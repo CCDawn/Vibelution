@@ -19,6 +19,12 @@ describe("AgentCreateWizardDialog contract", () => {
     expect(dialogStyles.body).toContain("overflow-y-auto");
   });
 
+  it("loads avatar options while open for create-time library picks", () => {
+    expect(dialogSource).toContain("/api/agents/avatar-options");
+    expect(dialogSource).toContain("avatarOptions=");
+    expect(dialogSource).toContain("avatarOptionsPending=");
+  });
+
   it("loads options only while open, preserves the draft, and creates no implicit session", () => {
     expect(dialogSource).toContain("enabled: open");
     expect(dialogSource).toContain("draftDirty");

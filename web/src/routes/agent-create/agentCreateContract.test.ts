@@ -184,9 +184,27 @@ describe("agent create contract", () => {
       taskMission: "",
       selectedToolBundleIds: [],
       allowedTools: "agent_message_tool, glob_tool",
+      avatarImagePath: "",
     }, []);
 
     expect(payload.toolPolicy.preferredTools.every((tool) => payload.toolPolicy.allowedTools.includes(tool))).toBe(true);
+    expect(payload).not.toHaveProperty("avatarImagePath");
+  });
+
+  it("includes avatarImagePath when the create draft picks a library avatar", () => {
+    const payload = createAgentPayload({
+      displayName: "新会话 Agent",
+      llmBindings: { dialogue: { modelId: "provider/model" } },
+      primaryMode: "chat",
+      roleKey: "",
+      promptTemplateId: "prompt-chat-default",
+      personaSummary: "",
+      taskMission: "",
+      selectedToolBundleIds: [],
+      allowedTools: "agent_message_tool",
+      avatarImagePath: "workspace/avatars/10-anime-session-agent.png",
+    }, []);
+    expect(payload.avatarImagePath).toBe("workspace/avatars/10-anime-session-agent.png");
   });
 
   it("does not widen research agents with session-only terminal tools", () => {
@@ -200,6 +218,7 @@ describe("agent create contract", () => {
       taskMission: "Research",
       selectedToolBundleIds: ["core"],
       allowedTools: "",
+      avatarImagePath: "",
     }, bundles);
 
     expect(payload.toolPolicy.allowedTools).toEqual(["glob_tool", "grep_search_tool"]);

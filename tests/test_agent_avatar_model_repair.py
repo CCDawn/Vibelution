@@ -52,7 +52,7 @@ def test_agent_avatar_options_read_external_workspace_home_when_project_root_dif
     assert resolved == avatar_dir / "11-anime-deep-research-agent.png"
 
 
-def test_agent_avatar_options_do_not_read_project_workspace_avatar_dir(tmp_path, monkeypatch):
+def test_agent_avatar_options_seed_project_files_into_data_home(tmp_path, monkeypatch):
     project_root, data_home = _use_isolated_agent_directory(tmp_path, monkeypatch)
     _patch_primary_model(monkeypatch)
     project_avatar_dir = project_root / "workspace" / "avatars"
@@ -60,9 +60,13 @@ def test_agent_avatar_options_do_not_read_project_workspace_avatar_dir(tmp_path,
     (project_avatar_dir / "11-anime-deep-research-agent.png").write_bytes(b"\x89PNG\r\n\x1a\navatar")
 
     options = agent_directory_service.list_agent_avatar_options()
+    seeded = data_home / "workspace" / "avatars" / "11-anime-deep-research-agent.png"
 
-    assert not (data_home / "workspace" / "avatars").exists()
-    assert options["options"] == []
+    # Options still resolve under data-home (not project path), after optional seed copy.
+    assert seeded.exists()
+    assert options["options"]
+    assert options["options"][0]["path"] == "workspace/avatars/11-anime-deep-research-agent.png"
+    assert agent_directory_service.resolve_agent_avatar_file("11-anime-deep-research-agent.png") == seeded
 
 
 def test_agent_directory_repairs_model_primary_to_configured_primary_profile(tmp_path, monkeypatch):

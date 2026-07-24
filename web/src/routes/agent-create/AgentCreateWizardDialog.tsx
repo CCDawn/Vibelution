@@ -6,6 +6,7 @@ import { createPortal } from "react-dom";
 import { fetchJson } from "../../api/client";
 import { queryKeys } from "../../api/queryKeys";
 import {
+  type AgentAvatarOptionsPayload,
   type AgentConfigWorkspace,
   type AgentConfigWorkspaceAgent,
   type AgentInstance,
@@ -70,6 +71,12 @@ function dialogCopy(lang: "zh" | "en"): AgentCreatePanelCopy {
     modeMembership: "使用位置",
     model: "模型",
     prompt: "提示词",
+    createAgentAvatar: "头像",
+    createAgentAvatarHint: "默认随职责选择头像；也可从图库指定。创建后仍可在 Agent 详情中修改。",
+    createAgentAvatarDefault: "使用职责默认",
+    createAgentAvatarLibrary: "图库",
+    createAgentAvatarLoading: "正在加载头像库…",
+    createAgentAvatarEmpty: "暂无可用头像文件，将使用职责默认。",
   } : {
     createAgent: "Create Agent",
     createAgentTitle: "Create chat Agent",
@@ -92,6 +99,12 @@ function dialogCopy(lang: "zh" | "en"): AgentCreatePanelCopy {
     modeMembership: "Use in",
     model: "Model",
     prompt: "Prompt",
+    createAgentAvatar: "Avatar",
+    createAgentAvatarHint: "A role default is used unless you pick from the library. You can still change it later.",
+    createAgentAvatarDefault: "Use role default",
+    createAgentAvatarLibrary: "Library",
+    createAgentAvatarLoading: "Loading avatar library…",
+    createAgentAvatarEmpty: "No avatar files available; the role default will be used.",
   };
 }
 
@@ -139,6 +152,12 @@ export function AgentCreateWizardDialog({
     queryFn: () => fetchJson<ToolRegistryPayload>("/api/tools"),
     enabled: open,
     staleTime: 10_000,
+  });
+  const avatarOptionsQuery = useQuery({
+    queryKey: ["agent-avatar-options"],
+    queryFn: () => fetchJson<AgentAvatarOptionsPayload>("/api/agents/avatar-options"),
+    enabled: open,
+    staleTime: 30_000,
   });
   const toolBundles = toolsQuery.data?.toolBundles ?? [];
   const modelChoices = useMemo(
@@ -469,6 +488,8 @@ export function AgentCreateWizardDialog({
               probeSummary={probeSummary}
               onProbeSelected={probeSelectedModel}
               onProbeCredentialReady={probeAllCredentialReady}
+              avatarOptions={avatarOptionsQuery.data ?? null}
+              avatarOptionsPending={avatarOptionsQuery.isPending}
               onDraftChange={updateDraft}
               onApplyPreset={applyPreset}
               onModelChange={(modelId) => updateDraft({ llmBindings: withDialogueModel(draft.llmBindings, modelId) })}

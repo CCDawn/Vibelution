@@ -1,7 +1,7 @@
 import { Check, ChevronLeft, ChevronRight, Plus, Sparkles } from "lucide-react";
 import { useMemo, useState } from "react";
 
-import { type ToolBundle } from "../api/types";
+import { type AgentAvatarOptionsPayload, type ToolBundle } from "../api/types";
 import { VButton, VContextualHint, VFieldRow, VNativeButton, VNativeInput, VNativeSelect, VNativeTextarea, VTooltip } from "../components/vui";
 import {
   buildAgentProviderChoices,
@@ -44,6 +44,12 @@ export type AgentCreatePanelCopy = {
   modeMembership: string;
   model: string;
   prompt: string;
+  createAgentAvatar?: string;
+  createAgentAvatarHint?: string;
+  createAgentAvatarDefault?: string;
+  createAgentAvatarLibrary?: string;
+  createAgentAvatarLoading?: string;
+  createAgentAvatarEmpty?: string;
 };
 
 type AgentCreatePanelProps = {
@@ -71,6 +77,8 @@ type AgentCreatePanelProps = {
   probeSummary?: string;
   onProbeSelected?: () => void;
   onProbeCredentialReady?: () => void;
+  avatarOptions?: AgentAvatarOptionsPayload | null;
+  avatarOptionsPending?: boolean;
   onDraftChange: (patch: Partial<AgentCreateDraft>) => void;
   onApplyPreset: (draft: AgentCreateDraft) => void;
   onModelChange: (modelId: string) => void;
@@ -102,6 +110,8 @@ export function AgentCreatePanel({
   probeSummary = "",
   onProbeSelected,
   onProbeCredentialReady,
+  avatarOptions = null,
+  avatarOptionsPending = false,
   onDraftChange,
   onApplyPreset,
   onModelChange,
@@ -232,6 +242,72 @@ export function AgentCreatePanel({
                 onChange={(event) => onDraftChange({ displayName: event.target.value })}
               />
             </VFieldRow>
+            <div className={styles.avatarSection}>
+              <div className={styles.avatarHeader}>
+                <span>{copy.createAgentAvatar || (lang === "zh" ? "头像" : "Avatar")}</span>
+                <small>
+                  {draft.avatarImagePath
+                    ? (lang === "zh" ? "图库指定" : "Library pick")
+                    : (copy.createAgentAvatarDefault || (lang === "zh" ? "职责默认" : "Role default"))}
+                </small>
+              </div>
+              <div className={styles.avatarPreviewRow}>
+                <span className={styles.avatarPreview} aria-hidden="true">
+                  {(() => {
+                    const selected = (avatarOptions?.options ?? []).find((item) => item.path === draft.avatarImagePath);
+                    const fallbackSession = (avatarOptions?.options ?? []).find((item) => item.filename.startsWith("01-session") || item.filename.includes("session-agent"));
+                    const previewUrl = selected?.url || (!draft.avatarImagePath ? fallbackSession?.url : "") || "";
+                    return previewUrl
+                      ? <img src={previewUrl} alt="" />
+                      : (draft.displayName.trim().slice(0, 2) || "AI");
+                  })()}
+                </span>
+                <p className={styles.avatarHint}>
+                  {copy.createAgentAvatarHint
+                    || (lang === "zh"
+                      ? "默认随职责选择头像；也可从图库指定。创建后仍可在 Agent 详情中修改。"
+                      : "A role default is used unless you pick from the library. You can still change it later.")}
+                </p>
+                <VButton
+                  type="button"
+                  variant="secondary"
+                  isDisabled={pending || !draft.avatarImagePath}
+                  onPress={() => onDraftChange({ avatarImagePath: "" })}
+                >
+                  {copy.createAgentAvatarDefault || (lang === "zh" ? "使用职责默认" : "Use role default")}
+                </VButton>
+              </div>
+              <div className={styles.avatarHeader}>
+                <span>{copy.createAgentAvatarLibrary || (lang === "zh" ? "图库" : "Library")}</span>
+                <small>{avatarOptions?.count ?? 0}</small>
+              </div>
+              {avatarOptionsPending ? (
+                <p className={styles.availabilitySummary}>{copy.createAgentAvatarLoading || (lang === "zh" ? "正在加载头像库…" : "Loading avatar library…")}</p>
+              ) : avatarOptions?.options?.length ? (
+                <div className={styles.avatarOptionGrid} role="listbox" aria-label={copy.createAgentAvatarLibrary || (lang === "zh" ? "头像图库" : "Avatar library")}>
+                  {avatarOptions.options.map((option) => {
+                    const selected = option.path === draft.avatarImagePath;
+                    return (
+                      <VTooltip key={option.path} content={option.filename} width="compact">
+                        <VNativeButton
+                          type="button"
+                          role="option"
+                          aria-selected={selected}
+                          className={selected ? `${styles.avatarOption} ${styles.avatarOptionSelected}` : styles.avatarOption}
+                          disabled={pending}
+                          onClick={() => onDraftChange({ avatarImagePath: option.path })}
+                          aria-label={option.filename}
+                        >
+                          <img src={option.url} alt="" />
+                        </VNativeButton>
+                      </VTooltip>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className={styles.availabilitySummary}>{copy.createAgentAvatarEmpty || (lang === "zh" ? "暂无可用头像文件，将使用职责默认。" : "No avatar files available; the role default will be used.")}</p>
+              )}
+            </div>
             <VFieldRow label={copy.modeMembership} className="col-span-full">
               <VNativeSelect value={draft.primaryMode} onChange={(event) => onPrimaryModeChange(event.target.value)}>
                 {primaryModeOptions.map((mode) => <option key={mode.value} value={mode.value}>{mode.label}</option>)}

@@ -15,6 +15,8 @@ export type AgentCreateDraft = {
   taskMission: string;
   selectedToolBundleIds: string[];
   allowedTools: string;
+  /** Empty = use role/default avatar; otherwise workspace/avatars/... library path. */
+  avatarImagePath: string;
 };
 
 export type AgentModelProbeStatus = "idle" | "probing" | "ok" | "fail";
@@ -413,6 +415,7 @@ export function createDraftFromWorkspace(
     taskMission: "",
     selectedToolBundleIds: defaultCreateToolBundleIds(true, bundles),
     allowedTools: DEFAULT_SESSION_AGENT_ALLOWED_TOOLS.join(", "),
+    avatarImagePath: "",
   };
 }
 
@@ -597,6 +600,7 @@ export function createAgentPayload(draft: AgentCreateDraft, bundles: ToolBundle[
     constraints: "只使用已授权工具；需要更多权限时走工具治理或用户确认。",
     handoffNotes: "由 Agent 中心创建，后续可在人物档案和任务档案中继续细化。",
   };
+  const avatarImagePath = String(draft.avatarImagePath || "").trim();
   return {
     displayName: draft.displayName.trim(),
     llmBindings: normalizeBindings(draft.llmBindings),
@@ -620,5 +624,6 @@ export function createAgentPayload(draft: AgentCreateDraft, bundles: ToolBundle[
       onboardingMissing: [],
       creationToolBundleIds: sortedIds(draft.selectedToolBundleIds),
     },
+    ...(avatarImagePath ? { avatarImagePath } : {}),
   };
 }

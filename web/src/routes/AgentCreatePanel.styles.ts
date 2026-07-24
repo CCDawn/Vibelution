@@ -26,6 +26,14 @@ const styles = {
   errorText: "[margin:0] [font-size:var(--vui-font-xs)] [line-height:1.4] [overflow-wrap:anywhere] [color:var(--state-error)]",
   successText: "[margin:0] [font-size:var(--vui-font-xs)] [line-height:1.4] [overflow-wrap:anywhere] [color:var(--state-success)]",
   editorActions: "flex [position:sticky] [bottom:0] [z-index:3] [justify-content:flex-end] [gap:7px] min-w-0 [flex-wrap:wrap] [margin:2px_0_0] [padding:12px_0_2px] [border-top:1px_solid_color-mix(in_srgb,_var(--vui-border-subtle)_78%,_transparent)] [background:color-mix(in_srgb,_var(--vui-surface-panel)_96%,_transparent)] [&_[data-vui=\"button\"]]:[max-width:100%] [&_[data-vui=\"button\"]]:w-fit",
+  avatarSection: "col-span-full grid min-w-0 gap-2",
+  avatarHeader: "flex min-w-0 flex-wrap items-center justify-between gap-2 [&_span]:[font-size:var(--vui-font-xs)] [&_span]:font-semibold [&_span]:text-[var(--fg-primary)] [&_small]:[font-size:var(--vui-font-xs)] [&_small]:text-[var(--fg-tertiary)]",
+  avatarPreviewRow: "flex min-w-0 flex-wrap items-center gap-3",
+  avatarPreview: "grid h-14 w-14 shrink-0 place-items-center overflow-hidden rounded-full border border-[color-mix(in_srgb,var(--accent-cool)_28%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_10%,transparent)] [font-size:var(--vui-font-xs)] font-bold text-[var(--fg-primary)] [&_img]:h-full [&_img]:w-full [&_img]:object-cover",
+  avatarHint: "m-0 min-w-0 flex-1 [font-size:var(--vui-font-xs)] leading-snug text-[var(--fg-secondary)]",
+  avatarOptionGrid: "grid max-h-[168px] min-w-0 grid-cols-[repeat(auto-fill,minmax(42px,1fr))] gap-1.5 overflow-auto pr-0.5",
+  avatarOption: "grid aspect-square w-full min-w-0 place-items-center rounded-full border border-[color-mix(in_srgb,var(--vui-border-subtle)_76%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_58%,transparent)] p-0.5 hover:border-[color-mix(in_srgb,var(--accent-cool)_48%,transparent)] focus-visible:outline-none [&_img]:h-full [&_img]:w-full [&_img]:rounded-full [&_img]:object-cover",
+  avatarOptionSelected: "border-[color-mix(in_srgb,var(--accent-warm)_58%,transparent)] shadow-none",
 } as const;
 
 export default styles;
