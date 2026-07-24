@@ -2254,21 +2254,33 @@ export function ConfigRoute() {
   const [activeGroupId, setActiveGroupId] = useState(() => searchParams.get("section") ?? "");
   const [activePageId, setActivePageId] = useState("");
   const [sectionUiState, setSectionUiState] = useState<Record<string, ConfigSectionUiState>>({});
+  // Atomic edit baseline: only rewritten on full workspace load/apply, never on draft pin/key/route ops.
+  // Keeps baseConfig + baseHash paired so apply after pin does not 409 with "配置基线已过期".
+  const editBaselineRef = useRef<{ baseConfig: PublicConfigShape | null; baseHash: string }>({
+    baseConfig: null,
+    baseHash: "",
+  });
 
   function syncWorkspace(workspace: ConfigWorkspace, tone: NoticeTone = "neutral", options: { resetBase?: boolean } = {}) {
+    const resetBase = options.resetBase !== false;
+    if (resetBase) {
+      const nextBaseConfig = clonePublicConfig(workspace.publicConfig);
+      const nextBaseHash = String(workspace.baseHash || workspace.hash || "").trim();
+      editBaselineRef.current = { baseConfig: nextBaseConfig, baseHash: nextBaseHash };
+      setBaseConfig(nextBaseConfig);
+      setBaseHash(nextBaseHash);
+    }
+    const baselineHash = editBaselineRef.current.baseHash || String(workspace.baseHash || "").trim();
     providerDraftRequestRef.current = {
       publicConfig: workspace.publicConfig,
       draftMeta: workspace.draftMeta,
-      baseHash: workspace.baseHash,
+      // Draft mutations must keep sending the frozen external baseline hash, not the draft hash.
+      baseHash: baselineHash,
       modelCatalog: workspace.modelCatalog,
     };
     setActiveWorkspace(clonePublicConfig(workspace));
     setDraftConfig(clonePublicConfig(workspace.publicConfig));
-    if (options.resetBase !== false) {
-      setBaseConfig(clonePublicConfig(workspace.publicConfig));
-    }
     setDraftMeta(clonePublicConfig(workspace.draftMeta));
-    setBaseHash(workspace.baseHash);
     setDraftHash(workspace.hash);
     setJsonText(formatJson(pickEditableConfigView(workspace.publicConfig, workspace.editorSections)));
     setNotice({ tone, text: workspace.message || "" });
@@ -2554,14 +2566,16 @@ export function ConfigRoute() {
   }
 
   const buildProviderDraftRequest = useCallback((extra: Record<string, unknown>) => {
-    const latestDraft = providerDraftRequestRef.current ?? (draftConfig ? { publicConfig: draftConfig, draftMeta, baseHash } : null);
+    const baselineHash = editBaselineRef.current.baseHash || baseHash;
+    const latestDraft = providerDraftRequestRef.current ?? (draftConfig ? { publicConfig: draftConfig, draftMeta, baseHash: baselineHash } : null);
     if (!latestDraft) {
       throw new Error(copy.loadFailed);
     }
     return {
       publicConfig: latestDraft.publicConfig,
       draftMeta: latestDraft.draftMeta,
-      baseHash: latestDraft.baseHash,
+      // Always prefer the frozen edit baseline hash over any draft response hash.
+      baseHash: editBaselineRef.current.baseHash || latestDraft.baseHash || baselineHash,
       ...extra,
     };
   }, [baseHash, copy.loadFailed, draftConfig, draftMeta]);
@@ -2589,7 +2603,8 @@ export function ConfigRoute() {
       const message = providerDiscoveryFailureMessage(detail).slice(0, 480);
       try {
         const refreshed = await requestJson<ConfigWorkspace>("/api/config/workspace", undefined, "GET");
-        syncWorkspace(refreshed, "neutral", { resetBase: false });
+        // Full reload: disk is the new baseline after a failed discover reconciliation.
+        syncWorkspace(refreshed, "neutral", { resetBase: true });
       } catch {
         // Preserve the scoped discovery failure; a workspace refresh is only a best-effort status reconciliation.
       }
@@ -2657,7 +2672,8 @@ export function ConfigRoute() {
     const latestDraft = providerDraftRequestRef.current;
     let currentConfig = latestDraft?.publicConfig ?? requireDraft();
     let currentMeta = latestDraft?.draftMeta ?? draftMeta;
-    let currentBaseHash = latestDraft?.baseHash ?? baseHash;
+    // Pin must keep the frozen external baseline hash for the whole multi-model loop.
+    let currentBaseHash = editBaselineRef.current.baseHash || latestDraft?.baseHash || baseHash;
 
     const catalogModels =
       activeWorkspace?.modelCatalog?.providers?.[providerId]?.models
@@ -2710,12 +2726,13 @@ export function ConfigRoute() {
           );
           currentConfig = response.publicConfig;
           currentMeta = response.draftMeta;
-          currentBaseHash = response.baseHash;
+          // Do not adopt response.hash (draft). Baseline hash stays frozen until apply/reload.
+          currentBaseHash = editBaselineRef.current.baseHash || response.baseHash || currentBaseHash;
           // Keep ref in sync so subsequent pins see the new draft pin set.
           providerDraftRequestRef.current = {
             publicConfig: response.publicConfig,
             draftMeta: response.draftMeta,
-            baseHash: response.baseHash,
+            baseHash: currentBaseHash,
             modelCatalog: response.modelCatalog,
           };
           syncWorkspace(response, "success", { resetBase: false });
@@ -3148,32 +3165,75 @@ export function ConfigRoute() {
   ): Promise<boolean> {
     setBusyAction(pendingLabel);
     try {
+      const baseline = editBaselineRef.current;
+      const applyBaseConfig = baseline.baseConfig ?? baseConfig;
+      const applyBaseHash = baseline.baseHash || baseHash;
+      if (!applyBaseHash) {
+        throw new Error(copy.loadFailed);
+      }
+
       const payload = draftOverride
         ? {
             publicConfig: draftOverride.publicConfig,
             draftMeta: draftOverride.draftMeta,
-            baseHash: draftOverride.baseHash,
-            baseConfig,
+            // Prefer frozen baseline hash; draftOverride.baseHash must not be the draft content hash.
+            baseHash: applyBaseHash || draftOverride.baseHash,
+            baseConfig: applyBaseConfig ?? null,
           }
-        : buildConfigApplyPayload({
-            draftConfig,
-            draftMeta,
-            baseHash,
-            baseConfig,
-            editorText: jsonText,
-            hasEditorChanges,
-            editorSections: workspace?.editorSections ?? [],
-            loadFailedMessage: copy.loadFailed,
-          });
-      const nextConfig = payload.publicConfig;
-      const response = await requestJson<ConfigWorkspace>(
-        "/api/config/apply",
-        payload,
-        "PUT",
-      );
+        : applyBaseConfig
+          ? buildConfigApplyPayload({
+              draftConfig,
+              draftMeta,
+              baseHash: applyBaseHash,
+              baseConfig: applyBaseConfig,
+              editorText: jsonText,
+              hasEditorChanges,
+              editorSections: workspace?.editorSections ?? [],
+              loadFailedMessage: copy.loadFailed,
+            })
+          : {
+              // Snapshot apply: server checks baseHash against disk and replaces with full draft.
+              publicConfig: buildConfigApplyPayload({
+                draftConfig,
+                draftMeta,
+                baseHash: applyBaseHash,
+                baseConfig: draftConfig,
+                editorText: jsonText,
+                hasEditorChanges,
+                editorSections: workspace?.editorSections ?? [],
+                loadFailedMessage: copy.loadFailed,
+              }).publicConfig,
+              draftMeta,
+              baseHash: applyBaseHash,
+              baseConfig: null as PublicConfigShape | null,
+            };
+
+      const isBaselineStaleError = (error: unknown) =>
+        /配置基线已过期|edit baseline is stale/i.test(readableErrorMessage(error));
+
+      let response: ConfigWorkspace;
+      try {
+        response = await requestJson<ConfigWorkspace>("/api/config/apply", payload, "PUT");
+      } catch (error) {
+        // Multi-pin draft loops can desync client baseConfig/baseHash. Retry once without
+        // baseConfig so the server uses on-disk baseline + this draft body.
+        if (!isBaselineStaleError(error) || payload.baseConfig == null) {
+          throw error;
+        }
+        response = await requestJson<ConfigWorkspace>(
+          "/api/config/apply",
+          {
+            publicConfig: payload.publicConfig,
+            draftMeta: payload.draftMeta,
+            baseHash: payload.baseHash,
+            baseConfig: null,
+          },
+          "PUT",
+        );
+      }
       syncWorkspace(response, "success");
       publishConfigDraftPresence(false);
-      await invalidateWorkbenchQueries(nextConfig);
+      await invalidateWorkbenchQueries(payload.publicConfig);
       return true;
     } catch (error) {
       markError(error);

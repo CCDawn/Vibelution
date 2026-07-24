@@ -166,7 +166,26 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain('handleApply("正在应用快速配置…", providerDraftRequestRef.current ?? undefined)');
     expect(routeSource).toContain("publicConfig: draftOverride.publicConfig");
     expect(routeSource).toContain("draftMeta: draftOverride.draftMeta");
-    expect(routeSource).toContain("baseHash: draftOverride.baseHash");
+    // Apply must freeze baseConfig+baseHash as an edit baseline pair across draft pin ops.
+    expect(routeSource).toContain("editBaselineRef");
+    expect(routeSource).toContain("applyBaseConfig");
+    expect(routeSource).toContain("applyBaseHash");
+  });
+
+  it("keeps edit baseline hash frozen across draft pin mutations", () => {
+    expect(routeSource).toContain("Atomic edit baseline");
+    expect(routeSource).toContain("const resetBase = options.resetBase !== false");
+    expect(routeSource).toContain("editBaselineRef.current = { baseConfig: nextBaseConfig, baseHash: nextBaseHash }");
+    // Pin loop must not adopt response draft hash as the apply baseline.
+    expect(routeSource).toContain("Do not adopt response.hash (draft)");
+    expect(routeSource).toContain("currentBaseHash = editBaselineRef.current.baseHash || response.baseHash || currentBaseHash");
+  });
+
+  it("retries config apply in snapshot mode when baseline pairing is stale", () => {
+    expect(routeSource).toContain("isBaselineStaleError");
+    expect(routeSource).toContain("配置基线已过期");
+    expect(routeSource).toContain("baseConfig: null");
+    expect(routeSource).toContain('requestJson<ConfigWorkspace>("/api/config/apply"');
   });
 
   it("does not auto-discover Provider endpoints when the model surface opens", () => {
@@ -389,6 +408,13 @@ describe("ConfigRoute layout contract", () => {
     expect(styles.pageViewport).toContain("overflow-y-auto");
     expect(styles.pageViewport).toContain("[&:has(>_.providerModelsLayout)]:[align-content:stretch]");
     expect(styles.pageViewport).toContain("[&:has(>_.providerModelsLayout)]:[grid-template-rows:minmax(0,1fr)]");
+    // Notice must reserve its own auto row so it is not covered by full-height models layout.
+    expect(styles.pageViewport).toContain(
+      "[&:has(>_.notice):has(>_.providerModelsLayout)]:[grid-template-rows:auto_minmax(0,1fr)]",
+    );
+    expect(styles.notice).toContain("relative");
+    expect(styles.notice).toContain("z-10");
+    expect(styles.notice).toContain("shrink-0");
   });
 
   it("extracts core Config sections into route-local display panels", () => {
@@ -532,7 +558,7 @@ describe("ConfigRoute layout contract", () => {
   });
 
   it("bounds Config diagnostics and transient notices so long text cannot force page overflow", () => {
-    expect(styles.notice).toContain("[min-width:0]");
+    expect(styles.notice).toMatch(/min-w-0|\[min-width:0\]/);
     expect(styles.notice).toContain("[overflow-wrap:anywhere]");
     expect(diagnosisPanelStyles.blockerCard).toContain("[min-width:0]");
     expect(diagnosisPanelStyles.blockerHeader).toContain("[&_h3]:[overflow-wrap:anywhere]");

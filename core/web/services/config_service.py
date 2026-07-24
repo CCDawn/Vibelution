@@ -2116,6 +2116,88 @@ def _assert_apply_base_hash_matches(base_hash: str, base_config: dict[str, Any],
     return base_hash_value
 
 
+def _resolve_apply_base_config(
+    *,
+    base_hash: str,
+    submitted_base: dict[str, Any] | None,
+    old_public: dict[str, Any],
+    current_public: dict[str, Any],
+    lang: str,
+) -> dict[str, Any] | None:
+    """Resolve the merge baseline for apply.
+
+    Draft pin/credential loops on the settings page sometimes send a mismatched
+    (baseConfig, baseHash) pair while baseHash still matches on-disk config.
+    Heal those client pairing bugs instead of hard-failing, but still reject
+    true concurrent writers (baseHash no longer matches disk).
+    """
+    if submitted_base is None:
+        _assert_base_hash_matches(base_hash, old_public, lang)
+        return None
+
+    expected_hash = str(base_hash or "").strip()
+    base_config_hash = public_config_hash(_with_config_workspace_defaults(submitted_base))
+    disk_hash = public_config_hash(current_public)
+    raw_disk_hash = public_config_hash(old_public)
+    disk_hashes = {disk_hash, raw_disk_hash}
+
+    if not expected_hash or expected_hash == base_config_hash:
+        if expected_hash:
+            return submitted_base
+        # Empty baseHash: still require the client baseline to match disk.
+        if base_config_hash in disk_hashes:
+            return submitted_base
+        raise ConfigConflictError(
+            text_for(
+                lang,
+                zh="设置页的配置基线已过期，请重新加载后再保存这次修改",
+                en="The config edit baseline is stale. Reload before saving these changes.",
+            )
+        )
+
+    # baseHash matches disk → trust disk as merge baseline (ignore bad baseConfig).
+    if expected_hash in disk_hashes:
+        _record_config_scene_event(
+            "validate",
+            "config.workspace.apply_baseline_healed",
+            message="Healed inconsistent client baseConfig using on-disk baseline.",
+            outcome="healed",
+            fields={
+                "expectedBaseHash": expected_hash,
+                "clientBaseConfigHash": base_config_hash,
+                "diskHash": disk_hash,
+                "healStrategy": "use_disk_baseline",
+            },
+            lifecycle=True,
+        )
+        return current_public
+
+    # baseConfig matches disk → trust baseConfig (ignore bad baseHash).
+    if base_config_hash in disk_hashes:
+        _record_config_scene_event(
+            "validate",
+            "config.workspace.apply_baseline_healed",
+            message="Healed inconsistent client baseHash using baseConfig that matches disk.",
+            outcome="healed",
+            fields={
+                "expectedBaseHash": expected_hash,
+                "clientBaseConfigHash": base_config_hash,
+                "diskHash": disk_hash,
+                "healStrategy": "use_client_base_config",
+            },
+            lifecycle=True,
+        )
+        return submitted_base
+
+    raise ConfigConflictError(
+        text_for(
+            lang,
+            zh="设置页的配置基线已过期，请重新加载后再保存这次修改",
+            en="The config edit baseline is stale. Reload before saving these changes.",
+        )
+    )
+
+
 def get_config_summary() -> dict[str, Any]:
     """Return a condensed config summary for shell-wide consumers."""
 
@@ -3432,10 +3514,13 @@ def apply_config_workspace(
     submitted = _prepare_submitted_public_config(public_config, old_public)
     submitted_base = _normalize_apply_base_config(base_config, old_public)
     lang = _resolve_workspace_language(submitted)
-    if submitted_base is None:
-        _assert_base_hash_matches(base_hash, old_public, lang)
-    else:
-        _assert_apply_base_hash_matches(base_hash, submitted_base, lang)
+    submitted_base = _resolve_apply_base_config(
+        base_hash=base_hash,
+        submitted_base=submitted_base,
+        old_public=old_public,
+        current_public=current_public,
+        lang=lang,
+    )
     merged, changed_paths, _ = _merge_submitted_config_changes(
         base_config=submitted_base,
         submitted=submitted,

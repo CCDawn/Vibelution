@@ -367,6 +367,15 @@ export function buildConfigApplyPayload(input: BuildConfigApplyPayloadInput): Co
   if (!input.draftConfig) {
     throw new Error(input.loadFailedMessage);
   }
+  // baseConfig is the frozen edit baseline captured at last full workspace load/apply.
+  // Never fall back to draftConfig: that pairs a draft snapshot with the external baseHash and
+  // triggers "设置页的配置基线已过期" on apply after pin/credential draft mutations.
+  if (!input.baseConfig) {
+    throw new Error(input.loadFailedMessage);
+  }
+  if (!String(input.baseHash || "").trim()) {
+    throw new Error(input.loadFailedMessage);
+  }
   const publicConfig = input.hasEditorChanges
     ? mergeEditableConfigView(input.draftConfig, JSON.parse(input.editorText) as PublicConfigShape, input.editorSections)
     : input.draftConfig;
@@ -374,7 +383,7 @@ export function buildConfigApplyPayload(input: BuildConfigApplyPayloadInput): Co
     publicConfig,
     draftMeta: input.draftMeta,
     baseHash: input.baseHash,
-    baseConfig: input.baseConfig ?? input.draftConfig,
+    baseConfig: input.baseConfig,
   };
 }
 
