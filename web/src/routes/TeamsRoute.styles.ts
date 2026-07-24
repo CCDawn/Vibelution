@@ -12,6 +12,7 @@
 import {
   vuiFlatPanelClass,
   vuiOpaqueRowClass,
+  vuiRailFillClass,
   vuiStateCoolSoftClass,
   vuiStateDangerSoftClass,
   vuiStateSelectedRowClass,
@@ -19,6 +20,7 @@ import {
   vuiStateSuccessSoftClass,
   vuiStateWarmSoftClass,
   vuiStateWarningSoftClass,
+  vuiWorkspaceFillClass,
 } from "../design/vuiSurfaceRecipes";
 
 const styles: Record<string, string> = {
@@ -180,7 +182,7 @@ const styles: Record<string, string> = {
   inlineToggle:
     "inlineToggle min-w-0",
   inspector:
-    "inspector min-w-0 !flex min-h-0 flex-col overflow-hidden p-0",
+    `inspector min-w-0 !flex min-h-0 flex-col overflow-hidden p-0 ${vuiRailFillClass}`,
   inspectorBody:
     "inspectorBody min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] flex min-h-0 flex-col gap-2 overflow-auto p-2 [&>*]:flex-none",
   inspectorHeader:
@@ -405,7 +407,7 @@ const styles: Record<string, string> = {
   revokeButton:
     "revokeButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
   route:
-    "route min-w-0 flex flex-col h-full min-h-0 overflow-hidden text-[var(--fg-primary)] [--team-workbench-gap:4px]",
+    `route min-w-0 flex flex-col h-full min-h-0 overflow-hidden text-[var(--fg-primary)] [--team-workbench-gap:4px] ${vuiWorkspaceFillClass}`,
   saveState:
     "saveState min-w-0",
   sectionTitle:
@@ -540,11 +542,11 @@ const styles: Record<string, string> = {
   workflowValidation:
     "workflowValidation min-w-0",
   workspace:
-    "workspace min-w-0 flex-1 grid min-h-0 gap-[var(--team-workbench-gap)] p-[var(--team-workbench-gap)] !grid min-h-0 grid-cols-[minmax(0,1fr)_clamp(320px,26vw,420px)] gap-[var(--team-workbench-gap)] overflow-hidden max-[760px]:h-auto max-[760px]:grid-cols-[minmax(0,1fr)] max-[760px]:content-start max-[760px]:overflow-auto",
+    `workspace min-w-0 flex-1 grid min-h-0 gap-[var(--team-workbench-gap)] p-[var(--team-workbench-gap)] !grid min-h-0 grid-cols-[minmax(0,1fr)_clamp(320px,26vw,420px)] gap-[var(--team-workbench-gap)] overflow-hidden max-[760px]:h-auto max-[760px]:grid-cols-[minmax(0,1fr)] max-[760px]:content-start max-[760px]:overflow-auto ${vuiWorkspaceFillClass}`,
   workspaceResearch:
     "workspaceResearch min-w-0 grid min-h-0 !grid-cols-[minmax(0,1fr)] !gap-2 !overflow-auto rounded-none border-0 border-t border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2 [scrollbar-gutter:stable]",
   workspaceResearchCanvas:
-    "workspaceResearchCanvas min-w-0 grid min-h-0 gap-[var(--team-workbench-gap)] p-[var(--team-workbench-gap)] !grid h-full grid-cols-[minmax(0,1fr)_clamp(320px,26vw,420px)] overflow-hidden max-[760px]:h-auto max-[760px]:grid-cols-[minmax(0,1fr)] max-[760px]:content-start max-[760px]:overflow-auto",
+    `workspaceResearchCanvas min-w-0 grid min-h-0 gap-[var(--team-workbench-gap)] p-[var(--team-workbench-gap)] !grid h-full grid-cols-[minmax(0,1fr)_clamp(320px,26vw,420px)] overflow-hidden max-[760px]:h-auto max-[760px]:grid-cols-[minmax(0,1fr)] max-[760px]:content-start max-[760px]:overflow-auto ${vuiWorkspaceFillClass}`,
 };
 
 export default styles;
