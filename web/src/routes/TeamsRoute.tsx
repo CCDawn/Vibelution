@@ -376,6 +376,10 @@ import {
   resolveKnownRouteTeamId,
   resolveTeamsRouteEffectiveTeamId,
 } from "./TeamsRoute.canvasData";
+import {
+  ChallengeCupOperationsWorkspace,
+  type ChallengeCupWorkspaceAgent,
+} from "./teams/challenge-cup/ChallengeCupOperationsWorkspace";
 import styles from "./TeamsRoute.styles";
 
 /** One shared async pack for Teams panel UI (see teams/README.md). */
@@ -1215,6 +1219,7 @@ export function TeamsRoute({
   );
   const knowledgeExpansionWorkflowTeamSelected = isKnowledgeExpansionWorkflowTeam(selectedTeam);
   const researchWorkflowTeamSelected = isResearchWorkflowTeam(selectedTeam);
+  const challengeCupResearchTeamSelected = isChallengeCupResearchWorkflowTeam(selectedTeam);
   const aiSearchScopeTeamSelected = isAiSearchScopeTeam(selectedTeam);
   const researchCanvasReadOnly = researchWorkflowTeamSelected && researchWorkspaceView === "canvas";
   const sourceCollectionWorkspaceSelected =
@@ -3397,6 +3402,43 @@ export function TeamsRoute({
   function renderResearchStageLauncher() {
     if (!researchWorkflowTeamSelected) {
       return null;
+    }
+    if (challengeCupResearchTeamSelected) {
+      const challengeProjection = experimentPlanningStatus?.challengeProgramProjection;
+      const challengeAgents: ChallengeCupWorkspaceAgent[] = selectedTeamMemoryMembers.map((member) => {
+        const normalizedRole = member.roleLabel.toLowerCase();
+        const workspace = normalizedRole.includes("source") || normalizedRole.includes("资料")
+          ? "证据链"
+          : normalizedRole.includes("knowledge") || normalizedRole.includes("知识")
+            ? "知识库"
+            : normalizedRole.includes("experiment") || normalizedRole.includes("实验")
+              ? "题目与结果"
+              : normalizedRole.includes("iteration") || normalizedRole.includes("版本")
+                ? "深研迭代"
+                : "全局";
+        return {
+          agentId: member.id,
+          name: member.agentName,
+          code: member.agentCode,
+          role: member.roleLabel,
+          workspace,
+          model: member.statusTitle,
+          status: member.statusLabel,
+          tone: member.statusTone === "ready" ? "ready" : member.statusTone === "blocked" ? "blocked" : "warning",
+          configHref: member.configRoute,
+        };
+      });
+      return (
+        <ChallengeCupOperationsWorkspace
+          projection={challengeProjection}
+          agents={challengeAgents}
+          graphHref={researchCanvasRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID)}
+          isLoading={!challengeProjection && experimentPlanningStatusQuery.isPending}
+          isUnavailable={!challengeProjection && !experimentPlanningStatusQuery.isPending}
+          isRefreshing={experimentPlanningStatusQuery.isFetching}
+          onRefresh={() => void experimentPlanningStatusQuery.refetch()}
+        />
+      );
     }
     const phaseOrder: ResearchStageType[] = knowledgeExpansionWorkflowTeamSelected ? ["knowledge_collection"] : ["knowledge_collection", "experiment", "iteration"];
     const phaseFallback: Record<ResearchStageType, { label: string; primaryAction: string }> = {
@@ -9236,6 +9278,7 @@ export function TeamsRoute({
     styles.workspace,
     researchWorkflowTeamSelected && !researchCanvasVisible ? styles.workspaceResearch : "",
     researchCanvasVisible ? styles.workspaceResearchCanvas : "",
+    challengeCupResearchTeamSelected && !researchCanvasVisible ? styles.challengeWorkspaceLayout : "",
   ].filter(Boolean).join(" ");
   const canvasPanelClassName = [
     styles.canvasPanel,
@@ -9244,6 +9287,7 @@ export function TeamsRoute({
   const inspectorClassName = [
     styles.inspector,
     researchWorkflowTeamSelected ? styles.researchInspector : "",
+    challengeCupResearchTeamSelected && !researchCanvasVisible ? styles.challengeWorkspaceInspector : "",
   ].filter(Boolean).join(" ");
   const showNodeBindingPanel = !researchWorkflowTeamSelected || (researchCanvasVisible && !researchCanvasReadOnly);
   const showWorkflowPanel =
@@ -9540,7 +9584,7 @@ export function TeamsRoute({
   return (
     <VDenseOpsPage
       className={styles.route}
-      headerClassName={styles.teamContextBar}
+      headerClassName={challengeCupResearchTeamSelected && !researchCanvasVisible ? styles.challengeWorkspaceContextHidden : styles.teamContextBar}
       ariaLabel={selectedTeamContextTitle}
       eyebrow={lang === "zh" ? "团队工作台 / 组织画布" : "Team Workspace / Canvas"}
       title={lang === "zh" ? "团队组织画布" : "Team Organization Canvas"}
@@ -9573,11 +9617,13 @@ export function TeamsRoute({
           </div>
       )}
     >
-      <VStatusStrip
-        className={styles.teamContextChips}
-        aria-label={lang === "zh" ? "团队概况" : "Team summary"}
-        items={teamSummaryStatusItems}
-      />
+      {challengeCupResearchTeamSelected && !researchCanvasVisible ? null : (
+        <VStatusStrip
+          className={styles.teamContextChips}
+          aria-label={lang === "zh" ? "团队概况" : "Team summary"}
+          items={teamSummaryStatusItems}
+        />
+      )}
       {showTeamInitialLoadingSurface ? (
         <main className={styles.teamUnavailableSurface} aria-label={teamInitialLoadingTitle}>
           <VStateSurface
@@ -9881,6 +9927,7 @@ export function TeamsRoute({
         </VSurface>
 
         <aside className={inspectorClassName}>
+          {challengeCupResearchTeamSelected && !researchCanvasVisible ? null : (
           <div className={styles.inspectorHeader}>
             <strong>
               {researchWorkflowTeamSelected && !researchCanvasVisible
@@ -9891,13 +9938,14 @@ export function TeamsRoute({
             </strong>
             {validation && !validation.valid ? <AlertTriangle size={16} /> : researchCanvasReadOnly ? <Eye size={16} /> : <Link2 size={16} />}
           </div>
-          <div className={styles.inspectorBody}>
+          )}
+          <div className={challengeCupResearchTeamSelected && !researchCanvasVisible ? styles.challengeWorkspaceBody : styles.inspectorBody}>
             {researchWorkflowTeamSelected && !researchCanvasVisible ? (
               <>
                 {renderResearchStageLauncher()}
               </>
             ) : null}
-            {selectedTeam ? renderTeamMemoryIndex() : null}
+            {selectedTeam && !challengeCupResearchTeamSelected ? renderTeamMemoryIndex() : null}
             {researchCanvasReadOnly ? renderResearchCanvasReadOnlyPanel() : null}
             {showNodeBindingPanel && !selectedTeam ? (
               <section className={`${styles.nodeBindingSection} ${styles.nodeBindingPlaceholder}`}>
