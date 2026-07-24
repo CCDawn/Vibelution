@@ -39,11 +39,17 @@ const styles = {
   factValue: "vui-routes-configproviderregistrypanel factValue min-w-0 truncate [font-size:var(--vui-font-sm)] font-semibold text-vui-fg-primary",
   deployment:
     "vui-routes-configproviderregistrypanel deployment grid min-w-0 gap-2 rounded-md border border-vui-border-subtle bg-vui-surface-glass p-2",
-  modelsWorkspace: "vui-routes-configproviderregistrypanel modelsWorkspace grid h-full min-h-0 min-w-0 [grid-template-rows:auto_auto_minmax(0,1fr)] gap-2 overflow-hidden",
+  modelsWorkspace: "vui-routes-configproviderregistrypanel modelsWorkspace grid h-full min-h-0 min-w-0 [grid-template-rows:auto_auto_auto_minmax(0,1fr)] gap-2 overflow-hidden",
   modelToolbar:
     "vui-routes-configproviderregistrypanel modelToolbar grid min-w-0 [grid-template-columns:minmax(16rem,0.7fr)_minmax(0,1fr)] items-center gap-2",
   modelSearch: "vui-routes-configproviderregistrypanel modelSearch min-w-0",
   modelFilters: "vui-routes-configproviderregistrypanel modelFilters flex min-w-0 flex-wrap items-center justify-end gap-1",
+  pinBanner:
+    "vui-routes-configproviderregistrypanel pinBanner grid min-w-0 gap-2 rounded-lg border border-[color-mix(in_srgb,var(--accent-warm)_40%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-warm)_10%,var(--vui-surface-panel))] px-3 py-2.5 max-[720px]:[grid-template-columns:1fr] [grid-template-columns:minmax(0,1fr)_auto] items-center",
+  pinBannerCopy:
+    "vui-routes-configproviderregistrypanel pinBannerCopy grid min-w-0 gap-0.5 [&_strong]:[font-size:var(--vui-font-sm)] [&_strong]:text-vui-fg-primary [&_span]:[font-size:var(--vui-font-xs)] [&_span]:leading-snug [&_span]:text-vui-fg-secondary [&_span]:[overflow-wrap:anywhere]",
+  pinBannerActions:
+    "vui-routes-configproviderregistrypanel pinBannerActions flex min-w-0 flex-wrap items-center justify-end gap-1.5",
   modelFilterHint:
     "vui-routes-configproviderregistrypanel modelFilterHint m-0 flex min-w-0 flex-wrap items-center gap-2 rounded-md border border-[color-mix(in_srgb,var(--accent-cool)_28%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-row))] px-2.5 py-1.5 [font-size:var(--vui-font-sm)] text-vui-fg-secondary [overflow-wrap:anywhere]",
   modelFilterHintAction: "vui-routes-configproviderregistrypanel modelFilterHintAction shrink-0",

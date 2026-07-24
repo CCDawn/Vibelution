@@ -68,6 +68,7 @@ function panelProps(
     onDiscover: () => undefined,
     onEditCredential: () => undefined,
     onEditRoute: () => undefined,
+    onPin: () => undefined,
     onUnpin: () => undefined,
     onTestModel: () => undefined,
     onProbeImageInput: () => undefined,
@@ -93,6 +94,7 @@ function renderModels(
       liveReferenceCountByModelRef={options.liveReferences ?? {}}
       onQueryChange={() => undefined}
       onFilterChange={() => undefined}
+      onPin={() => undefined}
       onUnpin={() => undefined}
       onTestModel={() => undefined}
       onProbeImageInput={() => undefined}
@@ -119,9 +121,12 @@ describe("ConfigProviderRegistryPanel", () => {
     expect(markup).toContain('aria-pressed="true"');
   });
 
-  it("renders neutral action labels instead of inapplicable danger buttons", () => {
+  it("renders pin controls for discovered models and bulk pin banner", () => {
     const observedMarkup = renderModels([model("observed", "observed")]);
-    expect(observedMarkup).toContain("未固定");
+    expect(observedMarkup).toContain("固定到配置");
+    expect(observedMarkup).toContain("固定全部已发现");
+    expect(observedMarkup).toContain('data-model-action="pin"');
+    expect(observedMarkup).toContain('data-model-action="pin-all"');
     expect(observedMarkup).not.toContain("取消固定");
     expect(observedMarkup).not.toContain("测试调用");
     expect(observedMarkup).toContain("验证推理 low / high");

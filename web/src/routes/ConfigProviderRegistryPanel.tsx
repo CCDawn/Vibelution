@@ -31,6 +31,7 @@ import {
   deriveProviderMergeCandidate,
   deriveProviderModelActionState,
   filterProviderModels,
+  pinnableProviderModels,
   sortProviderRegistryRows,
   summarizeProviderModels,
   type ProviderModelFilter,
@@ -64,6 +65,7 @@ export type ConfigProviderRegistryPanelProps = {
   onDiscover: (providerId: string) => void;
   onEditCredential: (providerId: string) => void;
   onEditRoute: (providerId: string) => void;
+  onPin: (providerId: string, models: ConfigCatalogModel[]) => void;
   onUnpin: (modelRef: string) => void;
   onTestModel: (modelRef: string) => void;
   onProbeImageInput: (modelRef: string) => void;
@@ -72,7 +74,7 @@ export type ConfigProviderRegistryPanelProps = {
 
 const TABS: Array<{ id: ConfigProviderRegistryTab; label: string }> = [
   { id: "connection", label: "连接" },
-  { id: "models", label: "模型" },
+  { id: "models", label: "模型库 · 固定" },
   { id: "protocols", label: "协议与能力" },
   { id: "diagnostics", label: "诊断" },
 ];
@@ -253,6 +255,7 @@ export type ProviderModelsTabProps = {
   liveReferenceCountByModelRef: Record<string, number>;
   onQueryChange: (query: string) => void;
   onFilterChange: (filter: ProviderModelFilter) => void;
+  onPin: (providerId: string, models: ConfigCatalogModel[]) => void;
   onUnpin: (modelRef: string) => void;
   onTestModel: (modelRef: string) => void;
   imageCapabilityBusy?: boolean;
@@ -273,6 +276,7 @@ export function ProviderModelsTab({
   liveReferenceCountByModelRef,
   onQueryChange,
   onFilterChange,
+  onPin,
   onUnpin,
   onTestModel,
   imageCapabilityBusy = false,
@@ -281,6 +285,7 @@ export function ProviderModelsTab({
   onProbeReasoning,
 }: ProviderModelsTabProps) {
   const summary = useMemo(() => summarizeProviderModels(provider.models), [provider.models]);
+  const pinnableModels = useMemo(() => pinnableProviderModels(provider.models), [provider.models]);
   const visibleModels = useMemo(
     () => filterProviderModels(provider.models, modelQuery, modelFilter),
     [modelFilter, modelQuery, provider.models],
@@ -288,7 +293,7 @@ export function ProviderModelsTab({
   const emptyText = provider.models.length === 0
     ? "该 Provider 暂无模型。先点右上角「发现」。"
     : modelFilter === "pinned" && summary.pinned === 0
-      ? "还没有固定模型。切换到「已发现」选中要用的对话模型并固定；固定后才会进入可用模型库。"
+      ? "还没有固定模型。用上方「固定全部已发现」一键加入，或在「已发现」里逐个点「固定到配置」。"
       : modelFilter === "discovered" && summary.discovered === 0
         ? "没有已发现模型。先运行「发现」，或切换到「全部」。"
         : "没有匹配的模型。请调整搜索或筛选条件。";
@@ -317,11 +322,41 @@ export function ProviderModelsTab({
           ))}
         </VActionGroup>
       </div>
+      {pinnableModels.length > 0 ? (
+        <div className={styles.pinBanner} role="region" aria-label="批量固定模型">
+          <div className={styles.pinBannerCopy}>
+            <strong>发现 {pinnableModels.length} 个可固定模型</strong>
+            <span>
+              「发现」不等于已入库。点「固定全部已发现」一次写入模型库；保存配置后即可在 Agent 里选用。也可在表格里逐个点「固定到配置」。
+            </span>
+          </div>
+          <VActionGroup ariaLabel="批量固定操作" className={styles.pinBannerActions}>
+            <VButton
+              variant="primary"
+              data-model-action="pin-all"
+              isDisabled={disabled || provider.refreshDue}
+              title={provider.refreshDue ? "目录已过期，请先重新发现" : `固定全部 ${pinnableModels.length} 个已发现模型`}
+              onPress={() => onPin(provider.providerId, pinnableModels)}
+            >
+              固定全部已发现（{pinnableModels.length}）
+            </VButton>
+            {modelFilter !== "discovered" ? (
+              <VButton
+                density="compact"
+                variant="ghost"
+                onPress={() => onFilterChange("discovered")}
+              >
+                只看已发现
+              </VButton>
+            ) : null}
+          </VActionGroup>
+        </div>
+      ) : null}
       {modelFilter === "pinned" && summary.pinned === 0 && summary.discovered > 0 ? (
         <p className={styles.modelFilterHint} role="status">
-          快捷路径：点「已发现 {summary.discovered}」→ 选对话模型 → 固定。不必浏览全部 {summary.total} 行。
-          <VButton density="compact" variant="ghost" className={styles.modelFilterHintAction} onPress={() => onFilterChange("discovered")}>
-            查看已发现
+          还没有已固定模型。推荐直接点「固定全部已发现」，不必一个个勾选。
+          <VButton density="compact" variant="primary" className={styles.modelFilterHintAction} onPress={() => onPin(provider.providerId, pinnableModels)}>
+            固定全部（{pinnableModels.length}）
           </VButton>
         </p>
       ) : null}
@@ -455,6 +490,18 @@ export function ProviderModelsTab({
                       {reasoningFeedback?.phase === "busy" ? "验证推理中…" : "验证推理 low / high"}
                     </VButton>
                   ) : null}
+                  {action.kind === "pin" ? (
+                    <VButton
+                      variant="primary"
+                      density="compact"
+                      data-model-action="pin"
+                      isDisabled={action.disabled || provider.refreshDue}
+                      title={provider.refreshDue ? "目录已过期，请先重新发现" : action.reason}
+                      onPress={() => onPin(provider.providerId, [model])}
+                    >
+                      {action.label}
+                    </VButton>
+                  ) : null}
                   {testAvailable ? (
                     <VButton
                       density="compact"
@@ -475,11 +522,11 @@ export function ProviderModelsTab({
                     >
                       {action.label}
                     </VButton>
-                  ) : (
+                  ) : action.kind === "in_use" || action.kind === "unavailable" ? (
                     <span className={styles.modelActionState} data-model-action={action.kind}>
                       {action.label}{action.kind === "in_use" ? ` · ${action.referenceCount} 个引用` : ""}
                     </span>
-                  )}
+                  ) : null}
                   {reasoningFeedback?.phase === "error" ? (
                     <small className={styles.critical} role="alert">{reasoningFeedback.message}</small>
                   ) : null}
@@ -570,6 +617,7 @@ export function ConfigProviderRegistryPanel({
   onDiscover,
   onEditCredential,
   onEditRoute,
+  onPin,
   onUnpin,
   onTestModel,
   onProbeImageInput,
@@ -730,11 +778,11 @@ export function ConfigProviderRegistryPanel({
       <VPanelHeader
         className={styles.header}
         eyebrow="已连接的服务"
-        title="管理已有连接"
+        title="管理与固定模型"
         actions={<VStatusChip tone={disabled ? "warning" : "success"}>{disabled ? "只读 / 忙碌" : "草稿可编辑"}</VStatusChip>}
       />
       <p className={styles.workspaceLead} role="note">
-        日常请用「快速配置」接好第一个模型。本页用于查看已连接服务、固定模型目录与排障。
+        先选左侧 Provider → 打开「模型库 · 固定」→ 用「固定全部已发现」或逐行「固定到配置」→ 页面顶部保存。固定后的模型才能在 Agent 里选。
       </p>
       <VSplitWorkspace
         className={styles.registryWorkspace}
@@ -776,12 +824,25 @@ export function ConfigProviderRegistryPanel({
               <VActionGroup ariaLabel="Provider 操作" className={styles.actions}>
                 <VButton
                   data-provider-action="discover"
+                  variant="primary"
                   icon={<RefreshCw size={14} />}
                   isDisabled={disabled}
+                  title="从中转站 / 上游拉取模型目录（发现后还需固定才会入库）"
                   onPress={() => onDiscover(provider.providerId)}
                 >
-                  {discoverBusy ? "发现中…" : "发现"}
+                  {discoverBusy ? "发现中…" : "发现模型"}
                 </VButton>
+                {pinnableProviderModels(provider.models).length > 0 ? (
+                  <VButton
+                    data-provider-action="open-models"
+                    variant={selectedTab === "models" ? "primary" : "secondary"}
+                    isDisabled={disabled}
+                    title="打开模型库，固定全部或逐个固定"
+                    onPress={() => onSelectTab("models")}
+                  >
+                    固定模型（{pinnableProviderModels(provider.models).length}）
+                  </VButton>
+                ) : null}
                 <VButton
                   data-provider-action="credential"
                   aria-pressed={credentialActive}
@@ -838,6 +899,7 @@ export function ConfigProviderRegistryPanel({
                   liveReferenceCountByModelRef={liveReferenceCountByModelRef}
                   onQueryChange={setModelQuery}
                   onFilterChange={setModelFilter}
+                  onPin={onPin}
                   onUnpin={onUnpin}
                   onTestModel={onTestModel}
                   imageCapabilityBusy={imageCapabilityBusy}

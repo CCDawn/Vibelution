@@ -235,7 +235,7 @@ export function AgentModelPicker({
               <strong className={styles.panelTitleText}>选择 {slot.label}</strong>
               <VContextualHint
                 label="模型选择说明"
-                content="按 Provider 分组。未固定模型会先加入模型库，再绑定当前 Agent。"
+                content="按 Provider 分组。可直接搜索模型名 / gpt / luna。已固定的点「使用」；未固定的点「固定后使用」会先加入模型库再绑定。"
                 width="wide"
               />
             </div>
@@ -256,7 +256,7 @@ export function AgentModelPicker({
           className={styles.search}
           value={query}
           aria-label="搜索模型"
-          placeholder="搜索 Provider、模型或 upstream ID"
+          placeholder="快速过滤：模型名 / gpt-5 / luna / Provider"
           onChange={(event) => setQuery(event.target.value)}
         />
         <div className={styles.list} role="listbox" aria-label={`${slot.label}模型候选`}>
