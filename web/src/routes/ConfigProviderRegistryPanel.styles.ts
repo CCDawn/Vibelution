@@ -1,5 +1,5 @@
 const panelSurface =
-  "[background:color-mix(in_srgb,var(--surface-panel)_96%,var(--bg-canvas))] [border:1px_solid_var(--vui-border-subtle)] [border-radius:8px]";
+  "[background:var(--vui-surface-panel)] [border:1px_solid_var(--vui-border-subtle)] [border-radius:8px]";
 
 const styles = {
   sectionSurface: `vui-routes-configproviderregistrypanel sectionSurface ${panelSurface} grid h-full min-h-0 min-w-0 [grid-template-rows:auto_minmax(0,1fr)] gap-3 overflow-hidden p-3`,

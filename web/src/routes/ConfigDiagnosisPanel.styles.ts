@@ -1,7 +1,7 @@
 const panelSurface =
-  "[border:1px_solid_color-mix(in_srgb,var(--vui-border-subtle)_94%,var(--fg-primary)_6%)] [border-radius:var(--radius-panel)] [background:color-mix(in_srgb,var(--surface-panel)_96%,var(--bg-canvas))] [box-shadow:0_10px_28px_color-mix(in_srgb,var(--fg-primary)_8%,transparent)]";
+  "[border:1px_solid_color-mix(in_srgb,var(--vui-border-subtle)_94%,var(--fg-primary)_6%)] [border-radius:var(--radius-panel)] [background:var(--vui-surface-panel)] [box-shadow:0_10px_28px_color-mix(in_srgb,var(--fg-primary)_8%,transparent)]";
 const rowSurface =
-  "[border:1px_solid_color-mix(in_srgb,var(--vui-border-subtle)_96%,var(--fg-primary)_4%)] [border-radius:8px] [background:color-mix(in_srgb,var(--surface-card)_94%,var(--surface-panel))]";
+  "[border:1px_solid_color-mix(in_srgb,var(--vui-border-subtle)_96%,var(--fg-primary)_4%)] [border-radius:8px] [background:var(--vui-surface-row)]";
 
 const styles = {
   actionButton: "vui-routes-configdiagnosispanel actionButton min-h-10 px-3.5 [font-size:var(--vui-font-sm)] font-semibold",
@@ -16,7 +16,7 @@ const styles = {
   helperText: "vui-routes-configdiagnosispanel helperText [margin:0] [color:var(--vui-fg-secondary)] [font-size:var(--vui-font-sm)] [line-height:1.45]",
   issueList: "vui-routes-configdiagnosispanel issueList [display:grid] [gap:7px] [margin:0] [padding:0] [list-style:none] [&_li]:[min-width:0] [&_li]:[padding:8px_10px] [&_li]:[border-radius:7px] [&_li]:[background:var(--vui-surface-row)] [&_li]:[color:var(--vui-fg-secondary)] [&_li]:[font-size:var(--vui-font-sm)] [&_li]:[overflow-wrap:anywhere]",
   metricCard: `vui-routes-configdiagnosispanel metricCard ${rowSurface} [display:flex] [align-items:baseline] [gap:8px] [min-width:0] [padding:10px_12px] [&_strong]:[color:var(--vui-fg-primary)] [&_strong]:[font-family:var(--font-display)] [&_strong]:[font-size:1.45rem] [&_strong]:[line-height:1] [&_span]:[color:var(--vui-fg-tertiary)] [&_span]:[font-size:var(--vui-font-xs)] [&_span]:[font-weight:650]`,
-  sectionHeader: "vui-routes-configdiagnosispanel sectionHeader [display:flex] [align-items:start] [justify-content:space-between] [gap:8px] [min-height:40px] [padding:7px_var(--config-section-x)] [border-bottom:1px_solid_color-mix(in_srgb,var(--vui-border-subtle)_96%,var(--fg-primary)_4%)] [background:color-mix(in_srgb,var(--surface-card)_94%,var(--surface-panel))]",
+  sectionHeader: "vui-routes-configdiagnosispanel sectionHeader [display:flex] [align-items:start] [justify-content:space-between] [gap:8px] [min-height:40px] [padding:7px_var(--config-section-x)] [border-bottom:1px_solid_color-mix(in_srgb,var(--vui-border-subtle)_96%,var(--fg-primary)_4%)] [background:var(--vui-surface-toolbar)]",
   sectionIcon: "vui-routes-configdiagnosispanel sectionIcon [color:var(--state-error)]",
   sectionSurface: `vui-routes-configdiagnosispanel sectionSurface ${panelSurface} [display:grid] [gap:0] [padding:0] [scroll-margin-top:84px] [overflow:visible] [&>_.diagnosticsGrid]:[margin:var(--config-section-y)_var(--config-section-x)_var(--config-section-x)]`,
   sectionText: "vui-routes-configdiagnosispanel sectionText [margin:0] [color:var(--vui-fg-secondary)] [font-size:var(--vui-font-xs)] [line-height:1.45]",

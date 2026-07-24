@@ -2,9 +2,9 @@
 // Generated from the legacy ConfigRoute stylesheet during the CSS-module retirement wave;
 // edit values directly as named Tailwind/arbitrary-property utilities.
 const panelSurface =
-  "[border:1px_solid_color-mix(in_srgb,var(--vui-border-subtle)_94%,var(--fg-primary)_6%)] [border-radius:var(--radius-panel)] [background:color-mix(in_srgb,var(--surface-panel)_96%,var(--bg-canvas))] [box-shadow:var(--vui-elevation-1)]";
+  "[border:1px_solid_color-mix(in_srgb,var(--vui-border-subtle)_94%,var(--fg-primary)_6%)] [border-radius:var(--radius-panel)] [background:var(--vui-surface-panel)] [box-shadow:var(--vui-elevation-1)]";
 const rowSurface =
-  "[border:1px_solid_color-mix(in_srgb,var(--vui-border-subtle)_96%,var(--fg-primary)_4%)] [border-radius:8px] [background:color-mix(in_srgb,var(--surface-card)_94%,var(--surface-panel))]";
+  "[border:1px_solid_color-mix(in_srgb,var(--vui-border-subtle)_96%,var(--fg-primary)_4%)] [border-radius:8px] [background:var(--vui-surface-row)]";
 const readablePanelSurface = panelSurface;
 const readableRowSurface = rowSurface;
 const mutedControl =
@@ -14,7 +14,7 @@ const primaryControl =
 const activeControl =
   "[border-color:color-mix(in_srgb,var(--accent-cool)_36%,transparent)] [background:color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] [color:var(--accent-warm-2)]";
 const sectionHeaderSurface =
-  "[border-bottom:1px_solid_color-mix(in_srgb,var(--vui-border-subtle)_96%,var(--fg-primary)_4%)] [background:color-mix(in_srgb,var(--surface-card)_94%,var(--surface-panel))]";
+  "[border-bottom:1px_solid_color-mix(in_srgb,var(--vui-border-subtle)_96%,var(--fg-primary)_4%)] [background:var(--vui-surface-toolbar)]";
 
 const styles = {
   actionButton:
@@ -118,7 +118,7 @@ const styles = {
   configAdvancedTier:
     "vui-routes-configroute configAdvancedTier [padding-top:10px] [border-top:1px_solid_var(--border-hairline)]",
   configAdvancedToggle:
-    "vui-routes-configroute configAdvancedToggle w-full [display:flex] [align-items:center] [justify-content:space-between] [gap:14px] [min-height:58px] [padding:10px_12px] [border:1px_solid_color-mix(in_srgb,var(--vui-border-subtle)_94%,transparent)] [border-radius:8px] [background:color-mix(in_srgb,var(--surface-card)_90%,var(--surface-panel))] [color:inherit] [text-align:left] hover:[border-color:color-mix(in_srgb,var(--accent-cool)_34%,var(--border-strong))] hover:[background:var(--vui-surface-row-hover)] focus-visible:[outline:2px_solid_var(--accent-cool)] focus-visible:[outline-offset:2px]",
+    "vui-routes-configroute configAdvancedToggle w-full [display:flex] [align-items:center] [justify-content:space-between] [gap:14px] [min-height:58px] [padding:10px_12px] [border:1px_solid_color-mix(in_srgb,var(--vui-border-subtle)_94%,transparent)] [border-radius:8px] [background:var(--vui-surface-row)] [color:inherit] [text-align:left] hover:[border-color:color-mix(in_srgb,var(--accent-cool)_34%,var(--border-strong))] hover:[background:var(--vui-surface-row-hover)] focus-visible:[outline:2px_solid_var(--accent-cool)] focus-visible:[outline-offset:2px]",
   configAdvancedToggleMeta:
     "vui-routes-configroute configAdvancedToggleMeta [display:flex] [align-items:center] [justify-content:end] [gap:8px] [flex:0_0_auto]",
   configAdvancedBody:
@@ -334,7 +334,7 @@ const styles = {
   sectionHeaderMain:
     "vui-routes-configroute sectionHeaderMain [display:grid] [gap:3px] [min-width:0]",
   sectionHeaderMeta:
-    "vui-routes-configroute sectionHeaderMeta [display:inline-flex] [align-items:center] [gap:6px] [min-height:28px] [padding:0_8px] [border:1px_solid_color-mix(in_srgb,var(--vui-border-subtle)_86%,transparent)] [border-radius:999px] [background:color-mix(in_srgb,var(--surface-card)_90%,var(--surface-panel))]",
+    "vui-routes-configroute sectionHeaderMeta [display:inline-flex] [align-items:center] [gap:6px] [min-height:28px] [padding:0_8px] [border:1px_solid_color-mix(in_srgb,var(--vui-border-subtle)_86%,transparent)] [border-radius:999px] [background:var(--vui-control-muted)]",
   sectionHeaderMetaLabel:
     "vui-routes-configroute sectionHeaderMetaLabel [color:var(--fg-tertiary)] [font-size:var(--vui-font-xs)] [text-transform:uppercase] [letter-spacing:0.06em]",
   sectionIcon:
@@ -352,7 +352,7 @@ const styles = {
   sectionTitle:
     "vui-routes-configroute sectionTitle [margin:1px_0_0] [color:var(--fg-primary)] [font-size:0.92rem] [line-height:1.15]",
   sectionToolbarGroup:
-    "vui-routes-configroute sectionToolbarGroup [display:inline-flex] [align-items:center] [gap:4px] [padding:3px] [border:1px_solid_color-mix(in_srgb,var(--vui-border-subtle)_86%,transparent)] [border-radius:999px] [background:color-mix(in_srgb,var(--surface-card)_90%,var(--surface-panel))] [flex-wrap:wrap] [justify-content:end]",
+    "vui-routes-configroute sectionToolbarGroup [display:inline-flex] [align-items:center] [gap:4px] [padding:3px] [border:1px_solid_color-mix(in_srgb,var(--vui-border-subtle)_86%,transparent)] [border-radius:999px] [background:var(--vui-surface-toolbar)] [flex-wrap:wrap] [justify-content:end]",
   segmentButton:
     `vui-routes-configroute segmentButton [display:inline-flex] [align-items:center] [justify-content:center] [gap:6px] [min-height:var(--control-height)] [padding:0_9px] [border-radius:var(--control-radius)] [font:inherit] [font-size:var(--vui-font-xs)] [font-weight:600] [line-height:1] [white-space:nowrap] [transition:border-color_140ms_ease,background-color_140ms_ease,color_140ms_ease] ${mutedControl} hover:[cursor:pointer] disabled:[cursor:not-allowed] disabled:[opacity:0.56] [min-height:27px] [border:0] [background:transparent] [color:var(--fg-secondary)]`,
   segmentButtonActive:
@@ -438,7 +438,7 @@ const styles = {
   treeBody:
     "vui-routes-configroute treeBody [display:grid] [gap:8px]",
   treeFieldCard:
-    "vui-routes-configroute treeFieldCard [border:1px_solid_color-mix(in_srgb,var(--vui-border-subtle)_92%,transparent)] [border-radius:7px] [background:color-mix(in_srgb,var(--surface-card)_94%,var(--surface-panel))] [display:grid] [gap:4px] [padding:6px]",
+    "vui-routes-configroute treeFieldCard [border:1px_solid_color-mix(in_srgb,var(--vui-border-subtle)_92%,transparent)] [border-radius:7px] [background:var(--vui-surface-row)] [display:grid] [gap:4px] [padding:6px]",
   treeFieldCardEdit:
     "vui-routes-configroute treeFieldCardEdit [align-content:start] [gap:10px] [min-height:56px] [padding:12px]",
   treeFieldCardView:
