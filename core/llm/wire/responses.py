@@ -32,6 +32,9 @@ from ..types import (
 from .types import BuiltPayload
 
 
+STREAM_EXHAUSTED_WITHOUT_TERMINAL = "stream_exhausted_without_terminal"
+
+
 def _as_dict(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
         return value
@@ -523,7 +526,7 @@ class _ResponsesTurnAssembler:
         if self._terminal_seen:
             return []
         return self._terminal(
-            "stream_exhausted_without_terminal",
+            STREAM_EXHAUSTED_WITHOUT_TERMINAL,
             {},
             {"status": "incomplete"},
         )
@@ -680,7 +683,7 @@ class _ResponsesTurnAssembler:
         if usage_event is not None:
             emitted.append(usage_event)
         status = _response_status(response)
-        if event_type in {"response.incomplete", "stream_exhausted_without_terminal"} or status == "incomplete":
+        if event_type in {"response.incomplete", STREAM_EXHAUSTED_WITHOUT_TERMINAL} or status == "incomplete":
             outcome_kind = "incomplete"
             terminal_kind = "turn_incomplete"
         elif event_type in {"response.cancelled", "response.canceled"} or status in {"cancelled", "canceled"}:
@@ -721,6 +724,8 @@ class _ResponsesTurnAssembler:
             error=(
                 self._error_message(event, response)
                 if outcome_kind == "failed"
+                else STREAM_EXHAUSTED_WITHOUT_TERMINAL
+                if event_type == STREAM_EXHAUSTED_WITHOUT_TERMINAL
                 else _response_incomplete_reason(response)
                 if outcome_kind == "incomplete"
                 else ""

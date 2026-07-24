@@ -701,6 +701,17 @@ def test_responses_incomplete_preserves_provider_reason_for_diagnostics():
     assert decoded.outcome.error == "max_output_tokens"
 
 
+def test_responses_stream_exhaustion_preserves_synthetic_terminal_reason():
+    decoded = ResponsesWireAdapter().decode_stream([], route=route(), scope=scope())
+
+    events = tuple(decoded)
+
+    assert decoded.outcome.kind == "incomplete"
+    assert decoded.outcome.error == "stream_exhausted_without_terminal"
+    assert events[-1].kind == "turn_incomplete"
+    assert events[-1].provider_event_type == "stream_exhausted_without_terminal"
+
+
 def test_responses_tool_result_encoder_preserves_call_id():
     result = CanonicalToolResult(
         identity=identity("tool-result-1", iteration=1),
