@@ -8,7 +8,7 @@ const stateControls = Array.from(document.querySelectorAll("[data-state-control]
 const stateContent = {
   running: {
     summaryTitle: "正在搜索资料",
-    summaryMeta: "已完成 2/3 个步骤 · 13s",
+    summaryMeta: "2/3 步骤 · 13s",
     summaryIcon: "running",
     searchIcon: "completed",
     searchTitle: "搜索 4 个查询",
@@ -22,7 +22,7 @@ const stateContent = {
   },
   completed: {
     summaryTitle: "已完成资料搜索",
-    summaryMeta: "3 个步骤 · 13.4s",
+    summaryMeta: "3 步骤 · 13.4s",
     summaryIcon: "completed",
     searchIcon: "completed",
     searchTitle: "搜索 4 个查询",
@@ -36,7 +36,7 @@ const stateContent = {
   },
   failed: {
     summaryTitle: "搜索服务暂时不可用",
-    summaryMeta: "第 2/3 步失败 · 13.2s",
+    summaryMeta: "第 2 步失败 · 13.2s",
     summaryIcon: "failed",
     searchIcon: "failed",
     searchTitle: "搜索 4 个查询",
@@ -56,7 +56,11 @@ function setIcon(element, state) {
 
 function renderState(state) {
   const content = stateContent[state];
+  const shouldExpand = state !== "completed";
   activityRegion.dataset.previewState = state;
+  activityToggle.setAttribute("aria-expanded", String(shouldExpand));
+  activityDetails.hidden = !shouldExpand;
+  document.querySelector(".technical-details").open = false;
   document.querySelector("[data-summary-title]").textContent = content.summaryTitle;
   document.querySelector("[data-summary-meta]").textContent = content.summaryMeta;
   document.querySelector("[data-search-title]").textContent = content.searchTitle;

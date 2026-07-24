@@ -117,7 +117,7 @@ button {
 }
 
 .preview-stage {
-  min-height: 460px;
+  min-height: 380px;
   border: 1px solid var(--vui-border-subtle);
   border-radius: 18px;
   background:
@@ -129,7 +129,7 @@ button {
 .conversation-turn {
   width: min(760px, calc(100% - 48px));
   margin: 0 auto;
-  padding: 72px 0;
+  padding: 60px 0;
 }
 
 .agent-heading {
@@ -179,7 +179,7 @@ button {
   gap: 8px;
   border: 0;
   border-radius: 8px;
-  padding: 7px 8px;
+  padding: 6px;
   background: transparent;
   color: inherit;
   cursor: pointer;
@@ -188,7 +188,7 @@ button {
 }
 
 .activity-summary:hover {
-  background: color-mix(in srgb, var(--vui-surface-row) 62%, transparent);
+  background: color-mix(in srgb, var(--vui-surface-row) 38%, transparent);
 }
 
 .activity-summary__copy {
@@ -234,16 +234,16 @@ button {
 .status-icon {
   position: relative;
   display: inline-grid;
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   flex: 0 0 auto;
   place-items: center;
-  margin-top: 2px;
+  margin: 3px 0 0 1px;
   border-radius: 50%;
 }
 
 .status-icon--running {
-  border: 1.5px solid color-mix(in srgb, var(--accent-warm) 28%, transparent);
+  border: 1.25px solid color-mix(in srgb, var(--accent-warm) 24%, transparent);
   border-top-color: var(--accent-warm);
   animation: activity-spin 1s linear infinite;
 }
@@ -254,8 +254,8 @@ button {
 }
 
 .status-icon--completed::after {
-  width: 6px;
-  height: 3px;
+  width: 5px;
+  height: 2.5px;
   border-bottom: 1.5px solid currentColor;
   border-left: 1.5px solid currentColor;
   content: "";
@@ -270,8 +270,8 @@ button {
 .status-icon--failed::before,
 .status-icon--failed::after {
   position: absolute;
-  width: 7px;
-  height: 1.5px;
+  width: 6px;
+  height: 1.25px;
   border-radius: 1px;
   background: currentColor;
   content: "";
@@ -301,7 +301,7 @@ button {
 .activity-details {
   margin: 1px 0 0 15px;
   padding: 4px 8px 4px 10px;
-  border-left: 1px solid var(--vui-border-subtle);
+  border-left: 1px solid color-mix(in srgb, var(--vui-border-subtle) 56%, transparent);
 }
 
 .activity-details[hidden] {
@@ -318,10 +318,10 @@ button {
 
 .activity-step {
   display: grid;
-  grid-template-columns: 18px minmax(0, 1fr) auto;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
   gap: 8px;
-  min-height: 48px;
-  padding: 5px 0;
+  min-height: 44px;
+  padding: 4px 0;
 }
 
 .step-rail {
@@ -330,11 +330,11 @@ button {
 
 .step-rail::after {
   position: absolute;
-  top: 22px;
-  bottom: -9px;
-  left: 7.5px;
+  top: 20px;
+  bottom: -8px;
+  left: 7px;
   width: 1px;
-  background: var(--vui-border-subtle);
+  background: color-mix(in srgb, var(--vui-border-subtle) 52%, transparent);
   content: "";
 }
 
@@ -352,13 +352,13 @@ button {
 .step-title {
   color: var(--fg-secondary);
   font-size: 13px;
-  font-weight: 560;
+  font-weight: 540;
   line-height: 1.45;
 }
 
 .step-description,
 .step-time {
-  color: var(--fg-tertiary);
+  color: color-mix(in srgb, var(--fg-tertiary) 82%, transparent);
   font-size: 12px;
   line-height: 1.45;
 }
@@ -372,7 +372,15 @@ button {
 .technical-details {
   margin: 2px 0 0 26px;
   color: var(--fg-tertiary);
-  font-size: 12px;
+  font-size: 11px;
+  opacity: 0.5;
+  transition: opacity var(--vui-transition);
+}
+
+.technical-details:hover,
+.technical-details:focus-within,
+.technical-details[open] {
+  opacity: 1;
 }
 
 .technical-details summary {
@@ -453,28 +461,6 @@ button {
   color: var(--state-error);
 }
 
-.answer-placeholder {
-  display: grid;
-  gap: 8px;
-  margin: 20px 0 0 44px;
-  opacity: 0.55;
-}
-
-.answer-placeholder span {
-  width: min(100%, 620px);
-  height: 7px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--fg-tertiary) 16%, transparent);
-}
-
-.answer-placeholder span:nth-child(2) {
-  width: min(72%, 440px);
-}
-
-.answer-placeholder span:nth-child(3) {
-  width: min(45%, 280px);
-}
-
 .preview-notes {
   display: flex;
   flex-wrap: wrap;
@@ -527,7 +513,7 @@ button {
   }
 
   .preview-stage {
-    min-height: 420px;
+    min-height: 360px;
     border-radius: 14px;
   }
 
@@ -552,10 +538,6 @@ button {
 
   .activity-details {
     margin-left: 7px;
-  }
-
-  .answer-placeholder {
-    margin-left: 8px;
   }
 
   .failure-action {
