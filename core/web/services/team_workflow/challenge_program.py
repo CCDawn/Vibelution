@@ -15,6 +15,10 @@ PROGRAM_TITLE = "面向前沿科学问题的AI假设生成与研究计划设计�
 OFFICIAL_PROBLEM_ID = "XH-202619"
 OFFICIAL_QUESTION_COUNT = 125
 BATCH_SIZE = 5
+MVP_GOLDEN_SAMPLE_COUNT = 1
+MVP_GOLDEN_SAMPLE_QUESTION_ID = "SCI-096"
+MVP_TEST_QUESTION_COUNT = 3
+MVP_TOTAL_QUESTION_COUNT = MVP_GOLDEN_SAMPLE_COUNT + MVP_TEST_QUESTION_COUNT
 REQUIRED_REPRESENTATIVE_CASES = 3
 COMPATIBILITY_CASE_REGISTRY_KIND = "challenge_program_representative_cases"
 DOCUMENTED_CASE_STATUSES = {"accepted_for_writeup", "validated", "promoted"}
@@ -185,25 +189,60 @@ def build_challenge_program_projection(
     provider = _dashscope_qwen_configuration(public_config)
     call_evidence = _official_dashscope_evidence(official_model_evidence)
     run_summary = question_run_summary if isinstance(question_run_summary, dict) else {}
-    valid_candidate_count = int(run_summary.get("validCandidateCount") or 0)
-    completed_question_count = int(run_summary.get("completedCount") or 0)
+    completed_question_ids = [
+        str(question_id)
+        for question_id in run_summary.get("completedQuestionIds") or []
+        if str(question_id)
+    ]
+    validated_question_ids = [
+        str(question_id)
+        for question_id in run_summary.get("validatedQuestionIds") or []
+        if str(question_id)
+    ]
+    validated_question_results = [
+        item
+        for item in run_summary.get("validatedQuestionResults") or []
+        if isinstance(item, dict)
+    ]
+    golden_sample_completed = int(MVP_GOLDEN_SAMPLE_QUESTION_ID in completed_question_ids)
+    mvp_test_question_ids = [
+        question_id
+        for question_id in validated_question_ids
+        if question_id != MVP_GOLDEN_SAMPLE_QUESTION_ID
+    ][:MVP_TEST_QUESTION_COUNT]
+    golden_sample_candidate_count = int(MVP_GOLDEN_SAMPLE_QUESTION_ID in validated_question_ids)
+    mvp_test_completed = len(mvp_test_question_ids)
     latest_candidate = run_summary.get("latestCandidate") if isinstance(run_summary.get("latestCandidate"), dict) else {}
+    golden_sample_candidate = next(
+        (
+            item
+            for item in validated_question_results
+            if str(item.get("questionId") or "") == MVP_GOLDEN_SAMPLE_QUESTION_ID
+        ),
+        latest_candidate if str(latest_candidate.get("questionId") or "") == MVP_GOLDEN_SAMPLE_QUESTION_ID else {},
+    )
     latest_validation = (
-        latest_candidate.get("validation") if isinstance(latest_candidate.get("validation"), dict) else {}
+        golden_sample_candidate.get("validation")
+        if isinstance(golden_sample_candidate.get("validation"), dict)
+        else {}
     )
     latest_semantic = (
         latest_validation.get("semantic") if isinstance(latest_validation.get("semantic"), dict) else {}
     )
-    latest_gates = latest_candidate.get("humanGates") if isinstance(latest_candidate.get("humanGates"), dict) else {}
+    latest_gates = (
+        golden_sample_candidate.get("humanGates")
+        if isinstance(golden_sample_candidate.get("humanGates"), dict)
+        else {}
+    )
     stage1_blockers: list[str] = []
     if not provider["configured"]:
         stage1_blockers.append("dashscope_qwen_provider_missing")
     if call_evidence["count"] == 0:
         stage1_blockers.append("dashscope_qwen_call_evidence_missing")
-    if valid_candidate_count < 1:
-        stage1_blockers.append("real_single_question_sample_missing")
-    if completed_question_count < 5:
-        stage1_blockers.append("five_question_trial_missing")
+    if golden_sample_completed < MVP_GOLDEN_SAMPLE_COUNT:
+        stage1_blockers.append("mvp_golden_sample_not_approved")
+    if mvp_test_completed < MVP_TEST_QUESTION_COUNT:
+        stage1_blockers.append("mvp_three_question_test_missing")
 
     case_records = _legacy_case_records(legacy_lifecycle)
     case_recovery_source = "legacy_lifecycle" if case_records else "none"
@@ -222,27 +261,38 @@ def build_challenge_program_projection(
             "officialProblemId": OFFICIAL_PROBLEM_ID,
             "track": "赛道一 / 方向一 / A 科学假设生成与研究计划设计",
             "officialQuestionCount": OFFICIAL_QUESTION_COUNT,
+            "deliveryMode": "mvp",
+            "immediateQuestionCount": MVP_TOTAL_QUESTION_COUNT,
             "directionBRole": "representative_deep_validation_only",
             "completed": False,
         },
         "stage1ComplianceReadiness": {
-            "status": "blocked" if stage1_blockers else "in_progress",
-            "completionDefinition": "real_sample_and_five_question_trial_pass_all_compliance_gates",
+            "status": "blocked" if stage1_blockers else "completed",
+            "completionDefinition": "one_golden_sample_and_three_test_questions_pass_mvp_gates",
             "blockers": stage1_blockers,
             "dashscopeQwenProvider": provider,
             "officialModelCallEvidence": call_evidence,
             "singleQuestionSample": {
-                "required": 1,
-                "candidateCount": min(valid_candidate_count, 1),
-                "completed": min(completed_question_count, 1),
+                "required": MVP_GOLDEN_SAMPLE_COUNT,
+                "candidateCount": golden_sample_candidate_count,
+                "completed": golden_sample_completed,
+                "questionId": MVP_GOLDEN_SAMPLE_QUESTION_ID,
                 "realCallsRequired": True,
-                "latestCandidate": latest_candidate or None,
+                "latestCandidate": golden_sample_candidate or None,
             },
             "trialRun": {
-                "required": 5,
-                "completed": min(completed_question_count, 5),
+                "required": MVP_TEST_QUESTION_COUNT,
+                "completed": mvp_test_completed,
                 "realCallsRequired": True,
-                "completedQuestionIds": list(run_summary.get("completedQuestionIds") or [])[:5],
+                "completedQuestionIds": mvp_test_question_ids,
+                "outcomeCounts": dict(run_summary.get("validatedOutcomeCounts") or {}),
+            },
+            "mvpManifest": {
+                "requiredQuestionCount": MVP_TOTAL_QUESTION_COUNT,
+                "completedQuestionCount": golden_sample_completed + mvp_test_completed,
+                "goldenSampleQuestionId": MVP_GOLDEN_SAMPLE_QUESTION_ID,
+                "testQuestionIds": mvp_test_question_ids,
+                "scaleUpDeferred": True,
             },
             "independentEvaluationDimensions": list(INDEPENDENT_EVALUATION_DIMENSIONS),
             "aggregateScoreAllowed": False,
@@ -258,7 +308,7 @@ def build_challenge_program_projection(
             },
         },
         "stage2BatchGovernance": {
-            "status": "blocked_by_stage1",
+            "status": "blocked_by_stage1" if stage1_blockers else "deferred_after_mvp",
             "completionDefinition": "all_125_questions_schema_valid_traceable_and_audited",
             "questionCount": OFFICIAL_QUESTION_COUNT,
             "completedQuestionCount": 0,

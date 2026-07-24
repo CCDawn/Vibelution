@@ -289,6 +289,11 @@ def challenge_question_run_summary(team_id: str) -> dict[str, Any]:
         and (record.get("validation") or {}).get("citationValidation") == "passed"
         and (record.get("validation") or {}).get("officialModelCall") is True
     ]
+    validated_candidates = [
+        record
+        for record in valid_candidates
+        if (record.get("validation") or {}).get("semanticValidation") == "passed"
+    ]
     completed = [
         record
         for record in valid_candidates
@@ -296,9 +301,35 @@ def challenge_question_run_summary(team_id: str) -> dict[str, Any]:
         and str(record.get("status") or "") == "approved"
     ]
     completed_question_ids = sorted({str(record.get("questionId") or "") for record in completed})
+    latest_validated_by_question: dict[str, dict[str, Any]] = {}
+    for record in validated_candidates:
+        question_id = str(record.get("questionId") or "")
+        if question_id:
+            latest_validated_by_question[question_id] = record
+    validated_question_ids = sorted(latest_validated_by_question)
+    validated_outcome_counts: dict[str, int] = {}
+    for record in latest_validated_by_question.values():
+        status = str(record.get("status") or "unknown")
+        validated_outcome_counts[status] = validated_outcome_counts.get(status, 0) + 1
+    validated_question_results = [
+        {
+            "questionId": question_id,
+            "runId": str(record.get("runId") or ""),
+            "status": str(record.get("status") or ""),
+            "validation": deepcopy(record.get("validation") or {}),
+            "humanGates": deepcopy(record.get("humanGates") or {}),
+            "outputSha256": str(record.get("outputSha256") or ""),
+            "artifactPath": str(record.get("artifactPath") or ""),
+        }
+        for question_id, record in sorted(latest_validated_by_question.items())
+    ]
     return {
         "recordCount": len(records),
         "validCandidateCount": len(valid_candidates),
+        "validatedQuestionCount": len(validated_question_ids),
+        "validatedQuestionIds": validated_question_ids,
+        "validatedOutcomeCounts": dict(sorted(validated_outcome_counts.items())),
+        "validatedQuestionResults": validated_question_results,
         "completedCount": len(completed_question_ids),
         "completedQuestionIds": completed_question_ids,
         "latestCandidate": deepcopy(valid_candidates[-1]) if valid_candidates else None,

@@ -239,6 +239,8 @@ export type ExperimentPlanningStatusPayload = {
       officialProblemId: string;
       track: string;
       officialQuestionCount: number;
+      deliveryMode: "mvp" | string;
+      immediateQuestionCount: number;
       directionBRole: string;
       completed: boolean;
     };
@@ -248,8 +250,21 @@ export type ExperimentPlanningStatusPayload = {
       blockers: string[];
       dashscopeQwenProvider: { configured: boolean; providerIds: string[]; modelRefs: string[] };
       officialModelCallEvidence: { count: number; evidenceIds: string[] };
-      singleQuestionSample: { required: number; completed: number; realCallsRequired: boolean };
-      trialRun: { required: number; completed: number; realCallsRequired: boolean };
+      singleQuestionSample: { required: number; completed: number; questionId: string; realCallsRequired: boolean };
+      trialRun: {
+        required: number;
+        completed: number;
+        realCallsRequired: boolean;
+        completedQuestionIds: string[];
+        outcomeCounts: Record<string, number>;
+      };
+      mvpManifest: {
+        requiredQuestionCount: number;
+        completedQuestionCount: number;
+        goldenSampleQuestionId: string;
+        testQuestionIds: string[];
+        scaleUpDeferred: boolean;
+      };
       independentEvaluationDimensions: string[];
       aggregateScoreAllowed: boolean;
       humanGates: string[];

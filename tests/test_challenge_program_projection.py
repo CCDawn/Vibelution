@@ -91,11 +91,14 @@ def test_configured_dashscope_and_real_call_evidence_only_clear_their_own_blocke
     assert stage1["officialModelCallEvidence"]["count"] == 1
     assert "dashscope_qwen_provider_missing" not in stage1["blockers"]
     assert "dashscope_qwen_call_evidence_missing" not in stage1["blockers"]
-    assert stage1["blockers"] == ["real_single_question_sample_missing", "five_question_trial_missing"]
+    assert stage1["blockers"] == [
+        "mvp_golden_sample_not_approved",
+        "mvp_three_question_test_missing",
+    ]
     assert stage1["status"] == "blocked"
 
 
-def test_valid_single_question_candidate_clears_sample_blocker_but_not_trial_gate():
+def test_valid_but_unapproved_candidate_does_not_complete_golden_sample():
     projection = build_challenge_program_projection(
         legacy_lifecycle={"stage2": {}, "stage3": {}},
         public_config={
@@ -118,6 +121,8 @@ def test_valid_single_question_candidate_clears_sample_blocker_but_not_trial_gat
         ],
         question_run_summary={
             "validCandidateCount": 1,
+            "validatedQuestionCount": 1,
+            "validatedQuestionIds": ["SCI-096"],
             "completedCount": 0,
             "completedQuestionIds": [],
             "latestCandidate": {"questionId": "SCI-096", "status": "review_required"},
@@ -125,11 +130,101 @@ def test_valid_single_question_candidate_clears_sample_blocker_but_not_trial_gat
     )
 
     stage1 = projection["stage1ComplianceReadiness"]
-    assert "real_single_question_sample_missing" not in stage1["blockers"]
-    assert stage1["blockers"] == ["five_question_trial_missing"]
+    assert stage1["blockers"] == [
+        "mvp_golden_sample_not_approved",
+        "mvp_three_question_test_missing",
+    ]
     assert stage1["singleQuestionSample"]["candidateCount"] == 1
     assert stage1["singleQuestionSample"]["completed"] == 0
     assert stage1["singleQuestionSample"]["latestCandidate"]["questionId"] == "SCI-096"
+
+
+def test_approved_golden_sample_and_three_validated_tests_complete_mvp_without_claiming_scale_up():
+    projection = build_challenge_program_projection(
+        legacy_lifecycle={"stage2": {}, "stage3": {}},
+        public_config={
+            "llm": {
+                "providers": {
+                    "dashscope_main": {
+                        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                        "credential_ref": "env:DASHSCOPE_API_KEY",
+                        "models": {"qwen3.6-plus": {"upstream_id": "qwen3.6-plus"}},
+                    }
+                }
+            }
+        },
+        official_model_evidence=[
+            {
+                "evidenceId": "model-evidence-real-1",
+                "modelProvider": "dashscope",
+                "status": "registered",
+            }
+        ],
+        question_run_summary={
+            "validCandidateCount": 4,
+            "validatedQuestionCount": 4,
+            "validatedQuestionIds": ["SCI-031", "SCI-067", "SCI-096", "SCI-118"],
+            "validatedOutcomeCounts": {"approved": 1, "review_required": 3},
+            "validatedQuestionResults": [
+                {
+                    "questionId": "SCI-096",
+                    "runId": "stage1-sci-096-v3",
+                    "status": "approved",
+                    "validation": {
+                        "schemaValidation": "passed",
+                        "citationValidation": "passed",
+                        "semantic": {
+                            "allSevenDimensionsReviewed": True,
+                            "researchPlanPresent": True,
+                            "feedbackRevisionCount": 1,
+                        },
+                    },
+                    "humanGates": {"allApproved": True},
+                }
+            ],
+            "completedCount": 1,
+            "completedQuestionIds": ["SCI-096"],
+            "latestCandidate": {
+                "questionId": "SCI-118",
+                "status": "approved",
+                "validation": {
+                    "schemaValidation": "passed",
+                    "citationValidation": "passed",
+                    "semantic": {
+                        "allSevenDimensionsReviewed": True,
+                        "researchPlanPresent": True,
+                        "feedbackRevisionCount": 1,
+                    },
+                },
+                "humanGates": {"allApproved": True},
+            },
+        },
+    )
+
+    stage1 = projection["stage1ComplianceReadiness"]
+    assert projection["program"]["deliveryMode"] == "mvp"
+    assert projection["program"]["immediateQuestionCount"] == 4
+    assert stage1["status"] == "completed"
+    assert stage1["blockers"] == []
+    assert stage1["singleQuestionSample"]["completed"] == 1
+    assert stage1["acceptance"]["allFourHumanGatesApproved"] is True
+    assert stage1["trialRun"] == {
+        "required": 3,
+        "completed": 3,
+        "realCallsRequired": True,
+        "completedQuestionIds": ["SCI-031", "SCI-067", "SCI-118"],
+        "outcomeCounts": {"approved": 1, "review_required": 3},
+    }
+    assert stage1["mvpManifest"] == {
+        "requiredQuestionCount": 4,
+        "completedQuestionCount": 4,
+        "goldenSampleQuestionId": "SCI-096",
+        "testQuestionIds": ["SCI-031", "SCI-067", "SCI-118"],
+        "scaleUpDeferred": True,
+    }
+    assert projection["stage2BatchGovernance"]["completedQuestionCount"] == 0
+    assert projection["stage2BatchGovernance"]["status"] == "deferred_after_mvp"
+    assert projection["program"]["completed"] is False
 
 
 def test_program_projection_reports_no_deep_case_when_legacy_iteration_never_started():

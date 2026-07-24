@@ -3509,36 +3509,37 @@ export function TeamsRoute({
     const challengeProgramProjection = experimentPlanningStatus?.challengeProgramProjection;
     const challengeStageLabel = (stageType: ResearchStageType) => {
       if (stageType === "knowledge_collection") {
-        return lang === "zh" ? "全量合规与系统可用性" : "Compliance and system readiness";
+        return lang === "zh" ? "MVP 完整样例" : "MVP golden sample";
       }
       if (stageType === "experiment") {
-        return lang === "zh" ? "125题批处理与质量治理" : "125-question batch governance";
+        return lang === "zh" ? "3 题通用性测试" : "Three-question validation";
       }
-      return lang === "zh" ? "代表性深研闭环与参赛封装" : "Deep-research cases and delivery";
+      return lang === "zh" ? "后续规模化与深研" : "Later scale-up and deep research";
     };
     const stageStatusLabel = (stageType: ResearchStageType, active: boolean, latestRound: ResearchStagePhaseStatus["latestRound"] | null | undefined) => {
       if (challengeProgramProjection) {
         if (stageType === "knowledge_collection") {
           const stage1 = challengeProgramProjection.stage1ComplianceReadiness;
-          if (stage1.status !== "blocked") {
-            return stage1.status;
-          }
           if (stage1.blockers.includes("dashscope_qwen_provider_missing")) {
             return lang === "zh" ? "BLOCKED · 待配置" : "BLOCKED · configuration required";
           }
           if (stage1.blockers.includes("dashscope_qwen_call_evidence_missing")) {
             return lang === "zh" ? "BLOCKED · 待验证" : "BLOCKED · validation required";
           }
-          return lang === "zh" ? "BLOCKED · 待完成" : "BLOCKED · incomplete";
+          return stage1.singleQuestionSample.completed >= stage1.singleQuestionSample.required
+            ? (lang === "zh" ? "已完成" : "completed")
+            : (lang === "zh" ? "待收口" : "pending");
         }
         if (stageType === "experiment") {
-          return challengeProgramProjection.stage2BatchGovernance.status === "blocked_by_stage1"
-            ? (lang === "zh" ? "等待 Stage1" : "waiting for Stage1")
-            : challengeProgramProjection.stage2BatchGovernance.status;
+          const stage1 = challengeProgramProjection.stage1ComplianceReadiness;
+          if (stage1.singleQuestionSample.completed < stage1.singleQuestionSample.required) {
+            return lang === "zh" ? "等待完整样例" : "waiting for golden sample";
+          }
+          return stage1.trialRun.completed >= stage1.trialRun.required
+            ? (lang === "zh" ? "已完成" : "completed")
+            : (lang === "zh" ? "待测试" : "pending");
         }
-        return challengeProgramProjection.stage3DeepResearchDelivery.status === "partial"
-          ? (lang === "zh" ? "部分完成 · 单案例" : "partial · case only")
-          : challengeProgramProjection.stage3DeepResearchDelivery.status;
+        return lang === "zh" ? "MVP 后再启动" : "deferred until after MVP";
       }
       if (stageType === "knowledge_collection") {
         return knowledgeCollectionStatusLabel;
@@ -3570,15 +3571,18 @@ export function TeamsRoute({
     };
     const stageStatusStyle = (stageType: ResearchStageType, active: boolean, latestRound: ResearchStagePhaseStatus["latestRound"] | null | undefined) => {
       if (challengeProgramProjection) {
-        if (stageType === "knowledge_collection" && challengeProgramProjection.stage1ComplianceReadiness.status === "blocked") {
-          return styles.researchStageStatusUnavailable;
+        const stage1 = challengeProgramProjection.stage1ComplianceReadiness;
+        if (stageType === "knowledge_collection") {
+          return stage1.singleQuestionSample.completed >= stage1.singleQuestionSample.required
+            ? styles.researchStageStatusRecorded
+            : styles.researchStageStatusUnavailable;
         }
-        if (stageType === "experiment" && challengeProgramProjection.stage2BatchGovernance.status === "blocked_by_stage1") {
-          return styles.researchStageStatusPending;
+        if (stageType === "experiment") {
+          return stage1.trialRun.completed >= stage1.trialRun.required
+            ? styles.researchStageStatusRecorded
+            : styles.researchStageStatusPending;
         }
-        if (stageType === "iteration" && challengeProgramProjection.stage3DeepResearchDelivery.status === "partial") {
-          return styles.researchStageStatusRecorded;
-        }
+        return styles.researchStageStatusPending;
       }
       if (stageType !== "knowledge_collection" && stageStatusLoading) {
         return styles.researchStageStatusLoading;
@@ -3615,17 +3619,17 @@ export function TeamsRoute({
         if (stageType === "knowledge_collection") {
           const providerReady = challengeProgramProjection.stage1ComplianceReadiness.dashscopeQwenProvider.configured;
           return providerReady
-            ? (lang === "zh" ? "先完成 1 题真实样例，再进行 5 题试运行；所有证据、七维审查和四个人工门禁必须可追踪。" : "Complete one real sample, then a five-question trial with traceable evidence and gates.")
+            ? (lang === "zh" ? "先把 1 题完整跑通：真实模型调用、证据、假设、七维审查、研究计划和四个人工门禁均可追踪。" : "Complete one end-to-end sample with a real model call, evidence, hypotheses, review, plan, and human gates.")
             : (lang === "zh" ? "缺少 DashScope/Qwen 正式 provider；只允许契约测试和样例草稿，禁止冒充真实调用。" : "DashScope/Qwen provider is missing; only contract tests and drafts are allowed.");
         }
         if (stageType === "experiment") {
           return lang === "zh"
-            ? "Stage1 通过后按 25 批×5题推进；失败、阻塞和缺证据必须显式入账，不能计入完成。"
-            : "After Stage1, process 25 batches of five; failures and blockers remain explicit and incomplete.";
+            ? "完整样例通过后，再用 3 个不同场景题验证可重复性、跨领域能力和缺证据时的正确阻塞。"
+            : "After the golden sample, validate repeatability, cross-domain behavior, and explicit evidence blocking on three questions.";
         }
         return lang === "zh"
-          ? "需完成 3 个跨学科深研案例与参赛封装；既有 FashionMNIST 仅作为单案例，不代表平台完成。"
-          : "Three cross-disciplinary cases are required; existing FashionMNIST evidence remains case-only.";
+          ? "125 题批跑、三个深研案例和最终参赛封装均延后到 MVP 验收之后，不计入本轮完成条件。"
+          : "The 125-question run, three deep cases, and submission package are deferred until after MVP acceptance.";
       }
       if (stageType === "knowledge_collection") {
         if (!selectedSourceCollectionRun) {
@@ -3727,9 +3731,9 @@ export function TeamsRoute({
             const disabled = stagePrimaryDisabled(stageType);
             const navItem = RESEARCH_WORKSPACE_NAV_ITEMS.find((item) => item.view === stageType);
             const primaryLabel = challengeProgramProjection && stageType === "experiment"
-              ? (lang === "zh" ? "批处理控制待接入" : "Batch controller pending")
+              ? (lang === "zh" ? "测试入口待接入" : "Test runner pending")
               : challengeProgramProjection && stageType === "iteration"
-                ? (lang === "zh" ? "请从阶段详情管理案例" : "Manage cases in details")
+                ? (lang === "zh" ? "MVP 后启动" : "Start after MVP")
                 : stagePrimaryLabel(stageType, phase?.primaryAction || fallback.primaryAction);
             return (
               <article
@@ -3757,15 +3761,17 @@ export function TeamsRoute({
                       </>
                     ) : stageType === "experiment" ? (
                       <>
-                        <span>{lang === "zh" ? "题目" : "questions"} {challengeProgramProjection.stage2BatchGovernance.completedQuestionCount}/{challengeProgramProjection.stage2BatchGovernance.questionCount}</span>
-                        <span>{lang === "zh" ? "批次" : "batches"} {challengeProgramProjection.stage2BatchGovernance.completedBatchCount}/{challengeProgramProjection.stage2BatchGovernance.batchCount}</span>
-                        <span>{lang === "zh" ? "每批" : "batch size"} {challengeProgramProjection.stage2BatchGovernance.batchSize}</span>
-                        <span>{lang === "zh" ? "单总分" : "aggregate score"} {challengeProgramProjection.stage2BatchGovernance.aggregateScoreAllowed ? (lang === "zh" ? "允许" : "allowed") : (lang === "zh" ? "禁止" : "prohibited")}</span>
+                        <span>{lang === "zh" ? "测试题" : "test questions"} {challengeProgramProjection.stage1ComplianceReadiness.trialRun.completed}/{challengeProgramProjection.stage1ComplianceReadiness.trialRun.required}</span>
+                        <span title={challengeProgramProjection.stage1ComplianceReadiness.trialRun.completedQuestionIds.join(" · ")}>
+                          {lang === "zh" ? "已完成" : "completed"} {challengeProgramProjection.stage1ComplianceReadiness.trialRun.completedQuestionIds.length}
+                        </span>
+                        <span>{lang === "zh" ? "MVP 总进度" : "MVP progress"} {challengeProgramProjection.stage1ComplianceReadiness.mvpManifest.completedQuestionCount}/{challengeProgramProjection.stage1ComplianceReadiness.mvpManifest.requiredQuestionCount}</span>
+                        <span>{lang === "zh" ? "规模化" : "scale-up"} {lang === "zh" ? "已延后" : "deferred"}</span>
                       </>
                     ) : (
                       <>
+                        <span>{lang === "zh" ? "125 题批跑" : "125-question run"} · {lang === "zh" ? "暂缓" : "deferred"}</span>
                         <span>{lang === "zh" ? "深研案例" : "deep cases"} {challengeProgramProjection.stage3DeepResearchDelivery.representativeCaseCount}/{challengeProgramProjection.stage3DeepResearchDelivery.requiredRepresentativeCaseCount}</span>
-                        <span>{lang === "zh" ? "平台完成" : "program complete"} {challengeProgramProjection.stage3DeepResearchDelivery.projectCompleted ? (lang === "zh" ? "是" : "yes") : (lang === "zh" ? "否" : "no")}</span>
                         <span title={challengeProgramProjection.stage3DeepResearchDelivery.caseRecords[0]?.claimBoundary || ""}>
                           {challengeProgramProjection.stage3DeepResearchDelivery.caseRecords[0]?.title || (lang === "zh" ? "单案例" : "case")} · {challengeProgramProjection.stage3DeepResearchDelivery.caseRecords[0]?.internalStatus || "-"}
                         </span>
