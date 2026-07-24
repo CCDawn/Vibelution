@@ -51,16 +51,17 @@ describe("ConversationInferenceControl", () => {
   });
 
   it("keeps the reasoning menu compact and reserves a right-side selection column", () => {
-    expect(styles.menu).toContain("w-[min(220px,calc(100vw-16px))]");
+    expect(styles.menu).toContain("w-[min(200px,calc(100vw-16px))]");
     expect(styles.menu).toContain("overflow-y-auto");
     expect(styles.menu).not.toContain("absolute");
-    expect(styles.option).toContain("!grid-cols-[minmax(0,1fr)_1rem]");
-    expect(styles.option).toContain("!min-h-10");
+    expect(styles.option).toContain("!grid-cols-[minmax(0,1fr)_0.875rem]");
+    expect(styles.option).toContain("!min-h-9");
+    expect(styles.option).toContain("data-[selected=true]");
     expect(styles.optionDescription).toContain("line-clamp-2");
+    expect(styles.trigger).toContain("data-[open=true]");
+    expect(styles.triggerChevron).toContain("data-[open=true]:rotate-180");
     expect(styles.trigger).toContain("!px-1.5");
-    expect(styles.trigger).toContain("!tracking-[-0.01em]");
     expect(styles.triggerSeparator).toContain("opacity-55");
-    expect(styles.triggerChevron).toContain("opacity-70");
   });
 
   it("places the menu fixed above the trigger when there is room", () => {
@@ -69,9 +70,9 @@ describe("ConversationInferenceControl", () => {
       { width: 1200, height: 800 },
     );
     expect(style.position).toBe("fixed");
-    expect(style.bottom).toBe(800 - 400 + 8);
-    expect(style.width).toBe(220);
-    expect(Number(style.maxHeight)).toBeGreaterThanOrEqual(120);
+    expect(style.bottom).toBe(800 - 400 + 6);
+    expect(style.width).toBe(200);
+    expect(Number(style.maxHeight)).toBeGreaterThanOrEqual(88);
     expect(style.right).toBe(1200 - 900);
   });
 
@@ -80,9 +81,19 @@ describe("ConversationInferenceControl", () => {
       { top: 40, bottom: 68, right: 900 },
       { width: 1200, height: 800 },
     );
-    expect(style.top).toBe(68 + 8);
+    expect(style.top).toBe(68 + 6);
     expect(style.bottom).toBeUndefined();
     expect(Number(style.maxHeight)).toBeGreaterThan(0);
+  });
+
+  it("clamps menu right edge so a wide panel stays on-screen", () => {
+    const style = placeInferenceMenu(
+      { top: 400, bottom: 428, right: 40 },
+      { width: 400, height: 800 },
+    );
+    // width 200 → right must leave room: max right = 400 - 200 - 8 = 192, min 8
+    expect(Number(style.right)).toBeGreaterThanOrEqual(8);
+    expect(Number(style.right) + 200).toBeLessThanOrEqual(400 - 8 + 0.01);
   });
 
   it("keeps models without reasoning as a non-interactive label", () => {
