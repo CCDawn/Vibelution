@@ -30,7 +30,7 @@ const styles = {
   advancedConfigBody: "grid min-w-0 gap-2.5 border-t border-[var(--vui-border-subtle)] p-2.5",
   errorText: "[margin:0] [font-size:var(--vui-font-xs)] [line-height:1.4] [overflow-wrap:anywhere] [color:var(--state-error)]",
   successText: "[margin:0] [font-size:var(--vui-font-xs)] [line-height:1.4] [overflow-wrap:anywhere] [color:var(--state-success)]",
-  editorActions: "sticky [bottom:0] z-[1] flex [justify-content:flex-end] [gap:6px] min-w-0 [flex-wrap:wrap] [padding-top:4px] [background:linear-gradient(180deg,_transparent,_color-mix(in_srgb,_var(--vui-surface-panel)_92%,_transparent)_28%)] [&_[data-vui=\"button\"]]:[max-width:100%] [&_[data-vui=\"button\"]]:w-fit",
+  editorActions: "sticky [bottom:0] z-[1] flex [justify-content:flex-end] [gap:6px] min-w-0 [flex-wrap:wrap] [padding-top:4px] [background:linear-gradient(180deg,_transparent,_var(--vui-surface-panel)_28%)] [&_[data-vui=\"button\"]]:[max-width:100%] [&_[data-vui=\"button\"]]:w-fit",
 } as const;
 
 export default styles;

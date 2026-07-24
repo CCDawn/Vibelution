@@ -1,7 +1,7 @@
 # Shadcn-aligned VUI 全前端设计系统迁移方案
 
 **Date:** 2026-07-23
-**Status:** partially implemented
+**Status:** partially implemented（Wave 0–1 完成；Wave 2 见 2026-07-24 计划）
 **Owner:** `web-workbench-surface` / VUI design-system owner
 **Mode:** `TASK_GRAPH`
 **Risk:** `STANDARD_TASK`；共享 token、组件 API、主题与页面迁移属于串行契约工作
@@ -10,10 +10,21 @@
 
 ## 0. 当前实施状态
 
-- 已落地：surface 语义 token、Reference Lab、主要路由的 surface literal 收敛，以及“VUI 为唯一表面字面值来源”的契约测试。
-- 对应主线提交：`a09a28ff8`。
-- 尚未完成：全量 primitive anatomy/slot 收敛、剩余路由迁移、兼容别名清零和完整主题/视口/交互验收。
-- 本文保留为增量迁移路线图；后续批次必须从当前主线继续，不能重新引入平行 token 或第二套组件 API。
+### Wave 0–1（已完成，2026-07-24 基线）
+
+- surface 语义 token；Reference Lab；`--vui-surface-*` 为唯一字面量源；legacy `--surface-*` **别名已删除**。
+- `vuiSurfaceRecipes`（panel/row/glass/shell fill）与约 **147** 个 style map 接入；结构性 `surface+transparent` 大部收敛。
+- 代表提交：`a09a28ff8`、`db3d90b4c`、`e2c3439a7`、`8059925ba` 等。
+
+### 尚未完成
+
+- 任意 `color-mix(...vui-surface...)` 的 **白名单契约**、代表页手测、状态 recipe、composition 示范路径。
+- 全量 primitive anatomy/slot 收敛；页面仍大量直写长 Tailwind。
+
+### 下一波
+
+- 详见：`docs/superpowers/plans/2026-07-24-vui-wave2-alpha-whitelist-and-composition.md`
+- 后续批次必须从当前主线继续，不能重新引入平行 token 或第二套组件 API。
 
 ## 1. 目标
 

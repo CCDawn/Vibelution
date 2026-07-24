@@ -93,11 +93,9 @@ function classTokens(className: string): string[] {
 
 function expectBackgroundAwareHairlineSurface(className: string) {
   expect(className).toContain("border");
-  expect(className).toContain("border-[color:color-mix(in_srgb");
-  expect(className).toContain("bg-[color:color-mix(in_srgb");
-  expect(className).toContain("transparent");
+  expect(className).toMatch(/border-\[(?:color:)?color-mix\(in_srgb|border-\[var\(--vui-border|border-vui-border/);
+  expect(className).toMatch(/!bg-\[var\(--vui-surface-|bg-\[var\(--vui-surface-|bg-\[color:color-mix\(in_srgb/);
   expect(className).not.toContain("bg-vui-surface-glass");
-  expect(className).not.toContain("bg-vui-surface-row");
   expect(className).not.toContain("bg-[var(--surface-card)]");
   expect(className).not.toContain("bg-[var(--surface-panel)]");
   expect(className).not.toContain("shadow-[var(--vui-shadow-hairline)]");

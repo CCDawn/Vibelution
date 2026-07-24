@@ -187,13 +187,13 @@ const styles: Record<string, string> = {
   inspectorTabs:
     "inspectorTabs min-w-0 min-h-0 overflow-auto",
   issueCard:
-    "issueCard min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_46%,transparent)] p-2",
+    "issueCard min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] !bg-[var(--vui-surface-panel)] p-2",
   issueCardBody:
-    "issueCardBody min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_70%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_38%,transparent)] p-2 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+    "issueCardBody min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_70%,transparent)] !bg-[var(--vui-surface-panel)] p-2 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   issueCardError:
     "issueCardError min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] p-2 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
   issueCardHeader:
-    "issueCardHeader min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_70%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_34%,transparent)] p-2 flex flex-wrap items-center gap-1.5",
+    "issueCardHeader min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_70%,transparent)] !bg-[var(--vui-surface-panel)] p-2 flex flex-wrap items-center gap-1.5",
   issueCardWarning:
     "issueCardWarning min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] p-2 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
   issueEmpty:
@@ -205,9 +205,9 @@ const styles: Record<string, string> = {
   issueMeta:
     "issueMeta min-w-0 flex flex-wrap items-center gap-1.5",
   issuePanel:
-    "issuePanel min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_44%,transparent)] p-2",
+    "issuePanel min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] !bg-[var(--vui-surface-panel)] p-2",
   issueSummary:
-    "issueSummary min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_40%,transparent)] p-2 !grid grid-cols-[repeat(2,minmax(0,1fr))] gap-2.5 max-[430px]:grid-cols-1",
+    "issueSummary min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] !bg-[var(--vui-surface-panel)] p-2 !grid grid-cols-[repeat(2,minmax(0,1fr))] gap-2.5 max-[430px]:grid-cols-1",
   issueSummaryError:
     "issueSummaryError min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] p-2 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
   issueSummaryOk:
@@ -322,7 +322,7 @@ const styles: Record<string, string> = {
   observerStatusActive:
     "observerStatusActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
   organizationActionRow:
-    "organizationActionRow min-w-0 max-w-full flex flex-wrap items-center gap-1.5 rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_36%,transparent)] p-2",
+    "organizationActionRow min-w-0 max-w-full flex flex-wrap items-center gap-1.5 rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] !bg-[var(--vui-surface-panel)] p-2",
   organizationAgentCard:
     "organizationAgentCard min-w-0 rounded-[var(--radius-panel)] border p-2 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
   organizationAgentList:
@@ -334,7 +334,7 @@ const styles: Record<string, string> = {
   organizationAuditBlocked:
     "organizationAuditBlocked min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
   organizationAuditCard:
-    "organizationAuditCard min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_42%,transparent)] p-2",
+    "organizationAuditCard min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] !bg-[var(--vui-surface-panel)] p-2",
   organizationAuditHeader:
     "organizationAuditHeader min-w-0 flex flex-wrap items-center gap-1.5",
   organizationAuditList:
@@ -346,29 +346,29 @@ const styles: Record<string, string> = {
   organizationBadgeProtected:
     "organizationBadgeProtected min-w-0",
   organizationBadgeRow:
-    "organizationBadgeRow min-w-0 max-w-full rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--border-soft)_68%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_34%,transparent)] p-2",
+    "organizationBadgeRow min-w-0 max-w-full rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--border-soft)_68%,transparent)] !bg-[var(--vui-surface-panel)] p-2",
   organizationForm:
     "organizationForm min-w-0 grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
   organizationMessageList:
     "organizationMessageList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   organizationMetric:
-    "organizationMetric min-w-0 max-w-full !grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-2 gap-y-1 p-2.5 rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_36%,transparent)]",
+    "organizationMetric min-w-0 max-w-full !grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-2 gap-y-1 p-2.5 rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] !bg-[var(--vui-surface-panel)]",
   organizationPanel:
-    "organizationPanel min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_44%,transparent)] p-2",
+    "organizationPanel min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] !bg-[var(--vui-surface-panel)] p-2",
   organizationProposalCard:
-    "organizationProposalCard min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_42%,transparent)] p-2",
+    "organizationProposalCard min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] !bg-[var(--vui-surface-panel)] p-2",
   organizationProposalList:
     "organizationProposalList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   organizationSectionHeader:
     "organizationSectionHeader min-w-0 flex flex-wrap items-center gap-1.5",
   organizationSummaryGrid:
-    "organizationSummaryGrid min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_40%,transparent)] p-2 grid gap-2 !grid grid-cols-[repeat(3,minmax(0,1fr))] gap-2 max-[430px]:grid-cols-1",
+    "organizationSummaryGrid min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] !bg-[var(--vui-surface-panel)] p-2 grid gap-2 !grid grid-cols-[repeat(3,minmax(0,1fr))] gap-2 max-[430px]:grid-cols-1",
   primaryButton:
     "primaryButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,transparent)] text-[var(--accent-cool)]",
   readonlyDescription:
     "readonlyDescription min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   readonlyDetailHeader:
-    "readonlyDetailHeader min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_40%,transparent)] p-2 flex flex-wrap items-center gap-1.5",
+    "readonlyDetailHeader min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] !bg-[var(--vui-surface-panel)] p-2 flex flex-wrap items-center gap-1.5",
   readonlySpecGrid:
     "readonlySpecGrid min-w-0 grid gap-2 !grid grid-cols-[auto_minmax(0,1fr)] gap-x-2.5 gap-y-[7px] p-2.5 rounded-[var(--radius-control)] border border-[var(--border-soft)] bg-[var(--vui-surface-base)]",
   reconnectHint:
@@ -385,7 +385,7 @@ const styles: Record<string, string> = {
   secondaryButton:
     "secondaryButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
   selectionSummary:
-    "selectionSummary min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_70%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_36%,transparent)] p-2 [overflow-wrap:anywhere]",
+    "selectionSummary min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_70%,transparent)] !bg-[var(--vui-surface-panel)] p-2 [overflow-wrap:anywhere]",
   statusPill:
     "statusPill min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
   status_active:

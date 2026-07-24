@@ -40,7 +40,7 @@ const userMessageBubble = cv(
 );
 const conversationComposerShell = cv(
   "composer",
-  "grid flex-none grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border-t border-[color-mix(in_srgb,var(--border-soft)_82%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_74%,transparent)] px-[11px] py-[7px] pb-[9px] backdrop-blur-[6px] shadow-none",
+  "grid flex-none grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border-t border-[color-mix(in_srgb,var(--border-soft)_82%,transparent)] !bg-[var(--vui-surface-panel)] px-[11px] py-[7px] pb-[9px] backdrop-blur-[6px] shadow-none",
 );
 const conversationComposerCodexShell = cv(
   "composerCodex",

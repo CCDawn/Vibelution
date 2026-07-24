@@ -6,7 +6,7 @@ import {
 } from "../design/vuiSurfaceRecipes";
 
 const compactActionLink =
-  "[&_a]:inline-flex [&_a]:w-fit [&_a]:flex-none [&_a]:min-h-7 [&_a]:max-w-full [&_a]:items-center [&_a]:justify-center [&_a]:gap-1 [&_a]:rounded-[var(--radius-control)] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_30%,var(--vui-border-subtle))] [&_a]:bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_88%,transparent)] [&_a]:px-2 [&_a]:text-[var(--fg-primary)] [&_a]:[font-size:var(--vui-font-xs)] [&_a]:font-[760] [&_a]:no-underline [&_a]:whitespace-nowrap [&_a:hover]:border-[color:color-mix(in_srgb,var(--accent-cool)_46%,var(--vui-border-subtle))] [&_a:hover]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-panel))]";
+  "[&_a]:inline-flex [&_a]:w-fit [&_a]:flex-none [&_a]:min-h-7 [&_a]:max-w-full [&_a]:items-center [&_a]:justify-center [&_a]:gap-1 [&_a]:rounded-[var(--radius-control)] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_30%,var(--vui-border-subtle))] [&_a]:!bg-[var(--vui-surface-panel)] [&_a]:px-2 [&_a]:text-[var(--fg-primary)] [&_a]:[font-size:var(--vui-font-xs)] [&_a]:font-[760] [&_a]:no-underline [&_a]:whitespace-nowrap [&_a:hover]:border-[color:color-mix(in_srgb,var(--accent-cool)_46%,var(--vui-border-subtle))] [&_a:hover]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-panel))]";
 
 const styles = {
   empty:
