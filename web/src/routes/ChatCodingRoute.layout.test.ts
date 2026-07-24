@@ -3130,7 +3130,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndDetailMutationsSource).toContain("const sessionReasoningEffortMutation = useMutation");
     expect(routeAndDetailMutationsSource).toContain("/reasoning-effort");
     expect(routeAndDetailMutationsSource).toContain("JSON.stringify({ reasoningEffort: variables.reasoningEffort })");
-    expect(routeSource).toContain("model: sessionLlmOptions?.model ?? null");
+    expect(routeSource).toContain("model: sessionLlmOptions.model");
     expect(routeSource).toContain("onReasoningEffortChange");
     expect(routeSource).not.toContain("/llm-selection");
     expect(routeSource).not.toContain("onSelectionChange");
