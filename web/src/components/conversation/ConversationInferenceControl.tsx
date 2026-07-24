@@ -116,7 +116,7 @@ export function ConversationInferenceControl({
 
   // Avoid applying effort clicks from a menu opened on a previous session.
   useEffect(() => {
-    setOpen(false);
+    setOpen((wasOpen) => (wasOpen ? false : wasOpen));
   }, [sessionId, model?.modelRef, model?.modelId]);
 
   useLayoutEffect(() => {
@@ -125,7 +125,17 @@ export function ConversationInferenceControl({
       const rect = triggerRef.current?.getBoundingClientRect();
       if (!rect) return;
       const measured = menuRef.current?.scrollHeight ?? 0;
-      setMenuStyle(placeInferenceMenu(rect, undefined, measured));
+      const next = placeInferenceMenu(rect, undefined, measured);
+      setMenuStyle((previous) => {
+        const same =
+          previous.top === next.top
+          && previous.bottom === next.bottom
+          && previous.right === next.right
+          && previous.width === next.width
+          && previous.maxHeight === next.maxHeight
+          && previous.position === next.position;
+        return same ? previous : next;
+      });
     }
     place();
     // Second frame: menu is mounted — remeasure true height for tight maxHeight.
