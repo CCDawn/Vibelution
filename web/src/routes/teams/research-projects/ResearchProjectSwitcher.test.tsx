@@ -1,0 +1,35 @@
+import { describe, expect, it } from "vitest";
+
+import type { TeamResearchProject } from "../../../api/types";
+import { projectDraftFromProject, researchProjectQueryKey } from "./ResearchProjectSwitcher";
+import switcherSource from "./ResearchProjectSwitcher.tsx?raw";
+
+const project: TeamResearchProject = {
+  projectId: "research-1",
+  name: "Causal robustness",
+  topic: "Robust causal discovery",
+  experimentMethod: "statistical_causal_test",
+  storageMode: "isolated",
+  createdAt: "2026-07-24T00:00:00Z",
+  updatedAt: "2026-07-24T00:00:00Z",
+};
+
+describe("ResearchProjectSwitcher", () => {
+  it("keeps project queries isolated by team", () => {
+    expect(researchProjectQueryKey("team-a")).toEqual(["teams", "team-a", "research-projects"]);
+  });
+
+  it("builds editable drafts from persisted project identity", () => {
+    expect(projectDraftFromProject(project)).toEqual({
+      name: "Causal robustness",
+      topic: "Robust causal discovery",
+    });
+  });
+
+  it("exposes create, edit, activate, and isolated workspace guidance", () => {
+    expect(switcherSource).toContain("research-projects");
+    expect(switcherSource).toContain("/activate");
+    expect(switcherSource).toContain("新建研究项目");
+    expect(switcherSource).toContain("每个项目拥有独立的资料、实验设计和迭代数据");
+  });
+});

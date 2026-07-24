@@ -11,11 +11,15 @@ from core.web.services.team_service import TeamNotFoundError, TeamServiceError
 from core.web.services.team_workflow_orchestration_service import (
     DEFAULT_OWNER_AGENT_ID,
     WORKFLOW_KIND_CHALLENGE_CUP_RESEARCH,
+    ResearchProjectError,
+    ResearchProjectNotFoundError,
     TeamWorkflowOrchestrationError,
+    activate_research_project,
     assess_source_candidate_quality,
     assess_source_quality_batch,
     build_candidate_graph,
     create_experiment_plan,
+    create_research_project,
     decide_research_review,
     decide_transfer_request,
     ensure_team_workflow_orchestration,
@@ -43,6 +47,7 @@ from core.web.services.team_workflow_orchestration_service import (
     import_data_record_as_source_candidate,
     invoke_local_research_model,
     list_candidate_store,
+    list_research_projects,
     map_mechanism_to_abstraction,
     open_source_collection_storage_target,
     plan_paper_note_chunks_from_source_candidate,
@@ -76,6 +81,7 @@ from core.web.services.team_workflow_orchestration_service import (
     sync_official_research_graph,
     validate_candidate_store,
     validate_prd,
+    update_research_project,
     writeback_source_collection_stage_session_task,
 )
 from core.web.services.runtime_scene_service import record_runtime_scene_event
@@ -233,6 +239,18 @@ class ResearchStageRoundStartPayload(BaseModel):
     maxResultsPerQuery: int = Field(10, ge=1, le=100)
     promptCachePolicy: dict[str, Any] = Field(default_factory=dict)
     scope: dict[str, Any] = Field(default_factory=dict)
+
+
+class ResearchProjectCreatePayload(BaseModel):
+    name: str = Field(..., min_length=1, max_length=160)
+    topic: str = Field("", max_length=1000)
+    experimentMethod: str = Field("", max_length=120)
+
+
+class ResearchProjectUpdatePayload(BaseModel):
+    name: str | None = Field(None, min_length=1, max_length=160)
+    topic: str | None = Field(None, max_length=1000)
+    experimentMethod: str | None = Field(None, max_length=120)
 
 
 class ExperimentPlanCreatePayload(BaseModel):
@@ -617,6 +635,77 @@ def team_workflow_ensure(team_id: str, payload: WorkflowEnsurePayload) -> dict:
             exc,
             status_code=422,
             fields={"workflowKind": payload.workflowKind, "ownerAgentId": payload.ownerAgentId},
+        )
+
+
+@router.get("/teams/{team_id}/workflow-orchestration/research-projects")
+def team_workflow_research_projects(team_id: str) -> dict:
+    try:
+        return list_research_projects(team_id)
+    except TeamNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ResearchProjectError as exc:
+        _raise_team_workflow_route_error("research_project.list", team_id, exc, status_code=422)
+
+
+@router.post(
+    "/teams/{team_id}/workflow-orchestration/research-projects",
+    status_code=status.HTTP_201_CREATED,
+)
+def team_workflow_research_project_create(team_id: str, payload: ResearchProjectCreatePayload) -> dict:
+    try:
+        return create_research_project(team_id, payload.model_dump())
+    except TeamNotFoundError as exc:
+        _raise_team_workflow_route_error("research_project.create", team_id, exc, status_code=404)
+    except ResearchProjectError as exc:
+        _raise_team_workflow_route_error("research_project.create", team_id, exc, status_code=422)
+
+
+@router.patch("/teams/{team_id}/workflow-orchestration/research-projects/{project_id}")
+def team_workflow_research_project_update(
+    team_id: str,
+    project_id: str,
+    payload: ResearchProjectUpdatePayload,
+) -> dict:
+    try:
+        return update_research_project(team_id, project_id, payload.model_dump(exclude_unset=True))
+    except (TeamNotFoundError, ResearchProjectNotFoundError) as exc:
+        _raise_team_workflow_route_error(
+            "research_project.update",
+            team_id,
+            exc,
+            status_code=404,
+            fields={"projectId": project_id},
+        )
+    except ResearchProjectError as exc:
+        _raise_team_workflow_route_error(
+            "research_project.update",
+            team_id,
+            exc,
+            status_code=422,
+            fields={"projectId": project_id},
+        )
+
+
+@router.post("/teams/{team_id}/workflow-orchestration/research-projects/{project_id}/activate")
+def team_workflow_research_project_activate(team_id: str, project_id: str) -> dict:
+    try:
+        return activate_research_project(team_id, project_id)
+    except (TeamNotFoundError, ResearchProjectNotFoundError) as exc:
+        _raise_team_workflow_route_error(
+            "research_project.activate",
+            team_id,
+            exc,
+            status_code=404,
+            fields={"projectId": project_id},
+        )
+    except ResearchProjectError as exc:
+        _raise_team_workflow_route_error(
+            "research_project.activate",
+            team_id,
+            exc,
+            status_code=422,
+            fields={"projectId": project_id},
         )
 
 

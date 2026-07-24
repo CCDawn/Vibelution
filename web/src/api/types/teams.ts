@@ -770,6 +770,25 @@ export type TeamWorkflowCandidateStoreSummary = {
   storagePath: string;
 };
 
+export type TeamResearchProject = {
+  projectId: string;
+  name: string;
+  topic: string;
+  experimentMethod: ExperimentMethodId | "";
+  storageMode: "legacy" | "isolated";
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type TeamResearchProjectListPayload = {
+  schemaVersion: number;
+  teamId: string;
+  activeProjectId: string;
+  projects: TeamResearchProject[];
+  updatedAt: string;
+  project?: TeamResearchProject;
+};
+
 export type TeamWorkflowOrchestration = {
   schemaVersion: number;
   workflowId: string;

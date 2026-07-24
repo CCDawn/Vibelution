@@ -1,0 +1,79 @@
+.root {
+  display: grid;
+  grid-template-columns: minmax(190px, 1fr) minmax(210px, 320px) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 14px;
+  border: 1px solid var(--vui-border-subtle);
+  border-radius: 12px;
+  background: var(--vui-surface-raised);
+}
+
+.identity {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+  color: var(--vui-fg-muted);
+}
+
+.identity div {
+  display: grid;
+  min-width: 0;
+}
+
+.identity span {
+  font-size: 12px;
+}
+
+.identity strong {
+  overflow: hidden;
+  color: var(--vui-fg);
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.message,
+.error {
+  grid-column: 1 / -1;
+  margin: -4px 0 0;
+  font-size: 12px;
+}
+
+.message {
+  color: var(--vui-fg-success);
+}
+
+.error {
+  color: var(--vui-fg-danger);
+}
+
+.form {
+  display: grid;
+  gap: 14px;
+}
+
+.form label {
+  display: grid;
+  gap: 6px;
+  color: var(--vui-fg-muted);
+  font-size: 12px;
+}
+
+@media (max-width: 1100px) {
+  .root {
+    grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr);
+  }
+
+  .actions {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+}

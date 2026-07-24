@@ -135,6 +135,7 @@ import {
   type ResearchStageWorkspaceView,
   type ResearchWorkspaceView,
 } from "./teams/researchWorkspaceModel";
+import { ResearchProjectSwitcher } from "./teams/research-projects/ResearchProjectSwitcher";
 import {
   SOURCE_COLLECTION_DEFAULT_ROLES,
   SOURCE_COLLECTION_TEAM_AGENT_ROLES,
@@ -3932,6 +3933,16 @@ export function TeamsRoute({
             </VNativeButton>
           </div>
         ) : null}
+        <ResearchProjectSwitcher
+          teamId={selectedTeam?.teamId || RESEARCH_TEAM_ID}
+          lang={lang}
+          currentTopic={sourceCollectionDraft.topic}
+          currentExperimentMethod={preferredExperimentMethod}
+          onProjectActivated={(project) => {
+            setSourceCollectionDraft((current) => ({ ...current, topic: project.topic }));
+            setPreferredExperimentMethod(project.experimentMethod || "");
+          }}
+        />
         {challengeProgramProjection ? (
           <div className={styles.challengeProgramScope}>
             <strong>{lang === "zh" ? "当前范围：1 个完整样例 + 3 个通用性测试" : "Current scope: 1 golden sample + 3 validation questions"}</strong>

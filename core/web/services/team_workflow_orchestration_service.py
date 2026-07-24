@@ -62,6 +62,14 @@ from core.web.services.team_workflow.orchestration_core import (
     ensure_team_workflow_orchestration,
     get_team_workflow_orchestration,
 )
+from core.web.services.team_workflow.research_projects import (
+    ResearchProjectError,
+    ResearchProjectNotFoundError,
+    activate_research_project,
+    create_research_project,
+    list_research_projects,
+    update_research_project,
+)
 from core.web.services.team_workflow.source_collection.candidates import (
     extract_source_collection_candidates,
     import_data_record_as_source_candidate,
