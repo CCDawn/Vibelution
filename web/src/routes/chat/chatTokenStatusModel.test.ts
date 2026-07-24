@@ -87,7 +87,74 @@ describe("chatTokenStatusModel", () => {
     expect(model.modelInputTokens).toBe(1100);
     expect(model.tokenStatusMetrics[0]?.value).toBe("40%");
     expect(model.tokenStatusMetrics[1]?.tone).toBe("modelInput");
+    expect(model.tokenStatusMetrics[1]?.value).not.toBe("缺窗口");
     expect(model.tokenStatusMetrics[2]?.value).toBe("8%");
     expect(model.llmUsageTitle).toContain("out");
+  });
+
+  it("fails closed when max context window is missing instead of inventing a default", () => {
+    const model = buildChatTokenStatusViewModel({
+      detail: {
+        llmUsage: {
+          source: "provider_usage",
+          inputTokens: 1200,
+          outputTokens: 100,
+          totalTokens: 1300,
+          cachedInputTokens: 0,
+        },
+        contextUsage: {
+          used: 1200,
+          limit: 0,
+          limitSource: "missing",
+          estimatedTokens: 1200,
+          messageCount: 1,
+          userMessageCount: 1,
+          assistantMessageCount: 0,
+          toolCallCount: 0,
+          source: "conversation_ledger",
+        },
+      } as never,
+      lastCacheComposition: {
+        calibratedInputTokens: 1200,
+        calibratedCachedInputTokens: 0,
+        inputTokens: 1200,
+        cachedInputTokens: 0,
+        cacheHitRate: 0,
+      } as never,
+      lastContextComposition: {
+        limitTokens: 0,
+        limitSource: "missing",
+        totalTokens: 1200,
+      } as never,
+      compression: null,
+      cache: {
+        cacheDetailAvailable: true,
+        cacheCompositionPercent: 0,
+        providerCachedInputTokens: 0,
+        providerCacheInputTokens: 1200,
+        cacheCompositionSummary: "true 0%",
+        cacheDetailOpenLabel: "View cache",
+        cacheCompositionTitle: "cache title",
+      },
+      tokenSpeedTracker: null,
+      activeSessionId: "s1",
+      groupPanelActive: false,
+      sessionStateValue: "idle",
+      sessionStateLabel: "Idle",
+      sessionStateLine: "ready",
+      lang: "zh",
+      t: ((key: string) => key) as never,
+      numberFormatter: new Intl.NumberFormat("zh-CN"),
+      compactNumberFormatter: new Intl.NumberFormat("zh-CN", { notation: "compact" }),
+      locale: "zh-CN",
+      formatTime: (value) => value,
+    });
+
+    const inputMetric = model.tokenStatusMetrics.find((item) => item.key === "modelInput");
+    expect(inputMetric?.value).toBe("缺窗口");
+    expect(inputMetric?.displayValue).toBe("!");
+    expect(inputMetric?.meta).toContain("禁止默认兜底");
+    expect(inputMetric?.title).toContain("禁止默认兜底");
+    expect(model.modelInputMetaLine).toContain("禁止默认兜底");
   });
 });

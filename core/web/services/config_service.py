@@ -56,6 +56,7 @@ from config.public_config import (
     _delete_user_env_var,
     _set_user_env_var,
     add_llm_model,
+    apply_discovered_context_windows,
     apply_llm_model_preset,
     build_effective_config,
     delete_llm_model,
@@ -3033,21 +3034,35 @@ def discover_config_models(
             canonical_provider_id,
             credential_override=str(api_key or ""),
         )
+        models = [
+            {
+                "id": model.upstream_id,
+                "label": model.label,
+                "capabilities": copy.deepcopy(model.capabilities),
+                "limits": copy.deepcopy(model.limits),
+                "metadataSource": model.metadata_source,
+                **(
+                    {"contextWindow": int(model.limits["context_window"])}
+                    if isinstance(model.limits, dict)
+                    and int(model.limits.get("context_window") or 0) > 0
+                    else {}
+                ),
+            }
+            for model in result.models
+        ]
+        applied_config, written_paths = apply_discovered_context_windows(
+            submitted,
+            models,
+            overwrite_existing=False,
+        )
         return {
             "providerId": result.provider_id,
             "adapterId": result.adapter_id,
             "attemptedEndpoints": list(result.attempted_endpoints),
             "discoveredAt": result.discovered_at,
-            "models": [
-                {
-                    "id": model.upstream_id,
-                    "label": model.label,
-                    "capabilities": copy.deepcopy(model.capabilities),
-                    "limits": copy.deepcopy(model.limits),
-                    "metadataSource": model.metadata_source,
-                }
-                for model in result.models
-            ],
+            "models": models,
+            "appliedPublicConfig": applied_config if written_paths else None,
+            "writtenContextWindowPaths": written_paths,
         }
 
     old_public = _with_config_workspace_defaults(load_public_config())
@@ -3073,11 +3088,20 @@ def discover_config_models(
         timeout=_MODEL_DISCOVERY_DEFAULT_TIMEOUT_SECONDS,
         api_key_source=api_key_source,
     ))
+    # Force-write discovered windows into matching draft model_library / provider
+    # entries when the operator left them empty (never invent; never overwrite hand edits).
+    applied_config, written_paths = apply_discovered_context_windows(
+        current,
+        models,
+        overwrite_existing=False,
+    )
     return {
         "models": models,
         "providerKind": str(provider_input.get("kind", "") or "").strip(),
         "baseUrl": str(provider_input.get("base_url", "") or "").strip(),
         "apiKeySource": api_key_source,
+        "appliedPublicConfig": applied_config if written_paths else None,
+        "writtenContextWindowPaths": written_paths,
     }
 
 
@@ -3267,13 +3291,42 @@ def materialize_observed_binding_pins(
             isinstance(pinned, dict) and model_key in pinned
         ):
             unresolved_refs.append(model_ref)
-    if not unresolved_refs:
-        return materialized
     try:
         catalog = load_model_catalog_state()
     except ValueError:
-        return materialized
+        catalog = {}
     catalog_providers = catalog.get("providers", {}) if isinstance(catalog, dict) else {}
+
+    # Force-write discovery limits into already-pinned models when operator left window empty.
+    discovered_for_write: list[dict[str, Any]] = []
+    if isinstance(catalog_providers, dict):
+        for provider_id, catalog_provider in catalog_providers.items():
+            if not isinstance(catalog_provider, dict):
+                continue
+            catalog_models = catalog_provider.get("models", {})
+            if not isinstance(catalog_models, dict):
+                continue
+            for model_key, observed in catalog_models.items():
+                if not isinstance(observed, dict):
+                    continue
+                discovered_for_write.append(
+                    {
+                        "id": str(observed.get("upstreamId") or model_key or "").strip(),
+                        "upstream_id": str(observed.get("upstreamId") or "").strip(),
+                        "limits": copy.deepcopy(observed.get("limits") or {}),
+                    }
+                )
+    if discovered_for_write:
+        materialized, _written = apply_discovered_context_windows(
+            materialized,
+            discovered_for_write,
+            overwrite_existing=False,
+        )
+        llm = materialized.get("llm", {}) if isinstance(materialized, dict) else {}
+        providers = llm.get("providers", {}) if isinstance(llm, dict) else {}
+
+    if not unresolved_refs:
+        return materialized
     for model_ref in unresolved_refs:
         provider_id, model_key = split_model_ref(model_ref)
         provider = providers.get(provider_id)
@@ -3302,12 +3355,27 @@ def materialize_observed_binding_pins(
         upstream_id = str(observed.get("upstreamId") or "").strip()
         if not upstream_id:
             continue
+        # Discovery-written limits become pinned config only when operator has not set one.
+        pin_overrides: dict[str, Any] = {}
+        observed_limits = observed.get("limits") if isinstance(observed.get("limits"), dict) else {}
+        discovered_window = 0
+        for key in ("context_window", "contextWindow", "max_model_len", "context_length"):
+            try:
+                candidate = int(observed_limits.get(key) or 0)
+            except Exception:
+                candidate = 0
+            if candidate > 0:
+                discovered_window = candidate
+                break
+        if discovered_window > 0:
+            pin_overrides["context_window"] = discovered_window
         materialized = pin_llm_model(
             materialized,
             provider_id,
             upstream_id=upstream_id,
             model_key=model_key,
             label=str(observed.get("label") or upstream_id),
+            overrides=pin_overrides or None,
         )
         llm = materialized.get("llm", {})
         providers = llm.get("providers", {}) if isinstance(llm, dict) else {}

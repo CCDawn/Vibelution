@@ -1899,24 +1899,51 @@ def _session_context_limit(conversation: dict[str, Any] | None = None) -> int:
 
 
 def _session_context_limit_payload(conversation: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Resolve the model max context window for a session.
+
+    No silent numeric fallbacks (no 128k/32k invention, no compression-threshold
+    masquerading as window). Callers must treat limit<=0 / source=missing as an
+    operator-visible error.
+    """
     s = _service()
     try:
         cfg = s.get_config()
         model_payload = s._conversation_agent_dialogue_context_window_payload(cfg, conversation)
         model_limit = s._coerce_nonnegative_int(model_payload.get("limit") or 0)
-        compression_limit = int(getattr(cfg.context_compression, "max_token_limit", 0) or 0)
-        limit = s._first_positive_int(model_limit, compression_limit, 128000)
-        if model_limit:
+        model_id = str(model_payload.get("modelId") or "").strip()
+        agent_id = str(model_payload.get("agentId") or "").strip()
+        if model_limit > 0:
             return {
                 **model_payload,
-                "limit": limit,
+                "limit": model_limit,
                 "source": "agent_dialogue_model",
+                "error": "",
             }
-        if compression_limit:
-            return {"limit": limit, "source": "context_compression_fallback", "modelId": "", "agentId": ""}
-        return {"limit": limit, "source": "static_fallback", "modelId": "", "agentId": ""}
-    except Exception:
-        return {"limit": 128000, "source": "static_fallback", "modelId": "", "agentId": ""}
+        if not model_id:
+            error = (
+                "未解析到会话对话模型，无法确定 max 上下文窗口。"
+                "请为 Agent 绑定明确的对话模型，并在模型/供应商配置中设置 context_window。"
+            )
+        else:
+            error = (
+                f"模型 `{model_id}` 未配置有效的 max 上下文窗口（context_window）。"
+                "禁止使用默认兜底值；请在设置中填写，或通过模型发现写入后再试。"
+            )
+        return {
+            "limit": 0,
+            "source": "missing",
+            "modelId": model_id,
+            "agentId": agent_id,
+            "error": error,
+        }
+    except Exception as exc:
+        return {
+            "limit": 0,
+            "source": "missing",
+            "modelId": "",
+            "agentId": "",
+            "error": f"解析 max 上下文窗口失败：{type(exc).__name__}",
+        }
 
 
 def _session_conversation_events_signature(session_id: str) -> tuple[str, int, int, int]:

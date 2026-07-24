@@ -13,7 +13,9 @@ from .adapters import capabilities_for_adapter
 from .types import DiagnosticReport, LLMCapabilities, ResolvedModelSpec
 
 
-KNOWN_CONTEXT_WINDOWS = {
+# Non-authoritative discovery/UI suggestions only. Runtime must never treat this
+# table as a real max context window (no silent catalog authority).
+SUGGESTED_CONTEXT_WINDOWS = {
     "minimax-m2.7": 204800,
     "gpt-4o": 128000,
     "gpt-4-turbo": 128000,
@@ -28,6 +30,10 @@ KNOWN_CONTEXT_WINDOWS = {
     "qwen-max": 131072,
     "qwen-32b-awq": 65536,
 }
+
+# Back-compat alias for importers that still reference the old name. Values are
+# suggestions only; do not use for runtime authority.
+KNOWN_CONTEXT_WINDOWS = SUGGESTED_CONTEXT_WINDOWS
 
 JSON_MODE_MODEL_HINTS = (
     "gpt-4",
@@ -111,12 +117,51 @@ _CATALOG_TO_RUNTIME_CAPABILITY = {
 }
 
 
-def _lookup_context_window(model_name: str, fallback: int) -> int:
+def _positive_context_window(value: Any) -> int:
+    """Coerce an explicit context window; 0 means missing (never invent defaults)."""
+    try:
+        number = int(value or 0)
+    except Exception:
+        return 0
+    return number if number > 0 else 0
+
+
+def suggested_context_window(model_name: str) -> int:
+    """Non-authoritative catalog suggestion for discovery/UI only.
+
+    Runtime budget resolution must not call this.
+    """
     normalized = (model_name or "").strip().lower()
-    for key, value in KNOWN_CONTEXT_WINDOWS.items():
+    if not normalized:
+        return 0
+    for key, value in SUGGESTED_CONTEXT_WINDOWS.items():
         if key in normalized:
-            return value
-    return int(fallback or 32768)
+            return int(value)
+    return 0
+
+
+def _lookup_context_window(model_name: str, fallback: int) -> int:
+    """Runtime path: only accept an explicit provider/model value.
+
+    The static suggestion table is intentionally ignored so unknown models fail
+    closed (return 0) instead of inventing 32k/128k-style windows.
+    """
+    del model_name  # name-based silent catalog is disabled for runtime authority
+    return _positive_context_window(fallback)
+
+
+def _catalog_discovered_context_window(model_record: dict[str, Any]) -> int:
+    """Read discovery-written limits from the derived model catalog (not invented)."""
+    if not isinstance(model_record, dict):
+        return 0
+    limits = model_record.get("limits")
+    if not isinstance(limits, dict):
+        return 0
+    for key in ("context_window", "contextWindow", "max_model_len", "context_length"):
+        window = _positive_context_window(limits.get(key))
+        if window > 0:
+            return window
+    return 0
 
 
 def _declared_capability_overrides(model_entry: Any) -> tuple[dict[str, bool], list[str]]:
@@ -298,13 +343,36 @@ def discover_model(config: AppConfig, profile_id: str) -> ResolvedModelSpec:
     )
     capabilities = _capabilities_from_resolution(driver_capabilities, resolved_capabilities)
     capabilities = _apply_runtime_capability_gates(capabilities, profile)
-    context_window = _lookup_context_window(profile.model, provider.context_window)
+    # Runtime authority only: model_library → provider config → discovery-written catalog.
+    # Static suggestion tables are never runtime authority. Unknown stays 0.
+    library_window = 0
+    if isinstance(model_entry, dict):
+        for key in ("context_window", "contextWindow", "max_model_len", "context_length"):
+            candidate = _positive_context_window(model_entry.get(key))
+            if candidate > 0:
+                library_window = candidate
+                break
+    provider_window = _positive_context_window(getattr(provider, "context_window", None))
+    discovery_window = _catalog_discovered_context_window(catalog_model)
+    if library_window > 0:
+        context_window = library_window
+        context_window_source = "model_library"
+    elif provider_window > 0:
+        context_window = provider_window
+        context_window_source = "provider_config"
+    elif discovery_window > 0:
+        context_window = discovery_window
+        context_window_source = "provider_discovery"
+    else:
+        context_window = 0
+        context_window_source = "missing"
     provider_details = {
         "provider_id": provider_id,
         "base_url": provider.base_url,
         "model_ref": model_ref,
         "upstream_id": upstream_id,
         "capabilities": resolved_capabilities,
+        "context_window_source": context_window_source,
         **catalog_details,
     }
     if model_id:
@@ -387,6 +455,11 @@ def doctor_llm_profile(config: AppConfig, profile_id: str) -> DiagnosticReport:
     compat_errors, compat_warnings = _compatibility_issues(profile, provider)
     errors.extend(compat_errors)
     warnings.extend(compat_warnings)
+    if int(getattr(spec, "context_window", 0) or 0) <= 0:
+        errors.append(
+            f"模型 `{profile.model}` 未配置 max 上下文窗口（context_window）。"
+            "禁止静默默认；请在设置中填写，或先运行模型发现写入后再试。"
+        )
     return DiagnosticReport(
         ok=not errors,
         provider=provider.kind,

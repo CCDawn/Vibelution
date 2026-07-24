@@ -708,6 +708,132 @@ def resolve_llm_model_context_window(model_entry: Any, provider: Any = None) -> 
     return _provider_context_window(owner_provider)
 
 
+def _discovered_context_window_value(item: Any) -> int:
+    if not isinstance(item, dict):
+        return 0
+    direct = _first_positive_int(
+        item.get("context_window"),
+        item.get("contextWindow"),
+        item.get("max_model_len"),
+        item.get("context_length"),
+    )
+    if direct:
+        return direct
+    limits = item.get("limits")
+    if isinstance(limits, dict):
+        return _first_positive_int(
+            limits.get("context_window"),
+            limits.get("contextWindow"),
+            limits.get("max_model_len"),
+            limits.get("context_length"),
+        )
+    return 0
+
+
+def _discovered_model_identity_keys(item: Any) -> set[str]:
+    if not isinstance(item, dict):
+        return set()
+    keys: set[str] = set()
+    for field in ("id", "upstream_id", "upstreamId", "model", "model_id", "modelId"):
+        token = str(item.get(field) or "").strip().lower()
+        if token:
+            keys.add(token)
+    return keys
+
+
+def apply_discovered_context_windows(
+    public_config: dict,
+    discovered_models: list[dict[str, Any]] | None,
+    *,
+    overwrite_existing: bool = False,
+) -> tuple[dict, list[str]]:
+    """Write discovery-reported context windows into matching config entries.
+
+    Only real discovered values are written. Existing positive operator values
+    are preserved unless ``overwrite_existing`` is True.
+    """
+    updated = copy.deepcopy(public_config) if isinstance(public_config, dict) else {}
+    discovered = [item for item in (discovered_models or []) if isinstance(item, dict)]
+    if not discovered:
+        return updated, []
+
+    windows_by_id: dict[str, int] = {}
+    for item in discovered:
+        window = _discovered_context_window_value(item)
+        if window <= 0:
+            continue
+        for key in _discovered_model_identity_keys(item):
+            windows_by_id[key] = window
+    if not windows_by_id:
+        return updated, []
+
+    written: list[str] = []
+    llm = updated.setdefault("llm", {})
+    if not isinstance(llm, dict):
+        updated["llm"] = llm = {}
+
+    # schema v1 model_library entries + nested provider.context_window
+    model_library = llm.get("model_library", {})
+    if isinstance(model_library, dict):
+        for model_id, entry in list(model_library.items()):
+            if not isinstance(entry, dict):
+                continue
+            identity = {str(model_id or "").strip().lower()} | _discovered_model_identity_keys(entry)
+            identity.add(str(entry.get("model") or "").strip().lower())
+            identity.discard("")
+            matched_window = next((windows_by_id[key] for key in identity if key in windows_by_id), 0)
+            if matched_window <= 0:
+                continue
+            existing_model = _first_positive_int(
+                entry.get("context_window"),
+                entry.get("contextWindow"),
+                entry.get("max_model_len"),
+                entry.get("context_length"),
+            )
+            if existing_model <= 0 or overwrite_existing:
+                if existing_model != matched_window or not existing_model:
+                    entry["context_window"] = matched_window
+                    written.append(f"llm.model_library.{model_id}.context_window")
+            provider = entry.get("provider")
+            if isinstance(provider, dict):
+                existing_provider = _provider_context_window(provider)
+                if existing_provider <= 0 or overwrite_existing:
+                    if existing_provider != matched_window or not existing_provider:
+                        provider["context_window"] = matched_window
+                        written.append(f"llm.model_library.{model_id}.provider.context_window")
+
+    # schema v2 providers / pinned models
+    providers = llm.get("providers", {})
+    if isinstance(providers, dict):
+        for provider_id, provider in providers.items():
+            if not isinstance(provider, dict):
+                continue
+            models = provider.get("models", {})
+            if not isinstance(models, dict):
+                continue
+            for model_key, pinned in models.items():
+                if not isinstance(pinned, dict):
+                    continue
+                identity = {
+                    str(model_key or "").strip().lower(),
+                    str(pinned.get("upstream_id") or pinned.get("upstreamId") or "").strip().lower(),
+                }
+                identity.discard("")
+                matched_window = next((windows_by_id[key] for key in identity if key in windows_by_id), 0)
+                if matched_window <= 0:
+                    continue
+                existing = _first_positive_int(
+                    pinned.get("context_window"),
+                    pinned.get("contextWindow"),
+                )
+                if existing > 0 and not overwrite_existing:
+                    continue
+                pinned["context_window"] = matched_window
+                written.append(f"llm.providers.{provider_id}.models.{model_key}.context_window")
+
+    return updated, written
+
+
 def _profile_model_ref(profile: Any) -> str:
     if not isinstance(profile, dict):
         return ""
@@ -2169,6 +2295,7 @@ __all__ = [
     "load_public_config",
     "build_effective_config",
     "resolve_llm_model_context_window",
+    "apply_discovered_context_windows",
     "list_llm_model_preset_options",
     "list_llm_provider_preset_options",
     "list_llm_provider_options",

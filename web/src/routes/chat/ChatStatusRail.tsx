@@ -545,7 +545,7 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
 
         <section className={`${styles.leftBlock} ${styles.featurePresetBlock} ${styles.runModeBlock}`}>
           <div className={styles.sectionHeader}>
-            <h3 className={styles.sectionTitle}>{lang === "zh" ? "运行模式" : "Run modes"}</h3>
+            <h3 className={styles.railSectionHeading}>{lang === "zh" ? "运行模式" : "Run modes"}</h3>
             <span className={styles.featurePresetScope} title={t("chatFeaturePanelHint")}>{lang === "zh" ? "下轮生效" : "Next turn"}</span>
           </div>
           <div className={styles.featureChipRow}>
@@ -554,7 +554,7 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
               contentLayout="plain"
               className={
                 mentalModelEnabledForNextTurn
-                  ? `${styles.featureChip} ${styles.featureChipPrimary} ${styles.featureChipActive}`
+                  ? `${styles.featureChip} ${styles.featureChipPrimary} ${styles.featureChipPrimaryActive}`
                   : `${styles.featureChip} ${styles.featureChipPrimary}`
               }
               aria-pressed={mentalModelEnabledForNextTurn}
@@ -603,38 +603,43 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
 
         <section className={`${styles.leftBlock} ${styles.companionBlock}`}>
           <div className={styles.sectionHeader}>
-            <h3 className={styles.sectionTitle}>{t("mentalState")} / {t("petSpace")}</h3>
-            <VTooltip
-              content={mentalCompactLine || mentalSourceLabel}
-              renderTrigger={(tooltipTriggerProps) => {
-                const {
-                  children: _triggerChildren,
-                  className: triggerClassName,
-                  role: _triggerRole,
-                  tabIndex: _triggerTabIndex,
-                  ...triggerProps
-                } = tooltipTriggerProps;
+            <h3 className={styles.railSectionHeading}>{lang === "zh" ? "陪伴" : "Companion"}</h3>
+            {mentalModelEnabledForNextTurn ? (
+              <VTooltip
+                content={mentalCompactLine || mentalSourceLabel}
+                renderTrigger={(tooltipTriggerProps) => {
+                  const {
+                    children: _triggerChildren,
+                    className: triggerClassName,
+                    role: _triggerRole,
+                    tabIndex: _triggerTabIndex,
+                    ...triggerProps
+                  } = tooltipTriggerProps;
 
-                return (
-                  <VButton
-                    {...(triggerProps as unknown as VButtonProps)}
-                    type="button"
-                    className={[
-                      triggerClassName,
-                      styles.mentalStateBadge,
-                      styles[`mentalStateBadge_${mentalCognitiveStateValue}`],
-                    ].filter(Boolean).join(" ")}
-                    aria-label={`${mentalStateLabel}. ${mentalCompactLine || mentalSourceLabel}`}
-                  >
-                    {mentalStateLabel}
-                  </VButton>
-                );
-              }}
-            >
-              {mentalStateLabel}
-            </VTooltip>
+                  return (
+                    <VButton
+                      {...(triggerProps as unknown as VButtonProps)}
+                      type="button"
+                      className={[
+                        triggerClassName,
+                        styles.mentalStateBadge,
+                        styles[`mentalStateBadge_${mentalCognitiveStateValue}`],
+                      ].filter(Boolean).join(" ")}
+                      aria-label={`${mentalStateLabel}. ${mentalCompactLine || mentalSourceLabel}`}
+                    >
+                      {mentalStateLabel}
+                    </VButton>
+                  );
+                }}
+              >
+                {mentalStateLabel}
+              </VTooltip>
+            ) : (
+              <span className={styles.mentalStateBadge} title={mentalSummary}>
+                {lang === "zh" ? "心智关" : "Mental off"}
+              </span>
+            )}
           </div>
-          <p className={styles.contextLineCompact}>{mentalSummary}</p>
           <div className={styles.companionCompact}>
             <div className={styles.petMiniAvatar} aria-hidden="true">
               <div className={`${styles.petShowcaseAvatar} ${petAvatarSkinStyle}`}>
@@ -655,37 +660,43 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
                 <strong>{pet?.name ?? t("loadingPetState")}</strong>
                 <span>{t("level")} {pet?.level ?? 0} · {petPresetLabel}</span>
               </div>
-              <p title={petCompactLine}>{petCompactLine}</p>
+              <p title={petCompactLine || mentalSummary}>{petCompactLine || mentalSummary}</p>
             </div>
           </div>
           <details className={styles.compactDetails}>
             <summary>
               <ChevronRight size={14} aria-hidden="true" />
-              <span className={styles.compactDetailsClosedLabel}>{t("expandSection")}</span>
+              <span className={styles.compactDetailsClosedLabel}>{lang === "zh" ? "明细" : "Details"}</span>
               <span className={styles.compactDetailsOpenLabel}>{t("collapseSection")}</span>
             </summary>
-            <p className={styles.oneLineValue} title={mentalWhisper}>
-              <span>{t("mentalWhisper")}</span>
-              {mentalWhisper}
-            </p>
-            <div className={styles.inlineStatGrid}>
-              <div className={styles.inlineStat}>
-                <span>{t("state")}</span>
-                <strong>{mentalCognitiveStateLabel}</strong>
-              </div>
-              <div className={styles.inlineStat}>
-                <span>{t("mentalConfidence")}</span>
-                <strong>{mentalConfidence}</strong>
-              </div>
-              <div className={styles.inlineStat}>
-                <span>{t("mentalSource")}</span>
-                <strong>{mentalSourceLabel}</strong>
-              </div>
-              <div className={styles.inlineStat}>
-                <span>{t("mentalLastUpdated")}</span>
-                <strong title={formatTime(mental?.updatedAt ?? "")}>{mentalRelativeTime}</strong>
-              </div>
-            </div>
+            {mentalModelEnabledForNextTurn ? (
+              <>
+                <p className={styles.oneLineValue} title={mentalWhisper}>
+                  <span>{t("mentalWhisper")}</span>
+                  {mentalWhisper}
+                </p>
+                <div className={styles.inlineStatGrid}>
+                  <div className={styles.inlineStat}>
+                    <span>{t("state")}</span>
+                    <strong>{mentalCognitiveStateLabel}</strong>
+                  </div>
+                  <div className={styles.inlineStat}>
+                    <span>{t("mentalConfidence")}</span>
+                    <strong>{mentalConfidence}</strong>
+                  </div>
+                  <div className={styles.inlineStat}>
+                    <span>{t("mentalSource")}</span>
+                    <strong>{mentalSourceLabel}</strong>
+                  </div>
+                  <div className={styles.inlineStat}>
+                    <span>{t("mentalLastUpdated")}</span>
+                    <strong title={formatTime(mental?.updatedAt ?? "")}>{mentalRelativeTime}</strong>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <p className={styles.contextLineCompact}>{mentalSummary}</p>
+            )}
             <div className={styles.inlineMetaList}>
               <span className={styles.inlineMetaPill}>
                 <span>{t("dailyTokens")}</span>
@@ -732,11 +743,13 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
                 <HeartHandshake size={14} />
                 <span>{petInteractionLabels.care}</span>
               </VButton>
+            </div>
+            {petActionPending ? (
               <span className={styles.petShowcaseActionHint}>
                 <Sparkles size={13} />
                 <span>{petInteractionLabels.pending}</span>
               </span>
-            </div>
+            ) : null}
             {petActionFeedback ? <p className={styles.petShowcaseFeedback}>{petActionFeedback}</p> : null}
           </details>
         </section>

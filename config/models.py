@@ -308,7 +308,11 @@ class ProviderConfig(BaseModel):
     extra_headers: Dict[str, str] = Field(default_factory=dict)
     compat_mode: str = Field(default="native")
     requires_api_key: bool = Field(default=True)
-    context_window: int = Field(default=32768, gt=0)
+    # None = not configured. Never invent 32768; missing must fail closed at runtime.
+    context_window: Optional[int] = Field(
+        default=None,
+        description="Provider-level max context window. None means unconfigured (no silent default).",
+    )
     label: str = ""
     service_class: Literal["official_api", "aggregator", "relay", "self_hosted", "local_runtime"] = "official_api"
     vendor: str = "custom"
@@ -331,6 +335,19 @@ class ProviderConfig(BaseModel):
     @classmethod
     def normalize_api(cls, v: str) -> str:
         return (v or "").strip().lower().replace("_", "-")
+
+    @field_validator("context_window", mode="before")
+    @classmethod
+    def normalize_context_window(cls, v: Any) -> Optional[int]:
+        if v is None or v == "" or v is False:
+            return None
+        try:
+            number = int(v)
+        except Exception as exc:
+            raise ValueError("context_window must be a positive integer when set") from exc
+        if number <= 0:
+            return None
+        return number
 
     @model_validator(mode="after")
     def validate_v2_provider_contract(self) -> "ProviderConfig":

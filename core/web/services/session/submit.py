@@ -134,6 +134,18 @@ def submit_session_message(
         conversation = s._find_conversation_entry(payload, conversation_id)
         if conversation is None:
             raise s.SessionNotFoundError(s.text_for(lang, zh="未找到当前会话。", en="Session not found."))
+        # Fail closed: never run a turn with an invented context window.
+        context_limit_payload = s._session_context_limit_payload(conversation)
+        context_limit = int(context_limit_payload.get("limit") or 0)
+        if context_limit <= 0:
+            detail = str(context_limit_payload.get("error") or "").strip()
+            if not detail:
+                detail = s.text_for(
+                    lang,
+                    zh="未配置模型 max 上下文窗口（禁止默认兜底）。请在设置中为对话模型填写 context_window，或先运行模型发现。",
+                    en="Model max context window is not configured (silent defaults are disabled). Set context_window for the dialogue model in settings, or run model discovery first.",
+                )
+            raise s.SessionValidationError(detail)
         s._ensure_session_mutable(
             conversation_id,
             conversation=conversation,

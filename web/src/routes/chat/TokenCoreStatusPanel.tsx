@@ -66,7 +66,7 @@ export function TokenCoreStatusPanel({
   return (
     <section className={`${styles.leftBlock} ${styles.tokenCompressionCard}`} aria-labelledby={titleId}>
       <div className={styles.sectionHeader}>
-        <h3 id={titleId} className={styles.sectionTitle}>Token</h3>
+        <h3 id={titleId} className={styles.railSectionHeading}>Token</h3>
       </div>
       <div className={styles.tokenStatusVisualGrid} role="list" aria-label={lang === "zh" ? "Token 核心状态" : "Token core status"}>
         {metrics.map((metric) => {
