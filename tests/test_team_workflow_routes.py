@@ -99,6 +99,79 @@ def _stub_source_collection_search_background(monkeypatch):
     return calls
 
 
+def test_team_research_projects_create_activate_and_preserve_legacy_workspace(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    client = _client()
+    team = client.post("/api/teams", json={"name": "Research Project Team"}).json()
+
+    legacy_stage = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/stage-rounds/start",
+        json={"stageType": "knowledge_collection", "topic": "Legacy topic"},
+    )
+    projects = client.get(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/research-projects",
+    )
+    created = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/research-projects",
+        json={
+            "name": "Causal robustness",
+            "topic": "Robust causal discovery",
+            "experimentMethod": "statistical_causal_test",
+        },
+    )
+    project_id = created.json()["project"]["projectId"]
+    activated = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/research-projects/{project_id}/activate",
+    )
+    isolated_status = client.get(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/stage-rounds/status",
+    )
+
+    assert legacy_stage.status_code == 201, legacy_stage.text
+    assert projects.status_code == 200, projects.text
+    assert projects.json()["activeProjectId"] == "legacy-default"
+    assert projects.json()["projects"][0]["storageMode"] == "legacy"
+    assert created.status_code == 201, created.text
+    assert created.json()["project"]["topic"] == "Robust causal discovery"
+    assert activated.status_code == 200, activated.text
+    assert activated.json()["activeProjectId"] == project_id
+    assert isolated_status.status_code == 200, isolated_status.text
+    assert isolated_status.json()["roundCount"] == 0
+
+    restored = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/research-projects/legacy-default/activate",
+    )
+    legacy_status = client.get(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/stage-rounds/status",
+    )
+    assert restored.status_code == 200, restored.text
+    assert legacy_status.json()["roundCount"] == 1
+
+
+def test_team_research_project_update_and_unknown_activation(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    client = _client()
+    team = client.post("/api/teams", json={"name": "Research Project Team"}).json()
+    created = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/research-projects",
+        json={"name": "Initial project", "topic": "Initial topic"},
+    )
+    project_id = created.json()["project"]["projectId"]
+
+    updated = client.patch(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/research-projects/{project_id}",
+        json={"name": "Renamed project", "topic": "Updated topic"},
+    )
+    missing = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/research-projects/missing/activate",
+    )
+
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["project"]["name"] == "Renamed project"
+    assert updated.json()["project"]["topic"] == "Updated topic"
+    assert missing.status_code == 404
+
+
 def _submit_steward_pack_through_source_review_route(
     client: TestClient,
     *,

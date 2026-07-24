@@ -12,9 +12,9 @@ from typing import Any
 
 from jsonschema import Draft202012Validator, FormatChecker
 
-from core.infrastructure import developer_sandbox
 from core.web.services import team_service
 from core.web.services.runtime_scene_service import record_runtime_scene_event
+from core.web.services.team_workflow.research_projects import resolve_team_workflow_root
 
 
 STORE_SCHEMA_VERSION = 1
@@ -39,12 +39,7 @@ def _project_root() -> Path:
 
 
 def _workflow_root(team_id: str) -> Path:
-    return developer_sandbox.seeded_sandbox_workspace_path(
-        _project_root(),
-        "teams",
-        "".join(character if character.isalnum() or character in "._-" else "_" for character in team_id)[:96]
-        or "team",
-    )
+    return resolve_team_workflow_root(team_id)
 
 
 def _store_path(team_id: str) -> Path:

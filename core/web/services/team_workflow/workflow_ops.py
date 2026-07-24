@@ -638,12 +638,9 @@ def _team_workflow_kernel_delivery(kernel_result: dict[str, Any], target_agent_i
 
 
 def _team_workflow_root(team_id: str) -> Path:
-    s = _service()
-    return s.developer_sandbox.seeded_sandbox_workspace_path(
-        s._project_root(),
-        "teams",
-        s._safe_token(team_id, default="team", max_length=96),
-    )
+    from core.web.services.team_workflow.research_projects import resolve_team_workflow_root
+
+    return resolve_team_workflow_root(team_id)
 
 
 def _validate_algorithm_hypothesis_candidate(candidate: dict[str, Any]) -> list[dict[str, str]]:

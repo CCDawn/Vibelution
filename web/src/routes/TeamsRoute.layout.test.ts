@@ -7,6 +7,7 @@ import teamsSourceCollectionPanelSource from "./teams/TeamsSourceCollectionPanel
 import researchMemoryEvidencePanelSource from "./teams/ResearchMemoryEvidencePanel.tsx?raw";
 import canvasGeometrySource from "./teams/canvasGeometry.ts?raw";
 import researchWorkspaceModelSource from "./teams/researchWorkspaceModel.ts?raw";
+import researchProjectSwitcherSource from "./teams/research-projects/ResearchProjectSwitcher.tsx?raw";
 import teamKindModelSource from "./teams/teamKindModel.ts?raw";
 import evidenceModelSource from "./teams/source-collection/evidenceModel.ts?raw";
 import presentationModelSource from "./teams/source-collection/presentationModel.ts?raw";
@@ -23,6 +24,14 @@ import teamWorkflowQueryKeysSource from "./teams/teamWorkflowQueryKeys.ts?raw";
 import researchStageAgentPresentationSource from "./teams/researchStageAgentPresentation.ts?raw";
 
 const routeAndPureSource = `${routeSource}\n${canvasGeometrySource}\n${researchWorkspaceModelSource}\n${teamKindModelSource}\n${presentationModelSource}\n${experimentLoopModelSource}\n${aiSearchPresentationSource}\n${workflowPresentationSource}\n${researchStageRolesSource}\n${teamWorkflowQueryKeysSource}\n${researchStageAgentPresentationSource}`;
+
+describe("research project workspace", () => {
+  it("mounts persistent project switching above the three-stage workspace", () => {
+    expect(routeSource).toContain("<ResearchProjectSwitcher");
+    expect(routeSource).toContain("onProjectActivated");
+    expect(researchProjectSwitcherSource).toContain("新建研究项目");
+  });
+});
 import teamMemoryIndexPanelSource from "./TeamMemoryIndexPanel.tsx?raw";
 import teamMemoryIndexPanelStyles from "./TeamMemoryIndexPanel.styles";
 import teamExperimentMethodPanelSource from "./TeamExperimentMethodPanel.tsx?raw";
