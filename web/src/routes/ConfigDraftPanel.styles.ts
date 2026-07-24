@@ -17,7 +17,7 @@ const styles = {
   draftWorkbench:
     `vui-routes-configdraftpanel draftWorkbench ${readableRowSurface} [display:grid] [grid-template-rows:auto_minmax(22rem,1fr)_auto] [gap:10px] [padding:10px] [min-height:0] [overflow:hidden]`,
   editorWrap:
-    "vui-routes-configdraftpanel editorWrap [min-height:22rem] [height:100%] [border:1px_solid_var(--border-hairline)] [border-radius:8px] [overflow:hidden] [background:var(--surface-code)] [&.cm-editor]:[height:100%] [&.cm-editor]:[min-height:22rem] [&.cm-scroller]:[overflow:auto]",
+    "vui-routes-configdraftpanel editorWrap [min-height:22rem] [height:100%] [border:1px_solid_var(--border-hairline)] [border-radius:8px] [overflow:hidden] [background:var(--vui-surface-workspace)] [&.cm-editor]:[height:100%] [&.cm-editor]:[min-height:22rem] [&.cm-scroller]:[overflow:auto]",
   eyebrow:
     "vui-routes-configdraftpanel eyebrow [margin:0] [color:var(--fg-tertiary)] [font-size:var(--vui-font-xs)] [text-transform:uppercase] [letter-spacing:0.08em]",
   helperText:
@@ -27,7 +27,7 @@ const styles = {
   configPath:
     "vui-routes-configdraftpanel configPath [display:block] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap] [font-family:var(--font-mono)] [font-size:var(--vui-font-xs)] [color:var(--vui-fg-secondary)]",
   rawToml:
-    "vui-routes-configdraftpanel rawToml [max-height:18rem] [overflow:auto] [overflow-wrap:anywhere] [margin:0] [padding:10px] [border:1px_solid_var(--vui-border-subtle)] [border-radius:8px] [background:var(--surface-code)] [font-family:var(--font-mono)] [font-size:var(--vui-font-xs)] [line-height:1.55] [color:var(--vui-fg-secondary)]",
+    "vui-routes-configdraftpanel rawToml [max-height:18rem] [overflow:auto] [overflow-wrap:anywhere] [margin:0] [padding:10px] [border:1px_solid_var(--vui-border-subtle)] [border-radius:8px] [background:var(--vui-surface-workspace)] [font-family:var(--font-mono)] [font-size:var(--vui-font-xs)] [line-height:1.55] [color:var(--vui-fg-secondary)]",
   sectionHeader:
     `vui-routes-configdraftpanel sectionHeader [display:flex] [align-items:start] [justify-content:space-between] [gap:8px] [min-height:40px] [padding:7px_var(--config-section-x)] ${sectionHeaderSurface}`,
   sectionIcon:

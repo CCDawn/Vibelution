@@ -328,7 +328,7 @@ const styles = {
   liveIoResizeHandle:
     "group relative block w-full !h-[12px] !min-h-[12px] !border-0 !bg-transparent !p-0 cursor-row-resize touch-none outline-none !shadow-none",
   liveIoResizeHandleLine:
-    "pointer-events-none absolute top-1/2 left-0 right-0 h-[3px] -translate-y-1/2 rounded-full bg-[var(--surface-resize-track)] transition-[background-color,box-shadow] group-hover:bg-[color-mix(in_srgb,var(--accent-warm)_52%,transparent)] group-focus-visible:bg-[color-mix(in_srgb,var(--accent-warm)_52%,transparent)] group-hover:shadow-none group-focus-visible:shadow-none",
+    "pointer-events-none absolute top-1/2 left-0 right-0 h-[3px] -translate-y-1/2 rounded-full bg-[var(--vui-border-subtle)] transition-[background-color,box-shadow] group-hover:bg-[color-mix(in_srgb,var(--accent-warm)_52%,transparent)] group-focus-visible:bg-[color-mix(in_srgb,var(--accent-warm)_52%,transparent)] group-hover:shadow-none group-focus-visible:shadow-none",
   liveLaunchStack:
     "grid [grid-template-rows:minmax(0,_1fr)] [gap:8px] [height:100%] min-h-0 [overflow:hidden] max-[1200px]:[grid-template-rows:minmax(0,_1fr)] max-[900px]:[height:auto] max-[900px]:[overflow:visible] max-[900px]:[grid-template-rows:auto] max-[900px]:[grid-auto-rows:max-content] max-[900px]:[align-content:start] max-[900px]:min-h-0",
   liveResizeHandle:
@@ -404,13 +404,13 @@ const styles = {
   rawBlockStack:
     "grid [gap:8px] [width:100%]",
   rawJson:
-    "[margin:12px_0_0] [padding:12px] [border-radius:8px] [overflow:auto] [background:var(--surface-code)] [color:var(--fg-secondary)] [font-size:var(--vui-font-xs)] [line-height:1.55]",
+    "[margin:12px_0_0] [padding:12px] [border-radius:8px] [overflow:auto] [background:var(--vui-surface-workspace)] [color:var(--fg-secondary)] [font-size:var(--vui-font-xs)] [line-height:1.55]",
   relatedList:
     "grid [grid-template-columns:repeat(2,_minmax(0,_1fr))] [gap:8px] max-[900px]:[grid-template-columns:1fr]",
   relatedRow:
     `grid ${rowSurface} [gap:4px] [min-height:48px] [padding:9px_10px]`,
   resizeHandle:
-    "relative h-full min-w-3 cursor-col-resize touch-none border-0 bg-transparent p-0 outline-none before:absolute before:inset-y-0 before:left-1/2 before:w-[3px] before:-translate-x-1/2 before:rounded-[var(--radius-control)] before:bg-[var(--surface-resize-track)] before:transition before:content-[''] hover:before:bg-[color-mix(in_srgb,var(--accent-warm)_52%,transparent)] hover:before:shadow-none focus-visible:before:bg-[color-mix(in_srgb,var(--accent-warm)_52%,transparent)] focus-visible:before:shadow-none max-[1200px]:hidden",
+    "relative h-full min-w-3 cursor-col-resize touch-none border-0 bg-transparent p-0 outline-none before:absolute before:inset-y-0 before:left-1/2 before:w-[3px] before:-translate-x-1/2 before:rounded-[var(--radius-control)] before:bg-[var(--vui-border-subtle)] before:transition before:content-[''] hover:before:bg-[color-mix(in_srgb,var(--accent-warm)_52%,transparent)] hover:before:shadow-none focus-visible:before:bg-[color-mix(in_srgb,var(--accent-warm)_52%,transparent)] focus-visible:before:shadow-none max-[1200px]:hidden",
   reviewLead:
     "[margin:0] [color:var(--fg-primary)_!important] [font-size:1.04rem] [line-height:1.55]",
   runControlReason:
@@ -450,7 +450,7 @@ const styles = {
   segmented:
     "inline-flex [align-items:center] [gap:6px] [padding:3px] [border-radius:var(--radius-panel)] [border:1px_solid_var(--border-soft)] [background:var(--vui-surface-panel)]",
   selectInput:
-    "[width:100%] min-w-0 [min-height:31px] [padding:0_9px] [border:1px_solid_var(--border-hairline)] [border-radius:7px] [background:var(--surface-input)] [color:var(--fg-primary)] focus:[outline:1px_solid_color-mix(in_srgb,_var(--accent-warm)_26%,_transparent)] focus:[border-color:color-mix(in_srgb,_var(--accent-warm)_26%,_transparent)]",
+    "[width:100%] min-w-0 [min-height:31px] [padding:0_9px] [border:1px_solid_var(--border-hairline)] [border-radius:7px] [background:var(--vui-surface-workspace)] [color:var(--fg-primary)] focus:[outline:1px_solid_color-mix(in_srgb,_var(--accent-warm)_26%,_transparent)] focus:[border-color:color-mix(in_srgb,_var(--accent-warm)_26%,_transparent)]",
   selectionBar:
     "flex [align-items:center] [justify-content:space-between] [gap:10px] [flex-wrap:wrap]",
   selectionSummary:
@@ -459,7 +459,7 @@ const styles = {
   // viewport; inner trackShell must keep its own auto | 1fr so the status bar
   // stays content-height instead of stretching.
   selfPage:
-    "[grid-template-rows:minmax(0,1fr)] [gap:0] [padding:8px_12px_12px] [background:color-mix(in_srgb,_var(--vui-surface-panel)_78%,_var(--surface-page))] [min-h-0] [align-content:stretch] max-[900px]:[grid-template-rows:minmax(0,1fr)] max-[900px]:[gap:0]",
+    "[grid-template-rows:minmax(0,1fr)] [gap:0] [padding:8px_12px_12px] [background:color-mix(in_srgb,_var(--vui-surface-panel)_78%,_var(--vui-surface-workspace))] [min-h-0] [align-content:stretch] max-[900px]:[grid-template-rows:minmax(0,1fr)] max-[900px]:[gap:0]",
   sourceHero:
     `grid [gap:5px] min-w-0 [padding:12px_14px] ${rowSurface} [&_span]:[color:var(--fg-tertiary)] [&_span]:[font-size:var(--vui-font-xs)] [&_small]:[color:var(--fg-tertiary)] [&_small]:[font-size:var(--vui-font-xs)] [&_strong]:min-w-0 [&_strong]:[overflow:hidden] [&_strong]:[color:var(--fg-primary)] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap] [&_small]:[overflow:hidden] [&_small]:[text-overflow:ellipsis] [&_small]:[white-space:nowrap]`,
   sourceInventoryBar:
@@ -561,9 +561,9 @@ const styles = {
   surfaceHeaderCompact:
     "flex [justify-content:space-between] [gap:10px] min-w-0 [&_div]:min-w-0 [align-items:center]",
   textArea:
-    "[width:100%] min-w-0 [border:1px_solid_var(--border-hairline)] [border-radius:7px] [background:var(--surface-input)] [color:var(--fg-primary)] focus:[outline:1px_solid_color-mix(in_srgb,_var(--accent-warm)_26%,_transparent)] focus:[border-color:color-mix(in_srgb,_var(--accent-warm)_26%,_transparent)] [min-height:86px] [padding:10px_12px] [resize:vertical] [line-height:1.5]",
+    "[width:100%] min-w-0 [border:1px_solid_var(--border-hairline)] [border-radius:7px] [background:var(--vui-surface-workspace)] [color:var(--fg-primary)] focus:[outline:1px_solid_color-mix(in_srgb,_var(--accent-warm)_26%,_transparent)] focus:[border-color:color-mix(in_srgb,_var(--accent-warm)_26%,_transparent)] [min-height:86px] [padding:10px_12px] [resize:vertical] [line-height:1.5]",
   textInput:
-    "[width:100%] min-w-0 [min-height:31px] [padding:0_9px] [border:1px_solid_var(--border-hairline)] [border-radius:7px] [background:var(--surface-input)] [color:var(--fg-primary)] focus:[outline:1px_solid_color-mix(in_srgb,_var(--accent-warm)_26%,_transparent)] focus:[border-color:color-mix(in_srgb,_var(--accent-warm)_26%,_transparent)]",
+    "[width:100%] min-w-0 [min-height:31px] [padding:0_9px] [border:1px_solid_var(--border-hairline)] [border-radius:7px] [background:var(--vui-surface-workspace)] [color:var(--fg-primary)] focus:[outline:1px_solid_color-mix(in_srgb,_var(--accent-warm)_26%,_transparent)] focus:[border-color:color-mix(in_srgb,_var(--accent-warm)_26%,_transparent)]",
   title:
     "[margin:0] [font-family:var(--font-body)] [font-weight:760] [font-size:var(--route-topbar-title-size)] [line-height:1.08] [white-space:nowrap]",
   toolbar:
@@ -584,7 +584,7 @@ const styles = {
   trendBarFill:
     "[height:100%] [border-radius:inherit] [background:color-mix(in_srgb,_var(--accent-cool)_64%,_transparent)]",
   trendBarTrack:
-    "[width:100%] [height:8px] [overflow:hidden] [border-radius:999px] [background:var(--surface-resize-track)]",
+    "[width:100%] [height:8px] [overflow:hidden] [border-radius:999px] [background:var(--vui-border-subtle)]",
   trendMeta:
     "grid [gap:4px] [&_span]:[color:var(--fg-secondary)] [&_span]:[font-size:0.92rem]",
   trendRow:

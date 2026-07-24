@@ -21,7 +21,7 @@ const eyebrowClass = "m-0 mb-0.5 [font-size:var(--vui-font-xs)] font-bold upperc
 const panelCountClass = "text-base text-vui-fg-primary";
 const taskListClass = "grid min-h-0 min-w-0 max-w-full content-start gap-[7px] overflow-auto overflow-x-hidden p-2 max-[1120px]:max-h-[min(38vh,320px)]";
 const taskRowClass = "grid !h-auto !min-h-[72px] w-full min-w-0 max-w-full content-start justify-self-stretch gap-1 overflow-hidden whitespace-normal rounded-[var(--radius-control)] border border-vui-border-soft bg-[color-mix(in_srgb,var(--vui-surface-row)_74%,transparent)] px-2 py-1.5 text-left text-vui-fg-primary hover:border-[var(--border-strong)] hover:bg-[color-mix(in_srgb,var(--vui-surface-row-hover)_84%,transparent)] [&_[data-slot=vui-button-content]]:grid [&_[data-slot=vui-button-content]]:min-w-0 [&_[data-slot=vui-button-content]]:w-full [&_[data-slot=vui-button-content]]:items-start [&_[data-slot=vui-button-content]]:justify-stretch [&_[data-slot=vui-button-content]]:gap-1 [&_[data-slot=vui-button-label]]:contents [&_[data-slot=vui-button-label]]:overflow-visible [&_[data-slot=vui-button-label]]:whitespace-normal";
-const taskRowSelectedClass = "border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[var(--surface-active-neutral)] shadow-[var(--vui-shadow-inset-accent)]";
+const taskRowSelectedClass = "border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[var(--vui-surface-row-hover)] shadow-[var(--vui-shadow-inset-accent)]";
 const taskRowTopClass = "grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2";
 const taskRowTitleClass = "block min-w-0 truncate";
 const taskRowMetaClass = "grid w-full min-w-0 gap-[3px] [font-size:var(--vui-font-xs)] leading-[1.35] text-vui-fg-secondary";
@@ -50,7 +50,7 @@ const lifecycleTitleClass = "flex items-center justify-between gap-2";
 const lifecycleKindClass = "[font-size:var(--vui-font-xs)] text-vui-fg-primary";
 const lifecycleSummaryClass = "m-0 my-[3px] min-w-0 break-words [font-size:var(--vui-font-xs)] leading-[1.35] text-vui-fg-secondary";
 const chipsClass = "mt-[5px] flex flex-wrap gap-[5px]";
-const chipCodeClass = "max-w-full overflow-hidden truncate whitespace-nowrap rounded-full border border-vui-border-soft bg-[var(--surface-code)] px-1.5 py-[3px] [font-size:var(--vui-font-xs)] text-vui-fg-tertiary";
+const chipCodeClass = "max-w-full overflow-hidden truncate whitespace-nowrap rounded-full border border-vui-border-soft bg-[var(--vui-surface-workspace)] px-1.5 py-[3px] [font-size:var(--vui-font-xs)] text-vui-fg-tertiary";
 const refListClass = "mt-[5px] flex min-w-0 max-w-full flex-wrap gap-[5px]";
 const evidenceRefListClass = "mt-[5px] flex min-w-0 max-w-full flex-wrap gap-[5px]";
 const emptyInlineClass = "[font-size:var(--vui-font-xs)] leading-[1.35] text-vui-fg-secondary";

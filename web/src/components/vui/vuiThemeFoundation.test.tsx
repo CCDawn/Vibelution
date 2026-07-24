@@ -113,7 +113,13 @@ describe("VUI dual-theme foundation", () => {
     expect(lightThemeBlock).toContain("--vui-select-chevron");
     expect(tokensSource).toContain("--vui-surface-toolbar: var(--vui-surface-raised);");
     expect(tokensSource).toContain("--vui-surface-row: rgb(24 30 40);");
-    expect(lightThemeBlock).toContain("--vui-surface-row: var(--surface-card-muted);");
+    // VUI owns literals; legacy --surface-* only aliases into VUI (never reverse).
+    expect(lightThemeBlock).toContain("--vui-surface-row: #f4f7fb;");
+    expect(lightThemeBlock).toContain("--surface-card-muted: var(--vui-surface-row);");
+    expect(tokensSource).toContain("--surface-page: var(--vui-surface-workspace);");
+    expect(tokensSource).toContain("--surface-panel: var(--vui-surface-panel);");
+    expect(tokensSource).toContain("--surface-card: var(--vui-surface-card);");
+    expect(tokensSource).not.toContain("--vui-surface-row: var(--surface-card-muted);");
     expect(tokensSource).not.toContain("--vui-surface-row: color-mix(in srgb, var(--surface-card) 86%, transparent);");
   });
 
@@ -160,6 +166,7 @@ describe("VUI dual-theme foundation", () => {
     expect(tailwindSource).toContain("--color-vui-surface-glass: var(--vui-surface-glass)");
     expect(tailwindSource).toContain("--color-vui-surface-toolbar: var(--vui-surface-toolbar)");
     expect(tailwindSource).toContain("--color-vui-surface-row: var(--vui-surface-row)");
+    expect(tailwindSource).toContain("--color-vui-surface-page: var(--vui-surface-workspace)");
     expect(tailwindSource).toContain("--color-vui-control-muted: var(--vui-control-muted)");
     expect(tailwindSource).toContain("--color-vui-border-subtle: var(--vui-border-subtle)");
     expect(providerThemeSource).toContain("--vui-component-border");
@@ -171,6 +178,17 @@ describe("VUI dual-theme foundation", () => {
     expect(providerThemeSource).toContain("--vui-component-control-hover-border");
     expect(providerThemeSource).toContain("--vui-component-control-hover-fg");
     expect(providerThemeSource).toContain(".vui-tone-danger");
+  });
+
+  it("exports shared opaque surface recipes for route style maps", () => {
+    const recipesSource = readFileSync(resolve(designRoot, "vuiSurfaceRecipes.ts"), "utf8");
+    expect(recipesSource).toContain("export const vuiOpaquePanelClass");
+    expect(recipesSource).toContain("export const vuiOpaqueRowClass");
+    expect(recipesSource).toContain("export const vuiDenseRowClass");
+    expect(recipesSource).toContain("!bg-[var(--vui-surface-panel)]");
+    expect(recipesSource).toContain("!bg-[var(--vui-surface-row)]");
+    expect(recipesSource).toContain("hover:bg-[var(--vui-surface-row-hover)]");
+    expect(recipesSource).not.toContain("var(--surface-");
   });
 
   it("defines the readable display scale as shared tokens instead of page-local micro text", () => {

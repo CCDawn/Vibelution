@@ -353,7 +353,7 @@ export const CONFIG_COPY = {
     providerApi: "Provider API",
     modelProtocol: "模型协议",
     modelCompat: "兼容策略对象",
-    contextWindow: "上下文窗口",
+    contextWindow: "上下文窗口（必填，禁止默认）",
     requiresApiKey: "需要 API Key",
     imageInputSupport: "图像输入",
     imageInputSupportUnknown: "未声明",
@@ -602,7 +602,7 @@ export const CONFIG_COPY = {
     providerApi: "Provider API",
     modelProtocol: "Model protocol",
     modelCompat: "Compat policy object",
-    contextWindow: "Context window",
+    contextWindow: "Context window (required, no default)",
     requiresApiKey: "Requires API key",
     imageInputSupport: "Image input",
     imageInputSupportUnknown: "Undeclared",
@@ -878,8 +878,16 @@ function buildProviderPayload(draft: ProviderDraft): Record<string, unknown> {
     compat_mode: draft.compat_mode.trim(),
     requires_api_key: draft.requires_api_key,
   };
-  if (draft.context_window.trim()) {
-    payload.context_window = Number(draft.context_window.trim());
+  // Empty means unconfigured — send null so backend clears schema defaults instead of inventing 32768.
+  const contextWindowRaw = draft.context_window.trim();
+  if (contextWindowRaw) {
+    const parsed = Number(contextWindowRaw);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      throw new Error("context_window must be a positive integer");
+    }
+    payload.context_window = Math.round(parsed);
+  } else {
+    payload.context_window = null;
   }
   return payload;
 }

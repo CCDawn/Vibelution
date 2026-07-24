@@ -13,7 +13,7 @@ const actionsClass = "mt-[18px] flex flex-wrap gap-2";
 const actionButtonClass = "min-w-24";
 const technicalClass = "mt-[18px] border-t border-vui-border-subtle pt-[14px]";
 const technicalSummaryClass = "cursor-pointer [font-size:var(--vui-font-sm)] font-bold text-vui-fg-tertiary";
-const technicalPreClass = "mt-2.5 max-h-40 overflow-auto whitespace-pre-wrap rounded-[var(--radius-card)] border border-vui-border-subtle bg-[var(--surface-code)] p-3 [font-size:var(--vui-font-xs)] leading-[1.5] text-vui-fg-primary";
+const technicalPreClass = "mt-2.5 max-h-40 overflow-auto whitespace-pre-wrap rounded-[var(--radius-card)] border border-vui-border-subtle bg-[var(--vui-surface-workspace)] p-3 [font-size:var(--vui-font-xs)] leading-[1.5] text-vui-fg-primary";
 
 const styles = {
   surfaceClass,

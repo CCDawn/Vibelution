@@ -930,11 +930,13 @@ describe("AgentsRoute layout contract", () => {
     expect(agentCreateContractSource).not.toContain("\"image2_generate_tool\"");
     expect(agentCreateContractSource).toContain("DEFAULT_SESSION_AGENT_ALLOWED_TOOLS.join(\", \")");
     expect(agentCreateContractSource).toContain("const fallbackAllowedTools = bundles.length ? [] : expertiseFromDraft(draft.allowedTools)");
-    expect(agentCreateContractSource).toContain("const allowedTools = sortedIds(selectedAllowedTools)");
+    expect(agentCreateContractSource).toContain("const allowedTools = sortedIds([...selectedAllowedTools, ...requiredAllowedTools])");
     expect(agentCreateContractSource).toContain("const selectedPreferredTools = selectedToolPolicy.preferredTools.length");
-    expect(agentCreateContractSource).toContain("const preferredTools = sortedIds(selectedPreferredTools.filter((tool) => allowedTools.includes(tool)))");
+    expect(agentCreateContractSource).toContain("const preferredTools = sortedIds(");
+    expect(agentCreateContractSource).toContain("[...selectedPreferredTools, ...requiredPreferredTools].filter((tool) => allowedTools.includes(tool))");
+    expect(agentCreateContractSource).toContain("REQUIRED_SESSION_AGENT_ALLOWED_TOOLS");
+    expect(agentCreateContractSource).toContain("REQUIRED_SESSION_AGENT_PREFERRED_TOOLS");
     expect(agentCreateContractSource).not.toContain("const sessionDefaultAllowedTools = workSession ? DEFAULT_SESSION_AGENT_ALLOWED_TOOLS : []");
-    expect(agentCreateContractSource).not.toContain("const sessionDefaultPreferredTools = workSession ? DEFAULT_SESSION_AGENT_PREFERRED_TOOLS : []");
     expect(agentCreateContractSource).not.toContain("const allowedTools = sortedIds([...sessionDefaultAllowedTools, ...selectedAllowedTools])");
     expect(agentCreateContractSource).toContain("selectedToolBundleIds: string[]");
     expect(agentCreateContractSource).toContain("function defaultCreateToolBundleIds");

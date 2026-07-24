@@ -579,7 +579,7 @@ describe("ConfigRoute layout contract", () => {
 
     expect(stylesSource).toContain("const readablePanelSurface");
     expect(stylesSource).toContain("const readableRowSurface");
-    expect(styles.page).toContain("[background:var(--surface-page)]");
+    expect(styles.page).toContain("[background:var(--vui-surface-workspace)]");
     expect(stylesSource).toContain("configHeader:");
     expect(styles.configHeader).toContain("[background:var(--vui-surface-panel)]");
 
@@ -895,7 +895,7 @@ describe("ConfigRoute layout contract", () => {
   });
 
   it("keeps operational settings readable over custom workbench backgrounds", () => {
-    expect(styles.page).toContain("[background:var(--surface-page)]");
+    expect(styles.page).toContain("[background:var(--vui-surface-workspace)]");
     expect(styles.page).toContain("[isolation:isolate]");
     expect(stylesSource).toContain("[background:var(--vui-surface-panel)]");
     expect(styles.sidebar).toContain("[background:var(--vui-surface-panel)]");
@@ -904,7 +904,7 @@ describe("ConfigRoute layout contract", () => {
     expect(styles.configDenseSection).toContain("[&>_.treeGrid]:[grid-template-columns:repeat(3,minmax(220px,1fr))]");
     expect(styles.configDenseSection).not.toContain("repeat(auto-fit");
     expect(styles.configDiscoverySection).toContain("[&>_.treeGrid]:[grid-template-columns:repeat(3,minmax(220px,1fr))]");
-    expect(styles.treeFieldValue).toContain("color-mix(in_srgb,var(--surface-code)_92%,var(--surface-panel))");
+    expect(styles.treeFieldValue).toContain("color-mix(in_srgb,var(--vui-surface-workspace)_92%,var(--vui-surface-panel))");
     expect(healthDiagnosticsPanelStylesSource).toContain("[background:var(--vui-surface-panel)]");
     expect(healthDiagnosticsPanelStylesSource).toContain("[background:var(--vui-surface-row)]");
   });

@@ -12,7 +12,7 @@ const styles = {
   reviewQueueScroll:
     "reviewQueueScroll min-h-0 min-w-0 overflow-y-auto overflow-x-hidden overscroll-contain pr-0.5 [scrollbar-gutter:stable]",
   projectMemorySlot:
-    "projectMemorySlot relative z-[1] min-h-0 min-w-0 shrink-0 overflow-hidden bg-[var(--surface-page)]",
+    "projectMemorySlot relative z-[1] min-h-0 min-w-0 shrink-0 overflow-hidden bg-[var(--vui-surface-workspace)]",
 } as const;
 
 export default styles;

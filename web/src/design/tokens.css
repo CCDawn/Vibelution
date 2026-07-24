@@ -9,26 +9,7 @@
   --source-workbench-card: var(--bg-canvas);
   --source-workbench-panel: var(--bg-canvas);
 
-  --surface-page: rgba(13, 15, 19, 0.86);
-  --surface-header: rgba(18, 21, 28, 0.88);
-  --surface-panel: rgba(21, 25, 32, 0.9);
-  --surface-panel-muted: rgba(16, 19, 25, 0.86);
-  --surface-panel-strong: rgba(28, 33, 42, 0.94);
-  --surface-panel-hover: rgba(32, 38, 49, 0.94);
-  --surface-card: rgba(18, 22, 29, 0.86);
-  --surface-card-muted: rgba(255, 255, 255, 0.035);
-  --surface-card-subtle: rgba(255, 255, 255, 0.024);
-  --surface-card-hover: rgba(255, 255, 255, 0.06);
-  --surface-raised: rgba(28, 33, 42, 0.96);
-  --surface-input: rgba(12, 15, 20, 0.9);
-  --surface-input-strong: rgba(8, 11, 15, 0.92);
-  --surface-code: rgba(7, 10, 14, 0.8);
-  --surface-active-neutral: rgba(32, 39, 51, 0.96);
-  --surface-overlay: rgba(4, 7, 11, 0.66);
-  --surface-resize-track: rgba(226, 232, 240, 0.1);
-  --surface-scrollbar-track: rgba(12, 15, 20, 0.8);
-  --shadow-soft: 0 12px 24px rgba(0, 0, 0, 0.2);
-  --shadow-strong: 0 22px 52px rgba(0, 0, 0, 0.28);
+  /* VUI surface contract — sole literal source of truth for product surfaces. */
   --vui-surface-base: rgb(12 14 19);
   --vui-surface-rail: rgb(16 19 26);
   --vui-surface-panel: rgb(21 26 35);
@@ -38,7 +19,6 @@
   --vui-surface-glass: color-mix(in srgb, var(--vui-surface-panel) 88%, transparent);
   --vui-surface-toolbar: var(--vui-surface-raised);
   --vui-surface-row: rgb(24 30 40);
-  /* Product surface contract: each visual role has one semantic consumption path. */
   --vui-surface-workspace: var(--vui-surface-base);
   --vui-surface-region: var(--vui-surface-rail);
   --vui-surface-card: var(--vui-surface-panel);
@@ -48,6 +28,31 @@
   --vui-row-hover-bg: color-mix(in srgb, var(--vui-surface-row) 96%, var(--fg-primary) 4%);
   --vui-surface-row-hover: var(--vui-row-hover-bg);
   --vui-control-muted: rgb(24 30 40);
+
+  /*
+   * Deprecated legacy surface aliases — keep for residual CSS only.
+   * New code must consume --vui-surface-* (or Tailwind bg-vui-surface-*).
+   */
+  --surface-page: var(--vui-surface-workspace);
+  --surface-header: var(--vui-surface-rail);
+  --surface-panel: var(--vui-surface-panel);
+  --surface-panel-muted: var(--vui-surface-rail);
+  --surface-panel-strong: var(--vui-surface-raised);
+  --surface-panel-hover: var(--vui-surface-row-hover);
+  --surface-card: var(--vui-surface-card);
+  --surface-card-muted: var(--vui-surface-row);
+  --surface-card-subtle: color-mix(in srgb, var(--vui-surface-row) 70%, transparent);
+  --surface-card-hover: var(--vui-surface-row-hover);
+  --surface-raised: var(--vui-surface-raised);
+  --surface-input: var(--vui-surface-workspace);
+  --surface-input-strong: var(--vui-surface-base);
+  --surface-code: var(--vui-surface-workspace);
+  --surface-active-neutral: var(--vui-surface-row-hover);
+  --surface-overlay: color-mix(in srgb, var(--vui-surface-base) 66%, transparent);
+  --surface-resize-track: var(--vui-border-subtle);
+  --surface-scrollbar-track: var(--vui-surface-workspace);
+  --shadow-soft: 0 12px 24px rgba(0, 0, 0, 0.2);
+  --shadow-strong: 0 22px 52px rgba(0, 0, 0, 0.28);
   --vui-control-hover-bg: color-mix(in srgb, var(--vui-control-muted) 95%, var(--fg-primary) 5%);
   --vui-control-hover-border: color-mix(in srgb, var(--vui-border-subtle) 82%, var(--fg-primary) 8%);
   --vui-control-hover-fg: var(--fg-primary);
@@ -92,8 +97,8 @@
 
   --vui-gradient-route-soft: linear-gradient(
     180deg,
-    color-mix(in srgb, var(--surface-panel) 92%, transparent),
-    color-mix(in srgb, var(--surface-card) 88%, transparent)
+    color-mix(in srgb, var(--vui-surface-panel) 92%, transparent),
+    color-mix(in srgb, var(--vui-surface-card) 88%, transparent)
   );
   --vui-gradient-route-accent: linear-gradient(
     90deg,
@@ -102,8 +107,8 @@
   );
   --vui-gradient-route-overlay: linear-gradient(
     180deg,
-    color-mix(in srgb, var(--surface-page) 92%, transparent),
-    color-mix(in srgb, var(--surface-panel) 78%, transparent)
+    color-mix(in srgb, var(--vui-surface-workspace) 92%, transparent),
+    color-mix(in srgb, var(--vui-surface-panel) 78%, transparent)
   );
   --vui-gradient-background-readable: linear-gradient(
     180deg,
@@ -136,8 +141,8 @@
   --accent-warning: var(--state-warning);
   --accent-danger: var(--state-error);
   --accent-cool-contrast: #061512;
-  --surface-base: var(--surface-page);
-  --surface-elevated: var(--surface-raised);
+  --surface-base: var(--vui-surface-base);
+  --surface-elevated: var(--vui-surface-raised);
   --surface-toolbar: var(--vui-surface-toolbar);
   --border-subtle: var(--vui-border-subtle);
 
@@ -206,27 +211,8 @@
   --source-workbench-card: var(--bg-canvas);
   --source-workbench-panel: var(--bg-canvas);
 
-  --surface-page: #f7f8fa;
-  --surface-header: rgba(255, 255, 255, 0.94);
-  --surface-panel: #ffffff;
-  --surface-panel-muted: #f1f4f8;
-  --surface-panel-strong: #ffffff;
-  --surface-panel-hover: #eef2f7;
-  --surface-card: #ffffff;
-  --surface-card-muted: #f4f7fb;
-  --surface-card-subtle: #f8fafc;
-  --surface-card-hover: #eef2f7;
-  --surface-raised: #ffffff;
-  --surface-input: #ffffff;
-  --surface-input-strong: #ffffff;
-  --surface-code: #f7f7f8;
-  --surface-active-neutral: #eef4ff;
-  --surface-overlay: rgba(15, 23, 42, 0.18);
-  --surface-resize-track: rgba(15, 23, 42, 0.1);
-  --surface-scrollbar-track: #f1f1f3;
-  --shadow-soft: 0 12px 28px rgba(15, 23, 42, 0.08);
-  --shadow-strong: 0 20px 52px rgba(15, 23, 42, 0.12);
-  --vui-surface-base: var(--surface-page);
+  /* VUI surface contract — sole literal source of truth (light). */
+  --vui-surface-base: #f7f8fa;
   --vui-surface-rail: #ffffff;
   --vui-surface-panel: #ffffff;
   --vui-surface-raised: #ffffff;
@@ -234,7 +220,7 @@
   --vui-surface-chat-panel: #ffffff;
   --vui-surface-glass: color-mix(in srgb, var(--vui-surface-panel) 76%, transparent);
   --vui-surface-toolbar: var(--vui-surface-raised);
-  --vui-surface-row: var(--surface-card-muted);
+  --vui-surface-row: #f4f7fb;
   --vui-surface-workspace: var(--vui-surface-base);
   --vui-surface-region: var(--vui-surface-rail);
   --vui-surface-card: var(--vui-surface-panel);
@@ -243,13 +229,35 @@
   --vui-surface-popover: var(--vui-surface-glass);
   --vui-row-hover-bg: color-mix(in srgb, var(--vui-surface-row) 97%, var(--fg-primary) 3%);
   --vui-surface-row-hover: var(--vui-row-hover-bg);
-  --vui-control-muted: color-mix(in srgb, var(--surface-card-muted) 86%, var(--surface-card));
+  --vui-control-muted: color-mix(in srgb, var(--vui-surface-row) 86%, var(--vui-surface-panel));
   --vui-control-hover-bg: color-mix(in srgb, var(--vui-control-muted) 97%, var(--fg-primary) 3%);
   --vui-control-hover-border: color-mix(in srgb, var(--vui-border-subtle) 78%, var(--fg-primary) 8%);
   --vui-control-hover-fg: var(--fg-primary);
   --vui-control-hover-shadow: none;
   --vui-control-muted-hover: var(--vui-control-hover-bg);
   --vui-border-subtle: color-mix(in srgb, var(--border-hairline) 92%, transparent);
+
+  /* Deprecated legacy surface aliases (light) — always point at VUI. */
+  --surface-page: var(--vui-surface-workspace);
+  --surface-header: color-mix(in srgb, var(--vui-surface-panel) 94%, transparent);
+  --surface-panel: var(--vui-surface-panel);
+  --surface-panel-muted: var(--vui-surface-region);
+  --surface-panel-strong: var(--vui-surface-raised);
+  --surface-panel-hover: var(--vui-surface-row-hover);
+  --surface-card: var(--vui-surface-card);
+  --surface-card-muted: var(--vui-surface-row);
+  --surface-card-subtle: color-mix(in srgb, var(--vui-surface-row) 70%, transparent);
+  --surface-card-hover: var(--vui-surface-row-hover);
+  --surface-raised: var(--vui-surface-raised);
+  --surface-input: var(--vui-surface-panel);
+  --surface-input-strong: var(--vui-surface-panel);
+  --surface-code: var(--vui-surface-workspace);
+  --surface-active-neutral: var(--vui-surface-row-hover);
+  --surface-overlay: color-mix(in srgb, var(--vui-surface-base) 18%, transparent);
+  --surface-resize-track: var(--vui-border-subtle);
+  --surface-scrollbar-track: var(--vui-surface-workspace);
+  --shadow-soft: 0 12px 28px rgba(15, 23, 42, 0.08);
+  --shadow-strong: 0 20px 52px rgba(15, 23, 42, 0.12);
   --vui-border-strong: rgba(15, 23, 42, 0.16);
   --vui-status-info-bg: color-mix(in srgb, var(--accent-cool) 9%, transparent);
   --vui-status-info-fg: var(--accent-cool);
@@ -284,8 +292,8 @@
 
   --vui-gradient-route-soft: linear-gradient(
     180deg,
-    color-mix(in srgb, var(--surface-panel) 96%, transparent),
-    color-mix(in srgb, var(--surface-card-muted) 72%, var(--surface-card))
+    color-mix(in srgb, var(--vui-surface-panel) 96%, transparent),
+    color-mix(in srgb, var(--vui-surface-row) 72%, var(--vui-surface-card))
   );
   --vui-gradient-route-accent: linear-gradient(
     90deg,
@@ -294,8 +302,8 @@
   );
   --vui-gradient-route-overlay: linear-gradient(
     180deg,
-    color-mix(in srgb, var(--surface-page) 96%, transparent),
-    color-mix(in srgb, var(--surface-panel) 88%, transparent)
+    color-mix(in srgb, var(--vui-surface-workspace) 96%, transparent),
+    color-mix(in srgb, var(--vui-surface-panel) 88%, transparent)
   );
   --vui-gradient-background-readable: linear-gradient(
     180deg,
@@ -328,8 +336,8 @@
   --accent-warning: var(--state-warning);
   --accent-danger: var(--state-error);
   --accent-cool-contrast: #ffffff;
-  --surface-base: var(--surface-page);
-  --surface-elevated: var(--surface-raised);
+  --surface-base: var(--vui-surface-base);
+  --surface-elevated: var(--vui-surface-raised);
   --surface-toolbar: var(--vui-surface-toolbar);
   --border-subtle: var(--vui-border-subtle);
 

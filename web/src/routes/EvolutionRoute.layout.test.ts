@@ -667,7 +667,7 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeStyles.resizeHandle).toContain("bg-transparent");
     expect(routeStyles.resizeHandle).toContain("before:absolute");
     expect(routeStyles.resizeHandle).toContain("before:w-[3px]");
-    expect(routeStyles.resizeHandle).toContain("before:bg-[var(--surface-resize-track)]");
+    expect(routeStyles.resizeHandle).toContain("before:bg-[var(--vui-border-subtle)]");
     expect(routeStyles.resizeHandle).toContain("hover:before:bg-[color-mix(in_srgb,var(--accent-warm)_52%,transparent)]");
     expect(routeStyles.resizeHandle).toContain("focus-visible:before:bg-[color-mix(in_srgb,var(--accent-warm)_52%,transparent)]");
     expect(routeStyles.resizeHandle).not.toContain("[background:color-mix(in_srgb,_var(--accent-warm)_52%,_transparent)]");

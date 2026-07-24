@@ -9628,10 +9628,10 @@ export function TeamsRoute({
                     className={styles.dangerButton}
                     onClick={() => selectedTeam?.teamId && archiveTeamMutation.mutate(selectedTeam.teamId)}
                     disabled={!selectedTeam || selectedTeamArchivePending || Boolean(selectedTeamArchiveDisabledReason)}
-                    title={selectedTeamArchiveDisabledReason || undefined}
+                    title={selectedTeamArchiveDisabledReason || (lang === "zh" ? "归档当前团队" : "Archive this team")}
                   >
                     <Archive size={14} />
-                    {selectedTeamArchiveDisabledReason ? (lang === "zh" ? "系统团队不可归档" : "System team") : (lang === "zh" ? "归档" : "Archive")}
+                    {lang === "zh" ? "归档" : "Archive"}
                   </VNativeButton>
                 </>
               )}

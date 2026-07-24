@@ -3,7 +3,7 @@ const headerClass = "hidden";
 const controlButtonClass =
   "inline-flex min-h-[26px] w-fit max-w-full items-center justify-center gap-1.5 whitespace-nowrap rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-soft)_76%,transparent)] bg-[color-mix(in_srgb,var(--vui-control-muted)_72%,transparent)] px-2 py-[3px] [font-size:var(--vui-font-xs)] text-vui-fg-secondary hover:border-[color-mix(in_srgb,var(--border-strong)_78%,transparent)] hover:bg-[color-mix(in_srgb,var(--vui-surface-row-hover)_82%,transparent)] hover:text-vui-fg-primary disabled:opacity-55";
 const fieldSurfaceClass =
-  "rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-soft)_76%,transparent)] bg-[color-mix(in_srgb,var(--surface-input-strong)_86%,transparent)]";
+  "rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-soft)_76%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-workspace)_86%,transparent)]";
 const rowButtonSurfaceClass =
   "block !h-auto w-full rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-soft)_74%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_78%,transparent)] p-2 text-left text-vui-fg-primary hover:border-[color-mix(in_srgb,var(--border-strong)_78%,transparent)] hover:bg-[color-mix(in_srgb,var(--vui-surface-row-hover)_84%,transparent)]";
 const detailSurfaceClass =
@@ -34,7 +34,7 @@ const skillButtonBaseClass = [
   rowButtonSurfaceClass,
   "!grid grid-cols-[10px_minmax(0,1fr)_auto] items-center gap-2",
 ].join(" ");
-const skillButtonActiveClass = "border-[color-mix(in_srgb,var(--accent-warm)_30%,transparent)] bg-[var(--surface-active-neutral)] shadow-[var(--vui-shadow-inset-accent)]";
+const skillButtonActiveClass = "border-[color-mix(in_srgb,var(--accent-warm)_30%,transparent)] bg-[var(--vui-surface-row-hover)] shadow-[var(--vui-shadow-inset-accent)]";
 const sourceDotClass = "h-2 w-2 rounded-full bg-[var(--accent-cool)] data-[source=agents]:bg-[var(--accent-warm)] data-[source=other]:bg-vui-fg-tertiary";
 const skillCopyClass = "grid min-w-0 gap-0.5";
 const skillNameClass = "min-w-0 truncate text-vui-fg-primary";

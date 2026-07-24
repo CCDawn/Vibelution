@@ -7,3 +7,12 @@
 @source "../../routes/Evolution*.styles.ts";
 @source "../../routes/SelfEvolutionTrack.tsx";
 @source "../../routes/SelfEvolutionTrack.styles.ts";
+/* Supervised evolution toolbar + review chrome are mounted from EvolutionRoute
+   (and shared with SupervisedReviewRoute). Without these sources the flow tabs
+   collapse into an unstyled vertical stack and leave a tall empty glass band. */
+@source "../../routes/SupervisedWorkspaceControls.tsx";
+@source "../../routes/SupervisedWorkspaceControls.styles.ts";
+@source "../../routes/SupervisedWorkspaceTabs.tsx";
+@source "../../routes/SupervisedWorkspaceTabs.styles.ts";
+@source "../../routes/SupervisedWorktreeReviewPanel.tsx";
+@source "../../routes/SupervisedWorktreeReviewPanel.styles.ts";

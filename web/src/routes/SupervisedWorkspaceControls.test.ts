@@ -8,6 +8,10 @@ const controlsStylesSource = readFileSync(new URL("./SupervisedWorkspaceControls
 const tabsSource = readFileSync(new URL("./SupervisedWorkspaceTabs.tsx", import.meta.url), "utf-8");
 const tabsStylesSource = readFileSync(new URL("./SupervisedWorkspaceTabs.styles.ts", import.meta.url), "utf-8");
 const evolutionRouteSource = readFileSync(new URL("./EvolutionRoute.tsx", import.meta.url), "utf-8");
+const evolutionCssEntrySource = readFileSync(
+  new URL("../design/route-css/evolution.tailwind.css", import.meta.url),
+  "utf-8",
+);
 const dictionarySource = readFileSync(new URL("../i18n/dictionary.ts", import.meta.url), "utf-8");
 
 describe("supervised workspace controls", () => {
@@ -117,5 +121,18 @@ describe("supervised workspace controls", () => {
     expect(evolutionRouteSource).toContain("activeWorkflowStepId={supervisedSelectedWorkflowStepId}");
     expect(evolutionRouteSource).toContain("onWorkflowStepSelect={handleSupervisedWorkflowStepSelect}");
     expect(evolutionRouteSource).toContain("tabSummaries={supervisedTabSummaries}");
+  });
+
+  it("keeps supervised workspace style maps in the Evolution lazy CSS entry", () => {
+    // EvolutionRoute mounts SupervisedWorkspaceControls/Tabs; if those style maps are only
+    // scanned by workbench-secondary CSS, supervised evolution loads without layout utilities
+    // and the flow tabs collapse into a tall unstyled vertical stack.
+    expect(evolutionRouteSource).toContain('import "../design/route-css/evolution.tailwind.css"');
+    expect(evolutionCssEntrySource).toContain('SupervisedWorkspaceControls.tsx');
+    expect(evolutionCssEntrySource).toContain('SupervisedWorkspaceControls.styles.ts');
+    expect(evolutionCssEntrySource).toContain('SupervisedWorkspaceTabs.tsx');
+    expect(evolutionCssEntrySource).toContain('SupervisedWorkspaceTabs.styles.ts');
+    expect(evolutionCssEntrySource).toContain('SupervisedWorktreeReviewPanel.tsx');
+    expect(evolutionCssEntrySource).toContain('SupervisedWorktreeReviewPanel.styles.ts');
   });
 });
