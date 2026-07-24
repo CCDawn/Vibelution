@@ -384,6 +384,14 @@ const styles: Record<string, string> = {
     "challengeProgramResultCard min-w-0 scroll-mt-4 grid content-start gap-2 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] p-3 [&>header]:flex [&>header]:flex-wrap [&>header]:items-center [&>header]:justify-between [&>header]:gap-2 [&>p]:m-0 [&>p]:[font-size:var(--vui-font-sm)] [&>p]:text-[var(--fg-secondary)]",
   challengeProgramQuestionList:
     "challengeProgramQuestionList min-w-0 !flex flex-wrap gap-1.5 [&>span]:inline-flex [&>span]:items-center [&>span]:rounded-full [&>span]:border [&>span]:border-[var(--vui-border-subtle)] [&>span]:bg-[var(--vui-surface-panel)] [&>span]:px-2 [&>span]:py-1 [&>span]:font-[760] [&>span]:text-[var(--fg-primary)]",
+  challengeWorkspaceBody:
+    "challengeWorkspaceBody min-w-0 !flex min-h-0 flex-col !gap-0 !overflow-auto !p-0 [scrollbar-gutter:stable]",
+  challengeWorkspaceContextHidden:
+    "challengeWorkspaceContextHidden hidden !hidden",
+  challengeWorkspaceInspector:
+    "challengeWorkspaceInspector min-w-0 !overflow-hidden !border-0 !bg-transparent",
+  challengeWorkspaceLayout:
+    "challengeWorkspaceLayout min-w-0 !overflow-hidden !border-0 !bg-[#f3f5f8] !p-0",
   researchStageGrid:
     "researchStageGrid min-w-0 grid items-stretch gap-3 grid-cols-[repeat(auto-fit,minmax(280px,1fr))]",
   researchStageHeroPanel: `researchStageHeroPanel min-w-0 ${vuiFlatPanelClass} p-2`,

@@ -1199,6 +1199,10 @@ describe("TeamsRoute layout contract", () => {
     expect(researchWorkspaceModelSource).toContain("执行批次 / 结果评估 / 消融归因 / 优化迭代");
     expect(routeSource).toContain("lifecycleProjection");
     expect(routeSource).toContain("challengeProgramProjection");
+    expect(routeSource).toContain("ChallengeCupOperationsWorkspace");
+    expect(routeSource).toContain("challengeCupResearchTeamSelected");
+    expect(routeSource).toContain("challengeWorkspaceContextHidden");
+    expect(routeSource).toContain("challengeWorkspaceBody");
     expect(routeSource).toContain("MVP 完整样例");
     expect(routeSource).toContain("3 题通用性测试");
     expect(routeSource).toContain("后续规模化与深研");
@@ -1994,6 +1998,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.challengeProgramResultGrid).toBeTypeOf("string");
     expect(routeStyles.challengeProgramResultCard).toBeTypeOf("string");
     expect(routeStyles.challengeProgramQuestionList).toBeTypeOf("string");
+    expect(routeStyles.challengeWorkspaceBody).toBeTypeOf("string");
+    expect(routeStyles.challengeWorkspaceContextHidden).toBeTypeOf("string");
+    expect(routeStyles.challengeWorkspaceInspector).toBeTypeOf("string");
+    expect(routeStyles.challengeWorkspaceLayout).toBeTypeOf("string");
     expect(routeStyles.researchStageAgentSummary).toBeTypeOf("string");
     expect(routeStyles.researchStageAgentSummaryLoading).toBeTypeOf("string");
     expect(routeStyles.researchStageAgentSummaryReady).toBeTypeOf("string");
