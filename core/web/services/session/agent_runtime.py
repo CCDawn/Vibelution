@@ -169,6 +169,11 @@ def _session_llm_model_choices() -> list[dict[str, Any]]:
 def _session_agent_id_snapshot(session_id: str) -> str:
     s = _service()
     normalized_session_id = str(session_id or "").strip()
+    if not s._ensure_session_conversation_record(
+        normalized_session_id,
+        source="session.agent_id.snapshot",
+    ):
+        raise s.SessionNotFoundError(f"Session not found: {normalized_session_id}")
     with s._CHAT_STATE_LOCK:
         payload = s.load_chat_state(s.PROJECT_ROOT)
         conversation = s._find_conversation_entry(payload, normalized_session_id)
@@ -179,6 +184,11 @@ def _session_agent_id_snapshot(session_id: str) -> str:
 
 def get_session_llm_options(session_id: str) -> dict[str, Any]:
     s = _service()
+    if not s._ensure_session_conversation_record(
+        str(session_id or "").strip(),
+        source="session.llm_options",
+    ):
+        raise s.SessionNotFoundError(f"Session not found: {str(session_id or '').strip()}")
     current_reasoning_effort = s._session_reasoning_effort_snapshot(session_id)
     model = s._session_fixed_model_choice(session_id)
     return {

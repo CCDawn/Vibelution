@@ -1330,6 +1330,140 @@ def _ensure_agent_directory_conversation_materialized(
         return changed
 
 
+def _ensure_session_conversation_record(
+    session_id: str,
+    *,
+    source: str,
+) -> bool:
+    """Ensure chat_state has a conversation row for this session.
+
+    Used by mutations (e.g. reasoning effort) that only write chat_state, while
+    list/detail can surface agent-directory or workspace-backed sessions that
+    were never (or no longer) indexed in chat_state.
+    """
+    s = _service()
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return False
+    s._ensure_agent_directory_conversation_materialized(
+        normalized_session_id,
+        source=source,
+    )
+    with s._CHAT_STATE_LOCK:
+        payload = s.load_chat_state(s.PROJECT_ROOT)
+        if s._find_conversation_entry(payload, normalized_session_id) is not None:
+            return True
+        recovered = s._recover_missing_conversation_from_workspace_locked(
+            payload,
+            normalized_session_id,
+            source=source,
+        )
+        if recovered:
+            s.save_chat_state(s.PROJECT_ROOT, payload)
+            s._invalidate_session_list_cache()
+        return recovered
+
+
+def _recover_agent_id_from_session_journal(session_id: str) -> str:
+    """Best-effort agentId from turn_journal when chat_state entry is missing."""
+    s = _service()
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return ""
+    try:
+        workspace = s._ensure_session_workspace(normalized_session_id)
+    except Exception:
+        return ""
+    journal_path = workspace / "turn_journal.jsonl"
+    if not journal_path.is_file():
+        return ""
+    try:
+        # Only scan a bounded prefix — agentId is typically on turn_started.
+        with journal_path.open("r", encoding="utf-8", errors="replace") as handle:
+            for index, line in enumerate(handle):
+                if index >= 40:
+                    break
+                text = str(line or "").strip()
+                if not text:
+                    continue
+                try:
+                    event = json.loads(text)
+                except Exception:
+                    continue
+                if not isinstance(event, dict):
+                    continue
+                payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+                for raw in (
+                    payload.get("agentId"),
+                    payload.get("agent_id"),
+                    event.get("agentId"),
+                    event.get("agent_id"),
+                ):
+                    agent_id = str(raw or "").strip()
+                    if agent_id:
+                        return agent_id
+    except Exception:
+        return ""
+    return ""
+
+
+def _recover_missing_conversation_from_workspace_locked(
+    payload: dict[str, Any],
+    session_id: str,
+    *,
+    source: str,
+) -> bool:
+    """Append a chat_state conversation recovered from on-disk session workspace."""
+    s = _service()
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return False
+    if s._find_conversation_entry(payload, normalized_session_id) is not None:
+        return False
+    agent_id = s._recover_agent_id_from_session_journal(normalized_session_id)
+    agent = s.get_agent(agent_id, include_archived=True) if agent_id else None
+    if isinstance(agent, dict) and agent:
+        conversation = s._agent_directory_conversation_record(
+            agent,
+            session_id=normalized_session_id,
+        )
+    else:
+        # Bare conversation so session-scoped settings (reasoning effort) can persist.
+        conversation = s._make_empty_conversation(
+            normalized_session_id,
+            title=normalized_session_id,
+            timestamp=s._now_timestamp(),
+        )
+        if agent_id:
+            conversation["agent_id"] = agent_id
+            conversation["agentId"] = agent_id
+    conversations = payload.get("conversations")
+    if not isinstance(conversations, list):
+        conversations = []
+        payload["conversations"] = conversations
+    conversations.append(conversation)
+    payload["version"] = int(payload.get("version") or s.CHAT_STATE_VERSION)
+    payload["updated_at"] = str(conversation.get("updated_at") or s._now_timestamp())
+    try:
+        s.record_runtime_scene_event(
+            "conversation",
+            "chat_state",
+            "conversation.workspace_recovered",
+            level="info",
+            outcome="recovered",
+            message="Recovered missing chat_state conversation from session workspace.",
+            fields={
+                "sessionId": normalized_session_id,
+                "agentId": agent_id,
+                "source": str(source or "").strip()[:64],
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        pass
+    return True
+
+
 def _materialize_agent_directory_conversation_locked(
     payload: dict[str, Any],
     session_id: str,

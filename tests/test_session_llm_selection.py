@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import json
 
 import pytest
 from fastapi.testclient import TestClient
@@ -141,6 +142,7 @@ def _model_choices() -> list[dict]:
 
 
 def test_session_llm_options_expose_current_model_and_effort(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(session_service, "_ensure_session_conversation_record", lambda *_a, **_k: True)
     monkeypatch.setattr(session_service, "_session_reasoning_effort_snapshot", lambda _session_id: "high")
     monkeypatch.setattr(session_service, "_session_fixed_model_choice", lambda _session_id: _model_choices()[0])
     monkeypatch.setattr(
@@ -155,6 +157,85 @@ def test_session_llm_options_expose_current_model_and_effort(monkeypatch: pytest
     assert payload["currentReasoningEffort"] == "high"
     assert payload["model"]["modelRef"] == "ai-pixel/gpt-5.6-luna"
     assert "models" not in payload
+
+
+def test_session_reasoning_effort_recovers_missing_chat_state_from_workspace(monkeypatch: pytest.MonkeyPatch, tmp_path):
+    """Workspace-backed sessions missing chat_state rows should rematerialize before update."""
+    state = {"conversations": [], "version": 1}
+    session_id = "session-orphan"
+    agent_id = "agent-orphan"
+    journal = tmp_path / "turn_journal.jsonl"
+    journal.write_text(
+        json.dumps(
+            {
+                "eventType": "turn_started",
+                "sessionId": session_id,
+                "payload": {"agentId": agent_id},
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    def save_state(_project_root, payload):
+        state.clear()
+        state.update(copy.deepcopy(payload))
+
+    monkeypatch.setattr(session_service, "load_chat_state", lambda _project_root: copy.deepcopy(state))
+    monkeypatch.setattr(session_service, "save_chat_state", save_state)
+    monkeypatch.setattr(session_service, "record_runtime_scene_event", lambda *_a, **_k: None)
+    monkeypatch.setattr(session_service, "_invalidate_session_list_cache", lambda: None)
+    monkeypatch.setattr(session_service, "_is_session_running", lambda _sid: False)
+    monkeypatch.setattr(
+        session_service,
+        "_ensure_agent_directory_conversation_materialized",
+        lambda *_a, **_k: False,
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_ensure_session_workspace",
+        lambda _sid: tmp_path,
+    )
+    monkeypatch.setattr(
+        session_service,
+        "get_agent",
+        lambda aid, include_archived=False: {
+            "agentId": agent_id,
+            "displayName": "orphan-agent",
+            "agentCode": "orphan",
+            "directSessionId": "",
+            "status": "active",
+            "updatedAt": "2026-07-24T00:00:00Z",
+            "createdAt": "2026-07-24T00:00:00Z",
+        } if aid == agent_id else None,
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_agent_directory_conversation_record",
+        lambda agent, *, session_id: {
+            "conversation_id": session_id,
+            "agent_id": agent["agentId"],
+            "agentId": agent["agentId"],
+            "title": agent["displayName"],
+            "updated_at": "2026-07-24T00:00:00Z",
+        },
+    )
+    monkeypatch.setattr(session_service, "_session_fixed_model_choice", lambda _sid: _model_choices()[0])
+    monkeypatch.setattr(session_service, "get_session_llm_options", lambda sid: {
+        "sessionId": sid,
+        "currentModelId": "ai-pixel/gpt-5.6-luna",
+        "currentReasoningEffort": "high",
+        "model": _model_choices()[0],
+    })
+
+    payload = session_service.update_session_reasoning_effort(session_id, reasoning_effort="high")
+
+    assert payload["currentReasoningEffort"] == "high"
+    assert any(item.get("conversation_id") == session_id for item in state["conversations"])
+    recovered = next(item for item in state["conversations"] if item["conversation_id"] == session_id)
+    assert recovered["reasoning_effort"] == "high"
+    assert recovered.get("agentId") == agent_id or recovered.get("agent_id") == agent_id
 
 
 def test_agent_model_choices_preserve_model_specific_reasoning_efforts():
