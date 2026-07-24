@@ -8,6 +8,7 @@ can be routed into an ephemeral sandbox while formal state stays read-only.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from threading import RLock
 import uuid
@@ -329,10 +330,24 @@ def seeded_sandbox_workspace_path(project_root: Path, *parts: str) -> Path:
     if not sandbox_path.exists() and formal_path.exists():
         sandbox_path.parent.mkdir(parents=True, exist_ok=True)
         if formal_path.is_dir():
-            shutil.copytree(formal_path, sandbox_path)
+            shutil.copytree(_filesystem_path(formal_path), _filesystem_path(sandbox_path))
         else:
-            shutil.copy2(formal_path, sandbox_path)
+            shutil.copy2(_filesystem_path(formal_path), _filesystem_path(sandbox_path))
     return sandbox_path
+
+
+def _filesystem_path(path: Path) -> Path:
+    """Return a Windows extended-length path for filesystem-only operations."""
+
+    resolved = Path(path).resolve()
+    if os.name != "nt":
+        return resolved
+    value = str(resolved)
+    if value.startswith("\\\\?\\"):
+        return resolved
+    if value.startswith("\\\\"):
+        return Path(f"\\\\?\\UNC\\{value[2:]}")
+    return Path(f"\\\\?\\{value}")
 
 
 def sandboxed_project_root(project_root: Path) -> Path:

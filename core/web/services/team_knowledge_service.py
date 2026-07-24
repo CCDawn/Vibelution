@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import re
 import shutil
 import threading
@@ -3884,10 +3885,19 @@ def _write_owner_inbox_source_file(
     source_dir = _owner_inbox_source_dir(owner, inbox_source_id)
     path = source_dir / filename
     path.parent.mkdir(parents=True, exist_ok=True)
+    write_path = path
+    if os.name == "nt":
+        resolved_path = str(path.resolve())
+        if not resolved_path.startswith("\\\\?\\"):
+            if resolved_path.startswith("\\\\"):
+                resolved_path = f"\\\\?\\UNC\\{resolved_path[2:]}"
+            else:
+                resolved_path = f"\\\\?\\{resolved_path}"
+        write_path = Path(resolved_path)
     if str(original_content or ""):
-        path.write_text(str(original_content), encoding="utf-8")
+        write_path.write_text(str(original_content), encoding="utf-8")
     else:
-        path.write_text(
+        write_path.write_text(
             json.dumps(
                 {
                     "schemaVersion": SCHEMA_VERSION,
