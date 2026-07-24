@@ -150,7 +150,7 @@ const styles = {
   content:
     "vui-routes-configroute content flex min-h-0 min-w-0 h-full flex-col overflow-hidden !bg-vui-surface-panel",
   pageViewport:
-    "vui-routes-configroute pageViewport [display:grid] [align-content:start] [gap:12px] min-w-0 min-h-0 overflow-y-auto overflow-x-hidden [padding:12px] [scrollbar-gutter:stable] [&:has(>_.providerModelsLayout)]:[align-content:stretch] [&:has(>_.providerModelsLayout)]:[grid-template-rows:minmax(0,1fr)]",
+    "vui-routes-configroute pageViewport [display:grid] [align-content:start] [gap:12px] min-w-0 min-h-0 overflow-y-auto overflow-x-hidden [padding:12px] [scrollbar-gutter:stable] [&:has(>_.providerModelsLayout)]:[align-content:stretch] [&:has(>_.providerModelsLayout)]:[grid-template-rows:minmax(0,1fr)] [&:has(>_.notice):has(>_.providerModelsLayout)]:[grid-template-rows:auto_minmax(0,1fr)]",
   contentModels:
     "vui-routes-configroute contentModels [align-content:stretch] [grid-template-rows:minmax(0,1fr)_auto] [height:100%] [max-height:calc(100dvh_-_76px)] [min-width:0] [&:has(>_.notice)]:[grid-template-rows:auto_minmax(0,1fr)_auto] [&>_.configDiscoverySection:last-child]:[display:grid] [&>_.configDiscoverySection:last-child]:[grid-template-rows:auto_auto] max-[720px]:[max-height:none] max-[720px]:[height:auto] max-[720px]:[overflow:visible]",
   providerModelsLayout:
@@ -296,7 +296,7 @@ const styles = {
   modelScenarioPicker:
     "vui-routes-configroute modelScenarioPicker [display:grid] [gap:6px] [margin:7px_9px_0] [&>_span]:[color:var(--fg-tertiary)] [&>_span]:[font-size:var(--vui-font-xs)] [&>_span]:[font-weight:700] [&>_span]:[text-transform:uppercase] [&>_span]:[letter-spacing:0.06em]",
   notice:
-    "vui-routes-configroute notice [margin:0] [min-width:0] [color:var(--fg-secondary)] [line-height:1.38] [overflow-wrap:anywhere] [padding:7px_9px] [border-radius:8px] [border:1px_solid_var(--border-hairline)] [background:var(--vui-surface-row)]",
+    "vui-routes-configroute notice relative z-10 m-0 min-w-0 shrink-0 [color:var(--fg-secondary)] [line-height:1.38] [overflow-wrap:anywhere] [padding:7px_9px] [border-radius:8px] [border:1px_solid_var(--border-hairline)] [background:var(--vui-surface-row)]",
   noticeError:
     "vui-routes-configroute noticeError [color:var(--state-error)] [background:color-mix(in_srgb,var(--state-error)_14%,transparent)] [border-color:color-mix(in_srgb,var(--state-error)_24%,transparent)]",
   noticeSuccess:
