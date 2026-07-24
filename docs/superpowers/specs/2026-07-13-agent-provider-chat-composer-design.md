@@ -83,6 +83,8 @@ Agent 模型选择器只读取 `list_llm_model_options()` 产生的已固定模�
 
 OpenCode 对自定义 Provider 使用稳定的 Provider key 保存 `baseURL`、凭据和协议，在 `provider.models` 下声明多个模型。完整模型 ID 是 `provider_id/model_id`，Agent 直接绑定这个完整 ID。模型可以拥有独立的 `options` 和 `variants`，推理强度属于模型/variant，而不是整个中转站的统一属性。
 
+**推理强度后续确认（2026-07-24）：** 以 OpenCode 的 per-model `variants`/`options` 为中转站主 ADAPT 对象；字段映射、显示门闩、实现工单见 `2026-07-24-reasoning-effort-protocol-contract-confirmed.md`。不新增 OpenCode 运行时依赖。
+
 参考：
 
 - https://opencode.ai/docs/providers/
@@ -94,6 +96,8 @@ OpenCode 对自定义 Provider 使用稳定的 Provider key 保存 `baseURL`、�
 
 Hermes 对命名 custom provider 保存 endpoint 和凭据，可从 `/models` 或 `/v1/models` 动态发现模型并短期缓存。交互选择以 Provider 和模型共同确定目标。其配置目录、实时目录和内置目录存在多源合并，官方仓库已有目录不一致问题，因此 Vibelution 只参考动态发现，不复制多事实源行为。
 
+**推理强度后续确认（2026-07-24）：** 可 ADAPT 会话级 effort 与 `api_mode` 随有效模型重算；**不采用**全局 `agent.reasoning_effort` 作为多模型中转唯一真相。细则见 `2026-07-24-reasoning-effort-protocol-contract-confirmed.md`。
+
 参考：
 
 - https://github.com/NousResearch/hermes-agent/blob/main/website/docs/integrations/providers.md
@@ -101,6 +105,7 @@ Hermes 对命名 custom provider 保存 endpoint 和凭据，可从 `/models` �
 - https://github.com/NousResearch/hermes-agent/blob/main/hermes_cli/model_switch.py
 - https://github.com/NousResearch/hermes-agent/issues/6799
 - https://github.com/NousResearch/hermes-agent/blob/main/LICENSE
+- https://hermes-agent.nousresearch.com/docs/user-guide/configuring-models
 
 ### 4.3 CC Switch
 
@@ -341,6 +346,8 @@ Agent llmReasoningEffort dialogue default
 - driver 可对上游枚举做显式、可测试的有损映射，例如上游没有 `max` 时映射到 `xhigh`，但必须在 capability projection 中暴露 effective value，不能静默伪装。
 
 推理参数适配属于 driver/model capability 层，不允许散落在 Composer、Agent service 或业务调用方中。真实请求日志只记录 requested/effective effort、adapter 和 reasonCode，不记录完整请求体。
+
+**2026-07-24 确认收紧：** 能力来源优先级、运营声明即可显示（不必先 probe）、无合同绝不名称启发式注入、中转站 R1–R3、OpenCode variants 字段映射与实现工单，见 `2026-07-24-reasoning-effort-protocol-contract-confirmed.md`。本设计 §6.3 / §8.2 仍为架构背景；冲突时以确认稿为准。
 
 会话 API 收敛为只修改 `reasoningEffort`。现有通过 session endpoint 同时修改 `modelId` 和 Agent metadata 的行为必须移除。
 
