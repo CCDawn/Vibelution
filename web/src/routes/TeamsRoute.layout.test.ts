@@ -1999,9 +1999,13 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.challengeProgramResultCard).toBeTypeOf("string");
     expect(routeStyles.challengeProgramQuestionList).toBeTypeOf("string");
     expect(routeStyles.challengeWorkspaceBody).toBeTypeOf("string");
+    expect(routeStyles.challengeWorkspaceBody).toContain("w-full");
+    expect(routeStyles.challengeWorkspaceBody).toContain("flex-1");
     expect(routeStyles.challengeWorkspaceContextHidden).toBeTypeOf("string");
     expect(routeStyles.challengeWorkspaceInspector).toBeTypeOf("string");
+    expect(routeStyles.challengeWorkspaceInspector).toContain("w-full");
     expect(routeStyles.challengeWorkspaceLayout).toBeTypeOf("string");
+    expect(routeStyles.challengeWorkspaceLayout).toContain("!grid-cols-[minmax(0,1fr)]");
     expect(routeStyles.researchStageAgentSummary).toBeTypeOf("string");
     expect(routeStyles.researchStageAgentSummaryLoading).toBeTypeOf("string");
     expect(routeStyles.researchStageAgentSummaryReady).toBeTypeOf("string");

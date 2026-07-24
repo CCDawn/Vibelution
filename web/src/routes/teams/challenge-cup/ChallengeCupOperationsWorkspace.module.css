@@ -29,6 +29,8 @@
   min-height: 100%;
   color: var(--text);
   background: var(--bg);
+  container-type: inline-size;
+  container-name: challenge-workspace;
 }
 
 .workspace,
@@ -209,9 +211,10 @@
 }
 
 .page-frame {
-  width: min(1440px, 100%);
-  margin: 0 auto;
-  padding: 18px 24px 56px;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: clamp(16px, 1.35vw, 28px) clamp(18px, 1.75vw, 36px) 56px;
 }
 
 .breadcrumbs {
@@ -1213,7 +1216,7 @@
   }
 }
 
-@media (max-width: 1080px) {
+@container challenge-workspace (max-width: 1080px) {
   .app-header {
     grid-template-columns: auto minmax(0, 1fr) auto;
   }
@@ -1260,6 +1263,31 @@
   .review-row > div:nth-child(4),
   .review-row > div:nth-child(5) {
     display: none;
+  }
+}
+
+@container challenge-workspace (min-width: 1600px) {
+  .page-frame {
+    padding-inline: clamp(32px, 2.25vw, 48px);
+  }
+
+  .program-header {
+    padding: 22px 26px;
+  }
+
+  .status-strip article {
+    min-height: 96px;
+    padding-inline: 20px;
+  }
+
+  .overview-grid {
+    grid-template-columns: minmax(0, 3fr) minmax(320px, 0.86fr);
+    gap: 16px;
+    margin-top: 16px;
+  }
+
+  .side-stack {
+    gap: 16px;
   }
 }
 
