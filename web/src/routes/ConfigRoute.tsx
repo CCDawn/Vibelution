@@ -2233,7 +2233,8 @@ export function ConfigRoute() {
   const [selectedProviderVendorId, setSelectedProviderVendorId] = useState("");
   const [selectedProviderId, setSelectedProviderId] = useState("");
   const [selectedProviderTab, setSelectedProviderTab] = useState<ConfigProviderRegistryTab>("connection");
-  const [providerWorkspaceMode, setProviderWorkspaceMode] = useState<ProviderWorkspaceMode>("quick");
+  // Default to asset home (configured providers + pinned models), not empty quick-setup form.
+  const [providerWorkspaceMode, setProviderWorkspaceMode] = useState<ProviderWorkspaceMode>("manage");
   const [providerQuickSetupState, dispatchProviderQuickSetup] = useReducer(
     providerQuickSetupReducer,
     undefined,
@@ -2328,8 +2329,13 @@ export function ConfigRoute() {
   const modelOptionsById = useMemo(() => new Map(modelOptions.map((option) => [option.model_id, option])), [modelOptions]);
   const providerPresetOptions = workspace?.providerPresetOptions ?? [];
   const providerRows = useMemo(
-    () => deriveProviderRegistryRows(workspace?.providerOptions ?? [], workspace?.modelCatalog ?? { schemaVersion: 2, providerCount: 0, modelCount: 0, providers: {} }),
-    [workspace?.modelCatalog, workspace?.providerOptions],
+    () => deriveProviderRegistryRows(
+      workspace?.providerOptions ?? [],
+      workspace?.modelCatalog ?? { schemaVersion: 2, providerCount: 0, modelCount: 0, providers: {} },
+      // Prefer live draft so pin upgrades show immediately even if discovery catalog still says "observed".
+      draftConfig ?? workspace?.publicConfig,
+    ),
+    [draftConfig, workspace?.modelCatalog, workspace?.providerOptions, workspace?.publicConfig],
   );
   const liveReferenceCountByModelRef = useMemo(
     () => Object.fromEntries(
@@ -2625,46 +2631,128 @@ export function ConfigRoute() {
   }
 
   async function handlePinProviderModels(providerId: string, models: ConfigCatalogModel[]): Promise<void> {
-    setBusyAction("正在固定模型…");
-    setProviderActionError("");
+    const report = (phase: "busy" | "success" | "error", message: string) => {
+      setProviderActionFeedback({ kind: "pin", providerId, phase, message });
+      setNotice({
+        tone: phase === "error" ? "error" : phase === "success" ? "success" : "neutral",
+        text: message,
+      });
+      if (phase === "error") {
+        setProviderActionError(message);
+      } else {
+        setProviderActionError("");
+      }
+    };
+
+    if (!models.length) {
+      report("error", "没有可固定的模型。请先点「发现模型」，确认列表里有「已发现」状态的行。");
+      return;
+    }
+
+    setBusyAction(models.length === 1 ? `正在固定 ${models[0].modelRef}…` : `正在固定 ${models.length} 个模型…`);
+    report("busy", models.length === 1
+      ? `正在固定 ${models[0].modelRef}…`
+      : `正在固定 ${models.length} 个模型…`);
+
     const latestDraft = providerDraftRequestRef.current;
     let currentConfig = latestDraft?.publicConfig ?? requireDraft();
     let currentMeta = latestDraft?.draftMeta ?? draftMeta;
     let currentBaseHash = latestDraft?.baseHash ?? baseHash;
+
+    const catalogModels =
+      activeWorkspace?.modelCatalog?.providers?.[providerId]?.models
+      ?? latestDraft?.modelCatalog?.providers?.[providerId]?.models
+      ?? {};
     const pinnedModelRefs = new Set(
-      Object.values(latestDraft?.modelCatalog.providers[providerId]?.models ?? {})
+      Object.values(catalogModels)
         .filter((model) => model.availability === "pinned" || model.availability === "missing_remote")
         .map((model) => model.modelRef),
     );
+    const draftProvider = asRecord(asRecord(asRecord(currentConfig.llm).providers)[providerId]);
+    const draftModels = asRecord(draftProvider.models);
+    for (const modelKey of Object.keys(draftModels)) {
+      pinnedModelRefs.add(`${providerId}/${modelKey}`);
+    }
+
     const pendingModels = filterAlreadyPinnedModels(models, pinnedModelRefs);
+    const skippedExisting = models.length - pendingModels.length;
+    if (!pendingModels.length) {
+      setBusyAction("");
+      setSelectedProviderId(providerId);
+      setSelectedProviderTab("models");
+      report("success", "所选模型均已固定。已切换到「已固定」列表。");
+      return;
+    }
+
+    let pinnedCount = 0;
+    let skippedRuntime = 0;
     try {
       for (const model of pendingModels) {
-        const response = await requestJson<ConfigWorkspace>(
-          `/api/config/draft/providers/${encodeURIComponent(providerId)}/models`,
-          {
-            publicConfig: currentConfig,
-            draftMeta: currentMeta,
-            baseHash: currentBaseHash,
-            providerId,
-            upstreamId: model.upstreamId,
-            modelKey: model.modelKey,
-            label: model.label,
-            overrides: {},
-          },
-        );
-        currentConfig = response.publicConfig;
-        currentMeta = response.draftMeta;
-        currentBaseHash = response.baseHash;
-        syncWorkspace(response, "success", { resetBase: false });
-        dispatchProviderWizard({ type: "pin_succeeded", modelRef: model.modelRef });
+        const modelKey = String(model.modelKey || model.upstreamId || "").trim();
+        const upstreamId = String(model.upstreamId || model.modelKey || "").trim();
+        if (!modelKey || !upstreamId) {
+          skippedRuntime += 1;
+          continue;
+        }
+        try {
+          const response = await requestJson<ConfigWorkspace>(
+            `/api/config/draft/providers/${encodeURIComponent(providerId)}/models`,
+            {
+              publicConfig: currentConfig,
+              draftMeta: currentMeta,
+              baseHash: currentBaseHash,
+              providerId,
+              upstreamId,
+              modelKey,
+              label: model.label || upstreamId,
+              overrides: {},
+            },
+          );
+          currentConfig = response.publicConfig;
+          currentMeta = response.draftMeta;
+          currentBaseHash = response.baseHash;
+          // Keep ref in sync so subsequent pins see the new draft pin set.
+          providerDraftRequestRef.current = {
+            publicConfig: response.publicConfig,
+            draftMeta: response.draftMeta,
+            baseHash: response.baseHash,
+            modelCatalog: response.modelCatalog,
+          };
+          syncWorkspace(response, "success", { resetBase: false });
+          dispatchProviderWizard({ type: "pin_succeeded", modelRef: model.modelRef || `${providerId}/${modelKey}` });
+          pinnedCount += 1;
+          pinnedModelRefs.add(model.modelRef || `${providerId}/${modelKey}`);
+          if (pendingModels.length > 1) {
+            report("busy", `正在固定模型…（${pinnedCount}/${pendingModels.length}）`);
+          }
+        } catch (error) {
+          const message = readableErrorMessage(error);
+          if (/already exists|already pinned|已存在|已固定/i.test(message)) {
+            skippedRuntime += 1;
+            pinnedModelRefs.add(model.modelRef || `${providerId}/${modelKey}`);
+            continue;
+          }
+          throw error;
+        }
       }
       setSelectedProviderId(providerId);
       setSelectedProviderTab("models");
+      const skippedTotal = skippedExisting + skippedRuntime;
+      const parts = [
+        pinnedCount > 0 ? `新固定 ${pinnedCount} 个` : null,
+        skippedTotal > 0 ? `跳过已存在 ${skippedTotal} 个` : null,
+      ].filter(Boolean);
+      report(
+        "success",
+        `${parts.join("，") || "固定完成"}。已切换到「已固定」列表；请点右上角「保存到外部配置」。`,
+      );
     } catch (error) {
       const message = readableErrorMessage(error).slice(0, 480);
-      setProviderActionError(message);
       markError(error);
-      throw error;
+      report(
+        "error",
+        pinnedCount > 0 ? `已固定 ${pinnedCount} 个后失败：${message}` : `固定失败：${message}`,
+      );
     } finally {
       setBusyAction("");
     }
@@ -2834,6 +2922,47 @@ export function ConfigRoute() {
     } catch (error) {
       const message = readableErrorMessage(error).slice(0, 480);
       setProviderActionFeedback({ kind: "credential", providerId, phase: "error", message });
+      markError(error);
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function handleUpdateProviderContextWindow(providerId: string, contextWindow: number | null) {
+    if (structuredActionsDisabled) return;
+    setBusyAction("正在更新上下文窗口草稿…");
+    setProviderActionError("");
+    setProviderActionFeedback({
+      kind: "credential",
+      providerId,
+      phase: "busy",
+      message: "正在保存上下文窗口…",
+    });
+    try {
+      const provider = clonePublicConfig(asRecord(asRecord(asRecord(requireDraft().llm).providers)[providerId]));
+      if (contextWindow && contextWindow > 0) {
+        provider.context_window = contextWindow;
+      } else {
+        provider.context_window = null;
+      }
+      const response = await requestJson<ConfigWorkspace>(
+        `/api/config/draft/providers/${encodeURIComponent(providerId)}`,
+        buildProviderDraftRequest({ providerId, provider }),
+        "PUT",
+      );
+      syncWorkspace(response, "success", { resetBase: false });
+      setProviderActionFeedback({
+        kind: "credential",
+        providerId,
+        phase: "success",
+        message: contextWindow && contextWindow > 0
+          ? `上下文窗口已设为 ${contextWindow}（草稿）；请点右上角保存到外部配置`
+          : "已清除 Provider 上下文窗口草稿；请点右上角保存到外部配置",
+      });
+    } catch (error) {
+      const message = readableErrorMessage(error).slice(0, 480);
+      setProviderActionFeedback({ kind: "credential", providerId, phase: "error", message });
+      setProviderActionError(message);
       markError(error);
     } finally {
       setBusyAction("");
@@ -3671,41 +3800,17 @@ export function ConfigRoute() {
               <>
                 <VSection
                   title="模型连接"
-                  eyebrow="推荐路径：发现 → 固定 → 保存 → Agent 选用"
-                  tooltip="首次用「快速配置」接好第一个模型。已有中转站时：② 管理与固定 →「模型库 · 固定」→「固定全部已发现」→ 顶部保存。"
+                  eyebrow="默认：已配置资产 · 需要新建时再点「添加连接」"
+                  tooltip="本页默认展示已连接服务与已固定模型。点服务旁「编辑」在右侧改 API Key 与上下文窗口。仅在接入新中转站时用「添加连接」。"
                   tooltipLabel="模型连接工作台说明"
                   actions={(
                     <VActionGroup ariaLabel="Provider 工作区模式">
-                      <VButton tooltip="最短路径：服务商 + 凭据 + 检测 + 固定 1 个模型。" className={styles.providerModeButton} aria-pressed={providerWorkspaceMode === "quick"} variant={providerWorkspaceMode === "quick" ? "primary" : "ghost"} onPress={() => setProviderWorkspaceMode("quick")}>① 快速配置</VButton>
-                      <VButton tooltip="已有连接：发现目录、一键固定全部、逐个固定、测试与排障。" className={styles.providerModeButton} aria-pressed={providerWorkspaceMode === "manage"} variant={providerWorkspaceMode === "manage" ? "primary" : "ghost"} onPress={() => setProviderWorkspaceMode("manage")}>② 管理与固定</VButton>
+                      <VButton tooltip="查看已连接服务、已固定模型；点编辑打开右侧配置栏。" className={styles.providerModeButton} aria-pressed={providerWorkspaceMode === "manage"} variant={providerWorkspaceMode === "manage" ? "primary" : "ghost"} onPress={() => setProviderWorkspaceMode("manage")}>① 模型资产</VButton>
+                      <VButton tooltip="新建中转站/服务商：选模板 → Key → 检测 → 固定模型。" className={styles.providerModeButton} aria-pressed={providerWorkspaceMode === "quick"} variant={providerWorkspaceMode === "quick" ? "primary" : "ghost"} onPress={() => setProviderWorkspaceMode("quick")}>② 添加连接</VButton>
                       <VButton tooltip="模板、路由与底层参数（进阶）。" className={styles.providerModeButton} aria-pressed={providerWorkspaceMode === "advanced"} variant={providerWorkspaceMode === "advanced" ? "primary" : "ghost"} onPress={() => setProviderWorkspaceMode("advanced")}>③ 高级设置</VButton>
                     </VActionGroup>
                   )}
                 />
-                {providerWorkspaceMode === "quick" ? (
-                  <ConfigQuickSetupPanel
-                    state={providerQuickSetupState}
-                    templates={providerPresetOptions}
-                    credentialValue={providerQuickCredential}
-                    disabled={structuredActionsDisabled || Boolean(busyAction)}
-                    onCredentialChange={setProviderQuickCredential}
-                    onProviderChange={(provider) => {
-                      setProviderQuickCredential("");
-                      dispatchProviderQuickSetup({ type: "set_provider", provider });
-                    }}
-                    onDetect={(input) => {
-                      void handlePrepareProviderQuickSetup(input);
-                    }}
-                    onModelChange={(modelRef) => dispatchProviderQuickSetup({ type: "select_model", modelRef })}
-                    onConfirm={() => {
-                      void handleConfirmProviderQuickSetup();
-                    }}
-                    onReset={() => {
-                      setProviderQuickCredential("");
-                      dispatchProviderQuickSetup({ type: "reset" });
-                    }}
-                  />
-                ) : null}
                 {providerWorkspaceMode === "manage" ? (
                   <>
                 <ConfigProviderRegistryPanel
@@ -3714,10 +3819,17 @@ export function ConfigRoute() {
                   selectedTab={selectedProviderTab}
                   disabled={structuredActionsDisabled || Boolean(busyAction)}
                   activeCredentialProviderId={providerCredentialEditId}
+                  credentialValue={providerCredentialValue}
                   activeRouteProviderId={routeEditProviderId}
                   imageCapabilityBusy={busyAction === copy.imageCapabilityCheckPending}
                   actionFeedback={providerActionFeedback}
                   liveReferenceCountByModelRef={liveReferenceCountByModelRef}
+                  hasPendingApply={hasPendingApply}
+                  canSaveConfig={canSaveConfig}
+                  saveBusy={busyAction === copy.applying}
+                  onSaveExternal={() => {
+                    void handleApply();
+                  }}
                   onSelectProvider={(providerId) => {
                     setProviderCredentialEditId("");
                     setProviderCredentialValue("");
@@ -3732,12 +3844,25 @@ export function ConfigRoute() {
                     void handleDiscoverProvider(providerId).catch(() => undefined);
                   }}
                   onEditCredential={(providerId) => {
+                    setSelectedProviderTab("connection");
                     setProviderCredentialEditId(providerId);
                     setProviderCredentialValue("");
                     setRouteEditProviderId("");
                     setRouteEditProvider({});
                     setRoutePreview(null);
                     setProviderActionFeedback(null);
+                  }}
+                  onCredentialValueChange={setProviderCredentialValue}
+                  onCancelCredential={() => {
+                    setProviderCredentialEditId("");
+                    setProviderCredentialValue("");
+                    setProviderActionFeedback(null);
+                  }}
+                  onSaveCredential={(providerId) => {
+                    void handleUpdateProviderCredential(providerId);
+                  }}
+                  onSaveContextWindow={(providerId, contextWindow) => {
+                    void handleUpdateProviderContextWindow(providerId, contextWindow);
                   }}
                   onEditRoute={(providerId) => {
                     setProviderCredentialEditId("");
@@ -3760,68 +3885,6 @@ export function ConfigRoute() {
                     void handleDeleteProvider(providerId);
                   }}
                 />
-                {providerCredentialEditId && providerCredentialEditId === selectedProviderId ? (
-                  <VSurface as="section" padding="compact" tone="row" className={styles.providerRouteEditSurface}>
-                    <VSection
-                      title={`设置 ${providerCredentialEditId} 的 API Key`}
-                      tooltip="最终保存会写入用户环境变量，不会把密钥写入 config.toml。"
-                      tooltipLabel="API Key 保存说明"
-                      actions={(
-                        <VActionGroup ariaLabel="Provider API Key 编辑操作">
-                          <VButton
-                            isDisabled={Boolean(busyAction)}
-                            onPress={() => {
-                              setProviderCredentialEditId("");
-                              setProviderCredentialValue("");
-                              setProviderActionFeedback(null);
-                            }}
-                          >
-                            取消
-                          </VButton>
-                          <VButton
-                            variant="primary"
-                            isDisabled={
-                              structuredActionsDisabled || Boolean(busyAction) || !providerCredentialValue.trim()
-                              || !credentialProvider || credentialProvider.credentialState === "not_required"
-                            }
-                            tooltip="保存到配置草稿；最终保存时写入用户环境变量。"
-                            disabledReason={
-                              structuredActionsDisabled
-                                ? "先完成当前配置检查。"
-                                : busyAction
-                                  ? "当前有配置操作正在进行。"
-                                  : !providerCredentialValue.trim()
-                                    ? "先填写 API Key。"
-                                    : !credentialProvider
-                                      ? "当前 Provider 不可用。"
-                                      : credentialProvider.credentialState === "not_required"
-                                        ? "此 Provider 无需凭据。"
-                                        : undefined
-                            }
-                            onPress={() => {
-                              void handleUpdateProviderCredential(providerCredentialEditId);
-                            }}
-                          >
-                            {providerActionFeedback?.kind === "credential" && providerActionFeedback.phase === "busy"
-                              ? "保存中…"
-                              : "保存到草稿"}
-                          </VButton>
-                        </VActionGroup>
-                      )}
-                    >
-                      <label className={styles.providerRouteEditField}>
-                        <span>API Key</span>
-                        <VInput
-                          type="password"
-                          autoComplete="new-password"
-                          value={providerCredentialValue}
-                          disabled={Boolean(busyAction)}
-                          onChange={(event) => setProviderCredentialValue(event.target.value)}
-                        />
-                      </label>
-                    </VSection>
-                  </VSurface>
-                ) : null}
                 {routeEditProviderId && !routePreview ? (
                   <VSurface as="section" padding="compact" tone="row" className={styles.providerRouteEditSurface}>
                     <VSection
@@ -3925,10 +3988,34 @@ export function ConfigRoute() {
                       </VActionGroup>
                     )}
                   >
-                    后端 preview token 是唯一授权；本地 checkbox 或布尔值不能替代。受影响 canonical modelRef 与 live-reference counts 如上。
+                    后端 preview token 是唯一授权；本页 checkbox 或布尔值不能替代。受影响 canonical modelRef 与 live-reference counts 如上。
                   </VStateSurface>
                 ) : null}
                   </>
+                ) : null}
+                {providerWorkspaceMode === "quick" ? (
+                  <ConfigQuickSetupPanel
+                    state={providerQuickSetupState}
+                    templates={providerPresetOptions}
+                    credentialValue={providerQuickCredential}
+                    disabled={structuredActionsDisabled || Boolean(busyAction)}
+                    onCredentialChange={setProviderQuickCredential}
+                    onProviderChange={(provider) => {
+                      setProviderQuickCredential("");
+                      dispatchProviderQuickSetup({ type: "set_provider", provider });
+                    }}
+                    onDetect={(input) => {
+                      void handlePrepareProviderQuickSetup(input);
+                    }}
+                    onModelChange={(modelRef) => dispatchProviderQuickSetup({ type: "select_model", modelRef })}
+                    onConfirm={() => {
+                      void handleConfirmProviderQuickSetup();
+                    }}
+                    onReset={() => {
+                      setProviderQuickCredential("");
+                      dispatchProviderQuickSetup({ type: "reset" });
+                    }}
+                  />
                 ) : null}
                 {providerWorkspaceMode === "advanced" ? (
                   <>

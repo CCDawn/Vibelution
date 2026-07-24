@@ -1756,10 +1756,17 @@ def summarize_model_catalog(
                 provider_protocol_status = "protocol_mismatch"
             elif protocol_status == "protocol_unknown" and not provider_protocol_status:
                 provider_protocol_status = "blocked"
-            availability = str(
-                catalog_model.get("availability")
-                or ("pinned" if pinned_model else "unknown")
-            )[:64]
+            # Draft pins always win over discovery "observed"/"unknown".
+            # Previously catalog availability (e.g. observed) blocked the pin upgrade,
+            # so UI showed "已固定 1 / 已发现 18" while draft already had 19 pins.
+            if pinned_model:
+                catalog_avail = str(catalog_model.get("availability") or "").strip()
+                if catalog_avail == "missing_remote":
+                    availability = "missing_remote"
+                else:
+                    availability = "pinned"
+            else:
+                availability = str(catalog_model.get("availability") or "unknown")[:64]
             models[str(model_key)] = {
                 "modelKey": str(model_key),
                 "modelRef": model_ref,

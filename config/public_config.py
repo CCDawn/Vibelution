@@ -1462,6 +1462,13 @@ def list_llm_provider_options(public_config: dict) -> list[dict[str, object]]:
         protocols = provider.get("protocols", {})
         protocols = protocols if isinstance(protocols, dict) else {}
         models = provider.get("models", {})
+        raw_context_window = provider.get("context_window")
+        context_window: int | None
+        try:
+            parsed_window = int(raw_context_window) if raw_context_window not in (None, "") else 0
+            context_window = parsed_window if parsed_window > 0 else None
+        except Exception:
+            context_window = None
         options.append(
             {
                 "provider_id": str(provider_id),
@@ -1473,6 +1480,7 @@ def list_llm_provider_options(public_config: dict) -> list[dict[str, object]]:
                 "artifact_path": str(deployment.get("artifact_path") or ""),
                 "base_url": str(provider.get("base_url") or ""),
                 "credential_state": resolution.state,
+                "context_window": context_window,
                 "default_protocol": str(protocols.get("default") or ""),
                 "pinned_count": len(models) if isinstance(models, dict) else 0,
             }

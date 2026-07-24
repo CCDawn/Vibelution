@@ -39,6 +39,7 @@ function provider(models: ConfigCatalogModel[]): ProviderRegistryRow {
     artifactPath: "",
     baseUrl: "https://relay.example/v1",
     credentialState: "configured",
+    contextWindow: 128000,
     defaultProtocol: "responses",
     pinnedCount: models.filter((item) => ["pinned", "missing_remote"].includes(item.availability)).length,
     status: "reachable",
@@ -67,6 +68,11 @@ function panelProps(
     onSelectTab: () => undefined,
     onDiscover: () => undefined,
     onEditCredential: () => undefined,
+    credentialValue: "",
+    onCredentialValueChange: () => undefined,
+    onCancelCredential: () => undefined,
+    onSaveCredential: () => undefined,
+    onSaveContextWindow: () => undefined,
     onEditRoute: () => undefined,
     onPin: () => undefined,
     onUnpin: () => undefined,
@@ -234,15 +240,16 @@ describe("ConfigProviderRegistryPanel", () => {
 
   it("fills the desktop workspace with large Provider rows and a bottom danger zone", () => {
     expect(panelStyles.sectionSurface).toContain("h-full");
-    expect(panelStyles.registryWorkspace).toContain("[--vui-workspace-sidebar:clamp(18rem,26vw,24rem)]");
+    expect(panelStyles.registryWorkspace).toContain("[--vui-workspace-sidebar:clamp(18rem,24vw,22rem)]");
     expect(panelStyles.providerList).toContain("h-full");
-    expect(panelStyles.providerButton).toContain("!min-h-[58px]");
-    expect(panelStyles.detailSurface).toContain("[grid-template-rows:auto_auto_auto_auto_minmax(0,1fr)_auto_auto]");
-    expect(panelStyles.detailSurface).toContain("overflow-y-auto");
-    expect(panelStyles.detailSurface).not.toContain("overflow-hidden");
+    expect(panelStyles.providerButton).toContain("!min-h-[3.5rem]");
+    expect(panelStyles.providerLabel).toContain("whitespace-normal");
+    expect(panelStyles.providerLabel).toContain("break-words");
+    expect(panelStyles.inspectorPanel).toContain("h-full");
     expect(panelStyles.detailBody).toContain("min-h-0");
-    expect(panelSource).toContain('data-provider-tab={selectedTab}');
+    expect(panelSource).toContain('data-provider-action="edit-asset"');
     expect(panelSource).toContain('data-provider-danger-zone="true"');
+    expect(panelSource).toContain("openInspector");
     expect(panelSource).not.toContain("mobileActionGroup");
   });
 
@@ -252,18 +259,56 @@ describe("ConfigProviderRegistryPanel", () => {
   });
 
   it("offers a preview-first merge only for an exact-contract duplicate", () => {
-    const duplicate = { ...provider([]), providerId: "relay_b", label: "Relay B" };
-    const markup = renderToStaticMarkup(
-      <ConfigProviderRegistryPanel {...panelProps([], { rows: [provider([]), duplicate] })} />,
-    );
-
-    expect(markup).toContain("合并重复 Provider");
-    expect(markup).toContain("生成合并预览");
-    expect(markup).toContain("历史记录不改写");
-    expect(markup).not.toContain("应用合并");
+    expect(panelSource).toContain("合并重复 Provider（高级）");
+    expect(panelSource).toContain("日常中转站不需要");
     expect(panelSource).toContain("/api/config/migration/providers/merge/preview");
     expect(panelSource).toContain("/api/config/migration/providers/merge/apply");
     expect(panelSource).toContain("confirmed: true");
+  });
+
+  it("keeps API Key and context window in the right-side asset inspector", () => {
+    expect(panelSource).toContain("一个中转站 / Provider = 一把 API Key");
+    expect(panelSource).toContain("2 · 上下文窗口");
+    expect(panelSource).toContain("context_window");
+    expect(panelSource).toContain("保存上下文窗口到草稿");
+    expect(panelSource).toContain("config-asset-inspector");
+    const markup = renderToStaticMarkup(
+      <ConfigProviderRegistryPanel {...panelProps([])} />,
+    );
+    expect(markup).toContain("编辑");
+    expect(markup).toContain("已配置的连接与模型");
+  });
+
+  it("collapses abnormal services and surfaces a strong save prompt when draft is dirty", () => {
+    const healthy = provider([model("luna", "pinned")]);
+    const broken = {
+      ...provider([]),
+      providerId: "relay_bad",
+      label: "Broken Relay",
+      status: "auth_failed" as const,
+    };
+    const collapsed = renderToStaticMarkup(
+      <ConfigProviderRegistryPanel {...panelProps([], { rows: [healthy, broken] })} />,
+    );
+    expect(collapsed).toContain("可用服务");
+    expect(collapsed).toContain("异常服务 · 1");
+    expect(collapsed).toContain('data-abnormal-expanded="false"');
+    expect(collapsed).toContain("Relay A");
+    expect(collapsed).not.toContain("Broken Relay");
+
+    const dirty = renderToStaticMarkup(
+      <ConfigProviderRegistryPanel
+        {...panelProps([model("luna", "pinned")], {
+          hasPendingApply: true,
+          canSaveConfig: true,
+          onSaveExternal: () => undefined,
+        })}
+      />,
+    );
+    expect(dirty).toContain('data-save-prompt="pending"');
+    expect(dirty).toContain("有未保存的模型配置");
+    expect(dirty).toContain("保存到外部配置");
+    expect(dirty).toContain("有未保存修改");
   });
 
   it("aligns Provider action labels, active states, and nearby feedback", () => {
@@ -280,8 +325,8 @@ describe("ConfigProviderRegistryPanel", () => {
     })} />);
 
     expect(busyMarkup).toContain("发现中…");
-    expect(busyMarkup).toContain('data-provider-action="credential"');
-    expect(busyMarkup).toMatch(/data-provider-action="credential"[^>]*aria-pressed="true"/);
+    expect(busyMarkup).toContain('data-provider-action="edit-asset"');
+    expect(busyMarkup).toContain('data-provider-action="discover"');
     expect(busyMarkup).toContain('aria-live="polite"');
     expect(busyMarkup).toContain("正在发现模型…");
 
@@ -295,8 +340,8 @@ describe("ConfigProviderRegistryPanel", () => {
         message: "路由预览已生成",
       },
     })} />);
-    expect(successMarkup).toMatch(/data-provider-action="route"[^>]*aria-pressed="true"/);
     expect(successMarkup).toContain("路由预览已生成");
+    expect(panelSource).toContain('data-provider-action="route"');
 
     const errorMarkup = renderToStaticMarkup(<ConfigProviderRegistryPanel {...panelProps(models, {
       activeCredentialProviderId: "",
@@ -312,12 +357,14 @@ describe("ConfigProviderRegistryPanel", () => {
     expect(errorMarkup).toContain("API Key 更新失败");
   });
   it("keeps the latest safe discovery failure on the selected Provider diagnostics", () => {
+    expect(panelSource).toContain("最近失败原因");
+    expect(panelSource).toContain("请求超时");
+    expect(panelSource).toContain("function DiagnosticsTab");
     const timedOut = { ...provider([]), status: "discovery_failed" as const, lastErrorType: "timeout" };
     const markup = renderToStaticMarkup(
-      <ConfigProviderRegistryPanel {...panelProps([], { rows: [timedOut], selectedTab: "diagnostics" })} />,
+      <ConfigProviderRegistryPanel {...panelProps([], { rows: [timedOut] })} />,
     );
-
-    expect(markup).toContain("最近失败原因");
-    expect(markup).toContain("请求超时");
+    expect(markup).toContain("discovery_failed");
+    expect(markup).toContain("编辑");
   });
 });

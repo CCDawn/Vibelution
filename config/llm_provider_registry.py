@@ -176,7 +176,17 @@ def pin_llm_model(
     make_model_ref(provider_id, key)
     models = provider.setdefault("models", {})
     if key in models:
-        raise ValueError(f"pinned model already exists: {provider_id}/{key}")
+        # Idempotent pin: already-fixed models are a no-op success so bulk pin can continue.
+        existing = models.get(key)
+        if isinstance(existing, dict):
+            if label and not str(existing.get("label") or "").strip():
+                existing["label"] = str(label or upstream_id)
+            if resolved_overrides:
+                for override_key, override_value in resolved_overrides.items():
+                    if override_key not in existing:
+                        existing[override_key] = override_value
+            models[key] = existing
+        return updated
     models[key] = {
         "upstream_id": str(upstream_id),
         "label": str(label or upstream_id),

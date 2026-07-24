@@ -128,6 +128,8 @@ export type ConfigProviderOption = {
   artifact_path?: string;
   base_url?: string;
   credential_state: "configured" | "missing" | "not_required" | (string & {});
+  /** Provider-level max context window in tokens; omit/null when unconfigured. */
+  context_window?: number | null;
   default_protocol: string;
   pinned_count: number;
 };
