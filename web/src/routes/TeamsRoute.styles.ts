@@ -392,6 +392,10 @@ const styles: Record<string, string> = {
     "challengeWorkspaceInspector min-w-0 w-full flex-1 !overflow-hidden !border-0 !bg-transparent",
   challengeWorkspaceLayout:
     "challengeWorkspaceLayout min-w-0 w-full flex-1 !grid-cols-[minmax(0,1fr)] !overflow-hidden !border-0 !bg-[#f3f5f8] !p-0",
+  challengeSurfaceSwitch:
+    "challengeSurfaceSwitch sticky top-0 z-20 grid w-full min-w-0 grid-cols-2 gap-1 border-b border-[var(--vui-border-subtle)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_94%,transparent)] p-1.5 backdrop-blur [&>button]:grid [&>button]:min-w-0 [&>button]:gap-0.5 [&>button]:rounded-[var(--radius-control)] [&>button]:border [&>button]:border-transparent [&>button]:bg-transparent [&>button]:px-3 [&>button]:py-2 [&>button]:text-left [&>button]:text-[var(--fg-secondary)] [&>button]:transition-colors [&>button:hover]:bg-[var(--vui-surface-row-hover)] [&>button:focus-visible]:outline-none [&>button:focus-visible]:shadow-[var(--focus-ring)] [&_strong]:text-[var(--vui-font-sm)] [&_span]:truncate [&_span]:text-[var(--vui-font-xs)] [&_span]:text-[var(--fg-tertiary)]",
+  challengeSurfaceSwitchActive:
+    "!border-[color:color-mix(in_srgb,var(--accent-cool)_34%,var(--vui-border-subtle))] !bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-panel))] !text-[var(--fg-primary)]",
   researchStageGrid:
     "researchStageGrid min-w-0 grid items-stretch gap-3 grid-cols-[repeat(auto-fit,minmax(280px,1fr))]",
   researchStageHeroPanel: `researchStageHeroPanel min-w-0 ${vuiFlatPanelClass} p-2`,
