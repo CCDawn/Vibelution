@@ -17,7 +17,6 @@ from config import LLMProfile, ProviderConfig
 
 from .reasoning_effort import (
     ReasoningEffortResolution,
-    model_supports_gpt_reasoning_effort,
     normalize_reasoning_effort,
     resolve_reasoning_effort_request,
 )
@@ -156,13 +155,14 @@ class ProviderAdapter:
         prompt_cache_mode = str(
             getattr(getattr(self.profile, "prompt_cache", None), "mode", "") or "disabled"
         ).strip().lower()
-        supports_reasoning_effort = model_supports_gpt_reasoning_effort(
-            model=self.profile.model,
-            provider_kind=self.kind,
-            transport=transport,
-            compat_mode=self.compat_mode,
-            provider_api=getattr(self.provider, "api", ""),
-        )
+        # Protocol contract only — never name heuristics (reasoning-effort confirmed D2).
+        contract_values = [
+            normalize_reasoning_effort(value)
+            for value in list(getattr(self.profile, "reasoning_effort_values", None) or [])
+            if normalize_reasoning_effort(value)
+        ]
+        contract_adapter = str(getattr(self.profile, "reasoning_effort_adapter", "") or "none").strip().lower()
+        supports_reasoning_effort = bool(contract_values) and contract_adapter not in {"", "none"}
         image_input_support = getattr(self.profile, "supports_image_input", None)
         return replace(
             base,
@@ -217,27 +217,9 @@ class ProviderAdapter:
         }
 
     def _reasoning_effort_resolution(self) -> ReasoningEffortResolution:
-        resolution = resolve_reasoning_effort_request(self.profile)
-        effort = normalize_reasoning_effort(getattr(self.profile, "reasoning_effort", ""))
-        if (
-            resolution.adapter == "none"
-            and effort
-            and bool(getattr(self.provider, "legacy_inference_allowed", True))
-            and model_supports_gpt_reasoning_effort(
-                model=self.profile.model,
-                provider_kind=self.kind,
-                transport=getattr(self.profile, "transport", ""),
-                compat_mode=self.compat_mode,
-                provider_api=getattr(self.provider, "api", ""),
-            )
-        ):
-            return ReasoningEffortResolution(
-                effort,
-                effort,
-                "reasoning_object",
-                {"reasoning": {"effort": effort}},
-            )
-        return resolution
+        # Inject only from explicit profile contract (adapter + values on profile).
+        # Name-based gpt-5 legacy inject is forbidden (confirmed D2).
+        return resolve_reasoning_effort_request(self.profile)
 
     def supports_explicit_tool_choice(self) -> bool:
         if self.uses_openai_gpt5_chat_constraints():

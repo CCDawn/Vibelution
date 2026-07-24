@@ -238,12 +238,52 @@ def test_agent_config_workspace_marks_gpt_responses_reasoning_effort_models(tmp_
 
     payload = agent_config_workspace_service.get_agent_config_workspace()
 
+    # gpt-5 + responses without an explicit protocol contract must not invent values (D2).
     reasoning_model = next(item for item in payload["agentModelChoices"] if item["modelId"] == "model-gpt-reasoning")
     primary_model = next(item for item in payload["agentModelChoices"] if item["modelId"] == "model-primary")
-    assert reasoning_model["supportsReasoningEffort"] is True
-    assert reasoning_model["reasoningEffortValues"] == ["low", "medium", "high"]
+    assert reasoning_model["supportsReasoningEffort"] is False
+    assert reasoning_model["reasoningEffortValues"] == []
     assert primary_model["supportsReasoningEffort"] is False
     assert primary_model["reasoningEffortValues"] == []
+
+
+def test_agent_config_workspace_projects_operator_reasoning_contract_without_probe(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+
+    def workspace_with_contract():
+        payload = _fake_config_workspace()
+        for option in payload["modelOptions"]:
+            if option["model_id"] == "model-gpt-reasoning":
+                option["details"] = {
+                    **dict(option.get("details") or {}),
+                    "reasoning_effort_values": ["low", "xhigh"],
+                    "default_reasoning_effort": "low",
+                    "reasoning_effort_adapter": "reasoning_object",
+                }
+        return payload
+
+    monkeypatch.setattr(config_service, "get_config_workspace", workspace_with_contract)
+    monkeypatch.setattr(config_service, "get_agent_model_options_workspace", workspace_with_contract)
+    registry_path = tmp_path / "workspace" / "agents" / "agents.json"
+    registry_path.parent.mkdir(parents=True, exist_ok=True)
+    registry_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "agents": [],
+                "toolPolicies": {},
+                "memoryPolicies": {},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    payload = agent_config_workspace_service.get_agent_config_workspace()
+    reasoning_model = next(item for item in payload["agentModelChoices"] if item["modelId"] == "model-gpt-reasoning")
+    assert reasoning_model["supportsReasoningEffort"] is True
+    assert reasoning_model["reasoningEffortValues"] == ["low", "xhigh"]
+    assert reasoning_model["defaultReasoningEffort"] == "low"
 
 
 def test_agent_config_workspace_lists_agents_once_and_derives_references(tmp_path, monkeypatch):

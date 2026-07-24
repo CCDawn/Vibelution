@@ -401,3 +401,24 @@ def test_resolve_agent_llm_ignores_reasoning_effort_for_unsupported_slot_model()
     resolved = resolve_agent_llm(agent, "dialogue", config=config)
 
     assert resolved.config.llm.profiles["primary"].reasoning_effort == ""
+
+
+def test_resolve_agent_llm_ignores_effort_for_gpt5_without_protocol_contract():
+    """D2: gpt-5 family name alone must not apply agent effort override."""
+    config = _config_with_agent_models()
+    config.llm.providers["default"].kind = "relay"
+    config.llm.providers["default"].compat_mode = "openai"
+    config.llm.model_library["dialogue-model"].update({
+        "model": "gpt-5.5",
+        "transport": "responses",
+        # no reasoning_effort_values / adapter
+    })
+    agent = {
+        "agentId": "agent-a",
+        "llmBindings": {"dialogue": {"modelId": "dialogue-model"}},
+        "metadata": {"llmReasoningEffort": {"dialogue": "high"}},
+    }
+
+    resolved = resolve_agent_llm(agent, "dialogue", config=config)
+
+    assert resolved.config.llm.profiles["primary"].reasoning_effort == ""
