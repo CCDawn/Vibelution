@@ -123,6 +123,24 @@ def test_pin_uses_upstream_id_and_stable_provider_scoped_key() -> None:
     assert config["llm"]["providers"]["relay_a"]["models"] == {}
 
 
+def test_pin_openai_responses_model_gets_reasoning_effort_protocol_defaults() -> None:
+    config = add_llm_provider(_empty_v2(), "relay_a", _provider())
+    updated = pin_llm_model(config, "relay_a", upstream_id="gpt-5.6-sol", label="Sol")
+    pinned = updated["llm"]["providers"]["relay_a"]["models"]["gpt-5.6-sol"]
+    assert pinned["defaults"]["reasoning_effort_values"] == ["low", "medium", "high"]
+    assert pinned["defaults"]["default_reasoning_effort"] == "medium"
+    assert pinned["defaults"]["reasoning_effort_adapter"] == "reasoning_object"
+    # Idempotent re-pin heals older entries missing the contract.
+    bare = add_llm_provider(_empty_v2(), "relay_a", _provider())
+    bare["llm"]["providers"]["relay_a"]["models"] = {
+        "gpt-5.6-sol": {"upstream_id": "gpt-5.6-sol", "label": "Sol", "enabled": True}
+    }
+    healed = pin_llm_model(bare, "relay_a", upstream_id="gpt-5.6-sol")
+    assert healed["llm"]["providers"]["relay_a"]["models"]["gpt-5.6-sol"]["defaults"][
+        "reasoning_effort_values"
+    ] == ["low", "medium", "high"]
+
+
 @pytest.mark.parametrize(
     "reserved_field",
     [

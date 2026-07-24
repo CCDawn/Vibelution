@@ -1588,9 +1588,20 @@ def list_llm_model_options(public_config: dict) -> list[dict[str, object]]:
                     if not model:
                         continue
                     defaults = raw_model.get("defaults") if isinstance(raw_model.get("defaults"), dict) else {}
+                    # Surface protocol-default reasoning for OpenAI Responses pins so Agent
+                    # create/edit pickers show 思考强度 even when pin defaults were never written.
+                    from config.llm_projection import _default_v2_reasoning_effort_defaults
+
+                    reasoning_defaults = _default_v2_reasoning_effort_defaults(
+                        raw_provider, raw_model, defaults
+                    )
+                    effective_defaults = copy.deepcopy(defaults)
+                    if reasoning_defaults:
+                        for key, value in reasoning_defaults.items():
+                            effective_defaults.setdefault(key, value)
                     details_source = {
                         **copy.deepcopy(raw_model),
-                        **copy.deepcopy(defaults),
+                        **effective_defaults,
                     }
                     compatibility = raw_model.get("compatibility")
                     if isinstance(compatibility, dict):
