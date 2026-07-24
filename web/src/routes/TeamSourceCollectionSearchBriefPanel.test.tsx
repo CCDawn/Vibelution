@@ -76,7 +76,7 @@ describe("TeamSourceCollectionSearchBriefPanel", () => {
       />,
     );
 
-    expect(markup).toContain("至少补充一个问题后再开始搜索");
+    expect(markup).toContain("系统会直接使用研究主题搜索");
     expect(markup).toContain("开始搜索");
     expect(markup).toContain("disabled");
   });

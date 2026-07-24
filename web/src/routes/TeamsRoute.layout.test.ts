@@ -3081,12 +3081,23 @@ describe("TeamsRoute layout contract", () => {
   });
 
   it("shows only the selected run's close gate and lets users locate its unfinished stage", () => {
+    const standaloneSource = routeSource.slice(
+      routeSource.indexOf("if (sourceCollectionStandalone)"),
+      routeSource.indexOf("if (stageStandaloneView)"),
+    );
     expect(stageProjectionSource).toContain("sourceCollectionPhaseCloseGateForRun");
     expect(stageProjectionSource).toContain('scope.kind !== "source_run"');
     expect(stageProjectionSource).toContain("scope.includesHistorical === true");
     expect(routeSource).toContain("const sourceCollectionPhaseCloseGate = sourceCollectionPhaseCloseGateForRun(");
     expect(routeSource).toContain("<TeamSourceCollectionPhaseCloseGatePanel");
     expect(routeSource).toContain("onOpenStage={selectSourceCollectionStage}");
+    expect(routeSource).toContain('createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionSearchBriefPanel")');
+    expect(routeSource).toContain("function renderSourceCollectionSearchBrief()");
+    expect(standaloneSource).toContain("searchBrief={renderSourceCollectionSearchBrief()}");
+    expect(standaloneSource).toContain("runHistoryLabel=");
+    expect(standaloneSource).toContain("compact");
+    expect(standaloneSource).toContain("sourceCollectionDraft.topic.trim()");
+    expect(routeSource).toContain("!sourceCollectionStandalone ? (");
     expect(teamSourceCollectionStandaloneStagePanelSource).toContain("phaseCloseGate?: ReactNode");
     expect(teamSourceCollectionStandaloneStagePanelSource).toContain("styles.sourceCollectionRunContext");
     expect(teamSourceCollectionOverviewPanelSource).toContain("phaseCloseGate?: ReactNode");

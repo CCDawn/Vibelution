@@ -131,7 +131,9 @@ export function TeamSourceCollectionSearchBriefPanel({
             </label>
           )) : (
             <div className={styles.emptyQueries}>
-              {isZh ? "尚未添加搜索问题；至少补充一个问题后再开始搜索。" : "Add at least one query before searching."}
+              {isZh
+                ? "没有附加问题；系统会直接使用研究主题搜索，也可以补充更具体的问题。"
+                : "The topic can be searched directly, or you can add more specific queries."}
             </div>
           )}
         </div>
