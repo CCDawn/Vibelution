@@ -186,6 +186,7 @@ describe("VUI workbench layout templates", () => {
       <VSettingsFormPage
         ariaLabel="Model settings"
         title="Basics"
+        toolbar={<div>Tabs</div>}
         footer={<VButton type="button">Save</VButton>}
       >
         <VFieldRow label="Name">
@@ -195,6 +196,9 @@ describe("VUI workbench layout templates", () => {
     );
 
     expect(markup).toContain('data-vui-recipe="settings-form-page"');
+    expect(markup).toContain('data-vui="settings-form-header"');
+    expect(markup).toContain('data-vui="settings-form-toolbar"');
+    expect(markup).toContain("Tabs");
     expect(markup).toContain('data-vui="settings-form-body"');
     expect(markup).toContain('data-vui="settings-form-footer"');
     expect(markup).toContain('data-vui="field-row"');

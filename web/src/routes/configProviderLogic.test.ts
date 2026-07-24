@@ -489,13 +489,23 @@ describe("configProviderLogic", () => {
       { ...pinned, availability: "observed" },
       0,
       false,
-    )).toEqual({ kind: "not_pinned", label: "未固定" });
+    )).toEqual({
+      kind: "pin",
+      label: "固定到配置",
+      disabled: false,
+      reason: "固定后写入模型库，保存配置即可在 Agent 中选用",
+    });
     expect(deriveProviderModelActionState(
       provider,
       { ...pinned, availability: "unknown" },
       0,
       false,
-    )).toEqual({ kind: "not_pinned", label: "未固定" });
+    )).toEqual({
+      kind: "pin",
+      label: "固定到配置",
+      disabled: false,
+      reason: "固定后写入模型库，保存配置即可在 Agent 中选用",
+    });
     expect(deriveProviderModelActionState(
       provider,
       { ...pinned, availability: "disabled" },

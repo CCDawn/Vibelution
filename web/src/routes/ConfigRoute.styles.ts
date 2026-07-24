@@ -145,8 +145,10 @@ const styles = {
     "vui-routes-configroute configStatusMeta [display:flex] [align-items:center] [gap:6px] [flex-wrap:wrap] [min-width:0]",
   configStatusPath:
     "vui-routes-configroute configStatusPath [display:inline-flex] [align-items:center] [min-height:24px] [max-width:100%] [padding:0_8px] [border:1px_solid_var(--vui-border-subtle)] [border-radius:999px] [background:var(--vui-surface-workspace)] [color:var(--fg-secondary)] [font-family:var(--font-mono)] [font-size:var(--vui-font-xs)] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]",
+  configToolbar:
+    "vui-routes-configroute configToolbar grid min-w-0 gap-2 border-b border-[var(--vui-border-subtle)] !bg-vui-surface-panel px-3 py-2",
   content:
-    "vui-routes-configroute content [display:grid] [grid-template-rows:auto_auto_minmax(0,1fr)] [align-content:stretch] [min-width:0] [min-height:0] [height:100%] [overflow:hidden]",
+    "vui-routes-configroute content flex min-h-0 min-w-0 h-full flex-col overflow-hidden !bg-vui-surface-panel",
   pageViewport:
     "vui-routes-configroute pageViewport [display:grid] [align-content:start] [gap:12px] min-w-0 min-h-0 overflow-y-auto overflow-x-hidden [padding:12px] [scrollbar-gutter:stable] [&:has(>_.providerModelsLayout)]:[align-content:stretch] [&:has(>_.providerModelsLayout)]:[grid-template-rows:minmax(0,1fr)]",
   contentModels:

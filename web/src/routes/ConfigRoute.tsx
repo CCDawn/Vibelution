@@ -71,8 +71,8 @@ import {
   VCheckbox,
   VInput,
   VPanelHeader,
-  VRouteHeader,
   VSection,
+  VSettingsFormPage,
   VStatusStrip,
   VStringSelect,
   VStateSurface,
@@ -3484,7 +3484,7 @@ export function ConfigRoute() {
 
   if (!draftConfig && workspaceQuery.isLoading) {
     return (
-      <div className={styles.page}>
+      <div className={styles.page} data-vui-recipe="config-settings-workbench">
         <ConfigWorkspacePlaceholderPanel title={copy.loading} />
       </div>
     );
@@ -3492,7 +3492,7 @@ export function ConfigRoute() {
 
   if (!draftConfig || !workspace) {
     return (
-      <div className={styles.page}>
+      <div className={styles.page} data-vui-recipe="config-settings-workbench">
         <ConfigWorkspacePlaceholderPanel
           title={copy.loadFailed}
           subtitle={workspaceQuery.error instanceof Error ? workspaceQuery.error.message : ""}
@@ -3503,7 +3503,7 @@ export function ConfigRoute() {
   }
 
   return (
-    <div className={styles.page}>
+    <div className={styles.page} data-vui-recipe="config-settings-workbench">
       {leaveGuardOpen ? (
         <div className={styles.leaveGuardOverlay}>
           <VSurface
@@ -3559,69 +3559,72 @@ export function ConfigRoute() {
         ) : undefined}
       />
 
-      <VSurface
-        as="section"
+      <VSettingsFormPage
+        ariaLabel={activeGroup?.title ?? copy.pageTitle}
         className={styles.content}
-        padding="none"
+        data-vui-region="config-settings-main"
+        headerClassName={styles.configHeader}
+        bodyClassName="!gap-0 !overflow-hidden !content-stretch"
+        eyebrow="Config"
+        title={activeGroup?.title ?? copy.pageTitle}
+        actions={
+          <div className={styles.configStatusActions}>
+            <VButton
+              type="button"
+              className={styles.actionButton}
+              isDisabled={Boolean(busyAction)}
+              onClick={() => {
+                void reloadWorkspace();
+              }}
+            >
+              <RotateCcw size={14} />
+              {copy.refresh}
+            </VButton>
+            <VButton
+              type="button"
+              variant="primary"
+              className={styles.primaryButton}
+              isDisabled={!canSaveConfig || Boolean(busyAction)}
+              onClick={() => {
+                void handleApply();
+              }}
+            >
+              <Save size={14} />
+              {saveButtonLabel}
+            </VButton>
+          </div>
+        }
+        toolbar={
+          <div className={styles.configToolbar}>
+            <VStatusStrip
+              className={styles.configStatusMeta}
+              items={[
+                {
+                  label: copy.configStatus,
+                  value: hasPendingApply ? copy.unsavedDraft : copy.syncedDraft,
+                  tone: hasPendingApply ? "warning" : "success",
+                },
+                { label: copy.settingsNextStep, value: sidebarNextStepLabel, tone: "info" },
+                {
+                  label: copy.configPath,
+                  value: (
+                    <span className={styles.configStatusPath} title={workspace.configPath}>
+                      {workspace.configPath}
+                    </span>
+                  ),
+                },
+              ]}
+            />
+            <ConfigSettingsPageTabs
+              language={currentLanguage}
+              group={activeGroup}
+              activePageId={activePage?.id ?? ""}
+              onSelectPage={handleSelectPage}
+            />
+          </div>
+        }
       >
-        <div className={styles.configHeader}>
-          <VRouteHeader
-            className={styles.configStatusCopy}
-            eyebrow="Config"
-            title={activeGroup?.title ?? copy.pageTitle}
-            actions={
-              <div className={styles.configStatusActions}>
-                <VButton
-                  type="button"
-                  className={styles.actionButton}
-                  isDisabled={Boolean(busyAction)}
-                  onClick={() => {
-                    void reloadWorkspace();
-                  }}
-                >
-                  <RotateCcw size={14} />
-                  {copy.refresh}
-                </VButton>
-                <VButton
-                  type="button"
-                  variant="primary"
-                  className={styles.primaryButton}
-                  isDisabled={!canSaveConfig || Boolean(busyAction)}
-                  onClick={() => {
-                    void handleApply();
-                  }}
-                >
-                  <Save size={14} />
-                  {saveButtonLabel}
-                </VButton>
-              </div>
-            }
-          />
-          <VStatusStrip
-            className={styles.configStatusMeta}
-            items={[
-              {
-                label: copy.configStatus,
-                value: hasPendingApply ? copy.unsavedDraft : copy.syncedDraft,
-                tone: hasPendingApply ? "warning" : "success",
-              },
-              { label: copy.settingsNextStep, value: sidebarNextStepLabel, tone: "info" },
-              {
-                label: copy.configPath,
-                value: <span className={styles.configStatusPath} title={workspace.configPath}>{workspace.configPath}</span>,
-              },
-            ]}
-          />
-        </div>
-
-        <ConfigSettingsPageTabs
-          language={currentLanguage}
-          group={activeGroup}
-          activePageId={activePage?.id ?? ""}
-          onSelectPage={handleSelectPage}
-        />
-
-        <div ref={contentViewportRef} className={styles.pageViewport}>
+        <div ref={contentViewportRef} className={styles.pageViewport} data-vui-region="config-settings-body">
 
         {notice.text ? (
           <div
@@ -3668,13 +3671,13 @@ export function ConfigRoute() {
               <>
                 <VSection
                   title="模型连接"
-                  eyebrow="推荐：先快速配置"
-                  tooltip="首次请用「快速配置」：选服务商 → 填 Key → 检测 → 固定模型 → 保存。管理页只用于已有连接与排障。"
+                  eyebrow="推荐路径：发现 → 固定 → 保存 → Agent 选用"
+                  tooltip="首次用「快速配置」接好第一个模型。已有中转站时：② 管理与固定 →「模型库 · 固定」→「固定全部已发现」→ 顶部保存。"
                   tooltipLabel="模型连接工作台说明"
                   actions={(
                     <VActionGroup ariaLabel="Provider 工作区模式">
-                      <VButton tooltip="最短路径：服务商 + 凭据 + 检测 + 固定模型。" className={styles.providerModeButton} aria-pressed={providerWorkspaceMode === "quick"} variant={providerWorkspaceMode === "quick" ? "primary" : "ghost"} onPress={() => setProviderWorkspaceMode("quick")}>① 快速配置</VButton>
-                      <VButton tooltip="已连接服务、固定模型目录、发现与排障。" className={styles.providerModeButton} aria-pressed={providerWorkspaceMode === "manage"} variant={providerWorkspaceMode === "manage" ? "primary" : "ghost"} onPress={() => setProviderWorkspaceMode("manage")}>② 管理已有连接</VButton>
+                      <VButton tooltip="最短路径：服务商 + 凭据 + 检测 + 固定 1 个模型。" className={styles.providerModeButton} aria-pressed={providerWorkspaceMode === "quick"} variant={providerWorkspaceMode === "quick" ? "primary" : "ghost"} onPress={() => setProviderWorkspaceMode("quick")}>① 快速配置</VButton>
+                      <VButton tooltip="已有连接：发现目录、一键固定全部、逐个固定、测试与排障。" className={styles.providerModeButton} aria-pressed={providerWorkspaceMode === "manage"} variant={providerWorkspaceMode === "manage" ? "primary" : "ghost"} onPress={() => setProviderWorkspaceMode("manage")}>② 管理与固定</VButton>
                       <VButton tooltip="模板、路由与底层参数（进阶）。" className={styles.providerModeButton} aria-pressed={providerWorkspaceMode === "advanced"} variant={providerWorkspaceMode === "advanced" ? "primary" : "ghost"} onPress={() => setProviderWorkspaceMode("advanced")}>③ 高级设置</VButton>
                     </VActionGroup>
                   )}
@@ -3740,6 +3743,9 @@ export function ConfigRoute() {
                     setProviderCredentialEditId("");
                     setProviderCredentialValue("");
                     handleBeginProviderRouteEdit(providerId);
+                  }}
+                  onPin={(providerId, models) => {
+                    void handlePinProviderModels(providerId, models);
                   }}
                   onUnpin={(modelRef) => {
                     void handleUnpinProviderModel(modelRef);
@@ -4054,7 +4060,7 @@ export function ConfigRoute() {
           />
         ) : null}
         </div>
-      </VSurface>
+      </VSettingsFormPage>
     </div>
   );
 }

@@ -1,11 +1,12 @@
 # VUI 前端统一 Wave 3：密度几何与 product shell 搭页
 
 **Date:** 2026-07-24
-**Status:** in progress（3A 完成；**3B 示范页 = 会话页 Chat session workbench**）
+**Status:** 3A–3C + 3B-alt(Config) complete；Tools 3B-alt / 3D 可选
 **Owner:** `web-workbench-surface` / VUI design-system owner
 **Mode:** `TASK_GRAPH`
 **Risk:** `STANDARD_TASK`
 **Depends on:** Wave 0–2 完成（surface token、recipes、alpha policy、壳层 opaque）
+**3C map:** `docs/superpowers/plans/2026-07-24-vui-wave3c-reference-lab-token-map.md`
 
 ## 0. 目标
 
@@ -26,8 +27,10 @@
 
 ```
 Wave 3A  chrome density recipes（quiet control / icon / pill）+ AppShell 与高频 style map 消费  ✅
-Wave 3B  示范页：会话页 Chat（domain shell composition）                                   ✅ 本轮
-Wave 3C  Reference Lab ↔ tokens 映射表
+Wave 3B  示范页：会话页 Chat（domain shell composition）                                   ✅
+Wave 3C  Reference Lab ↔ tokens 映射表 + 契约测试                                         ✅
+Wave 3B-alt  Config：`config-settings-workbench` + `VSettingsFormPage`                     ✅
+Wave 3B-alt2 Tools dense-ops（可选）                                                      ⏳
 Wave 3D  （可选）第二仓库时再评估 registry
 ```
 
@@ -74,9 +77,11 @@ Wave 3D  （可选）第二仓库时再评估 registry
 
 1. 高频 quiet control 串主要走 chrome recipe ✅ 3A
 2. 至少 1 条示范路径 composition 可测 ✅ 3B Chat 会话页
-3. （可选）另 1 条通用 page recipe 示范：Config 或 Tools
-4. Lab 映射文档存在（3C）
-5. 不回退 Wave 2 surface 契约
+3. 另 1 条通用 page recipe 示范：Config settings-form ✅ 3B-alt（`vuiWave3ConfigCompositionContract.test.ts`）
+4. Lab 映射文档存在 ✅ 3C（见 `2026-07-24-vui-wave3c-reference-lab-token-map.md` + `vuiWave3cLabTokenMapContract.test.ts`）
+5. 不回退 Wave 2 surface 契约 ✅ 既有 alpha / composition 测试仍守护
+
+**Wave 3 主路径收口：** 3A–3C + Config 3B-alt 已交付；Tools dense-ops / 3D 为增强项。
 
 ## 5. 与 Wave 2 关系
 

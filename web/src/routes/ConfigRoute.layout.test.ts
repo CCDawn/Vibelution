@@ -384,7 +384,8 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("const activeEditorSections = (activePage?.memberSectionIds ?? [])");
     expect(routeSource).toContain(".map((sectionId) => editorSectionById.get(sectionId))");
     expect(styles.page).toContain("[grid-template-rows:minmax(0,1fr)]");
-    expect(styles.content).toContain("[grid-template-rows:auto_auto_minmax(0,1fr)]");
+    expect(styles.content).toContain("flex");
+    expect(styles.content).toContain("h-full");
     expect(styles.pageViewport).toContain("overflow-y-auto");
     expect(styles.pageViewport).toContain("[&:has(>_.providerModelsLayout)]:[align-content:stretch]");
     expect(styles.pageViewport).toContain("[&:has(>_.providerModelsLayout)]:[grid-template-rows:minmax(0,1fr)]");
@@ -451,7 +452,9 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("subtitleHint");
     expect(routeSource).toContain('subtitleHint={copy.subtitleHint}');
     expect(overviewPanelSource).toContain("sourceBodyShort");
-    expect(providerPanelSource).toContain("Provider 与模型工作台");
+    expect(providerPanelSource).toContain("管理与固定模型");
+    expect(providerPanelSource).toContain("固定全部已发现");
+    expect(routeSource).toContain('tooltipLabel="模型连接工作台说明"');
     expect(overviewPanelSource).toContain('title={copy.sourceBody}');
     expect(providerPanelSource).toContain('title={provider.providerId}');
     expect(routeSource).toContain('title={copy.openEnvironmentHint}');
@@ -487,7 +490,7 @@ describe("ConfigRoute layout contract", () => {
 
   it("keeps the model settings group dense enough to use the bottom viewport", () => {
     expect(routeSource).toContain('isSectionVisible("models")');
-    expect(styles.content).toContain("[grid-template-rows:auto_auto_minmax(0,1fr)]");
+    expect(styles.content).toContain("overflow-hidden");
     expect(styles.pageViewport).toContain("min-h-0");
     expect(routeSource).toContain("<ConfigProviderRegistryPanel");
     expect(providerPanelSource).toContain('id="config-models"');
@@ -511,7 +514,7 @@ describe("ConfigRoute layout contract", () => {
     expect(providerPanelStylesSource).not.toMatch(/\bsurface-card\b(?!\))/);
     expect(providerPanelStylesSource).toContain("vuiSurfaceRecipes");
     expect(providerPanelStyles.sectionSurface).toContain("rounded-[var(--radius-panel)]");
-    expect(providerPanelStyles.sectionSurface).toContain("!bg-[var(--vui-surface-panel)]");
+    expect(providerPanelStyles.sectionSurface).toMatch(/!bg-vui-surface-panel|!bg-\[var\(--vui-surface-panel\)\]/);
     expect(providerPanelStyles.registryWorkspace).toContain("[--vui-workspace-sidebar:clamp(18rem,26vw,24rem)]");
     expect(providerPanelStyles.providerList).toContain("overflow-y-auto");
     expect(providerPanelStyles.tableScroll).toContain("h-full");
@@ -573,6 +576,8 @@ describe("ConfigRoute layout contract", () => {
   it("keeps the settings workbench readable over custom backgrounds with a bounded draft editor", () => {
     expect(routeSource).toContain("styles.configHeader");
     expect(routeSource).toContain("styles.configStatusActions");
+    expect(routeSource).toContain("VSettingsFormPage");
+    expect(routeSource).toContain('data-vui-recipe="config-settings-workbench"');
     expect(routeSource).toContain("<ConfigSettingsSidebar");
     expect(routeSource).not.toContain("styles.sidebarMetaStrip");
     expect(routeSource).not.toContain("styles.sidebarStatusCompact");
@@ -585,6 +590,7 @@ describe("ConfigRoute layout contract", () => {
     expect(styles.page).toContain("[background:var(--vui-surface-workspace)]");
     expect(stylesSource).toContain("configHeader:");
     expect(styles.configHeader).toMatch(/bg-vui-surface-panel|var\(--vui-surface-panel\)/);
+    expect(styles.content).toMatch(/!bg-vui-surface-panel|bg-vui-surface-panel/);
 
     expect(draftPanelSource).toContain("styles.draftWorkbench");
     expect(draftPanelSource).toContain("styles.draftActionRail");
@@ -909,7 +915,7 @@ describe("ConfigRoute layout contract", () => {
     expect(styles.treeFieldValue).toContain("color-mix(in_srgb,var(--vui-surface-workspace)_92%,var(--vui-surface-panel))");
     expect(healthDiagnosticsPanelStylesSource).toContain("vuiSurfaceRecipes");
     expect(healthDiagnosticsPanelStyles.sectionSurface).toMatch(/bg-vui-surface-panel|var\(--vui-surface-panel\)/);
-    expect(healthDiagnosticsPanelStyles.findingCard).toContain("var(--vui-surface-row)");
+    expect(healthDiagnosticsPanelStyles.findingCard).toMatch(/bg-vui-surface-row|var\(--vui-surface-row\)/);
   });
 
   it("keeps extracted Config panels on local VUI/Tailwind surface contracts", () => {
@@ -920,7 +926,7 @@ describe("ConfigRoute layout contract", () => {
     expect(overviewPanelStyles.sectionSurface).toMatch(/bg-vui-surface-panel|var\(--vui-surface-panel\)/);
     expect(runtimePanelStyles.segmented).toContain("[background:var(--vui-surface-toolbar)]");
     expect(draftPanelStyles.actionButton).toContain("var(--vui-control-muted)");
-    expect(healthDiagnosticsPanelStyles.findingCard).toContain("var(--vui-surface-row)");
+    expect(healthDiagnosticsPanelStyles.findingCard).toMatch(/bg-vui-surface-row|var\(--vui-surface-row\)/);
     expect(providerPanelStyles.sectionSurface).toMatch(/bg-vui-surface-panel|var\(--vui-surface-panel\)/);
     expect(placeholderPanelStyles.loadingBoard).toMatch(/bg-vui-surface-panel|var\(--vui-surface-panel\)/);
     expect(extractedPanelStylesSource).not.toContain("[background:var(--vui-gradient-route-soft),var(--surface-panel)]");
@@ -942,7 +948,8 @@ describe("ConfigRoute layout contract", () => {
     expect(runtimePanelSource).toContain("headerClassName={styles.sectionHeader}");
     expect(healthDiagnosticsPanelSource).toContain("headerClassName={styles.sectionHeader}");
     expect(diagnosisPanelSource).toContain("headerClassName={styles.sectionHeader}");
-    expect((routeSource.match(/<VRouteHeader\b/g) ?? []).length).toBe(1);
+    // Header chrome lives inside VSettingsFormPage (settings-form-page recipe).
+    expect(routeSource).toContain("VSettingsFormPage");
     expect(routeSource).not.toMatch(/<VRouteHeader[\s\S]*?<VStatusStrip[\s\S]*?<\/VRouteHeader>/);
     expect(styles.configHeader).toContain("[grid-template-columns:minmax(0,1fr)]");
   });
@@ -951,12 +958,13 @@ describe("ConfigRoute layout contract", () => {
     expect(placeholderPanelSource).toContain("VRouteHeader");
     expect(placeholderPanelSource).not.toContain("<VPanelHeader");
     expect(routeSource).toContain("<ConfigSettingsSidebar");
-    expect((routeSource.match(/<VRouteHeader\b/g) ?? []).length).toBe(1);
+    expect(routeSource).toContain("VSettingsFormPage");
+    expect(routeSource).toContain('title={activeGroup?.title ?? copy.pageTitle}');
   });
 
   it("routes Config controls through VUI primitives", () => {
     expect(routeSource).toContain('from "../components/vui"');
-    expect(routeSource).toContain("VRouteHeader");
+    expect(routeSource).toContain("VSettingsFormPage");
     expect(routeSource).toContain("VStatusStrip");
     expect(routeSource).toContain("VStringSelect");
     expect(configSources).toContain("<VButton");

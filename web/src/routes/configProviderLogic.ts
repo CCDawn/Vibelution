@@ -60,16 +60,25 @@ export function deriveProviderMergeCandidate(
 export type ProviderModelFilter = "all" | "pinned" | "discovered" | "unavailable";
 
 export type ProviderModelActionState =
+  | { kind: "pin"; label: "固定到配置"; disabled: boolean; reason: string }
   | { kind: "unpin"; label: "取消固定"; disabled: boolean; reason: string }
   | { kind: "in_use"; label: "使用中"; referenceCount: number }
-  | { kind: "not_pinned"; label: "未固定" }
-  | { kind: "unavailable"; label: "不可用" };
+  | { kind: "unavailable"; label: "不可用" | "不可固定" };
 
 const PROVIDER_MODEL_AVAILABILITY_GROUPS: Record<Exclude<ProviderModelFilter, "all">, ReadonlySet<string>> = {
   pinned: new Set(["pinned", "missing_remote"]),
   discovered: new Set(["observed", "capability_unknown", "protocol_unknown", "unknown"]),
   unavailable: new Set(["disabled"]),
 };
+
+/** Models that can be added to the usable library via pin. */
+export function canPinProviderModel(model: ConfigCatalogModel): boolean {
+  return PROVIDER_MODEL_AVAILABILITY_GROUPS.discovered.has(model.availability);
+}
+
+export function pinnableProviderModels(models: readonly ConfigCatalogModel[]): ConfigCatalogModel[] {
+  return models.filter((model) => canPinProviderModel(model));
+}
 
 export function filterProviderModels(
   models: ConfigCatalogModel[],
@@ -470,8 +479,21 @@ export function deriveProviderModelActionState(
   if (model.availability === "disabled") {
     return { kind: "unavailable", label: "不可用" };
   }
+  if (canPinProviderModel(model)) {
+    return {
+      kind: "pin",
+      label: "固定到配置",
+      disabled,
+      reason: disabled
+        ? "当前配置操作不可用"
+        : "固定后写入模型库，保存配置即可在 Agent 中选用",
+    };
+  }
   if (!canUnpinProviderModel(row, model)) {
-    return { kind: "not_pinned", label: "未固定" };
+    return {
+      kind: "unavailable",
+      label: "不可固定",
+    };
   }
   if (liveReferenceCount > 0) {
     return { kind: "in_use", label: "使用中", referenceCount: liveReferenceCount };

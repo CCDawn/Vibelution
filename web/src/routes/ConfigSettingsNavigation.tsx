@@ -133,7 +133,7 @@ export function ConfigSettingsSidebar({
 }: ConfigSettingsSidebarProps) {
   const sidebarHelp = subtitleHint || subtitle;
   return (
-    <aside className={styles.sidebar}>
+    <aside className={styles.sidebar} data-vui-region="config-settings-nav">
       <header className={styles.sidebarHeader}>
         <p className={styles.eyebrow}>{language === "zh" ? "设置" : "Settings"}</p>
         <div className={styles.titleRow}>
