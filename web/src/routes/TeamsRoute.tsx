@@ -3585,6 +3585,49 @@ export function TeamsRoute({
     const selectedExperimentResearchMode =
       experimentPlanningStatus?.activePlan?.experimentContract?.researchMode ?? "full_research_loop";
     const selectedExperimentAdapter = selectedExperimentMethodDescriptor?.adapterAvailability[selectedExperimentResearchMode];
+    const selectedExperimentRegisteredAdapters = experimentMethodCatalogQuery.data?.adapters.filter(
+      (adapter) => adapter.method === selectedExperimentMethod && adapter.availability === "available",
+    ) ?? [];
+    const selectedExperimentPlanningOnly = Boolean(
+      selectedExperimentAdapter?.unavailableReason?.toLowerCase().includes("not required"),
+    );
+    const selectedExperimentAdapterStatus = selectedExperimentAdapter?.resolvedAdapterId
+      ? "ready"
+      : selectedExperimentRegisteredAdapters.length > 0
+        ? "select_required"
+        : selectedExperimentPlanningOnly
+          ? "not_required"
+          : "blocked";
+    const selectedExperimentAdapterLabel = selectedExperimentAdapterStatus === "ready"
+      ? (lang === "zh" ? "执行器可用" : "Adapter ready")
+      : selectedExperimentAdapterStatus === "select_required"
+        ? (lang === "zh" ? "需选择执行器" : "Select an adapter")
+        : selectedExperimentAdapterStatus === "not_required"
+          ? (lang === "zh" ? "无需执行器" : "Adapter not required")
+          : (lang === "zh" ? "执行器阻塞" : "Adapter blocked");
+    const selectedExperimentAdapterReason = selectedExperimentAdapterStatus === "ready"
+      ? `${selectedExperimentAdapter?.resolvedAdapterId} · ${selectedExperimentAdapter?.selectionSource}`
+      : selectedExperimentAdapterStatus === "select_required"
+        ? (lang === "zh"
+          ? `已发现 ${selectedExperimentRegisteredAdapters.length} 个可用执行器，进入配置页后明确选择。`
+          : `${selectedExperimentRegisteredAdapters.length} available adapter(s); choose one in setup.`)
+        : selectedExperimentAdapterStatus === "not_required"
+          ? (lang === "zh"
+            ? "当前闭环只生成假设与研究计划，不会启动真实实验。"
+            : "This loop only generates hypotheses and a plan; no real experiment starts.")
+          : (lang === "zh"
+            ? `当前“${selectedExperimentMethodDescriptor?.labelZh || selectedExperimentMethod}”没有已注册且可用的执行器。`
+            : (selectedExperimentAdapter?.unavailableReason || "No registered adapter is available for this method."));
+    const executableAlternativeMethods = experimentMethodCatalogQuery.data?.methods.filter((method) => {
+      if (method.methodId === selectedExperimentMethod) {
+        return false;
+      }
+      const automaticAdapter = method.adapterAvailability[selectedExperimentResearchMode]?.resolvedAdapterId;
+      const explicitAdapter = experimentMethodCatalogQuery.data?.adapters.some(
+        (adapter) => adapter.method === method.methodId && adapter.availability === "available",
+      );
+      return Boolean(automaticAdapter || explicitAdapter);
+    }).slice(0, 2) ?? [];
     const selectedExperimentMethodRoute = `${researchWorkspaceStageRoute(
       selectedTeam?.teamId || RESEARCH_TEAM_ID,
       "experiment",
@@ -3967,16 +4010,29 @@ export function TeamsRoute({
                             ? (lang === "zh" ? "读取方式中" : "Loading methods")
                             : (lang === "zh" ? "方式目录不可用" : "Method catalog unavailable"))}
                       </span>
-                      <span className={selectedExperimentAdapter?.resolvedAdapterId ? styles.researchExperimentMethodReady : styles.researchExperimentMethodPending}>
-                        {selectedExperimentAdapter?.resolvedAdapterId
-                          ? (lang === "zh" ? "执行器可用" : "Adapter ready")
-                          : (lang === "zh" ? "需配置执行器" : "Adapter setup required")}
+                      <span className={["ready", "not_required"].includes(selectedExperimentAdapterStatus) ? styles.researchExperimentMethodReady : styles.researchExperimentMethodPending}>
+                        {selectedExperimentAdapterLabel}
                       </span>
                       <Link to={selectedExperimentMethodRoute}>
                         <Settings2 size={13} />
                         {lang === "zh" ? "配置方法" : "Configure"}
                       </Link>
                     </div>
+                    <p className={styles.researchExperimentMethodReason}>{selectedExperimentAdapterReason}</p>
+                    {selectedExperimentAdapterStatus === "blocked" && executableAlternativeMethods.length > 0 ? (
+                      <div className={styles.researchExperimentMethodAlternatives}>
+                        <span>{lang === "zh" ? "可执行替代" : "Executable alternatives"}</span>
+                        {executableAlternativeMethods.map((method) => (
+                          <VNativeButton
+                            key={method.methodId}
+                            type="button"
+                            onClick={() => setPreferredExperimentMethod(method.methodId)}
+                          >
+                            {lang === "zh" ? method.labelZh : method.labelEn}
+                          </VNativeButton>
+                        ))}
+                      </div>
+                    ) : null}
                   </div>
                 ) : null}
                 {challengeProgramProjection ? (
