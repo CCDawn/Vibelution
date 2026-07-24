@@ -137,8 +137,8 @@ describe("SupervisedReviewRoute layout contract", () => {
 
     expect(styles.factCard).toContain("min-w-0");
     expect(styles.metricCard).toContain("min-w-0");
-    expect(styles.evidenceCard).toContain("var(--vui-surface-row)");
-    expect(styles.transcriptCard).toContain("var(--vui-surface-row)");
+    expect(styles.evidenceCard).toMatch(/bg-vui-surface-row|var\(--vui-surface-row\)/);
+    expect(styles.transcriptCard).toMatch(/bg-vui-surface-row|var\(--vui-surface-row\)/);
   });
 
   it("keeps review actions content-sized while preserving danger emphasis", () => {

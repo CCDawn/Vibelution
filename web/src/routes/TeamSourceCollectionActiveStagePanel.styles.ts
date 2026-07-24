@@ -17,7 +17,7 @@ const styles = {
   sourceCollectionStageHandoffNext:
     "sourceCollectionStageHandoffNext min-w-0 text-[var(--fg-primary)]",
   sourceCollectionStagePrimaryAction:
-    `sourceCollectionStagePrimaryAction min-w-0 flex flex-wrap items-center justify-center gap-1.5 ${vuiStateSelectedRowClass} w-full max-w-full`,
+    `sourceCollectionStagePrimaryAction min-w-0 flex w-fit max-w-full flex-wrap items-center justify-center gap-1.5 ${vuiStateSelectedRowClass}`,
   sourceCollectionStageResult:
     "sourceCollectionStageResult min-w-0 col-start-1 row-start-1 row-span-2 grid h-full min-h-0 overflow-hidden max-[1020px]:col-start-1 max-[1020px]:row-start-3 max-[1020px]:row-span-1 max-[1020px]:h-auto max-[1020px]:min-h-[560px] max-[1020px]:overflow-visible",
   sourceCollectionStageSecondaryAction:

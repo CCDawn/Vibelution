@@ -26,6 +26,11 @@ const productSharedParentStyleConsumers = [
   "routes/chat/TokenCoreStatusPanel.tsx",
   "routes/chat/useChatWorkbenchLayout.ts",
 ] as const;
+const designSystemSourceFiles = new Set([
+  "design/vuiChromeRecipes.ts",
+  "design/vuiSurfaceAlphaPolicy.ts",
+  "design/vuiSurfaceRecipes.ts",
+]);
 
 function walkFiles(dir: string): string[] {
   const entries = readdirSync(dir);
@@ -152,6 +157,7 @@ describe("VUI architecture boundary", () => {
       .filter((file) => routeSourceExtensions.has(extname(file)))
       .map(relativeFromSourceRoot)
       .filter((file) => !allowedRoots.some((root) => file.startsWith(root)))
+      .filter((file) => !designSystemSourceFiles.has(file))
       .filter((file) => !allowedSuffixes.some((suffix) => file.endsWith(suffix)))
       .filter((file) => localVisualClassConstantPattern.test(readText(join(sourceRoot, file))));
 
@@ -171,6 +177,7 @@ describe("VUI architecture boundary", () => {
       .filter((file) => routeSourceExtensions.has(extname(file)))
       .map(relativeFromSourceRoot)
       .filter((file) => !allowedRoots.some((root) => file.startsWith(root)))
+      .filter((file) => !designSystemSourceFiles.has(file))
       .filter((file) => !allowedSuffixes.some((suffix) => file.endsWith(suffix)))
       .filter((file) => localStylesObjectPattern.test(readText(join(sourceRoot, file))));
 
@@ -191,6 +198,7 @@ describe("VUI architecture boundary", () => {
       .filter((file) => routeSourceExtensions.has(extname(file)))
       .map(relativeFromSourceRoot)
       .filter((file) => !allowedRoots.some((root) => file.startsWith(root)))
+      .filter((file) => !designSystemSourceFiles.has(file))
       .filter((file) => !allowedSuffixes.some((suffix) => file.endsWith(suffix)))
       .filter((file) => {
         const source = readText(join(sourceRoot, file));
@@ -215,6 +223,7 @@ describe("VUI architecture boundary", () => {
       .filter((file) => routeSourceExtensions.has(extname(file)))
       .map(relativeFromSourceRoot)
       .filter((file) => !allowedRoots.some((root) => file.startsWith(root)))
+      .filter((file) => !designSystemSourceFiles.has(file))
       .filter((file) => !allowedSuffixes.some((suffix) => file.endsWith(suffix)))
       .filter((file) => {
         const source = readText(join(sourceRoot, file));

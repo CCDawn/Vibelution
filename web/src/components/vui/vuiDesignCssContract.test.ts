@@ -3,10 +3,16 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const designRoot = resolve(import.meta.dirname, "../../design");
+const isolatedReferenceArtifacts = new Set(["vui-reference-lab.css"]);
 
 function collectCssMatches(pattern: RegExp): string[] {
   return readdirSync(designRoot)
-    .filter((name) => name.endsWith(".css") && name !== "tokens.css")
+    .filter(
+      (name) =>
+        name.endsWith(".css")
+        && name !== "tokens.css"
+        && !isolatedReferenceArtifacts.has(name),
+    )
     .flatMap((name) => {
       const source = readFileSync(resolve(designRoot, name), "utf8");
       return [...source.matchAll(pattern)].map((match) => {

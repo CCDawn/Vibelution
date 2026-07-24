@@ -19,7 +19,11 @@ import selfEvolutionStylesSource from "./SelfEvolutionTrack.styles.ts?raw";
 
 const backgroundTokens = (className: string) =>
   className.split(/\s+/).filter((token) =>
-    token.startsWith("bg-[") || token.startsWith("bg-vui-") || token.startsWith("[background:"),
+    token.startsWith("bg-[")
+    || token.startsWith("!bg-[")
+    || token.startsWith("bg-vui-")
+    || token.startsWith("!bg-vui-")
+    || token.startsWith("[background:"),
   );
 
 const expectBackgroundAware = (className: string) => {

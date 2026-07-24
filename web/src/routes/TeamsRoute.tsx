@@ -10086,7 +10086,7 @@ export function TeamsRoute({
           <div className={challengeCupResearchTeamSelected && !researchCanvasVisible ? styles.challengeWorkspaceBody : styles.inspectorBody}>
             {challengeCupResearchTeamSelected && !researchCanvasVisible ? (
               <nav className={styles.challengeSurfaceSwitch} aria-label={lang === "zh" ? "挑战杯平台视图" : "Challenge Cup platform view"}>
-                <button
+                <VNativeButton
                   type="button"
                   className={challengeTeamSurface === "workspace" ? styles.challengeSurfaceSwitchActive : ""}
                   aria-current={challengeTeamSurface === "workspace" ? "page" : undefined}
@@ -10094,8 +10094,8 @@ export function TeamsRoute({
                 >
                   <strong>{lang === "zh" ? "科研工作台" : "Research workspace"}</strong>
                   <span>{lang === "zh" ? "三阶段流程、实验方式与 Agent 操作" : "Three stages, experiment modes, and Agent operations"}</span>
-                </button>
-                <button
+                </VNativeButton>
+                <VNativeButton
                   type="button"
                   className={challengeTeamSurface === "progress" ? styles.challengeSurfaceSwitchActive : ""}
                   aria-current={challengeTeamSurface === "progress" ? "page" : undefined}
@@ -10103,7 +10103,7 @@ export function TeamsRoute({
                 >
                   <strong>{lang === "zh" ? "项目进展" : "Program progress"}</strong>
                   <span>{lang === "zh" ? "挑战杯任务、验收门禁与交付状态" : "Challenge task, acceptance gates, and delivery"}</span>
-                </button>
+                </VNativeButton>
               </nav>
             ) : null}
             {researchWorkflowTeamSelected && !researchCanvasVisible ? (

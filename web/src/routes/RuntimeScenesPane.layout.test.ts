@@ -5,7 +5,13 @@ import stylesSource from "./RuntimeScenesPane.styles.ts?raw";
 import paneSource from "./RuntimeScenesPane.tsx?raw";
 
 const backgroundTokens = (className: string) =>
-  className.split(/\s+/).filter((token) => token.startsWith("bg-[") || token.startsWith("!bg-[") || token.startsWith("!bg-[") || token.startsWith("[background:"));
+  className.split(/\s+/).filter((token) =>
+    token.startsWith("bg-[")
+    || token.startsWith("!bg-[")
+    || token.startsWith("bg-vui-")
+    || token.startsWith("!bg-vui-")
+    || token.startsWith("[background:"),
+  );
 
 const expectBackgroundAware = (className: string) => {
   const tokens = backgroundTokens(className);

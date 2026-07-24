@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
+import { VNativeButton } from "../../../components/vui";
 import type { ExperimentPlanningStatusPayload } from "../experimentLoopModel";
 import css from "./ChallengeCupOperationsWorkspace.module.css";
 
@@ -166,16 +167,16 @@ export function ChallengeCupOperationsWorkspace({
               <GraphMark />
               研究关系图
             </Link>
-            <button className={cx("button", "primary")} type="button" onClick={() => selectTab("questions")}>
+            <VNativeButton className={cx("button", "primary")} type="button" onClick={() => selectTab("questions")}>
               审核 {reviewRequired} 个待抽检题
               <ArrowMark />
-            </button>
+            </VNativeButton>
           </div>
         </section>
 
         <nav className={cx("section-tabs")} aria-label="挑战杯工作区">
           {(["overview", "questions", "evidence", "agents"] as WorkspaceTab[]).map((tab) => (
-            <button
+            <VNativeButton
               key={tab}
               id={`challenge-tab-${tab}`}
               className={cx("tab", activeTab === tab && "active")}
@@ -188,7 +189,7 @@ export function ChallengeCupOperationsWorkspace({
               {tabLabel(tab)}
               {tab === "questions" ? <span className={cx("tab-count")}>{questionIds.length}</span> : null}
               {tab === "agents" ? <span className={cx("tab-count")}>{agents.length}</span> : null}
-            </button>
+            </VNativeButton>
           ))}
         </nav>
 
@@ -215,9 +216,9 @@ export function ChallengeCupOperationsWorkspace({
               <span className={cx("eyebrow")}>挑战杯状态暂不可用</span>
               <h2>无法读取 MVP 投影</h2>
               <p>当前不展示旧科研流程，也不会提供可能产生错误写入的操作。团队和赛题身份仍保持可见。</p>
-              <button className={cx("button", "primary")} type="button" onClick={onRefresh} disabled={isRefreshing}>
+              <VNativeButton className={cx("button", "primary")} type="button" onClick={onRefresh} disabled={isRefreshing}>
                 {isRefreshing ? "重新读取中" : "重新读取"}
-              </button>
+              </VNativeButton>
             </div>
           </section>
         ) : (
@@ -299,7 +300,7 @@ export function ChallengeCupOperationsWorkspace({
                             <td><span className={cx("status-icon", question.machinePassed ? "success" : "warning")}>{question.machinePassed ? "通过" : "待验证"}</span></td>
                             <td>{question.machinePassed ? "已追溯" : "待生成"}</td>
                             <td><span className={cx("status-icon", question.humanApproved ? "success" : "warning")}>{question.humanApproved ? "已批准" : "待抽检"}</span></td>
-                            <td><button className={cx("text-button")} type="button" onClick={() => selectTab("questions")}>{question.humanApproved ? "查看" : "审核"}</button></td>
+                            <td><VNativeButton className={cx("text-button")} type="button" onClick={() => selectTab("questions")}>{question.humanApproved ? "查看" : "审核"}</VNativeButton></td>
                           </tr>
                         ))}
                       </tbody>
@@ -313,7 +314,7 @@ export function ChallengeCupOperationsWorkspace({
                     <h2 id="challenge-next-action-title">{reviewRequired > 0 ? `完成 ${reviewRequired} 题人工抽检` : "准备 MVP 验收记录"}</h2>
                     <p>{reviewRequired > 0 ? "机器验证已完成，但尚不能把测试题计为人工验收通过。" : "机器验证与人工审核均已完成，可进入 MVP 验收记录。"}</p>
                     <div className={cx("action-meta")}><span>预计操作</span><strong>逐题审查 · {reviewRequired} 项</strong></div>
-                    <button className={cx("button", "primary", "full")} type="button" onClick={() => selectTab("questions")}>进入人工审核</button>
+                    <VNativeButton className={cx("button", "primary", "full")} type="button" onClick={() => selectTab("questions")}>进入人工审核</VNativeButton>
                   </section>
 
                   <section className={cx("surface", "gate-summary")} aria-labelledby="challenge-gate-title">
@@ -362,9 +363,9 @@ export function ChallengeCupOperationsWorkspace({
                     <div><span>证据状态</span><strong>{question.machinePassed ? "可追溯" : "待生成"}</strong></div>
                     <div><span>假设输出</span><strong>≥ {stage1.acceptance.minimumHypothesisCount} 条</strong></div>
                     <div><span>人工状态</span><strong className={cx(question.humanApproved ? "success-text" : "warning-text")}>{question.humanApproved ? "已批准" : "待抽检"}</strong></div>
-                    <button className={cx("button", "secondary")} type="button" title="审核写入仍由现有人工门禁流程负责">
+                    <VNativeButton className={cx("button", "secondary")} type="button" title="审核写入仍由现有人工门禁流程负责">
                       {question.humanApproved ? "查看记录" : "开始审核"}
-                    </button>
+                    </VNativeButton>
                   </article>
                 ))}
               </div>
