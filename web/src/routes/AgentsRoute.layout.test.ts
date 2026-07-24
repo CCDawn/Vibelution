@@ -2187,8 +2187,12 @@ describe("AgentsRoute layout contract", () => {
     expect(stylesSource).not.toContain(".bulkSummary");
     expect(stylesSource).not.toContain(".bulkPromptPicker");
     expect(styles.agentRowBulkSelected).toContain(
-      "[background:color-mix(in_srgb,_var(--accent-cool)_10%,_var(--vui-surface-row))]",
+      "bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
     );
+    expect(styles.agentRowActive).toContain(
+      "bg-[color-mix(in_srgb,var(--accent-warm)_9%,var(--vui-surface-row))]",
+    );
+    expect(styles.agentRow).toContain("!bg-[var(--vui-surface-row)]");
     expect(bulkActionBarSource).toContain("!flex-nowrap items-center overflow-x-auto");
     expect(bulkActionBarSource).toContain("flex-[0_0_190px]");
     expect(bulkActionBarSource).toContain("min-h-[74px] overflow-hidden");

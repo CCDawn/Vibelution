@@ -1,5 +1,6 @@
 import {
   vuiOpaqueRowClass,
+  vuiStateSelectedRowFillClass,
 } from "../design/vuiSurfaceRecipes";
 
 const panelSurface =
@@ -98,7 +99,7 @@ export const gitRouteStyles = {
   commitAuthor:
     "block m-0 mt-0.5 min-h-[1.2em] min-w-0 max-w-full overflow-hidden text-ellipsis whitespace-nowrap font-normal leading-tight [font-size:var(--vui-font-xs)] [color:var(--fg-secondary)]",
   objectItemActive:
-    "border-[color-mix(in_srgb,var(--accent-cool)_40%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] shadow-[var(--vui-shadow-inset-accent)]",
+    `border-[color-mix(in_srgb,var(--accent-cool)_40%,transparent)] ${vuiStateSelectedRowFillClass} shadow-[var(--vui-shadow-inset-accent)]`,
   manualCommitPanel:
     "grid min-h-0 max-h-[min(100%,calc(100dvh-178px))] content-start gap-2 overflow-auto border-b border-[var(--border-soft)] pb-2 max-[1200px]:row-span-2 max-[1200px]:border-b-0 max-[1200px]:border-r max-[1200px]:pb-0 max-[1200px]:pr-3 max-[860px]:row-auto max-[860px]:max-h-none max-[860px]:overflow-visible max-[860px]:border-b max-[860px]:border-r-0 max-[860px]:pb-3 max-[860px]:pr-0",
   commitScopeBox: `grid gap-2 ${rowSurface} p-[9px]`,

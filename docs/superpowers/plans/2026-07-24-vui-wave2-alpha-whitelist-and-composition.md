@@ -1,7 +1,7 @@
 # VUI 前端统一 Wave 2：alpha 白名单、残余消费与组合搭页
 
 **Date:** 2026-07-24
-**Status:** in progress（2A 契约已落地；2B 状态 recipe 已落地；2C–2E 待做）
+**Status:** closed-enough（2A–2E 工程项完成；2C 视觉 H 格待操作者补签）
 **Owner:** `web-workbench-surface` / VUI design-system owner
 **Mode:** `TASK_GRAPH`
 **Risk:** `STANDARD_TASK`
@@ -137,15 +137,21 @@ Wave 2E  （可选）高流量 color-mix 热点压缩：Research / Tools
 
 ## 6. Wave 2C — 代表页手测验收
 
+**状态：部分完成（2026-07-24）** — 自动化矩阵与清单见
+`docs/superpowers/evidence/2026-07-24-vui-wave2/CHECKLIST.md`。
+深/浅色 + 背景图 **视觉格** 仍需操作者 Launcher 刷新后补签。
+
 ### 6.1 页面与矩阵
 
 | 页面 | 深色 | 浅色 | 无背景图 | 有背景图 | 窄视口 ≤860 |
 |---|---|---|---|---|---|
-| Chat | ☐ | ☐ | ☐ | ☐ | ☐ |
-| Agents | ☐ | ☐ | ☐ | ☐ | ☐ |
-| Config | ☐ | ☐ | ☐ | ☐ | ☐ |
-| Teams | ☐ | ☐ | ☐ | ☐ | ☐ |
-| Memory | ☐ | ☐ | ☐ | ☐ | ☐ |
+| Chat | A | H | A | H | A |
+| Agents | A | H | A | H | A |
+| Config | A | H | A | H | H |
+| Teams | A | H | A | H | A |
+| Memory | A | H | A | H | A |
+
+`A` = 自动化 layout/policy 已绿；`H` = 待真人视觉。
 
 ### 6.2 验收问题（每格回答 pass/fail + 截图路径）
 
@@ -164,36 +170,39 @@ Wave 2E  （可选）高流量 color-mix 热点压缩：Research / Tools
 
 ## 7. Wave 2D — 示范路径 composition
 
-**推荐路径（二选一，优先工作量小、收益大）：**
+**状态：已落地（2026-07-24）** — D1 + D2 均完成。
 
-### 选项 D1（推荐）：Agents 列表行
+### D1：Agents 列表行
 
-- 现状：已用 `vuiDenseRowClass`
-- 目标：行容器 100% recipe + 状态用 2B selected；去掉行内重复 border/bg
-- 验证：`AgentsRoute.layout.test.ts` + 手测列表选中
+- `agentRow` → `vuiDenseRowClass`
+- `agentRowActive` → `vuiStateSelectedWarmRowClass`
+- `agentRowBulkSelected` → `vuiStateSelectedRowFillClass`
+- 契约：`vuiWave2CompositionContract.test.ts` + `AgentsRoute.layout.test.ts`
 
-### 选项 D2：Chat 会话索引行
+### D2：Chat 会话索引行
 
-- 现状：`DirectSessionIndexItem` / group item 已 opaque row
-- 目标：index 区统一 dense row + selected state recipe；减少 hover 自造 mix
-- 验证：`ChatCodingRoute.layout.test.ts` + 手测索引
+- `sessionItem` → `vuiDenseRowClass`
+- `sessionItemActive` → `vuiStateSelectedRowClass`
+- 契约：同上 composition test
 
-**成功标准：** 示范路径的 styles 中，结构表面 **零** 内联 `color-mix(...vui-surface...)`（状态走 recipe 文件）。
+**成功标准：** 示范路径状态/结构表面走 recipe；无 structure-wash。
 
 ---
 
 ## 8. Wave 2E — 热点 color-mix 压缩（可选、可拆）
 
-按 mix 次数优先：
+**状态：主路径已落地（2026-07-24）**
 
-| 优先级 | 文件 | 策略 |
+| 优先级 | 文件 | 结果 |
 |---|---|---|
-| P0 | `ResearchRoute.styles.ts` (~23) | 结构 → recipe；状态 → 2B |
-| P0 | `ResearchFlowCanvasRoute.styles.ts` (~14) | 同上 |
-| P1 | `ToolsRoute.styles.ts` (~12) | 同上 |
-| P2 | `ConversationView.styles.ts` | 仅处理非白名单；保留 composer/软层 |
+| P0 | `ResearchRoute.styles.ts` | 结构 opaque + cool/state soft recipe；残余极少 |
+| P0 | `ResearchFlowCanvasRoute.styles.ts` | 同上 |
+| P1 | `ToolsRoute.styles.ts` | 本地 panel/row/tone 别名接 recipe |
+| P1 | Teams / Config / Chat / Logs / Git / Agents 热点 | 脚本批量折叠 |
+| P2 | `ConversationView.styles.ts` | 非白名单可折叠项已压；composer 软层保留 |
 
-每文件独立提交，避免大爆炸。
+脚本：`web/scripts/migrate_vui_wave2e_hotspots.py`。
+长尾（Evolution 任意属性语法、近邻 %）不阻塞 close。
 
 ---
 

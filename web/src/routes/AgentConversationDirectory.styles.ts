@@ -1,3 +1,5 @@
+import { vuiStateSelectedRowClass } from "../design/vuiSurfaceRecipes";
+
 const styles = {
   agentDirectory:
     "vui-routes-agentconversationdirectory grid min-w-0 gap-1.5 border-b border-[var(--vui-border-subtle)] pb-2",
@@ -12,7 +14,7 @@ const styles = {
   agentRow:
     "vui-routes-agentconversationdirectory agentRow !grid !h-auto !min-h-[3.25rem] !w-full min-w-0 max-w-full grid-cols-[32px_minmax(0,1fr)] items-center justify-start gap-2.5 rounded-[var(--radius-control)] border border-transparent px-2.5 py-2 text-left font-normal shadow-none transition-[background-color,border-color,box-shadow] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)]",
   agentRowActive:
-    "vui-routes-agentconversationdirectory agentRowActive border-[color-mix(in_srgb,var(--accent-cool)_44%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_9%,var(--vui-surface-row))] shadow-[var(--vui-shadow-inset-accent)]",
+    `vui-routes-agentconversationdirectory agentRowActive ${vuiStateSelectedRowClass} shadow-[var(--vui-shadow-inset-accent)]`,
   agentAvatar:
     "vui-routes-agentconversationdirectory agentAvatar grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_9%,transparent)] [font-size:var(--vui-font-xs)] font-semibold [color:var(--accent-cool)]",
   agentAvatarImage:

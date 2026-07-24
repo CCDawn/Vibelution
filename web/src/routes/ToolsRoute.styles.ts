@@ -7,18 +7,22 @@
 // Includes phantom keys accessed by consumers but never declared in the old
 // styleKeys; the Proxy synthesized them on demand.
 import {
+  vuiOpaquePanelClass,
   vuiOpaqueRowClass,
   vuiStateCoolInfoClass,
   vuiStateDangerSoftClass,
   vuiStateSelectedRowClass,
+  vuiStateSuccessSoftClass,
+  vuiStateWarmSoftClass,
+  vuiStateWarningSoftClass,
 } from "../design/vuiSurfaceRecipes";
 
 const panelSurface =
-  "rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_68%,transparent)] !bg-[var(--vui-surface-panel)] p-[7px]";
+  `${vuiOpaquePanelClass} p-[7px]`;
 const quietPanelSurface =
-  "rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_58%,transparent)] !bg-[var(--vui-surface-panel)] p-[6px]";
+  `${vuiOpaquePanelClass} p-[6px]`;
 const rowSurface =
-  "rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--border-soft)_62%,transparent)] !bg-[var(--vui-surface-row)]";
+  `${vuiOpaqueRowClass}`;
 const warmRowSurface =
   "rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--accent-warm)_18%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-warm)_5%,transparent)]";
 const buttonBase =
@@ -28,9 +32,9 @@ const pillBase =
 const activeTone =
   `${vuiStateSelectedRowClass}`;
 const successTone =
-  "border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]";
+  `${vuiStateSuccessSoftClass}`;
 const warningTone =
-  "border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]";
+  `${vuiStateWarningSoftClass}`;
 const errorTone =
   `${vuiStateDangerSoftClass}`;
 const compactField =
@@ -39,24 +43,24 @@ const scrollStack = "grid min-h-0 content-start gap-1 overflow-auto";
 
 const styles = {
   agentBulkPolicyPanel:
-    "agentBulkPolicyPanel min-w-0 rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_7%,transparent)] p-2 text-[var(--accent-cool)]",
+    `agentBulkPolicyPanel min-w-0 rounded-[var(--radius-panel)] ${vuiStateCoolInfoClass} p-2 text-[var(--accent-cool)]`,
   agentCompatibility:
     `agentCompatibility min-w-0 ${vuiStateCoolInfoClass}`,
   agentPermissionSummaryPanel:
-    "agentPermissionSummaryPanel min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_7%,transparent)] p-2 text-[var(--accent-cool)]",
+    `agentPermissionSummaryPanel min-w-0 max-w-full rounded-[var(--radius-panel)] ${vuiStateCoolInfoClass} p-2 text-[var(--accent-cool)]`,
   agentPolicyPanel:
-    "agentPolicyPanel min-w-0 rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_7%,transparent)] p-2 text-[var(--accent-cool)]",
+    `agentPolicyPanel min-w-0 rounded-[var(--radius-panel)] ${vuiStateCoolInfoClass} p-2 text-[var(--accent-cool)]`,
   agentPolicySelect:
     `agentPolicySelect min-w-0 grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full ${vuiStateCoolInfoClass}`,
   agentScopeBar:
     `agentScopeBar min-w-0 flex flex-wrap items-center gap-1.5 ${vuiStateCoolInfoClass}`,
   bulkActionBar:
-    "bulkActionBar min-w-0 max-w-full flex flex-wrap items-center gap-[5px] rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--border-soft)_58%,transparent)] !bg-[var(--vui-surface-row)] p-[5px]",
+    `bulkActionBar min-w-0 max-w-full flex flex-wrap items-center gap-[5px] ${vuiOpaqueRowClass} p-[5px]`,
   bulkPolicyActions:
     "bulkPolicyActions min-w-0 flex flex-wrap items-center gap-1.5",
-  bulkPolicyToolRow: `bulkPolicyToolRow min-w-0 ${vuiOpaqueRowClass} p-2 border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]`,
+  bulkPolicyToolRow: `bulkPolicyToolRow min-w-0 ${vuiOpaqueRowClass} p-2 ${vuiStateWarmSoftClass}`,
   bulkSummary:
-    "bulkSummary inline-flex w-fit max-w-full shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--border-soft)_58%,transparent)] !bg-[var(--vui-surface-row)] px-2 py-[4px] [font-size:var(--vui-font-xs)]",
+    `bulkSummary inline-flex w-fit max-w-full shrink-0 items-center gap-1.5 whitespace-nowrap ${vuiOpaqueRowClass} px-2 py-[4px] [font-size:var(--vui-font-xs)]`,
   controlStrip:
     "controlStrip min-w-0 flex flex-wrap items-center gap-1.5",
   contextualHint:
@@ -68,9 +72,9 @@ const styles = {
   deepLinkFocus:
     "deepLinkFocus min-w-0",
   deepLinkNotice:
-    "deepLinkNotice min-w-0 rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--accent-cool)_30%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,transparent)] p-2",
+    `deepLinkNotice min-w-0 rounded-[var(--radius-panel)] ${vuiStateCoolInfoClass} p-2`,
   dependencyHealthPanel:
-    "dependencyHealthPanel min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] !bg-[var(--vui-surface-panel)] p-2",
+    `dependencyHealthPanel min-w-0 max-w-full ${vuiOpaquePanelClass} p-2`,
   detailActions:
     "detailActions min-w-0 flex flex-wrap items-center gap-1 border-t border-[color:color-mix(in_srgb,var(--vui-border-subtle)_70%,transparent)] pt-[7px]",
   detailHeader:
@@ -86,7 +90,7 @@ const styles = {
   filterButtonActive:
     `filterButtonActive min-w-0 ${activeTone}`,
   filterRow:
-    "filterRow min-w-0 flex flex-wrap items-center gap-1 rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--vui-border-subtle)_58%,transparent)] !bg-[var(--vui-surface-row)] p-[5px]",
+    `filterRow min-w-0 flex flex-wrap items-center gap-1 ${vuiOpaqueRowClass} p-[5px]`,
   header:
     "hidden",
   image2ModelControls:
@@ -106,9 +110,9 @@ const styles = {
   notice:
     `notice min-w-0 max-w-full ${panelSurface}`,
   noticeError:
-    `noticeError min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color:color-mix(in_srgb,var(--state-error)_9%,transparent)] p-2 text-[var(--state-error)]`,
+    `noticeError min-w-0 max-w-full rounded-[var(--radius-panel)] ${vuiStateDangerSoftClass} p-2 text-[var(--state-error)]`,
   noticeSuccess:
-    `noticeSuccess min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color:color-mix(in_srgb,var(--state-success)_9%,transparent)] p-2 text-[var(--state-success)]`,
+    `noticeSuccess min-w-0 max-w-full rounded-[var(--radius-panel)] ${vuiStateSuccessSoftClass} p-2 text-[var(--state-success)]`,
   paneCollapsed:
     "paneCollapsed min-w-0 hidden",
   panelEyebrow:
@@ -198,7 +202,7 @@ const styles = {
   readiness_attention:
     "readiness_attention min-w-0",
   readiness_blocked:
-    "readiness_blocked min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+    `readiness_blocked min-w-0 ${vuiStateWarningSoftClass}`,
   readiness_danger:
     `readiness_danger min-w-0 ${vuiStateDangerSoftClass}`,
   readiness_done:
@@ -228,23 +232,23 @@ const styles = {
   readiness_neutral:
     "readiness_neutral min-w-0",
   readiness_ok:
-    "readiness_ok min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+    `readiness_ok min-w-0 ${vuiStateSuccessSoftClass}`,
   readiness_pending:
     "readiness_pending min-w-0",
   readiness_ready:
-    "readiness_ready min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+    `readiness_ready min-w-0 ${vuiStateSuccessSoftClass}`,
   readiness_running:
-    "readiness_running min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+    `readiness_running min-w-0 ${vuiStateSuccessSoftClass}`,
   readiness_status:
     "readiness_status min-w-0",
   readiness_success:
-    "readiness_success min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+    `readiness_success min-w-0 ${vuiStateSuccessSoftClass}`,
   readiness_thought:
     "readiness_thought min-w-0",
   readiness_warn:
     "readiness_warn min-w-0",
   readiness_warning:
-    "readiness_warning min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+    `readiness_warning min-w-0 ${vuiStateWarningSoftClass}`,
   refreshButton:
     `refreshButton min-w-0 ${buttonBase}`,
   resizeHandle:
@@ -256,13 +260,13 @@ const styles = {
   result_attention:
     "result_attention min-w-0",
   result_ok:
-    "result_ok min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+    `result_ok min-w-0 ${vuiStateSuccessSoftClass}`,
   returnButton:
     `returnButton min-w-0 ${buttonBase}`,
   route:
     "route min-w-0 max-w-full grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] content-start overflow-hidden overflow-x-hidden text-[var(--fg-primary)]",
   rowSelect:
-    "rowSelect inline-grid h-7 w-7 min-w-7 place-items-center rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--vui-border-subtle)_58%,transparent)] !bg-[var(--vui-surface-row)] [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:sr-only",
+    `rowSelect inline-grid h-7 w-7 min-w-7 place-items-center ${vuiOpaqueRowClass} [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:sr-only`,
   schemaDisclosure:
     "schemaDisclosure min-w-0 font-mono [font-size:var(--vui-font-xs)]",
   scopeCopy:
@@ -296,7 +300,7 @@ const styles = {
   state_attention:
     "state_attention min-w-0",
   state_blocked:
-    "state_blocked min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+    `state_blocked min-w-0 ${vuiStateWarningSoftClass}`,
   state_danger:
     `state_danger min-w-0 ${vuiStateDangerSoftClass}`,
   state_done:
@@ -326,23 +330,23 @@ const styles = {
   state_neutral:
     "state_neutral min-w-0",
   state_ok:
-    "state_ok min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+    `state_ok min-w-0 ${vuiStateSuccessSoftClass}`,
   state_pending:
     "state_pending min-w-0",
   state_ready:
-    "state_ready min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+    `state_ready min-w-0 ${vuiStateSuccessSoftClass}`,
   state_running:
-    "state_running min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+    `state_running min-w-0 ${vuiStateSuccessSoftClass}`,
   state_status:
     "state_status min-w-0",
   state_success:
-    "state_success min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+    `state_success min-w-0 ${vuiStateSuccessSoftClass}`,
   state_thought:
     "state_thought min-w-0",
   state_warn:
     "state_warn min-w-0",
   state_warning:
-    "state_warning min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+    `state_warning min-w-0 ${vuiStateWarningSoftClass}`,
   statusDot:
     "statusDot min-w-0 inline-block h-2 w-2 rounded-full bg-current",
   status_active:
@@ -352,7 +356,7 @@ const styles = {
   status_attention:
     "status_attention min-w-0",
   status_blocked:
-    "status_blocked min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+    `status_blocked min-w-0 ${vuiStateWarningSoftClass}`,
   status_danger:
     `status_danger min-w-0 ${vuiStateDangerSoftClass}`,
   status_done:
@@ -382,33 +386,33 @@ const styles = {
   status_neutral:
     "status_neutral min-w-0",
   status_ok:
-    "status_ok min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+    `status_ok min-w-0 ${vuiStateSuccessSoftClass}`,
   status_pending:
     "status_pending min-w-0",
   status_ready:
-    "status_ready min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+    `status_ready min-w-0 ${vuiStateSuccessSoftClass}`,
   status_running:
-    "status_running min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+    `status_running min-w-0 ${vuiStateSuccessSoftClass}`,
   status_status:
     "status_status min-w-0",
   status_success:
-    "status_success min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
+    `status_success min-w-0 ${vuiStateSuccessSoftClass}`,
   status_thought:
     "status_thought min-w-0",
   status_warn:
     "status_warn min-w-0",
   status_warning:
-    "status_warning min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+    `status_warning min-w-0 ${vuiStateWarningSoftClass}`,
   summaryCard:
-    "summaryCard min-w-0 max-w-full rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--border-soft)_58%,transparent)] !bg-[var(--vui-surface-row)] !grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-[5px] min-h-[26px] px-2 py-[3px]",
+    `summaryCard min-w-0 max-w-full ${vuiOpaqueRowClass} !grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-[5px] min-h-[26px] px-2 py-[3px]`,
   summaryGrid:
     "summaryGrid min-w-0 grid gap-2 flex-1 grid-cols-[repeat(auto-fit,minmax(6.5rem,1fr))]",
   testArgs:
     "testArgs min-w-0 font-mono [font-size:var(--vui-font-xs)]",
   testPanel:
-    "testPanel min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] !bg-[var(--vui-surface-panel)] p-2",
+    `testPanel min-w-0 max-w-full ${vuiOpaquePanelClass} p-2`,
   toolAgentFitPanel:
-    "toolAgentFitPanel min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_7%,transparent)] p-[7px] text-[var(--accent-cool)] !grid grid-cols-[minmax(0,1fr)_auto] items-center gap-[7px] max-[640px]:grid-cols-[1fr]",
+    `toolAgentFitPanel min-w-0 max-w-full rounded-[var(--radius-panel)] ${vuiStateCoolInfoClass} p-[7px] text-[var(--accent-cool)] !grid grid-cols-[minmax(0,1fr)_auto] items-center gap-[7px] max-[640px]:grid-cols-[1fr]`,
   toolBadges:
     "toolBadges min-w-0 flex flex-wrap items-center gap-1",
   toolBundleApplyActions:
@@ -418,7 +422,7 @@ const styles = {
   toolBundleApplyCard:
     "toolBundleApplyCard min-w-0 rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-warm)_7%,transparent)] p-2 text-[var(--accent-warm)]",
   toolBundleApplyGrid:
-    "toolBundleApplyGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]",
+    `toolBundleApplyGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] ${vuiStateWarmSoftClass}`,
   toolBundleGroup:
     "toolBundleGroup min-w-0 max-w-full rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--accent-warm)_16%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-warm)_4%,transparent)] p-[5px]",
   toolBundleHeader:
@@ -432,7 +436,7 @@ const styles = {
   toolBundleSummary:
     "toolBundleSummary min-w-0 max-w-full truncate rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--accent-warm)_18%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-warm)_5%,transparent)] px-2 py-[5px] text-[var(--fg-secondary)]",
   toolButton:
-    "toolButton min-w-0 !grid !h-auto min-h-[var(--vui-control-height-sm)] w-full max-w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center justify-start gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-left text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]",
+    `toolButton min-w-0 !grid !h-auto min-h-[var(--vui-control-height-sm)] w-full max-w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center justify-start gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-left text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 ${vuiStateWarmSoftClass}`,
   toolButtonActive:
     `toolButtonActive min-w-0 ${vuiStateSelectedRowClass}`,
   toolCopy:
@@ -458,7 +462,7 @@ const styles = {
   workspace:
     "workspace min-w-0 max-w-full grid h-full min-h-0 gap-[7px] p-[7px] !grid grid-cols-[minmax(0,var(--tools-left-panel-width))_auto_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] overflow-hidden overflow-x-hidden max-[760px]:grid-cols-[minmax(0,1fr)] max-[760px]:grid-rows-[minmax(220px,42vh)_minmax(420px,1fr)] max-[760px]:overflow-y-auto max-[760px]:overflow-x-hidden",
   workspaceScopePanel:
-    "workspaceScopePanel min-w-0 max-w-full rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--border-soft)_58%,transparent)] !bg-[var(--vui-surface-row)] !grid grid-cols-[repeat(3,minmax(0,1fr))] gap-[5px] px-2 py-[5px] [font-size:var(--vui-font-xs)] max-[720px]:grid-cols-[1fr]",
+    `workspaceScopePanel min-w-0 max-w-full ${vuiOpaqueRowClass} !grid grid-cols-[repeat(3,minmax(0,1fr))] gap-[5px] px-2 py-[5px] [font-size:var(--vui-font-xs)] max-[720px]:grid-cols-[1fr]`,
 } as const;
 
 export default styles;

@@ -1,6 +1,9 @@
 import {
+  vuiDenseRowClass,
   vuiOpaqueRowClass,
   vuiStateCoolInfoClass,
+  vuiStateSelectedRowClass,
+  vuiStateSelectedRowFillClass,
 } from "../design/vuiSurfaceRecipes";
 
 const styles = {
@@ -60,9 +63,9 @@ const styles = {
     "vui-routes-chatcodingroute sessionActionStack min-w-0 flex flex-wrap items-center gap-1.5",
   sessionIconButton:
     "vui-routes-chatcodingroute sessionIconButton min-w-0 inline-grid h-[var(--vui-control-height-sm)] min-h-[var(--vui-control-height-sm)] w-[var(--vui-control-height-sm)] min-w-[var(--vui-control-height-sm)] place-items-center rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] p-0 text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] shrink-0 text-[var(--fg-tertiary)]",
-  sessionItem: `vui-routes-chatcodingroute sessionItem relative grid min-w-0 grid-cols-[minmax(0,1fr)] gap-0 overflow-hidden ${vuiOpaqueRowClass} text-left shadow-none transition-[border-color,background-color,box-shadow] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] focus-within:border-[color-mix(in_srgb,var(--accent-cool)_42%,var(--vui-border-subtle))] focus-within:bg-[color-mix(in_srgb,var(--accent-cool)_5%,var(--vui-surface-row))]`,
+  sessionItem: `vui-routes-chatcodingroute sessionItem relative grid min-w-0 grid-cols-[minmax(0,1fr)] gap-0 overflow-hidden ${vuiDenseRowClass} text-left shadow-none transition-[border-color,background-color,box-shadow] focus-within:border-[color-mix(in_srgb,var(--accent-cool)_42%,var(--vui-border-subtle))] focus-within:${vuiStateSelectedRowFillClass}`,
   sessionItemActive:
-    "vui-routes-chatcodingroute sessionItemActive border-[color-mix(in_srgb,var(--accent-cool)_46%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_9%,var(--vui-surface-row))] shadow-[var(--vui-shadow-inset-accent)]",
+    `vui-routes-chatcodingroute sessionItemActive ${vuiStateSelectedRowClass} shadow-[var(--vui-shadow-inset-accent)]`,
   sessionItemContextTarget:
     "vui-routes-chatcodingroute sessionItemContextTarget border-[color-mix(in_srgb,var(--accent-cool)_18%,transparent)] !bg-[var(--vui-surface-card)] shadow-[var(--vui-shadow-inset-accent)] before:opacity-70",
   sessionItemError:

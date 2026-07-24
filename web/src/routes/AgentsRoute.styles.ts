@@ -7,6 +7,8 @@ import {
   vuiDenseRowClass,
   vuiFlatPanelClass,
   vuiOpaqueRowClass,
+  vuiStateSelectedRowFillClass,
+  vuiStateSelectedWarmRowClass,
   vuiWorkspaceFillClass,
 } from "../design/vuiSurfaceRecipes";
 
@@ -64,9 +66,9 @@ const styles = {
   agentRow:
     `grid [grid-template-columns:minmax(180px,_1.3fr)_minmax(120px,_0.86fr)_minmax(110px,_0.82fr)_minmax(88px,_0.48fr)_minmax(104px,_0.72fr)_minmax(128px,_0.68fr)] [gap:8px] [align-items:center] min-w-0 max-w-full [width:100%] [min-height:44px] [padding:var(--agent-row-pad-y)_8px] ${vuiDenseRowClass} [color:var(--fg-primary)] [text-align:left] [transition:border-color_160ms_ease,_background_160ms_ease] [&_span]:min-w-0 [&_span]:[overflow:hidden] [&_span]:[text-overflow:ellipsis] max-[860px]:[grid-template-columns:1fr] max-[860px]:[align-items:start]`,
   agentRowActive:
-    "[border-color:color-mix(in_srgb,_var(--accent-warm)_34%,_transparent)] [box-shadow:none] [background:color-mix(in_srgb,_var(--accent-warm)_9%,_var(--vui-surface-row))]",
+    `${vuiStateSelectedWarmRowClass} shadow-none [border-color:color-mix(in_srgb,var(--accent-warm)_34%,transparent)]`,
   agentRowBulkSelected:
-    "[background:color-mix(in_srgb,_var(--accent-cool)_10%,_var(--vui-surface-row))]",
+    `${vuiStateSelectedRowFillClass}`,
   agentRowShell:
     "grid [grid-template-columns:28px_minmax(0,_1fr)] [align-items:center] [gap:5px] min-w-0",
   agentTable:
@@ -126,7 +128,7 @@ const styles = {
   createToolBundleOption: `grid [grid-template-columns:auto_minmax(0,_1fr)] [align-items:flex-start] [gap:7px] min-w-0 [padding:8px] ${vuiOpaqueRowClass} [&_input]:[margin-top:2px] [&_span]:grid [&_span]:[gap:2px] [&_span]:min-w-0 [&_strong]:min-w-0 [&_strong]:[overflow:hidden] [&_strong]:[text-overflow:ellipsis] [&_strong]:[color:var(--fg-primary)] [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:[white-space:nowrap]`,
   createToolBundlePreview: `[padding:7px_8px] ${vuiOpaqueRowClass} [&_strong]:min-w-0 [&_strong]:[overflow:hidden] [&_strong]:[color:var(--fg-primary)] [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap]`,
   createToolBundleSelected:
-    "grid [grid-template-columns:auto_minmax(0,_1fr)] [align-items:flex-start] [gap:7px] min-w-0 [padding:8px] [border:1px_solid_var(--vui-border-subtle)] [border-radius:var(--radius-control)] [border-color:color-mix(in_srgb,_var(--accent-cool)_44%,_var(--vui-border-subtle))] [background:color-mix(in_srgb,_var(--accent-cool)_10%,_var(--vui-surface-row))] [&_input]:[margin-top:2px] [&_span]:grid [&_span]:[gap:2px] [&_span]:min-w-0 [&_strong]:min-w-0 [&_strong]:[overflow:hidden] [&_strong]:[text-overflow:ellipsis] [&_strong]:[color:var(--fg-primary)] [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:[white-space:nowrap]",
+    `grid [grid-template-columns:auto_minmax(0,_1fr)] [align-items:flex-start] [gap:7px] min-w-0 [padding:8px] [border:1px_solid_var(--vui-border-subtle)] [border-radius:var(--radius-control)] [border-color:color-mix(in_srgb,_var(--accent-cool)_44%,_var(--vui-border-subtle))] ${vuiStateSelectedRowFillClass} [&_input]:[margin-top:2px] [&_span]:grid [&_span]:[gap:2px] [&_span]:min-w-0 [&_strong]:min-w-0 [&_strong]:[overflow:hidden] [&_strong]:[text-overflow:ellipsis] [&_strong]:[color:var(--fg-primary)] [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:[white-space:nowrap]`,
   dangerButton:
     "inline-flex w-fit max-w-full [align-items:center] [justify-content:center] [gap:7px] [min-height:30px] [padding:0_10px] [border-radius:var(--radius-control)] [font-weight:700] [border:1px_solid_color-mix(in_srgb,_var(--state-error)_40%,_transparent)] [background:color-mix(in_srgb,_var(--state-error)_10%,_transparent)] [color:var(--state-error)] disabled:[cursor:not-allowed] disabled:[opacity:0.55]",
   dangerZone:

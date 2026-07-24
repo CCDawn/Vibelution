@@ -12,6 +12,8 @@ import {
   vuiStateCoolInfoClass,
   vuiStateDangerSoftClass,
   vuiStateSelectedRowClass,
+  vuiStateSuccessSoftClass,
+  vuiStateWarningSoftClass,
 } from "../design/vuiSurfaceRecipes";
 
 const styles = {
@@ -33,7 +35,7 @@ const styles = {
   diagnosticPillInfo:
     `diagnosticPillInfo min-w-0 ${vuiStateCoolInfoClass}`,
   diagnosticPillWarning:
-    "diagnosticPillWarning min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+    `diagnosticPillWarning min-w-0 ${vuiStateWarningSoftClass}`,
   diagnosticsDetails:
     "diagnosticsDetails min-w-0 grid gap-2 pt-2",
   diagnosticsExpandLabel:
@@ -71,7 +73,7 @@ const styles = {
     "metaPill min-w-0 flex flex-wrap items-center gap-1.5 inline-flex min-h-6 w-fit max-w-full justify-center rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
   notice: `notice min-w-0 ${vuiFlatPanelClass} p-2`,
   noticeError: `noticeError min-w-0 ${vuiFlatPanelClass} p-2 ${vuiStateDangerSoftClass}`,
-  noticeSuccess: `noticeSuccess min-w-0 ${vuiFlatPanelClass} p-2 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]`,
+  noticeSuccess: `noticeSuccess min-w-0 ${vuiFlatPanelClass} p-2 ${vuiStateSuccessSoftClass}`,
   packageButton: `packageButton min-w-0 flex min-h-[var(--vui-control-height-sm)] w-full max-w-full flex-col items-stretch justify-start gap-1 ${vuiOpaqueRowClass} px-2 py-1.5 text-left [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[color-mix(in_srgb,var(--border-strong)_58%,transparent)] hover:!bg-[var(--vui-surface-row)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55`,
   packageButtonActive:
     `packageButtonActive min-w-0 ${vuiStateSelectedRowClass}`,
@@ -262,7 +264,7 @@ const styles = {
   sceneIssueBadgeError:
     `sceneIssueBadgeError min-w-0 ${vuiStateDangerSoftClass}`,
   sceneIssueBadgeWarning:
-    "sceneIssueBadgeWarning min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+    `sceneIssueBadgeWarning min-w-0 ${vuiStateWarningSoftClass}`,
   scenePillRow: `scenePillRow min-w-0 ${vuiOpaqueRowClass} p-2`,
   sceneQuickFacts:
     "sceneQuickFacts min-w-0",
@@ -314,7 +316,7 @@ const styles = {
     "timelineHeader min-w-0 flex flex-wrap items-center gap-1.5 grid min-h-0 content-start overflow-auto",
   timelineItem: `timelineItem min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto ${vuiOpaqueRowClass} p-2`,
   timelineItemError: `timelineItemError min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto ${vuiOpaqueRowClass} p-2 ${vuiStateDangerSoftClass}`,
-  timelineItemWarning: `timelineItemWarning min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto ${vuiOpaqueRowClass} p-2 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]`,
+  timelineItemWarning: `timelineItemWarning min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto ${vuiOpaqueRowClass} p-2 ${vuiStateWarningSoftClass}`,
   timelineList:
     "timelineList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   timelineMessage:

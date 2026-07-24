@@ -4,6 +4,7 @@
 import {
   vuiElevatedPanelClass,
   vuiOpaqueRowClass,
+  vuiStateSelectedRowFillClass,
 } from "../design/vuiSurfaceRecipes";
 
 const panelSurface = vuiElevatedPanelClass;
@@ -15,7 +16,7 @@ const mutedControl =
 const primaryControl =
   "[border:1px_solid_color-mix(in_srgb,var(--accent-warm)_26%,transparent)] [background:color-mix(in_srgb,var(--accent-warm)_14%,var(--vui-control-muted))] [color:var(--accent-warm-2)]";
 const activeControl =
-  "[border-color:color-mix(in_srgb,var(--accent-cool)_36%,transparent)] [background:color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] [color:var(--accent-warm-2)]";
+  `[border-color:color-mix(in_srgb,var(--accent-cool)_36%,transparent)] ${vuiStateSelectedRowFillClass} [color:var(--accent-warm-2)]`;
 const sectionHeaderSurface =
   "[border-bottom:1px_solid_color-mix(in_srgb,var(--vui-border-subtle)_96%,var(--fg-primary)_4%)] [background:var(--vui-surface-toolbar)]";
 
@@ -303,7 +304,7 @@ const styles = {
   primaryButton:
     `vui-routes-configroute primaryButton [display:inline-flex] [align-items:center] [justify-content:center] [gap:7px] [min-height:40px] [padding:0_16px] [border-radius:var(--control-radius)] [font:inherit] [font-size:var(--vui-font-sm)] [font-weight:700] [line-height:1] [white-space:nowrap] [transition:border-color_140ms_ease,background-color_140ms_ease,color_140ms_ease] ${primaryControl} [box-shadow:none] hover:[cursor:pointer] hover:[border-color:color-mix(in_srgb,var(--accent-warm)_40%,transparent)] hover:[background:color-mix(in_srgb,var(--accent-warm)_20%,var(--vui-control-muted))] disabled:[cursor:not-allowed] disabled:[opacity:0.56]`,
   profileGroupRow:
-    "vui-routes-configroute profileGroupRow [&_td]:[padding:7px_9px] [&_td]:[color:var(--fg-secondary)] [&_td]:[background:color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] [&_td]:[font-size:var(--vui-font-xs)] [&_td]:[font-weight:700]",
+    `vui-routes-configroute profileGroupRow [&_td]:[padding:7px_9px] [&_td]:[color:var(--fg-secondary)] [&_td]:${vuiStateSelectedRowFillClass} [&_td]:[font-size:var(--vui-font-xs)] [&_td]:[font-weight:700]`,
   profileMetaCell:
     "vui-routes-configroute profileMetaCell [display:grid] [gap:5px] [min-width:0] [&_strong]:[min-width:0] [&_strong]:[color:var(--fg-primary)] [&_strong]:[overflow-wrap:anywhere] [&_strong]:[font-size:var(--vui-font-xs)] [&_span]:[min-width:0] [&_span]:[color:var(--fg-tertiary)] [&_span]:[overflow-wrap:anywhere] [&_span]:[font-size:var(--vui-font-xs)] [&_span]:[line-height:1.28]",
   profileModelCell:
