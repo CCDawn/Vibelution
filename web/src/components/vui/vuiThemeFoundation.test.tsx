@@ -73,9 +73,9 @@ describe("VUI dual-theme foundation", () => {
       "--accent-danger",
       "--accent-cool-contrast",
       "--state-danger",
-      "--surface-base",
-      "--surface-elevated",
-      "--surface-toolbar",
+      "--vui-surface-base",
+      "--vui-surface-raised",
+      "--vui-surface-toolbar",
       "--border-subtle",
       "--font-size-micro",
       "--font-size-caption",
@@ -108,17 +108,20 @@ describe("VUI dual-theme foundation", () => {
     expect(lightThemeBlock).toContain("--vui-row-hover-bg");
     expect(lightThemeBlock).toContain("--vui-status-info-bg");
     expect(lightThemeBlock).toContain("--accent-cool-contrast");
-    expect(lightThemeBlock).toContain("--surface-elevated");
+    expect(lightThemeBlock).toContain("--vui-surface-raised");
     expect(tokensSource).toContain("--vui-select-chevron");
     expect(lightThemeBlock).toContain("--vui-select-chevron");
     expect(tokensSource).toContain("--vui-surface-toolbar: var(--vui-surface-raised);");
     expect(tokensSource).toContain("--vui-surface-row: rgb(24 30 40);");
-    // VUI owns literals; legacy --surface-* only aliases into VUI (never reverse).
+    // VUI owns literals; legacy --surface-* aliases are deleted (no reverse deps either).
     expect(lightThemeBlock).toContain("--vui-surface-row: #f4f7fb;");
-    expect(lightThemeBlock).toContain("--surface-card-muted: var(--vui-surface-row);");
-    expect(tokensSource).toContain("--surface-page: var(--vui-surface-workspace);");
-    expect(tokensSource).toContain("--surface-panel: var(--vui-surface-panel);");
-    expect(tokensSource).toContain("--surface-card: var(--vui-surface-card);");
+    expect(tokensSource).not.toContain("--surface-page:");
+    expect(tokensSource).not.toContain("--surface-panel:");
+    expect(tokensSource).not.toContain("--surface-card:");
+    expect(tokensSource).not.toContain("--surface-card-muted:");
+    expect(tokensSource).not.toContain("--surface-base:");
+    expect(tokensSource).not.toContain("--surface-elevated:");
+    expect(tokensSource).not.toContain("--surface-toolbar:");
     expect(tokensSource).not.toContain("--vui-surface-row: var(--surface-card-muted);");
     expect(tokensSource).not.toContain("--vui-surface-row: color-mix(in srgb, var(--surface-card) 86%, transparent);");
   });
