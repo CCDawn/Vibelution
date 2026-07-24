@@ -322,6 +322,9 @@ def test_five_approved_unique_questions_complete_trial_count(tmp_path, monkeypat
 
     summary = challenge_question_runs.challenge_question_run_summary("research-team")
     assert summary["validCandidateCount"] == 5
+    assert summary["validatedQuestionCount"] == 5
+    assert summary["validatedQuestionIds"] == ["SCI-096", "SCI-097", "SCI-098", "SCI-099", "SCI-100"]
+    assert summary["validatedOutcomeCounts"] == {"approved": 5}
     assert summary["completedCount"] == 5
     assert summary["completedQuestionIds"] == ["SCI-096", "SCI-097", "SCI-098", "SCI-099", "SCI-100"]
 
@@ -356,6 +359,11 @@ def test_deferred_h4_review_preserves_revision_requested_decision(tmp_path, monk
     assert response["record"]["humanGates"]["decisions"]["H4_external_output"] == "revision_requested"
     assert response["output"]["audit"]["human_review_status"] == "revision_requested"
     assert response["summary"]["completedCount"] == 0
+    assert response["summary"]["validatedQuestionCount"] == 1
+    assert response["summary"]["validatedQuestionIds"] == ["SCI-096"]
+    assert response["summary"]["validatedOutcomeCounts"] == {"needs_revision": 1}
+    assert response["summary"]["validatedQuestionResults"][0]["questionId"] == "SCI-096"
+    assert response["summary"]["validatedQuestionResults"][0]["humanGates"]["allApproved"] is False
 
 
 def test_registration_cannot_self_approve_human_gates(tmp_path, monkeypatch):

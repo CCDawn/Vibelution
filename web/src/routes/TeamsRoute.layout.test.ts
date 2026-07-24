@@ -1187,10 +1187,12 @@ describe("TeamsRoute layout contract", () => {
     expect(researchWorkspaceModelSource).toContain("执行批次 / 结果评估 / 消融归因 / 优化迭代");
     expect(routeSource).toContain("lifecycleProjection");
     expect(routeSource).toContain("challengeProgramProjection");
-    expect(routeSource).toContain("全量合规与系统可用性");
-    expect(routeSource).toContain("125题批处理与质量治理");
-    expect(routeSource).toContain("代表性深研闭环与参赛封装");
-    expect(routeSource).toContain("既有 FashionMNIST 仅作为单案例，不代表平台完成");
+    expect(routeSource).toContain("MVP 完整样例");
+    expect(routeSource).toContain("3 题通用性测试");
+    expect(routeSource).toContain("后续规模化与深研");
+    expect(routeSource).toContain("125 题批跑、三个深研案例和最终参赛封装均延后到 MVP 验收之后");
+    expect(routeSource).toContain("stage1ComplianceReadiness.mvpManifest.completedQuestionCount");
+    expect(routeSource).toContain("stage1ComplianceReadiness.trialRun.completedQuestionIds");
     expect(routeSource).toContain('blockers.includes("dashscope_qwen_provider_missing")');
     expect(routeSource).toContain('"BLOCKED · 待验证"');
     expect(routeSource).toContain("caseRecords[0]?.title");
