@@ -2616,6 +2616,7 @@ export function ChatCodingRoute() {
       ref={layoutRef}
       className={chatLayoutClassName}
       style={layoutStyle}
+      data-vui-recipe="chat-session-workbench"
       data-chat-responsive-mode={responsiveLayout.mode}
       data-chat-status-rail={statusRailCollapsed ? "collapsed" : "visible"}
     >
@@ -2742,7 +2743,7 @@ export function ChatCodingRoute() {
         onKeyDown={(event) => handleResizeKeyDown("left", event)}
       /> : null}
 
-      <section className={centerPaneClassName}>
+      <section className={centerPaneClassName} data-vui-region="chat-conversation-center">
         <div className={styles.tabStrip}>
           <div className={styles.overlayPaneControls}>
             {!responsiveLayout.leftVisible ? (

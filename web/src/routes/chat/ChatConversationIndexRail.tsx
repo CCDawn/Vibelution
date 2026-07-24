@@ -180,6 +180,7 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
       <aside
         id="chat-conversation-index-pane"
         className={conversationIndexPaneClassName}
+        data-vui-region="chat-session-index"
         aria-hidden={conversationIndexCollapsed}
         role={conversationIndexOverlayOpen ? "dialog" : undefined}
         aria-label={conversationIndexOverlayOpen ? (lang === "zh" ? "会话列表" : "Conversation list") : undefined}

@@ -1,4 +1,5 @@
 import {
+  vuiControlIconSmClass,
   vuiControlPillClass,
 } from "../design/vuiChromeRecipes";
 
@@ -8,6 +9,7 @@ import {
   vuiStateCoolInfoClass,
   vuiStateSelectedRowClass,
   vuiStateSelectedRowFillClass,
+  vuiStateSuccessSoftClass,
 } from "../design/vuiSurfaceRecipes";
 
 const styles = {
@@ -66,7 +68,7 @@ const styles = {
   sessionActionStack:
     "vui-routes-chatcodingroute sessionActionStack min-w-0 flex flex-wrap items-center gap-1.5",
   sessionIconButton:
-    "vui-routes-chatcodingroute sessionIconButton min-w-0 inline-grid h-[var(--vui-control-height-sm)] min-h-[var(--vui-control-height-sm)] w-[var(--vui-control-height-sm)] min-w-[var(--vui-control-height-sm)] place-items-center rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] p-0 text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] shrink-0 text-[var(--fg-tertiary)]",
+    `vui-routes-chatcodingroute sessionIconButton min-w-0 ${vuiControlIconSmClass} place-items-center border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] p-0 text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] text-[var(--fg-tertiary)]`,
   sessionItem: `vui-routes-chatcodingroute sessionItem relative grid min-w-0 grid-cols-[minmax(0,1fr)] gap-0 overflow-hidden ${vuiDenseRowClass} text-left shadow-none transition-[border-color,background-color,box-shadow] focus-within:border-[color-mix(in_srgb,var(--accent-cool)_42%,var(--vui-border-subtle))] focus-within:${vuiStateSelectedRowFillClass}`,
   sessionItemActive:
     `vui-routes-chatcodingroute sessionItemActive ${vuiStateSelectedRowClass} shadow-[var(--vui-shadow-inset-accent)]`,
@@ -83,7 +85,7 @@ const styles = {
   sessionItemTitle:
     "vui-routes-chatcodingroute sessionItemTitle min-w-0 truncate [font-size:var(--vui-font-md)] font-semibold leading-tight text-[var(--fg-primary)]",
   sessionRunningBadge:
-    "vui-routes-chatcodingroute sessionRunningBadge !inline-flex !h-[22px] !min-h-[22px] !w-fit max-w-full shrink-0 items-center justify-center gap-1 overflow-hidden border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] px-1.5 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--state-success)] [&_span]:leading-none [&_svg]:size-[10px] [&_svg]:shrink-0 [&_svg]:animate-spin",
+    `vui-routes-chatcodingroute sessionRunningBadge !inline-flex !h-[22px] !min-h-[22px] !w-fit max-w-full shrink-0 items-center justify-center gap-1 overflow-hidden ${vuiStateSuccessSoftClass} px-1.5 [font-size:var(--vui-font-xs)] font-semibold leading-none [&_span]:leading-none [&_svg]:size-[10px] [&_svg]:shrink-0 [&_svg]:animate-spin`,
   sessionStatusCluster:
     "vui-routes-chatcodingroute sessionStatusCluster inline-flex min-w-0 items-center justify-end gap-1",
   sessionTitleInput:
