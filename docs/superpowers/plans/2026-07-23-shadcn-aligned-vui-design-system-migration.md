@@ -1,12 +1,19 @@
 # Shadcn-aligned VUI 全前端设计系统迁移方案
 
 **Date:** 2026-07-23
-**Status:** proposed
+**Status:** partially implemented
 **Owner:** `web-workbench-surface` / VUI design-system owner
 **Mode:** `TASK_GRAPH`
 **Risk:** `STANDARD_TASK`；共享 token、组件 API、主题与页面迁移属于串行契约工作
 **Scope:** `web/src/design/**`、`web/src/components/vui/**` 及所有生产路由的视觉消费层
 **Close condition:** 代表页面与迁移批次全部通过主题、视口、交互和构建验收；路由层不再派生任意表面透明度；兼容别名消费者清零并删除
+
+## 0. 当前实施状态
+
+- 已落地：surface 语义 token、Reference Lab、主要路由的 surface literal 收敛，以及“VUI 为唯一表面字面值来源”的契约测试。
+- 对应主线提交：`a09a28ff8`。
+- 尚未完成：全量 primitive anatomy/slot 收敛、剩余路由迁移、兼容别名清零和完整主题/视口/交互验收。
+- 本文保留为增量迁移路线图；后续批次必须从当前主线继续，不能重新引入平行 token 或第二套组件 API。
 
 ## 1. 目标
 

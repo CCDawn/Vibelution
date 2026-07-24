@@ -1,10 +1,17 @@
 # Agent 管理前端完整优化方案
 
 **Date:** 2026-07-23
-**Status:** proposed
+**Status:** partially implemented
 **Mode:** `TASK_GRAPH`
 **Risk:** `STANDARD_TASK`；共享 VUI 契约、路由状态和危险操作区域按高风险门禁验收
 **Scope:** `/agents`、`/agents/prompts`、`/agents/tools`、`/agents/skills`、Agent 创建向导、批量操作、跨中心返回路径和对应视觉回归矩阵
+
+## 0. 当前实施状态
+
+- 已落地：Agent 创建向导的职责头像选择、默认头像修复，以及 Agent 管理页对统一 VUI surface 契约的消费。
+- 对应主线提交：`0c72fb869`（职责头像与创建向导）、`a09a28ff8`（VUI surface 单一事实源）。
+- 尚未完成：本方案中的完整二级导航、目录比较/批量工作流、运行页重排和全视口验收矩阵。
+- 本文继续作为剩余工作路线图；不得把上述两个提交解释为整份方案已经完成。
 
 ## 1. 目标与成功结果
 

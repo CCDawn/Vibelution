@@ -17,7 +17,7 @@
 - **执行路由：** `TASK_GRAPH`
 - **建议工作方式：** BDD/TDD + migration gate + profile gate
 - **当前状态：** plan-ready，未开始实现
-- **当前规划 claim：** `claim-fa776f2ab123`
+- **历史规划 claim：** `claim-fa776f2ab123`（已不作为当前执行锁；实施前必须重新 preflight 并领取最小 scope）
 - **规划范围：** 会话事实账本加固、SQLite 派生目录、迁移/回退、服务读路径、诊断与测试
 - **明确不在本轮直接实现：** 完整消息数据库化、向量检索、跨项目云同步、会话加密格式重写、现有 JSONL 清理
 - **复用研究：** `C:\Users\Administrator\Desktop\Agent论文\search-results\2026-07-23-agent-session-storage-codex-hermes-opencode.md`
