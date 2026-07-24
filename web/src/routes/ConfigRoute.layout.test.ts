@@ -188,6 +188,15 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain('requestJson<ConfigWorkspace>("/api/config/apply"');
   });
 
+  it("surfaces model test results into notice, row feedback, and workspace reload", () => {
+    expect(routeSource).toContain("handleTestProviderModel");
+    expect(routeSource).toContain("formatTestNotice(result)");
+    expect(routeSource).toContain("verification_persisted");
+    expect(routeSource).toContain("workspaceQuery.refetch()");
+    expect(providerPanelSource).toContain("verificationMessage");
+    expect(providerPanelSource).toContain("上游 400 拒绝");
+  });
+
   it("does not auto-discover Provider endpoints when the model surface opens", () => {
     expect(routeSource).not.toContain("autoRefreshAttemptedProviderIds");
     expect(routeSource).not.toContain("refreshDueProviders");

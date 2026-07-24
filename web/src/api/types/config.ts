@@ -146,6 +146,8 @@ export type ConfigCatalogModel = {
   verificationCheckedAt?: string;
   verificationErrorType?: string;
   verificationHttpStatus?: number | null;
+  /** Sanitized last probe detail for the「真实调用」column (no secrets). */
+  verificationMessage?: string;
   reasoningVerificationStatus?: "unverified" | "verified" | "failed" | "stale" | "declared" | string;
   reasoningEffortValues?: string[];
   defaultReasoningEffort?: string;

@@ -357,6 +357,7 @@ def record_model_verification(
     ok: bool,
     error_type: str = "",
     http_status: int | None = None,
+    message: str = "",
 ) -> dict[str, Any]:
     provider_id, model_key = split_model_ref(model_ref)
     _parse_utc(checked_at)
@@ -370,6 +371,8 @@ def record_model_verification(
         if candidate < 100 or candidate > 599:
             raise ValueError("invalid model verification HTTP status")
         normalized_status = candidate
+    # Safe, bounded operator-facing note (callers should already sanitize secrets).
+    normalized_message = " ".join(str(message or "").strip().split())[:240]
 
     updated = copy.deepcopy(state)
     providers = updated.setdefault("providers", {})
@@ -401,6 +404,7 @@ def record_model_verification(
         "errorType": normalized_error,
         "httpStatus": normalized_status,
         "providerFingerprint": str(provider_fingerprint),
+        "message": normalized_message,
     }
     model["verification"] = verification
     return updated

@@ -69,6 +69,7 @@ def test_model_verification_records_callability_without_overwriting_discovery() 
         "errorType": "service_unavailable",
         "httpStatus": 503,
         "providerFingerprint": "fp",
+        "message": "",
     }
     rediscovered = record_discovery_success(
         verified,
@@ -165,6 +166,7 @@ def test_discovery_fingerprint_change_marks_prior_evidence_stale_without_deletin
             "errorType": "service_unavailable" if failed else "",
             "httpStatus": 503 if failed else None,
             "providerFingerprint": "fp-old",
+            "message": "",
         }
         assert model["reasoningContract"] == {
             "verificationStatus": "stale",

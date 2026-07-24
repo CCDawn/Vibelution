@@ -866,6 +866,19 @@ def _v2_model_ref_test_target(
     return target
 
 
+def _sanitize_verification_message(message: str) -> str:
+    """Bound probe failure text for catalog/UI; strip obvious secret material."""
+    text = " ".join(str(message or "").strip().split())
+    if not text:
+        return ""
+    # Drop common secret-bearing fragments before surfacing to the workbench.
+    text = re.sub(r"(?i)\b(bearer|api[_-]?key|authorization)\s*[:=]\s*\S+", r"\1=[redacted]", text)
+    text = re.sub(r"(?i)pending-secret:[A-Za-z0-9_\-]+", "pending-secret:[redacted]", text)
+    if len(text) > 240:
+        return f"{text[:237]}..."
+    return text
+
+
 def _model_verification_summary(result: dict[str, Any]) -> dict[str, Any]:
     ok = bool(result.get("ok") if "ok" in result else result.get("success"))
     message = str(result.get("message") or result.get("error") or "").strip()
@@ -897,12 +910,14 @@ def _model_verification_summary(result: dict[str, Any]) -> dict[str, Any]:
             error_type = "service_unavailable"
         elif http_status == 502 or "upstream" in lowered:
             error_type = "upstream_unavailable"
-        elif "timeout" in lowered or "timed out" in lowered:
+        elif "timeout" in lowered or "timed out" in lowered or "probe timed out" in lowered:
             error_type = "timeout"
         elif "connection" in lowered or "network" in lowered:
             error_type = "network"
-        elif "notfound" in lowered or "not found" in lowered:
+        elif "notfound" in lowered or "not found" in lowered or "does not exist" in lowered:
             error_type = "not_found"
+        elif http_status == 400:
+            error_type = "bad_request"
         else:
             error_type = "failed"
     return {
@@ -910,6 +925,7 @@ def _model_verification_summary(result: dict[str, Any]) -> dict[str, Any]:
         "checked_at": datetime.now(timezone.utc).isoformat(),
         "error_type": error_type,
         "http_status": http_status,
+        "message": _sanitize_verification_message(message),
     }
 
 
@@ -919,14 +935,22 @@ def _persist_saved_model_verification(
     model_ref: str,
     verification: dict[str, Any],
 ) -> bool:
+    """Persist callability probe evidence for schema-v2 models.
+
+    Always write for v2 pinned/catalog models — including draft-scope tests —
+    so the Config「真实调用」column updates after「测试调用」even when the
+    workspace still has unsaved draft changes. Fingerprint still binds the
+    result to the provider route used during the probe.
+    """
+    del draft_meta  # retained for call-site compatibility; no longer gates persistence
     llm = public_config.get("llm", {}) if isinstance(public_config, dict) else {}
     if int(llm.get("schema_version") or 1) != 2:
-        return False
-    if _llm_test_config_scope(public_config, draft_meta) != "saved":
         return False
     try:
         provider_id, _model_key = split_model_ref(model_ref)
         provider = public_config.get("llm", {}).get("providers", {}).get(provider_id, {})
+        if not isinstance(provider, dict):
+            provider = {}
         state = load_model_catalog_state()
         updated = record_model_verification(
             state,
@@ -936,6 +960,7 @@ def _persist_saved_model_verification(
             ok=verification["status"] == "verified",
             error_type=str(verification["error_type"]),
             http_status=verification["http_status"],
+            message=str(verification.get("message") or ""),
         )
         save_model_catalog_state(updated)
     except (OSError, ValueError):
@@ -1638,11 +1663,15 @@ def _project_catalog_verification(value: Any) -> dict[str, Any]:
         http_status = None
     if http_status is not None and not 100 <= http_status <= 599:
         http_status = None
+    # Only surface the sanitized `message` field. Never pass through rawMessage
+    # (may contain credential material from historical catalog entries).
+    message = _sanitize_verification_message(str(raw.get("message") or ""))
     return {
         "verificationStatus": status,
         "verificationCheckedAt": str(raw.get("checkedAt") or "")[:64],
         "verificationErrorType": str(raw.get("errorType") or "")[:64],
         "verificationHttpStatus": http_status,
+        "verificationMessage": message[:240],
     }
 
 
