@@ -298,8 +298,16 @@ def _candidate(
     defaults = pinned.get("defaults") if isinstance(pinned.get("defaults"), dict) else {}
     limits = observed.get("limits") if isinstance(observed.get("limits"), dict) else {}
     protocols = provider.get("protocols") if isinstance(provider.get("protocols"), dict) else {}
+    # Protocol-default reasoning for OpenAI Responses pins (same contract as pin/list projection).
+    from config.llm_projection import _default_v2_reasoning_effort_defaults
+
+    synthetic_reasoning = _default_v2_reasoning_effort_defaults(provider, pinned, defaults)
+    pinned_for_reasoning = pinned
+    if synthetic_reasoning:
+        merged_defaults = {**defaults, **{k: v for k, v in synthetic_reasoning.items() if k not in defaults}}
+        pinned_for_reasoning = {**pinned, "defaults": merged_defaults}
     reasoning = project_reasoning_contract(
-        pinned,
+        pinned_for_reasoning,
         observed,
         current_provider_fingerprint=current_provider_fingerprint,
     )
