@@ -1,5 +1,5 @@
 const panelSurface =
-  "[background:color-mix(in_srgb,var(--surface-panel)_96%,var(--bg-canvas))] [border:1px_solid_var(--vui-border-subtle)] [border-radius:8px]";
+  "[background:var(--vui-surface-panel)] [border:1px_solid_var(--vui-border-subtle)] [border-radius:8px]";
 
 const styles = {
   actions: "vui-routes-configmodelmigrationpanel actions flex min-w-0 flex-wrap items-center gap-1.5",

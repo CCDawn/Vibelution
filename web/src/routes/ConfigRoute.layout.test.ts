@@ -580,7 +580,7 @@ describe("ConfigRoute layout contract", () => {
     expect(stylesSource).toContain("const readableRowSurface");
     expect(styles.page).toContain("[background:var(--surface-page)]");
     expect(stylesSource).toContain("configHeader:");
-    expect(styles.configHeader).toContain("color-mix(in_srgb,var(--surface-panel)_96%,var(--bg-canvas))");
+    expect(styles.configHeader).toContain("[background:var(--vui-surface-panel)]");
 
     expect(draftPanelSource).toContain("styles.draftWorkbench");
     expect(draftPanelSource).toContain("styles.draftActionRail");
@@ -890,35 +890,35 @@ describe("ConfigRoute layout contract", () => {
   it("keeps operational settings readable over custom workbench backgrounds", () => {
     expect(styles.page).toContain("[background:var(--surface-page)]");
     expect(styles.page).toContain("[isolation:isolate]");
-    expect(stylesSource).toContain("color-mix(in_srgb,var(--surface-panel)_96%,var(--bg-canvas))");
-    expect(styles.sidebar).toContain("color-mix(in_srgb,var(--surface-panel)_96%,var(--bg-canvas))");
-    expect(styles.sectionSurface).toContain("color-mix(in_srgb,var(--surface-panel)_96%,var(--bg-canvas))");
+    expect(stylesSource).toContain("[background:var(--vui-surface-panel)]");
+    expect(styles.sidebar).toContain("[background:var(--vui-surface-panel)]");
+    expect(styles.sectionSurface).toContain("[background:var(--vui-surface-panel)]");
     expect(styles.treeGrid).toContain("[grid-template-columns:repeat(2,minmax(0,1fr))]");
     expect(styles.configDenseSection).toContain("[&>_.treeGrid]:[grid-template-columns:repeat(3,minmax(220px,1fr))]");
     expect(styles.configDenseSection).not.toContain("repeat(auto-fit");
     expect(styles.configDiscoverySection).toContain("[&>_.treeGrid]:[grid-template-columns:repeat(3,minmax(220px,1fr))]");
     expect(styles.treeFieldValue).toContain("color-mix(in_srgb,var(--surface-code)_92%,var(--surface-panel))");
-    expect(healthDiagnosticsPanelStylesSource).toContain("color-mix(in_srgb,var(--surface-panel)_96%,var(--bg-canvas))");
-    expect(healthDiagnosticsPanelStylesSource).toContain("color-mix(in_srgb,var(--surface-card)_94%,var(--surface-panel))");
+    expect(healthDiagnosticsPanelStylesSource).toContain("[background:var(--vui-surface-panel)]");
+    expect(healthDiagnosticsPanelStylesSource).toContain("[background:var(--vui-surface-row)]");
   });
 
   it("keeps extracted Config panels on local VUI/Tailwind surface contracts", () => {
     expect(extractedPanelStylesSource).toContain("const panelSurface");
-    expect(extractedPanelStylesSource).toContain("color-mix(in_srgb,var(--surface-panel)_96%,var(--bg-canvas))");
-    expect(extractedPanelStylesSource).toContain("color-mix(in_srgb,var(--surface-card)_94%,var(--surface-panel))");
+    expect(extractedPanelStylesSource).toContain("[background:var(--vui-surface-panel)]");
+    expect(extractedPanelStylesSource).toContain("[background:var(--vui-surface-row)]");
     expect(extractedPanelStylesSource).toContain("var(--vui-control-muted)");
     expect(extractedPanelStylesSource).toContain("var(--vui-border-subtle)");
     expect(overviewPanelStyles.sectionSurface).toContain(
-      "color-mix(in_srgb,var(--surface-panel)_96%,var(--bg-canvas))",
+      "[background:var(--vui-surface-panel)]",
     );
     expect(runtimePanelStyles.segmented).toContain("[background:var(--vui-surface-toolbar)]");
     expect(draftPanelStyles.actionButton).toContain("var(--vui-control-muted)");
-    expect(healthDiagnosticsPanelStyles.findingCard).toContain("color-mix(in_srgb,var(--surface-card)_94%,var(--surface-panel))");
+    expect(healthDiagnosticsPanelStyles.findingCard).toContain("[background:var(--vui-surface-row)]");
     expect(providerPanelStyles.sectionSurface).toContain(
-      "color-mix(in_srgb,var(--surface-panel)_96%,var(--bg-canvas))",
+      "[background:var(--vui-surface-panel)]",
     );
     expect(placeholderPanelStyles.loadingBoard).toContain(
-      "color-mix(in_srgb,var(--surface-panel)_96%,var(--bg-canvas))",
+      "[background:var(--vui-surface-panel)]",
     );
     expect(extractedPanelStylesSource).not.toContain("[background:var(--vui-gradient-route-soft),var(--surface-panel)]");
   });
