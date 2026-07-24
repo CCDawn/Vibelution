@@ -24,6 +24,14 @@
 - 任务 Agent 只提交本任务文件，不修改 `VERSION`、`CHANGELOG.md`、`web/package.json` 或锁文件。
 - 前端/API/runtime 变更在用户手工验收前必须通过 Launcher refresh；活动任务存在时不得绕过 guard。
 
+### Reasoning effort / 中转站（2026-07-24 确认增补）
+
+推理强度显示与注入、中转站 per-model 合同、OpenCode variants 映射、D1–D3 / R1–R3，以及实现工单 T1–T9，以确认稿为准：
+
+- `docs/superpowers/specs/2026-07-24-reasoning-effort-protocol-contract-confirmed.md`
+
+执行本 plan 中与 reasoning contract / Composer effort / promotion 相关的步骤时，须同时满足该确认稿（运营声明即可显示、无合同不注入、pin 不猜合同、Agent 选项与合同同源）。调研笔记：`Agent论文/search-results/2026-07-24-opencode-hermes-reasoning-effort-config.md`。
+
 ---
 
 ## Dependency Order and File Map
