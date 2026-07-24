@@ -114,6 +114,7 @@ import {
   createCodexTranscriptToolActivity,
   formatCodexTranscriptDuration,
 } from "./conversationToolActivityModel";
+import { ConversationProcessDisclosure } from "./ConversationProcessDisclosure";
 import { ConversationToolActivity } from "./ConversationToolActivity";
 import { buildCodexRolloutTraceEvents, type CodexRolloutTraceEvent } from "./codexRolloutTrace";
 import {
@@ -1495,20 +1496,44 @@ export function ConversationView({
     if (visibleCells.length === 0) {
       return null;
     }
+    const finalCellIndex = visibleCells.findIndex(
+      (cell) => cell.kind === "assistant_markdown" && cell.phase !== "commentary",
+    );
+    const processCells = finalCellIndex < 0
+      ? visibleCells
+      : visibleCells.slice(0, finalCellIndex);
+    const finalCells = finalCellIndex < 0
+      ? []
+      : visibleCells.slice(finalCellIndex);
+    const renderTimelineNodes = (timelineCells: CodexTranscriptCell[]) => (
+      buildCodexTranscriptTimelineNodes(timelineCells).map((node) => node.kind === "tool_activity" ? (
+        <ConversationToolActivity
+          key={node.activity.id}
+          activity={node.activity}
+          language={lang === "en" ? "en" : "zh"}
+          renderToolDetails={renderCodexTranscriptToolDetailContent}
+        />
+      ) : renderCodexTranscriptCell(message, node.cell))
+    );
     return (
       <div
         className={styles.codexTranscriptSurface}
         data-codex-transcript-surface="true"
         data-conversation-part-key={`${rowIdentity.messageKey}:codex-transcript`}
       >
-        {buildCodexTranscriptTimelineNodes(visibleCells).map((node) => node.kind === "tool_activity" ? (
-          <ConversationToolActivity
-            key={node.activity.id}
-            activity={node.activity}
+        {processCells.length > 0 ? (
+          <ConversationProcessDisclosure
+            cells={processCells}
             language={lang === "en" ? "en" : "zh"}
-            renderToolDetails={renderCodexTranscriptToolDetailContent}
-          />
-        ) : renderCodexTranscriptCell(message, node.cell))}
+          >
+            {renderTimelineNodes(processCells)}
+          </ConversationProcessDisclosure>
+        ) : null}
+        {finalCells.length > 0 ? (
+          <div data-codex-final-response="true">
+            {renderTimelineNodes(finalCells)}
+          </div>
+        ) : null}
       </div>
     );
   }
