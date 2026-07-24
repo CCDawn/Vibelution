@@ -96,7 +96,7 @@ function expectBackgroundAwareHairlineSurface(className: string) {
   expect(className).toMatch(/border-\[(?:color:)?color-mix\(in_srgb|border-\[var\(--vui-border|border-vui-border/);
   // Opaque surface recipes, color: mix form, or state-tint bg-[color-mix(...)] recipes.
   expect(className).toMatch(
-    /!bg-\[var\(--vui-surface-|bg-\[var\(--vui-surface-|bg-\[(?:color:)?color-mix\(in_srgb/,
+    /!bg-vui-surface-|bg-vui-surface-|!bg-\[var\(--vui-surface-|bg-\[var\(--vui-surface-|bg-\[(?:color:)?color-mix\(in_srgb/,
   );
   expect(className).not.toContain("bg-vui-surface-glass");
   expect(className).not.toContain("bg-[var(--surface-card)]");

@@ -340,7 +340,13 @@ describe("ResearchRoute layout contract", () => {
   it("keeps repeated research panels background-aware without strong glass or route shadows", () => {
     for (const key of majorResearchSurfaceKeys) {
       const className = styles[key];
-      const backgroundToken = className.split(/\s+/).find((token) => token.startsWith("bg-[") || token.startsWith("!bg-[") || token.startsWith("!bg-["));
+      const backgroundToken = className.split(/\s+/).find(
+        (token) =>
+          token.startsWith("bg-[")
+          || token.startsWith("!bg-[")
+          || token.startsWith("bg-vui-surface-")
+          || token.startsWith("!bg-vui-surface-"),
+      );
 
       expect(backgroundToken, `${key} should declare an explicit background token`).toBeTruthy();
       expect(backgroundToken, `${key} background should use semantic VUI surface tokens`).toMatch(
@@ -352,7 +358,7 @@ describe("ResearchRoute layout contract", () => {
       expect(backgroundToken, `${key} background should not restore the raw surface-card token`).not.toContain(
         "var(--surface-card)",
       );
-      expect(className).toMatch(/border-\[(?:color:)?(?:color-mix|var\(--vui-border)/);
+      expect(className).toMatch(/border-vui-border|border-\[(?:color:)?(?:color-mix|var\(--vui-border)/);
       expect(className).toMatch(/vui-surface-|color-mix\(in_srgb/);
       expect(className).not.toContain("bg-[var(--vui-surface-glass)]");
       expect(className).not.toContain("shadow-[var(--vui-shadow-hairline)]");

@@ -1,3 +1,4 @@
+// surface-role: glass-overlay — intentional translucent handle (alpha policy glass)
 const paneHandleClass = "relative";
 const paneToggleButtonClass = [
   "absolute left-1/2 top-1/2 z-[2] !h-7 !w-7 !max-w-none !min-w-0 !aspect-auto -translate-x-1/2 -translate-y-1/2 px-0",

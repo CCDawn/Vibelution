@@ -1,6 +1,7 @@
 import {
   vuiOpaqueRowClass,
   vuiStateSelectedRowClass,
+  vuiWorkspaceFillClass,
 } from "../design/vuiSurfaceRecipes";
 
 const styles = {
@@ -36,7 +37,7 @@ const styles = {
   sourcePanel:
     "sourcePanel min-h-0 overflow-auto",
   workspace:
-    "workspace min-w-0 grid h-full min-h-0 flex-1 gap-2 p-2 grid-rows-[minmax(0,1fr)] overflow-auto",
+    `workspace min-w-0 grid h-full min-h-0 flex-1 gap-2 p-2 grid-rows-[minmax(0,1fr)] overflow-auto ${vuiWorkspaceFillClass}`,
 } as const;
 
 export default styles;

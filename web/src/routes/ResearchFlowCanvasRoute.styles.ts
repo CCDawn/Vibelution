@@ -13,12 +13,14 @@ import {
   vuiFlatPanelClass,
   vuiOpaquePanelClass,
   vuiOpaqueRowClass,
+  vuiRailFillClass,
   vuiStateCoolInfoClass,
   vuiStateDangerSoftClass,
   vuiStateSelectedRowClass,
   vuiStateSuccessSoftClass,
   vuiStateWarmSoftClass,
   vuiStateWarningSoftClass,
+  vuiWorkspaceFillClass,
 } from "../design/vuiSurfaceRecipes";
 
 const styles: Record<string, string> = {
@@ -178,7 +180,7 @@ const styles: Record<string, string> = {
   inlineToggle:
     "inlineToggle min-w-0",
   inspector:
-    "inspector min-w-0 max-w-full grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden overflow-x-hidden",
+    `inspector min-w-0 max-w-full grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden overflow-x-hidden ${vuiRailFillClass}`,
   inspectorBody:
     "inspectorBody min-w-0 h-full [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] !grid grid-cols-[76px_minmax(0,1fr)] min-h-0 overflow-hidden max-[430px]:grid-cols-1 max-[430px]:grid-rows-[auto_minmax(0,1fr)]",
   inspectorContent:
@@ -381,7 +383,7 @@ const styles: Record<string, string> = {
   reconnectHint:
     "reconnectHint min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   route:
-    "route min-w-0 grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden bg-transparent text-[var(--fg-primary)]",
+    `route min-w-0 grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden bg-transparent text-[var(--fg-primary)] ${vuiWorkspaceFillClass}`,
   saveStatusError:
     `saveStatusError min-w-0 ${vuiStateDangerSoftClass}`,
   saveStatusIdle: `saveStatusIdle min-w-0 border-[var(--vui-border-subtle)] ${vuiOpaqueRowClass} text-[var(--fg-tertiary)]`,

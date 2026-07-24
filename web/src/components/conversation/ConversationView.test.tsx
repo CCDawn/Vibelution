@@ -630,7 +630,7 @@ describe("ConversationView edit resend affordance", () => {
       expect(className).toContain("border-0");
       expect(className).toContain("shadow-none");
       expect(className).not.toContain("bg-[var(--vui-surface-glass)]");
-      expect(className).not.toContain("bg-[var(--vui-surface-row)]");
+      expect(className).not.toMatch(/bg-vui-surface-row|bg-\[var\(--vui-surface-row\)\]/);
       expect(className).not.toContain("shadow-[var(--vui-shadow-hairline)]");
     }
 
@@ -681,7 +681,7 @@ describe("ConversationView edit resend affordance", () => {
       styles.turnAvatar,
       styles.turnAvatarImage,
     ]) {
-      expect(skeletonClass).not.toContain("bg-[var(--vui-surface-row)]");
+      expect(skeletonClass).not.toMatch(/bg-vui-surface-row|bg-\[var\(--vui-surface-row\)\]/);
       expect(skeletonClass).not.toContain("border border-[var(--vui-border-subtle)]");
       expect(skeletonClass).not.toMatch(/(?:^|\s)p-2(?:\s|$)/);
     }
@@ -1798,7 +1798,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.reActToolDetailToggle).toContain("border-0");
     expect(styles.reActToolDetailToggle).toContain("bg-transparent");
     expect(lineItemStyles).not.toContain("bg-[var(--vui-surface-glass)]");
-    expect(lineItemStyles).not.toContain("bg-[var(--vui-surface-row)]");
+    expect(lineItemStyles).not.toMatch(/bg-vui-surface-row|bg-\[var\(--vui-surface-row\)\]/);
     expect(lineItemStyles).not.toContain("shadow-[var(--vui-shadow-hairline)]");
   });
 
@@ -3598,8 +3598,8 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.turnErrorNotice).toContain("shadow-none");
     expect(styles.turnErrorNoticeBody).not.toContain("rounded-[var(--radius-panel)]");
     expect(styles.turnErrorNoticeBody).not.toContain("border ");
-    expect(styles.turnErrorNoticeIcon).not.toContain("bg-[var(--vui-surface-row)]");
-    expect(styles.turnErrorNoticeMeta).not.toContain("bg-[var(--vui-surface-row)]");
+    expect(styles.turnErrorNoticeIcon).not.toMatch(/bg-vui-surface-row|bg-\[var\(--vui-surface-row\)\]/);
+    expect(styles.turnErrorNoticeMeta).not.toMatch(/bg-vui-surface-row|bg-\[var\(--vui-surface-row\)\]/);
     expect(styles.turnErrorNoticeText).toContain("[overflow-wrap:anywhere]");
     expect(styles.turnErrorNoticeText).toContain("[&_.markdownBody]:max-w-[min(100%,128ch)]");
     expect(styles.turnErrorReasonList).toContain("border-t");

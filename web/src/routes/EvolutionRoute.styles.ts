@@ -6,6 +6,7 @@
 import {
   vuiFlatPanelClass,
   vuiOpaqueRowClass,
+  vuiStateAccentBannerClass,
 } from "../design/vuiSurfaceRecipes";
 
 const panelSurface =
@@ -505,7 +506,7 @@ const styles = {
   supervisedMemberIdentity:
     "grid [gap:2px] min-w-0 [&_strong]:min-w-0 [&_strong]:[overflow:hidden] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap] [&_span]:min-w-0 [&_span]:[overflow:hidden] [&_span]:[text-overflow:ellipsis] [&_span]:[white-space:nowrap] [&_strong]:[color:var(--fg-primary)] [&_strong]:[font-size:var(--vui-font-xs)] [&_span]:[color:var(--fg-tertiary)] [&_span]:[font-family:var(--font-mono)] [&_span]:[font-size:var(--vui-font-xs)]",
   supervisedMemberLink:
-    "[grid-template-columns:minmax(78px,_0.42fr)_minmax(0,_1fr)_auto] [color:inherit] [text-decoration:none] [transition:border-color_120ms_ease,_background_120ms_ease,_transform_120ms_ease] hover:[border-color:color-mix(in_srgb,_var(--accent-cool)_42%,_var(--border-soft))] hover:[background:color-mix(in_srgb,_var(--accent-cool)_8%,_var(--vui-surface-panel))] hover:[outline:none] focus-visible:[border-color:color-mix(in_srgb,_var(--accent-cool)_42%,_var(--border-soft))] focus-visible:[background:color-mix(in_srgb,_var(--accent-cool)_8%,_var(--vui-surface-panel))] focus-visible:[outline:none] focus-visible:[box-shadow:var(--focus-ring)] [&_svg]:[color:var(--fg-tertiary)]",
+    `[grid-template-columns:minmax(78px,_0.42fr)_minmax(0,_1fr)_auto] [color:inherit] [text-decoration:none] [transition:border-color_120ms_ease,_background_120ms_ease,_transform_120ms_ease] hover:[border-color:color-mix(in_srgb,_var(--accent-cool)_42%,_var(--border-soft))] hover:${vuiStateAccentBannerClass} hover:[outline:none] focus-visible:[border-color:color-mix(in_srgb,_var(--accent-cool)_42%,_var(--border-soft))] focus-visible:${vuiStateAccentBannerClass} focus-visible:[outline:none] focus-visible:[box-shadow:var(--focus-ring)] [&_svg]:[color:var(--fg-tertiary)]`,
   supervisedMemberRole:
     "grid [gap:2px] min-w-0 [&_span]:[color:var(--fg-secondary)] [&_span]:[font-size:var(--vui-font-xs)] [&_span]:[font-weight:600] [&_strong]:[width:fit-content] [&_strong]:[max-width:100%] [&_strong]:min-w-0 [&_strong]:[overflow:hidden] [&_strong]:[color:var(--accent-warm-2)] [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap]",
   supervisedMemberRow:

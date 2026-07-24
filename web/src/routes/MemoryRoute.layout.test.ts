@@ -312,12 +312,12 @@ describe("MemoryRoute layout contract", () => {
     expect(styles.compactItemSummary).toContain("line-clamp-2");
     expect(overviewPanelStyles.overviewPanel).toContain("grid-rows-[auto_minmax(0,1fr)]");
     expect(overviewPanelStyles.overviewPanel).toContain("overflow-hidden");
-    expect(matrixPanelStyles.matrixPanel).toContain("bg-[var(--vui-surface-panel)]");
+    expect(matrixPanelStyles.matrixPanel).toMatch(/bg-vui-surface-panel|bg-\[var\(--vui-surface-panel\)\]/);
     expect(matrixPanelStyles.matrixPanel).not.toContain("bg-[var(--vui-surface-glass)]");
     expect(matrixPanelStyles.matrixPanel).not.toContain("shadow-[var(--vui-shadow-hairline)]");
     expect(matrixPanelStyles.matrixGrid).toContain("grid-cols-[repeat(auto-fit,minmax(min(100%,10rem),1fr))]");
     expect(matrixPanelStyles.matrixCard).toContain("rounded-[var(--radius-control)]");
-    expect(matrixPanelStyles.matrixCard).toContain("bg-[var(--vui-surface-row)]");
+    expect(matrixPanelStyles.matrixCard).toMatch(/bg-vui-surface-row|bg-\[var\(--vui-surface-row\)\]/);
     expect(matrixPanelStyles.matrixCard).toContain("max-w-full");
     expect(matrixPanelStyles.matrixCard).not.toContain("bg-[var(--vui-surface-glass)]");
     expect(matrixPanelStyles.matrixCard).not.toContain("shadow-[var(--vui-shadow-hairline)]");
@@ -334,8 +334,8 @@ describe("MemoryRoute layout contract", () => {
     expect(overviewPanelSource).toContain("VPanelHeader");
     expect(overviewPanelSource).not.toContain("styles.summaryCard");
     expect(overviewPanelStyles.overviewPanel).not.toContain("rounded-[var(--radius-panel)]");
-    expect(overviewPanelStyles.overviewPanel).not.toContain("bg-[var(--vui-surface-panel)]");
-    expect(overviewPanelStyles.reviewQueuePanel).not.toContain("bg-[var(--vui-surface-panel)]");
+    expect(overviewPanelStyles.overviewPanel).not.toMatch(/bg-vui-surface-panel|bg-\[var\(--vui-surface-panel\)\]/);
+    expect(overviewPanelStyles.reviewQueuePanel).not.toMatch(/bg-vui-surface-panel|bg-\[var\(--vui-surface-panel\)\]/);
   });
 
   it("tightens Memory detail, manage, source, and graph surfaces without glass card walls", () => {
@@ -354,7 +354,7 @@ describe("MemoryRoute layout contract", () => {
     ];
 
     for (const className of secondWavePanelClasses) {
-      expect(className).toContain("bg-[var(--vui-surface-panel)]");
+      expect(className).toMatch(/bg-vui-surface-panel|bg-\[var\(--vui-surface-panel\)\]/);
       expect(className).not.toContain("bg-[var(--vui-surface-glass)]");
       expect(className).not.toContain("shadow-[var(--vui-shadow-hairline)]");
     }
@@ -367,7 +367,7 @@ describe("MemoryRoute layout contract", () => {
       graphNodeInspectorPanelStyles.emptyDetail,
       graphNodeInspectorPanelStyles.selectedConfigSummary,
     ]) {
-      expect(className).toContain("bg-[var(--vui-surface-row)]");
+      expect(className).toMatch(/bg-vui-surface-row|bg-\[var\(--vui-surface-row\)\]/);
       expect(className).not.toContain("bg-[var(--vui-surface-glass)]");
       expect(className).not.toContain("shadow-[var(--vui-shadow-hairline)]");
     }
@@ -406,11 +406,11 @@ describe("MemoryRoute layout contract", () => {
     expect(managePanelSource).toContain("VSurface");
     expect(managePanelSource).toContain("VSection");
     expect(managePanelSource).toContain("VStateSurface");
-    expect(managePanelStyles.manageFilterPanel).not.toContain("bg-[var(--vui-surface-panel)]");
+    expect(managePanelStyles.manageFilterPanel).not.toMatch(/bg-vui-surface-panel|bg-\[var\(--vui-surface-panel\)\]/);
     expect(graphViewPanelSource).toContain("VMetricStrip");
     expect(graphViewPanelSource).toContain("VSurface");
     expect(graphViewPanelSource).not.toContain("styles.summaryCard");
-    expect(graphViewPanelStyles.sourcePanel).not.toContain("bg-[var(--vui-surface-panel)]");
+    expect(graphViewPanelStyles.sourcePanel).not.toMatch(/bg-vui-surface-panel|bg-\[var\(--vui-surface-panel\)\]/);
     expect(graphViewPanelStyles.graphCanvasPanel).not.toContain("rounded-[var(--radius-panel)]");
     expect(graphViewPanelStyles).not.toHaveProperty("managementHeader");
   });
@@ -869,7 +869,7 @@ describe("MemoryRoute layout contract", () => {
     expect(knowledgeReviewPanelSource).not.toContain("useQuery");
     expect(knowledgeReviewPanelSource).not.toContain("useMutation");
     expect(knowledgeReviewPanelSource).not.toContain("fetchJson");
-    expect(knowledgeReviewPanelStyles.managementPanel).toContain("bg-[var(--vui-surface-panel)]");
+    expect(knowledgeReviewPanelStyles.managementPanel).toMatch(/bg-vui-surface-panel|bg-\[var\(--vui-surface-panel\)\]/);
     expect(knowledgeReviewPanelStyles.managementPanel).toContain("grid min-h-0");
     expect(knowledgeReviewPanelStyles.managementPanel).not.toContain("bg-[var(--vui-surface-glass)]");
     expect(knowledgeReviewPanelStyles.managementPanel).not.toContain("shadow-[var(--vui-shadow-hairline)]");
@@ -882,7 +882,7 @@ describe("MemoryRoute layout contract", () => {
     expect(knowledgeReviewPanelStyles.bulkActionBar).toContain("[&>button]:max-w-full");
     expect(knowledgeReviewPanelStyles.detailActionButton).toContain("w-fit");
     expect(knowledgeReviewPanelStyles.primaryActionButton).toContain("w-fit");
-    expect(knowledgeReviewPanelStyles.emptyDetail).toContain("bg-[var(--vui-surface-row)]");
+    expect(knowledgeReviewPanelStyles.emptyDetail).toMatch(/bg-vui-surface-row|bg-\[var\(--vui-surface-row\)\]/);
     expect(knowledgeReviewPanelStyles.emptyDetail).not.toContain("bg-[var(--vui-surface-glass)]");
     expect(knowledgeReviewPanelStyles.emptyDetail).not.toContain("shadow-[var(--vui-shadow-hairline)]");
     expect(routeSource).toContain('from "./MemoryKnowledgePermissionsPanel"');

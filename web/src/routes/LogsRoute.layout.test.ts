@@ -121,7 +121,7 @@ describe("LogsRoute layout contract", () => {
   it("keeps preview diagnostics and runtime evidence surfaces background-aware", () => {
     for (const key of logSurfaceKeys) {
       expect(styles[key]).toContain("border");
-      expect(styles[key]).toMatch(/bg-\[|!bg-\[|var\(--vui-surface/);
+      expect(styles[key]).toMatch(/bg-vui-surface-|!bg-vui-surface-|bg-\[|!bg-\[|var\(--vui-surface/);
       expect(styles[key]).not.toContain("bg-[var(--vui-surface-glass)]");
       expect(styles[key]).not.toContain("shadow-[var(--vui-shadow");
     }
@@ -194,7 +194,7 @@ describe("LogsRoute layout contract", () => {
       "sceneCardStatus",
       "sceneCardSummary",
     ] as const satisfies readonly (keyof typeof styles)[]) {
-      expect(styles[key]).toMatch(/bg-\[|!bg-\[|var\(--vui-surface/);
+      expect(styles[key]).toMatch(/bg-vui-surface-|!bg-vui-surface-|bg-\[|!bg-\[|var\(--vui-surface/);
       expect(styles[key]).not.toContain("bg-[var(--vui-control-muted)]");
       expect(styles[key]).not.toContain("shadow-[var(--vui-shadow");
     }

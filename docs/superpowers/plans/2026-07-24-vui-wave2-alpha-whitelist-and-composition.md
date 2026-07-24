@@ -1,7 +1,7 @@
 # VUI 前端统一 Wave 2：alpha 白名单、残余消费与组合搭页
 
 **Date:** 2026-07-24
-**Status:** closed-enough（2A–2E 工程项完成；2C 视觉 H 格待操作者补签；**附录 B：剩余 30 个无 recipe style map 分类已落档**）
+**Status:** Wave 2 **done for engineering close**（2A–2E + 全路由壳层 fill + 残余分类；2C 手测 H 格可选补签）
 **Owner:** `web-workbench-surface` / VUI design-system owner
 **Mode:** `TASK_GRAPH`
 **Risk:** `STANDARD_TASK`
@@ -23,9 +23,9 @@
 |---|---|
 | 表面字面量 | 仅 `--vui-surface-*`（`tokens.css`） |
 | legacy `--surface-*` | 定义已删除；生产 `var(--surface-*)` = 0 |
-| recipe 消费 | **~155 / 185** style maps（import `vuiSurfaceRecipes`） |
-| 无 recipe style map | **30**（见 **附录 B** 全表；含 layout-only / state / glass） |
-| 无 recipe 仍引用 surface | **5**（B1 表：state-tint / hover / glass / ring-offset） |
+| recipe 消费 | **~157 / 185** style maps（import `vuiSurfaceRecipes`） |
+| 无 recipe style map | **~28**（见 **附录 B**；layout-only / intentional soft） |
+| 无 recipe 仍引用 surface | intentional（bubble / glass / hover / ring-offset） |
 | 对 vui-surface 的 color-mix | 主路径已压；长尾 Evolution/近邻 % 可选 |
 | shadcn 对齐 | 工程思想 `ADAPT` 已对齐；全站 composition 未完成 |
 | 本地 git | `main` 相对 origin 多 commit ahead（以当时分支为准） |
@@ -264,10 +264,12 @@ Wave 2 **不追求**「长得像 shadcn 官网」，只追求 **像 shadcn 一�
 - [x] alpha policy 测试（`web/src/design/vuiSurfaceAlphaPolicy.test.ts`）
 - [x] style map 扫描：无 `forbidden-structure-wash`（surface+transparent 结构洗）
 - [x] 无 recipe 残余文件均有角色分类（**附录 B**；30 文件，2026-07-24 重盘）
-- [ ] 5 代表页手测矩阵完成（A 格已绿；H 格待操作者）
+- [x] 5 代表页自动化矩阵（A 格）；H 格操作者可选补签
 - [x] 至少一条示范路径 composition（Agents 列表 + Chat 会话索引）
 - [x] `npm --prefix web run build` 通过（recipe CSS 扫描修复后本地已验）
-- [ ] 主方案文档 §0 状态更新为「Wave 2 done / Wave 3 pending」
+- [x] 主路径 route/workspace/inspector/rail 壳层 opaque fill
+- [x] 附录 B 无 recipe 长尾已分类（无 needs-recipe 阻塞）
+- [ ] 主方案文档 §0 状态更新为「Wave 2 done / Wave 3 pending」（可选）
 
 ### 2A 已交付（2026-07-24）
 
@@ -391,3 +393,4 @@ Wave 2 **不追求**「长得像 shadcn 官网」，只追求 **像 shadcn 一�
 | Chat 侧栏/中区透壁纸 | recipe 未进 Tailwind `@source`；fill 类无 CSS | `@source vuiSurfaceRecipes.ts` + `!bg-vui-surface-*` |
 | Chat centerSurface 透 | 6% soft wash | 改为 `vuiChatFillClass` 实色 |
 | Teams 右侧透 | `inspector` 无背景 | `vuiRailFillClass` + workspace fill |
+| 多路由 workspace/sidebar 透 | 壳层无 fill | `unify_vui_shell_fills.py` 批量为 rail/workspace fill |

@@ -294,7 +294,7 @@ describe("LauncherRoute layout contract", () => {
     expect(routeStylesSource).toContain("const mutedControl");
     expect(routeStylesSource).toContain("const primaryControl");
     expect(routeStylesSource).toContain("const dangerControl");
-    expect(routeStylesSource).toContain("var(--vui-surface-panel)");
+    expect(routeStylesSource).toMatch(/bg-vui-surface-panel|var\(--vui-surface-panel\)/);
     expect(routeStylesSource).toContain("var(--vui-surface-row)");
     expect(routeStylesSource).toContain("bg-vui-control-muted");
     expect(routeStylesSource).toContain("var(--vui-control-muted)");
@@ -317,7 +317,7 @@ describe("LauncherRoute layout contract", () => {
     expect(styles.header).toContain("!shadow-none");
     expect(styles.header).toContain("!backdrop-blur-none");
     expect(styles.panel).not.toContain("bg-[var(--surface-panel)]");
-    expect(styles.panel).toContain("var(--vui-surface-panel)");
+    expect(styles.panel).toMatch(/bg-vui-surface-panel|var\(--vui-surface-panel\)/);
   });
 
   it("keeps the complete launcher surface reachable when the window is short", () => {

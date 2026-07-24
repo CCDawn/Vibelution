@@ -1,3 +1,4 @@
+// surface-role: ring-offset — transparent body; only ring-offset uses surface-panel
 const styles = {
   responseBody:
     "vui-components-conversationview responseBody min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] grid gap-1.5 border-0 bg-transparent py-1 pl-5 pr-0 text-[var(--fg-primary)] shadow-none [overflow-wrap:anywhere]",

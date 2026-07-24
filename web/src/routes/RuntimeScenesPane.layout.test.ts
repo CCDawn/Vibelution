@@ -24,7 +24,7 @@ const expectControlOnlyAction = (className: string) => {
   expect(className).toContain("rounded-[var(--radius-control)]");
   expect(className).toContain("bg-[var(--vui-control-muted)]");
   expect(className).not.toContain("rounded-[var(--radius-panel)]");
-  expect(className).not.toContain("var(--vui-surface-panel)");
+  expect(className).not.toMatch(/bg-vui-surface-panel|var\(--vui-surface-panel\)/);
   expect(className).not.toContain("var(--vui-surface-row)");
 };
 

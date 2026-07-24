@@ -25,6 +25,15 @@ TARGET_GLOBS = [
     "routes/LogsRoute.styles.ts",
     "routes/GitRoute.styles.ts",
     "routes/AgentsRoute.styles.ts",
+    "routes/SelfEvolutionTrack.styles.ts",
+    "routes/EvolutionActiveRunMonitorPanel.styles.ts",
+    "routes/LauncherRoute.styles.ts",
+    "routes/AgentCreatePanel.styles.ts",
+    "routes/AgentOverviewPanel.styles.ts",
+    "routes/UsageRoute.styles.ts",
+    "routes/SkillsRoute.styles.ts",
+    "routes/PromptTemplatesRoute.styles.ts",
+    "routes/SupervisedReviewRoute.styles.ts",
     "components/conversation/ConversationView.styles.ts",
 ]
 
@@ -134,6 +143,31 @@ REPLACEMENTS: list[tuple[str, str]] = [
     (
         "[background:color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
         "vuiStateSelectedRowFillClass",
+    ),
+    # Underscore arbitrary-property form (Agents / legacy CSS-module ports)
+    (
+        "[background:color-mix(in_srgb,_var(--accent-cool)_10%,_var(--vui-surface-row))]",
+        "vuiStateSelectedRowFillClass",
+    ),
+    (
+        "[background:color-mix(in_srgb,_var(--accent-cool)_5%,_var(--vui-surface-row))]",
+        "vuiStateSelectedRowFillClass",
+    ),
+    (
+        "[background:color-mix(in_srgb,_var(--state-success)_5%,_var(--vui-surface-row))]",
+        "vuiStateSuccessSoftClass",
+    ),
+    (
+        "[background:color-mix(in_srgb,_var(--accent-warm)_5%,_var(--vui-surface-row))]",
+        "vuiStateSelectedWarmRowClass",
+    ),
+    (
+        "[background:color-mix(in_srgb,_var(--accent-cool)_6%,_var(--vui-surface-panel))]",
+        "vuiStateAccentBannerClass",
+    ),
+    (
+        "[background:color-mix(in_srgb,_var(--accent-cool)_8%,_var(--vui-surface-panel))]",
+        "vuiStateAccentBannerClass",
     ),
 ]
 

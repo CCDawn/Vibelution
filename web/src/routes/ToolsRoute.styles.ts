@@ -15,6 +15,7 @@ import {
   vuiStateSuccessSoftClass,
   vuiStateWarmSoftClass,
   vuiStateWarningSoftClass,
+  vuiWorkspaceFillClass,
 } from "../design/vuiSurfaceRecipes";
 
 const panelSurface =
@@ -264,7 +265,7 @@ const styles = {
   returnButton:
     `returnButton min-w-0 ${buttonBase}`,
   route:
-    "route min-w-0 max-w-full grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] content-start overflow-hidden overflow-x-hidden text-[var(--fg-primary)]",
+    `route min-w-0 max-w-full grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] content-start overflow-hidden overflow-x-hidden text-[var(--fg-primary)] ${vuiWorkspaceFillClass}`,
   rowSelect:
     `rowSelect inline-grid h-7 w-7 min-w-7 place-items-center ${vuiOpaqueRowClass} [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:sr-only`,
   schemaDisclosure:
@@ -460,7 +461,7 @@ const styles = {
   ts:
     "ts min-w-0",
   workspace:
-    "workspace min-w-0 max-w-full grid h-full min-h-0 gap-[7px] p-[7px] !grid grid-cols-[minmax(0,var(--tools-left-panel-width))_auto_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] overflow-hidden overflow-x-hidden max-[760px]:grid-cols-[minmax(0,1fr)] max-[760px]:grid-rows-[minmax(220px,42vh)_minmax(420px,1fr)] max-[760px]:overflow-y-auto max-[760px]:overflow-x-hidden",
+    `workspace min-w-0 max-w-full grid h-full min-h-0 gap-[7px] p-[7px] !grid grid-cols-[minmax(0,var(--tools-left-panel-width))_auto_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] overflow-hidden overflow-x-hidden max-[760px]:grid-cols-[minmax(0,1fr)] max-[760px]:grid-rows-[minmax(220px,42vh)_minmax(420px,1fr)] max-[760px]:overflow-y-auto max-[760px]:overflow-x-hidden ${vuiWorkspaceFillClass}`,
   workspaceScopePanel:
     `workspaceScopePanel min-w-0 max-w-full ${vuiOpaqueRowClass} !grid grid-cols-[repeat(3,minmax(0,1fr))] gap-[5px] px-2 py-[5px] [font-size:var(--vui-font-xs)] max-[720px]:grid-cols-[1fr]`,
 } as const;

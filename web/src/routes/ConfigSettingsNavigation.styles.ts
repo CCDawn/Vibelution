@@ -18,7 +18,7 @@ const styles = {
     "vui-routes-configsettingsnavigation groupButton !grid min-h-11 !w-full !grid-cols-[minmax(0,1fr)] !justify-stretch rounded-lg px-3 text-left [font-size:var(--vui-font-sm)] font-bold",
   groupButtonActive:
     "vui-routes-configsettingsnavigation groupButtonActive border-[color-mix(in_srgb,var(--accent-cool)_44%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_13%,var(--vui-surface-row))] text-vui-fg-primary shadow-[inset_3px_0_0_var(--accent-warm-2)]",
-  pageTabs: `vui-routes-configsettingsnavigation pageTabs flex min-w-0 items-center gap-2 overflow-x-auto border-b border-vui-border-subtle !${vuiToolbarFillClass} px-4 py-2 [scrollbar-width:thin]`,
+  pageTabs: `vui-routes-configsettingsnavigation pageTabs flex min-w-0 items-center gap-2 overflow-x-auto border-b border-vui-border-subtle ${vuiToolbarFillClass} px-4 py-2 [scrollbar-width:thin]`,
   pageButton:
     "vui-routes-configsettingsnavigation pageButton min-h-10 shrink-0 px-4 [font-size:var(--vui-font-sm)] font-bold",
   pageButtonActive:

@@ -19,6 +19,7 @@ import {
   vuiStateSuccessSoftClass,
   vuiStateWarmSoftClass,
   vuiStateWarningSoftClass,
+  vuiWorkspaceFillClass,
 } from "../design/vuiSurfaceRecipes";
 
 const styles: Record<string, string> = {
@@ -195,7 +196,7 @@ const styles: Record<string, string> = {
   riskText:
     "riskText min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   route:
-    "route min-w-0 max-w-full grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] content-start overflow-hidden overflow-x-hidden text-[var(--fg-primary)]",
+    `route min-w-0 max-w-full grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] content-start overflow-hidden overflow-x-hidden text-[var(--fg-primary)] ${vuiWorkspaceFillClass}`,
   scoreStrip:
     "scoreStrip min-w-0 flex flex-wrap items-center gap-1.5",
   secondaryButton:
@@ -377,7 +378,7 @@ const styles: Record<string, string> = {
   workflowModeControl:
     "workflowModeControl min-w-0 w-fit max-w-full flex flex-wrap items-center gap-1.5",
   workspace:
-    "workspace min-w-0 max-w-full grid h-full min-h-0 grid-cols-[minmax(0,252px)_minmax(0,1fr)_minmax(0,252px)] grid-rows-[minmax(0,1fr)] gap-1.5 overflow-hidden overflow-x-hidden p-1.5 max-[1180px]:grid-cols-[minmax(0,220px)_minmax(0,1fr)_minmax(0,220px)] max-[980px]:grid-cols-[minmax(0,1fr)] max-[980px]:grid-rows-[auto_auto_auto] max-[980px]:gap-1.5 max-[980px]:overflow-y-auto max-[980px]:overflow-x-hidden max-[980px]:p-1",
+    `workspace min-w-0 max-w-full grid h-full min-h-0 grid-cols-[minmax(0,252px)_minmax(0,1fr)_minmax(0,252px)] grid-rows-[minmax(0,1fr)] gap-1.5 overflow-hidden overflow-x-hidden p-1.5 max-[1180px]:grid-cols-[minmax(0,220px)_minmax(0,1fr)_minmax(0,220px)] max-[980px]:grid-cols-[minmax(0,1fr)] max-[980px]:grid-rows-[auto_auto_auto] max-[980px]:gap-1.5 max-[980px]:overflow-y-auto max-[980px]:overflow-x-hidden max-[980px]:p-1 ${vuiWorkspaceFillClass}`,
 };
 
 export default styles;
