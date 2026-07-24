@@ -129,7 +129,7 @@ def _agent_to_api(
     s = _service()
     workspace = str(agent.get("workspacePath") or "").strip()
     metadata = dict(agent.get("metadata") or {})
-    avatar_path = s._agent_avatar_path_from_metadata(metadata)
+    avatar_path = s.resolve_agent_avatar_path_for_projection({**agent, "metadata": metadata})
     profileless_session_agent = s._is_profileless_session_agent({**agent, "metadata": metadata})
     if profileless_session_agent:
         metadata.pop("personaProfile", None)
@@ -297,6 +297,11 @@ def list_agents(*, include_archived: bool = False, detail: str = "full") -> list
     s = _service()
     started = time.perf_counter()
     timings: dict[str, float] = {}
+    # Ensure data-home avatar inventory exists so projection can emit default URLs.
+    try:
+        s.seed_agent_avatar_inventory_if_missing()
+    except Exception:
+        pass
     normalized_detail = str(detail or "full").strip().lower()
     if normalized_detail not in {"full", "summary", "config"}:
         normalized_detail = "full"
@@ -372,7 +377,7 @@ def _agent_to_api_summary(
     s = _service()
     workspace = str(agent.get("workspacePath") or "").strip()
     metadata = dict(agent.get("metadata") or {})
-    avatar_path = s._agent_avatar_path_from_metadata(metadata)
+    avatar_path = s.resolve_agent_avatar_path_for_projection({**agent, "metadata": metadata})
     profileless_session_agent = s._is_profileless_session_agent({**agent, "metadata": metadata})
     if profileless_session_agent:
         metadata.pop("personaProfile", None)
@@ -383,10 +388,10 @@ def _agent_to_api_summary(
     conversation_index_classification = s.agent_conversation_index_classification({**agent, "metadata": metadata})
     conversation_index_visibility = s.agent_conversation_index_visibility({**agent, "metadata": metadata})
     prompt_binding = s._agent_prompt_template_binding({**agent, "metadata": metadata})
-    avatar_image_url = avatar_url_cache.get(avatar_path) if avatar_url_cache is not None else None
+    avatar_image_url = avatar_url_cache.get(avatar_path) if avatar_url_cache is not None and avatar_path else None
     if avatar_image_url is None:
         avatar_image_url = s.agent_avatar_image_url(avatar_path)
-        if avatar_url_cache is not None:
+        if avatar_url_cache is not None and avatar_path:
             avatar_url_cache[avatar_path] = avatar_image_url
     return {
         "agentId": agent_id,

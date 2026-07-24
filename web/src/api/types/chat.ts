@@ -739,6 +739,7 @@ export type SessionDetail = SessionSummary & {
     limitSource?: string;
     limitModelId?: string;
     limitAgentId?: string;
+    limitError?: string;
     estimatedTokens: number;
     messageCount: number;
     userMessageCount: number;

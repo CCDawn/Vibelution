@@ -125,7 +125,24 @@ export function AgentConversationDirectory({
         onPress={() => onOpenAgent(agent)}
       >
         <span className={styles.agentAvatar} aria-hidden="true">
-          {avatarUrl ? <img className={styles.agentAvatarImage} src={avatarUrl} alt="" /> : avatarInitials(agent.agentCode, display.name, agentId)}
+          {avatarUrl ? (
+            <img
+              className={styles.agentAvatarImage}
+              src={avatarUrl}
+              alt=""
+              onError={(event) => {
+                const image = event.currentTarget;
+                image.style.display = "none";
+                const parent = image.parentElement;
+                if (parent && !parent.dataset.avatarFallback) {
+                  parent.dataset.avatarFallback = "1";
+                  parent.textContent = avatarInitials(agent.agentCode, display.name, agentId);
+                }
+              }}
+            />
+          ) : (
+            avatarInitials(agent.agentCode, display.name, agentId)
+          )}
         </span>
         <span className={styles.agentCopy}>
           <span className={styles.agentTitleRow}>

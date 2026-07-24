@@ -104,6 +104,8 @@ class AgentCreatePayload(BaseModel):
     personaProfile: dict[str, Any] = Field(default_factory=dict)
     taskProfile: dict[str, Any] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
+    # Optional library path (workspace/avatars/...). Empty => role default.
+    avatarImagePath: str = ""
 
 
 class AgentUpdatePayload(BaseModel):
@@ -582,6 +584,12 @@ def agent_create(payload: AgentCreatePayload) -> dict:
             agent = update_agent_instance(agent_id, task_profile=task_profile)
         if tool_policy:
             agent = update_agent_instance(agent_id, tool_policy=tool_policy)
+        avatar_path = str(payload.avatarImagePath or "").strip()
+        if avatar_path:
+            try:
+                agent = update_agent_avatar(agent_id, avatar_image_path=avatar_path)
+            except AgentDirectoryError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
         return _with_agent_workspace_cache_invalidated(agent)
     except session_service.SessionValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

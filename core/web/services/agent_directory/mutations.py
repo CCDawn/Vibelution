@@ -251,6 +251,10 @@ def create_agent_instance(
     context_compression_policy: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     s = _service()
+    try:
+        s.seed_agent_avatar_inventory_if_missing()
+    except Exception:
+        pass
     with s._STATE_LOCK:
         state = s.repair_agent_directory()
         existing_ids = {
@@ -516,13 +520,35 @@ def _default_agent_avatar_filename(
     available_avatar_filenames: list[str] | None = None,
 ) -> str:
     s = _service()
-    available = (
-        list(available_avatar_filenames)
-        if available_avatar_filenames is not None
-        else s._available_agent_avatar_filenames()
-    )
+    if available_avatar_filenames is not None:
+        available = list(available_avatar_filenames)
+    else:
+        available = s._available_agent_avatar_filenames()
+        if not available:
+            try:
+                s.seed_agent_avatar_inventory_if_missing()
+            except Exception:
+                pass
+            available = s._available_agent_avatar_filenames()
     if not available:
         return ""
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    # Exact field values beat substring table order for product fixed roles.
+    exact_candidates = [
+        str(agent.get("roleKey") or "").strip().lower(),
+        str(metadata.get("supervisedRole") or "").strip().lower(),
+        str(metadata.get("selfEvolutionRole") or "").strip().lower(),
+        str(metadata.get("systemRole") or "").strip().lower(),
+        str(metadata.get("researchOrgRole") or "").strip().lower(),
+    ]
+    for exact in exact_candidates:
+        if not exact:
+            continue
+        for tokens, filenames in s.AGENT_AVATAR_ROLE_DEFAULTS:
+            if len(tokens) == 1 and tokens[0] == exact:
+                for filename in filenames:
+                    if filename in available:
+                        return filename
     key = s._agent_avatar_match_key(agent)
     for tokens, filenames in s.AGENT_AVATAR_ROLE_DEFAULTS:
         if all(token in key for token in tokens):
@@ -660,14 +686,40 @@ def _ensure_agent_default_avatar(
     )
     if not default_path:
         return False
-    if current_path and current_source != "default":
-        return False
+    # Operator/library ("custom") and any other non-default source are locked while
+    # the file still resolves. Missing files fall through so ensure can recover.
+    if current_path and current_source and current_source != "default":
+        filename = s.agent_avatar_filename(current_path)
+        if filename:
+            try:
+                path = s.resolve_agent_avatar_file(filename)
+                if path.exists() and path.is_file():
+                    return False
+            except (FileNotFoundError, OSError, ValueError):
+                pass
     if current_path == default_path and metadata.get("avatarImageSource") == "default":
         return False
     metadata["avatarImagePath"] = default_path
     metadata["avatarImageSource"] = "default"
     agent["metadata"] = metadata
     return True
+
+
+def resolve_agent_avatar_path_for_projection(
+    agent: dict[str, Any],
+    *,
+    available_avatar_filenames: list[str] | None = None,
+) -> str:
+    """Path for API projection: stored metadata, else role default (read-only)."""
+    s = _service()
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    current_path = s._agent_avatar_path_from_metadata(metadata if isinstance(metadata, dict) else {})
+    if current_path:
+        return current_path
+    return s._default_agent_avatar_path(
+        agent,
+        available_avatar_filenames=available_avatar_filenames,
+    )
 
 
 def _record_agent_event(event_code: str, agent: dict[str, Any], *, lifecycle: bool = False) -> None:
@@ -720,6 +772,10 @@ def _record_agent_avatar_updated_event(agent: dict[str, Any]) -> None:
 
 def list_agent_avatar_options() -> dict[str, Any]:
     s = _service()
+    try:
+        s.seed_agent_avatar_inventory_if_missing()
+    except Exception:
+        pass
     options: list[dict[str, Any]] = []
     for filename in s._available_agent_avatar_filenames():
         path = str(s.AGENT_AVATAR_RELATIVE_DIR / filename)
@@ -822,23 +878,76 @@ def agent_avatar_filename(avatar_image_path: object) -> str:
 
 
 def _agent_avatar_match_key(agent: dict[str, Any]) -> str:
+    """Build a lowercase match haystack for default-avatar rules.
+
+    Specific identity fields are listed first so exact role tokens appear in the
+    key even when primaryMode is a broad mode like general/self_evolution.
+    """
     s = _service()
     metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    # Prefer specific roles ahead of primaryMode so table order can still use
+    # broad mode tokens without them being the only signal.
     parts = [
-        agent.get("primaryMode"),
         agent.get("roleKey"),
-        metadata.get("functionalDisplayName"),
-        metadata.get("researchAgentKey"),
-        metadata.get("selfEvolutionRole"),
         metadata.get("supervisedRole"),
+        metadata.get("selfEvolutionRole"),
         metadata.get("systemRole"),
         metadata.get("researchOrgRole"),
+        metadata.get("researchAgentKey"),
+        metadata.get("functionalDisplayName"),
+        agent.get("primaryMode"),
+        metadata.get("agentMode"),
     ]
     return " ".join(str(item or "").strip().lower() for item in parts if str(item or "").strip())
 
 
+def seed_agent_avatar_inventory_if_missing() -> int:
+    """Copy whitelist avatar files from project seed into data-home when empty.
+
+    Runtime inventory is data-home only; repo workspace/avatars is a seed source.
+    Returns number of files copied.
+    """
+    s = _service()
+    import shutil
+
+    target_dir = s._workspace_path("avatars").resolve()
+    target_dir.mkdir(parents=True, exist_ok=True)
+    existing = {item.name for item in target_dir.iterdir() if item.is_file()} if target_dir.is_dir() else set()
+    if existing.intersection(s.AGENT_AVATAR_FILENAMES):
+        return 0
+    seed_roots = [
+        Path(getattr(s, "PROJECT_ROOT", Path("."))) / "workspace" / "avatars",
+        Path(getattr(s, "PROJECT_ROOT", Path("."))) / "assets" / "agent-avatars",
+    ]
+    copied = 0
+    for seed_root in seed_roots:
+        try:
+            seed_root = seed_root.resolve()
+        except OSError:
+            continue
+        if not seed_root.is_dir():
+            continue
+        for filename in s.AGENT_AVATAR_FILENAMES:
+            if filename in existing:
+                continue
+            source = seed_root / filename
+            if not source.is_file():
+                continue
+            try:
+                shutil.copy2(source, target_dir / filename)
+                existing.add(filename)
+                copied += 1
+            except OSError:
+                continue
+        if copied:
+            break
+    return copied
+
+
 def _available_agent_avatar_filenames() -> list[str]:
     s = _service()
+    # Do not seed from project tree here: inventory is data-home only so options
+    # and resolve stay operator-home scoped (see test_agent_avatar_model_repair).
     avatar_dir = s._workspace_path("avatars").resolve()
     if not avatar_dir.exists() or not avatar_dir.is_dir():
         return []
