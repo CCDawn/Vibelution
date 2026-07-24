@@ -1,78 +1,47 @@
 const root = document.documentElement;
-const activityRegion = document.querySelector("[data-preview-state]");
-const activityToggle = document.querySelector("[data-activity-toggle]");
-const activityDetails = document.querySelector("[data-activity-details]");
-const themeToggle = document.querySelector("[data-theme-toggle]");
+const processToggle = document.querySelector("[data-process-toggle]");
+const processStream = document.querySelector("[data-process-stream]");
+const processLabel = document.querySelector("[data-process-label]");
+const terminalEntry = document.querySelector("[data-terminal-entry]");
+const terminalCopy = document.querySelector("[data-terminal-copy]");
+const finalAnswer = document.querySelector("[data-final-answer]");
 const stateControls = Array.from(document.querySelectorAll("[data-state-control]"));
+const themeToggle = document.querySelector("[data-theme-toggle]");
 
 const stateContent = {
-  running: {
-    summaryTitle: "正在搜索资料",
-    summaryMeta: "2/3 步骤 · 13s",
-    summaryIcon: "running",
-    searchIcon: "completed",
-    searchTitle: "搜索 4 个查询",
-    searchDescription: "官方文档、项目状态与相关工作流",
-    searchTime: "13s",
-    synthesisIcon: "running",
-    synthesisTitle: "正在整理搜索结果",
-    synthesisDescription: "归并来源，准备生成回答",
-    synthesisTime: "运行中",
-    showFailureAction: false,
-  },
   completed: {
-    summaryTitle: "已完成资料搜索",
-    summaryMeta: "3 步骤 · 13.4s",
-    summaryIcon: "completed",
-    searchIcon: "completed",
-    searchTitle: "搜索 4 个查询",
-    searchDescription: "已保留 8 个可信来源",
-    searchTime: "13s",
-    synthesisIcon: "completed",
-    synthesisTitle: "整理搜索结果",
-    synthesisDescription: "来源已归并，回答已生成",
-    synthesisTime: "0.3s",
-    showFailureAction: false,
+    processLabel: "已处理 13s",
+    terminalCopy: "整理了 8 个可信来源",
+    terminalState: "",
+    answer: "已完成资料检索。下面是根据可信来源整理的结论。",
+    showAnswer: true,
+  },
+  running: {
+    processLabel: "处理中 13s",
+    terminalCopy: "正在整理搜索结果",
+    terminalState: "is-running",
+    answer: "",
+    showAnswer: false,
   },
   failed: {
-    summaryTitle: "搜索服务暂时不可用",
-    summaryMeta: "第 2 步失败 · 13.2s",
-    summaryIcon: "failed",
-    searchIcon: "failed",
-    searchTitle: "搜索 4 个查询",
-    searchDescription: "服务未响应，可从此步骤重试",
-    searchTime: "失败",
-    synthesisIcon: "queued",
-    synthesisTitle: "等待搜索结果",
-    synthesisDescription: "上一步恢复后自动继续",
-    synthesisTime: "已暂停",
-    showFailureAction: true,
+    processLabel: "处理已停止",
+    terminalCopy: "Search failed: provider unavailable",
+    terminalState: "is-failed",
+    answer: "搜索服务暂时不可用，已保留前面的处理记录。",
+    showAnswer: true,
   },
 };
 
-function setIcon(element, state) {
-  element.className = `status-icon status-icon--${state}`;
-}
-
 function renderState(state) {
   const content = stateContent[state];
-  const shouldExpand = state !== "completed";
-  activityRegion.dataset.previewState = state;
-  activityToggle.setAttribute("aria-expanded", String(shouldExpand));
-  activityDetails.hidden = !shouldExpand;
-  document.querySelector(".technical-details").open = false;
-  document.querySelector("[data-summary-title]").textContent = content.summaryTitle;
-  document.querySelector("[data-summary-meta]").textContent = content.summaryMeta;
-  document.querySelector("[data-search-title]").textContent = content.searchTitle;
-  document.querySelector("[data-search-description]").textContent = content.searchDescription;
-  document.querySelector("[data-search-time]").textContent = content.searchTime;
-  document.querySelector("[data-synthesis-title]").textContent = content.synthesisTitle;
-  document.querySelector("[data-synthesis-description]").textContent = content.synthesisDescription;
-  document.querySelector("[data-synthesis-time]").textContent = content.synthesisTime;
-  document.querySelector("[data-failure-action]").hidden = !content.showFailureAction;
-  setIcon(document.querySelector("[data-summary-icon]"), content.summaryIcon);
-  setIcon(document.querySelector("[data-search-icon]"), content.searchIcon);
-  setIcon(document.querySelector("[data-synthesis-icon]"), content.synthesisIcon);
+  processLabel.textContent = content.processLabel;
+  terminalCopy.textContent = content.terminalCopy;
+  terminalEntry.className = `tool-entry ${content.terminalState}`.trim();
+  finalAnswer.querySelector("p").textContent = content.answer;
+  finalAnswer.hidden = !content.showAnswer;
+  processToggle.setAttribute("aria-expanded", "true");
+  processStream.hidden = false;
+
   stateControls.forEach((control) => {
     const selected = control.dataset.stateControl === state;
     control.classList.toggle("is-selected", selected);
@@ -80,10 +49,10 @@ function renderState(state) {
   });
 }
 
-activityToggle.addEventListener("click", () => {
-  const expanded = activityToggle.getAttribute("aria-expanded") === "true";
-  activityToggle.setAttribute("aria-expanded", String(!expanded));
-  activityDetails.hidden = expanded;
+processToggle.addEventListener("click", () => {
+  const expanded = processToggle.getAttribute("aria-expanded") === "true";
+  processToggle.setAttribute("aria-expanded", String(!expanded));
+  processStream.hidden = expanded;
 });
 
 stateControls.forEach((control) => {
