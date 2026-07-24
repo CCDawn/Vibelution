@@ -178,6 +178,22 @@ describe("ConfigProviderRegistryPanel", () => {
     expect(markup).not.toContain("验证推理 low / high");
     expect(panelSource).toContain('"/api/config/test-llm"');
     expect(panelSource).toContain('capability: "reasoning_effort"');
+    expect(panelSource).toContain("一期探测仅验证 low/high");
+  });
+
+  it("shows operator-declared reasoning contract without requiring probe", () => {
+    const declared = {
+      ...model("luna", "pinned"),
+      reasoningEffortValues: ["low", "medium", "high"],
+      reasoningVerificationStatus: "declared",
+      reasoningCapabilitySource: "operator_override",
+      defaultReasoningEffort: "medium",
+      reasoningAdapter: "reasoning_object",
+    };
+    const markup = renderModels([declared]);
+    expect(markup).toContain("协议已声明 low / medium / high");
+    expect(markup).toContain("协议声明");
+    expect(markup).not.toContain("验证推理 low / high");
   });
 
   it("distinguishes an empty directory from filtered no results", () => {
@@ -188,7 +204,9 @@ describe("ConfigProviderRegistryPanel", () => {
   it("uses low-emphasis copy for unobserved capabilities and a sticky internal scroll region", () => {
     const markup = renderModels([model("observed", "observed")]);
 
-    expect(markup).toContain("未观测");
+    // T8: observed models without a reasoning contract get explicit guidance, not a blank cell.
+    expect(markup).toContain("reasoning: 未声明");
+    expect(markup).toContain("reasoning_effort_values");
     expect(markup).not.toContain("unknown · 未观测");
     expect(panelStyles.tableScroll).toContain("h-full");
     expect(panelStyles.tableScroll).not.toContain("max-h-[calc(100dvh-33rem)]");
