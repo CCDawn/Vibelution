@@ -1,5 +1,6 @@
 import {
   vuiFlatPanelClass,
+  vuiStateCoolSoftClass,
 } from "../design/vuiSurfaceRecipes";
 
 const styles = {
@@ -15,7 +16,7 @@ const styles = {
   managementPanel: `managementPanel min-w-0 ${vuiFlatPanelClass} p-2`,
   panelEyebrow:
     "panelEyebrow min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
-  selectedConfigSummary: `selectedConfigSummary min-w-0 ${vuiFlatPanelClass} p-2 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)]`,
+  selectedConfigSummary: `selectedConfigSummary min-w-0 ${vuiFlatPanelClass} p-2 ${vuiStateCoolSoftClass}`,
 } as const;
 
 export default styles;

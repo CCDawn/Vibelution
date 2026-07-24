@@ -4,6 +4,9 @@
 import {
   vuiGlassPanelClass,
   vuiOpaqueRowClass,
+  vuiStateCoolInfoClass,
+  vuiStateDangerSoftClass,
+  vuiStateSelectedRowClass,
 } from "../../design/vuiSurfaceRecipes";
 
 const conversationViewScope = "vui-components-conversationview";
@@ -62,7 +65,7 @@ const composerToolbarCodexShell = cv(
 );
 const composerFieldDragActiveShell = cv(
   "composerFieldDragActive",
-  "border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] text-[var(--accent-cool)]",
+  `${vuiStateSelectedRowClass}`,
 );
 const compactControlButton =
   "min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55";
@@ -92,19 +95,19 @@ const composerGenericInputField = cv("input", composerFieldBase);
 
 const styles: Record<string, string> = {
   agentInboxMessageBody:
-    "vui-components-conversationview agentInboxMessageBody min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
-  agentInboxPreview: `vui-components-conversationview agentInboxPreview min-w-0 ${vuiGlassPanelClass} p-2 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]`,
+    `vui-components-conversationview agentInboxMessageBody min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] ${vuiStateCoolInfoClass}`,
+  agentInboxPreview: `vui-components-conversationview agentInboxPreview min-w-0 ${vuiGlassPanelClass} p-2 ${vuiStateCoolInfoClass}`,
   agentInboxSection:
-    "vui-components-conversationview agentInboxSection min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-components-conversationview agentInboxSection min-w-0 ${vuiStateCoolInfoClass}`,
   agentInboxToggle:
-    "vui-components-conversationview agentInboxToggle min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-components-conversationview agentInboxToggle min-w-0 ${vuiStateCoolInfoClass}`,
   agentInboxTurn:
     `vui-components-conversationview agentInboxTurn grid min-w-0 ${transcriptTurnRail} grid-cols-[34px_minmax(0,1fr)] gap-x-3 [&_.turnContent]:w-[min(100%,1360px)] [&_.turnContent]:p-0 [&_.turnContent]:border-l-0`,
   answerOnlyProcessDetails:
     "vui-components-conversationview answerOnlyProcessDetails min-w-0",
   answerOnlyProcessGroup: answerOnlyProcessShell,
   answerOnlyProcessGroup_active:
-    "vui-components-conversationview answerOnlyProcessGroup_active min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+    `vui-components-conversationview answerOnlyProcessGroup_active min-w-0 ${vuiStateSelectedRowClass}`,
   answerOnlyProcessGroup_answer:
     "vui-components-conversationview answerOnlyProcessGroup_answer min-w-0",
   answerOnlyProcessGroup_blocked:
@@ -114,19 +117,19 @@ const styles: Record<string, string> = {
   answerOnlyProcessGroup_commit:
     "vui-components-conversationview answerOnlyProcessGroup_commit min-w-0",
   answerOnlyProcessGroup_danger:
-    "vui-components-conversationview answerOnlyProcessGroup_danger min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `vui-components-conversationview answerOnlyProcessGroup_danger min-w-0 ${vuiStateDangerSoftClass}`,
   answerOnlyProcessGroup_done:
     "vui-components-conversationview answerOnlyProcessGroup_done min-w-0",
   answerOnlyProcessGroup_error:
-    "vui-components-conversationview answerOnlyProcessGroup_error min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `vui-components-conversationview answerOnlyProcessGroup_error min-w-0 ${vuiStateDangerSoftClass}`,
   answerOnlyProcessGroup_failed:
-    "vui-components-conversationview answerOnlyProcessGroup_failed min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `vui-components-conversationview answerOnlyProcessGroup_failed min-w-0 ${vuiStateDangerSoftClass}`,
   answerOnlyProcessGroup_files:
     "vui-components-conversationview answerOnlyProcessGroup_files min-w-0",
   answerOnlyProcessGroup_idle:
     "vui-components-conversationview answerOnlyProcessGroup_idle min-w-0 border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] text-[var(--fg-tertiary)]",
   answerOnlyProcessGroup_info:
-    "vui-components-conversationview answerOnlyProcessGroup_info min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-components-conversationview answerOnlyProcessGroup_info min-w-0 ${vuiStateCoolInfoClass}`,
   answerOnlyProcessGroup_intent:
     "vui-components-conversationview answerOnlyProcessGroup_intent min-w-0",
   answerOnlyProcessGroup_logs:
@@ -188,7 +191,7 @@ const styles: Record<string, string> = {
   auxiliaryBlock:
     "vui-components-conversationview auxiliaryBlock min-w-0",
   auxiliaryBlock_active:
-    "vui-components-conversationview auxiliaryBlock_active min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+    `vui-components-conversationview auxiliaryBlock_active min-w-0 ${vuiStateSelectedRowClass}`,
   auxiliaryBlock_answer:
     "vui-components-conversationview auxiliaryBlock_answer min-w-0",
   auxiliaryBlock_blocked:
@@ -198,19 +201,19 @@ const styles: Record<string, string> = {
   auxiliaryBlock_commit:
     "vui-components-conversationview auxiliaryBlock_commit min-w-0",
   auxiliaryBlock_danger:
-    "vui-components-conversationview auxiliaryBlock_danger min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `vui-components-conversationview auxiliaryBlock_danger min-w-0 ${vuiStateDangerSoftClass}`,
   auxiliaryBlock_done:
     "vui-components-conversationview auxiliaryBlock_done min-w-0",
   auxiliaryBlock_error:
-    "vui-components-conversationview auxiliaryBlock_error min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `vui-components-conversationview auxiliaryBlock_error min-w-0 ${vuiStateDangerSoftClass}`,
   auxiliaryBlock_failed:
-    "vui-components-conversationview auxiliaryBlock_failed min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `vui-components-conversationview auxiliaryBlock_failed min-w-0 ${vuiStateDangerSoftClass}`,
   auxiliaryBlock_files:
     "vui-components-conversationview auxiliaryBlock_files min-w-0",
   auxiliaryBlock_idle:
     "vui-components-conversationview auxiliaryBlock_idle min-w-0 border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] text-[var(--fg-tertiary)]",
   auxiliaryBlock_info:
-    "vui-components-conversationview auxiliaryBlock_info min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-components-conversationview auxiliaryBlock_info min-w-0 ${vuiStateCoolInfoClass}`,
   auxiliaryBlock_intent:
     "vui-components-conversationview auxiliaryBlock_intent min-w-0",
   auxiliaryBlock_logs:
@@ -255,14 +258,14 @@ const styles: Record<string, string> = {
   backToBottomButton:
     "vui-components-conversationview backToBottomButton absolute bottom-[calc(var(--vui-control-height-md)_+_18px)] left-1/2 z-20 min-w-0 -translate-x-1/2 !inline-flex min-h-[var(--vui-control-height-sm)] !w-fit max-w-[calc(100%_-_24px)] items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--vui-control-muted)_92%,var(--vui-surface-panel))] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] shadow-[var(--vui-shadow-soft)] backdrop-blur-[6px] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 [&_[data-slot=vui-button-content]]:!inline-flex [&_[data-slot=vui-button-content]]:!w-fit [&_[data-slot=vui-button-content]]:items-center [&_[data-slot=vui-button-content]]:gap-1.5 [&_[data-slot=vui-button-label]]:!inline-flex [&_[data-slot=vui-button-label]]:!w-fit [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-1.5",
   cliAgentLifecycleIcon:
-    "vui-components-conversationview cliAgentLifecycleIcon min-w-0 shrink-0 text-[var(--fg-tertiary)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-components-conversationview cliAgentLifecycleIcon min-w-0 shrink-0 text-[var(--fg-tertiary)] ${vuiStateCoolInfoClass}`,
   cliAgentLifecycleMeta:
-    "vui-components-conversationview cliAgentLifecycleMeta min-w-0 flex flex-wrap items-center gap-1.5 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)] [&_time]:flex-none",
+    `vui-components-conversationview cliAgentLifecycleMeta min-w-0 flex flex-wrap items-center gap-1.5 ${vuiStateCoolInfoClass} [&_time]:flex-none`,
   cliAgentLifecycleText:
-    "vui-components-conversationview cliAgentLifecycleText min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-components-conversationview cliAgentLifecycleText min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] ${vuiStateCoolInfoClass}`,
   cliAgentLifecycleTime:
-    "vui-components-conversationview cliAgentLifecycleTime min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
-  cliAgentLifecycleTurn: `vui-components-conversationview cliAgentLifecycleTurn min-w-0 ${vuiOpaqueRowClass} p-2 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)] !bg-[var(--vui-surface-panel)]`,
+    `vui-components-conversationview cliAgentLifecycleTime min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] ${vuiStateCoolInfoClass}`,
+  cliAgentLifecycleTurn: `vui-components-conversationview cliAgentLifecycleTurn min-w-0 ${vuiOpaqueRowClass} p-2 ${vuiStateCoolInfoClass} !bg-[var(--vui-surface-panel)]`,
   composer: conversationComposerShell,
   composerAttachmentChip:
     "vui-components-conversationview composerAttachmentChip min-w-0 inline-flex min-h-7 w-fit max-w-full items-center justify-start gap-1.5 overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-1.5 pr-1 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
@@ -277,7 +280,7 @@ const styles: Record<string, string> = {
   composerActionStack:
     "vui-components-conversationview composerActionStack grid min-w-0 w-fit grid-cols-1 content-end items-end gap-1 self-end justify-self-end",
   composerError:
-    "vui-components-conversationview composerError min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `vui-components-conversationview composerError min-w-0 ${vuiStateDangerSoftClass}`,
   composerEditModeDescription:
     "vui-components-conversationview composerEditModeDescription min-w-0 whitespace-normal break-words [font-size:var(--vui-font-xs)] font-medium leading-[1.45] text-[var(--fg-secondary)] [overflow-wrap:anywhere]",
   composerEditModeBar:
@@ -318,7 +321,7 @@ const styles: Record<string, string> = {
   computerUseActions:
     "vui-components-conversationview computerUseActions min-w-0 flex flex-wrap items-center gap-1.5",
   computerUseError:
-    "vui-components-conversationview computerUseError min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `vui-components-conversationview computerUseError min-w-0 ${vuiStateDangerSoftClass}`,
   computerUseHeader:
     "vui-components-conversationview computerUseHeader min-w-0 flex flex-wrap items-center gap-1.5",
   computerUsePanel: `vui-components-conversationview computerUsePanel min-w-0 ${vuiGlassPanelClass} p-2`,
@@ -569,7 +572,7 @@ const styles: Record<string, string> = {
   operationIcon:
     "vui-components-conversationview operationIcon inline-grid size-4 min-w-0 shrink-0 place-items-center text-[var(--fg-tertiary)]",
   operationIcon_active:
-    "vui-components-conversationview operationIcon_active min-w-0 shrink-0 text-[var(--fg-tertiary)] border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+    `vui-components-conversationview operationIcon_active min-w-0 shrink-0 text-[var(--fg-tertiary)] ${vuiStateSelectedRowClass}`,
   operationIcon_answer:
     "vui-components-conversationview operationIcon_answer min-w-0 shrink-0 text-[var(--fg-tertiary)]",
   operationIcon_blocked:
@@ -579,11 +582,11 @@ const styles: Record<string, string> = {
   operationIcon_commit:
     "vui-components-conversationview operationIcon_commit min-w-0 shrink-0 text-[var(--fg-tertiary)]",
   operationIcon_danger:
-    "vui-components-conversationview operationIcon_danger min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)] shrink-0 text-[var(--fg-tertiary)]",
+    `vui-components-conversationview operationIcon_danger min-w-0 ${vuiStateDangerSoftClass} shrink-0 text-[var(--fg-tertiary)]`,
   operationIcon_done:
     "vui-components-conversationview operationIcon_done min-w-0 shrink-0 text-[var(--fg-tertiary)]",
   operationIcon_error:
-    "vui-components-conversationview operationIcon_error min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)] shrink-0 text-[var(--fg-tertiary)]",
+    `vui-components-conversationview operationIcon_error min-w-0 ${vuiStateDangerSoftClass} shrink-0 text-[var(--fg-tertiary)]`,
   operationIcon_failed:
     "vui-components-conversationview operationIcon_failed min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] !text-[var(--state-error)] shrink-0 text-[var(--fg-tertiary)]",
   operationIcon_files:
@@ -591,7 +594,7 @@ const styles: Record<string, string> = {
   operationIcon_idle:
     "vui-components-conversationview operationIcon_idle min-w-0 shrink-0 text-[var(--fg-tertiary)] border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)]",
   operationIcon_info:
-    "vui-components-conversationview operationIcon_info min-w-0 shrink-0 text-[var(--fg-tertiary)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-components-conversationview operationIcon_info min-w-0 shrink-0 text-[var(--fg-tertiary)] ${vuiStateCoolInfoClass}`,
   operationIcon_intent:
     "vui-components-conversationview operationIcon_intent min-w-0 shrink-0 text-[var(--fg-tertiary)]",
   operationIcon_logs:
@@ -631,22 +634,22 @@ const styles: Record<string, string> = {
   operationIcon_warning:
     "vui-components-conversationview operationIcon_warning min-w-0 shrink-0 text-[var(--fg-tertiary)] border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] !text-[var(--state-warning)]",
   operationItem: `vui-components-conversationview operationItem min-w-0 ${vuiOpaqueRowClass} p-2 w-[min(100%,72ch)] grid grid-cols-[22px_minmax(0,1fr)_auto_auto_16px] items-start gap-1.5 !rounded-none !border-x-0 !border-t-0 border-b border-[color-mix(in_srgb,var(--accent-cool)_18%,var(--vui-border-subtle))] !bg-transparent !p-0 !pb-1 !text-[var(--fg-secondary)] !shadow-none`,
-  operationItemActive: `vui-components-conversationview operationItemActive min-w-0 ${vuiOpaqueRowClass} p-2 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]`,
+  operationItemActive: `vui-components-conversationview operationItemActive min-w-0 ${vuiOpaqueRowClass} p-2 ${vuiStateSelectedRowClass}`,
   operationItemTool: `vui-components-conversationview operationItemTool min-w-0 ${vuiOpaqueRowClass} p-2 text-[var(--fg-secondary)] max-w-full`,
   operationItemWrap:
     "vui-components-conversationview operationItemWrap min-w-0 border-0 bg-transparent p-0 shadow-none",
-  operationItem_active: `vui-components-conversationview operationItem_active min-w-0 ${vuiOpaqueRowClass} p-2 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]`,
+  operationItem_active: `vui-components-conversationview operationItem_active min-w-0 ${vuiOpaqueRowClass} p-2 ${vuiStateSelectedRowClass}`,
   operationItem_answer: `vui-components-conversationview operationItem_answer min-w-0 ${vuiOpaqueRowClass} p-2`,
   operationItem_blocked: `vui-components-conversationview operationItem_blocked min-w-0 ${vuiOpaqueRowClass} p-2 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]`,
   operationItem_code: `vui-components-conversationview operationItem_code min-w-0 ${vuiOpaqueRowClass} p-2 font-mono [font-size:var(--vui-font-xs)]`,
   operationItem_commit: `vui-components-conversationview operationItem_commit min-w-0 ${vuiOpaqueRowClass} p-2`,
-  operationItem_danger: `vui-components-conversationview operationItem_danger min-w-0 ${vuiOpaqueRowClass} p-2 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]`,
+  operationItem_danger: `vui-components-conversationview operationItem_danger min-w-0 ${vuiOpaqueRowClass} p-2 ${vuiStateDangerSoftClass}`,
   operationItem_done: `vui-components-conversationview operationItem_done min-w-0 ${vuiOpaqueRowClass} p-2`,
-  operationItem_error: `vui-components-conversationview operationItem_error min-w-0 ${vuiOpaqueRowClass} p-2 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]`,
+  operationItem_error: `vui-components-conversationview operationItem_error min-w-0 ${vuiOpaqueRowClass} p-2 ${vuiStateDangerSoftClass}`,
   operationItem_failed: `vui-components-conversationview operationItem_failed min-w-0 ${vuiOpaqueRowClass} p-2 !border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] !bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] !text-[var(--state-error)]`,
   operationItem_files: `vui-components-conversationview operationItem_files min-w-0 ${vuiOpaqueRowClass} p-2`,
   operationItem_idle: `vui-components-conversationview operationItem_idle min-w-0 ${vuiOpaqueRowClass} p-2 text-[var(--fg-tertiary)]`,
-  operationItem_info: `vui-components-conversationview operationItem_info min-w-0 ${vuiOpaqueRowClass} p-2 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]`,
+  operationItem_info: `vui-components-conversationview operationItem_info min-w-0 ${vuiOpaqueRowClass} p-2 ${vuiStateCoolInfoClass}`,
   operationItem_intent: `vui-components-conversationview operationItem_intent min-w-0 ${vuiOpaqueRowClass} p-2`,
   operationItem_logs: `vui-components-conversationview operationItem_logs min-w-0 ${vuiOpaqueRowClass} p-2`,
   operationItem_mental: `vui-components-conversationview operationItem_mental min-w-0 ${vuiOpaqueRowClass} p-2`,
@@ -706,7 +709,7 @@ const styles: Record<string, string> = {
   reActOperationGroup:
     "vui-components-conversationview reActOperationGroup min-w-0 border-l-0 bg-transparent",
   reActOperationGroup_active:
-    "vui-components-conversationview reActOperationGroup_active min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+    `vui-components-conversationview reActOperationGroup_active min-w-0 ${vuiStateSelectedRowClass}`,
   reActOperationGroup_answer:
     "vui-components-conversationview reActOperationGroup_answer min-w-0",
   reActOperationGroup_blocked:
@@ -716,19 +719,19 @@ const styles: Record<string, string> = {
   reActOperationGroup_commit:
     "vui-components-conversationview reActOperationGroup_commit min-w-0",
   reActOperationGroup_danger:
-    "vui-components-conversationview reActOperationGroup_danger min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `vui-components-conversationview reActOperationGroup_danger min-w-0 ${vuiStateDangerSoftClass}`,
   reActOperationGroup_done:
     "vui-components-conversationview reActOperationGroup_done min-w-0",
   reActOperationGroup_error:
-    "vui-components-conversationview reActOperationGroup_error min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `vui-components-conversationview reActOperationGroup_error min-w-0 ${vuiStateDangerSoftClass}`,
   reActOperationGroup_failed:
-    "vui-components-conversationview reActOperationGroup_failed min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `vui-components-conversationview reActOperationGroup_failed min-w-0 ${vuiStateDangerSoftClass}`,
   reActOperationGroup_files:
     "vui-components-conversationview reActOperationGroup_files min-w-0",
   reActOperationGroup_idle:
     "vui-components-conversationview reActOperationGroup_idle min-w-0 border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] text-[var(--fg-tertiary)]",
   reActOperationGroup_info:
-    "vui-components-conversationview reActOperationGroup_info min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-components-conversationview reActOperationGroup_info min-w-0 ${vuiStateCoolInfoClass}`,
   reActOperationGroup_intent:
     "vui-components-conversationview reActOperationGroup_intent min-w-0",
   reActOperationGroup_logs:
@@ -779,7 +782,7 @@ const styles: Record<string, string> = {
   reActOperationTitle:
     "vui-components-conversationview reActOperationTitle min-w-0 [font-size:var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
   reActResultItem: `vui-components-conversationview reActResultItem min-w-0 ${vuiOpaqueRowClass} p-2 border-0 bg-transparent`,
-  reActResultItem_failed: `vui-components-conversationview reActResultItem_failed min-w-0 ${vuiOpaqueRowClass} p-2 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]`,
+  reActResultItem_failed: `vui-components-conversationview reActResultItem_failed min-w-0 ${vuiOpaqueRowClass} p-2 ${vuiStateDangerSoftClass}`,
   reActResultLabel:
     "vui-components-conversationview reActResultLabel min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   reActResultList:
@@ -810,7 +813,7 @@ const styles: Record<string, string> = {
     "vui-components-conversationview researchOrgChip min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
   researchOrgChipRow: `vui-components-conversationview researchOrgChipRow min-w-0 ${vuiOpaqueRowClass} p-2`,
   researchOrgChip_active:
-    "vui-components-conversationview researchOrgChip_active min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+    `vui-components-conversationview researchOrgChip_active min-w-0 ${vuiStateSelectedRowClass}`,
   researchOrgChip_answer:
     "vui-components-conversationview researchOrgChip_answer min-w-0",
   researchOrgChip_blocked:
@@ -820,19 +823,19 @@ const styles: Record<string, string> = {
   researchOrgChip_commit:
     "vui-components-conversationview researchOrgChip_commit min-w-0",
   researchOrgChip_danger:
-    "vui-components-conversationview researchOrgChip_danger min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `vui-components-conversationview researchOrgChip_danger min-w-0 ${vuiStateDangerSoftClass}`,
   researchOrgChip_done:
     "vui-components-conversationview researchOrgChip_done min-w-0",
   researchOrgChip_error:
-    "vui-components-conversationview researchOrgChip_error min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `vui-components-conversationview researchOrgChip_error min-w-0 ${vuiStateDangerSoftClass}`,
   researchOrgChip_failed:
-    "vui-components-conversationview researchOrgChip_failed min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `vui-components-conversationview researchOrgChip_failed min-w-0 ${vuiStateDangerSoftClass}`,
   researchOrgChip_files:
     "vui-components-conversationview researchOrgChip_files min-w-0",
   researchOrgChip_idle:
     "vui-components-conversationview researchOrgChip_idle min-w-0 border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] text-[var(--fg-tertiary)]",
   researchOrgChip_info:
-    "vui-components-conversationview researchOrgChip_info min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-components-conversationview researchOrgChip_info min-w-0 ${vuiStateCoolInfoClass}`,
   researchOrgChip_intent:
     "vui-components-conversationview researchOrgChip_intent min-w-0",
   researchOrgChip_logs:
@@ -890,7 +893,7 @@ const styles: Record<string, string> = {
   responseSegmentPre:
     "vui-components-conversationview responseSegmentPre my-3 min-w-0 max-w-full overflow-x-auto rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--fg-primary)_4%,var(--vui-surface-row))] p-3 font-mono [font-size:var(--vui-font-xs)] leading-[1.55] text-[var(--fg-primary)] whitespace-pre",
   responseSegment_active:
-    "vui-components-conversationview responseSegment_active min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+    `vui-components-conversationview responseSegment_active min-w-0 ${vuiStateSelectedRowClass}`,
   responseSegment_answer:
     "vui-components-conversationview responseSegment_answer min-w-0 [&_.markdownBody]:max-w-[min(100%,128ch)] [&_.responseSegmentHeader]:hidden",
   responseSegment_blocked:
@@ -900,19 +903,19 @@ const styles: Record<string, string> = {
   responseSegment_commit:
     "vui-components-conversationview responseSegment_commit min-w-0",
   responseSegment_danger:
-    "vui-components-conversationview responseSegment_danger min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `vui-components-conversationview responseSegment_danger min-w-0 ${vuiStateDangerSoftClass}`,
   responseSegment_done:
     "vui-components-conversationview responseSegment_done min-w-0",
   responseSegment_error:
-    "vui-components-conversationview responseSegment_error min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `vui-components-conversationview responseSegment_error min-w-0 ${vuiStateDangerSoftClass}`,
   responseSegment_failed:
-    "vui-components-conversationview responseSegment_failed min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `vui-components-conversationview responseSegment_failed min-w-0 ${vuiStateDangerSoftClass}`,
   responseSegment_files:
     "vui-components-conversationview responseSegment_files min-w-0",
   responseSegment_idle:
     "vui-components-conversationview responseSegment_idle min-w-0 border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] text-[var(--fg-tertiary)]",
   responseSegment_info:
-    "vui-components-conversationview responseSegment_info min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `vui-components-conversationview responseSegment_info min-w-0 ${vuiStateCoolInfoClass}`,
   responseSegment_intent:
     "vui-components-conversationview responseSegment_intent min-w-0",
   responseSegment_logs:
@@ -1145,7 +1148,7 @@ const styles: Record<string, string> = {
   turnErrorType:
     "vui-components-conversationview turnErrorType min-w-0 w-fit max-w-full rounded-[var(--radius-control)] bg-[color-mix(in_srgb,var(--state-error)_10%,transparent)] px-1.5 py-0.5 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--state-error)]",
   turnIconButton: `vui-components-conversationview turnIconButton min-w-0 ${vuiOpaqueRowClass} p-2 inline-grid h-[var(--vui-control-height-sm)] min-h-[var(--vui-control-height-sm)] w-[var(--vui-control-height-sm)] min-w-[var(--vui-control-height-sm)] place-items-center bg-[var(--vui-control-muted)] p-0 text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] shrink-0 text-[var(--fg-tertiary)]`,
-  turnIconButtonActive: `vui-components-conversationview turnIconButtonActive min-w-0 ${vuiOpaqueRowClass} p-2 shrink-0 text-[var(--fg-tertiary)] border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]`,
+  turnIconButtonActive: `vui-components-conversationview turnIconButtonActive min-w-0 ${vuiOpaqueRowClass} p-2 shrink-0 text-[var(--fg-tertiary)] ${vuiStateSelectedRowClass}`,
   turnMeta:
     "vui-components-conversationview turnMeta inline-flex min-w-0 items-center justify-start gap-2 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   turnMetaActions:

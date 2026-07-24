@@ -1,6 +1,7 @@
 import {
   vuiFlatPanelClass,
   vuiOpaqueRowClass,
+  vuiStateSelectedRowClass,
 } from "../design/vuiSurfaceRecipes";
 
 const styles = {
@@ -32,7 +33,7 @@ const styles = {
   listButton:
     "listButton min-w-0 grid w-full gap-1 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-transparent p-2 text-left [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted)]",
   listButtonActive:
-    "listButtonActive border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] text-[var(--fg-primary)]",
+    `listButtonActive ${vuiStateSelectedRowClass} text-[var(--fg-primary)]`,
   actionRow:
     "actionRow min-w-0 flex flex-wrap items-center gap-1.5",
   meta:

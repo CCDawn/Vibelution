@@ -1,6 +1,7 @@
 import {
   vuiFlatPanelClass,
   vuiOpaqueRowClass,
+  vuiStateSelectedRowClass,
 } from "../design/vuiSurfaceRecipes";
 
 const styles = {
@@ -24,7 +25,7 @@ const styles = {
   panelEyebrow:
     "panelEyebrow min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   primaryActionButton:
-    "primaryActionButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--accent-cool)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] disabled:cursor-default disabled:opacity-55 [&>span]:truncate",
+    `primaryActionButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border ${vuiStateSelectedRowClass} px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--accent-cool)] hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] disabled:cursor-default disabled:opacity-55 [&>span]:truncate`,
   queueToolbar:
     "queueToolbar min-w-0 !grid min-h-0 content-start justify-start gap-1.5 overflow-hidden grid-cols-[repeat(auto-fit,minmax(min(100%,11rem),max-content))] max-[620px]:grid-cols-[1fr] [&_label]:min-w-0",
   wideField:

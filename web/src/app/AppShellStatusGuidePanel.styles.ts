@@ -1,6 +1,9 @@
 import {
   vuiGlassPanelClass,
   vuiOpaqueRowClass,
+  vuiStateCoolInfoClass,
+  vuiStateDangerSoftClass,
+  vuiStateSelectedRowClass,
 } from "../design/vuiSurfaceRecipes";
 
 const styles = {
@@ -19,15 +22,15 @@ const styles = {
   statusGuideListItem: `vui-app-appshell statusGuideListItem min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto ${vuiOpaqueRowClass} p-2`,
   statusGuidePanel: `vui-app-appshell statusGuidePanel min-w-0 ${vuiGlassPanelClass} p-2`,
   statusGuideStateLabel: "vui-app-appshell statusGuideStateLabel min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
-  status_active: "vui-app-appshell status_active min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+  status_active: `vui-app-appshell status_active min-w-0 ${vuiStateSelectedRowClass}`,
   status_blocked: "vui-app-appshell status_blocked min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
   status_caution: "vui-app-appshell status_caution text-[var(--state-warning)]",
-  status_danger: "vui-app-appshell status_danger min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+  status_danger: `vui-app-appshell status_danger min-w-0 ${vuiStateDangerSoftClass}`,
   status_done: "vui-app-appshell status_done min-w-0",
-  status_error: "vui-app-appshell status_error min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+  status_error: `vui-app-appshell status_error min-w-0 ${vuiStateDangerSoftClass}`,
   status_failed: "vui-app-appshell status_failed text-[var(--state-error)]",
   status_idle: "vui-app-appshell status_idle text-[color-mix(in_srgb,var(--fg-tertiary)_74%,transparent)]",
-  status_info: "vui-app-appshell status_info min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+  status_info: `vui-app-appshell status_info min-w-0 ${vuiStateCoolInfoClass}`,
   status_mental: "vui-app-appshell status_mental min-w-0",
   status_missing: "vui-app-appshell status_missing min-w-0",
   status_muted: "vui-app-appshell status_muted min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",

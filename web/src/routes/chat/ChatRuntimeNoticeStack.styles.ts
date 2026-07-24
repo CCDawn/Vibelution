@@ -1,5 +1,7 @@
 import {
   vuiFlatPanelClass,
+  vuiStateCoolInfoClass,
+  vuiStateDangerSoftClass,
 } from "../../design/vuiSurfaceRecipes";
 
 const styles = {
@@ -16,9 +18,9 @@ const styles = {
   message:
     "block min-w-0 break-words [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [overflow-wrap:anywhere]",
   toneError:
-    "border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `${vuiStateDangerSoftClass}`,
   toneInfo:
-    "border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `${vuiStateCoolInfoClass}`,
   toneMuted: `${vuiFlatPanelClass} text-[var(--fg-tertiary)]`,
   toneSuccess:
     "border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",

@@ -1,5 +1,6 @@
 import {
   vuiOpaqueRowClass,
+  vuiStateSelectedRowClass,
 } from "../design/vuiSurfaceRecipes";
 
 const styles = {
@@ -24,7 +25,7 @@ const styles = {
   graphWorkspace:
     "graphWorkspace min-w-0 grid h-full min-h-0 gap-2 p-2 grid-cols-[minmax(190px,240px)_minmax(0,1fr)_minmax(230px,0.34fr)] overflow-hidden max-[1180px]:grid-cols-[minmax(180px,220px)_minmax(0,1fr)] max-[1180px]:overflow-auto max-[1180px]:[&_.detailPanel]:col-span-2 max-[860px]:grid-cols-[minmax(0,1fr)] max-[860px]:[&_.detailPanel]:col-span-1",
   itemButton: `itemButton min-w-0 w-full max-w-full ${vuiOpaqueRowClass} p-2 text-left [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 [&_[data-slot=vui-button-content]]:w-full [&_[data-slot=vui-button-label]]:grid [&_[data-slot=vui-button-label]]:grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)_auto] [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-1.5 [&_strong]:min-w-0 [&_strong]:truncate [&_small]:min-w-0 [&_small]:truncate`,
-  itemButtonActive: `itemButtonActive min-w-0 ${vuiOpaqueRowClass} p-2 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]`,
+  itemButtonActive: `itemButtonActive min-w-0 ${vuiOpaqueRowClass} p-2 ${vuiStateSelectedRowClass}`,
   managementPanel:
     "managementPanel gap-1.5 border-t border-[var(--vui-border-hairline)] pt-1.5",
   panelEyebrow:

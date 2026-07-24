@@ -8,6 +8,9 @@
 // styleKeys; the Proxy synthesized them on demand.
 import {
   vuiOpaqueRowClass,
+  vuiStateCoolInfoClass,
+  vuiStateDangerSoftClass,
+  vuiStateSelectedRowClass,
 } from "../design/vuiSurfaceRecipes";
 
 const panelSurface =
@@ -23,13 +26,13 @@ const buttonBase =
 const pillBase =
   "inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]";
 const activeTone =
-  "border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] text-[var(--accent-cool)]";
+  `${vuiStateSelectedRowClass}`;
 const successTone =
   "border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]";
 const warningTone =
   "border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]";
 const errorTone =
-  "border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]";
+  `${vuiStateDangerSoftClass}`;
 const compactField =
   "grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full";
 const scrollStack = "grid min-h-0 content-start gap-1 overflow-auto";
@@ -38,15 +41,15 @@ const styles = {
   agentBulkPolicyPanel:
     "agentBulkPolicyPanel min-w-0 rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_7%,transparent)] p-2 text-[var(--accent-cool)]",
   agentCompatibility:
-    "agentCompatibility min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `agentCompatibility min-w-0 ${vuiStateCoolInfoClass}`,
   agentPermissionSummaryPanel:
     "agentPermissionSummaryPanel min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_7%,transparent)] p-2 text-[var(--accent-cool)]",
   agentPolicyPanel:
     "agentPolicyPanel min-w-0 rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_7%,transparent)] p-2 text-[var(--accent-cool)]",
   agentPolicySelect:
-    "agentPolicySelect min-w-0 grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `agentPolicySelect min-w-0 grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full ${vuiStateCoolInfoClass}`,
   agentScopeBar:
-    "agentScopeBar min-w-0 flex flex-wrap items-center gap-1.5 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `agentScopeBar min-w-0 flex flex-wrap items-center gap-1.5 ${vuiStateCoolInfoClass}`,
   bulkActionBar:
     "bulkActionBar min-w-0 max-w-full flex flex-wrap items-center gap-[5px] rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--border-soft)_58%,transparent)] !bg-[var(--vui-surface-row)] p-[5px]",
   bulkPolicyActions:
@@ -153,7 +156,7 @@ const styles = {
   policy_idle:
     "policy_idle min-w-0 border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] text-[var(--fg-tertiary)]",
   policy_info:
-    "policy_info min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `policy_info min-w-0 ${vuiStateCoolInfoClass}`,
   policy_inherited:
     "policy_inherited min-w-0",
   policy_mental:
@@ -189,7 +192,7 @@ const styles = {
   readinessPanel:
     `readinessPanel min-w-0 max-w-full ${panelSurface} !grid grid-cols-[repeat(4,minmax(0,1fr))] gap-[5px] max-[980px]:grid-cols-[repeat(2,minmax(0,1fr))] max-[520px]:grid-cols-[1fr]`,
   readiness_active:
-    "readiness_active min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+    `readiness_active min-w-0 ${vuiStateSelectedRowClass}`,
   readiness_allowed:
     "readiness_allowed min-w-0",
   readiness_attention:
@@ -197,23 +200,23 @@ const styles = {
   readiness_blocked:
     "readiness_blocked min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
   readiness_danger:
-    "readiness_danger min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `readiness_danger min-w-0 ${vuiStateDangerSoftClass}`,
   readiness_done:
     "readiness_done min-w-0",
   readiness_enabled:
     "readiness_enabled min-w-0",
   readiness_error:
-    "readiness_error min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `readiness_error min-w-0 ${vuiStateDangerSoftClass}`,
   readiness_excluded:
     "readiness_excluded min-w-0",
   readiness_explicit_required:
     "readiness_explicit_required min-w-0",
   readiness_failed:
-    "readiness_failed min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `readiness_failed min-w-0 ${vuiStateDangerSoftClass}`,
   readiness_idle:
     "readiness_idle min-w-0 border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] text-[var(--fg-tertiary)]",
   readiness_info:
-    "readiness_info min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `readiness_info min-w-0 ${vuiStateCoolInfoClass}`,
   readiness_inherited:
     "readiness_inherited min-w-0",
   readiness_mental:
@@ -295,23 +298,23 @@ const styles = {
   state_blocked:
     "state_blocked min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
   state_danger:
-    "state_danger min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `state_danger min-w-0 ${vuiStateDangerSoftClass}`,
   state_done:
     "state_done min-w-0",
   state_enabled:
     "state_enabled min-w-0",
   state_error:
-    "state_error min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `state_error min-w-0 ${vuiStateDangerSoftClass}`,
   state_excluded:
     "state_excluded min-w-0",
   state_explicit_required:
     "state_explicit_required min-w-0",
   state_failed:
-    "state_failed min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `state_failed min-w-0 ${vuiStateDangerSoftClass}`,
   state_idle:
     "state_idle min-w-0 border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] text-[var(--fg-tertiary)]",
   state_info:
-    "state_info min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `state_info min-w-0 ${vuiStateCoolInfoClass}`,
   state_inherited:
     "state_inherited min-w-0",
   state_mental:
@@ -343,7 +346,7 @@ const styles = {
   statusDot:
     "statusDot min-w-0 inline-block h-2 w-2 rounded-full bg-current",
   status_active:
-    "status_active min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+    `status_active min-w-0 ${vuiStateSelectedRowClass}`,
   status_allowed:
     "status_allowed min-w-0",
   status_attention:
@@ -351,23 +354,23 @@ const styles = {
   status_blocked:
     "status_blocked min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
   status_danger:
-    "status_danger min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `status_danger min-w-0 ${vuiStateDangerSoftClass}`,
   status_done:
     "status_done min-w-0",
   status_enabled:
     "status_enabled min-w-0",
   status_error:
-    "status_error min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `status_error min-w-0 ${vuiStateDangerSoftClass}`,
   status_excluded:
     "status_excluded min-w-0",
   status_explicit_required:
     "status_explicit_required min-w-0",
   status_failed:
-    "status_failed min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `status_failed min-w-0 ${vuiStateDangerSoftClass}`,
   status_idle:
     "status_idle min-w-0 border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] text-[var(--fg-tertiary)]",
   status_info:
-    "status_info min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `status_info min-w-0 ${vuiStateCoolInfoClass}`,
   status_inherited:
     "status_inherited min-w-0",
   status_mental:
@@ -431,7 +434,7 @@ const styles = {
   toolButton:
     "toolButton min-w-0 !grid !h-auto min-h-[var(--vui-control-height-sm)] w-full max-w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center justify-start gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-left text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]",
   toolButtonActive:
-    "toolButtonActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+    `toolButtonActive min-w-0 ${vuiStateSelectedRowClass}`,
   toolCopy:
     "toolCopy grid min-w-0 gap-[1px] text-left [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-secondary)] [&>strong]:truncate [&>span]:truncate",
   toolDetailPanel:

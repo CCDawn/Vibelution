@@ -1,5 +1,6 @@
 import {
   vuiFlatPanelClass,
+  vuiStateSelectedRowClass,
 } from "../design/vuiSurfaceRecipes";
 
 const styles = {
@@ -14,7 +15,7 @@ const styles = {
   sourceCollectionStageHandoffNext:
     "sourceCollectionStageHandoffNext min-w-0 text-[var(--fg-primary)]",
   sourceCollectionStagePrimaryAction:
-    "sourceCollectionStagePrimaryAction min-w-0 flex flex-wrap items-center gap-1.5 border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] text-[var(--accent-cool)] w-fit max-w-full",
+    `sourceCollectionStagePrimaryAction min-w-0 flex flex-wrap items-center gap-1.5 ${vuiStateSelectedRowClass} w-fit max-w-full`,
   sourceCollectionStageSecondaryAction:
     "sourceCollectionStageSecondaryAction min-w-0 flex flex-wrap items-center gap-1.5 w-fit max-w-full",
   sourceCollectionStageWorkspace:

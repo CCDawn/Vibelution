@@ -1,7 +1,7 @@
 # VUI 前端统一 Wave 2：alpha 白名单、残余消费与组合搭页
 
 **Date:** 2026-07-24
-**Status:** in progress（2A 已落地契约；2B–2E 待做）
+**Status:** in progress（2A 契约已落地；2B 状态 recipe 已落地；2C–2E 待做）
 **Owner:** `web-workbench-surface` / VUI design-system owner
 **Mode:** `TASK_GRAPH`
 **Risk:** `STANDARD_TASK`
@@ -108,21 +108,30 @@ Wave 2E  （可选）高流量 color-mix 热点压缩：Research / Tools
 
 ## 5. Wave 2B — 状态 recipe（减少任意 tint 拼写）
 
-在 `vuiSurfaceRecipes.ts`（或 `vuiSurfaceStateRecipes.ts`）增加 **有限** 状态类，禁止无限百分比：
+**状态：已落地（2026-07-24）**
 
-| Recipe | 语义 | 建议实现（固定配方，不允许路由自造 %） |
+在 `vuiSurfaceRecipes.ts` 增加 **有限** 状态类（固定配方，不允许路由自造 %）：
+
+| Recipe | 语义 | 实现 |
 |---|---|---|
-| `vuiStateSelectedRowClass` | 列表选中 | border accent + `bg color-mix(accent 10%, row)` |
-| `vuiStateDangerPanelClass` | 危险区底板 | border error + mix 固定 4–8% |
-| `vuiStateWarningPanelClass` | 警告区 | 固定 warning 配方 |
-| `vuiStateAccentBannerClass` | 返回条/提示条 | 固定 cool 配方 |
+| `vuiStateSelectedRowClass` | 列表选中 / active chip | border cool 34% + row 10% + cool text |
+| `vuiStateCoolSoftClass` | 软 cool chip（透明 wash） | border 38% + bg 11% transparent |
+| `vuiStateCoolInfoClass` | 更轻 info pill | border 28% + bg 8% transparent |
+| `vuiStateDangerPanelClass` | 危险区底板 | error 22% border + 4% panel |
+| `vuiStateWarningPanelClass` | 警告区 | warning 42% border + 8% panel |
+| `vuiStateAccentBannerClass` | 返回条/提示条 | cool 28% border + 6% panel |
+| `vuiStateDangerSoftClass` / `Success` / `Warm` | 状态 soft chip | 固定 transparent wash |
 
-**规则：** 新代码禁止再写 `color-mix(in_srgb,var(--accent-*)_N%,var(--vui-surface-*))` 字面量；必须引用状态 recipe。
-旧代码在 2E 分批替换热点文件。
+**已做：**
+- 迁移脚本 `web/scripts/migrate_vui_state_recipes.py` 折叠 double-stack / 高频 soft chip
+- ~43 个 style map 热点消费状态 recipe（AppShell / Chat / Memory / Research / Teams / Tools 等）
+- foundation 导出契约已扩；alpha policy 仍允许 style map 内 residual state-tint（结构 wash 仍禁）
+
+**规则：** 新代码应引用状态 recipe，禁止自造任意 alpha。残余近邻变体（border 40%/42%、arbitrary `[background:…]`）在 2E 分批压缩。
 
 **验证：**
 - foundation 测试导出符号
-- alpha policy 允许「状态 recipe 内部」的 mix，禁止路由内联 mix（可用「仅 recipes 文件允许」规则）
+- alpha policy：recipes 文件为 token-definition；style map 禁止 structure wash
 
 ---
 

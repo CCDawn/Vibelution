@@ -12,25 +12,28 @@
 import {
   vuiFlatPanelClass,
   vuiOpaqueRowClass,
+  vuiStateCoolInfoClass,
+  vuiStateDangerSoftClass,
+  vuiStateSelectedRowClass,
 } from "../design/vuiSurfaceRecipes";
 
 const styles: Record<string, string> = {
   agentRoleTag:
-    "agentRoleTag min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `agentRoleTag min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)] ${vuiStateCoolInfoClass}`,
   agentRoleTag_chat:
-    "agentRoleTag_chat min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `agentRoleTag_chat min-w-0 ${vuiStateCoolInfoClass}`,
   agentRoleTag_general:
-    "agentRoleTag_general min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `agentRoleTag_general min-w-0 ${vuiStateCoolInfoClass}`,
   agentRoleTag_memory:
-    "agentRoleTag_memory min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `agentRoleTag_memory min-w-0 ${vuiStateCoolInfoClass}`,
   agentRoleTag_research:
-    "agentRoleTag_research min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `agentRoleTag_research min-w-0 ${vuiStateCoolInfoClass}`,
   agentRoleTag_self:
-    "agentRoleTag_self min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `agentRoleTag_self min-w-0 ${vuiStateCoolInfoClass}`,
   agentRoleTag_supervised:
-    "agentRoleTag_supervised min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `agentRoleTag_supervised min-w-0 ${vuiStateCoolInfoClass}`,
   agentRoleTag_tool:
-    "agentRoleTag_tool min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `agentRoleTag_tool min-w-0 ${vuiStateCoolInfoClass}`,
   body:
     "body min-w-0 max-w-full grid h-full min-h-0 grid-cols-[minmax(0,1fr)_clamp(300px,26vw,400px)] gap-2 overflow-hidden overflow-x-hidden [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] max-[1080px]:grid-cols-1 max-[1080px]:grid-rows-[minmax(420px,1fr)_minmax(240px,0.48fr)]",
   canvas:
@@ -47,19 +50,19 @@ const styles: Record<string, string> = {
   edge:
     "edge min-w-0",
   edgeActive:
-    "edgeActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+    `edgeActive min-w-0 ${vuiStateSelectedRowClass}`,
   edgeArrowHead:
     "edgeArrowHead min-w-0 [fill:var(--research-flow-edge-fill)]",
   edgeEndpointHandle:
     "edgeEndpointHandle min-w-0 !absolute left-[var(--research-flow-edge-endpoint-left)] top-[var(--research-flow-edge-endpoint-top)]",
   edgeEndpointHandleActive:
-    "edgeEndpointHandleActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+    `edgeEndpointHandleActive min-w-0 ${vuiStateSelectedRowClass}`,
   edgeEndpoints:
     "edgeEndpoints min-w-0",
   edgeHotspot:
     "edgeHotspot min-w-0 !absolute left-[var(--research-flow-edge-label-left)] top-[var(--research-flow-edge-label-top)]",
   edgeHotspotActive:
-    "edgeHotspotActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+    `edgeHotspotActive min-w-0 ${vuiStateSelectedRowClass}`,
   edgeHotspotOffset:
     "edgeHotspotOffset min-w-0",
   edgeIssueList:
@@ -73,7 +76,7 @@ const styles: Record<string, string> = {
   edgeTypeHint:
     "edgeTypeHint min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   edgeType_active:
-    "edgeType_active min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+    `edgeType_active min-w-0 ${vuiStateSelectedRowClass}`,
   edgeType_approval_gate:
     "edgeType_approval_gate min-w-0",
   edgeType_blocked:
@@ -81,15 +84,15 @@ const styles: Record<string, string> = {
   edgeType_chat:
     "edgeType_chat min-w-0",
   edgeType_danger:
-    "edgeType_danger min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `edgeType_danger min-w-0 ${vuiStateDangerSoftClass}`,
   edgeType_done:
     "edgeType_done min-w-0",
   edgeType_error:
-    "edgeType_error min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `edgeType_error min-w-0 ${vuiStateDangerSoftClass}`,
   edgeType_evidence_loop:
     "edgeType_evidence_loop min-w-0",
   edgeType_failed:
-    "edgeType_failed min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `edgeType_failed min-w-0 ${vuiStateDangerSoftClass}`,
   edgeType_failure:
     "edgeType_failure min-w-0",
   edgeType_general:
@@ -98,7 +101,7 @@ const styles: Record<string, string> = {
     "edgeType_human_handoff min-w-0",
   edgeType_idle: `edgeType_idle min-w-0 border-[var(--vui-border-subtle)] ${vuiOpaqueRowClass} text-[var(--fg-tertiary)]`,
   edgeType_info:
-    "edgeType_info min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `edgeType_info min-w-0 ${vuiStateCoolInfoClass}`,
   edgeType_memory:
     "edgeType_memory min-w-0",
   edgeType_mental:
@@ -181,7 +184,7 @@ const styles: Record<string, string> = {
   inspectorTab:
     "inspectorTab min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
   inspectorTabActive:
-    "inspectorTabActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+    `inspectorTabActive min-w-0 ${vuiStateSelectedRowClass}`,
   inspectorTabBadge:
     "inspectorTabBadge min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
   inspectorTabs:
@@ -191,7 +194,7 @@ const styles: Record<string, string> = {
   issueCardBody:
     "issueCardBody min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_70%,transparent)] !bg-[var(--vui-surface-panel)] p-2 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   issueCardError:
-    "issueCardError min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] p-2 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `issueCardError min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] p-2 ${vuiStateDangerSoftClass}`,
   issueCardHeader:
     "issueCardHeader min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_70%,transparent)] !bg-[var(--vui-surface-panel)] p-2 flex flex-wrap items-center gap-1.5",
   issueCardWarning:
@@ -209,21 +212,21 @@ const styles: Record<string, string> = {
   issueSummary:
     "issueSummary min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] !bg-[var(--vui-surface-panel)] p-2 !grid grid-cols-[repeat(2,minmax(0,1fr))] gap-2.5 max-[430px]:grid-cols-1",
   issueSummaryError:
-    "issueSummaryError min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] p-2 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `issueSummaryError min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] p-2 ${vuiStateDangerSoftClass}`,
   issueSummaryOk:
     "issueSummaryOk min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] p-2 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
   issueSummaryWarning:
     "issueSummaryWarning min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] p-2 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
   lockButtonActive:
-    "lockButtonActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+    `lockButtonActive min-w-0 ${vuiStateSelectedRowClass}`,
   node:
     "node min-w-0 !absolute left-[var(--research-flow-node-left)] top-[var(--research-flow-node-top)]",
   nodeActive:
-    "nodeActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+    `nodeActive min-w-0 ${vuiStateSelectedRowClass}`,
   nodeConnectSource:
     "nodeConnectSource min-w-0",
   nodeIssueBadgeError:
-    "nodeIssueBadgeError min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `nodeIssueBadgeError min-w-0 ${vuiStateDangerSoftClass}`,
   nodeIssueBadgeWarning:
     "nodeIssueBadgeWarning min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
   nodeMeta:
@@ -235,7 +238,7 @@ const styles: Record<string, string> = {
   nodeStatusDot:
     "nodeStatusDot min-w-0 inline-block h-2 w-2 rounded-full bg-current",
   nodeStatus_active:
-    "nodeStatus_active min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+    `nodeStatus_active min-w-0 ${vuiStateSelectedRowClass}`,
   nodeStatus_approval_gate:
     "nodeStatus_approval_gate min-w-0",
   nodeStatus_blocked:
@@ -243,15 +246,15 @@ const styles: Record<string, string> = {
   nodeStatus_chat:
     "nodeStatus_chat min-w-0",
   nodeStatus_danger:
-    "nodeStatus_danger min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `nodeStatus_danger min-w-0 ${vuiStateDangerSoftClass}`,
   nodeStatus_done:
     "nodeStatus_done min-w-0",
   nodeStatus_error:
-    "nodeStatus_error min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `nodeStatus_error min-w-0 ${vuiStateDangerSoftClass}`,
   nodeStatus_evidence_loop:
     "nodeStatus_evidence_loop min-w-0",
   nodeStatus_failed:
-    "nodeStatus_failed min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `nodeStatus_failed min-w-0 ${vuiStateDangerSoftClass}`,
   nodeStatus_failure:
     "nodeStatus_failure min-w-0",
   nodeStatus_general:
@@ -260,7 +263,7 @@ const styles: Record<string, string> = {
     "nodeStatus_human_handoff min-w-0",
   nodeStatus_idle: `nodeStatus_idle min-w-0 border-[var(--vui-border-subtle)] ${vuiOpaqueRowClass} text-[var(--fg-tertiary)]`,
   nodeStatus_info:
-    "nodeStatus_info min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `nodeStatus_info min-w-0 ${vuiStateCoolInfoClass}`,
   nodeStatus_memory:
     "nodeStatus_memory min-w-0",
   nodeStatus_mental:
@@ -314,21 +317,21 @@ const styles: Record<string, string> = {
   nodeTopline:
     "nodeTopline min-w-0",
   nodeWithError:
-    "nodeWithError min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `nodeWithError min-w-0 ${vuiStateDangerSoftClass}`,
   nodeWithIssue:
     "nodeWithIssue min-w-0",
   observerStatus:
     "observerStatus min-w-0",
   observerStatusActive:
-    "observerStatusActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+    `observerStatusActive min-w-0 ${vuiStateSelectedRowClass}`,
   organizationActionRow:
     "organizationActionRow min-w-0 max-w-full flex flex-wrap items-center gap-1.5 rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] !bg-[var(--vui-surface-panel)] p-2",
   organizationAgentCard:
-    "organizationAgentCard min-w-0 rounded-[var(--radius-panel)] border p-2 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `organizationAgentCard min-w-0 rounded-[var(--radius-panel)] border p-2 ${vuiStateCoolInfoClass}`,
   organizationAgentList:
-    "organizationAgentList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `organizationAgentList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto ${vuiStateCoolInfoClass}`,
   organizationAgentMeta:
-    "organizationAgentMeta min-w-0 flex flex-wrap items-center gap-1.5 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `organizationAgentMeta min-w-0 flex flex-wrap items-center gap-1.5 ${vuiStateCoolInfoClass}`,
   organizationAuditAllowed:
     "organizationAuditAllowed min-w-0",
   organizationAuditBlocked:
@@ -376,7 +379,7 @@ const styles: Record<string, string> = {
   route:
     "route min-w-0 grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden bg-transparent text-[var(--fg-primary)]",
   saveStatusError:
-    "saveStatusError min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `saveStatusError min-w-0 ${vuiStateDangerSoftClass}`,
   saveStatusIdle: `saveStatusIdle min-w-0 border-[var(--vui-border-subtle)] ${vuiOpaqueRowClass} text-[var(--fg-tertiary)]`,
   saveStatusSuccess:
     "saveStatusSuccess min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
@@ -389,7 +392,7 @@ const styles: Record<string, string> = {
   statusPill:
     "statusPill min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
   status_active:
-    "status_active min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+    `status_active min-w-0 ${vuiStateSelectedRowClass}`,
   status_approval_gate:
     "status_approval_gate min-w-0",
   status_blocked:
@@ -397,15 +400,15 @@ const styles: Record<string, string> = {
   status_chat:
     "status_chat min-w-0",
   status_danger:
-    "status_danger min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `status_danger min-w-0 ${vuiStateDangerSoftClass}`,
   status_done:
     "status_done min-w-0",
   status_error:
-    "status_error min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `status_error min-w-0 ${vuiStateDangerSoftClass}`,
   status_evidence_loop:
     "status_evidence_loop min-w-0",
   status_failed:
-    "status_failed min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `status_failed min-w-0 ${vuiStateDangerSoftClass}`,
   status_failure:
     "status_failure min-w-0",
   status_general:
@@ -414,7 +417,7 @@ const styles: Record<string, string> = {
     "status_human_handoff min-w-0",
   status_idle: `status_idle min-w-0 border-[var(--vui-border-subtle)] ${vuiOpaqueRowClass} text-[var(--fg-tertiary)]`,
   status_info:
-    "status_info min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
+    `status_info min-w-0 ${vuiStateCoolInfoClass}`,
   status_memory:
     "status_memory min-w-0",
   status_mental:
@@ -469,7 +472,7 @@ const styles: Record<string, string> = {
   validationIssue:
     "validationIssue min-w-0",
   validationIssueError:
-    "validationIssueError min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
+    `validationIssueError min-w-0 ${vuiStateDangerSoftClass}`,
   validationIssueWarning:
     "validationIssueWarning min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
   zoomControl:

@@ -43,3 +43,61 @@ export const vuiToolbarFillClass = "!bg-[var(--vui-surface-toolbar)]";
 
 /** Inset region fill (inspector wells, nested shell pockets). */
 export const vuiInsetFillClass = "!bg-[var(--vui-surface-inset)]";
+
+// ─── State tints (fixed alpha; do not invent new % in route style maps) ───
+
+/**
+ * Selected / active list row or nav chip on an opaque product surface.
+ * border cool 34% + row wash 10% + cool text.
+ */
+export const vuiStateSelectedRowClass =
+  "border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] text-[var(--accent-cool)]";
+
+/**
+ * Soft cool chip / badge (transparent wash). Prefer selected-row when the
+ * parent is an opaque product board; use this only for badges and transient chips.
+ */
+export const vuiStateCoolSoftClass =
+  "border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)]";
+
+/**
+ * Soft cool info pill (lighter than selected chip).
+ */
+export const vuiStateCoolInfoClass =
+  "border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]";
+
+/**
+ * Danger-zone panel substrate (fixed error wash on panel).
+ */
+export const vuiStateDangerPanelClass =
+  "rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--state-error)_22%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-error)_4%,var(--vui-surface-panel))]";
+
+/**
+ * Warning / confirmation panel substrate.
+ */
+export const vuiStateWarningPanelClass =
+  "rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--state-warning)_42%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-warning)_8%,var(--vui-surface-panel))]";
+
+/**
+ * Accent return / hint banner on panel surface (cool 6% wash).
+ */
+export const vuiStateAccentBannerClass =
+  "rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-cool)_28%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_6%,var(--vui-surface-panel))]";
+
+/**
+ * Soft danger chip (border + transparent wash + error text).
+ */
+export const vuiStateDangerSoftClass =
+  "border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]";
+
+/**
+ * Soft success chip.
+ */
+export const vuiStateSuccessSoftClass =
+  "border-[color-mix(in_srgb,var(--state-success)_28%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]";
+
+/**
+ * Soft warning / warm chip.
+ */
+export const vuiStateWarmSoftClass =
+  "border-[color-mix(in_srgb,var(--accent-warm)_30%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_10%,transparent)] text-[var(--accent-warm-2)]";
