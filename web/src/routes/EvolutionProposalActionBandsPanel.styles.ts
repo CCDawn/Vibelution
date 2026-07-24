@@ -1,4 +1,8 @@
-const rowSurface = "[border:1px_solid_var(--vui-border-subtle)] [border-radius:8px] [background:var(--vui-surface-row)]";
+import {
+  vuiOpaqueRowClass,
+} from "../design/vuiSurfaceRecipes";
+
+const rowSurface = vuiOpaqueRowClass;
 const actionSurface = "[border:1px_solid_var(--vui-border-subtle)] [border-radius:var(--radius-control)] [background:var(--vui-control-muted)] [color:var(--fg-primary)] [transition:border-color_140ms_ease,_background-color_140ms_ease,_color_140ms_ease] hover:[border-color:color-mix(in_srgb,_var(--accent-warm)_30%,_transparent)] hover:[background:var(--vui-control-muted-hover)]";
 
 const styles = {

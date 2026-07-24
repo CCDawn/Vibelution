@@ -1,5 +1,6 @@
 import {
   vuiOpaqueRowClass,
+  vuiWorkspaceFillClass,
 } from "../design/vuiSurfaceRecipes";
 
 const styles = {
@@ -25,8 +26,7 @@ const styles = {
   partStatus:
     "flex-none rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-1.5 py-0.5 text-[length:var(--vui-font-xs)] leading-none text-[var(--fg-tertiary)]",
   summary: "m-0 text-[var(--fg-secondary)]",
-  preview:
-    "m-0 max-h-40 overflow-auto rounded-[var(--radius-control)] bg-[var(--vui-surface-workspace)] px-2 py-1.5 font-mono text-[length:var(--vui-font-xs)] whitespace-pre-wrap text-[var(--fg-primary)]",
+  preview: `m-0 max-h-40 overflow-auto rounded-[var(--radius-control)] ${vuiWorkspaceFillClass} px-2 py-1.5 font-mono text-[length:var(--vui-font-xs)] whitespace-pre-wrap text-[var(--fg-primary)]`,
   contextPart:
     "flex w-fit max-w-full min-w-0 flex-wrap items-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 text-[length:var(--vui-font-xs)] leading-[var(--vui-line-tight)] text-[var(--fg-secondary)]",
   contextLabel: "min-w-0 max-w-[36ch] overflow-hidden text-ellipsis whitespace-nowrap",

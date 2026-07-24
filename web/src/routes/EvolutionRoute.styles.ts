@@ -13,7 +13,7 @@ const panelSurface =
 const panelSurfaceSoft =
   "[border:1px_solid_var(--vui-border-subtle)] [border-radius:8px] !bg-[var(--vui-surface-panel)]";
 const rowSurface =
-  "[border:1px_solid_var(--vui-border-subtle)] [border-radius:8px] [background:var(--vui-surface-row)]";
+  `${vuiOpaqueRowClass}`;
 const rowSurfaceSoft =
   "[border:1px_solid_var(--vui-border-subtle)] [border-radius:8px] !bg-[var(--vui-surface-row)]";
 const actionSurface =

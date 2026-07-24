@@ -1,10 +1,11 @@
 import {
   vuiFlatPanelClass,
   vuiOpaqueRowClass,
+  vuiToolbarFillClass,
 } from "../design/vuiSurfaceRecipes";
 
-const panelSurface = "rounded-[var(--radius-panel)] border border-vui-border-subtle !bg-[var(--vui-surface-panel)]";
-const rowSurface = "rounded-[var(--radius-control)] border border-vui-border-subtle !bg-[var(--vui-surface-row)]";
+const panelSurface = `${vuiFlatPanelClass}`;
+const rowSurface = `${vuiOpaqueRowClass}`;
 const rowSurfaceMuted = "rounded-md border border-vui-border-subtle bg-vui-surface-row";
 const rowSurfaceHover = "hover:border-vui-border-soft hover:!bg-[var(--vui-surface-row-hover)]";
 const mutedControl =
@@ -49,8 +50,7 @@ export const launcherRouteStyles = {
   settingsSaveButton:
     `${primaryControl} justify-self-start py-[3px]`,
   settingError: "col-span-full [font-size:var(--vui-font-xs)] text-[var(--state-error)]",
-  segmentedControl:
-    "inline-flex min-w-0 max-w-full flex-wrap items-center gap-0.5 rounded-[var(--radius-control)] border border-vui-border-subtle bg-vui-surface-toolbar p-0.5 max-[860px]:justify-self-start [&_button]:min-h-[25px] [&_button]:rounded-[calc(var(--radius-control)-2px)] [&_button]:border-0 [&_button]:bg-transparent [&_button]:px-[7px] [&_button]:py-[3px] [&_button]:[font-size:var(--vui-font-xs)] [&_button]:leading-none [&_button]:text-vui-fg-secondary [&_button[data-active=true]]:bg-[color-mix(in_srgb,var(--accent-primary)_12%,var(--vui-control-muted))] [&_button[data-active=true]]:text-vui-fg-primary [&_button:disabled]:cursor-default [&_button:disabled]:opacity-60 [&_button[data-vui]]:min-w-0 [&_button[data-vui]_[data-slot=vui-button-content]]:inline-flex [&_button[data-vui]_[data-slot=vui-button-content]]:items-center [&_button[data-vui]_[data-slot=vui-button-content]]:gap-[5px] [&_button[data-vui]_[data-slot=vui-button-label]]:inline-flex [&_button[data-vui]_[data-slot=vui-button-label]]:items-center [&_button[data-vui]_[data-slot=vui-button-label]]:gap-[5px]",
+  segmentedControl: `inline-flex min-w-0 max-w-full flex-wrap items-center gap-0.5 rounded-[var(--radius-control)] border border-vui-border-subtle ${vuiToolbarFillClass} p-0.5 max-[860px]:justify-self-start [&_button]:min-h-[25px] [&_button]:rounded-[calc(var(--radius-control)-2px)] [&_button]:border-0 [&_button]:bg-transparent [&_button]:px-[7px] [&_button]:py-[3px] [&_button]:[font-size:var(--vui-font-xs)] [&_button]:leading-none [&_button]:text-vui-fg-secondary [&_button[data-active=true]]:bg-[color-mix(in_srgb,var(--accent-primary)_12%,var(--vui-control-muted))] [&_button[data-active=true]]:text-vui-fg-primary [&_button:disabled]:cursor-default [&_button:disabled]:opacity-60 [&_button[data-vui]]:min-w-0 [&_button[data-vui]_[data-slot=vui-button-content]]:inline-flex [&_button[data-vui]_[data-slot=vui-button-content]]:items-center [&_button[data-vui]_[data-slot=vui-button-content]]:gap-[5px] [&_button[data-vui]_[data-slot=vui-button-label]]:inline-flex [&_button[data-vui]_[data-slot=vui-button-label]]:items-center [&_button[data-vui]_[data-slot=vui-button-label]]:gap-[5px]`,
   developerPanel:
     `mx-2 mt-1.5 grid min-h-0 min-w-0 max-w-full gap-1.5 overflow-hidden ${panelSurface} px-2 py-1.5 data-[enabled=true]:border-[color-mix(in_srgb,var(--state-warning)_42%,transparent)]`,
   developerPanelHeader:

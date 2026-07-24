@@ -1,16 +1,16 @@
 import {
+  vuiFlatPanelClass,
   vuiOpaqueRowClass,
 } from "../design/vuiSurfaceRecipes";
 
-const panelSurface = "rounded-[var(--radius-panel)] border border-vui-border-subtle bg-vui-surface-panel/94 shadow-none";
+const panelSurface = ` shadow-none`;
 const rowSurface = "rounded-[var(--radius-control)] border border-vui-border-subtle bg-vui-surface-row";
 const rowSurfaceSoft = "rounded-[var(--radius-control)] border border-vui-border-subtle bg-[color-mix(in_srgb,var(--vui-surface-row)_84%,var(--vui-surface-panel))]";
 const controlSurface = "border border-vui-border-subtle bg-vui-control-muted hover:bg-vui-control-muted-hover";
 
 export const selfEvolutionTrackStyles = {
   pageStack: "grid h-full max-h-full min-h-0 min-w-0 max-w-full overflow-hidden overflow-x-hidden rounded-[var(--radius-panel)] bg-vui-surface-panel max-[1180px]:overflow-visible max-[1180px]:overflow-x-hidden",
-  trackShell:
-    "grid h-full max-h-full min-h-0 min-w-0 max-w-full grid-rows-[auto_minmax(0,1fr)] items-stretch content-start overflow-hidden overflow-x-hidden rounded-[var(--radius-panel)] border border-vui-border-subtle bg-vui-surface-panel p-3 max-[1180px]:h-auto max-[1180px]:overflow-visible max-[1180px]:overflow-x-hidden max-[760px]:p-2",
+  trackShell: `grid h-full max-h-full min-h-0 min-w-0 max-w-full grid-rows-[auto_minmax(0,1fr)] items-stretch content-start overflow-hidden overflow-x-hidden ${vuiFlatPanelClass} p-3 max-[1180px]:h-auto max-[1180px]:overflow-visible max-[1180px]:overflow-x-hidden max-[760px]:p-2`,
   trackBody:
     "min-h-0 min-w-0 max-w-full overflow-hidden overflow-x-hidden pt-2 max-[1180px]:overflow-visible max-[1180px]:overflow-x-hidden",
   // Header row must stay content-height (auto track) — never stretch into a tall empty band.
@@ -32,7 +32,7 @@ export const selfEvolutionTrackStyles = {
   sideColumnScrollable: "h-full overflow-y-auto pr-1.5 max-[1180px]:h-auto max-[1180px]:overflow-visible",
   paneCollapsed: "overflow-hidden p-0 invisible",
   centerColumn: "grid h-full min-h-0 min-w-0 max-w-full grid-rows-[auto_minmax(0,1fr)] gap-3 overflow-hidden overflow-x-hidden max-[1180px]:h-auto max-[1180px]:overflow-visible max-[1180px]:overflow-x-hidden",
-  conversationShell: "grid h-full max-h-full min-h-[420px] min-w-0 max-w-full overflow-hidden overflow-x-hidden rounded-[var(--radius-panel)] border border-vui-border-subtle bg-vui-surface-panel max-[1180px]:h-[min(74vh,760px)] max-[1180px]:overflow-hidden max-[1180px]:overflow-x-hidden max-[760px]:h-[min(72vh,720px)] max-[760px]:min-h-[540px]",
+  conversationShell: `grid h-full max-h-full min-h-[420px] min-w-0 max-w-full overflow-hidden overflow-x-hidden ${vuiFlatPanelClass} max-[1180px]:h-[min(74vh,760px)] max-[1180px]:overflow-hidden max-[1180px]:overflow-x-hidden max-[760px]:h-[min(72vh,720px)] max-[760px]:min-h-[540px]`,
   observationEvidenceRail:
     `grid h-full max-h-full min-h-0 content-start gap-3 overflow-auto p-3.5 max-[1180px]:h-auto max-[1180px]:max-h-none ${panelSurface}`,
   observationConfigForm: "grid gap-2.5",

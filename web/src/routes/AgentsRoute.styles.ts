@@ -7,6 +7,7 @@ import {
   vuiDenseRowClass,
   vuiFlatPanelClass,
   vuiOpaqueRowClass,
+  vuiWorkspaceFillClass,
 } from "../design/vuiSurfaceRecipes";
 
 const styles = {
@@ -217,8 +218,7 @@ const styles = {
     "grid [align-content:start] [gap:5px] min-w-0 [max-height:280px] [overflow:auto] [padding-right:3px]",
   inboxMessageTop:
     "grid [grid-template-columns:minmax(0,_1fr)_auto] [align-items:center] [gap:8px] min-w-0 [&_span]:grid [&_span]:[gap:2px] [&_span]:min-w-0",
-  inlineAdd:
-    "grid [grid-template-columns:minmax(0,_1fr)_auto] [gap:6px] min-w-0 [&_input]:min-w-0 [&_input]:[min-height:32px] [&_input]:[border-radius:var(--radius-control)] [&_input]:[font:inherit] [&_input]:[font-size:var(--vui-font-xs)] [&_input]:[width:100%] [&_input]:[padding:0_8px] [&_input]:[border:1px_solid_var(--vui-border-subtle)] [&_input]:!bg-[var(--vui-surface-workspace)] [&_input]:[color:var(--fg-primary)] [&_[data-vui=\"button\"]]:[white-space:nowrap]",
+  inlineAdd: `grid [grid-template-columns:minmax(0,_1fr)_auto] [gap:6px] min-w-0 [&_input]:min-w-0 [&_input]:[min-height:32px] [&_input]:[border-radius:var(--radius-control)] [&_input]:[font:inherit] [&_input]:[font-size:var(--vui-font-xs)] [&_input]:[width:100%] [&_input]:[padding:0_8px] [&_input]:[border:1px_solid_var(--vui-border-subtle)] [&_input]:!${vuiWorkspaceFillClass} [&_input]:[color:var(--fg-primary)] [&_[data-vui=\"button\"]]:[white-space:nowrap]`,
   issueItem: `grid [gap:4px] min-w-0 [padding:7px_8px] ${vuiOpaqueRowClass} [&_strong]:min-w-0 [&_strong]:[overflow:hidden] [&_strong]:[color:var(--fg-primary)] [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap] [&_p]:[margin:0] [&_p]:[color:var(--fg-secondary)] [&_p]:[font-size:var(--vui-font-xs)] [&_p]:[line-height:1.4]`,
   issueItem_blocking:
     "[border-color:color-mix(in_srgb,_var(--state-error)_32%,_transparent)]",
@@ -341,8 +341,7 @@ const styles = {
     "[border-color:color-mix(in_srgb,_var(--fg-tertiary)_24%,_transparent)] [background:color-mix(in_srgb,_var(--fg-tertiary)_8%,_transparent)] [color:var(--fg-secondary)]",
   runtime_unknown:
     "[border-color:color-mix(in_srgb,_var(--fg-tertiary)_24%,_transparent)] [background:color-mix(in_srgb,_var(--fg-tertiary)_8%,_transparent)] [color:var(--fg-secondary)]",
-  searchBox:
-    "flex [align-items:center] [gap:8px] [min-height:32px] [padding:0_9px] [border:1px_solid_var(--vui-border-subtle)] [border-radius:var(--radius-control)] !bg-[var(--vui-surface-workspace)] [color:var(--fg-tertiary)] focus-within:[border-color:color-mix(in_srgb,_var(--accent-cool)_44%,_transparent)] focus-within:[box-shadow:var(--focus-ring)] focus-within:[color:var(--fg-secondary)] [&_input]:min-w-0 [&_input]:[width:100%] [&_input]:[border:0] [&_input]:[outline:0] [&_input]:[background:transparent] [&_input]:[color:var(--fg-primary)] [&_input]:[font:inherit] [&_input]:[font-size:var(--vui-font-xs)]",
+  searchBox: `flex [align-items:center] [gap:8px] [min-height:32px] [padding:0_9px] [border:1px_solid_var(--vui-border-subtle)] [border-radius:var(--radius-control)] !${vuiWorkspaceFillClass} [color:var(--fg-tertiary)] focus-within:[border-color:color-mix(in_srgb,_var(--accent-cool)_44%,_transparent)] focus-within:[box-shadow:var(--focus-ring)] focus-within:[color:var(--fg-secondary)] [&_input]:min-w-0 [&_input]:[width:100%] [&_input]:[border:0] [&_input]:[outline:0] [&_input]:[background:transparent] [&_input]:[color:var(--fg-primary)] [&_input]:[font:inherit] [&_input]:[font-size:var(--vui-font-xs)]`,
   secondaryButton:
     "inline-flex w-fit max-w-full [align-items:center] [justify-content:center] [gap:7px] [min-height:30px] [padding:0_10px] [border-radius:var(--radius-control)] [font-weight:700] [border:1px_solid_var(--vui-border-subtle)] !bg-[var(--vui-surface-row)] [color:var(--fg-secondary)] disabled:[cursor:not-allowed] disabled:[opacity:0.55]",
   segmentActive:

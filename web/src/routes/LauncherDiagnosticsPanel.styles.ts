@@ -1,9 +1,10 @@
 import {
+  vuiFlatPanelClass,
   vuiOpaqueRowClass,
 } from "../design/vuiSurfaceRecipes";
 
-const panelSurface = "rounded-[var(--radius-panel)] border border-vui-border-subtle !bg-[var(--vui-surface-panel)]";
-const rowSurface = "rounded-[var(--radius-control)] border border-vui-border-subtle !bg-[var(--vui-surface-row)]";
+const panelSurface = `${vuiFlatPanelClass}`;
+const rowSurface = `${vuiOpaqueRowClass}`;
 const rowSurfaceMuted = "rounded-md border border-vui-border-subtle bg-vui-surface-row";
 const mutedControl =
   "inline-flex min-h-7 w-fit max-w-full flex-none items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-vui-border-soft bg-vui-control-muted px-2 [font-size:var(--vui-font-xs)] leading-none text-vui-fg-secondary no-underline hover:border-vui-border-soft hover:bg-vui-control-muted-hover hover:text-vui-fg-primary disabled:cursor-default disabled:opacity-55 [&[data-vui]]:min-w-0";

@@ -1,8 +1,11 @@
-import { vuiElevatedPanelClass } from "../design/vuiSurfaceRecipes";
+import {
+  vuiElevatedPanelClass,
+  vuiToolbarFillClass,
+} from "../design/vuiSurfaceRecipes";
 
 const panelSurface = vuiElevatedPanelClass;
 const sectionHeaderSurface =
-  "[border-bottom:1px_solid_var(--vui-border-subtle)] !bg-[var(--vui-surface-toolbar)]";
+  `[border-bottom:1px_solid_var(--vui-border-subtle)] !${vuiToolbarFillClass}`;
 
 const styles = {
   detailCard:

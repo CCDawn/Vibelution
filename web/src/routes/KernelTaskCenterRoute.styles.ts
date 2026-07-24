@@ -1,6 +1,7 @@
 import {
   vuiFlatPanelClass,
   vuiOpaqueRowClass,
+  vuiWorkspaceFillClass,
 } from "../design/vuiSurfaceRecipes";
 
 const panelSurface =
@@ -55,7 +56,7 @@ const lifecycleTitleClass = "flex items-center justify-between gap-2";
 const lifecycleKindClass = "[font-size:var(--vui-font-xs)] text-vui-fg-primary";
 const lifecycleSummaryClass = "m-0 my-[3px] min-w-0 break-words [font-size:var(--vui-font-xs)] leading-[1.35] text-vui-fg-secondary";
 const chipsClass = "mt-[5px] flex flex-wrap gap-[5px]";
-const chipCodeClass = "max-w-full overflow-hidden truncate whitespace-nowrap rounded-full border border-vui-border-soft bg-[var(--vui-surface-workspace)] px-1.5 py-[3px] [font-size:var(--vui-font-xs)] text-vui-fg-tertiary";
+const chipCodeClass = `max-w-full overflow-hidden truncate whitespace-nowrap rounded-full border border-vui-border-soft ${vuiWorkspaceFillClass} px-1.5 py-[3px] [font-size:var(--vui-font-xs)] text-vui-fg-tertiary`;
 const refListClass = "mt-[5px] flex min-w-0 max-w-full flex-wrap gap-[5px]";
 const evidenceRefListClass = "mt-[5px] flex min-w-0 max-w-full flex-wrap gap-[5px]";
 const emptyInlineClass = "[font-size:var(--vui-font-xs)] leading-[1.35] text-vui-fg-secondary";

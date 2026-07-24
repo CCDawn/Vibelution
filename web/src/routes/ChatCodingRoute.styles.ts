@@ -13,6 +13,8 @@ import {
   vuiFlatPanelClass,
   vuiGlassPanelClass,
   vuiOpaqueRowClass,
+  vuiRailFillClass,
+  vuiWorkspaceFillClass,
 } from "../design/vuiSurfaceRecipes";
 
 const styles: Record<string, string> = {
@@ -239,8 +241,7 @@ const styles: Record<string, string> = {
     "vui-routes-chatcodingroute cliAgentTerminalFrame min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
   cliAgentTerminalOutput:
     "vui-routes-chatcodingroute cliAgentTerminalOutput min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
-  cliAgentTerminalOutputShell:
-    "vui-routes-chatcodingroute cliAgentTerminalOutputShell min-w-0 grid h-full min-h-0 content-start overflow-hidden bg-[var(--vui-surface-workspace)] text-[var(--fg-primary)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)] bg-[var(--bg-canvas)]",
+  cliAgentTerminalOutputShell: `vui-routes-chatcodingroute cliAgentTerminalOutputShell min-w-0 grid h-full min-h-0 content-start overflow-hidden ${vuiWorkspaceFillClass} text-[var(--fg-primary)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)] bg-[var(--bg-canvas)]`,
   cliAgentTerminalOverlay:
     "vui-routes-chatcodingroute cliAgentTerminalOverlay min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
   cliAgentTerminalStatus:
@@ -475,8 +476,7 @@ layout:
     "vui-routes-chatcodingroute layoutOverlay relative grid min-w-0 grid-cols-[minmax(0,1fr)] overflow-hidden",
   leftBlock:
     "vui-routes-chatcodingroute leftBlock grid min-w-0 shrink-0 gap-1.5 border-0 border-b border-[var(--vui-border-subtle)] bg-transparent p-2 shadow-none last:border-b-0",
-  leftRail:
-    "vui-routes-chatcodingroute leftRail min-w-0 !flex h-full min-h-0 !flex-col overflow-auto rounded-none border-0 border-l border-[var(--vui-border-subtle)] bg-[var(--vui-surface-rail)] p-1 shadow-none [scrollbar-gutter:stable] [grid-column:5] [grid-row:1]",
+  leftRail: `vui-routes-chatcodingroute leftRail min-w-0 !flex h-full min-h-0 !flex-col overflow-auto rounded-none border-0 border-l border-[var(--vui-border-subtle)] ${vuiRailFillClass} p-1 shadow-none [scrollbar-gutter:stable] [grid-column:5] [grid-row:1]`,
   memberIndexSummary: `vui-routes-chatcodingroute memberIndexSummary min-w-0 ${vuiGlassPanelClass} p-2 !grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-1.5`,
   mentalStateBadge:
     "vui-routes-chatcodingroute mentalStateBadge min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
@@ -817,8 +817,7 @@ layout:
     "vui-routes-chatcodingroute rightIndexTabActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
   rightIndexTabs:
     "vui-routes-chatcodingroute rightIndexTabs min-w-0 !grid grid-cols-[repeat(2,minmax(0,1fr))] gap-1",
-  rightPane:
-    "vui-routes-chatcodingroute rightPane min-w-0 grid h-full min-h-0 gap-[var(--chat-workbench-gap)] overflow-hidden rounded-none border-0 border-r border-[var(--vui-border-subtle)] bg-[var(--vui-surface-rail)] p-[var(--chat-workbench-gap)] shadow-none [grid-column:1] [grid-row:1]",
+  rightPane: `vui-routes-chatcodingroute rightPane min-w-0 grid h-full min-h-0 gap-[var(--chat-workbench-gap)] overflow-hidden rounded-none border-0 border-r border-[var(--vui-border-subtle)] ${vuiRailFillClass} p-[var(--chat-workbench-gap)] shadow-none [grid-column:1] [grid-row:1]`,
   rightPaneWithTabs:
     "vui-routes-chatcodingroute rightPaneWithTabs grid-rows-[auto_auto_minmax(0,1fr)]",
   rightPaneWithoutTabs:
