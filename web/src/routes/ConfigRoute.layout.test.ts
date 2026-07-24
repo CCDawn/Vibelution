@@ -29,6 +29,7 @@ import providerLogicSource from "./configProviderLogic.ts?raw";
 import quickSetupSource from "./ConfigQuickSetupPanel.tsx?raw";
 import quickSetupStylesSource from "./ConfigQuickSetupPanel.styles.ts?raw";
 import quickSetupStyles from "./ConfigQuickSetupPanel.styles";
+import settingsNavigationStyles from "./ConfigSettingsNavigation.styles";
 import wizardSource from "./ConfigProviderWizard.tsx?raw";
 import styles from "./ConfigRoute.styles";
 import stylesSource from "./ConfigRoute.styles.ts?raw";
@@ -597,6 +598,12 @@ describe("ConfigRoute layout contract", () => {
   });
 
   it("keeps Config image editors and model content constrained on narrow screens", () => {
+    expect(styles.page).toContain("max-[720px]:[grid-template-columns:1fr]");
+    expect(styles.page).toContain("max-[720px]:[grid-template-rows:auto_minmax(0,1fr)]");
+    expect(settingsNavigationStyles.sidebar).toContain("max-[720px]:w-full");
+    expect(settingsNavigationStyles.sidebar).toContain("max-[720px]:h-auto");
+    expect(settingsNavigationStyles.groupNav).toContain("max-[720px]:overflow-visible");
+
     expect(stylesSource).toContain("contentModels:");
     expect(styles.contentModels).toContain("max-[720px]:[max-height:none]");
     expect(styles.contentModels).toContain("max-[720px]:[overflow:visible]");
