@@ -309,6 +309,9 @@ describe("ConfigProviderRegistryPanel", () => {
     expect(dirty).toContain("有未保存的模型配置");
     expect(dirty).toContain("保存到外部配置");
     expect(dirty).toContain("有未保存修改");
+    // savePrompt must not steal the 1fr row from the workspace when present
+    expect(panelStyles.sectionSurface).toContain("[&:has(>_.savePrompt)]:[grid-template-rows:auto_auto_auto_minmax(0,1fr)]");
+    expect(panelStyles.savePrompt).toContain("shrink-0");
   });
 
   it("aligns Provider action labels, active states, and nearby feedback", () => {

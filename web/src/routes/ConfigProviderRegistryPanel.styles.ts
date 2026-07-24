@@ -3,12 +3,12 @@ import { vuiOpaquePanelClass } from "../design/vuiSurfaceRecipes";
 const panelSurface = vuiOpaquePanelClass;
 
 const styles = {
-  sectionSurface: `vui-routes-configproviderregistrypanel sectionSurface ${panelSurface} grid h-full min-h-0 min-w-0 [grid-template-rows:auto_auto_minmax(0,1fr)] gap-3 overflow-hidden p-3`,
+  sectionSurface: `vui-routes-configproviderregistrypanel sectionSurface ${panelSurface} grid h-full min-h-0 min-w-0 [grid-template-rows:auto_auto_minmax(0,1fr)] gap-3 overflow-hidden p-3 [&:has(>_.savePrompt)]:[grid-template-rows:auto_auto_auto_minmax(0,1fr)]`,
   header: "vui-routes-configproviderregistrypanel header min-w-0",
   workspaceLead:
     "vui-routes-configproviderregistrypanel workspaceLead m-0 min-w-0 [font-size:var(--vui-font-sm)] leading-snug text-vui-fg-secondary [overflow-wrap:anywhere]",
   savePrompt:
-    "vui-routes-configproviderregistrypanel savePrompt relative z-30 grid min-w-0 items-center gap-3 rounded-lg border border-[color-mix(in_srgb,var(--state-warning)_45%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-warning)_12%,var(--vui-surface-panel))] px-3 py-2.5 shadow-sm max-[720px]:grid-cols-1 [grid-template-columns:minmax(0,1fr)_auto]",
+    "vui-routes-configproviderregistrypanel savePrompt relative z-10 grid min-w-0 shrink-0 items-center gap-3 rounded-lg border border-[color-mix(in_srgb,var(--state-warning)_45%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-warning)_12%,var(--vui-surface-panel))] px-3 py-2.5 shadow-sm max-[720px]:grid-cols-1 [grid-template-columns:minmax(0,1fr)_auto]",
   savePromptCopy:
     "vui-routes-configproviderregistrypanel savePromptCopy grid min-w-0 gap-0.5 [&_strong]:[font-size:var(--vui-font-sm)] [&_strong]:text-[var(--state-warning)] [&_span]:[font-size:var(--vui-font-xs)] [&_span]:leading-snug [&_span]:text-vui-fg-secondary [&_span]:[overflow-wrap:anywhere]",
   providerListSection:

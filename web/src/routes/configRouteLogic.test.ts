@@ -227,6 +227,21 @@ describe("configRouteLogic", () => {
     expect(payload.publicConfig).toEqual(draftConfig);
   });
 
+  it("refuses to use draftConfig as apply baseline when baseConfig is missing", () => {
+    expect(() =>
+      buildConfigApplyPayload({
+        draftConfig: { llm: { providers: { relay: { models: { a: {} } } } } },
+        draftMeta: { pending_api_keys: {}, pending_cleared_api_keys: [] },
+        baseHash: "base-hash",
+        baseConfig: null,
+        editorText: "{}",
+        hasEditorChanges: false,
+        editorSections: [],
+        loadFailedMessage: "load failed",
+      }),
+    ).toThrow("load failed");
+  });
+
   it("limits advanced editor apply payload to editable section diffs", () => {
     const draftConfig: PublicConfigShape = {
       avatar: { preset: "ember" },
