@@ -163,14 +163,23 @@ export function buildChatTokenStatusViewModel(options: {
       modelInputTokens,
     ),
   );
+  // Max context window: only trust explicit composition/session limits. Never invent 32k/128k.
   const modelInputLimitTokens = Math.max(
     0,
     lastContextComposition?.limitTokens
       ?? sessionContextUsage?.limit
-      ?? compression?.contextWindowLimit
       ?? 0,
   );
-  const modelInputPercent = modelInputLimitTokens > 0
+  const modelInputLimitSource = String(
+    lastContextComposition?.limitSource
+      ?? sessionContextUsage?.limitSource
+      ?? "",
+  ).trim();
+  const modelInputLimitMissing = modelInputLimitTokens <= 0
+    || modelInputLimitSource === "missing"
+    || modelInputLimitSource === "static_fallback"
+    || modelInputLimitSource === "context_compression_fallback";
+  const modelInputPercent = !modelInputLimitMissing && modelInputLimitTokens > 0
     ? Math.round(Math.min(1, modelInputTokens / modelInputLimitTokens) * 100)
     : 0;
   const modelInputSourceLine = modelInputAvailable
@@ -184,16 +193,26 @@ export function buildChatTokenStatusViewModel(options: {
     : llmUsageNotCalled
       ? t("llmUsageNotCalled")
       : t("llmUsageMissing");
-  const modelInputMetaLine = modelInputAvailable
-    ? modelInputLimitTokens > 0
+  const sessionLimitError = String(sessionContextUsage?.limitError || "").trim();
+  const modelInputLimitError = modelInputLimitMissing
+    ? (sessionLimitError
+      || (lang === "zh"
+        ? "未找到模型 max 上下文窗口（禁止默认兜底）。请在设置中为对话模型配置 context_window，或运行模型发现写入后再试。"
+        : "Model max context window is missing (silent defaults are disabled). Set context_window for the dialogue model in settings, or run model discovery."))
+    : "";
+  const modelInputMetaLine = modelInputLimitMissing
+    ? modelInputLimitError
+    : modelInputAvailable
       ? `${numberFormatter.format(modelInputTokens)} / ${numberFormatter.format(modelInputLimitTokens)} · ${modelInputPercent}%`
-      : `${numberFormatter.format(modelInputTokens)} tokens`
-    : modelInputSourceLine;
+      : modelInputSourceLine;
   const modelInputTitle = [
+    modelInputLimitMissing ? modelInputLimitError : "",
     lang === "zh"
       ? `模型输入 ${numberFormatter.format(modelInputTokens)}`
       : `Model input ${numberFormatter.format(modelInputTokens)}`,
-    modelInputLimitTokens > 0 ? `${lang === "zh" ? "窗口" : "window"} ${numberFormatter.format(modelInputLimitTokens)} · ${modelInputPercent}%` : "",
+    !modelInputLimitMissing && modelInputLimitTokens > 0
+      ? `${lang === "zh" ? "窗口" : "window"} ${numberFormatter.format(modelInputLimitTokens)} · ${modelInputPercent}% · source ${modelInputLimitSource || "configured"}`
+      : "",
     `${lang === "zh" ? "缓存输入" : "cached input"} ${numberFormatter.format(modelCachedInputTokens)}`,
     modelInputSourceLine,
     llmUsageTitle,
@@ -303,11 +322,19 @@ export function buildChatTokenStatusViewModel(options: {
     {
       key: "modelInput",
       label: lang === "zh" ? "模型输入" : "Model input",
-      value: modelInputAvailable ? numberFormatter.format(modelInputTokens) : "--",
-      displayValue: modelInputAvailable ? compactNumberFormatter.format(modelInputTokens) : "--",
+      value: modelInputLimitMissing
+        ? (lang === "zh" ? "缺窗口" : "No max")
+        : modelInputAvailable
+          ? numberFormatter.format(modelInputTokens)
+          : "--",
+      displayValue: modelInputLimitMissing
+        ? "!"
+        : modelInputAvailable
+          ? compactNumberFormatter.format(modelInputTokens)
+          : "--",
       meta: modelInputMetaLine,
       title: modelInputTitle,
-      percent: clampPercent(modelInputPercent),
+      percent: clampPercent(modelInputLimitMissing ? 0 : modelInputPercent),
       tone: "modelInput",
     },
     {

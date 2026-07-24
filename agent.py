@@ -1012,7 +1012,10 @@ class SelfEvolvingAgent:
         ).effective_enabled
 
     def _init_model_discovery(self):
-        """模型动态发现，返回 effective_max_token_limit"""
+        """解析模型 max 上下文窗口并派生压缩阈值。
+
+        禁止静默 32k/16k 兜底：窗口未知时直接失败，避免隐藏错误窗口。
+        """
         primary_profile_id = self.config.llm.get_role_profile_id("primary")
         doctor = doctor_llm_profile(self.config, primary_profile_id)
         for warning in doctor.warnings:
@@ -1021,14 +1024,20 @@ class SelfEvolvingAgent:
             for item in doctor.errors:
                 _debug_logger.error(item, tag="LLM")
         self.model_info = discover_model(self.config, primary_profile_id)
-        self._effective_max_token_limit = int(
-            self.model_info.context_window * 0.5
-        )
+        context_window = int(getattr(self.model_info, "context_window", 0) or 0)
+        if context_window <= 0:
+            model_name = str(getattr(self.model_info, "model", "") or "").strip() or "unknown"
+            message = (
+                f"模型 max 上下文窗口未配置（禁止默认兜底）。"
+                f"profile={primary_profile_id} model={model_name}。"
+                f"请在设置中为该模型/供应商填写 context_window，或先运行模型发现写入后再启动。"
+            )
+            _debug_logger.error(message, tag="LLM")
+            raise RuntimeError(message)
+        self._context_window_limit = context_window
+        # Compression threshold is derived from the known window; never invent the window itself.
+        self._effective_max_token_limit = max(1, int(context_window * 0.5))
         self.config.context_compression.max_token_limit = self._effective_max_token_limit
-        self._context_window_limit = int(
-            getattr(getattr(self, "model_info", None), "context_window", 0)
-            or self._effective_max_token_limit
-        )
         try:
             from core.pet_system import get_pet_system
             get_pet_system().update_context_window(self._context_window_limit)

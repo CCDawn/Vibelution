@@ -66,8 +66,9 @@ class CompressionThresholds:
 class ModelInfo:
     """模型信息"""
     model_name: str = "unknown"
-    max_model_len: int = 32768  # 默认值
-    suggested_max_tokens: int = 4096  # 建议的 max_tokens
+    # 0 = unknown / not discovered. Never invent 32768 as a real window.
+    max_model_len: int = 0
+    suggested_max_tokens: int = 0
     provider: str = "unknown"
     status: DiscoveryStatus = DiscoveryStatus.SKIPPED
     error_message: Optional[str] = None
@@ -112,14 +113,6 @@ class ModelDiscovery:
         "context_length",
         "max_position_embeddings",
     ]
-
-    KNOWN_CONTEXT_WINDOWS = {
-        "minimax-m2.7": 204800,
-        "minimax_m2.7": 204800,
-        "minimaxm2.7": 204800,
-        "minimaxm27": 204800,
-        "m2.7": 204800,
-    }
 
     def __init__(
         self,
@@ -263,61 +256,48 @@ class ModelDiscovery:
                 error_message="未找到模型信息",
             )
 
-        # 提取 context_window
+        # 提取 context_window（仅 API 字段；禁止静默查表/32768）
         context_window = self._extract_context_window(target_model)
 
         # 提取模型名称
         model_name = target_model.get("id", self.model_name or "unknown")
+
+        if context_window <= 0:
+            debug_logger.warning(
+                f"模型 {model_name} 未在发现响应中提供 context_window（禁止默认兜底）"
+            )
+            return ModelInfo(
+                model_name=str(model_name or "unknown"),
+                max_model_len=0,
+                suggested_max_tokens=0,
+                provider="auto-discovered",
+                status=DiscoveryStatus.FAILED,
+                error_message="发现响应未包含有效 context_window（禁止默认兜底）",
+                raw_response={"source_endpoint": source_endpoint},
+            )
 
         # 计算建议值
         return self._calculate_suggestions(model_name, context_window, source_endpoint)
 
     def _extract_context_window(self, model: Dict[str, Any]) -> int:
         """
-        从模型信息中提取 context_window
+        从模型信息中提取 context_window。
 
-        Args:
-            model: 模型信息字典
-
-        Returns:
-            int: context_window 值
+        只认 API 响应字段；未知返回 0（禁止静默表/32768）。
         """
         for field_name in self.CONTEXT_WINDOW_FIELDS:
             if field_name in model:
                 value = model[field_name]
-                if isinstance(value, (int, float)):
+                if isinstance(value, (int, float)) and int(value) > 0:
                     return int(value)
 
-        # 尝试在 created_by 或其他嵌套字段中查找
+        # 尝试在嵌套字段中查找（仍要求真实数值字段）
         for key, value in model.items():
             if isinstance(value, dict):
                 result = self._extract_context_window(value)
                 if result > 0:
                     return result
 
-        known_context = self._lookup_known_context_window(model)
-        if known_context > 0:
-            debug_logger.info(f"使用已知模型上下文窗口: {known_context}")
-            return known_context
-
-        # 返回默认值
-        debug_logger.warning("未找到 context_window，使用默认值 32768")
-        return 32768
-
-    def _lookup_known_context_window(self, model: Dict[str, Any]) -> int:
-        candidates = [
-            str(model.get("id", "") or ""),
-            str(model.get("model", "") or ""),
-            str(model.get("name", "") or ""),
-            str(self.model_name or ""),
-        ]
-        for candidate in candidates:
-            normalized = "".join(ch.lower() for ch in candidate if ch.isalnum() or ch in {".", "_", "-"})
-            if not normalized:
-                continue
-            for key, value in self.KNOWN_CONTEXT_WINDOWS.items():
-                if key in normalized:
-                    return int(value)
         return 0
 
     def _calculate_suggestions(
@@ -395,18 +375,19 @@ class ModelDiscovery:
         )
 
     def _create_fallback_info(self) -> ModelInfo:
-        """创建 fallback 信息"""
-        max_model_len = 32768  # 默认值
-
-        if self._fallback_max_token_limit:
-            max_token_limit = self._fallback_max_token_limit
+        """创建 fallback 信息：仅使用调用方显式 set_fallback 的值，绝不发明窗口。"""
+        # Explicit operator/runtime fallback only. Missing stays 0 (fail closed).
+        max_model_len = 0
+        if self._fallback_max_token_limit and self._fallback_max_token_limit > 0:
+            # Caller provided a compression limit, not necessarily a full window.
+            max_token_limit = int(self._fallback_max_token_limit)
         else:
-            max_token_limit = int(max_model_len * 0.5)
+            max_token_limit = 0
 
-        if self._fallback_max_tokens:
-            suggested_max_tokens = self._fallback_max_tokens
+        if self._fallback_max_tokens and self._fallback_max_tokens > 0:
+            suggested_max_tokens = int(self._fallback_max_tokens)
         else:
-            suggested_max_tokens = min(int(max_model_len * 0.2), 4096)
+            suggested_max_tokens = 0
 
         return ModelInfo(
             model_name=self.model_name or "unknown",
@@ -414,9 +395,9 @@ class ModelDiscovery:
             suggested_max_tokens=suggested_max_tokens,
             provider="fallback",
             status=DiscoveryStatus.FAILED,
-            error_message="动态发现失败，使用 fallback 值",
+            error_message="动态发现失败：未获得有效 context_window（禁止默认兜底）",
             compression_thresholds=CompressionThresholds(
-                max_token_limit=max_token_limit,
+                max_token_limit=max_token_limit if max_token_limit > 0 else 0,
             ),
         )
 

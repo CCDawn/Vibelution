@@ -1670,6 +1670,7 @@ def _build_session_context_usage(conversation: dict[str, Any], messages: list[di
         "limitSource": str(limit_payload.get("source") or "").strip(),
         "limitModelId": str(limit_payload.get("modelId") or "").strip(),
         "limitAgentId": str(limit_payload.get("agentId") or "").strip(),
+        "limitError": str(limit_payload.get("error") or "").strip(),
         "estimatedTokens": estimated_tokens,
         "messageCount": len(list(messages or [])),
         "userMessageCount": user_count,

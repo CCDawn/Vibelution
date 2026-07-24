@@ -84,15 +84,15 @@ class TestModelDiscovery:
         result = discovery._extract_context_window(model)
         assert result == 32768
 
-    def test_extract_context_window_default(self):
-        """测试默认值"""
+    def test_extract_context_window_missing_fails_closed_to_zero(self):
+        """未知窗口不得静默 32768 / 静默查表。"""
         discovery = ModelDiscovery(api_base="http://localhost:8000/v1")
         model = {"id": "qwen-32b"}
 
         result = discovery._extract_context_window(model)
-        assert result == 32768
+        assert result == 0
 
-    def test_extract_context_window_uses_known_minimax_window_when_field_missing(self):
+    def test_extract_context_window_does_not_use_known_minimax_table(self):
         discovery = ModelDiscovery(
             api_base="https://api.minimaxi.com/v1",
             model_name="MiniMax-M2.7",
@@ -100,7 +100,7 @@ class TestModelDiscovery:
         model = {"id": "MiniMax-M2.7"}
 
         result = discovery._extract_context_window(model)
-        assert result == 204800
+        assert result == 0
 
     def test_parse_response_openai_format(self):
         """测试解析 OpenAI 格式响应"""
@@ -213,25 +213,29 @@ class TestModelDiscovery:
         assert "禁用" in result.error_message
 
     def test_create_fallback_info(self):
-        """测试创建 fallback 信息"""
+        """测试创建 fallback 信息（仅用显式 fallback，不发明窗口）"""
         discovery = ModelDiscovery(api_base="http://localhost:8000/v1")
         discovery.set_fallback(max_tokens=4096, max_token_limit=16000)
 
         result = discovery._create_fallback_info()
 
         assert result.status == DiscoveryStatus.FAILED
-        assert "fallback" in result.error_message
+        assert "禁止默认兜底" in (result.error_message or "")
         assert result.suggested_max_tokens == 4096
+        assert result.max_model_len == 0
+        assert result.compression_thresholds.max_token_limit == 16000
 
     def test_create_fallback_info_no_fallback(self):
-        """测试无 fallback 值时的默认行为"""
+        """无显式 fallback 时不得发明窗口/阈值。"""
         discovery = ModelDiscovery(api_base="http://localhost:8000/v1")
         # 不设置 fallback
 
         result = discovery._create_fallback_info()
 
         assert result.status == DiscoveryStatus.FAILED
-        assert result.suggested_max_tokens == 4096  # min(32768 * 0.2, 4096)
+        assert result.max_model_len == 0
+        assert result.suggested_max_tokens == 0
+        assert result.compression_thresholds.max_token_limit == 0
 
     def test_to_dict(self):
         """测试 ModelInfo.to_dict()"""
@@ -335,7 +339,7 @@ class TestAsyncDiscovery:
         mock_response = MagicMock()
         mock_response.json.return_value = {
             "data": [
-                {"id": "MiniMax-M2.7"}
+                {"id": "MiniMax-M2.7", "context_window": 204800}
             ]
         }
         mock_response.raise_for_status = MagicMock()
@@ -364,6 +368,7 @@ class TestAsyncDiscovery:
             result = await discovery.discover()
 
         assert captured["headers"]["Authorization"] == "Bearer demo-key"
+        assert result.status == DiscoveryStatus.SUCCESS
         assert result.max_model_len == 204800
 
     async def test_discover_all_endpoints_fail(self):

@@ -1502,18 +1502,19 @@ def _conversation_agent_dialogue_context_window(cfg: Any, conversation: dict[str
 
 
 def _conversation_agent_dialogue_context_window_payload(cfg: Any, conversation: dict[str, Any] | None) -> dict[str, Any]:
+    """Resolve max context from model_library / provider config only (no numeric invention)."""
     s = _service()
     agent = s._conversation_agent_for_context_limit(conversation)
     agent_id = str((agent or {}).get("agentId") or "").strip() if isinstance(agent, dict) else ""
     model_id = s.agent_dialogue_model_id(agent)
     if not model_id:
-        return {"limit": 0, "modelId": "", "agentId": agent_id}
+        return {"limit": 0, "modelId": "", "agentId": agent_id, "source": "missing"}
     try:
         entry = getattr(cfg.llm, "model_library", {}).get(model_id)
     except Exception:
         entry = None
     if not isinstance(entry, dict):
-        return {"limit": 0, "modelId": model_id, "agentId": agent_id}
+        return {"limit": 0, "modelId": model_id, "agentId": agent_id, "source": "missing"}
     explicit_limit = s._first_positive_int(
         entry.get("context_window"),
         entry.get("contextWindow"),
@@ -1521,19 +1522,28 @@ def _conversation_agent_dialogue_context_window_payload(cfg: Any, conversation: 
         entry.get("context_length"),
     )
     if explicit_limit:
-        return {"limit": explicit_limit, "modelId": model_id, "agentId": agent_id}
-    provider_id = str(entry.get("provider_id") or "").strip()
-    if not provider_id:
-        return {"limit": 0, "modelId": model_id, "agentId": agent_id}
-    try:
-        provider = cfg.llm.get_provider(provider_id)
         return {
-            "limit": int(getattr(provider, "context_window", 0) or 0),
+            "limit": explicit_limit,
             "modelId": model_id,
             "agentId": agent_id,
+            "source": "model_library",
         }
+    provider_id = str(entry.get("provider_id") or "").strip()
+    if not provider_id:
+        return {"limit": 0, "modelId": model_id, "agentId": agent_id, "source": "missing"}
+    try:
+        provider = cfg.llm.get_provider(provider_id)
+        provider_limit = int(getattr(provider, "context_window", 0) or 0)
+        if provider_limit > 0:
+            return {
+                "limit": provider_limit,
+                "modelId": model_id,
+                "agentId": agent_id,
+                "source": "provider_config",
+            }
+        return {"limit": 0, "modelId": model_id, "agentId": agent_id, "source": "missing"}
     except Exception:
-        return {"limit": 0, "modelId": model_id, "agentId": agent_id}
+        return {"limit": 0, "modelId": model_id, "agentId": agent_id, "source": "missing"}
 
 
 def _conversation_agent_for_context_limit(conversation: dict[str, Any] | None) -> dict[str, Any] | None:

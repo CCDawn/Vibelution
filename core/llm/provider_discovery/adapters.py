@@ -149,9 +149,7 @@ def _model(raw: Any, *, id_field: str = "id", strip_prefix: str = "") -> Discove
         upstream_id = upstream_id[len(strip_prefix) :]
     if not upstream_id:
         return None
-    limits = {}
-    if raw.get("context_window") is not None:
-        limits["context_window"] = raw["context_window"]
+    limits = _extract_context_limits(raw)
     capabilities = copy.deepcopy(raw.get("capabilities")) if isinstance(raw.get("capabilities"), dict) else {}
     return DiscoveredProviderModel(
         upstream_id=upstream_id,
@@ -159,6 +157,45 @@ def _model(raw: Any, *, id_field: str = "id", strip_prefix: str = "") -> Discove
         capabilities=capabilities,
         limits=limits,
     )
+
+
+def _positive_limit(value: Any) -> int | None:
+    try:
+        number = int(value)
+    except Exception:
+        return None
+    return number if number > 0 else None
+
+
+def _extract_context_limits(raw: dict[str, Any]) -> dict[str, Any]:
+    """Extract real context limits from provider payloads only (no silent catalog)."""
+    limits: dict[str, Any] = {}
+    for key in (
+        "context_window",
+        "contextWindow",
+        "max_model_len",
+        "context_length",
+        "max_position_embeddings",
+        "max_input_tokens",
+    ):
+        number = _positive_limit(raw.get(key))
+        if number is not None:
+            limits["context_window"] = number
+            break
+    # Nested vendor envelopes (OpenRouter-style architecture/top_provider, etc.)
+    if "context_window" not in limits:
+        for nested_key in ("architecture", "top_provider", "limits", "model_info"):
+            nested = raw.get(nested_key)
+            if not isinstance(nested, dict):
+                continue
+            for key in ("context_window", "contextWindow", "context_length", "max_model_len", "max_input_tokens"):
+                number = _positive_limit(nested.get(key))
+                if number is not None:
+                    limits["context_window"] = number
+                    break
+            if "context_window" in limits:
+                break
+    return limits
 
 
 def _candidate_can_fall_through(exc: Exception) -> bool:
