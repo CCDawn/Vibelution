@@ -20,7 +20,12 @@ type ChatWorkbenchState = {
 export const useChatWorkbenchStore = create<ChatWorkbenchState>((set) => ({
   activeSessionId: null,
   sessionWorkspaces: {},
-  setActiveSession: (activeSessionId) => set({ activeSessionId }),
+  setActiveSession: (activeSessionId) =>
+    set((state) => (
+      state.activeSessionId === activeSessionId
+        ? state
+        : { activeSessionId }
+    )),
   hydrateSession: (sessionId) =>
     set((state) => {
       const existing = state.sessionWorkspaces[sessionId];

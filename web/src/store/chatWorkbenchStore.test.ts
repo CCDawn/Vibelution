@@ -74,4 +74,14 @@ describe("chatWorkbenchStore", () => {
     expect(useChatWorkbenchStore.getState().activeSessionId).toBe("session-replacement");
     expect(useChatWorkbenchStore.getState().sessionWorkspaces).toEqual({});
   });
+
+  it("does not thrash subscribers when setActiveSession receives the same id", () => {
+    const store = useChatWorkbenchStore.getState();
+    store.setActiveSession("session-live");
+    const before = useChatWorkbenchStore.getState();
+    store.setActiveSession("session-live");
+    const after = useChatWorkbenchStore.getState();
+    expect(after).toBe(before);
+    expect(after.activeSessionId).toBe("session-live");
+  });
 });
