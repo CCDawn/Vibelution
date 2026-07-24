@@ -47,6 +47,13 @@ def source_collection_stage_card_projection(
     extra_counts: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     latest_task = latest_source_collection_stage_task(tasks)
+    has_verified_completed_task = any(
+        trim_text(task.get("status"), max_length=80).lower() == "completed"
+        and isinstance(task.get("completionGate"), dict)
+        and bool(task["completionGate"].get("passed"))
+        for task in tasks
+        if isinstance(task, dict)
+    )
     agent_status = trim_text(latest_task.get("status"), max_length=80).lower() if latest_task else "not_started"
     coverage_summary = source_collection_stage_task_coverage_summary(latest_task or {})
     coverage_missing = source_collection_count(coverage_summary.get("missing")) + source_collection_count(coverage_summary.get("invalid"))
@@ -75,6 +82,8 @@ def source_collection_stage_card_projection(
         card_status = "agent_running"
     elif task_interrupted:
         card_status = "agent_interrupted"
+    elif task_blocked and artifact_complete and has_verified_completed_task:
+        card_status = "closed_loop"
     elif task_blocked and artifact_ready:
         card_status = "artifact_ready_agent_blocked"
     elif task_blocked:
