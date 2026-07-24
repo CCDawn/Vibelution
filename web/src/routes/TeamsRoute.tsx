@@ -1,7 +1,7 @@
 import "../design/route-css/teams.tailwind.css";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Archive, ArrowLeft, Bot, CheckCircle2, Eye, Link2, MessageSquare, Play, Plus, RefreshCw, Save, Search, Send, Trash2, Unlink, Users } from "lucide-react";
+import { AlertTriangle, Archive, ArrowLeft, Bot, CheckCircle2, Eye, Link2, MessageSquare, Play, Plus, RefreshCw, Save, Search, Send, Settings2, Trash2, Unlink, Users } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
@@ -173,6 +173,7 @@ import {
   ExperimentContractV2,
   ExperimentContractValidation,
   ExperimentMethodCatalogPayload,
+  ExperimentMethodId,
   RuntimeSummary,
   Team,
   TeamCanvasNode,
@@ -1011,6 +1012,7 @@ export function TeamsRoute({
     forcedResearchWorkspaceView ?? requestedResearchWorkspaceView ?? "overview",
   );
   const [challengeTeamSurface, setChallengeTeamSurface] = useState<"workspace" | "progress">("workspace");
+  const [preferredExperimentMethod, setPreferredExperimentMethod] = useState<ExperimentMethodId | "">("");
   const [sourceCollectionDraft, setSourceCollectionDraft] = useState<SourceCollectionDraft>({
     title: "神经算法资料搜索批次",
     topic: "神经预测编码",
@@ -1192,6 +1194,9 @@ export function TeamsRoute({
     visibleTeamIds,
     fallbackTeamId: fallbackVisibleTeamId,
   });
+  useEffect(() => {
+    setPreferredExperimentMethod("");
+  }, [effectiveTeamId]);
   const teamDetailLoadMode = resolveTeamDetailLoadMode({
     sourceCollectionStandalone,
     researchWorkspaceView,
@@ -1354,7 +1359,12 @@ export function TeamsRoute({
         `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/experiments/methods`,
         { signal },
       ),
-    enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && researchWorkspaceView === "experiment" && !sourceCollectionStandalone),
+    enabled: Boolean(
+      effectiveTeamId
+      && researchWorkflowTeamSelected
+      && ["overview", "experiment"].includes(researchWorkspaceView)
+      && !sourceCollectionStandalone
+    ),
   });
   const researchLoopTemplatesQuery = useQuery({
     queryKey: researchLoopTemplatesQueryKey(effectiveTeamId || "none"),
@@ -3560,6 +3570,25 @@ export function TeamsRoute({
     const challengeProgramUnavailable = challengeProgramExpected
       && !challengeProgramProjection
       && !experimentPlanningStatusQuery.isPending;
+    const requestedExperimentMethod = searchParams.get("experimentMethod");
+    const requestedExperimentMethodIsValid = experimentMethodCatalogQuery.data?.methods.some(
+      (method) => method.methodId === requestedExperimentMethod,
+    );
+    const selectedExperimentMethod = preferredExperimentMethod
+      || (requestedExperimentMethodIsValid ? requestedExperimentMethod as ExperimentMethodId : "")
+      || experimentPlanningStatus?.activePlan?.experimentContract?.experimentMethod
+      || experimentMethodCatalogQuery.data?.methods[0]?.methodId
+      || "model_training_inference";
+    const selectedExperimentMethodDescriptor = experimentMethodCatalogQuery.data?.methods.find(
+      (method) => method.methodId === selectedExperimentMethod,
+    );
+    const selectedExperimentResearchMode =
+      experimentPlanningStatus?.activePlan?.experimentContract?.researchMode ?? "full_research_loop";
+    const selectedExperimentAdapter = selectedExperimentMethodDescriptor?.adapterAvailability[selectedExperimentResearchMode];
+    const selectedExperimentMethodRoute = `${researchWorkspaceStageRoute(
+      selectedTeam?.teamId || RESEARCH_TEAM_ID,
+      "experiment",
+    )}&experimentMethod=${encodeURIComponent(selectedExperimentMethod)}`;
     const challengeTrialReviewRequiredCount = challengeProgramProjection?.stage1ComplianceReadiness.trialRun.outcomeCounts.review_required || 0;
     const challengeTrialApprovedCount = challengeProgramProjection?.stage1ComplianceReadiness.trialRun.outcomeCounts.approved || 0;
     const challengeStageLabel = (stageType: ResearchStageType) => {
@@ -3913,6 +3942,43 @@ export function TeamsRoute({
                   </div>
                 </div>
                 <p>{stageHint(stageType, active, latestRound)}</p>
+                {!challengeProgramProjection && stageType === "experiment" ? (
+                  <div className={styles.researchExperimentMethodQuickSelect}>
+                    <label>
+                      <span>{lang === "zh" ? "实验方式" : "Experiment method"}</span>
+                      <VNativeSelect
+                        value={selectedExperimentMethod}
+                        onChange={(event) => setPreferredExperimentMethod(event.target.value as ExperimentMethodId)}
+                        disabled={experimentMethodCatalogQuery.isFetching || !experimentMethodCatalogQuery.data}
+                        aria-label={lang === "zh" ? "选择实验方式" : "Select experiment method"}
+                      >
+                        {experimentMethodCatalogQuery.data?.methods.map((method) => (
+                          <option key={method.methodId} value={method.methodId}>
+                            {lang === "zh" ? method.labelZh : method.labelEn}
+                          </option>
+                        ))}
+                      </VNativeSelect>
+                    </label>
+                    <div>
+                      <span>
+                        {selectedExperimentMethodDescriptor
+                          ? `${selectedExperimentMethodDescriptor.requiredConfigFields.length} ${lang === "zh" ? "项配置" : "fields"}`
+                          : (experimentMethodCatalogQuery.isFetching
+                            ? (lang === "zh" ? "读取方式中" : "Loading methods")
+                            : (lang === "zh" ? "方式目录不可用" : "Method catalog unavailable"))}
+                      </span>
+                      <span className={selectedExperimentAdapter?.resolvedAdapterId ? styles.researchExperimentMethodReady : styles.researchExperimentMethodPending}>
+                        {selectedExperimentAdapter?.resolvedAdapterId
+                          ? (lang === "zh" ? "执行器可用" : "Adapter ready")
+                          : (lang === "zh" ? "需配置执行器" : "Adapter setup required")}
+                      </span>
+                      <Link to={selectedExperimentMethodRoute}>
+                        <Settings2 size={13} />
+                        {lang === "zh" ? "配置方法" : "Configure"}
+                      </Link>
+                    </div>
+                  </div>
+                ) : null}
                 {challengeProgramProjection ? (
                   <div className={styles.researchStageCardMetrics}>
                     {stageType === "knowledge_collection" ? (
@@ -6352,6 +6418,13 @@ export function TeamsRoute({
           lang={lang}
           catalog={experimentMethodCatalogQuery.data}
           activeContract={activeExperimentContract}
+          preferredExperimentMethod={
+            experimentMethodCatalogQuery.data?.methods.some(
+              (method) => method.methodId === searchParams.get("experimentMethod"),
+            )
+              ? searchParams.get("experimentMethod") as ExperimentMethodId
+              : (preferredExperimentMethod || undefined)
+          }
           activePlanStatus={activePlan?.status ?? ""}
           fallbackResearchQuestion={
             activePlan?.goal

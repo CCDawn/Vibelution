@@ -398,6 +398,12 @@ const styles: Record<string, string> = {
     "!border-[color:color-mix(in_srgb,var(--accent-cool)_34%,var(--vui-border-subtle))] !bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-panel))] !text-[var(--fg-primary)]",
   researchStageGrid:
     "researchStageGrid min-w-0 grid items-stretch gap-3 grid-cols-[repeat(auto-fit,minmax(280px,1fr))]",
+  researchExperimentMethodQuickSelect:
+    "researchExperimentMethodQuickSelect min-w-0 grid gap-2 rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--accent-cool)_24%,var(--vui-border-subtle))] bg-[color:color-mix(in_srgb,var(--accent-cool)_5%,var(--vui-surface-panel))] p-2 [&>label]:grid [&>label]:min-w-0 [&>label]:gap-1 [&>label>span]:text-[var(--vui-font-xs)] [&>label>span]:font-semibold [&>label>span]:text-[var(--fg-secondary)] [&_select]:w-full [&>div]:flex [&>div]:min-w-0 [&>div]:flex-wrap [&>div]:items-center [&>div]:gap-2 [&>div>span]:text-[var(--vui-font-xs)] [&>div>a]:ml-auto [&>div>a]:inline-flex [&>div>a]:min-h-7 [&>div>a]:items-center [&>div>a]:gap-1 [&>div>a]:rounded-[var(--radius-control)] [&>div>a]:border [&>div>a]:border-[var(--vui-border-subtle)] [&>div>a]:px-2 [&>div>a]:text-[var(--vui-font-xs)] [&>div>a]:font-semibold [&>div>a]:text-[var(--fg-primary)]",
+  researchExperimentMethodReady:
+    "text-[var(--state-success)]",
+  researchExperimentMethodPending:
+    "text-[var(--state-warning)]",
   researchStageHeroPanel: `researchStageHeroPanel min-w-0 ${vuiFlatPanelClass} p-2`,
   researchStageHeroStats:
     "researchStageHeroStats min-w-0 grid gap-2 !grid grid-cols-[repeat(3,minmax(0,1fr))] gap-2",
