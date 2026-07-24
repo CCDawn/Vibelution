@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Conversation Tool Activity Preview</title>
+    <link rel="stylesheet" href="./src/design/tokens.css" />
+    <link rel="stylesheet" href="./src/design/conversation-tool-activity-preview.css" />
+  </head>
+  <body>
+    <main class="preview-shell">
+      <header class="preview-toolbar" aria-label="预览控制">
+        <div>
+          <p class="preview-eyebrow">Vibelution · isolated preview</p>
+          <h1>工具活动时间线</h1>
+          <p>参考 Codex 的渐进披露：先看当前动作，需要时再展开过程与技术细节。</p>
+        </div>
+        <div class="preview-controls">
+          <div class="segmented-control" role="group" aria-label="切换运行状态">
+            <button class="is-selected" type="button" data-state-control="running" aria-pressed="true">运行中</button>
+            <button type="button" data-state-control="completed" aria-pressed="false">已完成</button>
+            <button type="button" data-state-control="failed" aria-pressed="false">失败</button>
+          </div>
+          <button class="theme-toggle" type="button" data-theme-toggle aria-label="切换深浅主题">深色</button>
+        </div>
+      </header>
+
+      <section class="preview-stage" aria-label="对话工具活动预览">
+        <article class="conversation-turn">
+          <header class="agent-heading">
+            <span class="agent-avatar" aria-hidden="true">资</span>
+            <span class="agent-name">资料寻找</span>
+            <time datetime="2026-07-24T23:55:00+08:00">07/24 23:55</time>
+          </header>
+
+          <div class="activity-region" data-preview-state="running">
+            <button
+              class="activity-summary"
+              type="button"
+              aria-expanded="true"
+              aria-controls="activity-details"
+              data-activity-toggle
+            >
+              <span class="status-icon status-icon--running" data-summary-icon aria-hidden="true"></span>
+              <span class="activity-summary__copy">
+                <span class="activity-summary__title" data-summary-title>正在搜索资料</span>
+                <span class="activity-summary__meta" data-summary-meta>已完成 2/3 个步骤 · 13s</span>
+              </span>
+              <svg class="activity-chevron" viewBox="0 0 16 16" aria-hidden="true">
+                <path d="m4 6 4 4 4-4" />
+              </svg>
+            </button>
+
+            <div class="activity-details" id="activity-details" data-activity-details>
+              <ol class="activity-list" aria-label="工具执行步骤">
+                <li class="activity-step" data-step="context">
+                  <span class="step-rail" aria-hidden="true">
+                    <span class="status-icon status-icon--completed"></span>
+                  </span>
+                  <span class="step-content">
+                    <span class="step-title">读取资料上下文</span>
+                    <span class="step-description">已载入研究目标与约束</span>
+                  </span>
+                  <span class="step-time">0.1s</span>
+                </li>
+                <li class="activity-step" data-step="search">
+                  <span class="step-rail" aria-hidden="true">
+                    <span class="status-icon status-icon--completed" data-search-icon></span>
+                  </span>
+                  <span class="step-content">
+                    <span class="step-title" data-search-title>搜索 4 个查询</span>
+                    <span class="step-description" data-search-description>官方文档、项目状态与相关工作流</span>
+                  </span>
+                  <span class="step-time" data-search-time>13s</span>
+                </li>
+                <li class="activity-step" data-step="synthesis">
+                  <span class="step-rail step-rail--last" aria-hidden="true">
+                    <span class="status-icon status-icon--running" data-synthesis-icon></span>
+                  </span>
+                  <span class="step-content">
+                    <span class="step-title" data-synthesis-title>正在整理搜索结果</span>
+                    <span class="step-description" data-synthesis-description>归并来源，准备生成回答</span>
+                  </span>
+                  <span class="step-time" data-synthesis-time>运行中</span>
+                </li>
+              </ol>
+
+              <details class="technical-details">
+                <summary>技术详情</summary>
+                <dl>
+                  <div>
+                    <dt>工具</dt>
+                    <dd>batch_web_search_tool</dd>
+                  </div>
+                  <div>
+                    <dt>调用</dt>
+                    <dd>第 3 次</dd>
+                  </div>
+                  <div>
+                    <dt>Agent</dt>
+                    <dd>agent-20260722-220511-172658</dd>
+                  </div>
+                </dl>
+              </details>
+
+              <div class="failure-action" data-failure-action hidden>
+                <p>已保留完成的上下文，可从失败步骤继续。</p>
+                <button type="button">重试搜索</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="answer-placeholder" aria-hidden="true">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+        </article>
+      </section>
+
+      <footer class="preview-notes">
+        <span>桌面内容宽度 ≤ 760px</span>
+        <span>键盘可展开</span>
+        <span>移动端元信息自动换行</span>
+        <span>原始参数默认隐藏</span>
+      </footer>
+    </main>
+    <script src="./src/design/conversation-tool-activity-preview.js"></script>
+  </body>
+</html>
