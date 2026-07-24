@@ -1,3 +1,11 @@
+import { vuiOpaqueRowClass } from "../design/vuiSurfaceRecipes";
+
+const rowDescendant = vuiOpaqueRowClass
+  .split(/\s+/)
+  .filter(Boolean)
+  .map((token) => `[&_span]:${token}`)
+  .join(" ");
+
 const styles = {
   sourceCollectionExtractionRecoveryActions:
     "sourceCollectionExtractionRecoveryActions min-w-0 flex flex-wrap items-center justify-end gap-1.5 self-start [&_[data-vui=native-button]]:w-fit [&_[data-vui=native-button]]:max-w-full",
@@ -10,7 +18,7 @@ const styles = {
   sourceCollectionExtractionRecoveryPanelProgressable:
     "sourceCollectionExtractionRecoveryPanelProgressable border-[color-mix(in_srgb,var(--state-warning)_38%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-warning)_8%,var(--source-workbench-card))] [&_svg]:text-[var(--state-warning)]",
   sourceCollectionExtractionRecoveryStats:
-    "sourceCollectionExtractionRecoveryStats min-w-0 grid gap-1.5 grid-cols-[repeat(auto-fit,minmax(7rem,1fr))] [&_span]:grid [&_span]:min-w-0 [&_span]:gap-0.5 [&_span]:rounded-[var(--radius-control)] [&_span]:border [&_span]:border-[var(--vui-border-subtle)] [&_span]:bg-[var(--vui-surface-row)] [&_span]:px-2 [&_span]:py-1 [&_span]:[font-size:var(--vui-font-xs)] [&_strong]:text-[var(--fg-primary)]",
+    `sourceCollectionExtractionRecoveryStats min-w-0 grid gap-1.5 grid-cols-[repeat(auto-fit,minmax(7rem,1fr))] [&_span]:grid [&_span]:min-w-0 [&_span]:gap-0.5 ${rowDescendant} [&_span]:px-2 [&_span]:py-1 [&_span]:[font-size:var(--vui-font-xs)] [&_strong]:text-[var(--fg-primary)]`,
   sourceCollectionResultsHeader:
     "sourceCollectionResultsHeader min-w-0 flex flex-wrap items-center gap-1.5",
   sourceCollectionRunBadge:

@@ -1,5 +1,6 @@
 import {
   vuiOpaqueRowClass,
+  vuiWorkspaceFillClass,
 } from "../design/vuiSurfaceRecipes";
 
 const routeClass = "grid h-full min-h-0 min-w-0 grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden";
@@ -8,7 +9,7 @@ const headerActionsClass = "inline-flex min-w-0 items-center justify-end gap-1.5
 const controlButtonClass =
   "inline-flex min-h-[26px] w-fit max-w-full items-center justify-center gap-1.5 whitespace-nowrap rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-soft)_76%,transparent)] bg-[color-mix(in_srgb,var(--vui-control-muted)_72%,transparent)] px-2 py-[3px] [font-size:var(--vui-font-xs)] text-vui-fg-secondary hover:border-[color-mix(in_srgb,var(--border-strong)_78%,transparent)] hover:bg-[var(--vui-control-muted-hover)] hover:text-vui-fg-primary disabled:opacity-55";
 const fieldSurfaceClass =
-  "rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-soft)_76%,transparent)] !bg-[var(--vui-surface-workspace)]";
+  `rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-soft)_76%,transparent)] !${vuiWorkspaceFillClass}`;
 const rowButtonSurfaceClass =
   `block !h-auto w-full ${vuiOpaqueRowClass} px-[9px] py-2 text-left text-vui-fg-primary hover:border-[color-mix(in_srgb,var(--border-strong)_78%,transparent)] hover:!bg-[var(--vui-surface-row)]`;
 const pillSurfaceClass =

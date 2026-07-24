@@ -1,3 +1,7 @@
+import {
+  vuiWorkspaceFillClass,
+} from "../design/vuiSurfaceRecipes";
+
 const styles = {
   // Full overview column: metrics → queues → dual lists, no section paint-through.
   overviewStack:
@@ -11,8 +15,7 @@ const styles = {
     "reviewQueuePanel relative z-0 grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] gap-1.5 overflow-hidden",
   reviewQueueScroll:
     "reviewQueueScroll min-h-0 min-w-0 overflow-y-auto overflow-x-hidden overscroll-contain pr-0.5 [scrollbar-gutter:stable]",
-  projectMemorySlot:
-    "projectMemorySlot relative z-[1] min-h-0 min-w-0 shrink-0 overflow-hidden bg-[var(--vui-surface-workspace)]",
+  projectMemorySlot: `projectMemorySlot relative z-[1] min-h-0 min-w-0 shrink-0 overflow-hidden ${vuiWorkspaceFillClass}`,
 } as const;
 
 export default styles;

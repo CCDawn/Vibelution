@@ -1,3 +1,5 @@
+import { vuiOpaqueRowClass } from "../design/vuiSurfaceRecipes";
+
 const styles = {
   empty:
     "empty min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
@@ -6,7 +8,7 @@ const styles = {
   sourceCollectionCandidateSkeletonList:
     "sourceCollectionCandidateSkeletonList min-w-0 grid content-start gap-1.5",
   sourceCollectionCandidateSkeletonRow:
-    "sourceCollectionCandidateSkeletonRow min-h-[56px] rounded-[var(--radius-control)] border border-[color:var(--border-subtle)] bg-[color:var(--vui-surface-row)] p-2",
+    `sourceCollectionCandidateSkeletonRow min-h-[56px] ${vuiOpaqueRowClass} p-2`,
   sourceCollectionCandidateSkeletonTitle:
     "sourceCollectionCandidateSkeletonTitle block h-3 w-2/3 rounded-[var(--radius-control)] bg-[color:var(--border-soft)]",
   sourceCollectionCandidateSkeletonMeta:

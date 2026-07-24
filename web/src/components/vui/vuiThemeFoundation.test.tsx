@@ -188,8 +188,13 @@ describe("VUI dual-theme foundation", () => {
     expect(recipesSource).toContain("export const vuiOpaqueRowClass");
     expect(recipesSource).toContain("export const vuiDenseRowClass");
     expect(recipesSource).toContain("export const vuiGlassPanelClass");
+    expect(recipesSource).toContain("export const vuiWorkspaceFillClass");
+    expect(recipesSource).toContain("export const vuiRailFillClass");
+    expect(recipesSource).toContain("export const vuiToolbarFillClass");
+    expect(recipesSource).toContain("export const vuiInsetFillClass");
     expect(recipesSource).toContain("!bg-[var(--vui-surface-panel)]");
     expect(recipesSource).toContain("!bg-[var(--vui-surface-row)]");
+    expect(recipesSource).toContain("!bg-[var(--vui-surface-workspace)]");
     expect(recipesSource).toContain("hover:bg-[var(--vui-surface-row-hover)]");
     expect(recipesSource).toContain("shadow-[var(--vui-elevation-1)]");
     expect(recipesSource).toContain("bg-[var(--vui-surface-glass)]");

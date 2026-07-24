@@ -46,7 +46,7 @@ const styles = {
   chatTranscript: "grid content-start gap-7 overflow-hidden px-[clamp(18px,7vw,100px)] py-7",
   chatMessage: "grid max-w-[720px] grid-cols-[28px_minmax(0,1fr)] items-start gap-3",
   chatMessageCopy: "grid min-w-0 gap-2 pt-1",
-  chatComposer: "mx-auto mb-3 grid w-[min(calc(100%_-_28px),900px)] gap-2 rounded-[var(--radius-panel)] border border-vui-border-subtle bg-vui-surface-panel p-3 shadow-[var(--vui-shadow-hairline)]",
+  chatComposer: `mx-auto mb-3 grid w-[min(calc(100%_-_28px),900px)] gap-2 ${vuiFlatPanelClass} p-3 shadow-[var(--vui-shadow-hairline)]`,
   chatComposerInput: "block h-10 animate-pulse rounded-[var(--radius-control)] bg-[color-mix(in_srgb,var(--accent-cool)_12%,var(--vui-surface-row))] motion-reduce:animate-none",
   chatComposerToolbar: "flex items-center justify-between [&_span]:block [&_span]:h-6 [&_span]:w-20 [&_span]:animate-pulse [&_span]:rounded-full [&_span]:bg-[color-mix(in_srgb,var(--accent-cool)_16%,var(--vui-border-subtle))] motion-reduce:[&_span]:animate-none",
   navigationPanel: [

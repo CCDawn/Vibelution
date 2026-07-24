@@ -31,3 +31,15 @@ export const vuiDenseRowClass = `${vuiOpaqueRowClass} ${vuiOpaqueRowHoverClass}`
  */
 export const vuiGlassPanelClass =
   "rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)]";
+
+/** Workspace fill for page bodies, code panes, and shell canvases. */
+export const vuiWorkspaceFillClass = "!bg-[var(--vui-surface-workspace)]";
+
+/** Primary chrome rail fill (left/right shell columns). */
+export const vuiRailFillClass = "!bg-[var(--vui-surface-rail)]";
+
+/** Toolbar / module-bar strip fill. */
+export const vuiToolbarFillClass = "!bg-[var(--vui-surface-toolbar)]";
+
+/** Inset region fill (inspector wells, nested shell pockets). */
+export const vuiInsetFillClass = "!bg-[var(--vui-surface-inset)]";

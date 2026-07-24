@@ -1,4 +1,9 @@
-const worktreeReviewSurfaceClass = "grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-2 overflow-hidden rounded-[var(--radius-panel)] border border-vui-border-subtle bg-vui-surface-panel/72 px-3 pb-3 pt-2.5 text-[0.9rem] shadow-none";
+import {
+  vuiFlatPanelClass,
+  vuiOpaqueRowClass,
+} from "../design/vuiSurfaceRecipes";
+
+const worktreeReviewSurfaceClass = `grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-2 overflow-hidden ${vuiFlatPanelClass} px-3 pb-3 pt-2.5 text-[0.9rem] shadow-none`;
 const surfaceHeaderCompactClass = "flex min-w-0 items-center justify-between gap-2.5";
 const headerCopyClass = "min-w-0";
 const eyebrowClass = "m-0 mb-0.5 [font-size:var(--vui-font-xs)] uppercase tracking-[0.08em] text-[var(--accent-warm-2)]";
@@ -9,13 +14,13 @@ const noticeTextClass = "m-0 break-words [font-size:var(--vui-font-xs)] leading-
 const gateNoticeTextClass = "m-0 overflow-hidden break-words [font-size:var(--vui-font-xs)] leading-[1.35] text-vui-fg-secondary [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]";
 const errorTextClass = "m-0 break-words [font-size:var(--vui-font-xs)] leading-[1.45] text-[var(--state-error)]";
 const controlFooterClass = "grid min-h-0 gap-[7px] overflow-auto pr-0.5";
-const closedLoopStatusClass = "grid min-h-[30px] min-w-0 grid-cols-[auto_minmax(56px,auto)_minmax(0,1fr)] items-center gap-[7px] rounded-[7px] border border-vui-border-subtle bg-vui-surface-row px-2 py-1 [font-size:var(--vui-font-xs)] max-[640px]:grid-cols-1";
+const closedLoopStatusClass = `grid min-h-[30px] min-w-0 grid-cols-[auto_minmax(56px,auto)_minmax(0,1fr)] items-center gap-[7px] ${vuiOpaqueRowClass} px-2 py-1 [font-size:var(--vui-font-xs)] max-[640px]:grid-cols-1`;
 const closedLoopStrongClass = "min-w-0 truncate";
 const closedLoopMessageClass = "min-w-0 truncate [font-size:var(--vui-font-xs)] text-vui-fg-secondary";
 const worktreeRunPickerClass = "grid min-w-0 gap-[5px]";
 const worktreeRunPickerHeaderClass = "flex min-h-5 items-center justify-between gap-2 [font-size:var(--vui-font-xs)] text-vui-fg-tertiary";
 const worktreeRunListClass = "grid max-h-[clamp(92px,16vh,148px)] gap-1 overflow-auto";
-const worktreeRunItemClass = "grid min-h-8 min-w-0 grid-cols-[minmax(0,1.25fr)_minmax(78px,0.55fr)_minmax(0,1fr)] items-center gap-2 rounded-[7px] border border-vui-border-subtle bg-vui-surface-row px-2 py-1 text-left [font-size:var(--vui-font-xs)] text-vui-fg-primary max-[640px]:grid-cols-1";
+const worktreeRunItemClass = `grid min-h-8 min-w-0 grid-cols-[minmax(0,1.25fr)_minmax(78px,0.55fr)_minmax(0,1fr)] items-center gap-2 ${vuiOpaqueRowClass} px-2 py-1 text-left [font-size:var(--vui-font-xs)] text-vui-fg-primary max-[640px]:grid-cols-1`;
 const worktreeRunItemActiveClass = "border-[color-mix(in_srgb,var(--accent-cool)_34%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]";
 const worktreeRunItemTopClass = "contents";
 const worktreeRunIdClass = "min-w-0 truncate font-[var(--font-mono)] [font-size:var(--vui-font-xs)] font-semibold text-vui-fg-primary";

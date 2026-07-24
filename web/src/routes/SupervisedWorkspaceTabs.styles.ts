@@ -1,7 +1,9 @@
+import { vuiToolbarFillClass } from "../design/vuiSurfaceRecipes";
+
 const flowTabsClass = [
   // Always a single horizontal row of 4 steps — never collapse into a tall vertical stack.
   "inline-grid w-fit max-w-full shrink-0 grid-flow-col grid-cols-[repeat(4,minmax(112px,168px))] gap-1 rounded-md border border-vui-border-soft",
-  "bg-vui-surface-toolbar p-[2px]",
+  `${vuiToolbarFillClass} p-[2px]`,
   "max-[1120px]:grid-cols-[repeat(4,minmax(100px,150px))]",
   "max-[760px]:grid-cols-[repeat(4,minmax(72px,1fr))] max-[760px]:w-full max-[760px]:max-w-full",
 ].join(" ");

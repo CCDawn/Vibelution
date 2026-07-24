@@ -1,13 +1,14 @@
 import {
+  vuiFlatPanelClass,
   vuiOpaqueRowClass,
 } from "../design/vuiSurfaceRecipes";
 
 const reviewPanelSurface =
-  "rounded-[var(--radius-panel)] border border-vui-border-subtle bg-vui-surface-panel/72 shadow-none";
+  ` shadow-none`;
 const reviewRowSurface =
   "rounded-[var(--radius-control)] border border-vui-border-subtle bg-vui-surface-row";
 const reviewRowSurfaceSoft =
-  "rounded-[var(--radius-control)] border border-vui-border-subtle !bg-[var(--vui-surface-row)]";
+  `${vuiOpaqueRowClass}`;
 const reviewControlSurface =
   "rounded-[var(--radius-control)] border border-vui-border-subtle bg-vui-control-muted transition hover:border-[color-mix(in_srgb,var(--accent-warm)_28%,transparent)] hover:bg-vui-control-muted-hover";
 const reviewControlButton =

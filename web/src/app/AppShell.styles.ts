@@ -9,6 +9,8 @@
 import {
   vuiGlassPanelClass,
   vuiOpaqueRowClass,
+  vuiToolbarFillClass,
+  vuiWorkspaceFillClass,
 } from "../design/vuiSurfaceRecipes";
 
 const styles = {
@@ -99,8 +101,7 @@ const styles = {
     "vui-app-appshell lifecycleProofName min-w-0 [font-size:var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
   mainArea:
     "vui-app-appshell mainArea min-w-0",
-  mobileNav:
-    "vui-app-appshell mobileNav hidden max-[639px]:flex min-w-0 items-center rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-toolbar)] px-2 py-1",
+  mobileNav: `vui-app-appshell mobileNav hidden max-[639px]:flex min-w-0 items-center rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] ${vuiToolbarFillClass} px-2 py-1`,
   mobileNavLabel:
     "vui-app-appshell mobileNavLabel min-w-0 truncate [font-size:var(--vui-font-sm)] font-semibold text-[var(--fg-primary)]",
   mobileRouteLink:
@@ -109,8 +110,7 @@ const styles = {
     "vui-app-appshell mobileRouteLinkActive bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] text-[var(--accent-cool)]",
   mobileRouteMenu:
     "vui-app-appshell mobileRouteMenu hidden max-[639px]:grid absolute right-0 top-[calc(100%+4px)] z-[90] w-[min(88vw,320px)] gap-1 rounded-[var(--vui-radius-panel-soft)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2 shadow-[var(--vui-elevation-panel)]",
-  nav:
-    "vui-app-appshell nav min-w-0 max-[639px]:hidden rounded-[var(--vui-radius-panel-soft)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-toolbar)] p-[3px] shadow-[var(--vui-elevation-panel)]",
+  nav: `vui-app-appshell nav min-w-0 max-[639px]:hidden rounded-[var(--vui-radius-panel-soft)] border border-[var(--vui-border-subtle)] ${vuiToolbarFillClass} p-[3px] shadow-[var(--vui-elevation-panel)]`,
   navLink:
     "vui-app-appshell navLink relative z-[2] inline-flex min-h-[30px] min-w-0 cursor-pointer items-center justify-center rounded-[var(--radius-control)] px-2.5 [font-size:var(--vui-font-sm)] font-semibold text-[var(--fg-primary)] no-underline select-none",
   navLinkActive:
@@ -119,8 +119,7 @@ const styles = {
     "vui-app-appshell navLinkDisabled relative inline-flex min-h-[30px] min-w-0 cursor-not-allowed items-center justify-center rounded-[var(--radius-control)] px-2.5 [font-size:var(--vui-font-sm)] font-semibold text-[var(--fg-tertiary)] opacity-55 select-none pointer-events-none",
   returnButton:
     "vui-app-appshell returnButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
-  shell:
-    "vui-app-appshell shell min-w-0 grid h-full min-h-0 content-start overflow-hidden bg-[var(--vui-surface-workspace)] text-[var(--fg-primary)]",
+  shell: `vui-app-appshell shell min-w-0 grid h-full min-h-0 content-start overflow-hidden ${vuiWorkspaceFillClass} text-[var(--fg-primary)]`,
   shutdownCancelButton:
     "vui-app-appshell shutdownCancelButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
   shutdownCopy:
@@ -211,8 +210,7 @@ const styles = {
     "vui-app-appshell status_warn min-w-0",
   status_warning:
     "vui-app-appshell status_warning min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
-  topActions:
-    "vui-app-appshell topActions min-w-0 flex flex-nowrap items-center gap-1 rounded-[var(--vui-radius-panel-soft)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-toolbar)] p-1 shadow-[var(--vui-elevation-panel)]",
+  topActions: `vui-app-appshell topActions min-w-0 flex flex-nowrap items-center gap-1 rounded-[var(--vui-radius-panel-soft)] border border-[var(--vui-border-subtle)] ${vuiToolbarFillClass} p-1 shadow-[var(--vui-elevation-panel)]`,
   // Display/layout + Electron drag policy for topBar live in workbench-shell.css.
   // Do not add Tailwind flex/grid or pointer-events here — they fight the fixed 3-column grid / hit targets.
   topBar:
