@@ -959,6 +959,16 @@ def _source_collection_stage_cards_projection(
         stage_task_groups,
         s._source_collection_completion_superseded_stage_cutoffs(normalized_team_id, normalized_run_id),
     )
+    finding_has_verified_completed_task = any(
+        s._trim_text(task.get("status"), max_length=80).lower() == "completed"
+        and isinstance(task.get("completionGate"), dict)
+        and bool(task["completionGate"].get("passed"))
+        for task in stage_task_groups.get("finding", ([], []))[0]
+        if isinstance(task, dict)
+    )
+    finding_effective_open_assignment_count = (
+        0 if finding_has_verified_completed_task else finding_open_assignment_count
+    )
     cards = [
         s._source_collection_stage_card_projection(
             "finding",
@@ -966,7 +976,7 @@ def _source_collection_stage_cards_projection(
             artifact_count=active_record_count,
             input_count=s._source_collection_count(run_summary.get("assignmentCount")),
             output_count=active_record_count,
-            pending_count=finding_open_assignment_count,
+            pending_count=finding_effective_open_assignment_count,
             artifact_status="ready" if active_record_count > 0 else "empty",
             artifact_summary=f"{active_record_count} active DataRecord records; {excluded_source_count} excluded; {finding_open_assignment_count} search assignments remain.",
             historical_task_count=len(stage_task_groups.get("finding", ([], []))[1]),

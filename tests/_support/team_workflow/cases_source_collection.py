@@ -2252,6 +2252,77 @@ def test_source_collection_stage_card_projection_closes_finding_with_downstream_
     assert finding_card["counts"]["downstreamOpenAssignment"] == 1
     assert "0 search assignments remain" in finding_card["artifactSummary"]
 
+def test_source_collection_stage_card_projection_ignores_stale_finder_assignment_after_verified_completion(
+    tmp_path,
+    monkeypatch,
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    finder = agent_directory_service.create_agent_instance(display_name="Source finder")
+    team = team_service.create_team(
+        name="Research team",
+        members=[
+            {
+                "agentId": finder["agentId"],
+                "role": "source_finder",
+                "agentName": "Source finder",
+            }
+        ],
+    )
+    run = data_processing_service.create_processing_run(
+        title="Knowledge collection current round",
+        scope={"teamId": team["teamId"], "workflowStage": "knowledge_collection"},
+        metadata={"startedFrom": "team_workflow_source_collection"},
+    )
+    completed_assignment = data_processing_service.create_collection_assignment(
+        run["runId"],
+        {"agentRole": "source_finder", "agentId": finder["agentId"]},
+    )
+    data_processing_service.record_collection_output(
+        run["runId"],
+        completed_assignment["assignmentId"],
+        {
+            "status": "completed",
+            "records": [
+                {
+                    "sourceType": "paper",
+                    "sourceRef": "https://doi.org/10.0000/verified-finding",
+                    "title": "Verified finding",
+                }
+            ],
+        },
+    )
+    data_processing_service.create_collection_assignment(
+        run["runId"],
+        {"agentRole": "source_finder", "agentId": finder["agentId"]},
+    )
+    team_workflow_orchestration_service._upsert_source_collection_stage_session_task(
+        team["teamId"],
+        run["runId"],
+        {
+            "taskId": "stagetask-finder-verified",
+            "runId": run["runId"],
+            "stageId": "finding",
+            "agentId": finder["agentId"],
+            "agentRole": "source_finder",
+            "sessionId": "session-finder-verified",
+            "status": "completed",
+            "summary": "The current finding checklist and artifact gate passed.",
+            "completionGate": {"passed": True},
+            "createdAt": "2026-07-24T12:00:00+00:00",
+            "updatedAt": "2026-07-24T12:00:00+00:00",
+        },
+    )
+
+    projection = team_workflow_orchestration_service._source_collection_stage_cards_projection(
+        team["teamId"],
+        run["runId"],
+    )
+
+    finding_card = next(item for item in projection["cards"] if item["stageId"] == "finding")
+    assert finding_card["status"] == "closed_loop"
+    assert finding_card["counts"]["pending"] == 0
+    assert finding_card["counts"]["searchOpenAssignment"] == 1
+
 def test_source_collection_stage_card_projection_suppresses_interrupted_task_after_one_click_completion(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     isolated_store = WorkRunStore(root=tmp_path / "completion-work-runs")
@@ -6862,6 +6933,40 @@ def test_source_collection_stage_card_projection_keeps_ready_artifact_when_lates
     assert card["latestTask"]["status"] == "blocked"
     assert "Latest Agent task is blocked or failed." not in card["blockingReasons"]
     assert "Ready artifact exists, but the latest Agent task is blocked or failed." in card["blockingReasons"]
+
+def test_source_collection_stage_card_projection_preserves_verified_success_after_blocked_retry():
+    card = team_workflow_orchestration_service._source_collection_stage_card_projection(
+        "ingestion",
+        [
+            {
+                "taskId": "task-ingestion-success",
+                "stageId": "ingestion",
+                "status": "completed",
+                "summary": "The approved knowledge package was formally synchronized.",
+                "updatedAt": "2026-07-24T12:00:00Z",
+                "completionGate": {"passed": True},
+            },
+            {
+                "taskId": "task-ingestion-duplicate-retry",
+                "stageId": "ingestion",
+                "status": "blocked",
+                "summary": "A duplicate retry did not locate the compact action packet.",
+                "updatedAt": "2026-07-24T12:03:00Z",
+                "completionGate": {"passed": False},
+            },
+        ],
+        artifact_count=1,
+        input_count=6,
+        output_count=1,
+        pending_count=0,
+        artifact_status="ready",
+        artifact_summary="1 steward package; 1 formal knowledge item synchronized.",
+    )
+
+    assert card["status"] == "closed_loop"
+    assert card["isClosedLoop"] is True
+    assert card["latestTask"]["taskId"] == "task-ingestion-duplicate-retry"
+    assert card["agentTaskStatus"] == "blocked"
 
 def test_load_source_collection_work_run_summary_cleanses_invalid_storage_path(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
