@@ -119,16 +119,18 @@ describe("ConfigRoute layout contract", () => {
     expect(wizardSource).toContain("canAdvanceProviderWizard");
   });
 
-  it("makes one-page quick setup the default Provider workspace without mounting management beside it", () => {
+  it("defaults Provider workspace to model assets home, with quick setup as add-connection mode", () => {
     expect(routeSource).toContain("ConfigQuickSetupPanel");
     expect(routeSource).toContain('type ProviderWorkspaceMode = "quick" | "manage" | "advanced"');
-    expect(routeSource).toContain('useState<ProviderWorkspaceMode>("quick")');
+    expect(routeSource).toContain('useState<ProviderWorkspaceMode>("manage")');
     expect(routeSource).toContain("handlePrepareProviderQuickSetup");
     expect(routeSource).toContain("handleConfirmProviderQuickSetup");
     expect(routeSource).toContain("recommendProviderModel");
     expect(routeSource).toContain('providerWorkspaceMode === "quick"');
     expect(routeSource).toContain('providerWorkspaceMode === "manage"');
     expect(routeSource).toContain('providerWorkspaceMode === "advanced"');
+    expect(routeSource).toContain("① 模型资产");
+    expect(routeSource).toContain("② 添加连接");
     expect(quickSetupSource).toContain("检测连接");
     expect(quickSetupSource).toContain("保存并完成");
     expect(quickSetupStyles.workspace).toContain("max-w-none");
@@ -204,25 +206,22 @@ describe("ConfigRoute layout contract", () => {
 
   it("edits an existing Provider API Key through the draft credential boundary", () => {
     expect(providerPanelSource).toContain("onEditCredential");
-    expect(providerPanelSource).toContain("设置 API Key");
+    expect(providerPanelSource).toContain("API Key");
+    expect(providerPanelSource).toContain("一个中转站 / Provider = 一把 API Key");
+    expect(providerPanelSource).toContain("context_window");
+    expect(providerPanelSource).toContain('type="password"');
     expect(providerPanelSource).toContain('provider.credentialState === "not_required"');
-    expect(routeSource).toContain('type="password"');
     expect(routeSource).toContain('`/api/config/draft/providers/${encodeURIComponent(providerId)}`');
     expect(routeSource).toContain("buildProviderDraftRequest({ providerId, provider, credentialValue: providerCredentialValue })");
     expect(routeSource).toContain('"PUT"');
-    expect(routeSource).toContain("最终保存会写入用户环境变量，不会把密钥写入 config.toml。");
-    expect(routeSource).toContain('tooltipLabel="API Key 保存说明"');
-    expect(routeSource).toContain("disabledReason={");
-    expect(routeSource).toContain('structuredActionsDisabled');
-    expect(routeSource).toContain('"先完成当前配置检查。"');
+    expect(routeSource).toContain("handleUpdateProviderContextWindow");
     expect(routeSource).toContain("if (structuredActionsDisabled || !providerCredentialValue.trim()) return;");
     expect(routeSource).toContain('credentialProvider.credentialState === "not_required"');
-    expect(routeSource).toContain("structuredActionsDisabled || Boolean(busyAction) || !providerCredentialValue.trim()");
-    expect(routeSource).toContain("providerCredentialEditId === selectedProviderId");
     expect(routeSource).toContain('onSelectProvider={(providerId) => {');
     expect(routeSource).toContain('setProviderCredentialEditId("")');
     expect(routeSource).toContain('setProviderCredentialValue("")');
     expect(routeSource).toContain("setSelectedProviderId(providerId)");
+    expect(routeSource).toContain('setSelectedProviderTab("connection")');
     expect(providerPanelSource).not.toContain("credential_ref");
     expect(routeSource).not.toContain("credential_ref");
   });
@@ -233,7 +232,7 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain('phase: "success"');
     expect(routeSource).toContain('phase: "error"');
     expect(providerPanelSource).toContain("发现中…");
-    expect(routeSource).toContain("保存中…");
+    expect(routeSource).toContain("正在保存 API Key…");
     expect(routeSource).toContain("生成预览中…");
     expect(routeSource).toContain("更新中…");
     expect(routeSource).toContain('setRouteEditProviderId("")');
@@ -253,7 +252,8 @@ describe("ConfigRoute layout contract", () => {
 
   it("recovers multi-pin partial success without resubmitting completed models", () => {
     expect(routeSource).toContain("filterAlreadyPinnedModels");
-    expect(routeSource).toContain('dispatchProviderWizard({ type: "pin_succeeded", modelRef: model.modelRef })');
+    expect(routeSource).toContain('type: "pin_succeeded"');
+    expect(routeSource).toContain("already exists");
     expect(routeSource).toContain('model.availability === "pinned" || model.availability === "missing_remote"');
   });
 
@@ -330,7 +330,7 @@ describe("ConfigRoute layout contract", () => {
   });
 
   it("keeps existing Provider management in a bounded desktop list-detail grid", () => {
-    expect(providerPanelStyles.registryWorkspace).toContain("[--vui-workspace-sidebar:clamp(18rem,26vw,24rem)]");
+    expect(providerPanelStyles.registryWorkspace).toContain("[--vui-workspace-sidebar:clamp(18rem,24vw,22rem)]");
     expect(providerPanelStyles.registryWorkspace).not.toContain("max-[960px]");
     expect(providerPanelStyles.providerList).toContain("h-full");
     expect(providerPanelStyles.providerList).toContain("overflow-y-auto");
@@ -452,8 +452,9 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("subtitleHint");
     expect(routeSource).toContain('subtitleHint={copy.subtitleHint}');
     expect(overviewPanelSource).toContain("sourceBodyShort");
-    expect(providerPanelSource).toContain("管理与固定模型");
+    expect(providerPanelSource).toContain("已配置的连接与模型");
     expect(providerPanelSource).toContain("固定全部已发现");
+    expect(providerPanelSource).toContain("编辑");
     expect(routeSource).toContain('tooltipLabel="模型连接工作台说明"');
     expect(overviewPanelSource).toContain('title={copy.sourceBody}');
     expect(providerPanelSource).toContain('title={provider.providerId}');
@@ -515,10 +516,10 @@ describe("ConfigRoute layout contract", () => {
     expect(providerPanelStylesSource).toContain("vuiSurfaceRecipes");
     expect(providerPanelStyles.sectionSurface).toContain("rounded-[var(--radius-panel)]");
     expect(providerPanelStyles.sectionSurface).toMatch(/!bg-vui-surface-panel|!bg-\[var\(--vui-surface-panel\)\]/);
-    expect(providerPanelStyles.registryWorkspace).toContain("[--vui-workspace-sidebar:clamp(18rem,26vw,24rem)]");
+    expect(providerPanelStyles.registryWorkspace).toContain("[--vui-workspace-sidebar:clamp(18rem,24vw,22rem)]");
     expect(providerPanelStyles.providerList).toContain("overflow-y-auto");
     expect(providerPanelStyles.tableScroll).toContain("h-full");
-    expect(providerPanelStyles.providerButton).toContain("!min-h-[58px]");
+    expect(providerPanelStyles.providerButton).toContain("!min-h-[3.5rem]");
     expect(providerPanelStyles.tableScroll).toContain("overflow-auto");
     expect(providerPanelStyles.table).toContain("[&_thead]:sticky");
     expect(providerPanelSource).toContain("filterProviderModels");

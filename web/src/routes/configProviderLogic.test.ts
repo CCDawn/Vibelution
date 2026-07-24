@@ -8,6 +8,11 @@ import {
   canTestProviderModel,
   canUnpinProviderModel,
   deriveProviderModelActionState,
+  filterReadyProviderAssets,
+  isHealthyProviderAsset,
+  isReadyProviderAsset,
+  partitionReadyProviderAssets,
+  projectProviderModelsForUi,
   deriveProviderRegistryRows,
   dispatchProviderWizardConnectionAction,
   filterAlreadyPinnedModels,
@@ -518,6 +523,57 @@ describe("configProviderLogic", () => {
     expect(canTestProviderModel(catalogModel("relay_a/pinned"))).toBe(true);
     expect(canTestProviderModel({ ...catalogModel("relay_a/missing"), availability: "missing_remote" })).toBe(true);
     expect(canTestProviderModel({ ...catalogModel("relay_a/observed"), availability: "observed" })).toBe(false);
+  });
+
+  it("keeps asset-home list to credential-ready providers only", () => {
+    expect(isReadyProviderAsset({ credentialState: "configured" })).toBe(true);
+    expect(isReadyProviderAsset({ credentialState: "not_required" })).toBe(true);
+    expect(isReadyProviderAsset({ credentialState: "missing" })).toBe(false);
+    const rows = deriveProviderRegistryRows(providers, catalog);
+    const ready = filterReadyProviderAssets(rows);
+    expect(ready.every((row) => row.credentialState === "configured" || row.credentialState === "not_required")).toBe(true);
+    expect(ready.some((row) => row.providerId === "relay_a")).toBe(true);
+    expect(ready.some((row) => row.providerId === "relay_b")).toBe(false);
+  });
+
+  it("partitions ready assets so auth/discovery failures stay out of the primary list", () => {
+    expect(isHealthyProviderAsset({ credentialState: "configured", status: "reachable" })).toBe(true);
+    expect(isHealthyProviderAsset({ credentialState: "configured", status: "stale" })).toBe(true);
+    expect(isHealthyProviderAsset({ credentialState: "configured", status: "auth_failed" })).toBe(false);
+    expect(isHealthyProviderAsset({ credentialState: "configured", status: "discovery_failed" })).toBe(false);
+    expect(isHealthyProviderAsset({ credentialState: "missing", status: "reachable" })).toBe(false);
+    const { healthy, abnormal } = partitionReadyProviderAssets([
+      { credentialState: "configured", status: "reachable" },
+      { credentialState: "configured", status: "auth_failed" },
+      { credentialState: "configured", status: "discovery_failed" },
+      { credentialState: "missing", status: "reachable" },
+    ]);
+    expect(healthy).toHaveLength(1);
+    expect(abnormal).toHaveLength(2);
+  });
+
+  it("upgrades catalog observed rows to pinned when draft already pins them", () => {
+    const projected = projectProviderModelsForUi(
+      "relay_a",
+      [
+        {
+          modelKey: "gpt-5.5",
+          modelRef: "relay_a/gpt-5.5",
+          upstreamId: "gpt-5.5",
+          label: "GPT 5.5",
+          availability: "observed",
+          status: "observed",
+          capabilities: {},
+        },
+      ],
+      {
+        models: {
+          "gpt-5.5": { upstream_id: "gpt-5.5", label: "GPT 5.5", enabled: true },
+        },
+      },
+    );
+    expect(projected).toHaveLength(1);
+    expect(projected[0].availability).toBe("pinned");
   });
 
   it("accepts the redacted provider mutation allowlist without inventing identity", () => {

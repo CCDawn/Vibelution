@@ -15,6 +15,8 @@ export type ProviderRegistryRow = {
   artifactPath: string;
   baseUrl: string;
   credentialState: string;
+  /** Provider-level max context window (token). 0/null = unconfigured. */
+  contextWindow: number | null;
   defaultProtocol: string;
   pinnedCount: number;
   status: ConfigProviderStatus | "configured";
@@ -24,6 +26,53 @@ export type ProviderRegistryRow = {
   refreshDue: boolean;
   models: ConfigCatalogModel[];
 };
+
+/**
+ * Asset-home list: only providers that already have credentials ready.
+ * Full vendor/template catalog belongs in「添加连接」, not the left rail.
+ */
+export function isReadyProviderAsset(row: Pick<ProviderRegistryRow, "credentialState">): boolean {
+  return row.credentialState === "configured" || row.credentialState === "not_required";
+}
+
+export function filterReadyProviderAssets<T extends Pick<ProviderRegistryRow, "credentialState">>(
+  rows: readonly T[],
+): T[] {
+  return rows.filter((row) => isReadyProviderAsset(row));
+}
+
+/** Statuses that should not crowd the primary asset list. */
+const ABNORMAL_PROVIDER_STATUSES = new Set([
+  "auth_failed",
+  "discovery_failed",
+  "blocked",
+  "protocol_mismatch",
+  "not_discovered",
+]);
+
+/**
+ * Healthy asset: has key AND connection is usable (or only mildly stale).
+ * Abnormal: key exists but auth/discovery/protocol is broken — collapse by default.
+ */
+export function isHealthyProviderAsset(
+  row: Pick<ProviderRegistryRow, "credentialState" | "status">,
+): boolean {
+  if (!isReadyProviderAsset(row)) return false;
+  return !ABNORMAL_PROVIDER_STATUSES.has(String(row.status || "").trim());
+}
+
+export function partitionReadyProviderAssets<T extends Pick<ProviderRegistryRow, "credentialState" | "status">>(
+  rows: readonly T[],
+): { healthy: T[]; abnormal: T[] } {
+  const ready = filterReadyProviderAssets(rows);
+  const healthy: T[] = [];
+  const abnormal: T[] = [];
+  for (const row of ready) {
+    if (isHealthyProviderAsset(row)) healthy.push(row);
+    else abnormal.push(row);
+  }
+  return { healthy, abnormal };
+}
 
 export type ProviderMergeCandidate = {
   canonicalProviderId: string;
@@ -180,13 +229,66 @@ export function buildProviderSetupChecklist(provider: ProviderRegistryRow): Prov
   ];
 }
 
+/**
+ * Merge discovery catalog rows with draft pins so the table does not keep showing
+ * "observed" after models are already pinned in publicConfig.
+ */
+export function projectProviderModelsForUi(
+  providerId: string,
+  catalogModels: readonly ConfigCatalogModel[],
+  draftProvider: unknown,
+): ConfigCatalogModel[] {
+  const draftModels = asRecord(asRecord(draftProvider).models);
+  const byKey = new Map<string, ConfigCatalogModel>();
+  for (const model of catalogModels) {
+    const draftHit = draftModels[model.modelKey] ?? draftModels[model.upstreamId];
+    if (draftHit && typeof draftHit === "object") {
+      const draft = asRecord(draftHit);
+      byKey.set(model.modelKey, {
+        ...model,
+        availability: model.availability === "missing_remote" ? "missing_remote" : "pinned",
+        label: String(draft.label || model.label || model.modelKey),
+        upstreamId: String(draft.upstream_id || model.upstreamId || model.modelKey),
+      });
+    } else {
+      byKey.set(model.modelKey, model);
+    }
+  }
+  for (const [modelKey, raw] of Object.entries(draftModels)) {
+    if (byKey.has(modelKey) || !raw || typeof raw !== "object") continue;
+    const draft = asRecord(raw);
+    const upstreamId = String(draft.upstream_id || modelKey);
+    byKey.set(modelKey, {
+      modelKey,
+      modelRef: `${providerId}/${modelKey}`,
+      upstreamId,
+      label: String(draft.label || upstreamId),
+      availability: "pinned",
+      status: "pinned",
+      capabilities: {},
+    });
+  }
+  return Array.from(byKey.values()).sort((left, right) => left.modelRef.localeCompare(right.modelRef));
+}
+
 export function deriveProviderRegistryRows(
   providers: ConfigProviderOption[],
   catalog: ConfigModelCatalog,
+  draftPublicConfig?: unknown,
 ): ProviderRegistryRow[] {
+  const draftProviders = asRecord(asRecord(asRecord(draftPublicConfig).llm).providers);
   return providers
     .map((provider) => {
       const observed = catalog.providers[provider.provider_id];
+      const catalogModels = Object.values(observed?.models ?? {});
+      const models = projectProviderModelsForUi(
+        provider.provider_id,
+        catalogModels,
+        draftProviders[provider.provider_id],
+      );
+      const pinnedFromModels = models.filter(
+        (model) => model.availability === "pinned" || model.availability === "missing_remote",
+      ).length;
       return {
         providerId: provider.provider_id,
         label: provider.label,
@@ -197,14 +299,18 @@ export function deriveProviderRegistryRows(
         artifactPath: provider.artifact_path ?? "",
         baseUrl: provider.base_url ?? "",
         credentialState: provider.credential_state,
+        contextWindow:
+          typeof provider.context_window === "number" && provider.context_window > 0
+            ? provider.context_window
+            : null,
         defaultProtocol: provider.default_protocol,
-        pinnedCount: provider.pinned_count,
+        pinnedCount: Math.max(provider.pinned_count, pinnedFromModels),
         status: observed?.status ?? "configured",
         lastAttemptAt: observed?.lastAttemptAt ?? "",
         lastErrorType: observed?.lastErrorType ?? "",
         lastSuccessAt: observed?.lastSuccessAt ?? "",
         refreshDue: observed?.refreshDue ?? false,
-        models: Object.values(observed?.models ?? {}).sort((left, right) => left.modelRef.localeCompare(right.modelRef)),
+        models,
       };
     })
     .sort((left, right) => left.providerId.localeCompare(right.providerId));
