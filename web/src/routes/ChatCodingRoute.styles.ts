@@ -234,7 +234,7 @@ const styles: Record<string, string> = {
   centerPaneOverlay:
     "vui-routes-chatcodingroute centerPaneOverlay [grid-column:1] [grid-row:1]",
   centerSurface:
-    "vui-routes-chatcodingroute centerSurface grid h-full min-h-0 overflow-hidden bg-[color-mix(in_srgb,var(--vui-surface-panel)_6%,transparent)]",
+    "vui-routes-chatcodingroute centerSurface grid h-full min-h-0 overflow-hidden !bg-[var(--vui-surface-chat)]",
   chatReturnLink:
     "vui-routes-chatcodingroute chatReturnLink min-w-0 [&_span]:truncate",
   childTopLevelSessionItem:

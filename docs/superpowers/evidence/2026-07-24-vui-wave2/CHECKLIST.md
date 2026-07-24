@@ -35,9 +35,10 @@
 ### 验收问题（自动化可答部分）
 
 1. **主卡片/列表行是否不透出花背景？**
-   - 结构板已强制 opaque recipe；Chat centerSurface/composer 保留白名单软层。
-   - **自动：pass**（forbidden structure-wash = 0）。
-   - **视觉：pending**（有背景图时由操作者确认）。
+   - 结构板已强制 opaque recipe。
+   - **Chat `centerSurface` 已改为不透明** `!bg-[var(--vui-surface-chat)]`（取消 6% soft wash）；composer 去掉 backdrop-blur、保持 panel 实底。
+   - **自动：pass**（forbidden structure-wash = 0；centerSurface 禁止 soft 回退）。
+   - **视觉：pending**（有背景图时再确认对话中区不透底）。
 
 2. **浮层是否可读？**
    - glass recipe + VUI dialog 路径；**视觉 pending**。
