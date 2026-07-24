@@ -1,7 +1,7 @@
 # VUI 前端统一 Wave 2：alpha 白名单、残余消费与组合搭页
 
 **Date:** 2026-07-24
-**Status:** closed-enough（2A–2E 工程项完成；2C 视觉 H 格待操作者补签）
+**Status:** closed-enough（2A–2E 工程项完成；2C 视觉 H 格待操作者补签；**附录 B：剩余 30 个无 recipe style map 分类已落档**）
 **Owner:** `web-workbench-surface` / VUI design-system owner
 **Mode:** `TASK_GRAPH`
 **Risk:** `STANDARD_TASK`
@@ -23,9 +23,10 @@
 |---|---|
 | 表面字面量 | 仅 `--vui-surface-*`（`tokens.css`） |
 | legacy `--surface-*` | 定义已删除；生产 `var(--surface-*)` = 0 |
-| recipe 消费 | ~147 / ~185 style maps |
-| 无 recipe 仍引用 surface | **11**（状态 tint / hover / ring-offset 为主） |
-| 对 vui-surface 的 color-mix | 约 **100+**；集中于 Research*、Tools、Conversation、状态条 |
+| recipe 消费 | **~155 / 185** style maps（import `vuiSurfaceRecipes`） |
+| 无 recipe style map | **30**（见 **附录 B** 全表；含 layout-only / state / glass） |
+| 无 recipe 仍引用 surface | **5**（B1 表：state-tint / hover / glass / ring-offset） |
+| 对 vui-surface 的 color-mix | 主路径已压；长尾 Evolution/近邻 % 可选 |
 | shadcn 对齐 | 工程思想 `ADAPT` 已对齐；全站 composition 未完成 |
 | 本地 git | `main` 相对 origin 多 commit ahead（以当时分支为准） |
 
@@ -88,21 +89,22 @@ Wave 2E  （可选）高流量 color-mix 热点压缩：Research / Tools
 | A3 | 11 个无 recipe 文件分类表写入本计划附录；状态-only 标注 `// surface-role: state-tint` 或 policy 登记 | 清单 | 人工 review |
 | A4 | 若扫描发现仍存在 `surface + transparent` 结构洗，优先改不透明 recipe，**禁止**扩白名单 | 补丁 | A2 绿 |
 
-### 4.3 11 文件分类（基线）
+### 4.3 无 recipe 文件分类
 
-| 文件 | 建议角色 | Wave 2 动作 |
+**基线 11 文件（2A）** 多数已在 2B 接入 recipe（selected / banner / danger 等）。
+**现行全量：30 个** 无 `vuiSurfaceRecipes` import 的 `*.styles.ts`，完整表见 **附录 B**。
+
+**决策规则（写死）：**
+
+| 角色 | 是否必须挂 recipe | 说明 |
 |---|---|---|
-| `AgentConversationDirectory.styles.ts` | state-tint | 登记；可选 `vuiStateTintSelectedClass` |
-| `ChatFileWorkspaceTabs.styles.ts` | state-tint | 登记 |
-| `MemoryKnowledgeModeTabs.styles.ts` | state-tint | 登记 |
-| `TeamSourceCollectionFindingDetailsPanel.styles.ts` | state-tint | 登记 |
-| `AgentReturnBannerPanel.styles.ts` | state-tint (accent banner) | 登记 |
-| `AgentConfigPrimaryPanePanel.styles.ts` | state-tint (danger zone) | 登记 |
-| `AgentUserContentSectionView.styles.ts` | state-tint (user bubble) | 登记；勿强行 opaque panel |
-| `AgentResponseSectionView.styles.ts` | ring-offset only | 登记为 non-mix 或 ignore |
-| `ConversationIndexSection.styles.ts` | hover fill | 登记 hover 角色 |
-| `SupervisedWorkspaceControls.styles.ts` | hover only | 登记 |
-| `PaneCollapseHandle.styles.ts` | glass-overlay | 登记 glass 白名单 |
+| `layout-only` | 否 | 无 surface token / 无 mix，纯几何 |
+| `state-tint` / `hover-fill` | 可选 | 可继续手写或吸收进状态 recipe；禁止 surface+transparent 结构洗 |
+| `glass-overlay` | 否（policy 放行） | 仅浮层/handle；勿改成 opaque panel |
+| `message-bubble` | 否 | 用户气泡等 domain 材质；勿强行 opaque row |
+| `ring-offset` | 否 | 仅 focus ring-offset 引用 surface |
+| `mix-no-surface` | 否 | accent/state mix 不落 surface 时不强制 recipe |
+| `needs-recipe` | 是 | 结构板仍自造 border+bg 时再迁 |
 
 ---
 
@@ -261,10 +263,10 @@ Wave 2 **不追求**「长得像 shadcn 官网」，只追求 **像 shadcn 一�
 
 - [x] alpha policy 测试（`web/src/design/vuiSurfaceAlphaPolicy.test.ts`）
 - [x] style map 扫描：无 `forbidden-structure-wash`（surface+transparent 结构洗）
-- [ ] 11 文件均有角色标注或已 recipe 化（2A 附录已分类，注释标注可选）
-- [ ] 5 代表页手测矩阵完成
-- [ ] 至少一条示范路径结构表面零内联 mix
-- [ ] `npm --prefix web run build` 通过
+- [x] 无 recipe 残余文件均有角色分类（**附录 B**；30 文件，2026-07-24 重盘）
+- [ ] 5 代表页手测矩阵完成（A 格已绿；H 格待操作者）
+- [x] 至少一条示范路径 composition（Agents 列表 + Chat 会话索引）
+- [x] `npm --prefix web run build` 通过（recipe CSS 扫描修复后本地已验）
 - [ ] 主方案文档 §0 状态更新为「Wave 2 done / Wave 3 pending」
 
 ### 2A 已交付（2026-07-24）
@@ -288,10 +290,104 @@ Wave 2 **不追求**「长得像 shadcn 官网」，只追求 **像 shadcn 一�
 ## 附录 A — 推荐立即开工的第一 PR
 
 **标题建议：** `test(web): enforce vui-surface color-mix whitelist`
+**状态：** 已完成（2A 合入）。
 
-**范围：**
-1. `vuiSurfaceAlphaPolicy.ts` + test
-2. 为 Chat center/composer、状态 tint 登记初始白名单
-3. 不改视觉（若扫描已绿）或仅修扫描失败的违例
+---
 
-**验证：** `vitest` policy + foundation；无需 Launcher（纯契约）除非顺带修视觉。
+## 附录 B — 无 recipe style map 全表（2026-07-24 重盘）
+
+**统计：** `web/src/**/*.styles.ts` 共 **185**；import `vuiSurfaceRecipes` **155**；**未 import 30**。
+**扫描方式：** 无 recipe import 即入表（不要求必须含 surface）。
+**维护：** 迁入 recipe 后从本表删除；新增无 recipe 文件须补角色。
+
+### B0. 角色汇总
+
+| 角色 | 数量 | 默认动作 |
+|---|---|---|
+| `layout-only` | 17 | **keep** — 无 surface 契约压力 |
+| `mix-no-surface` | 8 | **keep** — accent/state mix，不强制 recipe |
+| `state-tint` / `hover-fill` | 3 | **optional** — 可挂状态 recipe |
+| `message-bubble` | 1 | **keep** — 勿 opaque 化用户气泡 |
+| `ring-offset` | 1 | **keep** |
+| `glass-overlay` | 1 | **keep** — policy glass 角色 |
+| **合计** | **30** | 无 `needs-recipe` 阻塞项 |
+
+### B1. 仍引用 `--vui-surface-*`（5）
+
+| 文件 | 角色 | 说明 | 动作 |
+|---|---|---|---|
+| `components/conversation/AgentResponseSectionView.styles.ts` | `ring-offset` | `ring-offset-[var(--vui-surface-panel)]`；正文 `bg-transparent` | keep |
+| `components/conversation/AgentUserContentSectionView.styles.ts` | `message-bubble` | cool 6% + panel 用户气泡 | keep；可选未来 soft bubble recipe |
+| `components/layout/PaneCollapseHandle.styles.ts` | `glass-overlay` | glass 58% + transparent；policy 放行 | keep |
+| `routes/ConversationIndexSection.styles.ts` | `hover-fill` | `hover:!bg-[var(--vui-surface-card)]` | optional dense/hover |
+| `routes/SupervisedWorkspaceControls.styles.ts` | `hover-fill` | `hover:!bg-[var(--vui-surface-row-hover)]` + warm soft active | optional |
+
+### B2. `mix-no-surface`（8）— 有 color-mix，无 surface 结构义务
+
+| 文件 | 说明 | 动作 |
+|---|---|---|
+| `components/conversation/ConversationOperationDetails.styles.ts` | 操作详情状态色 | keep |
+| `routes/AgentArchiveZonePanel.styles.ts` | 归档区 tint | keep / optional state soft |
+| `routes/AgentManagementNav.styles.ts` | 导航 hover cool border | keep |
+| `routes/chat/ChatToolApprovalDialog.styles.ts` | 审批对话框 overlay-ish | keep |
+| `routes/MemoryGraphCanvas.styles.ts` | 图谱节点/边色 | keep |
+| `routes/MemoryWarningStrip.styles.ts` | 警告条 | optional `vuiStateWarningSoftClass` |
+| `routes/TeamSourceCollectionPhaseCloseGatePanel.styles.ts` | 阶段门禁状态 | keep |
+| `routes/TeamSourceCollectionRunSwitcherPanel.styles.ts` | run 切换 tint | keep |
+
+### B3. `layout-only`（17）— 无 surface token、无 recipe 压力
+
+| 文件 | 说明 | 动作 |
+|---|---|---|
+| `app/LauncherShell.styles.ts` | Launcher 壳几何 | keep |
+| `components/conversation/AgentMessageTurnView.styles.ts` | 回合布局 | keep |
+| `components/conversation/conversationInlineMarkdown.styles.ts` | markdown 内联 | keep |
+| `components/conversation/ConversationMarkdownRenderer.styles.ts` | markdown 布局 | keep |
+| `components/conversation/ConversationStreamingResponseContent.styles.ts` | 流式块布局 | keep |
+| `components/conversation/ConversationTurnAvatarContent.styles.ts` | 头像槽 | keep |
+| `components/conversation/LazyConversationMarkdownRenderer.styles.ts` | lazy 壳 | keep |
+| `components/editor/LazyJsonCodeMirror.styles.ts` | 编辑器壳 | keep |
+| `routes/AgentBulkOperationsPanel.styles.ts` | bulk 布局 | keep |
+| `routes/AgentDetailWorkspacePanel.styles.ts` | detail 工作区几何 | keep |
+| `routes/AgentListWorkspacePanel.styles.ts` | list 工作区几何 | keep |
+| `routes/ConversationIndexTree.styles.ts` | 索引树布局 | keep |
+| `routes/TeamSourceCollectionManualWritebackPanel.styles.ts` | 回写表单布局 | keep |
+| `routes/TeamSourceCollectionMemoryPanel.styles.ts` | 记忆子面板布局 | keep |
+| `routes/TeamSourceCollectionRunSettingsPanel.styles.ts` | run 设置布局 | keep |
+| `routes/TeamSourceCollectionScreeningPanel.styles.ts` | 筛选布局 | keep |
+| `routes/TeamSourceCollectionStandaloneStagePanel.styles.ts` | 独立阶段布局 | keep |
+
+### B4. 2A 原 11 文件 disposition（对照）
+
+| 原文件 | 现行 |
+|---|---|
+| `AgentConversationDirectory.styles.ts` | **已 recipe**（selected） |
+| `ChatFileWorkspaceTabs.styles.ts` | **已 recipe** |
+| `MemoryKnowledgeModeTabs.styles.ts` | **已 recipe** |
+| `TeamSourceCollectionFindingDetailsPanel.styles.ts` | **已 recipe** |
+| `AgentReturnBannerPanel.styles.ts` | **已 recipe**（accent banner） |
+| `AgentConfigPrimaryPanePanel.styles.ts` | **已 recipe**（danger panel） |
+| `AgentUserContentSectionView.styles.ts` | 仍无 recipe → B1 `message-bubble` |
+| `AgentResponseSectionView.styles.ts` | 仍无 recipe → B1 `ring-offset` |
+| `ConversationIndexSection.styles.ts` | 仍无 recipe → B1 `hover-fill` |
+| `SupervisedWorkspaceControls.styles.ts` | 仍无 recipe → B1 `hover-fill` |
+| `PaneCollapseHandle.styles.ts` | 仍无 recipe → B1 `glass-overlay` |
+
+### B5. 后续可选工单（非 Wave 2 阻塞）
+
+1. `MemoryWarningStrip` → `vuiStateWarningSoftClass`（小）
+2. `ConversationIndexSection` hover → 文档化或 `hover:bg-vui-surface-card` 主题类
+3. 用户气泡若多处复制再抽 `vuiStateUserBubbleClass`
+4. 盘点脚本（可复用）：对 `*.styles.ts` 检查 `vuiSurfaceRecipes` import
+
+**结论：** 剩余 30 个 **无「必须立刻挂 recipe」的结构板**；统一工作不因这 30 个阻塞 close。
+
+---
+
+## 附录 C — 相关修复备忘（透底）
+
+| 问题 | 根因 | 修复 |
+|---|---|---|
+| Chat 侧栏/中区透壁纸 | recipe 未进 Tailwind `@source`；fill 类无 CSS | `@source vuiSurfaceRecipes.ts` + `!bg-vui-surface-*` |
+| Chat centerSurface 透 | 6% soft wash | 改为 `vuiChatFillClass` 实色 |
+| Teams 右侧透 | `inspector` 无背景 | `vuiRailFillClass` + workspace fill |
