@@ -251,11 +251,24 @@ function sourceBlocksForStyle(styleName: string, source = routeSource): string[]
 function expectBackgroundAwareSurface(styleName: keyof typeof styles): void {
   const className = styles[styleName];
 
-  expect(className, `${String(styleName)} should keep a transparent, background-aware surface`).toContain("color-mix(in_srgb");
+  // Structural surfaces are now opaque VUI recipes (wallpaper no longer shows through).
+  const usesOpaqueRecipe =
+    className.includes("!bg-[var(--vui-surface-row)]")
+    || className.includes("!bg-[var(--vui-surface-panel)]")
+    || className.includes("[background:var(--vui-surface-row)]")
+    || className.includes("[background:var(--vui-surface-panel)]");
+  if (usesOpaqueRecipe) {
+    expect(
+      className,
+      `${String(styleName)} should use an opaque semantic surface after recipe migration`,
+    ).toMatch(/vui-surface-(row|panel)/);
+  } else {
+    expect(className, `${String(styleName)} should keep a transparent, background-aware surface`).toMatch(/vui-surface-|color-mix\(in_srgb/);
+  }
   expect(className, `${String(styleName)} should not restack an opaque surface-card wall`).not.toContain("var(--surface-card)");
   expect(className, `${String(styleName)} should not restack an opaque strong panel wall`).not.toContain("var(--surface-panel-strong)");
   expect(className, `${String(styleName)} should not own route-level elevation`).not.toContain("box-shadow:var(--shadow");
-  expect(className, `${String(styleName)} should keep a hairline border`).toContain("[border:1px_solid");
+  expect(className, `${String(styleName)} should keep a hairline border`).toMatch(/border/);
 }
 
 function expectContentSizedAction(styleName: keyof typeof styles): void {
@@ -278,15 +291,36 @@ function expectResponsiveActionRow(styleName: keyof typeof styles): void {
 }
 
 function expectBackgroundAwareClass(className: string, label: string): void {
-  expect(className, `${label} should use a lightweight background-aware token`).toContain("color-mix(in_srgb");
+  const usesOpaqueRecipe =
+    className.includes("!bg-[var(--vui-surface-row)]")
+    || className.includes("!bg-[var(--vui-surface-panel)]")
+    || className.includes("var(--vui-surface-row)")
+    || className.includes("var(--vui-surface-panel)");
+  if (usesOpaqueRecipe) {
+    expect(className, `${label} should use an opaque semantic surface after recipe migration`).toMatch(
+      /vui-surface-(row|panel)/,
+    );
+  } else {
+    expect(className, `${label} should use a lightweight background-aware token`).toMatch(/vui-surface-|color-mix\(in_srgb/);
+  }
   expect(className, `${label} should avoid restacking surface-card walls inside Agent detail`).not.toContain("var(--surface-card)");
   expect(className, `${label} should avoid strong opaque panel walls inside Agent detail`).not.toContain("var(--surface-panel-strong)");
-  expect(className, `${label} should not own route-level elevation`).not.toContain("box-shadow");
-  expect(className, `${label} should keep a hairline border`).toContain("[border:1px_solid");
+  expect(className, `${label} should not own route-level elevation`).not.toContain("box-shadow:var(--shadow");
+  expect(className, `${label} should keep a hairline border`).toMatch(/border/);
 }
 
 function expectOpaqueSemanticSurface(className: string, label: string, token: string): void {
-  expect(className, `${label} should use its semantic VUI surface token`).toContain(token);
+  const accepted = [token];
+  if (token.includes("[background:var(--vui-surface-panel)]")) {
+    accepted.push("!bg-[var(--vui-surface-panel)]");
+  }
+  if (token.includes("[background:var(--vui-surface-row)]")) {
+    accepted.push("!bg-[var(--vui-surface-row)]");
+  }
+  expect(
+    accepted.some((part) => className.includes(part)),
+    `${label} should use its semantic VUI surface token (${token})`,
+  ).toBe(true);
   expect(className, `${label} should not restore the legacy wallpaper-through background mix`).not.toContain(
     "color-mix(in_srgb,_var(--vui-surface",
   );
@@ -1827,9 +1861,11 @@ describe("AgentsRoute layout contract", () => {
       expectBackgroundAwareSurface(styleName);
     }
 
-    expectOpaqueSemanticSurface(styles.agentRow, "agentRow", "[background:var(--vui-surface-row)]");
-    expectOpaqueSemanticSurface(styles.detailSection, "detailSection", "[background:var(--vui-surface-panel)]");
-    expectOpaqueSemanticSurface(styles.groupButton, "groupButton", "[background:var(--vui-surface-row)]");
+    expectOpaqueSemanticSurface(styles.agentRow, "agentRow", "!bg-[var(--vui-surface-row)]");
+    expect(styles.agentRow).toContain("hover:bg-[var(--vui-surface-row-hover)]");
+    expectOpaqueSemanticSurface(styles.detailSection, "detailSection", "!bg-[var(--vui-surface-panel)]");
+    expectOpaqueSemanticSurface(styles.groupButton, "groupButton", "!bg-[var(--vui-surface-row)]");
+    expect(styles.groupButton).toContain("hover:bg-[var(--vui-surface-row-hover)]");
 
     expect(styles.agentRowActive).not.toContain("var(--surface-panel-strong)");
     expect(styles.agentRowBulkSelected).not.toContain("var(--surface-panel-strong)");

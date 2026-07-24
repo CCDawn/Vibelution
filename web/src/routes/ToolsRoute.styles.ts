@@ -6,6 +6,10 @@
 // componentizes ToolsRoute.
 // Includes phantom keys accessed by consumers but never declared in the old
 // styleKeys; the Proxy synthesized them on demand.
+import {
+  vuiOpaqueRowClass,
+} from "../design/vuiSurfaceRecipes";
+
 const panelSurface =
   "rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_68%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_52%,transparent)] p-[7px]";
 const quietPanelSurface =
@@ -47,8 +51,7 @@ const styles = {
     "bulkActionBar min-w-0 max-w-full flex flex-wrap items-center gap-[5px] rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--border-soft)_58%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-row)_52%,transparent)] p-[5px]",
   bulkPolicyActions:
     "bulkPolicyActions min-w-0 flex flex-wrap items-center gap-1.5",
-  bulkPolicyToolRow:
-    "bulkPolicyToolRow min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]",
+  bulkPolicyToolRow: `bulkPolicyToolRow min-w-0 ${vuiOpaqueRowClass} p-2 border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]`,
   bulkSummary:
     "bulkSummary inline-flex w-fit max-w-full shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--border-soft)_58%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-row)_50%,transparent)] px-2 py-[4px] [font-size:var(--vui-font-xs)]",
   controlStrip:

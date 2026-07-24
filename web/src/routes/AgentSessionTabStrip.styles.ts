@@ -1,3 +1,8 @@
+import {
+  vuiFlatPanelClass,
+  vuiOpaqueRowClass,
+} from "../design/vuiSurfaceRecipes";
+
 const styles = {
   agentSessionTab:
     "vui-routes-chatcodingroute agentSessionTab -mb-px min-w-0 inline-flex h-8 w-fit max-w-[14rem] shrink-0 items-end rounded-t-[var(--radius-control)] rounded-b-none",
@@ -29,10 +34,8 @@ const styles = {
     "vui-routes-chatcodingroute agentSessionTabIcon inline-grid h-4 w-4 shrink-0 place-items-center text-[var(--fg-tertiary)]",
   agentSessionTabKicker:
     "vui-routes-chatcodingroute agentSessionTabKicker min-w-0 text-[10px] font-semibold leading-none text-[var(--fg-tertiary)]",
-  agentSessionTabMainAction:
-    "vui-routes-chatcodingroute agentSessionTabMainAction h-8 min-h-8 min-w-0 max-w-full rounded-t-[var(--radius-control)] rounded-b-none border border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--vui-surface-row)_78%,transparent)] px-3 text-[var(--fg-secondary)] shadow-none hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] [&_[data-slot=vui-button-content]]:max-w-full [&_[data-slot=vui-button-content]]:gap-1.5 [&_[data-slot=vui-button-label]]:flex [&_[data-slot=vui-button-label]]:min-w-0 [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-1.5 [&_[data-slot=vui-button-label]]:truncate",
-  agentSessionTabMainActionActive:
-    "vui-routes-chatcodingroute agentSessionTabMainActionActive -mb-px border-b-transparent border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[var(--vui-surface-panel)] text-[var(--fg-primary)]",
+  agentSessionTabMainAction: `vui-routes-chatcodingroute agentSessionTabMainAction h-8 min-h-8 min-w-0 max-w-full rounded-t-[var(--radius-control)] rounded-b-none border border-[var(--vui-border-subtle)] ${vuiOpaqueRowClass} px-3 text-[var(--fg-secondary)] shadow-none hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] [&_[data-slot=vui-button-content]]:max-w-full [&_[data-slot=vui-button-content]]:gap-1.5 [&_[data-slot=vui-button-label]]:flex [&_[data-slot=vui-button-label]]:min-w-0 [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-1.5 [&_[data-slot=vui-button-label]]:truncate`,
+  agentSessionTabMainActionActive: `vui-routes-chatcodingroute agentSessionTabMainActionActive -mb-px border-b-transparent border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] ${vuiFlatPanelClass} text-[var(--fg-primary)]`,
   agentSessionTabMainActionContextTarget:
     "vui-routes-chatcodingroute agentSessionTabMainActionContextTarget border-[color-mix(in_srgb,var(--accent-cool)_30%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_7%,var(--vui-surface-row))]",
   agentSessionTabMeta:

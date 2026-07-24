@@ -1,11 +1,12 @@
-const panelSurface =
-  "[border:1px_solid_color-mix(in_srgb,var(--vui-border-subtle)_94%,var(--fg-primary)_6%)] [border-radius:var(--radius-panel)] [background:var(--vui-surface-panel)] [box-shadow:0_10px_28px_color-mix(in_srgb,var(--fg-primary)_8%,transparent)]";
+import { vuiElevatedPanelClass } from "../design/vuiSurfaceRecipes";
+
+const panelSurface = vuiElevatedPanelClass;
 const mutedControl =
   "[display:inline-flex] [align-items:center] [justify-content:center] [gap:6px] [min-height:var(--control-height)] [padding:0_9px] [border-radius:var(--control-radius)] [font:inherit] [font-size:var(--vui-font-xs)] [font-weight:600] [line-height:1] [white-space:nowrap] [transition:border-color_140ms_ease,background-color_140ms_ease,color_140ms_ease] [border:1px_solid_transparent] [background:transparent] [color:var(--vui-fg-secondary)] hover:[cursor:pointer] hover:[color:var(--vui-fg-primary)] disabled:[cursor:not-allowed] disabled:[opacity:0.56]";
 const activeControl =
   "[background:color-mix(in_srgb,var(--accent-cool)_14%,var(--vui-control-muted))] [border-color:color-mix(in_srgb,var(--accent-cool)_32%,transparent)] [color:var(--accent-warm-2)]";
 const sectionHeaderSurface =
-  "[border-bottom:1px_solid_var(--vui-border-subtle)] [background:color-mix(in_srgb,var(--vui-surface-toolbar)_72%,transparent)]";
+  "[border-bottom:1px_solid_var(--vui-border-subtle)] !bg-[var(--vui-surface-toolbar)]";
 
 const styles = {
   behaviorCopy:

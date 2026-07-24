@@ -3,9 +3,16 @@
  * Prefer these over re-stating border + bg + radius on every panel/row.
  */
 
-/** Opaque product panel (section / card body). */
+/** Opaque product panel (section / card body) without elevation opinion. */
 export const vuiOpaquePanelClass =
-  "rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] !bg-[var(--vui-surface-panel)] shadow-none";
+  "rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] !bg-[var(--vui-surface-panel)]";
+
+/** Dense ops / flat boards — no elevation wash. */
+export const vuiFlatPanelClass = `${vuiOpaquePanelClass} shadow-none`;
+
+/** Elevated product panel (settings workbench, overview cards). */
+export const vuiElevatedPanelClass =
+  `${vuiOpaquePanelClass} shadow-[var(--vui-elevation-1)]`;
 
 /** Opaque inset row / tile. */
 export const vuiOpaqueRowClass =
@@ -17,3 +24,10 @@ export const vuiOpaqueRowHoverClass =
 
 /** Panel + hover-capable row combo used by dense lists. */
 export const vuiDenseRowClass = `${vuiOpaqueRowClass} ${vuiOpaqueRowHoverClass}`;
+
+/**
+ * Glass / overlay panel — only for temporary layers (dialogs, popovers, notices).
+ * Structural product boards should use flat/elevated opaque panels instead.
+ */
+export const vuiGlassPanelClass =
+  "rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)]";

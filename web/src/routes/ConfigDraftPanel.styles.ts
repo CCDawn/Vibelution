@@ -1,11 +1,14 @@
-const readablePanelSurface =
-  "[border:1px_solid_color-mix(in_srgb,var(--vui-border-subtle)_94%,var(--fg-primary)_6%)] [border-radius:var(--radius-panel)] [background:var(--vui-surface-panel)] [box-shadow:0_10px_28px_color-mix(in_srgb,var(--fg-primary)_8%,transparent)]";
-const readableRowSurface =
-  "[border:1px_solid_color-mix(in_srgb,var(--vui-border-subtle)_96%,var(--fg-primary)_4%)] [border-radius:8px] [background:var(--vui-surface-row)]";
+import {
+  vuiElevatedPanelClass,
+  vuiOpaqueRowClass,
+} from "../design/vuiSurfaceRecipes";
+
+const readablePanelSurface = vuiElevatedPanelClass;
+const readableRowSurface = vuiOpaqueRowClass;
 const mutedControl =
   "[display:inline-flex] [align-items:center] [justify-content:center] [gap:6px] [min-height:var(--control-height)] [padding:0_9px] [border-radius:var(--control-radius)] [font:inherit] [font-size:var(--vui-font-xs)] [font-weight:600] [line-height:1] [white-space:nowrap] [transition:border-color_140ms_ease,background-color_140ms_ease,color_140ms_ease] [border:1px_solid_var(--vui-border-soft)] [background:var(--vui-control-muted)] [color:var(--vui-fg-primary)] hover:[cursor:pointer] hover:[border-color:var(--vui-border-soft)] hover:[background:var(--vui-control-muted-hover)] disabled:[cursor:not-allowed] disabled:[opacity:0.56]";
 const sectionHeaderSurface =
-  "[border-bottom:1px_solid_var(--vui-border-subtle)] [background:color-mix(in_srgb,var(--vui-surface-toolbar)_72%,transparent)]";
+  "[border-bottom:1px_solid_var(--vui-border-subtle)] !bg-[var(--vui-surface-toolbar)]";
 
 const styles = {
   actionButton:

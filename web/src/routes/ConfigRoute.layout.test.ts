@@ -509,8 +509,9 @@ describe("ConfigRoute layout contract", () => {
 
   it("converges the provider registry into a compact VUI workbench contract", () => {
     expect(providerPanelStylesSource).not.toMatch(/\bsurface-card\b(?!\))/);
-    expect(providerPanelStylesSource).not.toContain("var(--radius-panel)");
-    expect(providerPanelStyles.sectionSurface).toContain("[border-radius:8px]");
+    expect(providerPanelStylesSource).toContain("vuiSurfaceRecipes");
+    expect(providerPanelStyles.sectionSurface).toContain("rounded-[var(--radius-panel)]");
+    expect(providerPanelStyles.sectionSurface).toContain("!bg-[var(--vui-surface-panel)]");
     expect(providerPanelStyles.registryWorkspace).toContain("[--vui-workspace-sidebar:clamp(18rem,26vw,24rem)]");
     expect(providerPanelStyles.providerList).toContain("overflow-y-auto");
     expect(providerPanelStyles.tableScroll).toContain("h-full");
@@ -579,9 +580,11 @@ describe("ConfigRoute layout contract", () => {
 
     expect(stylesSource).toContain("const readablePanelSurface");
     expect(stylesSource).toContain("const readableRowSurface");
+    expect(stylesSource).toContain('from "../design/vuiSurfaceRecipes"');
+    expect(stylesSource).toContain("vuiElevatedPanelClass");
     expect(styles.page).toContain("[background:var(--vui-surface-workspace)]");
     expect(stylesSource).toContain("configHeader:");
-    expect(styles.configHeader).toContain("[background:var(--vui-surface-panel)]");
+    expect(styles.configHeader).toContain("var(--vui-surface-panel)");
 
     expect(draftPanelSource).toContain("styles.draftWorkbench");
     expect(draftPanelSource).toContain("styles.draftActionRail");
@@ -897,36 +900,29 @@ describe("ConfigRoute layout contract", () => {
   it("keeps operational settings readable over custom workbench backgrounds", () => {
     expect(styles.page).toContain("[background:var(--vui-surface-workspace)]");
     expect(styles.page).toContain("[isolation:isolate]");
-    expect(stylesSource).toContain("[background:var(--vui-surface-panel)]");
-    expect(styles.sidebar).toContain("[background:var(--vui-surface-panel)]");
-    expect(styles.sectionSurface).toContain("[background:var(--vui-surface-panel)]");
+    expect(styles.sidebar).toContain("var(--vui-surface-panel)");
+    expect(styles.sectionSurface).toContain("var(--vui-surface-panel)");
     expect(styles.treeGrid).toContain("[grid-template-columns:repeat(2,minmax(0,1fr))]");
     expect(styles.configDenseSection).toContain("[&>_.treeGrid]:[grid-template-columns:repeat(3,minmax(220px,1fr))]");
     expect(styles.configDenseSection).not.toContain("repeat(auto-fit");
     expect(styles.configDiscoverySection).toContain("[&>_.treeGrid]:[grid-template-columns:repeat(3,minmax(220px,1fr))]");
     expect(styles.treeFieldValue).toContain("color-mix(in_srgb,var(--vui-surface-workspace)_92%,var(--vui-surface-panel))");
-    expect(healthDiagnosticsPanelStylesSource).toContain("[background:var(--vui-surface-panel)]");
-    expect(healthDiagnosticsPanelStylesSource).toContain("[background:var(--vui-surface-row)]");
+    expect(healthDiagnosticsPanelStylesSource).toContain("vuiSurfaceRecipes");
+    expect(healthDiagnosticsPanelStyles.sectionSurface).toContain("var(--vui-surface-panel)");
+    expect(healthDiagnosticsPanelStyles.findingCard).toContain("var(--vui-surface-row)");
   });
 
   it("keeps extracted Config panels on local VUI/Tailwind surface contracts", () => {
     expect(extractedPanelStylesSource).toContain("const panelSurface");
-    expect(extractedPanelStylesSource).toContain("[background:var(--vui-surface-panel)]");
-    expect(extractedPanelStylesSource).toContain("[background:var(--vui-surface-row)]");
+    expect(extractedPanelStylesSource).toContain("vuiSurfaceRecipes");
     expect(extractedPanelStylesSource).toContain("var(--vui-control-muted)");
     expect(extractedPanelStylesSource).toContain("var(--vui-border-subtle)");
-    expect(overviewPanelStyles.sectionSurface).toContain(
-      "[background:var(--vui-surface-panel)]",
-    );
+    expect(overviewPanelStyles.sectionSurface).toContain("var(--vui-surface-panel)");
     expect(runtimePanelStyles.segmented).toContain("[background:var(--vui-surface-toolbar)]");
     expect(draftPanelStyles.actionButton).toContain("var(--vui-control-muted)");
-    expect(healthDiagnosticsPanelStyles.findingCard).toContain("[background:var(--vui-surface-row)]");
-    expect(providerPanelStyles.sectionSurface).toContain(
-      "[background:var(--vui-surface-panel)]",
-    );
-    expect(placeholderPanelStyles.loadingBoard).toContain(
-      "[background:var(--vui-surface-panel)]",
-    );
+    expect(healthDiagnosticsPanelStyles.findingCard).toContain("var(--vui-surface-row)");
+    expect(providerPanelStyles.sectionSurface).toContain("var(--vui-surface-panel)");
+    expect(placeholderPanelStyles.loadingBoard).toContain("var(--vui-surface-panel)");
     expect(extractedPanelStylesSource).not.toContain("[background:var(--vui-gradient-route-soft),var(--surface-panel)]");
   });
 

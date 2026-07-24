@@ -1,3 +1,7 @@
+import {
+  vuiFlatPanelClass,
+} from "../design/vuiSurfaceRecipes";
+
 const styles = {
   surface: "grid min-h-[min(520px,calc(100dvh_-_96px))] w-full p-3 sm:p-4",
   surfaceDefault: "place-items-center",
@@ -38,7 +42,7 @@ const styles = {
   chatIndexRow: "grid min-h-11 grid-cols-[28px_minmax(0,1fr)] items-center gap-2 px-1",
   chatAvatar: "block size-7 shrink-0 animate-pulse rounded-full bg-[color-mix(in_srgb,var(--accent-cool)_18%,var(--vui-border-subtle))] motion-reduce:animate-none",
   chatIndexCopy: "grid min-w-0 gap-2",
-  chatWorkspace: "grid min-h-[390px] grid-rows-[minmax(0,1fr)_auto] overflow-hidden rounded-[var(--radius-control)] border border-vui-border-subtle bg-[color-mix(in_srgb,var(--vui-surface-panel)_70%,transparent)]",
+  chatWorkspace: `grid min-h-[390px] grid-rows-[minmax(0,1fr)_auto] overflow-hidden rounded-[var(--radius-control)] border border-vui-border-subtle ${vuiFlatPanelClass}`,
   chatTranscript: "grid content-start gap-7 overflow-hidden px-[clamp(18px,7vw,100px)] py-7",
   chatMessage: "grid max-w-[720px] grid-cols-[28px_minmax(0,1fr)] items-start gap-3",
   chatMessageCopy: "grid min-w-0 gap-2 pt-1",
@@ -67,7 +71,7 @@ const styles = {
   canvasPanel: "grid min-h-[390px] content-start gap-3 rounded-[var(--radius-control)] border border-vui-border-subtle bg-vui-surface-row p-3",
   canvasBoard: [
     "grid min-h-[300px] grid-cols-2 content-center items-center gap-3 rounded-[var(--radius-control)] border border-dashed",
-    "border-vui-border-subtle bg-[color-mix(in_srgb,var(--vui-surface-panel)_72%,transparent)] p-4 sm:grid-cols-3",
+    "border-vui-border-subtle !bg-[var(--vui-surface-panel)] p-4 sm:grid-cols-3",
   ].join(" "),
   canvasNode: "flex min-w-0 items-center gap-2 rounded-[var(--radius-control)] border border-vui-border-subtle bg-vui-surface-panel p-2.5",
   nodeAvatar: "block size-8 shrink-0 animate-pulse rounded-full bg-[color-mix(in_srgb,var(--accent-cool)_18%,var(--vui-border-subtle))] motion-reduce:animate-none",

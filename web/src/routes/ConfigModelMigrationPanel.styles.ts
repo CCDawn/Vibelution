@@ -1,5 +1,6 @@
-const panelSurface =
-  "[background:var(--vui-surface-panel)] [border:1px_solid_var(--vui-border-subtle)] [border-radius:8px]";
+import { vuiOpaquePanelClass } from "../design/vuiSurfaceRecipes";
+
+const panelSurface = vuiOpaquePanelClass;
 
 const styles = {
   actions: "vui-routes-configmodelmigrationpanel actions flex min-w-0 flex-wrap items-center gap-1.5",

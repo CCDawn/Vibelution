@@ -1,10 +1,14 @@
+import {
+  vuiFlatPanelClass,
+} from "../../design/vuiSurfaceRecipes";
+
 const styles = {
   pulse:
     "animate-pulse bg-[color-mix(in_srgb,var(--vui-border-subtle)_70%,transparent)]",
   indexShell:
     "grid min-w-0 content-start gap-2 px-1 py-0.5",
   indexGroup:
-    "grid min-w-0 gap-1.5 rounded-[var(--vui-radius-panel-soft)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_72%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_52%,transparent)] p-1.5",
+    "grid min-w-0 gap-1.5 rounded-[var(--vui-radius-panel-soft)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_72%,transparent)] !bg-[var(--vui-surface-row)] p-1.5",
   indexGroupHeader:
     "flex min-h-6 items-center justify-between gap-3 px-0.5",
   indexGroupTitle:
@@ -40,11 +44,10 @@ const styles = {
   messageLine:
     "h-2.5 w-[78%] rounded-full opacity-80",
   userBubble:
-    "h-10 w-full rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_74%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_64%,transparent)]",
-  composerWrap:
-    "mx-auto mb-3 grid w-[min(calc(100%_-_32px),960px)] gap-2 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_84%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_88%,transparent)] p-3 shadow-[var(--vui-shadow-hairline)]",
+    "h-10 w-full rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_74%,transparent)] !bg-[var(--vui-surface-row)]",
+  composerWrap: `mx-auto mb-3 grid w-[min(calc(100%_-_32px),960px)] gap-2 ${vuiFlatPanelClass} p-3 shadow-[var(--vui-shadow-hairline)]`,
   composerInput:
-    "h-11 w-full rounded-[var(--radius-control)] bg-[color-mix(in_srgb,var(--vui-surface-row)_66%,transparent)]",
+    "h-11 w-full rounded-[var(--radius-control)] !bg-[var(--vui-surface-row)]",
   composerToolbar:
     "flex items-center justify-between gap-3",
   composerTools:

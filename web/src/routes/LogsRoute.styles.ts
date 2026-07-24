@@ -6,6 +6,11 @@
 // componentizes LogsRoute.
 // Includes phantom keys accessed by consumers but never declared in the old
 // styleKeys; the Proxy synthesized them on demand.
+import {
+  vuiFlatPanelClass,
+  vuiOpaqueRowClass,
+} from "../design/vuiSurfaceRecipes";
+
 const styles = {
   clearButton:
     "clearButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
@@ -33,17 +38,14 @@ const styles = {
   diagnosticsHeader:
     "diagnosticsHeader min-w-0 flex flex-wrap items-center gap-1.5",
   diagnosticsInlineMetrics:
-    "diagnosticsInlineMetrics min-w-0 inline-flex w-fit max-w-full items-center gap-1.5 whitespace-nowrap rounded-full border border-[color-mix(in_srgb,var(--vui-border-subtle)_64%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_58%,transparent)] px-2 py-1 [font-size:var(--vui-font-xs)] leading-none text-[var(--fg-secondary)]",
-  diagnosticsPanel:
-    "diagnosticsPanel min-w-0 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_58%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_44%,transparent)] p-2",
+    "diagnosticsInlineMetrics min-w-0 inline-flex w-fit max-w-full items-center gap-1.5 whitespace-nowrap rounded-full border border-[color-mix(in_srgb,var(--vui-border-subtle)_64%,transparent)] !bg-[var(--vui-surface-row)] px-2 py-1 [font-size:var(--vui-font-xs)] leading-none text-[var(--fg-secondary)]",
+  diagnosticsPanel: `diagnosticsPanel min-w-0 ${vuiFlatPanelClass} p-2`,
   diagnosticsSummary:
     "diagnosticsSummary min-w-0",
-  diagnosticsSummaryRow:
-    "diagnosticsSummaryRow min-w-0 flex cursor-pointer flex-wrap items-center gap-1.5 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_58%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_62%,transparent)] p-2 hover:border-[color-mix(in_srgb,var(--border-strong)_58%,transparent)] hover:bg-[color-mix(in_srgb,var(--vui-surface-row)_78%,transparent)]",
+  diagnosticsSummaryRow: `diagnosticsSummaryRow min-w-0 flex cursor-pointer flex-wrap items-center gap-1.5 ${vuiOpaqueRowClass} p-2 hover:border-[color-mix(in_srgb,var(--border-strong)_58%,transparent)] hover:!bg-[var(--vui-surface-row)]`,
   diagnosticsSummaryText:
     "diagnosticsSummaryText min-w-[12rem] flex-1 [overflow-wrap:anywhere] [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] max-[560px]:min-w-0",
-  emptySurface:
-    "emptySurface min-w-0 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_72%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_58%,transparent)] p-2 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+  emptySurface: `emptySurface min-w-0 ${vuiFlatPanelClass} p-2 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]`,
   eventTypeList:
     "eventTypeList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   eyebrow:
@@ -64,14 +66,10 @@ const styles = {
     "logPreviewStack min-w-0 grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] content-stretch gap-2 font-mono [font-size:var(--vui-font-xs)]",
   metaPill:
     "metaPill min-w-0 flex flex-wrap items-center gap-1.5 inline-flex min-h-6 w-fit max-w-full justify-center rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
-  notice:
-    "notice min-w-0 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_72%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_58%,transparent)] p-2",
-  noticeError:
-    "noticeError min-w-0 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_72%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_58%,transparent)] p-2 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
-  noticeSuccess:
-    "noticeSuccess min-w-0 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_72%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_58%,transparent)] p-2 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
-  packageButton:
-    "packageButton min-w-0 flex min-h-[var(--vui-control-height-sm)] w-full max-w-full flex-col items-stretch justify-start gap-1 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_62%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_54%,transparent)] px-2 py-1.5 text-left [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[color-mix(in_srgb,var(--border-strong)_58%,transparent)] hover:bg-[color-mix(in_srgb,var(--vui-surface-row)_72%,transparent)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55",
+  notice: `notice min-w-0 ${vuiFlatPanelClass} p-2`,
+  noticeError: `noticeError min-w-0 ${vuiFlatPanelClass} p-2 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]`,
+  noticeSuccess: `noticeSuccess min-w-0 ${vuiFlatPanelClass} p-2 border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]`,
+  packageButton: `packageButton min-w-0 flex min-h-[var(--vui-control-height-sm)] w-full max-w-full flex-col items-stretch justify-start gap-1 ${vuiOpaqueRowClass} px-2 py-1.5 text-left [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[color-mix(in_srgb,var(--border-strong)_58%,transparent)] hover:!bg-[var(--vui-surface-row)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55`,
   packageButtonActive:
     "packageButtonActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] text-[var(--accent-cool)]",
   packageButtonCount:
@@ -82,8 +80,7 @@ const styles = {
     "packageButtonPath min-w-0 truncate font-mono [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   packageButtonTitle:
     "packageButtonTitle min-w-0 [overflow-wrap:anywhere] [font-size:var(--vui-font-sm)] font-semibold leading-tight text-[var(--fg-primary)]",
-  packageClusterItem:
-    "packageClusterItem min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2",
+  packageClusterItem: `packageClusterItem min-w-0 ${vuiOpaqueRowClass} p-2`,
   packageClusterList:
     "packageClusterList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   packageClusterRefs:
@@ -101,13 +98,11 @@ const styles = {
   packageDiagnosisHeader:
     "packageDiagnosisHeader min-w-0 flex flex-wrap items-center gap-1.5",
   packageDiagnosisInlineMetrics:
-    "packageDiagnosisInlineMetrics min-w-0 inline-flex w-fit max-w-full items-center gap-1.5 whitespace-nowrap rounded-full border border-[color-mix(in_srgb,var(--vui-border-subtle)_64%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_58%,transparent)] px-2 py-1 [font-size:var(--vui-font-xs)] leading-none text-[var(--fg-secondary)]",
-  packageDiagnosisPanel:
-    "packageDiagnosisPanel min-w-0 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_58%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_44%,transparent)] p-2",
+    "packageDiagnosisInlineMetrics min-w-0 inline-flex w-fit max-w-full items-center gap-1.5 whitespace-nowrap rounded-full border border-[color-mix(in_srgb,var(--vui-border-subtle)_64%,transparent)] !bg-[var(--vui-surface-row)] px-2 py-1 [font-size:var(--vui-font-xs)] leading-none text-[var(--fg-secondary)]",
+  packageDiagnosisPanel: `packageDiagnosisPanel min-w-0 ${vuiFlatPanelClass} p-2`,
   packageDiagnosisSummary:
     "packageDiagnosisSummary min-w-0",
-  packageDiagnosisSummaryRow:
-    "packageDiagnosisSummaryRow min-w-0 flex cursor-pointer flex-wrap items-center gap-1.5 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_58%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_62%,transparent)] p-2 hover:border-[color-mix(in_srgb,var(--border-strong)_58%,transparent)] hover:bg-[color-mix(in_srgb,var(--vui-surface-row)_78%,transparent)]",
+  packageDiagnosisSummaryRow: `packageDiagnosisSummaryRow min-w-0 flex cursor-pointer flex-wrap items-center gap-1.5 ${vuiOpaqueRowClass} p-2 hover:border-[color-mix(in_srgb,var(--border-strong)_58%,transparent)] hover:!bg-[var(--vui-surface-row)]`,
   packageDiagnosisSummaryText:
     "packageDiagnosisSummaryText min-w-[12rem] flex-1 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   packageEvidencePaths:
@@ -122,14 +117,13 @@ const styles = {
     "packageFileName min-w-0 truncate [font-size:var(--vui-font-sm)] font-semibold leading-tight text-[var(--fg-primary)]",
   packageFilePath:
     "packageFilePath min-w-0 truncate font-mono [font-size:var(--vui-font-xs)] text-[var(--fg-tertiary)]",
-  packageFileRow:
-    "packageFileRow min-w-0 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_58%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_52%,transparent)] p-1 !grid grid-cols-[auto_minmax(0,1fr)] items-stretch gap-1.5",
+  packageFileRow: `packageFileRow min-w-0 ${vuiOpaqueRowClass} p-1 !grid grid-cols-[auto_minmax(0,1fr)] items-stretch gap-1.5`,
   packageFileRowActive:
     "packageFileRowActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] text-[var(--accent-cool)]",
   packageFilesHeader:
     "packageFilesHeader min-w-0 flex flex-wrap items-center justify-between gap-1.5",
   packageFilesPanel:
-    "packageFilesPanel min-w-0 grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-1.5 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_52%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_30%,transparent)] p-1.5",
+    "packageFilesPanel min-w-0 grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-1.5 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_52%,transparent)] !bg-[var(--vui-surface-panel)] p-1.5",
   packageFilesTitle:
     "packageFilesTitle min-w-0 [font-size:var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
   packageIssueStateStrip:
@@ -158,38 +152,29 @@ const styles = {
     "packageSelectButtonActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] text-[var(--accent-cool)]",
   packageWorkRunHeader:
     "packageWorkRunHeader min-w-0 flex flex-wrap items-center gap-1.5",
-  packageWorkRunItem:
-    "packageWorkRunItem min-w-0 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_58%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_56%,transparent)] p-2",
+  packageWorkRunItem: `packageWorkRunItem min-w-0 ${vuiOpaqueRowClass} p-2`,
   packageWorkRunList:
     "packageWorkRunList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   packageWorkRunMetricStrip:
     "packageWorkRunMetricStrip min-w-0 flex flex-wrap items-center gap-1.5",
-  packageWorkRunPanel:
-    "packageWorkRunPanel min-w-0 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_58%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_42%,transparent)] p-2",
+  packageWorkRunPanel: `packageWorkRunPanel min-w-0 ${vuiFlatPanelClass} p-2`,
   packageWorkRunPathButton:
     "packageWorkRunPathButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 font-mono",
   paneCollapsed:
     "paneCollapsed min-w-0 hidden",
-  panelSearch:
-    "panelSearch min-w-0 flex items-center gap-1.5 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_58%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_40%,transparent)] p-2",
+  panelSearch: `panelSearch min-w-0 flex items-center gap-1.5 ${vuiFlatPanelClass} p-2`,
   panelSearchInput:
     "panelSearchInput min-w-0 flex-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
-  panelState:
-    "panelState min-w-0 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_72%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_58%,transparent)] p-2",
-  previewActions:
-    "previewActions min-w-0 flex flex-wrap items-center gap-1.5 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_58%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_38%,transparent)] p-1.5",
+  panelState: `panelState min-w-0 ${vuiFlatPanelClass} p-2`,
+  previewActions: `previewActions min-w-0 flex flex-wrap items-center gap-1.5 ${vuiFlatPanelClass} p-1.5`,
   previewPane:
-    "previewPane min-w-0 max-w-full rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_48%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_28%,transparent)] p-1.5 grid min-h-0 grid-rows-[minmax(0,1fr)] gap-1.5 overflow-auto overflow-x-hidden",
-  previewStateCard:
-    "previewStateCard min-w-0 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_58%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_42%,transparent)] p-2",
-  previewStateFlow:
-    "previewStateFlow min-w-0 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_52%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_56%,transparent)] p-2 !grid grid-cols-[repeat(4,minmax(0,1fr))] gap-[5px] max-[560px]:grid-cols-[repeat(2,minmax(0,1fr))]",
+    "previewPane min-w-0 max-w-full rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_48%,transparent)] !bg-[var(--vui-surface-panel)] p-1.5 grid min-h-0 grid-rows-[minmax(0,1fr)] gap-1.5 overflow-auto overflow-x-hidden",
+  previewStateCard: `previewStateCard min-w-0 ${vuiFlatPanelClass} p-2`,
+  previewStateFlow: `previewStateFlow min-w-0 ${vuiOpaqueRowClass} p-2 !grid grid-cols-[repeat(4,minmax(0,1fr))] gap-[5px] max-[560px]:grid-cols-[repeat(2,minmax(0,1fr))]`,
   previewStateHeader:
     "previewStateHeader min-w-0 flex flex-wrap items-center gap-1.5",
-  previewStateSkeleton:
-    "previewStateSkeleton min-w-0 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_48%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_48%,transparent)] p-2",
-  previewStateSurface:
-    "previewStateSurface min-w-0 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_58%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_38%,transparent)] p-2",
+  previewStateSkeleton: `previewStateSkeleton min-w-0 ${vuiOpaqueRowClass} p-2`,
+  previewStateSurface: `previewStateSurface min-w-0 ${vuiFlatPanelClass} p-2`,
   railHeader:
     "railHeader min-w-0 grid min-h-0 content-start gap-1 overflow-auto",
   railText:
@@ -212,8 +197,7 @@ const styles = {
     "rightRail min-w-0 grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-1.5 overflow-hidden max-[760px]:max-h-[34vh]",
   rightRailResizeHandle:
     "rightRailResizeHandle min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto max-[760px]:hidden",
-  rootButton:
-    "rootButton min-w-0 flex min-h-[var(--vui-control-height-sm)] w-full max-w-full flex-col items-stretch justify-start gap-1 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_62%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_52%,transparent)] px-2 py-1.5 text-left [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[color-mix(in_srgb,var(--border-strong)_58%,transparent)] hover:bg-[color-mix(in_srgb,var(--vui-surface-row)_72%,transparent)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55",
+  rootButton: `rootButton min-w-0 flex min-h-[var(--vui-control-height-sm)] w-full max-w-full flex-col items-stretch justify-start gap-1 ${vuiOpaqueRowClass} px-2 py-1.5 text-left [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[color-mix(in_srgb,var(--border-strong)_58%,transparent)] hover:!bg-[var(--vui-surface-row)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55`,
   rootButtonActive:
     "rootButtonActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] text-[var(--accent-cool)]",
   rootButtonFooter:
@@ -238,8 +222,7 @@ const styles = {
     "rootStateMissing min-w-0 border-[color-mix(in_srgb,var(--state-warning)_34%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_9%,transparent)] text-[var(--state-warning)]",
   route:
     "route min-w-0 max-w-full grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] content-start overflow-hidden overflow-x-hidden text-[var(--fg-primary)]",
-  sceneCard:
-    "sceneCard min-w-0 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_58%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_42%,transparent)] p-2",
+  sceneCard: `sceneCard min-w-0 ${vuiFlatPanelClass} p-2`,
   sceneCardActive:
     "sceneCardActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] text-[var(--accent-cool)]",
   sceneCardButton:
@@ -248,22 +231,15 @@ const styles = {
     "sceneCardHeader min-w-0 flex flex-wrap items-center gap-1.5",
   sceneCardHeaderRow:
     "sceneCardHeaderRow min-w-0 flex flex-wrap items-center gap-1.5",
-  sceneCardMeta:
-    "sceneCardMeta min-w-0 flex flex-wrap items-center gap-1.5 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_52%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_54%,transparent)] p-1.5",
-  sceneCardStatus:
-    "sceneCardStatus min-w-0 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_52%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_54%,transparent)] p-1.5",
-  sceneCardStatusGroup:
-    "sceneCardStatusGroup min-w-0 grid gap-1.5 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_52%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_54%,transparent)] p-1.5",
-  sceneCardSummary:
-    "sceneCardSummary min-w-0 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_52%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_54%,transparent)] p-1.5",
+  sceneCardMeta: `sceneCardMeta min-w-0 flex flex-wrap items-center gap-1.5 ${vuiOpaqueRowClass} p-1.5`,
+  sceneCardStatus: `sceneCardStatus min-w-0 ${vuiOpaqueRowClass} p-1.5`,
+  sceneCardStatusGroup: `sceneCardStatusGroup min-w-0 grid gap-1.5 ${vuiOpaqueRowClass} p-1.5`,
+  sceneCardSummary: `sceneCardSummary min-w-0 ${vuiOpaqueRowClass} p-1.5`,
   sceneCardTop:
     "sceneCardTop min-w-0 grid gap-1.5",
-  sceneDetailHeaderCompact:
-    "sceneDetailHeaderCompact min-w-0 flex flex-wrap items-center gap-1.5 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_58%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_42%,transparent)] p-2",
-  sceneDetailSummary:
-    "sceneDetailSummary min-w-0 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_52%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_54%,transparent)] p-1.5",
-  sceneDetailSurface:
-    "sceneDetailSurface min-w-0 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_58%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_42%,transparent)] p-2",
+  sceneDetailHeaderCompact: `sceneDetailHeaderCompact min-w-0 flex flex-wrap items-center gap-1.5 ${vuiFlatPanelClass} p-2`,
+  sceneDetailSummary: `sceneDetailSummary min-w-0 ${vuiOpaqueRowClass} p-1.5`,
+  sceneDetailSurface: `sceneDetailSurface min-w-0 ${vuiFlatPanelClass} p-2`,
   sceneDetailTitle:
     "sceneDetailTitle min-w-0 [font-size:var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
   sceneEvidenceStrip:
@@ -284,14 +260,12 @@ const styles = {
     "sceneIssueBadgeError min-w-0 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
   sceneIssueBadgeWarning:
     "sceneIssueBadgeWarning min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
-  scenePillRow:
-    "scenePillRow min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2",
+  scenePillRow: `scenePillRow min-w-0 ${vuiOpaqueRowClass} p-2`,
   sceneQuickFacts:
     "sceneQuickFacts min-w-0",
   sceneRawHeader:
     "sceneRawHeader min-w-0 flex flex-wrap items-center gap-1.5",
-  sceneRawPreview:
-    "sceneRawPreview min-w-0 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_58%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_42%,transparent)] p-2",
+  sceneRawPreview: `sceneRawPreview min-w-0 ${vuiFlatPanelClass} p-2`,
   sceneTechnicalDetails:
     "sceneTechnicalDetails min-w-0",
   sceneTechnicalGrid:
@@ -314,16 +288,14 @@ const styles = {
     "sidebarTitle min-w-0 [font-size:var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
   startupTraceHeader:
     "startupTraceHeader min-w-0 flex flex-wrap items-center gap-1.5",
-  startupTracePanel:
-    "startupTracePanel min-w-0 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_58%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_42%,transparent)] p-2",
+  startupTracePanel: `startupTracePanel min-w-0 ${vuiFlatPanelClass} p-2`,
   startupTraceStep:
     "startupTraceStep min-w-0",
   startupTraceStepMissing:
     "startupTraceStepMissing min-w-0",
   startupTraceSteps:
     "startupTraceSteps min-w-0",
-  stateFactRow:
-    "stateFactRow min-w-0 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_72%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_68%,transparent)] p-2 !grid grid-cols-[repeat(3,minmax(0,1fr))] gap-[5px] w-full mt-0.5 max-[560px]:grid-cols-[minmax(0,1fr)]",
+  stateFactRow: `stateFactRow min-w-0 ${vuiOpaqueRowClass} p-2 !grid grid-cols-[repeat(3,minmax(0,1fr))] gap-[5px] w-full mt-0.5 max-[560px]:grid-cols-[minmax(0,1fr)]`,
   stateKicker:
     "stateKicker min-w-0",
   stateSkeletonStack:
@@ -337,12 +309,9 @@ const styles = {
     "timelineFields min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   timelineHeader:
     "timelineHeader min-w-0 flex flex-wrap items-center gap-1.5 grid min-h-0 content-start overflow-auto",
-  timelineItem:
-    "timelineItem min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2",
-  timelineItemError:
-    "timelineItemError min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
-  timelineItemWarning:
-    "timelineItemWarning min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+  timelineItem: `timelineItem min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto ${vuiOpaqueRowClass} p-2`,
+  timelineItemError: `timelineItemError min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto ${vuiOpaqueRowClass} p-2 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]`,
+  timelineItemWarning: `timelineItemWarning min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto ${vuiOpaqueRowClass} p-2 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]`,
   timelineList:
     "timelineList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   timelineMessage:

@@ -8,7 +8,7 @@ const styles = {
   activity: cx("activity", "grid min-w-0 gap-1.5"),
   group: cx(
     "group",
-    "group min-w-0 overflow-hidden rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_82%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_68%,transparent)]",
+    "group min-w-0 overflow-hidden rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_82%,transparent)] !bg-[var(--vui-surface-row)]",
   ),
   groupSummary: cx(
     "groupSummary",
@@ -26,7 +26,7 @@ const styles = {
   item: cx("item", "min-w-0"),
   itemDetails: cx(
     "itemDetails",
-    "group min-w-0 rounded-[var(--radius-control)] border border-transparent bg-transparent open:border-[color-mix(in_srgb,var(--vui-border-subtle)_72%,transparent)] open:bg-[color-mix(in_srgb,var(--vui-surface-panel)_72%,transparent)]",
+    "group min-w-0 rounded-[var(--radius-control)] border border-transparent bg-transparent open:border-[color-mix(in_srgb,var(--vui-border-subtle)_72%,transparent)] open:!bg-[var(--vui-surface-panel)]",
   ),
   itemSummary: cx(
     "itemSummary",

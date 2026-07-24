@@ -2,7 +2,7 @@ import { EditorView } from "@codemirror/view";
 
 export const workbenchCodeMirrorTheme = EditorView.theme({
   "&": {
-    backgroundColor: "var(--surface-code)",
+    backgroundColor: "var(--vui-surface-workspace)",
     color: "var(--fg-primary)",
   },
   ".cm-content": {

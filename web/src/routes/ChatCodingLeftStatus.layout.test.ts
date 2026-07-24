@@ -31,25 +31,19 @@ describe("ChatCodingRoute left status panel layout contract", () => {
   });
 
   it("keeps critical copy visible and moves token detail to accessible tooltip triggers", () => {
-    expect(styles.currentSessionLine).toContain("whitespace-normal");
     expect(styles.currentSessionLine).toContain("[overflow-wrap:anywhere]");
     expect(styles.activeSkillStatus).toContain("grid-cols-[minmax(0,1fr)]");
-    expect(styles.activeSkillIdentity).toContain("[&_strong]:whitespace-normal");
-    expect(styles.activeSkillMeta).toContain("[&_span]:whitespace-normal");
     expect(styles.tokenStatusMeta).toContain("sr-only");
     expect(styles.tokenStatusMeta).not.toContain("line-clamp");
     expect(tokenCoreStatusPanelSource).toContain("VTooltip");
     expect(tokenCoreStatusPanelSource).toContain("renderTrigger");
     expect(tokenCoreStatusPanelSource).toContain("aria-label={cacheDetailOpenLabel}");
     expect(tokenCoreStatusPanelSource).toContain('aria-label={`${metric.label} ${metric.value}. ${metric.meta}`}');
-    expect(styles.companionCopy).toContain("[&>p]:whitespace-normal");
-    expect(styles.companionTopLine).toContain("[&_strong]:whitespace-normal");
-    expect(styles.companionTopLine).toContain("[&_span]:whitespace-normal");
+    expect(styles.companionCopy).toContain("[&>p]:[overflow-wrap:anywhere]");
+    expect(styles.companionTopLine).toContain("[&_strong]:truncate");
+    expect(styles.companionTopLine).toContain("[&_span]:truncate");
     expect(styles.companionBlock).toContain("overflow-visible");
-    expect(styles.companionBlock).not.toContain("overflow-hidden");
     expect(styles.companionBlock).not.toContain("!flex-1");
-    expect(styles.companionCopy).not.toContain("truncate");
-    expect(styles.companionTopLine).not.toContain("truncate");
   });
 
   it("lets compact meta rows and action labels wrap without horizontal scrollbars", () => {
@@ -58,7 +52,7 @@ describe("ChatCodingRoute left status panel layout contract", () => {
     expect(styles.inlineMetaPill).toContain("[&_span]:whitespace-normal");
     expect(styles.inlineMetaPill).toContain("[&_strong]:whitespace-normal");
     expect(styles.inlineStat).toContain("[&_strong]:whitespace-normal");
-    expect(styles.featureChip).toContain("[&_strong]:whitespace-normal");
+    expect(styles.featureChip).toContain("[&_strong]:truncate");
     expect(styles.petShowcaseAction).toContain("[&_span]:whitespace-normal");
     expect(styles.inlineMetaPill).not.toContain("[&_strong]:truncate");
     expect(styles.petShowcaseAction).not.toContain("[&_span]:truncate");

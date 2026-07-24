@@ -1,5 +1,9 @@
+import {
+  vuiOpaqueRowClass,
+} from "../design/vuiSurfaceRecipes";
+
 const rowSurface = "[border:1px_solid_var(--vui-border-subtle)] [border-radius:8px] [background:var(--vui-surface-row)]";
-const rowSurfaceSoft = "[border:1px_solid_var(--vui-border-subtle)] [border-radius:8px] [background:color-mix(in_srgb,_var(--vui-surface-row)_72%,_transparent)]";
+const rowSurfaceSoft = "[border:1px_solid_var(--vui-border-subtle)] [border-radius:8px] !bg-[var(--vui-surface-row)]";
 const actionSurface = "[border:1px_solid_var(--vui-border-subtle)] [border-radius:var(--radius-control)] [background:var(--vui-control-muted)] [color:var(--fg-primary)] [transition:border-color_140ms_ease,_background-color_140ms_ease,_color_140ms_ease] hover:[border-color:color-mix(in_srgb,_var(--accent-warm)_30%,_transparent)] hover:[background:var(--vui-control-muted-hover)]";
 const metricSurface = `grid [gap:2px] min-w-0 ${rowSurfaceSoft} [&_span]:[color:var(--fg-tertiary)] [&_span]:[font-size:var(--vui-font-xs)] [&_strong]:[color:var(--fg-primary)] [&_strong]:[font-weight:600] [&_strong]:min-w-0 [&_strong]:[overflow:hidden] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap] [min-height:32px] [padding:4px_6px]`;
 
@@ -8,8 +12,7 @@ const styles = {
     "flex [flex-wrap:wrap] [gap:6px]",
   closedLoopLedger:
     "grid [gap:7px] min-w-0 [padding:8px] [border:1px_solid_color-mix(in_srgb,_var(--accent-cool)_26%,_var(--vui-border-subtle))] [border-radius:7px] [background:color-mix(in_srgb,_var(--accent-cool)_7%,_var(--vui-surface-row))] [&_p]:[margin:0] [&_p]:[color:var(--fg-secondary)] [&_p]:[font-size:var(--vui-font-xs)] [&_p]:[line-height:1.4] [&_p]:[overflow-wrap:anywhere]",
-  closedLoopLedgerEvidenceGrid:
-    "grid [grid-template-columns:repeat(2,_minmax(0,_1fr))] [gap:6px] [&_article]:grid [&_article]:[gap:2px] [&_article]:min-w-0 [&_article]:[padding:5px_6px] [&_article]:[border:1px_solid_var(--border-hairline)] [&_article]:[border-radius:6px] [&_article]:[background:color-mix(in_srgb,_var(--vui-surface-row)_78%,_transparent)] [&_span]:min-w-0 [&_span]:[overflow:hidden] [&_span]:[text-overflow:ellipsis] [&_span]:[white-space:nowrap] [&_strong]:min-w-0 [&_strong]:[overflow:hidden] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap] [&_span]:[color:var(--fg-tertiary)] [&_span]:[font-size:var(--vui-font-xs)] [&_strong]:[color:var(--fg-primary)] [&_strong]:[font-size:var(--vui-font-xs)]",
+  closedLoopLedgerEvidenceGrid: `grid [grid-template-columns:repeat(2,_minmax(0,_1fr))] [gap:6px] [&_article]:grid [&_article]:[gap:2px] [&_article]:min-w-0 [&_article]:[padding:5px_6px] [&_article]:[border:1px_solid_var(--border-hairline)] [&_article]:[border-radius:6px] [&_article]:${vuiOpaqueRowClass} [&_span]:min-w-0 [&_span]:[overflow:hidden] [&_span]:[text-overflow:ellipsis] [&_span]:[white-space:nowrap] [&_strong]:min-w-0 [&_strong]:[overflow:hidden] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap] [&_span]:[color:var(--fg-tertiary)] [&_span]:[font-size:var(--vui-font-xs)] [&_strong]:[color:var(--fg-primary)] [&_strong]:[font-size:var(--vui-font-xs)]`,
   closedLoopLedgerHeader:
     "flex [align-items:flex-start] [justify-content:space-between] [gap:10px] min-w-0 [&_div]:grid [&_div]:[gap:3px] [&_div]:min-w-0",
   compactActionGroup:

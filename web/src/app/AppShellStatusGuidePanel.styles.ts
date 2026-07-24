@@ -1,18 +1,23 @@
+import {
+  vuiGlassPanelClass,
+  vuiOpaqueRowClass,
+} from "../design/vuiSurfaceRecipes";
+
 const styles = {
-  lifecycleProofCard: "vui-app-appshell lifecycleProofCard min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  lifecycleProofCard: `vui-app-appshell lifecycleProofCard min-w-0 ${vuiGlassPanelClass} p-2`,
   lifecycleProofHeader: "vui-app-appshell lifecycleProofHeader min-w-0 flex flex-wrap items-center gap-1.5",
-  lifecycleProofItem: "vui-app-appshell lifecycleProofItem min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2",
+  lifecycleProofItem: `vui-app-appshell lifecycleProofItem min-w-0 ${vuiOpaqueRowClass} p-2`,
   lifecycleProofList: "vui-app-appshell lifecycleProofList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   lifecycleProofMeta: "vui-app-appshell lifecycleProofMeta min-w-0 flex flex-wrap items-center gap-1.5",
   lifecycleProofName: "vui-app-appshell lifecycleProofName min-w-0 [font-size:var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
   statusDot: "vui-app-appshell statusDot inline-block h-2 w-2 shrink-0 rounded-full border border-[color-mix(in_srgb,currentColor_38%,transparent)] bg-current p-0 align-middle",
-  statusGuideCard: "vui-app-appshell statusGuideCard min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  statusGuideCard: `vui-app-appshell statusGuideCard min-w-0 ${vuiGlassPanelClass} p-2`,
   statusGuideCardHeader: "vui-app-appshell statusGuideCardHeader min-w-0 flex flex-wrap items-center gap-1.5 px-0.5 pb-1",
   statusGuideGrid: "vui-app-appshell statusGuideGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
   statusGuideHeader: "vui-app-appshell statusGuideHeader min-w-0 flex flex-wrap items-center gap-1.5",
   statusGuideList: "vui-app-appshell statusGuideList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
-  statusGuideListItem: "vui-app-appshell statusGuideListItem min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2",
-  statusGuidePanel: "vui-app-appshell statusGuidePanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)] p-2",
+  statusGuideListItem: `vui-app-appshell statusGuideListItem min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto ${vuiOpaqueRowClass} p-2`,
+  statusGuidePanel: `vui-app-appshell statusGuidePanel min-w-0 ${vuiGlassPanelClass} p-2`,
   statusGuideStateLabel: "vui-app-appshell statusGuideStateLabel min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   status_active: "vui-app-appshell status_active min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
   status_blocked: "vui-app-appshell status_blocked min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",

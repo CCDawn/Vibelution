@@ -1,14 +1,18 @@
+import {
+  vuiOpaqueRowClass,
+} from "../design/vuiSurfaceRecipes";
+
 const routeClass = "grid h-full min-h-0 min-w-0 grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden";
 const headerClass = "hidden";
 const headerActionsClass = "inline-flex min-w-0 items-center justify-end gap-1.5";
 const controlButtonClass =
   "inline-flex min-h-[26px] w-fit max-w-full items-center justify-center gap-1.5 whitespace-nowrap rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-soft)_76%,transparent)] bg-[color-mix(in_srgb,var(--vui-control-muted)_72%,transparent)] px-2 py-[3px] [font-size:var(--vui-font-xs)] text-vui-fg-secondary hover:border-[color-mix(in_srgb,var(--border-strong)_78%,transparent)] hover:bg-[var(--vui-control-muted-hover)] hover:text-vui-fg-primary disabled:opacity-55";
 const fieldSurfaceClass =
-  "rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-soft)_76%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-workspace)_86%,transparent)]";
+  "rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-soft)_76%,transparent)] !bg-[var(--vui-surface-workspace)]";
 const rowButtonSurfaceClass =
-  "block !h-auto w-full rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-soft)_74%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_78%,transparent)] px-[9px] py-2 text-left text-vui-fg-primary hover:border-[color-mix(in_srgb,var(--border-strong)_78%,transparent)] hover:bg-[color-mix(in_srgb,var(--vui-surface-row)_88%,transparent)]";
+  `block !h-auto w-full ${vuiOpaqueRowClass} px-[9px] py-2 text-left text-vui-fg-primary hover:border-[color-mix(in_srgb,var(--border-strong)_78%,transparent)] hover:!bg-[var(--vui-surface-row)]`;
 const pillSurfaceClass =
-  "inline-flex min-h-5 max-w-full items-center justify-center rounded-full border border-[color-mix(in_srgb,var(--vui-border-soft)_74%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_72%,transparent)] px-1.5 [font-size:var(--vui-font-xs)]";
+  `inline-flex min-h-5 max-w-full items-center justify-center rounded-full border border-[color-mix(in_srgb,var(--vui-border-soft)_74%,transparent)] ${vuiOpaqueRowClass} px-1.5 [font-size:var(--vui-font-xs)]`;
 const refreshButtonClass = `${controlButtonClass} h-[var(--vui-control-height-sm)] w-[var(--vui-control-height-sm)] p-0`;
 const returnButtonClass = `${controlButtonClass} gap-[5px] text-[var(--accent-cool)] no-underline`;
 const workspaceClass = "grid h-full min-h-0 min-w-0 grid-cols-[clamp(260px,26vw,380px)_minmax(0,1fr)] gap-1.5 overflow-hidden px-2 pb-2 pt-1.5 max-[980px]:grid-cols-1 max-[980px]:content-start max-[980px]:overflow-auto";
@@ -45,7 +49,7 @@ const templateButtonBaseClass = [
 const templateButtonActiveClass = "border-[color-mix(in_srgb,var(--accent-warm)_30%,transparent)] bg-[var(--vui-surface-row-hover)] shadow-[var(--vui-shadow-inset-accent)]";
 const templateMainClass = "grid min-w-0 gap-0.5 [&_*]:min-w-0 [&_*]:truncate";
 const templateMetaClass =
-  "flex min-w-0 max-w-full flex-wrap gap-1 overflow-hidden [&_span]:inline-flex [&_span]:min-h-5 [&_span]:min-w-0 [&_span]:max-w-full [&_span]:items-center [&_span]:justify-center [&_span]:truncate [&_span]:whitespace-nowrap [&_span]:rounded-full [&_span]:border [&_span]:border-[color-mix(in_srgb,var(--vui-border-soft)_74%,transparent)] [&_span]:bg-[color-mix(in_srgb,var(--vui-surface-row)_72%,transparent)] [&_span]:px-1.5 [&_span]:[font-size:var(--vui-font-xs)] [&_span]:text-vui-fg-tertiary";
+  `flex min-w-0 max-w-full flex-wrap gap-1 overflow-hidden [&_span]:inline-flex [&_span]:min-h-5 [&_span]:min-w-0 [&_span]:max-w-full [&_span]:items-center [&_span]:justify-center [&_span]:truncate [&_span]:whitespace-nowrap [&_span]:rounded-full [&_span]:border [&_span]:border-[color-mix(in_srgb,var(--vui-border-soft)_74%,transparent)] [&_span]:${vuiOpaqueRowClass} [&_span]:px-1.5 [&_span]:[font-size:var(--vui-font-xs)] [&_span]:text-vui-fg-tertiary`;
 const categoryPillClass = `${pillSurfaceClass} text-[var(--accent-cool-2)]`;
 const editorHeaderClass = "flex min-w-0 items-start justify-between gap-3";
 const editorMetaClass = "grid grid-cols-3 gap-1.5 max-[980px]:grid-cols-1";
@@ -66,7 +70,7 @@ const cardTitleClass = "m-0 font-[var(--font-display)] text-[0.92rem] text-vui-f
 const helperTextClass = "m-0 [font-size:var(--vui-font-xs)] leading-[1.3] text-vui-fg-secondary";
 const detailCardHelperClass = `${helperTextClass} max-h-[58px] overflow-auto`;
 const agentRowsClass = "grid max-h-[140px] gap-[5px] overflow-auto";
-const agentItemClass = "grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-x-2.5 gap-y-1 rounded-[var(--radius-control)] border border-vui-border-soft bg-[color-mix(in_srgb,var(--vui-surface-row)_78%,transparent)] px-2 py-1.5 [&_*]:min-w-0";
+const agentItemClass = `grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-x-2.5 gap-y-1 ${vuiOpaqueRowClass} px-2 py-1.5 [&_*]:min-w-0`;
 const agentItemLinkedClass = "border-[color-mix(in_srgb,var(--accent-cool)_46%,var(--border-soft))] bg-[color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-row))]";
 const agentNameClass = "truncate";
 const agentCodeClass = "[font-size:var(--vui-font-xs)] text-vui-fg-tertiary";

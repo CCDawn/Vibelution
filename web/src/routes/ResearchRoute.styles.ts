@@ -9,6 +9,10 @@
 // coverage for dynamic `styles[`prefix_${tone}`]` lookups. Typed loosely as
 // Record<string, string> because those dynamic template indexes cannot index a
 // literal-keyed map; tightening is a follow-up, not Phase 0.
+import {
+  vuiOpaqueRowClass,
+} from "../design/vuiSurfaceRecipes";
+
 const styles: Record<string, string> = {
   agentModeCard:
     "agentModeCard min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_7%,transparent)] p-2 text-[var(--accent-cool)]",
@@ -198,8 +202,7 @@ const styles: Record<string, string> = {
     "sessionRail min-w-0 max-w-full grid min-h-0 content-start gap-1 overflow-auto overflow-x-hidden max-[980px]:grid-cols-[repeat(2,minmax(0,1fr))] max-[640px]:grid-cols-[minmax(0,1fr)]",
   sessionRow:
     "sessionRow min-w-0 max-w-full rounded-[var(--radius-control)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_48%,transparent)] p-1.5 !grid grid-cols-[minmax(0,1fr)_34px] items-stretch gap-0 rounded-[var(--radius-control)]",
-  sessionRow_active:
-    "sessionRow_active min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-1.5 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+  sessionRow_active: `sessionRow_active min-w-0 ${vuiOpaqueRowClass} p-1.5 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]`,
   sideColumn:
     "sideColumn min-w-0 max-w-full",
   sourceBar:
@@ -320,8 +323,7 @@ const styles: Record<string, string> = {
     "summaryCard min-w-0 max-w-full rounded-[var(--radius-panel)] border border-[color:color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_50%,transparent)] px-2 py-1.5 !grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-1.5",
   summaryGrid:
     "summaryGrid min-w-0 max-w-full grid gap-1.5 grid-cols-[repeat(auto-fit,minmax(7.5rem,1fr))] overflow-x-hidden max-[480px]:grid-cols-[minmax(0,1fr)]",
-  tagRow:
-    "tagRow min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2",
+  tagRow: `tagRow min-w-0 ${vuiOpaqueRowClass} p-2`,
   themeBody:
     "themeBody min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   themeCard:

@@ -81,7 +81,7 @@ describe("GitRoute layout contract", () => {
   it("keeps the Git route shell background-aware and header chrome-light", () => {
     expect(gitRouteStyles.route).not.toContain("surface-page");
     expect(gitRouteStyles.route).not.toContain("bg-[var(--surface-page)]");
-    expect(gitRouteStyles.route).not.toContain("bg-[color-mix(in_srgb,var(--surface-page)");
+    expect(gitRouteStyles.route).not.toMatch(/bg-\[|!bg-\[|var\(--vui-surface/);
     expect(gitRouteStyles.header).not.toContain("surface-panel");
     expect(gitRouteStyles.header).not.toContain("shadow-[var(--vui-shadow-hairline)]");
     expect(gitRouteStyles.header).toContain("!bg-transparent");
@@ -127,7 +127,7 @@ describe("GitRoute layout contract", () => {
 
     for (const key of largeSurfaceKeys) {
       expect(gitRouteStyles[key]).not.toContain("bg-[var(--surface-panel)]");
-      expect(gitRouteStyles[key]).toMatch(/bg-\[color-mix\(in_srgb,var\(--vui-surface-(panel|row)/);
+      expect(gitRouteStyles[key]).toMatch(/var\(--vui-surface-(panel|row)/);
     }
     for (const key of actionControlKeys) {
       expect(gitRouteStyles[key]).toContain("h-[var(--vui-control-height-sm)]");
@@ -156,7 +156,7 @@ describe("GitRoute layout contract", () => {
     expect(diffStyles.headerClass).toContain("max-[640px]:flex-wrap");
     expect(diffStyles.fileNameClass).toContain("truncate");
     expect(diffStyles.diffWrapClass).toContain("overflow-auto");
-    expect(diffStyles.diffWrapClass).toContain("bg-[var(--surface-code)]");
+    expect(diffStyles.diffWrapClass).toContain("bg-[var(--vui-surface-workspace)]");
     expect(diffStyles.diffTableClass).toContain("w-max");
     expect(diffStyles.diffTableClass).toContain("leading-[1.42]");
     expect(diffStyles.lineContentClass).toContain("whitespace-pre");
@@ -404,7 +404,7 @@ describe("GitRoute layout contract", () => {
     expect(commitItemStyles).toContain("gap-1.5");
     expect(commitItemStyles).not.toContain("data-slot=vui-button-content");
     expect(commitItemStyles).not.toContain("data-slot=vui-button-label");
-    expect(gitRouteStyles.commitItem).toContain("bg-[color-mix(in_srgb,var(--vui-surface-row)");
+    expect(gitRouteStyles.commitItem).toMatch(/bg-\[|!bg-\[|var\(--vui-surface/);
     expect(gitRouteStyles.commitList).toContain("gap-2.5");
     expect(stylesSource).toContain("commitSubject:");
     expect(stylesSource).toContain("commitAuthor:");

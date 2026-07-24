@@ -25,6 +25,8 @@
   --vui-surface-inset: var(--vui-surface-row);
   --vui-surface-control: var(--vui-control-muted);
   --vui-surface-popover: var(--vui-surface-glass);
+  --vui-surface-input: var(--vui-surface-workspace);
+  --vui-surface-overlay: color-mix(in srgb, var(--vui-surface-base) 66%, transparent);
   --vui-row-hover-bg: color-mix(in srgb, var(--vui-surface-row) 96%, var(--fg-primary) 4%);
   --vui-surface-row-hover: var(--vui-row-hover-bg);
   --vui-control-muted: rgb(24 30 40);
@@ -44,11 +46,11 @@
   --surface-card-subtle: color-mix(in srgb, var(--vui-surface-row) 70%, transparent);
   --surface-card-hover: var(--vui-surface-row-hover);
   --surface-raised: var(--vui-surface-raised);
-  --surface-input: var(--vui-surface-workspace);
+  --surface-input: var(--vui-surface-input);
   --surface-input-strong: var(--vui-surface-base);
   --surface-code: var(--vui-surface-workspace);
   --surface-active-neutral: var(--vui-surface-row-hover);
-  --surface-overlay: color-mix(in srgb, var(--vui-surface-base) 66%, transparent);
+  --surface-overlay: var(--vui-surface-overlay);
   --surface-resize-track: var(--vui-border-subtle);
   --surface-scrollbar-track: var(--vui-surface-workspace);
   --shadow-soft: 0 12px 24px rgba(0, 0, 0, 0.2);
@@ -227,6 +229,8 @@
   --vui-surface-inset: var(--vui-surface-row);
   --vui-surface-control: var(--vui-control-muted);
   --vui-surface-popover: var(--vui-surface-glass);
+  --vui-surface-input: var(--vui-surface-panel);
+  --vui-surface-overlay: color-mix(in srgb, var(--vui-surface-base) 18%, transparent);
   --vui-row-hover-bg: color-mix(in srgb, var(--vui-surface-row) 97%, var(--fg-primary) 3%);
   --vui-surface-row-hover: var(--vui-row-hover-bg);
   --vui-control-muted: color-mix(in srgb, var(--vui-surface-row) 86%, var(--vui-surface-panel));
@@ -249,11 +253,11 @@
   --surface-card-subtle: color-mix(in srgb, var(--vui-surface-row) 70%, transparent);
   --surface-card-hover: var(--vui-surface-row-hover);
   --surface-raised: var(--vui-surface-raised);
-  --surface-input: var(--vui-surface-panel);
+  --surface-input: var(--vui-surface-input);
   --surface-input-strong: var(--vui-surface-panel);
   --surface-code: var(--vui-surface-workspace);
   --surface-active-neutral: var(--vui-surface-row-hover);
-  --surface-overlay: color-mix(in srgb, var(--vui-surface-base) 18%, transparent);
+  --surface-overlay: var(--vui-surface-overlay);
   --surface-resize-track: var(--vui-border-subtle);
   --surface-scrollbar-track: var(--vui-surface-workspace);
   --shadow-soft: 0 12px 28px rgba(15, 23, 42, 0.08);

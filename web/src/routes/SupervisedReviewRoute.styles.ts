@@ -1,9 +1,13 @@
+import {
+  vuiOpaqueRowClass,
+} from "../design/vuiSurfaceRecipes";
+
 const reviewPanelSurface =
   "rounded-[var(--radius-panel)] border border-vui-border-subtle bg-vui-surface-panel/72 shadow-none";
 const reviewRowSurface =
   "rounded-[var(--radius-control)] border border-vui-border-subtle bg-vui-surface-row";
 const reviewRowSurfaceSoft =
-  "rounded-[var(--radius-control)] border border-vui-border-subtle bg-[color-mix(in_srgb,var(--vui-surface-row)_72%,transparent)]";
+  "rounded-[var(--radius-control)] border border-vui-border-subtle !bg-[var(--vui-surface-row)]";
 const reviewControlSurface =
   "rounded-[var(--radius-control)] border border-vui-border-subtle bg-vui-control-muted transition hover:border-[color-mix(in_srgb,var(--accent-warm)_28%,transparent)] hover:bg-vui-control-muted-hover";
 const reviewControlButton =
@@ -62,8 +66,7 @@ const styles = {
     "border-[color-mix(in_srgb,var(--state-success)_20%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_12%,transparent)] text-[var(--accent-warm-2)]",
   statusNegative:
     "border-[color-mix(in_srgb,var(--fg-tertiary)_20%,transparent)] bg-[color-mix(in_srgb,var(--fg-tertiary)_12%,transparent)] text-[var(--accent-warm-2)]",
-  statusDiscard:
-    "border-[color-mix(in_srgb,var(--vui-surface-row)_18%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_12%,transparent)] text-[var(--fg-secondary)]",
+  statusDiscard: `border-[color-mix(in_srgb,var(--vui-surface-row)_18%,transparent)] ${vuiOpaqueRowClass} text-[var(--fg-secondary)]`,
   queueControls: "flex flex-col gap-2.5",
   filterSegmented: "flex flex-wrap items-center gap-1.5",
   decisionSegmented: "flex flex-wrap items-center gap-1.5",
@@ -88,7 +91,7 @@ const styles = {
   bulkActions: "flex min-w-0 flex-wrap items-center justify-end gap-1.5 max-[520px]:justify-start",
   queueList: "flex min-h-0 max-w-full flex-col gap-1.5 overflow-y-auto overflow-x-hidden pr-1 [scrollbar-gutter:stable] max-[980px]:max-h-none",
   queueItem:
-    `w-full cursor-pointer px-2.5 py-[9px] text-left text-inherit transition hover:border-[color-mix(in_srgb,var(--accent-warm)_28%,transparent)] hover:bg-[color-mix(in_srgb,var(--vui-surface-row-hover)_84%,transparent)] ${reviewRowSurface}`,
+    `w-full cursor-pointer px-2.5 py-[9px] text-left text-inherit transition hover:border-[color-mix(in_srgb,var(--accent-warm)_28%,transparent)] hover:!bg-[var(--vui-surface-row-hover)] ${reviewRowSurface}`,
   queueItemActive:
     "border-[color-mix(in_srgb,var(--accent-warm)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,var(--vui-surface-row))]",
   queueItemTop: "flex items-center justify-between gap-2.5",

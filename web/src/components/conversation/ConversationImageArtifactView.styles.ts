@@ -1,10 +1,13 @@
+import {
+  vuiGlassPanelClass,
+} from "../../design/vuiSurfaceRecipes";
+
 const styles = {
   imageArtifact:
     "vui-components-conversationview imageArtifact grid min-w-0 gap-2",
   imageArtifactFooter:
     "vui-components-conversationview imageArtifactFooter grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2",
-  imageArtifactFrame:
-    "vui-components-conversationview imageArtifactFrame block aspect-square w-[min(100%,18rem)] min-w-0 overflow-hidden rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-glass)] shadow-[var(--vui-shadow-hairline)]",
+  imageArtifactFrame: `vui-components-conversationview imageArtifactFrame block aspect-square w-[min(100%,18rem)] min-w-0 overflow-hidden ${vuiGlassPanelClass}`,
   imageArtifactMeta:
     "vui-components-conversationview imageArtifactMeta grid min-w-0 gap-0.5 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   imageArtifactPrompt:

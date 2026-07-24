@@ -1,10 +1,10 @@
 import {
   vuiDenseRowClass,
-  vuiOpaquePanelClass,
+  vuiFlatPanelClass,
   vuiOpaqueRowClass,
 } from "../design/vuiSurfaceRecipes";
 
-const panelSurface = vuiOpaquePanelClass;
+const panelSurface = vuiFlatPanelClass;
 const rowSurface = vuiOpaqueRowClass;
 
 const styles = {
@@ -45,7 +45,7 @@ const styles = {
   sourceTileMissing:
     "border-[color-mix(in_srgb,var(--state-warning)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_9%,var(--vui-surface-row))]",
   sourceTileEmpty:
-    "border-[color-mix(in_srgb,var(--vui-border-subtle)_76%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_88%,transparent)]",
+    "border-[color-mix(in_srgb,var(--vui-border-subtle)_76%,transparent)] !bg-[var(--vui-surface-row)]",
   usageList:
     "grid min-h-0 min-w-0 max-w-full content-start gap-1 overflow-auto overflow-x-hidden pr-1",
   rollupGrid:

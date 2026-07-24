@@ -61,7 +61,7 @@ pre {
 }
 
 ::-webkit-scrollbar-track {
-  background: var(--surface-scrollbar-track);
+  background: var(--vui-surface-workspace);
 }
 
 ::-webkit-scrollbar-thumb {
@@ -111,7 +111,7 @@ pre {
 
 :where(input, textarea, select) {
   border: 1px solid var(--border-soft);
-  background: var(--surface-input);
+  background: var(--vui-surface-input);
   color: var(--fg-primary);
 }
 

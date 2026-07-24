@@ -1,13 +1,18 @@
+import {
+  vuiFlatPanelClass,
+  vuiOpaqueRowClass,
+} from "../design/vuiSurfaceRecipes";
+
 const routeClass = "grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)]";
 const headerClass = "hidden";
 const controlButtonClass =
-  "inline-flex min-h-[26px] w-fit max-w-full items-center justify-center gap-1.5 whitespace-nowrap rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-soft)_76%,transparent)] bg-[color-mix(in_srgb,var(--vui-control-muted)_72%,transparent)] px-2 py-[3px] [font-size:var(--vui-font-xs)] text-vui-fg-secondary hover:border-[color-mix(in_srgb,var(--border-strong)_78%,transparent)] hover:bg-[color-mix(in_srgb,var(--vui-surface-row-hover)_82%,transparent)] hover:text-vui-fg-primary disabled:opacity-55";
+  "inline-flex min-h-[26px] w-fit max-w-full items-center justify-center gap-1.5 whitespace-nowrap rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-soft)_76%,transparent)] bg-[color-mix(in_srgb,var(--vui-control-muted)_72%,transparent)] px-2 py-[3px] [font-size:var(--vui-font-xs)] text-vui-fg-secondary hover:border-[color-mix(in_srgb,var(--border-strong)_78%,transparent)] hover:!bg-[var(--vui-surface-row-hover)] hover:text-vui-fg-primary disabled:opacity-55";
 const fieldSurfaceClass =
-  "rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-soft)_76%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-workspace)_86%,transparent)]";
+  "rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-soft)_76%,transparent)] !bg-[var(--vui-surface-workspace)]";
 const rowButtonSurfaceClass =
-  "block !h-auto w-full rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-soft)_74%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_78%,transparent)] p-2 text-left text-vui-fg-primary hover:border-[color-mix(in_srgb,var(--border-strong)_78%,transparent)] hover:bg-[color-mix(in_srgb,var(--vui-surface-row-hover)_84%,transparent)]";
+  `block !h-auto w-full ${vuiOpaqueRowClass} p-2 text-left text-vui-fg-primary hover:border-[color-mix(in_srgb,var(--border-strong)_78%,transparent)] hover:!bg-[var(--vui-surface-row-hover)]`;
 const detailSurfaceClass =
-  "rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-soft)_74%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_62%,transparent)]";
+  `${vuiFlatPanelClass}`;
 const refreshButtonClass = `${controlButtonClass} h-[var(--vui-control-height-sm)] w-[var(--vui-control-height-sm)] p-0`;
 const workspaceClass = "grid min-h-0 grid-cols-[clamp(240px,26vw,340px)_minmax(0,1fr)] gap-1.5 px-2 pb-2 pt-1.5 max-[920px]:grid-cols-1 max-[920px]:content-start max-[920px]:overflow-auto";
 const panelClass = "grid min-h-0 min-w-0 content-start gap-[7px]";
@@ -47,7 +52,7 @@ const commandBodyClass = "grid min-w-0 gap-1";
 const commandLabelClass = "[font-size:var(--vui-font-xs)] text-vui-fg-tertiary";
 const commandCodeClass = "min-w-0 truncate text-[0.98rem] text-[var(--accent-warm-2)]";
 const commandFeedbackClass = "[font-size:var(--vui-font-xs)] text-[var(--state-success)]";
-const metaGridClass = "grid grid-cols-[110px_minmax(0,1fr)] gap-x-2.5 gap-y-1.5 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-soft)_74%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_58%,transparent)] p-2 max-[720px]:grid-cols-1";
+const metaGridClass = `grid grid-cols-[110px_minmax(0,1fr)] gap-x-2.5 gap-y-1.5 ${vuiOpaqueRowClass} p-2 max-[720px]:grid-cols-1`;
 const metaLabelClass = "[font-size:var(--vui-font-xs)] text-vui-fg-tertiary";
 const metaValueClass = "min-w-0 truncate [font-size:var(--vui-font-xs)] text-vui-fg-primary";
 const surfacePanelClass = `grid gap-2 ${detailSurfaceClass} p-2`;

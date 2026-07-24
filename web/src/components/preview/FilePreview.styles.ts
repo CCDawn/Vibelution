@@ -1,3 +1,7 @@
+import {
+  vuiOpaqueRowClass,
+} from "../../design/vuiSurfaceRecipes";
+
 const surfaceClass = "grid h-full min-h-0 grid-rows-[auto_1fr_auto]";
 const headerClass = "flex items-start justify-between gap-4 border-b border-vui-border-soft px-5 pb-3.5 pt-[18px]";
 const headerCopyClass = "min-w-0";
@@ -8,7 +12,7 @@ const metaBlockClass = "flex flex-wrap justify-end gap-2";
 const pillClass = "inline-flex items-center rounded-[var(--radius-control)] px-2.5 py-1.5 [font-size:var(--vui-font-xs)]";
 const changedPillClass = `${pillClass} border border-[color-mix(in_srgb,var(--accent-warm)_18%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_12%,transparent)] text-[var(--accent-warm-2)]`;
 const sourcePillClass = `${pillClass} border border-[color-mix(in_srgb,var(--accent-cool)_18%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,transparent)] text-vui-fg-secondary`;
-const previewModeGroupClass = "inline-flex items-center gap-1 rounded-[var(--radius-control)] border border-vui-border-soft bg-[color-mix(in_srgb,var(--vui-surface-row)_72%,transparent)] p-[3px]";
+const previewModeGroupClass = `inline-flex items-center gap-1 ${vuiOpaqueRowClass} p-[3px]`;
 const previewModeButtonClass = "min-h-[26px] border-0 bg-transparent px-2 py-[3px] [font-size:var(--vui-font-xs)] font-[inherit] text-vui-fg-secondary shadow-none";
 const previewModeButtonActiveClass = "bg-[color-mix(in_srgb,var(--accent-cool)_18%,var(--vui-surface-panel))] text-vui-fg-primary";
 const editorWrapClass = [

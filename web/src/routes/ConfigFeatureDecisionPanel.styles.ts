@@ -1,9 +1,12 @@
+import {
+  vuiOpaqueRowClass,
+} from "../design/vuiSurfaceRecipes";
+
 const styles = {
   section: "min-w-0",
   body: "m-0 max-w-4xl text-sm leading-6 text-[var(--vui-text-secondary)]",
   grid: "grid min-w-0 grid-cols-1 gap-2 lg:grid-cols-2",
-  card:
-    "flex min-w-0 items-start gap-3 rounded-xl border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] px-4 py-3",
+  card: `flex min-w-0 items-start gap-3 rounded-xl border border-[var(--vui-border-subtle)] ${vuiOpaqueRowClass} px-4 py-3`,
   enabledIcon: "mt-0.5 text-[var(--vui-status-success)]",
   disabledIcon: "mt-0.5 text-[var(--vui-text-tertiary)]",
   cardContent: "min-w-0 flex-1",
