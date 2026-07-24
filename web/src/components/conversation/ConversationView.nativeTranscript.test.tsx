@@ -171,7 +171,8 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html).not.toContain("运行提示");
     expect(html).toContain("诊断详情");
     expect(html).toContain("upstream_unavailable");
-    expect(html).not.toContain('open=""');
+    expect(html).toContain('data-codex-process-disclosure="true"');
+    expect(html).toContain('open=""');
     expect(html).not.toContain("responseSection");
   });
 
@@ -247,7 +248,9 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(toolIndex).toBeGreaterThan(commentaryIndex);
     expect(finalIndex).toBeGreaterThan(toolIndex);
     expect(html).toContain('data-codex-tool-detail="true"');
-    expect(html).not.toContain('open=""');
+    expect(html).toContain('data-codex-process-disclosure="true"');
+    expect(html).toContain('open=""');
+    expect(html).toContain('data-codex-final-response="true"');
     expect(html).toContain('data-codex-transcript-cell-channel="commentary"');
     expect(html).toContain('data-codex-transcript-cell-phase="tool_call"');
     expect(html).toContain("file loaded");
@@ -593,7 +596,7 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html).toContain('data-codex-tool-detail="true"');
     expect(html).toContain(">代码图谱<");
     expect(html).toContain("完整工具结果：命中 20 个符号");
-    expect(html).toContain("完成 2.9s");
+    expect(html).not.toContain("完成 2.9s");
     expect(html).toContain("工具检查完成。");
   });
 
@@ -665,8 +668,9 @@ describe("ConversationView native Codex transcript surface", () => {
     ]);
 
     expect(html).toContain(">命令<");
-    expect(html).not.toContain('open=""');
-    expect(html).toContain('data-codex-tool-detail-toggle="inline-symbol"');
+    expect(html).toContain('data-codex-process-disclosure="true"');
+    expect(html).toContain('open=""');
+    expect(html).not.toContain('data-codex-tool-detail-toggle="inline-symbol"');
     expect(html).toContain('aria-label="展开或收起工具结果：命令"');
     expect(html).toContain("git status --short");
     expect(html).toContain("M web/src/components/conversation/ConversationView.tsx");
@@ -677,7 +681,7 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html).not.toContain("exitCode");
   });
 
-  it("collapses long native tool sequences without moving commentary or final answer", () => {
+  it("keeps commentary and flat tool rows inside one expandable process before the final answer", () => {
     const html = renderConversation([
       {
         id: "assistant-native-tool-activity",
@@ -731,16 +735,22 @@ describe("ConversationView native Codex transcript surface", () => {
     ]);
 
     const before = html.indexOf("先检查当前实现。");
-    const group = html.indexOf('data-codex-tool-activity-group="true"');
+    const disclosure = html.indexOf('data-codex-process-disclosure="true"');
+    const firstTool = html.indexOf('data-codex-tool-activity-item="true"');
     const after = html.indexOf("已定位关键调用。");
     const final = html.indexOf("最终回答保持在最后。");
-    expect(html).toContain("代码分析");
-    expect(html).toContain("3 次调用");
+    expect(html).toContain("代码图谱");
+    expect(html.match(/data-codex-tool-activity-item="true"/g)).toHaveLength(3);
+    expect(html).not.toContain('data-codex-tool-activity-group="true"');
+    expect(html).not.toContain("3 次调用");
     expect(html).not.toContain('{&quot;status&quot;:&quot;ok&quot;,');
     expect(before).toBeGreaterThan(-1);
-    expect(group).toBeGreaterThan(before);
-    expect(after).toBeGreaterThan(group);
+    expect(disclosure).toBeGreaterThan(-1);
+    expect(before).toBeGreaterThan(disclosure);
+    expect(firstTool).toBeGreaterThan(before);
+    expect(after).toBeGreaterThan(firstTool);
     expect(final).toBeGreaterThan(after);
+    expect(html).toContain('data-codex-final-response="true"');
   });
 
   it("keeps a running native tool summary on the main row and nests lifecycle trace in details", () => {
@@ -812,7 +822,8 @@ describe("ConversationView native Codex transcript surface", () => {
     const detailsEnd = html.indexOf("</details>", detailsStart);
     const traceStart = html.indexOf('aria-label="工具生命周期"');
     expect(html).toContain(">命令<");
-    expect(html).toContain("运行中");
+    expect(html).toContain("处理中");
+    expect(html).not.toContain(">运行中<");
     expect(html).toContain("正在检查工作区");
     expect(detailsStart).toBeGreaterThan(-1);
     expect(traceStart).toBeGreaterThan(detailsStart);
@@ -868,7 +879,7 @@ describe("ConversationView native Codex transcript surface", () => {
     ]);
 
     expect(html).toContain(">列出文件<");
-    expect(html).toContain('data-codex-tool-detail-toggle="inline-symbol"');
+    expect(html).not.toContain('data-codex-tool-detail-toggle="inline-symbol"');
     expect(html).not.toContain("指令与结果");
     expect(html).toContain("web/src/components/conversation/ConversationView.tsx");
     expect(html).not.toContain(">指令</dt>");

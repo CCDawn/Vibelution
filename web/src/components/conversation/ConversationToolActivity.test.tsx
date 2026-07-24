@@ -19,7 +19,7 @@ function toolCell(id: string, summary: string): CodexTranscriptCell {
 }
 
 describe("ConversationToolActivity", () => {
-  it("collapses a long same-family sequence without exposing structured fragments", () => {
+  it("keeps a long sequence as flat Codex-style tool rows", () => {
     const html = renderToStaticMarkup(
       <ConversationToolActivity
         activity={createCodexTranscriptToolActivity([
@@ -32,9 +32,11 @@ describe("ConversationToolActivity", () => {
       />,
     );
 
-    expect(html).toContain('data-codex-tool-activity-group="true"');
-    expect(html).toContain("代码分析");
-    expect(html).toContain("3 次调用");
+    expect(html).toContain('data-codex-tool-activity="inline"');
+    expect(html.match(/data-codex-tool-activity-item="true"/g)).toHaveLength(3);
+    expect(html).not.toContain('data-codex-tool-activity-group="true"');
+    expect(html).toContain("代码图谱");
+    expect(html).not.toContain("3 次调用");
     expect(html).toContain("定位 ConversationLogger");
     expect(html).not.toContain('{&quot;status&quot;:&quot;ok&quot;,');
   });
@@ -51,5 +53,20 @@ describe("ConversationToolActivity", () => {
     expect(html).toContain('data-codex-tool-activity="inline"');
     expect(html).not.toContain('data-codex-tool-activity-group="true"');
     expect(html).toContain("代码图谱");
+  });
+
+  it("keeps tool details expandable without a right-side status or chevron", () => {
+    const html = renderToStaticMarkup(
+      <ConversationToolActivity
+        activity={createCodexTranscriptToolActivity([toolCell("tool-1", "定位 ConversationLogger")])}
+        language="zh"
+        renderToolDetails={() => <pre>工具原始结果</pre>}
+      />,
+    );
+
+    expect(html).toContain('data-codex-tool-detail="true"');
+    expect(html).toContain("工具原始结果");
+    expect(html).not.toContain('data-codex-tool-detail-toggle="inline-symbol"');
+    expect(html).not.toContain("完成");
   });
 });
