@@ -490,7 +490,9 @@ layout:
     "vui-routes-chatcodingroute layoutOverlay relative grid min-w-0 grid-cols-[minmax(0,1fr)] overflow-hidden",
   leftBlock:
     "vui-routes-chatcodingroute leftBlock grid min-w-0 shrink-0 gap-1.5 border-0 border-b border-[var(--vui-border-subtle)] bg-transparent p-2 shadow-none last:border-b-0",
-  leftRail: `vui-routes-chatcodingroute leftRail min-w-0 !flex h-full min-h-0 !flex-col overflow-auto rounded-none border-0 border-l border-[var(--vui-border-subtle)] ${vuiRailFillClass} p-1 shadow-none [scrollbar-gutter:stable] [grid-column:5] [grid-row:1]`,
+  // Use non-important flex so paneCollapsed `!hidden` always wins when the status rail is closed.
+  // Important flex + grid-column:5 previously forced implicit tracks and a blank right strip.
+  leftRail: `vui-routes-chatcodingroute leftRail min-w-0 flex h-full min-h-0 flex-col overflow-auto rounded-none border-0 border-l border-[var(--vui-border-subtle)] ${vuiRailFillClass} p-1 shadow-none [scrollbar-gutter:stable] [grid-column:5] [grid-row:1]`,
   memberIndexSummary: `vui-routes-chatcodingroute memberIndexSummary min-w-0 ${vuiGlassPanelClass} p-2 !grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-1.5`,
   mentalStateBadge:
     `vui-routes-chatcodingroute mentalStateBadge min-w-0 ${vuiControlPillClass}`,
