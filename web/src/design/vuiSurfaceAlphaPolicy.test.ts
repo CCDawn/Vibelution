@@ -49,11 +49,22 @@ describe("vuiSurfaceAlphaPolicy", () => {
     expect(hit.allowed).toBe(false);
   });
 
-  it("allows Chat centerSurface soft layer", () => {
+  it("forbids Chat centerSurface structure wash (conversation board stays opaque)", () => {
     const source = 'centerSurface: "bg-[color-mix(in_srgb,var(--vui-surface-panel)_6%,transparent)]"';
     const hit = classifyVuiSurfaceColorMix(
       "color-mix(in_srgb,var(--vui-surface-panel)_6%,transparent)",
       "routes/ChatCodingRoute.styles.ts",
+      source,
+    );
+    expect(hit.role).toBe("forbidden-structure-wash");
+    expect(hit.allowed).toBe(false);
+  });
+
+  it("allows Chat composer soft layer when still present", () => {
+    const source = 'composer: "bg-[color-mix(in_srgb,var(--vui-surface-panel)_74%,transparent)]"';
+    const hit = classifyVuiSurfaceColorMix(
+      "color-mix(in_srgb,var(--vui-surface-panel)_74%,transparent)",
+      "components/conversation/ConversationView.styles.ts",
       source,
     );
     expect(hit.role).toBe("chat-soft-layer");

@@ -180,18 +180,20 @@ describe("ChatCodingRoute layout contract", () => {
     expect(conversationStyles.imageDownloadButton).toBeTypeOf("string");
   });
 
-  it("keeps the workbench theme background visible behind the center conversation", () => {
+  it("keeps the center conversation as an opaque product board over theme wallpaper", () => {
     expect(appShellCssSource).toContain("--theme-background-overlay-mid: color-mix(in srgb, var(--bg-canvas) 34%, transparent);");
     expect(appShellCssSource).toContain("--theme-background-overlay-mid: color-mix(in srgb, var(--bg-canvas) 18%, transparent);");
     expect(appShellCssSource).toContain("--theme-background-overlay-mid: color-mix(in srgb, var(--bg-canvas) 44%, transparent);");
     expect(appShellCssSource).toContain("--theme-background-overlay-mid: color-mix(in srgb, var(--bg-canvas) 60%, transparent);");
     expect(routeStyles.centerPane).toContain("bg-[var(--vui-surface-chat)]");
-    expect(routeStyles.centerSurface).toContain("var(--vui-surface-panel)");
+    expect(routeStyles.centerSurface).toContain("!bg-[var(--vui-surface-chat)]");
+    expect(routeStyles.centerSurface).not.toContain("transparent");
+    expect(routeStyles.centerSurface).not.toContain("color-mix");
     expect(conversationStyles.timeline).toContain("bg-[var(--vui-surface-chat)]");
+    expect(conversationStyles.surface).toContain("bg-[var(--vui-surface-chat)]");
     expect(conversationStyles.surfaceCompact).toContain("[&_.timeline]:bg-[var(--vui-surface-chat)]");
     expect(appShellCssSource).not.toContain("--theme-background-overlay-mid: rgba(");
     expect(routeCssSource).not.toContain("background: color-mix(in srgb, var(--surface-page) 92%, var(--bg-canvas));");
-    expect(routeCssSource).not.toContain(".centerSurface {\n  display: grid;\n  height: 100%;\n  min-height: 0;\n  background: var(--surface-panel-strong);");
   });
 
   it("keeps empty chat states centered inside the full-height conversation workspace", () => {
@@ -279,7 +281,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(conversationStyles.surfaceCompact).not.toContain("bg-[var(--surface-panel-strong)]");
 
     expect(conversationStyles.composer).toContain("var(--vui-surface-panel)");
-    expect(conversationStyles.composer).toContain("backdrop-blur-[6px]");
+    expect(conversationStyles.composer).toContain("!bg-[var(--vui-surface-panel)]");
+    expect(conversationStyles.composer).not.toContain("backdrop-blur");
     expect(conversationStyles.composer).not.toContain("var(--surface-panel-strong)_92%");
 
     expect(conversationStyles.sendButton).toContain("!bg-[var(--fg-primary)]");

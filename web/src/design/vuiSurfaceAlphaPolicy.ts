@@ -36,8 +36,11 @@ const VUI_COMPONENT_SOFT_PATH_RE = /(^|\/)components\/vui\//;
  * same class string (or nearby source). Used only when first operand is a
  * surface token mixed with transparent (otherwise would be forbidden).
  */
+/**
+ * Intentional soft layers only. Chat center conversation is opaque product board
+ * (`centerSurface` uses solid `--vui-surface-chat`); do not re-allow center washes.
+ */
 const CHAT_SOFT_LAYER_ALLOW: ReadonlyArray<{ pathIncludes: string; sourceIncludes: string }> = [
-  { pathIncludes: "ChatCodingRoute.styles.ts", sourceIncludes: "centerSurface" },
   { pathIncludes: "ConversationView.styles.ts", sourceIncludes: "composer" },
   { pathIncludes: "SessionContextMenu.styles.ts", sourceIncludes: "sessionContextMenu" },
 ];
