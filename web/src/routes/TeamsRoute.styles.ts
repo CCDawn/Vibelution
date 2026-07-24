@@ -385,13 +385,13 @@ const styles: Record<string, string> = {
   challengeProgramQuestionList:
     "challengeProgramQuestionList min-w-0 !flex flex-wrap gap-1.5 [&>span]:inline-flex [&>span]:items-center [&>span]:rounded-full [&>span]:border [&>span]:border-[var(--vui-border-subtle)] [&>span]:bg-[var(--vui-surface-panel)] [&>span]:px-2 [&>span]:py-1 [&>span]:font-[760] [&>span]:text-[var(--fg-primary)]",
   challengeWorkspaceBody:
-    "challengeWorkspaceBody min-w-0 !flex min-h-0 flex-col !gap-0 !overflow-auto !p-0 [scrollbar-gutter:stable]",
+    "challengeWorkspaceBody min-w-0 w-full flex-1 !flex min-h-0 flex-col !gap-0 !overflow-auto !p-0 [scrollbar-gutter:stable]",
   challengeWorkspaceContextHidden:
     "challengeWorkspaceContextHidden hidden !hidden",
   challengeWorkspaceInspector:
-    "challengeWorkspaceInspector min-w-0 !overflow-hidden !border-0 !bg-transparent",
+    "challengeWorkspaceInspector min-w-0 w-full flex-1 !overflow-hidden !border-0 !bg-transparent",
   challengeWorkspaceLayout:
-    "challengeWorkspaceLayout min-w-0 !overflow-hidden !border-0 !bg-[#f3f5f8] !p-0",
+    "challengeWorkspaceLayout min-w-0 w-full flex-1 !grid-cols-[minmax(0,1fr)] !overflow-hidden !border-0 !bg-[#f3f5f8] !p-0",
   researchStageGrid:
     "researchStageGrid min-w-0 grid items-stretch gap-3 grid-cols-[repeat(auto-fit,minmax(280px,1fr))]",
   researchStageHeroPanel: `researchStageHeroPanel min-w-0 ${vuiFlatPanelClass} p-2`,

@@ -182,7 +182,11 @@ describe("ChallengeCupOperationsWorkspace", () => {
     expect(componentSource).toContain('data-testid="challenge-cup-operations-workspace"');
     expect(componentStyles).toContain(".workspace");
     expect(componentStyles).toContain("min-width: 860px");
-    expect(componentStyles).toContain("@media (max-width: 1080px)");
+    expect(componentStyles).toContain("container-type: inline-size");
+    expect(componentStyles).toContain("@container challenge-workspace (max-width: 1080px)");
+    expect(componentStyles).toContain("@container challenge-workspace (min-width: 1600px)");
+    expect(componentStyles).toContain("width: 100%");
+    expect(componentStyles).toContain("max-width: none");
     expect(componentStyles).not.toContain("@media (max-width: 760px)");
     expect(componentStyles).not.toContain("@media (max-width: 430px)");
   });
