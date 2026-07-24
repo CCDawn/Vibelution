@@ -261,7 +261,7 @@ const styles: Record<string, string> = {
   cliAgentTerminalOutput:
     "vui-routes-chatcodingroute cliAgentTerminalOutput min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
   cliAgentTerminalOutputShell:
-    "vui-routes-chatcodingroute cliAgentTerminalOutputShell min-w-0 grid h-full min-h-0 content-start overflow-hidden bg-[var(--surface-page)] text-[var(--fg-primary)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)] bg-[var(--bg-canvas)]",
+    "vui-routes-chatcodingroute cliAgentTerminalOutputShell min-w-0 grid h-full min-h-0 content-start overflow-hidden bg-[var(--vui-surface-workspace)] text-[var(--fg-primary)] border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)] bg-[var(--bg-canvas)]",
   cliAgentTerminalOverlay:
     "vui-routes-chatcodingroute cliAgentTerminalOverlay min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
   cliAgentTerminalStatus:
@@ -277,9 +277,9 @@ const styles: Record<string, string> = {
   companionCompact:
     "vui-routes-chatcodingroute companionCompact !grid min-w-0 grid-cols-[32px_minmax(0,1fr)] items-start gap-2 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-strong)_64%,transparent)] bg-[var(--vui-surface-raised)] px-1.5 py-1.5 shadow-none",
   companionCopy:
-    "vui-routes-chatcodingroute companionCopy grid min-w-0 gap-1 [font-size:var(--vui-font-sm)] leading-snug text-[var(--fg-secondary)] [&>p]:min-w-0 [&>p]:whitespace-normal [&>p]:leading-snug [&>p]:[overflow-wrap:anywhere]",
+    "vui-routes-chatcodingroute companionCopy grid min-w-0 gap-0.5 [font-size:var(--vui-font-xs)] leading-snug text-[var(--fg-secondary)] [&>p]:min-w-0 [&>p]:[display:-webkit-box] [&>p]:[-webkit-box-orient:vertical] [&>p]:[-webkit-line-clamp:2] [&>p]:overflow-hidden [&>p]:leading-snug [&>p]:[overflow-wrap:anywhere]",
   companionTopLine:
-    "vui-routes-chatcodingroute companionTopLine !grid min-w-0 grid-cols-[minmax(0,1fr)] items-start gap-0.5 [font-size:var(--vui-font-xs)] leading-tight [&_strong]:min-w-0 [&_strong]:whitespace-normal [&_span]:min-w-0 [&_span]:whitespace-normal [&_span]:text-[var(--fg-tertiary)] [overflow-wrap:anywhere]",
+    "vui-routes-chatcodingroute companionTopLine !grid min-w-0 grid-cols-[minmax(0,1fr)] items-start gap-0.5 [font-size:var(--vui-font-xs)] leading-tight [&_strong]:min-w-0 [&_strong]:truncate [&_strong]:[font-size:var(--vui-font-sm)] [&_strong]:font-[760] [&_strong]:text-[var(--fg-primary)] [&_span]:min-w-0 [&_span]:truncate [&_span]:text-[var(--fg-tertiary)]",
   contextCompositionSegmentAgent:
     "vui-routes-chatcodingroute contextCompositionSegmentAgent min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
   contextCompositionSegmentAttachments:
@@ -319,7 +319,7 @@ const styles: Record<string, string> = {
   contextCompositionSegmentUser:
     "vui-routes-chatcodingroute contextCompositionSegmentUser min-w-0 border-[color-mix(in_srgb,var(--accent-warm)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-warm)_8%,transparent)] text-[var(--accent-warm)]",
   contextLineCompact:
-    "vui-routes-chatcodingroute contextLineCompact min-w-0 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-strong)_58%,transparent)] bg-[var(--vui-surface-row)] px-1.5 py-1 text-[var(--fg-secondary)] whitespace-normal leading-snug shadow-none [overflow-wrap:anywhere]",
+    "vui-routes-chatcodingroute contextLineCompact min-w-0 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-strong)_58%,transparent)] bg-[var(--vui-surface-row)] px-1.5 py-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] leading-snug shadow-none [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] overflow-hidden [overflow-wrap:anywhere]",
   conversationAvatar:
     "vui-routes-chatcodingroute conversationAvatar min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
   conversationAvatarDirect:
@@ -331,7 +331,7 @@ const styles: Record<string, string> = {
   conversationGroup:
     "vui-routes-chatcodingroute conversationGroup grid min-w-0 gap-0.5",
   conversationGroupHeader:
-    "vui-routes-chatcodingroute conversationGroupHeader !grid !w-full min-h-[28px] grid-cols-[14px_minmax(0,1fr)_auto] items-center gap-1 rounded-[var(--radius-control)] border-0 bg-transparent px-1.5 py-0 text-left [font-size:var(--vui-font-sm)] font-semibold leading-tight text-[var(--fg-secondary)] shadow-none transition-colors hover:border-transparent hover:bg-[color-mix(in_srgb,var(--surface-card)_38%,transparent)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_36%,transparent)] [&_svg]:transition-transform [&[aria-expanded=true]_svg]:rotate-90 [&_span]:min-w-0 [&_span]:truncate [&_strong]:inline-grid [&_strong]:min-w-5 [&_strong]:place-items-center [&_strong]:rounded-full [&_strong]:bg-[color-mix(in_srgb,var(--vui-control-muted)_78%,transparent)] [&_strong]:px-1.5 [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:font-semibold [&_strong]:text-[var(--fg-secondary)]",
+    "vui-routes-chatcodingroute conversationGroupHeader !grid !w-full min-h-[28px] grid-cols-[14px_minmax(0,1fr)_auto] items-center gap-1 rounded-[var(--radius-control)] border-0 bg-transparent px-1.5 py-0 text-left [font-size:var(--vui-font-sm)] font-semibold leading-tight text-[var(--fg-secondary)] shadow-none transition-colors hover:border-transparent hover:bg-[color-mix(in_srgb,var(--vui-surface-card)_38%,transparent)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_36%,transparent)] [&_svg]:transition-transform [&[aria-expanded=true]_svg]:rotate-90 [&_span]:min-w-0 [&_span]:truncate [&_strong]:inline-grid [&_strong]:min-w-5 [&_strong]:place-items-center [&_strong]:rounded-full [&_strong]:bg-[color-mix(in_srgb,var(--vui-control-muted)_78%,transparent)] [&_strong]:px-1.5 [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:font-semibold [&_strong]:text-[var(--fg-secondary)]",
   conversationGroupList:
     "vui-routes-chatcodingroute conversationGroupList grid min-w-0 gap-1",
   conversationKindBadge:
@@ -365,23 +365,26 @@ const styles: Record<string, string> = {
   currentSessionBlock:
     "vui-routes-chatcodingroute currentSessionBlock min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_26%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_5%,transparent)] text-[var(--fg-primary)]",
   currentSessionLine:
-    "vui-routes-chatcodingroute currentSessionLine min-w-0 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-cool)_22%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_88%,transparent)] px-1.5 py-1 [font-size:var(--vui-font-sm)] leading-snug text-[var(--fg-primary)] whitespace-normal [overflow-wrap:anywhere]",
+    "vui-routes-chatcodingroute currentSessionLine min-w-0 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-cool)_22%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_88%,transparent)] px-1.5 py-1 [font-size:var(--vui-font-xs)] font-medium leading-[1.4] text-[var(--fg-secondary)] [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] overflow-hidden [overflow-wrap:anywhere]",
   currentSessionMetaList:
     "vui-routes-chatcodingroute currentSessionMetaList min-w-0 flex flex-wrap items-center gap-1 border-[color-mix(in_srgb,var(--accent-cool)_24%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_6%,transparent)] text-[var(--accent-cool)]",
   directSessionItem:
     "vui-routes-chatcodingroute directSessionItem pr-0 shadow-none",
+  // Run-mode toggle: label left + state pill right. No leading status dots (they duplicated 开/关).
   featureChip:
-    "vui-routes-chatcodingroute featureChip relative !grid !h-auto min-h-[32px] min-w-0 !w-full max-w-full grid-cols-[auto_minmax(0,1fr)] items-center justify-start gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-1.5 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] transition-colors hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 [&_[data-slot=vui-button-content]]:min-w-0 [&_[data-slot=vui-button-content]]:max-w-full [&_[data-slot=vui-button-content]]:w-full [&_[data-slot=vui-button-label]]:grid [&_[data-slot=vui-button-label]]:min-w-0 [&_[data-slot=vui-button-label]]:w-full [&_[data-slot=vui-button-label]]:grid-cols-[minmax(0,1fr)_auto] [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-1 before:content-[''] before:h-1.5 before:w-1.5 before:shrink-0 before:rounded-full before:bg-[var(--fg-tertiary)] [&_em]:shrink-0 [&_em]:not-italic [&_strong]:min-w-0 [&_strong]:whitespace-normal [&_strong]:leading-tight [&_strong]:[overflow-wrap:anywhere]",
+    "vui-routes-chatcodingroute featureChip !grid !h-auto min-h-[28px] min-w-0 !w-full max-w-full grid-cols-[minmax(0,1fr)_auto] items-center justify-start gap-1 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] transition-colors hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 [&_[data-slot=vui-button-content]]:min-w-0 [&_[data-slot=vui-button-content]]:max-w-full [&_[data-slot=vui-button-content]]:w-full [&_[data-slot=vui-button-label]]:grid [&_[data-slot=vui-button-label]]:min-w-0 [&_[data-slot=vui-button-label]]:w-full [&_[data-slot=vui-button-label]]:grid-cols-[minmax(0,1fr)_auto] [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-1 [&_strong]:min-w-0 [&_strong]:truncate [&_strong]:leading-tight [&_em]:inline-flex [&_em]:min-h-[18px] [&_em]:shrink-0 [&_em]:items-center [&_em]:justify-center [&_em]:rounded-full [&_em]:border [&_em]:border-[color-mix(in_srgb,var(--vui-border-subtle)_80%,transparent)] [&_em]:bg-[color-mix(in_srgb,var(--vui-surface-panel)_70%,transparent)] [&_em]:px-1.5 [&_em]:text-[10px] [&_em]:font-bold [&_em]:not-italic [&_em]:leading-none [&_em]:text-[var(--fg-tertiary)]",
   featureChipActive:
-    "vui-routes-chatcodingroute featureChipActive border-[color-mix(in_srgb,var(--accent-cool)_38%,var(--vui-border-subtle))] text-[var(--fg-primary)] before:bg-[var(--accent-cool)]",
+    "vui-routes-chatcodingroute featureChipActive border-[color-mix(in_srgb,var(--accent-cool)_40%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-control-muted))] text-[var(--fg-primary)] [&_em]:border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] [&_em]:bg-[color-mix(in_srgb,var(--accent-cool)_14%,transparent)] [&_em]:text-[var(--accent-cool)]",
   featureChipPrimary:
-    "vui-routes-chatcodingroute featureChipPrimary border-[color-mix(in_srgb,var(--accent-warm)_32%,var(--vui-border-subtle))] before:bg-[var(--accent-warm-2)]",
+    "vui-routes-chatcodingroute featureChipPrimary border-[color-mix(in_srgb,var(--accent-warm)_28%,var(--vui-border-subtle))]",
+  featureChipPrimaryActive:
+    "vui-routes-chatcodingroute featureChipPrimaryActive border-[color-mix(in_srgb,var(--accent-warm)_42%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-warm)_11%,var(--vui-control-muted))] text-[var(--fg-primary)] [&_em]:border-[color-mix(in_srgb,var(--accent-warm)_36%,transparent)] [&_em]:bg-[color-mix(in_srgb,var(--accent-warm)_14%,transparent)] [&_em]:text-[var(--accent-warm-2)]",
   featureChipRow:
-    "vui-routes-chatcodingroute featureChipRow grid min-w-0 grid-cols-2 gap-1.5 overflow-visible rounded-none border-0 bg-transparent p-0",
+    "vui-routes-chatcodingroute featureChipRow grid min-w-0 grid-cols-2 gap-1 overflow-visible rounded-none border-0 bg-transparent p-0",
   featurePresetBlock:
     "vui-routes-chatcodingroute featurePresetBlock min-w-0",
   featurePresetScope:
-    "vui-routes-chatcodingroute featurePresetScope min-w-0",
+    "vui-routes-chatcodingroute featurePresetScope min-w-0 shrink-0 [font-size:10px] font-semibold leading-none text-[var(--fg-tertiary)]",
   groupAgentOption:
     "vui-routes-chatcodingroute groupAgentOption min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)] !grid grid-cols-[auto_28px_minmax(0,1fr)] items-center gap-1.5",
   groupAgentOptionSelected:
@@ -659,7 +662,7 @@ layout:
   panelNotice:
     "vui-routes-chatcodingroute panelNotice grid min-w-0 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-warm)_22%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-warm)_5%,var(--vui-surface-row))] px-2 py-1.5 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)]",
   panelSearch:
-    "vui-routes-chatcodingroute panelSearch grid min-h-9 min-w-0 grid-cols-[16px_minmax(0,1fr)] items-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--vui-surface-row)_56%,transparent)] px-2 py-0 text-[var(--fg-tertiary)] shadow-none transition-colors hover:border-[color-mix(in_srgb,var(--accent-cool)_24%,var(--vui-border-subtle))] focus-within:border-[color-mix(in_srgb,var(--accent-cool)_42%,var(--vui-border-subtle))] focus-within:bg-[color-mix(in_srgb,var(--surface-card)_66%,transparent)]",
+    "vui-routes-chatcodingroute panelSearch grid min-h-9 min-w-0 grid-cols-[16px_minmax(0,1fr)] items-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--vui-surface-row)_56%,transparent)] px-2 py-0 text-[var(--fg-tertiary)] shadow-none transition-colors hover:border-[color-mix(in_srgb,var(--accent-cool)_24%,var(--vui-border-subtle))] focus-within:border-[color-mix(in_srgb,var(--accent-cool)_42%,var(--vui-border-subtle))] focus-within:bg-[color-mix(in_srgb,var(--vui-surface-card)_66%,transparent)]",
   panelSearchInput:
     "vui-routes-chatcodingroute panelSearchInput min-w-0 w-full !border-0 !bg-transparent px-0 py-0 text-[var(--fg-primary)] !shadow-none [&_[data-slot=input-wrapper]]:min-h-8 [&_[data-slot=input-wrapper]]:rounded-none [&_[data-slot=input-wrapper]]:!border-0 [&_[data-slot=input-wrapper]]:!bg-transparent [&_[data-slot=input-wrapper]]:px-0 [&_[data-slot=input-wrapper]]:shadow-none [&_[data-slot=input]]:[font-size:var(--vui-font-sm)] [&_[data-slot=input]]:text-[var(--fg-primary)] [&_[data-slot=input]]:placeholder:text-[var(--fg-tertiary)] [&_[data-slot=inner-wrapper]]:gap-0",
   panelState:
@@ -671,7 +674,7 @@ layout:
   petShowcaseActionHint:
     "vui-routes-chatcodingroute petShowcaseActionHint min-w-0 flex flex-wrap items-center gap-1.5 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   petShowcaseActions:
-    "vui-routes-chatcodingroute petShowcaseActions min-w-0 flex flex-wrap items-center gap-1.5 !grid grid-cols-[repeat(3,minmax(0,1fr))] gap-[4px]",
+    "vui-routes-chatcodingroute petShowcaseActions min-w-0 !grid grid-cols-3 gap-1",
   petShowcaseAvatar:
     "vui-routes-chatcodingroute petShowcaseAvatar min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
   petShowcaseAvatar_active:
@@ -863,8 +866,12 @@ layout:
     "vui-routes-chatcodingroute sectionIdentity grid min-w-0 gap-0.5",
   sectionMetaLine:
     "vui-routes-chatcodingroute sectionMetaLine min-w-0 whitespace-normal [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] [overflow-wrap:anywhere]",
+  // Surface titles in the status rail (session/group name): compact but primary.
   sectionTitle:
-    "vui-routes-chatcodingroute sectionTitle min-w-0 [font-size:var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)] m-0 [font-size:var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
+    "vui-routes-chatcodingroute sectionTitle m-0 min-w-0 truncate [font-size:var(--vui-font-sm)] font-[760] leading-tight text-[var(--fg-primary)]",
+  // Section labels (运行模式 / Token / 陪伴): quieter than surface titles.
+  railSectionHeading:
+    "vui-routes-chatcodingroute railSectionHeading m-0 min-w-0 truncate [font-size:var(--vui-font-xs)] font-[650] leading-tight text-[var(--fg-secondary)]",
   sessionActionRow:
     "vui-routes-chatcodingroute sessionActionRow grid min-w-0 grid-cols-2 items-center gap-2 border-0 bg-transparent p-0",
   sessionActionStack:
@@ -882,11 +889,11 @@ layout:
   sessionIconButton:
     "vui-routes-chatcodingroute sessionIconButton min-w-0 inline-grid h-[var(--vui-control-height-sm)] min-h-[var(--vui-control-height-sm)] w-[var(--vui-control-height-sm)] min-w-[var(--vui-control-height-sm)] place-items-center rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] p-0 text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] shrink-0 text-[var(--fg-tertiary)]",
   sessionItem:
-    "vui-routes-chatcodingroute sessionItem relative grid min-w-0 grid-cols-[minmax(0,1fr)] gap-0 overflow-hidden rounded-[var(--radius-control)] border border-transparent bg-transparent !px-1 !py-0 text-left transition-colors before:absolute before:inset-y-1.5 before:left-0 before:w-[2px] before:rounded-full before:bg-[var(--accent-cool)] before:opacity-0 before:transition-opacity hover:bg-[color-mix(in_srgb,var(--surface-card)_46%,transparent)] focus-within:bg-[color-mix(in_srgb,var(--surface-card)_48%,transparent)]",
+    "vui-routes-chatcodingroute sessionItem relative grid min-w-0 grid-cols-[minmax(0,1fr)] gap-0 overflow-hidden rounded-[var(--radius-control)] border border-transparent bg-transparent !px-1 !py-0 text-left transition-colors before:absolute before:inset-y-1.5 before:left-0 before:w-[2px] before:rounded-full before:bg-[var(--accent-cool)] before:opacity-0 before:transition-opacity hover:bg-[color-mix(in_srgb,var(--vui-surface-card)_46%,transparent)] focus-within:bg-[color-mix(in_srgb,var(--vui-surface-card)_48%,transparent)]",
   sessionItemActive:
-    "vui-routes-chatcodingroute sessionItemActive border-[color-mix(in_srgb,var(--accent-cool)_22%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_7%,var(--surface-card))] shadow-[var(--vui-shadow-inset-accent)] before:opacity-100",
+    "vui-routes-chatcodingroute sessionItemActive border-[color-mix(in_srgb,var(--accent-cool)_22%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_7%,var(--vui-surface-card))] shadow-[var(--vui-shadow-inset-accent)] before:opacity-100",
   sessionItemContextTarget:
-    "vui-routes-chatcodingroute sessionItemContextTarget border-[color-mix(in_srgb,var(--accent-cool)_18%,transparent)] bg-[color-mix(in_srgb,var(--surface-card)_56%,transparent)] shadow-[var(--vui-shadow-inset-accent)] before:opacity-70",
+    "vui-routes-chatcodingroute sessionItemContextTarget border-[color-mix(in_srgb,var(--accent-cool)_18%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-card)_56%,transparent)] shadow-[var(--vui-shadow-inset-accent)] before:opacity-70",
   sessionItemError:
     "vui-routes-chatcodingroute sessionItemError min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
   sessionItemMain:
@@ -1038,9 +1045,9 @@ layout:
   sessionUnreadBadge:
     "vui-routes-chatcodingroute sessionUnreadBadge !inline-flex !h-[22px] !min-h-[22px] !w-fit max-w-full shrink-0 items-center justify-center gap-1 overflow-hidden border-[color-mix(in_srgb,var(--state-warning)_34%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] px-1.5 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--state-warning)] [&_span]:leading-none",
   systemEntryButton:
-    "vui-routes-chatcodingroute systemEntryButton relative !grid !h-auto !min-h-[46px] !w-full grid-cols-[28px_minmax(0,1fr)] items-center justify-start gap-2 overflow-hidden rounded-[var(--radius-control)] border border-transparent bg-transparent px-1.5 py-1 text-left [color:var(--fg-secondary)] shadow-none transition-colors before:absolute before:inset-y-1.5 before:left-0 before:w-[2px] before:rounded-full before:bg-[var(--accent-cool)] before:opacity-0 hover:border-[color-mix(in_srgb,var(--accent-cool)_18%,transparent)] hover:bg-[color-mix(in_srgb,var(--surface-card)_46%,transparent)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
+    "vui-routes-chatcodingroute systemEntryButton relative !grid !h-auto !min-h-[46px] !w-full grid-cols-[28px_minmax(0,1fr)] items-center justify-start gap-2 overflow-hidden rounded-[var(--radius-control)] border border-transparent bg-transparent px-1.5 py-1 text-left [color:var(--fg-secondary)] shadow-none transition-colors before:absolute before:inset-y-1.5 before:left-0 before:w-[2px] before:rounded-full before:bg-[var(--accent-cool)] before:opacity-0 hover:border-[color-mix(in_srgb,var(--accent-cool)_18%,transparent)] hover:bg-[color-mix(in_srgb,var(--vui-surface-card)_46%,transparent)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
   systemEntryButtonActive:
-    "vui-routes-chatcodingroute systemEntryButtonActive border-[color-mix(in_srgb,var(--accent-cool)_22%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_7%,var(--surface-card))] [color:var(--fg-primary)] before:absolute before:opacity-100",
+    "vui-routes-chatcodingroute systemEntryButtonActive border-[color-mix(in_srgb,var(--accent-cool)_22%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_7%,var(--vui-surface-card))] [color:var(--fg-primary)] before:absolute before:opacity-100",
   systemEntryCopy:
     "vui-routes-chatcodingroute systemEntryCopy grid min-w-0 gap-0.5 overflow-hidden text-left",
   systemEntryGroup:

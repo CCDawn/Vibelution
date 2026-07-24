@@ -6,7 +6,7 @@ const styles = {
   sourceCollectionCandidateSkeletonList:
     "sourceCollectionCandidateSkeletonList min-w-0 grid content-start gap-1.5",
   sourceCollectionCandidateSkeletonRow:
-    "sourceCollectionCandidateSkeletonRow min-h-[56px] rounded-[var(--radius-control)] border border-[color:var(--border-subtle)] bg-[color:var(--surface-muted)] p-2",
+    "sourceCollectionCandidateSkeletonRow min-h-[56px] rounded-[var(--radius-control)] border border-[color:var(--border-subtle)] bg-[color:var(--vui-surface-row)] p-2",
   sourceCollectionCandidateSkeletonTitle:
     "sourceCollectionCandidateSkeletonTitle block h-3 w-2/3 rounded-[var(--radius-control)] bg-[color:var(--border-soft)]",
   sourceCollectionCandidateSkeletonMeta:

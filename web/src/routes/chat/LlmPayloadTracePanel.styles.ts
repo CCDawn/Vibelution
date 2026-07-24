@@ -15,6 +15,8 @@ const styles = {
     "vui-routes-chatcodingroute sectionHeader min-w-0 !grid grid-cols-[minmax(0,1fr)_max-content] items-start gap-1.5",
   sectionTitle:
     "vui-routes-chatcodingroute sectionTitle min-w-0 [font-size:var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)] m-0",
+  railSectionHeading:
+    "vui-routes-chatcodingroute railSectionHeading m-0 min-w-0 truncate [font-size:var(--vui-font-xs)] font-[650] leading-tight text-[var(--fg-secondary)]",
 } as const;
 
 export default styles;

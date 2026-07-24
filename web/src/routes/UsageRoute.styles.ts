@@ -1,19 +1,17 @@
-const readablePanelSurface =
-  "!bg-[color:color-mix(in_srgb,var(--surface-panel-strong)_98%,var(--surface-page)_2%)] shadow-none";
-const readableRowSurface =
-  "!bg-[color:color-mix(in_srgb,var(--surface-panel-strong)_96%,var(--surface-page)_4%)]";
-const panelSurface =
-  `rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-vui-surface-panel/88 ${readablePanelSurface}`;
-const rowSurface =
-  `rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-vui-surface-row/92 ${readableRowSurface}`;
-const rowSurfaceHover =
-  "hover:border-[var(--vui-border-soft)] hover:bg-[var(--vui-surface-row-hover)]";
+import {
+  vuiDenseRowClass,
+  vuiOpaquePanelClass,
+  vuiOpaqueRowClass,
+} from "../design/vuiSurfaceRecipes";
+
+const panelSurface = vuiOpaquePanelClass;
+const rowSurface = vuiOpaqueRowClass;
 
 const styles = {
   page:
     "grid h-full min-h-0 min-w-0 max-w-full grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden overflow-x-hidden text-vui-fg-primary max-[860px]:overflow-y-auto max-[860px]:overflow-x-hidden",
   header:
-    `mx-2 mt-1.5 min-w-0 max-w-full overflow-hidden border-[var(--vui-border-subtle)] ${readablePanelSurface} max-[720px]:grid-cols-[minmax(0,1fr)] max-[720px]:[&>div:last-child]:w-full max-[720px]:[&>div:last-child]:justify-self-start max-[720px]:[&>div:last-child]:justify-start`,
+    `mx-2 mt-1.5 min-w-0 max-w-full overflow-hidden ${panelSurface} max-[720px]:grid-cols-[minmax(0,1fr)] max-[720px]:[&>div:last-child]:w-full max-[720px]:[&>div:last-child]:justify-self-start max-[720px]:[&>div:last-child]:justify-start`,
   headerMeta:
     "min-w-0 max-w-full flex flex-wrap items-center gap-1 max-[720px]:w-full [&_[data-vui=\"status-strip-item\"]]:max-w-full [&_[data-vui=\"status-strip-item\"]]:grid-cols-[auto_minmax(0,1fr)] [&_[data-vui=\"status-strip-item\"]_span]:min-w-0 [&_[data-vui=\"status-strip-item\"]_span]:overflow-hidden [&_[data-vui=\"status-strip-item\"]_span]:text-ellipsis [&_[data-vui=\"status-strip-item\"]_span]:whitespace-nowrap",
   overviewBand:
@@ -53,7 +51,7 @@ const styles = {
   rollupGrid:
     "grid min-w-0 max-w-full grid-cols-[repeat(2,minmax(0,1fr))] gap-1 max-[720px]:grid-cols-1",
   usageRow:
-    `grid min-w-0 max-w-full grid-cols-[minmax(96px,0.64fr)_minmax(0,1fr)_minmax(58px,max-content)_minmax(54px,max-content)] items-center gap-1.5 ${rowSurface} ${rowSurfaceHover} px-2 py-1.5 max-[620px]:grid-cols-[minmax(0,1fr)] max-[620px]:items-start [&_span]:min-w-0 [&_span]:overflow-hidden [&_span]:text-ellipsis [&_span]:whitespace-nowrap [&_span]:[font-size:var(--vui-font-xs)] [&_span]:text-vui-fg-tertiary [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-vui-fg-primary [&_code]:inline-flex [&_code]:min-w-0 [&_code]:max-w-full [&_code]:items-center [&_code]:gap-1 [&_code]:overflow-hidden [&_code]:text-ellipsis [&_code]:whitespace-nowrap [&_code]:font-mono [&_code]:[font-size:var(--vui-font-xs)] [&_code]:text-[var(--accent-cool)]`,
+    `grid min-w-0 max-w-full grid-cols-[minmax(96px,0.64fr)_minmax(0,1fr)_minmax(58px,max-content)_minmax(54px,max-content)] items-center gap-1.5 ${vuiDenseRowClass} px-2 py-1.5 max-[620px]:grid-cols-[minmax(0,1fr)] max-[620px]:items-start [&_span]:min-w-0 [&_span]:overflow-hidden [&_span]:text-ellipsis [&_span]:whitespace-nowrap [&_span]:[font-size:var(--vui-font-xs)] [&_span]:text-vui-fg-tertiary [&_strong]:min-w-0 [&_strong]:overflow-hidden [&_strong]:text-ellipsis [&_strong]:whitespace-nowrap [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-vui-fg-primary [&_code]:inline-flex [&_code]:min-w-0 [&_code]:max-w-full [&_code]:items-center [&_code]:gap-1 [&_code]:overflow-hidden [&_code]:text-ellipsis [&_code]:whitespace-nowrap [&_code]:font-mono [&_code]:[font-size:var(--vui-font-xs)] [&_code]:text-[var(--accent-cool)]`,
   usageRowWide:
     "grid grid-cols-[minmax(104px,0.68fr)_minmax(0,1.1fr)_minmax(72px,max-content)] max-[620px]:grid-cols-[minmax(0,1fr)]",
   refreshButton:

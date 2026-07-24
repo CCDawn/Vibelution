@@ -451,9 +451,14 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStylesSource).toContain(".teamMemoryMemberTable");
     expect(routeStylesSource).toContain(".teamMemoryMemberHeading");
     expect(routeStylesSource).toContain(".teamMemoryActionRail");
-    expect(routeStyles.teamMemoryMemberHeading).toContain("max-[720px]:hidden");
-    expect(routeStyles.teamMemoryMemberActions).toContain("[&_a]:min-h-8");
+    expect(routeStyles.teamMemoryMemberHeading).toContain("sr-only");
+    expect(routeStyles.teamMemoryMemberCard).toContain("grid-cols-[minmax(0,1fr)_auto]");
+    expect(routeStyles.teamMemoryMemberMain).toContain("teamMemoryMemberMain");
+    expect(routeStyles.teamMemoryMemberActions).toContain("[&_a]:min-h-7");
     expect(routeStyles.teamMemoryActionRail).toContain("[&_a]:inline-flex");
+    expect(teamMemoryIndexPanelSource).toContain("styles.teamMemoryMemberMain");
+    expect(teamMemoryIndexPanelStyles.teamMemoryMemberCard).toContain("grid-cols-[minmax(0,1fr)_auto]");
+    expect(teamMemoryIndexPanelStyles.teamMemoryMemberHeading).toContain("sr-only");
   });
 
   it("distinguishes Agent-directory hydration from a missing Team binding in the memory index", () => {
@@ -480,9 +485,11 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.teamMemoryIndex).toContain("rounded-[var(--radius-panel)]");
     expect(routeStyles.teamMemoryMemberTable).toContain("grid-cols-[minmax(0,1fr)]");
     expect(routeStyles.teamMemoryMemberTable).not.toContain("repeat(auto-fit");
-    expect(routeStyles.teamMemoryMemberCard).toContain("grid-cols-[minmax(10rem,1.1fr)_minmax(11rem,1.4fr)_max-content_auto]");
+    expect(routeStyles.teamMemoryMemberCard).toContain("grid-cols-[minmax(0,1fr)_auto]");
+    expect(routeStyles.teamMemoryMemberCard).not.toContain("minmax(10rem,1.1fr)");
     expect(teamMemoryIndexPanelStyles.teamMemoryMemberTable).toContain("grid-cols-[minmax(0,1fr)]");
     expect(teamMemoryIndexPanelStyles.teamMemoryMemberTable).not.toContain("repeat(auto-fit");
+    expect(teamMemoryIndexPanelStyles.teamMemoryMemberCard).toContain("grid-cols-[minmax(0,1fr)_auto]");
   });
 
   it("keeps only the fixed research and AI search teams in the picker", () => {
@@ -608,7 +615,9 @@ describe("TeamsRoute layout contract", () => {
     expect(teamKindModelSource).toContain("function isSystemManagedTeam");
     expect(routeAndPureSource).toContain("systemManagedTeamArchiveReason");
     expect(teamKindModelSource).toContain("系统团队由工作流自动维护，不能在这里归档。");
-    expect(routeSource).toContain("系统团队不可归档");
+    // Keep the toolbar label short; the system-team lock reason stays on title/disabled path.
+    expect(routeSource).toContain('{lang === "zh" ? "归档" : "Archive"}');
+    expect(routeSource).not.toContain("系统团队不可归档");
     expect(routeSource).toContain("解绑节点");
     expect(routeSource).toContain("删除节点");
     expect(routeSource).toContain("团队任务");
@@ -1817,7 +1826,11 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.canvasToolbar).toContain("grid-cols-[minmax(0,1fr)_max-content]");
     expect(routeStyles.canvasToolbar).toContain("max-[900px]:grid-cols-[minmax(0,1fr)]");
     expect(routeStyles.canvasToolbar).toContain("[&>div:first-child]:min-w-0");
-    expect(routeStyles.toolbarActions).toContain("max-w-[min(100%,680px)]");
+    expect(routeStyles.toolbarActions).toContain("max-w-full");
+    expect(routeStyles.toolbarActions).toContain("[&_[data-vui=native-button]]:min-h-[28px]");
+    expect(routeStyles.toolbarActions).toContain("[&_[data-vui=native-button]:not(.dangerButton)]:border");
+    expect(routeStyles.toolbarActions).toContain("[&_a]:min-h-[28px]");
+    expect(routeStyles.toolbarActions).not.toContain("min-w-[72px]");
     expect(routeStyles.knowledgeCompletionFlowPanel).toContain("overflow-hidden");
     expect(routeStyles.knowledgeCompletionFlowHeader).toContain("grid-cols-[minmax(0,1fr)_auto]");
     expect(routeStyles.knowledgeCompletionFlowNodes).toContain("grid-cols-[repeat(auto-fit,minmax(280px,1fr))]");

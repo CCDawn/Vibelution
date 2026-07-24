@@ -1,0 +1,270 @@
+<!doctype html>
+<!--
+  Isolated VUI reference preview.
+  This file is intentionally not registered in the production router.
+  It may consume existing tokens, but it must not change them.
+-->
+<html lang="zh-CN" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>VUI Reference Lab · Vibelution</title>
+    <link rel="stylesheet" href="/src/design/tokens.css" />
+    <link rel="stylesheet" href="/src/design/vui-reference-lab.css" />
+  </head>
+  <body>
+    <main class="lab-shell" id="lab-shell">
+      <header class="lab-topbar">
+        <div class="lab-brand">
+          <div class="lab-brand-mark" aria-hidden="true">V</div>
+          <div>
+            <p class="lab-eyebrow">VIBELUTION · DESIGN SYSTEM</p>
+            <h1>VUI Reference Lab</h1>
+          </div>
+          <span class="lab-preview-badge">PREVIEW · 未接入生产</span>
+        </div>
+        <div class="lab-toolbar" aria-label="预览控制">
+          <div class="lab-segment" role="group" aria-label="主题">
+            <button class="lab-segment-button is-selected" data-theme-choice="light" type="button" aria-pressed="true">浅色</button>
+            <button class="lab-segment-button" data-theme-choice="dark" type="button" aria-pressed="false">深色</button>
+          </div>
+          <div class="lab-segment" role="group" aria-label="背景">
+            <button class="lab-segment-button is-selected" data-background-choice="default" type="button" aria-pressed="true">默认背景</button>
+            <button class="lab-segment-button" data-background-choice="context" type="button" aria-pressed="false">情境背景</button>
+          </div>
+          <button class="lab-density-button" id="density-toggle" type="button" aria-pressed="false">紧凑密度</button>
+        </div>
+      </header>
+
+      <div class="lab-statusbar" role="status">
+        <span><i class="lab-status-dot"></i>静态视觉基线</span>
+        <span>Token 来源：现有 <code>tokens.css</code></span>
+        <span>范围：不读写 API、不改路由、不影响运行中页面</span>
+      </div>
+
+      <div class="lab-layout">
+        <aside class="lab-sidebar" aria-label="组件目录">
+          <div class="lab-sidebar-heading">
+            <p class="lab-eyebrow">REFERENCE INDEX</p>
+            <h2>语义层与控件</h2>
+          </div>
+          <nav class="lab-nav">
+            <a class="is-current" href="#surfaces"><span>01</span> 表面层级</a>
+            <a href="#actions"><span>02</span> 操作与按钮</a>
+            <a href="#fields"><span>03</span> 表单与选择</a>
+            <a href="#rows"><span>04</span> 列表与状态</a>
+            <a href="#audit"><span>05</span> 审计基线</a>
+          </nav>
+          <div class="lab-sidebar-note">
+            <p class="lab-eyebrow">IMPLEMENTATION RULE</p>
+            <p>产品路由只通过 VUI 产品 API 组合组件；renderer 与 token 契约保持在边界内。</p>
+          </div>
+        </aside>
+
+        <section class="lab-canvas" aria-label="VUI 组件参考">
+          <section class="lab-intro lab-region" aria-labelledby="lab-title">
+            <div>
+              <p class="lab-eyebrow">SHADCN-ALIGNED · LOCAL VUI</p>
+              <h2 id="lab-title">先锁定语义层级，再批量收敛页面。</h2>
+              <p>这是一个独立的可交互预览：所有示例都用现有 VUI 主题变量映射到有限的产品语义角色，避免路由自行混合透明度。</p>
+            </div>
+            <div class="lab-decision-card">
+              <span class="lab-mini-label">本轮需确认</span>
+              <strong>内容卡默认不透明</strong>
+              <small>glass 仅用于浮层与临时覆盖层</small>
+            </div>
+          </section>
+
+          <section class="lab-section" id="surfaces" aria-labelledby="surfaces-title">
+            <div class="lab-section-heading">
+              <div>
+                <p class="lab-eyebrow">01 · SURFACES</p>
+                <h2 id="surfaces-title">六种表面语义，不按页面各自命名</h2>
+              </div>
+              <span class="lab-contract-chip">候选 Token 契约</span>
+            </div>
+
+            <div class="lab-surface-board lab-region">
+              <div class="lab-surface-board-header">
+                <div>
+                  <span class="lab-mini-label">workspace</span>
+                  <strong>工作区背景</strong>
+                </div>
+                <button class="lab-icon-button" type="button" aria-label="更多工作区操作">•••</button>
+              </div>
+              <div class="lab-surface-grid">
+                <article class="lab-surface-sample lab-surface-region">
+                  <span class="lab-mini-label">region</span>
+                  <strong>区域容器</strong>
+                  <small>承载一组有共同目标的内容</small>
+                </article>
+                <article class="lab-surface-sample lab-surface-card">
+                  <span class="lab-mini-label">card</span>
+                  <strong>内容卡</strong>
+                  <small>常规信息层，默认不透底</small>
+                </article>
+                <article class="lab-surface-sample lab-surface-inset">
+                  <span class="lab-mini-label">inset</span>
+                  <strong>内嵌区</strong>
+                  <small>卡片内部的分组或日志</small>
+                </article>
+                <article class="lab-surface-sample lab-surface-control">
+                  <span class="lab-mini-label">control</span>
+                  <strong>控件底</strong>
+                  <small>输入、选择与次级操作</small>
+                </article>
+                <article class="lab-surface-sample lab-surface-popover">
+                  <span class="lab-mini-label">popover</span>
+                  <strong>浮层</strong>
+                  <small>唯一允许轻玻璃感的角色</small>
+                </article>
+              </div>
+            </div>
+          </section>
+
+          <section class="lab-section" id="actions" aria-labelledby="actions-title">
+            <div class="lab-section-heading">
+              <div>
+                <p class="lab-eyebrow">02 · ACTIONS</p>
+                <h2 id="actions-title">按钮只保留明确层级与固定尺寸</h2>
+              </div>
+              <span class="lab-note">同一操作层不混用填充、渐变和不定高度</span>
+            </div>
+            <div class="lab-demo-grid">
+              <article class="lab-card">
+                <div class="lab-card-header">
+                  <div>
+                    <span class="lab-mini-label">BUTTON VARIANTS</span>
+                    <h3>主要 / 次要 / 幽灵 / 危险</h3>
+                  </div>
+                  <span class="lab-count">4 variants</span>
+                </div>
+                <div class="lab-button-row">
+                  <button class="lab-button lab-button-primary" type="button"><span aria-hidden="true">＋</span>新增 Agent</button>
+                  <button class="lab-button lab-button-secondary" type="button">保存草稿</button>
+                  <button class="lab-button lab-button-ghost" type="button">查看日志</button>
+                  <button class="lab-button lab-button-danger" type="button">归档</button>
+                </div>
+                <div class="lab-button-row lab-muted-row">
+                  <button class="lab-button lab-button-secondary" type="button" disabled>批量启用</button>
+                  <button class="lab-button lab-button-ghost" type="button" disabled>更多操作</button>
+                </div>
+              </article>
+              <article class="lab-card lab-action-anatomy">
+                <span class="lab-mini-label">CARD ANATOMY</span>
+                <div class="lab-anatomy-row"><span>header</span><strong>标题 + 一个主操作</strong></div>
+                <div class="lab-anatomy-row"><span>content</span><strong>信息不跨越卡片层级</strong></div>
+                <div class="lab-anatomy-row"><span>footer</span><strong>可选，仅放次级动作</strong></div>
+              </article>
+            </div>
+          </section>
+
+          <section class="lab-section" id="fields" aria-labelledby="fields-title">
+            <div class="lab-section-heading">
+              <div>
+                <p class="lab-eyebrow">03 · FIELDS</p>
+                <h2 id="fields-title">输入控件有一致的边框、焦点与高度</h2>
+              </div>
+            </div>
+            <div class="lab-card lab-form-card">
+              <label class="lab-field">
+                <span>Agent 名称</span>
+                <input value="监控进化裁决 Agent" aria-label="Agent 名称" />
+                <small>标签在控件外，说明不与值争夺层级。</small>
+              </label>
+              <label class="lab-field">
+                <span>执行模式</span>
+                <select aria-label="执行模式"><option>受控执行</option><option>观察模式</option></select>
+                <small>选择器与输入框采用同一尺寸和轮廓。</small>
+              </label>
+              <label class="lab-check-field"><input type="checkbox" checked /> <span>运行前校验关联资源</span></label>
+            </div>
+          </section>
+
+          <section class="lab-section" id="rows" aria-labelledby="rows-title">
+            <div class="lab-section-heading">
+              <div>
+                <p class="lab-eyebrow">04 · ROWS &amp; STATUS</p>
+                <h2 id="rows-title">列表将选择、状态和操作分层</h2>
+              </div>
+              <span class="lab-note">紧凑模式可切换，内容不重叠</span>
+            </div>
+            <div class="lab-list-card">
+              <div class="lab-list-header"><span>会话入口 Agent</span><span>状态</span><span>最后活动</span></div>
+              <article class="lab-list-row is-selected">
+                <span class="lab-avatar">30</span>
+                <div><strong>gpt</strong><small>relay_openai/gpt-5.6-luna</small></div>
+                <span class="lab-state lab-state-ready">正常</span><time>10:27</time>
+              </article>
+              <article class="lab-list-row">
+                <span class="lab-avatar">09</span>
+                <div><strong>监控进化裁决 Agent</strong><small>受控执行 · 观察队列</small></div>
+                <span class="lab-state lab-state-running">运行中</span><time>10:18</time>
+              </article>
+              <article class="lab-list-row">
+                <span class="lab-avatar">08</span>
+                <div><strong>监控进化审计 Agent</strong><small>等待资源校验</small></div>
+                <span class="lab-state lab-state-warning">待处理</span><time>09:42</time>
+              </article>
+            </div>
+          </section>
+
+          <section class="lab-section" id="audit" aria-labelledby="audit-title">
+            <div class="lab-section-heading">
+              <div>
+                <p class="lab-eyebrow">05 · BASELINE</p>
+                <h2 id="audit-title">为什么先做 token 审计</h2>
+              </div>
+              <span class="lab-repo-path">审计：<code>docs/superpowers/plans/2026-07-23-vui-surface-baseline.md</code></span>
+            </div>
+            <div class="lab-audit-grid">
+              <article class="lab-audit-metric"><strong>324</strong><span>路由层 surface + alpha 使用处</span></article>
+              <article class="lab-audit-metric"><strong>65</strong><span>不同 token + alpha 组合</span></article>
+              <article class="lab-audit-metric"><strong>1,366</strong><span>row / panel / glass 现有引用</span></article>
+              <article class="lab-audit-note"><span class="lab-mini-label">READOUT</span><p>问题不在于缺少组件，而在于相同视觉角色缺少唯一的消费入口。先在 Lab 确认角色与状态，再进入正式 token 改造。</p></article>
+            </div>
+          </section>
+
+          <footer class="lab-footer">
+            <span>Reference Lab 仅用于评审；尚未更改 VUI token 或业务页面。</span>
+            <strong>下一步：视觉确认后，进入 Token Contract</strong>
+          </footer>
+        </section>
+      </div>
+    </main>
+
+    <script>
+      const root = document.documentElement;
+      const shell = document.getElementById('lab-shell');
+      const setGroupState = (selector, activeButton) => {
+        document.querySelectorAll(selector).forEach((button) => {
+          const selected = button === activeButton;
+          button.classList.toggle('is-selected', selected);
+          button.setAttribute('aria-pressed', String(selected));
+        });
+      };
+
+      document.querySelectorAll('[data-theme-choice]').forEach((button) => {
+        button.addEventListener('click', () => {
+          root.dataset.theme = button.dataset.themeChoice;
+          setGroupState('[data-theme-choice]', button);
+        });
+      });
+
+      document.querySelectorAll('[data-background-choice]').forEach((button) => {
+        button.addEventListener('click', () => {
+          shell.classList.toggle('is-context-background', button.dataset.backgroundChoice === 'context');
+          setGroupState('[data-background-choice]', button);
+        });
+      });
+
+      document.getElementById('density-toggle').addEventListener('click', (event) => {
+        const enabled = shell.classList.toggle('is-compact');
+        event.currentTarget.classList.toggle('is-selected', enabled);
+        event.currentTarget.setAttribute('aria-pressed', String(enabled));
+        event.currentTarget.textContent = enabled ? '标准密度' : '紧凑密度';
+      });
+    </script>
+  </body>
+</html>

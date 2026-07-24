@@ -4,7 +4,7 @@ const headerActionsClass = "inline-flex min-w-0 items-center justify-end gap-1.5
 const controlButtonClass =
   "inline-flex min-h-[26px] w-fit max-w-full items-center justify-center gap-1.5 whitespace-nowrap rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-soft)_76%,transparent)] bg-[color-mix(in_srgb,var(--vui-control-muted)_72%,transparent)] px-2 py-[3px] [font-size:var(--vui-font-xs)] text-vui-fg-secondary hover:border-[color-mix(in_srgb,var(--border-strong)_78%,transparent)] hover:bg-[var(--vui-control-muted-hover)] hover:text-vui-fg-primary disabled:opacity-55";
 const fieldSurfaceClass =
-  "rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-soft)_76%,transparent)] bg-[color-mix(in_srgb,var(--surface-input-strong)_86%,transparent)]";
+  "rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-soft)_76%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-workspace)_86%,transparent)]";
 const rowButtonSurfaceClass =
   "block !h-auto w-full rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-soft)_74%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-row)_78%,transparent)] px-[9px] py-2 text-left text-vui-fg-primary hover:border-[color-mix(in_srgb,var(--border-strong)_78%,transparent)] hover:bg-[color-mix(in_srgb,var(--vui-surface-row)_88%,transparent)]";
 const pillSurfaceClass =
@@ -42,7 +42,7 @@ const templateButtonBaseClass = [
   rowButtonSurfaceClass,
   "!grid gap-[5px]",
 ].join(" ");
-const templateButtonActiveClass = "border-[color-mix(in_srgb,var(--accent-warm)_30%,transparent)] bg-[var(--surface-active-neutral)] shadow-[var(--vui-shadow-inset-accent)]";
+const templateButtonActiveClass = "border-[color-mix(in_srgb,var(--accent-warm)_30%,transparent)] bg-[var(--vui-surface-row-hover)] shadow-[var(--vui-shadow-inset-accent)]";
 const templateMainClass = "grid min-w-0 gap-0.5 [&_*]:min-w-0 [&_*]:truncate";
 const templateMetaClass =
   "flex min-w-0 max-w-full flex-wrap gap-1 overflow-hidden [&_span]:inline-flex [&_span]:min-h-5 [&_span]:min-w-0 [&_span]:max-w-full [&_span]:items-center [&_span]:justify-center [&_span]:truncate [&_span]:whitespace-nowrap [&_span]:rounded-full [&_span]:border [&_span]:border-[color-mix(in_srgb,var(--vui-border-soft)_74%,transparent)] [&_span]:bg-[color-mix(in_srgb,var(--vui-surface-row)_72%,transparent)] [&_span]:px-1.5 [&_span]:[font-size:var(--vui-font-xs)] [&_span]:text-vui-fg-tertiary";

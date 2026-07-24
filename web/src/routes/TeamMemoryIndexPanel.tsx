@@ -55,7 +55,7 @@ export function TeamMemoryIndexPanel({
       </div>
       <div className={styles.teamMemoryMemberTable}>
         {members.length ? (
-          <div className={styles.teamMemoryMemberHeading} aria-hidden="true">
+          <div className={styles.teamMemoryMemberHeading}>
             <span>Agent</span>
             <span>{isZh ? "职责" : "Role"}</span>
             <span>{isZh ? "状态" : "Status"}</span>
@@ -68,16 +68,20 @@ export function TeamMemoryIndexPanel({
             className={styles.teamMemoryMemberCard}
             aria-label={`${member.agentName} · ${member.roleLabel} · ${member.statusLabel}`}
           >
-            <div className={styles.teamMemoryMemberIdentity}>
-              <strong>{member.agentName}</strong>
-              <span>{member.agentCode}</span>
+            <div className={styles.teamMemoryMemberMain}>
+              <div className={styles.teamMemoryMemberIdentity}>
+                <strong>{member.agentName}</strong>
+                <span>{member.agentCode}</span>
+              </div>
+              <div className={styles.teamMemoryMemberMeta}>
+                <span className={styles.teamMemoryRole} title={member.roleTitle || undefined}>
+                  {member.roleLabel}
+                </span>
+                <span className={styles.teamMemoryStatusBadge} data-tone={member.statusTone} title={member.statusTitle}>
+                  {member.statusLabel}
+                </span>
+              </div>
             </div>
-            <span className={styles.teamMemoryRole} title={member.roleTitle || undefined}>
-              {member.roleLabel}
-            </span>
-            <span className={styles.teamMemoryStatusBadge} data-tone={member.statusTone} title={member.statusTitle}>
-              {member.statusLabel}
-            </span>
             <div className={styles.teamMemoryMemberActions}>
               <Link to={member.memoryRoute} title={isZh ? "打开该 Agent 私有记忆" : "Open this Agent's private memory"}>
                 <Bot size={13} />

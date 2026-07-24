@@ -231,7 +231,7 @@ const styles: Record<string, string> = {
   nodeBindingPlaceholder:
     "nodeBindingPlaceholder min-w-0",
   nodeBindingSection:
-    "nodeBindingSection min-w-0 content-start gap-2",
+    "nodeBindingSection min-w-0 grid content-start gap-2",
   nodeBound:
     "nodeBound min-w-0 border-[color-mix(in_srgb,var(--state-success)_42%,var(--vui-border-subtle))]",
   nodeIcon:
@@ -481,25 +481,29 @@ const styles: Record<string, string> = {
   teamHistoryPanel:
     "teamHistoryPanel min-w-0 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2",
   teamMemoryActionRail:
-    "teamMemoryActionRail min-w-0 flex flex-wrap items-center justify-end gap-1.5 [&_a]:inline-flex [&_a]:min-h-8 [&_a]:items-center [&_a]:justify-center [&_a]:gap-1.5 [&_a]:px-2.5 [&_a]:rounded-[var(--radius-control)] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_30%,var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_88%,transparent)] [&_a]:text-[var(--fg-primary)] [&_a]:font-[820] [&_a]:no-underline [&_a]:whitespace-nowrap [&_a:hover]:border-[color:color-mix(in_srgb,var(--accent-cool)_46%,var(--border-soft))] [&_a:hover]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-panel))]",
+    "teamMemoryActionRail min-w-0 flex flex-wrap items-center justify-end gap-1.5 [&_a]:inline-flex [&_a]:w-fit [&_a]:flex-none [&_a]:min-h-7 [&_a]:max-w-full [&_a]:items-center [&_a]:justify-center [&_a]:gap-1 [&_a]:rounded-[var(--radius-control)] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_30%,var(--vui-border-subtle))] [&_a]:bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_88%,transparent)] [&_a]:px-2 [&_a]:text-[var(--fg-primary)] [&_a]:[font-size:var(--vui-font-xs)] [&_a]:font-[760] [&_a]:no-underline [&_a]:whitespace-nowrap [&_a:hover]:border-[color:color-mix(in_srgb,var(--accent-cool)_46%,var(--vui-border-subtle))] [&_a:hover]:bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-panel))]",
   teamMemoryIndex:
-    "teamMemoryIndex min-w-0 !flex-none grid gap-3 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-3",
+    "teamMemoryIndex min-w-0 !flex-none grid gap-2.5 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2.5",
   teamMemoryIndexHeader:
-    "teamMemoryIndexHeader min-w-0 flex flex-wrap items-center gap-1.5 !flex min-w-0 items-center justify-between gap-2 [&>div]:grid [&>div]:min-w-0 [&>div]:gap-0.5 [&>div_strong]:truncate [&>div_strong]:text-[var(--fg-primary)] [&>div_span]:truncate [&>div_span]:text-[var(--fg-muted)] [&>div_span]:font-[760]",
+    "teamMemoryIndexHeader min-w-0 flex flex-wrap items-start justify-between gap-2 [&>div]:grid [&>div]:min-w-0 [&>div]:gap-0.5 [&>div_strong]:truncate [&>div_strong]:text-[var(--fg-primary)] [&>div_span]:truncate [&>div_span]:text-[var(--fg-muted)] [&>div_span]:[font-size:var(--vui-font-xs)] [&>div_span]:font-[760]",
   teamMemoryMemberActions:
-    "teamMemoryMemberActions min-w-0 flex flex-wrap items-center justify-end gap-1.5 [&_a]:inline-flex [&_a]:min-h-8 [&_a]:items-center [&_a]:justify-center [&_a]:gap-1.5 [&_a]:rounded-[var(--radius-control)] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_30%,var(--border-soft))] [&_a]:bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_88%,transparent)] [&_a]:px-2 [&_a]:text-[var(--fg-primary)] [&_a]:font-[760] [&_a]:no-underline",
+    "teamMemoryMemberActions min-w-0 flex flex-none flex-wrap items-center justify-end gap-1 self-start [&_a]:inline-flex [&_a]:w-fit [&_a]:flex-none [&_a]:min-h-7 [&_a]:max-w-full [&_a]:items-center [&_a]:justify-center [&_a]:gap-1 [&_a]:rounded-[var(--radius-control)] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_30%,var(--vui-border-subtle))] [&_a]:bg-[color:color-mix(in_srgb,var(--vui-surface-panel)_88%,transparent)] [&_a]:px-2 [&_a]:text-[var(--fg-primary)] [&_a]:[font-size:var(--vui-font-xs)] [&_a]:font-[760] [&_a]:no-underline [&_a]:whitespace-nowrap",
   teamMemoryMemberCard:
-    "teamMemoryMemberCard min-w-0 grid grid-cols-[minmax(10rem,1.1fr)_minmax(11rem,1.4fr)_max-content_auto] items-center gap-3 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] px-3 py-2 max-[720px]:grid-cols-[minmax(0,1fr)_auto] max-[720px]:gap-2",
+    "teamMemoryMemberCard min-w-0 grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-2 gap-y-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] px-2.5 py-2",
   teamMemoryMemberHeading:
-    "teamMemoryMemberHeading min-w-0 grid grid-cols-[minmax(10rem,1.1fr)_minmax(11rem,1.4fr)_max-content_auto] gap-3 px-3 [font-size:var(--vui-font-xs)] font-[760] text-[var(--fg-muted)] max-[720px]:hidden",
+    "teamMemoryMemberHeading sr-only",
   teamMemoryMemberIdentity:
-    "teamMemoryMemberIdentity min-w-0 grid gap-1",
+    "teamMemoryMemberIdentity min-w-0 grid gap-0.5 [&_strong]:min-w-0 [&_strong]:truncate [&_strong]:text-[var(--fg-primary)] [&_strong]:[font-size:var(--vui-font-sm)] [&_strong]:font-[760] [&_span]:min-w-0 [&_span]:truncate [&_span]:text-[var(--fg-tertiary)] [&_span]:[font-size:var(--vui-font-xs)]",
+  teamMemoryMemberMain:
+    "teamMemoryMemberMain min-w-0 grid gap-1 content-start",
+  teamMemoryMemberMeta:
+    "teamMemoryMemberMeta min-w-0 flex flex-wrap items-center gap-1.5",
   teamMemoryMemberTable:
     "teamMemoryMemberTable min-w-0 !grid grid-cols-[minmax(0,1fr)] content-start auto-rows-max gap-1.5",
   teamMemoryRole:
-    "teamMemoryRole min-w-0",
+    "teamMemoryRole min-w-0 block max-w-full truncate font-mono [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)]",
   teamMemoryStatusBadge:
-    "teamMemoryStatusBadge min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+    "teamMemoryStatusBadge min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
   teamMessageForm:
     "teamMessageForm min-w-0 grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)]",
   teamRoundCard:
@@ -528,10 +532,12 @@ const styles: Record<string, string> = {
     "teamUnavailableSurface grid min-h-0 flex-1 grid-cols-[minmax(0,720px)] content-start justify-center overflow-auto px-3 py-4",
   teamLoadingInlineSurface:
     "teamLoadingInlineSurface min-h-[96px]",
+  // VNativeButton carries data-vui so global native-control chrome does not apply.
+  // Parent group paints default chrome; exclude .dangerButton so its own tone wins.
   toolbarActions:
-    "toolbarActions max-w-[min(100%,680px)] items-start justify-end overflow-visible max-[900px]:justify-start [&_a]:min-w-[72px] [&_a]:whitespace-nowrap [&_button]:min-w-[72px] [&_button]:whitespace-nowrap",
+    "toolbarActions min-w-0 max-w-full flex-wrap items-center justify-end gap-1.5 overflow-visible max-[900px]:justify-start [&_a]:inline-flex [&_a]:min-h-[28px] [&_a]:w-fit [&_a]:max-w-full [&_a]:shrink-0 [&_a]:items-center [&_a]:justify-center [&_a]:gap-1.5 [&_a]:rounded-[var(--radius-control)] [&_a]:border [&_a]:border-[var(--vui-border-subtle)] [&_a]:bg-[var(--vui-control-muted)] [&_a]:px-2.5 [&_a]:[font-size:var(--vui-font-xs)] [&_a]:font-semibold [&_a]:leading-tight [&_a]:text-[var(--fg-secondary)] [&_a]:no-underline [&_a]:whitespace-nowrap [&_a:hover]:border-[var(--vui-control-hover-border)] [&_a:hover]:bg-[var(--vui-control-hover-bg)] [&_a:hover]:text-[var(--vui-control-hover-fg)] [&_[data-vui=native-button]]:inline-flex [&_[data-vui=native-button]]:min-h-[28px] [&_[data-vui=native-button]]:w-fit [&_[data-vui=native-button]]:max-w-full [&_[data-vui=native-button]]:shrink-0 [&_[data-vui=native-button]]:items-center [&_[data-vui=native-button]]:justify-center [&_[data-vui=native-button]]:gap-1.5 [&_[data-vui=native-button]]:rounded-[var(--radius-control)] [&_[data-vui=native-button]]:px-2.5 [&_[data-vui=native-button]]:[font-size:var(--vui-font-xs)] [&_[data-vui=native-button]]:font-semibold [&_[data-vui=native-button]]:leading-tight [&_[data-vui=native-button]]:whitespace-nowrap [&_[data-vui=native-button]:not(.dangerButton)]:border [&_[data-vui=native-button]:not(.dangerButton)]:border-[var(--vui-border-subtle)] [&_[data-vui=native-button]:not(.dangerButton)]:bg-[var(--vui-control-muted)] [&_[data-vui=native-button]:not(.dangerButton)]:text-[var(--fg-secondary)] [&_[data-vui=native-button]:not(.dangerButton):hover:not(:disabled)]:border-[var(--vui-control-hover-border)] [&_[data-vui=native-button]:not(.dangerButton):hover:not(:disabled)]:bg-[var(--vui-control-hover-bg)] [&_[data-vui=native-button]:not(.dangerButton):hover:not(:disabled)]:text-[var(--vui-control-hover-fg)] [&_[data-vui=native-button]:disabled]:cursor-default [&_[data-vui=native-button]:disabled]:opacity-55",
   toolbarLink:
-    "toolbarLink min-w-0 flex flex-wrap items-center gap-1.5",
+    "toolbarLink min-w-0 inline-flex items-center justify-center gap-1.5",
   workflowCandidateItemSelected:
     "workflowCandidateItemSelected min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 border-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_11%,transparent)] text-[var(--accent-cool)]",
   workflowError:

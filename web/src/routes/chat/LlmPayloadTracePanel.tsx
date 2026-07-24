@@ -71,7 +71,7 @@ export function LlmPayloadTracePanel({ lang, trace }: LlmPayloadTracePanelProps)
   return (
     <section className={`${styles.leftBlock} ${styles.llmPayloadTracePanel}`} role="status" aria-live="polite" aria-label={title}>
       <div className={styles.sectionHeader}>
-        <h3 className={styles.sectionTitle}>{title}</h3>
+        <h3 className={styles.railSectionHeading}>{title}</h3>
         {subtitle ? (
           <VTooltip
             content={subtitle}

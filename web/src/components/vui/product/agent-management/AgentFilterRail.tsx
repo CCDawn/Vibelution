@@ -143,7 +143,7 @@ export function AgentFilterRail({
     >
       <label
         data-vui-product="agent-filter-search"
-        className="flex items-center gap-2 min-h-[32px] px-[9px] rounded-[var(--radius-control)] border border-[var(--border-soft)] bg-[color-mix(in_srgb,var(--surface-input)_84%,var(--vui-surface-row))] text-[var(--fg-tertiary)] focus-within:border-[color-mix(in_srgb,var(--accent-cool)_44%,transparent)] focus-within:shadow-[var(--focus-ring)] focus-within:text-[var(--fg-secondary)]"
+        className="flex items-center gap-2 min-h-[32px] px-[9px] rounded-[var(--radius-control)] border border-[var(--border-soft)] bg-[color-mix(in_srgb,var(--vui-surface-workspace)_84%,var(--vui-surface-row))] text-[var(--fg-tertiary)] focus-within:border-[color-mix(in_srgb,var(--accent-cool)_44%,transparent)] focus-within:shadow-[var(--focus-ring)] focus-within:text-[var(--fg-secondary)]"
       >
         <Search size={15} className="shrink-0" />
         <VNativeInput

@@ -777,10 +777,10 @@ describe("ConversationView edit resend affordance", () => {
     expect(conversationViewStylesModuleSource).toContain("composerRoundButtonPrimary: composerPrimaryActionButton");
     expect(conversationViewStylesModuleSource).toContain("sendButton: composerSendActionButton");
     expect(styles.attachButton).toContain("focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)]");
-    expect(styles.attachButton).toContain("active:bg-[color-mix(in_srgb,var(--surface-page)_18%,var(--vui-control-muted-hover))]");
+    expect(styles.attachButton).toContain("active:bg-[color-mix(in_srgb,var(--vui-surface-workspace)_18%,var(--vui-control-muted-hover))]");
     expect(styles.attachButton).toContain("disabled:hover:bg-[color-mix(in_srgb,var(--vui-control-muted)_62%,transparent)]");
     expect(styles.composerRoundButton).toContain("border-[color-mix(in_srgb,var(--border-soft)_70%,transparent)]");
-    expect(styles.composerRoundButton).toContain("hover:bg-[color-mix(in_srgb,var(--surface-page)_14%,var(--vui-control-muted-hover))]");
+    expect(styles.composerRoundButton).toContain("hover:bg-[color-mix(in_srgb,var(--vui-surface-workspace)_14%,var(--vui-control-muted-hover))]");
     expect(styles.composerRoundButton).toContain("active:border-[color-mix(in_srgb,var(--accent-cool)_24%,var(--vui-border-subtle))]");
     expect(styles.composerRoundButtonPrimary).toContain("!border-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)]");
     expect(styles.composerRoundButtonPrimary).toContain("hover:!bg-[color-mix(in_srgb,var(--accent-cool)_18%,var(--vui-control-muted-hover))]");

@@ -288,7 +288,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(conversationStyles.sendButton).not.toContain("bg-[#");
     expect(conversationStyles.sendButton).not.toContain("-translate-y");
     expect(conversationStyles.attachButton).toContain("bg-[color-mix(in_srgb,var(--vui-control-muted)_62%,transparent)]");
-    expect(conversationStyles.attachButton).toContain("active:bg-[color-mix(in_srgb,var(--surface-page)_18%,var(--vui-control-muted-hover))]");
+    expect(conversationStyles.attachButton).toContain("active:bg-[color-mix(in_srgb,var(--vui-surface-workspace)_18%,var(--vui-control-muted-hover))]");
     expect(conversationStyles.stopButton).toContain("!border-[color-mix(in_srgb,var(--state-error)_34%,transparent)]");
     expect(conversationStyles.stopButton).toContain("!text-[var(--state-error)]");
 
@@ -817,8 +817,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndIndexRailSource).toContain("styles.companionCompact");
     expect(routeAndIndexRailSource).toContain("styles.petMiniAvatar");
     expect(routeAndIndexRailSource).toContain("styles.featureChipPrimary");
+    expect(routeAndIndexRailSource).toContain("styles.featureChipPrimaryActive");
     expect(routeAndIndexRailSource).toContain("styles.featureChipRow");
     expect(routeAndIndexRailSource).toContain("styles.featureChip");
+    expect(routeAndIndexRailSource).toContain("styles.railSectionHeading");
     expect(routeAndIndexRailSource).toContain("<em>{enabled ? (lang === \"zh\" ? \"开\" : \"On\") : (lang === \"zh\" ? \"关\" : \"Off\")}</em>");
     expect(routeSource).not.toContain("<section className={styles.petShowcase}");
     expect(routeSource).not.toContain("styles.featurePresetGrid");
@@ -842,8 +844,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.companionCompact).toBeTypeOf("string");
     expect(routeStyles.petMiniAvatar).toBeTypeOf("string");
     expect(routeStyles.featureChipPrimary).toBeTypeOf("string");
+    expect(routeStyles.featureChipPrimaryActive).toBeTypeOf("string");
     expect(routeStyles.featureChipRow).toBeTypeOf("string");
     expect(routeStyles.featureChip).toBeTypeOf("string");
+    expect(routeStyles.railSectionHeading).toBeTypeOf("string");
   });
 
   it("keeps the companion details toggle as a single compact control", () => {
@@ -893,7 +897,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.companionCompact).toContain("bg-[var(--vui-surface-raised)]");
     expect(routeStyles.companionCompact).not.toContain("white)");
     expect(routeStyles.companionCompact).toContain("shadow-none");
-    expect(routeStyles.companionCopy).toContain("[font-size:var(--vui-font-sm)]");
+    expect(routeStyles.companionCopy).toContain("[font-size:var(--vui-font-xs)]");
     expect(routeStyles.petShowcaseFeedback).toContain("[font-size:var(--vui-font-sm)]");
     expect(routeStyles.companionTopLine).not.toContain("bg-[var(--vui-surface-row)]");
     expect(routeStyles.compactDetails).toContain("max-h-[220px]");
@@ -962,9 +966,23 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.tokenStatusMetric_compression).not.toContain("inline-flex");
     expect(routeStyles.tokenStatusMetric_speed).not.toContain("inline-flex");
     expect(routeStyles.featureChipRow).toContain("grid-cols-2");
+    expect(routeStyles.featureChip).toContain("min-h-[28px]");
+    expect(routeStyles.featureChip).toContain("grid-cols-[minmax(0,1fr)_auto]");
+    expect(routeStyles.featureChip).not.toContain("before:content-['']");
+    expect(routeStyles.featureChip).not.toContain("before:h-1.5");
     expect(routeStyles.featureChip).toContain("[&_[data-slot=vui-button-content]]:min-w-0");
     expect(routeStyles.featureChip).toContain("[&_[data-slot=vui-button-content]]:max-w-full");
     expect(routeStyles.featureChip).toContain("[&_[data-slot=vui-button-label]]:grid-cols-[minmax(0,1fr)_auto]");
+    expect(routeStyles.featureChipActive).toContain("[&_em]:text-[var(--accent-cool)]");
+    expect(routeStyles.featureChipPrimaryActive).toContain("[&_em]:text-[var(--accent-warm-2)]");
+    expect(routeStyles.currentSessionLine).toContain("[-webkit-line-clamp:2]");
+    expect(routeStyles.currentSessionLine).toContain("[font-size:var(--vui-font-xs)]");
+    expect(routeStyles.railSectionHeading).toContain("[font-size:var(--vui-font-xs)]");
+    expect(routeStyles.sectionTitle).toContain("[font-size:var(--vui-font-sm)]");
+    expect(chatStatusRailSource).toContain('lang === "zh" ? "陪伴" : "Companion"');
+    expect(chatStatusRailSource).toContain('lang === "zh" ? "心智关" : "Mental off"');
+    expect(chatStatusRailSource).toContain("mentalModelEnabledForNextTurn ? (");
+    expect(chatStatusRailSource).toContain('lang === "zh" ? "明细" : "Details"');
   });
 
   it("optimistically renders the agent turn while submitted chat content is waiting for backend stream", () => {
@@ -1147,6 +1165,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndTokenStatusSource).toContain("const modelInputTokens = Math.max(");
     expect(routeAndTokenStatusSource).toContain("lastCacheComposition?.calibratedInputTokens");
     expect(routeAndTokenStatusSource).toContain("hasProviderLlmUsage ? sessionLlmUsage.inputTokens : undefined");
+    expect(routeAndTokenStatusSource).toContain("modelInputLimitMissing");
+    expect(routeAndTokenStatusSource).toContain("modelInputLimitError");
+    expect(routeAndTokenStatusSource).toContain("禁止默认兜底");
+    expect(routeAndTokenStatusSource).not.toContain("compression?.contextWindowLimit");
     expect(routeAndTokenStatusSource).toContain("modelInputMetaLine");
     expect(routeAndTokenStatusSource).toContain("modelInputTitle");
     expect(routeAndTokenStatusSource).toContain("compressionThresholdValue");
@@ -1424,7 +1446,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(html).toContain("128,000 / 200,000");
     expect(html).toContain('aria-label="模型输入 128,000. 128,000 / 200,000 · 64%"');
     expect(routeSource).toContain("const compactNumberFormatter = useMemo(");
-    expect(routeAndTokenStatusSource).toContain("displayValue: modelInputAvailable ? compactNumberFormatter.format(modelInputTokens) : \"--\"");
+    expect(routeAndTokenStatusSource).toContain("displayValue: modelInputLimitMissing");
+    expect(routeAndTokenStatusSource).toContain("compactNumberFormatter.format(modelInputTokens)");
   });
 
   it("shows the active skill contract before the context status cards", () => {
@@ -1533,7 +1556,10 @@ describe("ChatCodingRoute layout contract", () => {
 
   it("uses the model context window, not the compression threshold, for model input usage", () => {
     expect(routeAndTokenStatusSource).toContain("const modelInputLimitTokens = Math.max(");
-    expect(routeAndTokenStatusSource).toContain("lastContextComposition?.limitTokens\n      ?? sessionContextUsage?.limit\n      ?? compression?.contextWindowLimit");
+    expect(routeAndTokenStatusSource).toContain("lastContextComposition?.limitTokens");
+    expect(routeAndTokenStatusSource).toContain("sessionContextUsage?.limit");
+    expect(routeAndTokenStatusSource).toContain("modelInputLimitMissing");
+    expect(routeAndTokenStatusSource).not.toContain("compression?.contextWindowLimit");
     expect(routeAndTokenStatusSource).not.toContain("compression?.effectiveTokenLimit\n      ?? compression?.contextWindowLimit");
   });
 
@@ -1779,7 +1805,7 @@ describe("ChatCodingRoute layout contract", () => {
       [routeStyles.resourceSplit, "grid-cols-[repeat(auto-fit,minmax(118px,1fr))]"],
       [routeStyles.inlineStatGrid, "grid-cols-[1fr]"],
       [routeStyles.inlineStat, "grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]"],
-      [routeStyles.petShowcaseActions, "grid-cols-[repeat(3,minmax(0,1fr))]"],
+      [routeStyles.petShowcaseActions, "grid-cols-3"],
       [routeStyles.cliAgentTerminalCommand, "grid-cols-[auto_minmax(0,1fr)_auto]"],
       [chatRuntimeNoticeStackStyles.notice, "grid-cols-[16px_minmax(0,1fr)]"],
       [chatToolApprovalDialogStyles.dialog, "grid-cols-[34px_minmax(0,1fr)_auto]"],

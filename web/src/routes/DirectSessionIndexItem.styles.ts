@@ -62,7 +62,7 @@ const styles = {
   sessionItemActive:
     "vui-routes-chatcodingroute sessionItemActive border-[color-mix(in_srgb,var(--accent-cool)_46%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_9%,var(--vui-surface-row))] shadow-[var(--vui-shadow-inset-accent)]",
   sessionItemContextTarget:
-    "vui-routes-chatcodingroute sessionItemContextTarget border-[color-mix(in_srgb,var(--accent-cool)_18%,transparent)] bg-[color-mix(in_srgb,var(--surface-card)_56%,transparent)] shadow-[var(--vui-shadow-inset-accent)] before:opacity-70",
+    "vui-routes-chatcodingroute sessionItemContextTarget border-[color-mix(in_srgb,var(--accent-cool)_18%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-card)_56%,transparent)] shadow-[var(--vui-shadow-inset-accent)] before:opacity-70",
   sessionItemError:
     "vui-routes-chatcodingroute sessionItemError mx-2.5 mb-2 min-w-0 border-l-2 border-[var(--state-error)] bg-[color-mix(in_srgb,var(--state-error)_6%,transparent)] px-2 py-1 [font-size:var(--vui-font-xs)] leading-tight text-[var(--state-error)] [overflow-wrap:anywhere]",
   sessionItemMain:
