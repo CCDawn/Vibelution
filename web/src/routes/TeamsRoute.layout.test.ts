@@ -1512,6 +1512,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("实验计划账本");
     expect(routeSource).toContain("TeamExperimentMethodPanel");
     expect(routeSource).toContain("experimentMethodCatalogQueryKey");
+    expect(routeSource).toContain('["overview", "experiment"].includes(researchWorkspaceView)');
+    expect(routeSource).toContain("researchExperimentMethodQuickSelect");
+    expect(routeSource).toContain('aria-label={lang === "zh" ? "选择实验方式" : "Select experiment method"}');
+    expect(routeSource).toContain("preferredExperimentMethod=");
     expect(routeSource).toContain("/workflow-orchestration/experiments/methods");
     expect(routeSource).toContain("activeContract={activeExperimentContract}");
     expect(routeSource).toContain("onSubmit={createExperimentPlanFromWorkspace}");
@@ -2013,6 +2017,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.challengeSurfaceSwitch).toBeTypeOf("string");
     expect(routeStyles.challengeSurfaceSwitchActive).toBeTypeOf("string");
     expect(routeStyles.researchStageAgentSummary).toBeTypeOf("string");
+    expect(routeStyles.researchExperimentMethodQuickSelect).toBeTypeOf("string");
+    expect(routeStyles.researchExperimentMethodReady).toBeTypeOf("string");
+    expect(routeStyles.researchExperimentMethodPending).toBeTypeOf("string");
     expect(routeStyles.researchStageAgentSummaryLoading).toBeTypeOf("string");
     expect(routeStyles.researchStageAgentSummaryReady).toBeTypeOf("string");
     expect(routeStyles.researchStageAgentSummaryMissing).toBeTypeOf("string");

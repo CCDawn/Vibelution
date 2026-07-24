@@ -177,6 +177,26 @@ describe("TeamExperimentMethodPanel", () => {
     expect(markup).toContain("保存为新版本");
   });
 
+  it("uses the workspace quick selection when opening the detailed setup", () => {
+    const markup = renderToStaticMarkup(
+      <TeamExperimentMethodPanel
+        lang="zh"
+        catalog={catalog}
+        activeContract={simulationContract}
+        preferredExperimentMethod="model_training_inference"
+        activePlanStatus="draft"
+        loading={false}
+        submitting={false}
+        canCreatePlan
+        onSubmit={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain('data-selected-method="model_training_inference"');
+    expect(markup).toContain("公平基线");
+    expect(markup).toContain("随机种子");
+  });
+
   it("preserves per-method drafts and builds a versioned typed request", () => {
     const initial = createExperimentMethodFormDraft(simulationContract);
     initial.methodConfigs.model_training_inference = {

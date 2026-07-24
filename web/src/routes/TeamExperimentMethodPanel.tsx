@@ -101,6 +101,7 @@ export type TeamExperimentMethodPanelProps = {
   lang: "zh" | "en";
   catalog?: ExperimentMethodCatalogPayload;
   activeContract?: ExperimentContractV2 | null;
+  preferredExperimentMethod?: ExperimentMethodId;
   activePlanStatus?: string;
   fallbackResearchQuestion?: string;
   loading: boolean;
@@ -132,8 +133,9 @@ function serializeMethodConfig(methodConfig: Record<string, unknown> | undefined
 export function createExperimentMethodFormDraft(
   activeContract?: ExperimentContractV2 | null,
   fallbackResearchQuestion = "",
+  preferredExperimentMethod?: ExperimentMethodId,
 ): ExperimentMethodFormDraft {
-  const method = activeContract?.experimentMethod ?? "model_training_inference";
+  const method = preferredExperimentMethod ?? activeContract?.experimentMethod ?? "model_training_inference";
   const methodConfigs = Object.fromEntries(
     Object.entries(DEFAULT_CONFIGS).map(([methodId, config]) => [methodId, { ...config }]),
   ) as ExperimentMethodFormDraft["methodConfigs"];
@@ -289,6 +291,7 @@ export function TeamExperimentMethodPanel({
   lang,
   catalog,
   activeContract,
+  preferredExperimentMethod,
   activePlanStatus = "",
   fallbackResearchQuestion = "",
   loading,
@@ -298,10 +301,14 @@ export function TeamExperimentMethodPanel({
   canCreatePlan,
   onSubmit,
 }: TeamExperimentMethodPanelProps) {
-  const [draft, setDraft] = useState(() => createExperimentMethodFormDraft(activeContract, fallbackResearchQuestion));
+  const [draft, setDraft] = useState(() => createExperimentMethodFormDraft(
+    activeContract,
+    fallbackResearchQuestion,
+    preferredExperimentMethod,
+  ));
   useEffect(() => {
-    setDraft(createExperimentMethodFormDraft(activeContract, fallbackResearchQuestion));
-  }, [activeContract?.planId, activeContract?.revision, fallbackResearchQuestion]);
+    setDraft(createExperimentMethodFormDraft(activeContract, fallbackResearchQuestion, preferredExperimentMethod));
+  }, [activeContract?.planId, activeContract?.revision, fallbackResearchQuestion, preferredExperimentMethod]);
 
   const selectedMethod = catalog?.methods.find((item) => item.methodId === draft.experimentMethod);
   const adapterSelection = selectedMethod?.adapterAvailability[draft.researchMode];
