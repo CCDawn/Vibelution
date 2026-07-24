@@ -3668,14 +3668,14 @@ export function ConfigRoute() {
               <>
                 <VSection
                   title="模型连接"
-                  eyebrow="Provider workspace"
-                  tooltip="快速配置只需要服务商和凭据；管理已有连接与高级参数按需进入。"
+                  eyebrow="推荐：先快速配置"
+                  tooltip="首次请用「快速配置」：选服务商 → 填 Key → 检测 → 固定模型 → 保存。管理页只用于已有连接与排障。"
                   tooltipLabel="模型连接工作台说明"
                   actions={(
                     <VActionGroup ariaLabel="Provider 工作区模式">
-                      <VButton tooltip="用服务商和凭据完成自动检测与模型推荐。" className={styles.providerModeButton} aria-pressed={providerWorkspaceMode === "quick"} variant={providerWorkspaceMode === "quick" ? "primary" : "ghost"} onPress={() => setProviderWorkspaceMode("quick")}>快速配置</VButton>
-                      <VButton tooltip="查看已连接 Provider、模型目录、凭据和诊断状态。" className={styles.providerModeButton} aria-pressed={providerWorkspaceMode === "manage"} variant={providerWorkspaceMode === "manage" ? "primary" : "ghost"} onPress={() => setProviderWorkspaceMode("manage")}>管理已有连接</VButton>
-                      <VButton tooltip="编辑 Provider 模板、路由与底层参数。" className={styles.providerModeButton} aria-pressed={providerWorkspaceMode === "advanced"} variant={providerWorkspaceMode === "advanced" ? "primary" : "ghost"} onPress={() => setProviderWorkspaceMode("advanced")}>高级设置</VButton>
+                      <VButton tooltip="最短路径：服务商 + 凭据 + 检测 + 固定模型。" className={styles.providerModeButton} aria-pressed={providerWorkspaceMode === "quick"} variant={providerWorkspaceMode === "quick" ? "primary" : "ghost"} onPress={() => setProviderWorkspaceMode("quick")}>① 快速配置</VButton>
+                      <VButton tooltip="已连接服务、固定模型目录、发现与排障。" className={styles.providerModeButton} aria-pressed={providerWorkspaceMode === "manage"} variant={providerWorkspaceMode === "manage" ? "primary" : "ghost"} onPress={() => setProviderWorkspaceMode("manage")}>② 管理已有连接</VButton>
+                      <VButton tooltip="模板、路由与底层参数（进阶）。" className={styles.providerModeButton} aria-pressed={providerWorkspaceMode === "advanced"} variant={providerWorkspaceMode === "advanced" ? "primary" : "ghost"} onPress={() => setProviderWorkspaceMode("advanced")}>③ 高级设置</VButton>
                     </VActionGroup>
                   )}
                 />

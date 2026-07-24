@@ -192,7 +192,7 @@ describe("ConfigProviderRegistryPanel", () => {
     };
     const markup = renderModels([declared]);
     expect(markup).toContain("协议已声明 low / medium / high");
-    expect(markup).toContain("协议声明");
+    expect(markup).toContain("思考深度: low/medium/high");
     expect(markup).not.toContain("验证推理 low / high");
   });
 
@@ -204,9 +204,10 @@ describe("ConfigProviderRegistryPanel", () => {
   it("uses low-emphasis copy for unobserved capabilities and a sticky internal scroll region", () => {
     const markup = renderModels([model("observed", "observed")]);
 
-    // T8: observed models without a reasoning contract get explicit guidance, not a blank cell.
-    expect(markup).toContain("reasoning: 未声明");
-    expect(markup).toContain("reasoning_effort_values");
+    // Observed (not pinned) must not spam "thinking not declared" warnings.
+    expect(markup).not.toContain("思考深度: 未配置");
+    expect(markup).not.toContain("reasoning: 未声明");
+    expect(markup).toContain("—");
     expect(markup).not.toContain("unknown · 未观测");
     expect(panelStyles.tableScroll).toContain("h-full");
     expect(panelStyles.tableScroll).not.toContain("max-h-[calc(100dvh-33rem)]");
@@ -217,12 +218,21 @@ describe("ConfigProviderRegistryPanel", () => {
     expect(panelSource).not.toContain(heroUiImportToken);
   });
 
+  it("only warns about missing reasoning contracts on pinned models", () => {
+    const pinned = {
+      ...model("luna", "pinned"),
+      reasoningEffortValues: [],
+    };
+    const markup = renderModels([pinned]);
+    expect(markup).toContain("思考深度: 未配置");
+  });
+
   it("fills the desktop workspace with large Provider rows and a bottom danger zone", () => {
     expect(panelStyles.sectionSurface).toContain("h-full");
     expect(panelStyles.registryWorkspace).toContain("[--vui-workspace-sidebar:clamp(18rem,26vw,24rem)]");
     expect(panelStyles.providerList).toContain("h-full");
     expect(panelStyles.providerButton).toContain("!min-h-[58px]");
-    expect(panelStyles.detailSurface).toContain("[grid-template-rows:auto_auto_auto_minmax(0,1fr)_auto_auto]");
+    expect(panelStyles.detailSurface).toContain("[grid-template-rows:auto_auto_auto_auto_minmax(0,1fr)_auto_auto]");
     expect(panelStyles.detailSurface).toContain("overflow-y-auto");
     expect(panelStyles.detailSurface).not.toContain("overflow-hidden");
     expect(panelStyles.detailBody).toContain("min-h-0");

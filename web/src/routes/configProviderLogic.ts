@@ -103,6 +103,74 @@ export function summarizeProviderModels(models: ConfigCatalogModel[]): {
   };
 }
 
+/** Default model-table filter: prefer pinned work list over full discovery dump. */
+export function defaultProviderModelFilter(models: ConfigCatalogModel[]): ProviderModelFilter {
+  const summary = summarizeProviderModels(models);
+  if (summary.pinned > 0) return "pinned";
+  if (summary.discovered > 0) return "discovered";
+  if (summary.unavailable > 0) return "unavailable";
+  return "all";
+}
+
+/** Sort Providers so usable connections surface first in the manage rail. */
+export function sortProviderRegistryRows(rows: ProviderRegistryRow[]): ProviderRegistryRow[] {
+  const rank = (status: string): number => {
+    switch (status) {
+      case "reachable":
+        return 0;
+      case "configured":
+      case "stale":
+        return 1;
+      case "not_discovered":
+        return 2;
+      case "auth_failed":
+      case "discovery_failed":
+      case "protocol_mismatch":
+      case "blocked":
+        return 3;
+      default:
+        return 4;
+    }
+  };
+  return [...rows].sort((left, right) => {
+    const byStatus = rank(left.status) - rank(right.status);
+    if (byStatus !== 0) return byStatus;
+    const byPinned = Number(right.pinnedCount > 0) - Number(left.pinnedCount > 0);
+    if (byPinned !== 0) return byPinned;
+    return String(left.label || left.providerId).localeCompare(String(right.label || right.providerId), "zh");
+  });
+}
+
+export type ProviderSetupChecklistItem = {
+  id: string;
+  label: string;
+  done: boolean;
+  optional?: boolean;
+};
+
+/** Compact next-step checklist for manage workspace (not full audit surface). */
+export function buildProviderSetupChecklist(provider: ProviderRegistryRow): ProviderSetupChecklistItem[] {
+  const credentialOk = provider.credentialState === "configured" || provider.credentialState === "not_required";
+  const connectionOk = provider.status === "reachable" || provider.status === "configured";
+  const hasPinned = provider.pinnedCount > 0;
+  const pinnedWithReasoning = provider.models.some(
+    (model) =>
+      (model.availability === "pinned" || model.availability === "missing_remote")
+      && Boolean(model.reasoningEffortValues?.length),
+  );
+  return [
+    { id: "credential", label: "API Key / 凭据已就绪", done: credentialOk },
+    { id: "connection", label: "连接可达或已配置", done: connectionOk },
+    { id: "pin", label: "至少固定 1 个对话模型", done: hasPinned },
+    {
+      id: "reasoning",
+      label: "（可选）为已固定模型声明思考深度",
+      done: !hasPinned || pinnedWithReasoning,
+      optional: true,
+    },
+  ];
+}
+
 export function deriveProviderRegistryRows(
   providers: ConfigProviderOption[],
   catalog: ConfigModelCatalog,
