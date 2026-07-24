@@ -586,6 +586,7 @@ def test_catalog_summary_omits_sensitive_details_and_derives_protocol_status(mon
     assert model["verificationStatus"] == "failed"
     assert model["verificationErrorType"] == "service_unavailable"
     assert model["verificationHttpStatus"] == 503
+    assert model.get("verificationMessage") in {"", None} or "must-not-appear" not in str(model.get("verificationMessage"))
     serialized = json.dumps(summary)
     assert "providerFingerprint" not in serialized
     assert "credential_ref" not in serialized

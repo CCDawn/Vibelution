@@ -1278,6 +1278,101 @@ def test_responses_incomplete_reason_is_recorded_in_canonical_outcome_log(monkey
     assert canonical_event[1]["fields"]["terminalReason"] == "max_output_tokens"
 
 
+def test_responses_empty_stream_retries_without_exposing_transient_done(monkeypatch):
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "relay",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://pixel.try-chatapi.com/v1",
+            "llm.providers.default.compat_mode": "openai",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "gpt-5.6-luna",
+            "llm.profiles.primary.transport": "responses",
+            "llm.profiles.primary.streaming": True,
+            "llm.profiles.primary.retry_policy.max_attempts": 2,
+        }
+    )
+    attempts = {"count": 0}
+    recorded = []
+    published_statuses = []
+
+    def default_responses_backend(payload):
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            return iter(())
+        return iter(
+            [
+                {"type": "response.output_text.delta", "delta": "recovered"},
+                {
+                    "type": "response.completed",
+                    "response": {
+                        "id": "resp-recovered",
+                        "status": "completed",
+                        "usage": {"input_tokens": 3, "output_tokens": 1, "total_tokens": 4},
+                    },
+                },
+            ]
+        )
+
+    monkeypatch.setattr("core.llm.client._default_responses_backend", default_responses_backend)
+    monkeypatch.setattr("core.llm.client._sleep_with_llm_cancel_check", lambda _seconds: None)
+    monkeypatch.setattr(
+        "core.llm.client._record_llm_scene_event",
+        lambda *args, **kwargs: recorded.append((args, kwargs)),
+    )
+    monkeypatch.setattr(
+        "core.llm.client._publish_llm_status_event",
+        lambda status, **fields: published_statuses.append((status, fields)),
+    )
+    client = LLMClient(config=config)
+
+    events = list(client.stream_events([{"role": "user", "content": "ping"}]))
+
+    assert attempts["count"] == 2
+    assert [event.type for event in events] == ["text_delta", "done"]
+    assert events[0].text == "recovered"
+    assert any(item[0][1] == "llm.stream.failed.retrying" for item in recorded)
+    assert [
+        status
+        for status, _fields in published_statuses
+        if status in {"retrying", "retry_recovered"}
+    ] == [
+        "retrying",
+        "retry_recovered",
+    ]
+
+
+def test_responses_stream_exhaustion_after_partial_output_does_not_retry(monkeypatch):
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "relay",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://pixel.try-chatapi.com/v1",
+            "llm.providers.default.compat_mode": "openai",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "gpt-5.6-luna",
+            "llm.profiles.primary.transport": "responses",
+            "llm.profiles.primary.streaming": True,
+            "llm.profiles.primary.retry_policy.max_attempts": 3,
+        }
+    )
+    attempts = {"count": 0}
+
+    def default_responses_backend(payload):
+        attempts["count"] += 1
+        return iter([{"type": "response.output_text.delta", "delta": "partial"}])
+
+    monkeypatch.setattr("core.llm.client._default_responses_backend", default_responses_backend)
+    monkeypatch.setattr("core.llm.client._sleep_with_llm_cancel_check", lambda _seconds: None)
+    client = LLMClient(config=config)
+
+    with pytest.raises(LLMError) as raised:
+        list(client.stream_events([{"role": "user", "content": "ping"}]))
+
+    assert raised.value.category == "server_error"
+    assert attempts["count"] == 1
+
+
 def test_responses_transport_streams_output_item_done_message_when_no_delta(monkeypatch):
     config = make_config(
         **{

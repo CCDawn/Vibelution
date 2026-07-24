@@ -2880,6 +2880,12 @@ export function ConfigRoute() {
     if (structuredActionsDisabled) return;
     setBusyAction(`正在测试 ${modelRef}…`);
     setProviderActionError("");
+    setProviderActionFeedback({
+      kind: "discover",
+      providerId: modelRef.includes("/") ? modelRef.slice(0, modelRef.indexOf("/")) : selectedProviderId,
+      phase: "busy",
+      message: `正在真实调用测试 ${modelRef}…`,
+    });
     try {
       const result = await requestJson<ConfigLlmTestResult>("/api/config/test-llm", {
         publicConfig: requireDraft(),
@@ -2888,11 +2894,34 @@ export function ConfigRoute() {
         modelId: modelRef,
         capability: "text",
       });
-      setNotice({ tone: result.ok ? "success" : "error", text: formatTestNotice(result) });
-      await queryClient.invalidateQueries({ queryKey: queryKeys.configWorkspace() });
+      const noticeText = formatTestNotice(result);
+      setNotice({ tone: result.ok ? "success" : "error", text: noticeText });
+      setProviderActionFeedback({
+        kind: "discover",
+        providerId: result.provider_id || (modelRef.includes("/") ? modelRef.slice(0, modelRef.indexOf("/")) : selectedProviderId),
+        phase: result.ok ? "success" : "error",
+        message: result.ok
+          ? `${modelRef} 可调用${result.verification_persisted ? "（已写入真实调用状态）" : ""}`
+          : `${modelRef} 调用失败：${result.message || result.verification_error_type || "unknown"}${
+              result.verification_http_status ? ` · HTTP ${result.verification_http_status}` : ""
+            }`,
+      });
+      // Reload catalog so「真实调用」column picks up persisted verification (draft or saved).
+      const refreshed = await workspaceQuery.refetch();
+      if (refreshed.data) {
+        syncWorkspace(refreshed.data, result.ok ? "success" : "error", { resetBase: false });
+        // Keep the test notice after syncWorkspace overwrites message from workspace.
+        setNotice({ tone: result.ok ? "success" : "error", text: noticeText });
+      }
     } catch (error) {
       const message = readableErrorMessage(error).slice(0, 480);
       setProviderActionError(message);
+      setProviderActionFeedback({
+        kind: "discover",
+        providerId: modelRef.includes("/") ? modelRef.slice(0, modelRef.indexOf("/")) : selectedProviderId,
+        phase: "error",
+        message: `${modelRef} 测试请求失败：${message}`,
+      });
       markError(error);
     } finally {
       setBusyAction("");

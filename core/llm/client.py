@@ -42,6 +42,7 @@ from .types import LLMCapabilities, LLMError, LLMProtocolEvent, StreamChunk, Too
 from .usage import read_usage_int as _read_provider_usage_int
 from .usage import usage_stats_from_payload, usage_to_dict
 from .wire.registry import build_default_wire_adapter_registry
+from .wire.responses import STREAM_EXHAUSTED_WITHOUT_TERMINAL
 
 
 _LLM_STATUS_CONTEXT: ContextVar[Dict[str, str]] = ContextVar(
@@ -2653,12 +2654,16 @@ class LLMClient:
                                     for call in turn_outcome.tool_calls
                                 ],
                             )
-                        emitted = True
-                        yield StreamChunk(
-                            type="done",
-                            usage=provider_usage or canonical_usage,
-                            provider_payload={"turn_outcome": turn_outcome},
-                        )
+                        if not (
+                            turn_outcome.kind == "incomplete"
+                            and turn_outcome.error == STREAM_EXHAUSTED_WITHOUT_TERMINAL
+                        ):
+                            emitted = True
+                            yield StreamChunk(
+                                type="done",
+                                usage=provider_usage or canonical_usage,
+                                provider_payload={"turn_outcome": turn_outcome},
+                            )
                 except LLMCancelledError:
                     close = getattr(normalized_iterator, "close", None)
                     if callable(close):
@@ -3018,6 +3023,25 @@ class LLMClient:
                         model=self.profile.model,
                     )
                 self._record_canonical_outcome(canonical_outcome, phase="stream")
+                if (
+                    canonical_outcome.kind == "incomplete"
+                    and canonical_outcome.error == STREAM_EXHAUSTED_WITHOUT_TERMINAL
+                ):
+                    raise LLMError(
+                        "server_error",
+                        "Responses stream ended before a canonical terminal event.",
+                        retryable=True,
+                        provider=self.provider.kind,
+                        model=self.profile.model,
+                        details={"terminal_reason": STREAM_EXHAUSTED_WITHOUT_TERMINAL},
+                    )
+                if attempt > 1 and canonical_outcome.kind in {"final_answer", "tool_calls"}:
+                    _publish_llm_status_event(
+                        "retry_recovered",
+                        attempt=attempt,
+                        max_attempts=max_attempts,
+                        category=str(getattr(last_error, "category", "") or ""),
+                    )
                 return canonical_outcome
             except LLMCancelledError as exc:
                 llm_error = _llm_cancelled_error(exc.reason)

@@ -594,17 +594,31 @@ export function ProviderModelsTab({
             className: "w-[18%]",
             render: (model) => {
               const verificationStatus = model.verificationStatus || "unverified";
+              const errorLabel = (() => {
+                const kind = String(model.verificationErrorType || "").trim();
+                if (!kind) return "";
+                if (kind === "timeout") return "超时";
+                if (kind === "bad_request") return "上游 400 拒绝";
+                if (kind === "auth_failed") return "鉴权失败";
+                if (kind === "rate_limited") return "限流";
+                if (kind === "not_found") return "模型不存在";
+                if (kind === "network") return "网络错误";
+                if (kind === "missing_credential") return "缺 Key";
+                if (kind === "service_unavailable" || kind === "upstream_unavailable") return "上游不可用";
+                return kind;
+              })();
               const detail = [
                 model.verificationHttpStatus ? `HTTP ${model.verificationHttpStatus}` : "",
-                model.verificationErrorType || "",
-                model.verificationCheckedAt || "未测试",
+                errorLabel,
+                model.verificationMessage || "",
+                model.verificationCheckedAt || (verificationStatus === "unverified" ? "未测试" : ""),
               ].filter(Boolean).join(" · ");
               return (
                 <span className={styles.providerIdentity}>
                   <VStatusChip tone={verificationStatus === "verified" ? "success" : verificationStatus === "failed" ? "danger" : "warning"}>
                     {verificationStatus === "verified" ? "verified · 可调用" : verificationStatus === "failed" ? "failed · 调用失败" : "unverified · 未测试"}
                   </VStatusChip>
-                  <small className={styles.muted} title={detail}>{detail}</small>
+                  <small className={styles.muted} title={detail || undefined}>{detail || "—"}</small>
                 </span>
               );
             },
