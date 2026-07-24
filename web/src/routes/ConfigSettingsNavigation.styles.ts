@@ -1,6 +1,6 @@
 const styles = {
   sidebar:
-    "vui-routes-configsettingsnavigation sidebar grid h-full min-h-0 [width:clamp(15.5rem,17vw,18rem)] [grid-template-rows:auto_auto_minmax(0,1fr)] gap-4 overflow-hidden border border-vui-border-subtle bg-[var(--vui-surface-rail)] p-4",
+    "vui-routes-configsettingsnavigation sidebar grid h-full min-h-0 [width:clamp(15.5rem,17vw,18rem)] [grid-template-rows:auto_auto_minmax(0,1fr)] gap-4 overflow-hidden border border-vui-border-subtle bg-[var(--vui-surface-rail)] p-4 max-[720px]:h-auto max-[720px]:w-full max-[720px]:[grid-template-rows:auto_auto] max-[720px]:overflow-visible",
   sidebarHeader: "vui-routes-configsettingsnavigation sidebarHeader grid min-w-0 gap-1",
   eyebrow:
     "vui-routes-configsettingsnavigation eyebrow m-0 [font-size:var(--vui-font-xs)] font-bold uppercase tracking-[0.08em] text-vui-fg-tertiary",
@@ -9,7 +9,7 @@ const styles = {
   status:
     "vui-routes-configsettingsnavigation status flex min-h-10 items-center justify-between gap-3 rounded-lg border border-vui-border-subtle bg-vui-surface-row px-3 [font-size:var(--vui-font-sm)] font-semibold text-vui-fg-secondary",
   statusValue: "vui-routes-configsettingsnavigation statusValue text-vui-fg-primary",
-  groupNav: "vui-routes-configsettingsnavigation groupNav grid min-h-0 content-start gap-2 overflow-y-auto pr-1",
+  groupNav: "vui-routes-configsettingsnavigation groupNav grid min-h-0 content-start gap-2 overflow-y-auto pr-1 max-[720px]:overflow-visible",
   groupButton:
     "vui-routes-configsettingsnavigation groupButton !grid min-h-11 !w-full !grid-cols-[minmax(0,1fr)] !justify-stretch rounded-lg px-3 text-left [font-size:var(--vui-font-sm)] font-bold",
   groupButtonActive:
