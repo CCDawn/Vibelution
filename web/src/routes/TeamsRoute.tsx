@@ -3507,6 +3507,15 @@ export function TeamsRoute({
     const stageStatusUnavailable = !researchStageRoundStatus && researchStageRoundStatusQuery.isError;
     const experimentLifecycleProjection = experimentPlanningStatus?.lifecycleProjection;
     const challengeProgramProjection = experimentPlanningStatus?.challengeProgramProjection;
+    const challengeProgramExpected = isChallengeCupResearchWorkflowTeam(selectedTeam);
+    const challengeProgramLoading = challengeProgramExpected
+      && !challengeProgramProjection
+      && experimentPlanningStatusQuery.isPending;
+    const challengeProgramUnavailable = challengeProgramExpected
+      && !challengeProgramProjection
+      && !experimentPlanningStatusQuery.isPending;
+    const challengeTrialReviewRequiredCount = challengeProgramProjection?.stage1ComplianceReadiness.trialRun.outcomeCounts.review_required || 0;
+    const challengeTrialApprovedCount = challengeProgramProjection?.stage1ComplianceReadiness.trialRun.outcomeCounts.approved || 0;
     const challengeStageLabel = (stageType: ResearchStageType) => {
       if (stageType === "knowledge_collection") {
         return lang === "zh" ? "MVP 完整样例" : "MVP golden sample";
@@ -3536,7 +3545,9 @@ export function TeamsRoute({
             return lang === "zh" ? "等待完整样例" : "waiting for golden sample";
           }
           return stage1.trialRun.completed >= stage1.trialRun.required
-            ? (lang === "zh" ? "已完成" : "completed")
+            ? challengeTrialReviewRequiredCount > 0
+              ? (lang === "zh" ? "机器验证完成 · 待人工抽检" : "machine checks complete · human review pending")
+              : (lang === "zh" ? "验证完成" : "validation complete")
             : (lang === "zh" ? "待测试" : "pending");
         }
         return lang === "zh" ? "MVP 后再启动" : "deferred until after MVP";
@@ -3599,11 +3610,11 @@ export function TeamsRoute({
       return styles.researchStageStatusPending;
     };
     const stagePrimaryDisabled = (stageType: ResearchStageType) => {
-      if (stageType === "knowledge_collection") {
-        return knowledgeCollectionPrimaryDisabled;
-      }
       if (challengeProgramProjection) {
         return true;
+      }
+      if (stageType === "knowledge_collection") {
+        return knowledgeCollectionPrimaryDisabled;
       }
       return stageStatusLoading || stageStatusUnavailable || selectedTeamStartResearchStagePending;
     };
@@ -3677,8 +3688,97 @@ export function TeamsRoute({
     const currentStageLabel = researchStageRoundStatus?.currentStage
       ? researchWorkspaceViewLabel(researchStageRoundStatus.currentStage as ResearchStageWorkspaceView, lang)
       : lang === "zh" ? "待启动" : "not started";
+    const renderChallengeProgramResults = () => {
+      if (!challengeProgramProjection) {
+        return null;
+      }
+      const stage1 = challengeProgramProjection.stage1ComplianceReadiness;
+      const goldenSampleApproved = stage1.acceptance.allFourHumanGatesApproved;
+      const deepCase = challengeProgramProjection.stage3DeepResearchDelivery.caseRecords[0];
+      const deepCaseStatus = deepCase?.internalStatus === "accepted_for_writeup"
+        ? (lang === "zh" ? "案例内部已通过撰写审查" : "case accepted for write-up")
+        : deepCase?.internalStatus || (lang === "zh" ? "尚未启动" : "not started");
+      return (
+        <section
+          id="challenge-mvp-results"
+          className={styles.challengeProgramResults}
+          aria-labelledby="challenge-mvp-results-title"
+        >
+          <header className={styles.challengeProgramResultsHeader}>
+            <div>
+              <strong id="challenge-mvp-results-title">{lang === "zh" ? "MVP 验收结果" : "MVP acceptance results"}</strong>
+              <span>
+                {lang === "zh"
+                  ? `机器验证 ${stage1.mvpManifest.completedQuestionCount}/${stage1.mvpManifest.requiredQuestionCount}；人工审核与机器验证分开记录`
+                  : `Machine validation ${stage1.mvpManifest.completedQuestionCount}/${stage1.mvpManifest.requiredQuestionCount}; human review is tracked separately`}
+              </span>
+            </div>
+            <span className={`${styles.researchStageStatus} ${styles.researchStageStatusRecorded}`}>
+              {lang === "zh" ? "MVP 可验收" : "MVP ready for acceptance"}
+            </span>
+          </header>
+          <div className={styles.challengeProgramResultGrid}>
+            <article id="challenge-mvp-sample" className={styles.challengeProgramResultCard}>
+              <header>
+                <strong>{lang === "zh" ? "完整样例" : "Golden sample"}</strong>
+                <span className={`${styles.researchStageStatus} ${goldenSampleApproved ? styles.researchStageStatusRecorded : styles.researchStageStatusPending}`}>
+                  {goldenSampleApproved
+                    ? (lang === "zh" ? "人工审核通过" : "human review approved")
+                    : (lang === "zh" ? "待人工审核" : "human review pending")}
+                </span>
+              </header>
+              <div className={styles.challengeProgramQuestionList}>
+                <span>{stage1.mvpManifest.goldenSampleQuestionId}</span>
+              </div>
+              <p>
+                {lang === "zh"
+                  ? `Schema、引用、七维审查与研究计划均已记录；反馈修订 ${stage1.acceptance.feedbackRevisionCount} 次。`
+                  : `Schema, citations, seven-dimension review, and the research plan are recorded; ${stage1.acceptance.feedbackRevisionCount} feedback revision(s).`}
+              </p>
+            </article>
+            <article id="challenge-mvp-trials" className={styles.challengeProgramResultCard}>
+              <header>
+                <strong>{lang === "zh" ? "三题通用性测试" : "Three-question validation"}</strong>
+                <span className={`${styles.researchStageStatus} ${challengeTrialReviewRequiredCount > 0 ? styles.researchStageStatusPending : styles.researchStageStatusRecorded}`}>
+                  {challengeTrialReviewRequiredCount > 0
+                    ? (lang === "zh" ? `待人工抽检 ${challengeTrialReviewRequiredCount}` : `${challengeTrialReviewRequiredCount} awaiting human review`)
+                    : (lang === "zh" ? "审核完成" : "review complete")}
+                </span>
+              </header>
+              <div className={styles.challengeProgramQuestionList}>
+                {stage1.mvpManifest.testQuestionIds.map((questionId) => <span key={questionId}>{questionId}</span>)}
+              </div>
+              <p>
+                {lang === "zh"
+                  ? `机器验证 ${stage1.trialRun.completed}/${stage1.trialRun.required}；人工已批准 ${challengeTrialApprovedCount}，其余保持待审核，不计作正式人工通过。`
+                  : `Machine validation ${stage1.trialRun.completed}/${stage1.trialRun.required}; ${challengeTrialApprovedCount} human-approved, with the remainder explicitly pending.`}
+              </p>
+            </article>
+            <article id="challenge-mvp-roadmap" className={styles.challengeProgramResultCard}>
+              <header>
+                <strong>{lang === "zh" ? "MVP 后续范围" : "Post-MVP scope"}</strong>
+                <span className={`${styles.researchStageStatus} ${styles.researchStageStatusPending}`}>
+                  {lang === "zh" ? "暂缓" : "deferred"}
+                </span>
+              </header>
+              <p>{lang === "zh" ? "125 题批跑与三案例深研不计入本轮 MVP 完成条件。" : "The 125-question run and three deep cases are outside this MVP."}</p>
+              <p>
+                {deepCase
+                  ? `${deepCase.title} · ${deepCaseStatus}`
+                  : (lang === "zh" ? "当前没有已登记的代表性深研案例。" : "No representative deep-research case is registered.")}
+              </p>
+            </article>
+          </div>
+        </section>
+      );
+    };
     return (
-      <section className={styles.researchStageLauncher} aria-label={lang === "zh" ? "科研控制台" : "Research console"}>
+      <section
+        className={styles.researchStageLauncher}
+        aria-label={lang === "zh" ? "科研控制台" : "Research console"}
+        aria-busy={challengeProgramLoading}
+        aria-live="polite"
+      >
         <div className={styles.researchStageLauncherHeader}>
           <div>
             <strong>{challengeProgramProjection?.program.title || (lang === "zh" ? "科研控制台（三阶段）" : "Research console (3 stages)")}</strong>
@@ -3714,14 +3814,35 @@ export function TeamsRoute({
             </VNativeButton>
           </div>
         ) : null}
-        <label className={styles.researchStageTopicInput}>
-          <span>{lang === "zh" ? "研究主题" : "Research topic"}</span>
-          <VNativeInput
-            value={sourceCollectionDraft.topic}
-            onChange={(event) => setSourceCollectionDraft((current) => ({ ...current, topic: event.target.value }))}
-            placeholder={lang === "zh" ? "例如：predictive coding" : "e.g. predictive coding"}
-          />
-        </label>
+        {challengeProgramProjection ? (
+          <div className={styles.challengeProgramScope}>
+            <strong>{lang === "zh" ? "当前范围：1 个完整样例 + 3 个通用性测试" : "Current scope: 1 golden sample + 3 validation questions"}</strong>
+            <span>{lang === "zh" ? "125 题规模化与三案例深研已明确延后" : "125-question scale-up and three deep cases are explicitly deferred"}</span>
+          </div>
+        ) : challengeProgramExpected ? null : (
+          <label className={styles.researchStageTopicInput}>
+            <span>{lang === "zh" ? "研究主题" : "Research topic"}</span>
+            <VNativeInput
+              value={sourceCollectionDraft.topic}
+              onChange={(event) => setSourceCollectionDraft((current) => ({ ...current, topic: event.target.value }))}
+              placeholder={lang === "zh" ? "例如：predictive coding" : "e.g. predictive coding"}
+            />
+          </label>
+        )}
+        {challengeProgramLoading ? (
+          <div className={styles.researchStageDegradedNotice} role="status">
+            <span>{lang === "zh" ? "正在读取挑战杯 MVP 状态，不会显示旧科研流程。" : "Loading the Challenge Cup MVP state without falling back to the legacy workflow."}</span>
+          </div>
+        ) : challengeProgramUnavailable ? (
+          <div className={styles.researchStageDegradedNotice} role="alert">
+            <span>{lang === "zh" ? "挑战杯 MVP 状态暂不可用；旧科研流程已保持隐藏，避免产生错误操作。" : "The Challenge Cup MVP state is unavailable; the legacy workflow remains hidden to prevent incorrect actions."}</span>
+            <VNativeButton type="button" onClick={() => void experimentPlanningStatusQuery.refetch()} disabled={experimentPlanningStatusQuery.isFetching}>
+              <RefreshCw size={13} />
+              {lang === "zh" ? "重试" : "Retry"}
+            </VNativeButton>
+          </div>
+        ) : (
+        <>
         <div className={styles.researchStageGrid}>
           {phaseOrder.map((stageType) => {
             const phase = researchStagePhases.find((item) => item.stageType === stageType);
@@ -3730,11 +3851,7 @@ export function TeamsRoute({
             const active = Boolean(phase?.activeRoundId);
             const disabled = stagePrimaryDisabled(stageType);
             const navItem = RESEARCH_WORKSPACE_NAV_ITEMS.find((item) => item.view === stageType);
-            const primaryLabel = challengeProgramProjection && stageType === "experiment"
-              ? (lang === "zh" ? "测试入口待接入" : "Test runner pending")
-              : challengeProgramProjection && stageType === "iteration"
-                ? (lang === "zh" ? "MVP 后启动" : "Start after MVP")
-                : stagePrimaryLabel(stageType, phase?.primaryAction || fallback.primaryAction);
+            const primaryLabel = stagePrimaryLabel(stageType, phase?.primaryAction || fallback.primaryAction);
             return (
               <article
                 key={stageType}
@@ -3755,16 +3872,14 @@ export function TeamsRoute({
                     {stageType === "knowledge_collection" ? (
                       <>
                         <span>{lang === "zh" ? "真实样例" : "real sample"} {challengeProgramProjection.stage1ComplianceReadiness.singleQuestionSample.completed}/{challengeProgramProjection.stage1ComplianceReadiness.singleQuestionSample.required}</span>
-                        <span>{lang === "zh" ? "试运行" : "trial"} {challengeProgramProjection.stage1ComplianceReadiness.trialRun.completed}/{challengeProgramProjection.stage1ComplianceReadiness.trialRun.required}</span>
                         <span>{lang === "zh" ? "百炼证据" : "DashScope evidence"} {challengeProgramProjection.stage1ComplianceReadiness.officialModelCallEvidence.count}</span>
+                        <span>{lang === "zh" ? "人工审核" : "human review"} {challengeProgramProjection.stage1ComplianceReadiness.acceptance.allFourHumanGatesApproved ? (lang === "zh" ? "通过" : "approved") : (lang === "zh" ? "待处理" : "pending")}</span>
                         <span>{lang === "zh" ? "独立维度" : "dimensions"} {challengeProgramProjection.stage1ComplianceReadiness.independentEvaluationDimensions.length} · {lang === "zh" ? "人工门禁" : "human gates"} {challengeProgramProjection.stage1ComplianceReadiness.humanGates.length}</span>
                       </>
                     ) : stageType === "experiment" ? (
                       <>
                         <span>{lang === "zh" ? "测试题" : "test questions"} {challengeProgramProjection.stage1ComplianceReadiness.trialRun.completed}/{challengeProgramProjection.stage1ComplianceReadiness.trialRun.required}</span>
-                        <span title={challengeProgramProjection.stage1ComplianceReadiness.trialRun.completedQuestionIds.join(" · ")}>
-                          {lang === "zh" ? "已完成" : "completed"} {challengeProgramProjection.stage1ComplianceReadiness.trialRun.completedQuestionIds.length}
-                        </span>
+                        <span>{lang === "zh" ? "人工抽检" : "human review"} {challengeTrialReviewRequiredCount > 0 ? (lang === "zh" ? `待 ${challengeTrialReviewRequiredCount}` : `${challengeTrialReviewRequiredCount} pending`) : (lang === "zh" ? "完成" : "complete")}</span>
                         <span>{lang === "zh" ? "MVP 总进度" : "MVP progress"} {challengeProgramProjection.stage1ComplianceReadiness.mvpManifest.completedQuestionCount}/{challengeProgramProjection.stage1ComplianceReadiness.mvpManifest.requiredQuestionCount}</span>
                         <span>{lang === "zh" ? "规模化" : "scale-up"} {lang === "zh" ? "已延后" : "deferred"}</span>
                       </>
@@ -3773,7 +3888,9 @@ export function TeamsRoute({
                         <span>{lang === "zh" ? "125 题批跑" : "125-question run"} · {lang === "zh" ? "暂缓" : "deferred"}</span>
                         <span>{lang === "zh" ? "深研案例" : "deep cases"} {challengeProgramProjection.stage3DeepResearchDelivery.representativeCaseCount}/{challengeProgramProjection.stage3DeepResearchDelivery.requiredRepresentativeCaseCount}</span>
                         <span title={challengeProgramProjection.stage3DeepResearchDelivery.caseRecords[0]?.claimBoundary || ""}>
-                          {challengeProgramProjection.stage3DeepResearchDelivery.caseRecords[0]?.title || (lang === "zh" ? "单案例" : "case")} · {challengeProgramProjection.stage3DeepResearchDelivery.caseRecords[0]?.internalStatus || "-"}
+                          {challengeProgramProjection.stage3DeepResearchDelivery.caseRecords[0]?.title || (lang === "zh" ? "单案例" : "case")} · {challengeProgramProjection.stage3DeepResearchDelivery.caseRecords[0]?.internalStatus === "accepted_for_writeup"
+                            ? (lang === "zh" ? "案例内部已通过撰写审查" : "case accepted for write-up")
+                            : challengeProgramProjection.stage3DeepResearchDelivery.caseRecords[0]?.internalStatus || "-"}
                         </span>
                       </>
                     )}
@@ -3826,7 +3943,21 @@ export function TeamsRoute({
                 )}
                 {renderResearchStageAgentSummary(stageType)}
                 <div className={styles.researchStageActions}>
-                  {stageType === "knowledge_collection" ? (
+                  {challengeProgramProjection ? (
+                    <a href={stageType === "knowledge_collection"
+                      ? "#challenge-mvp-sample"
+                      : stageType === "experiment"
+                        ? "#challenge-mvp-trials"
+                        : "#challenge-mvp-roadmap"}
+                    >
+                      <Eye size={13} />
+                      {stageType === "knowledge_collection"
+                        ? (lang === "zh" ? "查看完整样例" : "View golden sample")
+                        : stageType === "experiment"
+                          ? (lang === "zh" ? "查看测试结果" : "View test results")
+                          : (lang === "zh" ? "查看后续范围" : "View post-MVP scope")}
+                    </a>
+                  ) : stageType === "knowledge_collection" ? (
                     <VNativeButton
                       type="button"
                       onClick={() => void runKnowledgeCollectionLoopAction()}
@@ -3847,17 +3978,20 @@ export function TeamsRoute({
                       {primaryLabel}
                     </VNativeButton>
                   )}
-                  <Link to={researchWorkspaceStageRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID, stageType)}>
-                    <Link2 size={13} />
-                    {stageType === "knowledge_collection"
-                      ? (lang === "zh" ? "手动控制" : "Manual controls")
-                      : (lang === "zh" ? "阶段详情" : "Details")}
-                  </Link>
+                  {!challengeProgramProjection ? (
+                    <Link to={researchWorkspaceStageRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID, stageType)}>
+                      <Link2 size={13} />
+                      {stageType === "knowledge_collection"
+                        ? (lang === "zh" ? "手动控制" : "Manual controls")
+                        : (lang === "zh" ? "阶段详情" : "Details")}
+                    </Link>
+                  ) : null}
                 </div>
               </article>
             );
           })}
         </div>
+        {renderChallengeProgramResults()}
         {selectedTeamStartResearchStageError ? (
           <div className={styles.workflowError}>{selectedTeamStartResearchStageError.message}</div>
         ) : null}
@@ -3870,6 +4004,8 @@ export function TeamsRoute({
             )}
           </div>
         ) : null}
+        </>
+        )}
       </section>
     );
   }

@@ -372,6 +372,18 @@ const styles: Record<string, string> = {
     "researchStageCardHead min-w-0 !grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2.5 [&>small]:inline-flex [&>small]:h-7 [&>small]:w-7 [&>small]:items-center [&>small]:justify-center [&>small]:rounded-full [&>small]:bg-[var(--vui-control-muted)] [&>small]:font-[820] [&>small]:text-[var(--fg-muted)] [&>div]:grid [&>div]:gap-1",
   researchStageCardMetrics:
     "researchStageCardMetrics min-w-0 !grid grid-cols-[repeat(3,minmax(0,1fr))] gap-x-2 gap-y-1 rounded-[var(--radius-control)] bg-[var(--vui-control-muted)] px-2 py-1.5 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)]",
+  challengeProgramScope:
+    "challengeProgramScope min-w-0 !flex flex-wrap items-center justify-between gap-2 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-3 py-2 [font-size:var(--vui-font-sm)] text-[var(--fg-secondary)] [&>strong]:text-[var(--fg-primary)]",
+  challengeProgramResults:
+    "challengeProgramResults min-w-0 scroll-mt-4 grid gap-3 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-3",
+  challengeProgramResultsHeader:
+    "challengeProgramResultsHeader min-w-0 !flex flex-wrap items-start justify-between gap-3 [&>div]:grid [&>div]:gap-1 [&_strong]:text-[var(--fg-primary)] [&_span]:[font-size:var(--vui-font-sm)] [&_span]:text-[var(--fg-secondary)]",
+  challengeProgramResultGrid:
+    "challengeProgramResultGrid min-w-0 !grid grid-cols-[repeat(auto-fit,minmax(250px,1fr))] gap-2",
+  challengeProgramResultCard:
+    "challengeProgramResultCard min-w-0 scroll-mt-4 grid content-start gap-2 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] p-3 [&>header]:flex [&>header]:flex-wrap [&>header]:items-center [&>header]:justify-between [&>header]:gap-2 [&>p]:m-0 [&>p]:[font-size:var(--vui-font-sm)] [&>p]:text-[var(--fg-secondary)]",
+  challengeProgramQuestionList:
+    "challengeProgramQuestionList min-w-0 !flex flex-wrap gap-1.5 [&>span]:inline-flex [&>span]:items-center [&>span]:rounded-full [&>span]:border [&>span]:border-[var(--vui-border-subtle)] [&>span]:bg-[var(--vui-surface-panel)] [&>span]:px-2 [&>span]:py-1 [&>span]:font-[760] [&>span]:text-[var(--fg-primary)]",
   researchStageGrid:
     "researchStageGrid min-w-0 grid items-stretch gap-3 grid-cols-[repeat(auto-fit,minmax(280px,1fr))]",
   researchStageHeroPanel: `researchStageHeroPanel min-w-0 ${vuiFlatPanelClass} p-2`,
