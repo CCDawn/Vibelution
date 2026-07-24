@@ -102,8 +102,8 @@ export function TeamSourceCollectionActiveStagePanel({
           {agentConfigAction}
         </div>
       </div>
-      {errors}
-      {resultPanel}
+      <div className={styles.sourceCollectionStageErrors}>{errors}</div>
+      <div className={styles.sourceCollectionStageResult}>{resultPanel}</div>
     </section>
   );
 }
