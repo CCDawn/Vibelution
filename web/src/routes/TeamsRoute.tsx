@@ -1010,6 +1010,7 @@ export function TeamsRoute({
   const [researchWorkspaceView, setResearchWorkspaceView] = useState<ResearchWorkspaceView>(
     forcedResearchWorkspaceView ?? requestedResearchWorkspaceView ?? "overview",
   );
+  const [challengeTeamSurface, setChallengeTeamSurface] = useState<"workspace" | "progress">("workspace");
   const [sourceCollectionDraft, setSourceCollectionDraft] = useState<SourceCollectionDraft>({
     title: "神经算法资料搜索批次",
     topic: "神经预测编码",
@@ -3403,7 +3404,7 @@ export function TeamsRoute({
     if (!researchWorkflowTeamSelected) {
       return null;
     }
-    if (challengeCupResearchTeamSelected) {
+    if (challengeCupResearchTeamSelected && challengeTeamSurface === "progress") {
       const challengeProjection = experimentPlanningStatus?.challengeProgramProjection;
       const challengeAgents: ChallengeCupWorkspaceAgent[] = selectedTeamMemoryMembers.map((member) => {
         const normalizedRole = member.roleLabel.toLowerCase();
@@ -3548,8 +3549,11 @@ export function TeamsRoute({
     const stageStatusLoading = !researchStageRoundStatus && researchStageRoundStatusQuery.isPending;
     const stageStatusUnavailable = !researchStageRoundStatus && researchStageRoundStatusQuery.isError;
     const experimentLifecycleProjection = experimentPlanningStatus?.lifecycleProjection;
-    const challengeProgramProjection = experimentPlanningStatus?.challengeProgramProjection;
-    const challengeProgramExpected = isChallengeCupResearchWorkflowTeam(selectedTeam);
+    const challengeProgramProjection = challengeTeamSurface === "progress"
+      ? experimentPlanningStatus?.challengeProgramProjection
+      : undefined;
+    const challengeProgramExpected = isChallengeCupResearchWorkflowTeam(selectedTeam)
+      && challengeTeamSurface === "progress";
     const challengeProgramLoading = challengeProgramExpected
       && !challengeProgramProjection
       && experimentPlanningStatusQuery.isPending;
@@ -3893,7 +3897,7 @@ export function TeamsRoute({
             const active = Boolean(phase?.activeRoundId);
             const disabled = stagePrimaryDisabled(stageType);
             const navItem = RESEARCH_WORKSPACE_NAV_ITEMS.find((item) => item.view === stageType);
-            const primaryLabel = stagePrimaryLabel(stageType, phase?.primaryAction || fallback.primaryAction);
+            const primaryLabel = stagePrimaryLabel(stageType, fallback.primaryAction);
             return (
               <article
                 key={stageType}
@@ -3904,7 +3908,7 @@ export function TeamsRoute({
                 <div className={styles.researchStageCardHead}>
                   <small>{String(phaseOrder.indexOf(stageType) + 1).padStart(2, "0")}</small>
                   <div>
-                    <strong>{challengeProgramProjection ? challengeStageLabel(stageType) : (phase?.label || fallback.label)}</strong>
+                    <strong>{challengeProgramProjection ? challengeStageLabel(stageType) : fallback.label}</strong>
                     <span className={`${styles.researchStageStatus} ${stageStatusStyle(stageType, active, latestRound)}`}>{stageStatusLabel(stageType, active, latestRound)}</span>
                   </div>
                 </div>
@@ -9940,6 +9944,28 @@ export function TeamsRoute({
           </div>
           )}
           <div className={challengeCupResearchTeamSelected && !researchCanvasVisible ? styles.challengeWorkspaceBody : styles.inspectorBody}>
+            {challengeCupResearchTeamSelected && !researchCanvasVisible ? (
+              <nav className={styles.challengeSurfaceSwitch} aria-label={lang === "zh" ? "挑战杯平台视图" : "Challenge Cup platform view"}>
+                <button
+                  type="button"
+                  className={challengeTeamSurface === "workspace" ? styles.challengeSurfaceSwitchActive : ""}
+                  aria-current={challengeTeamSurface === "workspace" ? "page" : undefined}
+                  onClick={() => setChallengeTeamSurface("workspace")}
+                >
+                  <strong>{lang === "zh" ? "科研工作台" : "Research workspace"}</strong>
+                  <span>{lang === "zh" ? "三阶段流程、实验方式与 Agent 操作" : "Three stages, experiment modes, and Agent operations"}</span>
+                </button>
+                <button
+                  type="button"
+                  className={challengeTeamSurface === "progress" ? styles.challengeSurfaceSwitchActive : ""}
+                  aria-current={challengeTeamSurface === "progress" ? "page" : undefined}
+                  onClick={() => setChallengeTeamSurface("progress")}
+                >
+                  <strong>{lang === "zh" ? "项目进展" : "Program progress"}</strong>
+                  <span>{lang === "zh" ? "挑战杯任务、验收门禁与交付状态" : "Challenge task, acceptance gates, and delivery"}</span>
+                </button>
+              </nav>
+            ) : null}
             {researchWorkflowTeamSelected && !researchCanvasVisible ? (
               <>
                 {renderResearchStageLauncher()}
