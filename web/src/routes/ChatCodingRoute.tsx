@@ -1267,10 +1267,10 @@ export function ChatCodingRoute() {
   const availableGroupParticipantCount = availableGroupParticipants.length;
 
   useEffect(() => {
-    if (activeSessionId && sessionDetailQuery.data) {
+    if (activeSessionId && sessionDetailQuery.data?.id === activeSessionId) {
       hydrateSession(activeSessionId, [], "agent");
     }
-  }, [activeSessionId, hydrateSession, sessionDetailQuery.data]);
+  }, [activeSessionId, hydrateSession, sessionDetailQuery.data?.id]);
 
   useEffect(() => {
     if (!activeGroupRoom) {
@@ -2084,9 +2084,12 @@ export function ChatCodingRoute() {
     ).trim();
   }, [activeSessionId, directSessionActiveSummary?.agentId, sessionDetailQuery.data?.agentId, sessionsById]);
   useEffect(() => {
-    if (activeSessionAgentId) {
-      setSelectedAgentId(activeSessionAgentId);
+    if (!activeSessionAgentId) {
+      return;
     }
+    setSelectedAgentId((current) => (
+      current === activeSessionAgentId ? current : activeSessionAgentId
+    ));
   }, [activeSessionAgentId]);
   const selectedChatAgentId = selectedAgentId || activeSessionAgentId || visibleChatAgents[0]?.agentId || "";
   const selectedAgentSessionsQuery = useQuery({
