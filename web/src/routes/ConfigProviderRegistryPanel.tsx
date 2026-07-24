@@ -25,10 +25,13 @@ import type {
   ConfigProviderMergeResult,
 } from "../api/types";
 import {
+  buildProviderSetupChecklist,
   canTestProviderModel,
+  defaultProviderModelFilter,
   deriveProviderMergeCandidate,
   deriveProviderModelActionState,
   filterProviderModels,
+  sortProviderRegistryRows,
   summarizeProviderModels,
   type ProviderModelFilter,
   type ProviderRegistryRow,
@@ -123,29 +126,29 @@ function CapabilityList({ model }: { model: ConfigCatalogModel }) {
   const capabilities = Object.entries(model.capabilities);
   const reasoningValues = model.reasoningEffortValues ?? [];
   const reasoningSource = String(model.reasoningCapabilitySource || "");
+  const isPinned = model.availability === "pinned" || model.availability === "missing_remote";
   const reasoningRows: Array<{ key: string; label: string; detail: string; tone: VStatusTone }> = [];
+  // Only surface reasoning contract guidance for pinned models — never spam full discovery dumps.
   if (reasoningValues.length > 0) {
     const isOperator = reasoningSource === "operator_override" || model.reasoningVerificationStatus === "declared";
     reasoningRows.push({
       key: "reasoning_effort",
-      label: isOperator
-        ? `reasoning: ${reasoningValues.join("/")}`
-        : `reasoning: ${reasoningValues.join("/")}`,
+      label: `思考深度: ${reasoningValues.join("/")}`,
       detail: isOperator
-        ? `operator_override · 协议声明 · default ${model.defaultReasoningEffort || "-"} · adapter ${model.reasoningAdapter || "none"}`
-        : `${reasoningSource || "verified"} · ${model.reasoningVerificationStatus || "verified"} · adapter ${model.reasoningAdapter || "none"}`,
+        ? `协议已声明 · 默认 ${model.defaultReasoningEffort || "-"} · adapter ${model.reasoningAdapter || "none"}`
+        : `已验证 · adapter ${model.reasoningAdapter || "none"}`,
       tone: "success",
     });
-  } else if (["observed", "pinned"].includes(model.availability)) {
+  } else if (isPinned) {
     reasoningRows.push({
       key: "reasoning_effort_missing",
-      label: "reasoning: 未声明",
-      detail: "pin defaults 写 reasoning_effort_values，或对 Responses 模型验证 low/high",
+      label: "思考深度: 未配置",
+      detail: "固定后可写 pin defaults.reasoning_effort_values，或对 Responses 模型点「验证推理 low/high」",
       tone: "warning",
     });
   }
   if (!capabilities.length && !reasoningRows.length) {
-    return <span className={styles.capabilityUnknown}>未观测</span>;
+    return <span className={styles.capabilityUnknown}>{isPinned ? "能力未观测" : "—"}</span>;
   }
   return (
     <div className={styles.capabilityList}>
@@ -165,6 +168,42 @@ function CapabilityList({ model }: { model: ConfigCatalogModel }) {
           </small>
         </span>
       ))}
+    </div>
+  );
+}
+
+function ProviderSetupChecklist({ provider }: { provider: ProviderRegistryRow }) {
+  const items = buildProviderSetupChecklist(provider);
+  const next = items.find((item) => !item.done);
+  return (
+    <div className={styles.setupChecklist} data-provider-checklist="true" aria-label="配置进度">
+      <div className={styles.setupChecklistItems}>
+        {items.map((item) => (
+          <span
+            key={item.id}
+            className={styles.setupChecklistItem}
+            data-done={item.done ? "true" : "false"}
+            data-optional={item.optional ? "true" : "false"}
+          >
+            <VStatusChip tone={item.done ? "success" : item.optional ? "neutral" : "warning"}>
+              {item.done ? "完成" : item.optional ? "可选" : "待办"}
+            </VStatusChip>
+            <small className={styles.muted}>{item.label}</small>
+          </span>
+        ))}
+      </div>
+      {next ? (
+        <p className={styles.setupChecklistNext} role="status">
+          下一步：{next.label}
+          {next.id === "pin" ? "（在下方「已固定 / 已发现」中固定对话模型）" : ""}
+          {next.id === "credential" ? "（点「设置 API Key」）" : ""}
+          {next.id === "connection" ? "（点「发现」或检查路由）" : ""}
+        </p>
+      ) : (
+        <p className={styles.setupChecklistNext} role="status">
+          本 Provider 基础配置已完成。固定的模型可在 Agent 中选用。
+        </p>
+      )}
     </div>
   );
 }
@@ -247,8 +286,12 @@ export function ProviderModelsTab({
     [modelFilter, modelQuery, provider.models],
   );
   const emptyText = provider.models.length === 0
-    ? "该 Provider 暂无模型。先运行发现。"
-    : "没有匹配的模型。请调整搜索或筛选条件。";
+    ? "该 Provider 暂无模型。先点右上角「发现」。"
+    : modelFilter === "pinned" && summary.pinned === 0
+      ? "还没有固定模型。切换到「已发现」选中要用的对话模型并固定；固定后才会进入可用模型库。"
+      : modelFilter === "discovered" && summary.discovered === 0
+        ? "没有已发现模型。先运行「发现」，或切换到「全部」。"
+        : "没有匹配的模型。请调整搜索或筛选条件。";
 
   return (
     <div className={styles.modelsWorkspace}>
@@ -274,6 +317,14 @@ export function ProviderModelsTab({
           ))}
         </VActionGroup>
       </div>
+      {modelFilter === "pinned" && summary.pinned === 0 && summary.discovered > 0 ? (
+        <p className={styles.modelFilterHint} role="status">
+          快捷路径：点「已发现 {summary.discovered}」→ 选对话模型 → 固定。不必浏览全部 {summary.total} 行。
+          <VButton density="compact" variant="ghost" className={styles.modelFilterHintAction} onPress={() => onFilterChange("discovered")}>
+            查看已发现
+          </VButton>
+        </p>
+      ) : null}
       <div className={styles.tableScroll}>
         <VDenseTable
           ariaLabel={`${provider.label} 模型目录`}
@@ -524,8 +575,12 @@ export function ConfigProviderRegistryPanel({
   onProbeImageInput,
   onDeleteProvider,
 }: ConfigProviderRegistryPanelProps) {
+  const orderedRows = useMemo(() => sortProviderRegistryRows(rows), [rows]);
+  const provider = orderedRows.find((row) => row.providerId === selectedProviderId) ?? orderedRows[0];
   const [modelQuery, setModelQuery] = useState("");
-  const [modelFilter, setModelFilter] = useState<ProviderModelFilter>("all");
+  const [modelFilter, setModelFilter] = useState<ProviderModelFilter>(() =>
+    defaultProviderModelFilter(provider?.models ?? []),
+  );
   const [mergePreview, setMergePreview] = useState<ConfigProviderMergePreview | null>(null);
   const [mergeResult, setMergeResult] = useState<ConfigProviderMergeResult | null>(null);
   const [mergeConfirmed, setMergeConfirmed] = useState(false);
@@ -536,12 +591,11 @@ export function ConfigProviderRegistryPanel({
     values: string[];
     message: string;
   }>>({});
-  const provider = rows.find((row) => row.providerId === selectedProviderId) ?? rows[0];
   const mergeCandidate = useMemo(
-    () => deriveProviderMergeCandidate(rows, provider?.providerId ?? ""),
-    [provider?.providerId, rows],
+    () => deriveProviderMergeCandidate(orderedRows, provider?.providerId ?? ""),
+    [provider?.providerId, orderedRows],
   );
-  const items = rows.map((row) => ({ ...row, id: row.providerId }));
+  const items = orderedRows.map((row) => ({ ...row, id: row.providerId }));
   const providerLiveReferenceCount = provider?.models.reduce(
     (total, model) => total + (liveReferenceCountByModelRef[model.modelRef] ?? 0),
     0,
@@ -554,12 +608,13 @@ export function ConfigProviderRegistryPanel({
 
   useEffect(() => {
     setModelQuery("");
-    setModelFilter("all");
+    setModelFilter(defaultProviderModelFilter(provider?.models ?? []));
     setMergePreview(null);
     setMergeResult(null);
     setMergeConfirmed(false);
     setMergeError("");
     setReasoningFeedbackByModelRef({});
+    // Reset table tools when switching Provider only — keep user filter while discovering on same Provider.
   }, [provider?.providerId]);
 
   const probeReasoning = async (modelRef: string) => {
@@ -674,10 +729,13 @@ export function ConfigProviderRegistryPanel({
     <VSurface as="section" id="config-models" className={styles.sectionSurface} padding="none">
       <VPanelHeader
         className={styles.header}
-        eyebrow="Provider-first registry"
-        title="Provider 与模型工作台"
+        eyebrow="已连接的服务"
+        title="管理已有连接"
         actions={<VStatusChip tone={disabled ? "warning" : "success"}>{disabled ? "只读 / 忙碌" : "草稿可编辑"}</VStatusChip>}
       />
+      <p className={styles.workspaceLead} role="note">
+        日常请用「快速配置」接好第一个模型。本页用于查看已连接服务、固定模型目录与排障。
+      </p>
       <VSplitWorkspace
         className={styles.registryWorkspace}
         sidebar={(
@@ -687,7 +745,7 @@ export function ConfigProviderRegistryPanel({
               activeId={provider?.providerId}
               className={styles.providerList}
               items={items}
-              empty={<VStateSurface tone="empty" title="尚无 Provider">使用右侧向导添加第一个 Provider。</VStateSurface>}
+              empty={<VStateSurface tone="empty" title="尚无 Provider">请切到「快速配置」添加第一个服务商。</VStateSurface>}
               renderItem={(row) => (
                 <VButton
                   className={styles.providerButton}
@@ -697,7 +755,10 @@ export function ConfigProviderRegistryPanel({
                 >
                   <span className={styles.providerIdentity}>
                     <strong className={styles.ellipsis} title={row.label}>{row.label || row.providerId}</strong>
-                    <small className={styles.ellipsis} title={row.providerId}>{row.providerId}</small>
+                    <small className={styles.ellipsis} title={row.providerId}>
+                      {row.providerId}
+                      {row.pinnedCount > 0 ? ` · 已固定 ${row.pinnedCount}` : ""}
+                    </small>
                   </span>
                   <VStatusChip tone={statusTone(row.status)} data-provider-status={row.status}>{row.status}</VStatusChip>
                 </VButton>
@@ -742,6 +803,7 @@ export function ConfigProviderRegistryPanel({
                 </VButton>
               </VActionGroup>
             </div>
+            <ProviderSetupChecklist provider={provider} />
             {visibleFeedback ? (
               <p
                 className={visibleFeedback.phase === "error" ? styles.actionFeedbackError : styles.actionFeedback}

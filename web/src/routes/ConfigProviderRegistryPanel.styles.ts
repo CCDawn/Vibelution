@@ -3,8 +3,10 @@ import { vuiOpaquePanelClass } from "../design/vuiSurfaceRecipes";
 const panelSurface = vuiOpaquePanelClass;
 
 const styles = {
-  sectionSurface: `vui-routes-configproviderregistrypanel sectionSurface ${panelSurface} grid h-full min-h-0 min-w-0 [grid-template-rows:auto_minmax(0,1fr)] gap-3 overflow-hidden p-3`,
+  sectionSurface: `vui-routes-configproviderregistrypanel sectionSurface ${panelSurface} grid h-full min-h-0 min-w-0 [grid-template-rows:auto_auto_minmax(0,1fr)] gap-3 overflow-hidden p-3`,
   header: "vui-routes-configproviderregistrypanel header min-w-0",
+  workspaceLead:
+    "vui-routes-configproviderregistrypanel workspaceLead m-0 min-w-0 [font-size:var(--vui-font-sm)] leading-snug text-vui-fg-secondary [overflow-wrap:anywhere]",
   registryWorkspace:
     "vui-routes-configproviderregistrypanel registryWorkspace h-full min-h-0 min-w-0 [--vui-workspace-sidebar:clamp(18rem,26vw,24rem)] gap-2 overflow-hidden",
   providerRail: "vui-routes-configproviderregistrypanel providerRail grid h-full min-h-0 min-w-0 [grid-template-rows:minmax(0,1fr)] gap-2",
@@ -13,10 +15,18 @@ const styles = {
     "vui-routes-configproviderregistrypanel providerButton !grid !min-h-[58px] !w-full min-w-0 !grid-cols-[minmax(0,1fr)_auto] !justify-stretch gap-3 px-3 py-2 text-left",
   providerIdentity: "vui-routes-configproviderregistrypanel providerIdentity grid min-w-0 gap-0.5",
   ellipsis: "vui-routes-configproviderregistrypanel ellipsis min-w-0 truncate",
-  detailSurface: "vui-routes-configproviderregistrypanel detailSurface grid h-full min-h-0 min-w-0 [grid-template-rows:auto_auto_auto_minmax(0,1fr)_auto_auto] gap-2 overflow-y-auto overflow-x-hidden pr-1",
+  detailSurface: "vui-routes-configproviderregistrypanel detailSurface grid h-full min-h-0 min-w-0 [grid-template-rows:auto_auto_auto_auto_minmax(0,1fr)_auto_auto] gap-2 overflow-y-auto overflow-x-hidden pr-1",
   detailHeader:
     "vui-routes-configproviderregistrypanel detailHeader flex min-w-0 flex-wrap items-start justify-between gap-2 border-b border-vui-border-hairline pb-2",
   detailIdentity: "vui-routes-configproviderregistrypanel detailIdentity grid min-w-0 gap-0.5",
+  setupChecklist:
+    "vui-routes-configproviderregistrypanel setupChecklist grid min-w-0 gap-1.5 rounded-md border border-vui-border-subtle bg-vui-surface-row/70 px-2.5 py-2",
+  setupChecklistItems:
+    "vui-routes-configproviderregistrypanel setupChecklistItems flex min-w-0 flex-wrap items-center gap-2",
+  setupChecklistItem:
+    "vui-routes-configproviderregistrypanel setupChecklistItem inline-flex min-w-0 max-w-full items-center gap-1.5",
+  setupChecklistNext:
+    "vui-routes-configproviderregistrypanel setupChecklistNext m-0 min-w-0 [font-size:var(--vui-font-sm)] font-medium leading-snug text-vui-fg-primary [overflow-wrap:anywhere]",
   tabs: "vui-routes-configproviderregistrypanel tabs flex min-w-0 flex-wrap items-center gap-1",
   tabButton: "vui-routes-configproviderregistrypanel tabButton",
   detailBody:
@@ -29,11 +39,14 @@ const styles = {
   factValue: "vui-routes-configproviderregistrypanel factValue min-w-0 truncate [font-size:var(--vui-font-sm)] font-semibold text-vui-fg-primary",
   deployment:
     "vui-routes-configproviderregistrypanel deployment grid min-w-0 gap-2 rounded-md border border-vui-border-subtle bg-vui-surface-glass p-2",
-  modelsWorkspace: "vui-routes-configproviderregistrypanel modelsWorkspace grid h-full min-h-0 min-w-0 [grid-template-rows:auto_minmax(0,1fr)] gap-2 overflow-hidden",
+  modelsWorkspace: "vui-routes-configproviderregistrypanel modelsWorkspace grid h-full min-h-0 min-w-0 [grid-template-rows:auto_auto_minmax(0,1fr)] gap-2 overflow-hidden",
   modelToolbar:
     "vui-routes-configproviderregistrypanel modelToolbar grid min-w-0 [grid-template-columns:minmax(16rem,0.7fr)_minmax(0,1fr)] items-center gap-2",
   modelSearch: "vui-routes-configproviderregistrypanel modelSearch min-w-0",
   modelFilters: "vui-routes-configproviderregistrypanel modelFilters flex min-w-0 flex-wrap items-center justify-end gap-1",
+  modelFilterHint:
+    "vui-routes-configproviderregistrypanel modelFilterHint m-0 flex min-w-0 flex-wrap items-center gap-2 rounded-md border border-[color-mix(in_srgb,var(--accent-cool)_28%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-row))] px-2.5 py-1.5 [font-size:var(--vui-font-sm)] text-vui-fg-secondary [overflow-wrap:anywhere]",
+  modelFilterHintAction: "vui-routes-configproviderregistrypanel modelFilterHintAction shrink-0",
   tableScroll:
     "vui-routes-configproviderregistrypanel tableScroll h-full min-h-0 min-w-0 overflow-auto rounded-[var(--radius-control)]",
   table:

@@ -11,6 +11,8 @@ import {
   deriveProviderRegistryRows,
   dispatchProviderWizardConnectionAction,
   filterAlreadyPinnedModels,
+  buildProviderSetupChecklist,
+  defaultProviderModelFilter,
   filterProviderModels,
   initialProviderQuickSetupState,
   initialProviderWizardState,
@@ -18,6 +20,7 @@ import {
   providerQuickSetupReducer,
   providerWizardReducer,
   recommendProviderModel,
+  sortProviderRegistryRows,
   summarizeProviderModels,
 } from "./configProviderLogic";
 
@@ -367,6 +370,65 @@ describe("configProviderLogic", () => {
     ]);
     expect(filterProviderModels(models, "", "all").map((model) => model.modelRef)).toEqual(snapshot);
     expect(models.map((model) => model.modelRef)).toEqual(snapshot);
+  });
+
+  it("defaults model filter to pinned work list when pins exist", () => {
+    expect(defaultProviderModelFilter([
+      { ...catalogModel("a/p"), availability: "pinned" },
+      { ...catalogModel("a/o"), availability: "observed" },
+    ])).toBe("pinned");
+    expect(defaultProviderModelFilter([
+      { ...catalogModel("a/o"), availability: "observed" },
+    ])).toBe("discovered");
+    expect(defaultProviderModelFilter([])).toBe("all");
+  });
+
+  it("sorts reachable providers before failed ones", () => {
+    const base = {
+      label: "x",
+      serviceClass: "relay",
+      vendor: "multi_model",
+      driver: "openai",
+      runtimeFramework: "",
+      artifactPath: "",
+      baseUrl: "https://relay.example/v1",
+      credentialState: "configured" as const,
+      defaultProtocol: "responses",
+      lastAttemptAt: "",
+      lastSuccessAt: "",
+      refreshDue: false,
+      models: [] as ConfigCatalogModel[],
+    };
+    const rows = sortProviderRegistryRows([
+      { ...base, providerId: "fail", status: "auth_failed", pinnedCount: 0 },
+      { ...base, providerId: "ok", status: "reachable", pinnedCount: 2 },
+      { ...base, providerId: "idle", status: "not_discovered", pinnedCount: 0 },
+    ]);
+    expect(rows.map((row) => row.providerId)).toEqual(["ok", "idle", "fail"]);
+  });
+
+  it("builds a setup checklist with pin as the critical next step", () => {
+    const checklist = buildProviderSetupChecklist({
+      providerId: "dash",
+      label: "Dash",
+      serviceClass: "official_api",
+      vendor: "aliyun",
+      driver: "openai",
+      runtimeFramework: "",
+      artifactPath: "",
+      baseUrl: "https://example",
+      credentialState: "configured",
+      defaultProtocol: "responses",
+      pinnedCount: 0,
+      status: "reachable",
+      lastAttemptAt: "",
+      lastSuccessAt: "",
+      refreshDue: false,
+      models: [{ ...catalogModel("dash/qwen"), availability: "observed" }],
+    });
+    expect(checklist.find((item) => item.id === "credential")?.done).toBe(true);
+    expect(checklist.find((item) => item.id === "connection")?.done).toBe(true);
+    expect(checklist.find((item) => item.id === "pin")?.done).toBe(false);
   });
 
   it("groups Provider models into pinned, discovered, and unavailable summaries", () => {
