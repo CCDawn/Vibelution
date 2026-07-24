@@ -1,4 +1,8 @@
 import {
+  vuiControlPillClass,
+} from "../design/vuiChromeRecipes";
+
+import {
   vuiOpaqueRowClass,
 } from "../design/vuiSurfaceRecipes";
 
@@ -10,7 +14,7 @@ const styles = {
   conversationCopy:
     "vui-routes-chatcodingroute conversationCopy grid min-w-0 gap-0.5 overflow-hidden text-left",
   conversationKindBadge:
-    "vui-routes-chatcodingroute conversationKindBadge min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+    `vui-routes-chatcodingroute conversationKindBadge min-w-0 ${vuiControlPillClass}`,
   conversationKindBadgeGroup:
     "vui-routes-chatcodingroute conversationKindBadgeGroup min-w-0",
   conversationMetaRow:

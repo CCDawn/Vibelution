@@ -1,4 +1,8 @@
 import {
+  vuiControlPillClass,
+} from "../design/vuiChromeRecipes";
+
+import {
   vuiFlatPanelClass,
   vuiOpaqueRowClass,
   vuiStateCoolInfoClass,
@@ -10,7 +14,7 @@ const styles = {
   agentMemoryWorkspace:
     `agentMemoryWorkspace min-w-0 grid h-full min-h-0 gap-2 p-2 grid-cols-[minmax(210px,260px)_minmax(0,1fr)_minmax(280px,0.42fr)] overflow-hidden ${vuiStateCoolInfoClass} max-[1100px]:grid-cols-[minmax(220px,280px)_minmax(0,1fr)] max-[1100px]:[&_.detailPanel]:col-span-2 max-[780px]:grid-cols-1 max-[780px]:overflow-auto`,
   countPill:
-    "countPill min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+    `countPill min-w-0 ${vuiControlPillClass}`,
   detailHeader:
     "detailHeader min-w-0 flex flex-wrap items-center gap-1.5 px-1 py-0.5",
   detailMeta:
@@ -39,7 +43,7 @@ const styles = {
   sectionPanel: `sectionPanel min-w-0 ${vuiFlatPanelClass} p-2`,
   sourcePanel: `sourcePanel min-w-0 min-h-0 overflow-auto ${vuiFlatPanelClass} p-2`,
   statusPill:
-    "statusPill min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+    `statusPill min-w-0 ${vuiControlPillClass}`,
   statusPillVisible:
     "statusPillVisible min-w-0",
   summaryCard: `summaryCard min-w-0 ${vuiOpaqueRowClass} grid min-h-[54px] grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-2 py-1.5 [&>span]:[font-size:var(--vui-font-xs)] [&>strong]:[font-size:var(--vui-font-title)]`,

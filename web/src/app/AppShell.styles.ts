@@ -7,6 +7,13 @@
 // Includes phantom keys accessed by consumers but never declared in the old
 // styleKeys; the Proxy synthesized them on demand.
 import {
+  vuiControlIconSmClass,
+  vuiControlPillClass,
+  vuiControlQuietChromeClass,
+  vuiControlQuietClass,
+} from "../design/vuiChromeRecipes";
+
+import {
   vuiGlassPanelClass,
   vuiOpaqueRowClass,
   vuiStateCoolInfoClass,
@@ -19,11 +26,11 @@ import {
 
 const styles = {
   actionButton:
-    "vui-app-appshell actionButton min-w-0 flex flex-wrap items-center gap-1.5 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full justify-center rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
+    `vui-app-appshell actionButton min-w-0 flex flex-wrap items-center gap-1.5 ${vuiControlQuietChromeClass}`,
   actionIconButton:
-    "vui-app-appshell actionIconButton h-[var(--vui-control-height-sm)] w-[var(--vui-control-height-sm)] min-w-[var(--vui-control-height-sm)]",
+    `vui-app-appshell actionIconButton ${vuiControlIconSmClass}`,
   activeWorkChip:
-    `vui-app-appshell activeWorkChip min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)] ${vuiStateSelectedRowClass} relative h-8 min-h-8 flex-nowrap overflow-visible gap-1.5 whitespace-nowrap [&:focus-within_.activeWorkDetailPanel]:visible [&:focus-within_.activeWorkDetailPanel]:pointer-events-auto [&:focus-within_.activeWorkDetailPanel]:translate-y-0 [&:focus-within_.activeWorkDetailPanel]:opacity-100 [&:hover_.activeWorkDetailPanel]:visible [&:hover_.activeWorkDetailPanel]:pointer-events-auto [&:hover_.activeWorkDetailPanel]:translate-y-0 [&:hover_.activeWorkDetailPanel]:opacity-100`,
+    `vui-app-appshell activeWorkChip min-w-0 ${vuiControlPillClass} ${vuiStateSelectedRowClass} relative h-8 min-h-8 flex-nowrap overflow-visible gap-1.5 whitespace-nowrap [&:focus-within_.activeWorkDetailPanel]:visible [&:focus-within_.activeWorkDetailPanel]:pointer-events-auto [&:focus-within_.activeWorkDetailPanel]:translate-y-0 [&:focus-within_.activeWorkDetailPanel]:opacity-100 [&:hover_.activeWorkDetailPanel]:visible [&:hover_.activeWorkDetailPanel]:pointer-events-auto [&:hover_.activeWorkDetailPanel]:translate-y-0 [&:hover_.activeWorkDetailPanel]:opacity-100`,
   activeWorkDetailCopy: `vui-app-appshell activeWorkDetailCopy min-w-0 ${vuiGlassPanelClass} p-2 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] ${vuiStateSelectedRowClass}`,
   activeWorkDetailHeader:
     "vui-app-appshell activeWorkDetailHeader min-w-0 flex flex-wrap items-center gap-1.5 border-b border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] px-0.5 pb-1 text-[var(--accent-cool)]",
@@ -57,7 +64,7 @@ const styles = {
   gitBranchName:
     "vui-app-appshell gitBranchName min-w-0 [font-size:var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
   gitChip:
-    "vui-app-appshell gitChip min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+    `vui-app-appshell gitChip min-w-0 ${vuiControlPillClass}`,
   gitCommitItem: `vui-app-appshell gitCommitItem min-w-0 ${vuiOpaqueRowClass} p-2`,
   gitCommitList:
     "vui-app-appshell gitCommitList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
@@ -122,10 +129,10 @@ const styles = {
   navLinkDisabled:
     "vui-app-appshell navLinkDisabled relative inline-flex min-h-[30px] min-w-0 cursor-not-allowed items-center justify-center rounded-[var(--radius-control)] px-2.5 [font-size:var(--vui-font-sm)] font-semibold text-[var(--fg-tertiary)] opacity-55 select-none pointer-events-none",
   returnButton:
-    "vui-app-appshell returnButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
+    `vui-app-appshell returnButton min-w-0 ${vuiControlQuietClass}`,
   shell: `vui-app-appshell shell min-w-0 grid h-full min-h-0 content-start overflow-hidden ${vuiWorkspaceFillClass} text-[var(--fg-primary)]`,
   shutdownCancelButton:
-    "vui-app-appshell shutdownCancelButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
+    `vui-app-appshell shutdownCancelButton min-w-0 ${vuiControlQuietClass}`,
   shutdownCopy:
     "vui-app-appshell shutdownCopy min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   shutdownIconSpin:
@@ -145,7 +152,7 @@ const styles = {
   startupSpinner:
     "vui-app-appshell startupSpinner min-w-0 animate-spin",
   statusBadge:
-    "vui-app-appshell statusBadge min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+    `vui-app-appshell statusBadge min-w-0 ${vuiControlPillClass}`,
   statusBadgeLabel:
     "vui-app-appshell statusBadgeLabel min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] whitespace-nowrap",
   statusBadgeValue:
@@ -224,7 +231,7 @@ const styles = {
   topClock:
     "vui-app-appshell topClock min-w-0 flex shrink-0 items-center gap-1.5 whitespace-nowrap [font-size:var(--vui-font-xs)] leading-none text-[var(--fg-secondary)]",
   utilityButton:
-    "vui-app-appshell utilityButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
+    `vui-app-appshell utilityButton min-w-0 ${vuiControlQuietClass}`,
   utilityButtonActive:
     `vui-app-appshell utilityButtonActive min-w-0 ${vuiStateSelectedRowClass}`,
   utilityButtonGrid:
@@ -236,7 +243,7 @@ const styles = {
   utilityClusterOpen:
     `vui-app-appshell utilityClusterOpen min-w-0 ${vuiStateCoolSoftClass}`,
   utilityFileButton:
-    "vui-app-appshell utilityFileButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 grid [&_[data-slot=vui-button-content]]:w-full [&_[data-slot=vui-button-label]]:grid [&_[data-slot=vui-button-label]]:w-full [&_[data-slot=vui-button-label]]:grid-cols-[minmax(0,1fr)_auto] [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-2",
+    `vui-app-appshell utilityFileButton min-w-0 ${vuiControlQuietClass} grid [&_[data-slot=vui-button-content]]:w-full [&_[data-slot=vui-button-label]]:grid [&_[data-slot=vui-button-label]]:w-full [&_[data-slot=vui-button-label]]:grid-cols-[minmax(0,1fr)_auto] [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-2`,
   utilityFileButtonActive:
     `vui-app-appshell utilityFileButtonActive min-w-0 ${vuiStateSelectedRowClass} grid [&_[data-slot=vui-button-content]]:w-full [&_[data-slot=vui-button-label]]:grid [&_[data-slot=vui-button-label]]:w-full [&_[data-slot=vui-button-label]]:grid-cols-[minmax(0,1fr)_auto] [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-2`,
   utilityFileChildren:
@@ -256,11 +263,11 @@ const styles = {
   utilityPanelHeader:
     "vui-app-appshell utilityPanelHeader min-w-0 flex flex-wrap items-center gap-1.5 px-0.5 pb-1",
   utilityTrigger:
-    "vui-app-appshell utilityTrigger min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 h-[var(--vui-control-height-sm)] flex-nowrap [&_[data-slot=vui-button-content]]:flex-nowrap [&_[data-slot=vui-button-content]]:whitespace-nowrap [&_[data-slot=vui-button-icon]]:shrink-0 [&_[data-slot=vui-button-label]]:inline-flex [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-1.5 [&_[data-slot=vui-button-label]]:whitespace-nowrap [&_[data-slot=vui-button-trailing-icon]]:shrink-0",
+    `vui-app-appshell utilityTrigger min-w-0 ${vuiControlQuietClass} h-[var(--vui-control-height-sm)] flex-nowrap [&_[data-slot=vui-button-content]]:flex-nowrap [&_[data-slot=vui-button-content]]:whitespace-nowrap [&_[data-slot=vui-button-icon]]:shrink-0 [&_[data-slot=vui-button-label]]:inline-flex [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-1.5 [&_[data-slot=vui-button-label]]:whitespace-nowrap [&_[data-slot=vui-button-trailing-icon]]:shrink-0`,
   utilityTriggerLabel:
     "vui-app-appshell utilityTriggerLabel min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] whitespace-nowrap",
   versionPill:
-    "vui-app-appshell versionPill min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+    `vui-app-appshell versionPill min-w-0 ${vuiControlPillClass}`,
 } as const;
 
 export default styles;

@@ -3,6 +3,7 @@
 
 /* Shared recipe class literals (import constants are not followed by Tailwind). */
 @source "../vuiSurfaceRecipes.ts";
+@source "../vuiChromeRecipes.ts";
 
 @source "../../routes/ToolsRoute.tsx";
 @source "../../routes/ToolsRoute.styles.ts";

@@ -2,6 +2,11 @@
 // broad generated coverage for dynamic `styles[`prefix_${tone}`]` lookups, but
 // visible shell styles are being migrated into named, reusable slices.
 import {
+  vuiControlPillClass,
+  vuiControlQuietClass,
+} from "../../design/vuiChromeRecipes";
+
+import {
   vuiGlassPanelClass,
   vuiOpaqueRowClass,
   vuiStateCoolInfoClass,
@@ -71,7 +76,7 @@ const composerFieldDragActiveShell = cv(
   `${vuiStateSelectedRowClass}`,
 );
 const compactControlButton =
-  "min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55";
+  `min-w-0 ${vuiControlQuietClass}`;
 const compactIconButtonSize =
   "h-[var(--vui-control-height-sm)] min-h-[var(--vui-control-height-sm)] w-[var(--vui-control-height-sm)] min-w-[var(--vui-control-height-sm)] shrink-0";
 const composerQuietActionState =
@@ -312,7 +317,7 @@ const styles: Record<string, string> = {
   composerModeNotice: `vui-components-conversationview composerModeNotice min-w-0 ${vuiGlassPanelClass} p-2`,
   composerModeNoticeIcon: `vui-components-conversationview composerModeNoticeIcon min-w-0 ${vuiGlassPanelClass} p-2 shrink-0 text-[var(--fg-tertiary)]`,
   composerReferenceChip:
-    "vui-components-conversationview composerReferenceChip min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+    `vui-components-conversationview composerReferenceChip min-w-0 ${vuiControlPillClass}`,
   composerReferenceCopy:
     "vui-components-conversationview composerReferenceCopy min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   composerReferenceIcon:
@@ -402,7 +407,7 @@ const styles: Record<string, string> = {
   imageArtifactPrompt:
     "vui-components-conversationview imageArtifactPrompt min-w-0",
   imageDownloadButton:
-    "vui-components-conversationview imageDownloadButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
+    `vui-components-conversationview imageDownloadButton min-w-0 ${vuiControlQuietClass}`,
   imagePreview: `vui-components-conversationview imagePreview min-w-0 ${vuiGlassPanelClass} p-2`,
   imagePreviewActions: `vui-components-conversationview imagePreviewActions min-w-0 ${vuiGlassPanelClass} p-2 flex flex-wrap items-center gap-1.5`,
   imagePreviewButton: `vui-components-conversationview imagePreviewButton min-w-0 ${vuiGlassPanelClass} p-2 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55`,
@@ -813,7 +818,7 @@ const styles: Record<string, string> = {
   reActToolSummary:
     "vui-components-conversationview reActToolSummary min-w-0 border-0 bg-transparent p-0 text-[var(--fg-secondary)] shadow-none line-clamp-1 whitespace-normal [overflow-wrap:anywhere]",
   researchOrgChip:
-    "vui-components-conversationview researchOrgChip min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+    `vui-components-conversationview researchOrgChip min-w-0 ${vuiControlPillClass}`,
   researchOrgChipRow: `vui-components-conversationview researchOrgChipRow min-w-0 ${vuiOpaqueRowClass} p-2`,
   researchOrgChip_active:
     `vui-components-conversationview researchOrgChip_active min-w-0 ${vuiStateSelectedRowClass}`,
@@ -997,7 +1002,7 @@ const styles: Record<string, string> = {
   sessionMeta:
     "vui-components-conversationview sessionMeta min-w-0 flex flex-wrap items-center gap-1.5",
   statPill:
-    "vui-components-conversationview statPill min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+    `vui-components-conversationview statPill min-w-0 ${vuiControlPillClass}`,
   statRow: `vui-components-conversationview statRow min-w-0 ${vuiOpaqueRowClass} p-2`,
   statusRunningDot:
     `vui-components-conversationview statusRunningDot min-w-0 inline-block h-2 w-2 rounded-full bg-current ${vuiStateSuccessSoftClass}`,
@@ -1101,7 +1106,7 @@ const styles: Record<string, string> = {
   title:
     "vui-components-conversationview title min-w-0 [font-size:var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
   toolPill:
-    `vui-components-conversationview toolPill min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)] ${vuiStateWarmSoftClass}`,
+    `vui-components-conversationview toolPill min-w-0 ${vuiControlPillClass} ${vuiStateWarmSoftClass}`,
   toolRow:
     "vui-components-conversationview toolRow min-w-0 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-warm)_22%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-warm)_5%,var(--vui-surface-panel))] px-2 py-1.5 text-[var(--accent-warm)] shadow-none",
   toolsBlock:

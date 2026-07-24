@@ -10,6 +10,11 @@
 // Record<string, string> because those dynamic template indexes cannot index a
 // literal-keyed map; tightening is a follow-up, not Phase 0.
 import {
+  vuiControlPillClass,
+  vuiControlQuietClass,
+} from "../design/vuiChromeRecipes";
+
+import {
   vuiFlatPanelClass,
   vuiOpaquePanelClass,
   vuiOpaqueRowClass,
@@ -25,7 +30,7 @@ import {
 
 const styles: Record<string, string> = {
   agentRoleTag:
-    `agentRoleTag min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)] ${vuiStateCoolInfoClass}`,
+    `agentRoleTag min-w-0 ${vuiControlPillClass} ${vuiStateCoolInfoClass}`,
   agentRoleTag_chat:
     `agentRoleTag_chat min-w-0 ${vuiStateCoolInfoClass}`,
   agentRoleTag_general:
@@ -188,11 +193,11 @@ const styles: Record<string, string> = {
   inspectorHeader:
     "inspectorHeader min-w-0 max-w-full flex flex-wrap items-center gap-1.5 overflow-x-hidden",
   inspectorTab:
-    "inspectorTab min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
+    `inspectorTab min-w-0 ${vuiControlQuietClass}`,
   inspectorTabActive:
     `inspectorTabActive min-w-0 ${vuiStateSelectedRowClass}`,
   inspectorTabBadge:
-    "inspectorTabBadge min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+    `inspectorTabBadge min-w-0 ${vuiControlPillClass}`,
   inspectorTabs:
     "inspectorTabs min-w-0 min-h-0 overflow-auto",
   issueCard:
@@ -208,7 +213,7 @@ const styles: Record<string, string> = {
   issueEmpty:
     "issueEmpty min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   issueFocusButton:
-    "issueFocusButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
+    `issueFocusButton min-w-0 ${vuiControlQuietClass}`,
   issueList:
     "issueList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   issueMeta:
@@ -349,7 +354,7 @@ const styles: Record<string, string> = {
   organizationAuditList:
     "organizationAuditList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   organizationBadge:
-    "organizationBadge min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+    `organizationBadge min-w-0 ${vuiControlPillClass}`,
   organizationBadgeBlocked:
     `organizationBadgeBlocked min-w-0 ${vuiStateWarningSoftClass}`,
   organizationBadgeProtected:
@@ -373,7 +378,7 @@ const styles: Record<string, string> = {
   organizationSummaryGrid:
     `organizationSummaryGrid min-w-0 max-w-full ${vuiOpaquePanelClass} p-2 grid gap-2 !grid grid-cols-[repeat(3,minmax(0,1fr))] gap-2 max-[430px]:grid-cols-1`,
   primaryButton:
-    "primaryButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,transparent)] text-[var(--accent-cool)]",
+    `primaryButton min-w-0 ${vuiControlQuietClass} border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,transparent)] text-[var(--accent-cool)]`,
   readonlyDescription:
     "readonlyDescription min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   readonlyDetailHeader:
@@ -392,11 +397,11 @@ const styles: Record<string, string> = {
   saveStatusWarning:
     `saveStatusWarning min-w-0 ${vuiStateWarningSoftClass}`,
   secondaryButton:
-    "secondaryButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
+    `secondaryButton min-w-0 ${vuiControlQuietClass}`,
   selectionSummary:
     `selectionSummary min-w-0 max-w-full ${vuiOpaquePanelClass} p-2 [overflow-wrap:anywhere]`,
   statusPill:
-    "statusPill min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+    `statusPill min-w-0 ${vuiControlPillClass}`,
   status_active:
     `status_active min-w-0 ${vuiStateSelectedRowClass}`,
   status_approval_gate:

@@ -10,6 +10,11 @@
 // Record<string, string> because those dynamic template indexes cannot index a
 // literal-keyed map; tightening is a follow-up, not Phase 0.
 import {
+  vuiControlPillClass,
+  vuiControlQuietClass,
+} from "../design/vuiChromeRecipes";
+
+import {
   vuiOpaquePanelClass,
   vuiOpaqueRowClass,
   vuiStateCoolInfoClass,
@@ -54,7 +59,7 @@ const styles: Record<string, string> = {
   agentTraceHeader:
     "agentTraceHeader min-w-0 max-w-full flex flex-wrap items-center justify-between gap-1.5",
   agentTraceLivePill:
-    `agentTraceLivePill min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)] ${vuiStateCoolInfoClass}`,
+    `agentTraceLivePill min-w-0 ${vuiControlPillClass} ${vuiStateCoolInfoClass}`,
   agentTraceMeta:
     "agentTraceMeta min-w-0 max-w-full flex flex-wrap items-center gap-1.5 text-[var(--fg-tertiary)] [&_strong]:text-[var(--fg-primary)]",
   agentTracePanel:
@@ -140,7 +145,7 @@ const styles: Record<string, string> = {
   compactList_warning:
     `compactList_warning min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto ${vuiStateWarningSoftClass}`,
   countPill:
-    "countPill min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+    `countPill min-w-0 ${vuiControlPillClass}`,
   emptyText:
     "emptyText min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   errorText:
@@ -200,11 +205,11 @@ const styles: Record<string, string> = {
   scoreStrip:
     "scoreStrip min-w-0 flex flex-wrap items-center gap-1.5",
   secondaryButton:
-    "secondaryButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
+    `secondaryButton min-w-0 ${vuiControlQuietClass}`,
   sessionButton:
-    "sessionButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
+    `sessionButton min-w-0 ${vuiControlQuietClass}`,
   sessionDeleteButton:
-    `sessionDeleteButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 ${vuiStateDangerSoftClass}`,
+    `sessionDeleteButton min-w-0 ${vuiControlQuietClass} ${vuiStateDangerSoftClass}`,
   sessionList:
     "sessionList min-w-0 max-w-full grid min-h-0 content-start gap-1 overflow-auto overflow-x-hidden",
   sessionRail:
@@ -219,7 +224,7 @@ const styles: Record<string, string> = {
   sourceBars:
     "sourceBars min-w-0",
   sourceToggleButton:
-    "sourceToggleButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
+    `sourceToggleButton min-w-0 ${vuiControlQuietClass}`,
   stageBody:
     "stageBody min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   stageCard:
@@ -251,9 +256,9 @@ const styles: Record<string, string> = {
   stageResultSummary:
     `stageResultSummary min-w-0 max-w-full ${vuiOpaquePanelClass} p-1.5`,
   stageSelectButton:
-    "stageSelectButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 grid gap-1 [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
+    `stageSelectButton min-w-0 ${vuiControlQuietClass} grid gap-1 [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full`,
   statePill:
-    "statePill min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+    `statePill min-w-0 ${vuiControlPillClass}`,
   state_active:
     `state_active min-w-0 ${vuiStateSelectedRowClass}`,
   state_agent:
@@ -368,11 +373,11 @@ const styles: Record<string, string> = {
   themeRank:
     "themeRank min-w-0",
   traceBackToBottomButton:
-    "traceBackToBottomButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
+    `traceBackToBottomButton min-w-0 ${vuiControlQuietClass}`,
   traceGhostButton:
-    "traceGhostButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
+    `traceGhostButton min-w-0 ${vuiControlQuietClass}`,
   workflowModeButton:
-    "workflowModeButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
+    `workflowModeButton min-w-0 ${vuiControlQuietClass}`,
   workflowModeButton_active:
     `workflowModeButton_active min-w-0 ${vuiStateSelectedRowClass}`,
   workflowModeControl:

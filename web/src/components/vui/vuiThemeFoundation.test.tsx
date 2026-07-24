@@ -183,6 +183,16 @@ describe("VUI dual-theme foundation", () => {
     expect(providerThemeSource).toContain(".vui-tone-danger");
   });
 
+  it("exports shared control chrome density recipes for style maps (Wave 3A)", () => {
+    const chromeSource = readFileSync(resolve(designRoot, "vuiChromeRecipes.ts"), "utf8");
+    expect(chromeSource).toContain("export const vuiControlQuietClass");
+    expect(chromeSource).toContain("export const vuiControlQuietChromeClass");
+    expect(chromeSource).toContain("export const vuiControlIconSmClass");
+    expect(chromeSource).toContain("export const vuiControlPillClass");
+    expect(chromeSource).toContain("min-h-[var(--vui-control-height-sm)]");
+    expect(chromeSource).toContain("bg-[var(--vui-control-muted)]");
+  });
+
   it("exports shared opaque surface recipes for route style maps", () => {
     const recipesSource = readFileSync(resolve(designRoot, "vuiSurfaceRecipes.ts"), "utf8");
     expect(recipesSource).toContain("export const vuiOpaquePanelClass");

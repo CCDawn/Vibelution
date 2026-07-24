@@ -1,4 +1,9 @@
 import {
+  vuiControlPillClass,
+  vuiControlQuietClass,
+} from "../design/vuiChromeRecipes";
+
+import {
   vuiGlassPanelClass,
   vuiOpaqueRowClass,
   vuiStateCoolInfoClass,
@@ -8,7 +13,7 @@ import {
 
 const styles = {
   gitBranchName: "vui-app-appshell gitBranchName min-w-0 [font-size:var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
-  gitChip: "vui-app-appshell gitChip min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+  gitChip: `vui-app-appshell gitChip min-w-0 ${vuiControlPillClass}`,
   gitCommitItem: `vui-app-appshell gitCommitItem min-w-0 ${vuiOpaqueRowClass} p-2`,
   gitCommitList: "vui-app-appshell gitCommitList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   gitCount: "vui-app-appshell gitCount min-w-0",
@@ -48,10 +53,10 @@ const styles = {
   status_thought: "vui-app-appshell status_thought min-w-0",
   status_warn: "vui-app-appshell status_warn min-w-0",
   status_warning: "vui-app-appshell status_warning min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
-  utilityButton: "vui-app-appshell utilityButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
+  utilityButton: `vui-app-appshell utilityButton min-w-0 ${vuiControlQuietClass}`,
   utilityButtonActive: `vui-app-appshell utilityButtonActive min-w-0 ${vuiStateSelectedRowClass}`,
   utilityButtonGrid: "vui-app-appshell utilityButtonGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
-  utilityFileButton: "vui-app-appshell utilityFileButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 grid [&_[data-slot=vui-button-content]]:w-full [&_[data-slot=vui-button-label]]:grid [&_[data-slot=vui-button-label]]:w-full [&_[data-slot=vui-button-label]]:grid-cols-[minmax(0,1fr)_auto] [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-2",
+  utilityFileButton: `vui-app-appshell utilityFileButton min-w-0 ${vuiControlQuietClass} grid [&_[data-slot=vui-button-content]]:w-full [&_[data-slot=vui-button-label]]:grid [&_[data-slot=vui-button-label]]:w-full [&_[data-slot=vui-button-label]]:grid-cols-[minmax(0,1fr)_auto] [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-2`,
   utilityFileButtonActive: `vui-app-appshell utilityFileButtonActive min-w-0 ${vuiStateSelectedRowClass} grid [&_[data-slot=vui-button-content]]:w-full [&_[data-slot=vui-button-label]]:grid [&_[data-slot=vui-button-label]]:w-full [&_[data-slot=vui-button-label]]:grid-cols-[minmax(0,1fr)_auto] [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-2`,
   utilityFileChildren: "vui-app-appshell utilityFileChildren min-w-0",
   utilityFileDir: "vui-app-appshell utilityFileDir min-w-0",
