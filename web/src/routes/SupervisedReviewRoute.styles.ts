@@ -3,12 +3,9 @@ import {
   vuiOpaqueRowClass,
 } from "../design/vuiSurfaceRecipes";
 
-const reviewPanelSurface =
-  ` shadow-none`;
-const reviewRowSurface =
-  "rounded-[var(--radius-control)] border border-vui-border-subtle bg-vui-surface-row";
-const reviewRowSurfaceSoft =
-  `${vuiOpaqueRowClass}`;
+const reviewPanelSurface = `${vuiFlatPanelClass} shadow-none`;
+const reviewRowSurface = vuiOpaqueRowClass;
+const reviewRowSurfaceSoft = vuiOpaqueRowClass;
 const reviewControlSurface =
   "rounded-[var(--radius-control)] border border-vui-border-subtle bg-vui-control-muted transition hover:border-[color-mix(in_srgb,var(--accent-warm)_28%,transparent)] hover:bg-vui-control-muted-hover";
 const reviewControlButton =
@@ -67,7 +64,7 @@ const styles = {
     "border-[color-mix(in_srgb,var(--state-success)_20%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_12%,transparent)] text-[var(--accent-warm-2)]",
   statusNegative:
     "border-[color-mix(in_srgb,var(--fg-tertiary)_20%,transparent)] bg-[color-mix(in_srgb,var(--fg-tertiary)_12%,transparent)] text-[var(--accent-warm-2)]",
-  statusDiscard: `border-[color-mix(in_srgb,var(--vui-surface-row)_18%,transparent)] ${vuiOpaqueRowClass} text-[var(--fg-secondary)]`,
+  statusDiscard: `border-[var(--vui-surface-row)] ${vuiOpaqueRowClass} text-[var(--fg-secondary)]`,
   queueControls: "flex flex-col gap-2.5",
   filterSegmented: "flex flex-wrap items-center gap-1.5",
   decisionSegmented: "flex flex-wrap items-center gap-1.5",

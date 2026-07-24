@@ -5,7 +5,7 @@ import {
 
 const routeClass = "grid h-full min-h-0 min-w-0 max-w-full grid-rows-[auto_minmax(0,1fr)] overflow-x-hidden";
 const panelSurface = `${vuiFlatPanelClass}`;
-const headerClass = "mx-2 mt-1.5 min-w-0 border-[color-mix(in_srgb,var(--vui-border-subtle)_78%,transparent)] bg-[var(--vui-gradient-route-soft),color-mix(in_srgb,var(--vui-surface-panel)_70%,transparent)]";
+const headerClass = "mx-2 mt-1.5 min-w-0 border-[color-mix(in_srgb,var(--vui-border-subtle)_78%,transparent)] bg-[var(--vui-gradient-route-soft),var(--vui-surface-panel)]";
 const headerActionsClass = "flex flex-wrap items-center justify-end gap-2";
 const secondaryButtonClass = "inline-flex w-fit max-w-full min-h-8 items-center justify-center gap-[7px] rounded-[var(--radius-control)] border border-vui-border-soft bg-[color-mix(in_srgb,var(--vui-control-muted)_72%,transparent)] px-2.5 py-1.5 [font-size:var(--vui-font-xs)] text-vui-fg-secondary hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-vui-fg-primary";
 const workspaceClass = "grid min-h-0 min-w-0 max-w-full grid-cols-[minmax(0,1.2fr)_clamp(260px,28vw,420px)] items-start justify-start gap-2 overflow-y-auto overflow-x-hidden px-2 pb-2 pt-1.5 max-[760px]:grid-cols-[minmax(0,1fr)]";
