@@ -90,6 +90,18 @@ def _runtime_provider(provider_id: str, provider: dict[str, Any]) -> dict[str, A
     }
 
 
+def _is_openai_responses_provider(provider: dict[str, Any]) -> bool:
+    service_class = str(provider.get("service_class") or "").strip().lower()
+    driver = str(provider.get("driver") or "").strip().lower()
+    default_wire = str(provider.get("protocols", {}).get("default") or "").strip().lower().replace("-", "_")
+    model_wire = str(provider.get("wire_protocol") or "").strip().lower().replace("-", "_")
+    return (
+        service_class in {"official_api", "aggregator", "relay"}
+        and driver == "openai"
+        and (default_wire == "responses" or model_wire == "responses")
+    )
+
+
 def _default_v2_prompt_cache(
     provider: dict[str, Any],
     raw_model: dict[str, Any],
@@ -97,16 +109,31 @@ def _default_v2_prompt_cache(
 ) -> dict[str, str] | None:
     if "prompt_cache" in raw_model or "prompt_cache" in defaults:
         return None
-    service_class = str(provider.get("service_class") or "").strip().lower()
-    driver = str(provider.get("driver") or "").strip().lower()
-    default_wire = str(provider.get("protocols", {}).get("default") or "").strip().lower().replace("-", "_")
-    if (
-        service_class in {"official_api", "aggregator", "relay"}
-        and driver == "openai"
-        and default_wire == "responses"
-    ):
+    if _is_openai_responses_provider(provider):
         return {"mode": "automatic"}
     return None
+
+
+def _default_v2_reasoning_effort_defaults(
+    provider: dict[str, Any],
+    raw_model: dict[str, Any],
+    defaults: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Protocol contract for OpenAI Responses pins (not model-name heuristics).
+
+    Bulk pin previously left defaults empty, so new Agents bound to those models
+    had no 思考强度 options. Mirror prompt_cache: declare a stable operator
+    contract for Responses + openai driver when none is present.
+    """
+    if defaults.get("reasoning_effort_values") or raw_model.get("reasoning_effort_values"):
+        return None
+    if not _is_openai_responses_provider(provider):
+        return None
+    return {
+        "reasoning_effort_values": ["low", "medium", "high"],
+        "default_reasoning_effort": "medium",
+        "reasoning_effort_adapter": "reasoning_object",
+    }
 
 
 def project_v2_llm_for_runtime(public_config: dict[str, Any]) -> dict[str, Any]:
@@ -169,6 +196,10 @@ def project_v2_llm_for_runtime(public_config: dict[str, Any]) -> dict[str, Any]:
             prompt_cache_default = _default_v2_prompt_cache(raw_provider, raw_model, defaults)
             if prompt_cache_default is not None:
                 runtime_model["prompt_cache"] = prompt_cache_default
+            reasoning_defaults = _default_v2_reasoning_effort_defaults(raw_provider, raw_model, defaults)
+            if reasoning_defaults is not None:
+                for key, value in reasoning_defaults.items():
+                    runtime_model.setdefault(key, value)
             runtime_models[model_ref] = runtime_model
     runtime_profiles: dict[str, dict[str, Any]] = {}
     aliases = llm.get("model_aliases", {}) if isinstance(llm.get("model_aliases"), dict) else {}

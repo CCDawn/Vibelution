@@ -154,6 +154,25 @@ def preview_provider_route_replacement(
     }
 
 
+def _with_responses_reasoning_pin_defaults(
+    provider: dict[str, Any],
+    model_entry: dict[str, Any],
+) -> dict[str, Any]:
+    """Ensure OpenAI Responses pins carry a reasoning-effort protocol contract."""
+    from config.llm_projection import _default_v2_reasoning_effort_defaults
+
+    existing_defaults = model_entry.get("defaults") if isinstance(model_entry.get("defaults"), dict) else {}
+    synthetic = _default_v2_reasoning_effort_defaults(provider, model_entry, existing_defaults)
+    if not synthetic:
+        return model_entry
+    defaults = copy.deepcopy(existing_defaults)
+    for key, value in synthetic.items():
+        defaults.setdefault(key, value)
+    updated_entry = copy.deepcopy(model_entry)
+    updated_entry["defaults"] = defaults
+    return updated_entry
+
+
 def pin_llm_model(
     public_config: dict[str, Any],
     provider_id: str,
@@ -185,14 +204,18 @@ def pin_llm_model(
                 for override_key, override_value in resolved_overrides.items():
                     if override_key not in existing:
                         existing[override_key] = override_value
-            models[key] = existing
+            # Heal older Responses pins that never received a reasoning contract.
+            models[key] = _with_responses_reasoning_pin_defaults(provider, existing)
         return updated
-    models[key] = {
-        "upstream_id": str(upstream_id),
-        "label": str(label or upstream_id),
-        "enabled": True,
-        **resolved_overrides,
-    }
+    models[key] = _with_responses_reasoning_pin_defaults(
+        provider,
+        {
+            "upstream_id": str(upstream_id),
+            "label": str(label or upstream_id),
+            "enabled": True,
+            **resolved_overrides,
+        },
+    )
     return updated
 
 
