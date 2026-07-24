@@ -876,6 +876,19 @@ export function ChatCodingRoute() {
       predicate: (query) => isForeignSessionDetailQueryKey(query.queryKey, activeId),
     });
   }, [activeSessionId, queryClient]);
+  // Clear stale composer errors for the newly selected session after a switch.
+  useEffect(() => {
+    const activeId = String(activeSessionId || "").trim();
+    if (!activeId) {
+      return;
+    }
+    setSessionComposerErrors((current) => {
+      if (!current[activeId]) {
+        return current;
+      }
+      return { ...current, [activeId]: "" };
+    });
+  }, [activeSessionId]);
   const sessionDetailQuery = useQuery<SessionDetail>({
     queryKey: queryKeys.session(activeSessionId ?? "none"),
     enabled: Boolean(activeSessionId),
@@ -1840,12 +1853,22 @@ export function ChatCodingRoute() {
     setMentalModelEnabledForNextTurn,
   });
   const sessionLlmOptions = sessionLlmOptionsQuery.data;
-  const sessionLlmControl = activeSessionId ? {
-    model: sessionLlmOptions?.model ?? null,
+  const sessionLlmControl = activeSessionId && sessionLlmOptions?.model ? {
+    model: sessionLlmOptions.model,
+    sessionId: activeSessionId,
     currentReasoningEffort: sessionLlmOptions?.currentReasoningEffort || detail?.reasoningEffort || "",
-    disabled: sessionBusy || sessionLlmOptionsQuery.isLoading,
+    // Do not allow switching effort while options failed/loading for this session.
+    disabled: (
+      sessionBusy
+      || sessionLlmOptionsQuery.isLoading
+      || sessionLlmOptionsQuery.isError
+      || !sessionLlmOptions?.model
+    ),
     pending: sessionReasoningEffortMutation.isPending,
     onReasoningEffortChange: (reasoningEffort: string) => {
+      if (!activeSessionId || sessionLlmOptionsQuery.isError) {
+        return;
+      }
       sessionReasoningEffortMutation.mutate({
         sessionId: activeSessionId,
         reasoningEffort,

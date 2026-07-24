@@ -1343,6 +1343,12 @@ def update_session_reasoning_effort(
 ) -> dict[str, Any]:
     s = _service()
     normalized_session_id = str(session_id or "").strip()
+    # Materialize/recover chat_state row for agent-directory or workspace-backed sessions.
+    if not s._ensure_session_conversation_record(
+        normalized_session_id,
+        source="session.reasoning_effort.update",
+    ):
+        raise s.SessionNotFoundError(f"Session not found: {normalized_session_id}")
     selected = s._session_fixed_model_choice(normalized_session_id)
     supported_efforts = {
         s.normalize_reasoning_effort(value)

@@ -15,6 +15,8 @@ import styles from "./ConversationInferenceControl.styles";
 
 type ConversationInferenceControlProps = {
   model: SessionLlmModelOption | null;
+  /** Active session id — menu closes when this changes after a session switch. */
+  sessionId?: string | null;
   currentReasoningEffort: string;
   disabled: boolean;
   pending: boolean;
@@ -96,6 +98,7 @@ export function placeInferenceMenu(
 
 export function ConversationInferenceControl({
   model,
+  sessionId = "",
   currentReasoningEffort,
   disabled,
   pending,
@@ -110,6 +113,11 @@ export function ConversationInferenceControl({
     () => resolveConversationInferenceEffort(model, currentReasoningEffort),
     [currentReasoningEffort, model],
   );
+
+  // Avoid applying effort clicks from a menu opened on a previous session.
+  useEffect(() => {
+    setOpen(false);
+  }, [sessionId, model?.modelRef, model?.modelId]);
 
   useLayoutEffect(() => {
     if (!open || !triggerRef.current) return;

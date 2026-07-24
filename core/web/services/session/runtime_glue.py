@@ -1070,6 +1070,11 @@ def _initial_session_reasoning_effort(agent: dict[str, Any] | None, model: dict[
 def _initialized_session_reasoning_effort(session_id: str) -> tuple[bool, str]:
     s = _service()
     normalized_session_id = str(session_id or "").strip()
+    if not s._ensure_session_conversation_record(
+        normalized_session_id,
+        source="session.reasoning_effort.snapshot",
+    ):
+        raise s.SessionNotFoundError(f"Session not found: {normalized_session_id}")
     with s._CHAT_STATE_LOCK:
         payload = s.load_chat_state(s.PROJECT_ROOT)
         conversation = s._find_conversation_entry(payload, normalized_session_id)
