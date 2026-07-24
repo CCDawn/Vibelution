@@ -17,8 +17,8 @@ const designRoot = resolve(import.meta.dirname);
 
 describe("Wave 2D composition demo paths", () => {
   it("Agents list row keys use dense/state recipes without structure wash", () => {
-    expect(agentsStyles.agentRow).toContain("!bg-[var(--vui-surface-row)]");
-    expect(agentsStyles.agentRow).toContain("hover:bg-[var(--vui-surface-row-hover)]");
+    expect(agentsStyles.agentRow).toMatch(/!bg-vui-surface-row|!bg-\[var\(--vui-surface-row\)\]/);
+    expect(agentsStyles.agentRow).toMatch(/hover:bg-vui-surface-row-hover|hover:bg-\[var\(--vui-surface-row-hover\)\]/);
     expect(agentsStyles.agentRowActive).toContain(
       "bg-[color-mix(in_srgb,var(--accent-warm)_9%,var(--vui-surface-row))]",
     );
@@ -35,7 +35,7 @@ describe("Wave 2D composition demo paths", () => {
   });
 
   it("Chat direct session index item uses dense row + selected state recipe", () => {
-    expect(sessionStyles.sessionItem).toContain("!bg-[var(--vui-surface-row)]");
+    expect(sessionStyles.sessionItem).toMatch(/!bg-vui-surface-row|!bg-\[var\(--vui-surface-row\)\]/);
     expect(sessionStyles.sessionItemActive).toContain(
       "bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
     );

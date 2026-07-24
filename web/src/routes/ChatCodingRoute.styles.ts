@@ -22,6 +22,7 @@ import {
   vuiStateSuccessSoftClass,
   vuiStateWarmSoftClass,
   vuiStateWarningSoftClass,
+  vuiChatFillClass,
   vuiWorkspaceFillClass,
 } from "../design/vuiSurfaceRecipes";
 
@@ -230,11 +231,11 @@ const styles: Record<string, string> = {
   cacheDonutTrack:
     "vui-routes-chatcodingroute cacheDonutTrack min-w-0 fill-none stroke-[color-mix(in_srgb,var(--vui-border-subtle)_82%,transparent)] [stroke-linecap:round] [vector-effect:non-scaling-stroke]",
   centerPane:
-    "vui-routes-chatcodingroute centerPane min-w-0 grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-[var(--vui-surface-chat)] [grid-column:3] [grid-row:1]",
+    `vui-routes-chatcodingroute centerPane min-w-0 grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden ${vuiChatFillClass} [grid-column:3] [grid-row:1]`,
   centerPaneOverlay:
     "vui-routes-chatcodingroute centerPaneOverlay [grid-column:1] [grid-row:1]",
   centerSurface:
-    "vui-routes-chatcodingroute centerSurface grid h-full min-h-0 overflow-hidden !bg-[var(--vui-surface-chat)]",
+    `vui-routes-chatcodingroute centerSurface grid h-full min-h-0 overflow-hidden ${vuiChatFillClass}`,
   chatReturnLink:
     "vui-routes-chatcodingroute chatReturnLink min-w-0 [&_span]:truncate",
   childTopLevelSessionItem:
@@ -622,7 +623,7 @@ layout:
   overlayBackdrop:
     "vui-routes-chatcodingroute overlayBackdrop fixed inset-0 z-30 border-0 bg-black/35",
   overlayPane:
-    "vui-routes-chatcodingroute overlayPane fixed inset-y-[var(--shell-topbar-height)] z-40 w-[min(86vw,320px)] shadow-[var(--vui-elevation-panel)]",
+    `vui-routes-chatcodingroute overlayPane fixed inset-y-[var(--shell-topbar-height)] z-40 w-[min(86vw,320px)] ${vuiRailFillClass} shadow-[var(--vui-elevation-panel)]`,
   overlayPaneControls:
     "vui-routes-chatcodingroute overlayPaneControls ml-auto flex min-w-0 items-center gap-1",
   overlayPaneLeft:

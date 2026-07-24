@@ -195,6 +195,10 @@ describe("VUI dual-theme foundation", () => {
     expect(recipesSource).toContain("export const vuiRailFillClass");
     expect(recipesSource).toContain("export const vuiToolbarFillClass");
     expect(recipesSource).toContain("export const vuiInsetFillClass");
+    expect(recipesSource).toContain("export const vuiChatFillClass");
+    expect(recipesSource).toContain("!bg-vui-surface-rail");
+    expect(recipesSource).toContain("!bg-vui-surface-panel");
+    expect(recipesSource).toContain("!bg-vui-surface-chat");
     expect(recipesSource).toContain("export const vuiStateSelectedRowClass");
     expect(recipesSource).toContain("export const vuiStateSelectedRowFillClass");
     expect(recipesSource).toContain("export const vuiStateSelectedWarmRowClass");
@@ -207,12 +211,11 @@ describe("VUI dual-theme foundation", () => {
     expect(recipesSource).toContain("export const vuiStateDangerSoftClass");
     expect(recipesSource).toContain("export const vuiStateSuccessSoftClass");
     expect(recipesSource).toContain("export const vuiStateWarmSoftClass");
-    expect(recipesSource).toContain("!bg-[var(--vui-surface-panel)]");
-    expect(recipesSource).toContain("!bg-[var(--vui-surface-row)]");
-    expect(recipesSource).toContain("!bg-[var(--vui-surface-workspace)]");
-    expect(recipesSource).toContain("hover:bg-[var(--vui-surface-row-hover)]");
+    expect(recipesSource).toContain("!bg-vui-surface-row");
+    expect(recipesSource).toContain("!bg-vui-surface-workspace");
+    expect(recipesSource).toContain("hover:bg-vui-surface-row-hover");
     expect(recipesSource).toContain("shadow-[var(--vui-elevation-1)]");
-    expect(recipesSource).toContain("bg-[var(--vui-surface-glass)]");
+    expect(recipesSource).toContain("bg-vui-surface-glass");
     expect(recipesSource).toContain(
       "bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
     );

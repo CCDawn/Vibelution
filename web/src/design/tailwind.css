@@ -4,6 +4,14 @@
 @source "../app/**/*.{ts,tsx}";
 @source "../agent-thread/**/*.{ts,tsx}";
 @source "../components/**/*.{ts,tsx}";
+/*
+ * Shared surface/state recipes are imported as class constants. Tailwind cannot
+ * follow those imports, so this module must be an explicit content source or
+ * fills like !bg-[var(--vui-surface-rail)] never enter the CSS and wallpaper
+ * bleeds through Chat rails / panels.
+ */
+@source "./vuiSurfaceRecipes.ts";
+@source "./vuiSurfaceAlphaPolicy.ts";
 
 /*
  * Chat is the primary workbench surface and is kept in the shell CSS entry
@@ -44,6 +52,8 @@
   --color-vui-surface-card: var(--vui-surface-card);
   --color-vui-surface-rail: var(--vui-surface-rail);
   --color-vui-surface-raised: var(--vui-surface-raised);
+  --color-vui-surface-chat: var(--vui-surface-chat);
+  --color-vui-surface-chat-panel: var(--vui-surface-chat-panel);
   --color-vui-surface-glass: var(--vui-surface-glass);
   --color-vui-surface-toolbar: var(--vui-surface-toolbar);
   --color-vui-surface-row: var(--vui-surface-row);
