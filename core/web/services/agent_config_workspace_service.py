@@ -10,7 +10,6 @@ from datetime import datetime, timezone
 from time import perf_counter
 from typing import Any, Callable, Iterable
 
-from core.llm.reasoning_effort import GPT_REASONING_EFFORT_VALUES, model_supports_gpt_reasoning_effort
 from core.orchestration.context_engine import list_agent_runs_for_agents
 
 from . import agent_role_tool_profile_service, chat_room_service, config_service
@@ -1914,15 +1913,24 @@ _REASONING_EFFORT_LABELS = {
 }
 
 
-def _model_reasoning_effort_contract(option: dict[str, Any], *, supported: bool) -> tuple[list[str], str, list[dict[str, str]]]:
+def _model_reasoning_effort_contract(option: dict[str, Any], *, supported: bool = False) -> tuple[list[str], str, list[dict[str, str]]]:
+    """Project reasoning effort options from explicit protocol fields only.
+
+    Name heuristics must not invent values (confirmed D1/D2). ``supported`` is
+    retained for call-site compatibility and ignored.
+    """
+    del supported  # protocol contract only; never invent values from model name
     details = option.get("details") if isinstance(option.get("details"), dict) else {}
     capabilities = details.get("capabilities") if isinstance(details.get("capabilities"), dict) else {}
+    # Also accept top-level projection fields from candidate service.
     raw_values = (
         details.get("reasoning_effort_values")
         or details.get("reasoningEffortValues")
         or capabilities.get("reasoning_effort_values")
         or capabilities.get("reasoningEffortValues")
-        or (GPT_REASONING_EFFORT_VALUES if supported else ())
+        or option.get("reasoning_effort_values")
+        or option.get("reasoningEffortValues")
+        or ()
     )
     values: list[str] = []
     if isinstance(raw_values, (list, tuple)):
@@ -1941,6 +1949,8 @@ def _model_reasoning_effort_contract(option: dict[str, Any], *, supported: bool)
         details.get("default_reasoning_effort")
         or details.get("defaultReasoningEffort")
         or details.get("reasoning_effort")
+        or option.get("default_reasoning_effort")
+        or option.get("defaultReasoningEffort")
         or ""
     ).strip().lower()
     default = requested_default if requested_default in values else "medium" if "medium" in values else (values[0] if values else "")
@@ -1975,20 +1985,8 @@ def _agent_model_choices(model_options: list[Any]) -> list[dict[str, Any]]:
         provider_kind = str(option.get("provider_kind") or provider.get("kind") or "").strip()
         api_key_configured = bool(option.get("api_key_configured", False))
         requires_api_key = bool(provider.get("requires_api_key", provider_kind != "local"))
-        supports_reasoning_effort = model_supports_gpt_reasoning_effort(
-            model=option.get("model"),
-            provider_kind=(
-                provider_kind
-                if provider_kind in {"openai", "openai_compatible", "relay", "azure"}
-                else provider.get("service_class") or provider.get("driver") or provider_kind
-            ),
-            transport=option.get("transport"),
-            compat_mode=provider.get("compat_mode"),
-            provider_api=option.get("resolved_provider_api") or option.get("provider_api") or provider.get("api"),
-        )
         reasoning_effort_values, default_reasoning_effort, reasoning_effort_options = _model_reasoning_effort_contract(
             option,
-            supported=supports_reasoning_effort,
         )
         supports_reasoning_effort = bool(reasoning_effort_values)
         choice = {

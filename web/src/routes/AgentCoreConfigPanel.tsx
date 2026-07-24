@@ -33,6 +33,8 @@ export type AgentCoreConfigLlmSlotView = {
   candidates: AgentModelChoice[];
   supportsReasoningEffort: boolean;
   reasoningEffort: string;
+  /** Protocol contract options for the bound model; empty when unsupported. */
+  reasoningEffortOptions: Array<{ value: string; label: string; description?: string }>;
 };
 
 export type AgentCoreConfigHealthView = {
@@ -58,6 +60,8 @@ export type AgentCoreConfigPanelCopy = AgentContextCompressionPanelCopy & {
   reasoningEffortHigh: string;
   reasoningEffortLow: string;
   reasoningEffortMedium: string;
+  /** Optional fallback label builder when option.label is empty. */
+  reasoningEffortOptionLabel?: (value: string) => string;
   requiredSlot: string;
   resetConfig: string;
   saveConfig: string;
@@ -104,12 +108,26 @@ function healthGuideToneClass(tone: AgentCoreConfigHealthView["tone"]) {
   return styles[toneKey] || styles.healthGuide_info;
 }
 
+function fallbackReasoningEffortLabel(copy: AgentCoreConfigPanelCopy, value: string) {
+  switch (value) {
+    case "low":
+      return copy.reasoningEffortLow;
+    case "medium":
+      return copy.reasoningEffortMedium;
+    case "high":
+      return copy.reasoningEffortHigh;
+    default:
+      return value;
+  }
+}
+
 function AgentLlmSlotField({
   slot,
   selectedModelId,
   candidates,
   supportsReasoningEffort,
   reasoningEffort,
+  reasoningEffortOptions,
   copy,
   lang,
   pending,
@@ -127,6 +145,7 @@ function AgentLlmSlotField({
   candidates: AgentModelChoice[];
   supportsReasoningEffort: boolean;
   reasoningEffort: string;
+  reasoningEffortOptions: AgentCoreConfigLlmSlotView["reasoningEffortOptions"];
   copy: AgentCoreConfigPanelCopy;
   lang: "zh" | "en";
   pending: boolean;
@@ -171,12 +190,17 @@ function AgentLlmSlotField({
           {copy.inheritDialogueModel}
         </VButton>
       ) : null}
-      {supportsReasoningEffort ? (
+      {supportsReasoningEffort && reasoningEffortOptions.length > 0 ? (
         <VNativeSelect value={reasoningEffort} aria-label={`${slot.label} ${copy.reasoningEffort}`} onChange={(event) => onReasoningEffortChange(slot.slot, event.target.value)}>
           <option value="">{copy.reasoningEffort}: {copy.reasoningEffortDefault}</option>
-          <option value="low">{copy.reasoningEffort}: {copy.reasoningEffortLow}</option>
-          <option value="medium">{copy.reasoningEffort}: {copy.reasoningEffortMedium}</option>
-          <option value="high">{copy.reasoningEffort}: {copy.reasoningEffortHigh}</option>
+          {reasoningEffortOptions.map((option) => {
+            const label = option.label || fallbackReasoningEffortLabel(copy, option.value);
+            return (
+              <option key={option.value} value={option.value}>
+                {copy.reasoningEffort}: {label}
+              </option>
+            );
+          })}
         </VNativeSelect>
       ) : null}
     </section>

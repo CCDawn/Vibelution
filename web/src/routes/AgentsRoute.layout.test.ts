@@ -872,9 +872,10 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("metadata.llmReasoningEffort = pruned");
     expect(routeSource).toContain("pruneAgentReasoningEffortBySlot");
     expect(coreConfigPanelSource).toContain("copy.reasoningEffort");
-    expect(routeSource).toContain("reasoningEffort: normalizeAgentReasoningEffort(configDraft.reasoningEffortBySlot[slot.slot])");
+    expect(routeSource).toContain("reasoningEffortOptions");
+    expect(routeSource).toContain("agentModelReasoningEffortValues");
     expect(coreConfigPanelSource).toContain("value={reasoningEffort}");
-    expect(coreConfigPanelSource).toContain("<option value=\"high\">{copy.reasoningEffort}: {copy.reasoningEffortHigh}</option>");
+    expect(coreConfigPanelSource).toContain("reasoningEffortOptions.map");
   });
 
   it("guides Agent creation through defaults, provider-model linkage, and a final review", () => {

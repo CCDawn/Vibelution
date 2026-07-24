@@ -17,7 +17,6 @@ from config.models import LLMProfile, PromptCacheConfig
 
 from .discovery import discover_model
 from .reasoning_effort import (
-    model_supports_gpt_reasoning_effort,
     normalize_reasoning_effort,
     resolve_reasoning_effort_request,
 )
@@ -270,13 +269,16 @@ def _apply_agent_reasoning_effort_override(
     effort = normalize_reasoning_effort(effort_by_slot.get(slot))
     if not effort:
         return
-    if not model_supports_gpt_reasoning_effort(
-        model=profile.model,
-        provider_kind=getattr(provider, "kind", ""),
-        transport=profile.transport,
-        compat_mode=getattr(provider, "compat_mode", ""),
-        provider_api=getattr(provider, "api", ""),
-    ):
+    # Protocol contract only — do not use model-name heuristics (confirmed D2).
+    allowed_values = {
+        normalize_reasoning_effort(value)
+        for value in list(getattr(profile, "reasoning_effort_values", None) or [])
+        if normalize_reasoning_effort(value)
+    }
+    adapter = str(getattr(profile, "reasoning_effort_adapter", "") or "none").strip().lower()
+    if not allowed_values or adapter in {"", "none"}:
+        return
+    if effort not in allowed_values:
         return
     profile.reasoning_effort = effort
 

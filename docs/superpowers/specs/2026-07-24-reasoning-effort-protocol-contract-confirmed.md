@@ -4,7 +4,7 @@
 > **范围：** Chat Composer / Agent 思考强度 / Config 模型协议合同 / 中转站 / runtime 注入
 > **关联设计：** `2026-07-13-agent-provider-chat-composer-design.md` §4 / §6.3 / §8.2 / §10.3
 > **调研笔记：** `Agent论文/search-results/2026-07-24-opencode-hermes-reasoning-effort-config.md`
-> **实现状态：** 需求与任务边界已锁定；代码尚未按本文件改动
+> **实现状态：** T1 / T2 / T3 / T5（promotion 已符合 R1）已落地部分代码；T4 既有门闩保留；T6–T9 待续
 
 ## 1. 一句话
 

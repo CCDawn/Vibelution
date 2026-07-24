@@ -574,15 +574,44 @@ function agentLlmSlots(workspace: AgentConfigWorkspace | undefined): AgentLlmSlo
   return workspace?.agentLlmSlots?.length ? workspace.agentLlmSlots : FALLBACK_AGENT_LLM_SLOTS;
 }
 
-const AGENT_REASONING_EFFORT_VALUES = ["low", "medium", "high"] as const;
+/** Known protocol effort tokens; UI options still come from model contract only. */
+const AGENT_REASONING_EFFORT_VALUES = [
+  "none",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+  "ultra",
+  "off",
+  "on",
+] as const;
 
-function normalizeAgentReasoningEffort(value: unknown) {
+function normalizeAgentReasoningEffort(value: unknown, allowed?: readonly string[] | null) {
   const normalized = String(value ?? "").trim().toLowerCase();
-  return AGENT_REASONING_EFFORT_VALUES.includes(normalized as typeof AGENT_REASONING_EFFORT_VALUES[number]) ? normalized : "";
+  if (!normalized) return "";
+  if (allowed && allowed.length > 0) {
+    return allowed.includes(normalized) ? normalized : "";
+  }
+  return AGENT_REASONING_EFFORT_VALUES.includes(normalized as typeof AGENT_REASONING_EFFORT_VALUES[number])
+    ? normalized
+    : "";
+}
+
+function agentModelReasoningEffortValues(model: AgentModelChoice | null | undefined): string[] {
+  const values = Array.isArray(model?.reasoningEffortValues) ? model.reasoningEffortValues : [];
+  return values
+    .map((value) => String(value || "").trim().toLowerCase())
+    .filter(Boolean);
 }
 
 function agentModelSupportsReasoningEffort(model: AgentModelChoice | null | undefined) {
-  return Boolean((model as Record<string, unknown> | null | undefined)?.supportsReasoningEffort);
+  if ((model as Record<string, unknown> | null | undefined)?.supportsReasoningEffort === false) {
+    return false;
+  }
+  return agentModelReasoningEffortValues(model).length > 0
+    || Boolean((model as Record<string, unknown> | null | undefined)?.supportsReasoningEffort);
 }
 
 function agentModelById(models: AgentModelChoice[] | null | undefined, modelId: string) {
@@ -662,7 +691,11 @@ function pruneAgentReasoningEffortBySlot(
         const slotKey = slot as keyof AgentLlmBindings;
         const modelId = String(normalizedBindings[slotKey]?.modelId || "").trim();
         const model = agentModelById(models, modelId);
-        return [slot, agentModelSupportsReasoningEffort(model) ? normalizeAgentReasoningEffort(effort) : ""];
+        const allowed = agentModelReasoningEffortValues(model);
+        if (!agentModelSupportsReasoningEffort(model) || allowed.length === 0) {
+          return [slot, ""];
+        }
+        return [slot, normalizeAgentReasoningEffort(effort, allowed)];
       })
       .filter(([slot, effort]) => slot && effort),
   );
@@ -3656,12 +3689,24 @@ export function AgentsRoute() {
     () => llmSlots.map((slot) => {
       const selectedModelId = agentLlmSlotModelId(configDraft.llmBindings, slot);
       const selectedModel = agentModelById(workspace?.agentModelChoices ?? [], selectedModelId);
+      const reasoningEffortValues = agentModelReasoningEffortValues(selectedModel);
+      const reasoningEffortOptions = Array.isArray(selectedModel?.reasoningEffortOptions)
+        ? selectedModel.reasoningEffortOptions
+        : reasoningEffortValues.map((value) => ({
+          value,
+          label: value,
+          description: "",
+        }));
       return {
         slot,
         selectedModelId,
         candidates: workspace?.agentModelChoices ?? [],
         supportsReasoningEffort: agentModelSupportsReasoningEffort(selectedModel),
-        reasoningEffort: normalizeAgentReasoningEffort(configDraft.reasoningEffortBySlot[slot.slot]),
+        reasoningEffort: normalizeAgentReasoningEffort(
+          configDraft.reasoningEffortBySlot[slot.slot],
+          reasoningEffortValues,
+        ),
+        reasoningEffortOptions,
       };
     }),
     [configDraft.llmBindings, configDraft.reasoningEffortBySlot, lang, llmSlots, workspace?.agentModelChoices],
