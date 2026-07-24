@@ -572,6 +572,16 @@ def _set_session_llm_status_live_output(
             en=f"Retrying the model connection...\n{attempt_line}; reason: {reason_line}. This turn is still running.",
         )
         stage = "model_retry"
+        feedback_name = "model_retry"
+    elif status_key == "retry_recovered":
+        content = s.text_for(
+            language,
+            zh="模型连接已恢复，本轮继续完成。",
+            en="The model connection recovered and this turn is continuing.",
+        )
+        stage = "model_retry"
+        feedback_status = "recovered"
+        feedback_name = "model_retry"
     elif status_key == "transport_degraded":
         content = s.text_for(
             language,
@@ -642,7 +652,7 @@ def _set_session_llm_status_live_output(
         capture.note_status_event(
             status_key or stage,
             content,
-            status="failed" if status_key == "failed" else "running",
+            status=feedback_status if status_key != "failed" else "failed",
             name=feedback_name,
         )
         for existing in capture.feedback_events:
@@ -655,7 +665,7 @@ def _set_session_llm_status_live_output(
         "stage": stage,
         "feedback_events": feedback_events,
     }
-    if not status_key.startswith("transport_"):
+    if not status_key.startswith("transport_") and status_key != "retry_recovered":
         live_output_fields["content"] = content
     s._set_session_live_output(session_id, **live_output_fields)
     s._touch_chat_turn_work_run(session_id=session_id, turn_id=turn_id, stage=stage, summary=s.trim_lines(content, max_lines=1))
@@ -663,7 +673,13 @@ def _set_session_llm_status_live_output(
         session_id,
         f"llm_status_{status_key}",
         turn_id=turn_id,
-        outcome="running" if status_key != "failed" else "failed",
+        outcome=(
+            "failed"
+            if status_key == "failed"
+            else "recovered"
+            if feedback_status == "recovered"
+            else "running"
+        ),
         fields={
             "llmStatus": status_key,
             "attempt": attempt,
