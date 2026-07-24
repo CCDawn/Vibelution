@@ -1,11 +1,15 @@
 import {
+  vuiControlPillClass,
+} from "../design/vuiChromeRecipes";
+
+import {
   vuiOpaqueRowClass,
   vuiStateSelectedRowClass,
 } from "../design/vuiSurfaceRecipes";
 
 const styles = {
   channelPill:
-    "channelPill min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+    `channelPill min-w-0 ${vuiControlPillClass}`,
   compactItemMeta:
     "compactItemMeta flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] [&>span]:min-w-0 [&>span]:truncate",
   compactItemPrimary:
@@ -36,7 +40,7 @@ const styles = {
   manageItemPrimary: `manageItemPrimary min-w-0 ${vuiOpaqueRowClass} p-2 ${vuiStateSelectedRowClass}`,
   manageItemSummary: `manageItemSummary min-w-0 line-clamp-2 ${vuiOpaqueRowClass} p-2`,
   statusPill:
-    "statusPill min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+    `statusPill min-w-0 ${vuiControlPillClass}`,
 } as const;
 
 export default styles;

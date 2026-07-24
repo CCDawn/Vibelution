@@ -1,4 +1,9 @@
 import {
+  vuiControlPillClass,
+  vuiControlQuietClass,
+} from "../design/vuiChromeRecipes";
+
+import {
   vuiFlatPanelClass,
   vuiOpaqueRowClass,
 } from "../design/vuiSurfaceRecipes";
@@ -6,9 +11,9 @@ import {
 const styles = {
   copyNotice: `copyNotice min-w-0 inline-flex w-fit max-w-full items-center gap-1.5 ${vuiOpaqueRowClass} p-1.5 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-secondary)] [&>span]:min-w-0 [&>span]:break-words`,
   countPill:
-    "countPill min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+    `countPill min-w-0 ${vuiControlPillClass}`,
   detailActionButton:
-    "detailActionButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
+    `detailActionButton min-w-0 ${vuiControlQuietClass}`,
   detailActions: `detailActions min-w-0 flex w-fit max-w-full flex-wrap items-center gap-1.5 ${vuiOpaqueRowClass} p-1.5`,
   detailHeader:
     "detailHeader min-w-0 flex flex-wrap items-start justify-between gap-2 px-1 py-0.5 [&>div]:min-w-0 [&_h2]:min-w-0 [&_h2]:break-words [&_p]:min-w-0 [&_p]:line-clamp-2 [&_p]:break-words",
@@ -29,7 +34,7 @@ const styles = {
   rawPanel: `rawPanel min-w-0 ${vuiFlatPanelClass} p-2 [&_pre]:max-w-full [&_pre]:whitespace-pre-wrap [&_pre]:break-words`,
   sectionPanel: `sectionPanel min-w-0 ${vuiFlatPanelClass} p-2 [&>p]:min-w-0 [&>p]:break-words`,
   statusPill:
-    "statusPill min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+    `statusPill min-w-0 ${vuiControlPillClass}`,
   statusPillMuted:
     "statusPillMuted min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   statusPillPrompt:

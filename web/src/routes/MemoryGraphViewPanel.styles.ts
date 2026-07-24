@@ -1,4 +1,9 @@
 import {
+  vuiControlPillClass,
+  vuiControlQuietClass,
+} from "../design/vuiChromeRecipes";
+
+import {
   vuiOpaqueRowClass,
   vuiStateSelectedRowClass,
   vuiWorkspaceFillClass,
@@ -6,7 +11,7 @@ import {
 
 const styles = {
   countPill:
-    "countPill min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+    `countPill min-w-0 ${vuiControlPillClass}`,
   graphCanvasFallback:
     "graphCanvasFallback min-w-0 grid min-h-0 gap-2 p-2",
   graphCanvasPanel:
@@ -14,7 +19,7 @@ const styles = {
   graphCanvasToolbar:
     "graphCanvasToolbar min-w-0 flex flex-wrap items-center justify-between gap-1.5 px-1 py-0.5 [&>div]:min-w-0 [&_strong]:break-words",
   graphClearFocusButton:
-    "graphClearFocusButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
+    `graphClearFocusButton min-w-0 ${vuiControlQuietClass}`,
   graphInteractionHint:
     "graphInteractionHint min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   graphNodeList:

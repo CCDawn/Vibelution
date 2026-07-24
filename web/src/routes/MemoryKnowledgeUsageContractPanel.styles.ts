@@ -1,4 +1,8 @@
 import {
+  vuiControlPillClass,
+} from "../design/vuiChromeRecipes";
+
+import {
   vuiFlatPanelClass,
   vuiOpaqueRowClass,
 } from "../design/vuiSurfaceRecipes";
@@ -13,7 +17,7 @@ const styles = {
   contractStateGrid:
     "contractStateGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] hidden",
   countPill:
-    "countPill min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+    `countPill min-w-0 ${vuiControlPillClass}`,
   managementHeader:
     "managementHeader min-w-0 flex flex-wrap items-center gap-1.5",
   panelEyebrow:

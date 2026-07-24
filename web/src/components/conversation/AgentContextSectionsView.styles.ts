@@ -1,4 +1,8 @@
 import {
+  vuiControlQuietClass,
+} from "../../design/vuiChromeRecipes";
+
+import {
   vuiOpaqueRowClass,
 } from "../../design/vuiSurfaceRecipes";
 
@@ -14,7 +18,7 @@ const styles = {
   composerReferenceTitle:
     "vui-components-conversationview composerReferenceTitle min-w-0 truncate [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [overflow-wrap:anywhere]",
   imageDownloadButton:
-    "vui-components-conversationview imageDownloadButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
+    `vui-components-conversationview imageDownloadButton min-w-0 ${vuiControlQuietClass}`,
   userAttachment: `vui-components-conversationview userAttachment min-w-0 overflow-hidden ${vuiOpaqueRowClass}`,
   userAttachmentGrid:
     "vui-components-conversationview userAttachmentGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(min(12rem,100%),1fr))]",

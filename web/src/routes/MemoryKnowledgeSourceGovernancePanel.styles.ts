@@ -1,4 +1,9 @@
 import {
+  vuiControlPillClass,
+  vuiControlQuietClass,
+} from "../design/vuiChromeRecipes";
+
+import {
   vuiFlatPanelClass,
   vuiOpaqueRowClass,
   vuiStateSelectedRowClass,
@@ -6,11 +11,11 @@ import {
 
 const styles = {
   collapsedFormButton:
-    "collapsedFormButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 grid gap-1 [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full hidden !grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-[7px] min-h-[42px] max-h-[92px]",
+    `collapsedFormButton min-w-0 ${vuiControlQuietClass} grid gap-1 [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full hidden !grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-[7px] min-h-[42px] max-h-[92px]`,
   countPill:
-    "countPill min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+    `countPill min-w-0 ${vuiControlPillClass}`,
   detailActionButton:
-    "detailActionButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
+    `detailActionButton min-w-0 ${vuiControlQuietClass}`,
   emptyDetail: `emptyDetail min-w-0 grid min-h-[96px] content-center gap-1.5 ${vuiFlatPanelClass} p-2 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]`,
   formActionRow: `formActionRow min-w-0 flex flex-wrap items-center gap-1.5 ${vuiOpaqueRowClass} p-2 grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full`,
   knowledgeFormGrid:
@@ -39,7 +44,7 @@ const styles = {
   sourceRecordMeta:
     "sourceRecordMeta min-w-0 flex flex-wrap items-center gap-1.5",
   statusPill:
-    "statusPill min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+    `statusPill min-w-0 ${vuiControlPillClass}`,
   statusPillMuted:
     "statusPillMuted min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   wideField:

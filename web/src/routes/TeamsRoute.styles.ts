@@ -10,6 +10,11 @@
 // Record<string, string> because those dynamic template indexes cannot index a
 // literal-keyed map; tightening is a follow-up, not Phase 0.
 import {
+  vuiControlPillClass,
+  vuiControlQuietClass,
+} from "../design/vuiChromeRecipes";
+
+import {
   vuiFlatPanelClass,
   vuiOpaqueRowClass,
   vuiRailFillClass,
@@ -66,7 +71,7 @@ const styles: Record<string, string> = {
   aiSearchRunTopic:
     "aiSearchRunTopic min-w-0",
   aiSearchScopeBadge:
-    "aiSearchScopeBadge min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+    `aiSearchScopeBadge min-w-0 ${vuiControlPillClass}`,
   aiSearchScopeDescription:
     "aiSearchScopeDescription min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   aiSearchScopeDetails:
@@ -99,7 +104,7 @@ const styles: Record<string, string> = {
   canvasPanel:
     "canvasPanel min-w-0 !flex min-h-0 flex-col overflow-hidden",
   canvasReadOnlyBadge:
-    `canvasReadOnlyBadge min-w-0 grid min-h-0 gap-2 p-2 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)] min-h-[26px] border-[color-mix(in_srgb,var(--accent-cool)_36%,var(--vui-border-subtle))] ${vuiStateSelectedRowFillClass} px-2 text-[var(--accent-cool)]`,
+    `canvasReadOnlyBadge min-w-0 grid min-h-0 gap-2 p-2 ${vuiControlPillClass} min-h-[26px] border-[color-mix(in_srgb,var(--accent-cool)_36%,var(--vui-border-subtle))] ${vuiStateSelectedRowFillClass} px-2 text-[var(--accent-cool)]`,
   canvasReadOnlyNode:
     "canvasReadOnlyNode min-w-0 grid min-h-0 gap-2 p-2 grid-cols-[repeat(2,minmax(0,1fr))]",
   canvasReadOnlyNodeWide:
@@ -111,7 +116,7 @@ const styles: Record<string, string> = {
   canvasViewport:
     "canvasViewport min-w-0 grid min-h-0 gap-2 p-2 relative box-content h-[760px] w-[1180px] origin-top-left pl-[var(--canvas-offset-x,0px)] pt-[var(--canvas-offset-y,0px)] [transform:scale(var(--canvas-scale,1))]",
   dangerButton:
-    `dangerButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 ${vuiStateDangerSoftClass}`,
+    `dangerButton min-w-0 ${vuiControlQuietClass} ${vuiStateDangerSoftClass}`,
   deliveryList:
     "deliveryList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   edgeCommunication:
@@ -232,7 +237,7 @@ const styles: Record<string, string> = {
   nodeReadOnly:
     "nodeReadOnly min-w-0 cursor-pointer touch-manipulation",
   nodeRoleBadge:
-    "nodeRoleBadge min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)] min-h-[18px] max-w-[128px] justify-self-start truncate rounded-full border border-[var(--node-role-border,var(--vui-border-subtle))] bg-[var(--node-role-bg,var(--vui-control-muted))] px-1.5 py-0 text-[var(--node-role-fg,var(--fg-secondary))] [font-size:var(--vui-font-xs)] font-semibold leading-none",
+    `nodeRoleBadge min-w-0 ${vuiControlPillClass} min-h-[18px] max-w-[128px] justify-self-start truncate rounded-full border border-[var(--node-role-border,var(--vui-border-subtle))] bg-[var(--node-role-bg,var(--vui-control-muted))] px-1.5 py-0 text-[var(--node-role-fg,var(--fg-secondary))] [font-size:var(--vui-font-xs)] font-semibold leading-none`,
   nodeRoleBadgeAdvisor:
     "nodeRoleBadgeAdvisor min-w-0 [--node-role-bg:color-mix(in_srgb,var(--accent-cool)_12%,var(--vui-surface-row))] [--node-role-border:color-mix(in_srgb,var(--accent-cool)_42%,var(--vui-border-subtle))] [--node-role-fg:var(--accent-cool)]",
   nodeRoleBadgeGeneral:
@@ -405,7 +410,7 @@ const styles: Record<string, string> = {
   researchStageTopicInput:
     "researchStageTopicInput min-w-0 grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
   revokeButton:
-    "revokeButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
+    `revokeButton min-w-0 ${vuiControlQuietClass}`,
   route:
     `route min-w-0 flex flex-col h-full min-h-0 overflow-hidden text-[var(--fg-primary)] [--team-workbench-gap:4px] ${vuiWorkspaceFillClass}`,
   saveState:
@@ -426,7 +431,7 @@ const styles: Record<string, string> = {
     "sourceCollectionPageTitleBlock min-w-0 [font-size:var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
   sourceCollectionPageTitleLine: `sourceCollectionPageTitleLine min-w-0 ${vuiOpaqueRowClass} p-2 [font-size:var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]`,
   sourceCollectionRunBadge:
-    "sourceCollectionRunBadge min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+    `sourceCollectionRunBadge min-w-0 ${vuiControlPillClass}`,
   sourceCollectionStepActive:
     `sourceCollectionStepActive min-w-0 ${vuiStateSelectedRowClass} [--source-step-color:var(--accent-cool)] border-[color-mix(in_srgb,var(--accent-cool)_52%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-base))]`,
   sourceCollectionStepDone:
@@ -530,7 +535,7 @@ const styles: Record<string, string> = {
   workflowSuccess:
     `workflowSuccess min-w-0 ${vuiStateSuccessSoftClass}`,
   workflowTag:
-    "workflowTag min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+    `workflowTag min-w-0 ${vuiControlPillClass}`,
   workflowTagDanger:
     `workflowTagDanger min-w-0 ${vuiStateDangerSoftClass}`,
   workflowTagNeutral:

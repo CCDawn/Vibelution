@@ -1,4 +1,8 @@
 import {
+  vuiControlPillClass,
+} from "../design/vuiChromeRecipes";
+
+import {
   vuiFlatPanelClass,
   vuiOpaqueRowClass,
   vuiStateSelectedRowClass,
@@ -6,9 +10,9 @@ import {
 
 const styles = {
   activeChannelPill:
-    `activeChannelPill min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)] ${vuiStateSelectedRowClass}`,
+    `activeChannelPill min-w-0 ${vuiControlPillClass} ${vuiStateSelectedRowClass}`,
   countPill:
-    "countPill min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+    `countPill min-w-0 ${vuiControlPillClass}`,
   matrixCard: `matrixCard min-w-0 max-w-full ${vuiOpaqueRowClass} p-2 !grid grid-cols-[minmax(0,1fr)_auto] gap-2.5 text-left [&>div]:min-w-0 [&>div]:grid [&>div]:gap-0.5 [&_span]:line-clamp-2 [&_span]:min-w-0 [&_dl]:grid [&_dl]:grid-cols-2 [&_dl]:gap-1.5`,
   matrixCardActive:
     `matrixCardActive min-w-0 ${vuiStateSelectedRowClass}`,

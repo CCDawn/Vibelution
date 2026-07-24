@@ -1,7 +1,7 @@
 # Shadcn-aligned VUI 全前端设计系统迁移方案
 
 **Date:** 2026-07-23
-**Status:** partially implemented（Wave 0–1 完成；Wave 2 见 2026-07-24 计划）
+**Status:** Wave 0–2 engineering close；Wave 3 见 `2026-07-24-vui-wave3-density-and-product-shell.md`（3A chrome density 开工）
 **Owner:** `web-workbench-surface` / VUI design-system owner
 **Mode:** `TASK_GRAPH`
 **Risk:** `STANDARD_TASK`；共享 token、组件 API、主题与页面迁移属于串行契约工作
@@ -21,9 +21,10 @@
 - 任意 `color-mix(...vui-surface...)` 的 **白名单契约**、代表页手测、状态 recipe、composition 示范路径。
 - 全量 primitive anatomy/slot 收敛；页面仍大量直写长 Tailwind。
 
-### 下一波
+### 下一波 / 当前波
 
-- 详见：`docs/superpowers/plans/2026-07-24-vui-wave2-alpha-whitelist-and-composition.md`
+- Wave 2：`docs/superpowers/plans/2026-07-24-vui-wave2-alpha-whitelist-and-composition.md`（工程 close）
+- Wave 3：`docs/superpowers/plans/2026-07-24-vui-wave3-density-and-product-shell.md`（密度 + product shell）
 - 后续批次必须从当前主线继续，不能重新引入平行 token 或第二套组件 API。
 
 ## 1. 目标

@@ -1,4 +1,8 @@
 import {
+  vuiControlPillClass,
+} from "../design/vuiChromeRecipes";
+
+import {
   vuiFlatPanelClass,
   vuiOpaqueRowClass,
 } from "../design/vuiSurfaceRecipes";
@@ -14,7 +18,7 @@ const styles = {
   sourceCollectionSourceDetailNotice: `sourceCollectionSourceDetailNotice min-w-0 ${vuiFlatPanelClass} p-2`,
   sourceCollectionSourceDetailPanel: `sourceCollectionSourceDetailPanel min-w-0 ${vuiFlatPanelClass} p-2 !grid content-start gap-2`,
   workflowTag:
-    "workflowTag min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+    `workflowTag min-w-0 ${vuiControlPillClass}`,
 } as const;
 
 export default styles;

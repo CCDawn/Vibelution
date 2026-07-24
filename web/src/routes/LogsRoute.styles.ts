@@ -7,6 +7,11 @@
 // Includes phantom keys accessed by consumers but never declared in the old
 // styleKeys; the Proxy synthesized them on demand.
 import {
+  vuiControlPillClass,
+  vuiControlQuietClass,
+} from "../design/vuiChromeRecipes";
+
+import {
   vuiFlatPanelClass,
   vuiOpaqueRowClass,
   vuiRailFillClass,
@@ -20,18 +25,18 @@ import {
 
 const styles = {
   clearButton:
-    "clearButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
+    `clearButton min-w-0 ${vuiControlQuietClass}`,
   cleanupActionGroup: "cleanupActionGroup min-w-0 border-t border-[var(--vui-border-soft)] pt-1.5",
   copyButton:
-    "copyButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)]",
+    `copyButton min-w-0 ${vuiControlQuietClass} [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)]`,
   deleteButton:
-    `deleteButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 ${vuiStateDangerSoftClass}`,
+    `deleteButton min-w-0 ${vuiControlQuietClass} ${vuiStateDangerSoftClass}`,
   diagnosticHintGrid:
     "diagnosticHintGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   diagnosticMetricGrid:
     "diagnosticMetricGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
   diagnosticPill:
-    "diagnosticPill min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+    `diagnosticPill min-w-0 ${vuiControlPillClass}`,
   diagnosticPillError:
     `diagnosticPillError min-w-0 ${vuiStateDangerSoftClass}`,
   diagnosticPillInfo:
@@ -58,7 +63,7 @@ const styles = {
   eyebrow:
     "eyebrow min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   filterButton:
-    "filterButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
+    `filterButton min-w-0 ${vuiControlQuietClass}`,
   filterButtonActive:
     `filterButtonActive min-w-0 ${vuiStateSelectedRowClass}`,
   filterGroup:
@@ -138,7 +143,7 @@ const styles = {
   packageKeyEntries:
     "packageKeyEntries min-w-0",
   packageKeyEntryButton:
-    "packageKeyEntryButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
+    `packageKeyEntryButton min-w-0 ${vuiControlQuietClass}`,
   packageList:
     "packageList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto pr-1",
   packagePrimaryCluster:
@@ -166,7 +171,7 @@ const styles = {
     "packageWorkRunMetricStrip min-w-0 flex flex-wrap items-center gap-1.5",
   packageWorkRunPanel: `packageWorkRunPanel min-w-0 ${vuiFlatPanelClass} p-2`,
   packageWorkRunPathButton:
-    "packageWorkRunPathButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 font-mono",
+    `packageWorkRunPathButton min-w-0 ${vuiControlQuietClass} font-mono`,
   paneCollapsed:
     "paneCollapsed min-w-0 hidden",
   panelSearch: `panelSearch min-w-0 flex items-center gap-1.5 ${vuiFlatPanelClass} p-2`,
@@ -189,7 +194,7 @@ const styles = {
   railTitle:
     "railTitle min-w-0 [font-size:var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
   rawFileButton:
-    "rawFileButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
+    `rawFileButton min-w-0 ${vuiControlQuietClass}`,
   rawFileButtonActive:
     `rawFileButtonActive min-w-0 ${vuiStateSelectedRowClass}`,
   rawFileTabs:
@@ -233,7 +238,7 @@ const styles = {
   sceneCardActive:
     `sceneCardActive min-w-0 ${vuiStateSelectedRowClass}`,
   sceneCardButton:
-    "sceneCardButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
+    `sceneCardButton min-w-0 ${vuiControlQuietClass}`,
   sceneCardHeader:
     "sceneCardHeader min-w-0 flex flex-wrap items-center gap-1.5",
   sceneCardHeaderRow:
@@ -262,7 +267,7 @@ const styles = {
   sceneInfoGrid:
     `sceneInfoGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] ${vuiStateCoolInfoClass}`,
   sceneIssueBadge:
-    "sceneIssueBadge min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+    `sceneIssueBadge min-w-0 ${vuiControlPillClass}`,
   sceneIssueBadgeError:
     `sceneIssueBadgeError min-w-0 ${vuiStateDangerSoftClass}`,
   sceneIssueBadgeWarning:
@@ -280,7 +285,7 @@ const styles = {
   selectionActions:
     "selectionActions min-w-0 flex flex-wrap items-center gap-1",
   selectionPill:
-    "selectionPill min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+    `selectionPill min-w-0 ${vuiControlPillClass}`,
   selectionToolbar:
     "selectionToolbar min-w-0 flex flex-wrap items-center gap-1",
   sidebar:

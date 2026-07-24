@@ -1,4 +1,9 @@
 import {
+  vuiControlPillClass,
+  vuiControlQuietClass,
+} from "../design/vuiChromeRecipes";
+
+import {
   vuiFlatPanelClass,
   vuiOpaqueRowClass,
   vuiRailFillClass,
@@ -12,9 +17,9 @@ const panelSurface =
 const rowSurface =
   `${vuiOpaqueRowClass} p-2`;
 const buttonBase =
-  "inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55";
+  `${vuiControlQuietClass}`;
 const pillBase =
-  "inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]";
+  `${vuiControlPillClass}`;
 const activeTone =
   `${vuiStateSelectedRowClass}`;
 const errorTone =
@@ -201,7 +206,7 @@ const styles = {
   sceneInfoGrid:
     `sceneInfoGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] ${vuiStateCoolInfoClass}`,
   sceneIssueBadge:
-    "sceneIssueBadge min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+    `sceneIssueBadge min-w-0 ${vuiControlPillClass}`,
   sceneIssueBadgeError:
     `sceneIssueBadgeError min-w-0 ${vuiStateDangerSoftClass}`,
   sceneIssueBadgeWarning:
@@ -221,7 +226,7 @@ const styles = {
   selectionActions:
     "selectionActions min-w-0 flex flex-wrap items-center gap-1.5",
   selectionPill:
-    "selectionPill min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+    `selectionPill min-w-0 ${vuiControlPillClass}`,
   selectionToolbar:
     "selectionToolbar min-w-0 flex flex-wrap items-center gap-1.5",
   sidebar:

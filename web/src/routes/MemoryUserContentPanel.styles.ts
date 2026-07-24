@@ -1,4 +1,8 @@
 import {
+  vuiControlPillClass,
+} from "../design/vuiChromeRecipes";
+
+import {
   vuiFlatPanelClass,
   vuiOpaqueRowClass,
   vuiStateSelectedRowClass,
@@ -16,7 +20,7 @@ const styles = {
   resultList:
     "resultList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   badge:
-    "badge min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+    `badge min-w-0 ${vuiControlPillClass}`,
   error:
     "error min-w-0 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-danger)_32%,transparent)] bg-[color-mix(in_srgb,var(--accent-danger)_10%,var(--vui-surface-row))] p-2 [font-size:var(--vui-font-xs)] leading-tight text-[var(--accent-danger)]",
   emptyState:

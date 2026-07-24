@@ -1,4 +1,9 @@
 import {
+  vuiControlPillClass,
+  vuiControlQuietClass,
+} from "../design/vuiChromeRecipes";
+
+import {
   vuiFlatPanelClass,
   vuiOpaqueRowClass,
 } from "../design/vuiSurfaceRecipes";
@@ -7,7 +12,7 @@ const styles = {
   cleanupConfirmField:
     "cleanupConfirmField min-w-0 grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
   cleanupExecuteButton:
-    "cleanupExecuteButton min-w-0 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
+    `cleanupExecuteButton min-w-0 ${vuiControlQuietClass}`,
   cleanupExecutePanel: `cleanupExecutePanel min-w-0 ${vuiFlatPanelClass} p-2`,
   cleanupExecutionSummary: `cleanupExecutionSummary min-w-0 ${vuiFlatPanelClass} p-2`,
   cleanupFeedback:
@@ -31,7 +36,7 @@ const styles = {
   cleanupWorkspace:
     "cleanupWorkspace min-w-0 grid h-full min-h-0 flex-1 gap-2 p-2 overflow-auto",
   countPill:
-    "countPill min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
+    `countPill min-w-0 ${vuiControlPillClass}`,
   emptyState:
     "emptyState min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   inlineActionButton:

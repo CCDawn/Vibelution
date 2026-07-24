@@ -33,10 +33,10 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain('data-shell-group="navigation"');
     expect(shellSource).toContain('data-shell-group="system-actions"');
     expect(styles.nav).toContain("rounded-[var(--vui-radius-panel-soft)]");
-    expect(styles.nav).toContain("bg-[var(--vui-surface-toolbar)]");
+    expect(styles.nav).toMatch(/bg-vui-surface-toolbar|bg-\[var\(--vui-surface-toolbar\)\]/);
     expect(styles.nav).toContain("shadow-[var(--vui-elevation-panel)]");
     expect(styles.topActions).toContain("rounded-[var(--vui-radius-panel-soft)]");
-    expect(styles.topActions).toContain("bg-[var(--vui-surface-toolbar)]");
+    expect(styles.topActions).toMatch(/bg-vui-surface-toolbar|bg-\[var\(--vui-surface-toolbar\)\]/);
     expect(styles.actionIconButton).toContain("h-[var(--vui-control-height-sm)]");
     expect(styles.actionIconButton).toContain("w-[var(--vui-control-height-sm)]");
     expect(shellStyles).toContain("@media (max-width: 1279px)");
