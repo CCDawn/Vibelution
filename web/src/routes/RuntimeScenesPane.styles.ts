@@ -1,6 +1,7 @@
 import {
   vuiFlatPanelClass,
   vuiOpaqueRowClass,
+  vuiRailFillClass,
   vuiStateCoolInfoClass,
   vuiStateDangerSoftClass,
   vuiStateSelectedRowClass,
@@ -224,7 +225,7 @@ const styles = {
   selectionToolbar:
     "selectionToolbar min-w-0 flex flex-wrap items-center gap-1.5",
   sidebar:
-    "sidebar min-w-0",
+    `sidebar min-w-0 ${vuiRailFillClass}`,
   sidebarEyebrow:
     "sidebarEyebrow min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   sidebarHeader:

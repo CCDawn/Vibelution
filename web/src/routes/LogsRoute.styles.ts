@@ -9,11 +9,13 @@
 import {
   vuiFlatPanelClass,
   vuiOpaqueRowClass,
+  vuiRailFillClass,
   vuiStateCoolInfoClass,
   vuiStateDangerSoftClass,
   vuiStateSelectedRowClass,
   vuiStateSuccessSoftClass,
   vuiStateWarningSoftClass,
+  vuiWorkspaceFillClass,
 } from "../design/vuiSurfaceRecipes";
 
 const styles = {
@@ -226,7 +228,7 @@ const styles = {
   rootStateMissing:
     "rootStateMissing min-w-0 border-[color-mix(in_srgb,var(--state-warning)_34%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_9%,transparent)] text-[var(--state-warning)]",
   route:
-    "route min-w-0 max-w-full grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] content-start overflow-hidden overflow-x-hidden text-[var(--fg-primary)]",
+    `route min-w-0 max-w-full grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] content-start overflow-hidden overflow-x-hidden text-[var(--fg-primary)] ${vuiWorkspaceFillClass}`,
   sceneCard: `sceneCard min-w-0 ${vuiFlatPanelClass} p-2`,
   sceneCardActive:
     `sceneCardActive min-w-0 ${vuiStateSelectedRowClass}`,
@@ -282,7 +284,7 @@ const styles = {
   selectionToolbar:
     "selectionToolbar min-w-0 flex flex-wrap items-center gap-1",
   sidebar:
-    "sidebar min-w-0 grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-1.5 overflow-hidden max-[760px]:max-h-[34vh]",
+    `sidebar min-w-0 grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-1.5 overflow-hidden max-[760px]:max-h-[34vh] ${vuiRailFillClass}`,
   sidebarEyebrow:
     "sidebarEyebrow min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   sidebarHeader:
@@ -326,7 +328,7 @@ const styles = {
   toolbarButton:
     "toolbarButton min-w-0 flex flex-wrap items-center gap-1.5 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full justify-center rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55 [&>span]:truncate",
   workspace:
-    "workspace min-w-0 max-w-full grid h-full min-h-0 gap-1.5 p-1.5 grid-cols-[minmax(0,1fr)_10px_minmax(220px,var(--logs-right-rail-width,280px))] grid-rows-[minmax(0,1fr)] overflow-hidden overflow-x-hidden max-[760px]:grid-cols-[minmax(0,1fr)] max-[760px]:grid-rows-[minmax(360px,1fr)_minmax(180px,34vh)] max-[760px]:overflow-y-auto max-[760px]:overflow-x-hidden",
+    `workspace min-w-0 max-w-full grid h-full min-h-0 gap-1.5 p-1.5 grid-cols-[minmax(0,1fr)_10px_minmax(220px,var(--logs-right-rail-width,280px))] grid-rows-[minmax(0,1fr)] overflow-hidden overflow-x-hidden max-[760px]:grid-cols-[minmax(0,1fr)] max-[760px]:grid-rows-[minmax(360px,1fr)_minmax(180px,34vh)] max-[760px]:overflow-y-auto max-[760px]:overflow-x-hidden ${vuiWorkspaceFillClass}`,
 } as const;
 
 export default styles;

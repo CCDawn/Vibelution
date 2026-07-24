@@ -150,13 +150,13 @@ describe("GitRoute layout contract", () => {
   });
 
   it("keeps Git diff surfaces on lightweight VUI panels without losing code scroll semantics", () => {
-    expect(diffStyles.surfaceClass).toContain("var(--vui-surface-panel)");
+    expect(diffStyles.surfaceClass).toMatch(/bg-vui-surface-panel|var\(--vui-surface-panel\)/);
     expect(diffStyles.surfaceClass).not.toContain("bg-[var(--surface-panel)]");
     expect(diffStyles.headerClass).toContain("border-vui-border-hairline");
     expect(diffStyles.headerClass).toContain("max-[640px]:flex-wrap");
     expect(diffStyles.fileNameClass).toContain("truncate");
     expect(diffStyles.diffWrapClass).toContain("overflow-auto");
-    expect(diffStyles.diffWrapClass).toContain("bg-[var(--vui-surface-workspace)]");
+    expect(diffStyles.diffWrapClass).toMatch(/bg-vui-surface-workspace|bg-\[var\(--vui-surface-workspace\)\]/);
     expect(diffStyles.diffTableClass).toContain("w-max");
     expect(diffStyles.diffTableClass).toContain("leading-[1.42]");
     expect(diffStyles.lineContentClass).toContain("whitespace-pre");

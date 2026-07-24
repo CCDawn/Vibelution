@@ -127,3 +127,9 @@ export const vuiStateWarmSoftClass =
  */
 export const vuiStateWarningSoftClass =
   "border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]";
+
+/**
+ * User chat bubble wash (cool tint on panel). Domain message chrome — not a product board.
+ */
+export const vuiStateUserBubbleClass =
+  "rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--accent-cool)_18%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_6%,var(--vui-surface-panel))]";

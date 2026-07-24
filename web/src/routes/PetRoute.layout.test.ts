@@ -23,7 +23,7 @@ describe("PetRoute layout contract", () => {
 
   it("keeps PetRoute surfaces on shared opaque VUI panel recipes", () => {
     for (const key of surfaceKeys) {
-      expect(styles[key]).toContain("var(--vui-surface-panel)");
+      expect(styles[key]).toMatch(/bg-vui-surface-panel|var\(--vui-surface-panel\)/);
       expect(styles[key]).toContain("border-[var(--vui-border-subtle)]");
       expect(styles[key]).not.toContain("bg-[var(--surface-page)]");
       expect(styles[key]).not.toContain("bg-[var(--surface-panel)]");

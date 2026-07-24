@@ -280,7 +280,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(conversationStyles.surfaceCompact).not.toContain("white)");
     expect(conversationStyles.surfaceCompact).not.toContain("bg-[var(--surface-panel-strong)]");
 
-    expect(conversationStyles.composer).toContain("var(--vui-surface-panel)");
+    expect(conversationStyles.composer).toMatch(/bg-vui-surface-panel|var\(--vui-surface-panel\)/);
     expect(conversationStyles.composer).toMatch(/!bg-vui-surface-panel|!bg-\[var\(--vui-surface-panel\)\]/);
     expect(conversationStyles.composer).not.toContain("backdrop-blur");
     expect(conversationStyles.composer).not.toContain("var(--surface-panel-strong)_92%");
@@ -2289,7 +2289,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(sessionContextMenuSource).toContain("styles.sessionContextMenu");
     expect(sessionContextMenuSource).toContain("styles.sessionContextMenuItem");
     expect(sessionContextMenuSource).toContain("styles.sessionContextMenuDanger");
-    expect(sessionContextMenuStyles.sessionContextMenu).toContain("var(--vui-surface-panel)");
+    expect(sessionContextMenuStyles.sessionContextMenu).toMatch(/bg-vui-surface-panel|var\(--vui-surface-panel\)/);
     expect(sessionContextMenuStyles.sessionContextMenu).toContain("shadow-none");
     expect(sessionContextMenuStyles.sessionContextMenu).not.toContain("vui-surface-glass");
     expect(sessionContextMenuStyles.sessionContextMenu).not.toContain("vui-shadow-hairline");

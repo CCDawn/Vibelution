@@ -204,6 +204,7 @@ describe("VUI dual-theme foundation", () => {
     expect(recipesSource).toContain("export const vuiStateSelectedWarmRowClass");
     expect(recipesSource).toContain("export const vuiStateCoolSoftClass");
     expect(recipesSource).toContain("export const vuiStateWarningSoftClass");
+    expect(recipesSource).toContain("export const vuiStateUserBubbleClass");
     expect(recipesSource).toContain("export const vuiStateCoolInfoClass");
     expect(recipesSource).toContain("export const vuiStateDangerPanelClass");
     expect(recipesSource).toContain("export const vuiStateWarningPanelClass");

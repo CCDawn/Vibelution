@@ -35,8 +35,12 @@ describe("AgentUserContentSectionView", () => {
     expect(styles.userMessageBody).toContain("whitespace-pre-wrap");
     expect(styles.userMessageBody).toContain("[overflow-wrap:anywhere]");
     expect(styles.userMessageBody).toContain("max-w-[min(100%,68ch)]");
-    expect(styles.userMessageBody).toContain("border border-[color-mix(in_srgb,var(--accent-cool)_18%,var(--vui-border-subtle))]");
-    expect(styles.userMessageBody).toContain("bg-[color-mix(in_srgb,var(--accent-cool)_6%,var(--vui-surface-panel))]");
+    expect(styles.userMessageBody).toContain(
+      "border-[color-mix(in_srgb,var(--accent-cool)_18%,var(--vui-border-subtle))]",
+    );
+    expect(styles.userMessageBody).toContain(
+      "bg-[color-mix(in_srgb,var(--accent-cool)_6%,var(--vui-surface-panel))]",
+    );
     expect(styles.userMessageBody).toContain("px-2.5");
     expect(styles.userMessageBody).toContain("py-1.5");
     expect(styles.userMessageBody).toContain("shadow-none");

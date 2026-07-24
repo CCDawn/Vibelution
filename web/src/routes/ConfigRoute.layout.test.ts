@@ -584,7 +584,7 @@ describe("ConfigRoute layout contract", () => {
     expect(stylesSource).toContain("vuiElevatedPanelClass");
     expect(styles.page).toContain("[background:var(--vui-surface-workspace)]");
     expect(stylesSource).toContain("configHeader:");
-    expect(styles.configHeader).toContain("var(--vui-surface-panel)");
+    expect(styles.configHeader).toMatch(/bg-vui-surface-panel|var\(--vui-surface-panel\)/);
 
     expect(draftPanelSource).toContain("styles.draftWorkbench");
     expect(draftPanelSource).toContain("styles.draftActionRail");
@@ -900,15 +900,15 @@ describe("ConfigRoute layout contract", () => {
   it("keeps operational settings readable over custom workbench backgrounds", () => {
     expect(styles.page).toContain("[background:var(--vui-surface-workspace)]");
     expect(styles.page).toContain("[isolation:isolate]");
-    expect(styles.sidebar).toContain("var(--vui-surface-panel)");
-    expect(styles.sectionSurface).toContain("var(--vui-surface-panel)");
+    expect(styles.sidebar).toMatch(/bg-vui-surface-panel|var\(--vui-surface-panel\)/);
+    expect(styles.sectionSurface).toMatch(/bg-vui-surface-panel|var\(--vui-surface-panel\)/);
     expect(styles.treeGrid).toContain("[grid-template-columns:repeat(2,minmax(0,1fr))]");
     expect(styles.configDenseSection).toContain("[&>_.treeGrid]:[grid-template-columns:repeat(3,minmax(220px,1fr))]");
     expect(styles.configDenseSection).not.toContain("repeat(auto-fit");
     expect(styles.configDiscoverySection).toContain("[&>_.treeGrid]:[grid-template-columns:repeat(3,minmax(220px,1fr))]");
     expect(styles.treeFieldValue).toContain("color-mix(in_srgb,var(--vui-surface-workspace)_92%,var(--vui-surface-panel))");
     expect(healthDiagnosticsPanelStylesSource).toContain("vuiSurfaceRecipes");
-    expect(healthDiagnosticsPanelStyles.sectionSurface).toContain("var(--vui-surface-panel)");
+    expect(healthDiagnosticsPanelStyles.sectionSurface).toMatch(/bg-vui-surface-panel|var\(--vui-surface-panel\)/);
     expect(healthDiagnosticsPanelStyles.findingCard).toContain("var(--vui-surface-row)");
   });
 
@@ -917,12 +917,12 @@ describe("ConfigRoute layout contract", () => {
     expect(extractedPanelStylesSource).toContain("vuiSurfaceRecipes");
     expect(extractedPanelStylesSource).toContain("var(--vui-control-muted)");
     expect(extractedPanelStylesSource).toContain("var(--vui-border-subtle)");
-    expect(overviewPanelStyles.sectionSurface).toContain("var(--vui-surface-panel)");
+    expect(overviewPanelStyles.sectionSurface).toMatch(/bg-vui-surface-panel|var\(--vui-surface-panel\)/);
     expect(runtimePanelStyles.segmented).toContain("[background:var(--vui-surface-toolbar)]");
     expect(draftPanelStyles.actionButton).toContain("var(--vui-control-muted)");
     expect(healthDiagnosticsPanelStyles.findingCard).toContain("var(--vui-surface-row)");
-    expect(providerPanelStyles.sectionSurface).toContain("var(--vui-surface-panel)");
-    expect(placeholderPanelStyles.loadingBoard).toContain("var(--vui-surface-panel)");
+    expect(providerPanelStyles.sectionSurface).toMatch(/bg-vui-surface-panel|var\(--vui-surface-panel\)/);
+    expect(placeholderPanelStyles.loadingBoard).toMatch(/bg-vui-surface-panel|var\(--vui-surface-panel\)/);
     expect(extractedPanelStylesSource).not.toContain("[background:var(--vui-gradient-route-soft),var(--surface-panel)]");
   });
 

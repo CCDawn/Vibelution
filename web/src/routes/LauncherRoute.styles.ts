@@ -2,6 +2,7 @@ import {
   vuiFlatPanelClass,
   vuiOpaqueRowClass,
   vuiToolbarFillClass,
+  vuiWorkspaceFillClass,
 } from "../design/vuiSurfaceRecipes";
 
 const panelSurface = `${vuiFlatPanelClass}`;
@@ -19,7 +20,7 @@ const panelHeaderText =
 
 export const launcherRouteStyles = {
   route:
-    "grid h-full min-h-full max-w-full content-start overflow-y-auto overflow-x-hidden overscroll-contain pb-[max(12px,env(safe-area-inset-bottom))] text-vui-fg-primary [scrollbar-gutter:stable] [--accent-primary:var(--accent-warm)] [--danger:var(--state-error)] [&_[data-vui=button]]:w-fit [&_[data-vui=button]]:[max-width:100%] [&_[data-vui=button]]:[white-space:nowrap]",
+    `grid h-full min-h-full max-w-full content-start overflow-y-auto overflow-x-hidden overscroll-contain pb-[max(12px,env(safe-area-inset-bottom))] text-vui-fg-primary [scrollbar-gutter:stable] [--accent-primary:var(--accent-warm)] [--danger:var(--state-error)] [&_[data-vui=button]]:w-fit [&_[data-vui=button]]:[max-width:100%] [&_[data-vui=button]]:[white-space:nowrap] ${vuiWorkspaceFillClass}`,
   header:
     "mx-2 mt-2 min-w-0 border-[var(--vui-border-subtle)] !bg-transparent !shadow-none !backdrop-blur-none",
   panelEyebrow: "m-0 [font-size:var(--vui-font-xs)] uppercase tracking-[0.08em] text-vui-fg-tertiary",
@@ -75,7 +76,7 @@ export const launcherRouteStyles = {
   notice:
     `mx-2 mt-1.5 grid gap-0.5 ${panelSurface} px-2 py-1.5 [font-size:var(--vui-font-xs)] text-vui-fg-secondary data-[tone=success]:border-[color-mix(in_srgb,var(--state-success)_34%,transparent)] data-[tone=success]:text-[var(--state-success)] data-[tone=warning]:border-[color-mix(in_srgb,var(--state-warning)_34%,transparent)] data-[tone=warning]:text-[var(--state-warning)] data-[tone=error]:border-[color-mix(in_srgb,var(--state-error)_34%,transparent)] data-[tone=error]:text-[var(--state-error)] [&_span]:min-w-0 [&_span]:truncate [&_span]:[font-size:var(--vui-font-xs)] [&_span]:text-vui-fg-tertiary`,
   workspace:
-    "grid min-h-0 grid-cols-[minmax(0,1fr)_clamp(300px,26vw,420px)] auto-rows-min gap-1.5 overflow-visible px-2 pb-[max(14px,env(safe-area-inset-bottom))] pt-1.5 max-[1200px]:grid-cols-[minmax(0,1fr)]",
+    `grid min-h-0 grid-cols-[minmax(0,1fr)_clamp(300px,26vw,420px)] auto-rows-min gap-1.5 overflow-visible px-2 pb-[max(14px,env(safe-area-inset-bottom))] pt-1.5 max-[1200px]:grid-cols-[minmax(0,1fr)] ${vuiWorkspaceFillClass}`,
   panel: `block min-h-0 min-w-0 overflow-hidden ${panelSurface} px-2 py-[7px]`,
   matrixPanel: "col-auto min-h-0",
   panelHeader:

@@ -1,6 +1,7 @@
 import {
   vuiFlatPanelClass,
   vuiOpaqueRowClass,
+  vuiWorkspaceFillClass,
 } from "../design/vuiSurfaceRecipes";
 
 const reviewPanelSurface = `${vuiFlatPanelClass} shadow-none`;
@@ -40,7 +41,7 @@ const styles = {
     `flex min-h-[34px] min-w-0 items-center justify-between gap-2 px-2 py-1.5 max-[980px]:flex-col max-[980px]:items-start ${reviewRowSurfaceSoft}`,
   lifecyclePills: "flex flex-wrap justify-end gap-2 max-[980px]:justify-start",
   workspace:
-    "grid min-h-0 min-w-0 max-w-full flex-1 grid-cols-[var(--review-queue-width,380px)_12px_minmax(0,1fr)] overflow-hidden overflow-x-hidden max-[980px]:grid-cols-1 max-[980px]:gap-y-3 max-[980px]:overflow-y-visible max-[980px]:overflow-x-hidden",
+    `grid min-h-0 min-w-0 max-w-full flex-1 grid-cols-[var(--review-queue-width,380px)_12px_minmax(0,1fr)] overflow-hidden overflow-x-hidden max-[980px]:grid-cols-1 max-[980px]:gap-y-3 max-[980px]:overflow-y-visible max-[980px]:overflow-x-hidden ${vuiWorkspaceFillClass}`,
   resizeHandle:
     "relative min-w-3 cursor-col-resize touch-none border-0 bg-transparent p-0 outline-none before:absolute before:inset-y-0 before:left-1/2 before:w-[3px] before:-translate-x-1/2 before:rounded-[var(--radius-control)] before:bg-[var(--vui-border-subtle)] before:transition before:content-[''] hover:before:bg-[color-mix(in_srgb,var(--accent-warm)_52%,transparent)] hover:before:shadow-none focus-visible:before:bg-[color-mix(in_srgb,var(--accent-warm)_52%,transparent)] focus-visible:before:shadow-none max-[980px]:hidden",
   queuePanel:

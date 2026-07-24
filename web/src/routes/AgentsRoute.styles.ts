@@ -7,8 +7,10 @@ import {
   vuiDenseRowClass,
   vuiFlatPanelClass,
   vuiOpaqueRowClass,
+  vuiStateAccentBannerClass,
   vuiStateSelectedRowFillClass,
   vuiStateSelectedWarmRowClass,
+  vuiStateSuccessSoftClass,
   vuiWorkspaceFillClass,
 } from "../design/vuiSurfaceRecipes";
 
@@ -17,11 +19,11 @@ const styles = {
   activityTimelineItem_context:
     "[border-color:color-mix(in_srgb,_var(--fg-tertiary)_22%,_var(--vui-border-subtle))]",
   activityTimelineItem_inbox:
-    "[border-color:color-mix(in_srgb,_var(--state-success)_28%,_var(--vui-border-subtle))] [background:color-mix(in_srgb,_var(--state-success)_5%,_var(--vui-surface-row))]",
+    `[border-color:color-mix(in_srgb,_var(--state-success)_28%,_var(--vui-border-subtle))] ${vuiStateSuccessSoftClass}`,
   activityTimelineItem_run:
-    "[border-color:color-mix(in_srgb,_var(--accent-cool)_28%,_var(--vui-border-subtle))] [background:color-mix(in_srgb,_var(--accent-cool)_5%,_var(--vui-surface-row))]",
+    `[border-color:color-mix(in_srgb,_var(--accent-cool)_28%,_var(--vui-border-subtle))] ${vuiStateSelectedRowFillClass}`,
   activityTimelineItem_sub_run:
-    "[border-color:color-mix(in_srgb,_var(--accent-warm)_28%,_var(--vui-border-subtle))] [background:color-mix(in_srgb,_var(--accent-warm)_5%,_var(--vui-surface-row))]",
+    `[border-color:color-mix(in_srgb,_var(--accent-warm)_28%,_var(--vui-border-subtle))] ${vuiStateSelectedWarmRowClass}`,
   activityTimelineList:
     "grid [align-content:start] [gap:5px] min-w-0 [max-height:280px] [overflow:auto] [padding-right:3px]",
   advancedFilterBody:
@@ -302,7 +304,7 @@ const styles = {
   resetZone:
     "grid [gap:8px] min-w-0 [padding:10px] [border:1px_solid_color-mix(in_srgb,_var(--state-warning)_28%,_var(--vui-border-subtle))] [border-radius:var(--radius-panel)] [background:color-mix(in_srgb,_var(--state-warning)_7%,_transparent)] [&_svg]:[color:var(--state-warning)]",
   returnBanner:
-    "grid [grid-template-columns:minmax(0,_1fr)_auto] [align-items:center] [gap:10px] min-w-0 [padding:9px_10px] [border:1px_solid_color-mix(in_srgb,_var(--accent-cool)_38%,_var(--vui-border-subtle))] [border-radius:var(--radius-panel)] [background:color-mix(in_srgb,_var(--accent-cool)_8%,_var(--vui-surface-panel))] [box-shadow:none] max-[860px]:[grid-template-columns:1fr]",
+    `grid [grid-template-columns:minmax(0,_1fr)_auto] [align-items:center] [gap:10px] min-w-0 [padding:9px_10px] [border:1px_solid_color-mix(in_srgb,_var(--accent-cool)_38%,_var(--vui-border-subtle))] [border-radius:var(--radius-panel)] ${vuiStateAccentBannerClass} [box-shadow:none] max-[860px]:[grid-template-columns:1fr]`,
   returnBannerButton:
     "inline-flex w-fit max-w-full max-[860px]:w-fit [align-items:center] [justify-content:center] [gap:6px] [min-width:116px] [min-height:34px] [padding:0_12px] [border:1px_solid_color-mix(in_srgb,_var(--accent-cool)_68%,_var(--vui-border-subtle))] [border-radius:var(--radius-control)] [background:var(--accent-cool)] [color:var(--accent-cool-contrast)] [font-size:var(--vui-font-xs)] [font-weight:800] [white-space:nowrap] [cursor:pointer] hover:[border-color:color-mix(in_srgb,_var(--accent-cool)_86%,_var(--vui-border-subtle))] hover:[background:color-mix(in_srgb,_var(--accent-cool)_90%,_var(--fg-primary))] hover:[outline:none] hover:[box-shadow:var(--focus-ring)] focus-visible:[border-color:color-mix(in_srgb,_var(--accent-cool)_86%,_var(--vui-border-subtle))] focus-visible:[background:color-mix(in_srgb,_var(--accent-cool)_90%,_var(--fg-primary))] focus-visible:[outline:none] focus-visible:[box-shadow:var(--focus-ring)]",
   returnBannerCopy:
@@ -311,7 +313,7 @@ const styles = {
   roomMembershipList:
     "grid [align-content:start] [gap:7px] min-w-0 [max-height:220px] [overflow:auto] [padding-right:3px]",
   route:
-    "grid max-w-full [grid-template-rows:auto_minmax(0,_1fr)] [height:100%] min-h-0 [overflow:hidden] [--agent-density-gap:0px] [--agent-panel-pad:8px] [--agent-row-pad-y:6px] [--agent-control-height:24px] [&_[data-vui-product=\"agent-workspace-panel\"]]:max-w-full [&_[data-vui-product=\"agent-workspace-panel\"]]:overflow-hidden [&_[data-vui-product=\"agent-workspace-panel\"]]:[scrollbar-gutter:stable] [&_[data-vui-product=\"agent-workspace-panel\"]]:[overflow-wrap:anywhere] [&_[data-vui=\"button\"]]:w-fit [&_[data-vui=\"button\"]]:[max-width:100%] [&_[data-vui=\"button\"]]:[white-space:nowrap] max-[860px]:[height:100%] max-[860px]:min-h-0 max-[860px]:[grid-template-rows:auto_minmax(0,_1fr)] max-[860px]:[overflow:hidden] max-[860px]:[&_[data-vui-product=\"agent-workspace-panel\"]]:overflow-visible",
+    `grid max-w-full [grid-template-rows:auto_minmax(0,_1fr)] [height:100%] min-h-0 [overflow:hidden] [--agent-density-gap:0px] [--agent-panel-pad:8px] [--agent-row-pad-y:6px] [--agent-control-height:24px] [&_[data-vui-product=\"agent-workspace-panel\"]]:max-w-full [&_[data-vui-product=\"agent-workspace-panel\"]]:overflow-hidden [&_[data-vui-product=\"agent-workspace-panel\"]]:[scrollbar-gutter:stable] [&_[data-vui-product=\"agent-workspace-panel\"]]:[overflow-wrap:anywhere] [&_[data-vui=\"button\"]]:w-fit [&_[data-vui=\"button\"]]:[max-width:100%] [&_[data-vui=\"button\"]]:[white-space:nowrap] max-[860px]:[height:100%] max-[860px]:min-h-0 max-[860px]:[grid-template-rows:auto_minmax(0,_1fr)] max-[860px]:[overflow:hidden] max-[860px]:[&_[data-vui-product=\"agent-workspace-panel\"]]:overflow-visible ${vuiWorkspaceFillClass}`,
   rowSelect: `grid [place-items:center] [width:28px] [height:36px] ${vuiOpaqueRowClass} [color:var(--fg-secondary)] [cursor:pointer] hover:[border-color:var(--border-strong)] hover:[color:var(--accent-warm-2)] [&_input]:[position:absolute] [&_input]:[width:1px] [&_input]:[height:1px] [&_input]:[opacity:0] [&_input]:[pointer-events:none]`,
   runHistoryItem: `grid [gap:3px] min-w-0 max-w-full [padding:7px_8px] ${vuiOpaqueRowClass} [&_strong]:min-w-0 [&_strong]:[overflow:hidden] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap] [&_span]:min-w-0 [&_span]:[overflow:hidden] [&_span]:[text-overflow:ellipsis] [&_span]:[white-space:nowrap] [&_small]:min-w-0 [&_small]:[overflow:hidden] [&_small]:[text-overflow:ellipsis] [&_small]:[white-space:nowrap] [&_strong]:[color:var(--fg-primary)] [&_strong]:[font-size:var(--vui-font-xs)] [&_span]:[color:var(--fg-secondary)] [&_span]:[font-size:var(--vui-font-xs)] [&_small]:[color:var(--fg-tertiary)] [&_small]:[font-size:var(--vui-font-xs)]`,
   runHistoryList:
@@ -322,7 +324,7 @@ const styles = {
   runtimeFocusMeta:
     "[&_code]:min-w-0 [&_code]:[overflow:hidden] [&_code]:[text-overflow:ellipsis] [&_code]:[white-space:nowrap] grid [grid-template-columns:repeat(3,_minmax(0,_1fr))] [gap:6px] min-w-0 [&_span]:grid [&_span]:[gap:3px] [&_span]:min-w-0 [&_span]:[padding:6px_7px] [&_span]:[border:1px_solid_color-mix(in_srgb,_var(--vui-border-subtle)_76%,_transparent)] [&_span]:[border-radius:var(--radius-control)] [&_span]:!bg-[var(--vui-surface-row)] [&_strong]:[color:var(--fg-tertiary)] [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:[font-weight:700] [&_strong]:[text-transform:uppercase] [&_code]:[color:var(--fg-secondary)] [&_code]:[font-family:var(--font-mono,_ui-monospace,_SFMono-Regular,_Consolas,_monospace)] [&_code]:[font-size:var(--vui-font-xs)]",
   runtimeFocusPanel:
-    "grid [gap:8px] min-w-0 [padding:10px] [border:1px_solid_color-mix(in_srgb,_var(--accent-cool)_28%,_var(--vui-border-subtle))] [border-radius:var(--radius-panel)] [background:color-mix(in_srgb,_var(--accent-cool)_6%,_var(--vui-surface-panel))] [box-shadow:none] [&_p]:min-w-0 [&_p]:[overflow:hidden] [&_p]:[text-overflow:ellipsis] [&_p]:[white-space:nowrap] [&_p]:[margin:0] [&_p]:[color:var(--fg-secondary)] [&_p]:[font-size:var(--vui-font-xs)]",
+    `grid [gap:8px] min-w-0 [padding:10px] [border:1px_solid_color-mix(in_srgb,_var(--accent-cool)_28%,_var(--vui-border-subtle))] [border-radius:var(--radius-panel)] ${vuiStateAccentBannerClass} [box-shadow:none] [&_p]:min-w-0 [&_p]:[overflow:hidden] [&_p]:[text-overflow:ellipsis] [&_p]:[white-space:nowrap] [&_p]:[margin:0] [&_p]:[color:var(--fg-secondary)] [&_p]:[font-size:var(--vui-font-xs)]`,
   runtimeNextStep:
     "grid [gap:4px] min-w-0 [padding:9px_10px] [border:1px_solid_color-mix(in_srgb,_var(--accent-warm)_20%,_transparent)] [border-radius:var(--radius-control)] [background:color-mix(in_srgb,_var(--accent-warm)_7%,_transparent)] [&_strong]:[color:var(--fg-tertiary)] [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:[font-weight:700] [&_strong]:[text-transform:uppercase] [&_span]:[color:var(--fg-secondary)] [&_span]:[font-size:var(--vui-font-xs)] [&_span]:[line-height:1.4]",
   runtimePill:

@@ -13,6 +13,7 @@ import {
   vuiStateCoolSoftClass,
   vuiStateDangerSoftClass,
   vuiStateSelectedRowClass,
+  vuiWorkspaceFillClass,
 } from "../design/vuiSurfaceRecipes";
 
 const styles = {
@@ -323,7 +324,7 @@ const styles = {
   reviewReasonPill:
     "reviewReasonPill min-w-0 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
   route:
-    "route min-w-0 grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden text-[var(--fg-primary)]",
+    `route min-w-0 grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden text-[var(--fg-primary)] ${vuiWorkspaceFillClass}`,
   searchBox: `searchBox min-w-0 ${vuiFlatPanelClass} p-2`,
   sectionPanel: `sectionPanel min-w-0 ${vuiFlatPanelClass} p-2`,
   selectedConfigSummary: `selectedConfigSummary min-w-0 ${vuiFlatPanelClass} p-2 ${vuiStateCoolSoftClass}`,
@@ -416,7 +417,7 @@ const styles = {
   wideField:
     "wideField min-w-0 grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
   workspace:
-    "workspace min-w-0 grid h-full min-h-0 flex-1 gap-2 p-2 grid-cols-[clamp(200px,18vw,260px)_minmax(0,1fr)_clamp(280px,24vw,380px)] grid-rows-[minmax(0,1fr)] overflow-hidden max-[1120px]:grid-cols-[clamp(190px,18vw,240px)_minmax(0,1fr)] max-[1120px]:[&_.detailPanel]:col-span-2 max-[780px]:grid-cols-1 max-[780px]:overflow-auto max-[780px]:[&_.detailPanel]:col-span-1",
+    `workspace min-w-0 grid h-full min-h-0 flex-1 gap-2 p-2 grid-cols-[clamp(200px,18vw,260px)_minmax(0,1fr)_clamp(280px,24vw,380px)] grid-rows-[minmax(0,1fr)] overflow-hidden max-[1120px]:grid-cols-[clamp(190px,18vw,240px)_minmax(0,1fr)] max-[1120px]:[&_.detailPanel]:col-span-2 max-[780px]:grid-cols-1 max-[780px]:overflow-auto max-[780px]:[&_.detailPanel]:col-span-1 ${vuiWorkspaceFillClass}`,
 } as const;
 
 export default styles;
