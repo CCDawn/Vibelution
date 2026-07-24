@@ -289,23 +289,33 @@ export function useChatWorkbenchLayout({
     : responsiveLayout.mode === "compact"
       ? `${styles.layout} ${styles.layoutCompactDesktop}`
       : `${styles.layout} ${styles.layoutOverlay}`;
+  // When the docked status rail is closed, reclaim its grid track. Compact already
+  // uses a 3-column template; wide needs the explicit override. Never apply on
+  // overlay/mobile (single-column) or the center would be forced into a wrong track.
+  const reclaimStatusRailTrack =
+    statusRailCollapsed
+    && !statusRailOverlayOpen
+    && (responsiveLayout.mode === "wide" || responsiveLayout.mode === "compact");
   const chatLayoutClassName = [
     layoutModeClassName,
-    responsiveLayout.mode === "wide" && statusRailCollapsed ? styles.layoutStatusRailCollapsed : "",
+    reclaimStatusRailTrack ? styles.layoutStatusRailCollapsed : "",
   ].filter(Boolean).join(" ");
   const centerPaneClassName = responsiveLayout.mode === "overlay" || responsiveLayout.mode === "mobile"
     ? `${styles.centerPane} ${styles.centerPaneOverlay}`
     : styles.centerPane;
-  const statusRailClassName = [
-    styles.leftRail,
-    statusRailCollapsed ? styles.paneCollapsed : "",
-    statusRailOverlayOpen ? `${styles.overlayPane} ${styles.overlayPaneRight}` : "",
-  ].filter(Boolean).join(" ");
-  const conversationIndexPaneClassName = [
-    rightPaneClassName,
-    conversationIndexCollapsed ? styles.paneCollapsed : "",
-    conversationIndexOverlayOpen ? `${styles.overlayPane} ${styles.overlayPaneLeft}` : "",
-  ].filter(Boolean).join(" ");
+  // Critical: when docked status rail is collapsed, do NOT attach leftRail
+  // (grid-column:5). A non-display:none item on column 5 creates implicit
+  // grid tracks and a blank right strip after route remounts.
+  const statusRailClassName = statusRailOverlayOpen
+    ? `${styles.leftRail} ${styles.overlayPane} ${styles.overlayPaneRight}`
+    : statusRailCollapsed
+      ? styles.paneCollapsed
+      : styles.leftRail;
+  const conversationIndexPaneClassName = conversationIndexOverlayOpen
+    ? `${rightPaneClassName} ${styles.overlayPane} ${styles.overlayPaneLeft}`
+    : conversationIndexCollapsed
+      ? styles.paneCollapsed
+      : rightPaneClassName;
 
   const closeResponsiveOverlayPane = useCallback(() => {
     const closingPane = responsiveOverlayPane;
