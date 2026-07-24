@@ -8,14 +8,26 @@ import routerSource from "../app/router.tsx?raw";
 function hasRealBackgroundToken(className: string) {
   return className
     .split(/\s+/)
-    .some((token) => token.startsWith("bg-[") || token.startsWith("!bg-[") || token.startsWith("!bg-[") || token.startsWith("!bg-[") || token.startsWith("[background:"));
+    .some((token) =>
+      token.startsWith("bg-[")
+      || token.startsWith("!bg-[")
+      || token.startsWith("bg-vui-")
+      || token.startsWith("!bg-vui-")
+      || token.startsWith("[background:"),
+    );
 }
 
 function expectBackgroundAware(className: string) {
   expect(hasRealBackgroundToken(className)).toBe(true);
   const backgroundTokens = className
     .split(/\s+/)
-    .filter((token) => token.startsWith("bg-[") || token.startsWith("!bg-[") || token.startsWith("!bg-[") || token.startsWith("!bg-[") || token.startsWith("[background:"));
+    .filter((token) =>
+      token.startsWith("bg-[")
+      || token.startsWith("!bg-[")
+      || token.startsWith("bg-vui-")
+      || token.startsWith("!bg-vui-")
+      || token.startsWith("[background:"),
+    );
   const hasStructuralBg = backgroundTokens.some(
     (token) =>
       token.includes("vui-surface-")

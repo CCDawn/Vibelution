@@ -132,11 +132,11 @@ describe("UsageRoute layout contract", () => {
     expect(stylesSource).toContain("vuiFlatPanelClass");
     expect(stylesSource).toContain("vuiOpaqueRowClass");
     expect(stylesSource).toContain("vuiDenseRowClass");
-    expect(styles.compositionPanel).toContain("!bg-[var(--vui-surface-panel)]");
-    expect(styles.usageRow).toContain("!bg-[var(--vui-surface-row)]");
+    expect(styles.compositionPanel).toContain("!bg-vui-surface-panel");
+    expect(styles.usageRow).toContain("!bg-vui-surface-row");
     expect(stylesSource).toContain("min-h-0");
     expect(styles.compositionPanel).toContain("shadow-none");
-    expect(styles.usageRow).toContain("hover:bg-[var(--vui-surface-row-hover)]");
+    expect(styles.usageRow).toContain("hover:bg-vui-surface-row-hover");
     expect(stylesSource).not.toContain("--surface-panel-strong");
     expect(stylesSource).not.toContain("--surface-page");
     expect(stylesSource).not.toContain("bg-vui-surface-panel/88");

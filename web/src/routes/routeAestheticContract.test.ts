@@ -4,6 +4,10 @@ import { describe, expect, it } from "vitest";
 
 const appRoot = resolve(import.meta.dirname, "../app");
 const routeRoot = import.meta.dirname;
+const chromeRecipeSource = readFileSync(
+  resolve(routeRoot, "../design/vuiChromeRecipes.ts"),
+  "utf-8",
+);
 
 const MEMORY_STYLE_FILES = readdirSync(routeRoot)
   .filter((filename) => /^Memory.*\.styles\.ts$/.test(filename))
@@ -254,6 +258,9 @@ describe("route aesthetic contract", () => {
   it("routes non-hot route hover states through shared quiet hover tokens", () => {
     const offenders = NON_HOT_ROUTE_HOVER_STYLE_FILES.flatMap((file) => {
       const source = readSource(file);
+      const contractSource = source.includes("vuiControlQuietClass")
+        ? `${source}\n${chromeRecipeSource}`
+        : source;
       const filename = file.split(/[/\\]/).pop();
       const violations = [];
 
@@ -262,7 +269,7 @@ describe("route aesthetic contract", () => {
       }
 
       for (const token of SHARED_QUIET_HOVER_TOKENS) {
-        if (!source.includes(token)) {
+        if (!contractSource.includes(token)) {
           violations.push(`${filename}:missing:${token}`);
         }
       }

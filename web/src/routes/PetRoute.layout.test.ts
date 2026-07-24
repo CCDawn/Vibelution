@@ -24,14 +24,14 @@ describe("PetRoute layout contract", () => {
   it("keeps PetRoute surfaces on shared opaque VUI panel recipes", () => {
     for (const key of surfaceKeys) {
       expect(styles[key]).toMatch(/bg-vui-surface-panel|var\(--vui-surface-panel\)/);
-      expect(styles[key]).toContain("border-[var(--vui-border-subtle)]");
+      expect(styles[key]).toMatch(/border-vui-border-subtle|border-\[var\(--vui-border-subtle\)\]/);
       expect(styles[key]).not.toContain("bg-[var(--surface-page)]");
       expect(styles[key]).not.toContain("bg-[var(--surface-panel)]");
       expect(styles[key]).not.toContain("bg-vui-surface-glass");
       expect(styles[key]).not.toContain("shadow-[var(--vui-shadow-hairline)]");
       expect(styles[key]).not.toContain("shadow-[var(--vui-shadow-soft)]");
     }
-    expect(styles.surfaceClass).toContain("!bg-[var(--vui-surface-panel)]");
+    expect(styles.surfaceClass).toMatch(/!bg-vui-surface-panel|!bg-\[var\(--vui-surface-panel\)\]/);
   });
 
   it("keeps progress width on a Tailwind contract variable", () => {
