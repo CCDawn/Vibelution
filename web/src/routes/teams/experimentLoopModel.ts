@@ -268,6 +268,15 @@ export type ExperimentPlanningStatusPayload = {
       independentEvaluationDimensions: string[];
       aggregateScoreAllowed: boolean;
       humanGates: string[];
+      acceptance: {
+        schemaValidation: boolean;
+        citationValidation: boolean;
+        minimumHypothesisCount: number;
+        allSevenDimensionsReviewed: boolean;
+        allFourHumanGatesApproved: boolean;
+        researchPlanPresent: boolean;
+        feedbackRevisionCount: number;
+      };
     };
     stage2BatchGovernance: {
       status: string;
