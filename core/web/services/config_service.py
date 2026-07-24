@@ -1650,33 +1650,45 @@ def _project_catalog_reasoning_contract(
     value: Any,
     *,
     provider_fingerprint: str,
+    pinned_model: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """Project reasoning contract for Config catalog rows.
+
+    Operator pin defaults take precedence over catalog probe evidence (D1).
+    Probe verification still surfaces as verificationStatus when no operator
+    values are declared.
+    """
+    from core.web.services.agent_model_candidate_service import project_reasoning_contract
+
     raw = value if isinstance(value, dict) else {}
     status = str(raw.get("verificationStatus") or "unverified").strip().lower()
     if status not in {"unverified", "verified", "failed", "stale"}:
         status = "unverified"
     if status == "verified" and str(raw.get("providerFingerprint") or "") != provider_fingerprint:
         status = "stale"
-    raw_values = raw.get("effortValues") if isinstance(raw.get("effortValues"), list) else []
-    values = [
-        str(item).strip().lower()[:16]
-        for item in raw_values[:10]
-        if str(item).strip()
-    ] if status == "verified" else []
+
+    pinned = pinned_model if isinstance(pinned_model, dict) else {}
+    observed = {"reasoningContract": raw} if raw else {}
+    projected = project_reasoning_contract(
+        pinned,
+        observed,
+        current_provider_fingerprint=provider_fingerprint,
+    )
+    values = [str(item)[:16] for item in list(projected.get("reasoningEffortValues") or [])[:10]]
+    source = str(projected.get("capabilitySource") or projected.get("reasoningDefaultSource") or "")[:32]
+    if values and source == "operator_override":
+        # Operator declaration is enough to show UI; keep probe status secondary.
+        display_status = "verified" if status == "verified" else "declared"
+    elif values and status == "verified":
+        display_status = "verified"
+    else:
+        display_status = status
     return {
-        "reasoningVerificationStatus": status,
+        "reasoningVerificationStatus": display_status,
         "reasoningEffortValues": values,
-        "defaultReasoningEffort": (
-            str(raw.get("default") or "").strip().lower()[:16]
-            if status == "verified"
-            else ""
-        ),
-        "reasoningAdapter": (
-            str(raw.get("adapter") or "none").strip().lower()[:32]
-            if status == "verified"
-            else "none"
-        ),
-        "reasoningCapabilitySource": str(raw.get("source") or "")[:32],
+        "defaultReasoningEffort": str(projected.get("defaultReasoningEffort") or "")[:16],
+        "reasoningAdapter": str(projected.get("reasoningAdapter") or "none")[:32],
+        "reasoningCapabilitySource": source,
         "reasoningCheckedAt": str(raw.get("checkedAt") or "")[:64],
     }
 
@@ -1770,6 +1782,7 @@ def summarize_model_catalog(
                 **_project_catalog_reasoning_contract(
                     catalog_model.get("reasoningContract"),
                     provider_fingerprint=current_provider_fingerprint,
+                    pinned_model=pinned_model,
                 ),
             }
         status = provider_protocol_status or str(

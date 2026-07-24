@@ -167,6 +167,55 @@ def test_summarize_model_catalog_projects_capabilities_without_untrusted_fields(
         assert forbidden not in serialized
 
 
+def test_summarize_model_catalog_projects_operator_reasoning_contract_without_probe() -> None:
+    state = {
+        "schemaVersion": 2,
+        "providers": {
+            "relay_openai": {
+                "status": "reachable",
+                "models": {
+                    "gpt-5.6-luna": {
+                        "upstreamId": "gpt-5.6-luna",
+                        "availability": "pinned",
+                        "reasoningContract": {},
+                    }
+                },
+            }
+        },
+    }
+    public_config = {
+        "llm": {
+            "schema_version": 2,
+            "providers": {
+                "relay_openai": {
+                    "protocols": {"default": "responses", "allowed": ["responses"]},
+                    "discovery": {"cache_ttl_seconds": 300},
+                    "models": {
+                        "gpt-5.6-luna": {
+                            "upstream_id": "gpt-5.6-luna",
+                            "label": "Relay GPT-5.6 Luna",
+                            "enabled": True,
+                            "defaults": {
+                                "reasoning_effort_values": ["low", "medium", "high"],
+                                "default_reasoning_effort": "medium",
+                                "reasoning_effort_adapter": "reasoning_object",
+                            },
+                        }
+                    },
+                }
+            },
+        }
+    }
+
+    summary = summarize_model_catalog(state, public_config=public_config)
+    projected = summary["providers"]["relay_openai"]["models"]["gpt-5.6-luna"]
+    assert projected["reasoningEffortValues"] == ["low", "medium", "high"]
+    assert projected["defaultReasoningEffort"] == "medium"
+    assert projected["reasoningAdapter"] == "reasoning_object"
+    assert projected["reasoningCapabilitySource"] == "operator_override"
+    assert projected["reasoningVerificationStatus"] == "declared"
+
+
 def test_v2_provider_target_allows_local_runtime_private_lan() -> None:
     validate_llm_provider_target(
         _v2_provider(

@@ -144,7 +144,7 @@ export type ConfigCatalogModel = {
   verificationCheckedAt?: string;
   verificationErrorType?: string;
   verificationHttpStatus?: number | null;
-  reasoningVerificationStatus?: "unverified" | "verified" | "failed" | "stale" | string;
+  reasoningVerificationStatus?: "unverified" | "verified" | "failed" | "stale" | "declared" | string;
   reasoningEffortValues?: string[];
   defaultReasoningEffort?: string;
   reasoningAdapter?: string;

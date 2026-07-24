@@ -121,11 +121,40 @@ function capabilityTone(observation: ConfigCapabilityObservation): VStatusTone {
 
 function CapabilityList({ model }: { model: ConfigCatalogModel }) {
   const capabilities = Object.entries(model.capabilities);
-  if (!capabilities.length) {
+  const reasoningValues = model.reasoningEffortValues ?? [];
+  const reasoningSource = String(model.reasoningCapabilitySource || "");
+  const reasoningRows: Array<{ key: string; label: string; detail: string; tone: VStatusTone }> = [];
+  if (reasoningValues.length > 0) {
+    const isOperator = reasoningSource === "operator_override" || model.reasoningVerificationStatus === "declared";
+    reasoningRows.push({
+      key: "reasoning_effort",
+      label: isOperator
+        ? `reasoning: ${reasoningValues.join("/")}`
+        : `reasoning: ${reasoningValues.join("/")}`,
+      detail: isOperator
+        ? `operator_override · 协议声明 · default ${model.defaultReasoningEffort || "-"} · adapter ${model.reasoningAdapter || "none"}`
+        : `${reasoningSource || "verified"} · ${model.reasoningVerificationStatus || "verified"} · adapter ${model.reasoningAdapter || "none"}`,
+      tone: "success",
+    });
+  } else if (["observed", "pinned"].includes(model.availability)) {
+    reasoningRows.push({
+      key: "reasoning_effort_missing",
+      label: "reasoning: 未声明",
+      detail: "pin defaults 写 reasoning_effort_values，或对 Responses 模型验证 low/high",
+      tone: "warning",
+    });
+  }
+  if (!capabilities.length && !reasoningRows.length) {
     return <span className={styles.capabilityUnknown}>未观测</span>;
   }
   return (
     <div className={styles.capabilityList}>
+      {reasoningRows.map((row) => (
+        <span key={row.key} className={styles.providerIdentity} data-capability="reasoning_effort">
+          <VStatusChip tone={row.tone}>{row.label}</VStatusChip>
+          <small className={styles.muted} title={row.detail}>{row.detail}</small>
+        </span>
+      ))}
       {capabilities.map(([name, observation]) => (
         <span key={name} className={styles.providerIdentity}>
           <VStatusChip tone={capabilityTone(observation)}>
@@ -315,12 +344,22 @@ export function ProviderModelsTab({
               const reasoningValues = reasoningFeedback?.phase === "success"
                 ? reasoningFeedback.values
                 : model.reasoningEffortValues ?? [];
+              const reasoningSource = String(model.reasoningCapabilitySource || "");
+              const reasoningDeclared = (
+                reasoningValues.length > 0
+                && (
+                  reasoningSource === "operator_override"
+                  || model.reasoningVerificationStatus === "declared"
+                )
+              );
               const reasoningVerified = reasoningFeedback?.phase === "success"
                 || model.reasoningVerificationStatus === "verified";
+              const reasoningHasContract = reasoningDeclared || reasoningVerified || reasoningValues.length > 0;
+              // T6: probe is optional evidence; operator declaration already enables UI (D1).
               const reasoningProbeAvailable = (
                 provider.defaultProtocol === "responses"
                 && ["observed", "pinned"].includes(model.availability)
-                && !reasoningVerified
+                && !reasoningHasContract
                 && !provider.refreshDue
               );
               return (
@@ -341,15 +380,25 @@ export function ProviderModelsTab({
                           : "验证图片输入"}
                     </VButton>
                   ) : null}
-                  {reasoningVerified ? (
-                    <span className={styles.modelActionState} data-model-reasoning="verified">
-                      推理 {reasoningValues.join(" / ")} 已验证
+                  {reasoningHasContract ? (
+                    <span
+                      className={styles.modelActionState}
+                      data-model-reasoning={reasoningDeclared && !reasoningVerified ? "declared" : "verified"}
+                      title={
+                        reasoningDeclared && !reasoningVerified
+                          ? "运营协议合同已声明；Composer 可显示档位。可选再验证 low/high 取证。"
+                          : "运行时验证已保存能力证据。完整档位仍以运营协议合同为准。"
+                      }
+                    >
+                      {reasoningDeclared && !reasoningVerified
+                        ? `协议已声明 ${reasoningValues.join(" / ")}`
+                        : `推理 ${reasoningValues.join(" / ")} 已验证`}
                     </span>
                   ) : reasoningProbeAvailable ? (
                     <VButton
                       density="compact"
                       isDisabled={disabled || reasoningFeedback?.phase === "busy"}
-                      title="分别发送 low/high 两次最小 Responses 请求；全部成功才保存能力证据。"
+                      title="一期探测仅验证 low/high + reasoning_object（Responses）。成功后保存能力证据；完整档位（medium/xhigh 等）请在 pin defaults 写协议合同。"
                       onPress={() => onProbeReasoning?.(model.modelRef)}
                     >
                       {reasoningFeedback?.phase === "busy" ? "验证推理中…" : "验证推理 low / high"}
@@ -533,7 +582,7 @@ export function ConfigProviderRegistryPanel({
         [modelRef]: {
           phase: "success",
           values,
-          message: `已验证并保存 ${values.join(" / ")}`,
+          message: `已验证并保存 ${values.join(" / ")}（一期仅 low/high；完整档位请写 pin defaults 协议合同）`,
         },
       }));
     } catch (error) {
