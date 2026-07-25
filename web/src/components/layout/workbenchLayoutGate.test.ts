@@ -204,6 +204,29 @@ describe("workbench layout gate (Wave 5)", () => {
     expect(memory).toContain('data-vui-recipe="memory-knowledge-workbench"');
   });
 
+  it("keeps remaining workbench routes on domain recipe markers (Wave 7A)", () => {
+    const samples: Array<{ file: string; recipe: string }> = [
+      { file: "routes/LogsRoute.tsx", recipe: "logs-workbench" },
+      { file: "routes/GitRoute.tsx", recipe: "git-workbench" },
+      { file: "routes/ToolsRoute.tsx", recipe: "tools-workbench" },
+      { file: "routes/EvolutionRoute.tsx", recipe: "evolution-workbench" },
+      { file: "routes/LauncherRoute.tsx", recipe: "launcher-workbench" },
+      { file: "routes/SupervisedReviewRoute.tsx", recipe: "supervised-review-workbench" },
+      { file: "routes/SelfEvolutionTrack.tsx", recipe: "evolution-self-workbench" },
+      { file: "routes/SkillsRoute.tsx", recipe: "skills-workbench" },
+      { file: "routes/KernelTaskCenterRoute.tsx", recipe: "kernel-task-center-workbench" },
+      { file: "routes/PromptTemplatesRoute.tsx", recipe: "prompt-templates-workbench" },
+    ];
+    for (const sample of samples) {
+      const text = readFileSync(resolve(webSrc, sample.file), "utf-8");
+      expect(
+        text.includes(`data-vui-recipe="${sample.recipe}"`)
+        || text.includes(`data-vui-domain-recipe="${sample.recipe}"`),
+        sample.file,
+      ).toBe(true);
+    }
+  });
+
   it("keeps route resize class maps placement-only (Wave 6A)", () => {
     const samples: Array<{ file: string; key: string }> = [
       { file: "routes/GitRoute.styles.ts", key: "resizeHandle" },

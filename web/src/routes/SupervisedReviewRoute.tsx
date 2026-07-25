@@ -427,7 +427,7 @@ export function SupervisedReviewRoute() {
       ];
 
   return (
-    <div className={styles.page}>
+    <div className={styles.page} data-vui-recipe="supervised-review-workbench">
       <section className={styles.toolbar}>
         <div className={styles.toolbarIntro}>
           <p className={styles.eyebrow}>{t("navSupervisedEvolution")}</p>
@@ -502,7 +502,9 @@ export function SupervisedReviewRoute() {
         ref={reviewLayoutRef}
         className={styles.workspace}
         style={workspaceStyle}
+        data-vui-recipe="supervised-review-workbench"
         data-vui-layout-id={REVIEW_LAYOUT_ID}
+        data-vui-region="supervised-review-workspace"
       >
         <aside className={queuePanelCollapsed ? `${styles.queuePanel} ${styles.paneCollapsed}` : styles.queuePanel} aria-hidden={queuePanelCollapsed}>
           <div className={styles.panelHeader}>

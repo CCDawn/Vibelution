@@ -1,8 +1,8 @@
 /**
- * Wave 6B domain workbench composition — Agents / Teams / Memory.
+ * Domain workbench composition contracts (Wave 6B + Wave 7A).
  *
- * Domain shells keep custom multi-pane layouts (not forced onto VListDetailPage).
- * Composition means:
+ * Domain shells keep custom multi-pane layouts (not forced onto VListDetailPage
+ * unless they already use that recipe). Composition means:
  * - domain recipe / domain-recipe markers
  * - region markers for directory-or-canvas / detail-or-inspector rails
  * - shared layoutId registry for permanent width (and height where applicable)
@@ -57,5 +57,36 @@ describe("Wave 6B Memory knowledge workbench composition", () => {
     expect(graphSource).toContain("graph-node-list");
     expect(graphSource).toContain('data-vui-region="memory-graph-canvas"');
     expect(graphSource).toContain('data-vui-region="memory-graph-node-list"');
+  });
+});
+
+describe("Wave 7A remaining workbench domain recipes", () => {
+  const cases: Array<{ file: string; recipe: string; layoutToken: string }> = [
+    { file: "LogsRoute.tsx", recipe: "logs-workbench", layoutToken: "WORKBENCH_LAYOUT_IDS.logs" },
+    { file: "GitRoute.tsx", recipe: "git-workbench", layoutToken: "WORKBENCH_LAYOUT_IDS.git" },
+    { file: "ToolsRoute.tsx", recipe: "tools-workbench", layoutToken: "WORKBENCH_LAYOUT_IDS.tools" },
+    { file: "EvolutionRoute.tsx", recipe: "evolution-workbench", layoutToken: "WORKBENCH_LAYOUT_IDS.evolution" },
+    { file: "LauncherRoute.tsx", recipe: "launcher-workbench", layoutToken: "WORKBENCH_LAYOUT_IDS.launcher" },
+    { file: "SupervisedReviewRoute.tsx", recipe: "supervised-review-workbench", layoutToken: "WORKBENCH_LAYOUT_IDS.supervisedReview" },
+    { file: "SelfEvolutionTrack.tsx", recipe: "evolution-self-workbench", layoutToken: "WORKBENCH_LAYOUT_IDS.evolutionSelf" },
+  ];
+
+  it.each(cases)("marks $file with $recipe + registry layout id", ({ file, recipe, layoutToken }) => {
+    const source = readFileSync(resolve(routesRoot, file), "utf8");
+    expect(source).toContain(`data-vui-recipe="${recipe}"`);
+    expect(source).toContain("data-vui-layout-id");
+    expect(source).toContain(layoutToken);
+  });
+
+  it("marks list-detail pages with domain-recipe overlays", () => {
+    const skills = readFileSync(resolve(routesRoot, "SkillsRoute.tsx"), "utf8");
+    const kernel = readFileSync(resolve(routesRoot, "KernelTaskCenterRoute.tsx"), "utf8");
+    const prompts = readFileSync(resolve(routesRoot, "PromptTemplatesRoute.tsx"), "utf8");
+    expect(skills).toContain('data-vui-domain-recipe="skills-workbench"');
+    expect(skills).toContain("WORKBENCH_LAYOUT_IDS.skills");
+    expect(kernel).toContain('data-vui-domain-recipe="kernel-task-center-workbench"');
+    expect(kernel).toContain("WORKBENCH_LAYOUT_IDS.kernelTaskCenter");
+    expect(prompts).toContain('data-vui-domain-recipe="prompt-templates-workbench"');
+    expect(prompts).toContain("WORKBENCH_LAYOUT_IDS.promptTemplates");
   });
 });

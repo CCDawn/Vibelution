@@ -136,6 +136,21 @@ Prefer these shared APIs for any new vertical splitter; do not reintroduce priva
 
 Policy source: `components/layout/dialogHeightPolicy.ts`. Gate blocks workbench height APIs inside `CacheDetailDialog` / `AgentCreateWizardDialog`.
 
+## Wave 7A domain recipe coverage
+
+Every primary workbench shell should expose a stable domain marker for contracts/debugging:
+
+| Route / shell | Marker |
+| --- | --- |
+| Logs / Git / Tools | `data-vui-domain-recipe` on `VDenseOpsPage` + `data-vui-recipe` on resizable workspace |
+| Evolution | `data-vui-recipe="evolution-workbench"` on page root |
+| Self-evolution track | `data-vui-recipe="evolution-self-workbench"` on workspace layout |
+| Launcher | `data-vui-recipe="launcher-workbench"` on route + workspace |
+| Supervised review | `data-vui-recipe="supervised-review-workbench"` on page + workspace |
+| Skills / Kernel / Prompt templates | `data-vui-domain-recipe` on `VListDetailPage` (page recipe remains `list-detail-page`) |
+
+Gate: `workbenchLayoutGate` + `design/vuiDomainWorkbenchCompositionContract.test.ts`.
+
 ## Wave 6D Chat shell boundary + more height reuse
 
 | Surface | Contract |

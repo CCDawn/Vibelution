@@ -2075,7 +2075,7 @@ export function LauncherRoute() {
   }, [launcherCloseGuardArmed, launcherCloseGuardMessage, status]);
 
   return (
-    <section className={styles.route} aria-label={copy.title}>
+    <section className={styles.route} aria-label={copy.title} data-vui-recipe="launcher-workbench">
       <VRouteHeader
         className={styles.header}
         aria-label={lifecycleDisplay.detail || copy.subtitle}
@@ -2219,6 +2219,7 @@ export function LauncherRoute() {
         ref={launcherLayoutRef}
         className={styles.workspace}
         style={launcherLayoutStyle}
+        data-vui-recipe="launcher-workbench"
         data-vui-layout-id={LAUNCHER_LAYOUT_ID}
       >
         <section className={`${styles.panel} ${styles.matrixPanel}`}>
