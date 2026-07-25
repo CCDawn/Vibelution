@@ -240,6 +240,7 @@ export function SkillsRoute() {
       headerClassName={styles.headerClass}
       workspaceClassName={styles.workspaceClass}
       columnsClassName=""
+      layoutId="skills"
       ariaLabel={copy.title}
       eyebrow={copy.eyebrow}
       title={copy.title}

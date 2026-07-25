@@ -81,7 +81,11 @@ export { VPanelHeader, type VPanelHeaderProps } from "./layout/VPanelHeader";
 export { VRouteHeader, type VRouteHeaderProps } from "./layout/VRouteHeader";
 export { VSection, type VSectionProps } from "./layout/VSection";
 export { VSettingsFormPage, type VSettingsFormPageProps } from "./layout/VSettingsFormPage";
-export { VSplitWorkspace, type VSplitWorkspaceProps } from "./layout/VSplitWorkspace";
+export {
+  VSplitWorkspace,
+  type VSplitWorkspaceProps,
+  type VSplitWorkspaceResizeConfig,
+} from "./layout/VSplitWorkspace";
 export { VStatusStrip, type VStatusStripItem, type VStatusStripProps, type VStatusStripTone } from "./layout/VStatusStrip";
 export { VStack, type VStackProps } from "./layout/VStack";
 export { VToolbar, type VToolbarProps } from "./layout/VToolbar";

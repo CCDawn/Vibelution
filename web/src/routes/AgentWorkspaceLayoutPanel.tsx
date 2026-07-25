@@ -1,14 +1,16 @@
 import {
-  useCallback,
   useEffect,
-  useRef,
-  useState,
   type ComponentProps,
   type CSSProperties,
-  type KeyboardEvent as ReactKeyboardEvent,
-  type PointerEvent as ReactPointerEvent,
 } from "react";
 
+import { PaneResizeHandle } from "../components/layout/PaneResizeHandle";
+import {
+  readPaneLayout,
+  writePaneLayout,
+  type PaneSpec,
+} from "../components/layout/paneLayoutPersistence";
+import { usePersistedPaneResize } from "../components/layout/usePersistedPaneResize";
 import { AgentFilterRail } from "../components/vui/product/agent-management";
 import { VNativeButton } from "../components/vui";
 import { AgentDetailWorkspacePanel } from "./AgentDetailWorkspacePanel";
@@ -16,29 +18,25 @@ import { AgentInspectorRailPanel } from "./AgentInspectorRailPanel";
 import { AgentListWorkspacePanel } from "./AgentListWorkspacePanel";
 import styles from "./AgentWorkspaceLayoutPanel.styles";
 
-const STORAGE_KEY = "vibelution.agent-workspace.column-widths.v1";
-const DEFAULT_LEFT = 340;
-const DEFAULT_RIGHT = 360;
-const MIN_LEFT = 280;
-const MAX_LEFT = 440;
-const MIN_RIGHT = 300;
-const MAX_RIGHT = 440;
-const MIN_MAIN = 560;
-const KEYBOARD_STEP = 24;
+const LAYOUT_ID = "agents";
+const LEGACY_STORAGE_KEY = "vibelution.agent-workspace.column-widths.v1";
 
-type ColumnWidths = {
-  left: number;
-  right: number;
+const LEFT_PANE: PaneSpec = {
+  id: "left",
+  defaultWidth: 340,
+  minWidth: 280,
+  maxWidth: 440,
 };
 
-type DragSide = "left" | "right";
-
-type DragState = {
-  side: DragSide;
-  startX: number;
-  startLeft: number;
-  startRight: number;
+const RIGHT_PANE: PaneSpec = {
+  id: "right",
+  defaultWidth: 360,
+  minWidth: 300,
+  maxWidth: 440,
 };
+
+const PANES_WITH_INSPECTOR: PaneSpec[] = [LEFT_PANE, RIGHT_PANE];
+const PANES_WITHOUT_INSPECTOR: PaneSpec[] = [LEFT_PANE];
 
 type AgentWorkspaceLayoutPanelProps = {
   detailWorkspace: ComponentProps<typeof AgentDetailWorkspacePanel>;
@@ -47,45 +45,28 @@ type AgentWorkspaceLayoutPanelProps = {
   inspectorRail?: ComponentProps<typeof AgentInspectorRailPanel> | null;
 };
 
-function clamp(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, value));
-}
-
-function readStoredWidths(): ColumnWidths {
+/** One-time migrate legacy agent-workspace key into shared pane-layouts store. */
+function migrateLegacyAgentWidths(): void {
+  if (typeof window === "undefined") {
+    return;
+  }
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const existing = readPaneLayout(LAYOUT_ID);
+    if (existing.left || existing.right) {
+      return;
+    }
+    const raw = window.localStorage.getItem(LEGACY_STORAGE_KEY);
     if (!raw) {
-      return { left: DEFAULT_LEFT, right: DEFAULT_RIGHT };
+      return;
     }
-    const parsed = JSON.parse(raw) as Partial<ColumnWidths>;
-    return {
-      left: clamp(Number(parsed.left) || DEFAULT_LEFT, MIN_LEFT, MAX_LEFT),
-      right: clamp(Number(parsed.right) || DEFAULT_RIGHT, MIN_RIGHT, MAX_RIGHT),
-    };
+    const parsed = JSON.parse(raw) as { left?: number; right?: number };
+    writePaneLayout(LAYOUT_ID, {
+      left: Number(parsed.left) || LEFT_PANE.defaultWidth,
+      right: Number(parsed.right) || RIGHT_PANE.defaultWidth,
+    });
   } catch {
-    return { left: DEFAULT_LEFT, right: DEFAULT_RIGHT };
+    // ignore
   }
-}
-
-function normalizeWidths(totalWidth: number, left: number, right: number, hasInspector: boolean): ColumnWidths {
-  if (!totalWidth) {
-    return { left, right };
-  }
-  let nextLeft = clamp(left, MIN_LEFT, MAX_LEFT);
-  let nextRight = hasInspector ? clamp(right, MIN_RIGHT, MAX_RIGHT) : 0;
-  const handles = hasInspector ? 12 : 6;
-  const maxSideBudget = Math.max(MIN_MAIN, totalWidth - MIN_MAIN - handles);
-  if (hasInspector) {
-    const sideTotal = nextLeft + nextRight;
-    if (sideTotal > maxSideBudget) {
-      const scale = maxSideBudget / sideTotal;
-      nextLeft = clamp(Math.round(nextLeft * scale), MIN_LEFT, MAX_LEFT);
-      nextRight = clamp(maxSideBudget - nextLeft, MIN_RIGHT, MAX_RIGHT);
-    }
-  } else if (nextLeft > maxSideBudget) {
-    nextLeft = clamp(maxSideBudget, MIN_LEFT, MAX_LEFT);
-  }
-  return { left: nextLeft, right: nextRight || DEFAULT_RIGHT };
 }
 
 export function AgentWorkspaceLayoutPanel({
@@ -95,113 +76,30 @@ export function AgentWorkspaceLayoutPanel({
   inspectorRail = null,
 }: AgentWorkspaceLayoutPanelProps) {
   const hasInspector = Boolean(inspectorRail);
-  const layoutRef = useRef<HTMLDivElement | null>(null);
-  const [widths, setWidths] = useState<ColumnWidths>(() => (
-    typeof window === "undefined" ? { left: DEFAULT_LEFT, right: DEFAULT_RIGHT } : readStoredWidths()
-  ));
-  const [dragState, setDragState] = useState<DragState | null>(null);
+  const panes = hasInspector ? PANES_WITH_INSPECTOR : PANES_WITHOUT_INSPECTOR;
 
-  const persistWidths = useCallback((next: ColumnWidths) => {
-    setWidths(next);
-    try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-    } catch {
-      // ignore storage failures
-    }
+  useEffect(() => {
+    migrateLegacyAgentWidths();
   }, []);
 
-  const syncToContainer = useCallback(() => {
-    const total = layoutRef.current?.getBoundingClientRect().width ?? 0;
-    if (!total) {
-      return;
-    }
-    const normalized = normalizeWidths(total, widths.left, widths.right, hasInspector);
-    if (normalized.left !== widths.left || normalized.right !== widths.right) {
-      persistWidths(normalized);
-    }
-  }, [hasInspector, persistWidths, widths.left, widths.right]);
+  const {
+    layoutRef,
+    widths,
+    draggingPaneId,
+    startResize,
+    onResizeKeyDown,
+  } = usePersistedPaneResize({
+    layoutId: LAYOUT_ID,
+    panes,
+    preserveMainMinWidth: 560,
+  });
 
-  useEffect(() => {
-    syncToContainer();
-    const element = layoutRef.current;
-    if (!element || typeof ResizeObserver === "undefined") {
-      return;
-    }
-    const observer = new ResizeObserver(() => syncToContainer());
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [syncToContainer]);
-
-  useEffect(() => {
-    if (!dragState) {
-      return;
-    }
-    const onMove = (event: PointerEvent) => {
-      const total = layoutRef.current?.getBoundingClientRect().width ?? 0;
-      const delta = event.clientX - dragState.startX;
-      if (dragState.side === "left") {
-        const nextLeft = clamp(dragState.startLeft + delta, MIN_LEFT, MAX_LEFT);
-        const normalized = normalizeWidths(total, nextLeft, dragState.startRight, hasInspector);
-        setWidths(normalized);
-        return;
-      }
-      const nextRight = clamp(dragState.startRight - delta, MIN_RIGHT, MAX_RIGHT);
-      const normalized = normalizeWidths(total, dragState.startLeft, nextRight, hasInspector);
-      setWidths(normalized);
-    };
-    const onUp = () => {
-      setDragState(null);
-      setWidths((current) => {
-        try {
-          window.localStorage.setItem(STORAGE_KEY, JSON.stringify(current));
-        } catch {
-          // ignore
-        }
-        return current;
-      });
-    };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-    window.addEventListener("pointercancel", onUp);
-    return () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      window.removeEventListener("pointercancel", onUp);
-    };
-  }, [dragState, hasInspector]);
-
-  const startResize = (side: DragSide, event: ReactPointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0) {
-      return;
-    }
-    event.preventDefault();
-    setDragState({
-      side,
-      startX: event.clientX,
-      startLeft: widths.left,
-      startRight: widths.right,
-    });
-  };
-
-  const onResizeKeyDown = (side: DragSide, event: ReactKeyboardEvent<HTMLDivElement>) => {
-    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
-      return;
-    }
-    event.preventDefault();
-    const total = layoutRef.current?.getBoundingClientRect().width ?? 0;
-    const delta = event.key === "ArrowRight" ? KEYBOARD_STEP : -KEYBOARD_STEP;
-    if (side === "left") {
-      const nextLeft = clamp(widths.left + delta, MIN_LEFT, MAX_LEFT);
-      persistWidths(normalizeWidths(total, nextLeft, widths.right, hasInspector));
-      return;
-    }
-    const nextRight = clamp(widths.right - delta, MIN_RIGHT, MAX_RIGHT);
-    persistWidths(normalizeWidths(total, widths.left, nextRight, hasInspector));
-  };
+  const leftWidth = widths.left ?? LEFT_PANE.defaultWidth;
+  const rightWidth = widths.right ?? RIGHT_PANE.defaultWidth;
 
   const layoutStyle = {
-    ["--agent-left-w" as string]: `${widths.left}px`,
-    ["--agent-right-w" as string]: `${widths.right}px`,
+    ["--agent-left-w" as string]: `${leftWidth}px`,
+    ["--agent-right-w" as string]: `${rightWidth}px`,
   } as CSSProperties;
 
   return (
@@ -214,7 +112,7 @@ export function AgentWorkspaceLayoutPanel({
     >
       <div
         className={styles.directory}
-        style={{ width: widths.left, flexBasis: widths.left }}
+        style={{ width: leftWidth, flexBasis: leftWidth }}
         data-agent-pane="directory"
       >
         <div className={styles.directoryFilter}>
@@ -225,20 +123,18 @@ export function AgentWorkspaceLayoutPanel({
         </div>
       </div>
 
-      <div
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="调整目录栏宽度"
-        aria-valuenow={Math.round(widths.left)}
-        aria-valuemin={MIN_LEFT}
-        aria-valuemax={MAX_LEFT}
-        tabIndex={0}
+      <PaneResizeHandle
+        label="调整目录栏宽度"
+        valueNow={leftWidth}
+        valueMin={LEFT_PANE.minWidth}
+        valueMax={LEFT_PANE.maxWidth}
+        active={draggingPaneId === "left"}
         className={[
           styles.resizeHandle,
-          dragState?.side === "left" ? styles.resizeHandleActive : "",
+          draggingPaneId === "left" ? styles.resizeHandleActive : "",
         ].filter(Boolean).join(" ")}
-        onPointerDown={(event) => startResize("left", event)}
-        onKeyDown={(event) => onResizeKeyDown("left", event)}
+        onPointerDown={(event) => startResize("left", event, { direction: 1 })}
+        onKeyDown={(event) => onResizeKeyDown("left", event, { direction: 1 })}
       />
 
       <div className={styles.main} data-agent-pane="main">
@@ -253,25 +149,23 @@ export function AgentWorkspaceLayoutPanel({
             aria-label={inspectorRail.closeLabel || inspectorRail.title}
             onClick={inspectorRail.onClose}
           />
-          <div
-            role="separator"
-            aria-orientation="vertical"
-            aria-label="调整侧栏宽度"
-            aria-valuenow={Math.round(widths.right)}
-            aria-valuemin={MIN_RIGHT}
-            aria-valuemax={MAX_RIGHT}
-            tabIndex={0}
+          <PaneResizeHandle
+            label="调整侧栏宽度"
+            valueNow={rightWidth}
+            valueMin={RIGHT_PANE.minWidth}
+            valueMax={RIGHT_PANE.maxWidth}
+            active={draggingPaneId === "right"}
             className={[
               styles.resizeHandle,
               styles.inspectorResizeHandle,
-              dragState?.side === "right" ? styles.resizeHandleActive : "",
+              draggingPaneId === "right" ? styles.resizeHandleActive : "",
             ].filter(Boolean).join(" ")}
-            onPointerDown={(event) => startResize("right", event)}
-            onKeyDown={(event) => onResizeKeyDown("right", event)}
+            onPointerDown={(event) => startResize("right", event, { direction: -1 })}
+            onKeyDown={(event) => onResizeKeyDown("right", event, { direction: -1 })}
           />
           <div
             className={styles.inspector}
-            style={{ width: widths.right, flexBasis: widths.right }}
+            style={{ width: rightWidth, flexBasis: rightWidth }}
             data-agent-pane="inspector"
           >
             <AgentInspectorRailPanel {...inspectorRail} />

@@ -1,7 +1,7 @@
 import { type ComponentPropsWithoutRef, type ReactNode } from "react";
 
 import { VRouteHeader } from "./VRouteHeader";
-import { VSplitWorkspace } from "./VSplitWorkspace";
+import { VSplitWorkspace, type VSplitWorkspaceResizeConfig } from "./VSplitWorkspace";
 import { VWorkbenchPage } from "./VWorkbenchPage";
 
 export type VListDetailPageProps = Omit<ComponentPropsWithoutRef<"section">, "children"> & {
@@ -26,8 +26,16 @@ export type VListDetailPageProps = Omit<ComponentPropsWithoutRef<"section">, "ch
   workspaceClassName?: string;
   /**
    * Override default split columns. Pass `""` when workspaceClassName owns columns.
+   * Ignored when `layoutId` enables resizable panes.
    */
   columnsClassName?: string;
+  /**
+   * Stable id for permanent sidebar width memory (localStorage).
+   * When set, left/right rails are draggable and widths persist across reloads.
+   */
+  layoutId?: string;
+  /** Optional min/max/default overrides for resizable panes. */
+  resize?: Omit<VSplitWorkspaceResizeConfig, "layoutId">;
   className?: string;
 };
 
@@ -48,9 +56,15 @@ export function VListDetailPage({
   aside,
   workspaceClassName,
   columnsClassName,
+  layoutId,
+  resize,
   className,
   ...props
 }: VListDetailPageProps) {
+  const resizeConfig = layoutId
+    ? { layoutId, enabled: true, ...resize }
+    : false;
+
   return (
     <VWorkbenchPage ariaLabel={ariaLabel} className={className} data-vui-recipe="list-detail-page" {...props}>
       <VRouteHeader
@@ -67,6 +81,7 @@ export function VListDetailPage({
         sidebar={list}
         main={detail}
         aside={aside}
+        resize={resizeConfig}
       />
     </VWorkbenchPage>
   );
