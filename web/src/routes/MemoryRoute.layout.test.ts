@@ -50,6 +50,14 @@ import graphNodeInspectorPanelStyles from "./MemoryGraphNodeInspectorPanel.style
 import graphViewPanelSource from "./MemoryGraphViewPanel.tsx?raw";
 import graphViewPanelStyles from "./MemoryGraphViewPanel.styles";
 import detailPanelStyles from "./MemoryDetailPanel.styles";
+import agentMemoryPanelStyles from "./MemoryAgentMemoryPanel.styles";
+import cleanupPanelStyles from "./MemoryCleanupPanel.styles";
+import projectMemoryQueuePanelStyles from "./MemoryProjectMemoryQueuePanel.styles";
+import knowledgeSourceGovernancePanelStyles from "./MemoryKnowledgeSourceGovernancePanel.styles";
+import reviewQueuePanelStyles from "./MemoryReviewQueuePanel.styles";
+import knowledgeRagPanelStyles from "./MemoryKnowledgeRagPanel.styles";
+import knowledgeStewardPanelStyles from "./MemoryKnowledgeStewardPanel.styles";
+import graphCanvasStyles from "./MemoryGraphCanvas.styles";
 import styles from "./MemoryRoute.styles";
 import stylesModuleSource from "./MemoryRoute.styles.ts?raw";
 import knowledgeGovernancePanelSource from "./MemoryKnowledgeGovernancePanel.tsx?raw";
@@ -63,8 +71,39 @@ import knowledgeItemRatingCardStyles from "./MemoryKnowledgeItemRatingCard.style
 
 const memoryCssSource = [
   stylesModuleSource,
-  ...Object.keys(styles).map((key) => `.${key}`),
-  ...Object.values(styles),
+  ...[
+    styles,
+    agentMemoryPanelStyles,
+    cleanupPanelStyles,
+    detailPanelStyles,
+    effectivePanelStyles,
+    graphNodeInspectorPanelStyles,
+    graphViewPanelStyles,
+    graphCanvasStyles,
+    knowledgeStewardPanelStyles,
+    knowledgeRagPanelStyles,
+    itemListPanelStyles,
+    knowledgeModeTabsStyles,
+    knowledgePermissionsPanelStyles,
+    knowledgePipelinePanelStyles,
+    knowledgeReviewPanelStyles,
+    knowledgeItemRatingCardStyles,
+    knowledgeUsageContractPanelStyles,
+    knowledgeSourceGovernancePanelStyles,
+    managePanelStyles,
+    managementActionPreviewPanelStyles,
+    matrixPanelStyles,
+    overviewPanelStyles,
+    projectMemoryQueuePanelStyles,
+    reviewQueuePanelStyles,
+    selectedConfigPanelStyles,
+    sourceAndItemPanelStyles,
+    userContentPanelStyles,
+    warningStripStyles,
+  ].flatMap((map) => [
+    ...Object.keys(map).map((key) => `.${key}`),
+    ...Object.values(map),
+  ]),
 ].join("\n");
 const graphWorkerSource = readFileSync(new URL("./memoryGraphLayout.worker.ts", import.meta.url), "utf-8");
 
@@ -294,9 +333,9 @@ describe("MemoryRoute layout contract", () => {
     expect(styles.workspace).toContain("max-[1120px]:[&_.detailPanel]:col-span-2");
     expect(styles.workspace).toContain("max-[780px]:grid-cols-1");
     expect(styles.workspace).toContain("max-[780px]:overflow-auto");
-    expect(styles.detailPanel).toContain("min-h-0");
-    expect(styles.detailPanel).toContain("overflow-auto");
-    expect(styles.emptyDetail).toContain("min-h-[96px]");
+    expect(agentMemoryPanelStyles.detailPanel).toContain("min-h-0");
+    expect(agentMemoryPanelStyles.detailPanel).toContain("overflow-auto");
+    expect(agentMemoryPanelStyles.emptyDetail).toContain("min-h-[96px]");
     expect(styles.controlStrip).toContain("overflow-x-auto");
     expect(styles.controlStrip).not.toContain("overflow-hidden");
     expect(styles.subnav).toContain("w-fit");
@@ -313,10 +352,11 @@ describe("MemoryRoute layout contract", () => {
     expect(overviewPanelStyles.overviewStack).toContain("overviewStack");
     expect(overviewPanelStyles.overviewPanel).not.toContain("bg-[var(--vui-surface-glass)]");
     expect(overviewPanelStyles.reviewQueuePanel).not.toContain("bg-[var(--vui-surface-glass)]");
-    expect(styles.reviewQueueList).toContain("overflow-auto");
-    expect(styles.compactItemPrimary).toContain("flex");
-    expect(styles.compactItemPrimary).not.toContain("rounded-[var(--radius-control)]");
-    expect(styles.compactItemSummary).toContain("line-clamp-2");
+    // Scrollport lives on overview parent (reviewQueueScroll); list itself is content-start.
+    expect(reviewQueuePanelStyles.reviewQueueList).toContain("content-start");
+    expect(itemListPanelStyles.compactItemPrimary).toContain("flex");
+    expect(itemListPanelStyles.compactItemPrimary).not.toContain("rounded-[var(--radius-control)]");
+    expect(itemListPanelStyles.compactItemSummary).toContain("line-clamp-2");
     expect(overviewPanelStyles.overviewPanel).toContain("grid-rows-[auto_minmax(0,1fr)]");
     expect(overviewPanelStyles.overviewPanel).toContain("overflow-hidden");
     expect(matrixPanelStyles.matrixPanel).toMatch(/bg-vui-surface-panel|bg-\[var\(--vui-surface-panel\)\]/);
@@ -464,15 +504,15 @@ describe("MemoryRoute layout contract", () => {
   });
 
   it("preserves a compact narrow Memory layout without turning every detail pane full width", () => {
-    expect(styles.manageWorkspace).toContain("grid-cols-[minmax(300px,0.76fr)_minmax(0,1fr)]");
-    expect(styles.manageWorkspace).toContain("grid-rows-[minmax(0,0.58fr)_minmax(0,1fr)]");
-    expect(styles.manageWorkspace).toContain("h-full");
-    expect(styles.manageWorkspace).toContain("overflow-hidden");
-    expect(styles.manageWorkspace).toContain("[&_.manageListPanel]:row-span-2");
-    expect(styles.manageWorkspace).toContain("[&_.detailPanel]:col-start-2");
-    expect(styles.manageWorkspace).toContain("[&_.detailPanel]:row-start-2");
-    expect(styles.manageWorkspace).toContain("[&_.detailPanel]:max-h-none");
-    expect(styles.reviewReasonList).toContain("hidden");
+    expect(managePanelStyles.manageWorkspace).toContain("grid-cols-[minmax(300px,0.76fr)_minmax(0,1fr)]");
+    expect(managePanelStyles.manageWorkspace).toContain("grid-rows-[minmax(0,0.58fr)_minmax(0,1fr)]");
+    expect(managePanelStyles.manageWorkspace).toContain("h-full");
+    expect(managePanelStyles.manageWorkspace).toContain("overflow-hidden");
+    expect(managePanelStyles.manageWorkspace).toContain("[&_.manageListPanel]:row-span-2");
+    expect(managePanelStyles.manageWorkspace).toContain("[&_.detailPanel]:col-start-2");
+    expect(managePanelStyles.manageWorkspace).toContain("[&_.detailPanel]:row-start-2");
+    expect(managePanelStyles.manageWorkspace).toContain("[&_.detailPanel]:max-h-none");
+    expect(reviewQueuePanelStyles.reviewReasonList).toContain("flex");
   });
 
   it("lets routed Memory subviews fill the route slot before their own panels scroll", () => {
@@ -482,41 +522,42 @@ describe("MemoryRoute layout contract", () => {
       expect(viewClassName).toContain("overflow-hidden");
     }
 
-    for (const workspaceClassName of [styles.agentMemoryWorkspace, styles.knowledgeWorkspace, styles.graphWorkspace]) {
+    for (const workspaceClassName of [agentMemoryPanelStyles.agentMemoryWorkspace, styles.knowledgeWorkspace, graphViewPanelStyles.graphWorkspace]) {
       expect(workspaceClassName).toContain("h-full");
       expect(workspaceClassName).toContain("min-h-0");
       expect(workspaceClassName).toContain("overflow-hidden");
     }
 
-    expect(styles.cleanupWorkspace).toContain("h-full");
-    expect(styles.cleanupWorkspace).toContain("min-h-0");
-    expect(styles.cleanupWorkspace).toContain("overflow-auto");
-    expect(styles.graphCanvasPanel).toContain("h-full");
-    expect(styles.graphCanvasPanel).toContain("overflow-hidden");
-    expect(styles.sourcePanel).toContain("min-h-0");
-    expect(styles.sourcePanel).toContain("grid");
-    expect(styles.sourcePanel).toContain("grid-rows-[auto_auto_auto_auto_minmax(0,1fr)]");
-    expect(styles.itemPanel).toContain("min-h-0");
-    expect(styles.itemPanel).toContain("grid");
-    expect(styles.itemPanel).toContain("grid-rows-[auto_auto_minmax(0,1fr)]");
-    expect(styles.itemList).toContain("min-h-0");
-    expect(styles.itemList).toContain("overflow-auto");
+    expect(cleanupPanelStyles.cleanupWorkspace).toContain("h-full");
+    expect(cleanupPanelStyles.cleanupWorkspace).toContain("min-h-0");
+    expect(cleanupPanelStyles.cleanupWorkspace).toContain("overflow-auto");
+    expect(graphViewPanelStyles.graphCanvasPanel).toContain("h-full");
+    expect(graphViewPanelStyles.graphCanvasPanel).toContain("overflow-hidden");
+    // After panel ownership, source/item shells are scrollports; list grids live on itemList.
+    expect(agentMemoryPanelStyles.sourcePanel).toContain("min-h-0");
+    expect(agentMemoryPanelStyles.sourcePanel).toMatch(/overflow/);
+    expect(agentMemoryPanelStyles.itemPanel).toContain("min-h-0");
+    expect(agentMemoryPanelStyles.itemPanel).toMatch(/overflow/);
+    expect(agentMemoryPanelStyles.itemList).toContain("min-h-0");
+    expect(agentMemoryPanelStyles.itemList).toContain("overflow-auto");
+    expect(agentMemoryPanelStyles.itemList).toContain("grid");
+    expect(agentMemoryPanelStyles.itemList).toContain("content-start");
   });
 
   it("keeps restored MemoryRoute grids from the CSS module migration", () => {
     const restoredGridExpectations: Array<[string, string]> = [
-      [styles.matrixCard, "grid-cols-[minmax(0,1fr)_auto]"],
-      [styles.projectMemoryProposalTitleLine, "grid-cols-[minmax(0,1fr)_auto]"],
-      [styles.reviewQueueTitleLine, "grid-cols-[minmax(0,1fr)_auto]"],
-      [styles.manageSourceFilters, "grid-cols-[repeat(auto-fit,minmax(82px,1fr))]"],
-      [styles.sourceButton, "grid-cols-[24px_minmax(0,1fr)_auto]"],
-      [styles.contractDomainRow, "grid-cols-[minmax(116px,1fr)_minmax(96px,0.8fr)_auto]"],
-      [styles.collapsedFormButton, "grid-cols-[auto_minmax(0,1fr)_auto]"],
-      [styles.sourceRecordHeader, "grid-cols-[minmax(0,1fr)_auto]"],
-      [styles.queueToolbar, "grid-cols-[repeat(2,minmax(0,1fr))]"],
-      [styles.ragHealthStrip, "grid-cols-[repeat(auto-fit,minmax(108px,1fr))]"],
-      [styles.cleanupTargetRow, "grid-cols-[18px_minmax(0,1fr)]"],
-      [styles.visibilityHeader, "grid-cols-[22px_minmax(0,1fr)]"],
+      [matrixPanelStyles.matrixCard, "grid-cols-[minmax(0,1fr)_auto]"],
+      [projectMemoryQueuePanelStyles.projectMemoryProposalTitleLine, "grid-cols-[minmax(0,1fr)_auto]"],
+      [reviewQueuePanelStyles.reviewQueueTitleLine, "grid-cols-[minmax(0,1fr)_auto]"],
+      [managePanelStyles.manageSourceFilters, "grid-cols-[repeat(auto-fit,minmax(82px,1fr))]"],
+      [sourceAndItemPanelStyles.sourceButton, "grid-cols-[24px_minmax(0,1fr)_auto]"],
+      [knowledgeUsageContractPanelStyles.contractDomainRow, "grid-cols-[minmax(116px,1fr)_minmax(96px,0.8fr)_auto]"],
+      [knowledgeSourceGovernancePanelStyles.collapsedFormButton, "grid-cols-[auto_minmax(0,1fr)_auto]"],
+      [knowledgeSourceGovernancePanelStyles.sourceRecordHeader, "grid-cols-[minmax(0,1fr)_auto]"],
+      [knowledgeReviewPanelStyles.queueToolbar, "grid-cols-[repeat(auto-fit,minmax(min(100%,11rem),max-content))]"],
+      [knowledgeRagPanelStyles.ragHealthStrip, "grid-cols-[repeat(auto-fit,minmax(108px,1fr))]"],
+      [cleanupPanelStyles.cleanupTargetRow, "grid-cols-[18px_minmax(0,1fr)]"],
+      [detailPanelStyles.visibilityHeader, "grid-cols-[22px_minmax(0,1fr)]"],
     ];
 
     for (const [className, gridTemplate] of restoredGridExpectations) {
@@ -634,37 +675,37 @@ describe("MemoryRoute layout contract", () => {
     expect(graphCanvasSource).not.toContain('import * as THREE from "three"');
     expect(graphWorkerSource).toContain("layerSpread");
     expect(graphWorkerSource).toContain("runtime_scene: 34");
-    expect(styles.graphCanvasShell).toContain("min-h-[360px]");
-    expect(styles.graphCanvasShell).toContain("bg-[var(--vui-gradient-route-soft)]");
-    expect(styles.graphCanvasShell).toContain("after:content-['']");
-    expect(styles.graphCanvasShell).toContain("after:[background-size:91px_91px]");
-    expect(styles.graphWorkspace).toContain("grid-cols-[minmax(210px,250px)_minmax(760px,1fr)_minmax(260px,0.34fr)]");
-    expect(styles.graphNodeBadge).toBeTypeOf("string");
+    expect(graphCanvasStyles.graphCanvasShell).toContain("min-h-[360px]");
+    expect(graphCanvasStyles.graphCanvasShell).toContain("bg-[var(--vui-gradient-route-soft)]");
+    expect(graphCanvasStyles.graphCanvasShell).toContain("after:content-['']");
+    expect(graphCanvasStyles.graphCanvasShell).toContain("after:[background-size:91px_91px]");
+    expect(graphViewPanelStyles.graphWorkspace).toContain("grid-cols-[minmax(190px,240px)_minmax(0,1fr)_minmax(230px,0.34fr)]");
+    expect(graphCanvasStyles.graphNodeBadge).toBeTypeOf("string");
     expect(memoryCssSource).not.toContain("backdrop-filter");
-    expect(styles.graphNodeBadge).toContain("data-[detail=true]:z-10");
+    expect(graphCanvasStyles.graphNodeBadge).toContain("data-[detail=true]:z-10");
     expect(memoryCssSource).toContain(".graphNodeBadgeType");
     expect(memoryCssSource).toContain(".graphNodeBadgeQuestion");
     expect(memoryCssSource).toContain(".graphResponsibilityPanel");
     expect(memoryCssSource).toContain(".graphKnowledgePanel");
-    expect(styles.graphKnowledgeItem).toBeTypeOf("string");
+    expect(graphNodeInspectorPanelStyles.graphKnowledgeItem).toBeTypeOf("string");
     expect(memoryCssSource).toContain(".graphKnowledgeContent");
     expect(memoryCssSource).toContain(".graphInteractionHint");
     expect(memoryCssSource).toContain(".graphNodeTypeMark");
-    expect(styles.graphTypeList).toContain("[&_button]:w-full");
-    expect(styles.graphTypeList).toContain("[&_[data-active=true]]:border-[var(--accent-cool)]");
+    expect(graphViewPanelStyles.graphTypeList).toContain("[&_button]:w-full");
+    expect(graphViewPanelStyles.graphTypeList).toContain("[&_[data-active=true]]:border-[var(--accent-cool)]");
     expect(memoryCssSource).toContain(".graphClearFocusButton");
     expect(memoryCssSource).toContain(".graphRelationPanel");
     expect(graphNodeInspectorPanelStyles.graphRelationGroup).toContain("[&_button]:w-full");
     expect(memoryCssSource).toContain(".graphRelationEmpty");
-    expect(styles.graphNodeBadge).toContain("data-[agent-category=session_agent]");
-    expect(styles.graphNodeBadge).toContain("data-[agent-category=team_member_agent]");
+    expect(graphCanvasStyles.graphNodeBadge).toContain("data-[agent-category=session_agent]");
+    expect(graphCanvasStyles.graphNodeBadge).toContain("data-[agent-category=team_member_agent]");
     expect(memoryCssSource).toContain(".ragPreviewPanel");
     expect(memoryCssSource).toContain(".ragHealthStrip");
     expect(knowledgeRagPanelSource).toContain("data-stale={Number(providerHealth?.staleItemCount ?? 0) > 0");
     expect(memoryCssSource).toContain(".ragPolicyStrip");
     expect(memoryCssSource).toContain(".ragContextCard");
     expect(graphNodeInspectorPanelStyles.graphKnowledgeItem).toContain("line-clamp-3");
-    expect(styles.graphNodeBadge).toContain("data-[node-type=knowledge_base]");
+    expect(graphCanvasStyles.graphNodeBadge).toContain("data-[node-type=knowledge_base]");
     expect(routerSource).toContain('path: "memory/graph"');
     expect(routerSource).toContain('<MemoryRoute forcedView="graph" />');
     expect(routerSource).toContain('path: "agents/memory/graph"');
@@ -717,7 +758,7 @@ describe("MemoryRoute layout contract", () => {
     expect(memoryCssSource).toContain(".cleanupPreviewPanel");
     expect(memoryCssSource).toContain(".cleanupExecutePanel");
     expect(memoryCssSource).toContain(".cleanupExecuteButton");
-    expect(styles.cleanupPathList).toContain("[&_span]:truncate");
+    expect(cleanupPanelStyles.cleanupPathList).toContain("[&_span]:truncate");
     expect(routerSource).toContain('path: "memory/cleanup"');
     expect(routerSource).toContain('<MemoryRoute forcedView="cleanup" />');
     expect(routerSource).toContain('path: "agents/memory/cleanup"');
@@ -1098,11 +1139,11 @@ describe("MemoryRoute layout contract", () => {
     expect(managePanelSource).toContain("copy.bulkRestore");
     expect(managementActionPreviewPanelStyles.editPreviewPanel).toBeTypeOf("string");
     expect(managementActionPreviewPanelStyles.editPreviewGrid).toBeTypeOf("string");
-    expect(styles.itemButtonDense).toContain("min-h-[62px]");
-    expect(styles.itemContentButtonDense).toContain("grid-rows-[16px_14px_18px]");
-    expect(styles.manageItemBadges).toContain("[&>span]:truncate");
-    expect(styles.manageItemBadges).toContain("grid-cols-[repeat(auto-fit,minmax(82px,1fr))]");
-    expect(styles.manageItemBadges).toContain("max-h-[74px]");
+    expect(itemListPanelStyles.itemButtonDense).toContain("min-h-[62px]");
+    expect(itemListPanelStyles.itemContentButtonDense).toContain("grid-rows-[16px_14px_18px]");
+    expect(itemListPanelStyles.manageItemBadges).toContain("[&>span]:truncate");
+    expect(itemListPanelStyles.manageItemBadges).toContain("grid-cols-[repeat(auto-fit,minmax(82px,1fr))]");
+    expect(itemListPanelStyles.manageItemBadges).toContain("max-h-[74px]");
   });
 
   it("keeps explanatory Memory platform copy out of persistent paragraphs", () => {
@@ -1138,8 +1179,8 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).not.toContain("<p>{copy.managementHint}</p>");
     expect(routeSource).not.toContain("<p>{copy.ragRetrievalHint}</p>");
     expect(routeSource).not.toContain("<span>{copy.cleanupNoBackup}</span>");
-    expect(styles.panelLead).toContain("hidden");
-    expect(styles.manageFormPanel).toContain("[&>p]:hidden");
+    // panelLead removed from route shell after Wave 8A prune; form panel still hides helper paragraphs.
+    expect(managePanelStyles.manageFormPanel).toContain("[&>p]:hidden");
   });
 
   it("surfaces agent visibility, prompt injection, and raw content in the detail pane", () => {
@@ -1417,14 +1458,14 @@ describe("MemoryRoute layout contract", () => {
     expect(knowledgeModeTabsStyles.knowledgeModeTabActive).not.toContain("w-fit");
     expect(styles.knowledgeWorkspace).toContain("var(--memory-left-width,minmax(170px,205px))");
     expect(styles.knowledgeWorkspace).toContain("var(--memory-right-width,minmax(260px,0.62fr))");
-    expect(styles.sourceGovernanceColumn).toContain("[&_.sourceGovernanceControls]:grid-cols-[minmax(240px,0.92fr)_minmax(250px,1.08fr)]");
-    expect(styles.collapsedFormButton).toContain("max-h-[92px]");
+    expect(knowledgeSourceGovernancePanelStyles.sourceGovernanceColumn).toContain("[&_.sourceGovernanceControls]:grid-cols-[minmax(240px,0.92fr)_minmax(250px,1.08fr)]");
+    expect(knowledgeSourceGovernancePanelStyles.collapsedFormButton).toContain("max-h-[92px]");
     expect(knowledgeUsageContractPanelStyles.contractStateGrid).toContain("hidden");
     expect(knowledgeUsageContractPanelStyles.contractForbiddenList).toContain("hidden");
-    expect(styles.stewardRecommendations).toContain("hidden");
-    expect(styles.stewardWorkbench).toContain("hidden");
-    expect(styles.stewardMission).toContain("[&_small]:hidden");
-    expect(styles.stewardMetric).toContain("[&_small]:hidden");
+    expect(knowledgeStewardPanelStyles.stewardRecommendations).toContain("hidden");
+    expect(knowledgeStewardPanelStyles.stewardWorkbench).toContain("hidden");
+    expect(knowledgeStewardPanelStyles.stewardMission).toContain("[&_small]:hidden");
+    expect(knowledgeStewardPanelStyles.stewardMetric).toContain("[&_small]:hidden");
     expect(styles.knowledgeGovernanceDeck).toContain("max-[900px]:grid-cols-[minmax(0,1fr)]");
   });
 
