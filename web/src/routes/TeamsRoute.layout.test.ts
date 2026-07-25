@@ -106,6 +106,7 @@ const sourceCollectionLocalStyles = {
   ...teamSourceCollectionExtractionRecoveryPanelStyles,
   ...teamSourceCollectionGraphPanelStyles,
   ...teamSourceCollectionMemoryPanelStyles,
+  ...teamSourceCollectionOverviewPanelStyles,
   ...teamSourceCollectionPhaseCloseGatePanelStyles,
   ...teamSourceCollectionPanelFrameStyles,
   ...teamSourceCollectionRunSwitcherPanelStyles,
@@ -113,17 +114,30 @@ const sourceCollectionLocalStyles = {
   ...teamSourceCollectionSourceDetailPanelStyles,
   ...teamSourceCollectionStageAgentsPanelStyles,
   ...teamSourceCollectionStandaloneStagePanelStyles,
+  ...teamSourceCollectionStorageActionsPanelStyles,
+  ...teamSourceCollectionFindingDetailsPanelStyles,
+  ...teamSourceCollectionManualWritebackPanelStyles,
+  ...teamSourceCollectionRunSettingsPanelStyles,
 };
 
+/** Wave 8E: merge panel maps so routeStyles resolves ownership after dead-key prune. */
 const routeStyles = {
   ...routeStylesBase,
   ...sourceCollectionLocalStyles,
-};
+  ...teamMemoryIndexPanelStyles,
+  ...teamExperimentMethodPanelStyles,
+  ...teamWorkflowCandidatePreviewPanelStyles,
+  ...teamWorkflowStatusPanelStyles,
+  ...workflowGraphViewStyles,
+} as Record<string, string>;
 
 const routeStylesSource = [
   routeStylesModuleSource,
   ...Object.keys(routeStylesBase).map((key) => `.${key}`),
   ...Object.values(routeStylesBase),
+  // Panel-owned class names still contracted via routeStylesSource scans.
+  ...Object.keys(teamMemoryIndexPanelStyles).map((key) => `.${key}`),
+  ...Object.values(teamMemoryIndexPanelStyles),
 ].join("\n");
 
 function classTokenCount(className: string, token: string) {
@@ -1631,7 +1645,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("edges: durableCanvas.edges.filter((edge) => edge.source !== deletedNodeId && edge.target !== deletedNodeId)");
     expect(routeSource).toContain("disabled={!hasWritableCanvas");
     expect(routeStyles.teamContextBar).toBeTypeOf("string");
-    expect(routeStyles.teamTitleBlock).toBeTypeOf("string");
+    // Wave 8E: teamTitleBlock removed as unused route residue; context chrome remains.
     expect(routeStyles.teamSelectField).toBeTypeOf("string");
     expect(routeStyles.teamSelectPrefix).toBeTypeOf("string");
     expect(routeStyles.teamSelectControl).toBeTypeOf("string");
@@ -1711,7 +1725,8 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourceCollectionSourceDetailPanelStyles.sourceCollectionSourceDetailNotice).toBeTypeOf("string");
     expect(teamSourceCollectionSourceDetailPanelStyles.sourceCollectionSearchEvidence).toBeTypeOf("string");
     expect(teamSourceCollectionSourceDetailPanelStyles.sourceCollectionSearchEvidenceBody).toBeTypeOf("string");
-    expect(routeStyles.workflowCandidateItemSelected).toBeTypeOf("string");
+    // Wave 8E: workflowCandidateItemSelected removed as unused route residue.
+    expect(teamWorkflowCandidatePreviewPanelStyles.workflowCandidateList).toBeTypeOf("string");
     expect(routeStylesSource).not.toContain(".sourceCollectionResultStatus");
     expect(routeStylesSource).not.toContain(".sourceCollectionResultSource");
     expect(routeStylesSource).not.toContain(".sourceCollectionResultSourceMissing");
