@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   completedToolPresentationSummary,
+  conversationToolDetailPresentation,
   conversationToolPresentationLabel,
 } from "./conversationToolPresentation";
 
@@ -97,4 +98,43 @@ describe("conversation tool presentation", () => {
       ).toBe("");
     },
   );
+
+  it("turns a code-symbol payload into one semantic activity summary", () => {
+    expect(
+      completedToolPresentationSummary({
+        resultPreview: JSON.stringify({
+          status: "ok",
+          mode: "search",
+          query: "savedDraft",
+          count: 4,
+          results: [],
+        }),
+        toolName: "code_symbol_tool",
+        language: "zh",
+      }),
+    ).toBe("搜索 savedDraft · 4 个结果");
+  });
+
+  it("renders code-symbol results as compact hit lines instead of raw JSON", () => {
+    const presented = conversationToolDetailPresentation({
+      value: JSON.stringify({
+        status: "ok",
+        mode: "search",
+        query: "savedDraft",
+        count: 3,
+        results: [
+          { line: 183, preview: "const [savedDraft, setSavedDraft] = useState..." },
+          { line: 947, preview: "setSavedDraft(nextSnapshot)" },
+          { line: 1294, preview: "savedDraft?.providerWorkspace" },
+        ],
+      }),
+      toolName: "code_symbol_tool",
+      language: "zh",
+    });
+
+    expect(presented).toContain(" 183  const [savedDraft");
+    expect(presented).toContain(" 947  setSavedDraft(nextSnapshot)");
+    expect(presented).not.toContain('"status"');
+    expect(presented).not.toContain('"results"');
+  });
 });

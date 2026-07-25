@@ -10,7 +10,7 @@ const styles = {
   itemDetails: cx("itemDetails", "min-w-0"),
   itemSummary: cx(
     "itemSummary",
-    "grid min-w-0 cursor-pointer grid-cols-[17px_minmax(0,1fr)] items-start gap-x-2 py-1 text-left [&::-webkit-details-marker]:hidden focus-visible:rounded-[var(--radius-control)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)]",
+    "grid min-w-0 cursor-pointer grid-cols-[17px_minmax(0,1fr)_16px] items-start gap-x-2 py-1 text-left [&::-webkit-details-marker]:hidden focus-visible:rounded-[var(--radius-control)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)]",
   ),
   itemStatic: cx(
     "itemStatic",
@@ -18,7 +18,7 @@ const styles = {
   ),
   itemIcon: cx("itemIcon", "mt-0.5 shrink-0 text-[var(--fg-tertiary)]"),
   itemIconRunning: cx("itemIconRunning", "text-[var(--accent-cool)]"),
-  itemIconFailed: cx("itemIconFailed", "text-[var(--state-error)]"),
+  itemIconFailed: cx("itemIconFailed", "text-[var(--fg-tertiary)]"),
   itemIconWarning: cx("itemIconWarning", "text-[var(--state-warning)]"),
   itemBody: cx(
     "itemBody",
@@ -29,9 +29,13 @@ const styles = {
     "itemPreview",
     "min-w-0 truncate text-[var(--fg-tertiary)] max-[719px]:whitespace-normal max-[719px]:[overflow-wrap:anywhere]",
   ),
+  itemChevron: cx(
+    "itemChevron",
+    "mt-0.5 shrink-0 text-[var(--fg-tertiary)] transition-transform duration-150 group-open:rotate-180",
+  ),
   itemDetailsBody: cx(
     "itemDetailsBody",
-    "ml-6 min-w-0 border-l border-[var(--vui-border-subtle)] py-1 pl-2 [&_pre]:max-h-72 [&_pre]:overflow-auto",
+    "ml-6 min-w-0 py-1 [&_pre]:max-h-72 [&_pre]:overflow-auto",
   ),
 } as const;
 
