@@ -98,6 +98,22 @@ const styles: Record<string, string> = {
     `vui-routes-chatcodingroute contextCompositionSegmentToolDescriptions min-w-0 ${vuiStateWarmSoftClass}`,
   contextCompositionSegmentToolSchema:
     `vui-routes-chatcodingroute contextCompositionSegmentToolSchema min-w-0 font-mono [font-size:var(--vui-font-xs)] ${vuiStateWarmSoftClass}`,
+  cacheDonutShell:
+    "vui-routes-chatcodingroute cacheDonutShell min-w-0 grid h-full min-h-0 content-start overflow-hidden text-[var(--fg-primary)]",
+  cacheDonutStats:
+    "vui-routes-chatcodingroute cacheDonutStats min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
+  contextCompositionSegmentCacheWrite:
+    `vui-routes-chatcodingroute contextCompositionSegmentCacheWrite min-w-0 ${vuiStateWarmSoftClass}`,
+  contextCompositionSegmentCached:
+    `vui-routes-chatcodingroute contextCompositionSegmentCached min-w-0 ${vuiStateWarmSoftClass}`,
+  contextCompositionSegmentExact:
+    `vui-routes-chatcodingroute contextCompositionSegmentExact min-w-0 ${vuiStateWarmSoftClass}`,
+  contextCompositionSegmentMissing:
+    `vui-routes-chatcodingroute contextCompositionSegmentMissing min-w-0 ${vuiStateWarmSoftClass}`,
+  contextCompositionSegmentUncached:
+    `vui-routes-chatcodingroute contextCompositionSegmentUncached min-w-0 ${vuiStateWarmSoftClass}`,
+  contextCompositionSegmentUnused:
+    `vui-routes-chatcodingroute contextCompositionSegmentUnused min-w-0 ${vuiStateWarmSoftClass}`,
 };
 
 export default styles;

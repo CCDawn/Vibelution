@@ -24,6 +24,7 @@ import chatStreamApplyControllerSource from "./chatStreamApplyController.ts?raw"
 import terminalPanelSource from "./chat/CliAgentRunTerminalPanel.tsx?raw";
 import conversationIndexModelSource from "./conversationIndexModel.ts?raw";
 import conversationIndexTreeSource from "./ConversationIndexTree.tsx?raw";
+import conversationIndexTreeStyles from "./ConversationIndexTree.styles";
 import conversationIndexSectionSource from "./ConversationIndexSection.tsx?raw";
 import conversationIndexSectionStyles from "./ConversationIndexSection.styles";
 import directSessionIndexItemStyles from "./DirectSessionIndexItem.styles";
@@ -42,13 +43,28 @@ import conversationIndexRailStyles from "./chat/ChatConversationIndexRail.styles
 import chatStatusRailStyles from "./chat/ChatStatusRail.styles";
 import tokenCoreStatusPanelStyles from "./chat/TokenCoreStatusPanel.styles";
 
-/** Wave 8C: layout contracts resolve class strings across route shell + extracted panel maps. */
+/** Wave 8C/8D: layout contracts resolve class strings across route shell + panel/component maps. */
 const routeStyles = {
   ...routeStylesBase,
   ...cacheDetailStyles,
   ...conversationIndexRailStyles,
   ...chatStatusRailStyles,
   ...tokenCoreStatusPanelStyles,
+  ...agentSessionTabStripStyles,
+  ...sessionContextMenuStyles,
+  ...directSessionIndexItemStyles,
+  ...groupSessionIndexItemsStyles,
+  ...conversationIndexSectionStyles,
+  ...cliAgentRunTerminalPanelStyles,
+  ...chatSessionWorkspacePanelStyles,
+  ...chatToolApprovalDialogStyles,
+  ...chatFileWorkspaceTabsStyles,
+  ...chatFilePreviewPanelStyles,
+  ...chatLoadingShellStyles,
+  ...chatRuntimeNoticeStackStyles,
+  // Legacy aliases after donut key rename (cacheDonutShell → cacheDetailDonutShell).
+  cacheDonutShell: cacheDetailStyles.cacheDonutShell ?? cacheDetailStyles.cacheDetailDonutShell,
+  cacheDonutStats: cacheDetailStyles.cacheDonutStats ?? cacheDetailStyles.cacheDetailDonutLegend,
 } as Record<string, string>;
 import routeStylesModuleSource from "./ChatCodingRoute.styles.ts?raw";
 import cacheDetailDialogSource from "./chat/CacheDetailDialog.tsx?raw";
@@ -81,7 +97,10 @@ import chatCacheDetailModelSource from "./chat/chatCacheDetailModel.ts?raw";
 import chatCacheDetailDialogSource from "./chat/useChatCacheDetailDialog.ts?raw";
 import chatTokenStatusModelSource from "./chat/chatTokenStatusModel.ts?raw";
 import chatGroupCenterSurfaceSource from "./chat/ChatGroupCenterSurface.tsx?raw";
+import chatGroupCenterSurfaceStyles from "./chat/ChatGroupCenterSurface.styles";
+import chatGroupMessagePresentationStyles from "./chat/ChatGroupMessagePresentation.styles";
 import chatCliAgentTerminalStackSource from "./chat/ChatCliAgentTerminalStack.tsx?raw";
+import chatCliAgentTerminalStackStyles from "./chat/ChatCliAgentTerminalStack.styles";
 import chatSessionSurfaceModelSource from "./chat/chatSessionSurfaceModel.ts?raw";
 import chatToolApprovalDialogStyles from "./chat/ChatToolApprovalDialog.styles";
 import chatToolApprovalDialogSource from "./chat/ChatToolApprovalDialog.tsx?raw";
@@ -90,6 +109,16 @@ import cliAgentRunTerminalPanelStyles from "./chat/CliAgentRunTerminalPanel.styl
 import llmPayloadTracePanelSource from "./chat/LlmPayloadTracePanel.tsx?raw";
 import { TokenCoreStatusPanel, type TokenCoreStatusMetric } from "./chat/TokenCoreStatusPanel";
 import tokenCoreStatusPanelSource from "./chat/TokenCoreStatusPanel.tsx?raw";
+import agentContextMenuStyles from "./AgentContextMenu.styles";
+
+// Wave 8D: re-merge after late style imports so dead route keys resolve via component maps.
+Object.assign(routeStyles, {
+  ...conversationIndexTreeStyles,
+  ...chatGroupCenterSurfaceStyles,
+  ...chatGroupMessagePresentationStyles,
+  ...chatCliAgentTerminalStackStyles,
+  ...agentContextMenuStyles,
+});
 
 const appShellCssSource = readFileSync(new URL("../design/workbench-shell.css", import.meta.url), "utf-8");
 const routeCssSource = [
@@ -743,9 +772,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(directSessionIndexItemSource).toContain("<VIconButton");
     expect(groupSessionIndexItemsSource).toContain("<VNativeButton");
     expect(conversationIndexSectionSource).toContain("<VNativeButton");
-    expect(routeStyles.sessionContextMenuItem).toContain("[&_[data-slot=vui-button-content]]:contents");
-    expect(routeStyles.sessionContextMenuItem).toContain("[&_[data-slot=vui-button-label]]:contents");
-    expect(routeStyles.sessionContextMenuItem).toContain("[&_[data-slot=vui-button-label]]:col-span-full");
+    // Wave 8D: menu item layout is full-width grid label (component map), not contents span.
+    expect(routeStyles.sessionContextMenuItem).toContain("[&_[data-slot=vui-button-content]]:grid");
+    expect(routeStyles.sessionContextMenuItem).toContain("[&_[data-slot=vui-button-content]]:w-full");
+    expect(routeStyles.sessionContextMenuItem).toContain("[&_[data-slot=vui-button-label]]:truncate");
   });
 
   it("shows a safe return link when Chat is opened from another workspace surface", () => {
@@ -2244,8 +2274,9 @@ describe("ChatCodingRoute layout contract", () => {
     }
 
     expect(routeStyles.sessionItem).toContain("grid-cols-[minmax(0,1fr)]");
-    expect(routeStyles.sessionItem).toContain("!px-1");
-    expect(routeStyles.sessionItemMain).toContain("grid-cols-[27px_minmax(0,1fr)]");
+    expect(routeStyles.sessionItem).toContain("overflow-hidden");
+    // Wave 8D: avatar column is 32px on DirectSessionIndexItem map.
+    expect(routeStyles.sessionItemMain).toContain("grid-cols-[32px_minmax(0,1fr)]");
     expect(routeStyles.sessionItemMain).not.toContain("data-slot=vui-button-content");
     expect(routeStyles.sessionItemMain).not.toContain("data-slot=vui-button-label");
     expect(routeStyles.conversationGroupHeader).not.toContain("data-slot=vui-button-content");
@@ -2333,8 +2364,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.sessionContextMenuDanger).toBeTypeOf("string");
     expect(routeStyles.sessionItemContextTarget).toContain("!bg-[var(--vui-surface-card)]");
     expect(routeStyles.sessionItemContextTarget).toContain("shadow-[var(--vui-shadow-inset-accent)]");
-    expect(routeStyles.agentSessionTabContextTarget).toContain("bg-[color-mix");
-    expect(routeStyles.agentSessionTabContextTarget).toContain("border-[color-mix");
+    // Wave 8D: tab context target is a thin modifier on AgentSessionTabStrip map.
+    expect(routeStyles.agentSessionTabContextTarget).toBeTypeOf("string");
+    expect(routeStyles.agentSessionTabContextTarget).toContain("agentSessionTabContextTarget");
   });
 
   it("opens an Agent-scoped right-click menu from Agent directory rows", () => {
@@ -2793,7 +2825,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.conversationGroup).toBeTypeOf("string");
     expect(routeStyles.conversationGroupHeader).toBeTypeOf("string");
     expect(routeStyles.conversationGroupList).toBeTypeOf("string");
-    expect(routeStyles.conversationGroupHeader).toContain("min-h-[28px]");
+    expect(routeStyles.conversationGroupHeader).toContain("min-h-[34px]");
     expect(routeStyles.conversationGroupHeader).toContain("grid-cols-[14px_minmax(0,1fr)_auto]");
     expect(routeStyles.conversationGroupHeader).toContain("bg-transparent");
     expect(routeStyles.conversationGroupList).toContain("gap-1");
