@@ -125,6 +125,21 @@ describe("workbench layout gate (Wave 5)", () => {
     expect(maintenance).toContain("LAUNCHER_CLEANUP_CONSOLE_HEIGHT_PANE");
   });
 
+  it("keeps Chat group member picker and Launcher noise grids on shared height API (Wave 6G)", () => {
+    const chatHeights = readFileSync(resolve(webSrc, "routes/chat/chatListHeights.ts"), "utf-8");
+    const statusRail = readFileSync(resolve(webSrc, "routes/chat/ChatStatusRail.tsx"), "utf-8");
+    const launcherHeights = readFileSync(resolve(webSrc, "routes/launcherListHeights.ts"), "utf-8");
+    const developer = readFileSync(resolve(webSrc, "routes/LauncherDeveloperModePanel.tsx"), "utf-8");
+    const maintenance = readFileSync(resolve(webSrc, "routes/LauncherProjectMaintenancePanel.tsx"), "utf-8");
+    expect(chatHeights).toContain("group-member-picker");
+    expect(chatHeights).toContain("WORKBENCH_LAYOUT_IDS.chat");
+    expect(statusRail).toContain("PersistedHeightListShell");
+    expect(statusRail).toContain("CHAT_GROUP_MEMBER_PICKER_HEIGHT_PANE");
+    expect(launcherHeights).toContain("noise-item-grid");
+    expect(developer).toContain("LAUNCHER_NOISE_ITEM_GRID_HEIGHT_PANE");
+    expect(maintenance).toContain("LAUNCHER_NOISE_ITEM_GRID_HEIGHT_PANE");
+  });
+
   it("keeps Evolution CASE IO on shared height resize handle", () => {
     const evolution = readFileSync(resolve(webSrc, "routes/EvolutionRoute.tsx"), "utf-8");
     expect(evolution).toContain("usePersistedPaneHeight");
@@ -189,6 +204,9 @@ describe("workbench layout gate (Wave 5)", () => {
       { file: "routes/LauncherDiagnosticsPanel.styles.ts", key: "guardianTableResizeHandle" },
       { file: "routes/LauncherDeveloperModePanel.styles.ts", key: "cleanupConsoleResizeHandle" },
       { file: "routes/LauncherProjectMaintenancePanel.styles.ts", key: "cleanupConsoleResizeHandle" },
+      { file: "routes/ChatCodingRoute.styles.ts", key: "groupMemberPickerResizeHandle" },
+      { file: "routes/LauncherDeveloperModePanel.styles.ts", key: "noiseItemGridResizeHandle" },
+      { file: "routes/LauncherProjectMaintenancePanel.styles.ts", key: "noiseItemGridResizeHandle" },
     ];
 
     for (const sample of samples) {

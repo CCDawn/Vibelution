@@ -22,3 +22,11 @@ export const LAUNCHER_CLEANUP_CONSOLE_HEIGHT_PANE: PaneHeightSpec = {
   minHeight: 120,
   maxHeight: 420,
 };
+
+/** Developer / project-maintenance noise overview grid (~former max-h 150px). */
+export const LAUNCHER_NOISE_ITEM_GRID_HEIGHT_PANE: PaneHeightSpec = {
+  id: "noise-item-grid",
+  defaultHeight: 150,
+  minHeight: 100,
+  maxHeight: 280,
+};

@@ -1855,6 +1855,10 @@ describe("ChatCodingRoute layout contract", () => {
 
     expect(routeStyles.groupMemberPicker).toContain("grid");
     expect(routeStyles.groupMemberPicker).toContain("gap-1.5");
+    // Wave 6G: group member picker height is shared PaneHeight, not fixed max-h.
+    expect(routeStyles.groupMemberPicker).not.toContain("max-h-[min(40dvh,360px)]");
+    expect(chatStatusRailSource).toContain("PersistedHeightListShell");
+    expect(chatStatusRailSource).toContain("CHAT_GROUP_MEMBER_PICKER_HEIGHT_PANE");
     expect(routeStyles.groupMemberChip).toContain("!w-full");
     expect(routeStyles.groupMemberChip).not.toContain("w-fit");
     expect(routeStyles.groupMemberCopy).toContain("grid");

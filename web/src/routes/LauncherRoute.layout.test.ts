@@ -369,6 +369,7 @@ describe("LauncherRoute layout contract", () => {
       expect(panelStyles.developerGrid).toContain("min-h-0");
       expect(panelStyles.developerNoise).toContain("overflow-hidden");
       expect(panelStyles.noiseItemGrid).toContain("overflow-auto");
+      expect(panelStyles.noiseItemGrid).not.toContain("max-h-[150px]");
       expect(panelStyles.cleanupConsole).toContain("overflow-auto");
       expect(panelStyles.developerPanel).not.toContain("mx-3");
     }
@@ -394,6 +395,9 @@ describe("LauncherRoute layout contract", () => {
     expect(projectMaintenancePanelStyles.cleanupConsole).not.toContain("max-h-[220px]");
     expect(projectMaintenancePanelSource).toContain("PersistedHeightListShell");
     expect(diagnosticsPanelStyles.guardianTable).toContain("overflow-auto");
+    // Wave 6G: noise overview grids use PersistedHeightListShell.
+    expect(developerModePanelSource).toContain("LAUNCHER_NOISE_ITEM_GRID_HEIGHT_PANE");
+    expect(projectMaintenancePanelSource).toContain("LAUNCHER_NOISE_ITEM_GRID_HEIGHT_PANE");
   });
 
   it("keeps internal lifecycle fields out of the first-read labels", () => {
