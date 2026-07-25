@@ -70,6 +70,10 @@ Canonical ids live in `components/layout/workbenchLayoutIds.ts` (`WORKBENCH_LAYO
 
 New list-detail pages should start from a page recipe + registry `layoutId`. Domain shells (Chat dual-write via `shellStore`, Agents flex) still use the same registry ids.
 
+**Evolution / Runtime scenes:** multi-column Evolution width rails and Logs nested `RuntimeScenesPane` sidebar use `usePersistedPaneResize` + registry ids (`evolution`, `logs-runtime-scenes`). Self-evolution sidebar uses the same hook (`evolution-self`).
+
+**Heights:** vertical splitters use `vibelution.pane-heights.v1` (`paneHeightPersistence.ts`), same layoutId namespace as widths. Evolution CASE IO height is `evolution` / `live-io` (legacy key migrated once).
+
 Each sets `data-vui-recipe="…"` on the page root for contracts and debugging.
 
 ## Adding a control (checklist)

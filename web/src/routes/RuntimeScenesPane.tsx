@@ -3,14 +3,11 @@ import "../design/route-css/workbench-secondary.tailwind.css";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CircleAlert, Check, CheckSquare, Copy, ListFilter, Square, Trash2, TriangleAlert, X } from "lucide-react";
 import {
-  useCallback,
   useEffect,
   useMemo,
-  useRef,
   useState,
   type CSSProperties,
   type KeyboardEvent,
-  type MouseEvent,
   type PointerEvent,
 } from "react";
 
@@ -28,6 +25,12 @@ import {
 } from "../api/types";
 import { LazyFilePreview } from "../components/preview/LazyFilePreview";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
+import {
+  migrateLegacyNumericPane,
+  type PaneSpec,
+} from "../components/layout/paneLayoutPersistence";
+import { usePersistedPaneResize } from "../components/layout/usePersistedPaneResize";
+import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import { VButton, VIconButton, VNativeInput } from "../components/vui";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { TranslationKey } from "../i18n/dictionary";
@@ -40,18 +43,15 @@ type ActionNotice = {
   message: string;
 };
 
-const RESIZE_HANDLE_WIDTH = 16;
+const RUNTIME_SCENES_LAYOUT_ID = WORKBENCH_LAYOUT_IDS.logsRuntimeScenes;
 const RUNTIME_SCENES_SIDEBAR_STORAGE_KEY = "vibelution.logs.runtime-scenes-sidebar-width";
-const DEFAULT_RUNTIME_SCENES_SIDEBAR_WIDTH = 320;
-const MIN_RUNTIME_SCENES_SIDEBAR_WIDTH = 280;
-const MAX_RUNTIME_SCENES_SIDEBAR_WIDTH = 560;
-const MIN_RUNTIME_SCENES_PREVIEW_WIDTH = 520;
-const KEYBOARD_RESIZE_STEP = 24;
-
-type DragState = {
-  startX: number;
-  startWidth: number;
+const RUNTIME_SCENES_SIDEBAR_PANE: PaneSpec = {
+  id: "sidebar",
+  defaultWidth: 320,
+  minWidth: 280,
+  maxWidth: 560,
 };
+const RUNTIME_SCENES_PANES: PaneSpec[] = [RUNTIME_SCENES_SIDEBAR_PANE];
 
 type RuntimeScenesPaneProps = {
   activeRoot: LogRoot;
@@ -106,19 +106,6 @@ function uniqueIds(items: string[]): string[] {
     result.push(value);
   }
   return result;
-}
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(Math.max(value, min), max);
-}
-
-function getMaxSidebarWidth(layoutWidth: number) {
-  const maxWidth = layoutWidth - RESIZE_HANDLE_WIDTH - MIN_RUNTIME_SCENES_PREVIEW_WIDTH;
-  return Math.max(MIN_RUNTIME_SCENES_SIDEBAR_WIDTH, Math.min(MAX_RUNTIME_SCENES_SIDEBAR_WIDTH, maxWidth));
-}
-
-function normalizeSidebarWidth(layoutWidth: number, sidebarWidth: number) {
-  return Math.round(clamp(sidebarWidth, MIN_RUNTIME_SCENES_SIDEBAR_WIDTH, getMaxSidebarWidth(layoutWidth)));
 }
 
 function describeError(error: unknown, fallback: string) {
@@ -878,7 +865,6 @@ async function copyText(text: string) {
 
 export function RuntimeScenesPane({ activeRoot, lang, t, statusLabel, initialSceneId = "", initialPath = "" }: RuntimeScenesPaneProps) {
   const queryClient = useQueryClient();
-  const layoutRef = useRef<HTMLDivElement | null>(null);
   const [sceneSearch, setSceneSearch] = useState("");
   const [selectedSceneIds, setSelectedSceneIds] = useState<string[]>([]);
   const [activeSceneId, setActiveSceneId] = useState(initialSceneId);
@@ -888,17 +874,22 @@ export function RuntimeScenesPane({ activeRoot, lang, t, statusLabel, initialSce
   );
   const [copyState, setCopyState] = useState<"idle" | "copied" | "error">("idle");
   const [actionNotice, setActionNotice] = useState<ActionNotice | null>(null);
-  const [dragState, setDragState] = useState<DragState | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [sidebarWidth, setSidebarWidth] = useState(() => {
-    if (typeof window === "undefined") {
-      return DEFAULT_RUNTIME_SCENES_SIDEBAR_WIDTH;
-    }
-    const saved = Number(window.localStorage.getItem(RUNTIME_SCENES_SIDEBAR_STORAGE_KEY) || "");
-    return Number.isFinite(saved)
-      ? clamp(saved, MIN_RUNTIME_SCENES_SIDEBAR_WIDTH, MAX_RUNTIME_SCENES_SIDEBAR_WIDTH)
-      : DEFAULT_RUNTIME_SCENES_SIDEBAR_WIDTH;
+  useEffect(() => {
+    migrateLegacyNumericPane(RUNTIME_SCENES_LAYOUT_ID, "sidebar", RUNTIME_SCENES_SIDEBAR_STORAGE_KEY);
+  }, []);
+  const {
+    layoutRef,
+    widths: runtimeScenesPaneWidths,
+    draggingPaneId,
+    startResize,
+    onResizeKeyDown,
+  } = usePersistedPaneResize({
+    layoutId: RUNTIME_SCENES_LAYOUT_ID,
+    panes: RUNTIME_SCENES_PANES,
+    preserveMainMinWidth: 520,
   });
+  const sidebarWidth = runtimeScenesPaneWidths.sidebar ?? RUNTIME_SCENES_SIDEBAR_PANE.defaultWidth;
   const pageVisible = usePageVisibility();
 
   const runtimeScenesQuery = useQuery({
@@ -1046,79 +1037,6 @@ export function RuntimeScenesPane({ activeRoot, lang, t, statusLabel, initialSce
     return () => window.clearTimeout(timeout);
   }, [actionNotice]);
 
-  const syncSidebarWidthToLayout = useCallback(() => {
-    const layoutWidth = layoutRef.current?.getBoundingClientRect().width ?? 0;
-    if (!layoutWidth) {
-      return;
-    }
-    const normalized = normalizeSidebarWidth(layoutWidth, sidebarWidth);
-    if (normalized !== sidebarWidth) {
-      setSidebarWidth(normalized);
-    }
-  }, [sidebarWidth]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-    window.localStorage.setItem(RUNTIME_SCENES_SIDEBAR_STORAGE_KEY, String(sidebarWidth));
-  }, [sidebarWidth]);
-
-  useEffect(() => {
-    syncSidebarWidthToLayout();
-    const layoutElement = layoutRef.current;
-    if (!layoutElement) {
-      return;
-    }
-
-    const observer = new ResizeObserver(() => {
-      syncSidebarWidthToLayout();
-    });
-    observer.observe(layoutElement);
-    return () => observer.disconnect();
-  }, [syncSidebarWidthToLayout]);
-
-  useEffect(() => {
-    if (!dragState) {
-      return;
-    }
-
-    const activeDrag = dragState;
-    const previousCursor = document.body.style.cursor;
-    const previousUserSelect = document.body.style.userSelect;
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
-
-    function stopDragging() {
-      setDragState(null);
-    }
-
-    function handlePointerMove(event: globalThis.PointerEvent) {
-      const layoutWidth = layoutRef.current?.getBoundingClientRect().width ?? 0;
-      if (!layoutWidth) {
-        return;
-      }
-      const delta = event.clientX - activeDrag.startX;
-      setSidebarWidth(normalizeSidebarWidth(layoutWidth, activeDrag.startWidth + delta));
-    }
-
-    window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", stopDragging);
-    window.addEventListener("pointercancel", stopDragging);
-    window.addEventListener("mousemove", handlePointerMove as EventListener);
-    window.addEventListener("mouseup", stopDragging);
-
-    return () => {
-      document.body.style.cursor = previousCursor;
-      document.body.style.userSelect = previousUserSelect;
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", stopDragging);
-      window.removeEventListener("pointercancel", stopDragging);
-      window.removeEventListener("mousemove", handlePointerMove as EventListener);
-      window.removeEventListener("mouseup", stopDragging);
-    };
-  }, [dragState]);
-
   const copyLabel =
     copyState === "copied" ? t("copied") : copyState === "error" ? t("copyFailed") : t("copyContent");
   const severityFilterOptions: Array<{
@@ -1223,64 +1141,18 @@ export function RuntimeScenesPane({ activeRoot, lang, t, statusLabel, initialSce
     [sidebarCollapsed, sidebarWidth],
   );
 
-  function beginResize(clientX: number) {
-    setDragState({
-      startX: clientX,
-      startWidth: sidebarWidth,
-    });
-  }
-
-  function handleResizeStart(event: PointerEvent<HTMLButtonElement>) {
-    if (event.button !== 0) {
-      return;
-    }
+  function handleResizeStart(event: PointerEvent<any>) {
     if (sidebarCollapsed) {
       return;
     }
-    event.preventDefault();
-    beginResize(event.clientX);
+    startResize("sidebar", event as PointerEvent<HTMLDivElement>, { direction: 1 });
   }
 
-  function handleResizeMouseDown(event: MouseEvent<HTMLButtonElement>) {
-    if (event.button !== 0) {
-      return;
-    }
+  function handleResizeKeyDown(event: KeyboardEvent<any>) {
     if (sidebarCollapsed) {
       return;
     }
-    event.preventDefault();
-    beginResize(event.clientX);
-  }
-
-  function handleResizeKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
-    if (!layoutRef.current) {
-      return;
-    }
-    if (sidebarCollapsed) {
-      return;
-    }
-
-    const { key } = event;
-    const direction =
-      key === "ArrowLeft" ? -1 : key === "ArrowRight" ? 1 : key === "Home" ? "min" : key === "End" ? "max" : null;
-    if (direction === null) {
-      return;
-    }
-
-    event.preventDefault();
-    const layoutWidth = layoutRef.current.getBoundingClientRect().width;
-    const maxWidth = getMaxSidebarWidth(layoutWidth);
-    const nextWidth =
-      direction === "min"
-        ? MIN_RUNTIME_SCENES_SIDEBAR_WIDTH
-        : direction === "max"
-          ? maxWidth
-          : clamp(
-              sidebarWidth + Number(direction) * KEYBOARD_RESIZE_STEP,
-              MIN_RUNTIME_SCENES_SIDEBAR_WIDTH,
-              maxWidth,
-            );
-    setSidebarWidth(Math.round(nextWidth));
+    onResizeKeyDown("sidebar", event as KeyboardEvent<HTMLDivElement>, { direction: 1 });
   }
 
   function renderSceneDetail(scene: RuntimeSceneDetail) {
@@ -1496,7 +1368,12 @@ export function RuntimeScenesPane({ activeRoot, lang, t, statusLabel, initialSce
   }
 
   return (
-    <div ref={layoutRef} className={styles.resizableLayout} style={layoutStyle}>
+    <div
+      ref={layoutRef}
+      className={styles.resizableLayout}
+      style={layoutStyle}
+      data-vui-layout-id={RUNTIME_SCENES_LAYOUT_ID}
+    >
       <aside className={sidebarCollapsed ? `${styles.sidebar} ${styles.paneCollapsed}` : styles.sidebar} aria-hidden={sidebarCollapsed}>
         <div className={styles.sidebarHeader}>
           <div>
@@ -1663,11 +1540,12 @@ export function RuntimeScenesPane({ activeRoot, lang, t, statusLabel, initialSce
         collapseLabel={lang === "zh" ? "收起左栏" : "Collapse left pane"}
         expandLabel={lang === "zh" ? "展开左栏" : "Expand left pane"}
         className={styles.resizeHandle}
-        active={Boolean(dragState)}
-        activeClassName={styles.resizeHandleActive}
+        active={draggingPaneId === "sidebar"}
+        valueNow={sidebarWidth}
+        valueMin={RUNTIME_SCENES_SIDEBAR_PANE.minWidth}
+        valueMax={RUNTIME_SCENES_SIDEBAR_PANE.maxWidth}
         onToggle={() => setSidebarCollapsed((current) => !current)}
         onPointerDown={handleResizeStart}
-        onMouseDown={handleResizeMouseDown}
         onKeyDown={handleResizeKeyDown}
       />
 
