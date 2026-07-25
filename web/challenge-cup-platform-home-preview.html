@@ -100,6 +100,24 @@
               <b>0</b>
             </span>
           </button>
+          <div class="stage-objects" aria-label="当前阶段对象">
+            <div class="stage-objects-heading">
+              <span>当前批次</span>
+              <button type="button" aria-label="新建批次">＋</button>
+            </div>
+            <button class="stage-object active" type="button">
+              <span><i></i>层级机制证据补齐</span>
+              <small>16 条资料 · 提炼中</small>
+            </button>
+            <button class="stage-object" type="button">
+              <span><i></i>可塑性规则检索</span>
+              <small>8 条资料 · 已暂停</small>
+            </button>
+            <button class="stage-object" type="button">
+              <span><i></i>门控机制补充</span>
+              <small>草稿 · 未启动</small>
+            </button>
+          </div>
         </section>
 
         <div class="workspace-grid">
@@ -167,30 +185,61 @@
                 </dl>
               </section>
 
-              <section class="output-preview" aria-labelledby="knowledge-output-title">
-                <header>
+              <section class="source-explorer" aria-labelledby="source-explorer-title">
+                <header class="explorer-toolbar">
                   <div>
-                    <span class="eyebrow">阶段产出</span>
-                    <h3 id="knowledge-output-title">这些资料最终会沉淀为什么</h3>
+                    <span class="eyebrow">资料工作表</span>
+                    <h3 id="source-explorer-title">检索结果与提炼队列</h3>
                   </div>
-                  <button class="text-button" type="button">查看证据链</button>
+                  <div class="explorer-controls">
+                    <label class="search-control">
+                      <span>⌕</span>
+                      <input type="search" placeholder="搜索标题、作者或证据内容" aria-label="搜索资料" />
+                    </label>
+                    <select aria-label="筛选资料状态">
+                      <option>全部状态</option>
+                      <option>待提炼</option>
+                      <option>已提炼</option>
+                      <option>需复核</option>
+                    </select>
+                    <button class="button secondary" type="button">比较所选</button>
+                  </div>
                 </header>
-                <div class="output-grid">
-                  <article class="ready">
-                    <span>01</span>
-                    <div><strong>可追溯证据包</strong><span data-vui-hint-label="可追溯证据包要求" data-vui-hint="15 条来源已具备 DOI 或原始链接。"></span></div>
-                    <em>已建立</em>
-                  </article>
-                  <article>
-                    <span>02</span>
-                    <div><strong>概念与关系图</strong><span data-vui-hint-label="概念与关系图要求" data-vui-hint="用于定位共识、冲突和证据缺口。"></span></div>
-                    <em>等待整理</em>
-                  </article>
-                  <article>
-                    <span>03</span>
-                    <div><strong>受审知识条目</strong><span data-vui-hint-label="受审知识条目要求" data-vui-hint="为实验假设提供可引用、可追溯的上游依据。"></span></div>
-                    <em>等待入库</em>
-                  </article>
+                <div class="source-tabs" role="tablist" aria-label="资料分类">
+                  <button class="active" type="button" role="tab" aria-selected="true">全部 16</button>
+                  <button type="button" role="tab" aria-selected="false">论文 11</button>
+                  <button type="button" role="tab" aria-selected="false">数据集 2</button>
+                  <button type="button" role="tab" aria-selected="false">网页 3</button>
+                </div>
+                <div class="source-table" role="table" aria-label="资料提炼队列">
+                  <div class="source-row source-head" role="row">
+                    <span role="columnheader"><input type="checkbox" aria-label="选择全部资料" /></span>
+                    <span role="columnheader">资料</span>
+                    <span role="columnheader">来源</span>
+                    <span role="columnheader">状态</span>
+                    <span role="columnheader">证据</span>
+                  </div>
+                  <button class="source-row selected" type="button" role="row" data-source-title="Predictive coding in the visual cortex" data-source-meta="Friston et al. · DOI 可追溯" data-source-evidence="支持层级预测误差沿皮层层级传播；当前已标注 4 个证据锚点。">
+                    <span role="cell"><input type="checkbox" checked aria-label="选择 Predictive coding in the visual cortex" /></span>
+                    <span role="cell"><strong>Predictive coding in the visual cortex</strong><small>层级反馈与预测误差传播</small></span>
+                    <span role="cell">期刊论文</span>
+                    <span role="cell"><em class="status-pill active">提炼中</em></span>
+                    <span role="cell">4 锚点</span>
+                  </button>
+                  <button class="source-row" type="button" role="row" data-source-title="Plasticity rules for predictive processing" data-source-meta="Whittington et al. · DOI 可追溯" data-source-evidence="讨论局部可塑性规则与预测误差更新，尚需确认适用边界。">
+                    <span role="cell"><input type="checkbox" aria-label="选择 Plasticity rules for predictive processing" /></span>
+                    <span role="cell"><strong>Plasticity rules for predictive processing</strong><small>局部学习规则与误差更新</small></span>
+                    <span role="cell">期刊论文</span>
+                    <span role="cell"><em class="status-pill">待提炼</em></span>
+                    <span role="cell">2 锚点</span>
+                  </button>
+                  <button class="source-row" type="button" role="row" data-source-title="Attention as precision weighting" data-source-meta="Feldman et al. · 网页与论文交叉来源" data-source-evidence="可能支持门控注意与精度加权的关系，但当前来源之间存在术语差异。">
+                    <span role="cell"><input type="checkbox" aria-label="选择 Attention as precision weighting" /></span>
+                    <span role="cell"><strong>Attention as precision weighting</strong><small>注意门控与精度加权</small></span>
+                    <span role="cell">交叉来源</span>
+                    <span role="cell"><em class="status-pill warning">需复核</em></span>
+                    <span role="cell">3 锚点</span>
+                  </button>
                 </div>
               </section>
 
@@ -312,6 +361,21 @@
           </section>
 
           <aside class="inspector" aria-label="当前阶段辅助信息">
+            <section class="inspector-card source-detail-card">
+              <div class="card-heading">
+                <div><span class="eyebrow">当前选择</span><h2 id="selected-source-title">Predictive coding in the visual cortex</h2></div>
+                <button class="text-button" type="button">打开原文</button>
+              </div>
+              <p id="selected-source-meta">Friston et al. · DOI 可追溯</p>
+              <div class="evidence-summary">
+                <span>证据摘要</span>
+                <strong id="selected-source-evidence">支持层级预测误差沿皮层层级传播；当前已标注 4 个证据锚点。</strong>
+              </div>
+              <div class="detail-actions">
+                <button class="button secondary" type="button">查看锚点</button>
+                <button class="button primary" type="button">开始提炼</button>
+              </div>
+            </section>
             <section class="inspector-card next-action">
               <span class="eyebrow">下一步</span>
               <div class="title-with-hint">
@@ -440,6 +504,15 @@
       }
 
       stageButtons.forEach((button) => button.addEventListener("click", () => selectStage(button.dataset.stage)));
+      document.querySelectorAll(".source-row[data-source-title]").forEach((row) => {
+        row.addEventListener("click", (event) => {
+          if (event.target.matches("input")) return;
+          document.querySelectorAll(".source-row[data-source-title]").forEach((item) => item.classList.toggle("selected", item === row));
+          document.querySelector("#selected-source-title").textContent = row.dataset.sourceTitle;
+          document.querySelector("#selected-source-meta").textContent = row.dataset.sourceMeta;
+          document.querySelector("#selected-source-evidence").textContent = row.dataset.sourceEvidence;
+        });
+      });
       document.querySelectorAll("[data-toast]").forEach((button) => {
         button.addEventListener("click", () => showToast(button.dataset.toast));
       });
