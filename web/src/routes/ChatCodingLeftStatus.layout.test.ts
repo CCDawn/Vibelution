@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
 
-import styles from "./ChatCodingRoute.styles";
+import routeStyles from "./ChatCodingRoute.styles";
+import conversationIndexRailStyles from "./chat/ChatConversationIndexRail.styles";
+import statusRailStyles from "./chat/ChatStatusRail.styles";
+import tokenCoreStyles from "./chat/TokenCoreStatusPanel.styles";
+
+const styles = {
+  ...routeStyles,
+  ...conversationIndexRailStyles,
+  ...statusRailStyles,
+  ...tokenCoreStyles,
+} as Record<string, string>;
 import chatCodingRouteSource from "./ChatCodingRoute.tsx?raw";
 import chatSessionSurfaceModelSource from "./chat/chatSessionSurfaceModel.ts?raw";
 import tokenCoreStatusPanelSource from "./chat/TokenCoreStatusPanel.tsx?raw";

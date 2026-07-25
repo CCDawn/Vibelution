@@ -1,7 +1,8 @@
 import { useId, type CSSProperties } from "react";
 
 import { VButton, VTooltip, type VButtonProps } from "../../components/vui";
-import styles from "../ChatCodingRoute.styles";
+import routeStyles from "../ChatCodingRoute.styles";
+import styles from "./TokenCoreStatusPanel.styles";
 
 export type TokenCoreStatusMetric = {
   key: "cache" | "modelInput" | "compression" | "speed";
@@ -64,9 +65,9 @@ export function TokenCoreStatusPanel({
   const titleId = `${panelId}-title`;
 
   return (
-    <section className={`${styles.leftBlock} ${styles.tokenCompressionCard}`} aria-labelledby={titleId}>
-      <div className={styles.sectionHeader}>
-        <h3 id={titleId} className={styles.railSectionHeading}>Token</h3>
+    <section className={`${routeStyles.leftBlock} ${styles.tokenCompressionCard}`} aria-labelledby={titleId}>
+      <div className={routeStyles.sectionHeader}>
+        <h3 id={titleId} className={routeStyles.railSectionHeading}>Token</h3>
       </div>
       <div className={styles.tokenStatusVisualGrid} role="list" aria-label={lang === "zh" ? "Token 核心状态" : "Token core status"}>
         {metrics.map((metric) => {

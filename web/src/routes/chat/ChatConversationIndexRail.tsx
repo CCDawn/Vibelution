@@ -31,7 +31,8 @@ import {
   formatContextUsage,
   formatRelativeTime,
 } from "../chatShellFormat";
-import styles from "../ChatCodingRoute.styles";
+import routeStyles from "../ChatCodingRoute.styles";
+import styles from "./ChatConversationIndexRail.styles";
 
 export type ConversationIndexPanelKey = "conversations" | "members";
 
@@ -245,10 +246,10 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
         >
           {rightIndexPanel === "members" && standardGroupRoomActive ? (
             <section className={styles.agentIndexRoster} aria-label={lang === "zh" ? "群成员状态索引" : "Group member status index"}>
-              <div className={styles.sectionHeader}>
-                <div className={styles.sectionIdentity}>
-                  <div className={styles.sectionEyebrowRow}>
-                    <p className={styles.blockEyebrow}>{lang === "zh" ? "成员状态" : "Member status"}</p>
+              <div className={routeStyles.sectionHeader}>
+                <div className={routeStyles.sectionIdentity}>
+                  <div className={routeStyles.sectionEyebrowRow}>
+                    <p className={routeStyles.blockEyebrow}>{lang === "zh" ? "成员状态" : "Member status"}</p>
                     <VContextualHint
                       content={lang === "zh"
                         ? "只展示可用成员；已归档或断链的历史成员保留在日志里，不在这里打扰。"
@@ -257,7 +258,7 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
                       width="wide"
                     />
                   </div>
-                  <h3 className={styles.sectionTitle}>{activeGroupRoom?.title ?? (lang === "zh" ? "群聊加载中" : "Loading group")}</h3>
+                  <h3 className={routeStyles.sectionTitle}>{activeGroupRoom?.title ?? (lang === "zh" ? "群聊加载中" : "Loading group")}</h3>
                 </div>
               </div>
               {availableGroupParticipants.length ? (
@@ -323,7 +324,7 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
                           <span className={styles.agentIndexCopy}>
                             <strong className={styles.agentIndexNameLine}>
                               <span>{participantDisplay.name}</span>
-                              <em className={`${styles.agentRoleTag} ${styles[agentRoleClass(participantDisplay.tone)]}`}>
+                              <em className={`${routeStyles.agentRoleTag} ${styles[agentRoleClass(participantDisplay.tone)]}`}>
                                 {participantDisplay.functionLabel}
                               </em>
                             </strong>
@@ -341,38 +342,38 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
                       {expanded ? (
                         <div className={styles.agentIndexDetails}>
                           {expandedDetailQuery?.isPending ? (
-                            <p className={styles.contextLineCompact}>{t("loadingSession")}</p>
+                            <p className={routeStyles.contextLineCompact}>{t("loadingSession")}</p>
                           ) : expandedDetailQuery?.isError ? (
-                            <p className={styles.panelNotice}>{describeError(expandedDetailQuery.error, t("loadFailed"))}</p>
+                            <p className={routeStyles.panelNotice}>{describeError(expandedDetailQuery.error, t("loadFailed"))}</p>
                           ) : (
                             <>
-                              <div className={styles.resourceSplit}>
-                                <div className={styles.resourceMetric}>
+                              <div className={routeStyles.resourceSplit}>
+                                <div className={routeStyles.resourceMetric}>
                                   <span>{t("contextInUse")}</span>
                                   <strong>{formatContextUsage(memberContextUsed, memberContextLimit, locale)}</strong>
                                 </div>
-                                <div className={styles.resourceMetric}>
+                                <div className={routeStyles.resourceMetric}>
                                   <span>{lang === "zh" ? "上下文占比" : "Context ratio"}</span>
                                   <strong>{memberContextPercent}%</strong>
                                 </div>
                               </div>
-                              <p className={styles.oneLineValue}>
+                              <p className={routeStyles.oneLineValue}>
                                 <span>{lang === "zh" ? "消息" : "Messages"}</span>
                                 {memberContext
                                   ? `${numberFormatter.format(memberContext.messageCount)} ${lang === "zh" ? "条" : "messages"} · ${numberFormatter.format(memberContext.assistantMessageCount)} Agent`
                                   : (lang === "zh" ? "暂无上下文统计" : "No context stats yet")}
                               </p>
                               <div className={styles.agentIndexMentalBlock}>
-                                <div className={styles.sectionHeader}>
-                                  <div className={styles.sectionIdentity}>
-                                    <p className={styles.blockEyebrow}>{t("mentalState")}</p>
+                                <div className={routeStyles.sectionHeader}>
+                                  <div className={routeStyles.sectionIdentity}>
+                                    <p className={routeStyles.blockEyebrow}>{t("mentalState")}</p>
                                     <p className={styles.sectionMetaLine}>
                                       {memberUpdated || (lang === "zh" ? "尚未更新" : "Not updated yet")}
                                     </p>
                                   </div>
-                                  <span className={styles.mentalStateBadge}>{memberMentalState}</span>
+                                  <span className={routeStyles.mentalStateBadge}>{memberMentalState}</span>
                                 </div>
-                                <p className={styles.contextLineCompact}>{memberMentalSummary}</p>
+                                <p className={routeStyles.contextLineCompact}>{memberMentalSummary}</p>
                               </div>
                             </>
                           )}
@@ -476,14 +477,14 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
                             onChange={() => onToggleGroupAgent(agent.agentId)}
                           />
                           {renderAgentAvatar(
-                            styles.agentOptionAvatar,
+                            routeStyles.agentOptionAvatar,
                             agent.avatarImageUrl,
                             avatarInitials(agent.agentCode, display.name),
                           )}
                           <span>
                             <strong>{display.name}</strong>
                             <span className={styles.agentOptionMeta}>
-                              <small className={`${styles.agentRoleTag} ${styles[agentRoleClass(display.tone)]}`}>
+                              <small className={`${routeStyles.agentRoleTag} ${styles[agentRoleClass(display.tone)]}`}>
                                 {display.functionLabel}
                               </small>
                               {display.modelLabel ? (

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import styles from "./ChatCodingRoute.styles";
+import styles from "./chat/ChatStatusRail.styles";
 
 describe("ChatCodingRoute run mode chip visual contract", () => {
   it("keeps persistent enabled state on chip chrome instead of filling the whole chip with accent", () => {

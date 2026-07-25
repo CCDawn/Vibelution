@@ -36,7 +36,20 @@ import sessionContextMenuSource from "./SessionContextMenu.tsx?raw";
 import agentContextMenuSource from "./AgentContextMenu.tsx?raw";
 import agentConversationDirectorySource from "./AgentConversationDirectory.tsx?raw";
 import agentSessionTabStripStyles from "./AgentSessionTabStrip.styles";
-import routeStyles from "./ChatCodingRoute.styles";
+import routeStylesBase from "./ChatCodingRoute.styles";
+import cacheDetailStyles from "./chat/CacheDetailDialog.styles";
+import conversationIndexRailStyles from "./chat/ChatConversationIndexRail.styles";
+import chatStatusRailStyles from "./chat/ChatStatusRail.styles";
+import tokenCoreStatusPanelStyles from "./chat/TokenCoreStatusPanel.styles";
+
+/** Wave 8C: layout contracts resolve class strings across route shell + extracted panel maps. */
+const routeStyles = {
+  ...routeStylesBase,
+  ...cacheDetailStyles,
+  ...conversationIndexRailStyles,
+  ...chatStatusRailStyles,
+  ...tokenCoreStatusPanelStyles,
+} as Record<string, string>;
 import routeStylesModuleSource from "./ChatCodingRoute.styles.ts?raw";
 import cacheDetailDialogSource from "./chat/CacheDetailDialog.tsx?raw";
 import chatConversationComposerBridgeSource from "./chat/ChatConversationComposerBridge.tsx?raw";
@@ -824,7 +837,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndIndexRailSource).toContain("styles.featureChipPrimaryActive");
     expect(routeAndIndexRailSource).toContain("styles.featureChipRow");
     expect(routeAndIndexRailSource).toContain("styles.featureChip");
-    expect(routeAndIndexRailSource).toContain("styles.railSectionHeading");
+    expect(routeAndIndexRailSource).toMatch(/styles\.railSectionHeading|routeStyles\.railSectionHeading/);
     expect(routeAndIndexRailSource).toContain("<em>{enabled ? (lang === \"zh\" ? \"开\" : \"On\") : (lang === \"zh\" ? \"关\" : \"Off\")}</em>");
     expect(routeSource).not.toContain("<section className={styles.petShowcase}");
     expect(routeSource).not.toContain("styles.featurePresetGrid");
@@ -927,7 +940,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndIndexRailSource).toContain("content={mentalCompactLine || mentalSourceLabel}");
     expect(routeAndIndexRailSource).toContain('aria-label={`${mentalStateLabel}. ${mentalCompactLine || mentalSourceLabel}`}');
     expect(routeAndIndexRailSource).toContain("VContextualHint");
-    expect(routeAndIndexRailSource).toContain("styles.sectionEyebrowRow");
+    expect(routeAndIndexRailSource).toMatch(/styles\.sectionEyebrowRow|routeStyles\.sectionEyebrowRow/);
     expect(routeAndIndexRailSource).toContain("styles.groupManagementTitleRow");
     expect(routeAndGroupCenterSource).toContain("styles.groupConversationTitleRow");
     expect(routeAndGroupCenterSource).toContain("暂无通知。");
@@ -2384,10 +2397,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(agentSessionTabStripSource).toContain("const sessionDisplay = sessionAgentDisplayInfo(session, sessionAgent, lang, resolveModelLabel)");
     expect(routeAndIndexRailSource).toContain("const participantDisplay = groupParticipantIdentity(participant)");
     expect(routeSource).toContain("identityLabel: formatAgentIdentityWithRole");
-    expect(routeAndIndexRailSource).toContain("styles.groupMemberCopy");
-    expect(routeAndIndexRailSource).toContain("styles.agentRoleTag");
-    expect(routeAndIndexRailSource).toContain("styles.agentModelTag");
-    expect(routeAndIndexRailSource).toContain("styles.agentModelLine");
+    expect(routeAndIndexRailSource).toMatch(/styles\.groupMemberCopy|routeStyles\.groupMemberCopy/);
+    expect(routeAndIndexRailSource).toMatch(/styles\.agentRoleTag|routeStyles\.agentRoleTag/);
+    expect(routeAndIndexRailSource).toMatch(/styles\.agentModelTag|routeStyles\.agentModelTag/);
+    expect(routeAndIndexRailSource).toMatch(/styles\.agentModelLine|routeStyles\.agentModelLine/);
 
     expect(routeStyles.groupMemberCopy).toBeTypeOf("string");
     expect(routeStyles.agentRoleTag).toBeTypeOf("string");

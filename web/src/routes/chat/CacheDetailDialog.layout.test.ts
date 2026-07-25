@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import routeStyles from "../ChatCodingRoute.styles";
+import cacheDetailStyles from "./CacheDetailDialog.styles";
 import cacheDetailDialogSource from "./CacheDetailDialog.tsx?raw";
 
 const donutSegmentToneKeys = [
@@ -22,6 +23,12 @@ const donutSegmentToneKeys = [
   "cacheDonutSegmentUncached",
   "cacheDonutSegmentUser",
 ] as const;
+
+function resolveDonutTone(key: string): string {
+  return (cacheDetailStyles as Record<string, string>)[key]
+    ?? (routeStyles as Record<string, string>)[key]
+    ?? "";
+}
 
 describe("CacheDetailDialog donut layout contract", () => {
   it("labels the dialog from visible title and description text", () => {
@@ -47,31 +54,31 @@ describe("CacheDetailDialog donut layout contract", () => {
   });
 
   it("keeps donut tracks and segments visibly stroked", () => {
-    expect(routeStyles.cacheDetailDonutShell).toContain("size-[");
-    expect(routeStyles.cacheDetailDonutShell).toContain("place-items-center");
-    expect(routeStyles.cacheDetailDonutSvg).toContain("size-full");
-    expect(routeStyles.cacheDetailDonutCenter).toContain("absolute");
-    expect(routeStyles.cacheDetailDonutCenter).toContain("inset-0");
-    expect(routeStyles.cacheDetailDonutCenter).toContain("place-self-center");
-    expect(routeStyles.cacheDetailDonutCenter).toContain("place-items-center");
-    expect(routeStyles.cacheDetailDonutCenter).toContain("pointer-events-none");
+    expect(cacheDetailStyles.cacheDetailDonutShell).toContain("size-[");
+    expect(cacheDetailStyles.cacheDetailDonutShell).toContain("place-items-center");
+    expect(cacheDetailStyles.cacheDetailDonutSvg).toContain("size-full");
+    expect(cacheDetailStyles.cacheDetailDonutCenter).toContain("absolute");
+    expect(cacheDetailStyles.cacheDetailDonutCenter).toContain("inset-0");
+    expect(cacheDetailStyles.cacheDetailDonutCenter).toContain("place-self-center");
+    expect(cacheDetailStyles.cacheDetailDonutCenter).toContain("place-items-center");
+    expect(cacheDetailStyles.cacheDetailDonutCenter).toContain("pointer-events-none");
 
-    expect(routeStyles.cacheDonutTrack).toContain("fill-none");
-    expect(routeStyles.cacheDonutTrack).toContain("stroke-[");
-    expect(routeStyles.cacheDonutTrack).toContain("[stroke-linecap:round]");
-    expect(routeStyles.cacheDonutTrack).toContain("[vector-effect:non-scaling-stroke]");
-    expect(routeStyles.cacheDonutOuterTrack).toContain("[stroke-width:");
-    expect(routeStyles.cacheDonutInnerTrack).toContain("[stroke-width:");
+    expect(cacheDetailStyles.cacheDonutTrack).toContain("fill-none");
+    expect(cacheDetailStyles.cacheDonutTrack).toContain("stroke-[");
+    expect(cacheDetailStyles.cacheDonutTrack).toContain("[stroke-linecap:round]");
+    expect(cacheDetailStyles.cacheDonutTrack).toContain("[vector-effect:non-scaling-stroke]");
+    expect(cacheDetailStyles.cacheDonutOuterTrack).toContain("[stroke-width:");
+    expect(cacheDetailStyles.cacheDonutInnerTrack).toContain("[stroke-width:");
 
-    expect(routeStyles.cacheDonutSegment).toContain("fill-none");
-    expect(routeStyles.cacheDonutSegment).toContain("stroke-[");
-    expect(routeStyles.cacheDonutSegment).toContain("[stroke-linecap:round]");
-    expect(routeStyles.cacheDonutSegment).toContain("[vector-effect:non-scaling-stroke]");
-    expect(routeStyles.cacheDonutOuterSegment).toContain("[stroke-width:");
-    expect(routeStyles.cacheDonutInnerSegment).toContain("[stroke-width:");
+    expect(cacheDetailStyles.cacheDonutSegment).toContain("fill-none");
+    expect(cacheDetailStyles.cacheDonutSegment).toContain("stroke-[");
+    expect(cacheDetailStyles.cacheDonutSegment).toContain("[stroke-linecap:round]");
+    expect(cacheDetailStyles.cacheDonutSegment).toContain("[vector-effect:non-scaling-stroke]");
+    expect(cacheDetailStyles.cacheDonutOuterSegment).toContain("[stroke-width:");
+    expect(cacheDetailStyles.cacheDonutInnerSegment).toContain("[stroke-width:");
 
     for (const key of donutSegmentToneKeys) {
-      expect(routeStyles[key], key).toContain("stroke-[");
+      expect(resolveDonutTone(key), key).toContain("stroke-[");
     }
   });
 });
