@@ -40,6 +40,7 @@ describe("workbenchLayoutIds", () => {
       { file: "routes/EvolutionRoute.tsx", token: "WORKBENCH_LAYOUT_IDS.evolution" },
       { file: "routes/SelfEvolutionTrack.tsx", token: "WORKBENCH_LAYOUT_IDS.evolutionSelf" },
       { file: "routes/ChatCodingRoute.tsx", token: "WORKBENCH_LAYOUT_IDS.chat" },
+      { file: "routes/RuntimeScenesPane.tsx", token: "WORKBENCH_LAYOUT_IDS.logsRuntimeScenes" },
     ];
 
     for (const sample of samples) {

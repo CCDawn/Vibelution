@@ -70,6 +70,8 @@ Canonical ids live in `components/layout/workbenchLayoutIds.ts` (`WORKBENCH_LAYO
 
 New list-detail pages should start from a page recipe + registry `layoutId`. Domain shells (Chat dual-write via `shellStore`, Agents flex) still use the same registry ids.
 
+**Evolution / Runtime scenes:** multi-column Evolution width rails and Logs nested `RuntimeScenesPane` sidebar also use `usePersistedPaneResize` + registry ids (`evolution`, `logs-runtime-scenes`). Vertical CASE IO height remains a dedicated height key until a height layout store is introduced.
+
 Each sets `data-vui-recipe="…"` on the page root for contracts and debugging.
 
 ## Adding a control (checklist)
