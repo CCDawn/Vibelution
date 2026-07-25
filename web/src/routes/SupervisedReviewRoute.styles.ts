@@ -42,8 +42,8 @@ const styles = {
   lifecyclePills: "flex flex-wrap justify-end gap-2 max-[980px]:justify-start",
   workspace:
     `grid min-h-0 min-w-0 max-w-full flex-1 grid-cols-[var(--review-queue-width,380px)_12px_minmax(0,1fr)] overflow-hidden overflow-x-hidden max-[980px]:grid-cols-1 max-[980px]:gap-y-3 max-[980px]:overflow-y-visible max-[980px]:overflow-x-hidden ${vuiWorkspaceFillClass}`,
-  resizeHandle:
-    "relative min-w-3 cursor-col-resize touch-none border-0 bg-transparent p-0 outline-none before:absolute before:inset-y-0 before:left-1/2 before:w-[3px] before:-translate-x-1/2 before:rounded-[var(--radius-control)] before:bg-[var(--vui-border-subtle)] before:transition before:content-[''] hover:before:bg-[color-mix(in_srgb,var(--accent-warm)_52%,transparent)] hover:before:shadow-none focus-visible:before:bg-[color-mix(in_srgb,var(--accent-warm)_52%,transparent)] focus-visible:before:shadow-none max-[980px]:hidden",
+  // Wave 6A: PaneCollapseHandle owns the visual rule; breakpoint hide only.
+  resizeHandle: "max-[980px]:hidden",
   queuePanel:
     `grid min-h-0 min-w-0 max-w-full grid-rows-[auto_auto_auto_auto_minmax(0,1fr)] gap-2 overflow-hidden p-[9px] max-[980px]:max-h-[min(620px,72vh)] max-[980px]:overflow-hidden ${reviewPanelSurface}`,
   paneCollapsed: "overflow-hidden p-0 invisible",
