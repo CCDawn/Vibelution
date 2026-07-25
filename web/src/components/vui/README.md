@@ -106,6 +106,17 @@ Gate also asserts sample route handle keys stay free of private col/row-resize c
 
 Gate: `workbenchLayoutGate` + `design/vuiDomainWorkbenchCompositionContract.test.ts`.
 
+## Wave 6C more height split reuse
+
+| Surface | layoutId | pane id | Notes |
+| --- | --- | --- | --- |
+| Evolution CASE IO | `evolution` | `live-io` | First height consumer (Wave 5) |
+| Memory graph node list | `memory` | `graph-node-list` | Wave 6B |
+| Logs package file picker | `logs` | `package-files` | Replaces fixed `max-h-[min(190px,24vh)]` |
+| Launcher diagnostics body | `launcher` | `diagnostics-body` | Replaces fixed `max-h-[min(42vh,420px)]` |
+
+Prefer these shared APIs for any new vertical splitter; do not reintroduce private max-height-only strips that users would need to resize.
+
 Each sets `data-vui-recipe="…"` on the page root for contracts and debugging.
 
 ## Adding a control (checklist)

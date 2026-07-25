@@ -91,6 +91,19 @@ describe("workbench layout gate (Wave 5)", () => {
     expect(graph).not.toContain("beginPaneHeightResize");
   });
 
+  it("keeps Logs package-files and Launcher diagnostics on shared height resize (Wave 6C)", () => {
+    const logs = readFileSync(resolve(webSrc, "routes/LogsRoute.tsx"), "utf-8");
+    const launcherDiag = readFileSync(resolve(webSrc, "routes/LauncherDiagnosticsPanel.tsx"), "utf-8");
+    expect(logs).toContain("usePersistedPaneHeight");
+    expect(logs).toContain("PaneHeightResizeHandle");
+    expect(logs).toContain("package-files");
+    expect(logs).toContain("WORKBENCH_LAYOUT_IDS.logs");
+    expect(launcherDiag).toContain("usePersistedPaneHeight");
+    expect(launcherDiag).toContain("PaneHeightResizeHandle");
+    expect(launcherDiag).toContain("diagnostics-body");
+    expect(launcherDiag).toContain("WORKBENCH_LAYOUT_IDS.launcher");
+  });
+
   it("keeps Agents/Teams/Memory domain recipe markers (Wave 6B)", () => {
     const agents = readFileSync(resolve(webSrc, "routes/AgentsRoute.tsx"), "utf-8");
     const agentsWorkspace = readFileSync(resolve(webSrc, "routes/AgentWorkspaceLayoutPanel.tsx"), "utf-8");
@@ -115,6 +128,8 @@ describe("workbench layout gate (Wave 5)", () => {
       { file: "routes/LauncherRoute.styles.ts", key: "railResizeHandle" },
       { file: "routes/ConfigRoute.styles.ts", key: "settingsNavResizeHandle" },
       { file: "routes/MemoryGraphViewPanel.styles.ts", key: "graphNodeListResizeHandle" },
+      { file: "routes/LogsRoute.styles.ts", key: "packageFilesResizeHandle" },
+      { file: "routes/LauncherDiagnosticsPanel.styles.ts", key: "diagnosticsBodyResizeHandle" },
     ];
 
     for (const sample of samples) {
