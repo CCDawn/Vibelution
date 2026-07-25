@@ -82,6 +82,28 @@ describe("workbench layout gate (Wave 5)", () => {
     expect(evolution).not.toContain("beginPaneHeightResize");
   });
 
+  it("keeps Memory graph node list on shared height resize handle (Wave 6B)", () => {
+    const graph = readFileSync(resolve(webSrc, "routes/MemoryGraphViewPanel.tsx"), "utf-8");
+    expect(graph).toContain("usePersistedPaneHeight");
+    expect(graph).toContain("PaneHeightResizeHandle");
+    expect(graph).toContain("graph-node-list");
+    expect(graph).toContain("WORKBENCH_LAYOUT_IDS.memory");
+    expect(graph).not.toContain("beginPaneHeightResize");
+  });
+
+  it("keeps Agents/Teams/Memory domain recipe markers (Wave 6B)", () => {
+    const agents = readFileSync(resolve(webSrc, "routes/AgentsRoute.tsx"), "utf-8");
+    const agentsWorkspace = readFileSync(resolve(webSrc, "routes/AgentWorkspaceLayoutPanel.tsx"), "utf-8");
+    const teams = readFileSync(resolve(webSrc, "routes/TeamsRoute.tsx"), "utf-8");
+    const memory = readFileSync(resolve(webSrc, "routes/MemoryRoute.tsx"), "utf-8");
+    expect(agents).toContain('data-vui-recipe="agents-management-workbench"');
+    expect(agentsWorkspace).toContain('data-vui-region="agents-directory"');
+    expect(teams).toContain('data-vui-recipe="teams-organization-workbench"');
+    expect(teams).toContain('data-vui-region="teams-canvas"');
+    expect(memory).toContain('data-vui-domain-recipe="memory-knowledge-workbench"');
+    expect(memory).toContain('data-vui-recipe="memory-knowledge-workbench"');
+  });
+
   it("keeps route resize class maps placement-only (Wave 6A)", () => {
     const samples: Array<{ file: string; key: string }> = [
       { file: "routes/GitRoute.styles.ts", key: "resizeHandle" },
@@ -92,6 +114,7 @@ describe("workbench layout gate (Wave 5)", () => {
       { file: "routes/ToolsRoute.styles.ts", key: "resizeHandle" },
       { file: "routes/LauncherRoute.styles.ts", key: "railResizeHandle" },
       { file: "routes/ConfigRoute.styles.ts", key: "settingsNavResizeHandle" },
+      { file: "routes/MemoryGraphViewPanel.styles.ts", key: "graphNodeListResizeHandle" },
     ];
 
     for (const sample of samples) {

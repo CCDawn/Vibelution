@@ -9757,6 +9757,7 @@ export function TeamsRoute({
     <VDenseOpsPage
       className={styles.route}
       headerClassName={challengeCupResearchTeamSelected && !researchCanvasVisible ? styles.challengeWorkspaceContextHidden : styles.teamContextBar}
+      data-vui-domain-recipe="teams-organization-workbench"
       ariaLabel={selectedTeamContextTitle}
       eyebrow={lang === "zh" ? "团队工作台 / 组织画布" : "Team Workspace / Canvas"}
       title={lang === "zh" ? "团队组织画布" : "Team Organization Canvas"}
@@ -9875,6 +9876,7 @@ export function TeamsRoute({
         ref={teamsLayoutRef}
         className={workspaceClassName}
         style={teamsLayoutStyle}
+        data-vui-recipe="teams-organization-workbench"
         data-vui-layout-id={TEAMS_LAYOUT_ID}
       >
         <VSurface
@@ -9884,6 +9886,7 @@ export function TeamsRoute({
           padding="none"
           tone="rail"
           id="research-organization-canvas"
+          data-vui-region="teams-canvas"
         >
           <div className={styles.canvasToolbar}>
             <div>
@@ -10116,7 +10119,7 @@ export function TeamsRoute({
           />
         ) : null}
 
-        <aside className={inspectorClassName}>
+        <aside className={inspectorClassName} data-vui-region="teams-inspector">
           {challengeCupResearchTeamSelected && !researchCanvasVisible ? null : (
           <div className={styles.inspectorHeader}>
             <strong>

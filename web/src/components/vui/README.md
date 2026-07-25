@@ -95,6 +95,17 @@ Gate: `components/layout/workbenchLayoutGate.test.ts` blocks new ad-hoc width/he
 
 Gate also asserts sample route handle keys stay free of private col/row-resize chrome.
 
+## Wave 6B domain recipe + height reuse
+
+| Prefer | Avoid |
+| --- | --- |
+| Domain recipe on Agents/Teams/Memory shells (`agents-management-workbench`, `teams-organization-workbench`, `memory-knowledge-workbench`) | Anonymous multi-pane shells with only style class names |
+| `data-vui-region` for directory/detail/inspector (or canvas/inspector, graph filters/canvas) | Unmarked major rails that break composition contracts |
+| `usePersistedPaneHeight` + `PaneHeightResizeHandle` for any new vertical splitter (Evolution CASE IO, Memory graph node list) | Private row-resize handlers / height localStorage keys |
+| Page recipe (`dense-ops-page`) + `data-vui-domain-recipe` when domain chrome sits on `VDenseOpsPage` | Overwriting the page recipe without a domain marker |
+
+Gate: `workbenchLayoutGate` + `design/vuiDomainWorkbenchCompositionContract.test.ts`.
+
 Each sets `data-vui-recipe="…"` on the page root for contracts and debugging.
 
 ## Adding a control (checklist)
