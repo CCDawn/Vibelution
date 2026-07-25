@@ -102,21 +102,23 @@
           </button>
           <div class="stage-objects" aria-label="当前阶段对象">
             <div class="stage-objects-heading">
-              <span>当前批次</span>
+              <span id="stage-object-heading">当前批次</span>
               <button type="button" aria-label="新建批次">＋</button>
             </div>
-            <button class="stage-object active" type="button">
-              <span><i></i>层级机制证据补齐</span>
-              <small>16 条资料 · 提炼中</small>
-            </button>
-            <button class="stage-object" type="button">
-              <span><i></i>可塑性规则检索</span>
-              <small>8 条资料 · 已暂停</small>
-            </button>
-            <button class="stage-object" type="button">
-              <span><i></i>门控机制补充</span>
-              <small>草稿 · 未启动</small>
-            </button>
+            <div id="stage-object-list">
+              <button class="stage-object active" type="button">
+                <span><i></i>层级机制证据补齐</span>
+                <small>16 条资料 · 提炼中</small>
+              </button>
+              <button class="stage-object" type="button">
+                <span><i></i>可塑性规则检索</span>
+                <small>8 条资料 · 已暂停</small>
+              </button>
+              <button class="stage-object" type="button">
+                <span><i></i>门控机制补充</span>
+                <small>草稿 · 未启动</small>
+              </button>
+            </div>
           </div>
         </section>
 
@@ -276,6 +278,35 @@
                   </div>
                 </article>
               </div>
+              <section class="design-version-explorer" aria-labelledby="design-version-title">
+                <header>
+                  <div>
+                    <span class="eyebrow">Design 版本链</span>
+                    <h3 id="design-version-title">冻结设计与修订差异</h3>
+                  </div>
+                  <div class="header-actions">
+                    <button class="button secondary" type="button">比较版本</button>
+                    <button class="button primary" type="button">新建修订</button>
+                  </div>
+                </header>
+                <div class="version-list">
+                  <button class="version-item active" type="button">
+                    <span><strong>Design v4</strong><em class="status-pill active">已冻结</em></span>
+                    <small>weight=0.875 · 5 seeds · formal</small>
+                    <b>当前执行基线</b>
+                  </button>
+                  <button class="version-item" type="button">
+                    <span><strong>Design v5-diagnostic</strong><em class="status-pill warning">待审查</em></span>
+                    <small>alignment × mask structure · diagnostic</small>
+                    <b>相对 v4：修改 2 项变量</b>
+                  </button>
+                  <button class="version-item" type="button">
+                    <span><strong>Design v3</strong><em class="status-pill">已归档</em></span>
+                    <small>weight=0.75 · 3 seeds · smoke</small>
+                    <b>未达到增益门禁</b>
+                  </button>
+                </div>
+              </section>
               <section class="design-contract" aria-labelledby="design-contract-title">
                 <header>
                   <div>
@@ -307,16 +338,49 @@
               <div class="blocked-callout neutral">
                 <span class="callout-icon">3</span>
                 <div>
-                  <strong>冻结实验设计后才能开始执行</strong>
-                  <span data-vui-hint-label="执行阶段阻塞原因" data-vui-hint="当前没有可运行的设计版本，也没有候选结果或诊断记录。"></span>
+                  <strong>当前新轮次等待设计冻结，历史运行仍可审查</strong>
+                  <span data-vui-hint-label="执行阶段阻塞原因" data-vui-hint="当前知识搜集轮次尚未生成新设计；下方保留历史 Run、候选与诊断记录，不会覆盖当前轮次状态。"></span>
                 </div>
               </div>
               <div class="metric-grid">
-                <article><span>冻结设计</span><strong>—</strong><span data-vui-hint-label="冻结设计说明" data-vui-hint="尚未生成可执行的冻结设计。"></span></article>
-                <article><span>最佳候选</span><strong>—</strong><span data-vui-hint-label="最佳候选说明" data-vui-hint="尚未执行，因此没有可晋升候选。"></span></article>
-                <article><span>有效结果</span><strong>0</strong><span data-vui-hint-label="有效结果说明" data-vui-hint="目前没有通过门禁的运行记录。"></span></article>
-                <article><span>诊断记录</span><strong>0</strong><span data-vui-hint-label="诊断记录说明" data-vui-hint="目前没有失败归因或边界诊断。"></span></article>
+                <article><span>历史冻结设计</span><strong>v4</strong><span data-vui-hint-label="冻结设计说明" data-vui-hint="Design v4 是历史正式执行基线；当前新轮次尚未冻结设计。"></span></article>
+                <article><span>历史最佳候选</span><strong>formal-v4</strong><span data-vui-hint-label="最佳候选说明" data-vui-hint="该候选只代表固定协议下的有界工程收益。"></span></article>
+                <article><span>有效结果</span><strong>1</strong><span data-vui-hint-label="有效结果说明" data-vui-hint="一条历史结果通过了正式门禁。"></span></article>
+                <article><span>诊断记录</span><strong>2</strong><span data-vui-hint-label="诊断记录说明" data-vui-hint="包括边界结果与未晋升运行，均保留失败归因。"></span></article>
               </div>
+              <section class="run-explorer" aria-labelledby="run-explorer-title">
+                <header class="explorer-toolbar">
+                  <div>
+                    <span class="eyebrow">Run Explorer</span>
+                    <h3 id="run-explorer-title">运行记录与候选比较</h3>
+                  </div>
+                  <div class="explorer-controls">
+                    <label class="search-control"><span>⌕</span><input type="search" placeholder="搜索 Run、版本或标签" aria-label="搜索运行记录" /></label>
+                    <select aria-label="筛选运行状态"><option>全部状态</option><option>通过</option><option>失败</option><option>运行中</option></select>
+                    <button class="button secondary" type="button">比较所选</button>
+                  </div>
+                </header>
+                <div class="run-table" role="table" aria-label="实验运行记录">
+                  <div class="run-row run-head" role="row">
+                    <span role="columnheader"></span><span role="columnheader">Run / Design</span><span role="columnheader">变量</span><span role="columnheader">Δ 指标</span><span role="columnheader">状态</span><span role="columnheader">Artifact</span>
+                  </div>
+                  <button class="run-row selected" type="button" role="row">
+                    <span role="cell"><input type="checkbox" checked aria-label="选择 formal-v4" /></span>
+                    <span role="cell"><strong>formal-v4</strong><small>Design v4 · 5 seeds</small></span>
+                    <span role="cell">weight 0.875</span><span role="cell" class="positive">+2.8%</span><span role="cell"><em class="status-pill active">通过</em></span><span role="cell">8</span>
+                  </button>
+                  <button class="run-row" type="button" role="row">
+                    <span role="cell"><input type="checkbox" aria-label="选择 diagnostic-align" /></span>
+                    <span role="cell"><strong>diagnostic-align</strong><small>Design v5 · 3 seeds</small></span>
+                    <span role="cell">aligned / shifted</span><span role="cell">边界结果</span><span role="cell"><em class="status-pill warning">待审查</em></span><span role="cell">5</span>
+                  </button>
+                  <button class="run-row" type="button" role="row">
+                    <span role="cell"><input type="checkbox" aria-label="选择 smoke-v3" /></span>
+                    <span role="cell"><strong>smoke-v3</strong><small>Design v3 · 3 seeds</small></span>
+                    <span role="cell">weight 0.75</span><span role="cell" class="negative">+0.4%</span><span role="cell"><em class="status-pill">未晋升</em></span><span role="cell">4</span>
+                  </button>
+                </div>
+              </section>
               <section class="iteration-flow" aria-labelledby="iteration-flow-title">
                 <header>
                   <div>
@@ -361,7 +425,7 @@
           </section>
 
           <aside class="inspector" aria-label="当前阶段辅助信息">
-            <section class="inspector-card source-detail-card">
+            <section class="inspector-card source-detail-card" id="selection-inspector">
               <div class="card-heading">
                 <div><span class="eyebrow">当前选择</span><h2 id="selected-source-title">Predictive coding in the visual cortex</h2></div>
                 <button class="text-button" type="button">打开原文</button>
@@ -456,14 +520,44 @@
         iteration: {
           kicker: "阶段 03 · 执行工作区",
           title: "执行与迭代",
-          status: "尚未开始",
-          description: "按冻结设计运行、评估、归因，并只修改获准变量。",
-          heroAction: "查看执行准备度",
+          status: "新轮次待启动",
+          description: "当前轮次等待冻结设计；历史 Run、结果与诊断继续保留并可比较。",
+          heroAction: "查看运行记录",
           nextTitle: "等待冻结实验设计",
           nextCopy: "没有可执行的设计版本，因此不会创建运行批次或虚构实验结果。",
           nextButton: "查看实验设计",
           gates: ["实验设计已冻结", "执行器已绑定", "预算与种子已确认", "结果写回路径已准备"],
           completed: 0
+        }
+      };
+
+      const stageObjects = {
+        knowledge: {
+          heading: "当前批次",
+          items: [
+            ["层级机制证据补齐", "16 条资料 · 提炼中"],
+            ["可塑性规则检索", "8 条资料 · 已暂停"],
+            ["门控机制补充", "草稿 · 未启动"]
+          ],
+          selection: ["Predictive coding in the visual cortex", "Friston et al. · DOI 可追溯", "支持层级预测误差沿皮层层级传播；当前已标注 4 个证据锚点。"]
+        },
+        experiment: {
+          heading: "Design 版本",
+          items: [
+            ["Design v4", "已冻结 · 当前基线"],
+            ["Design v5-diagnostic", "待审查 · 修改 2 项"],
+            ["Design v3", "已归档 · 门禁失败"]
+          ],
+          selection: ["Design v4", "冻结设计 · formal · 5 seeds", "当前可执行基线；固定 weight=0.875，其余控制变量保持不变。"]
+        },
+        iteration: {
+          heading: "运行与候选",
+          items: [
+            ["formal-v4", "通过 · 当前最佳"],
+            ["diagnostic-align", "待审查 · 边界结果"],
+            ["smoke-v3", "未晋升 · 增益不足"]
+          ],
+          selection: ["formal-v4", "Design v4 · 5 seeds · 8 artifacts", "固定协议下获得有界工程收益；结论不能外推为真实神经机制。"]
         }
       };
 
@@ -501,6 +595,14 @@
         document.querySelector("#gate-list").innerHTML = content.gates
           .map((gate, index) => `<li class="${index < content.completed ? "done" : ""}"><span>${index < content.completed ? "✓" : ""}</span>${gate}</li>`)
           .join("");
+        const objects = stageObjects[stage];
+        document.querySelector("#stage-object-heading").textContent = objects.heading;
+        document.querySelector("#stage-object-list").innerHTML = objects.items
+          .map((item, index) => `<button class="stage-object ${index === 0 ? "active" : ""}" type="button"><span><i></i>${item[0]}</span><small>${item[1]}</small></button>`)
+          .join("");
+        document.querySelector("#selected-source-title").textContent = objects.selection[0];
+        document.querySelector("#selected-source-meta").textContent = objects.selection[1];
+        document.querySelector("#selected-source-evidence").textContent = objects.selection[2];
       }
 
       stageButtons.forEach((button) => button.addEventListener("click", () => selectStage(button.dataset.stage)));
