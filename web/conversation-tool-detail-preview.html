@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Vibelution · 工具详情预览</title>
+    <link rel="stylesheet" href="./src/design/conversation-tool-detail-preview.css" />
+  </head>
+  <body>
+    <main class="preview-shell">
+      <header class="preview-header">
+        <div>
+          <p class="eyebrow">Conversation UI preview</p>
+          <h1>工具结果不再是一张卡片</h1>
+          <p class="intro">
+            保留 Codex 式过程记录：摘要在时间线上，结果在原位展开，原始数据退到第二层。
+          </p>
+        </div>
+        <div class="preview-actions" aria-label="预览控制">
+          <button class="text-button" type="button" data-action="collapse-all">全部收起</button>
+          <button class="text-button" type="button" data-action="expand-all">全部展开</button>
+        </div>
+      </header>
+
+      <section class="conversation" aria-label="工具活动消息预览">
+        <article class="agent-turn">
+          <header class="agent-meta">
+            <span class="avatar" aria-hidden="true">资</span>
+            <strong>资料寻找</strong>
+            <time datetime="2026-07-25T10:31:00+08:00">10:31</time>
+          </header>
+
+          <p class="agent-copy">
+            我先检查设置页的具体实现和引用关系，再确认为什么模型配置入口会出现异常。
+          </p>
+
+          <div class="activity-stream">
+            <details class="activity-item" open>
+              <summary class="activity-summary">
+                <span class="activity-icon" aria-hidden="true">
+                  <svg viewBox="0 0 20 20">
+                    <circle cx="5" cy="4" r="2"></circle>
+                    <circle cx="15" cy="4" r="2"></circle>
+                    <circle cx="10" cy="16" r="2"></circle>
+                    <path d="M5 6v3h10V6M10 9v5"></path>
+                  </svg>
+                </span>
+                <span class="activity-copy">
+                  <span class="activity-title">检查代码图谱</span>
+                  <span class="activity-subtitle">找到 4 处引用 · ConfigRoute.tsx</span>
+                </span>
+                <span class="activity-status">已完成</span>
+                <span class="chevron" aria-hidden="true">
+                  <svg viewBox="0 0 20 20"><path d="m6 8 4 4 4-4"></path></svg>
+                </span>
+              </summary>
+
+              <div class="activity-detail structured-detail">
+                <div class="result-heading">
+                  <div>
+                    <strong>ConfigRoute.tsx</strong>
+                    <span>设置页主路由 · TypeScript · 4,213 行</span>
+                  </div>
+                  <span class="success-mark">
+                    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 10 3 3 7-7"></path></svg>
+                    结果可用
+                  </span>
+                </div>
+
+                <ol class="reference-list" aria-label="代码引用">
+                  <li>
+                    <span class="line-number">183</span>
+                    <div>
+                      <strong>ConfigRoute.tsx</strong>
+                      <code>const [savedDraft, setSavedDraft] = useState...</code>
+                    </div>
+                  </li>
+                  <li>
+                    <span class="line-number">947</span>
+                    <div>
+                      <strong>ConfigRoute.tsx</strong>
+                      <code>setSavedDraft(nextSnapshot)</code>
+                    </div>
+                  </li>
+                  <li>
+                    <span class="line-number">1294</span>
+                    <div>
+                      <strong>ConfigRoute.tsx</strong>
+                      <code>savedDraft?.providerWorkspace</code>
+                    </div>
+                  </li>
+                  <li class="reference-more">另有 1 处引用</li>
+                </ol>
+
+                <details class="raw-disclosure">
+                  <summary>
+                    <span>查看原始 JSON</span>
+                    <span class="raw-meta">2.1 KB</span>
+                    <span class="chevron" aria-hidden="true">
+                      <svg viewBox="0 0 20 20"><path d="m6 8 4 4 4-4"></path></svg>
+                    </span>
+                  </summary>
+                  <pre class="raw-output"><code>{
+  "status": "ok",
+  "mode": "inspect",
+  "target": {
+    "filePath": "web/src/routes/ConfigRoute.tsx"
+  },
+  "file": {
+    "language": "typescript",
+    "lineCount": 4213
+  },
+  "count": 4
+}</code></pre>
+                </details>
+              </div>
+            </details>
+
+            <details class="activity-item" open>
+              <summary class="activity-summary">
+                <span class="activity-icon" aria-hidden="true">
+                  <svg viewBox="0 0 20 20">
+                    <rect x="3" y="3" width="14" height="12" rx="2"></rect>
+                    <path d="m6 7 2 2-2 2M10 12h4"></path>
+                  </svg>
+                </span>
+                <span class="activity-copy">
+                  <span class="activity-title">读取浏览器操作能力</span>
+                  <span class="activity-subtitle">已读取使用约束与恢复策略</span>
+                </span>
+                <span class="activity-status">已完成</span>
+                <span class="chevron" aria-hidden="true">
+                  <svg viewBox="0 0 20 20"><path d="m6 8 4 4 4-4"></path></svg>
+                </span>
+              </summary>
+
+              <div class="activity-detail text-detail">
+                <div class="text-result-meta">
+                  <span>纯文本</span>
+                  <button type="button" class="copy-button" data-copy-target="browser-output">
+                    <svg viewBox="0 0 20 20" aria-hidden="true">
+                      <rect x="7" y="7" width="9" height="9" rx="2"></rect>
+                      <path d="M13 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"></path>
+                    </svg>
+                    复制
+                  </button>
+                </div>
+                <pre id="browser-output" class="text-output"><code>Use browser control only for visible, interactive page state.
+
+When a browser tab becomes stale, obtain or create a fresh tab from the
+same browser. Do not invalidate the browser binding only because a tab
+was closed during cleanup.
+
+Prefer semantic inspection before screenshots. Keep the current page
+binding while inspecting DOM state, interaction feedback, and console
+messages. Empty tab lists are normal after cleanup.
+
+For local previews, verify the primary desktop viewport and one narrow
+viewport. Report any state that remains simulated or unverified.</code></pre>
+              </div>
+            </details>
+
+            <details class="activity-item">
+              <summary class="activity-summary">
+                <span class="activity-icon" aria-hidden="true">
+                  <svg viewBox="0 0 20 20">
+                    <rect x="3" y="3" width="14" height="12" rx="2"></rect>
+                    <path d="m6 7 2 2-2 2M10 12h4"></path>
+                  </svg>
+                </span>
+                <span class="activity-copy">
+                  <span class="activity-title">运行前端检查</span>
+                  <span class="activity-subtitle">npm run build · 18.4s</span>
+                </span>
+                <span class="activity-status">已完成</span>
+                <span class="chevron" aria-hidden="true">
+                  <svg viewBox="0 0 20 20"><path d="m6 8 4 4 4-4"></path></svg>
+                </span>
+              </summary>
+              <div class="activity-detail text-detail">
+                <div class="text-result-meta"><span>命令输出</span></div>
+                <pre class="text-output compact"><code>✓ 2314 modules transformed.
+✓ built in 18.4s</code></pre>
+              </div>
+            </details>
+          </div>
+
+          <p class="agent-copy final-copy">
+            已定位到配置页引用关系：入口本身存在，下一步应继续核对模型服务发现失败的返回状态。
+          </p>
+        </article>
+      </section>
+
+      <footer class="preview-notes">
+        <span>预览范围</span>
+        <p>桌面与窄屏布局 · 展开/收起 · 原始 JSON 二级披露 · 长文本滚动 · 复制反馈</p>
+      </footer>
+    </main>
+
+    <div class="toast" role="status" aria-live="polite"></div>
+    <script src="./src/design/conversation-tool-detail-preview.js"></script>
+  </body>
+</html>
