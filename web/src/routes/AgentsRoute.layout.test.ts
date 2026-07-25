@@ -1824,6 +1824,10 @@ describe("AgentsRoute layout contract", () => {
     expect(workspaceLayoutPanelSource).toContain("PaneResizeHandle");
     expect(workspaceLayoutPanelSource).toContain("usePersistedPaneResize");
     expect(workspaceLayoutPanelSource).toContain("data-agent-workspace=\"resizable\"");
+    expect(routeSource).toContain('data-vui-recipe="agents-management-workbench"');
+    expect(workspaceLayoutPanelSource).toContain('data-vui-recipe="agents-workspace-shell"');
+    expect(workspaceLayoutPanelSource).toContain('data-vui-region="agents-directory"');
+    expect(workspaceLayoutPanelSource).toContain('data-vui-region="agents-detail"');
     expect(workspaceLayoutPanelSource).toContain('label="调整目录栏宽度"');
     expect(workspaceLayoutStyles.workspace).toContain("max-[860px]:flex-col");
     expect(workspaceLayoutStyles.inspector).toContain("max-[1180px]:absolute");

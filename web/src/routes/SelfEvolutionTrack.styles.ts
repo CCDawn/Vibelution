@@ -65,8 +65,8 @@ export const selfEvolutionTrackStyles = {
   approvalPanel: `grid min-h-0 content-start gap-3 overflow-auto p-3.5 ${panelSurface}`,
   statusPage: "grid h-full min-h-0 overflow-hidden max-[1180px]:h-auto max-[1180px]:overflow-visible",
   panelStack: "grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-4 overflow-hidden",
-  sidebarResizer:
-    "relative h-full w-2.5 cursor-col-resize rounded-[var(--radius-control)] border-0 bg-transparent p-0 before:absolute before:bottom-[18px] before:left-1 before:top-[18px] before:w-0.5 before:rounded-full before:bg-[color-mix(in_srgb,var(--accent-warm)_16%,transparent)] before:content-[''] max-[1180px]:hidden",
+  // Wave 6A: PaneCollapseHandle owns the visual rule; breakpoint hide only.
+  sidebarResizer: "max-[1180px]:hidden",
   segmentedTabs: "inline-flex self-center items-center gap-1 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] p-1 max-[1180px]:self-start",
   tabButton: "min-h-8 cursor-pointer rounded-md border-0 bg-transparent px-3 [font-size:var(--vui-font-sm)] text-[var(--fg-secondary)]",
   tabButtonActive: "bg-[color-mix(in_srgb,var(--accent-warm)_16%,transparent)] text-[var(--accent-warm-2)]",

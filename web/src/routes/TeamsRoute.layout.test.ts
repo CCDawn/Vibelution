@@ -1179,13 +1179,18 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionIngestionPanels).toContain("overflow-hidden");
     expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionIngestionPanels).toContain("min-h-0");
     expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionIngestionPanels).toContain("max-[860px]:min-h-[560px]");
-    expect(teamSourceCollectionGraphPanelStyles.sourceCollectionGraphNodeListShell).toContain("max-h-[28vh]");
+    // Wave 6E: graph node list height is shared PaneHeight, not fixed max-h.
+    expect(teamSourceCollectionGraphPanelStyles.sourceCollectionGraphNodeListShell).not.toContain("max-h-[28vh]");
     expect(teamSourceCollectionGraphPanelStyles.sourceCollectionGraphNodeListShell).toContain("[scrollbar-gutter:stable]");
+    expect(teamSourceCollectionGraphPanelSource).toContain("PersistedHeightListShell");
+    expect(teamSourceCollectionGraphPanelSource).toContain("TEAM_SOURCE_COLLECTION_GRAPH_NODES_HEIGHT_PANE");
     expect(routeStylesSource).not.toContain(".sourceCollectionIngestionPanels");
     expect(routeStylesSource).not.toContain(".sourceCollectionGraphNodeListShell");
     expect(teamSourceCollectionMemoryPanelSource).toContain("sourceCollectionMemoryListShell");
-    expect(teamSourceCollectionMemoryPanelStyles.sourceCollectionMemoryListShell).toContain("max-h-[44vh]");
-    expect(teamSourceCollectionMemoryPanelStyles.sourceCollectionMemoryListShell).toContain("max-[860px]:max-h-[58vh]");
+    expect(teamSourceCollectionMemoryPanelSource).toContain("PersistedHeightListShell");
+    expect(teamSourceCollectionMemoryPanelSource).toContain("TEAM_SOURCE_COLLECTION_MEMORY_HEIGHT_PANE");
+    expect(teamSourceCollectionMemoryPanelStyles.sourceCollectionMemoryListShell).not.toContain("max-h-[44vh]");
+    expect(teamSourceCollectionMemoryPanelStyles.sourceCollectionMemoryListShell).not.toContain("max-[860px]:max-h-[58vh]");
     expect(teamSourceCollectionMemoryPanelStyles.sourceCollectionMemoryListShell).toContain("[scrollbar-gutter:stable]");
     expect(routeSource).toContain("待 Agent 复核");
     expect(routeSource).not.toContain("待质检");
@@ -1739,10 +1744,15 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourceCollectionExtractionRecoveryPanelStyles.sourceCollectionExtractionRecoveryStats).toContain("repeat(auto-fit,minmax(7rem,1fr))");
     expect(teamSourceCollectionExtractionRecoveryPanelStyles.sourceCollectionExtractionRecoveryActions).toBeTypeOf("string");
     expect(teamSourceCollectionExtractionRecoveryPanelStyles.sourceCollectionExtractionRecoveryActions).toContain("[&_[data-vui=native-button]]:w-fit");
-    expect(teamSourceCollectionCandidatePanelStyles.sourceCollectionCandidateListShell).toContain("max-h-[44vh]");
-    expect(teamSourceCollectionCandidatePanelStyles.sourceCollectionCandidateListShell).toContain("min-h-[220px]");
-    expect(teamSourceCollectionScreeningPanelStyles.sourceCollectionScreeningListShell).toContain("max-h-[44vh]");
+    // Wave 6E: list shells use PersistedHeightListShell (min/max live on pane specs).
+    expect(teamSourceCollectionCandidatePanelStyles.sourceCollectionCandidateListShell).not.toContain("max-h-[44vh]");
+    expect(teamSourceCollectionCandidatePanelStyles.sourceCollectionCandidateListShell).not.toContain("min-h-[220px]");
+    expect(teamSourceCollectionCandidatePanelSource).toContain("PersistedHeightListShell");
+    expect(teamSourceCollectionCandidatePanelSource).toContain("TEAM_SOURCE_COLLECTION_CANDIDATES_HEIGHT_PANE");
+    expect(teamSourceCollectionScreeningPanelStyles.sourceCollectionScreeningListShell).not.toContain("max-h-[44vh]");
     expect(teamSourceCollectionScreeningPanelStyles.sourceCollectionScreeningListShell).toContain("[scrollbar-gutter:stable]");
+    expect(teamSourceCollectionScreeningPanelSource).toContain("PersistedHeightListShell");
+    expect(teamSourceCollectionScreeningPanelSource).toContain("TEAM_SOURCE_COLLECTION_SCREENING_HEIGHT_PANE");
     expect(routeStylesSource).not.toContain("grid-template-rows: auto minmax(0, 1fr) auto auto");
     expect(workflowGraphViewStyles.workflowGraphFrame).toContain("h-[var(--workflow-graph-height,360px)]");
     expect(workflowGraphViewStyles.workflowGraphFrame).not.toContain("h-full");
@@ -2081,6 +2091,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.workspace).toContain("max-[760px]:overflow-auto");
     expect(routeStyles.inspectorResizeHandle).toContain("max-[760px]:hidden");
     expect(routeSource).toContain("PaneResizeHandle");
+    expect(routeSource).toContain('data-vui-recipe="teams-organization-workbench"');
+    expect(routeSource).toContain('data-vui-domain-recipe="teams-organization-workbench"');
+    expect(routeSource).toContain('data-vui-region="teams-canvas"');
+    expect(routeSource).toContain('data-vui-region="teams-inspector"');
     expect(routeStyles.workspaceResearchCanvas).toContain("h-full");
     expect(routeStyles.workspaceResearchCanvas).toContain("var(--teams-inspector-width,clamp(320px,26vw,420px))");
     expect(routeStyles.workspaceResearchCanvas).toContain("overflow-hidden");

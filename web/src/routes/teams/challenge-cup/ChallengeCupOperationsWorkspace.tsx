@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { VNativeButton } from "../../../components/vui";
@@ -7,6 +7,7 @@ import css from "./ChallengeCupOperationsWorkspace.module.css";
 
 type ChallengeProgramProjection = NonNullable<ExperimentPlanningStatusPayload["challengeProgramProjection"]>;
 type WorkspaceTab = "overview" | "questions" | "evidence" | "agents";
+type PlatformStage = "knowledge_collection" | "experiment" | "iteration";
 
 export type ChallengeCupWorkspaceAgent = {
   agentId: string;
@@ -24,6 +25,10 @@ export type ChallengeCupOperationsWorkspaceProps = {
   projection?: ChallengeProgramProjection;
   agents: ChallengeCupWorkspaceAgent[];
   graphHref: string;
+  projectSwitcher?: ReactNode;
+  researchTopic?: string;
+  surface?: "workspace" | "progress";
+  stageHrefs?: Partial<Record<PlatformStage, string>>;
   isLoading: boolean;
   isUnavailable: boolean;
   isRefreshing: boolean;
@@ -80,16 +85,27 @@ function tabLabel(tab: WorkspaceTab) {
   }[tab];
 }
 
+const PLATFORM_STAGE_META: Record<PlatformStage, { index: string; label: string; shortLabel: string }> = {
+  knowledge_collection: { index: "01", label: "知识搜集", shortLabel: "资料与证据" },
+  experiment: { index: "02", label: "实验设计", shortLabel: "假设与方案" },
+  iteration: { index: "03", label: "执行与迭代", shortLabel: "运行与结论" },
+};
+
 export function ChallengeCupOperationsWorkspace({
   projection,
   agents,
   graphHref,
+  projectSwitcher,
+  researchTopic = "",
+  surface = "progress",
+  stageHrefs = {},
   isLoading,
   isUnavailable,
   isRefreshing,
   onRefresh,
 }: ChallengeCupOperationsWorkspaceProps) {
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("overview");
+  const [activeStage, setActiveStage] = useState<PlatformStage>("knowledge_collection");
   const stage1 = projection?.stage1ComplianceReadiness;
   const stage2 = projection?.stage2BatchGovernance;
   const stage3 = projection?.stage3DeepResearchDelivery;
@@ -136,6 +152,35 @@ export function ChallengeCupOperationsWorkspace({
   const programTrack = projection?.program.track || "赛道一 / 方向一 / A 科学假设生成与研究计划设计";
   const currentGate = reviewRequired > 0 ? "等待人工验收" : machineCompleted >= machineRequired ? "MVP 验收完成" : "等待机器验证";
   const isReady = machineCompleted >= machineRequired && reviewRequired === 0;
+  const activeStageHref = stageHrefs[activeStage] || graphHref;
+
+  const stageState = (stage: PlatformStage) => {
+    if (!stage1) {
+      return { label: "读取中", tone: "neutral" as const, count: "—" };
+    }
+    if (stage === "knowledge_collection") {
+      const blocked = stage1.blockers.length > 0;
+      return {
+        label: blocked ? "阻塞" : machineCompleted > 0 ? "进行中" : "未开始",
+        tone: blocked ? "warning" as const : machineCompleted > 0 ? "active" as const : "neutral" as const,
+        count: `${Math.min(machineCompleted, machineRequired)} / ${machineRequired}`,
+      };
+    }
+    if (stage === "experiment") {
+      const designReady = stage1.acceptance.researchPlanPresent && stage1.acceptance.feedbackRevisionCount > 0;
+      return {
+        label: designReady ? "已有设计" : "待设计",
+        tone: designReady ? "ready" as const : "neutral" as const,
+        count: designReady ? "1 / 1" : "0 / 1",
+      };
+    }
+    const caseCount = stage3?.representativeCaseCount ?? 0;
+    return {
+      label: caseCount > 0 ? "迭代中" : "待执行",
+      tone: caseCount > 0 ? "active" as const : "neutral" as const,
+      count: `${caseCount} / ${stage3?.requiredRepresentativeCaseCount ?? 3}`,
+    };
+  };
 
   const selectTab = (tab: WorkspaceTab) => {
     setActiveTab(tab);
@@ -143,6 +188,234 @@ export function ChallengeCupOperationsWorkspace({
       document.getElementById(`challenge-workspace-${tab}`)?.focus({ preventScroll: true });
     });
   };
+
+  if (surface === "workspace") {
+    return (
+      <section className={cx("workspace", "platform-workspace")} aria-label="通用科研工作台" data-testid="challenge-cup-platform-workspace">
+        <main className={cx("platform-frame")}>
+          <header className={cx("platform-project-header")}>
+            <div className={cx("platform-project-identity")}>
+              <span>研究计划</span>
+              <div>
+                <h1>{programTitle}</h1>
+                <span className={cx("status-pill", stageState(activeStage).tone)}>{stageState(activeStage).label}</span>
+                <span className={cx("autosave-label")}>{isLoading ? "同步中" : projection ? "投影已同步" : "投影不可用"}</span>
+              </div>
+              <p>研究主题：{researchTopic.trim() || programTitle}</p>
+            </div>
+            <div className={cx("platform-project-actions")}>
+              <span>项目操作</span>
+              <Link className={cx("button", "secondary")} to={graphHref}>
+                <GraphMark />
+                研究关系图
+              </Link>
+              <VNativeButton className={cx("button", "secondary")} type="button" onClick={onRefresh} disabled={isRefreshing}>
+                {isRefreshing ? "刷新中" : "刷新状态"}
+              </VNativeButton>
+            </div>
+          </header>
+
+          {isLoading ? (
+            <section className={cx("platform-state")} aria-live="polite" data-testid="challenge-cup-platform-loading">
+              <div className={cx("skeleton", "w-60")} />
+              <div className={cx("skeleton-panel")} />
+            </section>
+          ) : isUnavailable || !projection || !stage1 ? (
+            <section className={cx("platform-state", "error-state")} role="alert" data-testid="challenge-cup-platform-unavailable">
+              <div className={cx("error-icon")} aria-hidden="true">!</div>
+              <div>
+                <strong>科研工作台数据暂不可用</strong>
+                <p>页面不会回退到模拟数据。请重新读取真实 challengeProgramProjection。</p>
+                <VNativeButton className={cx("button", "primary")} type="button" onClick={onRefresh} disabled={isRefreshing}>
+                  {isRefreshing ? "重新读取中" : "重新读取"}
+                </VNativeButton>
+              </div>
+            </section>
+          ) : (
+            <>
+              {projectSwitcher ? <div className={cx("platform-project-switcher")}>{projectSwitcher}</div> : null}
+              <nav className={cx("platform-stage-rail")} aria-label="科研三阶段">
+                {(Object.keys(PLATFORM_STAGE_META) as PlatformStage[]).map((stage) => {
+                  const meta = PLATFORM_STAGE_META[stage];
+                  const state = stageState(stage);
+                  const selected = activeStage === stage;
+                  return (
+                    <VNativeButton
+                      key={stage}
+                      className={cx("platform-stage-button", selected && "selected")}
+                      type="button"
+                      aria-current={selected ? "step" : undefined}
+                      onClick={() => setActiveStage(stage)}
+                    >
+                      <span className={cx("stage-index")}>{meta.index}</span>
+                      <span className={cx("stage-label")}>
+                        <strong>{meta.label}</strong>
+                        <small>{meta.shortLabel}</small>
+                      </span>
+                      <span className={cx("stage-state", state.tone)}>{state.label}</span>
+                      <strong className={cx("stage-count")}>{state.count}</strong>
+                    </VNativeButton>
+                  );
+                })}
+              </nav>
+
+              <div className={cx("platform-grid")}>
+                <section className={cx("platform-canvas")} aria-labelledby="platform-stage-title">
+                  <header className={cx("platform-canvas-header")}>
+                    <div>
+                      <span>阶段 {PLATFORM_STAGE_META[activeStage].index} · 当前工作区</span>
+                      <div>
+                        <h2 id="platform-stage-title">{PLATFORM_STAGE_META[activeStage].label}</h2>
+                        <span className={cx("status-pill", stageState(activeStage).tone)}>{stageState(activeStage).label}</span>
+                      </div>
+                    </div>
+                    <div className={cx("platform-canvas-actions")}>
+                      <Link className={cx("button", "secondary")} to={activeStageHref}>查看阶段详情</Link>
+                    </div>
+                  </header>
+
+                  {activeStage === "knowledge_collection" ? (
+                    <div className={cx("platform-stage-content")}>
+                      <div className={cx("platform-substage-rail")} aria-label="知识搜集子阶段">
+                        {[
+                          ["资料发现", machineCompleted > 0],
+                          ["内容提炼", officialCallCount > 0],
+                          ["关系整理", citationGate],
+                          ["入库审核", humanGate],
+                        ].map(([label, done], index) => (
+                          <div className={cx("platform-substage", Boolean(done) && "complete")} key={String(label)}>
+                            <span>{done ? <CheckMark /> : index + 1}</span>
+                            <strong>{label}</strong>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className={cx("platform-metrics")}>
+                        <article><span>题目记录</span><strong>{machineCompleted}</strong></article>
+                        <article><span>模型调用证据</span><strong>{officialCallCount}</strong></article>
+                        <article><span>待人工审核</span><strong>{reviewRequired}</strong></article>
+                        <article><span>团队成员</span><strong>{readyAgentCount} / {agents.length}</strong></article>
+                      </div>
+
+                      <section className={cx("platform-task-card")}>
+                        <div>
+                          <span>本轮任务</span>
+                          <h3>{researchTopic.trim() || programTitle}</h3>
+                          <div className={cx("topic-tags")}>
+                            {stage1.independentEvaluationDimensions.slice(0, 3).map((dimension) => (
+                              <span key={dimension}>{dimension}</span>
+                            ))}
+                          </div>
+                        </div>
+                        <dl>
+                          <div><dt>当前批次</dt><dd>{stage1.mvpManifest.goldenSampleQuestionId || "未登记"}</dd></div>
+                          <div><dt>最近更新</dt><dd>{stage1.acceptance.feedbackRevisionCount} 次反馈修订</dd></div>
+                          <div><dt>阶段判断</dt><dd>{humanGate ? "证据与人工门禁已闭环" : "资料已找到，等待人工验收"}</dd></div>
+                        </dl>
+                      </section>
+
+                      <section className={cx("platform-data-surface")} aria-labelledby="platform-source-title">
+                        <header>
+                          <div><span>资料工作表</span><h3 id="platform-source-title">题目、证据与审核队列</h3></div>
+                          <div className={cx("dataset-tabs")} aria-label="资料视图">
+                            <span className={cx("selected")}>资料 {questions.length}</span>
+                            <span>Claim Map 0</span>
+                            <span>审核队列 {pendingQuestions.length}</span>
+                          </div>
+                        </header>
+                        <div className={cx("table-wrap", "platform-table")}>
+                          <table>
+                            <thead><tr><th>对象</th><th>类型</th><th>机器验证</th><th>人工审核</th><th>证据</th></tr></thead>
+                            <tbody>
+                              {questions.map((question) => (
+                                <tr key={question.id}>
+                                  <td><strong>{question.id}</strong><span>{question.kind}</span></td>
+                                  <td>{modelLabel}</td>
+                                  <td><span className={cx("status-icon", question.machinePassed ? "success" : "warning")}>{question.machinePassed ? "通过" : "待验证"}</span></td>
+                                  <td><span className={cx("status-icon", question.humanApproved ? "success" : "warning")}>{question.humanApproved ? "已批准" : "待抽检"}</span></td>
+                                  <td>{question.machinePassed ? "可追溯" : "待生成"}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                        <p className={cx("data-footnote")}>当前投影未提供正式 Claim Map 时保持为 0，不使用预览占位数据冒充真实研究结论。</p>
+                      </section>
+                    </div>
+                  ) : activeStage === "experiment" ? (
+                    <div className={cx("platform-stage-content", "platform-design-content")}>
+                      <section className={cx("design-summary")}>
+                        <header><span>Experiment Design</span><h3>冻结前的研究设计与治理检查</h3></header>
+                        <div className={cx("design-grid")}>
+                          <article><span>研究计划</span><strong>{stage1.acceptance.researchPlanPresent ? "已生成" : "待生成"}</strong><p>研究问题、假设与可执行协议来自正式投影。</p></article>
+                          <article><span>反馈修订</span><strong>v{Math.max(1, stage1.acceptance.feedbackRevisionCount)}</strong><p>仅展示已登记的修订次数，不推断不存在的版本。</p></article>
+                          <article><span>批处理治理</span><strong>{stage2?.completedQuestionCount ?? 0} / {stage2?.questionCount ?? 125}</strong><p>{stage2?.status || "未返回状态"}</p></article>
+                          <article><span>账本门禁</span><strong>{stage2?.ledger.initialized ? "已初始化" : "待初始化"}</strong><p>Manifest、引用审计和失败记录保持独立。</p></article>
+                        </div>
+                      </section>
+                      <section className={cx("platform-empty-state")}>
+                        <strong>当前 DTO 未返回冻结 Experiment Design 明细</strong>
+                        <p>生产页面保留清晰空态；进入阶段详情后继续使用现有实验规划链路。</p>
+                        <Link className={cx("button", "primary")} to={activeStageHref}>进入实验设计</Link>
+                      </section>
+                    </div>
+                  ) : (
+                    <div className={cx("platform-stage-content", "platform-run-content")}>
+                      <section className={cx("run-summary")}>
+                        <header><span>Run history</span><h3>代表性深研案例与版本链</h3></header>
+                        <div className={cx("run-list")}>
+                          {(stage3?.caseRecords.length ? stage3.caseRecords : []).map((record) => (
+                            <article key={record.caseId}>
+                              <div><strong>{record.title}</strong><span>{record.caseId}</span></div>
+                              <dl>
+                                <div><dt>内部状态</dt><dd>{record.internalStatus}</dd></div>
+                                <div><dt>最佳结果</dt><dd>{record.bestValidatedResultId || "未登记"}</dd></div>
+                                <div><dt>项目状态</dt><dd>{record.projectCompletionStatus}</dd></div>
+                              </dl>
+                              <p>{record.claimBoundary}</p>
+                            </article>
+                          ))}
+                        </div>
+                        {!stage3?.caseRecords.length ? <div className={cx("platform-empty-state")}>尚无已登记的代表性深研案例。</div> : null}
+                      </section>
+                    </div>
+                  )}
+                </section>
+
+                <aside className={cx("platform-inspector")} aria-label="阶段检查器">
+                  <section>
+                    <span>当前对象</span>
+                    <h2>{PLATFORM_STAGE_META[activeStage].label}</h2>
+                    <p>{activeStage === "knowledge_collection"
+                      ? "从真实题目、模型调用证据与人工门禁判断资料是否足以进入设计。"
+                      : activeStage === "experiment"
+                        ? "冻结可执行设计；没有 DTO 明细时不会伪造实验参数。"
+                        : "按版本检查运行结果、适用边界和下一轮受控修改。"}</p>
+                  </section>
+                  <section>
+                    <span>下一步</span>
+                    <strong>{activeStage === "knowledge_collection"
+                      ? reviewRequired > 0 ? `完成 ${reviewRequired} 项人工审核` : "进入实验设计"
+                      : activeStage === "experiment"
+                        ? "补齐并冻结设计"
+                        : "审查最佳版本与边界"}</strong>
+                    <Link className={cx("button", "primary")} to={activeStageHref}>进入工作区</Link>
+                  </section>
+                  <section>
+                    <span>Agent 团队</span>
+                    <strong>{readyAgentCount} / {agents.length} 可用</strong>
+                    <div className={cx("inspector-agent-list")}>
+                      {agents.slice(0, 4).map((agent) => <span key={agent.agentId}>{agent.name} · {agent.role}</span>)}
+                    </div>
+                  </section>
+                </aside>
+              </div>
+            </>
+          )}
+        </main>
+      </section>
+    );
+  }
 
   return (
     <section className={cx("workspace")} aria-label="挑战杯科研任务操作台" data-testid="challenge-cup-operations-workspace">

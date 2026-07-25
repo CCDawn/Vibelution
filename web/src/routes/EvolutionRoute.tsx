@@ -56,9 +56,11 @@ import {
   type PaneSpec,
 } from "../components/layout/paneLayoutPersistence";
 import {
-  persistPaneHeight,
-  resolveStoredPaneHeight,
+  migrateLegacyNumericHeight,
+  type PaneHeightSpec,
 } from "../components/layout/paneHeightPersistence";
+import { PaneHeightResizeHandle } from "../components/layout/PaneHeightResizeHandle";
+import { usePersistedPaneHeight } from "../components/layout/usePersistedPaneHeight";
 import { usePersistedPaneResize } from "../components/layout/usePersistedPaneResize";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import { LazyConversationView } from "../components/conversation/LazyConversationView";
@@ -103,10 +105,6 @@ import { EvolutionRunRecordsPanel } from "./EvolutionRunRecordsPanel";
 import { EvolutionSelfTrackBoundary } from "./EvolutionSelfTrackBoundary";
 import { createEvolutionWorkspaceCache } from "./evolutionWorkspaceCache";
 import { modelDisplayLabel } from "./agentDisplay";
-import {
-  clampPaneSize,
-  keyboardPaneHeight,
-} from "./resizablePane";
 import styles from "./EvolutionRoute.styles";
 
 type RunFilter = "all" | "success" | "failed";
@@ -238,9 +236,13 @@ const EVOLUTION_WIDTH_PANES: PaneSpec[] = [
   EVOLUTION_LIVE_RUN_PANE,
 ];
 const EVOLUTION_LIVE_IO_HEIGHT_KEY = "vibelution.evolution.live-io-height";
-const EVOLUTION_LIVE_IO_HEIGHT_PANE_ID = "live-io";
-const EVOLUTION_LIVE_IO_HEIGHT_BOUNDS = { min: 260, max: 780 };
-const EVOLUTION_LIVE_IO_DEFAULT_HEIGHT = 340;
+const EVOLUTION_LIVE_IO_HEIGHT_PANE: PaneHeightSpec = {
+  id: "live-io",
+  defaultHeight: 340,
+  minHeight: 260,
+  maxHeight: 780,
+};
+const EVOLUTION_HEIGHT_PANES: PaneHeightSpec[] = [EVOLUTION_LIVE_IO_HEIGHT_PANE];
 const SUPERVISED_RUN_MEMBER_ROLES: SupervisedMemberRole[] = ["baseline", "candidate"];
 const SUPERVISED_WORKFLOW_STEPS: SupervisedWorkflowDefinition[] = [
   { id: "baseline_eval", zh: "基线评测", en: "Baseline", role: "baseline" },
@@ -772,16 +774,22 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const libraryListWidth = evolutionPaneWidths["library-list"] ?? EVOLUTION_LIBRARY_LIST_PANE.defaultWidth;
   const liveLaunchWidth = evolutionPaneWidths["live-launch"] ?? EVOLUTION_LIVE_LAUNCH_PANE.defaultWidth;
   const liveRunWidth = evolutionPaneWidths["live-run"] ?? EVOLUTION_LIVE_RUN_PANE.defaultWidth;
-  const [liveIoHeight, setLiveIoHeight] = useState(() =>
-    resolveStoredPaneHeight(
-      EVOLUTION_LAYOUT_ID,
-      EVOLUTION_LIVE_IO_HEIGHT_PANE_ID,
-      EVOLUTION_LIVE_IO_DEFAULT_HEIGHT,
-      EVOLUTION_LIVE_IO_HEIGHT_BOUNDS.min,
-      EVOLUTION_LIVE_IO_HEIGHT_BOUNDS.max,
-      EVOLUTION_LIVE_IO_HEIGHT_KEY,
-    ),
+  // Synchronous one-time migrate so the first height resolve sees shared storage.
+  migrateLegacyNumericHeight(
+    EVOLUTION_LAYOUT_ID,
+    EVOLUTION_LIVE_IO_HEIGHT_PANE.id,
+    EVOLUTION_LIVE_IO_HEIGHT_KEY,
   );
+  const {
+    heights: evolutionPaneHeights,
+    draggingPaneId: evolutionHeightDraggingPaneId,
+    startResize: startEvolutionHeightResize,
+    onResizeKeyDown: onEvolutionHeightResizeKeyDown,
+  } = usePersistedPaneHeight({
+    layoutId: EVOLUTION_LAYOUT_ID,
+    panes: EVOLUTION_HEIGHT_PANES,
+  });
+  const liveIoHeight = evolutionPaneHeights["live-io"] ?? EVOLUTION_LIVE_IO_HEIGHT_PANE.defaultHeight;
   const [runsQueueCollapsed, setRunsQueueCollapsed] = useState(false);
   const [libraryListCollapsed, setLibraryListCollapsed] = useState(false);
   const [liveLaunchCollapsed, setLiveLaunchCollapsed] = useState(false);
@@ -2158,10 +2166,6 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     });
   }, [visibleLibraryEntries]);
 
-  useEffect(() => {
-    persistPaneHeight(EVOLUTION_LAYOUT_ID, EVOLUTION_LIVE_IO_HEIGHT_PANE_ID, liveIoHeight);
-  }, [liveIoHeight]);
-
   const filteredRuns = useMemo(() => {
     if (runFilter === "all") {
       return runs;
@@ -2626,27 +2630,6 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     setLibraryDeleteFilter("all");
   }
 
-  function beginPaneHeightResize(
-    startY: number,
-    startHeight: number,
-    bounds: typeof EVOLUTION_LIVE_IO_HEIGHT_BOUNDS,
-    setHeight: (value: number) => void,
-  ) {
-    const handleMove = (moveEvent: globalThis.PointerEvent) => {
-      setHeight(clampPaneSize(startHeight + moveEvent.clientY - startY, bounds));
-    };
-    const handleEnd = () => {
-      window.removeEventListener("pointermove", handleMove);
-      window.removeEventListener("pointerup", handleEnd);
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
-    };
-    document.body.style.cursor = "row-resize";
-    document.body.style.userSelect = "none";
-    window.addEventListener("pointermove", handleMove);
-    window.addEventListener("pointerup", handleEnd);
-  }
-
   function handleRunsResizeStart(event: PointerEvent<any>) {
     if (runsQueueCollapsed) {
       return;
@@ -2689,21 +2672,12 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     onEvolutionPaneResizeKeyDown("live-run", event as KeyboardEvent<HTMLDivElement>, { direction: -1 });
   }
 
-  function handleLiveIoResizeStart(event: PointerEvent<HTMLButtonElement>) {
-    if (event.button !== 0) {
-      return;
-    }
-    event.preventDefault();
-    beginPaneHeightResize(event.clientY, liveIoHeight, EVOLUTION_LIVE_IO_HEIGHT_BOUNDS, setLiveIoHeight);
+  function handleLiveIoResizeStart(event: PointerEvent<any>) {
+    startEvolutionHeightResize("live-io", event, { direction: 1 });
   }
 
-  function handleLiveIoResizeKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
-    const nextHeight = keyboardPaneHeight(liveIoHeight, event.key, EVOLUTION_LIVE_IO_HEIGHT_BOUNDS);
-    if (nextHeight === null) {
-      return;
-    }
-    event.preventDefault();
-    setLiveIoHeight(nextHeight);
+  function handleLiveIoResizeKeyDown(event: KeyboardEvent<any>) {
+    onEvolutionHeightResizeKeyDown("live-io", event, { direction: 1 });
   }
 
   function handleLibraryResizeStart(event: PointerEvent<any>) {
@@ -3585,16 +3559,16 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                 )}
               </div>
 
-              <VButton
-                type="button"
+              <PaneHeightResizeHandle
+                label={resizeLiveIoLabel}
+                valueNow={liveIoHeight}
+                valueMin={EVOLUTION_LIVE_IO_HEIGHT_PANE.minHeight}
+                valueMax={EVOLUTION_LIVE_IO_HEIGHT_PANE.maxHeight}
+                active={evolutionHeightDraggingPaneId === "live-io"}
                 className={styles.liveIoResizeHandle}
-                aria-label={resizeLiveIoLabel}
-                tooltip={resizeLiveIoLabel}
                 onPointerDown={handleLiveIoResizeStart}
                 onKeyDown={handleLiveIoResizeKeyDown}
-              >
-                <span className={styles.liveIoResizeHandleLine} aria-hidden="true" />
-              </VButton>
+              />
           </VSurface>
 
         </div>

@@ -3443,8 +3443,9 @@ export function TeamsRoute({
     if (!researchWorkflowTeamSelected) {
       return null;
     }
-    if (challengeCupResearchTeamSelected && challengeTeamSurface === "progress") {
+    if (challengeCupResearchTeamSelected) {
       const challengeProjection = experimentPlanningStatus?.challengeProgramProjection;
+      const challengeTeamId = selectedTeam?.teamId || RESEARCH_TEAM_ID;
       const challengeAgents: ChallengeCupWorkspaceAgent[] = selectedTeamMemoryMembers.map((member) => {
         const normalizedRole = member.roleLabel.toLowerCase();
         const workspace = normalizedRole.includes("source") || normalizedRole.includes("资料")
@@ -3472,7 +3473,26 @@ export function TeamsRoute({
         <ChallengeCupOperationsWorkspace
           projection={challengeProjection}
           agents={challengeAgents}
-          graphHref={researchCanvasRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID)}
+          graphHref={researchCanvasRoute(challengeTeamId)}
+          projectSwitcher={challengeTeamSurface === "workspace" ? (
+            <ResearchProjectSwitcher
+              teamId={challengeTeamId}
+              lang={lang}
+              currentTopic={sourceCollectionDraft.topic}
+              currentExperimentMethod={preferredExperimentMethod}
+              onProjectActivated={(project) => {
+                setSourceCollectionDraft((current) => ({ ...current, topic: project.topic }));
+                setPreferredExperimentMethod(project.experimentMethod || "");
+              }}
+            />
+          ) : null}
+          researchTopic={sourceCollectionDraft.topic}
+          surface={challengeTeamSurface}
+          stageHrefs={{
+            knowledge_collection: researchSourceCollectionRoute(challengeTeamId),
+            experiment: researchWorkspaceStageRoute(challengeTeamId, "experiment"),
+            iteration: researchWorkspaceStageRoute(challengeTeamId, "iteration"),
+          }}
           isLoading={!challengeProjection && experimentPlanningStatusQuery.isPending}
           isUnavailable={!challengeProjection && !experimentPlanningStatusQuery.isPending}
           isRefreshing={experimentPlanningStatusQuery.isFetching}
@@ -9757,6 +9777,7 @@ export function TeamsRoute({
     <VDenseOpsPage
       className={styles.route}
       headerClassName={challengeCupResearchTeamSelected && !researchCanvasVisible ? styles.challengeWorkspaceContextHidden : styles.teamContextBar}
+      data-vui-domain-recipe="teams-organization-workbench"
       ariaLabel={selectedTeamContextTitle}
       eyebrow={lang === "zh" ? "团队工作台 / 组织画布" : "Team Workspace / Canvas"}
       title={lang === "zh" ? "团队组织画布" : "Team Organization Canvas"}
@@ -9875,6 +9896,7 @@ export function TeamsRoute({
         ref={teamsLayoutRef}
         className={workspaceClassName}
         style={teamsLayoutStyle}
+        data-vui-recipe="teams-organization-workbench"
         data-vui-layout-id={TEAMS_LAYOUT_ID}
       >
         <VSurface
@@ -9884,6 +9906,7 @@ export function TeamsRoute({
           padding="none"
           tone="rail"
           id="research-organization-canvas"
+          data-vui-region="teams-canvas"
         >
           <div className={styles.canvasToolbar}>
             <div>
@@ -10116,7 +10139,7 @@ export function TeamsRoute({
           />
         ) : null}
 
-        <aside className={inspectorClassName}>
+        <aside className={inspectorClassName} data-vui-region="teams-inspector">
           {challengeCupResearchTeamSelected && !researchCanvasVisible ? null : (
           <div className={styles.inspectorHeader}>
             <strong>

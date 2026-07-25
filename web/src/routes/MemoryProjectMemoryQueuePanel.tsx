@@ -1,9 +1,22 @@
 import { CheckCircle2, Square, TriangleAlert, XCircle } from "lucide-react";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 
 import type { AgentProjectMemoryUpdateProposal } from "../api/types";
+import { PaneHeightResizeHandle } from "../components/layout/PaneHeightResizeHandle";
+import type { PaneHeightSpec } from "../components/layout/paneHeightPersistence";
+import { usePersistedPaneHeight } from "../components/layout/usePersistedPaneHeight";
+import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import { VButton, VNativeInput, VTooltip } from "../components/vui";
 import styles from "./MemoryProjectMemoryQueuePanel.styles";
+
+const MEMORY_PROJECT_QUEUE_LAYOUT_ID = WORKBENCH_LAYOUT_IDS.memory;
+const MEMORY_PROJECT_QUEUE_HEIGHT_PANE: PaneHeightSpec = {
+  id: "project-memory-queue",
+  defaultHeight: 220,
+  minHeight: 140,
+  maxHeight: 480,
+};
+const MEMORY_PROJECT_QUEUE_HEIGHT_PANES: PaneHeightSpec[] = [MEMORY_PROJECT_QUEUE_HEIGHT_PANE];
 
 export type MemoryProjectMemoryResolveStatus = "applied" | "rejected" | "conflict" | "superseded";
 
@@ -71,8 +84,28 @@ export function MemoryProjectMemoryQueuePanel({
   proposalAgentLabel,
   proposalResolverLabel,
 }: MemoryProjectMemoryQueuePanelProps) {
+  const {
+    heights: queueHeights,
+    draggingPaneId: queueHeightDraggingPaneId,
+    startResize: startQueueHeightResize,
+    onResizeKeyDown: onQueueHeightResizeKeyDown,
+  } = usePersistedPaneHeight({
+    layoutId: MEMORY_PROJECT_QUEUE_LAYOUT_ID,
+    panes: MEMORY_PROJECT_QUEUE_HEIGHT_PANES,
+  });
+  const queueHeight = queueHeights["project-memory-queue"] ?? MEMORY_PROJECT_QUEUE_HEIGHT_PANE.defaultHeight;
+  const queueStyle = {
+    height: `${queueHeight}px`,
+  } as CSSProperties;
+
   return (
-    <section className={styles.projectMemoryQueuePanel}>
+    <>
+    <section
+      className={styles.projectMemoryQueuePanel}
+      style={queueStyle}
+      data-vui-region="memory-project-queue"
+      data-vui-layout-id={MEMORY_PROJECT_QUEUE_LAYOUT_ID}
+    >
       <div className={styles.panelHeader}>
         <div>
           <p className={styles.panelEyebrow}>{copy.governance}</p>
@@ -230,5 +263,16 @@ export function MemoryProjectMemoryQueuePanel({
         ) : null}
       </div>
     </section>
+    <PaneHeightResizeHandle
+      label={copy.projectMemoryQueue}
+      valueNow={queueHeight}
+      valueMin={MEMORY_PROJECT_QUEUE_HEIGHT_PANE.minHeight}
+      valueMax={MEMORY_PROJECT_QUEUE_HEIGHT_PANE.maxHeight}
+      active={queueHeightDraggingPaneId === "project-memory-queue"}
+      className={styles.projectMemoryQueueResizeHandle}
+      onPointerDown={(event) => startQueueHeightResize("project-memory-queue", event, { direction: 1 })}
+      onKeyDown={(event) => onQueueHeightResizeKeyDown("project-memory-queue", event, { direction: 1 })}
+    />
+    </>
   );
 }

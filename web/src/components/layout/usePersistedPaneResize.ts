@@ -16,6 +16,7 @@ import {
   type PaneSpec,
   type PaneWidthMap,
 } from "./paneLayoutPersistence";
+import { attachAxisResizeSession } from "./attachAxisResizeSession";
 import {
   PANE_KEYBOARD_STEP,
   resolvePaneWidthFromKeyboardKey,
@@ -146,47 +147,6 @@ export function usePersistedPaneResize({
     return () => observer.disconnect();
   }, [layoutId, panes, preserveMainMinWidth]);
 
-  useEffect(() => {
-    if (!drag) {
-      return;
-    }
-    const previousCursor = document.body.style.cursor;
-    const previousUserSelect = document.body.style.userSelect;
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
-
-    const onMove = (event: PointerEvent) => {
-      const spec = specs.get(drag.paneId);
-      if (!spec) {
-        return;
-      }
-      const delta = (event.clientX - drag.startX) * drag.direction;
-      const nextWidth = clampPaneWidth(drag.startWidth + delta, spec.minWidth, spec.maxWidth);
-      setWidths((current) => (
-        current[drag.paneId] === nextWidth
-          ? current
-          : { ...current, [drag.paneId]: nextWidth }
-      ));
-    };
-    const onUp = () => {
-      setDrag(null);
-      setWidths((current) => {
-        writePaneLayout(layoutId, current);
-        return current;
-      });
-    };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-    window.addEventListener("pointercancel", onUp);
-    return () => {
-      document.body.style.cursor = previousCursor;
-      document.body.style.userSelect = previousUserSelect;
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      window.removeEventListener("pointercancel", onUp);
-    };
-  }, [drag, layoutId, specs]);
-
   const startResize = useCallback(
     (paneId: string, event: ReactPointerEvent<HTMLDivElement>, options?: { direction?: 1 | -1 }) => {
       if (event.button !== 0) {
@@ -197,14 +157,36 @@ export function usePersistedPaneResize({
         return;
       }
       event.preventDefault();
+      const direction = options?.direction ?? 1;
+      const startX = event.clientX;
+      const startWidth = widths[paneId] ?? spec.defaultWidth;
       setDrag({
         paneId,
-        direction: options?.direction ?? 1,
-        startX: event.clientX,
-        startWidth: widths[paneId] ?? spec.defaultWidth,
+        direction,
+        startX,
+        startWidth,
+      });
+      attachAxisResizeSession({
+        cursor: "col-resize",
+        onMove: (moveEvent) => {
+          const delta = (moveEvent.clientX - startX) * direction;
+          const nextWidth = clampPaneWidth(startWidth + delta, spec.minWidth, spec.maxWidth);
+          setWidths((current) => (
+            current[paneId] === nextWidth
+              ? current
+              : { ...current, [paneId]: nextWidth }
+          ));
+        },
+        onEnd: () => {
+          setDrag(null);
+          setWidths((current) => {
+            writePaneLayout(layoutId, current);
+            return current;
+          });
+        },
       });
     },
-    [specs, widths],
+    [layoutId, specs, widths],
   );
 
   const onResizeKeyDown = useCallback(

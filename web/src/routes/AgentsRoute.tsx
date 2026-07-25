@@ -5909,7 +5909,10 @@ export function AgentsRoute() {
   } : null;
 
   return (
-    <section className={styles.route}>
+    <section
+      className={styles.route}
+      data-vui-recipe="agents-management-workbench"
+    >
       <AgentManagementHeaderPanel
         copy={{
           createAgent: copy.createAgent,

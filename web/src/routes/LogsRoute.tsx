@@ -37,10 +37,13 @@ import {
 } from "../api/types";
 import { VActionGroup, VButton, VConfirmDialog, VDenseOpsPage, VIconButton, VNativeInput, VStateSurface, VStatusStrip, VSurface, VTooltip } from "../components/vui";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
+import { PaneHeightResizeHandle } from "../components/layout/PaneHeightResizeHandle";
 import {
   migrateLegacyNumericPanes,
   type PaneSpec,
 } from "../components/layout/paneLayoutPersistence";
+import type { PaneHeightSpec } from "../components/layout/paneHeightPersistence";
+import { usePersistedPaneHeight } from "../components/layout/usePersistedPaneHeight";
 import { usePersistedPaneResize } from "../components/layout/usePersistedPaneResize";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import { LazyFilePreview } from "../components/preview/LazyFilePreview";
@@ -75,6 +78,14 @@ const LOG_RIGHT_PANE: PaneSpec = {
   maxWidth: 520,
 };
 const LOG_PANES: PaneSpec[] = [LOG_SIDEBAR_PANE, LOG_RIGHT_PANE];
+/** Preview-stack package file picker height (shared pane-heights.v1 under logs). */
+const LOG_PACKAGE_FILES_HEIGHT_PANE: PaneHeightSpec = {
+  id: "package-files",
+  defaultHeight: 190,
+  minHeight: 120,
+  maxHeight: 420,
+};
+const LOG_HEIGHT_PANES: PaneHeightSpec[] = [LOG_PACKAGE_FILES_HEIGHT_PANE];
 
 type RootLabelKey = (typeof ROOT_LABEL_KEYS)[keyof typeof ROOT_LABEL_KEYS];
 type ActionNotice = {
@@ -336,8 +347,19 @@ export function LogsRoute() {
     panes: LOG_PANES,
     preserveMainMinWidth: 520,
   });
+  const {
+    heights: logPaneHeights,
+    draggingPaneId: logHeightDraggingPaneId,
+    startResize: startLogHeightResize,
+    onResizeKeyDown: onLogHeightResizeKeyDown,
+  } = usePersistedPaneHeight({
+    layoutId: LOGS_LAYOUT_ID,
+    panes: LOG_HEIGHT_PANES,
+  });
   const sidebarWidth = logPaneWidths.sidebar ?? LOG_SIDEBAR_PANE.defaultWidth;
   const rightRailWidth = logPaneWidths.right ?? LOG_RIGHT_PANE.defaultWidth;
+  const packageFilesHeight = logPaneHeights["package-files"] ?? LOG_PACKAGE_FILES_HEIGHT_PANE.defaultHeight;
+  const packageFilesResizeLabel = lang === "zh" ? "调整日志文件列表高度" : "Resize log file list height";
 
   const rootsQuery = useQuery({
     queryKey: queryKeys.logRoots(),
@@ -1081,8 +1103,14 @@ export function LogsRoute() {
                   tone: "loading",
                 })
               ) : contentQuery.data ? (
-                <div className={styles.logPreviewStack}>
-                  <section className={styles.packageFilesPanel}>
+                <div
+                  className={styles.logPreviewStack}
+                  style={{
+                    ["--logs-package-files-height" as string]: `${packageFilesHeight}px`,
+                  } as CSSProperties}
+                  data-vui-region="logs-preview-stack"
+                >
+                  <section className={styles.packageFilesPanel} data-vui-region="logs-package-files">
                     <div className={styles.packageFilesHeader}>
                       <div>
                         <p className={styles.sidebarEyebrow}>{packageFilesLabel}</p>
@@ -1136,6 +1164,16 @@ export function LogsRoute() {
                       })}
                     </div>
                   </section>
+                  <PaneHeightResizeHandle
+                    label={packageFilesResizeLabel}
+                    valueNow={packageFilesHeight}
+                    valueMin={LOG_PACKAGE_FILES_HEIGHT_PANE.minHeight}
+                    valueMax={LOG_PACKAGE_FILES_HEIGHT_PANE.maxHeight}
+                    active={logHeightDraggingPaneId === "package-files"}
+                    className={styles.packageFilesResizeHandle}
+                    onPointerDown={(event) => startLogHeightResize("package-files", event, { direction: 1 })}
+                    onKeyDown={(event) => onLogHeightResizeKeyDown("package-files", event, { direction: 1 })}
+                  />
                   <LazyFilePreview
                     file={contentQuery.data}
                     changed={false}

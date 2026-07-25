@@ -12,7 +12,9 @@ import {
   type SetStateAction,
 } from "react";
 
+import { attachAxisResizeSession } from "../../components/layout/attachAxisResizeSession";
 import { PANE_KEYBOARD_STEP, resolvePaneWidthFromKeyboardKey } from "../../components/layout/paneResizeKeyboard";
+import { WORKBENCH_LAYOUT_IDS } from "../../components/layout/workbenchLayoutIds";
 import { resolveChatResponsiveLayout, type ChatResponsiveLayout } from "../chatCompactPanel";
 import { useShellStore } from "../../store/shellStore";
 import styles from "../ChatCodingRoute.styles";
@@ -61,7 +63,15 @@ export type UseChatWorkbenchLayoutResult = {
 /**
  * Chat workbench shell layout: panel widths, resize drag/keyboard, responsive
  * collapse/overlay, and CSS vars / class names for the three-pane grid.
+ *
+ * Wave 5–6D Chat shell boundary (do not collapse into generic usePersistedPaneResize):
+ * - Shared: attachAxisResizeSession, paneResizeKeyboard, WORKBENCH_LAYOUT_IDS.chat,
+ *   PaneCollapseHandle visuals, dual-write via setChatPanelWidths → pane-layouts.v1[chat].
+ * - Chat-owned: coupled left/right bounds (center track budget), responsive collapse/overlay,
+ *   CSS grid template vars / class names for the three-pane session workbench.
  */
+export const CHAT_WORKBENCH_LAYOUT_ID = WORKBENCH_LAYOUT_IDS.chat;
+
 export function useChatWorkbenchLayout({
   standardGroupRoomActive,
 }: UseChatWorkbenchLayoutOptions): UseChatWorkbenchLayoutResult {
@@ -156,60 +166,6 @@ export function useChatWorkbenchLayout({
     }
   }, [responsiveLayout.leftVisible, responsiveLayout.rightVisible, responsiveOverlayPane]);
 
-  useEffect(() => {
-    if (!dragState) {
-      return;
-    }
-    const activeDrag = dragState;
-
-    const previousCursor = document.body.style.cursor;
-    const previousUserSelect = document.body.style.userSelect;
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
-
-    function stopDragging() {
-      setDragState(null);
-    }
-
-    function handlePointerMove(event: globalThis.PointerEvent) {
-      const layoutWidth = layoutRef.current?.getBoundingClientRect().width ?? 0;
-      if (!layoutWidth) {
-        return;
-      }
-
-      const delta = event.clientX - activeDrag.startX;
-
-      if (activeDrag.side === "left") {
-        if (conversationIndexCollapsed) {
-          return;
-        }
-        const bounds = getResizeBounds("left", layoutWidth, statusRailCollapsed ? 0 : activeDrag.startRightWidth);
-        const nextLeftWidth = clamp(activeDrag.startLeftWidth + delta, bounds.min, bounds.max);
-        setChatPanelWidths({ leftPanelWidth: Math.round(nextLeftWidth) });
-        return;
-      }
-
-      if (statusRailCollapsed) {
-        return;
-      }
-      const bounds = getResizeBounds("right", layoutWidth, conversationIndexCollapsed ? 0 : activeDrag.startLeftWidth);
-      const nextRightWidth = clamp(activeDrag.startRightWidth - delta, bounds.min, bounds.max);
-      setChatPanelWidths({ rightPanelWidth: Math.round(nextRightWidth) });
-    }
-
-    window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", stopDragging);
-    window.addEventListener("pointercancel", stopDragging);
-
-    return () => {
-      document.body.style.cursor = previousCursor;
-      document.body.style.userSelect = previousUserSelect;
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", stopDragging);
-      window.removeEventListener("pointercancel", stopDragging);
-    };
-  }, [conversationIndexCollapsed, dragState, setChatPanelWidths, statusRailCollapsed]);
-
   const handleResizeStart = useCallback((side: ResizableSide, event: PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) {
       return;
@@ -218,13 +174,51 @@ export function useChatWorkbenchLayout({
       return;
     }
     event.preventDefault();
+    // Wave 5: shared window pointer session; Chat keeps coupled dual-pane bounds + shellStore dual-write.
+    const startX = event.clientX;
+    const startLeftWidth = leftPanelWidth;
+    const startRightWidth = rightPanelWidth;
     setDragState({
       side,
-      startX: event.clientX,
-      startLeftWidth: leftPanelWidth,
-      startRightWidth: rightPanelWidth,
+      startX,
+      startLeftWidth,
+      startRightWidth,
     });
-  }, [conversationIndexCollapsed, leftPanelWidth, rightPanelWidth, statusRailCollapsed]);
+    attachAxisResizeSession({
+      cursor: "col-resize",
+      onMove: (moveEvent) => {
+        const layoutWidth = layoutRef.current?.getBoundingClientRect().width ?? 0;
+        if (!layoutWidth) {
+          return;
+        }
+        const delta = moveEvent.clientX - startX;
+        if (side === "left") {
+          if (conversationIndexCollapsed) {
+            return;
+          }
+          const bounds = getResizeBounds("left", layoutWidth, statusRailCollapsed ? 0 : startRightWidth);
+          const nextLeftWidth = clamp(startLeftWidth + delta, bounds.min, bounds.max);
+          setChatPanelWidths({ leftPanelWidth: Math.round(nextLeftWidth) });
+          return;
+        }
+        if (statusRailCollapsed) {
+          return;
+        }
+        const bounds = getResizeBounds("right", layoutWidth, conversationIndexCollapsed ? 0 : startLeftWidth);
+        const nextRightWidth = clamp(startRightWidth - delta, bounds.min, bounds.max);
+        setChatPanelWidths({ rightPanelWidth: Math.round(nextRightWidth) });
+      },
+      onEnd: () => {
+        setDragState(null);
+      },
+    });
+  }, [
+    conversationIndexCollapsed,
+    leftPanelWidth,
+    rightPanelWidth,
+    setChatPanelWidths,
+    statusRailCollapsed,
+  ]);
 
   const handleResizeKeyDown = useCallback((side: ResizableSide, event: KeyboardEvent<HTMLDivElement>) => {
     if (!layoutRef.current) {
