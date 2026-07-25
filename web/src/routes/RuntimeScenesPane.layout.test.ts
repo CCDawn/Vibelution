@@ -104,11 +104,14 @@ describe("RuntimeScenesPane layout contract", () => {
     expect(paneSource).toContain("handleOpenRawLog(scene.runtimeSceneId, cluster.rawRefs[0].path)");
   });
 
-  it("keeps the runtime scene sidebar collapsible from the resize handle", () => {
+  it("keeps the runtime scene sidebar collapsible from the shared resize contract", () => {
     expect(paneSource).toContain("PaneCollapseHandle");
+    expect(paneSource).toContain("usePersistedPaneResize");
+    expect(paneSource).toContain("WORKBENCH_LAYOUT_IDS.logsRuntimeScenes");
     expect(paneSource).toContain("sidebarCollapsed");
     expect(paneSource).toContain("setSidebarCollapsed");
     expect(paneSource).toContain("--logs-sidebar-width");
+    expect(paneSource).toContain("data-vui-layout-id");
   });
 
   it("keeps the scene list on the lightweight package index", () => {
