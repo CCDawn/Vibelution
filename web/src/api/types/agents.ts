@@ -876,6 +876,26 @@ export type AgentConfigWorkspaceAgent = AgentInstance & {
   archiveSummary?: AgentArchiveSummary;
   references: AgentConfigReference[];
   health: AgentConfigHealthIssue[];
+  effectiveConfiguration?: AgentEffectiveConfiguration;
+};
+
+export type AgentEffectiveConfigurationSource = {
+  kind: "agent" | "mode_default" | "global" | "shared_policy" | "system" | string;
+  id: string;
+  label: string;
+};
+
+export type AgentEffectiveConfigurationField = {
+  key: "dialogueModel" | "promptTemplate" | "toolPolicy" | "memoryPolicy" | "contextCompression" | "delegation" | "supervision" | string;
+  label: string;
+  effectiveValue: unknown;
+  source: AgentEffectiveConfigurationSource;
+  inheritanceChain: Array<AgentEffectiveConfigurationSource & { value: unknown; active: boolean }>;
+  status: "ready" | "warning" | "blocked" | string;
+};
+
+export type AgentEffectiveConfiguration = {
+  fields: AgentEffectiveConfigurationField[];
 };
 
 export type AgentModelChoice = {

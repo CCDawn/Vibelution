@@ -12,6 +12,7 @@ from typing import Any, Callable, Iterable
 
 from core.orchestration.context_engine import list_agent_runs_for_agents
 
+from .agent_config_effective_projection import derive_effective_configuration
 from . import agent_role_tool_profile_service, chat_room_service, config_service
 from .agent_directory_service import agent_persona_profile_has_content
 from .agent_directory_service import agent_task_profile_has_content
@@ -277,6 +278,13 @@ def _build_agent_config_workspace(
             "runtimeStatus": runtime_status_by_agent.get(str(agent.get("agentId") or ""), _default_runtime_status(agent)),
         }
         for agent in agents
+    ]
+    enriched_agents = [
+        {
+            **agent,
+            "effectiveConfiguration": derive_effective_configuration(agent),
+        }
+        for agent in enriched_agents
     ]
     groups = _timed_stage(timings, "derive_groups", lambda: _derive_groups(enriched_agents))
     team_indexes = _timed_stage(

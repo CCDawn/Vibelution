@@ -127,6 +127,7 @@ class AgentUpdatePayload(BaseModel):
     taskProfile: dict[str, Any] | None = None
     metadata: dict[str, Any] | None = None
     status: str | None = None
+    expectedUpdatedAt: str = ""
 
 
 class AgentToolPolicyValidatePayload(BaseModel):
@@ -872,6 +873,7 @@ def agent_update(agent_id: str, payload: AgentUpdatePayload) -> dict:
                     task_profile=payload.taskProfile,
                     metadata=payload.metadata,
                     status="archived",
+                    expected_updated_at=payload.expectedUpdatedAt,
                 ),
             )
             return _with_agent_workspace_cache_invalidated({
@@ -897,6 +899,7 @@ def agent_update(agent_id: str, payload: AgentUpdatePayload) -> dict:
                 task_profile=payload.taskProfile,
                 metadata=payload.metadata,
                 status=payload.status,
+                expected_updated_at=payload.expectedUpdatedAt,
             )
             | ({"archiveSummary": archive_summary} if archive_summary else {})
         )
@@ -908,6 +911,11 @@ def agent_update(agent_id: str, payload: AgentUpdatePayload) -> dict:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except session_service.SessionValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except AgentStateConflictError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "agent_update_conflict", "message": str(exc)},
+        ) from exc
     except (AgentDirectoryError, AgentModeBindingError, ChatRoomValidationError, TeamServiceError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 

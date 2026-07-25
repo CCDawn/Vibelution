@@ -904,6 +904,45 @@ def test_agent_config_workspace_persists_context_compression_policy(tmp_path, mo
     assert stored["contextCompressionPolicy"]["maxTokenLimit"] == 9000
 
 
+def test_agent_config_workspace_projects_effective_configuration_sources(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="Governance Projection Agent",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
+    )
+    agent_directory_service.update_agent_instance(
+        agent["agentId"],
+        context_compression_policy={
+            "mode": "custom",
+            "maxTokenLimit": 9000,
+        },
+        delegation_policy={"allowSubagents": True, "maxConcurrent": 3, "maxDepth": 2},
+        supervision_policy={"supervisionEnabled": True, "reviewMode": "required", "evidenceLevel": "strict"},
+    )
+
+    workspace = agent_config_workspace_service.get_agent_config_workspace()
+    projected = next(item for item in workspace["agents"] if item["agentId"] == agent["agentId"])
+    fields = {item["key"]: item for item in projected["effectiveConfiguration"]["fields"]}
+
+    assert set(fields) == {
+        "dialogueModel",
+        "promptTemplate",
+        "toolPolicy",
+        "memoryPolicy",
+        "contextCompression",
+        "delegation",
+        "supervision",
+    }
+    assert fields["dialogueModel"]["effectiveValue"] == "model-primary"
+    assert fields["dialogueModel"]["source"]["kind"] == "agent"
+    assert fields["contextCompression"]["effectiveValue"]["maxTokenLimit"] == 9000
+    assert fields["contextCompression"]["source"]["kind"] == "agent"
+    assert fields["delegation"]["effectiveValue"]["maxConcurrent"] == 3
+    assert fields["supervision"]["effectiveValue"]["reviewMode"] == "required"
+    assert all(item["inheritanceChain"] for item in fields.values())
+
+
 def test_agent_directory_reuses_repaired_snapshot_for_repeated_reads(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
