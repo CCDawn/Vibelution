@@ -14,3 +14,15 @@ export const CHAT_GROUP_MEMBER_PICKER_HEIGHT_PANE: PaneHeightSpec = {
   minHeight: 160,
   maxHeight: 360,
 };
+
+/**
+ * Companion / mental-model compact details body in status rail
+ * (~former max-h 220px on the whole <details>).
+ * Height applies to the open body only; closed summary stays content-sized.
+ */
+export const CHAT_COMPACT_DETAILS_HEIGHT_PANE: PaneHeightSpec = {
+  id: "compact-details",
+  defaultHeight: 220,
+  minHeight: 120,
+  maxHeight: 360,
+};

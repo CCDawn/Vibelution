@@ -37,6 +37,7 @@ import {
   type FeaturePresetKey,
 } from "./chatFeaturePresets";
 import {
+  CHAT_COMPACT_DETAILS_HEIGHT_PANE,
   CHAT_GROUP_MEMBER_PICKER_HEIGHT_PANE,
   CHAT_LIST_HEIGHT_LAYOUT_ID,
 } from "./chatListHeights";
@@ -683,88 +684,97 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
               <span className={styles.compactDetailsClosedLabel}>{lang === "zh" ? "明细" : "Details"}</span>
               <span className={styles.compactDetailsOpenLabel}>{t("collapseSection")}</span>
             </summary>
-            {mentalModelEnabledForNextTurn ? (
-              <>
-                <p className={styles.oneLineValue} title={mentalWhisper}>
-                  <span>{t("mentalWhisper")}</span>
-                  {mentalWhisper}
-                </p>
-                <div className={styles.inlineStatGrid}>
-                  <div className={styles.inlineStat}>
-                    <span>{t("state")}</span>
-                    <strong>{mentalCognitiveStateLabel}</strong>
+            {/* Height shell only wraps the open body — closed summary stays content-sized. */}
+            <PersistedHeightListShell
+              layoutId={CHAT_LIST_HEIGHT_LAYOUT_ID}
+              pane={CHAT_COMPACT_DETAILS_HEIGHT_PANE}
+              label={lang === "zh" ? "调整状态明细高度" : "Resize status details height"}
+              className={styles.compactDetailsBody}
+              resizeHandleClassName={styles.compactDetailsResizeHandle}
+            >
+              {mentalModelEnabledForNextTurn ? (
+                <>
+                  <p className={styles.oneLineValue} title={mentalWhisper}>
+                    <span>{t("mentalWhisper")}</span>
+                    {mentalWhisper}
+                  </p>
+                  <div className={styles.inlineStatGrid}>
+                    <div className={styles.inlineStat}>
+                      <span>{t("state")}</span>
+                      <strong>{mentalCognitiveStateLabel}</strong>
+                    </div>
+                    <div className={styles.inlineStat}>
+                      <span>{t("mentalConfidence")}</span>
+                      <strong>{mentalConfidence}</strong>
+                    </div>
+                    <div className={styles.inlineStat}>
+                      <span>{t("mentalSource")}</span>
+                      <strong>{mentalSourceLabel}</strong>
+                    </div>
+                    <div className={styles.inlineStat}>
+                      <span>{t("mentalLastUpdated")}</span>
+                      <strong title={formatTime(mental?.updatedAt ?? "")}>{mentalRelativeTime}</strong>
+                    </div>
                   </div>
-                  <div className={styles.inlineStat}>
-                    <span>{t("mentalConfidence")}</span>
-                    <strong>{mentalConfidence}</strong>
-                  </div>
-                  <div className={styles.inlineStat}>
-                    <span>{t("mentalSource")}</span>
-                    <strong>{mentalSourceLabel}</strong>
-                  </div>
-                  <div className={styles.inlineStat}>
-                    <span>{t("mentalLastUpdated")}</span>
-                    <strong title={formatTime(mental?.updatedAt ?? "")}>{mentalRelativeTime}</strong>
-                  </div>
-                </div>
-              </>
-            ) : (
-              <p className={styles.contextLineCompact}>{mentalSummary}</p>
-            )}
-            <div className={styles.inlineMetaList}>
-              <span className={styles.inlineMetaPill}>
-                <span>{t("dailyTokens")}</span>
-                <strong>{numberFormatter.format(pet?.dailyTokens ?? 0)}</strong>
-              </span>
-              {petVitals.map((vital) => (
-                <span key={vital.key} className={styles.inlineMetaPill}>
-                  <span>{vital.label}</span>
-                  <strong>{vital.value}</strong>
+                </>
+              ) : (
+                <p className={styles.contextLineCompact}>{mentalSummary}</p>
+              )}
+              <div className={styles.inlineMetaList}>
+                <span className={styles.inlineMetaPill}>
+                  <span>{t("dailyTokens")}</span>
+                  <strong>{numberFormatter.format(pet?.dailyTokens ?? 0)}</strong>
                 </span>
-              ))}
-            </div>
-            <div className={styles.petShowcaseActions} aria-label={petInteractionLabels.group}>
-              <VButton
-                type="button"
-                contentLayout="plain"
-                className={styles.petShowcaseAction}
-                onClick={() => onPetInteraction("feed")}
-                isDisabled={petActionPending}
-                title={petInteractionLabels.feedTitle}
-              >
-                <Apple size={14} />
-                <span>{petInteractionLabels.feed}</span>
-              </VButton>
-              <VButton
-                type="button"
-                contentLayout="plain"
-                className={styles.petShowcaseAction}
-                onClick={() => onPetInteraction("talk")}
-                isDisabled={petActionPending}
-                title={petInteractionLabels.talkTitle}
-              >
-                <MessageCircleHeart size={14} />
-                <span>{petInteractionLabels.talk}</span>
-              </VButton>
-              <VButton
-                type="button"
-                contentLayout="plain"
-                className={styles.petShowcaseAction}
-                onClick={() => onPetInteraction("care")}
-                isDisabled={petActionPending}
-                title={petInteractionLabels.careTitle}
-              >
-                <HeartHandshake size={14} />
-                <span>{petInteractionLabels.care}</span>
-              </VButton>
-            </div>
-            {petActionPending ? (
-              <span className={styles.petShowcaseActionHint}>
-                <Sparkles size={13} />
-                <span>{petInteractionLabels.pending}</span>
-              </span>
-            ) : null}
-            {petActionFeedback ? <p className={styles.petShowcaseFeedback}>{petActionFeedback}</p> : null}
+                {petVitals.map((vital) => (
+                  <span key={vital.key} className={styles.inlineMetaPill}>
+                    <span>{vital.label}</span>
+                    <strong>{vital.value}</strong>
+                  </span>
+                ))}
+              </div>
+              <div className={styles.petShowcaseActions} aria-label={petInteractionLabels.group}>
+                <VButton
+                  type="button"
+                  contentLayout="plain"
+                  className={styles.petShowcaseAction}
+                  onClick={() => onPetInteraction("feed")}
+                  isDisabled={petActionPending}
+                  title={petInteractionLabels.feedTitle}
+                >
+                  <Apple size={14} />
+                  <span>{petInteractionLabels.feed}</span>
+                </VButton>
+                <VButton
+                  type="button"
+                  contentLayout="plain"
+                  className={styles.petShowcaseAction}
+                  onClick={() => onPetInteraction("talk")}
+                  isDisabled={petActionPending}
+                  title={petInteractionLabels.talkTitle}
+                >
+                  <MessageCircleHeart size={14} />
+                  <span>{petInteractionLabels.talk}</span>
+                </VButton>
+                <VButton
+                  type="button"
+                  contentLayout="plain"
+                  className={styles.petShowcaseAction}
+                  onClick={() => onPetInteraction("care")}
+                  isDisabled={petActionPending}
+                  title={petInteractionLabels.careTitle}
+                >
+                  <HeartHandshake size={14} />
+                  <span>{petInteractionLabels.care}</span>
+                </VButton>
+              </div>
+              {petActionPending ? (
+                <span className={styles.petShowcaseActionHint}>
+                  <Sparkles size={13} />
+                  <span>{petInteractionLabels.pending}</span>
+                </span>
+              ) : null}
+              {petActionFeedback ? <p className={styles.petShowcaseFeedback}>{petActionFeedback}</p> : null}
+            </PersistedHeightListShell>
           </details>
         </section>
           </>

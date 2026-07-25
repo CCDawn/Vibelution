@@ -904,8 +904,11 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.companionCopy).toContain("[font-size:var(--vui-font-xs)]");
     expect(routeStyles.petShowcaseFeedback).toContain("[font-size:var(--vui-font-sm)]");
     expect(routeStyles.companionTopLine).not.toMatch(/bg-vui-surface-row|bg-\[var\(--vui-surface-row\)\]/);
-    expect(routeStyles.compactDetails).toContain("max-h-[220px]");
-    expect(routeStyles.compactDetails).toContain("overflow-auto");
+    // Wave 6H: max-h lives on open body height shell, not the outer <details>.
+    expect(routeStyles.compactDetails).not.toContain("max-h-[220px]");
+    expect(routeStyles.compactDetailsBody).toContain("overflow-auto");
+    expect(chatStatusRailSource).toContain("CHAT_COMPACT_DETAILS_HEIGHT_PANE");
+    expect(chatStatusRailSource).toContain("PersistedHeightListShell");
     expect(routeStyles.inlineMetaPill).toContain("min-h-[24px]");
     expect(routeStyles.petShowcaseAction).toContain("min-h-[30px]");
     expect(routeStyles.petShowcaseAction).toContain("[font-size:var(--vui-font-sm)]");
@@ -1333,8 +1336,12 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.cacheDetailBoundaryUnknown).toBeTypeOf("string");
     expect(routeStyles.cacheDetailEmpty).toBeTypeOf("string");
     expect(routeStyles.cacheDetailDialog).toContain("w-[min(1120px,calc(100vw_-_44px))]");
+    // Wave 6H: dialog shells stay viewport-clamped (not workbench height API).
     expect(routeStyles.cacheDetailDialog).toContain("max-h-[min(860px,calc(100dvh_-_52px))]");
+    expect(routeStyles.cacheDetailDialog).toContain("100dvh");
     expect(routeStyles.cacheDetailBody).toContain("max-h-[min(620px,calc(100dvh_-_238px))]");
+    expect(cacheDetailDialogSource).not.toContain("usePersistedPaneHeight");
+    expect(cacheDetailDialogSource).not.toContain("PersistedHeightListShell");
     expect(routeStyles.cacheDetailBody).toContain("[scrollbar-gutter:stable]");
     expect(routeStyles.tokenStatusRing).toContain("relative");
     expect(routeStyles.tokenStatusRing).toContain("conic-gradient");
