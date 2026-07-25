@@ -61,6 +61,8 @@ from .optimization_models import (
     candidate_from_improvement,
 )
 from .feedback import build_reflective_feedback
+from .budget import BudgetLimitExceeded, BudgetUsage, EvolutionBudget, EvolutionBudgetLedger
+from .candidate_archive import CandidateArchive, CandidateArchiveRecord, ObjectiveVector
 from .vibelution_adapter import VibelutionAgentHarnessAdapter
 from .runner import (
     DEFAULT_COLLECTION_ID,
@@ -82,10 +84,16 @@ __all__ = [
     "AttemptEvidence",
     "AgentHarnessAdapter",
     "CandidateImprovement",
+    "CandidateArchive",
+    "CandidateArchiveRecord",
     "CallableAgentHarnessAdapter",
     "CriticDiagnosis",
+    "BudgetLimitExceeded",
+    "BudgetUsage",
     "EvaluationRun",
     "EvolutionEngine",
+    "EvolutionBudget",
+    "EvolutionBudgetLedger",
     "EvolutionCandidate",
     "EvolutionReplayContext",
     "GeneratedCaseProvenance",
@@ -103,6 +111,7 @@ __all__ = [
     "ImprovementEpisode",
     "OPTIMIZATION_ARTIFACT_SCHEMA_VERSION",
     "OptimizationContractError",
+    "ObjectiveVector",
     "PromotionProposal",
     "Score",
     "ReflectiveFeedback",
