@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>科研平台主页优化预览 · Vibelution</title>
+    <link rel="stylesheet" href="/src/design/challenge-cup-platform-home-preview.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="app-bar">
+        <div class="brand">
+          <button class="icon-button" type="button" aria-label="返回">←</button>
+          <div>
+            <strong>Vibelution</strong>
+            <span>本地 Agent 工作台</span>
+          </div>
+          <span class="version">v1.0.16</span>
+        </div>
+        <nav aria-label="主导航">
+          <a href="#">对话</a>
+          <a href="#">监督进化</a>
+          <a href="#">自进化</a>
+          <a class="active" href="#">团队</a>
+          <a href="#">Kernel</a>
+          <a href="#">记忆库</a>
+          <a href="#">Agent 管理</a>
+        </nav>
+        <div class="app-tools">
+          <span class="connected"><i></i>前端 已连接</span>
+          <button class="icon-button bordered" type="button" aria-label="刷新">↻</button>
+          <button class="icon-button bordered" type="button" aria-label="设置">⚙</button>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <div class="surface-switch" role="tablist" aria-label="团队页面视图">
+          <button class="active" role="tab" aria-selected="true" type="button">
+            <strong>科研工作台</strong>
+            <span>项目推进与三阶段协作</span>
+          </button>
+          <button role="tab" aria-selected="false" type="button">
+            <strong>项目进展</strong>
+            <span>里程碑、验收门禁与交付状态</span>
+          </button>
+        </div>
+
+        <section class="project-hero" aria-labelledby="project-title">
+          <div class="project-identity">
+            <span class="eyebrow">当前研究项目</span>
+            <div class="project-title-line">
+              <h1 id="project-title">默认研究项目</h1>
+              <span class="state-badge active">知识搜集中</span>
+              <span class="save-state">已自动保存</span>
+            </div>
+            <p>研究主题：神经预测编码中的层级反馈与可塑性学习机制</p>
+          </div>
+          <div class="project-actions">
+            <label>
+              <span>切换项目</span>
+              <select aria-label="切换研究项目">
+                <option>默认研究项目</option>
+                <option>催化剂智能发现</option>
+                <option>临床知识推理</option>
+              </select>
+            </label>
+            <button class="button secondary" type="button">编辑项目</button>
+            <button class="button secondary" type="button">＋ 新建项目</button>
+            <button class="button primary" id="hero-primary" type="button">继续知识搜集</button>
+          </div>
+        </section>
+
+        <section class="stage-rail" aria-label="科研三阶段">
+          <button class="stage-node active" type="button" data-stage="knowledge" aria-pressed="true">
+            <span class="stage-index">01</span>
+            <span class="stage-copy">
+              <small>当前阶段</small>
+              <strong>知识搜集</strong>
+              <em>资料发现、提炼、关系整理与入库</em>
+            </span>
+            <span class="stage-summary">
+              <b>1 / 4</b>
+              <small>内部步骤</small>
+            </span>
+          </button>
+          <span class="stage-connector" aria-hidden="true"></span>
+          <button class="stage-node" type="button" data-stage="experiment" aria-pressed="false">
+            <span class="stage-index">02</span>
+            <span class="stage-copy">
+              <small>等待上游</small>
+              <strong>实验设计</strong>
+              <em>假设、变量、指标与执行门禁</em>
+            </span>
+            <span class="stage-summary">
+              <b>2 / 2</b>
+              <small>Agent 就绪</small>
+            </span>
+          </button>
+          <span class="stage-connector" aria-hidden="true"></span>
+          <button class="stage-node" type="button" data-stage="iteration" aria-pressed="false">
+            <span class="stage-index">03</span>
+            <span class="stage-copy">
+              <small>尚未开始</small>
+              <strong>执行与迭代</strong>
+              <em>运行、评估、归因与受控优化</em>
+            </span>
+            <span class="stage-summary">
+              <b>0</b>
+              <small>有效结果</small>
+            </span>
+          </button>
+        </section>
+
+        <div class="workspace-grid">
+          <section class="primary-workspace" aria-labelledby="active-stage-title">
+            <header class="workspace-header">
+              <div>
+                <span class="eyebrow" id="active-stage-kicker">阶段 01 · 当前工作区</span>
+                <div class="workspace-title-line">
+                  <h2 id="active-stage-title">知识搜集</h2>
+                  <span class="state-badge active" id="active-stage-status">进行中</span>
+                </div>
+                <p id="active-stage-description">先建立可信的资料和证据基础，再进入实验规划。</p>
+              </div>
+              <div class="header-actions">
+                <button class="button quiet" type="button">团队讨论</button>
+                <button class="button secondary" type="button">查看阶段详情</button>
+              </div>
+            </header>
+
+            <div class="knowledge-view stage-view active" data-view="knowledge">
+              <ol class="substage-progress" aria-label="知识搜集内部进度">
+                <li class="done">
+                  <span>✓</span>
+                  <div><strong>资料发现</strong><small>16 条原始资料</small></div>
+                </li>
+                <li class="current">
+                  <span>2</span>
+                  <div><strong>内容提炼</strong><small>下一步</small></div>
+                </li>
+                <li>
+                  <span>3</span>
+                  <div><strong>关系整理</strong><small>未开始</small></div>
+                </li>
+                <li>
+                  <span>4</span>
+                  <div><strong>入库审核</strong><small>未开始</small></div>
+                </li>
+              </ol>
+
+              <div class="metric-grid">
+                <article><span>原始资料</span><strong>16</strong><small>15 条来源可追溯</small></article>
+                <article><span>待提炼</span><strong>16</strong><small>尚未形成知识条目</small></article>
+                <article><span>搜索问题</span><strong>4</strong><small>中英文 · 3 类来源</small></article>
+                <article><span>团队成员</span><strong>5 / 5</strong><small>全部可用</small></article>
+              </div>
+
+              <section class="current-task">
+                <div class="task-main">
+                  <span class="eyebrow">本轮任务</span>
+                  <h3>围绕预测编码的层级机制补齐证据</h3>
+                  <p>当前批次已返回资料。建议先完成提炼和来源审查，再根据证据缺口决定是否继续搜索。</p>
+                  <div class="query-chips">
+                    <span>预测编码皮层层级</span>
+                    <span>突触可塑性学习规则</span>
+                    <span>神经门控注意机制</span>
+                    <span>＋1</span>
+                  </div>
+                </div>
+                <dl>
+                  <div><dt>当前批次</dt><dd>dprun-2026…500ed</dd></div>
+                  <div><dt>最近更新</dt><dd>今天 10:34</dd></div>
+                  <div><dt>阶段判断</dt><dd>资料已找到，等待提炼</dd></div>
+                </dl>
+              </section>
+
+              <footer class="workspace-actions">
+                <div>
+                  <strong>推荐下一步：提炼 16 条资料</strong>
+                  <span>完成后才能判断证据是否足以支撑实验假设。</span>
+                </div>
+                <button class="button secondary" type="button">调整搜索主题</button>
+                <button class="button primary" type="button" data-toast="已进入知识搜集工作台">进入知识搜集工作台</button>
+              </footer>
+            </div>
+
+            <div class="experiment-view stage-view" data-view="experiment">
+              <div class="blocked-callout">
+                <span class="callout-icon">!</span>
+                <div>
+                  <strong>等待知识搜集完成</strong>
+                  <p>至少需要一组已审核、可追溯的知识条目，才能冻结实验设计。</p>
+                </div>
+              </div>
+              <div class="design-summary">
+                <article>
+                  <span class="eyebrow">当前方式</span>
+                  <strong>模型训练 / 推理</strong>
+                  <p>已发现 3 个可用执行器，尚未选择正式执行器。</p>
+                  <button class="button secondary" type="button">配置实验方式</button>
+                </article>
+                <article>
+                  <span class="eyebrow">设计门禁</span>
+                  <ul>
+                    <li class="done">研究问题已定义</li>
+                    <li>证据支持尚未就绪</li>
+                    <li>Baseline 与指标待冻结</li>
+                    <li>复现合同待生成</li>
+                  </ul>
+                </article>
+              </div>
+            </div>
+
+            <div class="iteration-view stage-view" data-view="iteration">
+              <div class="blocked-callout neutral">
+                <span class="callout-icon">3</span>
+                <div>
+                  <strong>冻结实验设计后才能开始执行</strong>
+                  <p>当前没有可运行的设计版本，也没有候选结果或诊断记录。</p>
+                </div>
+              </div>
+              <div class="metric-grid">
+                <article><span>冻结设计</span><strong>—</strong><small>尚未生成</small></article>
+                <article><span>最佳候选</span><strong>—</strong><small>尚未执行</small></article>
+                <article><span>有效结果</span><strong>0</strong><small>无运行记录</small></article>
+                <article><span>诊断记录</span><strong>0</strong><small>无失败归因</small></article>
+              </div>
+            </div>
+          </section>
+
+          <aside class="inspector" aria-label="当前阶段辅助信息">
+            <section class="inspector-card next-action">
+              <span class="eyebrow">下一步</span>
+              <h2 id="next-action-title">完成内容提炼</h2>
+              <p id="next-action-copy">把原始资料转为带证据锚点的结构化内容，避免直接用搜索摘要设计实验。</p>
+              <button class="button primary full" id="next-action-button" type="button" data-toast="已定位到内容提炼">去内容提炼</button>
+            </section>
+
+            <section class="inspector-card">
+              <div class="card-heading">
+                <div><span class="eyebrow">阶段门禁</span><h2>进入下一阶段前</h2></div>
+                <span class="counter" id="gate-counter">1 / 4</span>
+              </div>
+              <ul class="check-list" id="gate-list">
+                <li class="done"><span>✓</span>资料来源可追溯</li>
+                <li><span></span>关键内容完成提炼</li>
+                <li><span></span>关系图完成整理</li>
+                <li><span></span>知识条目审核入库</li>
+              </ul>
+            </section>
+
+            <section class="inspector-card">
+              <div class="card-heading">
+                <div><span class="eyebrow">协作状态</span><h2>当前阶段 Agent</h2></div>
+                <button class="text-button" type="button">查看团队</button>
+              </div>
+              <div class="agent-list">
+                <article><span class="avatar">白</span><div><strong>白书遥</strong><small>资料寻找 · 等待任务</small></div><i class="online"></i></article>
+                <article><span class="avatar">白</span><div><strong>白望舒</strong><small>资料提炼 · 可用</small></div><i class="online"></i></article>
+                <article><span class="avatar">顾</span><div><strong>顾言初</strong><small>关系整理 · 未启动</small></div><i></i></article>
+              </div>
+            </section>
+
+            <section class="inspector-card activity-card">
+              <div class="card-heading">
+                <div><span class="eyebrow">最近活动</span><h2>项目动态</h2></div>
+              </div>
+              <ul>
+                <li><span>10:34</span><p>资料寻找返回 16 条结果</p></li>
+                <li><span>10:31</span><p>创建知识搜集批次</p></li>
+                <li><span>10:28</span><p>更新研究主题</p></li>
+              </ul>
+            </section>
+          </aside>
+        </div>
+      </main>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script>
+      const stageContent = {
+        knowledge: {
+          kicker: "阶段 01 · 当前工作区",
+          title: "知识搜集",
+          status: "进行中",
+          description: "先建立可信的资料和证据基础，再进入实验规划。",
+          heroAction: "继续知识搜集",
+          nextTitle: "完成内容提炼",
+          nextCopy: "把原始资料转为带证据锚点的结构化内容，避免直接用搜索摘要设计实验。",
+          nextButton: "去内容提炼",
+          gates: ["资料来源可追溯", "关键内容完成提炼", "关系图完成整理", "知识条目审核入库"],
+          completed: 1
+        },
+        experiment: {
+          kicker: "阶段 02 · 设计工作区",
+          title: "实验设计",
+          status: "等待上游",
+          description: "围绕证据充分的假设冻结变量、指标、预算和复现合同。",
+          heroAction: "查看实验设计",
+          nextTitle: "先完成知识入库",
+          nextCopy: "当前缺少已审核知识条目，实验设计只能查看，不能冻结或启动。",
+          nextButton: "返回知识搜集",
+          gates: ["研究问题已定义", "证据支持已审核", "Baseline 与指标已冻结", "执行器与预算已确认"],
+          completed: 1
+        },
+        iteration: {
+          kicker: "阶段 03 · 执行工作区",
+          title: "执行与迭代",
+          status: "尚未开始",
+          description: "按冻结设计运行、评估、归因，并只修改获准变量。",
+          heroAction: "查看执行准备度",
+          nextTitle: "等待冻结实验设计",
+          nextCopy: "没有可执行的设计版本，因此不会创建运行批次或虚构实验结果。",
+          nextButton: "查看实验设计",
+          gates: ["实验设计已冻结", "执行器已绑定", "预算与种子已确认", "结果写回路径已准备"],
+          completed: 0
+        }
+      };
+
+      const stageButtons = [...document.querySelectorAll(".stage-node")];
+      const views = [...document.querySelectorAll(".stage-view")];
+      const toast = document.querySelector("#toast");
+
+      function showToast(message) {
+        toast.textContent = message;
+        toast.classList.add("visible");
+        window.clearTimeout(window.toastTimer);
+        window.toastTimer = window.setTimeout(() => toast.classList.remove("visible"), 1800);
+      }
+
+      function selectStage(stage) {
+        const content = stageContent[stage];
+        stageButtons.forEach((button) => {
+          const selected = button.dataset.stage === stage;
+          button.classList.toggle("active", selected);
+          button.setAttribute("aria-pressed", String(selected));
+        });
+        views.forEach((view) => view.classList.toggle("active", view.dataset.view === stage));
+        document.querySelector("#active-stage-kicker").textContent = content.kicker;
+        document.querySelector("#active-stage-title").textContent = content.title;
+        document.querySelector("#active-stage-status").textContent = content.status;
+        document.querySelector("#active-stage-status").className = `state-badge ${stage === "knowledge" ? "active" : "pending"}`;
+        document.querySelector("#active-stage-description").textContent = content.description;
+        document.querySelector("#hero-primary").textContent = content.heroAction;
+        document.querySelector("#next-action-title").textContent = content.nextTitle;
+        document.querySelector("#next-action-copy").textContent = content.nextCopy;
+        document.querySelector("#next-action-button").textContent = content.nextButton;
+        document.querySelector("#gate-counter").textContent = `${content.completed} / ${content.gates.length}`;
+        document.querySelector("#gate-list").innerHTML = content.gates
+          .map((gate, index) => `<li class="${index < content.completed ? "done" : ""}"><span>${index < content.completed ? "✓" : ""}</span>${gate}</li>`)
+          .join("");
+      }
+
+      stageButtons.forEach((button) => button.addEventListener("click", () => selectStage(button.dataset.stage)));
+      document.querySelectorAll("[data-toast]").forEach((button) => {
+        button.addEventListener("click", () => showToast(button.dataset.toast));
+      });
+      document.querySelector("#hero-primary").addEventListener("click", () => showToast("已定位到当前阶段工作区"));
+      document.querySelector("#next-action-button").addEventListener("click", () => showToast(document.querySelector("#next-action-button").textContent));
+      document.querySelectorAll(".surface-switch button").forEach((button) => {
+        button.addEventListener("click", () => {
+          document.querySelectorAll(".surface-switch button").forEach((item) => {
+            const selected = item === button;
+            item.classList.toggle("active", selected);
+            item.setAttribute("aria-selected", String(selected));
+          });
+          showToast(button.querySelector("strong").textContent === "项目进展" ? "预览仅展示主页结构，项目进展页未展开" : "已返回科研工作台");
+        });
+      });
+    </script>
+  </body>
+</html>
