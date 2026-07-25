@@ -1,3 +1,4 @@
+// Wave 8 prune: removed 107 unused keys (EvolutionRoute panel-componentization residue).
 // Explicit Tailwind style map converted from the former route stylesheet by
 // web/scripts/convert-css-module.mjs (2026-07-02 refined target: one styling
 // system). Declarations are Tailwind arbitrary properties
@@ -6,7 +7,6 @@
 import {
   vuiFlatPanelClass,
   vuiOpaqueRowClass,
-  vuiStateAccentBannerClass,
 } from "../design/vuiSurfaceRecipes";
 
 const panelSurface =
@@ -27,14 +27,6 @@ const compactMetricSurface =
 const styles = {
   sourceInventorySection:
     "grid [gap:6px]",
-  toolbarHeaderHidden:
-    "[&>div:first-child]:hidden",
-  actionButton:
-    `${actionSurface} inline-flex [align-items:center] [justify-content:center] [gap:8px] [min-height:34px] [padding:0_12px]`,
-  actionGrid:
-    "grid [gap:8px] [padding:12px_14px_14px] [grid-template-columns:repeat(3,_minmax(0,_1fr))] max-[900px]:[grid-template-columns:repeat(2,_minmax(0,_1fr))] max-[640px]:[grid-template-columns:1fr]",
-  actionGridCompact:
-    "grid [gap:10px]",
   actionRow:
     "flex [flex-wrap:wrap] [gap:6px]",
   approvalEvidenceActions:
@@ -47,8 +39,6 @@ const styles = {
     "inline-flex [align-items:center] [gap:8px] [color:var(--fg-tertiary)] [font-size:var(--vui-font-xs)] [&_input]:[width:15px] [&_input]:[height:15px]",
   bulkToolbar:
     "flex [align-items:center] [justify-content:space-between] [gap:12px] [flex-wrap:wrap]",
-  bulkToolbarHint:
-    "[flex-basis:100%] [margin:-2px_0_0] [color:var(--fg-tertiary)] [font-size:var(--vui-font-xs)] [line-height:1.45]",
   bulkToolbarText:
     "inline-flex [align-items:center] [gap:8px] [color:var(--fg-secondary)]",
   cardFooter:
@@ -117,8 +107,6 @@ const styles = {
     "[&_.caseTraceIcon]:[color:color-mix(in_srgb,_var(--accent-warm)_80%,_var(--fg-secondary))] [&_.caseTraceSummary]:[border-left-color:color-mix(in_srgb,_var(--accent-warm)_48%,_transparent)]",
   caseTraceTurn_tool:
     "[&_.caseTraceIcon]:[color:color-mix(in_srgb,_var(--accent-cool)_78%,_var(--fg-secondary))] [&_.caseTraceSummary]:[border-left-color:color-mix(in_srgb,_var(--accent-cool)_42%,_transparent)]",
-  chatReviewSurface:
-    "grid [align-content:start] [gap:8px] [height:100%] min-h-0 [padding:10px_12px_12px]",
   checkboxLabel:
     "[color:var(--fg-tertiary)] [font-size:var(--vui-font-xs)]",
   checkboxRow:
@@ -127,46 +115,20 @@ const styles = {
     "grid [grid-template-columns:minmax(0,_1fr)_minmax(92px,_auto)] [align-items:center] [gap:8px] min-w-0 [padding:7px_9px] [border:1px_solid_color-mix(in_srgb,_var(--accent-warm)_30%,_var(--border-hairline))] [border-radius:7px] [background:color-mix(in_srgb,_var(--accent-warm)_8%,_var(--vui-surface-row))] [&_div]:grid [&_div]:[gap:2px] [&_div]:min-w-0 [&_strong]:[overflow-wrap:anywhere] [&_span]:min-w-0 [&_span]:[overflow-wrap:anywhere] [&_strong]:min-w-0 [&_strong]:[overflow:hidden] [&_strong]:[color:var(--fg-primary)] [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap] [&_span]:[color:var(--fg-tertiary)] [&_span]:[font-size:var(--vui-font-xs)] [&_span]:[line-height:1.3] max-[1200px]:[padding:6px_8px]",
   closedLoopModeBadge:
     "[flex:0_0_auto] [padding:2px_6px] [border:1px_solid_color-mix(in_srgb,_var(--accent-warm)_36%,_var(--border-hairline))] [border-radius:999px] [background:color-mix(in_srgb,_var(--accent-warm)_12%,_transparent)] [color:var(--accent-warm-2)] [font-size:var(--vui-font-xs)] [font-weight:740] [line-height:1] [white-space:nowrap]",
-  closedLoopStatus:
-    "max-[640px]:[grid-template-columns:1fr]",
   closedLoopTitleRow:
     "inline-flex [align-items:center] [gap:6px] min-w-0",
   collapsibleEvidence:
     "grid [gap:10px] [&_summary]:[outline:0] [background:var(--vui-surface-row)]",
-  compactActionGroup:
-    "inline-flex [align-items:center] [gap:6px] min-w-0",
   compactFact:
     `${compactMetricSurface} [align-content:center] [min-height:42px] [padding:7px_8px] [&_span]:[color:var(--fg-secondary)] [&_strong]:[font-size:0.92rem] [&_strong]:[font-weight:650] [&_strong]:[overflow-wrap:anywhere]`,
   compactFieldGrid:
     "grid [grid-template-columns:minmax(0,_1.52fr)_minmax(108px,_0.68fr)] [align-items:start] [gap:8px] min-w-0 max-[1200px]:[grid-template-columns:1fr] max-[1200px]:[gap:6px]",
   compactIconAction:
     `${actionSurface} inline-flex w-9 [align-items:center] [justify-content:center] [gap:7px] [min-height:34px] [width:36px] [padding:0] disabled:[cursor:not-allowed] disabled:[color:var(--fg-tertiary)] disabled:[opacity:0.52]`,
-  compactRunList:
-    "grid [gap:6px]",
-  compactRunMain:
-    "grid [gap:2px] min-w-0 [&_strong]:min-w-0 [&_strong]:[overflow:hidden] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap] [&_span]:min-w-0 [&_span]:[overflow:hidden] [&_span]:[text-overflow:ellipsis] [&_span]:[white-space:nowrap] [&_span]:[color:var(--fg-tertiary)] [&_span]:[font-size:var(--vui-font-xs)]",
-  compactRunMeta:
-    "[color:var(--fg-tertiary)] [font-size:var(--vui-font-xs)] inline-flex [align-items:center] [justify-content:flex-end] [gap:8px] min-w-0 [white-space:nowrap] [&_strong]:[color:var(--fg-primary)] max-[640px]:[justify-content:flex-start] max-[640px]:[flex-wrap:wrap]",
-  compactRunRow:
-    "grid [grid-template-columns:minmax(0,_1fr)_auto] [gap:10px] [align-items:center] min-w-0 [padding:9px_10px] [border:1px_solid_var(--border-hairline)] [border-radius:8px] [background:var(--vui-surface-row)] [color:var(--fg-primary)] [text-align:left] [transition:border-color_140ms_ease,_background-color_140ms_ease,_color_140ms_ease] hover:[border-color:color-mix(in_srgb,_var(--accent-warm)_26%,_transparent)] hover:[background:var(--vui-surface-row-hover)] max-[640px]:[grid-template-columns:1fr]",
-  compactTextAction:
-    `${actionSurface} inline-flex [align-items:center] [justify-content:center] [gap:7px] [min-height:34px] [max-width:190px] [padding:0_10px] [white-space:nowrap] [overflow:hidden] [text-overflow:ellipsis] disabled:[cursor:not-allowed] disabled:[color:var(--fg-tertiary)] disabled:[opacity:0.52]`,
   controlActions:
     "flex [flex-wrap:wrap] [gap:6px] min-w-0",
-  controlColumn:
-    "grid [gap:14px] [align-content:start]",
   controlFooter:
     "grid [gap:6px] min-w-0 max-[1200px]:[gap:6px]",
-  controlLabel:
-    "[padding:0_6px_0_8px] [color:var(--fg-secondary)] [font-size:var(--vui-font-xs)]",
-  controlSurface:
-    "grid [grid-template-columns:minmax(320px,_1fr)_minmax(0,_1.2fr)] [gap:16px] [padding:18px] max-[1200px]:[grid-template-columns:1fr]",
-  dangerDetailSection:
-    "[opacity:0.86]",
-  dangerIconAction:
-    "[color:var(--state-error)]",
-  dangerInlineAction:
-    "[border-color:color-mix(in_srgb,_var(--state-error)_34%,_var(--border-hairline))] [color:var(--state-error)] [background:color-mix(in_srgb,_var(--state-error)_7%,_var(--vui-surface-row))] hover:[border-color:color-mix(in_srgb,_var(--state-error)_52%,_var(--border-hairline))] hover:[background:color-mix(in_srgb,_var(--state-error)_12%,_var(--vui-surface-row-hover))]",
   dashboardIo:
     "min-w-0 [max-width:100%] [grid-column:3] [grid-row:1] grid [grid-template-rows:auto_minmax(0,_1fr)] [overflow:hidden_!important] max-[1200px]:[grid-column:1_/_-1] max-[1200px]:[grid-row:1] max-[900px]:[grid-column:1] max-[900px]:[grid-row:1]",
   dashboardLaunch:
@@ -193,36 +155,14 @@ const styles = {
     "grid [gap:8px] min-w-0 [max-height:min(238px,_34vh)] [padding:8px] [border:1px_solid_var(--border-hairline)] [border-radius:8px] [background:var(--vui-surface-row)] [overflow:hidden]",
   datasetCatalogStatus:
     "[align-self:start] [max-width:116px] [padding:3px_7px] [border:1px_solid_var(--border-soft)] [border-radius:999px] [background:var(--vui-surface-row)] [color:var(--fg-secondary)] [font-size:var(--vui-font-xs)] [line-height:1.2] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]",
-  datasetMeta:
-    "grid [gap:6px] [padding:12px_14px] [border-radius:8px] [background:var(--vui-surface-row)] [border:1px_solid_var(--border-hairline)] [&_strong]:[color:var(--fg-primary)]",
-  datasetMetaCompact:
-    "grid [gap:8px] [padding:12px_14px] [border-radius:8px] [background:var(--vui-surface-row)] [border:1px_solid_var(--border-hairline)]",
-  deltaBadge:
-    "inline-flex [align-items:center] [justify-content:center] [max-width:100%] [min-height:28px] [padding:0_10px] [border-radius:999px] [border:1px_solid_var(--border-soft)] [font-size:var(--vui-font-xs)] [white-space:nowrap] [overflow:hidden] [text-overflow:ellipsis]",
-  deltaNegative:
-    "[color:var(--state-error)] [background:color-mix(in_srgb,_var(--state-error)_14%,_transparent)]",
-  deltaNeutral:
-    "[color:var(--fg-secondary)] [background:var(--vui-surface-row)]",
-  deltaPositive:
-    "[color:var(--state-success)] [background:color-mix(in_srgb,_var(--state-success)_12%,_transparent)]",
-  detailFactGrid:
-    "grid [grid-template-columns:repeat(2,_minmax(0,_1fr))] [gap:10px] max-[900px]:[grid-template-columns:repeat(2,_minmax(0,_1fr))] max-[640px]:[grid-template-columns:1fr]",
   detailHeader:
     "flex [justify-content:space-between] [gap:12px] [align-items:start]",
-  detailHeaderActions:
-    "inline-flex [align-items:center] [justify-content:flex-end] [gap:8px] [flex-wrap:wrap]",
-  detailLead:
-    "[margin:0] [font-size:1.74rem] [color:var(--fg-primary)_!important] [line-height:1]",
   detailList:
     "[margin:0] [padding-left:18px] [color:var(--fg-secondary)] grid [gap:8px]",
   detailPanel:
     "min-h-0 [overflow:auto] [padding:12px]",
   detailSection:
     "[&_p]:[margin:0] [&_p]:[color:var(--fg-secondary)] [&_p]:[line-height:1.6] grid [border-top:1px_solid_var(--border-hairline)] [gap:6px] [padding-top:10px] [margin-top:10px]",
-  detailSectionCompact:
-    "[margin-top:0] [padding-top:0] [border-top:0]",
-  detailSubtleId:
-    "min-w-0 [overflow:hidden] [color:var(--fg-tertiary)] [font-family:var(--font-mono)] [font-size:var(--vui-font-xs)] [text-overflow:ellipsis] [white-space:nowrap]",
   detailTitle:
     "[margin:6px_0_0] [font-size:1.08rem]",
   emptyState:
@@ -231,20 +171,10 @@ const styles = {
     "[margin:0] [line-height:1.4] [color:var(--state-error)]",
   errorTextCompact:
     "[margin:0] [padding:9px_10px] [border-radius:8px] [line-height:1.45] [overflow-wrap:anywhere] [color:var(--state-error)] [background:color-mix(in_srgb,_var(--state-error)_11%,_transparent)]",
-  eventHeader:
-    "flex [align-items:center] [justify-content:space-between] [gap:12px] min-w-0 [&_strong]:min-w-0 [&_strong]:[overflow:hidden] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap]",
-  eventList:
-    "grid [gap:8px]",
-  eventRow:
-    "grid [gap:5px] min-w-0 [padding:9px_10px] [border-radius:8px] [background:var(--vui-surface-row)] [border:1px_solid_var(--border-hairline)]",
-  eventSummary:
-    "[margin:0] [color:var(--fg-secondary)] [line-height:1.5] [display:-webkit-box] [overflow:hidden] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]",
   eyebrow:
     "[margin:0] [color:var(--fg-tertiary)] [font-size:var(--vui-font-xs)] [text-transform:uppercase] [letter-spacing:0.08em]",
   feedbackText:
     "[margin:0] [color:var(--fg-secondary)] [line-height:1.55] [white-space:pre-wrap]",
-  feedbackTextCompact:
-    "[margin:0] [padding:9px_10px] [border-radius:8px] [line-height:1.45] [overflow-wrap:anywhere] [color:var(--fg-secondary)] [white-space:pre-wrap] [background:color-mix(in_srgb,_var(--state-success)_9%,_transparent)]",
   filterButton:
     "[min-height:26px] [padding:0_8px] [border:0] [border-radius:var(--radius-control)] [background:transparent] [color:var(--fg-secondary)] [transition:background-color_140ms_ease,_color_140ms_ease]",
   filterButtonActive:
@@ -265,46 +195,14 @@ const styles = {
     "grid [gap:7px]",
   formHint:
     "[color:var(--fg-tertiary)] [font-size:var(--vui-font-xs)] max-[1200px]:hidden",
-  headerIcon:
-    "[color:var(--fg-tertiary)]",
-  heroHeading:
-    "[margin:0] [font-size:1.08rem]",
-  heroHeadingRow:
-    "flex [align-items:center] [gap:10px] [flex-wrap:wrap] min-w-0",
-  heroSummary:
-    "[margin:0] [color:var(--fg-secondary)] [line-height:1.6] [display:-webkit-box] [overflow:hidden] [-webkit-box-orient:vertical] [-webkit-line-clamp:3]",
-  heroSurface:
-    "grid [gap:12px] [padding:14px_16px]",
-  heroTitleRow:
-    "flex [align-items:start] [gap:14px]",
-  heroTop:
-    "flex [align-items:start] [justify-content:space-between] [gap:16px]",
   inlineAction:
     `${actionSurface} [justify-self:end] min-w-0 [max-width:100%] inline-flex [align-items:center] [justify-content:center] [gap:8px] [width:fit-content] [min-height:32px] [padding:0_10px] [font-size:var(--vui-font-xs)]`,
-  inlineNoticeRow:
-    "flex [align-items:center] [justify-content:space-between] [gap:12px] [padding:0_18px_18px] [flex-wrap:wrap]",
-  intakeButton:
-    "[min-height:26px] [padding:0_8px] [border:0] [border-radius:var(--radius-control)] [background:transparent] [color:var(--fg-secondary)] [transition:background-color_140ms_ease,_color_140ms_ease]",
-  intakeButtonActive:
-    "[background:color-mix(in_srgb,_var(--accent-warm)_16%,_transparent)] [color:var(--accent-warm-2)]",
-  intakeControl:
-    "inline-flex [align-items:center] [gap:6px] [padding:3px] [border-radius:var(--radius-panel)] [border:1px_solid_var(--border-soft)] [background:var(--vui-surface-panel)]",
-  intakeSegmented:
-    "inline-flex [gap:6px]",
   ioContent:
     "[margin:0] [overflow:auto] [white-space:pre-wrap] [overflow-wrap:anywhere] [font-family:Consolas,_\"SFMono-Regular\",_monospace] [font-size:var(--vui-font-xs)] [line-height:1.6] [color:var(--fg-secondary)] [max-height:360px]",
-  ioEntry:
-    "grid [gap:7px] min-w-0 [padding:10px_12px] [border-radius:8px] [border:1px_solid_var(--border-hairline)] [background:var(--vui-surface-row)]",
-  ioMetaRow:
-    "flex [align-items:center] [justify-content:space-between] [gap:12px] min-w-0 [&_strong]:min-w-0 [&_strong]:[overflow:hidden] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap]",
   ioStack:
     "flex [flex-direction:column] [gap:10px] [height:100%] min-h-0",
   ioSurface:
     "[position:relative] [overflow:hidden] grid [grid-template-rows:auto_minmax(0,_1fr)] [align-content:stretch] [gap:8px] [height:100%] min-h-0 [padding:10px_12px_12px] max-[900px]:[height:auto] max-[900px]:min-h-0 max-[900px]:[overflow:visible]",
-  ioTranscript:
-    "grid [align-content:start] [gap:8px] min-h-0 [overflow:auto] [padding-right:4px] [flex:1_1_0]",
-  ioWaitingState:
-    "grid [place-items:center] [height:100%] [min-height:96px] [text-align:center]",
   launchSurface:
     "[max-height:none] [overflow:auto] grid [align-content:start] [gap:8px] [height:100%] min-h-0 [padding:10px_12px_12px] [font-size:0.9rem] max-[1200px]:[max-height:none] max-[1200px]:[gap:6px] max-[1200px]:[padding:9px_10px] max-[900px]:[height:max-content] max-[900px]:[min-height:max-content] max-[900px]:[overflow:visible]",
   libraryFilters:
@@ -313,16 +211,10 @@ const styles = {
     "grid [grid-template-columns:minmax(0,_1.1fr)_minmax(0,_0.9fr)_minmax(0,_1fr)] [gap:8px] [align-items:stretch] min-h-0 max-[1360px]:[grid-template-columns:minmax(0,_1fr)_minmax(0,_0.85fr)_minmax(0,_0.95fr)] max-[1100px]:[grid-template-columns:1fr]",
   libraryViewStack:
     "[grid-template-rows:auto_minmax(0,_1fr)] [height:100%] [overflow:hidden] [&_strong]:min-w-0 [&_strong]:[overflow:hidden] [&_strong]:[text-overflow:ellipsis] [&_span]:min-w-0 [&_span]:[overflow:hidden] [&_span]:[text-overflow:ellipsis] max-[1200px]:[height:auto] max-[1200px]:[overflow:auto]",
-  listEmptyState:
-    "[padding:10px] [border-radius:8px] [border:1px_dashed_var(--border-hairline)] [color:var(--fg-secondary)]",
   listPanel:
     "min-h-0 [overflow:auto] [padding:12px] grid [align-content:start] [gap:10px]",
-  listRow:
-    "[&_p]:[margin:0] [&_p]:[color:var(--fg-secondary)] [&_p]:[line-height:1.6] grid [gap:6px] [padding:12px_14px] [border-radius:8px] [background:var(--vui-surface-row)] [border:1px_solid_var(--border-hairline)]",
   listRowTop:
     "flex [align-items:center] [justify-content:space-between] [gap:12px]",
-  listStack:
-    "grid [gap:8px] [padding:12px_14px_14px]",
   liveIoPane:
     "[height:100%] min-h-0 [overflow:auto] [padding-right:4px]",
   // Wave 6A: PaneHeightResizeHandle owns row-resize visual; no route chrome.
@@ -337,58 +229,24 @@ const styles = {
     "[grid-column:4] [grid-row:1]",
   liveStatusRow:
     "flex [align-items:center] [justify-content:flex-end] [gap:8px] min-w-0 [max-width:min(100%,_320px)] [flex-wrap:wrap]",
-  liveSummaryRow:
-    `grid [grid-template-columns:auto_minmax(0,_1fr)] [gap:10px] [align-items:start] min-w-0 [padding:10px_12px] ${rowSurfaceSoft}`,
   liveSurface:
     "[overflow:auto] grid [align-content:start] [gap:8px] [height:100%] min-h-0 [padding:10px_12px_12px] [font-size:0.9rem] max-[900px]:[height:auto] max-[900px]:min-h-0 max-[900px]:[overflow:visible]",
   masterDetail:
     "grid [grid-template-columns:var(--evolution-library-list-width,_360px)_12px_minmax(0,_1fr)] min-h-0 [height:100%] [overflow:hidden] max-[1200px]:[grid-template-columns:1fr] max-[1200px]:[height:auto] max-[1200px]:[overflow:visible]",
   metaRow:
     "flex [align-items:center] [justify-content:space-between] [gap:12px] [&_span]:[color:var(--fg-tertiary)]",
-  metricGrid:
-    "grid [grid-template-columns:repeat(4,_minmax(0,_1fr))] [gap:10px] max-[900px]:[grid-template-columns:repeat(2,_minmax(0,_1fr))] max-[640px]:[grid-template-columns:1fr]",
-  metricStrip:
-    "grid [grid-template-columns:repeat(4,_minmax(0,_1fr))] [gap:10px] max-[900px]:[grid-template-columns:repeat(2,_minmax(0,_1fr))] max-[640px]:[grid-template-columns:1fr]",
   metricTile:
     compactMetricSurface,
-  modeTeamCanvasMap:
-    "grid [grid-template-columns:repeat(2,_minmax(0,_1fr))] [gap:6px] min-h-0 [overflow:auto]",
-  modeTeamEdges:
-    "flex [flex-wrap:wrap] [gap:5px] min-w-0 [&_span]:[max-width:100%] [&_span]:[padding:2px_6px] [&_span]:[border:1px_solid_var(--border-hairline)] [&_span]:[border-radius:999px] [&_span]:[background:var(--vui-surface-row)] [&_span]:[color:var(--fg-secondary)] [&_span]:[font-size:var(--vui-font-xs)]",
-  modeTeamEmpty:
-    "[margin:0] [padding:10px] [border:1px_dashed_var(--border-soft)] [border-radius:7px] [color:var(--fg-tertiary)] [font-size:var(--vui-font-xs)]",
-  modeTeamHeader:
-    "flex [align-items:flex-start] [justify-content:space-between] [gap:10px] min-w-0",
-  modeTeamNode:
-    "grid [gap:2px] min-w-0 [padding:7px_8px] [border:1px_solid_var(--border-hairline)] [border-left:3px_solid_var(--border-soft)] [border-radius:7px] [background:var(--vui-surface-row)] [&_strong]:min-w-0 [&_strong]:[overflow:hidden] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap] [&_span]:min-w-0 [&_span]:[overflow:hidden] [&_span]:[text-overflow:ellipsis] [&_span]:[white-space:nowrap] [&_small]:min-w-0 [&_small]:[overflow:hidden] [&_small]:[text-overflow:ellipsis] [&_small]:[white-space:nowrap] [&_strong]:[font-size:var(--vui-font-xs)] [&_span]:[color:var(--fg-secondary)] [&_span]:[font-size:var(--vui-font-xs)] [&_small]:[color:var(--fg-tertiary)] [&_small]:[font-family:var(--font-mono)] [&_small]:[font-size:var(--vui-font-xs)]",
-  modeTeamNodeBound:
-    "[border-left-color:var(--accent-cool)]",
-  modeTeamNodeStale:
-    "[border-left-color:var(--state-warning)] [background:color-mix(in_srgb,_var(--state-warning)_8%,_var(--vui-surface-row))]",
-  modeTeamPanel:
-    "grid [gap:8px] min-w-0 min-h-0 [padding:10px] [overflow:hidden]",
-  modeTeamStats:
-    "grid [grid-template-columns:repeat(4,_minmax(0,_1fr))] [gap:5px] [&_span]:grid [&_span]:[gap:1px] [&_span]:min-w-0 [&_span]:[padding:5px_6px] [&_span]:[border:1px_solid_var(--border-hairline)] [&_span]:[border-radius:6px] [&_span]:[background:var(--vui-surface-row)] [&_span]:[color:var(--fg-tertiary)] [&_span]:[font-size:var(--vui-font-xs)] [&_strong]:min-w-0 [&_strong]:[overflow:hidden] [&_strong]:[color:var(--fg-primary)] [&_strong]:[font-family:var(--font-mono)] [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap]",
-  monitorMetrics:
-    "grid [grid-template-columns:repeat(3,_minmax(0,_1fr))] [gap:10px] max-[900px]:[grid-template-columns:repeat(2,_minmax(0,_1fr))] max-[640px]:[grid-template-columns:1fr]",
-  mutedCounter:
-    "[color:var(--fg-primary)] [font-weight:600] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap] [min-width:32px] [text-align:right] [font-size:1rem]",
   noticeText:
     "[color:var(--fg-secondary)] [font-size:var(--vui-font-xs)] [margin:0] [display:-webkit-box] [overflow:hidden] [line-height:1.45] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] max-[1200px]:hidden",
   noticeTextCompact:
     `[margin:0] [padding:9px_10px] [line-height:1.45] [overflow-wrap:anywhere] [color:var(--fg-secondary)] ${rowSurfaceSoft}`,
   overviewGrid:
     "grid [grid-template-columns:minmax(300px,_var(--evolution-live-launch-width,_348px))_12px_minmax(360px,_1fr)_12px_minmax(300px,_var(--evolution-live-run-width,_360px))] [grid-template-rows:minmax(0,_1fr)] [grid-auto-rows:minmax(0,_1fr)] [align-items:stretch] [align-content:stretch] min-h-0 [height:100%] [overflow:hidden] [padding-right:4px] max-[1360px]:[grid-template-columns:minmax(292px,_0.92fr)_12px_minmax(360px,_1.32fr)_12px_minmax(292px,_0.9fr)] max-[1360px]:[grid-template-rows:minmax(0,_1fr)] max-[1360px]:[gap:0] max-[1360px]:[overflow:hidden] max-[1200px]:[grid-template-columns:minmax(0,_1fr)_minmax(292px,_0.82fr)] max-[1200px]:[grid-template-rows:minmax(180px,_0.58fr)_minmax(300px,_1fr)] max-[1200px]:[overflow:auto] max-[1200px]:[gap:10px] max-[900px]:[grid-template-columns:1fr] max-[900px]:[grid-template-rows:max-content_max-content_max-content] max-[900px]:[align-content:start] max-[900px]:[height:auto] max-[900px]:[min-height:100%] max-[900px]:[overflow:auto]",
-  overviewSecondaryGrid:
-    "grid [grid-template-columns:minmax(0,_0.92fr)_minmax(0,_1.28fr)] [gap:10px] [align-items:start] max-[1360px]:[grid-template-columns:repeat(2,_minmax(0,_1fr))] max-[1200px]:[grid-template-columns:1fr]",
-  overviewWorkspace:
-    "grid [grid-template-columns:minmax(0,_1.15fr)_minmax(0,_1fr)_minmax(0,_0.92fr)] [gap:10px] [align-items:start] max-[1360px]:[grid-template-columns:minmax(0,_1.2fr)_minmax(0,_1fr)] max-[1200px]:[grid-template-columns:1fr]",
   page:
     "grid [grid-template-rows:auto_minmax(0,_1fr)] [gap:6px] [height:calc(100dvh_-_var(--shell-topbar-height))] [max-height:calc(100dvh_-_var(--shell-topbar-height))] min-h-0 [padding:6px_10px_10px] [overflow:hidden] max-[900px]:[gap:6px] max-[640px]:[padding-inline:10px]",
   paneCollapsed:
     "[padding:0] [border:0] [overflow:hidden] [visibility:hidden]",
-  panelHeader:
-    "flex [align-items:start] [justify-content:space-between] [gap:12px]",
   pathText:
     "[overflow-wrap:anywhere] [font-family:Consolas,_\"SFMono-Regular\",_monospace] [font-size:var(--vui-font-xs)]",
   proposalCard:
@@ -412,30 +270,14 @@ const styles = {
     "max-[1200px]:hidden",
   reviewLead:
     "[margin:0] [color:var(--fg-primary)_!important] [font-size:1.04rem] [line-height:1.55]",
-  runControlReason:
-    "[margin:0] [color:var(--fg-secondary)] [font-size:var(--vui-font-xs)] [line-height:1.45] [overflow-wrap:anywhere]",
-  runControlSummaryBody:
-    "grid [gap:4px] min-w-0",
   runItemActive:
     "[border-color:color-mix(in_srgb,_var(--accent-warm)_28%,_transparent)] [background:color-mix(in_srgb,_var(--accent-warm)_8%,_transparent)]",
-  runsCommandHeader:
-    "flex [flex-direction:column] [align-items:stretch] [justify-content:end] [gap:10px] min-w-0 max-[900px]:[flex-direction:column]",
   runsCommandMetrics:
     "grid [grid-template-columns:repeat(6,_minmax(0,_1fr))] [gap:6px] max-[900px]:[grid-template-columns:repeat(3,_minmax(0,_1fr))] max-[640px]:[grid-template-columns:1fr]",
   runsCommandStrip:
     "grid [grid-template-columns:minmax(220px,_0.42fr)_minmax(0,_1fr)] [gap:10px] [align-items:end] [padding:8px_10px] max-[1200px]:[grid-template-columns:1fr]",
-  runsGuideCard:
-    "grid [gap:10px] [padding:12px_14px] [border-radius:8px] [border:1px_solid_var(--border-hairline)] [background:var(--vui-surface-row)] [&_p]:[margin:0] [&_p]:[color:var(--fg-secondary)] [&_p]:[line-height:1.55]",
-  runsHeaderBody:
-    "grid [grid-template-columns:minmax(0,_1.7fr)_minmax(280px,_0.95fr)] [gap:12px] [padding:0_18px] max-[1200px]:[grid-template-columns:1fr]",
-  runsHeaderSurface:
-    "grid [gap:12px] [padding-bottom:18px]",
-  runsSurface:
-    "max-[1360px]:[grid-column:1_/_-1]",
   runsWorkspace:
     "grid [grid-template-columns:var(--evolution-runs-queue-width,_380px)_12px_minmax(0,_1fr)] [align-items:stretch] min-h-0 max-[1200px]:[grid-template-columns:1fr]",
-  scoreRow:
-    "flex [align-items:center] [justify-content:space-between] [gap:12px] [&_span]:[color:var(--fg-tertiary)]",
   secondaryPill:
     `${pillSurface} [color:var(--fg-secondary)]`,
   sectionHeadingRow:
@@ -459,8 +301,6 @@ const styles = {
   // stays content-height instead of stretching.
   selfPage:
     "[grid-template-rows:minmax(0,1fr)] [gap:0] [padding:8px_12px_12px] [background:color-mix(in_srgb,_var(--vui-surface-panel)_78%,_var(--vui-surface-workspace))] [min-h-0] [align-content:stretch] max-[900px]:[grid-template-rows:minmax(0,1fr)] max-[900px]:[gap:0]",
-  sourceHero:
-    `grid [gap:5px] min-w-0 [padding:12px_14px] ${rowSurface} [&_span]:[color:var(--fg-tertiary)] [&_span]:[font-size:var(--vui-font-xs)] [&_small]:[color:var(--fg-tertiary)] [&_small]:[font-size:var(--vui-font-xs)] [&_strong]:min-w-0 [&_strong]:[overflow:hidden] [&_strong]:[color:var(--fg-primary)] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap] [&_small]:[overflow:hidden] [&_small]:[text-overflow:ellipsis] [&_small]:[white-space:nowrap]`,
   sourceInventoryBar:
     `${rowSurfaceSoft} flex [flex-wrap:wrap] [gap:6px_10px] [padding:4px_8px] min-w-0 [&_span]:inline-flex [&_span]:[align-items:center] [&_span]:[gap:6px] [&_span]:[color:var(--fg-tertiary)] [&_span]:[font-size:var(--vui-font-xs)] [&_strong]:[color:var(--fg-primary)]`,
   sourceMetaCompact:
@@ -469,31 +309,17 @@ const styles = {
     "min-w-0 grid [gap:2px] [&_span]:[overflow:hidden] [&_span]:[text-overflow:ellipsis] [&_span]:[white-space:nowrap]",
   sourceMetaSide:
     "[justify-self:end] [padding:5px_9px] [border:1px_solid_var(--border-soft)] [border-radius:999px] [background:var(--vui-surface-row)] [white-space:nowrap]",
-  sourceMetricGrid:
-    "grid [grid-template-columns:repeat(2,_minmax(0,_1fr))] [gap:8px] max-[900px]:[grid-template-columns:repeat(2,_minmax(0,_1fr))] max-[640px]:[grid-template-columns:1fr]",
-  sourceNextAction:
-    "[&_span]:[color:var(--fg-tertiary)] [&_span]:[font-size:var(--vui-font-xs)] [&_strong]:min-w-0 [&_strong]:[overflow:hidden] [&_strong]:[color:var(--fg-primary)] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap] grid [grid-template-columns:auto_minmax(0,_1fr)] [align-items:center] [gap:10px] [padding:10px_12px] [border-radius:8px] [background:var(--vui-surface-row)] [border:1px_solid_var(--border-hairline)] max-[640px]:[grid-template-columns:1fr]",
-  sourceSummary:
-    "grid [gap:10px] [padding:14px_16px_16px]",
   sourceWarningStrip:
     "[margin:0] [padding:7px_9px] [border:1px_solid_color-mix(in_srgb,_var(--state-warning)_40%,_var(--border-hairline))] [border-radius:7px] [background:color-mix(in_srgb,_var(--state-warning)_10%,_var(--vui-surface-row))] [color:var(--fg-secondary)] [font-size:var(--vui-font-xs)] [line-height:1.36] [overflow-wrap:anywhere]",
-  spinIcon:
-    "animate-spin",
-  statusIcon:
-    "inline-flex [align-items:center] [justify-content:center] [border-radius:999px] [color:var(--accent-warm-2)] [background:color-mix(in_srgb,_var(--accent-warm)_12%,_transparent)] [width:30px] [height:30px]",
   statusLead:
     "[color:var(--fg-primary)] [font-size:0.96rem] [margin:0] [display:-webkit-box] [overflow:hidden] [line-height:1.45] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]",
   statusMetricGrid:
     "grid [grid-template-columns:repeat(4,_minmax(0,_1fr))] [gap:6px] max-[900px]:[grid-template-columns:1fr] max-[640px]:[grid-template-columns:1fr]",
   statusPill:
     `${pillSurface} [border-color:color-mix(in_srgb,_var(--accent-warm)_28%,_var(--vui-border-subtle))] [color:var(--accent-warm-2)] [background:color-mix(in_srgb,_var(--accent-warm)_12%,_transparent)]`,
-  statusSurface:
-    "grid [align-content:start] [gap:8px] [height:100%] min-h-0 [padding:10px_12px_12px] max-[1360px]:[grid-column:1_/_-1]",
   stripItem:
     compactMetricSurface,
   structuredEmptyState: `grid [align-content:start] [gap:8px] [min-height:86px] [padding:10px_12px] [border-radius:8px] [border:1px_dashed_var(--vui-border-subtle)] ${vuiOpaqueRowClass} [&_p]:[margin:0] [&_p]:[color:var(--fg-secondary)] [&_p]:[font-size:var(--vui-font-xs)] [&_p]:[line-height:1.36]`,
-  subtitle:
-    "[margin:0] [max-width:none] [color:var(--fg-secondary)] [font-size:var(--route-topbar-subtitle-size)] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]",
   summaryMetricStrip:
     "grid [grid-template-columns:repeat(4,_minmax(0,_1fr))] [gap:6px] max-[900px]:[grid-template-columns:1fr] max-[640px]:[grid-template-columns:1fr]",
   summarySurface:
@@ -504,16 +330,8 @@ const styles = {
     `min-w-0 min-h-0 [max-height:min(260px,_30vh)] [overflow:hidden] ${rowSurface}`,
   supervisedMemberIdentity:
     "grid [gap:2px] min-w-0 [&_strong]:min-w-0 [&_strong]:[overflow:hidden] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap] [&_span]:min-w-0 [&_span]:[overflow:hidden] [&_span]:[text-overflow:ellipsis] [&_span]:[white-space:nowrap] [&_strong]:[color:var(--fg-primary)] [&_strong]:[font-size:var(--vui-font-xs)] [&_span]:[color:var(--fg-tertiary)] [&_span]:[font-family:var(--font-mono)] [&_span]:[font-size:var(--vui-font-xs)]",
-  supervisedMemberLink:
-    `[grid-template-columns:minmax(78px,_0.42fr)_minmax(0,_1fr)_auto] [color:inherit] [text-decoration:none] [transition:border-color_120ms_ease,_background_120ms_ease,_transform_120ms_ease] hover:[border-color:color-mix(in_srgb,_var(--accent-cool)_42%,_var(--border-soft))] hover:${vuiStateAccentBannerClass} hover:[outline:none] focus-visible:[border-color:color-mix(in_srgb,_var(--accent-cool)_42%,_var(--border-soft))] focus-visible:${vuiStateAccentBannerClass} focus-visible:[outline:none] focus-visible:[box-shadow:var(--focus-ring)] [&_svg]:[color:var(--fg-tertiary)]`,
-  supervisedMemberRole:
-    "grid [gap:2px] min-w-0 [&_span]:[color:var(--fg-secondary)] [&_span]:[font-size:var(--vui-font-xs)] [&_span]:[font-weight:600] [&_strong]:[width:fit-content] [&_strong]:[max-width:100%] [&_strong]:min-w-0 [&_strong]:[overflow:hidden] [&_strong]:[color:var(--accent-warm-2)] [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap]",
   supervisedMemberRow:
     "grid [grid-template-columns:minmax(78px,_0.42fr)_minmax(0,_1fr)] [gap:6px] [align-items:center] min-w-0 [min-height:34px] [padding:5px_7px] [border:1px_solid_var(--vui-border-subtle)] [border-radius:7px] [background:var(--vui-surface-row)]",
-  supervisedMemberRowActive:
-    "[border-color:color-mix(in_srgb,_var(--accent-warm)_44%,_var(--border-soft))] [background:color-mix(in_srgb,_var(--accent-warm)_10%,_var(--vui-surface-row))]",
-  supervisedMemberRowMissing:
-    "[opacity:0.72]",
   supervisedMembersHeader:
     "flex [align-items:flex-start] [justify-content:space-between] [gap:10px] min-w-0",
   supervisedMembersHeaderActions:
@@ -534,18 +352,6 @@ const styles = {
     "grid [grid-template-columns:minmax(0,_0.95fr)_minmax(126px,_1.05fr)] [gap:6px] [align-items:end] min-w-0 [@container(min-width:560px)]:[grid-template-columns:max-content_minmax(140px,_1fr)] [@container(max-width:430px)]:[grid-template-columns:1fr]",
   supervisedRunSetup:
     "grid [align-content:start] [gap:7px] min-w-0 min-h-0",
-  supervisedStepFollowButton:
-    "[min-height:24px] [padding:0_8px] [border:1px_solid_var(--border-hairline)] [border-radius:999px] [background:var(--vui-surface-row)] [color:var(--fg-secondary)] [font:inherit] [font-size:var(--vui-font-xs)] [line-height:1] [white-space:nowrap] [cursor:pointer] [transition:border-color_120ms_ease,_background_120ms_ease,_color_120ms_ease] hover:[border-color:color-mix(in_srgb,_var(--accent-cool)_42%,_var(--border-soft))] hover:[background:color-mix(in_srgb,_var(--accent-cool)_8%,_var(--vui-surface-row))] hover:[color:var(--accent-cool-2)] hover:[outline:none] focus-visible:[border-color:color-mix(in_srgb,_var(--accent-cool)_42%,_var(--border-soft))] focus-visible:[background:color-mix(in_srgb,_var(--accent-cool)_8%,_var(--vui-surface-row))] focus-visible:[color:var(--accent-cool-2)] focus-visible:[outline:none]",
-  supervisedStepMemberCard:
-    "grid [gap:2px] min-w-0 [min-height:34px] [padding:5px_7px] [border:1px_solid_var(--vui-border-subtle)] [border-radius:7px] [background:var(--vui-surface-row)] [color:inherit] [font:inherit] [text-align:left] [cursor:pointer] [transition:border-color_120ms_ease,_background_120ms_ease,_color_120ms_ease] hover:[border-color:color-mix(in_srgb,_var(--accent-cool)_34%,_var(--vui-border-subtle))] hover:[background:var(--vui-surface-row-hover)] hover:[outline:none] focus-visible:[border-color:color-mix(in_srgb,_var(--accent-cool)_34%,_var(--vui-border-subtle))] focus-visible:[background:var(--vui-surface-row-hover)] focus-visible:[outline:none] [&_span]:min-w-0 [&_span]:[overflow:hidden] [&_span]:[text-overflow:ellipsis] [&_span]:[white-space:nowrap] [&_strong]:min-w-0 [&_strong]:[overflow:hidden] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap] [&_span]:[color:var(--fg-secondary)] [&_span]:[font-size:var(--vui-font-xs)] [&_span]:[font-weight:650] [&_strong]:[color:var(--fg-tertiary)] [&_strong]:[font-size:var(--vui-font-xs)]",
-  supervisedStepMemberCardActive:
-    "[border-color:color-mix(in_srgb,_var(--accent-cool)_42%,_var(--border-soft))] [background:color-mix(in_srgb,_var(--accent-cool)_9%,_var(--vui-surface-panel))]",
-  supervisedStepMemberCardCurrent:
-    "[border-color:color-mix(in_srgb,_var(--accent-warm)_34%,_var(--border-soft))] [background:color-mix(in_srgb,_var(--accent-warm)_6%,_var(--vui-surface-panel))]",
-  supervisedStepMemberLabel:
-    "inline-flex [align-items:center] [gap:5px] min-w-0 [&_em]:[flex:0_0_auto] [&_em]:[padding:1px_5px] [&_em]:[border-radius:999px] [&_em]:[background:color-mix(in_srgb,_var(--accent-warm)_14%,_transparent)] [&_em]:[color:var(--accent-warm-2)] [&_em]:[font-size:var(--vui-font-xs)] [&_em]:[font-style:normal] [&_em]:[font-weight:700]",
-  supervisedStepMemberRail:
-    "grid [grid-template-columns:repeat(2,_minmax(0,_1fr))] [gap:4px] min-w-0",
   supervisedWorkflowFollowButton:
     "[min-height:24px] [padding:0_8px] [border:1px_solid_var(--border-hairline)] [border-radius:999px] [background:var(--vui-surface-row)] [color:var(--fg-secondary)] [font:inherit] [font-size:var(--vui-font-xs)] [line-height:1] [white-space:nowrap] [cursor:pointer] [transition:border-color_120ms_ease,_background_120ms_ease,_color_120ms_ease] hover:[border-color:color-mix(in_srgb,_var(--accent-cool)_42%,_var(--border-soft))] hover:[background:color-mix(in_srgb,_var(--accent-cool)_8%,_var(--vui-surface-row))] hover:[color:var(--accent-cool-2)] hover:[outline:none] focus-visible:[border-color:color-mix(in_srgb,_var(--accent-cool)_42%,_var(--border-soft))] focus-visible:[background:color-mix(in_srgb,_var(--accent-cool)_8%,_var(--vui-surface-row))] focus-visible:[color:var(--accent-cool-2)] focus-visible:[outline:none]",
   supervisedWorkflowPanel:
@@ -554,16 +360,12 @@ const styles = {
     "inline-flex [align-items:center] [gap:3px] min-w-0 [color:var(--accent-cool-2)] [text-decoration:none] [white-space:nowrap] hover:[color:var(--accent-cool)] hover:[text-decoration:underline] hover:[outline:none] focus-visible:[color:var(--accent-cool)] focus-visible:[text-decoration:underline] focus-visible:[outline:none]",
   surface:
     panelSurface,
-  surfaceHeader:
-    "flex [align-items:start] [justify-content:space-between] [gap:10px] [padding:14px_14px_0]",
   surfaceHeaderCompact:
     "flex [justify-content:space-between] [gap:10px] min-w-0 [&_div]:min-w-0 [align-items:center]",
   textArea:
     "[width:100%] min-w-0 [border:1px_solid_var(--border-hairline)] [border-radius:7px] [background:var(--vui-surface-workspace)] [color:var(--fg-primary)] focus:[outline:1px_solid_color-mix(in_srgb,_var(--accent-warm)_26%,_transparent)] focus:[border-color:color-mix(in_srgb,_var(--accent-warm)_26%,_transparent)] [min-height:86px] [padding:10px_12px] [resize:vertical] [line-height:1.5]",
   textInput:
     "[width:100%] min-w-0 [min-height:31px] [padding:0_9px] [border:1px_solid_var(--border-hairline)] [border-radius:7px] [background:var(--vui-surface-workspace)] [color:var(--fg-primary)] focus:[outline:1px_solid_color-mix(in_srgb,_var(--accent-warm)_26%,_transparent)] focus:[border-color:color-mix(in_srgb,_var(--accent-warm)_26%,_transparent)]",
-  title:
-    "[margin:0] [font-family:var(--font-body)] [font-weight:760] [font-size:var(--route-topbar-title-size)] [line-height:1.08] [white-space:nowrap]",
   toolbar:
     "flex [align-items:center] [justify-content:space-between] [gap:8px_12px] [flex-wrap:wrap] min-w-0 max-[1200px]:[align-items:flex-start] max-[900px]:grid max-[900px]:[grid-template-columns:1fr] max-[900px]:[gap:6px]",
   toolbarControls:
@@ -571,26 +373,10 @@ const styles = {
   // Content-sized row for supervised focus toolbar — never grow into a tall empty shell.
   toolbarControlsSupervisedFocus:
     "flex flex-nowrap items-center justify-end gap-2 w-fit max-w-full min-w-0 shrink-0 overflow-x-auto [scrollbar-width:thin]",
-  toolbarIntro:
-    "grid [gap:2px] [min-width:260px] [max-width:min(760px,_100%)] max-[1200px]:[min-width:220px] max-[1200px]:[max-width:min(390px,_100%)] max-[900px]:min-w-0 max-[900px]:[max-width:100%]",
   // Standalone supervised focus chrome: do NOT also apply `toolbar` (flex-wrap + full row)
   // on top of VRouteHeader hideIntro — that reintroduced full-width empty bands.
   toolbarSupervisedFocus:
     "!flex w-fit max-w-full min-w-0 flex-nowrap items-center justify-end gap-2 justify-self-end self-start",
-  transcriptSection:
-    "flex [flex:1_1_0] [flex-direction:column] min-h-0 [padding:0] [border:0] [background:transparent]",
-  trendBarFill:
-    "[height:100%] [border-radius:inherit] [background:color-mix(in_srgb,_var(--accent-cool)_64%,_transparent)]",
-  trendBarTrack:
-    "[width:100%] [height:8px] [overflow:hidden] [border-radius:999px] [background:var(--vui-border-subtle)]",
-  trendMeta:
-    "grid [gap:4px] [&_span]:[color:var(--fg-secondary)] [&_span]:[font-size:0.92rem]",
-  trendRow:
-    `${actionSurface} grid [gap:10px] [padding:12px_14px] [text-align:left]`,
-  trendStack:
-    "grid [gap:8px] [padding:12px_14px_14px]",
-  trendValue:
-    "grid [grid-template-columns:minmax(0,_1fr)_auto] [gap:10px] [align-items:center]",
   truncateText:
     "min-w-0 [max-width:100%] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]",
   viewStack:

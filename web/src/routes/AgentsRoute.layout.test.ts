@@ -1994,9 +1994,12 @@ describe("AgentsRoute layout contract", () => {
       expectContentSizedAction(styleName);
     }
 
-    for (const styleName of ["avatarEditorActions", "configDeepLinkRow", "editorActions", "timelineActions"] as const) {
+    // editorActions lives on panel style maps after componentization; route map no longer owns it.
+    for (const styleName of ["avatarEditorActions", "configDeepLinkRow", "timelineActions"] as const) {
       expectResponsiveActionRow(styleName);
     }
+    expect(coreConfigStyles.editorActions).toContain("[flex-wrap:wrap]");
+    expect(coreConfigStyles.editorActions).toContain("[&_[data-vui=\"button\"]]:w-fit");
 
     expect(styles.returnBannerButton).toContain("max-[860px]:w-fit");
     expect(styles.returnBannerButton).not.toContain("max-[860px]:w-full");

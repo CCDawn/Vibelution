@@ -3,25 +3,17 @@ import { describe, expect, it } from "vitest";
 import styles from "./LogsRoute.styles";
 import routeSource from "./LogsRoute.tsx?raw";
 
+// Wave 8 prune dropped unused surface keys (package diagnosis / scene card residue).
 const logSurfaceKeys = [
   "diagnosticsPanel",
   "diagnosticsSummaryRow",
-  "packageDiagnosisPanel",
-  "packageDiagnosisSummaryRow",
   "packageFilesPanel",
   "panelSearch",
   "previewActions",
   "previewPane",
-  "previewStateCard",
   "previewStateFlow",
-  "previewStateSurface",
-  "sceneCard",
   "sceneCardMeta",
   "sceneCardStatus",
-  "sceneDetailSurface",
-  "sceneRawPreview",
-  "startupTracePanel",
-  "packageWorkRunPanel",
 ] as const satisfies readonly (keyof typeof styles)[];
 
 function hasClassToken(className: string, token: string) {
