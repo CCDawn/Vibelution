@@ -42,7 +42,8 @@ import {
   CHAT_LIST_HEIGHT_LAYOUT_ID,
 } from "./chatListHeights";
 import { TokenCoreStatusPanel, type TokenCoreStatusMetric } from "./TokenCoreStatusPanel";
-import styles from "../ChatCodingRoute.styles";
+import routeStyles from "../ChatCodingRoute.styles";
+import styles from "./ChatStatusRail.styles";
 
 /** Secondary-lazy: status-rail debug panel, not required for first Chat paint. */
 const LlmPayloadTracePanel = lazy(() =>
@@ -271,11 +272,11 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
         aria-label={statusRailOverlayOpen ? (lang === "zh" ? "状态栏" : "Status panel") : undefined}
       >
         {standardGroupRoomActive ? (
-          <section className={`${styles.leftBlock} ${styles.groupProfileBlock}`}>
-            <div className={styles.sectionHeader}>
-              <div className={styles.sectionIdentity}>
-                <div className={styles.sectionEyebrowRow}>
-                  <p className={styles.blockEyebrow}>{lang === "zh" ? "群资料与设置" : "Group profile"}</p>
+          <section className={`${routeStyles.leftBlock} ${styles.groupProfileBlock}`}>
+            <div className={routeStyles.sectionHeader}>
+              <div className={routeStyles.sectionIdentity}>
+                <div className={routeStyles.sectionEyebrowRow}>
+                  <p className={routeStyles.blockEyebrow}>{lang === "zh" ? "群资料与设置" : "Group profile"}</p>
                   <VContextualHint
                     content={activeGroupTeamOwned
                       ? (lang === "zh"
@@ -288,22 +289,22 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
                     width="wide"
                   />
                 </div>
-                <h3 className={styles.sectionTitle}>{activeGroupRoom?.title ?? (lang === "zh" ? "群聊加载中" : "Loading group")}</h3>
+                <h3 className={routeStyles.sectionTitle}>{activeGroupRoom?.title ?? (lang === "zh" ? "群聊加载中" : "Loading group")}</h3>
               </div>
               <span className={`${styles.sessionStatePill} ${styles[`sessionStatePill_${String(activeGroupRoom?.status ?? "ready").trim().toLowerCase()}`]}`}>
                 {statusLabel(activeGroupRoom?.status ?? "ready")}
               </span>
             </div>
-            <div className={styles.resourceSplit}>
-              <div className={styles.resourceMetric}>
+            <div className={routeStyles.resourceSplit}>
+              <div className={routeStyles.resourceMetric}>
                 <span>{lang === "zh" ? "可用成员" : "Available"}</span>
                 <strong>{numberFormatter.format(availableGroupParticipantCount)}</strong>
               </div>
-              <div className={styles.resourceMetric}>
+              <div className={routeStyles.resourceMetric}>
                 <span>{lang === "zh" ? "调度" : "Mode"}</span>
                 <strong>{activeGroupRoom?.mode ?? "round_robin"}</strong>
               </div>
-              <div className={styles.resourceMetric}>
+              <div className={routeStyles.resourceMetric}>
                 <span>{lang === "zh" ? "目的" : "Purpose"}</span>
                 <strong>{activeGroupRoom?.purpose ?? "discussion"}</strong>
               </div>
@@ -380,7 +381,7 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
                 </div>
               </div>
               {groupRoomActionError ? (
-                <div className={styles.panelNotice}>{groupRoomActionError}</div>
+                <div className={routeStyles.panelNotice}>{groupRoomActionError}</div>
               ) : null}
               <div className={styles.groupManagementControls}>
                 <label className={styles.groupTitleField}>
@@ -468,13 +469,13 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
                           onChange={() => onToggleGroupManageSession(session.id)}
                         />
                         {renderAgentAvatar(
-                          styles.agentOptionAvatar,
+                          routeStyles.agentOptionAvatar,
                           sessionAvatarImageUrl,
                           avatarInitials(session.agentCode, display.name),
                         )}
                         <span className={styles.groupMemberCopy}>
                           <strong>{display.name}</strong>
-                          <small className={`${styles.agentRoleTag} ${styles[agentRoleClass(display.tone)]}`}>
+                          <small className={`${routeStyles.agentRoleTag} ${styles[agentRoleClass(display.tone)]}`}>
                             {display.functionLabel}
                           </small>
                         </span>
@@ -501,17 +502,17 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
           </section>
         ) : (
           <>
-        <section className={`${styles.leftBlock} ${styles.currentSessionBlock}`}>
-          <div className={styles.sectionHeader}>
-            <div className={styles.sectionIdentity}>
-              <p className={styles.blockEyebrow}>{t("currentSession")}</p>
-              <h3 className={styles.sectionTitle}>{activeSurfaceTitle}</h3>
+        <section className={`${routeStyles.leftBlock} ${styles.currentSessionBlock}`}>
+          <div className={routeStyles.sectionHeader}>
+            <div className={routeStyles.sectionIdentity}>
+              <p className={routeStyles.blockEyebrow}>{t("currentSession")}</p>
+              <h3 className={routeStyles.sectionTitle}>{activeSurfaceTitle}</h3>
             </div>
             <span className={`${styles.sessionStatePill} ${styles[`sessionStatePill_${sessionStateValue}`]}`}>
               {sessionStateLabel}
             </span>
           </div>
-          <p className={`${styles.contextLineCompact} ${styles.currentSessionLine}`} title={sessionStateLine}>
+          <p className={`${routeStyles.contextLineCompact} ${styles.currentSessionLine}`} title={sessionStateLine}>
             {compactSessionStateLine}
           </p>
           {agentDirectSessionMismatch && agentPrimaryDirectSessionId ? (
@@ -558,9 +559,9 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
           ) : null}
         </section>
 
-        <section className={`${styles.leftBlock} ${styles.featurePresetBlock} ${styles.runModeBlock}`}>
-          <div className={styles.sectionHeader}>
-            <h3 className={styles.railSectionHeading}>{lang === "zh" ? "运行模式" : "Run modes"}</h3>
+        <section className={`${routeStyles.leftBlock} ${styles.featurePresetBlock} ${styles.runModeBlock}`}>
+          <div className={routeStyles.sectionHeader}>
+            <h3 className={routeStyles.railSectionHeading}>{lang === "zh" ? "运行模式" : "Run modes"}</h3>
             <span className={styles.featurePresetScope} title={t("chatFeaturePanelHint")}>{lang === "zh" ? "下轮生效" : "Next turn"}</span>
           </div>
           <div className={styles.featureChipRow}>
@@ -616,9 +617,9 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
           </Suspense>
         ) : null}
 
-        <section className={`${styles.leftBlock} ${styles.companionBlock}`}>
-          <div className={styles.sectionHeader}>
-            <h3 className={styles.railSectionHeading}>{lang === "zh" ? "陪伴" : "Companion"}</h3>
+        <section className={`${routeStyles.leftBlock} ${styles.companionBlock}`}>
+          <div className={routeStyles.sectionHeader}>
+            <h3 className={routeStyles.railSectionHeading}>{lang === "zh" ? "陪伴" : "Companion"}</h3>
             {mentalModelEnabledForNextTurn ? (
               <VTooltip
                 content={mentalCompactLine || mentalSourceLabel}
@@ -637,7 +638,7 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
                       type="button"
                       className={[
                         triggerClassName,
-                        styles.mentalStateBadge,
+                        routeStyles.mentalStateBadge,
                         styles[`mentalStateBadge_${mentalCognitiveStateValue}`],
                       ].filter(Boolean).join(" ")}
                       aria-label={`${mentalStateLabel}. ${mentalCompactLine || mentalSourceLabel}`}
@@ -650,7 +651,7 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
                 {mentalStateLabel}
               </VTooltip>
             ) : (
-              <span className={styles.mentalStateBadge} title={mentalSummary}>
+              <span className={routeStyles.mentalStateBadge} title={mentalSummary}>
                 {lang === "zh" ? "心智关" : "Mental off"}
               </span>
             )}
@@ -694,7 +695,7 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
             >
               {mentalModelEnabledForNextTurn ? (
                 <>
-                  <p className={styles.oneLineValue} title={mentalWhisper}>
+                  <p className={routeStyles.oneLineValue} title={mentalWhisper}>
                     <span>{t("mentalWhisper")}</span>
                     {mentalWhisper}
                   </p>
@@ -718,7 +719,7 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
                   </div>
                 </>
               ) : (
-                <p className={styles.contextLineCompact}>{mentalSummary}</p>
+                <p className={routeStyles.contextLineCompact}>{mentalSummary}</p>
               )}
               <div className={styles.inlineMetaList}>
                 <span className={styles.inlineMetaPill}>

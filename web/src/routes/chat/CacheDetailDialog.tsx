@@ -3,7 +3,8 @@ import { useId, type CSSProperties } from "react";
 
 import type { SessionCacheCompositionSegment } from "../../api/types";
 import { VButton } from "../../components/vui";
-import styles from "../ChatCodingRoute.styles";
+import routeStyles from "../ChatCodingRoute.styles";
+import styles from "./CacheDetailDialog.styles";
 
 export type CacheDonutSegment = SessionCacheCompositionSegment & {
   actualPercent: number;
@@ -147,7 +148,7 @@ function cachePromptLegendSegmentClass(segment: Pick<SessionCacheCompositionSegm
       return styles.contextCompositionSegmentSystem;
     case "agent_spec":
     case "agent_context":
-      return styles.contextCompositionSegmentAgent;
+      return routeStyles.contextCompositionSegmentAgent;
     case "developer_instructions":
     case "project_context":
       return styles.contextCompositionSegmentProjectRules;
@@ -158,19 +159,19 @@ function cachePromptLegendSegmentClass(segment: Pick<SessionCacheCompositionSegm
     case "provider_unmapped":
       return styles.contextCompositionSegmentProviderUnmapped;
     case "current_user":
-      return styles.contextCompositionSegmentUser;
+      return routeStyles.contextCompositionSegmentUser;
     case "history":
-      return styles.contextCompositionSegmentHistory;
+      return routeStyles.contextCompositionSegmentHistory;
     case "task_state":
-      return styles.contextCompositionSegmentTask;
+      return routeStyles.contextCompositionSegmentTask;
     case "operator_guidance":
-      return styles.contextCompositionSegmentGuidance;
+      return routeStyles.contextCompositionSegmentGuidance;
     case "skill_context":
-      return styles.contextCompositionSegmentSkill;
+      return routeStyles.contextCompositionSegmentSkill;
     case "attachments":
-      return styles.contextCompositionSegmentAttachments;
+      return routeStyles.contextCompositionSegmentAttachments;
     default:
-      return styles.contextCompositionSegmentOther;
+      return routeStyles.contextCompositionSegmentOther;
   }
 }
 

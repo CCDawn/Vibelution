@@ -94,16 +94,30 @@ const dead = allKeys.filter((k) => {
 });
 const deadSet = new Set(dead);
 
-const mapStart = stylesSrc.indexOf("const styles = {");
-const mapEnd = stylesSrc.lastIndexOf("} as const;");
-if (mapStart < 0 || mapEnd < 0) {
-  console.error("Could not locate `const styles = { ... } as const;`");
+const mapDeclMatch = stylesSrc.match(/const styles(?::\s*[^=]+)?\s*=\s*\{/);
+if (!mapDeclMatch || mapDeclMatch.index == null) {
+  console.error("Could not locate styles map declaration");
   process.exit(1);
+}
+const mapStart = mapDeclMatch.index;
+const mapDecl = mapDeclMatch[0];
+const mapBodyStart = mapStart + mapDecl.length;
+// Prefer `} as const;` then bare `};` before export
+let mapEnd = stylesSrc.lastIndexOf("} as const;");
+let suffix;
+if (mapEnd >= mapBodyStart) {
+  suffix = stylesSrc.slice(mapEnd);
+} else {
+  mapEnd = stylesSrc.lastIndexOf("\n};");
+  if (mapEnd < mapBodyStart) {
+    console.error("Could not locate styles map end");
+    process.exit(1);
+  }
+  suffix = stylesSrc.slice(mapEnd); // starts with \n};
 }
 
 const preamble = stylesSrc.slice(0, mapStart);
-const mapBody = stylesSrc.slice(mapStart + "const styles = {".length, mapEnd);
-const suffix = stylesSrc.slice(mapEnd);
+const mapBody = stylesSrc.slice(mapBodyStart, mapEnd);
 
 const lines = mapBody.split("\n");
 const blocks = [];
@@ -136,14 +150,14 @@ if (current) blocks.push(current);
 const keptBlocks = blocks.filter((b) => !deadSet.has(b.key));
 const removed = blocks.filter((b) => deadSet.has(b.key)).map((b) => b.key);
 
-let mapOut = "const styles = {\n";
+let mapOut = `${mapDecl}\n`;
 for (const block of keptBlocks) {
   let text = block.lines.join("\n").replace(/\n+$/, "");
   if (!/,\s*$/.test(text)) text += ",";
   mapOut += `${text}\n`;
 }
-// suffix already starts with `} as const;...`
-mapOut += suffix.startsWith("}") ? suffix : `} as const;\n`;
+// suffix already starts with `} as const;...` or `\n};...`
+mapOut += suffix.startsWith("}") || suffix.startsWith("\n}") ? suffix : `} as const;\n`;
 
 // Local helpers in preamble may reference imports; include their bodies in scan.
 const preambleWithoutImports = preamble.replace(/^import\s[\s\S]*?;\r?\n/gm, "");
