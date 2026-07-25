@@ -11,6 +11,7 @@ import styles from "./LauncherProjectMaintenancePanel.styles";
 import {
   LAUNCHER_CLEANUP_CONSOLE_HEIGHT_PANE,
   LAUNCHER_LIST_HEIGHT_LAYOUT_ID,
+  LAUNCHER_NOISE_ITEM_GRID_HEIGHT_PANE,
 } from "./launcherListHeights";
 
 type LauncherProjectMaintenanceCopy = {
@@ -148,7 +149,13 @@ export function LauncherProjectMaintenancePanel({
               </VButton>
             ))}
           </div>
-          <div className={styles.noiseItemGrid}>
+          <PersistedHeightListShell
+            layoutId={LAUNCHER_LIST_HEIGHT_LAYOUT_ID}
+            pane={LAUNCHER_NOISE_ITEM_GRID_HEIGHT_PANE}
+            label={copy.maintenanceTitle}
+            className={styles.noiseItemGrid}
+            resizeHandleClassName={styles.noiseItemGridResizeHandle}
+          >
             {selectedItems.slice(0, 4).map((item) => (
               <div key={item.id} className={styles.noiseItem} data-protected="false">
                 <span>{item.name}</span>
@@ -156,7 +163,7 @@ export function LauncherProjectMaintenancePanel({
                 <small>{item.candidateCount} {copy.maintenanceTargets}</small>
               </div>
             ))}
-          </div>
+          </PersistedHeightListShell>
         </div>
         <PersistedHeightListShell
           layoutId={LAUNCHER_LIST_HEIGHT_LAYOUT_ID}

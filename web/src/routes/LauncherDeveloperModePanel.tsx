@@ -12,6 +12,7 @@ import styles from "./LauncherDeveloperModePanel.styles";
 import {
   LAUNCHER_CLEANUP_CONSOLE_HEIGHT_PANE,
   LAUNCHER_LIST_HEIGHT_LAYOUT_ID,
+  LAUNCHER_NOISE_ITEM_GRID_HEIGHT_PANE,
 } from "./launcherListHeights";
 
 type LauncherDeveloperModeCopy = {
@@ -189,7 +190,13 @@ export function LauncherDeveloperModePanel({
             </VButton>
           </div>
           {noiseLoading && !noiseOverview ? <small>{copy.developerModeNoiseLoading}</small> : null}
-          <div className={styles.noiseItemGrid}>
+          <PersistedHeightListShell
+            layoutId={LAUNCHER_LIST_HEIGHT_LAYOUT_ID}
+            pane={LAUNCHER_NOISE_ITEM_GRID_HEIGHT_PANE}
+            label={copy.developerModeNoiseOverview}
+            className={styles.noiseItemGrid}
+            resizeHandleClassName={styles.noiseItemGridResizeHandle}
+          >
             {(noiseOverview?.items ?? []).slice(0, 4).map((item) => (
               <div key={item.id} className={styles.noiseItem} data-protected={item.protected}>
                 <span>{item.label}</span>
@@ -197,7 +204,7 @@ export function LauncherDeveloperModePanel({
                 <small>{item.targetCount} {copy.cleanupTargets}{item.skippedCount ? ` · ${item.skippedCount} ${copy.cleanupSkipped}` : ""}</small>
               </div>
             ))}
-          </div>
+          </PersistedHeightListShell>
         </div>
         <PersistedHeightListShell
           layoutId={LAUNCHER_LIST_HEIGHT_LAYOUT_ID}

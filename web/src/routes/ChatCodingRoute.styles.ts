@@ -439,8 +439,11 @@ const styles: Record<string, string> = {
     `vui-routes-chatcodingroute groupMemberChipSelected min-w-0 ${vuiStateCoolSoftClass}`,
   groupMemberCopy:
     "vui-routes-chatcodingroute groupMemberCopy grid min-w-0 gap-0.5 overflow-hidden text-left [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-secondary)] [&_small]:min-w-0 [&_small]:truncate [&_strong]:min-w-0 [&_strong]:truncate",
+  // Wave 6G: height from PersistedHeightListShell / pane-heights.v1, not fixed max-h.
   groupMemberPicker:
-    "vui-routes-chatcodingroute groupMemberPicker grid min-h-0 min-w-0 max-h-[min(40dvh,360px)] gap-1.5 overflow-auto pr-1",
+    "vui-routes-chatcodingroute groupMemberPicker grid min-h-0 min-w-0 gap-1.5 overflow-auto pr-1",
+  groupMemberPickerResizeHandle:
+    "vui-routes-chatcodingroute groupMemberPickerResizeHandle",
   groupMessageList:
     "vui-routes-chatcodingroute groupMessageList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   groupMessageTimeline:

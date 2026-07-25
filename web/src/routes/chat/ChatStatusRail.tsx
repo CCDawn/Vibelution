@@ -20,6 +20,7 @@ import type {
   SessionLlmPayloadTrace,
   SessionSummary,
 } from "../../api/types";
+import { PersistedHeightListShell } from "../../components/layout/PersistedHeightListShell";
 import {
   VButton,
   VContextualHint,
@@ -35,6 +36,10 @@ import {
   chatFeaturePresetShortLabel,
   type FeaturePresetKey,
 } from "./chatFeaturePresets";
+import {
+  CHAT_GROUP_MEMBER_PICKER_HEIGHT_PANE,
+  CHAT_LIST_HEIGHT_LAYOUT_ID,
+} from "./chatListHeights";
 import { TokenCoreStatusPanel, type TokenCoreStatusMetric } from "./TokenCoreStatusPanel";
 import styles from "../ChatCodingRoute.styles";
 
@@ -429,7 +434,15 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
                     {groupManageSessionIds.length}/{sessions?.length ?? 0}
                   </strong>
                 </div>
-                <div className={styles.groupMemberPicker}>
+                <PersistedHeightListShell
+                  layoutId={CHAT_LIST_HEIGHT_LAYOUT_ID}
+                  pane={CHAT_GROUP_MEMBER_PICKER_HEIGHT_PANE}
+                  label={lang === "zh" ? "调整群成员选择列表高度" : "Resize group member picker height"}
+                  className={styles.groupMemberPicker}
+                  resizeHandleClassName={styles.groupMemberPickerResizeHandle}
+                  role="region"
+                  aria-label={lang === "zh" ? "群成员选择" : "Group member picker"}
+                >
                   {(sessions ?? []).map((session) => {
                     const selected = groupManageSessionSet.has(session.id);
                     const sessionAgent = session.agentId ? agentsById.get(session.agentId) : undefined;
@@ -472,7 +485,7 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
                       </label>
                     );
                   })}
-                </div>
+                </PersistedHeightListShell>
               </div>
               {groupRoundActive ? (
                 <p className={styles.groupManagementHint}>
