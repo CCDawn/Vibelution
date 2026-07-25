@@ -328,6 +328,7 @@ h3 {
 
 .project-actions {
   flex: 0 0 auto;
+  align-items: flex-end;
   gap: 7px;
 }
 
@@ -776,10 +777,11 @@ h3 {
 }
 
 .workspace-actions > div {
-  display: grid;
+  display: flex;
   min-width: 260px;
   flex: 1;
-  gap: 2px;
+  align-items: center;
+  gap: 5px;
 }
 
 .workspace-actions strong {
