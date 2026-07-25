@@ -1,7 +1,12 @@
 import { type ReactNode, type SyntheticEvent } from "react";
 
+import { PersistedHeightListShell } from "../components/layout/PersistedHeightListShell";
 import panelFrameStyles from "./TeamSourceCollectionPanelFrame.styles";
 import styles from "./TeamSourceCollectionGraphPanel.styles";
+import {
+  TEAM_SOURCE_COLLECTION_GRAPH_NODES_HEIGHT_PANE,
+  TEAM_SOURCE_COLLECTION_LAYOUT_ID,
+} from "./teamSourceCollectionListHeights";
 
 export type TeamSourceCollectionGraphPanelStat = {
   key: string;
@@ -71,14 +76,18 @@ export function TeamSourceCollectionGraphPanel({
           </div>
           {graphView}
           {nodeListItems ? (
-            <div
+            <PersistedHeightListShell
+              layoutId={TEAM_SOURCE_COLLECTION_LAYOUT_ID}
+              pane={TEAM_SOURCE_COLLECTION_GRAPH_NODES_HEIGHT_PANE}
+              label={lang === "zh" ? "调整入库关系图节点列表高度" : "Resize ingestion graph node list height"}
               className={styles.sourceCollectionGraphNodeListShell}
+              resizeHandleClassName={styles.sourceCollectionListResizeHandle}
               role="region"
               tabIndex={0}
               aria-label={nodeListAriaLabel}
             >
               <div className={styles.workflowCandidateList}>{nodeListItems}</div>
-            </div>
+            </PersistedHeightListShell>
           ) : null}
           {pagination}
         </>

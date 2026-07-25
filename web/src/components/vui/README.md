@@ -115,8 +115,11 @@ Gate: `workbenchLayoutGate` + `design/vuiDomainWorkbenchCompositionContract.test
 | Logs package file picker | `logs` | `package-files` | Replaces fixed `max-h-[min(190px,24vh)]` |
 | Launcher diagnostics body | `launcher` | `diagnostics-body` | Replaces fixed `max-h-[min(42vh,420px)]` |
 | Memory project memory queue | `memory` | `project-memory-queue` | Wave 6D; replaces fixed `max-h-[min(220px,28vh)]` |
+| Teams source-collection lists | `teams` | `source-collection-candidates` / `screening` / `memory` / `graph-nodes` | Wave 6E via `PersistedHeightListShell` |
 
 Prefer these shared APIs for any new vertical splitter; do not reintroduce private max-height-only strips that users would need to resize.
+
+**List shells:** use `components/layout/PersistedHeightListShell` with a module-level `PaneHeightSpec` (see `routes/teamSourceCollectionListHeights.ts`).
 
 ## Wave 6D Chat shell boundary + more height reuse
 
@@ -133,7 +136,7 @@ Prefer these shared APIs for any new vertical splitter; do not reintroduce priva
 | `setChatPanelWidths` dual-write | New Chat-only width localStorage keys |
 | Document Chat-owned center-track coupling | Forcing Chat onto `usePersistedPaneResize` (breaks coupled dual-pane math) |
 
-Gate: Chat dual-write + layout id stay in `workbenchLayoutGate`; height consumers include project-memory-queue.
+Gate: Chat dual-write + layout id stay in `workbenchLayoutGate`; height consumers include project-memory-queue and Teams source-collection lists.
 
 Each sets `data-vui-recipe="…"` on the page root for contracts and debugging.
 
