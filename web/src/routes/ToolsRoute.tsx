@@ -1646,6 +1646,7 @@ export function ToolsRoute() {
     <VDenseOpsPage
       className={styles.route}
       headerClassName={styles.header}
+      data-vui-domain-recipe="tools-workbench"
       ariaLabel={t("toolsPageSubtitle")}
       eyebrow={t("navTools")}
       title={t("toolsPageTitle")}
@@ -1704,6 +1705,7 @@ export function ToolsRoute() {
         ref={toolsLayoutRef}
         className={styles.workspace}
         style={workspaceStyle}
+        data-vui-recipe="tools-workbench"
         data-vui-layout-id={TOOLS_LAYOUT_ID}
       >
         <aside className={leftPanelCollapsed ? `${styles.listPanel} ${styles.paneCollapsed}` : styles.listPanel} aria-hidden={leftPanelCollapsed}>

@@ -832,6 +832,7 @@ export function LogsRoute() {
     <VDenseOpsPage
       className={styles.route}
       headerClassName={styles.header}
+      data-vui-domain-recipe="logs-workbench"
       ariaLabel={t("logsSubtitle")}
       eyebrow={t("navLogs")}
       title={t("logsTitle")}
@@ -851,6 +852,7 @@ export function LogsRoute() {
         ref={workspaceRef}
         className={styles.workspace}
         style={layoutStyle}
+        data-vui-recipe="logs-workbench"
         data-vui-layout-id={LOGS_LAYOUT_ID}
       >
         {activeRoot && isRuntimeScenesRoot ? (

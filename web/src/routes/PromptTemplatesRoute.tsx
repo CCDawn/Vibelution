@@ -498,6 +498,7 @@ export function PromptTemplatesRoute() {
         workspaceClassName={styles.workspaceClass}
         columnsClassName=""
         layoutId={WORKBENCH_LAYOUT_IDS.promptTemplates}
+        data-vui-domain-recipe="prompt-templates-workbench"
         ariaLabel={copy.title}
         eyebrow={copy.eyebrow}
         title={copy.title}

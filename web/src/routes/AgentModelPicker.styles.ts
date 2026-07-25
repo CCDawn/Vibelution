@@ -10,7 +10,8 @@ const styles = {
   triggerLabel: "min-w-0 flex-1 truncate [font-size:var(--vui-font-sm)] text-[var(--fg-primary)]",
   triggerMeta: "shrink-0 [font-size:var(--vui-font-xs)] font-normal text-[var(--fg-tertiary)]",
   dialogLayer: "fixed inset-0 z-[100] grid place-items-start justify-items-center overflow-y-auto bg-[color-mix(in_srgb,var(--bg-canvas)_46%,transparent)] p-6 pt-[max(24px,8vh)]",
-  panel: `grid w-[min(760px,calc(100vw-48px))] max-h-[calc(100vh-48px)] min-w-0 [grid-template-rows:auto_auto_minmax(0,1fr)] gap-3 overflow-hidden rounded-[14px] border border-[var(--vui-border-subtle)] ${vuiFlatPanelClass} p-3 shadow-[var(--vui-shadow-soft)]`,
+  // Wave 6H dialog policy: prefer 100dvh viewport clamp (not workbench pane-heights).
+  panel: `grid w-[min(760px,calc(100vw-48px))] max-h-[calc(100dvh-48px)] min-w-0 [grid-template-rows:auto_auto_minmax(0,1fr)] gap-3 overflow-hidden rounded-[14px] border border-[var(--vui-border-subtle)] ${vuiFlatPanelClass} p-3 shadow-[var(--vui-shadow-soft)]`,
   panelHeader: "flex items-start justify-between gap-3 px-1 pt-0.5",
   panelTitle: "grid min-w-0 gap-0.5",
   panelTitleText: "[font-size:var(--vui-font-sm)] font-semibold text-[var(--fg-primary)]",

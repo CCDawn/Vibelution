@@ -1659,6 +1659,7 @@ export function SelfEvolutionTrack({
               ref={selfLayoutRef}
               className={styles.workspaceLayout}
               style={workspaceLayoutStyle(sidebarCollapsed, sidebarWidth)}
+              data-vui-recipe="evolution-self-workbench"
               data-vui-layout-id={SELF_LAYOUT_ID}
             >
           <aside

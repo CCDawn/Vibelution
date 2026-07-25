@@ -2874,6 +2874,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     <div
       ref={evolutionLayoutRef}
       className={activeTrack === "self" ? `${styles.page} ${styles.selfPage}` : styles.page}
+      data-vui-recipe="evolution-workbench"
       data-vui-layout-id={EVOLUTION_LAYOUT_ID}
     >
       {showRouteToolbar ? (

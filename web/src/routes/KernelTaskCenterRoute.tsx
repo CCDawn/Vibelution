@@ -280,6 +280,7 @@ export function KernelTaskCenterRoute() {
       workspaceClassName={styles.workspaceClass}
       columnsClassName=""
       layoutId={WORKBENCH_LAYOUT_IDS.kernelTaskCenter}
+      data-vui-domain-recipe="kernel-task-center-workbench"
       eyebrow="Kernel"
       title={copy.title}
       meta={copy.subtitle}

@@ -242,6 +242,7 @@ export function SkillsRoute() {
       workspaceClassName={styles.workspaceClass}
       columnsClassName=""
       layoutId={WORKBENCH_LAYOUT_IDS.skills}
+      data-vui-domain-recipe="skills-workbench"
       ariaLabel={copy.title}
       eyebrow={copy.eyebrow}
       title={copy.title}

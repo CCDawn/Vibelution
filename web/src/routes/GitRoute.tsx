@@ -624,6 +624,7 @@ export function GitRoute() {
     <VDenseOpsPage
       className={styles.route}
       headerClassName={styles.header}
+      data-vui-domain-recipe="git-workbench"
       ariaLabel={t("gitPageTitle")}
       eyebrow={t("navGit")}
       title={t("gitPageTitle")}
@@ -667,6 +668,7 @@ export function GitRoute() {
         ref={gitLayoutRef}
         className={noChangedFiles ? `${styles.workspace} ${styles.workspaceOverview}` : styles.workspace}
         style={workspaceStyle}
+        data-vui-recipe="git-workbench"
         data-vui-layout-id={GIT_LAYOUT_ID}
       >
         {statusInitialLoading || statusEmptyError ? (

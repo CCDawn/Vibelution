@@ -67,7 +67,8 @@ export const launcherRouteStyles = {
   noiseItemGrid: "grid min-h-0 min-w-0 grid-cols-4 gap-[5px] overflow-auto pr-0.5 [scrollbar-gutter:stable] max-[860px]:grid-cols-[minmax(0,1fr)]",
   noiseItem:
     "grid min-w-0 gap-0.5 rounded-md border border-[color-mix(in_srgb,var(--border-soft)_72%,transparent)] px-1.5 py-[5px] data-[protected=true]:opacity-80 [&_span]:min-w-0 [&_span]:truncate [&_span]:[font-size:var(--vui-font-xs)] [&_span]:text-[var(--fg-secondary)] [&_strong]:min-w-0 [&_strong]:truncate [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:text-[var(--fg-primary)] [&_small]:min-w-0 [&_small]:truncate [&_small]:[font-size:var(--vui-font-xs)] [&_small]:text-[var(--fg-secondary)]",
-  cleanupConsole: `grid max-h-[220px] min-w-0 gap-1.5 overflow-auto ${rowSurface} p-[7px] [scrollbar-gutter:stable]`,
+  // Legacy key; live cleanup consoles use PersistedHeightListShell on panel styles.
+  cleanupConsole: `grid min-h-0 min-w-0 gap-1.5 overflow-auto ${rowSurface} p-[7px] [scrollbar-gutter:stable]`,
   cleanupMetrics:
     "flex min-w-0 flex-wrap items-center gap-1.5 [&_span]:[font-size:var(--vui-font-xs)] [&_span]:uppercase [&_span]:tracking-[0.06em] [&_span]:text-[var(--fg-tertiary)] [&_strong]:text-[var(--fg-primary)] max-[620px]:grid max-[620px]:grid-cols-[minmax(0,1fr)]",
   cleanupActions: "flex min-w-0 flex-wrap items-center justify-start gap-1.5",
