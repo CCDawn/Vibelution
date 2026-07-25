@@ -1533,6 +1533,69 @@ a:focus-visible {
   font-weight: 760;
 }
 
+.explorer-view-bar {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 5px 12px;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-soft);
+}
+
+.explorer-view-bar > span {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.explorer-view-switch {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+}
+
+.explorer-view-switch button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 26px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.explorer-view-switch button.active {
+  background: var(--surface-selected);
+  color: var(--accent-strong);
+  font-weight: 720;
+}
+
+.explorer-view-switch b {
+  min-width: 16px;
+  padding: 2px 4px;
+  border-radius: 999px;
+  background: var(--surface-soft);
+  font-size: 8px;
+  text-align: center;
+}
+
+.knowledge-explorer-view[hidden] {
+  display: none;
+}
+
+.knowledge-explorer-view .source-tabs {
+  padding-top: 7px;
+}
+
 .source-table {
   display: grid;
 }
@@ -1592,6 +1655,82 @@ button.source-row {
 .source-row small {
   color: var(--muted);
   font-size: 9px;
+}
+
+.claim-table,
+.review-table {
+  display: grid;
+}
+
+.governance-row {
+  display: grid;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  min-height: 47px;
+  padding: 7px 11px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  text-align: left;
+}
+
+button.governance-row {
+  cursor: pointer;
+}
+
+.governance-row:last-child {
+  border-bottom: 0;
+}
+
+.claim-row,
+.claim-head {
+  grid-template-columns: minmax(250px, 1fr) 54px 82px 88px;
+}
+
+.review-row,
+.review-head {
+  grid-template-columns: minmax(230px, 1fr) 68px 76px 78px;
+}
+
+.claim-head,
+.review-head {
+  min-height: 31px;
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 760;
+}
+
+.governance-row.selected {
+  background: var(--surface-selected);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.governance-row > span {
+  min-width: 0;
+  font-size: 9px;
+}
+
+.governance-row > span:first-child {
+  display: grid;
+  gap: 2px;
+}
+
+.governance-row strong {
+  overflow: hidden;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.governance-row small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .status-pill {
