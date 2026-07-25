@@ -55,6 +55,10 @@ import {
   migrateLegacyNumericPanes,
   type PaneSpec,
 } from "../components/layout/paneLayoutPersistence";
+import {
+  persistPaneHeight,
+  resolveStoredPaneHeight,
+} from "../components/layout/paneHeightPersistence";
 import { usePersistedPaneResize } from "../components/layout/usePersistedPaneResize";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import { LazyConversationView } from "../components/conversation/LazyConversationView";
@@ -102,7 +106,6 @@ import { modelDisplayLabel } from "./agentDisplay";
 import {
   clampPaneSize,
   keyboardPaneHeight,
-  storedPaneSize,
 } from "./resizablePane";
 import styles from "./EvolutionRoute.styles";
 
@@ -235,6 +238,7 @@ const EVOLUTION_WIDTH_PANES: PaneSpec[] = [
   EVOLUTION_LIVE_RUN_PANE,
 ];
 const EVOLUTION_LIVE_IO_HEIGHT_KEY = "vibelution.evolution.live-io-height";
+const EVOLUTION_LIVE_IO_HEIGHT_PANE_ID = "live-io";
 const EVOLUTION_LIVE_IO_HEIGHT_BOUNDS = { min: 260, max: 780 };
 const EVOLUTION_LIVE_IO_DEFAULT_HEIGHT = 340;
 const SUPERVISED_RUN_MEMBER_ROLES: SupervisedMemberRole[] = ["baseline", "candidate"];
@@ -769,11 +773,13 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const liveLaunchWidth = evolutionPaneWidths["live-launch"] ?? EVOLUTION_LIVE_LAUNCH_PANE.defaultWidth;
   const liveRunWidth = evolutionPaneWidths["live-run"] ?? EVOLUTION_LIVE_RUN_PANE.defaultWidth;
   const [liveIoHeight, setLiveIoHeight] = useState(() =>
-    // Heights stay on dedicated key (pane-layouts.v1 is width-oriented).
-    storedPaneSize(
-      EVOLUTION_LIVE_IO_HEIGHT_KEY,
+    resolveStoredPaneHeight(
+      EVOLUTION_LAYOUT_ID,
+      EVOLUTION_LIVE_IO_HEIGHT_PANE_ID,
       EVOLUTION_LIVE_IO_DEFAULT_HEIGHT,
-      EVOLUTION_LIVE_IO_HEIGHT_BOUNDS,
+      EVOLUTION_LIVE_IO_HEIGHT_BOUNDS.min,
+      EVOLUTION_LIVE_IO_HEIGHT_BOUNDS.max,
+      EVOLUTION_LIVE_IO_HEIGHT_KEY,
     ),
   );
   const [runsQueueCollapsed, setRunsQueueCollapsed] = useState(false);
@@ -2153,7 +2159,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   }, [visibleLibraryEntries]);
 
   useEffect(() => {
-    window.localStorage.setItem(EVOLUTION_LIVE_IO_HEIGHT_KEY, String(liveIoHeight));
+    persistPaneHeight(EVOLUTION_LAYOUT_ID, EVOLUTION_LIVE_IO_HEIGHT_PANE_ID, liveIoHeight);
   }, [liveIoHeight]);
 
   const filteredRuns = useMemo(() => {
