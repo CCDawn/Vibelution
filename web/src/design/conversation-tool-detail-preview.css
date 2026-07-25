@@ -14,6 +14,8 @@
   --accent-soft: #eff5ff;
   --success: #338761;
   --success-soft: #eaf5ef;
+  --danger: #b94a48;
+  --danger-soft: #fff3f2;
   --code: #f5f6f8;
 }
 
@@ -218,6 +220,15 @@ summary:focus-visible {
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 1.4;
+}
+
+.activity-item-failed .activity-icon,
+.activity-item-failed .activity-status {
+  color: var(--danger);
+}
+
+.activity-item-failed .activity-title {
+  color: #7f3433;
 }
 
 .activity-copy {
@@ -460,6 +471,76 @@ details[open] > .activity-summary .chevron,
   max-height: none;
 }
 
+.failure-detail {
+  padding-top: 12px;
+}
+
+.failure-summary {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 0 2px 12px;
+}
+
+.failure-summary > div {
+  display: grid;
+  gap: 5px;
+}
+
+.failure-summary strong {
+  color: #733837;
+  font-size: 13px;
+  font-weight: 620;
+}
+
+.failure-summary span {
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.failure-summary .failure-count {
+  flex: 0 0 auto;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.failure-list {
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--line);
+  list-style: none;
+}
+
+.failure-list li {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 7px 2px;
+  border-bottom: 1px solid var(--line);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.failure-list small {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.failure-technical .raw-output {
+  border-left: 2px solid #e6b8b6;
+  border-radius: 0;
+  background: var(--danger-soft);
+  color: #6f3f3e;
+}
+
 .final-copy {
   margin-top: 24px;
 }
@@ -555,6 +636,15 @@ details[open] > .activity-summary .chevron,
   .result-heading {
     display: grid;
     gap: 8px;
+  }
+
+  .failure-summary {
+    display: grid;
+    gap: 8px;
+  }
+
+  .failure-summary .failure-count {
+    width: fit-content;
   }
 
   .reference-list li {

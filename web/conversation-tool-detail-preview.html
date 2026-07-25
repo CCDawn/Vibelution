@@ -183,6 +183,58 @@ viewport. Report any state that remains simulated or unverified.</code></pre>
 ✓ built in 18.4s</code></pre>
               </div>
             </details>
+
+            <details class="activity-item activity-item-failed" open>
+              <summary class="activity-summary">
+                <span class="activity-icon" aria-hidden="true">
+                  <svg viewBox="0 0 20 20">
+                    <rect x="3" y="3" width="14" height="12" rx="2"></rect>
+                    <path d="M7 7l6 6M13 7l-6 6"></path>
+                  </svg>
+                </span>
+                <span class="activity-copy">
+                  <span class="activity-title">调用研究工具</span>
+                  <span class="activity-subtitle">4 次调用未完成 · 搜索、代码图谱</span>
+                </span>
+                <span class="activity-status">失败</span>
+                <span class="chevron" aria-hidden="true">
+                  <svg viewBox="0 0 20 20"><path d="m6 8 4 4 4-4"></path></svg>
+                </span>
+              </summary>
+
+              <div class="activity-detail failure-detail">
+                <div class="failure-summary">
+                  <div>
+                    <strong>本回合工具调用额度已用尽</strong>
+                    <span>回答内容不受影响；刷新 Agent 工具配置后，可从失败步骤继续。</span>
+                  </div>
+                  <span class="failure-count">4 次</span>
+                </div>
+
+                <ul class="failure-list" aria-label="失败的工具调用">
+                  <li>
+                    <span>搜索</span>
+                    <small>未执行</small>
+                  </li>
+                  <li>
+                    <span>代码图谱</span>
+                    <small>未执行 × 3</small>
+                  </li>
+                </ul>
+
+                <details class="raw-disclosure failure-technical">
+                  <summary>
+                    <span>查看技术信息</span>
+                    <span class="raw-meta">tool_quota_exhausted</span>
+                    <span class="chevron" aria-hidden="true">
+                      <svg viewBox="0 0 20 20"><path d="m6 8 4 4 4-4"></path></svg>
+                    </span>
+                  </summary>
+                  <pre class="raw-output"><code>[工具授权] 当前回合工具调用额度已用尽。
+请刷新 Agent 工具配置后重试。</code></pre>
+                </details>
+              </div>
+            </details>
           </div>
 
           <p class="agent-copy final-copy">
@@ -193,7 +245,7 @@ viewport. Report any state that remains simulated or unverified.</code></pre>
 
       <footer class="preview-notes">
         <span>预览范围</span>
-        <p>桌面与窄屏布局 · 展开/收起 · 原始 JSON 二级披露 · 长文本滚动 · 复制反馈</p>
+        <p>桌面与窄屏布局 · 展开/收起 · 原始 JSON 二级披露 · 长文本滚动 · 聚合失败态 · 复制反馈</p>
       </footer>
     </main>
 
