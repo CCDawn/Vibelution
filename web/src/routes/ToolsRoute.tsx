@@ -28,7 +28,11 @@ import type { TranslationKey } from "../i18n/dictionary";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
 import { AgentManagementModuleBar } from "./AgentManagementModuleBar";
-import { clampPaneWidth, keyboardPaneWidth, storedPaneWidth } from "./resizablePane";
+import {
+  persistPaneWidth,
+  resolveStoredPaneWidth,
+} from "../components/layout/paneLayoutPersistence";
+import { clampPaneWidth, keyboardPaneWidth } from "./resizablePane";
 import { ToolsRouteAgentScopePanel } from "./ToolsRouteAgentScopePanel";
 import styles from "./ToolsRoute.styles";
 
@@ -89,6 +93,7 @@ type ToolDeepLinkFocus = "policy" | "detail" | "bundle" | "test";
 type Translate = (key: TranslationKey) => string;
 
 const FILTERS: ToolFilter[] = ["all", "built_in", "generated", "llm", "enabled"];
+const TOOLS_LAYOUT_ID = "tools";
 const TOOLS_LEFT_PANEL_WIDTH_KEY = "vibelution.tools.left-panel-width";
 const TOOLS_LEFT_PANEL_BOUNDS = { min: 260, max: 520 };
 const TOOLS_LEFT_PANEL_DEFAULT_WIDTH = 350;
@@ -830,7 +835,14 @@ export function ToolsRoute() {
   const [activeToolId, setActiveToolId] = useState<string | null>(null);
   const [selectedBundleId, setSelectedBundleId] = useState("");
   const [leftPanelWidth, setLeftPanelWidth] = useState(() =>
-    storedPaneWidth(TOOLS_LEFT_PANEL_WIDTH_KEY, TOOLS_LEFT_PANEL_DEFAULT_WIDTH, TOOLS_LEFT_PANEL_BOUNDS),
+    resolveStoredPaneWidth(
+      TOOLS_LAYOUT_ID,
+      "left",
+      TOOLS_LEFT_PANEL_DEFAULT_WIDTH,
+      TOOLS_LEFT_PANEL_BOUNDS.min,
+      TOOLS_LEFT_PANEL_BOUNDS.max,
+      TOOLS_LEFT_PANEL_WIDTH_KEY,
+    ),
   );
   const [leftPanelCollapsed, setLeftPanelCollapsed] = useState(false);
   const [selectedToolIds, setSelectedToolIds] = useState<Set<string>>(() => new Set());
@@ -1089,7 +1101,7 @@ export function ToolsRoute() {
   }, [visibleTools]);
 
   useEffect(() => {
-    window.localStorage.setItem(TOOLS_LEFT_PANEL_WIDTH_KEY, String(leftPanelWidth));
+    persistPaneWidth(TOOLS_LAYOUT_ID, "left", leftPanelWidth);
   }, [leftPanelWidth]);
 
   const enableMutation = useMutation({
