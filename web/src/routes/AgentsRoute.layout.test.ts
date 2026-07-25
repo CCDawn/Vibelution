@@ -512,7 +512,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain('searchParams.get("create") === "1"');
     expect(routeSource).toContain("const createOpen = requestedCreate");
     expect(routeSource).toContain("setCreateWizardOpen(false)");
-    expect(routeSource).toContain('const fullWorkspaceNeeded = Boolean(activePane === "effective" || activePane === "config" || activePane === "activity" || requestedAgentId)');
+    expect(routeSource).toContain('const fullWorkspaceNeeded = Boolean(activePane === "effective" || activePane === "relations" || activePane === "config" || activePane === "activity" || requestedAgentId)');
     expect(routeSource).toContain("<AgentCreateWizardDialog");
     expect(routeSource).toContain("triggerRef={agentCreateTriggerRef}");
     expect(agentCreateDialogSource).toContain('enabled: open');
@@ -1447,7 +1447,7 @@ describe("AgentsRoute layout contract", () => {
 
   it("organizes the Agent card into three switchable panes with run history", () => {
     expect(routeSource).toContain("AgentConfigPaneId");
-    expect(routeSource).toContain('type AgentConfigPaneId = "overview" | "effective" | "config" | "activity"');
+    expect(routeSource).toContain('type AgentConfigPaneId = "overview" | "effective" | "relations" | "config" | "activity"');
     expect(routeSource).toContain("agentConfigPanes(copy, selectedAgent)");
     expect(routeSource).toContain("AgentManagementBrief");
     expect(routeSource).toContain("buildAgentManagementBrief(selectedAgent, copy, lang)");
@@ -1455,6 +1455,8 @@ describe("AgentsRoute layout contract", () => {
     expect(selectedDetailContentPanelSource).toContain("AgentOverviewPanel");
     expect(selectedDetailContentPanelSource).toContain("AgentEffectiveConfigurationPanel");
     expect(selectedDetailContentPanelSource).toContain('activePane === "effective"');
+    expect(selectedDetailContentPanelSource).toContain("AgentTeamRelationsPanel");
+    expect(selectedDetailContentPanelSource).toContain('activePane === "relations"');
     expect(routeSource).toContain("copy.managementBriefTitle");
     expect(routeSource).toContain("copy.nextActionsTitle");
     expect(routeSource).not.toContain("className={styles.managementBriefPanel}");

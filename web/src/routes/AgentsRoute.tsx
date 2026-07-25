@@ -177,7 +177,7 @@ type AgentDraftSyncSource = {
 };
 
 type ToolPolicyMode = "inherited" | "allowed" | "blocked" | "excluded";
-type AgentConfigPaneId = "overview" | "effective" | "config" | "activity";
+type AgentConfigPaneId = "overview" | "effective" | "relations" | "config" | "activity";
 type ToolPermissionGroup = {
   bundleId: string;
   label: string;
@@ -1131,7 +1131,7 @@ function buildVisibleAgentColumns(
 
 function normalizeAgentConfigPane(value: string | null | undefined): AgentConfigPaneId {
   const normalized = String(value || "").trim();
-  return normalized === "effective" || normalized === "config" || normalized === "activity" || normalized === "overview"
+  return normalized === "effective" || normalized === "relations" || normalized === "config" || normalized === "activity" || normalized === "overview"
     ? normalized
     : "overview";
 }
@@ -2355,10 +2355,12 @@ function agentConfigPanes(copy: ReturnType<typeof agentsRouteCopy>, agent: Agent
   // Badge = actionable signals only (not panel/field cardinality).
   const configIssueCount = agent?.health.length ?? 0;
   const effectiveIssueCount = agent?.effectiveConfiguration?.fields.some((field) => field.status !== "ready") ? 1 : 0;
+  const relationCount = agent?.references.filter((reference) => reference.kind === "team").length ?? 0;
   const activityCount = (agent?.agentInboxPendingCount ?? 0) + (agent?.groupContextEvents?.length ?? 0);
   return [
     { id: "overview", label: copy.overviewPane, count: 0 },
     { id: "effective", label: copy.effectiveConfiguration, count: effectiveIssueCount },
+    { id: "relations", label: copy.teamRelations, count: relationCount },
     { id: "config", label: copy.configTitle, count: configIssueCount },
     { id: "activity", label: copy.activityPane, count: activityCount },
   ];
@@ -2655,6 +2657,7 @@ function agentsRouteCopy(lang: "zh" | "en") {
         expertisePlaceholder: "用逗号分隔，例如 规划, 统计, 评审",
         overviewPane: "总览",
         effectiveConfiguration: "生效配置",
+        teamRelations: "团队关系",
         policiesPane: "策略",
         membershipPane: "归属",
         activityPane: "运行",
@@ -3053,6 +3056,7 @@ function agentsRouteCopy(lang: "zh" | "en") {
         expertisePlaceholder: "Comma-separated, e.g. planning, statistics, review",
         overviewPane: "Overview",
         effectiveConfiguration: "Effective config",
+        teamRelations: "Team relations",
         policiesPane: "Policies",
         membershipPane: "Membership",
         activityPane: "Activity",
@@ -3277,7 +3281,7 @@ export function AgentsRoute() {
     };
   }, []);
 
-  const fullWorkspaceNeeded = Boolean(activePane === "effective" || activePane === "config" || activePane === "activity" || requestedAgentId);
+  const fullWorkspaceNeeded = Boolean(activePane === "effective" || activePane === "relations" || activePane === "config" || activePane === "activity" || requestedAgentId);
   const workspaceQuery = useQuery({
     queryKey: queryKeys.agentConfigWorkspace(),
     queryFn: () => fetchJson<AgentConfigWorkspaceWithTeamIndexes>("/api/agents/config-workspace?includeRuntime=false"),
@@ -3464,6 +3468,32 @@ export function AgentsRoute() {
       effectiveConfigurationFields.some((field) => field.key === current) ? current : firstKey
     ));
   }, [effectiveConfigurationFields]);
+
+  const selectedTeamRelations = useMemo(() => {
+    if (!selectedAgent) {
+      return [];
+    }
+    const agentsById = new Map((workspace?.agents ?? []).map((agent) => [agent.agentId, agent]));
+    return (workspace?.teams ?? [])
+      .filter((team) => team.status !== "archived" && team.agentIds.includes(selectedAgent.agentId))
+      .map((team) => ({
+        teamId: team.teamId,
+        name: team.name || team.teamId,
+        purpose: team.purpose,
+        members: team.agentIds.map((memberId) => {
+          const member = agentsById.get(memberId);
+          const current = memberId === selectedAgent.agentId;
+          return {
+            agentId: memberId,
+            label: member ? agentLabel(member) : memberId,
+            functionLabel: current
+              ? (lang === "zh" ? `当前 Agent · ${agentFunctionalLabel(member, lang)}` : `Current agent · ${agentFunctionalLabel(member, lang)}`)
+              : agentFunctionalLabel(member, lang),
+            current,
+          };
+        }),
+      }));
+  }, [lang, selectedAgent?.agentId, workspace?.agents, workspace?.teams]);
 
   const selectedAgentReturnRoute = selectedAgent?.agentId
     ? `/agents?agent=${encodeURIComponent(selectedAgent.agentId)}&pane=config`
@@ -5441,6 +5471,12 @@ export function AgentsRoute() {
       selectedFieldKey: selectedEffectiveField?.key ?? "",
       onSelectField: setSelectedEffectiveFieldKey,
       onOpenConfig: () => setActivePane("config"),
+    },
+    teamRelations: {
+      relations: selectedTeamRelations,
+      onOpenTeam: (teamId: string) => {
+        void navigate(`/teams?team=${encodeURIComponent(teamId)}`);
+      },
     },
     configPrimary: {
       coreConfig: {
