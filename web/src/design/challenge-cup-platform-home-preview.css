@@ -544,6 +544,7 @@ h3 {
 }
 
 .knowledge-view .current-task {
+  grid-column: 1 / -1;
   grid-template-columns: minmax(0, 1fr) minmax(220px, 0.72fr);
 }
 
