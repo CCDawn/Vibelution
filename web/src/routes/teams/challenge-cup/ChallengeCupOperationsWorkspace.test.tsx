@@ -134,6 +134,7 @@ function props(overrides: Partial<ChallengeCupOperationsWorkspaceProps> = {}): C
       configHref: "/agents/agent-source-finder",
     }],
     graphHref: "/teams?team=research-team&researchView=canvas",
+    researchTopic: "神经预测编码中的层级反馈与可塑性学习机制",
     isLoading: false,
     isUnavailable: false,
     isRefreshing: false,
@@ -167,6 +168,31 @@ describe("ChallengeCupOperationsWorkspace", () => {
     expect(markup).toContain("白书遥");
   });
 
+  it("renders the approved universal research platform from the live projection without preview claims", () => {
+    const markup = renderWorkspace({
+      projectSwitcher: <div>项目切换器</div>,
+      surface: "workspace",
+      stageHrefs: {
+        knowledge_collection: "/teams/research-team/source-collection",
+        experiment: "/teams/research-team/experiment",
+        iteration: "/teams/research-team/iteration",
+      },
+    });
+
+    expect(markup).toContain('data-testid="challenge-cup-platform-workspace"');
+    expect(markup).toContain("知识搜集");
+    expect(markup).toContain("实验设计");
+    expect(markup).toContain("执行与迭代");
+    expect(markup).toContain("资料工作表");
+    expect(markup).toContain("项目切换器");
+    expect(markup).toContain("神经预测编码中的层级反馈与可塑性学习机制");
+    expect(markup).toContain("Claim Map 0");
+    expect(markup).toContain("当前投影未提供正式 Claim Map 时保持为 0");
+    expect(markup).toContain("SCI-096");
+    expect(markup).toContain("模型调用证据");
+    expect(markup).not.toContain("weight=0.875");
+  });
+
   it("keeps the approved identity visible during loading and unavailable states", () => {
     const loadingMarkup = renderWorkspace({ projection: undefined, isLoading: true });
     const unavailableMarkup = renderWorkspace({ projection: undefined, isUnavailable: true });
@@ -185,6 +211,8 @@ describe("ChallengeCupOperationsWorkspace", () => {
     expect(componentStyles).toContain("container-type: inline-size");
     expect(componentStyles).toContain("@container challenge-workspace (max-width: 1080px)");
     expect(componentStyles).toContain("@container challenge-workspace (min-width: 1600px)");
+    expect(componentStyles).toContain(".platform-grid");
+    expect(componentStyles).toContain("grid-template-columns: minmax(0, 1fr) 292px");
     expect(componentStyles).toContain("width: 100%");
     expect(componentStyles).toContain("max-width: none");
     expect(componentStyles).not.toContain("@media (max-width: 760px)");
