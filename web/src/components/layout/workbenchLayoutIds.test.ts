@@ -54,5 +54,6 @@ describe("workbenchLayoutIds", () => {
     expect(readme).toContain("layoutId");
     expect(readme).toContain("pane-layouts.v1");
     expect(readme).toContain("Workbench layoutIds");
+    expect(readme).toContain("pane-heights.v1");
   });
 });

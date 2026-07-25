@@ -17,7 +17,14 @@ import {
   TriangleAlert,
   X,
 } from "lucide-react";
-import { type CSSProperties, type PointerEvent as ReactPointerEvent, useEffect, useMemo, useState } from "react";
+import {
+  type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { Link } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
@@ -40,9 +47,10 @@ import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy"
 import { LazyConversationView } from "../components/conversation/LazyConversationView";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
 import {
-  persistPaneWidth,
-  resolveStoredPaneWidth,
+  migrateLegacyNumericPane,
+  type PaneSpec,
 } from "../components/layout/paneLayoutPersistence";
+import { usePersistedPaneResize } from "../components/layout/usePersistedPaneResize";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import { VButton, VNativeInput, VNativeTextarea } from "../components/vui";
 import { TranslationKey } from "../i18n/dictionary";
@@ -203,6 +211,14 @@ const SELF_EVOLUTION_AGENT_KNOWN_ROLE_SET = new Set<string>([
 ]);
 const SELF_EVOLUTION_CONVERSATION_CONTEXT = "self-evolution";
 const SELF_SIDEBAR_WIDTH_STORAGE_KEY = "vibelution.self.sidebar.width";
+const SELF_LAYOUT_ID = WORKBENCH_LAYOUT_IDS.evolutionSelf;
+const SELF_SIDEBAR_PANE: PaneSpec = {
+  id: "sidebar",
+  defaultWidth: 360,
+  minWidth: 360,
+  maxWidth: 460,
+};
+const SELF_SIDEBAR_PANES: PaneSpec[] = [SELF_SIDEBAR_PANE];
 const DEFAULT_OBSERVATION_DURATION_SECONDS = 300;
 const MIN_OBSERVATION_DURATION_SECONDS = 30;
 const MAX_OBSERVATION_DURATION_SECONDS = 3600;
@@ -731,17 +747,22 @@ export function SelfEvolutionTrack({
   const [transactionFilter, setTransactionFilter] = useState<SelfEvolutionTransactionFilter>("all");
   const [transactionDateFilter, setTransactionDateFilter] = useState<SelfEvolutionTransactionDateFilter>("all");
   const [transactionHistoryExpanded, setTransactionHistoryExpanded] = useState(false);
-  const [sidebarWidth, setSidebarWidth] = useState(() =>
-    resolveStoredPaneWidth(
-      WORKBENCH_LAYOUT_IDS.evolutionSelf,
-      "sidebar",
-      360,
-      360,
-      460,
-      SELF_SIDEBAR_WIDTH_STORAGE_KEY,
-    ),
-  );
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  useEffect(() => {
+    migrateLegacyNumericPane(SELF_LAYOUT_ID, "sidebar", SELF_SIDEBAR_WIDTH_STORAGE_KEY);
+  }, []);
+  const {
+    layoutRef: selfLayoutRef,
+    widths: selfPaneWidths,
+    draggingPaneId: selfDraggingPaneId,
+    startResize: startSelfPaneResize,
+    onResizeKeyDown: onSelfPaneResizeKeyDown,
+  } = usePersistedPaneResize({
+    layoutId: SELF_LAYOUT_ID,
+    panes: SELF_SIDEBAR_PANES,
+    preserveMainMinWidth: 420,
+  });
+  const sidebarWidth = selfPaneWidths.sidebar ?? SELF_SIDEBAR_PANE.defaultWidth;
   const pageVisible = usePageVisibility();
   const petQuery = useQuery({
     queryKey: queryKeys.petSummary(),
@@ -763,10 +784,6 @@ export function SelfEvolutionTrack({
   });
   const pet = petQuery.data;
   const runtime = runtimeQuery.data;
-
-  useEffect(() => {
-    persistPaneWidth(WORKBENCH_LAYOUT_IDS.evolutionSelf, "sidebar", sidebarWidth);
-  }, [sidebarWidth]);
 
   const worktreeFiles = useMemo(() => {
     const files = overview?.worktree.files ?? [];
@@ -1195,25 +1212,18 @@ export function SelfEvolutionTrack({
     setTransactionHistoryExpanded(false);
   }, [transactionDateFilter, transactionFilter]);
 
-  function beginSidebarResize(event: ReactPointerEvent<HTMLButtonElement>) {
+  function beginSidebarResize(event: ReactPointerEvent<any>) {
     if (sidebarCollapsed) {
       return;
     }
-    const startX = event.clientX;
-    const startWidth = sidebarWidth;
+    startSelfPaneResize("sidebar", event as ReactPointerEvent<HTMLDivElement>, { direction: 1 });
+  }
 
-    const handleMove = (moveEvent: PointerEvent) => {
-      const nextWidth = startWidth + (moveEvent.clientX - startX);
-      setSidebarWidth(Math.max(340, Math.min(460, nextWidth)));
-    };
-
-    const handleUp = () => {
-      window.removeEventListener("pointermove", handleMove);
-      window.removeEventListener("pointerup", handleUp);
-    };
-
-    window.addEventListener("pointermove", handleMove);
-    window.addEventListener("pointerup", handleUp);
+  function handleSidebarResizeKeyDown(event: ReactKeyboardEvent<any>) {
+    if (sidebarCollapsed) {
+      return;
+    }
+    onSelfPaneResizeKeyDown("sidebar", event as ReactKeyboardEvent<HTMLDivElement>, { direction: 1 });
   }
 
   function toggleHistorySelection(txnId: string) {
@@ -1646,8 +1656,10 @@ export function SelfEvolutionTrack({
         <div className={styles.trackBody}>
           {activePage === "workspace" ? (
             <div
+              ref={selfLayoutRef}
               className={styles.workspaceLayout}
               style={workspaceLayoutStyle(sidebarCollapsed, sidebarWidth)}
+              data-vui-layout-id={SELF_LAYOUT_ID}
             >
           <aside
             className={
@@ -1823,8 +1835,13 @@ export function SelfEvolutionTrack({
             collapseLabel={lang === "zh" ? "收起自进化侧栏" : "Collapse self-evolution sidebar"}
             expandLabel={lang === "zh" ? "展开自进化侧栏" : "Expand self-evolution sidebar"}
             className={styles.sidebarResizer}
+            active={selfDraggingPaneId === "sidebar"}
+            valueNow={sidebarWidth}
+            valueMin={SELF_SIDEBAR_PANE.minWidth}
+            valueMax={SELF_SIDEBAR_PANE.maxWidth}
             onToggle={() => setSidebarCollapsed((current) => !current)}
             onPointerDown={beginSidebarResize}
+            onKeyDown={handleSidebarResizeKeyDown}
           />
 
           <main className={styles.centerColumn}>
