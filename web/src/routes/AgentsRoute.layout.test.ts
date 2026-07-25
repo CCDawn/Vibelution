@@ -597,7 +597,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("normalizeAgentConfigPane(searchParams.get(\"pane\"))");
     expect(routeSource).toContain("safeAgentCenterReturnTo(searchParams.get(\"returnTo\"))");
     expect(routeSource).toContain("agentCenterReturnLabel(searchParams.get(\"returnLabel\"), lang)");
-    expect(routeSource).toContain('normalized === "config" || normalized === "activity" || normalized === "overview"');
+    expect(routeSource).toContain('normalized === "config" || normalized === "changes" || normalized === "activity" || normalized === "overview"');
     expect(routeSource).toContain("safeReturnToPath");
     expect(routeSource).toContain("return safeReturnToPath(value)");
     expect(routeSource).toContain("const routeTargetKey = requestedAgentId ? `${requestedAgentId}:${requestedPane}` : \"\"");
@@ -1445,9 +1445,9 @@ describe("AgentsRoute layout contract", () => {
     expect(memoryPolicyStyles.inlineAdd).toBeTruthy();
   });
 
-  it("organizes the Agent card into three switchable panes with run history", () => {
+  it("organizes the Agent card into switchable operational panes with run history", () => {
     expect(routeSource).toContain("AgentConfigPaneId");
-    expect(routeSource).toContain('type AgentConfigPaneId = "overview" | "effective" | "relations" | "config" | "activity"');
+    expect(routeSource).toContain('type AgentConfigPaneId = "overview" | "effective" | "relations" | "config" | "changes" | "activity"');
     expect(routeSource).toContain("agentConfigPanes(copy, selectedAgent)");
     expect(routeSource).toContain("AgentManagementBrief");
     expect(routeSource).toContain("buildAgentManagementBrief(selectedAgent, copy, lang)");
@@ -1457,6 +1457,9 @@ describe("AgentsRoute layout contract", () => {
     expect(selectedDetailContentPanelSource).toContain('activePane === "effective"');
     expect(selectedDetailContentPanelSource).toContain("AgentTeamRelationsPanel");
     expect(selectedDetailContentPanelSource).toContain('activePane === "relations"');
+    expect(selectedDetailContentPanelSource).toContain("AgentConfigChangeHistoryPanel");
+    expect(selectedDetailContentPanelSource).toContain('activePane === "changes"');
+    expect(routeSource).toContain("config-changes");
     expect(routeSource).toContain("copy.managementBriefTitle");
     expect(routeSource).toContain("copy.nextActionsTitle");
     expect(routeSource).not.toContain("className={styles.managementBriefPanel}");

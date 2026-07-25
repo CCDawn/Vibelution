@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from config.operator_config_transaction import OperatorConfigTransactionError
 from core.agent_kernel import KernelAdapterError, KernelError, KernelValidationError, submit_agent_message_event
 from core.orchestration.context_engine import list_agent_runs_for_agent
-from core.web.services import agent_directory_service, agent_tool_governance_service, session_service, tool_policy_configuration_service
+from core.web.services import agent_config_change_service, agent_directory_service, agent_tool_governance_service, session_service, tool_policy_configuration_service
 from core.web.services.runtime_scene_service import list_runtime_scene_evidence_for_agent, record_runtime_scene_event
 from core.web.services.agent_config_workspace_service import get_agent_config_workspace, invalidate_agent_config_workspace_cache
 from core.web.services.agent_directory_service import (
@@ -128,6 +128,15 @@ class AgentUpdatePayload(BaseModel):
     metadata: dict[str, Any] | None = None
     status: str | None = None
     expectedUpdatedAt: str = ""
+    sourceDraftId: str = ""
+
+
+class AgentConfigDraftPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    baseUpdatedAt: str
+    snapshot: dict[str, Any] = Field(default_factory=dict)
+    summary: str = ""
 
 
 class AgentToolPolicyValidatePayload(BaseModel):
@@ -450,6 +459,44 @@ def agent_avatar_options() -> dict:
 def agent_config_workspace(includeRuntime: bool = True) -> dict:
     _ensure_config_agent_instances()
     return get_agent_config_workspace(use_cache=True, include_runtime=includeRuntime)
+
+
+@router.get("/agents/{agent_id}/config-changes")
+def agent_config_changes(agent_id: str, limit: int = 12) -> dict:
+    try:
+        return agent_config_change_service.list_agent_config_changes(agent_id, limit=limit)
+    except AgentNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/agents/{agent_id}/config-drafts", status_code=status.HTTP_201_CREATED)
+def agent_config_draft_create(agent_id: str, payload: AgentConfigDraftPayload) -> dict:
+    try:
+        return agent_config_change_service.save_agent_config_draft(
+            agent_id,
+            base_updated_at=payload.baseUpdatedAt,
+            snapshot=payload.snapshot,
+            summary=payload.summary,
+        )
+    except AgentNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except AgentStateConflictError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "agent_draft_conflict", "message": str(exc)},
+        ) from exc
+    except AgentDirectoryError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.delete("/agents/{agent_id}/config-drafts/{draft_id}")
+def agent_config_draft_discard(agent_id: str, draft_id: str) -> dict:
+    try:
+        return agent_config_change_service.discard_agent_config_draft(agent_id, draft_id)
+    except AgentNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except AgentDirectoryError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 def _with_agent_workspace_cache_invalidated(payload: dict[str, Any]) -> dict[str, Any]:
@@ -880,29 +927,39 @@ def agent_update(agent_id: str, payload: AgentUpdatePayload) -> dict:
                 **updated,
                 "archiveSummary": archive_summary,
             })
-        return _with_agent_workspace_cache_invalidated(
-            update_agent_instance(
-                agent_id,
-                display_name=payload.displayName,
-                llm_bindings=payload.llmBindings,
-                primary_mode=payload.primaryMode,
-                role_key=payload.roleKey,
-                prompt_template_id=payload.promptTemplateId,
-                tool_policy_id=payload.toolPolicyId,
-                memory_policy_id=payload.memoryPolicyId,
-                tool_policy=payload.toolPolicy,
-                memory_policy=payload.memoryPolicy,
-                context_compression_policy=payload.contextCompressionPolicy,
-                delegation_policy=payload.delegationPolicy,
-                supervision_policy=payload.supervisionPolicy,
-                persona_profile=payload.personaProfile,
-                task_profile=payload.taskProfile,
-                metadata=payload.metadata,
-                status=payload.status,
-                expected_updated_at=payload.expectedUpdatedAt,
-            )
-            | ({"archiveSummary": archive_summary} if archive_summary else {})
+        updated = update_agent_instance(
+            agent_id,
+            display_name=payload.displayName,
+            llm_bindings=payload.llmBindings,
+            primary_mode=payload.primaryMode,
+            role_key=payload.roleKey,
+            prompt_template_id=payload.promptTemplateId,
+            tool_policy_id=payload.toolPolicyId,
+            memory_policy_id=payload.memoryPolicyId,
+            tool_policy=payload.toolPolicy,
+            memory_policy=payload.memoryPolicy,
+            context_compression_policy=payload.contextCompressionPolicy,
+            delegation_policy=payload.delegationPolicy,
+            supervision_policy=payload.supervisionPolicy,
+            persona_profile=payload.personaProfile,
+            task_profile=payload.taskProfile,
+            metadata=payload.metadata,
+            status=payload.status,
+            expected_updated_at=payload.expectedUpdatedAt,
         )
+        revision = agent_config_change_service.record_agent_config_revision(
+            agent_id,
+            before=current,
+            after=updated,
+            source="direct_patch",
+            source_draft_id=payload.sourceDraftId,
+        )
+        result = {
+            **updated,
+            **({"configRevision": revision} if revision else {}),
+            **({"archiveSummary": archive_summary} if archive_summary else {}),
+        }
+        return _with_agent_workspace_cache_invalidated(result)
     except AgentNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ChatRoomBusyError as exc:

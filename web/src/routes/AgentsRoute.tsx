@@ -24,6 +24,7 @@ import {
   AgentRuntimeEvidenceMatch,
   AgentRunHistory,
   AgentConfigHealthIssue,
+  AgentConfigChanges,
   AgentModeBindings,
   AgentPersonaProfile,
   AgentPurgeResponse,
@@ -177,7 +178,7 @@ type AgentDraftSyncSource = {
 };
 
 type ToolPolicyMode = "inherited" | "allowed" | "blocked" | "excluded";
-type AgentConfigPaneId = "overview" | "effective" | "relations" | "config" | "activity";
+type AgentConfigPaneId = "overview" | "effective" | "relations" | "config" | "changes" | "activity";
 type ToolPermissionGroup = {
   bundleId: string;
   label: string;
@@ -1131,7 +1132,7 @@ function buildVisibleAgentColumns(
 
 function normalizeAgentConfigPane(value: string | null | undefined): AgentConfigPaneId {
   const normalized = String(value || "").trim();
-  return normalized === "effective" || normalized === "relations" || normalized === "config" || normalized === "activity" || normalized === "overview"
+  return normalized === "effective" || normalized === "relations" || normalized === "config" || normalized === "changes" || normalized === "activity" || normalized === "overview"
     ? normalized
     : "overview";
 }
@@ -1340,6 +1341,19 @@ function draftFromAgent(agent: AgentConfigWorkspaceAgent | null | undefined): Ag
     memoryPolicyId: agent?.memoryPolicyId ?? "",
     contextCompressionPolicy: contextCompressionDraftFromAgent(agent),
     status: agent?.status ?? "active",
+  };
+}
+
+function configChangeSnapshotFromDraft(draft: AgentConfigDraft): Record<string, unknown> {
+  return {
+    displayName: draft.displayName,
+    llmBindings: normalizeAgentLlmBindings(draft.llmBindings),
+    reasoningEffortBySlot: normalizeAgentReasoningEffortBySlot(draft.reasoningEffortBySlot),
+    promptTemplateId: draft.promptTemplateId,
+    toolPolicyId: draft.toolPolicyId,
+    memoryPolicyId: draft.memoryPolicyId,
+    contextCompressionPolicy: contextCompressionPolicyFromDraft(draft.contextCompressionPolicy),
+    status: draft.status,
   };
 }
 
@@ -2362,6 +2376,7 @@ function agentConfigPanes(copy: ReturnType<typeof agentsRouteCopy>, agent: Agent
     { id: "effective", label: copy.effectiveConfiguration, count: effectiveIssueCount },
     { id: "relations", label: copy.teamRelations, count: relationCount },
     { id: "config", label: copy.configTitle, count: configIssueCount },
+    { id: "changes", label: copy.configChanges, count: 0 },
     { id: "activity", label: copy.activityPane, count: activityCount },
   ];
 }
@@ -2658,6 +2673,7 @@ function agentsRouteCopy(lang: "zh" | "en") {
         overviewPane: "总览",
         effectiveConfiguration: "生效配置",
         teamRelations: "团队关系",
+        configChanges: "草稿与版本",
         policiesPane: "策略",
         membershipPane: "归属",
         activityPane: "运行",
@@ -3057,6 +3073,7 @@ function agentsRouteCopy(lang: "zh" | "en") {
         overviewPane: "Overview",
         effectiveConfiguration: "Effective config",
         teamRelations: "Team relations",
+        configChanges: "Drafts & versions",
         policiesPane: "Policies",
         membershipPane: "Membership",
         activityPane: "Activity",
@@ -3495,6 +3512,16 @@ export function AgentsRoute() {
       }));
   }, [lang, selectedAgent?.agentId, workspace?.agents, workspace?.teams]);
 
+  const configChangesQuery = useQuery({
+    queryKey: ["agents", "config-changes", selectedAgent?.agentId ?? ""],
+    queryFn: () => fetchJson<AgentConfigChanges>(
+      `/api/agents/${encodeURIComponent(selectedAgent?.agentId ?? "")}/config-changes`,
+    ),
+    enabled: Boolean(selectedAgent?.agentId && (activePane === "changes" || activePane === "config")),
+    staleTime: 8_000,
+  });
+  const activeConfigDraftId = configChangesQuery.data?.activeDraft?.draftId ?? "";
+
   const selectedAgentReturnRoute = selectedAgent?.agentId
     ? `/agents?agent=${encodeURIComponent(selectedAgent.agentId)}&pane=config`
     : "/agents?pane=config";
@@ -3793,8 +3820,55 @@ export function AgentsRoute() {
     }, { replace: true });
   }
 
+  const saveAgentConfigDraftMutation = useMutation({
+    mutationFn: (payload: { agentId: string; baseUpdatedAt: string; snapshot: Record<string, unknown> }) =>
+      fetchJson<NonNullable<AgentConfigChanges["activeDraft"]>>(
+        `/api/agents/${encodeURIComponent(payload.agentId)}/config-drafts`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            baseUpdatedAt: payload.baseUpdatedAt,
+            snapshot: payload.snapshot,
+            summary: lang === "zh" ? "来自 Agent Center 配置编辑器。" : "Saved from the Agent Center configuration editor.",
+          }),
+        },
+      ),
+    onSuccess: async (_, variables) => {
+      setNotice({
+        tone: "success",
+        text: lang === "zh" ? "当前配置已保存为草稿，尚未影响运行。" : "The current configuration was saved as a draft and is not running yet.",
+      });
+      await queryClient.invalidateQueries({ queryKey: ["agents", "config-changes", variables.agentId] });
+    },
+    onError: (error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      setNotice({
+        tone: "error",
+        text: message.includes("agent_draft_conflict")
+          ? (lang === "zh" ? "草稿基线已过期，请刷新后重新保存。" : "The draft baseline is stale. Refresh before saving again.")
+          : message,
+      });
+    },
+  });
+
+  const discardAgentConfigDraftMutation = useMutation({
+    mutationFn: (payload: { agentId: string; draftId: string }) =>
+      fetchJson<{ draftId: string; status: string }>(
+        `/api/agents/${encodeURIComponent(payload.agentId)}/config-drafts/${encodeURIComponent(payload.draftId)}`,
+        { method: "DELETE" },
+      ),
+    onSuccess: async (_, variables) => {
+      setNotice({ tone: "success", text: lang === "zh" ? "草稿已放弃，发布记录保留不变。" : "Draft discarded; published revisions remain unchanged." });
+      await queryClient.invalidateQueries({ queryKey: ["agents", "config-changes", variables.agentId] });
+    },
+    onError: (error) => {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
+    },
+  });
+
   const updateAgentMutation = useMutation({
-    mutationFn: (payload: { agentId: string; agent: AgentConfigWorkspaceAgent; draft: AgentConfigDraft; modelChoices: AgentModelChoice[] }) =>
+    mutationFn: (payload: { agentId: string; agent: AgentConfigWorkspaceAgent; draft: AgentConfigDraft; modelChoices: AgentModelChoice[]; sourceDraftId: string }) =>
       fetchJson<AgentConfigWorkspaceAgent>(`/api/agents/${encodeURIComponent(payload.agentId)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -3808,9 +3882,10 @@ export function AgentsRoute() {
           metadata: agentMetadataWithReasoningEffort(payload.draft, payload.modelChoices),
           status: payload.draft.status,
           expectedUpdatedAt: payload.agent.updatedAt,
+          sourceDraftId: payload.sourceDraftId,
         }),
       }),
-    onSuccess: (agent) => {
+    onSuccess: (agent, variables) => {
       queryClient.setQueryData<AgentConfigWorkspace | undefined>(
         queryKeys.agentConfigWorkspace(),
         (current) => updatedAgentWorkspaceCache(current, agent),
@@ -3819,6 +3894,7 @@ export function AgentsRoute() {
         tone: "success",
         text: lang === "zh" ? `已保存 ${agentLabel(agent)} 的 Agent 配置` : `Saved config for ${agentLabel(agent)}`,
       });
+      void queryClient.invalidateQueries({ queryKey: ["agents", "config-changes", variables.agentId] });
       void chatWorkspaceCache.afterAgentWorkspaceChanged();
     },
     onError: (error) => {
@@ -4354,6 +4430,8 @@ export function AgentsRoute() {
   const selectedAgentAvatarUploadPending = uploadAvatarMutation.isPending && uploadAvatarMutation.variables?.agentId === selectedAgent?.agentId;
   const selectedAgentConsumeAllPending = consumeAllMessagesMutation.isPending && consumeAllMessagesMutation.variables?.agentId === selectedAgent?.agentId;
   const selectedAgentConfigPending = updateAgentMutation.isPending && updateAgentMutation.variables?.agentId === selectedAgent?.agentId;
+  const selectedAgentConfigDraftSavePending = saveAgentConfigDraftMutation.isPending && saveAgentConfigDraftMutation.variables?.agentId === selectedAgent?.agentId;
+  const selectedAgentConfigDraftDiscardPending = discardAgentConfigDraftMutation.isPending && discardAgentConfigDraftMutation.variables?.agentId === selectedAgent?.agentId;
   const selectedAgentPersonaPending = updatePersonaMutation.isPending && updatePersonaMutation.variables?.agentId === selectedAgent?.agentId;
   const selectedAgentTaskPending = updateTaskMutation.isPending && updateTaskMutation.variables?.agentId === selectedAgent?.agentId;
   const selectedAgentMembershipPending = updateMembershipMutation.isPending && updateMembershipMutation.variables?.agentId === selectedAgent?.agentId;
@@ -4552,6 +4630,28 @@ export function AgentsRoute() {
       agent: selectedAgent,
       draft: configDraft,
       modelChoices: workspace?.agentModelChoices ?? [],
+      sourceDraftId: activeConfigDraftId,
+    });
+  };
+
+  const saveAgentConfigDraft = () => {
+    if (!selectedAgent || !configDirty || selectedAgentConfigDraftSavePending) {
+      return;
+    }
+    saveAgentConfigDraftMutation.mutate({
+      agentId: selectedAgent.agentId,
+      baseUpdatedAt: selectedAgent.updatedAt,
+      snapshot: configChangeSnapshotFromDraft(configDraft),
+    });
+  };
+
+  const discardAgentConfigDraft = () => {
+    if (!selectedAgent || !activeConfigDraftId || selectedAgentConfigDraftDiscardPending) {
+      return;
+    }
+    discardAgentConfigDraftMutation.mutate({
+      agentId: selectedAgent.agentId,
+      draftId: activeConfigDraftId,
     });
   };
 
@@ -5477,6 +5577,16 @@ export function AgentsRoute() {
       onOpenTeam: (teamId: string) => {
         void navigate(`/teams?team=${encodeURIComponent(teamId)}`);
       },
+    },
+    configChanges: {
+      changes: configChangesQuery.data,
+      configDirty,
+      loading: configChangesQuery.isPending,
+      savePending: selectedAgentConfigDraftSavePending,
+      discardPending: selectedAgentConfigDraftDiscardPending,
+      onSaveDraft: saveAgentConfigDraft,
+      onDiscardDraft: discardAgentConfigDraft,
+      onOpenConfig: () => setActivePane("config"),
     },
     configPrimary: {
       coreConfig: {
