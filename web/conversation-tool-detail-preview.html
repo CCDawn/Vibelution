@@ -46,73 +46,20 @@
                   </svg>
                 </span>
                 <span class="activity-copy">
-                  <span class="activity-title">检查代码图谱</span>
-                  <span class="activity-subtitle">找到 4 处引用 · ConfigRoute.tsx</span>
+                  <span class="activity-title">搜索 ConfigRoute.tsx 中的 savedDraft</span>
+                  <span class="activity-subtitle">4 个结果</span>
                 </span>
-                <span class="activity-status">已完成</span>
+                <span class="activity-status"></span>
                 <span class="chevron" aria-hidden="true">
                   <svg viewBox="0 0 20 20"><path d="m6 8 4 4 4-4"></path></svg>
                 </span>
               </summary>
 
               <div class="activity-detail structured-detail">
-                <div class="result-heading">
-                  <div>
-                    <strong>ConfigRoute.tsx</strong>
-                    <span>设置页主路由 · TypeScript · 4,213 行</span>
-                  </div>
-                  <span class="success-mark">
-                    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 10 3 3 7-7"></path></svg>
-                    结果可用
-                  </span>
-                </div>
-
-                <ol class="reference-list" aria-label="代码引用">
-                  <li>
-                    <span class="line-number">183</span>
-                    <div>
-                      <strong>ConfigRoute.tsx</strong>
-                      <code>const [savedDraft, setSavedDraft] = useState...</code>
-                    </div>
-                  </li>
-                  <li>
-                    <span class="line-number">947</span>
-                    <div>
-                      <strong>ConfigRoute.tsx</strong>
-                      <code>setSavedDraft(nextSnapshot)</code>
-                    </div>
-                  </li>
-                  <li>
-                    <span class="line-number">1294</span>
-                    <div>
-                      <strong>ConfigRoute.tsx</strong>
-                      <code>savedDraft?.providerWorkspace</code>
-                    </div>
-                  </li>
-                  <li class="reference-more">另有 1 处引用</li>
-                </ol>
-
-                <details class="raw-disclosure">
-                  <summary>
-                    <span>查看原始 JSON</span>
-                    <span class="raw-meta">2.1 KB</span>
-                    <span class="chevron" aria-hidden="true">
-                      <svg viewBox="0 0 20 20"><path d="m6 8 4 4 4-4"></path></svg>
-                    </span>
-                  </summary>
-                  <pre class="raw-output"><code>{
-  "status": "ok",
-  "mode": "inspect",
-  "target": {
-    "filePath": "web/src/routes/ConfigRoute.tsx"
-  },
-  "file": {
-    "language": "typescript",
-    "lineCount": 4213
-  },
-  "count": 4
-}</code></pre>
-                </details>
+                <pre class="code-search-output"><code><span>183</span>  const [savedDraft, setSavedDraft] = useState...
+<span>947</span>  setSavedDraft(nextSnapshot)
+<span>1294</span> savedDraft?.providerWorkspace
+<span>…</span>    另有 1 个结果</code></pre>
               </div>
             </details>
 
@@ -216,7 +163,7 @@ viewport. Report any state that remains simulated or unverified.</code></pre>
 
       <footer class="preview-notes">
         <span>预览范围</span>
-        <p>桌面与窄屏布局 · 展开/收起 · 原始 JSON 二级披露 · 长文本滚动 · 单行失败态 · 复制反馈</p>
+        <p>桌面与窄屏布局 · 展开/收起 · 代码命中行 · 长文本滚动 · 单行失败态 · 复制反馈</p>
       </footer>
     </main>
 
