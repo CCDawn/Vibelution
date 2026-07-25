@@ -1115,6 +1115,11 @@ export function ConfigProviderRegistryPanel({
             ? "grid-cols-[minmax(18rem,22rem)_minmax(0,1fr)_minmax(18rem,22rem)]"
             : "grid-cols-[minmax(18rem,22rem)_minmax(0,1fr)]"
         }
+        resize={{
+          layoutId: "config-model-assets",
+          sidebar: { defaultWidth: 320, minWidth: 260, maxWidth: 420 },
+          aside: { defaultWidth: 320, minWidth: 260, maxWidth: 440 },
+        }}
         sidebar={(
           <div className={styles.providerRail}>
             <div className={styles.providerListSection}>
