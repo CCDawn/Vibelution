@@ -8,6 +8,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
 import { AgentInstance, PromptTemplate, PromptTemplateWorkspace } from "../api/types";
+import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import {
   VButton,
   VConfirmDialog,
@@ -496,7 +497,7 @@ export function PromptTemplatesRoute() {
         headerClassName={styles.headerClass}
         workspaceClassName={styles.workspaceClass}
         columnsClassName=""
-        layoutId="prompt-templates"
+        layoutId={WORKBENCH_LAYOUT_IDS.promptTemplates}
         ariaLabel={copy.title}
         eyebrow={copy.eyebrow}
         title={copy.title}

@@ -24,10 +24,11 @@ import { createEvolutionWorkspaceCache } from "./evolutionWorkspaceCache";
 import { SupervisedWorkspaceControls } from "./SupervisedWorkspaceControls";
 import { SupervisedWorktreeReviewPanel } from "./SupervisedWorktreeReviewPanel";
 import {
-  persistPaneWidth,
-  resolveStoredPaneWidth,
+  migrateLegacyNumericPane,
+  type PaneSpec,
 } from "../components/layout/paneLayoutPersistence";
-import { clampPaneWidth, keyboardPaneWidth } from "./resizablePane";
+import { usePersistedPaneResize } from "../components/layout/usePersistedPaneResize";
+import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import styles from "./SupervisedReviewRoute.styles";
 
 type ReviewDecision = "positive" | "negative" | "discard";
@@ -35,10 +36,15 @@ type ReviewFilter = "all" | "pending" | "positive" | "negative" | "discard";
 
 const REVIEW_FILTERS: ReviewFilter[] = ["all", "pending", "positive", "negative", "discard"];
 const EMPTY_REVIEW_ITEMS: EvolutionChatReviewCandidate[] = [];
-const REVIEW_LAYOUT_ID = "supervised-review";
+const REVIEW_LAYOUT_ID = WORKBENCH_LAYOUT_IDS.supervisedReview;
 const REVIEW_QUEUE_WIDTH_KEY = "vibelution.supervised-review.queue-width";
-const REVIEW_QUEUE_BOUNDS = { min: 320, max: 560 };
-const REVIEW_QUEUE_DEFAULT_WIDTH = 380;
+const REVIEW_QUEUE_PANE: PaneSpec = {
+  id: "queue",
+  defaultWidth: 380,
+  minWidth: 320,
+  maxWidth: 560,
+};
+const REVIEW_QUEUE_PANES: PaneSpec[] = [REVIEW_QUEUE_PANE];
 
 
 export function SupervisedReviewRoute() {
@@ -57,17 +63,22 @@ export function SupervisedReviewRoute() {
   const [actionFeedback, setActionFeedback] = useState("");
   const [selectedCandidateIds, setSelectedCandidateIds] = useState<string[]>([]);
   const [bulkFeedback, setBulkFeedback] = useState("");
-  const [queuePanelWidth, setQueuePanelWidth] = useState(() =>
-    resolveStoredPaneWidth(
-      REVIEW_LAYOUT_ID,
-      "queue",
-      REVIEW_QUEUE_DEFAULT_WIDTH,
-      REVIEW_QUEUE_BOUNDS.min,
-      REVIEW_QUEUE_BOUNDS.max,
-      REVIEW_QUEUE_WIDTH_KEY,
-    ),
-  );
   const [queuePanelCollapsed, setQueuePanelCollapsed] = useState(false);
+  useEffect(() => {
+    migrateLegacyNumericPane(REVIEW_LAYOUT_ID, "queue", REVIEW_QUEUE_WIDTH_KEY);
+  }, []);
+  const {
+    layoutRef: reviewLayoutRef,
+    widths: reviewPaneWidths,
+    draggingPaneId: reviewDraggingPaneId,
+    startResize: startReviewPaneResize,
+    onResizeKeyDown: onReviewPaneResizeKeyDown,
+  } = usePersistedPaneResize({
+    layoutId: REVIEW_LAYOUT_ID,
+    panes: REVIEW_QUEUE_PANES,
+    preserveMainMinWidth: 480,
+  });
+  const queuePanelWidth = reviewPaneWidths.queue ?? REVIEW_QUEUE_PANE.defaultWidth;
   const pageVisible = usePageVisibility();
 
   const reviewQuery = useQuery({
@@ -272,10 +283,6 @@ export function SupervisedReviewRoute() {
     setIdealBehavior(detailCandidate.reviewDecision.idealBehavior || "");
   }, [detailCandidate?.candidateId]);
 
-  useEffect(() => {
-    persistPaneWidth(REVIEW_LAYOUT_ID, "queue", queuePanelWidth);
-  }, [queuePanelWidth]);
-
   const decisionError = decisionMutation.error?.message ?? "";
   const bulkError = bulkDeleteMutation.error?.message ?? "";
   const pendingOnlyCount = reviewData?.pendingCount ?? 0;
@@ -360,44 +367,18 @@ export function SupervisedReviewRoute() {
     setSelectedCandidateIds(visiblePendingIds);
   }
 
-  function beginQueueResize(startX: number) {
-    const startWidth = queuePanelWidth;
-    const handleMove = (moveEvent: globalThis.PointerEvent) => {
-      setQueuePanelWidth(clampPaneWidth(startWidth + moveEvent.clientX - startX, REVIEW_QUEUE_BOUNDS));
-    };
-    const handleEnd = () => {
-      window.removeEventListener("pointermove", handleMove);
-      window.removeEventListener("pointerup", handleEnd);
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
-    };
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
-    window.addEventListener("pointermove", handleMove);
-    window.addEventListener("pointerup", handleEnd);
-  }
-
-  function handleQueueResizeStart(event: PointerEvent<HTMLButtonElement>) {
-    if (event.button !== 0) {
-      return;
-    }
+  function handleQueueResizeStart(event: PointerEvent<any>) {
     if (queuePanelCollapsed) {
       return;
     }
-    event.preventDefault();
-    beginQueueResize(event.clientX);
+    startReviewPaneResize("queue", event as PointerEvent<HTMLDivElement>, { direction: 1 });
   }
 
-  function handleQueueResizeKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+  function handleQueueResizeKeyDown(event: KeyboardEvent<any>) {
     if (queuePanelCollapsed) {
       return;
     }
-    const nextWidth = keyboardPaneWidth(queuePanelWidth, event.key, REVIEW_QUEUE_BOUNDS);
-    if (nextWidth === null) {
-      return;
-    }
-    event.preventDefault();
-    setQueuePanelWidth(nextWidth);
+    onReviewPaneResizeKeyDown("queue", event as KeyboardEvent<HTMLDivElement>, { direction: 1 });
   }
 
   function triggerWorktreeReviewApproval(run: SupervisedWorktreeRun) {
@@ -517,7 +498,12 @@ export function SupervisedReviewRoute() {
         onRunAction={triggerWorktreeAction}
       />
 
-      <div className={styles.workspace} style={workspaceStyle}>
+      <div
+        ref={reviewLayoutRef}
+        className={styles.workspace}
+        style={workspaceStyle}
+        data-vui-layout-id={REVIEW_LAYOUT_ID}
+      >
         <aside className={queuePanelCollapsed ? `${styles.queuePanel} ${styles.paneCollapsed}` : styles.queuePanel} aria-hidden={queuePanelCollapsed}>
           <div className={styles.panelHeader}>
             <div>
@@ -683,6 +669,10 @@ export function SupervisedReviewRoute() {
           collapseLabel={lang === "zh" ? "收起样本列表" : "Collapse sample list"}
           expandLabel={lang === "zh" ? "展开样本列表" : "Expand sample list"}
           className={styles.resizeHandle}
+          active={reviewDraggingPaneId === "queue"}
+          valueNow={queuePanelWidth}
+          valueMin={REVIEW_QUEUE_PANE.minWidth}
+          valueMax={REVIEW_QUEUE_PANE.maxWidth}
           onToggle={() => setQueuePanelCollapsed((current) => !current)}
           onPointerDown={handleQueueResizeStart}
           onKeyDown={handleQueueResizeKeyDown}

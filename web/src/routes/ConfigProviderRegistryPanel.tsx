@@ -1,6 +1,7 @@
 import { AlertTriangle, Database, Image as ImageIcon, Pencil, RefreshCw, Route, Save, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
+import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import { fetchJson } from "../api/client";
 import {
   VActionGroup,
@@ -1116,7 +1117,7 @@ export function ConfigProviderRegistryPanel({
             : "grid-cols-[minmax(18rem,22rem)_minmax(0,1fr)]"
         }
         resize={{
-          layoutId: "config-model-assets",
+          layoutId: WORKBENCH_LAYOUT_IDS.configModelAssets,
           sidebar: { defaultWidth: 320, minWidth: 260, maxWidth: 420 },
           aside: { defaultWidth: 320, minWidth: 260, maxWidth: 440 },
         }}

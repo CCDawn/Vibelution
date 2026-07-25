@@ -29,10 +29,11 @@ import { useAppI18n } from "../i18n/useAppI18n";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
 import { AgentManagementModuleBar } from "./AgentManagementModuleBar";
 import {
-  persistPaneWidth,
-  resolveStoredPaneWidth,
+  migrateLegacyNumericPane,
+  type PaneSpec,
 } from "../components/layout/paneLayoutPersistence";
-import { clampPaneWidth, keyboardPaneWidth } from "./resizablePane";
+import { usePersistedPaneResize } from "../components/layout/usePersistedPaneResize";
+import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import { ToolsRouteAgentScopePanel } from "./ToolsRouteAgentScopePanel";
 import styles from "./ToolsRoute.styles";
 
@@ -93,10 +94,15 @@ type ToolDeepLinkFocus = "policy" | "detail" | "bundle" | "test";
 type Translate = (key: TranslationKey) => string;
 
 const FILTERS: ToolFilter[] = ["all", "built_in", "generated", "llm", "enabled"];
-const TOOLS_LAYOUT_ID = "tools";
+const TOOLS_LAYOUT_ID = WORKBENCH_LAYOUT_IDS.tools;
 const TOOLS_LEFT_PANEL_WIDTH_KEY = "vibelution.tools.left-panel-width";
-const TOOLS_LEFT_PANEL_BOUNDS = { min: 260, max: 520 };
-const TOOLS_LEFT_PANEL_DEFAULT_WIDTH = 350;
+const TOOLS_LEFT_PANE: PaneSpec = {
+  id: "left",
+  defaultWidth: 350,
+  minWidth: 260,
+  maxWidth: 520,
+};
+const TOOLS_LEFT_PANES: PaneSpec[] = [TOOLS_LEFT_PANE];
 const MAIN_AGENT_SCOPE_ID = "main_agent";
 const IMAGE2_TOOL_NAME = "image2_generate_tool";
 const WEB_SEARCH_TOOL_NAME = "web_search_tool";
@@ -834,17 +840,22 @@ export function ToolsRoute() {
   const [toolPolicyPreview, setToolPolicyPreview] = useState<AgentToolPolicyConfiguration | null>(null);
   const [activeToolId, setActiveToolId] = useState<string | null>(null);
   const [selectedBundleId, setSelectedBundleId] = useState("");
-  const [leftPanelWidth, setLeftPanelWidth] = useState(() =>
-    resolveStoredPaneWidth(
-      TOOLS_LAYOUT_ID,
-      "left",
-      TOOLS_LEFT_PANEL_DEFAULT_WIDTH,
-      TOOLS_LEFT_PANEL_BOUNDS.min,
-      TOOLS_LEFT_PANEL_BOUNDS.max,
-      TOOLS_LEFT_PANEL_WIDTH_KEY,
-    ),
-  );
   const [leftPanelCollapsed, setLeftPanelCollapsed] = useState(false);
+  useEffect(() => {
+    migrateLegacyNumericPane(TOOLS_LAYOUT_ID, "left", TOOLS_LEFT_PANEL_WIDTH_KEY);
+  }, []);
+  const {
+    layoutRef: toolsLayoutRef,
+    widths: toolsPaneWidths,
+    draggingPaneId: toolsDraggingPaneId,
+    startResize: startToolsPaneResize,
+    onResizeKeyDown: onToolsPaneResizeKeyDown,
+  } = usePersistedPaneResize({
+    layoutId: TOOLS_LAYOUT_ID,
+    panes: TOOLS_LEFT_PANES,
+    preserveMainMinWidth: 480,
+  });
+  const leftPanelWidth = toolsPaneWidths.left ?? TOOLS_LEFT_PANE.defaultWidth;
   const [selectedToolIds, setSelectedToolIds] = useState<Set<string>>(() => new Set());
   const [bulkSelectionAnchorToolId, setBulkSelectionAnchorToolId] = useState<string | null>(null);
   const [bulkToolPending, setBulkToolPending] = useState(false);
@@ -1099,10 +1110,6 @@ export function ToolsRoute() {
       return next.size === current.size ? current : next;
     });
   }, [visibleTools]);
-
-  useEffect(() => {
-    persistPaneWidth(TOOLS_LAYOUT_ID, "left", leftPanelWidth);
-  }, [leftPanelWidth]);
 
   const enableMutation = useMutation({
     mutationFn: (payload: { toolId: string; enabled: boolean }) =>
@@ -1388,50 +1395,18 @@ export function ToolsRoute() {
   );
   const resizeLeftPanelLabel = lang === "zh" ? "调整工具列表宽度" : "Resize tool list";
 
-  function beginPanelResize(
-    startX: number,
-    currentWidth: number,
-    bounds: { min: number; max: number },
-    setter: (width: number) => void,
-  ) {
-    const startWidth = currentWidth;
-    const handleMove = (moveEvent: globalThis.PointerEvent) => {
-      const delta = moveEvent.clientX - startX;
-      setter(clampPaneWidth(startWidth + delta, bounds));
-    };
-    const handleEnd = () => {
-      window.removeEventListener("pointermove", handleMove);
-      window.removeEventListener("pointerup", handleEnd);
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
-    };
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
-    window.addEventListener("pointermove", handleMove);
-    window.addEventListener("pointerup", handleEnd);
-  }
-
-  function handleLeftPanelResizeStart(event: PointerEvent<HTMLButtonElement>) {
-    if (event.button !== 0) {
-      return;
-    }
+  function handleLeftPanelResizeStart(event: PointerEvent<any>) {
     if (leftPanelCollapsed) {
       return;
     }
-    event.preventDefault();
-    beginPanelResize(event.clientX, leftPanelWidth, TOOLS_LEFT_PANEL_BOUNDS, setLeftPanelWidth);
+    startToolsPaneResize("left", event as PointerEvent<HTMLDivElement>, { direction: 1 });
   }
 
-  function handleLeftPanelResizeKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+  function handleLeftPanelResizeKeyDown(event: KeyboardEvent<any>) {
     if (leftPanelCollapsed) {
       return;
     }
-    const nextWidth = keyboardPaneWidth(leftPanelWidth, event.key, TOOLS_LEFT_PANEL_BOUNDS);
-    if (nextWidth === null) {
-      return;
-    }
-    event.preventDefault();
-    setLeftPanelWidth(nextWidth);
+    onToolsPaneResizeKeyDown("left", event as KeyboardEvent<HTMLDivElement>, { direction: 1 });
   }
 
   function updateToolPolicyMode(toolName: string, mode: Exclude<ToolPolicyDraftMode, "excluded">) {
@@ -1725,7 +1700,12 @@ export function ToolsRoute() {
         onScopeChange={setActiveAgentScopeId}
       />
 
-      <div className={styles.workspace} style={workspaceStyle}>
+      <div
+        ref={toolsLayoutRef}
+        className={styles.workspace}
+        style={workspaceStyle}
+        data-vui-layout-id={TOOLS_LAYOUT_ID}
+      >
         <aside className={leftPanelCollapsed ? `${styles.listPanel} ${styles.paneCollapsed}` : styles.listPanel} aria-hidden={leftPanelCollapsed}>
           <div className={styles.panelHeader}>
             <div>
@@ -1860,6 +1840,10 @@ export function ToolsRoute() {
           collapseLabel={lang === "zh" ? "收起工具列表" : "Collapse tool list"}
           expandLabel={lang === "zh" ? "展开工具列表" : "Expand tool list"}
           className={styles.resizeHandle}
+          active={toolsDraggingPaneId === "left"}
+          valueNow={leftPanelWidth}
+          valueMin={TOOLS_LEFT_PANE.minWidth}
+          valueMax={TOOLS_LEFT_PANE.maxWidth}
           onToggle={() => setLeftPanelCollapsed((current) => !current)}
           onPointerDown={handleLeftPanelResizeStart}
           onKeyDown={handleLeftPanelResizeKeyDown}

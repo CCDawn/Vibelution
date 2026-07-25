@@ -43,6 +43,7 @@ import {
   persistPaneWidth,
   resolveStoredPaneWidth,
 } from "../components/layout/paneLayoutPersistence";
+import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import { VButton, VNativeInput, VNativeTextarea } from "../components/vui";
 import { TranslationKey } from "../i18n/dictionary";
 import { petAvatarPresetLabel } from "../i18n/petLabels";
@@ -732,7 +733,7 @@ export function SelfEvolutionTrack({
   const [transactionHistoryExpanded, setTransactionHistoryExpanded] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(() =>
     resolveStoredPaneWidth(
-      "evolution-self",
+      WORKBENCH_LAYOUT_IDS.evolutionSelf,
       "sidebar",
       360,
       360,
@@ -764,7 +765,7 @@ export function SelfEvolutionTrack({
   const runtime = runtimeQuery.data;
 
   useEffect(() => {
-    persistPaneWidth("evolution-self", "sidebar", sidebarWidth);
+    persistPaneWidth(WORKBENCH_LAYOUT_IDS.evolutionSelf, "sidebar", sidebarWidth);
   }, [sidebarWidth]);
 
   const worktreeFiles = useMemo(() => {

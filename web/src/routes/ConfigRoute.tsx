@@ -82,6 +82,7 @@ import {
 import { PaneResizeHandle } from "../components/layout/PaneResizeHandle";
 import { type PaneSpec } from "../components/layout/paneLayoutPersistence";
 import { usePersistedPaneResize } from "../components/layout/usePersistedPaneResize";
+import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
 import { ConfigDraftPanel } from "./ConfigDraftPanel";
 import { publishConfigDraftPresence } from "./configDraftPresence";
@@ -121,7 +122,7 @@ import {
 } from "./configProviderLogic";
 import styles from "./ConfigRoute.styles";
 
-const CONFIG_SETTINGS_LAYOUT_ID = "config-settings";
+const CONFIG_SETTINGS_LAYOUT_ID = WORKBENCH_LAYOUT_IDS.configSettings;
 const CONFIG_SETTINGS_NAV_PANE: PaneSpec = {
   id: "sidebar",
   defaultWidth: 280,

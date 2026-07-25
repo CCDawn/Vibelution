@@ -56,24 +56,10 @@ import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy"
 import { PaneResizeHandle } from "../components/layout/PaneResizeHandle";
 import { type PaneSpec } from "../components/layout/paneLayoutPersistence";
 import { usePersistedPaneResize } from "../components/layout/usePersistedPaneResize";
+import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import { VButton, VDenseOpsPage } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
-
-const MEMORY_LAYOUT_ID = "memory";
-const MEMORY_LEFT_PANE: PaneSpec = {
-  id: "left",
-  defaultWidth: 230,
-  minWidth: 190,
-  maxWidth: 300,
-};
-const MEMORY_RIGHT_PANE: PaneSpec = {
-  id: "right",
-  defaultWidth: 320,
-  minWidth: 260,
-  maxWidth: 420,
-};
-const MEMORY_PANES: PaneSpec[] = [MEMORY_LEFT_PANE, MEMORY_RIGHT_PANE];
 import { MemoryAgentMemoryPanel } from "./MemoryAgentMemoryPanel";
 import { MemoryCleanupPanel } from "./MemoryCleanupPanel";
 import { MemoryDetailPanel } from "./MemoryDetailPanel";
@@ -1862,6 +1848,21 @@ function commaList(value: string) {
     .map((item) => item.trim())
     .filter(Boolean);
 }
+
+const MEMORY_LAYOUT_ID = WORKBENCH_LAYOUT_IDS.memory;
+const MEMORY_LEFT_PANE: PaneSpec = {
+  id: "left",
+  defaultWidth: 230,
+  minWidth: 190,
+  maxWidth: 300,
+};
+const MEMORY_RIGHT_PANE: PaneSpec = {
+  id: "right",
+  defaultWidth: 320,
+  minWidth: 260,
+  maxWidth: 420,
+};
+const MEMORY_PANES: PaneSpec[] = [MEMORY_LEFT_PANE, MEMORY_RIGHT_PANE];
 
 type MemoryRouteProps = {
   forcedView?: MemoryRouteView;

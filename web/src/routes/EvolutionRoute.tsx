@@ -55,6 +55,7 @@ import {
   persistPaneWidth,
   resolveStoredPaneWidth,
 } from "../components/layout/paneLayoutPersistence";
+import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import { LazyConversationView } from "../components/conversation/LazyConversationView";
 import {
   VButton,
@@ -199,7 +200,7 @@ const EMPTY_RUNS: EvolutionRun[] = [];
 const EMPTY_LIBRARY_ENTRIES: EvolutionLibraryEntry[] = [];
 const EMPTY_WORKTREE_RUNS: SupervisedWorktreeRun[] = [];
 const EMPTY_AGENT_BINDINGS: Record<string, EvolutionActiveRunAgentBinding> = {};
-const EVOLUTION_LAYOUT_ID = "evolution";
+const EVOLUTION_LAYOUT_ID = WORKBENCH_LAYOUT_IDS.evolution;
 const EVOLUTION_RUNS_QUEUE_WIDTH_KEY = "vibelution.evolution.runs-queue-width";
 const EVOLUTION_RUNS_QUEUE_BOUNDS = { min: 300, max: 520 };
 const EVOLUTION_RUNS_QUEUE_DEFAULT_WIDTH = 380;

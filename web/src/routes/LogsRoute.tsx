@@ -18,11 +18,9 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useRef,
   useState,
   type CSSProperties,
   type KeyboardEvent,
-  type MouseEvent,
   type PointerEvent,
 } from "react";
 import { useLocation } from "react-router-dom";
@@ -40,13 +38,11 @@ import {
 import { VActionGroup, VButton, VConfirmDialog, VDenseOpsPage, VIconButton, VNativeInput, VStateSurface, VStatusStrip, VSurface, VTooltip } from "../components/vui";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
 import {
-  persistPaneWidth,
-  resolveStoredPaneWidth,
+  migrateLegacyNumericPanes,
+  type PaneSpec,
 } from "../components/layout/paneLayoutPersistence";
-import {
-  PANE_KEYBOARD_STEP,
-  resolvePaneWidthFromKeyboardKey,
-} from "../components/layout/paneResizeKeyboard";
+import { usePersistedPaneResize } from "../components/layout/usePersistedPaneResize";
+import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import { LazyFilePreview } from "../components/preview/LazyFilePreview";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { useAppI18n } from "../i18n/useAppI18n";
@@ -62,54 +58,29 @@ const ROOT_LABEL_KEYS = {
   conversation_logs: "logsRootConversation",
 } as const;
 
-/** Shared permanent memory id under vibelution.pane-layouts.v1 */
-const LOGS_LAYOUT_ID = "logs";
+const LOGS_LAYOUT_ID = WORKBENCH_LAYOUT_IDS.logs;
+const LOG_SIDEBAR_STORAGE_KEY = "vibelution.logs.sidebar-width";
+const LOG_RIGHT_RAIL_STORAGE_KEY = "vibelution.logs.right-rail-width";
+
+const LOG_SIDEBAR_PANE: PaneSpec = {
+  id: "sidebar",
+  defaultWidth: 320,
+  minWidth: 280,
+  maxWidth: 560,
+};
+const LOG_RIGHT_PANE: PaneSpec = {
+  id: "right",
+  defaultWidth: 280,
+  minWidth: 220,
+  maxWidth: 520,
+};
+const LOG_PANES: PaneSpec[] = [LOG_SIDEBAR_PANE, LOG_RIGHT_PANE];
 
 type RootLabelKey = (typeof ROOT_LABEL_KEYS)[keyof typeof ROOT_LABEL_KEYS];
 type ActionNotice = {
   tone: "success" | "error";
   message: string;
 };
-
-const RESIZE_HANDLE_WIDTH = 16;
-const LOG_SIDEBAR_STORAGE_KEY = "vibelution.logs.sidebar-width";
-const LOG_RIGHT_RAIL_STORAGE_KEY = "vibelution.logs.right-rail-width";
-const DEFAULT_LOG_SIDEBAR_WIDTH = 320;
-const DEFAULT_LOG_RIGHT_RAIL_WIDTH = 280;
-const MIN_LOG_SIDEBAR_WIDTH = 280;
-const MIN_LOG_RIGHT_RAIL_WIDTH = 220;
-const MAX_LOG_SIDEBAR_WIDTH = 560;
-const MAX_LOG_RIGHT_RAIL_WIDTH = 520;
-const MIN_LOG_PREVIEW_WIDTH = 520;
-const MIN_LOG_MAIN_WIDTH = 640;
-
-
-type DragState = {
-  startX: number;
-  startWidth: number;
-};
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(Math.max(value, min), max);
-}
-
-function getMaxSidebarWidth(layoutWidth: number) {
-  const maxWidth = layoutWidth - RESIZE_HANDLE_WIDTH - MIN_LOG_PREVIEW_WIDTH;
-  return Math.max(MIN_LOG_SIDEBAR_WIDTH, Math.min(MAX_LOG_SIDEBAR_WIDTH, maxWidth));
-}
-
-function normalizeSidebarWidth(layoutWidth: number, sidebarWidth: number) {
-  return Math.round(clamp(sidebarWidth, MIN_LOG_SIDEBAR_WIDTH, getMaxSidebarWidth(layoutWidth)));
-}
-
-function getMaxRightRailWidth(layoutWidth: number) {
-  const maxWidth = layoutWidth - RESIZE_HANDLE_WIDTH - MIN_LOG_MAIN_WIDTH;
-  return Math.max(MIN_LOG_RIGHT_RAIL_WIDTH, Math.min(MAX_LOG_RIGHT_RAIL_WIDTH, maxWidth));
-}
-
-function normalizeRightRailWidth(layoutWidth: number, rightRailWidth: number) {
-  return Math.round(clamp(rightRailWidth, MIN_LOG_RIGHT_RAIL_WIDTH, getMaxRightRailWidth(layoutWidth)));
-}
 
 function uniquePaths(items: string[]): string[] {
   const seen = new Set<string>();
@@ -331,8 +302,6 @@ export function LogsRoute() {
   const runtimeSceneQuery = useMemo(() => new URLSearchParams(location.search), [location.search]);
   const initialRuntimeSceneId = runtimeSceneQuery.get("scene") ?? "";
   const initialRuntimeScenePath = runtimeSceneQuery.get("path") ?? "";
-  const workspaceRef = useRef<HTMLDivElement | null>(null);
-  const layoutRef = useRef<HTMLDivElement | null>(null);
   const [activeRootId, setActiveRootId] = useState<string>("");
   const [openPaths, setOpenPaths] = useState<Record<string, string>>({});
   const [activePackagesByRoot, setActivePackagesByRoot] = useState<Record<string, string>>({});
@@ -345,31 +314,30 @@ export function LogsRoute() {
     kind: "clear" | "delete";
     description: string;
   }>(null);
-  const [dragState, setDragState] = useState<DragState | null>(null);
-  const [rightRailDragState, setRightRailDragState] = useState<DragState | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [rightRailCollapsed, setRightRailCollapsed] = useState(false);
-  const [sidebarWidth, setSidebarWidth] = useState(() =>
-    resolveStoredPaneWidth(
-      LOGS_LAYOUT_ID,
-      "sidebar",
-      DEFAULT_LOG_SIDEBAR_WIDTH,
-      MIN_LOG_SIDEBAR_WIDTH,
-      MAX_LOG_SIDEBAR_WIDTH,
-      LOG_SIDEBAR_STORAGE_KEY,
-    ),
-  );
-  const [rightRailWidth, setRightRailWidth] = useState(() =>
-    resolveStoredPaneWidth(
-      LOGS_LAYOUT_ID,
-      "right",
-      DEFAULT_LOG_RIGHT_RAIL_WIDTH,
-      MIN_LOG_RIGHT_RAIL_WIDTH,
-      MAX_LOG_RIGHT_RAIL_WIDTH,
-      LOG_RIGHT_RAIL_STORAGE_KEY,
-    ),
-  );
   const pageVisible = usePageVisibility();
+
+  useEffect(() => {
+    migrateLegacyNumericPanes(LOGS_LAYOUT_ID, {
+      sidebar: LOG_SIDEBAR_STORAGE_KEY,
+      right: LOG_RIGHT_RAIL_STORAGE_KEY,
+    });
+  }, []);
+
+  const {
+    layoutRef: workspaceRef,
+    widths: logPaneWidths,
+    draggingPaneId,
+    startResize,
+    onResizeKeyDown,
+  } = usePersistedPaneResize({
+    layoutId: LOGS_LAYOUT_ID,
+    panes: LOG_PANES,
+    preserveMainMinWidth: 520,
+  });
+  const sidebarWidth = logPaneWidths.sidebar ?? LOG_SIDEBAR_PANE.defaultWidth;
+  const rightRailWidth = logPaneWidths.right ?? LOG_RIGHT_PANE.defaultWidth;
 
   const rootsQuery = useQuery({
     queryKey: queryKeys.logRoots(),
@@ -404,28 +372,6 @@ export function LogsRoute() {
 
   const activeRootLabelKey = activeRoot ? ROOT_LABEL_KEYS[activeRoot.id as keyof typeof ROOT_LABEL_KEYS] : null;
   const isRuntimeScenesRoot = activeRoot?.id === "runtime_scenes";
-
-  const syncSidebarWidthToLayout = useCallback(() => {
-    const layoutWidth = layoutRef.current?.getBoundingClientRect().width ?? 0;
-    if (!layoutWidth) {
-      return;
-    }
-    const normalized = normalizeSidebarWidth(layoutWidth, sidebarWidth);
-    if (normalized !== sidebarWidth) {
-      setSidebarWidth(normalized);
-    }
-  }, [sidebarWidth]);
-
-  const syncRightRailWidthToLayout = useCallback(() => {
-    const layoutWidth = workspaceRef.current?.getBoundingClientRect().width ?? 0;
-    if (!layoutWidth) {
-      return;
-    }
-    const normalized = normalizeRightRailWidth(layoutWidth, rightRailWidth);
-    if (normalized !== rightRailWidth) {
-      setRightRailWidth(normalized);
-    }
-  }, [rightRailWidth]);
 
   const treeQuery = useQuery({
     queryKey: queryKeys.logTree(activeRoot?.id ?? ""),
@@ -648,121 +594,6 @@ export function LogsRoute() {
     return () => window.clearTimeout(timeout);
   }, [actionNotice]);
 
-  useEffect(() => {
-    persistPaneWidth(LOGS_LAYOUT_ID, "sidebar", sidebarWidth);
-  }, [sidebarWidth]);
-
-  useEffect(() => {
-    persistPaneWidth(LOGS_LAYOUT_ID, "right", rightRailWidth);
-  }, [rightRailWidth]);
-
-  useEffect(() => {
-    if (isRuntimeScenesRoot) {
-      setDragState(null);
-      return;
-    }
-
-    syncSidebarWidthToLayout();
-    const layoutElement = layoutRef.current;
-    if (!layoutElement) {
-      return;
-    }
-
-    const observer = new ResizeObserver(() => {
-      syncSidebarWidthToLayout();
-    });
-    observer.observe(layoutElement);
-    return () => observer.disconnect();
-  }, [isRuntimeScenesRoot, syncSidebarWidthToLayout]);
-
-  useEffect(() => {
-    syncRightRailWidthToLayout();
-    const layoutElement = workspaceRef.current;
-    if (!layoutElement) {
-      return;
-    }
-
-    const observer = new ResizeObserver(() => {
-      syncRightRailWidthToLayout();
-    });
-    observer.observe(layoutElement);
-    return () => observer.disconnect();
-  }, [syncRightRailWidthToLayout]);
-
-  useEffect(() => {
-    if (!dragState) {
-      return;
-    }
-
-    const activeDrag = dragState;
-    const previousCursor = document.body.style.cursor;
-    const previousUserSelect = document.body.style.userSelect;
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
-
-    function stopDragging() {
-      setDragState(null);
-    }
-
-    function handlePointerMove(event: globalThis.PointerEvent) {
-      const layoutWidth = layoutRef.current?.getBoundingClientRect().width ?? 0;
-      if (!layoutWidth) {
-        return;
-      }
-      const delta = event.clientX - activeDrag.startX;
-      setSidebarWidth(normalizeSidebarWidth(layoutWidth, activeDrag.startWidth + delta));
-    }
-
-    window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", stopDragging);
-    window.addEventListener("pointercancel", stopDragging);
-
-    return () => {
-      document.body.style.cursor = previousCursor;
-      document.body.style.userSelect = previousUserSelect;
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", stopDragging);
-      window.removeEventListener("pointercancel", stopDragging);
-    };
-  }, [dragState]);
-
-  useEffect(() => {
-    if (!rightRailDragState) {
-      return;
-    }
-
-    const activeDrag = rightRailDragState;
-    const previousCursor = document.body.style.cursor;
-    const previousUserSelect = document.body.style.userSelect;
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
-
-    function stopDragging() {
-      setRightRailDragState(null);
-    }
-
-    function handlePointerMove(event: globalThis.PointerEvent) {
-      const layoutWidth = workspaceRef.current?.getBoundingClientRect().width ?? 0;
-      if (!layoutWidth) {
-        return;
-      }
-      const delta = activeDrag.startX - event.clientX;
-      setRightRailWidth(normalizeRightRailWidth(layoutWidth, activeDrag.startWidth + delta));
-    }
-
-    window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", stopDragging);
-    window.addEventListener("pointercancel", stopDragging);
-
-    return () => {
-      document.body.style.cursor = previousCursor;
-      document.body.style.userSelect = previousUserSelect;
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", stopDragging);
-      window.removeEventListener("pointercancel", stopDragging);
-    };
-  }, [rightRailDragState]);
-
   const layoutStyle = useMemo(
     () =>
       ({
@@ -881,100 +712,32 @@ export function LogsRoute() {
     });
   }
 
-  function beginResize(clientX: number) {
-    setDragState({
-      startX: clientX,
-      startWidth: sidebarWidth,
-    });
+  function handleResizeStart(event: PointerEvent<any>) {
+    if (sidebarCollapsed || isRuntimeScenesRoot) {
+      return;
+    }
+    startResize("sidebar", event as PointerEvent<HTMLDivElement>, { direction: 1 });
   }
 
-  function beginRightRailResize(clientX: number) {
-    setRightRailDragState({
-      startX: clientX,
-      startWidth: rightRailWidth,
-    });
+  function handleResizeKeyDown(event: KeyboardEvent<any>) {
+    if (sidebarCollapsed || isRuntimeScenesRoot) {
+      return;
+    }
+    onResizeKeyDown("sidebar", event as KeyboardEvent<HTMLDivElement>, { direction: 1 });
   }
 
-  function handleResizeStart(event: PointerEvent<HTMLDivElement>) {
-    if (event.button !== 0) {
-      return;
-    }
-    if (sidebarCollapsed) {
-      return;
-    }
-    event.preventDefault();
-    beginResize(event.clientX);
-  }
-
-  function handleResizeMouseDown(event: MouseEvent<HTMLDivElement>) {
-    if (event.button !== 0) {
-      return;
-    }
-    if (sidebarCollapsed) {
-      return;
-    }
-    event.preventDefault();
-    beginResize(event.clientX);
-  }
-
-  function handleResizeKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    if (!layoutRef.current || sidebarCollapsed) {
-      return;
-    }
-    const layoutWidth = layoutRef.current.getBoundingClientRect().width;
-    const nextWidth = resolvePaneWidthFromKeyboardKey(event.key, {
-      direction: 1,
-      step: PANE_KEYBOARD_STEP,
-      minWidth: MIN_LOG_SIDEBAR_WIDTH,
-      maxWidth: getMaxSidebarWidth(layoutWidth),
-      currentWidth: sidebarWidth,
-    });
-    if (nextWidth == null) {
-      return;
-    }
-    event.preventDefault();
-    setSidebarWidth(nextWidth);
-  }
-
-  function handleRightRailResizeStart(event: PointerEvent<HTMLDivElement>) {
-    if (event.button !== 0) {
-      return;
-    }
+  function handleRightRailResizeStart(event: PointerEvent<any>) {
     if (rightRailCollapsed) {
       return;
     }
-    event.preventDefault();
-    beginRightRailResize(event.clientX);
+    startResize("right", event as PointerEvent<HTMLDivElement>, { direction: -1 });
   }
 
-  function handleRightRailResizeMouseDown(event: MouseEvent<HTMLDivElement>) {
-    if (event.button !== 0) {
-      return;
-    }
+  function handleRightRailResizeKeyDown(event: KeyboardEvent<any>) {
     if (rightRailCollapsed) {
       return;
     }
-    event.preventDefault();
-    beginRightRailResize(event.clientX);
-  }
-
-  function handleRightRailResizeKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    if (!workspaceRef.current || rightRailCollapsed) {
-      return;
-    }
-    const layoutWidth = workspaceRef.current.getBoundingClientRect().width;
-    const nextWidth = resolvePaneWidthFromKeyboardKey(event.key, {
-      direction: -1,
-      step: PANE_KEYBOARD_STEP,
-      minWidth: MIN_LOG_RIGHT_RAIL_WIDTH,
-      maxWidth: getMaxRightRailWidth(layoutWidth),
-      currentWidth: rightRailWidth,
-    });
-    if (nextWidth == null) {
-      return;
-    }
-    event.preventDefault();
-    setRightRailWidth(nextWidth);
+    onResizeKeyDown("right", event as KeyboardEvent<HTMLDivElement>, { direction: -1 });
   }
 
   const copyLabel =
@@ -1062,7 +825,12 @@ export function LogsRoute() {
         />
       )}
     >
-      <div ref={workspaceRef} className={styles.workspace} style={layoutStyle}>
+      <div
+        ref={workspaceRef}
+        className={styles.workspace}
+        style={layoutStyle}
+        data-vui-layout-id={LOGS_LAYOUT_ID}
+      >
         {activeRoot && isRuntimeScenesRoot ? (
           <RuntimeScenesPane
             activeRoot={activeRoot}
@@ -1073,7 +841,7 @@ export function LogsRoute() {
             initialPath={initialRuntimeScenePath}
           />
         ) : (
-          <div ref={layoutRef} className={styles.resizableLayout}>
+          <div className={styles.resizableLayout}>
             <VSurface
               as="aside"
               tone="rail"
@@ -1254,13 +1022,12 @@ export function LogsRoute() {
               collapseLabel={lang === "zh" ? "收起日志列表" : "Collapse log list"}
               expandLabel={lang === "zh" ? "展开日志列表" : "Expand log list"}
               className={styles.resizeHandle}
-              active={Boolean(dragState)}
+              active={draggingPaneId === "sidebar"}
               valueNow={sidebarWidth}
-              valueMin={MIN_LOG_SIDEBAR_WIDTH}
-              valueMax={MAX_LOG_SIDEBAR_WIDTH}
+              valueMin={LOG_SIDEBAR_PANE.minWidth}
+              valueMax={LOG_SIDEBAR_PANE.maxWidth}
               onToggle={() => setSidebarCollapsed((current) => !current)}
               onPointerDown={handleResizeStart}
-              onMouseDown={handleResizeMouseDown}
               onKeyDown={handleResizeKeyDown}
             />
 
@@ -1404,13 +1171,12 @@ export function LogsRoute() {
           collapseLabel={lang === "zh" ? "收起右侧日志导航" : "Collapse right log navigation"}
           expandLabel={lang === "zh" ? "展开右侧日志导航" : "Expand right log navigation"}
           className={`${styles.resizeHandle} ${styles.rightRailResizeHandle}`}
-          active={Boolean(rightRailDragState)}
+          active={draggingPaneId === "right"}
           valueNow={rightRailWidth}
-          valueMin={MIN_LOG_RIGHT_RAIL_WIDTH}
-          valueMax={MAX_LOG_RIGHT_RAIL_WIDTH}
+          valueMin={LOG_RIGHT_PANE.minWidth}
+          valueMax={LOG_RIGHT_PANE.maxWidth}
           onToggle={() => setRightRailCollapsed((current) => !current)}
           onPointerDown={handleRightRailResizeStart}
-          onMouseDown={handleRightRailResizeMouseDown}
           onKeyDown={handleRightRailResizeKeyDown}
         />
 

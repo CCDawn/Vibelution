@@ -11,6 +11,7 @@ import {
   type PaneSpec,
 } from "../components/layout/paneLayoutPersistence";
 import { usePersistedPaneResize } from "../components/layout/usePersistedPaneResize";
+import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import { AgentFilterRail } from "../components/vui/product/agent-management";
 import { VNativeButton } from "../components/vui";
 import { AgentDetailWorkspacePanel } from "./AgentDetailWorkspacePanel";
@@ -18,7 +19,7 @@ import { AgentInspectorRailPanel } from "./AgentInspectorRailPanel";
 import { AgentListWorkspacePanel } from "./AgentListWorkspacePanel";
 import styles from "./AgentWorkspaceLayoutPanel.styles";
 
-const LAYOUT_ID = "agents";
+const LAYOUT_ID = WORKBENCH_LAYOUT_IDS.agents;
 const LEGACY_STORAGE_KEY = "vibelution.agent-workspace.column-widths.v1";
 
 const LEFT_PANE: PaneSpec = {
@@ -108,6 +109,7 @@ export function AgentWorkspaceLayoutPanel({
       className={styles.workspace}
       style={layoutStyle}
       data-agent-workspace="resizable"
+      data-vui-layout-id={LAYOUT_ID}
       data-has-inspector={hasInspector ? "true" : "false"}
     >
       <div
