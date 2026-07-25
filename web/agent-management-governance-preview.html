@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Vibelution · Agent 管理治理预览</title>
+    <link rel="stylesheet" href="./src/design/agent-management-governance-preview.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark">V</span>
+          <span>Vibelution</span>
+        </div>
+        <nav class="product-nav" aria-label="主导航">
+          <button class="nav-item">会话</button>
+          <button class="nav-item active">Agent</button>
+          <button class="nav-item">团队</button>
+          <button class="nav-item">设置</button>
+        </nav>
+        <div class="topbar-actions">
+          <button class="icon-button" aria-label="搜索">⌕</button>
+          <span class="runtime-state"><i></i> 本地运行正常</span>
+          <span class="avatar">管</span>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <aside class="directory">
+          <div class="directory-head">
+            <div>
+              <p class="eyebrow">AGENT DIRECTORY</p>
+              <h1>Agent 管理</h1>
+            </div>
+            <button class="primary compact">新建</button>
+          </div>
+
+          <label class="search-box">
+            <span>⌕</span>
+            <input value="" placeholder="搜索 Agent" aria-label="搜索 Agent" />
+          </label>
+
+          <div class="filter-row" role="tablist" aria-label="Agent 过滤">
+            <button class="filter active">全部 <b>8</b></button>
+            <button class="filter">团队 <b>5</b></button>
+            <button class="filter">异常 <b>1</b></button>
+          </div>
+
+          <section class="agent-group">
+            <div class="group-title"><span>科研团队</span><small>4</small></div>
+            <button class="agent-row selected" data-agent="科研规划师">
+              <span class="agent-avatar navy">规</span>
+              <span class="agent-copy">
+                <strong>科研规划师</strong>
+                <small>Supervisor · 运行中</small>
+              </span>
+              <i class="status-dot live"></i>
+            </button>
+            <button class="agent-row" data-agent="资料寻找">
+              <span class="agent-avatar blue">资</span>
+              <span class="agent-copy">
+                <strong>资料寻找</strong>
+                <small>Worker · 空闲</small>
+              </span>
+              <i class="status-dot"></i>
+            </button>
+            <button class="agent-row" data-agent="实验设计">
+              <span class="agent-avatar violet">实</span>
+              <span class="agent-copy">
+                <strong>实验设计</strong>
+                <small>Worker · 空闲</small>
+              </span>
+              <i class="status-dot"></i>
+            </button>
+            <button class="agent-row" data-agent="结果审查">
+              <span class="agent-avatar green">审</span>
+              <span class="agent-copy">
+                <strong>结果审查</strong>
+                <small>Reviewer · 需关注</small>
+              </span>
+              <i class="status-dot warn"></i>
+            </button>
+          </section>
+
+          <section class="agent-group">
+            <div class="group-title"><span>个人 Agent</span><small>4</small></div>
+            <button class="agent-row">
+              <span class="agent-avatar sand">编</span>
+              <span class="agent-copy">
+                <strong>代码开发</strong>
+                <small>个人 · 空闲</small>
+              </span>
+              <i class="status-dot"></i>
+            </button>
+            <button class="agent-row">
+              <span class="agent-avatar slate">文</span>
+              <span class="agent-copy">
+                <strong>文档整理</strong>
+                <small>个人 · 已归档</small>
+              </span>
+              <i class="status-dot muted"></i>
+            </button>
+          </section>
+        </aside>
+
+        <section class="content">
+          <header class="agent-header">
+            <div class="agent-title">
+              <span class="agent-avatar navy large">规</span>
+              <div>
+                <div class="title-line">
+                  <h2 id="agent-name">科研规划师</h2>
+                  <span class="role-badge">Supervisor</span>
+                  <span class="health-badge">配置健康</span>
+                </div>
+                <p>负责拆解科研问题、协调专业 Agent，并在关键节点请求人工确认。</p>
+              </div>
+            </div>
+            <div class="header-actions">
+              <button class="secondary">复制为模板</button>
+              <button class="primary" id="open-impact">审查并保存 <span class="change-count">3</span></button>
+            </div>
+          </header>
+
+          <nav class="view-tabs" aria-label="Agent 管理视图">
+            <button class="view-tab active" data-view="effective">有效配置</button>
+            <button class="view-tab" data-view="relations">团队关系 <span>4</span></button>
+            <button class="view-tab" data-view="impact">变更影响 <span class="change-count">3</span></button>
+            <button class="view-tab" data-view="runs">运行记录</button>
+          </nav>
+
+          <div class="view-body">
+            <section class="view-panel active" id="view-effective">
+              <div class="source-summary">
+                <div>
+                  <span class="summary-icon">↳</span>
+                  <div><strong>当前有效配置</strong><small>全局默认 → 科研团队策略 → Agent 覆盖</small></div>
+                </div>
+                <button class="text-button">查看完整继承链</button>
+              </div>
+
+              <div class="section-heading">
+                <div><h3>核心能力</h3><p>展示运行时实际生效的值，而不是仅展示已保存字段。</p></div>
+                <span class="updated">2 分钟前校验</span>
+              </div>
+
+              <div class="config-table" role="table" aria-label="有效配置">
+                <div class="table-head" role="row">
+                  <span>配置项</span><span>有效值</span><span>来源</span><span>状态</span>
+                </div>
+                <button class="config-row selected" data-key="model" role="row">
+                  <span><i class="row-icon">◇</i><b>主要对话模型</b><small>处理规划、对话与协调</small></span>
+                  <span><strong>gpt-5.6-terra</strong><small>reasoning: high</small></span>
+                  <span><em class="source agent">Agent 覆盖</em><small>覆盖团队默认</small></span>
+                  <span><i class="ok">✓</i> 可用</span>
+                </button>
+                <button class="config-row" data-key="prompt" role="row">
+                  <span><i class="row-icon">¶</i><b>提示词模板</b><small>身份、边界与工作规范</small></span>
+                  <span><strong>科研主管 v4</strong><small>已发布 · revision 12</small></span>
+                  <span><em class="source team">团队策略</em><small>research-team</small></span>
+                  <span><i class="ok">✓</i> 已同步</span>
+                </button>
+                <button class="config-row" data-key="tools" role="row">
+                  <span><i class="row-icon">⌘</i><b>工具策略</b><small>允许、阻止与人工审批</small></span>
+                  <span><strong>研究工具集</strong><small>12 允许 · 3 需审批</small></span>
+                  <span><em class="source team">团队策略</em><small>继承，无覆盖</small></span>
+                  <span><i class="ok">✓</i> 边界明确</span>
+                </button>
+                <button class="config-row" data-key="memory" role="row">
+                  <span><i class="row-icon">◎</i><b>记忆策略</b><small>私有记忆与团队知识</small></span>
+                  <span><strong>研究协作记忆</strong><small>可读团队 · 提议写入</small></span>
+                  <span><em class="source global">全局默认</em><small>无本地覆盖</small></span>
+                  <span><i class="ok">✓</i> 正常</span>
+                </button>
+                <button class="config-row" data-key="delegation" role="row">
+                  <span><i class="row-icon">⑂</i><b>委派与监督</b><small>子 Agent 范围和门禁</small></span>
+                  <span><strong>并发 3 · 深度 2</strong><small>关键结论需人工复核</small></span>
+                  <span><em class="source agent">Agent 覆盖</em><small>较团队策略更严格</small></span>
+                  <span><i class="ok">✓</i> 受控</span>
+                </button>
+              </div>
+
+              <div class="section-heading compact-heading">
+                <div><h3>运行边界</h3><p>高风险能力保持可见，但不与日常配置混排。</p></div>
+              </div>
+              <div class="boundary-strip">
+                <span><small>网络访问</small><strong>仅白名单</strong></span>
+                <span><small>文件写入</small><strong>任务工作区</strong></span>
+                <span><small>人工审批</small><strong>3 类工具</strong></span>
+                <span><small>最大迭代</small><strong>24 次</strong></span>
+              </div>
+            </section>
+
+            <section class="view-panel" id="view-relations">
+              <div class="section-heading">
+                <div><h3>团队关系</h3><p>查看谁负责委派、谁可以协作，以及人工门禁位于何处。</p></div>
+                <button class="secondary compact">前往团队画布</button>
+              </div>
+              <div class="relation-layout">
+                <div class="relation-canvas">
+                  <div class="flow-label">挑战杯科研团队 · 当前发布版本</div>
+                  <svg class="edges" viewBox="0 0 760 390" preserveAspectRatio="none" aria-hidden="true">
+                    <path d="M380 100 C380 150,165 145,165 205" />
+                    <path d="M380 100 C380 150,380 145,380 205" />
+                    <path d="M380 100 C380 150,595 145,595 205" />
+                    <path class="review-edge" d="M595 268 C595 325,440 320,440 350" />
+                    <path class="review-edge" d="M380 268 C380 325,440 320,440 350" />
+                  </svg>
+                  <button class="graph-node supervisor selected">
+                    <span class="agent-avatar navy">规</span>
+                    <span><strong>科研规划师</strong><small>Supervisor · 当前 Agent</small></span>
+                    <em>运行中</em>
+                  </button>
+                  <button class="graph-node worker node-a">
+                    <span class="agent-avatar blue">资</span>
+                    <span><strong>资料寻找</strong><small>来源检索与证据整理</small></span>
+                    <em>可委派</em>
+                  </button>
+                  <button class="graph-node worker node-b">
+                    <span class="agent-avatar violet">实</span>
+                    <span><strong>实验设计</strong><small>假说与判别实验</small></span>
+                    <em>可委派</em>
+                  </button>
+                  <button class="graph-node worker node-c">
+                    <span class="agent-avatar green">审</span>
+                    <span><strong>结果审查</strong><small>证据和结论复核</small></span>
+                    <em>需关注</em>
+                  </button>
+                  <div class="human-gate">
+                    <span>人</span>
+                    <div><strong>人工门禁</strong><small>实验执行与最终结论</small></div>
+                  </div>
+                  <div class="legend"><span><i></i>自动委派</span><span><i class="dashed"></i>请求复核</span></div>
+                </div>
+                <aside class="relation-summary">
+                  <p class="eyebrow">TEAM POLICY</p>
+                  <h4>协作策略</h4>
+                  <dl>
+                    <div><dt>编排模式</dt><dd>Supervisor + Workers</dd></div>
+                    <div><dt>最大并发</dt><dd>3 个任务</dd></div>
+                    <div><dt>委派深度</dt><dd>2 层</dd></div>
+                    <div><dt>共享上下文</dt><dd>摘要 + 证据引用</dd></div>
+                    <div><dt>失败处理</dt><dd>暂停并回到主管</dd></div>
+                  </dl>
+                  <button class="secondary wide">查看团队有效策略</button>
+                </aside>
+              </div>
+            </section>
+
+            <section class="view-panel" id="view-impact">
+              <div class="impact-header">
+                <div>
+                  <span class="impact-mark">3</span>
+                  <div><h3>待保存变更</h3><p>保存前先确认有效值变化和受影响范围。</p></div>
+                </div>
+                <button class="text-button">撤销全部</button>
+              </div>
+              <div class="impact-grid">
+                <div class="change-list">
+                  <article class="change-item">
+                    <div class="change-path"><span>模型</span><small>主要对话模型</small></div>
+                    <div class="diff-line"><del>qwen3.5-plus</del><span>→</span><ins>gpt-5.6-terra</ins></div>
+                    <p>从团队默认改为 Agent 覆盖；只影响该 Agent 的新运行。</p>
+                  </article>
+                  <article class="change-item">
+                    <div class="change-path"><span>委派</span><small>最大并发</small></div>
+                    <div class="diff-line"><del>2</del><span>→</span><ins>3</ins></div>
+                    <p>可能增加同时运行的 Worker 数量和模型调用量。</p>
+                  </article>
+                  <article class="change-item">
+                    <div class="change-path"><span>监督</span><small>证据等级</small></div>
+                    <div class="diff-line"><del>standard</del><span>→</span><ins>strict</ins></div>
+                    <p>新的关键结论必须带可复核证据，已运行任务保持原策略。</p>
+                  </article>
+                </div>
+                <aside class="impact-summary">
+                  <h4>影响范围</h4>
+                  <div class="impact-metric"><strong>1</strong><span>Agent</span></div>
+                  <div class="impact-metric"><strong>1</strong><span>团队</span></div>
+                  <div class="impact-metric"><strong>2</strong><span>进行中的任务</span></div>
+                  <div class="warning-box">
+                    <strong>运行版本不会被静默替换</strong>
+                    <p>当前两个任务继续使用 revision 12；新配置将发布为 revision 13。</p>
+                  </div>
+                  <label class="release-note"><span>变更说明</span><textarea>调整主管模型和委派并发，加强证据门禁。</textarea></label>
+                  <button class="primary wide">发布 revision 13</button>
+                  <button class="secondary wide">仅保存草稿</button>
+                </aside>
+              </div>
+            </section>
+
+            <section class="view-panel empty-panel" id="view-runs">
+              <span class="empty-icon">↗</span>
+              <h3>运行记录保持现有能力</h3>
+              <p>本预览只验证管理信息架构，运行时间线与 trace 暂不重做。</p>
+              <button class="secondary">返回有效配置</button>
+            </section>
+          </div>
+        </section>
+
+        <aside class="inspector">
+          <div class="inspector-head">
+            <div><p class="eyebrow">INSPECTOR</p><h3 id="inspector-title">主要对话模型</h3></div>
+            <button class="icon-button close-inspector" aria-label="关闭检查器">×</button>
+          </div>
+          <div class="inspector-body" id="inspector-body">
+            <section>
+              <span class="field-label">有效值</span>
+              <div class="value-box"><strong>gpt-5.6-terra</strong><small>ai-pixel · Responses API</small></div>
+            </section>
+            <section>
+              <span class="field-label">配置来源</span>
+              <div class="inheritance">
+                <div><i>1</i><span><strong>全局默认</strong><small>qwen3.5-plus</small></span></div>
+                <div><i>2</i><span><strong>科研团队策略</strong><small>沿用全局默认</small></span></div>
+                <div class="current"><i>3</i><span><strong>科研规划师覆盖</strong><small>gpt-5.6-terra</small></span></div>
+              </div>
+            </section>
+            <section>
+              <span class="field-label">运行验证</span>
+              <div class="validation-line"><i class="ok">✓</i><span><strong>实际调用通过</strong><small>7 月 25 日 11:48 · 2.4s</small></span></div>
+            </section>
+            <section>
+              <span class="field-label">操作</span>
+              <button class="secondary wide">修改配置</button>
+              <button class="text-danger wide">恢复团队默认</button>
+            </section>
+          </div>
+          <footer class="mock-note">
+            <strong>交互预览</strong>
+            <span>数据均为安全 mock；未连接保存、运行或删除接口。</span>
+          </footer>
+        </aside>
+      </main>
+    </div>
+    <script src="./src/design/agent-management-governance-preview.js"></script>
+  </body>
+</html>
