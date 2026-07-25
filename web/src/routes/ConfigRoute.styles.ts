@@ -388,12 +388,6 @@ const styles = {
     "vui-routes-configroute sidebarPanelIntro [display:grid] [gap:1px] [min-width:0]",
   sidebarPanelToggle:
     "vui-routes-configroute sidebarPanelToggle [flex:0_0_auto]",
-  sidebarResizeCorner:
-    "vui-routes-configroute sidebarResizeCorner [position:absolute] [z-index:3] [opacity:0.34] [transition:opacity_140ms_ease,background-color_140ms_ease] hover:[opacity:0.88] hover:[background:color-mix(in_srgb,var(--accent-warm)_20%,transparent)] [right:0] [bottom:0] [width:18px] [height:18px] [cursor:nwse-resize] [border-radius:999px_0_8px_0] !bg-[var(--vui-surface-row)] max-[1120px]:[display:none]",
-  sidebarResizeX:
-    "vui-routes-configroute sidebarResizeX [position:absolute] [z-index:3] [opacity:0.34] [transition:opacity_140ms_ease,background-color_140ms_ease] hover:[opacity:0.88] hover:[background:color-mix(in_srgb,var(--accent-warm)_20%,transparent)] [top:18px] [right:0] [width:10px] [height:calc(100%_-_34px)] [cursor:col-resize] [background:var(--vui-gradient-route-soft)] max-[1120px]:[display:none]",
-  sidebarResizeY:
-    "vui-routes-configroute sidebarResizeY [position:absolute] [z-index:3] [opacity:0.34] [transition:opacity_140ms_ease,background-color_140ms_ease] hover:[opacity:0.88] hover:[background:color-mix(in_srgb,var(--accent-warm)_20%,transparent)] [left:18px] [bottom:0] [width:calc(100%_-_36px)] [height:10px] [cursor:row-resize] [background:var(--vui-gradient-route-soft)] max-[1120px]:[display:none]",
   sidebarStatus:
     "vui-routes-configroute sidebarStatus [display:grid] [gap:5px] [padding:8px] [border:1px_solid_var(--border-hairline)] [border-radius:8px] !bg-[var(--vui-surface-row)] max-[1120px]:[grid-template-columns:minmax(150px,0.7fr)_minmax(180px,1fr)_max-content] max-[1120px]:[align-items:center] max-[1120px]:[&_.buttonBlock]:[width:auto] max-[1120px]:[&_.buttonBlock]:[justify-self:end] max-[1120px]:[&>_.helperText]:[grid-column:1/-1] max-[720px]:[grid-template-columns:1fr] max-[720px]:[&_.buttonBlock]:[width:100%] max-[720px]:[&_.buttonBlock]:[justify-self:stretch]",
   sidebarStatusCompact:

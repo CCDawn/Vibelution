@@ -81,4 +81,33 @@ describe("workbench layout gate (Wave 5)", () => {
     expect(evolution).toContain("PaneHeightResizeHandle");
     expect(evolution).not.toContain("beginPaneHeightResize");
   });
+
+  it("keeps route resize class maps placement-only (Wave 6A)", () => {
+    const samples: Array<{ file: string; key: string }> = [
+      { file: "routes/GitRoute.styles.ts", key: "resizeHandle" },
+      { file: "routes/SupervisedReviewRoute.styles.ts", key: "resizeHandle" },
+      { file: "routes/SelfEvolutionTrack.styles.ts", key: "sidebarResizer" },
+      { file: "routes/EvolutionRoute.styles.ts", key: "liveIoResizeHandle" },
+      { file: "routes/LogsRoute.styles.ts", key: "resizeHandle" },
+      { file: "routes/ToolsRoute.styles.ts", key: "resizeHandle" },
+      { file: "routes/LauncherRoute.styles.ts", key: "railResizeHandle" },
+      { file: "routes/ConfigRoute.styles.ts", key: "settingsNavResizeHandle" },
+    ];
+
+    for (const sample of samples) {
+      const text = readFileSync(resolve(webSrc, sample.file), "utf-8");
+      // Key assignment should not reintroduce private lit-rule / col-resize chrome.
+      const keyBlock = text.match(new RegExp(`${sample.key}:\\s*(?:\`[^\`]*\`|"[^"]*"|'[^']*')`, "m"));
+      expect(keyBlock, `${sample.file} ${sample.key}`).not.toBeNull();
+      const value = keyBlock?.[0] ?? "";
+      expect(value, `${sample.file} ${sample.key} must not own col-resize chrome`).not.toMatch(/cursor-col-resize/);
+      expect(value, `${sample.file} ${sample.key} must not own row-resize chrome`).not.toMatch(/cursor-row-resize/);
+      expect(value, `${sample.file} ${sample.key} must not paint private before: rule`).not.toMatch(/before:w-/);
+    }
+
+    const configStyles = readFileSync(resolve(webSrc, "routes/ConfigRoute.styles.ts"), "utf-8");
+    expect(configStyles).not.toContain("sidebarResizeX");
+    expect(configStyles).not.toContain("sidebarResizeY");
+    expect(configStyles).not.toContain("sidebarResizeCorner");
+  });
 });

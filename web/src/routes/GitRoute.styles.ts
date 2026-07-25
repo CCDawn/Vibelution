@@ -1,5 +1,4 @@
 import {
-  vuiOpaqueRowClass,
   vuiStateSelectedRowFillClass,
   vuiWorkspaceFillClass,
 } from "../design/vuiSurfaceRecipes";
@@ -34,7 +33,8 @@ export const gitRouteStyles = {
   // ~320px and nested 本地提交|WORKTREE cards crush/overlap text.
   workspaceOverview:
     "!grid-cols-[minmax(360px,1fr)_minmax(0,1.2fr)_minmax(300px,0.85fr)] !gap-2 max-[1400px]:!grid-cols-[minmax(0,1fr)_minmax(300px,0.9fr)] max-[1400px]:!grid-rows-[minmax(240px,0.95fr)_minmax(220px,0.85fr)] max-[1400px]:!gap-y-2 max-[860px]:!grid-cols-[minmax(0,1fr)] max-[860px]:!grid-rows-none max-[860px]:!content-start max-[860px]:!gap-1.5",
-  resizeHandle: `relative min-w-2.5 cursor-col-resize touch-none border-0 bg-transparent p-0 outline-none before:absolute before:inset-y-0 before:left-1/2 before:w-[3px] before:-translate-x-1/2 before:rounded-full before:${vuiOpaqueRowClass} before:transition before:content-[''] hover:before:bg-[color-mix(in_srgb,var(--accent-warm)_52%,transparent)] hover:before:shadow-none focus-visible:before:bg-[color-mix(in_srgb,var(--accent-warm)_52%,transparent)] focus-visible:before:shadow-none max-[860px]:hidden`,
+  // Wave 6A: PaneCollapseHandle owns the visual rule; breakpoint hide only.
+  resizeHandle: "max-[860px]:hidden",
   changePanel:
     `grid min-h-0 grid-rows-[auto_auto_auto_minmax(0,1fr)] gap-1.5 ${panelSurface} p-2`,
   commitPanel:

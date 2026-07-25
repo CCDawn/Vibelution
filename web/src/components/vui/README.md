@@ -85,6 +85,16 @@ New list-detail pages should start from a page recipe + registry `layoutId`. Dom
 
 Gate: `components/layout/workbenchLayoutGate.test.ts` blocks new ad-hoc width/height keys under `routes/`.
 
+## Wave 6A style-map compression
+
+| Prefer | Avoid |
+| --- | --- |
+| Route `resizeHandle` / `*Resizer` classes = **placement + breakpoint hide only** | Re-painting lit rules, `cursor-col-resize`, or `before:` chrome on route style maps |
+| `PaneResizeHandle` / `PaneCollapseHandle` / `PaneHeightResizeHandle` for visual contract | Private handle markup or dead `resizablePane` helpers |
+| Drop unused Config `sidebarResize*` keys once rails use shared handles | Leaving orphan style-map keys that reintroduce dual chrome |
+
+Gate also asserts sample route handle keys stay free of private col/row-resize chrome.
+
 Each sets `data-vui-recipe="…"` on the page root for contracts and debugging.
 
 ## Adding a control (checklist)
