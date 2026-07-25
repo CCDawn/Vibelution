@@ -55,7 +55,7 @@ describe("ConversationToolActivity", () => {
     expect(html).toContain("代码图谱");
   });
 
-  it("keeps tool details expandable without a right-side status or chevron", () => {
+  it("keeps tool details expandable with one compact disclosure chevron", () => {
     const html = renderToStaticMarkup(
       <ConversationToolActivity
         activity={createCodexTranscriptToolActivity([toolCell("tool-1", "定位 ConversationLogger")])}
@@ -68,5 +68,43 @@ describe("ConversationToolActivity", () => {
     expect(html).toContain("工具原始结果");
     expect(html).not.toContain('data-codex-tool-detail-toggle="inline-symbol"');
     expect(html).not.toContain("完成");
+    expect(html).toContain("itemChevron");
+  });
+
+  it("uses a semantic code result as the row title without repeating the generic tool name", () => {
+    const cell = toolCell("tool-code-search", "");
+    cell.toolLifecycleModel = {
+      toolCalls: [
+        {
+          toolCallId: "tool-call-code-search",
+          rawOperationId: "tool-code-search",
+          status: "completed",
+          title: "code_symbol_tool",
+          rawToolName: "code_symbol_tool",
+          runtimeKind: "tool",
+          resultPreview: JSON.stringify({
+            status: "ok",
+            mode: "search",
+            query: "savedDraft",
+            count: 4,
+            results: [],
+          }),
+        },
+      ],
+      terminalOperations: [],
+      terminalSessions: [],
+      modelObservations: [],
+    };
+
+    const html = renderToStaticMarkup(
+      <ConversationToolActivity
+        activity={createCodexTranscriptToolActivity([cell])}
+        language="zh"
+        renderToolDetails={() => <pre>183 savedDraft</pre>}
+      />,
+    );
+
+    expect(html).toContain("搜索 savedDraft · 4 个结果");
+    expect(html).not.toContain(">代码图谱<");
   });
 });
