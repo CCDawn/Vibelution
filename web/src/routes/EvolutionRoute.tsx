@@ -52,9 +52,10 @@ import {
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
 import {
-  persistPaneWidth,
-  resolveStoredPaneWidth,
+  migrateLegacyNumericPanes,
+  type PaneSpec,
 } from "../components/layout/paneLayoutPersistence";
+import { usePersistedPaneResize } from "../components/layout/usePersistedPaneResize";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import { LazyConversationView } from "../components/conversation/LazyConversationView";
 import {
@@ -100,9 +101,7 @@ import { createEvolutionWorkspaceCache } from "./evolutionWorkspaceCache";
 import { modelDisplayLabel } from "./agentDisplay";
 import {
   clampPaneSize,
-  clampPaneWidth,
   keyboardPaneHeight,
-  keyboardPaneWidth,
   storedPaneSize,
 } from "./resizablePane";
 import styles from "./EvolutionRoute.styles";
@@ -202,17 +201,39 @@ const EMPTY_WORKTREE_RUNS: SupervisedWorktreeRun[] = [];
 const EMPTY_AGENT_BINDINGS: Record<string, EvolutionActiveRunAgentBinding> = {};
 const EVOLUTION_LAYOUT_ID = WORKBENCH_LAYOUT_IDS.evolution;
 const EVOLUTION_RUNS_QUEUE_WIDTH_KEY = "vibelution.evolution.runs-queue-width";
-const EVOLUTION_RUNS_QUEUE_BOUNDS = { min: 300, max: 520 };
-const EVOLUTION_RUNS_QUEUE_DEFAULT_WIDTH = 380;
 const EVOLUTION_LIBRARY_LIST_WIDTH_KEY = "vibelution.evolution.library-list-width";
-const EVOLUTION_LIBRARY_LIST_BOUNDS = { min: 280, max: 520 };
-const EVOLUTION_LIBRARY_LIST_DEFAULT_WIDTH = 360;
 const EVOLUTION_LIVE_LAUNCH_WIDTH_KEY = "vibelution.evolution.live-launch-width";
-const EVOLUTION_LIVE_LAUNCH_BOUNDS = { min: 320, max: 520 };
-const EVOLUTION_LIVE_LAUNCH_DEFAULT_WIDTH = 360;
 const EVOLUTION_LIVE_RUN_WIDTH_KEY = "vibelution.evolution.live-run-width";
-const EVOLUTION_LIVE_RUN_BOUNDS = { min: 320, max: 560 };
-const EVOLUTION_LIVE_RUN_DEFAULT_WIDTH = 380;
+const EVOLUTION_RUNS_QUEUE_PANE: PaneSpec = {
+  id: "runs-queue",
+  defaultWidth: 380,
+  minWidth: 300,
+  maxWidth: 520,
+};
+const EVOLUTION_LIBRARY_LIST_PANE: PaneSpec = {
+  id: "library-list",
+  defaultWidth: 360,
+  minWidth: 280,
+  maxWidth: 520,
+};
+const EVOLUTION_LIVE_LAUNCH_PANE: PaneSpec = {
+  id: "live-launch",
+  defaultWidth: 360,
+  minWidth: 320,
+  maxWidth: 520,
+};
+const EVOLUTION_LIVE_RUN_PANE: PaneSpec = {
+  id: "live-run",
+  defaultWidth: 380,
+  minWidth: 320,
+  maxWidth: 560,
+};
+const EVOLUTION_WIDTH_PANES: PaneSpec[] = [
+  EVOLUTION_RUNS_QUEUE_PANE,
+  EVOLUTION_LIBRARY_LIST_PANE,
+  EVOLUTION_LIVE_LAUNCH_PANE,
+  EVOLUTION_LIVE_RUN_PANE,
+];
 const EVOLUTION_LIVE_IO_HEIGHT_KEY = "vibelution.evolution.live-io-height";
 const EVOLUTION_LIVE_IO_HEIGHT_BOUNDS = { min: 260, max: 780 };
 const EVOLUTION_LIVE_IO_DEFAULT_HEIGHT = 340;
@@ -724,46 +745,29 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     editNote: "",
   });
   const [proposalEditFeedback, setProposalEditFeedback] = useState("");
-  const [runsQueueWidth, setRunsQueueWidth] = useState(() =>
-    resolveStoredPaneWidth(
-      EVOLUTION_LAYOUT_ID,
-      "runs-queue",
-      EVOLUTION_RUNS_QUEUE_DEFAULT_WIDTH,
-      EVOLUTION_RUNS_QUEUE_BOUNDS.min,
-      EVOLUTION_RUNS_QUEUE_BOUNDS.max,
-      EVOLUTION_RUNS_QUEUE_WIDTH_KEY,
-    ),
-  );
-  const [libraryListWidth, setLibraryListWidth] = useState(() =>
-    resolveStoredPaneWidth(
-      EVOLUTION_LAYOUT_ID,
-      "library-list",
-      EVOLUTION_LIBRARY_LIST_DEFAULT_WIDTH,
-      EVOLUTION_LIBRARY_LIST_BOUNDS.min,
-      EVOLUTION_LIBRARY_LIST_BOUNDS.max,
-      EVOLUTION_LIBRARY_LIST_WIDTH_KEY,
-    ),
-  );
-  const [liveLaunchWidth, setLiveLaunchWidth] = useState(() =>
-    resolveStoredPaneWidth(
-      EVOLUTION_LAYOUT_ID,
-      "live-launch",
-      EVOLUTION_LIVE_LAUNCH_DEFAULT_WIDTH,
-      EVOLUTION_LIVE_LAUNCH_BOUNDS.min,
-      EVOLUTION_LIVE_LAUNCH_BOUNDS.max,
-      EVOLUTION_LIVE_LAUNCH_WIDTH_KEY,
-    ),
-  );
-  const [liveRunWidth, setLiveRunWidth] = useState(() =>
-    resolveStoredPaneWidth(
-      EVOLUTION_LAYOUT_ID,
-      "live-run",
-      EVOLUTION_LIVE_RUN_DEFAULT_WIDTH,
-      EVOLUTION_LIVE_RUN_BOUNDS.min,
-      EVOLUTION_LIVE_RUN_BOUNDS.max,
-      EVOLUTION_LIVE_RUN_WIDTH_KEY,
-    ),
-  );
+  useEffect(() => {
+    migrateLegacyNumericPanes(EVOLUTION_LAYOUT_ID, {
+      "runs-queue": EVOLUTION_RUNS_QUEUE_WIDTH_KEY,
+      "library-list": EVOLUTION_LIBRARY_LIST_WIDTH_KEY,
+      "live-launch": EVOLUTION_LIVE_LAUNCH_WIDTH_KEY,
+      "live-run": EVOLUTION_LIVE_RUN_WIDTH_KEY,
+    });
+  }, []);
+  const {
+    layoutRef: evolutionLayoutRef,
+    widths: evolutionPaneWidths,
+    draggingPaneId: evolutionDraggingPaneId,
+    startResize: startEvolutionPaneResize,
+    onResizeKeyDown: onEvolutionPaneResizeKeyDown,
+  } = usePersistedPaneResize({
+    layoutId: EVOLUTION_LAYOUT_ID,
+    panes: EVOLUTION_WIDTH_PANES,
+    preserveMainMinWidth: 360,
+  });
+  const runsQueueWidth = evolutionPaneWidths["runs-queue"] ?? EVOLUTION_RUNS_QUEUE_PANE.defaultWidth;
+  const libraryListWidth = evolutionPaneWidths["library-list"] ?? EVOLUTION_LIBRARY_LIST_PANE.defaultWidth;
+  const liveLaunchWidth = evolutionPaneWidths["live-launch"] ?? EVOLUTION_LIVE_LAUNCH_PANE.defaultWidth;
+  const liveRunWidth = evolutionPaneWidths["live-run"] ?? EVOLUTION_LIVE_RUN_PANE.defaultWidth;
   const [liveIoHeight, setLiveIoHeight] = useState(() =>
     // Heights stay on dedicated key (pane-layouts.v1 is width-oriented).
     storedPaneSize(
@@ -2149,22 +2153,6 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   }, [visibleLibraryEntries]);
 
   useEffect(() => {
-    persistPaneWidth(EVOLUTION_LAYOUT_ID, "runs-queue", runsQueueWidth);
-  }, [runsQueueWidth]);
-
-  useEffect(() => {
-    persistPaneWidth(EVOLUTION_LAYOUT_ID, "library-list", libraryListWidth);
-  }, [libraryListWidth]);
-
-  useEffect(() => {
-    persistPaneWidth(EVOLUTION_LAYOUT_ID, "live-launch", liveLaunchWidth);
-  }, [liveLaunchWidth]);
-
-  useEffect(() => {
-    persistPaneWidth(EVOLUTION_LAYOUT_ID, "live-run", liveRunWidth);
-  }, [liveRunWidth]);
-
-  useEffect(() => {
     window.localStorage.setItem(EVOLUTION_LIVE_IO_HEIGHT_KEY, String(liveIoHeight));
   }, [liveIoHeight]);
 
@@ -2632,29 +2620,6 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     setLibraryDeleteFilter("all");
   }
 
-  function beginPaneResize(
-    startX: number,
-    startWidth: number,
-    bounds: typeof EVOLUTION_RUNS_QUEUE_BOUNDS,
-    setWidth: (value: number) => void,
-    inverted = false,
-  ) {
-    const handleMove = (moveEvent: globalThis.PointerEvent) => {
-      const delta = moveEvent.clientX - startX;
-      setWidth(clampPaneWidth(startWidth + (inverted ? -delta : delta), bounds));
-    };
-    const handleEnd = () => {
-      window.removeEventListener("pointermove", handleMove);
-      window.removeEventListener("pointerup", handleEnd);
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
-    };
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
-    window.addEventListener("pointermove", handleMove);
-    window.addEventListener("pointerup", handleEnd);
-  }
-
   function beginPaneHeightResize(
     startY: number,
     startHeight: number,
@@ -2676,73 +2641,46 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     window.addEventListener("pointerup", handleEnd);
   }
 
-  function handleRunsResizeStart(event: PointerEvent<HTMLButtonElement>) {
-    if (event.button !== 0) {
-      return;
-    }
+  function handleRunsResizeStart(event: PointerEvent<any>) {
     if (runsQueueCollapsed) {
       return;
     }
-    event.preventDefault();
-    beginPaneResize(event.clientX, runsQueueWidth, EVOLUTION_RUNS_QUEUE_BOUNDS, setRunsQueueWidth);
+    startEvolutionPaneResize("runs-queue", event as PointerEvent<HTMLDivElement>, { direction: 1 });
   }
 
-  function handleRunsResizeKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+  function handleRunsResizeKeyDown(event: KeyboardEvent<any>) {
     if (runsQueueCollapsed) {
       return;
     }
-    const nextWidth = keyboardPaneWidth(runsQueueWidth, event.key, EVOLUTION_RUNS_QUEUE_BOUNDS);
-    if (nextWidth === null) {
-      return;
-    }
-    event.preventDefault();
-    setRunsQueueWidth(nextWidth);
+    onEvolutionPaneResizeKeyDown("runs-queue", event as KeyboardEvent<HTMLDivElement>, { direction: 1 });
   }
 
-  function handleLiveLaunchResizeStart(event: PointerEvent<HTMLButtonElement>) {
-    if (event.button !== 0) {
-      return;
-    }
+  function handleLiveLaunchResizeStart(event: PointerEvent<any>) {
     if (liveLaunchCollapsed) {
       return;
     }
-    event.preventDefault();
-    beginPaneResize(event.clientX, liveLaunchWidth, EVOLUTION_LIVE_LAUNCH_BOUNDS, setLiveLaunchWidth);
+    startEvolutionPaneResize("live-launch", event as PointerEvent<HTMLDivElement>, { direction: 1 });
   }
 
-  function handleLiveLaunchResizeKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+  function handleLiveLaunchResizeKeyDown(event: KeyboardEvent<any>) {
     if (liveLaunchCollapsed) {
       return;
     }
-    const nextWidth = keyboardPaneWidth(liveLaunchWidth, event.key, EVOLUTION_LIVE_LAUNCH_BOUNDS);
-    if (nextWidth === null) {
-      return;
-    }
-    event.preventDefault();
-    setLiveLaunchWidth(nextWidth);
+    onEvolutionPaneResizeKeyDown("live-launch", event as KeyboardEvent<HTMLDivElement>, { direction: 1 });
   }
 
-  function handleLiveRunResizeStart(event: PointerEvent<HTMLButtonElement>) {
-    if (event.button !== 0) {
-      return;
-    }
+  function handleLiveRunResizeStart(event: PointerEvent<any>) {
     if (liveRunCollapsed) {
       return;
     }
-    event.preventDefault();
-    beginPaneResize(event.clientX, liveRunWidth, EVOLUTION_LIVE_RUN_BOUNDS, setLiveRunWidth, true);
+    startEvolutionPaneResize("live-run", event as PointerEvent<HTMLDivElement>, { direction: -1 });
   }
 
-  function handleLiveRunResizeKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+  function handleLiveRunResizeKeyDown(event: KeyboardEvent<any>) {
     if (liveRunCollapsed) {
       return;
     }
-    const nextWidth = keyboardPaneWidth(liveRunWidth, event.key, EVOLUTION_LIVE_RUN_BOUNDS, true);
-    if (nextWidth === null) {
-      return;
-    }
-    event.preventDefault();
-    setLiveRunWidth(nextWidth);
+    onEvolutionPaneResizeKeyDown("live-run", event as KeyboardEvent<HTMLDivElement>, { direction: -1 });
   }
 
   function handleLiveIoResizeStart(event: PointerEvent<HTMLButtonElement>) {
@@ -2762,27 +2700,18 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     setLiveIoHeight(nextHeight);
   }
 
-  function handleLibraryResizeStart(event: PointerEvent<HTMLButtonElement>) {
-    if (event.button !== 0) {
-      return;
-    }
+  function handleLibraryResizeStart(event: PointerEvent<any>) {
     if (libraryListCollapsed) {
       return;
     }
-    event.preventDefault();
-    beginPaneResize(event.clientX, libraryListWidth, EVOLUTION_LIBRARY_LIST_BOUNDS, setLibraryListWidth);
+    startEvolutionPaneResize("library-list", event as PointerEvent<HTMLDivElement>, { direction: 1 });
   }
 
-  function handleLibraryResizeKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+  function handleLibraryResizeKeyDown(event: KeyboardEvent<any>) {
     if (libraryListCollapsed) {
       return;
     }
-    const nextWidth = keyboardPaneWidth(libraryListWidth, event.key, EVOLUTION_LIBRARY_LIST_BOUNDS);
-    if (nextWidth === null) {
-      return;
-    }
-    event.preventDefault();
-    setLibraryListWidth(nextWidth);
+    onEvolutionPaneResizeKeyDown("library-list", event as KeyboardEvent<HTMLDivElement>, { direction: 1 });
   }
 
   function renderReviewList(lines: string[]) {
@@ -2962,7 +2891,11 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   }
 
   return (
-    <div className={activeTrack === "self" ? `${styles.page} ${styles.selfPage}` : styles.page}>
+    <div
+      ref={evolutionLayoutRef}
+      className={activeTrack === "self" ? `${styles.page} ${styles.selfPage}` : styles.page}
+      data-vui-layout-id={EVOLUTION_LAYOUT_ID}
+    >
       {showRouteToolbar ? (
         <VRouteHeader
           aria-label={routeTitle}
@@ -3438,6 +3371,10 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
             collapseLabel={lang === "zh" ? "收起启动卡片" : "Collapse launch card"}
             expandLabel={lang === "zh" ? "展开启动卡片" : "Expand launch card"}
             className={`${styles.resizeHandle} ${styles.liveResizeHandle} ${styles.liveResizeHandleLaunch}`}
+            active={evolutionDraggingPaneId === "live-launch"}
+            valueNow={liveLaunchWidth}
+            valueMin={EVOLUTION_LIVE_LAUNCH_PANE.minWidth}
+            valueMax={EVOLUTION_LIVE_LAUNCH_PANE.maxWidth}
             onToggle={() => setLiveLaunchCollapsed((current) => !current)}
             onPointerDown={handleLiveLaunchResizeStart}
             onKeyDown={handleLiveLaunchResizeKeyDown}
@@ -3486,6 +3423,10 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
             collapseLabel={lang === "zh" ? "收起当前任务卡片" : "Collapse active run card"}
             expandLabel={lang === "zh" ? "展开当前任务卡片" : "Expand active run card"}
             className={`${styles.resizeHandle} ${styles.liveResizeHandle} ${styles.liveResizeHandleRun}`}
+            active={evolutionDraggingPaneId === "live-run"}
+            valueNow={liveRunWidth}
+            valueMin={EVOLUTION_LIVE_RUN_PANE.minWidth}
+            valueMax={EVOLUTION_LIVE_RUN_PANE.maxWidth}
             onToggle={() => setLiveRunCollapsed((current) => !current)}
             onPointerDown={handleLiveRunResizeStart}
             onKeyDown={handleLiveRunResizeKeyDown}
@@ -3720,6 +3661,10 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                 collapseLabel={lang === "zh" ? "收起运行列表" : "Collapse run list"}
                 expandLabel={lang === "zh" ? "展开运行列表" : "Expand run list"}
                 className={styles.resizeHandle}
+                active={evolutionDraggingPaneId === "runs-queue"}
+                valueNow={runsQueueWidth}
+                valueMin={EVOLUTION_RUNS_QUEUE_PANE.minWidth}
+                valueMax={EVOLUTION_RUNS_QUEUE_PANE.maxWidth}
                 onToggle={() => setRunsQueueCollapsed((current) => !current)}
                 onPointerDown={handleRunsResizeStart}
                 onKeyDown={handleRunsResizeKeyDown}
@@ -4106,6 +4051,10 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
               collapseLabel={lang === "zh" ? "收起提案列表" : "Collapse proposal list"}
               expandLabel={lang === "zh" ? "展开提案列表" : "Expand proposal list"}
               className={styles.resizeHandle}
+              active={evolutionDraggingPaneId === "library-list"}
+              valueNow={libraryListWidth}
+              valueMin={EVOLUTION_LIBRARY_LIST_PANE.minWidth}
+              valueMax={EVOLUTION_LIBRARY_LIST_PANE.maxWidth}
               onToggle={() => setLibraryListCollapsed((current) => !current)}
               onPointerDown={handleLibraryResizeStart}
               onKeyDown={handleLibraryResizeKeyDown}
