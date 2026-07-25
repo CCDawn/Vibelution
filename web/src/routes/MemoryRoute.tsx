@@ -4251,7 +4251,9 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
         ref={memoryLayoutRef}
         className={styles.workspace}
         style={memoryLayoutStyle}
+        data-vui-recipe="memory-knowledge-workbench"
         data-vui-layout-id={MEMORY_LAYOUT_ID}
+        data-vui-region="memory-sources-workspace"
       >
         {createSourceAndItemPanels(copy.sourceAudit)}
         {createDetailPanel()}
@@ -4303,7 +4305,9 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
         ref={memoryLayoutRef}
         className={`${styles.workspace} ${styles.knowledgeWorkspace}`}
         style={memoryLayoutStyle}
+        data-vui-recipe="memory-knowledge-workbench"
         data-vui-layout-id={MEMORY_LAYOUT_ID}
+        data-vui-region="memory-knowledge-workspace"
       >
         <MemoryKnowledgeBaseSidebar
           copy={copy}
@@ -4527,6 +4531,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     <VDenseOpsPage
       className={styles.route}
       headerClassName={styles.header}
+      data-vui-domain-recipe="memory-knowledge-workbench"
       ariaLabel={memoryViewLabel(copy, forcedView)}
       eyebrow={copy.eyebrow}
       title={memoryViewLabel(copy, forcedView)}

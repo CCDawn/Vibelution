@@ -1,7 +1,11 @@
 import { Search, XCircle } from "lucide-react";
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, type CSSProperties } from "react";
 
 import type { MemoryKnowledgeGraphEdge, MemoryKnowledgeGraphNode, MemoryKnowledgeGraphPayload } from "../api/types";
+import { PaneHeightResizeHandle } from "../components/layout/PaneHeightResizeHandle";
+import type { PaneHeightSpec } from "../components/layout/paneHeightPersistence";
+import { usePersistedPaneHeight } from "../components/layout/usePersistedPaneHeight";
+import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import { VButton, VMetricStrip, VNativeInput, VSection, VSurface } from "../components/vui";
 import {
   GRAPH_NODE_TYPE_LABELS,
@@ -62,6 +66,15 @@ type MemoryGraphViewPanelProps = {
   onFocusGraphNode: (nodeId: string) => void;
 };
 
+const MEMORY_GRAPH_LAYOUT_ID = WORKBENCH_LAYOUT_IDS.memory;
+const MEMORY_GRAPH_NODE_LIST_PANE: PaneHeightSpec = {
+  id: "graph-node-list",
+  defaultHeight: 168,
+  minHeight: 96,
+  maxHeight: 360,
+};
+const MEMORY_GRAPH_HEIGHT_PANES: PaneHeightSpec[] = [MEMORY_GRAPH_NODE_LIST_PANE];
+
 export function MemoryGraphViewPanel({
   copy,
   graphPayload,
@@ -82,6 +95,20 @@ export function MemoryGraphViewPanel({
   onSelectGraphNode,
   onFocusGraphNode,
 }: MemoryGraphViewPanelProps) {
+  const {
+    heights: graphHeights,
+    draggingPaneId: graphHeightDraggingPaneId,
+    startResize: startGraphHeightResize,
+    onResizeKeyDown: onGraphHeightResizeKeyDown,
+  } = usePersistedPaneHeight({
+    layoutId: MEMORY_GRAPH_LAYOUT_ID,
+    panes: MEMORY_GRAPH_HEIGHT_PANES,
+  });
+  const graphNodeListHeight = graphHeights["graph-node-list"] ?? MEMORY_GRAPH_NODE_LIST_PANE.defaultHeight;
+  const graphCanvasStyle = {
+    ["--memory-graph-node-list-height" as string]: `${graphNodeListHeight}px`,
+  } as CSSProperties;
+
   return (
     <>
       <VMetricStrip
@@ -96,8 +123,19 @@ export function MemoryGraphViewPanel({
         ]}
       />
 
-      <div className={`${styles.workspace} ${styles.graphWorkspace}`}>
-        <VSurface as="aside" className={styles.sourcePanel} elevation="panel" tone="rail">
+      <div
+        className={`${styles.workspace} ${styles.graphWorkspace}`}
+        data-vui-recipe="memory-knowledge-workbench"
+        data-vui-layout-id={MEMORY_GRAPH_LAYOUT_ID}
+        data-vui-region="memory-graph-workspace"
+      >
+        <VSurface
+          as="aside"
+          className={styles.sourcePanel}
+          elevation="panel"
+          tone="rail"
+          data-vui-region="memory-graph-filters"
+        >
           <div className={styles.panelHeader}>
             <div>
               <p className={styles.panelEyebrow}>{copy.knowledgeGraph}</p>
@@ -141,7 +179,14 @@ export function MemoryGraphViewPanel({
           </VSection>
         </VSurface>
 
-        <VSurface as="main" className={styles.graphCanvasPanel} elevation="panel" tone="rail">
+        <VSurface
+          as="main"
+          className={styles.graphCanvasPanel}
+          elevation="panel"
+          tone="rail"
+          style={graphCanvasStyle}
+          data-vui-region="memory-graph-canvas"
+        >
           <div className={styles.graphCanvasToolbar}>
             <div>
               <p className={styles.panelEyebrow}>{copy.knowledgeGraph}</p>
@@ -160,7 +205,17 @@ export function MemoryGraphViewPanel({
               fallbackText={copy.graphCanvasFallback}
             />
           </Suspense>
-          <div className={styles.graphNodeList}>
+          <PaneHeightResizeHandle
+            label={copy.graphNodes}
+            valueNow={graphNodeListHeight}
+            valueMin={MEMORY_GRAPH_NODE_LIST_PANE.minHeight}
+            valueMax={MEMORY_GRAPH_NODE_LIST_PANE.maxHeight}
+            active={graphHeightDraggingPaneId === "graph-node-list"}
+            className={styles.graphNodeListResizeHandle}
+            onPointerDown={(event) => startGraphHeightResize("graph-node-list", event, { direction: 1 })}
+            onKeyDown={(event) => onGraphHeightResizeKeyDown("graph-node-list", event, { direction: 1 })}
+          />
+          <div className={styles.graphNodeList} data-vui-region="memory-graph-node-list">
             {filteredGraphNodes.slice(0, 80).map((node) => (
               <VButton
                 key={node.id}
@@ -179,16 +234,18 @@ export function MemoryGraphViewPanel({
           </div>
         </VSurface>
 
-        <MemoryGraphNodeInspectorPanel
-          copy={copy}
-          selectedGraphNode={selectedGraphNode}
-          selectedGraphChildren={selectedGraphChildren}
-          selectedGraphRelations={selectedGraphRelations}
-          selectedGraphDetailItems={selectedGraphDetailItems}
-          isGraphNodeDetailFetching={isGraphNodeDetailFetching}
-          formatTimestamp={formatTimestamp}
-          onFocusGraphNode={onFocusGraphNode}
-        />
+        <div data-vui-region="memory-graph-inspector">
+          <MemoryGraphNodeInspectorPanel
+            copy={copy}
+            selectedGraphNode={selectedGraphNode}
+            selectedGraphChildren={selectedGraphChildren}
+            selectedGraphRelations={selectedGraphRelations}
+            selectedGraphDetailItems={selectedGraphDetailItems}
+            isGraphNodeDetailFetching={isGraphNodeDetailFetching}
+            formatTimestamp={formatTimestamp}
+            onFocusGraphNode={onFocusGraphNode}
+          />
+        </div>
       </div>
     </>
   );

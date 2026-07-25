@@ -413,9 +413,14 @@ describe("MemoryRoute layout contract", () => {
     expect(managePanelStyles.manageFilterPanel).not.toMatch(/bg-vui-surface-panel|bg-\[var\(--vui-surface-panel\)\]/);
     expect(graphViewPanelSource).toContain("VMetricStrip");
     expect(graphViewPanelSource).toContain("VSurface");
+    expect(graphViewPanelSource).toContain("usePersistedPaneHeight");
+    expect(graphViewPanelSource).toContain("PaneHeightResizeHandle");
+    expect(graphViewPanelSource).toContain("graph-node-list");
     expect(graphViewPanelSource).not.toContain("styles.summaryCard");
     expect(graphViewPanelStyles.sourcePanel).not.toMatch(/bg-vui-surface-panel|bg-\[var\(--vui-surface-panel\)\]/);
     expect(graphViewPanelStyles.graphCanvasPanel).not.toContain("rounded-[var(--radius-panel)]");
+    expect(graphViewPanelStyles.graphCanvasPanel).toContain("--memory-graph-node-list-height");
+    expect(graphViewPanelStyles.graphNodeListResizeHandle).not.toContain("cursor-row-resize");
     expect(graphViewPanelStyles).not.toHaveProperty("managementHeader");
   });
 

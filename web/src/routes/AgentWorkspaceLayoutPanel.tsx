@@ -109,6 +109,7 @@ export function AgentWorkspaceLayoutPanel({
       className={styles.workspace}
       style={layoutStyle}
       data-agent-workspace="resizable"
+      data-vui-recipe="agents-workspace-shell"
       data-vui-layout-id={LAYOUT_ID}
       data-has-inspector={hasInspector ? "true" : "false"}
     >
@@ -116,6 +117,7 @@ export function AgentWorkspaceLayoutPanel({
         className={styles.directory}
         style={{ width: leftWidth, flexBasis: leftWidth }}
         data-agent-pane="directory"
+        data-vui-region="agents-directory"
       >
         <div className={styles.directoryFilter}>
           <AgentFilterRail {...filterRail} />
@@ -135,7 +137,7 @@ export function AgentWorkspaceLayoutPanel({
         onKeyDown={(event) => onResizeKeyDown("left", event, { direction: 1 })}
       />
 
-      <div className={styles.main} data-agent-pane="main">
+      <div className={styles.main} data-agent-pane="main" data-vui-region="agents-detail">
         <AgentDetailWorkspacePanel {...detailWorkspace} />
       </div>
 
@@ -161,6 +163,7 @@ export function AgentWorkspaceLayoutPanel({
             className={styles.inspector}
             style={{ width: rightWidth, flexBasis: rightWidth }}
             data-agent-pane="inspector"
+            data-vui-region="agents-inspector"
           >
             <AgentInspectorRailPanel {...inspectorRail} />
           </div>
