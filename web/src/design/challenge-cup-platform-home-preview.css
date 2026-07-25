@@ -245,6 +245,28 @@ button {
   gap: 8px;
 }
 
+.title-with-hint,
+[data-vui-hint] {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+}
+
+.title-with-hint {
+  gap: 5px;
+}
+
+[data-vui-hint] {
+  min-height: 18px;
+}
+
+[data-vui-hint-title] strong {
+  cursor: help;
+  text-decoration: underline dotted color-mix(in srgb, var(--muted) 48%, transparent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
 h1,
 h2,
 h3,
@@ -269,8 +291,7 @@ h3 {
   font-size: 14px;
 }
 
-.project-identity p,
-.workspace-header p {
+.project-identity p {
   margin-bottom: 0;
   color: var(--muted);
   font-size: 12px;
@@ -424,28 +445,14 @@ h3 {
 }
 
 .stage-copy {
-  display: grid;
+  display: flex;
   min-width: 0;
+  align-items: center;
   gap: 2px;
-}
-
-.stage-copy small,
-.stage-summary small {
-  color: var(--muted);
-  font-size: 9px;
 }
 
 .stage-copy strong {
   font-size: 13px;
-}
-
-.stage-copy em {
-  overflow: hidden;
-  color: var(--muted);
-  font-size: 10px;
-  font-style: normal;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .stage-summary {
@@ -578,8 +585,9 @@ h3 {
 
 .substage-progress li > div {
   z-index: 1;
-  display: grid;
+  display: flex;
   width: fit-content;
+  align-items: center;
   gap: 2px;
   padding-right: 6px;
   background: var(--surface);
@@ -587,11 +595,6 @@ h3 {
 
 .substage-progress strong {
   font-size: 11px;
-}
-
-.substage-progress small {
-  color: var(--muted);
-  font-size: 9px;
 }
 
 .metric-grid {
@@ -623,14 +626,6 @@ h3 {
   font-size: 18px;
 }
 
-.metric-grid small {
-  overflow: hidden;
-  color: var(--muted);
-  font-size: 9px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .current-task {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 290px;
@@ -645,14 +640,6 @@ h3 {
   display: grid;
   min-width: 0;
   gap: 5px;
-}
-
-.task-main p {
-  max-width: 760px;
-  margin-bottom: 3px;
-  color: var(--muted);
-  font-size: 11px;
-  line-height: 1.55;
 }
 
 .query-chips {
@@ -760,21 +747,14 @@ h3 {
 }
 
 .output-grid article > div {
-  display: grid;
+  display: flex;
   min-width: 0;
+  align-items: center;
   gap: 2px;
 }
 
 .output-grid strong {
   font-size: 10px;
-}
-
-.output-grid small {
-  overflow: hidden;
-  color: var(--muted);
-  font-size: 9px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .output-grid em {
@@ -804,11 +784,6 @@ h3 {
 
 .workspace-actions strong {
   font-size: 11px;
-}
-
-.workspace-actions span {
-  color: var(--muted);
-  font-size: 9px;
 }
 
 .blocked-callout {
@@ -848,12 +823,6 @@ h3 {
   font-size: 12px;
 }
 
-.blocked-callout p {
-  margin-bottom: 0;
-  color: var(--muted);
-  font-size: 10px;
-}
-
 .design-summary {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -864,50 +833,22 @@ h3 {
   display: grid;
   align-content: start;
   gap: 7px;
-  min-height: 180px;
+  min-height: 128px;
   padding: 13px;
   border: 1px solid var(--line);
   border-radius: 9px;
   background: var(--surface-soft);
 }
 
-.design-summary p {
-  margin-bottom: 2px;
-  color: var(--muted);
-  font-size: 10px;
-  line-height: 1.5;
-}
-
 .design-summary .button {
   width: fit-content;
 }
 
-.design-summary ul {
-  display: grid;
-  gap: 8px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.design-summary li {
-  padding-left: 18px;
-  color: var(--muted);
-  font-size: 10px;
-}
-
-.design-summary li::before {
-  position: absolute;
-  margin-left: -17px;
-  content: "○";
-}
-
-.design-summary li.done {
-  color: var(--success);
-}
-
-.design-summary li.done::before {
-  content: "✓";
+.compact-gate {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--warning);
 }
 
 .contract-grid {
@@ -946,12 +887,6 @@ h3 {
   white-space: nowrap;
 }
 
-.contract-grid small {
-  color: var(--muted);
-  font-size: 9px;
-  line-height: 1.4;
-}
-
 .iteration-lanes {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr);
@@ -981,12 +916,6 @@ h3 {
   font-size: 11px;
 }
 
-.iteration-lanes small {
-  color: var(--muted);
-  font-size: 9px;
-  line-height: 1.4;
-}
-
 .iteration-lanes > i {
   color: var(--subtle);
   font-size: 12px;
@@ -1010,13 +939,6 @@ h3 {
   gap: 4px;
 }
 
-.empty-run-state p {
-  margin-bottom: 0;
-  color: var(--muted);
-  font-size: 10px;
-  line-height: 1.55;
-}
-
 .inspector {
   display: grid;
   align-content: start;
@@ -1029,13 +951,6 @@ h3 {
 
 .inspector-card h2 {
   font-size: 13px;
-}
-
-.inspector-card p {
-  margin: 6px 0 11px;
-  color: var(--muted);
-  font-size: 10px;
-  line-height: 1.55;
 }
 
 .next-action {
