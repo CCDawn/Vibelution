@@ -15,6 +15,10 @@ import {
   completedToolPresentationSummary,
   type ConversationToolPresentationLanguage,
 } from "./conversationToolPresentation";
+import {
+  buildConversationToolActivityPresentation,
+  type ConversationToolActivityPresentationItem,
+} from "./conversationToolActivityPresentation";
 import styles from "./ConversationToolActivity.styles";
 
 type ConversationToolActivityProps = {
@@ -147,17 +151,70 @@ function ToolActivityItem({
   );
 }
 
+function ToolActivityBatch({
+  item,
+  language,
+  renderToolDetails,
+}: {
+  item: Extract<ConversationToolActivityPresentationItem, { kind: "batch" }>;
+  language: ConversationToolPresentationLanguage;
+  renderToolDetails: ConversationToolActivityProps["renderToolDetails"];
+}) {
+  const descriptor = conversationToolRendererForPresentationLabel(item.title, language);
+  const Icon = descriptor.icon;
+  const countLabel = language === "zh" ? `${item.count} 次` : `${item.count} calls`;
+  const label = language === "zh"
+    ? `展开或收起连续工具调用：${item.title}，${countLabel}`
+    : `Expand or collapse repeated tool calls: ${item.title}, ${countLabel}`;
+
+  return (
+    <details
+      className={`${styles.batch} group`}
+      data-codex-tool-activity-batch="true"
+      data-codex-tool-activity-count={item.count}
+      data-conversation-part-key={item.id}
+    >
+      <summary className={styles.batchSummary} aria-label={label}>
+        <Icon className={styles.itemIcon} size={15} aria-hidden="true" />
+        <span className={styles.itemBody}>
+          <span className={styles.itemTitle}>{item.title}</span>
+          <span className={styles.batchCount}>· {countLabel}</span>
+        </span>
+        <ChevronDown className={styles.itemChevron} size={14} aria-hidden="true" />
+      </summary>
+      <div className={styles.batchDetails}>
+        {item.cells.map((cell) => (
+          <ToolActivityItem
+            key={cell.id}
+            cell={cell}
+            language={language}
+            renderToolDetails={renderToolDetails}
+          />
+        ))}
+      </div>
+    </details>
+  );
+}
+
 export function ConversationToolActivity({
   activity,
   language,
   renderToolDetails,
 }: ConversationToolActivityProps) {
+  const items = buildConversationToolActivityPresentation(activity.cells, language);
   return (
     <div className={styles.activity} data-codex-tool-activity="inline">
-      {activity.cells.map((cell) => (
+      {items.map((item) => item.kind === "batch" ? (
+        <ToolActivityBatch
+          key={item.id}
+          item={item}
+          language={language}
+          renderToolDetails={renderToolDetails}
+        />
+      ) : (
         <ToolActivityItem
-          key={cell.id}
-          cell={cell}
+          key={item.id}
+          cell={item.cell}
           language={language}
           renderToolDetails={renderToolDetails}
         />

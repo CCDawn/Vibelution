@@ -55,6 +55,28 @@ describe("ConversationToolActivity", () => {
     expect(html).toContain("代码图谱");
   });
 
+  it("folds a long same-tool run into one in-place batch while preserving its details", () => {
+    const html = renderToStaticMarkup(
+      <ConversationToolActivity
+        activity={createCodexTranscriptToolActivity([
+          toolCell("tool-1", "已完成"),
+          toolCell("tool-2", "已完成"),
+          toolCell("tool-3", "已完成"),
+          toolCell("tool-4", "已完成"),
+        ])}
+        language="zh"
+        renderToolDetails={(cell) => <pre>{`详情 ${cell.id}`}</pre>}
+      />,
+    );
+
+    expect(html).toContain('data-codex-tool-activity-batch="true"');
+    expect(html.match(/data-codex-tool-activity-item="true"/g)).toHaveLength(4);
+    expect(html).toContain('data-codex-tool-activity-count="4"');
+    expect(html).toContain(">· 4 次</span>");
+    expect(html).toContain("详情 tool-1");
+    expect(html).toContain("详情 tool-4");
+  });
+
   it("keeps tool details expandable with one compact disclosure chevron", () => {
     const html = renderToStaticMarkup(
       <ConversationToolActivity
