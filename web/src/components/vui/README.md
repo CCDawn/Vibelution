@@ -72,7 +72,18 @@ New list-detail pages should start from a page recipe + registry `layoutId`. Dom
 
 **Evolution / Runtime scenes:** multi-column Evolution width rails and Logs nested `RuntimeScenesPane` sidebar use `usePersistedPaneResize` + registry ids (`evolution`, `logs-runtime-scenes`). Self-evolution sidebar uses the same hook (`evolution-self`).
 
-**Heights:** vertical splitters use `vibelution.pane-heights.v1` (`paneHeightPersistence.ts`), same layoutId namespace as widths. Evolution CASE IO height is `evolution` / `live-io` (legacy key migrated once).
+**Heights:** vertical splitters use `vibelution.pane-heights.v1` (`paneHeightPersistence.ts`), same layoutId namespace as widths. Prefer `usePersistedPaneHeight` + `PaneHeightResizeHandle`. Evolution CASE IO is `evolution` / `live-io` (legacy key migrated once).
+
+## Wave 5 shell rules
+
+| Prefer | Avoid |
+| --- | --- |
+| `attachAxisResizeSession` for window-level drag body cursor | Copy-pasted pointermove/up listeners per route |
+| `usePersistedPaneResize` / `usePersistedPaneHeight` | New `vibelution.*-width` / `*-height` localStorage keys |
+| `WORKBENCH_LAYOUT_IDS.*` + `data-vui-layout-id` | Hard-coded layout id strings |
+| Chat dual-write via `setChatPanelWidths` (shellStore + pane-layouts) | Direct Chat width keys outside shellStore |
+
+Gate: `components/layout/workbenchLayoutGate.test.ts` blocks new ad-hoc width/height keys under `routes/`.
 
 Each sets `data-vui-recipe="…"` on the page root for contracts and debugging.
 
