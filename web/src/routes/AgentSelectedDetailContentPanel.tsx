@@ -5,6 +5,7 @@ import { AgentActivityPanePanel } from "./AgentActivityPanePanel";
 import { AgentConfigPrimaryPanePanel } from "./AgentConfigPrimaryPanePanel";
 import { AgentConfigPolicyPanePanel } from "./AgentConfigPolicyPanePanel";
 import { AgentConfigReferencesPanePanel } from "./AgentConfigReferencesPanePanel";
+import { AgentEffectiveConfigurationPanel } from "./AgentEffectiveConfigurationPanel";
 import {
   AgentDetailHeaderPanel,
   type AgentDetailHeaderPaneView,
@@ -15,7 +16,7 @@ import { AgentOverviewOperationsPanel } from "./AgentOverviewOperationsPanel";
 import { AgentOverviewResourcesPanel } from "./AgentOverviewResourcesPanel";
 import styles from "./AgentSelectedDetailContentPanel.styles";
 
-export type AgentSelectedDetailPaneId = "overview" | "config" | "activity";
+export type AgentSelectedDetailPaneId = "overview" | "effective" | "config" | "activity";
 
 export type AgentConfigSectionId = "basic" | "profile" | "capability" | "ops";
 
@@ -35,6 +36,7 @@ export type AgentSelectedDetailContentPanelProps = {
   overview: ComponentProps<typeof AgentOverviewPanel> | null;
   operations: ComponentProps<typeof AgentOverviewOperationsPanel> | null;
   resources: ComponentProps<typeof AgentOverviewResourcesPanel> | null;
+  effectiveConfiguration: ComponentProps<typeof AgentEffectiveConfigurationPanel>;
   configPrimary: ComponentProps<typeof AgentConfigPrimaryPanePanel>;
   configPolicies: ComponentProps<typeof AgentConfigPolicyPanePanel>;
   configReferences: ComponentProps<typeof AgentConfigReferencesPanePanel>;
@@ -73,6 +75,7 @@ export function AgentSelectedDetailContentPanel({
   overview,
   operations,
   resources,
+  effectiveConfiguration,
   configPrimary,
   configPolicies,
   configReferences,
@@ -115,6 +118,11 @@ export function AgentSelectedDetailContentPanel({
               {resources ? <AgentOverviewResourcesPanel {...resources} /> : null}
             </aside>
           ) : null}
+        </div>
+      ) : null}
+      {activePane === "effective" ? (
+        <div className={styles.paneContent}>
+          <AgentEffectiveConfigurationPanel {...effectiveConfiguration} />
         </div>
       ) : null}
       {activePane === "config" ? (

@@ -936,9 +936,11 @@ def test_agent_config_workspace_projects_effective_configuration_sources(tmp_pat
     }
     assert fields["dialogueModel"]["effectiveValue"] == "model-primary"
     assert fields["dialogueModel"]["source"]["kind"] == "agent"
+    assert fields["dialogueModel"]["status"] == "ready"
     assert fields["contextCompression"]["effectiveValue"]["maxTokenLimit"] == 9000
     assert fields["contextCompression"]["source"]["kind"] == "agent"
     assert fields["delegation"]["effectiveValue"]["maxConcurrent"] == 3
+    assert fields["delegation"]["status"] == "ready"
     assert fields["supervision"]["effectiveValue"]["reviewMode"] == "required"
     assert all(item["inheritanceChain"] for item in fields.values())
 

@@ -8,15 +8,28 @@ from typing import Any
 from .agent_directory_service import agent_dialogue_model_id, normalize_delegation_policy, normalize_supervision_policy
 
 
-def _configuration_status(agent: dict[str, Any]) -> str:
-    severities = {
-        str(item.get("severity") or "").strip()
+_FIELD_ISSUE_PREFIXES = {
+    "promptTemplate": ("missing_prompt_template", "missing_prompt_source"),
+    "toolPolicy": ("missing_tool_policy", "tool_policy_required"),
+    "memoryPolicy": ("missing_memory_policy",),
+}
+
+
+def _field_status(agent: dict[str, Any], key: str, effective_value: Any) -> str:
+    if key == "dialogueModel" and not str(effective_value or "").strip():
+        return "blocked"
+    if key in {"promptTemplate", "toolPolicy", "memoryPolicy"} and not str(effective_value or "").strip():
+        return "warning"
+    prefixes = _FIELD_ISSUE_PREFIXES.get(key, ())
+    relevant = [
+        item
         for item in list(agent.get("health") or [])
         if isinstance(item, dict)
-    }
-    if "blocking" in severities:
+        and any(str(item.get("code") or "").strip().startswith(prefix) for prefix in prefixes)
+    ]
+    if any(str(item.get("severity") or "").strip() == "blocking" for item in relevant):
         return "blocked"
-    if "warning" in severities:
+    if relevant:
         return "warning"
     return "ready"
 
@@ -62,7 +75,6 @@ def derive_effective_configuration(agent: dict[str, Any]) -> dict[str, Any]:
     """Project already-hydrated Agent data without reading any additional store."""
     agent_id = str(agent.get("agentId") or "").strip()
     metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
-    status = _configuration_status(agent)
     dialogue_model_id = agent_dialogue_model_id(agent)
     prompt_template_id = str(agent.get("promptTemplateId") or "").strip()
     default_prompt_template_id = str(agent.get("defaultPromptTemplateId") or "").strip()
@@ -104,14 +116,14 @@ def derive_effective_configuration(agent: dict[str, Any]) -> dict[str, Any]:
                 label="对话模型",
                 effective_value=dialogue_model_id,
                 source=_configuration_source("agent", agent_id, "Agent 模型绑定"),
-                status=status,
+                status=_field_status(agent, "dialogueModel", dialogue_model_id),
             ),
             _field(
                 key="promptTemplate",
                 label="提示词模板",
                 effective_value=prompt_template_id,
                 source=prompt_source,
-                status=status,
+                status=_field_status(agent, "promptTemplate", prompt_template_id),
                 inheritance_chain=prompt_chain,
             ),
             _field(
@@ -123,14 +135,14 @@ def derive_effective_configuration(agent: dict[str, Any]) -> dict[str, Any]:
                     tool_policy_id,
                     str(tool_source.get("label") or "工具策略"),
                 ),
-                status=status,
+                status=_field_status(agent, "toolPolicy", tool_policy_id),
             ),
             _field(
                 key="memoryPolicy",
                 label="记忆策略",
                 effective_value=memory_policy_id,
                 source=_configuration_source(memory_source_kind, memory_policy_id, "记忆策略"),
-                status=status,
+                status=_field_status(agent, "memoryPolicy", memory_policy_id),
             ),
             _field(
                 key="contextCompression",
@@ -141,7 +153,7 @@ def derive_effective_configuration(agent: dict[str, Any]) -> dict[str, Any]:
                     agent_id if compression_source_kind == "agent" else "global",
                     "Agent 覆盖" if compression_source_kind == "agent" else "全局默认",
                 ),
-                status=status,
+                status=_field_status(agent, "contextCompression", compression),
             ),
             _field(
                 key="delegation",
@@ -152,7 +164,7 @@ def derive_effective_configuration(agent: dict[str, Any]) -> dict[str, Any]:
                     agent_id if delegation_custom else "default",
                     "Agent 委派策略" if delegation_custom else "系统默认委派策略",
                 ),
-                status=status,
+                status=_field_status(agent, "delegation", delegation),
             ),
             _field(
                 key="supervision",
@@ -163,7 +175,7 @@ def derive_effective_configuration(agent: dict[str, Any]) -> dict[str, Any]:
                     agent_id if supervision_custom else "default",
                     "Agent 监督策略" if supervision_custom else "系统默认监督策略",
                 ),
-                status=status,
+                status=_field_status(agent, "supervision", supervision),
             ),
         ],
     }

@@ -50,6 +50,7 @@ import toolGovernanceStyles from "./AgentToolGovernancePanel.styles";
 import toolSummaryStyles from "./AgentToolSummaryPanel.styles";
 import returnBannerStyles from "./AgentReturnBannerPanel.styles";
 import selectedDetailContentStyles from "./AgentSelectedDetailContentPanel.styles";
+import effectiveConfigurationStyles from "./AgentEffectiveConfigurationPanel.styles";
 import workspaceLayoutStyles from "./AgentWorkspaceLayoutPanel.styles";
 import agentCreateDialogStyles from "./agent-create/AgentCreateWizardDialog.styles";
 import routerSource from "../app/router.tsx?raw";
@@ -181,6 +182,10 @@ const detailWorkspacePanelSource = readFileSync(
 );
 const selectedDetailContentPanelSource = readFileSync(
   new URL("./AgentSelectedDetailContentPanel.tsx", import.meta.url),
+  "utf-8",
+);
+const effectiveConfigurationPanelSource = readFileSync(
+  new URL("./AgentEffectiveConfigurationPanel.tsx", import.meta.url),
   "utf-8",
 );
 const overviewPanelSource = readFileSync(
@@ -507,7 +512,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain('searchParams.get("create") === "1"');
     expect(routeSource).toContain("const createOpen = requestedCreate");
     expect(routeSource).toContain("setCreateWizardOpen(false)");
-    expect(routeSource).toContain('const fullWorkspaceNeeded = Boolean(activePane === "config" || activePane === "activity" || requestedAgentId)');
+    expect(routeSource).toContain('const fullWorkspaceNeeded = Boolean(activePane === "effective" || activePane === "config" || activePane === "activity" || requestedAgentId)');
     expect(routeSource).toContain("<AgentCreateWizardDialog");
     expect(routeSource).toContain("triggerRef={agentCreateTriggerRef}");
     expect(agentCreateDialogSource).toContain('enabled: open');
@@ -1442,12 +1447,14 @@ describe("AgentsRoute layout contract", () => {
 
   it("organizes the Agent card into three switchable panes with run history", () => {
     expect(routeSource).toContain("AgentConfigPaneId");
-    expect(routeSource).toContain('type AgentConfigPaneId = "overview" | "config" | "activity"');
+    expect(routeSource).toContain('type AgentConfigPaneId = "overview" | "effective" | "config" | "activity"');
     expect(routeSource).toContain("agentConfigPanes(copy, selectedAgent)");
     expect(routeSource).toContain("AgentManagementBrief");
     expect(routeSource).toContain("buildAgentManagementBrief(selectedAgent, copy, lang)");
     expect(selectedDetailContentPanelSource).toContain("AgentManagementBriefPanel");
     expect(selectedDetailContentPanelSource).toContain("AgentOverviewPanel");
+    expect(selectedDetailContentPanelSource).toContain("AgentEffectiveConfigurationPanel");
+    expect(selectedDetailContentPanelSource).toContain('activePane === "effective"');
     expect(routeSource).toContain("copy.managementBriefTitle");
     expect(routeSource).toContain("copy.nextActionsTitle");
     expect(routeSource).not.toContain("className={styles.managementBriefPanel}");
@@ -1474,6 +1481,8 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).not.toContain("summary?.runningAgentCount");
     expect(routeSource).not.toContain("summary?.blockedAgentCount");
     expect(routeSource).toContain("inspectorOpen");
+    expect(routeSource).toContain("AgentEffectiveConfigurationInspectorPanel");
+    expect(routeSource).toContain("expectedUpdatedAt: payload.agent.updatedAt");
     expect(runtimeFocusPanelSource).toContain("styles.runtimePill");
     expect(runtimeFocusPanelSource).toContain("styles.runtimeFocusPanel");
     expect(activityHistoryPanelSource).toContain("styles.runHistoryList");
@@ -1496,6 +1505,9 @@ describe("AgentsRoute layout contract", () => {
     expect(overviewStyles.policyGrid).toContain("min-[1540px]:[grid-template-columns:repeat(4,_minmax(0,_1fr))]");
     expect(selectedDetailContentPanelSource).toContain("styles.overviewMain");
     expect(selectedDetailContentPanelSource).toContain("styles.overviewAside");
+    expect(effectiveConfigurationPanelSource).toContain("当前有效配置");
+    expect(effectiveConfigurationPanelSource).toContain("inheritanceChain");
+    expect(effectiveConfigurationStyles.configurationTable).toContain("max-[860px]");
   });
 
   it("includes work-session Agent setup copy for model instructions and workspace boundaries", () => {
