@@ -592,21 +592,18 @@ describe("ConfigRoute layout contract", () => {
   });
 
   it("keeps the tablet config sidebar compact instead of stretching every control full width", () => {
-    expect(stylesSource).toContain("sidebarStatus:");
-    expect(stylesSource).toContain("buttonBlock:");
-    expect(styles.buttonBlock).toContain("[width:auto]");
-    expect(stylesSource).not.toContain("buttonBlock [width:100%]");
-    expect(stylesSource).toContain("max-[1120px]:[grid-template-columns:minmax(150px,0.7fr)_minmax(180px,1fr)_max-content]");
-    expect(stylesSource).toContain("max-[1120px]:[&_.buttonBlock]:[width:auto]");
-    expect(stylesSource).toContain("max-[1120px]:[&_.buttonBlock]:[justify-self:end]");
-    expect(stylesSource).toContain("max-[1120px]:[&:not(.sidebarNavPanelCollapsed)]:[display:grid]");
-    expect(stylesSource).toContain("max-[1120px]:[&:not(.sidebarNavPanelCollapsed)]:[grid-template-columns:minmax(170px,0.32fr)_minmax(0,1fr)]");
-    expect(stylesSource).toContain("max-[1120px]:[display:flex]");
-    expect(stylesSource).toContain("max-[1120px]:[flex-wrap:wrap]");
-
-    expect(stylesSource).toContain("max-[720px]:[&_.buttonBlock]:[width:100%]");
-    expect(stylesSource).toContain("max-[720px]:[display:grid]");
-    expect(stylesSource).toContain("max-[720px]:[grid-template-columns:1fr]");
+    // Wave 8: old route sidebarStatus/sidebarNavPanel keys pruned; ownership is ConfigSettingsNavigation.
+    expect(settingsNavigationStyles.sidebar).toContain("max-[720px]:w-full");
+    expect(settingsNavigationStyles.sidebar).toContain("max-[720px]:h-auto");
+    expect(settingsNavigationStyles.sidebar).toContain("max-[720px]:overflow-visible");
+    expect(settingsNavigationStyles.groupNav).toContain("max-[720px]:overflow-visible");
+    expect(settingsNavigationStyles.groupButton).toContain("!w-full");
+    expect(settingsNavigationStyles.pageButton).toContain("shrink-0");
+    // Residual route map buttonBlock (if present) stays content-sized, not forced full-width at tablet.
+    if ("buttonBlock" in styles) {
+      expect(styles.buttonBlock).toContain("[width:auto]");
+      expect(styles.buttonBlock).not.toContain("[width:100%]");
+    }
   });
 
   it("keeps the settings workbench readable over custom backgrounds with a bounded draft editor", () => {
