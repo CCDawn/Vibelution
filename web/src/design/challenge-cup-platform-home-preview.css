@@ -28,7 +28,7 @@
 
 html,
 body {
-  min-width: 1180px;
+  min-width: 1024px;
   min-height: 100%;
   margin: 0;
   background: var(--bg);
@@ -476,9 +476,9 @@ h3 {
 
 .workspace-grid {
   display: grid;
-  min-height: max(520px, calc(100vh - 350px));
+  min-height: 0;
   grid-template-columns: minmax(0, 1fr) clamp(300px, 21vw, 360px);
-  align-items: stretch;
+  align-items: start;
   gap: 12px;
 }
 
@@ -527,6 +527,36 @@ h3 {
   flex: 1;
   align-content: start;
   gap: 14px;
+}
+
+.knowledge-view.stage-view.active,
+.experiment-view.stage-view.active,
+.iteration-view.stage-view.active {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.knowledge-view .workspace-actions,
+.experiment-view .blocked-callout,
+.experiment-view .workspace-actions,
+.iteration-view .blocked-callout,
+.iteration-view .iteration-flow {
+  grid-column: 1 / -1;
+}
+
+.knowledge-view .current-task {
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 0.72fr);
+}
+
+.experiment-view .design-summary {
+  grid-template-columns: 1fr;
+}
+
+.iteration-view > .metric-grid {
+  grid-column: 1;
+}
+
+.iteration-view > .empty-run-state {
+  grid-column: 2;
 }
 
 .substage-progress {
@@ -1151,6 +1181,55 @@ a:focus-visible {
 
   .workspace-grid {
     grid-template-columns: minmax(0, 1fr) 300px;
+  }
+
+  .knowledge-view .substage-progress,
+  .knowledge-view > .metric-grid,
+  .iteration-view > .metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .knowledge-view .substage-progress {
+    align-content: center;
+    row-gap: 8px;
+  }
+
+  .knowledge-view .substage-progress li:nth-child(2)::after {
+    display: none;
+  }
+
+  .knowledge-view > .metric-grid article:nth-child(odd),
+  .iteration-view > .metric-grid article:nth-child(odd) {
+    border-left: 0;
+  }
+
+  .knowledge-view > .metric-grid article:nth-child(n + 3),
+  .iteration-view > .metric-grid article:nth-child(n + 3) {
+    border-top: 1px solid var(--line);
+  }
+
+  .knowledge-view .current-task {
+    grid-template-columns: 1fr;
+  }
+
+  .knowledge-view .current-task dl {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .knowledge-view .current-task dl div {
+    grid-template-columns: 1fr;
+  }
+
+  .knowledge-view .output-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .experiment-view .contract-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .experiment-view .design-summary {
+    grid-template-columns: 1fr;
   }
 }
 
