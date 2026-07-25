@@ -9,7 +9,14 @@ interface CompletedToolPresentationSummaryInput {
   language: ConversationToolPresentationLanguage;
 }
 
+interface ConversationToolDetailPresentationInput {
+  value: string;
+  toolName?: string;
+  language: ConversationToolPresentationLanguage;
+}
+
 const TOOL_RESULT_SUMMARY_MAX_LENGTH = 180;
+const TOOL_DETAIL_MAX_ITEMS = 6;
 const LOW_VALUE_TOOL_RESULTS = new Set([
   "ok",
   "done",
@@ -17,6 +24,8 @@ const LOW_VALUE_TOOL_RESULTS = new Set([
   "success",
   "succeeded",
   "true",
+  "完成",
+  "已完成",
 ]);
 
 function compactToolPresentationText(value: string) {
@@ -27,6 +36,115 @@ function compactToolPresentationText(value: string) {
 
 function isLowValueToolResult(value: string) {
   return LOW_VALUE_TOOL_RESULTS.has(value.trim().toLowerCase());
+}
+
+function objectRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function compactScalar(value: unknown) {
+  return typeof value === "string" || typeof value === "number"
+    ? String(value).replace(/\s+/g, " ").trim()
+    : "";
+}
+
+function firstScalar(record: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = compactScalar(record[key]);
+    if (value) {
+      return value;
+    }
+  }
+  return "";
+}
+
+function codeSymbolResultItems(parsed: Record<string, unknown>) {
+  for (const key of ["results", "symbols", "files", "tests", "contexts"]) {
+    const items = parsed[key];
+    if (Array.isArray(items) && items.length > 0) {
+      return items;
+    }
+  }
+  return [];
+}
+
+function codeSymbolItemLine(item: unknown) {
+  const record = objectRecord(item);
+  if (!record) {
+    return compactScalar(item);
+  }
+  const range = objectRecord(record.range);
+  const line = firstScalar(record, ["line", "lineNumber", "startLine", "start_line"])
+    || (range ? firstScalar(range, ["startLine", "start_line", "line"]) : "");
+  const text = firstScalar(record, [
+    "preview",
+    "snippet",
+    "text",
+    "summary",
+    "qualifiedName",
+    "name",
+    "path",
+  ]);
+  if (!text) {
+    return "";
+  }
+  return line ? `${line.padStart(4, " ")}  ${text}` : text;
+}
+
+function codeSymbolStructuredSummary(
+  parsed: Record<string, unknown>,
+  language: ConversationToolPresentationLanguage,
+) {
+  const target = objectRecord(parsed.target);
+  const file = objectRecord(parsed.file);
+  const query = firstScalar(parsed, ["query"])
+    || (target ? firstScalar(target, ["symbol"]) : "");
+  const filePath = (target ? firstScalar(target, ["filePath", "path"]) : "")
+    || (file ? firstScalar(file, ["path"]) : "");
+  const items = codeSymbolResultItems(parsed);
+  const count = compactScalar(parsed.count)
+    || compactScalar(parsed.totalCount)
+    || (items.length > 0 ? String(items.length) : "");
+
+  if (query && filePath) {
+    return language === "zh"
+      ? `搜索 ${filePath} 中的 ${query}${count ? ` · ${count} 个结果` : ""}`
+      : `Search ${filePath} for ${query}${count ? ` · ${count} results` : ""}`;
+  }
+  if (query) {
+    return language === "zh"
+      ? `搜索 ${query}${count ? ` · ${count} 个结果` : ""}`
+      : `Search ${query}${count ? ` · ${count} results` : ""}`;
+  }
+  if (filePath) {
+    return language === "zh" ? `检查 ${filePath}` : `Inspect ${filePath}`;
+  }
+  return "";
+}
+
+function codeSymbolStructuredDetail(
+  parsed: Record<string, unknown>,
+  language: ConversationToolPresentationLanguage,
+) {
+  const items = codeSymbolResultItems(parsed);
+  const lines = items
+    .slice(0, TOOL_DETAIL_MAX_ITEMS)
+    .map(codeSymbolItemLine)
+    .filter(Boolean);
+  if (lines.length > 0) {
+    const omitted = Math.max(0, items.length - lines.length);
+    if (omitted > 0) {
+      lines.push(language === "zh" ? `… 另有 ${omitted} 个结果` : `… ${omitted} more results`);
+    }
+    return lines.join("\n");
+  }
+  const snippet = compactScalar(parsed.snippet);
+  if (snippet) {
+    return snippet;
+  }
+  return firstScalar(parsed, ["message", "summary", "error"]);
 }
 
 function conversationLogInspectTarget(value: string) {
@@ -87,6 +205,12 @@ function compactToolPresentationCandidate(
     try {
       const parsed = JSON.parse(normalized) as Record<string, unknown>;
       if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        if (String(toolName ?? "").trim().toLowerCase() === "code_symbol_tool") {
+          const codeSummary = codeSymbolStructuredSummary(parsed, language);
+          if (codeSummary) {
+            return compactToolPresentationText(codeSummary);
+          }
+        }
         const semantic = [
           parsed.dirty_summary,
           parsed.message,
@@ -144,6 +268,28 @@ export function completedToolPresentationSummary({
     }
   }
   return "";
+}
+
+export function conversationToolDetailPresentation({
+  value,
+  toolName,
+  language,
+}: ConversationToolDetailPresentationInput) {
+  const normalized = String(value ?? "").trim();
+  if (!normalized) {
+    return "";
+  }
+  if (String(toolName ?? "").trim().toLowerCase() !== "code_symbol_tool" || !normalized.startsWith("{")) {
+    return normalized;
+  }
+  try {
+    const parsed = JSON.parse(normalized) as Record<string, unknown>;
+    return codeSymbolStructuredDetail(parsed, language)
+      || codeSymbolStructuredSummary(parsed, language)
+      || (language === "zh" ? "已返回结构化结果" : "Structured result returned");
+  } catch {
+    return normalized;
+  }
 }
 
 export function conversationToolPresentationLabel(

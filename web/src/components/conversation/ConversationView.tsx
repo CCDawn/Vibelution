@@ -111,6 +111,7 @@ import { resolveCodexTranscriptSurface, type CodexTranscriptSurface } from "./co
 import {
   buildCodexTranscriptTimelineNodes,
   codexTranscriptToolDurationSeconds,
+  codexTranscriptToolRawName,
   createCodexTranscriptToolActivity,
   formatCodexTranscriptDuration,
 } from "./conversationToolActivityModel";
@@ -1840,19 +1841,21 @@ export function ConversationView({
     return (
       <>
         {rows.length > 0 ? (
-          <dl id={detailsId} className={styles.operationDetails}>
+          <div id={detailsId} className={styles.operationDetails}>
             {rows.map((row, index) => {
-              const labelId = `${detailsId}-label-${index}`;
               return (
                 <div key={`${cell.id}-${row.label}-${index}`} className={styles.operationDetailRow}>
-                  <dt id={labelId} className={styles.operationDetailLabel}>{row.label}</dt>
-                  <dd aria-labelledby={labelId}>
-                    <pre className={styles.operationDetailValue} tabIndex={0}>{row.value}</pre>
-                  </dd>
+                  <pre
+                    className={styles.operationDetailValue}
+                    aria-label={row.label}
+                    tabIndex={0}
+                  >
+                    {row.value}
+                  </pre>
                 </div>
               );
             })}
-          </dl>
+          </div>
         ) : null}
         {rolloutEvents}
       </>
@@ -1880,6 +1883,14 @@ export function ConversationView({
     );
     const rows: OperationDetailRow[] = [];
     const primaryToolCall = toolCalls[0];
+    const toolName = primaryToolCall?.rawToolName || primaryToolCall?.title || codexTranscriptToolRawName(cell);
+    const presentDetail = (value: string) => boundedCodexToolDetailText(
+      conversationToolDetailPresentation({
+        value,
+        toolName,
+        language: lang,
+      }),
+    );
     const visibleTitle = codexTranscriptCellTitle(cell);
     const instructionLabel = lang === "zh" ? "指令" : "Instruction";
     const pushedInstructions = new Set<string>();
@@ -1889,7 +1900,7 @@ export function ConversationView({
         return;
       }
       pushedInstructions.add(text);
-      rows.push({ label: instructionLabel, value: boundedCodexToolDetailText(text) });
+      rows.push({ label: instructionLabel, value: presentDetail(text) });
     }
     for (const operation of terminalOperations) {
       const displayCommand = operation.request?.displayCommand?.trim();
@@ -1903,14 +1914,14 @@ export function ConversationView({
       if (output) {
         rows.push({
           label: operationDetailLabels.toolCallResult,
-          value: boundedCodexToolDetailText(output),
+          value: presentDetail(output),
         });
       }
       const error = firstNonEmptyText(operation.result?.stderr);
       if (error) {
         rows.push({
           label: operationDetailLabels.toolCallError,
-          value: boundedCodexToolDetailText(error),
+          value: presentDetail(error),
         });
       }
     }
@@ -1918,14 +1929,14 @@ export function ConversationView({
     if (resultPreview && !rows.some((row) => row.label === operationDetailLabels.toolCallResult && row.value.includes(resultPreview.slice(0, 80)))) {
       rows.push({
         label: operationDetailLabels.toolCallResult,
-        value: boundedCodexToolDetailText(resultPreview),
+        value: presentDetail(resultPreview),
       });
     }
     const error = firstNonEmptyText(...toolCalls.map((toolCall) => toolCall.error));
     if (error) {
       rows.push({
         label: operationDetailLabels.toolCallError,
-        value: boundedCodexToolDetailText(error),
+        value: presentDetail(error),
       });
     }
     return rows;
@@ -3347,7 +3358,6 @@ export function ConversationView({
                   {compactActiveTurnPlaceholderNode}
                   {processNode}
                   {turnStatusNode}
-                  {answerOnlyProcessMode ? responseSectionNode : null}
                   {shouldRenderLegacyTurnError ? (
                     <div className={styles.turnErrorNotice} role="status" aria-live="polite">
                       <div className={styles.turnErrorNoticeIcon} aria-hidden="true">
@@ -3360,18 +3370,24 @@ export function ConversationView({
                         </div>
                         <div className={styles.turnErrorNoticeText}>{renderResponseText(message.content)}</div>
                         {buildConversationTurnErrorReasonRows(message, lang).length > 0 ? (
-                          <dl className={styles.turnErrorReasonList}>
-                            {buildConversationTurnErrorReasonRows(message, lang).map((row) => (
-                              <div key={`${row.label}-${row.value}`} className={styles.turnErrorReasonRow}>
-                                <dt>{row.label}</dt>
-                                <dd>{row.value}</dd>
-                              </div>
-                            ))}
-                          </dl>
+                          <details className={styles.turnErrorDiagnostics}>
+                            <summary className={styles.turnErrorDiagnosticsSummary}>
+                              {lang === "zh" ? "诊断详情" : "Diagnostics"}
+                            </summary>
+                            <dl className={styles.turnErrorReasonList}>
+                              {buildConversationTurnErrorReasonRows(message, lang).map((row) => (
+                                <div key={`${row.label}-${row.value}`} className={styles.turnErrorReasonRow}>
+                                  <dt>{row.label}</dt>
+                                  <dd>{row.value}</dd>
+                                </div>
+                              ))}
+                            </dl>
+                          </details>
                         ) : null}
                       </div>
                     </div>
                   ) : null}
+                  {answerOnlyProcessMode ? responseSectionNode : null}
                   {imageArtifact ? (
                     <ConversationImageArtifactView
                       artifact={imageArtifact}
@@ -3678,5 +3694,6 @@ function formattedCodeBlockContent(content: string, language?: string) {
 }
 import {
   completedToolPresentationSummary,
+  conversationToolDetailPresentation,
   conversationToolPresentationLabel,
 } from "./conversationToolPresentation";
