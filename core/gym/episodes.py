@@ -9,11 +9,13 @@ import re
 from pathlib import Path
 from typing import Optional
 
+from core.infrastructure import developer_sandbox
 from core.infrastructure.workspace_manager import get_workspace
 
 from .models import Attempt, ImprovementEpisode, PromotionProposal, Trace, utcnow_iso
 
 _SAFE_GYM_FILE_STEM_RE = re.compile(r"[^A-Za-z0-9_.-]+")
+_MAX_GYM_ARTIFACT_STEM_LENGTH = 36
 _WINDOWS_RESERVED_FILE_STEMS = {
     "CON",
     "PRN",
@@ -26,8 +28,6 @@ _WINDOWS_RESERVED_FILE_STEMS = {
 
 def _gym_workspace(project_root: Optional[Path] = None) -> Path:
     root = (project_root or get_workspace().project_root).resolve()
-    from core.infrastructure import developer_sandbox
-
     return developer_sandbox.route_workspace_path(
         root,
         "gym",
@@ -72,10 +72,10 @@ def record_improvement_episode(episode: ImprovementEpisode, *, project_root: Opt
         proposal_payload = proposal.to_dict()
         proposal_payload["decision_path"] = str(decision_path)
         proposal_payload["trace_index_path"] = str(trace_index_path)
-        proposal_path.write_text(json.dumps(proposal_payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        _write_json_artifact(proposal_path, proposal_payload)
 
     _write_trace_index(episode, traces_dir=traces_dir, trace_index_path=trace_index_path)
-    decision_path.write_text(json.dumps(episode.to_dict(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    _write_json_artifact(decision_path, episode.to_dict())
     return decision_path
 
 
@@ -95,7 +95,7 @@ def _write_trace_index(episode: ImprovementEpisode, *, traces_dir: Path, trace_i
     for role, traces in (("baseline", episode.baseline_traces), ("candidate", episode.candidate_traces)):
         for trace in traces:
             trace_path = traces_dir / _trace_filename(trace)
-            trace_path.write_text(json.dumps(trace.to_dict(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            _write_json_artifact(trace_path, trace.to_dict())
             attempt = attempts_by_trace_id.get(trace.trace_id)
             entries.append(
                 {
@@ -111,7 +111,16 @@ def _write_trace_index(episode: ImprovementEpisode, *, traces_dir: Path, trace_i
         "created_at": utcnow_iso(),
         "traces": entries,
     }
-    trace_index_path.write_text(json.dumps(trace_index, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    _write_json_artifact(trace_index_path, trace_index)
+
+
+def _write_json_artifact(path: Path, payload: dict) -> None:
+    """Write Gym evidence through the shared Windows extended-path adapter."""
+
+    developer_sandbox._filesystem_path(path).write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
 
 
 def _trace_filename(trace: Trace) -> str:
@@ -124,10 +133,10 @@ def _safe_gym_file_stem(value: str, *, default: str) -> str:
     if not stem:
         stem = default
     base_name = stem.split(".", 1)[0].upper()
-    should_hash = stem != raw or len(stem) > 140 or base_name in _WINDOWS_RESERVED_FILE_STEMS
+    should_hash = stem != raw or len(stem) > _MAX_GYM_ARTIFACT_STEM_LENGTH or base_name in _WINDOWS_RESERVED_FILE_STEMS
     if base_name in _WINDOWS_RESERVED_FILE_STEMS:
         stem = f"{default}-{stem}"
     if should_hash:
         digest = hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()[:10]
-        stem = f"{stem[:128].rstrip('._-') or default}-{digest}"
+        stem = f"{stem[:_MAX_GYM_ARTIFACT_STEM_LENGTH].rstrip('._-') or default}-{digest}"
     return stem
