@@ -51,9 +51,14 @@ import {
   GIT_FILTERS,
   type GitFilter,
 } from "./gitRouteLogic";
-import { clampPaneWidth, keyboardPaneWidth, storedPaneWidth } from "./resizablePane";
+import {
+  persistPaneWidth,
+  resolveStoredPaneWidth,
+} from "../components/layout/paneLayoutPersistence";
+import { clampPaneWidth, keyboardPaneWidth } from "./resizablePane";
 import { gitRouteStyles as styles } from "./GitRoute.styles";
 
+const GIT_LAYOUT_ID = "git";
 const GIT_CHANGE_PANEL_WIDTH_KEY = "vibelution.git.change-panel-width";
 const GIT_CHANGE_PANEL_BOUNDS = { min: 260, max: 520 };
 const GIT_CHANGE_PANEL_DEFAULT_WIDTH = 340;
@@ -207,7 +212,14 @@ export function GitRoute() {
     text: "",
   });
   const [changePanelWidth, setChangePanelWidth] = useState(() =>
-    storedPaneWidth(GIT_CHANGE_PANEL_WIDTH_KEY, GIT_CHANGE_PANEL_DEFAULT_WIDTH, GIT_CHANGE_PANEL_BOUNDS),
+    resolveStoredPaneWidth(
+      GIT_LAYOUT_ID,
+      "change-panel",
+      GIT_CHANGE_PANEL_DEFAULT_WIDTH,
+      GIT_CHANGE_PANEL_BOUNDS.min,
+      GIT_CHANGE_PANEL_BOUNDS.max,
+      GIT_CHANGE_PANEL_WIDTH_KEY,
+    ),
   );
   const [changePanelCollapsed, setChangePanelCollapsed] = useState(false);
   const pageVisible = usePageVisibility();
@@ -296,7 +308,7 @@ export function GitRoute() {
   }, [files]);
 
   useEffect(() => {
-    window.localStorage.setItem(GIT_CHANGE_PANEL_WIDTH_KEY, String(changePanelWidth));
+    persistPaneWidth(GIT_LAYOUT_ID, "change-panel", changePanelWidth);
   }, [changePanelWidth]);
 
   useEffect(() => {

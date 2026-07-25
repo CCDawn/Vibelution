@@ -206,7 +206,7 @@ const styles = {
   knowledgeViewStack:
     "knowledgeViewStack min-w-0 grid !flex h-full flex-col min-h-0 overflow-hidden [&>.summaryGrid]:[grid-template-columns:repeat(4,minmax(0,1fr))] max-[720px]:[&>.summaryGrid]:[grid-template-columns:repeat(2,minmax(0,1fr))] max-[460px]:[&>.summaryGrid]:[grid-template-columns:minmax(0,1fr)] [&>.knowledgeWorkspace]:flex-1 [&>.knowledgeGovernanceDeck]:hidden",
   knowledgeWorkspace:
-    "knowledgeWorkspace min-w-0 grid h-full min-h-0 gap-2 p-2 grid-cols-[minmax(170px,205px)_minmax(0,1.24fr)_minmax(260px,0.62fr)] overflow-hidden max-[1180px]:grid-cols-[minmax(180px,220px)_minmax(0,1fr)] max-[1180px]:[&_.detailPanel]:col-span-2 max-[820px]:grid-cols-1 max-[820px]:overflow-auto max-[820px]:[&_.detailPanel]:col-span-1",
+    "knowledgeWorkspace relative min-w-0 grid h-full min-h-0 gap-2 p-2 grid-cols-[var(--memory-left-width,minmax(170px,205px))_minmax(0,1.24fr)_var(--memory-right-width,minmax(260px,0.62fr))] overflow-hidden max-[1180px]:grid-cols-[var(--memory-left-width,minmax(180px,220px))_minmax(0,1fr)] max-[1180px]:[&_.detailPanel]:col-span-2 max-[820px]:grid-cols-1 max-[820px]:overflow-auto max-[820px]:[&_.detailPanel]:col-span-1",
   manageDetailPanel: `manageDetailPanel min-w-0 ${vuiFlatPanelClass} p-2`,
   manageFilterHeader:
     "manageFilterHeader min-w-0 flex flex-wrap items-center gap-1.5",
@@ -422,7 +422,13 @@ const styles = {
   wideField:
     "wideField min-w-0 grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
   workspace:
-    `workspace min-w-0 grid h-full min-h-0 flex-1 gap-2 p-2 grid-cols-[clamp(200px,18vw,260px)_minmax(0,1fr)_clamp(280px,24vw,380px)] grid-rows-[minmax(0,1fr)] overflow-hidden max-[1120px]:grid-cols-[clamp(190px,18vw,240px)_minmax(0,1fr)] max-[1120px]:[&_.detailPanel]:col-span-2 max-[780px]:grid-cols-1 max-[780px]:overflow-auto max-[780px]:[&_.detailPanel]:col-span-1 ${vuiWorkspaceFillClass}`,
+    `workspace relative min-w-0 grid h-full min-h-0 flex-1 gap-2 p-2 grid-cols-[var(--memory-left-width,clamp(200px,18vw,260px))_minmax(0,1fr)_var(--memory-right-width,clamp(280px,24vw,380px))] grid-rows-[minmax(0,1fr)] overflow-hidden max-[1120px]:grid-cols-[var(--memory-left-width,clamp(190px,18vw,240px))_minmax(0,1fr)] max-[1120px]:[&_.detailPanel]:col-span-2 max-[780px]:grid-cols-1 max-[780px]:overflow-auto max-[780px]:[&_.detailPanel]:col-span-1 ${vuiWorkspaceFillClass}`,
+  paneResizeHandleLeft:
+    "memoryPaneResizeHandleLeft absolute top-2 bottom-2 z-20 w-1.5 -translate-x-1/2 cursor-col-resize touch-none border-0 bg-transparent p-0 outline-none max-[780px]:hidden left-[var(--memory-left-width,230px)] before:pointer-events-none before:absolute before:inset-y-0 before:left-1/2 before:w-px before:-translate-x-1/2 before:bg-transparent before:opacity-0 before:transition before:content-[''] hover:before:bg-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)] hover:before:opacity-100 focus-visible:before:bg-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)] focus-visible:before:opacity-100",
+  paneResizeHandleRight:
+    "memoryPaneResizeHandleRight absolute top-2 bottom-2 z-20 w-1.5 translate-x-1/2 cursor-col-resize touch-none border-0 bg-transparent p-0 outline-none max-[780px]:hidden right-[var(--memory-right-width,320px)] before:pointer-events-none before:absolute before:inset-y-0 before:left-1/2 before:w-px before:-translate-x-1/2 before:bg-transparent before:opacity-0 before:transition before:content-[''] hover:before:bg-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)] hover:before:opacity-100 focus-visible:before:bg-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)] focus-visible:before:opacity-100 max-[1120px]:hidden",
+  paneResizeHandleActive:
+    "memoryPaneResizeHandleActive before:bg-[color-mix(in_srgb,var(--accent-cool)_62%,transparent)] before:opacity-100",
 } as const;
 
 export default styles;

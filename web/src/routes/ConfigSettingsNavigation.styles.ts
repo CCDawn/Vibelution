@@ -4,7 +4,7 @@ import {
 } from "../design/vuiSurfaceRecipes";
 
 const styles = {
-  sidebar: `vui-routes-configsettingsnavigation sidebar grid h-full min-h-0 [width:clamp(15.5rem,17vw,18rem)] [grid-template-rows:auto_auto_minmax(0,1fr)] gap-4 overflow-hidden border border-vui-border-subtle ${vuiRailFillClass} p-4 max-[720px]:h-auto max-[720px]:w-full max-[720px]:[grid-template-rows:auto_auto] max-[720px]:overflow-visible`,
+  sidebar: `vui-routes-configsettingsnavigation sidebar grid h-full min-h-0 w-full min-w-0 [grid-template-rows:auto_auto_minmax(0,1fr)] gap-4 overflow-hidden border border-vui-border-subtle ${vuiRailFillClass} p-4 max-[720px]:h-auto max-[720px]:w-full max-[720px]:[grid-template-rows:auto_auto] max-[720px]:overflow-visible`,
   sidebarHeader: "vui-routes-configsettingsnavigation sidebarHeader grid min-w-0 gap-1",
   eyebrow:
     "vui-routes-configsettingsnavigation eyebrow m-0 [font-size:var(--vui-font-xs)] font-bold uppercase tracking-[0.08em] text-vui-fg-tertiary",

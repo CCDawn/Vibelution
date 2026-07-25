@@ -2073,14 +2073,15 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.teamUnavailableSurface).toContain("content-start");
     expect(routeStyles.teamUnavailableSurface).toContain("grid-cols-[minmax(0,720px)]");
     expect(routeStyles.teamUnavailableCard).toContain("max-w-[720px]");
-    expect(routeStyles.workspace).toContain("grid-cols-[minmax(0,1fr)_clamp(320px,26vw,420px)]");
+    expect(routeStyles.workspace).toContain("var(--teams-inspector-width,clamp(320px,26vw,420px))");
     expect(routeStyles.workspace).toContain("overflow-hidden");
     expect(routeStyles.workspace).toContain("max-[760px]:h-auto");
     expect(routeStyles.workspace).toContain("max-[760px]:grid-cols-[minmax(0,1fr)]");
     expect(routeStyles.workspace).toContain("max-[760px]:content-start");
     expect(routeStyles.workspace).toContain("max-[760px]:overflow-auto");
+    expect(routeStyles.inspectorResizeHandle).toContain("cursor-col-resize");
     expect(routeStyles.workspaceResearchCanvas).toContain("h-full");
-    expect(routeStyles.workspaceResearchCanvas).toContain("grid-cols-[minmax(0,1fr)_clamp(320px,26vw,420px)]");
+    expect(routeStyles.workspaceResearchCanvas).toContain("var(--teams-inspector-width,clamp(320px,26vw,420px))");
     expect(routeStyles.workspaceResearchCanvas).toContain("overflow-hidden");
     expect(routeStyles.workspaceResearchCanvas).toContain("max-[760px]:h-auto");
     expect(routeStyles.workspaceResearchCanvas).toContain("max-[760px]:grid-cols-[minmax(0,1fr)]");
@@ -2873,12 +2874,12 @@ describe("TeamsRoute layout contract", () => {
     expect(mainRenderSource).not.toContain("showTeamLoadingSurface ? (");
     expect(mainRenderSource).toContain("showTeamDetailUnavailableSurface ? (");
     expect(mainRenderSource.indexOf("showTeamDetailUnavailableSurface ? (")).toBeLessThan(
-      mainRenderSource.indexOf("<div className={workspaceClassName}>"),
+      mainRenderSource.indexOf("className={workspaceClassName}"),
     );
     expect(routeSource).toContain("teamWorkspaceLoadingTitle");
     expect(routeSource).toContain("className={styles.teamLoadingInlineSurface}");
     expect(routeSource.indexOf("className={styles.teamLoadingInlineSurface}")).toBeGreaterThan(
-      routeSource.indexOf("<div className={workspaceClassName}>"),
+      routeSource.indexOf("className={workspaceClassName}"),
     );
 
     const standaloneSource = routeSource.slice(

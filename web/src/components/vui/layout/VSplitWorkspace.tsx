@@ -188,9 +188,7 @@ export function VSplitWorkspace({
   resize,
   ...props
 }: VSplitWorkspaceProps) {
-  const resizeEnabled = Boolean(resize && resize !== false && resize.layoutId && resize.enabled !== false);
-
-  if (resizeEnabled && resize && resize !== false) {
+  if (resize && typeof resize === "object" && resize.layoutId && resize.enabled !== false) {
     return (
       <ResizableSplitWorkspace
         {...props}
