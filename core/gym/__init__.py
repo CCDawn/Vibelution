@@ -60,6 +60,7 @@ from .optimization_models import (
     ReflectiveFeedback,
     candidate_from_improvement,
 )
+from .feedback import build_reflective_feedback
 from .vibelution_adapter import VibelutionAgentHarnessAdapter
 from .runner import (
     DEFAULT_COLLECTION_ID,
@@ -120,6 +121,7 @@ __all__ = [
     "build_intelligence_strategy_exercise",
     "build_local_transaction_exercise",
     "build_mixed_readiness_gate_exercise",
+    "build_reflective_feedback",
     "candidate_from_improvement",
     "format_gym_run_result",
     "list_builtin_collections",
