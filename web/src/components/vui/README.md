@@ -116,10 +116,13 @@ Gate: `workbenchLayoutGate` + `design/vuiDomainWorkbenchCompositionContract.test
 | Launcher diagnostics body | `launcher` | `diagnostics-body` | Replaces fixed `max-h-[min(42vh,420px)]` |
 | Memory project memory queue | `memory` | `project-memory-queue` | Wave 6D; replaces fixed `max-h-[min(220px,28vh)]` |
 | Teams source-collection lists | `teams` | `source-collection-candidates` / `screening` / `memory` / `graph-nodes` | Wave 6E via `PersistedHeightListShell` |
+| Memory compact item lists | `memory` | `compact-memory-list` | Wave 6F |
+| Launcher guardian table | `launcher` | `guardian-table` | Wave 6F |
+| Launcher cleanup console | `launcher` | `cleanup-console` | Wave 6F (developer + project maintenance) |
 
 Prefer these shared APIs for any new vertical splitter; do not reintroduce private max-height-only strips that users would need to resize.
 
-**List shells:** use `components/layout/PersistedHeightListShell` with a module-level `PaneHeightSpec` (see `routes/teamSourceCollectionListHeights.ts`).
+**List shells:** use `components/layout/PersistedHeightListShell` with a module-level `PaneHeightSpec` (see `routes/teamSourceCollectionListHeights.ts`, `routes/memoryListHeights.ts`, `routes/launcherListHeights.ts`).
 
 ## Wave 6D Chat shell boundary + more height reuse
 

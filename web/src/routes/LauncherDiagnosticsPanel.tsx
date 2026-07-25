@@ -2,11 +2,16 @@ import { LoaderCircle, RefreshCw } from "lucide-react";
 import type { CSSProperties } from "react";
 
 import { PaneHeightResizeHandle } from "../components/layout/PaneHeightResizeHandle";
+import { PersistedHeightListShell } from "../components/layout/PersistedHeightListShell";
 import type { PaneHeightSpec } from "../components/layout/paneHeightPersistence";
 import { usePersistedPaneHeight } from "../components/layout/usePersistedPaneHeight";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import { VButton, VTooltip } from "../components/vui";
 import styles from "./LauncherDiagnosticsPanel.styles";
+import {
+  LAUNCHER_GUARDIAN_TABLE_HEIGHT_PANE,
+  LAUNCHER_LIST_HEIGHT_LAYOUT_ID,
+} from "./launcherListHeights";
 
 const LAUNCHER_DIAGNOSTICS_LAYOUT_ID = WORKBENCH_LAYOUT_IDS.launcher;
 const LAUNCHER_DIAGNOSTICS_BODY_PANE: PaneHeightSpec = {
@@ -216,7 +221,15 @@ export function LauncherDiagnosticsPanel({
               <span>{copy.reattachSupervisor}</span>
             </VButton>
           </div>
-          <div className={styles.guardianTable} role="table" aria-label={copy.guardian}>
+          <PersistedHeightListShell
+            layoutId={LAUNCHER_LIST_HEIGHT_LAYOUT_ID}
+            pane={LAUNCHER_GUARDIAN_TABLE_HEIGHT_PANE}
+            label={copy.guardian}
+            className={styles.guardianTable}
+            resizeHandleClassName={styles.guardianTableResizeHandle}
+            role="table"
+            aria-label={copy.guardian}
+          >
             <div className={styles.guardianHead} role="row">
               <span role="columnheader">{copy.unit}</span>
               <span role="columnheader">owner</span>
@@ -231,7 +244,7 @@ export function LauncherDiagnosticsPanel({
                 <span role="cell">{item.detail}</span>
               </div>
             ))}
-          </div>
+          </PersistedHeightListShell>
         </section>
       </div>
       <PaneHeightResizeHandle

@@ -67,7 +67,8 @@ const styles = {
   compactItemSummary:
     "compactItemSummary line-clamp-2 min-w-0 [font-size:var(--vui-font-xs)] leading-[1.35] text-[var(--fg-secondary)]",
   compactMemoryList:
-    "compactMemoryList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto max-h-[148px]",
+    // Legacy key; live list uses MemoryItemListPanel.styles + height API.
+    "compactMemoryList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   contractDomainGrid:
     "contractDomainGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
   contractDomainRow: `contractDomainRow min-w-0 ${vuiOpaqueRowClass} p-2 !grid grid-cols-[minmax(116px,1fr)_minmax(96px,0.8fr)_auto] items-center gap-[3px] px-[5px] py-[3px]`,

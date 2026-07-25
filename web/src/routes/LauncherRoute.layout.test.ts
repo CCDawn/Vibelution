@@ -384,8 +384,16 @@ describe("LauncherRoute layout contract", () => {
     expect(diagnosticsPanelSource).toContain("PaneHeightResizeHandle");
     expect(diagnosticsPanelSource).toContain("diagnostics-body");
     expect(diagnosticsPanelStyles.diagnosticsBodyResizeHandle).not.toContain("cursor-row-resize");
+    // Wave 6F: guardian table + cleanup consoles use PersistedHeightListShell.
+    expect(diagnosticsPanelStyles.guardianTable).not.toContain("max-h-[220px]");
+    expect(diagnosticsPanelSource).toContain("PersistedHeightListShell");
+    expect(diagnosticsPanelSource).toContain("LAUNCHER_GUARDIAN_TABLE_HEIGHT_PANE");
+    expect(developerModePanelStyles.cleanupConsole).not.toContain("max-h-[220px]");
+    expect(developerModePanelSource).toContain("PersistedHeightListShell");
+    expect(developerModePanelSource).toContain("LAUNCHER_CLEANUP_CONSOLE_HEIGHT_PANE");
+    expect(projectMaintenancePanelStyles.cleanupConsole).not.toContain("max-h-[220px]");
+    expect(projectMaintenancePanelSource).toContain("PersistedHeightListShell");
     expect(diagnosticsPanelStyles.guardianTable).toContain("overflow-auto");
-    expect(diagnosticsPanelStyles.guardianTable).toContain("max-h-[220px]");
   });
 
   it("keeps internal lifecycle fields out of the first-read labels", () => {

@@ -16,8 +16,11 @@ const styles = {
     "compactItemPrimary flex min-w-0 flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5 [font-size:var(--vui-font-xs)] leading-tight [&>strong]:min-w-0 [&>strong]:truncate [&>strong]:font-semibold [&>strong]:text-[var(--fg-primary)] [&>span]:shrink-0 [&>span]:text-[var(--fg-tertiary)]",
   compactItemSummary:
     "compactItemSummary line-clamp-2 min-w-0 [font-size:var(--vui-font-xs)] leading-[1.35] text-[var(--fg-secondary)]",
+  // Wave 6F: height from PersistedHeightListShell / pane-heights.v1, not fixed max-h.
   compactMemoryList:
-    "compactMemoryList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto max-h-[148px]",
+    "compactMemoryList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
+  compactMemoryListResizeHandle:
+    "compactMemoryListResizeHandle",
   emptyState:
     "emptyState min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   itemBadges: `itemBadges min-w-0 ${vuiOpaqueRowClass} p-2`,

@@ -1320,7 +1320,10 @@ describe("MemoryRoute layout contract", () => {
     expect(effectivePanelStyles.effectiveGrid).toContain("[&_.overviewPanel]:max-h-[min(260px,36vh)]");
     expect(effectivePanelStyles.effectiveGrid).toContain("[&_.overviewPanel]:overflow-auto");
     expect(effectivePanelStyles.effectiveGrid).toContain("[&_.panelLead]:line-clamp-2");
-    expect(styles.compactMemoryList).toContain("max-h-[148px]");
+    // Wave 6F: compact list height is shared PaneHeight, not fixed max-h.
+    expect(itemListPanelStyles.compactMemoryList).not.toContain("max-h-[148px]");
+    expect(itemListPanelSource).toContain("PersistedHeightListShell");
+    expect(itemListPanelSource).toContain("MEMORY_COMPACT_LIST_HEIGHT_PANE");
   });
 
   it("visualizes the P1 team knowledge pipeline and prompt boundary", () => {

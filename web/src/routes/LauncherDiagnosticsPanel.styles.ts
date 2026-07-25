@@ -23,7 +23,10 @@ const styles = {
   guardianHead: `grid min-w-0 grid-cols-[minmax(178px,1fr)_minmax(120px,0.7fr)_minmax(84px,0.52fr)_minmax(0,1.7fr)] items-center gap-[7px] border-b border-[var(--border-soft)] ${vuiOpaqueRowClass} px-2 py-1.5 [font-size:var(--vui-font-xs)] uppercase tracking-[0.06em] text-[var(--fg-tertiary)] max-[860px]:grid-cols-[minmax(140px,1fr)_minmax(96px,0.65fr)_minmax(82px,0.5fr)_minmax(0,1.4fr)] max-[620px]:grid-cols-[minmax(0,1fr)] max-[620px]:[&>span:nth-child(n+3)]:hidden`,
   guardianRow: "grid min-w-0 grid-cols-[minmax(178px,1fr)_minmax(120px,0.7fr)_minmax(84px,0.52fr)_minmax(0,1.7fr)] items-center gap-[7px] border-t border-[color-mix(in_srgb,var(--border-soft)_72%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-base)_74%,var(--vui-surface-row))] px-2 py-1.5 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] first:border-t-0 data-[tone=success]:border-l-2 data-[tone=success]:border-l-[var(--state-success)] data-[tone=warning]:border-l-2 data-[tone=warning]:border-l-[var(--state-warning)] data-[tone=error]:border-l-2 data-[tone=error]:border-l-[var(--state-error)] max-[860px]:grid-cols-[minmax(140px,1fr)_minmax(96px,0.65fr)_minmax(82px,0.5fr)_minmax(0,1.4fr)] max-[620px]:grid-cols-[minmax(0,1fr)] max-[620px]:[&>span:nth-child(n+3)]:hidden [&_span]:min-w-0 [&_span]:truncate [&_strong]:text-[var(--fg-primary)]",
   guardianSummary: "mt-2 grid min-w-0 grid-cols-[minmax(0,1fr)_repeat(3,max-content)_auto] items-center gap-2 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] max-[860px]:grid-cols-2 max-[860px]:[&_span]:col-span-full max-[620px]:grid-cols-[minmax(0,1fr)] [&_span]:min-w-0 [&_span]:truncate [&_strong]:min-w-0 [&_strong]:truncate [&_strong]:font-semibold [&_strong]:text-[var(--fg-primary)]",
-  guardianTable: `mt-1.5 grid max-h-[220px] min-w-0 overflow-auto ${rowSurfaceMuted} [scrollbar-gutter:stable]`,
+  // Wave 6F: height from PersistedHeightListShell, not fixed max-h.
+  guardianTable: `mt-1.5 grid min-h-0 min-w-0 overflow-auto ${rowSurfaceMuted} [scrollbar-gutter:stable]`,
+  guardianTableResizeHandle:
+    "guardianTableResizeHandle",
   iconButton: mutedControl,
   panel: `block min-h-0 min-w-0 overflow-hidden ${panelSurface} px-2 py-[7px]`,
   panelEyebrow: "m-0 [font-size:var(--vui-font-xs)] uppercase tracking-[0.08em] text-[var(--fg-tertiary)]",
