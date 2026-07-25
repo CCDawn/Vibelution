@@ -78,6 +78,7 @@
             </span>
             <span class="stage-summary">
               <b>1 / 4</b>
+              <small>当前轮</small>
             </span>
           </button>
           <span class="stage-connector" aria-hidden="true"></span>
@@ -87,7 +88,8 @@
               <span data-vui-hint-title="实验设计" data-vui-hint-label="实验设计阶段要求" data-vui-hint="定义可证伪假设｜冻结变量与控制组｜确定独立指标｜生成复现合同"></span>
             </span>
             <span class="stage-summary">
-              <b>2 / 2</b>
+              <b>1 / 4</b>
+              <small>设计门禁</small>
             </span>
           </button>
           <span class="stage-connector" aria-hidden="true"></span>
@@ -97,12 +99,13 @@
               <span data-vui-hint-title="执行与迭代" data-vui-hint-label="执行与迭代阶段要求" data-vui-hint="运行冻结设计｜独立评估指标｜记录失败归因｜受控修改变量｜写回知识"></span>
             </span>
             <span class="stage-summary">
-              <b>0</b>
+              <b>0 / 4</b>
+              <small>当前轮</small>
             </span>
           </button>
           <div class="stage-objects" aria-label="当前阶段对象">
             <div class="stage-objects-heading">
-              <span id="stage-object-heading">当前批次</span>
+              <span id="stage-object-heading">当前批次 · 3</span>
               <button type="button" aria-label="新建批次">＋</button>
             </div>
             <div id="stage-object-list">
@@ -427,17 +430,17 @@
           <aside class="inspector" aria-label="当前阶段辅助信息">
             <section class="inspector-card source-detail-card" id="selection-inspector">
               <div class="card-heading">
-                <div><span class="eyebrow">当前选择</span><h2 id="selected-source-title">Predictive coding in the visual cortex</h2></div>
-                <button class="text-button" type="button">打开原文</button>
+                <div><span class="eyebrow" id="selection-kind">当前资料</span><h2 id="selected-source-title">Predictive coding in the visual cortex</h2></div>
+                <button class="text-button" id="selection-open-button" type="button" data-toast="已打开资料原文">打开原文</button>
               </div>
               <p id="selected-source-meta">Friston et al. · DOI 可追溯</p>
               <div class="evidence-summary">
-                <span>证据摘要</span>
+                <span id="selection-summary-label">证据摘要</span>
                 <strong id="selected-source-evidence">支持层级预测误差沿皮层层级传播；当前已标注 4 个证据锚点。</strong>
               </div>
               <div class="detail-actions">
-                <button class="button secondary" type="button">查看锚点</button>
-                <button class="button primary" type="button">开始提炼</button>
+                <button class="button secondary" id="selection-secondary-button" type="button" data-toast="已打开证据锚点">查看锚点</button>
+                <button class="button primary" id="selection-primary-button" type="button" data-toast="已进入内容提炼">开始提炼</button>
               </div>
             </section>
             <section class="inspector-card next-action">
@@ -533,31 +536,139 @@
 
       const stageObjects = {
         knowledge: {
-          heading: "当前批次",
+          heading: "当前批次 · 3",
           items: [
-            ["层级机制证据补齐", "16 条资料 · 提炼中"],
-            ["可塑性规则检索", "8 条资料 · 已暂停"],
-            ["门控机制补充", "草稿 · 未启动"]
+            { title: "层级机制证据补齐", status: "16 条资料 · 提炼中" },
+            { title: "可塑性规则检索", status: "8 条资料 · 已暂停" },
+            { title: "门控机制补充", status: "草稿 · 未启动" }
           ],
-          selection: ["Predictive coding in the visual cortex", "Friston et al. · DOI 可追溯", "支持层级预测误差沿皮层层级传播；当前已标注 4 个证据锚点。"]
+          selection: {
+            kind: "当前资料",
+            title: "Predictive coding in the visual cortex",
+            meta: "Friston et al. · DOI 可追溯",
+            summaryLabel: "证据摘要",
+            summary: "支持层级预测误差沿皮层层级传播；当前已标注 4 个证据锚点。",
+            openLabel: "打开原文",
+            openToast: "已打开资料原文",
+            secondaryLabel: "查看锚点",
+            secondaryToast: "已打开证据锚点",
+            primaryLabel: "开始提炼",
+            primaryToast: "已进入内容提炼"
+          }
         },
         experiment: {
-          heading: "Design 版本",
+          heading: "Design 版本 · 3",
           items: [
-            ["Design v4", "已冻结 · 当前基线"],
-            ["Design v5-diagnostic", "待审查 · 修改 2 项"],
-            ["Design v3", "已归档 · 门禁失败"]
+            {
+              title: "Design v4",
+              status: "已冻结 · 当前基线",
+              selection: {
+                kind: "冻结设计",
+                title: "Design v4",
+                meta: "formal · 5 seeds · 当前执行基线",
+                summaryLabel: "设计摘要",
+                summary: "固定 weight=0.875，其余控制变量保持不变；可作为下一轮受控修订的比较基线。",
+                openLabel: "查看版本",
+                openToast: "已打开 Design v4",
+                secondaryLabel: "查看变更",
+                secondaryToast: "已显示相对上一版的变量差异",
+                primaryLabel: "复制为修订",
+                primaryToast: "已创建基于 Design v4 的修订草稿"
+              }
+            },
+            {
+              title: "Design v5-diagnostic",
+              status: "待审查 · 修改 2 项",
+              selection: {
+                kind: "设计草稿",
+                title: "Design v5-diagnostic",
+                meta: "diagnostic · 3 seeds · 待审查",
+                summaryLabel: "修订摘要",
+                summary: "相对 v4 修改 alignment 与 mask structure；未通过审查前不能进入执行队列。",
+                openLabel: "打开草稿",
+                openToast: "已打开 Design v5-diagnostic",
+                secondaryLabel: "比较 v4",
+                secondaryToast: "已加载与 Design v4 的变量差异",
+                primaryLabel: "提交审查",
+                primaryToast: "已提交设计审查"
+              }
+            },
+            {
+              title: "Design v3",
+              status: "已归档 · 门禁失败",
+              selection: {
+                kind: "归档设计",
+                title: "Design v3",
+                meta: "smoke · 3 seeds · 已归档",
+                summaryLabel: "归档原因",
+                summary: "weight=0.75 的增益不足，未达到晋升门禁；保留为负向实验依据。",
+                openLabel: "查看归档",
+                openToast: "已打开 Design v3 归档",
+                secondaryLabel: "查看失败门禁",
+                secondaryToast: "已显示未通过的实验门禁",
+                primaryLabel: "复制为修订",
+                primaryToast: "已创建基于 Design v3 的修订草稿"
+              }
+            }
           ],
-          selection: ["Design v4", "冻结设计 · formal · 5 seeds", "当前可执行基线；固定 weight=0.875，其余控制变量保持不变。"]
+          selection: null
         },
         iteration: {
-          heading: "运行与候选",
+          heading: "历史运行 · 3",
           items: [
-            ["formal-v4", "通过 · 当前最佳"],
-            ["diagnostic-align", "待审查 · 边界结果"],
-            ["smoke-v3", "未晋升 · 增益不足"]
+            {
+              title: "formal-v4",
+              status: "通过 · 当前最佳",
+              selection: {
+                kind: "运行记录",
+                title: "formal-v4",
+                meta: "Design v4 · 5 seeds · 8 artifacts",
+                summaryLabel: "结果摘要",
+                summary: "固定协议下获得 +2.8% 有界工程收益；结论不能外推为真实神经机制。",
+                openLabel: "打开运行",
+                openToast: "已打开 formal-v4 运行详情",
+                secondaryLabel: "查看 Artifact",
+                secondaryToast: "已打开 8 个运行 Artifact",
+                primaryLabel: "加入比较",
+                primaryToast: "已将 formal-v4 加入候选比较"
+              }
+            },
+            {
+              title: "diagnostic-align",
+              status: "待审查 · 边界结果",
+              selection: {
+                kind: "诊断运行",
+                title: "diagnostic-align",
+                meta: "Design v5 · 3 seeds · 5 artifacts",
+                summaryLabel: "诊断摘要",
+                summary: "aligned 与 shifted 条件未形成稳定差异；当前只能标记为边界结果。",
+                openLabel: "打开运行",
+                openToast: "已打开 diagnostic-align 运行详情",
+                secondaryLabel: "查看诊断",
+                secondaryToast: "已打开诊断证据",
+                primaryLabel: "加入比较",
+                primaryToast: "已将 diagnostic-align 加入候选比较"
+              }
+            },
+            {
+              title: "smoke-v3",
+              status: "未晋升 · 增益不足",
+              selection: {
+                kind: "历史运行",
+                title: "smoke-v3",
+                meta: "Design v3 · 3 seeds · 4 artifacts",
+                summaryLabel: "失败摘要",
+                summary: "weight=0.75 仅获得 +0.4% 增益，未达到预注册晋升门禁。",
+                openLabel: "打开运行",
+                openToast: "已打开 smoke-v3 运行详情",
+                secondaryLabel: "查看失败门禁",
+                secondaryToast: "已显示未通过的晋升条件",
+                primaryLabel: "加入比较",
+                primaryToast: "已将 smoke-v3 加入候选比较"
+              }
+            }
           ],
-          selection: ["formal-v4", "Design v4 · 5 seeds · 8 artifacts", "固定协议下获得有界工程收益；结论不能外推为真实神经机制。"]
+          selection: null
         }
       };
 
@@ -570,6 +681,42 @@
         toast.classList.add("visible");
         window.clearTimeout(window.toastTimer);
         window.toastTimer = window.setTimeout(() => toast.classList.remove("visible"), 1800);
+      }
+
+      function updateSelectionInspector(selection) {
+        document.querySelector("#selection-kind").textContent = selection.kind;
+        document.querySelector("#selected-source-title").textContent = selection.title;
+        document.querySelector("#selected-source-meta").textContent = selection.meta;
+        document.querySelector("#selection-summary-label").textContent = selection.summaryLabel;
+        document.querySelector("#selected-source-evidence").textContent = selection.summary;
+        const actions = [
+          ["#selection-open-button", selection.openLabel, selection.openToast],
+          ["#selection-secondary-button", selection.secondaryLabel, selection.secondaryToast],
+          ["#selection-primary-button", selection.primaryLabel, selection.primaryToast]
+        ];
+        actions.forEach(([selector, label, toastMessage]) => {
+          const button = document.querySelector(selector);
+          button.textContent = label;
+          button.dataset.toast = toastMessage;
+        });
+      }
+
+      function renderStageObjects(stage) {
+        const objects = stageObjects[stage];
+        document.querySelector("#stage-object-heading").textContent = objects.heading;
+        const list = document.querySelector("#stage-object-list");
+        list.innerHTML = objects.items
+          .map((item, index) => `<button class="stage-object ${index === 0 ? "active" : ""}" type="button" data-object-index="${index}"><span><i></i>${item.title}</span><small>${item.status}</small></button>`)
+          .join("");
+        const defaultSelection = objects.selection || objects.items[0].selection;
+        updateSelectionInspector(defaultSelection);
+        if (stage === "knowledge") return;
+        list.querySelectorAll(".stage-object").forEach((button) => {
+          button.addEventListener("click", () => {
+            list.querySelectorAll(".stage-object").forEach((item) => item.classList.toggle("active", item === button));
+            updateSelectionInspector(objects.items[Number(button.dataset.objectIndex)].selection);
+          });
+        });
       }
 
       function selectStage(stage) {
@@ -595,14 +742,7 @@
         document.querySelector("#gate-list").innerHTML = content.gates
           .map((gate, index) => `<li class="${index < content.completed ? "done" : ""}"><span>${index < content.completed ? "✓" : ""}</span>${gate}</li>`)
           .join("");
-        const objects = stageObjects[stage];
-        document.querySelector("#stage-object-heading").textContent = objects.heading;
-        document.querySelector("#stage-object-list").innerHTML = objects.items
-          .map((item, index) => `<button class="stage-object ${index === 0 ? "active" : ""}" type="button"><span><i></i>${item[0]}</span><small>${item[1]}</small></button>`)
-          .join("");
-        document.querySelector("#selected-source-title").textContent = objects.selection[0];
-        document.querySelector("#selected-source-meta").textContent = objects.selection[1];
-        document.querySelector("#selected-source-evidence").textContent = objects.selection[2];
+        renderStageObjects(stage);
       }
 
       stageButtons.forEach((button) => button.addEventListener("click", () => selectStage(button.dataset.stage)));
@@ -610,9 +750,12 @@
         row.addEventListener("click", (event) => {
           if (event.target.matches("input")) return;
           document.querySelectorAll(".source-row[data-source-title]").forEach((item) => item.classList.toggle("selected", item === row));
-          document.querySelector("#selected-source-title").textContent = row.dataset.sourceTitle;
-          document.querySelector("#selected-source-meta").textContent = row.dataset.sourceMeta;
-          document.querySelector("#selected-source-evidence").textContent = row.dataset.sourceEvidence;
+          updateSelectionInspector({
+            ...stageObjects.knowledge.selection,
+            title: row.dataset.sourceTitle,
+            meta: row.dataset.sourceMeta,
+            summary: row.dataset.sourceEvidence
+          });
         });
       });
       document.querySelectorAll("[data-toast]").forEach((button) => {
