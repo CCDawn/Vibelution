@@ -1329,6 +1329,11 @@ a:focus-visible {
   cursor: pointer;
 }
 
+#stage-object-list {
+  display: grid;
+  gap: 4px;
+}
+
 .stage-object:hover,
 .stage-object.active {
   border-color: var(--line);
@@ -1599,6 +1604,148 @@ button.source-row {
   grid-template-columns: 1fr 1fr;
   gap: 6px;
   margin-top: 8px;
+}
+
+.design-version-explorer,
+.run-explorer {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.design-version-explorer > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.design-version-explorer h3,
+.run-explorer h3 {
+  margin-top: 2px;
+  font-size: 13px;
+}
+
+.version-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  padding: 10px;
+  background: var(--surface-soft);
+}
+
+.version-item {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  text-align: left;
+  cursor: pointer;
+}
+
+.version-item.active {
+  border-color: #a9d4cf;
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.version-item > span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.version-item strong {
+  overflow: hidden;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.version-item small {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.version-item b {
+  color: var(--accent-strong);
+  font-size: 9px;
+  font-weight: 650;
+}
+
+.run-table {
+  display: grid;
+}
+
+.run-row {
+  display: grid;
+  width: 100%;
+  grid-template-columns: 28px minmax(150px, 1fr) minmax(110px, 0.8fr) 72px 74px 54px;
+  align-items: center;
+  gap: 8px;
+  min-height: 47px;
+  padding: 7px 11px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+  text-align: left;
+}
+
+button.run-row {
+  cursor: pointer;
+}
+
+.run-row:last-child {
+  border-bottom: 0;
+}
+
+.run-row.selected {
+  background: var(--surface-selected);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.run-head {
+  min-height: 31px;
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 760;
+}
+
+.run-row > span {
+  min-width: 0;
+  font-size: 10px;
+}
+
+.run-row > span:nth-child(2) {
+  display: grid;
+  gap: 2px;
+}
+
+.run-row strong {
+  font-size: 10px;
+}
+
+.run-row small {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.run-row .positive {
+  color: var(--success);
+  font-weight: 760;
+}
+
+.run-row .negative {
+  color: var(--warning);
+  font-weight: 760;
 }
 
 @media (max-width: 1420px) {
