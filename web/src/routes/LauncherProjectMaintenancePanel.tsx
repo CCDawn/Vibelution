@@ -5,8 +5,13 @@ import type {
   LauncherMaintenanceProfileId,
   LauncherMaintenanceSummary,
 } from "../api/types";
+import { PersistedHeightListShell } from "../components/layout/PersistedHeightListShell";
 import { VButton, VTooltip } from "../components/vui";
 import styles from "./LauncherProjectMaintenancePanel.styles";
+import {
+  LAUNCHER_CLEANUP_CONSOLE_HEIGHT_PANE,
+  LAUNCHER_LIST_HEIGHT_LAYOUT_ID,
+} from "./launcherListHeights";
 
 type LauncherProjectMaintenanceCopy = {
   maintenanceActiveWorkPolicy: string;
@@ -153,7 +158,13 @@ export function LauncherProjectMaintenancePanel({
             ))}
           </div>
         </div>
-        <div className={styles.cleanupConsole}>
+        <PersistedHeightListShell
+          layoutId={LAUNCHER_LIST_HEIGHT_LAYOUT_ID}
+          pane={LAUNCHER_CLEANUP_CONSOLE_HEIGHT_PANE}
+          label={copy.maintenanceTitle}
+          className={styles.cleanupConsole}
+          resizeHandleClassName={styles.cleanupConsoleResizeHandle}
+        >
           <div className={styles.cleanupMetrics}>
             <span>{copy.maintenanceEstimated}: <strong>{formatBytes(visiblePlan?.estimatedBytes ?? estimatedBytes)}</strong></span>
             <span>{copy.maintenanceTargets}: <strong>{visiblePlan?.targetCount ?? targetCount}</strong></span>
@@ -175,7 +186,7 @@ export function LauncherProjectMaintenancePanel({
           ) : (
             <small>{plan && !planProfileMatches ? copy.maintenancePlanProfileMismatch : copy.maintenancePlanMissingForProfile}</small>
           )}
-        </div>
+        </PersistedHeightListShell>
       </div>
     </section>
   );

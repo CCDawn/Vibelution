@@ -1,6 +1,11 @@
+import { PersistedHeightListShell } from "../components/layout/PersistedHeightListShell";
 import { VButton, VNativeInput } from "../components/vui";
 import type { MemoryItem, MemorySection } from "../api/types";
 import styles from "./MemoryItemListPanel.styles";
+import {
+  MEMORY_COMPACT_LIST_HEIGHT_PANE,
+  MEMORY_LIST_HEIGHT_LAYOUT_ID,
+} from "./memoryListHeights";
 
 export type MemoryItemListPair = {
   section: MemorySection;
@@ -75,9 +80,7 @@ export function MemoryItemListPanel({
     return <div className={styles.emptyState}>{emptyText}</div>;
   }
 
-  return (
-    <div className={compact ? styles.compactMemoryList : styles.itemList}>
-      {pairs.map(({ section, item }) => {
+  const listItems = pairs.map(({ section, item }) => {
         const itemKey = memoryItemListKey(section.id, item.id);
         const active = itemKey === activePairKey;
         const originLabel = formatSourceOrigin(section, item);
@@ -202,7 +205,7 @@ export function MemoryItemListPanel({
           <VButton
             key={itemKey}
             type="button"
-                contentLayout="plain"
+            contentLayout="plain"
             className={active ? `${styles.itemButton} ${styles.itemButtonActive}` : styles.itemButton}
             onClick={() => onSelectPair(section.id, item.id)}
             aria-pressed={active}
@@ -210,7 +213,23 @@ export function MemoryItemListPanel({
             {itemBody}
           </VButton>
         );
-      })}
-    </div>
-  );
+      });
+
+  if (compact) {
+    return (
+      <PersistedHeightListShell
+        layoutId={MEMORY_LIST_HEIGHT_LAYOUT_ID}
+        pane={MEMORY_COMPACT_LIST_HEIGHT_PANE}
+        label={copy.selectMemory}
+        className={styles.compactMemoryList}
+        resizeHandleClassName={styles.compactMemoryListResizeHandle}
+        role="region"
+        aria-label={copy.selectMemory}
+      >
+        {listItems}
+      </PersistedHeightListShell>
+    );
+  }
+
+  return <div className={styles.itemList}>{listItems}</div>;
 }

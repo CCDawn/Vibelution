@@ -6,8 +6,13 @@ import type {
   LauncherDeveloperModeSetting,
   LauncherDeveloperNoiseOverview,
 } from "../api/types";
+import { PersistedHeightListShell } from "../components/layout/PersistedHeightListShell";
 import { VButton, VNativeSelect, VTooltip } from "../components/vui";
 import styles from "./LauncherDeveloperModePanel.styles";
+import {
+  LAUNCHER_CLEANUP_CONSOLE_HEIGHT_PANE,
+  LAUNCHER_LIST_HEIGHT_LAYOUT_ID,
+} from "./launcherListHeights";
 
 type LauncherDeveloperModeCopy = {
   cleanupApply: string;
@@ -194,7 +199,13 @@ export function LauncherDeveloperModePanel({
             ))}
           </div>
         </div>
-        <div className={styles.cleanupConsole}>
+        <PersistedHeightListShell
+          layoutId={LAUNCHER_LIST_HEIGHT_LAYOUT_ID}
+          pane={LAUNCHER_CLEANUP_CONSOLE_HEIGHT_PANE}
+          label={copy.developerModeAction}
+          className={styles.cleanupConsole}
+          resizeHandleClassName={styles.cleanupConsoleResizeHandle}
+        >
           <VTooltip content={selectedOption.detail} width="wide">
             <label className={styles.settingField}>
               <span>{copy.developerModeAction}</span>
@@ -232,7 +243,7 @@ export function LauncherDeveloperModePanel({
               )}
             </div>
           ) : null}
-        </div>
+        </PersistedHeightListShell>
       </div>
     </section>
   );

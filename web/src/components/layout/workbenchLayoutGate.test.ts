@@ -109,6 +109,22 @@ describe("workbench layout gate (Wave 5)", () => {
     expect(graph).toContain("PersistedHeightListShell");
   });
 
+  it("keeps Memory compact lists and Launcher cleanup strips on shared height API (Wave 6F)", () => {
+    const memoryHeights = readFileSync(resolve(webSrc, "routes/memoryListHeights.ts"), "utf-8");
+    const launcherHeights = readFileSync(resolve(webSrc, "routes/launcherListHeights.ts"), "utf-8");
+    const itemList = readFileSync(resolve(webSrc, "routes/MemoryItemListPanel.tsx"), "utf-8");
+    const diagnostics = readFileSync(resolve(webSrc, "routes/LauncherDiagnosticsPanel.tsx"), "utf-8");
+    const developer = readFileSync(resolve(webSrc, "routes/LauncherDeveloperModePanel.tsx"), "utf-8");
+    const maintenance = readFileSync(resolve(webSrc, "routes/LauncherProjectMaintenancePanel.tsx"), "utf-8");
+    expect(memoryHeights).toContain("compact-memory-list");
+    expect(launcherHeights).toContain("guardian-table");
+    expect(launcherHeights).toContain("cleanup-console");
+    expect(itemList).toContain("PersistedHeightListShell");
+    expect(diagnostics).toContain("LAUNCHER_GUARDIAN_TABLE_HEIGHT_PANE");
+    expect(developer).toContain("LAUNCHER_CLEANUP_CONSOLE_HEIGHT_PANE");
+    expect(maintenance).toContain("LAUNCHER_CLEANUP_CONSOLE_HEIGHT_PANE");
+  });
+
   it("keeps Evolution CASE IO on shared height resize handle", () => {
     const evolution = readFileSync(resolve(webSrc, "routes/EvolutionRoute.tsx"), "utf-8");
     expect(evolution).toContain("usePersistedPaneHeight");
@@ -169,6 +185,10 @@ describe("workbench layout gate (Wave 5)", () => {
       { file: "routes/TeamSourceCollectionScreeningPanel.styles.ts", key: "sourceCollectionListResizeHandle" },
       { file: "routes/TeamSourceCollectionMemoryPanel.styles.ts", key: "sourceCollectionListResizeHandle" },
       { file: "routes/TeamSourceCollectionGraphPanel.styles.ts", key: "sourceCollectionListResizeHandle" },
+      { file: "routes/MemoryItemListPanel.styles.ts", key: "compactMemoryListResizeHandle" },
+      { file: "routes/LauncherDiagnosticsPanel.styles.ts", key: "guardianTableResizeHandle" },
+      { file: "routes/LauncherDeveloperModePanel.styles.ts", key: "cleanupConsoleResizeHandle" },
+      { file: "routes/LauncherProjectMaintenancePanel.styles.ts", key: "cleanupConsoleResizeHandle" },
     ];
 
     for (const sample of samples) {
