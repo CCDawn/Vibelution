@@ -154,6 +154,32 @@ def test_openai_compatible_adapter_normalizes_models_and_reconciles_pins(monkeyp
     )
 
 
+def test_openai_compatible_adapter_uses_llamacpp_runtime_context_from_details(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("VIBELUTION_LLM_PROVIDER_LAB_API_KEY", "secret")
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(
+            200,
+            json={
+                "data": [
+                    {
+                        "id": "laguna-local",
+                        "details": {"n_ctx": 4096, "n_ctx_train": 1048576},
+                    }
+                ]
+            },
+        )
+    )
+
+    result = discover_provider_models(
+        _config("openai_compatible"),
+        "lab",
+        catalog_path=tmp_path / "model-catalog-state.json",
+        transport=transport,
+    )
+
+    assert result.models[0].limits == {"context_window": 4096}
+
+
 @pytest.mark.parametrize("route_mismatch_status", [404, 405])
 def test_openai_compatible_tries_bounded_candidates_in_order(
     monkeypatch,
