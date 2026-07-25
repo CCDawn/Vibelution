@@ -468,9 +468,9 @@ h3 {
 
 .workspace-grid {
   display: grid;
-  min-height: 520px;
+  min-height: max(520px, calc(100vh - 350px));
   grid-template-columns: minmax(0, 1fr) clamp(300px, 21vw, 360px);
-  align-items: start;
+  align-items: stretch;
   gap: 12px;
 }
 
@@ -483,6 +483,8 @@ h3 {
 }
 
 .primary-workspace {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
   overflow: hidden;
 }
@@ -513,6 +515,9 @@ h3 {
 
 .stage-view.active {
   display: grid;
+  min-height: 0;
+  flex: 1;
+  align-content: start;
   gap: 14px;
 }
 
@@ -692,6 +697,96 @@ h3 {
   font-weight: 650;
 }
 
+.output-preview,
+.design-contract,
+.iteration-flow,
+.empty-run-state {
+  padding: 13px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface-soft);
+}
+
+.output-preview > header,
+.design-contract > header,
+.iteration-flow > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.output-preview > header > div,
+.design-contract > header > div,
+.iteration-flow > header > div {
+  display: grid;
+  gap: 3px;
+}
+
+.output-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.output-grid article {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 27px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.output-grid article > span {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border-radius: 50%;
+  background: #edf1f4;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.output-grid article.ready > span {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.output-grid article > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.output-grid strong {
+  font-size: 10px;
+}
+
+.output-grid small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.output-grid em {
+  color: var(--muted);
+  font-size: 9px;
+  font-style: normal;
+}
+
+.output-grid article.ready em {
+  color: var(--success);
+}
+
 .workspace-actions {
   flex-wrap: wrap;
   justify-content: flex-end;
@@ -813,6 +908,113 @@ h3 {
 
 .design-summary li.done::before {
   content: "✓";
+}
+
+.contract-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.contract-grid article {
+  display: grid;
+  min-width: 0;
+  min-height: 78px;
+  align-content: start;
+  gap: 4px;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.contract-grid article.ready {
+  border-color: #c1ded9;
+  background: #f3faf8;
+}
+
+.contract-grid span {
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 730;
+}
+
+.contract-grid strong {
+  overflow: hidden;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.contract-grid small {
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.4;
+}
+
+.iteration-lanes {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+}
+
+.iteration-lanes article {
+  display: grid;
+  min-width: 0;
+  min-height: 94px;
+  align-content: center;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.iteration-lanes article > span {
+  color: var(--accent);
+  font-size: 9px;
+  font-weight: 780;
+}
+
+.iteration-lanes strong {
+  font-size: 11px;
+}
+
+.iteration-lanes small {
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.4;
+}
+
+.iteration-lanes > i {
+  color: var(--subtle);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.empty-run-state {
+  display: flex;
+  min-height: 126px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  background:
+    radial-gradient(circle at 0% 0%, rgb(22 124 117 / 6%), transparent 40%),
+    var(--surface-soft);
+}
+
+.empty-run-state > div {
+  display: grid;
+  max-width: 720px;
+  gap: 4px;
+}
+
+.empty-run-state p {
+  margin-bottom: 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.55;
 }
 
 .inspector {

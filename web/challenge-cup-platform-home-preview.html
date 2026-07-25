@@ -174,6 +174,33 @@
                 </dl>
               </section>
 
+              <section class="output-preview" aria-labelledby="knowledge-output-title">
+                <header>
+                  <div>
+                    <span class="eyebrow">阶段产出</span>
+                    <h3 id="knowledge-output-title">这些资料最终会沉淀为什么</h3>
+                  </div>
+                  <button class="text-button" type="button">查看证据链</button>
+                </header>
+                <div class="output-grid">
+                  <article class="ready">
+                    <span>01</span>
+                    <div><strong>可追溯证据包</strong><small>15 条来源已具备 DOI 或原始链接</small></div>
+                    <em>已建立</em>
+                  </article>
+                  <article>
+                    <span>02</span>
+                    <div><strong>概念与关系图</strong><small>用于定位共识、冲突和证据缺口</small></div>
+                    <em>等待整理</em>
+                  </article>
+                  <article>
+                    <span>03</span>
+                    <div><strong>受审知识条目</strong><small>为实验假设提供可引用的上游依据</small></div>
+                    <em>等待入库</em>
+                  </article>
+                </div>
+              </section>
+
               <footer class="workspace-actions">
                 <div>
                   <strong>推荐下一步：提炼 16 条资料</strong>
@@ -209,6 +236,31 @@
                   </ul>
                 </article>
               </div>
+              <section class="design-contract" aria-labelledby="design-contract-title">
+                <header>
+                  <div>
+                    <span class="eyebrow">设计合同</span>
+                    <h3 id="design-contract-title">冻结之前需要补齐的六项内容</h3>
+                  </div>
+                  <span class="state-badge pending">1 / 6 已定义</span>
+                </header>
+                <div class="contract-grid">
+                  <article class="ready"><span>研究问题</span><strong>预测误差如何跨层传播？</strong><small>已从当前项目主题继承</small></article>
+                  <article><span>可证伪假设</span><strong>等待证据支持</strong><small>必须标注支持与反证来源</small></article>
+                  <article><span>数据与 Baseline</span><strong>尚未选择</strong><small>需要明确数据许可与基准实现</small></article>
+                  <article><span>变量与控制组</span><strong>尚未定义</strong><small>限定本轮允许修改的变量</small></article>
+                  <article><span>指标与成功门禁</span><strong>尚未定义</strong><small>不得用单一总分代替独立指标</small></article>
+                  <article><span>复现与执行合同</span><strong>尚未生成</strong><small>执行器、预算、种子和产物路径</small></article>
+                </div>
+              </section>
+              <footer class="workspace-actions">
+                <div>
+                  <strong>当前阻塞：缺少已审核知识条目</strong>
+                  <span>可以查看和配置设计框架，但暂时不能冻结或启动实验。</span>
+                </div>
+                <button class="button secondary" type="button">查看上游证据</button>
+                <button class="button primary" type="button" data-toast="已打开实验设计配置">进入实验设计工作台</button>
+              </footer>
             </div>
 
             <div class="iteration-view stage-view" data-view="iteration">
@@ -225,6 +277,48 @@
                 <article><span>有效结果</span><strong>0</strong><small>无运行记录</small></article>
                 <article><span>诊断记录</span><strong>0</strong><small>无失败归因</small></article>
               </div>
+              <section class="iteration-flow" aria-labelledby="iteration-flow-title">
+                <header>
+                  <div>
+                    <span class="eyebrow">版本链</span>
+                    <h3 id="iteration-flow-title">每次运行都会留下可追踪的决策轨迹</h3>
+                  </div>
+                  <span class="state-badge pending">等待设计版本</span>
+                </header>
+                <div class="iteration-lanes">
+                  <article>
+                    <span>Baseline</span>
+                    <strong>基线运行</strong>
+                    <small>冻结配置后建立比较起点</small>
+                  </article>
+                  <i aria-hidden="true">→</i>
+                  <article>
+                    <span>Candidate</span>
+                    <strong>候选版本</strong>
+                    <small>一次只修改获准变量</small>
+                  </article>
+                  <i aria-hidden="true">→</i>
+                  <article>
+                    <span>Review</span>
+                    <strong>评估与归因</strong>
+                    <small>记录成功门禁与失败原因</small>
+                  </article>
+                  <i aria-hidden="true">→</i>
+                  <article>
+                    <span>Decision</span>
+                    <strong>晋升或淘汰</strong>
+                    <small>结果写回团队知识与下一版设计</small>
+                  </article>
+                </div>
+              </section>
+              <section class="empty-run-state">
+                <div>
+                  <span class="eyebrow">运行记录</span>
+                  <h3>暂无执行批次</h3>
+                  <p>实验设计冻结后，这里会展示 smoke、formal、消融和诊断记录，而不是提前生成模拟结果。</p>
+                </div>
+                <button class="button secondary" type="button">查看执行准备度</button>
+              </section>
             </div>
           </section>
 
