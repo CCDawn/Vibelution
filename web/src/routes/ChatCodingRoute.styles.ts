@@ -151,6 +151,7 @@ const styles: Record<string, string> = {
     "vui-routes-chatcodingroute blockEyebrow min-w-0 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-tertiary)]",
   sectionEyebrowRow:
     "vui-routes-chatcodingroute sectionEyebrowRow flex min-w-0 items-center gap-1",
+  // Wave 6H dialog policy: viewport clamp only — not workbench pane-heights.
   cacheDetailBody: `vui-routes-chatcodingroute cacheDetailBody min-w-0 ${vuiGlassPanelClass} p-2 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] max-h-[min(620px,calc(100dvh_-_238px))] overflow-auto [scrollbar-gutter:stable]`,
   cacheDetailBoundary: `vui-routes-chatcodingroute cacheDetailBoundary min-w-0 ${vuiGlassPanelClass} p-2`,
   cacheDetailBoundaryHit: `vui-routes-chatcodingroute cacheDetailBoundaryHit min-w-0 ${vuiGlassPanelClass} p-2 w-[var(--cache-boundary-hit-width)]`,
@@ -160,6 +161,7 @@ const styles: Record<string, string> = {
   cacheDetailBoundaryUnknown: `vui-routes-chatcodingroute cacheDetailBoundaryUnknown min-w-0 ${vuiGlassPanelClass} p-2 w-[var(--cache-boundary-unknown-width)]`,
   cacheDetailCalibrationNote: `vui-routes-chatcodingroute cacheDetailCalibrationNote min-w-0 ${vuiGlassPanelClass} p-2 !grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-[7px]`,
   cacheDetailCloseButton: `vui-routes-chatcodingroute cacheDetailCloseButton min-w-0 ${vuiGlassPanelClass} p-2 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55`,
+  // Dialog shell: viewport max-h (see components/layout/dialogHeightPolicy.ts).
   cacheDetailDialog: `vui-routes-chatcodingroute cacheDetailDialog min-w-0 ${vuiGlassPanelClass} p-2 w-[min(1120px,calc(100vw_-_44px))] max-h-[min(860px,calc(100dvh_-_52px))]`,
   cacheDetailDonutCenter: `vui-routes-chatcodingroute cacheDetailDonutCenter pointer-events-none absolute inset-0 m-auto grid size-[min(112px,40%)] min-w-0 place-self-center place-items-center ${vuiGlassPanelClass} p-2 text-center shadow-[var(--vui-shadow-hairline)]`,
   cacheDetailDonutLegend: `vui-routes-chatcodingroute cacheDetailDonutLegend min-w-0 ${vuiGlassPanelClass} p-2`,
@@ -260,7 +262,12 @@ const styles: Record<string, string> = {
     `vui-routes-chatcodingroute cliAgentTerminalOverlay min-w-0 ${vuiStateCoolInfoClass}`,
   cliAgentTerminalStatus:
     `vui-routes-chatcodingroute cliAgentTerminalStatus min-w-0 ${vuiStateCoolInfoClass}`,
-  compactDetails: `vui-routes-chatcodingroute compactDetails grid min-w-0 max-h-[220px] gap-1 overflow-auto ${vuiOpaqueRowClass} px-1.5 py-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [scrollbar-gutter:stable] [&>summary]:grid [&>summary]:cursor-pointer [&>summary]:list-none [&>summary]:grid-cols-[14px_minmax(0,1fr)] [&>summary]:items-center [&>summary]:gap-1 [&>summary]:font-semibold [&>summary::-webkit-details-marker]:hidden [&>summary_svg]:transition-transform [&[open]>summary_svg]:rotate-90 [&_.compactDetailsOpenLabel]:hidden [&[open]_.compactDetailsOpenLabel]:inline [&[open]_.compactDetailsClosedLabel]:hidden`,
+  // Wave 6H: outer <details> is chrome only; open body height uses PersistedHeightListShell.
+  compactDetails: `vui-routes-chatcodingroute compactDetails grid min-w-0 gap-1 ${vuiOpaqueRowClass} px-1.5 py-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&>summary]:grid [&>summary]:cursor-pointer [&>summary]:list-none [&>summary]:grid-cols-[14px_minmax(0,1fr)] [&>summary]:items-center [&>summary]:gap-1 [&>summary]:font-semibold [&>summary::-webkit-details-marker]:hidden [&>summary_svg]:transition-transform [&[open]>summary_svg]:rotate-90 [&_.compactDetailsOpenLabel]:hidden [&[open]_.compactDetailsOpenLabel]:inline [&[open]_.compactDetailsClosedLabel]:hidden`,
+  compactDetailsBody:
+    "vui-routes-chatcodingroute compactDetailsBody grid min-h-0 min-w-0 content-start gap-1 overflow-auto [scrollbar-gutter:stable]",
+  compactDetailsResizeHandle:
+    "vui-routes-chatcodingroute compactDetailsResizeHandle",
   compactDetailsClosedLabel:
     "vui-routes-chatcodingroute compactDetailsClosedLabel min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   compactDetailsOpenLabel:

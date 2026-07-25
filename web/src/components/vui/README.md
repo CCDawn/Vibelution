@@ -121,10 +121,20 @@ Gate: `workbenchLayoutGate` + `design/vuiDomainWorkbenchCompositionContract.test
 | Launcher cleanup console | `launcher` | `cleanup-console` | Wave 6F (developer + project maintenance) |
 | Chat group member picker | `chat` | `group-member-picker` | Wave 6G |
 | Launcher noise item grid | `launcher` | `noise-item-grid` | Wave 6G |
+| Chat status compact details body | `chat` | `compact-details` | Wave 6H (open body only) |
 
 Prefer these shared APIs for any new vertical splitter; do not reintroduce private max-height-only strips that users would need to resize.
 
 **List shells:** use `components/layout/PersistedHeightListShell` with a module-level `PaneHeightSpec` (see `routes/teamSourceCollectionListHeights.ts`, `routes/memoryListHeights.ts`, `routes/launcherListHeights.ts`, `routes/chat/chatListHeights.ts`).
+
+## Wave 6H dialog height policy (do **not** use pane-heights)
+
+| Surface type | Prefer | Avoid |
+| --- | --- | --- |
+| Modal / dialog shell (`role=dialog`, wizard, cache detail) | Viewport clamp: `max-h-[calc(100dvh-…)]` or `max-h-[min(…,calc(100dvh-…))]` + internal `minmax(0,1fr)` scroll | `usePersistedPaneHeight` / `PersistedHeightListShell` as dialog root |
+| Workbench rail strips (status details body, package lists) | Shared height API | Fixed px-only max-h without user resize |
+
+Policy source: `components/layout/dialogHeightPolicy.ts`. Gate blocks workbench height APIs inside `CacheDetailDialog` / `AgentCreateWizardDialog`.
 
 ## Wave 6D Chat shell boundary + more height reuse
 
