@@ -469,6 +469,13 @@ h3 {
   font-size: 12px;
 }
 
+.stage-summary small {
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 680;
+  line-height: 1.2;
+}
+
 .stage-connector {
   height: 1px;
   background: var(--line-strong);
