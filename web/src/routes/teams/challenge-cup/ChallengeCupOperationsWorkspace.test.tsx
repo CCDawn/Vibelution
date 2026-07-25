@@ -170,7 +170,11 @@ describe("ChallengeCupOperationsWorkspace", () => {
 
   it("renders the approved universal research platform from the live projection without preview claims", () => {
     const markup = renderWorkspace({
-      projectSwitcher: <div>项目切换器</div>,
+      projectSwitcher: (context) => (
+        <div>
+          项目切换器 · {context.statusLabel} · {context.primaryActionLabel}
+        </div>
+      ),
       surface: "workspace",
       stageHrefs: {
         knowledge_collection: "/teams/research-team/source-collection",
@@ -185,6 +189,8 @@ describe("ChallengeCupOperationsWorkspace", () => {
     expect(markup).toContain("执行与迭代");
     expect(markup).toContain("资料工作表");
     expect(markup).toContain("项目切换器");
+    expect(markup).toContain("继续知识搜集");
+    expect(markup).toContain("当前对象");
     expect(markup).toContain("神经预测编码中的层级反馈与可塑性学习机制");
     expect(markup).toContain("Claim Map 0");
     expect(markup).toContain("当前投影未提供正式 Claim Map 时保持为 0");
@@ -211,8 +217,12 @@ describe("ChallengeCupOperationsWorkspace", () => {
     expect(componentStyles).toContain("container-type: inline-size");
     expect(componentStyles).toContain("@container challenge-workspace (max-width: 1080px)");
     expect(componentStyles).toContain("@container challenge-workspace (min-width: 1600px)");
+    expect(componentStyles).toContain(".platform-console");
+    expect(componentStyles).toContain("grid-template-columns: 220px minmax(620px, 1fr) clamp(280px, 19vw, 340px)");
+    expect(componentStyles).toContain(".platform-stage-rail");
+    expect(componentStyles).toContain("position: sticky");
     expect(componentStyles).toContain(".platform-grid");
-    expect(componentStyles).toContain("grid-template-columns: minmax(0, 1fr) 292px");
+    expect(componentStyles).toContain("display: contents");
     expect(componentStyles).toContain("width: 100%");
     expect(componentStyles).toContain("max-width: none");
     expect(componentStyles).not.toContain("@media (max-width: 760px)");

@@ -3402,18 +3402,23 @@ export function TeamsRoute({
           projection={challengeProjection}
           agents={challengeAgents}
           graphHref={researchCanvasRoute(challengeTeamId)}
-          projectSwitcher={challengeTeamSurface === "workspace" ? (
+          projectSwitcher={challengeTeamSurface === "workspace" ? ((context) => (
             <ResearchProjectSwitcher
               teamId={challengeTeamId}
               lang={lang}
               currentTopic={sourceCollectionDraft.topic}
               currentExperimentMethod={preferredExperimentMethod}
+              variant="hero"
+              statusLabel={context.statusLabel}
+              statusTone={context.statusTone}
+              primaryActionHref={context.primaryActionHref}
+              primaryActionLabel={context.primaryActionLabel}
               onProjectActivated={(project) => {
                 setSourceCollectionDraft((current) => ({ ...current, topic: project.topic }));
                 setPreferredExperimentMethod(project.experimentMethod || "");
               }}
             />
-          ) : null}
+          )) : null}
           researchTopic={sourceCollectionDraft.topic}
           surface={challengeTeamSurface}
           stageHrefs={{
@@ -9857,24 +9862,26 @@ export function TeamsRoute({
           <div className={challengeCupResearchTeamSelected && !researchCanvasVisible ? styles.challengeWorkspaceBody : styles.inspectorBody}>
             {challengeCupResearchTeamSelected && !researchCanvasVisible ? (
               <nav className={styles.challengeSurfaceSwitch} aria-label={lang === "zh" ? "挑战杯平台视图" : "Challenge Cup platform view"}>
-                <VNativeButton
-                  type="button"
-                  className={challengeTeamSurface === "workspace" ? styles.challengeSurfaceSwitchActive : ""}
-                  aria-current={challengeTeamSurface === "workspace" ? "page" : undefined}
-                  onClick={() => setChallengeTeamSurface("workspace")}
-                >
-                  <strong>{lang === "zh" ? "科研工作台" : "Research workspace"}</strong>
-                  <span>{lang === "zh" ? "三阶段流程、实验方式与 Agent 操作" : "Three stages, experiment modes, and Agent operations"}</span>
-                </VNativeButton>
-                <VNativeButton
-                  type="button"
-                  className={challengeTeamSurface === "progress" ? styles.challengeSurfaceSwitchActive : ""}
-                  aria-current={challengeTeamSurface === "progress" ? "page" : undefined}
-                  onClick={() => setChallengeTeamSurface("progress")}
-                >
-                  <strong>{lang === "zh" ? "项目进展" : "Program progress"}</strong>
-                  <span>{lang === "zh" ? "挑战杯任务、验收门禁与交付状态" : "Challenge task, acceptance gates, and delivery"}</span>
-                </VNativeButton>
+                <VTooltip content={lang === "zh" ? "三阶段流程、实验方式与 Agent 操作" : "Three stages, experiment modes, and Agent operations"}>
+                  <VNativeButton
+                    type="button"
+                    className={challengeTeamSurface === "workspace" ? styles.challengeSurfaceSwitchActive : ""}
+                    aria-current={challengeTeamSurface === "workspace" ? "page" : undefined}
+                    onClick={() => setChallengeTeamSurface("workspace")}
+                  >
+                    <strong>{lang === "zh" ? "科研工作台" : "Research workspace"}</strong>
+                  </VNativeButton>
+                </VTooltip>
+                <VTooltip content={lang === "zh" ? "挑战杯任务、验收门禁与交付状态" : "Challenge task, acceptance gates, and delivery"}>
+                  <VNativeButton
+                    type="button"
+                    className={challengeTeamSurface === "progress" ? styles.challengeSurfaceSwitchActive : ""}
+                    aria-current={challengeTeamSurface === "progress" ? "page" : undefined}
+                    onClick={() => setChallengeTeamSurface("progress")}
+                  >
+                    <strong>{lang === "zh" ? "项目进展" : "Program progress"}</strong>
+                  </VNativeButton>
+                </VTooltip>
               </nav>
             ) : null}
             {researchWorkflowTeamSelected && !researchCanvasVisible ? (

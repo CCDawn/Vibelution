@@ -1384,9 +1384,15 @@
 }
 
 .platform-stage-rail {
+  position: sticky;
+  top: 12px;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  gap: 4px;
   overflow: hidden;
+  align-self: start;
+  padding: 8px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--panel);
@@ -1403,20 +1409,16 @@
 
 .platform-stage-button {
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) max-content max-content;
-  gap: 10px;
+  grid-template-columns: 30px minmax(0, 1fr);
+  gap: 8px;
   align-items: center;
-  min-height: 70px;
-  padding: 11px 16px;
-  border: 0;
-  border-right: 1px solid var(--line);
+  min-height: 58px;
+  padding: 9px;
+  border: 1px solid transparent;
+  border-radius: 9px;
   color: var(--text);
   text-align: left;
   background: transparent;
-}
-
-.platform-stage-button:last-child {
-  border-right: 0;
 }
 
 .platform-stage-button:hover {
@@ -1424,8 +1426,16 @@
 }
 
 .platform-stage-button.selected {
-  box-shadow: inset 4px 0 0 var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--line));
+  box-shadow: inset 3px 0 0 var(--accent);
   background: var(--accent-soft);
+}
+
+.platform-stage-connector {
+  width: 1px;
+  height: 14px;
+  margin-left: 23px;
+  background: var(--line-strong);
 }
 
 .stage-index {
@@ -1479,6 +1489,11 @@
   background: var(--panel-subtle);
 }
 
+.platform-stage-button .stage-state {
+  grid-column: 2;
+  justify-self: start;
+}
+
 .stage-state.active,
 .status-pill.active {
   border-color: rgb(23 107 115 / 24%);
@@ -1501,18 +1516,102 @@
 }
 
 .stage-count {
+  grid-column: 2;
   min-width: 38px;
   color: var(--text-secondary);
   font-size: 12px;
-  text-align: right;
+  text-align: left;
+}
+
+.platform-stage-objects {
+  display: grid;
+  gap: 5px;
+  margin-top: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.platform-stage-objects > header {
+  display: flex;
+  min-height: 22px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 4px 3px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 760;
+}
+
+.platform-stage-object {
+  display: grid;
+  gap: 3px;
+  padding: 8px 9px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--text);
+  text-decoration: none;
+  background: transparent;
+}
+
+.platform-stage-object:hover,
+.platform-stage-object.selected {
+  border-color: var(--line);
+  background: var(--panel-subtle);
+}
+
+.platform-stage-object > span {
+  display: flex;
+  min-width: 0;
+  gap: 6px;
+  align-items: center;
+  overflow: hidden;
+  font-size: 11px;
+  font-weight: 750;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.platform-stage-object i {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+
+.platform-stage-object i.active {
+  background: var(--accent);
+}
+
+.platform-stage-object i.ready {
+  background: var(--success);
+}
+
+.platform-stage-object small,
+.platform-stage-object-empty {
+  margin: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 9px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.platform-stage-object-empty {
+  padding: 8px 9px;
+}
+
+.platform-console {
+  display: grid;
+  min-height: calc(100vh - 250px);
+  grid-template-columns: 220px minmax(620px, 1fr) clamp(280px, 19vw, 340px);
+  gap: 12px;
+  align-items: start;
 }
 
 .platform-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 292px;
-  gap: 12px;
-  align-items: stretch;
-  min-height: 0;
+  display: contents;
 }
 
 .platform-canvas,
@@ -1525,6 +1624,8 @@
 }
 
 .platform-canvas {
+  grid-column: 2;
+  min-height: calc(100vh - 250px);
   overflow: hidden;
 }
 
@@ -1873,9 +1974,14 @@
 }
 
 .platform-inspector {
+  position: sticky;
+  top: 12px;
+  grid-column: 3;
   display: grid;
   align-content: start;
-  overflow: hidden;
+  max-height: calc(100vh - 76px);
+  overflow: auto;
+  scrollbar-width: thin;
 }
 
 .platform-inspector section {
@@ -1930,17 +2036,13 @@
     padding: 10px;
   }
 
-  .platform-grid {
-    grid-template-columns: minmax(0, 1fr) 250px;
+  .platform-console {
+    grid-template-columns: 188px minmax(560px, 1fr) 250px;
   }
 
   .platform-stage-button {
-    grid-template-columns: 30px minmax(0, 1fr) max-content;
-    padding-inline: 12px;
-  }
-
-  .stage-count {
-    display: none;
+    grid-template-columns: 28px minmax(0, 1fr);
+    padding-inline: 8px;
   }
 
   .platform-task-card {
@@ -1953,8 +2055,8 @@
     padding: 18px clamp(24px, 2vw, 36px);
   }
 
-  .platform-grid {
-    grid-template-columns: minmax(0, 1fr) 320px;
+  .platform-console {
+    grid-template-columns: 230px minmax(680px, 1fr) 320px;
     gap: 16px;
   }
 

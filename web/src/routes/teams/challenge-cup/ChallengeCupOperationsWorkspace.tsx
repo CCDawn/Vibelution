@@ -1,4 +1,4 @@
-import { type ReactNode, useMemo, useState } from "react";
+import { Fragment, type ReactNode, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { VNativeButton } from "../../../components/vui";
@@ -8,6 +8,14 @@ import css from "./ChallengeCupOperationsWorkspace.module.css";
 type ChallengeProgramProjection = NonNullable<ExperimentPlanningStatusPayload["challengeProgramProjection"]>;
 type WorkspaceTab = "overview" | "questions" | "evidence" | "agents";
 type PlatformStage = "knowledge_collection" | "experiment" | "iteration";
+
+export type ChallengeCupProjectSwitcherContext = {
+  activeStage: PlatformStage;
+  statusLabel: string;
+  statusTone: "neutral" | "active" | "ready" | "warning";
+  primaryActionHref: string;
+  primaryActionLabel: string;
+};
 
 export type ChallengeCupWorkspaceAgent = {
   agentId: string;
@@ -25,7 +33,7 @@ export type ChallengeCupOperationsWorkspaceProps = {
   projection?: ChallengeProgramProjection;
   agents: ChallengeCupWorkspaceAgent[];
   graphHref: string;
-  projectSwitcher?: ReactNode;
+  projectSwitcher?: ReactNode | ((context: ChallengeCupProjectSwitcherContext) => ReactNode);
   researchTopic?: string;
   surface?: "workspace" | "progress";
   stageHrefs?: Partial<Record<PlatformStage, string>>;
@@ -189,11 +197,49 @@ export function ChallengeCupOperationsWorkspace({
     });
   };
 
+  const activeStageState = stageState(activeStage);
+  const projectSwitcherContext: ChallengeCupProjectSwitcherContext = {
+    activeStage,
+    statusLabel: activeStageState.label,
+    statusTone: activeStageState.tone,
+    primaryActionHref: activeStageHref,
+    primaryActionLabel: activeStage === "knowledge_collection"
+      ? "继续知识搜集"
+      : activeStage === "experiment"
+        ? "继续实验设计"
+        : "继续执行与迭代",
+  };
+  const renderedProjectSwitcher = typeof projectSwitcher === "function"
+    ? projectSwitcher(projectSwitcherContext)
+    : projectSwitcher;
+  const stageObjects = activeStage === "knowledge_collection"
+    ? questions.slice(0, 3).map((question) => ({
+        id: question.id,
+        title: question.id,
+        summary: `${question.kind} · ${question.humanApproved ? "已通过人工审核" : question.machinePassed ? "待人工审核" : "待机器验证"}`,
+        tone: question.humanApproved ? "ready" : question.machinePassed ? "active" : "neutral",
+      }))
+    : activeStage === "experiment"
+      ? [{
+          id: "experiment-design",
+          title: researchTopic.trim() || "当前实验设计",
+          summary: stage1?.acceptance.researchPlanPresent
+            ? `研究计划已登记 · revision ${Math.max(1, stage1.acceptance.feedbackRevisionCount)}`
+            : "等待生成可执行研究计划",
+          tone: stage1?.acceptance.researchPlanPresent ? "ready" : "neutral",
+        }]
+      : (stage3?.caseRecords ?? []).slice(0, 3).map((record) => ({
+          id: record.caseId,
+          title: record.title,
+          summary: `${record.internalStatus} · ${record.bestValidatedResultId || "暂无最佳结果"}`,
+          tone: record.bestValidatedResultId ? "active" : "neutral",
+        }));
+
   if (surface === "workspace") {
     return (
       <section className={cx("workspace", "platform-workspace")} aria-label="通用科研工作台" data-testid="challenge-cup-platform-workspace">
         <main className={cx("platform-frame")}>
-          <header className={cx("platform-project-header")}>
+          {!renderedProjectSwitcher ? <header className={cx("platform-project-header")}>
             <div className={cx("platform-project-identity")}>
               <span>研究计划</span>
               <div>
@@ -213,7 +259,7 @@ export function ChallengeCupOperationsWorkspace({
                 {isRefreshing ? "刷新中" : "刷新状态"}
               </VNativeButton>
             </div>
-          </header>
+          </header> : null}
 
           {isLoading ? (
             <section className={cx("platform-state")} aria-live="polite" data-testid="challenge-cup-platform-loading">
@@ -233,33 +279,53 @@ export function ChallengeCupOperationsWorkspace({
             </section>
           ) : (
             <>
-              {projectSwitcher ? <div className={cx("platform-project-switcher")}>{projectSwitcher}</div> : null}
-              <nav className={cx("platform-stage-rail")} aria-label="科研三阶段">
-                {(Object.keys(PLATFORM_STAGE_META) as PlatformStage[]).map((stage) => {
-                  const meta = PLATFORM_STAGE_META[stage];
-                  const state = stageState(stage);
-                  const selected = activeStage === stage;
-                  return (
-                    <VNativeButton
-                      key={stage}
-                      className={cx("platform-stage-button", selected && "selected")}
-                      type="button"
-                      aria-current={selected ? "step" : undefined}
-                      onClick={() => setActiveStage(stage)}
-                    >
-                      <span className={cx("stage-index")}>{meta.index}</span>
-                      <span className={cx("stage-label")}>
-                        <strong>{meta.label}</strong>
-                        <small>{meta.shortLabel}</small>
-                      </span>
-                      <span className={cx("stage-state", state.tone)}>{state.label}</span>
-                      <strong className={cx("stage-count")}>{state.count}</strong>
-                    </VNativeButton>
-                  );
-                })}
-              </nav>
+              {renderedProjectSwitcher ? <div className={cx("platform-project-switcher")}>{renderedProjectSwitcher}</div> : null}
+              <div className={cx("platform-console")}>
+                <nav className={cx("platform-stage-rail")} aria-label="科研三阶段">
+                  {(Object.keys(PLATFORM_STAGE_META) as PlatformStage[]).map((stage, index, stages) => {
+                    const meta = PLATFORM_STAGE_META[stage];
+                    const state = stageState(stage);
+                    const selected = activeStage === stage;
+                    return (
+                      <Fragment key={stage}>
+                        <VNativeButton
+                          className={cx("platform-stage-button", selected && "selected")}
+                          type="button"
+                          aria-current={selected ? "step" : undefined}
+                          onClick={() => setActiveStage(stage)}
+                        >
+                          <span className={cx("stage-index")}>{meta.index}</span>
+                          <span className={cx("stage-label")}>
+                            <strong>{meta.label}</strong>
+                            <small>{meta.shortLabel}</small>
+                          </span>
+                          <span className={cx("stage-state", state.tone)}>{state.label}</span>
+                          <strong className={cx("stage-count")}>{state.count}</strong>
+                        </VNativeButton>
+                        {index < stages.length - 1 ? <span className={cx("platform-stage-connector")} aria-hidden="true" /> : null}
+                      </Fragment>
+                    );
+                  })}
+                  <section className={cx("platform-stage-objects")} aria-label="当前阶段对象">
+                    <header>
+                      <span>当前对象 · {stageObjects.length}</span>
+                    </header>
+                    {stageObjects.length > 0 ? stageObjects.map((item, index) => (
+                      <Link
+                        className={cx("platform-stage-object", index === 0 && "selected")}
+                        key={item.id}
+                        to={activeStageHref}
+                      >
+                        <span><i className={cx(item.tone)} />{item.title}</span>
+                        <small>{item.summary}</small>
+                      </Link>
+                    )) : (
+                      <p className={cx("platform-stage-object-empty")}>当前阶段尚无已登记对象</p>
+                    )}
+                  </section>
+                </nav>
 
-              <div className={cx("platform-grid")}>
+                <div className={cx("platform-grid")}>
                 <section className={cx("platform-canvas")} aria-labelledby="platform-stage-title">
                   <header className={cx("platform-canvas-header")}>
                     <div>
@@ -409,6 +475,7 @@ export function ChallengeCupOperationsWorkspace({
                     </div>
                   </section>
                 </aside>
+                </div>
               </div>
             </>
           )}
