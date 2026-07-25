@@ -3,7 +3,7 @@ import { AlertTriangle, CheckCircle2 } from "lucide-react";
 import { VContextualHint, VNativeButton, VTooltip } from "../components/vui";
 import styles from "./AgentManagementBriefPanel.styles";
 
-export type AgentManagementBriefPanelPane = "overview" | "config" | "activity";
+export type AgentManagementBriefPanelPane = "overview" | "effective" | "config" | "activity";
 
 export type AgentManagementBriefPanelData = {
   score: number;

@@ -84,6 +84,7 @@ import {
   type AgentSelectedDetailContentPanelProps,
 } from "./AgentSelectedDetailContentPanel";
 import { type AgentTaskDraft } from "./AgentTaskProfilePanel";
+import { AgentEffectiveConfigurationInspectorPanel } from "./AgentEffectiveConfigurationPanel";
 import { governanceStatusLabel } from "./AgentToolGovernancePanel";
 import { AgentWorkspaceLayoutPanel } from "./AgentWorkspaceLayoutPanel";
 import {
@@ -176,7 +177,7 @@ type AgentDraftSyncSource = {
 };
 
 type ToolPolicyMode = "inherited" | "allowed" | "blocked" | "excluded";
-type AgentConfigPaneId = "overview" | "config" | "activity";
+type AgentConfigPaneId = "overview" | "effective" | "config" | "activity";
 type ToolPermissionGroup = {
   bundleId: string;
   label: string;
@@ -1130,7 +1131,7 @@ function buildVisibleAgentColumns(
 
 function normalizeAgentConfigPane(value: string | null | undefined): AgentConfigPaneId {
   const normalized = String(value || "").trim();
-  return normalized === "config" || normalized === "activity" || normalized === "overview"
+  return normalized === "effective" || normalized === "config" || normalized === "activity" || normalized === "overview"
     ? normalized
     : "overview";
 }
@@ -2353,9 +2354,11 @@ function agentConfigPanes(copy: ReturnType<typeof agentsRouteCopy>, agent: Agent
 }> {
   // Badge = actionable signals only (not panel/field cardinality).
   const configIssueCount = agent?.health.length ?? 0;
+  const effectiveIssueCount = agent?.effectiveConfiguration?.fields.some((field) => field.status !== "ready") ? 1 : 0;
   const activityCount = (agent?.agentInboxPendingCount ?? 0) + (agent?.groupContextEvents?.length ?? 0);
   return [
     { id: "overview", label: copy.overviewPane, count: 0 },
+    { id: "effective", label: copy.effectiveConfiguration, count: effectiveIssueCount },
     { id: "config", label: copy.configTitle, count: configIssueCount },
     { id: "activity", label: copy.activityPane, count: activityCount },
   ];
@@ -2651,6 +2654,7 @@ function agentsRouteCopy(lang: "zh" | "en") {
         identityNotes: "人物说明",
         expertisePlaceholder: "用逗号分隔，例如 规划, 统计, 评审",
         overviewPane: "总览",
+        effectiveConfiguration: "生效配置",
         policiesPane: "策略",
         membershipPane: "归属",
         activityPane: "运行",
@@ -3048,6 +3052,7 @@ function agentsRouteCopy(lang: "zh" | "en") {
         identityNotes: "Identity notes",
         expertisePlaceholder: "Comma-separated, e.g. planning, statistics, review",
         overviewPane: "Overview",
+        effectiveConfiguration: "Effective config",
         policiesPane: "Policies",
         membershipPane: "Membership",
         activityPane: "Activity",
@@ -3212,6 +3217,7 @@ export function AgentsRoute() {
   const [searchText, setSearchText] = useState("");
   const [selectedAgentId, setSelectedAgentId] = useState("");
   const [activePane, setActivePane] = useState<AgentConfigPaneId>("overview");
+  const [selectedEffectiveFieldKey, setSelectedEffectiveFieldKey] = useState("");
   const createOpen = requestedCreate;
   const [configDraft, setConfigDraft] = useState<AgentConfigDraft>(() => draftFromAgent(null));
   const [membershipDraft, setMembershipDraft] = useState<AgentModeMembershipDraft>(() => membershipDraftFromWorkspace(undefined, null));
@@ -3271,7 +3277,7 @@ export function AgentsRoute() {
     };
   }, []);
 
-  const fullWorkspaceNeeded = Boolean(activePane === "config" || activePane === "activity" || requestedAgentId);
+  const fullWorkspaceNeeded = Boolean(activePane === "effective" || activePane === "config" || activePane === "activity" || requestedAgentId);
   const workspaceQuery = useQuery({
     queryKey: queryKeys.agentConfigWorkspace(),
     queryFn: () => fetchJson<AgentConfigWorkspaceWithTeamIndexes>("/api/agents/config-workspace?includeRuntime=false"),
@@ -3444,6 +3450,21 @@ export function AgentsRoute() {
     [lang, toolBundles, toolPolicyDraft, visiblePolicyTools],
   );
   const selectedAgent = selectedAgentFromList(visibleAgents, selectedAgentId, workspace?.agents ?? [], activeFilter);
+  const effectiveConfigurationFields = useMemo(
+    () => selectedAgent?.effectiveConfiguration?.fields ?? [],
+    [selectedAgent?.effectiveConfiguration],
+  );
+  const selectedEffectiveField = effectiveConfigurationFields.find(
+    (field) => field.key === selectedEffectiveFieldKey,
+  ) ?? effectiveConfigurationFields[0] ?? null;
+
+  useEffect(() => {
+    const firstKey = effectiveConfigurationFields[0]?.key ?? "";
+    setSelectedEffectiveFieldKey((current) => (
+      effectiveConfigurationFields.some((field) => field.key === current) ? current : firstKey
+    ));
+  }, [effectiveConfigurationFields]);
+
   const selectedAgentReturnRoute = selectedAgent?.agentId
     ? `/agents?agent=${encodeURIComponent(selectedAgent.agentId)}&pane=config`
     : "/agents?pane=config";
@@ -3756,6 +3777,7 @@ export function AgentsRoute() {
           contextCompressionPolicy: contextCompressionPolicyFromDraft(payload.draft.contextCompressionPolicy),
           metadata: agentMetadataWithReasoningEffort(payload.draft, payload.modelChoices),
           status: payload.draft.status,
+          expectedUpdatedAt: payload.agent.updatedAt,
         }),
       }),
     onSuccess: (agent) => {
@@ -3770,7 +3792,13 @@ export function AgentsRoute() {
       void chatWorkspaceCache.afterAgentWorkspaceChanged();
     },
     onError: (error) => {
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
+      const message = error instanceof Error ? error.message : String(error);
+      setNotice({
+        tone: "error",
+        text: message.includes("agent_update_conflict")
+          ? (lang === "zh" ? "配置已被其他编辑更新，请刷新后再保存。" : "Configuration changed elsewhere. Refresh before saving again.")
+          : message,
+      });
     },
   });
 
@@ -5408,6 +5436,12 @@ export function AgentsRoute() {
     overview: selectedAgentOverviewPanel,
     operations: overviewOperations,
     resources: overviewResources,
+    effectiveConfiguration: {
+      fields: effectiveConfigurationFields,
+      selectedFieldKey: selectedEffectiveField?.key ?? "",
+      onSelectField: setSelectedEffectiveFieldKey,
+      onOpenConfig: () => setActivePane("config"),
+    },
     configPrimary: {
       coreConfig: {
         copy,
@@ -5839,13 +5873,21 @@ export function AgentsRoute() {
         inspectorRail={selectedAgentDetailContent && inspectorOpen ? {
           ariaLabel: lang === "zh" ? "Agent 侧栏" : "Agent inspector",
           title: lang === "zh" ? "检查器" : "Inspector",
-          subtitle: agentLabel(selectedAgent!),
+          subtitle: activePane === "effective" && selectedEffectiveField
+            ? selectedEffectiveField.label
+            : agentLabel(selectedAgent!),
           emptyTitle: lang === "zh" ? "选择 Agent 查看侧栏" : "Select an Agent",
           emptyHint: lang === "zh"
             ? "管理完整度、下一步建议与关联资源会显示在这里。"
             : "Management score, next steps, and linked resources appear here.",
           brief: selectedAgentDetailContent.brief,
           resources: selectedAgentDetailContent.resources,
+          extra: activePane === "effective" ? (
+            <AgentEffectiveConfigurationInspectorPanel
+              field={selectedEffectiveField}
+              onOpenConfig={() => setActivePane("config")}
+            />
+          ) : null,
           closeLabel: lang === "zh" ? "关闭检查器" : "Close inspector",
           onClose: () => setInspectorOpen(false),
         } : null}
