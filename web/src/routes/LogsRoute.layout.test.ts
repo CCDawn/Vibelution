@@ -129,7 +129,8 @@ describe("LogsRoute layout contract", () => {
 
   it("avoids adding another card shell around the actual log preview stack", () => {
     expect(styles.previewPane).toContain("grid-rows-[minmax(0,1fr)]");
-    expect(styles.logPreviewStack).toContain("grid-rows-[auto_minmax(0,1fr)_auto]");
+    expect(styles.logPreviewStack).toContain("--logs-package-files-height");
+    expect(styles.logPreviewStack).toContain("minmax(0,1fr)");
     expect(styles.logPreviewStack).not.toContain("rounded-[var(--radius-panel)]");
     expect(styles.logPreviewStack).not.toContain("border border-[color-mix(in_srgb");
     expect(styles.logPreviewStack).not.toMatch(/bg-\[|!bg-\[|var\(--vui-surface/);
@@ -143,8 +144,18 @@ describe("LogsRoute layout contract", () => {
     expect(styles.sidebar).toContain("grid-rows-[auto_auto_minmax(0,1fr)]");
     expect(styles.rightRail).toContain("grid-rows-[auto_minmax(0,1fr)]");
     expect(styles.packageFilesPanel).toContain("grid-rows-[auto_minmax(0,1fr)]");
-    expect(styles.packageFileList).toContain("max-h-[min(190px,24vh)]");
+    // Wave 6C: package file list height is shared PaneHeight, not a fixed max-h cap.
+    expect(styles.packageFileList).not.toContain("max-h-[min(190px,24vh)]");
+    expect(styles.packageFileList).toContain("h-full");
+    expect(styles.packageFilesResizeHandle).not.toContain("cursor-row-resize");
     expect(styles.rootNav).toContain("max-[760px]:max-h-[34vh]");
+  });
+
+  it("uses shared height resize for the package file picker", () => {
+    expect(routeSource).toContain("usePersistedPaneHeight");
+    expect(routeSource).toContain("PaneHeightResizeHandle");
+    expect(routeSource).toContain("package-files");
+    expect(routeSource).toContain("--logs-package-files-height");
   });
 
   it("keeps short toolbar and picker controls content-sized unless the whole row is the target", () => {

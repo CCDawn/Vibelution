@@ -325,10 +325,8 @@ const styles = {
     "grid [gap:8px] [padding:12px_14px_14px]",
   liveIoPane:
     "[height:100%] min-h-0 [overflow:auto] [padding-right:4px]",
-  liveIoResizeHandle:
-    "group relative block w-full !h-[12px] !min-h-[12px] !border-0 !bg-transparent !p-0 cursor-row-resize touch-none outline-none !shadow-none",
-  liveIoResizeHandleLine:
-    "pointer-events-none absolute top-1/2 left-0 right-0 h-[3px] -translate-y-1/2 rounded-full bg-[var(--vui-border-subtle)] transition-[background-color,box-shadow] group-hover:bg-[color-mix(in_srgb,var(--accent-warm)_52%,transparent)] group-focus-visible:bg-[color-mix(in_srgb,var(--accent-warm)_52%,transparent)] group-hover:shadow-none group-focus-visible:shadow-none",
+  // Wave 6A: PaneHeightResizeHandle owns row-resize visual; no route chrome.
+  liveIoResizeHandle: "",
   liveLaunchStack:
     "grid [grid-template-rows:minmax(0,_1fr)] [gap:8px] [height:100%] min-h-0 [overflow:hidden] max-[1200px]:[grid-template-rows:minmax(0,_1fr)] max-[900px]:[height:auto] max-[900px]:[overflow:visible] max-[900px]:[grid-template-rows:auto] max-[900px]:[grid-auto-rows:max-content] max-[900px]:[align-content:start] max-[900px]:min-h-0",
   liveResizeHandle:

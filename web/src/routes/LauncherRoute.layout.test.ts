@@ -377,8 +377,13 @@ describe("LauncherRoute layout contract", () => {
     expect(developerModePanelStyles.cleanupActions).not.toContain("max-[620px]:grid");
 
     expect(diagnosticsPanelStyles.diagnosticsPanel).toContain("overflow-hidden");
-    expect(diagnosticsPanelStyles.diagnosticsBody).toContain("max-h-[min(42vh,420px)]");
+    // Wave 6C: diagnostics body height is shared PaneHeight, not a fixed max-h cap.
+    expect(diagnosticsPanelStyles.diagnosticsBody).not.toContain("max-h-[min(42vh,420px)]");
     expect(diagnosticsPanelStyles.diagnosticsBody).toContain("overflow-auto");
+    expect(diagnosticsPanelSource).toContain("usePersistedPaneHeight");
+    expect(diagnosticsPanelSource).toContain("PaneHeightResizeHandle");
+    expect(diagnosticsPanelSource).toContain("diagnostics-body");
+    expect(diagnosticsPanelStyles.diagnosticsBodyResizeHandle).not.toContain("cursor-row-resize");
     expect(diagnosticsPanelStyles.guardianTable).toContain("overflow-auto");
     expect(diagnosticsPanelStyles.guardianTable).toContain("max-h-[220px]");
   });

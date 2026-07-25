@@ -42,7 +42,11 @@ const styles = {
   projectMemoryProposalTitleLine: `projectMemoryProposalTitleLine min-w-0 ${vuiOpaqueRowClass} p-2 [font-size:var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)] !grid grid-cols-[minmax(0,1fr)_auto] items-center gap-1.5`,
   projectMemoryQueueControls:
     "projectMemoryQueueControls min-w-0 flex flex-wrap items-center gap-1.5",
-  projectMemoryQueuePanel: `projectMemoryQueuePanel relative z-[1] min-w-0 ${vuiFlatPanelClass} p-2 grid min-h-0 max-h-[min(220px,28vh)] grid-rows-[auto_auto_minmax(0,1fr)] content-start gap-1.5 overflow-hidden`,
+  // Wave 6D: height comes from usePersistedPaneHeight (project-memory-queue), not fixed max-h.
+  projectMemoryQueuePanel: `projectMemoryQueuePanel relative z-[1] min-w-0 ${vuiFlatPanelClass} p-2 grid min-h-0 h-full grid-rows-[auto_auto_minmax(0,1fr)] content-start gap-1.5 overflow-hidden`,
+  // PaneHeightResizeHandle owns row-resize visual; placement only.
+  projectMemoryQueueResizeHandle:
+    "projectMemoryQueueResizeHandle",
   projectMemoryQueueStats:
     "projectMemoryQueueStats min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] min-h-0 content-start gap-1.5",
 } as const;

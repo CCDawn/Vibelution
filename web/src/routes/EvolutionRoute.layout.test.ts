@@ -724,13 +724,11 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeStyles.supervisedConversationTrace).toContain("[max-height:min(260px,_30vh)]");
     expect(routeStyles.supervisedConversationTrace).not.toContain("[max-height:340px]");
     expect(routeStyles.ioSurface).toContain("[position:relative]");
-    expect(routeSource).toContain("styles.liveIoResizeHandleLine");
-    expect(routeStyles.liveIoResizeHandle).toContain("relative");
-    expect(routeStyles.liveIoResizeHandle).toContain("!min-h-[12px]");
-    expect(routeStyles.liveIoResizeHandle).toContain("!bg-transparent");
-    expect(routeStyles.liveIoResizeHandle).not.toContain("[position:absolute]");
-    expect(routeStyles.liveIoResizeHandleLine).toContain("h-[3px]");
-    expect(routeStyles.liveIoResizeHandleLine).toContain("group-hover:bg-[color-mix(in_srgb,var(--accent-warm)_52%,transparent)]");
+    // Wave 6A: height chrome lives on PaneHeightResizeHandle, not route style maps.
+    expect(routeSource).toContain("PaneHeightResizeHandle");
+    expect(routeSource).not.toContain("styles.liveIoResizeHandleLine");
+    expect(routeStyles.liveIoResizeHandle).not.toContain("cursor-row-resize");
+    expect(routeStyles.liveIoResizeHandle).not.toContain("before:");
   });
 
   it("shows environment preflight failures instead of waiting for agent output forever", () => {

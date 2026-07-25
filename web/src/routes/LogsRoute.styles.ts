@@ -75,7 +75,7 @@ const styles = {
   logIndexState:
     "logIndexState min-w-0 font-mono [font-size:var(--vui-font-xs)]",
   logPreviewStack:
-    "logPreviewStack min-w-0 grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] content-stretch gap-2 font-mono [font-size:var(--vui-font-xs)]",
+    "logPreviewStack min-w-0 grid h-full min-h-0 grid-rows-[var(--logs-package-files-height,190px)_auto_minmax(0,1fr)_auto] content-stretch gap-y-1 font-mono [font-size:var(--vui-font-xs)]",
   metaPill:
     "metaPill min-w-0 flex flex-wrap items-center gap-1.5 inline-flex min-h-6 w-fit max-w-full justify-center rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]",
   notice: `notice min-w-0 ${vuiFlatPanelClass} p-2`,
@@ -124,7 +124,7 @@ const styles = {
   packageFileButtonActive:
     "packageFileButtonActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_30%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] text-[var(--accent-cool)]",
   packageFileList:
-    "packageFileList min-w-0 grid min-h-0 max-h-[min(190px,24vh)] content-start gap-1.5 overflow-auto pr-1",
+    "packageFileList min-w-0 grid h-full min-h-0 content-start gap-1.5 overflow-auto pr-1",
   packageFileName:
     "packageFileName min-w-0 truncate [font-size:var(--vui-font-sm)] font-semibold leading-tight text-[var(--fg-primary)]",
   packageFilePath:
@@ -135,7 +135,10 @@ const styles = {
   packageFilesHeader:
     "packageFilesHeader min-w-0 flex flex-wrap items-center justify-between gap-1.5",
   packageFilesPanel:
-    "packageFilesPanel min-w-0 grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-1.5 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_52%,transparent)] !bg-[var(--vui-surface-panel)] p-1.5",
+    "packageFilesPanel min-w-0 grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-1.5 overflow-hidden rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_52%,transparent)] !bg-[var(--vui-surface-panel)] p-1.5",
+  // Wave 6C: PaneHeightResizeHandle owns row-resize visual; placement only.
+  packageFilesResizeHandle:
+    "packageFilesResizeHandle",
   packageFilesTitle:
     "packageFilesTitle min-w-0 [font-size:var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
   packageIssueStateStrip:

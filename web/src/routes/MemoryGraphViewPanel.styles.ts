@@ -15,15 +15,18 @@ const styles = {
   graphCanvasFallback:
     "graphCanvasFallback min-w-0 grid min-h-0 gap-2 p-2",
   graphCanvasPanel:
-    "graphCanvasPanel grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-2 overflow-hidden",
+    "graphCanvasPanel grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)_auto_var(--memory-graph-node-list-height,168px)] gap-0 overflow-hidden",
   graphCanvasToolbar:
     "graphCanvasToolbar min-w-0 flex flex-wrap items-center justify-between gap-1.5 px-1 py-0.5 [&>div]:min-w-0 [&_strong]:break-words",
   graphClearFocusButton:
     `graphClearFocusButton min-w-0 ${vuiControlQuietClass}`,
   graphInteractionHint:
     "graphInteractionHint min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+  // Wave 6B: PaneHeightResizeHandle owns row-resize visual; placement only.
+  graphNodeListResizeHandle:
+    "graphNodeListResizeHandle",
   graphNodeList:
-    "graphNodeList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto [&_[data-vui=\"button\"]]:w-full",
+    "graphNodeList min-w-0 grid h-full min-h-0 content-start gap-1.5 overflow-auto pt-1 [&_[data-vui=\"button\"]]:w-full",
   graphNodeTypeMark:
     "graphNodeTypeMark min-w-0",
   graphTypeList:
