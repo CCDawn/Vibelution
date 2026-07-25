@@ -71,8 +71,22 @@ describe("workbench layout gate (Wave 5)", () => {
     expect(chatLayout).toContain("attachAxisResizeSession");
     expect(chatLayout).toContain("CHAT_WORKBENCH_LAYOUT_ID");
     expect(chatLayout).toContain("WORKBENCH_LAYOUT_IDS.chat");
+    expect(chatLayout).toContain("setChatPanelWidths");
+    expect(chatLayout).toContain("getResizeBounds");
+    // Coupled dual-pane math stays Chat-owned (doc may mention the generic hook by name).
+    expect(chatLayout).not.toMatch(/import\s*\{[^}]*usePersistedPaneResize/);
     expect(chatRoute).toContain("WORKBENCH_LAYOUT_IDS.chat");
     expect(chatRoute).toContain("data-vui-layout-id");
+    expect(chatRoute).toContain('data-vui-recipe="chat-session-workbench"');
+    expect(chatRoute).toContain("PaneCollapseHandle");
+  });
+
+  it("keeps Memory project-memory-queue on shared height resize handle (Wave 6D)", () => {
+    const panel = readFileSync(resolve(webSrc, "routes/MemoryProjectMemoryQueuePanel.tsx"), "utf-8");
+    expect(panel).toContain("usePersistedPaneHeight");
+    expect(panel).toContain("PaneHeightResizeHandle");
+    expect(panel).toContain("project-memory-queue");
+    expect(panel).toContain("WORKBENCH_LAYOUT_IDS.memory");
   });
 
   it("keeps Evolution CASE IO on shared height resize handle", () => {
@@ -130,6 +144,7 @@ describe("workbench layout gate (Wave 5)", () => {
       { file: "routes/MemoryGraphViewPanel.styles.ts", key: "graphNodeListResizeHandle" },
       { file: "routes/LogsRoute.styles.ts", key: "packageFilesResizeHandle" },
       { file: "routes/LauncherDiagnosticsPanel.styles.ts", key: "diagnosticsBodyResizeHandle" },
+      { file: "routes/MemoryProjectMemoryQueuePanel.styles.ts", key: "projectMemoryQueueResizeHandle" },
     ];
 
     for (const sample of samples) {

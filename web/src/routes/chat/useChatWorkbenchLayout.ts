@@ -64,9 +64,11 @@ export type UseChatWorkbenchLayoutResult = {
  * Chat workbench shell layout: panel widths, resize drag/keyboard, responsive
  * collapse/overlay, and CSS vars / class names for the three-pane grid.
  *
- * Wave 5: pointer sessions use attachAxisResizeSession; permanent memory dual-writes
- * shellStore + WORKBENCH_LAYOUT_IDS.chat via setChatPanelWidths. Coupled dual-pane
- * bounds stay Chat-owned (center track budget).
+ * Wave 5–6D Chat shell boundary (do not collapse into generic usePersistedPaneResize):
+ * - Shared: attachAxisResizeSession, paneResizeKeyboard, WORKBENCH_LAYOUT_IDS.chat,
+ *   PaneCollapseHandle visuals, dual-write via setChatPanelWidths → pane-layouts.v1[chat].
+ * - Chat-owned: coupled left/right bounds (center track budget), responsive collapse/overlay,
+ *   CSS grid template vars / class names for the three-pane session workbench.
  */
 export const CHAT_WORKBENCH_LAYOUT_ID = WORKBENCH_LAYOUT_IDS.chat;
 
