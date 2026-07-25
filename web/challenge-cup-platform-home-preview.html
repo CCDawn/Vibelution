@@ -360,29 +360,95 @@
                   <div class="explorer-controls">
                     <label class="search-control"><span>⌕</span><input type="search" placeholder="搜索 Run、版本或标签" aria-label="搜索运行记录" /></label>
                     <select aria-label="筛选运行状态"><option>全部状态</option><option>通过</option><option>失败</option><option>运行中</option></select>
-                    <button class="button secondary" type="button">比较所选</button>
+                    <button class="button secondary" id="run-compare-button" type="button" aria-controls="run-analysis-panel" aria-expanded="false">比较所选</button>
                   </div>
                 </header>
                 <div class="run-table" role="table" aria-label="实验运行记录">
                   <div class="run-row run-head" role="row">
                     <span role="columnheader"></span><span role="columnheader">Run / Design</span><span role="columnheader">变量</span><span role="columnheader">Δ 指标</span><span role="columnheader">状态</span><span role="columnheader">Artifact</span>
                   </div>
-                  <button class="run-row selected" type="button" role="row">
+                  <button class="run-row selected" type="button" role="row" data-run-index="0">
                     <span role="cell"><input type="checkbox" checked aria-label="选择 formal-v4" /></span>
                     <span role="cell"><strong>formal-v4</strong><small>Design v4 · 5 seeds</small></span>
                     <span role="cell">weight 0.875</span><span role="cell" class="positive">+2.8%</span><span role="cell"><em class="status-pill active">通过</em></span><span role="cell">8</span>
                   </button>
-                  <button class="run-row" type="button" role="row">
+                  <button class="run-row" type="button" role="row" data-run-index="1">
                     <span role="cell"><input type="checkbox" aria-label="选择 diagnostic-align" /></span>
                     <span role="cell"><strong>diagnostic-align</strong><small>Design v5 · 3 seeds</small></span>
                     <span role="cell">aligned / shifted</span><span role="cell">边界结果</span><span role="cell"><em class="status-pill warning">待审查</em></span><span role="cell">5</span>
                   </button>
-                  <button class="run-row" type="button" role="row">
+                  <button class="run-row" type="button" role="row" data-run-index="2">
                     <span role="cell"><input type="checkbox" aria-label="选择 smoke-v3" /></span>
                     <span role="cell"><strong>smoke-v3</strong><small>Design v3 · 3 seeds</small></span>
                     <span role="cell">weight 0.75</span><span role="cell" class="negative">+0.4%</span><span role="cell"><em class="status-pill">未晋升</em></span><span role="cell">4</span>
                   </button>
                 </div>
+                <section class="run-analysis-panel" id="run-analysis-panel" aria-labelledby="run-analysis-title" hidden>
+                  <header class="run-analysis-header">
+                    <div>
+                      <span class="eyebrow">Baseline Compare</span>
+                      <h3 id="run-analysis-title">固定基线与候选运行对比</h3>
+                    </div>
+                    <div class="analysis-heading-actions">
+                      <span class="preview-data-label">预览数据</span>
+                      <button class="text-button" id="run-analysis-close" type="button">收起</button>
+                    </div>
+                  </header>
+                  <div class="run-analysis-grid">
+                    <article class="metric-plot-card">
+                      <div class="analysis-card-heading">
+                        <div>
+                          <span class="eyebrow">主要指标曲线</span>
+                          <h4 id="analysis-run-title">formal-v4 vs baseline</h4>
+                        </div>
+                        <span class="status-pill active" id="analysis-run-delta">+2.8%</span>
+                      </div>
+                      <svg class="metric-chart" viewBox="0 0 480 150" role="img" aria-label="Baseline 与候选运行主要指标曲线">
+                        <g class="chart-grid" aria-hidden="true">
+                          <line x1="34" y1="24" x2="466" y2="24"></line>
+                          <line x1="34" y1="61" x2="466" y2="61"></line>
+                          <line x1="34" y1="98" x2="466" y2="98"></line>
+                          <line x1="34" y1="135" x2="466" y2="135"></line>
+                        </g>
+                        <polyline class="chart-line baseline" points="34,126 142,110 250,87 358,68 466,55"></polyline>
+                        <polyline class="chart-line candidate" id="candidate-metric-line" points="34,123 142,101 250,72 358,51 466,39"></polyline>
+                        <g class="chart-axis-labels" aria-hidden="true">
+                          <text x="34" y="147">seed 1</text>
+                          <text x="228" y="147">seed 3</text>
+                          <text x="435" y="147">seed 5</text>
+                        </g>
+                      </svg>
+                      <div class="chart-legend">
+                        <span><i class="baseline"></i>冻结 Baseline</span>
+                        <span><i class="candidate"></i><b id="candidate-legend-label">formal-v4</b></span>
+                      </div>
+                    </article>
+                    <article class="run-compare-card">
+                      <div class="analysis-card-heading">
+                        <div>
+                          <span class="eyebrow">指标差异</span>
+                          <h4>独立门禁，不汇总总分</h4>
+                        </div>
+                      </div>
+                      <dl class="comparison-metrics" id="comparison-metrics">
+                        <div><dt>主要指标</dt><dd class="positive">+2.8%</dd></div>
+                        <div><dt>跨种子稳定性</dt><dd class="positive">+1.1%</dd></div>
+                        <div><dt>执行成本</dt><dd class="negative">+6.4%</dd></div>
+                      </dl>
+                      <div class="gate-decision" id="gate-decision">
+                        <span>门禁结论</span>
+                        <strong>通过 · 保留为当前最佳候选</strong>
+                      </div>
+                    </article>
+                    <article class="run-detail-card">
+                      <div class="run-detail-tabs" role="tablist" aria-label="运行证据详情">
+                        <button class="active" type="button" role="tab" aria-selected="true" data-run-detail="artifacts">Artifact <b id="artifact-count">8</b></button>
+                        <button type="button" role="tab" aria-selected="false" data-run-detail="trace">Trace <b id="trace-count">6</b></button>
+                      </div>
+                      <div class="run-detail-list" id="run-detail-list" role="tabpanel" aria-live="polite"></div>
+                    </article>
+                  </div>
+                </section>
               </section>
               <section class="iteration-flow" aria-labelledby="iteration-flow-title">
                 <header>
@@ -672,9 +738,56 @@
         }
       };
 
+      const runAnalysisData = [
+        {
+          title: "formal-v4",
+          delta: "+2.8%",
+          deltaClass: "active",
+          line: "34,123 142,101 250,72 358,51 466,39",
+          metrics: [
+            ["主要指标", "+2.8%", "positive"],
+            ["跨种子稳定性", "+1.1%", "positive"],
+            ["执行成本", "+6.4%", "negative"]
+          ],
+          decision: "通过 · 保留为当前最佳候选",
+          artifacts: ["metrics.json", "seed-summary.csv", "config.snapshot.json", "model-card.md", "run-manifest.json", "plots/metric.svg", "logs/formal.log", "evidence-index.json"],
+          trace: ["加载冻结 Design v4", "解析 FashionMNIST 数据集", "执行 5 个独立种子", "聚合主要指标与稳定性", "核验预注册门禁", "写回候选与证据索引"]
+        },
+        {
+          title: "diagnostic-align",
+          delta: "边界结果",
+          deltaClass: "warning",
+          line: "34,124 142,108 250,89 358,73 466,62",
+          metrics: [
+            ["aligned 条件", "+0.6%", "positive"],
+            ["shifted 条件", "+0.5%", "positive"],
+            ["条件差异", "+0.1%", "negative"]
+          ],
+          decision: "待审查 · 不支持空间对齐结论",
+          artifacts: ["diagnostic-metrics.json", "alignment-grid.csv", "config.snapshot.json", "boundary-review.md", "run-manifest.json"],
+          trace: ["加载 Design v5-diagnostic", "冻结共同控制变量", "执行 aligned 条件", "执行 shifted 条件", "记录边界结果", "等待人工审查"]
+        },
+        {
+          title: "smoke-v3",
+          delta: "+0.4%",
+          deltaClass: "",
+          line: "34,126 142,113 250,96 358,81 466,69",
+          metrics: [
+            ["主要指标", "+0.4%", "positive"],
+            ["跨种子稳定性", "-0.2%", "negative"],
+            ["执行成本", "+2.1%", "negative"]
+          ],
+          decision: "未晋升 · 增益未达到门禁",
+          artifacts: ["smoke-metrics.json", "seed-summary.csv", "config.snapshot.json", "failure-gates.md"],
+          trace: ["加载 Design v3", "执行 3 个 smoke seeds", "聚合主要指标", "核验增益门禁", "记录未晋升原因"]
+        }
+      ];
+
       const stageButtons = [...document.querySelectorAll(".stage-node")];
       const views = [...document.querySelectorAll(".stage-view")];
       const toast = document.querySelector("#toast");
+      let selectedRunIndex = 0;
+      let selectedRunDetail = "artifacts";
 
       function showToast(message) {
         toast.textContent = message;
@@ -714,9 +827,39 @@
         list.querySelectorAll(".stage-object").forEach((button) => {
           button.addEventListener("click", () => {
             list.querySelectorAll(".stage-object").forEach((item) => item.classList.toggle("active", item === button));
-            updateSelectionInspector(objects.items[Number(button.dataset.objectIndex)].selection);
+            const index = Number(button.dataset.objectIndex);
+            updateSelectionInspector(objects.items[index].selection);
+            if (stage === "iteration") {
+              document.querySelectorAll(".run-row[data-run-index]").forEach((row) => row.classList.toggle("selected", Number(row.dataset.runIndex) === index));
+              updateRunAnalysis(index);
+            }
           });
         });
+      }
+
+      function renderRunDetail() {
+        const run = runAnalysisData[selectedRunIndex];
+        const items = run[selectedRunDetail];
+        document.querySelector("#run-detail-list").innerHTML = items
+          .map((item, index) => `<div><span>${String(index + 1).padStart(2, "0")}</span><strong>${item}</strong><em>${selectedRunDetail === "artifacts" ? "可追溯" : "已完成"}</em></div>`)
+          .join("");
+      }
+
+      function updateRunAnalysis(index) {
+        selectedRunIndex = index;
+        const run = runAnalysisData[index];
+        document.querySelector("#analysis-run-title").textContent = `${run.title} vs baseline`;
+        document.querySelector("#analysis-run-delta").textContent = run.delta;
+        document.querySelector("#analysis-run-delta").className = `status-pill ${run.deltaClass}`;
+        document.querySelector("#candidate-legend-label").textContent = run.title;
+        document.querySelector("#candidate-metric-line").setAttribute("points", run.line);
+        document.querySelector("#comparison-metrics").innerHTML = run.metrics
+          .map(([label, value, state]) => `<div><dt>${label}</dt><dd class="${state}">${value}</dd></div>`)
+          .join("");
+        document.querySelector("#gate-decision strong").textContent = run.decision;
+        document.querySelector("#artifact-count").textContent = run.artifacts.length;
+        document.querySelector("#trace-count").textContent = run.trace.length;
+        renderRunDetail();
       }
 
       function selectStage(stage) {
@@ -756,6 +899,40 @@
             meta: row.dataset.sourceMeta,
             summary: row.dataset.sourceEvidence
           });
+        });
+      });
+      document.querySelectorAll(".run-row[data-run-index]").forEach((row) => {
+        row.addEventListener("click", (event) => {
+          if (event.target.matches("input")) return;
+          const index = Number(row.dataset.runIndex);
+          document.querySelectorAll(".run-row[data-run-index]").forEach((item) => item.classList.toggle("selected", item === row));
+          document.querySelectorAll("#stage-object-list .stage-object").forEach((item) => item.classList.toggle("active", Number(item.dataset.objectIndex) === index));
+          updateSelectionInspector(stageObjects.iteration.items[index].selection);
+          updateRunAnalysis(index);
+        });
+      });
+      document.querySelector("#run-compare-button").addEventListener("click", () => {
+        const panel = document.querySelector("#run-analysis-panel");
+        const expanded = panel.hidden;
+        panel.hidden = !expanded;
+        document.querySelector("#run-compare-button").setAttribute("aria-expanded", String(expanded));
+        document.querySelector("#run-compare-button").textContent = expanded ? "收起比较" : "比较所选";
+        if (expanded) updateRunAnalysis(selectedRunIndex);
+      });
+      document.querySelector("#run-analysis-close").addEventListener("click", () => {
+        document.querySelector("#run-analysis-panel").hidden = true;
+        document.querySelector("#run-compare-button").setAttribute("aria-expanded", "false");
+        document.querySelector("#run-compare-button").textContent = "比较所选";
+      });
+      document.querySelectorAll("[data-run-detail]").forEach((button) => {
+        button.addEventListener("click", () => {
+          selectedRunDetail = button.dataset.runDetail;
+          document.querySelectorAll("[data-run-detail]").forEach((item) => {
+            const selected = item === button;
+            item.classList.toggle("active", selected);
+            item.setAttribute("aria-selected", String(selected));
+          });
+          renderRunDetail();
         });
       });
       document.querySelectorAll("[data-toast]").forEach((button) => {
