@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FolderKanban, Pencil, Plus, Save } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 
 import { fetchJson } from "../../../api/client";
 import type {
@@ -23,6 +24,11 @@ type ResearchProjectSwitcherProps = {
   currentTopic: string;
   currentExperimentMethod: ExperimentMethodId | "";
   onProjectActivated: (project: TeamResearchProject) => void;
+  variant?: "compact" | "hero";
+  statusLabel?: string;
+  statusTone?: "neutral" | "active" | "ready" | "warning";
+  primaryActionHref?: string;
+  primaryActionLabel?: string;
 };
 
 const EMPTY_DRAFT: ProjectDraft = { name: "", topic: "" };
@@ -41,6 +47,11 @@ export function ResearchProjectSwitcher({
   currentTopic,
   currentExperimentMethod,
   onProjectActivated,
+  variant = "compact",
+  statusLabel = "",
+  statusTone = "neutral",
+  primaryActionHref = "",
+  primaryActionLabel = "",
 }: ResearchProjectSwitcherProps) {
   const queryClient = useQueryClient();
   const [dialogMode, setDialogMode] = useState<"create" | "edit" | null>(null);
@@ -150,24 +161,34 @@ export function ResearchProjectSwitcher({
   };
 
   return (
-    <section className={styles.root} aria-label={lang === "zh" ? "研究项目" : "Research projects"}>
+    <section className={`${styles.root} ${variant === "hero" ? styles.hero : ""}`} aria-label={lang === "zh" ? "研究项目" : "Research projects"}>
       <div className={styles.identity}>
         <FolderKanban size={16} aria-hidden="true" />
         <div>
           <span>{lang === "zh" ? "当前研究项目" : "Current research project"}</span>
-          <strong>{activeProject?.name || (projectsQuery.isPending ? "…" : "—")}</strong>
+          <div className={styles.titleLine}>
+            <strong>{activeProject?.name || (projectsQuery.isPending ? "…" : "—")}</strong>
+            {statusLabel ? <em className={styles.status} data-tone={statusTone}>{statusLabel}</em> : null}
+            {variant === "hero" ? <small>{lang === "zh" ? "已自动保存" : "Autosaved"}</small> : null}
+          </div>
+          {variant === "hero" ? (
+            <p>{lang === "zh" ? "研究主题" : "Research topic"}：{activeProject?.topic || currentTopic || "—"}</p>
+          ) : null}
         </div>
       </div>
-      <VNativeSelect
-        value={projectsQuery.data?.activeProjectId || ""}
-        onChange={(event) => activateMutation.mutate(event.target.value)}
-        disabled={pending || projectsQuery.isPending}
-        aria-label={lang === "zh" ? "切换研究项目" : "Switch research project"}
-      >
-        {(projectsQuery.data?.projects ?? []).map((project) => (
-          <option key={project.projectId} value={project.projectId}>{project.name}</option>
-        ))}
-      </VNativeSelect>
+      <label className={styles.projectSelect}>
+        {variant === "hero" ? <span>{lang === "zh" ? "切换项目" : "Switch project"}</span> : null}
+        <VNativeSelect
+          value={projectsQuery.data?.activeProjectId || ""}
+          onChange={(event) => activateMutation.mutate(event.target.value)}
+          disabled={pending || projectsQuery.isPending}
+          aria-label={lang === "zh" ? "切换研究项目" : "Switch research project"}
+        >
+          {(projectsQuery.data?.projects ?? []).map((project) => (
+            <option key={project.projectId} value={project.projectId}>{project.name}</option>
+          ))}
+        </VNativeSelect>
+      </label>
       <div className={styles.actions}>
         <VButton
           type="button"
@@ -189,6 +210,9 @@ export function ResearchProjectSwitcher({
         >
           {lang === "zh" ? "新建项目" : "New project"}
         </VButton>
+        {variant === "hero" && primaryActionHref && primaryActionLabel ? (
+          <Link className={styles.primaryAction} to={primaryActionHref}>{primaryActionLabel}</Link>
+        ) : null}
       </div>
       {message ? <p className={styles.message} role="status">{message}</p> : null}
       {error ? <p className={styles.error} role="alert">{lang === "zh" ? "项目操作失败，请重试。" : "Project operation failed."}</p> : null}

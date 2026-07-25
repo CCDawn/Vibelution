@@ -29,7 +29,17 @@ describe("research project workspace", () => {
   it("mounts persistent project switching above the three-stage workspace", () => {
     expect(routeSource).toContain("<ResearchProjectSwitcher");
     expect(routeSource).toContain("onProjectActivated");
+    expect(routeSource).toContain('variant="hero"');
+    expect(routeSource).toContain("primaryActionHref={context.primaryActionHref}");
     expect(researchProjectSwitcherSource).toContain("新建研究项目");
+  });
+
+  it("keeps challenge platform surfaces compact and moves explanations into VUI tooltips", () => {
+    expect(routeSource).toContain("<VTooltip content={lang === \"zh\" ? \"三阶段流程、实验方式与 Agent 操作\"");
+    expect(routeSource).toContain("<VTooltip content={lang === \"zh\" ? \"挑战杯任务、验收门禁与交付状态\"");
+    expect(routeStyles.challengeSurfaceSwitch).toContain("inline-grid");
+    expect(routeStyles.challengeSurfaceSwitch).toContain("w-fit");
+    expect(routeStyles.challengeSurfaceSwitch).not.toContain("w-full");
   });
 });
 import teamMemoryIndexPanelSource from "./TeamMemoryIndexPanel.tsx?raw";

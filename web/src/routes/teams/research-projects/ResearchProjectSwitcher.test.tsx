@@ -32,4 +32,13 @@ describe("ResearchProjectSwitcher", () => {
     expect(switcherSource).toContain("新建研究项目");
     expect(switcherSource).toContain("每个项目拥有独立的资料、实验设计和迭代数据");
   });
+
+  it("supports the approved project hero without replacing project operations", () => {
+    expect(switcherSource).toContain('variant?: "compact" | "hero"');
+    expect(switcherSource).toContain('variant === "hero"');
+    expect(switcherSource).toContain("primaryActionHref");
+    expect(switcherSource).toContain("primaryActionLabel");
+    expect(switcherSource).toContain("已自动保存");
+    expect(switcherSource).toContain("切换项目");
+  });
 });
