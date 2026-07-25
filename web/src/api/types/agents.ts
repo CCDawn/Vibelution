@@ -898,6 +898,35 @@ export type AgentEffectiveConfiguration = {
   fields: AgentEffectiveConfigurationField[];
 };
 
+export type AgentConfigChangeDraft = {
+  draftId: string;
+  status: "active" | string;
+  baseUpdatedAt: string;
+  createdAt: string;
+  summary: string;
+  changedFields: string[];
+  stale: boolean;
+};
+
+export type AgentConfigRevision = {
+  revisionId: string;
+  revisionNumber: number;
+  publishedAt: string;
+  source: string;
+  sourceDraftId: string;
+  changedFields: string[];
+  runtimeBinding: {
+    directSessionId: string;
+  };
+};
+
+export type AgentConfigChanges = {
+  schemaVersion: number;
+  agentId: string;
+  activeDraft: AgentConfigChangeDraft | null;
+  revisions: AgentConfigRevision[];
+};
+
 export type AgentModelChoice = {
   modelId: string;
   modelRef: string;

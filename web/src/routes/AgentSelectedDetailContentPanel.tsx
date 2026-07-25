@@ -5,6 +5,7 @@ import { AgentActivityPanePanel } from "./AgentActivityPanePanel";
 import { AgentConfigPrimaryPanePanel } from "./AgentConfigPrimaryPanePanel";
 import { AgentConfigPolicyPanePanel } from "./AgentConfigPolicyPanePanel";
 import { AgentConfigReferencesPanePanel } from "./AgentConfigReferencesPanePanel";
+import { AgentConfigChangeHistoryPanel } from "./AgentConfigChangeHistoryPanel";
 import { AgentEffectiveConfigurationPanel } from "./AgentEffectiveConfigurationPanel";
 import { AgentTeamRelationsPanel } from "./AgentTeamRelationsPanel";
 import {
@@ -17,7 +18,7 @@ import { AgentOverviewOperationsPanel } from "./AgentOverviewOperationsPanel";
 import { AgentOverviewResourcesPanel } from "./AgentOverviewResourcesPanel";
 import styles from "./AgentSelectedDetailContentPanel.styles";
 
-export type AgentSelectedDetailPaneId = "overview" | "effective" | "relations" | "config" | "activity";
+export type AgentSelectedDetailPaneId = "overview" | "effective" | "relations" | "config" | "changes" | "activity";
 
 export type AgentConfigSectionId = "basic" | "profile" | "capability" | "ops";
 
@@ -39,6 +40,7 @@ export type AgentSelectedDetailContentPanelProps = {
   resources: ComponentProps<typeof AgentOverviewResourcesPanel> | null;
   effectiveConfiguration: ComponentProps<typeof AgentEffectiveConfigurationPanel>;
   teamRelations: ComponentProps<typeof AgentTeamRelationsPanel>;
+  configChanges: ComponentProps<typeof AgentConfigChangeHistoryPanel>;
   configPrimary: ComponentProps<typeof AgentConfigPrimaryPanePanel>;
   configPolicies: ComponentProps<typeof AgentConfigPolicyPanePanel>;
   configReferences: ComponentProps<typeof AgentConfigReferencesPanePanel>;
@@ -79,6 +81,7 @@ export function AgentSelectedDetailContentPanel({
   resources,
   effectiveConfiguration,
   teamRelations,
+  configChanges,
   configPrimary,
   configPolicies,
   configReferences,
@@ -131,6 +134,11 @@ export function AgentSelectedDetailContentPanel({
       {activePane === "relations" ? (
         <div className={styles.paneContent}>
           <AgentTeamRelationsPanel {...teamRelations} />
+        </div>
+      ) : null}
+      {activePane === "changes" ? (
+        <div className={styles.paneContent}>
+          <AgentConfigChangeHistoryPanel {...configChanges} />
         </div>
       ) : null}
       {activePane === "config" ? (
