@@ -314,6 +314,8 @@ export function conversationToolPresentationLabel(
     get_core_context_tool: { zh: "核心上下文", en: "Core context" },
     get_current_goal_tool: { zh: "当前目标", en: "Current goal" },
     search_code_tool: { zh: "搜索代码", en: "Search code" },
+    source_collection_context_tool: { zh: "读取资料上下文", en: "Read source context" },
+    source_collection_stage_writeback_tool: { zh: "资料提炼回写", en: "Write source extraction" },
     get_git_status_summary_tool: { zh: "Git 状态", en: "Git status" },
     get_recent_changes_tool: { zh: "查看最近改动", en: "Recent changes" },
     conversation_log_inspect_tool: {

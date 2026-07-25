@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import type { ConversationMessage } from "../../api/types";
 import { ConversationView } from "./ConversationView";
 import styles from "./ConversationView.styles";
+import conversationViewSource from "./ConversationView.tsx?raw";
 
 function renderConversation(messages: ConversationMessage[]) {
   const queryClient = new QueryClient({
@@ -40,6 +41,15 @@ function renderConversation(messages: ConversationMessage[]) {
 }
 
 describe("ConversationView process expansion defaults", () => {
+  it("keeps legacy feedback details flat under the process disclosure", () => {
+    const feedbackStart = conversationViewSource.indexOf("function renderFeedbackTimelineGroup(");
+    const feedbackEnd = conversationViewSource.indexOf("function renderAnswerOnlyProcessGroup(", feedbackStart);
+    const feedbackRenderer = conversationViewSource.slice(feedbackStart, feedbackEnd);
+
+    expect(feedbackRenderer).toContain("renderFeedbackTimelineDetails(messageId, operations)");
+    expect(feedbackRenderer).not.toContain("renderReActOperationGroup(");
+  });
+
   it("keeps running process details expanded by default", () => {
     const html = renderConversation([
       {
@@ -71,6 +81,39 @@ describe("ConversationView process expansion defaults", () => {
     expect(html).toContain('aria-expanded="true"');
     expect(html).toContain("运行中思考详情默认展开。");
     expect(html).toContain("正在读取上下文。");
+  });
+
+  it("keeps an answer-mode feedback process to one disclosure layer", () => {
+    const html = renderConversation([
+      {
+        id: "message-answer-mode-feedback-process",
+        role: "assistant",
+        content: "",
+        timestamp: "2026-07-25T15:57:00Z",
+        streaming: true,
+        feedbackEvents: [
+          {
+            sequence: 1,
+            kind: "tool",
+            status: "done",
+            name: "source_collection_context_tool",
+            summary: "Reading source context.",
+          },
+          {
+            sequence: 2,
+            kind: "tool",
+            status: "running",
+            name: "search_code_tool",
+            summary: "Searching source.",
+          },
+        ],
+      },
+    ]);
+
+    expect(html).toContain('data-agent-process-kind="answer-only"');
+    expect(html).not.toContain(styles.reActOperationSummary);
+    expect(html).not.toContain("source_collection_context_tool");
+    expect(html).not.toContain("search_code_tool");
   });
 
   it("keeps the running fallback tool row compact and uses the mapped operation label", () => {

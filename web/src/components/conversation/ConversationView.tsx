@@ -91,13 +91,11 @@ import {
   processSummaryMeta,
   processSummaryPreview,
   processSummaryTitle,
-  reActGroupTone,
   shouldShowTimelineOperation,
   type OperationStateLabels,
 } from "./conversationOperationState";
 import {
   reActActionOperations,
-  reActGroupDurationLabel,
   reActResultItems,
   reActThoughtItems,
   shouldExpandReActGroupByDefault,
@@ -2306,7 +2304,6 @@ export function ConversationView({
     }
     return (
       <section className={styles.reActOperationSection}>
-        <span className={styles.reActOperationSectionLabel}>{lang === "zh" ? "工具调用" : "Tool calls"}</span>
         <div className={styles.reActToolList}>
           {actions.map((operation) => {
             const duration = formatDuration(operation.durationSeconds);
@@ -2421,45 +2418,37 @@ export function ConversationView({
     );
   }
 
-  function renderReActOperationGroup(messageId: string, group: AgentMessageReActOperationGroup) {
-    if (group.operations.length === 0) {
+  function renderReActOperationContent(messageId: string, group: AgentMessageReActOperationGroup) {
+    return (
+      <div className={styles.reActOperationBody}>
+        {renderReActThoughtSection(group)}
+        {renderReActActionSection(group)}
+        {renderReActResultSection(messageId, group)}
+      </div>
+    );
+  }
+
+  function feedbackTimelineGroups(operations: AgentMessageOperation[]) {
+    const visibleOperations = compactVisibleTimelineOperations(operations.filter(shouldShowTimelineOperation));
+    return {
+      visibleOperations,
+      reActGroups: buildAgentMessageReActOperationGroups(visibleOperations),
+    };
+  }
+
+  function renderFeedbackTimelineDetails(messageId: string, operations: AgentMessageOperation[]) {
+    const { reActGroups } = feedbackTimelineGroups(operations);
+    if (reActGroups.length === 0) {
       return null;
     }
-    const tone = reActGroupTone(group);
-    const sectionId = `feedback-react-${tone}-${group.id}`;
-    const defaultExpanded = shouldExpandReActGroupByDefault(group);
-    const expanded = getExpansionState(messageId, sectionId, defaultExpanded);
-    const groupTitle = group.title || operationLabel(group.operations[0]);
-    const headerItems = [
-      operationStateLabel(tone, operationStateLabels),
-      reActGroupDurationLabel(group, formatDuration),
-    ].filter(Boolean);
     return (
-      <section className={`${styles.reActOperationGroup} ${styles[`reActOperationGroup_${tone}`]}`}>
-        <VButton
-          type="button"
-          className={styles.reActOperationSummary}
-          aria-expanded={expanded}
-          onClick={() => toggleSection(messageId, sectionId, defaultExpanded)}
-          title={expanded ? t("executionDetailsVisible") : t("executionDetailsHidden")}
-        >
-          {operationIcon(group.primaryKind ?? group.operations[0]?.kind ?? "tool", groupTitle)}
-          <span className={styles.reActOperationTitle}>{groupTitle}</span>
-          {headerItems.length > 0 ? (
-            <span className={styles.reActOperationMeta}>
-              {headerItems.join(" · ")}
-            </span>
-          ) : null}
-          {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-        </VButton>
-        {expanded ? (
-          <div className={styles.reActOperationBody}>
-            {renderReActThoughtSection(group)}
-            {renderReActActionSection(group)}
-            {renderReActResultSection(messageId, group)}
+      <div className={styles.reActOperationList}>
+        {reActGroups.map((group) => (
+          <div key={group.id}>
+            {renderReActOperationContent(messageId, group)}
           </div>
-        ) : null}
-      </section>
+        ))}
+      </div>
     );
   }
 
@@ -2516,11 +2505,10 @@ export function ConversationView({
     if (operations.length === 0) {
       return null;
     }
-    const visibleOperations = compactVisibleTimelineOperations(operations.filter(shouldShowTimelineOperation));
+    const { visibleOperations, reActGroups } = feedbackTimelineGroups(operations);
     if (visibleOperations.length === 0) {
       return null;
     }
-    const reActGroups = buildAgentMessageReActOperationGroups(visibleOperations);
     if (reActGroups.length === 0) {
       return null;
     }
@@ -2549,15 +2537,7 @@ export function ConversationView({
           <span className={styles.operationSummaryCount}>{stateLabel}</span>
           {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
         </VButton>
-        {expanded ? (
-          <div className={styles.reActOperationList}>
-            {reActGroups.map((group) => (
-              <div key={group.id}>
-                {renderReActOperationGroup(messageId, group)}
-              </div>
-            ))}
-          </div>
-        ) : null}
+        {expanded ? renderFeedbackTimelineDetails(messageId, operations) : null}
       </section>
     );
   }
@@ -3183,12 +3163,7 @@ export function ConversationView({
                 return renderAgentMessageTimeline(message, agentMessageTimelineItems, rowIdentity, agentRenderState.processSectionIds);
               }
               if (hasFeedbackTimeline) {
-                return renderFeedbackTimelineGroup(
-                  message.id,
-                  operationGroups.timeline,
-                  true,
-                  agentRenderState.processSectionIds,
-                );
+                return renderFeedbackTimelineDetails(message.id, operationGroups.timeline);
               }
               return renderAgentProcessDetails(true);
             };
