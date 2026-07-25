@@ -59,6 +59,13 @@ describe("conversation tool presentation", () => {
     expect(conversationToolPresentationLabel(toolName, "zh")).toBe(expected);
   });
 
+  it("maps source-collection tools instead of exposing their internal names", () => {
+    expect(conversationToolPresentationLabel("source_collection_context_tool", "zh"))
+      .not.toBe("source_collection_context_tool");
+    expect(conversationToolPresentationLabel("source_collection_stage_writeback_tool", "zh"))
+      .not.toBe("source_collection_stage_writeback_tool");
+  });
+
   it("uses the inspected query instead of a low-value ok status", () => {
     expect(
       completedToolPresentationSummary({
