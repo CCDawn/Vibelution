@@ -386,7 +386,20 @@ import {
   ChallengeCupOperationsWorkspace,
   type ChallengeCupWorkspaceAgent,
 } from "./teams/challenge-cup/ChallengeCupOperationsWorkspace";
-import styles from "./TeamsRoute.styles";
+import shellStyles from "./TeamsRoute.styles";
+import researchRouteStyles from "./TeamsRoute.research.styles";
+import aiSearchRouteStyles from "./TeamsRoute.aiSearch.styles";
+import experimentRouteStyles from "./TeamsRoute.experiment.styles";
+import workflowRouteStyles from "./TeamsRoute.workflow.styles";
+
+/** Wave 8F: thematic style clusters merged for call-site stability. */
+const styles = {
+  ...shellStyles,
+  ...researchRouteStyles,
+  ...aiSearchRouteStyles,
+  ...experimentRouteStyles,
+  ...workflowRouteStyles,
+} as Record<string, string>;
 
 /** One shared async pack for Teams panel UI (see teams/README.md). */
 const loadTeamSecondaryPanels = () => import("./teams/teamSecondaryPanels");

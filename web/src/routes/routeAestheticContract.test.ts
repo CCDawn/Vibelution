@@ -195,6 +195,10 @@ describe("route aesthetic contract", () => {
       resolve(routeRoot, "MemoryRoute.styles.ts"),
       resolve(routeRoot, "ResearchFlowCanvasRoute.styles.ts"),
       resolve(routeRoot, "TeamsRoute.styles.ts"),
+      resolve(routeRoot, "TeamsRoute.research.styles.ts"),
+      resolve(routeRoot, "TeamsRoute.aiSearch.styles.ts"),
+      resolve(routeRoot, "TeamsRoute.experiment.styles.ts"),
+      resolve(routeRoot, "TeamsRoute.workflow.styles.ts"),
       ...MEMORY_STYLE_FILES,
     ]))
       .flatMap((file) => {
