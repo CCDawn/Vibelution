@@ -814,15 +814,11 @@ layout:
     "vui-routes-chatcodingroute projectBusEventRevoked min-w-0",
   projectBusInterruptToggle:
     "vui-routes-chatcodingroute projectBusInterruptToggle min-w-0",
-  // Zero-width seam: no reserved gutter strip; hit target expands via absolute inset.
-  resizeHandle:
-    "vui-routes-chatcodingroute resizeHandle relative z-20 h-full w-full min-w-0 cursor-col-resize touch-none border-0 bg-transparent p-0 outline-none after:absolute after:inset-y-0 after:left-1/2 after:z-0 after:w-3 after:-translate-x-1/2 after:content-[''] before:pointer-events-none before:absolute before:inset-y-0 before:left-1/2 before:z-[1] before:w-px before:-translate-x-1/2 before:bg-transparent before:opacity-0 before:transition before:content-[''] hover:before:bg-[color-mix(in_srgb,var(--accent-warm)_38%,transparent)] hover:before:opacity-100 focus-visible:before:bg-[color-mix(in_srgb,var(--accent-warm)_38%,transparent)] focus-visible:before:opacity-100 [&_button[data-vui=icon-button]]:absolute [&_button[data-vui=icon-button]]:left-1/2 [&_button[data-vui=icon-button]]:top-1/2 [&_button[data-vui=icon-button]]:z-[2] [&_button[data-vui=icon-button]]:opacity-55 [&_button[data-vui=icon-button]]:transition-opacity hover:[&_button[data-vui=icon-button]]:opacity-100 focus-within:[&_button[data-vui=icon-button]]:opacity-100 [&_button[data-vui=icon-button]]:[--tw-translate-x:var(--chat-resize-handle-button-x,-50%)]",
+  // Wave 4B: visual resize rule lives on PaneCollapseHandle; route only places the seam.
   resizeHandleLeft:
-    "vui-routes-chatcodingroute resizeHandleLeft [grid-column:2] [grid-row:1] [--chat-resize-handle-button-x:-50%]",
+    "vui-routes-chatcodingroute resizeHandleLeft h-full w-full min-w-0 max-[860px]:block [grid-column:2] [grid-row:1]",
   resizeHandleRight:
-    "vui-routes-chatcodingroute resizeHandleRight [grid-column:4] [grid-row:1] [--chat-resize-handle-button-x:-50%]",
-  resizeHandleActive:
-    "vui-routes-chatcodingroute resizeHandleActive before:bg-[color-mix(in_srgb,var(--accent-warm)_62%,transparent)] before:opacity-100 before:shadow-[var(--vui-shadow-accent)] [&_button[data-vui=icon-button]]:opacity-100",
+    "vui-routes-chatcodingroute resizeHandleRight h-full w-full min-w-0 max-[860px]:block [grid-column:4] [grid-row:1]",
   resourceMetric:
     "vui-routes-chatcodingroute resourceMetric min-w-0",
   resourceSplit:

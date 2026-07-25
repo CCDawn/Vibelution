@@ -663,14 +663,9 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeStyles.dashboardRun).toContain("[grid-row:1]");
   });
 
-  it("keeps supervised split resize handles as subtle transparent hit targets", () => {
-    expect(routeStyles.resizeHandle).toContain("bg-transparent");
-    expect(routeStyles.resizeHandle).toContain("before:absolute");
-    expect(routeStyles.resizeHandle).toContain("before:w-[3px]");
-    expect(routeStyles.resizeHandle).toContain("before:bg-[var(--vui-border-subtle)]");
-    expect(routeStyles.resizeHandle).toContain("hover:before:bg-[color-mix(in_srgb,var(--accent-warm)_52%,transparent)]");
-    expect(routeStyles.resizeHandle).toContain("focus-visible:before:bg-[color-mix(in_srgb,var(--accent-warm)_52%,transparent)]");
-    expect(routeStyles.resizeHandle).not.toContain("[background:color-mix(in_srgb,_var(--accent-warm)_52%,_transparent)]");
+  it("keeps supervised split resize handles on the shared collapse-resize contract", () => {
+    expect(routeStyles.resizeHandle).toContain("max-[1200px]:hidden");
+    expect(routeSource).toContain("PaneCollapseHandle");
   });
 
   it("keeps supervised run empty states compact for first-viewport scanning", () => {

@@ -16,8 +16,10 @@ import {
   type PaneSpec,
   type PaneWidthMap,
 } from "./paneLayoutPersistence";
-
-const KEYBOARD_STEP = 24;
+import {
+  PANE_KEYBOARD_STEP,
+  resolvePaneWidthFromKeyboardKey,
+} from "./paneResizeKeyboard";
 
 type DragState = {
   paneId: string;
@@ -148,6 +150,11 @@ export function usePersistedPaneResize({
     if (!drag) {
       return;
     }
+    const previousCursor = document.body.style.cursor;
+    const previousUserSelect = document.body.style.userSelect;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+
     const onMove = (event: PointerEvent) => {
       const spec = specs.get(drag.paneId);
       if (!spec) {
@@ -172,6 +179,8 @@ export function usePersistedPaneResize({
     window.addEventListener("pointerup", onUp);
     window.addEventListener("pointercancel", onUp);
     return () => {
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousUserSelect;
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onUp);
@@ -200,18 +209,22 @@ export function usePersistedPaneResize({
 
   const onResizeKeyDown = useCallback(
     (paneId: string, event: ReactKeyboardEvent<HTMLDivElement>, options?: { direction?: 1 | -1 }) => {
-      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
-        return;
-      }
       const spec = specs.get(paneId);
       if (!spec) {
         return;
       }
+      const next = resolvePaneWidthFromKeyboardKey(event.key, {
+        direction: options?.direction ?? 1,
+        step: PANE_KEYBOARD_STEP,
+        minWidth: spec.minWidth,
+        maxWidth: spec.maxWidth,
+        currentWidth: widths[paneId] ?? spec.defaultWidth,
+      });
+      if (next == null) {
+        return;
+      }
       event.preventDefault();
-      const direction = options?.direction ?? 1;
-      const step = (event.key === "ArrowRight" ? KEYBOARD_STEP : -KEYBOARD_STEP) * direction;
-      const current = widths[paneId] ?? spec.defaultWidth;
-      setPaneWidth(paneId, current + step);
+      setPaneWidth(paneId, next);
     },
     [setPaneWidth, specs, widths],
   );

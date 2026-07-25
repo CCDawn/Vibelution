@@ -409,8 +409,9 @@ const styles = {
     "grid [grid-template-columns:repeat(2,_minmax(0,_1fr))] [gap:8px] max-[900px]:[grid-template-columns:1fr]",
   relatedRow:
     `grid ${rowSurface} [gap:4px] [min-height:48px] [padding:9px_10px]`,
+  // Wave 4B: visual rule from PaneCollapseHandle; keep breakpoint hide local.
   resizeHandle:
-    "relative h-full min-w-3 cursor-col-resize touch-none border-0 bg-transparent p-0 outline-none before:absolute before:inset-y-0 before:left-1/2 before:w-[3px] before:-translate-x-1/2 before:rounded-[var(--radius-control)] before:bg-[var(--vui-border-subtle)] before:transition before:content-[''] hover:before:bg-[color-mix(in_srgb,var(--accent-warm)_52%,transparent)] hover:before:shadow-none focus-visible:before:bg-[color-mix(in_srgb,var(--accent-warm)_52%,transparent)] focus-visible:before:shadow-none max-[1200px]:hidden",
+    "max-[1200px]:hidden",
   reviewLead:
     "[margin:0] [color:var(--fg-primary)_!important] [font-size:1.04rem] [line-height:1.55]",
   runControlReason:

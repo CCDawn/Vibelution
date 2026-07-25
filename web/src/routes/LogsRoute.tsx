@@ -43,6 +43,10 @@ import {
   persistPaneWidth,
   resolveStoredPaneWidth,
 } from "../components/layout/paneLayoutPersistence";
+import {
+  PANE_KEYBOARD_STEP,
+  resolvePaneWidthFromKeyboardKey,
+} from "../components/layout/paneResizeKeyboard";
 import { LazyFilePreview } from "../components/preview/LazyFilePreview";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { useAppI18n } from "../i18n/useAppI18n";
@@ -78,7 +82,7 @@ const MAX_LOG_SIDEBAR_WIDTH = 560;
 const MAX_LOG_RIGHT_RAIL_WIDTH = 520;
 const MIN_LOG_PREVIEW_WIDTH = 520;
 const MIN_LOG_MAIN_WIDTH = 640;
-const KEYBOARD_RESIZE_STEP = 24;
+
 
 type DragState = {
   startX: number;
@@ -891,7 +895,7 @@ export function LogsRoute() {
     });
   }
 
-  function handleResizeStart(event: PointerEvent<HTMLButtonElement>) {
+  function handleResizeStart(event: PointerEvent<HTMLDivElement>) {
     if (event.button !== 0) {
       return;
     }
@@ -902,7 +906,7 @@ export function LogsRoute() {
     beginResize(event.clientX);
   }
 
-  function handleResizeMouseDown(event: MouseEvent<HTMLButtonElement>) {
+  function handleResizeMouseDown(event: MouseEvent<HTMLDivElement>) {
     if (event.button !== 0) {
       return;
     }
@@ -913,34 +917,26 @@ export function LogsRoute() {
     beginResize(event.clientX);
   }
 
-  function handleResizeKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
-    if (!layoutRef.current) {
+  function handleResizeKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (!layoutRef.current || sidebarCollapsed) {
       return;
     }
-    if (sidebarCollapsed) {
-      return;
-    }
-
-    const { key } = event;
-    const direction =
-      key === "ArrowLeft" ? -1 : key === "ArrowRight" ? 1 : key === "Home" ? "min" : key === "End" ? "max" : null;
-    if (direction === null) {
-      return;
-    }
-
-    event.preventDefault();
     const layoutWidth = layoutRef.current.getBoundingClientRect().width;
-    const maxWidth = getMaxSidebarWidth(layoutWidth);
-    const nextWidth =
-      direction === "min"
-        ? MIN_LOG_SIDEBAR_WIDTH
-        : direction === "max"
-          ? maxWidth
-          : clamp(sidebarWidth + Number(direction) * KEYBOARD_RESIZE_STEP, MIN_LOG_SIDEBAR_WIDTH, maxWidth);
-    setSidebarWidth(Math.round(nextWidth));
+    const nextWidth = resolvePaneWidthFromKeyboardKey(event.key, {
+      direction: 1,
+      step: PANE_KEYBOARD_STEP,
+      minWidth: MIN_LOG_SIDEBAR_WIDTH,
+      maxWidth: getMaxSidebarWidth(layoutWidth),
+      currentWidth: sidebarWidth,
+    });
+    if (nextWidth == null) {
+      return;
+    }
+    event.preventDefault();
+    setSidebarWidth(nextWidth);
   }
 
-  function handleRightRailResizeStart(event: PointerEvent<HTMLButtonElement>) {
+  function handleRightRailResizeStart(event: PointerEvent<HTMLDivElement>) {
     if (event.button !== 0) {
       return;
     }
@@ -951,7 +947,7 @@ export function LogsRoute() {
     beginRightRailResize(event.clientX);
   }
 
-  function handleRightRailResizeMouseDown(event: MouseEvent<HTMLButtonElement>) {
+  function handleRightRailResizeMouseDown(event: MouseEvent<HTMLDivElement>) {
     if (event.button !== 0) {
       return;
     }
@@ -962,35 +958,23 @@ export function LogsRoute() {
     beginRightRailResize(event.clientX);
   }
 
-  function handleRightRailResizeKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
-    if (!workspaceRef.current) {
+  function handleRightRailResizeKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (!workspaceRef.current || rightRailCollapsed) {
       return;
     }
-    if (rightRailCollapsed) {
-      return;
-    }
-
-    const { key } = event;
-    const direction =
-      key === "ArrowLeft" ? 1 : key === "ArrowRight" ? -1 : key === "Home" ? "min" : key === "End" ? "max" : null;
-    if (direction === null) {
-      return;
-    }
-
-    event.preventDefault();
     const layoutWidth = workspaceRef.current.getBoundingClientRect().width;
-    const maxWidth = getMaxRightRailWidth(layoutWidth);
-    const nextWidth =
-      direction === "min"
-        ? MIN_LOG_RIGHT_RAIL_WIDTH
-        : direction === "max"
-          ? maxWidth
-          : clamp(
-              rightRailWidth + Number(direction) * KEYBOARD_RESIZE_STEP,
-              MIN_LOG_RIGHT_RAIL_WIDTH,
-              maxWidth,
-            );
-    setRightRailWidth(Math.round(nextWidth));
+    const nextWidth = resolvePaneWidthFromKeyboardKey(event.key, {
+      direction: -1,
+      step: PANE_KEYBOARD_STEP,
+      minWidth: MIN_LOG_RIGHT_RAIL_WIDTH,
+      maxWidth: getMaxRightRailWidth(layoutWidth),
+      currentWidth: rightRailWidth,
+    });
+    if (nextWidth == null) {
+      return;
+    }
+    event.preventDefault();
+    setRightRailWidth(nextWidth);
   }
 
   const copyLabel =
@@ -1271,7 +1255,9 @@ export function LogsRoute() {
               expandLabel={lang === "zh" ? "展开日志列表" : "Expand log list"}
               className={styles.resizeHandle}
               active={Boolean(dragState)}
-              activeClassName={styles.resizeHandleActive}
+              valueNow={sidebarWidth}
+              valueMin={MIN_LOG_SIDEBAR_WIDTH}
+              valueMax={MAX_LOG_SIDEBAR_WIDTH}
               onToggle={() => setSidebarCollapsed((current) => !current)}
               onPointerDown={handleResizeStart}
               onMouseDown={handleResizeMouseDown}
@@ -1419,7 +1405,9 @@ export function LogsRoute() {
           expandLabel={lang === "zh" ? "展开右侧日志导航" : "Expand right log navigation"}
           className={`${styles.resizeHandle} ${styles.rightRailResizeHandle}`}
           active={Boolean(rightRailDragState)}
-          activeClassName={styles.resizeHandleActive}
+          valueNow={rightRailWidth}
+          valueMin={MIN_LOG_RIGHT_RAIL_WIDTH}
+          valueMax={MAX_LOG_RIGHT_RAIL_WIDTH}
           onToggle={() => setRightRailCollapsed((current) => !current)}
           onPointerDown={handleRightRailResizeStart}
           onMouseDown={handleRightRailResizeMouseDown}

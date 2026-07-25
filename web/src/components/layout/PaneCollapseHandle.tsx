@@ -3,10 +3,11 @@ import type { KeyboardEvent, MouseEvent, PointerEvent, ReactNode } from "react";
 
 import { VIconButton } from "../vui";
 import styles from "./PaneCollapseHandle.styles";
+import { paneResizeHandleStyles } from "./PaneResizeHandle";
 
-type PaneSide = "left" | "right";
+export type PaneSide = "left" | "right";
 
-type PaneCollapseHandleProps = {
+export type PaneCollapseHandleProps = {
   side: PaneSide;
   collapsed: boolean;
   className?: string;
@@ -15,7 +16,12 @@ type PaneCollapseHandleProps = {
   separatorLabel: string;
   collapseLabel: string;
   expandLabel: string;
+  /** Optional resize value contract (aria + Wave 4B keyboard consumers). */
+  valueNow?: number;
+  valueMin?: number;
+  valueMax?: number;
   onToggle: () => void;
+  /** Root is a div separator; callers may keep legacy HTMLButtonElement handler types. */
   onPointerDown?: (event: PointerEvent<any>) => void;
   onMouseDown?: (event: MouseEvent<any>) => void;
   onKeyDown?: (event: KeyboardEvent<any>) => void;
@@ -26,7 +32,10 @@ function stopHandleDrag(event: PointerEvent<HTMLButtonElement> | MouseEvent<HTML
   event.stopPropagation();
 }
 
-
+/**
+ * Combined collapse + resize separator (Wave 4B contract).
+ * Visual rail rule comes from shared PaneResizeHandle styles; routes only pass placement classes.
+ */
 export function PaneCollapseHandle({
   side,
   collapsed,
@@ -36,6 +45,9 @@ export function PaneCollapseHandle({
   separatorLabel,
   collapseLabel,
   expandLabel,
+  valueNow,
+  valueMin,
+  valueMax,
   onToggle,
   onPointerDown,
   onMouseDown,
@@ -48,10 +60,16 @@ export function PaneCollapseHandle({
     : collapsed ? "left" : "right";
   const Icon = iconDirection === "left" ? ChevronLeft : ChevronRight;
   const tooltip = `${separatorLabel} · ${label}`;
+  const hasValueContract =
+    typeof valueNow === "number"
+    && typeof valueMin === "number"
+    && typeof valueMax === "number";
   const rootClassName = [
-    styles.paneHandleClass,
+    paneResizeHandleStyles.handle,
+    active && !collapsed ? paneResizeHandleStyles.handleActive : "",
+    collapsed ? paneResizeHandleStyles.handleCollapsed : "",
+    active && activeClassName ? activeClassName : "",
     className,
-    active ? activeClassName : "",
   ].filter(Boolean).join(" ");
 
   return (
@@ -59,6 +77,14 @@ export function PaneCollapseHandle({
       role="separator"
       aria-orientation="vertical"
       aria-label={separatorLabel}
+      aria-valuenow={hasValueContract ? Math.round(valueNow) : undefined}
+      aria-valuemin={hasValueContract ? Math.round(valueMin) : undefined}
+      aria-valuemax={hasValueContract ? Math.round(valueMax) : undefined}
+      aria-disabled={collapsed || undefined}
+      data-vui-layout-handle="collapse-resize"
+      data-side={side}
+      data-active={active ? "true" : "false"}
+      data-collapsed={collapsed ? "true" : "false"}
       tabIndex={0}
       className={rootClassName}
       onPointerDown={onPointerDown}
@@ -68,7 +94,10 @@ export function PaneCollapseHandle({
       {children}
       <VIconButton
         type="button"
-        className={styles.paneToggleButtonClass}
+        className={[
+          styles.paneToggleButtonClass,
+          active ? styles.paneToggleButtonActive : "",
+        ].filter(Boolean).join(" ")}
         label={label}
         tooltip={tooltip}
         aria-pressed={collapsed}

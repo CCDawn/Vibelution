@@ -548,7 +548,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("useChatWorkbenchLayout");
   });
 
-  it("aligns side-pane gutters while preserving overlay resize handles", () => {
+  it("places shared collapse-resize handles on the chat gutters", () => {
     expect(routeStyles.layout.split(/\s+/)).toContain("grid");
     expect(routeStyles.layout).toContain("!gap-0");
     expect(routeStyles.layout).toContain("!p-0");
@@ -568,23 +568,16 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.layoutCompactDesktop).not.toContain("minmax(260px");
     expect(routeStyles.layout).not.toContain("_8px_");
     expect(routeStyles.layoutCompactDesktop).not.toContain("_8px_");
-    expect(routeStyles.resizeHandle).toContain("h-full");
-    expect(routeStyles.resizeHandle).toContain("w-full");
-    expect(routeStyles.resizeHandle).toContain("cursor-col-resize");
-    expect(routeStyles.resizeHandle).toContain("touch-none");
-    expect(routeStyles.resizeHandle).toContain("before:absolute");
-    expect(routeStyles.resizeHandle).toContain("before:w-px");
-    expect(routeStyles.resizeHandle).toContain("hover:before:bg");
-    expect(routeStyles.resizeHandle).toContain("focus-visible:before:bg");
-    expect(routeStyles.resizeHandle).toContain("[&_button[data-vui=icon-button]]:[--tw-translate-x:var(--chat-resize-handle-button-x,-50%)]");
+    // Placement only — shared visual/keyboard contract lives on PaneCollapseHandle.
+    expect(routeStyles.resizeHandleLeft).toContain("h-full");
+    expect(routeStyles.resizeHandleLeft).toContain("w-full");
     expect(routeStyles.resizeHandleLeft).toContain("[grid-column:2]");
-    expect(routeStyles.resizeHandleLeft).toContain("[--chat-resize-handle-button-x:-50%]");
     expect(routeStyles.resizeHandleRight).toContain("[grid-column:4]");
-    expect(routeStyles.resizeHandleRight).toContain("[--chat-resize-handle-button-x:-50%]");
-    expect(routeStyles.resizeHandle).toContain("before:opacity-0");
-    expect(routeStyles.resizeHandle).toContain("hover:before:opacity-100");
-    expect(routeStyles.resizeHandleActive).toContain("before:bg");
-    expect(routeStyles.resizeHandleActive).toContain("before:opacity-100");
+    expect(routeSource).toContain("PaneCollapseHandle");
+    expect(routeSource).toContain("valueNow={leftPanelWidth}");
+    expect(routeSource).toContain("valueNow={rightPanelWidth}");
+    expect(routeSource).toContain("MIN_LEFT_PANEL_WIDTH");
+    expect(routeSource).toContain("MIN_RIGHT_PANEL_WIDTH");
   });
 
   it("fills the conversation reading track whenever the optional status rail is closed", () => {

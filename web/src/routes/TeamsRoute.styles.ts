@@ -586,10 +586,9 @@ const styles: Record<string, string> = {
     "workspaceResearch min-w-0 grid min-h-0 !grid-cols-[minmax(0,1fr)] !gap-2 !overflow-auto rounded-none border-0 border-t border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2 [scrollbar-gutter:stable]",
   workspaceResearchCanvas:
     `workspaceResearchCanvas min-w-0 grid min-h-0 gap-[var(--team-workbench-gap)] p-[var(--team-workbench-gap)] !grid h-full grid-cols-[minmax(0,1fr)_auto_var(--teams-inspector-width,clamp(320px,26vw,420px))] overflow-hidden max-[760px]:h-auto max-[760px]:grid-cols-[minmax(0,1fr)] max-[760px]:content-start max-[760px]:overflow-auto ${vuiWorkspaceFillClass}`,
+  // Wave 4B: shared PaneResizeHandle visual.
   inspectorResizeHandle:
-    "inspectorResizeHandle relative z-20 h-full w-1 shrink-0 cursor-col-resize touch-none border-0 bg-transparent p-0 outline-none max-[760px]:hidden before:pointer-events-none before:absolute before:inset-y-0 before:left-1/2 before:w-px before:-translate-x-1/2 before:bg-transparent before:opacity-0 before:transition before:content-[''] hover:before:bg-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)] hover:before:opacity-100 focus-visible:before:bg-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)] focus-visible:before:opacity-100 after:absolute after:inset-y-0 after:left-1/2 after:w-3 after:-translate-x-1/2 after:content-['']",
-  inspectorResizeHandleActive:
-    "inspectorResizeHandleActive before:bg-[color-mix(in_srgb,var(--accent-cool)_62%,transparent)] before:opacity-100",
+    "inspectorResizeHandle max-[760px]:hidden",
 };
 
 export default styles;

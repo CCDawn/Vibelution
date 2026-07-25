@@ -3816,10 +3816,7 @@ export function ConfigRoute() {
         valueMin={CONFIG_SETTINGS_NAV_PANE.minWidth}
         valueMax={CONFIG_SETTINGS_NAV_PANE.maxWidth}
         active={settingsDraggingPaneId === "sidebar"}
-        className={[
-          styles.settingsNavResizeHandle,
-          settingsDraggingPaneId === "sidebar" ? styles.settingsNavResizeHandleActive : "",
-        ].filter(Boolean).join(" ")}
+        className={styles.settingsNavResizeHandle}
         onPointerDown={(event) => startSettingsNavResize("sidebar", event, { direction: 1 })}
         onKeyDown={(event) => onSettingsNavResizeKeyDown("sidebar", event, { direction: 1 })}
       />

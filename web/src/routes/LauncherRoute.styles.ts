@@ -77,10 +77,9 @@ export const launcherRouteStyles = {
     `mx-2 mt-1.5 grid gap-0.5 ${panelSurface} px-2 py-1.5 [font-size:var(--vui-font-xs)] text-vui-fg-secondary data-[tone=success]:border-[color-mix(in_srgb,var(--state-success)_34%,transparent)] data-[tone=success]:text-[var(--state-success)] data-[tone=warning]:border-[color-mix(in_srgb,var(--state-warning)_34%,transparent)] data-[tone=warning]:text-[var(--state-warning)] data-[tone=error]:border-[color-mix(in_srgb,var(--state-error)_34%,transparent)] data-[tone=error]:text-[var(--state-error)] [&_span]:min-w-0 [&_span]:truncate [&_span]:[font-size:var(--vui-font-xs)] [&_span]:text-vui-fg-tertiary`,
   workspace:
     `grid min-h-0 grid-cols-[minmax(0,1fr)_auto_var(--launcher-rail-width,clamp(300px,26vw,420px))] auto-rows-min gap-1.5 overflow-visible px-2 pb-[max(14px,env(safe-area-inset-bottom))] pt-1.5 max-[1200px]:grid-cols-[minmax(0,1fr)] ${vuiWorkspaceFillClass}`,
+  // Wave 4B: shared PaneResizeHandle visual.
   railResizeHandle:
-    "relative z-20 min-h-full w-1 shrink-0 cursor-col-resize touch-none border-0 bg-transparent p-0 outline-none max-[1200px]:hidden before:pointer-events-none before:absolute before:inset-y-0 before:left-1/2 before:w-px before:-translate-x-1/2 before:bg-transparent before:opacity-0 before:transition before:content-[''] hover:before:bg-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)] hover:before:opacity-100 focus-visible:before:bg-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)] focus-visible:before:opacity-100 after:absolute after:inset-y-0 after:left-1/2 after:w-3 after:-translate-x-1/2 after:content-['']",
-  railResizeHandleActive:
-    "before:bg-[color-mix(in_srgb,var(--accent-cool)_62%,transparent)] before:opacity-100",
+    "max-[1200px]:hidden",
   panel: `block min-h-0 min-w-0 overflow-hidden ${panelSurface} px-2 py-[7px]`,
   matrixPanel: "col-auto min-h-0",
   panelHeader:

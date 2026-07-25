@@ -285,8 +285,9 @@ describe("MemoryRoute layout contract", () => {
     expect(styles.workspace).toContain("var(--memory-right-width,clamp(280px,24vw,380px))");
     expect(styles.workspace).toContain("overflow-hidden");
     expect(styles.workspace).toContain("max-[1120px]:grid-cols-[var(--memory-left-width,clamp(190px,18vw,240px))_minmax(0,1fr)]");
-    expect(styles.paneResizeHandleLeft).toContain("cursor-col-resize");
-    expect(styles.paneResizeHandleRight).toContain("cursor-col-resize");
+    expect(styles.paneResizeHandleLeft).toContain("left-[var(--memory-left-width,230px)]");
+    expect(styles.paneResizeHandleRight).toContain("right-[var(--memory-right-width,320px)]");
+    expect(routeSource).toContain("PaneResizeHandle");
     expect(styles.workspace).toContain("max-[1120px]:[&_.detailPanel]:col-span-2");
     expect(styles.workspace).toContain("max-[780px]:grid-cols-1");
     expect(styles.workspace).toContain("max-[780px]:overflow-auto");

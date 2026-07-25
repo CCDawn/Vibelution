@@ -201,14 +201,13 @@ const styles = {
     "rawFileTabs min-w-0",
   resizableLayout:
     "resizableLayout min-w-0 max-w-full grid h-full min-h-0 gap-1.5 p-1.5 !grid grid-cols-[var(--logs-sidebar-width)_auto_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] overflow-hidden overflow-x-hidden max-[760px]:grid-cols-[minmax(0,1fr)] max-[760px]:grid-rows-[minmax(180px,34vh)_minmax(360px,1fr)] max-[760px]:overflow-y-auto max-[760px]:overflow-x-hidden",
+  // Wave 4B: visual contract from PaneCollapseHandle; route only gates mobile hide.
   resizeHandle:
     "resizeHandle min-w-0 max-[760px]:hidden",
-  resizeHandleActive:
-    `resizeHandleActive min-w-0 ${vuiStateSelectedRowClass}`,
   rightRail:
     "rightRail min-w-0 grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-1.5 overflow-hidden max-[760px]:max-h-[34vh]",
   rightRailResizeHandle:
-    "rightRailResizeHandle min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto max-[760px]:hidden",
+    "rightRailResizeHandle min-w-0 max-[760px]:hidden",
   rootButton: `rootButton min-w-0 flex min-h-[var(--vui-control-height-sm)] w-full max-w-full flex-col items-stretch justify-start gap-1 ${vuiOpaqueRowClass} px-2 py-1.5 text-left [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[color-mix(in_srgb,var(--border-strong)_58%,transparent)] hover:!bg-[var(--vui-surface-row)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55`,
   rootButtonActive:
     `rootButtonActive min-w-0 ${vuiStateSelectedRowClass}`,
