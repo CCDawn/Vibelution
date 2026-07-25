@@ -79,6 +79,9 @@ import {
   VSurface,
   VTextarea,
 } from "../components/vui";
+import { PaneResizeHandle } from "../components/layout/PaneResizeHandle";
+import { type PaneSpec } from "../components/layout/paneLayoutPersistence";
+import { usePersistedPaneResize } from "../components/layout/usePersistedPaneResize";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
 import { ConfigDraftPanel } from "./ConfigDraftPanel";
 import { publishConfigDraftPresence } from "./configDraftPresence";
@@ -117,6 +120,15 @@ import {
   type ProviderWizardState,
 } from "./configProviderLogic";
 import styles from "./ConfigRoute.styles";
+
+const CONFIG_SETTINGS_LAYOUT_ID = "config-settings";
+const CONFIG_SETTINGS_NAV_PANE: PaneSpec = {
+  id: "sidebar",
+  defaultWidth: 280,
+  minWidth: 220,
+  maxWidth: 360,
+};
+const CONFIG_SETTINGS_PANES: PaneSpec[] = [CONFIG_SETTINGS_NAV_PANE];
 
 export type ConfigLanguage = "zh" | "en";
 type NoticeTone = "neutral" | "success" | "error";
@@ -2199,6 +2211,21 @@ export function ConfigRoute() {
   const [searchParams] = useSearchParams();
   const contentViewportRef = useRef<HTMLDivElement | null>(null);
   const modelEditorRef = useRef<HTMLDivElement | null>(null);
+  const {
+    layoutRef: settingsLayoutRef,
+    widths: settingsPaneWidths,
+    draggingPaneId: settingsDraggingPaneId,
+    startResize: startSettingsNavResize,
+    onResizeKeyDown: onSettingsNavResizeKeyDown,
+  } = usePersistedPaneResize({
+    layoutId: CONFIG_SETTINGS_LAYOUT_ID,
+    panes: CONFIG_SETTINGS_PANES,
+    preserveMainMinWidth: 480,
+  });
+  const settingsNavWidth = settingsPaneWidths.sidebar ?? CONFIG_SETTINGS_NAV_PANE.defaultWidth;
+  const settingsLayoutStyle = {
+    ["--config-settings-nav-width" as string]: `${settingsNavWidth}px`,
+  } as CSSProperties;
   const lastRequestedSectionRef = useRef("");
   const providerDraftRequestRef = useRef<{
     publicConfig: PublicConfigShape;
@@ -3721,7 +3748,13 @@ export function ConfigRoute() {
   }
 
   return (
-    <div className={styles.page} data-vui-recipe="config-settings-workbench">
+    <div
+      ref={settingsLayoutRef}
+      className={styles.page}
+      style={settingsLayoutStyle}
+      data-vui-recipe="config-settings-workbench"
+      data-vui-layout-id={CONFIG_SETTINGS_LAYOUT_ID}
+    >
       {leaveGuardOpen ? (
         <div className={styles.leaveGuardOverlay}>
           <VSurface
@@ -3775,6 +3808,20 @@ export function ConfigRoute() {
             {returnToLabel}
           </Link>
         ) : undefined}
+      />
+
+      <PaneResizeHandle
+        label={currentLanguage === "zh" ? "调整设置导航宽度" : "Resize settings navigation"}
+        valueNow={settingsNavWidth}
+        valueMin={CONFIG_SETTINGS_NAV_PANE.minWidth}
+        valueMax={CONFIG_SETTINGS_NAV_PANE.maxWidth}
+        active={settingsDraggingPaneId === "sidebar"}
+        className={[
+          styles.settingsNavResizeHandle,
+          settingsDraggingPaneId === "sidebar" ? styles.settingsNavResizeHandleActive : "",
+        ].filter(Boolean).join(" ")}
+        onPointerDown={(event) => startSettingsNavResize("sidebar", event, { direction: 1 })}
+        onKeyDown={(event) => onSettingsNavResizeKeyDown("sidebar", event, { direction: 1 })}
       />
 
       <VSettingsFormPage

@@ -2,7 +2,7 @@ import "../design/route-css/workbench-secondary.tailwind.css";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ExternalLink, LoaderCircle, Play, Power, RefreshCw, Square } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 
 import {
   getLauncherStatus,
@@ -45,9 +45,21 @@ import {
   shouldArmBrowserProjectCloseGuard,
   shouldBlockProjectWindowClose,
 } from "../app/projectCloseGuard";
+import { PaneResizeHandle } from "../components/layout/PaneResizeHandle";
+import { type PaneSpec } from "../components/layout/paneLayoutPersistence";
+import { usePersistedPaneResize } from "../components/layout/usePersistedPaneResize";
 import { VButton, VRouteHeader, VTooltip } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { LauncherDeveloperModePanel } from "./LauncherDeveloperModePanel";
+
+const LAUNCHER_LAYOUT_ID = "launcher";
+const LAUNCHER_RAIL_PANE: PaneSpec = {
+  id: "rail",
+  defaultWidth: 340,
+  minWidth: 300,
+  maxWidth: 420,
+};
+const LAUNCHER_PANES: PaneSpec[] = [LAUNCHER_RAIL_PANE];
 import { LauncherDiagnosticsPanel } from "./LauncherDiagnosticsPanel";
 import { LauncherProjectMaintenancePanel } from "./LauncherProjectMaintenancePanel";
 import { launcherRouteStyles as styles } from "./LauncherRoute.styles";
@@ -871,6 +883,21 @@ export function LauncherRoute() {
   const queryClient = useQueryClient();
   const pageVisible = usePageVisibility();
   const locale = lang === "zh" ? "zh-CN" : "en-US";
+  const {
+    layoutRef: launcherLayoutRef,
+    widths: launcherPaneWidths,
+    draggingPaneId: launcherDraggingPaneId,
+    startResize: startLauncherRailResize,
+    onResizeKeyDown: onLauncherRailResizeKeyDown,
+  } = usePersistedPaneResize({
+    layoutId: LAUNCHER_LAYOUT_ID,
+    panes: LAUNCHER_PANES,
+    preserveMainMinWidth: 420,
+  });
+  const launcherRailWidth = launcherPaneWidths.rail ?? LAUNCHER_RAIL_PANE.defaultWidth;
+  const launcherLayoutStyle = {
+    ["--launcher-rail-width" as string]: `${launcherRailWidth}px`,
+  } as CSSProperties;
   const copy = lang === "zh"
     ? {
         eyebrow: "Launcher",
@@ -2187,7 +2214,12 @@ export function LauncherRoute() {
       ) : null}
       {statusQuery.isPending && !status ? <p className={styles.notice} data-tone="neutral">{copy.loading}</p> : null}
 
-      <div className={styles.workspace}>
+      <div
+        ref={launcherLayoutRef}
+        className={styles.workspace}
+        style={launcherLayoutStyle}
+        data-vui-layout-id={LAUNCHER_LAYOUT_ID}
+      >
         <section className={`${styles.panel} ${styles.matrixPanel}`}>
           <div className={styles.panelHeader}>
             <p className={styles.panelEyebrow}>{copy.lifecycle}</p>
@@ -2221,6 +2253,20 @@ export function LauncherRoute() {
             ))}
           </div>
         </section>
+
+        <PaneResizeHandle
+          label={lang === "zh" ? "调整启动器诊断栏宽度" : "Resize launcher diagnostics rail"}
+          valueNow={launcherRailWidth}
+          valueMin={LAUNCHER_RAIL_PANE.minWidth}
+          valueMax={LAUNCHER_RAIL_PANE.maxWidth}
+          active={launcherDraggingPaneId === "rail"}
+          className={[
+            styles.railResizeHandle,
+            launcherDraggingPaneId === "rail" ? styles.railResizeHandleActive : "",
+          ].filter(Boolean).join(" ")}
+          onPointerDown={(event) => startLauncherRailResize("rail", event, { direction: -1 })}
+          onKeyDown={(event) => onLauncherRailResizeKeyDown("rail", event, { direction: -1 })}
+        />
 
         <LauncherDiagnosticsPanel
           copy={copy}

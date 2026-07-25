@@ -23,7 +23,11 @@ import { useAppI18n } from "../i18n/useAppI18n";
 import { createEvolutionWorkspaceCache } from "./evolutionWorkspaceCache";
 import { SupervisedWorkspaceControls } from "./SupervisedWorkspaceControls";
 import { SupervisedWorktreeReviewPanel } from "./SupervisedWorktreeReviewPanel";
-import { clampPaneWidth, keyboardPaneWidth, storedPaneWidth } from "./resizablePane";
+import {
+  persistPaneWidth,
+  resolveStoredPaneWidth,
+} from "../components/layout/paneLayoutPersistence";
+import { clampPaneWidth, keyboardPaneWidth } from "./resizablePane";
 import styles from "./SupervisedReviewRoute.styles";
 
 type ReviewDecision = "positive" | "negative" | "discard";
@@ -31,6 +35,7 @@ type ReviewFilter = "all" | "pending" | "positive" | "negative" | "discard";
 
 const REVIEW_FILTERS: ReviewFilter[] = ["all", "pending", "positive", "negative", "discard"];
 const EMPTY_REVIEW_ITEMS: EvolutionChatReviewCandidate[] = [];
+const REVIEW_LAYOUT_ID = "supervised-review";
 const REVIEW_QUEUE_WIDTH_KEY = "vibelution.supervised-review.queue-width";
 const REVIEW_QUEUE_BOUNDS = { min: 320, max: 560 };
 const REVIEW_QUEUE_DEFAULT_WIDTH = 380;
@@ -53,7 +58,14 @@ export function SupervisedReviewRoute() {
   const [selectedCandidateIds, setSelectedCandidateIds] = useState<string[]>([]);
   const [bulkFeedback, setBulkFeedback] = useState("");
   const [queuePanelWidth, setQueuePanelWidth] = useState(() =>
-    storedPaneWidth(REVIEW_QUEUE_WIDTH_KEY, REVIEW_QUEUE_DEFAULT_WIDTH, REVIEW_QUEUE_BOUNDS),
+    resolveStoredPaneWidth(
+      REVIEW_LAYOUT_ID,
+      "queue",
+      REVIEW_QUEUE_DEFAULT_WIDTH,
+      REVIEW_QUEUE_BOUNDS.min,
+      REVIEW_QUEUE_BOUNDS.max,
+      REVIEW_QUEUE_WIDTH_KEY,
+    ),
   );
   const [queuePanelCollapsed, setQueuePanelCollapsed] = useState(false);
   const pageVisible = usePageVisibility();
@@ -261,7 +273,7 @@ export function SupervisedReviewRoute() {
   }, [detailCandidate?.candidateId]);
 
   useEffect(() => {
-    window.localStorage.setItem(REVIEW_QUEUE_WIDTH_KEY, String(queuePanelWidth));
+    persistPaneWidth(REVIEW_LAYOUT_ID, "queue", queuePanelWidth);
   }, [queuePanelWidth]);
 
   const decisionError = decisionMutation.error?.message ?? "";

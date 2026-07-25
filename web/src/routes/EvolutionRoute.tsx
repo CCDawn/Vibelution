@@ -51,6 +51,10 @@ import {
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
+import {
+  persistPaneWidth,
+  resolveStoredPaneWidth,
+} from "../components/layout/paneLayoutPersistence";
 import { LazyConversationView } from "../components/conversation/LazyConversationView";
 import {
   VButton,
@@ -99,7 +103,6 @@ import {
   keyboardPaneHeight,
   keyboardPaneWidth,
   storedPaneSize,
-  storedPaneWidth,
 } from "./resizablePane";
 import styles from "./EvolutionRoute.styles";
 
@@ -196,6 +199,7 @@ const EMPTY_RUNS: EvolutionRun[] = [];
 const EMPTY_LIBRARY_ENTRIES: EvolutionLibraryEntry[] = [];
 const EMPTY_WORKTREE_RUNS: SupervisedWorktreeRun[] = [];
 const EMPTY_AGENT_BINDINGS: Record<string, EvolutionActiveRunAgentBinding> = {};
+const EVOLUTION_LAYOUT_ID = "evolution";
 const EVOLUTION_RUNS_QUEUE_WIDTH_KEY = "vibelution.evolution.runs-queue-width";
 const EVOLUTION_RUNS_QUEUE_BOUNDS = { min: 300, max: 520 };
 const EVOLUTION_RUNS_QUEUE_DEFAULT_WIDTH = 380;
@@ -720,34 +724,47 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   });
   const [proposalEditFeedback, setProposalEditFeedback] = useState("");
   const [runsQueueWidth, setRunsQueueWidth] = useState(() =>
-    storedPaneWidth(
-      EVOLUTION_RUNS_QUEUE_WIDTH_KEY,
+    resolveStoredPaneWidth(
+      EVOLUTION_LAYOUT_ID,
+      "runs-queue",
       EVOLUTION_RUNS_QUEUE_DEFAULT_WIDTH,
-      EVOLUTION_RUNS_QUEUE_BOUNDS,
+      EVOLUTION_RUNS_QUEUE_BOUNDS.min,
+      EVOLUTION_RUNS_QUEUE_BOUNDS.max,
+      EVOLUTION_RUNS_QUEUE_WIDTH_KEY,
     ),
   );
   const [libraryListWidth, setLibraryListWidth] = useState(() =>
-    storedPaneWidth(
-      EVOLUTION_LIBRARY_LIST_WIDTH_KEY,
+    resolveStoredPaneWidth(
+      EVOLUTION_LAYOUT_ID,
+      "library-list",
       EVOLUTION_LIBRARY_LIST_DEFAULT_WIDTH,
-      EVOLUTION_LIBRARY_LIST_BOUNDS,
+      EVOLUTION_LIBRARY_LIST_BOUNDS.min,
+      EVOLUTION_LIBRARY_LIST_BOUNDS.max,
+      EVOLUTION_LIBRARY_LIST_WIDTH_KEY,
     ),
   );
   const [liveLaunchWidth, setLiveLaunchWidth] = useState(() =>
-    storedPaneWidth(
-      EVOLUTION_LIVE_LAUNCH_WIDTH_KEY,
+    resolveStoredPaneWidth(
+      EVOLUTION_LAYOUT_ID,
+      "live-launch",
       EVOLUTION_LIVE_LAUNCH_DEFAULT_WIDTH,
-      EVOLUTION_LIVE_LAUNCH_BOUNDS,
+      EVOLUTION_LIVE_LAUNCH_BOUNDS.min,
+      EVOLUTION_LIVE_LAUNCH_BOUNDS.max,
+      EVOLUTION_LIVE_LAUNCH_WIDTH_KEY,
     ),
   );
   const [liveRunWidth, setLiveRunWidth] = useState(() =>
-    storedPaneWidth(
-      EVOLUTION_LIVE_RUN_WIDTH_KEY,
+    resolveStoredPaneWidth(
+      EVOLUTION_LAYOUT_ID,
+      "live-run",
       EVOLUTION_LIVE_RUN_DEFAULT_WIDTH,
-      EVOLUTION_LIVE_RUN_BOUNDS,
+      EVOLUTION_LIVE_RUN_BOUNDS.min,
+      EVOLUTION_LIVE_RUN_BOUNDS.max,
+      EVOLUTION_LIVE_RUN_WIDTH_KEY,
     ),
   );
   const [liveIoHeight, setLiveIoHeight] = useState(() =>
+    // Heights stay on dedicated key (pane-layouts.v1 is width-oriented).
     storedPaneSize(
       EVOLUTION_LIVE_IO_HEIGHT_KEY,
       EVOLUTION_LIVE_IO_DEFAULT_HEIGHT,
@@ -2131,19 +2148,19 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   }, [visibleLibraryEntries]);
 
   useEffect(() => {
-    window.localStorage.setItem(EVOLUTION_RUNS_QUEUE_WIDTH_KEY, String(runsQueueWidth));
+    persistPaneWidth(EVOLUTION_LAYOUT_ID, "runs-queue", runsQueueWidth);
   }, [runsQueueWidth]);
 
   useEffect(() => {
-    window.localStorage.setItem(EVOLUTION_LIBRARY_LIST_WIDTH_KEY, String(libraryListWidth));
+    persistPaneWidth(EVOLUTION_LAYOUT_ID, "library-list", libraryListWidth);
   }, [libraryListWidth]);
 
   useEffect(() => {
-    window.localStorage.setItem(EVOLUTION_LIVE_LAUNCH_WIDTH_KEY, String(liveLaunchWidth));
+    persistPaneWidth(EVOLUTION_LAYOUT_ID, "live-launch", liveLaunchWidth);
   }, [liveLaunchWidth]);
 
   useEffect(() => {
-    window.localStorage.setItem(EVOLUTION_LIVE_RUN_WIDTH_KEY, String(liveRunWidth));
+    persistPaneWidth(EVOLUTION_LAYOUT_ID, "live-run", liveRunWidth);
   }, [liveRunWidth]);
 
   useEffect(() => {

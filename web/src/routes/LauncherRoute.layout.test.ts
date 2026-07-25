@@ -348,8 +348,9 @@ describe("LauncherRoute layout contract", () => {
     expect(routeStylesSource).toContain("[&_[data-vui=button]]:[max-width:100%]");
     expect(routeStylesSource).toContain("[&_[data-vui=button]]:[white-space:nowrap]");
 
-    expect(styles.workspace).toContain("grid-cols-[minmax(0,1fr)_clamp(300px,26vw,420px)]");
+    expect(styles.workspace).toContain("var(--launcher-rail-width,clamp(300px,26vw,420px))");
     expect(styles.workspace).toContain("max-[1200px]:grid-cols-[minmax(0,1fr)]");
+    expect(styles.railResizeHandle).toContain("cursor-col-resize");
     expect(styles.statusBar).toContain("w-full");
     expect(styles.statusBar).toContain("max-w-none");
     expect(styles.statusBar).not.toContain("w-[min(760px,58vw)]");

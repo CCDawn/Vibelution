@@ -281,9 +281,12 @@ describe("MemoryRoute layout contract", () => {
     expect(styles.workspace).toContain("h-full");
     expect(styles.workspace).toContain("min-h-0");
     expect(styles.workspace).toContain("grid-rows-[minmax(0,1fr)]");
-    expect(styles.workspace).toContain("grid-cols-[clamp(200px,18vw,260px)_minmax(0,1fr)_clamp(280px,24vw,380px)]");
+    expect(styles.workspace).toContain("var(--memory-left-width,clamp(200px,18vw,260px))");
+    expect(styles.workspace).toContain("var(--memory-right-width,clamp(280px,24vw,380px))");
     expect(styles.workspace).toContain("overflow-hidden");
-    expect(styles.workspace).toContain("max-[1120px]:grid-cols-[clamp(190px,18vw,240px)_minmax(0,1fr)]");
+    expect(styles.workspace).toContain("max-[1120px]:grid-cols-[var(--memory-left-width,clamp(190px,18vw,240px))_minmax(0,1fr)]");
+    expect(styles.paneResizeHandleLeft).toContain("cursor-col-resize");
+    expect(styles.paneResizeHandleRight).toContain("cursor-col-resize");
     expect(styles.workspace).toContain("max-[1120px]:[&_.detailPanel]:col-span-2");
     expect(styles.workspace).toContain("max-[780px]:grid-cols-1");
     expect(styles.workspace).toContain("max-[780px]:overflow-auto");
@@ -1400,7 +1403,8 @@ describe("MemoryRoute layout contract", () => {
     expect(knowledgeModeTabsStyles.knowledgeModeTabActive).toBeTypeOf("string");
     expect(knowledgeModeTabsStyles.knowledgeModeTabActive).not.toContain("inline-flex");
     expect(knowledgeModeTabsStyles.knowledgeModeTabActive).not.toContain("w-fit");
-    expect(styles.knowledgeWorkspace).toContain("grid-cols-[minmax(170px,205px)_minmax(0,1.24fr)_minmax(260px,0.62fr)]");
+    expect(styles.knowledgeWorkspace).toContain("var(--memory-left-width,minmax(170px,205px))");
+    expect(styles.knowledgeWorkspace).toContain("var(--memory-right-width,minmax(260px,0.62fr))");
     expect(styles.sourceGovernanceColumn).toContain("[&_.sourceGovernanceControls]:grid-cols-[minmax(240px,0.92fr)_minmax(250px,1.08fr)]");
     expect(styles.collapsedFormButton).toContain("max-h-[92px]");
     expect(knowledgeUsageContractPanelStyles.contractStateGrid).toContain("hidden");
