@@ -126,6 +126,24 @@ def test_agent_config_workspace_route_uses_short_lived_cache(tmp_path, monkeypat
     assert second["summary"]["agentCount"] == first["summary"]["agentCount"]
 
 
+def test_agent_update_rejects_stale_expected_updated_at(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _mark_config_agent_instances_present()
+    agent = agent_directory_service.create_agent_instance(display_name="Concurrent update agent", primary_mode="chat")
+    agent_directory_service.update_agent_instance(agent["agentId"], display_name="Updated elsewhere")
+
+    response = client.patch(
+        f"/api/agents/{agent['agentId']}",
+        json={
+            "displayName": "Stale editor update",
+            "expectedUpdatedAt": agent["updatedAt"],
+        },
+    )
+
+    assert response.status_code == 409, response.json()
+    assert response.json()["detail"]["code"] == "agent_update_conflict"
+
+
 def test_agent_model_promotion_route_uses_strict_payload_without_duplicate_cache_invalidation(
     monkeypatch,
 ):
