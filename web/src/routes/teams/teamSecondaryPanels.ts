@@ -4,6 +4,11 @@
  */
 
 export { TeamMemoryIndexPanel } from "../TeamMemoryIndexPanel";
+export { TeamAiSearchWorkspacePanel } from "../TeamAiSearchWorkspacePanel";
+export {
+  TeamResearchStageAgentPanel,
+  TeamResearchStageAgentSummary,
+} from "../TeamResearchStageAgentPanel";
 export { TeamExperimentMethodPanel } from "../TeamExperimentMethodPanel";
 export { TeamSourceCollectionActiveStagePanel } from "../TeamSourceCollectionActiveStagePanel";
 export { TeamSourceCollectionPhaseCloseGatePanel } from "../TeamSourceCollectionPhaseCloseGatePanel";

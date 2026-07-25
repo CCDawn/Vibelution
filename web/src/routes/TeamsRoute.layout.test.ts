@@ -34,6 +34,8 @@ describe("research project workspace", () => {
 });
 import teamMemoryIndexPanelSource from "./TeamMemoryIndexPanel.tsx?raw";
 import teamMemoryIndexPanelStyles from "./TeamMemoryIndexPanel.styles";
+import teamAiSearchWorkspacePanelSource from "./TeamAiSearchWorkspacePanel.tsx?raw";
+import teamResearchStageAgentPanelSource from "./TeamResearchStageAgentPanel.tsx?raw";
 import teamExperimentMethodPanelSource from "./TeamExperimentMethodPanel.tsx?raw";
 import teamExperimentMethodPanelStyles from "./TeamExperimentMethodPanel.styles";
 import teamSourceCollectionActiveStagePanelSource from "./TeamSourceCollectionActiveStagePanel.tsx?raw";
@@ -415,6 +417,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("isAiSearchScopeTeam(selectedTeam)");
     expect(routeSource).toContain("showAiSearchScopePanel");
     expect(routeSource).toContain("renderAiSearchSourceScopePanel");
+    expect(routeSource).toContain("TeamAiSearchWorkspacePanel");
     expect(routeSource).toContain("selectedTeam?.sourceScope");
     expect(routeSource).toContain("AiSearchRunListPayload");
     expect(routeSource).toContain("queryKeys.teamAiSearchRuns");
@@ -422,13 +425,14 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("/api/teams/${encodeURIComponent(payload.teamId)}/ai-search-runs");
     expect(routeSource).toContain("startAiSearchRunMutation");
     expect(routeSource).toContain("aiSearchRunTopic");
-    expect(routeSource).toContain("主题 -> 可信来源 -> 摘要/引用 -> 运行记录");
-    expect(routeSource).toContain("结论需一手证据");
-    expect(routeSource).toContain("默认启用");
-    expect(routeSource).toContain("线索");
-    expect(routeSource).toContain("白名单、去重、存储路径");
-    expect(routeSource).toContain("启动一键搜索");
-    expect(routeSource).toContain("最近搜索结果");
+    // Wave 8G: AI Search copy lives in TeamAiSearchWorkspacePanel.
+    expect(teamAiSearchWorkspacePanelSource).toContain("主题 -> 可信来源 -> 摘要/引用 -> 运行记录");
+    expect(teamAiSearchWorkspacePanelSource).toContain("结论需一手证据");
+    expect(teamAiSearchWorkspacePanelSource).toContain("默认启用");
+    expect(teamAiSearchWorkspacePanelSource).toContain("线索");
+    expect(teamAiSearchWorkspacePanelSource).toContain("白名单、去重、存储路径");
+    expect(teamAiSearchWorkspacePanelSource).toContain("启动一键搜索");
+    expect(teamAiSearchWorkspacePanelSource).toContain("最近搜索结果");
     expect(routeSource).toContain("latestAiSearchRun");
     expect(routeSource).toContain("/api/teams/${encodeURIComponent(nextCanvas.teamId)}/canvas");
     expect(routeSource).toContain("成员源");
@@ -729,9 +733,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("styles.workspaceResearchCanvas");
     expect(routeSource).toContain("styles.researchInspector");
     expect(routeSource).toContain("styles.researchCanvasPanelHidden");
-    expect(routeSource).toContain("styles.aiSearchScopePanel");
-    expect(routeSource).toContain("styles.aiSearchSourceGroups");
-    expect(routeSource).toContain("styles.aiSearchSourceItem");
+    // Wave 8G: AI Search surface classes live on panel + aiSearch style cluster.
+    expect(teamAiSearchWorkspacePanelSource).toContain("styles.aiSearchScopePanel");
+    expect(teamAiSearchWorkspacePanelSource).toContain("styles.aiSearchSourceGroups");
+    expect(teamAiSearchWorkspacePanelSource).toContain("styles.aiSearchSourceItem");
     expect(routeSource).toContain('researchWorkspaceView !== "overview"');
     expect(routeSource).not.toContain("科研三阶段索引");
     expect(routeSource).not.toContain("团队专属阶段页");
@@ -1078,6 +1083,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("researchStageAgentBindingsByStage");
     expect(routeSource).toContain("renderResearchStageAgentSummary(stageType)");
     expect(routeSource).toContain("renderResearchStageAgentPanel(stageType)");
+    expect(routeSource).toContain("TeamResearchStageAgentSummary");
+    expect(routeSource).toContain("TeamResearchStageAgentPanel");
     expect(routeSource).not.toContain('renderResearchStageAgentPanel("knowledge_collection", "compact")');
     expect(routeSource).toContain("SOURCE_COLLECTION_STAGE_AGENT_KEYS");
     expect(routeSource).toContain("sourceCollectionStageAgentBindings(stageId)");
@@ -1095,7 +1102,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).not.toContain("sourceCollectionStageAgentChip");
     expect(routeSource).toContain("researchStageAgentManagementRoute(binding.agentId)");
     expect(routeSource).not.toContain("const chatRoute = researchStageAgentDirectChatRoute");
-    expect(routeSource).toContain("Agent 管理");
+    // Wave 8G: Agent management CTA copy lives on TeamResearchStageAgentPanel.
+    expect(teamResearchStageAgentPanelSource).toContain("Agent 管理");
     expect(routeSource).not.toContain("还需补充资料");
     expect(routeSource).toContain("sourceCollectionSearchOpenAssignmentCount");
     expect(routeSource).toContain("sourceCollectionDownstreamOpenAssignmentCount");
@@ -2910,7 +2918,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("researchStageDegradedNotice");
     expect(routeSource).toContain("团队详情暂时不可用；当前保留已读取的科研状态。");
     expect(routeSource).toContain("const agentDirectoryHydrating = bindings.some(");
-    expect(routeSource).toContain("正在读取成员配置");
+    // Wave 8G: stage member loading copy lives in TeamResearchStageAgentPanel.
+    expect(teamResearchStageAgentPanelSource).toContain("正在读取成员配置");
     expect(routeSource).toContain("状态同步中");
     expect(routeSource).toContain("状态暂不可用");
     expect(routeSource).toContain("const showTeamLoadingSurface =");

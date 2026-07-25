@@ -23,6 +23,8 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 | First-paint detail/canvas/SC query gating | `teamDetailLoadPolicy.ts` | mutations, UI panels |
 | Research workflow resource queries/keys | `useResearchWorkflowResources.ts` | Canvas drag |
 | Research memory evidence UI | `ResearchMemoryEvidencePanel.tsx` | Teams shell mutations |
+| AI Search workspace UI | `../TeamAiSearchWorkspacePanel.tsx` (via secondary pack) | start mutation wiring |
+| Research stage agent summary/grid UI | `../TeamResearchStageAgentPanel.tsx` (via secondary pack) | binding projection |
 | Source-collection panel shell alias | `TeamsSourceCollectionPanel.tsx` | full route wiring |
 | Workflow graph **layout math** | `../TeamWorkflowGraphLayout.ts` | Graph SVG view |
 | Workflow graph **SVG view** | `../TeamWorkflowGraphView.tsx` (via secondary pack) | layout pure math |
@@ -42,7 +44,7 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 
 - Pure models: `source-collection/*`, `TeamsRoute.canvasData`, `TeamWorkflowGraphLayout`
 - Data hooks: `useResearchWorkflowResources`
-- Styles map: `TeamsRoute.styles` (shared class strings)
+- Styles maps: `TeamsRoute.styles` + thematic clusters (`research` / `aiSearch` / `experiment` / `workflow`)
 
 **Do not** re-add static value imports of panel components into `TeamsRoute.tsx` without a budget re-check.
 
@@ -50,6 +52,7 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 
 - **Done:** workspace navigation, team kind guards, canvas geometry, source-collection presentation, experiment/loop types+labels, AI-search presentation, workflow presentation labels, research stage agent role tables, workflow query keys, stage-agent presentation/routes.
 - **Still in `TeamsRoute.tsx`:** mutation wiring, JSX shell, style-bound tone helpers, large panel orchestration.
+- **Wave 8G done:** AI Search workspace + research stage agent summary/panel extracted to secondary-lazy components.
 
 ## Next (planned)
 
