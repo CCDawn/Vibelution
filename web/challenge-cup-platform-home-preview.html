@@ -199,9 +199,9 @@
                   <div class="explorer-controls">
                     <label class="search-control">
                       <span>⌕</span>
-                      <input type="search" placeholder="搜索标题、作者或证据内容" aria-label="搜索资料" />
+                      <input id="knowledge-search-input" type="search" placeholder="搜索标题、作者或证据内容" aria-label="搜索资料" />
                     </label>
-                    <select aria-label="筛选资料状态">
+                    <select id="knowledge-status-filter" aria-label="筛选资料状态">
                       <option>全部状态</option>
                       <option>待提炼</option>
                       <option>已提炼</option>
@@ -210,41 +210,97 @@
                     <button class="button secondary" type="button">比较所选</button>
                   </div>
                 </header>
-                <div class="source-tabs" role="tablist" aria-label="资料分类">
-                  <button class="active" type="button" role="tab" aria-selected="true">全部 16</button>
-                  <button type="button" role="tab" aria-selected="false">论文 11</button>
-                  <button type="button" role="tab" aria-selected="false">数据集 2</button>
-                  <button type="button" role="tab" aria-selected="false">网页 3</button>
-                </div>
-                <div class="source-table" role="table" aria-label="资料提炼队列">
-                  <div class="source-row source-head" role="row">
-                    <span role="columnheader"><input type="checkbox" aria-label="选择全部资料" /></span>
-                    <span role="columnheader">资料</span>
-                    <span role="columnheader">来源</span>
-                    <span role="columnheader">状态</span>
-                    <span role="columnheader">证据</span>
+                <div class="explorer-view-bar">
+                  <div class="explorer-view-switch" role="tablist" aria-label="知识治理工作视图">
+                    <button class="active" type="button" role="tab" aria-selected="true" data-knowledge-view="sources">资料 <b>16</b></button>
+                    <button type="button" role="tab" aria-selected="false" data-knowledge-view="claims">Claim Map <b>5</b></button>
+                    <button type="button" role="tab" aria-selected="false" data-knowledge-view="reviews">审核队列 <b>3</b></button>
                   </div>
-                  <button class="source-row selected" type="button" role="row" data-source-title="Predictive coding in the visual cortex" data-source-meta="Friston et al. · DOI 可追溯" data-source-evidence="支持层级预测误差沿皮层层级传播；当前已标注 4 个证据锚点。">
-                    <span role="cell"><input type="checkbox" checked aria-label="选择 Predictive coding in the visual cortex" /></span>
-                    <span role="cell"><strong>Predictive coding in the visual cortex</strong><small>层级反馈与预测误差传播</small></span>
-                    <span role="cell">期刊论文</span>
-                    <span role="cell"><em class="status-pill active">提炼中</em></span>
-                    <span role="cell">4 锚点</span>
-                  </button>
-                  <button class="source-row" type="button" role="row" data-source-title="Plasticity rules for predictive processing" data-source-meta="Whittington et al. · DOI 可追溯" data-source-evidence="讨论局部可塑性规则与预测误差更新，尚需确认适用边界。">
-                    <span role="cell"><input type="checkbox" aria-label="选择 Plasticity rules for predictive processing" /></span>
-                    <span role="cell"><strong>Plasticity rules for predictive processing</strong><small>局部学习规则与误差更新</small></span>
-                    <span role="cell">期刊论文</span>
-                    <span role="cell"><em class="status-pill">待提炼</em></span>
-                    <span role="cell">2 锚点</span>
-                  </button>
-                  <button class="source-row" type="button" role="row" data-source-title="Attention as precision weighting" data-source-meta="Feldman et al. · 网页与论文交叉来源" data-source-evidence="可能支持门控注意与精度加权的关系，但当前来源之间存在术语差异。">
-                    <span role="cell"><input type="checkbox" aria-label="选择 Attention as precision weighting" /></span>
-                    <span role="cell"><strong>Attention as precision weighting</strong><small>注意门控与精度加权</small></span>
-                    <span role="cell">交叉来源</span>
-                    <span role="cell"><em class="status-pill warning">需复核</em></span>
-                    <span role="cell">3 锚点</span>
-                  </button>
+                  <span id="knowledge-view-summary">3 条资料可见 · 16 条待提炼</span>
+                </div>
+                <div class="knowledge-explorer-view" data-knowledge-view-panel="sources">
+                  <div class="source-tabs" role="tablist" aria-label="资料分类">
+                    <button class="active" type="button" role="tab" aria-selected="true">全部 16</button>
+                    <button type="button" role="tab" aria-selected="false">论文 11</button>
+                    <button type="button" role="tab" aria-selected="false">数据集 2</button>
+                    <button type="button" role="tab" aria-selected="false">网页 3</button>
+                  </div>
+                  <div class="source-table" role="table" aria-label="资料提炼队列">
+                    <div class="source-row source-head" role="row">
+                      <span role="columnheader"><input type="checkbox" aria-label="选择全部资料" /></span>
+                      <span role="columnheader">资料</span>
+                      <span role="columnheader">来源</span>
+                      <span role="columnheader">状态</span>
+                      <span role="columnheader">证据</span>
+                    </div>
+                    <button class="source-row selected" type="button" role="row" data-source-title="Predictive coding in the visual cortex" data-source-meta="Friston et al. · DOI 可追溯" data-source-evidence="支持层级预测误差沿皮层层级传播；当前已标注 4 个证据锚点。">
+                      <span role="cell"><input type="checkbox" checked aria-label="选择 Predictive coding in the visual cortex" /></span>
+                      <span role="cell"><strong>Predictive coding in the visual cortex</strong><small>层级反馈与预测误差传播</small></span>
+                      <span role="cell">期刊论文</span>
+                      <span role="cell"><em class="status-pill active">提炼中</em></span>
+                      <span role="cell">4 锚点</span>
+                    </button>
+                    <button class="source-row" type="button" role="row" data-source-title="Plasticity rules for predictive processing" data-source-meta="Whittington et al. · DOI 可追溯" data-source-evidence="讨论局部可塑性规则与预测误差更新，尚需确认适用边界。">
+                      <span role="cell"><input type="checkbox" aria-label="选择 Plasticity rules for predictive processing" /></span>
+                      <span role="cell"><strong>Plasticity rules for predictive processing</strong><small>局部学习规则与误差更新</small></span>
+                      <span role="cell">期刊论文</span>
+                      <span role="cell"><em class="status-pill">待提炼</em></span>
+                      <span role="cell">2 锚点</span>
+                    </button>
+                    <button class="source-row" type="button" role="row" data-source-title="Attention as precision weighting" data-source-meta="Feldman et al. · 网页与论文交叉来源" data-source-evidence="可能支持门控注意与精度加权的关系，但当前来源之间存在术语差异。">
+                      <span role="cell"><input type="checkbox" aria-label="选择 Attention as precision weighting" /></span>
+                      <span role="cell"><strong>Attention as precision weighting</strong><small>注意门控与精度加权</small></span>
+                      <span role="cell">交叉来源</span>
+                      <span role="cell"><em class="status-pill warning">需复核</em></span>
+                      <span role="cell">3 锚点</span>
+                    </button>
+                  </div>
+                </div>
+                <div class="knowledge-explorer-view" data-knowledge-view-panel="claims" hidden>
+                  <div class="claim-table" role="table" aria-label="研究 Claim Map">
+                    <div class="governance-row claim-head" role="row">
+                      <span role="columnheader">Claim</span><span role="columnheader">支持</span><span role="columnheader">反证 / 边界</span><span role="columnheader">状态</span>
+                    </div>
+                    <button class="governance-row claim-row selected" type="button" role="row" data-claim-index="0">
+                      <span role="cell"><strong>weight=0.875 在固定协议下带来有界工程收益</strong><small>仅限当前 FashionMNIST 协议</small></span>
+                      <span role="cell">3</span><span role="cell">1 / 2</span><span role="cell"><em class="status-pill active">有条件支持</em></span>
+                    </button>
+                    <button class="governance-row claim-row" type="button" role="row" data-claim-index="1">
+                      <span role="cell"><strong>空间对齐是收益来源</strong><small>aligned 与 shifted 未形成稳定差异</small></span>
+                      <span role="cell">0</span><span role="cell">2 / 1</span><span role="cell"><em class="status-pill warning">不支持</em></span>
+                    </button>
+                    <button class="governance-row claim-row" type="button" role="row" data-claim-index="2">
+                      <span role="cell"><strong>特定 mask structure 是必要条件</strong><small>三种 mask 模式均未形成决定性证据</small></span>
+                      <span role="cell">0</span><span role="cell">3 / 1</span><span role="cell"><em class="status-pill warning">不支持</em></span>
+                    </button>
+                    <button class="governance-row claim-row" type="button" role="row" data-claim-index="3">
+                      <span role="cell"><strong>0.875 构成稳定参数区间</strong><small>邻域权重结果仍不稳定</small></span>
+                      <span role="cell">1</span><span role="cell">2 / 2</span><span role="cell"><em class="status-pill">未建立</em></span>
+                    </button>
+                    <button class="governance-row claim-row" type="button" role="row" data-claim-index="4">
+                      <span role="cell"><strong>结果具有神经真实性</strong><small>工程结果不能外推为生物机制</small></span>
+                      <span role="cell">0</span><span role="cell">0 / 4</span><span role="cell"><em class="status-pill">未建立</em></span>
+                    </button>
+                  </div>
+                </div>
+                <div class="knowledge-explorer-view" data-knowledge-view-panel="reviews" hidden>
+                  <div class="review-table" role="table" aria-label="知识人工审核队列">
+                    <div class="governance-row review-head" role="row">
+                      <span role="columnheader">审核对象</span><span role="columnheader">Rubric</span><span role="columnheader">负责人</span><span role="columnheader">状态</span>
+                    </div>
+                    <button class="governance-row review-row selected" type="button" role="row" data-review-index="0">
+                      <span role="cell"><strong>层级机制证据补齐</strong><small>来源质量、锚点完整性、适用边界</small></span>
+                      <span role="cell">3 / 5</span><span role="cell">白望舒</span><span role="cell"><em class="status-pill warning">审核中</em></span>
+                    </button>
+                    <button class="governance-row review-row" type="button" role="row" data-review-index="1">
+                      <span role="cell"><strong>空间对齐诊断结论</strong><small>反证处理与结论强度</small></span>
+                      <span role="cell">0 / 4</span><span role="cell">未领取</span><span role="cell"><em class="status-pill">待领取</em></span>
+                    </button>
+                    <button class="governance-row review-row" type="button" role="row" data-review-index="2">
+                      <span role="cell"><strong>weight=0.75 负向实验包</strong><small>失败门禁、重测策略、证据引用</small></span>
+                      <span role="cell">4 / 4</span><span role="cell">顾言初</span><span role="cell"><em class="status-pill active">已完成</em></span>
+                    </button>
+                  </div>
                 </div>
               </section>
 
@@ -738,6 +794,137 @@
         }
       };
 
+      const knowledgeViewConfig = {
+        sources: {
+          placeholder: "搜索标题、作者或证据内容",
+          ariaLabel: "搜索资料",
+          summary: "3 条资料可见 · 16 条待提炼",
+          statuses: ["全部状态", "待提炼", "已提炼", "需复核"]
+        },
+        claims: {
+          placeholder: "搜索 Claim、证据或适用边界",
+          ariaLabel: "搜索 Claim",
+          summary: "5 条 Claim · 1 条有条件支持",
+          statuses: ["全部状态", "有条件支持", "不支持", "未建立"]
+        },
+        reviews: {
+          placeholder: "搜索审核对象或负责人",
+          ariaLabel: "搜索审核任务",
+          summary: "3 项审核 · 1 项待领取",
+          statuses: ["全部状态", "待领取", "审核中", "已完成"]
+        }
+      };
+
+      const claimMapData = [
+        {
+          kind: "Claim Map",
+          title: "weight=0.875 在固定协议下带来有界工程收益",
+          meta: "支持 3 · 反证 1 · 边界 2",
+          summaryLabel: "证据判断",
+          summary: "有条件支持。结论只适用于当前 FashionMNIST、固定种子与固定训练协议。",
+          openLabel: "打开 Claim",
+          openToast: "已打开 Claim 详情",
+          secondaryLabel: "查看证据链",
+          secondaryToast: "已打开支持、反证与边界证据",
+          primaryLabel: "提交复核",
+          primaryToast: "已将 Claim 提交人工复核"
+        },
+        {
+          kind: "Claim Map",
+          title: "空间对齐是收益来源",
+          meta: "支持 0 · 反证 2 · 边界 1",
+          summaryLabel: "证据判断",
+          summary: "当前不支持。aligned 与 shifted 条件未形成稳定差异，不能把空间对齐解释为收益来源。",
+          openLabel: "打开 Claim",
+          openToast: "已打开空间对齐 Claim",
+          secondaryLabel: "查看反证",
+          secondaryToast: "已打开 2 条反证与 1 条边界证据",
+          primaryLabel: "提交复核",
+          primaryToast: "已将不支持结论提交人工复核"
+        },
+        {
+          kind: "Claim Map",
+          title: "特定 mask structure 是必要条件",
+          meta: "支持 0 · 反证 3 · 边界 1",
+          summaryLabel: "证据判断",
+          summary: "当前不支持。aligned、shifted 与 permuted 三种模式均未形成决定性差异。",
+          openLabel: "打开 Claim",
+          openToast: "已打开 mask structure Claim",
+          secondaryLabel: "查看反证",
+          secondaryToast: "已打开 mask structure 反证",
+          primaryLabel: "提交复核",
+          primaryToast: "已将 mask structure 结论提交人工复核"
+        },
+        {
+          kind: "Claim Map",
+          title: "0.875 构成稳定参数区间",
+          meta: "支持 1 · 反证 2 · 边界 2",
+          summaryLabel: "证据判断",
+          summary: "尚未建立。0.8125 与 0.9375 的邻域结果不稳定，目前只能保留单点工程结果。",
+          openLabel: "打开 Claim",
+          openToast: "已打开参数稳定区间 Claim",
+          secondaryLabel: "查看边界",
+          secondaryToast: "已打开邻域权重边界结果",
+          primaryLabel: "补充证据",
+          primaryToast: "已创建参数区间证据补充任务"
+        },
+        {
+          kind: "Claim Map",
+          title: "结果具有神经真实性",
+          meta: "支持 0 · 反证 0 · 边界 4",
+          summaryLabel: "证据判断",
+          summary: "尚未建立。工程模型结果不能外推为真实生物神经机制，必须保持论断边界。",
+          openLabel: "打开 Claim",
+          openToast: "已打开神经真实性 Claim",
+          secondaryLabel: "查看边界",
+          secondaryToast: "已打开神经真实性论断边界",
+          primaryLabel: "补充证据",
+          primaryToast: "已创建神经真实性证据补充任务"
+        }
+      ];
+
+      const reviewQueueData = [
+        {
+          kind: "审核任务",
+          title: "层级机制证据补齐",
+          meta: "review-17 · 白望舒 · Rubric 3 / 5",
+          summaryLabel: "审核范围",
+          summary: "核对来源质量、证据锚点完整性、适用边界、重复来源与可引用性。",
+          openLabel: "打开审核",
+          openToast: "已打开 review-17",
+          secondaryLabel: "查看 Rubric",
+          secondaryToast: "已打开 5 项审核 Rubric",
+          primaryLabel: "继续审核",
+          primaryToast: "已进入层级机制证据审核"
+        },
+        {
+          kind: "审核任务",
+          title: "空间对齐诊断结论",
+          meta: "review-18 · 未领取 · Rubric 0 / 4",
+          summaryLabel: "审核范围",
+          summary: "核对反证处理、结论强度、边界结果表达以及是否需要新的判别性实验。",
+          openLabel: "打开审核",
+          openToast: "已打开 review-18",
+          secondaryLabel: "查看 Rubric",
+          secondaryToast: "已打开 4 项审核 Rubric",
+          primaryLabel: "领取审核",
+          primaryToast: "已领取空间对齐诊断审核"
+        },
+        {
+          kind: "审核结论",
+          title: "weight=0.75 负向实验包",
+          meta: "review-19 · 顾言初 · Rubric 4 / 4",
+          summaryLabel: "审核结论",
+          summary: "审核通过。失败门禁、解释、重测策略和 evidenceRefs 均完整，可写入负向实验知识。",
+          openLabel: "查看结论",
+          openToast: "已打开 review-19 审核结论",
+          secondaryLabel: "查看证据包",
+          secondaryToast: "已打开 weight=0.75 负向实验包",
+          primaryLabel: "写入知识",
+          primaryToast: "已提交负向实验知识写入"
+        }
+      ];
+
       const runAnalysisData = [
         {
           title: "formal-v4",
@@ -899,6 +1086,52 @@
             meta: row.dataset.sourceMeta,
             summary: row.dataset.sourceEvidence
           });
+        });
+      });
+      document.querySelectorAll("[data-claim-index]").forEach((row) => {
+        row.addEventListener("click", () => {
+          document.querySelectorAll("[data-claim-index]").forEach((item) => item.classList.toggle("selected", item === row));
+          updateSelectionInspector(claimMapData[Number(row.dataset.claimIndex)]);
+        });
+      });
+      document.querySelectorAll("[data-review-index]").forEach((row) => {
+        row.addEventListener("click", () => {
+          document.querySelectorAll("[data-review-index]").forEach((item) => item.classList.toggle("selected", item === row));
+          updateSelectionInspector(reviewQueueData[Number(row.dataset.reviewIndex)]);
+        });
+      });
+      document.querySelectorAll("[data-knowledge-view]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const view = button.dataset.knowledgeView;
+          const config = knowledgeViewConfig[view];
+          document.querySelectorAll("[data-knowledge-view]").forEach((item) => {
+            const selected = item === button;
+            item.classList.toggle("active", selected);
+            item.setAttribute("aria-selected", String(selected));
+          });
+          document.querySelectorAll("[data-knowledge-view-panel]").forEach((panel) => {
+            panel.hidden = panel.dataset.knowledgeViewPanel !== view;
+          });
+          const search = document.querySelector("#knowledge-search-input");
+          search.placeholder = config.placeholder;
+          search.setAttribute("aria-label", config.ariaLabel);
+          document.querySelector("#knowledge-view-summary").textContent = config.summary;
+          document.querySelector("#knowledge-status-filter").innerHTML = config.statuses.map((status) => `<option>${status}</option>`).join("");
+          if (view === "sources") {
+            const source = document.querySelector(".source-row[data-source-title].selected") || document.querySelector(".source-row[data-source-title]");
+            updateSelectionInspector({
+              ...stageObjects.knowledge.selection,
+              title: source.dataset.sourceTitle,
+              meta: source.dataset.sourceMeta,
+              summary: source.dataset.sourceEvidence
+            });
+          } else if (view === "claims") {
+            const selected = document.querySelector("[data-claim-index].selected") || document.querySelector("[data-claim-index]");
+            updateSelectionInspector(claimMapData[Number(selected.dataset.claimIndex)]);
+          } else {
+            const selected = document.querySelector("[data-review-index].selected") || document.querySelector("[data-review-index]");
+            updateSelectionInspector(reviewQueueData[Number(selected.dataset.reviewIndex)]);
+          }
         });
       });
       document.querySelectorAll(".run-row[data-run-index]").forEach((row) => {
