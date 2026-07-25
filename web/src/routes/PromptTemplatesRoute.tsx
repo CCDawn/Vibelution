@@ -496,6 +496,7 @@ export function PromptTemplatesRoute() {
         headerClassName={styles.headerClass}
         workspaceClassName={styles.workspaceClass}
         columnsClassName=""
+        layoutId="prompt-templates"
         ariaLabel={copy.title}
         eyebrow={copy.eyebrow}
         title={copy.title}

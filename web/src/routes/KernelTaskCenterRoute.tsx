@@ -278,6 +278,7 @@ export function KernelTaskCenterRoute() {
       headerClassName={styles.headerClass}
       workspaceClassName={styles.workspaceClass}
       columnsClassName=""
+      layoutId="kernel-task-center"
       eyebrow="Kernel"
       title={copy.title}
       meta={copy.subtitle}

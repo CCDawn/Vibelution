@@ -44,9 +44,10 @@
 
 | Recipe | Use when |
 | --- | --- |
-| `VListDetailPage` | Left list / filter + main detail (+ optional aside); supports `workspaceClassName` / `columnsClassName` for route style maps |
+| `VListDetailPage` | Left list / filter + main detail (+ optional aside); pass `layoutId` so sidebars are **draggable with permanent width memory** (`localStorage` key `vibelution.pane-layouts.v1`) |
 | `VSettingsFormPage` | Settings/config form with sticky save footer |
 | `VDenseOpsPage` | Dense toolbar + body; use `toolbar` (VToolbar) or `toolbarSlot` (bare strip like metrics) |
+| `VSplitWorkspace` | Low-level split; `resize={{ layoutId }}` enables left/right drag + persistence (used by list-detail recipe) |
 
 Each sets `data-vui-recipe="…"` on the page root for contracts and debugging.
 
