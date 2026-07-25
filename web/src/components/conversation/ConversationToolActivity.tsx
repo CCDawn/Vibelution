@@ -1,4 +1,4 @@
-import { CircleAlert, LoaderCircle } from "lucide-react";
+import { ChevronDown, CircleAlert, LoaderCircle } from "lucide-react";
 import type { ReactNode } from "react";
 
 import type { CodexTranscriptCell } from "./codexTranscriptCells";
@@ -81,8 +81,12 @@ function ToolActivityItem({
   renderToolDetails: ConversationToolActivityProps["renderToolDetails"];
 }) {
   const toolName = codexTranscriptToolRawName(cell);
-  const title = conversationToolRendererLabel(toolName, language);
+  const baseTitle = conversationToolRendererLabel(toolName, language);
   const summary = visibleToolSummary(cell, language);
+  const useSemanticCodeTitle = toolName.trim().toLowerCase() === "code_symbol_tool"
+    && /^(搜索|检查|Search |Inspect )/.test(summary);
+  const title = useSemanticCodeTitle ? summary : baseTitle;
+  const preview = useSemanticCodeTitle ? "" : summary;
   const detailsId = `codex-tool-detail-${cell.id}`;
   const details = renderToolDetails(cell, detailsId);
   const expandable = details !== null && details !== undefined && details !== false;
@@ -95,7 +99,7 @@ function ToolActivityItem({
       <ToolStatusIcon cell={cell} language={language} />
       <span className={styles.itemBody}>
         <span className={styles.itemTitle}>{title}</span>
-        {summary ? <span className={styles.itemPreview}>{summary}</span> : null}
+        {preview ? <span className={styles.itemPreview}>{preview}</span> : null}
       </span>
     </>
   );
@@ -120,7 +124,7 @@ function ToolActivityItem({
 
   return (
     <details
-      className={`${styles.item} ${styles.itemDetails}`}
+      className={`${styles.item} ${styles.itemDetails} group`}
       data-codex-tool-activity-item="true"
       data-codex-tool-detail="true"
       data-codex-transcript-cell-kind={cell.kind}
@@ -136,6 +140,7 @@ function ToolActivityItem({
         aria-live={cell.status === "running" || cell.status === "pending" ? "polite" : undefined}
       >
         {content}
+        <ChevronDown className={styles.itemChevron} size={14} aria-hidden="true" />
       </summary>
       <div id={detailsId} className={styles.itemDetailsBody}>{details}</div>
     </details>

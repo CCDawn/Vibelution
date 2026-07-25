@@ -555,12 +555,15 @@ const styles: Record<string, string> = {
     "vui-components-conversationview nextStateSignalsToggle min-w-0",
   operationChevron:
     "vui-components-conversationview operationChevron min-w-0",
-  operationDetailLabel: `vui-components-conversationview operationDetailLabel min-w-0 ${vuiGlassPanelClass} p-2 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]`,
-  operationDetailRow: `vui-components-conversationview operationDetailRow min-w-0 ${vuiGlassPanelClass} p-2 rounded-[var(--radius-control)] bg-[var(--vui-surface-row)]`,
+  operationDetailLabel:
+    "vui-components-conversationview operationDetailLabel sr-only",
+  operationDetailRow:
+    "vui-components-conversationview operationDetailRow min-w-0 border-0 bg-transparent p-0 shadow-none",
   operationDetailToggle: `vui-components-conversationview operationDetailToggle min-w-0 ${vuiGlassPanelClass} p-2`,
-  operationDetailValue: `vui-components-conversationview operationDetailValue min-w-0 ${vuiGlassPanelClass} p-2`,
+  operationDetailValue:
+    "vui-components-conversationview operationDetailValue m-0 min-w-0 max-w-full overflow-auto whitespace-pre-wrap border-0 border-l-2 border-[var(--vui-border-subtle)] bg-transparent py-1.5 pl-3 pr-0 font-mono [font-size:var(--vui-font-sm)] leading-[1.65] text-[var(--fg-secondary)] shadow-none [overflow-wrap:anywhere]",
   operationDetails:
-    "vui-components-conversationview operationDetails min-w-0 border-0 bg-transparent",
+    "vui-components-conversationview operationDetails grid min-w-0 gap-1 border-0 bg-transparent",
   operationDetailsChevronButton:
     "vui-components-conversationview operationDetailsChevronButton inline-flex size-4 min-w-0 shrink-0 items-center justify-center border-0 bg-transparent p-0 text-[var(--fg-tertiary)] leading-none hover:text-[var(--fg-primary)]",
   operationDetailsChevronClosed:
@@ -1137,15 +1140,15 @@ const styles: Record<string, string> = {
   turnErrorLabel:
     "vui-components-conversationview turnErrorLabel min-w-0 w-fit [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--state-error)]",
   turnErrorNotice:
-    "vui-components-conversationview turnErrorNotice grid w-[min(100%,920px)] max-w-full min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-2 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_7%,var(--vui-surface-row))] px-2.5 py-2 text-[var(--state-error)] shadow-none",
+    "vui-components-conversationview turnErrorNotice block w-[min(100%,920px)] max-w-full min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2.5 py-2 text-[var(--fg-secondary)] shadow-none",
   turnErrorNoticeBody:
-    "vui-components-conversationview turnErrorNoticeBody grid min-w-0 gap-1.5 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+    "vui-components-conversationview turnErrorNoticeBody block min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   turnErrorNoticeIcon:
-    "vui-components-conversationview turnErrorNoticeIcon mt-0.5 min-w-0 shrink-0 text-[var(--state-error)]",
+    "vui-components-conversationview turnErrorNoticeIcon sr-only",
   turnErrorNoticeMeta:
-    "vui-components-conversationview turnErrorNoticeMeta flex min-w-0 flex-wrap items-center gap-1.5 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--state-error)]",
+    "vui-components-conversationview turnErrorNoticeMeta sr-only",
   turnErrorNoticeText:
-    "vui-components-conversationview turnErrorNoticeText min-w-0 whitespace-normal break-words [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [overflow-wrap:anywhere] [&_.markdownBody]:max-w-[min(100%,128ch)] [&_.markdownBody]:whitespace-normal [&_.markdownBody]:break-words [&_.markdownBody]:[overflow-wrap:anywhere]",
+    "vui-components-conversationview turnErrorNoticeText m-0 min-w-0 whitespace-normal break-words font-mono [font-size:var(--vui-font-sm)] leading-[1.55] text-[var(--fg-secondary)] [overflow-wrap:anywhere] [&_.markdownBody]:max-w-[min(100%,128ch)] [&_.markdownBody]:whitespace-normal [&_.markdownBody]:break-words [&_.markdownBody]:[overflow-wrap:anywhere] [&_.markdownBody_p]:m-0",
   turnErrorReasonList:
     "vui-components-conversationview turnErrorReasonList grid min-w-0 gap-1 border-t border-[color-mix(in_srgb,var(--state-error)_20%,transparent)] pt-1.5 [font-size:var(--vui-font-xs)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   turnErrorReasonRow:
