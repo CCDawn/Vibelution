@@ -9,16 +9,8 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { PaneResizeHandle } from "../components/layout/PaneResizeHandle";
 import { type PaneSpec } from "../components/layout/paneLayoutPersistence";
 import { usePersistedPaneResize } from "../components/layout/usePersistedPaneResize";
+import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import { createLazyNamedTeamPanel } from "./teams/lazyTeamPanel";
-
-const TEAMS_LAYOUT_ID = "teams";
-const TEAMS_INSPECTOR_PANE: PaneSpec = {
-  id: "inspector",
-  defaultWidth: 360,
-  minWidth: 320,
-  maxWidth: 480,
-};
-const TEAMS_PANES: PaneSpec[] = [TEAMS_INSPECTOR_PANE];
 import {
   AI_SEARCH_RUN_PREVIEW_LIMIT,
   aiSearchRunCardFallbackReason,
@@ -430,6 +422,15 @@ const TeamWorkflowKnowledgeIngestionStatusPanel = createLazyNamedTeamPanel(loadT
 const TeamWorkflowModelEvidenceStatusPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamWorkflowModelEvidenceStatusPanel");
 const TeamWorkflowPaperNoteChunkStatusPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamWorkflowPaperNoteChunkStatusPanel");
 const TeamWorkflowSourceQualityStatusPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamWorkflowSourceQualityStatusPanel");
+
+const TEAMS_LAYOUT_ID = WORKBENCH_LAYOUT_IDS.teams;
+const TEAMS_INSPECTOR_PANE: PaneSpec = {
+  id: "inspector",
+  defaultWidth: 360,
+  minWidth: 320,
+  maxWidth: 480,
+};
+const TEAMS_PANES: PaneSpec[] = [TEAMS_INSPECTOR_PANE];
 
 type TeamsRouteProps = {
   forcedTeamId?: string;

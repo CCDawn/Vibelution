@@ -7,6 +7,7 @@ import { useEffect, useMemo, useState } from "react";
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
 import { SkillLibraryDetail, SkillLibraryItem, SkillLibraryPayload } from "../api/types";
+import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import {
   VButton,
   VDenseToolbar,
@@ -240,7 +241,7 @@ export function SkillsRoute() {
       headerClassName={styles.headerClass}
       workspaceClassName={styles.workspaceClass}
       columnsClassName=""
-      layoutId="skills"
+      layoutId={WORKBENCH_LAYOUT_IDS.skills}
       ariaLabel={copy.title}
       eyebrow={copy.eyebrow}
       title={copy.title}

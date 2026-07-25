@@ -9,6 +9,7 @@ import { useSearchParams } from "react-router-dom";
 import { getKernelTaskTimeline, listKernelTasks, selectKernelTaskId } from "../api/kernel";
 import { queryKeys } from "../api/queryKeys";
 import type { KernelDelivery, KernelTask, KernelTimelineItem } from "../api/types";
+import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import { VActionGroup, VButton, VIconButton, VListDetailPage, VMetricStrip, VSelect, VStateSurface, VSurface } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
 import styles from "./KernelTaskCenterRoute.styles";
@@ -278,7 +279,7 @@ export function KernelTaskCenterRoute() {
       headerClassName={styles.headerClass}
       workspaceClassName={styles.workspaceClass}
       columnsClassName=""
-      layoutId="kernel-task-center"
+      layoutId={WORKBENCH_LAYOUT_IDS.kernelTaskCenter}
       eyebrow="Kernel"
       title={copy.title}
       meta={copy.subtitle}

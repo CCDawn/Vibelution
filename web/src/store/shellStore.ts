@@ -6,6 +6,7 @@ import {
   readPaneLayout,
   resolveStoredPaneWidth,
 } from "../components/layout/paneLayoutPersistence";
+import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 
 type EvolutionTrack = "supervised" | "self";
 type EvolutionView = "live" | "runs" | "library" | "overview";
@@ -28,7 +29,7 @@ type ShellState = {
 };
 
 /** Shared permanent memory under vibelution.pane-layouts.v1["chat"]. */
-export const CHAT_PANE_LAYOUT_ID = "chat";
+export const CHAT_PANE_LAYOUT_ID = WORKBENCH_LAYOUT_IDS.chat;
 
 const DEFAULT_CHAT_PANEL_WIDTHS: ChatPanelWidths = {
   leftPanelWidth: 300,

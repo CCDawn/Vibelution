@@ -48,11 +48,16 @@ import {
 import { PaneResizeHandle } from "../components/layout/PaneResizeHandle";
 import { type PaneSpec } from "../components/layout/paneLayoutPersistence";
 import { usePersistedPaneResize } from "../components/layout/usePersistedPaneResize";
+import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import { VButton, VRouteHeader, VTooltip } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { LauncherDeveloperModePanel } from "./LauncherDeveloperModePanel";
+import { LauncherDiagnosticsPanel } from "./LauncherDiagnosticsPanel";
+import { LauncherProjectMaintenancePanel } from "./LauncherProjectMaintenancePanel";
+import { launcherRouteStyles as styles } from "./LauncherRoute.styles";
+import { LauncherStartupSettingsPanel } from "./LauncherStartupSettingsPanel";
 
-const LAUNCHER_LAYOUT_ID = "launcher";
+const LAUNCHER_LAYOUT_ID = WORKBENCH_LAYOUT_IDS.launcher;
 const LAUNCHER_RAIL_PANE: PaneSpec = {
   id: "rail",
   defaultWidth: 340,
@@ -60,10 +65,6 @@ const LAUNCHER_RAIL_PANE: PaneSpec = {
   maxWidth: 420,
 };
 const LAUNCHER_PANES: PaneSpec[] = [LAUNCHER_RAIL_PANE];
-import { LauncherDiagnosticsPanel } from "./LauncherDiagnosticsPanel";
-import { LauncherProjectMaintenancePanel } from "./LauncherProjectMaintenancePanel";
-import { launcherRouteStyles as styles } from "./LauncherRoute.styles";
-import { LauncherStartupSettingsPanel } from "./LauncherStartupSettingsPanel";
 
 type LauncherNotice = {
   tone: "neutral" | "success" | "warning" | "error";

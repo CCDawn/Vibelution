@@ -58,6 +58,18 @@
 | Keyboard helper | `components/layout/paneResizeKeyboard` | Shared Arrow/Home/End resolution for Chat/Logs/custom drag |
 | Persistence | `pane-layouts.v1[layoutId]` | Wave 4A store; do not invent new width keys |
 
+## Workbench layoutIds (Wave 4C)
+
+Canonical ids live in `components/layout/workbenchLayoutIds.ts` (`WORKBENCH_LAYOUT_IDS`).
+
+| Prefer | Avoid |
+| --- | --- |
+| `layoutId={WORKBENCH_LAYOUT_IDS.skills}` on `VListDetailPage` / `VSplitWorkspace` | New ad-hoc `localStorage` width keys |
+| `usePersistedPaneResize({ layoutId: WORKBENCH_LAYOUT_IDS.logs, panes })` for custom shells | Copy-pasted drag/keyboard handlers per route |
+| `data-vui-layout-id` on the shell root | Hard-coded string literals outside the registry |
+
+New list-detail pages should start from a page recipe + registry `layoutId`. Domain shells (Chat dual-write via `shellStore`, Agents flex) still use the same registry ids.
+
 Each sets `data-vui-recipe="…"` on the page root for contracts and debugging.
 
 ## Adding a control (checklist)

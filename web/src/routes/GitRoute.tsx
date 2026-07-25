@@ -52,16 +52,22 @@ import {
   type GitFilter,
 } from "./gitRouteLogic";
 import {
-  persistPaneWidth,
-  resolveStoredPaneWidth,
+  migrateLegacyNumericPane,
+  type PaneSpec,
 } from "../components/layout/paneLayoutPersistence";
-import { clampPaneWidth, keyboardPaneWidth } from "./resizablePane";
+import { usePersistedPaneResize } from "../components/layout/usePersistedPaneResize";
+import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import { gitRouteStyles as styles } from "./GitRoute.styles";
 
-const GIT_LAYOUT_ID = "git";
+const GIT_LAYOUT_ID = WORKBENCH_LAYOUT_IDS.git;
 const GIT_CHANGE_PANEL_WIDTH_KEY = "vibelution.git.change-panel-width";
-const GIT_CHANGE_PANEL_BOUNDS = { min: 260, max: 520 };
-const GIT_CHANGE_PANEL_DEFAULT_WIDTH = 340;
+const GIT_CHANGE_PANE: PaneSpec = {
+  id: "change-panel",
+  defaultWidth: 340,
+  minWidth: 260,
+  maxWidth: 520,
+};
+const GIT_CHANGE_PANES: PaneSpec[] = [GIT_CHANGE_PANE];
 
 type GitWorktreeItem = GitStatusSummary["worktrees"]["items"][number];
 type GitObjectSelection = {
@@ -211,17 +217,22 @@ export function GitRoute() {
     tone: "neutral",
     text: "",
   });
-  const [changePanelWidth, setChangePanelWidth] = useState(() =>
-    resolveStoredPaneWidth(
-      GIT_LAYOUT_ID,
-      "change-panel",
-      GIT_CHANGE_PANEL_DEFAULT_WIDTH,
-      GIT_CHANGE_PANEL_BOUNDS.min,
-      GIT_CHANGE_PANEL_BOUNDS.max,
-      GIT_CHANGE_PANEL_WIDTH_KEY,
-    ),
-  );
   const [changePanelCollapsed, setChangePanelCollapsed] = useState(false);
+  useEffect(() => {
+    migrateLegacyNumericPane(GIT_LAYOUT_ID, "change-panel", GIT_CHANGE_PANEL_WIDTH_KEY);
+  }, []);
+  const {
+    layoutRef: gitLayoutRef,
+    widths: gitPaneWidths,
+    draggingPaneId: gitDraggingPaneId,
+    startResize: startGitPaneResize,
+    onResizeKeyDown: onGitPaneResizeKeyDown,
+  } = usePersistedPaneResize({
+    layoutId: GIT_LAYOUT_ID,
+    panes: GIT_CHANGE_PANES,
+    preserveMainMinWidth: 480,
+  });
+  const changePanelWidth = gitPaneWidths["change-panel"] ?? GIT_CHANGE_PANE.defaultWidth;
   const pageVisible = usePageVisibility();
   const locale = lang === "zh" ? "zh-CN" : "en-US";
 
@@ -306,10 +317,6 @@ export function GitRoute() {
     const availablePaths = new Set(files.map((file) => file.path));
     setSelectedPaths((current) => current.filter((path) => availablePaths.has(path)));
   }, [files]);
-
-  useEffect(() => {
-    persistPaneWidth(GIT_LAYOUT_ID, "change-panel", changePanelWidth);
-  }, [changePanelWidth]);
 
   useEffect(() => {
     setAiPromptDraft(configuredPrompt);
@@ -514,44 +521,18 @@ export function GitRoute() {
   );
   const resizeChangePanelLabel = lang === "zh" ? "调整变更列表宽度" : "Resize changed files";
 
-  function beginChangePanelResize(startX: number) {
-    const startWidth = changePanelWidth;
-    const handleMove = (moveEvent: globalThis.PointerEvent) => {
-      setChangePanelWidth(clampPaneWidth(startWidth + moveEvent.clientX - startX, GIT_CHANGE_PANEL_BOUNDS));
-    };
-    const handleEnd = () => {
-      window.removeEventListener("pointermove", handleMove);
-      window.removeEventListener("pointerup", handleEnd);
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
-    };
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
-    window.addEventListener("pointermove", handleMove);
-    window.addEventListener("pointerup", handleEnd);
-  }
-
-  function handleChangePanelResizeStart(event: PointerEvent<HTMLButtonElement>) {
-    if (event.button !== 0) {
-      return;
-    }
+  function handleChangePanelResizeStart(event: PointerEvent<any>) {
     if (changePanelCollapsed) {
       return;
     }
-    event.preventDefault();
-    beginChangePanelResize(event.clientX);
+    startGitPaneResize("change-panel", event as PointerEvent<HTMLDivElement>, { direction: 1 });
   }
 
-  function handleChangePanelResizeKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+  function handleChangePanelResizeKeyDown(event: KeyboardEvent<any>) {
     if (changePanelCollapsed) {
       return;
     }
-    const nextWidth = keyboardPaneWidth(changePanelWidth, event.key, GIT_CHANGE_PANEL_BOUNDS);
-    if (nextWidth === null) {
-      return;
-    }
-    event.preventDefault();
-    setChangePanelWidth(nextWidth);
+    onGitPaneResizeKeyDown("change-panel", event as KeyboardEvent<HTMLDivElement>, { direction: 1 });
   }
 
   function worktreeDisplayName(item: GitWorktreeItem) {
@@ -682,7 +663,12 @@ export function GitRoute() {
         <VStateSurface className={styles.notice} title={status.error || t("gitStatusUnavailable")} tone="unavailable" />
       ) : null}
 
-      <div className={noChangedFiles ? `${styles.workspace} ${styles.workspaceOverview}` : styles.workspace} style={workspaceStyle}>
+      <div
+        ref={gitLayoutRef}
+        className={noChangedFiles ? `${styles.workspace} ${styles.workspaceOverview}` : styles.workspace}
+        style={workspaceStyle}
+        data-vui-layout-id={GIT_LAYOUT_ID}
+      >
         {statusInitialLoading || statusEmptyError ? (
           <>
             {statusInitialLoading ? (
@@ -709,6 +695,10 @@ export function GitRoute() {
               collapseLabel={lang === "zh" ? "收起变更列表" : "Collapse changed files"}
               expandLabel={lang === "zh" ? "展开变更列表" : "Expand changed files"}
               className={styles.resizeHandle}
+              active={gitDraggingPaneId === "change-panel"}
+              valueNow={changePanelWidth}
+              valueMin={GIT_CHANGE_PANE.minWidth}
+              valueMax={GIT_CHANGE_PANE.maxWidth}
               onToggle={() => setChangePanelCollapsed((current) => !current)}
               onPointerDown={handleChangePanelResizeStart}
               onKeyDown={handleChangePanelResizeKeyDown}
@@ -905,6 +895,10 @@ export function GitRoute() {
               collapseLabel={lang === "zh" ? "收起变更列表" : "Collapse changed files"}
               expandLabel={lang === "zh" ? "展开变更列表" : "Expand changed files"}
               className={styles.resizeHandle}
+              active={gitDraggingPaneId === "change-panel"}
+              valueNow={changePanelWidth}
+              valueMin={GIT_CHANGE_PANE.minWidth}
+              valueMax={GIT_CHANGE_PANE.maxWidth}
               onToggle={() => setChangePanelCollapsed((current) => !current)}
               onPointerDown={handleChangePanelResizeStart}
               onKeyDown={handleChangePanelResizeKeyDown}

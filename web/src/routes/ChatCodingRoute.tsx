@@ -70,6 +70,7 @@ import { getPageInstanceId } from "../app/pageInstance";
 import { resolvePollingInterval, usePageVisibility, useStartupWarmup } from "../app/pollingPolicy";
 import type { TranslationKey } from "../i18n/dictionary";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
+import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { useChatWorkbenchStore } from "../store/chatWorkbenchStore";
 import {
@@ -2649,6 +2650,7 @@ export function ChatCodingRoute() {
       className={chatLayoutClassName}
       style={layoutStyle}
       data-vui-recipe="chat-session-workbench"
+      data-vui-layout-id={WORKBENCH_LAYOUT_IDS.chat}
       data-chat-responsive-mode={responsiveLayout.mode}
       data-chat-status-rail={statusRailCollapsed ? "collapsed" : "visible"}
     >
