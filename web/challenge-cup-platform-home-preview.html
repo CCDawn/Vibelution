@@ -1,10 +1,11 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="light">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>科研平台主页优化预览 · Vibelution</title>
     <link rel="stylesheet" href="/src/design/challenge-cup-platform-home-preview.css" />
+    <script type="module" src="/src/design/challenge-cup-platform-home-preview-tooltips.tsx"></script>
   </head>
   <body>
     <div class="app-shell">
@@ -36,12 +37,10 @@
       <main class="workspace">
         <div class="surface-switch" role="tablist" aria-label="团队页面视图">
           <button class="active" role="tab" aria-selected="true" type="button">
-            <strong>科研工作台</strong>
-            <span>项目推进与三阶段协作</span>
+            <span data-vui-hint-title="科研工作台" data-vui-hint-label="科研工作台说明" data-vui-hint="项目推进、三阶段协作和当前工作都集中在此视图。"></span>
           </button>
           <button role="tab" aria-selected="false" type="button">
-            <strong>项目进展</strong>
-            <span>里程碑、验收门禁与交付状态</span>
+            <span data-vui-hint-title="项目进展" data-vui-hint-label="项目进展说明" data-vui-hint="查看里程碑、验收门禁和交付状态。"></span>
           </button>
         </div>
 
@@ -74,39 +73,30 @@
           <button class="stage-node active" type="button" data-stage="knowledge" aria-pressed="true">
             <span class="stage-index">01</span>
             <span class="stage-copy">
-              <small>当前阶段</small>
-              <strong>知识搜集</strong>
-              <em>资料发现、提炼、关系整理与入库</em>
+              <span data-vui-hint-title="知识搜集" data-vui-hint-label="知识搜集阶段要求" data-vui-hint="资料发现｜内容提炼｜关系整理｜审核入库"></span>
             </span>
             <span class="stage-summary">
               <b>1 / 4</b>
-              <small>内部步骤</small>
             </span>
           </button>
           <span class="stage-connector" aria-hidden="true"></span>
           <button class="stage-node" type="button" data-stage="experiment" aria-pressed="false">
             <span class="stage-index">02</span>
             <span class="stage-copy">
-              <small>等待上游</small>
-              <strong>实验设计</strong>
-              <em>假设、变量、指标与执行门禁</em>
+              <span data-vui-hint-title="实验设计" data-vui-hint-label="实验设计阶段要求" data-vui-hint="定义可证伪假设｜冻结变量与控制组｜确定独立指标｜生成复现合同"></span>
             </span>
             <span class="stage-summary">
               <b>2 / 2</b>
-              <small>Agent 就绪</small>
             </span>
           </button>
           <span class="stage-connector" aria-hidden="true"></span>
           <button class="stage-node" type="button" data-stage="iteration" aria-pressed="false">
             <span class="stage-index">03</span>
             <span class="stage-copy">
-              <small>尚未开始</small>
-              <strong>执行与迭代</strong>
-              <em>运行、评估、归因与受控优化</em>
+              <span data-vui-hint-title="执行与迭代" data-vui-hint-label="执行与迭代阶段要求" data-vui-hint="运行冻结设计｜独立评估指标｜记录失败归因｜受控修改变量｜写回知识"></span>
             </span>
             <span class="stage-summary">
               <b>0</b>
-              <small>有效结果</small>
             </span>
           </button>
         </section>
@@ -119,8 +109,8 @@
                 <div class="workspace-title-line">
                   <h2 id="active-stage-title">知识搜集</h2>
                   <span class="state-badge active" id="active-stage-status">进行中</span>
+                  <span id="active-stage-hint" data-vui-hint-label="知识搜集说明" data-vui-hint="先建立可信的资料和证据基础，再进入实验规划。"></span>
                 </div>
-                <p id="active-stage-description">先建立可信的资料和证据基础，再进入实验规划。</p>
               </div>
               <div class="header-actions">
                 <button class="button quiet" type="button">团队讨论</button>
@@ -132,34 +122,36 @@
               <ol class="substage-progress" aria-label="知识搜集内部进度">
                 <li class="done">
                   <span>✓</span>
-                  <div><strong>资料发现</strong><small>16 条原始资料</small></div>
+                  <div><strong>资料发现</strong><span data-vui-hint-label="资料发现状态" data-vui-hint="已找到 16 条原始资料，其中 15 条来源可追溯。"></span></div>
                 </li>
                 <li class="current">
                   <span>2</span>
-                  <div><strong>内容提炼</strong><small>下一步</small></div>
+                  <div><strong>内容提炼</strong><span data-vui-hint-label="内容提炼状态" data-vui-hint="当前推荐步骤：把原始资料转为带证据锚点的结构化内容。"></span></div>
                 </li>
                 <li>
                   <span>3</span>
-                  <div><strong>关系整理</strong><small>未开始</small></div>
+                  <div><strong>关系整理</strong><span data-vui-hint-label="关系整理状态" data-vui-hint="尚未开始；需要先完成内容提炼。"></span></div>
                 </li>
                 <li>
                   <span>4</span>
-                  <div><strong>入库审核</strong><small>未开始</small></div>
+                  <div><strong>入库审核</strong><span data-vui-hint-label="入库审核状态" data-vui-hint="尚未开始；只允许审核通过且可追溯的知识条目入库。"></span></div>
                 </li>
               </ol>
 
               <div class="metric-grid">
-                <article><span>原始资料</span><strong>16</strong><small>15 条来源可追溯</small></article>
-                <article><span>待提炼</span><strong>16</strong><small>尚未形成知识条目</small></article>
-                <article><span>搜索问题</span><strong>4</strong><small>中英文 · 3 类来源</small></article>
-                <article><span>团队成员</span><strong>5 / 5</strong><small>全部可用</small></article>
+                <article><span>原始资料</span><strong>16</strong><span data-vui-hint-label="原始资料说明" data-vui-hint="15 条来源已具备 DOI 或原始链接，可继续审查。"></span></article>
+                <article><span>待提炼</span><strong>16</strong><span data-vui-hint-label="待提炼说明" data-vui-hint="当前资料尚未形成可供实验设计引用的知识条目。"></span></article>
+                <article><span>搜索问题</span><strong>4</strong><span data-vui-hint-label="搜索问题说明" data-vui-hint="覆盖中英文检索词与 3 类来源。"></span></article>
+                <article><span>团队成员</span><strong>5 / 5</strong><span data-vui-hint-label="团队成员说明" data-vui-hint="本阶段所需 5 名 Agent 当前全部可用。"></span></article>
               </div>
 
               <section class="current-task">
                 <div class="task-main">
                   <span class="eyebrow">本轮任务</span>
-                  <h3>围绕预测编码的层级机制补齐证据</h3>
-                  <p>当前批次已返回资料。建议先完成提炼和来源审查，再根据证据缺口决定是否继续搜索。</p>
+                  <div class="title-with-hint">
+                    <h3>围绕预测编码的层级机制补齐证据</h3>
+                    <span data-vui-hint-label="本轮任务要求" data-vui-hint="当前批次已返回资料。先完成提炼和来源审查，再根据证据缺口决定是否继续搜索。"></span>
+                  </div>
                   <div class="query-chips">
                     <span>预测编码皮层层级</span>
                     <span>突触可塑性学习规则</span>
@@ -185,17 +177,17 @@
                 <div class="output-grid">
                   <article class="ready">
                     <span>01</span>
-                    <div><strong>可追溯证据包</strong><small>15 条来源已具备 DOI 或原始链接</small></div>
+                    <div><strong>可追溯证据包</strong><span data-vui-hint-label="可追溯证据包要求" data-vui-hint="15 条来源已具备 DOI 或原始链接。"></span></div>
                     <em>已建立</em>
                   </article>
                   <article>
                     <span>02</span>
-                    <div><strong>概念与关系图</strong><small>用于定位共识、冲突和证据缺口</small></div>
+                    <div><strong>概念与关系图</strong><span data-vui-hint-label="概念与关系图要求" data-vui-hint="用于定位共识、冲突和证据缺口。"></span></div>
                     <em>等待整理</em>
                   </article>
                   <article>
                     <span>03</span>
-                    <div><strong>受审知识条目</strong><small>为实验假设提供可引用的上游依据</small></div>
+                    <div><strong>受审知识条目</strong><span data-vui-hint-label="受审知识条目要求" data-vui-hint="为实验假设提供可引用、可追溯的上游依据。"></span></div>
                     <em>等待入库</em>
                   </article>
                 </div>
@@ -204,7 +196,7 @@
               <footer class="workspace-actions">
                 <div>
                   <strong>推荐下一步：提炼 16 条资料</strong>
-                  <span>完成后才能判断证据是否足以支撑实验假设。</span>
+                  <span data-vui-hint-label="推荐下一步说明" data-vui-hint="完成内容提炼后，才能判断证据是否足以支撑实验假设。"></span>
                 </div>
                 <button class="button secondary" type="button">调整搜索主题</button>
                 <button class="button primary" type="button" data-toast="已进入知识搜集工作台">进入知识搜集工作台</button>
@@ -216,24 +208,22 @@
                 <span class="callout-icon">!</span>
                 <div>
                   <strong>等待知识搜集完成</strong>
-                  <p>至少需要一组已审核、可追溯的知识条目，才能冻结实验设计。</p>
+                  <span data-vui-hint-label="实验设计阻塞原因" data-vui-hint="至少需要一组已审核、可追溯的知识条目，才能冻结实验设计。"></span>
                 </div>
               </div>
               <div class="design-summary">
                 <article>
                   <span class="eyebrow">当前方式</span>
                   <strong>模型训练 / 推理</strong>
-                  <p>已发现 3 个可用执行器，尚未选择正式执行器。</p>
+                  <span data-vui-hint-label="实验方式说明" data-vui-hint="已发现 3 个可用执行器，但尚未选择正式执行器。"></span>
                   <button class="button secondary" type="button">配置实验方式</button>
                 </article>
                 <article>
                   <span class="eyebrow">设计门禁</span>
-                  <ul>
-                    <li class="done">研究问题已定义</li>
-                    <li>证据支持尚未就绪</li>
-                    <li>Baseline 与指标待冻结</li>
-                    <li>复现合同待生成</li>
-                  </ul>
+                  <div class="compact-gate">
+                    <strong>1 / 4 已满足</strong>
+                    <span data-vui-hint-label="设计门禁要求" data-vui-hint="✓ 研究问题已定义｜○ 证据支持尚未就绪｜○ Baseline 与指标待冻结｜○ 复现合同待生成"></span>
+                  </div>
                 </article>
               </div>
               <section class="design-contract" aria-labelledby="design-contract-title">
@@ -245,18 +235,18 @@
                   <span class="state-badge pending">1 / 6 已定义</span>
                 </header>
                 <div class="contract-grid">
-                  <article class="ready"><span>研究问题</span><strong>预测误差如何跨层传播？</strong><small>已从当前项目主题继承</small></article>
-                  <article><span>可证伪假设</span><strong>等待证据支持</strong><small>必须标注支持与反证来源</small></article>
-                  <article><span>数据与 Baseline</span><strong>尚未选择</strong><small>需要明确数据许可与基准实现</small></article>
-                  <article><span>变量与控制组</span><strong>尚未定义</strong><small>限定本轮允许修改的变量</small></article>
-                  <article><span>指标与成功门禁</span><strong>尚未定义</strong><small>不得用单一总分代替独立指标</small></article>
-                  <article><span>复现与执行合同</span><strong>尚未生成</strong><small>执行器、预算、种子和产物路径</small></article>
+                  <article class="ready"><span>研究问题</span><div class="title-with-hint"><strong>预测误差如何跨层传播？</strong><span data-vui-hint-label="研究问题要求" data-vui-hint="已从当前项目主题继承；冻结前仍需确认适用边界。"></span></div></article>
+                  <article><span>可证伪假设</span><div class="title-with-hint"><strong>等待证据支持</strong><span data-vui-hint-label="可证伪假设要求" data-vui-hint="必须同时标注支持来源与反证来源。"></span></div></article>
+                  <article><span>数据与 Baseline</span><div class="title-with-hint"><strong>尚未选择</strong><span data-vui-hint-label="数据与基线要求" data-vui-hint="需要明确数据许可、版本和基准实现。"></span></div></article>
+                  <article><span>变量与控制组</span><div class="title-with-hint"><strong>尚未定义</strong><span data-vui-hint-label="变量与控制组要求" data-vui-hint="限定本轮允许修改的变量，并冻结其余控制条件。"></span></div></article>
+                  <article><span>指标与成功门禁</span><div class="title-with-hint"><strong>尚未定义</strong><span data-vui-hint-label="指标与成功门禁要求" data-vui-hint="独立展示各项指标，不得用单一总分替代。"></span></div></article>
+                  <article><span>复现与执行合同</span><div class="title-with-hint"><strong>尚未生成</strong><span data-vui-hint-label="复现与执行合同要求" data-vui-hint="必须包含执行器、预算、随机种子和产物路径。"></span></div></article>
                 </div>
               </section>
               <footer class="workspace-actions">
                 <div>
                   <strong>当前阻塞：缺少已审核知识条目</strong>
-                  <span>可以查看和配置设计框架，但暂时不能冻结或启动实验。</span>
+                  <span data-vui-hint-label="当前阻塞说明" data-vui-hint="可以查看和配置设计框架，但暂时不能冻结或启动实验。"></span>
                 </div>
                 <button class="button secondary" type="button">查看上游证据</button>
                 <button class="button primary" type="button" data-toast="已打开实验设计配置">进入实验设计工作台</button>
@@ -268,14 +258,14 @@
                 <span class="callout-icon">3</span>
                 <div>
                   <strong>冻结实验设计后才能开始执行</strong>
-                  <p>当前没有可运行的设计版本，也没有候选结果或诊断记录。</p>
+                  <span data-vui-hint-label="执行阶段阻塞原因" data-vui-hint="当前没有可运行的设计版本，也没有候选结果或诊断记录。"></span>
                 </div>
               </div>
               <div class="metric-grid">
-                <article><span>冻结设计</span><strong>—</strong><small>尚未生成</small></article>
-                <article><span>最佳候选</span><strong>—</strong><small>尚未执行</small></article>
-                <article><span>有效结果</span><strong>0</strong><small>无运行记录</small></article>
-                <article><span>诊断记录</span><strong>0</strong><small>无失败归因</small></article>
+                <article><span>冻结设计</span><strong>—</strong><span data-vui-hint-label="冻结设计说明" data-vui-hint="尚未生成可执行的冻结设计。"></span></article>
+                <article><span>最佳候选</span><strong>—</strong><span data-vui-hint-label="最佳候选说明" data-vui-hint="尚未执行，因此没有可晋升候选。"></span></article>
+                <article><span>有效结果</span><strong>0</strong><span data-vui-hint-label="有效结果说明" data-vui-hint="目前没有通过门禁的运行记录。"></span></article>
+                <article><span>诊断记录</span><strong>0</strong><span data-vui-hint-label="诊断记录说明" data-vui-hint="目前没有失败归因或边界诊断。"></span></article>
               </div>
               <section class="iteration-flow" aria-labelledby="iteration-flow-title">
                 <header>
@@ -288,34 +278,32 @@
                 <div class="iteration-lanes">
                   <article>
                     <span>Baseline</span>
-                    <strong>基线运行</strong>
-                    <small>冻结配置后建立比较起点</small>
+                    <div class="title-with-hint"><strong>基线运行</strong><span data-vui-hint-label="基线运行要求" data-vui-hint="使用冻结配置建立比较起点。"></span></div>
                   </article>
                   <i aria-hidden="true">→</i>
                   <article>
                     <span>Candidate</span>
-                    <strong>候选版本</strong>
-                    <small>一次只修改获准变量</small>
+                    <div class="title-with-hint"><strong>候选版本</strong><span data-vui-hint-label="候选版本要求" data-vui-hint="每次只修改设计中明确获准的变量。"></span></div>
                   </article>
                   <i aria-hidden="true">→</i>
                   <article>
                     <span>Review</span>
-                    <strong>评估与归因</strong>
-                    <small>记录成功门禁与失败原因</small>
+                    <div class="title-with-hint"><strong>评估与归因</strong><span data-vui-hint-label="评估与归因要求" data-vui-hint="独立记录成功门禁、失败门禁和原因。"></span></div>
                   </article>
                   <i aria-hidden="true">→</i>
                   <article>
                     <span>Decision</span>
-                    <strong>晋升或淘汰</strong>
-                    <small>结果写回团队知识与下一版设计</small>
+                    <div class="title-with-hint"><strong>晋升或淘汰</strong><span data-vui-hint-label="晋升或淘汰要求" data-vui-hint="结果必须写回团队知识，并决定是否生成下一版设计。"></span></div>
                   </article>
                 </div>
               </section>
               <section class="empty-run-state">
                 <div>
                   <span class="eyebrow">运行记录</span>
-                  <h3>暂无执行批次</h3>
-                  <p>实验设计冻结后，这里会展示 smoke、formal、消融和诊断记录，而不是提前生成模拟结果。</p>
+                  <div class="title-with-hint">
+                    <h3>暂无执行批次</h3>
+                    <span data-vui-hint-label="运行记录说明" data-vui-hint="实验设计冻结后，这里才会展示 smoke、formal、消融和诊断记录；不会提前生成模拟结果。"></span>
+                  </div>
                 </div>
                 <button class="button secondary" type="button">查看执行准备度</button>
               </section>
@@ -325,8 +313,10 @@
           <aside class="inspector" aria-label="当前阶段辅助信息">
             <section class="inspector-card next-action">
               <span class="eyebrow">下一步</span>
-              <h2 id="next-action-title">完成内容提炼</h2>
-              <p id="next-action-copy">把原始资料转为带证据锚点的结构化内容，避免直接用搜索摘要设计实验。</p>
+              <div class="title-with-hint">
+                <h2 id="next-action-title">完成内容提炼</h2>
+                <span id="next-action-hint" data-vui-hint-label="下一步要求" data-vui-hint="把原始资料转为带证据锚点的结构化内容，避免直接用搜索摘要设计实验。"></span>
+              </div>
               <button class="button primary full" id="next-action-button" type="button" data-toast="已定位到内容提炼">去内容提炼</button>
             </section>
 
@@ -434,10 +424,12 @@
         document.querySelector("#active-stage-title").textContent = content.title;
         document.querySelector("#active-stage-status").textContent = content.status;
         document.querySelector("#active-stage-status").className = `state-badge ${stage === "knowledge" ? "active" : "pending"}`;
-        document.querySelector("#active-stage-description").textContent = content.description;
+        const stageHint = document.querySelector("#active-stage-hint");
+        stageHint.dataset.vuiHintLabel = `${content.title}说明`;
+        stageHint.dataset.vuiHint = content.description;
         document.querySelector("#hero-primary").textContent = content.heroAction;
         document.querySelector("#next-action-title").textContent = content.nextTitle;
-        document.querySelector("#next-action-copy").textContent = content.nextCopy;
+        document.querySelector("#next-action-hint").dataset.vuiHint = content.nextCopy;
         document.querySelector("#next-action-button").textContent = content.nextButton;
         document.querySelector("#gate-counter").textContent = `${content.completed} / ${content.gates.length}`;
         document.querySelector("#gate-list").innerHTML = content.gates
