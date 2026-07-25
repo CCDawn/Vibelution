@@ -1804,9 +1804,10 @@ describe("AgentsRoute layout contract", () => {
     expect(workspaceLayoutStyles.workspace).toContain("flex h-full");
     expect(workspaceLayoutStyles.workspace).toContain("overflow-hidden");
     expect(workspaceLayoutStyles.directory).toContain("grid-rows-[auto_minmax(0,1fr)]");
-    expect(workspaceLayoutStyles.resizeHandle).toContain("cursor-col-resize");
+    expect(workspaceLayoutPanelSource).toContain("PaneResizeHandle");
+    expect(workspaceLayoutPanelSource).toContain("usePersistedPaneResize");
     expect(workspaceLayoutPanelSource).toContain("data-agent-workspace=\"resizable\"");
-    expect(workspaceLayoutPanelSource).toContain("aria-label=\"调整目录栏宽度\"");
+    expect(workspaceLayoutPanelSource).toContain('label="调整目录栏宽度"');
     expect(workspaceLayoutStyles.workspace).toContain("max-[860px]:flex-col");
     expect(workspaceLayoutStyles.inspector).toContain("max-[1180px]:absolute");
     expect(workspaceLayoutStyles.inspectorBackdrop).toContain("max-[1180px]:block");

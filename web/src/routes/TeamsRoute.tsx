@@ -10109,10 +10109,7 @@ export function TeamsRoute({
             valueMin={TEAMS_INSPECTOR_PANE.minWidth}
             valueMax={TEAMS_INSPECTOR_PANE.maxWidth}
             active={teamsDraggingPaneId === "inspector"}
-            className={[
-              styles.inspectorResizeHandle,
-              teamsDraggingPaneId === "inspector" ? styles.inspectorResizeHandleActive : "",
-            ].filter(Boolean).join(" ")}
+            className={styles.inspectorResizeHandle}
             onPointerDown={(event) => startTeamsInspectorResize("inspector", event, { direction: -1 })}
             onKeyDown={(event) => onTeamsInspectorResizeKeyDown("inspector", event, { direction: -1 })}
           />

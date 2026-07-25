@@ -12,6 +12,7 @@ import {
   type SetStateAction,
 } from "react";
 
+import { PANE_KEYBOARD_STEP, resolvePaneWidthFromKeyboardKey } from "../../components/layout/paneResizeKeyboard";
 import { resolveChatResponsiveLayout, type ChatResponsiveLayout } from "../chatCompactPanel";
 import { useShellStore } from "../../store/shellStore";
 import styles from "../ChatCodingRoute.styles";
@@ -21,8 +22,6 @@ import {
   normalizePanelWidths,
   type ResizableSide,
 } from "./chatCodingRouteViewModel";
-
-const KEYBOARD_RESIZE_STEP = 24;
 
 type DragState = {
   side: ResizableSide;
@@ -235,36 +234,39 @@ export function useChatWorkbenchLayout({
       return;
     }
 
-    const { key } = event;
-    const direction =
-      key === "ArrowLeft" ? -1 : key === "ArrowRight" ? 1 : key === "Home" ? "min" : key === "End" ? "max" : null;
-    if (direction === null) {
-      return;
-    }
-
-    event.preventDefault();
     const layoutWidth = layoutRef.current.getBoundingClientRect().width;
 
     if (side === "left") {
       const bounds = getResizeBounds("left", layoutWidth, statusRailCollapsed ? 0 : rightPanelWidth);
-      const nextLeftWidth =
-        direction === "min"
-          ? bounds.min
-          : direction === "max"
-            ? bounds.max
-            : clamp(leftPanelWidth + Number(direction) * KEYBOARD_RESIZE_STEP, bounds.min, bounds.max);
-      setChatPanelWidths({ leftPanelWidth: Math.round(nextLeftWidth) });
+      const nextLeftWidth = resolvePaneWidthFromKeyboardKey(event.key, {
+        direction: 1,
+        step: PANE_KEYBOARD_STEP,
+        minWidth: bounds.min,
+        maxWidth: bounds.max,
+        currentWidth: leftPanelWidth,
+      });
+      if (nextLeftWidth == null) {
+        return;
+      }
+      event.preventDefault();
+      setChatPanelWidths({ leftPanelWidth: nextLeftWidth });
       return;
     }
 
     const bounds = getResizeBounds("right", layoutWidth, conversationIndexCollapsed ? 0 : leftPanelWidth);
-    const delta =
-      direction === "min"
-        ? bounds.min
-        : direction === "max"
-          ? bounds.max
-          : clamp(rightPanelWidth - Number(direction) * KEYBOARD_RESIZE_STEP, bounds.min, bounds.max);
-    setChatPanelWidths({ rightPanelWidth: Math.round(delta) });
+    // Right rail grows when the pointer moves left; keyboard uses inverted direction.
+    const nextRightWidth = resolvePaneWidthFromKeyboardKey(event.key, {
+      direction: -1,
+      step: PANE_KEYBOARD_STEP,
+      minWidth: bounds.min,
+      maxWidth: bounds.max,
+      currentWidth: rightPanelWidth,
+    });
+    if (nextRightWidth == null) {
+      return;
+    }
+    event.preventDefault();
+    setChatPanelWidths({ rightPanelWidth: nextRightWidth });
   }, [
     conversationIndexCollapsed,
     leftPanelWidth,

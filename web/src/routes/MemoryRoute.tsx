@@ -2189,10 +2189,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
         valueMin={MEMORY_LEFT_PANE.minWidth}
         valueMax={MEMORY_LEFT_PANE.maxWidth}
         active={memoryDraggingPaneId === "left"}
-        className={[
-          styles.paneResizeHandleLeft,
-          memoryDraggingPaneId === "left" ? styles.paneResizeHandleActive : "",
-        ].filter(Boolean).join(" ")}
+        className={styles.paneResizeHandleLeft}
         onPointerDown={(event) => startMemoryPaneResize("left", event, { direction: 1 })}
         onKeyDown={(event) => onMemoryPaneResizeKeyDown("left", event, { direction: 1 })}
       />
@@ -2202,10 +2199,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
         valueMin={MEMORY_RIGHT_PANE.minWidth}
         valueMax={MEMORY_RIGHT_PANE.maxWidth}
         active={memoryDraggingPaneId === "right"}
-        className={[
-          styles.paneResizeHandleRight,
-          memoryDraggingPaneId === "right" ? styles.paneResizeHandleActive : "",
-        ].filter(Boolean).join(" ")}
+        className={styles.paneResizeHandleRight}
         onPointerDown={(event) => startMemoryPaneResize("right", event, { direction: -1 })}
         onKeyDown={(event) => onMemoryPaneResizeKeyDown("right", event, { direction: -1 })}
       />

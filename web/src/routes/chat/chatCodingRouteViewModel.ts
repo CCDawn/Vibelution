@@ -1,10 +1,10 @@
 export type ResizableSide = "left" | "right";
 
 const RESIZE_HANDLE_WIDTH = 10;
-const MIN_LEFT_PANEL_WIDTH = 260;
-const MAX_LEFT_PANEL_WIDTH = 560;
-const MIN_RIGHT_PANEL_WIDTH = 200;
-const MAX_RIGHT_PANEL_WIDTH = 520;
+export const MIN_LEFT_PANEL_WIDTH = 260;
+export const MAX_LEFT_PANEL_WIDTH = 560;
+export const MIN_RIGHT_PANEL_WIDTH = 200;
+export const MAX_RIGHT_PANEL_WIDTH = 520;
 const TARGET_CENTER_PANE_WIDTH = 800;
 
 export function clamp(value: number, min: number, max: number) {

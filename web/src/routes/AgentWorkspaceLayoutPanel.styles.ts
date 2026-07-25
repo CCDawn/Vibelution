@@ -17,11 +17,8 @@ const styles = {
   inspector: `z-40 grid h-full min-h-0 min-w-0 shrink-0 overflow-hidden border-l border-[color-mix(in_srgb,var(--vui-border-subtle)_80%,transparent)] ${vuiRailFillClass} ${panelReset} [&_[data-vui-product=agent-workspace-panel]]:p-0 max-[1180px]:absolute max-[1180px]:inset-y-0 max-[1180px]:right-0 max-[1180px]:w-[min(360px,calc(100%-24px))]! max-[1180px]:max-w-[calc(100%-24px)] max-[1180px]:shadow-[-18px_0_40px_rgba(0,0,0,0.18)]`,
   inspectorBackdrop:
     "pointer-events-none absolute inset-0 z-30 hidden border-0 bg-black/20 opacity-0 max-[1180px]:block max-[1180px]:pointer-events-auto max-[1180px]:opacity-100",
-  resizeHandle:
-    "relative z-20 h-full w-1 shrink-0 cursor-col-resize touch-none border-0 bg-transparent p-0 outline-none max-[860px]:hidden before:pointer-events-none before:absolute before:inset-y-0 before:left-1/2 before:w-px before:-translate-x-1/2 before:bg-transparent before:opacity-0 before:transition before:content-[''] hover:before:bg-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)] hover:before:opacity-100 focus-visible:before:bg-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)] focus-visible:before:opacity-100 after:absolute after:inset-y-0 after:left-1/2 after:w-3 after:-translate-x-1/2 after:content-['']",
+  // Wave 4B: PaneResizeHandle owns the visual rule; only placement overrides stay here.
   inspectorResizeHandle: "max-[1180px]:hidden",
-  resizeHandleActive:
-    "before:bg-[color-mix(in_srgb,var(--accent-cool)_56%,transparent)] before:opacity-100",
   workspaceWithInspector:
     "flex h-full min-h-0 w-full min-w-0 overflow-hidden border-t border-[color-mix(in_srgb,var(--vui-border-subtle)_80%,transparent)]",
 } as const;

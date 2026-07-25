@@ -49,6 +49,15 @@
 | `VDenseOpsPage` | Dense toolbar + body; use `toolbar` (VToolbar) or `toolbarSlot` (bare strip like metrics) |
 | `VSplitWorkspace` | Low-level split; `resize={{ layoutId }}` enables left/right drag + persistence (used by list-detail recipe) |
 
+## Rail resize / collapse (Wave 4B)
+
+| Piece | Path | Contract |
+| --- | --- | --- |
+| Resize only | `components/layout/PaneResizeHandle` | `role=separator`, `aria-valuenow/min/max`, hover-lit 1px rule, Home/End + arrows via `usePersistedPaneResize` |
+| Collapse + resize | `components/layout/PaneCollapseHandle` | Same visual contract + centered toggle; routes pass **placement** class only |
+| Keyboard helper | `components/layout/paneResizeKeyboard` | Shared Arrow/Home/End resolution for Chat/Logs/custom drag |
+| Persistence | `pane-layouts.v1[layoutId]` | Wave 4A store; do not invent new width keys |
+
 Each sets `data-vui-recipe="…"` on the page root for contracts and debugging.
 
 ## Adding a control (checklist)

@@ -1,6 +1,7 @@
 /**
- * Shared vertical resize handle for left/right workbench rails.
+ * Shared vertical resize handle for left/right workbench rails (Wave 4B contract).
  * Wide hit target (~12px) with a 1px visual rule that lights on hover/active.
+ * Placement (grid-column, absolute offsets) stays on route className overrides.
  */
 const styles = {
   handle:
@@ -13,6 +14,9 @@ const styles = {
     + "after:absolute after:inset-y-0 after:left-1/2 after:w-3 after:-translate-x-1/2 after:content-['']",
   handleActive:
     "before:bg-[color-mix(in_srgb,var(--accent-cool)_56%,transparent)] before:opacity-100",
+  /** When the rail is collapsed, hide the lit rule and use default cursor. */
+  handleCollapsed:
+    "cursor-default before:opacity-0 hover:before:opacity-0",
 } as const;
 
 export default styles;

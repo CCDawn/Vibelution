@@ -2260,10 +2260,7 @@ export function LauncherRoute() {
           valueMin={LAUNCHER_RAIL_PANE.minWidth}
           valueMax={LAUNCHER_RAIL_PANE.maxWidth}
           active={launcherDraggingPaneId === "rail"}
-          className={[
-            styles.railResizeHandle,
-            launcherDraggingPaneId === "rail" ? styles.railResizeHandleActive : "",
-          ].filter(Boolean).join(" ")}
+          className={styles.railResizeHandle}
           onPointerDown={(event) => startLauncherRailResize("rail", event, { direction: -1 })}
           onKeyDown={(event) => onLauncherRailResizeKeyDown("rail", event, { direction: -1 })}
         />

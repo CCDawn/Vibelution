@@ -160,6 +160,10 @@ import {
   isBusyPhase,
   isRunningPhase,
   isStoppingPhase,
+  MAX_LEFT_PANEL_WIDTH,
+  MAX_RIGHT_PANEL_WIDTH,
+  MIN_LEFT_PANEL_WIDTH,
+  MIN_RIGHT_PANEL_WIDTH,
   shouldSuppressComposerErrorForTurnError,
 } from "./chat/chatCodingRouteViewModel";
 import { useChatWorkbenchLayout } from "./chat/useChatWorkbenchLayout";
@@ -477,6 +481,8 @@ export function ChatCodingRoute() {
     centerPaneClassName,
     statusRailClassName,
     conversationIndexPaneClassName,
+    leftPanelWidth,
+    rightPanelWidth,
     handleResizeStart,
     handleResizeKeyDown,
     closeResponsiveOverlayPane,
@@ -2761,9 +2767,11 @@ export function ChatCodingRoute() {
         separatorLabel={t("resizeLeftPanel")}
         collapseLabel={lang === "zh" ? "收起会话列" : "Collapse conversation column"}
         expandLabel={lang === "zh" ? "展开会话列" : "Expand conversation column"}
-        className={`${styles.resizeHandle} ${styles.resizeHandleLeft}`}
+        className={styles.resizeHandleLeft}
         active={dragState?.side === "left"}
-        activeClassName={styles.resizeHandleActive}
+        valueNow={leftPanelWidth}
+        valueMin={MIN_LEFT_PANEL_WIDTH}
+        valueMax={MAX_LEFT_PANEL_WIDTH}
         onToggle={() => setLeftRailCollapsed((current) => !current)}
         onPointerDown={(event) => handleResizeStart("left", event)}
         onKeyDown={(event) => handleResizeKeyDown("left", event)}
@@ -3048,9 +3056,11 @@ export function ChatCodingRoute() {
         separatorLabel={t("resizeRightPanel")}
         collapseLabel={lang === "zh" ? "收起状态栏" : "Collapse status rail"}
         expandLabel={lang === "zh" ? "展开状态栏" : "Expand status rail"}
-        className={`${styles.resizeHandle} ${styles.resizeHandleRight}`}
+        className={styles.resizeHandleRight}
         active={dragState?.side === "right"}
-        activeClassName={styles.resizeHandleActive}
+        valueNow={rightPanelWidth}
+        valueMin={MIN_RIGHT_PANEL_WIDTH}
+        valueMax={MAX_RIGHT_PANEL_WIDTH}
         onToggle={() => setRightPaneCollapsed((current) => !current)}
         onPointerDown={(event) => handleResizeStart("right", event)}
         onKeyDown={(event) => handleResizeKeyDown("right", event)}

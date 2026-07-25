@@ -423,12 +423,11 @@ const styles = {
     "wideField min-w-0 grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
   workspace:
     `workspace relative min-w-0 grid h-full min-h-0 flex-1 gap-2 p-2 grid-cols-[var(--memory-left-width,clamp(200px,18vw,260px))_minmax(0,1fr)_var(--memory-right-width,clamp(280px,24vw,380px))] grid-rows-[minmax(0,1fr)] overflow-hidden max-[1120px]:grid-cols-[var(--memory-left-width,clamp(190px,18vw,240px))_minmax(0,1fr)] max-[1120px]:[&_.detailPanel]:col-span-2 max-[780px]:grid-cols-1 max-[780px]:overflow-auto max-[780px]:[&_.detailPanel]:col-span-1 ${vuiWorkspaceFillClass}`,
+  // Wave 4B: shared PaneResizeHandle visual; absolute placement only.
   paneResizeHandleLeft:
-    "memoryPaneResizeHandleLeft absolute top-2 bottom-2 z-20 w-1.5 -translate-x-1/2 cursor-col-resize touch-none border-0 bg-transparent p-0 outline-none max-[780px]:hidden left-[var(--memory-left-width,230px)] before:pointer-events-none before:absolute before:inset-y-0 before:left-1/2 before:w-px before:-translate-x-1/2 before:bg-transparent before:opacity-0 before:transition before:content-[''] hover:before:bg-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)] hover:before:opacity-100 focus-visible:before:bg-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)] focus-visible:before:opacity-100",
+    "memoryPaneResizeHandleLeft !absolute top-2 bottom-2 left-[var(--memory-left-width,230px)] z-30 w-1.5 -translate-x-1/2 max-[780px]:hidden",
   paneResizeHandleRight:
-    "memoryPaneResizeHandleRight absolute top-2 bottom-2 z-20 w-1.5 translate-x-1/2 cursor-col-resize touch-none border-0 bg-transparent p-0 outline-none max-[780px]:hidden right-[var(--memory-right-width,320px)] before:pointer-events-none before:absolute before:inset-y-0 before:left-1/2 before:w-px before:-translate-x-1/2 before:bg-transparent before:opacity-0 before:transition before:content-[''] hover:before:bg-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)] hover:before:opacity-100 focus-visible:before:bg-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)] focus-visible:before:opacity-100 max-[1120px]:hidden",
-  paneResizeHandleActive:
-    "memoryPaneResizeHandleActive before:bg-[color-mix(in_srgb,var(--accent-cool)_62%,transparent)] before:opacity-100",
+    "memoryPaneResizeHandleRight !absolute top-2 bottom-2 right-[var(--memory-right-width,320px)] z-30 w-1.5 translate-x-1/2 max-[780px]:hidden max-[1120px]:hidden",
 } as const;
 
 export default styles;

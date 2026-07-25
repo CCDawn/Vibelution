@@ -129,10 +129,6 @@ export function AgentWorkspaceLayoutPanel({
         valueMin={LEFT_PANE.minWidth}
         valueMax={LEFT_PANE.maxWidth}
         active={draggingPaneId === "left"}
-        className={[
-          styles.resizeHandle,
-          draggingPaneId === "left" ? styles.resizeHandleActive : "",
-        ].filter(Boolean).join(" ")}
         onPointerDown={(event) => startResize("left", event, { direction: 1 })}
         onKeyDown={(event) => onResizeKeyDown("left", event, { direction: 1 })}
       />
@@ -155,11 +151,7 @@ export function AgentWorkspaceLayoutPanel({
             valueMin={RIGHT_PANE.minWidth}
             valueMax={RIGHT_PANE.maxWidth}
             active={draggingPaneId === "right"}
-            className={[
-              styles.resizeHandle,
-              styles.inspectorResizeHandle,
-              draggingPaneId === "right" ? styles.resizeHandleActive : "",
-            ].filter(Boolean).join(" ")}
+            className={styles.inspectorResizeHandle}
             onPointerDown={(event) => startResize("right", event, { direction: -1 })}
             onKeyDown={(event) => onResizeKeyDown("right", event, { direction: -1 })}
           />

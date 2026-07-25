@@ -2079,7 +2079,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.workspace).toContain("max-[760px]:grid-cols-[minmax(0,1fr)]");
     expect(routeStyles.workspace).toContain("max-[760px]:content-start");
     expect(routeStyles.workspace).toContain("max-[760px]:overflow-auto");
-    expect(routeStyles.inspectorResizeHandle).toContain("cursor-col-resize");
+    expect(routeStyles.inspectorResizeHandle).toContain("max-[760px]:hidden");
+    expect(routeSource).toContain("PaneResizeHandle");
     expect(routeStyles.workspaceResearchCanvas).toContain("h-full");
     expect(routeStyles.workspaceResearchCanvas).toContain("var(--teams-inspector-width,clamp(320px,26vw,420px))");
     expect(routeStyles.workspaceResearchCanvas).toContain("overflow-hidden");

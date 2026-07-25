@@ -8,6 +8,8 @@ export type PaneResizeHandleProps = {
   valueMin: number;
   valueMax: number;
   active?: boolean;
+  /** When true, keeps hit target but disables lit rule / col-resize cursor. */
+  collapsed?: boolean;
   className?: string;
   onPointerDown: (event: PointerEvent<HTMLDivElement>) => void;
   onKeyDown?: (event: KeyboardEvent<HTMLDivElement>) => void;
@@ -16,7 +18,7 @@ export type PaneResizeHandleProps = {
 
 /**
  * Vertical resize separator (role=separator). Pair with usePersistedPaneResize.
- * Collapse toggles should use PaneCollapseHandle on top of this or separately.
+ * Collapse + resize: use PaneCollapseHandle (composes this visual contract).
  */
 export function PaneResizeHandle({
   label,
@@ -24,6 +26,7 @@ export function PaneResizeHandle({
   valueMin,
   valueMax,
   active = false,
+  collapsed = false,
   className = "",
   onPointerDown,
   onKeyDown,
@@ -37,8 +40,17 @@ export function PaneResizeHandle({
       aria-valuenow={Math.round(valueNow)}
       aria-valuemin={Math.round(valueMin)}
       aria-valuemax={Math.round(valueMax)}
+      aria-disabled={collapsed || undefined}
+      data-vui-layout-handle="resize"
+      data-active={active ? "true" : "false"}
+      data-collapsed={collapsed ? "true" : "false"}
       tabIndex={0}
-      className={[styles.handle, active ? styles.handleActive : "", className].filter(Boolean).join(" ")}
+      className={[
+        styles.handle,
+        active && !collapsed ? styles.handleActive : "",
+        collapsed ? styles.handleCollapsed : "",
+        className,
+      ].filter(Boolean).join(" ")}
       onPointerDown={onPointerDown}
       onKeyDown={onKeyDown}
     >
@@ -46,3 +58,5 @@ export function PaneResizeHandle({
     </div>
   );
 }
+
+export { styles as paneResizeHandleStyles };
