@@ -1,7 +1,12 @@
 import { type ReactNode, type SyntheticEvent } from "react";
 
+import { PersistedHeightListShell } from "../components/layout/PersistedHeightListShell";
 import panelFrameStyles from "./TeamSourceCollectionPanelFrame.styles";
 import styles from "./TeamSourceCollectionMemoryPanel.styles";
+import {
+  TEAM_SOURCE_COLLECTION_LAYOUT_ID,
+  TEAM_SOURCE_COLLECTION_MEMORY_HEIGHT_PANE,
+} from "./teamSourceCollectionListHeights";
 
 export type TeamSourceCollectionMemoryPanelStat = {
   key: string;
@@ -66,14 +71,18 @@ export function TeamSourceCollectionMemoryPanel({
         ))}
       </div>
       {hasCandidates ? (
-        <div
+        <PersistedHeightListShell
+          layoutId={TEAM_SOURCE_COLLECTION_LAYOUT_ID}
+          pane={TEAM_SOURCE_COLLECTION_MEMORY_HEIGHT_PANE}
+          label={lang === "zh" ? "调整入库审核列表高度" : "Resize knowledge ingestion list height"}
           className={styles.sourceCollectionMemoryListShell}
+          resizeHandleClassName={styles.sourceCollectionListResizeHandle}
           role="region"
           tabIndex={0}
           aria-label={lang === "zh" ? "入库审核候选列表，可滚动查看" : "Knowledge ingestion candidates, scroll to review"}
         >
           <div className={styles.workflowCandidateList}>{children}</div>
-        </div>
+        </PersistedHeightListShell>
       ) : (
         <div className={styles.empty}>{emptyMessage}</div>
       )}

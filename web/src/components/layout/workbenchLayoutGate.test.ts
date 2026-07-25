@@ -89,6 +89,26 @@ describe("workbench layout gate (Wave 5)", () => {
     expect(panel).toContain("WORKBENCH_LAYOUT_IDS.memory");
   });
 
+  it("keeps Teams source-collection list shells on shared height API (Wave 6E)", () => {
+    const heights = readFileSync(resolve(webSrc, "routes/teamSourceCollectionListHeights.ts"), "utf-8");
+    const shell = readFileSync(resolve(webSrc, "components/layout/PersistedHeightListShell.tsx"), "utf-8");
+    const candidates = readFileSync(resolve(webSrc, "routes/TeamSourceCollectionCandidatePanel.tsx"), "utf-8");
+    const screening = readFileSync(resolve(webSrc, "routes/TeamSourceCollectionScreeningPanel.tsx"), "utf-8");
+    const memory = readFileSync(resolve(webSrc, "routes/TeamSourceCollectionMemoryPanel.tsx"), "utf-8");
+    const graph = readFileSync(resolve(webSrc, "routes/TeamSourceCollectionGraphPanel.tsx"), "utf-8");
+    expect(heights).toContain("WORKBENCH_LAYOUT_IDS.teams");
+    expect(heights).toContain("source-collection-candidates");
+    expect(heights).toContain("source-collection-screening");
+    expect(heights).toContain("source-collection-memory");
+    expect(heights).toContain("source-collection-graph-nodes");
+    expect(shell).toContain("usePersistedPaneHeight");
+    expect(shell).toContain("PaneHeightResizeHandle");
+    expect(candidates).toContain("PersistedHeightListShell");
+    expect(screening).toContain("PersistedHeightListShell");
+    expect(memory).toContain("PersistedHeightListShell");
+    expect(graph).toContain("PersistedHeightListShell");
+  });
+
   it("keeps Evolution CASE IO on shared height resize handle", () => {
     const evolution = readFileSync(resolve(webSrc, "routes/EvolutionRoute.tsx"), "utf-8");
     expect(evolution).toContain("usePersistedPaneHeight");
@@ -145,6 +165,10 @@ describe("workbench layout gate (Wave 5)", () => {
       { file: "routes/LogsRoute.styles.ts", key: "packageFilesResizeHandle" },
       { file: "routes/LauncherDiagnosticsPanel.styles.ts", key: "diagnosticsBodyResizeHandle" },
       { file: "routes/MemoryProjectMemoryQueuePanel.styles.ts", key: "projectMemoryQueueResizeHandle" },
+      { file: "routes/TeamSourceCollectionCandidatePanel.styles.ts", key: "sourceCollectionListResizeHandle" },
+      { file: "routes/TeamSourceCollectionScreeningPanel.styles.ts", key: "sourceCollectionListResizeHandle" },
+      { file: "routes/TeamSourceCollectionMemoryPanel.styles.ts", key: "sourceCollectionListResizeHandle" },
+      { file: "routes/TeamSourceCollectionGraphPanel.styles.ts", key: "sourceCollectionListResizeHandle" },
     ];
 
     for (const sample of samples) {

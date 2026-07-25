@@ -1,7 +1,12 @@
 import { type ReactNode, type SyntheticEvent } from "react";
 
+import { PersistedHeightListShell } from "../components/layout/PersistedHeightListShell";
 import panelFrameStyles from "./TeamSourceCollectionPanelFrame.styles";
 import styles from "./TeamSourceCollectionCandidatePanel.styles";
+import {
+  TEAM_SOURCE_COLLECTION_CANDIDATES_HEIGHT_PANE,
+  TEAM_SOURCE_COLLECTION_LAYOUT_ID,
+} from "./teamSourceCollectionListHeights";
 
 export type TeamSourceCollectionCandidatePanelStat = {
   key: string;
@@ -68,8 +73,12 @@ export function TeamSourceCollectionCandidatePanel({
         ))}
       </div>
       {hasCandidates ? (
-        <div
+        <PersistedHeightListShell
+          layoutId={TEAM_SOURCE_COLLECTION_LAYOUT_ID}
+          pane={TEAM_SOURCE_COLLECTION_CANDIDATES_HEIGHT_PANE}
+          label={lang === "zh" ? "调整资料提炼候选列表高度" : "Resize extracted candidate list height"}
           className={styles.sourceCollectionCandidateListShell}
+          resizeHandleClassName={styles.sourceCollectionListResizeHandle}
           role="region"
           tabIndex={0}
           aria-label={lang === "zh" ? "资料提炼候选列表，可向下滚动查看更多" : "Extracted candidate list, scroll for more"}
@@ -80,10 +89,14 @@ export function TeamSourceCollectionCandidatePanel({
               <span>{lang === "zh" ? "向下滚动查看更多本页候选" : "Scroll down for more candidates on this page"}</span>
             </div>
           ) : null}
-        </div>
+        </PersistedHeightListShell>
       ) : loading && !hasCandidates ? (
-        <div
+        <PersistedHeightListShell
+          layoutId={TEAM_SOURCE_COLLECTION_LAYOUT_ID}
+          pane={TEAM_SOURCE_COLLECTION_CANDIDATES_HEIGHT_PANE}
+          label={lang === "zh" ? "调整资料提炼候选列表高度" : "Resize extracted candidate list height"}
           className={styles.sourceCollectionCandidateListShell}
+          resizeHandleClassName={styles.sourceCollectionListResizeHandle}
           role="region"
           tabIndex={0}
           aria-busy="true"
@@ -97,7 +110,7 @@ export function TeamSourceCollectionCandidatePanel({
               </div>
             ))}
           </div>
-        </div>
+        </PersistedHeightListShell>
       ) : (
         <div className={styles.empty}>{emptyMessage}</div>
       )}
