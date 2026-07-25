@@ -645,6 +645,9 @@ describe("ConfigRoute layout contract", () => {
   it("keeps Config image editors and model content constrained on narrow screens", () => {
     expect(styles.page).toContain("max-[720px]:[grid-template-columns:1fr]");
     expect(styles.page).toContain("max-[720px]:[grid-template-rows:auto_minmax(0,1fr)]");
+    expect(styles.page).toContain("--config-settings-nav-width");
+    expect(styles.page).toContain("var(--config-settings-nav-width)_auto_minmax(0,1fr)");
+    expect(styles.settingsNavResizeHandle).toContain("cursor-col-resize");
     expect(settingsNavigationStyles.sidebar).toContain("max-[720px]:w-full");
     expect(settingsNavigationStyles.sidebar).toContain("max-[720px]:h-auto");
     expect(settingsNavigationStyles.groupNav).toContain("max-[720px]:overflow-visible");

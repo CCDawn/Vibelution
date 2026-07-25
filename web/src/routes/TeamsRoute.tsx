@@ -6,7 +6,19 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
+import { PaneResizeHandle } from "../components/layout/PaneResizeHandle";
+import { type PaneSpec } from "../components/layout/paneLayoutPersistence";
+import { usePersistedPaneResize } from "../components/layout/usePersistedPaneResize";
 import { createLazyNamedTeamPanel } from "./teams/lazyTeamPanel";
+
+const TEAMS_LAYOUT_ID = "teams";
+const TEAMS_INSPECTOR_PANE: PaneSpec = {
+  id: "inspector",
+  defaultWidth: 360,
+  minWidth: 320,
+  maxWidth: 480,
+};
+const TEAMS_PANES: PaneSpec[] = [TEAMS_INSPECTOR_PANE];
 import {
   AI_SEARCH_RUN_PREVIEW_LIMIT,
   aiSearchRunCardFallbackReason,
@@ -993,6 +1005,21 @@ export function TeamsRoute({
   const chatWorkspaceCache = useMemo(() => createChatWorkspaceCache(queryClient), [queryClient]);
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const {
+    layoutRef: teamsLayoutRef,
+    widths: teamsPaneWidths,
+    draggingPaneId: teamsDraggingPaneId,
+    startResize: startTeamsInspectorResize,
+    onResizeKeyDown: onTeamsInspectorResizeKeyDown,
+  } = usePersistedPaneResize({
+    layoutId: TEAMS_LAYOUT_ID,
+    panes: TEAMS_PANES,
+    preserveMainMinWidth: 480,
+  });
+  const teamsInspectorWidth = teamsPaneWidths.inspector ?? TEAMS_INSPECTOR_PANE.defaultWidth;
+  const teamsLayoutStyle = {
+    ["--teams-inspector-width" as string]: `${teamsInspectorWidth}px`,
+  } as CSSProperties;
   const requestedResearchViewParam = searchParams.get("researchView");
   const requestedResearchWorkspaceView = parseResearchWorkspaceView(searchParams.get("researchView"));
   const requestedSourceCollectionStage = parseSourceCollectionStageModuleId(searchParams.get("collectionStage"));
@@ -9843,7 +9870,12 @@ export function TeamsRoute({
           </VStateSurface>
         </main>
       ) : (
-      <div className={workspaceClassName}>
+      <div
+        ref={teamsLayoutRef}
+        className={workspaceClassName}
+        style={teamsLayoutStyle}
+        data-vui-layout-id={TEAMS_LAYOUT_ID}
+      >
         <VSurface
           as="main"
           className={canvasPanelClassName}
@@ -10069,6 +10101,22 @@ export function TeamsRoute({
             </div>
           )}
         </VSurface>
+
+        {!researchWorkflowTeamSelected || researchCanvasVisible ? (
+          <PaneResizeHandle
+            label={lang === "zh" ? "调整团队侧栏宽度" : "Resize team inspector"}
+            valueNow={teamsInspectorWidth}
+            valueMin={TEAMS_INSPECTOR_PANE.minWidth}
+            valueMax={TEAMS_INSPECTOR_PANE.maxWidth}
+            active={teamsDraggingPaneId === "inspector"}
+            className={[
+              styles.inspectorResizeHandle,
+              teamsDraggingPaneId === "inspector" ? styles.inspectorResizeHandleActive : "",
+            ].filter(Boolean).join(" ")}
+            onPointerDown={(event) => startTeamsInspectorResize("inspector", event, { direction: -1 })}
+            onKeyDown={(event) => onTeamsInspectorResizeKeyDown("inspector", event, { direction: -1 })}
+          />
+        ) : null}
 
         <aside className={inspectorClassName}>
           {challengeCupResearchTeamSelected && !researchCanvasVisible ? null : (

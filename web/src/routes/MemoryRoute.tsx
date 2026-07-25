@@ -9,7 +9,7 @@ import {
   TriangleAlert,
   Undo2,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Link, NavLink, useSearchParams } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
@@ -53,9 +53,27 @@ import {
   TeamKnowledgeBase,
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
+import { PaneResizeHandle } from "../components/layout/PaneResizeHandle";
+import { type PaneSpec } from "../components/layout/paneLayoutPersistence";
+import { usePersistedPaneResize } from "../components/layout/usePersistedPaneResize";
 import { VButton, VDenseOpsPage } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
+
+const MEMORY_LAYOUT_ID = "memory";
+const MEMORY_LEFT_PANE: PaneSpec = {
+  id: "left",
+  defaultWidth: 230,
+  minWidth: 190,
+  maxWidth: 300,
+};
+const MEMORY_RIGHT_PANE: PaneSpec = {
+  id: "right",
+  defaultWidth: 320,
+  minWidth: 260,
+  maxWidth: 420,
+};
+const MEMORY_PANES: PaneSpec[] = [MEMORY_LEFT_PANE, MEMORY_RIGHT_PANE];
 import { MemoryAgentMemoryPanel } from "./MemoryAgentMemoryPanel";
 import { MemoryCleanupPanel } from "./MemoryCleanupPanel";
 import { MemoryDetailPanel } from "./MemoryDetailPanel";
@@ -2146,6 +2164,53 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   const searchParamText = searchParams.toString();
   const returnToPath = useMemo(() => safeAgentCenterReturnToPath(searchParams.get("returnTo")), [searchParamText]);
   const returnToLabel = searchParams.get("returnLabel") === "agents" ? copy.returnToAgents : copy.returnToSource;
+  const {
+    layoutRef: memoryLayoutRef,
+    widths: memoryPaneWidths,
+    draggingPaneId: memoryDraggingPaneId,
+    startResize: startMemoryPaneResize,
+    onResizeKeyDown: onMemoryPaneResizeKeyDown,
+  } = usePersistedPaneResize({
+    layoutId: MEMORY_LAYOUT_ID,
+    panes: MEMORY_PANES,
+    preserveMainMinWidth: 420,
+  });
+  const memoryLeftWidth = memoryPaneWidths.left ?? MEMORY_LEFT_PANE.defaultWidth;
+  const memoryRightWidth = memoryPaneWidths.right ?? MEMORY_RIGHT_PANE.defaultWidth;
+  const memoryLayoutStyle = {
+    ["--memory-left-width" as string]: `${memoryLeftWidth}px`,
+    ["--memory-right-width" as string]: `${memoryRightWidth}px`,
+  } as CSSProperties;
+  const memoryResizeHandles = (
+    <>
+      <PaneResizeHandle
+        label={lang === "zh" ? "调整记忆左侧栏宽度" : "Resize memory left rail"}
+        valueNow={memoryLeftWidth}
+        valueMin={MEMORY_LEFT_PANE.minWidth}
+        valueMax={MEMORY_LEFT_PANE.maxWidth}
+        active={memoryDraggingPaneId === "left"}
+        className={[
+          styles.paneResizeHandleLeft,
+          memoryDraggingPaneId === "left" ? styles.paneResizeHandleActive : "",
+        ].filter(Boolean).join(" ")}
+        onPointerDown={(event) => startMemoryPaneResize("left", event, { direction: 1 })}
+        onKeyDown={(event) => onMemoryPaneResizeKeyDown("left", event, { direction: 1 })}
+      />
+      <PaneResizeHandle
+        label={lang === "zh" ? "调整记忆右侧栏宽度" : "Resize memory right rail"}
+        valueNow={memoryRightWidth}
+        valueMin={MEMORY_RIGHT_PANE.minWidth}
+        valueMax={MEMORY_RIGHT_PANE.maxWidth}
+        active={memoryDraggingPaneId === "right"}
+        className={[
+          styles.paneResizeHandleRight,
+          memoryDraggingPaneId === "right" ? styles.paneResizeHandleActive : "",
+        ].filter(Boolean).join(" ")}
+        onPointerDown={(event) => startMemoryPaneResize("right", event, { direction: -1 })}
+        onKeyDown={(event) => onMemoryPaneResizeKeyDown("right", event, { direction: -1 })}
+      />
+    </>
+  );
   const [activeSectionId, setActiveSectionId] = useState(() => searchParams.get("section") ?? "");
   const [activeItemId, setActiveItemId] = useState(() => searchParams.get("item") ?? "");
   const [activeFilter, setActiveFilter] = useState<FilterMode>(() => normalizeFilterMode(searchParams.get("filter")));
@@ -4187,9 +4252,15 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     <>
       {createMatrixPanel(copy.sourceAudit)}
       {createWarningStrip()}
-      <div className={styles.workspace}>
+      <div
+        ref={memoryLayoutRef}
+        className={styles.workspace}
+        style={memoryLayoutStyle}
+        data-vui-layout-id={MEMORY_LAYOUT_ID}
+      >
         {createSourceAndItemPanels(copy.sourceAudit)}
         {createDetailPanel()}
+        {memoryResizeHandles}
       </div>
     </>
   );
@@ -4233,7 +4304,12 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
           <span>{knowledgeFeedback.text}</span>
         </section>
       ) : null}
-      <div className={`${styles.workspace} ${styles.knowledgeWorkspace}`}>
+      <div
+        ref={memoryLayoutRef}
+        className={`${styles.workspace} ${styles.knowledgeWorkspace}`}
+        style={memoryLayoutStyle}
+        data-vui-layout-id={MEMORY_LAYOUT_ID}
+      >
         <MemoryKnowledgeBaseSidebar
           copy={copy}
           bases={knowledgeBases.map((base) => ({
@@ -4384,6 +4460,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
           onRatingDraftChange={setRatingDraft}
           onUpdateKnowledgeRating={updateKnowledgeRating}
         />
+        {memoryResizeHandles}
       </div>
     </>
   );

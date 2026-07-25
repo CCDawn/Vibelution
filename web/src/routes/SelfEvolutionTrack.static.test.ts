@@ -509,8 +509,9 @@ describe("SelfEvolutionTrack static assets", () => {
   });
 
   it("keeps the self-evolution workspace visually stable at desktop widths", () => {
-    expect(selfEvolutionSource).toContain("return 360;");
-    expect(selfEvolutionSource).toContain("Math.max(360, Math.min(460, saved))");
+    expect(selfEvolutionSource).toContain('resolveStoredPaneWidth(');
+    expect(selfEvolutionSource).toContain('"evolution-self"');
+    expect(selfEvolutionSource).toContain("persistPaneWidth(\"evolution-self\", \"sidebar\", sidebarWidth)");
     expect(selfEvolutionSource).toContain("Math.max(340, Math.min(460, nextWidth))");
     expect(styles.workspaceLayout).toContain("var(--self-sidebar-width,360px)");
     expect(styles.conversationShell).toContain("border border-vui-border-subtle");

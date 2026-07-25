@@ -39,6 +39,10 @@ import {
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { LazyConversationView } from "../components/conversation/LazyConversationView";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
+import {
+  persistPaneWidth,
+  resolveStoredPaneWidth,
+} from "../components/layout/paneLayoutPersistence";
 import { VButton, VNativeInput, VNativeTextarea } from "../components/vui";
 import { TranslationKey } from "../i18n/dictionary";
 import { petAvatarPresetLabel } from "../i18n/petLabels";
@@ -726,13 +730,16 @@ export function SelfEvolutionTrack({
   const [transactionFilter, setTransactionFilter] = useState<SelfEvolutionTransactionFilter>("all");
   const [transactionDateFilter, setTransactionDateFilter] = useState<SelfEvolutionTransactionDateFilter>("all");
   const [transactionHistoryExpanded, setTransactionHistoryExpanded] = useState(false);
-  const [sidebarWidth, setSidebarWidth] = useState(() => {
-    if (typeof window === "undefined") {
-      return 360;
-    }
-    const saved = Number(window.localStorage.getItem(SELF_SIDEBAR_WIDTH_STORAGE_KEY) || "");
-    return Number.isFinite(saved) ? Math.max(360, Math.min(460, saved)) : 360;
-  });
+  const [sidebarWidth, setSidebarWidth] = useState(() =>
+    resolveStoredPaneWidth(
+      "evolution-self",
+      "sidebar",
+      360,
+      360,
+      460,
+      SELF_SIDEBAR_WIDTH_STORAGE_KEY,
+    ),
+  );
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const pageVisible = usePageVisibility();
   const petQuery = useQuery({
@@ -757,9 +764,7 @@ export function SelfEvolutionTrack({
   const runtime = runtimeQuery.data;
 
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem(SELF_SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth));
-    }
+    persistPaneWidth("evolution-self", "sidebar", sidebarWidth);
   }, [sidebarWidth]);
 
   const worktreeFiles = useMemo(() => {

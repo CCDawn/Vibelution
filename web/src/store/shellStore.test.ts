@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { useShellStore } from "./shellStore";
+import {
+  PANE_LAYOUT_STORAGE_KEY,
+  readPaneLayout,
+} from "../components/layout/paneLayoutPersistence";
+import { CHAT_PANE_LAYOUT_ID, useShellStore } from "./shellStore";
 
 function createMemoryStorage(): Storage {
   const entries = new Map<string, string>();
@@ -18,7 +22,9 @@ function createMemoryStorage(): Storage {
 
 describe("shellStore", () => {
   beforeEach(() => {
-    vi.stubGlobal("localStorage", createMemoryStorage());
+    const memoryStorage = createMemoryStorage();
+    vi.stubGlobal("localStorage", memoryStorage);
+    vi.stubGlobal("window", { localStorage: memoryStorage });
     localStorage.clear();
     useShellStore.setState({
       evolutionTrack: "supervised",
@@ -75,5 +81,22 @@ describe("shellStore", () => {
       leftPanelWidth: 300,
       rightPanelWidth: 220,
     });
+  });
+
+  it("dual-writes Chat panel widths into shared pane-layouts.v1[chat]", () => {
+    useShellStore.getState().setChatPanelWidths({
+      leftPanelWidth: 340,
+      rightPanelWidth: 260,
+    });
+
+    expect(useShellStore.getState().chatPanelWidths).toEqual({
+      leftPanelWidth: 340,
+      rightPanelWidth: 260,
+    });
+    expect(readPaneLayout(CHAT_PANE_LAYOUT_ID)).toEqual({
+      left: 340,
+      right: 260,
+    });
+    expect(localStorage.getItem(PANE_LAYOUT_STORAGE_KEY)).toContain("chat");
   });
 });

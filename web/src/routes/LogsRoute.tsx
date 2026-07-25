@@ -39,6 +39,10 @@ import {
 } from "../api/types";
 import { VActionGroup, VButton, VConfirmDialog, VDenseOpsPage, VIconButton, VNativeInput, VStateSurface, VStatusStrip, VSurface, VTooltip } from "../components/vui";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
+import {
+  persistPaneWidth,
+  resolveStoredPaneWidth,
+} from "../components/layout/paneLayoutPersistence";
 import { LazyFilePreview } from "../components/preview/LazyFilePreview";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { useAppI18n } from "../i18n/useAppI18n";
@@ -53,6 +57,9 @@ const ROOT_LABEL_KEYS = {
   workspace_logs: "logsRootWorkspace",
   conversation_logs: "logsRootConversation",
 } as const;
+
+/** Shared permanent memory id under vibelution.pane-layouts.v1 */
+const LOGS_LAYOUT_ID = "logs";
 
 type RootLabelKey = (typeof ROOT_LABEL_KEYS)[keyof typeof ROOT_LABEL_KEYS];
 type ActionNotice = {
@@ -338,24 +345,26 @@ export function LogsRoute() {
   const [rightRailDragState, setRightRailDragState] = useState<DragState | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [rightRailCollapsed, setRightRailCollapsed] = useState(false);
-  const [sidebarWidth, setSidebarWidth] = useState(() => {
-    if (typeof window === "undefined") {
-      return DEFAULT_LOG_SIDEBAR_WIDTH;
-    }
-    const saved = Number(window.localStorage.getItem(LOG_SIDEBAR_STORAGE_KEY) || "");
-    return Number.isFinite(saved)
-      ? clamp(saved, MIN_LOG_SIDEBAR_WIDTH, MAX_LOG_SIDEBAR_WIDTH)
-      : DEFAULT_LOG_SIDEBAR_WIDTH;
-  });
-  const [rightRailWidth, setRightRailWidth] = useState(() => {
-    if (typeof window === "undefined") {
-      return DEFAULT_LOG_RIGHT_RAIL_WIDTH;
-    }
-    const saved = Number(window.localStorage.getItem(LOG_RIGHT_RAIL_STORAGE_KEY) || "");
-    return Number.isFinite(saved)
-      ? clamp(saved, MIN_LOG_RIGHT_RAIL_WIDTH, MAX_LOG_RIGHT_RAIL_WIDTH)
-      : DEFAULT_LOG_RIGHT_RAIL_WIDTH;
-  });
+  const [sidebarWidth, setSidebarWidth] = useState(() =>
+    resolveStoredPaneWidth(
+      LOGS_LAYOUT_ID,
+      "sidebar",
+      DEFAULT_LOG_SIDEBAR_WIDTH,
+      MIN_LOG_SIDEBAR_WIDTH,
+      MAX_LOG_SIDEBAR_WIDTH,
+      LOG_SIDEBAR_STORAGE_KEY,
+    ),
+  );
+  const [rightRailWidth, setRightRailWidth] = useState(() =>
+    resolveStoredPaneWidth(
+      LOGS_LAYOUT_ID,
+      "right",
+      DEFAULT_LOG_RIGHT_RAIL_WIDTH,
+      MIN_LOG_RIGHT_RAIL_WIDTH,
+      MAX_LOG_RIGHT_RAIL_WIDTH,
+      LOG_RIGHT_RAIL_STORAGE_KEY,
+    ),
+  );
   const pageVisible = usePageVisibility();
 
   const rootsQuery = useQuery({
@@ -636,17 +645,11 @@ export function LogsRoute() {
   }, [actionNotice]);
 
   useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-    window.localStorage.setItem(LOG_SIDEBAR_STORAGE_KEY, String(sidebarWidth));
+    persistPaneWidth(LOGS_LAYOUT_ID, "sidebar", sidebarWidth);
   }, [sidebarWidth]);
 
   useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-    window.localStorage.setItem(LOG_RIGHT_RAIL_STORAGE_KEY, String(rightRailWidth));
+    persistPaneWidth(LOGS_LAYOUT_ID, "right", rightRailWidth);
   }, [rightRailWidth]);
 
   useEffect(() => {
