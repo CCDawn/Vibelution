@@ -23,6 +23,18 @@ describe("Wave 3B Chat session workbench composition", () => {
     const routeSource = readFileSync(resolve(routesRoot, "ChatCodingRoute.tsx"), "utf8");
     expect(routeSource).toContain('data-vui-recipe="chat-session-workbench"');
     expect(routeSource).toContain('data-vui-region="chat-conversation-center"');
+    expect(routeSource).toContain("data-vui-layout-id");
+    expect(routeSource).toContain("WORKBENCH_LAYOUT_IDS.chat");
+    expect(routeSource).toContain("PaneCollapseHandle");
+  });
+
+  it("keeps Chat width dual-write on shellStore (Wave 6D boundary)", () => {
+    const layoutSource = readFileSync(resolve(routesRoot, "chat/useChatWorkbenchLayout.ts"), "utf8");
+    expect(layoutSource).toContain("setChatPanelWidths");
+    expect(layoutSource).toContain("attachAxisResizeSession");
+    expect(layoutSource).toContain("getResizeBounds");
+    // Coupled dual-pane math stays Chat-owned — do not import the generic width hook.
+    expect(layoutSource).not.toMatch(/import\s*\{[^}]*usePersistedPaneResize/);
   });
 
   it("marks index and status rails as composition regions", () => {

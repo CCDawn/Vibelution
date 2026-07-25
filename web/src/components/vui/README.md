@@ -114,8 +114,26 @@ Gate: `workbenchLayoutGate` + `design/vuiDomainWorkbenchCompositionContract.test
 | Memory graph node list | `memory` | `graph-node-list` | Wave 6B |
 | Logs package file picker | `logs` | `package-files` | Replaces fixed `max-h-[min(190px,24vh)]` |
 | Launcher diagnostics body | `launcher` | `diagnostics-body` | Replaces fixed `max-h-[min(42vh,420px)]` |
+| Memory project memory queue | `memory` | `project-memory-queue` | Wave 6D; replaces fixed `max-h-[min(220px,28vh)]` |
 
 Prefer these shared APIs for any new vertical splitter; do not reintroduce private max-height-only strips that users would need to resize.
+
+## Wave 6D Chat shell boundary + more height reuse
+
+| Surface | Contract |
+| --- | --- |
+| Chat session workbench | Domain recipe `chat-session-workbench`; **not** `VListDetailPage`. Width dual-writes `shellStore.setChatPanelWidths` → `pane-layouts.v1[chat]`. Coupled dual-pane bounds stay Chat-owned. |
+| Memory project memory queue | `memory` / `project-memory-queue` via `usePersistedPaneHeight` (replaces fixed `max-h-[min(220px,28vh)]`) |
+
+**Chat prefer / avoid**
+
+| Prefer | Avoid |
+| --- | --- |
+| `attachAxisResizeSession` + `paneResizeKeyboard` + `PaneCollapseHandle` | Private pointermove listeners or lit-rule chrome on Chat style maps |
+| `setChatPanelWidths` dual-write | New Chat-only width localStorage keys |
+| Document Chat-owned center-track coupling | Forcing Chat onto `usePersistedPaneResize` (breaks coupled dual-pane math) |
+
+Gate: Chat dual-write + layout id stay in `workbenchLayoutGate`; height consumers include project-memory-queue.
 
 Each sets `data-vui-recipe="…"` on the page root for contracts and debugging.
 

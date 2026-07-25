@@ -194,6 +194,9 @@ describe("MemoryRoute layout contract", () => {
     expect(projectMemoryQueuePanelSource).toContain("export function MemoryProjectMemoryQueuePanel");
     expect(projectMemoryQueuePanelSource).toContain("className={styles.projectMemoryQueuePanel}");
     expect(projectMemoryQueuePanelSource).toContain("VNativeInput");
+    expect(projectMemoryQueuePanelSource).toContain("usePersistedPaneHeight");
+    expect(projectMemoryQueuePanelSource).toContain("PaneHeightResizeHandle");
+    expect(projectMemoryQueuePanelSource).toContain("project-memory-queue");
     expect(projectMemoryQueuePanelSource).not.toContain("useQuery");
     expect(projectMemoryQueuePanelSource).not.toContain("useMutation");
     expect(projectMemoryQueuePanelSource).not.toContain("fetchJson");

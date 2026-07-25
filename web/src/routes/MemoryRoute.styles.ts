@@ -315,7 +315,8 @@ const styles = {
   reviewQueueItem: `reviewQueueItem min-w-0 grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-2 gap-y-1.5 ${vuiOpaqueRowClass} p-2.5`,
   reviewQueueList:
     "reviewQueueList min-w-0 grid content-start gap-2 overflow-auto",
-  reviewQueuePanel: `reviewQueuePanel min-w-0 ${vuiFlatPanelClass} p-2 grid min-h-0 content-start gap-1.5 overflow-auto max-h-[min(280px,34vh)] overflow-auto`,
+  // Legacy style-map key; live overview uses MemoryOverviewPanel.styles.reviewQueuePanel.
+  reviewQueuePanel: `reviewQueuePanel min-w-0 ${vuiFlatPanelClass} p-2 grid min-h-0 content-start gap-1.5 overflow-auto`,
   reviewQueueSummary:
     "reviewQueueSummary m-0 min-w-0 max-w-full [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [overflow-wrap:anywhere] [word-break:break-word]",
   reviewQueueTime:
