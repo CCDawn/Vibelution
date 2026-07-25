@@ -1,7 +1,21 @@
 import { LoaderCircle, RefreshCw } from "lucide-react";
+import type { CSSProperties } from "react";
 
+import { PaneHeightResizeHandle } from "../components/layout/PaneHeightResizeHandle";
+import type { PaneHeightSpec } from "../components/layout/paneHeightPersistence";
+import { usePersistedPaneHeight } from "../components/layout/usePersistedPaneHeight";
+import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import { VButton, VTooltip } from "../components/vui";
 import styles from "./LauncherDiagnosticsPanel.styles";
+
+const LAUNCHER_DIAGNOSTICS_LAYOUT_ID = WORKBENCH_LAYOUT_IDS.launcher;
+const LAUNCHER_DIAGNOSTICS_BODY_PANE: PaneHeightSpec = {
+  id: "diagnostics-body",
+  defaultHeight: 280,
+  minHeight: 160,
+  maxHeight: 520,
+};
+const LAUNCHER_DIAGNOSTICS_HEIGHT_PANES: PaneHeightSpec[] = [LAUNCHER_DIAGNOSTICS_BODY_PANE];
 
 export type LauncherDiagnosticsSpecItem = {
   label: string;
@@ -113,13 +127,32 @@ export function LauncherDiagnosticsPanel({
   supervisorPending,
   onReattachSupervisor,
 }: LauncherDiagnosticsPanelProps) {
+  const {
+    heights: diagnosticsHeights,
+    draggingPaneId: diagnosticsHeightDraggingPaneId,
+    startResize: startDiagnosticsHeightResize,
+    onResizeKeyDown: onDiagnosticsHeightResizeKeyDown,
+  } = usePersistedPaneHeight({
+    layoutId: LAUNCHER_DIAGNOSTICS_LAYOUT_ID,
+    panes: LAUNCHER_DIAGNOSTICS_HEIGHT_PANES,
+  });
+  const diagnosticsBodyHeight =
+    diagnosticsHeights["diagnostics-body"] ?? LAUNCHER_DIAGNOSTICS_BODY_PANE.defaultHeight;
+  const diagnosticsBodyStyle = {
+    height: `${diagnosticsBodyHeight}px`,
+  } as CSSProperties;
+
   return (
     <details className={`${styles.panel} ${styles.diagnosticsPanel}`}>
       <summary>
         <span>{copy.advancedDiagnostics}</span>
         <strong>{copy.diagnosticsCollapsedHint}</strong>
       </summary>
-      <div className={styles.diagnosticsBody}>
+      <div
+        className={styles.diagnosticsBody}
+        style={diagnosticsBodyStyle}
+        data-vui-region="launcher-diagnostics-body"
+      >
         <section className={styles.diagnosticSection}>
           <div className={styles.panelHeader}>
             <p className={styles.panelEyebrow}>{copy.controlPlane}</p>
@@ -201,6 +234,16 @@ export function LauncherDiagnosticsPanel({
           </div>
         </section>
       </div>
+      <PaneHeightResizeHandle
+        label={`${copy.advancedDiagnostics} height`}
+        valueNow={diagnosticsBodyHeight}
+        valueMin={LAUNCHER_DIAGNOSTICS_BODY_PANE.minHeight}
+        valueMax={LAUNCHER_DIAGNOSTICS_BODY_PANE.maxHeight}
+        active={diagnosticsHeightDraggingPaneId === "diagnostics-body"}
+        className={styles.diagnosticsBodyResizeHandle}
+        onPointerDown={(event) => startDiagnosticsHeightResize("diagnostics-body", event, { direction: 1 })}
+        onKeyDown={(event) => onDiagnosticsHeightResizeKeyDown("diagnostics-body", event, { direction: 1 })}
+      />
       <dl className={styles.diagnosticsGrid}>
         {diagnosticSpecs.map((item) => (
           <Spec key={item.label} {...item} />
