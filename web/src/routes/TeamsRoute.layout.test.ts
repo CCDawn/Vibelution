@@ -94,8 +94,30 @@ import teamStageCommandBarSource from "../components/vui/product/team-management
 import teamStagePipelineSource from "../components/vui/product/team-management/TeamStagePipeline.tsx?raw";
 import teamSourceResultListSource from "../components/vui/product/team-management/TeamSourceResultList.tsx?raw";
 import teamSourceResultStatsSource from "../components/vui/product/team-management/TeamSourceResultStats.tsx?raw";
-import routeStylesBase from "./TeamsRoute.styles";
-import routeStylesModuleSource from "./TeamsRoute.styles.ts?raw";
+import shellRouteStyles from "./TeamsRoute.styles";
+import researchRouteStyles from "./TeamsRoute.research.styles";
+import aiSearchRouteStyles from "./TeamsRoute.aiSearch.styles";
+import experimentRouteStyles from "./TeamsRoute.experiment.styles";
+import workflowRouteStyles from "./TeamsRoute.workflow.styles";
+const routeStylesBase = {
+  ...shellRouteStyles,
+  ...researchRouteStyles,
+  ...aiSearchRouteStyles,
+  ...experimentRouteStyles,
+  ...workflowRouteStyles,
+} as Record<string, string>;
+import shellRouteStylesModuleSource from "./TeamsRoute.styles.ts?raw";
+import researchRouteStylesModuleSource from "./TeamsRoute.research.styles.ts?raw";
+import aiSearchRouteStylesModuleSource from "./TeamsRoute.aiSearch.styles.ts?raw";
+import experimentRouteStylesModuleSource from "./TeamsRoute.experiment.styles.ts?raw";
+import workflowRouteStylesModuleSource from "./TeamsRoute.workflow.styles.ts?raw";
+const routeStylesModuleSource = [
+  shellRouteStylesModuleSource,
+  researchRouteStylesModuleSource,
+  aiSearchRouteStylesModuleSource,
+  experimentRouteStylesModuleSource,
+  workflowRouteStylesModuleSource,
+].join("\n");
 import routerSource from "../app/router.tsx?raw";
 
 const sourceCollectionLocalStyles = {

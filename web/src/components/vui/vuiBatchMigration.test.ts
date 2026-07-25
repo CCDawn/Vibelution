@@ -10,7 +10,20 @@ import evolutionRunRecordsStyles from "../../routes/EvolutionRunRecordsPanel.sty
 import petStyles from "../../routes/PetRoute.styles";
 import teamSourceCollectionActiveStagePanelStyles from "../../routes/TeamSourceCollectionActiveStagePanel.styles";
 import teamSourceCollectionScreeningPanelStyles from "../../routes/TeamSourceCollectionScreeningPanel.styles";
-import teamStyles from "../../routes/TeamsRoute.styles";
+import teamShellStyles from "../../routes/TeamsRoute.styles";
+import teamResearchStyles from "../../routes/TeamsRoute.research.styles";
+import teamAiSearchStyles from "../../routes/TeamsRoute.aiSearch.styles";
+import teamExperimentStyles from "../../routes/TeamsRoute.experiment.styles";
+import teamWorkflowStyles from "../../routes/TeamsRoute.workflow.styles";
+
+/** Wave 8F: Teams styles are split into thematic clusters. */
+const teamStyles = {
+  ...teamShellStyles,
+  ...teamResearchStyles,
+  ...teamAiSearchStyles,
+  ...teamExperimentStyles,
+  ...teamWorkflowStyles,
+} as Record<string, string>;
 
 const sourceRoot = resolve(import.meta.dirname, "../..");
 const rawControlPattern = /<(button|input|select|textarea)\b/;
@@ -206,6 +219,28 @@ const routeStyleTargets = [
       "color-mix(in srgb, var(--surface-card) 96%, var(--fg-primary) 4%)",
     ],
   },
+  // Wave 8F cluster maps
+  {
+    path: "routes/TeamsRoute.research.styles.ts",
+    forbidden: [
+      "background: color-mix(in srgb, var(--fg-primary) 78%, transparent)",
+      "border-left-width: 4px",
+      "color-mix(in srgb, var(--surface-panel-strong) 96%, var(--fg-primary) 4%)",
+      "color-mix(in srgb, var(--surface-card) 96%, var(--fg-primary) 4%)",
+    ],
+  },
+  {
+    path: "routes/TeamsRoute.aiSearch.styles.ts",
+    forbidden: ["border-left-width: 4px"],
+  },
+  {
+    path: "routes/TeamsRoute.experiment.styles.ts",
+    forbidden: ["border-left-width: 4px"],
+  },
+  {
+    path: "routes/TeamsRoute.workflow.styles.ts",
+    forbidden: ["border-left-width: 4px"],
+  },
 ] as const;
 
 const staticInlineStyleCleanupTargets = [
@@ -400,13 +435,15 @@ describe("VUI batch migration", () => {
   );
 
   it("keeps Teams source-collection stage actions compact by default", () => {
-    const source = readTargetSource("routes/TeamsRoute.styles.ts");
+    // Wave 8F: researchStage* lives in TeamsRoute.research.styles.ts
+    const researchSource = readTargetSource("routes/TeamsRoute.research.styles.ts");
+    const shellSource = readTargetSource("routes/TeamsRoute.styles.ts");
     const activeStageSource = readTargetSource("routes/TeamSourceCollectionActiveStagePanel.styles.ts");
     const screeningSource = readTargetSource("routes/TeamSourceCollectionScreeningPanel.styles.ts");
 
-    expect(source).toContain("researchStageActions");
-    expect(source).not.toContain("sourceCollectionStagePrimaryAction");
-    expect(source).not.toContain("sourceCollectionPanelActions");
+    expect(researchSource).toContain("researchStageActions");
+    expect(shellSource).not.toContain("sourceCollectionStagePrimaryAction");
+    expect(shellSource).not.toContain("sourceCollectionPanelActions");
     expect(activeStageSource).toContain("sourceCollectionStagePrimaryAction");
     expect(screeningSource).toContain("sourceCollectionPanelActions");
     expect(teamStyles.researchStageActions).toContain("flex");
