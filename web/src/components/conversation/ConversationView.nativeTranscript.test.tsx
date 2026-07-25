@@ -753,6 +753,71 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html).toContain('data-codex-final-response="true"');
   });
 
+  it("keeps a long same-tool batch between its surrounding commentary cells", () => {
+    const html = renderConversation([
+      {
+        id: "assistant-native-tool-batch",
+        role: "assistant",
+        content: "",
+        timestamp: "2026-07-18T01:00:00Z",
+        codexTranscript: {
+          version: 1,
+          source: "native",
+          messageId: "assistant-native-tool-batch",
+          cells: [
+            {
+              id: "commentary-before-batch",
+              kind: "assistant_markdown",
+              messageId: "assistant-native-tool-batch",
+              status: "completed",
+              tone: "neutral",
+              phase: "commentary",
+              text: "Inspecting the current implementation.",
+            },
+            ...Array.from({ length: 4 }, (_, index) => ({
+              id: `code-tool-batch-${index + 1}`,
+              kind: "tool_call" as const,
+              messageId: "assistant-native-tool-batch",
+              status: "completed" as const,
+              tone: "neutral" as const,
+              title: "code_symbol_tool",
+              summary: "ok",
+            })),
+            {
+              id: "commentary-after-batch",
+              kind: "assistant_markdown",
+              messageId: "assistant-native-tool-batch",
+              status: "completed",
+              tone: "neutral",
+              phase: "commentary",
+              text: "The relevant calls are located.",
+            },
+            {
+              id: "final-after-batch",
+              kind: "assistant_markdown",
+              messageId: "assistant-native-tool-batch",
+              status: "completed",
+              tone: "neutral",
+              phase: "final",
+              text: "Final answer remains last.",
+            },
+          ],
+        },
+      } as ConversationMessage,
+    ]);
+
+    const before = html.indexOf("Inspecting the current implementation.");
+    const batch = html.indexOf('data-codex-tool-activity-batch="true"');
+    const after = html.indexOf("The relevant calls are located.");
+    const final = html.indexOf("Final answer remains last.");
+    expect(before).toBeGreaterThan(-1);
+    expect(batch).toBeGreaterThan(before);
+    expect(after).toBeGreaterThan(batch);
+    expect(final).toBeGreaterThan(after);
+    expect(html).toContain('data-codex-tool-activity-count="4"');
+    expect(html).toContain('data-codex-final-response="true"');
+  });
+
   it("keeps a running native tool summary on the main row and nests lifecycle trace in details", () => {
     const html = renderConversation([
       {

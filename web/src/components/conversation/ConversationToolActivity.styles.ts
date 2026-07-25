@@ -16,6 +16,16 @@ const styles = {
     "itemStatic",
     "grid min-w-0 grid-cols-[17px_minmax(0,1fr)] items-start gap-x-2 py-1",
   ),
+  batch: cx("batch", "min-w-0"),
+  batchSummary: cx(
+    "batchSummary",
+    "grid min-w-0 cursor-pointer grid-cols-[17px_minmax(0,1fr)_16px] items-start gap-x-2 py-1 text-left [&::-webkit-details-marker]:hidden focus-visible:rounded-[var(--radius-control)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)]",
+  ),
+  batchCount: cx("batchCount", "shrink-0 text-[var(--fg-tertiary)]"),
+  batchDetails: cx(
+    "batchDetails",
+    "ml-2 border-l border-[var(--vui-border-subtle)] pl-4",
+  ),
   itemIcon: cx("itemIcon", "mt-0.5 shrink-0 text-[var(--fg-tertiary)]"),
   itemIconRunning: cx("itemIconRunning", "text-[var(--accent-cool)]"),
   itemIconFailed: cx("itemIconFailed", "text-[var(--fg-tertiary)]"),
