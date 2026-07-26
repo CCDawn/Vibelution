@@ -1,6 +1,6 @@
 import "../design/route-css/teams.tailwind.css";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Archive, ArrowLeft, Bot, CheckCircle2, Eye, Link2, MessageSquare, Play, Plus, RefreshCw, Save, Search, Send, Settings2, Trash2, Unlink, Users } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
@@ -17,6 +17,9 @@ import {
 } from "./teams/teamPanelPrefetch";
 import { useTeamExperimentLoopMutations } from "./teams/useTeamExperimentLoopMutations";
 import { useTeamSourceCollectionMutations } from "./teams/useTeamSourceCollectionMutations";
+import { useTeamShellMutations } from "./teams/useTeamShellMutations";
+import { useTeamWorkflowStartMutations } from "./teams/useTeamWorkflowStartMutations";
+import type { ResearchStageRoundStartPayload } from "./teams/workflowStartMutationModel";
 import type {
   SourceCollectionOutputDraft,
   TeamWorkflowKnowledgeIngestionPrecheckPayload,
@@ -150,9 +153,6 @@ import {
   isEvolutionSystemTeam,
   isKnowledgeExpansionWorkflowTeam,
   isResearchWorkflowTeam,
-  sourceCollectionAgentRolesForTeam,
-  sourceCollectionWorkflowKindForTeam,
-  sourceCollectionWorkflowPurposeForTeam,
   systemManagedTeamArchiveReason,
 } from "./teams/teamKindModel";
 import { fetchJson } from "../api/client";
@@ -162,8 +162,6 @@ import {
   isProjectAgentBusEventRevoked,
   listProjectAgentBusTimeline,
   projectAgentBusEventsForTeam,
-  revokeProjectAgentBusMessage,
-  sendTeamProjectBusMessage,
 } from "../api/projectAgentBus";
 import { queryKeys } from "../api/queryKeys";
 import {
@@ -612,38 +610,6 @@ type SourceCollectionSummaryPayload = {
   activeWorkRun?: WorkRunSnapshot | Record<string, unknown>;
   storageArtifacts?: Partial<SourceCollectionStorageArtifacts>;
   updatedAt?: string;
-};
-
-type ResearchStageRoundStartPayload = {
-  created: boolean;
-  continued?: boolean;
-  stageRound: ResearchStageRound;
-  phase: ResearchStagePhaseStatus;
-  status: ResearchStageRoundStatusPayload;
-  workflow: TeamWorkflowOrchestration;
-  sourceCollectionRun?: TeamWorkflowSourceCollectionRunStartPayload;
-  sourceCollectionSearchExecution?: TeamWorkflowSourceCollectionSearchExecutionPayload;
-  run?: TeamWorkflowSourceCollectionRunStartPayload["run"];
-  searchPlan?: TeamWorkflowSourceCollectionRunStartPayload["searchPlan"];
-  assignments?: TeamWorkflowSourceCollectionRunStartPayload["assignments"];
-  assignmentCount?: number;
-  promptCachePolicy?: TeamWorkflowSourceCollectionRunStartPayload["promptCachePolicy"];
-  continuedSourceRunRef?: {
-    runId: string;
-    status: string;
-    recordCount: number;
-    assignmentCount: number;
-    openAssignmentCount: number;
-    searchOpenAssignmentCount?: number;
-    collectionOpenAssignmentCount?: number;
-    downstreamOpenAssignmentCount?: number;
-    queryCount?: number;
-    planId?: string;
-    externalSearchTriggered?: boolean;
-    message?: string;
-  };
-  boundaries: ResearchStageRoundStatusPayload["boundaries"];
-  nextActions?: string[];
 };
 
 type NodeDragState = {
@@ -1565,384 +1531,44 @@ export function TeamsRoute({
     return () => observer.disconnect();
   }, []);
 
-  const archiveTeamMutation = useMutation({
-    mutationFn: (teamId: string) =>
-      fetchJson<Team>(`/api/teams/${encodeURIComponent(teamId)}`, {
-        method: "DELETE",
-      }),
-    onSuccess: (team, teamId) => {
-      setSelectedTeamId("");
-      setSelectedNodeId("");
-      setSearchParams({});
-      void chatWorkspaceCache.afterTeamArchived(teamId, team.linkedChatRoomId || team.linkedChatRoom?.roomId);
-    },
+  const {
+    archiveTeamMutation,
+    saveCanvasMutation,
+    sendTeamMessageMutation,
+    revokeTeamMessageMutation,
+    syncTeamChatRoomMutation,
+    repairChallengeCupTeamAgentsMutation,
+    repairKnowledgeExpansionTeamAgentsMutation,
+    startTeamRoundMutation,
+  } = useTeamShellMutations({
+    selectedTeamId,
+    setSelectedTeamId,
+    setSelectedNodeId,
+    clearTeamSearchParams: () => setSearchParams({}),
+    setTeamMessage,
+    setTeamTaskTopic,
+    chatWorkspaceCache,
   });
 
-  const saveCanvasMutation = useMutation({
-    mutationFn: (nextCanvas: TeamOrganizationCanvas) =>
-      fetchJson<TeamOrganizationCanvas>(`/api/teams/${encodeURIComponent(nextCanvas.teamId)}/canvas`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(nextCanvas),
-      }),
-    onSuccess: (canvas, variables) => {
-      queryClient.setQueryData(queryKeys.teamCanvas(variables.teamId), canvas);
-      void chatWorkspaceCache.afterTeamChanged(variables.teamId);
-    },
-  });
-
-  const sendTeamMessageMutation = useMutation({
-    mutationFn: (payload: { teamId: string; content: string; interruptMode: string }) =>
-      sendTeamProjectBusMessage(payload),
-    onSuccess: (_payload, variables) => {
-      if (variables.teamId === selectedTeamId) {
-        setTeamMessage("");
-      }
-      void chatWorkspaceCache.afterTeamChanged(variables.teamId);
-    },
-  });
-
-  const revokeTeamMessageMutation = useMutation({
-    mutationFn: (payload: { teamId: string; eventId: string }) =>
-      revokeProjectAgentBusMessage({
-        eventId: payload.eventId,
-        reason: "Revoked from Agent Center team broadcast history.",
-      }),
-    onSuccess: (_payload, variables) => {
-      void chatWorkspaceCache.afterTeamChanged(variables.teamId);
-    },
-  });
-
-  const syncTeamChatRoomMutation = useMutation({
-    mutationFn: (teamId: string) =>
-      fetchJson<Team>(`/api/teams/${encodeURIComponent(teamId)}/chat-room/sync`, {
-        method: "POST",
-      }),
-    onSuccess: (team) => {
-      queryClient.setQueryData(queryKeys.team(team.teamId, "light"), team);
-      queryClient.setQueryData(queryKeys.team(team.teamId, "full"), team);
-      if (team.linkedChatRoom?.roomId) {
-        void chatWorkspaceCache.afterTeamRoomMembershipChanged(team.teamId, team.linkedChatRoom.roomId);
-      } else {
-        void chatWorkspaceCache.afterTeamChanged(team.teamId);
-      }
-    },
-  });
-
-  const repairChallengeCupTeamAgentsMutation = useMutation({
-    mutationFn: (teamId: string) =>
-      fetchJson<{ team: Team }>(`/api/teams/${encodeURIComponent(teamId)}/challenge-cup-agents/repair`, {
-        method: "POST",
-      }),
-    onSuccess: (payload, teamId) => {
-      if (payload.team) {
-        queryClient.setQueryData(queryKeys.team(payload.team.teamId, "light"), payload.team);
-        queryClient.setQueryData(queryKeys.team(payload.team.teamId, "full"), payload.team);
-      }
-      void chatWorkspaceCache.afterTeamChanged(payload.team?.teamId || teamId);
-      void chatWorkspaceCache.afterAgentWorkspaceChanged();
-    },
-  });
-
-  const repairKnowledgeExpansionTeamAgentsMutation = useMutation({
-    mutationFn: (teamId: string) =>
-      fetchJson<{ team: Team }>(`/api/teams/${encodeURIComponent(teamId)}/knowledge-expansion-agents/repair`, {
-        method: "POST",
-      }),
-    onSuccess: (payload, teamId) => {
-      if (payload.team) {
-        queryClient.setQueryData(queryKeys.team(payload.team.teamId, "light"), payload.team);
-        queryClient.setQueryData(queryKeys.team(payload.team.teamId, "full"), payload.team);
-      }
-      void chatWorkspaceCache.afterTeamChanged(payload.team?.teamId || teamId);
-      void chatWorkspaceCache.afterAgentWorkspaceChanged();
-    },
-  });
-
-  const seedSourceCollectionAgentSessionContextMutation = useMutation({
-    mutationFn: (payload: { teamId: string; runId: string; stageId: SourceCollectionStageModuleId; agentId: string; agentRole: string }) =>
-      fetchJson<TeamWorkflowSourceCollectionAgentSessionContextPayload>(
-        `/api/teams/${encodeURIComponent(payload.teamId)}/workflow-orchestration/source-collection-runs/${encodeURIComponent(payload.runId)}/agent-session-context`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            stageId: payload.stageId,
-            agentId: payload.agentId,
-            agentRole: payload.agentRole,
-          }),
-        },
-      ),
-  });
-
-  const startSourceCollectionStageSessionTaskMutation = useMutation({
-    mutationFn: (payload: {
-      teamId: string;
-      runId: string;
-      stageId: SourceCollectionStageModuleId;
-      agentId: string;
-      agentRole: string;
-      returnTo: string;
-      returnLabel: string;
-      requestedByAgent: string;
-      idempotencyKey: string;
-    }) =>
-      fetchJson<TeamWorkflowSourceCollectionStageSessionTaskPayload>(
-        `/api/teams/${encodeURIComponent(payload.teamId)}/workflow-orchestration/source-collection-runs/${encodeURIComponent(payload.runId)}/stage-session-tasks`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            stageId: payload.stageId,
-            agentId: payload.agentId,
-            agentRole: payload.agentRole,
-            returnTo: payload.returnTo,
-            returnLabel: payload.returnLabel,
-            requestedByAgent: payload.requestedByAgent,
-            idempotencyKey: payload.idempotencyKey,
-          }),
-        },
-      ),
-    onSuccess: (payload, variables) => {
-      setSelectedSourceCollectionRunId(payload.runId);
-      setSourceCollectionStageSyncUntilMs(Date.now() + SOURCE_COLLECTION_STAGE_WRITEBACK_SYNC_GRACE_MS);
-      if (payload.taskId) {
-        setSourceCollectionPendingStageTaskIds((current) => {
-          const currentStageTaskIds = current[variables.stageId] ?? [];
-          if (currentStageTaskIds.includes(payload.taskId)) {
-            return current;
-          }
-          return {
-            ...current,
-            [variables.stageId]: [...currentStageTaskIds, payload.taskId],
-          };
-        });
-      }
-      void chatWorkspaceCache.afterDirectTurnAccepted(payload.sessionId);
-      void queryClient.invalidateQueries({ queryKey: researchStageRoundStatusQueryKey(variables.teamId) });
-      void queryClient.invalidateQueries({ queryKey: sourceCollectionSummaryQueryPrefix(variables.teamId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowSourceCollectionRuns(variables.teamId, SOURCE_COLLECTION_RUN_PREVIEW_LIMIT) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.dataProcessingRunStatus(payload.runId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.dataProcessingCollectionAssignments(payload.runId) });
-      void queryClient.invalidateQueries({ queryKey: sourceCollectionRunRecordsQueryKey(payload.runId) });
-    },
-  });
-
-  const startTeamRoundMutation = useMutation({
-    mutationFn: (payload: { roomId: string; teamId: string; topic: string; mode: string; purpose: string }) =>
-      fetchJson<ChatRoomDetail>(`/api/chat-rooms/${payload.roomId}/rounds`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          topic: payload.topic,
-          mode: payload.mode,
-          purpose: payload.purpose,
-          config: {
-            source: "team_workspace",
-            teamId: payload.teamId,
-          },
-        }),
-      }),
-    onSuccess: (room, variables) => {
-      setTeamTaskTopic("");
-      queryClient.setQueryData(queryKeys.chatRoom(room.roomId), room);
-      void chatWorkspaceCache.afterTeamRoomMembershipChanged(variables.teamId, room.roomId);
-    },
-  });
-
-  const startAiSearchRunMutation = useMutation({
-    mutationFn: (payload: { teamId: string; topic: string }) =>
-      fetchJson<AiSearchRun>(`/api/teams/${encodeURIComponent(payload.teamId)}/ai-search-runs`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          topic: payload.topic.trim() || "AI 最新动态",
-          sourceLimit: 8,
-          maxResultsPerQuery: 3,
-          includeSignals: false,
-        }),
-      }),
-    onSuccess: (_run, variables) => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.teamAiSearchRuns(variables.teamId, AI_SEARCH_RUN_PREVIEW_LIMIT) });
-    },
-  });
-
-  const startSourceCollectionRunMutation = useMutation({
-    mutationFn: (payload: { teamId: string; draft: SourceCollectionDraft }) => {
-      const querySeeds = compactSourceCollectionQuerySeeds(payload.draft.topic, payload.draft.querySeeds);
-      const workflowKind = sourceCollectionWorkflowKindForTeam(selectedTeam);
-      const workflowPurpose = sourceCollectionWorkflowPurposeForTeam(selectedTeam);
-      const collectionMode = sourceCollectionModeForTeam(selectedTeam, payload.draft);
-      return fetchJson<TeamWorkflowSourceCollectionRunStartPayload>(
-        `/api/teams/${encodeURIComponent(payload.teamId)}/workflow-orchestration/source-collection-runs`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            title: payload.draft.title.trim() || (knowledgeExpansionWorkflowTeamSelected ? "Knowledge expansion source intake" : "Challenge Cup source collection"),
-            topic: payload.draft.topic.trim(),
-            goal: payload.draft.goal.trim(),
-            ownerAgentId: sourceCollectionOwnerAgentId,
-            requestedByAgent: sourceCollectionOwnerAgentId,
-            workflowPurpose,
-            workflowKind,
-            collectionMode,
-            agentRoles: sourceCollectionAgentRolesForTeam(selectedTeam),
-            agentIds: sourceCollectionAgentIds,
-            inputRefs: splitDraftList(payload.draft.inputRefs, 24),
-            querySeeds,
-            searchLanguages: splitDraftList(payload.draft.searchLanguages, 8),
-            sourceTypes: splitDraftList(payload.draft.sourceTypes, 12),
-            maxResultsPerQuery: payload.draft.maxResultsPerQuery,
-            localScanScope: sourceCollectionLocalScanScopeForDraft(collectionMode, payload.draft),
-            promptCachePolicy: SOURCE_COLLECTION_PROMPT_CACHE_POLICY,
-            scope: {
-              domain: knowledgeExpansionWorkflowTeamSelected ? "team knowledge expansion" : "neuroscience-inspired algorithm discovery",
-              workflowStage: "knowledge_collection",
-              workflowKind,
-              workflowPurpose,
-              collectionMode,
-              uiEntry: knowledgeExpansionWorkflowTeamSelected ? "teams_knowledge_expansion_source_collection_panel" : "teams_research_source_collection_panel",
-            },
-          }),
-        },
-      );
-    },
-    onSuccess: (payload, variables) => {
-      setSelectedSourceCollectionRunId(payload.run.runId);
-      const firstAssignmentId = payload.assignments[0]?.assignmentId ?? "";
-      setSourceCollectionOutputDraft((current) => ({
-        ...current,
-        assignmentId: firstAssignmentId || current.assignmentId,
-      }));
-      queryClient.setQueryData(queryKeys.teamWorkflow(variables.teamId), payload.workflow);
-      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowSourceCollectionRuns(variables.teamId, SOURCE_COLLECTION_RUN_PREVIEW_LIMIT) });
-      void queryClient.invalidateQueries({ queryKey: sourceCollectionSummaryQueryPrefix(variables.teamId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.dataProcessingRunStatus(payload.run.runId) });
-      void queryClient.invalidateQueries({ queryKey: sourceCollectionRunRecordsQueryKey(payload.run.runId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.dataProcessingCollectionAssignments(payload.run.runId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowKnowledgeIngestionStatus(variables.teamId) });
-      void queryClient.invalidateQueries({ queryKey: sourceQualityStatusQueryKey(variables.teamId) });
-      void queryClient.invalidateQueries({ queryKey: paperNoteChunkStatusQueryKey(variables.teamId) });
-    },
-  });
-
-  const startResearchStageRoundMutation = useMutation({
-    mutationFn: (payload: { teamId: string; stageType: ResearchStageType; mode?: "continue_or_start" | "new_round"; draft: SourceCollectionDraft }) => {
-      const querySeeds = compactSourceCollectionQuerySeeds(payload.draft.topic, payload.draft.querySeeds);
-      return fetchJson<ResearchStageRoundStartPayload>(
-        `/api/teams/${encodeURIComponent(payload.teamId)}/workflow-orchestration/stage-rounds/start`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            stageType: payload.stageType,
-            mode: payload.mode || "continue_or_start",
-            title: payload.draft.title.trim() || "",
-            topic: payload.draft.topic.trim(),
-            goal: payload.draft.goal.trim(),
-            ownerAgentId: sourceCollectionOwnerAgentId,
-            requestedByAgent: sourceCollectionOwnerAgentId,
-            agentRoles: SOURCE_COLLECTION_DEFAULT_ROLES,
-            agentIds: sourceCollectionAgentIds,
-            inputRefs: splitDraftList(payload.draft.inputRefs, 24),
-            querySeeds,
-            searchLanguages: splitDraftList(payload.draft.searchLanguages, 8),
-            sourceTypes: splitDraftList(payload.draft.sourceTypes, 12),
-            maxResultsPerQuery: payload.draft.maxResultsPerQuery,
-            promptCachePolicy: SOURCE_COLLECTION_PROMPT_CACHE_POLICY,
-            scope: {
-              domain: "neuroscience-inspired algorithm discovery",
-              workflowStage: payload.stageType,
-              uiEntry: "teams_research_stage_launcher",
-            },
-          }),
-        },
-      );
-    },
-    onSuccess: (payload, variables) => {
-      queryClient.setQueryData(researchStageRoundStatusQueryKey(variables.teamId), payload.status);
-      queryClient.setQueryData(queryKeys.teamWorkflow(variables.teamId), payload.workflow);
-      void queryClient.invalidateQueries({ queryKey: experimentPlanningStatusQueryKey(variables.teamId) });
-      const sourceRunId = payload.run?.runId || payload.stageRound.sourceRunIds?.[0] || "";
-      const searchExecution = payload.sourceCollectionSearchExecution;
-      if (sourceRunId) {
-        setSelectedSourceCollectionRunId(sourceRunId);
-        const firstAssignmentId = payload.assignments?.[0]?.assignmentId ?? "";
-        if (firstAssignmentId) {
-          setSourceCollectionOutputDraft((current) => ({
-            ...current,
-            assignmentId: firstAssignmentId,
-          }));
-        }
-        if (searchExecution?.runStatus) {
-          queryClient.setQueryData(queryKeys.dataProcessingRunStatus(sourceRunId), {
-            ...searchExecution.runStatus,
-            summary: {
-              ...searchExecution.runStatus.summary,
-              ...(searchExecution.sourceCollectionSummary ?? {}),
-            },
-          });
-        } else if (payload.run) {
-          queryClient.setQueryData(queryKeys.dataProcessingRunStatus(sourceRunId), {
-            schemaVersion: 1,
-            runId: payload.run.runId,
-            profileId: payload.run.profileId,
-            runStatus: payload.run.status,
-            summary: payload.run.summary ?? {
-              recordCount: 0,
-              assignmentCount: payload.assignmentCount ?? payload.assignments?.length ?? 0,
-              openAssignmentCount: payload.continuedSourceRunRef?.openAssignmentCount ?? 0,
-              searchOpenAssignmentCount: payload.continuedSourceRunRef?.searchOpenAssignmentCount ?? 0,
-              collectionOpenAssignmentCount: payload.continuedSourceRunRef?.collectionOpenAssignmentCount ?? 0,
-              downstreamOpenAssignmentCount: payload.continuedSourceRunRef?.downstreamOpenAssignmentCount ?? 0,
-              outputCount: 0,
-              recordStatusCounts: {},
-              sourceTypeCounts: {},
-              assignmentStatusCounts: {},
-            },
-            nextActions: [],
-            boundaries: {
-              generic: true,
-              writesFormalKnowledge: false,
-              writesRag: false,
-              writesKnowledgeGraph: false,
-              requiresDownstreamPublisher: true,
-            },
-          });
-        }
-        const stageAssignments = searchExecution?.assignments ?? payload.assignments;
-        if (stageAssignments) {
-          queryClient.setQueryData(queryKeys.dataProcessingCollectionAssignments(sourceRunId), {
-            schemaVersion: 1,
-            runId: sourceRunId,
-            assignments: stageAssignments,
-            summary: {
-              assignmentCount: stageAssignments.length,
-              assignmentStatusCounts: stageAssignments.reduce<Record<string, number>>((counts, assignment) => {
-                counts[assignment.status] = (counts[assignment.status] ?? 0) + 1;
-                return counts;
-              }, {}),
-            },
-          });
-        }
-        if (sourceCollectionStandalone) {
-          setResearchWorkspaceView("knowledge_collection");
-        } else {
-          navigate(researchSourceCollectionRoute(variables.teamId));
-        }
-        void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowSourceCollectionRuns(variables.teamId, SOURCE_COLLECTION_RUN_PREVIEW_LIMIT) });
-        void queryClient.invalidateQueries({ queryKey: sourceCollectionSummaryQueryPrefix(variables.teamId) });
-        void queryClient.invalidateQueries({ queryKey: queryKeys.dataProcessingRunStatus(sourceRunId) });
-        void queryClient.invalidateQueries({ queryKey: sourceCollectionRunRecordsQueryKey(sourceRunId) });
-        void queryClient.invalidateQueries({ queryKey: queryKeys.dataProcessingCollectionAssignments(sourceRunId) });
-        void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowKnowledgeIngestionStatus(variables.teamId) });
-      } else if (variables.stageType === "experiment") {
-        setResearchWorkspaceView("experiment");
-      } else if (variables.stageType === "iteration") {
-        setResearchWorkspaceView("iteration");
-      }
-    },
+  const {
+    seedSourceCollectionAgentSessionContextMutation,
+    startSourceCollectionStageSessionTaskMutation,
+    startAiSearchRunMutation,
+    startSourceCollectionRunMutation,
+    startResearchStageRoundMutation,
+  } = useTeamWorkflowStartMutations({
+    selectedTeam,
+    knowledgeExpansionWorkflowTeamSelected,
+    sourceCollectionOwnerAgentId,
+    sourceCollectionAgentIds,
+    sourceCollectionStandalone,
+    chatWorkspaceCache,
+    setSelectedSourceCollectionRunId,
+    setSourceCollectionStageSyncUntilMs,
+    setSourceCollectionPendingStageTaskIds,
+    setSourceCollectionOutputDraft,
+    setResearchWorkspaceView,
+    navigateToSourceCollection: (teamId) => navigate(researchSourceCollectionRoute(teamId)),
   });
 
   const {
