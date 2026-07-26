@@ -734,7 +734,7 @@ export function SelfEvolutionTrack({
   transactions,
   loading,
 }: SelfEvolutionTrackProps) {
-  const { lang, t, statusLabel } = useAppI18n();
+  const { lang, t, statusLabel } = useAppI18n({ domains: ["evolution"] });
   const [selfEvolutionMode, setSelfEvolutionMode] = useState<SelfEvolutionMode>(
     isObservationQueuedOrRunning(observationRun?.status || "") ? "observation" : "isolated_development",
   );

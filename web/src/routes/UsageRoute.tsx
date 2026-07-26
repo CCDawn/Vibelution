@@ -145,7 +145,7 @@ function renderBreakdownList(items: TokenUsageBreakdownItem[], emptyLabel: strin
 }
 
 export function UsageRoute() {
-  const { lang } = useAppI18n();
+  const { lang } = useAppI18n({ domains: ["core"] });
   const queryClient = useQueryClient();
   const pageVisible = usePageVisibility();
   const usageQuery = useQuery({

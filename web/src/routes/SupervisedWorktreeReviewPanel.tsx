@@ -80,7 +80,7 @@ export function SupervisedWorktreeReviewPanel({
   onApproveReview,
   onRunAction,
 }: SupervisedWorktreeReviewPanelProps) {
-  const { lang, t, statusLabel } = useAppI18n();
+  const { lang, t, statusLabel } = useAppI18n({ domains: ["evolution"] });
   const [selectedWorktreeRunId, setSelectedWorktreeRunId] = useState<string | null>(null);
   const selectedWorktreeRun = selectedWorktreeRunId
     ? runs.find((item) => item.runId === selectedWorktreeRunId) ?? null

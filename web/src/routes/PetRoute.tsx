@@ -20,7 +20,7 @@ type PetProgressStyle = CSSProperties & {
 };
 
 export function PetRoute() {
-  const { t } = useAppI18n();
+  const { t } = useAppI18n({ domains: ["pet"] });
   const petQuery = useQuery({
     queryKey: queryKeys.petSummary(),
     queryFn: () => fetchJson<PetSummary>("/api/pet/summary"),

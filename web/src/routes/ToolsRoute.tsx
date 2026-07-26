@@ -827,7 +827,7 @@ function optimisticToolEnabled(tool: ToolRegistryItem, enabled: boolean): ToolRe
 }
 
 export function ToolsRoute() {
-  const { lang, t } = useAppI18n();
+  const { lang, t } = useAppI18n({ domains: ["tools"] });
   const [searchParams] = useSearchParams();
   const bulkCopy = useMemo(() => toolsBulkCopy(lang), [lang]);
   const queryClient = useQueryClient();
