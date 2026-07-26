@@ -218,6 +218,12 @@ import {
   COMPUTER_USE_TOOL_NAME,
   type ComputerUseResult,
 } from "./conversationComputerUseState";
+import { formattedCodeBlockContent } from "./conversationFormattedCodeBlock";
+import {
+  completedToolPresentationSummary,
+  conversationToolDetailPresentation,
+  conversationToolPresentationLabel,
+} from "./conversationToolPresentation";
 import { VButton, VNativeInput, VNativeTextarea } from "../vui";
 import styles from "./ConversationView.styles";
 
@@ -3835,26 +3841,3 @@ export function ConversationView({
     </div>
   );
 }
-
-function formattedCodeBlockContent(content: string, language?: string) {
-  const raw = String(content ?? "");
-  if (String(language ?? "").trim().toLowerCase() !== "json") {
-    return raw;
-  }
-
-  const trimmed = raw.trim();
-  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) {
-    return raw;
-  }
-
-  try {
-    return JSON.stringify(JSON.parse(trimmed), null, 2);
-  } catch {
-    return raw;
-  }
-}
-import {
-  completedToolPresentationSummary,
-  conversationToolDetailPresentation,
-  conversationToolPresentationLabel,
-} from "./conversationToolPresentation";

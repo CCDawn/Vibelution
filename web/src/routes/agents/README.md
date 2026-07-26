@@ -17,6 +17,7 @@ and panel composition. Pure query/presentation/draft helpers should leave the sh
 | Lightweight workspace, filterAgents, references | `agentRouteWorkspaceModel.ts` |
 | Config/persona/task/context-compression drafts | `agentRouteDraftModel.ts` |
 | Tool/memory/membership/runtime policy drafts | `agentRoutePolicyDraftModel.ts` |
+| Bulk config / archive / center-return helpers | `agentRouteBulkModel.ts` |
 | Management brief / setup filters / list columns | `agentRouteManagementModel.ts` |
 | Config draft mutations | `useAgentConfigDraftMutations.ts` |
 | Workbench profile/lifecycle/policy mutations | `useAgentWorkbenchMutations.ts` |
@@ -38,6 +39,7 @@ and panel composition. Pure query/presentation/draft helpers should leave the sh
 | Lightweight list projection / filters | `agentRouteWorkspaceModel.ts` | mutations |
 | Draft mappers (config/persona/task/compression) | `agentRouteDraftModel.ts` | EventSource |
 | Policy drafts (tool/memory/membership/delegation/supervision) | `agentRoutePolicyDraftModel.ts` | EventSource |
+| Bulk config / metadata / archive pure helpers | `agentRouteBulkModel.ts` | shell JSX |
 | Management brief / setup filters / columns | `agentRouteManagementModel.ts` | shell JSX |
 | Write mutations | `useAgent*Mutations.ts` | pure files |
 | Overview / config / activity panes | panel file | Route-only inlines |
@@ -51,7 +53,8 @@ and panel composition. Pure query/presentation/draft helpers should leave the sh
 - **Done (M1 structure):** `agentRouteDraftModel` — config/persona/task/context-compression mappers + `sortedIds`.
 - **Done (M2 structure):** `agentRouteManagementModel` — management brief, setup filters, list columns, group labels.
 - **Done (M3 structure):** `agentRoutePolicyDraftModel` — tool/memory/membership/delegation/supervision drafts + capability preview.
-- **Still in shell:** bulk config helpers, large JSX composition, copy tables.
+- **Done (M7 structure):** `agentRouteBulkModel` — bulk config draft/patch/ready, metadata archive guards, center return labels; draft-equals moved into `agentRouteDraftModel`.
+- **Still in shell:** large JSX composition, copy tables, pane badge wiring, reset-session side effects.
 
 ## Structure program (maintainability-first)
 
@@ -61,6 +64,7 @@ and panel composition. Pure query/presentation/draft helpers should leave the sh
 | M2 | Management brief + setup filter predicates | **Done** — `agentRouteManagementModel.ts` |
 | M3 | Tool/memory/membership draft mappers | **Done** — `agentRoutePolicyDraftModel.ts` |
 | M4–M6 | Evolution / Teams / Conversation maps | See `evolution/README.md`, `teams/README.md`, `components/conversation/README.md` |
+| M7 | Bulk config / metadata / archive pure extract | **Done** — `agentRouteBulkModel.ts` |
 | Shell rule | Route only orchestrates | ongoing |
 
 ## Perf notes (secondary)

@@ -2,6 +2,7 @@ import React, { type ComponentPropsWithoutRef } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+import { formattedCodeBlockContent } from "./conversationFormattedCodeBlock";
 import { safeConversationMarkdownUrl } from "./conversationMarkdownUrl";
 import type { ConversationMarkdownClassNames } from "./conversationMarkdownTypes";
 import { conversationMarkdownRendererStyles } from "./ConversationMarkdownRenderer.styles";
@@ -90,7 +91,7 @@ function markdownComponents(
     },
     code({ className, children }: ComponentPropsWithoutRef<"code">) {
       if (className) {
-        return <code className={className}>{formattedCodeBlockContent(children, languageFromCodeClassName(className))}</code>;
+        return <code className={className}>{formattedCodeBlockChildren(children, languageFromCodeClassName(className))}</code>;
       }
       return <code className={classNames.inlineCode}>{children}</code>;
     },
@@ -148,20 +149,6 @@ function languageFromCodeClassName(className: string) {
     ?.slice("language-".length);
 }
 
-function formattedCodeBlockContent(children: React.ReactNode, language?: string) {
-  const raw = React.Children.toArray(children).join("");
-  if (String(language ?? "").trim().toLowerCase() !== "json") {
-    return raw;
-  }
-
-  const trimmed = raw.trim();
-  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) {
-    return raw;
-  }
-
-  try {
-    return JSON.stringify(JSON.parse(trimmed), null, 2);
-  } catch {
-    return raw;
-  }
+function formattedCodeBlockChildren(children: React.ReactNode, language?: string) {
+  return formattedCodeBlockContent(React.Children.toArray(children).join(""), language);
 }
