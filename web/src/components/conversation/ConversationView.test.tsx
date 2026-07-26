@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import { ChatNextStateSignalSummary, ConversationMessage, SessionTurnError } from "../../api/types";
 import { conversationMessageToAgentMessage } from "../../agent-thread";
+import { dictionary } from "../../i18n/dictionary";
 import { AgentContextSectionsView } from "./AgentContextSectionsView";
 import { buildAgentMessageRenderState } from "./agentMessageRenderState";
 import styles from "./ConversationView.styles";
@@ -94,6 +95,7 @@ function renderConversation(
       },
     },
   });
+  queryClient.setQueryData(["i18n", "dictionary-domains", "core,chat"], dictionary);
   const processDisplayProps = options.useDefaultProcessDisplayMode
     ? {}
     : { processDisplayMode: options.processDisplayMode ?? ("trace" as ConversationProcessDisplayMode) };
