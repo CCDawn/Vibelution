@@ -49,6 +49,7 @@ import teamMemoryIndexPanelStyles from "./TeamMemoryIndexPanel.styles";
 import teamAiSearchWorkspacePanelSource from "./TeamAiSearchWorkspacePanel.tsx?raw";
 import teamResearchStageAgentPanelSource from "./TeamResearchStageAgentPanel.tsx?raw";
 import teamResearchStageLauncherPanelSource from "./TeamResearchStageLauncherPanel.tsx?raw";
+import teamResearchStageStandalonePagePanelSource from "./TeamResearchStageStandalonePagePanel.tsx?raw";
 import teamExperimentMethodPanelSource from "./TeamExperimentMethodPanel.tsx?raw";
 import teamExperimentMethodPanelStyles from "./TeamExperimentMethodPanel.styles";
 import teamSourceCollectionActiveStagePanelSource from "./TeamSourceCollectionActiveStagePanel.tsx?raw";
@@ -1097,9 +1098,12 @@ describe("TeamsRoute layout contract", () => {
     expect(teamResearchStageLauncherPanelSource).toContain("styles.researchStageCardMetrics");
     expect(routeSource).toContain("RESEARCH_STAGE_AGENT_ROLES");
     expect(routeSource).toContain("researchStageAgentBindingsByStage");
-    // Wave 8H: summary is invoked from TeamResearchStageLauncherPanel; panel still used on standalone page.
+    // Wave 8H: summary is invoked from TeamResearchStageLauncherPanel.
+    // Wave 8I: full agent panel is invoked from TeamResearchStageStandalonePagePanel (route injects the renderer).
     expect(teamResearchStageLauncherPanelSource).toContain("renderResearchStageAgentSummary(stageType)");
-    expect(routeSource).toContain("renderResearchStageAgentPanel(stageType)");
+    expect(teamResearchStageStandalonePagePanelSource).toContain("renderResearchStageAgentPanel(stageType)");
+    expect(routeSource).toContain("function renderResearchStageAgentPanel");
+    expect(routeSource).toContain("renderResearchStageAgentPanel={renderResearchStageAgentPanel}");
     expect(routeSource).toContain("TeamResearchStageAgentSummary");
     expect(routeSource).toContain("TeamResearchStageAgentPanel");
     expect(routeSource).not.toContain('renderResearchStageAgentPanel("knowledge_collection", "compact")');
@@ -1274,7 +1278,9 @@ describe("TeamsRoute layout contract", () => {
     expect(researchWorkspaceModelSource).toContain("资料寻找 / 资料提炼 / 资料关系整理 / 资料入库");
     expect(researchWorkspaceModelSource).toContain("研究问题 / 假设 / 控制变量 / 冻结设计");
     expect(researchWorkspaceModelSource).toContain("执行批次 / 结果评估 / 消融归因 / 优化迭代");
-    expect(routeSource).toContain("lifecycleProjection");
+    // Wave 8I: lifecycleProjection is consumed by launcher + standalone stage panels.
+    expect(teamResearchStageLauncherPanelSource).toContain("lifecycleProjection");
+    expect(teamResearchStageStandalonePagePanelSource).toContain("lifecycleProjection");
     // Wave 8H: challengeProgramProjection is read inside TeamResearchStageLauncherPanel.
     expect(teamResearchStageLauncherPanelSource).toContain("challengeProgramProjection");
     expect(teamResearchStageLauncherPanelSource).toContain("ChallengeCupOperationsWorkspace");
@@ -1310,18 +1316,18 @@ describe("TeamsRoute layout contract", () => {
     expect(teamResearchStageLauncherPanelSource).toContain("bestValidatedResultId");
     expect(teamResearchStageLauncherPanelSource).toContain("latestDiagnosticStatus");
     expect(teamResearchStageLauncherPanelSource).toContain("researchIterationLifecycleStatusLabel");
-    // Standalone stage page detail heroes remain on the route.
-    expect(routeSource).toContain("data-research-stage-detail-status={detailHeroStatus}");
-    expect(routeSource).toContain("data-research-stage-detail-best={detailHeroBestValue}");
-    expect(routeSource).toContain("data-research-stage-detail-diagnostic={detailHeroDiagnosticValue}");
-    expect(routeSource).toContain("data-research-stage-detail-diagnostic-status={detailHeroDiagnosticStatus || undefined}");
-    expect(routeSource).toContain("stage3Lifecycle.bestCandidateId");
-    expect(routeSource).toContain("detailHeroDiagnosticStatus");
-    expect(routeSource).toContain("latestDiagnosticStatus.status");
+    // Wave 8I: standalone stage page detail heroes live on TeamResearchStageStandalonePagePanel.
+    expect(teamResearchStageStandalonePagePanelSource).toContain("data-research-stage-detail-status={detailHeroStatus}");
+    expect(teamResearchStageStandalonePagePanelSource).toContain("data-research-stage-detail-best={detailHeroBestValue}");
+    expect(teamResearchStageStandalonePagePanelSource).toContain("data-research-stage-detail-diagnostic={detailHeroDiagnosticValue}");
+    expect(teamResearchStageStandalonePagePanelSource).toContain("data-research-stage-detail-diagnostic-status={detailHeroDiagnosticStatus || undefined}");
+    expect(teamResearchStageStandalonePagePanelSource).toContain("stage3Lifecycle.bestCandidateId");
+    expect(teamResearchStageStandalonePagePanelSource).toContain("detailHeroDiagnosticStatus");
+    expect(teamResearchStageStandalonePagePanelSource).toContain("latestDiagnosticStatus.status");
     expect(routeAndPureSource).toContain("researchDiagnosticStatusLabel");
     expect(experimentLoopModelSource).toContain('smoke_needs_review: { zh: "Smoke 待复核", en: "smoke needs review" }');
     expect(experimentLoopModelSource).toContain('full_run_needs_review: { zh: "正式实验待复核", en: "formal run needs review" }');
-    expect(routeAndPureSource).toContain("memoryContextSummary");
+    expect(teamResearchStageStandalonePagePanelSource).toContain("memoryContextSummary");
     expect(teamResearchStageLauncherPanelSource).toContain("团队记忆");
     expect(teamResearchStageLauncherPanelSource).toContain("已用记忆");
     expect(teamResearchStageLauncherPanelSource).toContain("forbiddenDuplicateExperimentCount");
@@ -1330,11 +1336,11 @@ describe("TeamsRoute layout contract", () => {
     expect(researchMemoryEvidencePanelSource).toContain("allowedVariableContract");
     expect(researchMemoryEvidencePanelSource).toContain("claimMap");
     expect(researchMemoryEvidencePanelSource).toContain("data-memory-context-id");
-    // Wave 8H: compact mount is stage={stage}; explicit experiment/iteration mounts remain on the route.
+    // Wave 8H: compact mount is stage={stage}; Wave 8I: explicit experiment/iteration mounts on standalone panel.
     expect(teamResearchStageLauncherPanelSource).toContain("ResearchMemoryEvidencePanel");
     expect(teamResearchStageLauncherPanelSource).toContain("stage={stage}");
-    expect(routeSource).toContain('stage="experiment"');
-    expect(routeSource).toContain('stage="iteration"');
+    expect(teamResearchStageStandalonePagePanelSource).toContain('stage="experiment"');
+    expect(teamResearchStageStandalonePagePanelSource).toContain('stage="iteration"');
     expect(researchWorkspaceModelSource).toContain('value === "source_collection"');
     expect(researchWorkspaceModelSource).toContain('return "knowledge_collection"');
     expect(routeSource).toContain('id="research-workflow-overview"');
@@ -1389,7 +1395,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("teamChatRoomRoute");
     expect(routeSource).toContain("返回团队页面");
     expect(routeSource).toContain("返回知识搜集");
-    expect(routeSource).toContain("返回阶段页");
+    // Wave 8I: stage-page chat back-link copy lives on the standalone stage panel.
+    expect(teamResearchStageStandalonePagePanelSource).toContain("返回阶段页");
     expect(routeSource).toContain("renderSourceCollectionConversation");
     expect(routeSource).toContain("renderSourceCollectionControlsPanel");
     expect(routeSource).toContain("知识搜集工作台");
@@ -1586,8 +1593,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).not.toContain("通常无需修改");
     expect(routeSource).not.toContain("一键生成搜索计划、团队分工");
     expect(routeSource).not.toContain("搜索计划、步骤记录、资料记录和候选镜像都已落盘");
+    // Wave 8I: stage standalone page copy lives on TeamResearchStageStandalonePagePanel.
     expect(routeSource).toContain("返回团队页面");
-    expect(routeSource).toContain("实验规划工作台");
+    expect(teamResearchStageStandalonePagePanelSource).toContain("返回团队页面");
+    expect(teamResearchStageStandalonePagePanelSource).toContain("实验规划工作台");
     expect(routeSource).toContain("experimentPlanningStatusQueryKey");
     expect(routeSource).toContain("renderExperimentPlanningLedgerPanel");
     expect(routeSource).toContain("实验计划账本");
@@ -1628,9 +1637,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeAndPureSource).toContain("baselineSelection");
     expect(routeAndPureSource).toContain("readyForFullRun");
     expect(routeSource).toContain("No training execution was triggered.");
-    expect(routeSource).toContain("迭代优化工作台");
+    expect(teamResearchStageStandalonePagePanelSource).toContain("迭代优化工作台");
     expect(routeSource).toContain("renderResearchStageStandalonePage");
-    expect(routeSource).toContain("不自动进入下一阶段。");
+    expect(routeSource).toContain("TeamResearchStageStandalonePagePanel");
+    expect(teamResearchStageStandalonePagePanelSource).toContain("不自动进入下一阶段。");
     expect(teamWorkflowStatusPanelsSource).toContain("资料提炼 Agent");
     expect(teamWorkflowStatusPanelsSource).toContain("入库审核状态");
     expect(teamWorkflowStatusPanelsSource).toContain("模型调用证据链");
