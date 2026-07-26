@@ -1,13 +1,6 @@
-import { useEffect, useMemo, useState, type ComponentProps } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState, type ComponentProps, type ReactNode } from "react";
 
 import { VNativeButton } from "../components/vui";
-import { AgentActivityPanePanel } from "./AgentActivityPanePanel";
-import { AgentConfigPrimaryPanePanel } from "./AgentConfigPrimaryPanePanel";
-import { AgentConfigPolicyPanePanel } from "./AgentConfigPolicyPanePanel";
-import { AgentConfigReferencesPanePanel } from "./AgentConfigReferencesPanePanel";
-import { AgentConfigChangeHistoryPanel } from "./AgentConfigChangeHistoryPanel";
-import { AgentEffectiveConfigurationPanel } from "./AgentEffectiveConfigurationPanel";
-import { AgentTeamRelationsPanel } from "./AgentTeamRelationsPanel";
 import {
   AgentDetailHeaderPanel,
   type AgentDetailHeaderPaneView,
@@ -21,6 +14,29 @@ import styles from "./AgentSelectedDetailContentPanel.styles";
 export type AgentSelectedDetailPaneId = "overview" | "effective" | "relations" | "config" | "changes" | "activity";
 
 export type AgentConfigSectionId = "basic" | "profile" | "capability" | "ops";
+
+/** Secondary panes — kept off the default overview graph (F3-B). */
+const AgentActivityPanePanel = lazy(() =>
+  import("./AgentActivityPanePanel").then((m) => ({ default: m.AgentActivityPanePanel })),
+);
+const AgentConfigPrimaryPanePanel = lazy(() =>
+  import("./AgentConfigPrimaryPanePanel").then((m) => ({ default: m.AgentConfigPrimaryPanePanel })),
+);
+const AgentConfigPolicyPanePanel = lazy(() =>
+  import("./AgentConfigPolicyPanePanel").then((m) => ({ default: m.AgentConfigPolicyPanePanel })),
+);
+const AgentConfigReferencesPanePanel = lazy(() =>
+  import("./AgentConfigReferencesPanePanel").then((m) => ({ default: m.AgentConfigReferencesPanePanel })),
+);
+const AgentConfigChangeHistoryPanel = lazy(() =>
+  import("./AgentConfigChangeHistoryPanel").then((m) => ({ default: m.AgentConfigChangeHistoryPanel })),
+);
+const AgentEffectiveConfigurationPanel = lazy(() =>
+  import("./AgentEffectiveConfigurationPanel").then((m) => ({ default: m.AgentEffectiveConfigurationPanel })),
+);
+const AgentTeamRelationsPanel = lazy(() =>
+  import("./AgentTeamRelationsPanel").then((m) => ({ default: m.AgentTeamRelationsPanel })),
+);
 
 type AgentSelectedDetailHeaderProps = Omit<
   ComponentProps<typeof AgentDetailHeaderPanel>,
@@ -70,6 +86,20 @@ function configSectionLabels(lang: "zh" | "en") {
         ops: "Ops · Danger",
         navLabel: "Configuration sections",
       };
+}
+
+function PaneSuspense({ children, lang }: { children: ReactNode; lang: "zh" | "en" }) {
+  return (
+    <Suspense
+      fallback={
+        <div className={styles.paneContent} role="status">
+          {lang === "zh" ? "正在加载面板…" : "Loading panel…"}
+        </div>
+      }
+    >
+      {children}
+    </Suspense>
+  );
 }
 
 export function AgentSelectedDetailContentPanel({
@@ -127,79 +157,89 @@ export function AgentSelectedDetailContentPanel({
         </div>
       ) : null}
       {activePane === "effective" ? (
-        <div className={styles.paneContent}>
-          <AgentEffectiveConfigurationPanel {...effectiveConfiguration} />
-        </div>
+        <PaneSuspense lang={header.lang}>
+          <div className={styles.paneContent}>
+            <AgentEffectiveConfigurationPanel {...effectiveConfiguration} />
+          </div>
+        </PaneSuspense>
       ) : null}
       {activePane === "relations" ? (
-        <div className={styles.paneContent}>
-          <AgentTeamRelationsPanel {...teamRelations} />
-        </div>
+        <PaneSuspense lang={header.lang}>
+          <div className={styles.paneContent}>
+            <AgentTeamRelationsPanel {...teamRelations} />
+          </div>
+        </PaneSuspense>
       ) : null}
       {activePane === "changes" ? (
-        <div className={styles.paneContent}>
-          <AgentConfigChangeHistoryPanel {...configChanges} />
-        </div>
+        <PaneSuspense lang={header.lang}>
+          <div className={styles.paneContent}>
+            <AgentConfigChangeHistoryPanel {...configChanges} />
+          </div>
+        </PaneSuspense>
       ) : null}
       {activePane === "config" ? (
-        <div className={styles.paneContent}>
-          <nav className={styles.configSectionNav} aria-label={labels.navLabel}>
-            {(
-              [
-                ["basic", labels.basic],
-                ["profile", labels.profile],
-                ["capability", labels.capability],
-                ["ops", labels.ops],
-              ] as const
-            ).map(([id, label]) => (
-              <VNativeButton
-                key={id}
-                type="button"
-                className={
-                  configSection === id ? styles.configSectionTabActive : styles.configSectionTab
-                }
-                onClick={() => setConfigSection(id)}
-                aria-pressed={configSection === id}
-              >
-                <span>{label}</span>
-                {id === "ops" && opsBadge > 0 ? (
-                  <strong className={styles.configSectionBadge}>{opsBadge}</strong>
-                ) : null}
-              </VNativeButton>
-            ))}
-          </nav>
-          <div className={styles.configSectionBody}>
-            {configSection === "basic" ? (
-              <AgentConfigPrimaryPanePanel {...configPrimary} section="basic" />
-            ) : null}
-            {configSection === "profile" ? (
-              <AgentConfigPrimaryPanePanel {...configPrimary} section="profile" />
-            ) : null}
-            {configSection === "capability" ? (
-              <>
-                <AgentConfigPolicyPanePanel {...configPolicies} />
-                <AgentConfigReferencesPanePanel {...configReferences} />
-              </>
-            ) : null}
-            {configSection === "ops" ? (
-              <AgentConfigPrimaryPanePanel
-                {...configPrimary}
-                section="ops"
-                opsTitle={header.lang === "zh" ? "运维与危险操作" : "Ops and dangerous actions"}
-                opsHint={
-                  header.lang === "zh"
-                    ? "健康检查、归档删除与调试重置与日常配置分离。"
-                    : "Health, archive/delete, and debug reset are separated from daily config."
-                }
-              />
-            ) : null}
+        <PaneSuspense lang={header.lang}>
+          <div className={styles.paneContent}>
+            <nav className={styles.configSectionNav} aria-label={labels.navLabel}>
+              {(
+                [
+                  ["basic", labels.basic],
+                  ["profile", labels.profile],
+                  ["capability", labels.capability],
+                  ["ops", labels.ops],
+                ] as const
+              ).map(([id, label]) => (
+                <VNativeButton
+                  key={id}
+                  type="button"
+                  className={
+                    configSection === id ? styles.configSectionTabActive : styles.configSectionTab
+                  }
+                  onClick={() => setConfigSection(id)}
+                  aria-pressed={configSection === id}
+                >
+                  <span>{label}</span>
+                  {id === "ops" && opsBadge > 0 ? (
+                    <strong className={styles.configSectionBadge}>{opsBadge}</strong>
+                  ) : null}
+                </VNativeButton>
+              ))}
+            </nav>
+            <div className={styles.configSectionBody}>
+              {configSection === "basic" ? (
+                <AgentConfigPrimaryPanePanel {...configPrimary} section="basic" />
+              ) : null}
+              {configSection === "profile" ? (
+                <AgentConfigPrimaryPanePanel {...configPrimary} section="profile" />
+              ) : null}
+              {configSection === "capability" ? (
+                <>
+                  <AgentConfigPolicyPanePanel {...configPolicies} />
+                  <AgentConfigReferencesPanePanel {...configReferences} />
+                </>
+              ) : null}
+              {configSection === "ops" ? (
+                <AgentConfigPrimaryPanePanel
+                  {...configPrimary}
+                  section="ops"
+                  opsTitle={header.lang === "zh" ? "运维与危险操作" : "Ops and dangerous actions"}
+                  opsHint={
+                    header.lang === "zh"
+                      ? "健康检查、归档删除与调试重置与日常配置分离。"
+                      : "Health, archive/delete, and debug reset are separated from daily config."
+                  }
+                />
+              ) : null}
+            </div>
           </div>
-        </div>
+        </PaneSuspense>
       ) : null}
       {activePane === "activity" ? (
-        <div className={styles.paneContent}>
-          <AgentActivityPanePanel {...activity} />
-        </div>
+        <PaneSuspense lang={header.lang}>
+          <div className={styles.paneContent}>
+            <AgentActivityPanePanel {...activity} />
+          </div>
+        </PaneSuspense>
       ) : null}
     </div>
   );

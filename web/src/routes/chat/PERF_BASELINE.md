@@ -46,11 +46,19 @@ Recorded for high-ROI program **scope A** (F0–F3, F5, F6; F4 trigger-only).
 3. Agents: mutation hooks + pane-scoped lazy packs; default overview lighter. (F3 — staged; see `agents/README.md`)
 4. i18n: keep shell light; no regression of AppShell dictionary boundary. ✅ already (F5 verify)
 
-## Shipped in first delivery PR(s)
+## Shipped
 
 | Item | Change |
 |---|---|
 | F0 | This baseline file |
 | F1 | `AppShell` soft idle preload + hard click |
 | F2 | `expandedGroupAgentDetailQueries` stop poll when group SSE open |
+| F3-A | Agents mutations → hooks (0 inline `useMutation` on AgentsRoute) |
+| F3-B | Agent secondary panes React.lazy; AgentsRoute raw ~357→~261 kB gzip ~85→~66 |
+| F3-C | Activity poll gates already correct |
 | F5 | Verified: AppShell/Launcher use `useShellI18n` only (existing contracts) |
+| F4 | Trigger-only — no Config/Memory feature PR this round |
+
+### Post-F3 Agents chunk note
+
+Default Agents route chunk reduced by moving config/activity/relations/changes panes into async chunks. Overview stays eager.

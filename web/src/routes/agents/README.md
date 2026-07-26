@@ -41,11 +41,11 @@ and panel composition. Pure query/presentation helpers should leave the shell.
 
 | Wave | Goal | Status |
 |---|---|---|
-| F3-A mutation hooks | Move EventSource-free writes out of shell | **Blocked pending draft/state DI design** — archive/purge/config drafts close over many route setters (`setConfigDraft`, `draftSyncSourceRef`, pane selection). Naive extract failed tsc; next attempt should extract **one cluster at a time** with explicit options (notice + draft setters + pure mappers co-located first). |
-| F3-B pane lazy packs | overview default light; config/activity/relations async | Pending after F3-A or independent if panels already split files |
-| F3-C query gates | tighten fullWorkspaceNeeded vs pack | Pending |
+| F3-A mutation hooks | Move EventSource-free writes out of shell | **Done** — `useAgentConfigDraftMutations` (4) + `useAgentWorkbenchMutations` (15); route **0** inline `useMutation`. Options DI for draft sync / selection. |
+| F3-B pane lazy | overview static; config/activity/relations/effective/changes lazy | **Done** — `AgentSelectedDetailContentPanel` React.lazy secondary panes |
+| F3-C query gates | activity poll only on activity pane | **Already** — layout/code gate on `activePane === "activity"` |
 
-**Recommended F3-A order:** (1) promote pure mappers to `agents/*Model.ts`, (2) `useAgentConfigDraftMutations` only (save/discard/update/promote), (3) lifecycle, (4) policy/inbox.
+Pure mappers remain in `AgentsRoute.tsx` until a follow-up promotes them; hooks inject them to avoid circular imports.
 
 ## Next (planned, by ROI)
 
