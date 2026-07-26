@@ -16,11 +16,16 @@ import selfTrackBoundarySource from "./EvolutionSelfTrackBoundary.tsx?raw";
 import selfTrackBoundaryStyles from "./EvolutionSelfTrackBoundary.styles";
 import selfTrackBoundaryStylesSource from "./EvolutionSelfTrackBoundary.styles.ts?raw";
 import runMutationsSource from "./evolution/useEvolutionRunMutations.ts?raw";
+import evolutionRouteModelSource from "./evolution/evolutionRouteModel.ts?raw";
 import routeStyles from "./EvolutionRoute.styles";
 import stylesSource from "./EvolutionRoute.styles.ts?raw";
 
 const worktreeReviewStylesSource = readFileSync(new URL("./SupervisedWorktreeReviewPanel.styles.ts", import.meta.url), "utf-8");
-const dictionarySource = readFileSync(new URL("../i18n/dictionary.ts", import.meta.url), "utf-8");
+// D1 domain split: evolution route labels may live in evolution or core slices.
+const dictionarySource = [
+  readFileSync(new URL("../i18n/domains/dictionaryEvolution.ts", import.meta.url), "utf-8"),
+  readFileSync(new URL("../i18n/domains/dictionaryCore.ts", import.meta.url), "utf-8"),
+].join("\n");
 const evolutionTypesSource = readFileSync(new URL("../api/types/evolution.ts", import.meta.url), "utf-8");
 const evolutionSources = [
   routeSource,
@@ -60,15 +65,16 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("selectedProposalIsSelfCandidate");
     expect(routeSource).toContain("!selectedProposalIsSelfCandidate");
     expect(routeSource).toContain("renderSelfEvolutionCandidateDetail(selectedProposalSummary)");
-    expect(routeSource).toContain("function isSelfEvolutionCandidateItem");
-    expect(routeSource).toContain('item?.ingestMode === "self_evolution_candidate"');
+    expect(evolutionRouteModelSource).toContain("function isSelfEvolutionCandidateItem");
+    expect(evolutionRouteModelSource).toContain('item?.ingestMode === "self_evolution_candidate"');
+    expect(routeSource).toContain('from "./evolution/evolutionRouteModel"');
   });
 
   it("labels self-evolution candidate origins without opening them as supervised runs", () => {
-    expect(routeSource).toContain("function proposalDisplaySourceRun");
-    expect(routeSource).toContain("item.sourceSelfRunId || item.sourceRun");
-    expect(routeSource).toContain("function canOpenProposalSourceRun");
-    expect(routeSource).toContain("!isSelfEvolutionCandidateItem(item)");
+    expect(evolutionRouteModelSource).toContain("function proposalDisplaySourceRun");
+    expect(evolutionRouteModelSource).toContain("item.sourceSelfRunId || item.sourceRun");
+    expect(evolutionRouteModelSource).toContain("function canOpenProposalSourceRun");
+    expect(evolutionRouteModelSource).toContain("!isSelfEvolutionCandidateItem(item)");
     expect(routeSource).toContain("selectedProposalDisplaySourceRun || latestRun?.id");
     expect(routeSource).toContain("selectedProposalSummary && selectedProposalCanOpenSourceRun");
     expect(routeSource).toContain("item.riskLevel ? riskLabel(item.riskLevel) : \"--\"");
@@ -157,9 +163,9 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("supervisedSourceOptions");
     expect(routeSource).toContain('value: `dataset:${item.name}`');
     expect(routeSource).toContain('value: `bundle:${item.name}`');
-    expect(routeSource).toContain("function datasetBenchmarkDetail");
-    expect(routeSource).toContain("item.taskType");
-    expect(routeSource).toContain("item.runBudgetClass");
+    expect(evolutionRouteModelSource).toContain("function datasetBenchmarkDetail");
+    expect(evolutionRouteModelSource).toContain("item.taskType");
+    expect(evolutionRouteModelSource).toContain("item.runBudgetClass");
     expect(routeSource).toContain("datasetBenchmarkDetail(item, lang)");
     expect(routeSource).toContain("数据集会先物化，评测包可直接运行。");
     expect(routeSource).toContain("sourceInventoryBar");
@@ -200,9 +206,9 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("supervisedClosedLoopDecisionLabel");
     expect(routeSource).toContain("supervisedClosedLoopLedger");
     expect(activeRunMonitorPanelSource).toContain("EvolutionActiveRunClosedLoopLedgerPanel");
-    expect(routeSource).toContain('status === "agent_harness_ready"');
-    expect(routeSource).toContain('status === "custom_harness_ready"');
-    expect(routeSource).toContain("自定义评测");
+    expect(evolutionRouteModelSource).toContain('status === "agent_harness_ready"');
+    expect(evolutionRouteModelSource).toContain('status === "custom_harness_ready"');
+    expect(evolutionRouteModelSource).toContain("自定义评测");
     expect(routeSource).toContain("非官方 Terminal-Bench 成绩");
     expect(routeSource).toContain("selectedSourceOfficialWarning");
     expect(routeSource).toContain('t("sourceOfficialVerifierWarning")');
@@ -212,10 +218,10 @@ describe("EvolutionRoute library user flow contract", () => {
   });
 
   it("keeps supervised rejection and runtime notes in governance wording instead of raw status codes", () => {
-    expect(routeSource).toContain("function displaySupervisedTechnicalText");
-    expect(routeSource).toContain("decision\\s*=\\s*REJECT");
-    expect(routeSource).toContain("agent_judgment\\s+fail");
-    expect(routeSource).toContain("风险 gate");
+    expect(evolutionRouteModelSource).toContain("function displaySupervisedTechnicalText");
+    expect(evolutionRouteModelSource).toContain("decision\\s*=\\s*REJECT");
+    expect(evolutionRouteModelSource).toContain("agent_judgment\\s+fail");
+    expect(evolutionRouteModelSource).toContain("风险 gate");
     expect(runRecordsPanelSource).toContain("tooltip={run.nextAction || undefined}");
     expect(runRecordsPanelSource).not.toContain('title={run.nextAction || ""}');
     expect(runRecordsPanelSource).toContain('content={selectedRun.outcomeSemantics.runtimeExplanation}');
@@ -467,13 +473,13 @@ describe("EvolutionRoute library user flow contract", () => {
 
   it("shows a compact supervised workflow rail and center overview fallback", () => {
     expect(routeSource).toContain("SUPERVISED_WORKFLOW_STEPS");
-    expect(routeSource).toContain('{ id: "baseline_eval", zh: "基线评测", en: "Baseline", role: "baseline" }');
-    expect(routeSource).toContain('{ id: "improve", zh: "提出建议与改良", en: "Improve", role: "candidate" }');
-    expect(routeSource).toContain('{ id: "rerun_score", zh: "复跑与评分", en: "Rerun + Score", role: "candidate" }');
-    expect(routeSource).toContain('{ id: "approval", zh: "用户审批", en: "Approval", role: null }');
-    expect(routeSource).not.toContain('{ id: "results", zh: "运行结果"');
-    expect(routeSource).not.toContain('{ id: "proposal", zh: "改进提案"');
-    expect(routeSource).not.toContain('{ id: "review", zh: "样本评审"');
+    expect(evolutionRouteModelSource).toContain('{ id: "baseline_eval", zh: "基线评测", en: "Baseline", role: "baseline" }');
+    expect(evolutionRouteModelSource).toContain('{ id: "improve", zh: "提出建议与改良", en: "Improve", role: "candidate" }');
+    expect(evolutionRouteModelSource).toContain('{ id: "rerun_score", zh: "复跑与评分", en: "Rerun + Score", role: "candidate" }');
+    expect(evolutionRouteModelSource).toContain('{ id: "approval", zh: "用户审批", en: "Approval", role: null }');
+    expect(evolutionRouteModelSource).not.toContain('{ id: "results", zh: "运行结果"');
+    expect(evolutionRouteModelSource).not.toContain('{ id: "proposal", zh: "改进提案"');
+    expect(evolutionRouteModelSource).not.toContain('{ id: "review", zh: "样本评审"');
     expect(evolutionTypesSource).toContain("export type EvolutionWorkflowStep");
     expect(evolutionTypesSource).toContain("workflowSteps?: EvolutionWorkflowStep[]");
     expect(routeSource).toContain("selectedSupervisedWorkflowStepId");
@@ -485,18 +491,18 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("最终运行结果");
     expect(routeSource).toContain("改进提案");
     expect(routeSource).toContain("样本评审");
-    expect(routeSource).toContain("用户审批");
+    expect(evolutionRouteModelSource).toContain("用户审批");
     expect(routeSource).toContain("supervisedRunMembers");
     expect(routeSource).toContain("hasSupervisedAgentBindings");
     expect(routeSource).toContain("currentSupervisedAgentBindings");
     expect(routeSource).toContain("const bindings = supervisedMembersBindings");
     expect(routeSource).toContain("supervisedMembersRun?.currentAgentBinding?.agentId");
-    expect(routeSource).toContain("binding?.dialogueModelLabel || binding?.dialogueModelName");
-    expect(routeSource).toContain("modelDisplayLabel(supervisedMemberModelId(binding), resolveModelLabel)");
+    expect(evolutionRouteModelSource).toContain("binding?.dialogueModelLabel || binding?.dialogueModelName");
+    expect(evolutionRouteModelSource).toContain("modelDisplayLabel(supervisedMemberModelId(binding), resolveModelLabel)");
     expect(routeSource).toContain("configQuery.data?.modelLabels");
     expect(routeSource).toContain("EvolutionRoleConversationSession");
     expect(evolutionTypesSource).toContain("roleConversationSessions?: Record<string, EvolutionRoleConversationSession>");
-    expect(routeSource).toContain("function supervisedMemberChatRoute");
+    expect(evolutionRouteModelSource).toContain("function supervisedMemberChatRoute");
     expect(routeSource).toContain("const roleSessions = supervisedMembersRun?.roleConversationSessions ?? {}");
     expect(routeSource).toContain("const conversationSession = roleSessions[role]");
     expect(routeSource).toContain("conversationSessionId");
@@ -514,9 +520,9 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("reviewCandidateWorktree?.actionStates?.approveReview?.enabled");
     expect(routeSource).toContain("reviewCandidateWorktree?.actionStates?.merge?.enabled");
     expect(routeSource).toContain("supervisedMemberAgentManagementRoute");
-    expect(routeSource).toContain('new URLSearchParams({ pane: "config", returnLabel: "supervised_evolution" })');
-    expect(routeSource).toContain('params.set("agent", normalizedAgentId)');
-    expect(routeSource).toContain('params.set("returnTo", normalizedReturnTo)');
+    expect(evolutionRouteModelSource).toContain('new URLSearchParams({ pane: "config", returnLabel: "supervised_evolution" })');
+    expect(evolutionRouteModelSource).toContain('params.set("agent", normalizedAgentId)');
+    expect(evolutionRouteModelSource).toContain('params.set("returnTo", normalizedReturnTo)');
     expect(routeSource).toContain("const supervisedMemberReturnTo = `${location.pathname}${location.search}`");
     expect(routeSource).toContain("<ArrowUpRight size={13} aria-hidden=\"true\" />");
     expect(routeSource).toContain("onClick={() => setSelectedSupervisedWorkflowStepId(step.id)}");
@@ -744,8 +750,8 @@ describe("EvolutionRoute library user flow contract", () => {
 
   it("shows environment preflight failures instead of waiting for agent output forever", () => {
     expect(routeSource).toContain("supervisedPreflightIssue(monitoredRun, lang)");
-    expect(routeSource).toContain("任务环境预检失败，未启动 Agent");
-    expect(routeSource).toContain("missing_verifier_dependency");
+    expect(evolutionRouteModelSource).toContain("任务环境预检失败，未启动 Agent");
+    expect(evolutionRouteModelSource).toContain("missing_verifier_dependency");
     expect(routeSource).toContain("monitoredPreflightIssue ? (");
     expect(routeSource).toContain("styles.casePreflightIssue");
     expect(routeStyles.casePreflightIssue).toContain("var(--state-warning)");
