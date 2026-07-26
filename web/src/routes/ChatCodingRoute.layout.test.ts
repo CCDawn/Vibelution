@@ -2535,7 +2535,8 @@ describe("ChatCodingRoute layout contract", () => {
   it("moves file workspace tabs and preview display into chat file components while keeping route query ownership", () => {
     expect(routeSource).toContain('import { ChatSessionWorkspacePanel } from "./chat/ChatSessionWorkspacePanel"');
     expect(routeSource).not.toContain('import { ChatFilePreviewPanel } from "./chat/ChatFilePreviewPanel"');
-    expect(routeSource).toContain('import { ChatFileWorkspaceTabs } from "./chat/ChatFileWorkspaceTabs"');
+    expect(routeSource).toContain("const ChatFileWorkspaceTabs = lazy(() =>");
+    expect(routeSource).toContain('import("./chat/ChatFileWorkspaceTabs")');
     expect(routeSource).toContain('const activeFilePath = workspace.activeTab !== "agent" && !activeCliAgentRunId ? workspace.activeTab : null;');
     expect(routeSource).toContain("const fileContentQuery = useQuery({");
     expect(routeSource).toContain("queryKeys.fileContent(activeFilePath ?? \"\")");
