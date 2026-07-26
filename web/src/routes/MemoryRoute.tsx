@@ -9,7 +9,7 @@ import {
   TriangleAlert,
   Undo2,
 } from "lucide-react";
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Link, NavLink, useSearchParams } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
@@ -59,6 +59,7 @@ import { usePersistedPaneResize } from "../components/layout/usePersistedPaneRes
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import { VButton, VDenseOpsPage } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
+import { useMemoryItemMutations } from "./memory/useMemoryItemMutations";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
 import { MemoryAgentMemoryPanel } from "./MemoryAgentMemoryPanel";
 import { MemoryCleanupPanel } from "./MemoryCleanupPanel";
@@ -67,7 +68,12 @@ import { MemoryEffectivePanel } from "./MemoryEffectivePanel";
 import { MemoryKnowledgeBaseSidebar } from "./MemoryKnowledgeBaseSidebar";
 import { MemoryKnowledgeDetailPanel } from "./MemoryKnowledgeDetailPanel";
 import { MemoryKnowledgeGovernancePanel } from "./MemoryKnowledgeGovernancePanel";
-import { MemoryGraphViewPanel, type MemoryGraphRelation } from "./MemoryGraphViewPanel";
+import type { MemoryGraphRelation } from "./MemoryGraphViewPanel";
+
+/** Graph UI (+ three) must not enter the Memory list/governance shell (R4). */
+const MemoryGraphViewPanel = lazy(() =>
+  import("./MemoryGraphViewPanel").then((module) => ({ default: module.MemoryGraphViewPanel })),
+);
 import { MemoryKnowledgeModeTabs } from "./MemoryKnowledgeModeTabs";
 import { MemoryKnowledgePermissionsPanel } from "./MemoryKnowledgePermissionsPanel";
 import { MemoryKnowledgePipelinePanel } from "./MemoryKnowledgePipelinePanel";
@@ -2359,161 +2365,30 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     refetchInterval: false,
     enabled: forcedView === "graph" && Boolean(selectedGraphNodeId) && Boolean(fallbackKnowledgeActorAgentId),
   });
-  const memoryMutation = useMutation({
-    mutationFn: async (draft: MemoryManagementEditorDraft) => {
-      const body = JSON.stringify({
-        title: draft.title,
-        summary: draft.summary,
-        content: draft.content,
-      });
-      if (draft.mode === "create") {
-        return fetchJson<MemoryMutationResponse>("/api/memory/items", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body,
-        });
-      }
-      return fetchJson<MemoryMutationResponse>(memoryMutationEndpoint(draft.sectionId, draft.itemId), {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body,
-      });
-    },
-    onSuccess: (payload) => {
-      setEditDraft(null);
-      setActiveSectionId(payload.sectionId);
-      setActiveItemId(payload.itemId);
-      setMutationFeedback({ tone: "success", text: copy.mutationDone });
-      invalidateMemoryQueries(queryClient);
-    },
-    onError: (error) => {
-      setMutationFeedback({
-        tone: "error",
-        text: `${copy.mutationFailed}: ${error instanceof Error ? error.message : String(error)}`,
-      });
-    },
-  });
-
-  const deleteMemoryMutation = useMutation({
-    mutationFn: async ({ sectionId, itemId }: { sectionId: string; itemId: string }) =>
-      fetchJson<MemoryMutationResponse>(memoryMutationEndpoint(sectionId, itemId), {
-        method: "DELETE",
-      }),
-    onSuccess: (payload) => {
-      setActiveSectionId(payload.sectionId === "user-managed-memory" ? "" : payload.sectionId);
-      setActiveItemId(payload.sectionId === "user-managed-memory" ? "" : payload.itemId);
-      setMutationFeedback({ tone: "success", text: copy.mutationDone });
-      invalidateMemoryQueries(queryClient);
-    },
-    onError: (error) => {
-      setMutationFeedback({
-        tone: "error",
-        text: `${copy.mutationFailed}: ${error instanceof Error ? error.message : String(error)}`,
-      });
-    },
-  });
-
-  const restoreMemoryMutation = useMutation({
-    mutationFn: async ({ sectionId, itemId }: { sectionId: string; itemId: string }) =>
-      fetchJson<MemoryMutationResponse>(memoryMutationEndpoint(sectionId, itemId, "/restore"), {
-        method: "POST",
-      }),
-    onSuccess: (payload) => {
-      setActiveSectionId(payload.sectionId);
-      setActiveItemId(payload.itemId);
-      setMutationFeedback({ tone: "success", text: copy.mutationDone });
-      invalidateMemoryQueries(queryClient);
-    },
-    onError: (error) => {
-      setMutationFeedback({
-        tone: "error",
-        text: `${copy.mutationFailed}: ${error instanceof Error ? error.message : String(error)}`,
-      });
-    },
-  });
-
-  const projectMemoryUpdateResolveMutation = useMutation({
-    mutationFn: async ({
-      proposal,
-      status,
-      resolutionNote,
-    }: {
-      proposal: AgentProjectMemoryUpdateProposal;
-      status: MemoryProposalResolveStatus;
-      resolutionNote: string;
-    }) =>
-      fetchJson<AgentProjectMemoryUpdateProposal>(projectMemoryProposalResolveEndpoint(proposal), {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          status,
-          resolvedBy: "user",
-          resolutionNote,
-        }),
-      }),
-    onSuccess: (proposal) => {
-      setMutationFeedback({ tone: "success", text: `${copy.mutationDone} · ${proposal.status}` });
-      setMemoryProposalResolutionNotes((current) => {
-        const next = { ...current };
-        delete next[proposal.proposalId];
-        return next;
-      });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.agentProjectMemoryUpdates("pending", "", 100) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.agentProjectMemoryUpdates("", "", 100) });
-    },
-    onError: (error) => {
-      setMutationFeedback({
-        tone: "error",
-        text: `${copy.mutationFailed}: ${error instanceof Error ? error.message : String(error)}`,
-      });
-    },
-  });
-
-  const cleanupPreviewMutation = useMutation({
-    mutationFn: async (targets: MemoryCleanupTargetRequest[]) =>
-      fetchJson<MemoryCleanupPreviewResponse>("/api/memory/cleanup/preview", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ targets }),
-      }),
-    onSuccess: (payload) => {
-      setCleanupPreview(payload);
-      setCleanupExecution(null);
-      setCleanupFeedback({ tone: "success", text: copy.cleanupPreviewReady });
-      void queryClient.setQueryData(queryKeys.memoryCleanupPreview(), payload);
-    },
-    onError: (error) => {
-      setCleanupFeedback({
-        tone: "error",
-        text: `${copy.cleanupFailed}: ${error instanceof Error ? error.message : String(error)}`,
-      });
-    },
-  });
-
-  const cleanupExecuteMutation = useMutation({
-    mutationFn: async ({ targets, confirmationPhrase }: { targets: MemoryCleanupTargetRequest[]; confirmationPhrase: string }) =>
-      fetchJson<MemoryCleanupExecuteResponse>("/api/memory/cleanup/execute", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ targets, confirmationPhrase }),
-      }),
-    onSuccess: (payload) => {
-      setCleanupPreview(payload);
-      setCleanupExecution(payload);
-      setCleanupConfirmationText("");
-      setCleanupFeedback({ tone: "success", text: copy.cleanupExecuteDone });
-      invalidateMemoryQueries(queryClient);
-      invalidateKnowledgeDashboard(queryClient, fallbackKnowledgeActorAgentId);
-      void queryClient.invalidateQueries({ queryKey: queryKeys.agents() });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.memoryKnowledgeGraph(fallbackKnowledgeActorAgentId, "officialResearchGraph", requestedTeamId) });
-      void queryClient.invalidateQueries({ queryKey: ["knowledge"] });
-    },
-    onError: (error) => {
-      setCleanupFeedback({
-        tone: "error",
-        text: `${copy.cleanupFailed}: ${error instanceof Error ? error.message : String(error)}`,
-      });
-    },
+  const {
+    memoryMutation,
+    deleteMemoryMutation,
+    restoreMemoryMutation,
+    projectMemoryUpdateResolveMutation,
+    cleanupPreviewMutation,
+    cleanupExecuteMutation,
+  } = useMemoryItemMutations({
+    copy,
+    setEditDraft,
+    setActiveSectionId,
+    setActiveItemId,
+    setMutationFeedback,
+    setMemoryProposalResolutionNotes,
+    setCleanupPreview,
+    setCleanupExecution,
+    setCleanupConfirmationText,
+    setCleanupFeedback,
+    fallbackKnowledgeActorAgentId,
+    requestedTeamId,
+    memoryMutationEndpoint,
+    projectMemoryProposalResolveEndpoint,
+    invalidateMemoryQueries,
+    invalidateKnowledgeDashboard,
   });
 
   const proposalMutation = useMutation({
@@ -4493,29 +4368,31 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   };
 
   const renderGraphView = () => (
-    <MemoryGraphViewPanel
-      copy={copy}
-      graphPayload={graphPayload}
-      filteredGraphNodes={filteredGraphNodes}
-      filteredGraphEdges={filteredGraphEdges}
-      graphSearchText={graphSearchText}
-      activeGraphNodeType={activeGraphNodeType}
-      graphTypeEntries={graphTypeEntries}
-      selectedGraphNode={selectedGraphNode}
-      selectedGraphChildren={selectedGraphChildren}
-      selectedGraphRelations={selectedGraphRelations}
-      selectedGraphDetailItems={selectedGraphDetailItems}
-      isGraphNodeDetailFetching={memoryKnowledgeGraphNodeDetailQuery.isFetching}
-      formatTimestamp={(value) => formatTimestamp(value, lang)}
-      onGraphSearchTextChange={setGraphSearchText}
-      onActiveGraphNodeTypeChange={setActiveGraphNodeType}
-      onClearGraphFilters={() => {
-        setActiveGraphNodeType("");
-        setGraphSearchText("");
-      }}
-      onSelectGraphNode={setSelectedGraphNodeId}
-      onFocusGraphNode={selectGraphNode}
-    />
+    <Suspense fallback={<div className={styles.viewStack}>{copy.loading ?? (lang === "zh" ? "正在加载图谱…" : "Loading graph…")}</div>}>
+      <MemoryGraphViewPanel
+        copy={copy}
+        graphPayload={graphPayload}
+        filteredGraphNodes={filteredGraphNodes}
+        filteredGraphEdges={filteredGraphEdges}
+        graphSearchText={graphSearchText}
+        activeGraphNodeType={activeGraphNodeType}
+        graphTypeEntries={graphTypeEntries}
+        selectedGraphNode={selectedGraphNode}
+        selectedGraphChildren={selectedGraphChildren}
+        selectedGraphRelations={selectedGraphRelations}
+        selectedGraphDetailItems={selectedGraphDetailItems}
+        isGraphNodeDetailFetching={memoryKnowledgeGraphNodeDetailQuery.isFetching}
+        formatTimestamp={(value) => formatTimestamp(value, lang)}
+        onGraphSearchTextChange={setGraphSearchText}
+        onActiveGraphNodeTypeChange={setActiveGraphNodeType}
+        onClearGraphFilters={() => {
+          setActiveGraphNodeType("");
+          setGraphSearchText("");
+        }}
+        onSelectGraphNode={setSelectedGraphNodeId}
+        onFocusGraphNode={selectGraphNode}
+      />
+    </Suspense>
   );
 
   const viewStackClassName =
