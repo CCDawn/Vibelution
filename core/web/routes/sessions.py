@@ -182,6 +182,12 @@ class SessionMessageEditPayload(SessionMessagePayload):
     messageId: str = ""
 
 
+class SessionStopPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    turnId: str = Field(min_length=1, max_length=160)
+
+
 class SessionGuidancePayload(BaseModel):
     content: str = ""
     mode: str = "safe"
@@ -487,11 +493,13 @@ def session_edit_resubmit_message(session_id: str, payload: SessionMessageEditPa
 
 
 @router.post("/sessions/{session_id}/stop", status_code=status.HTTP_202_ACCEPTED)
-def session_stop_turn(session_id: str) -> dict:
+def session_stop_turn(session_id: str, payload: SessionStopPayload) -> dict:
     try:
-        return request_stop_session_turn(session_id)
+        return request_stop_session_turn(session_id, expected_turn_id=payload.turnId)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except SessionBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.post("/sessions/{session_id}/guidance", status_code=status.HTTP_202_ACCEPTED)

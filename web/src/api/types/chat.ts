@@ -724,6 +724,7 @@ export type SessionMessageWindow = {
 
 export type SessionDetail = SessionSummary & {
   ledgerSeq?: number;
+  activeTurnId?: string;
   activeTask?: SessionActiveTask | null;
   defaultFileContext: string;
   previewTabs: string[];
