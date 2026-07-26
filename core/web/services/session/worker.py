@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from core.chat.chat_task_types import trim_lines
+from core.infrastructure.tool_execution_scope import ToolExecutionScope, tool_execution_scope
 
 
 def _service():
@@ -46,6 +47,45 @@ def _session_context_internal_auto_continue_max_turns(context: dict[str, Any]) -
     if s._source_collection_stage_task_context_metadata(context):
         return s.SOURCE_COLLECTION_STAGE_TASK_AUTO_CONTINUE_MAX_TURNS
     return s.INTERNAL_AUTO_CONTINUE_MAX_TURNS
+
+
+def _wait_for_tool_execution_quiescence(scope: ToolExecutionScope) -> None:
+    """Keep the owning turn active until every scheduled tool physically exits."""
+
+    s = _service()
+    scope.seal()
+    initial_snapshot = scope.snapshot()
+    if scope.is_quiescent():
+        return
+
+    s._record_session_turn_lifecycle_event(
+        scope.session_id,
+        "tool_quiescence_wait_started",
+        turn_id=scope.turn_id,
+        outcome="waiting",
+        fields=initial_snapshot,
+    )
+    extended_wait_recorded = False
+    while not scope.wait_for_quiescence(timeout=1.0):
+        snapshot = scope.snapshot()
+        if not extended_wait_recorded and int(snapshot.get("ageMs") or 0) >= 30_000:
+            extended_wait_recorded = True
+            s._record_session_turn_lifecycle_event(
+                scope.session_id,
+                "tool_quiescence_wait_extended",
+                turn_id=scope.turn_id,
+                level="warning",
+                outcome="waiting",
+                fields=snapshot,
+            )
+    s._record_session_turn_lifecycle_event(
+        scope.session_id,
+        "tool_quiescence_wait_finished",
+        turn_id=scope.turn_id,
+        outcome="quiescent",
+        fields=scope.snapshot(),
+    )
+
 
 def _run_session_turn(context: dict[str, Any]) -> None:
     s = _service()
@@ -871,26 +911,33 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                 # Context composition is already available through live output and the
                 # conversation journal.  A durable WorkRun rewrite here blocks the
                 # imminent model request and is immediately superseded by model_request.
-                with s.session_reference_context(context.get("session_references") or []):
-                    result = _run_session_continuation_loop(
-                        runtime_agent,
-                        session_id=session_id,
-                        turn_control=turn_control,
-                        initial_prompt=user_message,
-                        history_messages=history_messages,
-                        attachments=llm_attachments,
-                        user_message_source=str(context.get("user_message_source") or "").strip(),
-                        prompt_cache_partition=prompt_cache_partition,
-                        prompt_cache_scope=prompt_cache_scope,
-                        agent_id=agent_id,
-                        llm_slot=llm_slot,
-                        llm_model_id=llm_model_id_for_turn,
-                        disable_tools=lightweight_chat_payload,
-                        allow_internal_auto_continue=allow_internal_auto_continue,
-                        max_internal_auto_continue_turns=internal_auto_continue_max_turns,
-                        require_tool_progress=bool(source_collection_stage_task_auto_continue),
-                        required_tool_names=source_collection_stage_task_required_tools,
-                    )
+                tool_scope = ToolExecutionScope(session_id=session_id, turn_id=turn_id)
+                with (
+                    s.session_reference_context(context.get("session_references") or []),
+                    tool_execution_scope(tool_scope),
+                ):
+                    try:
+                        result = _run_session_continuation_loop(
+                            runtime_agent,
+                            session_id=session_id,
+                            turn_control=turn_control,
+                            initial_prompt=user_message,
+                            history_messages=history_messages,
+                            attachments=llm_attachments,
+                            user_message_source=str(context.get("user_message_source") or "").strip(),
+                            prompt_cache_partition=prompt_cache_partition,
+                            prompt_cache_scope=prompt_cache_scope,
+                            agent_id=agent_id,
+                            llm_slot=llm_slot,
+                            llm_model_id=llm_model_id_for_turn,
+                            disable_tools=lightweight_chat_payload,
+                            allow_internal_auto_continue=allow_internal_auto_continue,
+                            max_internal_auto_continue_turns=internal_auto_continue_max_turns,
+                            require_tool_progress=bool(source_collection_stage_task_auto_continue),
+                            required_tool_names=source_collection_stage_task_required_tools,
+                        )
+                    finally:
+                        _wait_for_tool_execution_quiescence(tool_scope)
                 if isinstance(result, dict):
                     result["context_composition"] = context_composition
                     result = s._attach_session_llm_runtime_diagnostics(result, llm_runtime_diagnostics)

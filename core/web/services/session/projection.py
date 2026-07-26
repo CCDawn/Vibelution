@@ -379,6 +379,12 @@ def _build_session_detail_from_summary(
         else [],
         "toolPolicy": (available_agent or {}).get("toolPolicy") if available_agent_id else None,
         "memoryPolicy": (available_agent or {}).get("memoryPolicy") if available_agent_id else None,
+        "activeTurnId": s._current_session_turn_id(conversation["id"])
+        or (
+            str(turn_snapshot.get("turnId") or "").strip()
+            if not bool(turn_snapshot.get("releasedToUser"))
+            else ""
+        ),
         "stopRequested": bool(turn_snapshot["stopRequested"]) and not bool(turn_snapshot.get("releasedToUser")),
         "stopRequestedAt": ""
         if bool(turn_snapshot.get("releasedToUser"))

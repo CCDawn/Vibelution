@@ -40,7 +40,8 @@ def request_stop_session_turn(session_id: str, *, expected_turn_id: str = "") ->
         return detail
 
     controller = s._get_session_turn_control(conversation_id)
-    if controller is None:
+    controller_was_restored = controller is None
+    if controller_was_restored:
         controller = s._restore_missing_session_turn_control(conversation_id)
         s._set_session_running(conversation_id, True, turn_id=controller.turn_id)
     normalized_expected_turn_id = str(expected_turn_id or "").strip()
@@ -61,7 +62,10 @@ def request_stop_session_turn(session_id: str, *, expected_turn_id: str = "") ->
         )
     )
     stop_snapshot = controller.snapshot()
-    s._cancel_queued_session_turn(conversation_id, str(stop_snapshot.get("turnId") or controller.turn_id))
+    queued_turn_cancelled = s._cancel_queued_session_turn(
+        conversation_id,
+        str(stop_snapshot.get("turnId") or controller.turn_id),
+    )
     s._record_chat_next_state_signal(
         session_id=conversation_id,
         turn_id=str(stop_snapshot.get("turnId") or controller.turn_id),
@@ -80,13 +84,14 @@ def request_stop_session_turn(session_id: str, *, expected_turn_id: str = "") ->
             "stopRequestedAt": stop_snapshot.get("stopRequestedAt") or "",
         },
     )
-    s._persist_session_interrupted_snapshot(
-        conversation_id,
-        stop_snapshot,
-        lang=lang,
-    )
-    s._set_session_running(conversation_id, False, turn_id=controller.turn_id)
-    controller.mark_released_to_user()
+    if queued_turn_cancelled or controller_was_restored:
+        s._persist_session_interrupted_snapshot(
+            conversation_id,
+            stop_snapshot,
+            lang=lang,
+        )
+        s._set_session_running(conversation_id, False, turn_id=controller.turn_id)
+        controller.mark_released_to_user()
     s._publish_session_detail_snapshot(conversation_id)
     return s.get_session_detail(conversation_id) or detail
 
