@@ -151,11 +151,9 @@ import {
 import {
   buildConversationComposerBridgeState,
 } from "./chat/ChatConversationComposerBridge";
-import { ChatFileWorkspaceTabs } from "./chat/ChatFileWorkspaceTabs";
 import { ConversationIndexLoadingShell } from "./chat/ChatLoadingShell";
 import { ChatSessionWorkspacePanel } from "./chat/ChatSessionWorkspacePanel";
 import { ChatConversationIndexRail } from "./chat/ChatConversationIndexRail";
-import { ChatStatusRail } from "./chat/ChatStatusRail";
 import {
   chatStreamPerformanceNowMs,
   describeChatRouteError as describeError,
@@ -187,7 +185,6 @@ import { useChatSessionSelection } from "./chat/useChatSessionSelection";
 import { useChatWorkspaceLifecycle } from "./chat/useChatWorkspaceLifecycle";
 import { useChatSessionDetailMutations } from "./chat/useChatSessionDetailMutations";
 import { useChatWorkspaceActions } from "./chat/useChatWorkspaceActions";
-import { ChatGroupCenterSurface } from "./chat/ChatGroupCenterSurface";
 import { ChatCliAgentTerminalStack } from "./chat/ChatCliAgentTerminalStack";
 import {
   useChatSessionRenameMenu,
@@ -299,6 +296,17 @@ const AgentContextMenu = lazy(() =>
   import("./AgentContextMenu").then((module) => ({
     default: module.AgentContextMenu,
   })),
+);
+
+/** S2: not required for first paint of direct chat center. */
+const ChatStatusRail = lazy(() =>
+  import("./chat/ChatStatusRail").then((module) => ({ default: module.ChatStatusRail })),
+);
+const ChatGroupCenterSurface = lazy(() =>
+  import("./chat/ChatGroupCenterSurface").then((module) => ({ default: module.ChatGroupCenterSurface })),
+);
+const ChatFileWorkspaceTabs = lazy(() =>
+  import("./chat/ChatFileWorkspaceTabs").then((module) => ({ default: module.ChatFileWorkspaceTabs })),
 );
 
 type SessionDetailWithActiveSkill = SessionDetail & {
@@ -2675,6 +2683,7 @@ export function ChatCodingRoute() {
           <span className="sr-only">{lang === "zh" ? "关闭侧栏" : "Close side panel"}</span>
         </VButton>
       ) : null}
+      <Suspense fallback={null}>
       <ChatStatusRail
         statusRailClassName={statusRailClassName}
         statusRailCollapsed={statusRailCollapsed}
@@ -2773,6 +2782,7 @@ export function ChatCodingRoute() {
         petActionFeedback={petActionFeedback}
         onPetInteraction={handlePetInteraction}
       />
+      </Suspense>
 
       {responsiveLayout.leftVisible ? <PaneCollapseHandle
         side="left"
@@ -2892,18 +2902,20 @@ export function ChatCodingRoute() {
               {t("agentSession")}
             </VButton>
           )}
-          <ChatFileWorkspaceTabs
-            activeTab={workspace.activeTab}
-            closePreviewTabLabel={t("closePreviewTab")}
-            hidden={groupPanelActive}
-            openTabs={workspace.openTabs}
-            onCloseTab={(tabPath) => {
-              activeSessionId && closePreviewTab(activeSessionId, tabPath);
-            }}
-            onOpenTab={(tabPath) => {
-              activeSessionId && setActiveTab(activeSessionId, tabPath);
-            }}
-          />
+          <Suspense fallback={null}>
+            <ChatFileWorkspaceTabs
+              activeTab={workspace.activeTab}
+              closePreviewTabLabel={t("closePreviewTab")}
+              hidden={groupPanelActive}
+              openTabs={workspace.openTabs}
+              onCloseTab={(tabPath) => {
+                activeSessionId && closePreviewTab(activeSessionId, tabPath);
+              }}
+              onOpenTab={(tabPath) => {
+                activeSessionId && setActiveTab(activeSessionId, tabPath);
+              }}
+            />
+          </Suspense>
         </div>
 
         <div className={styles.centerSurface}>
@@ -2917,6 +2929,7 @@ export function ChatCodingRoute() {
             onTerminalSessionChange={handleCliAgentTerminalSessionChange}
           />
           {groupPanelActive ? (
+            <Suspense fallback={null}>
             <ChatGroupCenterSurface
               lang={lang}
               projectBusActive={projectBusActive}
@@ -2968,6 +2981,7 @@ export function ChatCodingRoute() {
                 )
               }
             />
+            </Suspense>
           ) : (
             <ChatSessionWorkspacePanel
               activeCliAgentRunAvailable={Boolean(activeCliAgentRun)}
