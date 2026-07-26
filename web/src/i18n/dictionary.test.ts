@@ -80,4 +80,15 @@ describe("dictionary", () => {
     expect(useAppI18nSource).toContain('partial: "status_partial"');
     expect(useShellI18nSource).toContain('partial: "status_partial"');
   });
+
+  it("assembles the route dictionary from domain slices (parity lock)", () => {
+    const zhKeys = Object.keys(dictionary.zh);
+    const enKeys = Object.keys(dictionary.en);
+    expect(zhKeys.length).toBe(enKeys.length);
+    expect(zhKeys.length).toBeGreaterThan(900);
+    for (const key of zhKeys) {
+      expect(enKeys).toContain(key);
+      expect(typeof dictionary.en[key as keyof typeof dictionary.en]).toBe("string");
+    }
+  });
 });

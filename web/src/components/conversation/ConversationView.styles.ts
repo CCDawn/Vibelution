@@ -1055,6 +1055,8 @@ const styles: Record<string, string> = {
     "vui-components-conversationview thoughtTextBlock min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   timeline:
     "vui-components-conversationview timeline grid min-h-0 min-w-0 flex-1 content-start gap-[10px] overflow-y-auto overflow-x-hidden bg-[var(--vui-surface-chat)] px-[clamp(1rem,3vw,3rem)] py-4 [scrollbar-gutter:stable]",
+  timelineVirtualSpacer:
+    "vui-components-conversationview timelineVirtualSpacer pointer-events-none min-w-0 shrink-0",
   timelineAssistantTextCell:
     "vui-components-conversationview timelineAssistantTextCell min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] max-w-[min(100%,1360px)]",
   timelineCellDetailButton:

@@ -83,6 +83,14 @@ Recorded for high-ROI program **scope A** (F0–F3, F5, F6; F4 trigger-only).
 | U4 | Research pack split: `teamResearchPanels` (core) / `teamResearchExperimentPanels` / `teamResearchSearchPanels`; prefetch by path |
 | U5 | Conversation timeline window policy extracted; initial/batch **12**; soft DOM ceiling **72** prefers server earlier-load |
 
+### D1–D3 (deferred risks, measured)
+
+| Item | Change |
+|---|---|
+| D1 | `dictionary.ts` → domain slices under `i18n/domains/*` (core/chat/agents/teams/evolution/tools/git/logs/pet); merge façade keeps `TranslationKey` |
+| D2 | Conversation windowed virtual range + stick-bottom ResizeObserver; pure helpers in `conversationTimelineFollowState` |
+| D3 | Agents pure presentation helpers → `agents/agentRouteListModel.ts` (~200 LOC off route) |
+
 ### Post-T1–T3 chunk notes (build evidence)
 
 | Chunk | ~kB raw | Notes |

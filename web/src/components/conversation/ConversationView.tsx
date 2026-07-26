@@ -178,7 +178,11 @@ import {
   buildStreamingTimelineScrollSignal,
   buildTimelineScrollSignal,
 } from "./conversationTimelineScrollSignals";
-import { resolveTimelineFollowState } from "./conversationTimelineFollowState";
+import {
+  resolveConversationVirtualRange,
+  resolveTimelineFollowState,
+  shouldStickTimelineToBottomOnContentResize,
+} from "./conversationTimelineFollowState";
 import {
   extractComposerImageDropFiles,
   extractComposerSessionReferenceDrop,
@@ -408,6 +412,10 @@ export function ConversationView({
   const [previewImage, setPreviewImage] = useState<ConversationImagePreviewRequest | null>(null);
   const [composerDragActive, setComposerDragActive] = useState(false);
   const [visibleMessageLimit, setVisibleMessageLimit] = useState(INITIAL_VISIBLE_MESSAGE_COUNT);
+  const [timelineVirtualMetrics, setTimelineVirtualMetrics] = useState({
+    scrollTop: 0,
+    viewportHeight: 720,
+  });
   const [computerUseSessionResults, setComputerUseSessionResults] = useState<Record<string, ComputerUseResult>>({});
   const [computerUseSessionPending, setComputerUseSessionPending] = useState<Record<string, "confirm" | "cancel" | undefined>>({});
   const resolvedActionMode = composerActionMode ?? "send";
@@ -592,6 +600,24 @@ export function ConversationView({
   const activeAgentMessages = activeAgentMessageTimelineProjection.agentMessages;
   const streamingTimelineMessages = activeAgentMessageTimelineProjection.streamingMessages;
   const activeTimelineRowIdentities = activeAgentMessageTimelineProjection.rowIdentities;
+  const timelineVirtualRange = useMemo(
+    () => resolveConversationVirtualRange({
+      itemCount: activeTimelineMessages.length,
+      scrollTop: timelineVirtualMetrics.scrollTop,
+      viewportHeight: timelineVirtualMetrics.viewportHeight,
+      followingLatest: followLatestRef.current,
+    }),
+    // followLatestRef is read at compute time; scroll metrics drive recompute while following is sticky via stick effect.
+    [activeTimelineMessages.length, timelineVirtualMetrics.scrollTop, timelineVirtualMetrics.viewportHeight, isAtBottom],
+  );
+  const virtualTimelineMessages = useMemo(
+    () => activeTimelineMessages.slice(timelineVirtualRange.start, timelineVirtualRange.end),
+    [activeTimelineMessages, timelineVirtualRange.end, timelineVirtualRange.start],
+  );
+  const virtualTimelineRowIdentities = useMemo(
+    () => activeTimelineRowIdentities.slice(timelineVirtualRange.start, timelineVirtualRange.end),
+    [activeTimelineRowIdentities, timelineVirtualRange.end, timelineVirtualRange.start],
+  );
   const activeConversationMessagesById = useMemo(() => {
     const messagesById = new Map<string, ConversationMessage>();
     for (const message of activeTimelineMessages) {
@@ -802,6 +828,34 @@ export function ConversationView({
     });
   }
 
+  // Stick-to-bottom: re-pin when timeline content resizes while following latest (streaming / reflow).
+  useEffect(() => {
+    const timeline = timelineRef.current;
+    if (!timeline || typeof ResizeObserver === "undefined") {
+      return undefined;
+    }
+    const observer = new ResizeObserver(() => {
+      if (shouldStickTimelineToBottomOnContentResize({
+        autoScrollToLatest,
+        followingLatest: followLatestRef.current,
+      })) {
+        scheduleTimelineScrollToBottom();
+      }
+      setTimelineVirtualMetrics((current) => {
+        const next = {
+          scrollTop: timeline.scrollTop,
+          viewportHeight: timeline.clientHeight || current.viewportHeight,
+        };
+        if (next.scrollTop === current.scrollTop && next.viewportHeight === current.viewportHeight) {
+          return current;
+        }
+        return next;
+      });
+    });
+    observer.observe(timeline);
+    return () => observer.disconnect();
+  }, [autoScrollToLatest, sessionId]);
+
   useLayoutEffect(() => {
     const anchor = historyScrollAnchorRef.current;
     if (!anchor) {
@@ -896,6 +950,10 @@ export function ConversationView({
       atBottomRef.current = nextState.isAtBottom;
       followLatestRef.current = nextState.shouldFollowLatest;
       setIsAtBottom(nextState.isAtBottom);
+      setTimelineVirtualMetrics({
+        scrollTop: timeline.scrollTop,
+        viewportHeight: timeline.clientHeight || 720,
+      });
     };
     handleScroll();
     timeline.addEventListener("scroll", handleScroll);
@@ -2982,9 +3040,18 @@ export function ConversationView({
           <div className={styles.emptyState}>{t("sessionNoMessages")}</div>
         ) : (
           <>
-            {activeTimelineMessages.map((message, index) => (
+            {timelineVirtualRange.topSpacerPx > 0 ? (
+              <div
+                aria-hidden="true"
+                className={styles.timelineVirtualSpacer}
+                style={{ height: timelineVirtualRange.topSpacerPx }}
+              />
+            ) : null}
+            {virtualTimelineMessages.map((message, virtualIndex) => {
+              const index = timelineVirtualRange.start + virtualIndex;
+              return (
               <ConversationTurnRow
-                key={activeTimelineRowIdentities[index].rowKey}
+                key={virtualTimelineRowIdentities[virtualIndex]?.rowKey ?? message.id}
                 message={message}
                 previousMessage={activeTimelineMessages[index - 1]}
                 agentMessage={agentMessagesByMessageId.get(message.id)}
@@ -2995,7 +3062,7 @@ export function ConversationView({
                     : undefined
                 }
                 codexTranscriptCells={agentCodexSurfacesByMessageId.get(message.id)?.cells}
-                rowIdentity={activeTimelineRowIdentities[index]}
+                rowIdentity={virtualTimelineRowIdentities[virtualIndex] ?? activeTimelineRowIdentities[index]}
                 defaultResponseExpanded={defaultExpandedResponseIds.has(message.id)}
                 latestUserMessageId={latestUserMessageId}
                 editingMessageId={editingMessageId}
@@ -3403,7 +3470,15 @@ export function ConversationView({
             );
                 }}
               />
-            ))}
+              );
+            })}
+            {timelineVirtualRange.bottomSpacerPx > 0 ? (
+              <div
+                aria-hidden="true"
+                className={styles.timelineVirtualSpacer}
+                style={{ height: timelineVirtualRange.bottomSpacerPx }}
+              />
+            ) : null}
           </>
         )}
       </div>
