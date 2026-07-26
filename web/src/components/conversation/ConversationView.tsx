@@ -220,6 +220,11 @@ import {
 } from "./conversationComputerUseState";
 import { formattedCodeBlockContent } from "./conversationFormattedCodeBlock";
 import {
+  isResponseSegmentCodeLike,
+  responseSegmentLabel as resolveResponseSegmentLabel,
+  shouldShowAgentResponseBlock as resolveShouldShowAgentResponseBlock,
+} from "./conversationResponseSegmentPresentation";
+import {
   completedToolPresentationSummary,
   conversationToolDetailPresentation,
   conversationToolPresentationLabel,
@@ -2851,30 +2856,11 @@ export function ConversationView({
   }
 
   function responseSegmentLabel(segment: ResponseSegment) {
-    switch (segment.kind) {
-      case "status":
-        return t("responseSegmentStatus");
-      case "commit":
-        return t("responseSegmentCommit");
-      case "verification":
-        return t("responseSegmentVerification");
-      case "code":
-        return segment.language || t("responseSegmentCode");
-      case "files":
-        return t("responseSegmentFiles");
-      case "logs":
-        return t("responseSegmentLogs");
-      case "answer":
-      default:
-        return t("responseSegmentAnswer");
-    }
+    return resolveResponseSegmentLabel(segment, (key) => t(key));
   }
 
   function renderResponseSegment(segment: ResponseSegment, duplicateImageUrls?: Set<string>) {
     const label = responseSegmentLabel(segment);
-    const isCodeLike = segment.kind === "code"
-      || Boolean(segment.language)
-      || (["commit", "verification"].includes(segment.kind) && segment.content.includes("\n"));
     return (
       <section
         key={segment.id}
@@ -2886,7 +2872,7 @@ export function ConversationView({
             <span className={styles.responseSegmentMeta}>{segment.language}</span>
           ) : null}
         </div>
-        {isCodeLike ? (
+        {isResponseSegmentCodeLike(segment) ? (
           <pre className={styles.responseSegmentPre}>
             <code>{formattedCodeBlockContent(segment.content, segment.language)}</code>
           </pre>
@@ -2902,20 +2888,13 @@ export function ConversationView({
     sectionState: AgentMessageSectionState,
     hasFeedbackTimeline: boolean,
   ) {
-    if (!sectionState.hasResponseBlock) {
-      return false;
-    }
-    if (isNoFinalAnswerStatusContent(sectionState.answerText)) {
-      return false;
-    }
-    if (!hasFeedbackTimeline) {
-      return true;
-    }
-    if (message.streaming) {
-      return true;
-    }
-    const segments = getCachedResponseSegments(sectionState.answerText);
-    return segments.some((segment) => segment.kind !== "status");
+    return resolveShouldShowAgentResponseBlock({
+      hasResponseBlock: sectionState.hasResponseBlock,
+      answerText: sectionState.answerText,
+      hasFeedbackTimeline,
+      streaming: Boolean(message.streaming),
+      segments: getCachedResponseSegments(sectionState.answerText),
+    });
   }
 
   function renderResponseText(content: string, duplicateImageUrls?: Set<string>) {
