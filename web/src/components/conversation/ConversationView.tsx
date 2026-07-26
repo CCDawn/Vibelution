@@ -225,6 +225,17 @@ import {
   shouldShowAgentResponseBlock as resolveShouldShowAgentResponseBlock,
 } from "./conversationResponseSegmentPresentation";
 import {
+  compactConversationPreview,
+  operationGroupTitle as resolveOperationGroupTitle,
+  operationStatusFallbackText,
+  operationStatusToneClassNameFromTone,
+  operationTimelineTitle as resolveOperationTimelineTitle,
+  operationVisualTone,
+  rolloutTraceEventLabel as resolveRolloutTraceEventLabel,
+  shouldRenderCodexTranscriptSurface as resolveShouldRenderCodexTranscriptSurface,
+  shouldRenderCompactActiveTurnPlaceholder as resolveShouldRenderCompactActiveTurnPlaceholder,
+} from "./conversationOperationPresentation";
+import {
   completedToolPresentationSummary,
   conversationToolDetailPresentation,
   conversationToolPresentationLabel,
@@ -805,14 +816,7 @@ export function ConversationView({
     [lang, t],
   );
   function compactPreview(value: string, maxLength = 180) {
-    const normalized = value.replace(/\s+/g, " ").trim();
-    if (!normalized) {
-      return "";
-    }
-    if (normalized.length <= maxLength) {
-      return normalized;
-    }
-    return `${normalized.slice(0, maxLength - 1).trimEnd()}...`;
+    return compactConversationPreview(value, maxLength);
   }
 
   function openImagePreview(image: ConversationImagePreviewRequest) {
@@ -1277,27 +1281,11 @@ export function ConversationView({
   }
 
   function operationTone(operation: AgentMessageOperation) {
-    if (operation.kind === "thought") {
-      return "thought";
-    }
-    if (operation.kind === "mental") {
-      return "mental";
-    }
-    if (operation.kind === "status") {
-      return "status";
-    }
-    return "tool";
+    return operationVisualTone(operation);
   }
 
   function operationStatusToneClassName(operation: AgentMessageOperation) {
-    const tone = operationStatusTone(operation);
-    if (tone === "done") {
-      return "success";
-    }
-    if (tone === "degraded") {
-      return "warning";
-    }
-    return tone;
+    return operationStatusToneClassNameFromTone(operationStatusTone(operation));
   }
 
   function operationStatusIcon(operation: AgentMessageOperation, animateRunning = true) {
@@ -1315,25 +1303,11 @@ export function ConversationView({
   }
 
   function operationStatusText(status: string) {
-    const normalized = status.trim().toLowerCase();
-    const explicitFallbackLabels: Record<string, string> = {
-      degraded: lang === "zh" ? "降级" : "Degraded",
-      fallback: lang === "zh" ? "备用路径" : "Fallback",
-      partial: lang === "zh" ? "部分结果" : "Partial",
-      recovered: lang === "zh" ? "已恢复" : "Recovered",
-      unavailable: lang === "zh" ? "不可用" : "Unavailable",
-    };
-    return explicitFallbackLabels[normalized] ?? statusLabel(status);
+    return operationStatusFallbackText(status, lang, statusLabel);
   }
 
   function rolloutTraceEventLabel(kind: CodexRolloutTraceEvent["kind"]) {
-    const labels: Record<CodexRolloutTraceEvent["kind"], string> = {
-      ToolCallStarted: lang === "zh" ? "调用开始" : "Tool call started",
-      RuntimeStarted: lang === "zh" ? "运行开始" : "Runtime started",
-      RuntimeEnded: lang === "zh" ? "运行结束" : "Runtime ended",
-      ToolCallEnded: lang === "zh" ? "调用结束" : "Tool call ended",
-    };
-    return labels[kind];
+    return resolveRolloutTraceEventLabel(kind, lang);
   }
 
   function renderRolloutTraceEvents(operation: AgentMessageOperation) {
@@ -1386,28 +1360,19 @@ export function ConversationView({
   }
 
   function operationGroupTitle(kind: AgentMessageOperationKind, count: number) {
-    if (kind === "thought") {
-      return t("thoughtProcess");
-    }
-    if (kind === "mental") {
-      return t("mentalProcess");
-    }
-    return `${t("toolProcess")} ${count}`;
+    return resolveOperationGroupTitle(kind, count, {
+      thoughtProcess: t("thoughtProcess"),
+      mentalProcess: t("mentalProcess"),
+      toolProcess: t("toolProcess"),
+    });
   }
 
   function operationTimelineTitle(operations: AgentMessageOperation[]) {
-    if (operations.length > 0) {
-      return lang === "zh" ? "执行过程" : "Execution trace";
-    }
-    const thoughtCount = operations.filter((operation) => operation.kind === "thought").length;
-    const toolCount = operations.filter((operation) => operation.kind === "tool").length;
-    const mentalCount = operations.filter((operation) => operation.kind === "mental").length;
-    const parts = [
-      thoughtCount > 0 ? `${t("thoughtProcess")} ${thoughtCount}` : "",
-      toolCount > 0 ? `${t("toolProcess")} ${toolCount}` : "",
-      mentalCount > 0 ? `${t("mentalProcess")} ${mentalCount}` : "",
-    ].filter(Boolean);
-    return parts.length > 0 ? parts.join(" · ") : `${t("toolProcess")} ${operations.length}`;
+    return resolveOperationTimelineTitle(operations, lang, {
+      thoughtProcess: t("thoughtProcess"),
+      mentalProcess: t("mentalProcess"),
+      toolProcess: t("toolProcess"),
+    });
   }
 
   function processSummaryIcon(tone: string) {
@@ -1706,7 +1671,7 @@ export function ConversationView({
   }
 
   function shouldRenderCodexTranscriptSurface(surface?: CodexTranscriptSurface) {
-    return surface?.mode === "native" && surface.cells.length > 0;
+    return resolveShouldRenderCodexTranscriptSurface(surface);
   }
 
   function shouldRenderCompactActiveTurnPlaceholder(
@@ -1718,14 +1683,14 @@ export function ConversationView({
       turnErrorMessage: boolean;
     },
   ) {
-    return Boolean(
-      message.role === "assistant"
-      && message.streaming
-      && !options.showResponseBlock
-      && !options.hasFeedbackTimeline
-      && !options.hasActiveProcess
-      && !options.turnErrorMessage
-    );
+    return resolveShouldRenderCompactActiveTurnPlaceholder({
+      role: message.role,
+      streaming: Boolean(message.streaming),
+      showResponseBlock: options.showResponseBlock,
+      hasFeedbackTimeline: options.hasFeedbackTimeline,
+      hasActiveProcess: options.hasActiveProcess,
+      turnErrorMessage: options.turnErrorMessage,
+    });
   }
 
   function renderCodexTranscriptCell(message: ConversationMessage, cell: CodexTranscriptCell) {

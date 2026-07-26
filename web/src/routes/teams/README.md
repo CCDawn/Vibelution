@@ -124,6 +124,7 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 | M5 | TeamsRoute shell pure extract | **Done** — `teamRouteShellModel.ts` |
 | M9 | Canvas node role/tone pure classification | **Done** — `teamCanvasNodePresentation.ts` |
 | T2 | SC shell inject pure helpers | **Done** — `teamSourceCollectionShellModel.ts` |
+| T2.1 | SC stage chat-state pure | **Done** — same module (`resolveSourceCollectionStageAgentChatState`) |
 
 ## Next (planned) — Phase 9+
 

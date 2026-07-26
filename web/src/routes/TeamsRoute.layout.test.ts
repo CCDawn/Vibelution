@@ -1092,7 +1092,8 @@ describe("TeamsRoute layout contract", () => {
     expect(researchStageAgentPresentationSource).toContain("params.set(\"returnTo\", normalizedReturnTo)");
     expect(researchStageAgentPresentationSource).toContain("params.set(\"returnLabel\", normalizedReturnLabel)");
     expect(routeSource).toContain("openSourceCollectionStageAgentChat");
-    expect(routeSource).toContain('type SourceCollectionStageAgentChatStatus = "ready" | "loading" | "error" | "repair"');
+    expect(teamSourceCollectionShellModelSource).toContain('export type SourceCollectionStageAgentChatStatus = "ready" | "loading" | "error" | "repair"');
+    expect(routeSource).toContain("resolveSourceCollectionStageAgentChatState");
     expect(routeSource).toContain("sourceCollectionStageAgentChatState(stageId");
     expect(routeSource).toContain("agentSummaryQuery.isPending || agentSummaryQuery.isFetching");
     // Wave 8M: primary stage agent chat fallback state lives on active-stage workspace.

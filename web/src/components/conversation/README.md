@@ -25,6 +25,7 @@ live outside the shell.
 | Markdown blocks / streaming markdown | `conversationMarkdownBlocks.ts`, `streamingMarkdown.ts`, `ConversationMarkdownRenderer.tsx` |
 | JSON fenced code pretty-print | `conversationFormattedCodeBlock.ts` |
 | Response segment labels / visibility | `conversationResponseSegmentPresentation.ts` |
+| Operation / process labels & codex gates | `conversationOperationPresentation.ts` |
 | Tool activity UI / registry | `ConversationToolActivity.tsx`, `conversationTool*`, `conversationToolRendererRegistry.tsx` |
 | Codex native transcript surface | `codexNativeTranscriptSurface.ts`, `codexTranscriptCells.ts`, `codexToolLifecycleModel.ts` |
 | Mental-state rows | `conversationMentalState.ts` |
@@ -71,6 +72,7 @@ Approximate ownership inside the shell. Line ranges drift; use the map by
 | M6 | ConversationView block boundaries / README | **Done** — this file |
 | M8 | Shared JSON code-block pretty-print | **Done** — `conversationFormattedCodeBlock.ts` |
 | C3 | Response segment label / show pure | **Done** — `conversationResponseSegmentPresentation.ts` |
+| C3.1 | Operation labels / codex surface gates | **Done** — `conversationOperationPresentation.ts` |
 | Further pure extract | only when a claim needs it | deferred |
 
 ## Rules

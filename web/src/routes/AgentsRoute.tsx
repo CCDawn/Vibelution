@@ -285,10 +285,12 @@ import {
   bulkConfigValueMixed,
   DEFAULT_BULK_CONFIG_APPLY,
   DEFAULT_BULK_CONFIG_DRAFT,
+  DEFAULT_SESSION_AGENT_PREFERRED_TOOLS,
   metadataFlag,
   metadataString,
   metadataText,
   optimisticArchivedAgent,
+  planAgentResetDirectSession,
   safeAgentCenterReturnTo,
 } from "./agents/agentRouteBulkModel";
 import {
@@ -362,31 +364,16 @@ const DEFAULT_AGENT_RESET_OPTIONS: AgentResetOptions = {
   resetRuntimePolicy: false,
 };
 
-function stringValue(value: unknown): string {
-  return typeof value === "string" ? value.trim() : "";
-}
-
 function reconcileResetDirectSession(summary: AgentResetSummary) {
-  if (!summary.resetDirectSession) {
+  const plan = planAgentResetDirectSession(summary);
+  if (plan.kind === "remove") {
+    useChatWorkbenchStore.getState().removeSession(plan.previousDirectSessionId, plan.replacementDirectSessionId);
     return;
   }
-  const previousDirectSessionId = stringValue(summary.previousDirectSessionId);
-  const replacementDirectSessionId = stringValue(summary.replacementDirectSessionId);
-  if (!previousDirectSessionId && !replacementDirectSessionId) {
-    return;
+  if (plan.kind === "reset") {
+    useChatWorkbenchStore.getState().resetSessions(plan.replacementDirectSessionId);
   }
-  if (previousDirectSessionId) {
-    useChatWorkbenchStore.getState().removeSession(previousDirectSessionId, replacementDirectSessionId || null);
-    return;
-  }
-  useChatWorkbenchStore.getState().resetSessions(replacementDirectSessionId || null);
 }
-
-const DEFAULT_SESSION_AGENT_PREFERRED_TOOLS = [
-  "grep_search_tool",
-  "conversation_log_inspect_tool",
-  "get_core_context_tool",
-];
 
 export function AgentsRoute() {
   const { lang } = useShellI18n();

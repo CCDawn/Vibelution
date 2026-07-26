@@ -224,3 +224,44 @@ export function agentBulkPurgeCleanupPending(item: AgentBulkActionItem) {
     && (sessions as { cleanupPending?: unknown }).cleanupPending,
   );
 }
+
+export function stringValue(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+export type AgentResetDirectSessionPlan =
+  | { kind: "none" }
+  | { kind: "remove"; previousDirectSessionId: string; replacementDirectSessionId: string | null }
+  | { kind: "reset"; replacementDirectSessionId: string | null };
+
+export function planAgentResetDirectSession(summary: {
+  resetDirectSession?: boolean;
+  previousDirectSessionId?: unknown;
+  replacementDirectSessionId?: unknown;
+}): AgentResetDirectSessionPlan {
+  if (!summary.resetDirectSession) {
+    return { kind: "none" };
+  }
+  const previousDirectSessionId = stringValue(summary.previousDirectSessionId);
+  const replacementDirectSessionId = stringValue(summary.replacementDirectSessionId) || null;
+  if (!previousDirectSessionId && !replacementDirectSessionId) {
+    return { kind: "none" };
+  }
+  if (previousDirectSessionId) {
+    return {
+      kind: "remove",
+      previousDirectSessionId,
+      replacementDirectSessionId,
+    };
+  }
+  return {
+    kind: "reset",
+    replacementDirectSessionId,
+  };
+}
+
+export const DEFAULT_SESSION_AGENT_PREFERRED_TOOLS = [
+  "grep_search_tool",
+  "conversation_log_inspect_tool",
+  "get_core_context_tool",
+];

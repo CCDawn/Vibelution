@@ -398,6 +398,8 @@ import {
 } from "./teams/teamCanvasNodePresentation";
 import {
   SOURCE_COLLECTION_STAGE_AGENT_KEYS,
+  resolveSourceCollectionStageAgentChatState,
+  selectSourceCollectionStagePrimaryBinding,
   sourceCollectionPageSlice,
   sourceCollectionStageAgentBindingsForStage,
   sourceCollectionStageChatReturnLabel as sourceCollectionStageChatReturnLabelPure,
@@ -407,6 +409,7 @@ import {
   sourceCollectionStageLaunchActive as sourceCollectionStageLaunchActivePure,
   sourceCollectionStageLaunchSummary as sourceCollectionStageLaunchSummaryPure,
   sourceCollectionStageReturnRoute as sourceCollectionStageReturnRoutePure,
+  type SourceCollectionStageAgentChatStatus,
 } from "./teams/teamSourceCollectionShellModel";
 
 import { workflowGraphLayout } from "./TeamWorkflowGraphLayout";
@@ -546,7 +549,6 @@ type SourceCollectionStageModule = {
 
 type SourceCollectionCompletionFlowNode = NonNullable<TeamWorkflowKnowledgeIngestionWorkRun["flowVisualization"]>["nodes"][number];
 
-type SourceCollectionStageAgentChatStatus = "ready" | "loading" | "error" | "repair";
 
 
 type NodeDragState = {
@@ -1561,8 +1563,10 @@ export function TeamsRoute({
   }
 
   function sourceCollectionStagePrimaryAgentBinding(stageId: SourceCollectionStageModuleId) {
-    const bindings = sourceCollectionStageAgentBindings(stageId);
-    return bindings.find((binding) => researchStageAgentDirectChatRoute(binding.agent)) ?? bindings[0] ?? null;
+    return selectSourceCollectionStagePrimaryBinding(
+      sourceCollectionStageAgentBindings(stageId),
+      (agent) => Boolean(researchStageAgentDirectChatRoute(agent)),
+    );
   }
 
   function sourceCollectionStageAgentChatState(stageId: SourceCollectionStageModuleId): {
@@ -1576,17 +1580,13 @@ export function TeamsRoute({
       sourceCollectionStageReturnRoute(stageId),
       sourceCollectionStageChatReturnLabel(stageId),
     );
-    if (route) {
-      return { binding, route, status: "ready" };
-    }
-    const hasBoundAgentId = Boolean(String(binding?.agentId || "").trim());
-    if (hasBoundAgentId && !binding?.agent && (agentSummaryQuery.isPending || agentSummaryQuery.isFetching)) {
-      return { binding, route, status: "loading" };
-    }
-    if (hasBoundAgentId && !binding?.agent && agentSummaryQuery.isError) {
-      return { binding, route, status: "error" };
-    }
-    return { binding, route, status: "repair" };
+    return resolveSourceCollectionStageAgentChatState({
+      binding,
+      route,
+      agentSummaryPending: agentSummaryQuery.isPending,
+      agentSummaryFetching: agentSummaryQuery.isFetching,
+      agentSummaryError: agentSummaryQuery.isError,
+    });
   }
 
   function sourceCollectionStageReturnRoute(stageId: SourceCollectionStageModuleId) {
