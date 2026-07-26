@@ -23,7 +23,8 @@ import agentRouteDraftModelSource from "./agents/agentRouteDraftModel.ts?raw";
 import agentRouteManagementModelSource from "./agents/agentRouteManagementModel.ts?raw";
 import agentRoutePolicyDraftModelSource from "./agents/agentRoutePolicyDraftModel.ts?raw";
 import agentRouteBulkModelSource from "./agents/agentRouteBulkModel.ts?raw";
-import agentsRouteCopySource from "./agents/agentsRouteCopy.ts?raw";
+import agentsRouteCopyFacadeSource from "./agents/agentsRouteCopy.ts?raw";
+import agentsRouteCopySource from "../i18n/domains/agentsWorkbenchCopy.ts?raw";
 import agentManagementNavSource from "./AgentManagementNav.tsx?raw";
 import agentManagementModuleBarSource from "./AgentManagementModuleBar.tsx?raw";
 import agentWorkspaceCacheSource from "./agentWorkspaceCache.ts?raw";
@@ -921,6 +922,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain('from "./agents/agentRoutePolicyDraftModel"');
     expect(routeSource).toContain('from "./agents/agentRouteBulkModel"');
     expect(routeSource).toContain('from "./agents/agentsRouteCopy"');
+    expect(agentsRouteCopyFacadeSource).toContain('from "../../i18n/domains/agentsWorkbenchCopy"');
     expect(agentsRouteCopySource).toContain("function agentsRouteCopy");
     expect(agentsRouteCopySource).toContain("function agentConfigPanes");
     expect(agentRoutePolicyDraftModelSource).toContain("function toolPolicyDraftFromAgent");
