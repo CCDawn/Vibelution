@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { AgentConfigHealthIssue, AgentConfigWorkspaceAgent } from "../../api/types";
 
 import {
+  governanceStatusLabel,
   issueLabel,
   issueNextStep,
   issuePanelLabel,
@@ -32,6 +33,12 @@ describe("agentStatusPresentation", () => {
     expect(issueLabel([issue("blocking")], "zh")).toBe("阻塞");
     expect(issuePanelLabel([issue("info")], { statusReminders: "提醒", healthIssues: "问题" })).toBe("提醒");
     expect(issuePanelLabel([issue("warning")], { statusReminders: "提醒", healthIssues: "问题" })).toBe("问题");
+  });
+
+  it("labels tool governance request status", () => {
+    expect(governanceStatusLabel("pending_review", "zh")).toBe("待审批");
+    expect(governanceStatusLabel("applied", "en")).toBe("Applied");
+    expect(governanceStatusLabel("rejected", "zh")).toBe("已拒绝");
   });
 
   it("labels workspace health and runtime states", () => {

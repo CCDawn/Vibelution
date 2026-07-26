@@ -27,6 +27,7 @@ const evolutionSources = [
   activeRunMonitorPanelSource,
   proposalActionBandsPanelSource,
   runRecordsPanelSource,
+  runMutationsSource,
 ].join("\n");
 
 describe("EvolutionRoute library user flow contract", () => {
@@ -189,6 +190,8 @@ describe("EvolutionRoute library user flow contract", () => {
 
   it("separates inconclusive terminal status and harness-only datasets from success wording", () => {
     expect(activeRunMonitorPanelSource).toContain('normalizedDecision === "INCONCLUSIVE"');
+    expect(routeSource).toContain('import("./EvolutionActiveRunMonitorPanel")');
+    expect(routeSource).not.toMatch(/import \{\s*EvolutionActiveRunMonitorPanel/);
     expect(routeSource).toContain("<EvolutionActiveRunMonitorPanel");
     expect(routeSource).toContain("supervisedActiveRunMonitorRun");
     expect(activeRunMonitorPanelSource).toContain("function statusIcon");
@@ -227,7 +230,8 @@ describe("EvolutionRoute library user flow contract", () => {
   });
 
   it("keeps supervised run records queue and detail composition in the extracted panel", () => {
-    expect(routeSource).toContain('import { EvolutionRunRecordsPanel } from "./EvolutionRunRecordsPanel";');
+    expect(routeSource).toContain('import("./EvolutionRunRecordsPanel")');
+    expect(routeSource).not.toMatch(/import \{ EvolutionRunRecordsPanel \} from "\.\/EvolutionRunRecordsPanel"/);
     expect(routeSource).toContain("<EvolutionRunRecordsPanel");
     expect(routeSource).toContain("filteredRuns={filteredRuns}");
     expect(routeSource).toContain("selectedRun={selectedRun}");
@@ -269,7 +273,8 @@ describe("EvolutionRoute library user flow contract", () => {
   });
 
   it("keeps proposal action bands in the extracted panel while route owns mutations", () => {
-    expect(routeSource).toContain('import { EvolutionProposalActionBandsPanel } from "./EvolutionProposalActionBandsPanel";');
+    expect(routeSource).toContain('import("./EvolutionProposalActionBandsPanel")');
+    expect(routeSource).not.toMatch(/import \{ EvolutionProposalActionBandsPanel \} from "\.\/EvolutionProposalActionBandsPanel"/);
     expect(routeSource).toContain("<EvolutionProposalActionBandsPanel");
     expect(routeSource).toContain("proposal={proposalDetailQuery.data}");
     expect(routeSource).toContain("actionError={actionMutation.error?.message ?? \"\"}");
@@ -353,7 +358,6 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("<EvolutionSelfTrackBoundary");
     expect(routeSource).not.toContain("LazySelfEvolutionTrack");
     expect(routeSource).not.toContain('import("./SelfEvolutionTrack")');
-    expect(routeSource).not.toContain("<Suspense");
     expect(routeSource).not.toContain('import { SelfEvolutionTrack } from "./SelfEvolutionTrack";');
     expect(selfTrackBoundarySource).toContain("LazySelfEvolutionTrack");
     expect(selfTrackBoundarySource).toContain('import("./SelfEvolutionTrack")');
@@ -362,6 +366,9 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(selfTrackBoundarySource).not.toContain("useQuery");
     expect(selfTrackBoundarySource).not.toContain("useMutation");
     expect(selfTrackBoundarySource).not.toContain("queryClient");
+    // U3: supervised secondary panels also use Suspense; self track stays boundary-owned.
+    expect(routeSource).toContain('import("./EvolutionRunRecordsPanel")');
+    expect(routeSource).toContain("<Suspense");
   });
 
   it("lets the self-evolution workspace fill the remaining viewport height", () => {

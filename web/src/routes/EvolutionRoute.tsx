@@ -18,7 +18,7 @@ import {
   Wrench,
   X,
 } from "lucide-react";
-import { type CSSProperties, type KeyboardEvent, type PointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, type CSSProperties, type KeyboardEvent, type PointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
@@ -95,19 +95,33 @@ import {
 import { supervisedDecisionLabel } from "./supervisedRunRecordLabel";
 import { buildSupervisedRunControlSummary } from "./supervisedRunSummary";
 import { buildSupervisedCaseTraceItems, type SupervisedCaseTraceItem, type SupervisedCaseTraceTone } from "./supervisedCaseTrace";
-import {
-  EvolutionActiveRunMonitorPanel,
-  type EvolutionActiveRunClosedLoopLedger,
-  type EvolutionActiveRunMonitorEventItem,
-  type EvolutionActiveRunMonitorMetric,
-  type EvolutionActiveRunMonitorRunView,
+import type {
+  EvolutionActiveRunClosedLoopLedger,
+  EvolutionActiveRunMonitorEventItem,
+  EvolutionActiveRunMonitorMetric,
+  EvolutionActiveRunMonitorRunView,
 } from "./EvolutionActiveRunMonitorPanel";
-import { EvolutionProposalActionBandsPanel } from "./EvolutionProposalActionBandsPanel";
-import { EvolutionRunRecordsPanel } from "./EvolutionRunRecordsPanel";
 import { EvolutionSelfTrackBoundary } from "./EvolutionSelfTrackBoundary";
 import { createEvolutionWorkspaceCache } from "./evolutionWorkspaceCache";
 import { modelDisplayLabel } from "./agentDisplay";
 import styles from "./EvolutionRoute.styles";
+
+/** U3: supervised secondary view panels — live/runs/library packs stay off each other's graph. */
+const EvolutionActiveRunMonitorPanel = lazy(() =>
+  import("./EvolutionActiveRunMonitorPanel").then((module) => ({
+    default: module.EvolutionActiveRunMonitorPanel,
+  })),
+);
+const EvolutionRunRecordsPanel = lazy(() =>
+  import("./EvolutionRunRecordsPanel").then((module) => ({
+    default: module.EvolutionRunRecordsPanel,
+  })),
+);
+const EvolutionProposalActionBandsPanel = lazy(() =>
+  import("./EvolutionProposalActionBandsPanel").then((module) => ({
+    default: module.EvolutionProposalActionBandsPanel,
+  })),
+);
 
 type RunFilter = "all" | "success" | "failed";
 type LibraryView = "items" | "pending";
@@ -3132,41 +3146,43 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
             onKeyDown={handleLiveLaunchResizeKeyDown}
           />
 
-          <EvolutionActiveRunMonitorPanel
-            ariaHidden={liveRunCollapsed}
-            className={
-              liveRunCollapsed
-                ? `${styles.surface} ${styles.liveSurface} ${styles.dashboardRun} ${styles.paneCollapsed}`
-                : `${styles.surface} ${styles.liveSurface} ${styles.dashboardRun}`
-            }
-            header={{
-              eyebrow: t("activeSupervisedRun"),
-              title: monitoredRunIdentity || t("activeSupervisedRun"),
-              titleTooltip: monitoredRunIdentity || undefined,
-              statusLabel: monitoredRun ? monitoredStatusLabel : undefined,
-              sourceKindLabel: monitoredRun ? sourceKindLabel(monitoredRun.sourceKind) : undefined,
-              fallbackStatusLabel: workbenchSourceLabel(workbenchState?.source ?? "unknown"),
-            }}
-            run={supervisedActiveRunMonitorRun}
-            idle={{
-              notice: t("noActiveSupervisedRun"),
-              closedLoop: supervisedClosedLoopLedger,
-              metrics: supervisedActiveRunMonitorIdleMetrics,
-              related: supervisedActiveRunMonitorIdleRelated,
-              latestRunAction: {
-                label: t("openLatestRuns"),
-                disabled: !overviewLatestRunId,
-                onClick: () => openRun(overviewLatestRunId || null),
-              },
-              libraryAction: {
-                label: t("openLibraryQueue"),
-                onClick: () => {
-                  setLibraryView("items");
-                  goToSupervisedView("library");
+          <Suspense fallback={<p className={styles.noticeText}>{t("loading")}</p>}>
+            <EvolutionActiveRunMonitorPanel
+              ariaHidden={liveRunCollapsed}
+              className={
+                liveRunCollapsed
+                  ? `${styles.surface} ${styles.liveSurface} ${styles.dashboardRun} ${styles.paneCollapsed}`
+                  : `${styles.surface} ${styles.liveSurface} ${styles.dashboardRun}`
+              }
+              header={{
+                eyebrow: t("activeSupervisedRun"),
+                title: monitoredRunIdentity || t("activeSupervisedRun"),
+                titleTooltip: monitoredRunIdentity || undefined,
+                statusLabel: monitoredRun ? monitoredStatusLabel : undefined,
+                sourceKindLabel: monitoredRun ? sourceKindLabel(monitoredRun.sourceKind) : undefined,
+                fallbackStatusLabel: workbenchSourceLabel(workbenchState?.source ?? "unknown"),
+              }}
+              run={supervisedActiveRunMonitorRun}
+              idle={{
+                notice: t("noActiveSupervisedRun"),
+                closedLoop: supervisedClosedLoopLedger,
+                metrics: supervisedActiveRunMonitorIdleMetrics,
+                related: supervisedActiveRunMonitorIdleRelated,
+                latestRunAction: {
+                  label: t("openLatestRuns"),
+                  disabled: !overviewLatestRunId,
+                  onClick: () => openRun(overviewLatestRunId || null),
                 },
-              },
-            }}
-          />
+                libraryAction: {
+                  label: t("openLibraryQueue"),
+                  onClick: () => {
+                    setLibraryView("items");
+                    goToSupervisedView("library");
+                  },
+                },
+              }}
+            />
+          </Suspense>
 
           <PaneCollapseHandle
             side="right"
@@ -3400,65 +3416,67 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
             </div>
           </VSection>
 
-          <EvolutionRunRecordsPanel
-            className={styles.runsWorkspace}
-            style={runsWorkspaceStyle}
-            lang={lang}
-            labels={{ t, statusLabel, decisionLabel, riskLabel, proposalActionLabel }}
-            separator={(
-              <PaneCollapseHandle
-                side="left"
-                collapsed={runsQueueCollapsed}
-                separatorLabel={resizeRunsQueueLabel}
-                collapseLabel={lang === "zh" ? "收起运行列表" : "Collapse run list"}
-                expandLabel={lang === "zh" ? "展开运行列表" : "Expand run list"}
-                className={styles.resizeHandle}
-                active={evolutionDraggingPaneId === "runs-queue"}
-                valueNow={runsQueueWidth}
-                valueMin={EVOLUTION_RUNS_QUEUE_PANE.minWidth}
-                valueMax={EVOLUTION_RUNS_QUEUE_PANE.maxWidth}
-                onToggle={() => setRunsQueueCollapsed((current) => !current)}
-                onPointerDown={handleRunsResizeStart}
-                onKeyDown={handleRunsResizeKeyDown}
-              />
-            )}
-            queueCollapsed={runsQueueCollapsed}
-            filteredRuns={filteredRuns}
-            hasRuns={hasRuns}
-            hasFilteredRuns={hasFilteredRuns}
-            filteredRunsEmpty={filteredRunsEmpty}
-            runHeaderMessage={runHeaderMessage}
-            selectedRun={selectedRun}
-            selectedRunIds={selectedRunIds}
-            visibleDeletableRunCount={visibleDeletableRunIds.length}
-            allVisibleDeletableRunsSelected={allVisibleDeletableRunsSelected}
-            relatedLibraryItems={relatedLibraryItems}
-            relatedPendingItems={relatedPendingItems}
-            relatedProposalCount={relatedProposalCount}
-            runLocked={runLocked}
-            runRecordsFeedback={runRecordsFeedback}
-            deleteRunRecordError={deleteRunRecordMutation.error?.message ?? ""}
-            bulkDeleteRunRecordsError={bulkDeleteRunRecordsMutation.error?.message ?? ""}
-            bulkDeleteRunRecordsPending={bulkDeleteRunRecordsMutation.isPending}
-            deleteRunRecordPending={deleteRunRecordMutation.isPending}
-            actionFeedback={actionFeedback}
-            actionError={actionMutation.error?.message ?? ""}
-            actionPending={actionMutation.isPending}
-            libraryFeedback={libraryFeedback}
-            deleteProposalError={deleteProposalMutation.error?.message ?? ""}
-            deleteProposalPending={deleteProposalMutation.isPending}
-            onSelectVisibleRunRecords={selectVisibleRunRecords}
-            onClearRunSelection={() => setSelectedRunIds([])}
-            onBulkDeleteRunRecords={triggerBulkRunRecordDelete}
-            onReturnToOverview={() => goToSupervisedView("live")}
-            onShowAllRuns={() => setRunFilter("all")}
-            onSelectRun={setSelectedRunId}
-            onToggleRunSelection={toggleRunSelection}
-            onRunAction={triggerRunAction}
-            onOpenProposal={openProposalFromRun}
-            onDeleteProposal={triggerProposalDelete}
-            onDeleteRunRecord={triggerRunRecordDelete}
-          />
+          <Suspense fallback={<p className={styles.noticeText}>{t("loading")}</p>}>
+            <EvolutionRunRecordsPanel
+              className={styles.runsWorkspace}
+              style={runsWorkspaceStyle}
+              lang={lang}
+              labels={{ t, statusLabel, decisionLabel, riskLabel, proposalActionLabel }}
+              separator={(
+                <PaneCollapseHandle
+                  side="left"
+                  collapsed={runsQueueCollapsed}
+                  separatorLabel={resizeRunsQueueLabel}
+                  collapseLabel={lang === "zh" ? "收起运行列表" : "Collapse run list"}
+                  expandLabel={lang === "zh" ? "展开运行列表" : "Expand run list"}
+                  className={styles.resizeHandle}
+                  active={evolutionDraggingPaneId === "runs-queue"}
+                  valueNow={runsQueueWidth}
+                  valueMin={EVOLUTION_RUNS_QUEUE_PANE.minWidth}
+                  valueMax={EVOLUTION_RUNS_QUEUE_PANE.maxWidth}
+                  onToggle={() => setRunsQueueCollapsed((current) => !current)}
+                  onPointerDown={handleRunsResizeStart}
+                  onKeyDown={handleRunsResizeKeyDown}
+                />
+              )}
+              queueCollapsed={runsQueueCollapsed}
+              filteredRuns={filteredRuns}
+              hasRuns={hasRuns}
+              hasFilteredRuns={hasFilteredRuns}
+              filteredRunsEmpty={filteredRunsEmpty}
+              runHeaderMessage={runHeaderMessage}
+              selectedRun={selectedRun}
+              selectedRunIds={selectedRunIds}
+              visibleDeletableRunCount={visibleDeletableRunIds.length}
+              allVisibleDeletableRunsSelected={allVisibleDeletableRunsSelected}
+              relatedLibraryItems={relatedLibraryItems}
+              relatedPendingItems={relatedPendingItems}
+              relatedProposalCount={relatedProposalCount}
+              runLocked={runLocked}
+              runRecordsFeedback={runRecordsFeedback}
+              deleteRunRecordError={deleteRunRecordMutation.error?.message ?? ""}
+              bulkDeleteRunRecordsError={bulkDeleteRunRecordsMutation.error?.message ?? ""}
+              bulkDeleteRunRecordsPending={bulkDeleteRunRecordsMutation.isPending}
+              deleteRunRecordPending={deleteRunRecordMutation.isPending}
+              actionFeedback={actionFeedback}
+              actionError={actionMutation.error?.message ?? ""}
+              actionPending={actionMutation.isPending}
+              libraryFeedback={libraryFeedback}
+              deleteProposalError={deleteProposalMutation.error?.message ?? ""}
+              deleteProposalPending={deleteProposalMutation.isPending}
+              onSelectVisibleRunRecords={selectVisibleRunRecords}
+              onClearRunSelection={() => setSelectedRunIds([])}
+              onBulkDeleteRunRecords={triggerBulkRunRecordDelete}
+              onReturnToOverview={() => goToSupervisedView("live")}
+              onShowAllRuns={() => setRunFilter("all")}
+              onSelectRun={setSelectedRunId}
+              onToggleRunSelection={toggleRunSelection}
+              onRunAction={triggerRunAction}
+              onOpenProposal={openProposalFromRun}
+              onDeleteProposal={triggerProposalDelete}
+              onDeleteRunRecord={triggerRunRecordDelete}
+            />
+          </Suspense>
         </div>
       ) : null}
 
@@ -4087,18 +4105,20 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                       ) : null}
                     </div>
 
-                    <EvolutionProposalActionBandsPanel
-                      proposal={proposalDetailQuery.data}
-                      labels={{ t, proposalActionLabel }}
-                      runLocked={runLocked}
-                      actionFeedback={actionFeedback}
-                      actionError={actionMutation.error?.message ?? ""}
-                      actionPending={actionMutation.isPending}
-                      deleteProposalError={deleteProposalMutation.error?.message ?? ""}
-                      deleteProposalPending={deleteProposalMutation.isPending}
-                      onRunAction={triggerRunAction}
-                      onDeleteProposal={triggerProposalDelete}
-                    />
+                    <Suspense fallback={<p className={styles.noticeText}>{t("loading")}</p>}>
+                      <EvolutionProposalActionBandsPanel
+                        proposal={proposalDetailQuery.data}
+                        labels={{ t, proposalActionLabel }}
+                        runLocked={runLocked}
+                        actionFeedback={actionFeedback}
+                        actionError={actionMutation.error?.message ?? ""}
+                        actionPending={actionMutation.isPending}
+                        deleteProposalError={deleteProposalMutation.error?.message ?? ""}
+                        deleteProposalPending={deleteProposalMutation.isPending}
+                        onRunAction={triggerRunAction}
+                        onDeleteProposal={triggerProposalDelete}
+                      />
+                    </Suspense>
 
                     <div className={styles.detailSection}>
                       <h3>{t("evidencePaths")}</h3>
