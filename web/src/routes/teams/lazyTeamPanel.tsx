@@ -7,8 +7,9 @@ import {
 } from "react";
 
 /**
- * Shared secondary-lazy helper for Teams UI panels.
- * All named loaders that point at the same module share one async chunk.
+ * Secondary-lazy helper for Teams UI panels.
+ * Named loaders that point at the same module share one async chunk;
+ * use distinct loaders (shared / research / source-collection) for path-scoped packs.
  */
 export function createLazyNamedTeamPanel<
   TModule extends Record<string, ComponentType<any>>,
