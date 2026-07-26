@@ -18,8 +18,9 @@ and panel composition. Pure query/presentation/draft helpers should leave the sh
 | Config/persona/task/context-compression drafts | `agentRouteDraftModel.ts` |
 | Tool/memory/membership/runtime policy drafts | `agentRoutePolicyDraftModel.ts` |
 | Bulk config / archive / center-return helpers | `agentRouteBulkModel.ts` |
-| Agents workbench bilingual copy / pane badges | `agentsRouteCopy.ts` |
+| Agents workbench bilingual copy / pane badges | `agentsRouteCopy.ts` → `../../i18n/domains/agentsWorkbenchCopy.ts` |
 | Shared nav/compression dictionary pack | `../../i18n/domains/dictionaryAgents.ts` |
+| Soft-prefetch workbench copy | `../../i18n/loadAgentsWorkbenchCopy.ts` |
 | Management brief / setup filters / list columns | `agentRouteManagementModel.ts` |
 | Config draft mutations | `useAgentConfigDraftMutations.ts` |
 | Workbench profile/lifecycle/policy mutations | `useAgentWorkbenchMutations.ts` |
@@ -59,8 +60,18 @@ and panel composition. Pure query/presentation/draft helpers should leave the sh
 - **Done (M3 structure):** `agentRoutePolicyDraftModel` — tool/memory/membership/delegation/supervision drafts + capability preview.
 - **Done (M7 structure):** `agentRouteBulkModel` — bulk config draft/patch/ready, metadata archive guards, center return labels; draft-equals moved into `agentRouteDraftModel`.
 - **Done (C1 structure):** `agentsRouteCopy` — ~800-line zh/en workbench copy + `agentConfigPanes` badges out of shell.
+- **Done (C1.1 dictionary charter):** nested workbench tables live under `i18n/domains/agentsWorkbenchCopy.ts`; facade + soft-prefetch loader; flat `dictionaryAgents` stays shared nav/compression only.
 - **Still in shell:** large JSX composition, reset-session side effects.
-- **Deferred:** full merge of workbench copy into `TranslationKey` / `useAppI18n({ domains: ["agents"] })` (needs dictionary charter; keep `dictionaryAgents` for shared nav/compression only).
+- **Deferred (charter next):** flatten high-traffic keys into `TranslationKey` and dual-read via `useAppI18n({ domains: ["agents"] })`.
+
+## Dictionary charter (Agents workbench)
+
+| Layer | Owner | Notes |
+|-------|-------|-------|
+| Flat shared keys | `dictionaryAgents` | nav/compression; in `TranslationKey` |
+| Nested workbench tables | `agentsWorkbenchCopy` | bulk/filter/setup/policy labels; **not** flat TranslationKey |
+| Route façade | `routes/agents/agentsRouteCopy.ts` | stable import path for shell/tests |
+| Soft warm | `loadAgentsWorkbenchCopy` + AppShell agents `onPointerEnter` | module cache only |
 
 ## Structure program (maintainability-first)
 
@@ -72,6 +83,7 @@ and panel composition. Pure query/presentation/draft helpers should leave the sh
 | M4–M6 | Evolution / Teams / Conversation maps | See `evolution/README.md`, `teams/README.md`, `components/conversation/README.md` |
 | M7 | Bulk config / metadata / archive pure extract | **Done** — `agentRouteBulkModel.ts` |
 | C1 | Workbench copy table externalize | **Done** — `agentsRouteCopy.ts` |
+| C1.1 | Domain-shaped workbench copy + soft prefetch | **Done** — `i18n/domains/agentsWorkbenchCopy.ts` |
 | Shell rule | Route only orchestrates | ongoing |
 
 ## Perf notes (secondary)

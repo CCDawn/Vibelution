@@ -5,6 +5,10 @@ import coreSource from "./dictionaryCore.ts?raw";
 import chatSource from "./dictionaryChat.ts?raw";
 import evolutionSource from "./dictionaryEvolution.ts?raw";
 import gitSource from "./dictionaryGit.ts?raw";
+import agentsSource from "./dictionaryAgents.ts?raw";
+import agentsWorkbenchSource from "./agentsWorkbenchCopy.ts?raw";
+import agentsWorkbenchFacadeSource from "../../routes/agents/agentsRouteCopy.ts?raw";
+import loadAgentsWorkbenchSource from "../loadAgentsWorkbenchCopy.ts?raw";
 
 describe("dictionary domain boundary", () => {
   it("keeps dictionary.ts as a merge façade over domain slices", () => {
@@ -21,5 +25,16 @@ describe("dictionary domain boundary", () => {
     expect(chatSource).toContain("navChat:");
     expect(evolutionSource).toContain("navEvolution:");
     expect(gitSource).toContain("gitPageTitle:");
+    expect(agentsSource).toContain("navAgents:");
+  });
+
+  it("keeps Agents workbench nested copy as a structured domain table, not flat TranslationKey", () => {
+    expect(agentsWorkbenchSource).toContain("function agentsRouteCopy");
+    expect(agentsWorkbenchSource).toContain("title: \"Agent 中心\"");
+    expect(agentsWorkbenchFacadeSource).toContain('from "../../i18n/domains/agentsWorkbenchCopy"');
+    expect(loadAgentsWorkbenchSource).toContain("prefetchAgentsWorkbenchCopy");
+    // Flat dictionaryAgents remains small shared slice; workbench tables stay nested.
+    expect(agentsSource).not.toContain("bulkPurgeConfirm:");
+    expect(agentsWorkbenchSource).toContain("bulkPurgeConfirm:");
   });
 });

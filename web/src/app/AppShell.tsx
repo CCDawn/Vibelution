@@ -2378,7 +2378,17 @@ export function AppShell() {
           <NavLink to="/memory" className={linkClassName} onClick={(event) => handlePrimaryNavClick(event, "/memory")}>
             {t("navMemory")}
           </NavLink>
-          <NavLink to="/agents" className={linkClassName} onClick={(event) => handlePrimaryNavClick(event, "/agents")}>
+          <NavLink
+            to="/agents"
+            className={linkClassName}
+            onClick={(event) => handlePrimaryNavClick(event, "/agents")}
+            onPointerEnter={() => {
+              // C1.1: soft-warm Agents structured workbench copy (not flat TranslationKey).
+              void import("../i18n/loadAgentsWorkbenchCopy").then((module) => {
+                module.prefetchAgentsWorkbenchCopy();
+              });
+            }}
+          >
             {t("navAgents")}
           </NavLink>
         </nav>
