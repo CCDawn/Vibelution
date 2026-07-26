@@ -59,6 +59,26 @@ Recorded for high-ROI program **scope A** (F0–F3, F5, F6; F4 trigger-only).
 | F5 | Verified: AppShell/Launcher use `useShellI18n` only (existing contracts) |
 | F4 / R1–R4 | Chat secondary poll; Config pane lazy; Evolution poll gate; Memory item mutations + graph lazy |
 | S1–S3 | Memory view-level panel lazy; Chat status/group/file tabs lazy; Memory knowledge mutations extract |
+| T1–T3 | ConversationView prefetch + dialog lazy; Chat file/tool dialog lazy; Evolution mutation hooks |
+| T4 | Launcher secondary panels React.lazy; i18n shell boundary re-locked (useShellI18n only) |
+
+### Post-T1–T3 chunk notes (build evidence)
+
+| Chunk | ~kB raw | Notes |
+|---|---:|---|
+| ChatCodingRoute | ~264 | Surface lazy (S2) + T2 file/tool dialogs out of shell graph when unused |
+| ConversationView | ~192–196 | Still large transcript path; ImagePreview / AgentContext are separate chunks |
+| ConversationImagePreviewDialog | ~4 | T1 dialog pack |
+| AgentContextSectionsView | ~5 | T1 context pack |
+| ChatFilePreviewPanel / ChatToolApprovalDialog | ~1 / ~3 | T2 session workspace packs |
+| EvolutionRoute | ~183 | Inline mutations → hooks (T3); route still owns layout/query |
+| useAppI18n | ~89 | Route-level full dictionary chunk; shell must stay on `useShellI18n` (T4/F5) |
+| LauncherRoute | **~80** (was ~122) | T4: shell −~42 kB raw; panels ~9–12 kB each |
+| LauncherStartup / Maintenance / Developer / Diagnostics | ~11 / ~9 / ~12 / ~11 | T4 lazy packs |
+
+Prefetch: `prefetchConversationView` after `activeSessionId` via idle callback (does not mount).
+
+Deferred (not T4): domain-splitting `dictionary.ts` / `useAppI18n` by route — high churn, measure before any cut.
 
 ### Post-F3 Agents chunk note
 
