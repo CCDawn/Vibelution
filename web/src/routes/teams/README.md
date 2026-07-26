@@ -67,6 +67,7 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 - New panels must enter exactly one pack; do **not** revive a mono `teamSecondaryPanels` UI barrel.
 - Same-pack static imports are fine; cross-pack **value** imports of workspaces are forbidden.
 - Stay static in the shell (on purpose): pure models, query keys/hooks, style maps.
+- Prefetch is path-scoped via `teamPanelPrefetch.ts`: warm research or SC after team/view switch; **never** prefetch all packs on shell mount.
 
 **Do not** re-add static value imports of panel components into `TeamsRoute.tsx` without a budget re-check.
 
@@ -82,14 +83,14 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 - **Wave 8L done:** SC recovery / candidate / graph / memory workspaces extracted (controls/active-stage still route-owned).
 - **Wave 8M done:** SC selected-source / controls / active-stage workspaces extracted (small helpers like filterBar/pagination/modeFields remain route-local).
 - **Wave 8N done:** Split mono secondary barrel into path-scoped packs: `teamSharedPanels` / `teamResearchPanels` / `teamSourceCollectionPanels`.
+- **Wave 8N+prefetch done:** Path-scoped pack warm-up after team/view switch (`teamPanelPrefetch.ts`).
 
 ## Next (planned)
 
-1. Optional path prefetch (research vs SC) after view/team switch — not on shell mount.
-2. Extract EventSource-free mutation hooks (`useTeamWorkflowMutations` family) only when a hook can own a full boundary.
-3. Optional: extract remaining small SC helpers only if they block further shell shrink.
-4. Optional: style-bound tone helpers (`workflowQualityTone`) once styles map ownership is clear.
-5. Optional: collapse SC chrome+workspace double layer when inject surface stabilizes.
+1. Extract EventSource-free mutation hooks (`useTeamWorkflowMutations` family) only when a hook can own a full boundary.
+2. Optional: extract remaining small SC helpers only if they block further shell shrink.
+3. Optional: style-bound tone helpers (`workflowQualityTone`) once styles map ownership is clear.
+4. Optional: collapse SC chrome+workspace double layer when inject surface stabilizes.
 
 ## Rules
 

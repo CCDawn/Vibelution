@@ -12,6 +12,10 @@ import { usePersistedPaneResize } from "../components/layout/usePersistedPaneRes
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import { createLazyNamedTeamPanel } from "./teams/lazyTeamPanel";
 import {
+  prefetchTeamsPanelPacks,
+  resolveTeamsPanelPrefetchPacks,
+} from "./teams/teamPanelPrefetch";
+import {
   AI_SEARCH_RUN_PREVIEW_LIMIT,
 } from "./teams/aiSearchPresentation";
 import {
@@ -1280,6 +1284,26 @@ export function TeamsRoute({
   const researchCanvasReadOnly = researchWorkflowTeamSelected && researchWorkspaceView === "canvas";
   const sourceCollectionWorkspaceSelected =
     researchWorkflowTeamSelected && (sourceCollectionStandalone || researchWorkspaceView === "source_collection" || researchWorkspaceView === "knowledge_collection");
+  // Path-scoped pack warm-up after team/view switch (not shell mount-all).
+  useEffect(() => {
+    const packs = resolveTeamsPanelPrefetchPacks({
+      researchWorkflowTeamSelected,
+      aiSearchScopeTeamSelected,
+      sourceCollectionWorkspaceSelected,
+    });
+    if (packs.length === 0) {
+      return;
+    }
+    prefetchTeamsPanelPacks(packs, {
+      shared: loadTeamSharedPanels,
+      research: loadTeamResearchPanels,
+      source_collection: loadTeamSourceCollectionPanels,
+    });
+  }, [
+    researchWorkflowTeamSelected,
+    aiSearchScopeTeamSelected,
+    sourceCollectionWorkspaceSelected,
+  ]);
   const teamCanvasQueryEnabled = resolveTeamCanvasQueryEnabled({
     effectiveTeamId,
     researchWorkflowTeamSelected,

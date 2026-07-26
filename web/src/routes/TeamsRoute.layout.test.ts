@@ -486,6 +486,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain('import("./teams/teamResearchPanels")');
     expect(routeSource).toContain('import("./teams/teamSourceCollectionPanels")');
     expect(routeSource).toContain('createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamsSourceCollectionPanel")');
+    // Wave 8N+prefetch: warm packs after team/view switch, not mount-all.
+    expect(routeSource).toContain("resolveTeamsPanelPrefetchPacks");
+    expect(routeSource).toContain("prefetchTeamsPanelPacks");
+    expect(routeSource).toContain("sourceCollectionWorkspaceSelected");
     expect(teamsSourceCollectionPanelSource).toContain("TeamSourceCollectionOverviewPanel");
     expect(teamsSourceCollectionPanelSource).not.toContain("TeamsRoute.styles");
     expect(teamsSourceCollectionPanelSource).not.toContain("useQuery");
