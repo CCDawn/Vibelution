@@ -1,6 +1,6 @@
 import "../design/route-css/agents.tailwind.css";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   Bot,
@@ -10,7 +10,7 @@ import {
   UserRound,
   Users,
 } from "lucide-react";
-import { type MouseEvent, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, type MouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
@@ -54,6 +54,8 @@ import {
 import { VButton } from "../components/vui";
 import { safeReturnToPath } from "../app/navigationReturn";
 import { useShellI18n } from "../i18n/useShellI18n";
+import { useAgentConfigDraftMutations } from "./agents/useAgentConfigDraftMutations";
+import { useAgentWorkbenchMutations } from "./agents/useAgentWorkbenchMutations";
 import { useChatWorkbenchStore } from "../store/chatWorkbenchStore";
 import { type AgentActivityTimelineItem } from "./AgentActivityHistoryPanel";
 import {
@@ -85,9 +87,14 @@ import {
   type AgentSelectedDetailContentPanelProps,
 } from "./AgentSelectedDetailContentPanel";
 import { type AgentTaskDraft } from "./AgentTaskProfilePanel";
-import { AgentEffectiveConfigurationInspectorPanel } from "./AgentEffectiveConfigurationPanel";
 import { governanceStatusLabel } from "./AgentToolGovernancePanel";
 import { AgentWorkspaceLayoutPanel } from "./AgentWorkspaceLayoutPanel";
+
+const AgentEffectiveConfigurationInspectorPanel = lazy(() =>
+  import("./AgentEffectiveConfigurationPanel").then((module) => ({
+    default: module.AgentEffectiveConfigurationInspectorPanel,
+  })),
+);
 import {
   agentCenterMemoryRoute,
   agentCenterModelsRoute,
@@ -3820,611 +3827,83 @@ export function AgentsRoute() {
     }, { replace: true });
   }
 
-  const saveAgentConfigDraftMutation = useMutation({
-    mutationFn: (payload: { agentId: string; baseUpdatedAt: string; snapshot: Record<string, unknown> }) =>
-      fetchJson<NonNullable<AgentConfigChanges["activeDraft"]>>(
-        `/api/agents/${encodeURIComponent(payload.agentId)}/config-drafts`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            baseUpdatedAt: payload.baseUpdatedAt,
-            snapshot: payload.snapshot,
-            summary: lang === "zh" ? "来自 Agent Center 配置编辑器。" : "Saved from the Agent Center configuration editor.",
-          }),
-        },
-      ),
-    onSuccess: async (_, variables) => {
-      setNotice({
-        tone: "success",
-        text: lang === "zh" ? "当前配置已保存为草稿，尚未影响运行。" : "The current configuration was saved as a draft and is not running yet.",
-      });
-      await queryClient.invalidateQueries({ queryKey: ["agents", "config-changes", variables.agentId] });
-    },
-    onError: (error) => {
-      const message = error instanceof Error ? error.message : String(error);
-      setNotice({
-        tone: "error",
-        text: message.includes("agent_draft_conflict")
-          ? (lang === "zh" ? "草稿基线已过期，请刷新后重新保存。" : "The draft baseline is stale. Refresh before saving again.")
-          : message,
-      });
-    },
+  const {
+    saveAgentConfigDraftMutation,
+    discardAgentConfigDraftMutation,
+    updateAgentMutation,
+    promoteAgentModelMutation,
+  } = useAgentConfigDraftMutations({
+    lang,
+    setNotice,
+    chatWorkspaceCache,
+    setConfigDraft,
+    draftSyncSourceRef,
+    getWorkspace: () => workspace,
+    draftFromAgent,
+    draftSyncSourceFromAgent,
+    normalizeAgentLlmBindings,
+    contextCompressionPolicyFromDraft,
+    agentMetadataWithReasoningEffort,
+    agentLabel,
+    updatedAgentWorkspaceCache,
   });
 
-  const discardAgentConfigDraftMutation = useMutation({
-    mutationFn: (payload: { agentId: string; draftId: string }) =>
-      fetchJson<{ draftId: string; status: string }>(
-        `/api/agents/${encodeURIComponent(payload.agentId)}/config-drafts/${encodeURIComponent(payload.draftId)}`,
-        { method: "DELETE" },
-      ),
-    onSuccess: async (_, variables) => {
-      setNotice({ tone: "success", text: lang === "zh" ? "草稿已放弃，发布记录保留不变。" : "Draft discarded; published revisions remain unchanged." });
-      await queryClient.invalidateQueries({ queryKey: ["agents", "config-changes", variables.agentId] });
-    },
-    onError: (error) => {
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
-    },
+  const {
+    updatePersonaMutation,
+    updateTaskMutation,
+    archiveAgentMutation,
+    purgeAgentMutation,
+    resetAgentMutation,
+    updateAvatarMutation,
+    uploadAvatarMutation,
+    updateMembershipMutation,
+    updateToolPolicyMutation,
+    createToolGovernanceMutation,
+    resolveToolGovernanceMutation,
+    updateMemoryPolicyMutation,
+    updateRuntimePolicyMutation,
+    consumeMessageMutation,
+    consumeAllMessagesMutation,
+  } = useAgentWorkbenchMutations({
+    lang,
+    copy,
+    setNotice,
+    chatWorkspaceCache,
+    setPersonaDraft,
+    setTaskDraft,
+    draftSyncSourceRef,
+    setSelectedAgentId,
+    setActivePane,
+    setResettingAgentIds,
+    setResetOptions,
+    setMembershipDraft,
+    setToolGovernanceDraft,
+    getWorkspace: () => workspace,
+    getSelectedAgentId: () => selectedAgentId,
+    getActivePane: () => activePane,
+    getSelectedAgent: () => selectedAgent,
+    reconcileResetDirectSession,
+    encodeArrayBufferBase64,
+    updatedAgentWorkspaceCache,
+    archivedWorkspaceCache,
+    purgedWorkspaceCache,
+    optimisticArchivedAgent,
+    personaProfileFromDraft,
+    personaDraftFromAgent,
+    taskProfileFromDraft,
+    taskDraftFromAgent,
+    draftSyncSourceFromAgent,
+    agentLabel,
+    defaultToolPolicy,
+    defaultMemoryPolicy,
+    sortedIds,
+    toolPolicyDeltaFromDraft,
+    toolGovernanceDraftFromAgent,
+    governanceStatusLabel,
+    DEFAULT_AGENT_RESET_OPTIONS,
+    stringValue,
   });
 
-  const updateAgentMutation = useMutation({
-    mutationFn: (payload: { agentId: string; agent: AgentConfigWorkspaceAgent; draft: AgentConfigDraft; modelChoices: AgentModelChoice[]; sourceDraftId: string }) =>
-      fetchJson<AgentConfigWorkspaceAgent>(`/api/agents/${encodeURIComponent(payload.agentId)}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          displayName: payload.draft.displayName,
-          llmBindings: normalizeAgentLlmBindings(payload.draft.llmBindings),
-          promptTemplateId: payload.draft.promptTemplateId,
-          toolPolicyId: payload.draft.toolPolicyId,
-          memoryPolicyId: payload.draft.memoryPolicyId,
-          contextCompressionPolicy: contextCompressionPolicyFromDraft(payload.draft.contextCompressionPolicy),
-          metadata: agentMetadataWithReasoningEffort(payload.draft, payload.modelChoices),
-          status: payload.draft.status,
-          expectedUpdatedAt: payload.agent.updatedAt,
-          sourceDraftId: payload.sourceDraftId,
-        }),
-      }),
-    onSuccess: (agent, variables) => {
-      queryClient.setQueryData<AgentConfigWorkspace | undefined>(
-        queryKeys.agentConfigWorkspace(),
-        (current) => updatedAgentWorkspaceCache(current, agent),
-      );
-      setNotice({
-        tone: "success",
-        text: lang === "zh" ? `已保存 ${agentLabel(agent)} 的 Agent 配置` : `Saved config for ${agentLabel(agent)}`,
-      });
-      void queryClient.invalidateQueries({ queryKey: ["agents", "config-changes", variables.agentId] });
-      void chatWorkspaceCache.afterAgentWorkspaceChanged();
-    },
-    onError: (error) => {
-      const message = error instanceof Error ? error.message : String(error);
-      setNotice({
-        tone: "error",
-        text: message.includes("agent_update_conflict")
-          ? (lang === "zh" ? "配置已被其他编辑更新，请刷新后再保存。" : "Configuration changed elsewhere. Refresh before saving again.")
-          : message,
-      });
-    },
-  });
-
-  const promoteAgentModelMutation = useMutation({
-    mutationFn: (payload: {
-      agent: AgentConfigWorkspaceAgent;
-      slot: AgentLlmSlotDefinition;
-      candidate: AgentModelChoice;
-      expectedBaseHash: string;
-    }) => fetchJson<AgentModelPromotionResult>(
-      `/api/agents/${encodeURIComponent(payload.agent.agentId)}/llm-bindings/${encodeURIComponent(payload.slot.slot)}/promote`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          modelRef: payload.candidate.modelRef,
-          expectedBaseHash: payload.expectedBaseHash,
-          expectedAgentUpdatedAt: payload.agent.updatedAt,
-          confirmed: true,
-        }),
-      },
-    ),
-    onSuccess: async (result) => {
-      setConfigDraft(draftFromAgent(result.agent));
-      draftSyncSourceRef.current = draftSyncSourceFromAgent(workspace, result.agent);
-      setNotice({
-        tone: "success",
-        text: lang === "zh"
-          ? `已固定 ${result.modelRef} 并绑定到当前 Agent`
-          : `Pinned ${result.modelRef} and bound it to this Agent`,
-      });
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.agentConfigWorkspace() }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.agentSummary(true) }),
-      ]);
-      void chatWorkspaceCache.afterAgentWorkspaceChanged();
-    },
-    onError: (error) => {
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
-    },
-  });
-
-  const updatePersonaMutation = useMutation({
-    mutationFn: (payload: { agentId: string; draft: AgentPersonaDraft }) =>
-      fetchJson<AgentConfigWorkspaceAgent>(`/api/agents/${encodeURIComponent(payload.agentId)}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          personaProfile: personaProfileFromDraft(payload.draft),
-        }),
-      }),
-    onSuccess: (agent) => {
-      queryClient.setQueryData<AgentConfigWorkspace | undefined>(
-        queryKeys.agentConfigWorkspace(),
-        (current) => updatedAgentWorkspaceCache(current, agent),
-      );
-      setPersonaDraft(personaDraftFromAgent(agent));
-      draftSyncSourceRef.current = draftSyncSourceFromAgent(workspace, agent);
-      setNotice({ tone: "success", text: copy.personaUpdateSuccess });
-      void chatWorkspaceCache.afterAgentWorkspaceChanged();
-    },
-    onError: (error) => {
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
-    },
-  });
-
-  const updateTaskMutation = useMutation({
-    mutationFn: (payload: { agentId: string; draft: AgentTaskDraft }) =>
-      fetchJson<AgentConfigWorkspaceAgent>(`/api/agents/${encodeURIComponent(payload.agentId)}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          taskProfile: taskProfileFromDraft(payload.draft),
-        }),
-      }),
-    onSuccess: (agent) => {
-      queryClient.setQueryData<AgentConfigWorkspace | undefined>(
-        queryKeys.agentConfigWorkspace(),
-        (current) => updatedAgentWorkspaceCache(current, agent),
-      );
-      setTaskDraft(taskDraftFromAgent(agent));
-      draftSyncSourceRef.current = draftSyncSourceFromAgent(workspace, agent);
-      setNotice({ tone: "success", text: copy.taskUpdateSuccess });
-      void chatWorkspaceCache.afterAgentWorkspaceChanged();
-    },
-    onError: (error) => {
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
-    },
-  });
-
-  const archiveAgentMutation = useMutation({
-    mutationFn: (payload: { agentId: string }) =>
-      fetchJson<AgentConfigWorkspaceAgent>(`/api/agents/${encodeURIComponent(payload.agentId)}`, {
-        method: "DELETE",
-      }),
-    onMutate: async (payload) => {
-      await queryClient.cancelQueries({ queryKey: queryKeys.agentConfigWorkspace() });
-      const previousWorkspace = queryClient.getQueryData<AgentConfigWorkspace>(queryKeys.agentConfigWorkspace());
-      const previousSelectedAgentId = selectedAgentId;
-      const previousActivePane = activePane;
-      const optimisticAgent = previousWorkspace?.agents.find((agent) => agent.agentId === payload.agentId) ?? selectedAgent;
-      if (optimisticAgent) {
-        queryClient.setQueryData<AgentConfigWorkspace | undefined>(
-          queryKeys.agentConfigWorkspace(),
-          (current) => archivedWorkspaceCache(current, optimisticArchivedAgent(optimisticAgent)),
-        );
-      }
-      setSelectedAgentId("");
-      setActivePane("overview");
-      return { previousWorkspace, previousSelectedAgentId, previousActivePane };
-    },
-    onSuccess: (agent) => {
-      queryClient.setQueryData<AgentConfigWorkspace | undefined>(
-        queryKeys.agentConfigWorkspace(),
-        (current) => archivedWorkspaceCache(current, agent),
-      );
-      setSelectedAgentId("");
-      setActivePane("overview");
-      setNotice({
-        tone: "success",
-        text: lang === "zh" ? `已安全归档 ${agentLabel(agent)}` : `Archived ${agentLabel(agent)}`,
-      });
-      void chatWorkspaceCache.afterAgentArchived();
-    },
-    onError: (error, _variables, context) => {
-      if (context?.previousWorkspace) {
-        queryClient.setQueryData(queryKeys.agentConfigWorkspace(), context.previousWorkspace);
-      }
-      setSelectedAgentId(context?.previousSelectedAgentId ?? "");
-      setActivePane(context?.previousActivePane ?? "overview");
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
-      void chatWorkspaceCache.afterAgentArchived();
-    },
-  });
-
-  const purgeAgentMutation = useMutation({
-    mutationFn: (payload: { agentId: string }) =>
-      fetchJson<AgentPurgeResponse>(
-        `/api/agents/${encodeURIComponent(payload.agentId)}/purge`,
-        { method: "DELETE" },
-      ),
-    onMutate: async (payload) => {
-      await queryClient.cancelQueries({ queryKey: queryKeys.agentConfigWorkspace() });
-      const previousWorkspace = queryClient.getQueryData<AgentConfigWorkspace>(queryKeys.agentConfigWorkspace());
-      const previousSelectedAgentId = selectedAgentId;
-      const previousActivePane = activePane;
-      queryClient.setQueryData<AgentConfigWorkspace | undefined>(
-        queryKeys.agentConfigWorkspace(),
-        (current) => purgedWorkspaceCache(current, payload.agentId),
-      );
-      setSelectedAgentId("");
-      setActivePane("overview");
-      return { previousWorkspace, previousSelectedAgentId, previousActivePane };
-    },
-    onSuccess: (result) => {
-      queryClient.setQueryData<AgentConfigWorkspace | undefined>(
-        queryKeys.agentConfigWorkspace(),
-        (current) => purgedWorkspaceCache(current, result.agentId),
-      );
-      setSelectedAgentId("");
-      setActivePane("overview");
-      setNotice({
-        tone: "success",
-        text: result.purgeSummary.sessions.cleanupPending
-          ? (lang === "zh"
-            ? "Agent 与绑定会话已删除；部分私有文件因系统占用等待后续清理"
-            : "The Agent and bound sessions were deleted; some private files remain pending cleanup because they are in use")
-          : (lang === "zh" ? "已彻底删除归档 Agent" : "Permanently deleted archived Agent"),
-      });
-      void chatWorkspaceCache.afterAgentArchived();
-    },
-    onError: (error, _variables, context) => {
-      if (context?.previousWorkspace) {
-        queryClient.setQueryData(queryKeys.agentConfigWorkspace(), context.previousWorkspace);
-      }
-      setSelectedAgentId(context?.previousSelectedAgentId ?? "");
-      setActivePane(context?.previousActivePane ?? "overview");
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
-      void chatWorkspaceCache.afterAgentArchived();
-    },
-  });
-
-  const resetAgentMutation = useMutation({
-    mutationFn: (payload: { agentId: string; options: AgentResetOptions }) =>
-      fetchJson<{ agent: AgentConfigWorkspaceAgent; resetSummary: AgentResetSummary }>(
-        `/api/agents/${encodeURIComponent(payload.agentId)}/reset`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload.options),
-        },
-      ),
-    onMutate: (payload) => {
-      setResettingAgentIds((current) => {
-        const next = new Set(current);
-        next.add(payload.agentId);
-        return next;
-      });
-    },
-    onSuccess: (result) => {
-      const agent = result.agent;
-      const previousDirectSessionId = stringValue(result.resetSummary.previousDirectSessionId);
-      reconcileResetDirectSession(result.resetSummary);
-      setNotice({ tone: "success", text: copy.resetAgentSuccess });
-      setResetOptions(DEFAULT_AGENT_RESET_OPTIONS);
-      void chatWorkspaceCache.afterAgentWorkspaceChanged();
-      if (result.resetSummary.resetDirectSession) {
-        if (previousDirectSessionId) {
-          queryClient.removeQueries({ queryKey: queryKeys.session(previousDirectSessionId), exact: true });
-        }
-        void chatWorkspaceCache.afterChatWorkspaceReset();
-      }
-      void queryClient.invalidateQueries({ queryKey: queryKeys.agentRuns(agent.agentId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.agentMessages(agent.agentId, "pending") });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.agentRuntimeEvidence(agent.agentId) });
-    },
-    onError: (error) => {
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
-    },
-    onSettled: (_result, _error, payload) => {
-      setResettingAgentIds((current) => {
-        const next = new Set(current);
-        next.delete(payload.agentId);
-        return next;
-      });
-    },
-  });
-
-  const updateAvatarMutation = useMutation({
-    mutationFn: (payload: { agentId: string; avatarImagePath?: string; resetToDefault?: boolean }) =>
-      fetchJson<AgentConfigWorkspaceAgent>(`/api/agents/${encodeURIComponent(payload.agentId)}/avatar`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          avatarImagePath: payload.avatarImagePath ?? "",
-          resetToDefault: Boolean(payload.resetToDefault),
-        }),
-      }),
-    onSuccess: (agent) => {
-      queryClient.setQueryData<AgentConfigWorkspace | undefined>(
-        queryKeys.agentConfigWorkspace(),
-        (current) => updatedAgentWorkspaceCache(current, agent),
-      );
-      setNotice({ tone: "success", text: copy.avatarUpdateSuccess });
-      void chatWorkspaceCache.afterAgentWorkspaceChanged();
-    },
-    onError: (error) => {
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
-    },
-  });
-
-  const uploadAvatarMutation = useMutation({
-    mutationFn: async (payload: { agentId: string; file: File }) =>
-      fetchJson<AgentAvatarUploadResponse>(`/api/agents/${encodeURIComponent(payload.agentId)}/avatar-image`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          filename: payload.file.name,
-          contentType: payload.file.type || "image/png",
-          dataBase64: encodeArrayBufferBase64(await payload.file.arrayBuffer()),
-        }),
-      }),
-    onSuccess: (result) => {
-      queryClient.setQueryData<AgentConfigWorkspace | undefined>(
-        queryKeys.agentConfigWorkspace(),
-        (current) => updatedAgentWorkspaceCache(current, result.agent),
-      );
-      setNotice({ tone: "success", text: copy.avatarUpdateSuccess });
-      void queryClient.invalidateQueries({ queryKey: ["agent-avatar-options"] });
-      void chatWorkspaceCache.afterAgentWorkspaceChanged();
-    },
-    onError: (error) => {
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
-    },
-  });
-
-  const updateMembershipMutation = useMutation({
-    mutationFn: (payload: { agentId: string; draft: AgentModeMembershipDraft }) =>
-      fetchJson<AgentModeBindings>(`/api/agents/${encodeURIComponent(payload.agentId)}/mode-membership`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload.draft),
-      }),
-    onSuccess: (payload, variables) => {
-      queryClient.setQueryData<AgentConfigWorkspace | undefined>(
-        queryKeys.agentConfigWorkspace(),
-        (current) => current
-          ? {
-              ...current,
-              modeBindings: payload.modes ?? current.modeBindings,
-            }
-          : current,
-      );
-      setMembershipDraft(variables.draft);
-      setNotice({
-        tone: "success",
-        text: lang === "zh" ? "已保存 Agent 使用位置" : "Saved Agent mode membership",
-      });
-      void chatWorkspaceCache.afterAgentWorkspaceChanged();
-    },
-    onError: (error) => {
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
-    },
-  });
-
-  const updateToolPolicyMutation = useMutation({
-    mutationFn: (payload: { agentId: string; draft: AgentToolPolicyDraft; basePolicy: ToolPolicy | undefined }) =>
-      fetchJson<AgentConfigWorkspaceAgent>(`/api/agents/${encodeURIComponent(payload.agentId)}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          toolPolicy: {
-            ...defaultToolPolicy(payload.basePolicy?.policyId || "default"),
-            ...(payload.basePolicy ?? {}),
-            allowedTools: sortedIds(payload.draft.allowedTools),
-            preferredTools: sortedIds(payload.draft.preferredTools),
-            blockedTools: sortedIds(payload.draft.blockedTools),
-            readScopes: sortedIds(payload.draft.readScopes),
-            writeScopes: sortedIds(payload.draft.writeScopes),
-          },
-        }),
-      }),
-    onSuccess: (agent) => {
-      queryClient.setQueryData<AgentConfigWorkspace | undefined>(
-        queryKeys.agentConfigWorkspace(),
-        (current) => updatedAgentWorkspaceCache(current, agent),
-      );
-      setNotice({
-        tone: "success",
-        text: lang === "zh" ? `已保存 ${agentLabel(agent)} 的工具能力` : `Saved tool permissions for ${agentLabel(agent)}`,
-      });
-      void chatWorkspaceCache.afterAgentWorkspaceChanged();
-    },
-    onError: (error) => {
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
-    },
-  });
-
-  const createToolGovernanceMutation = useMutation({
-    mutationFn: (payload: {
-      agentId: string;
-      draft: AgentToolGovernanceDraft;
-      delta: ReturnType<typeof toolPolicyDeltaFromDraft>;
-    }) =>
-      fetchJson<AgentToolGovernanceRequest>(`/api/agents/${encodeURIComponent(payload.agentId)}/tool-governance-requests`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          proposedByAgentId: payload.draft.proposedByAgentId,
-          grantTools: sortedIds(payload.delta.grantTools),
-          revokeTools: sortedIds(payload.delta.revokeTools),
-          blockTools: sortedIds(payload.delta.blockTools),
-          unblockTools: sortedIds(payload.delta.unblockTools),
-          reason: payload.draft.reason,
-          applyMode: payload.draft.applyMode,
-        }),
-      }),
-    onSuccess: (request) => {
-      setNotice({
-        tone: "success",
-        text: `${copy.toolGovernanceSuccess}: ${governanceStatusLabel(request.status, lang)}`,
-      });
-      setToolGovernanceDraft(toolGovernanceDraftFromAgent(selectedAgent));
-      void chatWorkspaceCache.afterAgentWorkspaceChanged();
-    },
-    onError: (error) => {
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
-    },
-  });
-
-  const resolveToolGovernanceMutation = useMutation({
-    mutationFn: (payload: { agentId: string; requestId: string; decision: "approve" | "reject" }) =>
-      fetchJson<AgentToolGovernanceRequest>(
-        `/api/agents/${encodeURIComponent(payload.agentId)}/tool-governance-requests/${encodeURIComponent(payload.requestId)}`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            decision: payload.decision,
-            resolvedBy: "user",
-            resolutionNote: payload.decision,
-          }),
-        },
-      ),
-    onSuccess: () => {
-      setNotice({ tone: "success", text: copy.toolGovernanceResolved });
-      void chatWorkspaceCache.afterAgentWorkspaceChanged();
-    },
-    onError: (error) => {
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
-    },
-  });
-
-  const updateMemoryPolicyMutation = useMutation({
-    mutationFn: (payload: { agentId: string; draft: AgentMemoryPolicyDraft; basePolicy: MemoryPolicy | undefined }) =>
-      fetchJson<AgentConfigWorkspaceAgent>(`/api/agents/${encodeURIComponent(payload.agentId)}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          memoryPolicy: {
-            ...defaultMemoryPolicy(payload.basePolicy?.policyId || ""),
-            ...(payload.basePolicy ?? {}),
-            readSharedGroups: sortedIds(payload.draft.readSharedGroups),
-            writeSharedGroups: sortedIds(payload.draft.writeSharedGroups),
-            readKnowledgeBaseIds: sortedIds(payload.draft.readKnowledgeBaseIds),
-            proposeKnowledgeBaseIds: sortedIds(payload.draft.proposeKnowledgeBaseIds),
-            reviewKnowledgeBaseIds: sortedIds(payload.draft.reviewKnowledgeBaseIds),
-            rateKnowledgeBaseIds: sortedIds(payload.draft.rateKnowledgeBaseIds),
-          },
-        }),
-      }),
-    onSuccess: (agent) => {
-      queryClient.setQueryData<AgentConfigWorkspace | undefined>(
-        queryKeys.agentConfigWorkspace(),
-        (current) => updatedAgentWorkspaceCache(current, agent),
-      );
-      setNotice({
-        tone: "success",
-        text: lang === "zh" ? `已保存 ${agentLabel(agent)} 的记忆设置` : `Saved memory policy for ${agentLabel(agent)}`,
-      });
-      void chatWorkspaceCache.afterAgentWorkspaceChanged();
-    },
-    onError: (error) => {
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
-    },
-  });
-
-  const updateRuntimePolicyMutation = useMutation({
-    mutationFn: (payload: {
-      agentId: string;
-      delegationPolicy: AgentDelegationPolicyDraft;
-      supervisionPolicy: AgentSupervisionPolicyDraft;
-    }) =>
-      fetchJson<AgentConfigWorkspaceAgent>(`/api/agents/${encodeURIComponent(payload.agentId)}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          delegationPolicy: {
-            allowSubagents: payload.delegationPolicy.allowSubagents,
-            maxConcurrent: payload.delegationPolicy.maxConcurrent,
-            maxDepth: payload.delegationPolicy.maxDepth,
-            allowWakeMessages: payload.delegationPolicy.allowWakeMessages,
-            allowedContextModes: sortedIds(payload.delegationPolicy.allowedContextModes),
-          },
-          supervisionPolicy: {
-            supervisionEnabled: payload.supervisionPolicy.supervisionEnabled,
-            requiresReview: payload.supervisionPolicy.requiresReview,
-            reviewMode: payload.supervisionPolicy.reviewMode,
-            evidenceLevel: payload.supervisionPolicy.evidenceLevel,
-          },
-        }),
-      }),
-    onSuccess: (agent) => {
-      queryClient.setQueryData<AgentConfigWorkspace | undefined>(
-        queryKeys.agentConfigWorkspace(),
-        (current) => updatedAgentWorkspaceCache(current, agent),
-      );
-      setNotice({
-        tone: "success",
-        text: lang === "zh" ? `已保存 ${agentLabel(agent)} 的运行策略` : `Saved runtime policy for ${agentLabel(agent)}`,
-      });
-      void chatWorkspaceCache.afterAgentWorkspaceChanged();
-      void queryClient.invalidateQueries({ queryKey: queryKeys.agentRuns(agent.agentId) });
-    },
-    onError: (error) => {
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
-    },
-  });
-
-  const consumeMessageMutation = useMutation({
-    mutationFn: (payload: { agentId: string; messageId: string; sessionId: string }) =>
-      fetchJson<AgentInboxMessage>(
-        `/api/agents/${encodeURIComponent(payload.agentId)}/messages/${encodeURIComponent(payload.messageId)}/consume`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            consumedBySessionId: payload.sessionId,
-            consumedByTurnId: "agent-center",
-          }),
-        },
-      ),
-    onSuccess: (_message, variables) => {
-      setNotice({
-        tone: "success",
-        text: lang === "zh" ? "已标记消息为已处理" : "Marked message as consumed",
-      });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.agentMessages(variables.agentId, "pending") });
-      void chatWorkspaceCache.afterAgentWorkspaceChanged();
-    },
-    onError: (error) => {
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
-    },
-  });
-
-  const consumeAllMessagesMutation = useMutation({
-    mutationFn: (payload: { agentId: string; sessionId: string }) =>
-      fetchJson<{ agentId: string; consumed: boolean; consumedCount: number; remainingPendingCount: number }>(
-        `/api/agents/${encodeURIComponent(payload.agentId)}/messages/consume-all`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            consumedBySessionId: payload.sessionId,
-            consumedByTurnId: "agent-center",
-          }),
-        },
-      ),
-    onSuccess: (result, variables) => {
-      setNotice({
-        tone: "success",
-        text: lang === "zh" ? `已处理 ${result.consumedCount} 条 Inbox 消息` : `Consumed ${result.consumedCount} inbox messages`,
-      });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.agentMessages(result.agentId || variables.agentId, "pending") });
-      void chatWorkspaceCache.afterAgentWorkspaceChanged();
-    },
-    onError: (error) => {
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
-    },
-  });
 
   const selectedAgentAvatarUpdatePending = updateAvatarMutation.isPending && updateAvatarMutation.variables?.agentId === selectedAgent?.agentId;
   const selectedAgentAvatarUploadPending = uploadAvatarMutation.isPending && uploadAvatarMutation.variables?.agentId === selectedAgent?.agentId;
@@ -6032,10 +5511,12 @@ export function AgentsRoute() {
           brief: selectedAgentDetailContent.brief,
           resources: selectedAgentDetailContent.resources,
           extra: activePane === "effective" ? (
-            <AgentEffectiveConfigurationInspectorPanel
-              field={selectedEffectiveField}
-              onOpenConfig={() => setActivePane("config")}
-            />
+            <Suspense fallback={null}>
+              <AgentEffectiveConfigurationInspectorPanel
+                field={selectedEffectiveField}
+                onOpenConfig={() => setActivePane("config")}
+              />
+            </Suspense>
           ) : null,
           closeLabel: lang === "zh" ? "关闭检查器" : "Close inspector",
           onClose: () => setInspectorOpen(false),
