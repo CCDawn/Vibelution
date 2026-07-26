@@ -19,6 +19,8 @@ import configDraftMutationsSource from "./agents/useAgentConfigDraftMutations.ts
 import agentRouteListModelSource from "./agents/agentRouteListModel.ts?raw";
 import agentRouteLlmModelSource from "./agents/agentRouteLlmModel.ts?raw";
 import agentRouteWorkspaceModelSource from "./agents/agentRouteWorkspaceModel.ts?raw";
+import agentRouteDraftModelSource from "./agents/agentRouteDraftModel.ts?raw";
+import agentRouteManagementModelSource from "./agents/agentRouteManagementModel.ts?raw";
 import agentManagementNavSource from "./AgentManagementNav.tsx?raw";
 import agentManagementModuleBarSource from "./AgentManagementModuleBar.tsx?raw";
 import agentWorkspaceCacheSource from "./agentWorkspaceCache.ts?raw";
@@ -607,7 +609,10 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("normalizeAgentConfigPane(searchParams.get(\"pane\"))");
     expect(routeSource).toContain("safeAgentCenterReturnTo(searchParams.get(\"returnTo\"))");
     expect(routeSource).toContain("agentCenterReturnLabel(searchParams.get(\"returnLabel\"), lang)");
-    expect(routeSource).toContain('normalized === "config" || normalized === "changes" || normalized === "activity" || normalized === "overview"');
+    expect(agentRouteManagementModelSource).toContain('normalized === "config"');
+    expect(agentRouteManagementModelSource).toContain('normalized === "changes"');
+    expect(agentRouteManagementModelSource).toContain('normalized === "activity"');
+    expect(agentRouteManagementModelSource).toContain('normalized === "overview"');
     expect(routeSource).toContain("safeReturnToPath");
     expect(routeSource).toContain("return safeReturnToPath(value)");
     expect(routeSource).toContain("const routeTargetKey = requestedAgentId ? `${requestedAgentId}:${requestedPane}` : \"\"");
@@ -697,7 +702,8 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("workspaceTeamIndexes(workspace)");
     expect(agentRouteWorkspaceModelSource).toContain("teamIndexes");
     expect(routeSource).toContain("copy.filterSections");
-    expect(routeSource).toContain("copy.groupLabels");
+    expect(routeSource).toContain("groupLabels:");
+    expect(agentRouteManagementModelSource).toContain("copy.groupLabels");
     expect(routeSource).toContain('const sectionOrder = ["status", "boundary", "team_index"] as const;');
     expect(routeSource).toContain('const sectionOrder = ["source_scope", "mode", "reference"] as const;');
     expect(agentRouteWorkspaceModelSource).toContain('section === "team_index"');
@@ -710,7 +716,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain('moreFilters: "More filters"');
     expect(agentWorkspaceCacheSource).toContain("sourceScopeGroupId");
     expect(agentWorkspaceCacheSource).toContain("teamIndexesWithoutAgentIds");
-    expect(routeSource).toContain('section === "boundary"');
+    expect(agentRouteManagementModelSource).toContain('section === "boundary"');
     expect(routeSource).toContain("managementSection,");
     expect(routeSource).toContain("sections: filterSections");
     expect(routeSource).toContain("advancedSections: advancedFilterSections");
@@ -741,7 +747,7 @@ describe("AgentsRoute layout contract", () => {
   });
 
   it("labels Agent filter health counts instead of concatenating bare numbers", () => {
-    expect(routeSource).toContain("function groupAriaLabel");
+    expect(agentRouteManagementModelSource).toContain("function groupAriaLabel");
     expect(routeSource).toContain("groupAriaLabel(displayLabel, group, copy, lang)");
     expect(routeSource).toContain('group.id === "setup:inbox" ? copy.statusReminderShort : copy.healthIssueShort');
     expect(routeSource).not.toContain("{group.healthCount ? <em>{group.healthCount}</em> : null}");
@@ -790,8 +796,8 @@ describe("AgentsRoute layout contract", () => {
   it("lets each Agent inherit or override its context compression policy", () => {
     expect(routeSource).toContain("AgentContextCompressionPolicy");
     expect(coreConfigPanelSource).toContain("contextCompressionPolicy: AgentContextCompressionPolicyDraft");
-    expect(routeSource).toContain("function contextCompressionDraftFromAgent");
-    expect(routeSource).toContain("function contextCompressionPolicyFromDraft");
+    expect(agentRouteDraftModelSource).toContain("function contextCompressionDraftFromAgent");
+    expect(agentRouteDraftModelSource).toContain("function contextCompressionPolicyFromDraft");
     expect(configDraftMutationsSource).toContain("contextCompressionPolicy: options.contextCompressionPolicyFromDraft(payload.draft.contextCompressionPolicy)");
     expect(routeSource).toContain("updateContextCompressionDraft");
     expect(selectedDetailContentPanelSource).toContain("<AgentConfigPrimaryPanePanel");
@@ -903,20 +909,31 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).not.toMatch(/from "\.\/AgentToolGovernancePanel"/);
   });
 
-  it("owns pure list/presentation helpers outside AgentsRoute (D3)", () => {
+  it("owns pure list/presentation helpers outside AgentsRoute (D3/M1/M2)", () => {
     expect(routeSource).toContain('from "./agents/agentRouteListModel"');
     expect(routeSource).toContain('from "./agents/agentRouteLlmModel"');
     expect(routeSource).toContain('from "./agents/agentRouteWorkspaceModel"');
+    expect(routeSource).toContain('from "./agents/agentRouteDraftModel"');
+    expect(routeSource).toContain('from "./agents/agentRouteManagementModel"');
     expect(routeSource).toContain("buildAgentModelChoices");
     expect(routeSource).toContain("agentLabel");
     expect(routeSource).toContain("normalizeAgentLlmBindings");
     expect(routeSource).toContain("buildLightweightAgentWorkspace");
+    expect(routeSource).toContain("draftFromAgent");
+    expect(routeSource).toContain("buildAgentManagementBrief");
+    expect(routeSource).toContain("buildManagementFilterGroups");
     expect(routeSource).toContain("filterAgents(workspace, activeFilter, searchText, { managementFilterMatches })");
     expect(routeSource).not.toMatch(/^function normalizeText\(/m);
     expect(routeSource).not.toMatch(/^function buildAgentModelChoices\(/m);
     expect(routeSource).not.toMatch(/^function agentLlmSlots\(/m);
     expect(routeSource).not.toMatch(/^function buildLightweightAgentWorkspace\(/m);
     expect(routeSource).not.toMatch(/^function filterAgents\(/m);
+    expect(routeSource).not.toMatch(/^function draftFromAgent\(/m);
+    expect(routeSource).not.toMatch(/^function personaDraftFromAgent\(/m);
+    expect(routeSource).not.toMatch(/^function contextCompressionDraftFromAgent\(/m);
+    expect(routeSource).not.toMatch(/^function buildAgentManagementBrief\(/m);
+    expect(routeSource).not.toMatch(/^function managementFilterMatches\(/m);
+    expect(routeSource).not.toMatch(/^function buildVisibleAgentColumns\(/m);
   });
 
   it("guides Agent creation through defaults, provider-model linkage, and a final review", () => {
@@ -999,24 +1016,24 @@ describe("AgentsRoute layout contract", () => {
   });
 
   it("routes membership guidance to the team surface and not just the config pane", () => {
-    expect(routeSource).toContain("route: agent?.agentId ? `/teams?agent=${encodeURIComponent(agent.agentId)}` : \"/teams\"");
+    expect(agentRouteManagementModelSource).toContain("route: agent?.agentId ? `/teams?agent=${encodeURIComponent(agent.agentId)}` : \"/teams\"");
     expect(routeSource).toContain("void navigate(route)");
     expect(managementBriefPanelSource).toContain("onOpenRoute(action.route)");
     expect(routeSource).toContain("onSelectPane: setActivePane");
     expect(selectedDetailContentPanelSource).toContain("<AgentManagementBriefPanel");
     expect(managementBriefPanelSource).toContain("onSelectPane(action.pane)");
-    expect(routeSource).toContain("copy.nextSetupMembership");
+    expect(routeSource).toContain("nextSetupMembership:");
   });
 
   it("keeps tool and runtime completeness strict enough to avoid false positives", () => {
-    expect(routeSource).toContain("function hasToolPolicyConfiguration(agent: AgentConfigWorkspaceAgent | null | undefined)");
-    expect(routeSource).toContain("policy?.blockedTools?.length");
-    expect(routeSource).toContain("function agentHasRuntimeSignal(agent: AgentConfigWorkspaceAgent | null | undefined)");
-    expect(routeSource).toContain("const runtimeState = String(agent?.runtimeStatus?.state || \"\").trim()");
-    expect(routeSource).toContain("runtimeState && runtimeState !== \"idle\"");
-    expect(routeSource).toContain("function hasActionableHealthIssue(agent: AgentConfigWorkspaceAgent | null | undefined)");
-    expect(routeSource).toContain('issue.severity === "blocking" || issue.severity === "warning"');
-    expect(routeSource).toContain("count(hasActionableHealthIssue)");
+    expect(agentRouteDraftModelSource).toContain("function hasToolPolicyConfiguration(agent: AgentConfigWorkspaceAgent | null | undefined)");
+    expect(agentRouteDraftModelSource).toContain("policy?.blockedTools?.length");
+    expect(agentRouteManagementModelSource).toContain("function agentHasRuntimeSignal(agent: AgentConfigWorkspaceAgent | null | undefined)");
+    expect(agentRouteManagementModelSource).toContain("const runtimeState = String(agent?.runtimeStatus?.state || \"\").trim()");
+    expect(agentRouteManagementModelSource).toContain("runtimeState && runtimeState !== \"idle\"");
+    expect(agentRouteManagementModelSource).toContain("function hasActionableHealthIssue(agent: AgentConfigWorkspaceAgent | null | undefined)");
+    expect(agentRouteManagementModelSource).toContain('issue.severity === "blocking" || issue.severity === "warning"');
+    expect(agentRouteManagementModelSource).toContain("count(hasActionableHealthIssue)");
   });
 
   it("creates Agents through tool bundle presets instead of raw tool strings", () => {
@@ -1487,7 +1504,8 @@ describe("AgentsRoute layout contract", () => {
 
   it("organizes the Agent card into switchable operational panes with run history", () => {
     expect(routeSource).toContain("AgentConfigPaneId");
-    expect(routeSource).toContain('type AgentConfigPaneId = "overview" | "effective" | "relations" | "config" | "changes" | "activity"');
+    expect(agentRouteManagementModelSource).toContain('export type AgentConfigPaneId =');
+    expect(routeSource).toContain("type AgentConfigPaneId");
     expect(routeSource).toContain("agentConfigPanes(copy, selectedAgent)");
     expect(routeSource).toContain("AgentManagementBrief");
     expect(routeSource).toContain("buildAgentManagementBrief(selectedAgent, copy, lang)");
@@ -1561,10 +1579,10 @@ describe("AgentsRoute layout contract", () => {
     expect(agentCreateContractSource).toContain("const workSession = isWorkSessionCreateDraft(draft)");
     expect(routeSource).toContain("const sectionOrder = [\"status\", \"boundary\", \"team_index\"] as const");
     expect(routeSource).toContain("const sectionOrder = [\"source_scope\", \"mode\", \"reference\"] as const");
-    expect(routeSource).toContain("copy.managementModelPrompt");
-    expect(routeSource).toContain("copy.managementWorkspace");
-    expect(routeSource).toContain("copy.nextSetupModelPrompt");
-    expect(routeSource).toContain("copy.nextSetupWorkspace");
+    expect(routeSource).toContain("managementModelPrompt:");
+    expect(routeSource).toContain("managementWorkspace:");
+    expect(routeSource).toContain("nextSetupModelPrompt:");
+    expect(routeSource).toContain("nextSetupWorkspace:");
     expect(routeSource).toContain("Model / instructions");
     expect(routeSource).toContain("Check workspace boundary");
     expect(routeSource).toContain("配置模型与项目指令");
@@ -1573,13 +1591,13 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("Team / research role Agents");
     expect(routeSource).toContain("会话入口 Agent");
     expect(routeSource).toContain("团队/科研角色 Agent");
-    expect(routeSource).toContain("function buildVisibleAgentColumns");
-    expect(routeSource).toContain("teamIndexGroups: AgentTeamIndexGroup[]");
-    expect(routeSource).toContain("group.section === \"team_index\"");
-    expect(routeSource).toContain("id: `team_agents:${group.id}`");
-    expect(routeSource).toContain("unassignedNonSessionAgents");
-    expect(routeSource).toContain("copy.nonSessionAgentColumn");
-    expect(routeSource).toContain("nonSessionAgents = agents.filter((agent) => !isWorkSessionAgent(agent))");
+    expect(agentRouteManagementModelSource).toContain("function buildVisibleAgentColumns");
+    expect(agentRouteManagementModelSource).toContain("teamIndexGroups: AgentTeamIndexGroup[]");
+    expect(agentRouteManagementModelSource).toContain('group.section === "team_index"');
+    expect(agentRouteManagementModelSource).toContain("id: `team_agents:${group.id}`");
+    expect(agentRouteManagementModelSource).toContain("unassignedNonSessionAgents");
+    expect(routeSource).toContain("nonSessionAgentColumn:");
+    expect(agentRouteManagementModelSource).toContain("nonSessionAgents = agents.filter((agent) => !isWorkSessionAgent(agent))");
     expect(routeSource).toContain("buildVisibleAgentColumns(visibleAgents, copy, teamIndexGroups)");
     expect(listStatePanelSource).toContain("<AgentDenseList");
     expect(denseListSource).toContain('data-vui-product="agent-dense-list"');
@@ -1606,12 +1624,12 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("managementFilterMatches");
     expect(agentRouteWorkspaceModelSource).toContain('activeFilter.startsWith("setup:")');
     expect(routeSource).toContain("copy.filterSections.management");
-    expect(routeSource).toContain("copy.managementFilterMissingPersona");
-    expect(routeSource).toContain("copy.managementFilterMissingTask");
-    expect(routeSource).toContain("copy.managementFilterMissingTools");
-    expect(routeSource).toContain("copy.managementFilterNoTeam");
-    expect(routeSource).toContain("copy.managementFilterPendingInbox");
-    expect(routeSource).toContain("copy.managementFilterMaintenance");
+    expect(routeSource).toContain("managementFilterMissingPersona:");
+    expect(routeSource).toContain("managementFilterMissingTask:");
+    expect(routeSource).toContain("managementFilterMissingTools:");
+    expect(routeSource).toContain("managementFilterNoTeam:");
+    expect(routeSource).toContain("managementFilterPendingInbox:");
+    expect(routeSource).toContain("managementFilterMaintenance:");
   });
 
   it("surfaces pending Agent inbox messages from the activity pane", () => {
