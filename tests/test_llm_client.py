@@ -228,6 +228,8 @@ def test_openai_responses_gpt_payload_includes_reasoning_effort():
             "llm.profiles.primary.model": "gpt-5.5",
             "llm.profiles.primary.transport": "responses",
             "llm.profiles.primary.reasoning_effort": "high",
+            "llm.profiles.primary.reasoning_effort_values": ["low", "medium", "high"],
+            "llm.profiles.primary.reasoning_effort_adapter": "reasoning_object",
         }
     )
 
@@ -3546,7 +3548,7 @@ def test_responses_transport_forwards_images_when_capability_is_unknown():
     ]
 
 
-def test_openai_codex_model_uses_known_context_window():
+def test_openai_codex_model_uses_explicit_provider_context_window():
     config = make_config(
         **{
             "llm.providers.default.kind": "openai",
@@ -3560,10 +3562,11 @@ def test_openai_codex_model_uses_known_context_window():
 
     client = LLMClient(config=config, backend=lambda payload: payload)
 
-    assert client.resolved_spec.context_window == 400000
+    assert client.resolved_spec.context_window == 123456
+    assert client.resolved_spec.provider_details["context_window_source"] == "provider_config"
 
 
-def test_openai_gpt_5_5_uses_known_context_window():
+def test_openai_gpt_5_5_uses_explicit_provider_context_window():
     config = make_config(
         **{
             "llm.providers.default.kind": "openai",
@@ -3577,7 +3580,8 @@ def test_openai_gpt_5_5_uses_known_context_window():
 
     client = LLMClient(config=config, backend=lambda payload: payload)
 
-    assert client.resolved_spec.context_window == 1050000
+    assert client.resolved_spec.context_window == 123456
+    assert client.resolved_spec.provider_details["context_window_source"] == "provider_config"
 
 
 def test_tool_schema_is_sanitized_before_payload():

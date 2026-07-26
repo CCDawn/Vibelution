@@ -902,7 +902,15 @@ def test_config_workspace_exposes_unified_config_payload(monkeypatch):
 
 
 def test_config_workspace_exposes_editor_schema_without_launcher_owned_startup_settings(monkeypatch):
-    public_config = copy.deepcopy(load_operator_public_config())
+    public_config = config_models.AppConfig().model_dump(
+        mode="json",
+        exclude={"workspace_path", "effective_api_base"},
+    )
+    model_fixture = load_public_config()
+    public_config["llm"] = copy.deepcopy(model_fixture["llm"])
+    public_config["git"] = {
+        "commit_message_model_ref": model_fixture["git"]["commit_message_model_ref"],
+    }
     monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
 
     response = client.get("/api/config/workspace")
