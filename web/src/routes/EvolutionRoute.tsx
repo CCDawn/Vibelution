@@ -1,6 +1,6 @@
 import "../design/route-css/evolution.tailwind.css";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
   ArrowUpRight,
@@ -80,6 +80,8 @@ import {
 } from "../components/vui";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { useShellStore } from "../store/shellStore";
+import { useEvolutionProposalMutations } from "./evolution/useEvolutionProposalMutations";
+import { useEvolutionRunMutations } from "./evolution/useEvolutionRunMutations";
 import { SupervisedWorkspaceControls } from "./SupervisedWorkspaceControls";
 import { type SupervisedWorkspaceWorkflowStep } from "./SupervisedWorkspaceTabs";
 import { isSelfEvolutionWorktreeRun } from "./supervisedWorktreeReview";
@@ -884,214 +886,60 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     ),
     [datasetLimitInput, sourceKind],
   );
-  const startWorktreeRunMutation = useMutation({
-    onMutate: () => {
-      const placeholderAgentBindings = activeRunSnapshot?.agentBindings
-        ?? workspaceSnapshot?.currentAgentBindings
-        ?? EMPTY_AGENT_BINDINGS;
-      setActionFeedback(lang === "zh" ? "启动请求已提交，正在等待运行记录刷新。" : "Start request submitted; waiting for the run record to refresh.");
-      setLiveActiveRun(buildSupervisedStartPlaceholder({
-        sourceKind,
-        datasetName: sourceKind === "dataset" ? datasetName : "",
-        datasetLimit: selectedDatasetLimit,
-        bundleName: sourceKind === "bundle" ? bundleNameInput : "",
-        keepWorktree,
-        mentalModelMode: supervisedMentalModelMode,
-        agentBindings: placeholderAgentBindings,
-        lang,
-      }));
-    },
-    mutationFn: () =>
-      fetchJson<SupervisedWorktreeRun>("/api/evolution/worktree-runs", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          sourceKind,
-          datasetName: sourceKind === "dataset" ? datasetName : "",
-          datasetLimit:
-            sourceKind === "dataset" && datasetLimitInput.trim()
-              ? Number(datasetLimitInput.trim())
-              : null,
-          bundleName: sourceKind === "bundle" ? bundleNameInput : "",
-          keepWorktree: true,
-          mode: currentIntakeMode === "auto" ? "auto" : "manual",
-          executionMode: "real",
-          confirmRealLlmCost: true,
-          mentalModelMode: supervisedMentalModelMode,
-          uiRoute: `${location.pathname}${location.search}`,
-          clientAction: "start_supervised_worktree_run",
-        }),
-      }),
-    onSuccess: async (snapshot) => {
-      setActionFeedback(snapshot.latestMessage || t("startClosedLoopQueued"));
-      setLiveActiveRun((current) => (isLocalSupervisedStartPlaceholder(current) ? null : current));
-      await evolutionWorkspaceCache.afterWorktreeRunChanged();
-    },
-    onError: () => {
-      setLiveActiveRun((current) => (isLocalSupervisedStartPlaceholder(current) ? null : current));
-      void evolutionWorkspaceCache.afterWorktreeRunChanged();
-    },
-  });
-  const startSimulationWorktreeRunMutation = useMutation({
-    onMutate: () => {
-      setActionFeedback("");
-    },
-    mutationFn: () =>
-      fetchJson<SupervisedWorktreeRun>("/api/evolution/worktree-runs", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          sourceKind,
-          datasetName: sourceKind === "dataset" ? datasetName : "",
-          datasetLimit:
-            sourceKind === "dataset" && datasetLimitInput.trim()
-              ? Number(datasetLimitInput.trim())
-              : null,
-          bundleName: sourceKind === "bundle" ? bundleNameInput : "",
-          keepWorktree: true,
-          mode: currentIntakeMode === "auto" ? "auto" : "manual",
-          executionMode: "simulation",
-          confirmRealLlmCost: false,
-          mentalModelMode: supervisedMentalModelMode,
-          uiRoute: `${location.pathname}${location.search}`,
-          clientAction: "start_supervised_worktree_simulation",
-        }),
-      }),
-    onSuccess: async (snapshot) => {
-      setActionFeedback(snapshot.latestMessage || t("startClosedLoopQueued"));
-      await evolutionWorkspaceCache.afterWorktreeRunChanged();
-    },
-  });
-  const invalidateSelfEvolution = async () => {
-    await evolutionWorkspaceCache.afterSelfEvolutionChanged();
-  };
-  const startSelfWorktreeRunMutation = useMutation({
-    onMutate: () => {
-      setSelfActionFeedback("");
-    },
-    mutationFn: () => {
-      const fallbackBundleName =
+  const {
+    startWorktreeRunMutation,
+    startSimulationWorktreeRunMutation,
+    startSelfWorktreeRunMutation,
+    startSelfObservationMutation,
+    selfObservationActionMutation,
+    deleteSelfHistoryMutation,
+    actionMutation,
+    approvalWorktreeActionMutation,
+  } = useEvolutionRunMutations({
+    lang,
+    t,
+    statusLabel,
+    locationPathname: location.pathname,
+    locationSearch: location.search,
+    getStartPayload: () => ({
+      sourceKind,
+      datasetName,
+      datasetLimit: selectedDatasetLimit,
+      bundleName: bundleNameInput,
+      keepWorktree,
+      mentalModelMode: supervisedMentalModelMode,
+      currentIntakeMode,
+      placeholderAgentBindings:
+        activeRunSnapshot?.agentBindings
+        ?? workspaceSnapshotQuery.data?.currentAgentBindings
+        ?? EMPTY_AGENT_BINDINGS,
+    }),
+    getSelfStartPayload: () => ({
+      goal: selfGoalInput.trim(),
+      bundleName:
         bundleNameInput.trim()
         || workbenchCatalogQuery.data?.defaultBundleName
         || workbenchCatalogQuery.data?.bundles?.[0]?.name
         || workspaceSnapshotQuery.data?.workbench?.defaultBundleName
         || workspaceSnapshotQuery.data?.workbench?.bundles?.[0]?.name
-        || "";
-      return fetchJson<SupervisedWorktreeRun>("/api/evolution/self/worktree-runs", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          goal: selfGoalInput.trim(),
-          sourceKind: "bundle",
-          bundleName: fallbackBundleName,
-          mode: "manual",
-          executionMode: "simulation",
-          confirmRealLlmCost: false,
-          uiRoute: `${location.pathname}${location.search}`,
-        }),
-      });
-    },
-    onSuccess: async (snapshot) => {
-      setSelfActionFeedback(snapshot.latestMessage || t("startSelfWorktreeQueued"));
-      await evolutionWorkspaceCache.afterWorktreeRunChanged();
-    },
+        || "",
+    }),
+    setActionFeedback,
+    setSelfActionFeedback,
+    setLiveActiveRun,
+    setSelectedSelfObservationRunId,
+    buildSupervisedStartPlaceholder,
+    isLocalSupervisedStartPlaceholder,
+    isSelfEvolutionWorktreeRun,
+    afterWorktreeRunChanged: () => evolutionWorkspaceCache.afterWorktreeRunChanged(),
+    afterSelfEvolutionChanged: () => evolutionWorkspaceCache.afterSelfEvolutionChanged(),
+    afterSupervisedWorkspaceChanged: () => evolutionWorkspaceCache.afterSupervisedWorkspaceChanged(),
   });
-  const startSelfObservationMutation = useMutation({
-    onMutate: () => {
-      setSelfActionFeedback("");
-    },
-    mutationFn: (payload: SelfObservationRunStartRequest) =>
-      fetchJson<SelfObservationRun>("/api/evolution/self/observation-runs", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ ...payload, uiRoute: "/evolution?track=self" }),
-      }),
-    onSuccess: async (snapshot) => {
-      setSelectedSelfObservationRunId(snapshot.runId);
-      setSelfActionFeedback(snapshot.latestMessage || "");
-      await evolutionWorkspaceCache.afterSelfEvolutionChanged();
-    },
-  });
-  const selfObservationActionMutation = useMutation({
-    onMutate: () => {
-      setSelfActionFeedback("");
-    },
-    mutationFn: ({ runId, action }: { runId: string; action: string }) =>
-      fetchJson<SelfObservationRun>(`/api/evolution/self/observation-runs/${encodeURIComponent(runId)}/actions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ action }),
-      }),
-    onSuccess: async (snapshot) => {
-      setSelectedSelfObservationRunId(snapshot.runId);
-      setSelfActionFeedback(snapshot.latestMessage || "");
-      await evolutionWorkspaceCache.afterSelfEvolutionChanged();
-    },
-  });
-  const deleteSelfHistoryMutation = useMutation({
-    onMutate: () => {
-      setSelfActionFeedback("");
-    },
-    mutationFn: (txnIds: string[]) =>
-      fetchJson<SelfEvolutionHistoryDeleteResponse>("/api/evolution/self/history/delete", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ txnIds }),
-      }),
-    onSuccess: async (payload) => {
-      setSelfActionFeedback(payload.summary || "");
-      await invalidateSelfEvolution();
-    },
-  });
-  const actionMutation = useMutation({
-    mutationFn: (variables: { sessionId: string; action: string }) =>
-      fetchJson<EvolutionRunActionResponse>(`/api/evolution/runs/${variables.sessionId}/actions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ action: variables.action }),
-      }),
-    onSuccess: async (payload) => {
-      setActionFeedback(payload.summary);
-      await evolutionWorkspaceCache.afterSupervisedWorkspaceChanged();
-    },
-  });
-  const approvalWorktreeActionMutation = useMutation({
-    onMutate: () => {
-      setActionFeedback("");
-    },
-    mutationFn: (variables: { runId: string; action: string; reviewerNote?: string }) =>
-      fetchJson<SupervisedWorktreeRun>(`/api/evolution/worktree-runs/${encodeURIComponent(variables.runId)}/actions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          action: variables.action,
-          reviewerNote: variables.reviewerNote ?? "",
-        }),
-      }),
-    onSuccess: async (snapshot) => {
-      setActionFeedback(snapshot.latestMessage || statusLabel(snapshot.status));
-      if (isSelfEvolutionWorktreeRun(snapshot)) {
-        setSelfActionFeedback(snapshot.latestMessage || statusLabel(snapshot.status));
-      }
-      await evolutionWorkspaceCache.afterWorktreeRunChanged();
-    },
-  });
+
+  const invalidateSelfEvolution = async () => {
+    await evolutionWorkspaceCache.afterSelfEvolutionChanged();
+  };
+
   const workspaceSnapshot = workspaceSnapshotQuery.data;
   const activeSelfObservationRunId = workspaceSnapshot?.selfObservationActiveRun?.runId ?? "";
   useEffect(() => {
@@ -1905,122 +1753,32 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     refetchInterval: resolvePollingInterval(pageVisible, 15_000),
     refetchIntervalInBackground: false,
   });
-  const updateProposalMutation = useMutation({
-    mutationFn: ({ sessionId, draft }: { sessionId: string; draft: ProposalEditDraft }) =>
-      fetchJson<EvolutionProposalUpdateResponse>(`/api/evolution/proposals/${sessionId}`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(draft),
-      }),
-    onSuccess: async (payload) => {
-      setProposalEditFeedback(payload.summary);
-      setProposalEditDraft(proposalEditDraftFromDetail(payload.proposal));
-      if (payload.updated) {
-        setProposalEditOpen(false);
-      }
-      await evolutionWorkspaceCache.afterProposalChanged(payload.sessionId);
-    },
+  const {
+    updateProposalMutation,
+    deleteProposalMutation,
+    bulkDeleteMutation,
+    deleteRunRecordMutation,
+    bulkDeleteRunRecordsMutation,
+  } = useEvolutionProposalMutations({
+    libraryView,
+    selectedProposalRunId,
+    selectedRunId,
+    selectedLibraryItemId,
+    selectedPendingItemId,
+    setProposalEditFeedback,
+    setProposalEditDraft,
+    setProposalEditOpen,
+    setLibraryFeedback,
+    setRunRecordsFeedback,
+    setSelectedProposalRunIds,
+    setSelectedRunIds,
+    setSelectedRunId,
+    setSelectedLibraryItemId,
+    setSelectedPendingItemId,
+    proposalEditDraftFromDetail,
+    afterProposalChanged: (sessionId: string) => evolutionWorkspaceCache.afterProposalChanged(sessionId),
   });
-  const deleteProposalMutation = useMutation({
-    mutationFn: (sessionId: string) =>
-      fetchJson<EvolutionProposalDeleteResponse>(`/api/evolution/proposals/${sessionId}`, {
-        method: "DELETE",
-      }),
-    onSuccess: async (payload) => {
-      setLibraryFeedback(payload.summary);
-      setSelectedProposalRunIds((current) => current.filter((item) => item !== payload.sessionId));
-      if (selectedRunId === payload.sessionId) {
-        setSelectedRunId(null);
-      }
-      if (selectedLibraryItemId === payload.sessionId) {
-        setSelectedLibraryItemId(null);
-      }
-      if (selectedPendingItemId === payload.sessionId) {
-        setSelectedPendingItemId(null);
-      }
-      await evolutionWorkspaceCache.afterProposalChanged(payload.sessionId);
-    },
-  });
-  const bulkDeleteMutation = useMutation({
-    mutationFn: (sessionIds: string[]) =>
-      fetchJson<EvolutionProposalBulkDeleteResponse>("/api/evolution/proposals/delete", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ sessionIds }),
-      }),
-    onSuccess: async (payload) => {
-      setLibraryFeedback(payload.summary);
-      setSelectedProposalRunIds([]);
-      if (
-        selectedProposalRunId
-        && payload.results.some(
-          (item) => item.sessionId === selectedProposalRunId && item.status === "deleted",
-        )
-      ) {
-        if (libraryView === "items") {
-          setSelectedLibraryItemId(null);
-        } else {
-          setSelectedPendingItemId(null);
-        }
-      }
-      await evolutionWorkspaceCache.afterProposalChanged(selectedProposalRunId ?? "__none__");
-    },
-  });
-  const deleteRunRecordMutation = useMutation({
-    mutationFn: (sessionId: string) =>
-      fetchJson<EvolutionProposalDeleteResponse>(`/api/evolution/proposals/${sessionId}`, {
-        method: "DELETE",
-      }),
-    onSuccess: async (payload) => {
-      setRunRecordsFeedback(payload.summary);
-      setSelectedRunIds((current) => current.filter((item) => item !== payload.sessionId));
-      setSelectedProposalRunIds((current) => current.filter((item) => item !== payload.sessionId));
-      if (selectedRunId === payload.sessionId) {
-        setSelectedRunId(null);
-      }
-      if (selectedLibraryItemId === payload.sessionId) {
-        setSelectedLibraryItemId(null);
-      }
-      if (selectedPendingItemId === payload.sessionId) {
-        setSelectedPendingItemId(null);
-      }
-      await evolutionWorkspaceCache.afterProposalChanged(payload.sessionId);
-    },
-  });
-  const bulkDeleteRunRecordsMutation = useMutation({
-    mutationFn: (sessionIds: string[]) =>
-      fetchJson<EvolutionProposalBulkDeleteResponse>("/api/evolution/proposals/delete", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ sessionIds }),
-      }),
-    onSuccess: async (payload) => {
-      const deletedIds = new Set(
-        payload.results
-          .filter((item) => item.status === "deleted")
-          .map((item) => item.sessionId),
-      );
-      setRunRecordsFeedback(payload.summary);
-      setSelectedRunIds([]);
-      setSelectedProposalRunIds((current) => current.filter((item) => !deletedIds.has(item)));
-      if (selectedRunId && deletedIds.has(selectedRunId)) {
-        setSelectedRunId(null);
-      }
-      if (selectedLibraryItemId && deletedIds.has(selectedLibraryItemId)) {
-        setSelectedLibraryItemId(null);
-      }
-      if (selectedPendingItemId && deletedIds.has(selectedPendingItemId)) {
-        setSelectedPendingItemId(null);
-      }
-      await evolutionWorkspaceCache.afterProposalChanged(selectedRunId ?? "__none__");
-    },
-  });
+
 
   useEffect(() => {
     if (!proposalDetailQuery.data) {
