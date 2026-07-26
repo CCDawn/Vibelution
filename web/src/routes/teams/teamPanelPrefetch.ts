@@ -1,14 +1,31 @@
 import type { ResearchWorkspaceView } from "./researchWorkspaceModel";
 
-/** Path-scoped Teams UI packs created in Wave 8N. */
-export type TeamsPanelPackId = "shared" | "research" | "source_collection";
+/** Path-scoped Teams UI packs (Wave 8N + U4 research split). */
+export type TeamsPanelPackId =
+  | "shared"
+  | "research"
+  | "research_experiment"
+  | "research_search"
+  | "source_collection";
 
 export type TeamsPanelPrefetchInput = {
   researchWorkflowTeamSelected: boolean;
   aiSearchScopeTeamSelected: boolean;
   /** True when the knowledge/source-collection workspace is the active surface. */
   sourceCollectionWorkspaceSelected: boolean;
+  /** Optional view for finer research secondary packs. */
+  researchWorkspaceView?: ResearchWorkspaceView | null;
 };
+
+const RESEARCH_EXPERIMENT_VIEWS = new Set<ResearchWorkspaceView>([
+  "overview",
+  "experiment",
+  "iteration",
+  "candidates",
+  "graph",
+  "coordination",
+  "ingestion",
+]);
 
 /**
  * Decide which secondary packs to warm after a team/view switch.
@@ -23,7 +40,7 @@ export function resolveTeamsPanelPrefetchPacks(input: TeamsPanelPrefetchInput): 
   }
 
   if (input.aiSearchScopeTeamSelected) {
-    packs.add("research");
+    packs.add("research_search");
     packs.add("shared");
   }
 
@@ -31,6 +48,10 @@ export function resolveTeamsPanelPrefetchPacks(input: TeamsPanelPrefetchInput): 
   if (input.researchWorkflowTeamSelected && !input.sourceCollectionWorkspaceSelected) {
     packs.add("research");
     packs.add("shared");
+    const view = input.researchWorkspaceView;
+    if (!view || RESEARCH_EXPERIMENT_VIEWS.has(view)) {
+      packs.add("research_experiment");
+    }
   }
 
   return [...packs];
@@ -55,6 +76,8 @@ export function isSourceCollectionWorkspaceSelected(input: {
 export type TeamsPanelPackLoaders = {
   shared: () => Promise<unknown>;
   research: () => Promise<unknown>;
+  research_experiment: () => Promise<unknown>;
+  research_search: () => Promise<unknown>;
   source_collection: () => Promise<unknown>;
 };
 

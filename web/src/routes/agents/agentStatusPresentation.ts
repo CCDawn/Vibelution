@@ -6,6 +6,22 @@ import type {
 
 export type RuntimeFocusEvidenceReason = "run" | "source_run" | "session" | "fallback" | "missing";
 
+/** Tool governance request status labels (shared; keep panel free of shell-only deps). */
+export function governanceStatusLabel(value: string, lang: "zh" | "en") {
+  const normalized = String(value || "").trim();
+  const zh: Record<string, string> = {
+    pending_review: "待审批",
+    applied: "已应用",
+    rejected: "已拒绝",
+  };
+  const en: Record<string, string> = {
+    pending_review: "Pending review",
+    applied: "Applied",
+    rejected: "Rejected",
+  };
+  return ((lang === "zh" ? zh : en)[normalized] ?? normalized) || "-";
+}
+
 export function issueTone(issues: AgentConfigHealthIssue[]) {
   if (issues.some((item) => item.severity === "blocking")) {
     return "blocking";

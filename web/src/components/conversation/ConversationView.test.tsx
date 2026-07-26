@@ -3187,10 +3187,10 @@ describe("ConversationView edit resend affordance", () => {
     const html = renderConversation(messages);
 
     expect(html).not.toContain("显示更早");
-    expect(html).not.toContain("Show 4 earlier messages");
+    expect(html).not.toContain("Show 6 earlier messages");
     expect(html).not.toContain("MESSAGE_1_CONTENT");
-    expect(html).not.toContain("MESSAGE_4_CONTENT");
-    expect(html).toContain("MESSAGE_5_CONTENT");
+    expect(html).not.toContain("MESSAGE_6_CONTENT");
+    expect(html).toContain("MESSAGE_7_CONTENT");
     expect(html).toContain("MESSAGE_18_CONTENT");
   });
 

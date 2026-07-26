@@ -147,7 +147,14 @@ import {
 import {
   type AgentMessageSectionState,
 } from "./agentMessageSections";
-import { shouldLoadEarlierConversationMessages } from "./conversationHistoryWindow";
+import {
+  INITIAL_VISIBLE_MESSAGE_COUNT,
+  nextVisibleMessageLimit,
+  resolveVisibleMessageCount,
+  shouldLoadEarlierConversationMessages,
+  shouldPreferServerEarlierLoad,
+  TIMELINE_HISTORY_LOAD_THRESHOLD_PX,
+} from "./conversationHistoryWindow";
 import { parseResponseSegments, ResponseSegment } from "./messageResponseSegments";
 import { LazyConversationMarkdownRenderer } from "./LazyConversationMarkdownRenderer";
 import { ConversationInferenceControl } from "./ConversationInferenceControl";
@@ -210,9 +217,6 @@ import { VButton, VNativeInput, VNativeTextarea } from "../vui";
 import styles from "./ConversationView.styles";
 
 const DEFAULT_EXPANDED_RESPONSE_TAIL_COUNT = 3;
-const INITIAL_VISIBLE_MESSAGE_COUNT = 14;
-const TIMELINE_HISTORY_LOAD_BATCH_COUNT = 14;
-const TIMELINE_HISTORY_LOAD_THRESHOLD_PX = 56;
 const INITIAL_VISIBLE_FEEDBACK_OPERATION_COUNT = 36;
 const RESPONSE_PARSE_CACHE_LIMIT = 80;
 const RESPONSE_PREWARM_MESSAGE_LIMIT = 8;
@@ -570,7 +574,10 @@ export function ConversationView({
     () => displayMessages.some((message) => isTurnErrorMessage(message)),
     [displayMessages],
   );
-  const visibleMessageCount = Math.min(displayMessages.length, visibleMessageLimit);
+  const visibleMessageCount = resolveVisibleMessageCount({
+    displayMessageCount: displayMessages.length,
+    visibleLimit: visibleMessageLimit,
+  });
   const hiddenRenderedMessageCount = displayMessages.length - visibleMessageCount;
   const hiddenHistorySignalCount = hiddenRenderedMessageCount + (hasEarlierMessages ? 1 : 0);
   const timelineMessages = useMemo(
@@ -1050,17 +1057,27 @@ export function ConversationView({
   }
 
   function revealEarlierTimelineMessages() {
-    if (visibleMessageCount >= displayMessages.length) {
-      if (!hasEarlierMessages || !onLoadEarlierMessages || earlierMessagesLoading) {
-        return;
-      }
+    const preferServerEarlier = shouldPreferServerEarlierLoad({
+      visibleMessageCount,
+      displayMessageCount: displayMessages.length,
+      hasEarlierMessages: Boolean(hasEarlierMessages),
+      earlierMessagesLoading: Boolean(earlierMessagesLoading),
+    });
+    if (preferServerEarlier && onLoadEarlierMessages) {
+      // U5: once the local window is large, prefer server pages over only growing DOM.
       preserveCurrentExpansionDefaults();
       historyScrollAnchorRef.current = captureTimelineRowKeyAnchor(timelineRef.current);
       atBottomRef.current = false;
       followLatestRef.current = false;
       setIsAtBottom(false);
-      setVisibleMessageLimit((current) => current + TIMELINE_HISTORY_LOAD_BATCH_COUNT);
+      setVisibleMessageLimit((current) => nextVisibleMessageLimit({
+        currentLimit: current,
+        displayMessageCount: Math.max(displayMessages.length, current + 1),
+      }));
       onLoadEarlierMessages();
+      return;
+    }
+    if (visibleMessageCount >= displayMessages.length) {
       return;
     }
     preserveCurrentExpansionDefaults();
@@ -1068,10 +1085,10 @@ export function ConversationView({
     atBottomRef.current = false;
     followLatestRef.current = false;
     setIsAtBottom(false);
-    setVisibleMessageLimit((current) => Math.min(
-      displayMessages.length,
-      current + TIMELINE_HISTORY_LOAD_BATCH_COUNT,
-    ));
+    setVisibleMessageLimit((current) => nextVisibleMessageLimit({
+      currentLimit: current,
+      displayMessageCount: displayMessages.length,
+    }));
   }
 
   function preserveCurrentExpansionDefaults() {
