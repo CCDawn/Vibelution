@@ -58,6 +58,7 @@ Recorded for high-ROI program **scope A** (F0–F3, F5, F6; F4 trigger-only).
 | F3-C | Activity poll gates already correct |
 | F5 | Verified: AppShell/Launcher use `useShellI18n` only (existing contracts) |
 | F4 / R1–R4 | Chat secondary poll; Config pane lazy; Evolution poll gate; Memory item mutations + graph lazy |
+| S1–S3 | Memory view-level panel lazy; Chat status/group/file tabs lazy; Memory knowledge mutations extract |
 
 ### Post-F3 Agents chunk note
 
