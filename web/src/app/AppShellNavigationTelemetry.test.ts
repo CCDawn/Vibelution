@@ -152,6 +152,10 @@ describe("AppShell navigation telemetry", () => {
     expect(appShellSource).toContain("browser.chat_route.preload_loaded");
     expect(appShellSource).toContain("browser.chat_route.preload_failed");
     expect(appShellSource).toContain('import("../routes/ChatCodingRoute")');
+    // F1: soft idle preload on hover/focus; hard immediate on click.
+    expect(appShellSource).toContain("requestIdleCallback");
+    expect(appShellSource).toContain("cancelChatRouteSoftPreload");
+    expect(appShellSource).toContain("startChatRoutePreloadImport");
     expect(appShellSource).toContain('onPointerEnter={() => preloadChatRouteForNav("pointerenter")}');
     expect(appShellSource).toContain('onFocus={() => preloadChatRouteForNav("focus")}');
     expect(appShellSource).toContain('onClick={(event) => handlePrimaryNavClick(event, "/chat")}');
