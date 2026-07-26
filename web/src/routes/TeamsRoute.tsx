@@ -412,6 +412,9 @@ const TeamSourceCollectionGraphPanel = createLazyNamedTeamPanel(loadTeamSecondar
 const TeamSourceCollectionManualWritebackPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionManualWritebackPanel");
 const TeamSourceCollectionMemoryPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionMemoryPanel");
 const TeamSourceCollectionScreeningPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionScreeningPanel");
+const TeamKnowledgeCollectionCompletionFlowPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamKnowledgeCollectionCompletionFlowPanel");
+const TeamSourceCollectionConversationWorkspacePanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionConversationWorkspacePanel");
+const TeamSourceCollectionScreeningWorkspacePanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionScreeningWorkspacePanel");
 const TeamSourceCollectionSourceDetailPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionSourceDetailPanel");
 const TeamSourceCollectionStandaloneStagePanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionStandaloneStagePanel");
 const TeamSourceCollectionRunSettingsPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionRunSettingsPanel");
@@ -3496,97 +3499,27 @@ export function TeamsRoute({
   }
 
   function renderKnowledgeCollectionCompletionFlowPanel() {
-    if (!researchWorkflowTeamSelected || !researchCanvasReadOnly) {
-      return null;
-    }
-    const workRun = selectedTeamKnowledgeCollectionWorkRun;
-    const flow = sourceCollectionCompletionFlow;
-    const flowStatus = String(flow?.status || workRun?.status || "queued");
-    const flowError = String(flow?.error || workRun?.error || "");
-    const currentStageId = String(flow?.currentStageId || "");
     return (
-      <section className={styles.knowledgeCompletionFlowPanel} aria-label={lang === "zh" ? "一键流程图" : "One-click flow graph"}>
-        <div className={styles.knowledgeCompletionFlowHeader}>
-          <div>
-            <strong>{lang === "zh" ? "一键流程图" : "One-click flow graph"}</strong>
-            <span>
-              {workRun
-                ? (workRun.summary || workRun.currentTask || workRun.runId)
-                : (lang === "zh" ? "闭环执行后，这里展示阶段 Agent 的运行状态。" : "After loop execution starts, stage Agent progress appears here.")}
-            </span>
-          </div>
-          <span className={`${styles.workflowTag} ${workflowIngestionTone(flowStatus)}`}>
-            {workflowIngestionStatusLabel(flowStatus, lang)}
-          </span>
-        </div>
-        {flowError ? (
-          <div className={styles.workflowError}>
-            {flow?.errorType || workRun?.errorType ? `${flow?.errorType || workRun?.errorType}: ` : ""}
-            {flowError}
-          </div>
-        ) : null}
-        <div className={styles.knowledgeCompletionFlowNodes}>
-          {sourceCollectionCompletionFlowNodes.map((rawNode, index) => {
-            const stageId = parseSourceCollectionStageModuleId(String(rawNode.stageId || "")) ?? "finding";
-            const node = { ...rawNode, stageId };
-            const nodeState = sourceCollectionCompletionFlowNodeState(node.status);
-            const binding = sourceCollectionStagePrimaryAgentBinding(stageId);
-            const bindingDisplay = binding?.agent ? agentDisplayInfo(binding.agent, lang) : null;
-            const agentLabel =
-              bindingDisplay?.name
-              || binding?.agentId
-              || sourceCollectionAgentRoleLabel(node.agentRole, lang);
-            const isCurrent = currentStageId === node.stageId || nodeState === "active";
-            return (
-              <article
-                key={`${node.stageId}-${index}`}
-                className={[
-                  styles.knowledgeCompletionFlowNode,
-                  sourceCollectionStepClassName(nodeState),
-                  isCurrent ? styles.knowledgeCompletionFlowNodeCurrent : "",
-                ].filter(Boolean).join(" ")}
-              >
-                <div className={styles.knowledgeCompletionFlowNodeHeader}>
-                  <strong>{String(index + 1).padStart(2, "0")}</strong>
-                  <span>{workflowIngestionStatusLabel(String(node.status || ""), lang)}</span>
-                </div>
-                <div className={styles.knowledgeCompletionFlowNodeBody}>
-                  <b>{node.label || sourceCollectionStageModules.find((module) => module.id === stageId)?.label || stageId}</b>
-                  <small>{lang === "zh" ? `Agent：${agentLabel}` : `Agent: ${agentLabel}`}</small>
-                  <em>
-                    {lang === "zh" ? "输入" : "in"} {Number(node.inputCount || 0)}
-                    {" · "}
-                    {lang === "zh" ? "输出" : "out"} {Number(node.outputCount || 0)}
-                  </em>
-                  {node.detail ? <p>{node.detail}</p> : null}
-                  {node.errorType ? <p className={styles.knowledgeCompletionFlowError}>{node.errorType}</p> : null}
-                </div>
-                <div className={styles.knowledgeCompletionFlowActions}>
-                  <Link to={sourceCollectionStageReturnRoute(stageId)}>
-                    <Link2 size={13} />
-                    {lang === "zh" ? "阶段详情" : "Stage detail"}
-                  </Link>
-                  <VNativeButton type="button" onClick={() => openSourceCollectionStageAgentChat(node.stageId)}>
-                    <MessageSquare size={13} />
-                    {lang === "zh" ? "Agent 私聊" : "Agent chat"}
-                  </VNativeButton>
-                  {nodeState === "failed" ? (
-                    <VNativeButton
-                      type="button"
-                      onClick={runKnowledgeCollectionCompletionAction}
-                      disabled={sourceCollectionCompletionActionDisabled || selectedTeamKnowledgeCollectionIngestPending}
-                      title={sourceCollectionActionDisabledTitle(sourceCollectionCompletionActionReadiness, lang === "zh" ? "重试失败节点" : "Retry failed node")}
-                    >
-                      <RefreshCw size={13} />
-                      {lang === "zh" ? "重试失败节点" : "Retry failed node"}
-                    </VNativeButton>
-                  ) : null}
-                </div>
-              </article>
-            );
-          })}
-        </div>
-      </section>
+      <TeamKnowledgeCollectionCompletionFlowPanel
+        lang={lang}
+        researchWorkflowTeamSelected={researchWorkflowTeamSelected}
+        researchCanvasReadOnly={researchCanvasReadOnly}
+        selectedTeamKnowledgeCollectionWorkRun={selectedTeamKnowledgeCollectionWorkRun}
+        sourceCollectionCompletionFlow={sourceCollectionCompletionFlow}
+        sourceCollectionCompletionFlowNodes={sourceCollectionCompletionFlowNodes}
+        sourceCollectionStageModules={sourceCollectionStageModules}
+        workflowIngestionTone={workflowIngestionTone}
+        parseSourceCollectionStageModuleId={parseSourceCollectionStageModuleId}
+        sourceCollectionStagePrimaryAgentBinding={sourceCollectionStagePrimaryAgentBinding}
+        sourceCollectionStageReturnRoute={sourceCollectionStageReturnRoute}
+        openSourceCollectionStageAgentChat={openSourceCollectionStageAgentChat}
+        sourceCollectionStepClassName={sourceCollectionStepClassName}
+        runKnowledgeCollectionCompletionAction={runKnowledgeCollectionCompletionAction}
+        sourceCollectionCompletionActionDisabled={sourceCollectionCompletionActionDisabled}
+        selectedTeamKnowledgeCollectionIngestPending={selectedTeamKnowledgeCollectionIngestPending}
+        sourceCollectionActionDisabledTitle={sourceCollectionActionDisabledTitle}
+        sourceCollectionCompletionActionReadiness={sourceCollectionCompletionActionReadiness}
+      />
     );
   }
 
@@ -3659,193 +3592,40 @@ export function TeamsRoute({
   }
 
   function renderSourceCollectionConversation() {
-    const pagedResults = sourceCollectionPageItems("finding", sourceCollectionFilteredRecords);
-    const visibleResults = pagedResults.items;
-    const sourceCollectionConversationHasVisibleResults = visibleResults.length > 0;
-    const sourceCollectionConversationCompact = !sourceCollectionConversationHasVisibleResults;
-    const selectedRunEmptyWithHistorical = Boolean(
-      !sourceCollectionRecordsDataLoading
-      && !sourceCollectionRecords.length
-      && selectedSourceCollectionRun
-      && !sourceCollectionRunHasUsableRecords(selectedSourceCollectionRun)
-      && sourceCollectionHistoricalRunWithRecords
-      && sourceCollectionHistoricalRunWithRecords.runId !== selectedSourceCollectionRun.runId,
-    );
-    const rawRecordRangeText = sourceCollectionRecordsDataLoading
-      ? sourceCollectionLoadingText
-      : `${pagedResults.start}-${pagedResults.end} / ${sourceCollectionFilteredRecords.length}`;
-    const rawRecordHeaderText = sourceCollectionRecordsDataLoading
-      ? (lang === "zh" ? "加载中" : "Loading")
-      : lang === "zh"
-        ? `${visibleResults.length}/${sourceCollectionFilteredRecords.length}，共 ${sourceCollectionRawRecordCount}`
-        : `${visibleResults.length}/${sourceCollectionFilteredRecords.length}, ${sourceCollectionRawRecordCount} total`;
-    const sourceCollectionRecordClickableSourceCountText = sourceCollectionRecordsDataLoading
-      ? sourceCollectionLoadingText
-      : String(sourceCollectionRecordClickableSourceCount);
-    const sourceCollectionRecordLocalFileCountText = sourceCollectionRecordsDataLoading
-      ? sourceCollectionLoadingText
-      : String(sourceCollectionRecordLocalFileCount);
-    const findingStageModule = sourceCollectionStageModules.find((module) => module.id === "finding");
-    const findingStageReadiness = sourceCollectionStageActionReadinessFor("finding");
-    const findingStageActionLabel = findingStageModule?.actionLabel ?? (lang === "zh" ? "开始搜索" : "Start search");
-    const rawRecordEmptyFacts: TeamSourceEmptyStateFact[] = [
-      {
-        key: "run",
-        label: lang === "zh" ? "当前批次" : "Run",
-        value: sourceCollectionRecordsDataLoading
-          ? sourceCollectionLoadingText
-          : sourceCollectionRunTitleLabel(selectedSourceCollectionRun?.title || sourceCollectionDraft.title, lang),
-      },
-      {
-        key: "records",
-        label: lang === "zh" ? "原始资料" : "Raw records",
-        value: sourceCollectionRecordsDataLoading ? sourceCollectionLoadingText : sourceCollectionCollectedCountLabel,
-      },
-      {
-        key: "files",
-        label: lang === "zh" ? "文件产物" : "Files",
-        value: selectedSourceCollectionStorageArtifacts
-          ? (lang === "zh" ? "已连接本轮产物" : "Artifacts linked")
-          : (lang === "zh" ? "搜索完成后生成" : "Created after search"),
-      },
-      {
-        key: "next",
-        label: lang === "zh" ? "下一步" : "Next",
-        value: sourceCollectionBoardNextStepLabel,
-      },
-    ];
-    const rawRecordEmptyTitle = sourceCollectionRecordsDataLoading
-      ? (lang === "zh" ? "正在读取当前批次资料" : "Loading run records")
-      : sourceCollectionRecords.length
-        ? (lang === "zh" ? "当前筛选没有资料" : "No records match this filter")
-        : selectedSourceCollectionRun
-          ? (lang === "zh" ? "当前批次还没有原始资料" : "This run has no raw records yet")
-          : (lang === "zh" ? "还没有开始资料搜集" : "Source collection has not started");
-    const rawRecordEmptyDescription = sourceCollectionRecordsDataLoading
-      ? (lang === "zh" ? "正在读取记录、候选和文件产物，完成后会在这里进入列表视图。" : "Records, candidates, and artifacts are loading.")
-      : sourceCollectionRecords.length
-        ? (lang === "zh" ? "资料已经读取完成，但当前来源过滤没有命中；切回全部即可继续查看。" : "Records are loaded, but the selected source filter has no matches.")
-        : (lang === "zh"
-            ? "点击开始搜索后，原始资料、候选资料和文件产物会按同一批次写入这里。"
-            : "Start a search to write raw records, candidates, and file artifacts into this run.");
-    const rawRecordEmptyActions = sourceCollectionRecordsDataLoading
-      ? null
-      : sourceCollectionRecords.length
-        ? (
-            <VButton
-              type="button"
-              density="compact"
-              variant="secondary"
-              icon={<RefreshCw size={13} />}
-              isDisabled={sourceCollectionSourceFilter === "all"}
-              onPress={() => setSourceCollectionSourceFilter("all")}
-            >
-              {lang === "zh" ? "查看全部来源" : "Show all sources"}
-            </VButton>
-          )
-        : (
-            <VButton
-              type="button"
-              density="compact"
-              variant="primary"
-              icon={<Play size={13} />}
-              isDisabled={findingStageModule?.actionDisabled ?? true}
-              onPress={findingStageModule?.onAction}
-              title={sourceCollectionActionDisabledTitle(findingStageReadiness, findingStageActionLabel)}
-            >
-              {findingStageActionLabel}
-            </VButton>
-          );
     return (
-      <TeamSourceCollectionConversationPanel
+      <TeamSourceCollectionConversationWorkspacePanel
         lang={lang}
-        rangeText={rawRecordRangeText}
-        headerText={rawRecordHeaderText}
-        filterBar={renderSourceCollectionFilterBar(sourceCollectionRecordFilterCounts, lang === "zh" ? "资料来源过滤" : "Source filters", sourceCollectionRecordsDataLoading)}
-        stats={[
-          { key: "raw", label: lang === "zh" ? "原始记录" : "raw records", value: sourceCollectionCollectedCountText },
-          { key: "imported", label: lang === "zh" ? "已入候选" : "imported to candidates", value: sourceCollectionDisplayedCandidateCountText },
-          { key: "clickable", label: lang === "zh" ? "可点击来源" : "clickable sources", value: sourceCollectionRecordClickableSourceCountText },
-          { key: "local", label: lang === "zh" ? "本地文件" : "local files", value: sourceCollectionRecordLocalFileCountText },
-        ]}
-        pendingCandidateImportCount={sourceCollectionPendingCandidateImportCount}
-        missingSourceCount={sourceCollectionRecordMissingSourceCount}
-        compact={sourceCollectionConversationCompact}
-        pagination={sourceCollectionRecordsDataLoading ? null : renderSourceCollectionPagination("finding", sourceCollectionFilteredRecords.length)}
-      >
-          {sourceCollectionConversationHasVisibleResults ? (
-            <TeamSourceResultList ariaLabel={lang === "zh" ? "原始资料记录" : "Raw source records"}>
-              {visibleResults.map((record) => {
-                const linkedCandidate = sourceCollectionCandidatesByRecordId.get(record.recordId) ?? null;
-                const sourceQualitySummary = linkedCandidate ? candidateSourceQualityAssessmentSummary(linkedCandidate) : null;
-                const provenance = sourceCollectionRecordProvenance(record, lang);
-                const selected = Boolean(linkedCandidate && selectedSourceCollectionCandidateId === linkedCandidate.candidateId);
-                const resultStatusLabel = sourceCollectionSimpleRecordStatusLabel(linkedCandidate, sourceQualitySummary, lang);
-                const resultStatusRaw = linkedCandidate
-                  ? (sourceQualitySummary?.decision || linkedCandidate.qualityStatus || linkedCandidate.currentState)
-                  : "candidate_pending";
-                const resultScoreLabel = sourceQualitySummary
-                  ? `${sourceQualitySummary.overallScore}/100`
-                  : linkedCandidate
-                    ? (lang === "zh" ? "已提炼" : "extracted")
-                    : (lang === "zh" ? "待提炼" : "extract");
-                return (
-                  <TeamSourceResultItem
-                    key={record.recordId}
-                    tone={linkedCandidate ? sourceCollectionResultTone(linkedCandidate.qualityStatus) : "warning"}
-                    statusLabel={resultStatusLabel}
-                    statusTitle={resultStatusRaw}
-                    title={record.title || record.recordId}
-                    titleTooltip={[record.title || record.recordId, record.summary || ""].filter(Boolean).join("\n")}
-                    meta={[
-                      { key: "type", label: sourceCollectionSourceTypeLabel(record.sourceType, lang) },
-                      { key: "score", label: resultScoreLabel },
-                    ]}
-                    source={{
-                      label: provenance.label,
-                      value: provenance.value,
-                      href: provenance.href,
-                      title: provenance.href || provenance.value,
-                      missing: provenance.kind === "missing",
-                    }}
-                    selected={selected}
-                    onActivate={linkedCandidate ? () => selectSourceCollectionCandidate(linkedCandidate) : undefined}
-                    activateTitle={linkedCandidate ? (lang === "zh" ? "点击查看候选详情" : "Open candidate detail") : undefined}
-                  />
-                );
-              })}
-            </TeamSourceResultList>
-          ) : selectedRunEmptyWithHistorical && sourceCollectionHistoricalRunWithRecords ? (
-            <TeamSourceEmptyState
-              title={lang === "zh" ? "当前批次暂无资料" : "This run has no records"}
-              description={lang === "zh"
-                ? `上一轮有资料：${sourceCollectionRunRecordCount(sourceCollectionHistoricalRunWithRecords)} 条资料 / ${sourceCollectionRunCandidateMetric(sourceCollectionHistoricalRunWithRecords)} 个候选。`
-                : `Another run has records: ${sourceCollectionRunRecordCount(sourceCollectionHistoricalRunWithRecords)} records / ${sourceCollectionRunCandidateMetric(sourceCollectionHistoricalRunWithRecords)} candidates.`}
-              facts={rawRecordEmptyFacts}
-              actions={(
-                <VButton
-                  type="button"
-                  density="compact"
-                  variant="secondary"
-                  icon={<Search size={13} />}
-                  onPress={() => setSelectedSourceCollectionRunId(sourceCollectionHistoricalRunWithRecords.runId)}
-                >
-                  {lang === "zh" ? "切换到有资料批次" : "Show run with records"}
-                </VButton>
-              )}
-            />
-          ) : (
-            <TeamSourceEmptyState
-              title={rawRecordEmptyTitle}
-              description={rawRecordEmptyDescription}
-              facts={rawRecordEmptyFacts}
-              actions={rawRecordEmptyActions}
-              footer={lang === "zh"
-                ? "资料列表只展示真实写入的记录；没有记录时不再撑出空白列表。"
-                : "The source list only renders real records; empty runs stay compact."}
-            />
-          )}
-      </TeamSourceCollectionConversationPanel>
+        sourceCollectionPageItems={sourceCollectionPageItems}
+        sourceCollectionFilteredRecords={sourceCollectionFilteredRecords}
+        sourceCollectionRecordsDataLoading={sourceCollectionRecordsDataLoading}
+        sourceCollectionRecords={sourceCollectionRecords}
+        selectedSourceCollectionRun={selectedSourceCollectionRun}
+        sourceCollectionHistoricalRunWithRecords={sourceCollectionHistoricalRunWithRecords}
+        sourceCollectionLoadingText={sourceCollectionLoadingText}
+        sourceCollectionRawRecordCount={sourceCollectionRawRecordCount}
+        sourceCollectionRecordClickableSourceCount={sourceCollectionRecordClickableSourceCount}
+        sourceCollectionRecordLocalFileCount={sourceCollectionRecordLocalFileCount}
+        sourceCollectionStageModules={sourceCollectionStageModules}
+        sourceCollectionStageActionReadinessFor={sourceCollectionStageActionReadinessFor}
+        sourceCollectionDraft={sourceCollectionDraft}
+        sourceCollectionCollectedCountLabel={sourceCollectionCollectedCountLabel}
+        selectedSourceCollectionStorageArtifacts={selectedSourceCollectionStorageArtifacts}
+        sourceCollectionBoardNextStepLabel={sourceCollectionBoardNextStepLabel}
+        sourceCollectionSourceFilter={sourceCollectionSourceFilter}
+        setSourceCollectionSourceFilter={setSourceCollectionSourceFilter}
+        sourceCollectionActionDisabledTitle={sourceCollectionActionDisabledTitle}
+        sourceCollectionRecordFilterCounts={sourceCollectionRecordFilterCounts}
+        renderSourceCollectionFilterBar={renderSourceCollectionFilterBar}
+        sourceCollectionCollectedCountText={sourceCollectionCollectedCountText}
+        sourceCollectionDisplayedCandidateCountText={sourceCollectionDisplayedCandidateCountText}
+        sourceCollectionPendingCandidateImportCount={sourceCollectionPendingCandidateImportCount}
+        sourceCollectionRecordMissingSourceCount={sourceCollectionRecordMissingSourceCount}
+        renderSourceCollectionPagination={renderSourceCollectionPagination}
+        sourceCollectionCandidatesByRecordId={sourceCollectionCandidatesByRecordId}
+        selectedSourceCollectionCandidateId={selectedSourceCollectionCandidateId}
+        selectSourceCollectionCandidate={selectSourceCollectionCandidate}
+        setSelectedSourceCollectionRunId={setSelectedSourceCollectionRunId}
+      />
     );
   }
 
@@ -3994,211 +3774,52 @@ export function TeamsRoute({
   }
 
   function renderSourceCollectionScreeningPanel() {
-    const filteredScreeningCandidates = sourceCollectionFilteredRunCandidates;
-    const pagedScreeningCandidates = sourceCollectionPageItems("extraction", filteredScreeningCandidates);
-    const screeningCandidates = pagedScreeningCandidates.items;
-    const screeningListNeedsScrollHint = screeningCandidates.length > 3;
-    const screeningPanelFilteredCount = sourceCollectionSourceFilter === "all"
-      ? sourceCollectionDisplayedCandidateCount
-      : filteredScreeningCandidates.length;
-    const screeningPanelFilteredCountText = sourceCollectionCountText(sourceCollectionPrimaryDataLoading, screeningPanelFilteredCount);
-    const screeningPanelRange = sourceCollectionPrimaryDataLoading
-      ? sourceCollectionDataSyncText
-      : screeningCandidates.length
-      ? `${pagedScreeningCandidates.start}-${pagedScreeningCandidates.end}/${filteredScreeningCandidates.length}`
-      : `0/${screeningPanelFilteredCount}`;
     return (
-      <TeamSourceCollectionScreeningPanel
+      <TeamSourceCollectionScreeningWorkspacePanel
         lang={lang}
-        focused={sourceCollectionFocusedPanelId === "source-collection-screening-panel"}
-        open={
-          (
-            selectedSourceCollectionStageId === "extraction"
-            && !sourceCollectionExpandedPanelId
-            && sourceCollectionExtractionDefaultPanelId === "source-collection-screening-panel"
-          )
-          || sourceCollectionExpandedPanelId === "source-collection-screening-panel"
-          || sourceCollectionScreeningStepState === "active"
-          || sourceCollectionScreeningStepState === "pending"
-        }
-        onToggle={(event) => {
-          if (!event.currentTarget.open && sourceCollectionExpandedPanelId === "source-collection-screening-panel") {
-            setSourceCollectionExpandedPanelId("");
-          }
-        }}
-        rangeText={screeningPanelRange}
-        filterBar={renderSourceCollectionFilterBar(sourceCollectionDisplayedCandidateFilterCounts, lang === "zh" ? "审查资料过滤" : "Review source filters", sourceCollectionPrimaryDataLoading)}
-        stats={[
-          { key: "candidate", label: lang === "zh" ? "本轮候选" : "run candidates", value: sourceCollectionDisplayedCandidateCountText },
-          { key: "filtered", label: lang === "zh" ? "当前过滤" : "filtered", value: screeningPanelFilteredCountText },
-          { key: "reviewed", label: lang === "zh" ? "已审查" : "reviewed", value: sourceCollectionProjectedAssessedCountText },
-          { key: "approved", label: lang === "zh" ? "通过" : "approved", value: sourceCollectionProjectedApprovedCountText },
-          { key: "pending", label: lang === "zh" ? "待 Agent 复核" : "pending agent review", value: sourceCollectionRunPendingScreeningCountText },
-          { key: "evidence-ready", label: "evidence_ready", value: sourceCollectionEvidenceReadyCandidateCount },
-          { key: "missing-evidence-anchor", label: "missing_evidence_anchor", value: sourceCollectionMissingEvidenceAnchorCount },
-        ]}
-        actions={<>
-          <VButton
-            type="button"
-            density="compact"
-            variant="primary"
-            icon={<CheckCircle2 size={13} />}
-            onPress={runSourceCollectionScreeningAction}
-            isDisabled={sourceCollectionScreeningDisabled || selectedTeamSourceQualityPending}
-            title={sourceCollectionActionDisabledTitle(sourceCollectionScreeningActionReadiness, sourceCollectionScreeningButtonText)}
-          >
-            {sourceCollectionScreeningButtonText}
-          </VButton>
-          <VButton
-            type="button"
-            density="compact"
-            variant="secondary"
-            icon={<Eye size={13} />}
-            onPress={openSourceCollectionScreeningPanel}
-            isDisabled={sourceCollectionScreeningDisabled}
-            title={sourceCollectionActionDisabledTitle(sourceCollectionScreeningActionReadiness, lang === "zh" ? "查看筛选结果" : "View results")}
-          >
-            {lang === "zh" ? "查看筛选结果" : "View results"}
-          </VButton>
-        </>}
-        hasCandidates={Boolean(screeningCandidates.length)}
-        listNeedsScrollHint={screeningListNeedsScrollHint}
-        emptyMessage={
-          sourceCollectionPrimaryDataLoading
-            ? (lang === "zh" ? "正在加载资料提炼复核候选..." : "Loading review candidates...")
-            : sourceCollectionDisplayedCandidateCount
-              ? (lang === "zh" ? "当前过滤条件下没有候选资料。" : "No candidates match this filter.")
-              : (lang === "zh" ? "本轮还没有候选资料。先完成搜索资料并导入候选。" : "No candidates from this run yet.")
-        }
-        pagination={renderSourceCollectionPagination("extraction", filteredScreeningCandidates.length)}
-        statusItems={teamWorkflowSourceQualityStatus?.actionItems.length
-          ? teamWorkflowSourceQualityStatus.actionItems.slice(0, 3).map((item) => (
-            <span key={`${item.code}-${item.candidateId}`} className={workflowIngestionTone(item.severity)}>
-              {workflowIngestionStatusLabel(item.severity, lang)} · {item.message}
-            </span>
-          ))
-          : null}
-        errors={<>
-          {teamWorkflowSourceQualityStatusQuery.error instanceof Error ? (
-            <div className={styles.messageError}>{teamWorkflowSourceQualityStatusQuery.error.message}</div>
-          ) : null}
-          {selectedTeamSourceQualityError ? (
-            <div className={styles.messageError}>{selectedTeamSourceQualityError.message}</div>
-          ) : null}
-        </>}
-      >
-        {screeningCandidates.map((candidate) => {
-                const chunkPlanSummary = candidatePaperNoteChunkPlanSummary(candidate);
-                const sourceQualitySummary = candidateSourceQualityAssessmentSummary(candidate);
-                const provenance = sourceCollectionCandidateProvenance(candidate, lang);
-                const canPlanPaperNoteChunks = sourceCandidateHasCompletedExtraction(candidate);
-                const candidateQualityPending =
-                  selectedTeamAssessSourceQualityPending
-                  && assessSourceQualityMutation.variables?.candidateId === candidate.candidateId;
-                const candidatePlanPending =
-                  selectedTeamPlanPaperNoteChunksPending
-                  && planPaperNoteChunksMutation.variables?.candidateId === candidate.candidateId;
-                const selected = selectedSourceCollectionCandidateId === candidate.candidateId;
-                return (
-                  <TeamCandidateCard
-                    key={candidate.candidateId}
-                    tone={sourceCollectionResultTone(candidate.qualityStatus)}
-                    statusLabel={
-                      sourceQualitySummary
-                        ? workflowIngestionStatusLabel(sourceQualitySummary.decision, lang)
-                        : (lang === "zh" ? "待 Agent 复核" : "pending agent review")
-                    }
-                    title={candidate.title || candidate.candidateId}
-                    summary={candidate.summary || candidate.candidateType}
-                    meta={[
-                      { key: "category", label: sourceCollectionSourceFilterLabel(sourceCollectionCandidateSourceCategory(candidate, lang), lang) },
-                      { key: "updated", label: formatTime(candidate.updatedAt, lang) },
-                      ...(sourceQualitySummary
-                        ? [{ key: "score", label: `${lang === "zh" ? "评分" : "score"} ${sourceQualitySummary.overallScore}/100` }]
-                        : []),
-                      ...(chunkPlanSummary
-                        ? [{ key: "chunks", label: `paper_note ${chunkPlanSummary.completedChunkCount}/${chunkPlanSummary.chunkCount}` }]
-                        : canPlanPaperNoteChunks
-                          ? [{ key: "chunks", label: lang === "zh" ? "可分块" : "chunk ready" }]
-                          : []),
-                    ]}
-                    source={{
-                      label: provenance.label,
-                      value: provenance.value,
-                      href: provenance.href,
-                      title: provenance.href || provenance.value,
-                      missing: provenance.kind === "missing",
-                    }}
-                    selected={selected}
-                    onActivate={() => selectSourceCollectionCandidate(candidate)}
-                    activateTitle={lang === "zh" ? "点击查看来源详情" : "Open source detail"}
-                    actions={<>
-                      <VNativeButton
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          if (!selectedTeam?.teamId || selectedTeamSourceQualityPending) {
-                            return;
-                          }
-                          assessSourceQualityMutation.mutate({
-                            teamId: selectedTeam.teamId,
-                            candidateId: candidate.candidateId,
-                            decision: "approved",
-                          });
-                        }}
-                        disabled={!selectedTeam?.teamId || selectedTeamSourceQualityPending}
-                      >
-                        <CheckCircle2 size={13} />
-                        {candidateQualityPending && assessSourceQualityMutation.variables?.decision === "approved"
-                          ? (lang === "zh" ? "筛选中" : "Assessing")
-                          : (lang === "zh" ? "通过复核" : "Approve")}
-                      </VNativeButton>
-                      <VNativeButton
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          if (!selectedTeam?.teamId || selectedTeamSourceQualityPending) {
-                            return;
-                          }
-                          assessSourceQualityMutation.mutate({
-                            teamId: selectedTeam.teamId,
-                            candidateId: candidate.candidateId,
-                            decision: "needs_revision",
-                          });
-                        }}
-                        disabled={!selectedTeam?.teamId || selectedTeamSourceQualityPending}
-                      >
-                        <AlertTriangle size={13} />
-                        {candidateQualityPending && assessSourceQualityMutation.variables?.decision === "needs_revision"
-                          ? (lang === "zh" ? "退回中" : "Returning")
-                          : (lang === "zh" ? "退回补资料" : "Repair")}
-                      </VNativeButton>
-                      <VNativeButton
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          if (!selectedTeam?.teamId || !canPlanPaperNoteChunks || planPaperNoteChunksMutation.isPending) {
-                            return;
-                          }
-                          planPaperNoteChunksMutation.mutate({
-                            teamId: selectedTeam.teamId,
-                            candidateId: candidate.candidateId,
-                          });
-                        }}
-                        disabled={!selectedTeam?.teamId || !canPlanPaperNoteChunks || planPaperNoteChunksMutation.isPending}
-                      >
-                        {chunkPlanSummary ? <RefreshCw size={13} /> : <Plus size={13} />}
-                        {candidatePlanPending
-                          ? (lang === "zh" ? "规划中" : "Planning")
-                          : chunkPlanSummary
-                            ? (lang === "zh" ? "重建分块" : "Rebuild chunks")
-                            : (lang === "zh" ? "生成分块" : "Plan chunks")}
-                      </VNativeButton>
-                    </>}
-                  />
-                );
-              })}
-      </TeamSourceCollectionScreeningPanel>
+        sourceCollectionFilteredRunCandidates={sourceCollectionFilteredRunCandidates}
+        sourceCollectionPageItems={sourceCollectionPageItems}
+        sourceCollectionSourceFilter={sourceCollectionSourceFilter}
+        sourceCollectionDisplayedCandidateCount={sourceCollectionDisplayedCandidateCount}
+        sourceCollectionCountText={sourceCollectionCountText}
+        sourceCollectionPrimaryDataLoading={sourceCollectionPrimaryDataLoading}
+        sourceCollectionDataSyncText={sourceCollectionDataSyncText}
+        sourceCollectionFocusedPanelId={sourceCollectionFocusedPanelId}
+        selectedSourceCollectionStageId={selectedSourceCollectionStageId}
+        sourceCollectionExpandedPanelId={sourceCollectionExpandedPanelId}
+        setSourceCollectionExpandedPanelId={setSourceCollectionExpandedPanelId}
+        sourceCollectionExtractionDefaultPanelId={sourceCollectionExtractionDefaultPanelId}
+        sourceCollectionScreeningStepState={sourceCollectionScreeningStepState}
+        sourceCollectionDisplayedCandidateFilterCounts={sourceCollectionDisplayedCandidateFilterCounts}
+        renderSourceCollectionFilterBar={renderSourceCollectionFilterBar}
+        sourceCollectionDisplayedCandidateCountText={sourceCollectionDisplayedCandidateCountText}
+        sourceCollectionProjectedAssessedCountText={sourceCollectionProjectedAssessedCountText}
+        sourceCollectionProjectedApprovedCountText={sourceCollectionProjectedApprovedCountText}
+        sourceCollectionRunPendingScreeningCountText={sourceCollectionRunPendingScreeningCountText}
+        sourceCollectionEvidenceReadyCandidateCount={sourceCollectionEvidenceReadyCandidateCount}
+        sourceCollectionMissingEvidenceAnchorCount={sourceCollectionMissingEvidenceAnchorCount}
+        runSourceCollectionScreeningAction={runSourceCollectionScreeningAction}
+        sourceCollectionScreeningDisabled={sourceCollectionScreeningDisabled}
+        selectedTeamSourceQualityPending={selectedTeamSourceQualityPending}
+        sourceCollectionActionDisabledTitle={sourceCollectionActionDisabledTitle}
+        sourceCollectionScreeningActionReadiness={sourceCollectionScreeningActionReadiness}
+        sourceCollectionScreeningButtonText={sourceCollectionScreeningButtonText}
+        openSourceCollectionScreeningPanel={openSourceCollectionScreeningPanel}
+        renderSourceCollectionPagination={renderSourceCollectionPagination}
+        teamWorkflowSourceQualityStatus={teamWorkflowSourceQualityStatus}
+        teamWorkflowSourceQualityStatusQuery={teamWorkflowSourceQualityStatusQuery}
+        workflowIngestionTone={workflowIngestionTone}
+        selectedTeamSourceQualityError={selectedTeamSourceQualityError}
+        selectedSourceCollectionCandidateId={selectedSourceCollectionCandidateId}
+        selectSourceCollectionCandidate={selectSourceCollectionCandidate}
+        selectedTeam={selectedTeam}
+        selectedTeamAssessSourceQualityPending={selectedTeamAssessSourceQualityPending}
+        assessSourceQualityMutation={assessSourceQualityMutation}
+        selectedTeamPlanPaperNoteChunksPending={selectedTeamPlanPaperNoteChunksPending}
+        planPaperNoteChunksMutation={planPaperNoteChunksMutation}
+        sourceCandidateHasCompletedExtraction={sourceCandidateHasCompletedExtraction}
+        candidatePaperNoteChunkPlanSummary={candidatePaperNoteChunkPlanSummary}
+      />
     );
   }
 
