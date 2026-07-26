@@ -16,6 +16,7 @@ import routeSource from "./AgentsRoute.tsx?raw";
 import agentStatusPresentationSource from "./agents/agentStatusPresentation.ts?raw";
 import workbenchMutationsSource from "./agents/useAgentWorkbenchMutations.ts?raw";
 import configDraftMutationsSource from "./agents/useAgentConfigDraftMutations.ts?raw";
+import agentRouteListModelSource from "./agents/agentRouteListModel.ts?raw";
 import agentManagementNavSource from "./AgentManagementNav.tsx?raw";
 import agentManagementModuleBarSource from "./AgentManagementModuleBar.tsx?raw";
 import agentWorkspaceCacheSource from "./agentWorkspaceCache.ts?raw";
@@ -761,7 +762,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("promptTemplateDisplayName(agent.promptTemplate, agent.promptTemplateId, lang)");
     expect(routeSource).toContain("promptTemplateDisplayName(selectedAgent.promptTemplate, selectedAgent.promptTemplateId, lang)");
     expect(routeSource).toContain("promptTemplateOptionLabel(template, lang)");
-    expect(routeSource).toContain('"research ceo": "科研负责人"');
+    expect(agentRouteListModelSource).toContain('"research ceo": "科研负责人"');
     expect(routeSource).not.toContain("<span>{agent.promptTemplate?.name || agent.promptTemplateId || \"-\"}</span>");
     expect(routeSource).toContain("copy.tools");
     expect(routeSource).toContain("copy.memory");
@@ -823,20 +824,20 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("AgentModelChoice");
     expect(routeSource).toContain("model.model");
     expect(routeSource).toContain("model.modelId");
-    expect(routeSource).toContain("function agentModelChoiceAllowed");
-    expect(routeSource).toContain("!text.includes(\"image2\")");
+    expect(agentRouteListModelSource).toContain("function agentModelChoiceAllowed");
+    expect(agentRouteListModelSource).toContain('!text.includes("image2")');
     expect(routeSource).toContain("buildAgentModelChoices(workspace?.agentModelChoices ?? [])");
-    expect(routeSource).toContain(
+    expect(agentRouteListModelSource).toContain(
       ".filter((model) => model.runtimeSelectable && agentModelChoiceAllowed(model))",
     );
     expect(routeSource).toContain("coreConfigLlmSlots");
     expect(routeSource).toContain("selectedModelId");
     expect(routeSource).toContain("agentLlmSlots(workspace)");
     expect(routeSource).toContain("workspace?.agentLlmSlots?.length");
-    expect(routeSource).toContain("key: model.modelId");
+    expect(agentRouteListModelSource).toContain("key: model.modelId");
     expect(routeSource).toContain("agentDialogueModelDisplay(agent, lang)");
-    expect(routeSource).toContain("unresolved_model_reference_dialogue");
-    expect(routeSource).toContain("模型库未注册");
+    expect(agentRouteListModelSource).toContain("unresolved_model_reference_dialogue");
+    expect(agentRouteListModelSource).toContain("模型库未注册");
     expect(modelPickerSource).toContain("模型与当前 Agent 槽位不兼容");
     expect(modelPickerSource).toContain("上游模型当前不可用");
     expect(modelPickerSource).toContain("请先保存或放弃未保存修改");
@@ -897,6 +898,14 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain('from "./agents/agentStatusPresentation"');
     expect(routeSource).toContain("governanceStatusLabel");
     expect(routeSource).not.toMatch(/from "\.\/AgentToolGovernancePanel"/);
+  });
+
+  it("owns pure list/presentation helpers outside AgentsRoute (D3)", () => {
+    expect(routeSource).toContain('from "./agents/agentRouteListModel"');
+    expect(routeSource).toContain("buildAgentModelChoices");
+    expect(routeSource).toContain("agentLabel");
+    expect(routeSource).not.toMatch(/^function normalizeText\(/m);
+    expect(routeSource).not.toMatch(/^function buildAgentModelChoices\(/m);
   });
 
   it("guides Agent creation through defaults, provider-model linkage, and a final review", () => {
