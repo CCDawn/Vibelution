@@ -93,7 +93,8 @@ Recorded for high-ROI program **scope A** (F0–F3, F5, F6; F4 trigger-only).
 | D2 | Conversation windowed virtual range + stick-bottom ResizeObserver |
 | D2+ | Measured row heights + prefix-sum spacers (`buildConversationHeightOffsets` / row ResizeObserver) |
 | D2++ | Stick-bottom: min tail window + rAF height-version batch + 2px measure deadband |
-| D3 | Agents pure presentation helpers → `agents/agentRouteListModel.ts` (~200 LOC off route) |
+| D3 | Agents pure presentation helpers → `agentRouteListModel.ts` |
+| D3+ | LLM/reasoning + lightweight workspace helpers → `agentRouteLlmModel.ts` / `agentRouteWorkspaceModel.ts` (~500 LOC off route) |
 
 ### Post-T1–T3 chunk notes (build evidence)
 
