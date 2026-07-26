@@ -9,6 +9,7 @@ export {
   TeamResearchStageAgentPanel,
   TeamResearchStageAgentSummary,
 } from "../TeamResearchStageAgentPanel";
+export { TeamResearchStageLauncherPanel } from "../TeamResearchStageLauncherPanel";
 export { TeamExperimentMethodPanel } from "../TeamExperimentMethodPanel";
 export { TeamSourceCollectionActiveStagePanel } from "../TeamSourceCollectionActiveStagePanel";
 export { TeamSourceCollectionPhaseCloseGatePanel } from "../TeamSourceCollectionPhaseCloseGatePanel";

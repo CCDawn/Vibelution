@@ -25,6 +25,7 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 | Research memory evidence UI | `ResearchMemoryEvidencePanel.tsx` | Teams shell mutations |
 | AI Search workspace UI | `../TeamAiSearchWorkspacePanel.tsx` (via secondary pack) | start mutation wiring |
 | Research stage agent summary/grid UI | `../TeamResearchStageAgentPanel.tsx` (via secondary pack) | binding projection |
+| Research stage launcher console | `../TeamResearchStageLauncherPanel.tsx` (via secondary pack) | query/mutation injection |
 | Source-collection panel shell alias | `TeamsSourceCollectionPanel.tsx` | full route wiring |
 | Workflow graph **layout math** | `../TeamWorkflowGraphLayout.ts` | Graph SVG view |
 | Workflow graph **SVG view** | `../TeamWorkflowGraphView.tsx` (via secondary pack) | layout pure math |
@@ -53,6 +54,7 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 - **Done:** workspace navigation, team kind guards, canvas geometry, source-collection presentation, experiment/loop types+labels, AI-search presentation, workflow presentation labels, research stage agent role tables, workflow query keys, stage-agent presentation/routes.
 - **Still in `TeamsRoute.tsx`:** mutation wiring, JSX shell, style-bound tone helpers, large panel orchestration.
 - **Wave 8G done:** AI Search workspace + research stage agent summary/panel extracted to secondary-lazy components.
+- **Wave 8H done:** Research stage launcher (three-stage + Challenge Cup MVP console) extracted to `TeamResearchStageLauncherPanel`.
 
 ## Next (planned)
 
