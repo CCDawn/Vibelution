@@ -798,7 +798,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const configQuery = useQuery({
     queryKey: queryKeys.configPublic(),
     queryFn: () => fetchJson<ConfigSummary>("/api/config/public"),
-    refetchInterval: resolvePollingInterval(pageVisible, 8_000),
+    staleTime: 30_000,
+    refetchInterval: resolvePollingInterval(pageVisible, 30_000),
     refetchIntervalInBackground: false,
   });
   const modelLabelsById = useMemo(
@@ -830,14 +831,19 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
         ? "/api/evolution/workspace-snapshot?includeSelf=true"
         : "/api/evolution/workspace-snapshot",
     ),
-    refetchInterval: resolvePollingInterval(pageVisible, 4_000),
+    // R3: idle workspace — slower poll; fast only when an active run is present (see below after data).
+    refetchInterval: (query) => {
+      const snapshot = query.state.data as EvolutionWorkspaceSnapshot | undefined;
+      const hasActiveRun = Boolean(snapshot?.activeRun?.runId);
+      return resolvePollingInterval(pageVisible, hasActiveRun ? 4_000 : 12_000);
+    },
     refetchIntervalInBackground: false,
     enabled: supervisedTrackQueriesEnabled || selfTrackQueriesEnabled,
   });
   const workbenchCatalogQuery = useQuery({
     queryKey: queryKeys.evolutionWorkbench(),
     queryFn: () => fetchJson<EvolutionWorkbench>("/api/evolution/workbench"),
-    refetchInterval: resolvePollingInterval(pageVisible, 8_000),
+    refetchInterval: resolvePollingInterval(pageVisible, 15_000),
     refetchIntervalInBackground: false,
     enabled: supervisedTrackQueriesEnabled,
   });
@@ -852,7 +858,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const selfTransactionsQuery = useQuery({
     queryKey: queryKeys.evolutionSelfTransactions(),
     queryFn: () => fetchJson<SelfEvolutionTransaction[]>("/api/evolution/self/transactions"),
-    refetchInterval: resolvePollingInterval(pageVisible, 8_000),
+    refetchInterval: resolvePollingInterval(pageVisible, 12_000),
     refetchIntervalInBackground: false,
     enabled: selfTrackQueriesEnabled,
   });
@@ -860,7 +866,13 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     queryKey: queryKeys.evolutionSelfObservationRun(selectedSelfObservationRunId || "__none__"),
     queryFn: () =>
       fetchJson<SelfObservationRun>(`/api/evolution/self/observation-runs/${encodeURIComponent(selectedSelfObservationRunId)}`),
-    refetchInterval: resolvePollingInterval(pageVisible, 2_000),
+    // R3: 2s only while the selected observation run is still active/in-flight.
+    refetchInterval: (query) => {
+      const run = query.state.data as SelfObservationRun | undefined;
+      const status = String(run?.status || "").toLowerCase();
+      const active = Boolean(status) && !["completed", "failed", "cancelled", "archived", "done", "success"].includes(status);
+      return resolvePollingInterval(pageVisible, active ? 2_000 : 10_000);
+    },
     refetchIntervalInBackground: false,
     enabled: Boolean(selfTrackQueriesEnabled && selectedSelfObservationRunId),
   });
@@ -1889,7 +1901,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       && evolutionView === "library"
       && !selectedProposalIsSelfCandidate
       && Boolean(selectedProposalRunId),
-    refetchInterval: resolvePollingInterval(pageVisible, 8_000),
+    // R3: library detail is not a hot live run surface.
+    refetchInterval: resolvePollingInterval(pageVisible, 15_000),
     refetchIntervalInBackground: false,
   });
   const updateProposalMutation = useMutation({

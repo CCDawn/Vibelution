@@ -111,6 +111,7 @@ See `PERF_BASELINE.md` for F0 numbers and gaps.
 | F1 markdown / xterm lazy | Already in place (do not regress) |
 | F2 expanded group agent polls honor SSE open | Done in ChatCodingRoute |
 | F2 core session/list policy | Already in `chatLiveQueryPolicy` |
+| R1 secondary chrome polls | `chatSecondaryPollPolicy` — runtime 20s / pet 30s / teams gated / project bus 8s |
 
 ## Next (planned)
 

@@ -57,7 +57,7 @@ Recorded for high-ROI program **scope A** (F0–F3, F5, F6; F4 trigger-only).
 | F3-B | Agent secondary panes React.lazy; AgentsRoute raw ~357→~261 kB gzip ~85→~66 |
 | F3-C | Activity poll gates already correct |
 | F5 | Verified: AppShell/Launcher use `useShellI18n` only (existing contracts) |
-| F4 | Trigger-only — no Config/Memory feature PR this round |
+| F4 / R1–R4 | Chat secondary poll; Config pane lazy; Evolution poll gate; Memory item mutations + graph lazy |
 
 ### Post-F3 Agents chunk note
 
