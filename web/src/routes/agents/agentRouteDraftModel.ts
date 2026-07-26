@@ -422,3 +422,48 @@ export function hasWorkspaceConfiguration(agent: AgentConfigWorkspaceAgent | nul
 export function agentHasTeamReference(agent: AgentConfigWorkspaceAgent | null | undefined) {
   return Boolean(agent?.references?.some((reference) => reference.kind === "team"));
 }
+
+export function configDraftEqualsDraft(left: AgentConfigDraft, right: AgentConfigDraft) {
+  return (
+    left.displayName === right.displayName
+    && sameAgentLlmBindings(left.llmBindings, right.llmBindings)
+    && sameAgentReasoningEffortBySlot(left.reasoningEffortBySlot, right.reasoningEffortBySlot)
+    && left.promptTemplateId === right.promptTemplateId
+    && left.toolPolicyId === right.toolPolicyId
+    && left.memoryPolicyId === right.memoryPolicyId
+    && contextCompressionDraftEqualsDraft(left.contextCompressionPolicy, right.contextCompressionPolicy)
+    && left.status === right.status
+  );
+}
+
+export function personaDraftEqualsDraft(left: AgentPersonaDraft, right: AgentPersonaDraft) {
+  const leftProfile = personaProfileFromDraft(left);
+  const rightProfile = personaProfileFromDraft(right);
+  return (
+    leftProfile.gender === rightProfile.gender
+    && leftProfile.age === rightProfile.age
+    && leftProfile.pronouns === rightProfile.pronouns
+    && leftProfile.personality === rightProfile.personality
+    && leftProfile.communicationStyle === rightProfile.communicationStyle
+    && leftProfile.background === rightProfile.background
+    && sameStringSet(leftProfile.expertise, rightProfile.expertise)
+    && leftProfile.collaborationPreference === rightProfile.collaborationPreference
+    && leftProfile.identityNotes === rightProfile.identityNotes
+  );
+}
+
+export function taskDraftEqualsDraft(left: AgentTaskDraft, right: AgentTaskDraft) {
+  const leftProfile = taskProfileFromDraft(left);
+  const rightProfile = taskProfileFromDraft(right);
+  return (
+    leftProfile.mission === rightProfile.mission
+    && sameStringSet(leftProfile.taskTypes, rightProfile.taskTypes)
+    && leftProfile.responsibilities === rightProfile.responsibilities
+    && leftProfile.preferredTasks === rightProfile.preferredTasks
+    && leftProfile.avoidTasks === rightProfile.avoidTasks
+    && leftProfile.successCriteria === rightProfile.successCriteria
+    && leftProfile.deliverables === rightProfile.deliverables
+    && leftProfile.constraints === rightProfile.constraints
+    && leftProfile.handoffNotes === rightProfile.handoffNotes
+  );
+}
