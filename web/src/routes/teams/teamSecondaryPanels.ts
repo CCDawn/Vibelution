@@ -48,3 +48,7 @@ export {
   TeamWorkflowPaperNoteChunkStatusPanel,
   TeamWorkflowSourceQualityStatusPanel,
 } from "../TeamWorkflowStatusPanels";
+
+export { TeamKnowledgeCollectionCompletionFlowPanel } from "../TeamKnowledgeCollectionCompletionFlowPanel";
+export { TeamSourceCollectionConversationWorkspacePanel } from "../TeamSourceCollectionConversationWorkspacePanel";
+export { TeamSourceCollectionScreeningWorkspacePanel } from "../TeamSourceCollectionScreeningWorkspacePanel";
