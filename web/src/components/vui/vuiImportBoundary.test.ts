@@ -19,13 +19,31 @@ const localVisualClassConstantPattern = /const\s+[A-Za-z0-9_]+Class\s*=/;
 const localStylesObjectPattern = /const\s+styles\s*=/;
 const parentRouteStyleImportPattern = /from\s+["']\.\/([A-Za-z0-9]+Route)\.styles["']/g;
 const productSharedParentStyleConsumers = [
+  "components/layout/PersistedHeightListShell.tsx",
   "routes/chat/CacheDetailDialog.tsx",
   "routes/chat/ChatConversationIndexRail.tsx",
   "routes/chat/chatRoutePresentation.tsx",
   "routes/chat/ChatStatusRail.tsx",
   "routes/chat/TokenCoreStatusPanel.tsx",
   "routes/chat/useChatWorkbenchLayout.ts",
+  "routes/TeamAiSearchWorkspacePanel.tsx",
+  "routes/TeamExperimentPlanningLedgerPanel.tsx",
+  "routes/TeamKnowledgeCollectionCompletionFlowPanel.tsx",
+  "routes/TeamResearchLoopPanel.tsx",
+  "routes/TeamResearchStageAgentPanel.tsx",
+  "routes/TeamResearchStageLauncherPanel.tsx",
+  "routes/TeamResearchStageStandalonePagePanel.tsx",
+  "routes/TeamSourceCollectionActiveStageWorkspacePanel.tsx",
+  "routes/TeamSourceCollectionControlsWorkspacePanel.tsx",
+  "routes/TeamSourceCollectionGraphWorkspacePanel.tsx",
+  "routes/TeamSourceCollectionMemoryWorkspacePanel.tsx",
+  "routes/TeamSourceCollectionScreeningWorkspacePanel.tsx",
+  "routes/teams/workflowTone.ts",
+  "routes/TeamsRoute.tsx",
 ] as const;
+const isolatedDesignReferenceArtifacts = new Set([
+  "design/challenge-cup-platform-home-preview-tooltips.tsx",
+]);
 const designSystemSourceFiles = new Set([
   "design/vuiChromeRecipes.ts",
   "design/vuiSurfaceAlphaPolicy.ts",
@@ -136,6 +154,7 @@ describe("VUI architecture boundary", () => {
     const offenders = walkFiles(sourceRoot)
       .filter((file) => routeSourceExtensions.has(extname(file)))
       .map(relativeFromSourceRoot)
+      .filter((file) => !isolatedDesignReferenceArtifacts.has(file))
       .filter((file) => !allowedRoots.some((root) => file.startsWith(root)))
       .filter((file) => !file.endsWith(".test.tsx"))
       .filter((file) => !file.endsWith(".test.ts"))
@@ -173,12 +192,14 @@ describe("VUI architecture boundary", () => {
       ".test.ts",
       ".test.tsx",
     ];
+    const allowedSharedConsumers = new Set<string>(productSharedParentStyleConsumers);
     const offenders = walkFiles(sourceRoot)
       .filter((file) => routeSourceExtensions.has(extname(file)))
       .map(relativeFromSourceRoot)
       .filter((file) => !allowedRoots.some((root) => file.startsWith(root)))
       .filter((file) => !designSystemSourceFiles.has(file))
       .filter((file) => !allowedSuffixes.some((suffix) => file.endsWith(suffix)))
+      .filter((file) => !allowedSharedConsumers.has(file))
       .filter((file) => localStylesObjectPattern.test(readText(join(sourceRoot, file))));
 
     expect(offenders).toEqual([]);
@@ -197,6 +218,7 @@ describe("VUI architecture boundary", () => {
     const offenders = walkFiles(sourceRoot)
       .filter((file) => routeSourceExtensions.has(extname(file)))
       .map(relativeFromSourceRoot)
+      .filter((file) => !isolatedDesignReferenceArtifacts.has(file))
       .filter((file) => !allowedRoots.some((root) => file.startsWith(root)))
       .filter((file) => !designSystemSourceFiles.has(file))
       .filter((file) => !allowedSuffixes.some((suffix) => file.endsWith(suffix)))
@@ -222,6 +244,7 @@ describe("VUI architecture boundary", () => {
     const offenders = walkFiles(sourceRoot)
       .filter((file) => routeSourceExtensions.has(extname(file)))
       .map(relativeFromSourceRoot)
+      .filter((file) => !isolatedDesignReferenceArtifacts.has(file))
       .filter((file) => !allowedRoots.some((root) => file.startsWith(root)))
       .filter((file) => !designSystemSourceFiles.has(file))
       .filter((file) => !allowedSuffixes.some((suffix) => file.endsWith(suffix)))

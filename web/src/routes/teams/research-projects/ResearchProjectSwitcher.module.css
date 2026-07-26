@@ -144,7 +144,7 @@
   text-decoration: none;
   white-space: nowrap;
   background: var(--accent-cool);
-  box-shadow: 0 6px 14px color-mix(in srgb, var(--accent-cool) 18%, transparent);
+  box-shadow: var(--vui-shadow-accent);
 }
 
 .primaryAction:hover {

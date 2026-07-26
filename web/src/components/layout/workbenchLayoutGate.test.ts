@@ -249,8 +249,8 @@ describe("workbench layout gate (Wave 5)", () => {
       { file: "routes/LauncherDiagnosticsPanel.styles.ts", key: "guardianTableResizeHandle" },
       { file: "routes/LauncherDeveloperModePanel.styles.ts", key: "cleanupConsoleResizeHandle" },
       { file: "routes/LauncherProjectMaintenancePanel.styles.ts", key: "cleanupConsoleResizeHandle" },
-      { file: "routes/ChatCodingRoute.styles.ts", key: "groupMemberPickerResizeHandle" },
-      { file: "routes/ChatCodingRoute.styles.ts", key: "compactDetailsResizeHandle" },
+      { file: "routes/chat/ChatStatusRail.styles.ts", key: "groupMemberPickerResizeHandle" },
+      { file: "routes/chat/ChatStatusRail.styles.ts", key: "compactDetailsResizeHandle" },
       { file: "routes/LauncherDeveloperModePanel.styles.ts", key: "noiseItemGridResizeHandle" },
       { file: "routes/LauncherProjectMaintenancePanel.styles.ts", key: "noiseItemGridResizeHandle" },
     ];

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 // @ts-expect-error Vitest runs this contract in Node; the web project intentionally omits global Node types.
 import { readFileSync } from "node:fs";
 import routeSource from "./EvolutionRoute.tsx?raw";
+import runMutationsSource from "./evolution/useEvolutionRunMutations.ts?raw";
 import activeRunMonitorPanelSource from "./EvolutionActiveRunMonitorPanel.tsx?raw";
 import activeRunMonitorStyles from "./EvolutionActiveRunMonitorPanel.styles";
 import activeRunMonitorStylesSource from "./EvolutionActiveRunMonitorPanel.styles.ts?raw";
@@ -91,8 +92,8 @@ describe("EvolutionRoute library user flow contract", () => {
 
   it("routes self-evolution starts only into the reviewed worktree endpoint", () => {
     expect(routeSource).toContain("startSelfWorktreeRunMutation");
-    expect(routeSource).toContain('"/api/evolution/self/worktree-runs"');
-    expect(routeSource).toContain('mode: "manual"');
+    expect(runMutationsSource).toContain('"/api/evolution/self/worktree-runs"');
+    expect(runMutationsSource).toContain('mode: "manual"');
     expect(routeSource).toContain("onStartRun={() => startSelfWorktreeRunMutation.mutate()}");
     expect(routeSource).toContain("startWorktreeError={startSelfWorktreeRunMutation.error?.message ?? \"\"}");
     expect(routeSource).not.toContain('"/api/evolution/self/runs"');
@@ -103,7 +104,7 @@ describe("EvolutionRoute library user flow contract", () => {
 
   it("keeps candidate worktree review out of the live left rail", () => {
     expect(routeSource).toContain("startWorktreeRunMutation");
-    expect(routeSource).toContain('"/api/evolution/worktree-runs"');
+    expect(runMutationsSource).toContain('"/api/evolution/worktree-runs"');
     expect(routeSource).not.toContain("SupervisedWorktreeReviewPanel");
     expect(routeSource).not.toContain("worktreeActionMutation");
     expect(routeSource).not.toContain("triggerWorktreeReviewApproval");
@@ -120,7 +121,7 @@ describe("EvolutionRoute library user flow contract", () => {
     );
 
     expect(routeSource).toContain("startWorktreeRunMutation");
-    expect(routeSource).toContain('"/api/evolution/worktree-runs"');
+    expect(runMutationsSource).toContain('"/api/evolution/worktree-runs"');
     expect(routeSource).toContain("approvalWorktreeActionMutation");
     expect(terminateHandler).toContain("if (supervisedWorktreeLiveRun)");
     expect(terminateHandler).toContain('action: "terminate"');
@@ -332,7 +333,7 @@ describe("EvolutionRoute library user flow contract", () => {
 
   it("keeps the latest self-observation run visible after it leaves the active slot", () => {
     expect(routeSource).toContain("selectedSelfObservationRunId");
-    expect(routeSource).toContain("setSelectedSelfObservationRunId(snapshot.runId)");
+    expect(runMutationsSource).toContain("options.setSelectedSelfObservationRunId(snapshot.runId)");
     expect(routeSource).toContain("queryKeys.evolutionSelfObservationRun(selectedSelfObservationRunId || \"__none__\")");
     expect(routeSource).toContain("`/api/evolution/self/observation-runs/${encodeURIComponent(selectedSelfObservationRunId)}`");
     expect(routeSource).toContain("const selfObservationRun = workspaceSnapshot?.selfObservationActiveRun");
@@ -557,24 +558,29 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("LOCAL_SUPERVISED_RUN_PREFIX");
     expect(routeSource).toContain("buildSupervisedStartPlaceholder");
     expect(routeSource).toContain("isLocalSupervisedStartPlaceholder");
-    expect(routeSource).toContain("onMutate: () =>");
-    expect(routeSource).toContain("启动请求已提交，正在等待运行记录刷新。");
-    expect(routeSource).toContain("setLiveActiveRun(buildSupervisedStartPlaceholder");
-    expect(routeSource).toContain("const placeholderAgentBindings = activeRunSnapshot?.agentBindings");
-    expect(routeSource).toContain("?? workspaceSnapshot?.currentAgentBindings");
+    expect(runMutationsSource).toContain("onMutate: () =>");
+    expect(runMutationsSource).toContain("启动请求已提交，正在等待运行记录刷新。");
+    expect(runMutationsSource).toContain("options.setLiveActiveRun(");
+    expect(runMutationsSource).toContain("options.buildSupervisedStartPlaceholder({");
+    expect(routeSource).toContain("placeholderAgentBindings:");
+    expect(routeSource).toContain("activeRunSnapshot?.agentBindings");
+    expect(routeSource).toContain("?? workspaceSnapshotQuery.data?.currentAgentBindings");
     expect(routeSource).toContain("?? EMPTY_AGENT_BINDINGS");
-    expect(routeSource).toContain("agentBindings: placeholderAgentBindings");
+    expect(runMutationsSource).toContain("agentBindings: payload.placeholderAgentBindings");
     expect(routeSource).not.toContain("latestSupervisedRunSnapshot?.agentBindings ?? {}");
-    expect(routeSource).toContain("await evolutionWorkspaceCache.afterWorktreeRunChanged()");
-    expect(routeSource).toContain("void evolutionWorkspaceCache.afterWorktreeRunChanged()");
+    expect(runMutationsSource).toContain("await options.afterWorktreeRunChanged()");
+    expect(runMutationsSource).toContain("void options.afterWorktreeRunChanged()");
     expect(routeSource).not.toContain("isEvolutionRunCommandAccepted");
     expect(routeSource).toContain("visibleLiveRunSnapshot");
     expect(routeSource).toContain("const streamLiveRun = isLocalSupervisedStartPlaceholder(liveActiveRun) ? null : liveActiveRun");
-    expect(routeSource).toContain("setLiveActiveRun((current) => (isLocalSupervisedStartPlaceholder(current) ? null : current))");
+    expect(runMutationsSource).toContain("options.setLiveActiveRun((current: any) =>");
+    expect(runMutationsSource).toContain(
+      "options.isLocalSupervisedStartPlaceholder(current) ? null : current,",
+    );
     expect(routeSource).toContain("const supervisedStartSubmitting = startWorktreeRunMutation.isPending || isLocalSupervisedStartPlaceholder(liveActiveRun)");
     expect(routeSource).toContain("onClick={() => startWorktreeRunMutation.mutate()}");
-    expect(routeSource).toContain('executionMode: "real"');
-    expect(routeSource).toContain("confirmRealLlmCost: true");
+    expect(runMutationsSource).toContain('executionMode: "real"');
+    expect(runMutationsSource).toContain("confirmRealLlmCost: true");
     expect(routeSource).toContain("监督运行中");
     expect(routeSource).toContain("supervisedStartButtonLabel");
   });

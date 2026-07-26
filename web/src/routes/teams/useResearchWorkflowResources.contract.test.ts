@@ -78,7 +78,7 @@ describe("research workflow shared read-query contract", () => {
     });
   });
 
-  it("is the only owner while Route remains the demand and mutation boundary", () => {
+  it("is the only read owner while Route remains the demand composition boundary", () => {
     expect(routeSource).toContain("useResearchWorkflowResources({");
     [
       "teamWorkflowQuery",
@@ -93,6 +93,14 @@ describe("research workflow shared read-query contract", () => {
     ].forEach((queryName) => {
       expect(routeSource).not.toContain(`const ${queryName} = useQuery({`);
     });
-    expect(routeSource).toContain("useMutation");
+    [
+      "useTeamShellMutations",
+      "useTeamWorkflowStartMutations",
+      "useTeamExperimentLoopMutations",
+      "useTeamSourceCollectionMutations",
+    ].forEach((mutationOwner) => {
+      expect(routeSource).toContain(`${mutationOwner}({`);
+    });
+    expect(routeSource).not.toContain("useMutation");
   });
 });
