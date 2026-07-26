@@ -50,6 +50,8 @@ import teamAiSearchWorkspacePanelSource from "./TeamAiSearchWorkspacePanel.tsx?r
 import teamResearchStageAgentPanelSource from "./TeamResearchStageAgentPanel.tsx?raw";
 import teamResearchStageLauncherPanelSource from "./TeamResearchStageLauncherPanel.tsx?raw";
 import teamResearchStageStandalonePagePanelSource from "./TeamResearchStageStandalonePagePanel.tsx?raw";
+import teamResearchLoopPanelSource from "./TeamResearchLoopPanel.tsx?raw";
+import teamExperimentPlanningLedgerPanelSource from "./TeamExperimentPlanningLedgerPanel.tsx?raw";
 import teamExperimentMethodPanelSource from "./TeamExperimentMethodPanel.tsx?raw";
 import teamExperimentMethodPanelStyles from "./TeamExperimentMethodPanel.styles";
 import teamSourceCollectionActiveStagePanelSource from "./TeamSourceCollectionActiveStagePanel.tsx?raw";
@@ -324,8 +326,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("/workflow-orchestration/experiments/plans/${encodeURIComponent(payload.plan.planId)}/knowledge-ingestion-request");
     expect(routeSource).toContain("registerExperimentFullRunResultMutation");
     expect(routeSource).toContain("requestExperimentKnowledgeIngestionMutation");
-    expect(routeSource).toContain("登记 full-run");
-    expect(routeSource).toContain("通知知识库管理员");
+    // Wave 8J: full-run / knowledge-admin CTA copy lives on experiment ledger panel.
+    expect(teamExperimentPlanningLedgerPanelSource).toContain("登记 full-run");
+    expect(teamExperimentPlanningLedgerPanelSource).toContain("通知知识库管理员");
     expect(routeSource).toContain("manualFullRunResult: true");
     expect(routeSource).toContain("explicitUserBoundary: true");
     expect(routeSource).toContain("stewardReviewRequired: true");
@@ -344,19 +347,21 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("recordResearchLoopDecisionMutation");
     expect(routeSource).toContain("createNextDesignDraft:");
     expect(routeSource).toContain("idempotencyKey: `${payload.loop.loopId}:${payload.loop.updatedAt}:${payload.draft.decision}`");
-    expect(routeSource).toContain("nextDesignPlanId");
-    expect(routeSource).toContain("已生成下一版设计");
+    // Wave 8J: research-loop UI + design-draft CTA live on TeamResearchLoopPanel.
+    expect(teamResearchLoopPanelSource).toContain("nextDesignPlanId");
+    expect(teamResearchLoopPanelSource).toContain("已生成下一版设计");
     expect(routeSource).toContain("freezeExperimentDesignMutation");
     expect(routeSource).toContain("/freeze`");
-    expect(routeSource).toContain("冻结设计");
-    expect(routeSource).toContain("designExecutionAllowed");
+    expect(teamExperimentPlanningLedgerPanelSource).toContain("冻结设计");
+    expect(teamExperimentPlanningLedgerPanelSource).toContain("designExecutionAllowed");
     expect(routeSource).toContain("materializeResearchLoopIterationDesignMutation");
-    expect(routeSource).toContain("pendingDesignProposals");
-    expect(routeSource).toContain("生成设计草稿");
-    expect(routeSource).toContain("生成后仍需人工冻结，不会自动执行实验。");
+    expect(teamResearchLoopPanelSource).toContain("pendingDesignProposals");
+    expect(teamResearchLoopPanelSource).toContain("生成设计草稿");
+    expect(teamResearchLoopPanelSource).toContain("生成后仍需人工冻结，不会自动执行实验。");
     expect(routeSource).toContain("renderResearchLoopPanel");
-    expect(routeSource).toContain("Research Loop 模板");
-    expect(routeSource).toContain("实验迭代决策");
+    expect(routeSource).toContain("TeamResearchLoopPanel");
+    expect(teamResearchLoopPanelSource).toContain("Research Loop 模板");
+    expect(teamResearchLoopPanelSource).toContain("实验迭代决策");
     expect(routeSource).toContain("noSandboxRunner: true");
     expect(routeSource).toContain("noTrainingExecution: true");
     expect(routeSource).toContain("commandPreviewOnly: true");
@@ -1599,8 +1604,10 @@ describe("TeamsRoute layout contract", () => {
     expect(teamResearchStageStandalonePagePanelSource).toContain("实验规划工作台");
     expect(routeSource).toContain("experimentPlanningStatusQueryKey");
     expect(routeSource).toContain("renderExperimentPlanningLedgerPanel");
-    expect(routeSource).toContain("实验计划账本");
-    expect(routeSource).toContain("TeamExperimentMethodPanel");
+    expect(routeSource).toContain("TeamExperimentPlanningLedgerPanel");
+    // Wave 8J: ledger UI + method mount live on TeamExperimentPlanningLedgerPanel.
+    expect(teamExperimentPlanningLedgerPanelSource).toContain("实验计划账本");
+    expect(teamExperimentPlanningLedgerPanelSource).toContain("TeamExperimentMethodPanel");
     expect(routeSource).toContain("experimentMethodCatalogQueryKey");
     expect(routeSource).toContain('["overview", "experiment"].includes(researchWorkspaceView)');
     // Wave 8H: overview experiment method quick-select is on TeamResearchStageLauncherPanel.
@@ -1612,8 +1619,8 @@ describe("TeamsRoute layout contract", () => {
     expect(teamResearchStageLauncherPanelSource).toContain('aria-label={lang === "zh" ? "选择实验方式" : "Select experiment method"}');
     expect(routeSource).toContain("preferredExperimentMethod=");
     expect(routeSource).toContain("/workflow-orchestration/experiments/methods");
-    expect(routeSource).toContain("activeContract={activeExperimentContract}");
-    expect(routeSource).toContain("onSubmit={createExperimentPlanFromWorkspace}");
+    expect(teamExperimentPlanningLedgerPanelSource).toContain("activeContract={activeExperimentContract}");
+    expect(teamExperimentPlanningLedgerPanelSource).toContain("onSubmit={createExperimentPlanFromWorkspace}");
     expect(teamExperimentMethodPanelSource).toContain("catalog.researchModes.map");
     expect(teamExperimentMethodPanelSource).toContain("实验方式");
     expect(teamExperimentMethodPanelSource).toContain("实验目的");
@@ -1624,15 +1631,15 @@ describe("TeamsRoute layout contract", () => {
     expect(teamExperimentMethodPanelStyles.methodGrid).toContain("max-[560px]:grid-cols-[minmax(0,1fr)]");
     expect(teamExperimentMethodPanelStyles.form).toContain("min-h-[18rem]");
     expect(routeSource).toContain("baseline-artifact");
-    expect(routeSource).toContain("登记基线工件");
+    expect(teamExperimentPlanningLedgerPanelSource).toContain("登记基线工件");
     expect(routeSource).toContain("reproductionCommand");
     expect(routeSource).toContain("smoke-result");
     expect(routeAndPureSource).toContain("ExperimentSmokeResultRecord");
     expect(routeAndPureSource).toContain("activeSmokeResult");
     expect(routeAndPureSource).toContain("gateDecision");
-    expect(routeSource).toContain("登记 smoke 结果");
+    expect(teamExperimentPlanningLedgerPanelSource).toContain("登记 smoke 结果");
     expect(routeAndPureSource).toContain("needs_review");
-    expect(routeSource).toContain("full-run 已解锁");
+    expect(teamExperimentPlanningLedgerPanelSource).toContain("full-run 已解锁");
     expect(routeAndPureSource).toContain("readyForSmoke");
     expect(routeAndPureSource).toContain("baselineSelection");
     expect(routeAndPureSource).toContain("readyForFullRun");

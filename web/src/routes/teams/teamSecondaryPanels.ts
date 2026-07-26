@@ -11,6 +11,8 @@ export {
 } from "../TeamResearchStageAgentPanel";
 export { TeamResearchStageLauncherPanel } from "../TeamResearchStageLauncherPanel";
 export { TeamResearchStageStandalonePagePanel } from "../TeamResearchStageStandalonePagePanel";
+export { TeamResearchLoopPanel } from "../TeamResearchLoopPanel";
+export { TeamExperimentPlanningLedgerPanel } from "../TeamExperimentPlanningLedgerPanel";
 export { TeamExperimentMethodPanel } from "../TeamExperimentMethodPanel";
 export { TeamSourceCollectionActiveStagePanel } from "../TeamSourceCollectionActiveStagePanel";
 export { TeamSourceCollectionPhaseCloseGatePanel } from "../TeamSourceCollectionPhaseCloseGatePanel";

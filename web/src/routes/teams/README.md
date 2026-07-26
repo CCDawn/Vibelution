@@ -27,6 +27,8 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 | Research stage agent summary/grid UI | `../TeamResearchStageAgentPanel.tsx` (via secondary pack) | binding projection |
 | Research stage launcher console | `../TeamResearchStageLauncherPanel.tsx` (via secondary pack) | query/mutation injection |
 | Research stage standalone page (experiment/iteration) | `../TeamResearchStageStandalonePagePanel.tsx` (via secondary pack) | ledger/loop render props + launch mutations |
+| Research loop (template / evidence / decision) | `../TeamResearchLoopPanel.tsx` (via secondary pack) | create/record mutations + drafts |
+| Experiment planning ledger | `../TeamExperimentPlanningLedgerPanel.tsx` (via secondary pack) | plan/baseline/smoke/full-run mutations + loop render prop |
 | Source-collection panel shell alias | `TeamsSourceCollectionPanel.tsx` | full route wiring |
 | Workflow graph **layout math** | `../TeamWorkflowGraphLayout.ts` | Graph SVG view |
 | Workflow graph **SVG view** | `../TeamWorkflowGraphView.tsx` (via secondary pack) | layout pure math |
@@ -57,10 +59,11 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 - **Wave 8G done:** AI Search workspace + research stage agent summary/panel extracted to secondary-lazy components.
 - **Wave 8H done:** Research stage launcher (three-stage + Challenge Cup MVP console) extracted to `TeamResearchStageLauncherPanel`.
 - **Wave 8I done:** Experiment/iteration standalone stage page extracted to `TeamResearchStageStandalonePagePanel` (ledger/loop panels remain route-owned injectables).
+- **Wave 8J done:** Research loop + experiment planning ledger extracted to `TeamResearchLoopPanel` / `TeamExperimentPlanningLedgerPanel` (mutations stay route-owned injectables).
 
 ## Next (planned)
 
-1. Extract research loop panel / experiment planning ledger / remaining source-collection orchestration when each can own a full boundary.
+1. Extract remaining source-collection orchestration panels when each can own a full boundary.
 2. Extract EventSource-free mutation hooks (`useTeamWorkflowMutations` family) only when a hook can own a full boundary.
 3. Optional: split `teamSecondaryPanels` into source-collection vs workflow-status packs if the secondary pack exceeds route budget.
 4. Optional: style-bound tone helpers (`workflowQualityTone`) once styles map ownership is clear.
