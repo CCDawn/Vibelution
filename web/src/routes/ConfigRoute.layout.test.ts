@@ -728,8 +728,8 @@ describe("ConfigRoute layout contract", () => {
   });
 
   it("moves health diagnostics display into a route-local panel while keeping ConfigRoute as query owner", () => {
-    expect(routeSource).toContain('import { ConfigHealthDiagnosticsPanel');
-    expect(routeSource).toContain('from "./ConfigHealthDiagnosticsPanel"');
+    expect(routeSource).toContain("const ConfigHealthDiagnosticsPanel = lazy(() =>");
+    expect(routeSource).toContain('import("./ConfigHealthDiagnosticsPanel")');
     expect(routeSource).toContain("<ConfigHealthDiagnosticsPanel");
     expect(routeSource).toContain("diagnostics={healthDiagnosticsQuery.data}");
     expect(routeSource).toContain("loading={healthDiagnosticsQuery.isLoading || healthDiagnosticsQuery.isFetching}");

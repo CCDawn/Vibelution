@@ -15,10 +15,17 @@ const routeTestPattern = /\.test\.(ts|tsx)$/;
 /**
  * Transitional debt ledger. Counts may only stay equal or decrease.
  * New domain requests belong in web/src/api/<domain>.ts.
+ *
+ * The 2026-07-26 route-pack extraction redistributed existing calls without
+ * increasing the aggregate debt. Keep the exact per-file ledger so future
+ * moves remain reviewable, and keep the aggregate ceiling until these hooks
+ * migrate to domain API modules.
  */
 const legacyRouteFetchJsonCallBudgets: Record<string, number> = {
   "routes/agent-create/AgentCreateWizardDialog.tsx": 5,
-  "routes/AgentsRoute.tsx": 31,
+  "routes/AgentsRoute.tsx": 12,
+  "routes/agents/useAgentConfigDraftMutations.ts": 4,
+  "routes/agents/useAgentWorkbenchMutations.ts": 15,
   "routes/chat/chatComposerSubmitModel.ts": 1,
   "routes/chat/chatSessionDetailHelpers.ts": 1,
   "routes/chat/CliAgentRunTerminalPanel.tsx": 3,
@@ -31,12 +38,16 @@ const legacyRouteFetchJsonCallBudgets: Record<string, number> = {
   "routes/chatSessionIndexQuery.ts": 1,
   "routes/ConfigProviderRegistryPanel.tsx": 4,
   "routes/ConfigRoute.tsx": 3,
-  "routes/EvolutionRoute.tsx": 20,
+  "routes/EvolutionRoute.tsx": 7,
+  "routes/evolution/useEvolutionProposalMutations.ts": 5,
+  "routes/evolution/useEvolutionRunMutations.ts": 8,
   "routes/GitRoute.tsx": 9,
   "routes/HomeRedirect.tsx": 1,
   "routes/LegacyEvolutionRedirect.tsx": 1,
   "routes/LogsRoute.tsx": 5,
-  "routes/MemoryRoute.tsx": 37,
+  "routes/MemoryRoute.tsx": 22,
+  "routes/memory/useMemoryItemMutations.ts": 7,
+  "routes/memory/useMemoryKnowledgeMutations.ts": 8,
   "routes/MemoryUserContentPanel.tsx": 6,
   "routes/PetRoute.tsx": 1,
   "routes/PromptTemplatesRoute.tsx": 7,
@@ -49,12 +60,19 @@ const legacyRouteFetchJsonCallBudgets: Record<string, number> = {
   "routes/SupervisedWorkspaceControls.tsx": 3,
   "routes/teams/research-projects/ResearchProjectSwitcher.tsx": 4,
   "routes/teams/useResearchWorkflowResources.ts": 9,
-  "routes/TeamsRoute.tsx": 48,
+  "routes/teams/useSourceCollectionRunQueries.ts": 4,
+  "routes/teams/useTeamExperimentLoopMutations.ts": 10,
+  "routes/teams/useTeamResearchSecondaryQueries.ts": 4,
+  "routes/teams/useTeamShellMutations.ts": 6,
+  "routes/teams/useTeamSourceCollectionMutations.ts": 11,
+  "routes/teams/useTeamWorkflowStartMutations.ts": 5,
+  "routes/TeamsRoute.tsx": 8,
   "routes/ToolsRoute.tsx": 13,
   "routes/UsageRoute.tsx": 1,
   "routes/WorkbenchDomainRoute.tsx": 1,
   "routes/WorkbenchModeRoute.tsx": 1,
 };
+const legacyRouteFetchJsonAggregateBudget = 283;
 
 function walkSourceFiles(dir: string): string[] {
   return readdirSync(dir).flatMap((entry) => {
@@ -120,6 +138,12 @@ describe("full-stack frontend API boundary", () => {
     expect(currentRouteClientImports()).toEqual(
       Object.keys(legacyRouteFetchJsonCallBudgets).sort(),
     );
+  });
+
+  it("keeps route-layer transport debt at or below the pre-extraction aggregate ceiling", () => {
+    const aggregateBudget = Object.values(legacyRouteFetchJsonCallBudgets)
+      .reduce((total, count) => total + count, 0);
+    expect(aggregateBudget).toBeLessThanOrEqual(legacyRouteFetchJsonAggregateBudget);
   });
 
   it("keeps legacy fetchJson calls visible instead of hiding them behind aliases", () => {

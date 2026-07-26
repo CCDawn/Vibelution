@@ -4,6 +4,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { ChatNextStateSignalSummary, ConversationMessage, SessionTurnError } from "../../api/types";
+import { conversationMessageToAgentMessage } from "../../agent-thread";
+import { AgentContextSectionsView } from "./AgentContextSectionsView";
+import { buildAgentMessageRenderState } from "./agentMessageRenderState";
 import styles from "./ConversationView.styles";
 import agentMessageRenderStateSource from "./agentMessageRenderState.ts?raw";
 import conversationViewStylesModuleSource from "./ConversationView.styles.ts?raw";
@@ -2995,28 +2998,27 @@ describe("ConversationView edit resend affordance", () => {
   });
 
   it("renders user image attachments and composer image chips", () => {
-    const html = renderConversation(
-      [
+    const userMessage: ConversationMessage = {
+      id: "message-user",
+      role: "user",
+      content: "看看这张图",
+      timestamp: "2026-05-22T00:00:00Z",
+      attachments: [
         {
-          id: "message-user",
-          role: "user",
-          content: "看看这张图",
-          timestamp: "2026-05-22T00:00:00Z",
-          attachments: [
-            {
-              artifactId: "user-image-test.png",
-              filename: "sketch.png",
-              url: "/api/sessions/session-1/artifacts/user-image-test.png",
-              imageUrl: "/api/sessions/session-1/artifacts/user-image-test.png",
-              downloadUrl: "/api/sessions/session-1/artifacts/user-image-test.png?download=1",
-              contentType: "image/png",
-              sizeBytes: 128,
-              kind: "user_image",
-              status: "ready",
-            },
-          ],
+          artifactId: "user-image-test.png",
+          filename: "sketch.png",
+          url: "/api/sessions/session-1/artifacts/user-image-test.png",
+          imageUrl: "/api/sessions/session-1/artifacts/user-image-test.png",
+          downloadUrl: "/api/sessions/session-1/artifacts/user-image-test.png?download=1",
+          contentType: "image/png",
+          sizeBytes: 128,
+          kind: "user_image",
+          status: "ready",
         },
       ],
+    };
+    const html = renderConversation(
+      [userMessage],
       {
         composerAttachments: [
           {
@@ -3030,9 +3032,15 @@ describe("ConversationView edit resend affordance", () => {
         onRemoveComposerAttachment: () => undefined,
       },
     );
+    const contextHtml = renderToStaticMarkup(
+      <AgentContextSectionsView
+        sections={buildAgentMessageRenderState(conversationMessageToAgentMessage(userMessage)).contextSections}
+        lang="zh"
+      />,
+    );
 
-    expect(html).toContain('src="/api/sessions/session-1/artifacts/user-image-test.png"');
-    expect(html).toContain("sketch.png");
+    expect(contextHtml).toContain('src="/api/sessions/session-1/artifacts/user-image-test.png"');
+    expect(contextHtml).toContain("sketch.png");
     expect(html).toContain("pending.png");
     expect(html).toContain("blob:pending-image");
     expect(html).toContain("composerAttachmentThumb");

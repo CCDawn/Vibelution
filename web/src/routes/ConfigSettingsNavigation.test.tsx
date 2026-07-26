@@ -171,7 +171,7 @@ describe("ConfigSettingsNavigation", () => {
     expect(tabsMarkup.match(/data-vui="button"/g)?.length ?? 0).toBe(activeGroup?.pages.length ?? 0);
     expect(styles.groupButton).toContain("min-h-11");
     expect(styles.pageButton).toContain("min-h-10");
-    expect(styles.sidebar).toContain("clamp(15.5rem,17vw,18rem)");
+    expect(styles.sidebar).toContain("w-full");
     expect(styles.pageTabs).toContain("overflow-x-auto");
     expect(componentSource).not.toContain(["@heroui", "react"].join("/"));
   });

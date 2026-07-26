@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import routeSource from "./MemoryRoute.tsx?raw";
+import itemMutationsSource from "./memory/useMemoryItemMutations.ts?raw";
+import knowledgeMutationsSource from "./memory/useMemoryKnowledgeMutations.ts?raw";
 import agentMemoryPanelSource from "./MemoryAgentMemoryPanel.tsx?raw";
 import cleanupPanelSource from "./MemoryCleanupPanel.tsx?raw";
 import detailPanelSource from "./MemoryDetailPanel.tsx?raw";
@@ -149,7 +151,7 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("styles.agentMemoryViewStack");
     expect(memoryCssSource).toContain(".agentMemoryViewStack");
     expect(memoryCssSource).toContain(".agentMemoryWorkspace");
-    expect(routeSource).toContain('from "./MemoryAgentMemoryPanel"');
+    expect(routeSource).toContain('import("./MemoryAgentMemoryPanel")');
     expect(routeSource).toContain("<MemoryAgentMemoryPanel");
     expect(routeSource).not.toContain("const renderAgentMemoryView = () =>");
     expect(agentMemoryPanelSource).toContain("export function MemoryAgentMemoryPanel");
@@ -203,11 +205,11 @@ describe("MemoryRoute layout contract", () => {
 
   it("exposes manual memory management actions through guarded API mutations", () => {
     expect(routeSource).toContain("useMutation");
-    expect(routeSource).toContain('fetchJson<MemoryMutationResponse>("/api/memory/items"');
-    expect(routeSource).toContain('method: "POST"');
-    expect(routeSource).toContain('method: "PATCH"');
-    expect(routeSource).toContain('method: "DELETE"');
-    expect(routeSource).toContain('memoryMutationEndpoint(sectionId, itemId, "/restore")');
+    expect(itemMutationsSource).toContain('fetchJson<{ sectionId: string; itemId: string }>("/api/memory/items"');
+    expect(itemMutationsSource).toContain('method: "POST"');
+    expect(itemMutationsSource).toContain('method: "PATCH"');
+    expect(itemMutationsSource).toContain('method: "DELETE"');
+    expect(itemMutationsSource).toContain('options.memoryMutationEndpoint(sectionId, itemId, "/restore")');
     expect(routeSource).toContain("managedState");
     expect(managePanelSource).toContain("copy.addMemory");
     expect(managePanelSource).toContain("copy.editMemory");
@@ -221,7 +223,7 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("queryKeys.agentProjectMemoryUpdates");
     expect(routeSource).toContain("/api/agents/project-memory-updates?");
     expect(routeSource).toContain("/project-memory-updates/");
-    expect(routeSource).toContain('resolvedBy: "user"');
+    expect(itemMutationsSource).toContain('resolvedBy: "user"');
     expect(routeSource).toContain("projectMemoryProposalResolverLabel");
     expect(routeSource).toContain("旧治理记录");
     expect(routeSource).toContain("copy.projectMemoryQueue");
@@ -578,7 +580,7 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("queryKeys.memoryKnowledgeGraphNodeDetail(selectedGraphNodeId, fallbackKnowledgeActorAgentId)");
     expect(routeSource).toContain('appendAgentParam(new URLSearchParams({ nodeId: selectedGraphNodeId }), fallbackKnowledgeActorAgentId)');
     expect(routeSource).toContain("/api/memory/knowledge-graph/node-detail?");
-    expect(routeSource).toContain('from "./MemoryGraphViewPanel"');
+    expect(routeSource).toContain('import("./MemoryGraphViewPanel")');
     expect(routeSource).toContain("<MemoryGraphViewPanel");
     expect(routeSource).toContain("selectedGraphDetailItems");
     expect(routeSource).toContain("graphSearchText");
@@ -715,8 +717,8 @@ describe("MemoryRoute layout contract", () => {
   it("wires the hard-delete memory cleanup console behind preview and confirmation APIs", () => {
     expect(routeSource).toContain("MemoryCleanupTargetRequest");
     expect(routeSource).toContain("MemoryCleanupPreviewResponse");
-    expect(routeSource).toContain('fetchJson<MemoryCleanupPreviewResponse>("/api/memory/cleanup/preview"');
-    expect(routeSource).toContain('fetchJson<MemoryCleanupExecuteResponse>("/api/memory/cleanup/execute"');
+    expect(itemMutationsSource).toContain('"/api/memory/cleanup/preview"');
+    expect(itemMutationsSource).toContain('"/api/memory/cleanup/execute"');
     expect(routeSource).toContain("confirmationPhrase");
     expect(routeSource).toContain("cleanupConfirmationText.trim()");
     expect(cleanupPanelSource).toContain("copy.cleanupHardDelete");
@@ -734,8 +736,8 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("targetType: \"agent_memory_policy\"");
     expect(routeSource).toContain("targetType: \"team_knowledge\"");
     expect(routeSource).toContain("targetType: \"knowledge_base\"");
-    expect(routeSource).toContain("queryKeys.memoryCleanupPreview()");
-    expect(routeSource).toContain('from "./MemoryCleanupPanel"');
+    expect(itemMutationsSource).toContain("queryKeys.memoryCleanupPreview()");
+    expect(routeSource).toContain('import("./MemoryCleanupPanel")');
     expect(routeSource).toContain("<MemoryCleanupPanel");
     expect(routeSource).not.toContain("const renderCleanupView = () =>");
     expect(cleanupPanelSource).toContain("export function MemoryCleanupPanel");
@@ -781,7 +783,7 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("queryKeys.knowledgeCentralSources(");
     expect(routeSource).toContain("/api/knowledge/sources/inbox");
     expect(routeSource).toContain("/api/knowledge/sources/registry");
-    expect(routeSource).toContain("/central-source-artifacts");
+    expect(knowledgeMutationsSource).toContain("/central-source-artifacts");
     expect(routeSource).toContain("ownerSourceDraft");
     expect(routeSource).toContain("sourceOwnerType");
     expect(routeSource).toContain("sourceOwnerId");
@@ -789,7 +791,7 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("submitOwnerSource");
     expect(routeSource).toContain("reviewOwnerSource");
     expect(routeSource).toContain("attachCentralSource");
-    expect(routeSource).toContain('from "./MemoryKnowledgeSourceGovernancePanel"');
+    expect(routeSource).toContain('import("./MemoryKnowledgeSourceGovernancePanel")');
     expect(routeSource).toContain("<MemoryKnowledgeSourceGovernancePanel");
     expect(routeSource).not.toContain("function sourceInboxStatusLabel");
     expect(knowledgeSourceGovernancePanelSource).toContain("export function MemoryKnowledgeSourceGovernancePanel");
@@ -808,13 +810,13 @@ describe("MemoryRoute layout contract", () => {
     expect(memoryCssSource).toContain(".sourceGovernanceGrid");
     expect(memoryCssSource).toContain(".sourceRecord");
     expect(memoryCssSource).toContain(".sourceRecordMeta");
-    expect(routeSource).toContain("/refinement-proposals");
+    expect(knowledgeMutationsSource).toContain("/refinement-proposals");
     expect(routeSource).not.toContain("/ingestion-packages");
-    expect(routeSource).toContain("/review");
+    expect(knowledgeMutationsSource).toContain("/review");
     expect(routeSource).toContain("/api/knowledge/search");
     expect(routeSource).toContain("queryKeys.knowledgeSearch(");
     expect(routeSource).toContain("queryKeys.knowledgeItems(activeKnowledgeBaseForItems, activeKnowledgeActorAgentId)");
-    expect(routeSource).toContain('from "./MemoryKnowledgeDetailPanel"');
+    expect(routeSource).toContain('import("./MemoryKnowledgeDetailPanel")');
     expect(routeSource).toContain("<MemoryKnowledgeDetailPanel");
     expect(knowledgeDetailPanelSource).toContain("export function MemoryKnowledgeDetailPanel");
     expect(knowledgeDetailPanelSource).toContain("copy.formalKnowledge");
@@ -834,7 +836,7 @@ describe("MemoryRoute layout contract", () => {
     expect(knowledgeDetailPanelSource).not.toContain("useQuery");
     expect(knowledgeDetailPanelSource).not.toContain("useMutation");
     expect(knowledgeDetailPanelSource).not.toContain("fetchJson");
-    expect(routeSource).toContain('from "./MemoryKnowledgeBaseSidebar"');
+    expect(routeSource).toContain('import("./MemoryKnowledgeBaseSidebar")');
     expect(routeSource).toContain("<MemoryKnowledgeBaseSidebar");
     expect(knowledgeBaseSidebarSource).toContain("export function MemoryKnowledgeBaseSidebar");
     expect(knowledgeBaseSidebarSource).toContain("copy.teamKnowledge");
@@ -854,7 +856,7 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain('params.set("agentId", activeKnowledgeActorAgentId)');
     expect(routeSource).toContain("actorAgentIdForKnowledgeContext(activeKnowledgeBase, knowledgeActorAgents, fallbackKnowledgeActorAgentId)");
     expect(routeSource).toContain("fetchJson<KnowledgeRagRetrievalPayload>");
-    expect(routeSource).toContain('from "./MemoryKnowledgeSearchPanel"');
+    expect(routeSource).toContain('import("./MemoryKnowledgeSearchPanel")');
     expect(routeSource).toContain("<MemoryKnowledgeSearchPanel");
     expect(routeSource).not.toContain('from "./MemoryKnowledgeRagPanel"');
     expect(knowledgeSearchPanelSource).toContain("export function MemoryKnowledgeSearchPanel");
@@ -905,12 +907,12 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("queryKeys.knowledgeTrace(activeKnowledgeBaseForItems, activeKnowledgeActorAgentId, traceTargetId)");
     expect(routeSource).toContain("/rating-suggestions");
     expect(routeSource).toContain("queryKeys.knowledgeRatingSuggestions(");
-    expect(routeSource).toContain("/rating-suggestions/review-batch");
+    expect(knowledgeMutationsSource).toContain("/rating-suggestions/review-batch");
     expect(routeSource).toContain("/api/knowledge/permissions/audit?agentId=");
     expect(knowledgeItemRatingCardSource).toContain("copy.submitRatingSuggestion");
     expect(routeSource).toContain("selectedRatingSuggestionIds");
     expect(routeSource).toContain("toggleVisibleRatingSuggestions");
-    expect(routeSource).toContain('from "./MemoryKnowledgeReviewPanel"');
+    expect(routeSource).toContain('import("./MemoryKnowledgeReviewPanel")');
     expect(routeSource).toContain("<MemoryKnowledgeReviewPanel");
     expect(knowledgeReviewPanelSource).toContain("export function MemoryKnowledgeReviewPanel");
     expect(knowledgeReviewPanelSource).toContain("copy.approveProposal");
@@ -938,7 +940,7 @@ describe("MemoryRoute layout contract", () => {
     expect(knowledgeReviewPanelStyles.emptyDetail).toMatch(/bg-vui-surface-row|bg-\[var\(--vui-surface-row\)\]/);
     expect(knowledgeReviewPanelStyles.emptyDetail).not.toContain("bg-[var(--vui-surface-glass)]");
     expect(knowledgeReviewPanelStyles.emptyDetail).not.toContain("shadow-[var(--vui-shadow-hairline)]");
-    expect(routeSource).toContain('from "./MemoryKnowledgePermissionsPanel"');
+    expect(routeSource).toContain('import("./MemoryKnowledgePermissionsPanel")');
     expect(routeSource).toContain("<MemoryKnowledgePermissionsPanel");
     expect(routeSource).not.toContain("function normalizeKnowledgePermission");
     expect(knowledgePermissionsPanelSource).toContain("export function MemoryKnowledgePermissionsPanel");
@@ -955,7 +957,7 @@ describe("MemoryRoute layout contract", () => {
     expect(knowledgePermissionsPanelSource).not.toContain("fetchJson");
     expect(routeSource).not.toContain("copy.ingestionPackage");
     expect(routeSource).not.toContain("copy.submitIngestionPackage");
-    expect(routeSource).toContain('from "./MemoryKnowledgeGovernancePanel"');
+    expect(routeSource).toContain('import("./MemoryKnowledgeGovernancePanel")');
     expect(routeSource).toContain("<MemoryKnowledgeGovernancePanel");
     expect(knowledgeGovernancePanelSource).toContain("export function MemoryKnowledgeGovernancePanel");
     expect(knowledgeGovernancePanelSource).toContain("copy.operationsHealth");
@@ -967,7 +969,7 @@ describe("MemoryRoute layout contract", () => {
     expect(knowledgeGovernancePanelSource).not.toContain("useQuery");
     expect(knowledgeGovernancePanelSource).not.toContain("useMutation");
     expect(knowledgeGovernancePanelSource).not.toContain("fetchJson");
-    expect(routeSource).toContain('from "./MemoryKnowledgeUsageContractPanel"');
+    expect(routeSource).toContain('import("./MemoryKnowledgeUsageContractPanel")');
     expect(routeSource).toContain("<MemoryKnowledgeUsageContractPanel");
     expect(knowledgeUsageContractPanelSource).toContain("export function MemoryKnowledgeUsageContractPanel");
     expect(knowledgeUsageContractPanelSource).toContain('from "./MemoryKnowledgeUsageContractPanel.styles"');
@@ -991,7 +993,7 @@ describe("MemoryRoute layout contract", () => {
     expect(knowledgeSearchPanelSource).toContain("semanticScore");
     expect(knowledgePermissionsPanelSource).toContain("copy.ingestionAdapters");
     expect(knowledgeGovernancePanelSource).toContain("copy.traceability");
-    expect(routeSource).toContain('from "./MemoryKnowledgeStewardPanel"');
+    expect(routeSource).toContain('import("./MemoryKnowledgeStewardPanel")');
     expect(routeSource).toContain("<MemoryKnowledgeStewardPanel");
     expect(knowledgeStewardPanelSource).toContain("export function MemoryKnowledgeStewardPanel");
     expect(knowledgeStewardPanelSource).toContain("copy.knowledgeSteward");
@@ -1368,7 +1370,7 @@ describe("MemoryRoute layout contract", () => {
   });
 
   it("visualizes the P1 team knowledge pipeline and prompt boundary", () => {
-    expect(routeSource).toContain('from "./MemoryKnowledgePipelinePanel"');
+    expect(routeSource).toContain('import("./MemoryKnowledgePipelinePanel")');
     expect(routeSource).toContain("<MemoryKnowledgePipelinePanel");
     expect(knowledgePipelinePanelSource).toContain("export function MemoryKnowledgePipelinePanel");
     expect(knowledgePipelinePanelSource).toContain('from "./MemoryKnowledgePipelinePanel.styles"');
@@ -1418,7 +1420,7 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("styles.knowledgeViewStack");
     expect(routeSource).toContain("className={styles.knowledgeGovernanceDeck}");
     expect(routeSource).toContain('type KnowledgeWorkspaceMode = "sources" | "search" | "review" | "governance" | "permissions"');
-    expect(routeSource).toContain('from "./MemoryKnowledgeModeTabs"');
+    expect(routeSource).toContain('import("./MemoryKnowledgeModeTabs")');
     expect(routeSource).toContain("<MemoryKnowledgeModeTabs");
     expect(knowledgeModeTabsSource).toContain("export function MemoryKnowledgeModeTabs");
     expect(knowledgeModeTabsSource).toContain('from "./MemoryKnowledgeModeTabs.styles"');

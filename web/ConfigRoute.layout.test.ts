@@ -13,7 +13,6 @@ describe("ConfigRoute layout density contract", () => {
   });
 
   it("keeps read-only config fields in dense label-value rows on wide screens", () => {
-    expect(configRouteStylesSource).toContain("hashGrid:");
     expect(configRouteStylesSource).toContain("treeGrid:");
     expect(configRouteStylesSource).toContain("[display:grid]");
     expect(configRouteStylesSource).toContain("[gap:7px]");

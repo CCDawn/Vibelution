@@ -8,9 +8,9 @@ import standaloneStageStyles from "./TeamSourceCollectionStandaloneStagePanel.st
 describe("source collection vertical three-column workbench", () => {
   it("places run context, result workspace, and stage controls in persistent desktop rails", () => {
     expect(standaloneStageStyles.sourceCollectionPageBody).toContain(
-      "grid-cols-[clamp(228px,14vw,278px)_minmax(520px,1fr)_clamp(270px,17vw,338px)]",
+      "grid-cols-[clamp(300px,20vw,348px)_minmax(520px,1fr)_clamp(270px,17vw,338px)]",
     );
-    expect(standaloneStageStyles.sourceCollectionRunContext).toContain("col-start-1");
+    expect(standaloneStageStyles.sourceCollectionLeftRail).toContain("col-start-1");
     expect(standaloneStageStyles.sourceCollectionPageGrid).toContain("col-start-2 col-span-2");
     expect(activeStageStyles.sourceCollectionStageWorkspace).toContain(
       "grid-cols-[minmax(0,1fr)_clamp(270px,17vw,338px)]",

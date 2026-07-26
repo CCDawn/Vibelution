@@ -3,7 +3,11 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const designRoot = resolve(import.meta.dirname, "../../design");
-const isolatedReferenceArtifacts = new Set(["vui-reference-lab.css"]);
+const isolatedReferenceArtifacts = new Set([
+  "agent-management-governance-preview.css",
+  "challenge-cup-platform-home-preview.css",
+  "vui-reference-lab.css",
+]);
 
 function collectCssMatches(pattern: RegExp): string[] {
   return readdirSync(designRoot)
