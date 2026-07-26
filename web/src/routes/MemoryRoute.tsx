@@ -60,33 +60,17 @@ import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import { VButton, VDenseOpsPage } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { useMemoryItemMutations } from "./memory/useMemoryItemMutations";
+import { useMemoryKnowledgeMutations } from "./memory/useMemoryKnowledgeMutations";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
-import { MemoryAgentMemoryPanel } from "./MemoryAgentMemoryPanel";
-import { MemoryCleanupPanel } from "./MemoryCleanupPanel";
 import { MemoryDetailPanel } from "./MemoryDetailPanel";
 import { MemoryEffectivePanel } from "./MemoryEffectivePanel";
-import { MemoryKnowledgeBaseSidebar } from "./MemoryKnowledgeBaseSidebar";
-import { MemoryKnowledgeDetailPanel } from "./MemoryKnowledgeDetailPanel";
-import { MemoryKnowledgeGovernancePanel } from "./MemoryKnowledgeGovernancePanel";
 import type { MemoryGraphRelation } from "./MemoryGraphViewPanel";
-
-/** Graph UI (+ three) must not enter the Memory list/governance shell (R4). */
-const MemoryGraphViewPanel = lazy(() =>
-  import("./MemoryGraphViewPanel").then((module) => ({ default: module.MemoryGraphViewPanel })),
-);
-import { MemoryKnowledgeModeTabs } from "./MemoryKnowledgeModeTabs";
-import { MemoryKnowledgePermissionsPanel } from "./MemoryKnowledgePermissionsPanel";
-import { MemoryKnowledgePipelinePanel } from "./MemoryKnowledgePipelinePanel";
-import { MemoryKnowledgeReviewPanel } from "./MemoryKnowledgeReviewPanel";
-import { MemoryKnowledgeSearchPanel, type MemoryKnowledgeSearchDraft } from "./MemoryKnowledgeSearchPanel";
-import {
-  MemoryKnowledgeSourceGovernancePanel,
-  type MemoryKnowledgeOwnerSourceDraft,
-  type MemoryKnowledgeSourceInboxStatusFilter,
-  type MemoryKnowledgeSourceOwnerType,
+import type { MemoryKnowledgeSearchDraft } from "./MemoryKnowledgeSearchPanel";
+import type {
+  MemoryKnowledgeOwnerSourceDraft,
+  MemoryKnowledgeSourceInboxStatusFilter,
+  MemoryKnowledgeSourceOwnerType,
 } from "./MemoryKnowledgeSourceGovernancePanel";
-import { MemoryKnowledgeStewardPanel } from "./MemoryKnowledgeStewardPanel";
-import { MemoryKnowledgeUsageContractPanel } from "./MemoryKnowledgeUsageContractPanel";
 import { MemoryManagementEditor, type MemoryManagementEditorDraft } from "./MemoryManagementEditor";
 import { MemoryManagePanel } from "./MemoryManagePanel";
 import { MemoryMatrixPanel } from "./MemoryMatrixPanel";
@@ -99,6 +83,50 @@ import { MemorySourceAndItemPanels } from "./MemorySourceAndItemPanels";
 import { MemoryUserContentPanel } from "./MemoryUserContentPanel";
 import { MemoryWarningStrip } from "./MemoryWarningStrip";
 import styles from "./MemoryRoute.styles";
+
+/** S1: view-scoped heavy panels — keep overview/manage shell light. */
+const MemoryAgentMemoryPanel = lazy(() =>
+  import("./MemoryAgentMemoryPanel").then((m) => ({ default: m.MemoryAgentMemoryPanel })),
+);
+const MemoryCleanupPanel = lazy(() =>
+  import("./MemoryCleanupPanel").then((m) => ({ default: m.MemoryCleanupPanel })),
+);
+const MemoryGraphViewPanel = lazy(() =>
+  import("./MemoryGraphViewPanel").then((m) => ({ default: m.MemoryGraphViewPanel })),
+);
+const MemoryKnowledgeBaseSidebar = lazy(() =>
+  import("./MemoryKnowledgeBaseSidebar").then((m) => ({ default: m.MemoryKnowledgeBaseSidebar })),
+);
+const MemoryKnowledgeDetailPanel = lazy(() =>
+  import("./MemoryKnowledgeDetailPanel").then((m) => ({ default: m.MemoryKnowledgeDetailPanel })),
+);
+const MemoryKnowledgeGovernancePanel = lazy(() =>
+  import("./MemoryKnowledgeGovernancePanel").then((m) => ({ default: m.MemoryKnowledgeGovernancePanel })),
+);
+const MemoryKnowledgeModeTabs = lazy(() =>
+  import("./MemoryKnowledgeModeTabs").then((m) => ({ default: m.MemoryKnowledgeModeTabs })),
+);
+const MemoryKnowledgePermissionsPanel = lazy(() =>
+  import("./MemoryKnowledgePermissionsPanel").then((m) => ({ default: m.MemoryKnowledgePermissionsPanel })),
+);
+const MemoryKnowledgePipelinePanel = lazy(() =>
+  import("./MemoryKnowledgePipelinePanel").then((m) => ({ default: m.MemoryKnowledgePipelinePanel })),
+);
+const MemoryKnowledgeReviewPanel = lazy(() =>
+  import("./MemoryKnowledgeReviewPanel").then((m) => ({ default: m.MemoryKnowledgeReviewPanel })),
+);
+const MemoryKnowledgeSearchPanel = lazy(() =>
+  import("./MemoryKnowledgeSearchPanel").then((m) => ({ default: m.MemoryKnowledgeSearchPanel })),
+);
+const MemoryKnowledgeSourceGovernancePanel = lazy(() =>
+  import("./MemoryKnowledgeSourceGovernancePanel").then((m) => ({ default: m.MemoryKnowledgeSourceGovernancePanel })),
+);
+const MemoryKnowledgeStewardPanel = lazy(() =>
+  import("./MemoryKnowledgeStewardPanel").then((m) => ({ default: m.MemoryKnowledgeStewardPanel })),
+);
+const MemoryKnowledgeUsageContractPanel = lazy(() =>
+  import("./MemoryKnowledgeUsageContractPanel").then((m) => ({ default: m.MemoryKnowledgeUsageContractPanel })),
+);
 
 type Copy = {
   eyebrow: string;
@@ -2391,149 +2419,35 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     invalidateKnowledgeDashboard,
   });
 
-  const proposalMutation = useMutation({
-    mutationFn: async ({ knowledgeBaseId, draft }: { knowledgeBaseId: string; draft: ProposalDraft }) =>
-      fetchJson<KnowledgeRefinementProposal>(`/api/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/refinement-proposals`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sourceArtifactIds: commaList(draft.sourceArtifactIds),
-          proposedByAgentId: draft.proposedByAgentId,
-          title: draft.title,
-          summary: draft.summary,
-          content: draft.content,
-          tags: commaList(draft.tags),
-        }),
-      }),
-    onSuccess: () => {
-      setProposalDraft(newProposalDraft());
-      setKnowledgeFeedback({ tone: "success", text: copy.mutationDone });
-      invalidateKnowledgeDashboard(queryClient, activeKnowledgeActorAgentId);
-      invalidateMemoryQueries(queryClient);
-    },
-    onError: (error) => {
-      setKnowledgeFeedback({ tone: "error", text: `${copy.mutationFailed}: ${error instanceof Error ? error.message : String(error)}` });
-    },
-  });
-
-  const reviewMutation = useMutation({
-    mutationFn: async ({ knowledgeBaseId, proposalId, status }: { knowledgeBaseId: string; proposalId: string; status: string }) =>
-      fetchJson<KnowledgeReviewResponse>(
-        `/api/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/refinement-proposals/${encodeURIComponent(proposalId)}/review`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ status, reviewedByAgentId: activeKnowledgeActorAgentId }),
-        },
-      ),
-    onSuccess: (payload) => {
-      setKnowledgeFeedback({ tone: "success", text: payload.item ? `${copy.mutationDone} · ${payload.item.title}` : copy.mutationDone });
-      invalidateKnowledgeDashboard(queryClient, activeKnowledgeActorAgentId);
-      void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeItems(activeKnowledgeBaseForItems, activeKnowledgeActorAgentId) });
-      void queryClient.invalidateQueries({
-        queryKey: queryKeys.knowledgeSearch(
-          activeKnowledgeBaseForItems,
-          activeKnowledgeActorAgentId,
-          knowledgeSearchDraft.query,
-          knowledgeSearchDraft.tags,
-          knowledgeSearchDraft.searchMode,
-        ),
-      });
-      invalidateMemoryQueries(queryClient);
-    },
-    onError: (error) => {
-      setKnowledgeFeedback({ tone: "error", text: `${copy.mutationFailed}: ${error instanceof Error ? error.message : String(error)}` });
-    },
-  });
-
-  const ratingMutation = useMutation({
-    mutationFn: async ({ knowledgeBaseId, item, draft }: { knowledgeBaseId: string; item: KnowledgeItem; draft: RatingDraft }) =>
-      fetchJson<KnowledgeRatingSuggestion>(`/api/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/rating-suggestions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          suggestedByAgentId: draft.actorAgentId,
-          targetType: "knowledge_item",
-          knowledgeItemId: item.knowledgeItemId,
-          importanceLevel: draft.importanceLevel,
-          confidence: draft.confidence.trim() ? Number(draft.confidence) : null,
-          stability: draft.stability,
-          reviewPriority: draft.reviewPriority,
-          markingReason: draft.markingReason,
-        }),
-      }),
-    onSuccess: () => {
-      setKnowledgeFeedback({ tone: "success", text: copy.mutationDone });
-      void queryClient.invalidateQueries({ queryKey: ["knowledge", "rating-suggestions"] });
-      invalidateKnowledgeDashboard(queryClient, activeKnowledgeActorAgentId);
-    },
-    onError: (error) => {
-      setKnowledgeFeedback({ tone: "error", text: `${copy.mutationFailed}: ${error instanceof Error ? error.message : String(error)}` });
-    },
-  });
-
-  const ratingSuggestionReviewMutation = useMutation({
-    mutationFn: async ({ knowledgeBaseId, suggestionId, status }: { knowledgeBaseId: string; suggestionId: string; status: "applied" | "rejected" }) =>
-      fetchJson<KnowledgeRatingSuggestionReviewResponse>(
-        `/api/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/rating-suggestions/${encodeURIComponent(suggestionId)}/review`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ status, reviewedByAgentId: activeKnowledgeActorAgentId }),
-        },
-      ),
-    onSuccess: () => {
-      setKnowledgeFeedback({ tone: "success", text: copy.mutationDone });
-      void queryClient.invalidateQueries({ queryKey: ["knowledge", "rating-suggestions"] });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeItems(activeKnowledgeBaseForItems, activeKnowledgeActorAgentId) });
-      void queryClient.invalidateQueries({
-        queryKey: queryKeys.knowledgeSearch(
-          activeKnowledgeBaseForItems,
-          activeKnowledgeActorAgentId,
-          knowledgeSearchDraft.query,
-          knowledgeSearchDraft.tags,
-          knowledgeSearchDraft.searchMode,
-        ),
-      });
-      invalidateKnowledgeDashboard(queryClient, activeKnowledgeActorAgentId);
-    },
-    onError: (error) => {
-      setKnowledgeFeedback({ tone: "error", text: `${copy.mutationFailed}: ${error instanceof Error ? error.message : String(error)}` });
-    },
-  });
-
-  const ratingSuggestionBulkReviewMutation = useMutation({
-    mutationFn: async ({ knowledgeBaseId, suggestionIds, status }: { knowledgeBaseId: string; suggestionIds: string[]; status: "applied" | "rejected" }) =>
-      fetchJson<KnowledgeRatingSuggestionBulkReviewResponse>(
-        `/api/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/rating-suggestions/review-batch`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ suggestionIds, status, reviewedByAgentId: activeKnowledgeActorAgentId }),
-        },
-      ),
-    onSuccess: (payload) => {
-      setSelectedRatingSuggestionIds([]);
-      setKnowledgeFeedback({
-        tone: "success",
-        text: `${copy.mutationDone} · ${payload.summary.reviewedCount}/${payload.summary.requestedCount}${payload.summary.skippedCount ? ` · ${copy.skippedSuggestions}: ${payload.summary.skippedCount}` : ""}`,
-      });
-      void queryClient.invalidateQueries({ queryKey: ["knowledge", "rating-suggestions"] });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeItems(activeKnowledgeBaseForItems, activeKnowledgeActorAgentId) });
-      void queryClient.invalidateQueries({
-        queryKey: queryKeys.knowledgeSearch(
-          activeKnowledgeBaseForItems,
-          activeKnowledgeActorAgentId,
-          knowledgeSearchDraft.query,
-          knowledgeSearchDraft.tags,
-          knowledgeSearchDraft.searchMode,
-        ),
-      });
-      invalidateKnowledgeDashboard(queryClient, activeKnowledgeActorAgentId);
-    },
-    onError: (error) => {
-      setKnowledgeFeedback({ tone: "error", text: `${copy.mutationFailed}: ${error instanceof Error ? error.message : String(error)}` });
-    },
+  const {
+    proposalMutation,
+    reviewMutation,
+    ratingMutation,
+    ratingSuggestionReviewMutation,
+    ratingSuggestionBulkReviewMutation,
+    sourceInboxCollectMutation,
+    sourceInboxReviewMutation,
+    centralSourceAttachMutation,
+  } = useMemoryKnowledgeMutations({
+    copy,
+    setProposalDraft,
+    setOwnerSourceDraft,
+    setKnowledgeFeedback,
+    setSelectedRatingSuggestionIds,
+    newProposalDraft,
+    newOwnerSourceDraft,
+    commaList,
+    parseJsonObject,
+    getActiveKnowledgeActorAgentId: () => activeKnowledgeActorAgentId,
+    getActiveKnowledgeBaseForItems: () => activeKnowledgeBaseForItems,
+    getKnowledgeSearchDraft: () => knowledgeSearchDraft,
+    getActiveSourceOwnerType: () => activeSourceOwnerType,
+    getActiveSourceOwnerId: () => activeSourceOwnerId,
+    getActiveSourceInboxStatus: () => activeSourceInboxStatus,
+    getSourceReviewNote: () => sourceReviewNote,
+    getDuplicateCentralSourceId: () => duplicateCentralSourceId,
+    invalidateMemoryQueries,
+    invalidateKnowledgeDashboard,
   });
 
   const overview = overviewQuery.data;
@@ -2858,91 +2772,6 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     enabled: forcedView === "knowledge" && Boolean(activeSourceOwnerId) && Boolean(activeKnowledgeActorAgentId),
     refetchInterval: resolvePollingInterval(pageVisible, 60_000),
     refetchIntervalInBackground: false,
-  });
-  const sourceInboxCollectMutation = useMutation({
-    mutationFn: async (draft: MemoryKnowledgeOwnerSourceDraft) =>
-      fetchJson<KnowledgeOwnerSource>("/api/knowledge/sources/inbox", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ownerType: activeSourceOwnerType,
-          ownerId: activeSourceOwnerId,
-          sourceType: draft.sourceType,
-          sourceRef: parseJsonObject(draft.sourceRef),
-          originalContent: draft.originalContent,
-          originalFilename: draft.originalFilename,
-          sourceCreatedAt: draft.sourceCreatedAt,
-          capturedBy: draft.capturedBy.trim() || activeKnowledgeActorAgentId,
-          sourceHash: draft.sourceHash,
-          evidenceRange: parseJsonObject(draft.evidenceRange),
-          title: draft.title,
-          summary: draft.summary,
-          actorAgentId: activeKnowledgeActorAgentId,
-        }),
-      }),
-    onSuccess: () => {
-      setOwnerSourceDraft(newOwnerSourceDraft());
-      setKnowledgeFeedback({ tone: "success", text: copy.mutationDone });
-      void queryClient.invalidateQueries({
-        queryKey: queryKeys.knowledgeSourceInbox(activeSourceOwnerType, activeSourceOwnerId, activeKnowledgeActorAgentId, activeSourceInboxStatus),
-      });
-      invalidateMemoryQueries(queryClient);
-    },
-    onError: (error) => {
-      setKnowledgeFeedback({ tone: "error", text: `${copy.mutationFailed}: ${error instanceof Error ? error.message : String(error)}` });
-    },
-  });
-  const sourceInboxReviewMutation = useMutation({
-    mutationFn: async ({ source, decision }: { source: KnowledgeOwnerSource; decision: "accepted" | "rejected" | "duplicate" | "needs_more_context" }) =>
-      fetchJson<KnowledgeSourceInboxReviewResponse>(
-        `/api/knowledge/sources/inbox/${encodeURIComponent(activeSourceOwnerType)}/${encodeURIComponent(activeSourceOwnerId)}/${encodeURIComponent(source.inboxSourceId)}/review`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            decision,
-            reviewedByAgentId: activeKnowledgeActorAgentId,
-            resolutionNote: sourceReviewNote,
-            duplicateOf: decision === "duplicate" ? duplicateCentralSourceId : "",
-          }),
-        },
-      ),
-    onSuccess: (payload) => {
-      setKnowledgeFeedback({ tone: "success", text: payload.centralSource?.centralSourceId ? `${copy.mutationDone} · ${payload.centralSource.centralSourceId}` : copy.mutationDone });
-      void queryClient.invalidateQueries({
-        queryKey: queryKeys.knowledgeSourceInbox(activeSourceOwnerType, activeSourceOwnerId, activeKnowledgeActorAgentId, activeSourceInboxStatus),
-      });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeCentralSources(activeKnowledgeActorAgentId, activeSourceOwnerType, activeSourceOwnerId) });
-      invalidateKnowledgeDashboard(queryClient, activeKnowledgeActorAgentId);
-      invalidateMemoryQueries(queryClient);
-    },
-    onError: (error) => {
-      setKnowledgeFeedback({ tone: "error", text: `${copy.mutationFailed}: ${error instanceof Error ? error.message : String(error)}` });
-    },
-  });
-  const centralSourceAttachMutation = useMutation({
-    mutationFn: async (centralSourceId: string) =>
-      fetchJson<KnowledgeSourceArtifact>(`/api/knowledge-bases/${encodeURIComponent(activeKnowledgeBaseForItems)}/central-source-artifacts`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          centralSourceId,
-          actorAgentId: activeKnowledgeActorAgentId,
-        }),
-      }),
-    onSuccess: (payload) => {
-      setProposalDraft((current) => ({
-        ...current,
-        sourceArtifactIds: [...commaList(current.sourceArtifactIds), payload.sourceArtifactId].join(", "),
-      }));
-      setKnowledgeFeedback({ tone: "success", text: `${copy.mutationDone} · ${payload.sourceArtifactId}` });
-      invalidateKnowledgeDashboard(queryClient, activeKnowledgeActorAgentId);
-      void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeItems(activeKnowledgeBaseForItems, activeKnowledgeActorAgentId) });
-      invalidateMemoryQueries(queryClient);
-    },
-    onError: (error) => {
-      setKnowledgeFeedback({ tone: "error", text: `${copy.mutationFailed}: ${error instanceof Error ? error.message : String(error)}` });
-    },
   });
   const knowledgeSearchResults = knowledgeSearchQuery.data?.results ?? [];
   const knowledgeRagContexts = knowledgeRagRetrieveQuery.data?.contexts ?? [];
@@ -4451,19 +4280,29 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
               reviewMemoryList={renderMemoryList(reviewPairs, copy.noIssues, true)}
             />
           )
-           : forcedView === "effective"
-             ? createEffectivePanel()
-             : forcedView === "agents"
-              ? createAgentMemoryPanel()
-              : forcedView === "manage"
-                ? createManagePanel()
-                : forcedView === "knowledge"
-                  ? renderKnowledgeView()
-                  : forcedView === "graph"
-                    ? renderGraphView()
-                    : forcedView === "cleanup"
-                      ? createCleanupPanel()
-                      : renderSourcesView()}
+          : (
+            <Suspense
+              fallback={(
+                <div className={styles.viewStack} role="status">
+                  {lang === "zh" ? "正在加载工作区…" : "Loading workspace…"}
+                </div>
+              )}
+            >
+              {forcedView === "effective"
+                ? createEffectivePanel()
+                : forcedView === "agents"
+                  ? createAgentMemoryPanel()
+                  : forcedView === "manage"
+                    ? createManagePanel()
+                    : forcedView === "knowledge"
+                      ? renderKnowledgeView()
+                      : forcedView === "graph"
+                        ? renderGraphView()
+                        : forcedView === "cleanup"
+                          ? createCleanupPanel()
+                          : renderSourcesView()}
+            </Suspense>
+          )}
       </div>
     </VDenseOpsPage>
   );
