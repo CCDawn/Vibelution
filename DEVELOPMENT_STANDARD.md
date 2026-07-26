@@ -1154,3 +1154,103 @@ Avoid:
 - mobile layouts that require horizontal scrolling for normal controls or let fixed buttons cover content.
 
 Validation anchor: frontend visual work should include a browser screenshot or equivalent visual check at the relevant desktop and mobile widths. Before finishing, confirm that buttons hug their content or have an explicit full-width reason, text fits, controls do not overlap, non-critical explanatory copy is not permanently consuming primary UI space, tooltip/focus explanations are reachable, and loading-to-loaded transitions do not create disruptive layout shifts.
+
+## 24. Full-Stack Feature Development Contract
+
+This section is the canonical cross-layer contract for product feature development. It connects the frontend rules in §9 and §23.6/§23.10 with the backend facade and pack rules in §8.3. VUI and service-pack READMEs remain implementation maps; they must not define a competing feature architecture.
+
+The normal feature path is:
+
+```text
+Route entry / page composition
+  -> route-domain component, hook, and view model
+  -> web/src/api/<domain>.ts + api/types/<domain>.ts + queryKeys
+  -> core/web/routes/<domain>.py
+  -> core/web/services/<domain>_service.py public facade
+  -> core/web/services/<domain>/ owned pack
+  -> canonical store / runtime-scene evidence
+```
+
+A feature is not structurally complete when only its UI or only its backend endpoint works. The owning change must identify the source of truth, request and response contract, cache convergence, service owner, failure evidence, and tests that prove the path.
+
+### 24.1 Directory Decision Table
+
+Use the existing project structure. Do not create a parallel top-level `features/`, `contracts/`, second component library, or second service tree merely to make new code look cleaner.
+
+| Concern | Default location | Owns | Must not own |
+| --- | --- | --- | --- |
+| Route registration and page composition | `web/src/routes/<Domain>Route.tsx` | route params, top-level page recipe, domain surface composition | raw endpoint strings, reusable business rules, persistence semantics |
+| Route-domain UI | `web/src/routes/<domain>/*.tsx` | domain panels and local interaction composition | generic primitives, direct renderer imports, backend source-of-truth rules |
+| Route-domain state/model | `web/src/routes/<domain>/use*.ts`, `*Model.ts`, `*ViewModel.ts` | query composition, UI state, pure projection and formatting | transport implementation, duplicated server authority |
+| Stable UI product API | `web/src/components/vui/` and `product/` | primitives, recipes, renderer isolation, shared domain composition | endpoint calls and route-specific state |
+| Frontend transport | `web/src/api/client.ts` | control token, JSON transport, shared request failure handling | domain endpoint catalog |
+| Domain API functions | `web/src/api/<domain>.ts` | endpoint paths, request construction, typed responses | React state and page rendering |
+| Frontend DTOs | `web/src/api/types/<domain>.ts` | public API request/response shapes | component-only display state |
+| Query identity | `web/src/api/queryKeys.ts` or an exported domain key module | stable cache keys and parameter identity | arbitrary component-local arrays |
+| FastAPI route | `core/web/routes/<domain>.py` | HTTP parsing, Pydantic request/response models, status/error mapping, service delegation | canonical business decisions, direct store mutation |
+| Stable backend import | `core/web/services/<domain>_service.py` | public facade, compatibility re-exports, required transaction glue | new unbounded domain implementation |
+| Backend domain behavior | `core/web/services/<domain>/` | commands, queries, lifecycle, projection, storage adapters, domain errors | cross-domain dumping-ground helpers |
+| Canonical persistence | existing domain store/service | atomic writes, indexes, source-of-truth invariants | UI-only or route-only shadow truth |
+| Runtime evidence | runtime-scene owner at the real decision point | bounded transition, failure, retry, repair evidence | prompts, secrets, large payload dumps |
+| Backend verification | `tests/test_<domain>_service.py`, `tests/test_web_<domain>_routes.py`, or established equivalents | service behavior and HTTP contract | frontend rendering assertions |
+| Frontend verification | colocated `*.test.ts(x)` plus the relevant route/VUI contract | model, cache, interaction, layout, import boundaries | mocked proof of backend semantics |
+
+Small redirect, health, static-file, and transport-only endpoints may remain compact, but they still need an explicit response or response-class contract and must not become a bypass for domain behavior.
+
+### 24.2 Contract-First Sequence
+
+For a new user-visible capability or a behavior change that crosses HTTP:
+
+1. Name the owning domain and canonical source of truth. Reuse the existing route, facade, pack, store, query key, and VUI recipe when they already own the behavior.
+2. Define the public request and response contract before wiring the page. Public JSON fields use the established API casing, normally camelCase; internal Python state may remain snake_case behind the route adapter.
+3. Add or update the service behavior first. Keep domain errors and state transitions in the service/pack, not in FastAPI or React.
+4. Expose a thin FastAPI route with a Pydantic request model and an explicit `response_model`. Streaming, file, HTML, and other non-JSON routes must declare the appropriate response class or document the bounded exception.
+5. Add the matching TypeScript DTO and a domain API function under `web/src/api/`. Route and product components consume that function instead of owning endpoint strings.
+6. Define the React Query key, invalidation set, optimistic patch, rollback, and eventual refetch as one cache contract when server state can change.
+7. Compose the UI through VUI and route-domain modules. Keep server authority separate from draft, selection, disclosure, and other local presentation state.
+8. Validate the service invariant, HTTP payload, TypeScript/build contract, cache convergence, and affected visual/interaction states.
+
+For backend-only or frontend-only work, explicitly state why the other half is not affected. “No UI change” or “no backend change” is a boundary decision, not an excuse to skip checking the public contract.
+
+### 24.3 Hard Boundaries
+
+- Product UI must not call browser `fetch` directly. Shared transport remains `fetchJson`; exceptional telemetry, streaming, download, or browser-native flows must stay in a named adapter with bounded error handling.
+- New route and product-component files must not import or call `fetchJson` directly. Put domain endpoint functions in `web/src/api/<domain>.ts`. Existing direct route calls are migration debt governed by `web/src/api/fullStackApiBoundary.test.ts`.
+- Route entry modules should remain composition roots. When a touched route already owns endpoint strings, multiple mutations, cache repair, and view code, extract the touched API or model slice instead of adding another parallel block.
+- Public JSON endpoints must declare an explicit Pydantic response contract. Returning an untyped `dict` from a service is allowed internally only when the route validates or projects it into the public response model.
+- Frontend TypeScript DTOs describe API data, not component display state. Display-only unions, selected-row state, draft form state, and view models stay in their route-domain module.
+- Backend routes delegate to services. Direct filesystem, SQLite, registry, config, subprocess, LLM, tool, or lifecycle mutation in a route requires an existing approved transport exception.
+- Service facades remain stable public imports. New implementation goes to the matching pack when the concern already has an owner in its README.
+- Cross-domain changes must name one source owner and projection consumers. A projection may cache or render facts; it must not silently become a second writer.
+- API changes must preserve or intentionally migrate developer/formal mode parity, permissions, redaction, delete/archive semantics, and runtime evidence.
+
+### 24.4 Incremental Migration And Guard Budgets
+
+This contract applies immediately to new code and to the slice materially touched by a task. It does not authorize a big-bang rewrite of existing routes, DTOs, services, or tests.
+
+The first structural guards are debt budgets:
+
+- `web/src/api/fullStackApiBoundary.test.ts` records existing route-layer `fetchJson` call counts. New files and count increases fail; an intentional extraction must lower the recorded budget in the same change.
+- `tests/test_full_stack_contract_guards.py` records existing FastAPI endpoints without explicit `response_model`. New untyped endpoints and count increases fail; adding response contracts must lower the matching budget.
+
+Guard budgets are not exemptions for new work. Raising a budget requires a documented compatibility or emergency reason, owner, removal trigger, and review evidence. Normal feature development must keep budgets equal or lower.
+
+Do not move files solely to satisfy a count. Migrate one behavior slice with its API function, DTO, cache contract, service owner, and tests. Existing compatibility barrels and service facades may remain while imports converge.
+
+### 24.5 Cross-Layer Definition Of Done
+
+Use the smallest applicable rows; a full-stack feature normally needs all of them.
+
+| Evidence | Required proof |
+| --- | --- |
+| Ownership | named frontend domain, backend service/pack, canonical fact source, and projection consumers |
+| Contract | Pydantic request/response, matching TypeScript DTO, stable field casing, status/error semantics |
+| Backend | focused service test plus route/contract test; no route-owned domain mutation |
+| Frontend data | domain API function, canonical query key, invalidation/rollback decision, no new route-layer transport |
+| Frontend UI | VUI composition, relevant state tests, longest-label/error/loading checks when visible behavior changes |
+| Evidence and safety | logging decision, redaction, permission, destructive semantics, developer/formal parity |
+| Build | narrow Vitest selection and `npm --prefix web run build` for compiled/API changes |
+| Runtime | Launcher refresh decision and the smallest live/browser/runtime-scene evidence proportional to risk |
+| Delivery | scoped diff, version-impact judgment, clean claim release, and no unrelated files |
+
+When the endpoint contract changes, passing frontend and backend tests independently is insufficient. The change must include one piece of shared contract evidence: an OpenAPI/schema assertion, a route payload test consumed by the TypeScript shape, generated/static alignment, or an equivalent checked fixture that fails on field drift.
