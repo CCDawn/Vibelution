@@ -57,3 +57,7 @@ export { TeamSourceCollectionExtractionRecoveryWorkspacePanel } from "../TeamSou
 export { TeamSourceCollectionCandidateWorkspacePanel } from "../TeamSourceCollectionCandidateWorkspacePanel";
 export { TeamSourceCollectionGraphWorkspacePanel } from "../TeamSourceCollectionGraphWorkspacePanel";
 export { TeamSourceCollectionMemoryWorkspacePanel } from "../TeamSourceCollectionMemoryWorkspacePanel";
+
+export { TeamSourceCollectionSelectedSourceWorkspacePanel } from "../TeamSourceCollectionSelectedSourceWorkspacePanel";
+export { TeamSourceCollectionControlsWorkspacePanel } from "../TeamSourceCollectionControlsWorkspacePanel";
+export { TeamSourceCollectionActiveStageWorkspacePanel } from "../TeamSourceCollectionActiveStageWorkspacePanel";
