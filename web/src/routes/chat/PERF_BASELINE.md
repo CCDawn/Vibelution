@@ -87,8 +87,10 @@ Recorded for high-ROI program **scope A** (F0–F3, F5, F6; F4 trigger-only).
 
 | Item | Change |
 |---|---|
-| D1 | `dictionary.ts` → domain slices under `i18n/domains/*` (core/chat/agents/teams/evolution/tools/git/logs/pet); merge façade keeps `TranslationKey` |
-| D2 | Conversation windowed virtual range + stick-bottom ResizeObserver; pure helpers in `conversationTimelineFollowState` |
+| D1 | `dictionary.ts` → domain slices under `i18n/domains/*`; merge façade keeps `TranslationKey` |
+| D1+ | `useAppI18n({ domains })` dynamic domain loaders; primary routes pass scoped packs (chat/evolution/tools/…) |
+| D2 | Conversation windowed virtual range + stick-bottom ResizeObserver |
+| D2+ | Measured row heights + prefix-sum spacers (`buildConversationHeightOffsets` / row ResizeObserver) |
 | D3 | Agents pure presentation helpers → `agents/agentRouteListModel.ts` (~200 LOC off route) |
 
 ### Post-T1–T3 chunk notes (build evidence)

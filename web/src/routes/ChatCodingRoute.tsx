@@ -320,7 +320,7 @@ type RightIndexPanel = "conversations" | "members";
 
 
 export function ChatCodingRoute() {
-  const { lang, t, statusLabel } = useAppI18n();
+  const { lang, t, statusLabel } = useAppI18n({ domains: ["chat"] });
   const queryClient = useQueryClient();
   const chatWorkspaceCache = useMemo(() => createChatWorkspaceCache(queryClient), [queryClient]);
   const navigate = useNavigate();

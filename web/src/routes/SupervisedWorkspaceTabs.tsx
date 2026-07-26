@@ -58,7 +58,7 @@ export function SupervisedWorkspaceTabs({
   onWorkflowStepSelect,
   summaries = {},
 }: SupervisedWorkspaceTabsProps) {
-  const { t } = useAppI18n();
+  const { t } = useAppI18n({ domains: ["evolution"] });
   const normalizedActiveWorkflowStepId = String(activeWorkflowStepId || "").trim();
 
   return (
