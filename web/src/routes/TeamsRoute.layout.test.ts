@@ -59,6 +59,9 @@ import teamSourceCollectionExtractionRecoveryWorkspacePanelSource from "./TeamSo
 import teamSourceCollectionCandidateWorkspacePanelSource from "./TeamSourceCollectionCandidateWorkspacePanel.tsx?raw";
 import teamSourceCollectionGraphWorkspacePanelSource from "./TeamSourceCollectionGraphWorkspacePanel.tsx?raw";
 import teamSourceCollectionMemoryWorkspacePanelSource from "./TeamSourceCollectionMemoryWorkspacePanel.tsx?raw";
+import teamSourceCollectionSelectedSourceWorkspacePanelSource from "./TeamSourceCollectionSelectedSourceWorkspacePanel.tsx?raw";
+import teamSourceCollectionControlsWorkspacePanelSource from "./TeamSourceCollectionControlsWorkspacePanel.tsx?raw";
+import teamSourceCollectionActiveStageWorkspacePanelSource from "./TeamSourceCollectionActiveStageWorkspacePanel.tsx?raw";
 import teamExperimentMethodPanelSource from "./TeamExperimentMethodPanel.tsx?raw";
 import teamExperimentMethodPanelStyles from "./TeamExperimentMethodPanel.styles";
 import teamSourceCollectionActiveStagePanelSource from "./TeamSourceCollectionActiveStagePanel.tsx?raw";
@@ -241,11 +244,12 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain('content={lang === "zh" ? "自动排版只改变当前显示，不保存坐标"');
     expect(routeSource).toContain('content={lang === "zh" ? "显示画布文件中的原始坐标"');
     expect(routeSource).toContain("<VTooltip content={communicationEdgeHint}>");
-    expect(routeSource).toContain('content={lang === "zh" ? "当前阶段 Agent 配置"');
+    // Wave 8M: stage-agent config tooltip lives on active-stage workspace panel.
+    expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain('content={lang === "zh" ? "当前阶段 Agent 配置"');
     expect(routeSource).toContain('content={lang === "zh" ? "到 AgentDirectory 源配置修改"');
     expect(routeSource).not.toContain("title={communicationEdgeHint}");
     expect(routeSource).not.toContain('title={lang === "zh" ? "自动排版只改变当前显示，不保存坐标"');
-    expect(routeSource).not.toContain('title={lang === "zh" ? "当前阶段 Agent 配置"');
+    expect(teamSourceCollectionActiveStageWorkspacePanelSource).not.toContain('title={lang === "zh" ? "当前阶段 Agent 配置"');
     expect(routeSource).not.toContain('title={lang === "zh" ? "到 AgentDirectory 源配置修改"');
     expect(routeSource).not.toContain('{" · "}\n                  {communicationEdgeHint}');
   });
@@ -835,14 +839,15 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("sourceCollectionCandidateTrace");
     expect(routeSource).toContain("selectedSourceCollectionCandidateId");
     expect(routeSource).toContain("TeamSourceCollectionSourceDetailPanel");
-    expect(routeSource).toContain("TeamSourceCollectionSourceDetailFact[]");
+    // Wave 8M: selected-source detail typing/copy live on selected-source workspace panel.
+    expect(teamSourceCollectionSelectedSourceWorkspacePanelSource).toContain("TeamSourceCollectionSourceDetailFact[]");
     expect(evidenceModelSource).toContain("打开论文 DOI");
-    expect(routeSource).toContain("打开 API 原文");
+    expect(teamSourceCollectionSelectedSourceWorkspacePanelSource).toContain("打开 API 原文");
     expect(teamSourceCollectionSourceDetailPanelSource).toContain("sourceCollectionSourceDetailPanel");
     expect(teamSourceCollectionSourceDetailPanelSource).toContain("sourceCollectionSearchEvidence");
     expect(teamSourceCollectionSourceDetailPanelSource).toContain("查看搜索证据");
     expect(evidenceModelSource).toContain("sourceCollectionIsMachineEvidenceUrl");
-    expect(routeSource).toContain("仅有搜索记录，缺少可读来源");
+    expect(teamSourceCollectionSelectedSourceWorkspacePanelSource).toContain("仅有搜索记录，缺少可读来源");
     expect(routeSource).not.toContain("打开搜索页");
     expect(teamSourceCollectionConversationPanelSource).toContain("本轮原始资料记录");
     expect(teamSourceCollectionConversationWorkspacePanelSource).toContain("当前筛选没有资料");
@@ -944,7 +949,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("sourceCollectionStageCardById");
     expect(routeSource).toContain("excludedSourceCount");
     expect(routeSource).toContain("filteredExcludedCount");
-    expect(routeSource).toContain("无效来源已过滤");
+    // Wave 8M: search result feedback copy lives on controls workspace panel.
+    expect(teamSourceCollectionControlsWorkspacePanelSource).toContain("无效来源已过滤");
     expect(stageProjectionSource).toContain("已移出");
     expect(routeSource).toContain("sourceCollectionDisplayedCandidateCount");
     expect(routeSource).toContain("sourceCollectionPrimaryDataLoading");
@@ -1046,8 +1052,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain('type SourceCollectionStageAgentChatStatus = "ready" | "loading" | "error" | "repair"');
     expect(routeSource).toContain("sourceCollectionStageAgentChatState(stageId");
     expect(routeSource).toContain("agentSummaryQuery.isPending || agentSummaryQuery.isFetching");
-    expect(routeSource).toContain("primaryStageAgentChatLoading");
-    expect(routeSource).toContain("加载 Agent...");
+    // Wave 8M: primary stage agent chat fallback state lives on active-stage workspace.
+    expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain("primaryStageAgentChatLoading");
+    expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain("加载 Agent...");
     expect(routeSource).toContain('chatState.status === "repair"');
     expect(routeSource).toContain("onAction: () => void startSourceCollectionStageSessionTask(\"finding\")");
     expect(routeSource).toContain("onAction: sourceCollectionExtractionCanProceedAfterExclusions");
@@ -1058,8 +1065,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("/challenge-cup-agents/repair");
     expect(routeSource).toContain("repairKnowledgeExpansionTeamAgentsMutation");
     expect(routeSource).toContain("/knowledge-expansion-agents/repair");
-    expect(routeSource).toContain("修复团队 Agent");
-    expect(routeSource).toContain("进入 Agent 私聊");
+    // Wave 8M: repair/open-chat CTAs live on active-stage workspace (and recovery).
+    expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain("修复团队 Agent");
+    expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain("进入 Agent 私聊");
     expect(routeSource).toContain("Agent 私聊");
     expect(routeSource).not.toContain("window.alert(lang === \"zh\"");
     expect(routeSource).not.toContain("sourceCollectionStageChatRoute");
@@ -1098,11 +1106,12 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).not.toContain("className={styles.sourceCollectionStageMiniFlow}");
     expect(teamSourceCollectionActiveStagePanelSource).toContain("sourceCollectionStageHandoffNext");
     expect(routeSource).not.toContain("Agent过程");
-    expect(routeSource).toContain("activeModule.nextLabel");
-    expect(routeSource).toContain("activeModule.onAction");
-    expect(routeSource).toContain("sourceCollectionStagePrimaryAgentBinding(activeModule.id)");
-    expect(routeSource).toContain("配置 Agent");
-    expect(routeSource).toContain("绑定 Agent");
+    // Wave 8M: active-stage action/binding copy lives on active-stage workspace.
+    expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain("activeModule.nextLabel");
+    expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain("activeModule.onAction");
+    expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain("sourceCollectionStagePrimaryAgentBinding(activeModule.id)");
+    expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain("配置 Agent");
+    expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain("绑定 Agent");
     expect(routeSource).toContain("sourceCollectionStageModules.map");
     expect(routeSource).toContain("sourceCollectionStepClassName");
     expect(routeSource).not.toContain("下一步操作");
@@ -1132,7 +1141,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("sourceCollectionStageAgentBindings(stageId)");
     expect(routeSource).not.toContain("renderSourceCollectionStageAgentStrip");
     expect(teamStageCardSource).toContain('target.closest("button, a")');
-    expect(routeSource).toContain("renderSourceCollectionStageAgents(activeModule.id)");
+    // Wave 8M: stage-agents strip mount lives on controls workspace.
+    expect(teamSourceCollectionControlsWorkspacePanelSource).toContain("renderSourceCollectionStageAgents(activeModule.id)");
     expect(routeSource).toContain("TeamSourceCollectionStageAgentsPanel");
     expect(routeSource).toContain("agentCards: TeamSourceCollectionStageAgentCard[]");
     expect(teamSourceCollectionStageAgentsPanelSource).toContain("当前步骤 Agent 配置");
@@ -1153,7 +1163,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("个搜索任务待执行");
     expect(runModelSource).toContain("搜索已停止，还有");
     expect(routeSource).not.toContain("sourceCollectionOpenAssignmentCount > 0 ? <Search");
-    expect(routeSource).toContain("条资料通过审查");
+    // Wave 8M: ingestion feedback copy lives on controls workspace panel.
+    expect(teamSourceCollectionControlsWorkspacePanelSource).toContain("条资料通过审查");
     expect(routeSource).toContain("Agent 重新提炼复核");
     expect(routeSource).toContain("sourceCollectionIngestorAgentId");
     expect(routeSource).toContain("runKnowledgeIngestionPrecheckMutation");
@@ -1194,7 +1205,7 @@ describe("TeamsRoute layout contract", () => {
     expect(teamKnowledgeCollectionCompletionFlowPanelSource).toContain("重试失败节点");
     expect(teamKnowledgeCollectionCompletionFlowPanelSource).toContain("openSourceCollectionStageAgentChat(node.stageId)");
     expect(routeSource).toContain("提炼后通知入库 Agent");
-    expect(routeSource).toContain("资料已写入团队知识库");
+    expect(teamSourceCollectionControlsWorkspacePanelSource).toContain("资料已写入团队知识库");
     expect(routeSource).toContain("sourceCollectionPrecheckCandidateCount");
     expect(routeSource).toContain("sourceCollectionIngestCandidateCount");
     expect(routeSource).toContain("sourceCollectionCanBuildGraph");
@@ -1256,10 +1267,11 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourceCollectionActiveStagePanelSource).toContain("styles.sourceCollectionExtractionPanels");
     expect(teamSourceCollectionActiveStagePanelSource).toContain("renderCandidatePanel()");
     expect(teamSourceCollectionActiveStagePanelSource).toContain("renderScreeningPanel()");
-    expect(routeSource).toContain("renderGraphPanel={renderSourceCollectionGraphPanel}");
-    expect(routeSource).toContain("renderMemoryPanel={renderSourceCollectionMemoryPanel}");
-    expect(routeSource).toContain("renderCandidatePanel={renderSourceCollectionCandidatePanel}");
-    expect(routeSource).toContain("renderScreeningPanel={renderSourceCollectionScreeningPanel}");
+    // Wave 8M: stage panel render-prop mounts live on active-stage workspace.
+    expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain("renderGraphPanel={renderSourceCollectionGraphPanel}");
+    expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain("renderMemoryPanel={renderSourceCollectionMemoryPanel}");
+    expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain("renderCandidatePanel={renderSourceCollectionCandidatePanel}");
+    expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain("renderScreeningPanel={renderSourceCollectionScreeningPanel}");
     // Wave 8L: graph open condition lives on graph workspace panel.
     const graphPanelOpenSource = teamSourceCollectionGraphWorkspacePanelSource.slice(
       teamSourceCollectionGraphWorkspacePanelSource.indexOf("<TeamSourceCollectionGraphPanel"),
@@ -1595,7 +1607,8 @@ describe("TeamsRoute layout contract", () => {
     expect(sourceCollectionSearchAcceptedRefreshSource).not.toContain("sourceCollectionRunStatus?.runStatus");
     expect(sourceCollectionSearchAcceptedRefreshSource).not.toContain("sourceCollectionRunStatus?.summary.recordCount");
     expect(routeSource).toContain("skippedDuplicateCount");
-    expect(routeSource).toContain("条重复跳过");
+    // Wave 8M: duplicate-skip feedback lives on controls workspace panel.
+    expect(teamSourceCollectionControlsWorkspacePanelSource).toContain("条重复跳过");
     expect(routeSource).toContain("selectedSourceCollectionSearchAccepted");
     expect(routeSource).toContain('finding: ["source_finder"]');
     expect(routeSource).toContain('extraction: ["source_extractor"]');
@@ -1614,7 +1627,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).not.toContain("sourceCollectionStageRoomKey");
     expect(routeSource).toContain("openSourceCollectionStageAgentChat");
     expect(routeSource).toContain("repairChallengeCupTeamAgentsMutation.mutate(selectedTeam.teamId)");
-    expect(routeSource).toContain("进入 Agent 私聊");
+    expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain("进入 Agent 私聊");
     expect(routeSource).toContain("researchStageStartFeedbackText");
     expect(routeSource).toContain("已复用正在运行的");
     expect(routeSource).not.toContain("像对话一样记录：搜索了什么");
@@ -1966,8 +1979,9 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourceCollectionConversationWorkspacePanelSource).toContain("const sourceCollectionConversationHasVisibleResults = visibleResults.length > 0");
     expect(teamSourceCollectionConversationWorkspacePanelSource).toContain("const sourceCollectionConversationCompact = !sourceCollectionConversationHasVisibleResults");
     expect(teamSourceCollectionConversationWorkspacePanelSource).toContain("compact={sourceCollectionConversationCompact}");
-    expect(routeSource).toContain("const sourceCollectionActiveStageCompact =");
-    expect(routeSource).toContain("compact={sourceCollectionActiveStageCompact}");
+    // Wave 8M: active-stage compact projection lives on active-stage workspace.
+    expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain("const sourceCollectionActiveStageCompact =");
+    expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain("compact={sourceCollectionActiveStageCompact}");
     expect(routeSource).toContain("const sourceCollectionFindingHasVisibleRecords =");
     expect(routeSource).toContain("&& !sourceCollectionFindingHasVisibleRecords");
     expect(routeSource).toContain("compactActivePanel={sourceCollectionFindingStageCompact}");
@@ -2802,10 +2816,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("sourceCollectionEvidenceReadyCandidateCount");
     expect(routeSource).toContain("sourceCollectionMissingEvidenceAnchorCount");
 
-    const selectedSourceDetailSource = routeSource.slice(
-      routeSource.indexOf("function renderSourceCollectionSelectedSourcePanel"),
-      routeSource.indexOf("function renderSourceCollectionScreeningPanel"),
-    );
+    // Wave 8M: selected-source detail body lives on selected-source workspace panel.
+    const selectedSourceDetailSource = teamSourceCollectionSelectedSourceWorkspacePanelSource;
     expect(selectedSourceDetailSource).toContain("sourceCollectionEvidenceLedgerDetailItems");
     expect(selectedSourceDetailSource).toContain("evidenceLedger={evidenceLedgerSummary");
     expect(teamSourceCollectionSourceDetailPanelSource).toContain("Evidence Ledger");

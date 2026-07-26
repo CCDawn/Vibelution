@@ -419,6 +419,9 @@ const TeamSourceCollectionExtractionRecoveryWorkspacePanel = createLazyNamedTeam
 const TeamSourceCollectionCandidateWorkspacePanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionCandidateWorkspacePanel");
 const TeamSourceCollectionGraphWorkspacePanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionGraphWorkspacePanel");
 const TeamSourceCollectionMemoryWorkspacePanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionMemoryWorkspacePanel");
+const TeamSourceCollectionSelectedSourceWorkspacePanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionSelectedSourceWorkspacePanel");
+const TeamSourceCollectionControlsWorkspacePanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionControlsWorkspacePanel");
+const TeamSourceCollectionActiveStageWorkspacePanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionActiveStageWorkspacePanel");
 const TeamSourceCollectionSourceDetailPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionSourceDetailPanel");
 const TeamSourceCollectionStandaloneStagePanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionStandaloneStagePanel");
 const TeamSourceCollectionRunSettingsPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionRunSettingsPanel");
@@ -3667,112 +3670,16 @@ export function TeamsRoute({
   }
 
   function renderSourceCollectionSelectedSourcePanel() {
-    if (!selectedSourceCollectionCandidate) {
-      return null;
-    }
-    const provenance = sourceCollectionCandidateProvenance(selectedSourceCollectionCandidate, lang);
-    const trace = selectedSourceCollectionCandidateTrace ?? sourceCollectionCandidateTrace(selectedSourceCollectionCandidate);
-    const sourceQualitySummary = candidateSourceQualityAssessmentSummary(selectedSourceCollectionCandidate);
-    const evidenceLedgerSummary = sourceCollectionEvidenceLedgerSummary(selectedSourceCollectionCandidate);
-    const runId = trace.runId || selectedSourceCollectionRunEffectiveId;
-    const fileStorageTarget = provenance.kind === "file" && selectedSourceCollectionCandidateStorageArtifacts
-      ? sourceCollectionStorageTargetForRef(provenance.value, selectedSourceCollectionCandidateStorageArtifacts)
-      : null;
-    const hasReadableSource = Boolean(provenance.href || fileStorageTarget);
-    const hasSearchEvidence = Boolean(trace.searchUrl || trace.query || trace.searchProvider || trace.queryId || trace.assignmentId);
-    const storageTargets: SourceCollectionStorageOpenTarget[] = ["run_directory", "search_events", "records", "candidates"];
-    const readableLinks: TeamSourceCollectionSourceDetailLink[] = provenance.href
-      ? [{
-          id: "source",
-          href: provenance.href,
-          title: provenance.href,
-          label: sourceCollectionCandidateOpenLabel(provenance, lang),
-        }]
-      : [];
-    const sourceActions: TeamSourceCollectionSourceDetailAction[] = fileStorageTarget
-      ? [{
-          id: `file-${fileStorageTarget}`,
-          target: fileStorageTarget,
-          runId,
-          label: sourceCollectionStorageTargetLabel(fileStorageTarget, lang),
-          title: provenance.value,
-        }]
-      : [];
-    const storageActions: TeamSourceCollectionSourceDetailAction[] = runId
-      ? storageTargets.map((target) => ({
-          id: `${selectedSourceCollectionCandidate.candidateId}-${target}`,
-          target,
-          runId,
-          label: sourceCollectionStorageTargetLabel(target, lang),
-        }))
-      : [];
-    const noticeMessage = hasReadableSource
-      ? ""
-      : provenance.kind === "search_evidence"
-        ? (lang === "zh" ? "仅有搜索记录，缺少可读来源" : "Only search evidence is available")
-        : (lang === "zh" ? "缺少可读来源" : "Readable source missing");
-    const searchEvidence: TeamSourceCollectionSourceDetailEvidence[] = [
-      trace.query
-        ? {
-            id: "query",
-            label: lang === "zh" ? "搜索问题" : "Search query",
-            value: translateResearchPhrase(trace.query, lang),
-            title: trace.query,
-          }
-        : null,
-      trace.searchProvider
-        ? {
-            id: "provider",
-            label: lang === "zh" ? "搜索源" : "Provider",
-            value: trace.searchProvider,
-            title: trace.searchProvider,
-          }
-        : null,
-      trace.searchUrl
-        ? {
-            id: "api",
-            label: lang === "zh" ? "API 证据" : "API evidence",
-            value: lang === "zh" ? "打开 API 原文" : "Open raw API",
-            title: trace.searchUrl,
-            href: trace.searchUrl,
-          }
-        : null,
-    ].filter((item): item is TeamSourceCollectionSourceDetailEvidence => Boolean(item));
-    const facts: TeamSourceCollectionSourceDetailFact[] = [
-      [lang === "zh" ? "类型" : "Type", sourceCollectionSourceTypeLabel(selectedSourceCollectionCandidate.sourceKind || selectedSourceCollectionCandidate.candidateType, lang)],
-      [lang === "zh" ? "来源" : "Source", provenance.value],
-      [lang === "zh" ? "查询" : "Query", trace.query ? translateResearchPhrase(trace.query, lang) : ""],
-      [lang === "zh" ? "资料记录" : "Record", trace.recordId],
-      [lang === "zh" ? "批次" : "Run", runId ? sourceCollectionRunLabel(runId) : ""],
-      [lang === "zh" ? "分工" : "Assignment", trace.assignmentId],
-      [lang === "zh" ? "搜索源" : "Provider", trace.searchProvider],
-      [
-        "Evidence Ledger",
-        evidenceLedgerSummary
-          ? sourceCollectionEvidenceLedgerCardLabel(evidenceLedgerSummary, lang)
-          : "",
-      ],
-    ]
-      .filter(([, value]) => Boolean(value))
-      .map(([label, value]) => ({ label: String(label), value: String(value) }));
-    const statusLabel = sourceQualitySummary
-      ? `${workflowIngestionStatusLabel(sourceQualitySummary.decision, lang)} · ${sourceQualitySummary.overallScore}/100`
-      : workflowStateLabel(selectedSourceCollectionCandidate.currentState, lang);
     return (
-      <TeamSourceCollectionSourceDetailPanel
+      <TeamSourceCollectionSelectedSourceWorkspacePanel
         lang={lang}
-        title={selectedSourceCollectionCandidate.title || selectedSourceCollectionCandidate.candidateId}
-        candidateId={selectedSourceCollectionCandidate.candidateId}
-        statusLabel={statusLabel}
-        statusToneClassName={workflowQualityTone(selectedSourceCollectionCandidate.qualityStatus)}
-        readableLinks={readableLinks}
-        actions={[...sourceActions, ...storageActions]}
-        noticeMessage={noticeMessage}
-        searchEvidence={hasSearchEvidence ? searchEvidence : []}
-        evidenceLedger={evidenceLedgerSummary ? sourceCollectionEvidenceLedgerDetailItems(evidenceLedgerSummary, lang) : []}
-        facts={facts}
-        pending={selectedSourceCollectionStorageOpenPending}
-        onOpenTarget={(target, targetRunId) => openSourceCollectionStorageTarget(target as SourceCollectionStorageOpenTarget, targetRunId)}
+        selectedSourceCollectionCandidate={selectedSourceCollectionCandidate}
+        selectedSourceCollectionCandidateTrace={selectedSourceCollectionCandidateTrace}
+        selectedSourceCollectionRunEffectiveId={selectedSourceCollectionRunEffectiveId}
+        selectedSourceCollectionCandidateStorageArtifacts={selectedSourceCollectionCandidateStorageArtifacts}
+        workflowQualityTone={workflowQualityTone}
+        selectedSourceCollectionStorageOpenPending={selectedSourceCollectionStorageOpenPending}
+        openSourceCollectionStorageTarget={openSourceCollectionStorageTarget}
       />
     );
   }
@@ -4023,241 +3930,74 @@ export function TeamsRoute({
   }
 
   function renderSourceCollectionControlsPanel() {
-    const activeModule =
-      sourceCollectionStageModules.find((module) => module.id === selectedSourceCollectionStageId)
-      ?? sourceCollectionStageModules[0];
     return (
-      <TeamSourceCollectionControlsPanel
-        ref={sourceCollectionControlPanelRef}
+      <TeamSourceCollectionControlsWorkspacePanel
         lang={lang}
-        activeRunText={
-          selectedSourceCollectionRun
-            ? `${sourceCollectionRunLabel(selectedSourceCollectionRun.runId)} · ${sourceCollectionStageFocusLabel}`
-            : lang === "zh" ? "等待启动搜集批次" : "Waiting for a collection run"
-        }
-        statusClassName={workflowIngestionTone(sourceCollectionRunStatus?.runStatus || selectedSourceCollectionRun?.status || "")}
-        statusLabel={sourceCollectionStatusLabel(sourceCollectionRunStatus?.runStatus || selectedSourceCollectionRun?.status || "pending", lang)}
-        selectedSourcePanel={renderSourceCollectionSelectedSourcePanel()}
-      >
-        {selectedSourceCollectionStageId === "finding" ? (
-        <>
-        <TeamSourceCollectionRunSettingsPanel
-          lang={lang}
-          draft={sourceCollectionDraft}
-          modeFields={renderSourceCollectionModeFields()}
-          open={!selectedSourceCollectionRun}
-          canStart={sourceCollectionCanStart}
-          startPending={selectedTeamStartSourceCollectionPending}
-          onDraftChange={(patch) => setSourceCollectionDraft((current) => ({ ...current, ...patch }))}
-          onSubmit={() => {
-            if (!selectedTeam?.teamId || !sourceCollectionCanStart || selectedTeamStartSourceCollectionPending) {
-              return;
-            }
-            startSourceCollectionRunMutation.mutate({
-              teamId: selectedTeam.teamId,
-              draft: sourceCollectionDraft,
-            });
-          }}
-        />
-        <TeamSourceCollectionFindingDetailsPanel
-          lang={lang}
-          selectedRunId={selectedSourceCollectionRunEffectiveId}
-          runs={sourceCollectionFindingRunOptions}
-          assignments={sourceCollectionFindingAssignments}
-          queries={sourceCollectionFindingQueries}
-          storageActions={renderSourceCollectionStorageActions()}
-          onRunChange={setSelectedSourceCollectionRunId}
-          onAssignmentSelect={(assignmentId) => setSourceCollectionOutputDraft((current) => ({ ...current, assignmentId }))}
-        />
-        {renderSourceCollectionManualWritebackPanel()}
-        </>
-        ) : null}
-        {selectedSourceCollectionStageId === "extraction" ? (
-          <div className={styles.workflowSourceQualityStats}>
-            <span>{lang === "zh" ? "本轮候选" : "run candidates"} <strong>{sourceCollectionDisplayedCandidateCountText}</strong></span>
-            <span>{lang === "zh" ? "已审查" : "reviewed"} <strong>{sourceCollectionProjectedAssessedCountText}</strong></span>
-            <span>{lang === "zh" ? "通过" : "approved"} <strong>{sourceCollectionProjectedApprovedCountText}</strong></span>
-            <span>{lang === "zh" ? "待 Agent 复核" : "pending agent review"} <strong>{sourceCollectionRunPendingScreeningCountText}</strong></span>
-          </div>
-        ) : null}
-        {selectedSourceCollectionStageId === "extraction" ? renderSourceCollectionStorageActions() : null}
-        {selectedSourceCollectionStageId === "relations" ? (
-          <div className={styles.workflowSourceQualityStats}>
-            <span>{lang === "zh" ? "节点" : "nodes"} <strong>{candidateGraphNodeCount}</strong></span>
-            <span>{lang === "zh" ? "边" : "edges"} <strong>{candidateGraphEdgeCount}</strong></span>
-          </div>
-        ) : null}
-        {selectedSourceCollectionStageId === "ingestion" ? (
-          <>
-            <div className={styles.workflowSourceQualityStats}>
-              <span>{lang === "zh" ? "通过资料" : "approved sources"} <strong>{sourceCollectionPrecheckCandidateCount}</strong></span>
-              <span>{lang === "zh" ? "待入库" : "pending"} <strong>{knowledgePendingReviewCount}</strong></span>
-              <span>{lang === "zh" ? "正式知识" : "formal items"} <strong>{formalKnowledgeItemCount}</strong></span>
-              <span>{lang === "zh" ? "关系节点" : "map nodes"} <strong>{candidateGraphNodeCount}</strong></span>
-            </div>
-            {selectedTeamKnowledgeCollectionIngestResult ? (
-              <div className={styles.messageResult}>
-                <strong>
-                  {selectedTeamKnowledgeCollectionIngestResult.status === "completed"
-                    ? (lang === "zh" ? "资料已写入团队知识库" : "Sources ingested into Team Knowledge")
-                    : selectedTeamKnowledgeCollectionIngestResult.status === "agent_notified"
-                      ? (lang === "zh" ? "已通知资料入库 Agent" : "Source ingestion Agent notified")
-                    : selectedTeamKnowledgeCollectionIngestResult.status === "agent_wake_pending"
-                      ? (lang === "zh" ? "已发送，等待唤醒 Agent" : "Sent; waiting to wake Agent")
-                    : sourceCollectionStatusLabel(selectedTeamKnowledgeCollectionIngestResult.status, lang)}
-                </strong>
-                <span>
-                  {selectedTeamKnowledgeCollectionIngestResult.status === "completed"
-                    ? (lang === "zh"
-                        ? `${selectedTeamKnowledgeCollectionIngestResult.summary.approvedSourceCandidateCount} 条资料通过审查，${selectedTeamKnowledgeCollectionIngestResult.summary.formalKnowledgeItemCount} 条正式知识可用于后续实验。`
-                        : `${selectedTeamKnowledgeCollectionIngestResult.summary.approvedSourceCandidateCount} sources approved; ${selectedTeamKnowledgeCollectionIngestResult.summary.formalKnowledgeItemCount} formal items are ready for experiments.`)
-                    : (lang === "zh"
-                        ? `${selectedTeamKnowledgeCollectionIngestResult.summary.approvedSourceCandidateCount} 条资料通过审查，待入库知识包已发送给资料入库 Agent；当前正式知识 ${selectedTeamKnowledgeCollectionIngestResult.summary.formalKnowledgeItemCount} 条。`
-                        : `${selectedTeamKnowledgeCollectionIngestResult.summary.approvedSourceCandidateCount} sources approved; the ingestion pack was sent to the steward Agent. Current formal items: ${selectedTeamKnowledgeCollectionIngestResult.summary.formalKnowledgeItemCount}.`)}
-                </span>
-              </div>
-            ) : null}
-            {selectedTeamKnowledgeCollectionIngestError ? (
-              <div className={styles.messageError}>{selectedTeamKnowledgeCollectionIngestError.message}</div>
-            ) : null}
-          </>
-        ) : null}
-        {selectedSourceCollectionStageId === "finding" ? (
-          <>
-            {selectedTeamStartSourceCollectionError ? (
-              <div className={styles.messageError}>{selectedTeamStartSourceCollectionError.message}</div>
-            ) : null}
-            {selectedTeamRecordSourceCollectionOutputError ? (
-              <div className={styles.messageError}>{selectedTeamRecordSourceCollectionOutputError.message}</div>
-            ) : null}
-            {selectedTeamExecuteSourceCollectionSearchError ? (
-              <div className={styles.messageError}>{selectedTeamExecuteSourceCollectionSearchError.message}</div>
-            ) : null}
-            {selectedTeamStartSourceCollectionStageTaskError ? (
-              <div className={styles.messageError}>{selectedTeamStartSourceCollectionStageTaskError.message}</div>
-            ) : null}
-            {selectedTeamExecuteSourceCollectionSearchResult ? (
-              <div className={styles.messageResult}>
-                <strong>
-                  {selectedTeamExecuteSourceCollectionSearchResult.accepted
-                    ? (lang === "zh" ? "搜索已转后台" : "Search queued in background")
-                    : (lang === "zh" ? "搜索执行已回写" : "Search execution written")}
-                </strong>
-                {selectedTeamExecuteSourceCollectionSearchResult.accepted ? (
-                  <span>{lang === "zh" ? "页面可继续操作，结果会自动刷新。" : "You can keep working; results will refresh automatically."}</span>
-                ) : (
-                  <span>
-                    {selectedTeamExecuteSourceCollectionSearchResult.executedQueryCount} {lang === "zh" ? "条搜索" : "queries"} / {selectedTeamExecuteSourceCollectionSearchResult.recordCount} {lang === "zh" ? "条资料记录" : "DataRecord"} / {selectedTeamExecuteSourceCollectionSearchResult.importedCount} {lang === "zh" ? "个候选" : "candidate"}{selectedTeamExecuteSourceCollectionSearchResult.skippedDuplicateCount ? ` / ${selectedTeamExecuteSourceCollectionSearchResult.skippedDuplicateCount} ${lang === "zh" ? "条重复跳过" : "duplicates skipped"}` : ""}{selectedTeamExecuteSourceCollectionSearchResult.filteredExcludedCount ? ` / ${selectedTeamExecuteSourceCollectionSearchResult.filteredExcludedCount} ${lang === "zh" ? "条无效来源已过滤" : "excluded sources filtered"}` : ""}{selectedTeamExecuteSourceCollectionSearchResult.hasMore ? ` / ${selectedTeamExecuteSourceCollectionSearchResult.remainingQueryCount ?? 0} ${lang === "zh" ? "条待继续" : "remaining"}` : ""}
-                  </span>
-                )}
-              </div>
-            ) : null}
-            {selectedTeamRecordSourceCollectionOutputResult ? (
-              <div className={styles.messageResult}>
-                <strong>{lang === "zh" ? "已回写" : "Written"}</strong>
-                <span>
-                  {selectedTeamRecordSourceCollectionOutputResult.output.createdRecords.length} {lang === "zh" ? "条资料记录" : "DataRecord"} / {selectedTeamRecordSourceCollectionOutputResult.imported.length} {lang === "zh" ? "个候选" : "candidate"}
-                </span>
-              </div>
-            ) : null}
-          </>
-        ) : null}
-        {renderSourceCollectionStageAgents(activeModule.id)}
-      </TeamSourceCollectionControlsPanel>
+        sourceCollectionControlPanelRef={sourceCollectionControlPanelRef}
+        sourceCollectionStageModules={sourceCollectionStageModules}
+        selectedSourceCollectionStageId={selectedSourceCollectionStageId}
+        selectedSourceCollectionRun={selectedSourceCollectionRun}
+        sourceCollectionStageFocusLabel={sourceCollectionStageFocusLabel}
+        workflowIngestionTone={workflowIngestionTone}
+        sourceCollectionRunStatus={sourceCollectionRunStatus}
+        renderSourceCollectionSelectedSourcePanel={renderSourceCollectionSelectedSourcePanel}
+        sourceCollectionDraft={sourceCollectionDraft}
+        renderSourceCollectionModeFields={renderSourceCollectionModeFields}
+        sourceCollectionCanStart={sourceCollectionCanStart}
+        selectedTeamStartSourceCollectionPending={selectedTeamStartSourceCollectionPending}
+        setSourceCollectionDraft={setSourceCollectionDraft}
+        selectedTeam={selectedTeam}
+        startSourceCollectionRunMutation={startSourceCollectionRunMutation}
+        selectedSourceCollectionRunEffectiveId={selectedSourceCollectionRunEffectiveId}
+        sourceCollectionFindingRunOptions={sourceCollectionFindingRunOptions}
+        sourceCollectionFindingAssignments={sourceCollectionFindingAssignments}
+        sourceCollectionFindingQueries={sourceCollectionFindingQueries}
+        renderSourceCollectionStorageActions={renderSourceCollectionStorageActions}
+        setSelectedSourceCollectionRunId={setSelectedSourceCollectionRunId}
+        setSourceCollectionOutputDraft={setSourceCollectionOutputDraft}
+        renderSourceCollectionManualWritebackPanel={renderSourceCollectionManualWritebackPanel}
+        sourceCollectionDisplayedCandidateCountText={sourceCollectionDisplayedCandidateCountText}
+        sourceCollectionProjectedAssessedCountText={sourceCollectionProjectedAssessedCountText}
+        sourceCollectionProjectedApprovedCountText={sourceCollectionProjectedApprovedCountText}
+        sourceCollectionRunPendingScreeningCountText={sourceCollectionRunPendingScreeningCountText}
+        candidateGraphNodeCount={candidateGraphNodeCount}
+        candidateGraphEdgeCount={candidateGraphEdgeCount}
+        sourceCollectionPrecheckCandidateCount={sourceCollectionPrecheckCandidateCount}
+        knowledgePendingReviewCount={knowledgePendingReviewCount}
+        formalKnowledgeItemCount={formalKnowledgeItemCount}
+        selectedTeamKnowledgeCollectionIngestResult={selectedTeamKnowledgeCollectionIngestResult}
+        selectedTeamKnowledgeCollectionIngestError={selectedTeamKnowledgeCollectionIngestError}
+        selectedTeamStartSourceCollectionError={selectedTeamStartSourceCollectionError}
+        selectedTeamRecordSourceCollectionOutputError={selectedTeamRecordSourceCollectionOutputError}
+        selectedTeamExecuteSourceCollectionSearchError={selectedTeamExecuteSourceCollectionSearchError}
+        selectedTeamStartSourceCollectionStageTaskError={selectedTeamStartSourceCollectionStageTaskError}
+        selectedTeamExecuteSourceCollectionSearchResult={selectedTeamExecuteSourceCollectionSearchResult}
+        selectedTeamRecordSourceCollectionOutputResult={selectedTeamRecordSourceCollectionOutputResult}
+        renderSourceCollectionStageAgents={renderSourceCollectionStageAgents}
+      />
     );
   }
 
   function renderSourceCollectionActiveStagePanel() {
-    const activeModule =
-      sourceCollectionStageModules.find((module) => module.id === selectedSourceCollectionStageId)
-      ?? sourceCollectionStageModules[0];
-    const primaryStageAgentChatState = sourceCollectionStageAgentChatState(activeModule.id);
-    const primaryStageAgentChatRoute = primaryStageAgentChatState.route;
-    const primaryStageAgentChatLoading = primaryStageAgentChatState.status === "loading";
-    const primaryStageAgentChatError = primaryStageAgentChatState.status === "error";
-    const primaryStageAgentRepairPending =
-      primaryStageAgentChatState.status === "repair" && repairChallengeCupTeamAgentsMutation.isPending;
-    const primaryStageAgentFallbackTitle = primaryStageAgentChatLoading
-      ? (lang === "zh" ? "正在加载 Agent 配置，请稍候" : "Loading Agent configuration")
-      : primaryStageAgentChatError
-        ? (lang === "zh" ? "Agent 配置加载失败，请刷新后重试" : "Agent configuration failed to load")
-        : (lang === "zh" ? "当前步骤缺少可用私聊，请先修复团队 Agent 绑定" : "No usable direct chat for this step");
-    const primaryStageAgentFallbackLabel = primaryStageAgentChatLoading
-      ? (lang === "zh" ? "加载 Agent..." : "Loading Agent...")
-      : primaryStageAgentChatError
-        ? (lang === "zh" ? "Agent 加载失败" : "Agent load failed")
-        : primaryStageAgentRepairPending
-          ? (lang === "zh" ? "修复中" : "Repairing")
-          : (lang === "zh" ? "修复团队 Agent" : "Repair Team Agents");
-    const primaryStageAgentBinding = sourceCollectionStagePrimaryAgentBinding(activeModule.id);
-    const primaryStageAgentConfigRoute = primaryStageAgentBinding?.agentId
-      ? researchStageAgentManagementRoute(primaryStageAgentBinding.agentId)
-      : "/agents";
-    const primaryStageAgentConfigLabel = primaryStageAgentBinding?.agent
-      ? (lang === "zh" ? "配置 Agent" : "Configure Agent")
-      : (lang === "zh" ? "绑定 Agent" : "Bind Agent");
-    const sourceCollectionActiveStageCompact =
-      activeModule.id === "finding" && sourceCollectionFindingStageCompact;
     return (
-      <TeamSourceCollectionActiveStagePanel
+      <TeamSourceCollectionActiveStageWorkspacePanel
         lang={lang}
-        stageId={selectedSourceCollectionStageId}
-        compact={sourceCollectionActiveStageCompact}
-        title={activeModule.label}
-        status={activeModule.status}
-        inputLabel={activeModule.inputLabel}
-        outputLabel={activeModule.outputLabel}
-        nextLabel={activeModule.nextLabel}
-        primaryAction={{
-          tone: activeModule.actionTone,
-          disabled: activeModule.actionDisabled,
-          onAction: activeModule.onAction,
-          title: sourceCollectionActionDisabledTitle(sourceCollectionStageActionReadinessFor(activeModule.id), activeModule.actionLabel),
-          icon: activeModule.actionIcon,
-          label: activeModule.actionLabel,
-        }}
-        agentChatAction={primaryStageAgentChatRoute ? (
-          <Link
-            to={primaryStageAgentChatRoute}
-            title={SOURCE_COLLECTION_STAGE_CHAT_LABELS[activeModule.id][lang]}
-          >
-            <MessageSquare size={13} />
-            {lang === "zh" ? "进入 Agent 私聊" : "Open Agent chat"}
-          </Link>
-        ) : (
-          <VNativeButton
-            type="button"
-            title={primaryStageAgentFallbackTitle}
-            onClick={() => openSourceCollectionStageAgentChat(activeModule.id)}
-            disabled={primaryStageAgentChatLoading || primaryStageAgentChatError || primaryStageAgentRepairPending}
-          >
-            <MessageSquare size={13} />
-            {primaryStageAgentFallbackLabel}
-          </VNativeButton>
-        )}
-        agentConfigAction={(
-          <VTooltip content={lang === "zh" ? "当前阶段 Agent 配置" : "Current stage Agent configuration"}>
-            <Link to={primaryStageAgentConfigRoute}>
-              <Link2 size={13} />
-              {primaryStageAgentConfigLabel}
-            </Link>
-          </VTooltip>
-        )}
-        errors={(
-          <>
-            {repairChallengeCupTeamAgentsMutation.error instanceof Error ? (
-              <div className={styles.messageError}>{repairChallengeCupTeamAgentsMutation.error.message}</div>
-            ) : null}
-            {selectedTeamStartSourceCollectionStageTaskError ? (
-              <div className={styles.messageError}>{selectedTeamStartSourceCollectionStageTaskError.message}</div>
-            ) : null}
-          </>
-        )}
-        renderConversationPanel={renderSourceCollectionConversation}
-        renderCandidatePanel={renderSourceCollectionCandidatePanel}
-        renderScreeningPanel={renderSourceCollectionScreeningPanel}
-        renderGraphPanel={renderSourceCollectionGraphPanel}
-        renderMemoryPanel={renderSourceCollectionMemoryPanel}
+        sourceCollectionStageModules={sourceCollectionStageModules}
+        selectedSourceCollectionStageId={selectedSourceCollectionStageId}
+        sourceCollectionStageAgentChatState={sourceCollectionStageAgentChatState}
+        repairChallengeCupTeamAgentsMutation={repairChallengeCupTeamAgentsMutation}
+        sourceCollectionActionDisabledTitle={sourceCollectionActionDisabledTitle}
+        sourceCollectionStageActionReadinessFor={sourceCollectionStageActionReadinessFor}
+        sourceCollectionStagePrimaryAgentBinding={sourceCollectionStagePrimaryAgentBinding}
+        stageChatLabels={SOURCE_COLLECTION_STAGE_CHAT_LABELS}
+        openSourceCollectionStageAgentChat={openSourceCollectionStageAgentChat}
+        sourceCollectionFindingStageCompact={sourceCollectionFindingStageCompact}
+        selectedTeamStartSourceCollectionStageTaskError={selectedTeamStartSourceCollectionStageTaskError}
+        renderSourceCollectionConversation={renderSourceCollectionConversation}
+        renderSourceCollectionCandidatePanel={renderSourceCollectionCandidatePanel}
+        renderSourceCollectionScreeningPanel={renderSourceCollectionScreeningPanel}
+        renderSourceCollectionGraphPanel={renderSourceCollectionGraphPanel}
+        renderSourceCollectionMemoryPanel={renderSourceCollectionMemoryPanel}
       />
     );
   }
