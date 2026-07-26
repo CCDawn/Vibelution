@@ -9,6 +9,11 @@ from core.web.services import prompt_template_service
 def _use_tmp_project_root(tmp_path, monkeypatch):
     monkeypatch.setenv("VIBELUTION_DATA_HOME", str(tmp_path))
     monkeypatch.setattr(prompt_template_service, "PROJECT_ROOT", tmp_path)
+    core_prompt_root = tmp_path / "core" / "core_prompt"
+    core_prompt_root.mkdir(parents=True, exist_ok=True)
+    (core_prompt_root / "COMMON.md").write_text("# Test COMMON\n\nTEST_COMMON_CORE", encoding="utf-8")
+    (core_prompt_root / "SOUL.md").write_text("# Test SOUL\n\nTEST_SOUL_CORE", encoding="utf-8")
+    (tmp_path / "AGENTS.md").write_text("# Test AGENTS\n\nTEST_AGENTS_CORE", encoding="utf-8")
 
 
 def _contains_tool_name(content: str, tool_name: str) -> bool:
@@ -548,11 +553,20 @@ def test_build_agent_prompt_snapshot_freezes_template_content(tmp_path, monkeypa
 
     assert snapshot["reason"] == ""
     assert snapshot["promptTemplateId"] == "prompt-chat-custom"
-    assert snapshot["content"] == "第一版固定提示词。"
+    assert snapshot["content"].endswith("第一版固定提示词。")
+    assert snapshot["content"].count("TEST_COMMON_CORE") == 1
+    assert snapshot["content"].count("TEST_SOUL_CORE") == 1
+    assert snapshot["content"].count("TEST_AGENTS_CORE") == 1
+    assert "ContentHash:" not in snapshot["content"]
+    assert snapshot["corePromptSchemaVersion"] == prompt_template_service.CORE_PROMPT_SCHEMA_VERSION
+    assert snapshot["corePromptHash"].startswith("sha256:")
+    assert [item["name"] for item in snapshot["corePrompts"]] == list(
+        prompt_template_service.CORE_PROMPT_NAMES
+    )
     assert snapshot["contentHash"].startswith("sha256:")
     assert snapshot["agentId"] == "agent-1"
     assert snapshot["agentCode"] == "chat_agent"
-    assert current["content"] == "第二版提示词，不应该影响已有会话。"
+    assert current["content"].endswith("第二版提示词，不应该影响已有会话。")
     assert current["contentHash"] != snapshot["contentHash"]
     system_block = prompt_template_service.render_agent_prompt_snapshot_system_block(snapshot)
     assert "Agent System Prompt Snapshot" in system_block
@@ -578,6 +592,9 @@ def test_chat_snapshot_composes_common_prompt_before_role_prompt(tmp_path, monke
     )
 
     assert snapshot["chatBasePromptVersion"] == prompt_template_service.CHAT_AGENT_BASE_PROMPT_VERSION
+    assert snapshot["content"].index("TEST_COMMON_CORE") < snapshot["content"].index("TEST_SOUL_CORE")
+    assert snapshot["content"].index("TEST_SOUL_CORE") < snapshot["content"].index("TEST_AGENTS_CORE")
+    assert snapshot["content"].index("TEST_AGENTS_CORE") < snapshot["content"].index("## Conversation Agent Common Prompt")
     assert snapshot["content"].index("## Conversation Agent Common Prompt") < snapshot["content"].index("自定义会话职责。")
     assert "assistant commentary -> tool call/result" in snapshot["content"]
 
@@ -629,6 +646,21 @@ def test_build_agent_prompt_snapshot_reports_missing_and_empty(tmp_path, monkeyp
     assert empty["reason"] == "empty_template_content"
     assert empty["content"] == ""
     assert prompt_template_service.render_agent_prompt_snapshot_system_block(empty) == ""
+
+
+def test_build_agent_prompt_snapshot_fails_closed_when_required_core_is_missing(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    (tmp_path / "AGENTS.md").unlink()
+
+    snapshot = prompt_template_service.build_agent_prompt_snapshot(
+        "prompt-chat-default",
+        project_root=tmp_path,
+        include_chat_base=True,
+    )
+
+    assert snapshot["reason"] == "missing_core_prompt"
+    assert snapshot["missingCorePrompts"] == ["AGENTS"]
+    assert snapshot["content"] == ""
 
 
 def test_prompt_template_rejects_unsafe_source_path(tmp_path, monkeypatch):

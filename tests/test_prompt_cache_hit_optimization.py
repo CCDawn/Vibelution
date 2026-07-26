@@ -37,8 +37,6 @@ def _reset_context_engine_project_root(tmp_path, monkeypatch):
     monkeypatch.setattr(prompt_template_service, "PROJECT_ROOT", tmp_path)
     with context_engine._RESEARCH_ORG_CONTEXT_CACHE_LOCK:
         context_engine._RESEARCH_ORG_CONTEXT_CACHE.clear()
-    with context_engine._PROJECT_RULES_CONTEXT_CACHE_LOCK:
-        context_engine._PROJECT_RULES_CONTEXT_CACHE.clear()
     with context_engine._PROJECT_AGENT_REGISTRY_CACHE_LOCK:
         context_engine._PROJECT_AGENT_REGISTRY_CACHE.clear()
     with context_engine._ACTIVE_AGENT_DIRECTORY_CACHE_LOCK:

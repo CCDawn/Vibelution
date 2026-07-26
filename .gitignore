@@ -81,8 +81,7 @@ log_info/
 # Workspace - Agent generated files (do NOT commit)
 workspace/
 
-# Local project operator rules (keep out of GitHub)
-/AGENTS.md
+# Local project operator state (keep out of GitHub)
 /.arts/
 /.claude/
 /.codeartsdoer/

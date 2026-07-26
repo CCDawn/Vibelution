@@ -13,10 +13,14 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 
+from core.prompt_manager.core_prompt_sources import (
+    CORE_PROMPT_NAMES,
+    CORE_PROMPT_SPECS,
+    core_prompt_path,
+    load_core_prompt_bundle,
+    strip_prompt_front_matter,
+)
 from core.prompt_manager.types import SystemPromptSection, BuildContext
-
-
-_FRONT_MATTER_RE = re.compile(r'^---\s*\n.*?\n---(\n)?', re.DOTALL)
 
 
 def _strip_front_matter(content: str) -> str:
@@ -27,8 +31,7 @@ def _strip_front_matter(content: str) -> str:
       config/registry；
     - 文件头 front matter 仅视为可选文件注释，不参与 section 注册决策。
     """
-    match = _FRONT_MATTER_RE.match(content)
-    return content[match.end():].strip() if match else content.strip()
+    return strip_prompt_front_matter(content)
 
 
 def _build_git_rules_summary(content: str) -> Optional[str]:
@@ -104,7 +107,9 @@ def _looks_like_vibelution_project_root(project_root: Path) -> bool:
         root = Path(project_root)
         return (
             (root / "core" / "prompt_manager" / "sections.py").exists()
-            and (root / "core" / "core_prompt" / "SPEC.md").exists()
+            and (root / "core" / "core_prompt" / "COMMON.md").exists()
+            and (root / "core" / "core_prompt" / "SOUL.md").exists()
+            and (root / "AGENTS.md").exists()
             and (root / "config" / "models.py").exists()
         )
     except Exception:
@@ -654,25 +659,28 @@ def create_default_sections(
 
     Args:
         section_configs: [[prompt.sections]] 配置列表，每项含 name/path/priority 等属性。
-            静态章节由此驱动；为 None 或空列表时不注册任何静态章节。
+            COMMON / SOUL / AGENTS 是代码保护的必载核心，不受该配置开关控制。
     """
 
     sections: List[SystemPromptSection] = []
 
-    # ── 静态章节（由 config.toml [[prompt.sections]] 驱动）──
+    # ── 三核心静态章节（代码保护，配置不能关闭或覆盖）──
 
-    common_path = static_root / "COMMON.md"
-    if common_path.exists():
+    load_core_prompt_bundle(project_root)
+    for spec in CORE_PROMPT_SPECS:
+        path = core_prompt_path(project_root, spec)
         sections.append(make_file_section(
-            "COMMON",
-            common_path,
-            priority=8,
+            spec.name,
+            path,
+            priority=spec.priority,
             cache_break=False,
-            description="统一 Agent 通用基座",
+            description=spec.description,
             required=True,
         ))
 
     for cfg in (section_configs or []):
+        if str(getattr(cfg, "name", "") or "").strip().upper() in CORE_PROMPT_NAMES:
+            continue
         section_path = project_root / cfg.path
         if section_path.exists():
             sections.append(make_file_section(

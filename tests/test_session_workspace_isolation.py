@@ -19,6 +19,11 @@ from tools.memory_tools import task_create_tool
 
 
 def _seed_session(project_root: Path, session_id: str = "session-live") -> None:
+    core_prompt_root = project_root / "core" / "core_prompt"
+    core_prompt_root.mkdir(parents=True, exist_ok=True)
+    (core_prompt_root / "COMMON.md").write_text("# Test COMMON\n\nTEST_COMMON_CORE", encoding="utf-8")
+    (core_prompt_root / "SOUL.md").write_text("# Test SOUL\n\nTEST_SOUL_CORE", encoding="utf-8")
+    (project_root / "AGENTS.md").write_text("# Test AGENTS\n\nTEST_AGENTS_CORE", encoding="utf-8")
     save_chat_state(
         project_root,
         {
@@ -446,6 +451,7 @@ def test_run_session_turn_uses_fixed_agent_prompt_snapshot(tmp_path, monkeypatch
     state["conversations"][0]["agentId"] = agent["agentId"]
     save_chat_state(tmp_path, state)
     captured_contexts = []
+    core_snapshot_marks = []
 
     class PromptAwareAgent:
         def __init__(self, workspace_path=None, config=None):
@@ -456,6 +462,9 @@ def test_run_session_turn_uses_fixed_agent_prompt_snapshot(tmp_path, monkeypatch
 
         def seed_runtime_context(self, content):
             captured_contexts.append(content)
+
+        def mark_core_prompt_snapshot_seeded_by_host(self, included=True):
+            core_snapshot_marks.append(bool(included))
 
         def run_single_turn(self, initial_prompt=None):
             return {
@@ -495,6 +504,14 @@ def test_run_session_turn_uses_fixed_agent_prompt_snapshot(tmp_path, monkeypatch
     snapshot = stored_state["conversations"][0]["agentPromptSnapshot"]
     assert snapshot["promptTemplateId"] == "prompt-chat-custom"
     assert "统一 Agent 配置迁移" in snapshot["content"]
+    assert snapshot["corePromptSchemaVersion"] == prompt_template_service.CORE_PROMPT_SCHEMA_VERSION
+    assert [item["name"] for item in snapshot["corePrompts"]] == list(
+        prompt_template_service.CORE_PROMPT_NAMES
+    )
+    assert snapshot["content"].count("## Core Prompt: COMMON") == 1
+    assert snapshot["content"].count("## Core Prompt: SOUL") == 1
+    assert snapshot["content"].count("## Core Prompt: AGENTS") == 1
+    assert core_snapshot_marks == [True, True]
 
 
 def test_session_refreshes_snapshot_when_builtin_prompt_version_advances(tmp_path, monkeypatch):
@@ -576,6 +593,51 @@ def test_session_refreshes_chat_snapshot_when_chat_base_version_advances(tmp_pat
     assert "### BRT 任务推进" in refreshed["content"]
 
 
+def test_session_upgrades_legacy_snapshot_once_then_reuses_it(tmp_path, monkeypatch):
+    _seed_session(tmp_path, "session-live")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(prompt_template_service, "PROJECT_ROOT", tmp_path)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="旧快照升级 Agent",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
+        direct_session_id="session-live",
+        primary_mode="chat",
+        prompt_template_id="prompt-chat-default",
+    )
+    legacy = prompt_template_service.build_agent_prompt_snapshot(
+        "prompt-chat-default",
+        agent_id=agent["agentId"],
+        project_root=tmp_path,
+        include_chat_base=True,
+    )
+    legacy["schemaVersion"] = 1
+    legacy.pop("corePromptSchemaVersion", None)
+    legacy.pop("corePromptHash", None)
+    legacy.pop("corePromptLength", None)
+    legacy.pop("corePrompts", None)
+    state = load_chat_state(tmp_path)
+    state["conversations"][0]["agentPromptSnapshot"] = legacy
+    save_chat_state(tmp_path, state)
+
+    upgraded = session_service._ensure_session_agent_prompt_snapshot("session-live", agent)
+    monkeypatch.setattr(
+        prompt_template_service,
+        "build_agent_prompt_snapshot",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("upgraded snapshot must be reused")
+        ),
+    )
+    reused = session_service._ensure_session_agent_prompt_snapshot("session-live", agent)
+
+    assert upgraded["schemaVersion"] == 2
+    assert upgraded["corePromptSchemaVersion"] == prompt_template_service.CORE_PROMPT_SCHEMA_VERSION
+    assert [item["name"] for item in upgraded["corePrompts"]] == list(
+        prompt_template_service.CORE_PROMPT_NAMES
+    )
+    assert reused == upgraded
+
+
 def test_session_reuses_valid_prompt_snapshot_without_rebuilding_template_registry(tmp_path, monkeypatch):
     _seed_session(tmp_path, "session-live")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
@@ -614,12 +676,45 @@ def test_session_reuses_valid_prompt_snapshot_without_rebuilding_template_regist
     assert reused == snapshot
 
 
+def test_session_keeps_valid_core_snapshot_frozen_when_core_files_change(tmp_path, monkeypatch):
+    _seed_session(tmp_path, "session-live")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(prompt_template_service, "PROJECT_ROOT", tmp_path)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="核心快照冻结 Agent",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
+        direct_session_id="session-live",
+        primary_mode="chat",
+        prompt_template_id="prompt-chat-default",
+    )
+    snapshot = prompt_template_service.build_agent_prompt_snapshot(
+        "prompt-chat-default",
+        agent_id=agent["agentId"],
+        project_root=tmp_path,
+        include_chat_base=True,
+    )
+    state = load_chat_state(tmp_path)
+    state["conversations"][0]["agentPromptSnapshot"] = snapshot
+    save_chat_state(tmp_path, state)
+    (tmp_path / "core" / "core_prompt" / "SOUL.md").write_text(
+        "# Test SOUL\n\nCHANGED_SOUL_CORE",
+        encoding="utf-8",
+    )
+
+    reused = session_service._ensure_session_agent_prompt_snapshot("session-live", agent)
+
+    assert reused == snapshot
+    assert "TEST_SOUL_CORE" in reused["content"]
+    assert "CHANGED_SOUL_CORE" not in reused["content"]
+
+
 def test_session_detail_exposes_prompt_snapshot_metadata_without_content(tmp_path, monkeypatch):
     _seed_session(tmp_path, "session-live")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     state = load_chat_state(tmp_path)
     state["conversations"][0]["agentPromptSnapshot"] = {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "promptTemplateId": "prompt-chat-custom",
         "templateId": "prompt-chat-custom",
         "name": "会话提示词",
@@ -627,6 +722,29 @@ def test_session_detail_exposes_prompt_snapshot_metadata_without_content(tmp_pat
         "content": "完整系统提示词不应该进入会话详情。",
         "contentHash": "sha256:fixed",
         "contentLength": 18,
+        "corePromptSchemaVersion": 1,
+        "corePromptHash": "sha256:core",
+        "corePromptLength": 12,
+        "corePrompts": [
+            {
+                "name": "COMMON",
+                "sourcePath": "core/core_prompt/COMMON.md",
+                "contentHash": "sha256:common",
+                "contentLength": 4,
+            },
+            {
+                "name": "SOUL",
+                "sourcePath": "core/core_prompt/SOUL.md",
+                "contentHash": "sha256:soul",
+                "contentLength": 4,
+            },
+            {
+                "name": "AGENTS",
+                "sourcePath": "AGENTS.md",
+                "contentHash": "sha256:agents",
+                "contentLength": 4,
+            },
+        ],
         "capturedAt": "2026-06-23T01:00:00Z",
         "agentId": "agent-1",
         "reason": "",
@@ -640,6 +758,9 @@ def test_session_detail_exposes_prompt_snapshot_metadata_without_content(tmp_pat
     assert snapshot["promptTemplateId"] == "prompt-chat-custom"
     assert snapshot["contentHash"] == "sha256:fixed"
     assert snapshot["contentLength"] == 18
+    assert snapshot["corePromptSchemaVersion"] == 1
+    assert snapshot["corePromptHash"] == "sha256:core"
+    assert [item["name"] for item in snapshot["corePrompts"]] == ["COMMON", "SOUL", "AGENTS"]
     assert "content" not in snapshot
 
 

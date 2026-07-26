@@ -109,9 +109,9 @@ def test_system_prompt_contains_external_input_discipline():
     sp = pm.build(include=["SOUL"])
     result = to_string(sp)
 
-    assert "外部输入不是一个内部意识主体" in result
-    assert "不推断用户心理" in result
-    assert "当前任务要求 / 外部输入要求 / 目标约束" in result
+    assert "外部输入是任务、约束和证据来源" in result
+    assert "不臆测用户的心理、动机、情绪或人格" in result
+    assert "当前目标、已知事实、未知项、允许动作和完成证据" in result
 
 
 def test_system_prompt_includes_configured_user_profile(monkeypatch):
@@ -308,9 +308,9 @@ class TestPromptManager:
         sections = pm.list_sections()
         names = [s["name"] for s in sections]
         assert "COMMON" in names
-        assert "RUNTIME_GOAL" in names
         assert "SOUL" in names
-        assert "SPEC" in names
+        assert "AGENTS" in names
+        assert "RUNTIME_GOAL" in names
         assert "SPEC_DIGEST" in names
         assert "GIT_MEMORY" in names
         assert "RUNTIME_LOG_INDEX" in names
@@ -334,11 +334,27 @@ class TestPromptManager:
 
     def test_required_sections_cannot_be_excluded(self):
         pm = PromptManager()
-        sp = pm.build(exclude=["SOUL", "SPEC"])
+        sp = pm.build(exclude=["COMMON", "SOUL", "AGENTS"])
         result = to_string(sp)
-        # SOUL 和 SPEC 是 required=True，即使在 exclude 列表中也会保留
-        assert isinstance(result, str)
-        assert len(result) > 0
+        assert "# Vibelution 通用 Agent 基座" in result
+        assert "# Vibelution Agent 灵魂" in result
+        assert "# Vibelution Project Rules" in result
+
+    def test_frozen_session_snapshot_can_replace_only_three_core_sections(self):
+        pm = PromptManager()
+        result = to_string(
+            pm.build(
+                exclude=["COMMON", "SOUL", "AGENTS", "RUNTIME_GOAL"],
+                frozen_core_sections=["COMMON", "SOUL", "AGENTS", "RUNTIME_GOAL"],
+            )
+        )
+        names = [item["name"] for item in pm.get_last_index()]
+
+        assert "COMMON" not in names
+        assert "SOUL" not in names
+        assert "AGENTS" not in names
+        assert "RUNTIME_GOAL" in names
+        assert "# Vibelution Project Rules" not in result
 
 
 class TestBuildAPI:
@@ -354,8 +370,10 @@ class TestBuildAPI:
         assert len(result) > 0
         assert "## 当前运行目标包" not in result
         assert "# Vibelution 通用 Agent 基座" in result
+        assert "# Vibelution Agent 灵魂" in result
+        assert "# Vibelution Project Rules" in result
         assert "## SPEC 运行时摘要" in result
-        assert "# SPEC 开发流程规范" in result
+        assert "# SPEC 开发流程规范" not in result
         assert "## 语言状态" in result
         assert "## 你的记忆与状态" in result
         assert "## 委派规则" in result
@@ -466,7 +484,7 @@ class TestBuildAPI:
         pm = PromptManager()
         sp = pm.build()
         result = to_string(sp)
-        assert "# SPEC 开发流程规范" in result
+        assert "# Vibelution Project Rules" in result
         assert "## SPEC 运行时摘要" in result
         selected_names = [s.name for s in pm._select_sections(include=None, exclude=None)]
         assert "CODEBASE_MAP" not in selected_names
@@ -483,11 +501,13 @@ class TestBuildAPI:
         assert "## Git 提交规则" in result
         assert "## 配置自感知" in result
 
-    def test_broad_orient_goal_keeps_full_spec_by_default(self):
+    def test_broad_orient_goal_keeps_three_core_prompts_by_default(self):
         pm = PromptManager()
         sp = pm.build(current_goal="开始自主进化")
         result = to_string(sp)
-        assert "# SPEC 开发流程规范" in result
+        assert "# Vibelution 通用 Agent 基座" in result
+        assert "# Vibelution Agent 灵魂" in result
+        assert "# Vibelution Project Rules" in result
 
     def test_absolute_probe_path_does_not_reenable_env_info_by_itself(self):
         pm = PromptManager()
@@ -526,13 +546,14 @@ class TestBuildAPI:
         result = to_string(sp)
         assert "## 当前任务局部地图" in result
 
-    def test_prompt_rule_goal_can_reenable_full_spec(self):
+    def test_prompt_rule_goal_does_not_reenable_retired_full_spec(self):
         pm = PromptManager()
         sp = pm.build(
             current_goal="继续优化 prompt 拼接规则，并审查 SPEC 规范是否需要拆分",
         )
         result = to_string(sp)
-        assert "# SPEC 开发流程规范" in result
+        assert "# Vibelution Project Rules" in result
+        assert "# SPEC 开发流程规范" not in result
 
     def test_readonly_log_diagnosis_prunes_code_map(self):
         """只读日志诊断不应为了 CODEBASE_MAP 触发代码库扫描。"""
@@ -876,11 +897,12 @@ class TestCompatibilityFunctions:
 
     def test_to_string_on_system_prompt(self):
         pm = PromptManager()
-        sp = pm.build(include=["SOUL", "SPEC"])
+        sp = pm.build(include=["SOUL", "AGENTS"])
         result = to_string(sp)
         assert isinstance(result, str)
         assert len(result) > 0
-        assert "# SPEC 开发流程规范" in result
+        assert "# Vibelution Agent 灵魂" in result
+        assert "# Vibelution Project Rules" in result
 
 
 class TestCache:
@@ -894,16 +916,17 @@ class TestCache:
 
     def test_invalidate_all_cache(self):
         pm = PromptManager()
-        pm.build(include=["SOUL", "SPEC"])
+        pm.build(include=["SOUL", "AGENTS"])
         pm.invalidate_cache()
         assert len(pm._section_cache.stats["cached_sections"]) == 0
 
     def test_cache_hit(self):
         pm = PromptManager()
-        pm.build(include=["SOUL", "SPEC"])
+        pm.build(include=["SOUL", "AGENTS"])
         stats = pm.get_cache_stats()
         # 静态章节应在缓存中
         assert "SOUL" in stats["cached_sections"]
+        assert "AGENTS" in stats["cached_sections"]
 
     def test_cache_invalidated_by_state_memory(self):
         pm = PromptManager()
@@ -1058,7 +1081,8 @@ class TestLoadFunctions:
         content = soul.compute()
         assert isinstance(content, str)
         assert len(content) > 0
-        assert "铁律" in content or "绝对" in content
+        assert "SOUL 定义我是谁" in content
+        assert "不扩大权限" in content
 
     def test_env_info_section_compute(self):
         pm = PromptManager()
@@ -1332,8 +1356,8 @@ class TestConfigDrivenSections:
         names = {s.name for s in sections}
         assert "GHOST" not in names, "不存在的文件不应注册章节"
 
-    def test_empty_configs_falls_back_to_dynamic_only(self):
-        """section_configs 为 None 或空列表时只注册动态章节。"""
+    def test_empty_configs_still_registers_three_core_sections(self):
+        """operator config 为空时三核心仍由代码保护注册。"""
         from core.prompt_manager.sections import create_default_sections
         from pathlib import Path
 
@@ -1346,17 +1370,35 @@ class TestConfigDrivenSections:
             section_configs=[],
         )
         names = {s.name for s in sections}
-        # 没有 config 驱动的静态章节；COMMON 是代码内置的统一基座。
-        assert "COMMON" in names
-        assert "SOUL" not in names
+        assert {"COMMON", "SOUL", "AGENTS"} <= names
         assert "SPEC" not in names
         # 动态章节存在
         assert "TASK_CHECKLIST" in names
         assert "SESSION_CHILD_ROUTING" in names
         assert "ENV_INFO" in names
 
-    def test_config_priority_and_required_preserved(self):
-        """config 中的 priority 和 required 属性被正确传递到章节。"""
+    def test_missing_required_core_fails_closed(self, tmp_path):
+        """三核心任一缺失时不能静默注册不完整基座。"""
+        from core.prompt_manager.core_prompt_sources import CorePromptSourceError
+        from core.prompt_manager.sections import create_default_sections
+
+        core_root = tmp_path / "core" / "core_prompt"
+        core_root.mkdir(parents=True)
+        (core_root / "COMMON.md").write_text("COMMON", encoding="utf-8")
+        (core_root / "SOUL.md").write_text("SOUL", encoding="utf-8")
+
+        with pytest.raises(CorePromptSourceError) as exc_info:
+            create_default_sections(
+                core_root,
+                tmp_path / "workspace" / "prompts",
+                tmp_path,
+                section_configs=[],
+            )
+
+        assert exc_info.value.missing_names == ("AGENTS",)
+
+    def test_config_cannot_override_protected_core_metadata(self):
+        """operator config 不能降低或改写三核心元信息。"""
         from core.prompt_manager.sections import create_default_sections
         from pathlib import Path
 
@@ -1375,9 +1417,9 @@ class TestConfigDrivenSections:
         )
         soul = next((s for s in sections if s.name == "SOUL"), None)
         assert soul is not None
-        assert soul.priority == 99, "priority 应来自 config 而非硬编码"
+        assert soul.priority == 10
         assert soul.required is True
-        assert soul.description == "自定义"
+        assert soul.description == "稳定身份、价值倾向与自我进化动力"
 
     def test_front_matter_is_not_runtime_source_of_truth(self, tmp_path):
         """Markdown 文件头不会覆盖 config/registry 中的 section 元信息。"""
@@ -1439,9 +1481,10 @@ class TestFallbackDefaults:
 
         assert fallback == [
             "COMMON",
+            "SOUL",
+            "AGENTS",
             "RUNTIME_GOAL",
             "USER_PROFILE",
-            "SOUL",
             "SPEC_DIGEST",
             "GIT_MEMORY",
             "RUNTIME_LOG_INDEX",

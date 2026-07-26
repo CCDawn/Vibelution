@@ -256,6 +256,7 @@ def _agent_prompt_snapshot_matches_agent(
     prompt_template_id: str,
     builtin_content_version: int = 0,
     chat_base_prompt_version: int = 0,
+    core_prompt_schema_version: int = 0,
 ) -> bool:
     s = _service()
     if not isinstance(snapshot, dict):
@@ -274,9 +275,23 @@ def _agent_prompt_snapshot_matches_agent(
         snapshot_chat_base_prompt_version = max(0, int(snapshot.get("chatBasePromptVersion") or 0))
     except (TypeError, ValueError):
         snapshot_chat_base_prompt_version = 0
+    try:
+        snapshot_core_prompt_schema_version = max(0, int(snapshot.get("corePromptSchemaVersion") or 0))
+    except (TypeError, ValueError):
+        snapshot_core_prompt_schema_version = 0
+    snapshot_core_prompt_names = tuple(
+        str(item.get("name") or "").strip().upper()
+        for item in list(snapshot.get("corePrompts") or [])
+        if isinstance(item, dict) and str(item.get("name") or "").strip()
+    )
     return (
         max(0, int(builtin_content_version or 0)) <= snapshot_builtin_content_version
         and max(0, int(chat_base_prompt_version or 0)) <= snapshot_chat_base_prompt_version
+        and max(0, int(core_prompt_schema_version or 0)) <= snapshot_core_prompt_schema_version
+        and (
+            max(0, int(core_prompt_schema_version or 0)) == 0
+            or snapshot_core_prompt_names == tuple(s.prompt_template_service.CORE_PROMPT_NAMES)
+        )
     )
 
 
@@ -297,7 +312,7 @@ def _ensure_session_agent_prompt_snapshot(
     include_chat_base = str(agent.get("primaryMode") or "").strip().lower() == "chat"
     required_versions = s.prompt_template_service.get_agent_prompt_snapshot_versions(
         prompt_template_id,
-        project_root= Path(__file__).resolve().parents[3],
+        project_root=Path(__file__).resolve().parents[4],
         include_chat_base=include_chat_base,
     )
     if s._agent_prompt_snapshot_matches_agent(
@@ -306,6 +321,7 @@ def _ensure_session_agent_prompt_snapshot(
         prompt_template_id=prompt_template_id,
         builtin_content_version=required_versions.get("builtinContentVersion", 0),
         chat_base_prompt_version=required_versions.get("chatBasePromptVersion", 0),
+        core_prompt_schema_version=required_versions.get("corePromptSchemaVersion", 0),
     ):
         s._record_session_prompt_snapshot_event(
             normalized_session_id,
@@ -326,6 +342,7 @@ def _ensure_session_agent_prompt_snapshot(
             prompt_template_id=prompt_template_id,
             builtin_content_version=required_versions.get("builtinContentVersion", 0),
             chat_base_prompt_version=required_versions.get("chatBasePromptVersion", 0),
+            core_prompt_schema_version=required_versions.get("corePromptSchemaVersion", 0),
         ):
             s._record_session_prompt_snapshot_event(
                 normalized_session_id,
@@ -339,7 +356,7 @@ def _ensure_session_agent_prompt_snapshot(
             agent_id=agent_id,
             agent_code=str(agent.get("agentCode") or "").strip(),
             agent_display_name=str(agent.get("displayName") or "").strip(),
-            project_root= Path(__file__).resolve().parents[3],
+            project_root=Path(__file__).resolve().parents[4],
             include_chat_base=include_chat_base,
         )
         if str(snapshot.get("reason") or "").strip():
@@ -407,6 +424,13 @@ def _record_session_prompt_snapshot_event(
                 "contentHash": str(snapshot.get("contentHash") or "").strip(),
                 "contentLength": int(snapshot.get("contentLength") or len(str(snapshot.get("content") or ""))),
                 "category": str(snapshot.get("category") or "").strip(),
+                "corePromptSchemaVersion": int(snapshot.get("corePromptSchemaVersion") or 0),
+                "corePromptHash": str(snapshot.get("corePromptHash") or "").strip(),
+                "corePromptNames": ",".join(
+                    str(item.get("name") or "").strip()
+                    for item in list(snapshot.get("corePrompts") or [])
+                    if isinstance(item, dict) and str(item.get("name") or "").strip()
+                ),
                 "reason": str(snapshot.get("reason") or "").strip(),
                 "source": "session_service",
             },
@@ -418,6 +442,8 @@ def _record_session_prompt_snapshot_event(
                 "content_hash": str(snapshot.get("contentHash") or "").strip(),
                 "content_length": int(snapshot.get("contentLength") or len(str(snapshot.get("content") or ""))),
                 "category": str(snapshot.get("category") or "").strip(),
+                "core_prompt_schema_version": int(snapshot.get("corePromptSchemaVersion") or 0),
+                "core_prompt_hash": str(snapshot.get("corePromptHash") or "").strip(),
                 "reason": str(snapshot.get("reason") or "").strip(),
                 "outcome": str(outcome or "").strip(),
             },

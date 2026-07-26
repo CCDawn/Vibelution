@@ -17,8 +17,6 @@ def _use_tmp_project_root(tmp_path, monkeypatch):
     )
     with context_engine._RESEARCH_ORG_CONTEXT_CACHE_LOCK:
         context_engine._RESEARCH_ORG_CONTEXT_CACHE.clear()
-    with context_engine._PROJECT_RULES_CONTEXT_CACHE_LOCK:
-        context_engine._PROJECT_RULES_CONTEXT_CACHE.clear()
     with context_engine._PROJECT_AGENT_REGISTRY_CACHE_LOCK:
         context_engine._PROJECT_AGENT_REGISTRY_CACHE.clear()
     with context_engine._ACTIVE_AGENT_DIRECTORY_CACHE_LOCK:
@@ -329,7 +327,7 @@ def test_build_research_agent_context_cache_invalidates_when_research_org_change
     assert second.timings["researchOrgContextCacheHit"] is False
 
 
-def test_build_agent_context_includes_project_memory_coordination_rules_from_agents_md(tmp_path, monkeypatch):
+def test_build_agent_context_leaves_agents_md_to_prompt_manager_or_session_snapshot(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     (tmp_path / "AGENTS.md").write_text(
         "\n".join(
@@ -369,30 +367,21 @@ def test_build_agent_context_includes_project_memory_coordination_rules_from_age
 
     packet = context_engine.build_agent_context(agent["agentId"], session_id="session-parallel-memory", run_id="turn-1")
 
-    assert "Project Operating Rules" in packet.context_block
-    assert "Project Operating Rules" in packet.static_context_block
-    assert "Project Operating Rules" not in packet.dynamic_context_block
-    assert "Session-level Agents may process project work in parallel." in packet.context_block
-    assert "Project memory is a single-writer shared record." in packet.context_block
-    assert "AGENTS.md is the default contract for this behavior." in packet.context_block
-    assert "Session Agent Territory And Handoff" in packet.context_block
-    assert "recommend a matching handoff target" in packet.context_block
-    assert "This line must not enter the runtime context." not in packet.context_block
+    assert "Project Operating Rules" not in packet.context_block
+    assert "AGENTS.md is the default contract for this behavior." not in packet.context_block
     segments_by_key = {segment["key"]: segment for segment in packet.context_segments}
-    assert segments_by_key["project_rules"]["placement"] == "cache_prefix"
-    assert segments_by_key["project_rules"]["stability"] == "project_static"
-    assert segments_by_key["project_rules"]["chars"] == len(segments_by_key["project_rules"]["block"])
-    assert segments_by_key["project_rules"]["hash"]
-    assert "projectRulesContextMs" in packet.timings
-    assert any(
-        item[0][:3] == ("agent_context", "context_engine", "agent_runtime.project_rules_context_loaded")
-        and "Session-Level Agent Memory Coordination" in item[1]["fields"]["section"]
-        and "Session Agent Territory And Handoff" in item[1]["fields"]["section"]
-        for item in events
+    assert "project_rules" not in segments_by_key
+    assert packet.timings["projectRulesContextMs"] == 0
+    assert packet.timings["projectRulesContextSkipped"] is True
+    resolved = next(
+        item for item in events
+        if item[0][:3] == ("agent_context", "context_engine", "agent_runtime.resolved")
     )
+    assert resolved[1]["fields"]["projectRulesContextIncluded"] is False
+    assert resolved[1]["fields"]["projectRulesContextOwner"] == "prompt_manager_or_session_snapshot"
 
 
-def test_build_agent_context_reuses_project_rules_and_registry_file_cache(tmp_path, monkeypatch):
+def test_build_agent_context_reuses_registry_file_cache_without_project_rules_copy(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     (tmp_path / "AGENTS.md").write_text(
         "\n".join(
@@ -448,9 +437,8 @@ def test_build_agent_context_reuses_project_rules_and_registry_file_cache(tmp_pa
     context_engine.build_agent_context(agent["agentId"], session_id="session-cache", run_id="turn-1")
     context_engine.build_agent_context(agent["agentId"], session_id="session-cache", run_id="turn-2")
 
-    rule_events = [item for item in events if item[0][2] == "agent_runtime.project_rules_context_loaded"]
     registry_events = [item for item in events if item[0][2] == "agent_runtime.project_agent_registry_context_loaded"]
-    assert [item[1]["fields"]["cacheHit"] for item in rule_events[-2:]] == [False, True]
+    assert not any(item[0][2] == "agent_runtime.project_rules_context_loaded" for item in events)
     assert [item[1]["fields"]["cacheHit"] for item in registry_events[-2:]] == [False, True]
     assert [item[1]["fields"]["activeAgentDirectoryCacheHit"] for item in registry_events[-2:]] == [False, True]
 
