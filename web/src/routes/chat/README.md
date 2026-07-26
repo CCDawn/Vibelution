@@ -100,11 +100,24 @@ Prefer pure modules there over growing `ConversationView.tsx`.
 
 Do not suppress polling on connect *intent* alone — wait for EventSource `onopen`.
 
+## Perf program (scope A)
+
+See `PERF_BASELINE.md` for F0 numbers and gaps.
+
+| Phase | Status |
+|---|---|
+| F0 baseline | Done (`PERF_BASELINE.md`) |
+| F1 soft chat preload (idle hover/focus, hard click) | Done in AppShell |
+| F1 markdown / xterm lazy | Already in place (do not regress) |
+| F2 expanded group agent polls honor SSE open | Done in ChatCodingRoute |
+| F2 core session/list policy | Already in `chatLiveQueryPolicy` |
+
 ## Next (planned)
 
 - Prefer chunk wins over further pure LOC grind on `ChatCodingRoute` (already hook/panel split)
 - Continue ConversationView pure extracts only when claimability requires it (draft mappers stay out)
 - Target `ChatCodingRoute` toward ~800–1500 LOC only when a concrete claim needs it
+- Agents pane lazy + mutation hooks: see frontend ROI program F3 (agents/README)
 
 ## Hand-test substitutes
 

@@ -50,6 +50,19 @@ from .advisory import (
     summarize_active_advisory_baselines,
 )
 from .selection import TierScoreSummary, TierSelectionDecision, select_by_training_tier
+from .optimization_models import (
+    AGENT_CONSUMPTION_ADVISORY,
+    OPTIMIZATION_ARTIFACT_SCHEMA_VERSION,
+    RUNTIME_EFFECT_NOT_APPLIED,
+    EvolutionCandidate,
+    EvolutionReplayContext,
+    OptimizationContractError,
+    ReflectiveFeedback,
+    candidate_from_improvement,
+)
+from .feedback import build_reflective_feedback
+from .budget import BudgetLimitExceeded, BudgetUsage, EvolutionBudget, EvolutionBudgetLedger
+from .candidate_archive import CandidateArchive, CandidateArchiveRecord, ObjectiveVector
 from .vibelution_adapter import VibelutionAgentHarnessAdapter
 from .runner import (
     DEFAULT_COLLECTION_ID,
@@ -63,6 +76,7 @@ from .runner import (
 __all__ = [
     "ALLOWED_DATASET_SPLITS",
     "ALLOWED_TRAINING_TIERS",
+    "AGENT_CONSUMPTION_ADVISORY",
     "AdapterContractCheck",
     "DEFAULT_COLLECTION_ID",
     "PROMOTION_GATE_COLLECTION_ID",
@@ -70,10 +84,18 @@ __all__ = [
     "AttemptEvidence",
     "AgentHarnessAdapter",
     "CandidateImprovement",
+    "CandidateArchive",
+    "CandidateArchiveRecord",
     "CallableAgentHarnessAdapter",
     "CriticDiagnosis",
+    "BudgetLimitExceeded",
+    "BudgetUsage",
     "EvaluationRun",
     "EvolutionEngine",
+    "EvolutionBudget",
+    "EvolutionBudgetLedger",
+    "EvolutionCandidate",
+    "EvolutionReplayContext",
     "GeneratedCaseProvenance",
     "GenericCaseResult",
     "GymCase",
@@ -87,8 +109,13 @@ __all__ = [
     "ActiveAdvisoryBaseline",
     "HarnessVariant",
     "ImprovementEpisode",
+    "OPTIMIZATION_ARTIFACT_SCHEMA_VERSION",
+    "OptimizationContractError",
+    "ObjectiveVector",
     "PromotionProposal",
     "Score",
+    "ReflectiveFeedback",
+    "RUNTIME_EFFECT_NOT_APPLIED",
     "Trace",
     "TierScoreSummary",
     "TierSelectionDecision",
@@ -103,6 +130,8 @@ __all__ = [
     "build_intelligence_strategy_exercise",
     "build_local_transaction_exercise",
     "build_mixed_readiness_gate_exercise",
+    "build_reflective_feedback",
+    "candidate_from_improvement",
     "format_gym_run_result",
     "list_builtin_collections",
     "load_active_advisory_baselines",

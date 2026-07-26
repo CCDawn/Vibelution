@@ -779,10 +779,11 @@ export function ChatCodingRoute() {
       queryKey: queryKeys.session(sessionId || "none"),
       queryFn: () => fetchSessionDetailWindow(sessionId, { messageLimit: 20 }),
       enabled: standardGroupRoomActive && Boolean(sessionId),
+      // Match group room detail: only poll while SSE is not open (F2).
       refetchInterval: standardGroupRoomActive && sessionId
         ? resolvePollingInterval(
             chatPollingVisible,
-            3_000,
+            groupStreamConnected ? false : 3_000,
             { backgroundMs: groupBackgroundSyncActive && !groupStreamConnected ? ACTIVE_BACKGROUND_SYNC_POLL_MS : false },
           )
         : false,

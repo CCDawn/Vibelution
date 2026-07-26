@@ -179,13 +179,13 @@ const styles: Record<string, string> = {
   answerOnlyProcessIcon:
     "vui-components-conversationview answerOnlyProcessIcon min-w-0 shrink-0 text-[var(--fg-tertiary)]",
   answerOnlyProcessMeta:
-    "vui-components-conversationview answerOnlyProcessMeta min-w-0 truncate whitespace-nowrap",
+    "vui-components-conversationview answerOnlyProcessMeta min-w-0 truncate whitespace-nowrap [font-size:var(--vui-font-xs)] font-medium leading-tight text-[var(--fg-tertiary)]",
   answerOnlyProcessPreview:
     "vui-components-conversationview answerOnlyProcessPreview min-w-0 truncate whitespace-nowrap border-0 bg-transparent p-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] shadow-none",
   answerOnlyProcessStatic:
     "vui-components-conversationview answerOnlyProcessStatic min-w-0 !inline-grid w-fit max-w-full grid-cols-[14px_auto_auto] items-center gap-1.5",
   answerOnlyProcessTitle:
-    "vui-components-conversationview answerOnlyProcessTitle min-w-0 truncate whitespace-nowrap [font-size:var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
+    "vui-components-conversationview answerOnlyProcessTitle min-w-0 truncate whitespace-nowrap [font-size:var(--vui-font-sm)] font-semibold leading-tight text-[var(--fg-primary)]",
   answerOnlyProcessToggle:
     "vui-components-conversationview answerOnlyProcessToggle min-w-0 grid border-0 bg-transparent p-0 text-[var(--fg-secondary)] hover:border-transparent hover:bg-transparent [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:inline-grid [&_[data-slot=vui-button-label]]:max-w-full [&_[data-slot=vui-button-label]]:grid-cols-[14px_auto_auto_minmax(0,1fr)_14px] [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-1.5",
   assistantCard:
@@ -681,7 +681,7 @@ const styles: Record<string, string> = {
   operationItem_warn: `vui-components-conversationview operationItem_warn min-w-0 ${vuiOpaqueRowClass} p-2`,
   operationItem_warning: `vui-components-conversationview operationItem_warning min-w-0 ${vuiOpaqueRowClass} p-2 !border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] !bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] !text-[var(--state-warning)]`,
   operationName:
-    "vui-components-conversationview operationName min-w-0 [font-size:var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
+    "vui-components-conversationview operationName min-w-0 [font-size:var(--vui-font-sm)] font-semibold leading-tight text-[var(--fg-primary)]",
   operationStatus:
     "vui-components-conversationview operationStatus min-w-0 justify-self-start",
   operationStatus_failed:
@@ -791,7 +791,7 @@ const styles: Record<string, string> = {
     "vui-components-conversationview reActOperationSectionLabel min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   reActOperationSummary: `vui-components-conversationview reActOperationSummary min-w-0 ${vuiGlassPanelClass} p-2 inline-grid w-fit border-0 bg-transparent`,
   reActOperationTitle:
-    "vui-components-conversationview reActOperationTitle min-w-0 [font-size:var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
+    "vui-components-conversationview reActOperationTitle min-w-0 [font-size:var(--vui-font-sm)] font-semibold leading-tight text-[var(--fg-primary)]",
   reActResultItem: `vui-components-conversationview reActResultItem min-w-0 ${vuiOpaqueRowClass} p-2 border-0 bg-transparent`,
   reActResultItem_failed: `vui-components-conversationview reActResultItem_failed min-w-0 ${vuiOpaqueRowClass} p-2 ${vuiStateDangerSoftClass}`,
   reActResultLabel:
@@ -799,7 +799,7 @@ const styles: Record<string, string> = {
   reActResultList:
     "vui-components-conversationview reActResultList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   reActResultToggle:
-    "vui-components-conversationview reActResultToggle min-w-0 border-0 bg-transparent",
+    "vui-components-conversationview reActResultToggle min-w-0 border-0 bg-transparent [font-size:var(--vui-font-xs)] font-medium leading-tight text-[var(--fg-tertiary)]",
   reActResultValue:
     "vui-components-conversationview reActResultValue min-w-0",
   reActThoughtStack:
@@ -815,11 +815,11 @@ const styles: Record<string, string> = {
   reActToolList:
     "vui-components-conversationview reActToolList min-w-0 grid min-h-0 content-start gap-0 overflow-visible border-0 bg-transparent text-[var(--fg-secondary)]",
   reActToolName:
-    "vui-components-conversationview reActToolName min-w-0 truncate [font-size:var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
+    "vui-components-conversationview reActToolName min-w-0 truncate [font-size:var(--vui-font-sm)] font-semibold leading-tight text-[var(--fg-primary)]",
   reActToolStatus:
-    "vui-components-conversationview reActToolStatus min-w-0 inline-flex items-center gap-1 border-0 bg-transparent text-[var(--fg-tertiary)]",
+    "vui-components-conversationview reActToolStatus min-w-0 inline-flex items-center gap-1 border-0 bg-transparent [font-size:var(--vui-font-xs)] font-normal leading-tight text-[var(--fg-tertiary)]",
   reActToolSummary:
-    "vui-components-conversationview reActToolSummary min-w-0 border-0 bg-transparent p-0 text-[var(--fg-secondary)] shadow-none line-clamp-1 whitespace-normal [overflow-wrap:anywhere]",
+    "vui-components-conversationview reActToolSummary min-w-0 border-0 bg-transparent p-0 [font-size:var(--vui-font-sm)] font-normal leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] shadow-none line-clamp-1 whitespace-normal [overflow-wrap:anywhere]",
   researchOrgChip:
     `vui-components-conversationview researchOrgChip min-w-0 ${vuiControlPillClass}`,
   researchOrgChipRow: `vui-components-conversationview researchOrgChipRow min-w-0 ${vuiOpaqueRowClass} p-2`,

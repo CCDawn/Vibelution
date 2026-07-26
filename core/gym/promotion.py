@@ -168,7 +168,7 @@ def apply_gym_promotion_proposal(
             "ledger_path": str(ledger_path),
         }
     )
-    active_proposal_path.write_text(json.dumps(proposal, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    _write_json_object(active_proposal_path, proposal)
     _append_ledger_once(ledger_path, application)
     _record_gym_scene_event(
         "apply",
@@ -253,7 +253,7 @@ def rollback_gym_promotion_proposal(
             "rollback_ledger_path": str(ledger_path),
         }
     )
-    active_proposal_path.write_text(json.dumps(proposal, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    _write_json_object(active_proposal_path, proposal)
     _append_ledger_once(ledger_path, rollback)
     _record_gym_scene_event(
         "rollback",
@@ -352,7 +352,7 @@ def activate_gym_promotion_proposal(
     }
     registry["updated_at"] = activated_at
     registry_path.parent.mkdir(parents=True, exist_ok=True)
-    registry_path.write_text(json.dumps(registry, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    _write_json_object(registry_path, registry)
 
     proposal.update(
         {
@@ -367,7 +367,7 @@ def activate_gym_promotion_proposal(
             "previous_active_proposal_id": previous_active_proposal_id,
         }
     )
-    active_proposal_path.write_text(json.dumps(proposal, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    _write_json_object(active_proposal_path, proposal)
     _append_ledger_once(history_path, activation)
     _record_gym_scene_event(
         "activate",
@@ -464,9 +464,10 @@ def _rollback_from_rolled_back_proposal(
 
 
 def _append_ledger_once(path: Path, record: GymPromotionApplication | GymPromotionRollback | GymPromotionActivation) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if path.exists():
-        for line in path.read_text(encoding="utf-8").splitlines():
+    filesystem_path = developer_sandbox._filesystem_path(path)
+    filesystem_path.parent.mkdir(parents=True, exist_ok=True)
+    if filesystem_path.exists():
+        for line in filesystem_path.read_text(encoding="utf-8").splitlines():
             if not line.strip():
                 continue
             try:
@@ -475,7 +476,7 @@ def _append_ledger_once(path: Path, record: GymPromotionApplication | GymPromoti
                 continue
             if row.get("proposal_id") == record.proposal_id:
                 return
-    with open(path, "a", encoding="utf-8") as fh:
+    with filesystem_path.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(record.to_dict(), ensure_ascii=False) + "\n")
 
 
@@ -501,15 +502,16 @@ def _validate_trace_index(path: Path) -> None:
         raise ValueError("Gym trace index must contain traces before apply")
     for item in traces:
         trace_path = Path(str((item or {}).get("path") or "")).resolve()
-        if not trace_path.exists():
+        if not developer_sandbox._filesystem_path(trace_path).exists():
             raise ValueError(f"Gym trace index references missing trace file: {trace_path}")
 
 
 def _load_json_object(path: Path, *, label: str) -> dict:
-    if not path.exists():
+    filesystem_path = developer_sandbox._filesystem_path(path)
+    if not filesystem_path.exists():
         raise ValueError(f"Missing {label}: {path}")
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload = json.loads(filesystem_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise ValueError(f"Invalid {label}: {path}") from exc
     if not isinstance(payload, dict):
@@ -525,7 +527,7 @@ def _required_text(payload: dict, key: str) -> str:
 
 
 def _load_registry(path: Path) -> dict:
-    if not path.exists():
+    if not developer_sandbox._filesystem_path(path).exists():
         return {"active": {}}
     payload = _load_json_object(path, label="Gym active promotion registry")
     active = payload.get("active")
@@ -558,7 +560,7 @@ def _mark_previous_active_superseded(
     if not previous_path_text:
         return
     previous_path = Path(previous_path_text).resolve()
-    if not previous_path.exists():
+    if not developer_sandbox._filesystem_path(previous_path).exists():
         return
     previous = _load_json_object(previous_path, label="previous active Gym promotion proposal")
     if str(previous.get("status") or "") != "active":
@@ -570,7 +572,7 @@ def _mark_previous_active_superseded(
             "superseded_at": superseded_at,
         }
     )
-    previous_path.write_text(json.dumps(previous, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    _write_json_object(previous_path, previous)
 
 
 def _deactivate_active_registry_entry(
@@ -590,7 +592,13 @@ def _deactivate_active_registry_entry(
         active_entries.pop(target_key, None)
         registry["updated_at"] = deactivated_at
         registry_path.parent.mkdir(parents=True, exist_ok=True)
-        registry_path.write_text(json.dumps(registry, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        _write_json_object(registry_path, registry)
+
+
+def _write_json_object(path: Path, payload: dict) -> None:
+    filesystem_path = developer_sandbox._filesystem_path(path)
+    filesystem_path.parent.mkdir(parents=True, exist_ok=True)
+    filesystem_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 __all__ = [
