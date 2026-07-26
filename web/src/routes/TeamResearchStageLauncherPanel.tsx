@@ -212,15 +212,15 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
       const challengeTeamId = selectedTeam?.teamId || RESEARCH_TEAM_ID;
       const challengeAgents: ChallengeCupWorkspaceAgent[] = selectedTeamMemoryMembers.map((member) => {
         const normalizedRole = member.roleLabel.toLowerCase();
-        const workspace = normalizedRole.includes("source") || normalizedRole.includes("璧勬枡")
-          ? "璇佹嵁閾?
-          : normalizedRole.includes("knowledge") || normalizedRole.includes("鐭ヨ瘑")
-            ? "鐭ヨ瘑搴?
-            : normalizedRole.includes("experiment") || normalizedRole.includes("瀹為獙")
-              ? "棰樼洰涓庣粨鏋?
-              : normalizedRole.includes("iteration") || normalizedRole.includes("鐗堟湰")
-                ? "娣辩爺杩唬"
-                : "鍏ㄥ眬";
+        const workspace = normalizedRole.includes("source") || normalizedRole.includes("资料")
+          ? "证据链"
+          : normalizedRole.includes("knowledge") || normalizedRole.includes("知识")
+            ? "知识库"
+            : normalizedRole.includes("experiment") || normalizedRole.includes("实验")
+              ? "题目与结果"
+              : normalizedRole.includes("iteration") || normalizedRole.includes("版本")
+                ? "深研迭代"
+                : "全局";
         return {
           agentId: member.id,
           name: member.agentName,
@@ -251,7 +251,7 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
               primaryActionLabel={context.primaryActionLabel}
               onProjectActivated={(project) => {
                 setSourceCollectionDraft((current) => ({ ...current, topic: project.topic }));
-                setPreferredExperimentMethod((project.experimentMethod || "") as ExperimentMethodId | "");
+                setPreferredExperimentMethod(project.experimentMethod || "");
               }}
             />
           )) : null}
@@ -272,16 +272,16 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
     const phaseOrder: ResearchStageType[] = knowledgeExpansionWorkflowTeamSelected ? ["knowledge_collection"] : ["knowledge_collection", "experiment", "iteration"];
     const phaseFallback: Record<ResearchStageType, { label: string; primaryAction: string }> = {
       knowledge_collection: {
-        label: lang === "zh" ? "鐭ヨ瘑鎼滈泦" : "Knowledge",
-        primaryAction: lang === "zh" ? "寮€濮嬬煡璇嗘悳闆? : "Start knowledge",
+        label: lang === "zh" ? "知识搜集" : "Knowledge",
+        primaryAction: lang === "zh" ? "开始知识搜集" : "Start knowledge",
       },
       experiment: {
-        label: lang === "zh" ? "瀹為獙璁捐" : "Experiment design",
-        primaryAction: lang === "zh" ? "鍚姩璁捐" : "Start design",
+        label: lang === "zh" ? "实验设计" : "Experiment design",
+        primaryAction: lang === "zh" ? "启动设计" : "Start design",
       },
       iteration: {
-        label: lang === "zh" ? "鎵ц涓庤凯浠? : "Execution & iteration",
-        primaryAction: lang === "zh" ? "鍚姩鎵ц杩唬" : "Start execution",
+        label: lang === "zh" ? "执行与迭代" : "Execution & iteration",
+        primaryAction: lang === "zh" ? "启动执行迭代" : "Start execution",
       },
     };
     const renderResearchMemoryContextDetails = (
@@ -293,17 +293,17 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
     const knowledgeCollectionStatusLabel = sourceCollectionDisplayState.statusText;
     const knowledgeCollectionPrimaryActionLabel = !selectedSourceCollectionRun
       ? knowledgeExpansionWorkflowTeamSelected
-        ? (lang === "zh" ? "寮€濮嬫墿鍏? : "Start expansion")
-        : (lang === "zh" ? "寮€濮嬬煡璇嗘悳闆? : "Start knowledge")
+        ? (lang === "zh" ? "开始扩充" : "Start expansion")
+        : (lang === "zh" ? "开始知识搜集" : "Start knowledge")
       : sourceCollectionSearchOpenAssignmentCount > 0
         ? (selectedTeamExecuteSourceCollectionSearchPending || sourceCollectionAcceptedBackgroundActive
-          ? (lang === "zh" ? "鎼滅储涓? : "Searching")
-          : (lang === "zh" ? "鎼滅储涓嬩竴鎵? : "Search next batch"))
+          ? (lang === "zh" ? "搜索中" : "Searching")
+          : (lang === "zh" ? "搜索下一批" : "Search next batch"))
         : sourceCollectionDownstreamOpenAssignmentCount > 0
-          ? (lang === "zh" ? "杩涘叆闃舵璇︽儏" : "Open stage details")
+          ? (lang === "zh" ? "进入阶段详情" : "Open stage details")
         : sourceCollectionRunPendingScreeningCount > 0
-          ? (lang === "zh" ? "杩涘叆璧勬枡鎻愮偧澶嶆牳" : "Open review")
-          : (lang === "zh" ? "杩涘叆鎼滈泦宸ヤ綔鍙? : "Open collection workspace");
+          ? (lang === "zh" ? "进入资料提炼复核" : "Open review")
+          : (lang === "zh" ? "进入搜集工作台" : "Open collection workspace");
     const knowledgeCollectionPrimaryDisabled = !selectedSourceCollectionRun
       ? knowledgeExpansionWorkflowTeamSelected
         ? selectedTeamStartSourceCollectionPending || !sourceCollectionCanStart
@@ -417,24 +417,24 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
           ? "not_required"
           : "blocked";
     const selectedExperimentAdapterLabel = selectedExperimentAdapterStatus === "ready"
-      ? (lang === "zh" ? "鎵ц鍣ㄥ彲鐢? : "Adapter ready")
+      ? (lang === "zh" ? "执行器可用" : "Adapter ready")
       : selectedExperimentAdapterStatus === "select_required"
-        ? (lang === "zh" ? "闇€閫夋嫨鎵ц鍣? : "Select an adapter")
+        ? (lang === "zh" ? "需选择执行器" : "Select an adapter")
         : selectedExperimentAdapterStatus === "not_required"
-          ? (lang === "zh" ? "鏃犻渶鎵ц鍣? : "Adapter not required")
-          : (lang === "zh" ? "鎵ц鍣ㄩ樆濉? : "Adapter blocked");
+          ? (lang === "zh" ? "无需执行器" : "Adapter not required")
+          : (lang === "zh" ? "执行器阻塞" : "Adapter blocked");
     const selectedExperimentAdapterReason = selectedExperimentAdapterStatus === "ready"
-      ? `${selectedExperimentAdapter?.resolvedAdapterId} 路 ${selectedExperimentAdapter?.selectionSource}`
+      ? `${selectedExperimentAdapter?.resolvedAdapterId} · ${selectedExperimentAdapter?.selectionSource}`
       : selectedExperimentAdapterStatus === "select_required"
         ? (lang === "zh"
-          ? `宸插彂鐜?${selectedExperimentRegisteredAdapters.length} 涓彲鐢ㄦ墽琛屽櫒锛岃繘鍏ラ厤缃〉鍚庢槑纭€夋嫨銆俙
+          ? `已发现 ${selectedExperimentRegisteredAdapters.length} 个可用执行器，进入配置页后明确选择。`
           : `${selectedExperimentRegisteredAdapters.length} available adapter(s); choose one in setup.`)
         : selectedExperimentAdapterStatus === "not_required"
           ? (lang === "zh"
-            ? "褰撳墠闂幆鍙敓鎴愬亣璁句笌鐮旂┒璁″垝锛屼笉浼氬惎鍔ㄧ湡瀹炲疄楠屻€?
+            ? "当前闭环只生成假设与研究计划，不会启动真实实验。"
             : "This loop only generates hypotheses and a plan; no real experiment starts.")
           : (lang === "zh"
-            ? `褰撳墠鈥?{selectedExperimentMethodDescriptor?.labelZh || selectedExperimentMethod}鈥濇病鏈夊凡娉ㄥ唽涓斿彲鐢ㄧ殑鎵ц鍣ㄣ€俙
+            ? `当前“${selectedExperimentMethodDescriptor?.labelZh || selectedExperimentMethod}”没有已注册且可用的执行器。`
             : (selectedExperimentAdapter?.unavailableReason || "No registered adapter is available for this method."));
     const executableAlternativeMethods = experimentMethodCatalogQuery.data?.methods.filter((method: any) => {
       if (method.methodId === selectedExperimentMethod) {
@@ -454,67 +454,67 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
     const challengeTrialApprovedCount = challengeProgramProjection?.stage1ComplianceReadiness.trialRun.outcomeCounts.approved || 0;
     const challengeStageLabel = (stageType: ResearchStageType) => {
       if (stageType === "knowledge_collection") {
-        return lang === "zh" ? "MVP 瀹屾暣鏍蜂緥" : "MVP golden sample";
+        return lang === "zh" ? "MVP 完整样例" : "MVP golden sample";
       }
       if (stageType === "experiment") {
-        return lang === "zh" ? "3 棰橀€氱敤鎬ф祴璇? : "Three-question validation";
+        return lang === "zh" ? "3 题通用性测试" : "Three-question validation";
       }
-      return lang === "zh" ? "鍚庣画瑙勬ā鍖栦笌娣辩爺" : "Later scale-up and deep research";
+      return lang === "zh" ? "后续规模化与深研" : "Later scale-up and deep research";
     };
     const stageStatusLabel = (stageType: ResearchStageType, active: boolean, latestRound: ResearchStagePhaseStatus["latestRound"] | null | undefined) => {
       if (challengeProgramProjection) {
         if (stageType === "knowledge_collection") {
           const stage1 = challengeProgramProjection.stage1ComplianceReadiness;
           if (stage1.blockers.includes("dashscope_qwen_provider_missing")) {
-            return lang === "zh" ? "BLOCKED 路 寰呴厤缃? : "BLOCKED 路 configuration required";
+            return lang === "zh" ? "BLOCKED · 待配置" : "BLOCKED · configuration required";
           }
           if (stage1.blockers.includes("dashscope_qwen_call_evidence_missing")) {
-            return lang === "zh" ? "BLOCKED 路 寰呴獙璇? : "BLOCKED 路 validation required";
+            return lang === "zh" ? "BLOCKED · 待验证" : "BLOCKED · validation required";
           }
           return stage1.singleQuestionSample.completed >= stage1.singleQuestionSample.required
-            ? (lang === "zh" ? "宸插畬鎴? : "completed")
-            : (lang === "zh" ? "寰呮敹鍙? : "pending");
+            ? (lang === "zh" ? "已完成" : "completed")
+            : (lang === "zh" ? "待收口" : "pending");
         }
         if (stageType === "experiment") {
           const stage1 = challengeProgramProjection.stage1ComplianceReadiness;
           if (stage1.singleQuestionSample.completed < stage1.singleQuestionSample.required) {
-            return lang === "zh" ? "绛夊緟瀹屾暣鏍蜂緥" : "waiting for golden sample";
+            return lang === "zh" ? "等待完整样例" : "waiting for golden sample";
           }
           return stage1.trialRun.completed >= stage1.trialRun.required
             ? challengeTrialReviewRequiredCount > 0
-              ? (lang === "zh" ? "鏈哄櫒楠岃瘉瀹屾垚 路 寰呬汉宸ユ娊妫€" : "machine checks complete 路 human review pending")
-              : (lang === "zh" ? "楠岃瘉瀹屾垚" : "validation complete")
-            : (lang === "zh" ? "寰呮祴璇? : "pending");
+              ? (lang === "zh" ? "机器验证完成 · 待人工抽检" : "machine checks complete · human review pending")
+              : (lang === "zh" ? "验证完成" : "validation complete")
+            : (lang === "zh" ? "待测试" : "pending");
         }
-        return lang === "zh" ? "MVP 鍚庡啀鍚姩" : "deferred until after MVP";
+        return lang === "zh" ? "MVP 后再启动" : "deferred until after MVP";
       }
       if (stageType === "knowledge_collection") {
         return knowledgeCollectionStatusLabel;
       }
       if (stageType === "experiment" && experimentLifecycleProjection?.stage2) {
         if (experimentLifecycleProjection.stage2.status === "frozen") {
-          return lang === "zh" ? "宸茶璁?路 寰呮墽琛? : "designed 路 ready";
+          return lang === "zh" ? "已设计 · 待执行" : "designed · ready";
         }
         if (experimentLifecycleProjection.stage2.status === "draft") {
-          return lang === "zh" ? "璁捐涓? : "designing";
+          return lang === "zh" ? "设计中" : "designing";
         }
       }
       if (stageType === "iteration" && experimentLifecycleProjection?.stage3) {
         return researchIterationLifecycleStatusLabel(experimentLifecycleProjection.stage3.status, lang);
       }
       if (stageStatusLoading) {
-        return lang === "zh" ? "鐘舵€佸悓姝ヤ腑" : "Syncing status";
+        return lang === "zh" ? "状态同步中" : "Syncing status";
       }
       if (stageStatusUnavailable) {
-        return lang === "zh" ? "鐘舵€佹殏涓嶅彲鐢? : "Status unavailable";
+        return lang === "zh" ? "状态暂不可用" : "Status unavailable";
       }
       if (active) {
-        return lang === "zh" ? "杩愯涓? : "running";
+        return lang === "zh" ? "运行中" : "running";
       }
       if (latestRound) {
-        return lang === "zh" ? "宸叉湁杞" : "has round";
+        return lang === "zh" ? "已有轮次" : "has round";
       }
-      return lang === "zh" ? "鏈惎鍔? : "not started";
+      return lang === "zh" ? "未启动" : "not started";
     };
     const stageStatusStyle = (stageType: ResearchStageType, active: boolean, latestRound: ResearchStagePhaseStatus["latestRound"] | null | undefined) => {
       if (challengeProgramProjection) {
@@ -566,64 +566,64 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
         if (stageType === "knowledge_collection") {
           const providerReady = challengeProgramProjection.stage1ComplianceReadiness.dashscopeQwenProvider.configured;
           return providerReady
-            ? (lang === "zh" ? "鍏堟妸 1 棰樺畬鏁磋窇閫氾細鐪熷疄妯″瀷璋冪敤銆佽瘉鎹€佸亣璁俱€佷竷缁村鏌ャ€佺爺绌惰鍒掑拰鍥涗釜浜哄伐闂ㄧ鍧囧彲杩借釜銆? : "Complete one end-to-end sample with a real model call, evidence, hypotheses, review, plan, and human gates.")
-            : (lang === "zh" ? "缂哄皯 DashScope/Qwen 姝ｅ紡 provider锛涘彧鍏佽濂戠害娴嬭瘯鍜屾牱渚嬭崏绋匡紝绂佹鍐掑厖鐪熷疄璋冪敤銆? : "DashScope/Qwen provider is missing; only contract tests and drafts are allowed.");
+            ? (lang === "zh" ? "先把 1 题完整跑通：真实模型调用、证据、假设、七维审查、研究计划和四个人工门禁均可追踪。" : "Complete one end-to-end sample with a real model call, evidence, hypotheses, review, plan, and human gates.")
+            : (lang === "zh" ? "缺少 DashScope/Qwen 正式 provider；只允许契约测试和样例草稿，禁止冒充真实调用。" : "DashScope/Qwen provider is missing; only contract tests and drafts are allowed.");
         }
         if (stageType === "experiment") {
           return lang === "zh"
-            ? "瀹屾暣鏍蜂緥閫氳繃鍚庯紝鍐嶇敤 3 涓笉鍚屽満鏅楠岃瘉鍙噸澶嶆€с€佽法棰嗗煙鑳藉姏鍜岀己璇佹嵁鏃剁殑姝ｇ‘闃诲銆?
+            ? "完整样例通过后，再用 3 个不同场景题验证可重复性、跨领域能力和缺证据时的正确阻塞。"
             : "After the golden sample, validate repeatability, cross-domain behavior, and explicit evidence blocking on three questions.";
         }
         return lang === "zh"
-          ? "125 棰樻壒璺戙€佷笁涓繁鐮旀渚嬪拰鏈€缁堝弬璧涘皝瑁呭潎寤跺悗鍒?MVP 楠屾敹涔嬪悗锛屼笉璁″叆鏈疆瀹屾垚鏉′欢銆?
+          ? "125 题批跑、三个深研案例和最终参赛封装均延后到 MVP 验收之后，不计入本轮完成条件。"
           : "The 125-question run, three deep cases, and submission package are deferred until after MVP acceptance.";
       }
       if (stageType === "knowledge_collection") {
         if (!selectedSourceCollectionRun) {
-          return lang === "zh" ? "鐢熸垚鎼滅储璁″垝鍜屽洟闃熷垎宸ワ紝鍏堟妸璧勬枡鎼滅储璺戣捣鏉ャ€? : "Create the search plan and team assignments.";
+          return lang === "zh" ? "生成搜索计划和团队分工，先把资料搜索跑起来。" : "Create the search plan and team assignments.";
         }
         if (selectedTeamExecuteSourceCollectionSearchPending) {
-          return lang === "zh" ? "姝ｅ湪鎵ц鎼滅储锛岀粨鏋滀細鍐欏叆璧勬枡璁板綍鍜屽€欓€夎祫鏂欎粨搴撱€? : "Searching now; results will be written into DataRecords and candidates.";
+          return lang === "zh" ? "正在执行搜索，结果会写入资料记录和候选资料仓库。" : "Searching now; results will be written into DataRecords and candidates.";
         }
         if (sourceCollectionSearchOpenAssignmentCount > 0) {
-          return lang === "zh" ? "杩樻湁鎼滅储浠诲姟锛屽彲缁х画璺戜笅涓€鎵广€? : "Search tasks are ready for another batch.";
+          return lang === "zh" ? "还有搜索任务，可继续跑下一批。" : "Search tasks are ready for another batch.";
         }
         if (sourceCollectionDownstreamOpenAssignmentCount > 0) {
-          return lang === "zh" ? "鎼滅储宸插仠锛屽悗缁繘鍏ユ彁鐐兼垨绛涢€夈€? : "Search is idle; extraction or screening is next.";
+          return lang === "zh" ? "搜索已停，后续进入提炼或筛选。" : "Search is idle; extraction or screening is next.";
         }
         if (sourceCollectionRunPendingScreeningCount > 0) {
-          return lang === "zh" ? "宸叉湁鍊欓€夎祫鏂欙紝涓嬩竴姝ヨ繘鍏ョ瓫閫夈€? : "Candidate sources are ready for screening.";
+          return lang === "zh" ? "已有候选资料，下一步进入筛选。" : "Candidate sources are ready for screening.";
         }
-        return lang === "zh" ? "鏈疆鍙ˉ鍏呮悳闆嗭紝鎴栫敱鐢ㄦ埛鍐冲畾杩涘叆瀹為獙銆? : "Add another collection round or move to experiments.";
+        return lang === "zh" ? "本轮可补充搜集，或由用户决定进入实验。" : "Add another collection round or move to experiments.";
       }
       if (stageType === "experiment") {
         if (experimentLifecycleProjection?.stage2.status === "frozen") {
           return lang === "zh"
-            ? "瀹為獙璁捐宸插喕缁擄紱璁粌缁撴灉涓嶅弬涓庢湰闃舵瀹屾垚鍒ゅ畾銆?
+            ? "实验设计已冻结；训练结果不参与本阶段完成判定。"
             : "The design is frozen; training results do not determine Stage 2 completion.";
         }
         if (active) {
-          return lang === "zh" ? "琛ラ綈鍋囪銆佸彉閲忋€佹帶鍒剁粍銆侀绠椼€佹寚鏍囦笌鎵ц闂ㄧ銆? : "Complete hypotheses, variables, controls, budget, metrics, and gates.";
+          return lang === "zh" ? "补齐假设、变量、控制组、预算、指标与执行门禁。" : "Complete hypotheses, variables, controls, budget, metrics, and gates.";
         }
         return latestRound
-          ? (lang === "zh" ? "鍙噸鏂拌鍒掑疄楠岋紝鎴栨煡鐪嬩笂涓€杞鍒掋€? : "Replan or review the latest plan.")
-          : (lang === "zh" ? "鐭ヨ瘑鎼滈泦鍚庯紝鐢辩敤鎴峰喅瀹氬惎鍔ㄥ疄楠岃鍒掋€? : "Start experiment planning after collection.");
+          ? (lang === "zh" ? "可重新规划实验，或查看上一轮计划。" : "Replan or review the latest plan.")
+          : (lang === "zh" ? "知识搜集后，由用户决定启动实验规划。" : "Start experiment planning after collection.");
       }
       if (experimentLifecycleProjection?.stage3.status === "accepted_for_writeup") {
         return lang === "zh"
-          ? "鏈€浣崇増鏈凡閫氳繃璇勪及锛涙渶杩戣瘖鏂崟鐙睍绀猴紝涓嶈鐩栦富绾跨粨鏋溿€?
+          ? "最佳版本已通过评估；最近诊断单独展示，不覆盖主线结果。"
           : "The best version passed review; diagnostics remain separate from the main result.";
       }
       if (active) {
-        return lang === "zh" ? "鎸夊喕缁撹璁℃墽琛屻€佽瘎浼般€佸綊鍥犲苟鍙楁帶杩唬銆? : "Execute the frozen design, evaluate, diagnose, and iterate under control.";
+        return lang === "zh" ? "按冻结设计执行、评估、归因并受控迭代。" : "Execute the frozen design, evaluate, diagnose, and iterate under control.";
       }
       return latestRound
-        ? (lang === "zh" ? "鍙紑鍚柊涓€杞紭鍖栵紝娌夋穩浜や粯璁″垝銆? : "Start another optimization round and prepare delivery.")
-        : (lang === "zh" ? "鍐荤粨瀹為獙璁捐鍚庤繘鍏ユ墽琛屻€佷紭鍖栧拰杩唬銆? : "Enter execution and iteration after the design is frozen.");
+        ? (lang === "zh" ? "可开启新一轮优化，沉淀交付计划。" : "Start another optimization round and prepare delivery.")
+        : (lang === "zh" ? "冻结实验设计后进入执行、优化和迭代。" : "Enter execution and iteration after the design is frozen.");
     };
     const currentStageLabel = researchStageRoundStatus?.currentStage
       ? researchWorkspaceViewLabel(researchStageRoundStatus.currentStage as ResearchStageWorkspaceView, lang)
-      : lang === "zh" ? "寰呭惎鍔? : "not started";
+      : lang === "zh" ? "待启动" : "not started";
     const renderChallengeProgramResults = () => {
       if (!challengeProgramProjection) {
         return null;
@@ -632,8 +632,8 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
       const goldenSampleApproved = stage1.acceptance.allFourHumanGatesApproved;
       const deepCase = challengeProgramProjection.stage3DeepResearchDelivery.caseRecords[0];
       const deepCaseStatus = deepCase?.internalStatus === "accepted_for_writeup"
-        ? (lang === "zh" ? "妗堜緥鍐呴儴宸查€氳繃鎾板啓瀹℃煡" : "case accepted for write-up")
-        : deepCase?.internalStatus || (lang === "zh" ? "灏氭湭鍚姩" : "not started");
+        ? (lang === "zh" ? "案例内部已通过撰写审查" : "case accepted for write-up")
+        : deepCase?.internalStatus || (lang === "zh" ? "尚未启动" : "not started");
       return (
         <section
           id="challenge-mvp-results"
@@ -642,25 +642,25 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
         >
           <header className={styles.challengeProgramResultsHeader}>
             <div>
-              <strong id="challenge-mvp-results-title">{lang === "zh" ? "MVP 楠屾敹缁撴灉" : "MVP acceptance results"}</strong>
+              <strong id="challenge-mvp-results-title">{lang === "zh" ? "MVP 验收结果" : "MVP acceptance results"}</strong>
               <span>
                 {lang === "zh"
-                  ? `鏈哄櫒楠岃瘉 ${stage1.mvpManifest.completedQuestionCount}/${stage1.mvpManifest.requiredQuestionCount}锛涗汉宸ュ鏍镐笌鏈哄櫒楠岃瘉鍒嗗紑璁板綍`
+                  ? `机器验证 ${stage1.mvpManifest.completedQuestionCount}/${stage1.mvpManifest.requiredQuestionCount}；人工审核与机器验证分开记录`
                   : `Machine validation ${stage1.mvpManifest.completedQuestionCount}/${stage1.mvpManifest.requiredQuestionCount}; human review is tracked separately`}
               </span>
             </div>
             <span className={`${styles.researchStageStatus} ${styles.researchStageStatusRecorded}`}>
-              {lang === "zh" ? "MVP 鍙獙鏀? : "MVP ready for acceptance"}
+              {lang === "zh" ? "MVP 可验收" : "MVP ready for acceptance"}
             </span>
           </header>
           <div className={styles.challengeProgramResultGrid}>
             <article id="challenge-mvp-sample" className={styles.challengeProgramResultCard}>
               <header>
-                <strong>{lang === "zh" ? "瀹屾暣鏍蜂緥" : "Golden sample"}</strong>
+                <strong>{lang === "zh" ? "完整样例" : "Golden sample"}</strong>
                 <span className={`${styles.researchStageStatus} ${goldenSampleApproved ? styles.researchStageStatusRecorded : styles.researchStageStatusPending}`}>
                   {goldenSampleApproved
-                    ? (lang === "zh" ? "浜哄伐瀹℃牳閫氳繃" : "human review approved")
-                    : (lang === "zh" ? "寰呬汉宸ュ鏍? : "human review pending")}
+                    ? (lang === "zh" ? "人工审核通过" : "human review approved")
+                    : (lang === "zh" ? "待人工审核" : "human review pending")}
                 </span>
               </header>
               <div className={styles.challengeProgramQuestionList}>
@@ -668,17 +668,17 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
               </div>
               <p>
                 {lang === "zh"
-                  ? `Schema銆佸紩鐢ㄣ€佷竷缁村鏌ヤ笌鐮旂┒璁″垝鍧囧凡璁板綍锛涘弽棣堜慨璁?${stage1.acceptance.feedbackRevisionCount} 娆°€俙
+                  ? `Schema、引用、七维审查与研究计划均已记录；反馈修订 ${stage1.acceptance.feedbackRevisionCount} 次。`
                   : `Schema, citations, seven-dimension review, and the research plan are recorded; ${stage1.acceptance.feedbackRevisionCount} feedback revision(s).`}
               </p>
             </article>
             <article id="challenge-mvp-trials" className={styles.challengeProgramResultCard}>
               <header>
-                <strong>{lang === "zh" ? "涓夐閫氱敤鎬ф祴璇? : "Three-question validation"}</strong>
+                <strong>{lang === "zh" ? "三题通用性测试" : "Three-question validation"}</strong>
                 <span className={`${styles.researchStageStatus} ${challengeTrialReviewRequiredCount > 0 ? styles.researchStageStatusPending : styles.researchStageStatusRecorded}`}>
                   {challengeTrialReviewRequiredCount > 0
-                    ? (lang === "zh" ? `寰呬汉宸ユ娊妫€ ${challengeTrialReviewRequiredCount}` : `${challengeTrialReviewRequiredCount} awaiting human review`)
-                    : (lang === "zh" ? "瀹℃牳瀹屾垚" : "review complete")}
+                    ? (lang === "zh" ? `待人工抽检 ${challengeTrialReviewRequiredCount}` : `${challengeTrialReviewRequiredCount} awaiting human review`)
+                    : (lang === "zh" ? "审核完成" : "review complete")}
                 </span>
               </header>
               <div className={styles.challengeProgramQuestionList}>
@@ -686,22 +686,22 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
               </div>
               <p>
                 {lang === "zh"
-                  ? `鏈哄櫒楠岃瘉 ${stage1.trialRun.completed}/${stage1.trialRun.required}锛涗汉宸ュ凡鎵瑰噯 ${challengeTrialApprovedCount}锛屽叾浣欎繚鎸佸緟瀹℃牳锛屼笉璁′綔姝ｅ紡浜哄伐閫氳繃銆俙
+                  ? `机器验证 ${stage1.trialRun.completed}/${stage1.trialRun.required}；人工已批准 ${challengeTrialApprovedCount}，其余保持待审核，不计作正式人工通过。`
                   : `Machine validation ${stage1.trialRun.completed}/${stage1.trialRun.required}; ${challengeTrialApprovedCount} human-approved, with the remainder explicitly pending.`}
               </p>
             </article>
             <article id="challenge-mvp-roadmap" className={styles.challengeProgramResultCard}>
               <header>
-                <strong>{lang === "zh" ? "MVP 鍚庣画鑼冨洿" : "Post-MVP scope"}</strong>
+                <strong>{lang === "zh" ? "MVP 后续范围" : "Post-MVP scope"}</strong>
                 <span className={`${styles.researchStageStatus} ${styles.researchStageStatusPending}`}>
-                  {lang === "zh" ? "鏆傜紦" : "deferred"}
+                  {lang === "zh" ? "暂缓" : "deferred"}
                 </span>
               </header>
-              <p>{lang === "zh" ? "125 棰樻壒璺戜笌涓夋渚嬫繁鐮斾笉璁″叆鏈疆 MVP 瀹屾垚鏉′欢銆? : "The 125-question run and three deep cases are outside this MVP."}</p>
+              <p>{lang === "zh" ? "125 题批跑与三案例深研不计入本轮 MVP 完成条件。" : "The 125-question run and three deep cases are outside this MVP."}</p>
               <p>
                 {deepCase
-                  ? `${deepCase.title} 路 ${deepCaseStatus}`
-                  : (lang === "zh" ? "褰撳墠娌℃湁宸茬櫥璁扮殑浠ｈ〃鎬ф繁鐮旀渚嬨€? : "No representative deep-research case is registered.")}
+                  ? `${deepCase.title} · ${deepCaseStatus}`
+                  : (lang === "zh" ? "当前没有已登记的代表性深研案例。" : "No representative deep-research case is registered.")}
               </p>
             </article>
           </div>
@@ -711,29 +711,29 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
     return (
       <section
         className={styles.researchStageLauncher}
-        aria-label={lang === "zh" ? "绉戠爺鎺у埗鍙? : "Research console"}
+        aria-label={lang === "zh" ? "科研控制台" : "Research console"}
         aria-busy={challengeProgramLoading}
         aria-live="polite"
       >
         <div className={styles.researchStageLauncherHeader}>
           <div>
-            <strong>{challengeProgramProjection?.program.title || (lang === "zh" ? "绉戠爺鎺у埗鍙帮紙涓夐樁娈碉級" : "Research console (3 stages)")}</strong>
+            <strong>{challengeProgramProjection?.program.title || (lang === "zh" ? "科研控制台（三阶段）" : "Research console (3 stages)")}</strong>
             <span>
               {challengeProgramProjection
-                ? `${challengeProgramProjection.program.officialProblemId} 路 ${challengeProgramProjection.program.track}`
+                ? `${challengeProgramProjection.program.officialProblemId} · ${challengeProgramProjection.program.track}`
                 : researchStageRoundStatus
-                ? `${lang === "zh" ? "褰撳墠闃舵" : "Current"} 路 ${currentStageLabel}`
+                ? `${lang === "zh" ? "当前阶段" : "Current"} · ${currentStageLabel}`
                 : researchStageRoundStatusQuery.isPending
-                ? (lang === "zh" ? "璇诲彇闃舵鐘舵€佷腑" : "Loading stage status")
-                : (lang === "zh" ? "閫夋嫨涓€涓樁娈靛紑濮? : "Choose a stage to start")}
+                ? (lang === "zh" ? "读取阶段状态中" : "Loading stage status")
+                : (lang === "zh" ? "选择一个阶段开始" : "Choose a stage to start")}
             </span>
           </div>
           <div className={styles.researchStageHeaderActions}>
             <Link to={researchCanvasRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID)}>
               <Eye size={13} />
-              {lang === "zh" ? "鐮旂┒鍏崇郴鍥? : "Research graph"}
+              {lang === "zh" ? "研究关系图" : "Research graph"}
             </Link>
-            <VNativeButton type="button" onClick={() => void researchStageRoundStatusQuery.refetch()} disabled={researchStageRoundStatusQuery.isFetching} title={lang === "zh" ? "鍒锋柊闃舵鐘舵€? : "Refresh stage status"}>
+            <VNativeButton type="button" onClick={() => void researchStageRoundStatusQuery.refetch()} disabled={researchStageRoundStatusQuery.isFetching} title={lang === "zh" ? "刷新阶段状态" : "Refresh stage status"}>
               <RefreshCw size={13} />
             </VNativeButton>
           </div>
@@ -741,12 +741,12 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
         {researchTeamDetailDegraded ? (
           <div className={styles.researchStageDegradedNotice} role="status">
             <span>{selectedTeamDetailLoading
-              ? (lang === "zh" ? "姝ｅ湪琛ラ綈鍥㈤槦璇︽儏锛涚鐮旈樁娈电姸鎬佷粛鍙嫭绔嬭鍙栥€? : "Loading team details; research stage status remains available.")
-              : (lang === "zh" ? "鍥㈤槦璇︽儏鏆傛椂涓嶅彲鐢紱褰撳墠淇濈暀宸茶鍙栫殑绉戠爺鐘舵€併€? : "Team details are temporarily unavailable; loaded research state is retained.")}
+              ? (lang === "zh" ? "正在补齐团队详情；科研阶段状态仍可独立读取。" : "Loading team details; research stage status remains available.")
+              : (lang === "zh" ? "团队详情暂时不可用；当前保留已读取的科研状态。" : "Team details are temporarily unavailable; loaded research state is retained.")}
             </span>
             <VNativeButton type="button" onClick={() => void teamDetailQuery.refetch()} disabled={teamDetailQuery.isFetching}>
               <RefreshCw size={13} />
-              {lang === "zh" ? "閲嶈瘯璇︽儏" : "Retry details"}
+              {lang === "zh" ? "重试详情" : "Retry details"}
             </VNativeButton>
           </div>
         ) : null}
@@ -762,29 +762,29 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
         />
         {challengeProgramProjection ? (
           <div className={styles.challengeProgramScope}>
-            <strong>{lang === "zh" ? "褰撳墠鑼冨洿锛? 涓畬鏁存牱渚?+ 3 涓€氱敤鎬ф祴璇? : "Current scope: 1 golden sample + 3 validation questions"}</strong>
-            <span>{lang === "zh" ? "125 棰樿妯″寲涓庝笁妗堜緥娣辩爺宸叉槑纭欢鍚? : "125-question scale-up and three deep cases are explicitly deferred"}</span>
+            <strong>{lang === "zh" ? "当前范围：1 个完整样例 + 3 个通用性测试" : "Current scope: 1 golden sample + 3 validation questions"}</strong>
+            <span>{lang === "zh" ? "125 题规模化与三案例深研已明确延后" : "125-question scale-up and three deep cases are explicitly deferred"}</span>
           </div>
         ) : challengeProgramExpected ? null : (
           <label className={styles.researchStageTopicInput}>
-            <span>{lang === "zh" ? "鐮旂┒涓婚" : "Research topic"}</span>
+            <span>{lang === "zh" ? "研究主题" : "Research topic"}</span>
             <VNativeInput
               value={sourceCollectionDraft.topic}
               onChange={(event) => setSourceCollectionDraft((current) => ({ ...current, topic: event.target.value }))}
-              placeholder={lang === "zh" ? "渚嬪锛歱redictive coding" : "e.g. predictive coding"}
+              placeholder={lang === "zh" ? "例如：predictive coding" : "e.g. predictive coding"}
             />
           </label>
         )}
         {challengeProgramLoading ? (
           <div className={styles.researchStageDegradedNotice} role="status">
-            <span>{lang === "zh" ? "姝ｅ湪璇诲彇鎸戞垬鏉?MVP 鐘舵€侊紝涓嶄細鏄剧ず鏃х鐮旀祦绋嬨€? : "Loading the Challenge Cup MVP state without falling back to the legacy workflow."}</span>
+            <span>{lang === "zh" ? "正在读取挑战杯 MVP 状态，不会显示旧科研流程。" : "Loading the Challenge Cup MVP state without falling back to the legacy workflow."}</span>
           </div>
         ) : challengeProgramUnavailable ? (
           <div className={styles.researchStageDegradedNotice} role="alert">
-            <span>{lang === "zh" ? "鎸戞垬鏉?MVP 鐘舵€佹殏涓嶅彲鐢紱鏃х鐮旀祦绋嬪凡淇濇寔闅愯棌锛岄伩鍏嶄骇鐢熼敊璇搷浣溿€? : "The Challenge Cup MVP state is unavailable; the legacy workflow remains hidden to prevent incorrect actions."}</span>
+            <span>{lang === "zh" ? "挑战杯 MVP 状态暂不可用；旧科研流程已保持隐藏，避免产生错误操作。" : "The Challenge Cup MVP state is unavailable; the legacy workflow remains hidden to prevent incorrect actions."}</span>
             <VNativeButton type="button" onClick={() => void experimentPlanningStatusQuery.refetch()} disabled={experimentPlanningStatusQuery.isFetching}>
               <RefreshCw size={13} />
-              {lang === "zh" ? "閲嶈瘯" : "Retry"}
+              {lang === "zh" ? "重试" : "Retry"}
             </VNativeButton>
           </div>
         ) : (
@@ -816,12 +816,12 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
                 {!challengeProgramProjection && stageType === "experiment" ? (
                   <div className={styles.researchExperimentMethodQuickSelect}>
                     <label>
-                      <span>{lang === "zh" ? "瀹為獙鏂瑰紡" : "Experiment method"}</span>
+                      <span>{lang === "zh" ? "实验方式" : "Experiment method"}</span>
                       <VNativeSelect
                         value={selectedExperimentMethod}
                         onChange={(event) => setPreferredExperimentMethod(event.target.value as ExperimentMethodId | "")}
                         disabled={experimentMethodCatalogQuery.isFetching || !experimentMethodCatalogQuery.data}
-                        aria-label={lang === "zh" ? "閫夋嫨瀹為獙鏂瑰紡" : "Select experiment method"}
+                        aria-label={lang === "zh" ? "选择实验方式" : "Select experiment method"}
                       >
                         {experimentMethodCatalogQuery.data?.methods.map((method: any) => (
                           <option key={method.methodId} value={method.methodId}>
@@ -833,23 +833,23 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
                     <div>
                       <span>
                         {selectedExperimentMethodDescriptor
-                          ? `${selectedExperimentMethodDescriptor.requiredConfigFields.length} ${lang === "zh" ? "椤归厤缃? : "fields"}`
+                          ? `${selectedExperimentMethodDescriptor.requiredConfigFields.length} ${lang === "zh" ? "项配置" : "fields"}`
                           : (experimentMethodCatalogQuery.isFetching
-                            ? (lang === "zh" ? "璇诲彇鏂瑰紡涓? : "Loading methods")
-                            : (lang === "zh" ? "鏂瑰紡鐩綍涓嶅彲鐢? : "Method catalog unavailable"))}
+                            ? (lang === "zh" ? "读取方式中" : "Loading methods")
+                            : (lang === "zh" ? "方式目录不可用" : "Method catalog unavailable"))}
                       </span>
                       <span className={["ready", "not_required"].includes(selectedExperimentAdapterStatus) ? styles.researchExperimentMethodReady : styles.researchExperimentMethodPending}>
                         {selectedExperimentAdapterLabel}
                       </span>
                       <Link to={selectedExperimentMethodRoute}>
                         <Settings2 size={13} />
-                        {lang === "zh" ? "閰嶇疆鏂规硶" : "Configure"}
+                        {lang === "zh" ? "配置方法" : "Configure"}
                       </Link>
                     </div>
                     <p className={styles.researchExperimentMethodReason}>{selectedExperimentAdapterReason}</p>
                     {selectedExperimentAdapterStatus === "blocked" && executableAlternativeMethods.length > 0 ? (
                       <div className={styles.researchExperimentMethodAlternatives}>
-                        <span>{lang === "zh" ? "鍙墽琛屾浛浠? : "Executable alternatives"}</span>
+                        <span>{lang === "zh" ? "可执行替代" : "Executable alternatives"}</span>
                         {executableAlternativeMethods.map((method: any) => (
                           <VNativeButton
                             key={method.methodId}
@@ -867,25 +867,25 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
                   <div className={styles.researchStageCardMetrics}>
                     {stageType === "knowledge_collection" ? (
                       <>
-                        <span>{lang === "zh" ? "鐪熷疄鏍蜂緥" : "real sample"} {challengeProgramProjection.stage1ComplianceReadiness.singleQuestionSample.completed}/{challengeProgramProjection.stage1ComplianceReadiness.singleQuestionSample.required}</span>
-                        <span>{lang === "zh" ? "鐧剧偧璇佹嵁" : "DashScope evidence"} {challengeProgramProjection.stage1ComplianceReadiness.officialModelCallEvidence.count}</span>
-                        <span>{lang === "zh" ? "浜哄伐瀹℃牳" : "human review"} {challengeProgramProjection.stage1ComplianceReadiness.acceptance.allFourHumanGatesApproved ? (lang === "zh" ? "閫氳繃" : "approved") : (lang === "zh" ? "寰呭鐞? : "pending")}</span>
-                        <span>{lang === "zh" ? "鐙珛缁村害" : "dimensions"} {challengeProgramProjection.stage1ComplianceReadiness.independentEvaluationDimensions.length} 路 {lang === "zh" ? "浜哄伐闂ㄧ" : "human gates"} {challengeProgramProjection.stage1ComplianceReadiness.humanGates.length}</span>
+                        <span>{lang === "zh" ? "真实样例" : "real sample"} {challengeProgramProjection.stage1ComplianceReadiness.singleQuestionSample.completed}/{challengeProgramProjection.stage1ComplianceReadiness.singleQuestionSample.required}</span>
+                        <span>{lang === "zh" ? "百炼证据" : "DashScope evidence"} {challengeProgramProjection.stage1ComplianceReadiness.officialModelCallEvidence.count}</span>
+                        <span>{lang === "zh" ? "人工审核" : "human review"} {challengeProgramProjection.stage1ComplianceReadiness.acceptance.allFourHumanGatesApproved ? (lang === "zh" ? "通过" : "approved") : (lang === "zh" ? "待处理" : "pending")}</span>
+                        <span>{lang === "zh" ? "独立维度" : "dimensions"} {challengeProgramProjection.stage1ComplianceReadiness.independentEvaluationDimensions.length} · {lang === "zh" ? "人工门禁" : "human gates"} {challengeProgramProjection.stage1ComplianceReadiness.humanGates.length}</span>
                       </>
                     ) : stageType === "experiment" ? (
                       <>
-                        <span>{lang === "zh" ? "娴嬭瘯棰? : "test questions"} {challengeProgramProjection.stage1ComplianceReadiness.trialRun.completed}/{challengeProgramProjection.stage1ComplianceReadiness.trialRun.required}</span>
-                        <span>{lang === "zh" ? "浜哄伐鎶芥" : "human review"} {challengeTrialReviewRequiredCount > 0 ? (lang === "zh" ? `寰?${challengeTrialReviewRequiredCount}` : `${challengeTrialReviewRequiredCount} pending`) : (lang === "zh" ? "瀹屾垚" : "complete")}</span>
-                        <span>{lang === "zh" ? "MVP 鎬昏繘搴? : "MVP progress"} {challengeProgramProjection.stage1ComplianceReadiness.mvpManifest.completedQuestionCount}/{challengeProgramProjection.stage1ComplianceReadiness.mvpManifest.requiredQuestionCount}</span>
-                        <span>{lang === "zh" ? "瑙勬ā鍖? : "scale-up"} {lang === "zh" ? "宸插欢鍚? : "deferred"}</span>
+                        <span>{lang === "zh" ? "测试题" : "test questions"} {challengeProgramProjection.stage1ComplianceReadiness.trialRun.completed}/{challengeProgramProjection.stage1ComplianceReadiness.trialRun.required}</span>
+                        <span>{lang === "zh" ? "人工抽检" : "human review"} {challengeTrialReviewRequiredCount > 0 ? (lang === "zh" ? `待 ${challengeTrialReviewRequiredCount}` : `${challengeTrialReviewRequiredCount} pending`) : (lang === "zh" ? "完成" : "complete")}</span>
+                        <span>{lang === "zh" ? "MVP 总进度" : "MVP progress"} {challengeProgramProjection.stage1ComplianceReadiness.mvpManifest.completedQuestionCount}/{challengeProgramProjection.stage1ComplianceReadiness.mvpManifest.requiredQuestionCount}</span>
+                        <span>{lang === "zh" ? "规模化" : "scale-up"} {lang === "zh" ? "已延后" : "deferred"}</span>
                       </>
                     ) : (
                       <>
-                        <span>{lang === "zh" ? "125 棰樻壒璺? : "125-question run"} 路 {lang === "zh" ? "鏆傜紦" : "deferred"}</span>
-                        <span>{lang === "zh" ? "娣辩爺妗堜緥" : "deep cases"} {challengeProgramProjection.stage3DeepResearchDelivery.representativeCaseCount}/{challengeProgramProjection.stage3DeepResearchDelivery.requiredRepresentativeCaseCount}</span>
+                        <span>{lang === "zh" ? "125 题批跑" : "125-question run"} · {lang === "zh" ? "暂缓" : "deferred"}</span>
+                        <span>{lang === "zh" ? "深研案例" : "deep cases"} {challengeProgramProjection.stage3DeepResearchDelivery.representativeCaseCount}/{challengeProgramProjection.stage3DeepResearchDelivery.requiredRepresentativeCaseCount}</span>
                         <span title={challengeProgramProjection.stage3DeepResearchDelivery.caseRecords[0]?.claimBoundary || ""}>
-                          {challengeProgramProjection.stage3DeepResearchDelivery.caseRecords[0]?.title || (lang === "zh" ? "鍗曟渚? : "case")} 路 {challengeProgramProjection.stage3DeepResearchDelivery.caseRecords[0]?.internalStatus === "accepted_for_writeup"
-                            ? (lang === "zh" ? "妗堜緥鍐呴儴宸查€氳繃鎾板啓瀹℃煡" : "case accepted for write-up")
+                          {challengeProgramProjection.stage3DeepResearchDelivery.caseRecords[0]?.title || (lang === "zh" ? "单案例" : "case")} · {challengeProgramProjection.stage3DeepResearchDelivery.caseRecords[0]?.internalStatus === "accepted_for_writeup"
+                            ? (lang === "zh" ? "案例内部已通过撰写审查" : "case accepted for write-up")
                             : challengeProgramProjection.stage3DeepResearchDelivery.caseRecords[0]?.internalStatus || "-"}
                         </span>
                       </>
@@ -894,23 +894,23 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
                 ) : stageType === "knowledge_collection" && selectedSourceCollectionRun ? (
                   <div className={styles.researchStageCardMetrics}>
                     <span>{sourceCollectionRunLabel(selectedSourceCollectionRun.runId)}</span>
-                    <span>{lang === "zh" ? `鍙悳绱?${sourceCollectionSearchOpenAssignmentCountText}` : `search ${sourceCollectionSearchOpenAssignmentCountText}`}</span>
-                    <span>{lang === "zh" ? `鍚庣画 ${sourceCollectionDownstreamOpenAssignmentCountText}` : `next ${sourceCollectionDownstreamOpenAssignmentCountText}`}</span>
-                    <span>{lang === "zh" ? `鍘熷 ${sourceCollectionCollectedCountText}` : `raw ${sourceCollectionCollectedCountText}`}</span>
-                    <span>{lang === "zh" ? `鍊欓€?${sourceCollectionDisplayedCandidateCountText}` : `candidates ${sourceCollectionDisplayedCandidateCountText}`}</span>
-                    <span>{lang === "zh" ? `鏌ヨ ${sourceCollectionQueryCountText}` : `queries ${sourceCollectionQueryCountText}`}</span>
+                    <span>{lang === "zh" ? `可搜索 ${sourceCollectionSearchOpenAssignmentCountText}` : `search ${sourceCollectionSearchOpenAssignmentCountText}`}</span>
+                    <span>{lang === "zh" ? `后续 ${sourceCollectionDownstreamOpenAssignmentCountText}` : `next ${sourceCollectionDownstreamOpenAssignmentCountText}`}</span>
+                    <span>{lang === "zh" ? `原始 ${sourceCollectionCollectedCountText}` : `raw ${sourceCollectionCollectedCountText}`}</span>
+                    <span>{lang === "zh" ? `候选 ${sourceCollectionDisplayedCandidateCountText}` : `candidates ${sourceCollectionDisplayedCandidateCountText}`}</span>
+                    <span>{lang === "zh" ? `查询 ${sourceCollectionQueryCountText}` : `queries ${sourceCollectionQueryCountText}`}</span>
                   </div>
                 ) : stageType === "experiment" && experimentLifecycleProjection?.stage2 ? (
                   <>
                     <div className={styles.researchStageCardMetrics}>
-                      <span>{lang === "zh" ? `鍐荤粨璁捐 v${experimentLifecycleProjection.stage2.frozenDesignRevision || "-"}` : `frozen v${experimentLifecycleProjection.stage2.frozenDesignRevision || "-"}`}</span>
+                      <span>{lang === "zh" ? `冻结设计 v${experimentLifecycleProjection.stage2.frozenDesignRevision || "-"}` : `frozen v${experimentLifecycleProjection.stage2.frozenDesignRevision || "-"}`}</span>
                       <span title={experimentLifecycleProjection.stage2.activeDesignPlanId}>
-                        {lang === "zh" ? "褰撳墠璁捐" : "design"} {experimentLifecycleProjection.stage2.activeDesignPlanId || "-"}
+                        {lang === "zh" ? "当前设计" : "design"} {experimentLifecycleProjection.stage2.activeDesignPlanId || "-"}
                       </span>
-                      <span>{experimentLifecycleProjection.stage2.readyForExecution ? (lang === "zh" ? "鍙墽琛? : "executable") : (lang === "zh" ? "寰呭喕缁? : "not frozen")}</span>
+                      <span>{experimentLifecycleProjection.stage2.readyForExecution ? (lang === "zh" ? "可执行" : "executable") : (lang === "zh" ? "待冻结" : "not frozen")}</span>
                       <span title={experimentLifecycleProjection.stage2.memoryContextSummary?.missingEvidence.join(" / ") || ""}>
-                        {lang === "zh" ? "鍥㈤槦璁板繂" : "memory"} {experimentLifecycleProjection.stage2.memoryContextSummary?.knowledgeItemCount ?? 0}
-                        {" 路 "}{lang === "zh" ? "璐熷悜" : "negative"} {experimentLifecycleProjection.stage2.memoryContextSummary?.negativeExperimentCount ?? 0}
+                        {lang === "zh" ? "团队记忆" : "memory"} {experimentLifecycleProjection.stage2.memoryContextSummary?.knowledgeItemCount ?? 0}
+                        {" · "}{lang === "zh" ? "负向" : "negative"} {experimentLifecycleProjection.stage2.memoryContextSummary?.negativeExperimentCount ?? 0}
                       </span>
                     </div>
                     {renderResearchMemoryContextDetails(experimentLifecycleProjection.stage2.memoryContextSummary, "experiment")}
@@ -919,17 +919,17 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
                   <>
                     <div className={styles.researchStageCardMetrics}>
                       <span title={experimentLifecycleProjection.stage3.bestCandidateId}>
-                        {lang === "zh" ? "鏈€浣冲€欓€? : "best"} {experimentLifecycleProjection.stage3.bestCandidateId || "-"}
+                        {lang === "zh" ? "最佳候选" : "best"} {experimentLifecycleProjection.stage3.bestCandidateId || "-"}
                       </span>
                       <span title={experimentLifecycleProjection.stage3.bestValidatedResultId}>
-                        {lang === "zh" ? "鏈€浣崇粨鏋? : "result"} {experimentLifecycleProjection.stage3.bestValidatedResultId || "-"}
+                        {lang === "zh" ? "最佳结果" : "result"} {experimentLifecycleProjection.stage3.bestValidatedResultId || "-"}
                       </span>
                       <span title={experimentLifecycleProjection.stage3.latestDiagnosticStatus.title}>
-                        {lang === "zh" ? "鏈€杩戣瘖鏂? : "diagnostic"} {experimentLifecycleProjection.stage3.latestDiagnosticStatus.status || "-"}
+                        {lang === "zh" ? "最近诊断" : "diagnostic"} {experimentLifecycleProjection.stage3.latestDiagnosticStatus.status || "-"}
                       </span>
                       <span title={experimentLifecycleProjection.stage3.memoryContextSummary?.missingEvidence.join(" / ") || ""}>
-                        {lang === "zh" ? "宸茬敤璁板繂" : "memory used"} {experimentLifecycleProjection.stage3.memoryContextSummary?.knowledgeItemCount ?? 0}
-                        {" 路 "}{lang === "zh" ? "绂侀噸" : "blocked repeats"} {experimentLifecycleProjection.stage3.memoryContextSummary?.forbiddenDuplicateExperimentCount ?? 0}
+                        {lang === "zh" ? "已用记忆" : "memory used"} {experimentLifecycleProjection.stage3.memoryContextSummary?.knowledgeItemCount ?? 0}
+                        {" · "}{lang === "zh" ? "禁重" : "blocked repeats"} {experimentLifecycleProjection.stage3.memoryContextSummary?.forbiddenDuplicateExperimentCount ?? 0}
                       </span>
                     </div>
                     {renderResearchMemoryContextDetails(experimentLifecycleProjection.stage3.memoryContextSummary, "iteration")}
@@ -948,10 +948,10 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
                     >
                       <Eye size={13} />
                       {stageType === "knowledge_collection"
-                        ? (lang === "zh" ? "鏌ョ湅瀹屾暣鏍蜂緥" : "View golden sample")
+                        ? (lang === "zh" ? "查看完整样例" : "View golden sample")
                         : stageType === "experiment"
-                          ? (lang === "zh" ? "鏌ョ湅娴嬭瘯缁撴灉" : "View test results")
-                          : (lang === "zh" ? "鏌ョ湅鍚庣画鑼冨洿" : "View post-MVP scope")}
+                          ? (lang === "zh" ? "查看测试结果" : "View test results")
+                          : (lang === "zh" ? "查看后续范围" : "View post-MVP scope")}
                     </a>
                   ) : stageType === "knowledge_collection" ? (
                     <VNativeButton
@@ -978,8 +978,8 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
                     <Link to={researchWorkspaceStageRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID, stageType)}>
                       <Link2 size={13} />
                       {stageType === "knowledge_collection"
-                        ? (lang === "zh" ? "鎵嬪姩鎺у埗" : "Manual controls")
-                        : (lang === "zh" ? "闃舵璇︽儏" : "Details")}
+                        ? (lang === "zh" ? "手动控制" : "Manual controls")
+                        : (lang === "zh" ? "阶段详情" : "Details")}
                     </Link>
                   ) : null}
                 </div>
