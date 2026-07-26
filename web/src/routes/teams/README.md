@@ -50,6 +50,7 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 | Shared UI pack barrel | `teamSharedPanels.ts` | path-specific orchestration |
 | Research UI pack barrel | `teamResearchPanels.ts` | SC orchestration |
 | Source-collection UI pack barrel | `teamSourceCollectionPanels.ts` | research orchestration |
+| Experiment + research-loop mutations | `useTeamExperimentLoopMutations.ts` | drafts/view orchestration |
 | Orchestration / wiring only | `../TeamsRoute.tsx` | — |
 
 ## Bundle note (path-scoped secondary packs)
@@ -84,13 +85,15 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 - **Wave 8M done:** SC selected-source / controls / active-stage workspaces extracted (small helpers like filterBar/pagination/modeFields remain route-local).
 - **Wave 8N done:** Split mono secondary barrel into path-scoped packs: `teamSharedPanels` / `teamResearchPanels` / `teamSourceCollectionPanels`.
 - **Wave 8N+prefetch done:** Path-scoped pack warm-up after team/view switch (`teamPanelPrefetch.ts`).
+- **Wave 8O done:** Extract experiment + research-loop write mutations to `useTeamExperimentLoopMutations` (EventSource-free).
 
 ## Next (planned)
 
-1. Extract EventSource-free mutation hooks (`useTeamWorkflowMutations` family) only when a hook can own a full boundary.
-2. Optional: extract remaining small SC helpers only if they block further shell shrink.
-3. Optional: style-bound tone helpers (`workflowQualityTone`) once styles map ownership is clear.
-4. Optional: collapse SC chrome+workspace double layer when inject surface stabilizes.
+1. Extract SC write mutations after local payload types are promoted out of `TeamsRoute.tsx`.
+2. Extract shell mutations (canvas/message/sync/archive/round) when a clean boundary exists.
+3. Optional: extract remaining small SC helpers only if they block further shell shrink.
+4. Optional: style-bound tone helpers (`workflowQualityTone`) once styles map ownership is clear.
+5. Optional: collapse SC chrome+workspace double layer when inject surface stabilizes.
 
 ## Rules
 
