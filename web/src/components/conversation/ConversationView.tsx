@@ -28,12 +28,8 @@ import type {
 } from "../../agent-thread/types";
 import { fetchJson } from "../../api/client";
 import { useAppI18n } from "../../i18n/useAppI18n";
-import { AgentContextSectionsView } from "./AgentContextSectionsView";
 import { ConversationImageArtifactView } from "./ConversationImageArtifactView";
-import {
-  ConversationImagePreviewDialog,
-  type ConversationImagePreviewRequest,
-} from "./ConversationImagePreviewDialog";
+import type { ConversationImagePreviewRequest } from "./ConversationImagePreviewDialog";
 import { ConversationStreamingResponseContent } from "./ConversationStreamingResponseContent";
 import { ConversationTurnAvatarContent } from "./ConversationTurnAvatarContent";
 import {
@@ -55,6 +51,18 @@ import {
 import { AgentMessageTurnView } from "./AgentMessageTurnView";
 import { AgentResponseSectionView } from "./AgentResponseSectionView";
 import { AgentUserContentSectionView } from "./AgentUserContentSectionView";
+
+/** T1: dialog/context chrome load only when opened — keep transcript path leaner. */
+const ConversationImagePreviewDialog = React.lazy(() =>
+  import("./ConversationImagePreviewDialog").then((module) => ({
+    default: module.ConversationImagePreviewDialog,
+  })),
+);
+const AgentContextSectionsView = React.lazy(() =>
+  import("./AgentContextSectionsView").then((module) => ({
+    default: module.AgentContextSectionsView,
+  })),
+);
 import { shouldSubmitComposerOnKeydown } from "./composerShortcuts";
 import {
   filterSlashCommandSuggestions,
@@ -3111,9 +3119,11 @@ export function ConversationView({
             const agentInboxExpanded = getExpansionState(message.id, "agentInbox", false);
             const agentInboxPreview = agentInboxMessage ? compactPreview(agentInboxSummary(message), 140) : "";
             const researchOrgChips = researchOrgMessageChips(message);
-            const contextNode = (
-              <AgentContextSectionsView sections={agentRenderState.contextSections} lang={lang} />
-            );
+            const contextNode = (agentRenderState.contextSections?.length ?? 0) > 0 ? (
+              <React.Suspense fallback={null}>
+                <AgentContextSectionsView sections={agentRenderState.contextSections} lang={lang} />
+              </React.Suspense>
+            ) : null;
             const turnClassName = [
               groupTranscriptMessage
                 ? styles.groupTranscriptTurn
@@ -3644,7 +3654,9 @@ export function ConversationView({
       </div>
       ) : null}
       {previewImage ? (
-        <ConversationImagePreviewDialog image={previewImage} lang={lang} onClose={closeImagePreview} />
+        <React.Suspense fallback={null}>
+          <ConversationImagePreviewDialog image={previewImage} lang={lang} onClose={closeImagePreview} />
+        </React.Suspense>
       ) : null}
     </div>
   );

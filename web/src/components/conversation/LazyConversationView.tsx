@@ -1,6 +1,7 @@
 import { lazy, Suspense, type ReactNode } from "react";
 
 import type { ConversationViewProps } from "./conversationViewTypes";
+import { prefetchConversationView } from "./prefetchConversationView";
 
 const ConversationView = lazy(async () => {
   const module = await import("./ConversationView");
@@ -18,3 +19,5 @@ export function LazyConversationView({ fallback, ...props }: LazyConversationVie
     </Suspense>
   );
 }
+
+export { prefetchConversationView };

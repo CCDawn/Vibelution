@@ -74,6 +74,18 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("useShellI18n");
     expect(routeSource).toContain("const { lang } = useShellI18n({ configEnabled: false })");
     expect(routeSource).not.toContain("useAppI18n");
+    expect(routeSource).not.toContain("../i18n/dictionary");
+    expect(routeSource).not.toContain("../i18n/useAppI18n");
+  });
+
+  it("loads secondary launcher panels as lazy route packs (T4)", () => {
+    expect(routeSource).toContain('import("./LauncherStartupSettingsPanel")');
+    expect(routeSource).toContain('import("./LauncherProjectMaintenancePanel")');
+    expect(routeSource).toContain('import("./LauncherDeveloperModePanel")');
+    expect(routeSource).toContain('import("./LauncherDiagnosticsPanel")');
+    expect(routeSource).not.toMatch(/import \{ LauncherStartupSettingsPanel \} from/);
+    expect(routeSource).not.toMatch(/import \{ LauncherDiagnosticsPanel \} from/);
+    expect(routeSource).toContain("<Suspense");
   });
 
   it("mounts the Launcher as an independent top-level control surface", () => {
