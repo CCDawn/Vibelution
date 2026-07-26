@@ -20,7 +20,14 @@ import routeStyles from "./EvolutionRoute.styles";
 import stylesSource from "./EvolutionRoute.styles.ts?raw";
 
 const worktreeReviewStylesSource = readFileSync(new URL("./SupervisedWorktreeReviewPanel.styles.ts", import.meta.url), "utf-8");
-const dictionarySource = readFileSync(new URL("../i18n/dictionary.ts", import.meta.url), "utf-8");
+const evolutionDictionarySource = readFileSync(
+  new URL("../i18n/domains/dictionaryEvolution.ts", import.meta.url),
+  "utf-8",
+);
+const coreDictionarySource = readFileSync(
+  new URL("../i18n/domains/dictionaryCore.ts", import.meta.url),
+  "utf-8",
+);
 const evolutionTypesSource = readFileSync(new URL("../api/types/evolution.ts", import.meta.url), "utf-8");
 const evolutionSources = [
   routeSource,
@@ -183,8 +190,8 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("item.visibilityReason");
     expect(routeSource).toContain("item.usabilityReason");
     expect(routeSource).toContain("datasetCatalogStatusLabel");
-    expect(dictionarySource).toContain('datasetCatalog: "评测集目录"');
-    expect(dictionarySource).toContain('datasetCatalogHiddenReason: "隐藏原因"');
+    expect(evolutionDictionarySource).toContain('datasetCatalog: "评测集目录"');
+    expect(evolutionDictionarySource).toContain('datasetCatalogHiddenReason: "隐藏原因"');
     expect(routeStyles.datasetCatalogPanel).toContain("[max-height:min(238px,_34vh)]");
   });
 
@@ -207,7 +214,7 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("selectedSourceOfficialWarning");
     expect(routeSource).toContain('t("sourceOfficialVerifierWarning")');
     expect(routeSource).toContain("styles.sourceWarningStrip");
-    expect(dictionarySource).toContain("Terminal-Bench 官方 Harbor 判分尚未接入");
+    expect(evolutionDictionarySource).toContain("Terminal-Bench 官方 Harbor 判分尚未接入");
     expect(routeStyles.sourceWarningStrip).toContain("var(--state-warning)");
   });
 
@@ -223,10 +230,10 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(runRecordsPanelSource).not.toContain('title={selectedRun.outcomeSemantics.runtimeExplanation}');
     expect(runRecordsPanelSource).not.toContain('title={selectedRun.riskReasons.join(" / ")}');
     expect(routeSource).toContain("proposalDetailQuery.data.supervised.riskReasons.join");
-    expect(dictionarySource).toContain('supervisedFlowRunsHint: "同一改良 Agent 提建议并改候选"');
-    expect(dictionarySource).toContain('decision: "治理结论"');
-    expect(dictionarySource).toContain('diagnosis: "治理结论说明"');
-    expect(dictionarySource).not.toContain('retrySupervisedRun: "重跑失败项"');
+    expect(evolutionDictionarySource).toContain('supervisedFlowRunsHint: "同一改良 Agent 提建议并改候选"');
+    expect(coreDictionarySource).toContain('decision: "治理结论"');
+    expect(coreDictionarySource).toContain('diagnosis: "治理结论说明"');
+    expect(coreDictionarySource).not.toContain('retrySupervisedRun: "重跑失败项"');
   });
 
   it("keeps supervised run records queue and detail composition in the extracted panel", () => {
@@ -439,18 +446,18 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("supervisedMentalModelMode");
     expect(routeSource).toContain("mentalModelMode: supervisedMentalModelMode");
     expect(routeSource).toContain('ariaLabel={t("supervisedMentalMode")}');
-    expect(dictionarySource).toContain('supervisedMentalMode: "心智模式"');
+    expect(evolutionDictionarySource).toContain('supervisedMentalMode: "心智模式"');
   });
 
   it("uses action-oriented supervised section labels instead of internal system terms", () => {
-    expect(dictionarySource).toContain('supervisedControl: "发起评测"');
-    expect(dictionarySource).toContain('launchSupervisedRun: "选择来源并启动"');
-    expect(dictionarySource).toContain('activeSupervisedRun: "现场进度"');
-    expect(dictionarySource).toContain('runList: "结果列表"');
-    expect(dictionarySource).toContain('runDetail: "结果详情"');
-    expect(dictionarySource).toContain('libraryItems: "已记录建议"');
-    expect(dictionarySource).toContain('pendingReview: "待处理建议"');
-    expect(dictionarySource).toContain('workbenchContext: "当前评测入口"');
+    expect(evolutionDictionarySource).toContain('supervisedControl: "发起评测"');
+    expect(coreDictionarySource).toContain('launchSupervisedRun: "选择来源并启动"');
+    expect(coreDictionarySource).toContain('activeSupervisedRun: "现场进度"');
+    expect(coreDictionarySource).toContain('runList: "结果列表"');
+    expect(coreDictionarySource).toContain('runDetail: "结果详情"');
+    expect(evolutionDictionarySource).toContain('libraryItems: "已记录建议"');
+    expect(coreDictionarySource).toContain('pendingReview: "待处理建议"');
+    expect(evolutionDictionarySource).toContain('workbenchContext: "当前评测入口"');
   });
 
   it("keeps the live launch panel focused on starting evaluations", () => {
@@ -654,7 +661,7 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).not.toContain('title={t("closedLoopLaunchPanelHint")}');
     expect(routeSource).toContain("styles.closedLoopModeBadge");
     expect(routeSource).toContain("当前只演练编排链路，不调用真实 LLM 自改。");
-    expect(dictionarySource).toContain("结果会进入下方候选审核，不会自动合并。");
+    expect(evolutionDictionarySource).toContain("结果会进入下方候选审核，不会自动合并。");
     expect(routeStyles.closedLoopLaunchBlock).toContain("[grid-template-columns:minmax(0,_1fr)_minmax(92px,_auto)]");
     expect(routeStyles.closedLoopModeBadge).toContain("[border-radius:999px]");
   });
