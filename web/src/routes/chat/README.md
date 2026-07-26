@@ -78,16 +78,19 @@ Plan: `docs/superpowers/plans/2026-07-19-chat-coding-route-stream-selection-spli
 
 Do not re-add static imports of those modules into the Chat shell without a budget re-check.
 
-## ConversationView boundary (D2)
+## ConversationView boundary (D2 + M6)
 
 Timeline message rendering lives under `web/src/components/conversation/`.
 Prefer pure modules there over growing `ConversationView.tsx`.
+
+**Full block map / 30-second routing:** `web/src/components/conversation/README.md` (M6).
 
 | Task type | Prefer | Avoid |
 |-----------|--------|--------|
 | Feedback status placeholder / long-loop labels | `conversationFeedbackStatusPresentation.ts` | ConversationView JSX |
 | Internal streaming status markers | `conversationInternalStatus.ts` | route shell |
 | Operation groups / timeline rows | `agentMessageOperations.ts`, `agentMessageTimeline*.ts` | ChatCodingRoute |
+| Virtual window / stick-bottom | `conversationHistoryWindow.ts`, `conversationTimelineFollowState.ts` | ChatCodingRoute |
 | Stream EventSource ownership | `useSessionDetailStream.ts` / `useGroupRoomStream.ts` | ConversationView |
 
 ## Live load policy (P1/P5)
@@ -116,9 +119,9 @@ See `PERF_BASELINE.md` for F0 numbers and gaps.
 ## Next (planned)
 
 - Prefer chunk wins over further pure LOC grind on `ChatCodingRoute` (already hook/panel split)
-- Continue ConversationView pure extracts only when claimability requires it (draft mappers stay out)
+- ConversationView block map is documented (M6); further pure extracts only when claimability requires it
 - Target `ChatCodingRoute` toward ~800–1500 LOC only when a concrete claim needs it
-- Agents pane lazy + mutation hooks: see frontend ROI program F3 (agents/README)
+- Agents structure M1–M3 and Teams/Evolution M4–M5 are on local main; see lane READMEs
 
 ## Hand-test substitutes
 
