@@ -62,6 +62,7 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 | SC run query payload types | `sourceCollectionRunQueryModel.ts` | route-only presentation |
 | Experiment + research-loop status queries | `useTeamResearchSecondaryQueries.ts` | workspace-view gating |
 | Workflow tag tone helpers | `workflowTone.ts` | style map ownership |
+| Shell pure helpers (stage parse / node labels / candidate graph) | `teamRouteShellModel.ts` | style-bound class helpers |
 | Orchestration / wiring only | `../TeamsRoute.tsx` | — |
 
 ## Bundle note (path-scoped secondary packs)
@@ -88,13 +89,15 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 ## Pure extract progress
 
 - **Done:** workspace navigation, team kind guards, canvas geometry, source-collection presentation, experiment/loop types+labels, AI-search presentation, workflow presentation labels, research stage agent role tables, workflow query keys, stage-agent presentation/routes.
-- **Still in `TeamsRoute.tsx` (intentional shell):** URL/view drafts, selection, JSX composition, thin `render*` inject adapters (filterBar/pagination/modeFields), and remaining shell queries (teams/detail/canvas/runs list/AI search/linked room/runtime).
+- **Done (M5 structure):** `teamRouteShellModel.ts` — stage module parse, node/function labels, chat feedback text, candidate graph/chunk-plan pure helpers.
+- **Still in `TeamsRoute.tsx` (intentional shell):** URL/view drafts, selection, JSX composition, thin `render*` inject adapters (filterBar/pagination/modeFields), style-bound class helpers (`roleBadgeTone` / `nodeTone` / tone wrappers), and remaining shell queries.
 - **Wave 8G–8P done:** panel extract, path packs + prefetch, experiment/loop mutations, SC write mutations (see history below).
 - **Wave 8Q done:** Team shell write mutations → `useTeamShellMutations`.
 - **Wave 8R done:** Workflow start/session mutations → `useTeamWorkflowStartMutations` + `workflowStartMutationModel`.
 - **Wave 8S done:** SC selected-run detail queries + research secondary queries extracted; SC run list selection stays route-owned.
 - **Wave 8T done:** `workflowQualityTone` / `workflowIngestionTone` → `workflowTone.ts` (styles map injected via bound wrappers). Thin SC helpers remain route-local by design.
 - **Wave 8U done:** Phase 8 closure — ownership map + contracts green; route has **zero** inline `useMutation` definitions.
+- **M5 done:** shell pure helpers extracted without touching path packs or mutation ownership.
 
 ### Phase 8 Closure
 
@@ -111,10 +114,16 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 
 **History (8G–8P):** 8G AI Search + stage agents · 8H launcher · 8I standalone stage · 8J loop/ledger · 8K–8M SC workspaces · 8N packs · prefetch · 8O experiment mutations · 8P SC mutations.
 
+## Structure program
+
+| Wave | Goal | Status |
+|------|------|--------|
+| M5 | TeamsRoute shell pure extract | **Done** — `teamRouteShellModel.ts` |
+
 ## Next (planned) — Phase 9+
 
 1. Optional: collapse SC chrome+workspace double layer when inject surface stabilizes.
-2. Optional: extract remaining small SC helpers only if they block a concrete shell shrink claim.
+2. Optional: extract remaining style-bound shell helpers only if they block a concrete claim.
 3. Optional: cross-route query/mutation patterns (Chat/Agents) only with a new phase charter.
 
 ## Rules
