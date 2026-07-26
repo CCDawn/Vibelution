@@ -51,6 +51,8 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 | Research UI pack barrel | `teamResearchPanels.ts` | SC orchestration |
 | Source-collection UI pack barrel | `teamSourceCollectionPanels.ts` | research orchestration |
 | Experiment + research-loop mutations | `useTeamExperimentLoopMutations.ts` | drafts/view orchestration |
+| Source-collection write mutations | `useTeamSourceCollectionMutations.ts` | drafts/view/session-task orchestration |
+| Source-collection mutation payload types | `sourceCollectionMutationModel.ts` | route-only presentation |
 | Orchestration / wiring only | `../TeamsRoute.tsx` | — |
 
 ## Bundle note (path-scoped secondary packs)
@@ -75,7 +77,7 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 ## Pure extract progress
 
 - **Done:** workspace navigation, team kind guards, canvas geometry, source-collection presentation, experiment/loop types+labels, AI-search presentation, workflow presentation labels, research stage agent role tables, workflow query keys, stage-agent presentation/routes.
-- **Still in `TeamsRoute.tsx`:** mutation wiring, JSX shell, style-bound tone helpers, large panel orchestration.
+- **Still in `TeamsRoute.tsx`:** shell mutations (canvas/message/sync/archive/round/session-task), JSX shell, style-bound tone helpers, remaining panel orchestration.
 - **Wave 8G done:** AI Search workspace + research stage agent summary/panel extracted to secondary-lazy components.
 - **Wave 8H done:** Research stage launcher (three-stage + Challenge Cup MVP console) extracted to `TeamResearchStageLauncherPanel`.
 - **Wave 8I done:** Experiment/iteration standalone stage page extracted to `TeamResearchStageStandalonePagePanel` (ledger/loop panels remain route-owned injectables).
@@ -86,14 +88,14 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 - **Wave 8N done:** Split mono secondary barrel into path-scoped packs: `teamSharedPanels` / `teamResearchPanels` / `teamSourceCollectionPanels`.
 - **Wave 8N+prefetch done:** Path-scoped pack warm-up after team/view switch (`teamPanelPrefetch.ts`).
 - **Wave 8O done:** Extract experiment + research-loop write mutations to `useTeamExperimentLoopMutations` (EventSource-free).
+- **Wave 8P done:** Promote SC mutation payload types to `sourceCollectionMutationModel` and extract write mutations to `useTeamSourceCollectionMutations` (EventSource-free; scroll helper late-bound via ref).
 
 ## Next (planned)
 
-1. Extract SC write mutations after local payload types are promoted out of `TeamsRoute.tsx`.
-2. Extract shell mutations (canvas/message/sync/archive/round) when a clean boundary exists.
-3. Optional: extract remaining small SC helpers only if they block further shell shrink.
-4. Optional: style-bound tone helpers (`workflowQualityTone`) once styles map ownership is clear.
-5. Optional: collapse SC chrome+workspace double layer when inject surface stabilizes.
+1. Extract shell mutations (canvas/message/sync/archive/round) when a clean boundary exists.
+2. Optional: extract remaining small SC helpers only if they block further shell shrink.
+3. Optional: style-bound tone helpers (`workflowQualityTone`) once styles map ownership is clear.
+4. Optional: collapse SC chrome+workspace double layer when inject surface stabilizes.
 
 ## Rules
 

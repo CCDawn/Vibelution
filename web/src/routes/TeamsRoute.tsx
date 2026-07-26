@@ -16,6 +16,17 @@ import {
   resolveTeamsPanelPrefetchPacks,
 } from "./teams/teamPanelPrefetch";
 import { useTeamExperimentLoopMutations } from "./teams/useTeamExperimentLoopMutations";
+import { useTeamSourceCollectionMutations } from "./teams/useTeamSourceCollectionMutations";
+import type {
+  SourceCollectionOutputDraft,
+  TeamWorkflowKnowledgeIngestionPrecheckPayload,
+  TeamWorkflowPaperNoteChunkPlanPayload,
+  TeamWorkflowSourceCollectionSearchExecutionPayload,
+  TeamWorkflowSourceCollectionStorageOpenPayload,
+  TeamWorkflowSourceQualityAssessmentPayload,
+  TeamWorkflowSourceQualityBatchAssessmentPayload,
+  SourceCollectionSearchExecutionEvent,
+} from "./teams/sourceCollectionMutationModel";
 import {
   AI_SEARCH_RUN_PREVIEW_LIMIT,
 } from "./teams/aiSearchPresentation";
@@ -464,42 +475,11 @@ type TeamsRouteProps = {
   sourceCollectionStandalone?: boolean;
 };
 
-type TeamWorkflowKnowledgeIngestionPrecheckPayload = {
-  candidate: TeamWorkflowCandidate;
-  validation: { valid: boolean; issues: Array<Record<string, unknown>> };
-  precheck: {
-    status: string;
-    generatedByAgent: string;
-    selectedCandidateCount: number;
-    filteredCandidateCount?: number;
-    candidateIds?: string[];
-    candidateGraphId?: string;
-    officialBoundary: {
-      writesOfficialKnowledge: boolean;
-      writesOfficialRag: boolean;
-      writesOfficialGraph: boolean;
-      requiresReviewBeforeOfficialSync?: boolean;
-    };
-  };
-  status: TeamWorkflowKnowledgeIngestionStatus;
-  workflow: TeamWorkflowOrchestration;
-};
-
 type NodeDraft = {
   label: string;
   role: string;
   purpose: string;
   agentId: string;
-};
-
-type SourceCollectionOutputDraft = {
-  assignmentId: string;
-  sourceType: string;
-  title: string;
-  sourceRef: string;
-  rawLocation: string;
-  summary: string;
-  notes: string;
 };
 
 type DataProcessingRecordListPayload = {
@@ -597,107 +577,6 @@ function parseSourceCollectionStageModuleId(value: string | null): SourceCollect
     : null;
 }
 
-type TeamWorkflowSourceCollectionStorageOpenPayload = {
-  schemaVersion: number;
-  teamId: string;
-  runId: string;
-  target: SourceCollectionStorageOpenTarget;
-  path: string;
-  openedPath: string;
-  targetExists: boolean;
-  storageArtifacts: SourceCollectionStorageArtifacts;
-};
-
-type SourceCollectionSearchExecutionEvent = {
-  eventId: string;
-  eventType: string;
-  status: string;
-  title: string;
-  summary: string;
-  agentRole: string;
-  agentId: string;
-  assignmentId: string;
-  queryId: string;
-  query: string;
-  sourceType: string;
-  refs: string[];
-  rawLocation: string;
-  storageRefs: string[];
-  createdAt: string;
-};
-
-type TeamWorkflowSourceCollectionSearchExecutionPayload = {
-  schemaVersion: number;
-  teamId: string;
-  runId: string;
-  status: string;
-  executionMode?: "background" | string;
-  accepted?: boolean;
-  provider: string;
-  executedQueryCount: number;
-  skippedQueryCount: number;
-  failedQueryCount: number;
-  resultCount: number;
-  recordCount: number;
-  createdUniqueRecordCount?: number;
-  outputCount: number;
-  importedCount: number;
-  skippedDuplicateCount?: number;
-  filteredExcludedCount?: number;
-  duplicateSourceKeys?: string[];
-  excludedSourceKeys?: string[];
-  remainingQueryCount?: number;
-  nextRunnableQueryIds?: string[];
-  hasMore?: boolean;
-  run: TeamWorkflowSourceCollectionRunStartPayload["run"];
-  runStatus: DataProcessingStatus;
-  sourceCollectionSummary?: {
-    assignmentCount: number;
-    openAssignmentCount: number;
-    searchAssignmentCount: number;
-    searchOpenAssignmentCount: number;
-    collectionAssignmentCount: number;
-    collectionOpenAssignmentCount: number;
-    downstreamAssignmentCount: number;
-    downstreamOpenAssignmentCount: number;
-  };
-  storageArtifacts: SourceCollectionStorageArtifacts;
-  assignments: TeamWorkflowSourceCollectionRunStartPayload["assignments"];
-  outputs: Array<DataProcessingCollectionOutputPayload["output"]>;
-  createdRecords: DataProcessingCollectionOutputPayload["createdRecords"];
-  imported: TeamWorkflowDataRecordSourceCandidateImportPayload[];
-  executionEvents: SourceCollectionSearchExecutionEvent[];
-  activeWorkRun?: {
-    runId: string;
-    status: string;
-    currentPhase: string;
-    currentTask?: string;
-    summary?: string;
-    openAssignmentCount?: number;
-    searchAssignmentCount?: number;
-    searchOpenAssignmentCount?: number;
-    collectionAssignmentCount?: number;
-    collectionOpenAssignmentCount?: number;
-    downstreamAssignmentCount?: number;
-    downstreamOpenAssignmentCount?: number;
-    recordCount?: number;
-    queryCount?: number;
-    error?: string;
-    errorType?: string;
-    storagePath?: string;
-    updatedAt?: string;
-  };
-  boundaries: {
-    externalSearchTriggered: boolean;
-    externalSearchQueued?: boolean;
-    metadataOnlyDownload: boolean;
-    writesFormalKnowledge: boolean;
-    writesRag: boolean;
-    writesOfficialGraph: boolean;
-  };
-  nextActions: string[];
-};
-
 type SourceCollectionSummaryPayload = {
   schemaVersion: number;
   teamId: string;
@@ -765,78 +644,6 @@ type ResearchStageRoundStartPayload = {
   };
   boundaries: ResearchStageRoundStatusPayload["boundaries"];
   nextActions?: string[];
-};
-
-type TeamWorkflowPaperNoteChunkPlanPayload = {
-  candidate: TeamWorkflowCandidate;
-  chunkPlan: {
-    planId: string;
-    status: string;
-    chunkCount: number;
-  };
-  workflow: TeamWorkflowOrchestration;
-  nextActions: string[];
-};
-
-type TeamWorkflowSourceQualityAssessmentPayload = {
-  candidate: TeamWorkflowCandidate;
-  assessment: {
-    assessmentId: string;
-    decision: string;
-    scores: {
-      relevance: number;
-      reliability: number;
-      accessibility: number;
-      extractionReadiness: number;
-      overall: number;
-    };
-  };
-  status: TeamWorkflowSourceQualityStatus;
-  workflow: TeamWorkflowOrchestration;
-  nextActions: string[];
-};
-
-type TeamWorkflowSourceQualityBatchAssessmentPayload = {
-  schemaVersion: number;
-  teamId: string;
-  workflowId: string;
-  batchRunId: string;
-  executionMode: string;
-  status: string;
-  assessedByAgent: string;
-  summary: {
-    targetCandidateCount: number;
-    assessedCandidateCount: number;
-    approvedCandidateCount: number;
-    needsRevisionCandidateCount: number;
-    rejectedCandidateCount: number;
-    failedCandidateCount: number;
-    skippedCandidateCount: number;
-  };
-  assessments: Array<{
-    candidateId: string;
-    title: string;
-    assessmentId: string;
-    decision: string;
-    overallScore: number;
-    requiredFixes: string[];
-    riskFlags: string[];
-    currentState: string;
-    qualityStatus: string;
-    assessedAt: string;
-  }>;
-  skippedCandidates: Array<{ candidateId: string; title?: string; reason: string }>;
-  failedCandidates: Array<{ candidateId: string; error: string }>;
-  sourceQualityStatus: TeamWorkflowSourceQualityStatus;
-  workflow: TeamWorkflowOrchestration;
-  officialBoundary: {
-    writesFormalKnowledge: boolean;
-    writesRag: boolean;
-    writesOfficialGraph: boolean;
-    candidateOnly: boolean;
-  };
-  nextActions: string[];
-  updatedAt: string;
 };
 
 type NodeDragState = {
@@ -1174,6 +981,8 @@ export function TeamsRoute({
   const [canvasFrameSize, setCanvasFrameSize] = useState<CanvasFrameSize>({ width: CANVAS_VIEWPORT_WIDTH, height: CANVAS_VIEWPORT_HEIGHT });
   const [lockedCanvasViewportStyle, setLockedCanvasViewportStyle] = useState<CanvasViewportStyle | null>(null);
   const sourceCollectionControlPanelRef = useRef<HTMLElement | null>(null);
+  // Late-bound: mutations hook is declared above scroll helper; keep stable identity via ref.
+  const scrollSourceCollectionPanelIntoViewRef = useRef<(panelId: string) => void>(() => {});
   const canvasFrameRef = useRef<HTMLDivElement | null>(null);
   const dragStateRef = useRef<NodeDragState | null>(null);
   const dragFrameRef = useRef(0);
@@ -2159,403 +1968,30 @@ export function TeamsRoute({
     setResearchLoopDecisionDraft,
   });
 
-  const recordSourceCollectionOutputMutation = useMutation({
-    mutationFn: async (payload: { teamId: string; runId: string; draft: SourceCollectionOutputDraft }) => {
-      const output = await fetchJson<DataProcessingCollectionOutputPayload>(
-        `/api/data-processing/runs/${encodeURIComponent(payload.runId)}/collection-assignments/${encodeURIComponent(payload.draft.assignmentId)}/outputs`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            status: "completed",
-            notes: payload.draft.notes.trim(),
-            records: [
-              {
-                sourceType: payload.draft.sourceType,
-                title: payload.draft.title.trim(),
-                sourceRef: payload.draft.sourceRef.trim(),
-                rawLocation: payload.draft.rawLocation.trim(),
-                summary: payload.draft.summary.trim(),
-                status: "collected",
-                metadata: {
-                  allowedForAnalysis: true,
-                  enteredFrom: "teams_research_source_collection_panel",
-                },
-                qualitySignals: {
-                  manualEntry: true,
-                  needsIntakeReview: true,
-                },
-              },
-            ],
-          }),
-        },
-      );
-      const imported = await Promise.all(
-        output.createdRecords.map((record) =>
-          fetchJson<TeamWorkflowDataRecordSourceCandidateImportPayload>(
-            `/api/teams/${encodeURIComponent(payload.teamId)}/workflow-orchestration/data-processing/runs/${encodeURIComponent(payload.runId)}/records/${encodeURIComponent(record.recordId)}/source-candidate`,
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                createdByAgent: sourceCollectionOwnerAgentId,
-                tags: ["source_collection", "manual_writeback"],
-                metadata: {
-                  sourceCollectionPanel: true,
-                  assignmentId: payload.draft.assignmentId,
-                },
-              }),
-            },
-          ),
-        ),
-      );
-      return { output, imported };
-    },
-    onSuccess: (payload, variables) => {
-      setSourceCollectionOutputDraft((current) => ({
-        ...current,
-        title: "",
-        sourceRef: "",
-        rawLocation: "",
-        summary: "",
-        notes: "",
-      }));
-      if (payload.imported[0]?.workflow) {
-        queryClient.setQueryData(queryKeys.teamWorkflow(variables.teamId), payload.imported[0].workflow);
-      }
-      void queryClient.invalidateQueries({ queryKey: queryKeys.dataProcessingRunStatus(variables.runId) });
-      void queryClient.invalidateQueries({ queryKey: sourceCollectionRunRecordsQueryKey(variables.runId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.dataProcessingCollectionAssignments(variables.runId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCandidates(variables.teamId, TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT) });
-      void queryClient.invalidateQueries({ queryKey: sourceCollectionSummaryQueryPrefix(variables.teamId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowKnowledgeIngestionStatus(variables.teamId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCoordinationStatus(variables.teamId) });
-      void queryClient.invalidateQueries({ queryKey: sourceQualityStatusQueryKey(variables.teamId) });
-      void queryClient.invalidateQueries({ queryKey: paperNoteChunkStatusQueryKey(variables.teamId) });
-      void queryClient.invalidateQueries({ queryKey: researchStageRoundStatusQueryKey(variables.teamId) });
+  const {
+    recordSourceCollectionOutputMutation,
+    executeSourceCollectionSearchMutation,
+    extractSourceCollectionCandidatesMutation,
+    openSourceCollectionStorageMutation,
+    assessSourceQualityMutation,
+    assessSourceQualityBatchMutation,
+    planPaperNoteChunksMutation,
+    buildCandidateGraphMutation,
+    runKnowledgeIngestionPrecheckMutation,
+    runKnowledgeCollectionCompletionMutation,
+  } = useTeamSourceCollectionMutations({
+    sourceCollectionOwnerAgentId,
+    sourceCollectionExtractorAgentId,
+    sourceCollectionRelationMapperAgentId,
+    sourceCollectionDraftTopic: sourceCollectionDraft.topic,
+    sourceCollectionDraftMaxResultsPerQuery: sourceCollectionDraft.maxResultsPerQuery || 3,
+    setSelectedSourceCollectionRunId,
+    setSourceCollectionOutputDraft,
+    // Bound later via ref once panel scroll helper is declared below.
+    scrollSourceCollectionPanelIntoView: (panelId) => {
+      scrollSourceCollectionPanelIntoViewRef.current(panelId);
     },
   });
-
-  const executeSourceCollectionSearchMutation = useMutation({
-    mutationFn: (payload: { teamId: string; runId: string; assignmentId?: string; maxQueries?: number; maxResultsPerQuery?: number }) =>
-      fetchJson<TeamWorkflowSourceCollectionSearchExecutionPayload>(
-        `/api/teams/${encodeURIComponent(payload.teamId)}/workflow-orchestration/source-collection-runs/${encodeURIComponent(payload.runId)}/search/execute`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            assignmentIds: payload.assignmentId ? [payload.assignmentId] : [],
-            maxQueries: payload.maxQueries ?? 4,
-            maxResultsPerQuery: payload.maxResultsPerQuery ?? 2,
-            provider: "crossref_rest_api",
-            backgroundExecution: true,
-          }),
-        },
-      ),
-    onSuccess: (payload, variables) => {
-      setSelectedSourceCollectionRunId(payload.runId);
-      queryClient.setQueryData(queryKeys.dataProcessingRunStatus(payload.runId), {
-        ...payload.runStatus,
-        summary: {
-          ...payload.runStatus.summary,
-          ...(payload.sourceCollectionSummary ?? {}),
-        },
-      });
-      queryClient.setQueryData(queryKeys.dataProcessingCollectionAssignments(payload.runId), {
-        schemaVersion: payload.schemaVersion,
-        runId: payload.runId,
-        assignments: payload.assignments,
-        summary: {
-          assignmentCount: payload.assignments.length,
-          assignmentStatusCounts: payload.assignments.reduce<Record<string, number>>((counts, assignment) => {
-            counts[assignment.status] = (counts[assignment.status] ?? 0) + 1;
-            return counts;
-          }, {}),
-        },
-      } satisfies DataProcessingCollectionAssignmentListPayload);
-      if (payload.imported[0]?.workflow) {
-        queryClient.setQueryData(queryKeys.teamWorkflow(variables.teamId), payload.imported[0].workflow);
-      }
-      void queryClient.invalidateQueries({ queryKey: researchStageRoundStatusQueryKey(variables.teamId) });
-      void queryClient.invalidateQueries({ queryKey: sourceCollectionSummaryQueryPrefix(variables.teamId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowSourceCollectionRuns(variables.teamId, SOURCE_COLLECTION_RUN_PREVIEW_LIMIT) });
-      void queryClient.invalidateQueries({ queryKey: sourceCollectionRunRecordsQueryKey(payload.runId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCandidates(variables.teamId, TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowKnowledgeIngestionStatus(variables.teamId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCoordinationStatus(variables.teamId) });
-      void queryClient.invalidateQueries({ queryKey: sourceQualityStatusQueryKey(variables.teamId) });
-      void queryClient.invalidateQueries({ queryKey: paperNoteChunkStatusQueryKey(variables.teamId) });
-    },
-  });
-
-  const extractSourceCollectionCandidatesMutation = useMutation({
-    mutationFn: (payload: { teamId: string; runId: string; extractionAgentId: string; maxRecords?: number; force?: boolean; notes?: string }) =>
-      fetchJson<TeamWorkflowSourceCollectionExtractionPayload>(
-        `/api/teams/${encodeURIComponent(payload.teamId)}/workflow-orchestration/knowledge-collection/extract`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            runId: payload.runId,
-            extractionAgentId: payload.extractionAgentId,
-            maxRecords: payload.maxRecords ?? 100,
-            force: payload.force ?? false,
-            notes: payload.notes ?? "",
-          }),
-        },
-      ),
-    onSuccess: (payload, variables) => {
-      setSelectedSourceCollectionRunId(payload.runId);
-      queryClient.setQueryData(queryKeys.teamWorkflow(variables.teamId), payload.workflow);
-      queryClient.setQueryData(queryKeys.dataProcessingRunStatus(payload.runId), {
-        ...payload.runStatus,
-        summary: {
-          ...payload.runStatus.summary,
-          ...(payload.sourceCollectionSummary ?? {}),
-        },
-      });
-      queryClient.setQueryData(queryKeys.dataProcessingCollectionAssignments(payload.runId), {
-        schemaVersion: payload.schemaVersion,
-        runId: payload.runId,
-        assignments: payload.assignments,
-        summary: {
-          assignmentCount: payload.assignments.length,
-          assignmentStatusCounts: payload.assignments.reduce<Record<string, number>>((counts, assignment) => {
-            counts[assignment.status] = (counts[assignment.status] ?? 0) + 1;
-            return counts;
-          }, {}),
-        },
-      } satisfies DataProcessingCollectionAssignmentListPayload);
-      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowSourceCollectionRuns(variables.teamId, SOURCE_COLLECTION_RUN_PREVIEW_LIMIT) });
-      void queryClient.invalidateQueries({ queryKey: sourceCollectionRunRecordsQueryKey(payload.runId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCandidates(variables.teamId, TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT) });
-      void queryClient.invalidateQueries({ queryKey: sourceCollectionSummaryQueryPrefix(variables.teamId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowKnowledgeIngestionStatus(variables.teamId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCoordinationStatus(variables.teamId) });
-      void queryClient.invalidateQueries({ queryKey: sourceQualityStatusQueryKey(variables.teamId) });
-      void queryClient.invalidateQueries({ queryKey: paperNoteChunkStatusQueryKey(variables.teamId) });
-    },
-  });
-
-  const openSourceCollectionStorageMutation = useMutation({
-    mutationFn: (payload: { teamId: string; runId: string; target: SourceCollectionStorageOpenTarget }) =>
-      fetchJson<TeamWorkflowSourceCollectionStorageOpenPayload>(
-        `/api/teams/${encodeURIComponent(payload.teamId)}/workflow-orchestration/source-collection-runs/${encodeURIComponent(payload.runId)}/storage/open`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ target: payload.target }),
-        },
-      ),
-  });
-
-  const assessSourceQualityMutation = useMutation({
-    mutationFn: (payload: { teamId: string; candidateId: string; decision: "approved" | "needs_revision" }) =>
-      fetchJson<TeamWorkflowSourceQualityAssessmentPayload>(
-        `/api/teams/${encodeURIComponent(payload.teamId)}/workflow-orchestration/candidates/${encodeURIComponent(payload.candidateId)}/source-quality/assess`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            assessedByAgent: sourceCollectionExtractorAgentId,
-            decision: payload.decision,
-            notes: payload.decision === "approved"
-              ? "Source Extractor Agent approved this source for downstream paper_note extraction."
-              : "Source Extractor Agent returned this source for repair before downstream extraction.",
-            requiredFixes: payload.decision === "needs_revision"
-              ? ["补充来源路径/权限/sha256/摘要/页码锚点或相关性说明后重新筛选。"]
-              : [],
-          }),
-        },
-      ),
-    onSuccess: (payload, variables) => {
-      queryClient.setQueryData(queryKeys.teamWorkflow(variables.teamId), payload.workflow);
-      queryClient.setQueryData(sourceQualityStatusQueryKey(variables.teamId), payload.status);
-      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCandidates(variables.teamId, TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT) });
-      void queryClient.invalidateQueries({ queryKey: sourceCollectionSummaryQueryPrefix(variables.teamId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowKnowledgeIngestionStatus(variables.teamId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCoordinationStatus(variables.teamId) });
-      void queryClient.invalidateQueries({ queryKey: paperNoteChunkStatusQueryKey(variables.teamId) });
-    },
-  });
-
-  const assessSourceQualityBatchMutation = useMutation({
-    mutationFn: (payload: { teamId: string; assessedByAgent: string; maxCandidates?: number; force?: boolean; notes?: string }) =>
-      fetchJson<TeamWorkflowSourceQualityBatchAssessmentPayload>(
-        `/api/teams/${encodeURIComponent(payload.teamId)}/workflow-orchestration/source-quality/assess-batch`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            assessedByAgent: payload.assessedByAgent,
-            maxCandidates: payload.maxCandidates ?? 100,
-            force: payload.force ?? false,
-            notes: payload.notes ?? "",
-          }),
-        },
-      ),
-    onSuccess: (payload, variables) => {
-      queryClient.setQueryData(queryKeys.teamWorkflow(variables.teamId), payload.workflow);
-      queryClient.setQueryData(sourceQualityStatusQueryKey(variables.teamId), payload.sourceQualityStatus);
-      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCandidates(variables.teamId, TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT) });
-      void queryClient.invalidateQueries({ queryKey: sourceCollectionSummaryQueryPrefix(variables.teamId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowKnowledgeIngestionStatus(variables.teamId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCoordinationStatus(variables.teamId) });
-      void queryClient.invalidateQueries({ queryKey: paperNoteChunkStatusQueryKey(variables.teamId) });
-      scrollSourceCollectionPanelIntoView("source-collection-screening-panel");
-    },
-  });
-
-  const planPaperNoteChunksMutation = useMutation({
-    mutationFn: (payload: { teamId: string; candidateId: string }) =>
-      fetchJson<TeamWorkflowPaperNoteChunkPlanPayload>(
-        `/api/teams/${encodeURIComponent(payload.teamId)}/workflow-orchestration/candidates/${encodeURIComponent(payload.candidateId)}/paper-note-chunks/plan`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            createdByAgent: sourceCollectionOwnerAgentId,
-            maxPagesPerChunk: 4,
-            maxCharsPerChunk: 12000,
-          }),
-        },
-      ),
-    onSuccess: (payload, variables) => {
-      queryClient.setQueryData(queryKeys.teamWorkflow(variables.teamId), payload.workflow);
-      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCandidates(variables.teamId, TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT) });
-      void queryClient.invalidateQueries({ queryKey: sourceCollectionSummaryQueryPrefix(variables.teamId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowKnowledgeIngestionStatus(variables.teamId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCoordinationStatus(variables.teamId) });
-      void queryClient.invalidateQueries({ queryKey: paperNoteChunkStatusQueryKey(variables.teamId) });
-    },
-  });
-
-  const buildCandidateGraphMutation = useMutation({
-    mutationFn: (variables: {
-      teamId: string;
-      title?: string;
-      createdByAgent?: string;
-      sourceQualityAgentId?: string;
-      curationMode?: string;
-      maxCandidates?: number;
-      forceReview?: boolean;
-      forceRebuild?: boolean;
-    }) =>
-      fetchJson<TeamWorkflowCandidateGraphBuildPayload>(`/api/teams/${encodeURIComponent(variables.teamId)}/workflow-orchestration/candidate-graph`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: variables.title || "Agent curated candidate graph",
-          createdByAgent: variables.createdByAgent || sourceCollectionRelationMapperAgentId,
-          sourceQualityAgentId: variables.sourceQualityAgentId || sourceCollectionExtractorAgentId,
-          curationMode: variables.curationMode || "",
-          maxCandidates: variables.maxCandidates || 80,
-          forceReview: variables.forceReview ?? false,
-          forceRebuild: variables.forceRebuild ?? false,
-        }),
-      }),
-    onSuccess: (payload, variables) => {
-      queryClient.setQueryData(queryKeys.teamWorkflow(variables.teamId), payload.workflow);
-      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCandidates(variables.teamId, TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCandidateGraph(variables.teamId) });
-      void queryClient.invalidateQueries({ queryKey: sourceCollectionSummaryQueryPrefix(variables.teamId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowKnowledgeIngestionStatus(variables.teamId) });
-    },
-  });
-
-  const runKnowledgeIngestionPrecheckMutation = useMutation({
-    mutationFn: (variables: { teamId: string; stewardAgentId: string; targetDomain?: string; maxCandidates?: number }) =>
-      fetchJson<TeamWorkflowKnowledgeIngestionPrecheckPayload>(
-        `/api/teams/${encodeURIComponent(variables.teamId)}/workflow-orchestration/knowledge-ingestion/precheck`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            stewardAgentId: variables.stewardAgentId,
-            targetDomain: variables.targetDomain || sourceCollectionDraft.topic || "神经机制启发神经网络算法",
-            maxCandidates: variables.maxCandidates || 32,
-          }),
-        },
-      ),
-    onSuccess: (payload, variables) => {
-      queryClient.setQueryData(queryKeys.teamWorkflow(variables.teamId), payload.workflow);
-      queryClient.setQueryData(queryKeys.teamWorkflowKnowledgeIngestionStatus(variables.teamId), payload.status);
-      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCandidates(variables.teamId, TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT) });
-      void queryClient.invalidateQueries({ queryKey: sourceCollectionSummaryQueryPrefix(variables.teamId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowKnowledgeIngestionStatus(variables.teamId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCoordinationStatus(variables.teamId) });
-    },
-  });
-
-  const runKnowledgeCollectionCompletionMutation = useMutation({
-    mutationFn: (variables: {
-      teamId: string;
-      runId?: string;
-      extractionAgentId?: string;
-      sourceQualityAgentId: string;
-      candidateGraphAgentId: string;
-      stewardAgentId: string;
-      knowledgeBaseId?: string;
-      targetDomain?: string;
-      maxCandidates?: number;
-      maxSearchBatches?: number;
-      maxQueriesPerBatch?: number;
-      maxResultsPerQuery?: number;
-      maxRecords?: number;
-      forceReview?: boolean;
-      forceRebuild?: boolean;
-    }) =>
-      fetchJson<TeamWorkflowKnowledgeCollectionIngestionPayload>(
-        `/api/teams/${encodeURIComponent(variables.teamId)}/workflow-orchestration/knowledge-collection/complete`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            runId: variables.runId || "",
-            extractionAgentId: variables.extractionAgentId || "",
-            sourceQualityAgentId: variables.sourceQualityAgentId,
-            candidateGraphAgentId: variables.candidateGraphAgentId,
-            stewardAgentId: variables.stewardAgentId,
-            knowledgeBaseId: variables.knowledgeBaseId || "",
-            targetDomain: variables.targetDomain || sourceCollectionDraft.topic || "神经机制启发神经网络算法",
-            maxCandidates: variables.maxCandidates || 80,
-            maxSearchBatches: variables.maxSearchBatches ?? 20,
-            maxQueriesPerBatch: variables.maxQueriesPerBatch ?? 4,
-            maxResultsPerQuery: variables.maxResultsPerQuery || Math.max(1, Math.min(5, sourceCollectionDraft.maxResultsPerQuery || 3)),
-            maxRecords: variables.maxRecords ?? 500,
-            forceReview: variables.forceReview ?? false,
-            forceRebuild: variables.forceRebuild ?? false,
-            autoCreateKnowledgeBase: true,
-            // 一键入库走同步闭环：提交→来源审核→知识提案→审批→正式 KnowledgeItem。
-            // 职责分离：steward 提案，由后端解析的 coordinator/lead 审批，不再依赖唤醒 agent 的异步交接。
-            autoSubmit: true,
-            autoReviewSource: true,
-            autoApprove: true,
-            notifyStewardAgent: false,
-            wakeStewardAgent: false,
-            // 首次入库需现场生成 steward pack（分钟级）；后台执行让点击立即返回，状态由 activeWorkRun 轮询。
-            backgroundExecution: true,
-            requesterAgentId: sourceCollectionOwnerAgentId,
-          }),
-        },
-      ),
-    onSuccess: (payload, variables) => {
-      // 后台执行时响应是 accepted（无 workflow/statusSnapshot）：只失效查询，让 activeWorkRun 轮询接管。
-      if (payload.workflow) {
-        queryClient.setQueryData(queryKeys.teamWorkflow(variables.teamId), payload.workflow);
-      }
-      if (payload.statusSnapshot) {
-        queryClient.setQueryData(queryKeys.teamWorkflowKnowledgeIngestionStatus(variables.teamId), payload.statusSnapshot);
-      }
-      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCandidates(variables.teamId, TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCandidateGraph(variables.teamId) });
-      void queryClient.invalidateQueries({ queryKey: sourceCollectionSummaryQueryPrefix(variables.teamId) });
-      void queryClient.invalidateQueries({ queryKey: sourceQualityStatusQueryKey(variables.teamId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowKnowledgeIngestionStatus(variables.teamId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowCoordinationStatus(variables.teamId) });
-    },
-  });
-
 
   const canvasSavePendingForTeam = (teamId: string | undefined | null) =>
     saveCanvasMutation.isPending && Boolean(teamId) && saveCanvasMutation.variables?.teamId === teamId;
@@ -5274,6 +4710,7 @@ export function TeamsRoute({
       target.focus({ preventScroll: true });
     });
   };
+  scrollSourceCollectionPanelIntoViewRef.current = scrollSourceCollectionPanelIntoView;
   const openSourceCollectionScreeningPanel = () => {
     if (!selectedTeam?.teamId || sourceCollectionScreeningDisabled) {
       return;
