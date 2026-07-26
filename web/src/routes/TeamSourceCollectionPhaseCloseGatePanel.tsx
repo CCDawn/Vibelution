@@ -13,6 +13,7 @@ type TeamSourceCollectionPhaseCloseGatePanelProps = {
   selectedRunId: string;
   gate: SourceCollectionPhaseCloseGate | null;
   loading: boolean;
+  compact?: boolean;
   onOpenStage: (stageId: SourceCollectionStageModuleId) => void;
 };
 
@@ -73,11 +74,35 @@ function gateTone(status: string | undefined) {
   return styles.phaseCloseGateTagNeutral;
 }
 
+const STAGE_ORDER: SourceCollectionStageModuleId[] = ["finding", "extraction", "relations", "ingestion"];
+
+function compactGateTitle(
+  gate: SourceCollectionPhaseCloseGate | null,
+  loading: boolean,
+  nextStage: SourceCollectionStageModuleId | null | undefined,
+  lang: "zh" | "en",
+) {
+  if (loading) {
+    return lang === "zh" ? "正在读取本轮进度" : "Loading run progress";
+  }
+  if (!gate) {
+    return lang === "zh" ? "先启动一次搜索" : "Start a search run";
+  }
+  if (gate.status === "closed_loop") {
+    return lang === "zh" ? "本轮资料已完成入库" : "This run is fully ingested";
+  }
+  if (nextStage) {
+    return lang === "zh" ? `下一步：${stageLabel(nextStage, lang)}` : `Next: ${stageLabel(nextStage, lang)}`;
+  }
+  return gateStatusCopy(gate.status, lang);
+}
+
 export function TeamSourceCollectionPhaseCloseGatePanel({
   lang,
   selectedRunId,
   gate,
   loading,
+  compact = false,
   onOpenStage,
 }: TeamSourceCollectionPhaseCloseGatePanelProps) {
   const isZh = lang === "zh";
@@ -87,6 +112,89 @@ export function TeamSourceCollectionPhaseCloseGatePanel({
     : (gate?.stages?.length || 4);
   const closedLoopCount = typeof gate?.closedLoopCount === "number" ? gate.closedLoopCount : 0;
   const reasons = (gate?.blockingReasons ?? []).filter(Boolean).slice(0, 2);
+
+  if (compact) {
+    return (
+      <section
+        className={`${styles.phaseCloseGatePanel} ${styles.phaseCloseGatePanelCompact}`}
+        data-vui-product="source-collection-phase-close-gate"
+        data-compact="true"
+        aria-label={isZh ? "本轮进度" : "Run progress"}
+      >
+        <div className={styles.phaseCloseGateHeader}>
+          <div>
+            <span className={styles.phaseCloseGateEyebrow}>{isZh ? "本轮进度" : "Run progress"}</span>
+            <strong>{compactGateTitle(gate, loading, nextStage, lang)}</strong>
+          </div>
+          <span className={`${styles.phaseCloseGateTag} ${gateTone(gate?.status)}`}>
+            {gate?.passed ? <CheckCircle2 size={13} aria-hidden /> : null}
+            {gate ? `${closedLoopCount}/${stageCount}` : "0/4"}
+          </span>
+        </div>
+
+        <ol className={styles.phaseCloseGateSteps}>
+          {STAGE_ORDER.map((stageId, index) => {
+            const stage = gate?.stages?.find((item) => item.stageId === stageId);
+            const passed = Boolean(stage?.passed);
+            const current = !passed && nextStage === stageId;
+            return (
+              <li
+                key={stageId}
+                className={passed
+                  ? styles.phaseCloseGateStepDone
+                  : current
+                    ? styles.phaseCloseGateStepCurrent
+                    : styles.phaseCloseGateStep}
+              >
+                <span>{passed ? <CheckCircle2 size={12} aria-hidden /> : index + 1}</span>
+                <div>
+                  <strong>{stageLabel(stageId, lang)}</strong>
+                  <small>
+                    {passed
+                      ? (isZh ? "已完成" : "Completed")
+                      : current
+                        ? (isZh ? "下一步" : "Next")
+                        : (isZh ? "未开始" : "Not started")}
+                  </small>
+                </div>
+              </li>
+            );
+          })}
+        </ol>
+
+        {nextStage && gate?.status === "needs_continue" ? (
+          <VNativeButton
+            type="button"
+            className={styles.phaseCloseGateAction}
+            onClick={() => onOpenStage(nextStage)}
+          >
+            {isZh ? `去${stageLabel(nextStage, lang)}` : `Open ${stageLabel(nextStage, lang)}`}
+            <ArrowRight size={13} aria-hidden />
+          </VNativeButton>
+        ) : null}
+
+        <details className={styles.phaseCloseGateRuntimeDetails}>
+          <summary>{isZh ? "运行详情" : "Run details"}</summary>
+          <dl>
+            <div>
+              <dt>{isZh ? "批次" : "Run"}</dt>
+              <dd>{selectedRunId || (isZh ? "未选择" : "not selected")}</dd>
+            </div>
+            <div>
+              <dt>{isZh ? "运行状态" : "Round"}</dt>
+              <dd>{gate?.stageRoundStatus || "—"}</dd>
+            </div>
+            {reasons.length ? (
+              <div>
+                <dt>{isZh ? "待完成" : "Blocked by"}</dt>
+                <dd>{reasons.join("；")}</dd>
+              </div>
+            ) : null}
+          </dl>
+        </details>
+      </section>
+    );
+  }
 
   return (
     <section
