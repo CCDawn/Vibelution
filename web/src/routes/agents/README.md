@@ -16,6 +16,7 @@ and panel composition. Pure query/presentation/draft helpers should leave the sh
 | LLM bindings / reasoning effort math | `agentRouteLlmModel.ts` |
 | Lightweight workspace, filterAgents, references | `agentRouteWorkspaceModel.ts` |
 | Config/persona/task/context-compression drafts | `agentRouteDraftModel.ts` |
+| Tool/memory/membership/runtime policy drafts | `agentRoutePolicyDraftModel.ts` |
 | Management brief / setup filters / list columns | `agentRouteManagementModel.ts` |
 | Config draft mutations | `useAgentConfigDraftMutations.ts` |
 | Workbench profile/lifecycle/policy mutations | `useAgentWorkbenchMutations.ts` |
@@ -36,6 +37,7 @@ and panel composition. Pure query/presentation/draft helpers should leave the sh
 | LLM binding / reasoning | `agentRouteLlmModel.ts` | panels |
 | Lightweight list projection / filters | `agentRouteWorkspaceModel.ts` | mutations |
 | Draft mappers (config/persona/task/compression) | `agentRouteDraftModel.ts` | EventSource |
+| Policy drafts (tool/memory/membership/delegation/supervision) | `agentRoutePolicyDraftModel.ts` | EventSource |
 | Management brief / setup filters / columns | `agentRouteManagementModel.ts` | shell JSX |
 | Write mutations | `useAgent*Mutations.ts` | pure files |
 | Overview / config / activity panes | panel file | Route-only inlines |
@@ -48,7 +50,8 @@ and panel composition. Pure query/presentation/draft helpers should leave the sh
 - **Done (D3):** `agentRouteListModel`, `agentRouteLlmModel`, `agentRouteWorkspaceModel`.
 - **Done (M1 structure):** `agentRouteDraftModel` — config/persona/task/context-compression mappers + `sortedIds`.
 - **Done (M2 structure):** `agentRouteManagementModel` — management brief, setup filters, list columns, group labels.
-- **Still in shell:** tool/memory/membership/runtime draft forms, capability preview, large JSX composition.
+- **Done (M3 structure):** `agentRoutePolicyDraftModel` — tool/memory/membership/delegation/supervision drafts + capability preview.
+- **Still in shell:** bulk config helpers, large JSX composition, copy tables.
 
 ## Structure program (maintainability-first)
 
@@ -56,7 +59,7 @@ and panel composition. Pure query/presentation/draft helpers should leave the sh
 |------|------|--------|
 | M1 | Draft/mapper pure extract | **Done** — `agentRouteDraftModel.ts` |
 | M2 | Management brief + setup filter predicates | **Done** — `agentRouteManagementModel.ts` |
-| M3 | Tool/memory/membership draft mappers | planned |
+| M3 | Tool/memory/membership draft mappers | **Done** — `agentRoutePolicyDraftModel.ts` |
 | Shell rule | Route only orchestrates | ongoing |
 
 ## Perf notes (secondary)
