@@ -18,6 +18,9 @@ import teamExperimentLoopMutationsSource from "./teams/useTeamExperimentLoopMuta
 import teamSourceCollectionMutationsSource from "./teams/useTeamSourceCollectionMutations.ts?raw";
 import teamShellMutationsSource from "./teams/useTeamShellMutations.ts?raw";
 import teamWorkflowStartMutationsSource from "./teams/useTeamWorkflowStartMutations.ts?raw";
+import teamResearchSecondaryQueriesSource from "./teams/useTeamResearchSecondaryQueries.ts?raw";
+import sourceCollectionRunQueriesSource from "./teams/useSourceCollectionRunQueries.ts?raw";
+import workflowToneSource from "./teams/workflowTone.ts?raw";
 
 /** Route shell + claimable pure modules extracted from TeamsRoute. */
 import experimentLoopModelSource from "./teams/experimentLoopModel.ts?raw";
@@ -360,8 +363,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("ResearchLoopStatusPayload");
     expect(routeSource).toContain("researchLoopTemplatesQuery");
     expect(routeSource).toContain("researchLoopStatusQuery");
-    expect(routeSource).toContain("/workflow-orchestration/research-loop/templates");
-    expect(routeSource).toContain("/workflow-orchestration/research-loop/status");
+    // Wave 8S: research-loop status/templates live on useTeamResearchSecondaryQueries.
+    expect(teamResearchSecondaryQueriesSource).toContain("/workflow-orchestration/research-loop/templates");
+    expect(teamResearchSecondaryQueriesSource).toContain("/workflow-orchestration/research-loop/status");
     expect(teamExperimentLoopMutationsSource).toContain("/workflow-orchestration/research-loop/loops");
     expect(teamExperimentLoopMutationsSource).toContain("/workflow-orchestration/research-loop/loops/${encodeURIComponent(payload.loop.loopId)}/evidence");
     expect(teamExperimentLoopMutationsSource).toContain("/workflow-orchestration/research-loop/loops/${encodeURIComponent(payload.loop.loopId)}/decision");
@@ -855,7 +859,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("sourceCollectionRunCandidateCount");
     expect(routeSource).toContain("sourceCollectionRunPendingScreeningCount");
     expect(routeSource).toContain("sourceCollectionPendingCandidateImportCount");
-    expect(routeSource).toContain("/api/data-processing/runs/${encodeURIComponent(selectedSourceCollectionRunEffectiveId)}/records");
+    // Wave 8S: selected-run records live on useSourceCollectionRunQueries.
+    expect(sourceCollectionRunQueriesSource).toContain("/api/data-processing/runs/${encodeURIComponent(options.selectedSourceCollectionRunEffectiveId)}/records");
     expect(teamSourceCollectionConversationPanelSource).toContain("还有 ${pendingCandidateImportCount} 条原始记录尚未进入候选库");
     expect(evidenceModelSource).toContain('label: "DOI"');
     expect(evidenceModelSource).toContain("https://doi.org/");
@@ -1510,7 +1515,8 @@ describe("TeamsRoute layout contract", () => {
     expect(researchWorkflowResourcesSource).toContain("refetchInterval: (query) =>");
     expect(researchWorkflowResourcesSource).toContain("query.state.data as ResearchStageRoundStatusPayload | null | undefined");
     expect(routeSource).toContain("sourceCollectionStageWritebackSyncActive,");
-    expect(routeSource).toContain("sourceCollectionStageWritebackRefetchInterval(");
+    // Wave 8S: summary writeback interval is applied from useSourceCollectionRunQueries.
+    expect(sourceCollectionRunQueriesSource).toContain("sourceCollectionStageWritebackRefetchInterval(");
     expect(researchWorkflowResourcesSource).toContain("refetchInterval: () => sourceCollectionStageWritebackRefetchInterval(");
     const sourceQualityStatusQuerySource = researchWorkflowResourcesSource.slice(
       researchWorkflowResourcesSource.indexOf("const sourceQuality = useQuery"),
@@ -1520,7 +1526,8 @@ describe("TeamsRoute layout contract", () => {
     expect(sourceQualityStatusQuerySource).toContain("stageWritebackSync.active");
     expect(routeSource).toContain("SourceCollectionSummaryPayload");
     expect(routeSource).toContain("sourceCollectionSummaryQueryKey");
-    expect(routeSource).toContain("/workflow-orchestration/source-collection/summary");
+    // Wave 8S: SC summary endpoint lives on useSourceCollectionRunQueries.
+    expect(sourceCollectionRunQueriesSource).toContain("/workflow-orchestration/source-collection/summary");
     expect(routeSource).toContain("sourceCollectionSummaryQueryPrefix");
     expect(researchWorkflowResourcesSource).toContain("includeValidation=false&includeStore=false");
     expect(researchWorkflowResourcesSource).toContain("const TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT = 80;");
@@ -1543,26 +1550,16 @@ describe("TeamsRoute layout contract", () => {
     expect(sourceCollectionFindingDetailsVisibleSource).toContain("sourceCollectionWorkspaceSelected");
     expect(sourceCollectionFindingDetailsVisibleSource).toContain("selectedSourceCollectionRunEffectiveId");
     expect(sourceCollectionFindingDetailsVisibleSource).toContain('selectedSourceCollectionStageId === "finding"');
-    expect(sourceCollectionFindingDetailsVisibleSource).toContain("sourceCollectionRecordsQueryEnabled");
-    expect(sourceCollectionFindingDetailsVisibleSource).toContain("sourceCollectionAssignmentsQueryEnabled");
-    expect(sourceCollectionFindingDetailsVisibleSource).toContain("sourceCollectionRunStatusQueryEnabled");
     expect(sourceCollectionFindingDetailsVisibleSource).not.toContain("sourceCollectionSummaryQuery.isSuccess");
     expect(sourceCollectionFindingDetailsVisibleSource).not.toContain("sourceCollectionSummaryQuery.isError");
-    const sourceCollectionRunStatusQuerySource = routeSource.slice(
-      routeSource.indexOf("const sourceCollectionRunStatusQuery = useQuery({"),
-      routeSource.indexOf("const sourceCollectionRecordsQuery = useQuery({"),
-    );
-    const sourceCollectionRecordsQuerySource = routeSource.slice(
-      routeSource.indexOf("const sourceCollectionRecordsQuery = useQuery({"),
-      routeSource.indexOf("const sourceCollectionAssignmentsQuery = useQuery({"),
-    );
-    const sourceCollectionAssignmentsQuerySource = routeSource.slice(
-      routeSource.indexOf("const sourceCollectionAssignmentsQuery = useQuery({"),
-      routeSource.indexOf("const autoCanvasViewportStyle"),
-    );
-    expect(sourceCollectionRunStatusQuerySource).toContain("enabled: sourceCollectionRunStatusQueryEnabled");
-    expect(sourceCollectionRecordsQuerySource).toContain("enabled: sourceCollectionRecordsQueryEnabled");
-    expect(sourceCollectionAssignmentsQuerySource).toContain("enabled: sourceCollectionAssignmentsQueryEnabled");
+    // Wave 8S: detail query enablement lives on useSourceCollectionRunQueries.
+    expect(sourceCollectionRunQueriesSource).toContain("sourceCollectionRecordsQueryEnabled");
+    expect(sourceCollectionRunQueriesSource).toContain("sourceCollectionAssignmentsQueryEnabled");
+    expect(sourceCollectionRunQueriesSource).toContain("sourceCollectionRunStatusQueryEnabled");
+    expect(sourceCollectionRunQueriesSource).toContain("enabled: sourceCollectionRunStatusQueryEnabled");
+    expect(sourceCollectionRunQueriesSource).toContain("enabled: sourceCollectionRecordsQueryEnabled");
+    expect(sourceCollectionRunQueriesSource).toContain("enabled: sourceCollectionAssignmentsQueryEnabled");
+    expect(routeSource).toContain("useSourceCollectionRunQueries({");
     const sourceCollectionRecordsDataLoadingSource = routeSource.slice(
       routeSource.indexOf("const sourceCollectionRecordsDataLoading = Boolean("),
       routeSource.indexOf("const sourceCollectionAssignmentsDataLoading = Boolean("),
@@ -1616,7 +1613,8 @@ describe("TeamsRoute layout contract", () => {
     expect(queryLayerSource).toContain("queryFn: ({ signal }) => fetchJson<Team>(`/api/teams/${encodeURIComponent(effectiveTeamId)}?detail=${teamDetailLoadMode}`, { signal })");
     expect(queryLayerSource).toContain("queryFn: ({ signal }) => fetchJson<TeamOrganizationCanvas>(`/api/teams/${encodeURIComponent(effectiveTeamId)}/canvas`, { signal })");
     expect(queryLayerSource).toContain("queryFn: ({ signal }) =>");
-    expect(queryLayerSource.match(/queryFn: \(\{ signal \}\) =>/g)?.length ?? 0).toBe(17);
+    // Wave 8S: research secondary + SC run detail queries moved out of the route query layer.
+    expect(queryLayerSource.match(/queryFn: \(\{ signal \}\) =>/g)?.length ?? 0).toBe(9);
     expect(queryLayerSource.match(/queryFn: \(\) =>/g) ?? []).toEqual([]);
     const sourceCollectionStageReturnRefreshSource = routeSource.slice(
       routeSource.indexOf("if (!researchWorkflowTeamSelected || !pageVisible"),
@@ -1680,7 +1678,8 @@ describe("TeamsRoute layout contract", () => {
     expect(teamExperimentPlanningLedgerPanelSource).toContain("实验计划账本");
     expect(teamExperimentPlanningLedgerPanelSource).toContain("TeamExperimentMethodPanel");
     expect(routeSource).toContain("experimentMethodCatalogQueryKey");
-    expect(routeSource).toContain('["overview", "experiment"].includes(researchWorkspaceView)');
+    // Wave 8S: experiment method catalog gating lives on research secondary queries.
+    expect(teamResearchSecondaryQueriesSource).toContain('["overview", "experiment"].includes(options.researchWorkspaceView)');
     // Wave 8H: overview experiment method quick-select is on TeamResearchStageLauncherPanel.
     expect(teamResearchStageLauncherPanelSource).toContain("researchExperimentMethodQuickSelect");
     expect(teamResearchStageLauncherPanelSource).toContain("selectedExperimentAdapterStatus");
@@ -1689,7 +1688,11 @@ describe("TeamsRoute layout contract", () => {
     expect(teamResearchStageLauncherPanelSource).toContain("可执行替代");
     expect(teamResearchStageLauncherPanelSource).toContain('aria-label={lang === "zh" ? "选择实验方式" : "Select experiment method"}');
     expect(routeSource).toContain("preferredExperimentMethod=");
-    expect(routeSource).toContain("/workflow-orchestration/experiments/methods");
+    // Wave 8S: experiment methods endpoint lives on useTeamResearchSecondaryQueries.
+    expect(teamResearchSecondaryQueriesSource).toContain("/workflow-orchestration/experiments/methods");
+    expect(routeSource).toContain("useTeamResearchSecondaryQueries");
+    expect(routeSource).toContain("useSourceCollectionRunQueries");
+    expect(workflowToneSource).toContain("export function workflowQualityTone");
     expect(teamExperimentPlanningLedgerPanelSource).toContain("activeContract={activeExperimentContract}");
     expect(teamExperimentPlanningLedgerPanelSource).toContain("onSubmit={createExperimentPlanFromWorkspace}");
     expect(teamExperimentMethodPanelSource).toContain("catalog.researchModes.map");

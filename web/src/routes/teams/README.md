@@ -53,6 +53,13 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 | Experiment + research-loop mutations | `useTeamExperimentLoopMutations.ts` | drafts/view orchestration |
 | Source-collection write mutations | `useTeamSourceCollectionMutations.ts` | drafts/view/session-task orchestration |
 | Source-collection mutation payload types | `sourceCollectionMutationModel.ts` | route-only presentation |
+| Team shell write mutations | `useTeamShellMutations.ts` | drafts/view orchestration |
+| Workflow start / stage-session mutations | `useTeamWorkflowStartMutations.ts` | draft/view navigation |
+| Research stage start payload | `workflowStartMutationModel.ts` | route-only presentation |
+| SC selected-run detail queries | `useSourceCollectionRunQueries.ts` | run selection / view gating |
+| SC run query payload types | `sourceCollectionRunQueryModel.ts` | route-only presentation |
+| Experiment + research-loop status queries | `useTeamResearchSecondaryQueries.ts` | workspace-view gating |
+| Workflow tag tone helpers | `workflowTone.ts` | style map ownership |
 | Orchestration / wiring only | `../TeamsRoute.tsx` | — |
 
 ## Bundle note (path-scoped secondary packs)
@@ -77,25 +84,34 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 ## Pure extract progress
 
 - **Done:** workspace navigation, team kind guards, canvas geometry, source-collection presentation, experiment/loop types+labels, AI-search presentation, workflow presentation labels, research stage agent role tables, workflow query keys, stage-agent presentation/routes.
-- **Still in `TeamsRoute.tsx`:** shell mutations (canvas/message/sync/archive/round/session-task), JSX shell, style-bound tone helpers, remaining panel orchestration.
-- **Wave 8G done:** AI Search workspace + research stage agent summary/panel extracted to secondary-lazy components.
-- **Wave 8H done:** Research stage launcher (three-stage + Challenge Cup MVP console) extracted to `TeamResearchStageLauncherPanel`.
-- **Wave 8I done:** Experiment/iteration standalone stage page extracted to `TeamResearchStageStandalonePagePanel` (ledger/loop panels remain route-owned injectables).
-- **Wave 8J done:** Research loop + experiment planning ledger extracted to `TeamResearchLoopPanel` / `TeamExperimentPlanningLedgerPanel` (mutations stay route-owned injectables).
-- **Wave 8K done:** Knowledge completion flow + SC conversation/screening workspaces extracted (chrome shells kept; orchestration moved off route).
-- **Wave 8L done:** SC recovery / candidate / graph / memory workspaces extracted (controls/active-stage still route-owned).
-- **Wave 8M done:** SC selected-source / controls / active-stage workspaces extracted (small helpers like filterBar/pagination/modeFields remain route-local).
-- **Wave 8N done:** Split mono secondary barrel into path-scoped packs: `teamSharedPanels` / `teamResearchPanels` / `teamSourceCollectionPanels`.
-- **Wave 8N+prefetch done:** Path-scoped pack warm-up after team/view switch (`teamPanelPrefetch.ts`).
-- **Wave 8O done:** Extract experiment + research-loop write mutations to `useTeamExperimentLoopMutations` (EventSource-free).
-- **Wave 8P done:** Promote SC mutation payload types to `sourceCollectionMutationModel` and extract write mutations to `useTeamSourceCollectionMutations` (EventSource-free; scroll helper late-bound via ref).
+- **Still in `TeamsRoute.tsx` (intentional shell):** URL/view drafts, selection, JSX composition, thin `render*` inject adapters (filterBar/pagination/modeFields), and remaining shell queries (teams/detail/canvas/runs list/AI search/linked room/runtime).
+- **Wave 8G–8P done:** panel extract, path packs + prefetch, experiment/loop mutations, SC write mutations (see history below).
+- **Wave 8Q done:** Team shell write mutations → `useTeamShellMutations`.
+- **Wave 8R done:** Workflow start/session mutations → `useTeamWorkflowStartMutations` + `workflowStartMutationModel`.
+- **Wave 8S done:** SC selected-run detail queries + research secondary queries extracted; SC run list selection stays route-owned.
+- **Wave 8T done:** `workflowQualityTone` / `workflowIngestionTone` → `workflowTone.ts` (styles map injected via bound wrappers). Thin SC helpers remain route-local by design.
+- **Wave 8U done:** Phase 8 closure — ownership map + contracts green; route has **zero** inline `useMutation` definitions.
 
-## Next (planned)
+### Phase 8 Closure
 
-1. Extract shell mutations (canvas/message/sync/archive/round) when a clean boundary exists.
-2. Optional: extract remaining small SC helpers only if they block further shell shrink.
-3. Optional: style-bound tone helpers (`workflowQualityTone`) once styles map ownership is clear.
-4. Optional: collapse SC chrome+workspace double layer when inject surface stabilizes.
+| Goal | Status |
+|---|---|
+| Domain write mutations out of route | Done (shell / start / SC write / experiment-loop) |
+| Path-scoped secondary packs + prefetch | Done (8N) |
+| Status/detail query ownership | Done (research resources + secondary + SC run detail) |
+| Style tone helpers | Done (`workflowTone.ts`) |
+| Behavior-conserving refactors only | Done |
+| Route is orchestration shell | Done |
+
+**Explicitly deferred to Phase 9+:** SC chrome+workspace double-layer merge; force `TeamsRoute` under 2k LOC; large Context replacement of inject props; cross-route Chat/Agents/Config depth parity.
+
+**History (8G–8P):** 8G AI Search + stage agents · 8H launcher · 8I standalone stage · 8J loop/ledger · 8K–8M SC workspaces · 8N packs · prefetch · 8O experiment mutations · 8P SC mutations.
+
+## Next (planned) — Phase 9+
+
+1. Optional: collapse SC chrome+workspace double layer when inject surface stabilizes.
+2. Optional: extract remaining small SC helpers only if they block a concrete shell shrink claim.
+3. Optional: cross-route query/mutation patterns (Chat/Agents) only with a new phase charter.
 
 ## Rules
 
