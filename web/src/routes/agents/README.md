@@ -61,7 +61,8 @@ and panel composition. Pure query/presentation/draft helpers should leave the sh
 - **Done (M7 structure):** `agentRouteBulkModel` — bulk config draft/patch/ready, metadata archive guards, center return labels; draft-equals moved into `agentRouteDraftModel`.
 - **Done (C1 structure):** `agentsRouteCopy` — ~800-line zh/en workbench copy + `agentConfigPanes` badges out of shell.
 - **Done (C1.1 dictionary charter):** nested workbench tables live under `i18n/domains/agentsWorkbenchCopy.ts`; facade + soft-prefetch loader; flat `dictionaryAgents` stays shared nav/compression only.
-- **Still in shell:** large JSX composition, reset-session side effects.
+- **Done (A8):** `planAgentResetDirectSession` pure plan in `agentRouteBulkModel`; shell only applies store side effects.
+- **Still in shell:** large JSX composition, store-side session reconcile apply.
 - **Deferred (charter next):** flatten high-traffic keys into `TranslationKey` and dual-read via `useAppI18n({ domains: ["agents"] })`.
 
 ## Dictionary charter (Agents workbench)

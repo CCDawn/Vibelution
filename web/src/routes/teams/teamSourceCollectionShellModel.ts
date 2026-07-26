@@ -143,3 +143,37 @@ export function sourceCollectionStageDisplaySummary(
 ) {
   return active ? summary : fallback;
 }
+
+export type SourceCollectionStageAgentChatStatus = "ready" | "loading" | "error" | "repair";
+
+export function selectSourceCollectionStagePrimaryBinding<T extends { agent?: unknown; agentId?: string }>(
+  bindings: T[],
+  hasDirectChatRoute: (agent: T["agent"]) => boolean,
+) {
+  return bindings.find((binding) => hasDirectChatRoute(binding.agent)) ?? bindings[0] ?? null;
+}
+
+export function resolveSourceCollectionStageAgentChatState<T extends { agent?: unknown; agentId?: string }>(input: {
+  binding: T | null;
+  route: string;
+  agentSummaryPending: boolean;
+  agentSummaryFetching: boolean;
+  agentSummaryError: boolean;
+}): {
+  binding: T | null;
+  route: string;
+  status: SourceCollectionStageAgentChatStatus;
+} {
+  const { binding, route } = input;
+  if (route) {
+    return { binding, route, status: "ready" };
+  }
+  const hasBoundAgentId = Boolean(String(binding?.agentId || "").trim());
+  if (hasBoundAgentId && !binding?.agent && (input.agentSummaryPending || input.agentSummaryFetching)) {
+    return { binding, route, status: "loading" };
+  }
+  if (hasBoundAgentId && !binding?.agent && input.agentSummaryError) {
+    return { binding, route, status: "error" };
+  }
+  return { binding, route, status: "repair" };
+}

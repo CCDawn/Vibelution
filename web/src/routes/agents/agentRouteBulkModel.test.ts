@@ -10,7 +10,9 @@ import {
   bulkConfigReady,
   DEFAULT_BULK_CONFIG_APPLY,
   DEFAULT_BULK_CONFIG_DRAFT,
+  DEFAULT_SESSION_AGENT_PREFERRED_TOOLS,
   optimisticArchivedAgent,
+  planAgentResetDirectSession,
   safeAgentCenterReturnTo,
 } from "./agentRouteBulkModel";
 
@@ -56,5 +58,27 @@ describe("agentRouteBulkModel", () => {
     expect(agentBulkActionSummary("archive", 2, 1, 0, ["ok"], "zh")).toContain("成功 2");
     expect(agentCenterReturnLabel("teams", "zh")).toBe("返回团队");
     expect(safeAgentCenterReturnTo("/teams?x=1")).toContain("/teams");
+  });
+
+  it("plans direct-session reset without store side effects", () => {
+    expect(planAgentResetDirectSession({ resetDirectSession: false })).toEqual({ kind: "none" });
+    expect(planAgentResetDirectSession({
+      resetDirectSession: true,
+      previousDirectSessionId: "s1",
+      replacementDirectSessionId: "s2",
+    })).toEqual({
+      kind: "remove",
+      previousDirectSessionId: "s1",
+      replacementDirectSessionId: "s2",
+    });
+    expect(planAgentResetDirectSession({
+      resetDirectSession: true,
+      previousDirectSessionId: "",
+      replacementDirectSessionId: "s3",
+    })).toEqual({
+      kind: "reset",
+      replacementDirectSessionId: "s3",
+    });
+    expect(DEFAULT_SESSION_AGENT_PREFERRED_TOOLS).toContain("grep_search_tool");
   });
 });

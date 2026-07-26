@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  resolveSourceCollectionStageAgentChatState,
+  selectSourceCollectionStagePrimaryBinding,
   sourceCollectionPageSlice,
   sourceCollectionStageAgentBindingsForStage,
   sourceCollectionStageChatReturnLabel,
@@ -46,5 +48,26 @@ describe("teamSourceCollectionShellModel", () => {
         ingestion: { zh: "x", en: "x" },
       },
     )).toContain("资料寻找");
+
+    const primary = selectSourceCollectionStagePrimaryBinding(
+      [{ agentId: "a1", agent: { id: "a1" } }, { agentId: "a2", agent: { id: "a2" } }],
+      (agent) => Boolean(agent && (agent as { id: string }).id === "a2"),
+    );
+    expect(primary?.agentId).toBe("a2");
+
+    expect(resolveSourceCollectionStageAgentChatState({
+      binding: { agentId: "a1" },
+      route: "",
+      agentSummaryPending: true,
+      agentSummaryFetching: false,
+      agentSummaryError: false,
+    }).status).toBe("loading");
+    expect(resolveSourceCollectionStageAgentChatState({
+      binding: { agentId: "a1", agent: { id: "a1" } },
+      route: "/chat?session=1",
+      agentSummaryPending: false,
+      agentSummaryFetching: false,
+      agentSummaryError: false,
+    }).status).toBe("ready");
   });
 });
