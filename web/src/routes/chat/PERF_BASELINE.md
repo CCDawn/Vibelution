@@ -59,6 +59,22 @@ Recorded for high-ROI program **scope A** (F0–F3, F5, F6; F4 trigger-only).
 | F5 | Verified: AppShell/Launcher use `useShellI18n` only (existing contracts) |
 | F4 / R1–R4 | Chat secondary poll; Config pane lazy; Evolution poll gate; Memory item mutations + graph lazy |
 | S1–S3 | Memory view-level panel lazy; Chat status/group/file tabs lazy; Memory knowledge mutations extract |
+| T1–T3 | ConversationView prefetch + dialog lazy; Chat file/tool dialog lazy; Evolution mutation hooks |
+
+### Post-T1–T3 chunk notes (build evidence)
+
+| Chunk | ~kB raw | Notes |
+|---|---:|---|
+| ChatCodingRoute | ~264 | Surface lazy (S2) + T2 file/tool dialogs out of shell graph when unused |
+| ConversationView | ~192–196 | Still large transcript path; ImagePreview / AgentContext are separate chunks |
+| ConversationImagePreviewDialog | ~4 | T1 dialog pack |
+| AgentContextSectionsView | ~5 | T1 context pack |
+| ChatFilePreviewPanel / ChatToolApprovalDialog | ~1 / ~3 | T2 session workspace packs |
+| EvolutionRoute | ~183 | Inline mutations → hooks (T3); route still owns layout/query |
+| useAppI18n | ~89 | T4 candidate: keep shell on `useShellI18n`; route dictionary split only if measured |
+| LauncherRoute | ~122 | T4 candidate: secondary panels only |
+
+Prefetch: `prefetchConversationView` after `activeSessionId` via idle callback (does not mount).
 
 ### Post-F3 Agents chunk note
 

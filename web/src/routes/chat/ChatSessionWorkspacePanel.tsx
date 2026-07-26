@@ -1,13 +1,20 @@
-import type { ComponentProps } from "react";
+import { lazy, Suspense, type ComponentProps } from "react";
 
 import type { FileContent, SessionRuntimeNotice } from "../../api/types";
 import { VStateSurface } from "../../components/vui";
 import { ChatConversationComposerBridge } from "./ChatConversationComposerBridge";
-import { ChatFilePreviewPanel } from "./ChatFilePreviewPanel";
 import { ConversationWorkspaceLoadingShell } from "./ChatLoadingShell";
 import { ChatRuntimeNoticeStack } from "./ChatRuntimeNoticeStack";
-import { ChatToolApprovalDialog, type ChatToolApprovalLabel } from "./ChatToolApprovalDialog";
+import type { ChatToolApprovalLabel } from "./ChatToolApprovalDialog";
 import styles from "./ChatSessionWorkspacePanel.styles";
+
+/** T2: file preview / tool approval only when those surfaces are active. */
+const ChatFilePreviewPanel = lazy(() =>
+  import("./ChatFilePreviewPanel").then((module) => ({ default: module.ChatFilePreviewPanel })),
+);
+const ChatToolApprovalDialog = lazy(() =>
+  import("./ChatToolApprovalDialog").then((module) => ({ default: module.ChatToolApprovalDialog })),
+);
 
 type ConversationBridgeProps = Omit<ComponentProps<typeof ChatConversationComposerBridge>, "fallback">;
 
@@ -106,16 +113,18 @@ export function ChatSessionWorkspacePanel({
         ) : null}
         <ChatRuntimeNoticeStack lang={lang} notices={notices} />
         {toolApproval ? (
-          <ChatToolApprovalDialog
-            lang={lang}
-            pending={toolApproval.pending}
-            rawTitle={toolApproval.rawTitle}
-            riskLabel={toolApproval.riskLabel}
-            scopeLabel={toolApproval.scopeLabel}
-            toolLabels={toolApproval.toolLabels}
-            onApprove={onApproveToolApproval}
-            onReject={onRejectToolApproval}
-          />
+          <Suspense fallback={null}>
+            <ChatToolApprovalDialog
+              lang={lang}
+              pending={toolApproval.pending}
+              rawTitle={toolApproval.rawTitle}
+              riskLabel={toolApproval.riskLabel}
+              scopeLabel={toolApproval.scopeLabel}
+              toolLabels={toolApproval.toolLabels}
+              onApprove={onApproveToolApproval}
+              onReject={onRejectToolApproval}
+            />
+          </Suspense>
         ) : null}
         <ChatConversationComposerBridge
           {...conversation}
@@ -133,12 +142,14 @@ export function ChatSessionWorkspacePanel({
   }
 
   return (
-    <ChatFilePreviewPanel
-      changed={filePreview.changed}
-      errorMessage={filePreview.errorMessage}
-      file={filePreview.file}
-      loadingLabel={filePreview.loadingLabel}
-      sourceLabel={filePreview.sourceLabel}
-    />
+    <Suspense fallback={<ConversationWorkspaceLoadingShell label={filePreview.loadingLabel} />}>
+      <ChatFilePreviewPanel
+        changed={filePreview.changed}
+        errorMessage={filePreview.errorMessage}
+        file={filePreview.file}
+        loadingLabel={filePreview.loadingLabel}
+        sourceLabel={filePreview.sourceLabel}
+      />
+    </Suspense>
   );
 }

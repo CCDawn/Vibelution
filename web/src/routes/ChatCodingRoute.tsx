@@ -27,6 +27,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
 import { createChatWorkspaceCache } from "./chatWorkspaceCache";
+import { prefetchConversationView } from "../components/conversation/prefetchConversationView";
 import {
   listProjectAgentBusTimeline,
 } from "../api/projectAgentBus";
@@ -1297,6 +1298,33 @@ export function ChatCodingRoute() {
       hydrateSession(activeSessionId, [], "agent");
     }
   }, [activeSessionId, hydrateSession, sessionDetailQuery.data?.id]);
+
+  // T1: warm ConversationView after session intent is known (does not mount).
+  useEffect(() => {
+    if (!activeSessionId || groupPanelActive) {
+      return;
+    }
+    let cancelled = false;
+    const run = () => {
+      if (!cancelled) {
+        void prefetchConversationView();
+      }
+    };
+    const idleRequest = (window as Window & {
+      requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
+    }).requestIdleCallback;
+    const handle = typeof idleRequest === "function"
+      ? idleRequest(run, { timeout: 800 })
+      : window.setTimeout(run, 120);
+    return () => {
+      cancelled = true;
+      if (typeof idleRequest === "function") {
+        (window as Window & { cancelIdleCallback?: (id: number) => void }).cancelIdleCallback?.(handle as number);
+      } else {
+        window.clearTimeout(handle as number);
+      }
+    };
+  }, [activeSessionId, groupPanelActive]);
 
   useEffect(() => {
     if (!activeGroupRoom) {
