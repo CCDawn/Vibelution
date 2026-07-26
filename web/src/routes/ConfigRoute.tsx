@@ -11,7 +11,18 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import { type CSSProperties, type ReactNode, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  type CSSProperties,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from "react";
 import { Link, type BlockerFunction, useBlocker, useSearchParams } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
@@ -84,21 +95,12 @@ import { type PaneSpec } from "../components/layout/paneLayoutPersistence";
 import { usePersistedPaneResize } from "../components/layout/usePersistedPaneResize";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
-import { ConfigDraftPanel } from "./ConfigDraftPanel";
 import { publishConfigDraftPresence } from "./configDraftPresence";
-import ConfigDiagnosisPanel from "./ConfigDiagnosisPanel";
-import { ConfigFeatureDecisionPanel } from "./ConfigFeatureDecisionPanel";
-import { ConfigHealthDiagnosticsPanel } from "./ConfigHealthDiagnosticsPanel";
-import { ConfigModelMigrationPanel } from "./ConfigModelMigrationPanel";
 import { ConfigOverviewPanel } from "./ConfigOverviewPanel";
-import { ConfigQuickSetupPanel } from "./ConfigQuickSetupPanel";
 import {
-  ConfigProviderRegistryPanel,
   type ConfigProviderRegistryTab,
   type ProviderActionFeedback,
 } from "./ConfigProviderRegistryPanel";
-import { ConfigProviderWizard } from "./ConfigProviderWizard";
-import { ConfigRuntimePanel } from "./ConfigRuntimePanel";
 import {
   buildConfigSettingsGroups,
   ConfigSettingsPageTabs,
@@ -108,6 +110,33 @@ import {
   type ConfigSettingsGroupId,
 } from "./ConfigSettingsNavigation";
 import { ConfigWorkspacePlaceholderPanel } from "./ConfigWorkspacePlaceholderPanel";
+
+/** Heavy settings sections — keep off Config shell first paint (R2). */
+const ConfigDraftPanel = lazy(() =>
+  import("./ConfigDraftPanel").then((m) => ({ default: m.ConfigDraftPanel })),
+);
+const ConfigDiagnosisPanel = lazy(() => import("./ConfigDiagnosisPanel"));
+const ConfigFeatureDecisionPanel = lazy(() =>
+  import("./ConfigFeatureDecisionPanel").then((m) => ({ default: m.ConfigFeatureDecisionPanel })),
+);
+const ConfigHealthDiagnosticsPanel = lazy(() =>
+  import("./ConfigHealthDiagnosticsPanel").then((m) => ({ default: m.ConfigHealthDiagnosticsPanel })),
+);
+const ConfigModelMigrationPanel = lazy(() =>
+  import("./ConfigModelMigrationPanel").then((m) => ({ default: m.ConfigModelMigrationPanel })),
+);
+const ConfigQuickSetupPanel = lazy(() =>
+  import("./ConfigQuickSetupPanel").then((m) => ({ default: m.ConfigQuickSetupPanel })),
+);
+const ConfigProviderRegistryPanel = lazy(() =>
+  import("./ConfigProviderRegistryPanel").then((m) => ({ default: m.ConfigProviderRegistryPanel })),
+);
+const ConfigProviderWizard = lazy(() =>
+  import("./ConfigProviderWizard").then((m) => ({ default: m.ConfigProviderWizard })),
+);
+const ConfigRuntimePanel = lazy(() =>
+  import("./ConfigRuntimePanel").then((m) => ({ default: m.ConfigRuntimePanel })),
+);
 import {
   buildProviderWizardDraft,
   deriveProviderRegistryRows,
@@ -3911,6 +3940,14 @@ export function ConfigRoute() {
           />
         ) : null}
 
+        <Suspense
+          fallback={
+            <ConfigWorkspacePlaceholderPanel
+              title={copy.loading}
+            />
+          }
+        >
+
         {isSectionVisible("shell") ? (
           <ConfigRuntimePanel
             copy={copy}
@@ -4280,6 +4317,7 @@ export function ConfigRoute() {
             onRepairProvider={handleRepairProviderCredential}
           />
         ) : null}
+        </Suspense>
         </div>
       </VSettingsFormPage>
     </div>
