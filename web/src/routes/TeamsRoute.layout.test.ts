@@ -29,8 +29,9 @@ import workflowPresentationSource from "./teams/workflowPresentation.ts?raw";
 import researchStageRolesSource from "./teams/researchStageRoles.ts?raw";
 import teamWorkflowQueryKeysSource from "./teams/teamWorkflowQueryKeys.ts?raw";
 import researchStageAgentPresentationSource from "./teams/researchStageAgentPresentation.ts?raw";
+import teamRouteShellModelSource from "./teams/teamRouteShellModel.ts?raw";
 
-const routeAndPureSource = `${routeSource}\n${canvasGeometrySource}\n${researchWorkspaceModelSource}\n${teamKindModelSource}\n${presentationModelSource}\n${experimentLoopModelSource}\n${aiSearchPresentationSource}\n${workflowPresentationSource}\n${researchStageRolesSource}\n${teamWorkflowQueryKeysSource}\n${researchStageAgentPresentationSource}`;
+const routeAndPureSource = `${routeSource}\n${canvasGeometrySource}\n${researchWorkspaceModelSource}\n${teamKindModelSource}\n${presentationModelSource}\n${experimentLoopModelSource}\n${aiSearchPresentationSource}\n${workflowPresentationSource}\n${researchStageRolesSource}\n${teamWorkflowQueryKeysSource}\n${researchStageAgentPresentationSource}\n${teamRouteShellModelSource}`;
 
 describe("research project workspace", () => {
   it("mounts persistent project switching above the three-stage workspace", () => {
@@ -1110,7 +1111,8 @@ describe("TeamsRoute layout contract", () => {
     // Wave 8M: repair/open-chat CTAs live on active-stage workspace (and recovery).
     expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain("修复团队 Agent");
     expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain("进入 Agent 私聊");
-    expect(routeSource).toContain("Agent 私聊");
+    expect(teamRouteShellModelSource).toContain("Agent 私聊");
+    expect(routeSource).toContain('from "./teams/teamRouteShellModel"');
     expect(routeSource).not.toContain("window.alert(lang === \"zh\"");
     expect(routeSource).not.toContain("sourceCollectionStageChatRoute");
     expect(routeSource).not.toContain("sourceCollectionStageRoomKey");
@@ -1442,8 +1444,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("只读组织画布");
     expect(routeSource).toContain("不会同步群聊或修改节点");
     expect(routeSource).toContain("canvasNodeStatusLabel");
-    expect(routeSource).toContain("已绑定");
-    expect(routeSource).toContain("专属管理员");
+    expect(teamRouteShellModelSource).toContain("已绑定");
+    expect(teamRouteShellModelSource).toContain("专属管理员");
     expect(routeSource).toContain("暂无信息线");
     expect(routeSource).toContain("没有可展开的信息线");
     expect(routeSource).toContain('useState<ResearchCanvasLayoutMode>("auto")');
@@ -1500,7 +1502,8 @@ describe("TeamsRoute layout contract", () => {
     expect(presentationModelSource).toContain('SOURCE_COLLECTION_PROMPT_CACHE_MODEL_LABEL = "configured prompt-cache model"');
     expect(routeSource).not.toContain('modelId: "houmo_qwen35_9b_agent"');
     expect(routeSource).toContain("|| selectedTeamStartResearchStageError");
-    expect(routeSource).toContain("continuedSourceRunRef");
+    expect(teamRouteShellModelSource).toContain("continuedSourceRunRef");
+    expect(routeSource).toContain("researchStageStartFeedbackText");
     expect(routeSource).toContain("sourceCollectionSearchExecution");
     expect(routeSource).toContain("selectedTeamInitialSourceCollectionSearchResult");
     expect(routeSource).toContain("selectedSourceCollectionSearchExecutionResult");
@@ -1669,7 +1672,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("repairChallengeCupTeamAgentsMutation.mutate(selectedTeam.teamId)");
     expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain("进入 Agent 私聊");
     expect(routeSource).toContain("researchStageStartFeedbackText");
-    expect(routeSource).toContain("已复用正在运行的");
+    expect(teamRouteShellModelSource).toContain("已复用正在运行的");
     expect(routeSource).not.toContain("像对话一样记录：搜索了什么");
     expect(routeSource).not.toContain("搜集批次已启动，等待功能 Agent 回写");
     expect(routeSource).not.toContain("后续接入全文下载或提炼器时");
@@ -2957,7 +2960,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("teamCanvasNodeStyle(node)");
     expect(routeSource).toContain("roleBadgeTone");
     expect(routeSource).toContain("teamNodeFunctionLabel");
-    expect(routeSource).toContain("能力管家");
+    expect(teamRouteShellModelSource).toContain("能力管家");
     expect(routeSource).toContain("styles.nodeRoleBadge");
     expect(routeSource).toContain("styles.nodeRoleBadgeLead");
     expect(routeSource).toContain("styles.nodeRoleBadgeAdvisor");
@@ -3079,7 +3082,7 @@ describe("TeamsRoute layout contract", () => {
   it("routes the source collection ingestion step to the single source ingestion Agent", () => {
     expect(routeSource).toContain('ingestion: ["source_ingestor"]');
     expect(routeSource).toContain("资料入库");
-    expect(routeSource).toContain("资料入库 Agent 私聊");
+    expect(teamRouteShellModelSource).toContain("资料入库 Agent 私聊");
     expect(routeSource).toContain("sourceCollectionIngestorAgentId");
     expect(routeSource).not.toContain("知识库管理员入库审核");
     expect(routeSource).not.toContain("共享记忆前审");
