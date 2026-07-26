@@ -64,6 +64,7 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 | Workflow tag tone helpers | `workflowTone.ts` | style map ownership |
 | Shell pure helpers (stage parse / node labels / candidate graph) | `teamRouteShellModel.ts` | style-bound class helpers |
 | Canvas node role/tone classification | `teamCanvasNodePresentation.ts` | hard-coding class strings in pure files |
+| SC shell inject pure math (page/bindings/launch) | `teamSourceCollectionShellModel.ts` | JSX inject adapters |
 | Orchestration / wiring only | `../TeamsRoute.tsx` | — |
 
 ## Bundle note (path-scoped secondary packs)
@@ -122,6 +123,7 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 |------|------|--------|
 | M5 | TeamsRoute shell pure extract | **Done** — `teamRouteShellModel.ts` |
 | M9 | Canvas node role/tone pure classification | **Done** — `teamCanvasNodePresentation.ts` |
+| T2 | SC shell inject pure helpers | **Done** — `teamSourceCollectionShellModel.ts` |
 
 ## Next (planned) — Phase 9+
 

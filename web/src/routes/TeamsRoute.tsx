@@ -396,6 +396,18 @@ import {
   nodeToneClass,
   roleBadgeToneClass,
 } from "./teams/teamCanvasNodePresentation";
+import {
+  SOURCE_COLLECTION_STAGE_AGENT_KEYS,
+  sourceCollectionPageSlice,
+  sourceCollectionStageAgentBindingsForStage,
+  sourceCollectionStageChatReturnLabel as sourceCollectionStageChatReturnLabelPure,
+  sourceCollectionStageDisplayState as sourceCollectionStageDisplayStatePure,
+  sourceCollectionStageDisplayStatus as sourceCollectionStageDisplayStatusPure,
+  sourceCollectionStageDisplaySummary as sourceCollectionStageDisplaySummaryPure,
+  sourceCollectionStageLaunchActive as sourceCollectionStageLaunchActivePure,
+  sourceCollectionStageLaunchSummary as sourceCollectionStageLaunchSummaryPure,
+  sourceCollectionStageReturnRoute as sourceCollectionStageReturnRoutePure,
+} from "./teams/teamSourceCollectionShellModel";
 
 import { workflowGraphLayout } from "./TeamWorkflowGraphLayout";
 import {
@@ -536,28 +548,6 @@ type SourceCollectionCompletionFlowNode = NonNullable<TeamWorkflowKnowledgeInges
 
 type SourceCollectionStageAgentChatStatus = "ready" | "loading" | "error" | "repair";
 
-const SOURCE_COLLECTION_STAGE_AGENT_KEYS: Record<SourceCollectionStageModuleId, string[]> = {
-  finding: ["source_finder"],
-  extraction: ["source_extractor"],
-  relations: ["source_relation_mapper"],
-  ingestion: ["source_ingestor"],
-};
-const SOURCE_COLLECTION_STAGE_TERMINAL_TASK_STATUSES = new Set([
-  "blocked",
-  "cancelled",
-  "completed",
-  "failed",
-  "interrupted",
-  "needs_review",
-]);
-const SOURCE_COLLECTION_STAGE_TERMINAL_PROJECTION_STATUSES = new Set([
-  "agent_blocked",
-  "agent_done_artifact_pending",
-  "agent_interrupted",
-  "artifact_ready_agent_blocked",
-  "artifact_ready_no_latest_agent_task",
-  "closed_loop",
-]);
 
 type NodeDragState = {
   nodeId: string;
@@ -1564,11 +1554,10 @@ export function TeamsRoute({
   }
 
   function sourceCollectionStageAgentBindings(stageId: SourceCollectionStageModuleId) {
-    const targetKeys = SOURCE_COLLECTION_STAGE_AGENT_KEYS[stageId];
-    const priorityByKey = new Map(targetKeys.map((key, index) => [key, index]));
-    return (researchStageAgentBindingsByStage.knowledge_collection ?? [])
-      .filter((binding) => priorityByKey.has(binding.key))
-      .sort((left, right) => (priorityByKey.get(left.key) ?? 99) - (priorityByKey.get(right.key) ?? 99));
+    return sourceCollectionStageAgentBindingsForStage(
+      stageId,
+      researchStageAgentBindingsByStage.knowledge_collection ?? [],
+    );
   }
 
   function sourceCollectionStagePrimaryAgentBinding(stageId: SourceCollectionStageModuleId) {
@@ -1601,11 +1590,15 @@ export function TeamsRoute({
   }
 
   function sourceCollectionStageReturnRoute(stageId: SourceCollectionStageModuleId) {
-    return `${researchSourceCollectionRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID)}&collectionStage=${stageId}`;
+    return sourceCollectionStageReturnRoutePure(
+      selectedTeam?.teamId || RESEARCH_TEAM_ID,
+      stageId,
+      researchSourceCollectionRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID),
+    );
   }
 
   function sourceCollectionStageChatReturnLabel(stageId: SourceCollectionStageModuleId) {
-    return `${lang === "zh" ? "返回" : "Back to"} ${SOURCE_COLLECTION_STAGE_CHAT_LABELS[stageId][lang]}`;
+    return sourceCollectionStageChatReturnLabelPure(stageId, lang, SOURCE_COLLECTION_STAGE_CHAT_LABELS);
   }
 
   function repairSelectedWorkflowTeamAgentsIfNeeded() {
@@ -1821,16 +1814,7 @@ export function TeamsRoute({
   }
 
   function sourceCollectionPageItems<T>(stageId: SourceCollectionStageModuleId, items: T[]) {
-    const pageCount = Math.max(1, Math.ceil(items.length / SOURCE_COLLECTION_RESULT_PAGE_SIZE));
-    const page = Math.min(Math.max(1, sourceCollectionResultPageByStage[stageId] ?? 1), pageCount);
-    const start = (page - 1) * SOURCE_COLLECTION_RESULT_PAGE_SIZE;
-    return {
-      items: items.slice(start, start + SOURCE_COLLECTION_RESULT_PAGE_SIZE),
-      page,
-      pageCount,
-      start: items.length ? start + 1 : 0,
-      end: Math.min(items.length, start + SOURCE_COLLECTION_RESULT_PAGE_SIZE),
-    };
+    return sourceCollectionPageSlice(items, sourceCollectionResultPageByStage[stageId] ?? 1);
   }
 
   function setSourceCollectionResultPage(stageId: SourceCollectionStageModuleId, page: number) {
@@ -4311,46 +4295,37 @@ export function TeamsRoute({
     return sourceCollectionStageUserStatusLabel(projection, lang, sourceCollectionStageProjectionSyncing(projection));
   };
   function sourceCollectionStageLaunchActive(stageId: SourceCollectionStageModuleId) {
-    if (sourceCollectionStageSessionTaskPendingStageId === stageId) {
-      return true;
-    }
-    const pendingTaskIds = sourceCollectionPendingStageTaskIds[stageId] ?? [];
-    if (!sourceCollectionStageWritebackSyncActive || pendingTaskIds.length <= 0) {
-      return false;
-    }
     const projection = sourceCollectionStageCardById.get(stageId);
-    const latestTaskId = projection?.latestTask?.taskId || "";
-    if (latestTaskId && pendingTaskIds.includes(latestTaskId)) {
-      const latestTaskStatus = String(projection?.latestTask?.status || "").toLowerCase();
-      const projectionStatus = String(projection?.status || "").toLowerCase();
-      return !SOURCE_COLLECTION_STAGE_TERMINAL_TASK_STATUSES.has(latestTaskStatus)
-        && !SOURCE_COLLECTION_STAGE_TERMINAL_PROJECTION_STATUSES.has(projectionStatus);
-    }
-    return true;
+    return sourceCollectionStageLaunchActivePure(stageId, {
+      pendingStageId: sourceCollectionStageSessionTaskPendingStageId,
+      pendingTaskIds: sourceCollectionPendingStageTaskIds[stageId] ?? [],
+      writebackSyncActive: sourceCollectionStageWritebackSyncActive,
+      latestTaskId: projection?.latestTask?.taskId || "",
+      latestTaskStatus: String(projection?.latestTask?.status || "").toLowerCase(),
+      projectionStatus: String(projection?.status || "").toLowerCase(),
+    });
   }
   function sourceCollectionStageLaunchSummary(stageId: SourceCollectionStageModuleId) {
-    if (sourceCollectionStageSessionTaskPendingStageId === stageId) {
-      return lang === "zh"
-        ? "Agent 已启动，正在进入私聊并准备执行本阶段任务。"
-        : "Agent started and the private chat is opening for this stage.";
-    }
-    return lang === "zh"
-      ? "等待 Agent 回写。团队页正在同步本阶段结果。"
-      : "Waiting for Agent writeback. The team page is syncing this stage result.";
+    return sourceCollectionStageLaunchSummaryPure(stageId, sourceCollectionStageSessionTaskPendingStageId, lang);
   }
   function sourceCollectionStageDisplayState(stageId: SourceCollectionStageModuleId, fallback: SourceCollectionStepState) {
-    return sourceCollectionStageLaunchActive(stageId) ? "active" : fallback;
+    return sourceCollectionStageDisplayStatePure(sourceCollectionStageLaunchActive(stageId), fallback);
   }
   function sourceCollectionStageDisplayStatus(stageId: SourceCollectionStageModuleId, fallback: string) {
-    if (!sourceCollectionStageLaunchActive(stageId)) {
-      return fallback;
-    }
-    return sourceCollectionStageSessionTaskPendingStageId === stageId
-      ? (lang === "zh" ? "Agent 已启动" : "Agent started")
-      : (lang === "zh" ? "等待 Agent 回写" : "Waiting for Agent writeback");
+    return sourceCollectionStageDisplayStatusPure(
+      stageId,
+      sourceCollectionStageLaunchActive(stageId),
+      sourceCollectionStageSessionTaskPendingStageId,
+      fallback,
+      lang,
+    );
   }
   function sourceCollectionStageDisplaySummary(stageId: SourceCollectionStageModuleId, fallback: string) {
-    return sourceCollectionStageLaunchActive(stageId) ? sourceCollectionStageLaunchSummary(stageId) : fallback;
+    return sourceCollectionStageDisplaySummaryPure(
+      sourceCollectionStageLaunchActive(stageId),
+      sourceCollectionStageLaunchSummary(stageId),
+      fallback,
+    );
   }
   const sourceCollectionStepClassName = (state: SourceCollectionStepState) => ({
     active: styles.sourceCollectionStepActive,

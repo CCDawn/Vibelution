@@ -30,8 +30,9 @@ import researchStageRolesSource from "./teams/researchStageRoles.ts?raw";
 import teamWorkflowQueryKeysSource from "./teams/teamWorkflowQueryKeys.ts?raw";
 import researchStageAgentPresentationSource from "./teams/researchStageAgentPresentation.ts?raw";
 import teamRouteShellModelSource from "./teams/teamRouteShellModel.ts?raw";
+import teamSourceCollectionShellModelSource from "./teams/teamSourceCollectionShellModel.ts?raw";
 
-const routeAndPureSource = `${routeSource}\n${canvasGeometrySource}\n${researchWorkspaceModelSource}\n${teamKindModelSource}\n${presentationModelSource}\n${experimentLoopModelSource}\n${aiSearchPresentationSource}\n${workflowPresentationSource}\n${researchStageRolesSource}\n${teamWorkflowQueryKeysSource}\n${researchStageAgentPresentationSource}\n${teamRouteShellModelSource}`;
+const routeAndPureSource = `${routeSource}\n${canvasGeometrySource}\n${researchWorkspaceModelSource}\n${teamKindModelSource}\n${presentationModelSource}\n${experimentLoopModelSource}\n${aiSearchPresentationSource}\n${workflowPresentationSource}\n${researchStageRolesSource}\n${teamWorkflowQueryKeysSource}\n${researchStageAgentPresentationSource}\n${teamRouteShellModelSource}\n${teamSourceCollectionShellModelSource}`;
 
 describe("research project workspace", () => {
   it("mounts persistent project switching above the three-stage workspace", () => {
@@ -345,8 +346,8 @@ describe("TeamsRoute layout contract", () => {
     // Wave 8R: stage-session idempotency lives on useTeamWorkflowStartMutations.
     expect(teamWorkflowStartMutationsSource).toContain("idempotencyKey: payload.idempotencyKey");
     expect(routeSource).toContain("idempotencyKey: sourceCollectionStageTaskClickKey(stageId)");
-    expect(routeSource).toContain('ingestion: ["source_ingestor"]');
-    expect(routeSource).toContain("priorityByKey");
+    expect(teamSourceCollectionShellModelSource).toContain('ingestion: ["source_ingestor"]');
+    expect(teamSourceCollectionShellModelSource).toContain("priorityByKey");
     expect(routeSource).toContain("ExperimentFullRunResultRegisterPayload");
     expect(routeSource).toContain("ExperimentResultKnowledgeIngestionPayload");
     // Wave 8O: experiment write endpoints live on useTeamExperimentLoopMutations.
@@ -1054,7 +1055,7 @@ describe("TeamsRoute layout contract", () => {
     expect(stageProjectionSource).toContain("检查项");
     expect(routeSource).toContain("sourceCollectionStageLaunchActive");
     expect(routeSource).toContain("sourceCollectionStageLaunchSummary");
-    expect(routeSource).toContain("Agent 已启动，正在进入私聊");
+    expect(teamSourceCollectionShellModelSource).toContain("Agent 已启动，正在进入私聊");
     expect(runModelSource).toContain("等待 Agent 回写");
     expect(routeSource).toContain("sourceCollectionStageDisplayState");
     expect(stageProjectionSource).toContain("sourceCollectionStageInterruptedSummary");
@@ -1182,6 +1183,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("TeamResearchStageAgentPanel");
     expect(routeSource).not.toContain('renderResearchStageAgentPanel("knowledge_collection", "compact")');
     expect(routeSource).toContain("SOURCE_COLLECTION_STAGE_AGENT_KEYS");
+    expect(teamSourceCollectionShellModelSource).toContain("SOURCE_COLLECTION_STAGE_AGENT_KEYS");
     expect(routeSource).toContain("sourceCollectionStageAgentBindings(stageId)");
     expect(routeSource).not.toContain("renderSourceCollectionStageAgentStrip");
     expect(teamStageCardSource).toContain('target.closest("button, a")');
@@ -1653,10 +1655,10 @@ describe("TeamsRoute layout contract", () => {
     // Wave 8M: duplicate-skip feedback lives on controls workspace panel.
     expect(teamSourceCollectionControlsWorkspacePanelSource).toContain("条重复跳过");
     expect(routeSource).toContain("selectedSourceCollectionSearchAccepted");
-    expect(routeSource).toContain('finding: ["source_finder"]');
-    expect(routeSource).toContain('extraction: ["source_extractor"]');
-    expect(routeSource).toContain('relations: ["source_relation_mapper"]');
-    expect(routeSource).toContain('ingestion: ["source_ingestor"]');
+    expect(teamSourceCollectionShellModelSource).toContain('finding: ["source_finder"]');
+    expect(teamSourceCollectionShellModelSource).toContain('extraction: ["source_extractor"]');
+    expect(teamSourceCollectionShellModelSource).toContain('relations: ["source_relation_mapper"]');
+    expect(teamSourceCollectionShellModelSource).toContain('ingestion: ["source_ingestor"]');
     expect(presentationModelSource).toContain('source_finder: "资料寻找 Agent"');
     expect(presentationModelSource).toContain('source_extractor: "资料提炼 Agent"');
     expect(presentationModelSource).toContain('source_relation_mapper: "资料关系整理 Agent"');
@@ -3080,7 +3082,7 @@ describe("TeamsRoute layout contract", () => {
   });
 
   it("routes the source collection ingestion step to the single source ingestion Agent", () => {
-    expect(routeSource).toContain('ingestion: ["source_ingestor"]');
+    expect(teamSourceCollectionShellModelSource).toContain('ingestion: ["source_ingestor"]');
     expect(routeSource).toContain("资料入库");
     expect(teamRouteShellModelSource).toContain("资料入库 Agent 私聊");
     expect(routeSource).toContain("sourceCollectionIngestorAgentId");
