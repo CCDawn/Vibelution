@@ -14,6 +14,7 @@ import presentationModelSource from "./teams/source-collection/presentationModel
 import runModelSource from "./teams/source-collection/runModel.ts?raw";
 import stageProjectionSource from "./teams/source-collection/stageProjection.ts?raw";
 import researchWorkflowResourcesSource from "./teams/useResearchWorkflowResources.ts?raw";
+import teamExperimentLoopMutationsSource from "./teams/useTeamExperimentLoopMutations.ts?raw";
 
 /** Route shell + claimable pure modules extracted from TeamsRoute. */
 import experimentLoopModelSource from "./teams/experimentLoopModel.ts?raw";
@@ -333,16 +334,19 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("priorityByKey");
     expect(routeSource).toContain("ExperimentFullRunResultRegisterPayload");
     expect(routeSource).toContain("ExperimentResultKnowledgeIngestionPayload");
-    expect(routeSource).toContain("/workflow-orchestration/experiments/plans/${encodeURIComponent(payload.plan.planId)}/full-run-result");
-    expect(routeSource).toContain("/workflow-orchestration/experiments/plans/${encodeURIComponent(payload.plan.planId)}/knowledge-ingestion-request");
+    // Wave 8O: experiment write endpoints live on useTeamExperimentLoopMutations.
+    expect(teamExperimentLoopMutationsSource).toContain("/workflow-orchestration/experiments/plans/${encodeURIComponent(payload.plan.planId)}/full-run-result");
+    expect(teamExperimentLoopMutationsSource).toContain("/workflow-orchestration/experiments/plans/${encodeURIComponent(payload.plan.planId)}/knowledge-ingestion-request");
     expect(routeSource).toContain("registerExperimentFullRunResultMutation");
+    expect(routeSource).toContain("useTeamExperimentLoopMutations");
     expect(routeSource).toContain("requestExperimentKnowledgeIngestionMutation");
     // Wave 8J: full-run / knowledge-admin CTA copy lives on experiment ledger panel.
     expect(teamExperimentPlanningLedgerPanelSource).toContain("登记 full-run");
     expect(teamExperimentPlanningLedgerPanelSource).toContain("通知知识库管理员");
-    expect(routeSource).toContain("manualFullRunResult: true");
-    expect(routeSource).toContain("explicitUserBoundary: true");
-    expect(routeSource).toContain("stewardReviewRequired: true");
+    // Wave 8O: full-run / knowledge-ingestion metadata lives on experiment-loop mutations hook.
+    expect(teamExperimentLoopMutationsSource).toContain("manualFullRunResult: true");
+    expect(teamExperimentLoopMutationsSource).toContain("explicitUserBoundary: true");
+    expect(teamExperimentLoopMutationsSource).toContain("stewardReviewRequired: true");
     expect(routeStylesSource).toContain(".experimentKnowledgePanel");
     expect(routeStylesSource).toContain(".experimentKnowledgeForm");
     expect(routeSource).toContain("ResearchLoopStatusPayload");
@@ -350,19 +354,19 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("researchLoopStatusQuery");
     expect(routeSource).toContain("/workflow-orchestration/research-loop/templates");
     expect(routeSource).toContain("/workflow-orchestration/research-loop/status");
-    expect(routeSource).toContain("/workflow-orchestration/research-loop/loops");
-    expect(routeSource).toContain("/workflow-orchestration/research-loop/loops/${encodeURIComponent(payload.loop.loopId)}/evidence");
-    expect(routeSource).toContain("/workflow-orchestration/research-loop/loops/${encodeURIComponent(payload.loop.loopId)}/decision");
+    expect(teamExperimentLoopMutationsSource).toContain("/workflow-orchestration/research-loop/loops");
+    expect(teamExperimentLoopMutationsSource).toContain("/workflow-orchestration/research-loop/loops/${encodeURIComponent(payload.loop.loopId)}/evidence");
+    expect(teamExperimentLoopMutationsSource).toContain("/workflow-orchestration/research-loop/loops/${encodeURIComponent(payload.loop.loopId)}/decision");
     expect(routeSource).toContain("createResearchLoopMutation");
     expect(routeSource).toContain("recordResearchLoopEvidenceMutation");
     expect(routeSource).toContain("recordResearchLoopDecisionMutation");
-    expect(routeSource).toContain("createNextDesignDraft:");
-    expect(routeSource).toContain("idempotencyKey: `${payload.loop.loopId}:${payload.loop.updatedAt}:${payload.draft.decision}`");
+    expect(teamExperimentLoopMutationsSource).toContain("createNextDesignDraft:");
+    expect(teamExperimentLoopMutationsSource).toContain("idempotencyKey: `${payload.loop.loopId}:${payload.loop.updatedAt}:${payload.draft.decision}`");
     // Wave 8J: research-loop UI + design-draft CTA live on TeamResearchLoopPanel.
     expect(teamResearchLoopPanelSource).toContain("nextDesignPlanId");
     expect(teamResearchLoopPanelSource).toContain("已生成下一版设计");
     expect(routeSource).toContain("freezeExperimentDesignMutation");
-    expect(routeSource).toContain("/freeze`");
+    expect(teamExperimentLoopMutationsSource).toContain("/freeze`");
     expect(teamExperimentPlanningLedgerPanelSource).toContain("冻结设计");
     expect(teamExperimentPlanningLedgerPanelSource).toContain("designExecutionAllowed");
     expect(routeSource).toContain("materializeResearchLoopIterationDesignMutation");
@@ -373,9 +377,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("TeamResearchLoopPanel");
     expect(teamResearchLoopPanelSource).toContain("Research Loop 模板");
     expect(teamResearchLoopPanelSource).toContain("实验迭代决策");
-    expect(routeSource).toContain("noSandboxRunner: true");
-    expect(routeSource).toContain("noTrainingExecution: true");
-    expect(routeSource).toContain("commandPreviewOnly: true");
+    expect(teamExperimentLoopMutationsSource).toContain("noSandboxRunner: true");
+    expect(teamExperimentLoopMutationsSource).toContain("noTrainingExecution: true");
+    expect(teamExperimentLoopMutationsSource).toContain("commandPreviewOnly: true");
     expect(routeSource).toContain("startSourceCollectionRunMutation");
     expect(routeSource).toContain("knowledgeExpansionWorkflowTeamSelected");
     expect(routeAndPureSource).toContain("SOURCE_COLLECTION_KNOWLEDGE_EXPANSION_ROLES");
@@ -1675,10 +1679,10 @@ describe("TeamsRoute layout contract", () => {
     expect(teamExperimentMethodPanelSource).toContain("执行器尚未就绪");
     expect(teamExperimentMethodPanelStyles.methodGrid).toContain("max-[560px]:grid-cols-[minmax(0,1fr)]");
     expect(teamExperimentMethodPanelStyles.form).toContain("min-h-[18rem]");
-    expect(routeSource).toContain("baseline-artifact");
+    expect(teamExperimentLoopMutationsSource).toContain("baseline-artifact");
     expect(teamExperimentPlanningLedgerPanelSource).toContain("登记基线工件");
     expect(routeSource).toContain("reproductionCommand");
-    expect(routeSource).toContain("smoke-result");
+    expect(teamExperimentLoopMutationsSource).toContain("smoke-result");
     expect(routeAndPureSource).toContain("ExperimentSmokeResultRecord");
     expect(routeAndPureSource).toContain("activeSmokeResult");
     expect(routeAndPureSource).toContain("gateDecision");
@@ -1688,7 +1692,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeAndPureSource).toContain("readyForSmoke");
     expect(routeAndPureSource).toContain("baselineSelection");
     expect(routeAndPureSource).toContain("readyForFullRun");
-    expect(routeSource).toContain("No training execution was triggered.");
+    expect(teamExperimentLoopMutationsSource).toContain("No training execution was triggered.");
     expect(teamResearchStageStandalonePagePanelSource).toContain("迭代优化工作台");
     expect(routeSource).toContain("renderResearchStageStandalonePage");
     expect(routeSource).toContain("TeamResearchStageStandalonePagePanel");
