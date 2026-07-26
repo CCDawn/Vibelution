@@ -2,7 +2,7 @@ import "../design/route-css/workbench-secondary.tailwind.css";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ExternalLink, LoaderCircle, Play, Power, RefreshCw, Square } from "lucide-react";
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState, type CSSProperties } from "react";
 
 import {
   getLauncherStatus,
@@ -51,11 +51,21 @@ import { usePersistedPaneResize } from "../components/layout/usePersistedPaneRes
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import { VButton, VRouteHeader, VTooltip } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
-import { LauncherDeveloperModePanel } from "./LauncherDeveloperModePanel";
-import { LauncherDiagnosticsPanel } from "./LauncherDiagnosticsPanel";
-import { LauncherProjectMaintenancePanel } from "./LauncherProjectMaintenancePanel";
 import { launcherRouteStyles as styles } from "./LauncherRoute.styles";
-import { LauncherStartupSettingsPanel } from "./LauncherStartupSettingsPanel";
+
+/** T4: secondary launcher panels load as route packs — keep lifecycle shell first. */
+const LauncherStartupSettingsPanel = lazy(() =>
+  import("./LauncherStartupSettingsPanel").then((module) => ({ default: module.LauncherStartupSettingsPanel })),
+);
+const LauncherProjectMaintenancePanel = lazy(() =>
+  import("./LauncherProjectMaintenancePanel").then((module) => ({ default: module.LauncherProjectMaintenancePanel })),
+);
+const LauncherDeveloperModePanel = lazy(() =>
+  import("./LauncherDeveloperModePanel").then((module) => ({ default: module.LauncherDeveloperModePanel })),
+);
+const LauncherDiagnosticsPanel = lazy(() =>
+  import("./LauncherDiagnosticsPanel").then((module) => ({ default: module.LauncherDiagnosticsPanel })),
+);
 
 const LAUNCHER_LAYOUT_ID = WORKBENCH_LAYOUT_IDS.launcher;
 const LAUNCHER_RAIL_PANE: PaneSpec = {
@@ -2148,58 +2158,60 @@ export function LauncherRoute() {
         </div>
       </div>
 
-      <LauncherStartupSettingsPanel
-        copy={copy}
-        uiLang={uiLang}
-        setting={startupSettings}
-        configuredWindowMode={configuredWindowMode}
-        effectiveWindowModeLabel={workbenchWindowModeLabel(effectiveWindowMode, copy)}
-        windowModeDetail={windowModeDetail}
-        controlPortOverride={controlPortOverride}
-        backendPortOverride={backendPortOverride}
-        frontendPortOverride={frontendPortOverride}
-        pending={startupSettingsMutation.isPending || workbenchWindowSaveMutation.isPending}
-        pendingWindowMode={pendingWindowMode}
-        onSave={(nextSetting) => startupSettingsMutation.mutate(nextSetting)}
-        onWindowModeChange={(request) => workbenchWindowSaveMutation.mutate(request)}
-      />
+      <Suspense fallback={<p className={styles.notice} data-tone="neutral">{copy.loading}</p>}>
+        <LauncherStartupSettingsPanel
+          copy={copy}
+          uiLang={uiLang}
+          setting={startupSettings}
+          configuredWindowMode={configuredWindowMode}
+          effectiveWindowModeLabel={workbenchWindowModeLabel(effectiveWindowMode, copy)}
+          windowModeDetail={windowModeDetail}
+          controlPortOverride={controlPortOverride}
+          backendPortOverride={backendPortOverride}
+          frontendPortOverride={frontendPortOverride}
+          pending={startupSettingsMutation.isPending || workbenchWindowSaveMutation.isPending}
+          pendingWindowMode={pendingWindowMode}
+          onSave={(nextSetting) => startupSettingsMutation.mutate(nextSetting)}
+          onWindowModeChange={(request) => workbenchWindowSaveMutation.mutate(request)}
+        />
 
-      <LauncherProjectMaintenancePanel
-        copy={copy}
-        summary={maintenanceSummaryQuery.data}
-        maintenanceProfile={maintenanceProfile}
-        plan={maintenancePlan}
-        loading={maintenanceSummaryQuery.isLoading || maintenanceSummaryQuery.isFetching}
-        previewPending={maintenancePreviewMutation.isPending}
-        applyPending={maintenanceApplyMutation.isPending}
-        onProfileChange={(profile) => {
-          setMaintenanceProfile(profile);
-        }}
-        onPreview={previewMaintenancePlan}
-        onApply={applyMaintenancePlan}
-      />
+        <LauncherProjectMaintenancePanel
+          copy={copy}
+          summary={maintenanceSummaryQuery.data}
+          maintenanceProfile={maintenanceProfile}
+          plan={maintenancePlan}
+          loading={maintenanceSummaryQuery.isLoading || maintenanceSummaryQuery.isFetching}
+          previewPending={maintenancePreviewMutation.isPending}
+          applyPending={maintenanceApplyMutation.isPending}
+          onProfileChange={(profile) => {
+            setMaintenanceProfile(profile);
+          }}
+          onPreview={previewMaintenancePlan}
+          onApply={applyMaintenancePlan}
+        />
 
-      <LauncherDeveloperModePanel
-        copy={copy}
-        setting={developerModeSetting}
-        noiseOverview={developerNoiseQuery.data}
-        selectedAction={selectedCleanupAction}
-        plan={cleanupPlan}
-        pending={developerModeMutation.isPending}
-        noiseLoading={developerNoiseQuery.isFetching}
-        previewPending={cleanupPreviewMutation.isPending}
-        applyPending={cleanupApplyMutation.isPending}
-        resetPending={resetDeveloperSandboxMutation.isPending}
-        onToggle={toggleDeveloperMode}
-        onReset={resetDeveloperSandbox}
-        onRefreshNoise={() => void developerNoiseQuery.refetch()}
-        onSelectAction={(action) => {
-          setSelectedCleanupAction(action);
-          setCleanupPlan(null);
-        }}
-        onPreview={previewDeveloperCleanup}
-        onApply={applyDeveloperCleanup}
-      />
+        <LauncherDeveloperModePanel
+          copy={copy}
+          setting={developerModeSetting}
+          noiseOverview={developerNoiseQuery.data}
+          selectedAction={selectedCleanupAction}
+          plan={cleanupPlan}
+          pending={developerModeMutation.isPending}
+          noiseLoading={developerNoiseQuery.isFetching}
+          previewPending={cleanupPreviewMutation.isPending}
+          applyPending={cleanupApplyMutation.isPending}
+          resetPending={resetDeveloperSandboxMutation.isPending}
+          onToggle={toggleDeveloperMode}
+          onReset={resetDeveloperSandbox}
+          onRefreshNoise={() => void developerNoiseQuery.refetch()}
+          onSelectAction={(action) => {
+            setSelectedCleanupAction(action);
+            setCleanupPlan(null);
+          }}
+          onPreview={previewDeveloperCleanup}
+          onApply={applyDeveloperCleanup}
+        />
+      </Suspense>
 
       {statusQuery.isError ? (
         <p className={styles.notice} data-tone={expectedStopDisconnect ? "success" : launcherControlLimited ? "warning" : "error"}>
@@ -2267,26 +2279,28 @@ export function LauncherRoute() {
           onKeyDown={(event) => onLauncherRailResizeKeyDown("rail", event, { direction: -1 })}
         />
 
-        <LauncherDiagnosticsPanel
-          copy={copy}
-          controlPlaneStatus={humanState(status?.runtimeManager.runtimeState, uiLang)}
-          controlPlaneSpecs={controlPlaneSpecs}
-          controlEvidenceStatus={evidence?.state.runtimeState || "-"}
-          controlEvidenceSpecs={controlEvidenceSpecs}
-          recoveryLine={recoveryLine}
-          activeCommandLine={activeCommandLine}
-          queueItemCount={recentResults.length + recentEvents.length}
-          queueItems={diagnosticQueueItems}
-          guardianProgress={guardianProgress}
-          guardianOwnedCount={guardian?.ownedCount ?? 0}
-          guardianAdapterCount={guardian?.adapterCount ?? 0}
-          guardianRows={guardianResponsibilityRows}
-          diagnosticSpecs={diagnosticSpecs}
-          busy={busy}
-          canRequestSupervisorReattach={canRequestSupervisorReattach}
-          supervisorPending={supervisorMutation.isPending}
-          onReattachSupervisor={() => supervisorMutation.mutate()}
-        />
+        <Suspense fallback={<p className={styles.notice} data-tone="neutral">{copy.loading}</p>}>
+          <LauncherDiagnosticsPanel
+            copy={copy}
+            controlPlaneStatus={humanState(status?.runtimeManager.runtimeState, uiLang)}
+            controlPlaneSpecs={controlPlaneSpecs}
+            controlEvidenceStatus={evidence?.state.runtimeState || "-"}
+            controlEvidenceSpecs={controlEvidenceSpecs}
+            recoveryLine={recoveryLine}
+            activeCommandLine={activeCommandLine}
+            queueItemCount={recentResults.length + recentEvents.length}
+            queueItems={diagnosticQueueItems}
+            guardianProgress={guardianProgress}
+            guardianOwnedCount={guardian?.ownedCount ?? 0}
+            guardianAdapterCount={guardian?.adapterCount ?? 0}
+            guardianRows={guardianResponsibilityRows}
+            diagnosticSpecs={diagnosticSpecs}
+            busy={busy}
+            canRequestSupervisorReattach={canRequestSupervisorReattach}
+            supervisorPending={supervisorMutation.isPending}
+            onReattachSupervisor={() => supervisorMutation.mutate()}
+          />
+        </Suspense>
       </div>
     </section>
   );
