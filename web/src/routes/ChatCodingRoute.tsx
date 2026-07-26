@@ -89,6 +89,7 @@ import {
   ACTIVE_INDEX_POLL_MS,
   resolveChatLiveQueryPolicy,
 } from "./chatLiveQueryPolicy";
+import { resolveChatSecondaryPollPolicy } from "./chatSecondaryPollPolicy";
 import {
   latestUserMessageId as deriveLatestUserMessageId,
   resolveComposerDraftValue,
@@ -653,6 +654,15 @@ export function ChatCodingRoute() {
   };
   const chatLiveQueryPolicy = resolveChatLiveQueryPolicy(chatLiveQueryPolicyInput);
   const { groupStreamOwnsLiveQueries } = chatLiveQueryPolicy;
+  const teamsPickerNeeded = groupComposerOpen || standardGroupRoomActive;
+  const chatSecondaryPollPolicy = resolveChatSecondaryPollPolicy({
+    chatPollingVisible,
+    chatStartupWarmupActive,
+    secondaryChatDataEnabled,
+    directSessionPanelActive,
+    teamsPickerNeeded,
+    projectBusActive,
+  });
   useEffect(() => {
     if (!standardGroupRoomActive && rightIndexPanel === "members") {
       setRightIndexPanel("conversations");
@@ -663,15 +673,15 @@ export function ChatCodingRoute() {
     queryKey: queryKeys.runtimeSummary(),
     queryFn: () => fetchJson<RuntimeSummary>("/api/runtime/summary"),
     enabled: secondaryChatDataEnabled,
-    refetchInterval: resolvePollingInterval(chatPollingVisible, 5_000),
-    refetchIntervalInBackground: chatStartupWarmupActive,
+    refetchInterval: chatSecondaryPollPolicy.runtimeRefetchInterval,
+    refetchIntervalInBackground: chatSecondaryPollPolicy.secondaryRefetchIntervalInBackground,
   });
   const petQuery = useQuery({
     queryKey: queryKeys.petSummary(),
     queryFn: () => fetchJson<PetSummary>("/api/pet/summary"),
     enabled: secondaryChatDataEnabled,
-    refetchInterval: resolvePollingInterval(chatPollingVisible, 10_000),
-    refetchIntervalInBackground: chatStartupWarmupActive,
+    refetchInterval: chatSecondaryPollPolicy.petRefetchInterval,
+    refetchIntervalInBackground: chatSecondaryPollPolicy.secondaryRefetchIntervalInBackground,
   });
   const configSummaryQuery = useQuery({
     queryKey: queryKeys.configPublic(),
@@ -728,9 +738,9 @@ export function ChatCodingRoute() {
   const teamsQuery = useQuery({
     queryKey: queryKeys.teams(),
     queryFn: () => fetchJson<TeamListPayload>("/api/teams"),
-    enabled: secondaryChatDataEnabled,
-    refetchInterval: resolvePollingInterval(chatPollingVisible, directSessionPanelActive ? false : ACTIVE_INDEX_POLL_MS),
-    refetchIntervalInBackground: chatStartupWarmupActive,
+    enabled: secondaryChatDataEnabled && teamsPickerNeeded,
+    refetchInterval: chatSecondaryPollPolicy.teamsRefetchInterval,
+    refetchIntervalInBackground: chatSecondaryPollPolicy.secondaryRefetchIntervalInBackground,
   });
   const agentsQuery = useQuery({
     queryKey: queryKeys.agents(),
@@ -771,8 +781,8 @@ export function ChatCodingRoute() {
     queryKey: queryKeys.projectAgentBus(),
     queryFn: ({ signal }) => listProjectAgentBusTimeline(undefined, { signal }),
     enabled: projectBusActive,
-    refetchInterval: projectBusActive ? resolvePollingInterval(chatPollingVisible, 3_000) : false,
-    refetchIntervalInBackground: chatStartupWarmupActive,
+    refetchInterval: chatSecondaryPollPolicy.projectBusRefetchInterval,
+    refetchIntervalInBackground: chatSecondaryPollPolicy.secondaryRefetchIntervalInBackground,
   });
   const expandedGroupAgentDetailQueries = useQueries({
     queries: expandedGroupAgentSessionIds.map((sessionId) => ({
