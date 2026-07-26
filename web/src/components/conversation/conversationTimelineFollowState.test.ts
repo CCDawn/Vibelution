@@ -115,11 +115,29 @@ describe("conversation timeline follow state", () => {
     expect(tail.start).toBeGreaterThan(0);
   });
 
-  it("records row heights only when they change", () => {
+  it("records row heights only when they change beyond min delta", () => {
     const cache = new Map<string, number>();
     expect(recordConversationRowHeight(cache, "r1", 120.4)).toBe(true);
     expect(cache.get("r1")).toBe(120);
     expect(recordConversationRowHeight(cache, "r1", 120)).toBe(false);
+    expect(recordConversationRowHeight(cache, "r1", 121, { minDeltaPx: 2 })).toBe(false);
+    expect(recordConversationRowHeight(cache, "r1", 123, { minDeltaPx: 2 })).toBe(true);
     expect(recordConversationRowHeight(cache, "", 50)).toBe(false);
+  });
+
+  it("keeps a stable min tail window while following latest", () => {
+    const tallTail = resolveConversationVirtualRange({
+      itemCount: 80,
+      scrollTop: 0,
+      viewportHeight: 600,
+      followingLatest: true,
+      // First rows short, last rows very tall — height walk alone would mount few rows.
+      heights: Array.from({ length: 80 }, (_, index) => (index >= 75 ? 400 : 40)),
+      estimatePx: 100,
+      overscan: 2,
+    });
+    expect(tallTail.end).toBe(80);
+    // minTailRows = ceil(600/100)+4 = 10 → start <= 70
+    expect(tallTail.start).toBeLessThanOrEqual(70);
   });
 });

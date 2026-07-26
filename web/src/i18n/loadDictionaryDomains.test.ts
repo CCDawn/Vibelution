@@ -29,4 +29,12 @@ describe("loadDictionaryDomains (D1)", () => {
     expect(useAppI18nSource).not.toContain('from "./dictionary"');
     expect(useAppI18nSource).toContain("domains");
   });
+
+  it("exposes soft prefetch for navigation warm paths", async () => {
+    const { prefetchDictionaryDomains } = await import("./loadDictionaryDomains");
+    expect(typeof prefetchDictionaryDomains).toBe("function");
+    prefetchDictionaryDomains(["tools"]);
+    const tools = await loadDictionaryDomains(["tools"]);
+    expect(tools.zh.appTitle || Object.keys(tools.zh).length > 0).toBeTruthy();
+  });
 });

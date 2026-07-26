@@ -89,8 +89,10 @@ Recorded for high-ROI program **scope A** (F0–F3, F5, F6; F4 trigger-only).
 |---|---|
 | D1 | `dictionary.ts` → domain slices under `i18n/domains/*`; merge façade keeps `TranslationKey` |
 | D1+ | `useAppI18n({ domains })` dynamic domain loaders; primary routes pass scoped packs (chat/evolution/tools/…) |
+| D1++ | AppShell soft chat preload warms `prefetchDictionaryDomains(["chat"])`; route domain contracts |
 | D2 | Conversation windowed virtual range + stick-bottom ResizeObserver |
 | D2+ | Measured row heights + prefix-sum spacers (`buildConversationHeightOffsets` / row ResizeObserver) |
+| D2++ | Stick-bottom: min tail window + rAF height-version batch + 2px measure deadband |
 | D3 | Agents pure presentation helpers → `agents/agentRouteListModel.ts` (~200 LOC off route) |
 
 ### Post-T1–T3 chunk notes (build evidence)
