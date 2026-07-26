@@ -387,57 +387,62 @@ const styles = {
   ...workflowRouteStyles,
 } as Record<string, string>;
 
-/** One shared async pack for Teams panel UI (see teams/README.md). */
-const loadTeamSecondaryPanels = () => import("./teams/teamSecondaryPanels");
+/**
+ * Path-scoped Teams UI packs (see teams/README.md).
+ * Shared = cross-path primitives; Research = research/experiment/AI search; SC = source-collection.
+ */
+const loadTeamSharedPanels = () => import("./teams/teamSharedPanels");
+const loadTeamResearchPanels = () => import("./teams/teamResearchPanels");
+const loadTeamSourceCollectionPanels = () => import("./teams/teamSourceCollectionPanels");
 
-const TeamMemoryIndexPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamMemoryIndexPanel");
-const TeamAiSearchWorkspacePanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamAiSearchWorkspacePanel");
-const TeamResearchStageAgentPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamResearchStageAgentPanel");
-const TeamResearchStageAgentSummary = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamResearchStageAgentSummary");
-const TeamResearchStageLauncherPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamResearchStageLauncherPanel");
-const TeamResearchStageStandalonePagePanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamResearchStageStandalonePagePanel");
-const TeamResearchLoopPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamResearchLoopPanel");
-const TeamExperimentPlanningLedgerPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamExperimentPlanningLedgerPanel");
-// TeamExperimentMethodPanel is mounted inside TeamExperimentPlanningLedgerPanel (same secondary pack).
-const TeamSourceCollectionActiveStagePanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionActiveStagePanel");
-const TeamSourceCollectionPhaseCloseGatePanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionPhaseCloseGatePanel");
-const TeamSourceCollectionStageAgentsPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionStageAgentsPanel");
-const TeamSourceCollectionRunSwitcherPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionRunSwitcherPanel");
-const TeamSourceCollectionFindingDetailsPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionFindingDetailsPanel");
-const TeamSourceCollectionCandidatePanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionCandidatePanel");
-const TeamSourceCollectionConversationPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionConversationPanel");
-const TeamSourceCollectionControlsPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionControlsPanel");
-const TeamSourceCollectionExtractionRecoveryPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionExtractionRecoveryPanel");
-const TeamSourceCollectionGraphPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionGraphPanel");
-const TeamSourceCollectionManualWritebackPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionManualWritebackPanel");
-const TeamSourceCollectionMemoryPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionMemoryPanel");
-const TeamSourceCollectionScreeningPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionScreeningPanel");
-const TeamKnowledgeCollectionCompletionFlowPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamKnowledgeCollectionCompletionFlowPanel");
-const TeamSourceCollectionConversationWorkspacePanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionConversationWorkspacePanel");
-const TeamSourceCollectionScreeningWorkspacePanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionScreeningWorkspacePanel");
-const TeamSourceCollectionExtractionRecoveryWorkspacePanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionExtractionRecoveryWorkspacePanel");
-const TeamSourceCollectionCandidateWorkspacePanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionCandidateWorkspacePanel");
-const TeamSourceCollectionGraphWorkspacePanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionGraphWorkspacePanel");
-const TeamSourceCollectionMemoryWorkspacePanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionMemoryWorkspacePanel");
-const TeamSourceCollectionSelectedSourceWorkspacePanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionSelectedSourceWorkspacePanel");
-const TeamSourceCollectionControlsWorkspacePanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionControlsWorkspacePanel");
-const TeamSourceCollectionActiveStageWorkspacePanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionActiveStageWorkspacePanel");
-const TeamSourceCollectionSourceDetailPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionSourceDetailPanel");
-const TeamSourceCollectionStandaloneStagePanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionStandaloneStagePanel");
-const TeamSourceCollectionRunSettingsPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionRunSettingsPanel");
-const TeamSourceCollectionFilterBar = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionFilterBar");
-const TeamSourceCollectionPagination = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionPagination");
-const TeamSourceCollectionStorageActionsPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionStorageActionsPanel");
-const TeamWorkflowCandidatePreviewPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamWorkflowCandidatePreviewPanel");
-const TeamsSourceCollectionPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamsSourceCollectionPanel");
-const ResearchMemoryEvidencePanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "ResearchMemoryEvidencePanel");
-const TeamWorkflowGraphView = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamWorkflowGraphView");
-const TeamWorkflowCandidateGraphStatusPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamWorkflowCandidateGraphStatusPanel");
-const TeamWorkflowCoordinationStatusPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamWorkflowCoordinationStatusPanel");
-const TeamWorkflowKnowledgeIngestionStatusPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamWorkflowKnowledgeIngestionStatusPanel");
-const TeamWorkflowModelEvidenceStatusPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamWorkflowModelEvidenceStatusPanel");
-const TeamWorkflowPaperNoteChunkStatusPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamWorkflowPaperNoteChunkStatusPanel");
-const TeamWorkflowSourceQualityStatusPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamWorkflowSourceQualityStatusPanel");
+const TeamMemoryIndexPanel = createLazyNamedTeamPanel(loadTeamResearchPanels, "TeamMemoryIndexPanel");
+const TeamAiSearchWorkspacePanel = createLazyNamedTeamPanel(loadTeamResearchPanels, "TeamAiSearchWorkspacePanel");
+const TeamResearchStageAgentPanel = createLazyNamedTeamPanel(loadTeamResearchPanels, "TeamResearchStageAgentPanel");
+const TeamResearchStageAgentSummary = createLazyNamedTeamPanel(loadTeamResearchPanels, "TeamResearchStageAgentSummary");
+const TeamResearchStageLauncherPanel = createLazyNamedTeamPanel(loadTeamResearchPanels, "TeamResearchStageLauncherPanel");
+const TeamResearchStageStandalonePagePanel = createLazyNamedTeamPanel(loadTeamResearchPanels, "TeamResearchStageStandalonePagePanel");
+const TeamResearchLoopPanel = createLazyNamedTeamPanel(loadTeamResearchPanels, "TeamResearchLoopPanel");
+const TeamExperimentPlanningLedgerPanel = createLazyNamedTeamPanel(loadTeamResearchPanels, "TeamExperimentPlanningLedgerPanel");
+// TeamExperimentMethodPanel is mounted inside TeamExperimentPlanningLedgerPanel (same research pack).
+const TeamSourceCollectionActiveStagePanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionActiveStagePanel");
+const TeamSourceCollectionPhaseCloseGatePanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionPhaseCloseGatePanel");
+const TeamSourceCollectionStageAgentsPanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionStageAgentsPanel");
+const TeamSourceCollectionRunSwitcherPanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionRunSwitcherPanel");
+const TeamSourceCollectionFindingDetailsPanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionFindingDetailsPanel");
+const TeamSourceCollectionCandidatePanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionCandidatePanel");
+const TeamSourceCollectionConversationPanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionConversationPanel");
+const TeamSourceCollectionControlsPanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionControlsPanel");
+const TeamSourceCollectionExtractionRecoveryPanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionExtractionRecoveryPanel");
+const TeamSourceCollectionGraphPanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionGraphPanel");
+const TeamSourceCollectionManualWritebackPanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionManualWritebackPanel");
+const TeamSourceCollectionMemoryPanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionMemoryPanel");
+const TeamSourceCollectionScreeningPanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionScreeningPanel");
+const TeamKnowledgeCollectionCompletionFlowPanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamKnowledgeCollectionCompletionFlowPanel");
+const TeamSourceCollectionConversationWorkspacePanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionConversationWorkspacePanel");
+const TeamSourceCollectionScreeningWorkspacePanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionScreeningWorkspacePanel");
+const TeamSourceCollectionExtractionRecoveryWorkspacePanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionExtractionRecoveryWorkspacePanel");
+const TeamSourceCollectionCandidateWorkspacePanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionCandidateWorkspacePanel");
+const TeamSourceCollectionGraphWorkspacePanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionGraphWorkspacePanel");
+const TeamSourceCollectionMemoryWorkspacePanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionMemoryWorkspacePanel");
+const TeamSourceCollectionSelectedSourceWorkspacePanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionSelectedSourceWorkspacePanel");
+const TeamSourceCollectionControlsWorkspacePanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionControlsWorkspacePanel");
+const TeamSourceCollectionActiveStageWorkspacePanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionActiveStageWorkspacePanel");
+const TeamSourceCollectionSourceDetailPanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionSourceDetailPanel");
+const TeamSourceCollectionStandaloneStagePanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionStandaloneStagePanel");
+const TeamSourceCollectionRunSettingsPanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionRunSettingsPanel");
+const TeamSourceCollectionFilterBar = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionFilterBar");
+const TeamSourceCollectionPagination = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionPagination");
+const TeamSourceCollectionStorageActionsPanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionStorageActionsPanel");
+const TeamWorkflowCandidatePreviewPanel = createLazyNamedTeamPanel(loadTeamResearchPanels, "TeamWorkflowCandidatePreviewPanel");
+const TeamsSourceCollectionPanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamsSourceCollectionPanel");
+const ResearchMemoryEvidencePanel = createLazyNamedTeamPanel(loadTeamSharedPanels, "ResearchMemoryEvidencePanel");
+const TeamWorkflowGraphView = createLazyNamedTeamPanel(loadTeamSharedPanels, "TeamWorkflowGraphView");
+const TeamWorkflowCandidateGraphStatusPanel = createLazyNamedTeamPanel(loadTeamResearchPanels, "TeamWorkflowCandidateGraphStatusPanel");
+const TeamWorkflowCoordinationStatusPanel = createLazyNamedTeamPanel(loadTeamResearchPanels, "TeamWorkflowCoordinationStatusPanel");
+const TeamWorkflowKnowledgeIngestionStatusPanel = createLazyNamedTeamPanel(loadTeamResearchPanels, "TeamWorkflowKnowledgeIngestionStatusPanel");
+const TeamWorkflowModelEvidenceStatusPanel = createLazyNamedTeamPanel(loadTeamResearchPanels, "TeamWorkflowModelEvidenceStatusPanel");
+const TeamWorkflowPaperNoteChunkStatusPanel = createLazyNamedTeamPanel(loadTeamResearchPanels, "TeamWorkflowPaperNoteChunkStatusPanel");
+const TeamWorkflowSourceQualityStatusPanel = createLazyNamedTeamPanel(loadTeamResearchPanels, "TeamWorkflowSourceQualityStatusPanel");
 
 const TEAMS_LAYOUT_ID = WORKBENCH_LAYOUT_IDS.teams;
 const TEAMS_INSPECTOR_PANE: PaneSpec = {

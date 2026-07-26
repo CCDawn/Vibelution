@@ -47,18 +47,26 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 | Team memory index UI | `../TeamMemoryIndexPanel.tsx` (via secondary pack) | bus timeline |
 | Source-collection UI panels (`TeamSourceCollection*`) | panel file under `routes/` (via secondary pack) | pure models |
 | Secondary-lazy loader helper | `lazyTeamPanel.tsx` | business logic |
-| Secondary UI pack barrel | `teamSecondaryPanels.ts` | pure models/hooks |
+| Shared UI pack barrel | `teamSharedPanels.ts` | path-specific orchestration |
+| Research UI pack barrel | `teamResearchPanels.ts` | SC orchestration |
+| Source-collection UI pack barrel | `teamSourceCollectionPanels.ts` | research orchestration |
 | Orchestration / wiring only | `../TeamsRoute.tsx` | — |
 
-## Bundle note (secondary lazy)
+## Bundle note (path-scoped secondary packs)
 
-`TeamsRoute` keeps UI panels off the initial Teams shell chunk via `createLazyNamedTeamPanel` + `teamSecondaryPanels.ts` (one shared async pack).
+`TeamsRoute` keeps UI panels off the initial shell via `createLazyNamedTeamPanel` and **three** async barrels:
 
-**Stay static in the shell (on purpose):**
+| Pack | Loader | Contains |
+|---|---|---|
+| Shared | `loadTeamSharedPanels` | Graph view, research memory evidence |
+| Research | `loadTeamResearchPanels` | AI search, research stages, loop/ledger, workflow status |
+| Source-collection | `loadTeamSourceCollectionPanels` | SC chrome + workspace orchestration |
 
-- Pure models: `source-collection/*`, `TeamsRoute.canvasData`, `TeamWorkflowGraphLayout`
-- Data hooks: `useResearchWorkflowResources`
-- Styles maps: `TeamsRoute.styles` + thematic clusters (`research` / `aiSearch` / `experiment` / `workflow`)
+**Rules:**
+
+- New panels must enter exactly one pack; do **not** revive a mono `teamSecondaryPanels` UI barrel.
+- Same-pack static imports are fine; cross-pack **value** imports of workspaces are forbidden.
+- Stay static in the shell (on purpose): pure models, query keys/hooks, style maps.
 
 **Do not** re-add static value imports of panel components into `TeamsRoute.tsx` without a budget re-check.
 
@@ -73,13 +81,15 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 - **Wave 8K done:** Knowledge completion flow + SC conversation/screening workspaces extracted (chrome shells kept; orchestration moved off route).
 - **Wave 8L done:** SC recovery / candidate / graph / memory workspaces extracted (controls/active-stage still route-owned).
 - **Wave 8M done:** SC selected-source / controls / active-stage workspaces extracted (small helpers like filterBar/pagination/modeFields remain route-local).
+- **Wave 8N done:** Split mono secondary barrel into path-scoped packs: `teamSharedPanels` / `teamResearchPanels` / `teamSourceCollectionPanels`.
 
 ## Next (planned)
 
-1. Optional: extract remaining small SC helpers (filterBar / pagination / modeFields / runSwitcher / storageActions / stageAgents / manual writeback) if they block further shell shrink.
+1. Optional path prefetch (research vs SC) after view/team switch — not on shell mount.
 2. Extract EventSource-free mutation hooks (`useTeamWorkflowMutations` family) only when a hook can own a full boundary.
-3. Recommended: split `teamSecondaryPanels` into source-collection vs research packs (secondary ~310KB after 8M).
+3. Optional: extract remaining small SC helpers only if they block further shell shrink.
 4. Optional: style-bound tone helpers (`workflowQualityTone`) once styles map ownership is clear.
+5. Optional: collapse SC chrome+workspace double layer when inject surface stabilizes.
 
 ## Rules
 
