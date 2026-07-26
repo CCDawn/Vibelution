@@ -12,7 +12,10 @@ const evolutionCssEntrySource = readFileSync(
   new URL("../design/route-css/evolution.tailwind.css", import.meta.url),
   "utf-8",
 );
-const dictionarySource = readFileSync(new URL("../i18n/dictionary.ts", import.meta.url), "utf-8");
+const evolutionDictionarySource = readFileSync(
+  new URL("../i18n/domains/dictionaryEvolution.ts", import.meta.url),
+  "utf-8",
+);
 
 describe("supervised workspace controls", () => {
   it("prefers auto when the overview reports auto mode", () => {
@@ -46,13 +49,13 @@ describe("supervised workspace controls", () => {
     expect(tabsSource).not.toContain("NavLink");
     expect(tabsSource).not.toContain("href: \"/supervised-evolution/runs\"");
     expect(tabsSource).toContain("stepHintClass");
-    expect(dictionarySource).toContain('supervisedFlowLive: "基线评测"');
-    expect(dictionarySource).toContain('supervisedFlowRuns: "提出建议与改良"');
-    expect(dictionarySource).toContain('supervisedFlowLibrary: "复跑与评分"');
-    expect(dictionarySource).toContain('supervisedFlowReview: "用户审批"');
-    expect(dictionarySource).not.toContain('supervisedFlowRuns: "运行结果"');
-    expect(dictionarySource).not.toContain('supervisedFlowLibrary: "改进提案"');
-    expect(dictionarySource).not.toContain('supervisedFlowReview: "样本评审"');
+    expect(evolutionDictionarySource).toContain('supervisedFlowLive: "基线评测"');
+    expect(evolutionDictionarySource).toContain('supervisedFlowRuns: "提出建议与改良"');
+    expect(evolutionDictionarySource).toContain('supervisedFlowLibrary: "复跑与评分"');
+    expect(evolutionDictionarySource).toContain('supervisedFlowReview: "用户审批"');
+    expect(evolutionDictionarySource).not.toContain('supervisedFlowRuns: "运行结果"');
+    expect(evolutionDictionarySource).not.toContain('supervisedFlowLibrary: "改进提案"');
+    expect(evolutionDictionarySource).not.toContain('supervisedFlowReview: "样本评审"');
     expect(tabsSource).toContain("flowTabsClass");
     expect(controlsSource).toContain("controlsShellClass");
     expect(controlsSource).toContain("flowRegionClass");
