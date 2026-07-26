@@ -69,7 +69,6 @@ import {
   type AgentConfigDraft,
   type AgentCoreConfigLlmSlotView,
 } from "./AgentCoreConfigPanel";
-import { AgentCreateWizardDialog } from "./agent-create/AgentCreateWizardDialog";
 import { type AgentResetOptions } from "./AgentDebugResetPanel";
 import { type AgentMemoryPolicyDraft } from "./AgentMemoryPolicyPanel";
 import { type AgentModeMembershipDraft } from "./AgentModeMembershipPanel";
@@ -87,12 +86,19 @@ import {
   type AgentSelectedDetailContentPanelProps,
 } from "./AgentSelectedDetailContentPanel";
 import { type AgentTaskDraft } from "./AgentTaskProfilePanel";
-import { governanceStatusLabel } from "./AgentToolGovernancePanel";
 import { AgentWorkspaceLayoutPanel } from "./AgentWorkspaceLayoutPanel";
+import { governanceStatusLabel } from "./agents/agentStatusPresentation";
 
 const AgentEffectiveConfigurationInspectorPanel = lazy(() =>
   import("./AgentEffectiveConfigurationPanel").then((module) => ({
     default: module.AgentEffectiveConfigurationInspectorPanel,
+  })),
+);
+
+/** U1: create wizard only when open — keep wizard graph out of Agents shell. */
+const AgentCreateWizardDialog = lazy(() =>
+  import("./agent-create/AgentCreateWizardDialog").then((module) => ({
+    default: module.AgentCreateWizardDialog,
   })),
 );
 import {
@@ -5522,24 +5528,28 @@ export function AgentsRoute() {
           onClose: () => setInspectorOpen(false),
         } : null}
       />
-      <AgentCreateWizardDialog
-        open={createOpen}
-        triggerRef={agentCreateTriggerRef}
-        triggerId="agents-create-trigger"
-        onClose={() => setCreateWizardOpen(false)}
-        onCreated={(agent) => {
-          setSelectedAgentId(agent.agentId);
-          setActivePane("overview");
-          setNotice({
-            tone: "success",
-            text: lang === "zh" ? `已新增 ${agentLabel(agent)}` : `Created ${agentLabel(agent)}`,
-          });
-        }}
-        onOpenAdvancedConfig={(agent) => {
-          setCreateWizardOpen(false);
-          navigate(`/agents?agent=${encodeURIComponent(agent.agentId)}&pane=config`);
-        }}
-      />
+      {createOpen ? (
+        <Suspense fallback={null}>
+          <AgentCreateWizardDialog
+            open={createOpen}
+            triggerRef={agentCreateTriggerRef}
+            triggerId="agents-create-trigger"
+            onClose={() => setCreateWizardOpen(false)}
+            onCreated={(agent) => {
+              setSelectedAgentId(agent.agentId);
+              setActivePane("overview");
+              setNotice({
+                tone: "success",
+                text: lang === "zh" ? `已新增 ${agentLabel(agent)}` : `Created ${agentLabel(agent)}`,
+              });
+            }}
+            onOpenAdvancedConfig={(agent) => {
+              setCreateWizardOpen(false);
+              navigate(`/agents?agent=${encodeURIComponent(agent.agentId)}&pane=config`);
+            }}
+          />
+        </Suspense>
+      ) : null}
     </section>
   );
 }

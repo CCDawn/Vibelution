@@ -61,6 +61,20 @@ Recorded for high-ROI program **scope A** (F0–F3, F5, F6; F4 trigger-only).
 | S1–S3 | Memory view-level panel lazy; Chat status/group/file tabs lazy; Memory knowledge mutations extract |
 | T1–T3 | ConversationView prefetch + dialog lazy; Chat file/tool dialog lazy; Evolution mutation hooks |
 | T4 | Launcher secondary panels React.lazy; i18n shell boundary re-locked (useShellI18n only) |
+| U1 | Agents `AgentCreateWizardDialog` lazy (open-only mount) → separate ~52 kB pack |
+| U2 | `governanceStatusLabel` → `agentStatusPresentation` (shell no longer static-imports governance panel) |
+| U3 | Evolution supervised panels lazy: active-run / run-records / proposal-action-bands |
+
+### Post-U1–U3 chunk notes
+
+| Chunk | ~kB raw | Notes |
+|---|---:|---|
+| AgentsRoute | **~257** (was ~261) | U1 wizard out of eager graph; gzip ~64 |
+| AgentCreateWizardDialog | ~52 | Shared create surface; open-only on Agents |
+| EvolutionRoute | **~143** (was ~183) | U3 panels async; gzip ~35 |
+| EvolutionActiveRunMonitorPanel | ~15 | live view pack |
+| EvolutionRunRecordsPanel | ~23 | runs view pack |
+| EvolutionProposalActionBandsPanel | ~3 | library action pack |
 
 ### Post-T1–T3 chunk notes (build evidence)
 

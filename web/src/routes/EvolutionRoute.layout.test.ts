@@ -15,6 +15,7 @@ import runRecordsPanelStylesSource from "./EvolutionRunRecordsPanel.styles.ts?ra
 import selfTrackBoundarySource from "./EvolutionSelfTrackBoundary.tsx?raw";
 import selfTrackBoundaryStyles from "./EvolutionSelfTrackBoundary.styles";
 import selfTrackBoundaryStylesSource from "./EvolutionSelfTrackBoundary.styles.ts?raw";
+import runMutationsSource from "./evolution/useEvolutionRunMutations.ts?raw";
 import routeStyles from "./EvolutionRoute.styles";
 import stylesSource from "./EvolutionRoute.styles.ts?raw";
 
@@ -26,6 +27,7 @@ const evolutionSources = [
   activeRunMonitorPanelSource,
   proposalActionBandsPanelSource,
   runRecordsPanelSource,
+  runMutationsSource,
 ].join("\n");
 
 describe("EvolutionRoute library user flow contract", () => {
@@ -91,8 +93,8 @@ describe("EvolutionRoute library user flow contract", () => {
 
   it("routes self-evolution starts only into the reviewed worktree endpoint", () => {
     expect(routeSource).toContain("startSelfWorktreeRunMutation");
-    expect(routeSource).toContain('"/api/evolution/self/worktree-runs"');
-    expect(routeSource).toContain('mode: "manual"');
+    expect(runMutationsSource).toContain('"/api/evolution/self/worktree-runs"');
+    expect(runMutationsSource).toContain('mode: "manual"');
     expect(routeSource).toContain("onStartRun={() => startSelfWorktreeRunMutation.mutate()}");
     expect(routeSource).toContain("startWorktreeError={startSelfWorktreeRunMutation.error?.message ?? \"\"}");
     expect(routeSource).not.toContain('"/api/evolution/self/runs"');
@@ -103,7 +105,7 @@ describe("EvolutionRoute library user flow contract", () => {
 
   it("keeps candidate worktree review out of the live left rail", () => {
     expect(routeSource).toContain("startWorktreeRunMutation");
-    expect(routeSource).toContain('"/api/evolution/worktree-runs"');
+    expect(runMutationsSource).toContain('"/api/evolution/worktree-runs"');
     expect(routeSource).not.toContain("SupervisedWorktreeReviewPanel");
     expect(routeSource).not.toContain("worktreeActionMutation");
     expect(routeSource).not.toContain("triggerWorktreeReviewApproval");
@@ -120,7 +122,7 @@ describe("EvolutionRoute library user flow contract", () => {
     );
 
     expect(routeSource).toContain("startWorktreeRunMutation");
-    expect(routeSource).toContain('"/api/evolution/worktree-runs"');
+    expect(runMutationsSource).toContain('"/api/evolution/worktree-runs"');
     expect(routeSource).toContain("approvalWorktreeActionMutation");
     expect(terminateHandler).toContain("if (supervisedWorktreeLiveRun)");
     expect(terminateHandler).toContain('action: "terminate"');
@@ -188,6 +190,8 @@ describe("EvolutionRoute library user flow contract", () => {
 
   it("separates inconclusive terminal status and harness-only datasets from success wording", () => {
     expect(activeRunMonitorPanelSource).toContain('normalizedDecision === "INCONCLUSIVE"');
+    expect(routeSource).toContain('import("./EvolutionActiveRunMonitorPanel")');
+    expect(routeSource).not.toMatch(/import \{\s*EvolutionActiveRunMonitorPanel/);
     expect(routeSource).toContain("<EvolutionActiveRunMonitorPanel");
     expect(routeSource).toContain("supervisedActiveRunMonitorRun");
     expect(activeRunMonitorPanelSource).toContain("function statusIcon");
@@ -226,7 +230,8 @@ describe("EvolutionRoute library user flow contract", () => {
   });
 
   it("keeps supervised run records queue and detail composition in the extracted panel", () => {
-    expect(routeSource).toContain('import { EvolutionRunRecordsPanel } from "./EvolutionRunRecordsPanel";');
+    expect(routeSource).toContain('import("./EvolutionRunRecordsPanel")');
+    expect(routeSource).not.toMatch(/import \{ EvolutionRunRecordsPanel \} from "\.\/EvolutionRunRecordsPanel"/);
     expect(routeSource).toContain("<EvolutionRunRecordsPanel");
     expect(routeSource).toContain("filteredRuns={filteredRuns}");
     expect(routeSource).toContain("selectedRun={selectedRun}");
@@ -268,7 +273,8 @@ describe("EvolutionRoute library user flow contract", () => {
   });
 
   it("keeps proposal action bands in the extracted panel while route owns mutations", () => {
-    expect(routeSource).toContain('import { EvolutionProposalActionBandsPanel } from "./EvolutionProposalActionBandsPanel";');
+    expect(routeSource).toContain('import("./EvolutionProposalActionBandsPanel")');
+    expect(routeSource).not.toMatch(/import \{ EvolutionProposalActionBandsPanel \} from "\.\/EvolutionProposalActionBandsPanel"/);
     expect(routeSource).toContain("<EvolutionProposalActionBandsPanel");
     expect(routeSource).toContain("proposal={proposalDetailQuery.data}");
     expect(routeSource).toContain("actionError={actionMutation.error?.message ?? \"\"}");
@@ -332,7 +338,7 @@ describe("EvolutionRoute library user flow contract", () => {
 
   it("keeps the latest self-observation run visible after it leaves the active slot", () => {
     expect(routeSource).toContain("selectedSelfObservationRunId");
-    expect(routeSource).toContain("setSelectedSelfObservationRunId(snapshot.runId)");
+    expect(runMutationsSource).toContain("setSelectedSelfObservationRunId(snapshot.runId)");
     expect(routeSource).toContain("queryKeys.evolutionSelfObservationRun(selectedSelfObservationRunId || \"__none__\")");
     expect(routeSource).toContain("`/api/evolution/self/observation-runs/${encodeURIComponent(selectedSelfObservationRunId)}`");
     expect(routeSource).toContain("const selfObservationRun = workspaceSnapshot?.selfObservationActiveRun");
@@ -352,7 +358,6 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("<EvolutionSelfTrackBoundary");
     expect(routeSource).not.toContain("LazySelfEvolutionTrack");
     expect(routeSource).not.toContain('import("./SelfEvolutionTrack")');
-    expect(routeSource).not.toContain("<Suspense");
     expect(routeSource).not.toContain('import { SelfEvolutionTrack } from "./SelfEvolutionTrack";');
     expect(selfTrackBoundarySource).toContain("LazySelfEvolutionTrack");
     expect(selfTrackBoundarySource).toContain('import("./SelfEvolutionTrack")');
@@ -361,6 +366,9 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(selfTrackBoundarySource).not.toContain("useQuery");
     expect(selfTrackBoundarySource).not.toContain("useMutation");
     expect(selfTrackBoundarySource).not.toContain("queryClient");
+    // U3: supervised secondary panels also use Suspense; self track stays boundary-owned.
+    expect(routeSource).toContain('import("./EvolutionRunRecordsPanel")');
+    expect(routeSource).toContain("<Suspense");
   });
 
   it("lets the self-evolution workspace fill the remaining viewport height", () => {
@@ -557,24 +565,27 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("LOCAL_SUPERVISED_RUN_PREFIX");
     expect(routeSource).toContain("buildSupervisedStartPlaceholder");
     expect(routeSource).toContain("isLocalSupervisedStartPlaceholder");
-    expect(routeSource).toContain("onMutate: () =>");
-    expect(routeSource).toContain("启动请求已提交，正在等待运行记录刷新。");
-    expect(routeSource).toContain("setLiveActiveRun(buildSupervisedStartPlaceholder");
-    expect(routeSource).toContain("const placeholderAgentBindings = activeRunSnapshot?.agentBindings");
-    expect(routeSource).toContain("?? workspaceSnapshot?.currentAgentBindings");
+    expect(runMutationsSource).toContain("onMutate: () =>");
+    expect(runMutationsSource).toContain("启动请求已提交，正在等待运行记录刷新。");
+    expect(runMutationsSource).toContain("setLiveActiveRun(");
+    expect(runMutationsSource).toContain("buildSupervisedStartPlaceholder");
+    expect(routeSource).toContain("placeholderAgentBindings:");
+    expect(routeSource).toContain("activeRunSnapshot?.agentBindings");
+    expect(routeSource).toContain("?? workspaceSnapshotQuery.data?.currentAgentBindings");
     expect(routeSource).toContain("?? EMPTY_AGENT_BINDINGS");
-    expect(routeSource).toContain("agentBindings: placeholderAgentBindings");
+    expect(runMutationsSource).toContain("agentBindings: payload.placeholderAgentBindings");
     expect(routeSource).not.toContain("latestSupervisedRunSnapshot?.agentBindings ?? {}");
-    expect(routeSource).toContain("await evolutionWorkspaceCache.afterWorktreeRunChanged()");
-    expect(routeSource).toContain("void evolutionWorkspaceCache.afterWorktreeRunChanged()");
+    expect(runMutationsSource).toContain("afterWorktreeRunChanged");
+    expect(routeSource).toContain("afterWorktreeRunChanged");
     expect(routeSource).not.toContain("isEvolutionRunCommandAccepted");
     expect(routeSource).toContain("visibleLiveRunSnapshot");
     expect(routeSource).toContain("const streamLiveRun = isLocalSupervisedStartPlaceholder(liveActiveRun) ? null : liveActiveRun");
-    expect(routeSource).toContain("setLiveActiveRun((current) => (isLocalSupervisedStartPlaceholder(current) ? null : current))");
+    expect(runMutationsSource).toContain("options.setLiveActiveRun((current: any) =>");
+    expect(runMutationsSource).toContain("options.isLocalSupervisedStartPlaceholder(current) ? null : current");
     expect(routeSource).toContain("const supervisedStartSubmitting = startWorktreeRunMutation.isPending || isLocalSupervisedStartPlaceholder(liveActiveRun)");
     expect(routeSource).toContain("onClick={() => startWorktreeRunMutation.mutate()}");
-    expect(routeSource).toContain('executionMode: "real"');
-    expect(routeSource).toContain("confirmRealLlmCost: true");
+    expect(runMutationsSource).toContain('executionMode: "real"');
+    expect(runMutationsSource).toContain("confirmRealLlmCost: true");
     expect(routeSource).toContain("监督运行中");
     expect(routeSource).toContain("supervisedStartButtonLabel");
   });
