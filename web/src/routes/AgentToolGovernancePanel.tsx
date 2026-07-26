@@ -2,6 +2,7 @@ import { ShieldCheck, Wrench } from "lucide-react";
 
 import { AgentToolGovernanceRequest } from "../api/types";
 import { VButton, VContextualHint } from "../components/vui";
+import { governanceStatusLabel } from "./agents/agentStatusPresentation";
 import styles from "./AgentToolGovernancePanel.styles";
 
 export type AgentToolGovernancePanelCopy = {
@@ -21,20 +22,7 @@ type AgentToolGovernancePanelProps = {
   onConfigure: () => void;
 };
 
-export function governanceStatusLabel(value: string, lang: "zh" | "en") {
-  const normalized = String(value || "").trim();
-  const zh: Record<string, string> = {
-    pending_review: "待审批",
-    applied: "已应用",
-    rejected: "已拒绝",
-  };
-  const en: Record<string, string> = {
-    pending_review: "Pending review",
-    applied: "Applied",
-    rejected: "Rejected",
-  };
-  return ((lang === "zh" ? zh : en)[normalized] ?? normalized) || "-";
-}
+export { governanceStatusLabel };
 
 function governanceRiskLabel(value: string, lang: "zh" | "en") {
   const normalized = String(value || "").trim();
