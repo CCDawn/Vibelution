@@ -19,7 +19,7 @@ import {
   TerminalSquare,
   Wrench,
 } from "lucide-react";
-import React, { DragEvent, ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import React, { DragEvent, ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type { ConversationMessage, SkillLibraryItem } from "../../api/types";
 import type {
@@ -179,6 +179,7 @@ import {
   buildTimelineScrollSignal,
 } from "./conversationTimelineScrollSignals";
 import {
+  recordConversationRowHeight,
   resolveConversationVirtualRange,
   resolveTimelineFollowState,
   shouldStickTimelineToBottomOnContentResize,
@@ -394,7 +395,7 @@ export function ConversationView({
   void interruptGuidanceLabel;
   void interruptGuidancePendingLabel;
   void onInterruptGuidance;
-  const { lang, t, statusLabel } = useAppI18n();
+  const { lang, t, statusLabel } = useAppI18n({ domains: ["chat"] });
   const timelineRef = useRef<HTMLDivElement | null>(null);
   const historyScrollAnchorRef = useRef<TimelineScrollRowKeyAnchor | null>(null);
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -416,6 +417,10 @@ export function ConversationView({
     scrollTop: 0,
     viewportHeight: 720,
   });
+  /** D2+: measured row heights by conversation row key. */
+  const timelineRowHeightCacheRef = useRef<Map<string, number>>(new Map());
+  const timelineRowResizeObserversRef = useRef<Map<string, ResizeObserver>>(new Map());
+  const [timelineRowHeightVersion, setTimelineRowHeightVersion] = useState(0);
   const [computerUseSessionResults, setComputerUseSessionResults] = useState<Record<string, ComputerUseResult>>({});
   const [computerUseSessionPending, setComputerUseSessionPending] = useState<Record<string, "confirm" | "cancel" | undefined>>({});
   const resolvedActionMode = composerActionMode ?? "send";
@@ -600,15 +605,27 @@ export function ConversationView({
   const activeAgentMessages = activeAgentMessageTimelineProjection.agentMessages;
   const streamingTimelineMessages = activeAgentMessageTimelineProjection.streamingMessages;
   const activeTimelineRowIdentities = activeAgentMessageTimelineProjection.rowIdentities;
+  const timelineMeasuredHeights = useMemo(() => {
+    return activeTimelineRowIdentities.map((identity) => {
+      const measured = timelineRowHeightCacheRef.current.get(identity.rowKey);
+      return measured && measured > 0 ? measured : 0;
+    });
+  }, [activeTimelineRowIdentities, timelineRowHeightVersion]);
   const timelineVirtualRange = useMemo(
     () => resolveConversationVirtualRange({
       itemCount: activeTimelineMessages.length,
       scrollTop: timelineVirtualMetrics.scrollTop,
       viewportHeight: timelineVirtualMetrics.viewportHeight,
       followingLatest: followLatestRef.current,
+      heights: timelineMeasuredHeights,
     }),
-    // followLatestRef is read at compute time; scroll metrics drive recompute while following is sticky via stick effect.
-    [activeTimelineMessages.length, timelineVirtualMetrics.scrollTop, timelineVirtualMetrics.viewportHeight, isAtBottom],
+    [
+      activeTimelineMessages.length,
+      timelineVirtualMetrics.scrollTop,
+      timelineVirtualMetrics.viewportHeight,
+      isAtBottom,
+      timelineMeasuredHeights,
+    ],
   );
   const virtualTimelineMessages = useMemo(
     () => activeTimelineMessages.slice(timelineVirtualRange.start, timelineVirtualRange.end),
@@ -855,6 +872,45 @@ export function ConversationView({
     observer.observe(timeline);
     return () => observer.disconnect();
   }, [autoScrollToLatest, sessionId]);
+
+  useEffect(() => {
+    timelineRowHeightCacheRef.current.clear();
+    for (const observer of timelineRowResizeObserversRef.current.values()) {
+      observer.disconnect();
+    }
+    timelineRowResizeObserversRef.current.clear();
+    setTimelineRowHeightVersion((version) => version + 1);
+  }, [sessionId]);
+
+  const bindTimelineVirtualRow = useCallback((rowKey: string, node: HTMLDivElement | null) => {
+    const key = String(rowKey || "").trim();
+    if (!key) {
+      return;
+    }
+    const previous = timelineRowResizeObserversRef.current.get(key);
+    if (previous) {
+      previous.disconnect();
+      timelineRowResizeObserversRef.current.delete(key);
+    }
+    if (!node || typeof ResizeObserver === "undefined") {
+      return;
+    }
+    const publish = (height: number) => {
+      if (recordConversationRowHeight(timelineRowHeightCacheRef.current, key, height)) {
+        setTimelineRowHeightVersion((version) => version + 1);
+      }
+    };
+    publish(node.getBoundingClientRect().height);
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      const height = entry?.borderBoxSize?.[0]?.blockSize
+        ?? entry?.contentRect?.height
+        ?? node.getBoundingClientRect().height;
+      publish(height);
+    });
+    observer.observe(node);
+    timelineRowResizeObserversRef.current.set(key, observer);
+  }, []);
 
   useLayoutEffect(() => {
     const anchor = historyScrollAnchorRef.current;
@@ -3049,9 +3105,16 @@ export function ConversationView({
             ) : null}
             {virtualTimelineMessages.map((message, virtualIndex) => {
               const index = timelineVirtualRange.start + virtualIndex;
+              const rowIdentity = virtualTimelineRowIdentities[virtualIndex] ?? activeTimelineRowIdentities[index];
+              const rowKey = rowIdentity?.rowKey ?? message.id;
               return (
+              <div
+                key={rowKey}
+                ref={(node) => bindTimelineVirtualRow(rowKey, node)}
+                className={styles.timelineVirtualRow}
+                data-conversation-virtual-row={rowKey}
+              >
               <ConversationTurnRow
-                key={virtualTimelineRowIdentities[virtualIndex]?.rowKey ?? message.id}
                 message={message}
                 previousMessage={activeTimelineMessages[index - 1]}
                 agentMessage={agentMessagesByMessageId.get(message.id)}
@@ -3062,7 +3125,7 @@ export function ConversationView({
                     : undefined
                 }
                 codexTranscriptCells={agentCodexSurfacesByMessageId.get(message.id)?.cells}
-                rowIdentity={virtualTimelineRowIdentities[virtualIndex] ?? activeTimelineRowIdentities[index]}
+                rowIdentity={rowIdentity}
                 defaultResponseExpanded={defaultExpandedResponseIds.has(message.id)}
                 latestUserMessageId={latestUserMessageId}
                 editingMessageId={editingMessageId}
@@ -3470,6 +3533,7 @@ export function ConversationView({
             );
                 }}
               />
+              </div>
               );
             })}
             {timelineVirtualRange.bottomSpacerPx > 0 ? (

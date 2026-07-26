@@ -175,7 +175,7 @@ export function FilePreview({
   highlightAsLog = false,
   severityFilter = "all",
 }: FilePreviewProps) {
-  const { t } = useAppI18n();
+  const { t } = useAppI18n({ domains: ["chat"] });
   const [viewMode, setViewMode] = useState<"structured" | "raw">("structured");
   const languageExtensions = useFilePreviewLanguageExtensions(file.language);
   const editorExtensions = useMemo(() => {

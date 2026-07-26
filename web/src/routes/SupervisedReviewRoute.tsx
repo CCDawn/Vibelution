@@ -48,7 +48,7 @@ const REVIEW_QUEUE_PANES: PaneSpec[] = [REVIEW_QUEUE_PANE];
 
 
 export function SupervisedReviewRoute() {
-  const { lang, t, statusLabel } = useAppI18n();
+  const { lang, t, statusLabel } = useAppI18n({ domains: ["evolution"] });
   const queryClient = useQueryClient();
   const evolutionWorkspaceCache = useMemo(() => createEvolutionWorkspaceCache(queryClient), [queryClient]);
   const [filter, setFilter] = useState<ReviewFilter>("pending");

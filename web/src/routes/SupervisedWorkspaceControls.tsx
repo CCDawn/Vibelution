@@ -44,7 +44,7 @@ export function SupervisedWorkspaceControls({
   configIntakeMode,
   tabSummaries,
 }: SupervisedWorkspaceControlsProps) {
-  const { t, intakeModeLabel } = useAppI18n();
+  const { t, intakeModeLabel } = useAppI18n({ domains: ["evolution"] });
   const queryClient = useQueryClient();
   const shouldFetchConfig = configIntakeMode == null;
   const shouldFetchOverview = overviewIntakeMode == null;

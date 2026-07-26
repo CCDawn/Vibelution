@@ -47,7 +47,7 @@ function categoryLabel(category: string, lang: "zh" | "en") {
 }
 
 export function StructuredLogPreview({ model, severityFilter }: StructuredLogPreviewProps) {
-  const { lang, t } = useAppI18n();
+  const { lang, t } = useAppI18n({ domains: ["logs"] });
   const [categoryFilter, setCategoryFilter] = useState<StructuredLogCategoryFilter>("all");
   const visibleEntries = useMemo(
     () => filterStructuredLogEntries(model.entries, categoryFilter, severityFilter),
