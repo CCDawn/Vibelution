@@ -19,6 +19,7 @@ import configDraftMutationsSource from "./agents/useAgentConfigDraftMutations.ts
 import agentRouteListModelSource from "./agents/agentRouteListModel.ts?raw";
 import agentRouteLlmModelSource from "./agents/agentRouteLlmModel.ts?raw";
 import agentRouteWorkspaceModelSource from "./agents/agentRouteWorkspaceModel.ts?raw";
+import agentRouteDraftModelSource from "./agents/agentRouteDraftModel.ts?raw";
 import agentManagementNavSource from "./AgentManagementNav.tsx?raw";
 import agentManagementModuleBarSource from "./AgentManagementModuleBar.tsx?raw";
 import agentWorkspaceCacheSource from "./agentWorkspaceCache.ts?raw";
@@ -785,8 +786,8 @@ describe("AgentsRoute layout contract", () => {
   it("lets each Agent inherit or override its context compression policy", () => {
     expect(routeSource).toContain("AgentContextCompressionPolicy");
     expect(coreConfigPanelSource).toContain("contextCompressionPolicy: AgentContextCompressionPolicyDraft");
-    expect(routeSource).toContain("function contextCompressionDraftFromAgent");
-    expect(routeSource).toContain("function contextCompressionPolicyFromDraft");
+    expect(agentRouteDraftModelSource).toContain("function contextCompressionDraftFromAgent");
+    expect(agentRouteDraftModelSource).toContain("function contextCompressionPolicyFromDraft");
     expect(configDraftMutationsSource).toContain("contextCompressionPolicy: options.contextCompressionPolicyFromDraft(payload.draft.contextCompressionPolicy)");
     expect(routeSource).toContain("updateContextCompressionDraft");
     expect(selectedDetailContentPanelSource).toContain("<AgentConfigPrimaryPanePanel");
@@ -898,20 +899,26 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).not.toMatch(/from "\.\/AgentToolGovernancePanel"/);
   });
 
-  it("owns pure list/presentation helpers outside AgentsRoute (D3)", () => {
+  it("owns pure list/presentation helpers outside AgentsRoute (D3/M1)", () => {
     expect(routeSource).toContain('from "./agents/agentRouteListModel"');
     expect(routeSource).toContain('from "./agents/agentRouteLlmModel"');
     expect(routeSource).toContain('from "./agents/agentRouteWorkspaceModel"');
+    expect(routeSource).toContain('from "./agents/agentRouteDraftModel"');
     expect(routeSource).toContain("buildAgentModelChoices");
     expect(routeSource).toContain("agentLabel");
     expect(routeSource).toContain("normalizeAgentLlmBindings");
     expect(routeSource).toContain("buildLightweightAgentWorkspace");
+    expect(routeSource).toContain("draftFromAgent");
+    expect(routeSource).toContain("contextCompressionPolicyFromDraft");
     expect(routeSource).toContain("filterAgents(workspace, activeFilter, searchText, { managementFilterMatches })");
     expect(routeSource).not.toMatch(/^function normalizeText\(/m);
     expect(routeSource).not.toMatch(/^function buildAgentModelChoices\(/m);
     expect(routeSource).not.toMatch(/^function agentLlmSlots\(/m);
     expect(routeSource).not.toMatch(/^function buildLightweightAgentWorkspace\(/m);
     expect(routeSource).not.toMatch(/^function filterAgents\(/m);
+    expect(routeSource).not.toMatch(/^function draftFromAgent\(/m);
+    expect(routeSource).not.toMatch(/^function personaDraftFromAgent\(/m);
+    expect(routeSource).not.toMatch(/^function contextCompressionDraftFromAgent\(/m);
   });
 
   it("guides Agent creation through defaults, provider-model linkage, and a final review", () => {
@@ -1004,8 +1011,8 @@ describe("AgentsRoute layout contract", () => {
   });
 
   it("keeps tool and runtime completeness strict enough to avoid false positives", () => {
-    expect(routeSource).toContain("function hasToolPolicyConfiguration(agent: AgentConfigWorkspaceAgent | null | undefined)");
-    expect(routeSource).toContain("policy?.blockedTools?.length");
+    expect(agentRouteDraftModelSource).toContain("function hasToolPolicyConfiguration(agent: AgentConfigWorkspaceAgent | null | undefined)");
+    expect(agentRouteDraftModelSource).toContain("policy?.blockedTools?.length");
     expect(routeSource).toContain("function agentHasRuntimeSignal(agent: AgentConfigWorkspaceAgent | null | undefined)");
     expect(routeSource).toContain("const runtimeState = String(agent?.runtimeStatus?.state || \"\").trim()");
     expect(routeSource).toContain("runtimeState && runtimeState !== \"idle\"");
