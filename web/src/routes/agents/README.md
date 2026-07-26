@@ -60,6 +60,7 @@ and panel composition. Pure query/presentation/draft helpers should leave the sh
 | M1 | Draft/mapper pure extract | **Done** — `agentRouteDraftModel.ts` |
 | M2 | Management brief + setup filter predicates | **Done** — `agentRouteManagementModel.ts` |
 | M3 | Tool/memory/membership draft mappers | **Done** — `agentRoutePolicyDraftModel.ts` |
+| M4–M6 | Evolution / Teams / Conversation maps | See `evolution/README.md`, `teams/README.md`, `components/conversation/README.md` |
 | Shell rule | Route only orchestrates | ongoing |
 
 ## Perf notes (secondary)
