@@ -3,13 +3,14 @@ import json
 import queue
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from core.evaluation.chat_next_state_signals import append_chat_next_state_signal
+from core.infrastructure.tool_execution_scope import register_current_tool_future
 from core.chat.slash_commands import parse_skill_slash_command
 from core.chat.conversation_ledger import (
     EVENT_ASSISTANT_DELTA_COMMITTED,
@@ -7326,6 +7327,7 @@ def test_request_stop_session_turn_persists_stop_snapshot_and_releases_session(t
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     _bind_live_session_agent(tmp_path)
     monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: None)
+    monkeypatch.setattr(session_service, "_cancel_queued_session_turn", lambda session_id, turn_id: True)
 
     try:
         submit_response = client.post(
@@ -7408,6 +7410,7 @@ def test_submit_session_interrupt_guidance_records_signal_and_stops(tmp_path, mo
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     _bind_live_session_agent(tmp_path)
     monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: None)
+    monkeypatch.setattr(session_service, "_cancel_queued_session_turn", lambda session_id, turn_id: True)
 
     try:
         submit_response = client.post(
@@ -7582,7 +7585,8 @@ def test_stop_requested_turn_persists_visible_stop_message(tmp_path, monkeypatch
     )
 
     assert stop_response.status_code == 202
-    assert stop_response.json()["currentPhase"] == "ready"
+    assert stop_response.json()["currentPhase"] == "stopping"
+    assert stop_response.json()["activeTurnId"] == active_control.turn_id
     assert finished.wait(2.0), "expected the stopped turn to finish"
 
     for thread in worker_threads:
@@ -7597,7 +7601,112 @@ def test_stop_requested_turn_persists_visible_stop_message(tmp_path, monkeypatch
     assert "本轮已按请求停止" in payload["messages"][-1]["content"]
 
 
-def test_stop_session_turn_persists_partial_snapshot_and_allows_immediate_continue(tmp_path, monkeypatch):
+@pytest.mark.slow
+def test_stop_turn_stays_stopping_until_registered_tool_is_physically_quiescent(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _bind_live_session_agent(tmp_path)
+    monkeypatch.setattr(
+        session_service,
+        "build_agent_context",
+        lambda agent_id, **kwargs: SimpleNamespace(memory_policy={}, context_block="", timings={}),
+    )
+
+    started = threading.Event()
+    worker_finished = threading.Event()
+    pending_tool: Future[str] = Future()
+    worker_threads: list[threading.Thread] = []
+    registration_results: list[bool] = []
+
+    class ToolStoppingAgent:
+        def __init__(self):
+            self.stop_checker = None
+
+        def seed_chat_history(self, messages):
+            self.messages = list(messages)
+
+        def set_turn_interrupt_checker(self, checker):
+            self.stop_checker = checker
+
+        def run_single_turn(self, initial_prompt=None):
+            registration_results.append(
+                register_current_tool_future(pending_tool, tool_name="blocking_test_tool")
+            )
+            started.set()
+            for _ in range(200):
+                reason = self.stop_checker() if callable(self.stop_checker) else ""
+                if reason:
+                    return {
+                        "status": "stopped",
+                        "summary": "",
+                        "raw_output": "",
+                        "stop_requested": True,
+                        "stop_reason": reason,
+                        "tool_call_count": 1,
+                        "tool_trace": [{"name": "blocking_test_tool", "status": "cancelled"}],
+                    }
+                time.sleep(0.01)
+            raise AssertionError("expected the test turn to observe the stop request")
+
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda: ToolStoppingAgent())
+
+    def run_async(context):
+        def _worker():
+            try:
+                session_service._run_session_turn(context)
+            finally:
+                worker_finished.set()
+
+        thread = threading.Thread(target=_worker, daemon=True)
+        worker_threads.append(thread)
+        thread.start()
+
+    monkeypatch.setattr(session_service, "_schedule_session_turn", run_async)
+
+    try:
+        response = client.post(
+            "/api/sessions/session-live/messages",
+            json={"content": "执行一个需要停止的阻塞工具"},
+        )
+        assert response.status_code == 202
+        assert started.wait(1.0)
+        active_control = session_service._get_session_turn_control("session-live")
+        assert active_control is not None
+
+        stop_response = client.post(
+            "/api/sessions/session-live/stop",
+            json={"turnId": active_control.turn_id},
+        )
+
+        assert stop_response.status_code == 202
+        assert registration_results == [True]
+        assert stop_response.json()["currentPhase"] == "stopping"
+        assert stop_response.json()["activeTurnId"] == active_control.turn_id
+        assert stop_response.json()["stopRequested"] is True
+        assert worker_finished.wait(0.05) is False
+
+        pending_tool.set_result("physically complete")
+        assert worker_finished.wait(2.0)
+
+        detail_response = client.get("/api/sessions/session-live")
+        assert detail_response.status_code == 200
+        payload = detail_response.json()
+        assert payload["currentPhase"] == "ready"
+        assert payload["activeTurnId"] == ""
+        assert payload["stopRequested"] is False
+        assert payload["messages"][-1]["role"] == "assistant"
+    finally:
+        if not pending_tool.done():
+            pending_tool.set_result("test cleanup")
+        for thread in worker_threads:
+            thread.join(timeout=1)
+        session_service._set_session_running("session-live", False)
+        session_service._clear_session_turn_control("session-live")
+        session_service._clear_session_live_output("session-live")
+
+
+def test_stop_queued_session_turn_persists_partial_snapshot_and_allows_immediate_continue(tmp_path, monkeypatch):
     _seed_chat_state(
         tmp_path,
         task_status="reading",
@@ -7619,6 +7728,7 @@ def test_stop_session_turn_persists_partial_snapshot_and_allows_immediate_contin
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     _bind_live_session_agent(tmp_path)
     monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: None)
+    monkeypatch.setattr(session_service, "_cancel_queued_session_turn", lambda session_id, turn_id: True)
 
     submit_response = client.post(
         "/api/sessions/session-live/messages",
@@ -7670,7 +7780,7 @@ def test_stop_session_turn_persists_partial_snapshot_and_allows_immediate_contin
     session_service._clear_session_turn_control("session-live", turn_id=new_control.turn_id)
 
 
-def test_stop_session_turn_keeps_old_control_cancel_token_until_worker_observes_it(tmp_path, monkeypatch):
+def test_stop_active_session_turn_blocks_continue_until_worker_observes_cancel_token(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
@@ -7698,14 +7808,21 @@ def test_stop_session_turn_keeps_old_control_cancel_token_until_worker_observes_
         "/api/sessions/session-live/messages",
         json={"content": "继续新一轮"},
     )
+    assert continue_response.status_code == 409
+    assert session_service._get_session_turn_control("session-live") is old_control
+
+    session_service._set_session_running("session-live", False, turn_id=old_turn_id)
+    session_service._clear_session_turn_control("session-live", turn_id=old_turn_id)
+
+    continue_response = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "继续新一轮"},
+    )
     assert continue_response.status_code == 202
     new_control = session_service._get_session_turn_control("session-live")
     assert new_control is not None
     assert new_control.turn_id != old_turn_id
     assert old_control.snapshot()["stopRequested"] is True
-
-    session_service._clear_session_turn_control("session-live", turn_id=old_turn_id)
-    assert session_service._get_session_turn_control("session-live").turn_id == new_control.turn_id
 
     session_service._set_session_running("session-live", False, turn_id=new_control.turn_id)
     session_service._clear_session_turn_control("session-live", turn_id=new_control.turn_id)
@@ -7755,6 +7872,7 @@ def test_stale_stopped_turn_does_not_run_after_immediate_continue(tmp_path, monk
             }
 
     monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: scheduled_contexts.append(dict(context)))
+    monkeypatch.setattr(session_service, "_cancel_queued_session_turn", lambda session_id, turn_id: True)
     monkeypatch.setattr(session_service, "create_chat_agent", lambda: StaleAgent())
 
     try:
@@ -7884,6 +8002,7 @@ def test_stale_turn_live_output_does_not_overwrite_new_turn(tmp_path, monkeypatc
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     _bind_live_session_agent(tmp_path)
     monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: None)
+    monkeypatch.setattr(session_service, "_cancel_queued_session_turn", lambda session_id, turn_id: True)
 
     try:
         first_response = client.post(
