@@ -420,6 +420,7 @@ export function ConversationView({
   /** D2+: measured row heights by conversation row key. */
   const timelineRowHeightCacheRef = useRef<Map<string, number>>(new Map());
   const timelineRowResizeObserversRef = useRef<Map<string, ResizeObserver>>(new Map());
+  const timelineHeightBumpFrameRef = useRef<number | null>(null);
   const [timelineRowHeightVersion, setTimelineRowHeightVersion] = useState(0);
   const [computerUseSessionResults, setComputerUseSessionResults] = useState<Record<string, ComputerUseResult>>({});
   const [computerUseSessionPending, setComputerUseSessionPending] = useState<Record<string, "confirm" | "cancel" | undefined>>({});
@@ -882,6 +883,23 @@ export function ConversationView({
     setTimelineRowHeightVersion((version) => version + 1);
   }, [sessionId]);
 
+  const scheduleTimelineHeightVersionBump = useCallback(() => {
+    if (timelineHeightBumpFrameRef.current !== null) {
+      return;
+    }
+    timelineHeightBumpFrameRef.current = window.requestAnimationFrame(() => {
+      timelineHeightBumpFrameRef.current = null;
+      setTimelineRowHeightVersion((version) => version + 1);
+      // After batched measure updates, re-stick while following latest to absorb spacer changes.
+      if (shouldStickTimelineToBottomOnContentResize({
+        autoScrollToLatest,
+        followingLatest: followLatestRef.current,
+      })) {
+        scheduleTimelineScrollToBottom();
+      }
+    });
+  }, [autoScrollToLatest]);
+
   const bindTimelineVirtualRow = useCallback((rowKey: string, node: HTMLDivElement | null) => {
     const key = String(rowKey || "").trim();
     if (!key) {
@@ -896,8 +914,8 @@ export function ConversationView({
       return;
     }
     const publish = (height: number) => {
-      if (recordConversationRowHeight(timelineRowHeightCacheRef.current, key, height)) {
-        setTimelineRowHeightVersion((version) => version + 1);
+      if (recordConversationRowHeight(timelineRowHeightCacheRef.current, key, height, { minDeltaPx: 2 })) {
+        scheduleTimelineHeightVersionBump();
       }
     };
     publish(node.getBoundingClientRect().height);
@@ -910,7 +928,7 @@ export function ConversationView({
     });
     observer.observe(node);
     timelineRowResizeObserversRef.current.set(key, observer);
-  }, []);
+  }, [scheduleTimelineHeightVersionBump]);
 
   useLayoutEffect(() => {
     const anchor = historyScrollAnchorRef.current;

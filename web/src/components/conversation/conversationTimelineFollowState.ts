@@ -148,6 +148,11 @@ export function resolveConversationVirtualRange(input: {
       covered += heights[start];
     }
     start = Math.max(0, start - overscan);
+    // Stabilize stick-bottom: always keep a min tail row count so estimate→measure
+    // transitions do not shrink the mounted window and jolt the tail.
+    const minTailRows = Math.ceil(input.viewportHeight / estimate) + overscan * 2;
+    const minRowsStart = Math.max(0, count - minTailRows);
+    start = Math.min(start, minRowsStart);
   } else {
     start = findConversationIndexAtOffset(offsets, Math.max(0, input.scrollTop));
     start = Math.max(0, start - overscan);
@@ -172,6 +177,7 @@ export function recordConversationRowHeight(
   cache: Map<string, number>,
   rowKey: string,
   heightPx: number,
+  options?: { minDeltaPx?: number },
 ): boolean {
   const key = String(rowKey || "").trim();
   if (!key) {
@@ -181,7 +187,12 @@ export function recordConversationRowHeight(
   if (!Number.isFinite(next) || next <= 0) {
     return false;
   }
-  if (cache.get(key) === next) {
+  const previous = cache.get(key);
+  const minDelta = options?.minDeltaPx ?? 2;
+  if (previous !== undefined && Math.abs(previous - next) < minDelta) {
+    return false;
+  }
+  if (previous === next) {
     return false;
   }
   cache.set(key, next);

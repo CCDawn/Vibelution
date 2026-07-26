@@ -84,6 +84,16 @@ export async function loadDictionaryDomains(
   return { zh, en };
 }
 
+/**
+ * Fire-and-forget warm of domain packs (module cache + dictionary domain cache).
+ * Safe to call from soft navigation preload paths.
+ */
+export function prefetchDictionaryDomains(domains?: readonly DictionaryDomainId[]): void {
+  void loadDictionaryDomains(domains).catch(() => {
+    // Soft prefetch must not surface; next useAppI18n load will retry.
+  });
+}
+
 export function dictionaryTableForLang(
   dictionary: LoadedDictionary,
   lang: Language,
