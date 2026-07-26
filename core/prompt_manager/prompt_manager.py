@@ -37,6 +37,7 @@ from core.prompt_manager.sections import (
     make_session_child_routing_section,
     make_spec_digest_section,
 )
+from core.prompt_manager.core_prompt_sources import CORE_PROMPT_NAMES
 from core.prompt_manager.builder import (
     get_system_prompt,
     to_string,
@@ -197,9 +198,10 @@ class PromptManager:
     _DYNAMIC_FILES = {"IDENTITY.md", "USER.md", "DYNAMIC.md", "COMPRESS_SUMMARY.md"}
     _PROTECTED_FLOOR_SECTIONS = [
         "COMMON",
+        "SOUL",
+        "AGENTS",
         "RUNTIME_GOAL",
         "USER_PROFILE",
-        "SOUL",
         "SPEC_DIGEST",
         "MEMORY",
         "GIT_MEMORY",
@@ -210,9 +212,10 @@ class PromptManager:
     ]
     _FALLBACK_DEFAULT_SECTIONS = [
         "COMMON",
+        "SOUL",
+        "AGENTS",
         "RUNTIME_GOAL",
         "USER_PROFILE",
-        "SOUL",
         "SPEC_DIGEST",
         "GIT_MEMORY",
         "RUNTIME_LOG_INDEX",
@@ -227,6 +230,7 @@ class PromptManager:
     _PREFERRED_SECTION_ORDER = [
         "COMMON",
         "SOUL",
+        "AGENTS",
         "RUNTIME_GOAL",
         "USER_PROFILE",
         "TASK_CHECKLIST",
@@ -375,6 +379,7 @@ class PromptManager:
         core_context: Optional[str] = None,
         current_goal: Optional[str] = None,
         state_memory: Optional[str] = None,
+        frozen_core_sections: Optional[List[str]] = None,
     ) -> SystemPrompt:
         """组装系统提示词。
 
@@ -384,6 +389,8 @@ class PromptManager:
             core_context: 核心记忆。
             current_goal: 当前目标。
             state_memory: 状态记忆（None 时使用 self.state_memory）。
+            frozen_core_sections: 已由会话静态快照完整承载的三核心章节。
+                只允许 COMMON / SOUL / AGENTS，用于避免同一规则重复注入。
 
         Returns:
             SystemPrompt — 不可变字符串元组。
@@ -403,12 +410,22 @@ class PromptManager:
 
         # 筛选章节
         select_started = time.perf_counter()
-        selected = self._select_sections(include, exclude)
+        normalized_frozen_core_sections = {
+            str(name or "").strip().upper()
+            for name in list(frozen_core_sections or [])
+            if str(name or "").strip().upper() in CORE_PROMPT_NAMES
+        }
+        selected = self._select_sections(
+            include,
+            exclude,
+            frozen_core_sections=normalized_frozen_core_sections,
+        )
         select_duration_ms = (time.perf_counter() - select_started) * 1000
         all_ordered_sections = self._order_sections(list(self._sections.values()))
         cache_key = self._build_reuse_cache_key(
             include=include,
             exclude=exclude,
+            frozen_core_sections=normalized_frozen_core_sections,
             core_context=core_context,
             current_goal=effective_current_goal,
             state_memory=effective_state_memory,
@@ -490,6 +507,7 @@ class PromptManager:
         *,
         include: Optional[List[str]],
         exclude: Optional[List[str]],
+        frozen_core_sections: set[str],
         core_context: Optional[str],
         current_goal: Optional[str],
         state_memory: Optional[str],
@@ -508,6 +526,7 @@ class PromptManager:
             tuple(section.name for section in selected),
             tuple(include or []),
             tuple(exclude or []),
+            tuple(sorted(frozen_core_sections)),
             _prompt_text_digest(core_context),
             _prompt_text_digest(current_goal),
             _prompt_text_digest(state_memory),
@@ -564,6 +583,8 @@ class PromptManager:
         self,
         include: Optional[List[str]],
         exclude: Optional[List[str]],
+        *,
+        frozen_core_sections: set[str] | None = None,
     ) -> List[SystemPromptSection]:
         """根据 include/exclude 规则选择章节。
 
@@ -585,16 +606,18 @@ class PromptManager:
             names = set(effective_include)
             all_sections = [s for s in all_sections if s.name in names]
 
+        frozen = set(frozen_core_sections or set())
         if exclude is not None:
             excluded = set(exclude)
             all_sections = [
                 s for s in all_sections
-                if s.name not in excluded or s.required
+                if s.name not in excluded or (s.required and s.name not in frozen)
             ]
 
         all_sections = self._apply_protected_floor(
             all_sections,
             exclude=exclude,
+            frozen_core_sections=frozen,
         )
         ordered = self._order_sections(all_sections)
         return self._prune_optional_sections(
@@ -607,14 +630,18 @@ class PromptManager:
         self,
         sections: List[SystemPromptSection],
         exclude: Optional[List[str]],
+        frozen_core_sections: set[str] | None = None,
     ) -> List[SystemPromptSection]:
         floor_excluded = set(exclude or [])
+        frozen = set(frozen_core_sections or set())
         section_map = {s.name: s for s in sections}
         for name in self._PROTECTED_FLOOR_SECTIONS:
-            if name in floor_excluded:
+            registered = self._sections.get(name)
+            required_and_live = bool(registered and registered.required and name not in frozen)
+            if name in floor_excluded and not required_and_live:
                 continue
-            if name not in section_map and name in self._sections:
-                section_map[name] = self._sections[name]
+            if name not in section_map and registered is not None:
+                section_map[name] = registered
         return list(section_map.values())
 
     def _order_sections(self, sections: List[SystemPromptSection]) -> List[SystemPromptSection]:

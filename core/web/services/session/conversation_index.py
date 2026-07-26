@@ -706,8 +706,9 @@ def _conversation_requires_agent_materialization(conversation: dict[str, Any]) -
 
 def _sync_agent_directory_project_root() -> None:
     s = _service()
-    if s.agent_directory_service.PROJECT_ROOT != Path(__file__).resolve().parents[3]:
-        s.agent_directory_service.PROJECT_ROOT = Path(__file__).resolve().parents[3]
+    project_root = Path(__file__).resolve().parents[4]
+    if s.agent_directory_service.PROJECT_ROOT != project_root:
+        s.agent_directory_service.PROJECT_ROOT = project_root
         s._invalidate_session_list_cache()
 
 

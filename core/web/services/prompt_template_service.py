@@ -11,6 +11,13 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from core.infrastructure import developer_sandbox
+from core.prompt_manager.core_prompt_sources import (
+    CORE_PROMPT_NAMES as CORE_PROMPT_NAMES,
+    CORE_PROMPT_SCHEMA_VERSION,
+    CorePromptSourceError,
+    load_core_prompt_bundle,
+    public_core_prompt_sources,
+)
 from core.research.agent_templates import research_default_prompt
 
 from .runtime_scene_service import record_runtime_scene_event
@@ -880,6 +887,7 @@ def get_agent_prompt_snapshot_versions(
     return {
         "builtinContentVersion": builtin_content_version,
         "chatBasePromptVersion": CHAT_AGENT_BASE_PROMPT_VERSION if include_chat_base else 0,
+        "corePromptSchemaVersion": CORE_PROMPT_SCHEMA_VERSION,
     }
 
 
@@ -892,12 +900,12 @@ def build_agent_prompt_snapshot(
     project_root: Path | None = None,
     include_chat_base: bool = False,
 ) -> dict[str, Any]:
-    """Freeze one Agent prompt template for a conversation/session."""
+    """Freeze the three core prompts and one role template for a session."""
 
     normalized = str(template_id or "").strip()
     if not normalized:
         return {
-            "schemaVersion": 1,
+            "schemaVersion": 2,
             "promptTemplateId": "",
             "templateId": "",
             "reason": "missing_template_id",
@@ -905,7 +913,7 @@ def build_agent_prompt_snapshot(
     template = _get_prompt_template_for_project(normalized, project_root=project_root)
     if not template:
         return {
-            "schemaVersion": 1,
+            "schemaVersion": 2,
             "promptTemplateId": normalized,
             "templateId": normalized,
             "reason": "missing_template",
@@ -916,11 +924,11 @@ def build_agent_prompt_snapshot(
     except (TypeError, ValueError):
         builtin_content_version = 0
     role_content = str(template.get("content") or "")
-    content = _compose_agent_prompt_content(role_content, include_chat_base=include_chat_base)
+    role_prompt_content = _compose_agent_prompt_content(role_content, include_chat_base=include_chat_base)
     chat_base_prompt_version = CHAT_AGENT_BASE_PROMPT_VERSION if include_chat_base else 0
-    if not content.strip():
+    if not role_prompt_content.strip():
         return {
-            "schemaVersion": 1,
+            "schemaVersion": 2,
             "promptTemplateId": normalized,
             "templateId": normalized,
             "name": str(template.get("name") or "").strip(),
@@ -932,14 +940,47 @@ def build_agent_prompt_snapshot(
             "contentLength": 0,
             "builtinContentVersion": builtin_content_version,
             "chatBasePromptVersion": chat_base_prompt_version,
+            "corePromptSchemaVersion": CORE_PROMPT_SCHEMA_VERSION,
             "capturedAt": _now(),
             "agentId": str(agent_id or "").strip(),
             "agentCode": str(agent_code or "").strip(),
             "agentDisplayName": str(agent_display_name or "").strip(),
             "reason": "empty_template_content",
         }
+    try:
+        core_bundle = load_core_prompt_bundle(Path(project_root or PROJECT_ROOT))
+    except CorePromptSourceError as exc:
+        return {
+            "schemaVersion": 2,
+            "promptTemplateId": normalized,
+            "templateId": normalized,
+            "name": str(template.get("name") or "").strip(),
+            "category": str(template.get("category") or "").strip(),
+            "sourcePath": str(template.get("sourcePath") or "").strip(),
+            "sourceExists": bool(template.get("sourceExists")),
+            "content": "",
+            "contentHash": _content_hash(""),
+            "contentLength": 0,
+            "builtinContentVersion": builtin_content_version,
+            "chatBasePromptVersion": chat_base_prompt_version,
+            "corePromptSchemaVersion": CORE_PROMPT_SCHEMA_VERSION,
+            "missingCorePrompts": list(exc.missing_names),
+            "capturedAt": _now(),
+            "agentId": str(agent_id or "").strip(),
+            "agentCode": str(agent_code or "").strip(),
+            "agentDisplayName": str(agent_display_name or "").strip(),
+            "reason": "missing_core_prompt",
+        }
+    content = "\n\n".join(
+        part
+        for part in (
+            str(core_bundle.get("content") or "").strip(),
+            role_prompt_content.strip(),
+        )
+        if part
+    )
     return {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "promptTemplateId": normalized,
         "templateId": normalized,
         "name": str(template.get("name") or "").strip(),
@@ -951,6 +992,10 @@ def build_agent_prompt_snapshot(
         "contentLength": len(content),
         "builtinContentVersion": builtin_content_version,
         "chatBasePromptVersion": chat_base_prompt_version,
+        "corePromptSchemaVersion": CORE_PROMPT_SCHEMA_VERSION,
+        "corePromptHash": str(core_bundle.get("contentHash") or "").strip(),
+        "corePromptLength": max(0, int(core_bundle.get("contentLength") or 0)),
+        "corePrompts": public_core_prompt_sources(core_bundle),
         "capturedAt": _now(),
         "agentId": str(agent_id or "").strip(),
         "agentCode": str(agent_code or "").strip(),
@@ -975,6 +1020,9 @@ def render_agent_prompt_snapshot_system_block(snapshot: dict[str, Any] | None) -
     content_hash = str(snapshot.get("contentHash") or "").strip()
     if content_hash:
         lines.append(f"ContentHash: {content_hash}")
+    core_prompt_hash = str(snapshot.get("corePromptHash") or "").strip()
+    if core_prompt_hash:
+        lines.append(f"CorePromptHash: {core_prompt_hash}")
     category = str(snapshot.get("category") or "").strip()
     if category:
         lines.append(f"Category: {category}")

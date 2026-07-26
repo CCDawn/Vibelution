@@ -30,6 +30,12 @@ def test_prompt_snapshot_hint_skips_chat_state_reload(monkeypatch):
         "promptTemplateId": "prompt-chat-default",
         "builtinContentVersion": 4,
         "chatBasePromptVersion": 3,
+        "corePromptSchemaVersion": 1,
+        "corePrompts": [
+            {"name": "COMMON"},
+            {"name": "SOUL"},
+            {"name": "AGENTS"},
+        ],
         "content": "stable prompt",
         "contentHash": "prompt-v4",
     }
@@ -38,7 +44,11 @@ def test_prompt_snapshot_hint_skips_chat_state_reload(monkeypatch):
     monkeypatch.setattr(
         session_service.prompt_template_service,
         "get_agent_prompt_snapshot_versions",
-        lambda *_args, **_kwargs: {"builtinContentVersion": 4, "chatBasePromptVersion": 3},
+        lambda *_args, **_kwargs: {
+            "builtinContentVersion": 4,
+            "chatBasePromptVersion": 3,
+            "corePromptSchemaVersion": 1,
+        },
     )
     monkeypatch.setattr(
         session_service,

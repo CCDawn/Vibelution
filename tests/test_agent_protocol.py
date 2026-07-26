@@ -181,6 +181,24 @@ def test_direct_chat_prompt_build_excludes_global_runtime_log_index():
     ]
 
 
+def test_session_core_snapshot_replaces_prompt_manager_core_without_duplicates():
+    agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+    build_calls: list[dict[str, object]] = []
+    agent.prompt_manager = SimpleNamespace(
+        build=lambda **kwargs: build_calls.append(dict(kwargs)) or "session system prompt"
+    )
+    agent._core_prompt_snapshot_seeded_by_host = True
+
+    assert agent._build_system_prompt_for_turn(stable_session_prompt=True) == "session system prompt"
+
+    assert build_calls == [
+        {
+            "exclude": ["RUNTIME_LOG_INDEX", "COMMON", "SOUL", "AGENTS"],
+            "frozen_core_sections": ["COMMON", "SOUL", "AGENTS"],
+        }
+    ]
+
+
 def test_numbered_confirmation_goal_preserves_previous_assistant_context():
     history = [
         SystemMessage(content=""),

@@ -23,8 +23,6 @@ SUB_AGENT_RUN_KIND = agent_run_store.SUB_AGENT_RUN_KIND
 _RESEARCH_ORG_CONTEXT_CACHE_TTL_SECONDS = 5.0
 _RESEARCH_ORG_CONTEXT_CACHE_LOCK = threading.Lock()
 _RESEARCH_ORG_CONTEXT_CACHE: dict[tuple[str, int, tuple[tuple[str, int, str], ...]], dict[str, Any]] = {}
-_PROJECT_RULES_CONTEXT_CACHE_LOCK = threading.Lock()
-_PROJECT_RULES_CONTEXT_CACHE: dict[tuple[str, int, int], str] = {}
 _PROJECT_AGENT_REGISTRY_CACHE_LOCK = threading.Lock()
 _PROJECT_AGENT_REGISTRY_CACHE: dict[tuple[str, int, int], dict[str, Any]] = {}
 _ACTIVE_AGENT_DIRECTORY_CACHE_LOCK = threading.Lock()
@@ -282,14 +280,10 @@ def build_agent_context(
     else:
         timings["promptTemplateContextMs"] = 0
         timings["promptTemplateContextSkipped"] = True
-    stage_started_at = _perf_counter()
-    project_rules_context_block = _build_project_rules_context_block(
-        agent_directory_service.PROJECT_ROOT,
-        agent_id=normalized_agent_id,
-        session_id=str(session_id or "").strip(),
-        run_id=str(run_id or "").strip(),
-    )
-    timings["projectRulesContextMs"] = _elapsed_ms(stage_started_at)
+    # COMMON / SOUL / AGENTS are owned by PromptManager and session snapshots.
+    # ContextEngine must not inject a second, independently filtered AGENTS copy.
+    timings["projectRulesContextMs"] = 0
+    timings["projectRulesContextSkipped"] = True
     project_agent_registry_context_block = ""
     if _agent_allows_project_agent_registry_context(agent):
         stage_started_at = _perf_counter()
@@ -324,12 +318,6 @@ def build_agent_context(
                 prompt_context_block,
                 placement="cache_prefix",
                 stability="agent_static",
-            ),
-            _context_segment(
-                "project_rules",
-                project_rules_context_block,
-                placement="cache_prefix",
-                stability="project_static",
             ),
             _context_segment(
                 "project_agent_registry",
@@ -395,7 +383,8 @@ def build_agent_context(
             "researchOrgContextIncluded": bool(research_org_context_block),
             "researchOrgContextCacheHit": bool(timings.get("researchOrgContextCacheHit")),
             "researchOrgContextCacheAgeMs": timings.get("researchOrgContextCacheAgeMs", 0),
-            "projectRulesContextIncluded": bool(project_rules_context_block),
+            "projectRulesContextIncluded": False,
+            "projectRulesContextOwner": "prompt_manager_or_session_snapshot",
             "projectAgentRegistryContextIncluded": bool(project_agent_registry_context_block),
             "staticContextChars": timings["staticContextChars"],
             "dynamicContextChars": timings["dynamicContextChars"],
@@ -775,90 +764,6 @@ def _build_prompt_template_context_block(
         )
         return ""
     return str(result.get("contextBlock") or "").strip()
-
-
-def _build_project_rules_context_block(
-    project_root: Path,
-    *,
-    agent_id: str,
-    session_id: str,
-    run_id: str,
-) -> str:
-    agents_path = Path(project_root) / "AGENTS.md"
-    signature = _file_signature(agents_path)
-    if signature is None:
-        return ""
-    with _PROJECT_RULES_CONTEXT_CACHE_LOCK:
-        cached_block = _PROJECT_RULES_CONTEXT_CACHE.get(signature)
-    if cached_block is not None:
-        _record_context_event(
-            "agent_runtime.project_rules_context_loaded",
-            outcome="included",
-            fields={
-                "agentId": agent_id,
-                "sessionId": session_id,
-                "runId": run_id,
-                "sourcePath": str(agents_path),
-                "section": "Session-Level Agent Memory Coordination,Session Agent Territory And Handoff",
-                "characterCount": len(cached_block),
-                "cacheHit": True,
-                "source": "ContextEngine",
-            },
-        )
-        return cached_block
-    try:
-        content = agents_path.read_text(encoding="utf-8")
-    except OSError as exc:
-        _record_context_event(
-            "agent_runtime.project_rules_context_failed",
-            outcome="failed",
-            level="warning",
-            fields={
-                "agentId": agent_id,
-                "sessionId": session_id,
-                "runId": run_id,
-                "sourcePath": str(agents_path),
-                "reason": type(exc).__name__,
-                "source": "ContextEngine",
-            },
-        )
-        return ""
-    section_names = (
-        "Session-Level Agent Memory Coordination",
-        "Session Agent Territory And Handoff",
-    )
-    sections = [(name, _extract_markdown_section(content, name)) for name in section_names]
-    included_sections = [(name, section) for name, section in sections if section]
-    if not included_sections:
-        return ""
-    block = "\n".join(
-        [
-            "## Project Operating Rules",
-            "Source: AGENTS.md#Session-Level Agent Memory Coordination + #Session Agent Territory And Handoff",
-            *(
-                "\n".join([f"### {name}", section]).strip()
-                for name, section in included_sections
-            ),
-        ]
-    ).strip()
-    with _PROJECT_RULES_CONTEXT_CACHE_LOCK:
-        _PROJECT_RULES_CONTEXT_CACHE.clear()
-        _PROJECT_RULES_CONTEXT_CACHE[signature] = block
-    _record_context_event(
-        "agent_runtime.project_rules_context_loaded",
-        outcome="included",
-        fields={
-            "agentId": agent_id,
-            "sessionId": session_id,
-            "runId": run_id,
-            "sourcePath": str(agents_path),
-            "section": ",".join(name for name, _section in included_sections),
-            "characterCount": len(block),
-            "cacheHit": False,
-            "source": "ContextEngine",
-        },
-    )
-    return block
 
 
 def _build_project_agent_registry_context_block(
@@ -1413,24 +1318,6 @@ def _infer_project_agent_responsibility_lane(agent: dict[str, Any]) -> str:
     if "chat" in haystack:
         return "chat-coding-surface"
     return "agent-runtime-core"
-
-
-def _extract_markdown_section(content: str, heading: str) -> str:
-    target = f"## {heading}".strip()
-    lines = str(content or "").splitlines()
-    captured: list[str] = []
-    in_section = False
-    for line in lines:
-        stripped = line.strip()
-        if stripped.startswith("## "):
-            if in_section:
-                break
-            if stripped == target:
-                in_section = True
-            continue
-        if in_section:
-            captured.append(line.rstrip())
-    return "\n".join(captured).strip()
 
 
 def _record_context_event(event_code: str, *, outcome: str, fields: dict[str, Any], level: str = "info") -> None:

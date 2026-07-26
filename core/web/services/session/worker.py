@@ -635,6 +635,11 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                 skill_context_seed_ms = 0
                 active_skill_context_seed_ms = 0
                 host_context_marker = getattr(runtime_agent, "mark_runtime_context_seeded_by_host", None)
+                core_prompt_snapshot_marker = getattr(
+                    runtime_agent,
+                    "mark_core_prompt_snapshot_seeded_by_host",
+                    None,
+                )
                 host_seeded_agent_context = False
                 if static_runtime_context_block:
                     static_stage_started_at = s._perf_counter()
@@ -655,6 +660,13 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                     static_runtime_context_seed_ms = s._elapsed_ms(static_stage_started_at)
                 if host_seeded_agent_context and callable(host_context_marker):
                     host_context_marker()
+                core_prompt_snapshot_seeded = (
+                    host_seeded_agent_context
+                    and bool(prompt_snapshot_segment)
+                    and int((agent_prompt_snapshot or {}).get("corePromptSchemaVersion") or 0) > 0
+                )
+                if callable(core_prompt_snapshot_marker):
+                    core_prompt_snapshot_marker(core_prompt_snapshot_seeded)
                 if dynamic_runtime_context_block and callable(volatile_runtime_context_seed):
                     runtime_stage_started_at = s._perf_counter()
                     volatile_runtime_context_seed(dynamic_runtime_context_block)
@@ -697,6 +709,10 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                         "promptSnapshotContentHash": str((agent_prompt_snapshot or {}).get("contentHash") or "").strip()
                         if isinstance(agent_prompt_snapshot, dict)
                         else "",
+                        "corePromptSnapshotSeeded": core_prompt_snapshot_seeded,
+                        "corePromptSchemaVersion": int(
+                            (agent_prompt_snapshot or {}).get("corePromptSchemaVersion") or 0
+                        ),
                         "dynamicRuntimeContextIncluded": dynamic_runtime_context_included,
                         "dynamicRuntimeContextAvailable": bool(dynamic_runtime_context_block),
                         "supervisedWorkspaceContextIncluded": bool(supervised_workspace_context_block),

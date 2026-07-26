@@ -133,6 +133,7 @@ from core.prompt_manager import (
     get_prompt_manager,
     to_string,
 )
+from core.prompt_manager.core_prompt_sources import CORE_PROMPT_NAMES
 from core.prompt_manager.task_analyzer import get_task_analyzer
 from core.orchestration.evolution_lifecycle import (
     is_full_evolution_goal,
@@ -844,6 +845,7 @@ class SelfEvolvingAgent:
         self._pending_runtime_context_blocks: List[str] = []
         self._pending_volatile_context_blocks: List[str] = []
         self._runtime_context_seeded_by_host: bool = False
+        self._core_prompt_snapshot_seeded_by_host: bool = False
         self._chat_provider_replay_state = None
         self._single_turn_mode_active: bool = False
         self._last_turn_metadata: Dict[str, Any] = {}
@@ -1924,6 +1926,11 @@ class SelfEvolvingAgent:
             return
         self._pending_static_context_blocks.append(text)
 
+    def mark_core_prompt_snapshot_seeded_by_host(self, included: bool = True) -> None:
+        """Record that the session-static block already contains all three cores."""
+
+        self._core_prompt_snapshot_seeded_by_host = bool(included)
+
     def seed_volatile_runtime_context(self, content: str) -> None:
         """Add current-turn-only context immediately before the current user message."""
         text = str(content or "").strip()
@@ -2054,6 +2061,7 @@ class SelfEvolvingAgent:
         self._pending_runtime_context_blocks = []
         self._pending_volatile_context_blocks = []
         self._runtime_context_seeded_by_host = False
+        self._core_prompt_snapshot_seeded_by_host = False
         self._last_turn_metadata = {}
         self._last_visible_response_text = ""
         self._last_response_tool_calls = 0
@@ -2071,11 +2079,14 @@ class SelfEvolvingAgent:
         ).strip()
 
     def _excluded_system_prompt_sections_for_turn(self, *, stable_session_prompt: bool) -> List[str]:
+        excluded: List[str] = []
         if self._get_mode_policy().mode == AgentMode.SUPERVISED_EVOLUTION:
-            return ["GIT_MEMORY", "RUNTIME_LOG_INDEX"]
-        if stable_session_prompt:
-            return ["RUNTIME_LOG_INDEX"]
-        return []
+            excluded.extend(["GIT_MEMORY", "RUNTIME_LOG_INDEX"])
+        elif stable_session_prompt:
+            excluded.append("RUNTIME_LOG_INDEX")
+        if bool(getattr(self, "_core_prompt_snapshot_seeded_by_host", False)):
+            excluded.extend(CORE_PROMPT_NAMES)
+        return list(dict.fromkeys(excluded))
 
     def _build_system_prompt_for_turn(self, *, stable_session_prompt: bool):
         """Build a prompt without unrelated global diagnostics for the current mode."""
@@ -2083,7 +2094,15 @@ class SelfEvolvingAgent:
             stable_session_prompt=stable_session_prompt,
         )
         if excluded_sections:
-            return self.prompt_manager.build(exclude=excluded_sections)
+            frozen_core_sections = [
+                name
+                for name in CORE_PROMPT_NAMES
+                if name in excluded_sections
+            ]
+            build_kwargs: Dict[str, Any] = {"exclude": excluded_sections}
+            if frozen_core_sections:
+                build_kwargs["frozen_core_sections"] = frozen_core_sections
+            return self.prompt_manager.build(**build_kwargs)
         return self.prompt_manager.build()
 
     def clear_chat_provider_replay_state(self) -> None:
