@@ -16,6 +16,7 @@ and panel composition. Pure query/presentation/draft helpers should leave the sh
 | LLM bindings / reasoning effort math | `agentRouteLlmModel.ts` |
 | Lightweight workspace, filterAgents, references | `agentRouteWorkspaceModel.ts` |
 | Config/persona/task/context-compression drafts | `agentRouteDraftModel.ts` |
+| Management brief / setup filters / list columns | `agentRouteManagementModel.ts` |
 | Config draft mutations | `useAgentConfigDraftMutations.ts` |
 | Workbench profile/lifecycle/policy mutations | `useAgentWorkbenchMutations.ts` |
 | Display name / tone | `../agentDisplay.ts` |
@@ -35,6 +36,7 @@ and panel composition. Pure query/presentation/draft helpers should leave the sh
 | LLM binding / reasoning | `agentRouteLlmModel.ts` | panels |
 | Lightweight list projection / filters | `agentRouteWorkspaceModel.ts` | mutations |
 | Draft mappers (config/persona/task/compression) | `agentRouteDraftModel.ts` | EventSource |
+| Management brief / setup filters / columns | `agentRouteManagementModel.ts` | shell JSX |
 | Write mutations | `useAgent*Mutations.ts` | pure files |
 | Overview / config / activity panes | panel file | Route-only inlines |
 | Shell selection + composition | `../AgentsRoute.tsx` | re-adding pure tables |
@@ -45,14 +47,15 @@ and panel composition. Pure query/presentation/draft helpers should leave the sh
 - **Done:** `agentWorkspaceQuery.ts`, `agentStatusPresentation.ts`.
 - **Done (D3):** `agentRouteListModel`, `agentRouteLlmModel`, `agentRouteWorkspaceModel`.
 - **Done (M1 structure):** `agentRouteDraftModel` — config/persona/task/context-compression mappers + `sortedIds`.
-- **Still in shell:** management brief builders, tool/memory policy draft forms, membership/runtime drafts, large JSX composition.
+- **Done (M2 structure):** `agentRouteManagementModel` — management brief, setup filters, list columns, group labels.
+- **Still in shell:** tool/memory/membership/runtime draft forms, capability preview, large JSX composition.
 
 ## Structure program (maintainability-first)
 
 | Wave | Goal | Status |
 |------|------|--------|
 | M1 | Draft/mapper pure extract | **Done** — `agentRouteDraftModel.ts` |
-| M2 | Management brief + setup filter predicates | planned |
+| M2 | Management brief + setup filter predicates | **Done** — `agentRouteManagementModel.ts` |
 | M3 | Tool/memory/membership draft mappers | planned |
 | Shell rule | Route only orchestrates | ongoing |
 

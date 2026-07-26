@@ -211,6 +211,25 @@ import {
   taskProfileSummary,
   type AgentToolPolicyDraft,
 } from "./agents/agentRouteDraftModel";
+import {
+  agentHasRuntimeSignal,
+  buildAgentManagementBrief,
+  buildManagementFilterGroups,
+  buildVisibleAgentColumns,
+  groupAriaLabel,
+  groupDescription,
+  groupDisplayLabel,
+  groupSectionId,
+  hasActionableHealthIssue,
+  managementFilterMatches,
+  normalizeAgentConfigPane,
+  type AgentConfigPaneId,
+  type AgentFilterGroup,
+  type AgentManagementAction,
+  type AgentManagementBrief,
+  type AgentManagementFilterGroup,
+} from "./agents/agentRouteManagementModel";
+
 
 
 
@@ -276,7 +295,6 @@ type AgentDraftSyncSource = {
 };
 
 type ToolPolicyMode = "inherited" | "allowed" | "blocked" | "excluded";
-type AgentConfigPaneId = "overview" | "effective" | "relations" | "config" | "changes" | "activity";
 type ToolPermissionGroup = {
   bundleId: string;
   label: string;
@@ -289,27 +307,6 @@ type ToolPermissionGroup = {
   highRiskCount: number;
 };
 type ToolBundleApplyMode = "merge" | "replace";
-type AgentManagementAction = {
-  id: string;
-  label: string;
-  detail: string;
-  pane: AgentConfigPaneId;
-  route?: string;
-};
-type AgentManagementBrief = {
-  score: number;
-  completed: number;
-  total: number;
-  statusLabel: string;
-  statusDetail: string;
-  items: Array<{
-    id: string;
-    label: string;
-    complete: boolean;
-    pane: AgentConfigPaneId;
-  }>;
-  actions: AgentManagementAction[];
-};
 type AgentCapabilityPreview = {
   effectiveAllowed: number;
   preferred: number;
@@ -319,14 +316,6 @@ type AgentCapabilityPreview = {
   explicitAllowed: number;
   writeBoundaryLabel: string;
 };
-type AgentManagementFilterGroup = {
-  id: string;
-  label: string;
-  count: number;
-  description?: string;
-  healthCount?: number;
-};
-type AgentFilterGroup = AgentConfigWorkspaceGroup | AgentTeamIndexGroup;
 type AgentBulkPromptTemplateResponse = Omit<AgentBulkActionResponse, "success"> & {
   success: AgentConfigWorkspaceAgent[];
   promptTemplateId?: string;
@@ -392,59 +381,6 @@ const DEFAULT_SESSION_AGENT_PREFERRED_TOOLS = [
   "conversation_log_inspect_tool",
   "get_core_context_tool",
 ];
-
-function buildVisibleAgentColumns(
-  agents: AgentConfigWorkspaceAgent[],
-  copy: ReturnType<typeof agentsRouteCopy>,
-  teamIndexGroups: AgentTeamIndexGroup[],
-) {
-  const sessionAgents = agents.filter(isWorkSessionAgent);
-  const nonSessionAgents = agents.filter((agent) => !isWorkSessionAgent(agent));
-  const visibleNonSessionIds = new Set(nonSessionAgents.map((agent) => agent.agentId));
-  const assignedTeamAgentIds = new Set<string>();
-  const teamColumns = teamIndexGroups
-    .filter((group) => group.section === "team_index")
-    .map((group) => {
-      const groupIds = new Set(group.agentIds);
-      const teamAgents = nonSessionAgents.filter((agent) => {
-        if (!groupIds.has(agent.agentId) || assignedTeamAgentIds.has(agent.agentId)) {
-          return false;
-        }
-        return visibleNonSessionIds.has(agent.agentId);
-      });
-      teamAgents.forEach((agent) => assignedTeamAgentIds.add(agent.agentId));
-      return {
-        id: `team_agents:${group.id}`,
-        label: group.label,
-        description: group.description || copy.teamAgentColumnHint,
-        agents: teamAgents,
-      };
-    })
-    .filter((column) => column.agents.length > 0);
-  const unassignedNonSessionAgents = nonSessionAgents.filter((agent) => !assignedTeamAgentIds.has(agent.agentId));
-  return [
-    {
-      id: "session_agents",
-      label: copy.sessionAgentColumn,
-      description: copy.sessionAgentColumnHint,
-      agents: sessionAgents,
-    },
-    ...teamColumns,
-    {
-      id: "non_session_agents",
-      label: copy.nonSessionAgentColumn,
-      description: copy.nonSessionAgentColumnHint,
-      agents: unassignedNonSessionAgents,
-    },
-  ].filter((column) => column.agents.length > 0);
-}
-
-function normalizeAgentConfigPane(value: string | null | undefined): AgentConfigPaneId {
-  const normalized = String(value || "").trim();
-  return normalized === "effective" || normalized === "relations" || normalized === "config" || normalized === "changes" || normalized === "activity" || normalized === "overview"
-    ? normalized
-    : "overview";
-}
 
 function safeAgentCenterReturnTo(value: string | null | undefined) {
   return safeReturnToPath(value);
@@ -514,180 +450,6 @@ function optimisticArchivedAgent(agent: AgentConfigWorkspaceAgent): AgentConfigW
       latestHistoricalUpdatedAt: agent.runtimeStatus?.latestHistoricalUpdatedAt,
     },
   };
-}
-
-function groupDisplayLabel(group: { id: string; label?: string } | undefined, copy: ReturnType<typeof agentsRouteCopy>) {
-  if (!group) {
-    return copy.activeAgents;
-  }
-  return copy.groupLabels[group.id] ?? group.label;
-}
-
-function groupSectionId(group: AgentFilterGroup) {
-  const section = String(group.section || "").trim();
-  return section === "boundary" ||
-    section === "mode" ||
-    section === "reference" ||
-    section === "team_index" ||
-    section === "source_scope"
-    ? section
-    : "status";
-}
-
-function groupDescription(group: { id: string; description?: string }, copy: ReturnType<typeof agentsRouteCopy>) {
-  return copy.groupDescriptions[group.id] ?? group.description ?? "";
-}
-
-function groupAriaLabel(
-  label: string,
-  group: { id?: string; count: number; healthCount?: number },
-  copy: ReturnType<typeof agentsRouteCopy>,
-  lang: "zh" | "en",
-) {
-  if (!group.healthCount) {
-    return lang === "zh" ? `${label}，${group.count} 个 Agent` : `${label}, ${group.count} Agents`;
-  }
-  const countLabel = group.id === "setup:inbox" ? copy.statusReminderShort : copy.healthIssueShort;
-  return lang === "zh"
-    ? `${label}，${group.count} 个 Agent，${countLabel} ${group.healthCount} 个`
-    : `${label}, ${group.count} Agents, ${countLabel} ${group.healthCount}`;
-}
-
-function agentHasRuntimeSignal(agent: AgentConfigWorkspaceAgent | null | undefined) {
-  const runtimeState = String(agent?.runtimeStatus?.state || "").trim();
-  return Boolean(runtimeState && runtimeState !== "idle") || (agent?.agentInboxPendingCount ?? 0) > 0;
-}
-
-function hasActionableHealthIssue(agent: AgentConfigWorkspaceAgent | null | undefined) {
-  return Boolean(agent?.health?.some((issue) => issue.severity === "blocking" || issue.severity === "warning"));
-}
-
-function buildAgentManagementBrief(
-  agent: AgentConfigWorkspaceAgent | null | undefined,
-  copy: ReturnType<typeof agentsRouteCopy>,
-  lang: "zh" | "en",
-): AgentManagementBrief {
-  const workSession = isWorkSessionAgent(agent);
-  const items = workSession
-    ? [
-        { id: "model_prompt", label: copy.managementModelPrompt, complete: hasModelAndPromptConfiguration(agent), pane: "config" as const },
-        { id: "tools", label: copy.managementTools, complete: hasToolPolicyConfiguration(agent), pane: "config" as const },
-        { id: "workspace", label: copy.managementWorkspace, complete: hasWorkspaceConfiguration(agent), pane: "config" as const },
-        { id: "runtime", label: copy.managementRuntime, complete: agentHasRuntimeSignal(agent), pane: "activity" as const },
-      ]
-    : [
-        { id: "identity", label: copy.managementIdentity, complete: !requiresPersonaProfile(agent) || hasPersonaProfile(agent), pane: "config" as const },
-        { id: "task", label: copy.managementTask, complete: !requiresTaskProfile(agent) || hasTaskProfile(agent), pane: "config" as const },
-        { id: "tools", label: copy.managementTools, complete: hasToolPolicyConfiguration(agent), pane: "config" as const },
-        { id: "membership", label: copy.managementMembership, complete: !requiresTeamMembership(agent) || agentHasTeamReference(agent), pane: "config" as const },
-        { id: "runtime", label: copy.managementRuntime, complete: agentHasRuntimeSignal(agent), pane: "activity" as const },
-      ];
-  const actions: AgentManagementAction[] = [];
-  if (workSession && !items[0].complete) {
-    actions.push({ id: "model_prompt", label: copy.nextSetupModelPrompt, detail: copy.nextSetupModelPromptHint, pane: "config" });
-  }
-  if (!workSession && !items[0].complete) {
-    actions.push({ id: "identity", label: copy.nextSetupIdentity, detail: copy.nextSetupIdentityHint, pane: "config" });
-  }
-  if (!workSession && !items[1].complete) {
-    actions.push({ id: "task", label: copy.nextSetupTask, detail: copy.nextSetupTaskHint, pane: "config" });
-  }
-  if (!items.find((item) => item.id === "tools")?.complete) {
-    actions.push({ id: "tools", label: copy.nextSetupTools, detail: copy.nextSetupToolsHint, pane: "config" });
-  }
-  if (workSession && !items.find((item) => item.id === "workspace")?.complete) {
-    actions.push({ id: "workspace", label: copy.nextSetupWorkspace, detail: copy.nextSetupWorkspaceHint, pane: "config" });
-  }
-  if (!workSession && !items.find((item) => item.id === "membership")?.complete) {
-    actions.push({
-      id: "membership",
-      label: copy.nextSetupMembership,
-      detail: copy.nextSetupMembershipHint,
-      pane: "config",
-      route: agent?.agentId ? `/teams?agent=${encodeURIComponent(agent.agentId)}` : "/teams",
-    });
-  }
-  if ((agent?.agentInboxPendingCount ?? 0) > 0) {
-    actions.unshift({ id: "inbox", label: copy.nextHandleInbox, detail: copy.nextHandleInboxHint, pane: "activity" });
-  }
-  const completed = items.filter((item) => item.complete).length;
-  const score = items.length ? Math.round((completed / items.length) * 100) : 0;
-  return {
-    score,
-    completed,
-    total: items.length,
-    statusLabel: lang === "zh" ? `${score}% 完整` : `${score}% complete`,
-    statusDetail: lang === "zh" ? `${completed}/${items.length} 项已就绪` : `${completed}/${items.length} ready`,
-    items,
-    actions: actions.slice(0, 3),
-  };
-}
-
-function buildManagementFilterGroups(
-  agents: AgentConfigWorkspaceAgent[],
-  copy: ReturnType<typeof agentsRouteCopy>,
-): AgentManagementFilterGroup[] {
-  const activeAgents = agents.filter((agent) => agent.status !== "archived");
-  const count = (predicate: (agent: AgentConfigWorkspaceAgent) => boolean) => activeAgents.filter(predicate).length;
-  return [
-    {
-      id: "setup:persona",
-      label: copy.managementFilterMissingPersona,
-      count: count((agent) => requiresPersonaProfile(agent) && !hasPersonaProfile(agent)),
-      description: copy.managementFilterMissingPersonaHint,
-    },
-    {
-      id: "setup:task",
-      label: copy.managementFilterMissingTask,
-      count: count((agent) => requiresTaskProfile(agent) && !hasTaskProfile(agent)),
-      description: copy.managementFilterMissingTaskHint,
-    },
-    {
-      id: "setup:tools",
-      label: copy.managementFilterMissingTools,
-      count: count((agent) => !hasToolPolicyConfiguration(agent)),
-      description: copy.managementFilterMissingToolsHint,
-    },
-    {
-      id: "setup:membership",
-      label: copy.managementFilterNoTeam,
-      count: count((agent) => requiresTeamMembership(agent) && !agentHasTeamReference(agent)),
-      description: copy.managementFilterNoTeamHint,
-    },
-    {
-      id: "setup:inbox",
-      label: copy.managementFilterPendingInbox,
-      count: count((agent) => (agent.agentInboxPendingCount ?? 0) > 0),
-      description: copy.managementFilterPendingInboxHint,
-      healthCount: count((agent) => (agent.agentInboxPendingCount ?? 0) > 0),
-    },
-    {
-      id: "setup:maintenance",
-      label: copy.managementFilterMaintenance,
-      count: count(hasActionableHealthIssue),
-      description: copy.managementFilterMaintenanceHint,
-      healthCount: count(hasActionableHealthIssue),
-    },
-  ];
-}
-
-function managementFilterMatches(agent: AgentConfigWorkspaceAgent, activeFilter: FilterId) {
-  switch (activeFilter) {
-    case "setup:persona":
-      return requiresPersonaProfile(agent) && !hasPersonaProfile(agent);
-    case "setup:task":
-      return requiresTaskProfile(agent) && !hasTaskProfile(agent);
-    case "setup:tools":
-      return !hasToolPolicyConfiguration(agent);
-    case "setup:membership":
-      return requiresTeamMembership(agent) && !agentHasTeamReference(agent);
-    case "setup:inbox":
-      return (agent.agentInboxPendingCount ?? 0) > 0;
-    case "setup:maintenance":
-      return hasActionableHealthIssue(agent);
-    default:
-      return true;
-  }
 }
 
 function buildAgentCapabilityPreview(
