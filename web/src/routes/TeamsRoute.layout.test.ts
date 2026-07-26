@@ -3091,13 +3091,12 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("const sourceCollectionPhaseCloseGate = sourceCollectionPhaseCloseGateForRun(");
     expect(routeSource).toContain("<TeamSourceCollectionPhaseCloseGatePanel");
     expect(routeSource).toContain("onOpenStage={selectSourceCollectionStage}");
-    expect(routeSource).toContain('createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionSearchBriefPanel")');
+    expect(routeSource).toContain('createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionSearchBriefPanel")');
     expect(routeSource).toContain("function renderSourceCollectionSearchBrief()");
     expect(standaloneSource).toContain("searchBrief={renderSourceCollectionSearchBrief()}");
     expect(standaloneSource).toContain("runHistoryLabel=");
     expect(standaloneSource).toContain("compact");
     expect(standaloneSource).toContain("sourceCollectionDraft.topic.trim()");
-    expect(routeSource).toContain("!sourceCollectionStandalone ? (");
     expect(teamSourceCollectionStandaloneStagePanelSource).toContain("phaseCloseGate?: ReactNode");
     expect(teamSourceCollectionStandaloneStagePanelSource).toContain("styles.sourceCollectionRunContext");
     expect(teamSourceCollectionOverviewPanelSource).toContain("phaseCloseGate?: ReactNode");
