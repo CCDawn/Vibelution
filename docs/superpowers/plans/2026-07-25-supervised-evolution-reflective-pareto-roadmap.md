@@ -1,14 +1,14 @@
 # Vibelution 监督进化：反思驱动、多候选与 Pareto 治理完整方案
 
-**Date:** 2026-07-25  
-**Status:** in-progress — T0 已完成并等待 root `main` 清理后集成  
-**Owner:** `codex-supervised-evolution-t0`  
-**Implementation:** `codex/supervised-evolution-t0` @ `53c507c1d`  
-**Validation:** claim-bound closeout passed; 217 selected supervised/Gym/Web evolution tests passed  
-**Mode:** `TASK_GRAPH`  
-**Risk:** `HIGH_RISK`（涉及 Agent 行为、LLM 路由、监督决策、运行控制与晋升治理）  
-**Version impact:** `minor`（兼容性扩展；实施任务不直接修改版本文件）  
-**Research decision:** `ADAPT`（吸收 GEPA、DSPy、TextGrad、OpenEvolve、A-Evolve、AFlow 的机制，不引入第二套 Agent Runtime）  
+**Date:** 2026-07-25
+**Status:** in-progress — T0 已完成并等待 root `main` 清理后集成
+**Owner:** `codex-supervised-evolution-t0`
+**Implementation:** `codex/supervised-evolution-t0` @ `53c507c1d`
+**Validation:** claim-bound closeout passed; 217 selected supervised/Gym/Web evolution tests passed
+**Mode:** `TASK_GRAPH`
+**Risk:** `HIGH_RISK`（涉及 Agent 行为、LLM 路由、监督决策、运行控制与晋升治理）
+**Version impact:** `minor`（兼容性扩展；实施任务不直接修改版本文件）
+**Research decision:** `ADAPT`（吸收 GEPA、DSPy、TextGrad、OpenEvolve、A-Evolve、AFlow 的机制，不引入第二套 Agent Runtime）
 **Research note:** `C:\Users\Administrator\Desktop\Agent论文\search-results\2026-07-25-supervised-evolution-github-designs.md`
 
 ## 0. 执行结论
@@ -94,13 +94,13 @@ flowchart LR
 
 ### 3.1 三个平面
 
-1. **评估平面（保持稳定）**  
+1. **评估平面（保持稳定）**
    由 Dataset Registry、Harness、Attempt/Trace/Score、证据 artifact 和 frozen evaluator 组成。优化器只能消费其公开结果，不能重写 evaluator 或 holdout。
 
-2. **优化平面（本方案新增）**  
+2. **优化平面（本方案新增）**
    由反馈构建、策略、候选池、预算、级联评估、Pareto/质量多样性归档和 checkpoint 组成。
 
-3. **治理平面（强化而非放宽）**  
+3. **治理平面（强化而非放宽）**
    由 Decision Record、proposal 生命周期、人工 review、apply/activate/rollback、审计日志和 runtime effect 组成。
 
 ## 4. 核心领域契约
