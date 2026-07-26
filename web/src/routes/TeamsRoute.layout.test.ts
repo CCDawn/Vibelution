@@ -27,10 +27,12 @@ const routeAndPureSource = `${routeSource}\n${canvasGeometrySource}\n${researchW
 
 describe("research project workspace", () => {
   it("mounts persistent project switching above the three-stage workspace", () => {
-    expect(routeSource).toContain("<ResearchProjectSwitcher");
-    expect(routeSource).toContain("onProjectActivated");
-    expect(routeSource).toContain('variant="hero"');
-    expect(routeSource).toContain("primaryActionHref={context.primaryActionHref}");
+    // Wave 8H: ResearchProjectSwitcher is mounted from TeamResearchStageLauncherPanel.
+    expect(teamResearchStageLauncherPanelSource).toContain("<ResearchProjectSwitcher");
+    expect(teamResearchStageLauncherPanelSource).toContain("onProjectActivated");
+    expect(teamResearchStageLauncherPanelSource).toContain('variant="hero"');
+    expect(teamResearchStageLauncherPanelSource).toContain("primaryActionHref={context.primaryActionHref}");
+    expect(routeSource).toContain("TeamResearchStageLauncherPanel");
     expect(researchProjectSwitcherSource).toContain("新建研究项目");
   });
 
@@ -46,6 +48,7 @@ import teamMemoryIndexPanelSource from "./TeamMemoryIndexPanel.tsx?raw";
 import teamMemoryIndexPanelStyles from "./TeamMemoryIndexPanel.styles";
 import teamAiSearchWorkspacePanelSource from "./TeamAiSearchWorkspacePanel.tsx?raw";
 import teamResearchStageAgentPanelSource from "./TeamResearchStageAgentPanel.tsx?raw";
+import teamResearchStageLauncherPanelSource from "./TeamResearchStageLauncherPanel.tsx?raw";
 import teamExperimentMethodPanelSource from "./TeamExperimentMethodPanel.tsx?raw";
 import teamExperimentMethodPanelStyles from "./TeamExperimentMethodPanel.styles";
 import teamSourceCollectionActiveStagePanelSource from "./TeamSourceCollectionActiveStagePanel.tsx?raw";
@@ -738,6 +741,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("selectResearchWorkspaceView");
     expect(routeSource).toContain("selectTeamRecord");
     expect(routeSource).toContain("renderResearchStageLauncher");
+    expect(routeSource).toContain("TeamResearchStageLauncherPanel");
     expect(routeSource).toContain("researchWorkspaceViewLabel");
     expect(routeSource).toContain("styles.workspaceResearch");
     expect(routeSource).toContain("styles.workspaceResearchCanvas");
@@ -772,9 +776,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeAndPureSource).toContain("组织画布");
     expect(researchWorkspaceModelSource).toContain('canvas: { zh: "组织画布", en: "Canvas" }');
     expect(routeAndPureSource).toContain("搜索资料");
-    expect(routeSource).toContain("科研控制台");
-    expect(routeSource).toContain("开始知识搜集");
-    expect(routeSource).toContain("搜索下一批");
+    // Wave 8H: research console copy lives on TeamResearchStageLauncherPanel.
+    expect(teamResearchStageLauncherPanelSource).toContain("科研控制台");
+    expect(teamResearchStageLauncherPanelSource).toContain("开始知识搜集");
+    expect(teamResearchStageLauncherPanelSource).toContain("搜索下一批");
     expect(routeSource).toContain("新一轮搜集");
     expect(routeSource).toContain("继续审查");
     expect(routeSource).toContain("准备实验");
@@ -1087,11 +1092,13 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourceCollectionControlsPanelSource).toContain("步骤侧栏");
     expect(teamSourceCollectionActiveStagePanelSource).toContain("输入");
     expect(teamSourceCollectionActiveStagePanelSource).toContain("输出");
-    expect(routeSource).toContain("styles.researchStageCardHead");
-    expect(routeSource).toContain("styles.researchStageCardMetrics");
+    // Wave 8H: stage card chrome lives on TeamResearchStageLauncherPanel.
+    expect(teamResearchStageLauncherPanelSource).toContain("styles.researchStageCardHead");
+    expect(teamResearchStageLauncherPanelSource).toContain("styles.researchStageCardMetrics");
     expect(routeSource).toContain("RESEARCH_STAGE_AGENT_ROLES");
     expect(routeSource).toContain("researchStageAgentBindingsByStage");
-    expect(routeSource).toContain("renderResearchStageAgentSummary(stageType)");
+    // Wave 8H: summary is invoked from TeamResearchStageLauncherPanel; panel still used on standalone page.
+    expect(teamResearchStageLauncherPanelSource).toContain("renderResearchStageAgentSummary(stageType)");
     expect(routeSource).toContain("renderResearchStageAgentPanel(stageType)");
     expect(routeSource).toContain("TeamResearchStageAgentSummary");
     expect(routeSource).toContain("TeamResearchStageAgentPanel");
@@ -1249,8 +1256,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("待 Agent 复核");
     expect(routeSource).not.toContain("待质检");
     expect(routeSource).not.toContain("workflowSourceCollectionPrimaryButton");
-    expect(routeSource).toContain("启动设计");
-    expect(routeSource).toContain("启动执行迭代");
+    // Wave 8H: stage primary action labels live on TeamResearchStageLauncherPanel.
+    expect(teamResearchStageLauncherPanelSource).toContain("启动设计");
+    expect(teamResearchStageLauncherPanelSource).toContain("启动执行迭代");
     expect(routeSource).not.toContain("{researchWorkflowTeamSelected ? renderResearchWorkspaceNav() : null}");
     expect(routeSource).toContain("onSelectionChange={(key) => {");
     expect(routeSource).toContain("selectTeamRecord(nextTeam)");
@@ -1258,16 +1266,18 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).not.toContain("{renderResearchWorkspaceNav()}");
     expect(routeSource).toContain("{renderResearchStageLauncher()}");
     expect(routeSource).toContain("researchWorkflowTeamSelected && !researchCanvasVisible");
-    expect(routeSource).toContain("研究关系图");
-    expect(routeSource).toContain("researchStageHeaderActions");
-    expect(routeSource).toContain("researchCanvasRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID)");
+    // Wave 8H: research graph / MVP console copy and ChallengeCup workspace live on launcher panel.
+    expect(teamResearchStageLauncherPanelSource).toContain("研究关系图");
+    expect(teamResearchStageLauncherPanelSource).toContain("researchStageHeaderActions");
+    expect(teamResearchStageLauncherPanelSource).toContain("researchCanvasRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID)");
     expect(researchWorkspaceModelSource).toContain("搜索、提炼、审查与入库");
     expect(researchWorkspaceModelSource).toContain("资料寻找 / 资料提炼 / 资料关系整理 / 资料入库");
     expect(researchWorkspaceModelSource).toContain("研究问题 / 假设 / 控制变量 / 冻结设计");
     expect(researchWorkspaceModelSource).toContain("执行批次 / 结果评估 / 消融归因 / 优化迭代");
     expect(routeSource).toContain("lifecycleProjection");
-    expect(routeSource).toContain("challengeProgramProjection");
-    expect(routeSource).toContain("ChallengeCupOperationsWorkspace");
+    // Wave 8H: challengeProgramProjection is read inside TeamResearchStageLauncherPanel.
+    expect(teamResearchStageLauncherPanelSource).toContain("challengeProgramProjection");
+    expect(teamResearchStageLauncherPanelSource).toContain("ChallengeCupOperationsWorkspace");
     expect(routeSource).toContain("challengeCupResearchTeamSelected");
     expect(routeSource).toContain('useState<"workspace" | "progress">("workspace")');
     expect(routeSource).toContain('challengeTeamSurface === "progress"');
@@ -1275,31 +1285,32 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain('setChallengeTeamSurface("progress")');
     expect(routeSource).toContain("challengeWorkspaceContextHidden");
     expect(routeSource).toContain("challengeWorkspaceBody");
-    expect(routeSource).toContain("MVP 完整样例");
-    expect(routeSource).toContain("3 题通用性测试");
-    expect(routeSource).toContain("后续规模化与深研");
-    expect(routeSource).toContain("125 题批跑、三个深研案例和最终参赛封装均延后到 MVP 验收之后");
-    expect(routeSource).toContain("stage1ComplianceReadiness.mvpManifest.completedQuestionCount");
-    expect(routeSource).toContain("challengeProgramLoading");
-    expect(routeSource).toContain("正在读取挑战杯 MVP 状态，不会显示旧科研流程");
-    expect(routeSource).toContain('href={stageType === "knowledge_collection"');
-    expect(routeSource).toContain('"#challenge-mvp-sample"');
-    expect(routeSource).toContain('"#challenge-mvp-trials"');
-    expect(routeSource).toContain('"#challenge-mvp-roadmap"');
-    expect(routeSource).toContain("查看完整样例");
-    expect(routeSource).toContain("查看测试结果");
-    expect(routeSource).toContain("人工审核与机器验证分开记录");
-    expect(routeSource).toContain("stage1.mvpManifest.testQuestionIds.map");
+    expect(teamResearchStageLauncherPanelSource).toContain("MVP 完整样例");
+    expect(teamResearchStageLauncherPanelSource).toContain("3 题通用性测试");
+    expect(teamResearchStageLauncherPanelSource).toContain("后续规模化与深研");
+    expect(teamResearchStageLauncherPanelSource).toContain("125 题批跑、三个深研案例和最终参赛封装均延后到 MVP 验收之后");
+    expect(teamResearchStageLauncherPanelSource).toContain("stage1ComplianceReadiness.mvpManifest.completedQuestionCount");
+    expect(teamResearchStageLauncherPanelSource).toContain("challengeProgramLoading");
+    expect(teamResearchStageLauncherPanelSource).toContain("正在读取挑战杯 MVP 状态，不会显示旧科研流程");
+    expect(teamResearchStageLauncherPanelSource).toContain('href={stageType === "knowledge_collection"');
+    expect(teamResearchStageLauncherPanelSource).toContain('"#challenge-mvp-sample"');
+    expect(teamResearchStageLauncherPanelSource).toContain('"#challenge-mvp-trials"');
+    expect(teamResearchStageLauncherPanelSource).toContain('"#challenge-mvp-roadmap"');
+    expect(teamResearchStageLauncherPanelSource).toContain("查看完整样例");
+    expect(teamResearchStageLauncherPanelSource).toContain("查看测试结果");
+    expect(teamResearchStageLauncherPanelSource).toContain("人工审核与机器验证分开记录");
+    expect(teamResearchStageLauncherPanelSource).toContain("stage1.mvpManifest.testQuestionIds.map");
     expect(routeSource).not.toContain("测试入口待接入");
-    expect(routeSource).toContain('blockers.includes("dashscope_qwen_provider_missing")');
-    expect(routeSource).toContain('"BLOCKED · 待验证"');
-    expect(routeSource).toContain("caseRecords[0]?.title");
-    expect(routeSource).toContain("已设计 · 待执行");
-    expect(routeSource).toContain("训练结果不参与本阶段完成判定");
-    expect(routeSource).toContain("最近诊断单独展示，不覆盖主线结果");
-    expect(routeSource).toContain("bestValidatedResultId");
-    expect(routeSource).toContain("latestDiagnosticStatus");
-    expect(routeSource).toContain("researchIterationLifecycleStatusLabel");
+    expect(teamResearchStageLauncherPanelSource).toContain('blockers.includes("dashscope_qwen_provider_missing")');
+    expect(teamResearchStageLauncherPanelSource).toContain('"BLOCKED · 待验证"');
+    expect(teamResearchStageLauncherPanelSource).toContain("caseRecords[0]?.title");
+    expect(teamResearchStageLauncherPanelSource).toContain("已设计 · 待执行");
+    expect(teamResearchStageLauncherPanelSource).toContain("训练结果不参与本阶段完成判定");
+    expect(teamResearchStageLauncherPanelSource).toContain("最近诊断单独展示，不覆盖主线结果");
+    expect(teamResearchStageLauncherPanelSource).toContain("bestValidatedResultId");
+    expect(teamResearchStageLauncherPanelSource).toContain("latestDiagnosticStatus");
+    expect(teamResearchStageLauncherPanelSource).toContain("researchIterationLifecycleStatusLabel");
+    // Standalone stage page detail heroes remain on the route.
     expect(routeSource).toContain("data-research-stage-detail-status={detailHeroStatus}");
     expect(routeSource).toContain("data-research-stage-detail-best={detailHeroBestValue}");
     expect(routeSource).toContain("data-research-stage-detail-diagnostic={detailHeroDiagnosticValue}");
@@ -1311,15 +1322,17 @@ describe("TeamsRoute layout contract", () => {
     expect(experimentLoopModelSource).toContain('smoke_needs_review: { zh: "Smoke 待复核", en: "smoke needs review" }');
     expect(experimentLoopModelSource).toContain('full_run_needs_review: { zh: "正式实验待复核", en: "formal run needs review" }');
     expect(routeAndPureSource).toContain("memoryContextSummary");
-    expect(routeSource).toContain("团队记忆");
-    expect(routeSource).toContain("已用记忆");
-    expect(routeSource).toContain("forbiddenDuplicateExperimentCount");
+    expect(teamResearchStageLauncherPanelSource).toContain("团队记忆");
+    expect(teamResearchStageLauncherPanelSource).toContain("已用记忆");
+    expect(teamResearchStageLauncherPanelSource).toContain("forbiddenDuplicateExperimentCount");
     expect(researchMemoryEvidencePanelSource).toContain("查看 Claim Map 与变量边界");
     expect(researchMemoryEvidencePanelSource).toContain("claimStatusCounts");
     expect(researchMemoryEvidencePanelSource).toContain("allowedVariableContract");
     expect(researchMemoryEvidencePanelSource).toContain("claimMap");
     expect(researchMemoryEvidencePanelSource).toContain("data-memory-context-id");
-    expect(routeSource).toContain("ResearchMemoryEvidencePanel");
+    // Wave 8H: compact mount is stage={stage}; explicit experiment/iteration mounts remain on the route.
+    expect(teamResearchStageLauncherPanelSource).toContain("ResearchMemoryEvidencePanel");
+    expect(teamResearchStageLauncherPanelSource).toContain("stage={stage}");
     expect(routeSource).toContain('stage="experiment"');
     expect(routeSource).toContain('stage="iteration"');
     expect(researchWorkspaceModelSource).toContain('value === "source_collection"');
@@ -1581,12 +1594,13 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("TeamExperimentMethodPanel");
     expect(routeSource).toContain("experimentMethodCatalogQueryKey");
     expect(routeSource).toContain('["overview", "experiment"].includes(researchWorkspaceView)');
-    expect(routeSource).toContain("researchExperimentMethodQuickSelect");
-    expect(routeSource).toContain("selectedExperimentAdapterStatus");
-    expect(routeSource).toContain("selectedExperimentAdapterReason");
-    expect(routeSource).toContain("executableAlternativeMethods");
-    expect(routeSource).toContain("可执行替代");
-    expect(routeSource).toContain('aria-label={lang === "zh" ? "选择实验方式" : "Select experiment method"}');
+    // Wave 8H: overview experiment method quick-select is on TeamResearchStageLauncherPanel.
+    expect(teamResearchStageLauncherPanelSource).toContain("researchExperimentMethodQuickSelect");
+    expect(teamResearchStageLauncherPanelSource).toContain("selectedExperimentAdapterStatus");
+    expect(teamResearchStageLauncherPanelSource).toContain("selectedExperimentAdapterReason");
+    expect(teamResearchStageLauncherPanelSource).toContain("executableAlternativeMethods");
+    expect(teamResearchStageLauncherPanelSource).toContain("可执行替代");
+    expect(teamResearchStageLauncherPanelSource).toContain('aria-label={lang === "zh" ? "选择实验方式" : "Select experiment method"}');
     expect(routeSource).toContain("preferredExperimentMethod=");
     expect(routeSource).toContain("/workflow-orchestration/experiments/methods");
     expect(routeSource).toContain("activeContract={activeExperimentContract}");
@@ -2484,10 +2498,8 @@ describe("TeamsRoute layout contract", () => {
   });
 
   it("keeps one knowledge collection loop CTA on the phase card and leaves manual work in stage details", () => {
-    const launcherSource = routeSource.slice(
-      routeSource.indexOf("function renderResearchStageLauncher"),
-      routeSource.indexOf("function renderResearchStageStandalonePage"),
-    );
+    // Wave 8H: phase-card CTA copy lives on TeamResearchStageLauncherPanel; route still owns loop labels.
+    const launcherSource = teamResearchStageLauncherPanelSource;
     expect(launcherSource).toContain("runKnowledgeCollectionLoopAction");
     expect(launcherSource).toContain("sourceCollectionLoopActionLabel");
     expect(launcherSource).toContain("sourceCollectionLoopActionDisabled");
@@ -2585,10 +2597,8 @@ describe("TeamsRoute layout contract", () => {
     expect(readinessSource).not.toContain("sourceCollectionRecordsQuery.isFetching");
     expect(readinessSource).not.toContain("sourceCollectionAssignmentsQuery.isFetching");
 
-    const launcherSource = routeSource.slice(
-      routeSource.indexOf("function renderResearchStageLauncher"),
-      routeSource.indexOf("function renderResearchStageStandalonePage"),
-    );
+    // Wave 8H: readiness gates for stage CTAs are enforced inside TeamResearchStageLauncherPanel.
+    const launcherSource = teamResearchStageLauncherPanelSource;
     expect(launcherSource).toContain("sourceCollectionSearchActionReadiness.disabled");
     expect(launcherSource).toContain("disabled={sourceCollectionLoopActionDisabled}");
     expect(routeSource).toContain("const sourceCollectionLoopActionDisabled = sourceCollectionLoopActionReadiness.disabled");
@@ -2925,13 +2935,15 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("const researchTeamDetailDegraded = Boolean(");
     expect(routeSource).toContain("selectedTeamDetailLoading && !researchWorkflowTeamSelected");
     expect(routeSource).toContain("selectedTeamDetailUnavailable && !researchWorkflowTeamSelected");
-    expect(routeSource).toContain("researchStageDegradedNotice");
-    expect(routeSource).toContain("团队详情暂时不可用；当前保留已读取的科研状态。");
+    // Wave 8H: degraded research notice lives on launcher panel.
+    expect(teamResearchStageLauncherPanelSource).toContain("researchStageDegradedNotice");
+    expect(teamResearchStageLauncherPanelSource).toContain("团队详情暂时不可用；当前保留已读取的科研状态。");
     expect(routeSource).toContain("const agentDirectoryHydrating = bindings.some(");
     // Wave 8G: stage member loading copy lives in TeamResearchStageAgentPanel.
     expect(teamResearchStageAgentPanelSource).toContain("正在读取成员配置");
-    expect(routeSource).toContain("状态同步中");
-    expect(routeSource).toContain("状态暂不可用");
+    // Wave 8H: stage status loading copy lives on launcher panel.
+    expect(teamResearchStageLauncherPanelSource).toContain("状态同步中");
+    expect(teamResearchStageLauncherPanelSource).toContain("状态暂不可用");
     expect(routeSource).toContain("const showTeamLoadingSurface =");
     expect(routeSource).toContain("const showTeamDetailUnavailableSurface =");
     expect(routeSource).toContain("VStateSurface");
