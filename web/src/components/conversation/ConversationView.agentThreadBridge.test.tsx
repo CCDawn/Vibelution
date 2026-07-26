@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import type { ConversationMessage } from "../../api/types";
 import { conversationMessageToAgentMessage } from "../../agent-thread";
+import { dictionary } from "../../i18n/dictionary";
 import { AgentContextSectionsView } from "./AgentContextSectionsView";
 import { buildAgentMessageRenderState } from "./agentMessageRenderState";
 import { ConversationView } from "./ConversationView";
@@ -18,6 +19,7 @@ function renderConversation(messages: ConversationMessage[], activeTurnMessage?:
       },
     },
   });
+  queryClient.setQueryData(["i18n", "dictionary-domains", "core,chat"], dictionary);
 
   return renderToStaticMarkup(
     <QueryClientProvider client={queryClient}>

@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import type { ConversationMessage } from "../../api/types";
+import { dictionary } from "../../i18n/dictionary";
 import { ConversationView } from "./ConversationView";
 import styles from "./ConversationView.styles";
 import conversationViewSource from "./ConversationView.tsx?raw";
@@ -16,6 +17,7 @@ function renderConversation(messages: ConversationMessage[]) {
       },
     },
   });
+  queryClient.setQueryData(["i18n", "dictionary-domains", "core,chat"], dictionary);
 
   return renderToStaticMarkup(
     <QueryClientProvider client={queryClient}>
