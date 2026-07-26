@@ -76,6 +76,13 @@ Recorded for high-ROI program **scope A** (F0–F3, F5, F6; F4 trigger-only).
 | EvolutionRunRecordsPanel | ~23 | runs view pack |
 | EvolutionProposalActionBandsPanel | ~3 | library action pack |
 
+### Post-U4–U5
+
+| Item | Change |
+|---|---|
+| U4 | Research pack split: `teamResearchPanels` (core) / `teamResearchExperimentPanels` / `teamResearchSearchPanels`; prefetch by path |
+| U5 | Conversation timeline window policy extracted; initial/batch **12**; soft DOM ceiling **72** prefers server earlier-load |
+
 ### Post-T1–T3 chunk notes (build evidence)
 
 | Chunk | ~kB raw | Notes |

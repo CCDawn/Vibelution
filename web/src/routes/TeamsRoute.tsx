@@ -414,21 +414,23 @@ const styles = {
 
 /**
  * Path-scoped Teams UI packs (see teams/README.md).
- * Shared = cross-path primitives; Research = research/experiment/AI search; SC = source-collection.
+ * Shared | research core | research experiment | research search | SC (U4).
  */
 const loadTeamSharedPanels = () => import("./teams/teamSharedPanels");
 const loadTeamResearchPanels = () => import("./teams/teamResearchPanels");
+const loadTeamResearchExperimentPanels = () => import("./teams/teamResearchExperimentPanels");
+const loadTeamResearchSearchPanels = () => import("./teams/teamResearchSearchPanels");
 const loadTeamSourceCollectionPanels = () => import("./teams/teamSourceCollectionPanels");
 
-const TeamMemoryIndexPanel = createLazyNamedTeamPanel(loadTeamResearchPanels, "TeamMemoryIndexPanel");
-const TeamAiSearchWorkspacePanel = createLazyNamedTeamPanel(loadTeamResearchPanels, "TeamAiSearchWorkspacePanel");
+const TeamMemoryIndexPanel = createLazyNamedTeamPanel(loadTeamResearchSearchPanels, "TeamMemoryIndexPanel");
+const TeamAiSearchWorkspacePanel = createLazyNamedTeamPanel(loadTeamResearchSearchPanels, "TeamAiSearchWorkspacePanel");
 const TeamResearchStageAgentPanel = createLazyNamedTeamPanel(loadTeamResearchPanels, "TeamResearchStageAgentPanel");
 const TeamResearchStageAgentSummary = createLazyNamedTeamPanel(loadTeamResearchPanels, "TeamResearchStageAgentSummary");
 const TeamResearchStageLauncherPanel = createLazyNamedTeamPanel(loadTeamResearchPanels, "TeamResearchStageLauncherPanel");
 const TeamResearchStageStandalonePagePanel = createLazyNamedTeamPanel(loadTeamResearchPanels, "TeamResearchStageStandalonePagePanel");
 const TeamResearchLoopPanel = createLazyNamedTeamPanel(loadTeamResearchPanels, "TeamResearchLoopPanel");
-const TeamExperimentPlanningLedgerPanel = createLazyNamedTeamPanel(loadTeamResearchPanels, "TeamExperimentPlanningLedgerPanel");
-// TeamExperimentMethodPanel is mounted inside TeamExperimentPlanningLedgerPanel (same research pack).
+const TeamExperimentPlanningLedgerPanel = createLazyNamedTeamPanel(loadTeamResearchExperimentPanels, "TeamExperimentPlanningLedgerPanel");
+// TeamExperimentMethodPanel is mounted inside TeamExperimentPlanningLedgerPanel (same experiment pack).
 const TeamSourceCollectionActiveStagePanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionActiveStagePanel");
 const TeamSourceCollectionPhaseCloseGatePanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionPhaseCloseGatePanel");
 const TeamSourceCollectionStageAgentsPanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionStageAgentsPanel");
@@ -459,16 +461,16 @@ const TeamSourceCollectionRunSettingsPanel = createLazyNamedTeamPanel(loadTeamSo
 const TeamSourceCollectionFilterBar = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionFilterBar");
 const TeamSourceCollectionPagination = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionPagination");
 const TeamSourceCollectionStorageActionsPanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionStorageActionsPanel");
-const TeamWorkflowCandidatePreviewPanel = createLazyNamedTeamPanel(loadTeamResearchPanels, "TeamWorkflowCandidatePreviewPanel");
+const TeamWorkflowCandidatePreviewPanel = createLazyNamedTeamPanel(loadTeamResearchExperimentPanels, "TeamWorkflowCandidatePreviewPanel");
 const TeamsSourceCollectionPanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamsSourceCollectionPanel");
 const ResearchMemoryEvidencePanel = createLazyNamedTeamPanel(loadTeamSharedPanels, "ResearchMemoryEvidencePanel");
 const TeamWorkflowGraphView = createLazyNamedTeamPanel(loadTeamSharedPanels, "TeamWorkflowGraphView");
-const TeamWorkflowCandidateGraphStatusPanel = createLazyNamedTeamPanel(loadTeamResearchPanels, "TeamWorkflowCandidateGraphStatusPanel");
-const TeamWorkflowCoordinationStatusPanel = createLazyNamedTeamPanel(loadTeamResearchPanels, "TeamWorkflowCoordinationStatusPanel");
-const TeamWorkflowKnowledgeIngestionStatusPanel = createLazyNamedTeamPanel(loadTeamResearchPanels, "TeamWorkflowKnowledgeIngestionStatusPanel");
-const TeamWorkflowModelEvidenceStatusPanel = createLazyNamedTeamPanel(loadTeamResearchPanels, "TeamWorkflowModelEvidenceStatusPanel");
-const TeamWorkflowPaperNoteChunkStatusPanel = createLazyNamedTeamPanel(loadTeamResearchPanels, "TeamWorkflowPaperNoteChunkStatusPanel");
-const TeamWorkflowSourceQualityStatusPanel = createLazyNamedTeamPanel(loadTeamResearchPanels, "TeamWorkflowSourceQualityStatusPanel");
+const TeamWorkflowCandidateGraphStatusPanel = createLazyNamedTeamPanel(loadTeamResearchExperimentPanels, "TeamWorkflowCandidateGraphStatusPanel");
+const TeamWorkflowCoordinationStatusPanel = createLazyNamedTeamPanel(loadTeamResearchExperimentPanels, "TeamWorkflowCoordinationStatusPanel");
+const TeamWorkflowKnowledgeIngestionStatusPanel = createLazyNamedTeamPanel(loadTeamResearchExperimentPanels, "TeamWorkflowKnowledgeIngestionStatusPanel");
+const TeamWorkflowModelEvidenceStatusPanel = createLazyNamedTeamPanel(loadTeamResearchExperimentPanels, "TeamWorkflowModelEvidenceStatusPanel");
+const TeamWorkflowPaperNoteChunkStatusPanel = createLazyNamedTeamPanel(loadTeamResearchExperimentPanels, "TeamWorkflowPaperNoteChunkStatusPanel");
+const TeamWorkflowSourceQualityStatusPanel = createLazyNamedTeamPanel(loadTeamResearchExperimentPanels, "TeamWorkflowSourceQualityStatusPanel");
 
 const TEAMS_LAYOUT_ID = WORKBENCH_LAYOUT_IDS.teams;
 const TEAMS_INSPECTOR_PANE: PaneSpec = {
@@ -1010,6 +1012,7 @@ export function TeamsRoute({
       researchWorkflowTeamSelected,
       aiSearchScopeTeamSelected,
       sourceCollectionWorkspaceSelected,
+      researchWorkspaceView,
     });
     if (packs.length === 0) {
       return;
@@ -1017,12 +1020,15 @@ export function TeamsRoute({
     prefetchTeamsPanelPacks(packs, {
       shared: loadTeamSharedPanels,
       research: loadTeamResearchPanels,
+      research_experiment: loadTeamResearchExperimentPanels,
+      research_search: loadTeamResearchSearchPanels,
       source_collection: loadTeamSourceCollectionPanels,
     });
   }, [
     researchWorkflowTeamSelected,
     aiSearchScopeTeamSelected,
     sourceCollectionWorkspaceSelected,
+    researchWorkspaceView,
   ]);
   const teamCanvasQueryEnabled = resolveTeamCanvasQueryEnabled({
     effectiveTeamId,

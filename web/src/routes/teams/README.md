@@ -48,7 +48,9 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 | Source-collection UI panels (`TeamSourceCollection*`) | panel file under `routes/` (via secondary pack) | pure models |
 | Secondary-lazy loader helper | `lazyTeamPanel.tsx` | business logic |
 | Shared UI pack barrel | `teamSharedPanels.ts` | path-specific orchestration |
-| Research UI pack barrel | `teamResearchPanels.ts` | SC orchestration |
+| Research core UI pack barrel | `teamResearchPanels.ts` | experiment / AI-search packs |
+| Research experiment UI pack barrel | `teamResearchExperimentPanels.ts` | core / SC packs |
+| Research AI-search UI pack barrel | `teamResearchSearchPanels.ts` | core / experiment packs |
 | Source-collection UI pack barrel | `teamSourceCollectionPanels.ts` | research orchestration |
 | Experiment + research-loop mutations | `useTeamExperimentLoopMutations.ts` | drafts/view orchestration |
 | Source-collection write mutations | `useTeamSourceCollectionMutations.ts` | drafts/view/session-task orchestration |
@@ -64,12 +66,14 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 
 ## Bundle note (path-scoped secondary packs)
 
-`TeamsRoute` keeps UI panels off the initial shell via `createLazyNamedTeamPanel` and **three** async barrels:
+`TeamsRoute` keeps UI panels off the initial shell via `createLazyNamedTeamPanel` and **path-scoped** async barrels:
 
 | Pack | Loader | Contains |
 |---|---|---|
 | Shared | `loadTeamSharedPanels` | Graph view, research memory evidence |
-| Research | `loadTeamResearchPanels` | AI search, research stages, loop/ledger, workflow status |
+| Research core | `loadTeamResearchPanels` | Stage launcher/agents, research loop |
+| Research experiment | `loadTeamResearchExperimentPanels` | Experiment ledger/method, workflow status, candidate preview |
+| Research search | `loadTeamResearchSearchPanels` | AI search workspace, team memory index |
 | Source-collection | `loadTeamSourceCollectionPanels` | SC chrome + workspace orchestration |
 
 **Rules:**
@@ -77,7 +81,7 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 - New panels must enter exactly one pack; do **not** revive a mono `teamSecondaryPanels` UI barrel.
 - Same-pack static imports are fine; cross-pack **value** imports of workspaces are forbidden.
 - Stay static in the shell (on purpose): pure models, query keys/hooks, style maps.
-- Prefetch is path-scoped via `teamPanelPrefetch.ts`: warm research or SC after team/view switch; **never** prefetch all packs on shell mount.
+- Prefetch is path-scoped via `teamPanelPrefetch.ts`: warm research core / experiment / search / SC after team/view switch; **never** prefetch all packs on shell mount.
 
 **Do not** re-add static value imports of panel components into `TeamsRoute.tsx` without a budget re-check.
 
