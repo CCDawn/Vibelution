@@ -509,6 +509,12 @@ describe("TeamsRoute layout contract", () => {
     // Wave 8N: path-scoped secondary packs (shared / research / source-collection).
     expect(routeSource).toContain('import("./teams/teamSharedPanels")');
     expect(routeSource).toContain('import("./teams/teamResearchPanels")');
+    expect(routeSource).toContain('import("./teams/teamResearchExperimentPanels")');
+    expect(routeSource).toContain('import("./teams/teamResearchSearchPanels")');
+    expect(routeSource).toContain("loadTeamResearchExperimentPanels");
+    expect(routeSource).toContain("loadTeamResearchSearchPanels");
+    expect(routeSource).toContain('createLazyNamedTeamPanel(loadTeamResearchSearchPanels, "TeamAiSearchWorkspacePanel")');
+    expect(routeSource).toContain('createLazyNamedTeamPanel(loadTeamResearchExperimentPanels, "TeamExperimentPlanningLedgerPanel")');
     expect(routeSource).toContain('import("./teams/teamSourceCollectionPanels")');
     expect(routeSource).toContain('createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamsSourceCollectionPanel")');
     // Wave 8N+prefetch: warm packs after team/view switch, not mount-all.

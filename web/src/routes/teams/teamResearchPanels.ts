@@ -1,10 +1,10 @@
 /**
- * Research / experiment / AI-search Teams UI pack.
- * Loaded when research workflow, experiment loop, or AI search surfaces are needed.
+ * Research core UI pack — stage launcher / agents / loop.
+ * Loaded for research-workflow teams on non–source-collection surfaces.
+ *
+ * Experiment ledger/status and AI-search packs are separate (U4).
  */
 
-export { TeamMemoryIndexPanel } from "../TeamMemoryIndexPanel";
-export { TeamAiSearchWorkspacePanel } from "../TeamAiSearchWorkspacePanel";
 export {
   TeamResearchStageAgentPanel,
   TeamResearchStageAgentSummary,
@@ -12,14 +12,3 @@ export {
 export { TeamResearchStageLauncherPanel } from "../TeamResearchStageLauncherPanel";
 export { TeamResearchStageStandalonePagePanel } from "../TeamResearchStageStandalonePagePanel";
 export { TeamResearchLoopPanel } from "../TeamResearchLoopPanel";
-export { TeamExperimentPlanningLedgerPanel } from "../TeamExperimentPlanningLedgerPanel";
-export { TeamExperimentMethodPanel } from "../TeamExperimentMethodPanel";
-export { TeamWorkflowCandidatePreviewPanel } from "../TeamWorkflowCandidatePreviewPanel";
-export {
-  TeamWorkflowCandidateGraphStatusPanel,
-  TeamWorkflowCoordinationStatusPanel,
-  TeamWorkflowKnowledgeIngestionStatusPanel,
-  TeamWorkflowModelEvidenceStatusPanel,
-  TeamWorkflowPaperNoteChunkStatusPanel,
-  TeamWorkflowSourceQualityStatusPanel,
-} from "../TeamWorkflowStatusPanels";
