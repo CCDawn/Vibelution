@@ -55,6 +55,10 @@ import teamExperimentPlanningLedgerPanelSource from "./TeamExperimentPlanningLed
 import teamKnowledgeCollectionCompletionFlowPanelSource from "./TeamKnowledgeCollectionCompletionFlowPanel.tsx?raw";
 import teamSourceCollectionConversationWorkspacePanelSource from "./TeamSourceCollectionConversationWorkspacePanel.tsx?raw";
 import teamSourceCollectionScreeningWorkspacePanelSource from "./TeamSourceCollectionScreeningWorkspacePanel.tsx?raw";
+import teamSourceCollectionExtractionRecoveryWorkspacePanelSource from "./TeamSourceCollectionExtractionRecoveryWorkspacePanel.tsx?raw";
+import teamSourceCollectionCandidateWorkspacePanelSource from "./TeamSourceCollectionCandidateWorkspacePanel.tsx?raw";
+import teamSourceCollectionGraphWorkspacePanelSource from "./TeamSourceCollectionGraphWorkspacePanel.tsx?raw";
+import teamSourceCollectionMemoryWorkspacePanelSource from "./TeamSourceCollectionMemoryWorkspacePanel.tsx?raw";
 import teamExperimentMethodPanelSource from "./TeamExperimentMethodPanel.tsx?raw";
 import teamExperimentMethodPanelStyles from "./TeamExperimentMethodPanel.styles";
 import teamSourceCollectionActiveStagePanelSource from "./TeamSourceCollectionActiveStagePanel.tsx?raw";
@@ -826,7 +830,8 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourceCollectionConversationPanelSource).toContain("还有 ${pendingCandidateImportCount} 条原始记录尚未进入候选库");
     expect(evidenceModelSource).toContain('label: "DOI"');
     expect(evidenceModelSource).toContain("https://doi.org/");
-    expect(routeSource).toContain("点击查看来源详情");
+    // Wave 8L: candidate detail activate title lives on candidate workspace panel.
+    expect(teamSourceCollectionCandidateWorkspacePanelSource).toContain("点击查看来源详情");
     expect(routeSource).toContain("sourceCollectionCandidateTrace");
     expect(routeSource).toContain("selectedSourceCollectionCandidateId");
     expect(routeSource).toContain("TeamSourceCollectionSourceDetailPanel");
@@ -905,12 +910,13 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourceCollectionExtractionRecoveryPanelSource).toContain("failedLabel");
     expect(teamSourceCollectionExtractionRecoveryPanelSource).toContain("recoverLabel");
     expect(teamSourceCollectionExtractionRecoveryPanelSource).toContain("可保留");
-    expect(routeSource).toContain("进入 Agent 私聊");
+    // Wave 8L: recovery CTA copy / open-chat wiring live on recovery workspace panel.
+    expect(teamSourceCollectionExtractionRecoveryWorkspacePanelSource).toContain("进入 Agent 私聊");
     expect(routeSource).toContain("runSourceCollectionCandidateExtractionAction");
     expect(routeSource).toContain("runSourceCollectionScreeningAction");
-    expect(routeSource).toContain("openSourceCollectionStageAgentChat(\"extraction\")");
-    expect(routeSource).toContain("sourceCollectionExtractionRecoveryFailureCount");
-    expect(routeSource).toContain("sourceCollectionExtractionRecoverySalvageCount");
+    expect(teamSourceCollectionExtractionRecoveryWorkspacePanelSource).toContain("openSourceCollectionStageAgentChat(\"extraction\")");
+    expect(teamSourceCollectionExtractionRecoveryWorkspacePanelSource).toContain("sourceCollectionExtractionRecoveryFailureCount");
+    expect(teamSourceCollectionExtractionRecoveryWorkspacePanelSource).toContain("sourceCollectionExtractionRecoverySalvageCount");
     expect(routeSource).toContain("deriveSourceCollectionExcludedRecoveryState");
     expect(routeSource).toContain("sourceCollectionExtractionExcludedRecoveryState");
     expect(evidenceModelSource).toContain("剩余资料已被排除");
@@ -918,7 +924,7 @@ describe("TeamsRoute layout contract", () => {
     expect(evidenceModelSource).toContain("提炼排除项确认");
     expect(routeSource).toContain("sourceCollectionExtractionCanProceedAfterExclusions");
     expect(evidenceModelSource).toContain("可继续推进");
-    expect(routeSource).toContain('onPress={() => void openSourceCollectionStageAgentChat("extraction")}');
+    expect(teamSourceCollectionExtractionRecoveryWorkspacePanelSource).toContain('onPress={() => void openSourceCollectionStageAgentChat("extraction")}');
     expect(routeSource).not.toContain("sourceCollectionRunCandidates.slice(0, 12)");
     expect(routeSource).not.toContain("SOURCE_COLLECTION_RESULT_PREVIEW_LIMIT");
     expect(routeSource).toContain("sourceCollectionStageCard");
@@ -948,7 +954,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("sourceCollectionLoadingSummary");
     expect(routeSource).toContain("sourceCollectionDisplayedCandidateFilterCounts");
     expect(routeSource).toContain("sourceCollectionCandidateProjectionFallbackCount");
-    expect(routeSource).toContain("candidateListAwaitingRefresh");
+    // Wave 8L: candidate empty-state refresh gate lives on candidate workspace panel.
+    expect(teamSourceCollectionCandidateWorkspacePanelSource).toContain("candidateListAwaitingRefresh");
     expect(evidenceModelSource).toContain("正在加载资料提炼结果");
     expect(routeSource).toContain("正在读取资料提炼结果");
     expect(evidenceModelSource).toContain("列表正在同步");
@@ -1006,12 +1013,13 @@ describe("TeamsRoute layout contract", () => {
     expect(stageProjectionSource).toContain("剩余检查项");
     expect(routeSource).toContain('sourceCollectionStageModules.find((module) => module.state === "failed")');
     expect(routeSource).not.toContain("仍需完成检查项或生成本阶段产物");
-    expect(routeSource).toContain("invalidRecordIds");
+    // Wave 8L: recovery panel consumes invalid id counts from projection.
+    expect(teamSourceCollectionExtractionRecoveryWorkspacePanelSource).toContain("invalidRecordIds");
     expect(stageProjectionSource).toContain("本轮未生成候选资料");
     expect(evidenceModelSource).toContain("没有生成候选资料");
     expect(stageProjectionSource).toContain("完整 recordId");
     expect(stageProjectionSource).toContain("sourceCollectionCoverageMetric");
-    expect(routeSource).toContain("invalidCandidateIds");
+    expect(teamSourceCollectionExtractionRecoveryWorkspacePanelSource).toContain("invalidCandidateIds");
     expect(stageProjectionSource).toContain("materializedContentExtraction");
     expect(evidenceModelSource).toContain("继续补全提炼");
     expect(evidenceModelSource).toContain("继续补全提炼");
@@ -1022,7 +1030,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("已审");
     expect(routeSource).toContain("待 Agent 复核");
     expect(routeSource).not.toContain("未匹配资料");
-    expect(routeSource).toContain("graphForSelectedSourceRun");
+    // Wave 8L: graph projection selection lives on graph workspace panel.
+    expect(teamSourceCollectionGraphWorkspacePanelSource).toContain("graphForSelectedSourceRun");
     expect(routeSource).toContain("parseSourceCollectionStageModuleId");
     expect(routeSource).toContain("collectionStage");
     expect(routeSource).toContain("selectedSourceCollectionStageId");
@@ -1063,9 +1072,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("stopSourceCollectionPaginationEvent");
     expect(routeSource).toContain("onContain={stopSourceCollectionPaginationEvent}");
     expect(routeSource).toContain("sourceCollectionExtractionDefaultPanelId");
-    // Wave 8K: screening expanded-panel open logic lives on screening workspace panel.
+    // Wave 8K/8L: expanded-panel open logic lives on screening/candidate workspace panels.
     expect(teamSourceCollectionScreeningWorkspacePanelSource).toContain("sourceCollectionExpandedPanelId === \"source-collection-screening-panel\"");
-    expect(routeSource).toContain("sourceCollectionExpandedPanelId === \"source-collection-candidates-panel\"");
+    expect(teamSourceCollectionCandidateWorkspacePanelSource).toContain("sourceCollectionExpandedPanelId === \"source-collection-candidates-panel\"");
     expect(routeSource).not.toContain("preventSourceCollectionPanelSummaryToggle");
     expect(routeSource).not.toContain("onClick={preventSourceCollectionPanelSummaryToggle}");
     expect(routeSource).not.toContain("sourceCollectionTraceMessagesForStage");
@@ -1229,8 +1238,9 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourceCollectionConversationWorkspacePanelSource).toContain("sourceCollectionResultTone");
     expect(teamSourceCollectionConversationWorkspacePanelSource).toContain("resultStatusLabel");
     expect(teamSourceCollectionScreeningWorkspacePanelSource).toContain("当前过滤条件下没有候选资料");
-    expect(routeSource).toContain("当前过滤条件下没有入库关系节点");
-    expect(routeSource).toContain("当前过滤条件下没有入库资料");
+    // Wave 8L: graph/memory empty filter copy live on workspace panels.
+    expect(teamSourceCollectionGraphWorkspacePanelSource).toContain("当前过滤条件下没有入库关系节点");
+    expect(teamSourceCollectionMemoryWorkspacePanelSource).toContain("当前过滤条件下没有入库资料");
     expect(routeSource).toContain("sourceCollectionCandidateQualityState(candidate).approved");
     expect(workflowPresentationSource).toContain("source_needs_quality_revision: \"需补资料\"");
     expect(workflowPresentationSource).toContain("source_screened: \"已审查\"");
@@ -1250,9 +1260,13 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("renderMemoryPanel={renderSourceCollectionMemoryPanel}");
     expect(routeSource).toContain("renderCandidatePanel={renderSourceCollectionCandidatePanel}");
     expect(routeSource).toContain("renderScreeningPanel={renderSourceCollectionScreeningPanel}");
-    const graphPanelOpenSource = routeSource.slice(
-      routeSource.indexOf("<TeamSourceCollectionGraphPanel"),
-      routeSource.indexOf("onToggle={(event) =>", routeSource.indexOf("<TeamSourceCollectionGraphPanel")),
+    // Wave 8L: graph open condition lives on graph workspace panel.
+    const graphPanelOpenSource = teamSourceCollectionGraphWorkspacePanelSource.slice(
+      teamSourceCollectionGraphWorkspacePanelSource.indexOf("<TeamSourceCollectionGraphPanel"),
+      teamSourceCollectionGraphWorkspacePanelSource.indexOf(
+        "onToggle={(event) =>",
+        teamSourceCollectionGraphWorkspacePanelSource.indexOf("<TeamSourceCollectionGraphPanel"),
+      ),
     );
     expect(graphPanelOpenSource).toContain('selectedSourceCollectionStageId === "relations"');
     expect(graphPanelOpenSource).not.toContain('selectedSourceCollectionStageId === "ingestion"');
@@ -2676,7 +2690,8 @@ describe("TeamsRoute layout contract", () => {
 
     expect(routeSource).toContain("sourceCollectionDataSyncText");
     expect(routeSource).toContain("sourceCollectionStableCountText");
-    expect(routeSource).toContain("loading={sourceCollectionPrimaryDataLoading}");
+    // Wave 8L: candidate panel loading prop lives on candidate workspace panel.
+    expect(teamSourceCollectionCandidateWorkspacePanelSource).toContain("loading={sourceCollectionPrimaryDataLoading}");
 
     const displayLoadingSource = routeSource.slice(
       routeSource.indexOf("const sourceCollectionFindingDisplayLoading"),
@@ -2767,10 +2782,8 @@ describe("TeamsRoute layout contract", () => {
     expect(rawRecordSource).not.toContain("<p title={record.summary || record.recordId}>");
     expect(rawRecordSource).not.toContain("formatTime(record.updatedAt || record.createdAt");
 
-    const candidatePanelSource = routeSource.slice(
-      routeSource.indexOf("function renderSourceCollectionCandidatePanel"),
-      routeSource.indexOf("function renderSourceCollectionGraphPanel"),
-    );
+    // Wave 8L: candidate list body lives on candidate workspace panel.
+    const candidatePanelSource = teamSourceCollectionCandidateWorkspacePanelSource;
     expect(candidatePanelSource).toContain("sourceCollectionSimpleCandidateStatusLabel");
     expect(candidatePanelSource).not.toContain("<p>{candidate.summary || candidate.candidateId}</p>");
     expect(candidatePanelSource).not.toContain("formatTime(candidate.updatedAt");
@@ -2798,17 +2811,13 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourceCollectionSourceDetailPanelSource).toContain("Evidence Ledger");
     expect(teamSourceCollectionSourceDetailPanelSource).toContain("evidenceLedger.map");
 
-    const candidatePanelSource = routeSource.slice(
-      routeSource.indexOf("function renderSourceCollectionCandidatePanel"),
-      routeSource.indexOf("function renderSourceCollectionGraphPanel"),
-    );
+    // Wave 8L: evidence-ledger labels used from candidate workspace panel.
+    const candidatePanelSource = teamSourceCollectionCandidateWorkspacePanelSource;
     expect(candidatePanelSource).toContain("sourceCollectionEvidenceLedgerCardLabel");
     expect(candidatePanelSource).toContain("sourceCollectionEvidenceLedgerTone");
 
-    const graphPanelSource = routeSource.slice(
-      routeSource.indexOf("function renderSourceCollectionGraphPanel"),
-      routeSource.indexOf("function renderSourceCollectionMemoryPanel"),
-    );
+    // Wave 8L: graph evidence-ledger summary lives on graph workspace panel.
+    const graphPanelSource = teamSourceCollectionGraphWorkspacePanelSource;
     expect(graphPanelSource).toContain("visibleGraphMissingEvidenceAnchorCount");
     expect(graphPanelSource).toContain("sourceCollectionEvidenceLedgerActionLabel");
     expect(graphPanelSource).toContain("待补证据");
@@ -2899,8 +2908,9 @@ describe("TeamsRoute layout contract", () => {
   });
 
   it("keeps Teams dynamic layout values behind typed CSS variable helpers", () => {
+    // Wave 8L: Teams SC graph mount lives on graph workspace panel; route only lazy-declares the view.
     expect(routeSource).toContain("TeamWorkflowGraphView");
-    expect(routeSource.match(/<TeamWorkflowGraphView/g)?.length ?? 0).toBe(1);
+    expect(teamSourceCollectionGraphWorkspacePanelSource.match(/<TeamWorkflowGraphView/g)?.length ?? 0).toBe(1);
     expect(teamWorkflowStatusPanelsSource.match(/<TeamWorkflowGraphView/g)?.length ?? 0).toBe(1);
     expect(routeSource).not.toContain("workflowGraphFrameStyle(visibleGraphLayout)");
     expect(routeSource).not.toContain("workflowGraphFrameStyle(teamWorkflowCandidateGraphLayout)");

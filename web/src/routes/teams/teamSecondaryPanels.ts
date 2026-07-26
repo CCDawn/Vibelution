@@ -52,3 +52,8 @@ export {
 export { TeamKnowledgeCollectionCompletionFlowPanel } from "../TeamKnowledgeCollectionCompletionFlowPanel";
 export { TeamSourceCollectionConversationWorkspacePanel } from "../TeamSourceCollectionConversationWorkspacePanel";
 export { TeamSourceCollectionScreeningWorkspacePanel } from "../TeamSourceCollectionScreeningWorkspacePanel";
+
+export { TeamSourceCollectionExtractionRecoveryWorkspacePanel } from "../TeamSourceCollectionExtractionRecoveryWorkspacePanel";
+export { TeamSourceCollectionCandidateWorkspacePanel } from "../TeamSourceCollectionCandidateWorkspacePanel";
+export { TeamSourceCollectionGraphWorkspacePanel } from "../TeamSourceCollectionGraphWorkspacePanel";
+export { TeamSourceCollectionMemoryWorkspacePanel } from "../TeamSourceCollectionMemoryWorkspacePanel";

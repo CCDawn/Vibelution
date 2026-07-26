@@ -32,6 +32,10 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 | Knowledge-collection completion flow graph | `../TeamKnowledgeCollectionCompletionFlowPanel.tsx` (via secondary pack) | stage chat + retry injectables |
 | SC conversation / raw-records workspace | `../TeamSourceCollectionConversationWorkspacePanel.tsx` (via secondary pack) | filter/pagination injectables |
 | SC screening / review workspace | `../TeamSourceCollectionScreeningWorkspacePanel.tsx` (via secondary pack) | quality/chunk mutations injectables |
+| SC extraction recovery workspace | `../TeamSourceCollectionExtractionRecoveryWorkspacePanel.tsx` (via secondary pack) | stage session + screening injectables |
+| SC candidate workspace | `../TeamSourceCollectionCandidateWorkspacePanel.tsx` (via secondary pack) | recovery render prop + selection |
+| SC graph workspace | `../TeamSourceCollectionGraphWorkspacePanel.tsx` (via secondary pack) | graph query + candidate map injectables |
+| SC memory / ingestion workspace | `../TeamSourceCollectionMemoryWorkspacePanel.tsx` (via secondary pack) | knowledge-ingestion status injectables |
 | Source-collection panel shell alias | `TeamsSourceCollectionPanel.tsx` | full route wiring |
 | Workflow graph **layout math** | `../TeamWorkflowGraphLayout.ts` | Graph SVG view |
 | Workflow graph **SVG view** | `../TeamWorkflowGraphView.tsx` (via secondary pack) | layout pure math |
@@ -64,12 +68,13 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 - **Wave 8I done:** Experiment/iteration standalone stage page extracted to `TeamResearchStageStandalonePagePanel` (ledger/loop panels remain route-owned injectables).
 - **Wave 8J done:** Research loop + experiment planning ledger extracted to `TeamResearchLoopPanel` / `TeamExperimentPlanningLedgerPanel` (mutations stay route-owned injectables).
 - **Wave 8K done:** Knowledge completion flow + SC conversation/screening workspaces extracted (chrome shells kept; orchestration moved off route).
+- **Wave 8L done:** SC recovery / candidate / graph / memory workspaces extracted (controls/active-stage still route-owned).
 
 ## Next (planned)
 
-1. Extract remaining SC orchestration (extraction recovery / graph / memory / controls / active-stage) when each can own a full boundary.
+1. Extract remaining SC orchestration (controls / active-stage / selected-source) when each can own a full boundary.
 2. Extract EventSource-free mutation hooks (`useTeamWorkflowMutations` family) only when a hook can own a full boundary.
-3. Optional: split `teamSecondaryPanels` into source-collection vs workflow-status packs if the secondary pack exceeds route budget.
+3. Optional: split `teamSecondaryPanels` into source-collection vs workflow-status packs if the secondary pack exceeds route budget (~300KB after 8L).
 4. Optional: style-bound tone helpers (`workflowQualityTone`) once styles map ownership is clear.
 
 ## Rules

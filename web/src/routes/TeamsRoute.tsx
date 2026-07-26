@@ -415,6 +415,10 @@ const TeamSourceCollectionScreeningPanel = createLazyNamedTeamPanel(loadTeamSeco
 const TeamKnowledgeCollectionCompletionFlowPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamKnowledgeCollectionCompletionFlowPanel");
 const TeamSourceCollectionConversationWorkspacePanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionConversationWorkspacePanel");
 const TeamSourceCollectionScreeningWorkspacePanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionScreeningWorkspacePanel");
+const TeamSourceCollectionExtractionRecoveryWorkspacePanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionExtractionRecoveryWorkspacePanel");
+const TeamSourceCollectionCandidateWorkspacePanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionCandidateWorkspacePanel");
+const TeamSourceCollectionGraphWorkspacePanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionGraphWorkspacePanel");
+const TeamSourceCollectionMemoryWorkspacePanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionMemoryWorkspacePanel");
 const TeamSourceCollectionSourceDetailPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionSourceDetailPanel");
 const TeamSourceCollectionStandaloneStagePanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionStandaloneStagePanel");
 const TeamSourceCollectionRunSettingsPanel = createLazyNamedTeamPanel(loadTeamSecondaryPanels, "TeamSourceCollectionRunSettingsPanel");
@@ -3826,510 +3830,118 @@ export function TeamsRoute({
   function renderSourceCollectionExtractionRecoveryPanel(
     candidateProjection: SourceCollectionStageCardProjection | null | undefined,
   ) {
-    const recoveryCoverage = candidateProjection?.currentCoverageSummary?.complete === false
-      ? candidateProjection.currentCoverageSummary
-      : candidateProjection?.latestTask?.coverageSummary;
-    const recoveryClosure = candidateProjection?.latestTask?.closureSummary;
-    const recoveryNumber = sourceCollectionNonNegativeCount;
-    const sourceCollectionExtractionRecoveryInputCount = Math.max(
-      recoveryNumber(recoveryCoverage?.total),
-      recoveryNumber(candidateProjection?.counts?.input),
-      sourceCollectionRawRecordCount,
-    );
-    const sourceCollectionExtractionRecoveryInvalidCount = Math.max(
-      recoveryNumber(recoveryCoverage?.invalid),
-      recoveryClosure?.invalidIds?.length ?? 0,
-      candidateProjection?.latestTask?.invalidRecordIds?.length ?? 0,
-      candidateProjection?.latestTask?.invalidCandidateIds?.length ?? 0,
-    );
-    const sourceCollectionExtractionRecoveryCoverageMissingCount = recoveryNumber(recoveryCoverage?.missing);
-    const sourceCollectionExtractionRecoveryMissingCount = Math.max(
-      sourceCollectionExtractionRecoveryCoverageMissingCount,
-      recoveryNumber(candidateProjection?.counts?.pending),
-    );
-    const sourceCollectionExtractionRecoveryFailureCount = Math.max(
-      recoveryNumber(recoveryClosure?.failedCount),
-      recoveryNumber(recoveryClosure?.blockedCount),
-      recoveryNumber(recoveryCoverage?.blocked),
-      sourceCollectionExtractionRecoveryInvalidCount,
-      recoveryCoverage?.complete === false ? sourceCollectionExtractionRecoveryCoverageMissingCount : 0,
-    );
-    const sourceCollectionExtractionRecoverySalvageSignals = [
-      recoveryNumber(recoveryClosure?.successCount),
-      recoveryNumber(candidateProjection?.counts?.output),
-      sourceCollectionRunApprovedCount,
-    ].filter((value) => value > 0);
-    const sourceCollectionExtractionRecoverySalvageCount = sourceCollectionExtractionRecoverySalvageSignals.length
-      ? Math.max(...sourceCollectionExtractionRecoverySalvageSignals)
-      : sourceCollectionDisplayedCandidateCount;
-    const sourceCollectionExtractionRecoverySalvageText = sourceCollectionPrimaryDataLoading
-      ? sourceCollectionLoadingText
-      : String(sourceCollectionExtractionRecoverySalvageCount);
-    const recoveryNeedsWork = Boolean(
-      sourceCollectionExtractionRecoveryFailureCount > 0
-      || sourceCollectionExtractionRecoveryInvalidCount > 0
-      || recoveryCoverage?.complete === false
-      || recoveryClosure?.userStatus === "failed"
-      || candidateProjection?.status === "failed"
-      || candidateProjection?.status === "agent_blocked"
-      || candidateProjection?.status === "agent_interrupted"
-      || sourceCollectionCandidateStepState === "failed"
-    );
-    if (!recoveryNeedsWork) {
-      return null;
-    }
-    const recoveryFailureText = sourceCollectionExtractionRecoveryFailureCount > 0
-      ? sourceCollectionExtractionRecoveryInputCount > 0
-        ? `${sourceCollectionExtractionRecoveryFailureCount}/${sourceCollectionExtractionRecoveryInputCount}`
-        : String(sourceCollectionExtractionRecoveryFailureCount)
-      : (lang === "zh" ? "需要排查" : "review");
-    const recoveryMissingText = sourceCollectionExtractionRecoveryMissingCount > 0
-      ? String(sourceCollectionExtractionRecoveryMissingCount)
-      : sourceCollectionExtractionRecoveryInvalidCount > 0
-        ? String(sourceCollectionExtractionRecoveryInvalidCount)
-        : sourceCollectionStageRecoveryStatusLabel("extraction", lang);
-    const sourceCollectionRecoveryAgentActionText = sourceCollectionExtractionExcludedRecoveryState.blockedByExcludedSources
-      ? sourceCollectionExtractionExcludedRecoveryState.primaryActionText
-      : (lang === "zh" ? "继续 Agent 提炼" : "Continue Agent extraction");
-    const sourceCollectionRecoveryAgentActionTitle = sourceCollectionExtractionExcludedRecoveryState.blockedByExcludedSources
-      ? sourceCollectionExtractionExcludedRecoveryState.primaryActionTitle
-      : sourceCollectionActionDisabledTitle(
-        sourceCollectionStageActionReadinessFor("extraction"),
-        sourceCollectionRecoveryAgentActionText,
-      );
-    const sourceCollectionImportCandidateActionText = lang === "zh" ? "补导入候选" : "Import candidates";
-    const recoverySummary = sourceCollectionExtractionExcludedRecoveryState.blockedByExcludedSources
-      ? sourceCollectionExtractionExcludedRecoveryState.summary
-      : sourceCollectionStageUserSummary(candidateProjection, lang)
-      || (lang === "zh"
-        ? "本轮资料提炼没有完全闭环；先保留可用候选，再补齐失败记录。"
-        : "This extraction run did not close cleanly; keep usable candidates and recover failed records.");
     return (
-      <TeamSourceCollectionExtractionRecoveryPanel
+      <TeamSourceCollectionExtractionRecoveryWorkspacePanel
+        candidateProjection={candidateProjection}
         lang={lang}
-        tone={sourceCollectionExtractionExcludedRecoveryState.tone}
-        ariaLabel={sourceCollectionExtractionExcludedRecoveryState.blockedByExcludedSources
-          ? sourceCollectionExtractionExcludedRecoveryState.panelAriaLabel
-          : undefined}
-        titleLabel={sourceCollectionExtractionExcludedRecoveryState.blockedByExcludedSources
-          ? sourceCollectionExtractionExcludedRecoveryState.panelTitle
-          : undefined}
-        statusLabel={sourceCollectionExtractionExcludedRecoveryState.blockedByExcludedSources
-          ? sourceCollectionExtractionExcludedRecoveryState.statusLabel
-          : sourceCollectionStageRecoveryStatusLabel("extraction", lang)}
-        summary={recoverySummary}
-        failedLabel={sourceCollectionExtractionExcludedRecoveryState.blockedByExcludedSources
-          ? sourceCollectionExtractionExcludedRecoveryState.failedLabel
-          : undefined}
-        failedText={recoveryFailureText}
-        salvageText={sourceCollectionExtractionRecoverySalvageText}
-        recoverLabel={sourceCollectionExtractionExcludedRecoveryState.blockedByExcludedSources
-          ? sourceCollectionExtractionExcludedRecoveryState.recoverLabel
-          : undefined}
-        recoverText={sourceCollectionPrimaryDataLoading
-          ? sourceCollectionLoadingText
-          : sourceCollectionExtractionExcludedRecoveryState.blockedByExcludedSources
-            ? sourceCollectionExtractionExcludedRecoveryState.recoverText
-            : recoveryMissingText}
-        pendingReviewText={sourceCollectionRunPendingScreeningCountText}
-        actions={(
-          <>
-          <VButton
-            type="button"
-            density="compact"
-            variant="primary"
-            icon={sourceCollectionExtractionExcludedRecoveryState.blockedByExcludedSources ? <MessageSquare size={13} /> : <Play size={13} />}
-            onPress={sourceCollectionExtractionExcludedRecoveryState.blockedByExcludedSources
-              ? () => void openSourceCollectionStageAgentChat("extraction")
-              : () => void startSourceCollectionStageSessionTask("extraction")}
-            isDisabled={!sourceCollectionExtractionExcludedRecoveryState.blockedByExcludedSources && sourceCollectionStageActionReadinessFor("extraction").disabled}
-            title={sourceCollectionRecoveryAgentActionTitle}
-          >
-            {sourceCollectionRecoveryAgentActionText}
-          </VButton>
-          {!sourceCollectionExtractionExcludedRecoveryState.blockedByExcludedSources ? (
-            <VButton
-              type="button"
-              density="compact"
-              variant="secondary"
-              icon={<RefreshCw size={13} />}
-              onPress={runSourceCollectionCandidateExtractionAction}
-              isDisabled={sourceCollectionCandidateExtractionActionReadiness.disabled}
-              title={sourceCollectionActionDisabledTitle(sourceCollectionCandidateExtractionActionReadiness, sourceCollectionImportCandidateActionText)}
-            >
-              {sourceCollectionImportCandidateActionText}
-            </VButton>
-          ) : null}
-          <VButton
-            type="button"
-            density="compact"
-            variant="secondary"
-            icon={<CheckCircle2 size={13} />}
-            onPress={runSourceCollectionScreeningAction}
-            isDisabled={sourceCollectionScreeningActionReadiness.disabled}
-            title={sourceCollectionActionDisabledTitle(sourceCollectionScreeningActionReadiness, sourceCollectionScreeningButtonText)}
-          >
-            {sourceCollectionScreeningButtonText}
-          </VButton>
-          <VButton
-            type="button"
-            density="compact"
-            variant="secondary"
-            icon={<MessageSquare size={13} />}
-            onPress={() => void openSourceCollectionStageAgentChat("extraction")}
-          >
-            {lang === "zh" ? "进入 Agent 私聊" : "Open Agent chat"}
-          </VButton>
-          </>
-        )}
+        sourceCollectionRawRecordCount={sourceCollectionRawRecordCount}
+        sourceCollectionRunApprovedCount={sourceCollectionRunApprovedCount}
+        sourceCollectionDisplayedCandidateCount={sourceCollectionDisplayedCandidateCount}
+        sourceCollectionPrimaryDataLoading={sourceCollectionPrimaryDataLoading}
+        sourceCollectionLoadingText={sourceCollectionLoadingText}
+        sourceCollectionCandidateStepState={sourceCollectionCandidateStepState}
+        sourceCollectionExtractionExcludedRecoveryState={sourceCollectionExtractionExcludedRecoveryState}
+        sourceCollectionActionDisabledTitle={sourceCollectionActionDisabledTitle}
+        sourceCollectionStageActionReadinessFor={sourceCollectionStageActionReadinessFor}
+        openSourceCollectionStageAgentChat={openSourceCollectionStageAgentChat}
+        startSourceCollectionStageSessionTask={startSourceCollectionStageSessionTask}
+        runSourceCollectionCandidateExtractionAction={runSourceCollectionCandidateExtractionAction}
+        sourceCollectionCandidateExtractionActionReadiness={sourceCollectionCandidateExtractionActionReadiness}
+        runSourceCollectionScreeningAction={runSourceCollectionScreeningAction}
+        sourceCollectionScreeningActionReadiness={sourceCollectionScreeningActionReadiness}
+        sourceCollectionScreeningButtonText={sourceCollectionScreeningButtonText}
+        sourceCollectionRunPendingScreeningCountText={sourceCollectionRunPendingScreeningCountText}
       />
     );
   }
 
   function renderSourceCollectionCandidatePanel() {
-    const filteredCandidates = sourceCollectionFilteredRunCandidates;
-    const pagedCandidates = sourceCollectionPageItems("extraction", filteredCandidates);
-    const visibleCandidates = pagedCandidates.items;
-    const candidateListNeedsScrollHint = visibleCandidates.length > 4;
-    const candidateProjection = sourceCollectionCandidateProjection;
-    const candidatePanelFilteredCount = sourceCollectionSourceFilter === "all"
-      ? sourceCollectionDisplayedCandidateCount
-      : filteredCandidates.length;
-    const candidatePanelFilteredCountText = sourceCollectionCountText(sourceCollectionPrimaryDataLoading, candidatePanelFilteredCount);
-    const candidatePanelRange = sourceCollectionPrimaryDataLoading
-      ? sourceCollectionDataSyncText
-      : visibleCandidates.length
-      ? `${pagedCandidates.start}-${pagedCandidates.end}/${filteredCandidates.length}`
-      : `0/${candidatePanelFilteredCount}`;
-    const candidateListAwaitingRefresh = !sourceCollectionRunCandidateCount && sourceCollectionDisplayedCandidateCount > 0;
     return (
-      <TeamSourceCollectionCandidatePanel
+      <TeamSourceCollectionCandidateWorkspacePanel
         lang={lang}
-        focused={sourceCollectionFocusedPanelId === "source-collection-candidates-panel"}
-        open={
-          (
-            selectedSourceCollectionStageId === "extraction"
-            && !sourceCollectionExpandedPanelId
-            && sourceCollectionExtractionDefaultPanelId === "source-collection-candidates-panel"
-          )
-          || sourceCollectionExpandedPanelId === "source-collection-candidates-panel"
-          || sourceCollectionCandidateStepState === "active"
-        }
-        onToggle={(event) => {
-          if (!event.currentTarget.open && sourceCollectionExpandedPanelId === "source-collection-candidates-panel") {
-            setSourceCollectionExpandedPanelId("");
-          }
-        }}
-        rangeText={candidatePanelRange}
-        filterBar={renderSourceCollectionFilterBar(sourceCollectionDisplayedCandidateFilterCounts, lang === "zh" ? "提炼资料过滤" : "Extracted source filters", sourceCollectionPrimaryDataLoading)}
-        stats={[
-          { key: "candidate", label: lang === "zh" ? "本轮候选" : "run candidates", value: sourceCollectionDisplayedCandidateCountText },
-          { key: "filtered", label: lang === "zh" ? "当前过滤" : "filtered", value: candidatePanelFilteredCountText },
-          { key: "reviewed", label: lang === "zh" ? "已审查" : "reviewed", value: sourceCollectionProjectedAssessedCountText },
-          { key: "approved", label: lang === "zh" ? "通过" : "approved", value: sourceCollectionProjectedApprovedCountText },
-          { key: "pending", label: lang === "zh" ? "待 Agent 复核" : "pending agent review", value: sourceCollectionRunPendingScreeningCountText },
-          { key: "evidence-ready", label: "evidence_ready", value: sourceCollectionEvidenceReadyCandidateCount },
-          { key: "missing-evidence-anchor", label: "missing_evidence_anchor", value: sourceCollectionMissingEvidenceAnchorCount },
-        ]}
-        loading={sourceCollectionPrimaryDataLoading}
-        hasCandidates={Boolean(visibleCandidates.length)}
-        listNeedsScrollHint={candidateListNeedsScrollHint}
-        emptyMessage={sourceCollectionCandidateEmptyStateText({
-          lang,
-          loading: sourceCollectionPrimaryDataLoading,
-          awaitingRefresh: candidateListAwaitingRefresh,
-          displayedCandidateCount: sourceCollectionDisplayedCandidateCount,
-          filteredCandidateCount: candidatePanelFilteredCount,
-          rawRecordCount: sourceCollectionProjectedCollectedCount,
-          projection: candidateProjection,
-        })}
-        recoveryPanel={renderSourceCollectionExtractionRecoveryPanel(candidateProjection)}
-        pagination={renderSourceCollectionPagination("extraction", filteredCandidates.length)}
-      >
-        {visibleCandidates.map((candidate) => {
-                const sourceQualitySummary = candidateSourceQualityAssessmentSummary(candidate);
-                const evidenceLedgerSummary = sourceCollectionEvidenceLedgerSummary(candidate);
-                const provenance = sourceCollectionCandidateProvenance(candidate, lang);
-                const qualityText = sourceCollectionSimpleCandidateStatusLabel(candidate, lang);
-                const scoreText = sourceQualitySummary
-                  ? `${sourceQualitySummary.overallScore}/100`
-                  : (lang === "zh" ? "待审" : "review");
-                const selected = selectedSourceCollectionCandidateId === candidate.candidateId;
-                return (
-                  <TeamCandidateCard
-                    key={candidate.candidateId}
-                    tone={evidenceLedgerSummary ? sourceCollectionEvidenceLedgerTone(evidenceLedgerSummary) : sourceCollectionResultTone(candidate.qualityStatus)}
-                    statusLabel={qualityText}
-                    title={
-                      <span title={[candidate.title || candidate.candidateId, candidate.summary || ""].filter(Boolean).join("\n")}>
-                        {candidate.title || candidate.candidateId}
-                      </span>
-                    }
-                    meta={[
-                      { key: "category", label: sourceCollectionSourceFilterLabel(sourceCollectionCandidateSourceCategory(candidate, lang), lang) },
-                      { key: "score", label: scoreText },
-                      ...(evidenceLedgerSummary
-                        ? [{ key: "evidence-ledger", label: sourceCollectionEvidenceLedgerCardLabel(evidenceLedgerSummary, lang) }]
-                        : []),
-                    ]}
-                    source={{
-                      label: provenance.label,
-                      value: provenance.value,
-                      href: provenance.href,
-                      title: provenance.href || provenance.value,
-                      missing: provenance.kind === "missing",
-                    }}
-                    selected={selected}
-                    onActivate={() => selectSourceCollectionCandidate(candidate)}
-                    activateTitle={lang === "zh" ? "点击查看来源详情" : "Open source detail"}
-                  />
-                );
-              })}
-      </TeamSourceCollectionCandidatePanel>
+        sourceCollectionFilteredRunCandidates={sourceCollectionFilteredRunCandidates}
+        sourceCollectionPageItems={sourceCollectionPageItems}
+        sourceCollectionCandidateProjection={sourceCollectionCandidateProjection}
+        sourceCollectionSourceFilter={sourceCollectionSourceFilter}
+        sourceCollectionDisplayedCandidateCount={sourceCollectionDisplayedCandidateCount}
+        sourceCollectionCountText={sourceCollectionCountText}
+        sourceCollectionPrimaryDataLoading={sourceCollectionPrimaryDataLoading}
+        sourceCollectionDataSyncText={sourceCollectionDataSyncText}
+        sourceCollectionRunCandidateCount={sourceCollectionRunCandidateCount}
+        sourceCollectionFocusedPanelId={sourceCollectionFocusedPanelId}
+        selectedSourceCollectionStageId={selectedSourceCollectionStageId}
+        sourceCollectionExpandedPanelId={sourceCollectionExpandedPanelId}
+        setSourceCollectionExpandedPanelId={setSourceCollectionExpandedPanelId}
+        sourceCollectionExtractionDefaultPanelId={sourceCollectionExtractionDefaultPanelId}
+        sourceCollectionCandidateStepState={sourceCollectionCandidateStepState}
+        sourceCollectionDisplayedCandidateFilterCounts={sourceCollectionDisplayedCandidateFilterCounts}
+        renderSourceCollectionFilterBar={renderSourceCollectionFilterBar}
+        sourceCollectionDisplayedCandidateCountText={sourceCollectionDisplayedCandidateCountText}
+        sourceCollectionProjectedAssessedCountText={sourceCollectionProjectedAssessedCountText}
+        sourceCollectionProjectedApprovedCountText={sourceCollectionProjectedApprovedCountText}
+        sourceCollectionRunPendingScreeningCountText={sourceCollectionRunPendingScreeningCountText}
+        sourceCollectionEvidenceReadyCandidateCount={sourceCollectionEvidenceReadyCandidateCount}
+        sourceCollectionMissingEvidenceAnchorCount={sourceCollectionMissingEvidenceAnchorCount}
+        sourceCollectionProjectedCollectedCount={sourceCollectionProjectedCollectedCount}
+        renderSourceCollectionExtractionRecoveryPanel={renderSourceCollectionExtractionRecoveryPanel}
+        renderSourceCollectionPagination={renderSourceCollectionPagination}
+        selectedSourceCollectionCandidateId={selectedSourceCollectionCandidateId}
+        selectSourceCollectionCandidate={selectSourceCollectionCandidate}
+      />
     );
   }
 
   function renderSourceCollectionGraphPanel() {
-    const graphForSelectedSourceRun =
-      selectedSourceCollectionRunEffectiveId && sourceCollectionGraphProjection
-        ? sourceCollectionProjectedGraphNodeCount > 0 ? teamWorkflowCandidateGraph : null
-        : teamWorkflowCandidateGraph;
-    const graphNodeSourceCategories = (graphForSelectedSourceRun?.nodes ?? []).map((node) => {
-      const candidate = teamWorkflowCandidatesById.get(node.candidateId);
-      return candidate ? sourceCollectionCandidateSourceCategory(candidate, lang) : "missing";
-    });
-    const graphFilterCounts = sourceCollectionFilterCounts(graphNodeSourceCategories);
-    const visibleGraphNodeIds = new Set(
-      (teamWorkflowCandidateGraph?.nodes ?? [])
-        .filter((node) => {
-          const candidate = teamWorkflowCandidatesById.get(node.candidateId);
-          const category = candidate ? sourceCollectionCandidateSourceCategory(candidate, lang) : "missing";
-          return sourceCollectionFilterMatches(sourceCollectionSourceFilter, category);
-        })
-        .map((node) => node.candidateId),
-    );
-    const visibleGraph = graphForSelectedSourceRun
-      ? {
-          ...graphForSelectedSourceRun,
-          nodes: graphForSelectedSourceRun.nodes.filter((node) => visibleGraphNodeIds.has(node.candidateId)),
-          edges: graphForSelectedSourceRun.edges.filter((edge) =>
-            visibleGraphNodeIds.has(edge.sourceCandidateId) && visibleGraphNodeIds.has(edge.targetCandidateId),
-          ),
-          missingLinks: graphForSelectedSourceRun.missingLinks.filter((edge) =>
-            visibleGraphNodeIds.has(edge.sourceCandidateId) || visibleGraphNodeIds.has(edge.targetCandidateId),
-          ),
-          unreviewedNodes: graphForSelectedSourceRun.unreviewedNodes.filter((node) => visibleGraphNodeIds.has(node.candidateId)),
-        }
-      : null;
-    const visibleGraphSummary = visibleGraph
-      ? {
-          nodeCount: visibleGraph.nodes.length,
-          edgeCount: visibleGraph.edges.length,
-          missingLinkCount: visibleGraph.missingLinks.length,
-          unreviewedNodeCount: visibleGraph.unreviewedNodes.length,
-        }
-      : null;
-    const visibleGraphMissingEvidenceAnchorCount = visibleGraph
-      ? visibleGraph.nodes.filter((node) => {
-          const candidate = teamWorkflowCandidatesById.get(node.candidateId);
-          return candidate ? Boolean(sourceCollectionEvidenceLedgerSummary(candidate)?.missingAnchor) : false;
-        }).length
-      : 0;
-    const visibleGraphLayout = visibleGraph && visibleGraphSummary
-      ? workflowGraphLayout({ ...visibleGraph, summary: { ...visibleGraph.summary, ...visibleGraphSummary } })
-      : null;
-    const pagedGraphNodes = sourceCollectionPageItems("relations", visibleGraph?.nodes ?? []);
     return (
-      <TeamSourceCollectionGraphPanel
+      <TeamSourceCollectionGraphWorkspacePanel
         lang={lang}
-        focused={sourceCollectionFocusedPanelId === "source-collection-graph-panel"}
-        open={
-          selectedSourceCollectionStageId === "relations"
-          || sourceCollectionExpandedPanelId === "source-collection-graph-panel"
-          || sourceCollectionGraphStepState === "active"
-        }
-        onToggle={(event) => {
-          if (!event.currentTarget.open && sourceCollectionExpandedPanelId === "source-collection-graph-panel") {
-            setSourceCollectionExpandedPanelId("");
-          }
-        }}
-        rangeText={visibleGraph ? `${pagedGraphNodes.start}-${pagedGraphNodes.end}/${visibleGraph.nodes.length}` : `${sourceCollectionProjectedGraphNodeCount} / ${sourceCollectionProjectedGraphEdgeCount}`}
-        filterBar={renderSourceCollectionFilterBar(graphFilterCounts, lang === "zh" ? "入库关系过滤" : "Ingestion map filters")}
-        stats={[
-          { key: "nodes", label: lang === "zh" ? "当前节点" : "visible nodes", value: visibleGraphSummary?.nodeCount ?? 0 },
-          { key: "edges", label: lang === "zh" ? "当前关系" : "visible edges", value: visibleGraphSummary?.edgeCount ?? 0 },
-          { key: "missing", label: lang === "zh" ? "缺口" : "missing", value: visibleGraphSummary?.missingLinkCount ?? 0 },
-          { key: "review", label: lang === "zh" ? "待审" : "review", value: visibleGraphSummary?.unreviewedNodeCount ?? 0 },
-          { key: "evidence-anchor", label: lang === "zh" ? "待补证据" : "missing evidence", value: visibleGraphMissingEvidenceAnchorCount },
-        ]}
-        hasGraph={Boolean(visibleGraph && visibleGraphLayout && visibleGraphSummary && visibleGraph.nodes.length)}
-        graphView={visibleGraphLayout ? (
-          <TeamWorkflowGraphView
-            layout={visibleGraphLayout}
-            markerId="source-collection-workflow-graph-arrow"
-            stateLabel={(value) => workflowStateLabel(value, lang)}
-          />
-        ) : null}
-        nodeListAriaLabel={lang === "zh" ? "入库关系节点列表，可滚动查看" : "Ingestion map nodes, scroll to review"}
-        nodeListItems={visibleGraph?.nodes.length ? pagedGraphNodes.items.map((node) => {
-          const candidate = teamWorkflowCandidatesById.get(node.candidateId) ?? null;
-          const provenance = candidate ? sourceCollectionCandidateProvenance(candidate, lang) : null;
-          const evidenceLedgerSummary = candidate ? sourceCollectionEvidenceLedgerSummary(candidate) : null;
-          const selected = candidate ? selectedSourceCollectionCandidateId === candidate.candidateId : false;
-          return (
-            <TeamCandidateCard
-              key={`graph-node-${node.candidateId}`}
-              tone={evidenceLedgerSummary ? sourceCollectionEvidenceLedgerTone(evidenceLedgerSummary) : sourceCollectionResultTone(node.qualityStatus || node.currentState)}
-              statusLabel={workflowStateLabel(node.currentState, lang)}
-              title={node.title || node.candidateId}
-              summary={node.candidateId}
-              meta={[
-                { key: "type", label: sourceCollectionSourceTypeLabel(node.candidateType, lang) },
-                { key: "node", label: node.currentWorkflowNode },
-                ...(candidate
-                  ? [{ key: "category", label: sourceCollectionSourceFilterLabel(sourceCollectionCandidateSourceCategory(candidate, lang), lang) }]
-                  : []),
-                ...(evidenceLedgerSummary
-                  ? [
-                      { key: "evidence-ledger", label: sourceCollectionEvidenceLedgerCardLabel(evidenceLedgerSummary, lang) },
-                      ...(evidenceLedgerSummary.missingAnchor
-                        ? [{ key: "evidence-action", label: sourceCollectionEvidenceLedgerActionLabel(evidenceLedgerSummary, lang) }]
-                        : []),
-                    ]
-                  : []),
-              ]}
-              source={provenance ? {
-                label: provenance.label,
-                value: provenance.value,
-                href: provenance.href,
-                title: provenance.href || provenance.value,
-                missing: provenance.kind === "missing",
-              } : undefined}
-              selected={selected}
-              onActivate={candidate ? () => selectSourceCollectionCandidate(candidate) : undefined}
-            />
-          );
-        }) : null}
-        pagination={visibleGraph ? renderSourceCollectionPagination("relations", visibleGraph.nodes.length) : null}
-        emptyMessage={
-          graphForSelectedSourceRun && !visibleGraph?.nodes.length
-            ? (lang === "zh" ? "当前过滤条件下没有入库关系节点。" : "No ingestion map nodes match this filter.")
-          : teamWorkflowCandidateGraphQuery.isPending
-            ? (lang === "zh" ? "正在读取入库关系图..." : "Loading ingestion map...")
-            : (lang === "zh" ? "尚未生成入库关系图。" : "No ingestion map yet.")
-        }
-        errors={(
-          <>
-            {teamWorkflowCandidateGraphQuery.error instanceof Error ? (
-              <div className={styles.messageError}>{teamWorkflowCandidateGraphQuery.error.message}</div>
-            ) : null}
-            {selectedTeamBuildCandidateGraphError ? (
-              <div className={styles.messageError}>{selectedTeamBuildCandidateGraphError.message}</div>
-            ) : null}
-          </>
-        )}
+        selectedSourceCollectionRunEffectiveId={selectedSourceCollectionRunEffectiveId}
+        sourceCollectionGraphProjection={sourceCollectionGraphProjection}
+        sourceCollectionProjectedGraphNodeCount={sourceCollectionProjectedGraphNodeCount}
+        sourceCollectionProjectedGraphEdgeCount={sourceCollectionProjectedGraphEdgeCount}
+        teamWorkflowCandidateGraph={teamWorkflowCandidateGraph}
+        teamWorkflowCandidatesById={teamWorkflowCandidatesById}
+        sourceCollectionSourceFilter={sourceCollectionSourceFilter}
+        sourceCollectionFocusedPanelId={sourceCollectionFocusedPanelId}
+        selectedSourceCollectionStageId={selectedSourceCollectionStageId}
+        sourceCollectionExpandedPanelId={sourceCollectionExpandedPanelId}
+        setSourceCollectionExpandedPanelId={setSourceCollectionExpandedPanelId}
+        sourceCollectionGraphStepState={sourceCollectionGraphStepState}
+        renderSourceCollectionFilterBar={renderSourceCollectionFilterBar}
+        sourceCollectionPageItems={sourceCollectionPageItems}
+        renderSourceCollectionPagination={renderSourceCollectionPagination}
+        teamWorkflowCandidateGraphQuery={teamWorkflowCandidateGraphQuery}
+        selectedTeamBuildCandidateGraphError={selectedTeamBuildCandidateGraphError}
+        selectedSourceCollectionCandidateId={selectedSourceCollectionCandidateId}
+        selectSourceCollectionCandidate={selectSourceCollectionCandidate}
       />
     );
   }
 
   function renderSourceCollectionMemoryPanel() {
-    const actionItems = teamWorkflowKnowledgeIngestionStatus?.actionItems ?? [];
-    const actionItemsByCandidateId = new Map<string, TeamWorkflowKnowledgeIngestionStatus["actionItems"]>();
-    actionItems.forEach((item) => {
-      if (!item.candidateId) {
-        return;
-      }
-      const current = actionItemsByCandidateId.get(item.candidateId) ?? [];
-      current.push(item);
-      actionItemsByCandidateId.set(item.candidateId, current);
-    });
-    const memoryCandidates = sourceCollectionFilteredRunCandidates.filter((candidate) =>
-      sourceCollectionCandidateQualityState(candidate).approved || actionItemsByCandidateId.has(candidate.candidateId),
-    );
-    const visibleMemoryCandidates = memoryCandidates;
-    const pagedMemoryCandidates = sourceCollectionPageItems("ingestion", visibleMemoryCandidates);
-    const orphanActionItems = actionItems.filter((item) => !item.candidateId || !teamWorkflowCandidatesById.has(item.candidateId));
     return (
-      <TeamSourceCollectionMemoryPanel
+      <TeamSourceCollectionMemoryWorkspacePanel
         lang={lang}
-        focused={sourceCollectionFocusedPanelId === "source-collection-memory-panel"}
-        open={
-          selectedSourceCollectionStageId === "ingestion"
-          || sourceCollectionExpandedPanelId === "source-collection-memory-panel"
-          || sourceCollectionMemoryStepState === "active"
-        }
-        onToggle={(event) => {
-          if (!event.currentTarget.open && sourceCollectionExpandedPanelId === "source-collection-memory-panel") {
-            setSourceCollectionExpandedPanelId("");
-          }
-        }}
-        rangeText={`${pagedMemoryCandidates.start}-${pagedMemoryCandidates.end}/${visibleMemoryCandidates.length}`}
-        filterBar={renderSourceCollectionFilterBar(sourceCollectionCandidateFilterCounts, lang === "zh" ? "入库资料过滤" : "Ingestion source filters")}
-        stats={[
-          { key: "pending", label: lang === "zh" ? "待审" : "pending", value: knowledgePendingReviewCount },
-          { key: "formal", label: lang === "zh" ? "正式" : "formal", value: formalKnowledgeItemCount },
-          { key: "approved", label: lang === "zh" ? "通过候选" : "approved", value: sourceCollectionApprovedCount },
-          { key: "filtered", label: lang === "zh" ? "当前过滤" : "filtered", value: visibleMemoryCandidates.length },
-        ]}
-        hasCandidates={Boolean(visibleMemoryCandidates.length)}
-        emptyMessage={lang === "zh" ? "当前过滤条件下没有入库资料。" : "No ingestion items match this filter."}
-        pagination={renderSourceCollectionPagination("ingestion", visibleMemoryCandidates.length)}
-        statusItems={orphanActionItems.length
-          ? orphanActionItems.map((item) => (
-            <span key={`${item.code}-${item.message}`} className={workflowIngestionTone(item.severity)}>
-              {workflowIngestionStatusLabel(item.severity, lang)} · {item.message}
-            </span>
-          ))
-          : null}
-        error={teamWorkflowKnowledgeIngestionStatusQuery.error instanceof Error ? (
-          <div className={styles.messageError}>{teamWorkflowKnowledgeIngestionStatusQuery.error.message}</div>
-        ) : null}
-      >
-        {pagedMemoryCandidates.items.map((candidate) => {
-              const provenance = sourceCollectionCandidateProvenance(candidate, lang);
-              const sourceQualitySummary = candidateSourceQualityAssessmentSummary(candidate);
-              const candidateActionItems = actionItemsByCandidateId.get(candidate.candidateId) ?? [];
-              const selected = selectedSourceCollectionCandidateId === candidate.candidateId;
-              return (
-                <TeamCandidateCard
-                  key={`memory-${candidate.candidateId}`}
-                  tone={sourceCollectionResultTone(candidate.qualityStatus)}
-                  statusLabel={
-                    sourceQualitySummary
-                      ? workflowIngestionStatusLabel(sourceQualitySummary.decision, lang)
-                      : workflowStateLabel(candidate.currentState, lang)
-                  }
-                  title={candidate.title || candidate.candidateId}
-                  summary={candidate.summary || candidate.candidateId}
-                  meta={[
-                    { key: "category", label: sourceCollectionSourceFilterLabel(sourceCollectionCandidateSourceCategory(candidate, lang), lang) },
-                    ...(sourceQualitySummary
-                      ? [{ key: "score", label: `${lang === "zh" ? "评分" : "score"} ${sourceQualitySummary.overallScore}/100` }]
-                      : []),
-                    { key: "updated", label: formatTime(candidate.updatedAt, lang) },
-                  ]}
-                  source={{
-                    label: provenance.label,
-                    value: provenance.value,
-                    href: provenance.href,
-                    title: provenance.href || provenance.value,
-                    missing: provenance.kind === "missing",
-                  }}
-                  selected={selected}
-                  onActivate={() => selectSourceCollectionCandidate(candidate)}
-                  actions={candidateActionItems.length ? (
-                    <div className={styles.workflowIngestionActions}>
-                      {candidateActionItems.map((item) => (
-                        <span key={`${item.code}-${item.message}`} className={workflowIngestionTone(item.severity)}>
-                          {workflowIngestionStatusLabel(item.severity, lang)} · {item.message}
-                        </span>
-                      ))}
-                    </div>
-                  ) : undefined}
-                />
-              );
-            })}
-      </TeamSourceCollectionMemoryPanel>
+        teamWorkflowKnowledgeIngestionStatus={teamWorkflowKnowledgeIngestionStatus}
+        sourceCollectionFilteredRunCandidates={sourceCollectionFilteredRunCandidates}
+        sourceCollectionPageItems={sourceCollectionPageItems}
+        teamWorkflowCandidatesById={teamWorkflowCandidatesById}
+        sourceCollectionFocusedPanelId={sourceCollectionFocusedPanelId}
+        selectedSourceCollectionStageId={selectedSourceCollectionStageId}
+        sourceCollectionExpandedPanelId={sourceCollectionExpandedPanelId}
+        setSourceCollectionExpandedPanelId={setSourceCollectionExpandedPanelId}
+        sourceCollectionMemoryStepState={sourceCollectionMemoryStepState}
+        sourceCollectionCandidateFilterCounts={sourceCollectionCandidateFilterCounts}
+        renderSourceCollectionFilterBar={renderSourceCollectionFilterBar}
+        knowledgePendingReviewCount={knowledgePendingReviewCount}
+        formalKnowledgeItemCount={formalKnowledgeItemCount}
+        sourceCollectionApprovedCount={sourceCollectionApprovedCount}
+        renderSourceCollectionPagination={renderSourceCollectionPagination}
+        workflowIngestionTone={workflowIngestionTone}
+        teamWorkflowKnowledgeIngestionStatusQuery={teamWorkflowKnowledgeIngestionStatusQuery}
+        selectedSourceCollectionCandidateId={selectedSourceCollectionCandidateId}
+        selectSourceCollectionCandidate={selectSourceCollectionCandidate}
+      />
     );
   }
 
