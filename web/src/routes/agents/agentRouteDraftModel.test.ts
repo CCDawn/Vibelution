@@ -2,15 +2,18 @@ import { describe, expect, it } from "vitest";
 
 import type { AgentConfigWorkspaceAgent } from "../../api/types";
 import {
+  configDraftEqualsDraft,
   contextCompressionDraftFromAgent,
   contextCompressionPolicyFromDraft,
   draftFromAgent,
   draftEqualsAgent,
   expertiseFromDraft,
   isWorkSessionAgent,
+  personaDraftEqualsDraft,
   personaDraftFromAgent,
   personaProfileFromDraft,
   sortedIds,
+  taskDraftEqualsDraft,
   taskDraftFromAgent,
   taskProfileFromDraft,
 } from "./agentRouteDraftModel";
@@ -88,5 +91,26 @@ describe("agentRouteDraftModel", () => {
     expect(isWorkSessionAgent({
       agentBoundary: { type: "team_role" },
     } as AgentConfigWorkspaceAgent)).toBe(false);
+  });
+
+  it("compares config/persona/task drafts for dirty-sync equality", () => {
+    const agent = {
+      agentId: "a1",
+      displayName: "助手",
+      promptTemplateId: "p1",
+      toolPolicyId: "t1",
+      memoryPolicyId: "m1",
+      status: "active",
+      llmBindings: { dialogue: { modelId: "m1" } },
+      personaProfile: { gender: "女", personality: "冷静" },
+      taskProfile: { mission: "研究" },
+    } as AgentConfigWorkspaceAgent;
+    const config = draftFromAgent(agent);
+    expect(configDraftEqualsDraft(config, config)).toBe(true);
+    expect(configDraftEqualsDraft(config, { ...config, displayName: "x" })).toBe(false);
+    const persona = personaDraftFromAgent(agent);
+    expect(personaDraftEqualsDraft(persona, persona)).toBe(true);
+    const task = taskDraftFromAgent(agent);
+    expect(taskDraftEqualsDraft(task, task)).toBe(true);
   });
 });
