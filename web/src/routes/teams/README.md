@@ -63,6 +63,7 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 | Experiment + research-loop status queries | `useTeamResearchSecondaryQueries.ts` | workspace-view gating |
 | Workflow tag tone helpers | `workflowTone.ts` | style map ownership |
 | Shell pure helpers (stage parse / node labels / candidate graph) | `teamRouteShellModel.ts` | style-bound class helpers |
+| Canvas node role/tone classification | `teamCanvasNodePresentation.ts` | hard-coding class strings in pure files |
 | Orchestration / wiring only | `../TeamsRoute.tsx` | — |
 
 ## Bundle note (path-scoped secondary packs)
@@ -90,7 +91,8 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 
 - **Done:** workspace navigation, team kind guards, canvas geometry, source-collection presentation, experiment/loop types+labels, AI-search presentation, workflow presentation labels, research stage agent role tables, workflow query keys, stage-agent presentation/routes.
 - **Done (M5 structure):** `teamRouteShellModel.ts` — stage module parse, node/function labels, chat feedback text, candidate graph/chunk-plan pure helpers.
-- **Still in `TeamsRoute.tsx` (intentional shell):** URL/view drafts, selection, JSX composition, thin `render*` inject adapters (filterBar/pagination/modeFields), style-bound class helpers (`roleBadgeTone` / `nodeTone` / tone wrappers), and remaining shell queries.
+- **Done (M9 structure):** `teamCanvasNodePresentation.ts` — canvas role badge / node tone pure kinds + style-map mappers; shell keeps CSS token maps.
+- **Still in `TeamsRoute.tsx` (intentional shell):** URL/view drafts, selection, JSX composition, thin `render*` inject adapters (filterBar/pagination/modeFields), tone wrappers, and remaining shell queries.
 - **Wave 8G–8P done:** panel extract, path packs + prefetch, experiment/loop mutations, SC write mutations (see history below).
 - **Wave 8Q done:** Team shell write mutations → `useTeamShellMutations`.
 - **Wave 8R done:** Workflow start/session mutations → `useTeamWorkflowStartMutations` + `workflowStartMutationModel`.
@@ -119,6 +121,7 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 | Wave | Goal | Status |
 |------|------|--------|
 | M5 | TeamsRoute shell pure extract | **Done** — `teamRouteShellModel.ts` |
+| M9 | Canvas node role/tone pure classification | **Done** — `teamCanvasNodePresentation.ts` |
 
 ## Next (planned) — Phase 9+
 
