@@ -180,6 +180,7 @@ import {
   agentBoundaryType,
   agentHasTeamReference,
   configChangeSnapshotFromDraft,
+  configDraftEqualsDraft,
   contextCompressionDraftEqualsDraft,
   contextCompressionDraftFromAgent,
   contextCompressionPolicyFromDraft,
@@ -197,6 +198,7 @@ import {
   normalizeTaskProfile,
   normalizeToolPolicyDraftForAgent,
   personaDraftEqualsAgent,
+  personaDraftEqualsDraft,
   personaDraftFromAgent,
   personaProfileFromDraft,
   personaProfileSummary,
@@ -206,6 +208,7 @@ import {
   sameStringSet,
   sortedIds,
   taskDraftEqualsAgent,
+  taskDraftEqualsDraft,
   taskDraftFromAgent,
   taskProfileFromDraft,
   taskProfileSummary,
@@ -268,10 +271,26 @@ import {
   type ToolPermissionGroup,
   type ToolPolicyMode,
 } from "./agents/agentRoutePolicyDraftModel";
-
-
-
-
+import {
+  agentArchiveProtected,
+  agentBulkActionItemNote,
+  agentBulkActionSummary,
+  agentBulkPurgeCleanupPending,
+  agentCenterReturnLabel,
+  bulkConfigApplyFields,
+  bulkConfigDraftFromAgents,
+  bulkConfigFieldReady,
+  bulkConfigPatchFromDraft,
+  bulkConfigReady,
+  bulkConfigValueMixed,
+  DEFAULT_BULK_CONFIG_APPLY,
+  DEFAULT_BULK_CONFIG_DRAFT,
+  metadataFlag,
+  metadataString,
+  metadataText,
+  optimisticArchivedAgent,
+  safeAgentCenterReturnTo,
+} from "./agents/agentRouteBulkModel";
 
 import {
   issueDisplayTitle,
@@ -304,8 +323,6 @@ type AgentModelPromotionResult = {
   operatorConfigHash: string;
   manifestPath: string;
 };
-
-
 
 type AgentResetSummary = {
   resetDirectSession?: boolean;
@@ -361,235 +378,11 @@ function reconcileResetDirectSession(summary: AgentResetSummary) {
   useChatWorkbenchStore.getState().resetSessions(replacementDirectSessionId || null);
 }
 
-const DEFAULT_BULK_CONFIG_DRAFT: AgentBulkConfigDraft = {
-  dialogueModelId: "",
-  promptTemplateId: "",
-  primaryMode: "",
-  roleKey: "",
-};
-const DEFAULT_BULK_CONFIG_APPLY: AgentBulkConfigApply = {
-  dialogueModelId: false,
-  promptTemplateId: false,
-  primaryMode: false,
-  roleKey: false,
-};
 const DEFAULT_SESSION_AGENT_PREFERRED_TOOLS = [
   "grep_search_tool",
   "conversation_log_inspect_tool",
   "get_core_context_tool",
 ];
-
-function safeAgentCenterReturnTo(value: string | null | undefined) {
-  return safeReturnToPath(value);
-}
-
-function agentCenterReturnLabel(value: string | null | undefined, lang: "zh" | "en") {
-  const normalized = String(value || "").trim();
-  if (normalized === "supervised_evolution") {
-    return lang === "zh" ? "返回监督进化" : "Back to supervised evolution";
-  }
-  if (normalized === "self_evolution") {
-    return lang === "zh" ? "返回自进化" : "Back to self evolution";
-  }
-  if (normalized === "tools") {
-    return lang === "zh" ? "返回工具配置" : "Back to tools";
-  }
-  if (normalized === "teams") {
-    return lang === "zh" ? "返回团队" : "Back to teams";
-  }
-  if (normalized === "chat") {
-    return lang === "zh" ? "返回会话" : "Back to chat";
-  }
-  if (normalized === "memory") {
-    return lang === "zh" ? "返回记忆库" : "Back to memory";
-  }
-  if (normalized === "research_flow") {
-    return lang === "zh" ? "返回科研流程画布" : "Back to research flow";
-  }
-  return lang === "zh" ? "返回来源页" : "Back";
-}
-
-function optimisticArchivedAgent(agent: AgentConfigWorkspaceAgent): AgentConfigWorkspaceAgent {
-  const updatedAt = new Date().toISOString();
-  return {
-    ...agent,
-    status: "archived",
-    updatedAt,
-    runtimeStatus: {
-      state: "archived",
-      label: "Archived",
-      reason: "agent_archive_pending",
-      runId: agent.runtimeStatus?.runId || "",
-      runKind: agent.runtimeStatus?.runKind || "",
-      sessionId: agent.runtimeStatus?.sessionId || agent.directSessionId || "",
-      summary: agent.runtimeStatus?.summary || "",
-      updatedAt,
-      staleRuntimeRunCount: agent.runtimeStatus?.staleRuntimeRunCount,
-      latestHistoricalRunId: agent.runtimeStatus?.latestHistoricalRunId,
-      latestHistoricalSessionId: agent.runtimeStatus?.latestHistoricalSessionId,
-      latestHistoricalUpdatedAt: agent.runtimeStatus?.latestHistoricalUpdatedAt,
-    },
-  };
-}
-
-function configDraftEqualsDraft(left: AgentConfigDraft, right: AgentConfigDraft) {
-  return (
-    left.displayName === right.displayName
-    && sameAgentLlmBindings(left.llmBindings, right.llmBindings)
-    && sameAgentReasoningEffortBySlot(left.reasoningEffortBySlot, right.reasoningEffortBySlot)
-    && left.promptTemplateId === right.promptTemplateId
-    && left.toolPolicyId === right.toolPolicyId
-    && left.memoryPolicyId === right.memoryPolicyId
-    && contextCompressionDraftEqualsDraft(left.contextCompressionPolicy, right.contextCompressionPolicy)
-    && left.status === right.status
-  );
-}
-
-function personaDraftEqualsDraft(left: AgentPersonaDraft, right: AgentPersonaDraft) {
-  const leftProfile = personaProfileFromDraft(left);
-  const rightProfile = personaProfileFromDraft(right);
-  return (
-    leftProfile.gender === rightProfile.gender
-    && leftProfile.age === rightProfile.age
-    && leftProfile.pronouns === rightProfile.pronouns
-    && leftProfile.personality === rightProfile.personality
-    && leftProfile.communicationStyle === rightProfile.communicationStyle
-    && leftProfile.background === rightProfile.background
-    && sameStringSet(leftProfile.expertise, rightProfile.expertise)
-    && leftProfile.collaborationPreference === rightProfile.collaborationPreference
-    && leftProfile.identityNotes === rightProfile.identityNotes
-  );
-}
-
-function taskDraftEqualsDraft(left: AgentTaskDraft, right: AgentTaskDraft) {
-  const leftProfile = taskProfileFromDraft(left);
-  const rightProfile = taskProfileFromDraft(right);
-  return (
-    leftProfile.mission === rightProfile.mission
-    && sameStringSet(leftProfile.taskTypes, rightProfile.taskTypes)
-    && leftProfile.responsibilities === rightProfile.responsibilities
-    && leftProfile.preferredTasks === rightProfile.preferredTasks
-    && leftProfile.avoidTasks === rightProfile.avoidTasks
-    && leftProfile.successCriteria === rightProfile.successCriteria
-    && leftProfile.deliverables === rightProfile.deliverables
-    && leftProfile.constraints === rightProfile.constraints
-    && leftProfile.handoffNotes === rightProfile.handoffNotes
-  );
-}
-
-function commonBulkConfigValue(
-  agents: AgentConfigWorkspaceAgent[],
-  selector: (agent: AgentConfigWorkspaceAgent) => string,
-) {
-  if (!agents.length) {
-    return "";
-  }
-  const first = selector(agents[0]);
-  return agents.every((agent) => selector(agent) === first) ? first : "";
-}
-
-function bulkConfigValueMixed(
-  agents: AgentConfigWorkspaceAgent[],
-  selector: (agent: AgentConfigWorkspaceAgent) => string,
-) {
-  if (agents.length < 2) {
-    return false;
-  }
-  const first = selector(agents[0]);
-  return !agents.every((agent) => selector(agent) === first);
-}
-
-function bulkConfigDraftFromAgents(agents: AgentConfigWorkspaceAgent[]): AgentBulkConfigDraft {
-  return {
-    dialogueModelId: commonBulkConfigValue(agents, (agent) => agentLlmSlotModelId(agent.llmBindings, FALLBACK_AGENT_LLM_SLOTS[0])),
-    promptTemplateId: commonBulkConfigValue(agents, (agent) => agent.promptTemplateId || ""),
-    primaryMode: commonBulkConfigValue(agents, (agent) => agent.primaryMode || ""),
-    roleKey: commonBulkConfigValue(agents, (agent) => agent.roleKey || ""),
-  };
-}
-
-function bulkConfigApplyFields(apply: AgentBulkConfigApply) {
-  const fields: string[] = [];
-  if (apply.dialogueModelId) {
-    fields.push("llmBindings");
-  }
-  if (apply.promptTemplateId) {
-    fields.push("promptTemplateId");
-  }
-  if (apply.primaryMode) {
-    fields.push("primaryMode");
-  }
-  if (apply.roleKey) {
-    fields.push("roleKey");
-  }
-  return fields;
-}
-
-function bulkConfigPatchFromDraft(draft: AgentBulkConfigDraft, apply: AgentBulkConfigApply) {
-  const patch: Record<string, unknown> = {};
-  if (apply.dialogueModelId) {
-    patch.llmBindings = {
-      dialogue: { modelId: draft.dialogueModelId },
-    };
-  }
-  if (apply.promptTemplateId) {
-    patch.promptTemplateId = draft.promptTemplateId;
-  }
-  if (apply.primaryMode) {
-    patch.primaryMode = draft.primaryMode;
-  }
-  if (apply.roleKey) {
-    patch.roleKey = draft.roleKey;
-  }
-  return patch;
-}
-
-function bulkConfigFieldReady(field: AgentBulkConfigField, draft: AgentBulkConfigDraft) {
-  if (field === "roleKey") {
-    return true;
-  }
-  return Boolean(draft[field].trim());
-}
-
-function bulkConfigReady(draft: AgentBulkConfigDraft, apply: AgentBulkConfigApply) {
-  return (Object.keys(apply) as AgentBulkConfigField[]).some((field) => apply[field] && bulkConfigFieldReady(field, draft));
-}
-
-function metadataString(agent: AgentConfigWorkspaceAgent | null | undefined, key: string) {
-  const value = agent?.metadata?.[key];
-  if (typeof value === "string") {
-    return value.trim();
-  }
-  if (typeof value === "number" || typeof value === "boolean") {
-    return String(value);
-  }
-  return "";
-}
-
-const metadataText = metadataString;
-
-function metadataFlag(agent: AgentConfigWorkspaceAgent | null | undefined, key: string) {
-  const value = agent?.metadata?.[key];
-  if (typeof value === "boolean") {
-    return value;
-  }
-  return ["1", "true", "yes"].includes(metadataString(agent, key).toLowerCase());
-}
-
-function agentArchiveProtected(agent: AgentConfigWorkspaceAgent | null | undefined) {
-  const systemRole = metadataString(agent, "systemRole");
-  const researchOrgRole = metadataString(agent, "researchOrgRole");
-  const systemOwnedRole = [
-    systemRole,
-    metadataString(agent, "selfEvolutionRole"),
-    metadataString(agent, "supervisedRole"),
-    metadataString(agent, "aiSearchRole"),
-  ].some(Boolean);
-  return metadataFlag(agent, "protected")
-    || metadataFlag(agent, "fixedRole")
-    || systemOwnedRole
-    || ["ceo", "organization_advisor", "capability_steward", "knowledge_steward"].includes(researchOrgRole);
-}
 
 function agentConfigPanes(copy: ReturnType<typeof agentsRouteCopy>, agent: AgentConfigWorkspaceAgent | null): Array<{
   id: AgentConfigPaneId;
@@ -1415,38 +1208,6 @@ function agentsRouteCopy(lang: "zh" | "en") {
       };
 }
 
-function agentBulkActionSummary(action: string, success: number, skipped: number, failed: number, notes: string[], lang: "zh" | "en") {
-  const parts = lang === "zh"
-    ? [`成功 ${success}`, `跳过 ${skipped}`, `失败 ${failed}`]
-    : [`success ${success}`, `skipped ${skipped}`, `failed ${failed}`];
-  const preview = notes.slice(0, 3).join("；");
-  return preview ? `${action}: ${parts.join(" / ")}。${preview}` : `${action}: ${parts.join(" / ")}`;
-}
-
-function agentBulkActionItemNote(
-  item: AgentBulkActionItem,
-  agentsById: Map<string, AgentConfigWorkspaceAgent>,
-  fallback: string,
-) {
-  const agentId = String(item.agentId || "").trim();
-  const label = agentLabel(agentsById.get(agentId)) || agentId || "-";
-  const message = String(item.message || item.reason || fallback || "").trim();
-  return message ? `${label}: ${message}` : label;
-}
-
-function agentBulkPurgeCleanupPending(item: AgentBulkActionItem) {
-  const purgeSummary = item.purgeSummary;
-  if (!purgeSummary || typeof purgeSummary !== "object") {
-    return false;
-  }
-  const sessions = (purgeSummary as { sessions?: unknown }).sessions;
-  return Boolean(
-    sessions
-    && typeof sessions === "object"
-    && (sessions as { cleanupPending?: unknown }).cleanupPending,
-  );
-}
-
 export function AgentsRoute() {
   const { lang } = useShellI18n();
   const queryClient = useQueryClient();
@@ -2126,7 +1887,6 @@ export function AgentsRoute() {
     DEFAULT_AGENT_RESET_OPTIONS,
     stringValue,
   });
-
 
   const selectedAgentAvatarUpdatePending = updateAvatarMutation.isPending && updateAvatarMutation.variables?.agentId === selectedAgent?.agentId;
   const selectedAgentAvatarUploadPending = uploadAvatarMutation.isPending && uploadAvatarMutation.variables?.agentId === selectedAgent?.agentId;
