@@ -7337,8 +7337,13 @@ def test_request_stop_session_turn_persists_stop_snapshot_and_releases_session(t
         running_payload = submit_response.json()
         assert running_payload["currentPhase"] == "running"
         assert running_payload["stopRequested"] is False
+        active_control = session_service._get_session_turn_control("session-live")
+        assert active_control is not None
 
-        stop_response = client.post("/api/sessions/session-live/stop")
+        stop_response = client.post(
+            "/api/sessions/session-live/stop",
+            json={"turnId": active_control.turn_id},
+        )
 
         assert stop_response.status_code == 202
         payload = stop_response.json()
@@ -7470,7 +7475,10 @@ def test_request_stop_session_turn_reuses_active_work_run_when_controller_is_mis
     )
 
     try:
-        stop_response = client.post("/api/sessions/session-live/stop")
+        stop_response = client.post(
+            "/api/sessions/session-live/stop",
+            json={"turnId": "existing-chat-turn"},
+        )
 
         assert stop_response.status_code == 202
         payload = stop_response.json()
@@ -7566,7 +7574,12 @@ def test_stop_requested_turn_persists_visible_stop_message(tmp_path, monkeypatch
     assert response.status_code == 202
     assert started.wait(1.0), "expected the background turn to start"
 
-    stop_response = client.post("/api/sessions/session-live/stop")
+    active_control = session_service._get_session_turn_control("session-live")
+    assert active_control is not None
+    stop_response = client.post(
+        "/api/sessions/session-live/stop",
+        json={"turnId": active_control.turn_id},
+    )
 
     assert stop_response.status_code == 202
     assert stop_response.json()["currentPhase"] == "ready"
@@ -7622,7 +7635,10 @@ def test_stop_session_turn_persists_partial_snapshot_and_allows_immediate_contin
         tool_calls=[{"name": "read_file_tool", "status": "done", "summary": "session_service.py"}],
     )
 
-    stop_response = client.post("/api/sessions/session-live/stop")
+    stop_response = client.post(
+        "/api/sessions/session-live/stop",
+        json={"turnId": old_control.turn_id},
+    )
     assert stop_response.status_code == 202
     stopped_payload = stop_response.json()
     assert stopped_payload["currentPhase"] == "ready"
@@ -7670,7 +7686,10 @@ def test_stop_session_turn_keeps_old_control_cancel_token_until_worker_observes_
     assert old_control is not None
     old_turn_id = old_control.turn_id
 
-    stop_response = client.post("/api/sessions/session-live/stop")
+    stop_response = client.post(
+        "/api/sessions/session-live/stop",
+        json={"turnId": old_turn_id},
+    )
     assert stop_response.status_code == 202
     assert old_control.snapshot()["stopRequested"] is True
     assert "操作者请求停止当前轮" in old_control.snapshot()["stopReason"]
@@ -7746,7 +7765,10 @@ def test_stale_stopped_turn_does_not_run_after_immediate_continue(tmp_path, monk
         assert first_response.status_code == 202
         assert len(scheduled_contexts) == 1
 
-        stop_response = client.post("/api/sessions/session-live/stop")
+        stop_response = client.post(
+            "/api/sessions/session-live/stop",
+            json={"turnId": scheduled_contexts[0]["turn_id"]},
+        )
         assert stop_response.status_code == 202
 
         continue_response = client.post(
@@ -7872,7 +7894,10 @@ def test_stale_turn_live_output_does_not_overwrite_new_turn(tmp_path, monkeypatc
         old_control = session_service._get_session_turn_control("session-live")
         assert old_control is not None
 
-        stop_response = client.post("/api/sessions/session-live/stop")
+        stop_response = client.post(
+            "/api/sessions/session-live/stop",
+            json={"turnId": old_control.turn_id},
+        )
         assert stop_response.status_code == 202
 
         continue_response = client.post(

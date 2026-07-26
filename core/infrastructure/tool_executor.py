@@ -33,6 +33,7 @@ from core.infrastructure.tool_result import (
     package_tool_result_facts,
     tool_result_facts_payload,
 )
+from core.infrastructure.tool_execution_scope import register_current_tool_future
 from core.logging import debug as _debug_logger
 
 
@@ -927,6 +928,7 @@ class ToolExecutor:
                 return (error_msg, None)
             tool_context = copy_context()
             future = executor.submit(tool_context.run, func, **call_args)
+            register_current_tool_future(future, tool_name=tool_name)
             deadline = time.monotonic() + max(float(timeout), 0.1)
             while True:
                 cancel_reason = self._current_cancel_reason(cancel_checker)

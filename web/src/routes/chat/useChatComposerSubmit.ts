@@ -55,6 +55,10 @@ import {
   type ComposerImageAttachment,
 } from "./chatComposerSubmitModel";
 import { postSubmitTelemetry } from "./chatSubmitTelemetry";
+import {
+  resolveSessionStopTurnId,
+  sessionStopRequestBody,
+} from "./chatStopTurnModel";
 
 type ChatEditTarget = { messageId: string; original: string };
 type ChatWorkspaceCache = ReturnType<typeof createChatWorkspaceCache>;
@@ -81,7 +85,7 @@ export type EditResubmitVariables = {
 export type ChatComposerTurnMutations = {
   submitTurnMutation: UseMutationResult<SessionTurnAcceptedResponse, Error, SubmitTurnVariables, unknown>;
   editResubmitMutation: UseMutationResult<SessionDetail, Error, EditResubmitVariables, unknown>;
-  stopTurnMutation: UseMutationResult<SessionDetail, Error, { sessionId: string }, unknown>;
+  stopTurnMutation: UseMutationResult<SessionDetail, Error, { sessionId: string; turnId: string }, unknown>;
   sessionGuidanceMutation: UseMutationResult<
     SessionDetail,
     Error,
@@ -351,9 +355,13 @@ export function useChatComposerTurnMutations({
   });
 
   const stopTurnMutation = useMutation({
-    mutationFn: async ({ sessionId }: { sessionId: string }) =>
+    mutationFn: async ({ sessionId, turnId }: { sessionId: string; turnId: string }) =>
       fetchJson<SessionDetail>(`/api/sessions/${sessionId}/stop`, {
         method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: sessionStopRequestBody(turnId),
       }),
     onSuccess: (nextDetail, variables) => {
       setSessionComposerErrors((current) => ({
@@ -949,10 +957,33 @@ export function useChatComposerSubmitActions({
     if (!activeSessionId || !sessionBusy || sessionStopping) {
       return;
     }
+    const turnId = resolveSessionStopTurnId(detail);
+    if (!turnId) {
+      setSessionComposerErrors((current) => ({
+        ...current,
+        [activeSessionId]: describeError(
+          new Error("Active turn identity is not available."),
+          lang === "zh" ? "停止失败" : "Failed to stop",
+        ),
+      }));
+      void queryClient.invalidateQueries({ queryKey: queryKeys.session(activeSessionId) });
+      return;
+    }
     stopTurnMutation.mutate({
       sessionId: activeSessionId,
+      turnId,
     });
-  }, [activeSessionId, sessionBusy, sessionStopping, stopTurnMutation]);
+  }, [
+    activeSessionId,
+    describeError,
+    detail,
+    lang,
+    queryClient,
+    sessionBusy,
+    sessionStopping,
+    setSessionComposerErrors,
+    stopTurnMutation,
+  ]);
 
   const handleSubmitGuidance = useCallback((mode: SessionGuidanceMode) => {
     if (!activeSessionId || !sessionBusy || sessionStopping) {

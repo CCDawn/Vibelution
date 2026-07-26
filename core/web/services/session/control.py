@@ -18,8 +18,13 @@ def _service():
     return session_service
 
 
-def request_stop_session_turn(session_id: str) -> dict:
-    """Interrupt one active web chat turn and persist the partial run surface."""
+def request_stop_session_turn(session_id: str, *, expected_turn_id: str = "") -> dict:
+    """Interrupt the active web chat turn after optional identity validation.
+
+    Interactive HTTP callers always provide ``expected_turn_id``. Trusted
+    internal shutdown paths may omit it to retain explicit stop-current
+    behavior.
+    """
     s = _service()
 
     lang = s.get_web_language()
@@ -38,6 +43,15 @@ def request_stop_session_turn(session_id: str) -> dict:
     if controller is None:
         controller = s._restore_missing_session_turn_control(conversation_id)
         s._set_session_running(conversation_id, True, turn_id=controller.turn_id)
+    normalized_expected_turn_id = str(expected_turn_id or "").strip()
+    if normalized_expected_turn_id and normalized_expected_turn_id != controller.turn_id:
+        raise s.SessionBusyError(
+            s.text_for(
+                lang,
+                zh="停止请求对应的轮次已不是当前运行轮次，请刷新后重试。",
+                en="The requested turn is no longer the active turn. Refresh and try again.",
+            )
+        )
 
     controller.request_stop(
         s.text_for(
@@ -341,7 +355,6 @@ def _build_auto_continue_paused_result(
 
 
 def _build_stopped_turn_result(reason: str) -> dict[str, Any]:
-    s = _service()
     return {
         "status": "stopped",
         "summary": "",

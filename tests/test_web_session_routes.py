@@ -99,6 +99,44 @@ def test_active_session_route_returns_empty_id_without_persisted_selection(monke
     assert response.json() == {"activeSessionId": ""}
 
 
+def test_session_stop_route_requires_exact_turn_id(monkeypatch):
+    observed: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        session_routes,
+        "request_stop_session_turn",
+        lambda session_id, *, expected_turn_id="": (
+            observed.append((session_id, expected_turn_id))
+            or {"id": session_id, "currentPhase": "stopping"}
+        ),
+    )
+
+    missing = client.post("/api/sessions/session-active/stop")
+    response = client.post(
+        "/api/sessions/session-active/stop",
+        json={"turnId": "turn-active"},
+    )
+
+    assert missing.status_code == 422
+    assert response.status_code == 202
+    assert response.json()["currentPhase"] == "stopping"
+    assert observed == [("session-active", "turn-active")]
+
+
+def test_session_stop_route_rejects_stale_turn(monkeypatch):
+    def reject_stale_turn(_session_id: str, *, expected_turn_id: str = ""):
+        raise session_service.SessionBusyError(f"turn mismatch: {expected_turn_id}")
+
+    monkeypatch.setattr(session_routes, "request_stop_session_turn", reject_stale_turn)
+
+    response = client.post(
+        "/api/sessions/session-active/stop",
+        json={"turnId": "turn-stale"},
+    )
+
+    assert response.status_code == 409
+    assert "turn mismatch" in response.json()["detail"]
+
+
 def test_session_events_runs_initial_and_iterator_on_dedicated_executor(monkeypatch):
     thread_names: list[str] = []
     closed = threading.Event()
