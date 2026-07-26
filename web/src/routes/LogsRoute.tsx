@@ -307,7 +307,7 @@ async function copyText(text: string) {
 }
 
 export function LogsRoute() {
-  const { lang, t, statusLabel } = useAppI18n();
+  const { lang, t, statusLabel } = useAppI18n({ domains: ["logs"] });
   const queryClient = useQueryClient();
   const location = useLocation();
   const runtimeSceneQuery = useMemo(() => new URLSearchParams(location.search), [location.search]);

@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import conversationViewSource from "./ConversationView.tsx?raw";
 import {
+  buildConversationHeightOffsets,
+  findConversationIndexAtOffset,
   isTimelineNearBottom,
+  recordConversationRowHeight,
   resolveConversationVirtualRange,
   resolveTimelineFollowState,
   shouldStickTimelineToBottomOnContentResize,
@@ -76,27 +79,65 @@ describe("conversation timeline follow state", () => {
     })).toBe(false);
   });
 
-  it("virtualizes long timelines with tail focus while following latest", () => {
-    const full = resolveConversationVirtualRange({
-      itemCount: 12,
-      scrollTop: 0,
+  it("uses measured height prefix sums for spacers (D2)", () => {
+    const heights = [100, 200, 150, 80];
+    const offsets = buildConversationHeightOffsets(heights);
+    expect(offsets).toEqual([0, 100, 300, 450, 530]);
+    expect(findConversationIndexAtOffset(offsets, 0)).toBe(0);
+    expect(findConversationIndexAtOffset(offsets, 100)).toBe(1);
+    expect(findConversationIndexAtOffset(offsets, 299)).toBe(1);
+    expect(findConversationIndexAtOffset(offsets, 450)).toBe(3);
+
+    const mid = resolveConversationVirtualRange({
+      itemCount: 40,
+      scrollTop: 1200,
       viewportHeight: 600,
-      followingLatest: true,
+      followingLatest: false,
+      heights: Array.from({ length: 40 }, () => 100),
+      overscan: 1,
     });
-    expect(full.start).toBe(0);
-    expect(full.end).toBe(12);
+    expect(mid.start).toBeGreaterThan(0);
+    expect(mid.end).toBeLessThan(40);
+    expect(mid.topSpacerPx).toBe(mid.start * 100);
+    expect(mid.bottomSpacerPx).toBe((40 - mid.end) * 100);
+    expect(mid.totalHeightPx).toBe(4000);
 
     const tail = resolveConversationVirtualRange({
       itemCount: 80,
       scrollTop: 0,
       viewportHeight: 600,
       followingLatest: true,
-      estimatePx: 100,
+      heights: Array.from({ length: 80 }, () => 100),
       overscan: 2,
     });
     expect(tail.end).toBe(80);
-    expect(tail.start).toBeGreaterThan(0);
-    expect(tail.topSpacerPx).toBe(tail.start * 100);
     expect(tail.bottomSpacerPx).toBe(0);
+    expect(tail.start).toBeGreaterThan(0);
+  });
+
+  it("records row heights only when they change beyond min delta", () => {
+    const cache = new Map<string, number>();
+    expect(recordConversationRowHeight(cache, "r1", 120.4)).toBe(true);
+    expect(cache.get("r1")).toBe(120);
+    expect(recordConversationRowHeight(cache, "r1", 120)).toBe(false);
+    expect(recordConversationRowHeight(cache, "r1", 121, { minDeltaPx: 2 })).toBe(false);
+    expect(recordConversationRowHeight(cache, "r1", 123, { minDeltaPx: 2 })).toBe(true);
+    expect(recordConversationRowHeight(cache, "", 50)).toBe(false);
+  });
+
+  it("keeps a stable min tail window while following latest", () => {
+    const tallTail = resolveConversationVirtualRange({
+      itemCount: 80,
+      scrollTop: 0,
+      viewportHeight: 600,
+      followingLatest: true,
+      // First rows short, last rows very tall — height walk alone would mount few rows.
+      heights: Array.from({ length: 80 }, (_, index) => (index >= 75 ? 400 : 40)),
+      estimatePx: 100,
+      overscan: 2,
+    });
+    expect(tallTail.end).toBe(80);
+    // minTailRows = ceil(600/100)+4 = 10 → start <= 70
+    expect(tallTail.start).toBeLessThanOrEqual(70);
   });
 });

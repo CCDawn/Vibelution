@@ -273,7 +273,7 @@ const AUTO_DRAFT_STEPS = [
 ] as const;
 
 export function ResearchRoute() {
-  const { lang, t } = useAppI18n();
+  const { lang, t } = useAppI18n({ domains: ["teams"] });
   const copy = COPY[lang];
   const queryClient = useQueryClient();
   const [activeSessionId, setActiveSessionId] = useState("");

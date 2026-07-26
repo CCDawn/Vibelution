@@ -149,6 +149,10 @@ function startChatRoutePreloadImport(trigger: "pointerenter" | "focus" | "click"
     return;
   }
   const startedAt = browserNowMs();
+  // D1: warm chat dictionary packs alongside the route graph (soft preload).
+  void import("../i18n/loadDictionaryDomains").then((module) => {
+    module.prefetchDictionaryDomains(["chat"]);
+  });
   chatRoutePreloadPromise = import("../routes/ChatCodingRoute")
     .then(() => {
       postBrowserTelemetry({

@@ -1,9 +1,20 @@
 import { useQuery } from "@tanstack/react-query";
+import { useMemo } from "react";
 
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
 import { ConfigSummary } from "../api/types";
-import { dictionary, Language, TranslationKey } from "./dictionary";
+import {
+  dictionaryDomainsQueryKey,
+  normalizeDictionaryDomains,
+  type DictionaryDomainId,
+} from "./dictionaryDomainIds";
+import type { Language, TranslationKey } from "./dictionaryTypes";
+import {
+  dictionaryTableForLang,
+  loadDictionaryDomains,
+  type DictionaryLangTable,
+} from "./loadDictionaryDomains";
 
 const statusKeyMap: Record<string, TranslationKey> = {
   idle: "status_idle",
@@ -107,57 +118,83 @@ const sourceKindKeyMap: Record<string, TranslationKey> = {
   bundle: "sourceBundle",
 };
 
-export function useAppI18n() {
+export type UseAppI18nOptions = {
+  /**
+   * Domain packs to load (core is always included).
+   * Omit for full dictionary (compat). Prefer route-scoped packs for D1 ROI.
+   */
+  domains?: readonly DictionaryDomainId[];
+};
+
+const EMPTY_TABLE: DictionaryLangTable = {};
+
+export function useAppI18n(options?: UseAppI18nOptions) {
+  const domains = useMemo(
+    () => normalizeDictionaryDomains(options?.domains),
+    // serialize for stable dep when callers pass inline arrays
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [dictionaryDomainsQueryKey(normalizeDictionaryDomains(options?.domains))],
+  );
+
   const configQuery = useQuery({
     queryKey: queryKeys.configPublic(),
     queryFn: () => fetchJson<ConfigSummary>("/api/config/public"),
   });
 
+  const dictionaryQuery = useQuery({
+    queryKey: ["i18n", "dictionary-domains", dictionaryDomainsQueryKey(domains)],
+    queryFn: () => loadDictionaryDomains(domains),
+    staleTime: Infinity,
+    gcTime: Infinity,
+  });
+
   const lang: Language = configQuery.data?.language === "en" ? "en" : "zh";
-  const table = dictionary[lang];
+  const table = dictionaryQuery.data
+    ? dictionaryTableForLang(dictionaryQuery.data, lang)
+    : EMPTY_TABLE;
 
   function t(key: TranslationKey): string {
-    return table[key];
+    return table[key] ?? String(key);
   }
 
   function statusLabel(status: string): string {
     const key = statusKeyMap[status];
-    return key ? table[key] : status.replaceAll("_", " ");
+    return key ? t(key) : status.replaceAll("_", " ");
   }
 
   function intakeModeLabel(mode: string): string {
     const key = intakeModeKeyMap[mode];
-    return key ? table[key] : mode.replaceAll("_", " ");
+    return key ? t(key) : mode.replaceAll("_", " ");
   }
 
   function viewLabel(view: string): string {
     const key = viewKeyMap[view];
-    return key ? table[key] : view;
+    return key ? t(key) : view;
   }
 
   function decisionLabel(decision: string): string {
     const key = decisionKeyMap[String(decision || "").trim().toUpperCase()];
-    return key ? table[key] : decision;
+    return key ? t(key) : decision;
   }
 
   function riskLabel(risk: string): string {
     const key = riskKeyMap[String(risk || "").trim().toLowerCase()];
-    return key ? table[key] : risk.replaceAll("_", " ");
+    return key ? t(key) : risk.replaceAll("_", " ");
   }
 
   function workbenchSourceLabel(source: string): string {
     const key = workbenchSourceKeyMap[String(source || "").trim().toLowerCase()];
-    return key ? table[key] : source.replaceAll("_", " ");
+    return key ? t(key) : source.replaceAll("_", " ");
   }
 
   function proposalActionLabel(action: string): string {
     const key = proposalActionKeyMap[String(action || "").trim().toLowerCase()];
-    return key ? table[key] : action.replaceAll("_", " ");
+    return key ? t(key) : action.replaceAll("_", " ");
   }
 
   function sourceKindLabel(source: string): string {
     const key = sourceKindKeyMap[String(source || "").trim().toLowerCase()];
-    return key ? table[key] : source.replaceAll("_", " ");
+    return key ? t(key) : source.replaceAll("_", " ");
   }
 
   return {
@@ -171,5 +208,7 @@ export function useAppI18n() {
     workbenchSourceLabel,
     proposalActionLabel,
     sourceKindLabel,
+    dictionaryDomains: domains,
+    dictionaryReady: Boolean(dictionaryQuery.data),
   };
 }

@@ -718,7 +718,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     workbenchSourceLabel,
     proposalActionLabel,
     sourceKindLabel,
-  } = useAppI18n();
+  } = useAppI18n({ domains: ["evolution"] });
   const displayDecisionLabel = (decision: string) => supervisedDecisionLabel(decision, lang, decisionLabel);
   const location = useLocation();
   const navigate = useNavigate();
