@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import chatStyles from "./src/routes/ChatCodingRoute.styles";
+import chatStyles from "./src/routes/chat/ChatStatusRail.styles";
 import chatRoute from "./src/routes/ChatCodingRoute.tsx?raw";
 import chatSessionWorkspacePanelStyles from "./src/routes/chat/ChatSessionWorkspacePanel.styles";
 import chatSessionWorkspacePanelSource from "./src/routes/chat/ChatSessionWorkspacePanel.tsx?raw";
