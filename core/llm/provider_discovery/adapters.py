@@ -195,6 +195,15 @@ def _extract_context_limits(raw: dict[str, Any]) -> dict[str, Any]:
                     break
             if "context_window" in limits:
                 break
+    # llama.cpp-compatible servers report the active runtime context as
+    # ``details.n_ctx``. Do not use ``n_ctx_train`` here: it is the model's
+    # training limit, not necessarily the server's configured runtime window.
+    if "context_window" not in limits:
+        details = raw.get("details")
+        if isinstance(details, dict):
+            number = _positive_limit(details.get("n_ctx"))
+            if number is not None:
+                limits["context_window"] = number
     return limits
 
 

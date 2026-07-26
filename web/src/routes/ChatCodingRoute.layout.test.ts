@@ -1077,6 +1077,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("expandedGroupAgentSessionIds");
     expect(routeSource).toContain("useQueries");
     expect(routeSource).toContain("expandedGroupAgentDetailQueries");
+    // F2: expanded agent session windows stop polling once group SSE is open.
+    expect(routeSource).toContain("groupStreamConnected ? false : 3_000");
     expect(routeSource).toContain("isAvailableGroupParticipant");
     expect(routeSource).toContain("availableGroupParticipants");
     expect(routeSource).toContain("groupParticipantIdentity");

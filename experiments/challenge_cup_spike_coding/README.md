@@ -77,3 +77,39 @@ outcome-blind movement-onset protocol is frozen. The adapter:
 `sci096_dandi000121_adapter.py` only produces the existing decoder dataset
 contract. It does not download DANDI assets, run neural decoding, or alter the
 frozen stationary/transition windows and v3 decision gates.
+
+### Frozen multi-session runner
+
+`sci096_dandi000121_multisession.py` separates three gates:
+
+1. the append-only qualification manifest selects exactly three frozen assets
+   spanning Reggie and JenkinsC;
+2. a download plan enforces the exact relative paths, byte sizes, SHA-256
+   digests, and an 8.3 GB source ceiling;
+3. formal decoding requires a separate human authorization artifact bound to
+   the qualification manifest SHA-256.
+
+Preparing a plan does not download data or authorize the experiment:
+
+```powershell
+$qualification = "C:\Users\Administrator\Documents\Vibelution\data\experiments\sci096_spike_coding\qualification\dandi000121\multisession_manifest_v2.json"
+$sourceRoot = "C:\Users\Administrator\Documents\Vibelution\data\experiments\sci096_spike_coding\source\dandi000121"
+$plan = "C:\Users\Administrator\Documents\Vibelution\data\experiments\sci096_spike_coding\qualification\dandi000121\download_plan_v1.json"
+& $python experiments\challenge_cup_spike_coding\sci096_dandi000121_multisession.py plan --qualification-manifest $qualification --source-root $sourceRoot --output $plan
+```
+
+The formal `run` command additionally requires an append-only authorization
+object with schema
+`sci096.dandi000121.execution-authorization.v1`, the exact
+`qualificationManifestSha256`, the frozen ordered `qualifiedSessionAssetIds`,
+`formalExperimentAuthorized: true`, `authorizedBy`, and `authorizedAt`.
+Authorization is checked before local asset access; all three downloaded NWB
+files are then size- and SHA-256-verified before the adapter or decoder runs.
+Unit rows with no spikes are deterministically excluded, and the resulting
+non-empty count must match the qualification record before evaluation.
+
+Each session retains the existing five SCI-096 v3 gates. Cross-subject support
+requires at least two of three sessions to pass all five gates, at least one
+supporting session from each monkey, a median interaction delta of at least
+0.08, and a positive interaction in every session. This result remains limited
+to the frozen assets, epochs, and offline controls.

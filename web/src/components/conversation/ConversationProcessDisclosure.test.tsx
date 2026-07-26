@@ -57,4 +57,16 @@ describe("ConversationProcessDisclosure", () => {
     expect(html).toContain('aria-live="polite"');
     expect(html).not.toContain("1 次调用");
   });
+
+  it("uses the completed summary for a stopped process while preserving failure state", () => {
+    const html = renderToStaticMarkup(
+      <ConversationProcessDisclosure cells={[processCell("failed")]} language="en">
+        <span>Stopped process details</span>
+      </ConversationProcessDisclosure>,
+    );
+
+    expect(html).toContain("Processed 2.9s");
+    expect(html).toContain('data-codex-process-state="failed"');
+    expect(html).not.toContain("Processing stopped");
+  });
 });
