@@ -392,6 +392,10 @@ import {
   teamNodeFunctionLabel,
   workflowCandidateGraphFromCandidate,
 } from "./teams/teamRouteShellModel";
+import {
+  nodeToneClass,
+  roleBadgeToneClass,
+} from "./teams/teamCanvasNodePresentation";
 
 import { workflowGraphLayout } from "./TeamWorkflowGraphLayout";
 import {
@@ -567,40 +571,29 @@ type NodeDragState = {
   moved: boolean;
 };
 
+const CANVAS_NODE_ROLE_BADGE_STYLES = {
+  stale: styles.nodeRoleBadgeStale,
+  open: styles.nodeRoleBadgeOpen,
+  lead: styles.nodeRoleBadgeLead,
+  advisor: styles.nodeRoleBadgeAdvisor,
+  steward: styles.nodeRoleBadgeSteward,
+  research: styles.nodeRoleBadgeResearch,
+  self: styles.nodeRoleBadgeSelf,
+  general: styles.nodeRoleBadgeGeneral,
+};
+
+const CANVAS_NODE_TONE_STYLES = {
+  stale: styles.nodeStale,
+  bound: styles.nodeBound,
+  open: styles.nodeOpen,
+};
+
 function roleBadgeTone(node: TeamCanvasNode, displayTone = "") {
-  if (node.status === "stale") {
-    return styles.nodeRoleBadgeStale;
-  }
-  if (!node.agentId) {
-    return styles.nodeRoleBadgeOpen;
-  }
-  const key = `${node.role} ${node.purpose} ${displayTone}`.toLowerCase();
-  if (key.includes("ceo") || key.includes("lead") || key.includes("负责人")) {
-    return styles.nodeRoleBadgeLead;
-  }
-  if (key.includes("advisor") || key.includes("organization") || key.includes("顾问")) {
-    return styles.nodeRoleBadgeAdvisor;
-  }
-  if (key.includes("steward") || key.includes("capability") || key.includes("能力") || key.includes("管家")) {
-    return styles.nodeRoleBadgeSteward;
-  }
-  if (key.includes("research") || key.includes("科研")) {
-    return styles.nodeRoleBadgeResearch;
-  }
-  if (key.includes("self") || key.includes("进化")) {
-    return styles.nodeRoleBadgeSelf;
-  }
-  return styles.nodeRoleBadgeGeneral;
+  return roleBadgeToneClass(node, CANVAS_NODE_ROLE_BADGE_STYLES, displayTone);
 }
 
 function nodeTone(node: TeamCanvasNode) {
-  if (node.status === "stale") {
-    return styles.nodeStale;
-  }
-  if (node.agentId) {
-    return styles.nodeBound;
-  }
-  return styles.nodeOpen;
+  return nodeToneClass(node, CANVAS_NODE_TONE_STYLES);
 }
 
 function workflowQualityToneBound(value: string) {
