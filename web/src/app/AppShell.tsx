@@ -117,6 +117,8 @@ function isModifiedPrimaryNavClick(event: { metaKey: boolean; ctrlKey: boolean; 
 }
 
 let chatRoutePreloadPromise: Promise<unknown> | null = null;
+/** Soft hover/focus preload — cancelled if a hard click starts first, or by idle timeout path. */
+let chatRouteSoftPreloadHandle: number | null = null;
 
 function browserNowMs(): number {
   return typeof performance === "undefined" ? Date.now() : performance.now();
@@ -126,25 +128,26 @@ function browserElapsedMs(startedAt: number): number {
   return Math.max(0, Math.round(browserNowMs() - startedAt));
 }
 
-function preloadChatRouteForNav(trigger: "pointerenter" | "focus" | "click") {
-  if (typeof window === "undefined") {
+function cancelChatRouteSoftPreload() {
+  if (chatRouteSoftPreloadHandle == null || typeof window === "undefined") {
+    chatRouteSoftPreloadHandle = null;
     return;
   }
-  const alreadyStarted = Boolean(chatRoutePreloadPromise);
-  postBrowserTelemetry({
-    phase: "navigation",
-    eventCode: "browser.chat_route.preload_requested",
-    message: "Chat route preload requested from navigation.",
-    fields: {
-      trigger,
-      alreadyStarted,
-      pathname: window.location.pathname,
-    },
-  });
-  if (alreadyStarted) {
-    return;
+  const idleCancel = (window as Window & {
+    cancelIdleCallback?: (handle: number) => void;
+  }).cancelIdleCallback;
+  if (typeof idleCancel === "function") {
+    idleCancel(chatRouteSoftPreloadHandle);
+  } else {
+    window.clearTimeout(chatRouteSoftPreloadHandle);
   }
+  chatRouteSoftPreloadHandle = null;
+}
 
+function startChatRoutePreloadImport(trigger: "pointerenter" | "focus" | "click") {
+  if (chatRoutePreloadPromise) {
+    return;
+  }
   const startedAt = browserNowMs();
   chatRoutePreloadPromise = import("../routes/ChatCodingRoute")
     .then(() => {
@@ -174,6 +177,58 @@ function preloadChatRouteForNav(trigger: "pointerenter" | "focus" | "click") {
         },
       });
     });
+}
+
+/**
+ * Balanced preload (F1):
+ * - click → hard immediate import of Chat route
+ * - pointerenter/focus → soft idle (does not compete with first paint)
+ */
+function preloadChatRouteForNav(trigger: "pointerenter" | "focus" | "click") {
+  if (typeof window === "undefined") {
+    return;
+  }
+  const alreadyStarted = Boolean(chatRoutePreloadPromise);
+  postBrowserTelemetry({
+    phase: "navigation",
+    eventCode: "browser.chat_route.preload_requested",
+    message: "Chat route preload requested from navigation.",
+    fields: {
+      trigger,
+      alreadyStarted,
+      soft: trigger !== "click",
+      pathname: window.location.pathname,
+    },
+  });
+  if (alreadyStarted) {
+    return;
+  }
+
+  if (trigger === "click") {
+    cancelChatRouteSoftPreload();
+    startChatRoutePreloadImport(trigger);
+    return;
+  }
+
+  // Soft path: schedule once; do not stack multiple idle timers.
+  if (chatRouteSoftPreloadHandle != null) {
+    return;
+  }
+  const scheduleSoft = () => {
+    chatRouteSoftPreloadHandle = null;
+    if (chatRoutePreloadPromise) {
+      return;
+    }
+    startChatRoutePreloadImport(trigger);
+  };
+  const idleRequest = (window as Window & {
+    requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
+  }).requestIdleCallback;
+  if (typeof idleRequest === "function") {
+    chatRouteSoftPreloadHandle = idleRequest(scheduleSoft, { timeout: 1_200 });
+  } else {
+    chatRouteSoftPreloadHandle = window.setTimeout(scheduleSoft, 250);
+  }
 }
 
 type RouteLocationLike = {

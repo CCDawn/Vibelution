@@ -37,11 +37,22 @@ and panel composition. Pure query/presentation helpers should leave the shell.
 - **Done (ROI D1 cont):** `agentStatusPresentation.ts` — health/runtime/mode labels and next-step copy.
 - **Still in `AgentsRoute.tsx`:** draft mappers, tool/memory policy drafts, list/filter builders, shell JSX.
 
+## Perf program F3 (Agents ROI)
+
+| Wave | Goal | Status |
+|---|---|---|
+| F3-A mutation hooks | Move EventSource-free writes out of shell | **Blocked pending draft/state DI design** — archive/purge/config drafts close over many route setters (`setConfigDraft`, `draftSyncSourceRef`, pane selection). Naive extract failed tsc; next attempt should extract **one cluster at a time** with explicit options (notice + draft setters + pure mappers co-located first). |
+| F3-B pane lazy packs | overview default light; config/activity/relations async | Pending after F3-A or independent if panels already split files |
+| F3-C query gates | tighten fullWorkspaceNeeded vs pack | Pending |
+
+**Recommended F3-A order:** (1) promote pure mappers to `agents/*Model.ts`, (2) `useAgentConfigDraftMutations` only (save/discard/update/promote), (3) lifecycle, (4) policy/inbox.
+
 ## Next (planned, by ROI)
 
-1. Extract draft mapper cluster (`draftFromAgent`, persona/task drafts) only when a panel owns the boundary.
+1. F3-A: pure mappers then config-draft mutation cluster (see above).
 2. Extract list/filter pure builders (`filterAgents`, management brief) with unit tests.
 3. Do not re-inline pure helpers into the shell for convenience.
+4. Pane-scoped lazy packs when mutation boundary is clean.
 
 ## Rules
 
