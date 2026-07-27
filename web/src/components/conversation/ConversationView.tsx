@@ -1725,6 +1725,17 @@ export function ConversationView({
       const diagnosticRows = buildTurnErrorDiagnosticRows(cell.diagnosticSummary, lang);
       const isCompactToolFailure = Boolean(cell.operationIds?.length);
       if (isCompactToolFailure) {
+        const compactErrorSummary = (
+          <>
+            <span className={styles.codexTranscriptCellTitle}>{cell.title?.trim() || (lang === "zh" ? "执行失败" : "Failed")}</span>
+            {cell.failureCount && cell.failureCount > 1 ? (
+              <span className={styles.codexTranscriptCellMeta}>· {cell.failureCount} {lang === "zh" ? "次" : "times"}</span>
+            ) : errorText ? (
+              <span className={styles.codexTranscriptCellMeta} aria-hidden="true">·</span>
+            ) : null}
+            {errorText ? <span className={styles.codexTranscriptCompactErrorSummary}>{errorText}</span> : null}
+          </>
+        );
         return (
           <section
             key={cell.id}
@@ -1740,34 +1751,30 @@ export function ConversationView({
               <TerminalSquare size={14} />
             </span>
             <div className={styles.codexTranscriptCellBody}>
-              <div className={styles.codexTranscriptCellTitleRow}>
-                <span className={styles.codexTranscriptCellTitle}>{cell.title?.trim() || (lang === "zh" ? "执行失败" : "Failed")}</span>
-                {cell.failureCount && cell.failureCount > 1 ? (
-                  <span className={styles.codexTranscriptCellMeta}>· {cell.failureCount} {lang === "zh" ? "次" : "times"}</span>
-                ) : errorText ? (
-                  <span className={styles.codexTranscriptCellMeta} aria-hidden="true">·</span>
-                ) : null}
-                {errorText ? <span className={styles.codexTranscriptCompactErrorSummary}>{errorText}</span> : null}
-                {diagnosticRows.length > 0 ? (
-                  <details className={styles.codexTranscriptCompactErrorDetails} data-codex-error-diagnostic="true">
-                    <summary className={styles.codexTranscriptCompactErrorDetailsSummary}>
-                      <span>{lang === "zh" ? "技术详情" : "Details"}</span>
-                      <span className={styles.operationDetailsChevronButton} aria-hidden="true">
-                        <span className={styles.operationDetailsChevronClosed}>▸</span>
-                        <span className={styles.operationDetailsChevronOpen}>▾</span>
-                      </span>
-                    </summary>
-                    <dl className={styles.turnErrorReasonList}>
-                      {diagnosticRows.map((row) => (
-                        <div key={`${cell.id}-${row.label}-${row.value}`} className={styles.turnErrorReasonRow}>
-                          <dt>{row.label}</dt>
-                          <dd>{row.value}</dd>
-                        </div>
-                      ))}
-                    </dl>
-                  </details>
-                ) : null}
-              </div>
+              {diagnosticRows.length > 0 ? (
+                <details className={styles.codexTranscriptCompactErrorDetails} data-codex-error-diagnostic="true">
+                  <summary className={`${styles.codexTranscriptCellTitleRow} ${styles.codexTranscriptCompactErrorDetailsSummary}`}>
+                    {compactErrorSummary}
+                    <span>{lang === "zh" ? "技术详情" : "Details"}</span>
+                    <span className={styles.operationDetailsChevronButton} aria-hidden="true">
+                      <span className={styles.operationDetailsChevronClosed}>▸</span>
+                      <span className={styles.operationDetailsChevronOpen}>▾</span>
+                    </span>
+                  </summary>
+                  <dl className={styles.turnErrorReasonList}>
+                    {diagnosticRows.map((row) => (
+                      <div key={`${cell.id}-${row.label}-${row.value}`} className={styles.turnErrorReasonRow}>
+                        <dt>{row.label}</dt>
+                        <dd>{row.value}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                </details>
+              ) : (
+                <div className={styles.codexTranscriptCellTitleRow}>
+                  {compactErrorSummary}
+                </div>
+              )}
             </div>
           </section>
         );
