@@ -111,7 +111,7 @@ const styles = {
   lifecycleProofName:
     "vui-app-appshell lifecycleProofName min-w-0 [font-size:var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
   mainArea:
-    "vui-app-appshell mainArea min-w-0",
+    "vui-app-appshell mainArea min-w-0 w-full",
   mobileNav: `vui-app-appshell mobileNav hidden max-[639px]:flex min-w-0 items-center rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] ${vuiToolbarFillClass} px-2 py-1`,
   mobileNavLabel:
     "vui-app-appshell mobileNavLabel min-w-0 truncate [font-size:var(--vui-font-sm)] font-semibold text-[var(--fg-primary)]",
