@@ -11,15 +11,15 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.parse import quote
 
+from config.public_config import CONFIG_PATH
 from core.infrastructure import developer_sandbox
 
 from .runtime_scene_service import record_runtime_scene_event
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-USER_AVATAR_DIR = developer_sandbox.formal_workspace_path(PROJECT_ROOT, "user_avatars")
-_DEFAULT_USER_AVATAR_DIR = USER_AVATAR_DIR
 USER_AVATAR_RELATIVE_DIR = PurePosixPath("workspace/user_avatars")
+USER_AVATAR_DIR_NAME = "avatars"
 MAX_USER_AVATAR_IMAGE_BYTES = 5 * 1024 * 1024
 _CONTENT_TYPE_EXTENSIONS = {
     "image/png": ".png",
@@ -116,10 +116,16 @@ def resolve_user_avatar_file(filename: str) -> Path:
     safe_filename = user_avatar_filename(str(USER_AVATAR_RELATIVE_DIR / str(filename or "")))
     if not safe_filename:
         raise FileNotFoundError("invalid avatar image path")
-    avatar_dir = _user_avatar_dir().resolve()
-    path = (avatar_dir / safe_filename).resolve()
-    if avatar_dir != path.parent:
+    custom_dir = _user_avatar_dir().resolve()
+    path = (custom_dir / safe_filename).resolve()
+    if custom_dir != path.parent:
         raise FileNotFoundError("invalid avatar image path")
+    if path.exists() and path.is_file():
+        return path
+    legacy_dir = _legacy_user_avatar_dir().resolve()
+    legacy_path = (legacy_dir / safe_filename).resolve()
+    if legacy_dir == legacy_path.parent and legacy_path.exists() and legacy_path.is_file():
+        return legacy_path
     return path
 
 
@@ -135,7 +141,7 @@ def store_user_avatar_image(*, filename: str, content_type: str, data_base64: st
     _user_avatar_dir().mkdir(parents=True, exist_ok=True)
     safe_stem = _sanitize_stem(filename)
     output_name = f"avatar-{int(time.time())}-{secrets.token_hex(4)}-{safe_stem}{extension}"
-    output_path = resolve_user_avatar_file(output_name)
+    output_path = _user_avatar_write_file(output_name)
     output_path.write_bytes(payload)
     relative_path = str(USER_AVATAR_RELATIVE_DIR / output_name)
     _record_avatar_event(
@@ -145,6 +151,7 @@ def store_user_avatar_image(*, filename: str, content_type: str, data_base64: st
             "contentType": normalized_type,
             "sizeBytes": len(payload),
             "extension": extension,
+            "storageScope": "config_adjacent",
         },
     )
     return {
@@ -156,17 +163,19 @@ def store_user_avatar_image(*, filename: str, content_type: str, data_base64: st
 
 
 def _user_avatar_dir() -> Path:
-    configured_dir = Path(USER_AVATAR_DIR)
-    current_formal_dir = developer_sandbox.formal_workspace_path(PROJECT_ROOT, "user_avatars")
-    if configured_dir.resolve() not in {
-        _DEFAULT_USER_AVATAR_DIR.resolve(),
-        current_formal_dir.resolve(),
-    }:
-        return configured_dir
-    return developer_sandbox.route_workspace_path(
-        PROJECT_ROOT,
-        "avatar_image",
-        "user_avatars",
-        intent="state",
-        seed=True,
-    )
+    return Path(CONFIG_PATH).expanduser().resolve().parent / USER_AVATAR_DIR_NAME
+
+
+def _user_avatar_write_file(filename: str) -> Path:
+    safe_filename = user_avatar_filename(str(USER_AVATAR_RELATIVE_DIR / str(filename or "")))
+    if not safe_filename:
+        raise FileNotFoundError("invalid avatar image path")
+    avatar_dir = _user_avatar_dir().resolve()
+    path = (avatar_dir / safe_filename).resolve()
+    if avatar_dir != path.parent:
+        raise FileNotFoundError("invalid avatar image path")
+    return path
+
+
+def _legacy_user_avatar_dir() -> Path:
+    return developer_sandbox.formal_workspace_path(PROJECT_ROOT, "user_avatars")

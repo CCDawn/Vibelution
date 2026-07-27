@@ -47,6 +47,12 @@ def _raw_mode_binding(mode: str):
 def _use_tmp_project_root(tmp_path, monkeypatch):
     monkeypatch.setenv("VIBELUTION_DATA_HOME", str(tmp_path))
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        agent_directory_service,
+        "CONFIG_PATH",
+        tmp_path / "config" / "config.toml",
+        raising=False,
+    )
     monkeypatch.setattr(agent_bulk_delete_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_mode_binding_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(prompt_template_service, "PROJECT_ROOT", tmp_path)
@@ -136,7 +142,7 @@ def _fake_config_workspace():
 
 
 def _seed_agent_avatars(root):
-    avatar_dir = root / "workspace" / "avatars"
+    avatar_dir = root / "assets" / "agent-avatars"
     avatar_dir.mkdir(parents=True, exist_ok=True)
     for filename in agent_directory_service.AGENT_AVATAR_FILENAMES:
         (avatar_dir / filename).write_bytes(b"\x89PNG\r\n\x1a\navatar")
@@ -1091,7 +1097,7 @@ def test_work_session_boundary_skips_persona_task_and_team_onboarding_requiremen
     assert "agent_onboarding_incomplete" not in issue_codes
 
 
-def test_agent_directory_assigns_default_avatar_from_workspace_avatars(tmp_path, monkeypatch):
+def test_agent_directory_assigns_default_avatar_from_bundled_assets(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _seed_agent_avatars(tmp_path)
 
@@ -1121,7 +1127,7 @@ def test_agent_directory_assigns_default_avatar_from_workspace_avatars(tmp_path,
 
 def test_agent_avatar_image_url_changes_when_file_changes(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    avatar_dir = tmp_path / "workspace" / "avatars"
+    avatar_dir = tmp_path / "assets" / "agent-avatars"
     avatar_dir.mkdir(parents=True, exist_ok=True)
     avatar_file = avatar_dir / "01-session-agent.png"
     avatar_file.write_bytes(b"\x89PNG\r\n\x1a\navatar-a")
@@ -1139,7 +1145,7 @@ def test_agent_avatar_image_url_changes_when_file_changes(tmp_path, monkeypatch)
 
 def test_agent_directory_uses_generated_avatar_when_primary_default_missing(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    avatar_dir = tmp_path / "workspace" / "avatars"
+    avatar_dir = tmp_path / "assets" / "agent-avatars"
     avatar_dir.mkdir(parents=True, exist_ok=True)
     (avatar_dir / "11-anime-deep-research-agent.png").write_bytes(b"\x89PNG\r\n\x1a\navatar")
 
@@ -1156,7 +1162,7 @@ def test_agent_directory_uses_generated_avatar_when_primary_default_missing(tmp_
 
 def test_agent_directory_uses_primary_avatar_before_generated_fallback(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    avatar_dir = tmp_path / "workspace" / "avatars"
+    avatar_dir = tmp_path / "assets" / "agent-avatars"
     avatar_dir.mkdir(parents=True, exist_ok=True)
     (avatar_dir / "06-deep-investigator.png").write_bytes(b"\x89PNG\r\n\x1a\navatar")
 
@@ -1179,6 +1185,12 @@ def test_agent_directory_uses_primary_avatar_before_generated_fallback(tmp_path,
 def test_agent_avatar_can_be_selected_uploaded_and_reset(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _seed_agent_avatars(tmp_path)
+    events = []
+    monkeypatch.setattr(
+        agent_directory_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: events.append((args, kwargs)),
+    )
     agent = agent_directory_service.create_agent_instance(display_name="头像 Agent", primary_mode="research", role_key="research_deep")
 
     options = client.get("/api/agents/avatar-options")
@@ -1205,7 +1217,10 @@ def test_agent_avatar_can_be_selected_uploaded_and_reset(tmp_path, monkeypatch):
     uploaded = upload_response.json()
     assert uploaded["path"].startswith("workspace/avatars/agent-avatar-")
     assert uploaded["agent"]["metadata"]["avatarImageSource"] == "custom"
-    assert (tmp_path / uploaded["path"]).exists()
+    uploaded_filename = agent_directory_service.agent_avatar_filename(uploaded["path"])
+    assert (tmp_path / "config" / "avatars" / "agents" / uploaded_filename).exists()
+    uploaded_event = next(item for item in events if item[0][2] == "agent.avatar_uploaded")
+    assert uploaded_event[1]["fields"]["storageScope"] == "config_adjacent"
 
     reset_response = client.patch(
         f"/api/agents/{agent['agentId']}/avatar",

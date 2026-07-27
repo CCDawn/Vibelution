@@ -24,6 +24,7 @@ from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
 from core.web.services.model_reference_service import ModelReferenceConflictError
 from core.web.services import (
+    config_editor_schema,
     config_service,
     log_service,
     provider_config_service,
@@ -1044,6 +1045,14 @@ def test_config_workspace_exposes_editor_schema_without_launcher_owned_startup_s
     assert any(section["id"] == "shell" for section in payload["sections"])
 
 
+def test_user_avatar_editor_hint_describes_config_adjacent_storage():
+    assert "主配置文件旁" in config_editor_schema.field_hint("user_profile.avatar_image_path", "zh")
+    assert "beside the main config file" in config_editor_schema.field_hint(
+        "user_profile.avatar_image_path",
+        "en",
+    )
+
+
 def test_config_public_summary_exposes_theme_background_url(monkeypatch):
     public_config = copy.deepcopy(load_public_config())
     public_config.setdefault("ui", {}).setdefault("workbench_theme", {})[
@@ -1074,8 +1083,15 @@ def test_config_public_summary_defaults_to_bundled_theme_background(monkeypatch)
     assert payload["themeBackgroundImageUrl"] == "/api/config/theme-background-image/default-graphite-command-center.png"
 
 
-def test_config_avatar_image_upload_stores_safe_project_file(monkeypatch, tmp_path):
-    monkeypatch.setattr(avatar_image_service, "USER_AVATAR_DIR", tmp_path / "user_avatars")
+def test_config_avatar_image_upload_stores_safe_config_adjacent_file(monkeypatch, tmp_path):
+    config_path = tmp_path / "config" / "config.toml"
+    monkeypatch.setattr(avatar_image_service, "CONFIG_PATH", config_path, raising=False)
+    events = []
+    monkeypatch.setattr(
+        avatar_image_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: events.append((args, kwargs)),
+    )
     png_payload = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
 
     response = client.post(
@@ -1092,7 +1108,7 @@ def test_config_avatar_image_upload_stores_safe_project_file(monkeypatch, tmp_pa
     assert payload["path"].startswith("workspace/user_avatars/avatar-")
     assert payload["path"].endswith(".png")
     assert payload["url"].startswith("/api/config/avatar-image/avatar-")
-    saved_files = list((tmp_path / "user_avatars").glob("*.png"))
+    saved_files = list((config_path.parent / "avatars").glob("*.png"))
     assert len(saved_files) == 1
     assert saved_files[0].read_bytes() == png_payload
 
@@ -1100,10 +1116,49 @@ def test_config_avatar_image_upload_stores_safe_project_file(monkeypatch, tmp_pa
     assert image_response.status_code == 200
     assert image_response.headers["content-type"].startswith("image/png")
     assert image_response.content == png_payload
+    uploaded_event = next(item for item in events if item[0][2] == "config.avatar_image.uploaded")
+    assert uploaded_event[1]["fields"]["storageScope"] == "config_adjacent"
+
+
+def test_config_avatar_image_resolver_keeps_legacy_workspace_file_readable(monkeypatch, tmp_path):
+    config_path = tmp_path / "config" / "config.toml"
+    legacy_dir = tmp_path / "legacy-user-avatars"
+    legacy_dir.mkdir(parents=True)
+    legacy_file = legacy_dir / "avatar-legacy.png"
+    legacy_file.write_bytes(b"\x89PNG\r\n\x1a\nlegacy")
+    monkeypatch.setattr(avatar_image_service, "CONFIG_PATH", config_path, raising=False)
+    monkeypatch.setattr(avatar_image_service, "_legacy_user_avatar_dir", lambda: legacy_dir)
+
+    assert avatar_image_service.resolve_user_avatar_file("avatar-legacy.png") == legacy_file
+
+
+def test_config_avatar_upload_never_overwrites_legacy_collision(monkeypatch, tmp_path):
+    config_path = tmp_path / "config" / "config.toml"
+    legacy_dir = tmp_path / "legacy-user-avatars"
+    legacy_dir.mkdir(parents=True)
+    output_name = "avatar-123-deadbeef-custom.png"
+    legacy_file = legacy_dir / output_name
+    legacy_file.write_bytes(b"\x89PNG\r\n\x1a\nlegacy")
+    monkeypatch.setattr(avatar_image_service, "CONFIG_PATH", config_path, raising=False)
+    monkeypatch.setattr(avatar_image_service, "_legacy_user_avatar_dir", lambda: legacy_dir)
+    monkeypatch.setattr(avatar_image_service.time, "time", lambda: 123)
+    monkeypatch.setattr(avatar_image_service.secrets, "token_hex", lambda _size: "deadbeef")
+
+    uploaded = avatar_image_service.store_user_avatar_image(
+        filename="custom.png",
+        content_type="image/png",
+        data_base64="iVBORw0KGgphdmF0YXI=",
+    )
+
+    custom_file = config_path.parent / "avatars" / output_name
+    assert uploaded["path"] == f"workspace/user_avatars/{output_name}"
+    assert custom_file.read_bytes() == b"\x89PNG\r\n\x1a\navatar"
+    assert legacy_file.read_bytes() == b"\x89PNG\r\n\x1a\nlegacy"
 
 
 def test_config_avatar_image_upload_rejects_disguised_image(monkeypatch, tmp_path):
-    monkeypatch.setattr(avatar_image_service, "USER_AVATAR_DIR", tmp_path / "user_avatars")
+    config_path = tmp_path / "config" / "config.toml"
+    monkeypatch.setattr(avatar_image_service, "CONFIG_PATH", config_path, raising=False)
 
     response = client.post(
         "/api/config/avatar-image",
@@ -1115,11 +1170,12 @@ def test_config_avatar_image_upload_rejects_disguised_image(monkeypatch, tmp_pat
     )
 
     assert response.status_code == 422
-    assert not (tmp_path / "user_avatars").exists()
+    assert not (config_path.parent / "avatars").exists()
 
 
 def test_config_avatar_image_upload_rejects_oversized_image(monkeypatch, tmp_path):
-    monkeypatch.setattr(avatar_image_service, "USER_AVATAR_DIR", tmp_path / "user_avatars")
+    config_path = tmp_path / "config" / "config.toml"
+    monkeypatch.setattr(avatar_image_service, "CONFIG_PATH", config_path, raising=False)
     monkeypatch.setattr(avatar_image_service, "MAX_USER_AVATAR_IMAGE_BYTES", 8)
 
     response = client.post(
@@ -1132,7 +1188,7 @@ def test_config_avatar_image_upload_rejects_oversized_image(monkeypatch, tmp_pat
     )
 
     assert response.status_code == 422
-    assert not (tmp_path / "user_avatars").exists()
+    assert not (config_path.parent / "avatars").exists()
 
 
 def test_config_theme_background_image_upload_stores_external_config_resource(monkeypatch, tmp_path):
