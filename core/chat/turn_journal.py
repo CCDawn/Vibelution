@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import threading
+import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -82,6 +85,15 @@ TURN_INTERRUPTED_MARKER = (
 _SAFE_SESSION_CHARS = re.compile(r"[^A-Za-z0-9_.-]+")
 _SEQUENCE_CACHE_LOCK = threading.Lock()
 _SEQUENCE_CACHE: dict[str, tuple[int, int, int]] = {}
+_JOURNAL_THREAD_LOCKS_GUARD = threading.Lock()
+_JOURNAL_THREAD_LOCKS: dict[str, _ThreadLockEntry] = {}
+_JOURNAL_LOCK_TIMEOUT_SECONDS = 15.0
+
+
+@dataclass
+class _ThreadLockEntry:
+    lock: threading.RLock
+    users: int = 0
 
 
 @dataclass(frozen=True)
@@ -189,38 +201,43 @@ def append_turn_event(
     normalized_session_id = str(session_id or "").strip()
     normalized_turn_id = str(turn_id or "").strip()
     normalized_event_type = str(event_type or "").strip()
-    with _SEQUENCE_CACHE_LOCK:
-        if (
-            normalized_event_type in POST_TERMINAL_MODEL_EVENT_TYPES
-            and _turn_has_terminal_event(path, normalized_turn_id)
-        ):
-            raise ValueError(
-                f"Cannot append {normalized_event_type} after terminal event for turn {normalized_turn_id}."
+    with _journal_thread_lock(path):
+        with _journal_file_lock(path):
+            if (
+                normalized_event_type in POST_TERMINAL_MODEL_EVENT_TYPES
+                and _turn_has_terminal_event(path, normalized_turn_id)
+            ):
+                raise ValueError(
+                    f"Cannot append {normalized_event_type} after terminal event for turn {normalized_turn_id}."
+                )
+            sequence = _next_sequence(path)
+            event = TurnJournalEvent(
+                schema_version=SCHEMA_VERSION,
+                event_id=f"{_safe_event_token(normalized_turn_id or normalized_session_id)}-{sequence:06d}-{uuid4().hex[:8]}",
+                session_id=normalized_session_id,
+                turn_id=normalized_turn_id,
+                sequence=sequence,
+                event_type=normalized_event_type,
+                status=str(status or "").strip(),
+                timestamp=str(timestamp or "").strip() or _now_timestamp(),
+                source=str(source or "").strip(),
+                payload=dict(payload or {}),
+                parent_event_id=str(parent_event_id or "").strip(),
+                visible_in_model=bool(visible_in_model),
+                projection_kind=str(projection_kind or "").strip(),
+                provider_role=str(provider_role or "").strip(),
+                tool_call_id=str(tool_call_id or "").strip(),
+                correlation_id=str(correlation_id or "").strip(),
+                source_kind=str(source_kind or "").strip(),
             )
-        sequence = _next_sequence(path)
-        event = TurnJournalEvent(
-            schema_version=SCHEMA_VERSION,
-            event_id=f"{_safe_event_token(normalized_turn_id or normalized_session_id)}-{sequence:06d}-{uuid4().hex[:8]}",
-            session_id=normalized_session_id,
-            turn_id=normalized_turn_id,
-            sequence=sequence,
-            event_type=normalized_event_type,
-            status=str(status or "").strip(),
-            timestamp=str(timestamp or "").strip() or _now_timestamp(),
-            source=str(source or "").strip(),
-            payload=dict(payload or {}),
-            parent_event_id=str(parent_event_id or "").strip(),
-            visible_in_model=bool(visible_in_model),
-            projection_kind=str(projection_kind or "").strip(),
-            provider_role=str(provider_role or "").strip(),
-            tool_call_id=str(tool_call_id or "").strip(),
-            correlation_id=str(correlation_id or "").strip(),
-            source_kind=str(source_kind or "").strip(),
-        )
-        with path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(event.to_dict(), ensure_ascii=False, separators=(",", ":")))
-            handle.write("\n")
-        _remember_sequence(path, sequence)
+            encoded = (
+                json.dumps(event.to_dict(), ensure_ascii=False, separators=(",", ":")) + "\n"
+            ).encode("utf-8")
+            with path.open("ab") as handle:
+                handle.write(encoded)
+                handle.flush()
+                os.fsync(handle.fileno())
+            _remember_sequence(path, sequence)
     return event
 
 
@@ -254,23 +271,26 @@ def load_turn_events(project_root: Path, session_id: str) -> list[TurnJournalEve
     path = turn_journal_path(project_root, session_id)
     if not path.exists():
         return []
-    events: list[TurnJournalEvent] = []
-    try:
-        with path.open(encoding="utf-8") as handle:
-            lines = handle
-            for line in lines:
-                raw = line.strip()
-                if not raw:
-                    continue
-                try:
-                    parsed = json.loads(raw)
-                except json.JSONDecodeError:
-                    continue
-                event = TurnJournalEvent.from_dict(parsed)
-                if event is not None:
-                    events.append(event)
-    except OSError:
-        return []
+    with _journal_thread_lock(path):
+        if not path.exists():
+            return []
+        events: list[TurnJournalEvent] = []
+        try:
+            with path.open(encoding="utf-8") as handle:
+                lines = handle
+                for line in lines:
+                    raw = line.strip()
+                    if not raw:
+                        continue
+                    try:
+                        parsed = json.loads(raw)
+                    except json.JSONDecodeError:
+                        continue
+                    event = TurnJournalEvent.from_dict(parsed)
+                    if event is not None:
+                        events.append(event)
+        except OSError:
+            return []
     events.sort(key=lambda item: (item.sequence, item.timestamp, item.event_id))
     return events
 
@@ -278,30 +298,40 @@ def load_turn_events(project_root: Path, session_id: str) -> list[TurnJournalEve
 def rewrite_turn_events(project_root: Path, session_id: str, events: Iterable[TurnJournalEvent]) -> None:
     path = turn_journal_path(project_root, session_id)
     event_list = [event for event in list(events or []) if isinstance(event, TurnJournalEvent)]
-    with _SEQUENCE_CACHE_LOCK:
-        if not event_list:
-            try:
-                path.unlink()
-            except FileNotFoundError:
-                pass
-            except OSError:
-                return
-            _SEQUENCE_CACHE.pop(_sequence_cache_key(path), None)
-            return
+    with _journal_thread_lock(path):
         path.parent.mkdir(parents=True, exist_ok=True)
-        tmp_path = path.with_name(f"{path.name}.tmp")
-        try:
-            with tmp_path.open("w", encoding="utf-8") as handle:
-                for event in event_list:
-                    handle.write(json.dumps(event.to_dict(), ensure_ascii=False, separators=(",", ":")))
-                    handle.write("\n")
-            tmp_path.replace(path)
-            _SEQUENCE_CACHE.pop(_sequence_cache_key(path), None)
-        except OSError:
+        with _journal_file_lock(path):
+            if not event_list:
+                try:
+                    path.unlink()
+                    _fsync_directory(path.parent)
+                except FileNotFoundError:
+                    pass
+                except OSError:
+                    return
+                _forget_sequence(path)
+                return
+            tmp_path = path.with_name(f"{path.name}.{uuid4().hex}.tmp")
             try:
-                tmp_path.unlink()
+                encoded = b"".join(
+                    (
+                        json.dumps(event.to_dict(), ensure_ascii=False, separators=(",", ":"))
+                        + "\n"
+                    ).encode("utf-8")
+                    for event in event_list
+                )
+                with tmp_path.open("xb") as handle:
+                    handle.write(encoded)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                os.replace(tmp_path, path)
+                _fsync_directory(path.parent)
+                _forget_sequence(path)
             except OSError:
-                pass
+                try:
+                    tmp_path.unlink()
+                except OSError:
+                    pass
 
 
 def latest_open_turn_id(events: Iterable[TurnJournalEvent]) -> str:
@@ -1272,29 +1302,134 @@ def _dedupe_adjacent_messages(messages: list[dict[str, Any]]) -> list[dict[str, 
     return deduped
 
 
+@contextmanager
+def _journal_thread_lock(path: Path):
+    key = _sequence_cache_key(path)
+    with _JOURNAL_THREAD_LOCKS_GUARD:
+        entry = _JOURNAL_THREAD_LOCKS.get(key)
+        if entry is None:
+            entry = _ThreadLockEntry(lock=threading.RLock())
+            _JOURNAL_THREAD_LOCKS[key] = entry
+        entry.users += 1
+    try:
+        with entry.lock:
+            yield
+    finally:
+        with _JOURNAL_THREAD_LOCKS_GUARD:
+            entry.users -= 1
+            if entry.users == 0 and _JOURNAL_THREAD_LOCKS.get(key) is entry:
+                _JOURNAL_THREAD_LOCKS.pop(key, None)
+
+
+@contextmanager
+def _journal_file_lock(path: Path, *, timeout: float = _JOURNAL_LOCK_TIMEOUT_SECONDS):
+    """Serialize one journal's read-modify-write cycle across processes."""
+
+    lock_path = path.with_name(f"{path.name}.lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+b") as handle:
+        handle.seek(0, os.SEEK_END)
+        if handle.tell() == 0:
+            handle.write(b"\0")
+            handle.flush()
+        deadline = time.monotonic() + max(0.0, float(timeout))
+        while True:
+            if _try_lock_handle(handle):
+                break
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"Timed out acquiring turn journal lock: {lock_path}")
+            time.sleep(0.01)
+        try:
+            yield
+        finally:
+            _unlock_handle(handle)
+
+
+def _try_lock_handle(handle) -> bool:
+    handle.seek(0)
+    if os.name == "nt":
+        import msvcrt
+
+        try:
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        except OSError:
+            return False
+        return True
+
+    import fcntl
+
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except (BlockingIOError, OSError):
+        return False
+    return True
+
+
+def _unlock_handle(handle) -> None:
+    handle.seek(0)
+    if os.name == "nt":
+        import msvcrt
+
+        try:
+            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        except OSError:
+            pass
+        return
+
+    import fcntl
+
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    except OSError:
+        pass
+
+
+def _fsync_directory(path: Path) -> None:
+    """Persist directory entry changes where the platform supports it."""
+
+    if os.name == "nt":
+        return
+    try:
+        descriptor = os.open(path, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(descriptor)
+    except OSError:
+        pass
+    finally:
+        os.close(descriptor)
+
+
 def _next_sequence(path: Path) -> int:
     return _latest_sequence(path) + 1
 
 
 def latest_turn_sequence(project_root: Path, session_id: str) -> int:
     path = turn_journal_path(project_root, session_id)
-    with _SEQUENCE_CACHE_LOCK:
-        return _latest_sequence(path)
+    if not path.exists():
+        _forget_sequence(path)
+        return 0
+    with _journal_thread_lock(path):
+        with _journal_file_lock(path):
+            return _latest_sequence(path)
 
 
 def _latest_sequence(path: Path) -> int:
     if not path.exists():
-        _SEQUENCE_CACHE.pop(_sequence_cache_key(path), None)
+        _forget_sequence(path)
         return 0
     key = _sequence_cache_key(path)
     mtime_ns, size = _sequence_file_signature(path)
-    cached = _SEQUENCE_CACHE.get(key)
+    with _SEQUENCE_CACHE_LOCK:
+        cached = _SEQUENCE_CACHE.get(key)
     if cached is not None and cached[1] == mtime_ns and cached[2] == size:
         return cached[0]
     last_sequence = _latest_sequence_from_tail(path)
     if last_sequence <= 0:
         last_sequence = _latest_sequence_from_scan(path)
-    _SEQUENCE_CACHE[key] = (last_sequence, mtime_ns, size)
+    with _SEQUENCE_CACHE_LOCK:
+        _SEQUENCE_CACHE[key] = (last_sequence, mtime_ns, size)
     return last_sequence
 
 
@@ -1349,7 +1484,17 @@ def _latest_sequence_from_scan(path: Path) -> int:
 
 def _remember_sequence(path: Path, sequence: int) -> None:
     mtime_ns, size = _sequence_file_signature(path)
-    _SEQUENCE_CACHE[_sequence_cache_key(path)] = (max(0, int(sequence or 0)), mtime_ns, size)
+    with _SEQUENCE_CACHE_LOCK:
+        _SEQUENCE_CACHE[_sequence_cache_key(path)] = (
+            max(0, int(sequence or 0)),
+            mtime_ns,
+            size,
+        )
+
+
+def _forget_sequence(path: Path) -> None:
+    with _SEQUENCE_CACHE_LOCK:
+        _SEQUENCE_CACHE.pop(_sequence_cache_key(path), None)
 
 
 def _sequence_file_signature(path: Path) -> tuple[int, int]:
