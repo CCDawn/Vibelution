@@ -989,7 +989,9 @@ describe("ConversationView edit resend affordance", () => {
   it("caches response segmentation while delegating markdown rendering to the shared renderer", () => {
     expect(conversationViewSource).toContain("const responseSegmentCacheRef = useRef<Map<string, ResponseSegment[]>>(new Map())");
     expect(conversationViewSource).toContain("function getCachedResponseSegments(content: string)");
-    expect(conversationViewSource).toContain("trimOldestCacheEntries(responseSegmentCacheRef.current, RESPONSE_PARSE_CACHE_LIMIT)");
+    expect(conversationViewSource).toContain('from "./conversationResponseSegmentCache"');
+    expect(conversationViewSource).toContain("return getCachedResponseSegmentsFromCache(");
+    expect(conversationViewSource).not.toContain("trimOldestCacheEntries(");
     expect(conversationViewSource).not.toContain("markdownBlockCacheRef");
     expect(conversationViewSource).not.toContain("MARKDOWN_PARSE_CACHE_LIMIT");
     expect(conversationViewSource).not.toContain("function getCachedMarkdownBlocks(content: string)");
