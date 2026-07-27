@@ -39,10 +39,13 @@ QUICK_CLEAN_EXCLUDED_DIRS = {
 }
 PROTECTED_PROJECT_NAMES = {
     "AGENTS.md",
-    "DEVELOPMENT_STANDARD.md",
     "PROJECT_MEMORY.html",
     "config.toml",
     "config.example.toml",
+}
+PROTECTED_PROJECT_RELATIVE_PATHS = {
+    "docs/standards/README.md",
+    "docs/standards/development-standard.md",
 }
 
 
@@ -441,6 +444,9 @@ def _is_safe_quick_clean_target(path: Path, root: Path) -> bool:
     if not _is_relative_to(resolved, root):
         return False
     if resolved.name in PROTECTED_PROJECT_NAMES:
+        return False
+    relative_path = resolved.relative_to(root).as_posix()
+    if relative_path in PROTECTED_PROJECT_RELATIVE_PATHS:
         return False
     rel_parts = set(resolved.relative_to(root).parts)
     if ".docs" in rel_parts or "workspace" in rel_parts or "logs" in rel_parts or "log_info" in rel_parts:

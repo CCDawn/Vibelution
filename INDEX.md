@@ -67,7 +67,7 @@ Vibelution/
 | Core First 规范 | 必须执行 | ✅ 已建立 |
 | 测试 | 变更后跑相关 `pytest`；全量见下 | ✅ `tests/test_*.py` 按功能面持续增长，数量以 `tests/README.md` 中的统计命令为准 |
 | Service facade 体量 | 优先 re-export + pack；新业务尽量不堆 facade | ✅ 四大 facade 约 0.7–1.4k 行（session / workflow / agent_directory / runtime_scene）；业务在 pack |
-| 单文件体量意识 | 实现文件约 1.5–2k 行起评估拆分；约 2.5–3k 为软提示 | ⚠️ 部分 pack / 前端 route 仍厚（如 knowledge*、agent_sessions、ChatCodingRoute 约 3k 行）；规范见 `DEVELOPMENT_STANDARD.md` §8.3 |
+| 单文件体量意识 | 实现文件约 1.5–2k 行起评估拆分；约 2.5–3k 为软提示 | ⚠️ 部分 pack / 前端 route 仍厚（如 knowledge*、agent_sessions、ChatCodingRoute 约 3k 行）；规范见 `docs/standards/development-standard.md` §8.3 |
 | 规范入口 | 流程 Standard；认领看 services README | ✅ `docs/README.md` 规范地图 |
 
 ---
@@ -133,10 +133,10 @@ Vibelution/
 | 文件 | 用途 |
 |------|------|
 | `core/core_prompt/SOUL.md` | 身份定义 |
-| `core/core_prompt/SPEC.md` | 开发流程规范 |
+| `docs/standards/development-standard.md` | 详细开发流程规范 |
 | `core/core_prompt/COMMON.md` | 通用准则 |
 | `core/core_prompt/MENTAL_SOUL.md` | 心智模型说明 |
-| `DEVELOPMENT_STANDARD.md` | 当前开发与协作标准 |
+| `docs/standards/README.md` | 当前开发与协作规范入口 |
 | `docs/README.md` | 当前文档入口与归档边界 |
 | `tests/README.md` | 测试入口与验证说明 |
 | `挑战杯/research_team_flow_design.html` | 挑战杯科研流程 HTML 入口 |

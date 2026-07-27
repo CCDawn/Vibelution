@@ -19,7 +19,7 @@ Prefer slice modules over growing `agent_directory_service.py` when possible.
 | Lifecycle serializers on facade | `../agent_directory_service.py` (wrappers only) |
 | Public import surface | `../agent_directory_service.py` (prefer re-export) |
 
-Structure awareness (soft): `DEVELOPMENT_STANDARD.md` §8.3.
+Structure awareness (soft): `docs/standards/development-standard.md` §8.3.
 
 ## Ownership map (claim scopes)
 

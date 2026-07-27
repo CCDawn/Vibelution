@@ -114,7 +114,8 @@ MERGED_STATUSES = {
 
 HOT_FILE_FRAGMENTS = (
     "AGENTS.md",
-    "DEVELOPMENT_STANDARD.md",
+    "docs/standards/",
+    "docs\\standards\\",
     ".docs/project-memory/",
     ".docs/project-memory\\",
     "PROJECT_MEMORY.html",

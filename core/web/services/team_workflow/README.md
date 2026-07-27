@@ -38,7 +38,7 @@ Align language with frontend claim map: `web/src/routes/teams/README.md`.
 | Small shared workflow helpers | `facade_helpers.py` |
 | Public import surface only | `../team_workflow_orchestration_service.py` (re-export shell) |
 
-Frontend claim alignment: `web/src/routes/teams/README.md` when present. Structure awareness (soft): `DEVELOPMENT_STANDARD.md` §8.3.
+Frontend claim alignment: `web/src/routes/teams/README.md` when present. Structure awareness (soft): `docs/standards/development-standard.md` §8.3.
 
 ## Ownership map (claim scopes)
 

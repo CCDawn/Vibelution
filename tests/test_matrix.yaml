@@ -59,7 +59,7 @@ rules:
       - "tests/test_select_tests.py"
       - "README.md"
       - "tests/README.md"
-      - "DEVELOPMENT_STANDARD.md"
+      - "docs/standards/development-standard.md"
     commands:
       - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_local_quality_gate.py tests/test_ci_workflow_contract.py tests/test_environment_doctor.py tests/test_select_tests.py -q"
     notes:

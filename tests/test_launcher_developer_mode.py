@@ -186,6 +186,21 @@ def test_developer_cleanup_plan_requires_confirm_and_matching_hash(tmp_path):
     assert not cache_dir.exists()
 
 
+def test_developer_cleanup_protects_canonical_standards_paths(tmp_path):
+    project_root = tmp_path / "project"
+    standards_root = project_root / "docs" / "standards"
+    standards_root.mkdir(parents=True)
+
+    assert developer_mode._is_safe_quick_clean_target(
+        standards_root / "README.md",
+        project_root,
+    ) is False
+    assert developer_mode._is_safe_quick_clean_target(
+        standards_root / "development-standard.md",
+        project_root,
+    ) is False
+
+
 def test_developer_db_compact_uses_git_memory_prune_entrypoint(tmp_path, monkeypatch):
     config_path = tmp_path / "config.toml"
     config_path.write_text("[launcher]\n[launcher.developer_mode]\nenabled = true\n", encoding="utf-8")

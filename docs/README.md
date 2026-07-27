@@ -1,78 +1,52 @@
 # Vibelution Docs Index
 
-This directory contains project documentation that is useful across sessions. Use this file as the first stop before opening older implementation plans.
+`docs/` 是 Vibelution 跨会话详细文档的统一目录。根 `AGENTS.md` 是 Agent 入口；[standards/README.md](standards/README.md) 是现行规范权威地图。
 
 ## Current Entrypoints
 
-| Area | Document | Use |
+| Area | Document | Authority |
 | --- | --- | --- |
-| Project operation | [../DEVELOPMENT_STANDARD.md](../DEVELOPMENT_STANDARD.md) | Canonical development, worktree, validation, and release rules. |
-| Structure / file-size awareness | [../DEVELOPMENT_STANDARD.md#83-structure-and-file-size-awareness](../DEVELOPMENT_STANDARD.md#83-structure-and-file-size-awareness) | Soft guidance to prefer packs over god files; no hard fail. |
-| Frontend style ownership | [../DEVELOPMENT_STANDARD.md#9-frontend-standards](../DEVELOPMENT_STANDARD.md#9-frontend-standards) | Tailwind-first styling, HeroUI primitive usage, and VUI composition rules. |
-| Domain language | [../CONTEXT.md](../CONTEXT.md) | Stable product and architecture vocabulary. |
-| Multi-agent work | [agents/worktree-collaboration.md](agents/worktree-collaboration.md) | Worktree, branch, claim, and merge protocol. |
-| Conversation flow | [agents/conversation-flow-map.md](agents/conversation-flow-map.md) | Chat/Coding message path from submit to model stream, journal facts, SSE, and frontend projection. |
-| Tests | [../tests/README.md](../tests/README.md) | Test entrypoints and validation guidance. |
-| Runtime logging | [../core/logging/README.md](../core/logging/README.md) | Logging module overview. |
-| Challenge Cup flow | [../挑战杯/research_team_flow_design.html](../挑战杯/research_team_flow_design.html) | Current generated research-flow site. |
-| Spec/plan lifecycle | [superpowers/](superpowers/) | Status metadata and ownership rules for active design specs and implementation plans. |
+| Agent rules and routing | [../AGENTS.md](../AGENTS.md) | Root entry and global red lines |
+| Detailed development standard | [standards/development-standard.md](standards/development-standard.md) | Canonical cross-project operating standard |
+| Standards map | [standards/README.md](standards/README.md) | Canonical rule ownership and routing |
+| Domain language | [agents/domain.md](agents/domain.md) | Canonical product and architecture vocabulary |
+| Multi-Agent work | [agents/worktree-collaboration.md](agents/worktree-collaboration.md) | Worktree, claim, branch, and merge protocol |
+| Tool authorization | [agents/tool-authorization-entrypoints.md](agents/tool-authorization-entrypoints.md) | Tool permission and routing entrypoints |
+| Conversation flow | [agents/conversation-flow-map.md](agents/conversation-flow-map.md) | Chat turn data and projection map |
+| Architecture decisions | [adr/](adr/) | Durable decisions and reasons |
+| Tests | [../tests/README.md](../tests/README.md) | Test entrypoints and validation matrix |
+| Runtime logging | [../core/logging/README.md](../core/logging/README.md) | Logging implementation map |
+| Frontend product API | [../web/src/components/vui/README.md](../web/src/components/vui/README.md) | VUI local implementation map |
+| Project memory | [../.docs/project-memory/INDEX.md](../.docs/project-memory/INDEX.md) | Current runtime/project state, not a normative source |
 
-## Norms Map (how work is governed)
+## Directory Classification
 
-Use this map when you need **where the rule lives**, not a second full process manual. Prefer awareness and smallest useful change over rigid enforcement.
-
-| Concern | Canonical place | Notes |
+| Directory | Classification | Rule |
 | --- | --- | --- |
-| How to develop / validate / merge / release | [../DEVELOPMENT_STANDARD.md](../DEVELOPMENT_STANDARD.md) | Full operating standard |
-| Red lines & short Agent entry | [../AGENTS.md](../AGENTS.md) | Compact index; details stay in Standard |
-| Backend “which file do I edit?” | [../core/web/services/session/README.md](../core/web/services/session/README.md), [../core/web/services/team_workflow/README.md](../core/web/services/team_workflow/README.md), [../core/web/services/agent_directory/README.md](../core/web/services/agent_directory/README.md), [../core/web/services/runtime_scene/README.md](../core/web/services/runtime_scene/README.md) | Claim maps + 30-second routing tables |
-| Frontend TS / Tailwind / HeroUI / VUI | [../DEVELOPMENT_STANDARD.md#9-frontend-standards](../DEVELOPMENT_STANDARD.md#9-frontend-standards) | Implementation style for `web/` |
-| Domain vocabulary | [../CONTEXT.md](../CONTEXT.md) | Product language, not code style |
-| Architecture decision memory | [adr/](adr/) | Why a major choice exists |
-| Tests how-to | [../tests/README.md](../tests/README.md) | Suite layout and matrix |
-| Commit Python fatal checks | `scripts/local_quality_gate.py` + `.githooks` | Ruff subset for crash-class issues only |
-| Project structure snapshot | [../INDEX.md](../INDEX.md) | Orientation index; verify hot numbers when they matter |
+| [standards/](standards/) | Current normative | Cross-module detailed rules live here |
+| [agents/](agents/) | Current normative/reference | Collaboration, authorization, flow, and domain docs |
+| [adr/](adr/) | Current decision record | Explains why stable architecture decisions exist |
+| [ops/](ops/) | Current or historical operations | Each file must state status; historical snapshots are not authority |
+| [testing/](testing/) | Evidence/reference | Test reports do not replace current test contracts |
+| [plans/](plans/) | Planning | Plans are not active rules until promoted |
+| [superpowers/](superpowers/) | Specs and plans | Status metadata controls lifecycle; not automatic authority |
+| [prds/](prds/) | Product reference | Durable intent; verify against current implementation |
+| [security/](security/) | Generated/reference | Verify source data and generation date |
+| [archive/](archive/) | Historical | Never use as current rule source |
 
-There is **no** separate full-stack `CODING_STYLE.md`. Python style is mostly project habit plus fatal Ruff at commit; frontend style is Standard §9. Structure preferences are Standard §8.3 plus service pack READMEs.
+## Governance Rules
 
-## Directory Map
-
-| Directory | Status | Notes |
-| --- | --- | --- |
-| [adr/](adr/) | Current | Architecture decisions that should remain stable. |
-| [agents/](agents/) | Current | Multi-agent collaboration, issue, triage, and domain docs. |
-| [ops/](ops/) | Current/reference | Operational audits, policies, and baselines. |
-| [plans/](plans/) | Current planning | Recent active or near-current plans only. |
-| [prds/](prds/) | Historical/reference | Product requirement documents with durable context. |
-| [security/](security/) | Generated/reference | Security and tool-risk reports; verify source data before pruning. |
-| [superpowers/](superpowers/) | Current planning | User-approved design specs and implementation plans from Superpowers/CCDawn workflows; active files may be untracked until their owning claim closes. |
-| [testing/](testing/) | Current/reference | Test reports and validation records. |
-| [archive/](archive/) | Historical | Superseded implementation plans and old generated material. |
-
-## Current And Recent Plans
-
-- Use [superpowers/specs/](superpowers/specs/) and [superpowers/plans/](superpowers/plans/) for active CCDawn/Superpowers design and execution artifacts.
-- Use [plans/](plans/) for durable architecture plans that remain current or near-current when cited by active work.
-- Use [../.docs/project-memory/INDEX.md](../.docs/project-memory/INDEX.md) and [../PROJECT_MEMORY.html](../PROJECT_MEMORY.html) for live lane state, active claims, recent updates, and merge readiness.
+- 全局规范正文只写一次；`AGENTS.md`、本索引和模块 README 使用链接，不复制流程。
+- 模块 README 可以保留局部 ownership、目录和实现地图，但不能声明竞争性的全局 canonical 规则。
+- `core/core_prompt/COMMON.md` 与 `SOUL.md` 是运行时 Prompt 资产；它们和根 `AGENTS.md` 组成三核心基础。
+- `.docs/project-memory/` 是可变状态和协作数据，不属于规范目录。
+- 历史材料中的旧路径、旧技术栈和“当前”措辞仅代表当时快照。
+- 现行前端栈是 Tailwind-first + VUI + shadcn/Radix；HeroUI 已移除。
 
 ## Spec And Plan Lifecycle
 
-Files in [superpowers/specs/](superpowers/specs/) and [superpowers/plans/](superpowers/plans/) should begin with compact metadata: `Status`, `Owner`, `Claim` or branch/worktree when applicable, `Scope`, `Supersedes` or `Replaces`, `Implementation link`, `Validation`, and `Close condition`.
+Spec/plan 状态使用 [development-standard.md §19.1](standards/development-standard.md#191-spec-and-plan-lifecycle) 定义的：
 
-Use status values from [../DEVELOPMENT_STANDARD.md#191-spec-and-plan-lifecycle](../DEVELOPMENT_STANDARD.md#191-spec-and-plan-lifecycle): `draft`, `user-approved`, `active-plan`, `in-progress`, `implemented`, `superseded`, `blocked`, or `historical`.
+`draft`、`user-approved`、`active-plan`、`in-progress`、`implemented`、`superseded`、`blocked`、`historical`。
 
-When a spec or plan starts implementation, finishes, or is replaced, update the status or the relevant project-memory lane in the same governance round.
-
-Durable architecture reference plans:
-
-- [plans/2026-06-03-memory-platform-rag-retrieval.md](plans/2026-06-03-memory-platform-rag-retrieval.md)
-- [plans/2026-06-04-memory-platform-vector-rag-next-phase.md](plans/2026-06-04-memory-platform-vector-rag-next-phase.md)
-- [plans/2026-06-05-llm-model-protocol-routing-architecture.md](plans/2026-06-05-llm-model-protocol-routing-architecture.md)
-- [plans/2026-06-07-general-data-processing-substrate.md](plans/2026-06-07-general-data-processing-substrate.md)
-- [plans/2026-06-19-vibelution-agent-kernel-protocol-plan.md](plans/2026-06-19-vibelution-agent-kernel-protocol-plan.md)
-
-## Archive Boundary
-
-The 2026-05 implementation plans were moved to [archive/plans/2026-05/](archive/plans/2026-05/) because they are useful historical design evidence, but they should not compete with current task entrypoints.
-
-Do not archive or delete `.docs/project-memory/**`, root `PROJECT_MEMORY.html`, or generated Challenge Cup HTML as part of ordinary docs cleanup. Those surfaces have their own governance paths.
+计划只有在 `AGENTS.md` 或 [standards/README.md](standards/README.md) 明确提升后，才能成为现行规范。
