@@ -132,6 +132,12 @@ import {
 import { TeamSourceCollectionModeFields } from "./teams/TeamSourceCollectionModeFields";
 import { TeamSourceCollectionSearchBriefInject } from "./teams/TeamSourceCollectionSearchBriefInject";
 import { TeamSourceCollectionManualWritebackInject } from "./teams/TeamSourceCollectionManualWritebackInject";
+import { TeamSourceCollectionControlsInject } from "./teams/TeamSourceCollectionControlsInject";
+import { TeamSourceCollectionActiveStageInject } from "./teams/TeamSourceCollectionActiveStageInject";
+import {
+  buildSourceCollectionFilterBarOptions,
+  resolveSourceCollectionPaginationView,
+} from "./teams/source-collection/injectModel";
 import {
   CANVAS_VIEWPORT_HEIGHT,
   CANVAS_VIEWPORT_WIDTH,
@@ -1798,14 +1804,14 @@ export function TeamsRoute({
     label: string,
     loading = false,
   ) {
-    const sourceCollectionFilterLoadingCount = (filter: SourceCollectionSourceFilter) =>
-      filter === "all" ? sourceCollectionLoadingText : "...";
-    const options: Array<TeamSourceCollectionFilterOption<SourceCollectionSourceFilter>> = SOURCE_COLLECTION_SOURCE_FILTERS.map((filter) => ({
-      key: filter,
-      label: sourceCollectionSourceFilterLabel(filter, lang),
-      count: loading ? sourceCollectionFilterLoadingCount(filter) : counts[filter] ?? 0,
-      selected: sourceCollectionSourceFilter === filter,
-    }));
+    const options = buildSourceCollectionFilterBarOptions({
+      filters: SOURCE_COLLECTION_SOURCE_FILTERS,
+      counts,
+      selected: sourceCollectionSourceFilter,
+      loading,
+      loadingAllText: sourceCollectionLoadingText,
+      labelFor: (filter) => sourceCollectionSourceFilterLabel(filter, lang),
+    }) as Array<TeamSourceCollectionFilterOption<SourceCollectionSourceFilter>>;
 
     return (
       <TeamSourceCollectionFilterBar
@@ -1832,17 +1838,20 @@ export function TeamsRoute({
   }
 
   function renderSourceCollectionPagination(stageId: SourceCollectionStageModuleId, total: number) {
-    const pageCount = Math.max(1, Math.ceil(total / SOURCE_COLLECTION_RESULT_PAGE_SIZE));
-    if (pageCount <= 1) {
+    const view = resolveSourceCollectionPaginationView({
+      total,
+      page: sourceCollectionResultPageByStage[stageId] ?? 1,
+      pageSize: SOURCE_COLLECTION_RESULT_PAGE_SIZE,
+    });
+    if (!view) {
       return null;
     }
-    const page = Math.min(Math.max(1, sourceCollectionResultPageByStage[stageId] ?? 1), pageCount);
     return (
       <TeamSourceCollectionPagination
         lang={lang}
-        total={total}
-        page={page}
-        pageSize={SOURCE_COLLECTION_RESULT_PAGE_SIZE}
+        total={view.total}
+        page={view.page}
+        pageSize={view.pageSize}
         onPageChange={(nextPage) => setSourceCollectionResultPage(stageId, nextPage)}
         onContain={stopSourceCollectionPaginationEvent}
       />
@@ -2385,7 +2394,7 @@ export function TeamsRoute({
 
   function renderSourceCollectionControlsPanel() {
     return (
-      <TeamSourceCollectionControlsWorkspacePanel
+      <TeamSourceCollectionControlsInject
         lang={lang}
         sourceCollectionControlPanelRef={sourceCollectionControlPanelRef}
         sourceCollectionStageModules={sourceCollectionStageModules}
@@ -2434,7 +2443,7 @@ export function TeamsRoute({
 
   function renderSourceCollectionActiveStagePanel() {
     return (
-      <TeamSourceCollectionActiveStageWorkspacePanel
+      <TeamSourceCollectionActiveStageInject
         lang={lang}
         sourceCollectionStageModules={sourceCollectionStageModules}
         selectedSourceCollectionStageId={selectedSourceCollectionStageId}
