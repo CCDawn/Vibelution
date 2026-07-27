@@ -254,9 +254,6 @@ def _build_available_sections(
         parts.append(f"- 当前可选: {optional_names}\n")
     if registered_optional_names:
         parts.append(f"- 其他可选: {registered_optional_names}\n")
-    if optional_names or registered_optional_names:
-        parts.append("- 使用 `<active_components>` 标签按需激活可选组件\n")
-
     return "".join(parts)
 
 

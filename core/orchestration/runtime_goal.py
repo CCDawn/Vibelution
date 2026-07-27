@@ -90,7 +90,7 @@ class RuntimeGoalPacket:
             f"- 完成标准: {self.completion_standard}",
             "- 禁止项:",
             *[f"  - {item}" for item in forbidden],
-            "- 提示词组件选择: 可以用 `<active_components>` 请求切换组件，但必须服务当前目标包，不能突破能力边界或移除受保护基座。",
+            "- 提示词组件选择: 由运行时根据本目标包、真实能力、权限和预算确定；模型输出不能改写系统层。",
         ]
         return "\n".join(lines)
 

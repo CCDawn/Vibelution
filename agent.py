@@ -134,6 +134,11 @@ from core.prompt_manager import (
     to_string,
 )
 from core.prompt_manager.core_prompt_sources import CORE_PROMPT_NAMES
+from core.prompt_manager.provider_adapters import (
+    build_prompt_assembly_context,
+    build_protocol_adapter_section,
+    client_supports_tool_calling,
+)
 from core.prompt_manager.task_analyzer import get_task_analyzer
 from core.orchestration.evolution_lifecycle import (
     is_full_evolution_goal,
@@ -1311,7 +1316,7 @@ class SelfEvolvingAgent:
         base_llm = getattr(self, "_base_llm", None) or self.llm_with_tools
         if profile_id and profile_id != getattr(base_llm, "profile_id", None):
             base_llm = get_llm_client(profile_id=profile_id, config=self.config)
-        if disable_tools:
+        if disable_tools or not client_supports_tool_calling(base_llm):
             return base_llm
         if not self._is_restart_focus_mode():
             if not hasattr(self, "_base_llm"):
@@ -2139,11 +2144,56 @@ class SelfEvolvingAgent:
             excluded.extend(CORE_PROMPT_NAMES)
         return list(dict.fromkeys(excluded))
 
+    def _prompt_assembly_context_for_turn(self):
+        client = getattr(self, "_base_llm", None)
+        route = getattr(client, "protocol_route", None)
+        capabilities = getattr(client, "capabilities", None)
+        if client is None or route is None or capabilities is None:
+            return None
+        context = build_prompt_assembly_context(
+            client,
+            context_window=int(
+                getattr(self, "_context_window_limit", 0)
+                or getattr(
+                    getattr(client, "resolved_spec", None),
+                    "context_window",
+                    0,
+                )
+                or 0
+            ),
+            allowed_tool_names=tuple(
+                sorted(getattr(self, "key_tool_maps", set()) or set())
+            ),
+            permission_fingerprint=str(
+                getattr(
+                    self,
+                    "_tool_authorization_decision_fingerprint",
+                    "",
+                )
+                or ""
+            ),
+            enforce_core_floor=not bool(
+                getattr(self, "_core_prompt_snapshot_seeded_by_host", False)
+            ),
+        )
+        section = build_protocol_adapter_section(route, capabilities)
+        setter = getattr(self.prompt_manager, "set_protocol_adapter", None)
+        if callable(setter):
+            setter(
+                section,
+                fingerprint=(
+                    f"{context.model_protocol}:"
+                    f"{context.capability_fingerprint}"
+                ),
+            )
+        return context
+
     def _build_system_prompt_for_turn(self, *, stable_session_prompt: bool):
         """Build a prompt without unrelated global diagnostics for the current mode."""
         excluded_sections = self._excluded_system_prompt_sections_for_turn(
             stable_session_prompt=stable_session_prompt,
         )
+        assembly_context = self._prompt_assembly_context_for_turn()
         if excluded_sections:
             frozen_core_sections = [
                 name
@@ -2153,7 +2203,11 @@ class SelfEvolvingAgent:
             build_kwargs: Dict[str, Any] = {"exclude": excluded_sections}
             if frozen_core_sections:
                 build_kwargs["frozen_core_sections"] = frozen_core_sections
+            if assembly_context is not None:
+                build_kwargs["assembly_context"] = assembly_context
             return self.prompt_manager.build(**build_kwargs)
+        if assembly_context is not None:
+            return self.prompt_manager.build(assembly_context=assembly_context)
         return self.prompt_manager.build()
 
     def clear_chat_provider_replay_state(self) -> None:
@@ -3828,29 +3882,29 @@ class SelfEvolvingAgent:
         components = list(getattr(processed, "active_components", []) or [])
         if not components:
             return
-        before = list((self.prompt_manager.get_status() or {}).get("active_sections_override") or [])
-        self.prompt_manager.select_components(components)
-        after = list((self.prompt_manager.get_status() or {}).get("active_sections_override") or [])
-        if after == before:
-            return
-        joined = ", ".join(components)
-        _debug_logger.info(f"[PromptManager] LLM 请求切换组件: {joined}", tag="PROMPT")
+        _debug_logger.info(
+            f"[PromptManager] 观测到兼容标签但不应用: {', '.join(components)}",
+            tag="PROMPT",
+        )
         try:
-            get_ui().add_log(f"Prompt 组件切换: {', '.join(after)}", "INFO")
-        except Exception:
-            pass
-        try:
-            logger.log_action("active_components", {"requested": components, "applied": after})
+            logger.log_action(
+                "active_components_observed",
+                {
+                    "requested": components,
+                    "applied": [],
+                    "mode": "diagnostic_only",
+                },
+            )
         except Exception:
             pass
         _record_agent_scene_event(
             "prompt",
-            "prompt.components.selected",
-            message="统一 agent 已选择提示词组件。",
+            "prompt.components.request_observed",
+            message="模型组件请求仅作为兼容诊断记录，未修改系统 Prompt。",
             fields={
                 "requested": components,
-                "applied": after,
-                "rejected": [component for component in components if component not in after],
+                "applied": [],
+                "mode": "diagnostic_only",
             },
         )
 

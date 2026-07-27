@@ -411,7 +411,7 @@ class _CanonicalAgentTestLLM:
 class TestToolMessageFlow:
     """工具消息协议测试"""
 
-    def test_apply_active_components_request_updates_prompt_manager_and_logs(self, monkeypatch):
+    def test_apply_active_components_request_is_diagnostic_only(self, monkeypatch):
         agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
         class DummyPromptManager:
             def __init__(self):
@@ -443,11 +443,21 @@ class TestToolMessageFlow:
 
         agent._apply_active_components_request(processed)
 
-        assert agent.prompt_manager.override == ["SOUL", "SPEC"]
-        assert ui_events == [("INFO", "Prompt 组件切换: SOUL, SPEC")]
-        assert actions == [("active_components", {"requested": ["SOUL", "SPEC"], "applied": ["SOUL", "SPEC"]})]
-        assert scene_events[0][0:2] == ("prompt", "prompt.components.selected")
+        assert agent.prompt_manager.override is None
+        assert ui_events == []
+        assert actions == [
+            (
+                "active_components_observed",
+                {
+                    "requested": ["SOUL", "SPEC"],
+                    "applied": [],
+                    "mode": "diagnostic_only",
+                },
+            )
+        ]
+        assert scene_events[0][0:2] == ("prompt", "prompt.components.request_observed")
         assert scene_events[0][2]["fields"]["requested"] == ["SOUL", "SPEC"]
+        assert scene_events[0][2]["fields"]["applied"] == []
 
     def test_handle_tool_result_uses_tool_message_when_id_present(self):
         messages = []

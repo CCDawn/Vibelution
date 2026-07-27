@@ -1485,6 +1485,7 @@ class TestFallbackDefaults:
             "COMMON",
             "SOUL",
             "AGENTS",
+            "PROTOCOL_ADAPTER",
             "RUNTIME_GOAL",
             "USER_PROFILE",
             "SPEC_DIGEST",
