@@ -52,12 +52,10 @@ def stream_session_events(
             raise s.SessionNotFoundError(
                 s.text_for(s.get_web_language(), zh="未找到当前会话。", en="Session not found.")
             )
-    else:
-        state = initial_state or s.get_session_stream_initial_state(conversation_id)
-        if state is None:
-            raise s.SessionNotFoundError(
-                s.text_for(s.get_web_language(), zh="未找到当前会话。", en="Session not found.")
-            )
+    elif initial_mode == "none":
+        # The REST detail request is the bootstrap authority for this mode.
+        # SSE only carries events appended after the subscriber is registered.
+        state = None
 
     subscriber: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=s._SESSION_STREAM_QUEUE_SIZE)
     s._register_session_stream_subscriber(conversation_id, subscriber)
@@ -135,6 +133,11 @@ def resolve_session_stream_initial_payload(
         )
 
     initial_mode = s.normalize_session_stream_initial_mode(initial, default="light")
+    if initial_mode == "none":
+        # The caller already owns the authoritative bootstrap detail. Avoid
+        # rebuilding the session summary/message projection before opening the
+        # incremental event stream.
+        return initial_mode, None, None
     if initial_mode == "full":
         detail = s.get_session_detail(conversation_id)
         if detail is None:

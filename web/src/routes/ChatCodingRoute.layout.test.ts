@@ -2030,7 +2030,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndStreamSource).toContain("stream.removeEventListener(\"session_initial\", handleSessionInitial as EventListener)");
     expect(routeAndStreamSource).toContain("stream.removeEventListener(\"assistant_delta\", handleAssistantDelta as EventListener)");
     expect(routeAndStreamSource).toContain("queryClient.invalidateQueries({ queryKey: queryKeys.session(streamSessionId) })");
-    expect(routeAndStreamSource).toContain("const stream = new EventSource(`/api/sessions/${streamSessionId}/events?initial=light`)");
+    expect(routeAndStreamSource).toContain("const stream = new EventSource(`/api/sessions/${streamSessionId}/events?initial=none`)");
+    expect(routeAndStreamSource).not.toContain("/events?initial=light");
     expect(routeAndStreamSource).not.toContain("let pendingAssistantDeltaDetail: SessionDetail | undefined");
     expect(routeAndStreamSource).not.toContain("pendingAssistantDeltaDetail = mergeAssistantDeltaIntoSessionDetail");
     expect(routeAndStreamSource).not.toContain("queryClient.setQueryData<SessionDetail>(queryKeys.session(streamSessionId)");
@@ -2134,7 +2135,7 @@ describe("ChatCodingRoute layout contract", () => {
 
   it("keeps active chat streams stable during direct session route switches", () => {
     const sessionStreamEffectSource = routeAndStreamSource.slice(
-      routeAndStreamSource.indexOf("const stream = new EventSource(`/api/sessions/${streamSessionId}/events?initial=light`);"),
+      routeAndStreamSource.indexOf("const stream = new EventSource(`/api/sessions/${streamSessionId}/events?initial=none`);"),
       routeAndStreamSource.length,
     );
 
@@ -3190,7 +3191,7 @@ describe("ChatCodingRoute layout contract", () => {
 
   it("requests authoritative session refresh when the session stream errors", () => {
     const sessionStreamStart = routeAndStreamSource.indexOf(
-      "const stream = new EventSource(`/api/sessions/${streamSessionId}/events?initial=light`)",
+      "const stream = new EventSource(`/api/sessions/${streamSessionId}/events?initial=none`)",
     );
     const onErrorStart = routeAndStreamSource.indexOf("stream.onerror = () => {", sessionStreamStart);
     const onErrorEnd = routeAndStreamSource.indexOf("function handleSessionDetail", onErrorStart);

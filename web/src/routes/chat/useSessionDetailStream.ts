@@ -143,7 +143,7 @@ export function useSessionDetailStream({
         ...collectBrowserPageSnapshot(),
       },
     });
-    const stream = new EventSource(`/api/sessions/${streamSessionId}/events?initial=light`);
+    const stream = new EventSource(`/api/sessions/${streamSessionId}/events?initial=none`);
 
     function logRejectedSessionStreamRoute(trace: SessionStreamProtocolTrace, message: string) {
       if (trace.rejectReason === "parse_error") {

@@ -1462,13 +1462,39 @@ def test_session_stream_initial_payload_helper_normalizes_route_default(tmp_path
 def test_session_stream_initial_payload_helper_keeps_none_as_no_initial_event(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="running")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        session_service,
+        "get_session_stream_initial_state",
+        lambda session_id: (_ for _ in ()).throw(
+            AssertionError(f"unexpected initial state load for {session_id}")
+        ),
+    )
 
     mode, detail, initial_state = session_service.resolve_session_stream_initial_payload("session-live", "none")
 
     assert mode == "none"
     assert detail is None
-    assert initial_state is not None
-    assert initial_state["type"] == "session_initial"
+    assert initial_state is None
+
+
+def test_session_events_stream_none_yields_only_incremental_events(monkeypatch):
+    def fail_initial_projection(*_args, **_kwargs):
+        raise AssertionError("initial=none must not rebuild the session bootstrap projection")
+
+    def register_incremental_event(_session_id, subscriber):
+        subscriber.put({"type": "session_probe", "sessionId": "session-bootstrap-owned"})
+
+    monkeypatch.setattr(session_service, "get_session_stream_initial_state", fail_initial_projection)
+    monkeypatch.setattr(session_service, "get_session_detail", fail_initial_projection)
+    monkeypatch.setattr(session_service, "_register_session_stream_subscriber", register_incremental_event)
+    monkeypatch.setattr(session_service, "_unregister_session_stream_subscriber", lambda *_args: None)
+
+    stream = session_service.stream_session_events("session-bootstrap-owned", initial="none")
+    first_event = next(stream)
+    stream.close()
+
+    assert "event: session_probe" in first_event
+    assert '"sessionId": "session-bootstrap-owned"' in first_event
 
 
 def test_web_app_entrypoint_uses_extracted_app_chain_helpers():
