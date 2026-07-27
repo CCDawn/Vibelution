@@ -30,6 +30,7 @@ this package and be re-exported from the facade when it is part of the public AP
 | Agent purge/archive/child/inbox/cli | `agent_sessions.py` |
 | Create/select session / index repair | `conversation_index.py` |
 | List cache / prewarm | `list_cache.py` + `session_ops.py` |
+| SQLite session catalog reconcile | `catalog_bridge.py` |
 | Live overlay / checkpoint | `live_output.py` + `live_output_write.py` |
 | Timeline / tool normalize | `timeline.py` |
 | Turn errors / work-runs / review | `turn_diagnostics.py` |
@@ -48,6 +49,7 @@ Product flow map: `docs/agents/conversation-flow-map.md`. Structure awareness (s
 | Task type | Prefer these files | Avoid |
 |-----------|-------------------|--------|
 | Session list index cache / prewarm signatures | `list_cache.py` | stream capture, agent turn |
+| Session catalog source projection / reconcile | `catalog_bridge.py` | canonical writes, HTTP DTO projection |
 | Live output checkpoint / recovery state | `live_output.py` | submit validation, stream publish |
 | Conversation events cache, ledger seq helpers | `journal_bridge.py` | LLM invoke, live recovery reconcile |
 | `submit_session_message*` / guidance / edit-resubmit entry | `submit.py` | team workflow orchestration, worker loop |

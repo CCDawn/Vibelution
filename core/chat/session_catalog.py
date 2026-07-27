@@ -10,10 +10,11 @@ import ctypes
 import hashlib
 import os
 import sqlite3
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 
 SCHEMA_VERSION = 1
@@ -365,7 +366,7 @@ class SessionCatalogStore:
             connection.close()
 
     def metadata(self) -> dict[str, Any]:
-        with self._connect() as connection:
+        with closing(self._connect()) as connection:
             self._validate_schema(connection)
             row = dict(_metadata_row(connection))
         for key in ("lease_owner", "lease_expires_at"):
@@ -374,7 +375,7 @@ class SessionCatalogStore:
 
     def quick_check(self) -> str:
         try:
-            with self._connect() as connection:
+            with closing(self._connect()) as connection:
                 self._validate_schema(connection)
                 result = _quick_check(connection)
                 if result != "ok":
@@ -405,7 +406,7 @@ class SessionCatalogStore:
         )
         values = tuple(normalized[column] for column in _SESSION_COLUMNS)
         try:
-            with self._connect() as connection:
+            with closing(self._connect()) as connection:
                 self._validate_schema(connection)
                 connection.execute(
                     f"""
@@ -473,10 +474,80 @@ class SessionCatalogStore:
             LIMIT ? OFFSET ?
         """
         try:
-            with self._connect() as connection:
+            with closing(self._connect()) as connection:
                 self._validate_schema(connection)
                 rows = connection.execute(sql, tuple(parameters)).fetchall()
                 return [dict(row) for row in rows]
+        except sqlite3.Error as exc:
+            _raise_sqlite_error(exc)
+
+    def replace_sessions(
+        self,
+        rows: Sequence[Mapping[str, Any]],
+        *,
+        owner: str,
+        source_revision: str,
+        watermark: str,
+        source_revision_reader: Callable[[], str],
+    ) -> bool:
+        """Atomically publish a fully validated candidate projection."""
+
+        normalized_rows = [self._normalize_session_row(row) for row in rows]
+        session_ids = [row["session_id"] for row in normalized_rows]
+        if len(session_ids) != len(set(session_ids)):
+            raise ValueError("candidate session catalog contains duplicate session_id values")
+        normalized_owner = str(owner or "").strip()
+        normalized_revision = str(source_revision or "").strip()
+        if not normalized_owner or not normalized_revision:
+            raise ValueError("owner and source_revision are required")
+        columns = ", ".join(_SESSION_COLUMNS)
+        placeholders = ", ".join("?" for _ in _SESSION_COLUMNS)
+        values = [
+            tuple(row[column] for column in _SESSION_COLUMNS)
+            for row in normalized_rows
+        ]
+        try:
+            with closing(self._connect()) as connection:
+                self._validate_schema(connection)
+                connection.execute("DROP TABLE IF EXISTS temp.sessions_next")
+                connection.execute(
+                    "CREATE TEMP TABLE sessions_next AS SELECT * FROM sessions WHERE 0"
+                )
+                if values:
+                    connection.executemany(
+                        f"INSERT INTO sessions_next ({columns}) VALUES ({placeholders})",
+                        values,
+                    )
+                connection.execute("BEGIN IMMEDIATE")
+                current_owner = str(_metadata_row(connection)["lease_owner"] or "")
+                if current_owner != normalized_owner:
+                    connection.rollback()
+                    raise CatalogLeaseConflictError(
+                        "Session catalog lease is owned by another worker."
+                    )
+                if str(source_revision_reader() or "").strip() != normalized_revision:
+                    connection.rollback()
+                    return False
+                connection.execute("DELETE FROM sessions")
+                connection.execute(
+                    f"INSERT INTO sessions ({columns}) SELECT {columns} FROM sessions_next"
+                )
+                connection.execute(
+                    """
+                    UPDATE catalog_meta
+                    SET source_revision=?,
+                        backfill_status='complete',
+                        lease_owner=NULL,
+                        lease_expires_at=NULL,
+                        watermark=?,
+                        last_reconciled_at=?,
+                        last_error_type=''
+                    WHERE id=1
+                    """,
+                    (normalized_revision, str(watermark or ""), _utcnow()),
+                )
+                connection.commit()
+                return True
         except sqlite3.Error as exc:
             _raise_sqlite_error(exc)
 
@@ -491,7 +562,7 @@ class SessionCatalogStore:
         if not normalized_owner:
             raise ValueError("lease owner is required")
         try:
-            with self._connect() as connection:
+            with closing(self._connect()) as connection:
                 self._validate_schema(connection)
                 connection.execute("BEGIN IMMEDIATE")
                 row = _metadata_row(connection)
@@ -546,7 +617,7 @@ class SessionCatalogStore:
     ) -> None:
         normalized_owner = str(owner or "").strip()
         try:
-            with self._connect() as connection:
+            with closing(self._connect()) as connection:
                 self._validate_schema(connection)
                 connection.execute("BEGIN IMMEDIATE")
                 current_owner = str(_metadata_row(connection)["lease_owner"] or "")
