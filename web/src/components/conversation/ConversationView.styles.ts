@@ -349,7 +349,7 @@ const styles: Record<string, string> = {
   codexTranscriptCompactErrorDetailsSummary:
     "vui-components-conversationview codexTranscriptCompactErrorDetailsSummary inline-flex cursor-pointer list-none select-none items-center gap-1 [&::-webkit-details-marker]:hidden",
   codexTranscriptCompactErrorSummary:
-    "vui-components-conversationview codexTranscriptCompactErrorSummary min-w-0 flex-1 whitespace-normal break-words [font-size:var(--vui-font-xs)] leading-[var(--vui-line-tight)] text-[var(--state-error)] [overflow-wrap:anywhere]",
+    "vui-components-conversationview codexTranscriptCompactErrorSummary min-w-0 flex-1 whitespace-normal break-words [font-size:var(--vui-font-xs)] leading-[var(--vui-line-tight)] text-[var(--fg-tertiary)] [overflow-wrap:anywhere]",
   codexTranscriptCellIcon:
     "vui-components-conversationview codexTranscriptCellIcon mt-[0.15rem] grid size-4 shrink-0 place-items-center text-[var(--fg-tertiary)]",
   codexTranscriptCellMeta:
@@ -367,7 +367,7 @@ const styles: Record<string, string> = {
   codexTranscriptFinalCell:
     "vui-components-conversationview codexTranscriptFinalCell border-0 bg-transparent py-2 text-[var(--fg-primary)] leading-[var(--vui-line-readable)] [&_.markdownBody]:max-w-full [&_.markdownBody]:text-[var(--fg-primary)] [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_table]:max-w-full [&_img]:max-w-full [&_a]:break-words",
   codexTranscriptCell_error:
-    "vui-components-conversationview codexTranscriptCell_error border-0 border-l-2 border-l-[var(--state-error)] bg-[color-mix(in_srgb,var(--state-error)_5%,transparent)] px-3 py-2 text-[var(--fg-secondary)] [&_.codexTranscriptCellIcon]:text-[var(--state-error)] [&_.codexTranscriptCellMeta]:text-[var(--state-error)] [&_.codexTranscriptCellTitle]:text-[var(--state-error)]",
+    "vui-components-conversationview codexTranscriptCell_error border-0 bg-transparent py-1 text-[var(--fg-secondary)] [&_.codexTranscriptCellIcon]:text-[var(--state-error)]",
   codexTranscriptCell_neutral:
     "vui-components-conversationview codexTranscriptCell_neutral text-[var(--fg-secondary)]",
   codexTranscriptCell_running:

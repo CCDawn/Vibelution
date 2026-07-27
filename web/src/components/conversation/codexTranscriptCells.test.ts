@@ -229,6 +229,127 @@ describe("codexTranscriptCells", () => {
     expect(cells[0]?.summary).not.toContain("{");
   });
 
+  it("compacts status failed terminal payloads without exposing raw output", () => {
+    const rawFailure = JSON.stringify({
+      status: "failed",
+      terminalSessionId: "sandbox-terminal",
+      sessionOpen: false,
+      code: "TERMINAL_STDIN_UNAVAILABLE",
+      failureClass: "terminal_stdin_unavailable",
+      message: "终端会话已结束，不能继续写入。",
+      stdout: "const ConfigSummary = () => veryLongInternalSourceCode",
+    });
+    const cells = buildCodexTranscriptCells(message({ id: "terminal-write-failure" }), {
+      operations: [
+        {
+          id: "op-write-stdin",
+          kind: "tool",
+          label: "write_stdin",
+          status: "failed",
+          summary: rawFailure,
+          error: rawFailure,
+          durationSeconds: null,
+        },
+      ],
+    });
+
+    expect(cells).toEqual([
+      expect.objectContaining({
+        kind: "error_notice",
+        title: "write_stdin",
+        summary: "终端会话已结束",
+        failureCount: 1,
+        diagnosticSummary: expect.objectContaining({
+          reasonCode: "TERMINAL_STDIN_UNAVAILABLE",
+          reasonSummary: "终端会话已结束，不能继续写入。",
+        }),
+      }),
+    ]);
+    expect(cells[0]?.summary).not.toContain("terminalSessionId");
+    expect(cells[0]?.summary).not.toContain("ConfigSummary");
+  });
+
+  it("uses failed command operation diagnostics instead of the raw group summary", () => {
+    const rawFailure = JSON.stringify({
+      status: "failed",
+      code: "TERMINAL_STDIN_UNAVAILABLE",
+      message: "终端会话已结束，不能继续写入。",
+      stdout: "large internal output",
+    });
+    const timelineItems: AgentMessageTimelineItem[] = [
+      {
+        id: "failed-write-group",
+        kind: "command_group",
+        status: "failed",
+        title: "write_stdin",
+        summary: rawFailure,
+        operations: [
+          {
+            id: "op-failed-write",
+            kind: "tool",
+            label: "write_stdin",
+            status: "failed",
+            summary: rawFailure,
+            error: rawFailure,
+            durationSeconds: null,
+          },
+        ],
+      },
+    ];
+
+    const cells = buildCodexTranscriptCells(message({ id: "failed-command-group" }), { timelineItems });
+
+    expect(cells).toEqual([
+      expect.objectContaining({
+        kind: "error_notice",
+        title: "write_stdin",
+        summary: "终端会话已结束",
+        operationIds: ["op-failed-write"],
+      }),
+    ]);
+    expect(cells[0]?.summary).not.toContain("{");
+    expect(cells[0]?.summary).not.toContain("large internal output");
+  });
+
+  it("folds contiguous failures with the same root cause into one high-value row", () => {
+    const quotaError = "[工具授权] 当前回合工具调用额度已用尽。请刷新 Agent 工具配置后重试。";
+    const operations: AgentMessageOperation[] = [
+      {
+        id: "op-search",
+        kind: "tool",
+        label: "搜索",
+        status: "failed",
+        summary: quotaError,
+        error: quotaError,
+        durationSeconds: null,
+      },
+      ...["op-graph-1", "op-graph-2", "op-graph-3"].map((id): AgentMessageOperation => ({
+        id,
+        kind: "tool",
+        label: "代码图谱",
+        status: "failed",
+        summary: quotaError,
+        error: quotaError,
+        durationSeconds: null,
+      })),
+    ];
+
+    const cells = buildCodexTranscriptCells(message({ id: "repeated-tool-quota" }), { operations });
+
+    expect(cells).toEqual([
+      expect.objectContaining({
+        kind: "error_notice",
+        title: "工具调用受限",
+        summary: "本回合工具调用额度已用尽",
+        failureCount: 4,
+        operationIds: ["op-search", "op-graph-1", "op-graph-2", "op-graph-3"],
+        diagnosticSummary: expect.objectContaining({
+          reasonCode: "tool_quota_exhausted",
+        }),
+      }),
+    ]);
+  });
+
   it("filters internal runtime status operation cells from legacy transcript projections", () => {
     const cells = buildCodexTranscriptCells(message({ id: "legacy-internal-status" }), {
       operations: [

@@ -133,6 +133,55 @@ describe("codexNativeTranscriptSurface", () => {
     expect(surface.suppressProjectedResponse).toBe(true);
   });
 
+  it("compacts and folds repeated raw native tool failures at the transcript boundary", () => {
+    const quotaFailure = "[工具授权] 当前回合工具调用额度已用尽。请刷新 Agent 工具配置后重试。";
+    const surface = resolveCodexTranscriptSurface(message({
+      codexTranscript: {
+        version: 1,
+        source: "native",
+        messageId: "assistant-native-tool-failures",
+        cells: [
+          {
+            id: "native-search-failure",
+            kind: "error_notice",
+            messageId: "assistant-native-tool-failures",
+            status: "failed",
+            tone: "error",
+            title: "搜索",
+            text: quotaFailure,
+            summary: quotaFailure,
+            operationIds: ["op-search"],
+          },
+          ...["op-graph-1", "op-graph-2", "op-graph-3"].map((operationId) => ({
+            id: `native-${operationId}`,
+            kind: "error_notice" as const,
+            messageId: "assistant-native-tool-failures",
+            status: "failed",
+            tone: "error",
+            title: "代码图谱",
+            text: quotaFailure,
+            summary: quotaFailure,
+            operationIds: [operationId],
+          })),
+        ],
+      },
+    }), []);
+
+    expect(surface.cells).toEqual([
+      expect.objectContaining({
+        kind: "error_notice",
+        title: "工具调用受限",
+        text: undefined,
+        summary: "本回合工具调用额度已用尽",
+        failureCount: 4,
+        operationIds: ["op-search", "op-graph-1", "op-graph-2", "op-graph-3"],
+        diagnosticSummary: expect.objectContaining({
+          reasonCode: "tool_quota_exhausted",
+        }),
+      }),
+    ]);
+  });
+
   it("removes internal runtime status cells from native transcripts while keeping the answer", () => {
     const surface = resolveCodexTranscriptSurface(message({
       content: "模型连接正在重试...\n第 1/5 次；原因：server_error。本轮仍在继续，请不要重复提交。\n\n本轮已按请求停止。",

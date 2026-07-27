@@ -1647,12 +1647,15 @@ export function ConversationView({
     const finalCellIndex = visibleCells.findIndex(
       (cell) => cell.kind === "assistant_markdown" && cell.phase !== "commentary",
     );
-    const processCells = finalCellIndex < 0
+    const cellsBeforeFinal = finalCellIndex < 0
       ? visibleCells
       : visibleCells.slice(0, finalCellIndex);
-    const finalCells = finalCellIndex < 0
+    const cellsFromFinal = finalCellIndex < 0
       ? []
       : visibleCells.slice(finalCellIndex);
+    const trailingToolFailures = cellsFromFinal.filter((cell) => cell.kind === "error_notice");
+    const processCells = [...cellsBeforeFinal, ...trailingToolFailures];
+    const finalCells = cellsFromFinal.filter((cell) => cell.kind !== "error_notice");
     const renderTimelineNodes = (timelineCells: CodexTranscriptCell[]) => (
       buildCodexTranscriptTimelineNodes(timelineCells).map((node) => node.kind === "tool_activity" ? (
         <ConversationToolActivity
@@ -1755,7 +1758,11 @@ export function ConversationView({
             <div className={styles.codexTranscriptCellBody}>
               <div className={styles.codexTranscriptCellTitleRow}>
                 <span className={styles.codexTranscriptCellTitle}>{cell.title?.trim() || (lang === "zh" ? "执行失败" : "Failed")}</span>
-                {errorText ? <span className={styles.codexTranscriptCellMeta} aria-hidden="true">·</span> : null}
+                {cell.failureCount && cell.failureCount > 1 ? (
+                  <span className={styles.codexTranscriptCellMeta}>· {cell.failureCount} {lang === "zh" ? "次" : "times"}</span>
+                ) : errorText ? (
+                  <span className={styles.codexTranscriptCellMeta} aria-hidden="true">·</span>
+                ) : null}
                 {errorText ? <span className={styles.codexTranscriptCompactErrorSummary}>{errorText}</span> : null}
                 {diagnosticRows.length > 0 ? (
                   <details className={styles.codexTranscriptCompactErrorDetails} data-codex-error-diagnostic="true">
