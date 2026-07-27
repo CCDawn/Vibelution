@@ -630,7 +630,7 @@ def test_session_upgrades_legacy_snapshot_once_then_reuses_it(tmp_path, monkeypa
     )
     reused = session_service._ensure_session_agent_prompt_snapshot("session-live", agent)
 
-    assert upgraded["schemaVersion"] == 2
+    assert upgraded["schemaVersion"] == prompt_template_service.AGENT_PROMPT_SNAPSHOT_SCHEMA_VERSION
     assert upgraded["corePromptSchemaVersion"] == prompt_template_service.CORE_PROMPT_SCHEMA_VERSION
     assert [item["name"] for item in upgraded["corePrompts"]] == list(
         prompt_template_service.CORE_PROMPT_NAMES
@@ -662,6 +662,9 @@ def test_session_reuses_valid_prompt_snapshot_without_rebuilding_template_regist
         project_root=tmp_path,
         include_chat_base=True,
     )
+    snapshot["schemaVersion"] = 2
+    snapshot.pop("promptAssembly", None)
+    snapshot.pop("promptAssemblySchemaVersion", None)
     state = load_chat_state(tmp_path)
     state["conversations"][0]["agentPromptSnapshot"] = snapshot
     save_chat_state(tmp_path, state)
@@ -674,6 +677,7 @@ def test_session_reuses_valid_prompt_snapshot_without_rebuilding_template_regist
     reused = session_service._ensure_session_agent_prompt_snapshot("session-live", agent)
 
     assert reused == snapshot
+    assert "promptAssembly" not in reused
 
 
 def test_session_keeps_valid_core_snapshot_frozen_when_core_files_change(tmp_path, monkeypatch):
@@ -748,6 +752,40 @@ def test_session_detail_exposes_prompt_snapshot_metadata_without_content(tmp_pat
         "capturedAt": "2026-06-23T01:00:00Z",
         "agentId": "agent-1",
         "reason": "",
+        "promptAssemblySchemaVersion": 1,
+        "promptAssembly": {
+            "schemaVersion": 1,
+            "assemblyMode": "session_snapshot_v2",
+            "modelProtocol": "",
+            "capabilityFingerprint": "",
+            "permissionFingerprint": "",
+            "stablePrefixHash": "stable-safe",
+            "sessionSnapshotHash": "session-safe",
+            "totalEstimatedTokens": 32,
+            "budgetTokens": 0,
+            "segments": [
+                {
+                    "key": "core_common",
+                    "tier": "stable_core",
+                    "placement": "system_prefix",
+                    "stability": "project_static",
+                    "trust": "protected_core",
+                    "source": "core/core_prompt/COMMON.md",
+                    "required": True,
+                    "chars": 4,
+                    "contentHash": "hash-safe",
+                    "estimatedTokens": 1,
+                    "budgetTokens": 0,
+                    "cachePolicy": "prefix_candidate",
+                    "capabilityRequirements": [],
+                    "decision": "full",
+                    "decisionReason": "snapshot",
+                    "content": "不得泄漏的正文",
+                    "unexpected": "drop-me",
+                }
+            ],
+            "unexpected": "drop-me",
+        },
     }
     save_chat_state(tmp_path, state)
 
@@ -762,6 +800,12 @@ def test_session_detail_exposes_prompt_snapshot_metadata_without_content(tmp_pat
     assert snapshot["corePromptHash"] == "sha256:core"
     assert [item["name"] for item in snapshot["corePrompts"]] == ["COMMON", "SOUL", "AGENTS"]
     assert "content" not in snapshot
+    assert snapshot["promptAssemblySchemaVersion"] == 1
+    assert snapshot["promptAssembly"]["stablePrefixHash"] == "stable-safe"
+    assert snapshot["promptAssembly"]["segments"][0]["key"] == "core_common"
+    assert "content" not in snapshot["promptAssembly"]["segments"][0]
+    assert "unexpected" not in snapshot["promptAssembly"]["segments"][0]
+    assert "unexpected" not in snapshot["promptAssembly"]
 
 
 def test_tool_storage_overrides_are_context_local(tmp_path):

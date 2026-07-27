@@ -11,6 +11,17 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from core.infrastructure import developer_sandbox
+from core.prompt_manager.assembly_contract import (
+    PROMPT_ASSEMBLY_SCHEMA_VERSION,
+    PromptAssemblyManifest,
+    PromptCachePolicy,
+    PromptDecision,
+    PromptPlacement,
+    PromptSegment,
+    PromptStability,
+    PromptTier,
+    PromptTrust,
+)
 from core.prompt_manager.core_prompt_sources import (
     CORE_PROMPT_NAMES as CORE_PROMPT_NAMES,
     CORE_PROMPT_SCHEMA_VERSION,
@@ -32,6 +43,7 @@ PROMPT_TEMPLATE_PATH = developer_sandbox.formal_workspace_path(PROJECT_ROOT, "ag
 RETIRED_PROMPT_TEMPLATE_IDS = frozenset({"prompt-self-summarizer"})
 RESEARCH_DEFAULT_PROMPT_VERSION = 1
 CHAT_AGENT_BASE_PROMPT_VERSION = 2
+AGENT_PROMPT_SNAPSHOT_SCHEMA_VERSION = 3
 
 CHAT_AGENT_BASE_PROMPT = """## Conversation Agent Common Prompt
 
@@ -979,8 +991,45 @@ def build_agent_prompt_snapshot(
         )
         if part
     )
+    core_segments = [
+        PromptSegment.from_content(
+            key=f"core_{str(source.get('name') or '').strip().lower()}",
+            content=(
+                f"## Core Prompt: {str(source.get('name') or '').strip()}\n\n"
+                f"{str(source.get('content') or '').strip()}"
+            ),
+            tier=PromptTier.STABLE_CORE,
+            placement=PromptPlacement.SYSTEM_PREFIX,
+            stability=PromptStability.PROJECT_STATIC,
+            trust=PromptTrust.PROTECTED_CORE,
+            source=str(source.get("sourcePath") or "").strip(),
+            required=True,
+            cache_policy=PromptCachePolicy.PREFIX_CANDIDATE,
+            decision=PromptDecision.FULL,
+            decision_reason="session_snapshot",
+        )
+        for source in list(core_bundle.get("sources") or [])
+        if isinstance(source, dict)
+    ]
+    role_segment = PromptSegment.from_content(
+        key="agent_role_prompt",
+        content=role_prompt_content.strip(),
+        tier=PromptTier.SESSION_SNAPSHOT,
+        placement=PromptPlacement.SYSTEM_PREFIX,
+        stability=PromptStability.SESSION_STATIC,
+        trust=PromptTrust.OPERATOR_CONTROLLED,
+        source=str(template.get("sourcePath") or normalized).strip(),
+        required=True,
+        cache_policy=PromptCachePolicy.CACHEABLE,
+        decision=PromptDecision.FULL,
+        decision_reason="session_snapshot",
+    )
+    prompt_assembly = PromptAssemblyManifest.from_segments(
+        (*core_segments, role_segment),
+        assembly_mode="session_snapshot_v2",
+    ).to_public_dict()
     return {
-        "schemaVersion": 2,
+        "schemaVersion": AGENT_PROMPT_SNAPSHOT_SCHEMA_VERSION,
         "promptTemplateId": normalized,
         "templateId": normalized,
         "name": str(template.get("name") or "").strip(),
@@ -996,6 +1045,8 @@ def build_agent_prompt_snapshot(
         "corePromptHash": str(core_bundle.get("contentHash") or "").strip(),
         "corePromptLength": max(0, int(core_bundle.get("contentLength") or 0)),
         "corePrompts": public_core_prompt_sources(core_bundle),
+        "promptAssemblySchemaVersion": PROMPT_ASSEMBLY_SCHEMA_VERSION,
+        "promptAssembly": prompt_assembly,
         "capturedAt": _now(),
         "agentId": str(agent_id or "").strip(),
         "agentCode": str(agent_code or "").strip(),
