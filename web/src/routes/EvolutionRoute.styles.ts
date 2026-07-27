@@ -343,7 +343,7 @@ const styles = {
   supervisedRunConsole:
     "[container-type:inline-size] [grid-template-rows:auto_auto_minmax(0,_1fr)]",
   supervisedRunConsoleGrid:
-    "grid [grid-template-columns:minmax(0,_1fr)] [gap:7px] min-h-0 [@container(min-width:560px)]:[grid-template-columns:minmax(0,_1.08fr)_minmax(214px,_0.72fr)] [@container(min-width:560px)]:[align-items:start]",
+    "grid [grid-template-columns:minmax(0,_1fr)] [grid-auto-rows:max-content] [align-content:start] [gap:7px] min-h-0 [@container(min-width:560px)]:[grid-template-columns:minmax(0,_1.08fr)_minmax(214px,_0.72fr)] [@container(min-width:560px)]:[align-items:start]",
   supervisedRunConsoleHeader:
     "[align-items:flex-start]",
   supervisedRunConsoleStatus:

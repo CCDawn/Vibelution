@@ -476,6 +476,11 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeStyles.supervisedRunConsoleGrid).toContain("[grid-template-columns:minmax(0,_1fr)]");
   });
 
+  it("keeps supervised start controls above workflow navigation in single-column layouts", () => {
+    expect(routeStyles.supervisedRunConsoleGrid).toContain("[grid-auto-rows:max-content]");
+    expect(routeStyles.supervisedRunConsoleGrid).toContain("[align-content:start]");
+  });
+
   it("shows a compact supervised workflow rail and center overview fallback", () => {
     expect(routeSource).toContain("SUPERVISED_WORKFLOW_STEPS");
     expect(evolutionRouteModelSource).toContain('{ id: "baseline_eval", zh: "基线评测", en: "Baseline", role: "baseline" }');
