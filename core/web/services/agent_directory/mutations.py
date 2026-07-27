@@ -251,10 +251,6 @@ def create_agent_instance(
     context_compression_policy: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     s = _service()
-    try:
-        s.seed_agent_avatar_inventory_if_missing()
-    except Exception:
-        pass
     with s._STATE_LOCK:
         state = s.repair_agent_directory()
         existing_ids = {
@@ -429,11 +425,11 @@ def store_agent_avatar_image(
     payload = s._decode_agent_avatar_payload(data_base64)
     s._validate_agent_avatar_signature(payload, normalized_type)
 
-    avatar_dir = s._workspace_path("avatars").resolve()
+    avatar_dir = _agent_custom_avatar_dir().resolve()
     avatar_dir.mkdir(parents=True, exist_ok=True)
     safe_stem = s._sanitize_avatar_stem(filename or agent_id)
     output_name = f"agent-avatar-{int(time.time())}-{secrets.token_hex(4)}-{safe_stem}{extension}"
-    output_path = s.resolve_agent_avatar_file(output_name)
+    output_path = _agent_custom_avatar_file(output_name)
     output_path.write_bytes(payload)
     relative_path = str(s.AGENT_AVATAR_RELATIVE_DIR / output_name)
     updated = s.update_agent_avatar(agent_id, avatar_image_path=relative_path)
@@ -524,12 +520,6 @@ def _default_agent_avatar_filename(
         available = list(available_avatar_filenames)
     else:
         available = s._available_agent_avatar_filenames()
-        if not available:
-            try:
-                s.seed_agent_avatar_inventory_if_missing()
-            except Exception:
-                pass
-            available = s._available_agent_avatar_filenames()
     if not available:
         return ""
     metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
@@ -772,10 +762,6 @@ def _record_agent_avatar_updated_event(agent: dict[str, Any]) -> None:
 
 def list_agent_avatar_options() -> dict[str, Any]:
     s = _service()
-    try:
-        s.seed_agent_avatar_inventory_if_missing()
-    except Exception:
-        pass
     options: list[dict[str, Any]] = []
     for filename in s._available_agent_avatar_filenames():
         path = str(s.AGENT_AVATAR_RELATIVE_DIR / filename)
@@ -785,7 +771,7 @@ def list_agent_avatar_options() -> dict[str, Any]:
                 "filename": filename,
                 "path": path,
                 "url": s.agent_avatar_image_url(path),
-                "source": "workspace",
+                "source": _agent_avatar_source(filename),
                 "sizeBytes": file_path.stat().st_size if file_path.exists() else 0,
             }
         )
@@ -811,6 +797,7 @@ def _record_agent_avatar_uploaded_event(agent: dict[str, Any], *, content_type: 
                 "agentCode": s._normalize_agent_code(agent.get("agentCode")),
                 "contentType": str(content_type or "").strip(),
                 "sizeBytes": int(size_bytes or 0),
+                "storageScope": "config_adjacent",
             },
             lifecycle=True,
         )
@@ -883,7 +870,6 @@ def _agent_avatar_match_key(agent: dict[str, Any]) -> str:
     Specific identity fields are listed first so exact role tokens appear in the
     key even when primaryMode is a broad mode like general/self_evolution.
     """
-    s = _service()
     metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
     # Prefer specific roles ahead of primaryMode so table order can still use
     # broad mode tokens without them being the only signal.
@@ -901,61 +887,59 @@ def _agent_avatar_match_key(agent: dict[str, Any]) -> str:
     return " ".join(str(item or "").strip().lower() for item in parts if str(item or "").strip())
 
 
-def seed_agent_avatar_inventory_if_missing() -> int:
-    """Copy whitelist avatar files from project seed into data-home when empty.
-
-    Runtime inventory is data-home only; repo workspace/avatars is a seed source.
-    Returns number of files copied.
-    """
+def _agent_custom_avatar_dir() -> Path:
     s = _service()
-    import shutil
+    return (
+        Path(s.CONFIG_PATH).expanduser().resolve().parent
+        / s.AGENT_AVATAR_CONFIG_DIR_NAME
+        / s.AGENT_AVATAR_CONFIG_AGENT_DIR_NAME
+    )
 
-    target_dir = s._workspace_path("avatars").resolve()
-    target_dir.mkdir(parents=True, exist_ok=True)
-    existing = {item.name for item in target_dir.iterdir() if item.is_file()} if target_dir.is_dir() else set()
-    if existing.intersection(s.AGENT_AVATAR_FILENAMES):
-        return 0
-    seed_roots = [
-        Path(getattr(s, "PROJECT_ROOT", Path("."))) / "workspace" / "avatars",
-        Path(getattr(s, "PROJECT_ROOT", Path("."))) / "assets" / "agent-avatars",
-    ]
-    copied = 0
-    for seed_root in seed_roots:
-        try:
-            seed_root = seed_root.resolve()
-        except OSError:
-            continue
-        if not seed_root.is_dir():
-            continue
-        for filename in s.AGENT_AVATAR_FILENAMES:
-            if filename in existing:
-                continue
-            source = seed_root / filename
-            if not source.is_file():
-                continue
-            try:
-                shutil.copy2(source, target_dir / filename)
-                existing.add(filename)
-                copied += 1
-            except OSError:
-                continue
-        if copied:
-            break
-    return copied
+
+def _agent_custom_avatar_file(filename: str) -> Path:
+    s = _service()
+    safe_filename = s.agent_avatar_filename(str(s.AGENT_AVATAR_RELATIVE_DIR / str(filename or "")))
+    if not safe_filename:
+        raise FileNotFoundError("invalid Agent avatar image path")
+    avatar_dir = _agent_custom_avatar_dir().resolve()
+    path = (avatar_dir / safe_filename).resolve()
+    if avatar_dir != path.parent:
+        raise FileNotFoundError("invalid Agent avatar image path")
+    return path
+
+
+def _agent_avatar_storage_dirs() -> tuple[tuple[str, Path], ...]:
+    s = _service()
+    return (
+        ("custom", _agent_custom_avatar_dir()),
+        (
+            "bundled",
+            Path(s.PROJECT_ROOT).resolve() / "assets" / s.AGENT_AVATAR_ASSET_DIR_NAME,
+        ),
+        ("legacy", s._workspace_path("avatars", seed=False).resolve()),
+    )
+
+
+def _agent_avatar_source(filename: str) -> str:
+    for source, avatar_dir in _agent_avatar_storage_dirs():
+        resolved_dir = avatar_dir.resolve()
+        path = (resolved_dir / filename).resolve()
+        if resolved_dir == path.parent and path.exists() and path.is_file():
+            return source
+    return "unavailable"
 
 
 def _available_agent_avatar_filenames() -> list[str]:
     s = _service()
-    # Do not seed from project tree here: inventory is data-home only so options
-    # and resolve stay operator-home scoped (see test_agent_avatar_model_repair).
-    avatar_dir = s._workspace_path("avatars").resolve()
-    if not avatar_dir.exists() or not avatar_dir.is_dir():
-        return []
-    existing = {
-        item.name
-        for item in avatar_dir.iterdir()
-        if item.is_file() and s.agent_avatar_filename(str(s.AGENT_AVATAR_RELATIVE_DIR / item.name))
-    }
+    existing: set[str] = set()
+    for _source, avatar_dir in _agent_avatar_storage_dirs():
+        if not avatar_dir.exists() or not avatar_dir.is_dir():
+            continue
+        existing.update(
+            item.name
+            for item in avatar_dir.iterdir()
+            if item.is_file() and s.agent_avatar_filename(str(s.AGENT_AVATAR_RELATIVE_DIR / item.name))
+        )
     ordered = [filename for filename in s.AGENT_AVATAR_FILENAMES if filename in existing]
     extra = sorted(existing.difference(ordered))
     return ordered + extra
@@ -992,11 +976,15 @@ def resolve_agent_avatar_file(filename: str) -> Path:
     safe_filename = s.agent_avatar_filename(str(s.AGENT_AVATAR_RELATIVE_DIR / str(filename or "")))
     if not safe_filename:
         raise FileNotFoundError("invalid Agent avatar image path")
-    avatar_dir = s._workspace_path("avatars").resolve()
-    path = (avatar_dir / safe_filename).resolve()
-    if avatar_dir != path.parent:
-        raise FileNotFoundError("invalid Agent avatar image path")
-    return path
+    storage_dirs = _agent_avatar_storage_dirs()
+    for _source, avatar_dir in storage_dirs:
+        resolved_dir = avatar_dir.resolve()
+        path = (resolved_dir / safe_filename).resolve()
+        if resolved_dir != path.parent:
+            raise FileNotFoundError("invalid Agent avatar image path")
+        if path.exists() and path.is_file():
+            return path
+    return _agent_custom_avatar_file(safe_filename)
 
 
 def _validate_agent_avatar_signature(payload: bytes, content_type: str) -> None:
@@ -1045,7 +1033,6 @@ def record_agent_llm_binding_updated_event(agent: dict[str, Any]) -> None:
 
 
 def _sanitize_avatar_stem(filename: str) -> str:
-    s = _service()
     raw_stem = Path(str(filename or "agent-avatar")).stem.lower()
     stem = re.sub(r"[^a-z0-9_-]+", "-", raw_stem).strip("-_")
     return stem[:40] or "agent-avatar"

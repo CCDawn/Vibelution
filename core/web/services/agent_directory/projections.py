@@ -297,11 +297,6 @@ def list_agents(*, include_archived: bool = False, detail: str = "full") -> list
     s = _service()
     started = time.perf_counter()
     timings: dict[str, float] = {}
-    # Ensure data-home avatar inventory exists so projection can emit default URLs.
-    try:
-        s.seed_agent_avatar_inventory_if_missing()
-    except Exception:
-        pass
     normalized_detail = str(detail or "full").strip().lower()
     if normalized_detail not in {"full", "summary", "config"}:
         normalized_detail = "full"

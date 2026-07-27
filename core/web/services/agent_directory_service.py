@@ -22,6 +22,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Iterable
 from urllib.parse import quote
 
+from config.public_config import CONFIG_PATH as CONFIG_PATH
 from core.chat.chat_task_types import trim_lines
 from core.llm.agent_runtime import (
     AGENT_LLM_SLOTS,
@@ -173,7 +174,6 @@ from .agent_directory.mutations import (
     _record_agent_persona_profile_event,
     _ensure_agent_default_avatar,
     resolve_agent_avatar_path_for_projection,
-    seed_agent_avatar_inventory_if_missing,
     _record_agent_event,
     _record_agent_avatar_updated_event,
     list_agent_avatar_options,
@@ -506,6 +506,9 @@ KNOWLEDGE_STEWARD_DIRECT_SESSION_ID = "agent-knowledge-steward-direct"
 AGENT_CODE_PREFIX = "A"
 AGENT_SHARED_WORKSPACE_PATH = "workspace/shared"
 AGENT_AVATAR_RELATIVE_DIR = PurePosixPath("workspace/avatars")
+AGENT_AVATAR_ASSET_DIR_NAME = "agent-avatars"
+AGENT_AVATAR_CONFIG_DIR_NAME = "avatars"
+AGENT_AVATAR_CONFIG_AGENT_DIR_NAME = "agents"
 AGENT_AVATAR_FILENAMES = (
     "01-session-agent.png",
     "02-diagnose-agent.png",
