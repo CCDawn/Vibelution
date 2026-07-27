@@ -87,6 +87,8 @@ export function SupervisedAgentConversationPanel({
     || selectedMember?.status
     || "idle",
   );
+  const selectedTabId = `supervised-agent-tab-${selectedRole}`;
+  const selectedPanelId = `supervised-agent-panel-${selectedRole}`;
   const emptyTitle = sessionId
     ? lang === "zh" ? `${assistantDisplayName} 暂无可展示消息` : `${assistantDisplayName} has no visible messages`
     : lang === "zh" ? `${assistantDisplayName} 尚未启动` : `${assistantDisplayName} has not started`;
@@ -112,6 +114,8 @@ export function SupervisedAgentConversationPanel({
               contentLayout="plain"
               className={selected ? `${styles.tabButton} ${styles.tabButtonActive}` : styles.tabButton}
               role="tab"
+              id={`supervised-agent-tab-${member.role}`}
+              aria-controls={`supervised-agent-panel-${member.role}`}
               aria-selected={selected}
               onClick={() => onSelectRole(member.role)}
             >
@@ -119,10 +123,12 @@ export function SupervisedAgentConversationPanel({
                 <span className={styles.avatar} aria-hidden="true">{roleAvatar(member.role, lang)}</span>
                 <span className={styles.tabCopy}>
                   <span className={styles.tabTitle}>{member.name}</span>
-                  <span className={styles.tabSubtitle}>{roleDescription(member.role)}</span>
-                </span>
-                <span className={active ? `${styles.tabStatus} ${styles.tabStatusActive}` : styles.tabStatus}>
-                  {active ? (lang === "zh" ? "现场" : "Live") : memberStatus}
+                  <span className={styles.tabSubtitle}>
+                    <span>{roleLabel(member.role)}</span>
+                    <span className={active ? `${styles.tabStatus} ${styles.tabStatusActive}` : styles.tabStatus}>
+                      {active ? (lang === "zh" ? "现场" : "Live") : memberStatus}
+                    </span>
+                  </span>
                 </span>
               </span>
             </VButton>
@@ -130,79 +136,87 @@ export function SupervisedAgentConversationPanel({
         })}
       </div>
 
-      <header className={styles.selectedHeader}>
-        <div className={styles.selectedIdentity}>
-          <span className={styles.avatar} aria-hidden="true">{roleAvatar(selectedRole, lang)}</span>
-          <div className={styles.selectedCopy}>
-            <div className={styles.selectedTitle}>{assistantDisplayName}</div>
-            <div className={styles.selectedMeta}>
-              <span>{roleLabel(selectedRole)}</span>
-              <span>{selectedStatus}</span>
-              <VTooltip content={selectedMember?.modelId || selectedMember?.model || "--"} width="wide">
-                <span className={styles.selectedMetaValue} tabIndex={0}>{selectedMember?.model || "--"}</span>
-              </VTooltip>
-              <VTooltip content={sessionId || (lang === "zh" ? "尚无会话" : "No session")} width="wide">
-                <span className={styles.selectedMetaValue} tabIndex={0}>{sessionId || "--"}</span>
-              </VTooltip>
+      <section
+        className={styles.sessionSurface}
+        role="tabpanel"
+        id={selectedPanelId}
+        aria-labelledby={selectedTabId}
+      >
+        <header className={styles.selectedHeader}>
+          <div className={styles.selectedIdentity}>
+            <span className={styles.avatar} aria-hidden="true">{roleAvatar(selectedRole, lang)}</span>
+            <div className={styles.selectedCopy}>
+              <div className={styles.selectedTitle}>{assistantDisplayName}</div>
+              <div className={styles.selectedMeta}>
+                <span>{roleLabel(selectedRole)}</span>
+                <span className={styles.selectedDescription}>{roleDescription(selectedRole)}</span>
+                <span>{selectedStatus}</span>
+                <VTooltip content={selectedMember?.modelId || selectedMember?.model || "--"} width="wide">
+                  <span className={styles.selectedMetaValue} tabIndex={0}>{selectedMember?.model || "--"}</span>
+                </VTooltip>
+                <VTooltip content={sessionId || (lang === "zh" ? "尚无会话" : "No session")} width="wide">
+                  <span className={styles.selectedMetaValue} tabIndex={0}>{sessionId || "--"}</span>
+                </VTooltip>
+              </div>
             </div>
           </div>
-        </div>
-        <div className={styles.selectedActions}>
-          {isLive && activeRole && selectedRole !== activeRole ? (
-            <VButton type="button" className={styles.compactAction} onClick={onFollowLive}>
-              {lang === "zh" ? "跟随现场" : "Follow live"}
-            </VButton>
-          ) : null}
-          {selectedMember?.chatRoute ? (
-            <Link className={styles.sessionLink} to={selectedMember.chatRoute}>
-              <span>{lang === "zh" ? "完整会话" : "Full session"}</span>
-              <ArrowUpRight size={13} aria-hidden="true" />
-            </Link>
-          ) : null}
-        </div>
-      </header>
-
-      <div className={styles.body}>
-        {sessionDetailQuery.isError ? (
-          <div className={styles.queryNotice} role="status">{queryErrorMessage(sessionDetailQuery.error, lang)}</div>
-        ) : null}
-        {messages.length > 0 ? (
-          <LazyConversationView
-            sessionId={sessionId || `${selectedRole}-supervised`}
-            className={styles.conversation}
-            density="compact"
-            title={assistantDisplayName}
-            phase={phase}
-            messages={messages}
-            assistantDisplayName={assistantDisplayName}
-            userDisplayName={lang === "zh" ? "监督任务" : "Supervised task"}
-            taskSummary={detail?.taskSummary || taskSummary}
-            defaultFileContext={detail?.defaultFileContext || "supervised-evolution"}
-            summaryItems={[]}
-            showHeader={false}
-            showSessionOverview={Boolean(supplementalContent)}
-            supplementalContent={supplementalContent}
-            showComposer={false}
-            processDisplayMode="answer"
-            autoScrollToLatest={true}
-            composerValue=""
-            composerPlaceholder={lang === "zh" ? "监督进化会话只读" : "Supervised conversation is read-only"}
-            composerDisabled={true}
-            composerPending={false}
-            onComposerChange={() => undefined}
-            onSubmit={() => undefined}
-            fallback={<div className={styles.loading}>{lang === "zh" ? "正在加载统一对话前端…" : "Loading conversation…"}</div>}
-          />
-        ) : sessionDetailQuery.isLoading ? (
-          <div className={styles.loading}>{lang === "zh" ? "正在加载 Agent 会话…" : "Loading Agent session…"}</div>
-        ) : (
-          <div className={styles.empty}>
-            <span className={styles.emptyAvatar} aria-hidden="true">{roleAvatar(selectedRole, lang)}</span>
-            <strong className={styles.emptyTitle}>{emptyTitle}</strong>
-            <span>{emptyCopy}</span>
+          <div className={styles.selectedActions}>
+            {isLive && activeRole && selectedRole !== activeRole ? (
+              <VButton type="button" className={styles.compactAction} onClick={onFollowLive}>
+                {lang === "zh" ? "跟随现场" : "Follow live"}
+              </VButton>
+            ) : null}
+            {selectedMember?.chatRoute ? (
+              <Link className={styles.sessionLink} to={selectedMember.chatRoute}>
+                <span>{lang === "zh" ? "完整会话" : "Full session"}</span>
+                <ArrowUpRight size={13} aria-hidden="true" />
+              </Link>
+            ) : null}
           </div>
-        )}
-      </div>
+        </header>
+
+        <div className={styles.body}>
+          {sessionDetailQuery.isError ? (
+            <div className={styles.queryNotice} role="status">{queryErrorMessage(sessionDetailQuery.error, lang)}</div>
+          ) : null}
+          {messages.length > 0 ? (
+            <LazyConversationView
+              sessionId={sessionId || `${selectedRole}-supervised`}
+              className={styles.conversation}
+              density="compact"
+              title={assistantDisplayName}
+              phase={phase}
+              messages={messages}
+              assistantDisplayName={assistantDisplayName}
+              userDisplayName={lang === "zh" ? "监督任务" : "Supervised task"}
+              taskSummary={detail?.taskSummary || taskSummary}
+              defaultFileContext={detail?.defaultFileContext || "supervised-evolution"}
+              summaryItems={[]}
+              showHeader={false}
+              showSessionOverview={Boolean(supplementalContent)}
+              supplementalContent={supplementalContent}
+              showComposer={false}
+              processDisplayMode="answer"
+              autoScrollToLatest={true}
+              composerValue=""
+              composerPlaceholder={lang === "zh" ? "监督进化会话只读" : "Supervised conversation is read-only"}
+              composerDisabled={true}
+              composerPending={false}
+              onComposerChange={() => undefined}
+              onSubmit={() => undefined}
+              fallback={<div className={styles.loading}>{lang === "zh" ? "正在加载统一对话前端…" : "Loading conversation…"}</div>}
+            />
+          ) : sessionDetailQuery.isLoading ? (
+            <div className={styles.loading}>{lang === "zh" ? "正在加载 Agent 会话…" : "Loading Agent session…"}</div>
+          ) : (
+            <div className={styles.empty}>
+              <span className={styles.emptyAvatar} aria-hidden="true">{roleAvatar(selectedRole, lang)}</span>
+              <strong className={styles.emptyTitle}>{emptyTitle}</strong>
+              <span>{emptyCopy}</span>
+            </div>
+          )}
+        </div>
+      </section>
     </div>
   );
 }
