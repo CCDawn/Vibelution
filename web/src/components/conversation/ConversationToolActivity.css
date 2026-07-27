@@ -1,0 +1,8 @@
+.vui-components-conversation-tool-activity.itemChevron {
+  transform: rotate(-90deg);
+  transform-origin: center;
+}
+
+details[open] > summary .vui-components-conversation-tool-activity.itemChevron {
+  transform: rotate(0deg);
+}

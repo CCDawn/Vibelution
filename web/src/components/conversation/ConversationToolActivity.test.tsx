@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
@@ -6,6 +7,8 @@ import { ConversationToolActivity } from "./ConversationToolActivity";
 import styles from "./ConversationToolActivity.styles";
 import type { CodexTranscriptCell } from "./codexTranscriptCells";
 import { createCodexTranscriptToolActivity } from "./conversationToolActivityModel";
+
+const activityCss = readFileSync(new URL("./ConversationToolActivity.css", import.meta.url), "utf8");
 
 function toolCell(id: string, summary: string): CodexTranscriptCell {
   return {
@@ -133,9 +136,10 @@ describe("ConversationToolActivity", () => {
     expect(styles.itemSummary).toContain("grid-cols-[17px_minmax(0,1fr)]");
     expect(styles.itemSummary).not.toContain("grid-cols-[17px_minmax(0,1fr)_16px]");
     expect(styles.batchSummary).toContain("grid-cols-[17px_minmax(0,1fr)]");
-    expect(styles.itemChevron).toContain("-rotate-90");
-    expect(styles.itemChevron).toContain("group-open:rotate-0");
-    expect(styles.itemChevron).not.toContain("group-open:rotate-180");
+    expect(activityCss).toContain("transform: rotate(-90deg)");
+    expect(activityCss).toContain("details[open] > summary");
+    expect(activityCss).toContain("transform: rotate(0deg)");
+    expect(styles.itemChevron).not.toContain("rotate-");
   });
 
   it("uses a semantic code result as the row title without repeating the generic tool name", () => {
