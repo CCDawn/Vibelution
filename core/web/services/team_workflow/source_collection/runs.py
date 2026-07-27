@@ -23,6 +23,13 @@ def start_source_collection_run(team_id: str, payload: dict[str, Any] | None = N
     normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
     team = s.team_service.get_team(normalized_team_id)
     request_payload = dict(payload) if isinstance(payload, dict) else {}
+    active_project = s.get_active_research_project(normalized_team_id)
+    requested_project_id = s._trim_text(request_payload.get("researchProjectId"), max_length=160)
+    if requested_project_id and requested_project_id != active_project["projectId"]:
+        raise s.TeamWorkflowOrchestrationError(
+            "Source collection run researchProjectId must match the active research project."
+        )
+    research_project = active_project
     workflow_kind = s._source_collection_workflow_kind(request_payload, team)
     collection_mode = s._source_collection_collection_mode(request_payload.get("collectionMode"))
     title = s._trim_text(request_payload.get("title"), max_length=180) or (
@@ -48,6 +55,8 @@ def start_source_collection_run(team_id: str, payload: dict[str, Any] | None = N
     scope["workflowKind"] = workflow_kind
     scope["workflowPurpose"] = workflow_kind
     scope["collectionMode"] = collection_mode
+    scope["researchProjectId"] = research_project["projectId"]
+    scope["experimentName"] = research_project["name"]
     scope["promptCachePolicyRef"] = s._source_collection_prompt_cache_policy_ref(prompt_cache_policy)
     preliminary_search_plan = s._build_source_collection_search_plan(
         team_id=normalized_team_id,
@@ -74,6 +83,8 @@ def start_source_collection_run(team_id: str, payload: dict[str, Any] | None = N
             "workflowKind": workflow_kind,
             "workflowPurpose": workflow_kind,
             "collectionMode": collection_mode,
+            "researchProjectId": research_project["projectId"],
+            "experimentName": research_project["name"],
             "requestedByAgent": requested_by_agent,
             "ownerAgentId": owner_agent_id,
             "searchPlanId": preliminary_search_plan["planId"],
@@ -138,6 +149,11 @@ def start_source_collection_run(team_id: str, payload: dict[str, Any] | None = N
         )
         s._write_json(s._workflow_path(normalized_team_id), workflow)
         candidate_store = s._load_candidate_store(normalized_team_id)
+    research_project = s.lock_research_project_name(
+        normalized_team_id,
+        research_project["projectId"],
+        reason="first_experiment_task",
+    )
     s._record_workflow_event(
         "source_collection.run_started",
         normalized_team_id,
@@ -156,6 +172,7 @@ def start_source_collection_run(team_id: str, payload: dict[str, Any] | None = N
             "teamAgentBindingCount": sum(1 for item in assignments if str(item.get("agentId") or "") != str(item.get("agentRole") or "")),
             "sourceCollectionRunDirectory": storage_artifacts["runDirectory"],
             "sessionCleanupCleanedCount": session_cleanup["cleanedCount"],
+            "researchProjectId": research_project["projectId"],
         },
     )
     local_workspace_scan = s._import_source_collection_local_workspace_sources(
@@ -170,6 +187,8 @@ def start_source_collection_run(team_id: str, payload: dict[str, Any] | None = N
         "storageArtifacts": storage_artifacts,
         "promptCachePolicy": prompt_cache_policy,
         "sessionCleanup": session_cleanup,
+        "researchProjectId": research_project["projectId"],
+        "experimentName": research_project["name"],
         "localWorkspaceScan": local_workspace_scan,
         "assignments": assignments,
         "assignmentCount": len(assignments),

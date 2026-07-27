@@ -515,7 +515,7 @@ export function rootSessionIdFor(session: SessionSummary | undefined | null) {
 }
 
 export function isRepresentedInAgentSessionTabs(session: SessionSummary | undefined | null) {
-  return isChildSession(session);
+  return Boolean(String(session?.agentId || "").trim());
 }
 
 export function hasInvalidChildSessionLink(session: SessionSummary | undefined | null) {

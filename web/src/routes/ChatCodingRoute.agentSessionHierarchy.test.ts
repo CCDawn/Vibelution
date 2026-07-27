@@ -20,13 +20,18 @@ describe("ChatCodingRoute Agent-session hierarchy", () => {
     expect(routeSource).toContain("createAgentButtonRef={agentCreateTriggerRef}");
     expect(routeSource).toContain("if (!agent.directSessionId) return false");
     expect(routeSource).toContain("handleOpenAgent(agent)");
+    expect(routeSource).toContain("handleOpenDirectSession(latestSession.id)");
+    expect(routeSource).toContain("onOpenAgent={(agent, latestSession) => {");
     expect(routeSource).not.toContain("await createSessionMutation.mutateAsync({ agentId: agent.agentId })");
     expect(routeSource).not.toContain('createSessionMutation.mutate({ agentId: "" })');
     expect(routeSource).toContain("在当前 Agent 下新建会话");
   });
 
-  it("uses the session title, not the Agent name, for root session tabs", () => {
-    expect(tabStripSource).toContain("sessionIsChild ? (session.taskTitle || session.resultCard?.title || session.title) : session.title");
+  it("uses each session title without root-child visual hierarchy", () => {
+    expect(tabStripSource).toContain("const sessionTitle =");
+    expect(tabStripSource).toContain("session.title");
+    expect(tabStripSource).not.toContain("sessionIsChild");
+    expect(tabStripSource).not.toContain("MessageCircleHeart");
   });
 
   it("optimistically removes deleted sessions from Agent tab caches with rollback", () => {

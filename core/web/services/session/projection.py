@@ -491,6 +491,9 @@ def _build_session_summary(conversation: dict[str, Any], *, hydrate_agent: bool 
         "lastPromptAssembly": s._public_prompt_assembly_manifest(
             conversation.get("last_prompt_assembly") or conversation.get("lastPromptAssembly")
         ),
+        "experimentBinding": _public_experiment_binding(
+            conversation.get("experimentBinding") or conversation.get("experiment_binding")
+        ),
         "agentInboxPendingCount": agent_inbox_pending_count,
         "agentMissingId": agent_missing_id,
         "agentDirectSessionMismatch": agent_direct_session_mismatch,
@@ -527,6 +530,32 @@ def _build_session_summary(conversation: dict[str, Any], *, hydrate_agent: bool 
         "sourceRef": session_source_ref,
         "projectionEdit": session_projection_edit,
         "agentSourceRef": agent_source_ref,
+    }
+
+
+def _public_experiment_binding(value: Any) -> dict[str, Any] | None:
+    """Project only the allowlisted experiment identity; never expose storage data."""
+    if not isinstance(value, dict):
+        return None
+    research_project_id = str(value.get("researchProjectId") or "").strip()[:160]
+    agent_id = str(value.get("agentId") or "").strip()[:160]
+    if not research_project_id or not agent_id:
+        return None
+    try:
+        attempt = max(1, int(value.get("attempt") or 1))
+    except (TypeError, ValueError):
+        attempt = 1
+    return {
+        "teamId": str(value.get("teamId") or "").strip()[:160],
+        "researchProjectId": research_project_id,
+        "experimentName": str(value.get("experimentName") or "").strip()[:160],
+        "agentId": agent_id,
+        "roleKey": str(value.get("roleKey") or "").strip()[:80],
+        "roleLabel": str(value.get("roleLabel") or "").strip()[:80],
+        "attempt": attempt,
+        "retryOfSessionId": str(value.get("retryOfSessionId") or "").strip()[:160],
+        "createdFromTaskId": str(value.get("createdFromTaskId") or "").strip()[:160],
+        "createdAt": str(value.get("createdAt") or "").strip()[:120],
     }
 
 
@@ -656,6 +685,9 @@ def _normalize_conversation(
     last_prompt_assembly = s._public_prompt_assembly_manifest(
         raw.get("last_prompt_assembly") or raw.get("lastPromptAssembly")
     )
+    experiment_binding = _public_experiment_binding(
+        raw.get("experiment_binding") or raw.get("experimentBinding")
+    )
     conversation_index_classification = s._conversation_index_classification(
         raw,
         agent,
@@ -690,6 +722,7 @@ def _normalize_conversation(
         "lastContextComposition": last_context_composition,
         "agentPromptSnapshot": agent_prompt_snapshot,
         "lastPromptAssembly": last_prompt_assembly,
+        "experimentBinding": experiment_binding,
         "reasoningEffort": s.normalize_reasoning_effort(raw.get("reasoning_effort") or raw.get("reasoningEffort")),
         "activeSkillContract": active_skill_contract,
         "lastCacheComposition": last_cache_composition,

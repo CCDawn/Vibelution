@@ -236,6 +236,17 @@ function expectOperationalSurface(className: string, surface = "var(--vui-surfac
 }
 
 describe("TeamsRoute layout contract", () => {
+  it("lets the backend resolve the experiment session instead of requiring directSessionId", () => {
+    expect(routeSource).not.toContain("!binding?.agent?.directSessionId");
+    expect(routeSource).toContain("navigate(payload.chatRoute)");
+    expect(routeSource).toContain(
+      "formalRetry: options.formalRetry ?? sourceCollectionStageFormalRetryRequired(stageId)",
+    );
+    expect(routeSource).toContain("function sourceCollectionStageFormalRetryRequired");
+    expect(routeSource).not.toContain("chatState.route || payload.chatRoute");
+    expect(routeSource).not.toContain("payload.chatRoute || chatState.route");
+  });
+
   it("uses shell language state without loading the full app dictionary", () => {
     expect(routeSource).toContain("useShellI18n");
     expect(routeSource).toContain("const { lang } = useShellI18n()");
@@ -342,7 +353,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("TeamWorkflowSourceCollectionStageSessionTaskPayload");
     expect(routeSource).toContain("startSourceCollectionStageSessionTaskMutation");
     expect(teamWorkflowStartMutationsSource).toContain("/source-collection-runs/${encodeURIComponent(payload.runId)}/stage-session-tasks");
-    expect(routeSource).toContain("startSourceCollectionStageSessionTask(stageId");
+    expect(routeSource).toContain("async function startSourceCollectionStageSessionTask(");
+    expect(routeSource).toContain("options: { formalRetry?: boolean }");
     expect(routeSource).toContain("await startSourceCollectionStageSessionTaskMutation.mutateAsync");
     expect(routeSource).toContain("sourceCollectionStageTaskClickKey(stageId)");
     // Wave 8R: stage-session idempotency lives on useTeamWorkflowStartMutations.

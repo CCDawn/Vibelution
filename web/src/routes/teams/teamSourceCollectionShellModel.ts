@@ -165,7 +165,7 @@ export function resolveSourceCollectionStageAgentChatState<T extends { agent?: u
   status: SourceCollectionStageAgentChatStatus;
 } {
   const { binding, route } = input;
-  if (route) {
+  if (route || binding?.agent) {
     return { binding, route, status: "ready" };
   }
   const hasBoundAgentId = Boolean(String(binding?.agentId || "").trim());

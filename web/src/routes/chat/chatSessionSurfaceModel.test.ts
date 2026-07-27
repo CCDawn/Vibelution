@@ -123,7 +123,7 @@ describe("chatSessionSurfaceModel", () => {
     expect(model.sessionCompactRows[0]?.value).toBe("src/app.ts");
   });
 
-  it("sorts agent session tabs with primary direct session first", () => {
+  it("sorts every Agent session by activity without direct or child priority", () => {
     const tabs = buildAgentSessionTabs({
       sessions: [
         { id: "child", sessionKind: "child", updatedAt: "2026-01-02" } as never,
@@ -132,6 +132,6 @@ describe("chatSessionSurfaceModel", () => {
       ],
       selectedChatAgentDirectSessionId: "primary",
     });
-    expect(tabs.map((item) => item.id)).toEqual(["primary", "other", "child"]);
+    expect(tabs.map((item) => item.id)).toEqual(["other", "child", "primary"]);
   });
 });

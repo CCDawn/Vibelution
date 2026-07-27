@@ -172,6 +172,57 @@ def test_team_research_project_update_and_unknown_activation(tmp_path, monkeypat
     assert missing.status_code == 404
 
 
+def test_team_research_project_name_update_returns_conflict_after_experiment_session_lock(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    client = _client()
+    agent = agent_directory_service.create_agent_instance(
+        display_name="Source finder",
+        role_key="source_finder",
+    )
+    team = client.post(
+        "/api/teams",
+        json={
+            "name": "Research Project Team",
+            "members": [
+                {
+                    "agentId": agent["agentId"],
+                    "agentName": "Source finder",
+                    "role": "source_finder",
+                }
+            ],
+        },
+    ).json()
+    project = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/research-projects",
+        json={"name": "Frozen experiment name", "topic": "Initial topic"},
+    ).json()["project"]
+    client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/research-projects/{project['projectId']}/activate",
+    )
+    team_workflow_orchestration_service.resolve_research_project_agent_session(
+        team["teamId"],
+        research_project_id=project["projectId"],
+        agent_id=agent["agentId"],
+        role_key="source_finder",
+        role_label="Source finder",
+        created_from_task_id="task-lock-name",
+    )
+
+    topic_only = client.patch(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/research-projects/{project['projectId']}",
+        json={"topic": "Updated topic"},
+    )
+    rename = client.patch(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/research-projects/{project['projectId']}",
+        json={"name": "Renamed after lock"},
+    )
+
+    assert topic_only.status_code == 200, topic_only.text
+    assert topic_only.json()["project"]["nameLocked"] is True
+    assert rename.status_code == 409, rename.text
+    assert rename.json()["detail"]["code"] == "research_project_name_locked"
+
+
 def _submit_steward_pack_through_source_review_route(
     client: TestClient,
     *,
@@ -381,11 +432,16 @@ def test_team_workflow_route_seeds_source_collection_agent_session_context(tmp_p
     assert start_response.status_code == 201, start_response.text
     assert response.status_code == 201, response.text
     assert response.json()["created"] is True
-    assert response.json()["sessionId"] == direct_session["id"]
+    assert response.json()["sessionId"] != direct_session["id"]
+    assert response.json()["sessionCreated"] is True
+    assert response.json()["sessionAttempt"] == 1
+    assert response.json()["chatRoute"] == f"/chat?session={response.json()['sessionId']}"
     assert response.json()["message"]["metadata"]["kind"] == "source_collection_agent_context"
     assert duplicate.status_code == 201, duplicate.text
     assert duplicate.json()["alreadyPresent"] is True
-    detail = session_service.get_session_detail(direct_session["id"])
+    assert duplicate.json()["sessionId"] == response.json()["sessionId"]
+    assert session_service.get_session_detail(direct_session["id"]) is not None
+    detail = session_service.get_session_detail(response.json()["sessionId"])
     assert len([message for message in detail["messages"] if message.get("metadata", {}).get("kind") == "source_collection_agent_context"]) == 1
 
 
@@ -437,12 +493,16 @@ def test_team_workflow_route_starts_source_collection_stage_session_task(tmp_pat
     second_payload = second_response.json()
     duplicate_payload = duplicate_response.json()
     assert payload["created"] is True
-    assert payload["sessionId"] == direct_session["id"]
-    assert payload["chatRoute"].startswith(f"/chat?session={direct_session['id']}")
+    assert payload["sessionId"] != direct_session["id"]
+    assert payload["sessionCreated"] is True
+    assert payload["chatRoute"].startswith(f"/chat?session={payload['sessionId']}")
+    assert session_service.get_session_detail(direct_session["id"]) is not None
     assert payload["task"]["writebackContract"]["taskId"] == payload["taskId"]
     assert submitted[0]["kwargs"]["message_metadata"]["kind"] == "source_collection_stage_session_task"
     assert second_payload["created"] is True
     assert second_payload["alreadyPresent"] is False
+    assert second_payload["sessionCreated"] is False
+    assert second_payload["sessionId"] == payload["sessionId"]
     assert second_payload["taskId"] != payload["taskId"]
     assert duplicate_payload["created"] is False
     assert duplicate_payload["alreadyPresent"] is True

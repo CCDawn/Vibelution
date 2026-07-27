@@ -15,6 +15,7 @@ export type SessionSummary = {
   agentPromptTemplateId?: string;
   agentPromptSnapshot?: SessionAgentPromptSnapshot;
   lastPromptAssembly?: SessionPromptAssemblyManifest;
+  experimentBinding?: SessionExperimentBinding | null;
   dialogueModelId?: string;
   reasoningEffort?: string;
   agentInboxPendingCount?: number;
@@ -52,6 +53,19 @@ export type SessionSummary = {
   conversationIndexVisibility?: ConversationIndexVisibility;
   conversationIndexKind?: ConversationIndexKind;
   conversationIndexErrors?: string[];
+};
+
+export type SessionExperimentBinding = {
+  teamId: string;
+  researchProjectId: string;
+  experimentName: string;
+  agentId: string;
+  roleKey: string;
+  roleLabel: string;
+  attempt: number;
+  retryOfSessionId: string;
+  createdFromTaskId: string;
+  createdAt: string;
 };
 
 export type SessionLlmReasoningEffortOption = {

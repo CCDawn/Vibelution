@@ -10,6 +10,9 @@ const project: TeamResearchProject = {
   topic: "Robust causal discovery",
   experimentMethod: "statistical_causal_test",
   storageMode: "isolated",
+  nameLocked: false,
+  nameLockedAt: "",
+  nameLockReason: "",
   createdAt: "2026-07-24T00:00:00Z",
   updatedAt: "2026-07-24T00:00:00Z",
 };
@@ -40,5 +43,11 @@ describe("ResearchProjectSwitcher", () => {
     expect(switcherSource).toContain("primaryActionLabel");
     expect(switcherSource).toContain("已自动保存");
     expect(switcherSource).toContain("切换项目");
+  });
+
+  it("keeps project identity stable after the first experiment task", () => {
+    expect(switcherSource).toContain("activeProject?.nameLocked ? {} : { name: draft.name.trim() }");
+    expect(switcherSource).toContain('disabled={dialogMode === "edit" && activeProject?.nameLocked === true}');
+    expect(switcherSource).toContain("首次实验任务已建立，项目名称已锁定");
   });
 });

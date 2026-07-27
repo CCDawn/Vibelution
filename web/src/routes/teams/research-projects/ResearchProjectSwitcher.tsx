@@ -137,7 +137,7 @@ export function ResearchProjectSwitcher({
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            name: draft.name.trim(),
+            ...(activeProject?.nameLocked ? {} : { name: draft.name.trim() }),
             topic: draft.topic.trim(),
             experimentMethod: currentExperimentMethod,
           }),
@@ -253,8 +253,16 @@ export function ResearchProjectSwitcher({
               value={draft.name}
               onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
               maxLength={160}
+              disabled={dialogMode === "edit" && activeProject?.nameLocked === true}
               autoFocus
             />
+            {dialogMode === "edit" && activeProject?.nameLocked ? (
+              <small>
+                {lang === "zh"
+                  ? "首次实验任务已建立，项目名称已锁定；研究主题仍可继续修改。"
+                  : "The name is locked after the first experiment task; the research topic remains editable."}
+              </small>
+            ) : null}
           </label>
           <label>
             <span>{lang === "zh" ? "研究主题" : "Research topic"}</span>

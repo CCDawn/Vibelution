@@ -20,7 +20,7 @@ export type AgentConversationDirectoryProps = {
     agent: AgentInstance,
     latestSession: SessionSummary | null,
   ) => void;
-  onOpenAgent: (agent: AgentInstance) => void;
+  onOpenAgent: (agent: AgentInstance, latestSession: SessionSummary | null) => void;
 };
 
 export type AgentDirectorySection = "conversation" | "special";
@@ -122,7 +122,7 @@ export function AgentConversationDirectory({
         className={[styles.agentRow, active ? styles.agentRowActive : ""].filter(Boolean).join(" ")}
         aria-current={active ? "page" : undefined}
         onContextMenu={(event) => onContextMenu(event, agent, latestSession ?? null)}
-        onPress={() => onOpenAgent(agent)}
+        onPress={() => onOpenAgent(agent, latestSession ?? null)}
       >
         <span className={styles.agentAvatar} aria-hidden="true">
           {avatarUrl ? (

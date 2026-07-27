@@ -63,6 +63,14 @@ def create_experiment_plan(team_id: str, payload: dict[str, Any] | None = None) 
         store = s._load_stage_round_store(normalized_team_id)
         rounds = s._stage_rounds(store)
         stage_round = s._select_experiment_stage_round(request_payload, rounds)
+        research_project = s.resolve_research_project_identity(
+            normalized_team_id,
+            s._trim_text(
+                stage_round.get("researchProjectId")
+                or request_payload.get("researchProjectId"),
+                max_length=160,
+            ),
+        )
         candidate_store = s._load_candidate_store(normalized_team_id)
         selected_hypotheses = s._select_experiment_hypothesis_candidates(candidate_store, request_payload)
         plan_store = s._load_experiment_plan_store(normalized_team_id)
@@ -74,6 +82,10 @@ def create_experiment_plan(team_id: str, payload: dict[str, Any] | None = None) 
             request_payload,
             created_by_agent=created_by_agent,
         )
+        plan["researchProjectId"] = research_project["projectId"]
+        plan["experimentName"] = research_project["name"]
+        stage_round["researchProjectId"] = research_project["projectId"]
+        stage_round["experimentName"] = research_project["name"]
         memory_context = s._research_stage_memory_context(
             normalized_team_id,
             stage_type="experiment",
@@ -116,6 +128,11 @@ def create_experiment_plan(team_id: str, payload: dict[str, Any] | None = None) 
         s._write_json(s._workflow_path(normalized_team_id), workflow)
         status_payload = s._experiment_planning_status(normalized_team_id, rounds, candidate_store, plan_store)
         stage_round_status = s.get_research_stage_round_status(normalized_team_id)
+    s.lock_research_project_name(
+        normalized_team_id,
+        research_project["projectId"],
+        reason="first_experiment_task",
+    )
     s._record_workflow_event(
         "experiment_plan.drafted",
         normalized_team_id,

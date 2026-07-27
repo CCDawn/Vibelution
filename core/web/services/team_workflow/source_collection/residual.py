@@ -141,88 +141,15 @@ def _clean_source_collection_stage_agent_sessions_for_new_round(
     roles: list[str],
     payload: dict[str, Any],
 ) -> dict[str, Any]:
-    s = _service()
-    normalized_team_id = s._trim_text(team_id, max_length=160)
-    cleanup: dict[str, Any] = {
-        "status": "completed",
-        "reason": "new_source_collection_round",
+    """Compatibility response: project sessions are append-only and never reset."""
+    del team_id, roles, payload
+    return {
+        "status": "not_required",
+        "reason": "research_project_agent_sessions_preserved",
         "cleanedCount": 0,
         "items": [],
         "skipped": [],
     }
-    agent_ids = payload.get("agentIds") if isinstance(payload.get("agentIds"), dict) else {}
-    seen_agent_ids: set[str] = set()
-    for role in roles:
-        normalized_role = s._normalize_source_collection_agent_role(role)
-        if not normalized_role:
-            continue
-        agent_id = s._trim_text(agent_ids.get(normalized_role), max_length=160)
-        if not agent_id or agent_id in seen_agent_ids:
-            continue
-        seen_agent_ids.add(agent_id)
-        agent = s.agent_directory_service.get_agent(agent_id)
-        if not isinstance(agent, dict):
-            cleanup["skipped"].append({"agentRole": normalized_role, "agentId": agent_id, "reason": "missing_agent"})
-            continue
-        session_id = s._trim_text(agent.get("directSessionId"), max_length=160)
-        if not session_id:
-            cleanup["skipped"].append({"agentRole": normalized_role, "agentId": agent_id, "reason": "missing_direct_session"})
-            continue
-        evidence = s._source_collection_stage_session_previous_round_evidence(session_id, run_id="")
-        if not evidence:
-            continue
-        stage_id = s._normalize_source_collection_stage_id(
-            evidence.get("previousStageId") or s._source_collection_stage_id_for_agent_role(normalized_role),
-            default="finding",
-        )
-        try:
-            reset_result = s.session_service.reset_agent_direct_session_lightweight(
-                session_id,
-                agent_id=agent_id,
-                title=s._source_collection_stage_task_title(stage_id),
-            )
-        except s.session_service.SessionNotFoundError:
-            cleanup["skipped"].append({"agentRole": normalized_role, "agentId": agent_id, "sessionId": session_id, "reason": "missing_session"})
-            continue
-        except Exception as exc:
-            s._record_workflow_event(
-                "source_collection.stage_session_cleanup_failed",
-                normalized_team_id,
-                level="warning",
-                fields={
-                    "agentRole": normalized_role,
-                    "agentId": agent_id,
-                    "previousDirectSessionId": session_id,
-                    "previousSourceRunId": evidence.get("previousSourceRunId", ""),
-                    "errorType": type(exc).__name__,
-                },
-            )
-            raise s.TeamWorkflowOrchestrationError(
-                f"Previous source collection Agent session records could not be cleaned: {exc}"
-            ) from exc
-        replacement_session_id = (
-            s._trim_text(reset_result.get("replacementDirectSessionId"), max_length=160)
-            or s._trim_text(reset_result.get("nextActiveSessionId"), max_length=160)
-        )
-        item = {
-            "status": "cleaned",
-            "reason": "previous_source_collection_round",
-            "agentRole": normalized_role,
-            "agentId": agent_id,
-            "previousDirectSessionId": session_id,
-            "replacementDirectSessionId": replacement_session_id,
-            "previousSourceRunId": evidence.get("previousSourceRunId", ""),
-            "previousTeamId": evidence.get("previousTeamId", ""),
-            "previousMessageKind": evidence.get("previousMessageKind", ""),
-        }
-        cleanup["items"].append(item)
-        s._record_workflow_event(
-            "source_collection.stage_session_cleaned_for_new_round",
-            normalized_team_id,
-            fields=item,
-        )
-    cleanup["cleanedCount"] = len(cleanup["items"])
-    return cleanup
 
 
 def _coerce_source_collection_storage_path_soft(

@@ -906,6 +906,7 @@ def create_chat_session(
     llm_bindings: dict[str, Any] | None = None,
     created_by: str = "user",
     conversation_index_kind: str = agent_directory_service.CONVERSATION_INDEX_KIND_USER_CHAT,
+    experiment_binding: dict[str, Any] | None = None,
 ) -> dict:
     """Create a new empty chat session and make it active."""
     s = _service()
@@ -913,6 +914,26 @@ def create_chat_session(
     lang = s.get_web_language()
     normalized_agent_id = str(agent_id or "").strip()
     normalized_llm_bindings = s._normalize_session_agent_llm_bindings(llm_bindings)
+    raw_experiment_binding = experiment_binding if isinstance(experiment_binding, dict) else {}
+    try:
+        experiment_attempt = max(1, int(raw_experiment_binding.get("attempt") or 1))
+    except (TypeError, ValueError):
+        experiment_attempt = 1
+    normalized_experiment_binding = {
+        "teamId": str(raw_experiment_binding.get("teamId") or "").strip()[:160],
+        "researchProjectId": str(raw_experiment_binding.get("researchProjectId") or "").strip()[:160],
+        "experimentName": str(raw_experiment_binding.get("experimentName") or "").strip()[:160],
+        "agentId": str(raw_experiment_binding.get("agentId") or "").strip()[:160],
+        "roleKey": str(raw_experiment_binding.get("roleKey") or "").strip()[:80],
+        "roleLabel": str(raw_experiment_binding.get("roleLabel") or "").strip()[:80],
+        "attempt": experiment_attempt,
+        "retryOfSessionId": str(raw_experiment_binding.get("retryOfSessionId") or "").strip()[:160],
+        "createdFromTaskId": str(raw_experiment_binding.get("createdFromTaskId") or "").strip()[:160],
+        "createdAt": str(raw_experiment_binding.get("createdAt") or "").strip()[:120],
+    } if raw_experiment_binding else {}
+    binding_agent_id = str(normalized_experiment_binding.get("agentId") or "").strip()
+    if binding_agent_id and binding_agent_id != normalized_agent_id:
+        raise s.SessionValidationError("Experiment binding Agent id does not match the bound Agent.")
     bound_agent: dict[str, Any] | None = None
     if normalized_agent_id:
         s._sync_agent_directory_project_root()
@@ -948,6 +969,9 @@ def create_chat_session(
                     "sessionRole": "workspace",
                 }
             )
+            if normalized_experiment_binding:
+                conversation["experiment_binding"] = normalized_experiment_binding
+                conversation["experimentBinding"] = normalized_experiment_binding
         else:
             s._sync_agent_directory_project_root()
             agent = s.ensure_agent_for_session(

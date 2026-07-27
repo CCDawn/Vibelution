@@ -2589,9 +2589,17 @@ export function ChatCodingRoute() {
             resolveModelLabel={resolveModelLabel}
             sessions={allVisibleSessions}
             onContextMenu={openAgentContextMenu}
-            onOpenAgent={(agent) => (
-              agent.directSessionId ? handleOpenAgent(agent) : handleCreateAgentSession(agent)
-            )}
+            onOpenAgent={(agent, latestSession) => {
+              if (latestSession?.id) {
+                handleOpenDirectSession(latestSession.id);
+                return;
+              }
+              if (agent.directSessionId) {
+                handleOpenAgent(agent);
+                return;
+              }
+              handleCreateAgentSession(agent);
+            }}
           />
           {agentContextMenu ? (
             <Suspense fallback={null}>

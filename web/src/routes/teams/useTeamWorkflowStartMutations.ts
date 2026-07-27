@@ -107,6 +107,7 @@ export function useTeamWorkflowStartMutations(options: UseTeamWorkflowStartMutat
       returnLabel: string;
       requestedByAgent: string;
       idempotencyKey: string;
+      formalRetry?: boolean;
     }) =>
       fetchJson<TeamWorkflowSourceCollectionStageSessionTaskPayload>(
         `/api/teams/${encodeURIComponent(payload.teamId)}/workflow-orchestration/source-collection-runs/${encodeURIComponent(payload.runId)}/stage-session-tasks`,
@@ -121,6 +122,7 @@ export function useTeamWorkflowStartMutations(options: UseTeamWorkflowStartMutat
             returnLabel: payload.returnLabel,
             requestedByAgent: payload.requestedByAgent,
             idempotencyKey: payload.idempotencyKey,
+            formalRetry: payload.formalRetry === true,
           }),
         },
       ),

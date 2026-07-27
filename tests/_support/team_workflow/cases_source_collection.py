@@ -100,7 +100,7 @@ def test_source_collection_summary_reconciles_needs_continue_stage_task(tmp_path
     assert stored_task["status"] == "interrupted"
     assert stored_task["reconciledFromTurn"]["status"] == "needs_continue"
 
-def test_source_collection_run_start_cleans_previous_stage_agent_session_records(tmp_path, monkeypatch):
+def test_source_collection_run_start_preserves_previous_stage_agent_session_records(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
     discovery = agent_directory_service.create_agent_instance(display_name="资料寻找")
@@ -147,15 +147,16 @@ def test_source_collection_run_start_cleans_previous_stage_agent_session_records
     cleanup = second_run["sessionCleanup"]
     new_session_id = agent_directory_service.get_agent(discovery["agentId"])["directSessionId"]
 
-    assert cleanup["cleanedCount"] == 1
-    assert cleanup["items"][0]["previousDirectSessionId"] == old_session_id
-    assert cleanup["items"][0]["replacementDirectSessionId"] == new_session_id
-    assert cleanup["items"][0]["reason"] == "previous_source_collection_round"
-    assert new_session_id != old_session_id
-    assert session_service.get_session_detail(old_session_id) is None
-    new_detail = session_service.get_session_detail(new_session_id)
-    assert new_detail is not None
-    assert new_detail["messages"] == []
+    assert cleanup["status"] == "not_required"
+    assert cleanup["cleanedCount"] == 0
+    assert cleanup["items"] == []
+    assert new_session_id == old_session_id
+    old_detail = session_service.get_session_detail(old_session_id)
+    assert old_detail is not None
+    assert any(
+        message.get("metadata", {}).get("sourceCollectionStageTaskId") == "stagetask-old-round"
+        for message in old_detail["messages"]
+    )
 
 def test_source_collection_summary_defaults_to_latest_run_with_records(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
@@ -723,7 +724,7 @@ def test_start_source_collection_run_accepts_traceable_query_seed_contract(tmp_p
     assert response["assignments"][1]["acceptance"]["resultWritebackContract"]["candidateImport"]["targetCandidateType"] == "source_manifest"
     assert response["assignments"][1]["acceptance"]["resultWritebackContract"]["officialGraphWrites"] is False
 
-def test_seed_source_collection_agent_session_context_writes_and_dedupes_direct_session(tmp_path, monkeypatch):
+def test_seed_source_collection_agent_session_context_writes_and_dedupes_project_session(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
     discovery = agent_directory_service.create_agent_instance(display_name="资料寻找")
@@ -757,20 +758,24 @@ def test_seed_source_collection_agent_session_context_writes_and_dedupes_direct_
     )
 
     assert first["created"] is True
-    assert first["sessionId"] == direct_session["id"]
+    assert first["sessionCreated"] is True
+    assert first["sessionId"] != direct_session["id"]
+    assert agent_directory_service.get_agent(discovery["agentId"])["directSessionId"] == direct_session["id"]
     assert first["message"]["metadata"]["kind"] == "source_collection_agent_context"
     assert first["message"]["metadata"]["sourceCollectionContextKey"] == first["contextKey"]
     assert "脑启发路由" in first["message"]["content"]
     assert second["created"] is False
+    assert second["sessionCreated"] is False
+    assert second["sessionId"] == first["sessionId"]
     assert second["alreadyPresent"] is True
-    detail = session_service.get_session_detail(direct_session["id"])
+    detail = session_service.get_session_detail(first["sessionId"])
     context_messages = [
         message for message in detail["messages"]
         if message.get("metadata", {}).get("kind") == "source_collection_agent_context"
     ]
     assert len(context_messages) == 1
 
-def test_start_source_collection_stage_session_task_submits_direct_session_task(tmp_path, monkeypatch):
+def test_start_source_collection_stage_session_task_submits_project_session_task(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
     submitted: list[dict] = []
@@ -850,8 +855,10 @@ def test_start_source_collection_stage_session_task_submits_direct_session_task(
 
     assert task["created"] is True
     assert task["alreadyPresent"] is False
-    assert task["sessionId"] == direct_session["id"]
-    assert task["chatRoute"].startswith(f"/chat?session={direct_session['id']}")
+    assert task["sessionCreated"] is True
+    assert task["sessionId"] != direct_session["id"]
+    assert task["chatRoute"].startswith(f"/chat?session={task['sessionId']}")
+    assert agent_directory_service.get_agent(finder["agentId"])["directSessionId"] == direct_session["id"]
     assert task["turn"]["turnId"] == "turn-stage-task-1"
     assert task["task"]["status"] == "running"
     assert task["task"]["writebackContract"]["writesFormalKnowledge"] is False
@@ -873,7 +880,7 @@ def test_start_source_collection_stage_session_task_submits_direct_session_task(
         "write_invalid_sources",
         "confirm_materialized_sources",
     ]
-    assert submitted[0]["sessionId"] == direct_session["id"]
+    assert submitted[0]["sessionId"] == task["sessionId"]
     assert "资料搜集阶段任务" in submitted[0]["content"]
     assert "会立即要求当前 Agent 在本会话执行" in submitted[0]["content"]
     assert "checklist 已由后端绑定" in submitted[0]["content"]
@@ -959,12 +966,14 @@ def test_start_source_collection_ingestion_stage_routes_to_bound_source_ingestor
 
     assert task["agentId"] == ingestor["agentId"]
     assert task["agentRole"] == "source_ingestor"
-    assert task["sessionId"] == ingestor_session["id"]
+    assert task["sessionCreated"] is True
+    assert task["sessionId"] != ingestor_session["id"]
     assert task["task"]["title"] == "资料入库任务"
     assert task["task"]["writesFormalKnowledge"] is True
     assert task["writebackContract"]["writesFormalKnowledge"] is True
     assert task["writebackContract"]["resultAuthority"] == "source_collection_stage_writeback_tool+knowledge_ingestion_gate"
-    assert submitted[0]["sessionId"] == ingestor_session["id"]
+    assert submitted[0]["sessionId"] == task["sessionId"]
+    assert agent_directory_service.get_agent(ingestor["agentId"])["directSessionId"] == ingestor_session["id"]
     assert "资料入库任务" in submitted[0]["content"]
     assert "资料入库 Agent" in submitted[0]["content"]
     assert "共享记忆前审" not in submitted[0]["content"]
@@ -4337,7 +4346,7 @@ def test_source_collection_stage_turn_completion_reconciles_post_writeback_check
 
     _append_stage_task_tool_trace(tmp_path, first["task"])
     session_service._persist_session_turn_result(
-        direct_session["id"],
+        task["sessionId"],
         {
             "status": "needs_continue",
             "summary": "本轮还没有形成最终回答，已保留当前执行进度；发送“继续”可衔接上一轮继续。",
@@ -4444,7 +4453,7 @@ def test_source_collection_stage_turn_completion_reconciles_feedback_event_check
     assert first["task"]["completionGate"]["taskChecklistComplete"] is False
 
     session_service._persist_session_turn_result(
-        direct_session["id"],
+        task["sessionId"],
         {
             "status": "needs_continue",
             "summary": "本轮还没有形成最终回答，已保留当前执行进度；发送“继续”可衔接上一轮继续。",

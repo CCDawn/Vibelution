@@ -29,6 +29,12 @@ class ResearchProjectNotFoundError(ResearchProjectError):
     """Raised when a team research project does not exist."""
 
 
+class ResearchProjectNameLockedError(ResearchProjectError):
+    """Raised when a frozen research project name would be changed."""
+
+    code = "research_project_name_locked"
+
+
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -88,6 +94,9 @@ def _default_project(now: str) -> dict[str, Any]:
         "topic": "",
         "experimentMethod": "",
         "storageMode": "legacy",
+        "nameLocked": False,
+        "nameLockedAt": "",
+        "nameLockReason": "",
         "createdAt": now,
         "updatedAt": now,
     }
@@ -102,6 +111,9 @@ def _normalize_project(project: dict[str, Any], *, fallback_now: str) -> dict[st
         "topic": str(project.get("topic") or "").strip()[:1000],
         "experimentMethod": str(project.get("experimentMethod") or "").strip()[:120],
         "storageMode": storage_mode,
+        "nameLocked": bool(project.get("nameLocked")),
+        "nameLockedAt": str(project.get("nameLockedAt") or ""),
+        "nameLockReason": str(project.get("nameLockReason") or "").strip()[:160],
         "createdAt": str(project.get("createdAt") or fallback_now),
         "updatedAt": str(project.get("updatedAt") or fallback_now),
     }
@@ -165,6 +177,9 @@ def create_research_project(team_id: str, payload: dict[str, Any]) -> dict[str, 
             "topic": str(payload.get("topic") or "").strip()[:1000],
             "experimentMethod": str(payload.get("experimentMethod") or "").strip()[:120],
             "storageMode": "isolated",
+            "nameLocked": False,
+            "nameLockedAt": "",
+            "nameLockReason": "",
             "createdAt": now,
             "updatedAt": now,
         }
@@ -183,6 +198,10 @@ def update_research_project(team_id: str, project_id: str, payload: dict[str, An
             name = str(payload.get("name") or "").strip()
             if not name:
                 raise ResearchProjectError("Research project name is required.")
+            if bool(project.get("nameLocked")) and name[:160] != project["name"]:
+                raise ResearchProjectNameLockedError(
+                    "Research project name is locked after its first experiment session or task."
+                )
             project["name"] = name[:160]
         if "topic" in payload and payload.get("topic") is not None:
             project["topic"] = str(payload.get("topic") or "").strip()[:1000]
@@ -205,15 +224,59 @@ def activate_research_project(team_id: str, project_id: str) -> dict[str, Any]:
     return {"project": project, **store}
 
 
+def get_research_project(team_id: str, project_id: str) -> dict[str, Any]:
+    team_service.get_team(team_id)
+    with _STORE_LOCK:
+        store = _load_store(team_id)
+        return dict(_project_payload(store, str(project_id or "").strip()))
+
+
+def get_active_research_project(team_id: str) -> dict[str, Any]:
+    team_service.get_team(team_id)
+    with _STORE_LOCK:
+        store = _load_store(team_id)
+        return dict(_project_payload(store, store["activeProjectId"]))
+
+
+def lock_research_project_name(
+    team_id: str,
+    project_id: str,
+    *,
+    reason: str = "first_experiment_session",
+) -> dict[str, Any]:
+    """Idempotently freeze the display name used by experiment session titles."""
+    team_service.get_team(team_id)
+    with _STORE_LOCK:
+        store = _load_store(team_id)
+        project = _project_payload(store, project_id)
+        if not bool(project.get("nameLocked")):
+            now = _utc_now()
+            project["nameLocked"] = True
+            project["nameLockedAt"] = now
+            project["nameLockReason"] = str(reason or "first_experiment_session").strip()[:160]
+            project["updatedAt"] = now
+            _persist_store(team_id, store)
+            _record_project_event("research_project.name_locked", team_id, project_id)
+        return dict(project)
+
+
+def resolve_research_project_workspace_root(team_id: str, project_id: str) -> Path:
+    normalized_project_id = str(project_id or "").strip()
+    with _STORE_LOCK:
+        store = _load_store(team_id)
+        _project_payload(store, normalized_project_id)
+    base_root = team_workspace_root(team_id)
+    if normalized_project_id == LEGACY_PROJECT_ID:
+        return base_root
+    return base_root / "research_projects" / normalized_project_id / "workspace"
+
+
 def resolve_team_workflow_root(team_id: str) -> Path:
     """Resolve the canonical workflow root for the team's active research project."""
     with _STORE_LOCK:
         store = _load_store(team_id)
         active_project_id = store["activeProjectId"]
-    base_root = team_workspace_root(team_id)
-    if active_project_id == LEGACY_PROJECT_ID:
-        return base_root
-    return base_root / "research_projects" / active_project_id / "workspace"
+    return resolve_research_project_workspace_root(team_id, active_project_id)
 
 
 def _record_project_event(event_name: str, team_id: str, project_id: str) -> None:

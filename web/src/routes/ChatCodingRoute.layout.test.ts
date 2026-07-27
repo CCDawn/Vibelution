@@ -2404,13 +2404,17 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).not.toContain("renameSessionMutation.mutate({ sessionId: directSessionId, title })");
     expect(routeSource).toContain("onRename={handleRenameAgent}");
     expect(routeSource).toContain("onCreateSession={handleCreateAgentSession}");
-    expect(routeSource).toContain(
-      "agent.directSessionId ? handleOpenAgent(agent) : handleCreateAgentSession(agent)",
-    );
+    expect(routeSource).toContain("onOpenAgent={(agent, latestSession) => {");
+    expect(routeSource).toContain("handleOpenDirectSession(latestSession.id)");
+    expect(routeSource).toContain("if (agent.directSessionId) {");
+    expect(routeSource).toContain("handleCreateAgentSession(agent)");
     expect(routeSource).toContain("onOpenConfig={handleOpenAgentConfig}");
     expect(routeSource).toContain("onOpenLatest={handleOpenAgentLatestSession}");
     expect(agentConversationDirectorySource).toContain(
       "onContextMenu={(event) => onContextMenu(event, agent, latestSession ?? null)}",
+    );
+    expect(agentConversationDirectorySource).toContain(
+      "onPress={() => onOpenAgent(agent, latestSession ?? null)}",
     );
     expect(agentContextMenuSource).toContain('aria-label={lang === "zh" ? "Agent 操作" : "Agent actions"}');
     expect(agentContextMenuSource).toContain("打开最近会话");
@@ -2480,6 +2484,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(directSessionIndexItemSource).toContain("export function isChildSession");
     expect(conversationIndexModelSource).toContain("export function rootSessionIdFor");
     expect(conversationIndexModelSource).toContain("export function isRepresentedInAgentSessionTabs");
+    expect(conversationIndexModelSource).toContain(
+      'return Boolean(String(session?.agentId || "").trim())',
+    );
     expect(conversationIndexModelSource).toContain("export function hasInvalidChildSessionLink");
     expect(conversationIndexModelSource).toContain("export function mergeVisibleSessionsIntoConversations");
     expect(routeSource).toContain("queryKeys.sessionChildSessions(activeRootSessionId || \"none\")");
@@ -2491,7 +2498,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("return allVisibleSessions.filter((session) => !isRepresentedInAgentSessionTabs(session))");
     expect(routeSource).toContain("const agentSessionTabs = useMemo");
     expect(routeSource).toContain("sessions: selectedAgentSessionsQuery.data?.items");
-    expect(routeAndSessionSurfaceSource).toContain("isChildSession(left) ? 2 : 1");
+    expect(routeAndSessionSurfaceSource).toContain('String(right.updatedAt || right.lastActive || "")');
+    expect(routeAndSessionSurfaceSource).toContain(".localeCompare(String(left.updatedAt || left.lastActive || \"\"))");
+    expect(routeAndSessionSurfaceSource).not.toContain("isChildSession(left) ? 2 : 1");
     expect(routeSource).toContain("buildAgentSessionTabs");
     expect(conversationIndexModelSource).toContain("mergeVisibleSessionsIntoConversations(conversations, rightIndexSessions)");
     expect(conversationIndexModelSource).toContain("if (isRepresentedInAgentSessionTabs(session))");
@@ -2510,13 +2519,15 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("onCancelRename={cancelRenameSession}");
     expect(agentSessionTabStripSource).toContain("styles.agentSessionTabGroup");
     expect(agentSessionTabStripSource).toContain("styles.agentSessionTabActive");
-    expect(agentSessionTabStripSource).toContain("styles.agentSessionTabChild");
+    expect(agentSessionTabStripSource).not.toContain("styles.agentSessionTabChild");
     expect(agentSessionTabStripSource).toContain("styles.agentSessionTabRoot");
     expect(agentSessionTabStripSource).toContain("styles.agentSessionTabEditing");
     expect(agentSessionTabStripSource).toContain("onContextMenu={(event) => onContextMenu(event, session)}");
-    expect(agentSessionTabStripSource).toContain("sessionIsChild ? <MessageCircleHeart size={14} /> : <Bot size={14} />");
-    expect(agentSessionTabStripSource).toContain("session.taskTitle || session.resultCard?.title || session.title");
-    expect(agentSessionTabStripSource).toContain("session.resultCard?.summary || session.taskSummary");
+    expect(agentSessionTabStripSource).toContain("<Bot size={14} />");
+    expect(agentSessionTabStripSource).not.toContain("MessageCircleHeart");
+    expect(agentSessionTabStripSource).not.toContain("sessionIsChild");
+    expect(agentSessionTabStripSource).toContain("session.title");
+    expect(agentSessionTabStripSource).toContain("session.taskSummary");
     expect(agentSessionTabStripSource).toContain("onOpenDirectSession(session.id)");
     expect(agentSessionTabStripSource).toContain("const tabEditing = editingSessionId === session.id");
     expect(agentSessionTabStripSource).toContain("className={styles.agentSessionTabTitleInput}");

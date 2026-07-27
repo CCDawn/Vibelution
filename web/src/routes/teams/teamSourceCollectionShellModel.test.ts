@@ -64,7 +64,7 @@ describe("teamSourceCollectionShellModel", () => {
     }).status).toBe("loading");
     expect(resolveSourceCollectionStageAgentChatState({
       binding: { agentId: "a1", agent: { id: "a1" } },
-      route: "/chat?session=1",
+      route: "",
       agentSummaryPending: false,
       agentSummaryFetching: false,
       agentSummaryError: false,
