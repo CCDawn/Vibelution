@@ -129,13 +129,9 @@ import {
   type SourceCollectionStorageArtifacts,
   type SourceCollectionStorageOpenTarget,
 } from "./teams/source-collection/presentationModel";
-import {
-  buildSourceCollectionManualWritebackAssignmentOptions,
-  canStartSourceCollectionRun,
-  canSubmitSourceCollectionManualWriteback,
-  resolveSourceCollectionManualWritebackAssignmentValue,
-} from "./teams/source-collection/injectModel";
 import { TeamSourceCollectionModeFields } from "./teams/TeamSourceCollectionModeFields";
+import { TeamSourceCollectionSearchBriefInject } from "./teams/TeamSourceCollectionSearchBriefInject";
+import { TeamSourceCollectionManualWritebackInject } from "./teams/TeamSourceCollectionManualWritebackInject";
 import {
   CANVAS_VIEWPORT_HEIGHT,
   CANVAS_VIEWPORT_WIDTH,
@@ -2343,26 +2339,17 @@ export function TeamsRoute({
 
   function renderSourceCollectionSearchBrief() {
     return (
-      <TeamSourceCollectionSearchBriefPanel
+      <TeamSourceCollectionSearchBriefInject
         lang={lang}
         draft={sourceCollectionDraft}
         modeFields={renderSourceCollectionModeFields()}
         hasExistingRun={Boolean(selectedSourceCollectionRun)}
         canStart={sourceCollectionCanStart}
         startPending={selectedTeamStartSourceCollectionPending}
+        teamId={selectedTeam?.teamId}
         onDraftChange={(patch) => setSourceCollectionDraft((current) => ({ ...current, ...patch }))}
-        onSubmit={() => {
-          if (!canStartSourceCollectionRun({
-            teamId: selectedTeam?.teamId,
-            canStart: sourceCollectionCanStart,
-            startPending: selectedTeamStartSourceCollectionPending,
-          })) {
-            return;
-          }
-          startSourceCollectionRunMutation.mutate({
-            teamId: selectedTeam!.teamId,
-            draft: sourceCollectionDraft,
-          });
+        onStart={({ teamId, draft }) => {
+          startSourceCollectionRunMutation.mutate({ teamId, draft });
         }}
       />
     );
@@ -2373,39 +2360,20 @@ export function TeamsRoute({
     description?: string;
     wrapInDetails?: boolean;
   }) {
-    const assignmentValue = resolveSourceCollectionManualWritebackAssignmentValue(
-      sourceCollectionOutputDraft.assignmentId,
-      selectedSourceCollectionAssignment?.assignmentId,
-    );
     return (
-      <TeamSourceCollectionManualWritebackPanel
+      <TeamSourceCollectionManualWritebackInject
         lang={lang}
         draft={sourceCollectionOutputDraft}
-        assignmentValue={assignmentValue}
-        assignments={buildSourceCollectionManualWritebackAssignmentOptions(sourceCollectionAssignments, lang)}
-        sourceTypes={["paper", "url", "dataset", "file", "note", "manual"]}
+        assignments={sourceCollectionAssignments}
+        selectedAssignmentId={selectedSourceCollectionAssignment?.assignmentId}
         canSubmit={canRecordSourceCollectionOutput}
         pending={selectedTeamRecordSourceCollectionOutputPending}
+        teamId={selectedTeam?.teamId}
+        runId={selectedSourceCollectionRunEffectiveId}
+        hasRecord={sourceCollectionOutputHasRecord}
         onDraftChange={(patch) => setSourceCollectionOutputDraft((current) => ({ ...current, ...patch }))}
-        onSubmit={(event) => {
-          event.preventDefault();
-          const assignmentId = resolveSourceCollectionManualWritebackAssignmentValue(
-            sourceCollectionOutputDraft.assignmentId,
-            selectedSourceCollectionAssignment?.assignmentId,
-          );
-          if (!canSubmitSourceCollectionManualWriteback({
-            teamId: selectedTeam?.teamId,
-            runId: selectedSourceCollectionRunEffectiveId,
-            assignmentId,
-            hasRecord: sourceCollectionOutputHasRecord,
-          })) {
-            return;
-          }
-          recordSourceCollectionOutputMutation.mutate({
-            teamId: selectedTeam!.teamId,
-            runId: selectedSourceCollectionRunEffectiveId!,
-            draft: { ...sourceCollectionOutputDraft, assignmentId },
-          });
+        onSubmitRecord={({ teamId, runId, draft }) => {
+          recordSourceCollectionOutputMutation.mutate({ teamId, runId, draft });
         }}
         sourceTypeLabel={(sourceType) => sourceCollectionSourceTypeLabel(sourceType, lang)}
         title={options?.title}

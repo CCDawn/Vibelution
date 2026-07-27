@@ -63,8 +63,9 @@ and panel composition. Pure query/presentation/draft helpers should leave the sh
 - **Done (C1.1 dictionary charter):** nested workbench tables live under `i18n/domains/agentsWorkbenchCopy.ts`; facade + soft-prefetch loader; flat `dictionaryAgents` stays shared nav/compression only.
 - **Done (A8):** `planAgentResetDirectSession` pure plan in `agentRouteBulkModel`; shell only applies store side effects.
 - **Still in shell:** large JSX composition, store-side session reconcile apply.
-- **Done (C1.2 dictionary phase-2):** high-frequency workbench keys in flat `dictionaryAgents` + `mergeAgentsRouteCopyWithDictionary` dual-read; nested table remains fallback/full surface.
-- **Deferred (charter later):** expand dual-read beyond the high-frequency set; avoid swallowing the full nested table into `TranslationKey`.
+- **Done (C1.2 dictionary phase-2):** high-frequency workbench keys in flat `dictionaryAgents` + dual-read merge.
+- **Done (C1.3):** mid-frequency bulk/filter/management keys dual-read expanded; nested table still owns long confirms and low-freq labels.
+- **Deferred (charter later):** more dual-read only when a concrete claim needs it; do not swallow full nested table.
 
 ## Dictionary charter (Agents workbench)
 
@@ -88,6 +89,7 @@ and panel composition. Pure query/presentation/draft helpers should leave the sh
 | C1 | Workbench copy table externalize | **Done** — `agentsRouteCopy.ts` |
 | C1.1 | Domain-shaped workbench copy + soft prefetch | **Done** — `i18n/domains/agentsWorkbenchCopy.ts` |
 | C1.2 | High-freq workbench keys + dual-read | **Done** — `dictionaryAgents` + `mergeAgentsWorkbenchCopy` |
+| C1.3 | Mid-freq bulk/filter/management dual-read | **Done** — expanded merge overlay |
 | Shell rule | Route only orchestrates | ongoing |
 
 ## Perf notes (secondary)

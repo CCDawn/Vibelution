@@ -28,6 +28,7 @@ live outside the shell.
 | Operation / process labels & codex gates | `conversationOperationPresentation.ts` |
 | Composer primary-action resolution | `conversationComposerActionModel.ts` |
 | Response segment parse cache | `conversationResponseSegmentCache.ts` |
+| Operation icon kind classification | `conversationOperationIconModel.ts` |
 | Tool activity UI / registry | `ConversationToolActivity.tsx`, `conversationTool*`, `conversationToolRendererRegistry.tsx` |
 | Codex native transcript surface | `codexNativeTranscriptSurface.ts`, `codexTranscriptCells.ts`, `codexToolLifecycleModel.ts` |
 | Mental-state rows | `conversationMentalState.ts` |
@@ -76,6 +77,7 @@ Approximate ownership inside the shell. Line ranges drift; use the map by
 | C3 | Response segment label / show pure | **Done** — `conversationResponseSegmentPresentation.ts` |
 | C3.1 | Operation labels / codex surface gates | **Done** — `conversationOperationPresentation.ts` |
 | C3.2 | Composer action + segment-cache claims | **Done** — `conversationComposerActionModel` / `conversationResponseSegmentCache` |
+| C3.3 | Operation icon kind pure claim | **Done** — `conversationOperationIconModel` |
 | Further pure extract | only when a claim needs it | deferred |
 
 ## Rules
