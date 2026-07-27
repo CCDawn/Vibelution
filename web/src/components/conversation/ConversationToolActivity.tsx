@@ -1,6 +1,7 @@
 import { ChevronDown, CircleAlert, LoaderCircle } from "lucide-react";
 import type { ReactNode } from "react";
 
+import "./ConversationToolActivity.css";
 import type { CodexTranscriptCell } from "./codexTranscriptCells";
 import {
   codexTranscriptToolRawName,
