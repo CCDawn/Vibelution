@@ -177,6 +177,134 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html).not.toContain("responseSection");
   });
 
+  it("folds a native terminal continuation into its command across assistant messages", () => {
+    const terminalId = "terminal:sandbox-cross-message";
+    const html = renderConversation([
+      {
+        id: "user-terminal-command",
+        role: "user",
+        content: "Run the acceptance command.",
+        timestamp: "2026-07-27T20:02:00.000Z",
+      },
+      {
+        id: "assistant-terminal-command",
+        role: "assistant",
+        content: "",
+        timestamp: "2026-07-27T20:02:01.000Z",
+        codexTranscript: {
+          version: 1,
+          source: "native",
+          messageId: "assistant-terminal-command",
+          cells: [
+            {
+              id: "assistant-terminal-command-cell",
+              kind: "tool_call",
+              messageId: "assistant-terminal-command",
+              status: "running",
+              tone: "running",
+              title: "exec_command",
+              operationIds: ["exec-operation"],
+              toolLifecycleModel: {
+                toolCalls: [
+                  {
+                    toolCallId: "call-exec",
+                    rawOperationId: "exec-operation",
+                    status: "running",
+                    title: "exec_command",
+                    rawToolName: "exec_command",
+                    runtimeKind: "terminal",
+                    terminalOperationId: "terminal-operation-exec",
+                  },
+                ],
+                terminalOperations: [
+                  {
+                    operationId: "terminal-operation-exec",
+                    rawOperationId: "exec-operation",
+                    toolCallId: "call-exec",
+                    terminalId,
+                    kind: "ExecCommand",
+                    status: "running",
+                    request: { displayCommand: "ping -n 3 127.0.0.1", cwd: "" },
+                  },
+                ],
+                terminalSessions: [
+                  {
+                    terminalId,
+                    createdByOperationId: "terminal-operation-exec",
+                    operationIds: ["terminal-operation-exec"],
+                    status: "running",
+                  },
+                ],
+                modelObservations: [],
+              },
+            },
+          ],
+        },
+      },
+      {
+        id: "assistant-terminal-write",
+        role: "assistant",
+        content: "",
+        timestamp: "2026-07-27T20:02:04.000Z",
+        codexTranscript: {
+          version: 1,
+          source: "native",
+          messageId: "assistant-terminal-write",
+          cells: [
+            {
+              id: "assistant-terminal-write-cell",
+              kind: "tool_call",
+              messageId: "assistant-terminal-write",
+              status: "completed",
+              tone: "warning",
+              title: "write_stdin",
+              summary: "[WARNING | Exit Code: 7] command finished",
+              operationIds: ["write-operation"],
+              toolLifecycleModel: {
+                toolCalls: [
+                  {
+                    toolCallId: "call-write",
+                    rawOperationId: "write-operation",
+                    status: "completed",
+                    title: "write_stdin",
+                    rawToolName: "write_stdin",
+                    runtimeKind: "terminal",
+                    terminalOperationId: "terminal-operation-write",
+                  },
+                ],
+                terminalOperations: [
+                  {
+                    operationId: "terminal-operation-write",
+                    rawOperationId: "write-operation",
+                    toolCallId: "call-write",
+                    terminalId,
+                    kind: "WriteStdin",
+                    status: "completed",
+                    request: { displayCommand: "", cwd: "" },
+                    result: { exitCode: 7, formattedOutput: "[WARNING | Exit Code: 7] command finished" },
+                  },
+                ],
+                terminalSessions: [
+                  {
+                    terminalId,
+                    createdByOperationId: "terminal-operation-exec",
+                    operationIds: ["terminal-operation-exec", "terminal-operation-write"],
+                    status: "completed",
+                  },
+                ],
+                modelObservations: [],
+              },
+            },
+          ],
+        },
+      },
+    ]);
+
+    expect(html.match(/data-codex-tool-activity-item="true"/g)).toHaveLength(1);
+    expect(html).toContain('data-codex-transcript-cell-tone="warning"');
+    expect(html).not.toContain('data-conversation-part-key="assistant-terminal-write-cell"');
+  });
+
   it("aligns expanded compact tool diagnostics with the tool body column", () => {
     const html = renderConversation([
       {
