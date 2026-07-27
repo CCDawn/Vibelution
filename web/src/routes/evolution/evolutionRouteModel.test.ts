@@ -14,9 +14,14 @@ import {
   supervisedWorkflowStepLabel,
   toLimitInput,
   SUPERVISED_WORKFLOW_STEPS,
+  SUPERVISED_RUN_MEMBER_ROLES,
 } from "./evolutionRouteModel";
 
 describe("evolutionRouteModel", () => {
+  it("keeps every runtime conversation Agent available to the supervised UI", () => {
+    expect(SUPERVISED_RUN_MEMBER_ROLES).toEqual(["baseline", "candidate", "judge"]);
+  });
+
   it("clamps scores and formats compact timestamps", () => {
     expect(clampScore(120)).toBe(100);
     expect(clampScore(-3)).toBe(0);
