@@ -5,6 +5,7 @@ Stage 2 modules (claim scopes):
 - ``list_cache`` — session list index cache
 - ``live_output`` — live overlay state + checkpoint I/O
 - ``journal_bridge`` — conversation events cache / append / ledger seq
+- ``catalog_bridge`` — canonical metadata projection / SQLite reconcile
 - ``submit`` — submit / guidance / edit-resubmit entrypoints
 - ``schedule`` — queue / executor handoff
 - ``stream_capture`` — UI capture batching + hooks
