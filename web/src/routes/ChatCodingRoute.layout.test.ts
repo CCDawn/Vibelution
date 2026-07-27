@@ -2496,8 +2496,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("const merged = [...(sessionsQuery.data ?? []), ...(childSessionsQuery.data ?? [])]");
     expect(routeSource).toContain("const rightIndexSessions = useMemo");
     expect(routeSource).toContain("return allVisibleSessions.filter((session) => !isRepresentedInAgentSessionTabs(session))");
+    expect(routeSource).toContain("const selectedAgentVisibleSessions = useMemo");
     expect(routeSource).toContain("const agentSessionTabs = useMemo");
-    expect(routeSource).toContain("sessions: selectedAgentSessionsQuery.data?.items");
+    expect(routeSource).toContain("sessions: [...(selectedAgentSessionsQuery.data?.items ?? []), ...selectedAgentVisibleSessions]");
     expect(routeAndSessionSurfaceSource).toContain('String(right.updatedAt || right.lastActive || "")');
     expect(routeAndSessionSurfaceSource).toContain(".localeCompare(String(left.updatedAt || left.lastActive || \"\"))");
     expect(routeAndSessionSurfaceSource).not.toContain("isChildSession(left) ? 2 : 1");

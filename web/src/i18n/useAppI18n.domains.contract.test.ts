@@ -19,7 +19,7 @@ describe("useAppI18n domain wiring (D1 follow-up)", () => {
   });
 
   it("scopes primary routes to domain packs", () => {
-    expect(chatRouteSource).toContain('useAppI18n({ domains: ["chat"] })');
+    expect(chatRouteSource).toContain('useAppI18n({ domains: ["chat", "agents"] })');
     expect(conversationViewSource).toContain('useAppI18n({ domains: ["chat"] })');
     expect(evolutionRouteSource).toContain('useAppI18n({ domains: ["evolution"] })');
     expect(toolsRouteSource).toContain('useAppI18n({ domains: ["tools"] })');

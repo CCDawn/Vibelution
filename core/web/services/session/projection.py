@@ -3121,6 +3121,19 @@ def _session_agent_visible_in_indexes(summary: dict[str, Any]) -> bool:
     s = _service()
     conversation_index_kind = str(summary.get("conversationIndexKind") or "").strip()
     conversation_index_visibility = str(summary.get("conversationIndexVisibility") or "").strip()
+    experiment_binding = summary.get("experimentBinding") or summary.get("experiment_binding")
+    experiment_agent_id = (
+        str(experiment_binding.get("agentId") or "").strip()
+        if isinstance(experiment_binding, dict)
+        else ""
+    )
+    experiment_bound = bool(
+        isinstance(experiment_binding, dict)
+        and str(experiment_binding.get("teamId") or "").strip()
+        and str(experiment_binding.get("researchProjectId") or "").strip()
+        and experiment_agent_id
+        and experiment_agent_id == str(summary.get("agentId") or "").strip()
+    )
     if str(summary.get("agentStatusCode") or "").strip() == "deleted_agent":
         if bool(summary.get("hiddenFromIndex") or summary.get("hidden_from_index")):
             return False
@@ -3130,14 +3143,20 @@ def _session_agent_visible_in_indexes(summary: dict[str, Any]) -> bool:
     if conversation_index_kind == s.agent_directory_service.CONVERSATION_INDEX_KIND_INVALID:
         return True
     if conversation_index_visibility == s.agent_directory_service.CONVERSATION_INDEX_VISIBILITY_TEAM_PRIVATE:
-        return False
+        return experiment_bound and not bool(
+            summary.get("hiddenFromIndex") or summary.get("hidden_from_index")
+        )
     if conversation_index_visibility == s.agent_directory_service.CONVERSATION_INDEX_VISIBILITY_HIDDEN:
         return False
     if conversation_index_kind in {
         s.agent_directory_service.CONVERSATION_INDEX_KIND_TEAM_AGENT,
         s.agent_directory_service.CONVERSATION_INDEX_KIND_HIDDEN,
     }:
-        return False
+        return (
+            conversation_index_kind == s.agent_directory_service.CONVERSATION_INDEX_KIND_TEAM_AGENT
+            and experiment_bound
+            and not bool(summary.get("hiddenFromIndex") or summary.get("hidden_from_index"))
+        )
     if bool(summary.get("hiddenFromIndex") or summary.get("hidden_from_index")):
         return False
     if str(summary.get("sessionKind") or "").strip().lower() == "child":
