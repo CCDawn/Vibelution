@@ -917,7 +917,8 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourceCollectionControlsPanelSource).toContain("source-collection-actions");
     expect(teamSourceCollectionControlsPanelSource).toContain("sourceCollectionControlPanel");
     expect(teamSourceCollectionControlsPanelSource).toContain("forwardRef");
-    expect(routeSource).toContain("TeamSourceCollectionManualWritebackPanel");
+    expect(routeSource).toContain("TeamSourceCollectionManualWritebackInject");
+    expect(routeSource).toContain("TeamSourceCollectionSearchBriefInject");
     expect(routeSource).toContain("renderSourceCollectionManualWritebackPanel");
     expect(teamSourceCollectionManualWritebackPanelSource).toContain("workflowSourceCollectionDetails");
     expect(teamSourceCollectionManualWritebackPanelSource).toContain("workflowSourceCollectionOutputForm");

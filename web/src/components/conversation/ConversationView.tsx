@@ -243,6 +243,7 @@ import {
   resolveComposerGuidanceUi,
   resolveComposerPrimaryActionFlags,
 } from "./conversationComposerActionModel";
+import { conversationOperationIconKind } from "./conversationOperationIconModel";
 import { getCachedResponseSegments as getCachedResponseSegmentsFromCache } from "./conversationResponseSegmentCache";
 import {
   completedToolPresentationSummary,
@@ -1269,31 +1270,21 @@ export function ConversationView({
   const formatDuration = formatConversationDuration;
 
   function operationIcon(kind: AgentMessageOperationKind, label: string) {
-    const normalized = label.trim().toLowerCase();
-    if (kind === "thought") {
-      return <Sparkles size={17} />;
+    switch (conversationOperationIconKind(kind, label)) {
+      case "thought":
+        return <Sparkles size={17} />;
+      case "mental":
+        return <BrainCircuit size={17} />;
+      case "search":
+        return <Search size={17} />;
+      case "link":
+        return <ExternalLink size={17} />;
+      case "terminal":
+        return <TerminalSquare size={17} />;
+      case "tool":
+      default:
+        return <Wrench size={17} />;
     }
-    if (kind === "mental") {
-      return <BrainCircuit size={17} />;
-    }
-    if (normalized.includes("search") || normalized.includes("搜索")) {
-      return <Search size={17} />;
-    }
-    if (normalized.includes("http") || normalized.includes("访问") || normalized.includes("open")) {
-      return <ExternalLink size={17} />;
-    }
-    if (
-      normalized.includes("exec")
-      || normalized.includes("command")
-      || normalized.includes("shell")
-      || normalized.includes("powershell")
-      || normalized.includes("npm")
-      || normalized.includes("pytest")
-      || normalized.includes("命令")
-    ) {
-      return <TerminalSquare size={17} />;
-    }
-    return <Wrench size={17} />;
   }
 
   function operationTone(operation: AgentMessageOperation) {

@@ -12,8 +12,11 @@ describe("mergeAgentsRouteCopyWithDictionary", () => {
     expect(merged.title).toBe(dictionaryAgents.zh.agentsWorkbenchTitle);
     expect(merged.refresh).toBe(dictionaryAgents.zh.agentsWorkbenchRefresh);
     expect(merged.bulkNoSelection).toBe(dictionaryAgents.zh.agentsWorkbenchBulkNoSelection);
+    expect(merged.bulkArchive).toBe(dictionaryAgents.zh.agentsWorkbenchBulkArchive);
+    expect(merged.filterSections.status).toBe(dictionaryAgents.zh.agentsWorkbenchFilterStatus);
+    expect(merged.managementBriefTitle).toBe(dictionaryAgents.zh.agentsWorkbenchManagementBriefTitle);
     // Nested-only fields stay from workbench table.
-    expect(merged.bulkArchive).toBe(base.bulkArchive);
+    expect(merged.bulkArchiveConfirm).toBe(base.bulkArchiveConfirm);
   });
 
   it("falls back to nested workbench copy when dictionary key is unloaded", () => {
