@@ -10,13 +10,14 @@ import {
 } from "./source-collection/injectModel";
 import {
   sourceCollectionCollectionModeLabel,
+  type SourceCollectionDraft,
   type SourceCollectionMode,
 } from "./source-collection/presentationModel";
 
-export type TeamSourceCollectionModeFieldsDraft = {
-  collectionMode?: SourceCollectionMode | string;
-  localScanRoots?: string;
-};
+export type TeamSourceCollectionModeFieldsDraft = Pick<
+  SourceCollectionDraft,
+  "collectionMode" | "localScanRoots"
+>;
 
 export type TeamSourceCollectionModeFieldsProps = {
   lang: "zh" | "en";
@@ -36,7 +37,7 @@ export function TeamSourceCollectionModeFields({
   if (!sourceCollectionModeFieldsVisible(knowledgeExpansionWorkflowTeamSelected)) {
     return null;
   }
-  const mode = (draft.collectionMode || "mixed") as SourceCollectionMode;
+  const mode = draft.collectionMode || "mixed";
   const modeOptions = sourceCollectionModeFieldOptions(lang, sourceCollectionCollectionModeLabel);
   return (
     <>
