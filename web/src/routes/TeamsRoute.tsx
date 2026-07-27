@@ -1570,7 +1570,7 @@ export function TeamsRoute({
   }
 
   function sourceCollectionStageAgentChatState(stageId: SourceCollectionStageModuleId): {
-    binding: ReturnType<typeof sourceCollectionStagePrimaryAgentBinding>;
+    binding: ReturnType<typeof sourceCollectionStagePrimaryAgentBinding> | null;
     route: string;
     status: SourceCollectionStageAgentChatStatus;
   } {
