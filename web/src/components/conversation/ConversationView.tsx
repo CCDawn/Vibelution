@@ -227,10 +227,13 @@ import {
 import {
   compactConversationPreview,
   operationGroupTitle as resolveOperationGroupTitle,
+  hasOperationDetails as resolveHasOperationDetails,
   operationStatusFallbackText,
+  operationStatusIconKind,
   operationStatusToneClassNameFromTone,
   operationTimelineTitle as resolveOperationTimelineTitle,
   operationVisualTone,
+  processSummaryIconKind,
   rolloutTraceEventLabel as resolveRolloutTraceEventLabel,
   shouldRenderCodexTranscriptSurface as resolveShouldRenderCodexTranscriptSurface,
   shouldRenderCompactActiveTurnPlaceholder as resolveShouldRenderCompactActiveTurnPlaceholder,
@@ -1297,16 +1300,16 @@ export function ConversationView({
 
   function operationStatusIcon(operation: AgentMessageOperation, animateRunning = true) {
     const status = operation.status.trim().toLowerCase();
-    if (["done", "success", "completed", "succeeded"].includes(status)) {
-      return <CheckCircle2 size={14} />;
-    }
-    if (isRunningOperationStatus(status)) {
-      if (!animateRunning) {
+    switch (operationStatusIconKind(status, isRunningOperationStatus(status), animateRunning)) {
+      case "done":
+        return <CheckCircle2 size={14} />;
+      case "running":
+        return <LoaderCircle className={styles.statusSpinner} size={14} />;
+      case "running_static":
+      case "idle":
+      default:
         return <CircleDot size={14} />;
-      }
-      return <LoaderCircle className={styles.statusSpinner} size={14} />;
     }
-    return <CircleDot size={14} />;
   }
 
   function operationStatusText(status: string) {
@@ -1383,31 +1386,21 @@ export function ConversationView({
   }
 
   function processSummaryIcon(tone: string) {
-    if (tone === "running") {
-      return <CircleDot size={14} />;
+    switch (processSummaryIconKind(tone)) {
+      case "failed":
+        return <TerminalSquare size={14} />;
+      case "done":
+        return <CheckCircle2 size={14} />;
+      case "running":
+      case "degraded":
+      case "default":
+      default:
+        return <CircleDot size={14} />;
     }
-    if (tone === "failed") {
-      return <TerminalSquare size={14} />;
-    }
-    if (tone === "degraded") {
-      return <CircleDot size={14} />;
-    }
-    if (tone === "done") {
-      return <CheckCircle2 size={14} />;
-    }
-    return <CircleDot size={14} />;
   }
 
   function hasOperationDetails(operation: AgentMessageOperation) {
-    return Boolean(
-      Object.keys(operation.arguments ?? {}).length
-      || operation.resultPreview
-      || operation.error
-      || operation.resultType
-      || operation.resultLength !== undefined
-      || operation.timeoutSeconds !== undefined
-      || operation.tracePath,
-    );
+    return resolveHasOperationDetails(operation);
   }
 
   function renderComputerUseResult(operation: AgentMessageOperation) {

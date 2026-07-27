@@ -79,3 +79,48 @@ export function canStartSourceCollectionRun(input: {
 }) {
   return Boolean(String(input.teamId || "").trim() && input.canStart && !input.startPending);
 }
+
+export type SourceCollectionFilterBarOption<Key extends string = string> = {
+  key: Key;
+  label: string;
+  count: number | string;
+  selected: boolean;
+};
+
+export function buildSourceCollectionFilterBarOptions<Key extends string>(input: {
+  filters: readonly Key[];
+  counts: Partial<Record<Key, number>>;
+  selected: Key;
+  loading?: boolean;
+  loadingAllText: string;
+  loadingOtherText?: string;
+  labelFor: (filter: Key) => string;
+}): Array<SourceCollectionFilterBarOption<Key>> {
+  const loadingOtherText = input.loadingOtherText ?? "...";
+  return input.filters.map((filter) => ({
+    key: filter,
+    label: input.labelFor(filter),
+    count: input.loading
+      ? (filter === ("all" as Key) ? input.loadingAllText : loadingOtherText)
+      : input.counts[filter] ?? 0,
+    selected: input.selected === filter,
+  }));
+}
+
+export function resolveSourceCollectionPaginationView(input: {
+  total: number;
+  page: number;
+  pageSize: number;
+}) {
+  const pageCount = Math.max(1, Math.ceil(input.total / input.pageSize));
+  if (pageCount <= 1) {
+    return null;
+  }
+  const page = Math.min(Math.max(1, input.page), pageCount);
+  return {
+    page,
+    pageCount,
+    pageSize: input.pageSize,
+    total: input.total,
+  };
+}
