@@ -47,7 +47,6 @@ import {
   EvolutionRoleConversationSession,
   EvolutionClosedLoopRecord,
   EvolutionWorkflowStep,
-  ConversationMessage,
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
@@ -63,7 +62,6 @@ import { PaneHeightResizeHandle } from "../components/layout/PaneHeightResizeHan
 import { usePersistedPaneHeight } from "../components/layout/usePersistedPaneHeight";
 import { usePersistedPaneResize } from "../components/layout/usePersistedPaneResize";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
-import { LazyConversationView } from "../components/conversation/LazyConversationView";
 import {
   VButton,
   VCheckbox,
@@ -125,6 +123,7 @@ import {
 } from "./evolution/evolutionRouteModel";
 
 import { SupervisedWorkspaceControls } from "./SupervisedWorkspaceControls";
+import { SupervisedAgentConversationPanel } from "./SupervisedAgentConversationPanel";
 import { type SupervisedWorkspaceWorkflowStep } from "./SupervisedWorkspaceTabs";
 import { isSelfEvolutionWorktreeRun } from "./supervisedWorktreeReview";
 import {
@@ -312,6 +311,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const [keepWorktree, setKeepWorktree] = useState(false);
   const [supervisedMentalModelMode, setSupervisedMentalModelMode] = useState<SupervisedMentalModelMode>("follow");
   const [selectedSupervisedWorkflowStepId, setSelectedSupervisedWorkflowStepId] = useState<SupervisedWorkflowStepId | null>(null);
+  const [selectedSupervisedAgentRole, setSelectedSupervisedAgentRole] = useState<SupervisedMemberRole | null>(null);
   const [liveActiveRun, setLiveActiveRun] = useState<EvolutionActiveRun | null>(null);
   const [selfGoalInput, setSelfGoalInput] = useState("");
   const [selfGoalInitialized, setSelfGoalInitialized] = useState(false);
@@ -616,12 +616,6 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       : t("startSupervisedRun");
   const monitoredCaseTranscript = monitoredRun?.currentCaseIo?.transcript ?? [];
   const monitoredCaseConversationMessages = monitoredRun?.currentCaseIo?.conversationMessages ?? [];
-  const monitoredCaseHasConversationMessages = monitoredCaseConversationMessages.length > 0;
-  const monitoredCaseConversationSessionId =
-    monitoredRun?.currentCaseIo?.conversationSessionId
-    || monitoredRun?.currentCaseIo?.conversationPath?.replace(/^session:/, "")
-    || monitoredRun?.runId
-    || "supervised-case";
   const monitoredCaseTraceItems = useMemo(
     () =>
       buildSupervisedCaseTraceItems(monitoredCaseTranscript, {
@@ -644,13 +638,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     }
     timeline.scrollTop = timeline.scrollHeight;
   }, [latestCaseTraceKey, monitoredCaseTraceItems.length]);
-  const monitoredCaseHasOutput = Boolean(
-    monitoredRun?.currentCaseIo?.latestOutput || monitoredCaseHasConversationMessages || monitoredCaseTraceItems.length > 0,
-  );
   const monitoredPreflightIssue = supervisedPreflightIssue(monitoredRun, lang);
-  const monitoredCaseHasVisibleIo = Boolean(
-    monitoredRun?.currentCasePrompt || monitoredRun?.currentCaseIo?.latestInput || monitoredCaseHasOutput || monitoredPreflightIssue,
-  );
   const worktreeRunStopping = String(supervisedWorktreeLiveRun?.status || "").trim().toLowerCase() === "stopping";
   const monitoredRunIdentity = monitoredRun?.sessionId || monitoredRun?.runId || "";
   const monitoredCaseLabel = monitoredRun?.currentCaseId
@@ -665,6 +653,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const supervisedMembersRunIdentity = supervisedWorkflowRun?.runId || monitoredRun?.sessionId || "";
   useEffect(() => {
     setSelectedSupervisedWorkflowStepId(null);
+    setSelectedSupervisedAgentRole(null);
   }, [supervisedMembersRunIdentity]);
   const supervisedRunMembers = useMemo<SupervisedRunMember[]>(() => {
     const bindings = supervisedMembersBindings;
@@ -754,6 +743,45 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const supervisedWorkflowManualSelection = Boolean(
     selectedSupervisedWorkflowStepId && selectedSupervisedWorkflowStepId !== supervisedRuntimeWorkflowStepId,
   );
+  const normalizedSupervisedRuntimeRole = String(
+    supervisedMembersRun?.currentRole
+    || monitoredRun?.currentRole
+    || "",
+  ).trim().toLowerCase() as SupervisedMemberRole;
+  const supervisedRunIsLive = Boolean(monitoredRun && isLiveSupervisedRunStatus(monitoredRun.status));
+  const supervisedActiveAgentRole = supervisedRunIsLive
+    ? SUPERVISED_RUN_MEMBER_ROLES.includes(normalizedSupervisedRuntimeRole)
+      ? normalizedSupervisedRuntimeRole
+      : supervisedRunMembers.find((member) => member.status === "active")?.role ?? null
+    : null;
+  const supervisedSelectedAgentRole = selectedSupervisedAgentRole
+    && supervisedRunMemberByRole.has(selectedSupervisedAgentRole)
+    ? selectedSupervisedAgentRole
+    : supervisedActiveAgentRole
+      ?? supervisedRunMembers.find((member) => member.agentId)?.role
+      ?? supervisedRunMembers[0]?.role
+      ?? "baseline";
+  const supervisedSelectedAgentMember =
+    supervisedRunMemberByRole.get(supervisedSelectedAgentRole)
+    ?? supervisedRunMembers[0];
+  const supervisedSelectedAgentWorkflowSteps = supervisedWorkflowCards.filter(
+    (step) => step.role === supervisedSelectedAgentRole,
+  );
+  const supervisedSelectedAgentWorkflowStep =
+    supervisedSelectedAgentWorkflowSteps.find((step) => step.current)
+    ?? [...supervisedSelectedAgentWorkflowSteps].reverse().find((step) => step.conversationMessages?.length)
+    ?? supervisedSelectedAgentWorkflowSteps[0];
+  const supervisedSelectedAgentFallbackMessages =
+    supervisedSelectedAgentRole === normalizedSupervisedRuntimeRole && monitoredCaseConversationMessages.length > 0
+      ? monitoredCaseConversationMessages
+      : supervisedSelectedAgentWorkflowStep?.conversationMessages ?? [];
+  const supervisedSelectedAgentTaskSummary =
+    supervisedSelectedAgentMember?.conversationSession?.latestMessage
+    || supervisedSelectedAgentWorkflowStep?.summary
+    || supervisedSelectedAgentWorkflowStep?.livePreview
+    || monitoredRun?.currentTask
+    || "";
+  const supervisedApprovalSelected = selectedSupervisedWorkflowStepId === "approval";
   const approvalEvidenceItems = [
     {
       label: lang === "zh" ? "最终运行结果" : "Final result",
@@ -768,40 +796,15 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       value: supervisedWorkflowRun?.workflowSteps?.find((step) => step.id === "approval")?.summary || "--",
     },
   ];
-  const selectedWorkflowConversationMessages: ConversationMessage[] =
-    supervisedSelectedWorkflowStep.conversationMessages?.length
-      ? supervisedSelectedWorkflowStep.conversationMessages
-      : supervisedSelectedWorkflowStep.id === supervisedRuntimeWorkflowStepId
-        ? monitoredCaseConversationMessages
-        : [];
-  const selectedWorkflowHasConversationMessages = selectedWorkflowConversationMessages.length > 0;
   const selectedWorkflowIsRuntimeStep = supervisedSelectedWorkflowStep.id === supervisedRuntimeWorkflowStepId;
-  const selectedWorkflowConversationSessionId =
-    supervisedSelectedWorkflowStep.conversationSessionId
-    || (selectedWorkflowIsRuntimeStep ? monitoredCaseConversationSessionId : "")
-    || supervisedSelectedWorkflowStep.id;
-  const selectedWorkflowAssistantName =
-    supervisedSelectedWorkflowStep.member?.name
-    || monitoredRun?.currentAgentBinding?.displayName
-    || runRoleLabel(String(supervisedSelectedWorkflowStep.role || monitoredRun?.currentRole || ""));
   const selectedWorkflowTaskSummary =
     supervisedSelectedWorkflowStep.summary
     || supervisedSelectedWorkflowStep.livePreview
     || monitoredRun?.currentCasePrompt
     || monitoredRun?.currentTask
     || "";
-  const selectedWorkflowConversationNotice = selectedWorkflowIsRuntimeStep
-    ? monitoredCaseHasVisibleIo
-      ? t("caseIoWaiting")
-      : t("noCurrentCaseIo")
-    : supervisedSelectedWorkflowStep.livePreview
-      || supervisedSelectedWorkflowStep.summary
-      || (lang === "zh" ? "等待该阶段产生可展示的 Agent 对话。" : "Waiting for visible agent conversation in this stage.");
   const supervisedLiveConversationSupplement = supervisedSelectedWorkflowStep.id === "approval" ? null : (
     <div className={styles.supervisedConversationEvidence}>
-      {!selectedWorkflowHasConversationMessages ? (
-        <p className={styles.noticeTextCompact}>{selectedWorkflowConversationNotice}</p>
-      ) : null}
       {selectedWorkflowIsRuntimeStep && monitoredRun?.currentCasePrompt ? (
         <details className={`${styles.rawBlock} ${styles.collapsibleEvidence}`}>
           <summary>{t("currentCasePrompt")}</summary>
@@ -877,42 +880,6 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const supervisedClosedLoopLineageLabel = supervisedClosedLoopRecord?.evidence.lineageIndexPath
     ? (lang === "zh" ? "已记录" : "Recorded")
     : "--";
-  const selectedWorkflowOverviewItems = [
-    {
-      label: lang === "zh" ? "阶段" : "Stage",
-      value: supervisedWorkflowStepLabel(supervisedSelectedWorkflowStep, lang),
-    },
-    {
-      label: lang === "zh" ? "状态" : "Status",
-      value: statusLabel(supervisedSelectedWorkflowStep.status),
-    },
-    {
-      label: lang === "zh" ? "摘要" : "Summary",
-      value: selectedWorkflowTaskSummary || selectedWorkflowConversationNotice,
-    },
-    {
-      label: lang === "zh" ? "最近闭环" : "Latest ledger",
-      value: supervisedClosedLoopDecisionLabel || supervisedClosedLoopRecord?.nextAction.label || "--",
-    },
-  ];
-  const selectedWorkflowEvidenceItems = [
-    {
-      label: lang === "zh" ? "运行入口" : "Run entry",
-      value: monitoredRunIdentity || supervisedMembersRunIdentity || "--",
-    },
-    {
-      label: "Agent",
-      value: selectedWorkflowAssistantName || "--",
-    },
-    {
-      label: lang === "zh" ? "当前 case" : "Current case",
-      value: monitoredCaseLabel || "--",
-    },
-    {
-      label: lang === "zh" ? "提案证据" : "Proposal evidence",
-      value: String(supervisedClosedLoopProposalCount),
-    },
-  ];
   const supervisedMembersRunStatusLabel = supervisedMembersRun?.decision === "INCONCLUSIVE"
     ? displayDecisionLabel(supervisedMembersRun.decision)
     : statusLabel(supervisedMembersRun?.status || "");
@@ -973,10 +940,33 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   };
   const handleSupervisedWorkflowStepSelect = useCallback((stepId: SupervisedWorkspaceWorkflowStep) => {
     setSelectedSupervisedWorkflowStepId(stepId);
+    const definition = SUPERVISED_WORKFLOW_STEPS.find((step) => step.id === stepId);
+    if (definition?.role) {
+      setSelectedSupervisedAgentRole(definition.role);
+    }
     if (evolutionView !== "live") {
       goToSupervisedView("live");
     }
   }, [evolutionView]);
+  const handleSupervisedAgentSelect = useCallback((role: SupervisedMemberRole) => {
+    setSelectedSupervisedAgentRole(role);
+    if (role === "baseline") {
+      setSelectedSupervisedWorkflowStepId("baseline_eval");
+    } else if (role === "candidate") {
+      setSelectedSupervisedWorkflowStepId(
+        supervisedRuntimeWorkflowStepId === "rerun_score" ? "rerun_score" : "improve",
+      );
+    } else {
+      setSelectedSupervisedWorkflowStepId(null);
+    }
+    if (evolutionView !== "live") {
+      goToSupervisedView("live");
+    }
+  }, [evolutionView, supervisedRuntimeWorkflowStepId]);
+  const handleFollowSupervisedAgent = useCallback(() => {
+    setSelectedSupervisedAgentRole(null);
+    setSelectedSupervisedWorkflowStepId(null);
+  }, []);
   const terminateWorktreeAction = supervisedWorktreeLiveRun?.actionStates?.terminate;
   const terminateSupervisedAction = terminateWorktreeAction;
   const canTerminateSupervisedRun = Boolean(supervisedWorktreeLiveRun && terminateWorktreeAction?.enabled);
@@ -1667,6 +1657,22 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       return lang === "zh" ? "裁决" : "Judge";
     }
     return normalized || "--";
+  }
+
+  function supervisedAgentRoleDescription(role: SupervisedMemberRole) {
+    if (role === "baseline") {
+      return lang === "zh" ? "执行当前策略" : "Run the current strategy";
+    }
+    if (role === "candidate") {
+      return lang === "zh" ? "反思、改良与候选复跑" : "Reflect, improve, and rerun";
+    }
+    if (role === "judge") {
+      return lang === "zh" ? "独立评分与裁决" : "Independent scoring and judgment";
+    }
+    if (role === "reviewer") {
+      return lang === "zh" ? "复核改进证据" : "Review improvement evidence";
+    }
+    return lang === "zh" ? "核对运行证据" : "Audit run evidence";
   }
 
   function formatRunEventTitle(event: EvolutionActiveRun["eventTail"][number]) {
@@ -2643,7 +2649,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                             contentLayout="plain"
                             className={selected ? `${styles.workflowStepButton} ${styles.workflowStepButtonActive}` : styles.workflowStepButton}
                             aria-pressed={selected}
-                            onClick={() => setSelectedSupervisedWorkflowStepId(step.id)}
+                            onClick={() => handleSupervisedWorkflowStepSelect(step.id)}
                             tooltip={lang === "zh" ? `查看${supervisedWorkflowStepLabel(step, lang)}` : `View ${supervisedWorkflowStepLabel(step, lang)}`}
                           >
                             <span className={styles.workflowStepMeta}>
@@ -2771,35 +2777,54 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
           >
               <div className={styles.surfaceHeaderCompact}>
                 <div>
-                  <p className={styles.eyebrow}>{supervisedWorkflowStepLabel(supervisedSelectedWorkflowStep, lang)}</p>
-                  {selectedWorkflowTaskSummary ? (
-                    <VTooltip content={selectedWorkflowTaskSummary} width="wide">
+                  <p className={styles.eyebrow}>
+                    {supervisedApprovalSelected
+                      ? supervisedWorkflowStepLabel(supervisedSelectedWorkflowStep, lang)
+                      : lang === "zh" ? "Agent 对话" : "Agent conversations"}
+                  </p>
+                  {(supervisedApprovalSelected ? selectedWorkflowTaskSummary : supervisedSelectedAgentTaskSummary) ? (
+                    <VTooltip
+                      content={supervisedApprovalSelected ? selectedWorkflowTaskSummary : supervisedSelectedAgentTaskSummary}
+                      width="wide"
+                    >
                       <h2 className={`${styles.sectionTitle} ${styles.truncateText}`} tabIndex={0}>
-                        {supervisedSelectedWorkflowStep.label || t("currentCaseOutput")}
+                        {supervisedApprovalSelected
+                          ? supervisedSelectedWorkflowStep.label || t("currentCaseOutput")
+                          : supervisedSelectedAgentMember?.name || runRoleLabel(supervisedSelectedAgentRole)}
                       </h2>
                     </VTooltip>
                   ) : (
                     <h2 className={`${styles.sectionTitle} ${styles.truncateText}`}>
-                      {supervisedSelectedWorkflowStep.label || t("currentCaseOutput")}
+                      {supervisedApprovalSelected
+                        ? supervisedSelectedWorkflowStep.label || t("currentCaseOutput")
+                        : supervisedSelectedAgentMember?.name || runRoleLabel(supervisedSelectedAgentRole)}
                     </h2>
                   )}
                 </div>
                 <div className={styles.liveStatusRow}>
-                  {supervisedSelectedWorkflowStep.role ? (
-                    <span className={styles.secondaryPill}>{runRoleLabel(supervisedSelectedWorkflowStep.role)}</span>
+                  {!supervisedApprovalSelected ? (
+                    <span className={styles.secondaryPill}>{runRoleLabel(supervisedSelectedAgentRole)}</span>
                   ) : null}
-                  <span className={styles.secondaryPill}>{statusLabel(supervisedSelectedWorkflowStep.status)}</span>
-                  {monitoredRun?.currentCaseScenario && supervisedSelectedWorkflowStep.id === supervisedRuntimeWorkflowStepId ? (
+                  <span className={styles.secondaryPill}>
+                    {supervisedApprovalSelected
+                      ? statusLabel(supervisedSelectedWorkflowStep.status)
+                      : statusLabel(
+                        supervisedSelectedAgentMember?.conversationSession?.status
+                        || supervisedSelectedAgentMember?.status
+                        || "idle",
+                      )}
+                  </span>
+                  {monitoredRun?.currentCaseScenario && supervisedSelectedAgentRole === normalizedSupervisedRuntimeRole ? (
                     <span className={styles.secondaryPill}>{monitoredRun.currentCaseScenario}</span>
                   ) : null}
-                  {monitoredRun?.currentCaseMode && supervisedSelectedWorkflowStep.id === supervisedRuntimeWorkflowStepId ? (
+                  {monitoredRun?.currentCaseMode && supervisedSelectedAgentRole === normalizedSupervisedRuntimeRole ? (
                     <span className={styles.secondaryPill}>{monitoredRun.currentCaseMode}</span>
                   ) : null}
                 </div>
               </div>
 
               <div className={styles.liveIoPane}>
-                {supervisedSelectedWorkflowStep.id === "approval" ? (
+                {supervisedApprovalSelected ? (
                   <div className={styles.approvalEvidencePanel}>
                     {approvalEvidenceItems.map((item) => (
                       <article key={item.label} className={styles.approvalEvidenceItem}>
@@ -2838,74 +2863,25 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                     ) : null}
                   </div>
                 ) : (
-                  <div className={styles.ioStack}>
-                    <div className={styles.caseConversationShell}>
-                      {selectedWorkflowHasConversationMessages ? (
-                        <LazyConversationView
-                          sessionId={selectedWorkflowConversationSessionId}
-                          className={styles.caseConversationTranscript}
-                          density="compact"
-                          eyebrowLabel={selectedWorkflowIsRuntimeStep ? t("currentCaseTranscript") : supervisedWorkflowStepLabel(supervisedSelectedWorkflowStep, lang)}
-                          title={
-                            selectedWorkflowIsRuntimeStep
-                              ? monitoredRun?.currentCaseId || supervisedSelectedWorkflowStep.label || t("currentCaseOutput")
-                              : supervisedSelectedWorkflowStep.label || t("currentCaseOutput")
-                          }
-                          phase={
-                            selectedWorkflowIsRuntimeStep
-                              ? monitoredRun?.currentPhase || monitoredRun?.status || supervisedSelectedWorkflowStep.status
-                              : supervisedSelectedWorkflowStep.status
-                          }
-                          messages={selectedWorkflowConversationMessages}
-                          assistantDisplayName={selectedWorkflowAssistantName}
-                          userDisplayName={lang === "zh" ? "监督任务" : "Supervised task"}
-                          taskSummary={selectedWorkflowTaskSummary}
-                          defaultFileContext={monitoredRun?.currentCaseScenario || "supervised"}
-                          summaryItems={[]}
-                          showHeader={false}
-                          showSessionOverview={Boolean(supervisedLiveConversationSupplement)}
-                          supplementalContent={supervisedLiveConversationSupplement}
-                          showComposer={false}
-                          autoScrollToLatest={true}
-                          composerValue=""
-                          composerPlaceholder={t("caseIoWaiting")}
-                          composerDisabled={true}
-                          composerPending={false}
-                          onComposerChange={() => undefined}
-                          onSubmit={() => undefined}
-                          fallback={<div className={styles.caseConversationFallback}>{t("loadingSession")}</div>}
-                        />
-                      ) : (
-                        <div className={styles.caseOverviewWorkspace}>
-                          <div className={styles.caseOverviewGrid}>
-                            {selectedWorkflowOverviewItems.map((item) => (
-                              <article key={item.label} className={styles.caseOverviewItem}>
-                                <span>{item.label}</span>
-                                <strong>{item.value || "--"}</strong>
-                              </article>
-                            ))}
-                          </div>
-                          <div className={styles.caseOverviewEvidence}>
-                            <div className={styles.caseOverviewEvidenceGrid}>
-                              {selectedWorkflowEvidenceItems.map((item) => (
-                                <div key={item.label} className={styles.caseOverviewEvidenceItem}>
-                                  <span>{item.label}</span>
-                                  <strong>{item.value || "--"}</strong>
-                                </div>
-                              ))}
-                            </div>
-                            {!selectedWorkflowHasConversationMessages ? (
-                              <div className={styles.caseOverviewEmptyState}>
-                                <strong>{selectedWorkflowAssistantName || "--"}</strong>
-                                <span>{selectedWorkflowConversationNotice}</span>
-                              </div>
-                            ) : null}
-                            {supervisedLiveConversationSupplement}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
+                  <SupervisedAgentConversationPanel
+                    members={supervisedRunMembers}
+                    selectedRole={supervisedSelectedAgentRole}
+                    activeRole={supervisedActiveAgentRole}
+                    fallbackMessages={supervisedSelectedAgentFallbackMessages}
+                    taskSummary={supervisedSelectedAgentTaskSummary}
+                    supplementalContent={
+                      supervisedSelectedAgentRole === normalizedSupervisedRuntimeRole
+                        ? supervisedLiveConversationSupplement
+                        : undefined
+                    }
+                    isLive={supervisedRunIsLive}
+                    lang={lang}
+                    roleLabel={runRoleLabel}
+                    roleDescription={supervisedAgentRoleDescription}
+                    statusLabel={statusLabel}
+                    onSelectRole={handleSupervisedAgentSelect}
+                    onFollowLive={handleFollowSupervisedAgent}
+                  />
                 )}
               </div>
 
