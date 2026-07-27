@@ -48,7 +48,7 @@ export type SupervisedPreflightIssue = {
   reason: string;
 };
 
-export const SUPERVISED_RUN_MEMBER_ROLES: SupervisedMemberRole[] = ["baseline", "candidate"];
+export const SUPERVISED_RUN_MEMBER_ROLES: SupervisedMemberRole[] = ["baseline", "candidate", "judge"];
 export const SUPERVISED_WORKFLOW_STEPS: SupervisedWorkflowDefinition[] = [
   { id: "baseline_eval", zh: "基线评测", en: "Baseline", role: "baseline" },
   { id: "improve", zh: "提出建议与改良", en: "Improve", role: "candidate" },
