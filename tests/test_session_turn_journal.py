@@ -29,6 +29,13 @@ from core.chat.turn_journal import (
 from core.llm.types import CanonicalItemIdentity, CanonicalToolCall, LLMProtocolEvent, TurnOutcome
 
 
+@pytest.fixture(autouse=True)
+def _isolated_data_home(tmp_path, monkeypatch):
+    data_home = tmp_path / "operator-data"
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(data_home))
+    return data_home
+
+
 def test_canonical_outcomes_commit_items_before_tools_and_project_safe_v2(tmp_path):
     identity = CanonicalItemIdentity("session-a", "turn-1", "inv-1", 0, "msg-1")
     commentary = LLMProtocolEvent(
