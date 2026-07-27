@@ -38,5 +38,8 @@ describe("dictionary domain boundary", () => {
     expect(agentsWorkbenchSource).toContain("bulkPurgeConfirm:");
     expect(agentsSource).toContain("agentsWorkbenchTitle:");
     expect(agentsSource).toContain("agentsWorkbenchBulkNoSelection:");
+    expect(agentsSource).toContain("agentsWorkbenchBulkArchive:");
+    expect(agentsSource).toContain("agentsWorkbenchFilterStatus:");
+    expect(agentsSource).toContain("agentsWorkbenchManagementBriefTitle:");
   });
 });
