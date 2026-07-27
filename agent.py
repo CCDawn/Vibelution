@@ -523,6 +523,57 @@ def _llm_effective_route_id(client: Any) -> str:
     return hashlib.sha256(material).hexdigest()[:16]
 
 
+def _llm_route_trace_fields(
+    invocation_context: LLMInvocationContext,
+    client: Any,
+    *,
+    route_attempt: int,
+    route_id: str,
+) -> Dict[str, Any]:
+    """Build bounded correlation fields shared by route lifecycle events."""
+    metadata = invocation_context.to_metadata(client=client)
+    route = getattr(client, "protocol_route", None)
+    profile = getattr(client, "profile", None)
+    provider = getattr(client, "provider", None)
+    return {
+        "sessionId": str(metadata.get("sessionId") or "").strip(),
+        "turnId": str(metadata.get("turnId") or metadata.get("llmRunId") or "").strip(),
+        "runId": str(metadata.get("llmRunId") or "").strip(),
+        "agentId": str(metadata.get("agentId") or "").strip(),
+        "invocationId": str(metadata.get("invocationId") or "").strip(),
+        "routeAttempt": max(1, int(route_attempt)),
+        "routeId": str(route_id or "").strip(),
+        "profileId": str(getattr(client, "profile_id", "") or "").strip(),
+        "provider": str(getattr(provider, "kind", "") or "").strip(),
+        "model": str(getattr(profile, "model", "") or "").strip(),
+        "protocol": str(
+            getattr(getattr(route, "wire_protocol", None), "value", "")
+            or getattr(route, "protocol", "")
+            or ""
+        ).strip(),
+    }
+
+
+def _record_llm_route_success(
+    *,
+    trace_fields: Dict[str, Any],
+    duration_ms: int,
+    streamed: bool,
+) -> None:
+    """Close one successful provider route without claiming the whole turn ended."""
+    _record_agent_scene_event(
+        "llm_route",
+        "llm_route_attempt_succeeded",
+        message="LLM effective route attempt succeeded.",
+        fields={
+            **dict(trace_fields or {}),
+            "durationMs": max(0, int(duration_ms or 0)),
+            "streamed": bool(streamed),
+        },
+        outcome="succeeded",
+    )
+
+
 def _record_agent_tool_surface_event(tool_names: List[str]) -> None:
     names = [str(name or "").strip() for name in tool_names if str(name or "").strip()]
     group_counts: Dict[str, int] = {}
@@ -3368,7 +3419,29 @@ class SelfEvolvingAgent:
             "llm_failure": failure,
         }
 
+        runtime = _turn_runtime_from_env()
+        status_context = current_llm_status_context()
+        binding = getattr(self, "runtime_agent_binding", {}) or {}
         scene_fields = {
+            "sessionId": str(
+                runtime.get("sessionId")
+                or status_context.get("session_id")
+                or status_context.get("sessionId")
+                or binding.get("directSessionId")
+                or ""
+            ).strip(),
+            "turnId": str(
+                status_context.get("turn_id")
+                or status_context.get("turnId")
+                or runtime.get("runId")
+                or ""
+            ).strip(),
+            "runId": str(runtime.get("runId") or "").strip(),
+            "agentId": str(
+                runtime.get("agentId")
+                or binding.get("agentId")
+                or ""
+            ).strip(),
             "chainStage": chain_stage_value,
             "reasonCode": reason_code_value,
             "category": category_value,
@@ -3416,6 +3489,8 @@ class SelfEvolvingAgent:
             attempted_route_identities: set[tuple[str, ...]] = set()
             while route_attempt < 2:
                 route_attempt += 1
+                invocation_context = None
+                trace_fields: Dict[str, Any] = {}
                 try:
                     self._raise_if_turn_stop_requested()
                     llm_for_turn = fallback_client_for_retry
@@ -3433,6 +3508,7 @@ class SelfEvolvingAgent:
                             "llm_fallback_rejected",
                             message="Duplicate effective LLM route rejected.",
                             fields={
+                                **trace_fields,
                                 "routeAttempt": route_attempt,
                                 "routeId": route_id,
                                 "reasonCode": "duplicate_effective_route",
@@ -3446,27 +3522,18 @@ class SelfEvolvingAgent:
                         prompt_purpose="main_reply",
                         route_attempt=route_attempt,
                     )
-                    invocation_id = str(invocation_context.metadata.get("invocationId") or "").strip()
-                    route = getattr(llm_for_turn, "protocol_route", None)
-                    profile = getattr(llm_for_turn, "profile", None)
-                    provider = getattr(llm_for_turn, "provider", None)
+                    route_started_at = time.monotonic()
+                    trace_fields = _llm_route_trace_fields(
+                        invocation_context,
+                        llm_for_turn,
+                        route_attempt=route_attempt,
+                        route_id=route_id,
+                    )
                     _record_agent_scene_event(
                         "llm_route",
                         "llm_route_attempt_started",
                         message="LLM effective route attempt started.",
-                        fields={
-                            "routeAttempt": route_attempt,
-                            "routeId": route_id,
-                            "invocationId": invocation_id,
-                            "profileId": str(getattr(llm_for_turn, "profile_id", "") or ""),
-                            "provider": str(getattr(provider, "kind", "") or ""),
-                            "model": str(getattr(profile, "model", "") or ""),
-                            "protocol": str(
-                                getattr(getattr(route, "wire_protocol", None), "value", "")
-                                or getattr(route, "protocol", "")
-                                or ""
-                            ),
-                        },
+                        fields=trace_fields,
                     )
                     if (
                         self._should_stream_llm_for_turn(llm_for_turn)
@@ -3489,6 +3556,12 @@ class SelfEvolvingAgent:
                             replay_state=replay_state,
                         )
                         outcome = canonicalize_legacy_xml_outcome(outcome)
+                        if outcome.kind in {"tool_calls", "final_answer"}:
+                            _record_llm_route_success(
+                                trace_fields=trace_fields,
+                                duration_ms=int((time.monotonic() - route_started_at) * 1000),
+                                streamed=True,
+                            )
                         return outcome, llm_for_turn.project_outcome_message(outcome)
                     self._raise_if_turn_stop_requested()
                     outcome = invoke_llm_outcome(
@@ -3498,6 +3571,12 @@ class SelfEvolvingAgent:
                         replay_state=replay_state,
                     )
                     outcome = canonicalize_legacy_xml_outcome(outcome)
+                    if outcome.kind in {"tool_calls", "final_answer"}:
+                        _record_llm_route_success(
+                            trace_fields=trace_fields,
+                            duration_ms=int((time.monotonic() - route_started_at) * 1000),
+                            streamed=False,
+                        )
                     return outcome, llm_for_turn.project_outcome_message(outcome)
                 except TurnStopRequested:
                     raise
@@ -3601,14 +3680,20 @@ class SelfEvolvingAgent:
                     failed_route_id = _llm_effective_route_id(failed_route)
                     failed_invocation_id = str(
                         getattr(invocation_context, "metadata", {}).get("invocationId")
-                        if "invocation_context" in locals()
+                        if invocation_context is not None
                         else ""
                     )
+                    turn_trace_fields = {
+                        key: trace_fields[key]
+                        for key in ("sessionId", "turnId", "runId", "agentId")
+                        if trace_fields.get(key) not in (None, "")
+                    }
                     _record_agent_scene_event(
                         "llm_route",
                         "llm_route_attempt_exhausted",
                         message="LLM effective route attempt exhausted.",
                         fields={
+                            **trace_fields,
                             "routeAttempt": route_attempt,
                             "routeId": failed_route_id,
                             "invocationId": failed_invocation_id,
@@ -3629,6 +3714,7 @@ class SelfEvolvingAgent:
                             "llm_turn_terminal",
                             message="LLM turn stopped for context compression.",
                             fields={
+                                **trace_fields,
                                 "routeAttempts": route_attempt,
                                 "routeId": failed_route_id,
                                 "errorCategory": category,
@@ -3655,6 +3741,7 @@ class SelfEvolvingAgent:
                                 "llm_fallback_rejected",
                                 message="LLM fallback route resolution failed.",
                                 fields={
+                                    **turn_trace_fields,
                                     "routeAttempt": 2,
                                     "primaryRouteId": failed_route_id,
                                     "reasonCode": "fallback_resolution_failed",
@@ -3672,6 +3759,7 @@ class SelfEvolvingAgent:
                                     "llm_fallback_selected",
                                     message="Distinct LLM fallback route selected.",
                                     fields={
+                                        **turn_trace_fields,
                                         "routeAttempt": 2,
                                         "primaryRouteId": failed_route_id,
                                         "fallbackRouteId": _llm_effective_route_id(candidate),
@@ -3686,6 +3774,7 @@ class SelfEvolvingAgent:
                                     "llm_fallback_rejected",
                                     message="Duplicate effective LLM fallback route rejected.",
                                     fields={
+                                        **turn_trace_fields,
                                         "routeAttempt": 2,
                                         "primaryRouteId": failed_route_id,
                                         "fallbackRouteId": _llm_effective_route_id(candidate),
@@ -3707,6 +3796,7 @@ class SelfEvolvingAgent:
                         "llm_turn_terminal",
                         message="LLM turn exhausted all permitted routes.",
                         fields={
+                            **trace_fields,
                             "routeAttempts": route_attempt,
                             "routeId": failed_route_id,
                             "errorCategory": category,
