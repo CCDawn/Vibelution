@@ -28,9 +28,6 @@ type ConversationToolActivityProps = {
 };
 
 function visibleToolSummary(cell: CodexTranscriptCell, language: ConversationToolPresentationLanguage) {
-  if (cell.status !== "completed") {
-    return cell.summary?.trim() || cell.text?.trim() || "";
-  }
   const toolCall = cell.toolLifecycleModel?.toolCalls?.[0];
   return completedToolPresentationSummary({
     toolSummary: toolCall?.summary,
@@ -103,6 +100,7 @@ function ToolActivityItem({
       <ToolStatusIcon cell={cell} language={language} />
       <span className={styles.itemBody}>
         <span className={styles.itemTitle}>{title}</span>
+        {expandable ? <ChevronDown className={styles.itemChevron} size={14} aria-hidden="true" /> : null}
         {preview ? <span className={styles.itemPreview}>{preview}</span> : null}
       </span>
     </>
@@ -144,7 +142,6 @@ function ToolActivityItem({
         aria-live={cell.status === "running" || cell.status === "pending" ? "polite" : undefined}
       >
         {content}
-        <ChevronDown className={styles.itemChevron} size={14} aria-hidden="true" />
       </summary>
       <div id={detailsId} className={styles.itemDetailsBody}>{details}</div>
     </details>
@@ -179,8 +176,8 @@ function ToolActivityBatch({
         <span className={styles.itemBody}>
           <span className={styles.itemTitle}>{item.title}</span>
           <span className={styles.batchCount}>· {countLabel}</span>
+          <ChevronDown className={styles.itemChevron} size={14} aria-hidden="true" />
         </span>
-        <ChevronDown className={styles.itemChevron} size={14} aria-hidden="true" />
       </summary>
       <div className={styles.batchDetails}>
         {item.cells.map((cell) => (

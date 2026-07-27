@@ -348,6 +348,8 @@ const styles: Record<string, string> = {
     "vui-components-conversationview codexTranscriptCompactErrorDetails w-full min-w-0 border-0 bg-transparent group",
   codexTranscriptCompactErrorDetailsSummary:
     "vui-components-conversationview codexTranscriptCompactErrorDetailsSummary inline-flex cursor-pointer list-none select-none items-center gap-1 [&::-webkit-details-marker]:hidden",
+  codexTranscriptInlineChevron:
+    "vui-components-conversationview codexTranscriptInlineChevron shrink-0 self-center text-[var(--fg-tertiary)] transition-transform duration-150 group-open:rotate-180",
   codexTranscriptCompactErrorSummary:
     "vui-components-conversationview codexTranscriptCompactErrorSummary min-w-0 flex-1 whitespace-normal break-words [font-size:var(--vui-font-xs)] leading-[var(--vui-line-tight)] text-[var(--fg-tertiary)] [overflow-wrap:anywhere]",
   codexTranscriptCellIcon:

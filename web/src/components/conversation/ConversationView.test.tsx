@@ -408,7 +408,8 @@ describe("ConversationView Codex-like transcript adapter integration", () => {
 
     expect(html).toContain('data-codex-tool-error-compact="true"');
     expect(html).toContain("代码图谱");
-    expect(html).toMatch(/代码图谱<\/span><span[^>]*>·<\/span><span[^>]*codexTranscriptCompactErrorSummary[^>]*>索引未就绪/);
+    expect(html.indexOf("codexTranscriptInlineChevron")).toBeGreaterThan(html.indexOf("代码图谱"));
+    expect(html.indexOf("codexTranscriptCompactErrorSummary")).toBeGreaterThan(html.indexOf("codexTranscriptInlineChevron"));
     expect(html).toContain("索引未就绪");
     expect(styles.codexTranscriptCompactErrorSummary).toContain("whitespace-normal");
     expect(styles.codexTranscriptCompactErrorSummary).toContain("break-words");
@@ -418,7 +419,7 @@ describe("ConversationView Codex-like transcript adapter integration", () => {
     expect(styles.codexTranscriptCell_error).not.toContain("border-l-2");
     expect(styles.codexTranscriptCell_error).not.toContain("bg-[color-mix");
     expect(styles.codexTranscriptCell_error).not.toContain("[&_.codexTranscriptCellTitle]:text-[var(--state-error)]");
-    expect(html).toContain("技术详情");
+    expect(html).not.toContain("技术详情");
     expect(html).toContain("查看最近改动");
     expect(html).not.toContain("get_recent_changes_tool");
   });
@@ -459,7 +460,7 @@ describe("ConversationView Codex-like transcript adapter integration", () => {
     expect(html).toContain("工具调用受限");
     expect(html).toContain("4 次");
     expect(html.match(/本回合工具调用额度已用尽/g)).toHaveLength(1);
-    expect(html).toContain("技术详情");
+    expect(html).not.toContain("技术详情");
   });
 
   it("keeps trailing tool failures in the process area before the final answer", () => {

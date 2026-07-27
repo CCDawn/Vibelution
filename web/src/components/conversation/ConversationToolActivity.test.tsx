@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { ConversationToolActivity } from "./ConversationToolActivity";
+import styles from "./ConversationToolActivity.styles";
 import type { CodexTranscriptCell } from "./codexTranscriptCells";
 import { createCodexTranscriptToolActivity } from "./conversationToolActivityModel";
 
@@ -91,6 +92,10 @@ describe("ConversationToolActivity", () => {
     expect(html).not.toContain('data-codex-tool-detail-toggle="inline-symbol"');
     expect(html).not.toContain("完成");
     expect(html).toContain("itemChevron");
+    expect(html.indexOf("itemChevron")).toBeGreaterThan(html.indexOf("itemTitle"));
+    expect(styles.itemSummary).toContain("grid-cols-[17px_minmax(0,1fr)]");
+    expect(styles.itemSummary).not.toContain("grid-cols-[17px_minmax(0,1fr)_16px]");
+    expect(styles.batchSummary).toContain("grid-cols-[17px_minmax(0,1fr)]");
   });
 
   it("uses a semantic code result as the row title without repeating the generic tool name", () => {

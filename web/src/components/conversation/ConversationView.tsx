@@ -1721,18 +1721,27 @@ export function ConversationView({
       );
     }
     if (cell.kind === "error_notice") {
-      const errorText = cell.text?.trim() || cell.summary?.trim() || "";
+      const rawErrorTitle = cell.title?.trim() || (lang === "zh" ? "执行失败" : "Failed");
+      const visibleErrorTitle = conversationToolPresentationLabel(rawErrorTitle, lang === "en" ? "en" : "zh");
+      const errorText = completedToolPresentationSummary({
+        cellSummary: cell.summary,
+        resultPreview: cell.text,
+        toolName: rawErrorTitle,
+        language: lang === "en" ? "en" : "zh",
+      });
       const diagnosticRows = buildTurnErrorDiagnosticRows(cell.diagnosticSummary, lang);
       const isCompactToolFailure = Boolean(cell.operationIds?.length);
       if (isCompactToolFailure) {
         const compactErrorSummary = (
           <>
-            <span className={styles.codexTranscriptCellTitle}>{cell.title?.trim() || (lang === "zh" ? "执行失败" : "Failed")}</span>
+            <span className={styles.codexTranscriptCellTitle}>{visibleErrorTitle}</span>
             {cell.failureCount && cell.failureCount > 1 ? (
               <span className={styles.codexTranscriptCellMeta}>· {cell.failureCount} {lang === "zh" ? "次" : "times"}</span>
-            ) : errorText ? (
-              <span className={styles.codexTranscriptCellMeta} aria-hidden="true">·</span>
             ) : null}
+            {diagnosticRows.length > 0 ? (
+              <ChevronDown className={styles.codexTranscriptInlineChevron} size={14} aria-hidden="true" />
+            ) : null}
+            {errorText ? <span className={styles.codexTranscriptCellMeta} aria-hidden="true">·</span> : null}
             {errorText ? <span className={styles.codexTranscriptCompactErrorSummary}>{errorText}</span> : null}
           </>
         );
@@ -1755,11 +1764,6 @@ export function ConversationView({
                 <details className={styles.codexTranscriptCompactErrorDetails} data-codex-error-diagnostic="true">
                   <summary className={`${styles.codexTranscriptCellTitleRow} ${styles.codexTranscriptCompactErrorDetailsSummary}`}>
                     {compactErrorSummary}
-                    <span>{lang === "zh" ? "技术详情" : "Details"}</span>
-                    <span className={styles.operationDetailsChevronButton} aria-hidden="true">
-                      <span className={styles.operationDetailsChevronClosed}>▸</span>
-                      <span className={styles.operationDetailsChevronOpen}>▾</span>
-                    </span>
                   </summary>
                   <dl className={styles.turnErrorReasonList}>
                     {diagnosticRows.map((row) => (
