@@ -10,7 +10,7 @@ const styles = {
   itemDetails: cx("itemDetails", "min-w-0"),
   itemSummary: cx(
     "itemSummary",
-    "grid min-w-0 cursor-pointer grid-cols-[17px_minmax(0,1fr)_16px] items-start gap-x-2 py-1 text-left [&::-webkit-details-marker]:hidden focus-visible:rounded-[var(--radius-control)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)]",
+    "grid min-w-0 cursor-pointer grid-cols-[17px_minmax(0,1fr)] items-start gap-x-2 py-1 text-left [&::-webkit-details-marker]:hidden focus-visible:rounded-[var(--radius-control)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)]",
   ),
   itemStatic: cx(
     "itemStatic",
@@ -19,7 +19,7 @@ const styles = {
   batch: cx("batch", "min-w-0"),
   batchSummary: cx(
     "batchSummary",
-    "grid min-w-0 cursor-pointer grid-cols-[17px_minmax(0,1fr)_16px] items-start gap-x-2 py-1 text-left [&::-webkit-details-marker]:hidden focus-visible:rounded-[var(--radius-control)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)]",
+    "grid min-w-0 cursor-pointer grid-cols-[17px_minmax(0,1fr)] items-start gap-x-2 py-1 text-left [&::-webkit-details-marker]:hidden focus-visible:rounded-[var(--radius-control)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)]",
   ),
   batchCount: cx("batchCount", "shrink-0 text-[var(--fg-tertiary)]"),
   batchDetails: cx(
@@ -41,7 +41,7 @@ const styles = {
   ),
   itemChevron: cx(
     "itemChevron",
-    "mt-0.5 shrink-0 text-[var(--fg-tertiary)] transition-transform duration-150 group-open:rotate-180",
+    "shrink-0 self-center text-[var(--fg-tertiary)] transition-transform duration-150 group-open:rotate-180",
   ),
   itemDetailsBody: cx(
     "itemDetailsBody",

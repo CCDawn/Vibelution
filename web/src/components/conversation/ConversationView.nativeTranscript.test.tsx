@@ -217,8 +217,9 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(diagnosticAttribute).toBeGreaterThanOrEqual(0);
     expect(detailsStart).toBeGreaterThanOrEqual(0);
     expect(detailsEnd).toBeGreaterThan(detailsStart);
-    expect(detailsMarkup.slice(0, summaryEnd)).toContain("write_stdin");
-    expect(detailsMarkup.slice(0, summaryEnd)).toContain("技术详情");
+    expect(detailsMarkup.slice(0, summaryEnd)).toContain("写入终端");
+    expect(detailsMarkup.slice(0, summaryEnd)).toContain("codexTranscriptInlineChevron");
+    expect(detailsMarkup.slice(0, summaryEnd)).not.toContain("技术详情");
     expect(detailsMarkup.indexOf("turnErrorReasonList")).toBeGreaterThan(summaryEnd);
     expect(styles.codexTranscriptCompactErrorDetails).toContain("w-full");
     expect(styles.codexTranscriptCompactErrorDetails).not.toContain("inline-block");
