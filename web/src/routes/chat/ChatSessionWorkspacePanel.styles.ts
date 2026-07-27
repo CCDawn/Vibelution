@@ -4,7 +4,7 @@ import {
 
 const styles = {
   conversationFrame:
-    "vui-routes-chatsessionworkspacepanel conversationFrame relative flex h-full min-h-0 min-w-0 flex-col overflow-hidden",
+    "vui-routes-chatsessionworkspacepanel conversationFrame relative flex h-full min-h-0 min-w-0 w-full flex-col overflow-hidden",
   // When status rail is closed the center track already reclaims full width.
   // Keep the reading column full-bleed inside that track (no side gutters that
   // look like a blank right panel after navigation remounts).

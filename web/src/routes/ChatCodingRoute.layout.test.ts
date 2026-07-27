@@ -584,7 +584,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndLayoutSource).toContain("data-chat-responsive-mode={responsiveLayout.mode}");
     expect(routeAndLayoutSource).not.toContain("CHAT_COMPACT_DESKTOP_MEDIA_QUERY");
     expect(routeAndLayoutSource).not.toContain("compactDesktopAutoCollapseRef");
-    expect(routeAndLayoutSource).not.toContain("setRightPaneCollapsed(true)");
+    expect(routeAndLayoutSource).toContain(
+      "const [rightPaneCollapsed, setRightPaneCollapsed] = useState(true)",
+    );
     expect(routeAndLayoutSource).toContain("styles.layoutCompactDesktop");
     expect(routeAndLayoutSource).toContain("styles.layoutOverlay");
     expect(routeSource).toContain("useChatWorkbenchLayout");
@@ -594,6 +596,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.layout.split(/\s+/)).toContain("grid");
     expect(routeStyles.layout).toContain("!gap-0");
     expect(routeStyles.layout).toContain("!p-0");
+    expect(routeStyles.layout).toContain("w-full");
     expect(routeStyles.layout).toContain("[--chat-pane-gutter:0px]");
     expect(routeStyles.layout).toContain(
       "grid-cols-[var(--chat-left-pane-width,300px)_var(--chat-pane-gutter)_minmax(0,1fr)_var(--chat-pane-gutter)_var(--chat-right-pane-width,240px)]",
@@ -636,8 +639,12 @@ describe("ChatCodingRoute layout contract", () => {
   it("reclaims the status rail grid track when closed without leaving implicit columns", () => {
     expect(routeAndLayoutSource).toContain("reclaimStatusRailTrack");
     expect(routeAndLayoutSource).toContain("styles.layoutStatusRailCollapsed");
-    expect(routeAndLayoutSource).toContain("statusRailCollapsed");
-    expect(routeAndLayoutSource).toContain("statusRailOverlayOpen");
+    expect(routeAndLayoutSource).toContain(
+      "const statusRailDocked = responsiveLayout.rightVisible && !rightPaneCollapsed",
+    );
+    expect(routeAndLayoutSource).toContain(
+      "const statusRailCollapsed = !statusRailDocked && !statusRailOverlayOpen",
+    );
     // Collapsed docked rail must not keep grid-column:5 (creates blank right track).
     expect(routeAndLayoutSource).toContain("? styles.paneCollapsed");
     expect(routeAndLayoutSource).toContain(": styles.leftRail");
@@ -654,7 +661,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(shellStoreSource).toContain("normalizePersistedChatPanelWidths");
     expect(shellStoreSource).toContain("merge: (persistedState, currentState)");
     expect(routeAndLayoutSource).toContain('"--chat-left-pane-width": conversationIndexCollapsed ? "0px" : `${leftPanelWidth}px`');
-    expect(routeAndLayoutSource).toContain('"--chat-right-pane-width": statusRailCollapsed ? "0px" : `${rightPanelWidth}px`');
+    expect(routeAndLayoutSource).toContain('"--chat-right-pane-width": statusRailDocked ? `${rightPanelWidth}px` : "0px"');
     expect(routeStyles.leftRail).toContain("flex");
     expect(routeStyles.leftRail).toContain("flex-col");
     expect(routeStyles.leftRail).toContain("p-1");
@@ -698,7 +705,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.leftRail).toContain("[grid-column:5]");
     expect(routeStyles.leftRail).toContain("[grid-row:1]");
     expect(routeAndLayoutSource).toContain("const conversationIndexCollapsed = responsiveLayout.leftVisible");
-    expect(routeAndLayoutSource).toContain("const statusRailCollapsed = responsiveLayout.rightVisible");
+    expect(routeAndLayoutSource).toContain("const statusRailDocked = responsiveLayout.rightVisible");
+    expect(routeAndLayoutSource).toContain("const statusRailCollapsed = !statusRailDocked");
     expect(conversationIndexRailSource.indexOf("{conversationIndexPanel}")).toBeGreaterThan(-1);
     expect(conversationIndexRailSource.indexOf("styles.systemEntryGroup")).toBeGreaterThan(
       conversationIndexRailSource.indexOf('id="chat-conversation-index-pane"'),

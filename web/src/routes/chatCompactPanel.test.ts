@@ -43,7 +43,7 @@ describe("chatCompactPanel", () => {
   });
 
   it.each([
-    [1440, "wide", true, false],
+    [1440, "wide", true, true],
     [1024, "compact", true, false],
     [768, "overlay", false, false],
     [390, "mobile", false, false],

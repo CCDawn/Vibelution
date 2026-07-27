@@ -80,7 +80,7 @@ export function useChatWorkbenchLayout({
   const layoutRef = useRef<HTMLDivElement | null>(null);
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [leftRailCollapsed, setLeftRailCollapsed] = useState(false);
-  const [rightPaneCollapsed, setRightPaneCollapsed] = useState(false);
+  const [rightPaneCollapsed, setRightPaneCollapsed] = useState(true);
   const [responsiveLayout, setResponsiveLayout] = useState(() =>
     resolveChatResponsiveLayout(typeof window === "undefined" ? 1440 : window.innerWidth),
   );
@@ -92,11 +92,10 @@ export function useChatWorkbenchLayout({
   const conversationIndexCollapsed = responsiveLayout.leftVisible
     ? leftRailCollapsed
     : responsiveOverlayPane !== "left";
-  const statusRailCollapsed = responsiveLayout.rightVisible
-    ? rightPaneCollapsed
-    : responsiveOverlayPane !== "right";
   const conversationIndexOverlayOpen = !responsiveLayout.leftVisible && responsiveOverlayPane === "left";
   const statusRailOverlayOpen = !responsiveLayout.rightVisible && responsiveOverlayPane === "right";
+  const statusRailDocked = responsiveLayout.rightVisible && !rightPaneCollapsed;
+  const statusRailCollapsed = !statusRailDocked && !statusRailOverlayOpen;
   const responsiveOverlayOpen = conversationIndexOverlayOpen || statusRailOverlayOpen;
 
   const syncPanelWidthsToLayout = useCallback(() => {
@@ -273,9 +272,9 @@ export function useChatWorkbenchLayout({
     () =>
       ({
         "--chat-left-pane-width": conversationIndexCollapsed ? "0px" : `${leftPanelWidth}px`,
-        "--chat-right-pane-width": statusRailCollapsed ? "0px" : `${rightPanelWidth}px`,
+        "--chat-right-pane-width": statusRailDocked ? `${rightPanelWidth}px` : "0px",
       }) as CSSProperties,
-    [conversationIndexCollapsed, leftPanelWidth, rightPanelWidth, statusRailCollapsed],
+    [conversationIndexCollapsed, leftPanelWidth, rightPanelWidth, statusRailDocked],
   );
 
   const rightPaneLayoutClassName = standardGroupRoomActive ? styles.rightPaneWithTabs : styles.rightPaneWithoutTabs;
@@ -285,13 +284,11 @@ export function useChatWorkbenchLayout({
     : responsiveLayout.mode === "compact"
       ? `${styles.layout} ${styles.layoutCompactDesktop}`
       : `${styles.layout} ${styles.layoutOverlay}`;
-  // When the docked status rail is closed, reclaim its grid track. Compact already
-  // uses a 3-column template; wide needs the explicit override. Never apply on
-  // overlay/mobile (single-column) or the center would be forced into a wrong track.
+  // Compact and overlay modes already omit the right grid track. Wide mode needs
+  // an explicit three-column override while the docked status rail is closed.
   const reclaimStatusRailTrack =
     statusRailCollapsed
-    && !statusRailOverlayOpen
-    && (responsiveLayout.mode === "wide" || responsiveLayout.mode === "compact");
+    && responsiveLayout.mode === "wide";
   const chatLayoutClassName = [
     layoutModeClassName,
     reclaimStatusRailTrack ? styles.layoutStatusRailCollapsed : "",

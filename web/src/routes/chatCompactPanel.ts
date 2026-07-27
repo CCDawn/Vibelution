@@ -16,7 +16,7 @@ export function resolveChatResponsiveLayout(width: number): ChatResponsiveLayout
   if (width < 640) return { mode: "mobile", leftVisible: false, rightVisible: false };
   if (width < 960) return { mode: "overlay", leftVisible: false, rightVisible: false };
   if (width < 1280) return { mode: "compact", leftVisible: true, rightVisible: false };
-  return { mode: "wide", leftVisible: true, rightVisible: false };
+  return { mode: "wide", leftVisible: true, rightVisible: true };
 }
 
 export function resolveChatUserDisplayName(candidate: string | null | undefined) {
