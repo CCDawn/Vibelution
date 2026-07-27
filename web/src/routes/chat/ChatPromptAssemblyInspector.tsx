@@ -2,6 +2,7 @@ import { ChevronRight } from "lucide-react";
 
 import type {
   SessionAgentPromptSnapshot,
+  SessionPromptAssemblyManifest,
   SessionPromptAssemblySegment,
 } from "../../api/types";
 import styles from "./ChatPromptAssemblyInspector.styles";
@@ -9,6 +10,7 @@ import styles from "./ChatPromptAssemblyInspector.styles";
 type ChatPromptAssemblyInspectorProps = {
   lang: "zh" | "en";
   snapshot: SessionAgentPromptSnapshot;
+  manifest?: SessionPromptAssemblyManifest;
 };
 
 function safeText(value: unknown): string {
@@ -40,8 +42,9 @@ function hashLabel(value: unknown): string {
 export function ChatPromptAssemblyInspector({
   lang,
   snapshot,
+  manifest: runtimeManifest,
 }: ChatPromptAssemblyInspectorProps) {
-  const manifest = snapshot.promptAssembly;
+  const manifest = runtimeManifest ?? snapshot.promptAssembly;
   const title = lang === "zh" ? "Prompt 装配" : "Prompt assembly";
   if (!manifest) {
     return (

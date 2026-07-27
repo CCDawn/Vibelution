@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import threading
 import time
 from pathlib import Path
 from typing import Optional, List, Dict, Any
@@ -314,6 +315,7 @@ class PromptManager:
         # 最近一次 build 的索引
         self._last_index: List[Dict[str, Any]] = []
         self._last_assembly_manifest: Dict[str, Any] = {}
+        self._assembly_manifest_local = threading.local()
         self._protocol_adapter_fingerprint = ""
         self._last_runtime_goal_blocked_sections: List[str] = []
         self._pending_runtime_goal_blocked_sections: List[str] = []
@@ -485,6 +487,7 @@ class PromptManager:
         )
         sp = build_result.prompt
         self._last_assembly_manifest = build_result.assembly_manifest.to_public_dict()
+        self._assembly_manifest_local.value = self._last_assembly_manifest
         render_duration_ms = (time.perf_counter() - render_started) * 1000
 
         # 记录索引（复用本次真实构建结果，避免二次 compute）
@@ -1502,6 +1505,9 @@ class PromptManager:
     def get_last_assembly_manifest(self) -> Dict[str, Any]:
         """Return the latest sanitized Prompt Assembly manifest."""
 
+        thread_manifest = getattr(self._assembly_manifest_local, "value", None)
+        if isinstance(thread_manifest, dict):
+            return dict(thread_manifest)
         return dict(self._last_assembly_manifest)
 
 

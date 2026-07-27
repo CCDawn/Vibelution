@@ -87,6 +87,22 @@ def _wait_for_tool_execution_quiescence(scope: ToolExecutionScope) -> None:
     )
 
 
+def _attach_runtime_prompt_assembly_manifest(result: Any, runtime_agent: Any) -> Any:
+    if not isinstance(result, dict):
+        return result
+    prompt_manager = getattr(runtime_agent, "prompt_manager", None)
+    get_manifest = getattr(prompt_manager, "get_last_assembly_manifest", None)
+    if not callable(get_manifest):
+        return result
+    try:
+        manifest = get_manifest()
+    except Exception:
+        return result
+    if isinstance(manifest, dict) and manifest:
+        result["prompt_assembly"] = manifest
+    return result
+
+
 def _run_session_turn(context: dict[str, Any]) -> None:
     s = _service()
     prepare_started_at = s._perf_counter()
@@ -939,6 +955,7 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                     finally:
                         _wait_for_tool_execution_quiescence(tool_scope)
                 if isinstance(result, dict):
+                    result = _attach_runtime_prompt_assembly_manifest(result, runtime_agent)
                     result["context_composition"] = context_composition
                     result = s._attach_session_llm_runtime_diagnostics(result, llm_runtime_diagnostics)
             result = s._attach_turn_capture_to_result(

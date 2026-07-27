@@ -14,6 +14,7 @@ export type SessionSummary = {
   agentRoleKey?: string;
   agentPromptTemplateId?: string;
   agentPromptSnapshot?: SessionAgentPromptSnapshot;
+  lastPromptAssembly?: SessionPromptAssemblyManifest;
   dialogueModelId?: string;
   reasoningEffort?: string;
   agentInboxPendingCount?: number;

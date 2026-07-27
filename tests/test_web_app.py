@@ -11,6 +11,7 @@ import pytest
 
 from core.evaluation.chat_next_state_signals import append_chat_next_state_signal
 from core.infrastructure.tool_execution_scope import register_current_tool_future
+from core.prompt_manager.prompt_manager import PromptManager
 from core.chat.slash_commands import parse_skill_slash_command
 from core.chat.conversation_ledger import (
     EVENT_ASSISTANT_DELTA_COMMITTED,
@@ -41,6 +42,7 @@ from core.web.services import (
     supervised_control_service,
     supervised_worktree_evolution_service,
 )
+from core.web.services.session import worker as session_worker
 from tests.helpers.chat_turn_harness import wait_for_matching_event
 from tests.helpers.web_chat_state import _bind_seeded_session_agent, _read_next_state_signals, _seed_chat_state
 
@@ -5012,6 +5014,92 @@ def test_chat_turn_registers_as_work_run_until_finished(tmp_path, monkeypatch):
     latest_chat = finished_summary["workRuns"]["latest"]["chat_turn"]
     assert latest_chat["runId"] == turn_id
     assert latest_chat["status"] == "completed"
+
+
+def test_persist_turn_result_projects_sanitized_runtime_prompt_assembly(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    turn_id = "turn-runtime-prompt-assembly"
+    session_service._set_session_running("session-live", True, turn_id=turn_id)
+
+    session_service._persist_session_turn_result(
+        "session-live",
+        {
+            "status": "completed",
+            "summary": "OK",
+            "raw_output": "OK",
+            "outcome": "done",
+            "tool_call_count": 0,
+            "tool_trace": [],
+            "prompt_assembly": {
+                "schemaVersion": 1,
+                "assemblyMode": "turn_runtime_v2",
+                "modelProtocol": "basic_chat_no_tools",
+                "totalEstimatedTokens": 2922,
+                "segments": [
+                    {
+                        "key": "core_common",
+                        "source": "COMMON.md",
+                        "decision": "full",
+                        "contentHash": "safe-hash",
+                        "content": "must never reach the public DTO",
+                    }
+                ],
+            },
+        },
+        turn_id=turn_id,
+    )
+    session_service._set_session_running("session-live", False, turn_id=turn_id)
+
+    detail = session_service.get_session_detail("session-live")
+    assert detail["lastPromptAssembly"]["modelProtocol"] == "basic_chat_no_tools"
+    assert detail["lastPromptAssembly"]["totalEstimatedTokens"] == 2922
+    assert detail["lastPromptAssembly"]["segments"] == [
+        {
+            "key": "core_common",
+            "source": "COMMON.md",
+            "contentHash": "safe-hash",
+            "decision": "full",
+        }
+    ]
+    assert "content" not in detail["lastPromptAssembly"]["segments"][0]
+
+
+def test_attach_runtime_prompt_assembly_manifest_uses_agent_prompt_manager():
+    manifest = {
+        "schemaVersion": 1,
+        "assemblyMode": "turn_runtime_v2",
+        "modelProtocol": "basic_chat_no_tools",
+    }
+    runtime_agent = SimpleNamespace(
+        prompt_manager=SimpleNamespace(get_last_assembly_manifest=lambda: manifest)
+    )
+    result = {"status": "completed"}
+
+    attached = session_worker._attach_runtime_prompt_assembly_manifest(result, runtime_agent)
+
+    assert attached is result
+    assert attached["prompt_assembly"] == manifest
+
+
+def test_prompt_assembly_manifest_is_bound_to_the_building_worker_thread():
+    manager = PromptManager.__new__(PromptManager)
+    manager._last_assembly_manifest = {"modelProtocol": "global"}
+    manager._assembly_manifest_local = threading.local()
+    manager._assembly_manifest_local.value = {"modelProtocol": "main-thread"}
+    worker_manifest: list[dict] = []
+
+    def read_from_other_worker() -> None:
+        manager._last_assembly_manifest = {"modelProtocol": "other-worker"}
+        manager._assembly_manifest_local.value = {"modelProtocol": "other-worker"}
+        worker_manifest.append(manager.get_last_assembly_manifest())
+
+    worker = threading.Thread(target=read_from_other_worker)
+    worker.start()
+    worker.join()
+
+    assert worker_manifest == [{"modelProtocol": "other-worker"}]
+    assert manager.get_last_assembly_manifest() == {"modelProtocol": "main-thread"}
 
 
 def test_persist_turn_result_blocks_phantom_image_generation_success(tmp_path, monkeypatch):
