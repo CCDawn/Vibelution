@@ -118,7 +118,10 @@ import {
   sessionAgentDisplayInfo,
 } from "./agentDisplay";
 import { AgentSessionTabStrip, type CliAgentRunTab } from "./AgentSessionTabStrip";
-import { AgentConversationDirectory, isVisibleDirectoryAgent } from "./AgentConversationDirectory";
+import {
+  AgentConversationDirectory,
+  visibleDirectoryAgents,
+} from "./AgentConversationDirectory";
 import type { AgentContextMenuState } from "./AgentContextMenu";
 import { ConversationIndexTree } from "./ConversationIndexTree";
 import {
@@ -320,7 +323,7 @@ type RightIndexPanel = "conversations" | "members";
 
 
 export function ChatCodingRoute() {
-  const { lang, t, statusLabel } = useAppI18n({ domains: ["chat"] });
+  const { lang, t, statusLabel } = useAppI18n({ domains: ["chat", "agents"] });
   const queryClient = useQueryClient();
   const chatWorkspaceCache = useMemo(() => createChatWorkspaceCache(queryClient), [queryClient]);
   const navigate = useNavigate();
@@ -2127,8 +2130,8 @@ export function ChatCodingRoute() {
   }, [allVisibleSessions]);
 
   const visibleChatAgents = useMemo(() => {
-    return (agentsQuery.data ?? []).filter(isVisibleDirectoryAgent);
-  }, [agentsQuery.data]);
+    return visibleDirectoryAgents(agentsQuery.data ?? [], allVisibleSessions);
+  }, [agentsQuery.data, allVisibleSessions]);
   const activeSessionAgentId = useMemo(() => {
     return String(
       sessionDetailQuery.data?.agentId
@@ -2168,12 +2171,18 @@ export function ChatCodingRoute() {
     return allVisibleSessions.filter((session) => !isRepresentedInAgentSessionTabs(session));
   }, [allVisibleSessions]);
 
+  const selectedAgentVisibleSessions = useMemo(() => {
+    return allVisibleSessions.filter(
+      (session) => String(session.agentId || "").trim() === selectedChatAgentId,
+    );
+  }, [allVisibleSessions, selectedChatAgentId]);
+
   const agentSessionTabs = useMemo(
     () => buildAgentSessionTabs({
-      sessions: selectedAgentSessionsQuery.data?.items,
+      sessions: [...(selectedAgentSessionsQuery.data?.items ?? []), ...selectedAgentVisibleSessions],
       selectedChatAgentDirectSessionId: agentsById.get(selectedChatAgentId)?.directSessionId,
     }),
-    [agentsById, selectedAgentSessionsQuery.data?.items, selectedChatAgentId],
+    [agentsById, selectedAgentSessionsQuery.data?.items, selectedAgentVisibleSessions, selectedChatAgentId],
   );
 
   const groupCandidateAgents = useMemo(() => {
