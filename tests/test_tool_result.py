@@ -24,6 +24,7 @@ from core.infrastructure.tool_result import (
     render_tool_result_for_model,
     format_tool_message,
     infer_tool_business_success,
+    infer_tool_execution_success,
     DEFAULT_MAX_CHARS,
 )
 
@@ -786,6 +787,27 @@ class TestInferToolBusinessSuccess:
 
     def test_plain_text_is_success(self):
         assert infer_tool_business_success("normal output") is True
+
+    def test_completed_terminal_nonzero_exit_keeps_transport_completion_semantics(self):
+        payload = {
+            "status": "completed",
+            "terminalSessionId": "sandbox-nonzero",
+            "sessionOpen": False,
+            "exitCode": 1,
+            "outcomeStatus": "nonzero_exit",
+            "formattedOutput": "[WARNING | Exit Code: 1]\ncommand failed",
+        }
+
+        assert infer_tool_business_success(payload) is False
+        assert infer_tool_execution_success(payload) is True
+        semantics = extract_tool_result_semantics(payload)
+        envelope = package_tool_result(payload)
+
+        assert semantics["semanticStatus"] == "completed"
+        assert semantics["exitCode"] == 1
+        assert semantics["failureClass"] == "process_exit"
+        assert envelope.semantic_status == "completed"
+        assert envelope.exit_code == 1
 
     def test_error_prefix_is_failure(self):
         assert infer_tool_business_success("[错误] something failed") is False

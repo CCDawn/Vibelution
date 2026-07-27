@@ -57,10 +57,10 @@ export function buildCodexTranscriptCells(
     return [];
   }
 
-  const cells = compactConsecutiveToolFailures((options.timelineItems?.length
+  const cells = compactConsecutiveToolFailures(compactTerminalContinuations((options.timelineItems?.length
     ? cellsFromTimelineItems(message.id, options.timelineItems)
     : cellsFromOperations(message.id, options.operations ?? []))
-    .filter(shouldDisplayTranscriptCell));
+    .filter(shouldDisplayTranscriptCell)));
   if (!hasAssistantMarkdownCell(cells)) {
     const answerText = answerTextFromMessage(message);
     if (answerText) {
@@ -369,6 +369,227 @@ function compactConsecutiveToolFailures(cells: CodexTranscriptCell[]): CodexTran
     };
   }
   return compacted;
+}
+
+function compactTerminalContinuations(cells: CodexTranscriptCell[]): CodexTranscriptCell[] {
+  const compacted: CodexTranscriptCell[] = [];
+  for (const cell of cells) {
+    const originIndex = terminalContinuationOriginIndex(compacted, cell);
+    if (originIndex < 0) {
+      compacted.push(cell);
+      continue;
+    }
+    compacted[originIndex] = mergeTerminalContinuation(compacted[originIndex], cell);
+  }
+  return compacted;
+}
+
+function terminalContinuationOriginIndex(
+  cells: CodexTranscriptCell[],
+  continuation: CodexTranscriptCell,
+) {
+  const sessionIds = terminalSessionIds(continuation);
+  if (!isWriteStdinCell(continuation) || !sessionIds.length) {
+    return -1;
+  }
+  if (continuation.status !== "completed" && !isLegacyClosedTerminalContinuation(continuation)) {
+    return -1;
+  }
+  for (let index = cells.length - 1; index >= 0; index -= 1) {
+    const candidate = cells[index];
+    if (candidate.kind === "assistant_markdown" || candidate.kind === "user") {
+      break;
+    }
+    if (candidate.kind !== "tool_call" || isWriteStdinCell(candidate)) {
+      continue;
+    }
+    if (terminalSessionIds(candidate).some((sessionId) => sessionIds.includes(sessionId))) {
+      return index;
+    }
+  }
+  return -1;
+}
+
+function mergeTerminalContinuation(
+  origin: CodexTranscriptCell,
+  continuation: CodexTranscriptCell,
+): CodexTranscriptCell {
+  const terminalIds = terminalSessionIds(continuation);
+  const summary = continuation.status === "completed"
+    ? terminalContinuationSummary(continuation) || origin.summary
+    : origin.summary;
+  const hasNonzeroExit = terminalHasNonzeroExit(origin) || terminalHasNonzeroExit(continuation);
+  return {
+    ...origin,
+    kind: "tool_call",
+    status: "completed",
+    tone: hasNonzeroExit ? "warning" : "neutral",
+    summary,
+    failureCount: undefined,
+    diagnosticSummary: undefined,
+    operationIds: Array.from(new Set([
+      ...(origin.operationIds ?? []),
+      ...(continuation.operationIds ?? []),
+    ])),
+    rolloutTraceEvents: [
+      ...(origin.rolloutTraceEvents ?? []),
+      ...(continuation.rolloutTraceEvents ?? []),
+    ],
+    toolLifecycleModel: mergeTerminalContinuationModels(
+      origin.toolLifecycleModel,
+      continuation.toolLifecycleModel,
+      terminalIds,
+    ),
+  };
+}
+
+function terminalSessionIds(cell: CodexTranscriptCell) {
+  const model = cell.toolLifecycleModel;
+  if (!model) {
+    return [];
+  }
+  return Array.from(new Set([
+    ...model.terminalSessions.map((session) => session.terminalId),
+    ...model.terminalOperations.map((operation) => operation.terminalId),
+  ].filter(Boolean)));
+}
+
+function isWriteStdinCell(cell: CodexTranscriptCell) {
+  const rawName = String(
+    cell.toolLifecycleModel?.toolCalls.at(-1)?.rawToolName
+    || cell.toolLifecycleModel?.toolCalls.at(-1)?.title
+    || cell.title
+    || "",
+  ).trim().toLowerCase();
+  return rawName === "write_stdin";
+}
+
+function isLegacyClosedTerminalContinuation(cell: CodexTranscriptCell) {
+  if (cell.status !== "failed") {
+    return false;
+  }
+  const reasonCode = String(cell.diagnosticSummary?.reasonCode ?? "").trim().toLowerCase();
+  return reasonCode === "terminal_stdin_unavailable"
+    || /terminal_stdin_unavailable/i.test(`${cell.summary ?? ""}\n${cell.text ?? ""}`);
+}
+
+function terminalContinuationSummary(cell: CodexTranscriptCell) {
+  const direct = compactText(cell.summary);
+  if (direct) {
+    return direct;
+  }
+  for (const operation of cell.toolLifecycleModel?.terminalOperations ?? []) {
+    const result = operation.result;
+    const output = compactText(result?.formattedOutput || result?.stdout || result?.stderr);
+    if (output) {
+      return output;
+    }
+  }
+  return "";
+}
+
+function terminalHasNonzeroExit(cell: CodexTranscriptCell) {
+  return cell.toolLifecycleModel?.terminalOperations.some((operation) => {
+    const exitCode = operation.result?.exitCode;
+    return typeof exitCode === "number" && exitCode !== 0;
+  }) ?? false;
+}
+
+function mergeTerminalContinuationModels(
+  origin: CodexToolLifecycleModel | undefined,
+  continuation: CodexToolLifecycleModel | undefined,
+  terminalIds: string[],
+): CodexToolLifecycleModel | undefined {
+  if (!origin) {
+    return continuation;
+  }
+  if (!continuation) {
+    return origin;
+  }
+  const terminalIdSet = new Set(terminalIds);
+  const originTerminalIdByOperationId = new Map(
+    origin.terminalOperations.map((operation) => [operation.operationId, operation.terminalId]),
+  );
+  const continuationOperationIds = new Map(
+    continuation.terminalOperations.map((operation, index) => [
+      operation.operationId,
+      `terminal_operation:${origin.terminalOperations.length + index}`,
+    ]),
+  );
+  const completionByTerminalId = new Map(
+    continuation.terminalOperations
+      .filter((operation) => terminalIdSet.has(operation.terminalId))
+      .map((operation) => [operation.terminalId, operation]),
+  );
+  const terminalOperations = [
+    ...origin.terminalOperations.map((operation) => {
+      const completion = completionByTerminalId.get(operation.terminalId);
+      return terminalIdSet.has(operation.terminalId)
+        ? { ...operation, status: "completed" as const, result: completion?.result ?? operation.result }
+        : operation;
+    }),
+    ...continuation.terminalOperations.map((operation) => ({
+      ...operation,
+      operationId: continuationOperationIds.get(operation.operationId) ?? operation.operationId,
+    })),
+  ];
+  const toolCalls = [
+    ...origin.toolCalls.map((toolCall) => {
+      const terminalId = toolCall.terminalOperationId
+        ? originTerminalIdByOperationId.get(toolCall.terminalOperationId)
+        : "";
+      return terminalId && terminalIdSet.has(terminalId)
+        ? { ...toolCall, status: "completed" as const }
+        : toolCall;
+    }),
+    ...continuation.toolCalls.map((toolCall) => ({
+      ...toolCall,
+      terminalOperationId: toolCall.terminalOperationId
+        ? continuationOperationIds.get(toolCall.terminalOperationId) ?? toolCall.terminalOperationId
+        : undefined,
+    })),
+  ];
+  const terminalSessions = origin.terminalSessions.map((session) => ({
+    ...session,
+    operationIds: [...session.operationIds],
+    status: terminalIdSet.has(session.terminalId) ? "completed" as const : session.status,
+  }));
+  const sessionIndexByTerminalId = new Map(
+    terminalSessions.map((session, index) => [session.terminalId, index]),
+  );
+  for (const session of continuation.terminalSessions) {
+    const operationIds = session.operationIds.map(
+      (operationId) => continuationOperationIds.get(operationId) ?? operationId,
+    );
+    const existingIndex = sessionIndexByTerminalId.get(session.terminalId);
+    if (existingIndex === undefined) {
+      terminalSessions.push({
+        ...session,
+        operationIds,
+        status: terminalIdSet.has(session.terminalId) ? "completed" : session.status,
+      });
+      sessionIndexByTerminalId.set(session.terminalId, terminalSessions.length - 1);
+      continue;
+    }
+    const existing = terminalSessions[existingIndex];
+    terminalSessions[existingIndex] = {
+      ...existing,
+      operationIds: Array.from(new Set([...existing.operationIds, ...operationIds])),
+      status: terminalIdSet.has(session.terminalId) ? "completed" : session.status,
+    };
+  }
+  return {
+    toolCalls,
+    terminalOperations,
+    terminalSessions,
+    modelObservations: [
+      ...origin.modelObservations,
+      ...continuation.modelObservations.map((observation) => ({
+        ...observation,
+        operationId: continuationOperationIds.get(observation.operationId) ?? observation.operationId,
+      })),
+    ],
+  };
 }
 
 export function normalizeCodexTranscriptToolFailures(

@@ -18,6 +18,7 @@ from core.llm.types import CanonicalToolCall, CanonicalToolResult
 from core.infrastructure.llm_utils import parse_tool_args
 from core.infrastructure.tool_result import (
     infer_tool_business_success,
+    infer_tool_execution_success,
     package_tool_result_facts,
     project_runtime_tool_metadata,
     render_tool_result_for_model,
@@ -170,12 +171,13 @@ class ToolLifecycleBridge:
             result,
             post_close_action_pending=self._has_post_close_action_pending(),
         )
+        execution_success = infer_tool_execution_success(result)
         business_success = infer_tool_business_success(result)
-        is_err = not business_success
+        is_err = not execution_success
         ui.update_status("ERROR" if is_err else "WORKING")
 
         if result is not None:
-            status = "error" if is_err else "success"
+            status = "error" if is_err else ("completed" if not business_success else "success")
             logger.log_tool_call(
                 tool_name,
                 tool_args,
@@ -183,7 +185,7 @@ class ToolLifecycleBridge:
                 status=status,
                 tool_call_id=tool_call_id,
             )
-            _debug_logger.tool_result(tool_name, str(result), success=not is_err)
+            _debug_logger.tool_result(tool_name, str(result), success=execution_success)
         else:
             logger.log_tool_call(
                 tool_name,
@@ -284,7 +286,7 @@ class ToolLifecycleBridge:
         canonical_call = tool_call.get("canonical_tool_call")
         canonical_result: Optional[CanonicalToolResult] = None
         if isinstance(canonical_call, CanonicalToolCall):
-            is_error = not infer_tool_business_success(result) or action == "skip"
+            is_error = not infer_tool_execution_success(result) or action == "skip"
             canonical_result = CanonicalToolResult(
                 identity=canonical_call.identity,
                 call_id=canonical_call.call_id,

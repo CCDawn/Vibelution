@@ -187,7 +187,9 @@ def extract_tool_result_semantics(result: Any) -> dict[str, Any]:
                 payload = parsed_payload
         except Exception:
             pass
+    completed_terminal_lifecycle = False
     if payload:
+        completed_terminal_lifecycle = _is_completed_terminal_lifecycle(payload)
         status = _normalize_text_payload(str(payload.get("status") or "")).lower()
         if status:
             semantics["semanticStatus"] = status
@@ -208,7 +210,7 @@ def extract_tool_result_semantics(result: Any) -> dict[str, Any]:
                     pass
                 break
         if semantics["exitCode"] not in (None, 0):
-            semantics["semanticStatus"] = "failed"
+            semantics["semanticStatus"] = "completed" if completed_terminal_lifecycle else "failed"
             semantics["failureClass"] = semantics["failureClass"] or "process_exit"
         if bool(payload.get("timedOut") or payload.get("timed_out")) or status in {"timeout", "timed_out"}:
             semantics["timedOut"] = True
@@ -224,7 +226,7 @@ def extract_tool_result_semantics(result: Any) -> dict[str, Any]:
         flags=re.IGNORECASE,
     )
     if nonzero_exit_match:
-        semantics["semanticStatus"] = "failed"
+        semantics["semanticStatus"] = "completed" if completed_terminal_lifecycle else "failed"
         semantics["failureClass"] = "process_exit"
         try:
             semantics["exitCode"] = int(nonzero_exit_match.group(1))
@@ -309,6 +311,33 @@ def _looks_like_business_failure(payload: Any) -> bool:
     return False
 
 
+def _is_completed_terminal_lifecycle(result: Any) -> bool:
+    payload: dict[str, Any] | None
+    if isinstance(result, dict):
+        payload = result
+    elif isinstance(result, (bytes, bytearray)):
+        try:
+            return _is_completed_terminal_lifecycle(result.decode("utf-8", errors="replace"))
+        except Exception:
+            return False
+    elif isinstance(result, str):
+        payload = _try_parse_json_object(result)
+    else:
+        payload = None
+    if not isinstance(payload, dict):
+        return False
+    terminal_session_id = str(
+        payload.get("terminalSessionId")
+        or payload.get("terminal_session_id")
+        or payload.get("session_id")
+        or ""
+    ).strip()
+    status = _normalize_text_payload(
+        str(payload.get("status") or payload.get("terminalStatus") or "")
+    ).lower()
+    return bool(terminal_session_id and status == "completed" and payload.get("sessionOpen") is not True)
+
+
 def infer_tool_business_success(result: Any) -> bool:
     """从工具返回值推断业务层是否成功。
 
@@ -357,6 +386,12 @@ def infer_tool_business_success(result: Any) -> bool:
                 )
                 return True
     return True
+
+
+def infer_tool_execution_success(result: Any) -> bool:
+    """Return whether the tool transport completed, independent of command outcome."""
+
+    return _is_completed_terminal_lifecycle(result) or infer_tool_business_success(result)
 
 
 def _infer_result_kind(tool_name: str = "", result_str: str = "") -> str:
@@ -1360,6 +1395,7 @@ __all__ = [
     "render_tool_result_for_model",
     "project_tool_result_for_model",
     "extract_tool_result_semantics",
+    "infer_tool_execution_success",
     "ToolResultEnvelope",
     "ModelVisibleToolResult",
     "ToolResultFacts",

@@ -14,6 +14,10 @@ from .tool_policy_evaluator import evaluate_tool_policy, normalize_legacy_tool_p
 from .tool_policy_models import AuthorizationDecision, TurnToolGrant
 
 
+MAX_TERMINAL_WAITS_PER_SESSION = 8
+MAX_TERMINAL_WAITS_PER_TURN = 16
+
+
 class ToolAuthorizationContextError(ValueError):
     """Raised when an enforced authorization decision lacks trusted identity facts."""
 
@@ -27,6 +31,8 @@ class ToolExecutionAuthorizationContext:
     max_calls_per_turn: int = 0
     call_count: int = 0
     call_count_lock: Lock = field(default_factory=Lock, repr=False)
+    terminal_wait_counts: dict[str, int] = field(default_factory=dict, repr=False)
+    terminal_wait_count: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -182,6 +188,22 @@ def current_execution_authorization() -> ToolExecutionAuthorizationContext | Non
     return _EXECUTION_AUTHORIZATION.get(None)
 
 
+def _empty_terminal_wait_session_id(
+    tool_name: str,
+    tool_args: Mapping[str, Any] | None,
+) -> str:
+    if str(tool_name or "").strip().lower() != "write_stdin" or not isinstance(tool_args, Mapping):
+        return ""
+    chars = tool_args.get("chars", tool_args.get("input", ""))
+    if chars not in (None, ""):
+        return ""
+    for key in ("terminal_session_id", "session_id", "sessionId", "terminal_id", "terminalId"):
+        session_id = str(tool_args.get(key) or "").strip()
+        if session_id:
+            return session_id
+    return ""
+
+
 def authorize_tool_execution(
     *,
     tool_name: str,
@@ -216,7 +238,37 @@ def authorize_tool_execution(
     if constraint_denial:
         code, detail = constraint_denial
         return _execution_denial(code, detail, runtime_agent_id, runtime_turn_id, context)
+    terminal_wait_session_id = _empty_terminal_wait_session_id(normalized_tool, tool_args)
     with context.call_count_lock:
+        if terminal_wait_session_id:
+            if context.terminal_wait_count >= MAX_TERMINAL_WAITS_PER_TURN:
+                return _execution_denial(
+                    "terminal_wait_turn_budget_exhausted",
+                    "当前回合的终端轮询次数已用尽。",
+                    runtime_agent_id,
+                    runtime_turn_id,
+                    context,
+                )
+            count = context.terminal_wait_counts.get(terminal_wait_session_id, 0)
+            if count >= MAX_TERMINAL_WAITS_PER_SESSION:
+                return _execution_denial(
+                    "terminal_wait_budget_exhausted",
+                    "当前终端会话的轮询次数已用尽。",
+                    runtime_agent_id,
+                    runtime_turn_id,
+                    context,
+                )
+            context.terminal_wait_counts[terminal_wait_session_id] = count + 1
+            context.terminal_wait_count += 1
+            return ToolExecutionAuthorizationResult(
+                enforced=True,
+                allowed=True,
+                code="allowed_terminal_wait",
+                message="",
+                agent_id=context.agent_id,
+                turn_id=context.turn_id,
+                decision_fingerprint=context.decision_fingerprint,
+            )
         if context.max_calls_per_turn > 0 and context.call_count >= context.max_calls_per_turn:
             return _execution_denial("call_budget_exhausted", "当前回合工具调用额度已用尽。", runtime_agent_id, runtime_turn_id, context)
         context.call_count += 1

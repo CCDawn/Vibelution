@@ -161,6 +161,69 @@ def test_call_budget_is_shared_by_execution_authorization(monkeypatch):
     assert calls == ["called"]
 
 
+def test_empty_terminal_wait_does_not_consume_general_call_budget(monkeypatch):
+    _runtime(monkeypatch, allowed_tools=("exec_command", "write_stdin"), max_calls_per_turn=1)
+    _install(tools=("exec_command", "write_stdin"))
+
+    command = tool_authorization_service.authorize_tool_execution(
+        tool_name="exec_command",
+        tool_call_id="call-command",
+        tool_args={"cmd": "echo ready"},
+    )
+    terminal_wait = tool_authorization_service.authorize_tool_execution(
+        tool_name="write_stdin",
+        tool_call_id="call-wait",
+        tool_args={"session_id": "sandbox-a", "chars": ""},
+    )
+    blocked = tool_authorization_service.authorize_tool_execution(
+        tool_name="exec_command",
+        tool_call_id="call-over-budget",
+        tool_args={"cmd": "echo again"},
+    )
+
+    assert command.allowed is True
+    assert terminal_wait.allowed is True
+    assert terminal_wait.code == "allowed_terminal_wait"
+    assert blocked.allowed is False
+    assert blocked.code == "call_budget_exhausted"
+
+
+def test_empty_terminal_wait_has_a_bounded_per_session_limit(monkeypatch):
+    _runtime(monkeypatch, allowed_tools=("write_stdin",), max_calls_per_turn=1)
+    _install(tools=("write_stdin",))
+
+    results = [
+        tool_authorization_service.authorize_tool_execution(
+            tool_name="write_stdin",
+            tool_call_id=f"call-wait-{index}",
+            tool_args={"session_id": "sandbox-a", "chars": ""},
+        )
+        for index in range(9)
+    ]
+
+    assert all(result.allowed for result in results[:8])
+    assert results[-1].allowed is False
+    assert results[-1].code == "terminal_wait_budget_exhausted"
+
+
+def test_empty_terminal_wait_has_a_turn_bound_across_session_ids(monkeypatch):
+    _runtime(monkeypatch, allowed_tools=("write_stdin",), max_calls_per_turn=1)
+    _install(tools=("write_stdin",))
+
+    results = [
+        tool_authorization_service.authorize_tool_execution(
+            tool_name="write_stdin",
+            tool_call_id=f"call-wait-{index}",
+            tool_args={"session_id": f"sandbox-{index}", "chars": ""},
+        )
+        for index in range(17)
+    ]
+
+    assert all(result.allowed for result in results[:16])
+    assert results[-1].allowed is False
+    assert results[-1].code == "terminal_wait_turn_budget_exhausted"
+
+
 def test_delegation_constraint_is_enforced_by_canonical_authorization(monkeypatch):
     _runtime(monkeypatch, allowed_tools=("spawn_agent_tool",))
     monkeypatch.setattr(

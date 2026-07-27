@@ -29,6 +29,10 @@ type ConversationToolActivityProps = {
 };
 
 function visibleToolSummary(cell: CodexTranscriptCell, language: ConversationToolPresentationLanguage) {
+  const exitCode = terminalExitCode(cell);
+  if (exitCode !== null && exitCode !== 0) {
+    return language === "zh" ? `命令退出 ${exitCode}` : `Command exited ${exitCode}`;
+  }
   const toolCall = cell.toolLifecycleModel?.toolCalls?.[0];
   return completedToolPresentationSummary({
     toolSummary: toolCall?.summary,
@@ -39,6 +43,21 @@ function visibleToolSummary(cell: CodexTranscriptCell, language: ConversationToo
     status: cell.status,
     language,
   });
+}
+
+function terminalExitCode(cell: CodexTranscriptCell) {
+  for (const operation of cell.toolLifecycleModel?.terminalOperations ?? []) {
+    const exitCode = operation.result?.exitCode;
+    if (typeof exitCode === "number") {
+      return exitCode;
+    }
+  }
+  return null;
+}
+
+function hasNonzeroTerminalExit(cell: CodexTranscriptCell) {
+  const exitCode = terminalExitCode(cell);
+  return exitCode !== null && exitCode !== 0;
 }
 
 function toolRendererForCell(cell: CodexTranscriptCell, language: ConversationToolPresentationLanguage) {
@@ -67,6 +86,9 @@ function ToolStatusIcon({
   if (cell.status === "failed") {
     return <CircleAlert className={`${styles.itemIcon} ${styles.itemIconFailed}`} size={15} />;
   }
+  if (hasNonzeroTerminalExit(cell)) {
+    return <CircleAlert className={`${styles.itemIcon} ${styles.itemIconWarning}`} size={15} />;
+  }
   if (cell.status === "degraded") {
     return <CircleAlert className={`${styles.itemIcon} ${styles.itemIconWarning}`} size={15} />;
   }
@@ -93,7 +115,7 @@ function ToolActivityItem({
   const detailsId = `codex-tool-detail-${cell.id}`;
   const details = renderToolDetails(cell, detailsId);
   const expandable = details !== null && details !== undefined && details !== false;
-  const openByDefault = cell.status === "failed" || cell.status === "degraded";
+  const openByDefault = cell.status === "failed" || cell.status === "degraded" || hasNonzeroTerminalExit(cell);
   const label = language === "zh"
     ? `展开或收起工具结果：${title}`
     : `Expand or collapse tool results: ${title}`;

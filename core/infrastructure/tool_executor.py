@@ -333,6 +333,26 @@ def _classify_tool_semantic_result(tool_name: str, result: Any) -> dict[str, Any
                 "sessionOpen": bool(payload.get("sessionOpen")),
             },
         }
+    terminal_session_id = str(payload.get("terminalSessionId") or "").strip()
+    if tool_name in {"exec_command", "write_stdin"} and payload_status == "completed" and terminal_session_id:
+        raw_exit_code = payload.get("exitCode")
+        exit_code = _coerce_int(raw_exit_code) if raw_exit_code not in (None, "") else None
+        nonzero_exit = exit_code not in (None, 0) or str(payload.get("outcomeStatus") or "").strip() == "nonzero_exit"
+        return {
+            "eventCode": "tool.execute.completed",
+            "level": "warning" if nonzero_exit else "info",
+            "outcome": "completed",
+            "lifecycle": True,
+            "fields": {
+                **fields,
+                "semanticStatus": "completed",
+                "terminalSessionId": terminal_session_id,
+                "terminalStatus": "completed",
+                "sessionOpen": False,
+                "exitCode": exit_code,
+                "terminalOutcome": str(payload.get("outcomeStatus") or "success"),
+            },
+        }
     if tool_name == "close_evolution_transaction_tool" and payload_status:
         fields["toolResultStatus"] = payload_status
     is_business_success = infer_tool_business_success(payload) if payload else True
@@ -1027,7 +1047,7 @@ class ToolExecutor:
                 "timeoutSeconds": timeout,
                 **result_facts,
             }
-            if semantic_outcome in {"succeeded", "degraded", "observed"}:
+            if semantic_outcome in {"succeeded", "degraded", "observed", "completed"}:
                 publish_tool_event(EventNames.TOOL_SUCCESS, event_payload)
             else:
                 publish_tool_event(EventNames.TOOL_ERROR, {

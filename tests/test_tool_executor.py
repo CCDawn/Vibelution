@@ -333,6 +333,37 @@ class TestToolExecutorInit:
         assert events[-1][1]["outcome"] == "observed"
         assert events[-1][1]["fields"]["terminalSessionId"] == "sandbox-test-session"
 
+    def test_completed_nonzero_terminal_exit_is_not_recorded_as_transport_failure(self, monkeypatch):
+        from core.infrastructure import tool_executor as tool_executor_module
+
+        events = []
+        monkeypatch.setattr(
+            tool_executor_module,
+            "_record_tool_scene_event",
+            lambda *args, **kwargs: events.append((args, kwargs)),
+        )
+        executor = ToolExecutor()
+        executor.register_tool(
+            "exec_command",
+            lambda cmd="": json.dumps({
+                "status": "completed",
+                "terminalSessionId": "sandbox-test-session",
+                "sessionOpen": False,
+                "exitCode": 1,
+                "outcomeStatus": "nonzero_exit",
+                "formattedOutput": "[WARNING | Exit Code: 1]\\ncommand failed",
+            }),
+            timeout=5,
+        )
+
+        result, action = executor.execute("exec_command", {"cmd": "exit 1"})
+
+        assert action is None
+        assert json.loads(result)["exitCode"] == 1
+        assert events[-1][0][1] == "tool.execute.completed"
+        assert events[-1][1]["outcome"] == "completed"
+        assert events[-1][1]["fields"]["semanticStatus"] == "completed"
+
     def test_tool_argument_error_text_is_recorded_as_failed_scene_event(self, monkeypatch):
         """Tool argument error text should be treated as a failed tool result."""
         from core.infrastructure import tool_executor as tool_executor_module

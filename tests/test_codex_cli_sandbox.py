@@ -448,6 +448,67 @@ def test_terminal_session_stdin_rejects_unknown_session_without_starting_process
     assert result["terminalSessionId"] == "sandbox-missing"
 
 
+def test_terminal_session_late_empty_poll_returns_cached_completion_without_stdin_failure(tmp_path):
+    process = _TerminalSessionProcess()
+    process.returncode = 0
+    sandbox_temp = tmp_path / ".runtime" / "codex-cli" / "late-poll"
+    sandbox_temp.mkdir(parents=True)
+    session = codex_cli_sandbox._SandboxTerminalSession(
+        session_id="sandbox-late-poll",
+        process=process,
+        command_hash="late-poll-command",
+        workdir=tmp_path,
+        sandbox_temp=sandbox_temp,
+        timeout_seconds=60,
+    )
+    session._stdout_pending = "final output\n"
+    codex_cli_sandbox._SANDBOX_TERMINAL_SESSIONS.clear()
+    codex_cli_sandbox._SANDBOX_TERMINAL_SESSIONS[session.session_id] = session
+
+    try:
+        first = codex_cli_sandbox.write_codex_sandbox_terminal_stdin(
+            session.session_id,
+            "",
+            yield_time_ms=0,
+        )
+        second = codex_cli_sandbox.write_codex_sandbox_terminal_stdin(
+            session.session_id,
+            "",
+            yield_time_ms=0,
+        )
+    finally:
+        codex_cli_sandbox._SANDBOX_TERMINAL_SESSIONS.clear()
+
+    assert first["status"] == "completed"
+    assert first["sessionOpen"] is False
+    assert first["formattedOutput"] == "final output"
+    assert "TERMINAL_STDIN_UNAVAILABLE" not in str(first)
+    assert second == first
+
+
+def test_terminal_session_nonzero_exit_is_completed_with_business_failure_outcome(tmp_path):
+    process = _TerminalSessionProcess()
+    process.returncode = 1
+    sandbox_temp = tmp_path / ".runtime" / "codex-cli" / "nonzero"
+    sandbox_temp.mkdir(parents=True)
+    session = codex_cli_sandbox._SandboxTerminalSession(
+        session_id="sandbox-nonzero",
+        process=process,
+        command_hash="nonzero-command",
+        workdir=tmp_path,
+        sandbox_temp=sandbox_temp,
+        timeout_seconds=60,
+    )
+    session._stderr_pending = "command failed\n"
+
+    result = session.snapshot(max_output_chars=12000)
+
+    assert result["status"] == "completed"
+    assert result["outcomeStatus"] == "nonzero_exit"
+    assert result["exitCode"] == 1
+    assert result["failureClass"] == "process_exit"
+
+
 def test_terminal_session_prune_cleans_finished_unpolled_sandbox(monkeypatch, tmp_path):
     process = _TerminalSessionProcess()
     process.returncode = 0

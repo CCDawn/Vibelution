@@ -473,6 +473,46 @@ class TestToolMessageFlow:
         assert isinstance(messages[0], ToolMessage)
         assert messages[0].tool_call_id == "call_123"
 
+    def test_handle_tool_result_keeps_completed_nonzero_terminal_exit_as_canonical_completion(self):
+        identity = CanonicalItemIdentity(
+            session_id="session-terminal",
+            turn_id="turn-terminal",
+            invocation_id="invocation-terminal",
+            iteration=1,
+            item_id="call-terminal",
+        )
+        canonical_call = CanonicalToolCall(
+            identity=identity,
+            call_id="call-terminal",
+            name="exec_command",
+            arguments={"cmd": "exit 1"},
+        )
+        messages = []
+
+        ToolLifecycleBridge.handle_tool_result(
+            {
+                "name": "exec_command",
+                "id": "call-terminal",
+                "canonical_tool_call": canonical_call,
+            },
+            json.dumps({
+                "status": "completed",
+                "terminalSessionId": "sandbox-terminal",
+                "sessionOpen": False,
+                "exitCode": 1,
+                "outcomeStatus": "nonzero_exit",
+                "formattedOutput": "[WARNING | Exit Code: 1]\\ncommand failed",
+            }),
+            None,
+            messages,
+        )
+
+        canonical_result = messages[0].additional_kwargs["canonical_tool_result"]
+        assert canonical_result.status == "completed"
+        assert canonical_result.is_error is False
+        assert "semanticStatus: completed" in messages[0].content
+        assert "exitCode: 1" in messages[0].content
+
     def test_handle_tool_result_preserves_range_facts_without_continuation_hint(self):
         messages = []
         long_result = (
