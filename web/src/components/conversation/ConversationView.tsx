@@ -2355,9 +2355,15 @@ export function ConversationView({
     const operation = item.operation;
     const rawTimelineTitle = item.title.trim();
     const rawOperationLabel = String(operation.rawLabel ?? "").trim();
-    const visibleTitle = rawTimelineTitle && rawTimelineTitle !== rawOperationLabel
-      ? rawTimelineTitle
-      : operationLabel(operation);
+    const rawToolName = rawOperationLabel || rawTimelineTitle || operation.label;
+    const semanticToolTitle = conversationToolPresentationLabel(rawToolName, lang);
+    const visibleTitle = operation.kind === "tool"
+      ? rawTimelineTitle && rawTimelineTitle !== rawOperationLabel
+        ? rawTimelineTitle
+        : semanticToolTitle
+      : rawTimelineTitle && rawTimelineTitle !== rawOperationLabel
+        ? rawTimelineTitle
+        : operationLabel(operation);
     const detailsId = `timeline-operation-detail-${operation.id}`;
     const detailsExpanded = getExpansionState(operation.id, "details", false);
     const canExpandDetails = hasOperationDetails(operation);
@@ -2374,44 +2380,64 @@ export function ConversationView({
     const toneStatusClassName = styles[`operationStatus_${statusTone}` as keyof typeof styles] ?? "";
     const toneIconClassName = styles[`operationIcon_${statusTone}` as keyof typeof styles] ?? "";
     const metaText = [visibleStatus, duration].filter(Boolean).join(" · ");
-    const visibleSummary = statusTone === "failed" && operation.error?.trim()
-      ? [item.summary, operation.error.trim()].filter(Boolean).join(" · ")
-      : item.summary;
+    const visibleSummary = operation.kind === "tool"
+      ? completedToolPresentationSummary({
+          toolSummary: operation.error,
+          cellSummary: operation.summary,
+          resultPreview: operation.resultPreview,
+          cellText: item.summary,
+          toolName: rawToolName,
+          language: lang,
+        })
+      : statusTone === "failed" && operation.error?.trim()
+        ? [item.summary, operation.error.trim()].filter(Boolean).join(" · ")
+        : item.summary;
     const className = [
       styles.timelineOperationCell,
       timelineToneClassName,
     ].filter(Boolean).join(" ");
+    const headerContent = (
+      <>
+        <span className={`${styles.operationIcon} ${toneIconClassName}`}>
+          {operationStatusIcon(operation, isActiveTimelineItem)}
+        </span>
+        <span className={styles.timelineCellBody}>
+          <span className={`${styles.timelineCellTitleRow} ${styles.timelineCellCompactTitleRow}`}>
+            <span className={`${styles.timelineCellTitle} ${toneTextClassName}`}>{visibleTitle}</span>
+            {metaText ? <span className={`${styles.timelineCellMeta} ${toneStatusClassName}`}>{metaText}</span> : null}
+            {canExpandDetails ? (
+              <span className={styles.timelineCellInlineChevron} aria-hidden="true">
+                {detailsExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+              </span>
+            ) : null}
+            {visibleSummary ? <span className={styles.timelineCellSeparator} aria-hidden="true">·</span> : null}
+            {visibleSummary ? <span className={styles.timelineCellInlineSummary}>{visibleSummary}</span> : null}
+          </span>
+        </span>
+      </>
+    );
     return (
       <section
         key={agentMessageTimelineItemRowKey(rowIdentity, item)}
         className={className}
         data-conversation-part-key={agentMessageTimelineItemRowKey(rowIdentity, item)}
       >
-        <div className={`${styles.timelineCellHeader} ${toneTextClassName}`}>
-          <span className={`${styles.operationIcon} ${toneIconClassName}`}>
-            {operationStatusIcon(operation, isActiveTimelineItem)}
-          </span>
-          <span className={styles.timelineCellBody}>
-            <span className={`${styles.timelineCellTitleRow} ${styles.timelineCellCompactTitleRow}`}>
-              <span className={`${styles.timelineCellTitle} ${toneTextClassName}`}>{visibleTitle}</span>
-              {metaText ? <span className={`${styles.timelineCellMeta} ${toneStatusClassName}`}>{metaText}</span> : null}
-              {visibleSummary ? <span className={styles.timelineCellSeparator} aria-hidden="true">·</span> : null}
-              {visibleSummary ? <span className={styles.timelineCellInlineSummary}>{visibleSummary}</span> : null}
-            </span>
-          </span>
-          {canExpandDetails ? (
-            <VButton
-              type="button"
-              className={styles.timelineCellDetailButton}
-              aria-expanded={detailsExpanded}
-              aria-controls={detailsId}
-              onClick={() => toggleSection(operation.id, "details", false)}
-              title={detailsExpanded ? t("toolCallDetailsVisible") : t("toolCallDetailsHidden")}
-            >
-              {detailsExpanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
-            </VButton>
-          ) : null}
-        </div>
+        {canExpandDetails ? (
+          <VButton
+            type="button"
+            className={`${styles.timelineCellHeader} ${toneTextClassName}`}
+            aria-expanded={detailsExpanded}
+            aria-controls={detailsId}
+            onClick={() => toggleSection(operation.id, "details", false)}
+            title={detailsExpanded ? t("toolCallDetailsVisible") : t("toolCallDetailsHidden")}
+          >
+            {headerContent}
+          </VButton>
+        ) : (
+          <div className={`${styles.timelineCellHeader} ${toneTextClassName}`}>
+            {headerContent}
+          </div>
+        )}
         {canExpandDetails ? (
           <>
             <DeferredOperationDetails

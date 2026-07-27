@@ -610,7 +610,8 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.timelineCellHeader).not.toContain("!items-center");
     expect(styles.timelineCellHeader).toContain("!grid");
     expect(styles.timelineCellHeader).toContain("!w-full");
-    expect(styles.timelineCellHeader).toContain("grid-cols-[20px_minmax(0,1fr)_24px]");
+    expect(styles.timelineCellHeader).toContain("grid-cols-[20px_minmax(0,1fr)]");
+    expect(styles.timelineCellHeader).not.toContain("grid-cols-[20px_minmax(0,1fr)_24px]");
     expect(styles.timelineCellHeader).not.toContain("_max-content_");
     expect(styles.timelineCellHeader).toContain("gap-x-2");
     expect(styles.timelineCellHeader).toContain("border-0");
@@ -1766,7 +1767,7 @@ describe("ConversationView edit resend affordance", () => {
 
     expect(html).toContain("timelineOperationCell_success");
     expect(html).toMatch(/<span class="[^"]*operationText_success[^"]*">代码图谱<\/span>/);
-    expect(html).toMatch(/<span class="[^"]*timelineCellInlineSummary[^"]*">\{ &quot;status&quot;: &quot;ok&quot; \}<\/span>/);
+    expect(html).not.toContain("&quot;status&quot;: &quot;ok&quot;");
     expect(html).toContain("timelineOperationCell_failed");
     expect(html).toMatch(/timelineOperationCell_failed[\s\S]*搜索[\s\S]*got an unexpected keyword argument/);
     expect(html).toContain("timelineCellInlineSummary");
@@ -1776,6 +1777,11 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.timelineOperationCell_failed).not.toContain("rounded-[var(--radius-control)]");
     expect(styles.timelineCellInlineSummary).toContain("truncate");
     expect(styles.timelineCellCompactTitleRow).toContain("flex-nowrap");
+    expect(styles.timelineCellCompactTitleRow).not.toContain("[&_.timelineCellTitle]:truncate");
+    expect(conversationViewSource).toContain("styles.timelineCellInlineChevron");
+    expect(conversationViewSource).toContain("completedToolPresentationSummary({");
+    expect(html).not.toContain("timelineCellDetailButton");
+    expect(html).toMatch(/<button[^>]*aria-expanded="false"[^>]*timelineCellHeader/);
   });
 
   it("does not let top-edge history loading rewrite cached response expansion defaults", () => {
