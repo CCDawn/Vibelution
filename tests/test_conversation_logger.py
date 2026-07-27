@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import hashlib
 import json
 from pathlib import Path
 
@@ -19,7 +20,7 @@ def _fresh_logger(tmp_path: Path) -> ConversationLogger:
     return logger
 
 
-def test_system_prompt_uses_preview_and_sidecar_for_long_payload(tmp_path):
+def test_system_prompt_persists_only_bounded_hash_summary(tmp_path):
     logger = _fresh_logger(tmp_path)
     long_text = "A" * 1200 + "\n" + "B" * 1200
 
@@ -30,11 +31,60 @@ def test_system_prompt_uses_preview_and_sidecar_for_long_payload(tmp_path):
     record = lines[-1]
 
     assert record["type"] == "system_prompt"
+    assert record["content_length"] == len(long_text)
+    assert record["content_sha256"] == hashlib.sha256(long_text.encode("utf-8")).hexdigest()
     assert record["content_inlined"] is False
-    assert "content_preview" in record
-    assert "content_ref" in record
+    assert record["content_omitted"] is True
+    assert "content_preview" not in record
+    assert "content_ref" not in record
     assert "content" not in record
-    assert (tmp_path / record["content_ref"]).exists()
+    assert long_text not in session_file.read_text(encoding="utf-8")
+
+
+def test_llm_request_persists_message_shape_without_prompt_content(tmp_path):
+    logger = _fresh_logger(tmp_path)
+    secret_system_prompt = "SYSTEM-SECRET-" + ("A" * 1000)
+    secret_user_prompt = "USER-SECRET-" + ("B" * 1000)
+
+    logger.log_llm_request(
+        [
+            {"role": "system", "content": secret_system_prompt},
+            {"role": "user", "content": secret_user_prompt},
+        ],
+        model="gpt-test",
+    )
+
+    session_file = tmp_path / "conversation_test_session.jsonl"
+    serialized = session_file.read_text(encoding="utf-8")
+    record = json.loads(serialized.splitlines()[-1])
+
+    assert secret_system_prompt not in serialized
+    assert secret_user_prompt not in serialized
+    assert record["message_count"] == 2
+    assert [message["type"] for message in record["messages"]] == ["system", "user"]
+    for message in record["messages"]:
+        assert message["content_inlined"] is False
+        assert message["content_omitted"] is True
+        assert len(message["content_sha256"]) == 64
+        assert "content" not in message
+        assert "content_preview" not in message
+        assert "content_ref" not in message
+
+
+def test_transcript_system_prompt_persists_only_hash_summary(tmp_path):
+    secret_prompt = "TRANSCRIPT-SECRET-" + ("C" * 1000)
+    TranscriptLogger._instance = None
+    logger = TranscriptLogger()
+    logger._logs_dir = tmp_path
+    logger.start_session()
+
+    logger.write_system_prompt(secret_prompt)
+    logger._flush_pending_writes()
+
+    transcript = logger._get_transcript_file().read_text(encoding="utf-8")
+    assert secret_prompt not in transcript
+    assert "[system prompt omitted]" in transcript
+    assert hashlib.sha256(secret_prompt.encode("utf-8")).hexdigest() in transcript
 
 
 def test_tool_result_keeps_main_log_compact_and_spills_raw_payload(tmp_path):

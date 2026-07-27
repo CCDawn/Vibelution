@@ -59,6 +59,43 @@ def _build_operator_delegation_request(*, goal: str, iteration: int, total_tool_
     )
 
 
+def test_turn_failure_diagnostic_includes_prompt_free_turn_correlation(monkeypatch):
+    events = []
+    monkeypatch.setenv("VIBELUTION_TURN_SESSION_ID", "session-failure-trace")
+    monkeypatch.setenv("VIBELUTION_TURN_RUN_ID", "turn-failure-trace")
+    monkeypatch.setenv("VIBELUTION_TURN_AGENT_ID", "agent-failure-trace")
+    monkeypatch.setattr(
+        agent_module,
+        "_record_agent_scene_event",
+        lambda phase, code, **kwargs: events.append(
+            (phase, code, kwargs.get("fields") or {})
+        ),
+    )
+    agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+    agent.runtime_agent_binding = {}
+    agent._last_llm_error_details = {}
+    agent._last_llm_failure_attempts = 0
+    agent._last_llm_failure_max_attempts = 0
+    agent._last_turn_metadata = {}
+
+    agent._record_turn_failure_diagnostic(
+        category="protocol_error",
+        reason_code="canonical_turn_unsuccessful",
+        reason_summary="Canonical outcome was incomplete.",
+        reason_detail="No successful terminal outcome was available.",
+        chain_stage="agent_outcome_evaluation",
+        event_code="llm.turn_outcome.unsuccessful",
+        fields={"outcomeKind": "incomplete"},
+    )
+
+    scene_fields = events[-1][2]
+    assert scene_fields["sessionId"] == "session-failure-trace"
+    assert scene_fields["turnId"] == "turn-failure-trace"
+    assert scene_fields["agentId"] == "agent-failure-trace"
+    assert scene_fields["reasonCode"] == "canonical_turn_unsuccessful"
+    assert "No successful terminal outcome was available." not in str(scene_fields)
+
+
 def test_session_turn_reuse_refreshes_turn_scoped_tool_authorization(monkeypatch):
     agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
     agent.key_tools = [SimpleNamespace(name="git_status")]
@@ -791,6 +828,9 @@ class TestToolMessageFlow:
         invocation_ids = []
         events = []
         recovery_inputs = []
+        monkeypatch.setenv("VIBELUTION_TURN_SESSION_ID", "session-route-trace")
+        monkeypatch.setenv("VIBELUTION_TURN_RUN_ID", "turn-route-trace")
+        monkeypatch.setenv("VIBELUTION_TURN_AGENT_ID", "agent-route-trace")
 
         class DummyContext:
             def __enter__(self):
@@ -891,6 +931,19 @@ class TestToolMessageFlow:
         assert all(invocation_ids)
         assert invocation_ids[0] != invocation_ids[1]
         assert [code for _, code, _ in events].count("llm_fallback_selected") == 1
+        success_events = [
+            fields for _, code, fields in events if code == "llm_route_attempt_succeeded"
+        ]
+        assert len(success_events) == 1
+        assert success_events[0]["routeAttempt"] == 2
+        assert success_events[0]["routeId"] == "fallback-route"
+        assert success_events[0]["invocationId"] == invocation_ids[1]
+        assert success_events[0]["sessionId"] == "session-route-trace"
+        assert success_events[0]["turnId"] == "turn-route-trace"
+        assert success_events[0]["agentId"] == "agent-route-trace"
+        assert success_events[0]["streamed"] is False
+        assert "durationMs" in success_events[0]
+        assert "llm_turn_completed" not in [code for _, code, _ in events]
         assert "hello" not in str(events)
 
     def test_invoke_llm_rejects_duplicate_effective_fallback_before_io(self, monkeypatch):

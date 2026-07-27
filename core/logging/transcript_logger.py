@@ -10,6 +10,7 @@
 - 自动清理旧会话文件（保留最近 5 个）
 """
 
+import hashlib
 import os
 import re
 import glob
@@ -223,26 +224,22 @@ session: {self._session_id}
         self.cleanup_old_transcripts()
 
     def write_system_prompt(self, system_prompt: str):
-        """写入 System Prompt（折叠形式）"""
+        """Write a prompt-free diagnostic summary."""
         if self._system_prompt_written:
             return
 
         self._system_prompt_written = True
 
-        # 转义并截断内容
-        escaped_content = self._escape_markdown(system_prompt)
-        truncated_content = self._truncate_text(escaped_content, 2000, "\n\n_...[内容过长已截断]..._")
+        prompt_text = str(system_prompt or "")
+        prompt_hash = hashlib.sha256(
+            prompt_text.encode("utf-8", errors="ignore")
+        ).hexdigest()
 
         content = f"""
 
-## 🧠 System Prompt
+## System Prompt
 
-<details>
-<summary>🧠 展开查看本轮 System Prompt ({len(system_prompt)} 字符)</summary>
-
-{truncated_content}
-
-</details>
+> [system prompt omitted] chars={len(prompt_text)} sha256={prompt_hash}
 
 """
         self._enqueue_write(content)

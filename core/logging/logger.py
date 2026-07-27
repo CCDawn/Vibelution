@@ -26,6 +26,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import threading
@@ -595,6 +596,19 @@ class ConversationLogger:
             payload[f"{field_name}_ref"] = self._spill_text_payload(kind, raw, turn=turn, ext=ext)
         return payload
 
+    @staticmethod
+    def _summarize_text_payload(*, field_name: str, text: str) -> Dict[str, Any]:
+        """Return a stable prompt-free summary suitable for durable logs."""
+        raw = str(text or "")
+        return {
+            f"{field_name}_length": len(raw),
+            f"{field_name}_sha256": hashlib.sha256(
+                raw.encode("utf-8", errors="ignore")
+            ).hexdigest(),
+            f"{field_name}_inlined": False,
+            f"{field_name}_omitted": True,
+        }
+
     def _timestamp(self) -> str:
         """获取 ISO 格式的时间戳"""
         return datetime.now().isoformat(timespec="milliseconds")
@@ -664,6 +678,7 @@ class ConversationLogger:
             total_input_tokens = 0
 
         for msg in messages:
+            image_count = 0
             # 处理 dict 格式消息（如 build_system_message 返回的格式）
             if isinstance(msg, dict):
                 msg_type = msg.get("role", "unknown")
@@ -671,7 +686,6 @@ class ConversationLogger:
                 # content 可能是 content_blocks 列表
                 if isinstance(content_raw, list):
                     parts = []
-                    image_count = 0
                     for block in content_raw:
                         if not isinstance(block, dict):
                             continue
@@ -681,8 +695,6 @@ class ConversationLogger:
                             continue
                         parts.append(str(block.get("text") or ""))
                     text = "\n\n".join(part for part in parts if part)
-                    if image_count:
-                        text = f"{text}\n\n[image attachments: {image_count}]".strip()
                 else:
                     text = str(content_raw)
             else:
@@ -692,14 +704,12 @@ class ConversationLogger:
 
             payload = {"type": msg_type}
             payload.update(
-                self._pack_text_payload(
+                self._summarize_text_payload(
                     field_name="content",
                     text=text,
-                    kind=f"llm_request_{msg_type}_{len(msg_summaries)}",
-                    turn=self._turn_count,
-                    inline_limit=500,
                 )
             )
+            payload["image_count"] = image_count
             msg_summaries.append(payload)
 
         # 通过 UI 显示 token 数
@@ -845,12 +855,9 @@ class ConversationLogger:
             "timestamp": self._timestamp(),
         }
         record.update(
-            self._pack_text_payload(
+            self._summarize_text_payload(
                 field_name="content",
                 text=prompt_text,
-                kind="system_prompt",
-                turn=self._turn_count,
-                inline_limit=700,
             )
         )
         self._write(record)
