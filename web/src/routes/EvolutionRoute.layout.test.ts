@@ -32,6 +32,10 @@ const coreDictionarySource = readFileSync(
   "utf-8",
 );
 const evolutionTypesSource = readFileSync(new URL("../api/types/evolution.ts", import.meta.url), "utf-8");
+const evolutionTailwindSource = readFileSync(
+  new URL("../design/route-css/evolution.tailwind.css", import.meta.url),
+  "utf-8",
+);
 const evolutionSources = [
   routeSource,
   activeRunMonitorPanelSource,
@@ -567,12 +571,30 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeStyles.workflowStepButtonActive).toContain("[border-color:");
     expect(routeStyles.workflowStepPreview).toContain("[-webkit-line-clamp:2]");
     expect(supervisedAgentConversationPanelStyles.tabRail).toContain("overflow-x-auto");
-    expect(supervisedAgentConversationPanelStyles.tabButton).toContain("[min-width:132px]");
-    expect(supervisedAgentConversationPanelStyles.tabButton).toContain("[min-height:46px]");
-    expect(supervisedAgentConversationPanelStyles.tabButton).toContain("[flex:1_1_132px]");
-    expect(supervisedAgentConversationPanelStyles.tabLayout).toContain("[grid-template-columns:24px_minmax(0,_1fr)]");
+    expect(supervisedAgentConversationPanelStyles.tabRail).toContain("grid-flow-col");
+    expect(supervisedAgentConversationPanelStyles.tabRail).toContain("auto-cols-[minmax(152px,1fr)]");
+    expect(supervisedAgentConversationPanelStyles.tabButton).toContain("min-h-[54px]");
+    expect(supervisedAgentConversationPanelStyles.tabButton).toContain("!w-full");
+    expect(supervisedAgentConversationPanelStyles.tabButton).toContain("min-w-0");
+    expect(supervisedAgentConversationPanelStyles.tabLayout).toContain(
+      "[grid-template-columns:28px_minmax(0,1fr)_auto]",
+    );
     expect(supervisedAgentConversationPanelStyles.sessionSurface).toContain("flex-1");
+    expect(supervisedAgentConversationPanelStyles.sessionSurface).toContain("min-h-[544px]");
     expect(supervisedAgentConversationPanelStyles.sessionSurface).toContain("rounded-[var(--vui-radius-lg)]");
+    expect(supervisedAgentConversationPanelStyles.selectedHeader).toContain("min-h-[72px]");
+    expect(supervisedAgentConversationPanelStyles.selectedFacts).toContain("grid-cols-4");
+    expect(supervisedAgentConversationPanelSource).toContain("roleConversationTitle(member.role, lang)");
+    expect(supervisedAgentConversationPanelSource).toContain("当前 Agent 会话信息");
+    expect(supervisedAgentConversationPanelSource).toContain("统一消息链路");
+    expect(supervisedAgentConversationPanelSource).toContain("ConversationView ·");
+    expect(supervisedAgentConversationPanelSource).toContain("messageWindow?.totalMessages");
+    expect(supervisedAgentConversationPanelStyles.timelineToolbar).toContain("border-b");
+    expect(supervisedAgentConversationPanelStyles.body).toContain("min-h-[430px]");
+    expect(evolutionTailwindSource).toContain('@source "../../routes/SupervisedAgentConversationPanel.tsx"');
+    expect(evolutionTailwindSource).toContain(
+      '@source "../../routes/SupervisedAgentConversationPanel.styles.ts"',
+    );
     expect(supervisedAgentConversationPanelStyles.empty).toContain("text-center");
     expect(supervisedAgentConversationPanelStyles.empty).toContain("w-[min(72%,_460px)]");
     expect(stylesSource).not.toContain(".supervisedWorkflowCardGrid");
@@ -831,7 +853,7 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(supervisedAgentConversationPanelSource).toContain('role="tabpanel"');
     expect(supervisedAgentConversationPanelSource).toContain("className={styles.sessionSurface}");
     expect(supervisedAgentConversationPanelStyles.tabRail).toContain("overflow-x-auto");
-    expect(supervisedAgentConversationPanelStyles.body).toContain("min-h-[320px]");
+    expect(supervisedAgentConversationPanelStyles.body).toContain("min-h-[430px]");
     expect(routeStyles.supervisedConversationEvidence).toContain("[width:100%]");
     expect(routeStyles.supervisedConversationTrace).toContain("[max-height:min(260px,_30vh)]");
     expect(routeSource).not.toContain("styles.ioWaitingState");

@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { ArrowUpRight } from "lucide-react";
+import { ArrowUpRight, CheckCircle2 } from "lucide-react";
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 
@@ -39,12 +39,64 @@ function roleAvatar(role: SupervisedMemberRole, lang: "zh" | "en") {
   return "核";
 }
 
+function roleConversationTitle(role: SupervisedMemberRole, lang: "zh" | "en") {
+  const titles: Record<SupervisedMemberRole, { zh: string; en: string }> = {
+    baseline: { zh: "基线 Agent", en: "Baseline Agent" },
+    candidate: { zh: "候选 Agent", en: "Candidate Agent" },
+    judge: { zh: "评分 Agent", en: "Judge Agent" },
+    reviewer: { zh: "审查 Agent", en: "Review Agent" },
+    auditor: { zh: "审计 Agent", en: "Audit Agent" },
+  };
+  return titles[role][lang];
+}
+
+function memberStatusLabel(
+  status: string,
+  lang: "zh" | "en",
+  statusLabel: (status: string) => string,
+) {
+  if (status === "configured") {
+    return lang === "zh" ? "已配置" : "Ready";
+  }
+  if (status === "missing") {
+    return lang === "zh" ? "未配置" : "Missing";
+  }
+  if (status === "active") {
+    return lang === "zh" ? "现场" : "Live";
+  }
+  return statusLabel(status);
+}
+
 function queryErrorMessage(error: unknown, lang: "zh" | "en") {
   const detail = error instanceof Error ? error.message : String(error || "");
   if (lang === "zh") {
     return detail ? `完整会话暂时无法刷新：${detail}` : "完整会话暂时无法刷新。";
   }
   return detail ? `The full session could not refresh: ${detail}` : "The full session could not refresh.";
+}
+
+function conversationDuration(messages: ConversationMessage[]) {
+  const timestamps = messages
+    .map((message) => Date.parse(message.timestamp))
+    .filter((timestamp) => Number.isFinite(timestamp));
+  if (timestamps.length < 2) {
+    return "--";
+  }
+  const elapsedSeconds = Math.max(
+    0,
+    Math.round((Math.max(...timestamps) - Math.min(...timestamps)) / 1_000),
+  );
+  if (elapsedSeconds < 60) {
+    return `${elapsedSeconds}s`;
+  }
+  const minutes = Math.floor(elapsedSeconds / 60);
+  const seconds = elapsedSeconds % 60;
+  if (minutes < 60) {
+    return seconds ? `${minutes}m ${seconds}s` : `${minutes}m`;
+  }
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return remainingMinutes ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
 }
 
 export function SupervisedAgentConversationPanel({
@@ -76,16 +128,20 @@ export function SupervisedAgentConversationPanel({
   });
   const detail = sessionDetailQuery.data?.id === sessionId ? sessionDetailQuery.data : undefined;
   const messages = detail?.messages?.length ? detail.messages : fallbackMessages;
+  const messageCount = Math.max(detail?.messageWindow?.totalMessages ?? 0, messages.length);
+  const duration = conversationDuration(messages);
   const assistantDisplayName = detail?.agentDisplayName || selectedMember?.name || roleLabel(selectedRole);
   const phase = detail?.currentPhase
     || detail?.status
     || selectedMember?.conversationSession?.status
     || selectedMember?.status
     || "idle";
-  const selectedStatus = statusLabel(
+  const selectedStatus = memberStatusLabel(
     selectedMember?.conversationSession?.status
     || selectedMember?.status
     || "idle",
+    lang,
+    statusLabel,
   );
   const selectedTabId = `supervised-agent-tab-${selectedRole}`;
   const selectedPanelId = `supervised-agent-panel-${selectedRole}`;
@@ -106,7 +162,11 @@ export function SupervisedAgentConversationPanel({
         {members.map((member) => {
           const selected = member.role === selectedRole;
           const active = isLive && member.role === activeRole;
-          const memberStatus = statusLabel(member.conversationSession?.status || member.status);
+          const memberStatus = memberStatusLabel(
+            member.conversationSession?.status || member.status,
+            lang,
+            statusLabel,
+          );
           return (
             <VButton
               key={member.role}
@@ -122,13 +182,11 @@ export function SupervisedAgentConversationPanel({
               <span className={styles.tabLayout}>
                 <span className={styles.avatar} aria-hidden="true">{roleAvatar(member.role, lang)}</span>
                 <span className={styles.tabCopy}>
-                  <span className={styles.tabTitle}>{member.name}</span>
-                  <span className={styles.tabSubtitle}>
-                    <span>{roleLabel(member.role)}</span>
-                    <span className={active ? `${styles.tabStatus} ${styles.tabStatusActive}` : styles.tabStatus}>
-                      {active ? (lang === "zh" ? "现场" : "Live") : memberStatus}
-                    </span>
-                  </span>
+                  <span className={styles.tabTitle}>{roleConversationTitle(member.role, lang)}</span>
+                  <span className={styles.tabSubtitle}>{roleDescription(member.role)}</span>
+                </span>
+                <span className={active ? `${styles.tabStatus} ${styles.tabStatusActive}` : styles.tabStatus}>
+                  {active ? (lang === "zh" ? "现场" : "Live") : memberStatus}
                 </span>
               </span>
             </VButton>
@@ -144,23 +202,64 @@ export function SupervisedAgentConversationPanel({
       >
         <header className={styles.selectedHeader}>
           <div className={styles.selectedIdentity}>
-            <span className={styles.avatar} aria-hidden="true">{roleAvatar(selectedRole, lang)}</span>
+            <span className={styles.selectedAvatar} aria-hidden="true">{roleAvatar(selectedRole, lang)}</span>
             <div className={styles.selectedCopy}>
-              <div className={styles.selectedTitle}>{assistantDisplayName}</div>
-              <div className={styles.selectedMeta}>
-                <span>{roleLabel(selectedRole)}</span>
-                <span className={styles.selectedDescription}>{roleDescription(selectedRole)}</span>
-                <span>{selectedStatus}</span>
-                <VTooltip content={selectedMember?.modelId || selectedMember?.model || "--"} width="wide">
-                  <span className={styles.selectedMetaValue} tabIndex={0}>{selectedMember?.model || "--"}</span>
-                </VTooltip>
-                <VTooltip content={sessionId || (lang === "zh" ? "尚无会话" : "No session")} width="wide">
-                  <span className={styles.selectedMetaValue} tabIndex={0}>{sessionId || "--"}</span>
-                </VTooltip>
+              <div className={styles.selectedTitleRow}>
+                <h3 className={styles.selectedTitle}>{assistantDisplayName}</h3>
+                <span className={styles.roleBadge}>{roleLabel(selectedRole)}</span>
+                <span className={styles.statusBadge}>{selectedStatus}</span>
               </div>
+              <p className={styles.selectedDescription}>{roleDescription(selectedRole)}</p>
             </div>
           </div>
-          <div className={styles.selectedActions}>
+          <dl
+            className={styles.selectedFacts}
+            aria-label={lang === "zh" ? "当前 Agent 会话信息" : "Current Agent session facts"}
+          >
+            <div className={styles.factCell}>
+              <dt className={styles.factLabel}>{lang === "zh" ? "会话" : "Session"}</dt>
+              <dd className={styles.factValue}>
+                <VTooltip content={sessionId || (lang === "zh" ? "尚无会话" : "No session")} width="wide">
+                  <span tabIndex={0}>{sessionId || "--"}</span>
+                </VTooltip>
+              </dd>
+            </div>
+            <div className={styles.factCell}>
+              <dt className={styles.factLabel}>{lang === "zh" ? "模型" : "Model"}</dt>
+              <dd className={styles.factValue}>
+                <VTooltip content={selectedMember?.modelId || selectedMember?.model || "--"} width="wide">
+                  <span tabIndex={0}>{selectedMember?.model || "--"}</span>
+                </VTooltip>
+              </dd>
+            </div>
+            <div className={styles.factCell}>
+              <dt className={styles.factLabel}>{lang === "zh" ? "耗时" : "Duration"}</dt>
+              <dd className={styles.factValue}>{duration}</dd>
+            </div>
+            <div className={styles.factCell}>
+              <dt className={styles.factLabel}>{lang === "zh" ? "消息" : "Messages"}</dt>
+              <dd className={styles.factValue}>
+                {lang === "zh" ? `${messageCount} 条` : `${messageCount}`}
+              </dd>
+            </div>
+          </dl>
+        </header>
+
+        <div className={styles.timelineToolbar}>
+          <div className={styles.conversationContract}>
+            <span className={styles.contractIcon} aria-hidden="true">
+              <CheckCircle2 size={14} />
+            </span>
+            <span className={styles.contractCopy}>
+              <strong className={styles.contractTitle}>
+                {lang === "zh" ? "统一消息链路" : "Unified message chain"}
+              </strong>
+              <small className={styles.contractMeta}>
+                ConversationView · {lang === "zh" ? "标准消息 DTO" : "standard message DTO"}
+              </small>
+            </span>
+          </div>
+          <div className={styles.toolbarActions}>
             {isLive && activeRole && selectedRole !== activeRole ? (
               <VButton type="button" className={styles.compactAction} onClick={onFollowLive}>
                 {lang === "zh" ? "跟随现场" : "Follow live"}
@@ -173,9 +272,9 @@ export function SupervisedAgentConversationPanel({
               </Link>
             ) : null}
           </div>
-        </header>
+        </div>
 
-        <div className={styles.body}>
+        <div className={styles.body} aria-live="polite">
           {sessionDetailQuery.isError ? (
             <div className={styles.queryNotice} role="status">{queryErrorMessage(sessionDetailQuery.error, lang)}</div>
           ) : null}
