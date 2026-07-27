@@ -95,11 +95,54 @@ export type SessionAgentPromptSnapshot = {
   sourceExists?: boolean;
   contentHash?: string;
   contentLength?: number;
+  corePromptSchemaVersion?: number;
+  corePromptHash?: string;
+  corePromptLength?: number;
+  corePrompts?: Array<{
+    name?: string;
+    sourcePath?: string;
+    contentHash?: string;
+    contentLength?: number;
+  }>;
+  promptAssemblySchemaVersion?: number;
+  promptAssembly?: SessionPromptAssemblyManifest;
   capturedAt?: string;
   agentId?: string;
   agentCode?: string;
   agentDisplayName?: string;
   reason?: string;
+};
+
+export type SessionPromptAssemblySegment = {
+  key?: string;
+  tier?: string;
+  placement?: string;
+  stability?: string;
+  trust?: string;
+  source?: string;
+  required?: boolean;
+  chars?: number;
+  contentHash?: string;
+  estimatedTokens?: number;
+  budgetTokens?: number;
+  cachePolicy?: string;
+  capabilityRequirements?: string[];
+  decision?: string;
+  decisionReason?: string;
+  cacheHit?: boolean;
+};
+
+export type SessionPromptAssemblyManifest = {
+  schemaVersion?: number;
+  assemblyMode?: string;
+  modelProtocol?: string;
+  capabilityFingerprint?: string;
+  permissionFingerprint?: string;
+  stablePrefixHash?: string;
+  sessionSnapshotHash?: string;
+  totalEstimatedTokens?: number;
+  budgetTokens?: number;
+  segments?: SessionPromptAssemblySegment[];
 };
 
 export type SessionQueryResponse = {

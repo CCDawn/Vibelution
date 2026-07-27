@@ -568,6 +568,25 @@ def test_build_agent_prompt_snapshot_freezes_template_content(tmp_path, monkeypa
     assert snapshot["agentCode"] == "chat_agent"
     assert current["content"].endswith("第二版提示词，不应该影响已有会话。")
     assert current["contentHash"] != snapshot["contentHash"]
+    assembly = snapshot["promptAssembly"]
+    assert assembly["schemaVersion"] == 1
+    assert assembly["assemblyMode"] == "session_snapshot_v2"
+    assert [segment["key"] for segment in assembly["segments"]] == [
+        "core_common",
+        "core_soul",
+        "core_agents",
+        "agent_role_prompt",
+    ]
+    assert [segment["tier"] for segment in assembly["segments"]] == [
+        "stable_core",
+        "stable_core",
+        "stable_core",
+        "session_snapshot",
+    ]
+    assert assembly["stablePrefixHash"]
+    assert assembly["sessionSnapshotHash"]
+    assert assembly["totalEstimatedTokens"] > 0
+    assert all("content" not in segment and "block" not in segment for segment in assembly["segments"])
     system_block = prompt_template_service.render_agent_prompt_snapshot_system_block(snapshot)
     assert "Agent System Prompt Snapshot" in system_block
     assert "PromptTemplateId: prompt-chat-custom" in system_block

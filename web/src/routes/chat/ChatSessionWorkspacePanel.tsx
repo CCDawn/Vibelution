@@ -1,10 +1,11 @@
 import { lazy, Suspense, type ComponentProps } from "react";
 
-import type { FileContent, SessionRuntimeNotice } from "../../api/types";
+import type { FileContent, SessionAgentPromptSnapshot, SessionRuntimeNotice } from "../../api/types";
 import { VStateSurface } from "../../components/vui";
 import { ChatConversationComposerBridge } from "./ChatConversationComposerBridge";
 import { ConversationWorkspaceLoadingShell } from "./ChatLoadingShell";
 import { ChatRuntimeNoticeStack } from "./ChatRuntimeNoticeStack";
+import { ChatPromptAssemblyInspector } from "./ChatPromptAssemblyInspector";
 import type { ChatToolApprovalLabel } from "./ChatToolApprovalDialog";
 import styles from "./ChatSessionWorkspacePanel.styles";
 
@@ -43,6 +44,7 @@ type ChatSessionWorkspacePanelProps = {
   onApproveToolApproval: () => void;
   onRejectToolApproval: () => void;
   sessionsPending: boolean;
+  promptSnapshot?: SessionAgentPromptSnapshot;
   toolApproval: {
     pending: boolean;
     rawTitle: string;
@@ -73,6 +75,7 @@ export function ChatSessionWorkspacePanel({
   onApproveToolApproval,
   onRejectToolApproval,
   sessionsPending,
+  promptSnapshot,
   toolApproval,
   transientErrorMessage,
   workspaceActiveTab,
@@ -112,6 +115,9 @@ export function ChatSessionWorkspacePanel({
           </div>
         ) : null}
         <ChatRuntimeNoticeStack lang={lang} notices={notices} />
+        {promptSnapshot ? (
+          <ChatPromptAssemblyInspector lang={lang} snapshot={promptSnapshot} />
+        ) : null}
         {toolApproval ? (
           <Suspense fallback={null}>
             <ChatToolApprovalDialog

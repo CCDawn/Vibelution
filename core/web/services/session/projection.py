@@ -2762,6 +2762,7 @@ def _public_agent_prompt_snapshot(snapshot: Any) -> dict[str, Any]:
         "corePromptHash",
         "corePromptLength",
         "corePrompts",
+        "promptAssemblySchemaVersion",
         "capturedAt",
         "agentId",
         "agentCode",
@@ -2770,6 +2771,50 @@ def _public_agent_prompt_snapshot(snapshot: Any) -> dict[str, Any]:
     ):
         if key in snapshot:
             result[key] = snapshot.get(key)
+    prompt_assembly = snapshot.get("promptAssembly")
+    if isinstance(prompt_assembly, dict):
+        manifest: dict[str, Any] = {}
+        for key in (
+            "schemaVersion",
+            "assemblyMode",
+            "modelProtocol",
+            "capabilityFingerprint",
+            "permissionFingerprint",
+            "stablePrefixHash",
+            "sessionSnapshotHash",
+            "totalEstimatedTokens",
+            "budgetTokens",
+        ):
+            if key in prompt_assembly:
+                manifest[key] = prompt_assembly.get(key)
+        segments: list[dict[str, Any]] = []
+        for raw_segment in prompt_assembly.get("segments") or []:
+            if not isinstance(raw_segment, dict):
+                continue
+            segment: dict[str, Any] = {}
+            for key in (
+                "key",
+                "tier",
+                "placement",
+                "stability",
+                "trust",
+                "source",
+                "required",
+                "chars",
+                "contentHash",
+                "estimatedTokens",
+                "budgetTokens",
+                "cachePolicy",
+                "capabilityRequirements",
+                "decision",
+                "decisionReason",
+                "cacheHit",
+            ):
+                if key in raw_segment:
+                    segment[key] = raw_segment.get(key)
+            segments.append(segment)
+        manifest["segments"] = segments
+        result["promptAssembly"] = manifest
     return result
 
 

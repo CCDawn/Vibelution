@@ -3078,6 +3078,7 @@ export function ChatCodingRoute() {
               loadingSessionLabel={t("loadingSession")}
               noSessionsLabel={t("noSessionsYet")}
               notices={activeRuntimeNotices}
+              promptSnapshot={detail?.agentPromptSnapshot}
               sessionsPending={sessionsQuery.isPending}
               toolApproval={pendingToolApproval ? {
                 pending: pendingToolApprovalPending,
