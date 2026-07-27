@@ -236,6 +236,15 @@ import {
   shouldRenderCompactActiveTurnPlaceholder as resolveShouldRenderCompactActiveTurnPlaceholder,
 } from "./conversationOperationPresentation";
 import {
+  resolveComposerActionDisabled,
+  resolveComposerActionLabels,
+  resolveComposerActionMode,
+  resolveComposerEditMode,
+  resolveComposerGuidanceUi,
+  resolveComposerPrimaryActionFlags,
+} from "./conversationComposerActionModel";
+import { getCachedResponseSegments as getCachedResponseSegmentsFromCache } from "./conversationResponseSegmentCache";
+import {
   completedToolPresentationSummary,
   conversationToolDetailPresentation,
   conversationToolPresentationLabel,
@@ -446,39 +455,62 @@ export function ConversationView({
   const [timelineRowHeightVersion, setTimelineRowHeightVersion] = useState(0);
   const [computerUseSessionResults, setComputerUseSessionResults] = useState<Record<string, ComputerUseResult>>({});
   const [computerUseSessionPending, setComputerUseSessionPending] = useState<Record<string, "confirm" | "cancel" | undefined>>({});
-  const resolvedActionMode = composerActionMode ?? "send";
+  const resolvedActionMode = resolveComposerActionMode(composerActionMode);
   const hasComposerAttachments = composerAttachments.length > 0;
   const hasComposerReferences = composerReferences.length > 0;
   const attachmentInputDisabled = composerAttachmentInputDisabled ?? composerDisabled;
-  const resolvedActionDisabled =
-    composerActionDisabled
-    ?? (resolvedActionMode === "stop" ? composerDisabled : composerDisabled || (!composerValue.trim() && !hasComposerAttachments && !hasComposerReferences));
-  const resolvedActionLabel =
-    resolvedActionMode === "stop" ? (stopLabel ?? t("stop")) : (submitLabel ?? t("send"));
-  const resolvedPendingLabel =
-    resolvedActionMode === "stop"
-      ? (stopPendingLabel ?? t("stopPending"))
-      : (submitPendingLabel ?? t("sendPending"));
+  const resolvedActionDisabled = resolveComposerActionDisabled({
+    actionMode: resolvedActionMode,
+    composerActionDisabled,
+    composerDisabled,
+    composerValue,
+    hasAttachments: hasComposerAttachments,
+    hasReferences: hasComposerReferences,
+  });
+  const { actionLabel: resolvedActionLabel, pendingLabel: resolvedPendingLabel } = resolveComposerActionLabels({
+    actionMode: resolvedActionMode,
+    stopLabel,
+    submitLabel,
+    stopPendingLabel,
+    submitPendingLabel,
+    fallbackStop: t("stop"),
+    fallbackSend: t("send"),
+    fallbackStopPending: t("stopPending"),
+    fallbackSendPending: t("sendPending"),
+  });
   const assistantLabel = assistantDisplayName?.trim() || t("agent");
   const userLabel = userDisplayName?.trim() || t("operator");
   const userAvatarLabel = userAvatarSymbol(userAvatarPreset, userLabel);
-  const composerEditModeActive = Boolean(composerModeNotice);
-  const composerEditTargetPreview = composerEditModeActive
-    ? compactPreview(composerModeTargetPreview ?? "", 96)
-    : "";
-  const composerEditFailureNote = composerEditModeActive && turnError?.message
-    ? t("editMessageFailureRerunNotice")
-    : "";
-  const primaryActionIsEditSubmit = resolvedActionMode === "send" && composerEditModeActive;
+  const {
+    editModeActive: composerEditModeActive,
+    targetPreview: composerEditTargetPreview,
+    failureNote: composerEditFailureNote,
+  } = resolveComposerEditMode({
+    modeNotice: composerModeNotice,
+    modeTargetPreview: composerModeTargetPreview,
+    turnErrorMessage: turnError?.message,
+    compactPreview: compactConversationPreview,
+    failureNotice: t("editMessageFailureRerunNotice"),
+  });
+  const { primaryActionIsEditSubmit, runningGuidanceActionsEnabled } = resolveComposerPrimaryActionFlags({
+    actionMode: resolvedActionMode,
+    editModeActive: composerEditModeActive,
+  });
   const primaryActionClassName = primaryActionIsEditSubmit
     ? `${styles.composerEditSubmitButton} ${styles.composerRoundButtonPrimary}`
     : `${styles.sendButton} ${styles.composerRoundButton} ${styles.composerRoundButtonPrimary}`;
   const handlePrimaryAction = resolvedActionMode === "stop" ? onStop ?? onSubmit : onSubmit;
-  const runningGuidanceActionsEnabled = resolvedActionMode === "stop";
-  const guidanceActionDisabled =
-    !composerValue.trim() || composerDisabled || composerSafeGuidancePending || composerInterruptGuidancePending;
-  const guidanceDraftReady = Boolean(composerValue.trim());
-  const showSafeGuidanceAction = runningGuidanceActionsEnabled && guidanceDraftReady;
+  const {
+    guidanceDraftReady,
+    guidanceActionDisabled,
+    showSafeGuidanceAction,
+  } = resolveComposerGuidanceUi({
+    runningGuidanceActionsEnabled,
+    composerValue,
+    composerDisabled,
+    safeGuidancePending: composerSafeGuidancePending,
+    interruptGuidancePending: composerInterruptGuidancePending,
+  });
   const composerCanAcceptImageDrop = Boolean(onAddComposerAttachments) && !attachmentInputDisabled;
   const composerCanAcceptReferenceDrop = Boolean(onAddComposerReference) && !composerDisabled;
   const slashSuggestions = useMemo(
@@ -1133,27 +1165,11 @@ export function ConversationView({
   }, [agentRenderStatesByMessageId, sessionId, timelineMessages]);
 
   function getCachedResponseSegments(content: string) {
-    const key = String(content ?? "");
-    const cached = responseSegmentCacheRef.current.get(key);
-    if (cached) {
-      responseSegmentCacheRef.current.delete(key);
-      responseSegmentCacheRef.current.set(key, cached);
-      return cached;
-    }
-    const parsed = parseResponseSegments(key);
-    responseSegmentCacheRef.current.set(key, parsed);
-    trimOldestCacheEntries(responseSegmentCacheRef.current, RESPONSE_PARSE_CACHE_LIMIT);
-    return parsed;
-  }
-
-  function trimOldestCacheEntries<T>(cache: Map<string, T>, limit: number) {
-    while (cache.size > limit) {
-      const oldestKey = cache.keys().next().value;
-      if (oldestKey === undefined) {
-        return;
-      }
-      cache.delete(oldestKey);
-    }
+    return getCachedResponseSegmentsFromCache(
+      responseSegmentCacheRef.current,
+      content,
+      RESPONSE_PARSE_CACHE_LIMIT,
+    );
   }
 
   function getExpansionState(messageId: string, section: string, defaultExpanded: boolean) {

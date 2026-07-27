@@ -1,4 +1,8 @@
-/** Route/domain dictionary slice: agents (28 keys). */
+/**
+ * Route/domain dictionary slice: agents.
+ * Includes shared nav/compression keys plus C1.2 high-frequency workbench keys
+ * for dual-read with nested `agentsWorkbenchCopy` tables.
+ */
 export const dictionaryAgents = {
   zh: {
     navAgents: "Agent 管理",
@@ -29,6 +33,22 @@ export const dictionaryAgents = {
     configSubtitle: "把运行入口、进化方式和界面展示统一收在同一个系统设置页里。",
     configSnapshot: "配置快照",
     configSnapshotNote: "这个页面已经直接读取共享 public config 工作流，而不是在前端复制一份配置状态。",
+    // C1.2 high-frequency Agents workbench keys (flat TranslationKey dual-read)
+    agentsWorkbenchTitle: "Agent 中心",
+    agentsWorkbenchSubtitle: "统一查看长期 Agent 的身份、模型、提示词、工具、记忆、使用位置和健康状态。",
+    agentsWorkbenchRefresh: "刷新",
+    agentsWorkbenchLoading: "正在整理 Agent 配置...",
+    agentsWorkbenchLoadFailed: "Agent 配置加载失败",
+    agentsWorkbenchSearch: "搜索 Agent、模型、提示词、模式或引用",
+    agentsWorkbenchCreateAgent: "新增 Agent",
+    agentsWorkbenchBulkSelected: "已选",
+    agentsWorkbenchBulkClear: "清空",
+    agentsWorkbenchBulkNoSelection: "请先选择 Agent。",
+    agentsWorkbenchBulkWorking: "批量处理中...",
+    agentsWorkbenchBulkNoPrompt: "请先选择要应用的提示词模板。",
+    agentsWorkbenchBulkNoConfigFields: "请选择要批量应用的配置字段。",
+    agentsWorkbenchOverviewPane: "总览",
+    agentsWorkbenchConfigTitle: "配置",
   },
   en: {
     navAgents: "Agent Management",
@@ -59,5 +79,20 @@ export const dictionaryAgents = {
     configSubtitle: "Keep runtime entry points, evolution policy, and interface behavior inside one settings surface.",
     configSnapshot: "Config snapshot",
     configSnapshotNote: "This route is already reading the shared public config workflow instead of duplicating config state in the frontend.",
+    agentsWorkbenchTitle: "Agent Center",
+    agentsWorkbenchSubtitle: "Read long-lived Agent identity, models, prompts, tools, memory, membership, and health in one place.",
+    agentsWorkbenchRefresh: "Refresh",
+    agentsWorkbenchLoading: "Preparing Agent configuration...",
+    agentsWorkbenchLoadFailed: "Failed to load Agent configuration",
+    agentsWorkbenchSearch: "Search agents, models, prompts, modes, or references",
+    agentsWorkbenchCreateAgent: "New Agent",
+    agentsWorkbenchBulkSelected: "Selected",
+    agentsWorkbenchBulkClear: "Clear",
+    agentsWorkbenchBulkNoSelection: "Select agents first.",
+    agentsWorkbenchBulkWorking: "Working...",
+    agentsWorkbenchBulkNoPrompt: "Choose a prompt template first.",
+    agentsWorkbenchBulkNoConfigFields: "Choose config fields to apply in bulk.",
+    agentsWorkbenchOverviewPane: "Overview",
+    agentsWorkbenchConfigTitle: "Configuration",
   },
 } as const;

@@ -31,6 +31,8 @@ import teamWorkflowQueryKeysSource from "./teams/teamWorkflowQueryKeys.ts?raw";
 import researchStageAgentPresentationSource from "./teams/researchStageAgentPresentation.ts?raw";
 import teamRouteShellModelSource from "./teams/teamRouteShellModel.ts?raw";
 import teamSourceCollectionShellModelSource from "./teams/teamSourceCollectionShellModel.ts?raw";
+import teamSourceCollectionInjectModelSource from "./teams/source-collection/injectModel.ts?raw";
+import teamSourceCollectionModeFieldsSource from "./teams/TeamSourceCollectionModeFields.tsx?raw";
 
 const routeAndPureSource = `${routeSource}\n${canvasGeometrySource}\n${researchWorkspaceModelSource}\n${teamKindModelSource}\n${presentationModelSource}\n${experimentLoopModelSource}\n${aiSearchPresentationSource}\n${workflowPresentationSource}\n${researchStageRolesSource}\n${teamWorkflowQueryKeysSource}\n${researchStageAgentPresentationSource}\n${teamRouteShellModelSource}\n${teamSourceCollectionShellModelSource}`;
 
@@ -403,7 +405,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain('from "./teams/teamKindModel"');
     expect(routeSource).toContain("source_finder");
     expect(routeSource).toContain("collectionMode");
-    expect(routeSource).toContain("local_workspace");
+    expect(teamSourceCollectionInjectModelSource).toContain("local_workspace");
+    expect(teamSourceCollectionModeFieldsSource).toContain("TeamSourceCollectionModeFields");
+    expect(routeSource).toContain("TeamSourceCollectionModeFields");
     expect(routeSource).toContain("mixed");
     // Wave 8R: SC run start payload fields live on useTeamWorkflowStartMutations.
     expect(teamWorkflowStartMutationsSource).toContain("localScanScope");

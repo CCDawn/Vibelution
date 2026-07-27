@@ -53,6 +53,8 @@ import {
 } from "../components/vui/product/agent-management";
 import { VButton } from "../components/vui";
 import { safeReturnToPath } from "../app/navigationReturn";
+import { useAppI18n } from "../i18n/useAppI18n";
+import { mergeAgentsRouteCopyWithDictionary } from "../i18n/mergeAgentsWorkbenchCopy";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { useAgentConfigDraftMutations } from "./agents/useAgentConfigDraftMutations";
 import { useAgentWorkbenchMutations } from "./agents/useAgentWorkbenchMutations";
@@ -378,12 +380,17 @@ function reconcileResetDirectSession(summary: AgentResetSummary) {
 
 export function AgentsRoute() {
   const { lang } = useShellI18n();
+  // C1.2: load flat agents domain for high-frequency workbench dual-read.
+  const { t: agentsDictionaryT } = useAppI18n({ domains: ["agents"] });
   const queryClient = useQueryClient();
   const chatWorkspaceCache = useMemo(() => createChatWorkspaceCache(queryClient), [queryClient]);
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const pageVisible = usePageVisibility();
-  const copy = useMemo(() => agentsRouteCopy(lang), [lang]);
+  const copy = useMemo(
+    () => mergeAgentsRouteCopyWithDictionary(agentsRouteCopy(lang), agentsDictionaryT),
+    [agentsDictionaryT, lang],
+  );
   const numberFormatter = useMemo(() => new Intl.NumberFormat(lang === "zh" ? "zh-CN" : "en-US"), [lang]);
   const requestedAgentId = useMemo(() => String(searchParams.get("agent") || "").trim(), [searchParams]);
   const requestedCreate = useMemo(

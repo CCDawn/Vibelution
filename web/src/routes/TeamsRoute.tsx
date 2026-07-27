@@ -130,6 +130,13 @@ import {
   type SourceCollectionStorageOpenTarget,
 } from "./teams/source-collection/presentationModel";
 import {
+  buildSourceCollectionManualWritebackAssignmentOptions,
+  canStartSourceCollectionRun,
+  canSubmitSourceCollectionManualWriteback,
+  resolveSourceCollectionManualWritebackAssignmentValue,
+} from "./teams/source-collection/injectModel";
+import { TeamSourceCollectionModeFields } from "./teams/TeamSourceCollectionModeFields";
+import {
   CANVAS_VIEWPORT_HEIGHT,
   CANVAS_VIEWPORT_WIDTH,
   autoLayoutResearchCanvasNodes,
@@ -2323,41 +2330,14 @@ export function TeamsRoute({
   }
 
   function renderSourceCollectionModeFields() {
-    if (!knowledgeExpansionWorkflowTeamSelected) {
-      return null;
-    }
-    const mode = sourceCollectionDraft.collectionMode || "mixed";
     return (
-      <>
-        <label>
-          <span>{lang === "zh" ? "来源模式" : "Source mode"}</span>
-          <VNativeSelect
-            value={mode}
-            onChange={(event) =>
-              setSourceCollectionDraft((current) => ({
-                ...current,
-                collectionMode: event.target.value as SourceCollectionMode,
-              }))
-            }
-          >
-            {(["mixed", "web_search", "local_workspace"] as SourceCollectionMode[]).map((item) => (
-              <option key={item} value={item}>
-                {sourceCollectionCollectionModeLabel(item, lang)}
-              </option>
-            ))}
-          </VNativeSelect>
-        </label>
-        {mode !== "web_search" ? (
-          <label>
-            <span>{lang === "zh" ? "本地根目录" : "Local roots"}</span>
-            <VNativeInput
-              value={sourceCollectionDraft.localScanRoots}
-              onChange={(event) => setSourceCollectionDraft((current) => ({ ...current, localScanRoots: event.target.value }))}
-              placeholder={SOURCE_COLLECTION_LOCAL_SCAN_DEFAULT_ROOTS}
-            />
-          </label>
-        ) : null}
-      </>
+      <TeamSourceCollectionModeFields
+        lang={lang}
+        knowledgeExpansionWorkflowTeamSelected={knowledgeExpansionWorkflowTeamSelected}
+        draft={sourceCollectionDraft}
+        localScanDefaultRoots={SOURCE_COLLECTION_LOCAL_SCAN_DEFAULT_ROOTS}
+        onDraftChange={(patch) => setSourceCollectionDraft((current) => ({ ...current, ...patch }))}
+      />
     );
   }
 
@@ -2372,11 +2352,15 @@ export function TeamsRoute({
         startPending={selectedTeamStartSourceCollectionPending}
         onDraftChange={(patch) => setSourceCollectionDraft((current) => ({ ...current, ...patch }))}
         onSubmit={() => {
-          if (!selectedTeam?.teamId || !sourceCollectionCanStart || selectedTeamStartSourceCollectionPending) {
+          if (!canStartSourceCollectionRun({
+            teamId: selectedTeam?.teamId,
+            canStart: sourceCollectionCanStart,
+            startPending: selectedTeamStartSourceCollectionPending,
+          })) {
             return;
           }
           startSourceCollectionRunMutation.mutate({
-            teamId: selectedTeam.teamId,
+            teamId: selectedTeam!.teamId,
             draft: sourceCollectionDraft,
           });
         }}
@@ -2389,28 +2373,37 @@ export function TeamsRoute({
     description?: string;
     wrapInDetails?: boolean;
   }) {
+    const assignmentValue = resolveSourceCollectionManualWritebackAssignmentValue(
+      sourceCollectionOutputDraft.assignmentId,
+      selectedSourceCollectionAssignment?.assignmentId,
+    );
     return (
       <TeamSourceCollectionManualWritebackPanel
         lang={lang}
         draft={sourceCollectionOutputDraft}
-        assignmentValue={sourceCollectionOutputDraft.assignmentId || selectedSourceCollectionAssignment?.assignmentId || ""}
-        assignments={sourceCollectionAssignments.map((assignment) => ({
-          id: assignment.assignmentId,
-          label: `${sourceCollectionAgentRoleLabel(assignment.agentRole, lang)} · ${sourceCollectionStatusLabel(assignment.status, lang)}`,
-        }))}
+        assignmentValue={assignmentValue}
+        assignments={buildSourceCollectionManualWritebackAssignmentOptions(sourceCollectionAssignments, lang)}
         sourceTypes={["paper", "url", "dataset", "file", "note", "manual"]}
         canSubmit={canRecordSourceCollectionOutput}
         pending={selectedTeamRecordSourceCollectionOutputPending}
         onDraftChange={(patch) => setSourceCollectionOutputDraft((current) => ({ ...current, ...patch }))}
         onSubmit={(event) => {
           event.preventDefault();
-          const assignmentId = sourceCollectionOutputDraft.assignmentId || selectedSourceCollectionAssignment?.assignmentId || "";
-          if (!selectedTeam?.teamId || !selectedSourceCollectionRunEffectiveId || !assignmentId || !sourceCollectionOutputHasRecord) {
+          const assignmentId = resolveSourceCollectionManualWritebackAssignmentValue(
+            sourceCollectionOutputDraft.assignmentId,
+            selectedSourceCollectionAssignment?.assignmentId,
+          );
+          if (!canSubmitSourceCollectionManualWriteback({
+            teamId: selectedTeam?.teamId,
+            runId: selectedSourceCollectionRunEffectiveId,
+            assignmentId,
+            hasRecord: sourceCollectionOutputHasRecord,
+          })) {
             return;
           }
           recordSourceCollectionOutputMutation.mutate({
-            teamId: selectedTeam.teamId,
-            runId: selectedSourceCollectionRunEffectiveId,
+            teamId: selectedTeam!.teamId,
+            runId: selectedSourceCollectionRunEffectiveId!,
             draft: { ...sourceCollectionOutputDraft, assignmentId },
           });
         }}

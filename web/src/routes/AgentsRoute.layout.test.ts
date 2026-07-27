@@ -558,10 +558,14 @@ describe("AgentsRoute layout contract", () => {
   it("uses the lightweight shell language source instead of the full app dictionary", () => {
     expect(routeSource).toContain("useShellI18n");
     expect(routeSource).toContain("const { lang } = useShellI18n()");
-    expect(routeSource).not.toContain("useAppI18n");
+    // C1.2 dual-read may load the scoped agents domain only — never full-dictionary default.
+    expect(routeSource).toContain('useAppI18n({ domains: ["agents"] })');
+    expect(routeSource).toContain("mergeAgentsRouteCopyWithDictionary");
+    expect(routeSource).not.toContain("useAppI18n()");
     expect(agentManagementNavSource).toContain("useShellI18n");
     expect(agentManagementNavSource).not.toContain("useAppI18n");
   });
+
 
   it("keeps Agent management as a first-class top navigation route", () => {
     expect(routerSource).toContain('path: "agents"');

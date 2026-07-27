@@ -33,8 +33,10 @@ describe("dictionary domain boundary", () => {
     expect(agentsWorkbenchSource).toContain("title: \"Agent 中心\"");
     expect(agentsWorkbenchFacadeSource).toContain('from "../../i18n/domains/agentsWorkbenchCopy"');
     expect(loadAgentsWorkbenchSource).toContain("prefetchAgentsWorkbenchCopy");
-    // Flat dictionaryAgents remains small shared slice; workbench tables stay nested.
+    // Flat dictionaryAgents remains shared + C1.2 high-freq keys; long nested tables stay nested.
     expect(agentsSource).not.toContain("bulkPurgeConfirm:");
     expect(agentsWorkbenchSource).toContain("bulkPurgeConfirm:");
+    expect(agentsSource).toContain("agentsWorkbenchTitle:");
+    expect(agentsSource).toContain("agentsWorkbenchBulkNoSelection:");
   });
 });
