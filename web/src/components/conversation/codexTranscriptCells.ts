@@ -33,6 +33,7 @@ export type CodexTranscriptCell = {
   title?: string;
   text?: string;
   summary?: string;
+  failureCount?: number;
   operationIds?: string[];
   rolloutTraceEvents?: CodexRolloutTraceEvent[];
   toolLifecycleModel?: CodexToolLifecycleModel;
@@ -56,10 +57,10 @@ export function buildCodexTranscriptCells(
     return [];
   }
 
-  const cells = (options.timelineItems?.length
+  const cells = compactConsecutiveToolFailures((options.timelineItems?.length
     ? cellsFromTimelineItems(message.id, options.timelineItems)
     : cellsFromOperations(message.id, options.operations ?? []))
-    .filter(shouldDisplayTranscriptCell);
+    .filter(shouldDisplayTranscriptCell));
   if (!hasAssistantMarkdownCell(cells)) {
     const answerText = answerTextFromMessage(message);
     if (answerText) {
@@ -141,14 +142,19 @@ function cellsFromTimelineItems(
       if (item.kind === "command_group") {
         const status = normalizeCellStatus(item.status);
         const operationIds = item.operations.map((operation) => operation.id);
+        const failurePresentation = status === "failed"
+          ? commandGroupFailurePresentation(item.operations, item.summary)
+          : null;
         return {
           id: `${messageId}-${item.id}`,
           kind: status === "failed" ? "error_notice" : "tool_call",
           messageId,
           status,
           tone: cellTone(status),
-          title: item.title,
-          summary: item.summary,
+          title: failurePresentation?.title || item.title,
+          summary: failurePresentation?.summary || compactText(item.summary),
+          failureCount: failurePresentation?.failureCount,
+          diagnosticSummary: failurePresentation?.diagnosticSummary,
           operationIds,
           toolLifecycleModel: buildCodexToolLifecycleModel(item.operations),
           rolloutTraceEvents: buildCodexRolloutTraceEvents(item.operations),
@@ -199,6 +205,7 @@ function cellFromOperation(
     summary: failurePresentation
       ? failurePresentation.summary
       : compactText(timelineSummary || operation.summary),
+    failureCount: failurePresentation ? 1 : undefined,
     diagnosticSummary: failurePresentation?.diagnosticSummary,
     operationIds: [operation.id],
     toolLifecycleModel: operation.kind === "tool" ? buildCodexToolLifecycleModel(operation) : undefined,
@@ -210,6 +217,8 @@ function cellFromOperation(
 type ToolFailurePresentation = {
   summary: string;
   diagnosticSummary?: Record<string, unknown>;
+  identity: string;
+  title?: string;
 };
 
 function toolFailurePresentation(
@@ -222,20 +231,36 @@ function toolFailurePresentation(
     if (structured) {
       return structured;
     }
+    const known = knownToolFailurePresentation(candidate);
+    if (known) {
+      return known;
+    }
   }
-  return { summary: compactFailureText(operation.error || timelineSummary || operation.summary) };
+  const summary = compactFailureText(operation.error || timelineSummary || operation.summary) || "执行失败";
+  return {
+    summary,
+    identity: normalizeFailureIdentity(summary),
+    diagnosticSummary: {
+      reasonCode: "tool_failed",
+      reasonSummary: summary,
+    },
+  };
 }
 
 function structuredToolFailurePresentation(value: string | undefined): ToolFailurePresentation | null {
   const payload = parseJsonObject(value);
-  if (!payload || recordText(payload, "status").toLowerCase() !== "error") {
+  const status = recordText(payload ?? {}, "status").toLowerCase();
+  if (!payload || !["error", "failed", "failure"].includes(status)) {
     return null;
   }
-  const code = recordText(payload, "error");
+  const code = recordText(payload, "error")
+    || recordText(payload, "code")
+    || recordText(payload, "failureClass");
   const message = recordText(payload, "message");
-  if (!code && !message) {
-    return null;
-  }
+  const fallbackMessage = message
+    || compactDiagnosticText(recordText(payload, "formattedOutput"))
+    || compactDiagnosticText(recordText(payload, "stderr"));
+  const identity = normalizeFailureIdentity(code || fallbackMessage || "tool_failed");
   const target = recordTarget(payload);
   const recovery = structuredToolFailureRecovery(code);
   const detail = [
@@ -243,13 +268,181 @@ function structuredToolFailurePresentation(value: string | undefined): ToolFailu
     recovery ? `建议：${recovery}` : "",
   ].filter(Boolean).join("\n");
   return {
-    summary: structuredToolFailureSummary(code, message),
+    summary: structuredToolFailureSummary(code, fallbackMessage),
+    identity,
+    title: failurePresentationTitle(identity),
     diagnosticSummary: {
-      ...(code ? { reasonCode: code } : {}),
-      ...(message ? { reasonSummary: message } : {}),
+      reasonCode: code || "tool_failed",
+      ...(fallbackMessage ? { reasonSummary: fallbackMessage } : {}),
       ...(detail ? { reasonDetail: detail } : {}),
     },
   };
+}
+
+function knownToolFailurePresentation(value: string | undefined): ToolFailurePresentation | null {
+  const text = compactText(value);
+  if (!text) {
+    return null;
+  }
+  if (/工具调用额度已用尽|tool(?:\s+call)?\s+quota.+(?:exhausted|used up)/i.test(text)) {
+    return {
+      summary: "本回合工具调用额度已用尽",
+      identity: "tool_quota_exhausted",
+      title: "工具调用受限",
+      diagnosticSummary: {
+        reasonCode: "tool_quota_exhausted",
+        reasonSummary: compactDiagnosticText(text),
+      },
+    };
+  }
+  if (/terminal_stdin_unavailable|终端会话已结束|不能继续写入/i.test(text)) {
+    return {
+      summary: "终端会话已结束",
+      identity: "terminal_stdin_unavailable",
+      diagnosticSummary: {
+        reasonCode: "terminal_stdin_unavailable",
+        reasonSummary: compactDiagnosticText(text),
+      },
+    };
+  }
+  return null;
+}
+
+function commandGroupFailurePresentation(
+  operations: AgentMessageOperation[],
+  groupSummary?: string,
+): ToolFailurePresentation & { failureCount: number } {
+  const failedOperations = operations.filter(
+    (operation) => normalizeCellStatus(operation.status) === "failed",
+  );
+  const candidates = failedOperations.length > 0 ? failedOperations : operations.slice(0, 1);
+  const presentations = candidates.map((operation) => toolFailurePresentation(operation, groupSummary));
+  const first = presentations[0] ?? {
+    summary: "执行失败",
+    identity: "tool_failed",
+    diagnosticSummary: {
+      reasonCode: "tool_failed",
+      reasonSummary: "执行失败",
+    },
+  };
+  const sharedIdentity = presentations.every((presentation) => presentation.identity === first.identity);
+  if (!sharedIdentity) {
+    return {
+      summary: `${Math.max(1, candidates.length)} 项工具调用未完成`,
+      identity: "multiple_tool_failures",
+      title: "部分工具未完成",
+      failureCount: Math.max(1, candidates.length),
+      diagnosticSummary: {
+        reasonCode: "multiple_tool_failures",
+        reasonSummary: presentations.map((presentation) => presentation.summary).join("；"),
+      },
+    };
+  }
+  return {
+    ...first,
+    failureCount: Math.max(1, candidates.length),
+  };
+}
+
+function compactConsecutiveToolFailures(cells: CodexTranscriptCell[]): CodexTranscriptCell[] {
+  const compacted: CodexTranscriptCell[] = [];
+  for (const cell of cells) {
+    const previous = compacted.at(-1);
+    const identity = toolFailureIdentity(cell);
+    if (!previous || !identity || toolFailureIdentity(previous) !== identity) {
+      compacted.push(cell);
+      continue;
+    }
+    const failureCount = (previous.failureCount ?? 1) + (cell.failureCount ?? 1);
+    compacted[compacted.length - 1] = {
+      ...previous,
+      title: groupedFailureTitle(identity, previous.title, cell.title),
+      failureCount,
+      operationIds: Array.from(new Set([
+        ...(previous.operationIds ?? []),
+        ...(cell.operationIds ?? []),
+      ])),
+      rolloutTraceEvents: [
+        ...(previous.rolloutTraceEvents ?? []),
+        ...(cell.rolloutTraceEvents ?? []),
+      ],
+    };
+  }
+  return compacted;
+}
+
+export function normalizeCodexTranscriptToolFailures(
+  cells: CodexTranscriptCell[],
+): CodexTranscriptCell[] {
+  return compactConsecutiveToolFailures(cells.map((cell) => {
+    if (cell.kind !== "error_notice" || cell.status !== "failed" || !cell.operationIds?.length) {
+      return cell;
+    }
+    const sourceText = cell.text?.trim() || cell.summary?.trim() || "";
+    const presentation = toolFailurePresentation({
+      id: cell.id,
+      kind: "tool",
+      label: cell.title || "工具调用",
+      status: "failed",
+      summary: sourceText,
+      error: sourceText,
+      durationSeconds: null,
+    });
+    const existingReasonCode = String(cell.diagnosticSummary?.reasonCode ?? "").trim();
+    const identity = existingReasonCode
+      ? normalizeFailureIdentity(existingReasonCode)
+      : presentation.identity;
+    return {
+      ...cell,
+      title: failurePresentationTitle(identity) || presentation.title || cell.title,
+      text: undefined,
+      summary: presentation.summary,
+      failureCount: cell.failureCount ?? 1,
+      diagnosticSummary: {
+        ...(presentation.diagnosticSummary ?? {}),
+        ...(cell.diagnosticSummary ?? {}),
+        reasonCode: existingReasonCode
+          || String(presentation.diagnosticSummary?.reasonCode ?? "").trim()
+          || "tool_failed",
+      },
+    };
+  }));
+}
+
+function toolFailureIdentity(cell: CodexTranscriptCell) {
+  if (cell.kind !== "error_notice" || !cell.operationIds?.length) {
+    return "";
+  }
+  const reasonCode = String(cell.diagnosticSummary?.reasonCode ?? "").trim();
+  if (!reasonCode || reasonCode === "tool_failed") {
+    return "";
+  }
+  return normalizeFailureIdentity(reasonCode);
+}
+
+function groupedFailureTitle(identity: string, previousTitle?: string, nextTitle?: string) {
+  const semanticTitle = failurePresentationTitle(identity);
+  if (semanticTitle) {
+    return semanticTitle;
+  }
+  if (previousTitle?.trim() && previousTitle.trim() === nextTitle?.trim()) {
+    return previousTitle.trim();
+  }
+  return "工具调用失败";
+}
+
+function failurePresentationTitle(identity: string) {
+  if (identity === "tool_quota_exhausted") {
+    return "工具调用受限";
+  }
+  if (identity === "terminal_stdin_unavailable") {
+    return "";
+  }
+  return "";
+}
+
+function normalizeFailureIdentity(value: string) {
+  return compactText(value).toLowerCase().replace(/\s+/g, "_");
 }
 
 function parseJsonObject(value: string | undefined): Record<string, unknown> | null {
@@ -290,8 +483,10 @@ function structuredToolFailureSummary(code: string, message: string) {
     directory_not_indexed: "目录未建立索引",
     target_not_found: "目标不存在",
     target_outside_project: "目标超出项目范围",
+    terminal_stdin_unavailable: "终端会话已结束",
+    tool_quota_exhausted: "本回合工具调用额度已用尽",
   };
-  return summaries[code] || compactFailureText(message || code || "执行失败");
+  return summaries[normalizeFailureIdentity(code)] || compactFailureText(message || code || "执行失败");
 }
 
 function structuredToolFailureRecovery(code: string) {
@@ -307,6 +502,14 @@ function structuredToolFailureRecovery(code: string) {
 function compactFailureText(value: string | undefined) {
   const normalized = compactText(value);
   const maxLength = 96;
+  return normalized.length > maxLength
+    ? `${normalized.slice(0, maxLength - 1).trimEnd()}…`
+    : normalized;
+}
+
+function compactDiagnosticText(value: string | undefined) {
+  const normalized = compactText(value);
+  const maxLength = 240;
   return normalized.length > maxLength
     ? `${normalized.slice(0, maxLength - 1).trimEnd()}…`
     : normalized;

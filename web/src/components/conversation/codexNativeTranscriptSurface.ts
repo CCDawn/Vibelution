@@ -20,6 +20,7 @@ import type {
   CodexTranscriptCellStatus,
   CodexTranscriptCellTone,
 } from "./codexTranscriptCells";
+import { normalizeCodexTranscriptToolFailures } from "./codexTranscriptCells";
 import { shouldDisplayTranscriptCell } from "./conversationDisplayProtocol";
 import { isNoFinalAnswerStatusContent } from "./conversationInternalStatus";
 import { conversationToolSemanticLabel } from "./conversationToolSemanticLabel";
@@ -110,7 +111,7 @@ export function codexNativeTranscriptToCells(
 ): CodexTranscriptCell[] {
   const lifecycleModel = normalizeNativeToolLifecycleModel(transcript);
   const rolloutEvents = transcript.rolloutEvents ?? [];
-  return (transcript.cells ?? [])
+  return normalizeCodexTranscriptToolFailures((transcript.cells ?? [])
     .map((cell) => {
       const legacyMarkdown = "markdown" in cell && typeof cell.markdown === "string" ? cell.markdown : "";
       const operationIds = [...(cell.operationIds ?? [])];
@@ -139,6 +140,7 @@ export function codexNativeTranscriptToCells(
         title,
         text: cell.text || legacyMarkdown,
         summary: cell.summary,
+        failureCount: nativeCellFailureCount(cell),
         channel: cell.channel,
         phase: cell.phase,
         terminal: cell.terminal,
@@ -152,7 +154,12 @@ export function codexNativeTranscriptToCells(
         sourceItemId: cell.sourceItemId,
       };
     })
-    .filter(shouldDisplayTranscriptCell);
+    .filter(shouldDisplayTranscriptCell));
+}
+
+function nativeCellFailureCount(cell: CodexTranscriptProjection["cells"][number]) {
+  const failureCount = Number((cell as typeof cell & { failureCount?: number }).failureCount);
+  return Number.isFinite(failureCount) && failureCount > 0 ? failureCount : undefined;
 }
 
 function nativeCellHasToolCall(operationIds: string[], model: CodexToolLifecycleModel) {

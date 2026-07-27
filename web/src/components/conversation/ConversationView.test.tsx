@@ -413,9 +413,95 @@ describe("ConversationView Codex-like transcript adapter integration", () => {
     expect(styles.codexTranscriptCompactErrorSummary).toContain("whitespace-normal");
     expect(styles.codexTranscriptCompactErrorSummary).toContain("break-words");
     expect(styles.codexTranscriptCompactErrorSummary).toContain("[overflow-wrap:anywhere]");
+    expect(styles.codexTranscriptCompactErrorSummary).toContain("text-[var(--fg-tertiary)]");
+    expect(styles.codexTranscriptCompactErrorSummary).not.toContain("text-[var(--state-error)]");
+    expect(styles.codexTranscriptCell_error).not.toContain("border-l-2");
+    expect(styles.codexTranscriptCell_error).not.toContain("bg-[color-mix");
+    expect(styles.codexTranscriptCell_error).not.toContain("[&_.codexTranscriptCellTitle]:text-[var(--state-error)]");
     expect(html).toContain("技术详情");
     expect(html).toContain("查看最近改动");
     expect(html).not.toContain("get_recent_changes_tool");
+  });
+
+  it("renders a repeated compact tool failure as one neutral row with a count", () => {
+    const html = renderConversation([
+      {
+        id: "assistant-repeated-tool-failure",
+        role: "assistant",
+        content: "",
+        timestamp: "2026-07-27T09:32:00",
+        codexTranscript: {
+          version: 1,
+          source: "native",
+          messageId: "assistant-repeated-tool-failure",
+          cells: [
+            {
+              id: "tool-quota-failure-cell",
+              kind: "error_notice",
+              messageId: "assistant-repeated-tool-failure",
+              status: "failed",
+              tone: "error",
+              title: "工具调用受限",
+              summary: "本回合工具调用额度已用尽",
+              operationIds: ["op-search", "op-graph-1", "op-graph-2", "op-graph-3"],
+              failureCount: 4,
+              diagnosticSummary: {
+                reasonCode: "tool_quota_exhausted",
+                reasonSummary: "当前回合工具调用额度已用尽。",
+              },
+            },
+          ],
+        },
+      },
+    ], { processDisplayMode: "trace" });
+
+    expect(html).toContain('data-codex-tool-error-compact="true"');
+    expect(html).toContain("工具调用受限");
+    expect(html).toContain("4 次");
+    expect(html.match(/本回合工具调用额度已用尽/g)).toHaveLength(1);
+    expect(html).toContain("技术详情");
+  });
+
+  it("keeps trailing tool failures in the process area before the final answer", () => {
+    const html = renderConversation([
+      {
+        id: "assistant-answer-before-error-packet",
+        role: "assistant",
+        content: "这是最终回答。",
+        timestamp: "2026-07-27T09:32:00",
+        codexTranscript: {
+          version: 1,
+          source: "native",
+          messageId: "assistant-answer-before-error-packet",
+          cells: [
+            {
+              id: "native-final-answer",
+              kind: "assistant_markdown",
+              messageId: "assistant-answer-before-error-packet",
+              status: "completed",
+              tone: "neutral",
+              text: "这是最终回答。",
+            },
+            {
+              id: "native-trailing-tool-error",
+              kind: "error_notice",
+              messageId: "assistant-answer-before-error-packet",
+              status: "failed",
+              tone: "error",
+              title: "工具调用受限",
+              summary: "本回合工具调用额度已用尽",
+              operationIds: ["op-search"],
+              diagnosticSummary: {
+                reasonCode: "tool_quota_exhausted",
+              },
+            },
+          ],
+        },
+      },
+    ], { processDisplayMode: "trace" });
+
+    expect(html.indexOf("工具调用受限")).toBeGreaterThanOrEqual(0);
+    expect(html.indexOf("这是最终回答。")).toBeGreaterThan(html.indexOf("工具调用受限"));
   });
 });
 
