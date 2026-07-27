@@ -492,7 +492,7 @@ def test_agent_config_workspace_repairs_stale_chat_room_participant_model_snapsh
     room_path.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
 
     payload = agent_config_workspace_service.get_agent_config_workspace()
-    issues = payload["health"]["byAgent"][agent["agentId"]]
+    issues = payload["health"]["byAgent"].get(agent["agentId"], [])
 
     workspace_room = next(
         item
