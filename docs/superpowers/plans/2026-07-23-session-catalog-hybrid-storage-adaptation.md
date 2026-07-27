@@ -1,13 +1,13 @@
 # Vibelution 会话存储混合适配方案
 
-> **Status:** draft
-> **Owner:** codex-session-storage-plan-mainstream
-> **Claim:** claim-e0a745651ee6
-> **Branch:** `codex/session-storage-mainstream-plan`
-> **Worktree:** `C:\Users\Administrator\Desktop\Vibelution-worktrees\session-storage-mainstream-plan`
+> **Status:** user-approved / implementation-active
+> **Owner:** agent-codex-session-catalog-implementation
+> **Claim:** claim-fb6bcce7c6e8 (T0)
+> **Branch:** `codex/session-catalog-implementation`
+> **Worktree:** `C:\Users\Administrator\Desktop\Vibelution-worktrees\session-catalog-implementation`
 > **Scope:** 会话事实账本加固、可重建 SQLite catalog、迁移/回退、查询切流、容量与故障治理
 > **Replaces:** 本文件 2026-07-23 初稿
-> **Implementation link:** not started
+> **Implementation link:** T0 contract, runtime-data isolation guards and 100/1,000/10,000 baseline complete; T1/T2 next
 > **Validation:** 主流项目源码/官方文档复核、项目 owning surface 复核、source-of-truth/迁移/回滚/性能门自审、`git diff --check`
 > **Close condition:** shadow 零差异、故障自动回退、性能晋级门通过、`read_preferred` runtime verification 通过
 
@@ -47,8 +47,8 @@
 - **执行路由：** `TASK_GRAPH`
 - **性能分类：** `PROFILE`；本规划轮未运行产品 benchmark，因此不声称 SQLite 已经更快
 - **建议工作方式：** BDD/TDD + migration gate + profile gate
-- **当前状态：** draft，未开始实现
-- **当前规划 claim：** `claim-e0a745651ee6`；只覆盖本文档，不覆盖后续实现 hot files
+- **当前状态：** user-approved，T0 contract/guard/profile complete
+- **当前 T0 claim：** `claim-fb6bcce7c6e8`；只覆盖本文档、契约测试、fixture 和 benchmark，不覆盖后续生产 hot files
 - **规划范围：** 会话事实账本加固、SQLite 派生目录、迁移/回退、服务读路径、诊断与测试
 - **明确不在本轮直接实现：** 完整消息数据库化、向量检索、跨项目云同步、会话加密格式重写、现有 JSONL 清理
 - **协作边界：** 当前 `research-project-agent-sessions` 工作占用 `conversation_index.py`、`projection.py` 和部分 session tests；T4/T5 实施必须等待其释放、明确拆分或协调 handoff
@@ -500,7 +500,7 @@ flowchart TD
 - 为现有 `list_sessions()`、`query_sessions()`、visibility、排序、cursor 和 lifecycle 行为补契约测试。
 - 生成 100/1,000/10,000 会话的合成 profile fixture。
 - 记录当前实际数据量、legacy p50/p95、内存峰值、journal 扫描次数和 cache hit。
-- 分开记录 cold build、warm cache、filtered page、title sort、state/agent filter；每组至少 5 次 warmup + 30 次样本，并输出方差/分位数。
+- 分开记录 cold build、warm cache、filtered page、title sort、state/agent filter，并输出方差/分位数。warm/filter/sort 至少 5 次 warmup + 30 次样本；10,000 会话 cold build 因实测单进程重复重建会使 RSS 超过 1 GiB，改为每样本独立进程、1 次 warmup + 5 次样本，禁止把 allocator 累积误当成稳定生产负载。
 - benchmark 只在临时 workspace 上运行，不压测正式 operator 数据，不把脆弱时间阈值放入普通 pytest。
 
 **主要文件：**
@@ -509,8 +509,41 @@ flowchart TD
 - `tests/test_web_session_routes.py`
 - 新建 `tests/session_catalog_fixtures.py` 或等价测试 helper
 - 新建 `scripts/benchmark_session_query.py`，输出有界 JSON 结果到未跟踪的性能 evidence 目录
+- 新建 `scripts/session_benchmark_isolation.py`，独立拥有 data-root/sentinel/Launcher mount/operator fingerprint 门禁，避免性能编排脚本继续累积安全职责
 
 **退出条件：** 当前行为和性能数据可复现，所有后续 parity 有固定 oracle。
+
+#### T0 完整基线（2026-07-28）
+
+有效 manifest：`d35e3a8b0385be3b23b642fff27c18bb324618a57585eb21ae561debba2f2789`。100/1,000 使用 5 warmup + 30 samples；10,000 cold 使用每样本独立进程、1 warmup + 5 samples，其他 10,000 场景仍为 5 + 30。原始 JSON 仅保留在 sentinel 临时 evidence root，不提交包含 operator hash/本机路径的产物。
+
+| 会话数 | cold p95 | warm p95 | text p95 | agent p95 | state p95 | title sort p95 |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 100 | 1,589.35 ms | 0.09 ms | 0.31 ms | 0.15 ms | 0.14 ms | 0.23 ms |
+| 1,000 | 15,092.83 ms | 0.77 ms | 2.93 ms | 1.51 ms | 1.83 ms | 1.02 ms |
+| 10,000 | 148,632.96 ms | 144.24 ms | 226.07 ms | 256.78 ms | 305.80 ms | 345.07 ms |
+
+结论：
+
+- legacy cold projection 近似线性增长，10,000 会话约 146.8 秒均值，必须从请求热路径移到后台 reconcile；
+- 10,000 warm/filter/sort p95 已全部超过 100 ms 晋级线，SQL 下推至少需要达到既定 `p95 <= 100ms` 且相对 legacy `>= 2x`；
+- 默认 4 秒 cache TTL 小于 10,000 会话 cold build 时间，若不固定 warm profile TTL，会把持续 cold rebuild 误标为 warm query；
+- 重复 10,000 cold rebuild 的单进程 RSS 可超过 1 GiB，因此正式 backfill/reconcile 必须分批、可取消，并验证进程 RSS；普通 pytest 只保留 8-session shape 与污染门禁；
+- 最终 operator `chat_state.json`、`agents.json`、`mode_bindings.json`、tool/memory policy、Agent/session 目录 hash/count 前后完全一致，`session-NNNNN=0`、`createdBy=session_repair=0`。
+
+#### T0 运行数据隔离门（事故后强制）
+
+代码 worktree 隔离与运行数据隔离是两道独立门。所有 benchmark、repair、migration 和 backfill 工具必须复用以下 fail-closed 契约，不能因为代码位于任务分支就推断数据也是隔离的：
+
+- 强制显式 `data_root`；只允许带专用 sentinel 的 system-temp 子目录，缺参、符号链接、正式 operator data root、其父/子目录、源码 checkout 或 Launcher 当前挂载根均拒绝；
+- 只读解析 Launcher state 判断挂载根；benchmark 使用 in-process 隔离依赖或独立临时端口/进程，不连接、不重启、不复用 Launcher 管理的正式服务；
+- dry-run 先输出目标路径、对象数、ID 模式、预期 operator 状态 hash 和 manifest hash；apply 必须提交完全匹配的 manifest hash，目标文件只在临时 root 内原子替换；
+- benchmark 禁止调用 `save_chat_state()` 或任何 Agent/Policy 持久化入口；异常退出也必须在 `finally` 中复核正式状态；
+- 大规模 cold profile 每个样本使用独立子进程，进程退出即释放投影对象；10,000 会话默认跳过 `tracemalloc`，allocation probe 与 latency probe 分离，完整 profile 不进入普通 CI；
+- warm/filter/sort 场景在隔离上下文固定足够长的 cache TTL，确保 30 个样本真的是 warm query；默认 4 秒 TTL 下 10,000 会话投影会在单次重建完成前过期，不能把反复 cold rebuild 误标为 warm query；
+- 前后同时核对 `chat_state.json`、`agents.json`、`mode_bindings.json`、tool/memory policy 内容、Agent/session 目录名的 hash 与数量，并显式统计 `session-NNNNN` 和 `createdBy=session_repair` 异常；
+- repair 必须逐条证明 journal/direct-session 来源并设置新增上限；高数量 repair 默认失败，无法证明来源的对象只能进入 quarantine，不能进入正式索引；
+- repair/migration 使用 backup + quarantine + 可幂等重跑 manifest，不直接永久删除；在这些门禁测试全绿前，禁止对正式运行态执行 catalog benchmark/repair 或 Launcher 写入型验收。
 
 ### T1：加固 canonical journal
 
@@ -682,7 +715,8 @@ flowchart TD
 
 - 新增 2 个生产模块：`session_catalog.py`、`catalog_bridge.py`
 - 新增 1 个核心测试模块：`test_session_catalog.py`
-- 新增 1 个可重复 benchmark 脚本：`scripts/benchmark_session_query.py`
+- 新增 1 个可重复 benchmark CLI：`scripts/benchmark_session_query.py`
+- 新增 1 个 benchmark 隔离模块：`scripts/session_benchmark_isolation.py`；只承载 fail-closed 路径与正式状态指纹，不演化为通用数据库框架
 - 修改不超过 7 个既有生产模块，且 `session_service.py` 只允许 re-export
 - 新增 1 个 ADR，更新 2 个已有说明文档
 - 不新增第三方 Python/Node 依赖
@@ -713,6 +747,8 @@ flowchart TD
 | FTS 泄露隐藏内容 | v1 不存正文；FTS 单独安全门 |
 | 计划与现有 session hot-file 工作冲突 | 每任务重新 guard check/claim，按依赖串行合并 |
 | 过度设计成通用数据库层 | stdlib sqlite3、会话领域专用模块、文件预算和 ADR 边界 |
+| worktree 进程误用共享 operator config | 显式临时 data root + sentinel + realpath/Launcher mount 拒绝 + dry-run manifest |
+| benchmark/repair 批量制造会话与 Agent | synthetic/repair ID 数量门禁、来源证明、新增上限、正式文件/目录/policy 前后指纹 |
 
 ## 16. 完成定义
 

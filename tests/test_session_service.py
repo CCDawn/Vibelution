@@ -3,6 +3,8 @@ from types import SimpleNamespace
 import queue
 import threading
 
+import pytest
+
 from core.chat.conversation_ledger import (
     EVENT_ASSISTANT_MESSAGE,
     EVENT_TURN_COMPLETED,
@@ -17,6 +19,7 @@ from core.ui.chat_state import load_chat_state, save_chat_state
 from core.web.services import session_service
 from core.web.services import agent_directory_service
 from tests.helpers.web_chat_state import _seed_chat_state
+from tests.session_catalog_fixtures import QUERY_SEARCH_FIELDS, build_session_query_summaries
 
 
 def test_prompt_snapshot_hint_skips_chat_state_reload(monkeypatch):
@@ -1782,3 +1785,473 @@ def test_messages_with_live_output_reuses_normalized_projection(monkeypatch):
         "session-reuse",
         normalized_messages=normalized_messages,
     ) == normalized_messages
+
+
+def _stub_session_query_source(monkeypatch, summaries):
+    monkeypatch.setattr(
+        session_service,
+        "_get_cached_session_query_sessions",
+        lambda **_kwargs: [dict(item) for item in summaries],
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_record_session_list_query_event",
+        lambda **_kwargs: None,
+    )
+
+
+def test_session_catalog_fixture_is_deterministic_and_default_sorted():
+    summaries = build_session_query_summaries(12)
+
+    assert len(summaries) == 12
+    assert summaries[0]["id"] == "session-00011"
+    assert summaries[-1]["id"] == "session-00000"
+    assert set(QUERY_SEARCH_FIELDS).issubset(summaries[0])
+    assert [item["id"] for item in summaries if "needle" in item["title"]] == [
+        "session-00010",
+        "session-00000",
+    ]
+
+
+def test_session_query_contract_searches_all_declared_metadata_fields(monkeypatch):
+    base = build_session_query_summaries(1)[0]
+
+    for field in QUERY_SEARCH_FIELDS:
+        item = dict(base)
+        marker = f"unique-{field.lower()}-marker"
+        item[field] = marker
+        _stub_session_query_source(monkeypatch, [item])
+
+        payload = session_service.query_sessions(q=f"  {marker.upper()}  ")
+
+        assert payload["items"] == [item], field
+        assert payload["filters"]["q"] == marker.upper(), field
+
+
+def test_session_query_contract_normalizes_filters_sort_and_numeric_cursor(monkeypatch):
+    summaries = build_session_query_summaries(24)
+    _stub_session_query_source(monkeypatch, summaries)
+
+    page = session_service.query_sessions(limit=3, cursor="2")
+    assert [item["id"] for item in page["items"]] == [
+        item["id"] for item in summaries[2:5]
+    ]
+    assert page["nextCursor"] == "5"
+    assert page["totalEstimate"] == 24
+    assert page["filters"]["cursor"] == "2"
+
+    invalid = session_service.query_sessions(limit=0, cursor="-9", sort="unsupported")
+    assert invalid["filters"]["limit"] == session_service._SESSION_QUERY_DEFAULT_LIMIT
+    assert invalid["filters"]["cursor"] == ""
+    assert invalid["filters"]["sort"] == "updatedAt_desc"
+
+    agent_filtered = session_service.query_sessions(agent_id="agent-03")
+    assert agent_filtered["items"]
+    assert {item["agentId"] for item in agent_filtered["items"]} == {"agent-03"}
+
+    kind_filtered = session_service.query_sessions(session_kind=" CHILD ")
+    assert kind_filtered["items"]
+    assert {item["sessionKind"] for item in kind_filtered["items"]} == {"child"}
+
+    state_filtered = session_service.query_sessions(state=" MODEL_REQUEST ")
+    assert state_filtered["items"]
+    assert {item["currentPhase"] for item in state_filtered["items"]} == {
+        "model_request"
+    }
+
+    title_sorted = session_service.query_sessions(sort="title_asc")
+    assert [item["title"] for item in title_sorted["items"]] == sorted(
+        (item["title"] for item in summaries),
+        key=str.lower,
+    )
+
+
+def test_session_query_benchmark_reports_bounded_synthetic_metrics(
+    monkeypatch,
+    tmp_path,
+):
+    from scripts.benchmark_session_query import (
+        SCENARIOS,
+        initialize_benchmark_data_root,
+        run_benchmark,
+    )
+
+    data_root = tmp_path / "benchmark-data"
+    data_root.mkdir()
+    monkeypatch.setattr(
+        session_service,
+        "_SESSION_LIST_CACHE_TTL_SECONDS",
+        0.0,
+    )
+    initialize_benchmark_data_root(data_root)
+    dry_run = run_benchmark(
+        data_root=data_root,
+        sizes=[8],
+        warmups=1,
+        samples=2,
+        dry_run=True,
+    )
+    payload = run_benchmark(
+        data_root=data_root,
+        sizes=[8],
+        warmups=1,
+        samples=2,
+        approved_manifest_hash=dry_run["manifest"]["manifestHash"],
+    )
+
+    assert payload["schemaVersion"] == 1
+    assert payload["implementation"] == "legacy_python_session_query"
+    assert payload["workload"] == "temporary_chat_state_with_counted_empty_ledger_reads"
+    assert payload["dryRun"] is False
+    assert payload["isolation"]["dataRootKind"] == "explicit_system_temp_child"
+    assert payload["isolation"]["operatorStateUnchanged"] is True
+    assert payload["isolation"]["lifecycleMode"] == "offline_in_process_no_launcher"
+    assert session_service._SESSION_LIST_CACHE_TTL_SECONDS == 0.0
+    assert len(payload["results"]) == len(SCENARIOS)
+    for result in payload["results"]:
+        assert result["sessionCount"] == 8
+        assert result["p50Ms"] >= 0
+        assert result["p95Ms"] >= result["p50Ms"]
+        assert result["peakAllocatedBytes"] >= 0
+        assert result["allocationProbe"] == "measured"
+        assert result["ledgerPreviewCallsPerSample"] >= 0
+    warm_default = next(
+        item for item in payload["results"] if item["scenario"] == "warm_default_page"
+    )
+    assert warm_default["ledgerPreviewCallsPerSample"] == 0
+
+
+def test_session_query_benchmark_rejects_operator_workspace_as_data_root(
+    monkeypatch,
+    tmp_path,
+):
+    from scripts import benchmark_session_query
+
+    operator_workspace = tmp_path / "operator" / "data" / "workspace"
+    (operator_workspace / "chat").mkdir(parents=True)
+    (operator_workspace / "chat" / "chat_state.json").write_text(
+        '{"version": 1, "conversations": []}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        benchmark_session_query.isolation,
+        "formal_operator_workspace",
+        lambda: operator_workspace,
+        raising=False,
+    )
+
+    with pytest.raises(
+        benchmark_session_query.BenchmarkIsolationError,
+        match="operator",
+    ):
+        benchmark_session_query.run_benchmark(
+            data_root=operator_workspace,
+            sizes=[8],
+            warmups=1,
+            samples=1,
+        )
+
+    assert not (operator_workspace / "sessions").exists()
+
+
+def test_session_query_benchmark_dry_run_preserves_operator_hashes(
+    monkeypatch,
+    tmp_path,
+):
+    from scripts import benchmark_session_query
+
+    operator_workspace = tmp_path / "operator" / "data" / "workspace"
+    data_root = tmp_path / "benchmark-data"
+    (operator_workspace / "chat").mkdir(parents=True)
+    (operator_workspace / "agents").mkdir()
+    (operator_workspace / "agent_config").mkdir()
+    data_root.mkdir()
+    protected_payloads = {
+        operator_workspace / "chat" / "chat_state.json": '{"chat": true}',
+        operator_workspace / "agents" / "agents.json": '{"agents": []}',
+        operator_workspace
+        / "agent_config"
+        / "mode_bindings.json": '{"bindings": []}',
+    }
+    for path, content in protected_payloads.items():
+        path.write_text(content, encoding="utf-8")
+    benchmark_session_query.initialize_benchmark_data_root(data_root)
+    monkeypatch.setattr(
+        benchmark_session_query.isolation,
+        "formal_operator_workspace",
+        lambda: operator_workspace,
+        raising=False,
+    )
+
+    payload = benchmark_session_query.run_benchmark(
+        data_root=data_root,
+        sizes=[8],
+        warmups=1,
+        samples=1,
+        dry_run=True,
+    )
+
+    assert payload["dryRun"] is True
+    assert payload["results"] == []
+    assert payload["isolation"]["operatorStateUnchanged"] is True
+    assert payload["isolation"]["protectedBefore"] == payload["isolation"][
+        "protectedAfter"
+    ]
+    assert {item.name for item in data_root.iterdir()} == {
+        benchmark_session_query.DATA_ROOT_SENTINEL
+    }
+    for path, content in protected_payloads.items():
+        assert path.read_text(encoding="utf-8") == content
+
+
+def test_session_query_benchmark_normal_run_cannot_pollute_operator_state(
+    monkeypatch,
+    tmp_path,
+):
+    from scripts import benchmark_session_query
+
+    operator_workspace = tmp_path / "operator" / "data" / "workspace"
+    data_root = tmp_path / "benchmark-data"
+    (operator_workspace / "chat").mkdir(parents=True)
+    (operator_workspace / "agents" / "agent-real").mkdir(parents=True)
+    (operator_workspace / "sessions" / "session-real").mkdir(parents=True)
+    (operator_workspace / "agent_config").mkdir()
+    data_root.mkdir()
+    protected_payloads = {
+        operator_workspace / "chat" / "chat_state.json": '{"chat": "sentinel"}',
+        operator_workspace / "agents" / "agents.json": '{"agents": ["real"]}',
+        operator_workspace
+        / "agent_config"
+        / "mode_bindings.json": '{"bindings": ["real"]}',
+    }
+    for path, content in protected_payloads.items():
+        path.write_text(content, encoding="utf-8")
+    benchmark_session_query.initialize_benchmark_data_root(data_root)
+    monkeypatch.setattr(
+        benchmark_session_query.isolation,
+        "formal_operator_workspace",
+        lambda: operator_workspace,
+        raising=False,
+    )
+
+    dry_run = benchmark_session_query.run_benchmark(
+        data_root=data_root,
+        sizes=[8],
+        warmups=1,
+        samples=1,
+        dry_run=True,
+    )
+    payload = benchmark_session_query.run_benchmark(
+        data_root=data_root,
+        sizes=[8],
+        warmups=1,
+        samples=1,
+        approved_manifest_hash=dry_run["manifest"]["manifestHash"],
+    )
+
+    assert payload["results"]
+    assert payload["isolation"]["operatorStateUnchanged"] is True
+    assert {item.name for item in data_root.iterdir()} == {
+        benchmark_session_query.DATA_ROOT_SENTINEL
+    }
+    assert {item.name for item in (operator_workspace / "sessions").iterdir()} == {
+        "session-real"
+    }
+    assert {item.name for item in (operator_workspace / "agents").iterdir()} == {
+        "agent-real",
+        "agents.json",
+    }
+    for path, content in protected_payloads.items():
+        assert path.read_text(encoding="utf-8") == content
+
+
+def test_session_query_benchmark_output_must_stay_under_data_root(
+    monkeypatch,
+    tmp_path,
+):
+    from scripts import benchmark_session_query
+
+    operator_workspace = tmp_path / "operator" / "data" / "workspace"
+    data_root = tmp_path / "benchmark-data"
+    operator_workspace.mkdir(parents=True)
+    data_root.mkdir()
+    benchmark_session_query.initialize_benchmark_data_root(data_root)
+    monkeypatch.setattr(
+        benchmark_session_query.isolation,
+        "formal_operator_workspace",
+        lambda: operator_workspace,
+        raising=False,
+    )
+
+    with pytest.raises(
+        benchmark_session_query.BenchmarkIsolationError,
+        match="output path",
+    ):
+        benchmark_session_query.isolation.validate_output_path(
+            tmp_path / "outside.json",
+            data_root=data_root,
+        )
+
+    assert (
+        benchmark_session_query.isolation.validate_output_path(
+            data_root / "result.json",
+            data_root=data_root,
+        )
+        == data_root / "result.json"
+    )
+
+
+def test_session_query_benchmark_requires_sentinel_and_matching_manifest(
+    monkeypatch,
+    tmp_path,
+):
+    from scripts import benchmark_session_query
+
+    operator_workspace = tmp_path / "operator" / "data" / "workspace"
+    data_root = tmp_path / "benchmark-data"
+    operator_workspace.mkdir(parents=True)
+    data_root.mkdir()
+    monkeypatch.setattr(
+        benchmark_session_query.isolation,
+        "formal_operator_workspace",
+        lambda: operator_workspace,
+        raising=False,
+    )
+
+    with pytest.raises(
+        benchmark_session_query.BenchmarkIsolationError,
+        match="sentinel",
+    ):
+        benchmark_session_query.run_benchmark(
+            data_root=data_root,
+            sizes=[8],
+            warmups=1,
+            samples=1,
+            dry_run=True,
+        )
+
+    benchmark_session_query.initialize_benchmark_data_root(data_root)
+    with pytest.raises(
+        benchmark_session_query.BenchmarkIsolationError,
+        match="manifest hash",
+    ):
+        benchmark_session_query.run_benchmark(
+            data_root=data_root,
+            sizes=[8],
+            warmups=1,
+            samples=1,
+        )
+
+
+def test_session_query_benchmark_rejects_launcher_mounted_root(
+    monkeypatch,
+    tmp_path,
+):
+    from scripts import benchmark_session_query
+
+    operator_workspace = tmp_path / "operator" / "data" / "workspace"
+    mounted_root = tmp_path / "launcher-mounted"
+    data_root = mounted_root / "benchmark-data"
+    operator_workspace.mkdir(parents=True)
+    data_root.mkdir(parents=True)
+    monkeypatch.setattr(
+        benchmark_session_query.isolation,
+        "formal_operator_workspace",
+        lambda: operator_workspace,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        benchmark_session_query.isolation,
+        "launcher_mount_roots",
+        lambda: {mounted_root},
+        raising=False,
+    )
+
+    with pytest.raises(
+        benchmark_session_query.BenchmarkIsolationError,
+        match="Launcher",
+    ):
+        benchmark_session_query.initialize_benchmark_data_root(data_root)
+
+
+def test_session_query_benchmark_skips_allocation_probe_above_limit(
+    monkeypatch,
+    tmp_path,
+):
+    from scripts import benchmark_session_query
+
+    operator_workspace = tmp_path / "operator" / "data" / "workspace"
+    data_root = tmp_path / "benchmark-data"
+    operator_workspace.mkdir(parents=True)
+    data_root.mkdir()
+    monkeypatch.setattr(
+        benchmark_session_query.isolation,
+        "formal_operator_workspace",
+        lambda: operator_workspace,
+        raising=False,
+    )
+    benchmark_session_query.initialize_benchmark_data_root(data_root)
+    dry_run = benchmark_session_query.run_benchmark(
+        data_root=data_root,
+        sizes=[8],
+        warmups=1,
+        samples=1,
+        dry_run=True,
+        allocation_max_sessions=4,
+    )
+
+    payload = benchmark_session_query.run_benchmark(
+        data_root=data_root,
+        sizes=[8],
+        warmups=1,
+        samples=1,
+        allocation_max_sessions=4,
+        approved_manifest_hash=dry_run["manifest"]["manifestHash"],
+    )
+
+    assert payload["results"]
+    assert {
+        (item["allocationProbe"], item["peakAllocatedBytes"])
+        for item in payload["results"]
+    } == {("skipped_above_limit", None)}
+
+
+def test_session_query_benchmark_isolates_large_cold_samples_by_process(
+    monkeypatch,
+    tmp_path,
+):
+    from scripts import benchmark_session_query
+
+    invocations: list[list[str]] = []
+    payloads = iter(
+        (
+            '{"durationMs": 10, "ledgerPreviewCalls": 8, '
+            '"resultCount": 6, "matchedCount": 6}',
+            '{"durationMs": 20, "ledgerPreviewCalls": 8, '
+            '"resultCount": 6, "matchedCount": 6}',
+            '{"durationMs": 40, "ledgerPreviewCalls": 8, '
+            '"resultCount": 6, "matchedCount": 6}',
+        )
+    )
+
+    def fake_run(command, **kwargs):
+        invocations.append(command)
+        assert kwargs["check"] is True
+        assert kwargs["capture_output"] is True
+        return SimpleNamespace(stdout=next(payloads))
+
+    monkeypatch.setattr(benchmark_session_query.subprocess, "run", fake_run)
+
+    result = benchmark_session_query._measure_cold_in_subprocesses(
+        data_root=tmp_path,
+        session_count=10_000,
+        warmups=1,
+        samples=2,
+    )
+
+    assert len(invocations) == 3
+    assert all("--worker-single-cold" in command for command in invocations)
+    assert result["p50Ms"] == 30.0
+    assert result["p95Ms"] == 40.0
+    assert result["processIsolation"] == "one_process_per_cold_sample"
+    assert result["allocationProbe"] == "skipped_process_isolated_cold"
