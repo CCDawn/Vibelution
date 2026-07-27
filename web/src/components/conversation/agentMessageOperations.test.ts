@@ -232,7 +232,7 @@ describe("agentMessageOperations", () => {
           }),
           resultPreview: JSON.stringify({
             dirty_summary: "有 unstaged 改动，有 untracked 文件，共 17 个变化文件",
-            files: ["DEVELOPMENT_STANDARD.md", "README.md"],
+            files: ["docs/standards/development-standard.md", "README.md"],
           }),
         },
         {

@@ -1,6 +1,6 @@
 # 2026-05-19 Runtime Output Policy
 
-> Status: Historical governance snapshot from 2026-05-19. Use `DEVELOPMENT_STANDARD.md`, `AGENTS.md`, and current `.docs/project-memory/` files for active rules.
+> Status: Historical governance snapshot from 2026-05-19. Use `AGENTS.md`, `docs/standards/README.md`, and current `.docs/project-memory/` files for active rules and state.
 
 ## Purpose
 

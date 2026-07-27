@@ -158,8 +158,9 @@ def test_4_workspace_structure():
 
     # 检查核心提示词控制面（当前项目真实布局）
     prompt_checks = [
+        ("core/core_prompt/COMMON.md", PROJECT_ROOT / "core" / "core_prompt" / "COMMON.md"),
         ("core/core_prompt/SOUL.md", PROJECT_ROOT / "core" / "core_prompt" / "SOUL.md"),
-        ("core/core_prompt/SPEC.md", PROJECT_ROOT / "core" / "core_prompt" / "SPEC.md"),
+        ("AGENTS.md", PROJECT_ROOT / "AGENTS.md"),
         ("workspace/prompts", ws.root / "prompts"),
     ]
     for label, path in prompt_checks:

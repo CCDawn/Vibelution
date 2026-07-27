@@ -405,7 +405,7 @@ def test_build_stash_report_marks_hot_and_broad_snapshots(tmp_path: Path) -> Non
     commit_files(
         root,
         {
-            "DEVELOPMENT_STANDARD.md": "base\n",
+            "docs/standards/development-standard.md": "base\n",
             "core/a.py": "A = 1\n",
             "core/b.py": "B = 1\n",
             "core/c.py": "C = 1\n",
@@ -418,7 +418,7 @@ def test_build_stash_report_marks_hot_and_broad_snapshots(tmp_path: Path) -> Non
     create_stash(
         root,
         message="hot stash",
-        tracked_changes={"DEVELOPMENT_STANDARD.md": "changed\n"},
+        tracked_changes={"docs/standards/development-standard.md": "changed\n"},
     )
     create_stash(
         root,

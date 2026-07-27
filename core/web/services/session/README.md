@@ -41,7 +41,7 @@ this package and be re-exported from the facade when it is part of the public AP
 | Running state / workspace / codex / SC bridge glue | `runtime_glue.py` |
 | Public import surface only | `../session_service.py` (prefer re-export, not new business bodies) |
 
-Product flow map: `docs/agents/conversation-flow-map.md`. Structure awareness (soft): `DEVELOPMENT_STANDARD.md` §8.3.
+Product flow map: `docs/agents/conversation-flow-map.md`. Structure awareness (soft): `docs/standards/development-standard.md` §8.3.
 
 ## Ownership map (claim scopes)
 

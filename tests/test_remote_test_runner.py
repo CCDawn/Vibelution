@@ -186,10 +186,9 @@ def test_remote_script_prepares_venv_and_captures_log():
     assert 'model = "gpt-5.6-luna"' in script
     assert "[llm.model_library.relay_gpt_5_6_luna.prompt_cache]" in script
     assert 'mode = "automatic"' in script
-    assert 'name = "SOUL"' in script
-    assert 'path = "core/core_prompt/SOUL.md"' in script
-    assert 'name = "SPEC"' in script
-    assert 'path = "core/core_prompt/SPEC.md"' in script
+    assert 'name = "SOUL"' not in script
+    assert 'name = "SPEC"' not in script
+    assert 'path = "core/core_prompt/SPEC.md"' not in script
     assert 'export VIBELUTION_CONFIG_PATH="$REMOTE_SOURCE/.remote-test/config.toml"' in script
     assert f"PIP_INDEX_URL={remote_test_runner.DEFAULT_PIP_INDEX_URL}" in script
     assert 'echo pip_index_url="${PIP_INDEX_URL:-default}"' in script

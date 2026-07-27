@@ -2,7 +2,7 @@
 
 The budgets preserve current behavior while preventing new structural debt.
 They may stay equal or decrease; increases require an explicit migration
-exception in DEVELOPMENT_STANDARD.md section 24.4.
+exception in docs/standards/development-standard.md section 24.4.
 """
 
 from __future__ import annotations

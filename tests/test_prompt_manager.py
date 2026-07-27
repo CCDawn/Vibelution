@@ -338,7 +338,7 @@ class TestPromptManager:
         result = to_string(sp)
         assert "# Vibelution 通用 Agent 基座" in result
         assert "# Vibelution Agent 灵魂" in result
-        assert "# Vibelution Project Rules" in result
+        assert "# Vibelution Agent Rules" in result
 
     def test_frozen_session_snapshot_can_replace_only_three_core_sections(self):
         pm = PromptManager()
@@ -354,7 +354,7 @@ class TestPromptManager:
         assert "SOUL" not in names
         assert "AGENTS" not in names
         assert "RUNTIME_GOAL" in names
-        assert "# Vibelution Project Rules" not in result
+        assert "# Vibelution Agent Rules" not in result
 
 
 class TestBuildAPI:
@@ -371,7 +371,7 @@ class TestBuildAPI:
         assert "## 当前运行目标包" not in result
         assert "# Vibelution 通用 Agent 基座" in result
         assert "# Vibelution Agent 灵魂" in result
-        assert "# Vibelution Project Rules" in result
+        assert "# Vibelution Agent Rules" in result
         assert "## SPEC 运行时摘要" in result
         assert "# SPEC 开发流程规范" not in result
         assert "## 语言状态" in result
@@ -484,7 +484,7 @@ class TestBuildAPI:
         pm = PromptManager()
         sp = pm.build()
         result = to_string(sp)
-        assert "# Vibelution Project Rules" in result
+        assert "# Vibelution Agent Rules" in result
         assert "## SPEC 运行时摘要" in result
         selected_names = [s.name for s in pm._select_sections(include=None, exclude=None)]
         assert "CODEBASE_MAP" not in selected_names
@@ -507,7 +507,7 @@ class TestBuildAPI:
         result = to_string(sp)
         assert "# Vibelution 通用 Agent 基座" in result
         assert "# Vibelution Agent 灵魂" in result
-        assert "# Vibelution Project Rules" in result
+        assert "# Vibelution Agent Rules" in result
 
     def test_absolute_probe_path_does_not_reenable_env_info_by_itself(self):
         pm = PromptManager()
@@ -552,7 +552,7 @@ class TestBuildAPI:
             current_goal="继续优化 prompt 拼接规则，并审查 SPEC 规范是否需要拆分",
         )
         result = to_string(sp)
-        assert "# Vibelution Project Rules" in result
+        assert "# Vibelution Agent Rules" in result
         assert "# SPEC 开发流程规范" not in result
 
     def test_readonly_log_diagnosis_prunes_code_map(self):
@@ -902,7 +902,7 @@ class TestCompatibilityFunctions:
         assert isinstance(result, str)
         assert len(result) > 0
         assert "# Vibelution Agent 灵魂" in result
-        assert "# Vibelution Project Rules" in result
+        assert "# Vibelution Agent Rules" in result
 
 
 class TestCache:
@@ -1317,8 +1317,9 @@ class TestConfigDrivenSections:
         dynamic_root = project_root / "workspace" / "prompts"
 
         configs = [
-            self._make_config("SOUL", "core/core_prompt/SOUL.md", priority=10, required=True, description="铁律"),
-            self._make_config("SPEC", "core/core_prompt/SPEC.md", priority=65, description="规范"),
+            self._make_config("COMMON", "core/core_prompt/COMMON.md", priority=8, required=True, description="通用纪律"),
+            self._make_config("SOUL", "core/core_prompt/SOUL.md", priority=10, required=True, description="稳定身份"),
+            self._make_config("AGENTS", "AGENTS.md", priority=12, required=True, description="项目规则"),
         ]
 
         sections = create_default_sections(
@@ -1326,8 +1327,9 @@ class TestConfigDrivenSections:
             section_configs=configs,
         )
         names = {s.name for s in sections}
+        assert "COMMON" in names
         assert "SOUL" in names
-        assert "SPEC" in names
+        assert "AGENTS" in names
         # 动态章节仍应存在
         assert "TASK_CHECKLIST" in names
         assert "CODEBASE_MAP" in names

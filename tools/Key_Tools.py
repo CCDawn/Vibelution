@@ -3,7 +3,7 @@
 LangChain 工具包装模块
 
 所有在此注册的 Tool 都会通过 agent._tools 传递给 LLM。
-文档（SOUL.md / SPEC.md）中提到的工具必须在此注册，否则 Agent 无法调用。
+核心提示词与规范中提到的工具必须在此注册，否则 Agent 无法调用。
 """
 from copy import copy
 from functools import lru_cache

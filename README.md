@@ -315,14 +315,14 @@ CI 通常覆盖：
 
 | 文档 | 作用 |
 | --- | --- |
-| [DEVELOPMENT_STANDARD.md](DEVELOPMENT_STANDARD.md) | 仓库协作约束与工程规范 |
+| [docs/standards/README.md](docs/standards/README.md) | Agent 开发规范权威入口 |
 | [INDEX.md](INDEX.md) | 项目索引 |
 | [docs/README.md](docs/README.md) | 文档索引与归档边界 |
 | [.docs/project-memory/INDEX.md](.docs/project-memory/INDEX.md) | 当前项目记忆、lane 状态与 claim 入口 |
 | [PROJECT_MEMORY.html](PROJECT_MEMORY.html) | 人类可读项目记忆看板 |
-| [CONTEXT.md](CONTEXT.md) | 运行上下文说明 |
+| [docs/agents/domain.md](docs/agents/domain.md) | 领域词汇与运行上下文说明 |
 | [core/core_prompt/SOUL.md](core/core_prompt/SOUL.md) | 核心使命与行为边界 |
-| [core/core_prompt/SPEC.md](core/core_prompt/SPEC.md) | 核心开发规范 |
+| [docs/standards/development-standard.md](docs/standards/development-standard.md) | 详细开发与交付标准 |
 
 本地协作入口 `AGENTS.md` 由当前工作区维护；它可能不会出现在干净 clone 或独立 worktree 中。项目记忆入口 `.docs/project-memory/INDEX.md` 和 `PROJECT_MEMORY.html` 是当前工作状态的权威读物。
 

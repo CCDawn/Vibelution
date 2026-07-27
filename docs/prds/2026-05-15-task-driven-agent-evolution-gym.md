@@ -128,7 +128,7 @@ Promotion must be tier-aware. A Candidate Improvement that improves coordination
 
 - Build the feature around a task-driven evolution loop rather than a tool-generation loop. Tool creation is a supported improvement type, not the main abstraction.
 - Treat the primary data unit as an **Improvement Episode**: Exercise, baseline Attempts, diagnosis, Candidate Improvement, Harness Variant, candidate Attempts, Evaluation Runs, and Selection Policy decision.
-- Preserve and use the vocabulary in `CONTEXT.md`, especially Gym, Exercise, Dataset, Dataset Adapter, Dataset Split, Bundle, Case, Generated Case, Attempt, Evaluation Run, Trace, Score, Harness Gap, Critic, Evolver, Candidate Improvement, Harness Variant, Decision Record, Lineage, Selection Policy, Workbench, State Memory, and Workspace.
+- Preserve and use the vocabulary in `docs/agents/domain.md`, especially Gym, Exercise, Dataset, Dataset Adapter, Dataset Split, Bundle, Case, Generated Case, Attempt, Evaluation Run, Trace, Score, Harness Gap, Critic, Evolver, Candidate Improvement, Harness Variant, Decision Record, Lineage, Selection Policy, Workbench, State Memory, and Workspace.
 - Add a Gym module that owns Case selection, generated Case registration, Case tags, and Bundle creation for evolution exercises.
 - Add an Evolution Engine module that owns host-agnostic Improvement Episode orchestration.
 - Add an Agent Harness Adapter protocol that hosts implement to run Attempts, apply Harness Variants, expose agent version, and return Trace/Score evidence.

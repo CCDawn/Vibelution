@@ -77,8 +77,8 @@ python tests/select_tests.py --from-git main --commands-only
 配置 schema v2、Provider catalog/discovery、protocol、migration 与 Provider-first 前端变更使用以下聚焦命令：
 
 ```powershell
-& 'C:\Users\17533\Desktop\Vibelution\.venv\Scripts\python.exe' -m pytest tests\test_llm_config_v2_integration.py tests\test_llm_config_schema_v2.py tests\test_model_config_migration.py -q
-& 'C:\Users\17533\Desktop\Vibelution\.venv\Scripts\python.exe' -m pytest tests\test_provider_config_service.py tests\test_provider_discovery_adapters.py tests\test_model_config_migration.py tests\test_config_redaction.py -q
+& '<project-root>\.venv\Scripts\python.exe' -m pytest tests\test_llm_config_v2_integration.py tests\test_llm_config_schema_v2.py tests\test_model_config_migration.py -q
+& '<project-root>\.venv\Scripts\python.exe' -m pytest tests\test_provider_config_service.py tests\test_provider_discovery_adapters.py tests\test_model_config_migration.py tests\test_config_redaction.py -q
 npm --prefix web run test -- src/routes/configProviderLogic.test.ts src/routes/configRouteLogic.test.ts src/routes/ConfigRoute.layout.test.ts
 npm --prefix web run build
 ```

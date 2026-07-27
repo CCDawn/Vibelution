@@ -717,32 +717,6 @@ class PromptManager:
                 return False
             return False
 
-        if section_name == "SPEC":
-            if self._is_readonly_log_diagnosis(prompt_mode, goal, core_context):
-                return False
-            if prompt_mode == "orient":
-                return True
-            spec_keywords = (
-                "spec", "规范", "规则", "提示词", "prompt", "section", "拼接",
-                "core first", "提交规范", "git 提交规范", "运行时摘要",
-            )
-            if self._context_has_keywords(focused_context, spec_keywords):
-                return True
-            try:
-                from core.infrastructure.agent_session import get_session_state
-                snapshot = get_session_state().get_attention_snapshot()
-                modified_paths = [str(path) for path in (snapshot.get("modified_paths") or [])]
-                if any(
-                    path.endswith("agent.py")
-                    or "core/prompt_manager" in path.replace("\\", "/")
-                    or path.replace("\\", "/").endswith("core/core_prompt/SPEC.md")
-                    for path in modified_paths
-                ):
-                    return True
-            except Exception:
-                return False
-            return False
-
         if section_name == "ENV_INFO":
             env_keywords = (
                 "环境", "os", "系统", "python 版本", "解释器", "venv",

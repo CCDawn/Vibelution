@@ -7,7 +7,7 @@ core - 核心模块包
 - logging/          : 日志系统 (调试日志、统一日志、转录日志、工具追踪)
 - ui/               : 交互界面 (ASCII 艺术、CLI UI、交互式 CLI、主题)
 - pet_system/       : 宠物系统 (心情、饥饿、心跳、梦境等子系统)
-- core_prompt/      : 核心提示词 (双轨加载: 静态 SOUL/SPEC + 动态 workspace 覆盖)
+- core_prompt/      : 核心提示词资产（COMMON / SOUL；项目规则来自根 AGENTS.md）
 - prompt_manager/   : 提示词管理器 (动态拼装、任务分析、代码库地图)
 - restarter_manager/: 重启守护进程
 

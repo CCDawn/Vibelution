@@ -1,7 +1,7 @@
 # Vibelution Development Standard
 
 > Canonical project development standard for Vibelution.
-> Keep this file at the repository root. Do not move, rename, or generate it from another source unless `AGENTS.md` and project memory are updated in the same round.
+> This document is the canonical detailed operating standard routed by root `AGENTS.md`.
 
 This standard is written for every in-project Agent working on Vibelution. It defines how development work is scoped, diagnosed, implemented, validated, refreshed, committed, merged, remembered, and reported.
 
@@ -9,10 +9,10 @@ This standard is written for every in-project Agent working on Vibelution. It de
 
 ## 0. Source Hierarchy
 
-- This file, `DEVELOPMENT_STANDARD.md`, is the canonical tracked development standard.
-- Root `AGENTS.md` is the local Agent entrypoint and red-line index when present. It is intentionally local in this workspace and may be ignored by Git.
+- This file, `docs/standards/development-standard.md`, is the canonical tracked detailed development standard.
+- Root `AGENTS.md` is the required project Agent entrypoint, global red-line index, and standards router.
 - `docs/agents/worktree-collaboration.md` is the detailed multi-Agent worktree protocol.
-- `CONTEXT.md` defines domain vocabulary. Use it for product and architecture language.
+- `docs/agents/domain.md` defines domain vocabulary. Use it for product and architecture language.
 - `docs/adr/` records major design decisions and why they exist.
 - `.docs/project-memory/` is the structured current-state memory and Agent territory registry.
 
@@ -33,7 +33,7 @@ Before choosing tools, worktree shape, validation, or reporting depth, classify 
 
 For non-trivial code or behavior changes, use the local BRT skill:
 
-`C:\Users\17533\.codex\skills\ccdawn-brt\SKILL.md`
+`<codex-skill-root>\ccdawn-brt\SKILL.md`
 
 Use BRT when a request involves expected behavior, defaults, restore/memory behavior, permissions, state transitions, edge cases, completion criteria, safety gates, promotion/apply/rollback workflows, persistence, public API behavior, agent workflow, or runtime lifecycle. For `FAST_PATCH`, BRT may stay internal and use a silent or micro intent lock.
 
@@ -186,13 +186,13 @@ Vibelution development should learn from the local Agent research corpus before 
 
 Local reference roots:
 
-- `C:\Users\17533\Desktop\Agent论文\docs`
-- `C:\Users\17533\Desktop\Agent论文\projects`
-- `C:\Users\17533\Desktop\Agent论文\search-results`
+- `<agent-research-root>\docs`
+- `<agent-research-root>\projects`
+- `<agent-research-root>\search-results`
 
 For `STANDARD_TASK` and `HIGH_RISK` work that changes Agent behavior, LLM calls, tool routing, context/memory, runtime orchestration, planning/review loops, supervision, self-evolution, or durable workflow design, inspect the relevant local papers or projects first. At minimum, search filenames and nearby READMEs/docs under `Agent论文\docs` and `Agent论文\projects`; when a known local project is relevant, prefer adapting its proven pattern over creating a parallel mechanism.
 
-When web search or external repository research is used for project development, persist a compact local research note under `C:\Users\17533\Desktop\Agent论文\search-results`. The note should include date, task, query/source URLs or repository names, what was learned, reuse decision, and any license/security caveat. Do not paste full copyrighted papers, full articles, credentials, full prompts, or large external code into the note. External code remains reference material unless explicitly reviewed for license and maintenance fit.
+When web search or external repository research is used for project development, persist a compact local research note under `<agent-research-root>\search-results`. The note should include date, task, query/source URLs or repository names, what was learned, reuse decision, and any license/security caveat. Do not paste full copyrighted papers, full articles, credentials, full prompts, or large external code into the note. External code remains reference material unless explicitly reviewed for license and maintenance fit.
 
 `FAST_PATCH` work may skip local paper/project review and search capture when the change is clearly cosmetic, docs-only, tests-only, or mechanically scoped; state "local Agent corpus not affected" in the final report if that decision matters.
 
@@ -200,15 +200,15 @@ When web search or external repository research is used for project development,
 
 The root workspace:
 
-`C:\Users\17533\Desktop\Vibelution`
+`<project-root>`
 
 is the local `main` integration workspace. It is for syncing, merging, final validation, project-memory serialization, reviewed publication, and remote sync. `STANDARD_TASK` and `HIGH_RISK` ordinary development belongs in task worktrees. `FAST_PATCH` may stay in the current workspace when it is narrow, reversible, and does not collide with active claims or branch state.
 
-This root path is the durable local development-main checkout and must stay checked out on branch `main`. Do not leave `C:\Users\17533\Desktop\Vibelution` on a task branch, unresolved merge, or long-lived dirty experiment. If root is found on a non-main branch, first preserve or migrate that branch's dirty work into `C:\Users\17533\Desktop\Vibelution-worktrees\<task-slug>` or a named stash, then restore root to `main` before continuing normal development or integration. A separate `main` worktree may be used only as a short-lived recovery exception while root is blocked, and it should be retired once root has been restored.
+This root path is the durable local development-main checkout and must stay checked out on branch `main`. Do not leave `<project-root>` on a task branch, unresolved merge, or long-lived dirty experiment. If root is found on a non-main branch, first preserve or migrate that branch's dirty work into `<project-root-parent>\Vibelution-worktrees\<task-slug>` or a named stash, then restore root to `main` before continuing normal development or integration. A separate `main` worktree may be used only as a short-lived recovery exception while root is blocked, and it should be retired once root has been restored.
 
 Default task worktree path:
 
-`C:\Users\17533\Desktop\Vibelution-worktrees\<task-slug>`
+`<project-root-parent>\Vibelution-worktrees\<task-slug>`
 
 Default task branch:
 
@@ -221,17 +221,17 @@ Local task independence is deliberate: create each `codex/<task-slug>` branch fr
 Typical start:
 
 ```powershell
-cd C:\Users\17533\Desktop\Vibelution
-git worktree add C:\Users\17533\Desktop\Vibelution-worktrees\<task-slug> -b codex/<task-slug> main
+cd <project-root>
+git worktree add <project-root-parent>\Vibelution-worktrees\<task-slug> -b codex/<task-slug> main
 ```
 
 Before editing hot files, shared scopes, or any `STANDARD_TASK` / `HIGH_RISK` work in a multi-session project, use the project memory guard to inspect active work and, when needed, reserve a narrow write scope:
 
 ```powershell
-python "C:\Users\17533\.codex\skills\ccdawn-dawn-agent-html-memory\scripts\agent_work_guard.py" "C:\Users\17533\Desktop\Vibelution" status
-python "C:\Users\17533\.codex\skills\ccdawn-dawn-agent-html-memory\scripts\agent_work_guard.py" "C:\Users\17533\Desktop\Vibelution" check --lane "<lane-id>" --scope "<write-scope>" --scope "<second-write-scope>"
-python "C:\Users\17533\.codex\skills\ccdawn-dawn-agent-html-memory\scripts\agent_work_guard.py" "C:\Users\17533\Desktop\Vibelution" claim --lane "<lane-id>" --scope "<write-scope>" --agent "<agent-id>" --task "<task title>" --ttl-minutes 120 --note "<scope and validation note>"
-python "C:\Users\17533\.codex\skills\ccdawn-dawn-agent-html-memory\scripts\agent_work_guard.py" "C:\Users\17533\Desktop\Vibelution" release --claim-id "<claim-id>" --status completed --reason "<validation or blocker summary>"
+python "<codex-skill-root>\ccdawn-dawn-agent-html-memory\scripts\agent_work_guard.py" "<project-root>" status
+python "<codex-skill-root>\ccdawn-dawn-agent-html-memory\scripts\agent_work_guard.py" "<project-root>" check --lane "<lane-id>" --scope "<write-scope>" --scope "<second-write-scope>"
+python "<codex-skill-root>\ccdawn-dawn-agent-html-memory\scripts\agent_work_guard.py" "<project-root>" claim --lane "<lane-id>" --scope "<write-scope>" --agent "<agent-id>" --task "<task title>" --ttl-minutes 120 --note "<scope and validation note>"
+python "<codex-skill-root>\ccdawn-dawn-agent-html-memory\scripts\agent_work_guard.py" "<project-root>" release --claim-id "<claim-id>" --status completed --reason "<validation or blocker summary>"
 ```
 
 If a scope hits an active claim, coordinate with the owner, choose a non-overlapping slice, or make an explicit main-integration decision and record the reason. Hotspot status alone is not a stop sign, but it raises the review, validation, scoped staging, and reconciliation burden.
@@ -249,7 +249,7 @@ The local quality gate is evidence-producing, not lifecycle-owning. `scripts/loc
 Treat these as shared hot files. They may be edited, but require active-claim review, narrow impact scope, scoped staging, stronger validation evidence, and a final reconciliation note:
 
 - `AGENTS.md`;
-- `DEVELOPMENT_STANDARD.md`;
+- `docs/standards/development-standard.md`;
 - `.docs/project-memory/**`;
 - `PROJECT_MEMORY.html`;
 - `agent.py`;
@@ -368,7 +368,7 @@ This subsection is **guidance for maintainability**, not a hard gate. Prefer cor
 **Frontend**
 
 - Prefer not to grow already-thick routes (for example large Chat/Coding route modules) with more product logic. Extract route-local modules, hooks, or VUI composition pieces when the change is natural for the task.
-- Tailwind / HeroUI / VUI ownership remains §9; structure awareness does not replace those styling rules.
+- Tailwind / VUI / shadcn-Radix ownership remains §9; structure awareness does not replace those styling rules.
 
 **Late-bind and flexibility**
 
@@ -454,7 +454,7 @@ Frontend visual verification should cover the affected states and viewports in p
 
 Bun may be used only as an auxiliary local frontend runner under `web/`.
 
-Preferred commands from `C:\Users\17533\Desktop\Vibelution\web`:
+Preferred commands from `<project-root>\web`:
 
 ```powershell
 bun run bun:dev
@@ -529,7 +529,7 @@ Preferred refresh paths:
 - Windows adapter:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File "C:\Users\17533\Desktop\Vibelution\scripts\vibelution_launcher.ps1" -Action restart
+powershell -ExecutionPolicy Bypass -File "<project-root>\scripts\vibelution_launcher.ps1" -Action restart
 ```
 
 - macOS/Linux headless adapter:
@@ -602,7 +602,7 @@ When the gates pass, merge one task at a time into root local `main` with `git m
 When any gate fails, do not force the merge. `stale_main` and routine small conflicts inside the owning Agent's claimed scope return to the task worktree: merge the latest local `main` there, resolve conflicts, commit, and rerun `closeout`. Wait for a main integration session only for large conflicts, cross-lane conflicts, shared DTO/projection conflicts, hot-file conflicts with active claims, release/version conflicts, unclear semantic conflicts, or user-designated integration work. Close the lightweight guard claim as blocked, or create a separate ready/blocked queue handoff in the project memory lane if integration must happen later:
 
 ```powershell
-python "C:\Users\17533\.codex\skills\ccdawn-dawn-agent-html-memory\scripts\agent_work_guard.py" "C:\Users\17533\Desktop\Vibelution" release --claim-id "<claim-id>" --status blocked --reason "<failed merge gate, validation, or conflict summary>"
+python "<codex-skill-root>\ccdawn-dawn-agent-html-memory\scripts\agent_work_guard.py" "<project-root>" release --claim-id "<claim-id>" --status blocked --reason "<failed merge gate, validation, or conflict summary>"
 ```
 
 Self-merge may be followed by push, PR creation, `workflow_dispatch`, or publication when the remote sync gate passes, but remote push is not part of the default local closeout. Remote branch deletion, force/overwrite, and treating `origin/main` as authority to reset local `main` remain destructive choices and require explicit confirmation.
@@ -637,12 +637,12 @@ git remote -v
 git config --show-origin --get-regexp "^(core\.sshCommand|remote\.origin\.)"
 ```
 
-Known local history: `C:\Users\17533\.ssh\id_ed25519` can authenticate to `git@github.com:CCDawn/Vibelution.git` but is read-only as a deploy key. Do not repeatedly push with that identity.
+Known local history: `%USERPROFILE%\.ssh\id_ed25519` can authenticate to `git@github.com:CCDawn/Vibelution.git` but is read-only as a deploy key. Do not repeatedly push with that identity.
 
 When the remote sync gate passes and GitHub write access is needed, use the write key:
 
 ```powershell
-$env:GIT_SSH_COMMAND='ssh -i C:\Users\17533\.ssh\vibelution_write_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new'
+$env:GIT_SSH_COMMAND='ssh -i %USERPROFILE%\.ssh\vibelution_write_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new'
 git push origin main
 ```
 
@@ -767,8 +767,8 @@ After `STANDARD_TASK` or `HIGH_RISK` meaningful development, update or propose u
 Preferred sync commands:
 
 ```powershell
-python "C:\Users\17533\.codex\skills\ccdawn-dawn-agent-html-memory\scripts\sync_project_memory.py" "C:\Users\17533\Desktop\Vibelution" --lane "<stable-responsibility-id>" --focus "<current focus>" --update "<what changed>"
-python "C:\Users\17533\.codex\skills\ccdawn-dawn-agent-html-memory\scripts\render_overview.py" "C:\Users\17533\Desktop\Vibelution"
+python "<codex-skill-root>\ccdawn-dawn-agent-html-memory\scripts\sync_project_memory.py" "<project-root>" --lane "<stable-responsibility-id>" --focus "<current focus>" --update "<what changed>"
+python "<codex-skill-root>\ccdawn-dawn-agent-html-memory\scripts\render_overview.py" "<project-root>"
 ```
 
 Do not finish `STANDARD_TASK` or `HIGH_RISK` work with stale project memory or a stale active claim unless the user explicitly says to skip it. `FAST_PATCH` may report "project memory not affected" when it changes no durable project state, lane status, blocker, decision, or follow-up. If memory sync cannot be done safely in the task worktree, report the exact proposal for the main integration/memory-sync owner.
@@ -794,26 +794,26 @@ When implementation starts or finishes, update the document status or the releva
 
 For work under:
 
-`C:\Users\17533\Desktop\Vibelution\挑战杯`
+`<project-root>\挑战杯`
 
 every development, design, schema, data, workflow, candidate-knowledge, memory-platform, graph-sync, experiment, or deliverable change must be reflected in the research flow HTML site unless the user explicitly says to skip it.
 
 Canonical entrypoint:
 
-`C:\Users\17533\Desktop\Vibelution\挑战杯\research_team_flow_design.html`
+`<project-root>\挑战杯\research_team_flow_design.html`
 
 Per-node pages:
 
-`C:\Users\17533\Desktop\Vibelution\挑战杯\research_flow_pages\`
+`<project-root>\挑战杯\research_flow_pages\`
 
 Prefer updating:
 
-`C:\Users\17533\Desktop\Vibelution\挑战杯\build_research_flow_site.mjs`
+`<project-root>\挑战杯\build_research_flow_site.mjs`
 
 then regenerate:
 
 ```powershell
-node "C:\Users\17533\Desktop\Vibelution\挑战杯\build_research_flow_site.mjs"
+node "<project-root>\挑战杯\build_research_flow_site.mjs"
 ```
 
 Before finishing a Challenge Cup round, verify HTML links still resolve and report whether the flow HTML was updated.
@@ -876,7 +876,7 @@ A development round is not done until its tier-specific checklist is satisfied:
 - behavior and scope are clear;
 - relevant logs or evidence were inspected for bugs/runtime issues;
 - relevant local Agent papers/projects were consulted, or the final report explains why the local Agent corpus was not applicable;
-- any web search or external repository research used during development was captured under `C:\Users\17533\Desktop\Agent论文\search-results`;
+- any web search or external repository research used during development was captured under `<agent-research-root>\search-results`;
 - implementation stayed within claimed scope;
 - logging decision is explicit;
 - test decision is explicit;
@@ -1082,7 +1082,7 @@ Default rule: use the configured source of truth and preserve local-first operat
 
 Prefer:
 
-- `C:\Users\17533\Documents\Vibelution\config\config.toml` as the active operator config source during integration;
+- `%USERPROFILE%\Documents\Vibelution\config\config.toml` as the active operator config source during integration;
 - root `config.toml` and `config.example.toml` only as legacy/template surfaces unless an approved migration says otherwise;
 - existing public config APIs and model library services for frontend-visible config;
 - redacted diagnostics for missing, invalid, or partial config.

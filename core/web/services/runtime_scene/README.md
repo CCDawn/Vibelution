@@ -13,7 +13,7 @@ Ownership map for structured runtime scene bundles.
 | package_index sidecar stale detect/sync | `package_index.py` |
 | Public import surface | `../runtime_scene_service.py` (re-export shell) |
 
-Structure awareness (soft): `DEVELOPMENT_STANDARD.md` §8.3.
+Structure awareness (soft): `docs/standards/development-standard.md` §8.3.
 
 ## Ownership map (claim scopes)
 
