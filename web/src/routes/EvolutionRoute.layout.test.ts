@@ -566,9 +566,15 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeStyles.workflowStepButton).toContain("w-full");
     expect(routeStyles.workflowStepButtonActive).toContain("[border-color:");
     expect(routeStyles.workflowStepPreview).toContain("[-webkit-line-clamp:2]");
-    expect(supervisedAgentConversationPanelStyles.tabRail).toContain("grid-flow-col");
-    expect(supervisedAgentConversationPanelStyles.tabButton).toContain("min-w-[148px]");
+    expect(supervisedAgentConversationPanelStyles.tabRail).toContain("overflow-x-auto");
+    expect(supervisedAgentConversationPanelStyles.tabButton).toContain("[min-width:132px]");
+    expect(supervisedAgentConversationPanelStyles.tabButton).toContain("[min-height:46px]");
+    expect(supervisedAgentConversationPanelStyles.tabButton).toContain("[flex:1_1_132px]");
+    expect(supervisedAgentConversationPanelStyles.tabLayout).toContain("[grid-template-columns:24px_minmax(0,_1fr)]");
+    expect(supervisedAgentConversationPanelStyles.sessionSurface).toContain("flex-1");
+    expect(supervisedAgentConversationPanelStyles.sessionSurface).toContain("rounded-[var(--vui-radius-lg)]");
     expect(supervisedAgentConversationPanelStyles.empty).toContain("text-center");
+    expect(supervisedAgentConversationPanelStyles.empty).toContain("w-[min(72%,_460px)]");
     expect(stylesSource).not.toContain(".supervisedWorkflowCardGrid");
     expect(stylesSource).not.toContain(".supervisedWorkflowCardButton");
     expect(stylesSource).not.toContain(".supervisedWorkflowCardFooter");
@@ -822,6 +828,8 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(supervisedAgentConversationPanelSource).toContain("不会借用其他 Agent 的消息");
     expect(supervisedAgentConversationPanelSource).toContain('role="tablist"');
     expect(supervisedAgentConversationPanelSource).toContain('role="tab"');
+    expect(supervisedAgentConversationPanelSource).toContain('role="tabpanel"');
+    expect(supervisedAgentConversationPanelSource).toContain("className={styles.sessionSurface}");
     expect(supervisedAgentConversationPanelStyles.tabRail).toContain("overflow-x-auto");
     expect(supervisedAgentConversationPanelStyles.body).toContain("min-h-[320px]");
     expect(routeStyles.supervisedConversationEvidence).toContain("[width:100%]");
