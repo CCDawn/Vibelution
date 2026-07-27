@@ -1626,24 +1626,24 @@ export function TeamsRoute({
   async function openSourceCollectionStageAgentChat(stageId: SourceCollectionStageModuleId) {
     const chatState = sourceCollectionStageAgentChatState(stageId);
     const binding = chatState.binding;
-    if (chatState.status === "ready" && chatState.route) {
-      const teamId = selectedTeam?.teamId || RESEARCH_TEAM_ID;
-      const runId = selectedSourceCollectionRunEffectiveId;
-      const agentId = String(binding?.agent?.agentId || binding?.agentId || "").trim();
-      if (teamId && runId && agentId) {
-        try {
-          await seedSourceCollectionAgentSessionContextMutation.mutateAsync({
-            teamId,
-            runId,
-            stageId,
-            agentId,
-            agentRole: binding?.key || "",
-          });
-        } catch (error) {
-          console.warn("Failed to seed source collection Agent session context before navigation.", error);
+    const teamId = selectedTeam?.teamId || RESEARCH_TEAM_ID;
+    const runId = selectedSourceCollectionRunEffectiveId;
+    const agentId = String(binding?.agent?.agentId || binding?.agentId || "").trim();
+    if (teamId && runId && agentId) {
+      try {
+        const payload = await seedSourceCollectionAgentSessionContextMutation.mutateAsync({
+          teamId,
+          runId,
+          stageId,
+          agentId,
+          agentRole: binding?.key || "",
+        });
+        if (payload.chatRoute) {
+          navigate(payload.chatRoute);
         }
+      } catch (error) {
+        console.warn("Failed to resolve source collection experiment session before navigation.", error);
       }
-      navigate(chatState.route);
       return;
     }
     if (chatState.status === "repair") {
@@ -1665,7 +1665,10 @@ export function TeamsRoute({
     );
   }
 
-  async function startSourceCollectionStageSessionTask(stageId: SourceCollectionStageModuleId) {
+  async function startSourceCollectionStageSessionTask(
+    stageId: SourceCollectionStageModuleId,
+    options: { formalRetry?: boolean } = {},
+  ) {
     if (!selectedTeam?.teamId || startSourceCollectionStageSessionTaskMutation.isPending) {
       return;
     }
@@ -1678,7 +1681,7 @@ export function TeamsRoute({
     const binding = chatState.binding;
     const agentId = String(binding?.agent?.agentId || binding?.agentId || "").trim();
     const agentRole = String(binding?.key || "").trim();
-    if (chatState.status !== "ready" || !agentId || !binding?.agent?.directSessionId) {
+    if (!agentId) {
       if (chatState.status === "repair") {
         repairSelectedWorkflowTeamAgentsIfNeeded();
       }
@@ -1730,8 +1733,11 @@ export function TeamsRoute({
         returnLabel: sourceCollectionStageChatReturnLabel(stageId),
         requestedByAgent: sourceCollectionOwnerAgentId,
         idempotencyKey: sourceCollectionStageTaskClickKey(stageId),
+        formalRetry: options.formalRetry ?? sourceCollectionStageFormalRetryRequired(stageId),
       });
-      navigate(payload.chatRoute || chatState.route);
+      if (payload.chatRoute) {
+        navigate(payload.chatRoute);
+      }
     } catch {
       return;
     }
@@ -4274,6 +4280,14 @@ export function TeamsRoute({
       latestTaskStatus: String(projection?.latestTask?.status || "").toLowerCase(),
       projectionStatus: String(projection?.status || "").toLowerCase(),
     });
+  }
+  function sourceCollectionStageFormalRetryRequired(stageId: SourceCollectionStageModuleId) {
+    const latestTaskStatus = String(
+      sourceCollectionStageCardById.get(stageId)?.latestTask?.status || "",
+    ).trim().toLowerCase();
+    return new Set(["failed", "error", "blocked", "cancelled", "canceled", "incomplete"]).has(
+      latestTaskStatus,
+    );
   }
   function sourceCollectionStageLaunchSummary(stageId: SourceCollectionStageModuleId) {
     return sourceCollectionStageLaunchSummaryPure(stageId, sourceCollectionStageSessionTaskPendingStageId, lang);

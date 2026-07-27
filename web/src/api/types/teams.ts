@@ -776,6 +776,9 @@ export type TeamResearchProject = {
   topic: string;
   experimentMethod: ExperimentMethodId | "";
   storageMode: "legacy" | "isolated";
+  nameLocked: boolean;
+  nameLockedAt: string;
+  nameLockReason: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -1241,6 +1244,15 @@ export type TeamWorkflowSourceCollectionRunStartPayload = {
   assignments: DataProcessingCollectionAssignment[];
   assignmentCount: number;
   promptCachePolicy: TeamWorkflowSourceCollectionPromptCachePolicy;
+  researchProjectId: string;
+  experimentName: string;
+  sessionCleanup?: {
+    status: "not_required" | string;
+    reason: string;
+    cleanedCount: number;
+    items: Array<Record<string, unknown>>;
+    skipped: Array<Record<string, unknown>>;
+  };
   workflow: TeamWorkflowOrchestration;
   nextActions: string[];
 };
@@ -1253,6 +1265,13 @@ export type TeamWorkflowSourceCollectionAgentSessionContextPayload = {
   agentId: string;
   agentRole: string;
   sessionId: string;
+  researchProjectId: string;
+  experimentName: string;
+  sessionTitle: string;
+  sessionAttempt: number;
+  sessionCreated: boolean;
+  retryOfSessionId: string;
+  chatRoute: string;
   contextKey: string;
   created: boolean;
   alreadyPresent: boolean;
@@ -1270,6 +1289,13 @@ export type TeamWorkflowSourceCollectionStageSessionTask = {
   agentId: string;
   agentRole: string;
   sessionId: string;
+  researchProjectId: string;
+  experimentName: string;
+  sessionTitle: string;
+  sessionAttempt: number;
+  sessionCreated: boolean;
+  retryOfSessionId: string;
+  formalRetry: boolean;
   status: string;
   title: string;
   summary: string;
@@ -1323,6 +1349,12 @@ export type TeamWorkflowSourceCollectionStageSessionTaskPayload = {
   agentId: string;
   agentRole: string;
   sessionId: string;
+  researchProjectId: string;
+  experimentName: string;
+  sessionTitle: string;
+  sessionAttempt: number;
+  sessionCreated: boolean;
+  retryOfSessionId: string;
   taskId: string;
   idempotencyKey: string;
   created: boolean;

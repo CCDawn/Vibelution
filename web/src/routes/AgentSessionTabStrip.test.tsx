@@ -99,7 +99,7 @@ function renderStrip(overrides: Partial<ComponentProps<typeof AgentSessionTabStr
 }
 
 describe("AgentSessionTabStrip", () => {
-  it("renders root and child sessions with model tooltip and child task labels", () => {
+  it("renders legacy root and child records as flat session tabs", () => {
     const markup = renderStrip();
 
     expect(markup).toContain("Agent 会话");
@@ -107,8 +107,9 @@ describe("AgentSessionTabStrip", () => {
     expect(markup).toContain("GPT 5.5");
     expect(markup).not.toContain("idle · GPT 5.5</span>");
     expect(markup).not.toContain(">子对话</span>");
-    expect(markup).toContain("接续分析");
-    expect(markup).toContain("结果摘要");
+    expect(markup).toContain("子任务标题");
+    expect(markup).toContain("子会话摘要");
+    expect(markup).not.toContain("agentSessionTabChild");
     expect(markup).toContain("title=\"running · GPT 5.5\"");
     expect(markup).not.toContain(">running</span>");
     expect(markup).toContain("agentSessionTabStatusDot");

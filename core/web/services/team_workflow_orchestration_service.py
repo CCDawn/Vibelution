@@ -63,12 +63,25 @@ from core.web.services.team_workflow.orchestration_core import (
     get_team_workflow_orchestration,
 )
 from core.web.services.team_workflow.research_projects import (
+    LEGACY_PROJECT_ID,
     ResearchProjectError,
+    ResearchProjectNameLockedError,
     ResearchProjectNotFoundError,
     activate_research_project,
     create_research_project,
+    get_active_research_project,
+    get_research_project,
     list_research_projects,
+    lock_research_project_name,
+    resolve_research_project_workspace_root,
     update_research_project,
+)
+from core.web.services.team_workflow.research_project_agent_sessions import (
+    ResearchProjectAgentSessionError,
+    research_project_agent_role_label,
+    resolve_research_project_identity,
+    resolve_research_project_identity_from_record,
+    resolve_research_project_agent_session,
 )
 from core.web.services.team_workflow.source_collection.candidates import (
     extract_source_collection_candidates,

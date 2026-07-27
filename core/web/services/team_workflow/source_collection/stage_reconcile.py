@@ -67,7 +67,7 @@ def _ensure_source_collection_stage_agent_direct_session(
     stage_id: str,
     agent_role: str,
 ) -> dict[str, Any]:
-    s = _service()
+    del stage_id, agent_role
     return agent
 
 
@@ -120,68 +120,11 @@ def _ensure_source_collection_stage_agent_session_isolated(
     stage_id: str,
     agent_role: str,
 ) -> tuple[dict[str, Any], dict[str, str]]:
-    s = _service()
-    agent_id = s._trim_text(agent.get("agentId"), max_length=160)
-    session_id = s._trim_text(agent.get("directSessionId"), max_length=160)
-    evidence = s._source_collection_stage_session_previous_round_evidence(
-        session_id,
-        run_id=run_id,
-    )
-    if not evidence:
-        return agent, {}
-    try:
-        reset_result = s.session_service.reset_agent_direct_session_lightweight(
-            session_id,
-            agent_id=agent_id,
-            title=s._source_collection_stage_task_title(stage_id),
-        )
-    except Exception as exc:
-        s._record_workflow_event(
-            "source_collection.stage_session_isolation_failed",
-            team_id,
-            level="warning",
-            fields={
-                "runId": run_id,
-                "stageId": stage_id,
-                "agentId": agent_id,
-                "agentRole": agent_role,
-                "previousDirectSessionId": session_id,
-                "errorType": type(exc).__name__,
-            },
-        )
-        raise s.TeamWorkflowOrchestrationError(
-            f"Previous source collection Agent session could not be isolated: {exc}"
-        ) from exc
-    replacement_session_id = (
-        s._trim_text(reset_result.get("replacementDirectSessionId"), max_length=160)
-        or s._trim_text(reset_result.get("nextActiveSessionId"), max_length=160)
-    )
-    next_agent = s.agent_directory_service.get_agent(agent_id) if agent_id else None
-    if not isinstance(next_agent, dict):
-        next_agent = dict(agent)
-    if replacement_session_id:
-        next_agent["directSessionId"] = replacement_session_id
-    isolation = {
-        "status": "isolated",
-        "reason": "previous_source_collection_round",
-        "previousDirectSessionId": session_id,
-        "replacementDirectSessionId": replacement_session_id,
-        "previousSourceRunId": evidence.get("previousSourceRunId", ""),
-        "previousTeamId": evidence.get("previousTeamId", ""),
-        "previousMessageKind": evidence.get("previousMessageKind", ""),
+    del team_id, run_id, stage_id, agent_role
+    return agent, {
+        "status": "not_required",
+        "reason": "research_project_agent_session_registry",
     }
-    s._record_workflow_event(
-        "source_collection.stage_session_isolated",
-        team_id,
-        fields={
-            "runId": run_id,
-            "stageId": stage_id,
-            "agentId": agent_id,
-            "agentRole": agent_role,
-            **isolation,
-        },
-    )
-    return next_agent, isolation
 
 
 def _attach_source_collection_stage_card_projections(team_id: str, rounds: list[dict[str, Any]]) -> None:

@@ -460,15 +460,16 @@ describe("chat hand-test substitute: group/project-bus wiring", () => {
 });
 
 describe("chat hand-test substitute: agent tabs + skill chip", () => {
-  it("sorts primary direct session first for top strip", () => {
+  it("sorts flat Agent sessions by recent activity for the top strip", () => {
     const tabs = buildAgentSessionTabs({
       sessions: [
-        { id: "other", sessionKind: "direct", updatedAt: "2026-07-20T02:00:00Z" } as never,
+        { id: "other", sessionKind: "direct", updatedAt: "2026-07-20T03:00:00Z" } as never,
+        { id: "child", sessionKind: "child", updatedAt: "2026-07-20T02:00:00Z" } as never,
         { id: "primary", sessionKind: "direct", updatedAt: "2026-07-20T01:00:00Z" } as never,
       ],
       selectedChatAgentDirectSessionId: "primary",
     });
-    expect(tabs[0]?.id).toBe("primary");
+    expect(tabs.map((item) => item.id)).toEqual(["other", "child", "primary"]);
   });
 
   it("builds stale skill chip labels for status rail", () => {

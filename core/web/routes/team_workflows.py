@@ -12,6 +12,7 @@ from core.web.services.team_workflow_orchestration_service import (
     DEFAULT_OWNER_AGENT_ID,
     WORKFLOW_KIND_CHALLENGE_CUP_RESEARCH,
     ResearchProjectError,
+    ResearchProjectNameLockedError,
     ResearchProjectNotFoundError,
     TeamWorkflowOrchestrationError,
     activate_research_project,
@@ -101,6 +102,7 @@ def _raise_team_workflow_route_error(
     *,
     status_code: int,
     fields: dict[str, Any] | None = None,
+    detail: Any | None = None,
 ) -> NoReturn:
     event_fields = {
         "action": _truncate_route_field(action, limit=120),
@@ -124,7 +126,7 @@ def _raise_team_workflow_route_error(
         )
     except Exception:
         pass
-    raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+    raise HTTPException(status_code=status_code, detail=detail if detail is not None else str(exc)) from exc
 
 
 class WorkflowEnsurePayload(BaseModel):
@@ -164,6 +166,7 @@ class DataRecordSourceImportPayload(BaseModel):
 
 
 class SourceCollectionRunStartPayload(BaseModel):
+    researchProjectId: str = Field("", max_length=160)
     title: str = Field("", max_length=180)
     workflowPurpose: str = Field("", max_length=80)
     workflowKind: str = Field("", max_length=80)
@@ -209,6 +212,7 @@ class SourceCollectionStageSessionTaskPayload(SourceCollectionAgentSessionContex
     returnTo: str = Field("", max_length=1000)
     returnLabel: str = Field("", max_length=240)
     idempotencyKey: str = Field("", max_length=240)
+    formalRetry: bool = False
 
 
 class SourceCollectionStageSessionTaskWritebackPayload(BaseModel):
@@ -676,6 +680,21 @@ def team_workflow_research_project_update(
             exc,
             status_code=404,
             fields={"projectId": project_id},
+        )
+    except ResearchProjectNameLockedError as exc:
+        _raise_team_workflow_route_error(
+            "research_project.update",
+            team_id,
+            exc,
+            status_code=409,
+            fields={
+                "projectId": project_id,
+                "code": ResearchProjectNameLockedError.code,
+            },
+            detail={
+                "code": ResearchProjectNameLockedError.code,
+                "message": str(exc),
+            },
         )
     except ResearchProjectError as exc:
         _raise_team_workflow_route_error(

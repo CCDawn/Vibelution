@@ -8,7 +8,6 @@ import {
   type CompactPanelRow,
 } from "../chatCompactPanel";
 import { clampPercent, formatRelativeTime } from "../chatShellFormat";
-import { isChildSession } from "../DirectSessionIndexItem";
 
 export type ActiveSkillContract = {
   status?: string;
@@ -490,16 +489,12 @@ export function buildAgentSessionTabs(options: {
   selectedChatAgentDirectSessionId: string | null | undefined;
 }): SessionSummary[] {
   const sessions = options.sessions ?? [];
-  const directSessionId = String(options.selectedChatAgentDirectSessionId ?? "").trim();
+  void options.selectedChatAgentDirectSessionId;
   return sessions
     .filter((session): session is SessionSummary => Boolean(session))
     .filter((session, index, items) => items.findIndex((item) => item.id === session.id) === index)
-    .sort((left, right) => {
-      const leftPriority = left.id === directSessionId ? 0 : isChildSession(left) ? 2 : 1;
-      const rightPriority = right.id === directSessionId ? 0 : isChildSession(right) ? 2 : 1;
-      if (leftPriority !== rightPriority) {
-        return leftPriority - rightPriority;
-      }
-      return String(right.updatedAt || right.lastActive || "").localeCompare(String(left.updatedAt || left.lastActive || ""));
-    });
+    .sort((left, right) => (
+      String(right.updatedAt || right.lastActive || "")
+        .localeCompare(String(left.updatedAt || left.lastActive || ""))
+    ));
 }

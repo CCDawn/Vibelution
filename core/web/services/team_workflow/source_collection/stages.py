@@ -15,6 +15,47 @@ def _service():
     return team_workflow_orchestration_service
 
 
+def _source_collection_task_experiment_session_fields(
+    task: dict[str, Any],
+    *,
+    research_project: dict[str, Any],
+    return_to: str = "",
+    return_label: str = "",
+) -> dict[str, Any]:
+    s = _service()
+    session_id = s._trim_text(task.get("sessionId"), max_length=160)
+    detail = s.session_service.get_session_detail(session_id) if session_id else None
+    session_title = (
+        s._trim_text(task.get("sessionTitle"), max_length=120)
+        or s._trim_text((detail or {}).get("title"), max_length=120)
+    )
+    return {
+        "researchProjectId": s._trim_text(
+            task.get("researchProjectId") or research_project.get("projectId"),
+            max_length=160,
+        ),
+        "experimentName": s._trim_text(
+            task.get("experimentName") or research_project.get("name"),
+            max_length=160,
+        ),
+        "sessionId": session_id,
+        "sessionTitle": session_title,
+        "sessionAttempt": s._normalize_int(
+            task.get("sessionAttempt"),
+            default=1,
+            minimum=1,
+            maximum=10000,
+        ),
+        "sessionCreated": False,
+        "retryOfSessionId": s._trim_text(task.get("retryOfSessionId"), max_length=160),
+        "chatRoute": s._source_collection_stage_task_chat_route(
+            session_id,
+            return_to=return_to,
+            return_label=return_label,
+        ),
+    }
+
+
 def seed_source_collection_agent_session_context(
     team_id: str,
     run_id: str,
@@ -36,9 +77,6 @@ def seed_source_collection_agent_session_context(
     agent = s.agent_directory_service.get_agent(agent_id)
     if not isinstance(agent, dict):
         raise s.TeamWorkflowOrchestrationError(f"Agent not found: {agent_id}")
-    session_id = s._trim_text(agent.get("directSessionId"), max_length=160)
-    if not session_id:
-        raise s.TeamWorkflowOrchestrationError(f"Agent has no direct session: {agent_id}")
 
     try:
         run = s.data_processing_service.get_processing_run(normalized_run_id)
@@ -59,6 +97,19 @@ def seed_source_collection_agent_session_context(
     allowed_roles = s.SOURCE_COLLECTION_AGENT_CONTEXT_STAGE_ROLES[stage_id]
     if agent_role and agent_role not in allowed_roles:
         raise s.TeamWorkflowOrchestrationError(f"Agent role {agent_role} is not assigned to source collection stage {stage_id}.")
+    research_project = s.resolve_research_project_identity_from_record(normalized_team_id, run)
+    resolved_role_key = agent_role or s._trim_text(agent.get("roleKey"), max_length=80)
+    try:
+        experiment_session = s.resolve_research_project_agent_session(
+            normalized_team_id,
+            research_project_id=research_project["projectId"],
+            agent_id=agent_id,
+            role_key=resolved_role_key,
+            role_label=s.research_project_agent_role_label(resolved_role_key, agent),
+        )
+    except s.ResearchProjectAgentSessionError as exc:
+        raise s.TeamWorkflowOrchestrationError(str(exc)) from exc
+    session_id = experiment_session["sessionId"]
 
     matching_assignments = [
         item for item in assignments
@@ -91,6 +142,7 @@ def seed_source_collection_agent_session_context(
             "agentId": agent_id,
             "agentRole": agent_role,
             "sessionId": session_id,
+            **experiment_session,
             "contextKey": context_key,
             "created": False,
             "alreadyPresent": True,
@@ -123,6 +175,9 @@ def seed_source_collection_agent_session_context(
             "agentId": agent_id,
             "agentRole": agent_role,
             "sourceCollectionContextKey": context_key,
+            "researchProjectId": research_project["projectId"],
+            "experimentName": research_project["name"],
+            "sessionAttempt": experiment_session["sessionAttempt"],
             "recordCount": len(records),
             "candidateCount": len(source_candidates),
             "assignmentCount": len(assignments),
@@ -154,6 +209,7 @@ def seed_source_collection_agent_session_context(
         "agentId": agent_id,
         "agentRole": agent_role,
         "sessionId": session_id,
+        **experiment_session,
         "contextKey": context_key,
         "created": True,
         "alreadyPresent": False,
@@ -177,6 +233,7 @@ def start_source_collection_stage_session_task(
     return_label = s._trim_text(request_payload.get("returnLabel"), max_length=240)
     requested_by = s._trim_text(request_payload.get("requestedByAgent"), max_length=160)
     idempotency_key = s._trim_text(request_payload.get("idempotencyKey"), max_length=240)
+    formal_retry = bool(request_payload.get("formalRetry"))
     if stage_id not in s.SOURCE_COLLECTION_AGENT_CONTEXT_STAGE_ROLES:
         raise s.TeamWorkflowOrchestrationError(f"Unsupported source collection stage: {stage_id}")
     if not agent_id:
@@ -189,17 +246,6 @@ def start_source_collection_stage_session_task(
     agent = s.agent_directory_service.get_agent(agent_id)
     if not isinstance(agent, dict):
         raise s.TeamWorkflowOrchestrationError(f"Agent not found: {agent_id}")
-    agent = s._ensure_source_collection_stage_agent_direct_session(agent, stage_id=stage_id, agent_role=agent_role)
-    agent, session_isolation = s._ensure_source_collection_stage_agent_session_isolated(
-        agent,
-        team_id=normalized_team_id,
-        run_id=normalized_run_id,
-        stage_id=stage_id,
-        agent_role=agent_role,
-    )
-    session_id = s._trim_text(agent.get("directSessionId"), max_length=160)
-    if not session_id:
-        raise s.TeamWorkflowOrchestrationError(f"Agent has no direct session: {agent_id}")
 
     run_bundle = s._source_collection_run_context_bundle(normalized_team_id, normalized_run_id)
     run = run_bundle["run"]
@@ -213,6 +259,7 @@ def start_source_collection_stage_session_task(
     allowed_roles = s.SOURCE_COLLECTION_AGENT_CONTEXT_STAGE_ROLES[stage_id]
     if agent_role and agent_role not in allowed_roles:
         raise s.TeamWorkflowOrchestrationError(f"Agent role {agent_role} is not assigned to source collection stage {stage_id}.")
+    research_project = s.resolve_research_project_identity_from_record(normalized_team_id, run)
 
     matching_assignments = s._source_collection_matching_assignments(assignments, agent_id=agent_id, agent_role=agent_role)
     if not requested_by:
@@ -235,6 +282,12 @@ def start_source_collection_stage_session_task(
             idempotency_key=task_idempotency_key,
         )
         if existing_task is not None:
+            existing_session = _source_collection_task_experiment_session_fields(
+                existing_task,
+                research_project=research_project,
+                return_to=return_to or s._trim_text(existing_task.get("returnTo"), max_length=1000),
+                return_label=return_label or s._trim_text(existing_task.get("returnLabel"), max_length=240),
+            )
             s._record_workflow_event(
                 "source_collection.stage_session_task_reused",
                 normalized_team_id,
@@ -243,7 +296,7 @@ def start_source_collection_stage_session_task(
                     "stageId": stage_id,
                     "agentId": agent_id,
                     "agentRole": agent_role,
-                    "sessionId": s._trim_text(existing_task.get("sessionId"), max_length=160) or session_id,
+                    "sessionId": existing_session["sessionId"],
                     "taskId": s._trim_text(existing_task.get("taskId"), max_length=160),
                     "idempotencyKey": task_idempotency_key,
                     "status": s._trim_text(existing_task.get("status"), max_length=80),
@@ -256,18 +309,13 @@ def start_source_collection_stage_session_task(
                 "stageId": stage_id,
                 "agentId": agent_id,
                 "agentRole": agent_role,
-                "sessionId": s._trim_text(existing_task.get("sessionId"), max_length=160) or session_id,
+                **existing_session,
                 "taskId": s._trim_text(existing_task.get("taskId"), max_length=160),
                 "idempotencyKey": task_idempotency_key,
                 "created": False,
                 "alreadyPresent": True,
                 "task": existing_task,
                 "turn": existing_task.get("turn") if isinstance(existing_task.get("turn"), dict) else {},
-                "chatRoute": s._source_collection_stage_task_chat_route(
-                    s._trim_text(existing_task.get("sessionId"), max_length=160) or session_id,
-                    return_to=return_to or s._trim_text(existing_task.get("returnTo"), max_length=1000),
-                    return_label=return_label or s._trim_text(existing_task.get("returnLabel"), max_length=240),
-                ),
                 "writebackContract": existing_task.get("writebackContract") if isinstance(existing_task.get("writebackContract"), dict) else {},
                 "boundaries": s._source_collection_stage_session_task_boundaries(
                     stage_id=stage_id,
@@ -275,6 +323,41 @@ def start_source_collection_stage_session_task(
                 ),
             }
 
+    previous_stage_task = s._latest_source_collection_stage_task(
+        [
+            item
+            for item in s._source_collection_stage_session_tasks(normalized_team_id, normalized_run_id)
+            if s._trim_text(item.get("stageId"), max_length=80) == stage_id
+            and s._trim_text(item.get("agentId"), max_length=160) == agent_id
+        ]
+    )
+    source_context_mode = s._source_collection_stage_task_context_mode(
+        stage_id=stage_id,
+        agent_role=agent_role,
+        previous_task=previous_stage_task,
+        source_candidates=source_candidates,
+    )
+    try:
+        experiment_session = s.resolve_research_project_agent_session(
+            normalized_team_id,
+            research_project_id=research_project["projectId"],
+            agent_id=agent_id,
+            role_key=agent_role or s._trim_text(agent.get("roleKey"), max_length=80),
+            role_label=s.research_project_agent_role_label(
+                agent_role or s._trim_text(agent.get("roleKey"), max_length=80),
+                agent,
+            ),
+            created_from_task_id=task_id,
+            formal_retry=formal_retry,
+            previous_task=previous_stage_task,
+        )
+    except s.ResearchProjectAgentSessionError as exc:
+        raise s.TeamWorkflowOrchestrationError(str(exc)) from exc
+    session_id = experiment_session["sessionId"]
+    session_isolation = {
+        "status": "not_required",
+        "reason": "research_project_agent_session_registry",
+    }
     s._record_source_collection_stage_task_tool_policy_event(
         normalized_team_id,
         normalized_run_id,
@@ -295,24 +378,6 @@ def start_source_collection_stage_session_task(
     task_checklist = s._source_collection_stage_task_checklist(stage_id, agent_role)
     writeback_contract["taskToolRequired"] = False
     writeback_contract["taskChecklist"] = task_checklist
-    previous_stage_task = s._latest_source_collection_stage_task(
-        [
-            item
-            for item in s._source_collection_stage_session_tasks(normalized_team_id, normalized_run_id)
-            if s._trim_text(item.get("stageId"), max_length=80) == stage_id
-            and (
-                not agent_id
-                or s._trim_text(item.get("agentId"), max_length=160) == agent_id
-                or s._trim_text(item.get("agentRole"), max_length=80) == agent_role
-            )
-        ]
-    )
-    source_context_mode = s._source_collection_stage_task_context_mode(
-        stage_id=stage_id,
-        agent_role=agent_role,
-        previous_task=previous_stage_task,
-        source_candidates=source_candidates,
-    )
     task_message = s._source_collection_stage_session_task_message(
         team=team,
         agent=agent,
@@ -343,6 +408,13 @@ def start_source_collection_stage_session_task(
         "agentId": agent_id,
         "agentRole": agent_role,
         "sessionId": session_id,
+        "researchProjectId": experiment_session["researchProjectId"],
+        "experimentName": experiment_session["experimentName"],
+        "sessionTitle": experiment_session["sessionTitle"],
+        "sessionAttempt": experiment_session["sessionAttempt"],
+        "sessionCreated": experiment_session["sessionCreated"],
+        "retryOfSessionId": experiment_session["retryOfSessionId"],
+        "formalRetry": formal_retry,
         "status": "queued",
         "title": s._source_collection_stage_task_title(stage_id),
         "summary": "",
@@ -382,6 +454,7 @@ def start_source_collection_stage_session_task(
                 source_context_mode in {"retry_missing", "retry_evidence"}
                 or s._source_collection_stage_task_needs_writeback_resume(previous_stage_task)
                 or stage_id == "extraction"
+                or formal_retry
             )
             and isinstance(previous_stage_task, dict)
             else ""
@@ -406,6 +479,10 @@ def start_source_collection_stage_session_task(
             "stageId": stage_id,
             "agentId": agent_id,
             "agentRole": agent_role,
+            "researchProjectId": experiment_session["researchProjectId"],
+            "experimentName": experiment_session["experimentName"],
+            "sessionAttempt": experiment_session["sessionAttempt"],
+            "retryOfSessionId": experiment_session["retryOfSessionId"],
             "sourceCollectionStageTaskId": task_id,
             "sourceCollectionStageTaskKey": task_idempotency_key,
             "sourceContextMode": source_context_mode,
@@ -462,7 +539,7 @@ def start_source_collection_stage_session_task(
         "stageId": stage_id,
         "agentId": agent_id,
         "agentRole": agent_role,
-        "sessionId": session_id,
+        **experiment_session,
         "taskId": task_id,
         "idempotencyKey": task_idempotency_key,
         "created": True,

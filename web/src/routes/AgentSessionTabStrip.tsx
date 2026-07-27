@@ -1,11 +1,10 @@
-import { Bot, Check, MessageCircleHeart, SquareTerminal, X } from "lucide-react";
+import { Bot, Check, SquareTerminal, X } from "lucide-react";
 import type { DragEvent, MouseEvent as ReactMouseEvent } from "react";
 
 import type { AgentInstance, SessionReferenceAttachment, SessionSummary } from "../api/types";
 import { VButton, VIconButton, VNativeInput } from "../components/vui";
 import type { TranslationKey } from "../i18n/dictionary";
 import { sessionAgentDisplayInfo } from "./agentDisplay";
-import { isChildSession } from "./DirectSessionIndexItem";
 import styles from "./AgentSessionTabStrip.styles";
 
 export type CliAgentRunTab = {
@@ -126,16 +125,16 @@ export function AgentSessionTabStrip({
       aria-label={lang === "zh" ? "Agent 会话" : "Agent sessions"}
     >
       {sessions.map((session) => {
-        const sessionIsChild = isChildSession(session);
         const sessionAgent = session.agentId ? agentsById.get(session.agentId) : undefined;
         const sessionDisplay = sessionAgentDisplayInfo(session, sessionAgent, lang, resolveModelLabel);
-        const sessionStatus = sessionIsChild ? (session.childStatus || session.currentPhase || session.status) : session.status;
+        const sessionStatus = session.childStatus || session.status || session.currentPhase;
         const sessionTitle =
-          (sessionIsChild ? (session.taskTitle || session.resultCard?.title || session.title) : session.title)
+          session.title
           || sessionDisplay.name
           || t("agentSession");
         const sessionSummary =
-          (sessionIsChild ? (session.resultCard?.summary || session.taskSummary) : session.taskSummary)
+          session.taskSummary
+          || session.resultCard?.summary
           || sessionDisplay.modelLabel
           || "";
         const sessionStatusLabel = statusLabel(sessionStatus);
@@ -148,7 +147,7 @@ export function AgentSessionTabStrip({
         const tabEditing = editingSessionId === session.id;
         const tabClassName = [
           styles.agentSessionTab,
-          sessionIsChild ? styles.agentSessionTabChild : styles.agentSessionTabRoot,
+          styles.agentSessionTabRoot,
           tabActive ? styles.agentSessionTabActive : "",
           tabContextTarget && !tabActive ? styles.agentSessionTabContextTarget : "",
           tabEditing ? styles.agentSessionTabEditing : "",
@@ -171,11 +170,11 @@ export function AgentSessionTabStrip({
               title={sessionHoverTitle}
             >
               <span className={styles.agentSessionTabIcon} aria-hidden="true">
-                {sessionIsChild ? <MessageCircleHeart size={14} /> : <Bot size={14} />}
+                <Bot size={14} />
               </span>
               <span className={styles.agentSessionTabCopy}>
                 <span className={styles.agentSessionTabKicker}>
-                  {sessionIsChild ? (lang === "zh" ? "子对话" : "Child") : t("agentSession")}
+                  {t("agentSession")}
                 </span>
                 <VNativeInput
                   className={styles.agentSessionTabTitleInput}
@@ -193,7 +192,7 @@ export function AgentSessionTabStrip({
                       onCancelRename();
                     }
                   }}
-                  aria-label={t(sessionIsChild ? "renameTask" : "renameAgent")}
+                  aria-label={t("renameSession")}
                 />
               </span>
               <span className={styles.agentSessionTabEditActions}>
@@ -202,8 +201,8 @@ export function AgentSessionTabStrip({
                   className={styles.agentSessionTabEditButton}
                   onPress={() => onSubmitRename(session)}
                   isDisabled={sessionRenamePending}
-                  title={t(sessionIsChild ? "saveTaskName" : "saveAgentName")}
-                  label={`${t(sessionIsChild ? "saveTaskName" : "saveAgentName")} ${sessionTitle}`}
+                  title={t("saveSessionName")}
+                  label={`${t("saveSessionName")} ${sessionTitle}`}
                   icon={<Check size={13} />}
                 />
                 <VIconButton
@@ -251,7 +250,7 @@ export function AgentSessionTabStrip({
               title={sessionHoverTitle}
             >
               <span className={styles.agentSessionTabIcon} aria-hidden="true">
-                {sessionIsChild ? <MessageCircleHeart size={14} /> : <Bot size={14} />}
+                <Bot size={14} />
               </span>
               <span
                 className={styles.agentSessionTabTitle}

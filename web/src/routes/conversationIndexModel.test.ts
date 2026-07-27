@@ -9,6 +9,7 @@ import {
   DEFAULT_COLLAPSED_CONVERSATION_GROUPS,
   hasInvalidChildSessionLink,
   isDiscussionTeam,
+  isRepresentedInAgentSessionTabs,
   isVisibleConversation,
   isVisibleConversationAgent,
   normalizeConversationIndexTeams,
@@ -638,5 +639,11 @@ describe("conversationIndexModel", () => {
 
     expect(rootSessionIdFor(child)).toBe("root-1");
     expect(hasInvalidChildSessionLink(orphan)).toBe(true);
+  });
+
+  it("represents every Agent-bound session in the flat Agent tab strip", () => {
+    expect(isRepresentedInAgentSessionTabs(session({ agentId: "agent-1", sessionKind: "main" }))).toBe(true);
+    expect(isRepresentedInAgentSessionTabs(session({ agentId: "agent-1", sessionKind: "child" }))).toBe(true);
+    expect(isRepresentedInAgentSessionTabs(session({ agentId: "", sessionKind: "main" }))).toBe(false);
   });
 });

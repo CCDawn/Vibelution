@@ -70,6 +70,10 @@ def start_research_stage_round(team_id: str, payload: dict[str, Any] | None = No
     normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
     team = s.team_service.get_team(normalized_team_id)
     request_payload = dict(payload) if isinstance(payload, dict) else {}
+    research_project = s.resolve_research_project_identity(
+        normalized_team_id,
+        s._trim_text(request_payload.get("researchProjectId"), max_length=160),
+    )
     stage_type = s._normalize_stage_type(request_payload.get("stageType"))
     start_mode = s._normalize_stage_start_mode(request_payload.get("mode") or request_payload.get("startMode"))
     requested_by_agent = s._trim_text(request_payload.get("requestedByAgent"), max_length=160) or s._source_collection_owner_agent_id(team, request_payload)
@@ -147,11 +151,14 @@ def start_research_stage_round(team_id: str, payload: dict[str, Any] | None = No
             requested_by_agent=requested_by_agent,
             team=team,
         )
+        round_payload["researchProjectId"] = research_project["projectId"]
+        round_payload["experimentName"] = research_project["name"]
         result_payload: dict[str, Any] = {}
         status = "running"
         warnings: list[dict[str, str]] = []
         if stage_type == "knowledge_collection":
             source_payload = s._stage_source_collection_payload(round_payload, request_payload, team)
+            source_payload["researchProjectId"] = research_project["projectId"]
             source_result = s.start_source_collection_run(normalized_team_id, source_payload)
             search_execution = s.start_source_collection_search_background(
                 normalized_team_id,
@@ -239,6 +246,11 @@ def start_research_stage_round(team_id: str, payload: dict[str, Any] | None = No
         store["updatedAt"] = now
         s._write_json(s._stage_round_store_path(normalized_team_id), store)
         candidate_store = s._load_candidate_store(normalized_team_id)
+    s.lock_research_project_name(
+        normalized_team_id,
+        research_project["projectId"],
+        reason="first_experiment_task",
+    )
     s._record_workflow_event(
         "research_stage_round.started",
         normalized_team_id,
