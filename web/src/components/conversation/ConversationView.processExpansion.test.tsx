@@ -168,7 +168,8 @@ describe("ConversationView process expansion defaults", () => {
     expect(html).not.toContain(">cli_tool<");
     expect(html).not.toContain("调用开始");
     expect(html).not.toContain("运行开始");
-    expect(styles.timelineCellHeader).toContain("grid-cols-[20px_minmax(0,1fr)_24px]");
+    expect(styles.timelineCellHeader).toContain("grid-cols-[20px_minmax(0,1fr)]");
+    expect(styles.timelineCellHeader).not.toContain("grid-cols-[20px_minmax(0,1fr)_24px]");
     expect(styles.rolloutTraceList).not.toContain("col-start-2");
   });
 

@@ -4,7 +4,8 @@ import styles from "./ConversationView.styles";
 
 describe("conversation process trace styles", () => {
   it("keeps timeline operation rows scannable instead of generated nested cards", () => {
-    expect(styles.timelineCellHeader).toContain("grid-cols-[20px_minmax(0,1fr)_24px]");
+    expect(styles.timelineCellHeader).toContain("grid-cols-[20px_minmax(0,1fr)]");
+    expect(styles.timelineCellHeader).not.toContain("grid-cols-[20px_minmax(0,1fr)_24px]");
     expect(styles.timelineCellHeader).not.toContain("grid-cols-[20px_fit-content(52rem)_24px_minmax(0,1fr)]");
     expect(styles.timelineCellHeader).not.toContain("_max-content_");
     expect(styles.timelineCellHeader).toContain("overflow-visible");
@@ -29,9 +30,11 @@ describe("conversation process trace styles", () => {
     expect(styles.timelineThoughtHeader).not.toContain("grid-cols-[20px_fit-content(52rem)_24px_minmax(0,1fr)]");
     expect(styles.timelineThoughtHeader).not.toContain("max-content");
 
-    expect(styles.timelineCellDetailButton).toContain("inline-grid");
-    expect(styles.timelineCellDetailButton).toContain("size-6");
-    expect(styles.timelineCellDetailButton).not.toMatch(/radius-panel|surface-glass|shadow-|overflow-auto|content-start/);
+    expect(styles.timelineCellCompactTitleRow).toContain("[&_.timelineCellTitle]:max-w-none");
+    expect(styles.timelineCellCompactTitleRow).toContain("[&_.timelineCellTitle]:shrink-0");
+    expect(styles.timelineCellCompactTitleRow).not.toContain("[&_.timelineCellTitle]:truncate");
+    expect(styles.timelineCellInlineChevron).toContain("size-3.5");
+    expect(styles.timelineCellInlineChevron).not.toMatch(/border|rounded|shadow/);
 
     expect(styles.timelineCommandRow).toContain("bg-transparent");
     expect(styles.timelineCommandRow).toContain("grid-cols-[20px_minmax(0,1fr)]");

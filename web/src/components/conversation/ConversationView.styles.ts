@@ -1064,11 +1064,13 @@ const styles: Record<string, string> = {
   timelineCellDetailButton:
     "vui-components-conversationview timelineCellDetailButton min-w-0 inline-grid size-6 shrink-0 self-start place-items-center rounded-[var(--radius-control)] border border-transparent bg-transparent p-0 text-[var(--fg-tertiary)] hover:border-[var(--vui-border-subtle)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] disabled:cursor-default disabled:opacity-55",
   timelineCellHeader:
-    "vui-components-conversationview timelineCellHeader min-w-0 overflow-visible !grid !h-auto !w-full grid-cols-[20px_minmax(0,1fr)_24px] !items-start !justify-start gap-x-2 gap-y-1 !border-0 !bg-transparent !p-0 !text-left !shadow-none hover:border-transparent hover:bg-transparent hover:shadow-none hover:!border-transparent hover:!bg-transparent hover:!shadow-none [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
+    "vui-components-conversationview timelineCellHeader min-w-0 overflow-visible !grid !h-auto !min-h-0 !w-full !max-w-full !shrink grid-cols-[20px_minmax(0,1fr)] !items-start !justify-start gap-x-2 gap-y-1 !rounded-none !border-0 !bg-transparent !p-0 !text-left !font-normal !leading-normal !shadow-none hover:border-transparent hover:bg-transparent hover:shadow-none hover:!border-transparent hover:!bg-transparent hover:!shadow-none focus-visible:!rounded-[var(--radius-control)] focus-visible:!ring-2 focus-visible:!ring-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
   timelineCellBody:
     "vui-components-conversationview timelineCellBody min-w-0 overflow-hidden text-left",
   timelineCellCompactTitleRow:
-    "vui-components-conversationview timelineCellCompactTitleRow flex-nowrap overflow-hidden [&_.timelineCellTitle]:max-w-[40%] [&_.timelineCellTitle]:shrink-0 [&_.timelineCellTitle]:truncate [&_.timelineCellTitle]:whitespace-nowrap",
+    "vui-components-conversationview timelineCellCompactTitleRow flex-nowrap overflow-hidden [&_.timelineCellTitle]:max-w-none [&_.timelineCellTitle]:shrink-0 [&_.timelineCellTitle]:whitespace-nowrap",
+  timelineCellInlineChevron:
+    "vui-components-conversationview timelineCellInlineChevron inline-flex size-3.5 min-w-0 shrink-0 items-center justify-center self-center text-[var(--fg-tertiary)]",
   timelineCellInlineSummary:
     "vui-components-conversationview timelineCellInlineSummary min-w-0 flex-1 truncate [font-size:var(--vui-font-sm)] font-normal leading-[1.42] text-[var(--fg-tertiary)]",
   timelineCellSeparator:

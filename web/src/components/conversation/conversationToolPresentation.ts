@@ -26,6 +26,7 @@ const LOW_VALUE_TOOL_RESULTS = new Set([
   "true",
   "完成",
   "已完成",
+  "执行完成",
 ]);
 
 function compactToolPresentationText(value: string) {
@@ -228,6 +229,11 @@ function compactToolPresentationCandidate(
         ? "已返回结构化结果"
         : "Structured result returned";
     } catch {
+      if (normalized.startsWith("[") && !/^\[\s*[{"]/.test(normalized)) {
+        return isLowValueToolResult(normalized)
+          ? ""
+          : compactToolPresentationText(normalized);
+      }
       const semantic = extractTruncatedStructuredSummary(normalized);
       if (semantic) {
         return isLowValueToolResult(semantic)
@@ -303,6 +309,8 @@ export function conversationToolPresentationLabel(
     Record<ConversationToolPresentationLanguage, string>
   > = {
     cli_tool: { zh: "命令", en: "Command" },
+    exec_command: { zh: "运行命令", en: "Run command" },
+    write_stdin: { zh: "写入终端", en: "Write to terminal" },
     grep_search_tool: { zh: "搜索", en: "Search" },
     read_file_tool: { zh: "读取文件", en: "Read file" },
     glob_tool: { zh: "列出文件", en: "List files" },

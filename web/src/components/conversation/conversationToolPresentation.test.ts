@@ -55,6 +55,8 @@ describe("conversation tool presentation", () => {
     ["get_core_context_tool", "核心上下文"],
     ["get_current_goal_tool", "当前目标"],
     ["conversation_log_inspect_tool", "检查会话日志"],
+    ["exec_command", "运行命令"],
+    ["write_stdin", "写入终端"],
   ])("maps %s to its Chinese display label", (toolName, expected) => {
     expect(conversationToolPresentationLabel(toolName, "zh")).toBe(expected);
   });
@@ -94,7 +96,7 @@ describe("conversation tool presentation", () => {
     ).toBe("conversation_20260717_234402__chat__你好.jsonl");
   });
 
-  it.each(["ok", "done", "success", '{"status":"ok"}'])(
+  it.each(["ok", "done", "success", "执行完成", '{"status":"ok"}'])(
     "hides low-value completed summaries: %s",
     (resultPreview) => {
       expect(
@@ -105,6 +107,14 @@ describe("conversation tool presentation", () => {
       ).toBe("");
     },
   );
+
+  it("keeps bracket-prefixed human-readable failures instead of treating them as broken JSON", () => {
+    expect(completedToolPresentationSummary({
+      toolSummary: "[超时] 命令执行超时",
+      toolName: "exec_command",
+      language: "zh",
+    })).toBe("[超时] 命令执行超时");
+  });
 
   it("turns a code-symbol payload into one semantic activity summary", () => {
     expect(
