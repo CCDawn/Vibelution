@@ -2,11 +2,14 @@ import { describe, expect, it } from "vitest";
 
 import {
   compactConversationPreview,
+  hasOperationDetails,
   operationGroupTitle,
   operationStatusFallbackText,
+  operationStatusIconKind,
   operationStatusToneClassNameFromTone,
   operationTimelineTitle,
   operationVisualTone,
+  processSummaryIconKind,
   rolloutTraceEventLabel,
   shouldRenderCodexTranscriptSurface,
   shouldRenderCompactActiveTurnPlaceholder,
@@ -57,5 +60,15 @@ describe("conversationOperationPresentation", () => {
       hasActiveProcess: false,
       turnErrorMessage: false,
     })).toBe(false);
+  });
+
+  it("classifies status/process icons and detects operation details", () => {
+    expect(operationStatusIconKind("done", false, true)).toBe("done");
+    expect(operationStatusIconKind("running", true, true)).toBe("running");
+    expect(operationStatusIconKind("running", true, false)).toBe("running_static");
+    expect(processSummaryIconKind("failed")).toBe("failed");
+    expect(processSummaryIconKind("done")).toBe("done");
+    expect(hasOperationDetails({ arguments: { a: 1 } })).toBe(true);
+    expect(hasOperationDetails({})).toBe(false);
   });
 });

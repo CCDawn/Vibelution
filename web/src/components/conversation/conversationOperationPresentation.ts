@@ -123,3 +123,58 @@ export function shouldRenderCompactActiveTurnPlaceholder(input: {
     && !input.turnErrorMessage,
   );
 }
+
+export type OperationStatusIconKind = "done" | "running" | "running_static" | "idle";
+
+export function operationStatusIconKind(
+  status: string,
+  isRunning: boolean,
+  animateRunning = true,
+): OperationStatusIconKind {
+  const normalized = status.trim().toLowerCase();
+  if (["done", "success", "completed", "succeeded"].includes(normalized)) {
+    return "done";
+  }
+  if (isRunning) {
+    return animateRunning ? "running" : "running_static";
+  }
+  return "idle";
+}
+
+export type ProcessSummaryIconKind = "running" | "failed" | "degraded" | "done" | "default";
+
+export function processSummaryIconKind(tone: string): ProcessSummaryIconKind {
+  if (tone === "running") {
+    return "running";
+  }
+  if (tone === "failed") {
+    return "failed";
+  }
+  if (tone === "degraded") {
+    return "degraded";
+  }
+  if (tone === "done") {
+    return "done";
+  }
+  return "default";
+}
+
+export function hasOperationDetails(operation: {
+  arguments?: Record<string, unknown> | null;
+  resultPreview?: unknown;
+  error?: unknown;
+  resultType?: unknown;
+  resultLength?: unknown;
+  timeoutSeconds?: unknown;
+  tracePath?: unknown;
+}) {
+  return Boolean(
+    Object.keys(operation.arguments ?? {}).length
+    || operation.resultPreview
+    || operation.error
+    || operation.resultType
+    || operation.resultLength !== undefined
+    || operation.timeoutSeconds !== undefined
+    || operation.tracePath,
+  );
+}

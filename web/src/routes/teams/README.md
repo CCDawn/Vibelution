@@ -69,6 +69,9 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 | SC mode fields inject UI | `TeamSourceCollectionModeFields.tsx` | TeamsRoute query ownership |
 | SC search-brief inject | `TeamSourceCollectionSearchBriefInject.tsx` | start mutation ownership |
 | SC manual writeback inject | `TeamSourceCollectionManualWritebackInject.tsx` | record mutation ownership |
+| SC controls inject | `TeamSourceCollectionControlsInject.tsx` | side-rail workspace body |
+| SC active-stage inject | `TeamSourceCollectionActiveStageInject.tsx` | active-stage workspace body |
+| SC filter/pagination pure | `source-collection/injectModel.ts` | route-only JSX |
 | Orchestration / wiring only | `../TeamsRoute.tsx` | — |
 
 ## Bundle note (path-scoped secondary packs)
@@ -131,6 +134,7 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 | T2.1 | SC stage chat-state pure | **Done** — same module (`resolveSourceCollectionStageAgentChatState`) |
 | T2.2 | SC inject model + mode fields claim | **Done** — `injectModel` + `TeamSourceCollectionModeFields` |
 | T2.3 | SC search-brief / writeback inject claims | **Done** — `*SearchBriefInject` / `*ManualWritebackInject` |
+| T2.4 | SC controls/active-stage inject + filter/page pure | **Done** |
 
 ## Next (planned) — Phase 9+
 

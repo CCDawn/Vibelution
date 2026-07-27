@@ -78,6 +78,7 @@ Approximate ownership inside the shell. Line ranges drift; use the map by
 | C3.1 | Operation labels / codex surface gates | **Done** — `conversationOperationPresentation.ts` |
 | C3.2 | Composer action + segment-cache claims | **Done** — `conversationComposerActionModel` / `conversationResponseSegmentCache` |
 | C3.3 | Operation icon kind pure claim | **Done** — `conversationOperationIconModel` |
+| C3.4 | Status/process icon kinds + operation details pure | **Done** — `conversationOperationPresentation` |
 | Further pure extract | only when a claim needs it | deferred |
 
 ## Rules

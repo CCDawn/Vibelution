@@ -41,5 +41,8 @@ describe("dictionary domain boundary", () => {
     expect(agentsSource).toContain("agentsWorkbenchBulkArchive:");
     expect(agentsSource).toContain("agentsWorkbenchFilterStatus:");
     expect(agentsSource).toContain("agentsWorkbenchManagementBriefTitle:");
+    expect(agentsSource).toContain("agentsWorkbenchGroupActive:");
+    expect(agentsSource).toContain("agentsWorkbenchGroupDescTeam:");
+    expect(agentsSource).toContain("agentsWorkbenchFilterMissingPersona:");
   });
 });
