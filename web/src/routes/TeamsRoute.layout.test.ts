@@ -2811,8 +2811,13 @@ describe("TeamsRoute layout contract", () => {
     );
     expect(standaloneSource).toContain("sourceCollectionBoardNextStepLabel");
     expect(standaloneSource).not.toContain("{renderSourceCollectionControlsPanel()}");
-    expect(routeSource).toContain("sourceCollectionFilterLoadingCount");
-    expect(routeSource).toContain('filter === "all" ? sourceCollectionLoadingText : "..."');
+    expect(routeSource).toContain("buildSourceCollectionFilterBarOptions");
+    expect(teamSourceCollectionInjectModelSource).toContain("buildSourceCollectionFilterBarOptions");
+    expect(routeSource).toContain("resolveSourceCollectionPaginationView");
+    expect(routeSource).toContain("TeamSourceCollectionControlsInject");
+    expect(routeSource).toContain("TeamSourceCollectionActiveStageInject");
+    expect(teamSourceCollectionInjectModelSource).toContain('filter === ("all" as Key)');
+    expect(routeSource).toContain("loadingAllText: sourceCollectionLoadingText");
     expect(routeSource).not.toContain("count: loading ? loadingValue");
 
     const commandStatsSource = standaloneSource.slice(
