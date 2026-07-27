@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import type { ConversationMessage } from "../../api/types";
 import { ConversationView } from "./ConversationView";
+import styles from "./ConversationView.styles";
 
 function renderConversation(messages: ConversationMessage[], processDisplayMode: "answer" | "trace" = "trace") {
   const queryClient = new QueryClient({
@@ -174,6 +175,54 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html).toContain('data-codex-process-disclosure="true"');
     expect(html).toContain('open=""');
     expect(html).not.toContain("responseSection");
+  });
+
+  it("aligns expanded compact tool diagnostics with the tool body column", () => {
+    const html = renderConversation([
+      {
+        id: "message-compact-tool-error",
+        role: "assistant",
+        content: "",
+        timestamp: "2026-07-27T10:17:00.000Z",
+        codexTranscript: {
+          version: 1,
+          source: "native",
+          messageId: "message-compact-tool-error",
+          cells: [
+            {
+              id: "compact-tool-error",
+              kind: "error_notice",
+              messageId: "message-compact-tool-error",
+              status: "failed",
+              tone: "error",
+              title: "write_stdin",
+              text: "终端会话已结束",
+              operationIds: ["operation-write-stdin"],
+              diagnosticSummary: {
+                reasonCode: "terminal_stdin_unavailable",
+                reasonSummary: "终端会话已结束，不能继续写入。",
+              },
+            },
+          ],
+        },
+      },
+    ]);
+
+    const diagnosticAttribute = html.indexOf('data-codex-error-diagnostic="true"');
+    const detailsStart = html.lastIndexOf("<details", diagnosticAttribute);
+    const detailsEnd = html.indexOf("</details>", detailsStart);
+    const detailsMarkup = html.slice(detailsStart, detailsEnd);
+    const summaryEnd = detailsMarkup.indexOf("</summary>");
+
+    expect(diagnosticAttribute).toBeGreaterThanOrEqual(0);
+    expect(detailsStart).toBeGreaterThanOrEqual(0);
+    expect(detailsEnd).toBeGreaterThan(detailsStart);
+    expect(detailsMarkup.slice(0, summaryEnd)).toContain("write_stdin");
+    expect(detailsMarkup.slice(0, summaryEnd)).toContain("技术详情");
+    expect(detailsMarkup.indexOf("turnErrorReasonList")).toBeGreaterThan(summaryEnd);
+    expect(styles.codexTranscriptCompactErrorDetails).toContain("w-full");
+    expect(styles.codexTranscriptCompactErrorDetails).not.toContain("inline-block");
+    expect(styles.codexTranscriptCompactErrorDetails).not.toContain("shrink-0");
   });
 
   it("keeps commentary, tool, and final answer in canonical DOM order with tool details closed", () => {
