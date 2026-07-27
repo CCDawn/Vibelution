@@ -20,6 +20,43 @@ function toolCell(id: string, summary: string): CodexTranscriptCell {
 }
 
 describe("ConversationToolActivity", () => {
+  it("projects completed terminal output instead of its stale running payload", () => {
+    const cell = toolCell("terminal-completed", "");
+    cell.title = "exec_command";
+    cell.toolLifecycleModel = {
+      toolCalls: [
+        {
+          toolCallId: "terminal-completed",
+          rawOperationId: "terminal-completed",
+          status: "completed",
+          title: "exec_command",
+          rawToolName: "exec_command",
+          runtimeKind: "terminal",
+          summary: JSON.stringify({
+            status: "running",
+            terminalSessionId: "sandbox-1",
+            sessionOpen: true,
+          }),
+          resultPreview: "# Vibelution Development Standard",
+        },
+      ],
+      terminalOperations: [],
+      terminalSessions: [],
+      modelObservations: [],
+    };
+
+    const html = renderToStaticMarkup(
+      <ConversationToolActivity
+        activity={createCodexTranscriptToolActivity([cell])}
+        language="zh"
+        renderToolDetails={() => <pre>raw result</pre>}
+      />,
+    );
+
+    expect(html).toContain("# Vibelution Development Standard");
+    expect(html).not.toContain(">running<");
+  });
+
   it("keeps a long sequence as flat Codex-style tool rows", () => {
     const html = renderToStaticMarkup(
       <ConversationToolActivity
@@ -96,6 +133,9 @@ describe("ConversationToolActivity", () => {
     expect(styles.itemSummary).toContain("grid-cols-[17px_minmax(0,1fr)]");
     expect(styles.itemSummary).not.toContain("grid-cols-[17px_minmax(0,1fr)_16px]");
     expect(styles.batchSummary).toContain("grid-cols-[17px_minmax(0,1fr)]");
+    expect(styles.itemChevron).toContain("-rotate-90");
+    expect(styles.itemChevron).toContain("group-open:rotate-0");
+    expect(styles.itemChevron).not.toContain("group-open:rotate-180");
   });
 
   it("uses a semantic code result as the row title without repeating the generic tool name", () => {

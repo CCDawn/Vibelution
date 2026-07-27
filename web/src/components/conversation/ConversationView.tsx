@@ -1727,6 +1727,7 @@ export function ConversationView({
         cellSummary: cell.summary,
         resultPreview: cell.text,
         toolName: rawErrorTitle,
+        status: cell.status,
         language: lang === "en" ? "en" : "zh",
       });
       const diagnosticRows = buildTurnErrorDiagnosticRows(cell.diagnosticSummary, lang);
@@ -1912,6 +1913,7 @@ export function ConversationView({
       resultPreview: toolCall?.resultPreview,
       cellText: cell.text,
       toolName: toolCall?.rawToolName || cell.title,
+      status: cell.status,
       language: lang,
     });
   }
@@ -2391,6 +2393,7 @@ export function ConversationView({
           resultPreview: operation.resultPreview,
           cellText: item.summary,
           toolName: rawToolName,
+          status: item.status,
           language: lang,
         })
       : statusTone === "failed" && operation.error?.trim()

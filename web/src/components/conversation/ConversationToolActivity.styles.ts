@@ -41,7 +41,7 @@ const styles = {
   ),
   itemChevron: cx(
     "itemChevron",
-    "shrink-0 self-center text-[var(--fg-tertiary)] transition-transform duration-150 group-open:rotate-180",
+    "shrink-0 -rotate-90 self-center text-[var(--fg-tertiary)] transition-transform duration-150 group-open:rotate-0",
   ),
   itemDetailsBody: cx(
     "itemDetailsBody",
