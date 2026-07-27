@@ -1,6 +1,6 @@
 # Agent 规范权威统一迁移计划
 
-> Status: in-progress
+> Status: implemented
 > Baseline: `f8be120d4425`
 > Branch: `codex/agent-governance-unification`
 > Owner: `agent-runtime-core`
@@ -120,9 +120,11 @@ Critical Path：Task 1 → Task 2 → Task 3。共享规范与测试路径均串
 
 当前执行状态：
 
-- Task 1：implemented in branch；
-- Task 2：implemented in branch；
-- Task 3：focused verification passed，等待最终 diff/集成与真实 Launcher Prompt snapshot。
+- Task 1：implemented and integrated；
+- Task 2：implemented and integrated；
+- Task 3：focused verification and live Prompt snapshot passed。
+
+验收会话：`session-20260727-163103-480703`。运行时快照的核心来源严格为 `COMMON / SOUL / AGENTS`，其中 `AGENTS` hash 为 `sha256:c7662acad28b4958c92bcdc6652dce53fcd6b76f7a68f1becc5d7b82e7073f37`。
 
 ## 8. 风险与回滚
 
