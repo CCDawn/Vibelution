@@ -6,6 +6,16 @@ from __future__ import annotations
 import time
 from typing import Optional, List, Dict, Any
 
+from core.prompt_manager.assembly_contract import (
+    PromptAssemblyManifest,
+    PromptCachePolicy,
+    PromptDecision,
+    PromptPlacement,
+    PromptSegment,
+    PromptStability,
+    PromptTier,
+    PromptTrust,
+)
 from core.prompt_manager.types import (
     SystemPrompt,
     SystemPromptSection,
@@ -82,6 +92,37 @@ def get_system_prompt(
     if available:
         dynamic_parts.insert(0, available)
 
+    prefix_results = [
+        result
+        for result in results
+        if result.content and (not result.cache_break or result.cache_prefix)
+    ]
+    dynamic_results = [
+        result
+        for result in results
+        if result.content and result.cache_break and not result.cache_prefix
+    ]
+    omitted_results = [result for result in results if not result.content]
+    manifest_segments = [_segment_from_render_result(result) for result in prefix_results]
+    if available:
+        manifest_segments.append(
+            PromptSegment.from_content(
+                key="AVAILABLE_SECTIONS",
+                content=available,
+                tier=PromptTier.TURN_CONTEXT,
+                placement=PromptPlacement.BEFORE_CURRENT_USER,
+                stability=PromptStability.TURN_DYNAMIC,
+                trust=PromptTrust.DERIVED_RUNTIME,
+                source="prompt_manager.builder",
+                cache_policy=PromptCachePolicy.NEVER_CACHE,
+                decision=PromptDecision.FULL,
+                decision_reason="rendered_section_index",
+            )
+        )
+    manifest_segments.extend(_segment_from_render_result(result) for result in dynamic_results)
+    manifest_segments.extend(_segment_from_render_result(result) for result in omitted_results)
+    assembly_manifest = PromptAssemblyManifest.from_segments(manifest_segments)
+
     parts: List[str] = []
     parts.extend(prefix_parts)
     if dynamic_parts:
@@ -95,6 +136,7 @@ def get_system_prompt(
     return PromptBuildResult(
         prompt=prompt,
         section_results=tuple(results),
+        assembly_manifest=assembly_manifest,
         available_sections_text=available,
         join_duration_ms=join_duration_ms,
     )
@@ -159,3 +201,48 @@ def _build_available_sections(
         parts.append("- 使用 `<active_components>` 标签按需激活可选组件\n")
 
     return "".join(parts)
+
+
+def _segment_from_render_result(result: SectionRenderResult) -> PromptSegment:
+    is_core = result.name in {"COMMON", "SOUL", "AGENTS"}
+    is_protocol_adapter = result.name == "PROTOCOL_ADAPTER"
+    is_prefix = not result.cache_break or result.cache_prefix
+    if is_core:
+        tier = PromptTier.STABLE_CORE
+        stability = PromptStability.PROJECT_STATIC
+        trust = PromptTrust.PROTECTED_CORE
+    elif is_protocol_adapter:
+        tier = PromptTier.PROTOCOL_ADAPTER
+        stability = PromptStability.PROTOCOL_STATIC
+        trust = PromptTrust.DERIVED_RUNTIME
+    elif is_prefix:
+        tier = PromptTier.SESSION_SNAPSHOT
+        stability = PromptStability.SESSION_STATIC
+        trust = PromptTrust.OPERATOR_CONTROLLED
+    else:
+        tier = PromptTier.TURN_CONTEXT
+        stability = PromptStability.TURN_DYNAMIC
+        trust = PromptTrust.DERIVED_RUNTIME
+    decision = PromptDecision.FULL if result.content else PromptDecision.OMITTED
+    return PromptSegment.from_content(
+        key=result.name,
+        content=result.content or "",
+        tier=tier,
+        placement=(
+            PromptPlacement.SYSTEM_PREFIX
+            if is_prefix
+            else PromptPlacement.BEFORE_CURRENT_USER
+        ),
+        stability=stability,
+        trust=trust,
+        source=f"prompt_manager.section.{result.name.lower()}",
+        required=result.required,
+        cache_policy=(
+            PromptCachePolicy.CACHEABLE
+            if is_prefix
+            else PromptCachePolicy.NEVER_CACHE
+        ),
+        decision=decision,
+        decision_reason="rendered" if result.content else "empty",
+        cache_hit=result.source == "cache",
+    )

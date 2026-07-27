@@ -309,6 +309,7 @@ class PromptManager:
 
         # 最近一次 build 的索引
         self._last_index: List[Dict[str, Any]] = []
+        self._last_assembly_manifest: Dict[str, Any] = {}
         self._last_runtime_goal_blocked_sections: List[str] = []
         self._pending_runtime_goal_blocked_sections: List[str] = []
 
@@ -451,6 +452,7 @@ class PromptManager:
             all_sections=all_ordered_sections,
         )
         sp = build_result.prompt
+        self._last_assembly_manifest = build_result.assembly_manifest.to_public_dict()
         render_duration_ms = (time.perf_counter() - render_started) * 1000
 
         # 记录索引（复用本次真实构建结果，避免二次 compute）
@@ -1390,6 +1392,7 @@ class PromptManager:
             "active_sections_override": self._active_sections_override,
             "section_cache": self._section_cache.stats,
             "last_index": self._last_index,
+            "last_assembly_manifest": dict(self._last_assembly_manifest),
             "last_build_summary": getattr(self, "_last_build_summary", {}),
         }
 
@@ -1409,6 +1412,11 @@ class PromptManager:
     def get_last_index(self) -> List[Dict[str, Any]]:
         """返回最近一次 build() 的章节索引。"""
         return self._last_index
+
+    def get_last_assembly_manifest(self) -> Dict[str, Any]:
+        """Return the latest sanitized Prompt Assembly manifest."""
+
+        return dict(self._last_assembly_manifest)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
