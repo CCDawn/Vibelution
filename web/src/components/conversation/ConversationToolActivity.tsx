@@ -35,6 +35,7 @@ function visibleToolSummary(cell: CodexTranscriptCell, language: ConversationToo
     resultPreview: toolCall?.resultPreview,
     cellText: cell.text,
     toolName: codexTranscriptToolRawName(cell),
+    status: cell.status,
     language,
   });
 }

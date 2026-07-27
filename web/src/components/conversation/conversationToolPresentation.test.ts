@@ -7,6 +7,53 @@ import {
 } from "./conversationToolPresentation";
 
 describe("conversation tool presentation", () => {
+  it("uses terminal output instead of a stale running payload after the call completed", () => {
+    expect(
+      completedToolPresentationSummary({
+        toolSummary: JSON.stringify({
+          status: "running",
+          terminalSessionId: "sandbox-1",
+          sessionOpen: true,
+        }),
+        resultPreview: "# Vibelution Development Standard",
+        toolName: "exec_command",
+        status: "completed",
+        language: "zh",
+      }),
+    ).toBe("# Vibelution Development Standard");
+  });
+
+  it("falls back to a completed label when a completed terminal call has no useful output", () => {
+    expect(
+      completedToolPresentationSummary({
+        toolSummary: JSON.stringify({
+          status: "running",
+          terminalSessionId: "sandbox-1",
+          sessionOpen: true,
+        }),
+        toolName: "exec_command",
+        status: "completed",
+        language: "zh",
+      }),
+    ).toBe("已完成");
+  });
+
+  it("shows running only when the terminal tool lifecycle is actually active", () => {
+    expect(
+      completedToolPresentationSummary({
+        toolSummary: JSON.stringify({
+          status: "running",
+          terminalSessionId: "sandbox-1",
+          sessionOpen: true,
+        }),
+        resultPreview: "partial output",
+        toolName: "exec_command",
+        status: "running",
+        language: "zh",
+      }),
+    ).toBe("正在运行");
+  });
+
   it("uses the semantic lifecycle summary before a structured result preview", () => {
     expect(
       completedToolPresentationSummary({

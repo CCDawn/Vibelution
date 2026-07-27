@@ -6,6 +6,7 @@ interface CompletedToolPresentationSummaryInput {
   resultPreview?: string;
   cellText?: string;
   toolName?: string;
+  status?: string;
   language: ConversationToolPresentationLanguage;
 }
 
@@ -256,22 +257,38 @@ export function completedToolPresentationSummary({
   resultPreview,
   cellText,
   toolName,
+  status,
   language,
 }: CompletedToolPresentationSummaryInput) {
-  for (const candidate of [
-    toolSummary,
-    cellSummary,
-    resultPreview,
-    cellText,
-  ]) {
+  const normalizedToolName = String(toolName ?? "").trim().toLowerCase();
+  const normalizedStatus = String(status ?? "").trim().toLowerCase();
+  const terminalTool = normalizedToolName === "exec_command"
+    || normalizedToolName === "write_stdin";
+  if (terminalTool && (normalizedStatus === "running" || normalizedStatus === "pending")) {
+    return language === "zh" ? "正在运行" : "Running";
+  }
+  const candidates = terminalTool && normalizedStatus === "completed"
+    ? [resultPreview, cellText, toolSummary, cellSummary]
+    : [toolSummary, cellSummary, resultPreview, cellText];
+  for (const candidate of candidates) {
     const summary = compactToolPresentationCandidate(
       candidate,
       toolName,
       language,
     );
     if (summary) {
+      if (
+        terminalTool
+        && normalizedStatus === "completed"
+        && ["running", "pending", "正在运行"].includes(summary.trim().toLowerCase())
+      ) {
+        continue;
+      }
       return summary;
     }
+  }
+  if (terminalTool && normalizedStatus === "completed") {
+    return language === "zh" ? "已完成" : "Completed";
   }
   return "";
 }
