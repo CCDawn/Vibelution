@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Sequence
 
@@ -24,6 +25,91 @@ class CatalogReconcileResult:
     session_count: int
     source_revision: str
     orphan_journal_count: int = 0
+
+
+@dataclass(frozen=True)
+class SessionQueryShadowComparison:
+    status: str
+    mismatch_kinds: tuple[str, ...] = ()
+    legacy_count: int = 0
+    candidate_count: int = 0
+    error_type: str = ""
+
+
+_SHADOW_PROVIDER_LOCK = threading.Lock()
+_SESSION_QUERY_SHADOW_PROVIDER: (
+    Callable[[Mapping[str, Any]], Mapping[str, Any]] | None
+) = None
+_SHADOW_STATE_FIELDS = (
+    "conversationIndexVisibility",
+    "sessionKind",
+    "status",
+    "currentPhase",
+    "childStatus",
+)
+
+
+def set_session_query_shadow_provider(
+    provider: Callable[[Mapping[str, Any]], Mapping[str, Any]] | None,
+) -> None:
+    """Install the bounded SQL candidate provider; ``None`` keeps rollout off."""
+
+    global _SESSION_QUERY_SHADOW_PROVIDER
+    with _SHADOW_PROVIDER_LOCK:
+        _SESSION_QUERY_SHADOW_PROVIDER = provider
+
+
+def run_session_query_shadow(
+    legacy_payload: Mapping[str, Any],
+    *,
+    request: Mapping[str, Any],
+) -> SessionQueryShadowComparison:
+    with _SHADOW_PROVIDER_LOCK:
+        provider = _SESSION_QUERY_SHADOW_PROVIDER
+    if provider is None:
+        return SessionQueryShadowComparison(status="disabled")
+    try:
+        candidate = provider(dict(request))
+        return compare_session_query_payloads(legacy_payload, candidate)
+    except Exception as exc:
+        return SessionQueryShadowComparison(
+            status="degraded",
+            legacy_count=len(_payload_items(legacy_payload)),
+            error_type=type(exc).__name__,
+        )
+
+
+def compare_session_query_payloads(
+    legacy_payload: Mapping[str, Any],
+    candidate_payload: Mapping[str, Any],
+) -> SessionQueryShadowComparison:
+    """Compare only bounded query contract fields, never titles or user text."""
+
+    legacy_items = _payload_items(legacy_payload)
+    candidate_items = _payload_items(candidate_payload)
+    mismatches: list[str] = []
+    if [_item_id(item) for item in legacy_items] != [
+        _item_id(item) for item in candidate_items
+    ]:
+        mismatches.append("item_ids")
+    if [_item_state(item) for item in legacy_items] != [
+        _item_state(item) for item in candidate_items
+    ]:
+        mismatches.append("item_state")
+    if str(legacy_payload.get("nextCursor") or "") != str(
+        candidate_payload.get("nextCursor") or ""
+    ):
+        mismatches.append("next_cursor")
+    if _safe_int(legacy_payload.get("totalEstimate")) != _safe_int(
+        candidate_payload.get("totalEstimate")
+    ):
+        mismatches.append("total_estimate")
+    return SessionQueryShadowComparison(
+        status="mismatch" if mismatches else "match",
+        mismatch_kinds=tuple(mismatches),
+        legacy_count=len(legacy_items),
+        candidate_count=len(candidate_items),
+    )
 
 
 def build_catalog_snapshot(
@@ -312,3 +398,25 @@ def _canonical_hash(value: Any) -> str:
         separators=(",", ":"),
     ).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
+
+
+def _payload_items(payload: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    raw_items = payload.get("items")
+    if not isinstance(raw_items, list):
+        return []
+    return [item for item in raw_items if isinstance(item, Mapping)]
+
+
+def _item_id(item: Mapping[str, Any]) -> str:
+    return str(item.get("id") or item.get("sessionId") or "").strip()
+
+
+def _item_state(item: Mapping[str, Any]) -> tuple[str, ...]:
+    return tuple(str(item.get(field) or "").strip() for field in _SHADOW_STATE_FIELDS)
+
+
+def _safe_int(value: Any) -> int:
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0

@@ -837,7 +837,7 @@ def query_sessions(
         has_state_filter=bool(normalized_state),
         sort=normalized_sort,
     )
-    return {
+    payload = {
         "items": page_items,
         "nextCursor": next_cursor,
         "totalEstimate": total,
@@ -851,6 +851,27 @@ def query_sessions(
             "cursor": str(start) if start > 0 else "",
         },
     }
+    try:
+        catalog_config = getattr(s.get_config(), "session_catalog", None)
+        if str(getattr(catalog_config, "mode", "off") or "off") == "shadow":
+            from . import catalog_bridge
+
+            catalog_bridge.run_session_query_shadow(
+                payload,
+                request={
+                    "limit": normalized_limit,
+                    "cursor": str(start) if start > 0 else "",
+                    "q": str(q or "").strip(),
+                    "agent_id": normalized_agent_id,
+                    "session_kind": normalized_session_kind,
+                    "state": normalized_state,
+                    "sort": normalized_sort,
+                },
+            )
+    except Exception:
+        # Shadow failures must never change the canonical legacy response.
+        pass
+    return payload
 
 
 def select_chat_session(session_id: str) -> dict:
