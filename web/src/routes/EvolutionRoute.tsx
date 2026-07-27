@@ -104,10 +104,12 @@ import {
   SUPERVISED_WORKFLOW_STEPS,
   supervisedMemberAgentManagementRoute,
   supervisedMemberChatRoute,
+  supervisedDatasetLimitFromInput,
   supervisedMemberModelId,
   supervisedMemberModelLabel,
   supervisedPreflightIssue,
   supervisedProposalStatusLabel,
+  supervisedRoleConversationSession,
   supervisedRunBucketLabel,
   supervisedWorkflowStepLabel,
   toLimitInput,
@@ -307,6 +309,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const [datasetName, setDatasetName] = useState("");
   const [selectedDatasetCatalogFilter, setSelectedDatasetCatalogFilter] = useState<DatasetCatalogFilter>("all");
   const [datasetLimitInput, setDatasetLimitInput] = useState("");
+  const datasetLimitInputRef = useRef<HTMLInputElement | null>(null);
   const [bundleNameInput, setBundleNameInput] = useState("");
   const [keepWorktree, setKeepWorktree] = useState(false);
   const [supervisedMentalModelMode, setSupervisedMentalModelMode] = useState<SupervisedMentalModelMode>("follow");
@@ -455,14 +458,6 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     refetchIntervalInBackground: false,
     enabled: Boolean(selfTrackQueriesEnabled && selectedSelfObservationRunId),
   });
-  const selectedDatasetLimit = useMemo(
-    () => (
-      sourceKind === "dataset" && datasetLimitInput.trim()
-        ? Number(datasetLimitInput.trim())
-        : null
-    ),
-    [datasetLimitInput, sourceKind],
-  );
   const {
     startWorktreeRunMutation,
     startSimulationWorktreeRunMutation,
@@ -481,7 +476,10 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     getStartPayload: () => ({
       sourceKind,
       datasetName,
-      datasetLimit: selectedDatasetLimit,
+      datasetLimit: supervisedDatasetLimitFromInput(
+        sourceKind,
+        datasetLimitInputRef.current?.value ?? datasetLimitInput,
+      ),
       bundleName: bundleNameInput,
       keepWorktree,
       mentalModelMode: supervisedMentalModelMode,
@@ -655,14 +653,17 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     setSelectedSupervisedWorkflowStepId(null);
     setSelectedSupervisedAgentRole(null);
   }, [supervisedMembersRunIdentity]);
+  const backendWorkflowSteps = supervisedWorkflowRun?.workflowSteps ?? [];
+  const backendWorkflowCurrent = backendWorkflowSteps.find((step) => step.current);
   const supervisedRunMembers = useMemo<SupervisedRunMember[]>(() => {
     const bindings = supervisedMembersBindings;
     const roleSessions = supervisedMembersRun?.roleConversationSessions ?? {};
-    const currentRole = String(supervisedMembersRun?.currentRole || "").trim().toLowerCase();
+    const currentRole = String(supervisedMembersRun?.currentRole || backendWorkflowCurrent?.role || "").trim().toLowerCase();
     const currentAgentId = String(supervisedMembersRun?.currentAgentBinding?.agentId || "").trim();
     return SUPERVISED_RUN_MEMBER_ROLES.map((role) => {
       const binding = bindings[role] ?? {};
-      const conversationSession = roleSessions[role];
+      const conversationSession = roleSessions[role]
+        ?? supervisedRoleConversationSession(backendWorkflowSteps, role);
       const conversationSessionId = String(conversationSession?.conversationSessionId || "").trim();
       const agentId = String(binding.agentId || "").trim();
       const roleText = String(binding.roleLabel || "").trim() || runRoleLabel(role);
@@ -690,6 +691,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     supervisedMemberReturnLabel,
     supervisedMemberReturnTo,
     supervisedMembersBindings,
+    backendWorkflowCurrent?.role,
+    supervisedWorkflowRun?.workflowSteps,
     supervisedMembersRun?.currentAgentBinding?.agentId,
     supervisedMembersRun?.currentRole,
     supervisedMembersRun?.roleConversationSessions,
@@ -698,8 +701,6 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     () => new Map(supervisedRunMembers.map((member) => [member.role, member])),
     [supervisedRunMembers],
   );
-  const backendWorkflowSteps = supervisedWorkflowRun?.workflowSteps ?? [];
-  const backendWorkflowCurrent = backendWorkflowSteps.find((step) => step.current);
   const supervisedRuntimeWorkflowStepId = (
     SUPERVISED_WORKFLOW_STEPS.some((step) => step.id === backendWorkflowCurrent?.id)
       ? backendWorkflowCurrent?.id
@@ -745,10 +746,13 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   );
   const normalizedSupervisedRuntimeRole = String(
     supervisedMembersRun?.currentRole
+    || backendWorkflowCurrent?.role
     || monitoredRun?.currentRole
     || "",
   ).trim().toLowerCase() as SupervisedMemberRole;
-  const supervisedRunIsLive = Boolean(monitoredRun && isLiveSupervisedRunStatus(monitoredRun.status));
+  const supervisedRunIsLive = Boolean(
+    supervisedWorkflowRun && isLiveSupervisedRunStatus(supervisedWorkflowRun.status),
+  );
   const supervisedActiveAgentRole = supervisedRunIsLive
     ? SUPERVISED_RUN_MEMBER_ROLES.includes(normalizedSupervisedRuntimeRole)
       ? normalizedSupervisedRuntimeRole
@@ -2477,6 +2481,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                             <VContextualHint content={t("caseLimitHint")} label={`${t("caseLimit")}说明`} />
                           </div>
                           <VInput
+                            ref={datasetLimitInputRef}
                             id="supervised-limit"
                             className={styles.textInput}
                             type="number"

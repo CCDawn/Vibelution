@@ -261,6 +261,26 @@ export function supervisedMemberChatRoute(sessionId: string, returnTo: string, r
   return `/chat?${params.toString()}`;
 }
 
+export function supervisedRoleConversationSession(
+  steps: EvolutionWorkflowStep[],
+  role: SupervisedMemberRole,
+): EvolutionRoleConversationSession | undefined {
+  const matchingSteps = steps.filter((step) => step.role === role && String(step.conversationSessionId || "").trim());
+  const step = matchingSteps.find((item) => item.current) ?? [...matchingSteps].reverse()[0];
+  const conversationSessionId = String(step?.conversationSessionId || "").trim();
+  if (!step || !conversationSessionId) {
+    return undefined;
+  }
+  return {
+    role,
+    status: step.status || "pending",
+    conversationPath: `session:${conversationSessionId}`,
+    conversationSessionId,
+    conversationTurnId: step.conversationTurnId || "",
+    latestMessage: step.livePreview || step.summary || "",
+  };
+}
+
 export function supervisedPreflightIssue(run: EvolutionActiveRun | null | undefined, lang: "zh" | "en"): SupervisedPreflightIssue | null {
   const latestPreflightEvent = [...(run?.eventTail ?? [])].reverse().find((event) => {
     const phase = String((event as { phase?: unknown }).phase || "").trim();
@@ -301,6 +321,18 @@ export function toLimitInput(value: number | null | undefined) {
     return "";
   }
   return String(value);
+}
+
+export function supervisedDatasetLimitFromInput(sourceKind: string, value: string) {
+  if (sourceKind !== "dataset") {
+    return null;
+  }
+  const normalized = String(value || "").trim();
+  if (!normalized) {
+    return null;
+  }
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : null;
 }
 
 export function compactTimestamp(value: string) {
