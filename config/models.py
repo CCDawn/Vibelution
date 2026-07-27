@@ -842,6 +842,24 @@ class WebChatConfig(BaseModel):
     )
 
 
+class SessionCatalogConfig(BaseModel):
+    """Rebuildable session metadata catalog rollout settings."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    mode: str = Field(default="off")
+    reconcile_on_startup: bool = Field(default=True)
+    busy_timeout_ms: int = Field(default=5000, ge=0, le=120000)
+
+    @field_validator("mode")
+    @classmethod
+    def normalize_mode(cls, value: str) -> str:
+        normalized = str(value or "off").strip().lower()
+        if normalized not in {"off", "shadow"}:
+            raise ValueError("session_catalog.mode must be one of: off, shadow")
+        return normalized
+
+
 # ============================================================================
 # 上下文压缩配置
 # ============================================================================
@@ -2074,6 +2092,9 @@ class AppConfig(BaseModel):
     user_profile: UserProfileConfig = Field(default_factory=UserProfileConfig)
     agent: AgentConfig = Field(default_factory=AgentConfig)
     web_chat: WebChatConfig = Field(default_factory=WebChatConfig)
+    session_catalog: SessionCatalogConfig = Field(
+        default_factory=SessionCatalogConfig
+    )
     context_compression: ContextCompressionConfig = Field(
         default_factory=ContextCompressionConfig
     )
