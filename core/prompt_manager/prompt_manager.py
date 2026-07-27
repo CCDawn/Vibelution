@@ -29,6 +29,7 @@ from core.prompt_manager.types import (
     as_system_prompt,
     SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
 )
+from core.prompt_manager.assembly_resolver import PromptAssemblyContext
 from core.prompt_manager.section_cache import SystemPromptCache
 from core.prompt_manager.sections import (
     create_default_sections,
@@ -381,6 +382,7 @@ class PromptManager:
         current_goal: Optional[str] = None,
         state_memory: Optional[str] = None,
         frozen_core_sections: Optional[List[str]] = None,
+        assembly_context: PromptAssemblyContext | None = None,
     ) -> SystemPrompt:
         """组装系统提示词。
 
@@ -433,7 +435,7 @@ class PromptManager:
             selected=selected,
         )
         cached = self._get_reusable_build(cache_key)
-        reuse_allowed = self._can_reuse_build(selected)
+        reuse_allowed = assembly_context is None and self._can_reuse_build(selected)
         if reuse_allowed and cached is not None:
             self._last_index = [dict(item) for item in cached["last_index"]]
             self._last_build_summary = dict(cached["summary"])
@@ -450,6 +452,7 @@ class PromptManager:
             selected,
             self._section_cache,
             all_sections=all_ordered_sections,
+            assembly_context=assembly_context,
         )
         sp = build_result.prompt
         self._last_assembly_manifest = build_result.assembly_manifest.to_public_dict()
@@ -953,6 +956,13 @@ class PromptManager:
             for reason in [self._optional_section_reason(name)]
             if reason
         }
+        manifest = build_result.assembly_manifest.to_public_dict()
+        decision_counts: Dict[str, int] = {}
+        for segment in list(manifest.get("segments") or []):
+            if not isinstance(segment, dict):
+                continue
+            decision = str(segment.get("decision") or "unknown")
+            decision_counts[decision] = decision_counts.get(decision, 0) + 1
         return {
             "prompt_mode": self._build_context.prompt_mode,
             "selected_sections": selected_names,
@@ -964,6 +974,15 @@ class PromptManager:
             "cache_prefix_sections": cache_prefix_names,
             "optional_inclusion_reasons": inclusion_reasons,
             "content_length": len(to_string(build_result.prompt)),
+            "prompt_assembly": {
+                "schemaVersion": manifest.get("schemaVersion"),
+                "assemblyMode": manifest.get("assemblyMode"),
+                "stablePrefixHash": manifest.get("stablePrefixHash"),
+                "sessionSnapshotHash": manifest.get("sessionSnapshotHash"),
+                "totalEstimatedTokens": manifest.get("totalEstimatedTokens"),
+                "budgetTokens": manifest.get("budgetTokens"),
+                "decisionCounts": decision_counts,
+            },
         }
 
     def _log_build_summary(self):
@@ -1001,6 +1020,19 @@ class PromptManager:
         if inclusion_reasons:
             reason_text = ",".join(f"{name}:{reason}" for name, reason in inclusion_reasons.items())
             message += f" reasons={reason_text}"
+        assembly = summary.get("prompt_assembly") or {}
+        if assembly:
+            decisions = assembly.get("decisionCounts") or {}
+            decision_text = ",".join(
+                f"{key}:{decisions[key]}"
+                for key in sorted(decisions)
+            )
+            message += (
+                f" assembly={assembly.get('assemblyMode') or '-'}"
+                f" tokens={int(assembly.get('totalEstimatedTokens') or 0)}"
+                f"/{int(assembly.get('budgetTokens') or 0)}"
+                f" decisions={decision_text or '-'}"
+            )
         try:
             from core.logging.unified_logger import logger as unified_logger
             unified_logger.log_debug("prompt_build", message, level="INFO")
@@ -1011,6 +1043,31 @@ class PromptManager:
             debug_logger.info(f"[prompt_build] {message}")
         except Exception:
             pass
+        if assembly.get("assemblyMode") != "legacy_observe":
+            try:
+                from core.web.services.runtime_scene_service import record_runtime_scene_event
+
+                record_runtime_scene_event(
+                    "agent_runtime",
+                    "prompt_manager",
+                    "prompt_build.resolved",
+                    message="prompt_build.resolved",
+                    outcome="resolved",
+                    fields={
+                        "promptMode": summary.get("prompt_mode"),
+                        "assemblyMode": assembly.get("assemblyMode"),
+                        "stablePrefixHash": assembly.get("stablePrefixHash"),
+                        "sessionSnapshotHash": assembly.get("sessionSnapshotHash"),
+                        "totalEstimatedTokens": int(
+                            assembly.get("totalEstimatedTokens") or 0
+                        ),
+                        "budgetTokens": int(assembly.get("budgetTokens") or 0),
+                        "decisionCounts": dict(assembly.get("decisionCounts") or {}),
+                    },
+                    lifecycle=True,
+                )
+            except Exception:
+                pass
 
     # ------------------------------------------------------------------------
     # LLM 动态章节切换

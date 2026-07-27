@@ -24,6 +24,10 @@ from core.prompt_manager.assembly_contract import (
     PromptTier,
     PromptTrust,
 )
+from core.prompt_manager.assembly_resolver import (
+    PromptAssemblyContext,
+    PromptSectionResolver,
+)
 from core.runtime_manager import agent_run_store
 from core.web.services.runtime_scene_service import record_runtime_scene_event
 
@@ -129,6 +133,28 @@ def _join_context_segments(segments: list[dict[str, Any]], placement: str) -> st
     ).strip()
 
 
+def _resolve_context_segments(
+    segments: list[dict[str, Any]],
+    assembly_context: PromptAssemblyContext,
+) -> list[dict[str, Any]]:
+    raw_segments = list(segments)
+    resolution = PromptSectionResolver().resolve(
+        (
+            PromptSegment.from_internal_dict(segment)
+            for segment in raw_segments
+        ),
+        assembly_context,
+    )
+    return [
+        resolved.to_internal_dict(
+            block_key="block",
+            legacy_placement=str(raw.get("placement") or ""),
+            legacy_stability=str(raw.get("stability") or ""),
+        )
+        for raw, resolved in zip(raw_segments, resolution.segments)
+    ]
+
+
 def _join_context_blocks(*blocks: str) -> str:
     return "\n\n".join(str(block or "").strip() for block in blocks if str(block or "").strip()).strip()
 
@@ -161,6 +187,10 @@ def _context_segment_log_summary(segments: list[dict[str, Any]]) -> list[dict[st
             "stability": str(segment.get("stability") or "").strip(),
             "chars": _safe_int(segment.get("chars")),
             "hash": str(segment.get("hash") or "").strip(),
+            "estimatedTokens": _safe_int(segment.get("estimated_tokens")),
+            "budgetTokens": _safe_int(segment.get("budget_tokens")),
+            "decision": str(segment.get("decision") or "").strip(),
+            "decisionReason": str(segment.get("decision_reason") or "").strip(),
         }
         if segment.get("cache_hit") is not None:
             summary["cacheHit"] = bool(segment.get("cache_hit"))
@@ -210,6 +240,7 @@ def build_agent_context(
     limit: int = 6,
     agent_snapshot: dict[str, Any] | None = None,
     include_prompt_template_context: bool = True,
+    assembly_context: PromptAssemblyContext | None = None,
 ) -> AgentContextPacket:
     """Build the bounded context packet used by a persistent Agent turn."""
 
@@ -370,6 +401,11 @@ def build_agent_context(
         )
         if segment is not None
     ]
+    if assembly_context is not None:
+        context_segments = _resolve_context_segments(
+            context_segments,
+            assembly_context,
+        )
     static_context_block = _join_context_segments(context_segments, "cache_prefix")
     dynamic_context_block = _join_context_segments(context_segments, "volatile_turn")
     runtime_context_block = _join_context_blocks(static_context_block, dynamic_context_block)
