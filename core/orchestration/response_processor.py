@@ -3,7 +3,7 @@
 
 负责把原始 LLM 响应整理成主循环更容易消费的结构：
 - 标准 tool-calls 与 XML fallback 分流
-- <state> / <active_components> 回显清洗
+- <state> / <active_components> 兼容回显清洗与诊断提取
 - 可见 thought 文本与 AIMessage 载荷构建
 """
 

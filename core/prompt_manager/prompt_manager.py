@@ -201,6 +201,7 @@ class PromptManager:
         "COMMON",
         "SOUL",
         "AGENTS",
+        "PROTOCOL_ADAPTER",
         "RUNTIME_GOAL",
         "USER_PROFILE",
         "SPEC_DIGEST",
@@ -215,6 +216,7 @@ class PromptManager:
         "COMMON",
         "SOUL",
         "AGENTS",
+        "PROTOCOL_ADAPTER",
         "RUNTIME_GOAL",
         "USER_PROFILE",
         "SPEC_DIGEST",
@@ -232,6 +234,7 @@ class PromptManager:
         "COMMON",
         "SOUL",
         "AGENTS",
+        "PROTOCOL_ADAPTER",
         "RUNTIME_GOAL",
         "USER_PROFILE",
         "TASK_CHECKLIST",
@@ -311,6 +314,7 @@ class PromptManager:
         # 最近一次 build 的索引
         self._last_index: List[Dict[str, Any]] = []
         self._last_assembly_manifest: Dict[str, Any] = {}
+        self._protocol_adapter_fingerprint = ""
         self._last_runtime_goal_blocked_sections: List[str] = []
         self._pending_runtime_goal_blocked_sections: List[str] = []
 
@@ -369,6 +373,31 @@ class PromptManager:
             del self._sections[name]
             self._section_cache.invalidate(name)
             self._invalidate_build_reuse_cache()
+
+    def set_protocol_adapter(
+        self,
+        section: SystemPromptSection,
+        *,
+        fingerprint: str,
+    ) -> None:
+        """Install the resolved required T1 adapter when its route changes."""
+
+        if (
+            section.name != "PROTOCOL_ADAPTER"
+            or not section.required
+            or str(getattr(section.tier, "value", section.tier) or "")
+            != "protocol_adapter"
+        ):
+            raise ValueError("invalid_protocol_adapter_section")
+        normalized_fingerprint = str(fingerprint or "").strip()
+        if (
+            normalized_fingerprint
+            and normalized_fingerprint == self._protocol_adapter_fingerprint
+            and "PROTOCOL_ADAPTER" in self._sections
+        ):
+            return
+        self.register(section)
+        self._protocol_adapter_fingerprint = normalized_fingerprint
 
     # ------------------------------------------------------------------------
     # build() — 核心组装入口
@@ -1074,7 +1103,7 @@ class PromptManager:
     # ------------------------------------------------------------------------
 
     def select_components(self, components: List[str]):
-        """由 LLM 通过 <active_components> 标签调用，动态切换章节。
+        """兼容的 runtime-owner 组件选择入口。
 
         Args:
             components: 要激活的章节名称列表，如 ["SOUL", "SPEC", "MEMORY"]
