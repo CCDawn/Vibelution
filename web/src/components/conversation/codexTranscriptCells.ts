@@ -46,6 +46,18 @@ export type CodexTranscriptCellBuildOptions = {
   includeStreamTail?: boolean;
 };
 
+export type CodexTranscriptCellMessageGroup = {
+  messageId: string;
+  cells: readonly CodexTranscriptCell[];
+  barrier?: boolean;
+};
+
+type CodexTranscriptCellReference = {
+  cells: CodexTranscriptCell[];
+  index: number;
+  cell: CodexTranscriptCell;
+};
+
 export function buildCodexTranscriptCells(
   message: AgentMessage,
   options: CodexTranscriptCellBuildOptions = {},
@@ -372,31 +384,56 @@ function compactConsecutiveToolFailures(cells: CodexTranscriptCell[]): CodexTran
 }
 
 function compactTerminalContinuations(cells: CodexTranscriptCell[]): CodexTranscriptCell[] {
-  const compacted: CodexTranscriptCell[] = [];
-  for (const cell of cells) {
-    const originIndex = terminalContinuationOriginIndex(compacted, cell);
-    if (originIndex < 0) {
-      compacted.push(cell);
-      continue;
-    }
-    compacted[originIndex] = mergeTerminalContinuation(compacted[originIndex], cell);
-  }
-  return compacted;
+  return compactCodexTranscriptCellsAcrossMessages([
+    { messageId: "single-message", cells },
+  ]).get("single-message") ?? [];
 }
 
-function terminalContinuationOriginIndex(
-  cells: CodexTranscriptCell[],
+export function compactCodexTranscriptCellsAcrossMessages(
+  groups: readonly CodexTranscriptCellMessageGroup[],
+): Map<string, CodexTranscriptCell[]> {
+  const compactedByMessageId = new Map<string, CodexTranscriptCell[]>();
+  const precedingCells: CodexTranscriptCellReference[] = [];
+
+  for (const group of groups) {
+    if (group.barrier) {
+      precedingCells.length = 0;
+    }
+    const compactedCells: CodexTranscriptCell[] = [];
+    compactedByMessageId.set(group.messageId, compactedCells);
+    for (const cell of group.cells) {
+      const origin = terminalContinuationOriginReference(precedingCells, cell);
+      if (!origin) {
+        compactedCells.push(cell);
+        precedingCells.push({
+          cells: compactedCells,
+          index: compactedCells.length - 1,
+          cell,
+        });
+        continue;
+      }
+      const merged = mergeTerminalContinuation(origin.cell, cell);
+      origin.cells[origin.index] = merged;
+      origin.cell = merged;
+    }
+  }
+
+  return compactedByMessageId;
+}
+
+function terminalContinuationOriginReference(
+  cells: readonly CodexTranscriptCellReference[],
   continuation: CodexTranscriptCell,
-) {
+): CodexTranscriptCellReference | undefined {
   const sessionIds = terminalSessionIds(continuation);
   if (!isWriteStdinCell(continuation) || !sessionIds.length) {
-    return -1;
+    return undefined;
   }
   if (continuation.status !== "completed" && !isLegacyClosedTerminalContinuation(continuation)) {
-    return -1;
+    return undefined;
   }
   for (let index = cells.length - 1; index >= 0; index -= 1) {
-    const candidate = cells[index];
+    const candidate = cells[index].cell;
     if (candidate.kind === "assistant_markdown" || candidate.kind === "user") {
       break;
     }
@@ -404,10 +441,10 @@ function terminalContinuationOriginIndex(
       continue;
     }
     if (terminalSessionIds(candidate).some((sessionId) => sessionIds.includes(sessionId))) {
-      return index;
+      return cells[index];
     }
   }
-  return -1;
+  return undefined;
 }
 
 function mergeTerminalContinuation(

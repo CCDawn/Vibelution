@@ -6,6 +6,7 @@ import type { AgentMessageTimelineItem } from "./agentMessageTimeline";
 import codexTranscriptCellsSource from "./codexTranscriptCells.ts?raw";
 import {
   buildCodexTranscriptCells,
+  compactCodexTranscriptCellsAcrossMessages,
   type CodexTranscriptCell,
   type CodexTranscriptCellKind,
 } from "./codexTranscriptCells";
@@ -574,6 +575,97 @@ describe("codexTranscriptCells", () => {
       summary: "12 passed",
       operationIds: ["op-exec", "op-late-poll"],
     });
+  });
+
+  it("folds a terminal continuation across assistant message boundaries", () => {
+    const execCells = buildCodexTranscriptCells(message({ id: "terminal-command-message" }), {
+      operations: [
+        {
+          id: "op-exec",
+          kind: "tool",
+          label: "exec_command",
+          rawLabel: "exec_command",
+          status: "running",
+          summary: "ping -n 3 127.0.0.1",
+          terminalSessionId: "sandbox-cross-message",
+          durationSeconds: null,
+        },
+      ],
+    });
+    const continuationCells = buildCodexTranscriptCells(message({ id: "terminal-poll-message" }), {
+      operations: [
+        {
+          id: "op-late-poll",
+          kind: "tool",
+          label: "write_stdin",
+          rawLabel: "write_stdin",
+          status: "completed",
+          summary: "command finished",
+          resultPreview: "command finished",
+          terminalSessionId: "sandbox-cross-message",
+          exitCode: 7,
+          durationSeconds: null,
+        },
+      ],
+    });
+
+    const compacted = compactCodexTranscriptCellsAcrossMessages([
+      { messageId: "terminal-command-message", cells: execCells },
+      { messageId: "terminal-poll-message", cells: continuationCells },
+    ]);
+
+    expect(compacted.get("terminal-command-message")).toEqual([
+      expect.objectContaining({
+        kind: "tool_call",
+        title: "exec_command",
+        status: "completed",
+        tone: "warning",
+        summary: "command finished",
+        operationIds: ["op-exec", "op-late-poll"],
+      }),
+    ]);
+    expect(compacted.get("terminal-poll-message")).toEqual([]);
+  });
+
+  it("does not fold a terminal continuation across a user-message boundary", () => {
+    const execCells = buildCodexTranscriptCells(message({ id: "terminal-command-before-user" }), {
+      operations: [
+        {
+          id: "op-exec",
+          kind: "tool",
+          label: "exec_command",
+          rawLabel: "exec_command",
+          status: "running",
+          summary: "ping -n 3 127.0.0.1",
+          terminalSessionId: "sandbox-user-boundary",
+          durationSeconds: null,
+        },
+      ],
+    });
+    const continuationCells = buildCodexTranscriptCells(message({ id: "terminal-poll-after-user" }), {
+      operations: [
+        {
+          id: "op-late-poll",
+          kind: "tool",
+          label: "write_stdin",
+          rawLabel: "write_stdin",
+          status: "completed",
+          summary: "command finished",
+          terminalSessionId: "sandbox-user-boundary",
+          exitCode: 0,
+          durationSeconds: null,
+        },
+      ],
+    });
+
+    const compacted = compactCodexTranscriptCellsAcrossMessages([
+      { messageId: "terminal-command-before-user", cells: execCells },
+      { messageId: "user-message", cells: [], barrier: true },
+      { messageId: "terminal-poll-after-user", cells: continuationCells },
+    ]);
+
+    expect(compacted.get("terminal-command-before-user")).toHaveLength(1);
+    expect(compacted.get("terminal-poll-after-user")).toHaveLength(1);
   });
 
   it("absorbs a legacy closed-terminal write failure into the command row", () => {

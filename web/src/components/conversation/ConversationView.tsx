@@ -112,7 +112,11 @@ import {
   buildAgentMessageTimelineItems,
   type AgentMessageTimelineItem,
 } from "./agentMessageTimeline";
-import { buildCodexTranscriptCells, type CodexTranscriptCell } from "./codexTranscriptCells";
+import {
+  buildCodexTranscriptCells,
+  compactCodexTranscriptCellsAcrossMessages,
+  type CodexTranscriptCell,
+} from "./codexTranscriptCells";
 import { resolveCodexTranscriptSurface, type CodexTranscriptSurface } from "./codexNativeTranscriptSurface";
 import {
   buildCodexTranscriptTimelineNodes,
@@ -261,6 +265,14 @@ const INITIAL_VISIBLE_FEEDBACK_OPERATION_COUNT = 36;
 const RESPONSE_PARSE_CACHE_LIMIT = 80;
 const RESPONSE_PREWARM_MESSAGE_LIMIT = 8;
 const EMPTY_SECTION_EXPANSION: Record<string, boolean> = {};
+
+function transcriptCellSequenceMatches(
+  previous: readonly CodexTranscriptCell[],
+  next: readonly CodexTranscriptCell[],
+) {
+  return previous.length === next.length && previous.every((cell, index) => cell === next[index]);
+}
+
 function conversationPerformanceNowMs() {
   return typeof performance === "undefined" ? Date.now() : performance.now();
 }
@@ -763,6 +775,20 @@ export function ConversationView({
         continue;
       }
       surfacesByMessageId.set(agentMessage.id, resolveCodexTranscriptSurface(sourceMessage, projectedCells));
+    }
+    const compactedCellsByMessageId = compactCodexTranscriptCellsAcrossMessages(
+      agentThread.messages.map((agentMessage) => ({
+        messageId: agentMessage.id,
+        cells: surfacesByMessageId.get(agentMessage.id)?.cells ?? [],
+        barrier: agentMessage.role === "user",
+      })),
+    );
+    for (const [messageId, surface] of surfacesByMessageId) {
+      const compactedCells = compactedCellsByMessageId.get(messageId);
+      if (!compactedCells || transcriptCellSequenceMatches(surface.cells, compactedCells)) {
+        continue;
+      }
+      surfacesByMessageId.set(messageId, { ...surface, cells: compactedCells });
     }
     return surfacesByMessageId;
   }, [activeConversationMessagesById, agentOperationGroupsByMessageId, agentThread, agentTimelineItemsByMessageId]);
