@@ -490,6 +490,7 @@ class _SandboxTerminalSession:
         self._total_output_chars = 0
         self._output_truncated = False
         self._outcome_logged = False
+        self._final_snapshot: dict[str, Any] | None = None
         self._reader_threads = [
             threading.Thread(target=self._reader_loop, args=("stdout",), daemon=True, name=f"codex-sandbox-out-{session_id}"),
             threading.Thread(target=self._reader_loop, args=("stderr",), daemon=True, name=f"codex-sandbox-err-{session_id}"),
@@ -539,10 +540,7 @@ class _SandboxTerminalSession:
             return self._status
         if self._is_alive():
             return "running"
-        try:
-            return "completed" if int(self.process.returncode or 0) == 0 else "failed"
-        except (TypeError, ValueError):
-            return "failed"
+        return "completed"
 
     def _drain_output(self, *, max_output_chars: int) -> tuple[str, str, bool, int]:
         with self._lock:
@@ -579,6 +577,12 @@ class _SandboxTerminalSession:
     def snapshot(self, *, max_output_chars: int) -> dict[str, Any]:
         self.last_accessed_at = time.monotonic()
         status = self._terminal_status()
+        if status != "running" and self._final_snapshot is not None:
+            return dict(self._final_snapshot)
+        if status != "running":
+            for reader in self._reader_threads:
+                if reader.ident is not None and reader.is_alive():
+                    reader.join(timeout=1.0)
         stdout, stderr, truncated, original_length = self._drain_output(max_output_chars=max_output_chars)
         try:
             exit_code = self.process.returncode if not self._is_alive() else None
@@ -586,11 +590,17 @@ class _SandboxTerminalSession:
             exit_code = None
         self._log_terminal_outcome_once(status, exit_code)
         formatted_output = _format_output(stdout, stderr, exit_code) if (stdout or stderr or status != "running") else ""
+        outcome_status = "running"
+        if status == "completed":
+            outcome_status = "success" if exit_code in (None, 0) else "nonzero_exit"
+        elif status in {"timeout", "cancelled", "failed"}:
+            outcome_status = status
         payload: dict[str, Any] = {
             "status": status,
             "terminalSessionId": self.session_id,
             "sessionOpen": status == "running",
             "exitCode": exit_code,
+            "outcomeStatus": outcome_status,
             "stdout": stdout,
             "stderr": stderr,
             "formattedOutput": formatted_output,
@@ -599,9 +609,12 @@ class _SandboxTerminalSession:
             "truncated": bool(truncated),
             "originalLength": original_length,
         }
-        if status in {"failed", "timeout", "cancelled"}:
+        if status in {"failed", "timeout", "cancelled"} or outcome_status == "nonzero_exit":
             payload["failureClass"] = "timeout" if status == "timeout" else "process_exit"
-        return {key: value for key, value in payload.items() if value not in {None, ""}}
+        result = {key: value for key, value in payload.items() if value not in {None, ""}}
+        if status != "running":
+            self._final_snapshot = dict(result)
+        return result
 
     def wait_for_update(
         self,
@@ -794,7 +807,14 @@ def write_codex_sandbox_terminal_stdin(
         session = _SANDBOX_TERMINAL_SESSIONS.get(session_id)
     if session is None:
         return _terminal_error_payload("TERMINAL_SESSION_NOT_FOUND", "终端会话不存在、已过期或后端已重启。", session_id=session_id)
-    input_error = session.send_input(str(chars or ""))
+    normalized_chars = str(chars or "")
+    if not normalized_chars:
+        return session.wait_for_update(
+            yield_time_ms=yield_time_ms,
+            max_output_chars=max_output_chars,
+            cancel_checker=_cancel_checker,
+        )
+    input_error = session.send_input(normalized_chars)
     if input_error:
         message = {
             "terminal_not_running": "终端会话已结束，不能继续写入。",

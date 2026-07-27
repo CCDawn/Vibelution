@@ -60,6 +60,58 @@ describe("ConversationToolActivity", () => {
     expect(html).not.toContain(">running<");
   });
 
+  it("presents a completed nonzero terminal exit as an amber expandable result", () => {
+    const cell = toolCell("terminal-nonzero", "command failed");
+    cell.title = "exec_command";
+    cell.toolLifecycleModel = {
+      toolCalls: [
+        {
+          toolCallId: "terminal-nonzero",
+          rawOperationId: "terminal-nonzero",
+          status: "completed",
+          title: "exec_command",
+          rawToolName: "exec_command",
+          runtimeKind: "terminal",
+          terminalOperationId: "terminal_operation:0",
+        },
+      ],
+      terminalOperations: [
+        {
+          operationId: "terminal_operation:0",
+          toolCallId: "terminal-nonzero",
+          terminalId: "terminal:sandbox-1",
+          kind: "ExecCommand",
+          status: "completed",
+          request: { displayCommand: "exit 1", cwd: "" },
+          result: { exitCode: 1, formattedOutput: "command failed" },
+          rawOperationId: "terminal-nonzero",
+        },
+      ],
+      terminalSessions: [
+        {
+          terminalId: "terminal:sandbox-1",
+          createdByOperationId: "terminal_operation:0",
+          operationIds: ["terminal_operation:0"],
+          status: "completed",
+        },
+      ],
+      modelObservations: [],
+    };
+
+    const html = renderToStaticMarkup(
+      <ConversationToolActivity
+        activity={createCodexTranscriptToolActivity([cell])}
+        language="en"
+        renderToolDetails={() => <pre>command failed</pre>}
+      />,
+    );
+
+    expect(html).toContain("Command exited 1");
+    expect(html).toContain("itemIconWarning");
+    expect(html).not.toContain("itemIconFailed");
+    expect(html).toContain("open=\"\"");
+  });
+
   it("keeps a long sequence as flat Codex-style tool rows", () => {
     const html = renderToStaticMarkup(
       <ConversationToolActivity

@@ -537,6 +537,88 @@ describe("codexTranscriptCells", () => {
       tone: "running",
     });
   });
+
+  it("folds a terminal continuation back into its originating command row", () => {
+    const cells = buildCodexTranscriptCells(message({ id: "terminal-continuation" }), {
+      operations: [
+        {
+          id: "op-exec",
+          kind: "tool",
+          label: "exec_command",
+          rawLabel: "exec_command",
+          status: "running",
+          summary: "npm test",
+          terminalSessionId: "sandbox-a",
+          durationSeconds: null,
+        },
+        {
+          id: "op-late-poll",
+          kind: "tool",
+          label: "write_stdin",
+          rawLabel: "write_stdin",
+          status: "completed",
+          summary: "12 passed",
+          resultPreview: "12 passed",
+          terminalSessionId: "sandbox-a",
+          exitCode: 0,
+          durationSeconds: null,
+        },
+      ],
+    });
+
+    expect(cells).toHaveLength(1);
+    expect(cells[0]).toMatchObject({
+      kind: "tool_call",
+      title: "exec_command",
+      status: "completed",
+      summary: "12 passed",
+      operationIds: ["op-exec", "op-late-poll"],
+    });
+  });
+
+  it("absorbs a legacy closed-terminal write failure into the command row", () => {
+    const lateWriteFailure = JSON.stringify({
+      status: "failed",
+      terminalSessionId: "sandbox-a",
+      sessionOpen: false,
+      code: "TERMINAL_STDIN_UNAVAILABLE",
+      message: "terminal session already ended",
+    });
+    const cells = buildCodexTranscriptCells(message({ id: "terminal-legacy-continuation" }), {
+      operations: [
+        {
+          id: "op-exec",
+          kind: "tool",
+          label: "exec_command",
+          rawLabel: "exec_command",
+          status: "done",
+          summary: "npm test",
+          terminalSessionId: "sandbox-a",
+          durationSeconds: null,
+        },
+        {
+          id: "op-late-poll",
+          kind: "tool",
+          label: "write_stdin",
+          rawLabel: "write_stdin",
+          status: "failed",
+          summary: lateWriteFailure,
+          error: lateWriteFailure,
+          terminalSessionId: "sandbox-a",
+          sessionOpen: false,
+          durationSeconds: null,
+        },
+      ],
+    });
+
+    expect(cells).toHaveLength(1);
+    expect(cells[0]).toMatchObject({
+      kind: "tool_call",
+      title: "exec_command",
+      status: "completed",
+      operationIds: ["op-exec", "op-late-poll"],
+    });
+  });
 });
 
 function rolloutTraceEvents(cell: CodexTranscriptCell) {
