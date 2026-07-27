@@ -14,6 +14,16 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from core.infrastructure import developer_sandbox
+from core.prompt_manager.assembly_contract import (
+    PromptAssemblyManifest,
+    PromptCachePolicy,
+    PromptDecision,
+    PromptPlacement,
+    PromptSegment,
+    PromptStability,
+    PromptTier,
+    PromptTrust,
+)
 from core.runtime_manager import agent_run_store
 from core.web.services.runtime_scene_service import record_runtime_scene_event
 
@@ -63,16 +73,49 @@ def _context_segment(
     text = str(block or "").strip()
     if not text:
         return None
-    return asdict(
-        AgentContextSegment(
-            key=str(key or "").strip(),
-            block=text,
-            placement=str(placement or "").strip(),
-            stability=str(stability or "").strip(),
-            chars=len(text),
-            hash=_context_hash(text),
-            cache_hit=cache_hit,
-        )
+    normalized_key = str(key or "").strip()
+    normalized_placement = str(placement or "").strip()
+    normalized_stability = str(stability or "").strip()
+    is_cache_prefix = normalized_placement == "cache_prefix"
+    if normalized_stability == "project_static":
+        prompt_stability = PromptStability.PROJECT_STATIC
+    elif normalized_stability in {"agent_static", "session_static"}:
+        prompt_stability = PromptStability.SESSION_STATIC
+    else:
+        prompt_stability = PromptStability.TURN_DYNAMIC
+    segment = PromptSegment.from_content(
+        key=normalized_key,
+        content=text,
+        tier=(
+            PromptTier.SESSION_SNAPSHOT
+            if is_cache_prefix
+            else PromptTier.TURN_CONTEXT
+        ),
+        placement=(
+            PromptPlacement.SYSTEM_PREFIX
+            if is_cache_prefix
+            else PromptPlacement.BEFORE_CURRENT_USER
+        ),
+        stability=prompt_stability,
+        trust=(
+            PromptTrust.OPERATOR_CONTROLLED
+            if normalized_key in {"prompt_template", "agent_prompt_snapshot"}
+            else PromptTrust.DERIVED_RUNTIME
+        ),
+        source=f"context_engine.{normalized_key}",
+        cache_policy=(
+            PromptCachePolicy.CACHEABLE
+            if is_cache_prefix
+            else PromptCachePolicy.NEVER_CACHE
+        ),
+        decision=PromptDecision.FULL,
+        decision_reason="rendered",
+        cache_hit=cache_hit,
+    )
+    return segment.to_internal_dict(
+        block_key="block",
+        legacy_placement=normalized_placement,
+        legacy_stability=normalized_stability,
     )
 
 
@@ -126,17 +169,6 @@ def _context_segment_log_summary(segments: list[dict[str, Any]]) -> list[dict[st
 
 
 @dataclass(frozen=True)
-class AgentContextSegment:
-    key: str
-    block: str
-    placement: str
-    stability: str
-    chars: int = 0
-    hash: str = ""
-    cache_hit: bool | None = None
-
-
-@dataclass(frozen=True)
 class AgentContextPacket:
     agent_id: str
     agent_code: str = ""
@@ -156,6 +188,10 @@ class AgentContextPacket:
     context_segments: list[dict[str, Any]] = field(default_factory=list)
     context_block: str = ""
     timings: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def prompt_assembly_manifest(self) -> PromptAssemblyManifest:
+        return PromptAssemblyManifest.from_internal_segments(self.context_segments)
 
 
 @dataclass(frozen=True)

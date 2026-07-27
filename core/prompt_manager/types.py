@@ -6,6 +6,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Optional, NewType, Any
 
+from core.prompt_manager.assembly_contract import PromptAssemblyManifest
+
 # 品牌化的不可变字符串元组，等效于 TypeScript 的 readonly string[] & { __brand }
 SystemPrompt = NewType("SystemPrompt", tuple)
 
@@ -65,6 +67,7 @@ class PromptBuildResult:
 
     prompt: SystemPrompt
     section_results: tuple[SectionRenderResult, ...]
+    assembly_manifest: PromptAssemblyManifest
     available_sections_text: str = ""
     join_duration_ms: float = 0.0
 
