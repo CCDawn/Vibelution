@@ -35,7 +35,7 @@ const styles = {
   conversation: "h-full min-h-0 w-full flex-1",
   loading: "grid h-full min-h-[320px] w-full place-items-center text-[length:var(--vui-font-sm)] text-[var(--vui-text-muted)]",
   empty:
-    "m-auto flex w-[min(72%,_460px)] flex-col items-center gap-2 rounded-[var(--vui-radius-lg)] border border-dashed border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,_var(--vui-surface-panel)_82%,_transparent)] px-8 py-7 text-center text-[length:var(--vui-font-sm)] leading-6 text-[var(--vui-text-muted)]",
+    "m-auto flex w-[min(72%,_460px)] flex-col items-center gap-2 rounded-[var(--vui-radius-lg)] border border-dashed border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] px-8 py-7 text-center text-[length:var(--vui-font-sm)] leading-6 text-[var(--vui-text-muted)]",
   emptyAvatar:
     "grid size-10 place-items-center rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-muted)] text-[length:var(--vui-font-sm)] font-semibold text-[var(--vui-text-strong)]",
   emptyTitle: "text-[length:var(--vui-font-sm)] font-semibold text-[var(--vui-text-strong)]",
