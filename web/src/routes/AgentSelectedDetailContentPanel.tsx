@@ -140,7 +140,9 @@ export function AgentSelectedDetailContentPanel({
 
   return (
     <div className={styles.selectedDetailFrame}>
-      <AgentDetailHeaderPanel {...header} />
+      <div className={styles.detailHeaderRegion}>
+        <AgentDetailHeaderPanel {...header} />
+      </div>
       {activePane === "overview" && overview ? (
         <div className={styles.overviewLayout}>
           <div className={styles.overviewMain}>

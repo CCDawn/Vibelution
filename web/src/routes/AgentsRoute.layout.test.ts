@@ -1583,6 +1583,11 @@ describe("AgentsRoute layout contract", () => {
     expect(detailHeaderStyles.detailTabs).toBeTruthy();
     expect(selectedDetailContentStyles.selectedDetailFrame).toContain("w-full");
     expect(selectedDetailContentStyles.selectedDetailFrame).not.toContain("max-w-[1280px]");
+    expect(selectedDetailContentPanelSource).toContain(
+      '<div className={styles.detailHeaderRegion}>',
+    );
+    expect(selectedDetailContentStyles.detailHeaderRegion).toContain("grid");
+    expect(selectedDetailContentStyles.detailHeaderRegion).toContain("gap:8px");
     expect(selectedDetailContentStyles.overviewLayout).toContain("[overflow:auto]");
     expect(selectedDetailContentStyles.overviewAside).toContain("hidden");
     expect(workspaceLayoutPanelSource).toContain("AgentInspectorRailPanel");
