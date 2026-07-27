@@ -345,7 +345,7 @@ const styles: Record<string, string> = {
   codexTranscriptCellBody:
     "vui-components-conversationview codexTranscriptCellBody min-w-0 flex flex-wrap items-baseline gap-x-2 gap-y-0.5",
   codexTranscriptCompactErrorDetails:
-    "vui-components-conversationview codexTranscriptCompactErrorDetails inline-block min-w-0 shrink-0 border-0 bg-transparent group",
+    "vui-components-conversationview codexTranscriptCompactErrorDetails w-full min-w-0 border-0 bg-transparent group",
   codexTranscriptCompactErrorDetailsSummary:
     "vui-components-conversationview codexTranscriptCompactErrorDetailsSummary inline-flex cursor-pointer list-none select-none items-center gap-1 [&::-webkit-details-marker]:hidden",
   codexTranscriptCompactErrorSummary:
