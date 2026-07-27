@@ -2,12 +2,12 @@
 
 > **Status:** user-approved / implementation-active
 > **Owner:** agent-codex-session-catalog-implementation
-> **Claim:** claim-fb6bcce7c6e8 (T0)
+> **Claim:** T0 claim released; T1-T4 checkpoint scopes completed on the task worktree
 > **Branch:** `codex/session-catalog-implementation`
 > **Worktree:** `C:\Users\Administrator\Desktop\Vibelution-worktrees\session-catalog-implementation`
 > **Scope:** 会话事实账本加固、可重建 SQLite catalog、迁移/回退、查询切流、容量与故障治理
 > **Replaces:** 本文件 2026-07-23 初稿
-> **Implementation link:** T0 contract, runtime-data isolation guards and 100/1,000/10,000 baseline complete; T1/T2 next
+> **Implementation link:** T0-T2 complete; T3 deterministic reconcile core and T4 fail-safe shadow scaffold complete; invalidation wiring, SQL DTO provider and canary remain
 > **Validation:** 主流项目源码/官方文档复核、项目 owning surface 复核、source-of-truth/迁移/回滚/性能门自审、`git diff --check`
 > **Close condition:** shadow 零差异、故障自动回退、性能晋级门通过、`read_preferred` runtime verification 通过
 
@@ -22,6 +22,15 @@
 - v1 catalog 只能放在本地文件系统；如果运行目录是 UNC、网络盘或不支持 WAL 的 VFS，强制退回 `off/legacy`，不得尝试共享 WAL。
 
 该方案优先解决当前会话列表全量装载、Python 过滤/排序、短时内存缓存和多来源重建带来的扩展性问题，同时避免一次性把稳定的事件账本迁成数据库事实源。
+
+### 1.1 当前实现快照（2026-07-28）
+
+- T0：查询合同、100/1,000/10,000 baseline 和正式数据隔离门禁已提交。
+- T1：每会话跨进程锁、sequence 原子分配、append flush/fsync、唯一临时文件 rewrite 和 Windows 子进程回归已提交。
+- T2：本地 runtime cache 路由、WAL/local-filesystem fail closed、schema v1、migration checksum、参数化查询、quick_check、lease/watermark 和错误分类已提交。
+- T3 核心：canonical snapshot 投影、孤儿 journal 隔离、TEMP candidate、源 revision 二次校验、原子发布、删除重建和 stale lease takeover 已提交；`stateRevision`、dirty/sentinel、mutation bridge 与 startup/incremental 调度尚未接入。
+- T4 脚手架：typed `off|shadow`、有界 comparator 和异常时 exact legacy fallback 已提交；正式 SQLite candidate provider 尚未注册，因此生产默认仍为 `off`。
+- T5/T6 未开始：不得宣称 SQL 已成为产品读路径，也不得启用 `read_preferred`；必须先完成 DTO parity、临时数据集性能晋级和 shadow 零差异证据。
 
 ## 主流 Agent 复用结论
 
