@@ -6,7 +6,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Optional, NewType, Any
 
-from core.prompt_manager.assembly_contract import PromptAssemblyManifest
+from core.prompt_manager.assembly_contract import (
+    PromptAssemblyManifest,
+    PromptCachePolicy,
+    PromptStability,
+    PromptTier,
+    PromptTrust,
+)
 
 # 品牌化的不可变字符串元组，等效于 TypeScript 的 readonly string[] & { __brand }
 SystemPrompt = NewType("SystemPrompt", tuple)
@@ -43,6 +49,12 @@ class SystemPromptSection:
     description: str = ""
     required: bool = False
     is_empty: bool = False
+    tier: PromptTier | None = None
+    stability: PromptStability | None = None
+    trust: PromptTrust | None = None
+    cache_policy: PromptCachePolicy | None = None
+    budget_tokens: int = 0
+    capability_requirements: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -59,6 +71,12 @@ class SectionRenderResult:
     is_empty: bool
     source: Optional[str] = None
     duration_ms: float = 0.0
+    tier: PromptTier | None = None
+    stability: PromptStability | None = None
+    trust: PromptTrust | None = None
+    cache_policy: PromptCachePolicy | None = None
+    budget_tokens: int = 0
+    capability_requirements: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
