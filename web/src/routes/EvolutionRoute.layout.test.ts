@@ -453,6 +453,13 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(evolutionDictionarySource).toContain('supervisedMentalMode: "心智模式"');
   });
 
+  it("submits the visible case limit even after browser form restoration", () => {
+    expect(routeSource).toContain("const datasetLimitInputRef = useRef<HTMLInputElement | null>(null);");
+    expect(routeSource).toContain("ref={datasetLimitInputRef}");
+    expect(routeSource).toContain("datasetLimitInputRef.current?.value ?? datasetLimitInput");
+    expect(routeSource).toContain("supervisedDatasetLimitFromInput(");
+  });
+
   it("uses action-oriented supervised section labels instead of internal system terms", () => {
     expect(evolutionDictionarySource).toContain('supervisedControl: "发起评测"');
     expect(coreDictionarySource).toContain('launchSupervisedRun: "选择来源并启动"');
@@ -806,6 +813,9 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(supervisedAgentConversationPanelSource).toContain("fetchSessionDetailWindow");
     expect(supervisedAgentConversationPanelSource).toContain("queryKeys.session(sessionId || \"none\")");
     expect(supervisedAgentConversationPanelSource).toContain("LazyConversationView");
+    expect(routeSource).toContain("supervisedRoleConversationSession(backendWorkflowSteps, role)");
+    expect(routeSource).toContain("supervisedWorkflowRun && isLiveSupervisedRunStatus(supervisedWorkflowRun.status)");
+    expect(routeSource).toContain("backendWorkflowCurrent?.role");
     expect(supervisedAgentConversationPanelSource).toContain("const active = isLive && member.role === activeRole");
     expect(supervisedAgentConversationPanelSource).toContain("showComposer={false}");
     expect(supervisedAgentConversationPanelSource).toContain('processDisplayMode="answer"');
