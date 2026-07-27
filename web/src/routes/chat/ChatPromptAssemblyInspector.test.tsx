@@ -2,7 +2,7 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import type { SessionAgentPromptSnapshot } from "../../api/types";
+import type { SessionAgentPromptSnapshot, SessionPromptAssemblyManifest } from "../../api/types";
 import { ChatPromptAssemblyInspector } from "./ChatPromptAssemblyInspector";
 
 const snapshot: SessionAgentPromptSnapshot = {
@@ -83,5 +83,28 @@ describe("ChatPromptAssemblyInspector", () => {
 
     expect(html).toContain("旧快照");
     expect(html).toContain("未记录装配清单");
+  });
+
+  it("prefers the last runtime assembly manifest over the frozen session snapshot", () => {
+    const runtimeManifest: SessionPromptAssemblyManifest = {
+      schemaVersion: 1,
+      assemblyMode: "turn_runtime_v2",
+      modelProtocol: "basic_chat_no_tools",
+      totalEstimatedTokens: 2922,
+      segments: [],
+    };
+
+    const html = renderToStaticMarkup(
+      <ChatPromptAssemblyInspector
+        lang="en"
+        snapshot={snapshot}
+        manifest={runtimeManifest}
+      />,
+    );
+
+    expect(html).toContain("turn_runtime_v2");
+    expect(html).toContain("basic_chat_no_tools");
+    expect(html).toContain("2922 /");
+    expect(html).not.toContain("openai_chat");
   });
 });

@@ -899,6 +899,7 @@ from core.web.services.session.projection import (
     _conversation_phase,
     _projection_edit_contract,
     _public_agent_prompt_snapshot,
+    _public_prompt_assembly_manifest,
     _session_agent_status_payload,
     _ledger_visible_messages_for_session,
     _normalize_child_handoff_context,

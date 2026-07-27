@@ -361,6 +361,9 @@ def _build_session_detail_from_summary(
         "lastContextComposition": last_context_composition,
         "lastLlmPayloadTrace": last_llm_payload_trace,
         "agentPromptSnapshot": summary.get("agentPromptSnapshot") if isinstance(summary.get("agentPromptSnapshot"), dict) else {},
+        "lastPromptAssembly": summary.get("lastPromptAssembly")
+        if isinstance(summary.get("lastPromptAssembly"), dict)
+        else {},
         "activeSkillContract": s.normalize_active_skill_contract(
             conversation.get("activeSkillContract") or conversation.get("active_skill_contract")
         ),
@@ -485,6 +488,9 @@ def _build_session_summary(conversation: dict[str, Any], *, hydrate_agent: bool 
         "agentRoleKey": agent_role_key,
         "agentPromptTemplateId": agent_prompt_template_id,
         "agentPromptSnapshot": s._public_agent_prompt_snapshot(conversation.get("agentPromptSnapshot")),
+        "lastPromptAssembly": s._public_prompt_assembly_manifest(
+            conversation.get("last_prompt_assembly") or conversation.get("lastPromptAssembly")
+        ),
         "agentInboxPendingCount": agent_inbox_pending_count,
         "agentMissingId": agent_missing_id,
         "agentDirectSessionMismatch": agent_direct_session_mismatch,
@@ -647,6 +653,9 @@ def _normalize_conversation(
     if not isinstance(active_task, dict):
         active_task = None
     agent_prompt_snapshot = s._public_agent_prompt_snapshot(raw.get("agentPromptSnapshot"))
+    last_prompt_assembly = s._public_prompt_assembly_manifest(
+        raw.get("last_prompt_assembly") or raw.get("lastPromptAssembly")
+    )
     conversation_index_classification = s._conversation_index_classification(
         raw,
         agent,
@@ -680,6 +689,7 @@ def _normalize_conversation(
         "lastTurnError": last_turn_error,
         "lastContextComposition": last_context_composition,
         "agentPromptSnapshot": agent_prompt_snapshot,
+        "lastPromptAssembly": last_prompt_assembly,
         "reasoningEffort": s.normalize_reasoning_effort(raw.get("reasoning_effort") or raw.get("reasoningEffort")),
         "activeSkillContract": active_skill_contract,
         "lastCacheComposition": last_cache_composition,
@@ -2743,8 +2753,54 @@ def _projection_edit_contract(kind: str, source_id: str, metadata: dict[str, Any
     return projection_edit_contract(kind, source_id, metadata)
 
 
+def _public_prompt_assembly_manifest(prompt_assembly: Any) -> dict[str, Any]:
+    if not isinstance(prompt_assembly, dict):
+        return {}
+    manifest: dict[str, Any] = {}
+    for key in (
+            "schemaVersion",
+            "assemblyMode",
+            "modelProtocol",
+            "capabilityFingerprint",
+            "permissionFingerprint",
+            "stablePrefixHash",
+            "sessionSnapshotHash",
+            "totalEstimatedTokens",
+            "budgetTokens",
+    ):
+        if key in prompt_assembly:
+            manifest[key] = prompt_assembly.get(key)
+    segments: list[dict[str, Any]] = []
+    for raw_segment in prompt_assembly.get("segments") or []:
+        if not isinstance(raw_segment, dict):
+            continue
+        segment: dict[str, Any] = {}
+        for key in (
+                "key",
+                "tier",
+                "placement",
+                "stability",
+                "trust",
+                "source",
+                "required",
+                "chars",
+                "contentHash",
+                "estimatedTokens",
+                "budgetTokens",
+                "cachePolicy",
+                "capabilityRequirements",
+                "decision",
+                "decisionReason",
+                "cacheHit",
+        ):
+            if key in raw_segment:
+                segment[key] = raw_segment.get(key)
+        segments.append(segment)
+    manifest["segments"] = segments
+    return manifest
+
+
 def _public_agent_prompt_snapshot(snapshot: Any) -> dict[str, Any]:
-    s = _service()
     if not isinstance(snapshot, dict):
         return {}
     result: dict[str, Any] = {}
@@ -2771,49 +2827,8 @@ def _public_agent_prompt_snapshot(snapshot: Any) -> dict[str, Any]:
     ):
         if key in snapshot:
             result[key] = snapshot.get(key)
-    prompt_assembly = snapshot.get("promptAssembly")
-    if isinstance(prompt_assembly, dict):
-        manifest: dict[str, Any] = {}
-        for key in (
-            "schemaVersion",
-            "assemblyMode",
-            "modelProtocol",
-            "capabilityFingerprint",
-            "permissionFingerprint",
-            "stablePrefixHash",
-            "sessionSnapshotHash",
-            "totalEstimatedTokens",
-            "budgetTokens",
-        ):
-            if key in prompt_assembly:
-                manifest[key] = prompt_assembly.get(key)
-        segments: list[dict[str, Any]] = []
-        for raw_segment in prompt_assembly.get("segments") or []:
-            if not isinstance(raw_segment, dict):
-                continue
-            segment: dict[str, Any] = {}
-            for key in (
-                "key",
-                "tier",
-                "placement",
-                "stability",
-                "trust",
-                "source",
-                "required",
-                "chars",
-                "contentHash",
-                "estimatedTokens",
-                "budgetTokens",
-                "cachePolicy",
-                "capabilityRequirements",
-                "decision",
-                "decisionReason",
-                "cacheHit",
-            ):
-                if key in raw_segment:
-                    segment[key] = raw_segment.get(key)
-            segments.append(segment)
-        manifest["segments"] = segments
+    manifest = _public_prompt_assembly_manifest(snapshot.get("promptAssembly"))
+    if manifest:
         result["promptAssembly"] = manifest
     return result
 

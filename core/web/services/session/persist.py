@@ -129,6 +129,11 @@ def _persist_session_turn_result(
             )
             return
         result_status = str(result.get("status") or "").strip().lower() if isinstance(result, dict) else ""
+        prompt_assembly = s._public_prompt_assembly_manifest(
+            result.get("prompt_assembly") if isinstance(result, dict) else None
+        )
+        if prompt_assembly:
+            conversation["last_prompt_assembly"] = prompt_assembly
         source_collection_stage_task_metadata = s._source_collection_stage_task_turn_metadata(messages, turn_id)
         result_stop_requested = bool(result.get("stop_requested")) if isinstance(result, dict) else False
         stop_requested = result_stop_requested and runtime_stop_requested
