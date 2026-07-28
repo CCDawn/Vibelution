@@ -6,6 +6,7 @@ import {
   codexTranscriptToolDurationSeconds,
   formatCodexTranscriptDuration,
 } from "./conversationToolActivityModel";
+import { buildConversationToolActivityPresentation } from "./conversationToolActivityPresentation";
 import styles from "./ConversationProcessDisclosure.styles";
 
 type ConversationProcessDisclosureProps = {
@@ -39,11 +40,21 @@ function processLabel(cells: readonly CodexTranscriptCell[], language: "zh" | "e
   const labels = language === "zh"
     ? { completed: "已处理", failed: "处理已停止", running: "处理中" }
     : { completed: "Processed", failed: "Processing stopped", running: "Processing" };
-  const stateLabel = state === "failed" ? labels.completed : labels[state];
   const duration = processDuration(cells);
+  const stageCells = cells.filter(
+    (cell) => cell.kind === "tool_call" || cell.kind === "error_notice",
+  );
+  const stageCount = buildConversationToolActivityPresentation(stageCells, language).length;
+  let stageLabel = "";
+  if (stageCount > 0) {
+    stageLabel = language === "zh"
+      ? `${stageCount} 个阶段`
+      : `${stageCount} ${stageCount === 1 ? "stage" : "stages"}`;
+  }
   return [
-    stateLabel,
+    labels[state],
     duration === null ? "" : formatCodexTranscriptDuration(duration),
+    stageLabel,
   ].filter(Boolean).join(" ");
 }
 
@@ -64,7 +75,7 @@ export function ConversationProcessDisclosure({
       data-codex-process-disclosure="true"
       data-codex-process-state={processState(cells)}
       aria-live={running ? "polite" : undefined}
-      open
+      open={running || undefined}
     >
       <summary className={styles.summary} aria-label={toggleLabel}>
         <span>{label}</span>

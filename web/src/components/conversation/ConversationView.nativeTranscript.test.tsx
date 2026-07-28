@@ -173,7 +173,8 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html).toContain("诊断详情");
     expect(html).toContain("upstream_unavailable");
     expect(html).toContain('data-codex-process-disclosure="true"');
-    expect(html).toContain('open=""');
+    expect(html).toContain('data-codex-process-state="failed"');
+    expect(html).not.toContain('open=""');
     expect(html).not.toContain("responseSection");
   });
 
@@ -427,7 +428,8 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(finalIndex).toBeGreaterThan(toolIndex);
     expect(html).toContain('data-codex-tool-detail="true"');
     expect(html).toContain('data-codex-process-disclosure="true"');
-    expect(html).toContain('open=""');
+    expect(html).toContain("已处理 1 个阶段");
+    expect(html).not.toContain('open=""');
     expect(html).toContain('data-codex-final-response="true"');
     expect(html).toContain('data-codex-transcript-cell-channel="commentary"');
     expect(html).toContain('data-codex-transcript-cell-phase="tool_call"');
@@ -847,7 +849,7 @@ describe("ConversationView native Codex transcript surface", () => {
 
     expect(html).toContain(">命令<");
     expect(html).toContain('data-codex-process-disclosure="true"');
-    expect(html).toContain('open=""');
+    expect(html).not.toContain('open=""');
     expect(html).not.toContain('data-codex-tool-detail-toggle="inline-symbol"');
     expect(html).toContain('aria-label="展开或收起工具结果：命令"');
     expect(html).toContain("git status --short");
@@ -1063,6 +1065,12 @@ describe("ConversationView native Codex transcript surface", () => {
 
     const detailsStart = html.indexOf('data-codex-tool-detail="true"');
     const detailsEnd = html.indexOf("</details>", detailsStart);
+    const technicalAttribute = html.indexOf('data-codex-tool-technical-details="true"');
+    const technicalDetailsStart = html.lastIndexOf("<details", technicalAttribute);
+    const technicalOpenTag = html.slice(
+      technicalDetailsStart,
+      html.indexOf(">", technicalDetailsStart) + 1,
+    );
     const traceStart = html.indexOf('aria-label="工具生命周期"');
     expect(html).toContain(">命令<");
     expect(html).toContain("处理中");
@@ -1071,6 +1079,9 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(detailsStart).toBeGreaterThan(-1);
     expect(traceStart).toBeGreaterThan(detailsStart);
     expect(traceStart).toBeLessThan(detailsEnd);
+    expect(technicalDetailsStart).toBeGreaterThan(detailsStart);
+    expect(technicalOpenTag).not.toContain('open=""');
+    expect(html).toContain("技术详情");
   });
 
   it("does not repeat the tool title as an instruction when no command was sent", () => {

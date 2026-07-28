@@ -24,7 +24,7 @@ const styles = {
   batchCount: cx("batchCount", "shrink-0 text-[var(--fg-tertiary)]"),
   batchDetails: cx(
     "batchDetails",
-    "ml-2 border-l border-[var(--vui-border-subtle)] pl-4",
+    "ml-6 min-w-0",
   ),
   itemIcon: cx("itemIcon", "mt-0.5 shrink-0 text-[var(--fg-tertiary)]"),
   itemIconRunning: cx("itemIconRunning", "text-[var(--accent-cool)]"),

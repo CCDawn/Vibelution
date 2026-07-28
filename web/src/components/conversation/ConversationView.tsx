@@ -2006,7 +2006,7 @@ export function ConversationView({
     return "";
   }
 
-  function renderCodexTranscriptToolDetailContent(cell: CodexTranscriptCell, detailsId: string): ReactNode {
+  function renderCodexTranscriptToolDetailContent(cell: CodexTranscriptCell): ReactNode {
     if (cell.kind !== "tool_call") {
       return null;
     }
@@ -2018,7 +2018,7 @@ export function ConversationView({
     return (
       <>
         {rows.length > 0 ? (
-          <div id={detailsId} className={styles.operationDetails}>
+          <div className={styles.operationDetails}>
             {rows.map((row, index) => {
               return (
                 <div key={`${cell.id}-${row.label}-${index}`} className={styles.operationDetailRow}>
@@ -2159,36 +2159,48 @@ export function ConversationView({
       return null;
     }
     return (
-      <ol className={styles.rolloutTraceList} aria-label={lang === "zh" ? "工具生命周期" : "Tool lifecycle"}>
-        {events.map((event) => {
-          const eventClassName = [
-            styles.rolloutTraceItem,
-            styles[`rolloutTraceItem_${event.status}`],
-          ].filter(Boolean).join(" ");
-          const detailText = [
-            event.error,
-            event.exitCode !== undefined && event.exitCode !== null ? `exit ${event.exitCode}` : "",
-            event.timedOut ? (lang === "zh" ? "已超时" : "timed out") : "",
-          ].filter(Boolean).join(" · ");
-          return (
-            <li
-              key={event.id}
-              className={eventClassName}
-              data-rollout-trace-kind={event.kind}
-              data-rollout-trace-status={event.status}
-              data-rollout-tool-call-id={event.toolCallId}
-              data-rollout-terminal-operation-id={event.terminalOperationId}
-              data-rollout-terminal-id={event.terminalId}
-            >
-              <span className={styles.rolloutTraceDot} aria-hidden="true" />
-              <span className={styles.rolloutTraceText}>
-                <span className={styles.rolloutTraceTitle}>{rolloutTraceEventLabel(event.kind)}</span>
-                {detailText ? <span className={styles.rolloutTraceMeta}>{detailText}</span> : null}
-              </span>
-            </li>
-          );
-        })}
-      </ol>
+      <details
+        className={styles.operationDetailsDisclosure}
+        data-codex-tool-technical-details="true"
+      >
+        <summary className={styles.operationDetailsSummary}>
+          <span className={styles.operationDetailsChevronButton} aria-hidden="true">
+            <span className={styles.operationDetailsChevronClosed}>▸</span>
+            <span className={styles.operationDetailsChevronOpen}>▾</span>
+          </span>
+          <span>{lang === "zh" ? "技术详情" : "Technical details"}</span>
+        </summary>
+        <ol className={styles.rolloutTraceList} aria-label={lang === "zh" ? "工具生命周期" : "Tool lifecycle"}>
+          {events.map((event) => {
+            const eventClassName = [
+              styles.rolloutTraceItem,
+              styles[`rolloutTraceItem_${event.status}`],
+            ].filter(Boolean).join(" ");
+            const detailText = [
+              event.error,
+              event.exitCode !== undefined && event.exitCode !== null ? `exit ${event.exitCode}` : "",
+              event.timedOut ? (lang === "zh" ? "已超时" : "timed out") : "",
+            ].filter(Boolean).join(" · ");
+            return (
+              <li
+                key={event.id}
+                className={eventClassName}
+                data-rollout-trace-kind={event.kind}
+                data-rollout-trace-status={event.status}
+                data-rollout-tool-call-id={event.toolCallId}
+                data-rollout-terminal-operation-id={event.terminalOperationId}
+                data-rollout-terminal-id={event.terminalId}
+              >
+                <span className={styles.rolloutTraceDot} aria-hidden="true" />
+                <span className={styles.rolloutTraceText}>
+                  <span className={styles.rolloutTraceTitle}>{rolloutTraceEventLabel(event.kind)}</span>
+                  {detailText ? <span className={styles.rolloutTraceMeta}>{detailText}</span> : null}
+                </span>
+              </li>
+            );
+          })}
+        </ol>
+      </details>
     );
   }
 

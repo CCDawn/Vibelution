@@ -60,6 +60,23 @@ function hasNonzeroTerminalExit(cell: CodexTranscriptCell) {
   return exitCode !== null && exitCode !== 0;
 }
 
+function isNoMatchTerminalExit(cell: CodexTranscriptCell) {
+  if (terminalExitCode(cell) !== 1) {
+    return false;
+  }
+  const terminalText = (cell.toolLifecycleModel?.terminalOperations ?? [])
+    .flatMap((operation) => [
+      operation.request?.displayCommand,
+      operation.result?.formattedOutput,
+      operation.result?.stdout,
+      operation.result?.stderr,
+    ])
+    .filter(Boolean)
+    .join("\n");
+  return /\b(?:findstr|grep|rg)\b/i.test(terminalText)
+    && /(?:无输出|no output|no matches?|not found)/i.test(terminalText);
+}
+
 function toolRendererForCell(cell: CodexTranscriptCell, language: ConversationToolPresentationLanguage) {
   const rawName = codexTranscriptToolRawName(cell);
   const direct = conversationToolRendererFor(rawName);
@@ -107,7 +124,9 @@ function ToolActivityItem({
 }) {
   const toolName = codexTranscriptToolRawName(cell);
   const baseTitle = conversationToolRendererLabel(toolName, language);
-  const summary = visibleToolSummary(cell, language);
+  const summary = isNoMatchTerminalExit(cell)
+    ? (language === "zh" ? "未找到匹配项" : "No matches found")
+    : visibleToolSummary(cell, language);
   const useSemanticCodeTitle = toolName.trim().toLowerCase() === "code_symbol_tool"
     && /^(搜索|检查|Search |Inspect )/.test(summary);
   const title = useSemanticCodeTitle ? summary : baseTitle;
@@ -115,7 +134,7 @@ function ToolActivityItem({
   const detailsId = `codex-tool-detail-${cell.id}`;
   const details = renderToolDetails(cell, detailsId);
   const expandable = details !== null && details !== undefined && details !== false;
-  const openByDefault = cell.status === "failed" || cell.status === "degraded" || hasNonzeroTerminalExit(cell);
+  const openByDefault = cell.status === "running" || cell.status === "pending";
   const label = language === "zh"
     ? `展开或收起工具结果：${title}`
     : `Expand or collapse tool results: ${title}`;

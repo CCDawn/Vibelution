@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { ConversationProcessDisclosure } from "./ConversationProcessDisclosure";
+import styles from "./ConversationProcessDisclosure.styles";
 import type { CodexTranscriptCell } from "./codexTranscriptCells";
 
 function processCell(status: CodexTranscriptCell["status"]): CodexTranscriptCell {
@@ -33,7 +34,7 @@ function processCell(status: CodexTranscriptCell["status"]): CodexTranscriptCell
 }
 
 describe("ConversationProcessDisclosure", () => {
-  it("renders a completed process as an expanded disclosure with its duration", () => {
+  it("renders a completed process collapsed with its duration and stage count", () => {
     const html = renderToStaticMarkup(
       <ConversationProcessDisclosure cells={[processCell("completed")]} language="zh">
         <span>处理记录内容</span>
@@ -41,32 +42,35 @@ describe("ConversationProcessDisclosure", () => {
     );
 
     expect(html).toContain('data-codex-process-disclosure="true"');
-    expect(html).toContain('open=""');
-    expect(html).toContain("已处理 2.9s");
+    expect(html).not.toContain('open=""');
+    expect(html).toContain("已处理 2.9s 1 个阶段");
     expect(html).toContain("处理记录内容");
+    expect(styles.summary).not.toContain("border-b");
+    expect(styles.content).toContain("border-l");
   });
 
-  it("announces an active process without exposing per-item progress metadata", () => {
+  it("opens and announces only an active process without exposing per-item progress metadata", () => {
     const html = renderToStaticMarkup(
       <ConversationProcessDisclosure cells={[processCell("running")]} language="zh">
         <span>正在执行</span>
       </ConversationProcessDisclosure>,
     );
 
-    expect(html).toContain("处理中 2.9s");
+    expect(html).toContain("处理中 2.9s 1 个阶段");
+    expect(html).toContain('open=""');
     expect(html).toContain('aria-live="polite"');
     expect(html).not.toContain("1 次调用");
   });
 
-  it("uses the completed summary for a stopped process while preserving failure state", () => {
+  it("keeps a stopped process collapsed with an explicit failure summary", () => {
     const html = renderToStaticMarkup(
       <ConversationProcessDisclosure cells={[processCell("failed")]} language="en">
         <span>Stopped process details</span>
       </ConversationProcessDisclosure>,
     );
 
-    expect(html).toContain("Processed 2.9s");
+    expect(html).toContain("Processing stopped 2.9s 1 stage");
     expect(html).toContain('data-codex-process-state="failed"');
-    expect(html).not.toContain("Processing stopped");
+    expect(html).not.toContain('open=""');
   });
 });

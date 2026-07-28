@@ -109,10 +109,57 @@ describe("ConversationToolActivity", () => {
     expect(html).toContain("Command exited 1");
     expect(html).toContain("itemIconWarning");
     expect(html).not.toContain("itemIconFailed");
-    expect(html).toContain("open=\"\"");
+    expect(html).not.toContain("open=\"\"");
   });
 
-  it("keeps a long sequence as flat Codex-style tool rows", () => {
+  it("summarizes a search exit with no output as no matches instead of a generic failure", () => {
+    const cell = toolCell("terminal-no-match", "");
+    cell.title = "exec_command";
+    cell.toolLifecycleModel = {
+      toolCalls: [
+        {
+          toolCallId: "terminal-no-match",
+          rawOperationId: "terminal-no-match",
+          status: "completed",
+          title: "exec_command",
+          rawToolName: "exec_command",
+          runtimeKind: "terminal",
+          terminalOperationId: "terminal_operation:no-match",
+        },
+      ],
+      terminalOperations: [
+        {
+          operationId: "terminal_operation:no-match",
+          toolCallId: "terminal-no-match",
+          terminalId: "terminal:sandbox-no-match",
+          kind: "ExecCommand",
+          status: "completed",
+          request: { displayCommand: "findstr /n /i max-w ConversationView.tsx", cwd: "" },
+          result: {
+            exitCode: 1,
+            formattedOutput: "[WARNING | Exit Code: 1]\n[命令执行完成，无输出]",
+          },
+          rawOperationId: "terminal-no-match",
+        },
+      ],
+      terminalSessions: [],
+      modelObservations: [],
+    };
+
+    const html = renderToStaticMarkup(
+      <ConversationToolActivity
+        activity={createCodexTranscriptToolActivity([cell])}
+        language="zh"
+        renderToolDetails={() => <pre>技术输出</pre>}
+      />,
+    );
+
+    expect(html).toContain("未找到匹配项");
+    expect(html).not.toContain("命令退出 1");
+    expect(html).not.toContain('open=""');
+  });
+
+  it("folds a short repeated semantic stage while preserving its tool rows", () => {
     const html = renderToStaticMarkup(
       <ConversationToolActivity
         activity={createCodexTranscriptToolActivity([
@@ -126,9 +173,11 @@ describe("ConversationToolActivity", () => {
     );
 
     expect(html).toContain('data-codex-tool-activity="inline"');
+    expect(html).toContain('data-codex-tool-activity-batch="true"');
+    expect(html).toContain('data-codex-tool-activity-count="3"');
     expect(html.match(/data-codex-tool-activity-item="true"/g)).toHaveLength(3);
     expect(html).not.toContain('data-codex-tool-activity-group="true"');
-    expect(html).toContain("代码图谱");
+    expect(html).toContain("代码分析");
     expect(html).not.toContain("3 次调用");
     expect(html).toContain("定位 ConversationLogger");
     expect(html).not.toContain('{&quot;status&quot;:&quot;ok&quot;,');
@@ -192,6 +241,24 @@ describe("ConversationToolActivity", () => {
     expect(activityCss).toContain("details[open] > summary");
     expect(activityCss).toContain("transform: rotate(0deg)");
     expect(styles.itemChevron).not.toContain("rotate-");
+    expect(styles.batchDetails).not.toContain("border-l");
+  });
+
+  it("opens only the currently running tool detail by default", () => {
+    const runningCell = toolCell("tool-running", "正在执行");
+    runningCell.status = "running";
+    runningCell.tone = "running";
+
+    const html = renderToStaticMarkup(
+      <ConversationToolActivity
+        activity={createCodexTranscriptToolActivity([runningCell])}
+        language="zh"
+        renderToolDetails={() => <pre>实时输出</pre>}
+      />,
+    );
+
+    expect(html).toContain('data-codex-transcript-cell-status="running"');
+    expect(html).toContain('open=""');
   });
 
   it("uses a semantic code result as the row title without repeating the generic tool name", () => {

@@ -1,9 +1,12 @@
 import type { CodexTranscriptCell } from "./codexTranscriptCells";
 import { codexTranscriptToolRawName } from "./conversationToolActivityModel";
 import type { ConversationToolPresentationLanguage } from "./conversationToolPresentation";
-import { conversationToolRendererLabel } from "./conversationToolRendererRegistry";
+import {
+  conversationToolRendererFor,
+  conversationToolRendererLabel,
+} from "./conversationToolRendererRegistry";
 
-const BATCH_MINIMUM = 4;
+const BATCH_MINIMUM = 2;
 
 export type ConversationToolActivityPresentationItem =
   | {
@@ -23,7 +26,27 @@ function completedToolIdentity(cell: CodexTranscriptCell) {
   if (cell.kind !== "tool_call" || cell.status !== "completed" || cell.tone !== "neutral") {
     return "";
   }
-  return codexTranscriptToolRawName(cell).trim().toLowerCase();
+  if (
+    cell.toolLifecycleModel?.terminalOperations.some(
+      (operation) => typeof operation.result?.exitCode === "number" && operation.result.exitCode !== 0,
+    )
+  ) {
+    return "";
+  }
+  const rawName = codexTranscriptToolRawName(cell).trim().toLowerCase();
+  const family = conversationToolRendererFor(rawName).family;
+  return family === "generic" ? `generic:${rawName}` : family;
+}
+
+function presentationRunTitle(
+  cell: CodexTranscriptCell,
+  language: ConversationToolPresentationLanguage,
+) {
+  const rawName = codexTranscriptToolRawName(cell);
+  const descriptor = conversationToolRendererFor(rawName);
+  return descriptor.family === "generic"
+    ? conversationToolRendererLabel(rawName, language)
+    : descriptor.groupLabel[language];
 }
 
 function appendPresentationRun(
@@ -43,7 +66,7 @@ function appendPresentationRun(
   items.push({
     kind: "batch",
     id: `tool-batch:${first.id}:${last.id}`,
-    title: conversationToolRendererLabel(codexTranscriptToolRawName(first), language),
+    title: presentationRunTitle(first, language),
     count: cells.length,
     cells,
   });
@@ -51,8 +74,8 @@ function appendPresentationRun(
 
 /**
  * Builds a display-only projection for one contiguous tool activity. A batch
- * never moves events across commentary boundaries: it represents only a long,
- * adjacent run of successful calls to the same underlying tool.
+ * never moves events across commentary boundaries: it represents only an
+ * adjacent run of successful calls in the same semantic work stage.
  */
 export function buildConversationToolActivityPresentation(
   cells: readonly CodexTranscriptCell[],
