@@ -262,6 +262,8 @@ export type ExperimentPlanningStatusPayload = {
         requiredQuestionCount: number;
         completedQuestionCount: number;
         goldenSampleQuestionId: string;
+        trialQuestionIds?: string[];
+        /** Compatibility alias retained for clients created before the MVP wording was finalized. */
         testQuestionIds: string[];
         scaleUpDeferred: boolean;
       };
