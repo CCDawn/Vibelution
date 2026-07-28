@@ -29,6 +29,49 @@ def test_research_loop_templates_keep_execution_boundary_manual():
     assert templates["boundaries"]["trainingRunner"] is False
 
 
+def test_research_loop_status_and_lookup_are_project_scoped(
+    tmp_path, monkeypatch
+):
+    team = _team(tmp_path, monkeypatch)
+    loop_a = research_loop_service.create_research_loop(
+        team["teamId"],
+        {
+            "researchProjectId": "project-a",
+            "researchQuestion": "Question A",
+        },
+    )["loop"]
+    research_loop_service.create_research_loop(
+        team["teamId"],
+        {
+            "researchProjectId": "project-b",
+            "researchQuestion": "Question B",
+        },
+    )
+
+    status = research_loop_service.get_research_loop_status(
+        team["teamId"],
+        research_project_id="project-a",
+    )
+
+    assert loop_a["researchProjectId"] == "project-a"
+    assert status["researchProjectId"] == "project-a"
+    assert [item["loopId"] for item in status["loops"]] == [loop_a["loopId"]]
+    assert (
+        research_loop_service.require_research_loop(
+            team["teamId"],
+            loop_a["loopId"],
+            research_project_id="project-a",
+        )["loopId"]
+        == loop_a["loopId"]
+    )
+    with pytest.raises(research_loop_service.ResearchLoopError, match="does not belong"):
+        research_loop_service.require_research_loop(
+            team["teamId"],
+            loop_a["loopId"],
+            research_project_id="project-b",
+        )
+
+
 def test_research_loop_records_template_evidence_and_iteration_decision(tmp_path, monkeypatch):
     team = _team(tmp_path, monkeypatch)
     created = research_loop_service.create_research_loop(

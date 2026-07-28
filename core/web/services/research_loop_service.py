@@ -128,8 +128,12 @@ def list_research_loop_templates() -> dict[str, Any]:
     }
 
 
-def get_research_loop_status(team_id: str) -> dict[str, Any]:
+def get_research_loop_status(
+    team_id: str,
+    research_project_id: str = "",
+) -> dict[str, Any]:
     normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    normalized_project_id = _trim_text(research_project_id, max_length=160)
     team = team_service.get_team(normalized_team_id)
     with _LOCK:
         store = _load_research_loop_store(normalized_team_id)
@@ -138,10 +142,60 @@ def get_research_loop_status(team_id: str) -> dict[str, Any]:
         active_loop = _find_loop(store, str(store.get("activeLoopId") or ""))
         if active_loop is None and loops:
             active_loop = loops[-1]
-            store["activeLoopId"] = active_loop["loopId"]
+        store["activeLoopId"] = active_loop["loopId"] if active_loop else ""
         store["updatedAt"] = utc_now_iso()
         _write_json(_research_loop_store_path(normalized_team_id), store)
-    return _status_payload(normalized_team_id, team, store, active_loop=active_loop)
+    status_store = store
+    if normalized_project_id:
+        project_loops = [
+            item
+            for item in _loop_records(store)
+            if _trim_text(item.get("researchProjectId"), max_length=160)
+            == normalized_project_id
+        ]
+        status_store = deepcopy(store)
+        status_store["loops"] = project_loops
+        status_store["activeLoopId"] = (
+            project_loops[-1].get("loopId", "") if project_loops else ""
+        )
+        active_loop = project_loops[-1] if project_loops else None
+    payload = _status_payload(
+        normalized_team_id,
+        team,
+        status_store,
+        active_loop=active_loop,
+    )
+    payload["researchProjectId"] = normalized_project_id
+    return payload
+
+
+def require_research_loop(
+    team_id: str,
+    loop_id: str,
+    *,
+    research_project_id: str = "",
+) -> dict[str, Any]:
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    normalized_loop_id = _normalize_required_id(
+        loop_id,
+        "Research loop id is required.",
+    )
+    normalized_project_id = _trim_text(research_project_id, max_length=160)
+    team_service.get_team(normalized_team_id)
+    with _LOCK:
+        store = _load_research_loop_store(normalized_team_id)
+        loop = _find_loop(store, normalized_loop_id)
+    if loop is None:
+        raise ResearchLoopError("Research loop not found.")
+    if (
+        normalized_project_id
+        and _trim_text(loop.get("researchProjectId"), max_length=160)
+        != normalized_project_id
+    ):
+        raise ResearchLoopError(
+            "Research loop does not belong to this research project."
+        )
+    return deepcopy(loop)
 
 
 def create_research_loop(team_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -165,6 +219,10 @@ def create_research_loop(team_id: str, payload: dict[str, Any] | None = None) ->
         "schemaVersion": SCHEMA_VERSION,
         "loopId": _new_record_id("research-loop"),
         "teamId": normalized_team_id,
+        "researchProjectId": _trim_text(
+            request_payload.get("researchProjectId"),
+            max_length=160,
+        ),
         "templateId": template["templateId"],
         "templateKind": template["templateKind"],
         "templateSnapshot": deepcopy(template),
@@ -622,6 +680,7 @@ def _loop_summary(loop: dict[str, Any]) -> dict[str, Any]:
     readiness = loop.get("readiness") if isinstance(loop.get("readiness"), dict) else {}
     return {
         "loopId": loop.get("loopId", ""),
+        "researchProjectId": loop.get("researchProjectId", ""),
         "templateId": loop.get("templateId", ""),
         "templateKind": loop.get("templateKind", ""),
         "title": loop.get("title", ""),
