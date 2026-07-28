@@ -116,6 +116,91 @@ def test_query_shadow_match_never_changes_legacy_response(monkeypatch):
     assert observed[-1].status == "match"
 
 
+def test_query_shadow_records_only_bounded_comparison_evidence(monkeypatch):
+    summaries = build_session_query_summaries(2)
+    monkeypatch.setattr(
+        session_service,
+        "get_config",
+        lambda: AppConfig.model_validate({"session_catalog": {"mode": "shadow"}}),
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_get_cached_session_query_sessions",
+        lambda **_kwargs: [dict(item) for item in summaries],
+    )
+    monkeypatch.setattr(session_service, "_record_session_list_query_event", lambda **_kwargs: None)
+    observed: list[dict] = []
+    monkeypatch.setattr(
+        session_service,
+        "_record_session_catalog_shadow_query_event",
+        lambda **kwargs: observed.append(kwargs),
+        raising=False,
+    )
+    catalog_bridge.set_session_query_shadow_provider(
+        lambda _request: {
+            "items": [
+                {
+                    "id": "different-session",
+                    "title": "private candidate title",
+                    "status": "running",
+                }
+            ],
+            "nextCursor": "",
+            "totalEstimate": 1,
+        }
+    )
+    try:
+        payload = session_service.query_sessions(limit=1)
+    finally:
+        catalog_bridge.set_session_query_shadow_provider(None)
+
+    assert payload["items"] == summaries[:1]
+    assert observed[-1]["comparison"].status == "mismatch"
+    assert observed[-1]["limit"] == 1
+    assert "private" not in repr(observed[-1])
+
+
+def test_shadow_query_runtime_event_never_contains_session_content(monkeypatch):
+    observed: list[dict] = []
+    monkeypatch.setattr(
+        session_service,
+        "record_runtime_scene_event",
+        lambda *_args, **kwargs: observed.append(kwargs),
+    )
+    comparison = catalog_bridge.compare_session_query_payloads(
+        {
+            "items": [{"id": "session-a", "title": "private legacy title", "status": "ready"}],
+            "nextCursor": "",
+            "totalEstimate": 1,
+        },
+        {
+            "items": [{"id": "session-b", "title": "private catalog title", "status": "running"}],
+            "nextCursor": "",
+            "totalEstimate": 1,
+        },
+    )
+
+    session_service._record_session_catalog_shadow_query_event(
+        comparison=comparison,
+        limit=20,
+        cursor=0,
+        has_query=True,
+        has_agent_filter=False,
+        has_kind_filter=False,
+        has_state_filter=False,
+        sort="updatedAt_desc",
+    )
+
+    fields = observed[-1]["fields"]
+    assert observed[-1]["outcome"] == "mismatch"
+    assert fields["mismatchKinds"] == ["item_ids", "item_state"]
+    assert fields["legacyCount"] == 1
+    assert fields["candidateCount"] == 1
+    assert "private" not in repr(observed[-1])
+    assert "session-a" not in repr(observed[-1])
+    assert "session-b" not in repr(observed[-1])
+
+
 def test_shadow_provider_failure_falls_back_to_exact_legacy_payload(monkeypatch):
     summaries = build_session_query_summaries(3)
     monkeypatch.setattr(

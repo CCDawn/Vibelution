@@ -543,6 +543,7 @@ from core.web.services.session.events import (
     _record_session_delete_event,
     _record_session_execution_registry_event,
     _record_session_guidance_event,
+    _record_session_catalog_shadow_query_event,
     _record_session_list_loaded_event,
     _record_session_list_prewarm_event,
     _record_session_list_query_event,

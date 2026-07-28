@@ -29,7 +29,7 @@
 - T1：每会话跨进程锁、sequence 原子分配、append flush/fsync、唯一临时文件 rewrite 和 Windows 子进程回归已提交。
 - T2：本地 runtime cache 路由、WAL/local-filesystem fail closed、schema v1、migration checksum、参数化查询、quick_check、lease/watermark 和错误分类已提交。
 - T3 核心：canonical snapshot 投影、孤儿 journal 隔离、TEMP candidate、源 revision 二次校验、原子发布、删除重建和 stale lease takeover 已提交。`chat_state.state_revision` 在所有 state 写入（含 legacy-message cleanup）中以持锁磁盘状态单调推进；state 写入以全局 dirty、journal append 以会话 dirty 通知 catalog。dirty 记录和 `catalog.untrusted` 只会在成功 reconcile 时条件清除，晚到 mutation 会保留；runtime 以去抖、最多 3 次的后台重建恢复候选，失败或 shutdown 一律保持 legacy。
-- T4：typed `off|shadow`、有界 comparator、实际 SQLite candidate startup registration、受控增量 rebuild、runtime-scene 事件和异常时 exact legacy fallback 已提交。只有显式 `shadow` 才以 non-repair legacy summary 异步重建并注册 provider；dirty/sentinel/source failure 时 candidate 禁用并保留 legacy。默认生产配置仍为 `off`。10k 无 journal synthetic startup rebuild 为 1,076.59ms（专用 temp root/sentinel，正式数据快照不变）。
+- T4：typed `off|shadow`、有界 comparator、实际 SQLite candidate startup registration、受控增量 rebuild、runtime-scene 事件和异常时 exact legacy fallback 已提交。每次 shadow query 仅记录 match/mismatch/degraded、数量、filter/sort 与差异类别，不记录 session ID、标题或消息内容；只有显式 `shadow` 才以 non-repair legacy summary 异步重建并注册 provider。dirty/sentinel/source failure 时 candidate 禁用并保留 legacy。默认生产配置仍为 `off`。10k 无 journal synthetic startup rebuild 为 1,076.59ms（专用 temp root/sentinel，正式数据快照不变）。
 - T5：参数化 SQL filter/sort/pagination、稳定 cursor、DTO adapter 和 10k 临时数据 profile 已提交；p95 7.5–19.3ms，较 T0 legacy 144–345ms 快约 8–46 倍。它只在显式 `shadow` 下注册为 runtime candidate，且从不接管正式 `query_sessions`。
 - T6 未开始：不得启用 `read_preferred`；必须先完成真实 shadow 零差异和 Launcher canary 证据。
 

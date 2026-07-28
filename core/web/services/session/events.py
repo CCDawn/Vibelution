@@ -289,6 +289,62 @@ def _record_session_list_query_event(
         return
 
 
+def _record_session_catalog_shadow_query_event(
+    *,
+    comparison: Any,
+    limit: int,
+    cursor: int,
+    has_query: bool,
+    has_agent_filter: bool,
+    has_kind_filter: bool,
+    has_state_filter: bool,
+    sort: str,
+) -> None:
+    """Record bounded shadow evidence without session content or identifiers."""
+
+    s = _service()
+    status = str(getattr(comparison, "status", "") or "degraded").strip() or "degraded"
+    mismatch_kinds = [
+        str(item or "").strip()[:80]
+        for item in tuple(getattr(comparison, "mismatch_kinds", ()) or ())[:8]
+        if str(item or "").strip()
+    ]
+    try:
+        legacy_count = max(0, int(getattr(comparison, "legacy_count", 0) or 0))
+    except (TypeError, ValueError):
+        legacy_count = 0
+    try:
+        candidate_count = max(0, int(getattr(comparison, "candidate_count", 0) or 0))
+    except (TypeError, ValueError):
+        candidate_count = 0
+    try:
+        s.record_runtime_scene_event(
+            "session_catalog",
+            "shadow_query",
+            "session_catalog.shadow_query",
+            level="info" if status == "match" else "warning",
+            outcome=status,
+            message="Session catalog shadow query comparison completed.",
+            fields={
+                "status": status,
+                "mismatchKinds": mismatch_kinds,
+                "legacyCount": legacy_count,
+                "candidateCount": candidate_count,
+                "errorType": str(getattr(comparison, "error_type", "") or "").strip()[:120],
+                "limit": max(0, int(limit or 0)),
+                "cursor": max(0, int(cursor or 0)),
+                "hasQuery": bool(has_query),
+                "hasAgentFilter": bool(has_agent_filter),
+                "hasKindFilter": bool(has_kind_filter),
+                "hasStateFilter": bool(has_state_filter),
+                "sort": str(sort or "").strip()[:80],
+            },
+            lifecycle=False,
+        )
+    except Exception:
+        return
+
+
 def _record_session_message_edit_resubmit_event(
     session_id: str,
     *,
