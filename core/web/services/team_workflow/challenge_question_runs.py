@@ -359,7 +359,7 @@ def bind_challenge_research_task_model(
     dialogue_model_id: Any,
     model_library: dict[str, Any],
 ) -> dict[str, Any]:
-    """Resolve and fail closed on the effective Agent route before submission."""
+    """Resolve the configured Agent route and classify its official-evidence eligibility."""
     contract = normalize_challenge_research_task_policy(question_id, required_model_policy)
     if not contract:
         return {}
@@ -376,15 +376,12 @@ def bind_challenge_research_task_model(
     allowed_provider_ids = {item.lower() for item in policy["providerIds"]}
     allowed_model_ids = {item.lower() for item in policy["modelIds"]}
     model_candidates = {model_ref.lower(), upstream_model_id.lower()}
-    if (
-        provider_id.lower() not in allowed_provider_ids
-        or not any(marker in provider_id.lower() for marker in OFFICIAL_PROVIDERS)
-        or not (model_candidates & allowed_model_ids)
-        or "qwen" not in upstream_model_id.lower()
-    ):
-        raise ValueError(
-            "challenge_required_model_mismatch: Challenge task requires the configured DashScope/Qwen route before the first LLM call."
-        )
+    official_evidence_eligible = (
+        provider_id.lower() in allowed_provider_ids
+        and any(marker in provider_id.lower() for marker in OFFICIAL_PROVIDERS)
+        and bool(model_candidates & allowed_model_ids)
+        and "qwen" in upstream_model_id.lower()
+    )
     return {
         **contract,
         "researchProjectId": research_project_id,
@@ -393,10 +390,15 @@ def bind_challenge_research_task_model(
             "providerId": provider_id,
             "modelId": upstream_model_id,
         },
+        "executionPolicy": {
+            "routeSource": "agent_dialogue_binding",
+            "configuredModelAuthoritative": True,
+        },
         "evidencePolicy": {
             "recordCanonicalSuccessOnly": True,
             "rawPayloadPersistence": "forbidden",
             "publishRequiredForProgramLedger": True,
+            "officialEvidenceEligible": official_evidence_eligible,
         },
     }
 
@@ -412,6 +414,13 @@ def register_challenge_task_model_evidence(
     contract = task.get("challengeTaskContract") if isinstance(task.get("challengeTaskContract"), dict) else {}
     usage = dict(llm_usage) if isinstance(llm_usage, dict) else {}
     if not contract or str(final_status or "").strip() != "completed":
+        return None
+    evidence_policy = (
+        contract.get("evidencePolicy")
+        if isinstance(contract.get("evidencePolicy"), dict)
+        else {}
+    )
+    if evidence_policy.get("officialEvidenceEligible") is False:
         return None
     if str(usage.get("source") or "").strip() in {"", "missing", "not_called", "not_called_preflight"}:
         return None
