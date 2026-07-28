@@ -521,26 +521,7 @@
 .badge {
   min-height: 25px;
   padding: 0 9px;
-  border: 1px solid var(--line);
-  color: var(--text-secondary);
-  background: var(--panel-subtle);
   font-size: 11px;
-}
-
-.badge.success {
-  border-color: rgb(25 112 71 / 22%);
-  color: var(--success);
-  background: var(--success-soft);
-}
-
-.badge.warning {
-  border-color: rgb(161 92 0 / 23%);
-  color: var(--warning);
-  background: var(--warning-soft);
-}
-
-.badge.neutral {
-  color: var(--text-secondary);
 }
 
 .progress-rail {
@@ -692,20 +673,7 @@
 .status-icon {
   min-height: 23px;
   padding: 0 8px;
-  border: 1px solid var(--line);
   font-size: 10px;
-}
-
-.status-icon.success {
-  border-color: rgb(25 112 71 / 18%);
-  color: var(--success);
-  background: var(--success-soft);
-}
-
-.status-icon.warning {
-  border-color: rgb(161 92 0 / 19%);
-  color: var(--warning);
-  background: var(--warning-soft);
 }
 
 .text-button {
@@ -1476,43 +1444,16 @@
 
 .stage-state,
 .status-pill {
-  display: inline-flex;
-  align-items: center;
   width: max-content;
   min-height: 22px;
   padding: 0 8px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  color: var(--text-secondary);
   font-size: 10px;
   font-weight: 700;
-  background: var(--panel-subtle);
 }
 
 .platform-stage-button .stage-state {
   grid-column: 2;
   justify-self: start;
-}
-
-.stage-state.active,
-.status-pill.active {
-  border-color: rgb(23 107 115 / 24%);
-  color: var(--accent);
-  background: var(--accent-soft);
-}
-
-.stage-state.ready,
-.status-pill.ready {
-  border-color: rgb(25 112 71 / 22%);
-  color: var(--success);
-  background: var(--success-soft);
-}
-
-.stage-state.warning,
-.status-pill.warning {
-  border-color: rgb(161 92 0 / 24%);
-  color: var(--warning);
-  background: var(--warning-soft);
 }
 
 .stage-count {

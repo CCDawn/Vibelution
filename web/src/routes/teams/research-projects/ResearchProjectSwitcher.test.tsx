@@ -43,6 +43,8 @@ describe("ResearchProjectSwitcher", () => {
     expect(switcherSource).toContain("primaryActionLabel");
     expect(switcherSource).toContain("已自动保存");
     expect(switcherSource).toContain("切换项目");
+    expect(switcherSource).toContain("VStatusChip");
+    expect(switcherSource).toContain("projectStatusTone");
   });
 
   it("keeps project identity stable after the first experiment task", () => {

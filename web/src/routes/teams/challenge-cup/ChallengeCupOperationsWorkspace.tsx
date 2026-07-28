@@ -1,7 +1,7 @@
 import { Fragment, type ReactNode, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
-import { VNativeButton } from "../../../components/vui";
+import { VNativeButton, VStatusChip, type VStatusTone } from "../../../components/vui";
 import type {
   ResearchProjectAgentTaskKind,
   TeamResearchProjectAgentTask,
@@ -72,6 +72,13 @@ function cx(...tokens: Array<string | false | null | undefined>) {
     .filter((token): token is string => Boolean(token))
     .map((token) => css[token] || token)
     .join(" ");
+}
+
+function vuiStatusTone(tone: ChallengeCupProjectSwitcherContext["statusTone"]): VStatusTone {
+  if (tone === "active") return "accent";
+  if (tone === "ready") return "success";
+  if (tone === "warning") return "warning";
+  return "neutral";
 }
 
 function CheckMark() {
@@ -316,7 +323,9 @@ export function ChallengeCupOperationsWorkspace({
               <span>研究计划</span>
               <div>
                 <h1>{programTitle}</h1>
-                <span className={cx("status-pill", stageState(activeStage).tone)}>{stageState(activeStage).label}</span>
+                <VStatusChip className={cx("status-pill")} tone={vuiStatusTone(stageState(activeStage).tone)}>
+                  {stageState(activeStage).label}
+                </VStatusChip>
                 <span className={cx("autosave-label")}>{isLoading ? "同步中" : projection ? "投影已同步" : "投影不可用"}</span>
               </div>
               <p>研究主题：{researchTopic.trim() || programTitle}</p>
@@ -371,7 +380,9 @@ export function ChallengeCupOperationsWorkspace({
                             <strong>{meta.label}</strong>
                             <small>{meta.shortLabel}</small>
                           </span>
-                          <span className={cx("stage-state", state.tone)}>{state.label}</span>
+                          <VStatusChip className={cx("stage-state")} tone={vuiStatusTone(state.tone)}>
+                            {state.label}
+                          </VStatusChip>
                           <strong className={cx("stage-count")}>{state.count}</strong>
                         </VNativeButton>
                         {index < stages.length - 1 ? <span className={cx("platform-stage-connector")} aria-hidden="true" /> : null}
@@ -404,7 +415,9 @@ export function ChallengeCupOperationsWorkspace({
                       <span>阶段 {PLATFORM_STAGE_META[activeStage].index} · 当前工作区</span>
                       <div>
                         <h2 id="platform-stage-title">{PLATFORM_STAGE_META[activeStage].label}</h2>
-                        <span className={cx("status-pill", stageState(activeStage).tone)}>{stageState(activeStage).label}</span>
+                        <VStatusChip className={cx("status-pill")} tone={vuiStatusTone(stageState(activeStage).tone)}>
+                          {stageState(activeStage).label}
+                        </VStatusChip>
                       </div>
                     </div>
                     <div className={cx("platform-canvas-actions")}>
@@ -469,8 +482,16 @@ export function ChallengeCupOperationsWorkspace({
                                 <tr key={question.id}>
                                   <td><strong>{question.id}</strong><span>{question.kind}</span></td>
                                   <td>{modelLabel}</td>
-                                  <td><span className={cx("status-icon", question.machinePassed ? "success" : "warning")}>{question.machinePassed ? "通过" : "待验证"}</span></td>
-                                  <td><span className={cx("status-icon", question.humanApproved ? "success" : "warning")}>{humanStatusLabel(question.humanStatus)}</span></td>
+                                  <td>
+                                    <VStatusChip className={cx("status-icon")} tone={question.machinePassed ? "success" : "warning"}>
+                                      {question.machinePassed ? "通过" : "待验证"}
+                                    </VStatusChip>
+                                  </td>
+                                  <td>
+                                    <VStatusChip className={cx("status-icon")} tone={question.humanApproved ? "success" : "warning"}>
+                                      {humanStatusLabel(question.humanStatus)}
+                                    </VStatusChip>
+                                  </td>
                                   <td>{question.machinePassed ? "可追溯" : "待生成"}</td>
                                 </tr>
                               ))}
@@ -709,7 +730,9 @@ export function ChallengeCupOperationsWorkspace({
                       <span className={cx("eyebrow")}>MVP 进度</span>
                       <h2 id="challenge-progress-title">{machineRequired} 个问题的验证与审核轨迹</h2>
                     </div>
-                    <span className={cx("badge", humanGate ? "success" : "warning")}>人工验收 {humanPercent}%</span>
+                    <VStatusChip className={cx("badge")} tone={humanGate ? "success" : "warning"}>
+                      人工验收 {humanPercent}%
+                    </VStatusChip>
                   </header>
 
                   <div className={cx("progress-rail")}>
@@ -739,9 +762,17 @@ export function ChallengeCupOperationsWorkspace({
                           <tr key={question.id}>
                             <td><strong>{question.id}</strong><span>{question.kind}</span></td>
                             <td>{modelLabel}</td>
-                            <td><span className={cx("status-icon", question.machinePassed ? "success" : "warning")}>{question.machinePassed ? "通过" : "待验证"}</span></td>
+                            <td>
+                              <VStatusChip className={cx("status-icon")} tone={question.machinePassed ? "success" : "warning"}>
+                                {question.machinePassed ? "通过" : "待验证"}
+                              </VStatusChip>
+                            </td>
                             <td>{question.machinePassed ? "已追溯" : "待生成"}</td>
-                            <td><span className={cx("status-icon", question.humanApproved ? "success" : "warning")}>{humanStatusLabel(question.humanStatus)}</span></td>
+                            <td>
+                              <VStatusChip className={cx("status-icon")} tone={question.humanApproved ? "success" : "warning"}>
+                                {humanStatusLabel(question.humanStatus)}
+                              </VStatusChip>
+                            </td>
                             <td><VNativeButton className={cx("text-button")} type="button" onClick={() => selectTab("questions")}>{question.humanApproved ? "查看" : "审核"}</VNativeButton></td>
                           </tr>
                         ))}
@@ -774,7 +805,7 @@ export function ChallengeCupOperationsWorkspace({
                   <section className={cx("surface", "gate-summary")} aria-labelledby="challenge-gate-title">
                     <header className={cx("surface-header", "compact")}>
                       <div><span className={cx("eyebrow")}>验收门禁</span><h2 id="challenge-gate-title">完成条件</h2></div>
-                      <span className={cx("badge", "neutral")}>{completeGateCount} / 4</span>
+                      <VStatusChip className={cx("badge")} tone="neutral">{completeGateCount} / 4</VStatusChip>
                     </header>
                     <ul className={cx("check-list")}>
                       <li className={cx(schemaGate && "done")}><span />结构化输出符合 Schema</li>
@@ -789,7 +820,7 @@ export function ChallengeCupOperationsWorkspace({
               <details className={cx("roadmap")}>
                 <summary>
                   <div><span className={cx("eyebrow")}>MVP 后续范围</span><strong>125 题批处理与 3 个代表性深研案例</strong></div>
-                  <span className={cx("badge", "neutral")}>当前延后</span>
+                  <VStatusChip className={cx("badge")} tone="neutral">当前延后</VStatusChip>
                 </summary>
                 <div className={cx("roadmap-grid")}>
                   <article><span>规模化批处理</span><strong>{stage2?.completedQuestionCount ?? 0} / {stage2?.questionCount ?? 125}</strong><p>待 MVP 人工验收完成后再启动，不计入当前完成条件。</p></article>
@@ -807,7 +838,11 @@ export function ChallengeCupOperationsWorkspace({
             >
               <header className={cx("panel-heading")}>
                 <div><span className={cx("eyebrow")}>题目与结果</span><h2>人工抽检队列</h2><p>机器结果与人工决定分开记录，任何待审项都不会被计为正式通过。</p></div>
-                <div className={cx("panel-actions")}><span className={cx("badge", humanOutstanding > 0 ? "warning" : "success")}>{humanOutstanding} 个待处理结果</span></div>
+                <div className={cx("panel-actions")}>
+                  <VStatusChip className={cx("badge")} tone={humanOutstanding > 0 ? "warning" : "success"}>
+                    {humanOutstanding} 个待处理结果
+                  </VStatusChip>
+                </div>
               </header>
               <div className={cx("question-review-list")}>
                 {(pendingQuestions.length ? pendingQuestions : questions).map((question) => (
@@ -861,7 +896,9 @@ export function ChallengeCupOperationsWorkspace({
             >
               <header className={cx("panel-heading")}>
                 <div><span className={cx("eyebrow")}>Agent 团队</span><h2>{agents.length} 个角色按职责分组</h2><p>总览只保留团队健康摘要；模型、职责和入口在这里集中管理。</p></div>
-                <span className={cx("badge", readyAgentCount === agents.length ? "success" : "warning")}>{readyAgentCount} / {agents.length} 可用</span>
+                <VStatusChip className={cx("badge")} tone={readyAgentCount === agents.length ? "success" : "warning"}>
+                  {readyAgentCount} / {agents.length} 可用
+                </VStatusChip>
               </header>
               <div className={cx("agent-table")} role="table" aria-label="挑战杯 Agent 团队">
                 <div className={cx("agent-row", "agent-head")} role="row">
@@ -871,7 +908,9 @@ export function ChallengeCupOperationsWorkspace({
                   <div className={cx("agent-row")} role="row" key={agent.agentId}>
                     <span className={cx("agent-person")}><i>{agent.name.slice(0, 1)}</i><b>{agent.name}</b><small>{agent.code}</small></span>
                     <span>{agent.role}</span><span>{agent.workspace}</span><span title={agent.model}>{agent.model}</span>
-                    <span className={cx("status-icon", agent.tone === "ready" ? "success" : "warning")}>{agent.status}</span>
+                    <VStatusChip className={cx("status-icon")} tone={agent.tone === "ready" ? "success" : "warning"}>
+                      {agent.status}
+                    </VStatusChip>
                     <Link className={cx("text-button")} to={agent.configHref}>配置</Link>
                   </div>
                 ))}

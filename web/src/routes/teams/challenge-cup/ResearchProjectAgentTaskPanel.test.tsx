@@ -63,6 +63,8 @@ describe("ResearchProjectAgentTaskPanel", () => {
     expect(markup).toContain("神经预测编码实验｜实验规划");
     expect(markup).toContain("第 1 次");
     expect(markup).toContain("运行中");
+    expect(markup).toContain('data-vui="status-chip"');
+    expect(markup).toContain('data-tone="accent"');
     expect(markup).toContain("继续会话");
     expect(markup).toContain("实验证据");
   });
@@ -93,6 +95,7 @@ describe("ResearchProjectAgentTaskPanel", () => {
     expect(runningMarkup).not.toContain("正式重试");
     expect(panelSource).toContain("retryTaskId");
     expect(panelSource).toContain("formalRetry: true");
+    expect(panelSource).toContain("VStatusChip");
   });
 
   it("keeps Stage 3 responsibilities separate and blocks starts without an active project", () => {

@@ -15,15 +15,7 @@ const styles: Record<string, string> = {
   cardHeader: "flex items-center justify-between gap-2",
   role:
     "inline-flex min-w-0 items-center gap-1.5 text-xs font-bold text-[var(--text)]",
-  status: "shrink-0 rounded-full border px-2 py-0.5 text-[10px]",
-  neutral:
-    "border-[var(--line)] bg-[var(--panel)] text-[var(--text-muted)]",
-  active:
-    "border-[color-mix(in_srgb,var(--accent)_35%,var(--line))] bg-[var(--accent-soft)] text-[var(--accent)]",
-  completed:
-    "border-[color-mix(in_srgb,var(--success)_35%,var(--line))] bg-[var(--success-soft)] text-[var(--success)]",
-  warning:
-    "border-[color-mix(in_srgb,var(--warning)_35%,var(--line))] bg-[var(--warning-soft)] text-[var(--warning)]",
+  status: "shrink-0 px-2 py-0.5",
   description:
     "mt-2 text-[10px] leading-relaxed text-[var(--text-secondary)]",
   session:
