@@ -93,7 +93,7 @@ def test_configured_dashscope_and_real_call_evidence_only_clear_their_own_blocke
     assert "dashscope_qwen_call_evidence_missing" not in stage1["blockers"]
     assert stage1["blockers"] == [
         "mvp_golden_sample_not_approved",
-        "mvp_three_question_test_missing",
+        "mvp_three_trial_questions_missing",
     ]
     assert stage1["status"] == "blocked"
 
@@ -132,7 +132,7 @@ def test_valid_but_unapproved_candidate_does_not_complete_golden_sample():
     stage1 = projection["stage1ComplianceReadiness"]
     assert stage1["blockers"] == [
         "mvp_golden_sample_not_approved",
-        "mvp_three_question_test_missing",
+        "mvp_three_trial_questions_missing",
     ]
     assert stage1["singleQuestionSample"]["candidateCount"] == 1
     assert stage1["singleQuestionSample"]["completed"] == 0
@@ -163,7 +163,7 @@ def test_approved_golden_sample_and_three_validated_tests_complete_mvp_without_c
         question_run_summary={
             "validCandidateCount": 4,
             "validatedQuestionCount": 4,
-            "validatedQuestionIds": ["SCI-031", "SCI-067", "SCI-096", "SCI-118"],
+            "validatedQuestionIds": ["SCI-031", "SCI-096", "SCI-097", "SCI-118"],
             "validatedOutcomeCounts": {"approved": 1, "review_required": 3},
             "validatedQuestionResults": [
                 {
@@ -212,14 +212,15 @@ def test_approved_golden_sample_and_three_validated_tests_complete_mvp_without_c
         "required": 3,
         "completed": 3,
         "realCallsRequired": True,
-        "completedQuestionIds": ["SCI-031", "SCI-067", "SCI-118"],
+        "completedQuestionIds": ["SCI-031", "SCI-097", "SCI-118"],
         "outcomeCounts": {"approved": 1, "review_required": 3},
     }
     assert stage1["mvpManifest"] == {
         "requiredQuestionCount": 4,
         "completedQuestionCount": 4,
         "goldenSampleQuestionId": "SCI-096",
-        "testQuestionIds": ["SCI-031", "SCI-067", "SCI-118"],
+        "trialQuestionIds": ["SCI-031", "SCI-097", "SCI-118"],
+        "testQuestionIds": ["SCI-031", "SCI-097", "SCI-118"],
         "scaleUpDeferred": True,
     }
     assert projection["stage2BatchGovernance"]["completedQuestionCount"] == 0

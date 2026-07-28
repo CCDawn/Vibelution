@@ -36,7 +36,7 @@ function projection(): ChallengeProjection {
     },
     stage1ComplianceReadiness: {
       status: "completed",
-      completionDefinition: "one_golden_sample_and_three_test_questions_pass_mvp_gates",
+      completionDefinition: "one_golden_sample_and_three_trial_questions_pass_mvp_gates",
       blockers: [],
       dashscopeQwenProvider: {
         configured: true,
@@ -64,6 +64,7 @@ function projection(): ChallengeProjection {
         requiredQuestionCount: 4,
         completedQuestionCount: 4,
         goldenSampleQuestionId: "SCI-096",
+        trialQuestionIds: ["SCI-031", "SCI-097", "SCI-118"],
         testQuestionIds: ["SCI-031", "SCI-097", "SCI-118"],
         scaleUpDeferred: true,
       },
@@ -162,6 +163,7 @@ describe("ChallengeCupOperationsWorkspace", () => {
     expect(markup).toContain("人工审核");
     expect(markup).toContain("<strong>1 / 4</strong>");
     expect(markup).toContain("3 题待抽检");
+    expect(markup).toContain("1 个黄金样例 + 3 个试运行题（共 4 题）");
     expect(markup).toContain("模型调用证据");
     expect(markup).toContain("125 题批处理与 3 个代表性深研案例");
     expect(markup).toContain("FashionMNIST 仅为工程案例");
