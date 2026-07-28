@@ -31,7 +31,7 @@ def _isolated_catalog_runtime(tmp_path, monkeypatch):
 def test_shadow_runtime_rebuilds_catalog_and_registers_sql_provider(tmp_path):
     summaries = build_session_query_summaries(5)
     config = AppConfig.model_validate(
-        {"session_catalog": {"mode": "shadow", "incremental_reconcile_delay_ms": 0}}
+        {"session_catalog": {"mode": "shadow", "incremental_reconcile_delay_ms": 150}}
     ).session_catalog
 
     status = initialize_session_catalog_runtime(
@@ -70,7 +70,7 @@ def test_shadow_runtime_rebuilds_catalog_and_registers_sql_provider(tmp_path):
 
     assert stale.status == "degraded"
 
-    deadline = time.monotonic() + 1.0
+    deadline = time.monotonic() + 2.0
     while time.monotonic() < deadline:
         refreshed = catalog_bridge.run_session_query_shadow(
             {"items": summaries[:2], "nextCursor": "2", "totalEstimate": len(summaries)},
