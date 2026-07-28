@@ -51,6 +51,7 @@ export function TeamSourceCollectionScreeningPanel({
 }: TeamSourceCollectionScreeningPanelProps) {
   const className = [
     panelFrameStyles.workflowSourceCollectionDetails,
+    styles.sourceCollectionExpandedContentPanel,
     focused ? panelFrameStyles.sourceCollectionFocusedPanel : "",
   ].filter(Boolean).join(" ");
 
@@ -82,6 +83,7 @@ export function TeamSourceCollectionScreeningPanel({
           label={lang === "zh" ? "调整资料提炼复核列表高度" : "Resize source review list height"}
           className={styles.sourceCollectionScreeningListShell}
           resizeHandleClassName={styles.sourceCollectionListResizeHandle}
+          expandToContent
           role="region"
           tabIndex={0}
           aria-label={lang === "zh" ? "资料提炼复核候选列表，可向下滚动查看更多" : "Source review candidate list, scroll for more"}
