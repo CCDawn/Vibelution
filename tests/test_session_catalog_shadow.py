@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from config.models import AppConfig
+from core.chat.session_catalog import SessionCatalogStore
 from core.web.services import session_service
 from core.web.services.session import catalog_bridge
 from tests.session_catalog_fixtures import build_session_query_summaries
@@ -76,6 +77,120 @@ def test_shadow_comparator_reports_only_bounded_contract_mismatches():
     }
     assert "private" not in repr(comparison)
     assert not hasattr(comparison, "items")
+
+
+def test_sql_catalog_preserves_canonical_order_for_timestamps_and_title_ties(
+    monkeypatch,
+    tmp_path,
+):
+    """The SQLite candidate must preserve the legacy list's stable order."""
+
+    def summary(session_id: str, *, title: str, updated_at: str) -> dict[str, str]:
+        return {
+            "id": session_id,
+            "title": title,
+            "taskTitle": title,
+            "taskSummary": "bounded metadata",
+            "agentId": "agent-a",
+            "agentCode": "A001",
+            "agentDisplayName": "Agent A",
+            "dialogueModelId": "model-a",
+            "sessionKind": "main",
+            "status": "ready",
+            "currentPhase": "idle",
+            "childStatus": "",
+            "conversationIndexVisibility": "user_visible",
+            "updatedAt": updated_at,
+            "lastActive": updated_at,
+        }
+
+    # This is the already-canonical legacy list order. The offset timestamp is
+    # earlier than the UTC timestamp despite sorting later as raw text; the
+    # same-title rows deliberately oppose lexical session-id tie breaking.
+    summaries = [
+        summary(
+            "session-later-utc",
+            title="Zulu",
+            updated_at="2026-01-01T00:30:00Z",
+        ),
+        summary(
+            "session-offset-earlier",
+            title="same",
+            updated_at="2026-01-01T01:00:00+01:00",
+        ),
+        summary(
+            "session-z-title-tie",
+            title="same",
+            updated_at="2026-01-01T00:00:00Z",
+        ),
+        summary(
+            "session-a-title-tie",
+            title="same",
+            updated_at="not-a-timestamp",
+        ),
+    ]
+    snapshot = catalog_bridge.build_catalog_snapshot(
+        summaries,
+        {},
+        workspace_key="workspace-test",
+        indexed_at="2026-07-28T00:00:00Z",
+    )
+    store = SessionCatalogStore(
+        tmp_path / "catalog" / "session_catalog.sqlite3",
+        workspace_key="workspace-test",
+    )
+    store.initialize()
+    reconcile_result = catalog_bridge.CatalogReconciler(
+        store,
+        source_loader=lambda: snapshot,
+    ).reconcile(
+        owner="test-order-parity",
+        now="2026-07-28T00:00:00Z",
+        lease_expires_at="2026-07-28T00:01:00Z",
+    )
+    assert reconcile_result.status == "complete"
+
+    monkeypatch.setattr(session_service, "get_config", lambda: AppConfig())
+    monkeypatch.setattr(
+        session_service,
+        "_get_cached_session_query_sessions",
+        lambda **_kwargs: [dict(item) for item in summaries],
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_record_session_list_query_event",
+        lambda **_kwargs: None,
+    )
+    catalog_bridge.set_session_query_shadow_provider(
+        catalog_bridge.build_session_catalog_query_provider(store)
+    )
+    try:
+        for query_args in (
+            {"sort": "updatedAt_desc", "limit": 2},
+            {"sort": "updatedAt_desc", "cursor": "2", "limit": 2},
+            {"sort": "updatedAt_asc", "limit": 4},
+            {"sort": "title_asc", "limit": 4},
+            {"sort": "title_desc", "limit": 4},
+        ):
+            legacy = session_service.query_sessions(**query_args)
+            request = {
+                "q": "",
+                "agent_id": "",
+                "session_kind": "",
+                "state": "",
+                "sort": query_args["sort"],
+                "limit": query_args["limit"],
+                "cursor": query_args.get("cursor", ""),
+            }
+
+            comparison = catalog_bridge.run_session_query_shadow(
+                legacy,
+                request=request,
+            )
+
+            assert comparison.status == "match", query_args
+    finally:
+        catalog_bridge.set_session_query_shadow_provider(None)
 
 
 def test_session_query_cache_lookup_never_runs_collision_repair(monkeypatch):

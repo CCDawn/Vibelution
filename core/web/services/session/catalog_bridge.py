@@ -6,6 +6,7 @@ import hashlib
 import json
 import threading
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Callable, Mapping, Sequence
 
 from core.chat.session_catalog import (
@@ -256,6 +257,7 @@ def build_catalog_snapshot(
             conversation,
             journal,
             session_id=session_id,
+            source_order=len(rows),
             workspace_key=normalized_workspace_key,
             indexed_at=str(indexed_at or ""),
         )
@@ -377,10 +379,19 @@ def _project_row(
     journal: Mapping[str, Any],
     *,
     session_id: str,
+    source_order: int,
     workspace_key: str,
     indexed_at: str,
 ) -> dict[str, Any]:
     updated_at = _text(conversation, "updated_at", "updatedAt")
+    title = _text(conversation, "title")
+    last_active_at = _text(
+        conversation,
+        "last_active_at",
+        "lastActiveAt",
+        "last_active",
+        "lastActive",
+    ) or updated_at
     visibility = _text(
         conversation,
         "conversation_index_visibility",
@@ -395,7 +406,7 @@ def _project_row(
     visibility = visibility or "normal"
     return {
         "session_id": session_id,
-        "title": _text(conversation, "title"),
+        "title": title,
         "task_title": _text(conversation, "task_title", "taskTitle"),
         "task_summary": _text(conversation, "task_summary", "taskSummary"),
         "session_kind": _text(
@@ -442,14 +453,10 @@ def _project_row(
         ),
         "created_at": _text(conversation, "created_at", "createdAt"),
         "updated_at": updated_at,
-        "last_active_at": _text(
-            conversation,
-            "last_active_at",
-            "lastActiveAt",
-            "last_active",
-            "lastActive",
-        )
-        or updated_at,
+        "last_active_at": last_active_at,
+        "source_order": max(0, int(source_order)),
+        "updated_at_sort_key": _timestamp_sort_key(updated_at or last_active_at),
+        "title_sort_key": _title_sort_key(title),
         "last_turn_status": _text(
             journal,
             "last_turn_status",
@@ -505,6 +512,24 @@ def _text(value: Mapping[str, Any], *keys: str) -> str:
         if candidate:
             return candidate
     return ""
+
+
+def _timestamp_sort_key(value: Any) -> float:
+    """Match the legacy session-query timestamp ordering exactly."""
+
+    text = str(value or "").strip()
+    if not text:
+        return 0.0
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return 0.0
+
+
+def _title_sort_key(value: Any) -> str:
+    """Match the legacy session-query title sort key exactly."""
+
+    return str(value or "").strip().lower()
 
 
 def _nonnegative_int(value: Any) -> int:
