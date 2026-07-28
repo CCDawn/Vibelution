@@ -42,6 +42,7 @@ export type ChallengeCupOperationsWorkspaceProps = {
   researchTopic?: string;
   surface?: "workspace" | "progress";
   stageHrefs?: Partial<Record<PlatformStage, string>>;
+  questionHref: (questionId: string) => string;
   activeResearchProjectId?: string;
   researchProjectAgentTasks?: TeamResearchProjectAgentTask[];
   researchProjectAgentTasksLoading?: boolean;
@@ -131,6 +132,7 @@ export function ChallengeCupOperationsWorkspace({
   researchTopic = "",
   surface = "progress",
   stageHrefs = {},
+  questionHref,
   activeResearchProjectId = "",
   researchProjectAgentTasks = [],
   researchProjectAgentTasksLoading = false,
@@ -240,6 +242,7 @@ export function ChallengeCupOperationsWorkspace({
         : "等待机器验证";
   const isReady = machineCompleted >= machineRequired && humanGate;
   const activeStageHref = stageHrefs[activeStage] || graphHref;
+  const resolveQuestionHref = (questionId: string) => questionHref(questionId);
 
   const stageState = (stage: PlatformStage) => {
     if (!stage1) {
@@ -297,6 +300,7 @@ export function ChallengeCupOperationsWorkspace({
         title: question.id,
         summary: `${question.kind} · ${question.machinePassed ? humanStatusLabel(question.humanStatus) : "待机器验证"}`,
         tone: question.humanApproved ? "ready" : question.machinePassed ? "active" : "neutral",
+        href: resolveQuestionHref(question.id),
       }))
     : activeStage === "experiment"
       ? [{
@@ -306,12 +310,14 @@ export function ChallengeCupOperationsWorkspace({
             ? `研究计划已登记 · revision ${Math.max(1, stage1.acceptance.feedbackRevisionCount)}`
             : "等待生成可执行研究计划",
           tone: stage1?.acceptance.researchPlanPresent ? "ready" : "neutral",
+          href: activeStageHref,
         }]
       : (stage3?.caseRecords ?? []).slice(0, 3).map((record) => ({
           id: record.caseId,
           title: record.title,
           summary: `${record.internalStatus} · ${record.bestValidatedResultId || "暂无最佳结果"}`,
           tone: record.bestValidatedResultId ? "active" : "neutral",
+          href: activeStageHref,
         }));
 
   if (surface === "workspace") {
@@ -397,7 +403,7 @@ export function ChallengeCupOperationsWorkspace({
                       <Link
                         className={cx("platform-stage-object", index === 0 && "selected")}
                         key={item.id}
-                        to={activeStageHref}
+                        to={item.href}
                       >
                         <span><i className={cx(item.tone)} />{item.title}</span>
                         <small>{item.summary}</small>
@@ -480,7 +486,12 @@ export function ChallengeCupOperationsWorkspace({
                             <tbody>
                               {questions.map((question) => (
                                 <tr key={question.id}>
-                                  <td><strong>{question.id}</strong><span>{question.kind}</span></td>
+                                  <td>
+                                    <Link className={cx("text-button")} to={resolveQuestionHref(question.id)}>
+                                      {question.id}
+                                    </Link>
+                                    <span>{question.kind}</span>
+                                  </td>
                                   <td>{modelLabel}</td>
                                   <td>
                                     <VStatusChip className={cx("status-icon")} tone={question.machinePassed ? "success" : "warning"}>
@@ -773,7 +784,11 @@ export function ChallengeCupOperationsWorkspace({
                                 {humanStatusLabel(question.humanStatus)}
                               </VStatusChip>
                             </td>
-                            <td><VNativeButton className={cx("text-button")} type="button" onClick={() => selectTab("questions")}>{question.humanApproved ? "查看" : "审核"}</VNativeButton></td>
+                            <td>
+                              <Link className={cx("text-button")} to={resolveQuestionHref(question.id)}>
+                                {question.humanApproved ? "查看" : "审核"}
+                              </Link>
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -852,9 +867,13 @@ export function ChallengeCupOperationsWorkspace({
                     <div><span>证据状态</span><strong>{question.machinePassed ? "可追溯" : "待生成"}</strong></div>
                     <div><span>假设输出</span><strong>≥ {stage1.acceptance.minimumHypothesisCount} 条</strong></div>
                     <div><span>人工状态</span><strong className={cx(question.humanApproved ? "success-text" : "warning-text")}>{humanStatusLabel(question.humanStatus)}</strong></div>
-                    <VNativeButton className={cx("button", "secondary")} type="button" title="审核写入仍由现有人工门禁流程负责">
+                    <Link
+                      className={cx("button", "secondary")}
+                      to={resolveQuestionHref(question.id)}
+                      title="打开该题正式工件；审核写入仍由现有人工门禁流程负责"
+                    >
                       {question.humanApproved ? "查看记录" : "开始审核"}
-                    </VNativeButton>
+                    </Link>
                   </article>
                 ))}
               </div>

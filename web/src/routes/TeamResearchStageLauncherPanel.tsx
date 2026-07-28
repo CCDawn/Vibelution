@@ -29,6 +29,7 @@ import {
 import { isChallengeCupResearchWorkflowTeam } from "./teams/teamKindModel";
 import { RESEARCH_TEAM_ID } from "./TeamsRoute.canvasData";
 import {
+  challengeQuestionDetailRoute,
   RESEARCH_WORKSPACE_NAV_ITEMS,
   researchCanvasRoute,
   researchSourceCollectionRoute,
@@ -328,6 +329,7 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
             experiment: researchWorkspaceStageRoute(challengeTeamId, "experiment"),
             iteration: researchWorkspaceStageRoute(challengeTeamId, "iteration"),
           }}
+          questionHref={(questionId) => challengeQuestionDetailRoute(challengeTeamId, questionId)}
           activeResearchProjectId={researchProjectAgentTasks.activeProjectId}
           researchProjectAgentTasks={researchProjectAgentTasks.tasks}
           researchProjectAgentTasksLoading={researchProjectAgentTasks.isLoading}

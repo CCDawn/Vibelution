@@ -144,6 +144,7 @@ function props(overrides: Partial<ChallengeCupOperationsWorkspaceProps> = {}): C
       configHref: "/agents/agent-source-finder",
     }],
     graphHref: "/teams?team=research-team&researchView=canvas",
+    questionHref: (questionId) => `/teams?team=research-team&challengeQuestion=${questionId}`,
     researchTopic: "神经预测编码中的层级反馈与可塑性学习机制",
     isLoading: false,
     isUnavailable: false,
@@ -207,8 +208,26 @@ describe("ChallengeCupOperationsWorkspace", () => {
     expect(markup).toContain("Claim Map 0");
     expect(markup).toContain("当前投影未提供正式 Claim Map 时保持为 0");
     expect(markup).toContain("SCI-096");
+    expect(markup).toContain("challengeQuestion=SCI-096");
+    expect(markup).toContain("challengeQuestion=SCI-031");
     expect(markup).toContain("模型调用证据");
     expect(markup).not.toContain("weight=0.875");
+  });
+
+  it("routes each challenge question action to its own immutable artifact", () => {
+    const markup = renderWorkspace({
+      surface: "workspace",
+      stageHrefs: {
+        knowledge_collection: "/teams?team=research-team&researchView=knowledge_collection",
+      },
+    });
+
+    expect(markup).toContain("challengeQuestion=SCI-096");
+    expect(markup).toContain("challengeQuestion=SCI-031");
+    expect(markup).toContain("challengeQuestion=SCI-097");
+    expect(markup).toContain("challengeQuestion=SCI-118");
+    expect(componentSource).toContain("to={item.href}");
+    expect(componentSource).toContain("resolveQuestionHref(question.id)");
   });
 
   it("wires Stage 2 and Stage 3 to fixed flat-session Agent responsibilities", () => {
