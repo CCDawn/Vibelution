@@ -6,7 +6,7 @@ from core.web.services.session import catalog_bridge
 from tests.session_catalog_fixtures import build_session_query_summaries
 
 
-def test_typed_config_allows_only_off_or_shadow_before_canary():
+def test_typed_config_allows_all_guarded_rollout_modes():
     assert AppConfig().session_catalog.mode == "off"
     assert (
         AppConfig.model_validate(
@@ -20,13 +20,19 @@ def test_typed_config_allows_only_off_or_shadow_before_canary():
         ).session_catalog.mode
         == "shadow"
     )
+    assert (
+        AppConfig.model_validate(
+            {"session_catalog": {"mode": "read_preferred"}}
+        ).session_catalog.mode
+        == "read_preferred"
+    )
 
     try:
-        AppConfig.model_validate({"session_catalog": {"mode": "read_preferred"}})
+        AppConfig.model_validate({"session_catalog": {"mode": "unknown"}})
     except ValueError as exc:
         assert "session_catalog.mode" in str(exc)
     else:
-        raise AssertionError("read_preferred must remain unavailable before the canary stage")
+        raise AssertionError("unknown catalog modes must remain unavailable")
 
 
 def test_shadow_comparator_reports_only_bounded_contract_mismatches():
@@ -294,6 +300,294 @@ def test_shadow_provider_failure_falls_back_to_exact_legacy_payload(monkeypatch)
     assert observed[-1].status == "degraded"
     assert observed[-1].error_type == "RuntimeError"
     assert "private details" not in repr(observed[-1])
+
+
+def test_read_preferred_serves_catalog_without_loading_legacy_projection(monkeypatch):
+    summaries = build_session_query_summaries(3)
+    observed_reads: list[dict] = []
+    observed_requests: list[dict] = []
+    monkeypatch.setattr(
+        session_service,
+        "get_config",
+        lambda: AppConfig.model_validate(
+            {"session_catalog": {"mode": "read_preferred"}}
+        ),
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_get_cached_session_query_sessions",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("fresh catalog reads must not load the legacy projection")
+        ),
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_record_session_list_query_event",
+        lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_record_session_catalog_read_event",
+        lambda **kwargs: observed_reads.append(kwargs),
+        raising=False,
+    )
+
+    def catalog_page(request):
+        observed_requests.append(dict(request))
+        return {
+            "items": [dict(summaries[0])],
+            "nextCursor": "1",
+            "totalEstimate": len(summaries),
+        }
+
+    catalog_bridge.set_session_query_shadow_provider(catalog_page)
+    try:
+        payload = session_service.query_sessions(limit=1, q="needle")
+    finally:
+        catalog_bridge.set_session_query_shadow_provider(None)
+
+    assert payload == {
+        "items": [summaries[0]],
+        "nextCursor": "1",
+        "totalEstimate": len(summaries),
+        "filters": {
+            "q": "needle",
+            "agentId": "",
+            "sessionKind": "",
+            "state": "",
+            "sort": "updatedAt_desc",
+            "limit": 1,
+            "cursor": "",
+        },
+    }
+    assert observed_requests == [
+        {
+            "limit": 1,
+            "cursor": "",
+            "q": "needle",
+            "agent_id": "",
+            "session_kind": "",
+            "state": "",
+            "sort": "updatedAt_desc",
+        }
+    ]
+    assert observed_reads[-1]["source"] == "catalog"
+    assert observed_reads[-1]["catalog_status"] == "healthy"
+
+
+def test_read_preferred_provider_failure_returns_exact_legacy_payload(monkeypatch):
+    summaries = build_session_query_summaries(3)
+    observed_reads: list[dict] = []
+    monkeypatch.setattr(
+        session_service,
+        "get_config",
+        lambda: AppConfig.model_validate(
+            {"session_catalog": {"mode": "read_preferred"}}
+        ),
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_get_cached_session_query_sessions",
+        lambda **_kwargs: [dict(item) for item in summaries],
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_record_session_list_query_event",
+        lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_record_session_catalog_read_event",
+        lambda **kwargs: observed_reads.append(kwargs),
+        raising=False,
+    )
+
+    def fail_catalog(_request):
+        raise RuntimeError("private catalog failure")
+
+    catalog_bridge.set_session_query_shadow_provider(fail_catalog)
+    try:
+        payload = session_service.query_sessions(limit=1)
+    finally:
+        catalog_bridge.set_session_query_shadow_provider(None)
+
+    assert payload["items"] == summaries[:1]
+    assert payload["nextCursor"] == "1"
+    assert payload["totalEstimate"] == len(summaries)
+    assert observed_reads[-1]["source"] == "legacy"
+    assert observed_reads[-1]["catalog_status"] == "degraded"
+    assert observed_reads[-1]["error_type"] == "RuntimeError"
+    assert "private" not in repr(observed_reads[-1])
+
+
+def test_read_preferred_invalid_catalog_payload_returns_legacy_payload(monkeypatch):
+    summaries = build_session_query_summaries(3)
+    observed_reads: list[dict] = []
+    monkeypatch.setattr(
+        session_service,
+        "get_config",
+        lambda: AppConfig.model_validate(
+            {"session_catalog": {"mode": "read_preferred"}}
+        ),
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_get_cached_session_query_sessions",
+        lambda **_kwargs: [dict(item) for item in summaries],
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_record_session_list_query_event",
+        lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_record_session_catalog_read_event",
+        lambda **kwargs: observed_reads.append(kwargs),
+        raising=False,
+    )
+    catalog_bridge.set_session_query_shadow_provider(
+        lambda _request: {
+            "items": [dict(summaries[0])],
+            "nextCursor": "",
+            "totalEstimate": "invalid",
+        }
+    )
+    try:
+        payload = session_service.query_sessions(limit=1)
+    finally:
+        catalog_bridge.set_session_query_shadow_provider(None)
+
+    assert payload["items"] == summaries[:1]
+    assert payload["totalEstimate"] == len(summaries)
+    assert observed_reads[-1]["source"] == "legacy"
+    assert observed_reads[-1]["catalog_status"] == "degraded"
+    assert observed_reads[-1]["error_type"]
+
+
+def test_read_preferred_invalid_catalog_page_contract_returns_legacy_payload(monkeypatch):
+    summaries = build_session_query_summaries(3)
+    observed_reads: list[dict] = []
+    monkeypatch.setattr(
+        session_service,
+        "get_config",
+        lambda: AppConfig.model_validate(
+            {"session_catalog": {"mode": "read_preferred"}}
+        ),
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_get_cached_session_query_sessions",
+        lambda **_kwargs: [dict(item) for item in summaries],
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_record_session_list_query_event",
+        lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_record_session_catalog_read_event",
+        lambda **kwargs: observed_reads.append(kwargs),
+        raising=False,
+    )
+    invalid_pages = (
+        {
+            "items": [dict(summaries[0])],
+            "nextCursor": "not-a-cursor",
+            "totalEstimate": len(summaries),
+        },
+        {
+            "items": [{**summaries[0], "id": ""}],
+            "nextCursor": "1",
+            "totalEstimate": len(summaries),
+        },
+    )
+    for invalid_page in invalid_pages:
+        catalog_bridge.set_session_query_shadow_provider(
+            lambda _request, page=invalid_page: page
+        )
+        try:
+            payload = session_service.query_sessions(limit=1)
+        finally:
+            catalog_bridge.set_session_query_shadow_provider(None)
+
+        assert payload["items"] == summaries[:1]
+        assert payload["nextCursor"] == "1"
+        assert payload["totalEstimate"] == len(summaries)
+        assert observed_reads[-1]["source"] == "legacy"
+        assert observed_reads[-1]["catalog_status"] == "degraded"
+        assert observed_reads[-1]["error_type"]
+
+
+def test_read_preferred_without_catalog_provider_returns_legacy_payload(monkeypatch):
+    summaries = build_session_query_summaries(2)
+    observed_reads: list[dict] = []
+    monkeypatch.setattr(
+        session_service,
+        "get_config",
+        lambda: AppConfig.model_validate(
+            {"session_catalog": {"mode": "read_preferred"}}
+        ),
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_get_cached_session_query_sessions",
+        lambda **_kwargs: [dict(item) for item in summaries],
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_record_session_list_query_event",
+        lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_record_session_catalog_read_event",
+        lambda **kwargs: observed_reads.append(kwargs),
+        raising=False,
+    )
+    catalog_bridge.set_session_query_shadow_provider(None)
+
+    payload = session_service.query_sessions(limit=1)
+
+    assert payload["items"] == summaries[:1]
+    assert payload["totalEstimate"] == len(summaries)
+    assert observed_reads[-1]["source"] == "legacy"
+    assert observed_reads[-1]["catalog_status"] == "disabled"
+    assert observed_reads[-1]["error_type"] == ""
+
+
+def test_read_preferred_fallback_event_never_contains_session_content(monkeypatch):
+    observed: list[tuple[tuple, dict]] = []
+    monkeypatch.setattr(
+        session_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: observed.append((args, kwargs)),
+    )
+
+    session_service._record_session_catalog_read_event(
+        source="legacy",
+        catalog_status="degraded",
+        error_type="RuntimeError",
+        result_count=1,
+        matched_count=3,
+        total_count=5,
+        limit=20,
+        cursor=0,
+        has_query=True,
+        has_agent_filter=False,
+        has_kind_filter=False,
+        has_state_filter=False,
+        sort="updatedAt_desc",
+        elapsed_ms=8,
+    )
+
+    args, kwargs = observed[-1]
+    assert args[2] == "session_catalog.fallback"
+    assert kwargs["outcome"] == "fallback"
+    assert kwargs["fields"]["errorType"] == "RuntimeError"
+    assert "private" not in repr(observed[-1])
+    assert "session-" not in repr(observed[-1])
 
 
 def test_off_mode_never_invokes_registered_shadow_provider(monkeypatch):

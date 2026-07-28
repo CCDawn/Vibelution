@@ -204,7 +204,7 @@ def initialize_session_catalog_runtime(
     catalog_config: Any,
     summary_loader: Callable[[], Sequence[Mapping[str, Any]]] | None = None,
 ) -> SessionCatalogRuntimeStatus:
-    """Build and install the SQL candidate only for the opt-in shadow mode.
+    """Build and install the SQL candidate for an opt-in catalog rollout mode.
 
     Any catalog failure removes the candidate provider and leaves the legacy
     query path untouched.  This initializer never writes canonical state.
@@ -215,7 +215,8 @@ def initialize_session_catalog_runtime(
     shutdown_session_catalog_runtime()
     with _RUNTIME_SUPERVISOR_LOCK:
         generation = _RUNTIME_GENERATION
-    if str(getattr(catalog_config, "mode", "off") or "off").strip().lower() != "shadow":
+    mode = str(getattr(catalog_config, "mode", "off") or "off").strip().lower()
+    if mode not in {"shadow", "read_preferred"}:
         return SessionCatalogRuntimeStatus(status="disabled")
     if not bool(getattr(catalog_config, "reconcile_on_startup", True)):
         return SessionCatalogRuntimeStatus(status="disabled")

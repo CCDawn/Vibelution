@@ -28,10 +28,11 @@ def _isolated_catalog_runtime(tmp_path, monkeypatch):
     catalog_runtime.shutdown_session_catalog_runtime()
 
 
-def test_shadow_runtime_rebuilds_catalog_and_registers_sql_provider(tmp_path):
+@pytest.mark.parametrize("mode", ["shadow", "read_preferred"])
+def test_catalog_runtime_rebuilds_and_registers_sql_provider(tmp_path, mode):
     summaries = build_session_query_summaries(5)
     config = AppConfig.model_validate(
-        {"session_catalog": {"mode": "shadow", "incremental_reconcile_delay_ms": 150}}
+        {"session_catalog": {"mode": mode, "incremental_reconcile_delay_ms": 150}}
     ).session_catalog
 
     status = initialize_session_catalog_runtime(
@@ -81,6 +82,50 @@ def test_shadow_runtime_rebuilds_catalog_and_registers_sql_provider(tmp_path):
         time.sleep(0.01)
 
     assert refreshed.status == "match"
+
+
+def test_read_preferred_runtime_serves_sql_provider_without_legacy_projection(
+    tmp_path,
+    monkeypatch,
+):
+    summaries = build_session_query_summaries(5)
+    app_config = AppConfig.model_validate(
+        {"session_catalog": {"mode": "read_preferred"}}
+    )
+    status = initialize_session_catalog_runtime(
+        project_root=tmp_path,
+        catalog_config=app_config.session_catalog,
+        summary_loader=lambda: summaries,
+    )
+    observed_reads: list[dict] = []
+    monkeypatch.setattr(session_service, "get_config", lambda: app_config)
+    monkeypatch.setattr(
+        session_service,
+        "_get_cached_session_query_sessions",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("fresh read_preferred queries must not load legacy projection")
+        ),
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_record_session_list_query_event",
+        lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_record_session_catalog_read_event",
+        lambda **kwargs: observed_reads.append(kwargs),
+        raising=False,
+    )
+
+    payload = session_service.query_sessions(limit=2, q="needle")
+
+    assert status.status == "ready"
+    assert payload["items"] == [summaries[-1]]
+    assert payload["nextCursor"] == ""
+    assert payload["totalEstimate"] == 1
+    assert observed_reads[-1]["source"] == "catalog"
+    assert observed_reads[-1]["catalog_status"] == "healthy"
 
 
 def test_off_runtime_keeps_shadow_provider_disabled(tmp_path):

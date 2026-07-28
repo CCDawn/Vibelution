@@ -856,8 +856,10 @@ class SessionCatalogConfig(BaseModel):
     @classmethod
     def normalize_mode(cls, value: str) -> str:
         normalized = str(value or "off").strip().lower()
-        if normalized not in {"off", "shadow"}:
-            raise ValueError("session_catalog.mode must be one of: off, shadow")
+        if normalized not in {"off", "shadow", "read_preferred"}:
+            raise ValueError(
+                "session_catalog.mode must be one of: off, shadow, read_preferred"
+            )
         return normalized
 
 

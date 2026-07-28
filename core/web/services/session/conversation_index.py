@@ -786,10 +786,6 @@ def query_sessions(
     s = _service()
 
     started_at = s._perf_counter()
-    sessions = s._get_cached_session_query_sessions(now=started_at)
-    if sessions is None:
-        # A cache miss remains a read-only legacy projection.
-        sessions = s.list_sessions(repair_collisions=False)
     normalized_limit = s._coerce_session_query_limit(limit)
     normalized_cursor = s._coerce_nonnegative_int(cursor)
     normalized_query = str(q or "").strip().lower()
@@ -797,6 +793,99 @@ def query_sessions(
     normalized_session_kind = str(session_kind or "").strip().lower()
     normalized_state = str(state or "").strip().lower()
     normalized_sort = s._normalize_session_query_sort(sort)
+
+    def filter_payload(effective_cursor: int) -> dict[str, Any]:
+        return {
+            "q": str(q or "").strip(),
+            "agentId": normalized_agent_id,
+            "sessionKind": normalized_session_kind,
+            "state": normalized_state,
+            "sort": normalized_sort,
+            "limit": normalized_limit,
+            "cursor": str(effective_cursor) if effective_cursor > 0 else "",
+        }
+
+    query_request = {
+        "limit": normalized_limit,
+        "cursor": str(normalized_cursor) if normalized_cursor > 0 else "",
+        "q": str(q or "").strip(),
+        "agent_id": normalized_agent_id,
+        "session_kind": normalized_session_kind,
+        "state": normalized_state,
+        "sort": normalized_sort,
+    }
+    try:
+        catalog_config = getattr(s.get_config(), "session_catalog", None)
+        catalog_mode = str(getattr(catalog_config, "mode", "off") or "off").strip().lower()
+    except Exception:
+        catalog_mode = "off"
+
+    catalog_status = "disabled"
+    catalog_error_type = ""
+    if catalog_mode == "read_preferred":
+        candidate_payload: dict[str, Any] | None = None
+        try:
+            from . import catalog_bridge
+
+            candidate_read = catalog_bridge.read_session_query_catalog(
+                request=query_request,
+            )
+            catalog_status = str(candidate_read.status or "degraded")
+            catalog_error_type = str(candidate_read.error_type or "")
+            if candidate_read.payload is not None:
+                candidate_payload = dict(candidate_read.payload)
+        except Exception as exc:
+            catalog_status = "degraded"
+            catalog_error_type = type(exc).__name__
+
+        if candidate_payload is not None:
+            page_items = list(candidate_payload.get("items") or [])
+            try:
+                total = max(0, int(candidate_payload.get("totalEstimate") or 0))
+            except (TypeError, ValueError):
+                total = 0
+            start = min(normalized_cursor, total)
+            payload = {
+                "items": page_items,
+                "nextCursor": str(candidate_payload.get("nextCursor") or ""),
+                "totalEstimate": total,
+                "filters": filter_payload(start),
+            }
+            s._record_session_list_query_event(
+                result_count=len(page_items),
+                matched_count=total,
+                total_count=total,
+                limit=normalized_limit,
+                cursor=start,
+                elapsed_ms=s._elapsed_ms(started_at),
+                has_query=bool(normalized_query),
+                has_agent_filter=bool(normalized_agent_id),
+                has_kind_filter=bool(normalized_session_kind),
+                has_state_filter=bool(normalized_state),
+                sort=normalized_sort,
+            )
+            s._record_session_catalog_read_event(
+                source="catalog",
+                catalog_status="healthy",
+                error_type="",
+                result_count=len(page_items),
+                matched_count=total,
+                total_count=total,
+                limit=normalized_limit,
+                cursor=start,
+                has_query=bool(normalized_query),
+                has_agent_filter=bool(normalized_agent_id),
+                has_kind_filter=bool(normalized_session_kind),
+                has_state_filter=bool(normalized_state),
+                sort=normalized_sort,
+                elapsed_ms=s._elapsed_ms(started_at),
+            )
+            return payload
+
+    sessions = s._get_cached_session_query_sessions(now=started_at)
+    if sessions is None:
+        # A cache miss remains a read-only legacy projection.
+        sessions = s.list_sessions(repair_collisions=False)
 
     has_filters = bool(normalized_query or normalized_agent_id or normalized_session_kind or normalized_state)
     if not has_filters and normalized_sort == "updatedAt_desc":
@@ -841,32 +930,15 @@ def query_sessions(
         "items": page_items,
         "nextCursor": next_cursor,
         "totalEstimate": total,
-        "filters": {
-            "q": str(q or "").strip(),
-            "agentId": normalized_agent_id,
-            "sessionKind": normalized_session_kind,
-            "state": normalized_state,
-            "sort": normalized_sort,
-            "limit": normalized_limit,
-            "cursor": str(start) if start > 0 else "",
-        },
+        "filters": filter_payload(start),
     }
     try:
-        catalog_config = getattr(s.get_config(), "session_catalog", None)
-        if str(getattr(catalog_config, "mode", "off") or "off") == "shadow":
+        if catalog_mode == "shadow":
             from . import catalog_bridge
 
             comparison = catalog_bridge.run_session_query_shadow(
                 payload,
-                request={
-                    "limit": normalized_limit,
-                    "cursor": str(start) if start > 0 else "",
-                    "q": str(q or "").strip(),
-                    "agent_id": normalized_agent_id,
-                    "session_kind": normalized_session_kind,
-                    "state": normalized_state,
-                    "sort": normalized_sort,
-                },
+                request={**query_request, "cursor": str(start) if start > 0 else ""},
             )
             s._record_session_catalog_shadow_query_event(
                 comparison=comparison,
@@ -878,8 +950,25 @@ def query_sessions(
                 has_state_filter=bool(normalized_state),
                 sort=normalized_sort,
             )
+        elif catalog_mode == "read_preferred":
+            s._record_session_catalog_read_event(
+                source="legacy",
+                catalog_status=catalog_status,
+                error_type=catalog_error_type,
+                result_count=len(page_items),
+                matched_count=total,
+                total_count=len(sessions),
+                limit=normalized_limit,
+                cursor=start,
+                has_query=bool(normalized_query),
+                has_agent_filter=bool(normalized_agent_id),
+                has_kind_filter=bool(normalized_session_kind),
+                has_state_filter=bool(normalized_state),
+                sort=normalized_sort,
+                elapsed_ms=s._elapsed_ms(started_at),
+            )
     except Exception:
-        # Shadow failures must never change the canonical legacy response.
+        # Catalog observation failures must never change the canonical legacy response.
         pass
     return payload
 
