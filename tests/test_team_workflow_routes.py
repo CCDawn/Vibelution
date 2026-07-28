@@ -1,3 +1,4 @@
+import json
 import threading
 import time
 
@@ -146,6 +147,101 @@ def test_team_research_projects_create_activate_and_preserve_legacy_workspace(tm
     )
     assert restored.status_code == 200, restored.text
     assert legacy_status.json()["roundCount"] == 1
+
+
+def test_challenge_program_projection_stays_team_scoped_across_active_projects(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    client = _client()
+    team = client.post("/api/teams", json={"name": "Challenge Program Boundary"}).json()
+    team_id = team["teamId"]
+    program_root = team_workflow_orchestration_service.resolve_team_program_root(team_id)
+    evidence_path = program_root / "official_model_evidence" / "index.json"
+    evidence_path.parent.mkdir(parents=True, exist_ok=True)
+    evidence_path.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "storeKind": "official_model_evidence_store",
+                "teamId": team_id,
+                "evidence": [
+                    {
+                        "evidenceId": "program-qwen-evidence-1",
+                        "modelProvider": "dashscope",
+                        "modelId": "qwen3.6-plus",
+                        "evidenceKind": "invocation_log",
+                        "status": "published_to_challenge_program",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    question_path = program_root / "challenge_program" / "question_runs" / "index.json"
+    question_path.parent.mkdir(parents=True, exist_ok=True)
+    question_path.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "storeKind": "challenge_question_run_store",
+                "teamId": team_id,
+                "records": [
+                    {
+                        "recordId": "SCI-096:stage1-sci-096-v3",
+                        "questionId": "SCI-096",
+                        "runId": "stage1-sci-096-v3",
+                        "status": "approved",
+                        "validation": {
+                            "schemaValidation": "passed",
+                            "citationValidation": "passed",
+                            "semanticValidation": "passed",
+                            "officialModelCall": True,
+                        },
+                        "humanGates": {"allApproved": True},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    before_questions = client.get(
+        f"/api/teams/{team_id}/workflow-orchestration/challenge-program/question-runs/status"
+    ).json()
+    before_projection = client.get(
+        f"/api/teams/{team_id}/workflow-orchestration/experiments/status"
+    ).json()["challengeProgramProjection"]
+    project = client.post(
+        f"/api/teams/{team_id}/workflow-orchestration/research-projects",
+        json={"name": "Isolated unpublished project", "topic": "Unpublished evidence"},
+    ).json()["project"]
+    client.post(
+        f"/api/teams/{team_id}/workflow-orchestration/research-projects/{project['projectId']}/activate"
+    )
+    project_evidence = client.post(
+        f"/api/teams/{team_id}/workflow-orchestration/official-model-evidence",
+        json={
+            "taskType": "source_search",
+            "modelProvider": "dashscope",
+            "modelId": "qwen3.6-plus",
+            "evidenceKind": "invocation_log",
+            "status": "canonical_success",
+        },
+    )
+    after_questions = client.get(
+        f"/api/teams/{team_id}/workflow-orchestration/challenge-program/question-runs/status"
+    ).json()
+    after_projection = client.get(
+        f"/api/teams/{team_id}/workflow-orchestration/experiments/status"
+    ).json()["challengeProgramProjection"]
+
+    assert project_evidence.status_code == 201, project_evidence.text
+    assert before_questions["summary"]["completedQuestionIds"] == ["SCI-096"]
+    assert after_questions["summary"] == before_questions["summary"]
+    assert after_questions["storePath"] == str(question_path)
+    assert before_projection["stage1ComplianceReadiness"]["singleQuestionSample"]["completed"] == 1
+    assert after_projection["stage1ComplianceReadiness"]["singleQuestionSample"]["completed"] == 1
+    assert before_projection["stage1ComplianceReadiness"]["officialModelCallEvidence"]["count"] == 1
+    assert after_projection["stage1ComplianceReadiness"]["officialModelCallEvidence"]["count"] == 1
 
 
 def test_team_research_project_update_and_unknown_activation(tmp_path, monkeypatch):

@@ -663,6 +663,7 @@ def _persist_session_turn_result(
         session_id=session_id,
         turn_id=turn_id,
         final_status=final_status,
+        llm_usage=turn_llm_usage,
     )
     s._record_session_cycle_message(
         session_id,

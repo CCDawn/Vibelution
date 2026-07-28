@@ -271,6 +271,12 @@ def resolve_research_project_workspace_root(team_id: str, project_id: str) -> Pa
     return base_root / "research_projects" / normalized_project_id / "workspace"
 
 
+def resolve_team_program_root(team_id: str) -> Path:
+    """Return the stable team-level root for cross-project program ledgers."""
+    team_service.get_team(team_id)
+    return team_workspace_root(team_id)
+
+
 def resolve_team_workflow_root(team_id: str) -> Path:
     """Resolve the canonical workflow root for the team's active research project."""
     with _STORE_LOCK:

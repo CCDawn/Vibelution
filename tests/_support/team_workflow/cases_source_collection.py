@@ -7131,3 +7131,174 @@ def test_source_collection_run_context_bundle_cleanses_invalid_active_storage_pa
     assert bundle["activeWorkRun"]["runId"] == run_id
     assert "storagePath" not in bundle["activeWorkRun"]
     assert "pathValidationError" in bundle["activeWorkRun"]
+
+
+def test_challenge_stage_task_blocks_non_qwen_agent_before_submit(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "load_public_config",
+        lambda: {
+            "llm": {
+                "profiles": {},
+                "model_library": {
+                    "relay_openai/gpt-5.6-luna": {
+                        "model": "gpt-5.6-luna",
+                        "upstream_id": "gpt-5.6-luna",
+                        "provider_id": "relay_openai",
+                    }
+                },
+            }
+        },
+    )
+    finder = agent_directory_service.create_agent_instance(
+        display_name="资料寻找",
+        llm_bindings={"dialogue": {"modelId": "relay_openai/gpt-5.6-luna"}},
+    )
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": finder["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
+    )
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "predictive coding",
+            "agentRoles": ["source_finder"],
+            "agentIds": {"source_finder": finder["agentId"]},
+            "querySeeds": ["predictive coding"],
+            "promptCachePolicy": {"requirement": "disabled"},
+            "questionId": "SCI-096",
+            "requiredModelPolicy": {
+                "providerIds": ["dashscope_main"],
+                "modelIds": ["qwen3.6-plus"],
+                "requireOfficialProvider": True,
+            },
+        },
+    )
+    submitted = []
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda *args, **kwargs: submitted.append((args, kwargs)),
+    )
+
+    with pytest.raises(
+        team_workflow_orchestration_service.TeamWorkflowOrchestrationError,
+        match="challenge_required_model_mismatch",
+    ):
+        team_workflow_orchestration_service.start_source_collection_stage_session_task(
+            team["teamId"],
+            run_response["run"]["runId"],
+            {"stageId": "finding", "agentId": finder["agentId"], "agentRole": "source_finder"},
+        )
+
+    assert submitted == []
+    assert team_workflow_orchestration_service._source_collection_stage_session_tasks(
+        team["teamId"],
+        run_response["run"]["runId"],
+    ) == []
+
+
+def test_challenge_qwen_stage_task_records_bounded_canonical_evidence(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "load_public_config",
+        lambda: {
+            "llm": {
+                "profiles": {},
+                "model_library": {
+                    "dashscope_main/qwen3.6-plus": {
+                        "model": "qwen3.6-plus",
+                        "upstream_id": "qwen3.6-plus",
+                        "provider_id": "dashscope_main",
+                    }
+                },
+            }
+        },
+    )
+    finder = agent_directory_service.create_agent_instance(
+        display_name="资料寻找",
+        llm_bindings={"dialogue": {"modelId": "dashscope_main/qwen3.6-plus"}},
+    )
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": finder["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
+    )
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "predictive coding",
+            "agentRoles": ["source_finder"],
+            "agentIds": {"source_finder": finder["agentId"]},
+            "querySeeds": ["predictive coding"],
+            "promptCachePolicy": {"requirement": "disabled"},
+            "questionId": "SCI-096",
+            "requiredModelPolicy": {
+                "providerIds": ["dashscope_main"],
+                "modelIds": ["qwen3.6-plus"],
+                "requireOfficialProvider": True,
+            },
+        },
+    )
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda session_id, content, **kwargs: {
+            "accepted": True,
+            "sessionId": session_id,
+            "turnId": "turn-challenge-qwen-1",
+            "status": "running",
+        },
+    )
+    task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_response["run"]["runId"],
+        {"stageId": "finding", "agentId": finder["agentId"], "agentRole": "source_finder"},
+    )
+
+    reconciled = team_workflow_orchestration_service.reconcile_source_collection_stage_session_task_after_turn(
+        team["teamId"],
+        task["taskId"],
+        run_id=run_response["run"]["runId"],
+        session_id=task["sessionId"],
+        turn_id="turn-challenge-qwen-1",
+        final_status="completed",
+        llm_usage={
+            "source": "provider",
+            "provider": "dashscope_main",
+            "model": "qwen3.6-plus",
+            "llmModelId": "dashscope_main/qwen3.6-plus",
+            "inputTokens": 120,
+            "outputTokens": 80,
+            "totalTokens": 200,
+        },
+    )
+
+    evidence = reconciled["officialModelEvidence"]
+    assert task["task"]["challengeTaskContract"]["questionId"] == "SCI-096"
+    assert task["task"]["challengeTaskContract"]["effectiveRoute"] == {
+        "modelRef": "dashscope_main/qwen3.6-plus",
+        "providerId": "dashscope_main",
+        "modelId": "qwen3.6-plus",
+    }
+    assert task["task"]["challengeTaskContract"]["taskId"] == task["taskId"]
+    assert task["task"]["challengeTaskContract"]["turnId"] == "turn-challenge-qwen-1"
+    assert evidence["questionId"] == "SCI-096"
+    assert evidence["taskId"] == task["taskId"]
+    assert evidence["turnId"] == "turn-challenge-qwen-1"
+    assert evidence["metadata"] == {
+        "llmUsageSource": "provider",
+        "inputTokens": 120,
+        "outputTokens": 80,
+        "totalTokens": 200,
+    }
+    assert "prompt" not in json.dumps(evidence).lower()
+    project_root = team_workflow_orchestration_service.resolve_research_project_workspace_root(
+        team["teamId"],
+        task["researchProjectId"],
+    )
+    stored = json.loads(
+        (project_root / "official_model_evidence" / "index.json").read_text(encoding="utf-8")
+    )
+    assert [item["evidenceId"] for item in stored["evidence"]] == [evidence["evidenceId"]]

@@ -260,6 +260,23 @@ def start_source_collection_stage_session_task(
     if agent_role and agent_role not in allowed_roles:
         raise s.TeamWorkflowOrchestrationError(f"Agent role {agent_role} is not assigned to source collection stage {stage_id}.")
     research_project = s.resolve_research_project_identity_from_record(normalized_team_id, run)
+    run_scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
+    run_metadata = run.get("metadata") if isinstance(run.get("metadata"), dict) else {}
+    question_id = s._trim_text(
+        request_payload.get("questionId")
+        or run_scope.get("questionId")
+        or run_metadata.get("questionId"),
+        max_length=32,
+    )
+    required_model_policy = (
+        request_payload.get("requiredModelPolicy")
+        if isinstance(request_payload.get("requiredModelPolicy"), dict)
+        else run_scope.get("requiredModelPolicy")
+        if isinstance(run_scope.get("requiredModelPolicy"), dict)
+        else run_metadata.get("requiredModelPolicy")
+        if isinstance(run_metadata.get("requiredModelPolicy"), dict)
+        else {}
+    )
 
     matching_assignments = s._source_collection_matching_assignments(assignments, agent_id=agent_id, agent_role=agent_role)
     if not requested_by:
@@ -317,11 +334,35 @@ def start_source_collection_stage_session_task(
                 "task": existing_task,
                 "turn": existing_task.get("turn") if isinstance(existing_task.get("turn"), dict) else {},
                 "writebackContract": existing_task.get("writebackContract") if isinstance(existing_task.get("writebackContract"), dict) else {},
+                "challengeTaskContract": (
+                    existing_task.get("challengeTaskContract")
+                    if isinstance(existing_task.get("challengeTaskContract"), dict)
+                    else {}
+                ),
                 "boundaries": s._source_collection_stage_session_task_boundaries(
                     stage_id=stage_id,
                     agent_role=agent_role,
                 ),
             }
+
+    dialogue_model_id = s.agent_directory_service.agent_dialogue_model_id(agent)
+    try:
+        challenge_task_contract = s.bind_challenge_research_task_model(
+            team_id=normalized_team_id,
+            research_project_id=research_project["projectId"],
+            question_id=question_id,
+            required_model_policy=required_model_policy,
+            dialogue_model_id=dialogue_model_id,
+            model_library=s._source_collection_model_library(),
+        )
+    except ValueError as exc:
+        raise s.TeamWorkflowOrchestrationError(str(exc)) from exc
+    if challenge_task_contract:
+        challenge_task_contract = {
+            **challenge_task_contract,
+            "taskId": task_id,
+            "turnId": "",
+        }
 
     previous_stage_task = s._latest_source_collection_stage_task(
         [
@@ -414,6 +455,7 @@ def start_source_collection_stage_session_task(
         "sessionAttempt": experiment_session["sessionAttempt"],
         "sessionCreated": experiment_session["sessionCreated"],
         "retryOfSessionId": experiment_session["retryOfSessionId"],
+        "challengeTaskContract": challenge_task_contract,
         "formalRetry": formal_retry,
         "status": "queued",
         "title": s._source_collection_stage_task_title(stage_id),
@@ -483,6 +525,13 @@ def start_source_collection_stage_session_task(
             "experimentName": experiment_session["experimentName"],
             "sessionAttempt": experiment_session["sessionAttempt"],
             "retryOfSessionId": experiment_session["retryOfSessionId"],
+            "questionId": str(challenge_task_contract.get("questionId") or ""),
+            "requiredModelPolicy": (
+                challenge_task_contract.get("requiredModelPolicy")
+                if isinstance(challenge_task_contract.get("requiredModelPolicy"), dict)
+                else {}
+            ),
+            "challengeTaskContract": challenge_task_contract,
             "sourceCollectionStageTaskId": task_id,
             "sourceCollectionStageTaskKey": task_idempotency_key,
             "sourceContextMode": source_context_mode,
@@ -502,6 +551,12 @@ def start_source_collection_stage_session_task(
         "status": s._trim_text(turn_payload.get("status"), max_length=80),
         "acceptedAt": s._trim_text(turn_payload.get("acceptedAt"), max_length=120),
     }
+    if challenge_task_contract:
+        challenge_task_contract = {
+            **challenge_task_contract,
+            "turnId": task_record["turn"]["turnId"],
+        }
+        task_record["challengeTaskContract"] = challenge_task_contract
     if not task_record["turn"]["accepted"]:
         s._record_workflow_event(
             "source_collection.stage_session_task_submit_not_accepted",
@@ -1023,6 +1078,8 @@ def reconcile_source_collection_stage_session_task_after_turn(
     run_id: str = "",
     session_id: str = "",
     turn_id: str = "",
+    final_status: str = "",
+    llm_usage: dict[str, Any] | None = None,
     reason: str = "session_turn_completed",
 ) -> dict[str, Any]:
     s = _service()
@@ -1106,6 +1163,12 @@ def reconcile_source_collection_stage_session_task_after_turn(
     before_status = s._trim_text(before_task.get("status"), max_length=80)
     before_gate = before_task.get("completionGate") if isinstance(before_task.get("completionGate"), dict) else {}
     reconciled = s._reconcile_source_collection_stage_session_task(normalized_team_id, found_run_id, dict(found_task))
+    official_model_evidence = s.register_challenge_task_model_evidence(
+        normalized_team_id,
+        reconciled,
+        final_status=final_status,
+        llm_usage=llm_usage,
+    )
     after_gate = reconciled.get("completionGate") if isinstance(reconciled.get("completionGate"), dict) else {}
     task_tool_progress = reconciled.get("taskToolProgress") if isinstance(reconciled.get("taskToolProgress"), dict) else {}
     reconciled_turn = reconciled.get("turn") if isinstance(reconciled.get("turn"), dict) else {}
@@ -1126,4 +1189,5 @@ def reconcile_source_collection_stage_session_task_after_turn(
         "taskChecklistComplete": bool(after_gate.get("taskChecklistComplete")),
         "artifactComplete": bool(after_gate.get("artifactComplete")),
         "taskToolProgress": task_tool_progress,
+        "officialModelEvidence": official_model_evidence or {},
     }

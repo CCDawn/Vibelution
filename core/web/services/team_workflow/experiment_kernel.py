@@ -456,7 +456,7 @@ def _experiment_planning_status(
         plans=plans,
         active_plan=active_plan,
     )
-    official_model_evidence_store = s._load_official_model_evidence_store(team_id)
+    official_model_evidence_store = s._load_program_official_model_evidence_store(team_id)
     challenge_program_projection = build_challenge_program_projection(
         legacy_lifecycle=lifecycle_projection,
         public_config=s.load_public_config(),
