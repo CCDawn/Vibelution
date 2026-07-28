@@ -7,6 +7,7 @@ import {
   researchStageAgentConfigTone,
   researchStageAgentDirectChatRoute,
   researchStageAgentManagementRoute,
+  researchStageSessionChatRoute,
   sourceCollectionAgentIdsFromCanvas,
   sourceCollectionOwnerAgentIdFromCanvas,
 } from "./researchStageAgentPresentation";
@@ -44,5 +45,18 @@ describe("researchStageAgentPresentation", () => {
         "Teams",
       ),
     ).toContain("session=sess-1");
+  });
+
+  it("builds a chat route from the current stage task session", () => {
+    expect(
+      researchStageSessionChatRoute(
+        "session-current-task",
+        "/teams?team=research-team",
+        "返回知识搜集",
+      ),
+    ).toBe(
+      "/chat?session=session-current-task&returnTo=%2Fteams%3Fteam%3Dresearch-team&returnLabel=%E8%BF%94%E5%9B%9E%E7%9F%A5%E8%AF%86%E6%90%9C%E9%9B%86",
+    );
+    expect(researchStageSessionChatRoute("")).toBe("");
   });
 });

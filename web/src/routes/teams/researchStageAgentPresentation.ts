@@ -97,7 +97,15 @@ export function researchStageAgentDirectChatRoute(
   returnTo?: string,
   returnLabel?: string,
 ) {
-  const sessionId = String(agent?.directSessionId || "").trim();
+  return researchStageSessionChatRoute(agent?.directSessionId, returnTo, returnLabel);
+}
+
+export function researchStageSessionChatRoute(
+  sessionIdValue: string | null | undefined,
+  returnTo?: string,
+  returnLabel?: string,
+) {
+  const sessionId = String(sessionIdValue || "").trim();
   if (!sessionId) {
     return "";
   }
