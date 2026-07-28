@@ -40,6 +40,16 @@ class SessionQueryShadowComparison:
     error_type: str = ""
 
 
+@dataclass(frozen=True)
+class SessionQueryCatalogRead:
+    """Bounded result of one catalog candidate read before legacy fallback."""
+
+    status: str
+    payload: Mapping[str, Any] | None = None
+    candidate_count: int = 0
+    error_type: str = ""
+
+
 _SHADOW_PROVIDER_LOCK = threading.Lock()
 _SESSION_QUERY_SHADOW_PROVIDER: (
     Callable[[Mapping[str, Any]], Mapping[str, Any]] | None
@@ -68,19 +78,87 @@ def run_session_query_shadow(
     *,
     request: Mapping[str, Any],
 ) -> SessionQueryShadowComparison:
+    candidate_read = read_session_query_catalog(request=request)
+    if candidate_read.payload is None:
+        return SessionQueryShadowComparison(
+            status=candidate_read.status,
+            legacy_count=len(_payload_items(legacy_payload)),
+            candidate_count=candidate_read.candidate_count,
+            error_type=candidate_read.error_type,
+        )
+    return compare_session_query_payloads(legacy_payload, candidate_read.payload)
+
+
+def read_session_query_catalog(
+    *,
+    request: Mapping[str, Any],
+) -> SessionQueryCatalogRead:
+    """Read the registered catalog candidate without exposing provider errors."""
+
     with _SHADOW_PROVIDER_LOCK:
         provider = _SESSION_QUERY_SHADOW_PROVIDER
     if provider is None:
-        return SessionQueryShadowComparison(status="disabled")
+        return SessionQueryCatalogRead(status="disabled")
     try:
         candidate = provider(dict(request))
-        return compare_session_query_payloads(legacy_payload, candidate)
+        if not isinstance(candidate, Mapping):
+            raise TypeError("Session catalog query provider returned a non-mapping payload.")
+        payload = dict(candidate)
+        items = payload.get("items")
+        if not isinstance(items, list) or not all(
+            isinstance(item, Mapping) for item in items
+        ):
+            raise TypeError("Session catalog query provider returned invalid items.")
+        if any(not str(item.get("id") or "").strip() for item in items):
+            raise TypeError("Session catalog query provider returned an item without an id.")
+        total = payload.get("totalEstimate")
+        if isinstance(total, bool) or not isinstance(total, int):
+            raise TypeError("Session catalog query provider returned an invalid total.")
+        if total < len(items) or total < 0:
+            raise ValueError("Session catalog query provider returned an invalid total.")
+        limit = _session_query_request_integer(request, "limit", minimum=1)
+        cursor = _session_query_request_integer(request, "cursor", minimum=0)
+        start = min(cursor, total)
+        expected_item_count = min(limit, total - start)
+        if len(items) != expected_item_count:
+            raise ValueError("Session catalog query provider returned an invalid page size.")
+        next_cursor = payload.get("nextCursor")
+        if not isinstance(next_cursor, str):
+            raise TypeError("Session catalog query provider returned an invalid cursor.")
+        next_offset = start + len(items)
+        expected_next_cursor = str(next_offset) if next_offset < total else ""
+        if next_cursor != expected_next_cursor:
+            raise ValueError("Session catalog query provider returned an invalid cursor.")
+        return SessionQueryCatalogRead(
+            status="healthy",
+            payload=payload,
+            candidate_count=len(items),
+        )
     except Exception as exc:
-        return SessionQueryShadowComparison(
+        return SessionQueryCatalogRead(
             status="degraded",
-            legacy_count=len(_payload_items(legacy_payload)),
             error_type=type(exc).__name__,
         )
+
+
+def _session_query_request_integer(
+    request: Mapping[str, Any],
+    field: str,
+    *,
+    minimum: int,
+) -> int:
+    raw_value = request.get(field)
+    if isinstance(raw_value, bool):
+        raise TypeError(f"Session catalog query request has an invalid {field}.")
+    try:
+        value = int(raw_value or 0)
+    except (TypeError, ValueError) as exc:
+        raise TypeError(
+            f"Session catalog query request has an invalid {field}."
+        ) from exc
+    if value < minimum:
+        raise ValueError(f"Session catalog query request has an invalid {field}.")
+    return value
 
 
 def compare_session_query_payloads(

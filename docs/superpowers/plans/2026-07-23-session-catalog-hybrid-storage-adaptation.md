@@ -7,7 +7,7 @@
 > **Worktree:** `C:\Users\Administrator\Desktop\Vibelution-worktrees\session-catalog-implementation`
 > **Scope:** 会话事实账本加固、可重建 SQLite catalog、迁移/回退、查询切流、容量与故障治理
 > **Replaces:** 本文件 2026-07-23 初稿
-> **Implementation link:** T0-T2 complete; T3 reconcile/freshness bridge, T4 fail-safe runtime shadow with incremental rebuild and T5 SQL candidate provider complete; real shadow canary remains
+> **Implementation link:** T0-T5 complete; T6 guarded `read_preferred` code path is implemented on a separate follow-up worktree. Formal operator canary and Launcher verification remain pending behind the runtime-data isolation gate.
 > **Validation:** 主流项目源码/官方文档复核、项目 owning surface 复核、source-of-truth/迁移/回滚/性能门自审、`git diff --check`
 > **Close condition:** shadow 零差异、故障自动回退、性能晋级门通过、`read_preferred` runtime verification 通过
 
@@ -29,9 +29,9 @@
 - T1：每会话跨进程锁、sequence 原子分配、append flush/fsync、唯一临时文件 rewrite 和 Windows 子进程回归已提交。
 - T2：本地 runtime cache 路由、WAL/local-filesystem fail closed、schema v1、migration checksum、参数化查询、quick_check、lease/watermark 和错误分类已提交。
 - T3 核心：canonical snapshot 投影、孤儿 journal 隔离、TEMP candidate、源 revision 二次校验、原子发布、删除重建和 stale lease takeover 已提交。`chat_state.state_revision` 在所有 state 写入（含 legacy-message cleanup）中以持锁磁盘状态单调推进；state 写入以全局 dirty、journal append 以会话 dirty 通知 catalog。dirty 记录和 `catalog.untrusted` 只会在成功 reconcile 时条件清除，晚到 mutation 会保留；runtime 以去抖、最多 3 次的后台重建恢复候选，失败或 shutdown 一律保持 legacy。
-- T4：typed `off|shadow`、有界 comparator、实际 SQLite candidate startup registration、受控增量 rebuild、runtime-scene 事件和异常时 exact legacy fallback 已提交。每次 shadow query 仅记录 match/mismatch/degraded、数量、filter/sort 与差异类别，不记录 session ID、标题或消息内容；只有显式 `shadow` 才以 non-repair legacy summary 异步重建并注册 provider。dirty/sentinel/source failure 时 candidate 禁用并保留 legacy。默认生产配置仍为 `off`。10k 无 journal synthetic startup rebuild 为 1,076.59ms（专用 temp root/sentinel，正式数据快照不变）。
-- T5：参数化 SQL filter/sort/pagination、稳定 cursor、DTO adapter 和 10k 临时数据 profile 已提交；p95 7.5–19.3ms，较 T0 legacy 144–345ms 快约 8–46 倍。它只在显式 `shadow` 下注册为 runtime candidate，且从不接管正式 `query_sessions`。
-- T6 未开始：不得启用 `read_preferred`；必须先完成真实 shadow 零差异和 Launcher canary 证据。
+- T4：typed rollout config、有界 comparator、实际 SQLite candidate startup registration、受控增量 rebuild、runtime-scene 事件和异常时 exact legacy fallback 已提交。每次 shadow query 仅记录 match/mismatch/degraded、数量、filter/sort 与差异类别，不记录 session ID、标题或消息内容；只有显式 catalog rollout mode 才以 non-repair legacy summary 异步重建并注册 provider。dirty/sentinel/source failure 时 candidate 禁用并保留 legacy。默认生产配置仍为 `off`。10k 无 journal synthetic startup rebuild 为 1,076.59ms（专用 temp root/sentinel，正式数据快照不变）。
+- T5：参数化 SQL filter/sort/pagination、稳定 cursor、DTO adapter 和 10k 临时数据 profile 已提交；p95 7.5–19.3ms，较 T0 legacy 144–345ms 快约 8–46 倍。它只在显式 catalog rollout mode 下注册为 runtime candidate，且不在默认 `off` 配置下接管正式 `query_sessions`。
+- T6：typed `read_preferred`、同请求 exact legacy fallback、candidate payload fail-closed validation、采样的 catalog-served / fallback runtime-scene provenance 及 focused isolation regressions 已实现。尚未修改正式 operator config，未启动 Launcher；真实 shadow 对账、受控 canary 和 Launcher runtime verification 仍是晋级前置条件。
 
 ## 主流 Agent 复用结论
 
@@ -654,7 +654,11 @@ flowchart TD
 
 - typed config 支持 `read_preferred`，且配置解析 fail closed。
 - fresh 证明失败时单请求内回退。
-- 启动、切换、回退和 Launcher refresh 场景有 runtime-scene 证据。
+- candidate payload 非法、provider 缺失或异常时均在同一请求内回退 legacy，且不暴露 provider 内容。
+- catalog-served 和 fallback 均产生有界 runtime-scene provenance；成功读取采样，fallback 全量记录。
+- 启动、切换、回退和 Launcher refresh 的正式运行时证据留待受控 canary 阶段。
+
+**当前状态：** 代码与隔离回归已完成；未获得正式 config/Launcher 写入或刷新授权，故未启动 canary。
 
 **退出条件：** canary 期间无数据差异、无事实写入失败、fallback 原因可诊断。
 
@@ -774,4 +778,4 @@ flowchart TD
 - claims、project memory、版本影响和 main 集成状态已收敛；
 - FTS 若未通过安全评审，明确保持 deferred。
 
-下一步建议: 保持默认 `off`；在获得 operator config/Launcher 验收授权后，以 `shadow` 完成真实对账和 runtime-scene 证据，再决定是否进入 `read_preferred` 评审。
+下一步建议: 保持默认 `off`；先以 `shadow` 完成真实对账和 runtime-scene 证据，再在获得 operator config/Launcher 验收授权后启动受控 `read_preferred` canary。

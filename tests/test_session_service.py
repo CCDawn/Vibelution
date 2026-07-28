@@ -18,6 +18,7 @@ from core.chat.conversation_ledger import (
 from core.ui.chat_state import load_chat_state, save_chat_state
 from core.web.services import session_service
 from core.web.services import agent_directory_service
+from core.web.services.session import journal_bridge
 from tests.helpers.web_chat_state import _seed_chat_state
 from tests.session_catalog_fixtures import QUERY_SEARCH_FIELDS, build_session_query_summaries
 
@@ -213,7 +214,7 @@ def test_session_event_cache_coalesces_concurrent_misses(monkeypatch):
     load_calls = 0
     call_lock = threading.Lock()
 
-    def signature(_session_id):
+    def signature(_session_id, *, project_root=None):
         nonlocal signature_calls
         with call_lock:
             signature_calls += 1
@@ -229,14 +230,24 @@ def test_session_event_cache_coalesces_concurrent_misses(monkeypatch):
         assert release_loader.wait(timeout=5)
         return ["event-1"]
 
-    monkeypatch.setattr(session_service, "_session_conversation_events_signature", signature)
-    monkeypatch.setattr(session_service, "load_conversation_events", load_events)
-    session_service._invalidate_session_conversation_events_cache(session_id)
+    monkeypatch.setattr(
+        journal_bridge,
+        "session_conversation_events_signature",
+        signature,
+    )
+    monkeypatch.setattr(journal_bridge, "load_conversation_events", load_events)
+    journal_bridge.invalidate_session_conversation_events_cache(session_id)
 
     with ThreadPoolExecutor(max_workers=2) as executor:
-        first = executor.submit(session_service._load_session_conversation_events_cached, session_id)
+        first = executor.submit(
+            journal_bridge.load_session_conversation_events_cached,
+            session_id,
+        )
         assert loader_started.wait(timeout=5)
-        second = executor.submit(session_service._load_session_conversation_events_cached, session_id)
+        second = executor.submit(
+            journal_bridge.load_session_conversation_events_cached,
+            session_id,
+        )
         assert second_signature_computed.wait(timeout=5)
         release_loader.set()
 
@@ -244,7 +255,7 @@ def test_session_event_cache_coalesces_concurrent_misses(monkeypatch):
         assert second.result(timeout=5) == ["event-1"]
 
     assert load_calls == 1
-    session_service._invalidate_session_conversation_events_cache(session_id)
+    journal_bridge.invalidate_session_conversation_events_cache(session_id)
 
 
 def test_active_session_summary_normalizes_only_the_active_conversation(tmp_path, monkeypatch):

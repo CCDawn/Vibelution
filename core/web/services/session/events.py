@@ -9,7 +9,12 @@ Late-bound facade keeps monkeypatches stable.
 from __future__ import annotations
 
 import re
-from typing import Any, Mapping
+import threading
+from typing import Any
+
+
+_SESSION_CATALOG_READ_SAMPLE_LOCK = threading.Lock()
+_SESSION_CATALOG_SUCCESSFUL_READ_COUNT = 0
 
 
 def _service():
@@ -343,6 +348,76 @@ def _record_session_catalog_shadow_query_event(
         )
     except Exception:
         return
+
+
+def _record_session_catalog_read_event(
+    *,
+    source: str,
+    catalog_status: str,
+    error_type: str,
+    result_count: int,
+    matched_count: int,
+    total_count: int,
+    limit: int,
+    cursor: int,
+    has_query: bool,
+    has_agent_filter: bool,
+    has_kind_filter: bool,
+    has_state_filter: bool,
+    sort: str,
+    elapsed_ms: int,
+) -> None:
+    """Record bounded catalog-read provenance without session content."""
+
+    s = _service()
+    normalized_source = "catalog" if str(source or "").strip() == "catalog" else "legacy"
+    if normalized_source == "catalog" and not _should_record_catalog_read_sample():
+        return
+    event_code = (
+        "session_catalog.read_served"
+        if normalized_source == "catalog"
+        else "session_catalog.fallback"
+    )
+    try:
+        s.record_runtime_scene_event(
+            "session_catalog",
+            "query",
+            event_code,
+            level="info" if normalized_source == "catalog" else "warning",
+            outcome="served" if normalized_source == "catalog" else "fallback",
+            message="Session catalog query read provenance recorded.",
+            fields={
+                "source": normalized_source,
+                "catalogStatus": str(catalog_status or "disabled").strip()[:80],
+                "errorType": str(error_type or "").strip()[:120],
+                "resultCount": max(0, int(result_count or 0)),
+                "matchedCount": max(0, int(matched_count or 0)),
+                "totalCount": max(0, int(total_count or 0)),
+                "limit": max(0, int(limit or 0)),
+                "cursor": max(0, int(cursor or 0)),
+                "hasQuery": bool(has_query),
+                "hasAgentFilter": bool(has_agent_filter),
+                "hasKindFilter": bool(has_kind_filter),
+                "hasStateFilter": bool(has_state_filter),
+                "sort": str(sort or "").strip()[:80],
+                "elapsedMs": max(0, int(elapsed_ms or 0)),
+            },
+            lifecycle=False,
+        )
+    except Exception:
+        return
+
+
+def _should_record_catalog_read_sample() -> bool:
+    """Keep high-frequency healthy catalog-read evidence bounded."""
+
+    global _SESSION_CATALOG_SUCCESSFUL_READ_COUNT
+    with _SESSION_CATALOG_READ_SAMPLE_LOCK:
+        _SESSION_CATALOG_SUCCESSFUL_READ_COUNT += 1
+        return (
+            _SESSION_CATALOG_SUCCESSFUL_READ_COUNT == 1
+            or _SESSION_CATALOG_SUCCESSFUL_READ_COUNT % 100 == 0
+        )
 
 
 def _record_session_message_edit_resubmit_event(
