@@ -8,7 +8,6 @@ import {
   type CodexTranscriptToolActivity,
 } from "./conversationToolActivityModel";
 import {
-  conversationToolRendererFor,
   conversationToolRendererForPresentationLabel,
   conversationToolRendererLabel,
 } from "./conversationToolRendererRegistry";
@@ -17,7 +16,13 @@ import {
   type ConversationToolPresentationLanguage,
 } from "./conversationToolPresentation";
 import {
+  buildConversationToolActivityDigestPresentation,
   buildConversationToolActivityPresentation,
+  conversationToolActivityHasNonzeroTerminalExit,
+  conversationToolActivityIsNoMatchTerminalExit,
+  conversationToolActivityRendererForCell,
+  conversationToolActivityTerminalExitCode,
+  type ConversationToolActivityDigestPresentation,
   type ConversationToolActivityPresentationItem,
 } from "./conversationToolActivityPresentation";
 import styles from "./ConversationToolActivity.styles";
@@ -29,7 +34,7 @@ type ConversationToolActivityProps = {
 };
 
 function visibleToolSummary(cell: CodexTranscriptCell, language: ConversationToolPresentationLanguage) {
-  const exitCode = terminalExitCode(cell);
+  const exitCode = conversationToolActivityTerminalExitCode(cell);
   if (exitCode !== null && exitCode !== 0) {
     return language === "zh" ? `命令退出 ${exitCode}` : `Command exited ${exitCode}`;
   }
@@ -45,48 +50,23 @@ function visibleToolSummary(cell: CodexTranscriptCell, language: ConversationToo
   });
 }
 
-function terminalExitCode(cell: CodexTranscriptCell) {
-  for (const operation of cell.toolLifecycleModel?.terminalOperations ?? []) {
-    const exitCode = operation.result?.exitCode;
-    if (typeof exitCode === "number") {
-      return exitCode;
-    }
+function ToolActivityStatusIcon({
+  cells,
+  language,
+  state,
+}: {
+  cells: readonly CodexTranscriptCell[];
+  language: ConversationToolPresentationLanguage;
+  state: ConversationToolActivityDigestPresentation["state"];
+}) {
+  if (state === "running") {
+    return <LoaderCircle className={`${styles.activityIcon} ${styles.activityIconRunning} animate-spin`} size={15} aria-hidden="true" />;
   }
-  return null;
-}
-
-function hasNonzeroTerminalExit(cell: CodexTranscriptCell) {
-  const exitCode = terminalExitCode(cell);
-  return exitCode !== null && exitCode !== 0;
-}
-
-function isNoMatchTerminalExit(cell: CodexTranscriptCell) {
-  if (terminalExitCode(cell) !== 1) {
-    return false;
+  if (state === "attention") {
+    return <CircleAlert className={`${styles.activityIcon} ${styles.activityIconAttention}`} size={15} aria-hidden="true" />;
   }
-  const terminalText = (cell.toolLifecycleModel?.terminalOperations ?? [])
-    .flatMap((operation) => [
-      operation.request?.displayCommand,
-      operation.result?.formattedOutput,
-      operation.result?.stdout,
-      operation.result?.stderr,
-    ])
-    .filter(Boolean)
-    .join("\n");
-  return /\b(?:findstr|grep|rg)\b/i.test(terminalText)
-    && /(?:无输出|no output|no matches?|not found)/i.test(terminalText);
-}
-
-function toolRendererForCell(cell: CodexTranscriptCell, language: ConversationToolPresentationLanguage) {
-  const rawName = codexTranscriptToolRawName(cell);
-  const direct = conversationToolRendererFor(rawName);
-  if (direct.family !== "generic") {
-    return direct;
-  }
-  return conversationToolRendererForPresentationLabel(
-    conversationToolRendererLabel(rawName || cell.title || "", language),
-    language,
-  );
+  const Icon = conversationToolActivityRendererForCell(cells[0], language).icon;
+  return <Icon className={styles.activityIcon} size={15} aria-hidden="true" />;
 }
 
 function ToolStatusIcon({
@@ -96,14 +76,14 @@ function ToolStatusIcon({
   cell: CodexTranscriptCell;
   language: ConversationToolPresentationLanguage;
 }) {
-  const descriptor = toolRendererForCell(cell, language);
+  const descriptor = conversationToolActivityRendererForCell(cell, language);
   if (cell.status === "running" || cell.status === "pending") {
     return <LoaderCircle className={`${styles.itemIcon} ${styles.itemIconRunning} animate-spin`} size={15} />;
   }
   if (cell.status === "failed") {
     return <CircleAlert className={`${styles.itemIcon} ${styles.itemIconFailed}`} size={15} />;
   }
-  if (hasNonzeroTerminalExit(cell)) {
+  if (conversationToolActivityHasNonzeroTerminalExit(cell)) {
     return <CircleAlert className={`${styles.itemIcon} ${styles.itemIconWarning}`} size={15} />;
   }
   if (cell.status === "degraded") {
@@ -124,7 +104,7 @@ function ToolActivityItem({
 }) {
   const toolName = codexTranscriptToolRawName(cell);
   const baseTitle = conversationToolRendererLabel(toolName, language);
-  const summary = isNoMatchTerminalExit(cell)
+  const summary = conversationToolActivityIsNoMatchTerminalExit(cell)
     ? (language === "zh" ? "未找到匹配项" : "No matches found")
     : visibleToolSummary(cell, language);
   const useSemanticCodeTitle = toolName.trim().toLowerCase() === "code_symbol_tool"
@@ -242,23 +222,52 @@ export function ConversationToolActivity({
   renderToolDetails,
 }: ConversationToolActivityProps) {
   const items = buildConversationToolActivityPresentation(activity.cells, language);
+  const digest = buildConversationToolActivityDigestPresentation(activity.cells, language);
+  const openByDefault = digest.state === "running" || digest.state === "attention";
+  const label = language === "zh"
+    ? `展开或收起工具活动：${digest.title}`
+    : `Expand or collapse tool activity: ${digest.title}`;
   return (
-    <div className={styles.activity} data-codex-tool-activity="inline">
-      {items.map((item) => item.kind === "batch" ? (
-        <ToolActivityBatch
-          key={item.id}
-          item={item}
-          language={language}
-          renderToolDetails={renderToolDetails}
-        />
-      ) : (
-        <ToolActivityItem
-          key={item.id}
-          cell={item.cell}
-          language={language}
-          renderToolDetails={renderToolDetails}
-        />
-      ))}
-    </div>
+    <details
+      className={`${styles.activity} group`}
+      data-codex-tool-activity="digest"
+      data-codex-tool-activity-state={digest.state}
+      data-codex-tool-activity-count={digest.count}
+      data-codex-tool-activity-attention-count={digest.attentionCount || undefined}
+      open={openByDefault || undefined}
+    >
+      <summary
+        className={styles.activitySummary}
+        aria-label={label}
+        aria-live={digest.state === "running" ? "polite" : undefined}
+      >
+        <ToolActivityStatusIcon cells={activity.cells} language={language} state={digest.state} />
+        <span className={styles.activitySummaryBody}>
+          <span className={styles.activityTitle}>{digest.title}</span>
+          {digest.attentionLabel ? (
+            <span className={styles.activityAttention}>· {digest.attentionLabel}</span>
+          ) : null}
+          {digest.meta ? <span className={styles.activityMeta}>{digest.meta}</span> : null}
+          <ChevronDown className={styles.activityChevron} size={14} aria-hidden="true" />
+        </span>
+      </summary>
+      <div className={styles.activityDetails}>
+        {items.map((item) => item.kind === "batch" ? (
+          <ToolActivityBatch
+            key={item.id}
+            item={item}
+            language={language}
+            renderToolDetails={renderToolDetails}
+          />
+        ) : (
+          <ToolActivityItem
+            key={item.id}
+            cell={item.cell}
+            language={language}
+            renderToolDetails={renderToolDetails}
+          />
+        ))}
+      </div>
+    </details>
   );
 }

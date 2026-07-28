@@ -6,7 +6,6 @@ import {
   codexTranscriptToolDurationSeconds,
   formatCodexTranscriptDuration,
 } from "./conversationToolActivityModel";
-import { buildConversationToolActivityPresentation } from "./conversationToolActivityPresentation";
 import styles from "./ConversationProcessDisclosure.styles";
 
 type ConversationProcessDisclosureProps = {
@@ -41,20 +40,9 @@ function processLabel(cells: readonly CodexTranscriptCell[], language: "zh" | "e
     ? { completed: "已处理", failed: "处理已停止", running: "处理中" }
     : { completed: "Processed", failed: "Processing stopped", running: "Processing" };
   const duration = processDuration(cells);
-  const stageCells = cells.filter(
-    (cell) => cell.kind === "tool_call" || cell.kind === "error_notice",
-  );
-  const stageCount = buildConversationToolActivityPresentation(stageCells, language).length;
-  let stageLabel = "";
-  if (stageCount > 0) {
-    stageLabel = language === "zh"
-      ? `${stageCount} 个阶段`
-      : `${stageCount} ${stageCount === 1 ? "stage" : "stages"}`;
-  }
   return [
     labels[state],
     duration === null ? "" : formatCodexTranscriptDuration(duration),
-    stageLabel,
   ].filter(Boolean).join(" ");
 }
 

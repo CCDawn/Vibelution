@@ -40,16 +40,41 @@ describe("conversation tool activity model", () => {
     });
   });
 
-  it("keeps failed and degraded calls independently visible", () => {
+  it("keeps contiguous completed, failed, and degraded tool work in one activity", () => {
+    const failedTool = cell("tool-failed", "error_notice", "failed");
+    failedTool.operationIds = ["operation-failed"];
     const nodes = buildCodexTranscriptTimelineNodes([
       cell("tool-1", "tool_call"),
-      cell("tool-failed", "tool_call", "failed"),
+      failedTool,
       cell("tool-2", "tool_call"),
       cell("tool-degraded", "tool_call", "degraded"),
     ]);
 
-    expect(nodes).toHaveLength(4);
-    expect(nodes.every((node) => node.kind === "tool_activity")).toBe(true);
-    expect(nodes.map((node) => node.kind === "tool_activity" ? node.activity.cells : []).flat()).toHaveLength(4);
+    expect(nodes).toHaveLength(1);
+    expect(nodes[0]).toMatchObject({
+      kind: "tool_activity",
+      activity: {
+        cells: [
+          { id: "tool-1" },
+          { id: "tool-failed" },
+          { id: "tool-2" },
+          { id: "tool-degraded" },
+        ],
+      },
+    });
+  });
+
+  it("keeps a non-operation error notice as a narrative barrier", () => {
+    const nodes = buildCodexTranscriptTimelineNodes([
+      cell("tool-1", "tool_call"),
+      cell("turn-error", "error_notice", "failed"),
+      cell("tool-2", "tool_call"),
+    ]);
+
+    expect(nodes.map((node) => node.kind === "cell" ? node.cell.id : node.activity.id)).toEqual([
+      "tool-activity:tool-1",
+      "turn-error",
+      "tool-activity:tool-2",
+    ]);
   });
 });

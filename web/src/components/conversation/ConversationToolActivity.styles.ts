@@ -5,7 +5,29 @@ function cx(key: string, ...classNames: string[]) {
 }
 
 const styles = {
-  activity: cx("activity", "grid min-w-0 gap-0"),
+  activity: cx("activity", "mb-3 ml-4 min-w-0 py-0.5"),
+  activitySummary: cx(
+    "activitySummary",
+    "inline-flex min-h-7 max-w-full cursor-pointer items-start gap-2 py-1 text-left [font-size:var(--vui-font-xs)] leading-5 text-[var(--fg-tertiary)] [&::-webkit-details-marker]:hidden hover:text-[var(--fg-secondary)] focus-visible:rounded-[var(--radius-control)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)]",
+  ),
+  activitySummaryBody: cx(
+    "activitySummaryBody",
+    "inline-flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-0.5",
+  ),
+  activityIcon: cx("activityIcon", "mt-0.5 shrink-0 text-[var(--fg-tertiary)]"),
+  activityIconRunning: cx("activityIconRunning", "text-[var(--accent-cool)]"),
+  activityIconAttention: cx("activityIconAttention", "text-[var(--state-warning)]"),
+  activityTitle: cx("activityTitle", "shrink-0 font-medium text-[var(--fg-secondary)]"),
+  activityAttention: cx("activityAttention", "shrink-0 text-[var(--state-warning)]"),
+  activityMeta: cx(
+    "activityMeta",
+    "min-w-0 truncate text-[var(--fg-tertiary)] max-[719px]:whitespace-normal max-[719px]:[overflow-wrap:anywhere]",
+  ),
+  activityChevron: cx(
+    "activityChevron",
+    "shrink-0 self-center text-[var(--fg-tertiary)] transition-transform duration-150",
+  ),
+  activityDetails: cx("activityDetails", "ml-6 grid min-w-0 gap-0 pt-1"),
   item: cx("item", "min-w-0"),
   itemDetails: cx("itemDetails", "min-w-0"),
   itemSummary: cx(

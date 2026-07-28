@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import type { ConversationMessage } from "../../api/types";
 import { ConversationView } from "./ConversationView";
+import toolActivityStyles from "./ConversationToolActivity.styles";
 import styles from "./ConversationView.styles";
 
 function renderConversation(messages: ConversationMessage[], processDisplayMode: "answer" | "trace" = "trace") {
@@ -392,12 +393,11 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(detailsStart).toBeGreaterThanOrEqual(0);
     expect(detailsEnd).toBeGreaterThan(detailsStart);
     expect(detailsMarkup.slice(0, summaryEnd)).toContain("写入终端");
-    expect(detailsMarkup.slice(0, summaryEnd)).toContain("codexTranscriptInlineChevron");
+    expect(detailsMarkup.slice(0, summaryEnd)).toContain("itemChevron");
     expect(detailsMarkup.slice(0, summaryEnd)).not.toContain("技术详情");
     expect(detailsMarkup.indexOf("turnErrorReasonList")).toBeGreaterThan(summaryEnd);
-    expect(styles.codexTranscriptCompactErrorDetails).toContain("w-full");
-    expect(styles.codexTranscriptCompactErrorDetails).not.toContain("inline-block");
-    expect(styles.codexTranscriptCompactErrorDetails).not.toContain("shrink-0");
+    expect(toolActivityStyles.itemDetailsBody).toContain("ml-6");
+    expect(toolActivityStyles.itemDetailsBody).not.toContain("mr-");
   });
 
   it("keeps commentary, tool, and final answer in canonical DOM order with tool details closed", () => {
@@ -473,7 +473,8 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(finalIndex).toBeGreaterThan(toolIndex);
     expect(html).toContain('data-codex-tool-detail="true"');
     expect(html).toContain('data-codex-process-disclosure="true"');
-    expect(html).toContain("已处理 1 个阶段");
+    expect(html).toContain("已处理");
+    expect(html).not.toContain("个阶段");
     expect(html).not.toContain('open=""');
     expect(html).toContain('data-codex-final-response="true"');
     expect(html).toContain('data-codex-transcript-cell-channel="commentary"');
@@ -906,7 +907,7 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html).not.toContain("exitCode");
   });
 
-  it("keeps commentary and flat tool rows inside one expandable process before the final answer", () => {
+  it("keeps commentary primary and folds adjacent tools into one digest before the final answer", () => {
     const html = renderConversation([
       {
         id: "assistant-native-tool-activity",
@@ -961,9 +962,11 @@ describe("ConversationView native Codex transcript surface", () => {
 
     const before = html.indexOf("先检查当前实现。");
     const disclosure = html.indexOf('data-codex-process-disclosure="true"');
-    const firstTool = html.indexOf('data-codex-tool-activity-item="true"');
+    const toolDigest = html.indexOf('data-codex-tool-activity="digest"');
     const after = html.indexOf("已定位关键调用。");
     const final = html.indexOf("最终回答保持在最后。");
+    expect(html).toContain("运行了 3 个工具");
+    expect(html).toContain("代码分析 3");
     expect(html).toContain("代码图谱");
     expect(html.match(/data-codex-tool-activity-item="true"/g)).toHaveLength(3);
     expect(html).not.toContain('data-codex-tool-activity-group="true"');
@@ -972,8 +975,8 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(before).toBeGreaterThan(-1);
     expect(disclosure).toBeGreaterThan(-1);
     expect(before).toBeGreaterThan(disclosure);
-    expect(firstTool).toBeGreaterThan(before);
-    expect(after).toBeGreaterThan(firstTool);
+    expect(toolDigest).toBeGreaterThan(before);
+    expect(after).toBeGreaterThan(toolDigest);
     expect(final).toBeGreaterThan(after);
     expect(html).toContain('data-codex-final-response="true"');
   });
@@ -1036,6 +1039,7 @@ describe("ConversationView native Codex transcript surface", () => {
     const after = html.indexOf("The relevant calls are located.");
     const final = html.indexOf("Final answer remains last.");
     expect(before).toBeGreaterThan(-1);
+    expect(html).toContain('data-codex-tool-activity="digest"');
     expect(batch).toBeGreaterThan(before);
     expect(after).toBeGreaterThan(batch);
     expect(final).toBeGreaterThan(after);

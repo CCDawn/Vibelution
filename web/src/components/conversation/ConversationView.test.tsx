@@ -366,7 +366,7 @@ describe("ConversationView Codex-like transcript adapter integration", () => {
     expect(html).not.toContain("运行提示");
   });
 
-  it("renders a structured tool failure as one compact high-value row", () => {
+  it("folds a structured tool failure into one attention digest with expandable diagnostics", () => {
     const html = renderConversation([
       {
         id: "assistant-structured-tool-failure",
@@ -406,11 +406,14 @@ describe("ConversationView Codex-like transcript adapter integration", () => {
       },
     ], { processDisplayMode: "trace" });
 
-    expect(html).toContain('data-codex-tool-error-compact="true"');
+    expect(html).toContain('data-codex-tool-activity="digest"');
+    expect(html).toContain("运行了 2 个工具");
+    expect(html).toContain("1 项需关注");
+    expect(html).not.toContain('data-codex-tool-error-compact="true"');
     expect(html).toContain("代码图谱");
-    expect(html.indexOf("codexTranscriptInlineChevron")).toBeGreaterThan(html.indexOf("代码图谱"));
-    expect(html.indexOf("codexTranscriptCompactErrorSummary")).toBeGreaterThan(html.indexOf("codexTranscriptInlineChevron"));
     expect(html).toContain("索引未就绪");
+    expect(html).toContain('data-codex-tool-detail="true"');
+    expect(html).toContain('data-codex-error-diagnostic="true"');
     expect(styles.codexTranscriptCompactErrorSummary).toContain("whitespace-normal");
     expect(styles.codexTranscriptCompactErrorSummary).toContain("break-words");
     expect(styles.codexTranscriptCompactErrorSummary).toContain("[overflow-wrap:anywhere]");
@@ -424,7 +427,7 @@ describe("ConversationView Codex-like transcript adapter integration", () => {
     expect(html).not.toContain("get_recent_changes_tool");
   });
 
-  it("renders a repeated compact tool failure as one neutral row with a count", () => {
+  it("renders repeated tool failures as one bounded attention digest", () => {
     const html = renderConversation([
       {
         id: "assistant-repeated-tool-failure",
@@ -456,9 +459,11 @@ describe("ConversationView Codex-like transcript adapter integration", () => {
       },
     ], { processDisplayMode: "trace" });
 
-    expect(html).toContain('data-codex-tool-error-compact="true"');
+    expect(html).toContain('data-codex-tool-activity="digest"');
+    expect(html).toContain("运行了 4 个工具");
+    expect(html).toContain("1 项需关注");
+    expect(html).not.toContain('data-codex-tool-error-compact="true"');
     expect(html).toContain("工具调用受限");
-    expect(html).toContain("4 次");
     expect(html.match(/本回合工具调用额度已用尽/g)).toHaveLength(1);
     expect(html).not.toContain("技术详情");
   });
