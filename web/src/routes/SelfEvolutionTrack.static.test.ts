@@ -92,6 +92,10 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(selfEvolutionSource).toContain('from "../components/vui"');
     expect(selfEvolutionSource).toContain("<VButton");
     expect(selfEvolutionSource).toContain("<VNativeInput");
+    expect(selfEvolutionSource).toContain("<VRouteLinkButton");
+    expect(selfEvolutionSource).toContain("className={styles.agentCardMain}");
+    expect(selfEvolutionSource).not.toContain("<VRouteLinkButton\n                    className={styles.agentCardMain}");
+    expect(selfEvolutionSource).not.toContain("<Link className={styles.agentCardAction}");
     expect(selfEvolutionSource).not.toMatch(/<button\b/);
     expect(selfEvolutionSource).not.toMatch(/<input\b/);
     expect(selfEvolutionSource).not.toMatch(/<select\b/);

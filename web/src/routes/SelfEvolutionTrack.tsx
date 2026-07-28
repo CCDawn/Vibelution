@@ -52,7 +52,12 @@ import {
 } from "../components/layout/paneLayoutPersistence";
 import { usePersistedPaneResize } from "../components/layout/usePersistedPaneResize";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
-import { VButton, VNativeInput, VNativeTextarea } from "../components/vui";
+import {
+  VButton,
+  VNativeInput,
+  VNativeTextarea,
+  VRouteLinkButton,
+} from "../components/vui";
 import { TranslationKey } from "../i18n/dictionary";
 import { petAvatarPresetLabel } from "../i18n/petLabels";
 import { useAppI18n } from "../i18n/useAppI18n";
@@ -1400,14 +1405,20 @@ export function SelfEvolutionTrack({
                   </Link>
                   <p className={styles.compactPreviewText}>{roleSummary}</p>
                   <div className={styles.agentCardActions}>
-                    <Link className={styles.agentCardAction} to={configRoute}>
-                      <Settings size={13} />
+                    <VRouteLinkButton
+                      className={styles.agentCardAction}
+                      to={configRoute}
+                      icon={<Settings size={13} />}
+                    >
                       {lang === "zh" ? "配置" : "Config"}
-                    </Link>
-                    <Link className={styles.agentCardAction} to={activityRoute}>
-                      <ScrollText size={13} />
+                    </VRouteLinkButton>
+                    <VRouteLinkButton
+                      className={styles.agentCardAction}
+                      to={activityRoute}
+                      icon={<ScrollText size={13} />}
+                    >
                       {lang === "zh" ? "日志" : "Logs"}
-                    </Link>
+                    </VRouteLinkButton>
                   </div>
                 </article>
               );
