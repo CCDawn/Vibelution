@@ -25,6 +25,14 @@ def initialize_session_catalog_on_startup() -> object:
     )
 
 
+def shutdown_session_catalog_on_shutdown() -> None:
+    """Cancel opt-in catalog-only work before web shutdown completes."""
+
+    from .services.session.catalog_runtime import shutdown_session_catalog_runtime
+
+    shutdown_session_catalog_runtime()
+
+
 def is_windows_proactor_disconnect_noise(context: dict[str, Any]) -> bool:
     if os.name != "nt":
         return False
@@ -93,6 +101,7 @@ async def web_workbench_lifespan(_: FastAPI):
     try:
         yield
     finally:
+        shutdown_session_catalog_on_shutdown()
         for startup_task in (
             startup_cache_prewarm_task,
             startup_catalog_task,

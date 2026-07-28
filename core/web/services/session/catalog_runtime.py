@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -19,6 +20,13 @@ from core.infrastructure import developer_sandbox
 from core.ui.chat_state import chat_state_path
 
 from . import catalog_bridge
+from ..runtime_scene_service import record_runtime_scene_event
+
+
+_MAX_INCREMENTAL_RECONCILE_ATTEMPTS = 3
+_RUNTIME_SUPERVISOR_LOCK = threading.Lock()
+_RUNTIME_SUPERVISOR: "_CatalogRuntimeSupervisor | None" = None
+_RUNTIME_GENERATION = 0
 
 
 @dataclass(frozen=True)
@@ -28,6 +36,166 @@ class SessionCatalogRuntimeStatus:
     status: str
     session_count: int = 0
     error_type: str = ""
+
+
+class _CatalogRuntimeSupervisor:
+    """Debounce catalog rebuilds while keeping dirty reads on the legacy path."""
+
+    def __init__(
+        self,
+        *,
+        project_root: Path,
+        store: SessionCatalogStore,
+        reconciler: catalog_bridge.CatalogReconciler,
+        delay_ms: int,
+    ) -> None:
+        self._project_root = Path(project_root).resolve()
+        self._store = store
+        self._reconciler = reconciler
+        self._delay_seconds = max(0, int(delay_ms)) / 1000
+        self._lock = threading.Lock()
+        self._timer: threading.Timer | None = None
+        self._running = False
+        self._closed = False
+        self._retry_attempt = 0
+
+    def observe(self, observed_root: Path, session_id: str, source_revision: str) -> None:
+        if Path(observed_root).resolve() != self._project_root:
+            return
+        if not self._store.mark_dirty(
+            session_id,
+            reason="canonical_mutation",
+            source_revision=source_revision,
+        ):
+            self._record("session_catalog.dirty.unavailable", outcome="degraded", level="warning")
+            return
+        self._record(
+            "session_catalog.dirty.observed",
+            fields={"dirtyCount": self._dirty_count()},
+        )
+        self._schedule(reset_retry_budget=True)
+
+    def close(self) -> None:
+        with self._lock:
+            self._closed = True
+            timer = self._timer
+            self._timer = None
+        if timer is not None:
+            timer.cancel()
+
+    def _schedule(self, *, reset_retry_budget: bool = False) -> None:
+        with self._lock:
+            if self._closed:
+                return
+            if reset_retry_budget:
+                self._retry_attempt = 0
+            if self._timer is not None or self._running:
+                return
+            self._schedule_locked(self._delay_seconds)
+
+    def _schedule_locked(self, delay_seconds: float) -> None:
+        timer = threading.Timer(max(0.0, delay_seconds), self._run_reconcile)
+        timer.daemon = True
+        self._timer = timer
+        timer.start()
+
+    def _run_reconcile(self) -> None:
+        with self._lock:
+            self._timer = None
+            if self._closed or self._running:
+                return
+            self._running = True
+
+        should_retry = False
+        try:
+            result = self._reconciler.reconcile(
+                owner=f"web-incremental-{os.getpid()}",
+                now=_utcnow(),
+                lease_expires_at=_utcnow(offset_seconds=60),
+            )
+            fresh = (
+                result.status == "complete"
+                and not self._store.untrusted_sentinel_path.exists()
+                and self._dirty_count() == 0
+            )
+            if fresh:
+                self._record(
+                    "session_catalog.incremental.complete",
+                    outcome="complete",
+                    fields={"sessionCount": result.session_count},
+                )
+            else:
+                should_retry = True
+                self._record(
+                    "session_catalog.incremental.degraded",
+                    outcome="degraded",
+                    level="warning",
+                    fields={
+                        "status": result.status,
+                        "sessionCount": result.session_count,
+                        "dirtyCount": self._dirty_count(),
+                    },
+                )
+        except Exception as exc:
+            self._store.mark_untrusted(type(exc).__name__)
+            should_retry = True
+            self._record(
+                "session_catalog.incremental.failed",
+                outcome="failed",
+                level="warning",
+                fields={"errorType": type(exc).__name__},
+            )
+        finally:
+            with self._lock:
+                self._running = False
+                if should_retry and not self._closed:
+                    self._retry_attempt += 1
+                    if self._retry_attempt <= _MAX_INCREMENTAL_RECONCILE_ATTEMPTS:
+                        self._schedule_locked(self._delay_seconds)
+                elif not should_retry:
+                    self._retry_attempt = 0
+
+    def _dirty_count(self) -> int:
+        try:
+            return self._store.dirty_session_count()
+        except Exception:
+            return -1
+
+    @staticmethod
+    def _record(
+        event_code: str,
+        *,
+        outcome: str = "observed",
+        level: str = "info",
+        fields: dict[str, Any] | None = None,
+    ) -> None:
+        try:
+            record_runtime_scene_event(
+                "session_catalog",
+                "reconcile",
+                event_code,
+                message="Session catalog runtime reconciliation event.",
+                outcome=outcome,
+                level=level,
+                fields=fields or {},
+                lifecycle=True,
+            )
+        except Exception:
+            return
+
+
+def shutdown_session_catalog_runtime() -> None:
+    """Detach runtime observers and cancel pending catalog-only work."""
+
+    global _RUNTIME_GENERATION, _RUNTIME_SUPERVISOR
+    with _RUNTIME_SUPERVISOR_LOCK:
+        _RUNTIME_GENERATION += 1
+        supervisor = _RUNTIME_SUPERVISOR
+        _RUNTIME_SUPERVISOR = None
+        set_session_catalog_dirty_observer(None)
+        catalog_bridge.set_session_query_shadow_provider(None)
+    if supervisor is not None:
+        supervisor.close()
 
 
 def initialize_session_catalog_runtime(
@@ -42,8 +210,11 @@ def initialize_session_catalog_runtime(
     query path untouched.  This initializer never writes canonical state.
     """
 
-    catalog_bridge.set_session_query_shadow_provider(None)
-    set_session_catalog_dirty_observer(None)
+    global _RUNTIME_SUPERVISOR
+
+    shutdown_session_catalog_runtime()
+    with _RUNTIME_SUPERVISOR_LOCK:
+        generation = _RUNTIME_GENERATION
     if str(getattr(catalog_config, "mode", "off") or "off").strip().lower() != "shadow":
         return SessionCatalogRuntimeStatus(status="disabled")
     if not bool(getattr(catalog_config, "reconcile_on_startup", True)):
@@ -74,37 +245,77 @@ def initialize_session_catalog_runtime(
             )
 
         now = _utcnow()
-        result = catalog_bridge.CatalogReconciler(
+        reconciler = catalog_bridge.CatalogReconciler(
             store,
             source_loader=source_loader,
-        ).reconcile(
+        )
+        result = reconciler.reconcile(
             owner=f"web-startup-{os.getpid()}",
             now=now,
             lease_expires_at=_utcnow(offset_seconds=60),
         )
         if result.status != "complete":
+            _CatalogRuntimeSupervisor._record(
+                "session_catalog.startup.degraded",
+                outcome="degraded",
+                level="warning",
+                fields={"status": result.status, "sessionCount": result.session_count},
+            )
             return SessionCatalogRuntimeStatus(
                 status="degraded",
                 session_count=result.session_count,
             )
         if store.untrusted_sentinel_path.exists() or store.dirty_session_count() != 0:
+            _CatalogRuntimeSupervisor._record(
+                "session_catalog.startup.degraded",
+                outcome="degraded",
+                level="warning",
+                fields={"status": "untrusted_or_dirty", "sessionCount": result.session_count},
+            )
             return SessionCatalogRuntimeStatus(
                 status="degraded",
                 session_count=result.session_count,
             )
-        catalog_bridge.set_session_query_shadow_provider(
-            catalog_bridge.build_session_catalog_query_provider(store)
+        supervisor = _CatalogRuntimeSupervisor(
+            project_root=root,
+            store=store,
+            reconciler=reconciler,
+            delay_ms=getattr(catalog_config, "incremental_reconcile_delay_ms", 750),
         )
-        set_session_catalog_dirty_observer(
-            _catalog_dirty_observer(project_root=root, store=store)
+        with _RUNTIME_SUPERVISOR_LOCK:
+            if _RUNTIME_GENERATION != generation:
+                supervisor.close()
+                return SessionCatalogRuntimeStatus(status="disabled")
+            catalog_bridge.set_session_query_shadow_provider(
+                catalog_bridge.build_session_catalog_query_provider(store)
+            )
+            set_session_catalog_dirty_observer(supervisor.observe)
+            _RUNTIME_SUPERVISOR = supervisor
+        supervisor._record(
+            "session_catalog.startup.ready",
+            outcome="complete",
+            fields={"sessionCount": result.session_count},
         )
         return SessionCatalogRuntimeStatus(
             status="ready",
             session_count=result.session_count,
         )
     except Exception as exc:
-        catalog_bridge.set_session_query_shadow_provider(None)
-        set_session_catalog_dirty_observer(None)
+        detached_supervisor: _CatalogRuntimeSupervisor | None = None
+        with _RUNTIME_SUPERVISOR_LOCK:
+            if _RUNTIME_GENERATION == generation:
+                detached_supervisor = _RUNTIME_SUPERVISOR
+                _RUNTIME_SUPERVISOR = None
+                set_session_catalog_dirty_observer(None)
+                catalog_bridge.set_session_query_shadow_provider(None)
+        if detached_supervisor is not None:
+            detached_supervisor.close()
+        _CatalogRuntimeSupervisor._record(
+            "session_catalog.startup.failed",
+            outcome="failed",
+            level="warning",
+            fields={"errorType": type(exc).__name__},
+        )
         return SessionCatalogRuntimeStatus(
             status="degraded",
             error_type=type(exc).__name__,
@@ -137,25 +348,6 @@ def _load_legacy_session_summaries() -> Sequence[Mapping[str, Any]]:
     from core.web.services import session_service
 
     return session_service.list_sessions(repair_collisions=False)
-
-
-def _catalog_dirty_observer(
-    *,
-    project_root: Path,
-    store: SessionCatalogStore,
-) -> Callable[[Path, str, str], None]:
-    expected_root = Path(project_root).resolve()
-
-    def observe(observed_root: Path, session_id: str, source_revision: str) -> None:
-        if Path(observed_root).resolve() != expected_root:
-            return
-        store.mark_dirty(
-            session_id,
-            reason="canonical_mutation",
-            source_revision=source_revision,
-        )
-
-    return observe
 
 
 def _journal_inventory(
