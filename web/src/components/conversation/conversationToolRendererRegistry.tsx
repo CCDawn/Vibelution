@@ -1,7 +1,9 @@
 import {
+  BadgeCheck,
   FileSearch,
   GitBranch,
   Network,
+  PencilLine,
   Search,
   TerminalSquare,
   Wrench,
@@ -19,6 +21,8 @@ export type ConversationToolRendererFamily =
   | "files"
   | "search"
   | "command"
+  | "edit"
+  | "verify"
   | "conversation"
   | "generic";
 
@@ -54,6 +58,16 @@ const TOOL_RENDERER_REGISTRY: Record<ConversationToolRendererFamily, Conversatio
     icon: TerminalSquare,
     groupLabel: { zh: "命令执行", en: "Commands" },
   },
+  edit: {
+    family: "edit",
+    icon: PencilLine,
+    groupLabel: { zh: "修改文件", en: "File changes" },
+  },
+  verify: {
+    family: "verify",
+    icon: BadgeCheck,
+    groupLabel: { zh: "验证", en: "Verification" },
+  },
   conversation: {
     family: "conversation",
     icon: Wrench,
@@ -74,11 +88,25 @@ function familyForToolName(name: string): ConversationToolRendererFamily {
   if (normalized === "code_symbol_tool" || normalized.includes("symbol") || normalized.includes("graph")) {
     return "code";
   }
+  if (
+    ["apply_patch_tool", "apply_diff_edit_tool", "write_file_tool"].includes(normalized)
+    || normalized.includes("patch")
+    || normalized.includes("edit")
+  ) {
+    return "edit";
+  }
   if (["read_file_tool", "glob_tool"].includes(normalized) || normalized.includes("file")) {
     return "files";
   }
   if (["grep_search_tool", "search_code_tool"].includes(normalized) || normalized.includes("search")) {
     return "search";
+  }
+  if (
+    ["python_lint_tool", "run_test_for_tool"].includes(normalized)
+    || normalized.includes("lint")
+    || normalized.includes("test")
+  ) {
+    return "verify";
   }
   if (normalized === "cli_tool" || normalized.includes("command") || normalized.includes("terminal")) {
     return "command";
@@ -97,12 +125,19 @@ export function conversationToolRendererForPresentationLabel(
   label: string,
   language: ConversationToolPresentationLanguage,
 ) {
+  const groupDescriptor = Object.values(TOOL_RENDERER_REGISTRY)
+    .find((descriptor) => descriptor.groupLabel[language] === label);
+  if (groupDescriptor) {
+    return groupDescriptor;
+  }
   const knownFamilies: Array<[ConversationToolRendererFamily, string]> = [
     ["git", "get_git_status_summary_tool"],
     ["code", "code_symbol_tool"],
     ["files", "read_file_tool"],
     ["search", "search_code_tool"],
     ["command", "cli_tool"],
+    ["edit", "apply_patch_tool"],
+    ["verify", "run_test_for_tool"],
     ["conversation", "conversation_log_inspect_tool"],
   ];
   const matched = knownFamilies.find(([, toolName]) => conversationToolPresentationLabel(toolName, language) === label);
