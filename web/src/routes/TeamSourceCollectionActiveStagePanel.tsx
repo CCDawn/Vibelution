@@ -32,8 +32,8 @@ type TeamSourceCollectionActiveStagePanelProps = {
   errors: ReactNode;
   renderConversationPanel: () => ReactNode;
   compact?: boolean;
-  renderCandidatePanel: () => ReactNode;
   renderScreeningPanel: () => ReactNode;
+  renderRecoveryPanel: () => ReactNode;
   renderGraphPanel: () => ReactNode;
   renderMemoryPanel: () => ReactNode;
 };
@@ -52,16 +52,20 @@ export function TeamSourceCollectionActiveStagePanel({
   errors,
   renderConversationPanel,
   compact = false,
-  renderCandidatePanel,
   renderScreeningPanel,
+  renderRecoveryPanel,
   renderGraphPanel,
   renderMemoryPanel,
 }: TeamSourceCollectionActiveStagePanelProps) {
   const resultPanel = stageId === "extraction"
     ? (
         <div className={styles.sourceCollectionExtractionPanels}>
-          {renderCandidatePanel()}
-          {renderScreeningPanel()}
+          <div className={styles.sourceCollectionExtractionScrollRegion}>
+            {renderScreeningPanel()}
+          </div>
+          <div className={styles.sourceCollectionExtractionRecoveryDock}>
+            {renderRecoveryPanel()}
+          </div>
         </div>
       )
     : stageId === "relations"

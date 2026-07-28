@@ -968,7 +968,7 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourceCollectionScreeningPanelSource).toContain("sourceCollectionScreeningScrollHint");
     expect(teamSourceCollectionScreeningPanelSource).toContain("资料提炼复核候选列表，可向下滚动查看更多");
     expect(teamSourceCollectionScreeningPanelSource).toContain("向下滚动查看更多本页候选");
-    expect(routeSource).toContain("TeamSourceCollectionCandidatePanel");
+    expect(routeSource).not.toContain("TeamSourceCollectionCandidateWorkspacePanel");
     expect(teamSourceCollectionCandidatePanelSource).toContain("source-collection-candidates-panel");
     expect(routeSource).toContain("TeamSourceCollectionGraphPanel");
     expect(routeSource).toContain("source-collection-graph-panel");
@@ -979,7 +979,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).not.toContain("researchView=candidates");
     expect(routeSource).toContain("查看提炼结果");
     expect(routeSource).toContain("openSourceCollectionCandidatePanel");
-    expect(routeSource).toContain("renderSourceCollectionCandidatePanel");
+    expect(routeSource).not.toContain("renderSourceCollectionCandidatePanel");
     expect(routeSource).not.toContain("sourceCollectionRunCandidates.slice(0, 6)");
     expect(routeSource).toContain("TeamSourceCollectionExtractionRecoveryPanel");
     expect(routeSource).toContain("renderSourceCollectionExtractionRecoveryPanel");
@@ -1346,13 +1346,15 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourceCollectionActiveStagePanelSource).toContain("renderMemoryPanel()");
     expect(teamSourceCollectionActiveStagePanelSource).toContain('stageId === "extraction"');
     expect(teamSourceCollectionActiveStagePanelSource).toContain("styles.sourceCollectionExtractionPanels");
-    expect(teamSourceCollectionActiveStagePanelSource).toContain("renderCandidatePanel()");
+    expect(teamSourceCollectionActiveStagePanelSource).not.toContain("renderCandidatePanel");
     expect(teamSourceCollectionActiveStagePanelSource).toContain("renderScreeningPanel()");
+    expect(teamSourceCollectionActiveStagePanelSource).toContain("renderRecoveryPanel()");
     // Wave 8M: stage panel render-prop mounts live on active-stage workspace.
     expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain("renderGraphPanel={renderSourceCollectionGraphPanel}");
     expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain("renderMemoryPanel={renderSourceCollectionMemoryPanel}");
-    expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain("renderCandidatePanel={renderSourceCollectionCandidatePanel}");
+    expect(teamSourceCollectionActiveStageWorkspacePanelSource).not.toContain("renderCandidatePanel=");
     expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain("renderScreeningPanel={renderSourceCollectionScreeningPanel}");
+    expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain("renderRecoveryPanel={renderSourceCollectionRecoveryPanel}");
     // Wave 8L: graph open condition lives on graph workspace panel.
     const graphPanelOpenSource = teamSourceCollectionGraphWorkspacePanelSource.slice(
       teamSourceCollectionGraphWorkspacePanelSource.indexOf("<TeamSourceCollectionGraphPanel"),
@@ -1946,9 +1948,13 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourceCollectionExtractionRecoveryPanelStyles.sourceCollectionExtractionRecoveryPanel).toBeTypeOf("string");
     expect(teamSourceCollectionExtractionRecoveryPanelStyles.sourceCollectionExtractionRecoveryBody).toBeTypeOf("string");
     expect(teamSourceCollectionExtractionRecoveryPanelStyles.sourceCollectionExtractionRecoveryBody).toContain("[&_p]:m-0");
-    expect(teamSourceCollectionExtractionRecoveryPanelStyles.sourceCollectionExtractionRecoveryPanel).toContain("grid-cols-[minmax(0,1fr)_auto]");
+    expect(teamSourceCollectionExtractionRecoveryPanelStyles.sourceCollectionExtractionRecoveryPanel).toContain(
+      "grid-cols-[minmax(0,1fr)]",
+    );
     expect(teamSourceCollectionExtractionRecoveryPanelStyles.sourceCollectionExtractionRecoveryPanelDanger).toContain("state-error");
-    expect(teamSourceCollectionExtractionRecoveryPanelStyles.sourceCollectionExtractionRecoveryPanel).toContain("max-[760px]:grid-cols-[1fr]");
+    expect(teamSourceCollectionExtractionRecoveryPanelStyles.sourceCollectionExtractionRecoveryPanel).not.toContain(
+      "grid-cols-[minmax(0,1fr)_auto]",
+    );
     expect(teamSourceCollectionExtractionRecoveryPanelStyles.sourceCollectionExtractionRecoveryStats).toBeTypeOf("string");
     expect(teamSourceCollectionExtractionRecoveryPanelStyles.sourceCollectionExtractionRecoveryStats).toContain("repeat(auto-fit,minmax(7rem,1fr))");
     expect(teamSourceCollectionExtractionRecoveryPanelStyles.sourceCollectionExtractionRecoveryActions).toBeTypeOf("string");
@@ -2090,8 +2096,10 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourceCollectionConversationPanelStylesSource).not.toContain("sourceCollectionConversationPanelCompact:\n    \"sourceCollectionConversationPanelCompact h-full");
     expect(teamSourceResultListSource).toContain("flex-1");
     expect(teamSourceResultListSource).toContain("overflow-auto");
-    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionExtractionPanels).toContain("flex-col");
-    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionExtractionPanels).toContain("overflow-auto");
+    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionExtractionPanels).toContain(
+      "grid-rows-[minmax(0,1fr)_auto]",
+    );
+    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionExtractionScrollRegion).toContain("overflow-auto");
     expect(teamStageCommandBarSource).toContain('data-vui-product="team-stage-command-bar"');
     expect(teamStageCommandBarSource).toContain("flex flex-wrap items-center justify-between");
     expect(teamStageCardSource).toContain('data-vui-product="team-stage-card"');

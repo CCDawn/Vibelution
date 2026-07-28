@@ -40,9 +40,9 @@ export type TeamSourceCollectionActiveStageWorkspacePanelProps = {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   renderSourceCollectionConversation: () => ReactNode;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  renderSourceCollectionCandidatePanel: () => ReactNode;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   renderSourceCollectionScreeningPanel: () => ReactNode;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  renderSourceCollectionRecoveryPanel: () => ReactNode;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   renderSourceCollectionGraphPanel: () => ReactNode;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -64,8 +64,8 @@ export function TeamSourceCollectionActiveStageWorkspacePanel(props: TeamSourceC
     sourceCollectionFindingStageCompact,
     selectedTeamStartSourceCollectionStageTaskError,
     renderSourceCollectionConversation,
-    renderSourceCollectionCandidatePanel,
     renderSourceCollectionScreeningPanel,
+    renderSourceCollectionRecoveryPanel,
     renderSourceCollectionGraphPanel,
     renderSourceCollectionMemoryPanel,
   } = props;
@@ -157,8 +157,8 @@ export function TeamSourceCollectionActiveStageWorkspacePanel(props: TeamSourceC
           </>
         )}
         renderConversationPanel={renderSourceCollectionConversation}
-        renderCandidatePanel={renderSourceCollectionCandidatePanel}
         renderScreeningPanel={renderSourceCollectionScreeningPanel}
+        renderRecoveryPanel={renderSourceCollectionRecoveryPanel}
         renderGraphPanel={renderSourceCollectionGraphPanel}
         renderMemoryPanel={renderSourceCollectionMemoryPanel}
       />
