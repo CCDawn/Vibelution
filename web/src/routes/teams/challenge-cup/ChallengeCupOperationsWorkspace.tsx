@@ -1,7 +1,13 @@
 import { Fragment, type ReactNode, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
-import { VNativeButton, VStatusChip, type VStatusTone } from "../../../components/vui";
+import {
+  VEmptyState,
+  VNativeButton,
+  VRouteLinkButton,
+  VStatusChip,
+  type VStatusTone,
+} from "../../../components/vui";
 import type {
   ResearchProjectAgentTaskKind,
   TeamResearchProjectAgentTask,
@@ -338,10 +344,14 @@ export function ChallengeCupOperationsWorkspace({
             </div>
             <div className={cx("platform-project-actions")}>
               <span>项目操作</span>
-              <Link className={cx("button", "secondary")} to={graphHref}>
-                <GraphMark />
+              <VRouteLinkButton
+                className={cx("button", "secondary")}
+                icon={<GraphMark />}
+                to={graphHref}
+                variant="secondary"
+              >
                 研究关系图
-              </Link>
+              </VRouteLinkButton>
               <VNativeButton className={cx("button", "secondary")} type="button" onClick={onRefresh} disabled={isRefreshing}>
                 {isRefreshing ? "刷新中" : "刷新状态"}
               </VNativeButton>
@@ -427,7 +437,13 @@ export function ChallengeCupOperationsWorkspace({
                       </div>
                     </div>
                     <div className={cx("platform-canvas-actions")}>
-                      <Link className={cx("button", "secondary")} to={activeStageHref}>查看阶段详情</Link>
+                      <VRouteLinkButton
+                        className={cx("button", "secondary")}
+                        to={activeStageHref}
+                        variant="secondary"
+                      >
+                        查看阶段详情
+                      </VRouteLinkButton>
                     </div>
                   </header>
 
@@ -487,9 +503,13 @@ export function ChallengeCupOperationsWorkspace({
                               {questions.map((question) => (
                                 <tr key={question.id}>
                                   <td>
-                                    <Link className={cx("text-button")} to={resolveQuestionHref(question.id)}>
+                                    <VRouteLinkButton
+                                      className={cx("text-button")}
+                                      to={resolveQuestionHref(question.id)}
+                                      variant="ghost"
+                                    >
                                       {question.id}
-                                    </Link>
+                                    </VRouteLinkButton>
                                     <span>{question.kind}</span>
                                   </td>
                                   <td>{modelLabel}</td>
@@ -534,11 +554,22 @@ export function ChallengeCupOperationsWorkspace({
                         onStartTask={onStartResearchProjectAgentTask}
                         onOpenTask={onOpenResearchProjectAgentTask}
                       />
-                      <section className={cx("platform-empty-state")}>
-                        <strong>当前 DTO 未返回冻结 Experiment Design 明细</strong>
-                        <p>生产页面保留清晰空态；进入阶段详情后继续使用现有实验规划链路。</p>
-                        <Link className={cx("button", "primary")} to={activeStageHref}>进入实验设计</Link>
-                      </section>
+                      <VEmptyState
+                        actions={(
+                          <VRouteLinkButton
+                            className={cx("button", "primary")}
+                            to={activeStageHref}
+                            variant="primary"
+                          >
+                            进入实验设计
+                          </VRouteLinkButton>
+                        )}
+                        align="start"
+                        className={cx("platform-empty-state")}
+                        title="当前 DTO 未返回冻结 Experiment Design 明细"
+                      >
+                        生产页面保留清晰空态；进入阶段详情后继续使用现有实验规划链路。
+                      </VEmptyState>
                     </div>
                   ) : (
                     <div className={cx("platform-stage-content", "platform-run-content")}>
@@ -557,7 +588,13 @@ export function ChallengeCupOperationsWorkspace({
                             </article>
                           ))}
                         </div>
-                        {!stage3?.caseRecords.length ? <div className={cx("platform-empty-state")}>尚无已登记的代表性深研案例。</div> : null}
+                        {!stage3?.caseRecords.length ? (
+                          <VEmptyState
+                            align="start"
+                            className={cx("platform-empty-state")}
+                            title="尚无已登记的代表性深研案例。"
+                          />
+                        ) : null}
                       </section>
                       <ResearchProjectAgentTaskPanel
                         stage="iteration"
@@ -595,7 +632,13 @@ export function ChallengeCupOperationsWorkspace({
                       : activeStage === "experiment"
                         ? "补齐并冻结设计"
                         : "审查最佳版本与边界"}</strong>
-                    <Link className={cx("button", "primary")} to={activeStageHref}>进入工作区</Link>
+                    <VRouteLinkButton
+                      className={cx("button", "primary")}
+                      to={activeStageHref}
+                      variant="primary"
+                    >
+                      进入工作区
+                    </VRouteLinkButton>
                   </section>
                   <section>
                     <span>Agent 团队</span>
@@ -633,10 +676,14 @@ export function ChallengeCupOperationsWorkspace({
             <p>当前 MVP 聚焦“1 个黄金样例 + 3 个试运行题（共 4 题）”，后续规模化任务保持明确延后。</p>
           </div>
           <div className={cx("program-actions")}>
-            <Link className={cx("button", "secondary")} to={graphHref}>
-              <GraphMark />
+            <VRouteLinkButton
+              className={cx("button", "secondary")}
+              icon={<GraphMark />}
+              to={graphHref}
+              variant="secondary"
+            >
               研究关系图
-            </Link>
+            </VRouteLinkButton>
             <VNativeButton className={cx("button", "primary")} type="button" onClick={() => selectTab("questions")}>
               {revisionRequired > 0 ? `修订 ${revisionRequired} 个退回题` : `审核 ${reviewRequired} 个待抽检题`}
               <ArrowMark />
@@ -785,9 +832,13 @@ export function ChallengeCupOperationsWorkspace({
                               </VStatusChip>
                             </td>
                             <td>
-                              <Link className={cx("text-button")} to={resolveQuestionHref(question.id)}>
+                              <VRouteLinkButton
+                                className={cx("text-button")}
+                                to={resolveQuestionHref(question.id)}
+                                variant="ghost"
+                              >
                                 {question.humanApproved ? "查看" : "审核"}
-                              </Link>
+                              </VRouteLinkButton>
                             </td>
                           </tr>
                         ))}
@@ -867,13 +918,14 @@ export function ChallengeCupOperationsWorkspace({
                     <div><span>证据状态</span><strong>{question.machinePassed ? "可追溯" : "待生成"}</strong></div>
                     <div><span>假设输出</span><strong>≥ {stage1.acceptance.minimumHypothesisCount} 条</strong></div>
                     <div><span>人工状态</span><strong className={cx(question.humanApproved ? "success-text" : "warning-text")}>{humanStatusLabel(question.humanStatus)}</strong></div>
-                    <Link
+                    <VRouteLinkButton
                       className={cx("button", "secondary")}
                       to={resolveQuestionHref(question.id)}
                       title="打开该题正式工件；审核写入仍由现有人工门禁流程负责"
+                      variant="secondary"
                     >
                       {question.humanApproved ? "查看记录" : "开始审核"}
-                    </Link>
+                    </VRouteLinkButton>
                   </article>
                 ))}
               </div>
@@ -930,7 +982,13 @@ export function ChallengeCupOperationsWorkspace({
                     <VStatusChip className={cx("status-icon")} tone={agent.tone === "ready" ? "success" : "warning"}>
                       {agent.status}
                     </VStatusChip>
-                    <Link className={cx("text-button")} to={agent.configHref}>配置</Link>
+                    <VRouteLinkButton
+                      className={cx("text-button")}
+                      to={agent.configHref}
+                      variant="ghost"
+                    >
+                      配置
+                    </VRouteLinkButton>
                   </div>
                 ))}
               </div>

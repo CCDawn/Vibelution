@@ -240,7 +240,16 @@ describe("ChallengeCupOperationsWorkspace", () => {
 
   it("routes challenge status chrome through VUI while preserving the approved workspace layout", () => {
     expect(componentSource).toContain("VStatusChip");
+    expect(componentSource).toContain("VRouteLinkButton");
+    expect(componentSource).toContain("VEmptyState");
     expect(componentSource).toContain("vuiStatusTone");
+    expect(componentSource).not.toContain('<Link className={cx("button"');
+    expect(componentSource).not.toContain('<Link className={cx("text-button")');
+    expect(componentSource).not.toContain(
+      '<Link\n                      className={cx("button", "secondary")}',
+    );
+    expect(componentSource).not.toContain('<section className={cx("platform-empty-state")}');
+    expect(componentSource).not.toContain('<div className={cx("platform-empty-state")}');
     expect(componentSource).not.toContain('cx("status-pill", stageState(activeStage).tone)');
     expect(componentSource).not.toContain('cx("status-icon", question.machinePassed');
     expect(componentStyles).not.toContain(".status-icon.success");

@@ -44,7 +44,9 @@ describe("ResearchProjectSwitcher", () => {
     expect(switcherSource).toContain("已自动保存");
     expect(switcherSource).toContain("切换项目");
     expect(switcherSource).toContain("VStatusChip");
+    expect(switcherSource).toContain("VRouteLinkButton");
     expect(switcherSource).toContain("projectStatusTone");
+    expect(switcherSource).not.toContain("<Link ");
   });
 
   it("keeps project identity stable after the first experiment task", () => {

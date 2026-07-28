@@ -6,6 +6,10 @@ export {
   type VuiTone,
 } from "./renderers/shared/buttonVariants";
 export { VButton, type VButtonProps } from "./primitives/VButton";
+export {
+  VRouteLinkButton,
+  type VRouteLinkButtonProps,
+} from "./primitives/VRouteLinkButton";
 export { VChip, type VChipProps } from "./primitives/VChip";
 export { VContextualHint, type VContextualHintProps } from "./primitives/VContextualHint";
 export {

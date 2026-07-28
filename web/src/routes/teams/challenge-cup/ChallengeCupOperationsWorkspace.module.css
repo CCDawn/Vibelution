@@ -677,6 +677,8 @@
 }
 
 .text-button {
+  min-height: 0;
+  height: auto;
   padding: 3px 6px;
   border: 0;
   border-radius: 5px;
@@ -1879,8 +1881,13 @@
   background: var(--panel-subtle);
 }
 
-.platform-empty-state p {
-  margin: 0;
+.platform-empty-state > strong {
+  color: var(--text);
+  font-size: 16px;
+}
+
+.platform-empty-state > span {
+  color: var(--text-secondary);
   font-size: 11px;
 }
 

@@ -12,6 +12,7 @@ import {
   type VuiButtonVariant,
   type VuiDensity,
 } from "../renderers/shared/buttonVariants";
+import { vuiButtonGeometryClass } from "../renderers/shared/buttonSlots";
 
 /** Keep Radix/floating-ui out of the shell entry until a button actually needs a tooltip. */
 const VTooltip = lazy(async () => {
@@ -42,39 +43,16 @@ export type VButtonProps = Omit<
   onPress?: (event: MouseEvent<HTMLButtonElement>) => void;
 };
 
-function classNameTokens(className: VButtonProps["className"]): string[] {
-  return typeof className === "string" ? className.trim().split(/\s+/).filter(Boolean) : [];
-}
-
-function hasExplicitRootWidth(className: VButtonProps["className"]): boolean {
-  return classNameTokens(className).some((token) => {
-    if (token.startsWith("[&")) {
-      return false;
-    }
-    return /(?:^|:)!?w-(?:auto|fit|full|max|min|\[|[0-9])/.test(token);
-  });
-}
-
 function hasFullRootWidth(className: VButtonProps["className"]): boolean {
-  return classNameTokens(className).some((token) => {
+  if (typeof className !== "string") {
+    return false;
+  }
+  return className.trim().split(/\s+/).filter(Boolean).some((token) => {
     if (token.startsWith("[&")) {
       return false;
     }
     return /(?:^|:)!?w-full$/.test(token);
   });
-}
-
-function buttonGeometryClass(
-  className: VButtonProps["className"],
-  contentLayout: NonNullable<VButtonProps["contentLayout"]>,
-): string {
-  return [
-    "max-w-full shrink-0 justify-self-start",
-    contentLayout === "label" ? "whitespace-nowrap" : null,
-    hasExplicitRootWidth(className) ? null : "w-fit",
-  ]
-    .filter(Boolean)
-    .join(" ");
 }
 
 export const VButton = forwardRef<HTMLButtonElement, VButtonProps>(function VButton(
@@ -114,7 +92,7 @@ export const VButton = forwardRef<HTMLButtonElement, VButtonProps>(function VBut
       isIconOnly={iconOnly}
       onPress={onPress}
       className={[
-        buttonGeometryClass(className, contentLayout),
+        vuiButtonGeometryClass(className, contentLayout),
         "min-w-0",
         // Plain multi-line/card buttons must escape fixed density height.
         contentLayout === "plain" ? "!h-auto" : null,

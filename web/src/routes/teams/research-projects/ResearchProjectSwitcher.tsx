@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FolderKanban, Pencil, Plus, Save } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
 
 import { fetchJson } from "../../../api/client";
 import type {
@@ -14,6 +13,7 @@ import {
   VDialog,
   VNativeInput,
   VNativeSelect,
+  VRouteLinkButton,
   VStatusChip,
   type VStatusTone,
 } from "../../../components/vui";
@@ -229,7 +229,14 @@ export function ResearchProjectSwitcher({
           {lang === "zh" ? "新建项目" : "New project"}
         </VButton>
         {variant === "hero" && primaryActionHref && primaryActionLabel ? (
-          <Link className={styles.primaryAction} to={primaryActionHref}>{primaryActionLabel}</Link>
+          <VRouteLinkButton
+            className={styles.primaryAction}
+            density="normal"
+            to={primaryActionHref}
+            variant="primary"
+          >
+            {primaryActionLabel}
+          </VRouteLinkButton>
         ) : null}
       </div>
       {message ? <p className={styles.message} role="status">{message}</p> : null}
