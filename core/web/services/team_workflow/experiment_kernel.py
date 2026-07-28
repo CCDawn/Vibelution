@@ -541,16 +541,30 @@ def _experiment_planning_status(
 
 def _select_experiment_stage_round(payload: dict[str, Any], rounds: list[dict[str, Any]]) -> dict[str, Any]:
     s = _service()
+    research_project_id = s._trim_text(
+        payload.get("researchProjectId"),
+        max_length=160,
+    )
+    eligible_rounds = [
+        item
+        for item in rounds
+        if str(item.get("stageType") or "") == "experiment"
+        and (
+            not research_project_id
+            or s._trim_text(item.get("researchProjectId"), max_length=160)
+            == research_project_id
+        )
+    ]
     explicit_round_id = s._trim_text(payload.get("stageRoundId"), max_length=160)
     if explicit_round_id:
-        stage_round = s._find_stage_round(rounds, explicit_round_id)
-        if stage_round is None or str(stage_round.get("stageType") or "") != "experiment":
+        stage_round = s._find_stage_round(eligible_rounds, explicit_round_id)
+        if stage_round is None:
             raise s.TeamWorkflowOrchestrationError("Experiment stage round not found.")
         return stage_round
-    active_round = s._active_stage_round(rounds, "experiment")
+    active_round = s._active_stage_round(eligible_rounds, "experiment")
     if active_round:
         return active_round
-    latest_round = s._latest_stage_round([item for item in rounds if str(item.get("stageType") or "") == "experiment"])
+    latest_round = s._latest_stage_round(eligible_rounds)
     if latest_round:
         return latest_round
     raise s.TeamWorkflowOrchestrationError("Start an experiment planning stage round before drafting an experiment plan.")

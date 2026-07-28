@@ -7,19 +7,49 @@ import json
 from typing import Any
 
 
-def challenge_cup_experiment_context_tool(team_id: str = "research-team", include_research_loop: bool = False) -> str:
+def challenge_cup_experiment_context_tool(
+    team_id: str = "research-team",
+    include_research_loop: bool = False,
+    research_project_id: str = "",
+    task_id: str = "",
+) -> str:
     """Return bounded experiment planning ledger context for Challenge Cup Agents."""
 
     try:
         from core.web.services import team_workflow_orchestration_service as workflow_service
 
+        project_task_binding = _project_task_binding(
+            workflow_service,
+            team_id=team_id,
+            research_project_id=research_project_id,
+            task_id=task_id,
+            allowed_task_kinds=("experiment_design", "experiment_evidence_review"),
+            recorded_by_agent="",
+            load_context=True,
+        )
         payload: dict[str, Any] = {
             "status": "ok",
             "teamId": _text(team_id),
-            "experimentPlanningStatus": workflow_service.get_experiment_planning_status(team_id),
-            "boundaries": _operation_boundaries("experiment_planning_ledger_only_not_training_execution"),
+            "boundaries": _operation_boundaries(
+                "experiment_planning_ledger_only_not_training_execution"
+            ),
         }
+        if project_task_binding:
+            payload["researchProjectId"] = _text(research_project_id)
+            payload["taskContext"] = project_task_binding
+            payload["experimentPlanningStatus"] = project_task_binding.get(
+                "experiment",
+                {},
+            )
+        else:
+            payload["experimentPlanningStatus"] = (
+                workflow_service.get_experiment_planning_status(team_id)
+            )
         if include_research_loop:
+            if project_task_binding:
+                raise ValueError(
+                    "Project-scoped experiment task context does not expose the team-wide Research Loop projection."
+                )
             from core.web.services import research_loop_service
 
             payload["researchLoopStatus"] = research_loop_service.get_research_loop_status(team_id)
@@ -42,6 +72,8 @@ def challenge_cup_experiment_writeback_tool(
     plan_id: str = "",
     payload_json: str = "",
     recorded_by_agent: str = "",
+    research_project_id: str = "",
+    task_id: str = "",
 ) -> str:
     """Write experiment ledger records without executing training or smoke runners."""
 
@@ -51,30 +83,133 @@ def challenge_cup_experiment_writeback_tool(
         normalized_operation = _text(operation)
         if normalized_operation in {"run_smoke", "execute_smoke", "run_training", "execute_training", "full_run"}:
             return _unsupported_operation(normalized_operation, boundary="experiment_planning_ledger_only_not_training_execution")
+        allowed_task_kinds = (
+            ("experiment_design",)
+            if normalized_operation == "create_plan"
+            else ("experiment_evidence_review",)
+        )
+        task = _project_task_binding(
+            workflow_service,
+            team_id=team_id,
+            research_project_id=research_project_id,
+            task_id=task_id,
+            allowed_task_kinds=allowed_task_kinds,
+            recorded_by_agent=recorded_by_agent,
+        )
         payload = _json_object(payload_json)
-        _stamp_agent(payload, recorded_by_agent, keys=("createdByAgent", "registeredByAgent", "recordedByAgent", "requestedByAgent"))
+        actor_agent_id = (
+            _text(task.get("agentId"))
+            if isinstance(task, dict)
+            else _text(recorded_by_agent)
+        )
+        _stamp_agent(
+            payload,
+            actor_agent_id,
+            keys=(
+                "createdByAgent",
+                "registeredByAgent",
+                "recordedByAgent",
+                "requestedByAgent",
+            ),
+        )
+        if task:
+            payload["researchProjectId"] = _text(research_project_id)
         if normalized_operation == "create_plan":
             response = workflow_service.create_experiment_plan(team_id, payload)
-        elif normalized_operation == "register_baseline_artifact":
-            response = workflow_service.register_experiment_baseline_artifact(team_id, plan_id, payload)
-        elif normalized_operation == "register_smoke_result":
-            response = workflow_service.register_experiment_smoke_result(team_id, plan_id, payload)
-        elif normalized_operation == "register_full_run_result":
-            response = workflow_service.register_experiment_full_run_result(team_id, plan_id, payload)
-        elif normalized_operation == "request_knowledge_ingestion":
-            response = workflow_service.request_experiment_result_knowledge_ingestion(team_id, plan_id, payload)
+            if task:
+                created_plan = (
+                    response.get("plan")
+                    if isinstance(response.get("plan"), dict)
+                    else {}
+                )
+                if (
+                    _text(created_plan.get("researchProjectId"))
+                    != _text(research_project_id)
+                ):
+                    raise ValueError(
+                        "Created experiment plan was not bound to the requested research project."
+                    )
+        elif normalized_operation in {
+            "register_baseline_artifact",
+            "register_smoke_result",
+            "register_full_run_result",
+            "request_knowledge_ingestion",
+        }:
+            if task:
+                workflow_service.require_research_project_experiment_plan(
+                    team_id,
+                    research_project_id,
+                    plan_id,
+                )
+            if normalized_operation == "register_baseline_artifact":
+                response = workflow_service.register_experiment_baseline_artifact(
+                    team_id,
+                    plan_id,
+                    payload,
+                )
+            elif normalized_operation == "register_smoke_result":
+                response = workflow_service.register_experiment_smoke_result(
+                    team_id,
+                    plan_id,
+                    payload,
+                )
+            elif normalized_operation == "register_full_run_result":
+                response = workflow_service.register_experiment_full_run_result(
+                    team_id,
+                    plan_id,
+                    payload,
+                )
+            else:
+                response = (
+                    workflow_service.request_experiment_result_knowledge_ingestion(
+                        team_id,
+                        plan_id,
+                        payload,
+                    )
+                )
         else:
-            return _unsupported_operation(normalized_operation, boundary="experiment_planning_ledger_only_not_training_execution")
+            return _unsupported_operation(
+                normalized_operation,
+                boundary="experiment_planning_ledger_only_not_training_execution",
+            )
+        task_status = None
+        if task:
+            result_refs = _experiment_writeback_result_refs(
+                operation=normalized_operation,
+                requested_plan_id=_text(plan_id),
+                response=response,
+            )
+            task_status = (
+                workflow_service.update_research_project_agent_task_status(
+                    team_id,
+                    research_project_id,
+                    task_id,
+                    status="completed",
+                    result_refs=result_refs,
+                )
+            )
         _record_tool_event(
             "tool.challenge_cup_experiment_writeback.completed",
             fields={
                 "teamId": _text(team_id),
+                "researchProjectId": _text(research_project_id),
+                "taskId": _text(task_id),
                 "operation": normalized_operation,
                 "planId": _text(plan_id),
-                "recordedByAgent": _text(recorded_by_agent),
+                "recordedByAgent": actor_agent_id,
             },
         )
-        return _json_dump({"status": "ok", "operation": normalized_operation, "response": response, "boundaries": _operation_boundaries("experiment_planning_ledger_only_not_training_execution")})
+        return _json_dump(
+            {
+                "status": "ok",
+                "operation": normalized_operation,
+                "response": response,
+                "task": task_status,
+                "boundaries": _operation_boundaries(
+                    "experiment_planning_ledger_only_not_training_execution"
+                ),
+            }
+        )
     except Exception as exc:
         return _tool_error(
             exc,
@@ -233,6 +368,77 @@ def challenge_cup_versioning_writeback_tool(
             event_code="tool.challenge_cup_versioning_writeback.failed",
             fields={"teamId": _text(team_id), "operation": _text(operation), "candidateId": _text(candidate_id)},
         )
+
+
+def _project_task_binding(
+    workflow_service,
+    *,
+    team_id: str,
+    research_project_id: str,
+    task_id: str,
+    allowed_task_kinds: tuple[str, ...],
+    recorded_by_agent: str,
+    load_context: bool = False,
+) -> dict[str, Any] | None:
+    project_id = _text(research_project_id)
+    normalized_task_id = _text(task_id)
+    if bool(project_id) != bool(normalized_task_id):
+        raise ValueError(
+            "research_project_id and task_id must be provided together."
+        )
+    if not project_id:
+        return None
+    if load_context:
+        context = workflow_service.get_research_project_agent_task_context(
+            team_id,
+            project_id,
+            normalized_task_id,
+        )
+        task = context.get("task") if isinstance(context.get("task"), dict) else {}
+        if task.get("taskKind") not in set(allowed_task_kinds):
+            raise ValueError(
+                "Research project Agent task responsibility does not allow this context."
+            )
+        return context
+    return workflow_service.require_research_project_agent_task(
+        team_id,
+        project_id,
+        normalized_task_id,
+        allowed_task_kinds=allowed_task_kinds,
+        recorded_by_agent=_text(recorded_by_agent),
+    )
+
+
+def _experiment_writeback_result_refs(
+    *,
+    operation: str,
+    requested_plan_id: str,
+    response: dict[str, Any],
+) -> list[str]:
+    refs: list[str] = []
+    candidate_records = [
+        response.get("plan"),
+        response.get("baselineArtifact"),
+        response.get("smokeResult"),
+        response.get("fullRunResult"),
+        response.get("experimentResultPack"),
+    ]
+    for record in candidate_records:
+        if not isinstance(record, dict):
+            continue
+        for key in (
+            "planId",
+            "artifactId",
+            "smokeResultId",
+            "fullRunResultId",
+            "packId",
+        ):
+            value = _text(record.get(key))
+            if value and value not in refs:
+                refs.append(value)
+    if operation != "create_plan" and requested_plan_id and requested_plan_id not in refs:
+        refs.insert(0, requested_plan_id)
+    return refs[:24]
 
 
 def _stamp_agent(payload: dict[str, Any], recorded_by_agent: str, *, keys: tuple[str, ...]) -> None:

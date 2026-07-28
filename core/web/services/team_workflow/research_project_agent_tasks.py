@@ -343,6 +343,262 @@ def _task_response(
     }
 
 
+def require_research_project_agent_task(
+    team_id: str,
+    research_project_id: str,
+    task_id: str,
+    *,
+    allowed_task_kinds: tuple[str, ...] = (),
+    recorded_by_agent: str = "",
+    require_active: bool = True,
+) -> dict[str, Any]:
+    """Resolve and verify one project task before a controlled tool writeback."""
+    s = _service()
+    normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
+    normalized_project_id = s._normalize_required_id(
+        research_project_id,
+        "Research project id is required.",
+    )
+    normalized_task_id = s._normalize_required_id(task_id, "Task id is required.")
+    s.get_research_project(normalized_team_id, normalized_project_id)
+    with _TASK_LOCK:
+        store = _read_store(normalized_team_id, normalized_project_id)
+        task = next(
+            (
+                item
+                for item in store["tasks"]
+                if item.get("taskId") == normalized_task_id
+            ),
+            None,
+        )
+    if task is None:
+        raise ResearchProjectAgentTaskError(
+            "Research project Agent task not found.",
+            code="task_not_found",
+        )
+    if allowed_task_kinds and task.get("taskKind") not in set(allowed_task_kinds):
+        raise ResearchProjectAgentTaskError(
+            "Research project Agent task responsibility does not allow this operation.",
+            code="task_kind_mismatch",
+        )
+    if require_active and task.get("status") not in ACTIVE_STATUSES:
+        raise ResearchProjectAgentTaskError(
+            "Research project Agent task is no longer active.",
+            code="task_not_active",
+        )
+    actor_agent_id = _text(recorded_by_agent)
+    if actor_agent_id and actor_agent_id != task.get("agentId"):
+        raise ResearchProjectAgentTaskError(
+            "Tool actor does not match the Agent bound to this research task.",
+            code="task_agent_mismatch",
+        )
+    return _public_task(task)
+
+
+def _compact_experiment_result(
+    value: Any,
+    *,
+    id_keys: tuple[str, ...],
+) -> dict[str, Any] | None:
+    record = value if isinstance(value, dict) else {}
+    result_id = next(
+        (_text(record.get(key)) for key in id_keys if _text(record.get(key))),
+        "",
+    )
+    if not result_id:
+        return None
+    return {
+        "resultId": result_id,
+        "status": _text(record.get("status"), limit=80),
+        "metricName": _text(
+            record.get("metricName") or record.get("metric"),
+            limit=240,
+        ),
+        "metricValue": _text(record.get("metricValue"), limit=240),
+        "delta": _text(record.get("delta"), limit=240),
+    }
+
+
+def _compact_experiment_plan(plan: dict[str, Any]) -> dict[str, Any]:
+    contract = (
+        plan.get("experimentContract")
+        if isinstance(plan.get("experimentContract"), dict)
+        else {}
+    )
+    legacy_plan = (
+        plan.get("experimentPlan")
+        if isinstance(plan.get("experimentPlan"), dict)
+        else {}
+    )
+    readiness = (
+        plan.get("readiness") if isinstance(plan.get("readiness"), dict) else {}
+    )
+    validation = (
+        plan.get("contractValidation")
+        if isinstance(plan.get("contractValidation"), dict)
+        else {}
+    )
+    knowledge_ingestion = (
+        plan.get("knowledgeIngestion")
+        if isinstance(plan.get("knowledgeIngestion"), dict)
+        else {}
+    )
+    return {
+        "planId": _text(plan.get("planId")),
+        "stageRoundId": _text(plan.get("stageRoundId")),
+        "researchProjectId": _text(plan.get("researchProjectId")),
+        "experimentName": _text(plan.get("experimentName"), limit=160),
+        "title": _text(plan.get("title"), limit=240),
+        "status": _text(plan.get("status"), limit=80),
+        "revision": _positive_int(plan.get("revision")),
+        "researchQuestion": _text(
+            contract.get("researchQuestion")
+            or plan.get("goal")
+            or plan.get("topic"),
+            limit=1200,
+        ),
+        "researchMode": _text(contract.get("researchMode"), limit=120),
+        "experimentMethod": _text(contract.get("experimentMethod"), limit=120),
+        "dataset": _text(
+            contract.get("dataset") or legacy_plan.get("dataset"),
+            limit=500,
+        ),
+        "baseline": _text(
+            contract.get("baseline") or legacy_plan.get("baseline"),
+            limit=500,
+        ),
+        "metric": _text(
+            contract.get("metric") or legacy_plan.get("metric"),
+            limit=500,
+        ),
+        "selectedHypothesisIds": [
+            _text(item.get("candidateId"))
+            for item in list(plan.get("selectedHypotheses") or [])[:16]
+            if isinstance(item, dict) and _text(item.get("candidateId"))
+        ],
+        "readiness": {
+            "readyForPlanReview": bool(readiness.get("readyForPlanReview")),
+            "readyForSmoke": bool(readiness.get("readyForSmoke")),
+            "readyForFullRun": bool(readiness.get("readyForFullRun")),
+            "readyForKnowledgeIngestion": bool(
+                readiness.get("readyForKnowledgeIngestion")
+            ),
+        },
+        "contractValidation": {
+            "valid": bool(validation.get("valid")),
+            "adapterAvailable": bool(validation.get("adapterAvailable")),
+        },
+        "activeBaselineArtifactId": _text(plan.get("activeBaselineArtifactId")),
+        "activeSmokeResultId": _text(plan.get("activeSmokeResultId")),
+        "activeFullRunResultId": _text(plan.get("activeFullRunResultId")),
+        "baselineArtifact": _compact_experiment_result(
+            (
+                plan.get("baselineSelection", {}).get("activeBaselineArtifact")
+                if isinstance(plan.get("baselineSelection"), dict)
+                else None
+            ),
+            id_keys=("artifactId",),
+        ),
+        "smokeResult": _compact_experiment_result(
+            plan.get("activeSmokeResult"),
+            id_keys=("smokeResultId",),
+        ),
+        "fullRunResult": _compact_experiment_result(
+            plan.get("activeFullRunResult"),
+            id_keys=("fullRunResultId",),
+        ),
+        "knowledgeIngestionStatus": _text(
+            knowledge_ingestion.get("status"),
+            limit=80,
+        ),
+        "updatedAt": _text(plan.get("updatedAt"), limit=120),
+    }
+
+
+def require_research_project_experiment_plan(
+    team_id: str,
+    research_project_id: str,
+    plan_id: str,
+) -> dict[str, Any]:
+    """Reject experiment ledger operations that target another project."""
+    s = _service()
+    normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
+    normalized_project_id = s._normalize_required_id(
+        research_project_id,
+        "Research project id is required.",
+    )
+    normalized_plan_id = s._normalize_required_id(plan_id, "Plan id is required.")
+    s.get_research_project(normalized_team_id, normalized_project_id)
+    with s._WORKFLOW_LOCK:
+        store = s._load_experiment_plan_store(normalized_team_id)
+        plan = next(
+            (
+                item
+                for item in list(store.get("plans") or [])
+                if isinstance(item, dict)
+                and _text(item.get("planId")) == normalized_plan_id
+            ),
+            None,
+        )
+    if plan is None:
+        raise ResearchProjectAgentTaskError(
+            "Experiment plan not found.",
+            code="experiment_plan_not_found",
+        )
+    if _text(plan.get("researchProjectId")) != normalized_project_id:
+        raise ResearchProjectAgentTaskError(
+            "Experiment plan does not belong to this research project.",
+            code="experiment_plan_project_mismatch",
+        )
+    return _compact_experiment_plan(plan)
+
+
+def get_research_project_agent_task_context(
+    team_id: str,
+    research_project_id: str,
+    task_id: str,
+) -> dict[str, Any]:
+    """Build a bounded project/task context without paths, prompts, or raw logs."""
+    s = _service()
+    task = require_research_project_agent_task(
+        team_id,
+        research_project_id,
+        task_id,
+    )
+    project = s.get_research_project(team_id, research_project_id)
+    with s._WORKFLOW_LOCK:
+        plan_store = s._load_experiment_plan_store(team_id)
+    plans = [
+        _compact_experiment_plan(item)
+        for item in list(plan_store.get("plans") or [])
+        if isinstance(item, dict)
+        and _text(item.get("researchProjectId")) == task["researchProjectId"]
+    ]
+    target_ref = _text(task.get("targetRef"))
+    if task.get("taskKind") == "experiment_evidence_review" and target_ref:
+        plans = [item for item in plans if item.get("planId") == target_ref]
+    plans = plans[-12:]
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "teamId": _text(team_id),
+        "researchProjectId": _text(research_project_id),
+        "experimentName": _text(project.get("name"), limit=160),
+        "task": task,
+        "experiment": {
+            "planCount": len(plans),
+            "plans": plans,
+            "latestPlan": plans[-1] if plans else None,
+        },
+        "boundaries": {
+            "projectScoped": True,
+            "taskScoped": True,
+            "autoExecution": False,
+            "trainingRunner": False,
+            "rawLogsIncluded": False,
+        },
+    }
+
+
 def start_research_project_agent_task(
     team_id: str,
     research_project_id: str,
