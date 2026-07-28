@@ -91,7 +91,9 @@ describe("PromptTemplatesRoute layout contract", () => {
     expect(routeSource).toContain('searchParams.get("template")');
     expect(routeSource).toContain('searchParams.get("focus")');
     expect(routeSource).toContain("safeAgentCenterReturnToPath(searchParams.get(\"returnTo\"))");
+    expect(routeSource).toContain("<VRouteLinkButton");
     expect(routeSource).toContain("returnButtonClass");
+    expect(routeSource).not.toContain('import { Link, useSearchParams }');
     expect(routeSource).toContain("selectableRowLinkedClass");
     expect(routeSource).toContain("agentItemLinkedClass");
     expect(routeSource).toContain("editorPanelFocusedClass");

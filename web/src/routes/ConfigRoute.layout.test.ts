@@ -686,8 +686,10 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("requestedSectionId !== lastRequestedSectionRef.current");
     expect(routeSource).toContain("lastRequestedSectionRef.current = requestedSectionId");
     expect(routeSource).toContain("setActiveGroupId(requestedGroup.id)");
+    expect(routeSource).toContain("<VRouteLinkButton");
     expect(routeSource).toContain("className={styles.returnButton}");
     expect(routeSource).toContain("to={returnToPath}");
+    expect(routeSource).not.toContain('import { Link, type BlockerFunction');
     expect(stylesSource).toContain("returnButton:");
   });
 

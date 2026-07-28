@@ -3,7 +3,7 @@ import "../design/route-css/workbench-secondary.tailwind.css";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Archive, ArrowLeft, CheckCircle2, CheckSquare, FileText, RefreshCw, RotateCcw, Save, Search, Square, SquarePen, Tags } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
@@ -19,6 +19,7 @@ import {
   VNativeSelect,
   VNativeTextarea,
   VPanelHeader,
+  VRouteLinkButton,
   VStatusChip,
   VSurface,
   VTooltip,
@@ -509,10 +510,13 @@ export function PromptTemplatesRoute() {
             actions={(
               <>
                 {returnToPath ? (
-                  <Link className={styles.returnButtonClass} to={returnToPath}>
-                    <ArrowLeft size={15} />
-                    <span>{copy.returnToAgents}</span>
-                  </Link>
+                  <VRouteLinkButton
+                    className={styles.returnButtonClass}
+                    icon={<ArrowLeft size={15} />}
+                    to={returnToPath}
+                  >
+                    {copy.returnToAgents}
+                  </VRouteLinkButton>
                 ) : null}
                 <VIconButton
                   type="button"

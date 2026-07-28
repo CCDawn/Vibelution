@@ -23,7 +23,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { Link, type BlockerFunction, useBlocker, useSearchParams } from "react-router-dom";
+import { type BlockerFunction, useBlocker, useSearchParams } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
@@ -82,6 +82,7 @@ import {
   VCheckbox,
   VInput,
   VPanelHeader,
+  VRouteLinkButton,
   VSection,
   VSettingsFormPage,
   VStatusStrip,
@@ -3833,10 +3834,13 @@ export function ConfigRoute() {
         activeGroupId={activeGroup?.id ?? ""}
         onSelectGroup={handleSelectGroup}
         headerAction={returnToPath ? (
-          <Link to={returnToPath} className={styles.returnButton}>
-            <ChevronRight size={14} />
+          <VRouteLinkButton
+            to={returnToPath}
+            className={styles.returnButton}
+            icon={<ChevronRight size={14} />}
+          >
             {returnToLabel}
-          </Link>
+          </VRouteLinkButton>
         ) : undefined}
       />
 

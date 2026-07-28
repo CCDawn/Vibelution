@@ -3,7 +3,7 @@ import "../design/route-css/workbench-secondary.tailwind.css";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, CheckCircle2, CheckSquare, CircleSlash, FlaskConical, Power, RefreshCw, Search, Square, Trash2, Wrench } from "lucide-react";
 import { type CSSProperties, type KeyboardEvent, type PointerEvent, useEffect, useMemo, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
@@ -23,7 +23,7 @@ import {
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
-import { VButton, VConfirmDialog, VContextualHint, VDenseOpsPage, VIconButton, VNativeInput, VNativeSelect, VTooltip } from "../components/vui";
+import { VButton, VConfirmDialog, VContextualHint, VDenseOpsPage, VIconButton, VNativeInput, VNativeSelect, VRouteLinkButton, VTooltip } from "../components/vui";
 import type { TranslationKey } from "../i18n/dictionary";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
@@ -1658,10 +1658,13 @@ export function ToolsRoute() {
             <>
               {returnToPath ? (
                 <VTooltip content={returnToLabel} width="compact">
-                  <Link className={styles.returnButton} to={returnToPath}>
-                    <ArrowLeft size={15} />
-                    <span>{returnToLabel}</span>
-                  </Link>
+                  <VRouteLinkButton
+                    className={styles.returnButton}
+                    icon={<ArrowLeft size={15} />}
+                    to={returnToPath}
+                  >
+                    {returnToLabel}
+                  </VRouteLinkButton>
                 </VTooltip>
               ) : null}
               <VIconButton

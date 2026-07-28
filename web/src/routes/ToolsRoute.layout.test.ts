@@ -121,6 +121,7 @@ describe("ToolsRoute layout contract", () => {
     expect(routeSource).toContain("from \"../components/vui\"");
     expect(routeSource).toContain("<VButton");
     expect(routeSource).toContain("<VIconButton");
+    expect(routeSource).toContain("<VRouteLinkButton");
     expect(routeSource).toContain("<VNativeInput");
     expect(routeSource).toContain("<VNativeSelect");
     expect(routeSource).not.toMatch(/<button\b/);
@@ -244,6 +245,7 @@ describe("ToolsRoute layout contract", () => {
     expect(routeSource).toContain("safeAgentCenterReturnToPath(searchParams.get(\"returnTo\"))");
     expect(routeSource).toContain("返回 Agent 配置");
     expect(routeSource).toContain("styles.returnButton");
+    expect(routeSource).not.toContain('import { Link, useSearchParams }');
     expect(routeSource).toContain("Agent 工具配置");
     expect(routeSource).toContain("styles.agentPermissionSummaryPanel");
     expect(routeSource).toContain("styles.permissionSummaryGrid");
