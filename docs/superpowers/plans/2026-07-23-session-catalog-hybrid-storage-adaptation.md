@@ -7,7 +7,7 @@
 > **Worktree:** `C:\Users\Administrator\Desktop\Vibelution-worktrees\session-catalog-implementation`
 > **Scope:** 会话事实账本加固、可重建 SQLite catalog、迁移/回退、查询切流、容量与故障治理
 > **Replaces:** 本文件 2026-07-23 初稿
-> **Implementation link:** T0-T2 complete; T3 deterministic reconcile core and T4 fail-safe shadow scaffold complete; invalidation wiring, SQL DTO provider and canary remain
+> **Implementation link:** T0-T2 complete; T3 deterministic reconcile core, T4 fail-safe shadow scaffold and T5 SQL candidate provider complete; invalidation wiring, runtime catalog provider registration and canary remain
 > **Validation:** 主流项目源码/官方文档复核、项目 owning surface 复核、source-of-truth/迁移/回滚/性能门自审、`git diff --check`
 > **Close condition:** shadow 零差异、故障自动回退、性能晋级门通过、`read_preferred` runtime verification 通过
 
@@ -30,7 +30,8 @@
 - T2：本地 runtime cache 路由、WAL/local-filesystem fail closed、schema v1、migration checksum、参数化查询、quick_check、lease/watermark 和错误分类已提交。
 - T3 核心：canonical snapshot 投影、孤儿 journal 隔离、TEMP candidate、源 revision 二次校验、原子发布、删除重建和 stale lease takeover 已提交；`stateRevision`、dirty/sentinel、mutation bridge 与 startup/incremental 调度尚未接入。
 - T4 脚手架：typed `off|shadow`、有界 comparator 和异常时 exact legacy fallback 已提交；正式 SQLite candidate provider 尚未注册，因此生产默认仍为 `off`。
-- T5/T6 未开始：不得宣称 SQL 已成为产品读路径，也不得启用 `read_preferred`；必须先完成 DTO parity、临时数据集性能晋级和 shadow 零差异证据。
+- T5：参数化 SQL filter/sort/pagination、稳定 cursor、DTO adapter 和 10k 临时数据 profile 已提交；p95 7.5–19.3ms，较 T0 legacy 144–345ms 快约 8–46 倍。它目前只作为可注入 shadow candidate，尚未注册为运行期 provider，也未接管正式 `query_sessions`。
+- T6 未开始：不得启用 `read_preferred`；必须先完成 `stateRevision`/dirty invalidation、runtime provider registration、真实 shadow 零差异和 Launcher canary 证据。
 
 ## 主流 Agent 复用结论
 
