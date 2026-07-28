@@ -46,14 +46,24 @@ def start_source_collection_run(team_id: str, payload: dict[str, Any] | None = N
     owner_agent_id = s._trim_text(request_payload.get("ownerAgentId"), max_length=160) or default_owner_agent_id
     requested_by_agent = s._trim_text(request_payload.get("requestedByAgent"), max_length=160) or owner_agent_id
     prompt_cache_policy = s._source_collection_prompt_cache_policy(normalized_team_id, request_payload, roles)
+    scope = s._normalize_metadata(request_payload.get("scope"))
+    question_id = request_payload.get("questionId") or scope.get("questionId")
+    required_model_policy = (
+        request_payload.get("requiredModelPolicy")
+        if isinstance(request_payload.get("requiredModelPolicy"), dict)
+        else scope.get("requiredModelPolicy")
+        if isinstance(scope.get("requiredModelPolicy"), dict)
+        else {}
+    )
+    if question_id and not required_model_policy:
+        required_model_policy = s.derive_challenge_required_model_policy(prompt_cache_policy.get("modelId"))
     try:
         challenge_task_contract = s.normalize_challenge_research_task_policy(
-            request_payload.get("questionId"),
-            request_payload.get("requiredModelPolicy"),
+            question_id,
+            required_model_policy,
         )
     except ValueError as exc:
         raise s.TeamWorkflowOrchestrationError(str(exc)) from exc
-    scope = s._normalize_metadata(request_payload.get("scope"))
     if goal:
         scope["goal"] = goal
     if topic:

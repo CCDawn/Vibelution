@@ -331,6 +331,25 @@ def normalize_challenge_research_task_policy(
     }
 
 
+def derive_challenge_required_model_policy(model_ref: Any) -> dict[str, Any]:
+    """Recover a narrow official-model policy from a canonical provider/model ref."""
+    normalized_model_ref = str(model_ref or "").strip()[:160]
+    provider_id, separator, model_id = normalized_model_ref.partition("/")
+    if (
+        not separator
+        or not provider_id
+        or not model_id
+        or not any(marker in provider_id.lower() for marker in OFFICIAL_PROVIDERS)
+        or "qwen" not in model_id.lower()
+    ):
+        return {}
+    return {
+        "providerIds": [provider_id],
+        "modelIds": [model_id],
+        "requireOfficialProvider": True,
+    }
+
+
 def bind_challenge_research_task_model(
     *,
     team_id: str,
