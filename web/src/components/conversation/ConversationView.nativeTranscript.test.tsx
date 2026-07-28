@@ -178,6 +178,51 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html).not.toContain("responseSection");
   });
 
+  it("folds tool cells recorded after the final answer into the process disclosure", () => {
+    const html = renderConversation([
+      {
+        id: "message-final-before-tool",
+        role: "assistant",
+        content: "这是最终回答。",
+        timestamp: "2026-07-13T00:00:00.000Z",
+        codexTranscript: {
+          version: 1,
+          source: "native",
+          messageId: "message-final-before-tool",
+          cells: [
+            {
+              id: "final-before-tool-answer",
+              kind: "assistant_markdown",
+              messageId: "message-final-before-tool",
+              status: "completed",
+              tone: "neutral",
+              text: "这是最终回答。",
+            },
+            {
+              id: "tool-recorded-after-final",
+              kind: "tool_call",
+              messageId: "message-final-before-tool",
+              status: "completed",
+              tone: "neutral",
+              title: "code_symbol_tool",
+              summary: "后置工具结果",
+              operationIds: ["operation-after-final"],
+            },
+          ],
+        },
+      },
+    ]);
+
+    const processStart = html.indexOf('data-codex-process-disclosure="true"');
+    const processOpenEnd = html.indexOf(">", processStart);
+    const finalStart = html.indexOf('data-codex-final-response="true"');
+
+    expect(processStart).toBeGreaterThanOrEqual(0);
+    expect(html.slice(processStart, finalStart)).toContain("后置工具结果");
+    expect(finalStart).toBeGreaterThan(html.indexOf("后置工具结果"));
+    expect(html.slice(processStart, processOpenEnd)).not.toContain('open=""');
+  });
+
   it("folds a native terminal continuation into its command across assistant messages", () => {
     const terminalId = "terminal:sandbox-cross-message";
     const html = renderConversation([
