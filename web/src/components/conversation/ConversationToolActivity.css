@@ -3,6 +3,24 @@
   transform-origin: center;
 }
 
+.vui-components-conversation-tool-activity.activityChevron {
+  transform: rotate(-90deg);
+  transform-origin: center;
+}
+
 details[open] > summary .vui-components-conversation-tool-activity.itemChevron {
   transform: rotate(0deg);
+}
+
+details[open] > summary .vui-components-conversation-tool-activity.activityChevron {
+  transform: rotate(0deg);
+}
+
+.vui-components-conversation-tool-activity.activity:not([open])
+  > .vui-components-conversation-tool-activity.activityDetails,
+.vui-components-conversation-tool-activity.batch:not([open])
+  > .vui-components-conversation-tool-activity.batchDetails,
+.vui-components-conversation-tool-activity.itemDetails:not([open])
+  > .vui-components-conversation-tool-activity.itemDetailsBody {
+  display: none;
 }

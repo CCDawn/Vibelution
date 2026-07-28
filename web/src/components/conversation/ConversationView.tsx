@@ -2000,6 +2000,22 @@ export function ConversationView({
   }
 
   function renderCodexTranscriptToolDetailContent(cell: CodexTranscriptCell): ReactNode {
+    if (cell.kind === "error_notice") {
+      const diagnosticRows = buildTurnErrorDiagnosticRows(cell.diagnosticSummary, lang);
+      if (diagnosticRows.length === 0) {
+        return null;
+      }
+      return (
+        <dl className={styles.turnErrorReasonList} data-codex-error-diagnostic="true">
+          {diagnosticRows.map((row) => (
+            <div key={`${cell.id}-${row.label}-${row.value}`} className={styles.turnErrorReasonRow}>
+              <dt>{row.label}</dt>
+              <dd>{row.value}</dd>
+            </div>
+          ))}
+        </dl>
+      );
+    }
     if (cell.kind !== "tool_call") {
       return null;
     }

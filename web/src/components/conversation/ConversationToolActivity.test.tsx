@@ -22,6 +22,28 @@ function toolCell(id: string, summary: string): CodexTranscriptCell {
   };
 }
 
+function openingTagContaining(html: string, marker: string) {
+  const markerIndex = html.indexOf(marker);
+  if (markerIndex < 0) {
+    return "";
+  }
+  const tagStart = html.lastIndexOf("<", markerIndex);
+  const tagEnd = html.indexOf(">", markerIndex);
+  return tagStart >= 0 && tagEnd >= 0 ? html.slice(tagStart, tagEnd + 1) : "";
+}
+
+function summaryContaining(html: string, marker: string) {
+  const markerIndex = html.indexOf(marker);
+  if (markerIndex < 0) {
+    return "";
+  }
+  const summaryStart = html.lastIndexOf("<summary", markerIndex);
+  const summaryEnd = html.indexOf("</summary>", markerIndex);
+  return summaryStart >= 0 && summaryEnd >= 0
+    ? html.slice(summaryStart, summaryEnd + "</summary>".length)
+    : "";
+}
+
 describe("ConversationToolActivity", () => {
   it("projects completed terminal output instead of its stale running payload", () => {
     const cell = toolCell("terminal-completed", "");
@@ -56,11 +78,14 @@ describe("ConversationToolActivity", () => {
       />,
     );
 
+    expect(html).toContain('data-codex-tool-activity="digest"');
+    expect(html).toContain("运行了 1 个工具");
     expect(html).toContain("# Vibelution Development Standard");
     expect(html).not.toContain(">running<");
+    expect(summaryContaining(html, "运行了 1 个工具")).not.toContain("# Vibelution Development Standard");
   });
 
-  it("presents a completed nonzero terminal exit as an amber expandable result", () => {
+  it("opens an activity with a meaningful nonzero terminal exit as one attention digest", () => {
     const cell = toolCell("terminal-nonzero", "command failed");
     cell.title = "exec_command";
     cell.toolLifecycleModel = {
@@ -106,10 +131,12 @@ describe("ConversationToolActivity", () => {
       />,
     );
 
+    expect(html).toContain("Ran 1 tool");
+    expect(html).toContain("1 item needs attention");
+    expect(openingTagContaining(html, 'data-codex-tool-activity="digest"')).toContain('open=""');
     expect(html).toContain("Command exited 1");
     expect(html).toContain("itemIconWarning");
     expect(html).not.toContain("itemIconFailed");
-    expect(html).not.toContain("open=\"\"");
   });
 
   it("summarizes a search exit with no output as no matches instead of a generic failure", () => {
@@ -154,12 +181,15 @@ describe("ConversationToolActivity", () => {
       />,
     );
 
+    expect(html).toContain('data-codex-tool-activity="digest"');
+    expect(html).toContain("运行了 1 个工具");
+    expect(html).not.toContain("项需关注");
+    expect(openingTagContaining(html, 'data-codex-tool-activity="digest"')).not.toContain('open=""');
     expect(html).toContain("未找到匹配项");
     expect(html).not.toContain("命令退出 1");
-    expect(html).not.toContain('open=""');
   });
 
-  it("folds a short repeated semantic stage while preserving its tool rows", () => {
+  it("folds one contiguous activity behind a quiet digest while preserving its tool rows", () => {
     const html = renderToStaticMarkup(
       <ConversationToolActivity
         activity={createCodexTranscriptToolActivity([
@@ -172,7 +202,10 @@ describe("ConversationToolActivity", () => {
       />,
     );
 
-    expect(html).toContain('data-codex-tool-activity="inline"');
+    expect(html).toContain('data-codex-tool-activity="digest"');
+    expect(html).toContain("运行了 3 个工具");
+    expect(html).toContain("代码分析 3");
+    expect(openingTagContaining(html, 'data-codex-tool-activity="digest"')).not.toContain('open=""');
     expect(html).toContain('data-codex-tool-activity-batch="true"');
     expect(html).toContain('data-codex-tool-activity-count="3"');
     expect(html.match(/data-codex-tool-activity-item="true"/g)).toHaveLength(3);
@@ -183,7 +216,7 @@ describe("ConversationToolActivity", () => {
     expect(html).not.toContain('{&quot;status&quot;:&quot;ok&quot;,');
   });
 
-  it("keeps a small activity as compact rows instead of a nested group", () => {
+  it("keeps a small activity behind the same digest contract", () => {
     const html = renderToStaticMarkup(
       <ConversationToolActivity
         activity={createCodexTranscriptToolActivity([toolCell("tool-1", "已完成")])}
@@ -192,7 +225,8 @@ describe("ConversationToolActivity", () => {
       />,
     );
 
-    expect(html).toContain('data-codex-tool-activity="inline"');
+    expect(html).toContain('data-codex-tool-activity="digest"');
+    expect(html).toContain("运行了 1 个工具");
     expect(html).not.toContain('data-codex-tool-activity-group="true"');
     expect(html).toContain("代码图谱");
   });
@@ -240,11 +274,21 @@ describe("ConversationToolActivity", () => {
     expect(activityCss).toContain("transform: rotate(-90deg)");
     expect(activityCss).toContain("details[open] > summary");
     expect(activityCss).toContain("transform: rotate(0deg)");
+    expect(activityCss).toContain(".vui-components-conversation-tool-activity.activity:not([open])");
+    expect(activityCss).toContain(".vui-components-conversation-tool-activity.batch:not([open])");
+    expect(activityCss).toContain(".vui-components-conversation-tool-activity.itemDetails:not([open])");
+    expect(activityCss).toContain("> .vui-components-conversation-tool-activity.activityDetails");
+    expect(activityCss).toContain("> .vui-components-conversation-tool-activity.batchDetails");
+    expect(activityCss).toContain("> .vui-components-conversation-tool-activity.itemDetailsBody");
+    expect(styles.activitySummary).toContain("inline-flex");
+    expect(styles.activitySummary).not.toContain("justify-between");
+    expect(styles.activityChevron).not.toContain("ml-auto");
+    expect(styles.activityDetails).not.toContain("border-l");
     expect(styles.itemChevron).not.toContain("rotate-");
     expect(styles.batchDetails).not.toContain("border-l");
   });
 
-  it("opens only the currently running tool detail by default", () => {
+  it("opens the running activity and its current tool detail by default", () => {
     const runningCell = toolCell("tool-running", "正在执行");
     runningCell.status = "running";
     runningCell.tone = "running";
@@ -258,7 +302,9 @@ describe("ConversationToolActivity", () => {
     );
 
     expect(html).toContain('data-codex-transcript-cell-status="running"');
-    expect(html).toContain('open=""');
+    expect(html).toContain("正在运行工具");
+    expect(openingTagContaining(html, 'data-codex-tool-activity="digest"')).toContain('open=""');
+    expect(openingTagContaining(html, 'data-codex-tool-detail="true"')).toContain('open=""');
   });
 
   it("uses a semantic code result as the row title without repeating the generic tool name", () => {
