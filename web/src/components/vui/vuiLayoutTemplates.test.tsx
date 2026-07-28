@@ -248,4 +248,23 @@ describe("VUI workbench layout templates", () => {
     expect(tableMarkup).toContain('data-vui="dense-table"');
     expect(tableMarkup).toContain("Job A");
   });
+
+  it("supports reusable start-aligned empty states without route-owned markup", () => {
+    const markup = renderToStaticMarkup(
+      <VEmptyState
+        align="start"
+        title="No experiment design"
+        actions={<VButton>Open design</VButton>}
+      >
+        The current projection has no frozen design details.
+      </VEmptyState>,
+    );
+
+    expect(markup).toContain('data-vui="empty-state"');
+    expect(markup).toContain('data-align="start"');
+    expect(markup).toContain("justify-items-start");
+    expect(markup).toContain("text-left");
+    expect(markup).toContain("No experiment design");
+    expect(markup).toContain("Open design");
+  });
 });

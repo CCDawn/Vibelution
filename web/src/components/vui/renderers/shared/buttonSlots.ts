@@ -1,5 +1,7 @@
 /** Shared visual slots for VButton — renderer-agnostic Tailwind contracts. */
 
+import type { VuiButtonVariant } from "./buttonVariants";
+
 export const vuiButtonBaseClass =
   "border border-vui-border-subtle bg-vui-control-muted text-vui-fg-secondary shadow-none";
 
@@ -17,3 +19,42 @@ export const vuiButtonFocusClass =
 
 export const vuiButtonDisabledClass =
   "disabled:cursor-default disabled:opacity-55 disabled:pointer-events-none";
+
+export function vuiButtonVariantClass(variant: VuiButtonVariant | undefined): string {
+  if (variant === "primary") {
+    return `${vuiButtonBaseClass} ${vuiButtonHoverClass} ${vuiButtonPrimaryClass}`;
+  }
+  if (variant === "danger") {
+    return `${vuiButtonBaseClass} ${vuiButtonHoverClass} ${vuiButtonDangerClass}`;
+  }
+  if (variant === "ghost") {
+    return `border border-transparent bg-transparent text-vui-fg-secondary shadow-none ${vuiButtonHoverClass}`;
+  }
+  return `${vuiButtonBaseClass} ${vuiButtonHoverClass}`;
+}
+
+function classNameTokens(className: string | undefined): string[] {
+  return className?.trim().split(/\s+/).filter(Boolean) ?? [];
+}
+
+function hasExplicitRootWidth(className: string | undefined): boolean {
+  return classNameTokens(className).some((token) => {
+    if (token.startsWith("[&")) {
+      return false;
+    }
+    return /(?:^|:)!?w-(?:auto|fit|full|max|min|\[|[0-9])/.test(token);
+  });
+}
+
+export function vuiButtonGeometryClass(
+  className: string | undefined,
+  contentLayout: "label" | "plain",
+): string {
+  return [
+    "max-w-full shrink-0 justify-self-start",
+    contentLayout === "label" ? "whitespace-nowrap" : null,
+    hasExplicitRootWidth(className) ? null : "w-fit",
+  ]
+    .filter(Boolean)
+    .join(" ");
+}

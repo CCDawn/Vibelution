@@ -29,6 +29,7 @@
 | Product API | Implementation | Notes |
 | --- | --- | --- |
 | `VButton` | `ShadcnButton` | density + variant; HeroUI-era `onPress` / `isDisabled` kept |
+| `VRouteLinkButton` | React Router `Link` + shared button slots | Internal SPA navigation with link semantics and the same variant/density/focus contract as `VButton`; route classes may preserve domain geometry during migration |
 | `VIconButton` | via `VButton` | square geometry |
 | `VChip` | `ShadcnChip` | tone map |
 | `VTooltip` | `ShadcnTooltip` (Radix) | `isOpen` alias retained |
@@ -39,6 +40,11 @@
 | `VCheckbox` | `ShadcnCheckbox` | |
 | `VNativeButton` / `VNativeInput` / `VNativeSelect` / `VNativeTextarea` | native | Prefer for dense ops / zero-float paths |
 | Layout / display (`VPage`, `VSurface`, strips, …) | Tailwind composition | Not shadcn primitives; keep project-owned |
+
+`VEmptyState` defaults to centered content. Use `align="start"` when a workbench
+empty state must preserve left-aligned domain composition; keep one-off footprint
+and surface adjustments in the consuming route instead of adding page-specific
+global variants.
 
 ## Page recipes (prefer for new pages)
 

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { Search } from "lucide-react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -12,6 +13,7 @@ import {
   VIconButton,
   VNativeButton,
   VPanel,
+  VRouteLinkButton,
   VSurface,
   VToolbar,
   VTooltip,
@@ -243,6 +245,31 @@ describe("VUI foundation primitives", () => {
     expect(markup).toContain("inline-flex");
     expect(markup).toContain("justify-self-start");
     expect(markup).toContain("whitespace-nowrap");
+  });
+
+  it("renders router navigation actions through the shared VUI button contract", () => {
+    const markup = renderToStaticMarkup(
+      <MemoryRouter>
+        <VRouteLinkButton
+          to="/teams?team=research-team"
+          variant="primary"
+          icon={<Search size={14} />}
+          trailingIcon={<span data-test-id="trailing">+</span>}
+        >
+          Open team
+        </VRouteLinkButton>
+      </MemoryRouter>,
+    );
+
+    expect(markup).toContain('data-vui="route-link-button"');
+    expect(markup).toContain('data-renderer="shadcn"');
+    expect(markup).toContain('data-variant="primary"');
+    expect(markup).toContain('href="/teams?team=research-team"');
+    expect(markup).toContain('data-slot="vui-button-icon"');
+    expect(markup).toContain('data-slot="vui-button-label"');
+    expect(markup).toContain('data-slot="vui-button-trailing-icon"');
+    expect(markup).toContain("focus-visible:shadow-[var(--vui-shadow-focus)]");
+    expect(markup).not.toContain("<button");
   });
 
   it("renders panels as background-integrated native surfaces", () => {

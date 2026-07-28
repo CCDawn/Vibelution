@@ -7,12 +7,9 @@ import {
 
 import { cn } from "../../lib/cn";
 import {
-  vuiButtonBaseClass,
-  vuiButtonDangerClass,
   vuiButtonDisabledClass,
   vuiButtonFocusClass,
-  vuiButtonHoverClass,
-  vuiButtonPrimaryClass,
+  vuiButtonVariantClass,
 } from "../shared/buttonSlots";
 import {
   type VuiButtonVariant,
@@ -34,19 +31,6 @@ export type ShadcnButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, "d
   "data-vui"?: string;
   children?: ReactNode;
 };
-
-function variantClass(variant: VuiButtonVariant | undefined): string {
-  if (variant === "primary") {
-    return `${vuiButtonBaseClass} ${vuiButtonHoverClass} ${vuiButtonPrimaryClass}`;
-  }
-  if (variant === "danger") {
-    return `${vuiButtonBaseClass} ${vuiButtonHoverClass} ${vuiButtonDangerClass}`;
-  }
-  if (variant === "ghost") {
-    return `border border-transparent bg-transparent text-vui-fg-secondary shadow-none ${vuiButtonHoverClass}`;
-  }
-  return `${vuiButtonBaseClass} ${vuiButtonHoverClass}`;
-}
 
 export const ShadcnButton = forwardRef<HTMLButtonElement, ShadcnButtonProps>(
   function ShadcnButton(
@@ -81,7 +65,7 @@ export const ShadcnButton = forwardRef<HTMLButtonElement, ShadcnButtonProps>(
           "inline-flex max-w-full shrink-0 items-center justify-center justify-self-start",
           "rounded-[var(--radius-control)] px-2 [font-size:var(--vui-font-sm)] font-semibold leading-tight",
           vuiButtonDensityClass(density),
-          variantClass(variant),
+          vuiButtonVariantClass(variant),
           vuiButtonFocusClass,
           vuiButtonDisabledClass,
           isIconOnly ? "aspect-square px-0" : null,
