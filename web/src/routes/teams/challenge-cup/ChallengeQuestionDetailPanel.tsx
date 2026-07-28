@@ -10,7 +10,7 @@ import {
   VStatusChip,
   VSurface,
 } from "../../../components/vui";
-import css from "./ChallengeQuestionDetailPanel.module.css";
+import css from "./ChallengeQuestionDetailPanel.styles";
 
 export type ChallengeQuestionDetailPanelProps = {
   requestedQuestionId: string;
