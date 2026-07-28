@@ -277,6 +277,16 @@ def start_source_collection_stage_session_task(
         if isinstance(run_metadata.get("requiredModelPolicy"), dict)
         else {}
     )
+    if question_id and not required_model_policy:
+        prompt_cache_policy_ref = (
+            run_scope.get("promptCachePolicyRef")
+            if isinstance(run_scope.get("promptCachePolicyRef"), dict)
+            else {}
+        )
+        required_model_policy = s.derive_challenge_required_model_policy(
+            prompt_cache_policy_ref.get("modelId")
+            or run_metadata.get("promptCacheModelId")
+        )
 
     matching_assignments = s._source_collection_matching_assignments(assignments, agent_id=agent_id, agent_role=agent_role)
     if not requested_by:
