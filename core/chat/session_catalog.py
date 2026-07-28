@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import sqlite3
+import threading
 from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -24,6 +25,10 @@ SCHEMA_VERSION = 1
 PROJECTION_VERSION = 1
 DEFAULT_BUSY_TIMEOUT_MS = 5000
 CATALOG_FILENAME = "session_catalog.sqlite3"
+CATALOG_GLOBAL_DIRTY_SESSION_ID = "__catalog_global__"
+
+_CATALOG_DIRTY_OBSERVER_LOCK = threading.Lock()
+_CATALOG_DIRTY_OBSERVER: Callable[[Path, str, str], None] | None = None
 
 
 class CatalogError(RuntimeError):
@@ -56,6 +61,37 @@ class CatalogCorruptError(CatalogError):
 
 class CatalogLeaseConflictError(CatalogError):
     """A lease-bound mutation was attempted by a non-owner."""
+
+
+def set_session_catalog_dirty_observer(
+    observer: Callable[[Path, str, str], None] | None,
+) -> None:
+    """Install the optional runtime invalidation bridge without coupling facts to SQLite."""
+
+    global _CATALOG_DIRTY_OBSERVER
+    with _CATALOG_DIRTY_OBSERVER_LOCK:
+        _CATALOG_DIRTY_OBSERVER = observer
+
+
+def notify_session_catalog_dirty(
+    project_root: Path,
+    session_id: str,
+    source_revision: str,
+) -> None:
+    """Best-effort catalog invalidation after a canonical fact commit."""
+
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return
+    with _CATALOG_DIRTY_OBSERVER_LOCK:
+        observer = _CATALOG_DIRTY_OBSERVER
+    if observer is None:
+        return
+    try:
+        observer(Path(project_root), normalized_session_id, str(source_revision or ""))
+    except Exception:
+        # Catalog degradation must never turn a committed canonical write into a failure.
+        return
 
 
 @dataclass(frozen=True)

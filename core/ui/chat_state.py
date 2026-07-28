@@ -15,6 +15,10 @@ from typing import Any, BinaryIO
 
 from core.infrastructure import developer_sandbox
 from core.infrastructure.atomic_io import atomic_write_text
+from core.chat.session_catalog import (
+    CATALOG_GLOBAL_DIRTY_SESSION_ID,
+    notify_session_catalog_dirty,
+)
 from core.logging import debug as _debug_logger
 from core.orchestration.output_boundary import (
     sanitize_assistant_thought_text,
@@ -300,8 +304,14 @@ def load_chat_state(project_root: Path) -> dict[str, Any]:
         cleaned, changed = _drop_legacy_chat_state_messages(payload, project_root=project_root)
         if changed:
             try:
-                cleaned["state_revision"] = _next_state_revision(path)
+                revision = _next_state_revision(path)
+                cleaned["state_revision"] = revision
                 atomic_write_text(path, json.dumps(cleaned, ensure_ascii=False, indent=2))
+                notify_session_catalog_dirty(
+                    project_root,
+                    CATALOG_GLOBAL_DIRTY_SESSION_ID,
+                    f"state:{revision}",
+                )
             except OSError as exc:
                 _debug_logger.warning(
                     f"[ChatState] failed to clean legacy chat messages from {path}: {type(exc).__name__}: {exc}"
@@ -314,8 +324,14 @@ def save_chat_state(project_root: Path, state: dict[str, Any]) -> None:
         path = chat_state_path(project_root)
         path.parent.mkdir(parents=True, exist_ok=True)
         cleaned, _changed = _drop_legacy_chat_state_messages(state, project_root=project_root)
-        cleaned["state_revision"] = _next_state_revision(path)
+        revision = _next_state_revision(path)
+        cleaned["state_revision"] = revision
         atomic_write_text(path, json.dumps(cleaned, ensure_ascii=False, indent=2))
+        notify_session_catalog_dirty(
+            project_root,
+            CATALOG_GLOBAL_DIRTY_SESSION_ID,
+            f"state:{revision}",
+        )
 
 
 def _next_state_revision(path: Path) -> int:

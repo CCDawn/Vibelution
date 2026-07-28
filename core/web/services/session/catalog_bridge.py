@@ -8,7 +8,11 @@ import threading
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Sequence
 
-from core.chat.session_catalog import CatalogError, SessionCatalogStore
+from core.chat.session_catalog import (
+    CatalogError,
+    CatalogUnavailableError,
+    SessionCatalogStore,
+)
 
 
 @dataclass(frozen=True)
@@ -118,6 +122,8 @@ def build_session_catalog_query_provider(
     """Adapt catalog rows to the frozen session-list query payload."""
 
     def provider(request: Mapping[str, Any]) -> Mapping[str, Any]:
+        if store.untrusted_sentinel_path.exists() or store.dirty_session_count() != 0:
+            raise CatalogUnavailableError("Session catalog freshness is not proven.")
         page = store.query_session_page(
             q=str(request.get("q") or ""),
             agent_id=str(request.get("agent_id") or ""),

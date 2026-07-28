@@ -24,14 +24,18 @@ def _service():
     return session_service
 
 
-def list_sessions(*, include_hidden_internal: bool = False) -> list[dict]:
+def list_sessions(
+    *,
+    include_hidden_internal: bool = False,
+    repair_collisions: bool = True,
+) -> list[dict]:
     """Return summarized sessions sourced from persisted chat state."""
     s = _service()
 
     started_at = s._perf_counter()
     s._sync_agent_directory_project_root()
     signature = (s._session_list_source_signature(), bool(include_hidden_internal))
-    if s._repair_agent_direct_session_collisions(source_signature=signature):
+    if repair_collisions and s._repair_agent_direct_session_collisions(source_signature=signature):
         signature = (s._session_list_source_signature(), bool(include_hidden_internal))
     cached, should_build, waited_for_inflight = s._begin_session_list_cache_build(
         now=started_at,

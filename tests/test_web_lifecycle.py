@@ -7,6 +7,7 @@ from core.web.services import cli_agent_terminal_service, session_service
 
 def test_web_lifespan_schedules_agent_inbox_recovery_without_blocking_startup(monkeypatch):
     recovery_started = threading.Event()
+    catalog_started = threading.Event()
     allow_recovery_to_finish = threading.Event()
 
     def recover() -> dict:
@@ -30,10 +31,16 @@ def test_web_lifespan_schedules_agent_inbox_recovery_without_blocking_startup(mo
         raising=False,
     )
     monkeypatch.setattr(lifecycle, "prewarm_ui_caches_on_startup", prewarm)
+    monkeypatch.setattr(
+        lifecycle,
+        "initialize_session_catalog_on_startup",
+        lambda: catalog_started.set(),
+    )
 
     async def exercise() -> None:
         async with lifecycle.web_workbench_lifespan(None):
             assert await asyncio.to_thread(recovery_started.wait, 0.5)
+            assert await asyncio.to_thread(catalog_started.wait, 0.5)
             allow_recovery_to_finish.set()
             await asyncio.sleep(0)
 
