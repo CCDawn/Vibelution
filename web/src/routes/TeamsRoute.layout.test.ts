@@ -37,6 +37,21 @@ import teamSourceCollectionModeFieldsSource from "./teams/TeamSourceCollectionMo
 const routeAndPureSource = `${routeSource}\n${canvasGeometrySource}\n${researchWorkspaceModelSource}\n${teamKindModelSource}\n${presentationModelSource}\n${experimentLoopModelSource}\n${aiSearchPresentationSource}\n${workflowPresentationSource}\n${researchStageRolesSource}\n${teamWorkflowQueryKeysSource}\n${researchStageAgentPresentationSource}\n${teamRouteShellModelSource}\n${teamSourceCollectionShellModelSource}`;
 
 describe("research project workspace", () => {
+  it("keeps active research projects out of the Challenge Program progress surface", () => {
+    expect(teamResearchStageLauncherPanelSource).toContain(
+      "const challengeProgramSurfaceSelected =",
+    );
+    expect(teamResearchStageLauncherPanelSource).toContain(
+      'Boolean(selectedChallengeQuestionId) || challengeTeamSurface === "progress"',
+    );
+    expect(teamResearchStageLauncherPanelSource).toContain(
+      "if (challengeProgramSurfaceSelected) {",
+    );
+    expect(teamResearchStageLauncherPanelSource).not.toContain(
+      "if (challengeCupResearchTeamSelected) {",
+    );
+  });
+
   it("mounts persistent project switching above the three-stage workspace", () => {
     // Wave 8H: ResearchProjectSwitcher is mounted from TeamResearchStageLauncherPanel.
     expect(teamResearchStageLauncherPanelSource).toContain("<ResearchProjectSwitcher");
