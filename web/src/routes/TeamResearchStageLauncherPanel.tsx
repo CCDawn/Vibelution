@@ -494,10 +494,10 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
     const challengeTrialApprovedCount = challengeProgramProjection?.stage1ComplianceReadiness.trialRun.outcomeCounts.approved || 0;
     const challengeStageLabel = (stageType: ResearchStageType) => {
       if (stageType === "knowledge_collection") {
-        return lang === "zh" ? "MVP 完整样例" : "MVP golden sample";
+        return lang === "zh" ? "MVP 黄金样例" : "MVP golden sample";
       }
       if (stageType === "experiment") {
-        return lang === "zh" ? "3 题通用性测试" : "Three-question validation";
+        return lang === "zh" ? "3 题试运行" : "Three trial questions";
       }
       return lang === "zh" ? "后续规模化与深研" : "Later scale-up and deep research";
     };
@@ -518,7 +518,7 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
         if (stageType === "experiment") {
           const stage1 = challengeProgramProjection.stage1ComplianceReadiness;
           if (stage1.singleQuestionSample.completed < stage1.singleQuestionSample.required) {
-            return lang === "zh" ? "等待完整样例" : "waiting for golden sample";
+            return lang === "zh" ? "等待黄金样例" : "waiting for golden sample";
           }
           return stage1.trialRun.completed >= stage1.trialRun.required
             ? challengeTrialReviewRequiredCount > 0
@@ -611,7 +611,7 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
         }
         if (stageType === "experiment") {
           return lang === "zh"
-            ? "完整样例通过后，再用 3 个不同场景题验证可重复性、跨领域能力和缺证据时的正确阻塞。"
+            ? "黄金样例通过后，再用 3 个试运行题验证可重复性、跨领域能力和缺证据时的正确阻塞。"
             : "After the golden sample, validate repeatability, cross-domain behavior, and explicit evidence blocking on three questions.";
         }
         return lang === "zh"
@@ -696,7 +696,7 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
           <div className={styles.challengeProgramResultGrid}>
             <article id="challenge-mvp-sample" className={styles.challengeProgramResultCard}>
               <header>
-                <strong>{lang === "zh" ? "完整样例" : "Golden sample"}</strong>
+                <strong>{lang === "zh" ? "黄金样例" : "Golden sample"}</strong>
                 <span className={`${styles.researchStageStatus} ${goldenSampleApproved ? styles.researchStageStatusRecorded : styles.researchStageStatusPending}`}>
                   {goldenSampleApproved
                     ? (lang === "zh" ? "人工审核通过" : "human review approved")
@@ -714,7 +714,7 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
             </article>
             <article id="challenge-mvp-trials" className={styles.challengeProgramResultCard}>
               <header>
-                <strong>{lang === "zh" ? "三题通用性测试" : "Three-question validation"}</strong>
+                <strong>{lang === "zh" ? "三题试运行" : "Three trial questions"}</strong>
                 <span className={`${styles.researchStageStatus} ${challengeTrialReviewRequiredCount > 0 ? styles.researchStageStatusPending : styles.researchStageStatusRecorded}`}>
                   {challengeTrialReviewRequiredCount > 0
                     ? (lang === "zh" ? `待人工抽检 ${challengeTrialReviewRequiredCount}` : `${challengeTrialReviewRequiredCount} awaiting human review`)
@@ -722,7 +722,7 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
                 </span>
               </header>
               <div className={styles.challengeProgramQuestionList}>
-                {stage1.mvpManifest.testQuestionIds.map((questionId) => <span key={questionId}>{questionId}</span>)}
+                {(stage1.mvpManifest.trialQuestionIds ?? stage1.mvpManifest.testQuestionIds).map((questionId) => <span key={questionId}>{questionId}</span>)}
               </div>
               <p>
                 {lang === "zh"
@@ -802,7 +802,7 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
         />
         {challengeProgramProjection ? (
           <div className={styles.challengeProgramScope}>
-            <strong>{lang === "zh" ? "当前范围：1 个完整样例 + 3 个通用性测试" : "Current scope: 1 golden sample + 3 validation questions"}</strong>
+            <strong>{lang === "zh" ? "当前范围：1 个黄金样例 + 3 个试运行题（共 4 题）" : "Current scope: 1 golden sample + 3 trial questions (4 total)"}</strong>
             <span>{lang === "zh" ? "125 题规模化与三案例深研已明确延后" : "125-question scale-up and three deep cases are explicitly deferred"}</span>
           </div>
         ) : challengeProgramExpected ? null : (
@@ -914,7 +914,7 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
                       </>
                     ) : stageType === "experiment" ? (
                       <>
-                        <span>{lang === "zh" ? "测试题" : "test questions"} {challengeProgramProjection.stage1ComplianceReadiness.trialRun.completed}/{challengeProgramProjection.stage1ComplianceReadiness.trialRun.required}</span>
+                        <span>{lang === "zh" ? "试运行题" : "trial questions"} {challengeProgramProjection.stage1ComplianceReadiness.trialRun.completed}/{challengeProgramProjection.stage1ComplianceReadiness.trialRun.required}</span>
                         <span>{lang === "zh" ? "人工抽检" : "human review"} {challengeTrialReviewRequiredCount > 0 ? (lang === "zh" ? `待 ${challengeTrialReviewRequiredCount}` : `${challengeTrialReviewRequiredCount} pending`) : (lang === "zh" ? "完成" : "complete")}</span>
                         <span>{lang === "zh" ? "MVP 总进度" : "MVP progress"} {challengeProgramProjection.stage1ComplianceReadiness.mvpManifest.completedQuestionCount}/{challengeProgramProjection.stage1ComplianceReadiness.mvpManifest.requiredQuestionCount}</span>
                         <span>{lang === "zh" ? "规模化" : "scale-up"} {lang === "zh" ? "已延后" : "deferred"}</span>
@@ -988,9 +988,9 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
                     >
                       <Eye size={13} />
                       {stageType === "knowledge_collection"
-                        ? (lang === "zh" ? "查看完整样例" : "View golden sample")
+                        ? (lang === "zh" ? "查看黄金样例" : "View golden sample")
                         : stageType === "experiment"
-                          ? (lang === "zh" ? "查看测试结果" : "View test results")
+                          ? (lang === "zh" ? "查看试运行结果" : "View trial results")
                           : (lang === "zh" ? "查看后续范围" : "View post-MVP scope")}
                     </a>
                   ) : stageType === "knowledge_collection" ? (

@@ -1399,8 +1399,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain('setChallengeTeamSurface("progress")');
     expect(routeSource).toContain("challengeWorkspaceContextHidden");
     expect(routeSource).toContain("challengeWorkspaceBody");
-    expect(teamResearchStageLauncherPanelSource).toContain("MVP 完整样例");
-    expect(teamResearchStageLauncherPanelSource).toContain("3 题通用性测试");
+    expect(teamResearchStageLauncherPanelSource).toContain("MVP 黄金样例");
+    expect(teamResearchStageLauncherPanelSource).toContain("3 题试运行");
     expect(teamResearchStageLauncherPanelSource).toContain("后续规模化与深研");
     expect(teamResearchStageLauncherPanelSource).toContain("125 题批跑、三个深研案例和最终参赛封装均延后到 MVP 验收之后");
     expect(teamResearchStageLauncherPanelSource).toContain("stage1ComplianceReadiness.mvpManifest.completedQuestionCount");
@@ -1410,10 +1410,10 @@ describe("TeamsRoute layout contract", () => {
     expect(teamResearchStageLauncherPanelSource).toContain('"#challenge-mvp-sample"');
     expect(teamResearchStageLauncherPanelSource).toContain('"#challenge-mvp-trials"');
     expect(teamResearchStageLauncherPanelSource).toContain('"#challenge-mvp-roadmap"');
-    expect(teamResearchStageLauncherPanelSource).toContain("查看完整样例");
-    expect(teamResearchStageLauncherPanelSource).toContain("查看测试结果");
+    expect(teamResearchStageLauncherPanelSource).toContain("查看黄金样例");
+    expect(teamResearchStageLauncherPanelSource).toContain("查看试运行结果");
     expect(teamResearchStageLauncherPanelSource).toContain("人工审核与机器验证分开记录");
-    expect(teamResearchStageLauncherPanelSource).toContain("stage1.mvpManifest.testQuestionIds.map");
+    expect(teamResearchStageLauncherPanelSource).toContain("stage1.mvpManifest.trialQuestionIds ?? stage1.mvpManifest.testQuestionIds");
     expect(routeSource).not.toContain("测试入口待接入");
     expect(teamResearchStageLauncherPanelSource).toContain('blockers.includes("dashscope_qwen_provider_missing")');
     expect(teamResearchStageLauncherPanelSource).toContain('"BLOCKED · 待验证"');
