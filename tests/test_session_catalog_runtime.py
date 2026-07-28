@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from config.models import AppConfig
-from core.chat.session_catalog import resolve_session_catalog_path, set_session_catalog_dirty_observer
+from core.chat.session_catalog import resolve_session_catalog_path
 from core.ui.chat_state import save_chat_state
 from core.web.services import session_service
 from core.web.services.session import catalog_bridge, catalog_runtime
@@ -20,15 +22,17 @@ def _isolated_catalog_runtime(tmp_path, monkeypatch):
         "is_developer_mode_enabled",
         lambda: False,
     )
+    monkeypatch.setattr(catalog_runtime, "record_runtime_scene_event", lambda *_args, **_kwargs: {})
     catalog_bridge.set_session_query_shadow_provider(None)
     yield
-    catalog_bridge.set_session_query_shadow_provider(None)
-    set_session_catalog_dirty_observer(None)
+    catalog_runtime.shutdown_session_catalog_runtime()
 
 
 def test_shadow_runtime_rebuilds_catalog_and_registers_sql_provider(tmp_path):
     summaries = build_session_query_summaries(5)
-    config = AppConfig.model_validate({"session_catalog": {"mode": "shadow"}}).session_catalog
+    config = AppConfig.model_validate(
+        {"session_catalog": {"mode": "shadow", "incremental_reconcile_delay_ms": 0}}
+    ).session_catalog
 
     status = initialize_session_catalog_runtime(
         project_root=tmp_path,
@@ -66,6 +70,18 @@ def test_shadow_runtime_rebuilds_catalog_and_registers_sql_provider(tmp_path):
 
     assert stale.status == "degraded"
 
+    deadline = time.monotonic() + 1.0
+    while time.monotonic() < deadline:
+        refreshed = catalog_bridge.run_session_query_shadow(
+            {"items": summaries[:2], "nextCursor": "2", "totalEstimate": len(summaries)},
+            request={"limit": 2, "sort": "updatedAt_desc"},
+        )
+        if refreshed.status == "match":
+            break
+        time.sleep(0.01)
+
+    assert refreshed.status == "match"
+
 
 def test_off_runtime_keeps_shadow_provider_disabled(tmp_path):
     status = initialize_session_catalog_runtime(
@@ -80,6 +96,24 @@ def test_off_runtime_keeps_shadow_provider_disabled(tmp_path):
     )
 
     assert status.status == "disabled"
+    assert comparison.status == "disabled"
+
+
+def test_runtime_shutdown_removes_candidate_provider(tmp_path):
+    config = AppConfig.model_validate({"session_catalog": {"mode": "shadow"}}).session_catalog
+    status = initialize_session_catalog_runtime(
+        project_root=tmp_path,
+        catalog_config=config,
+        summary_loader=lambda: build_session_query_summaries(1),
+    )
+
+    catalog_runtime.shutdown_session_catalog_runtime()
+    comparison = catalog_bridge.run_session_query_shadow(
+        {"items": [], "nextCursor": "", "totalEstimate": 0},
+        request={"limit": 1},
+    )
+
+    assert status.status == "ready"
     assert comparison.status == "disabled"
 
 

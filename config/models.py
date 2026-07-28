@@ -849,6 +849,7 @@ class SessionCatalogConfig(BaseModel):
 
     mode: str = Field(default="off")
     reconcile_on_startup: bool = Field(default=True)
+    incremental_reconcile_delay_ms: int = Field(default=750, ge=0, le=60000)
     busy_timeout_ms: int = Field(default=5000, ge=0, le=120000)
 
     @field_validator("mode")
