@@ -21,6 +21,7 @@ from core.chat.conversation_ledger import (
     latest_ledger_sequence,
     load_conversation_events,
 )
+from core.chat.session_catalog import notify_session_catalog_dirty
 
 from ..runtime_scene_service import record_runtime_scene_event
 
@@ -206,6 +207,15 @@ def append_session_conversation_event(
             source_kind=source_kind,
         )
         invalidate_session_conversation_events_cache(normalized_session_id)
+        try:
+            sequence = latest_ledger_sequence(root, normalized_session_id)
+        except Exception:
+            sequence = 0
+        notify_session_catalog_dirty(
+            root,
+            normalized_session_id,
+            f"journal:{sequence}",
+        )
     except Exception as exc:
         try:
             record_runtime_scene_event(

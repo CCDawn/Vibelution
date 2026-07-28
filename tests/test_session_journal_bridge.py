@@ -4,13 +4,23 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from core.chat.conversation_ledger import (
     EVENT_TURN_STARTED,
     EVENT_USER_MESSAGE,
     append_conversation_event,
     latest_ledger_sequence,
 )
+from core.chat.session_catalog import (
+    set_session_catalog_dirty_observer,
+)
 from core.web.services.session import journal_bridge
+
+
+@pytest.fixture(autouse=True)
+def _isolated_data_home(tmp_path, monkeypatch):
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(tmp_path / "operator-data"))
 
 
 def test_journal_bridge_cache_hit_invalidate_and_project_root(tmp_path: Path) -> None:
@@ -99,6 +109,29 @@ def test_journal_bridge_append_invalidates_cache(tmp_path: Path) -> None:
         project_root=tmp_path,
     )
     assert len(events_after) == 2
+
+
+def test_journal_bridge_notifies_catalog_after_successful_append(tmp_path: Path) -> None:
+    observed: list[tuple[Path, str, str]] = []
+    set_session_catalog_dirty_observer(
+        lambda project_root, session_id, source_revision: observed.append(
+            (project_root, session_id, source_revision)
+        )
+    )
+    try:
+        journal_bridge.append_session_conversation_event(
+            "journal-dirty-session",
+            "turn-a",
+            EVENT_TURN_STARTED,
+            status="running",
+            payload={},
+            source="test",
+            project_root=tmp_path,
+        )
+    finally:
+        set_session_catalog_dirty_observer(None)
+
+    assert observed == [(tmp_path, "journal-dirty-session", "journal:1")]
 
 
 def test_facade_forwards_monkeypatched_project_root(tmp_path: Path, monkeypatch) -> None:

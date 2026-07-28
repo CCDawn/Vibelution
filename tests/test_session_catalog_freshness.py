@@ -5,7 +5,11 @@ from pathlib import Path
 
 import pytest
 
-from core.chat.session_catalog import SessionCatalogStore
+from core.chat.session_catalog import (
+    CATALOG_GLOBAL_DIRTY_SESSION_ID,
+    SessionCatalogStore,
+    set_session_catalog_dirty_observer,
+)
 from core.ui.chat_state import chat_state_path, load_chat_state, save_chat_state
 
 
@@ -63,6 +67,21 @@ def test_load_cleanup_advances_state_revision(tmp_path):
     assert cleaned["state_revision"] == 5
     assert "messages" not in cleaned["conversations"][0]
     assert json.loads(path.read_text(encoding="utf-8"))["state_revision"] == 5
+
+
+def test_chat_state_write_notifies_catalog_global_dirty_observer(tmp_path):
+    observed: list[tuple[Path, str, str]] = []
+    set_session_catalog_dirty_observer(
+        lambda project_root, session_id, source_revision: observed.append(
+            (project_root, session_id, source_revision)
+        )
+    )
+    try:
+        save_chat_state(tmp_path, {"version": 1, "conversations": []})
+    finally:
+        set_session_catalog_dirty_observer(None)
+
+    assert observed == [(tmp_path, CATALOG_GLOBAL_DIRTY_SESSION_ID, "state:1")]
 
 
 def test_dirty_catalog_marks_local_sentinel_and_only_clears_after_reconcile(tmp_path):

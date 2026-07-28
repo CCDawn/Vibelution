@@ -6,9 +6,23 @@ import asyncio
 import os
 import time
 from contextlib import asynccontextmanager, suppress
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI
+
+
+def initialize_session_catalog_on_startup() -> object:
+    """Start the optional catalog candidate without changing the legacy read path."""
+
+    from config.settings import get_config
+
+    from .services.session.catalog_runtime import initialize_session_catalog_runtime
+
+    return initialize_session_catalog_runtime(
+        project_root=Path(__file__).resolve().parents[2],
+        catalog_config=get_config().session_catalog,
+    )
 
 
 def is_windows_proactor_disconnect_noise(context: dict[str, Any]) -> bool:
@@ -45,6 +59,9 @@ async def web_workbench_lifespan(_: FastAPI):
 
     await asyncio.to_thread(reconcile_cli_agent_terminal_states_on_startup, reason="backend_startup")
     startup_cache_prewarm_task = asyncio.create_task(prewarm_ui_caches_on_startup())
+    startup_catalog_task = asyncio.create_task(
+        asyncio.to_thread(initialize_session_catalog_on_startup)
+    )
     from .services.session_service import recover_wakeable_agent_inbox_messages_on_startup
 
     startup_agent_inbox_recovery_task = asyncio.create_task(
@@ -67,13 +84,20 @@ async def web_workbench_lifespan(_: FastAPI):
     startup_cache_prewarm_task.add_done_callback(
         lambda task: consume_startup_task_result(task, message="UI cache prewarm failed during startup.")
     )
+    startup_catalog_task.add_done_callback(
+        lambda task: consume_startup_task_result(task, message="Session catalog startup failed.")
+    )
     startup_agent_inbox_recovery_task.add_done_callback(
         lambda task: consume_startup_task_result(task, message="Agent inbox recovery failed during startup.")
     )
     try:
         yield
     finally:
-        for startup_task in (startup_cache_prewarm_task, startup_agent_inbox_recovery_task):
+        for startup_task in (
+            startup_cache_prewarm_task,
+            startup_catalog_task,
+            startup_agent_inbox_recovery_task,
+        ):
             if not startup_task.done():
                 startup_task.cancel()
                 with suppress(asyncio.CancelledError):
