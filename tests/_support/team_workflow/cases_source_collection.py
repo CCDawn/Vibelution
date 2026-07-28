@@ -7133,7 +7133,10 @@ def test_source_collection_run_context_bundle_cleanses_invalid_active_storage_pa
     assert "pathValidationError" in bundle["activeWorkRun"]
 
 
-def test_challenge_stage_task_blocks_non_qwen_agent_before_submit(tmp_path, monkeypatch):
+def test_challenge_stage_task_uses_configured_agent_model_without_official_evidence_qualification(
+    tmp_path,
+    monkeypatch,
+):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(
         team_workflow_orchestration_service,
@@ -7179,24 +7182,44 @@ def test_challenge_stage_task_blocks_non_qwen_agent_before_submit(tmp_path, monk
     monkeypatch.setattr(
         session_service,
         "submit_session_message",
-        lambda *args, **kwargs: submitted.append((args, kwargs)),
+        lambda *args, **kwargs: (
+            submitted.append((args, kwargs))
+            or {
+                "accepted": True,
+                "turnId": "turn-configured-luna-1",
+                "status": "running",
+            }
+        ),
     )
 
-    with pytest.raises(
-        team_workflow_orchestration_service.TeamWorkflowOrchestrationError,
-        match="challenge_required_model_mismatch",
-    ):
-        team_workflow_orchestration_service.start_source_collection_stage_session_task(
-            team["teamId"],
-            run_response["run"]["runId"],
-            {"stageId": "finding", "agentId": finder["agentId"], "agentRole": "source_finder"},
-        )
-
-    assert submitted == []
-    assert team_workflow_orchestration_service._source_collection_stage_session_tasks(
+    task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
         team["teamId"],
         run_response["run"]["runId"],
-    ) == []
+        {"stageId": "finding", "agentId": finder["agentId"], "agentRole": "source_finder"},
+    )
+
+    assert len(submitted) == 1
+    assert task["task"]["challengeTaskContract"]["effectiveRoute"] == {
+        "modelRef": "relay_openai/gpt-5.6-luna",
+        "providerId": "relay_openai",
+        "modelId": "gpt-5.6-luna",
+    }
+    assert task["task"]["challengeTaskContract"]["evidencePolicy"]["officialEvidenceEligible"] is False
+    reconciled = team_workflow_orchestration_service.reconcile_source_collection_stage_session_task_after_turn(
+        team["teamId"],
+        task["taskId"],
+        run_id=run_response["run"]["runId"],
+        session_id=task["sessionId"],
+        turn_id="turn-configured-luna-1",
+        final_status="completed",
+        llm_usage={
+            "source": "provider",
+            "provider": "relay_openai",
+            "model": "gpt-5.6-luna",
+            "llmModelId": "relay_openai/gpt-5.6-luna",
+        },
+    )
+    assert reconciled["officialModelEvidence"] == {}
 
 
 def test_challenge_source_run_derives_required_policy_from_official_prompt_cache_route(tmp_path, monkeypatch):
