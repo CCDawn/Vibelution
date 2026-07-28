@@ -76,6 +76,36 @@ describe("codexRolloutTrace", () => {
     });
   });
 
+  it("keeps one latest lifecycle event per identity when repeated operation snapshots are projected", () => {
+    const events = buildCodexRolloutTraceEvents([
+      toolOperation({
+        id: "op-replayed",
+        status: "running",
+        summary: "正在搜索",
+      }),
+      toolOperation({
+        id: "op-replayed",
+        status: "done",
+        summary: "搜索完成",
+      }),
+    ]);
+
+    expect(events.map((event) => event.id)).toEqual([
+      "op-replayed-tool-call-started",
+      "op-replayed-runtime-started",
+      "op-replayed-runtime-ended",
+      "op-replayed-tool-call-ended",
+    ]);
+    expect(events[0]).toMatchObject({
+      status: "running",
+      summary: "搜索完成",
+    });
+    expect(events[2]).toMatchObject({
+      status: "completed",
+      summary: "搜索完成",
+    });
+  });
+
   it("keeps terminal failure diagnostics on runtime end events", () => {
     const failedCommand = {
       ...toolOperation({

@@ -34,7 +34,7 @@ function processCell(status: CodexTranscriptCell["status"]): CodexTranscriptCell
 }
 
 describe("ConversationProcessDisclosure", () => {
-  it("renders a completed process collapsed with its duration and stage count", () => {
+  it("renders a completed process collapsed with only its state and duration", () => {
     const html = renderToStaticMarkup(
       <ConversationProcessDisclosure cells={[processCell("completed")]} language="zh">
         <span>处理记录内容</span>
@@ -43,7 +43,8 @@ describe("ConversationProcessDisclosure", () => {
 
     expect(html).toContain('data-codex-process-disclosure="true"');
     expect(html).not.toContain('open=""');
-    expect(html).toContain("已处理 2.9s 1 个阶段");
+    expect(html).toContain("已处理 2.9s");
+    expect(html).not.toContain("个阶段");
     expect(html).toContain("处理记录内容");
     expect(styles.summary).not.toContain("border-b");
     expect(styles.content).toContain("border-l");
@@ -56,7 +57,8 @@ describe("ConversationProcessDisclosure", () => {
       </ConversationProcessDisclosure>,
     );
 
-    expect(html).toContain("处理中 2.9s 1 个阶段");
+    expect(html).toContain("处理中 2.9s");
+    expect(html).not.toContain("个阶段");
     expect(html).toContain('open=""');
     expect(html).toContain('aria-live="polite"');
     expect(html).not.toContain("1 次调用");
@@ -69,7 +71,8 @@ describe("ConversationProcessDisclosure", () => {
       </ConversationProcessDisclosure>,
     );
 
-    expect(html).toContain("Processing stopped 2.9s 1 stage");
+    expect(html).toContain("Processing stopped 2.9s");
+    expect(html).not.toContain("stage");
     expect(html).toContain('data-codex-process-state="failed"');
     expect(html).not.toContain('open=""');
   });

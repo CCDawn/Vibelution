@@ -16,11 +16,8 @@ export type CodexTranscriptTimelineNode =
   };
 
 function isToolActivityCell(cell: CodexTranscriptCell) {
-  return cell.kind === "tool_call";
-}
-
-function shouldIsolateToolCell(cell: CodexTranscriptCell) {
-  return cell.status === "failed" || cell.status === "degraded" || cell.tone === "warning" || cell.tone === "error";
+  return cell.kind === "tool_call"
+    || (cell.kind === "error_notice" && Boolean(cell.operationIds?.length));
 }
 
 export function createCodexTranscriptToolActivity(cells: readonly CodexTranscriptCell[]): CodexTranscriptToolActivity {
@@ -36,9 +33,10 @@ export function createCodexTranscriptToolActivity(cells: readonly CodexTranscrip
 }
 
 /**
- * Preserves canonical cell order while replacing only contiguous, non-terminal
- * tool cells with a frontend-only activity node. Commentary, warnings, errors,
- * approvals and final answers always flush the pending tool sequence.
+ * Preserves canonical cell order while replacing contiguous tool work with a
+ * frontend-only activity node. Operation-backed failures stay with the tools
+ * they describe; narrative, system, approval and turn-level error cells remain
+ * true timeline barriers.
  */
 export function buildCodexTranscriptTimelineNodes(
   cells: readonly CodexTranscriptCell[],
@@ -61,14 +59,6 @@ export function buildCodexTranscriptTimelineNodes(
     if (!isToolActivityCell(cell)) {
       flushPendingTools();
       nodes.push({ kind: "cell", cell });
-      continue;
-    }
-    if (shouldIsolateToolCell(cell)) {
-      flushPendingTools();
-      nodes.push({
-        kind: "tool_activity",
-        activity: createCodexTranscriptToolActivity([cell]),
-      });
       continue;
     }
     pendingTools.push(cell);
