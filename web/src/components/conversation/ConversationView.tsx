@@ -1654,18 +1654,11 @@ export function ConversationView({
     if (visibleCells.length === 0) {
       return null;
     }
-    const finalCellIndex = visibleCells.findIndex(
-      (cell) => cell.kind === "assistant_markdown" && cell.phase !== "commentary",
+    const isFinalResponseCell = (cell: CodexTranscriptCell) => (
+      cell.kind === "assistant_markdown" && cell.phase !== "commentary"
     );
-    const cellsBeforeFinal = finalCellIndex < 0
-      ? visibleCells
-      : visibleCells.slice(0, finalCellIndex);
-    const cellsFromFinal = finalCellIndex < 0
-      ? []
-      : visibleCells.slice(finalCellIndex);
-    const trailingToolFailures = cellsFromFinal.filter((cell) => cell.kind === "error_notice");
-    const processCells = [...cellsBeforeFinal, ...trailingToolFailures];
-    const finalCells = cellsFromFinal.filter((cell) => cell.kind !== "error_notice");
+    const processCells = visibleCells.filter((cell) => !isFinalResponseCell(cell));
+    const finalCells = visibleCells.filter(isFinalResponseCell);
     const renderTimelineNodes = (timelineCells: CodexTranscriptCell[]) => (
       buildCodexTranscriptTimelineNodes(timelineCells).map((node) => node.kind === "tool_activity" ? (
         <ConversationToolActivity
