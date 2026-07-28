@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -20,8 +21,13 @@ def _store(tmp_path: Path) -> SessionCatalogStore:
     return store
 
 
-def _catalog_row(summary: dict[str, object]) -> dict[str, object]:
+def _catalog_row(
+    summary: dict[str, object],
+    *,
+    source_order: int = 0,
+) -> dict[str, object]:
     session_id = str(summary["id"])
+    updated_at = str(summary["updatedAt"])
     return {
         "session_id": session_id,
         "title": summary["title"],
@@ -36,9 +42,14 @@ def _catalog_row(summary: dict[str, object]) -> dict[str, object]:
         "status": summary["status"],
         "current_phase": summary["currentPhase"],
         "child_status": summary["childStatus"],
-        "created_at": summary["updatedAt"],
-        "updated_at": summary["updatedAt"],
+        "created_at": updated_at,
+        "updated_at": updated_at,
         "last_active_at": summary["lastActive"],
+        "source_order": source_order,
+        "updated_at_sort_key": datetime.fromisoformat(
+            updated_at.replace("Z", "+00:00")
+        ).timestamp(),
+        "title_sort_key": str(summary["title"] or "").strip().lower(),
         "latest_sequence": 0,
         "event_count": 0,
         "message_count": 0,
@@ -81,8 +92,8 @@ def _legacy_query(monkeypatch, summaries, request):
 def test_sql_candidate_matches_legacy_query_contract(monkeypatch, tmp_path, query_args):
     summaries = build_session_query_summaries(48)
     store = _store(tmp_path)
-    for summary in summaries:
-        store.upsert_session(_catalog_row(summary))
+    for source_order, summary in enumerate(summaries):
+        store.upsert_session(_catalog_row(summary, source_order=source_order))
     provider = catalog_bridge.build_session_catalog_query_provider(store)
 
     legacy = _legacy_query(monkeypatch, summaries, query_args)

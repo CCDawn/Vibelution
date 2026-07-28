@@ -21,8 +21,8 @@ from typing import Any, Callable, Mapping, Sequence
 from core.infrastructure.atomic_io import atomic_write_text
 
 
-SCHEMA_VERSION = 1
-PROJECTION_VERSION = 1
+SCHEMA_VERSION = 2
+PROJECTION_VERSION = 2
 DEFAULT_BUSY_TIMEOUT_MS = 5000
 CATALOG_FILENAME = "session_catalog.sqlite3"
 CATALOG_GLOBAL_DIRTY_SESSION_ID = "__catalog_global__"
@@ -212,8 +212,43 @@ _SCHEMA_V1_STATEMENTS = (
     """,
 )
 
+
+_SCHEMA_V2_STATEMENTS = (
+    """
+    ALTER TABLE sessions
+    ADD COLUMN source_order INTEGER NOT NULL DEFAULT 0 CHECK (source_order >= 0)
+    """,
+    """
+    ALTER TABLE sessions
+    ADD COLUMN updated_at_sort_key REAL NOT NULL DEFAULT 0
+    """,
+    """
+    ALTER TABLE sessions
+    ADD COLUMN title_sort_key TEXT NOT NULL DEFAULT ''
+    """,
+    """
+    CREATE INDEX idx_sessions_source_order
+    ON sessions(source_order)
+    """,
+    """
+    CREATE INDEX idx_sessions_updated_at_sort_key
+    ON sessions(updated_at_sort_key, source_order)
+    """,
+    """
+    CREATE INDEX idx_sessions_title_sort_key
+    ON sessions(title_sort_key, source_order)
+    """,
+    """
+    UPDATE catalog_meta
+    SET schema_version=2, projection_version=2
+    WHERE id=1
+    """,
+)
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(version=1, statements=_SCHEMA_V1_STATEMENTS),
+    Migration(version=2, statements=_SCHEMA_V2_STATEMENTS),
 )
 
 _SESSION_COLUMNS = (
@@ -237,6 +272,9 @@ _SESSION_COLUMNS = (
     "created_at",
     "updated_at",
     "last_active_at",
+    "source_order",
+    "updated_at_sort_key",
+    "title_sort_key",
     "last_turn_status",
     "open_turn_id",
     "latest_sequence",
@@ -255,6 +293,11 @@ _INTEGER_SESSION_COLUMNS = {
     "message_count",
     "journal_size",
     "journal_mtime_ns",
+    "source_order",
+}
+
+_REAL_SESSION_COLUMNS = {
+    "updated_at_sort_key",
 }
 
 _QUERY_SEARCH_COLUMNS = (
@@ -744,10 +787,12 @@ class SessionCatalogStore:
             parameters.extend(escaped for _ in _QUERY_SEARCH_COLUMNS)
         normalized_sort = str(sort or "").strip()
         sort_sql = {
-            "updatedAt_desc": "updated_at DESC, session_id DESC",
-            "updatedAt_asc": "updated_at ASC, session_id ASC",
-            "title_asc": "title COLLATE NOCASE ASC, session_id ASC",
-            "title_desc": "title COLLATE NOCASE DESC, session_id DESC",
+            # The legacy query keeps its pre-sorted source order for the
+            # default request and as the stable tiebreaker for explicit sorts.
+            "updatedAt_desc": "source_order ASC",
+            "updatedAt_asc": "updated_at_sort_key ASC, source_order ASC",
+            "title_asc": "title_sort_key ASC, source_order ASC",
+            "title_desc": "title_sort_key DESC, source_order ASC",
         }.get(normalized_sort)
         if sort_sql is None:
             raise ValueError(f"Unsupported session catalog query sort: {sort}")
@@ -946,6 +991,8 @@ class SessionCatalogStore:
                 normalized[column] = self.workspace_key
             elif column in _INTEGER_SESSION_COLUMNS:
                 normalized[column] = max(0, int(row.get(column) or 0))
+            elif column in _REAL_SESSION_COLUMNS:
+                normalized[column] = float(row.get(column) or 0.0)
             else:
                 normalized[column] = str(row.get(column) or "")
         for required in ("session_kind", "visibility", "source_revision", "indexed_at"):

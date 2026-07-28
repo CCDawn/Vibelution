@@ -108,14 +108,14 @@ def test_formal_path_requires_local_app_data_but_developer_can_use_runtime_fallb
     assert developer_path.is_relative_to(tmp_path / "project" / ".runtime" / "session-catalogs")
 
 
-def test_initialize_creates_schema_v1_idempotently_and_records_checksum(tmp_path):
+def test_initialize_creates_schema_v2_idempotently_and_records_checksum(tmp_path):
     store = _store(tmp_path)
 
     first = store.initialize()
     second = store.initialize()
 
-    assert first["schemaVersion"] == 1
-    assert second["schemaVersion"] == 1
+    assert first["schemaVersion"] == 2
+    assert second["schemaVersion"] == 2
     assert first["migrationChecksum"] == second["migrationChecksum"]
     assert store.quick_check() == "ok"
     with sqlite3.connect(store.database_path) as connection:
@@ -125,16 +125,41 @@ def test_initialize_creates_schema_v1_idempotently_and_records_checksum(tmp_path
                 "SELECT name FROM sqlite_master WHERE type='table'"
             ).fetchall()
         }
-        migration = connection.execute(
-            "SELECT version, checksum FROM schema_migrations"
-        ).fetchone()
+        migrations = connection.execute(
+            "SELECT version, checksum FROM schema_migrations ORDER BY version"
+        ).fetchall()
     assert {
         "catalog_meta",
         "schema_migrations",
         "sessions",
         "catalog_dirty_sessions",
     }.issubset(tables)
-    assert migration == (1, first["migrationChecksum"])
+    assert [version for version, _checksum in migrations] == [1, 2]
+    assert migrations[-1] == (2, first["migrationChecksum"])
+
+
+def test_initialize_upgrades_existing_schema_v1_with_ordering_projection(tmp_path, monkeypatch):
+    store = _store(tmp_path)
+    legacy_migrations = (session_catalog.MIGRATIONS[0],)
+    monkeypatch.setattr(session_catalog, "SCHEMA_VERSION", 1)
+    monkeypatch.setattr(session_catalog, "PROJECTION_VERSION", 1)
+    monkeypatch.setattr(session_catalog, "MIGRATIONS", legacy_migrations)
+    store.initialize()
+    monkeypatch.undo()
+
+    upgraded = store.initialize()
+
+    assert upgraded["schemaVersion"] == 2
+    assert upgraded["projectionVersion"] == 2
+    with sqlite3.connect(store.database_path) as connection:
+        columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(sessions)").fetchall()
+        }
+        metadata = connection.execute(
+            "SELECT schema_version, projection_version FROM catalog_meta WHERE id=1"
+        ).fetchone()
+    assert {"source_order", "updated_at_sort_key", "title_sort_key"}.issubset(columns)
+    assert metadata == (2, 2)
 
 
 def test_unknown_higher_schema_fails_closed_without_downgrade(tmp_path):
@@ -159,7 +184,7 @@ def test_unknown_higher_migration_fails_closed_even_if_user_version_was_not_upda
         connection.execute(
             """
             INSERT INTO schema_migrations(version, applied_at, checksum)
-            VALUES (2, '2026-07-27T00:00:00Z', 'future')
+            VALUES (3, '2026-07-27T00:00:00Z', 'future')
             """
         )
 
