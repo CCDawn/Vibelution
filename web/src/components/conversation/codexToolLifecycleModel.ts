@@ -28,9 +28,9 @@ export type CodexToolCall = {
 };
 
 export type CodexTerminalRequest = {
-  displayCommand: string;
+  displayCommand?: string;
   command?: string[];
-  cwd: string;
+  cwd?: string;
 };
 
 export type CodexTerminalResult = {
@@ -47,7 +47,7 @@ export type CodexTerminalOperation = {
   terminalId: string;
   kind: CodexTerminalOperationKind;
   status: CodexToolLifecycleStatus;
-  request: CodexTerminalRequest;
+  request?: CodexTerminalRequest;
   result?: CodexTerminalResult;
   durationSeconds?: number | null;
   rawOperationId: string;
@@ -191,11 +191,11 @@ function terminalOperationFromTool(
     terminalId,
     kind: terminalOperationKind(operation),
     status,
-    request: {
+    request: compactTerminalRequest({
       displayCommand,
       command: displayCommand ? [displayCommand] : undefined,
       cwd: "",
-    },
+    }),
     result: status === "pending" || status === "running"
       ? undefined
       : compactTerminalResult({
@@ -288,7 +288,7 @@ function terminalOperationKind(operation: AgentMessageOperation): CodexTerminalO
 function terminalDisplayCommand(operation: AgentMessageOperation) {
   const rawToolName = String(operation.rawLabel ?? operation.label ?? "").trim().toLowerCase();
   if (rawToolName === "write_stdin") {
-    return "继续终端会话";
+    return "";
   }
   const args = operation.arguments ?? {};
   const command = args.cmd ?? args.command;
@@ -298,7 +298,12 @@ function terminalDisplayCommand(operation: AgentMessageOperation) {
   const commandText = typeof command === "string" || typeof command === "number"
     ? String(command)
     : "";
-  return compactText(commandText || operation.summary || operation.rawLabel || operation.label);
+  if (commandText) {
+    return compactText(commandText);
+  }
+  return ["cli_tool", "cli_agent_run_tool"].includes(rawToolName)
+    ? compactText(operation.summary)
+    : "";
 }
 
 function compactToolCall(call: CodexToolCall): CodexToolCall {
@@ -307,6 +312,10 @@ function compactToolCall(call: CodexToolCall): CodexToolCall {
 
 function compactTerminalOperation(operation: CodexTerminalOperation): CodexTerminalOperation {
   return compactRecord(operation) as CodexTerminalOperation;
+}
+
+function compactTerminalRequest(request: CodexTerminalRequest): CodexTerminalRequest {
+  return compactRecord(request) as CodexTerminalRequest;
 }
 
 function compactTerminalResult(result: CodexTerminalResult): CodexTerminalResult {

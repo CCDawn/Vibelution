@@ -395,9 +395,9 @@ export type CodexToolCall = {
 };
 
 export type CodexTerminalRequest = {
-  displayCommand: string;
+  displayCommand?: string;
   command?: string[];
-  cwd: string;
+  cwd?: string;
 };
 
 export type CodexTerminalResult = {
@@ -414,7 +414,7 @@ export type CodexTerminalOperation = {
   terminalId: string;
   kind: "ExecCommand" | "WriteStdin" | string;
   status: CodexTranscriptCellStatus;
-  request: CodexTerminalRequest;
+  request?: CodexTerminalRequest;
   result?: CodexTerminalResult;
   durationSeconds?: number | null;
   rawOperationId: string;

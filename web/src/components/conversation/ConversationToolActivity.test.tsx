@@ -45,7 +45,7 @@ function summaryContaining(html: string, marker: string) {
 }
 
 describe("ConversationToolActivity", () => {
-  it("projects completed terminal output instead of its stale running payload", () => {
+  it("keeps completed terminal output out of the collapsed command row", () => {
     const cell = toolCell("terminal-completed", "");
     cell.title = "exec_command";
     cell.toolLifecycleModel = {
@@ -74,15 +74,15 @@ describe("ConversationToolActivity", () => {
       <ConversationToolActivity
         activity={createCodexTranscriptToolActivity([cell])}
         language="zh"
-        renderToolDetails={() => <pre>raw result</pre>}
+        renderToolDetails={() => null}
       />,
     );
 
     expect(html).toContain('data-codex-tool-activity="digest"');
     expect(html).toContain("运行了 1 个工具");
-    expect(html).toContain("# Vibelution Development Standard");
+    expect(html).toContain(">运行命令<");
+    expect(html).not.toContain("# Vibelution Development Standard");
     expect(html).not.toContain(">running<");
-    expect(summaryContaining(html, "运行了 1 个工具")).not.toContain("# Vibelution Development Standard");
   });
 
   it("opens an activity with a meaningful nonzero terminal exit as one attention digest", () => {

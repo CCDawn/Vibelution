@@ -28,6 +28,8 @@ const styles = {
     "shrink-0 self-center text-[var(--fg-tertiary)] transition-transform duration-150",
   ),
   activityDetails: cx("activityDetails", "ml-6 grid min-w-0 gap-0 pt-1"),
+  activityDetailsInner: cx("activityDetailsInner", "grid min-w-0 gap-0"),
+  activityRow: cx("activityRow", "min-w-0"),
   item: cx("item", "min-w-0"),
   itemDetails: cx("itemDetails", "min-w-0"),
   itemSummary: cx(
@@ -48,6 +50,8 @@ const styles = {
     "batchDetails",
     "ml-6 min-w-0",
   ),
+  batchDetailsInner: cx("batchDetailsInner", "grid min-w-0 gap-0"),
+  batchRow: cx("batchRow", "min-w-0"),
   itemIcon: cx("itemIcon", "mt-0.5 shrink-0 text-[var(--fg-tertiary)]"),
   itemIconRunning: cx("itemIconRunning", "text-[var(--accent-cool)]"),
   itemIconFailed: cx("itemIconFailed", "text-[var(--fg-tertiary)]"),

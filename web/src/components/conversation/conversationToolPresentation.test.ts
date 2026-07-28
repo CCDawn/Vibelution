@@ -7,7 +7,7 @@ import {
 } from "./conversationToolPresentation";
 
 describe("conversation tool presentation", () => {
-  it("uses terminal output instead of a stale running payload after the call completed", () => {
+  it("keeps completed terminal output out of the collapsed command summary", () => {
     expect(
       completedToolPresentationSummary({
         toolSummary: JSON.stringify({
@@ -20,10 +20,10 @@ describe("conversation tool presentation", () => {
         status: "completed",
         language: "zh",
       }),
-    ).toBe("# Vibelution Development Standard");
+    ).toBe("");
   });
 
-  it("falls back to a completed label when a completed terminal call has no useful output", () => {
+  it("keeps a completed terminal row quiet when it has no useful output", () => {
     expect(
       completedToolPresentationSummary({
         toolSummary: JSON.stringify({
@@ -35,7 +35,7 @@ describe("conversation tool presentation", () => {
         status: "completed",
         language: "zh",
       }),
-    ).toBe("已完成");
+    ).toBe("");
   });
 
   it("shows running only when the terminal tool lifecycle is actually active", () => {

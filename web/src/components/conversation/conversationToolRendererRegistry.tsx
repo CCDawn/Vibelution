@@ -108,7 +108,11 @@ function familyForToolName(name: string): ConversationToolRendererFamily {
   ) {
     return "verify";
   }
-  if (normalized === "cli_tool" || normalized.includes("command") || normalized.includes("terminal")) {
+  if (
+    ["cli_agent_run_tool", "cli_tool", "exec_command", "write_stdin"].includes(normalized)
+    || normalized.includes("command")
+    || normalized.includes("terminal")
+  ) {
     return "command";
   }
   if (normalized === "conversation_log_inspect_tool" || normalized.includes("conversation_log")) {

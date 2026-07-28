@@ -898,7 +898,9 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html).not.toContain('open=""');
     expect(html).not.toContain('data-codex-tool-detail-toggle="inline-symbol"');
     expect(html).toContain('aria-label="展开或收起工具结果：命令"');
-    expect(html).toContain("git status --short");
+    expect(html).toContain('data-codex-terminal-detail="true"');
+    expect(html).toContain(">Shell<");
+    expect(html).toContain("$ git status --short");
     expect(html).toContain("M web/src/components/conversation/ConversationView.tsx");
     expect(html).not.toContain("指令与结果");
     expect(html).not.toContain(meaninglessSummary);

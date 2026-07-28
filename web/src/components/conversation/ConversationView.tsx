@@ -127,6 +127,10 @@ import {
 } from "./conversationToolActivityModel";
 import { ConversationProcessDisclosure } from "./ConversationProcessDisclosure";
 import { ConversationToolActivity } from "./ConversationToolActivity";
+import {
+  buildConversationTerminalToolDetail,
+  ConversationTerminalToolDetail,
+} from "./ConversationTerminalToolDetail";
 import { buildCodexRolloutTraceEvents, type CodexRolloutTraceEvent } from "./codexRolloutTrace";
 import {
   preserveConversationExpansionDefaults,
@@ -2019,14 +2023,17 @@ export function ConversationView({
     if (cell.kind !== "tool_call") {
       return null;
     }
-    const rows = codexTranscriptToolDetailRows(cell);
+    const terminalDetail = buildConversationTerminalToolDetail(cell, lang);
+    const rows = terminalDetail ? [] : codexTranscriptToolDetailRows(cell);
     const rolloutEvents = renderCodexTranscriptRolloutEvents(cell);
-    if (rows.length === 0 && !rolloutEvents) {
+    if (!terminalDetail && rows.length === 0 && !rolloutEvents) {
       return null;
     }
     return (
       <>
-        {rows.length > 0 ? (
+        {terminalDetail ? (
+          <ConversationTerminalToolDetail detail={terminalDetail} language={lang} />
+        ) : rows.length > 0 ? (
           <div className={styles.operationDetails}>
             {rows.map((row, index) => {
               return (

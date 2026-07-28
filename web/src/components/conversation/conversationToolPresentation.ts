@@ -267,9 +267,10 @@ export function completedToolPresentationSummary({
   if (terminalTool && (normalizedStatus === "running" || normalizedStatus === "pending")) {
     return language === "zh" ? "正在运行" : "Running";
   }
-  const candidates = terminalTool && normalizedStatus === "completed"
-    ? [resultPreview, cellText, toolSummary, cellSummary]
-    : [toolSummary, cellSummary, resultPreview, cellText];
+  if (terminalTool && normalizedStatus === "completed") {
+    return "";
+  }
+  const candidates = [toolSummary, cellSummary, resultPreview, cellText];
   for (const candidate of candidates) {
     const summary = compactToolPresentationCandidate(
       candidate,
@@ -277,18 +278,8 @@ export function completedToolPresentationSummary({
       language,
     );
     if (summary) {
-      if (
-        terminalTool
-        && normalizedStatus === "completed"
-        && ["running", "pending", "正在运行"].includes(summary.trim().toLowerCase())
-      ) {
-        continue;
-      }
       return summary;
     }
-  }
-  if (terminalTool && normalizedStatus === "completed") {
-    return language === "zh" ? "已完成" : "Completed";
   }
   return "";
 }

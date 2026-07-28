@@ -614,27 +614,30 @@ def _codex_terminal_operation_kind(source: dict[str, Any]) -> str:
     return "WriteStdin" if name == "write_stdin" else "ExecCommand"
 
 
-def _codex_terminal_request(source: dict[str, Any], summary: str, title: str) -> dict[str, Any]:
+def _codex_terminal_request(source: dict[str, Any], _summary: str, _title: str) -> dict[str, Any]:
     s = _service()
     arguments = source.get("arguments") if isinstance(source.get("arguments"), dict) else {}
-    display_command = s._trim_tool_detail_text(
-        arguments.get("cmd")
-        or arguments.get("command")
-        or source.get("resultPreview")
-        or summary
-        or title,
-        max_chars=1200,
-        max_lines=4,
-    )
-    command = arguments.get("command") or arguments.get("cmd")
+    raw_tool_name = str(source.get("name") or source.get("label") or "").strip().lower()
+    command = None if raw_tool_name == "write_stdin" else (arguments.get("cmd") or arguments.get("command"))
     if isinstance(command, list):
         command_value = [
             s._trim_tool_detail_text(item, max_chars=240, max_lines=1)
             for item in command[:12]
         ]
-    elif display_command:
+        display_command = s._trim_tool_detail_text(
+            " ".join(item for item in command_value if item),
+            max_chars=1200,
+            max_lines=4,
+        )
+    elif isinstance(command, (str, int, float)) and not isinstance(command, bool):
+        display_command = s._trim_tool_detail_text(
+            command,
+            max_chars=1200,
+            max_lines=4,
+        )
         command_value = [display_command]
     else:
+        display_command = ""
         command_value = []
     return s._compact_codex_record(
         {
