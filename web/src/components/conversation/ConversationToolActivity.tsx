@@ -1,5 +1,5 @@
 import { ChevronDown, CircleAlert, LoaderCircle } from "lucide-react";
-import type { ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 
 import "./ConversationToolActivity.css";
 import type { CodexTranscriptCell } from "./codexTranscriptCells";
@@ -33,12 +33,79 @@ type ConversationToolActivityProps = {
   renderToolDetails: (cell: CodexTranscriptCell, detailsId: string) => ReactNode;
 };
 
+const STAGGERED_DETAILS_CLOSE_DURATION_MS = 520;
+const MAX_STAGGERED_ROW_DELAY = 8;
+
+function staggeredRowStyle(index: number, count: number): CSSProperties {
+  const openIndex = Math.min(index, MAX_STAGGERED_ROW_DELAY);
+  const closeIndex = Math.min(count - index - 1, MAX_STAGGERED_ROW_DELAY);
+  return {
+    "--tool-activity-row-open-delay": `${openIndex * 42}ms`,
+    "--tool-activity-row-close-delay": `${closeIndex * 34}ms`,
+  } as CSSProperties;
+}
+
+/** Native <details> hides content immediately; keep it mounted for its exit sequence. */
+function useStaggeredDetails(openByDefault: boolean) {
+  const [isExpanded, setIsExpanded] = useState(openByDefault);
+  const [isClosing, setIsClosing] = useState(false);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const cancelClose = useCallback(() => {
+    if (closeTimer.current !== null) {
+      clearTimeout(closeTimer.current);
+      closeTimer.current = null;
+    }
+    setIsClosing(false);
+  }, []);
+
+  const toggle = useCallback(() => {
+    if (isClosing) {
+      cancelClose();
+      setIsExpanded(true);
+      return;
+    }
+    if (!isExpanded) {
+      setIsExpanded(true);
+      return;
+    }
+    setIsClosing(true);
+    closeTimer.current = setTimeout(() => {
+      closeTimer.current = null;
+      setIsClosing(false);
+      setIsExpanded(false);
+    }, STAGGERED_DETAILS_CLOSE_DURATION_MS);
+  }, [cancelClose, isClosing, isExpanded]);
+
+  useEffect(() => {
+    if (!openByDefault) return;
+    cancelClose();
+    setIsExpanded(true);
+  }, [cancelClose, openByDefault]);
+
+  useEffect(() => () => {
+    if (closeTimer.current !== null) clearTimeout(closeTimer.current);
+  }, []);
+
+  return {
+    isClosing,
+    isOpen: isExpanded || isClosing,
+    onSummaryClick: (event: React.MouseEvent<HTMLElement>) => {
+      event.preventDefault();
+      toggle();
+    },
+  };
+}
+
 function visibleToolSummary(cell: CodexTranscriptCell, language: ConversationToolPresentationLanguage) {
   const exitCode = conversationToolActivityTerminalExitCode(cell);
   if (exitCode !== null && exitCode !== 0) {
     return language === "zh" ? `命令退出 ${exitCode}` : `Command exited ${exitCode}`;
   }
   const toolCall = cell.toolLifecycleModel?.toolCalls?.[0];
+  if (cell.status === "completed" && toolCall?.runtimeKind === "terminal") {
+    return "";
+  }
   return completedToolPresentationSummary({
     toolSummary: toolCall?.summary,
     cellSummary: cell.summary,
@@ -180,6 +247,7 @@ function ToolActivityBatch({
   language: ConversationToolPresentationLanguage;
   renderToolDetails: ConversationToolActivityProps["renderToolDetails"];
 }) {
+  const staggeredDetails = useStaggeredDetails(false);
   const descriptor = conversationToolRendererForPresentationLabel(item.title, language);
   const Icon = descriptor.icon;
   const countLabel = language === "zh" ? `${item.count} 次` : `${item.count} calls`;
@@ -193,8 +261,10 @@ function ToolActivityBatch({
       data-codex-tool-activity-batch="true"
       data-codex-tool-activity-count={item.count}
       data-conversation-part-key={item.id}
+      data-closing={staggeredDetails.isClosing || undefined}
+      open={staggeredDetails.isOpen}
     >
-      <summary className={styles.batchSummary} aria-label={label}>
+      <summary className={styles.batchSummary} aria-label={label} onClick={staggeredDetails.onSummaryClick}>
         <Icon className={styles.itemIcon} size={15} aria-hidden="true" />
         <span className={styles.itemBody}>
           <span className={styles.itemTitle}>{item.title}</span>
@@ -203,14 +273,13 @@ function ToolActivityBatch({
         </span>
       </summary>
       <div className={styles.batchDetails}>
-        {item.cells.map((cell) => (
-          <ToolActivityItem
-            key={cell.id}
-            cell={cell}
-            language={language}
-            renderToolDetails={renderToolDetails}
-          />
-        ))}
+        <div className={styles.batchDetailsInner}>
+          {item.cells.map((cell, index) => (
+            <div key={cell.id} className={styles.batchRow} style={staggeredRowStyle(index, item.cells.length)}>
+              <ToolActivityItem cell={cell} language={language} renderToolDetails={renderToolDetails} />
+            </div>
+          ))}
+        </div>
       </div>
     </details>
   );
@@ -224,6 +293,7 @@ export function ConversationToolActivity({
   const items = buildConversationToolActivityPresentation(activity.cells, language);
   const digest = buildConversationToolActivityDigestPresentation(activity.cells, language);
   const openByDefault = digest.state === "running" || digest.state === "attention";
+  const staggeredDetails = useStaggeredDetails(openByDefault);
   const label = language === "zh"
     ? `展开或收起工具活动：${digest.title}`
     : `Expand or collapse tool activity: ${digest.title}`;
@@ -234,12 +304,14 @@ export function ConversationToolActivity({
       data-codex-tool-activity-state={digest.state}
       data-codex-tool-activity-count={digest.count}
       data-codex-tool-activity-attention-count={digest.attentionCount || undefined}
-      open={openByDefault || undefined}
+      data-closing={staggeredDetails.isClosing || undefined}
+      open={staggeredDetails.isOpen}
     >
       <summary
         className={styles.activitySummary}
         aria-label={label}
         aria-live={digest.state === "running" ? "polite" : undefined}
+        onClick={staggeredDetails.onSummaryClick}
       >
         <ToolActivityStatusIcon cells={activity.cells} language={language} state={digest.state} />
         <span className={styles.activitySummaryBody}>
@@ -252,21 +324,17 @@ export function ConversationToolActivity({
         </span>
       </summary>
       <div className={styles.activityDetails}>
-        {items.map((item) => item.kind === "batch" ? (
-          <ToolActivityBatch
-            key={item.id}
-            item={item}
-            language={language}
-            renderToolDetails={renderToolDetails}
-          />
-        ) : (
-          <ToolActivityItem
-            key={item.id}
-            cell={item.cell}
-            language={language}
-            renderToolDetails={renderToolDetails}
-          />
-        ))}
+        <div className={styles.activityDetailsInner}>
+          {items.map((item, index) => (
+            <div key={item.id} className={styles.activityRow} style={staggeredRowStyle(index, items.length)}>
+              {item.kind === "batch" ? (
+                <ToolActivityBatch item={item} language={language} renderToolDetails={renderToolDetails} />
+              ) : (
+                <ToolActivityItem cell={item.cell} language={language} renderToolDetails={renderToolDetails} />
+              )}
+            </div>
+          ))}
+        </div>
       </div>
     </details>
   );

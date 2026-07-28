@@ -129,6 +129,50 @@ def test_native_codex_transcript_does_not_invent_terminal_session_from_legacy_to
     assert transcript.get("terminalSessions", []) == []
 
 
+def test_write_stdin_result_is_not_projected_as_a_terminal_command():
+    progress_result = json.dumps(
+        {
+            "status": "completed",
+            "terminalSessionId": "sandbox-terminal-stdin",
+            "sessionOpen": False,
+            "exitCode": 0,
+            "formattedOutput": "import { ChevronDown } from \"lucide-react\";",
+        }
+    )
+    messages = session_service._normalize_messages(
+        "session-write-stdin",
+        [
+            {
+                "role": "assistant",
+                "content": "",
+                "feedback_events": [
+                    {
+                        "sequence": 1,
+                        "kind": "tool",
+                        "status": "done",
+                        "name": "write_stdin",
+                        "summary": "终端返回了新的输出",
+                        "arguments": {
+                            "session_id": "sandbox-terminal-stdin",
+                            "chars": "",
+                        },
+                        "result": progress_result,
+                    }
+                ],
+            }
+        ],
+    )
+
+    transcript = messages[0]["codexTranscript"]
+    operation = transcript["terminalOperations"][0]
+    request = operation.get("request", {})
+
+    assert operation["kind"] == "WriteStdin"
+    assert request.get("displayCommand", "") == ""
+    assert request.get("command", []) == []
+    assert operation["result"]["formattedOutput"] == 'import { ChevronDown } from "lucide-react";'
+
+
 def test_normalized_transcript_preserves_commentary_before_tool_and_final_answer():
     messages = session_service._normalize_messages(
         "session-commentary",

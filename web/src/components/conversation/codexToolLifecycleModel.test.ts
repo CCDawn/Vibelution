@@ -203,6 +203,9 @@ describe("codexToolLifecycleModel", () => {
         terminalId: "terminal:terminal-a",
         kind: "WriteStdin",
         status: "running",
+        request: expect.not.objectContaining({
+          displayCommand: expect.anything(),
+        }),
       }),
     ]);
     expect(model.terminalSessions).toEqual([

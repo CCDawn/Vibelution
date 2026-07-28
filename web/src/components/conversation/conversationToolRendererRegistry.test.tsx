@@ -10,6 +10,8 @@ describe("conversation tool renderer registry", () => {
   it.each([
     ["get_git_status_summary_tool", "git", "Git 状态"],
     ["code_symbol_tool", "code", "代码图谱"],
+    ["exec_command", "command", "运行命令"],
+    ["write_stdin", "command", "写入终端"],
     ["conversation_log_inspect_tool", "conversation", "检查会话日志"],
     ["unregistered_vendor_tool", "generic", "unregistered_vendor_tool"],
   ])("maps %s to a stable family and label", (toolName, family, label) => {
