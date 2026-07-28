@@ -856,7 +856,7 @@ def query_sessions(
         if str(getattr(catalog_config, "mode", "off") or "off") == "shadow":
             from . import catalog_bridge
 
-            catalog_bridge.run_session_query_shadow(
+            comparison = catalog_bridge.run_session_query_shadow(
                 payload,
                 request={
                     "limit": normalized_limit,
@@ -867,6 +867,16 @@ def query_sessions(
                     "state": normalized_state,
                     "sort": normalized_sort,
                 },
+            )
+            s._record_session_catalog_shadow_query_event(
+                comparison=comparison,
+                limit=normalized_limit,
+                cursor=start,
+                has_query=bool(normalized_query),
+                has_agent_filter=bool(normalized_agent_id),
+                has_kind_filter=bool(normalized_session_kind),
+                has_state_filter=bool(normalized_state),
+                sort=normalized_sort,
             )
     except Exception:
         # Shadow failures must never change the canonical legacy response.
