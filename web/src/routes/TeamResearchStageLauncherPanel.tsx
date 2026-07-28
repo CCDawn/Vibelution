@@ -8,7 +8,11 @@ import { CheckCircle2, Eye, Link2, Play, RefreshCw, Settings2 } from "lucide-rea
 import type { NavigateFunction } from "react-router-dom";
 import { Link } from "react-router-dom";
 
-import type { ExperimentMethodId, Team } from "../api/types";
+import type {
+  ExperimentMethodId,
+  ResearchProjectAgentTaskKind,
+  Team,
+} from "../api/types";
 import { VNativeButton, VNativeInput, VNativeSelect } from "../components/vui";
 import {
   ChallengeCupOperationsWorkspace,
@@ -39,6 +43,7 @@ import {
 } from "./teams/source-collection/presentationModel";
 import { sourceCollectionRunLabel } from "./teams/source-collection/runModel";
 import { ResearchProjectSwitcher } from "./teams/research-projects/ResearchProjectSwitcher";
+import { useResearchProjectAgentTasks } from "./teams/research-projects/useResearchProjectAgentTasks";
 import { ResearchMemoryEvidencePanel } from "./teams/ResearchMemoryEvidencePanel";
 import type { ResearchMemoryContextSummary } from "./teams/ResearchMemoryEvidencePanel";
 import researchStyles from "./TeamsRoute.research.styles";
@@ -202,6 +207,29 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
     selectedTeamStartResearchStageResult,
     researchStageStartFeedbackText,
   } = props;
+  const workflowTeamId = selectedTeam?.teamId || RESEARCH_TEAM_ID;
+  const researchProjectAgentTasks = useResearchProjectAgentTasks({
+    teamId: workflowTeamId,
+    enabled: challengeCupResearchTeamSelected,
+  });
+
+  const startResearchProjectAgentTask = async (
+    taskKind: ResearchProjectAgentTaskKind,
+    options: { formalRetry?: boolean; retryTaskId?: string } = {},
+  ) => {
+    const stage = taskKind === "experiment_design" || taskKind === "experiment_evidence_review"
+      ? "experiment"
+      : "iteration";
+    const returnTo = researchWorkspaceStageRoute(workflowTeamId, stage);
+    const payload = await researchProjectAgentTasks.startTask(taskKind, {
+      ...options,
+      returnTo,
+      returnLabel: stage === "experiment" ? "返回实验设计" : "返回执行与迭代",
+    });
+    if (payload.chatRoute) {
+      navigate(payload.chatRoute);
+    }
+  };
 
 
     if (!researchWorkflowTeamSelected) {
@@ -209,7 +237,7 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
     }
     if (challengeCupResearchTeamSelected) {
       const challengeProjection = experimentPlanningStatus?.challengeProgramProjection;
-      const challengeTeamId = selectedTeam?.teamId || RESEARCH_TEAM_ID;
+      const challengeTeamId = workflowTeamId;
       const challengeAgents: ChallengeCupWorkspaceAgent[] = selectedTeamMemoryMembers.map((member) => {
         const normalizedRole = member.roleLabel.toLowerCase();
         const workspace = normalizedRole.includes("source") || normalizedRole.includes("资料")
@@ -261,6 +289,18 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
             knowledge_collection: researchSourceCollectionRoute(challengeTeamId),
             experiment: researchWorkspaceStageRoute(challengeTeamId, "experiment"),
             iteration: researchWorkspaceStageRoute(challengeTeamId, "iteration"),
+          }}
+          activeResearchProjectId={researchProjectAgentTasks.activeProjectId}
+          researchProjectAgentTasks={researchProjectAgentTasks.tasks}
+          researchProjectAgentTasksLoading={researchProjectAgentTasks.isLoading}
+          researchProjectAgentTaskStarting={researchProjectAgentTasks.isStarting}
+          researchProjectAgentTaskStartingKind={researchProjectAgentTasks.startingTaskKind}
+          researchProjectAgentTaskError={researchProjectAgentTasks.error ? "task_request_failed" : ""}
+          onStartResearchProjectAgentTask={startResearchProjectAgentTask}
+          onOpenResearchProjectAgentTask={(task) => {
+            if (task.chatRoute) {
+              navigate(task.chatRoute);
+            }
           }}
           isLoading={!challengeProjection && experimentPlanningStatusQuery.isPending}
           isUnavailable={!challengeProjection && !experimentPlanningStatusQuery.isPending}
