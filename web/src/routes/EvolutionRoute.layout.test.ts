@@ -558,7 +558,7 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("<SupervisedAgentConversationPanel");
     expect(routeSource).toContain("selectedRole={supervisedSelectedAgentRole}");
     expect(routeSource).toContain("activeRole={supervisedActiveAgentRole}");
-    expect(supervisedAgentConversationPanelSource).toContain("members.map((member)");
+    expect(supervisedAgentConversationPanelSource).toContain("members.map((member, memberIndex)");
     expect(routeSource).not.toContain("styles.supervisedWorkflowCardGrid");
     expect(routeSource).not.toContain("styles.supervisedWorkflowCardButton");
     expect(routeSource).not.toContain("styles.supervisedWorkflowCardFooter");
@@ -574,14 +574,14 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(supervisedAgentConversationPanelStyles.tabRail).toContain("grid-flow-col");
     expect(supervisedAgentConversationPanelStyles.tabRail).toContain("auto-cols-[minmax(152px,1fr)]");
     expect(supervisedAgentConversationPanelStyles.tabButton).toContain("min-h-[54px]");
-    expect(supervisedAgentConversationPanelStyles.tabButton).toContain("!w-full");
+    expect(supervisedAgentConversationPanelStyles.tabButton).toContain("w-full");
     expect(supervisedAgentConversationPanelStyles.tabButton).toContain("min-w-0");
     expect(supervisedAgentConversationPanelStyles.tabLayout).toContain(
       "[grid-template-columns:28px_minmax(0,1fr)_auto]",
     );
     expect(supervisedAgentConversationPanelStyles.sessionSurface).toContain("flex-1");
     expect(supervisedAgentConversationPanelStyles.sessionSurface).toContain("min-h-[544px]");
-    expect(supervisedAgentConversationPanelStyles.sessionSurface).toContain("rounded-[var(--vui-radius-lg)]");
+    expect(supervisedAgentConversationPanelSource).toContain('data-vui="supervised-agent-conversation-surface"');
     expect(supervisedAgentConversationPanelStyles.selectedHeader).toContain("min-h-[72px]");
     expect(supervisedAgentConversationPanelStyles.selectedFacts).toContain("grid-cols-4");
     expect(supervisedAgentConversationPanelSource).toContain("roleConversationTitle(member.role, lang)");
@@ -601,6 +601,28 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(stylesSource).not.toContain(".supervisedWorkflowCardButton");
     expect(stylesSource).not.toContain(".supervisedWorkflowCardFooter");
     expect(routeStyles.supervisedWorkflowFollowButton).toContain("[min-height:24px]");
+  });
+
+  it("builds the supervised Agent conversation chrome from stable VUI product APIs", () => {
+    expect(supervisedAgentConversationPanelSource).toContain("VSurface");
+    expect(supervisedAgentConversationPanelSource).toContain("VStatusChip");
+    expect(supervisedAgentConversationPanelSource).toContain("VStatusStrip");
+    expect(supervisedAgentConversationPanelSource).toContain("VToolbar");
+    expect(supervisedAgentConversationPanelSource).toContain("VEmptyState");
+    expect(supervisedAgentConversationPanelSource).toContain("VLoadingValue");
+    expect(supervisedAgentConversationPanelSource).toContain('variant={selected ? "primary" : "secondary"}');
+    expect(supervisedAgentConversationPanelSource).toContain("tabIndex={selected ? 0 : -1}");
+    expect(supervisedAgentConversationPanelSource).toContain('event.key === "ArrowRight"');
+    expect(supervisedAgentConversationPanelSource).toContain('event.key === "ArrowLeft"');
+    expect(supervisedAgentConversationPanelSource).toContain('event.key === "Home"');
+    expect(supervisedAgentConversationPanelSource).toContain('event.key === "End"');
+    expect(supervisedAgentConversationPanelSource).toContain("onPress={() => onSelectRole(member.role)}");
+    expect(supervisedAgentConversationPanelSource).toContain('data-vui-recipe="supervised-agent-conversation"');
+    expect(supervisedAgentConversationPanelSource).not.toContain('from "../components/vui/renderers/');
+    expect(supervisedAgentConversationPanelSource).not.toContain("<Link");
+    expect(supervisedAgentConversationPanelSource).not.toContain("<button");
+    expect(supervisedAgentConversationPanelStyles.tabButton).not.toContain("!border");
+    expect(supervisedAgentConversationPanelStyles.tabButton).not.toContain("!bg");
   });
 
   it("shows immediate local feedback while a supervised worktree run is waiting for the run record", () => {
