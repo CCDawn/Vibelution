@@ -219,6 +219,16 @@ describe("ChallengeCupOperationsWorkspace", () => {
     expect(componentSource).toContain("onOpenResearchProjectAgentTask");
   });
 
+  it("routes challenge status chrome through VUI while preserving the approved workspace layout", () => {
+    expect(componentSource).toContain("VStatusChip");
+    expect(componentSource).toContain("vuiStatusTone");
+    expect(componentSource).not.toContain('cx("status-pill", stageState(activeStage).tone)');
+    expect(componentSource).not.toContain('cx("status-icon", question.machinePassed');
+    expect(componentStyles).not.toContain(".status-icon.success");
+    expect(componentStyles).not.toContain(".status-pill.warning");
+    expect(componentStyles).not.toContain(".badge.success");
+  });
+
   it("keeps the approved identity visible during loading and unavailable states", () => {
     const loadingMarkup = renderWorkspace({ projection: undefined, isLoading: true });
     const unavailableMarkup = renderWorkspace({ projection: undefined, isUnavailable: true });

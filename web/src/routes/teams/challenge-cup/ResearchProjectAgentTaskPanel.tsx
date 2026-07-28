@@ -4,7 +4,7 @@ import type {
   ResearchProjectAgentTaskKind,
   TeamResearchProjectAgentTask,
 } from "../../../api/types";
-import { VButton } from "../../../components/vui";
+import { VButton, VStatusChip, type VStatusTone } from "../../../components/vui";
 import styles from "./ResearchProjectAgentTaskPanel.styles";
 
 type Stage = "experiment" | "iteration";
@@ -66,11 +66,11 @@ function statusLabel(status: string) {
   }[status] ?? status) || "未开始";
 }
 
-function statusTone(status: string) {
-  if (ACTIVE_STATUSES.has(status)) return styles.active;
-  if (status === "completed") return styles.completed;
-  if (RETRYABLE_STATUSES.has(status)) return styles.warning;
-  return styles.neutral;
+function statusTone(status: string): VStatusTone {
+  if (ACTIVE_STATUSES.has(status)) return "accent";
+  if (status === "completed") return "success";
+  if (RETRYABLE_STATUSES.has(status)) return "warning";
+  return "neutral";
 }
 
 export function ResearchProjectAgentTaskPanel(props: {
@@ -127,9 +127,13 @@ export function ResearchProjectAgentTaskPanel(props: {
                   <Bot size={15} aria-hidden="true" />
                   {definition.roleLabel}
                 </span>
-                <span className={`${styles.status} ${statusTone(task?.status || "")}`}>
+                <VStatusChip
+                  className={styles.status}
+                  tone={statusTone(task?.status || "")}
+                  style={{ minHeight: 22, fontSize: 10, fontWeight: 400, lineHeight: "15.8px" }}
+                >
                   {task ? statusLabel(task.status) : "未启动"}
-                </span>
+                </VStatusChip>
               </div>
               <p className={styles.description}>{definition.description}</p>
               {task ? (

@@ -9,7 +9,14 @@ import type {
   TeamResearchProject,
   TeamResearchProjectListPayload,
 } from "../../../api/types";
-import { VButton, VDialog, VNativeInput, VNativeSelect } from "../../../components/vui";
+import {
+  VButton,
+  VDialog,
+  VNativeInput,
+  VNativeSelect,
+  VStatusChip,
+  type VStatusTone,
+} from "../../../components/vui";
 
 import styles from "./ResearchProjectSwitcher.module.css";
 
@@ -32,6 +39,13 @@ type ResearchProjectSwitcherProps = {
 };
 
 const EMPTY_DRAFT: ProjectDraft = { name: "", topic: "" };
+
+function projectStatusTone(tone: NonNullable<ResearchProjectSwitcherProps["statusTone"]>): VStatusTone {
+  if (tone === "active") return "accent";
+  if (tone === "ready") return "success";
+  if (tone === "warning") return "warning";
+  return "neutral";
+}
 
 export function researchProjectQueryKey(teamId: string) {
   return ["teams", teamId, "research-projects"] as const;
@@ -168,7 +182,11 @@ export function ResearchProjectSwitcher({
           <span>{lang === "zh" ? "当前研究项目" : "Current research project"}</span>
           <div className={styles.titleLine}>
             <strong>{activeProject?.name || (projectsQuery.isPending ? "…" : "—")}</strong>
-            {statusLabel ? <em className={styles.status} data-tone={statusTone}>{statusLabel}</em> : null}
+            {statusLabel ? (
+              <VStatusChip className={styles.status} tone={projectStatusTone(statusTone)}>
+                {statusLabel}
+              </VStatusChip>
+            ) : null}
             {variant === "hero" ? <small>{lang === "zh" ? "已自动保存" : "Autosaved"}</small> : null}
           </div>
           {variant === "hero" ? (

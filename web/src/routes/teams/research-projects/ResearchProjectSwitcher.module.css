@@ -72,30 +72,12 @@
 }
 
 .status {
-  display: inline-flex;
-  min-height: 22px;
-  align-items: center;
+  min-height: 23px !important;
   padding: 2px 8px;
-  border: 1px solid var(--vui-border-subtle);
-  border-radius: 999px;
-  color: var(--vui-fg-muted);
-  font-size: 11px;
+  font-size: 11px !important;
   font-style: normal;
   font-weight: 760;
   white-space: nowrap;
-}
-
-.status[data-tone="active"],
-.status[data-tone="ready"] {
-  border-color: color-mix(in srgb, var(--state-success) 32%, var(--vui-border-subtle));
-  color: var(--state-success);
-  background: color-mix(in srgb, var(--state-success) 8%, var(--vui-surface-raised));
-}
-
-.status[data-tone="warning"] {
-  border-color: color-mix(in srgb, var(--state-warning) 38%, var(--vui-border-subtle));
-  color: var(--state-warning);
-  background: color-mix(in srgb, var(--state-warning) 8%, var(--vui-surface-raised));
 }
 
 .identity p {
