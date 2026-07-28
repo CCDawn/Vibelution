@@ -2,7 +2,12 @@ import { Fragment, type ReactNode, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { VNativeButton } from "../../../components/vui";
+import type {
+  ResearchProjectAgentTaskKind,
+  TeamResearchProjectAgentTask,
+} from "../../../api/types";
 import type { ExperimentPlanningStatusPayload } from "../experimentLoopModel";
+import { ResearchProjectAgentTaskPanel } from "./ResearchProjectAgentTaskPanel";
 import css from "./ChallengeCupOperationsWorkspace.module.css";
 
 type ChallengeProgramProjection = NonNullable<ExperimentPlanningStatusPayload["challengeProgramProjection"]>;
@@ -37,6 +42,17 @@ export type ChallengeCupOperationsWorkspaceProps = {
   researchTopic?: string;
   surface?: "workspace" | "progress";
   stageHrefs?: Partial<Record<PlatformStage, string>>;
+  activeResearchProjectId?: string;
+  researchProjectAgentTasks?: TeamResearchProjectAgentTask[];
+  researchProjectAgentTasksLoading?: boolean;
+  researchProjectAgentTaskStarting?: boolean;
+  researchProjectAgentTaskStartingKind?: ResearchProjectAgentTaskKind | null;
+  researchProjectAgentTaskError?: string;
+  onStartResearchProjectAgentTask?: (
+    taskKind: ResearchProjectAgentTaskKind,
+    options?: { formalRetry?: boolean; retryTaskId?: string },
+  ) => Promise<void>;
+  onOpenResearchProjectAgentTask?: (task: TeamResearchProjectAgentTask) => void;
   isLoading: boolean;
   isUnavailable: boolean;
   isRefreshing: boolean;
@@ -107,6 +123,14 @@ export function ChallengeCupOperationsWorkspace({
   researchTopic = "",
   surface = "progress",
   stageHrefs = {},
+  activeResearchProjectId = "",
+  researchProjectAgentTasks = [],
+  researchProjectAgentTasksLoading = false,
+  researchProjectAgentTaskStarting = false,
+  researchProjectAgentTaskStartingKind = null,
+  researchProjectAgentTaskError = "",
+  onStartResearchProjectAgentTask = async () => undefined,
+  onOpenResearchProjectAgentTask,
   isLoading,
   isUnavailable,
   isRefreshing,
@@ -419,6 +443,17 @@ export function ChallengeCupOperationsWorkspace({
                           <article><span>账本门禁</span><strong>{stage2?.ledger.initialized ? "已初始化" : "待初始化"}</strong><p>Manifest、引用审计和失败记录保持独立。</p></article>
                         </div>
                       </section>
+                      <ResearchProjectAgentTaskPanel
+                        stage="experiment"
+                        activeProjectId={activeResearchProjectId}
+                        tasks={researchProjectAgentTasks}
+                        isLoading={researchProjectAgentTasksLoading}
+                        isStarting={researchProjectAgentTaskStarting}
+                        startingTaskKind={researchProjectAgentTaskStartingKind}
+                        errorMessage={researchProjectAgentTaskError}
+                        onStartTask={onStartResearchProjectAgentTask}
+                        onOpenTask={onOpenResearchProjectAgentTask}
+                      />
                       <section className={cx("platform-empty-state")}>
                         <strong>当前 DTO 未返回冻结 Experiment Design 明细</strong>
                         <p>生产页面保留清晰空态；进入阶段详情后继续使用现有实验规划链路。</p>
@@ -444,6 +479,17 @@ export function ChallengeCupOperationsWorkspace({
                         </div>
                         {!stage3?.caseRecords.length ? <div className={cx("platform-empty-state")}>尚无已登记的代表性深研案例。</div> : null}
                       </section>
+                      <ResearchProjectAgentTaskPanel
+                        stage="iteration"
+                        activeProjectId={activeResearchProjectId}
+                        tasks={researchProjectAgentTasks}
+                        isLoading={researchProjectAgentTasksLoading}
+                        isStarting={researchProjectAgentTaskStarting}
+                        startingTaskKind={researchProjectAgentTaskStartingKind}
+                        errorMessage={researchProjectAgentTaskError}
+                        onStartTask={onStartResearchProjectAgentTask}
+                        onOpenTask={onOpenResearchProjectAgentTask}
+                      />
                     </div>
                   )}
                 </section>

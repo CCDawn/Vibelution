@@ -199,6 +199,14 @@ describe("ChallengeCupOperationsWorkspace", () => {
     expect(markup).not.toContain("weight=0.875");
   });
 
+  it("wires Stage 2 and Stage 3 to fixed flat-session Agent responsibilities", () => {
+    expect(componentSource).toContain("<ResearchProjectAgentTaskPanel");
+    expect(componentSource).toContain('stage="experiment"');
+    expect(componentSource).toContain('stage="iteration"');
+    expect(componentSource).toContain("onStartResearchProjectAgentTask");
+    expect(componentSource).toContain("onOpenResearchProjectAgentTask");
+  });
+
   it("keeps the approved identity visible during loading and unavailable states", () => {
     const loadingMarkup = renderWorkspace({ projection: undefined, isLoading: true });
     const unavailableMarkup = renderWorkspace({ projection: undefined, isUnavailable: true });
