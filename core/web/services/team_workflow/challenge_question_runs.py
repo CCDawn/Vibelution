@@ -666,6 +666,69 @@ def get_challenge_question_run_status(team_id: str) -> dict[str, Any]:
     }
 
 
+def get_challenge_question_run_detail(
+    team_id: str,
+    question_id: str,
+    *,
+    run_id: str = "",
+) -> dict[str, Any]:
+    """Return one immutable Challenge Program question artifact without project fallback."""
+
+    team_service.get_team(team_id)
+    normalized_question_id = str(question_id or "").strip().upper()
+    normalized_run_id = str(run_id or "").strip()
+    if _catalog_question(normalized_question_id) is None:
+        raise ValueError("challenge_question_run_not_found: question is not present in the official catalog.")
+
+    records = _load_store(team_id).get("records")
+    question_records = [
+        deepcopy(record)
+        for record in (records if isinstance(records, list) else [])
+        if isinstance(record, dict)
+        and str(record.get("questionId") or "").strip().upper() == normalized_question_id
+    ]
+    if not question_records:
+        raise ValueError("challenge_question_run_not_found: no registered output exists for this question.")
+
+    selected_record = next(
+        (
+            record
+            for record in reversed(question_records)
+            if not normalized_run_id or str(record.get("runId") or "") == normalized_run_id
+        ),
+        None,
+    )
+    if selected_record is None:
+        raise ValueError("challenge_question_run_not_found: requested run was not registered for this question.")
+
+    selected_run_id = str(selected_record.get("runId") or "").strip()
+    output = _read_json(_artifact_path(team_id, normalized_question_id, selected_run_id))
+    expected_sha256 = str(selected_record.get("outputSha256") or "")
+    if (
+        not output
+        or str(output.get("question_id") or "").strip().upper() != normalized_question_id
+        or str((output.get("run") or {}).get("run_id") or "").strip() != selected_run_id
+        or _output_sha256(output) != expected_sha256
+    ):
+        raise ValueError(
+            "challenge_question_run_artifact_mismatch: immutable artifact does not match its index record."
+        )
+
+    return {
+        "teamId": team_id,
+        "questionId": normalized_question_id,
+        "selectedRunId": selected_run_id,
+        "record": selected_record,
+        "output": output,
+        "runs": question_records,
+        "artifact": {
+            "path": str(_artifact_path(team_id, normalized_question_id, selected_run_id)),
+            "sha256": expected_sha256,
+            "immutable": True,
+        },
+    }
+
+
 def register_challenge_question_output(team_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     team_service.get_team(team_id)
     raw_output = payload.get("output")

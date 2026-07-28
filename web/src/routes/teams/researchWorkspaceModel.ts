@@ -106,6 +106,18 @@ export function researchSourceCollectionRoute(teamId = RESEARCH_TEAM_ID) {
   return researchWorkspaceStageRoute(teamId, "knowledge_collection");
 }
 
+export function challengeQuestionDetailRoute(
+  teamId = RESEARCH_TEAM_ID,
+  questionId = "",
+  runId = "",
+) {
+  const params = new URLSearchParams({ team: teamId, challengeQuestion: questionId });
+  if (runId) {
+    params.set("challengeRun", runId);
+  }
+  return `/teams?${params.toString()}`;
+}
+
 export function teamWorkspaceRoute(teamId = RESEARCH_TEAM_ID) {
   return `/teams?team=${encodeURIComponent(teamId)}`;
 }

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, NoReturn
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
 from core.web.services.team_service import TeamNotFoundError, TeamServiceError
@@ -34,6 +34,7 @@ from core.web.services.team_workflow_orchestration_service import (
     generate_algorithm_hypothesis_from_mechanism_mapping,
     get_experiment_method_catalog,
     get_experiment_planning_status,
+    get_challenge_question_run_detail,
     get_challenge_question_run_status,
     get_knowledge_ingestion_status,
     get_official_model_evidence_status,
@@ -545,6 +546,22 @@ class ChallengeQuestionReviewPayload(BaseModel):
     reviewer: str = Field(..., min_length=1, max_length=160)
     rationale: str = Field(..., min_length=1, max_length=4000)
     decisions: dict[str, str]
+
+
+class ChallengeQuestionArtifactResponse(BaseModel):
+    path: str
+    sha256: str
+    immutable: bool
+
+
+class ChallengeQuestionRunDetailResponse(BaseModel):
+    teamId: str
+    questionId: str
+    selectedRunId: str
+    record: dict[str, Any]
+    output: dict[str, Any]
+    runs: list[dict[str, Any]]
+    artifact: ChallengeQuestionArtifactResponse
 
 
 class CandidateGraphBuildPayload(BaseModel):
@@ -1155,6 +1172,29 @@ def team_workflow_challenge_question_run_status(team_id: str) -> dict:
     try:
         return get_challenge_question_run_status(team_id)
     except TeamNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get(
+    "/teams/{team_id}/workflow-orchestration/challenge-program/questions/{question_id}",
+    response_model=ChallengeQuestionRunDetailResponse,
+)
+def team_workflow_challenge_question_run_detail(
+    team_id: str,
+    question_id: str,
+    run_id: str = Query("", alias="runId", max_length=160),
+) -> ChallengeQuestionRunDetailResponse:
+    try:
+        return ChallengeQuestionRunDetailResponse.model_validate(
+            get_challenge_question_run_detail(
+                team_id,
+                question_id,
+                run_id=run_id,
+            )
+        )
+    except TeamNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
