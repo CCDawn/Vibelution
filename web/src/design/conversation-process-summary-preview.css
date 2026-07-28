@@ -420,7 +420,6 @@ details summary::-webkit-details-marker {
 
 .process-disclosure {
   margin-left: 40px;
-  border-bottom: 1px solid var(--line);
 }
 
 .process-disclosure > summary {
@@ -429,7 +428,6 @@ details summary::-webkit-details-marker {
   grid-template-columns: 18px auto auto 1fr 14px;
   align-items: center;
   gap: 8px;
-  border-top: 1px solid var(--line);
   color: var(--muted);
   cursor: pointer;
   font-size: 12px;
