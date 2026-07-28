@@ -112,6 +112,30 @@ def compare_session_query_payloads(
     )
 
 
+def build_session_catalog_query_provider(
+    store: SessionCatalogStore,
+) -> Callable[[Mapping[str, Any]], Mapping[str, Any]]:
+    """Adapt catalog rows to the frozen session-list query payload."""
+
+    def provider(request: Mapping[str, Any]) -> Mapping[str, Any]:
+        page = store.query_session_page(
+            q=str(request.get("q") or ""),
+            agent_id=str(request.get("agent_id") or ""),
+            session_kind=str(request.get("session_kind") or ""),
+            state=str(request.get("state") or ""),
+            sort=str(request.get("sort") or "updatedAt_desc"),
+            limit=int(request.get("limit") or 50),
+            cursor=str(request.get("cursor") or ""),
+        )
+        return {
+            "items": [_catalog_query_item(row) for row in page["rows"]],
+            "nextCursor": str(page["next_cursor"]),
+            "totalEstimate": int(page["total"]),
+        }
+
+    return provider
+
+
 def build_catalog_snapshot(
     conversations: Sequence[Mapping[str, Any]],
     journal_inventory: Mapping[str, Mapping[str, Any]],
@@ -362,6 +386,26 @@ def _project_row(
         ),
         "source_revision": "",
         "indexed_at": indexed_at,
+    }
+
+
+def _catalog_query_item(row: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "id": str(row.get("session_id") or ""),
+        "title": str(row.get("title") or ""),
+        "taskTitle": str(row.get("task_title") or ""),
+        "taskSummary": str(row.get("task_summary") or ""),
+        "agentId": str(row.get("agent_id") or ""),
+        "agentCode": str(row.get("agent_code") or ""),
+        "agentDisplayName": str(row.get("agent_display_name") or ""),
+        "dialogueModelId": str(row.get("dialogue_model_id") or ""),
+        "sessionKind": str(row.get("session_kind") or ""),
+        "status": str(row.get("status") or ""),
+        "currentPhase": str(row.get("current_phase") or ""),
+        "childStatus": str(row.get("child_status") or ""),
+        "conversationIndexVisibility": str(row.get("visibility") or ""),
+        "updatedAt": str(row.get("updated_at") or ""),
+        "lastActive": str(row.get("last_active_at") or ""),
     }
 
 

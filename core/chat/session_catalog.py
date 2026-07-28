@@ -481,6 +481,90 @@ class SessionCatalogStore:
         except sqlite3.Error as exc:
             _raise_sqlite_error(exc)
 
+    def query_session_page(
+        self,
+        *,
+        q: str = "",
+        agent_id: str = "",
+        session_kind: str = "",
+        state: str = "",
+        sort: str = "updatedAt_desc",
+        limit: int = 50,
+        cursor: str = "",
+    ) -> dict[str, Any]:
+        """Run the frozen session-list query contract in SQLite."""
+
+        clauses = ["workspace_key=?"]
+        parameters: list[Any] = [self.workspace_key]
+        normalized_agent_id = str(agent_id or "").strip()
+        normalized_kind = str(session_kind or "").strip().lower()
+        normalized_state = str(state or "").strip().lower()
+        if normalized_agent_id:
+            clauses.append("agent_id=?")
+            parameters.append(normalized_agent_id)
+        if normalized_kind:
+            clauses.append("session_kind=?")
+            parameters.append(normalized_kind)
+        if normalized_state:
+            clauses.append(
+                "(lower(status)=? OR lower(current_phase)=? OR lower(child_status)=?)"
+            )
+            parameters.extend((normalized_state, normalized_state, normalized_state))
+        query = str(q or "").strip()
+        if query:
+            escaped = f"%{_escape_like(query)}%"
+            clauses.append(
+                "("
+                + " OR ".join(
+                    f"{column} LIKE ? ESCAPE '\\'" for column in _QUERY_SEARCH_COLUMNS
+                )
+                + ")"
+            )
+            parameters.extend(escaped for _ in _QUERY_SEARCH_COLUMNS)
+        normalized_sort = str(sort or "").strip()
+        sort_sql = {
+            "updatedAt_desc": "updated_at DESC, session_id DESC",
+            "updatedAt_asc": "updated_at ASC, session_id ASC",
+            "title_asc": "title COLLATE NOCASE ASC, session_id ASC",
+            "title_desc": "title COLLATE NOCASE DESC, session_id DESC",
+        }.get(normalized_sort)
+        if sort_sql is None:
+            raise ValueError(f"Unsupported session catalog query sort: {sort}")
+        bounded_limit = min(1000, max(1, int(limit)))
+        bounded_cursor = _coerce_cursor(cursor)
+        where_sql = " AND ".join(clauses)
+        try:
+            with closing(self._connect()) as connection:
+                self._validate_schema(connection)
+                total = int(
+                    connection.execute(
+                        f"SELECT COUNT(*) FROM sessions WHERE {where_sql}",
+                        tuple(parameters),
+                    ).fetchone()[0]
+                )
+                rows = connection.execute(
+                    f"""
+                    SELECT {", ".join(_SESSION_COLUMNS)}
+                    FROM sessions
+                    WHERE {where_sql}
+                    ORDER BY {sort_sql}
+                    LIMIT ? OFFSET ?
+                    """,
+                    tuple(parameters + [bounded_limit, bounded_cursor]),
+                ).fetchall()
+                return {
+                    "rows": [dict(row) for row in rows],
+                    "total": total,
+                    "cursor": bounded_cursor,
+                    "next_cursor": (
+                        str(bounded_cursor + len(rows))
+                        if bounded_cursor + len(rows) < total
+                        else ""
+                    ),
+                }
+        except sqlite3.Error as exc:
+            _raise_sqlite_error(exc)
+
     def replace_sessions(
         self,
         rows: Sequence[Mapping[str, Any]],
@@ -812,6 +896,13 @@ def _quick_check(connection: sqlite3.Connection) -> str:
 
 def _escape_like(value: str) -> str:
     return str(value).replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _coerce_cursor(value: Any) -> int:
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
 
 
 def _utcnow() -> str:
