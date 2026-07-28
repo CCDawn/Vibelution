@@ -2090,7 +2090,8 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourceCollectionConversationPanelStylesSource).not.toContain("sourceCollectionConversationPanelCompact:\n    \"sourceCollectionConversationPanelCompact h-full");
     expect(teamSourceResultListSource).toContain("flex-1");
     expect(teamSourceResultListSource).toContain("overflow-auto");
-    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionExtractionPanels).toContain("grid-cols-[minmax(0,1fr)]");
+    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionExtractionPanels).toContain("flex-col");
+    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionExtractionPanels).toContain("overflow-auto");
     expect(teamStageCommandBarSource).toContain('data-vui-product="team-stage-command-bar"');
     expect(teamStageCommandBarSource).toContain("flex flex-wrap items-center justify-between");
     expect(teamStageCardSource).toContain('data-vui-product="team-stage-card"');
