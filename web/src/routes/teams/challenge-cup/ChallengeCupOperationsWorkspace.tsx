@@ -61,7 +61,7 @@ export type ChallengeCupOperationsWorkspaceProps = {
 
 type QuestionRow = {
   id: string;
-  kind: "完整样例" | "通用性测试";
+  kind: "黄金样例" | "试运行题";
   machinePassed: boolean;
   humanApproved: boolean;
 };
@@ -142,8 +142,8 @@ export function ChallengeCupOperationsWorkspace({
   const stage2 = projection?.stage2BatchGovernance;
   const stage3 = projection?.stage3DeepResearchDelivery;
   const goldenId = stage1?.mvpManifest.goldenSampleQuestionId || stage1?.singleQuestionSample.questionId || "SCI-096";
-  const testIds = stage1?.mvpManifest.testQuestionIds ?? [];
-  const questionIds = [goldenId, ...testIds].filter(Boolean);
+  const trialIds = stage1?.mvpManifest.trialQuestionIds ?? stage1?.mvpManifest.testQuestionIds ?? [];
+  const questionIds = [goldenId, ...trialIds].filter(Boolean);
   const machineCompleted = stage1?.mvpManifest.completedQuestionCount ?? 0;
   const machineRequired = stage1?.mvpManifest.requiredQuestionCount ?? 4;
   const humanApproved = stage1?.trialRun.outcomeCounts.approved ?? (stage1?.acceptance.allFourHumanGatesApproved ? 1 : 0);
@@ -155,7 +155,7 @@ export function ChallengeCupOperationsWorkspace({
   const questions = useMemo<QuestionRow[]>(
     () => questionIds.map((id, index) => ({
       id,
-      kind: index === 0 ? "完整样例" : "通用性测试",
+      kind: index === 0 ? "黄金样例" : "试运行题",
       machinePassed: index === 0
         ? Boolean(stage1?.singleQuestionSample.completed)
         : Boolean(stage1?.trialRun.completedQuestionIds.includes(id)),
@@ -546,7 +546,7 @@ export function ChallengeCupOperationsWorkspace({
               <span>{programTrack}</span>
             </div>
             <h1 id="challenge-program-title">{programTitle}</h1>
-            <p>当前 MVP 聚焦“1 个完整样例 + 3 个通用性测试”，后续规模化任务保持明确延后。</p>
+            <p>当前 MVP 聚焦“1 个黄金样例 + 3 个试运行题（共 4 题）”，后续规模化任务保持明确延后。</p>
           </div>
           <div className={cx("program-actions")}>
             <Link className={cx("button", "secondary")} to={graphHref}>
@@ -698,7 +698,7 @@ export function ChallengeCupOperationsWorkspace({
                   <section className={cx("surface", "next-action")} aria-labelledby="challenge-next-action-title">
                     <span className={cx("eyebrow")}>下一步</span>
                     <h2 id="challenge-next-action-title">{reviewRequired > 0 ? `完成 ${reviewRequired} 题人工抽检` : "准备 MVP 验收记录"}</h2>
-                    <p>{reviewRequired > 0 ? "机器验证已完成，但尚不能把测试题计为人工验收通过。" : "机器验证与人工审核均已完成，可进入 MVP 验收记录。"}</p>
+                    <p>{reviewRequired > 0 ? "机器验证已完成，但尚不能把试运行题计为人工验收通过。" : "机器验证与人工审核均已完成，可进入 MVP 验收记录。"}</p>
                     <div className={cx("action-meta")}><span>预计操作</span><strong>逐题审查 · {reviewRequired} 项</strong></div>
                     <VNativeButton className={cx("button", "primary", "full")} type="button" onClick={() => selectTab("questions")}>进入人工审核</VNativeButton>
                   </section>
