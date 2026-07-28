@@ -72,6 +72,59 @@ def test_shadow_comparator_reports_only_bounded_contract_mismatches():
     assert not hasattr(comparison, "items")
 
 
+def test_session_query_cache_lookup_never_runs_collision_repair(monkeypatch):
+    monkeypatch.setattr(session_service, "_sync_agent_directory_project_root", lambda: None)
+    monkeypatch.setattr(session_service, "_session_list_source_signature", lambda: ("source",))
+
+    def should_not_repair(**_kwargs):
+        raise AssertionError("query must not repair")
+
+    monkeypatch.setattr(
+        session_service,
+        "_repair_agent_direct_session_collisions",
+        should_not_repair,
+    )
+    monkeypatch.setattr(session_service, "_get_session_list_cache", lambda **_kwargs: None)
+
+    assert session_service._get_cached_session_query_sessions(now=0.0) is None
+
+
+def test_session_query_cache_miss_loads_without_legacy_repair(monkeypatch):
+    summaries = build_session_query_summaries(2)
+    observed_repair_flags: list[bool] = []
+    monkeypatch.setattr(session_service, "get_config", lambda: AppConfig())
+    monkeypatch.setattr(session_service, "_get_cached_session_query_sessions", lambda **_kwargs: None)
+    monkeypatch.setattr(session_service, "_record_session_list_query_event", lambda **_kwargs: None)
+
+    def load_sessions(*, repair_collisions=True, **_kwargs):
+        observed_repair_flags.append(bool(repair_collisions))
+        return summaries
+
+    monkeypatch.setattr(session_service, "list_sessions", load_sessions)
+
+    payload = session_service.query_sessions(limit=1)
+
+    assert payload["items"] == summaries[:1]
+    assert observed_repair_flags == [False]
+
+
+def test_session_list_prewarm_loads_without_legacy_repair(monkeypatch):
+    summaries = build_session_query_summaries(2)
+    observed_repair_flags: list[bool] = []
+    monkeypatch.setattr(session_service, "_record_session_list_prewarm_event", lambda **_kwargs: None)
+
+    def load_sessions(*, repair_collisions=True, **_kwargs):
+        observed_repair_flags.append(bool(repair_collisions))
+        return summaries
+
+    monkeypatch.setattr(session_service, "list_sessions", load_sessions)
+
+    result = session_service.prewarm_session_list_cache(reason="test")
+
+    assert result["status"] == "completed"
+    assert observed_repair_flags == [False]
+
+
 def test_query_shadow_match_never_changes_legacy_response(monkeypatch):
     summaries = build_session_query_summaries(5)
     monkeypatch.setattr(

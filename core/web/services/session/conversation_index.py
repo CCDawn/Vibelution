@@ -749,9 +749,8 @@ def _conversation_agent_from_state(agent: dict[str, Any]) -> dict[str, Any]:
 def _get_cached_session_query_sessions(*, now: float) -> list[dict[str, Any]] | None:
     s = _service()
     s._sync_agent_directory_project_root()
+    # Query paths must never repair canonical Agent/session collisions.
     signature = (s._session_list_source_signature(), False)
-    if s._repair_agent_direct_session_collisions(source_signature=signature):
-        signature = (s._session_list_source_signature(), False)
     cached = s._get_session_list_cache(
         now=now,
         signature=signature,
@@ -789,7 +788,8 @@ def query_sessions(
     started_at = s._perf_counter()
     sessions = s._get_cached_session_query_sessions(now=started_at)
     if sessions is None:
-        sessions = s.list_sessions()
+        # A cache miss remains a read-only legacy projection.
+        sessions = s.list_sessions(repair_collisions=False)
     normalized_limit = s._coerce_session_query_limit(limit)
     normalized_cursor = s._coerce_nonnegative_int(cursor)
     normalized_query = str(q or "").strip().lower()

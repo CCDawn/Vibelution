@@ -1153,7 +1153,8 @@ def prewarm_session_list_cache(*, reason: str = "startup") -> dict[str, Any]:
         s._SESSION_LIST_PREWARM_INFLIGHT = True
 
     try:
-        sessions = s.list_sessions()
+        # Startup warming must not use a read to persist collision repairs.
+        sessions = s.list_sessions(repair_collisions=False)
         duration_ms = s._elapsed_ms(started_at)
         result = {
             "status": "completed",
