@@ -29,12 +29,58 @@ class ChallengeCupVersioningError(ValueError):
     """Raised when a candidate versioning request is invalid."""
 
 
-def get_candidate_versioning_status(team_id: str) -> dict[str, Any]:
+def get_candidate_versioning_status(
+    team_id: str,
+    research_project_id: str = "",
+) -> dict[str, Any]:
     normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    normalized_project_id = _trim_text(research_project_id, max_length=160)
     team = team_service.get_team(normalized_team_id)
     with _LOCK:
         store = _load_versioning_store(normalized_team_id)
-    return _status_payload(normalized_team_id, team, store)
+    return _status_payload(
+        normalized_team_id,
+        team,
+        store,
+        research_project_id=normalized_project_id,
+    )
+
+
+def require_candidate_version(
+    team_id: str,
+    version_id: str,
+    *,
+    research_project_id: str = "",
+) -> dict[str, Any]:
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    normalized_version_id = _normalize_required_id(
+        version_id,
+        "Candidate version id is required.",
+    )
+    normalized_project_id = _trim_text(research_project_id, max_length=160)
+    team_service.get_team(normalized_team_id)
+    with _LOCK:
+        store = _load_versioning_store(normalized_team_id)
+        version = next(
+            (
+                item
+                for item in store.get("versionHistory") or []
+                if isinstance(item, dict)
+                and str(item.get("versionId") or "") == normalized_version_id
+            ),
+            None,
+        )
+    if version is None:
+        raise ChallengeCupVersioningError("Candidate version not found.")
+    if (
+        normalized_project_id
+        and _trim_text(version.get("researchProjectId"), max_length=160)
+        != normalized_project_id
+    ):
+        raise ChallengeCupVersioningError(
+            "Candidate version does not belong to this research project."
+        )
+    return dict(version)
 
 
 def record_candidate_version_event(team_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -109,14 +155,45 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _status_payload(team_id: str, team: dict[str, Any], store: dict[str, Any]) -> dict[str, Any]:
+def _status_payload(
+    team_id: str,
+    team: dict[str, Any],
+    store: dict[str, Any],
+    *,
+    research_project_id: str = "",
+) -> dict[str, Any]:
     versions = [item for item in store.get("versionHistory") or [] if isinstance(item, dict)]
     relations = [item for item in store.get("relations") or [] if isinstance(item, dict)]
     rejections = [item for item in store.get("rejectionArchive") or [] if isinstance(item, dict)]
+    if research_project_id:
+        versions = [
+            item
+            for item in versions
+            if _trim_text(item.get("researchProjectId"), max_length=160)
+            == research_project_id
+        ]
+        version_ids = {
+            str(item.get("versionId") or "") for item in versions
+        }
+        relations = [
+            item
+            for item in relations
+            if _trim_text(item.get("researchProjectId"), max_length=160)
+            == research_project_id
+            or str(item.get("sourceVersionId") or "") in version_ids
+        ]
+        rejections = [
+            item
+            for item in rejections
+            if _trim_text(item.get("researchProjectId"), max_length=160)
+            == research_project_id
+            or str(item.get("versionId") or "") in version_ids
+        ]
     return {
         "schemaVersion": SCHEMA_VERSION,
         "storeKind": STORE_KIND,
         "teamId": team_id,
+        "researchProjectId": research_project_id,
         "team": {"teamId": team.get("teamId", team_id), "name": team.get("name", "")},
         "versionHistory": versions[-40:],
         "relations": relations[-60:],
@@ -145,6 +222,10 @@ def _version_record(
     return {
         "versionId": _new_record_id("candidate-version"),
         "teamId": team_id,
+        "researchProjectId": _trim_text(
+            payload.get("researchProjectId"),
+            max_length=160,
+        ),
         "operation": operation,
         "candidateId": candidate_id,
         "versionLabel": _trim_text(payload.get("versionLabel"), max_length=120)
@@ -177,6 +258,7 @@ def _relation_record(version: dict[str, Any], payload: dict[str, Any], *, operat
         return None
     return {
         "relationId": _new_record_id("candidate-version-relation"),
+        "researchProjectId": version["researchProjectId"],
         "relationType": relation_type,
         "sourceVersionId": version["versionId"],
         "targetVersionId": target_version_id,
@@ -191,6 +273,7 @@ def _relation_record(version: dict[str, Any], payload: dict[str, Any], *, operat
 def _rejection_record(version: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
     return {
         "rejectionId": _new_record_id("candidate-rejection"),
+        "researchProjectId": version["researchProjectId"],
         "candidateId": version["candidateId"],
         "versionId": version["versionId"],
         "reason": version["reason"] or version["summary"],
