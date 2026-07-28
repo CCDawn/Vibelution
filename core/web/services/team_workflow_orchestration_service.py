@@ -83,6 +83,12 @@ from core.web.services.team_workflow.research_project_agent_sessions import (
     resolve_research_project_identity_from_record,
     resolve_research_project_agent_session,
 )
+from core.web.services.team_workflow.research_project_agent_tasks import (
+    ResearchProjectAgentTaskError,
+    get_research_project_agent_task_status,
+    start_research_project_agent_task,
+    update_research_project_agent_task_status,
+)
 from core.web.services.team_workflow.source_collection.candidates import (
     extract_source_collection_candidates,
     import_data_record_as_source_candidate,

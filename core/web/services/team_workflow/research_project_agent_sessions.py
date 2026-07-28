@@ -30,6 +30,10 @@ ROLE_LABELS = {
     "source_extractor": "资料提炼",
     "source_relation_mapper": "资料关系整理",
     "source_ingestor": "资料入库",
+    "challenge_cup_experiment_planner": "实验规划",
+    "challenge_cup_experiment_ledger": "实验证据",
+    "challenge_cup_iteration_planner": "迭代决策",
+    "challenge_cup_versioning": "版本治理",
 }
 _REGISTRY_LOCK = threading.RLock()
 
