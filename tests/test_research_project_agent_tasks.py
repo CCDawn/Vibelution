@@ -17,9 +17,13 @@ from core.web.services import (
 )
 from core.web.services.team_workflow.research_project_agent_tasks import (
     ResearchProjectAgentTaskError,
+    get_research_project_agent_task_context,
     get_research_project_agent_task_status,
     start_research_project_agent_task,
     update_research_project_agent_task_status,
+)
+from core.web.services.team_workflow.experiment_kernel import (
+    _select_experiment_stage_round,
 )
 
 
@@ -302,3 +306,112 @@ def test_agent_task_routes_expose_typed_start_and_status_payloads(
     assert started.json()["task"]["turn"]["turnId"] == "turn-1"
     assert status_response.status_code == 200
     assert status_response.json()["tasks"][0]["taskId"] == started.json()["task"]["taskId"]
+
+
+def test_experiment_task_context_is_project_scoped_and_bounded(
+    tmp_path, monkeypatch
+):
+    team, project, _agents = _team_project_and_agents(tmp_path, monkeypatch)
+    _accepted_submitter(monkeypatch)
+    started = start_research_project_agent_task(
+        team["teamId"],
+        project["projectId"],
+        {
+            "taskKind": "experiment_design",
+            "targetRef": "stage-round-project-a",
+            "idempotencyKey": "design-context-project-a",
+        },
+    )
+    other_project = team_workflow_orchestration_service.create_research_project(
+        team["teamId"],
+        {"name": "另一个项目"},
+    )["project"]
+    plan_store = {
+        "plans": [
+            {
+                "planId": "plan-project-a",
+                "researchProjectId": project["projectId"],
+                "experimentName": project["name"],
+                "title": "本项目计划",
+                "status": "draft",
+                "revision": 2,
+                "stageRoundId": "stage-round-project-a",
+                "experimentContract": {
+                    "researchQuestion": "Does A improve?",
+                    "dataset": "dataset-a",
+                    "baseline": "baseline-a",
+                    "metrics": ["metric-a"],
+                },
+                "readiness": {"readyForPlanReview": True},
+                "activeFullRunResult": {
+                    "fullRunResultId": "full-result-a",
+                    "status": "passed",
+                    "metricName": "accuracy",
+                    "metricValue": "0.91",
+                    "delta": "+0.02",
+                    "resultPath": str(tmp_path / "must-not-leak.json"),
+                    "logRef": str(tmp_path / "must-not-leak.log"),
+                },
+                "updatedAt": "2026-07-28T01:00:00+00:00",
+            },
+            {
+                "planId": "plan-project-b",
+                "researchProjectId": other_project["projectId"],
+                "experimentName": other_project["name"],
+                "title": "其他项目计划",
+                "status": "draft",
+            },
+        ]
+    }
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "_load_experiment_plan_store",
+        lambda _team_id: plan_store,
+    )
+
+    context = get_research_project_agent_task_context(
+        team["teamId"],
+        project["projectId"],
+        started["task"]["taskId"],
+    )
+    encoded = json.dumps(context, ensure_ascii=False).lower()
+
+    assert context["task"]["taskKind"] == "experiment_design"
+    assert context["experiment"]["planCount"] == 1
+    assert context["experiment"]["plans"][0]["planId"] == "plan-project-a"
+    assert context["experiment"]["plans"][0]["fullRunResult"] == {
+        "resultId": "full-result-a",
+        "status": "passed",
+        "metricName": "accuracy",
+        "metricValue": "0.91",
+        "delta": "+0.02",
+    }
+    assert "plan-project-b" not in encoded
+    assert "storagepath" not in encoded
+    assert str(tmp_path).lower() not in encoded
+
+
+def test_experiment_stage_round_selection_is_project_scoped():
+    rounds = [
+        {
+            "stageRoundId": "round-project-a",
+            "stageType": "experiment",
+            "researchProjectId": "project-a",
+            "status": "planning",
+            "createdAt": "2026-07-28T01:00:00+00:00",
+        },
+        {
+            "stageRoundId": "round-project-b",
+            "stageType": "experiment",
+            "researchProjectId": "project-b",
+            "status": "planning",
+            "createdAt": "2026-07-28T02:00:00+00:00",
+        },
+    ]
+
+    selected = _select_experiment_stage_round(
+        {"researchProjectId": "project-a"},
+        rounds,
+    )
+
+    assert selected["stageRoundId"] == "round-project-a"

@@ -60,6 +60,132 @@ def test_challenge_cup_experiment_tool_wraps_ledger_without_execution(monkeypatc
     assert blocked_events[-1]["level"] == "warning"
 
 
+def test_experiment_tool_binds_project_task_and_completes_writeback(
+    monkeypatch,
+):
+    updates = []
+    created_payloads = []
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "get_research_project_agent_task_context",
+        lambda team_id, project_id, task_id: {
+            "teamId": team_id,
+            "researchProjectId": project_id,
+            "task": {
+                "taskId": task_id,
+                "taskKind": "experiment_design",
+                "agentId": "agent-planner",
+            },
+            "experiment": {"plans": [], "planCount": 0},
+        },
+        raising=False,
+    )
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "require_research_project_agent_task",
+        lambda team_id, project_id, task_id, **_kwargs: {
+            "taskId": task_id,
+            "taskKind": "experiment_design",
+            "agentId": "agent-planner",
+            "researchProjectId": project_id,
+        },
+        raising=False,
+    )
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "create_experiment_plan",
+        lambda team_id, payload: created_payloads.append(dict(payload))
+        or {
+            "teamId": team_id,
+            "plan": {
+                "planId": "plan-project-1",
+                "researchProjectId": payload["researchProjectId"],
+            },
+        },
+    )
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "update_research_project_agent_task_status",
+        lambda team_id, project_id, task_id, **kwargs: updates.append(
+            (team_id, project_id, task_id, kwargs)
+        )
+        or {"taskId": task_id, "status": kwargs["status"]},
+    )
+
+    context = json.loads(
+        challenge_cup_experiment_context_tool(
+            team_id="research-team",
+            research_project_id="project-1",
+            task_id="task-design-1",
+        )
+    )
+    result = json.loads(
+        challenge_cup_experiment_writeback_tool(
+            team_id="research-team",
+            research_project_id="project-1",
+            task_id="task-design-1",
+            operation="create_plan",
+            payload_json='{"title":"Project plan"}',
+            recorded_by_agent="agent-planner",
+        )
+    )
+
+    assert context["taskContext"]["researchProjectId"] == "project-1"
+    assert result["status"] == "ok"
+    assert created_payloads[0]["researchProjectId"] == "project-1"
+    assert created_payloads[0]["createdByAgent"] == "agent-planner"
+    assert updates == [
+        (
+            "research-team",
+            "project-1",
+            "task-design-1",
+            {"status": "completed", "result_refs": ["plan-project-1"]},
+        )
+    ]
+    assert result["task"]["status"] == "completed"
+
+
+def test_experiment_evidence_writeback_requires_plan_in_same_project(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "require_research_project_agent_task",
+        lambda _team_id, project_id, task_id, **_kwargs: {
+            "taskId": task_id,
+            "taskKind": "experiment_evidence_review",
+            "agentId": "agent-ledger",
+            "researchProjectId": project_id,
+        },
+        raising=False,
+    )
+
+    def reject_cross_project_plan(*_args, **_kwargs):
+        raise ValueError("Experiment plan does not belong to this research project.")
+
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "require_research_project_experiment_plan",
+        reject_cross_project_plan,
+        raising=False,
+    )
+
+    result = json.loads(
+        challenge_cup_experiment_writeback_tool(
+            team_id="research-team",
+            research_project_id="project-1",
+            task_id="task-ledger-1",
+            operation="register_full_run_result",
+            plan_id="plan-other-project",
+            payload_json='{"status":"passed"}',
+            recorded_by_agent="agent-ledger",
+        )
+    )
+
+    assert result["status"] == "error"
+    assert "does not belong" in result["message"]
+
+
 def test_challenge_cup_iteration_tool_wraps_research_loop_decisions(monkeypatch):
     scene_events = []
     monkeypatch.setattr(
