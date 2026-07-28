@@ -1,0 +1,400 @@
+.workspace {
+  display: grid;
+  gap: 16px;
+  color: var(--fg-primary);
+}
+
+.header,
+.sectionHeading,
+.headerActions,
+.cardTopline,
+.metadata,
+.artifact {
+  display: flex;
+  align-items: center;
+}
+
+.header {
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.header h2,
+.section h3,
+.section h4,
+.header p,
+.section p {
+  margin: 0;
+}
+
+.header h2 {
+  margin-top: 4px;
+  font-size: 22px;
+  line-height: 1.3;
+}
+
+.header p,
+.sectionHeading p,
+.state span {
+  color: var(--fg-secondary);
+}
+
+.eyebrow,
+.sectionHeading > span,
+.factGrid span,
+.selection > div > span,
+.fact > span {
+  color: var(--fg-secondary);
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: .02em;
+}
+
+.headerActions {
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
+.anchorNav {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  overflow: hidden;
+  border: 1px solid var(--vui-border-subtle);
+  border-radius: var(--vui-radius-panel-soft);
+  background: var(--vui-surface-panel);
+}
+
+.anchorNav a {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 9px 10px;
+  color: inherit;
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.anchorNav a + a {
+  border-left: 1px solid var(--vui-border-subtle);
+}
+
+.anchorNav span {
+  display: grid;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--vui-surface-inset);
+  color: var(--fg-secondary);
+}
+
+.section {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  scroll-margin-top: 20px;
+  border: 1px solid var(--vui-border-subtle);
+  border-radius: var(--vui-radius-panel-soft);
+  background: var(--vui-surface-panel);
+}
+
+.sectionHeading {
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.sectionHeading > span {
+  padding-top: 3px;
+}
+
+.sectionHeading h3 {
+  font-size: 16px;
+}
+
+.sectionHeading p {
+  margin-top: 2px;
+  font-size: 12px;
+}
+
+.factGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.factGrid section {
+  display: grid;
+  gap: 4px;
+}
+
+.warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--state-warning) 34%, transparent);
+  border-radius: var(--vui-radius-panel-soft);
+  background: color-mix(in srgb, var(--state-warning) 8%, transparent);
+}
+
+.warning svg {
+  flex: 0 0 auto;
+  color: var(--state-warning);
+}
+
+.warning p {
+  margin-top: 2px;
+  color: var(--fg-secondary);
+  font-size: 12px;
+}
+
+.explanation,
+.selection,
+.plan {
+  display: grid;
+  gap: 10px;
+}
+
+.explanation dl,
+.hypothesisCard dl {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.explanation dl {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.explanation dl > div,
+.hypothesisCard dl > div {
+  display: grid;
+  gap: 3px;
+}
+
+.explanation dt,
+.hypothesisCard dt {
+  color: var(--fg-secondary);
+  font-size: 12px;
+}
+
+.explanation dd,
+.hypothesisCard dd {
+  margin: 0;
+}
+
+.cardList,
+.reviewGroups,
+.timeline {
+  display: grid;
+  gap: 9px;
+}
+
+.evidenceCard,
+.hypothesisCard,
+.reviewGroups > article,
+.timeline article {
+  padding: 12px;
+  border: 1px solid var(--vui-border-subtle);
+  border-radius: var(--vui-radius-panel-soft);
+  background: var(--vui-surface-card);
+}
+
+.cardTopline {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.metadata {
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin-top: 6px;
+  color: var(--fg-secondary);
+  font-size: 12px;
+}
+
+.metadata a {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--accent-cool);
+}
+
+.fact {
+  margin-top: 10px;
+  padding: 9px 10px;
+  border-left: 3px solid var(--accent-cool);
+  background: var(--vui-surface-inset);
+}
+
+.fact p {
+  margin-top: 3px;
+}
+
+.missing,
+.missingLine {
+  color: var(--state-warning);
+  font-size: 12px;
+}
+
+.missingLine {
+  margin-top: 6px;
+}
+
+.compactList {
+  display: grid;
+  gap: 3px;
+  margin: 3px 0 0;
+  padding-left: 18px;
+}
+
+.twoColumn {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.hypothesisCard {
+  display: grid;
+  gap: 10px;
+}
+
+.hypothesisCard h4 {
+  font-size: 15px;
+  line-height: 1.45;
+}
+
+.reviewGroups > article {
+  display: grid;
+  gap: 8px;
+}
+
+.reviewGrid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.reviewGrid > div {
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  min-width: 0;
+  padding: 8px;
+  border-radius: var(--vui-radius-control);
+  background: var(--vui-surface-inset);
+}
+
+.reviewGrid span,
+.reviewGrid small {
+  color: var(--fg-secondary);
+  font-size: 11px;
+}
+
+.reviewGrid p {
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.selection {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.selection > div,
+.planGrid > div {
+  display: grid;
+  align-content: start;
+  gap: 5px;
+  padding: 10px;
+  border-radius: var(--vui-radius-control);
+  background: var(--vui-surface-inset);
+}
+
+.planGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.workPackage {
+  display: grid;
+  gap: 5px;
+  padding: 10px;
+  border: 1px solid var(--vui-border-subtle);
+  border-radius: var(--vui-radius-control);
+}
+
+.workPackage small {
+  color: var(--fg-secondary);
+}
+
+.timeline article {
+  display: grid;
+  grid-template-columns: 76px 1fr;
+  gap: 12px;
+}
+
+.timeline article > span {
+  color: var(--accent-cool);
+  font-weight: 700;
+}
+
+.timeline small {
+  color: var(--state-warning);
+}
+
+.artifact {
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.artifact > div {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+
+.artifact code,
+.state code {
+  overflow-wrap: anywhere;
+  color: var(--fg-secondary);
+  font-size: 12px;
+}
+
+.state {
+  display: grid;
+  justify-items: start;
+  gap: 10px;
+  min-height: 240px;
+  align-content: center;
+}
+
+.secondaryButton {
+  min-height: 32px;
+  padding: 6px 10px;
+  border: 1px solid var(--vui-border-subtle);
+  border-radius: var(--radius-control);
+  background: var(--vui-surface-control);
+  color: var(--fg-primary);
+  cursor: pointer;
+}
+
+@media (max-width: 1320px) {
+  .anchorNav {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .anchorNav a:nth-child(5) {
+    border-left: 0;
+  }
+
+  .anchorNav a:nth-child(n + 5) {
+    border-top: 1px solid var(--vui-border-subtle);
+  }
+
+  .reviewGrid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}

@@ -514,6 +514,7 @@ from core.web.services.team_workflow.experiment import (
 )
 from core.web.services.team_workflow.challenge_question_runs import (
     bind_challenge_research_task_model,
+    get_challenge_question_run_detail,
     get_challenge_question_run_status,
     normalize_challenge_research_task_policy,
     publish_research_project_challenge_question_output,

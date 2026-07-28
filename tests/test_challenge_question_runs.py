@@ -309,6 +309,98 @@ def test_register_valid_pending_candidate_counts_sample_but_not_completion(tmp_p
     assert response["summary"]["completedCount"] == 0
 
 
+def test_get_question_detail_returns_latest_immutable_artifact(tmp_path, monkeypatch):
+    _isolate_store(tmp_path, monkeypatch)
+    first_output = _output(approved=True)
+    first_output["run"]["run_id"] = "sci-096-v1"
+    first = challenge_question_runs.register_challenge_question_output(
+        "research-team",
+        {
+            "output": first_output,
+            "citationChecks": _citation_checks(first_output),
+            "registeredBy": "source-finder-agent",
+        },
+    )
+    second_output = deepcopy(first_output)
+    second_output["run"]["run_id"] = "sci-096-v2"
+    second_output["feedback_iterations"][0]["changes"] = ["Clarified the evidence boundary."]
+    second = challenge_question_runs.register_challenge_question_output(
+        "research-team",
+        {
+            "output": second_output,
+            "citationChecks": _citation_checks(second_output),
+            "registeredBy": "review-agent",
+            "parentRunId": "sci-096-v1",
+        },
+    )
+
+    detail = challenge_question_runs.get_challenge_question_run_detail(
+        "research-team",
+        "SCI-096",
+    )
+
+    assert detail["questionId"] == "SCI-096"
+    assert detail["selectedRunId"] == "sci-096-v2"
+    assert detail["record"]["recordId"] == second["record"]["recordId"]
+    assert detail["output"]["run"]["run_id"] == "sci-096-v2"
+    assert detail["artifact"]["sha256"] == second["record"]["outputSha256"]
+    assert detail["artifact"]["immutable"] is True
+    assert [item["runId"] for item in detail["runs"]] == ["sci-096-v1", "sci-096-v2"]
+    assert detail["runs"][0]["outputSha256"] == first["record"]["outputSha256"]
+
+
+def test_get_question_detail_can_select_prior_run_without_active_project_fallback(tmp_path, monkeypatch):
+    _isolate_store(tmp_path, monkeypatch)
+    output = _output(approved=True)
+    output["run"]["run_id"] = "sci-096-v1"
+    challenge_question_runs.register_challenge_question_output(
+        "research-team",
+        {
+            "output": output,
+            "citationChecks": _citation_checks(output),
+            "registeredBy": "source-finder-agent",
+        },
+    )
+
+    detail = challenge_question_runs.get_challenge_question_run_detail(
+        "research-team",
+        "SCI-096",
+        run_id="sci-096-v1",
+    )
+
+    assert detail["selectedRunId"] == "sci-096-v1"
+    assert detail["output"]["question_id"] == "SCI-096"
+    assert "researchProjectId" not in detail
+
+
+def test_get_question_detail_fails_closed_for_unknown_question_or_tampered_artifact(tmp_path, monkeypatch):
+    _isolate_store(tmp_path, monkeypatch)
+    with pytest.raises(ValueError, match="challenge_question_run_not_found"):
+        challenge_question_runs.get_challenge_question_run_detail(
+            "research-team",
+            "SCI-097",
+        )
+
+    output = _output(approved=True)
+    response = challenge_question_runs.register_challenge_question_output(
+        "research-team",
+        {
+            "output": output,
+            "citationChecks": _citation_checks(output),
+            "registeredBy": "source-finder-agent",
+        },
+    )
+    artifact = tmp_path / "challenge_program" / "question_runs" / "SCI-096" / "run-sci-096.json"
+    artifact.write_text("{}", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="challenge_question_run_artifact_mismatch"):
+        challenge_question_runs.get_challenge_question_run_detail(
+            "research-team",
+            "SCI-096",
+            run_id=response["record"]["runId"],
+        )
+
+
 def test_revised_question_run_records_parent_lineage_and_is_immutable(tmp_path, monkeypatch):
     _isolate_store(tmp_path, monkeypatch)
     parent_output = _output()

@@ -1903,3 +1903,163 @@ export type TeamCaseState = {
   participantsConsidered?: number;
   demoMapping?: string;
 };
+
+export type ChallengeQuestionHumanGate = {
+  required: true;
+  decision: "pending" | "approved" | "revision_requested" | "rejected";
+  rationale: string;
+  reviewer?: string;
+  decided_at?: string;
+};
+
+export type ChallengeQuestionEvidence = {
+  evidence_id: string;
+  title: string;
+  source_type: string;
+  source_url: string;
+  doi?: string;
+  publication_date?: string;
+  retrieved_at: string;
+  fact: string;
+  relation: "supports" | "challenges" | "context" | "method" | "boundary";
+  verification_status: string;
+  limitations?: string[];
+};
+
+export type ChallengeQuestionHypothesis = {
+  hypothesis_id: string;
+  statement: string;
+  mechanism: string;
+  novelty_basis: string;
+  falsifiability: string;
+  predictions: string[];
+  supporting_evidence_refs: string[];
+  challenging_evidence_refs: string[];
+  boundary_conditions: string[];
+};
+
+export type ChallengeQuestionDimensionReview = {
+  hypothesis_id: string;
+  dimension: string;
+  rating: "insufficient" | "weak" | "mixed" | "adequate" | "strong";
+  rationale: string;
+  evidence_refs: string[];
+  reviewer: string;
+};
+
+export type ChallengeQuestionResearchPlan = {
+  objective: string;
+  method: string;
+  work_packages: Array<{
+    work_package_id: string;
+    goal: string;
+    inputs: string[];
+    procedure: string[];
+    outputs: string[];
+    dependencies: string[];
+  }>;
+  variables: string[];
+  controls: string[];
+  data_and_materials: string[];
+  analysis: string[];
+  success_criteria: string[];
+  failure_criteria: string[];
+  stop_conditions: string[];
+  resources: string[];
+  timeline: string[];
+  risks: string[];
+  human_gate: ChallengeQuestionHumanGate;
+};
+
+export type ChallengeQuestionOutput = {
+  schema_version: number;
+  catalog_id: string;
+  question_id: string;
+  question_en: string;
+  question_zh?: string;
+  status: string;
+  run: {
+    run_id: string;
+    started_at: string;
+    completed_at?: string;
+    model_provider: string;
+    model_id: string;
+    platform: string;
+    prompt_version?: string;
+    workflow_version?: string;
+    invocation_evidence_refs: string[];
+  };
+  problem_understanding: {
+    scope: string;
+    subquestions: string[];
+    assumptions: string[];
+    known_unknowns: string[];
+    human_gate: ChallengeQuestionHumanGate;
+  };
+  evidence: ChallengeQuestionEvidence[];
+  hypotheses: ChallengeQuestionHypothesis[];
+  dimension_reviews: ChallengeQuestionDimensionReview[];
+  selection: {
+    selected_hypothesis_id: string;
+    comparison_method: string;
+    tradeoffs: string[];
+    rejected_hypotheses: Array<{ hypothesis_id: string; reason: string }>;
+    human_gate: ChallengeQuestionHumanGate;
+  };
+  research_plan: ChallengeQuestionResearchPlan;
+  feedback_iterations: Array<{
+    round: number;
+    trigger: string;
+    input_refs: string[];
+    changes: string[];
+    unresolved_issues: string[];
+    human_feedback: string;
+  }>;
+  final_summary: {
+    answer_boundary: string;
+    selected_hypothesis: string;
+    research_plan_summary: string;
+    key_evidence_refs: string[];
+    counterevidence_refs: string[];
+    limitations: string[];
+    next_validation_step: string;
+  };
+  audit: {
+    source_catalog_sha256: string;
+    output_sha256: string;
+    schema_validation: string;
+    citation_validation: string;
+    human_review_status: string;
+  };
+};
+
+export type ChallengeQuestionRunRecord = {
+  recordId: string;
+  questionId: string;
+  runId: string;
+  status: string;
+  modelProvider?: string;
+  modelId?: string;
+  registeredBy?: string;
+  registeredAt?: string;
+  validation?: Record<string, unknown>;
+  humanGates?: Record<string, unknown>;
+  outputSha256?: string;
+  artifactPath?: string;
+  lineage?: Record<string, unknown>;
+  review?: Record<string, unknown>;
+};
+
+export type ChallengeQuestionRunDetailPayload = {
+  teamId: string;
+  questionId: string;
+  selectedRunId: string;
+  record: ChallengeQuestionRunRecord;
+  output: ChallengeQuestionOutput;
+  runs: ChallengeQuestionRunRecord[];
+  artifact: {
+    path: string;
+    sha256: string;
+    immutable: boolean;
+  };
+};

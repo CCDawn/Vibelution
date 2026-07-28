@@ -5,9 +5,12 @@
  */
 import type { ReactNode } from "react";
 import { CheckCircle2, Eye, Link2, Play, RefreshCw, Settings2 } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import type { NavigateFunction } from "react-router-dom";
 import { Link } from "react-router-dom";
 
+import { getChallengeQuestionRunDetail } from "../api/challengeQuestionRuns";
+import { queryKeys } from "../api/queryKeys";
 import type {
   ExperimentMethodId,
   ResearchProjectAgentTaskKind,
@@ -18,6 +21,7 @@ import {
   ChallengeCupOperationsWorkspace,
   type ChallengeCupWorkspaceAgent,
 } from "./teams/challenge-cup/ChallengeCupOperationsWorkspace";
+import { ChallengeQuestionDetailPanel } from "./teams/challenge-cup/ChallengeQuestionDetailPanel";
 import {
   researchIterationLifecycleStatusLabel,
   type ExperimentPlanningStatusPayload,
@@ -30,6 +34,7 @@ import {
   researchSourceCollectionRoute,
   researchWorkspaceStageRoute,
   researchWorkspaceViewLabel,
+  teamWorkspaceRoute,
   type ResearchStageWorkspaceView,
 } from "./teams/researchWorkspaceModel";
 import type {
@@ -208,6 +213,22 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
     researchStageStartFeedbackText,
   } = props;
   const workflowTeamId = selectedTeam?.teamId || RESEARCH_TEAM_ID;
+  const selectedChallengeQuestionId = searchParams.get("challengeQuestion")?.trim().toUpperCase() || "";
+  const selectedChallengeRunId = searchParams.get("challengeRun")?.trim() || "";
+  const challengeQuestionDetailQuery = useQuery({
+    queryKey: queryKeys.challengeQuestionRunDetail(
+      workflowTeamId,
+      selectedChallengeQuestionId,
+      selectedChallengeRunId,
+    ),
+    queryFn: () => getChallengeQuestionRunDetail(
+      workflowTeamId,
+      selectedChallengeQuestionId,
+      selectedChallengeRunId,
+    ),
+    enabled: challengeCupResearchTeamSelected && Boolean(selectedChallengeQuestionId),
+    staleTime: 60_000,
+  });
   const researchProjectAgentTasks = useResearchProjectAgentTasks({
     teamId: workflowTeamId,
     enabled: challengeCupResearchTeamSelected,
@@ -238,6 +259,23 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
     if (challengeCupResearchTeamSelected) {
       const challengeProjection = experimentPlanningStatus?.challengeProgramProjection;
       const challengeTeamId = workflowTeamId;
+      if (selectedChallengeQuestionId) {
+        return (
+          <ChallengeQuestionDetailPanel
+            requestedQuestionId={selectedChallengeQuestionId}
+            detail={challengeQuestionDetailQuery.data}
+            isLoading={challengeQuestionDetailQuery.isPending}
+            errorMessage={
+              challengeQuestionDetailQuery.error instanceof Error
+                ? challengeQuestionDetailQuery.error.message
+                : challengeQuestionDetailQuery.isError
+                  ? "challenge_question_run_unavailable"
+                  : ""
+            }
+            onClose={() => navigate(teamWorkspaceRoute(challengeTeamId))}
+          />
+        );
+      }
       const challengeAgents: ChallengeCupWorkspaceAgent[] = selectedTeamMemoryMembers.map((member) => {
         const normalizedRole = member.roleLabel.toLowerCase();
         const workspace = normalizedRole.includes("source") || normalizedRole.includes("资料")
