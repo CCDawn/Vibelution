@@ -32,6 +32,7 @@ Align language with frontend claim map: `web/src/routes/teams/README.md`.
 | Experiment plan/smoke/full-run | `experiment.py` |
 | Experiment private kernel | `experiment_kernel.py` |
 | Research loop / stage round | `research_loop.py` |
+| Research-project Agent tasks / flat sessions | `research_project_agent_tasks.py` + `research_project_agent_sessions.py` |
 | Knowledge / steward / graph / paper-note entry | `knowledge.py` |
 | Knowledge private kernel | `knowledge_kernel.py` |
 | Iteration / export / inbox / stage-round glue | `workflow_ops.py` |
@@ -83,6 +84,7 @@ Frontend claim alignment: `web/src/routes/teams/README.md` when present. Structu
 | Experiment design/execution entry | `experiment.py` |
 | Experiment plan/status/notify kernel | `experiment_kernel.py` |
 | Research loop / stage round | `research_loop.py` |
+| Flat project Agent task lifecycle | `research_project_agent_tasks.py` |
 | Knowledge ingestion / steward / graph / coordination entry | `knowledge.py` |
 | Knowledge private kernel | `knowledge_kernel.py` |
 

@@ -12,6 +12,7 @@ from core.web.services.team_workflow_orchestration_service import (
     DEFAULT_OWNER_AGENT_ID,
     WORKFLOW_KIND_CHALLENGE_CUP_RESEARCH,
     ResearchProjectError,
+    ResearchProjectAgentTaskError,
     ResearchProjectNameLockedError,
     ResearchProjectNotFoundError,
     TeamWorkflowOrchestrationError,
@@ -38,6 +39,7 @@ from core.web.services.team_workflow_orchestration_service import (
     get_official_model_evidence_status,
     get_paper_note_chunk_status,
     get_research_stage_round_status,
+    get_research_project_agent_task_status,
     get_source_collection_summary,
     get_source_quality_status,
     get_team_workflow_coordination_status,
@@ -68,6 +70,7 @@ from core.web.services.team_workflow_orchestration_service import (
     rollback_official_research_graph,
     run_experiment_smoke_run,
     prepare_experiment_full_run,
+    publish_research_project_challenge_question_output,
     run_knowledge_collection_ingestion,
     run_knowledge_ingestion_precheck,
     seed_source_collection_agent_session_context,
@@ -75,6 +78,7 @@ from core.web.services.team_workflow_orchestration_service import (
     start_knowledge_collection_ingestion_background,
     start_source_collection_stage_session_task,
     start_research_stage_round,
+    start_research_project_agent_task,
     start_source_collection_search_background,
     start_source_collection_run,
     submit_transfer_request,
@@ -167,6 +171,8 @@ class DataRecordSourceImportPayload(BaseModel):
 
 class SourceCollectionRunStartPayload(BaseModel):
     researchProjectId: str = Field("", max_length=160)
+    questionId: str = Field("", max_length=32)
+    requiredModelPolicy: dict[str, Any] = Field(default_factory=dict)
     title: str = Field("", max_length=180)
     workflowPurpose: str = Field("", max_length=80)
     workflowKind: str = Field("", max_length=80)
@@ -208,6 +214,8 @@ class SourceCollectionAgentSessionContextPayload(BaseModel):
 
 
 class SourceCollectionStageSessionTaskPayload(SourceCollectionAgentSessionContextPayload):
+    questionId: str = Field("", max_length=32)
+    requiredModelPolicy: dict[str, Any] = Field(default_factory=dict)
     requestedByAgent: str = Field("", max_length=160)
     returnTo: str = Field("", max_length=1000)
     returnLabel: str = Field("", max_length=240)
@@ -255,6 +263,89 @@ class ResearchProjectUpdatePayload(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=160)
     topic: str | None = Field(None, max_length=1000)
     experimentMethod: str | None = Field(None, max_length=120)
+
+
+class ResearchProjectAgentTaskStartPayload(BaseModel):
+    taskKind: str = Field("", max_length=80)
+    targetRef: str = Field("", max_length=200)
+    idempotencyKey: str = Field("", max_length=240)
+    formalRetry: bool = False
+    retryTaskId: str = Field("", max_length=200)
+    returnTo: str = Field("", max_length=1000)
+    returnLabel: str = Field("", max_length=240)
+
+
+class ResearchProjectAgentTaskTurnResponse(BaseModel):
+    accepted: bool = False
+    turnId: str = ""
+    status: str = ""
+    acceptedAt: str = ""
+
+
+class ResearchProjectAgentTaskResponse(BaseModel):
+    schemaVersion: int = 1
+    taskId: str
+    idempotencyKey: str = ""
+    taskKind: str
+    taskTitle: str
+    teamId: str
+    researchProjectId: str
+    experimentName: str
+    targetRef: str = ""
+    agentId: str
+    teamRole: str
+    roleKey: str
+    roleLabel: str
+    sessionId: str
+    sessionTitle: str
+    sessionAttempt: int = 1
+    sessionCreated: bool = False
+    retryOfSessionId: str = ""
+    retrySourceTaskId: str = ""
+    formalRetry: bool = False
+    status: str
+    turn: ResearchProjectAgentTaskTurnResponse
+    resultRefs: list[str] = Field(default_factory=list)
+    failureCode: str = ""
+    returnTo: str = ""
+    returnLabel: str = ""
+    createdAt: str = ""
+    updatedAt: str = ""
+    chatRoute: str
+
+
+class ResearchProjectAgentTaskStartResponse(BaseModel):
+    task: ResearchProjectAgentTaskResponse
+    researchProjectId: str
+    experimentName: str
+    sessionId: str
+    sessionTitle: str
+    sessionAttempt: int = 1
+    sessionCreated: bool = False
+    retryOfSessionId: str = ""
+    chatRoute: str
+    idempotentReplay: bool = False
+
+
+class ResearchProjectAgentTaskKindResponse(BaseModel):
+    taskKind: str
+    teamRole: str
+    roleKey: str
+    roleLabel: str
+    title: str
+
+
+class ResearchProjectAgentTaskStatusResponse(BaseModel):
+    schemaVersion: int = 1
+    teamId: str
+    researchProjectId: str
+    experimentName: str
+    tasks: list[ResearchProjectAgentTaskResponse] = Field(default_factory=list)
+    activeTasks: list[ResearchProjectAgentTaskResponse] = Field(default_factory=list)
+    supportedTaskKinds: list[ResearchProjectAgentTaskKindResponse] = Field(
+        default_factory=list
+    )
+    updatedAt: str = ""
 
 
 class ExperimentPlanCreatePayload(BaseModel):
@@ -440,6 +531,14 @@ class ChallengeQuestionOutputPayload(BaseModel):
     registeredBy: str = Field("", max_length=160)
     parentRunId: str = Field("", max_length=160)
     lineageRefs: list[str] = Field(default_factory=list, max_length=64)
+
+
+class ChallengeQuestionPublishPayload(ChallengeQuestionOutputPayload):
+    researchProjectId: str = Field(..., min_length=1, max_length=160)
+    questionId: str = Field(..., min_length=1, max_length=32)
+    taskId: str = Field(..., min_length=1, max_length=160)
+    turnId: str = Field(..., min_length=1, max_length=200)
+    projectEvidenceId: str = Field(..., min_length=1, max_length=160)
 
 
 class ChallengeQuestionReviewPayload(BaseModel):
@@ -728,6 +827,95 @@ def team_workflow_research_project_activate(team_id: str, project_id: str) -> di
         )
 
 
+@router.get(
+    "/teams/{team_id}/workflow-orchestration/research-projects/{project_id}/agent-tasks/status",
+    response_model=ResearchProjectAgentTaskStatusResponse,
+)
+def team_workflow_research_project_agent_task_status(
+    team_id: str,
+    project_id: str,
+) -> dict:
+    try:
+        return get_research_project_agent_task_status(team_id, project_id)
+    except (TeamNotFoundError, ResearchProjectNotFoundError) as exc:
+        _raise_team_workflow_route_error(
+            "research_project_agent_task.status",
+            team_id,
+            exc,
+            status_code=404,
+            fields={"projectId": project_id},
+        )
+    except (ResearchProjectError, ResearchProjectAgentTaskError) as exc:
+        _raise_team_workflow_route_error(
+            "research_project_agent_task.status",
+            team_id,
+            exc,
+            status_code=422,
+            fields={
+                "projectId": project_id,
+                "code": getattr(exc, "code", ""),
+            },
+        )
+
+
+@router.post(
+    "/teams/{team_id}/workflow-orchestration/research-projects/{project_id}/agent-tasks/start",
+    status_code=status.HTTP_201_CREATED,
+    response_model=ResearchProjectAgentTaskStartResponse,
+)
+def team_workflow_research_project_agent_task_start(
+    team_id: str,
+    project_id: str,
+    payload: ResearchProjectAgentTaskStartPayload,
+) -> dict:
+    try:
+        return start_research_project_agent_task(
+            team_id,
+            project_id,
+            payload.model_dump(),
+        )
+    except (TeamNotFoundError, ResearchProjectNotFoundError) as exc:
+        _raise_team_workflow_route_error(
+            "research_project_agent_task.start",
+            team_id,
+            exc,
+            status_code=404,
+            fields={"projectId": project_id, "taskKind": payload.taskKind},
+        )
+    except ResearchProjectAgentTaskError as exc:
+        conflict_codes = {
+            "agent_role_unbound",
+            "agent_role_mismatch",
+            "agent_task_active",
+            "invalid_retry_source",
+            "retry_task_not_terminal",
+            "retry_task_required",
+            "session_resolution_failed",
+            "task_store_inconsistent",
+        }
+        response_status = 409 if exc.code in conflict_codes else 422
+        _raise_team_workflow_route_error(
+            "research_project_agent_task.start",
+            team_id,
+            exc,
+            status_code=response_status,
+            fields={
+                "projectId": project_id,
+                "taskKind": payload.taskKind,
+                "code": exc.code,
+            },
+            detail={"code": exc.code, "message": str(exc)},
+        )
+    except ResearchProjectError as exc:
+        _raise_team_workflow_route_error(
+            "research_project_agent_task.start",
+            team_id,
+            exc,
+            status_code=422,
+            fields={"projectId": project_id, "taskKind": payload.taskKind},
+        )
+
+
 @router.post("/teams/{team_id}/workflow-orchestration/candidates/source", status_code=status.HTTP_201_CREATED)
 def team_workflow_candidate_source_create(team_id: str, payload: CandidateSourcePayload) -> dict:
     try:
@@ -986,6 +1174,33 @@ def team_workflow_challenge_question_run_register(team_id: str, payload: Challen
             exc,
             status_code=422,
             fields={"registeredBy": payload.registeredBy},
+        )
+
+
+@router.post(
+    "/teams/{team_id}/workflow-orchestration/challenge-program/question-runs/publish",
+    status_code=status.HTTP_201_CREATED,
+)
+def team_workflow_challenge_question_run_publish(
+    team_id: str,
+    payload: ChallengeQuestionPublishPayload,
+) -> dict:
+    try:
+        return publish_research_project_challenge_question_output(team_id, payload.model_dump())
+    except TeamNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (ValueError, TeamServiceError, TeamWorkflowOrchestrationError) as exc:
+        _raise_team_workflow_route_error(
+            "challenge_question_run.publish",
+            team_id,
+            exc,
+            status_code=422,
+            fields={
+                "researchProjectId": payload.researchProjectId,
+                "questionId": payload.questionId,
+                "taskId": payload.taskId,
+                "turnId": payload.turnId,
+            },
         )
 
 

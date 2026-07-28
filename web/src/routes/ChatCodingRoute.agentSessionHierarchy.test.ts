@@ -6,9 +6,9 @@ import lifecycleSource from "./chat/useChatWorkspaceLifecycle.ts?raw";
 
 describe("ChatCodingRoute Agent-session hierarchy", () => {
   it("uses Agent navigation on the left and queries tabs by the selected Agent", () => {
-    expect(routeSource).toContain(
-      'import { AgentConversationDirectory, isVisibleDirectoryAgent } from "./AgentConversationDirectory"',
-    );
+    expect(routeSource).toContain("AgentConversationDirectory,");
+    expect(routeSource).toContain("visibleDirectoryAgents,");
+    expect(routeSource).toContain('from "./AgentConversationDirectory"');
     expect(routeSource).toContain('queryKey: ["sessions", "agent", selectedChatAgentId]');
     expect(routeSource).toContain('`/api/sessions/query?agentId=${encodeURIComponent(selectedChatAgentId)}&limit=100`');
     expect(routeSource).toContain("<AgentConversationDirectory");

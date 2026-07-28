@@ -4,6 +4,7 @@ import type { AgentInstance } from "../api/types";
 import {
   agentDirectorySection,
   isVisibleDirectoryAgent,
+  visibleDirectoryAgents,
 } from "./AgentConversationDirectory";
 import directorySource from "./AgentConversationDirectory.tsx?raw";
 import styles from "./AgentConversationDirectory.styles";
@@ -83,6 +84,54 @@ describe("AgentConversationDirectory", () => {
     expect(isVisibleDirectoryAgent(specialAgent)).toBe(true);
     expect(agentDirectorySection(specialAgent)).toBe("special");
     expect(isVisibleDirectoryAgent(teamAgent)).toBe(false);
+  });
+
+  it("adds only experiment-backed team Agents to the flat Agent directory", () => {
+    const personalAgent = agent();
+    const experimentAgent = agent({
+      agentId: "agent-team-experiment",
+      displayName: "资料寻找",
+      primaryMode: "research",
+      roleKey: "source_finder",
+      conversationIndexKind: "team_agent",
+      conversationIndexVisibility: "team_private",
+      metadata: { conversationIndexKind: "team_agent" },
+    });
+    const inactiveTeamAgent = agent({
+      agentId: "agent-team-inactive",
+      displayName: "资料入库",
+      primaryMode: "research",
+      roleKey: "source_ingestor",
+      conversationIndexKind: "team_agent",
+      conversationIndexVisibility: "team_private",
+      metadata: { conversationIndexKind: "team_agent" },
+    });
+    const sessions = [{
+      id: "session-experiment",
+      title: "Alpha 实验｜资料寻找",
+      agentId: experimentAgent.agentId,
+      status: "ready",
+      lastActive: "2026-07-27T13:47:44Z",
+      updatedAt: "2026-07-27T13:47:44Z",
+      currentPhase: "ready",
+      experimentBinding: {
+        teamId: "research-team",
+        researchProjectId: "research-alpha",
+        experimentName: "Alpha 实验",
+        agentId: experimentAgent.agentId,
+        roleKey: "source_finder",
+        roleLabel: "资料寻找",
+        attempt: 1,
+        retryOfSessionId: "",
+        createdFromTaskId: "",
+        createdAt: "2026-07-27T13:47:44Z",
+      },
+    }];
+
+    expect(
+      visibleDirectoryAgents([personalAgent, experimentAgent, inactiveTeamAgent], sessions)
+        .map((item) => item.agentId),
+    ).toEqual(["agent-1", "agent-team-experiment"]);
   });
 
   it("renders separate conversation and special Agent section labels", () => {

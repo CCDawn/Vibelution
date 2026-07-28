@@ -792,6 +792,81 @@ export type TeamResearchProjectListPayload = {
   project?: TeamResearchProject;
 };
 
+export type ResearchProjectAgentTaskKind =
+  | "experiment_design"
+  | "experiment_evidence_review"
+  | "iteration_decision"
+  | "version_governance";
+
+export type TeamResearchProjectAgentTask = {
+  schemaVersion: number;
+  taskId: string;
+  idempotencyKey: string;
+  taskKind: ResearchProjectAgentTaskKind;
+  taskTitle: string;
+  teamId: string;
+  researchProjectId: string;
+  experimentName: string;
+  targetRef: string;
+  agentId: string;
+  teamRole: string;
+  roleKey: string;
+  roleLabel: string;
+  sessionId: string;
+  sessionTitle: string;
+  sessionAttempt: number;
+  sessionCreated: boolean;
+  retryOfSessionId: string;
+  retrySourceTaskId: string;
+  formalRetry: boolean;
+  status: string;
+  turn: {
+    accepted: boolean;
+    turnId: string;
+    status: string;
+    acceptedAt: string;
+  };
+  resultRefs: string[];
+  failureCode: string;
+  returnTo: string;
+  returnLabel: string;
+  createdAt: string;
+  updatedAt: string;
+  chatRoute: string;
+};
+
+export type TeamResearchProjectAgentTaskKind = {
+  taskKind: ResearchProjectAgentTaskKind;
+  teamRole: string;
+  roleKey: string;
+  roleLabel: string;
+  title: string;
+};
+
+export type TeamResearchProjectAgentTaskStatusPayload = {
+  schemaVersion: number;
+  teamId: string;
+  researchProjectId: string;
+  experimentName: string;
+  tasks: TeamResearchProjectAgentTask[];
+  activeTasks: TeamResearchProjectAgentTask[];
+  supportedTaskKinds: TeamResearchProjectAgentTaskKind[];
+  updatedAt: string;
+};
+
+export type TeamResearchProjectAgentTaskStartPayload = {
+  task: TeamResearchProjectAgentTask;
+  researchProjectId: string;
+  experimentName: string;
+  sessionId: string;
+  sessionTitle: string;
+  sessionAttempt: number;
+  sessionCreated: boolean;
+  retryOfSessionId: string;
+  chatRoute: string;
+  idempotentReplay: boolean;
+};
+
 export type TeamWorkflowOrchestration = {
   schemaVersion: number;
   workflowId: string;

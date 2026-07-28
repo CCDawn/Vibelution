@@ -872,6 +872,7 @@ def _reconcile_source_collection_stage_task_after_turn(
     session_id: str,
     turn_id: str,
     final_status: str,
+    llm_usage: dict[str, Any] | None = None,
 ) -> None:
     s = _service()
     if not isinstance(metadata, dict) or not metadata:
@@ -889,6 +890,8 @@ def _reconcile_source_collection_stage_task_after_turn(
             run_id=str(metadata.get("runId") or "").strip(),
             session_id=session_id,
             turn_id=turn_id,
+            final_status=final_status,
+            llm_usage=llm_usage,
             reason=f"session_turn_{final_status or 'completed'}",
         )
     except Exception as exc:  # pragma: no cover - defensive, session persistence must not fail here
