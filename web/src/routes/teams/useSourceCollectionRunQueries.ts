@@ -48,6 +48,7 @@ export function useSourceCollectionRunQueries(options: UseSourceCollectionRunQue
       );
     },
     enabled: Boolean(options.effectiveTeamId && options.sourceCollectionWorkspaceSelected),
+    refetchOnMount: "always",
     refetchInterval: (query) => {
       const payload = query.state.data as SourceCollectionSummaryPayload | undefined;
       const active = payload?.status === "active";

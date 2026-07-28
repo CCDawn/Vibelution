@@ -362,6 +362,7 @@ import {
   researchStageAgentDirectChatRoute,
   researchStageAgentManagementRoute,
   researchStageAgentModelLabel,
+  researchStageSessionChatRoute,
   sourceCollectionAgentIdsFromCanvas,
   sourceCollectionAgentIdsFromTeam,
   sourceCollectionOwnerAgentIdFromCanvas,
@@ -651,6 +652,7 @@ export function TeamsRoute({
   );
   const [challengeTeamSurface, setChallengeTeamSurface] = useState<"workspace" | "progress">("workspace");
   const [preferredExperimentMethod, setPreferredExperimentMethod] = useState<ExperimentMethodId | "">("");
+  const sourceCollectionDraftHydratedRunIdRef = useRef("");
   const [sourceCollectionDraft, setSourceCollectionDraft] = useState<SourceCollectionDraft>({
     title: "神经算法资料搜索批次",
     topic: "神经预测编码",
@@ -1157,6 +1159,33 @@ export function TeamsRoute({
     && sourceCollectionLatestRun?.runId !== sourceCollectionHistoricalRunWithRecords.runId,
   );
   const selectedSourceCollectionRunEffectiveId = selectedSourceCollectionRun?.runId ?? "";
+  const sourceCollectionSelectedRunTopic = String(selectedSourceCollectionRun?.scope?.topic || "").trim();
+  const sourceCollectionSelectedRunGoal = String(selectedSourceCollectionRun?.scope?.goal || "").trim();
+  const sourceCollectionSelectedRunQueryCount =
+    Number(
+      selectedSourceCollectionRun?.metadata?.queryCount
+      ?? selectedSourceCollectionRun?.scope?.dataSearchPlanRef?.queryCount,
+    ) || 0;
+  useEffect(() => {
+    if (
+      !selectedSourceCollectionRunEffectiveId
+      || sourceCollectionDraftHydratedRunIdRef.current === selectedSourceCollectionRunEffectiveId
+    ) {
+      return;
+    }
+    sourceCollectionDraftHydratedRunIdRef.current = selectedSourceCollectionRunEffectiveId;
+    setSourceCollectionDraft((current) => ({
+      ...current,
+      title: selectedSourceCollectionRun?.title || current.title,
+      topic: sourceCollectionSelectedRunTopic || current.topic,
+      goal: sourceCollectionSelectedRunGoal || current.goal,
+    }));
+  }, [
+    selectedSourceCollectionRun?.title,
+    selectedSourceCollectionRunEffectiveId,
+    sourceCollectionSelectedRunGoal,
+    sourceCollectionSelectedRunTopic,
+  ]);
   const sourceCollectionFindingDetailsVisible = Boolean(
     sourceCollectionWorkspaceSelected
     && selectedSourceCollectionRunEffectiveId
@@ -1582,10 +1611,17 @@ export function TeamsRoute({
     status: SourceCollectionStageAgentChatStatus;
   } {
     const binding = sourceCollectionStagePrimaryAgentBinding(stageId);
-    const route = researchStageAgentDirectChatRoute(
+    const returnRoute = sourceCollectionStageReturnRoute(stageId);
+    const returnLabel = sourceCollectionStageChatReturnLabel(stageId);
+    const currentTaskSessionRoute = researchStageSessionChatRoute(
+      sourceCollectionSummaryQuery.data?.latestTasks?.[stageId]?.sessionId,
+      returnRoute,
+      returnLabel,
+    );
+    const route = currentTaskSessionRoute || researchStageAgentDirectChatRoute(
       binding?.agent,
-      sourceCollectionStageReturnRoute(stageId),
-      sourceCollectionStageChatReturnLabel(stageId),
+      returnRoute,
+      returnLabel,
     );
     return resolveSourceCollectionStageAgentChatState({
       binding,
@@ -3316,7 +3352,13 @@ export function TeamsRoute({
   );
   const sourceCollectionSummaryCounts = sourceCollectionSummary?.summary ?? {};
   const sourceCollectionRawRecordCount =
-    Number(sourceCollectionRecordsQuery.data?.summary?.recordCount ?? sourceCollectionSummaryCounts.recordCount ?? sourceCollectionRunSummary?.recordCount ?? sourceCollectionRecords.length) || 0;
+    Number(
+      sourceCollectionRecordsQuery.data?.summary?.recordCount
+      ?? sourceCollectionSummaryCounts.recordCount
+      ?? sourceCollectionRunSummary?.recordCount
+      ?? selectedSourceCollectionRun?.summary?.recordCount
+      ?? sourceCollectionRecords.length,
+    ) || 0;
   const sourceCollectionRecordClickableSourceCount = sourceCollectionRecordProvenances.filter((item) => item.href).length;
   const sourceCollectionRecordLocalFileCount = sourceCollectionRecordProvenances.filter((item) => item.kind === "file").length;
   const sourceCollectionRecordMissingSourceCount = sourceCollectionRecordProvenances.filter((item) => item.kind === "missing").length;
@@ -5003,14 +5045,14 @@ export function TeamsRoute({
             commandAriaLabel={lang === "zh" ? "知识搜集操作台" : "Knowledge collection command bar"}
             commandTone={sourceCollectionConsoleState}
             commandTitle={
-              sourceCollectionDraft.topic.trim()
-              || String(selectedSourceCollectionRun?.scope?.topic || "").trim()
+              sourceCollectionSelectedRunTopic
+              || sourceCollectionDraft.topic.trim()
               || sourceCollectionRunTitleLabel(selectedSourceCollectionRun?.title || sourceCollectionDraft.title, lang)
             }
             commandSubtitle={
               lang === "zh"
-                ? `${compactSourceCollectionQuerySeeds(sourceCollectionDraft.topic, sourceCollectionDraft.querySeeds).length} 个搜索问题 · ${splitDraftList(sourceCollectionDraft.searchLanguages, 8).length || 1} 种语言 · ${splitDraftList(sourceCollectionDraft.sourceTypes, 12).length || 1} 类来源`
-                : `${compactSourceCollectionQuerySeeds(sourceCollectionDraft.topic, sourceCollectionDraft.querySeeds).length} queries · ${splitDraftList(sourceCollectionDraft.searchLanguages, 8).length || 1} languages · ${splitDraftList(sourceCollectionDraft.sourceTypes, 12).length || 1} source types`
+                ? `${sourceCollectionSelectedRunQueryCount || compactSourceCollectionQuerySeeds(sourceCollectionDraft.topic, sourceCollectionDraft.querySeeds).length} 个搜索问题 · ${splitDraftList(sourceCollectionDraft.searchLanguages, 8).length || 1} 种语言 · ${splitDraftList(sourceCollectionDraft.sourceTypes, 12).length || 1} 类来源`
+                : `${sourceCollectionSelectedRunQueryCount || compactSourceCollectionQuerySeeds(sourceCollectionDraft.topic, sourceCollectionDraft.querySeeds).length} queries · ${splitDraftList(sourceCollectionDraft.searchLanguages, 8).length || 1} languages · ${splitDraftList(sourceCollectionDraft.sourceTypes, 12).length || 1} source types`
             }
             commandStats={[
               { key: "status", label: lang === "zh" ? "当前" : "status", value: sourceCollectionConsoleStatusText },

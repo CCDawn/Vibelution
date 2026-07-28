@@ -1119,6 +1119,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("selectSourceCollectionStage");
     expect(routeSource).toContain("renderSourceCollectionActiveStagePanel");
     expect(routeSource).toContain("researchStageAgentDirectChatRoute");
+    expect(routeSource).toContain("researchStageSessionChatRoute");
+    expect(routeSource).toContain("sourceCollectionSummaryQuery.data?.latestTasks?.[stageId]?.sessionId");
     expect(routeSource).toContain("sourceCollectionStageReturnRoute");
     expect(routeSource).toContain("sourceCollectionStageChatReturnLabel");
     expect(researchStageAgentPresentationSource).toContain("params.set(\"returnTo\", normalizedReturnTo)");
@@ -3156,7 +3158,9 @@ describe("TeamsRoute layout contract", () => {
     expect(standaloneSource).toContain("searchBrief={renderSourceCollectionSearchBrief()}");
     expect(standaloneSource).toContain("runHistoryLabel=");
     expect(standaloneSource).toContain("compact");
-    expect(standaloneSource).toContain("sourceCollectionDraft.topic.trim()");
+    expect(standaloneSource).toContain("sourceCollectionSelectedRunTopic");
+    expect(routeSource).toContain("sourceCollectionDraftHydratedRunIdRef");
+    expect(routeSource).toContain("selectedSourceCollectionRun?.summary?.recordCount");
     expect(teamSourceCollectionStandaloneStagePanelSource).toContain("phaseCloseGate?: ReactNode");
     expect(teamSourceCollectionStandaloneStagePanelSource).toContain("styles.sourceCollectionRunContext");
     expect(teamSourceCollectionOverviewPanelSource).toContain("phaseCloseGate?: ReactNode");

@@ -33,4 +33,8 @@ describe("source-collection run queries contract", () => {
     expect(queriesSource).toContain("/collection-assignments");
     expect(queriesSource).toContain("/status");
   });
+
+  it("refreshes the selected run summary whenever the stage workspace mounts", () => {
+    expect(queriesSource).toContain('refetchOnMount: "always"');
+  });
 });
