@@ -49,6 +49,7 @@ export function TeamSourceCollectionCandidatePanel({
 }: TeamSourceCollectionCandidatePanelProps) {
   const className = [
     panelFrameStyles.workflowSourceCollectionDetails,
+    styles.sourceCollectionExpandedContentPanel,
     focused ? panelFrameStyles.sourceCollectionFocusedPanel : "",
   ].filter(Boolean).join(" ");
 
@@ -79,6 +80,7 @@ export function TeamSourceCollectionCandidatePanel({
           label={lang === "zh" ? "调整资料提炼候选列表高度" : "Resize extracted candidate list height"}
           className={styles.sourceCollectionCandidateListShell}
           resizeHandleClassName={styles.sourceCollectionListResizeHandle}
+          expandToContent
           role="region"
           tabIndex={0}
           aria-label={lang === "zh" ? "资料提炼候选列表，可向下滚动查看更多" : "Extracted candidate list, scroll for more"}
@@ -97,6 +99,7 @@ export function TeamSourceCollectionCandidatePanel({
           label={lang === "zh" ? "调整资料提炼候选列表高度" : "Resize extracted candidate list height"}
           className={styles.sourceCollectionCandidateListShell}
           resizeHandleClassName={styles.sourceCollectionListResizeHandle}
+          expandToContent
           role="region"
           tabIndex={0}
           aria-busy="true"

@@ -18,6 +18,8 @@ export type PersistedHeightListShellProps = Omit<
   className?: string;
   /** Placement-only class for PaneHeightResizeHandle. */
   resizeHandleClassName?: string;
+  /** Expand the current page into its owning scroll workspace instead of nesting another fixed-height scroller. */
+  expandToContent?: boolean;
   children: ReactNode;
 };
 
@@ -31,6 +33,7 @@ export function PersistedHeightListShell({
   label,
   className = "",
   resizeHandleClassName = "",
+  expandToContent = false,
   children,
   ...props
 }: PersistedHeightListShellProps) {
@@ -46,9 +49,13 @@ export function PersistedHeightListShell({
     panes,
   });
   const height = heights[pane.id] ?? pane.defaultHeight;
-  const style = {
-    height: `${height}px`,
-  } as CSSProperties;
+  const style = expandToContent
+    ? {
+        height: "auto",
+      }
+    : {
+        height: `${height}px`,
+      } as CSSProperties;
 
   return (
     <>
@@ -57,20 +64,23 @@ export function PersistedHeightListShell({
         style={style}
         data-vui-height-pane={pane.id}
         data-vui-layout-id={layoutId}
+        data-vui-expand-to-content={expandToContent ? "true" : undefined}
         {...props}
       >
         {children}
       </div>
-      <PaneHeightResizeHandle
-        label={label}
-        valueNow={height}
-        valueMin={pane.minHeight}
-        valueMax={pane.maxHeight}
-        active={draggingPaneId === pane.id}
-        className={resizeHandleClassName}
-        onPointerDown={(event) => startResize(pane.id, event, { direction: 1 })}
-        onKeyDown={(event) => onResizeKeyDown(pane.id, event, { direction: 1 })}
-      />
+      {expandToContent ? null : (
+        <PaneHeightResizeHandle
+          label={label}
+          valueNow={height}
+          valueMin={pane.minHeight}
+          valueMax={pane.maxHeight}
+          active={draggingPaneId === pane.id}
+          className={resizeHandleClassName}
+          onPointerDown={(event) => startResize(pane.id, event, { direction: 1 })}
+          onKeyDown={(event) => onResizeKeyDown(pane.id, event, { direction: 1 })}
+        />
+      )}
     </>
   );
 }
