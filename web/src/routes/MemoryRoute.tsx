@@ -10,7 +10,7 @@ import {
   Undo2,
 } from "lucide-react";
 import { lazy, Suspense, useEffect, useMemo, useState, type CSSProperties } from "react";
-import { Link, NavLink, useSearchParams } from "react-router-dom";
+import { NavLink, useSearchParams } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
@@ -57,7 +57,7 @@ import { PaneResizeHandle } from "../components/layout/PaneResizeHandle";
 import { type PaneSpec } from "../components/layout/paneLayoutPersistence";
 import { usePersistedPaneResize } from "../components/layout/usePersistedPaneResize";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
-import { VButton, VDenseOpsPage } from "../components/vui";
+import { VButton, VDenseOpsPage, VRouteLinkButton } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { useMemoryItemMutations } from "./memory/useMemoryItemMutations";
 import { useMemoryKnowledgeMutations } from "./memory/useMemoryKnowledgeMutations";
@@ -4249,10 +4249,13 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
             {copy.refresh}
           </VButton>
           {returnToPath ? (
-            <Link to={returnToPath} className={styles.returnButton}>
-              <ArrowLeft size={16} />
+            <VRouteLinkButton
+              to={returnToPath}
+              className={styles.returnButton}
+              icon={<ArrowLeft size={16} />}
+            >
               {returnToLabel}
-            </Link>
+            </VRouteLinkButton>
           ) : null}
         </div>
       )}

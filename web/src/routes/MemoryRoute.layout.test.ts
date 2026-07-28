@@ -197,8 +197,10 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("safeAgentCenterReturnToPath");
     expect(routeSource).toContain("const returnToPath = useMemo(() => safeAgentCenterReturnToPath(searchParams.get(\"returnTo\")), [searchParamText])");
     expect(routeSource).toContain("const returnToLabel = searchParams.get(\"returnLabel\") === \"agents\" ? copy.returnToAgents : copy.returnToSource");
+    expect(routeSource).toContain("<VRouteLinkButton");
     expect(routeSource).toContain("className={styles.returnButton}");
     expect(routeSource).toContain("to={returnToPath}");
+    expect(routeSource).not.toContain('import { Link, NavLink');
     expect(styles.returnButton).toBeTypeOf("string");
     expect(styles.headerActions).toContain("justify-end");
   });
