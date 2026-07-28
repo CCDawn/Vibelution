@@ -9,3 +9,4 @@
 @source "../../routes/TeamsRoute.styles.ts";
 @source "../../routes/Team*.tsx";
 @source "../../routes/Team*.styles.ts";
+@source "../../routes/teams/challenge-cup/ChallengeQuestionDetailPanel.styles.ts";
