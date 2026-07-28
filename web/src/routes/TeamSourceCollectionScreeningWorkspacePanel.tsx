@@ -11,6 +11,9 @@ import { TeamCandidateCard } from "../components/vui/product/team-management";
 import {
   sourceCollectionCandidateProvenance,
   sourceCollectionCandidateSourceCategory,
+  sourceCollectionEvidenceLedgerCardLabel,
+  sourceCollectionEvidenceLedgerSummary,
+  sourceCollectionEvidenceLedgerTone,
   sourceCollectionSourceFilterLabel,
 } from "./teams/source-collection/evidenceModel";
 import {
@@ -232,6 +235,7 @@ export function TeamSourceCollectionScreeningWorkspacePanel(props: TeamSourceCol
         {screeningCandidates.map((candidate: any) => {
                 const chunkPlanSummary = candidatePaperNoteChunkPlanSummary(candidate);
                 const sourceQualitySummary = candidateSourceQualityAssessmentSummary(candidate);
+                const evidenceLedgerSummary = sourceCollectionEvidenceLedgerSummary(candidate);
                 const provenance = sourceCollectionCandidateProvenance(candidate, lang);
                 const canPlanPaperNoteChunks = sourceCandidateHasCompletedExtraction(candidate);
                 const candidateQualityPending =
@@ -244,7 +248,9 @@ export function TeamSourceCollectionScreeningWorkspacePanel(props: TeamSourceCol
                 return (
                   <TeamCandidateCard
                     key={candidate.candidateId}
-                    tone={sourceCollectionResultTone(candidate.qualityStatus)}
+                    tone={evidenceLedgerSummary
+                      ? sourceCollectionEvidenceLedgerTone(evidenceLedgerSummary)
+                      : sourceCollectionResultTone(candidate.qualityStatus)}
                     statusLabel={
                       sourceQualitySummary
                         ? workflowIngestionStatusLabel(sourceQualitySummary.decision, lang)
@@ -257,6 +263,9 @@ export function TeamSourceCollectionScreeningWorkspacePanel(props: TeamSourceCol
                       { key: "updated", label: formatTime(candidate.updatedAt, lang) },
                       ...(sourceQualitySummary
                         ? [{ key: "score", label: `${lang === "zh" ? "评分" : "score"} ${sourceQualitySummary.overallScore}/100` }]
+                        : []),
+                      ...(evidenceLedgerSummary
+                        ? [{ key: "evidence-ledger", label: sourceCollectionEvidenceLedgerCardLabel(evidenceLedgerSummary, lang) }]
                         : []),
                       ...(chunkPlanSummary
                         ? [{ key: "chunks", label: `paper_note ${chunkPlanSummary.completedChunkCount}/${chunkPlanSummary.chunkCount}` }]

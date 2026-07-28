@@ -16,7 +16,7 @@ const styles = {
   sourceCollectionExtractionRecoveryBody:
     "sourceCollectionExtractionRecoveryBody min-w-0 grid content-start gap-1.5 [&_p]:m-0 [&_p]:[font-size:var(--vui-font-sm)] [&_p]:leading-[var(--vui-line-readable)] [&_p]:text-[var(--fg-secondary)]",
   sourceCollectionExtractionRecoveryPanel:
-    "sourceCollectionExtractionRecoveryPanel min-w-0 !grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2 rounded-[var(--radius-control)] border p-2 text-[var(--fg-secondary)] max-[760px]:grid-cols-[1fr]",
+    "sourceCollectionExtractionRecoveryPanel min-w-0 !grid grid-cols-[minmax(0,1fr)] items-start gap-2 rounded-[var(--radius-control)] border p-2 text-[var(--fg-secondary)]",
   sourceCollectionExtractionRecoveryPanelDanger:
     "sourceCollectionExtractionRecoveryPanelDanger border-[color-mix(in_srgb,var(--state-error)_34%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-error)_7%,var(--source-workbench-card))] [&_svg]:text-[var(--state-error)]",
   sourceCollectionExtractionRecoveryPanelProgressable:

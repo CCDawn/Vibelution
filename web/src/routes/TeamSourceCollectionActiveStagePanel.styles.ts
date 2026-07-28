@@ -5,7 +5,11 @@ import {
 
 const styles = {
   sourceCollectionExtractionPanels:
-    "sourceCollectionExtractionPanels min-w-0 flex h-full min-h-0 flex-col content-start gap-2 overflow-auto [scrollbar-gutter:stable] max-[1020px]:h-auto max-[1020px]:overflow-visible",
+    "sourceCollectionExtractionPanels min-w-0 grid h-full min-h-0 grid-rows-[minmax(0,1fr)_auto] gap-2 overflow-hidden",
+  sourceCollectionExtractionScrollRegion:
+    "sourceCollectionExtractionScrollRegion min-w-0 min-h-0 overflow-auto [scrollbar-gutter:stable]",
+  sourceCollectionExtractionRecoveryDock:
+    "sourceCollectionExtractionRecoveryDock relative z-[1] min-w-0 max-h-[min(42dvh,300px)] shrink-0 overflow-auto [grid-row:2] [overscroll-behavior:contain]",
   sourceCollectionIngestionPanels:
     "sourceCollectionIngestionPanels min-w-0 grid min-h-0 content-stretch gap-2 grid-rows-[auto_minmax(0,1fr)] overflow-hidden max-[860px]:min-h-[560px] max-[860px]:grid-rows-[auto_minmax(0,1fr)] max-[860px]:overflow-hidden",
   sourceCollectionStageChatActions:

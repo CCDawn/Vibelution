@@ -478,7 +478,6 @@ const TeamSourceCollectionPhaseCloseGatePanel = createLazyNamedTeamPanel(loadTea
 const TeamSourceCollectionStageAgentsPanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionStageAgentsPanel");
 const TeamSourceCollectionRunSwitcherPanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionRunSwitcherPanel");
 const TeamSourceCollectionFindingDetailsPanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionFindingDetailsPanel");
-const TeamSourceCollectionCandidatePanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionCandidatePanel");
 const TeamSourceCollectionConversationPanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionConversationPanel");
 const TeamSourceCollectionControlsPanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionControlsPanel");
 const TeamSourceCollectionExtractionRecoveryPanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionExtractionRecoveryPanel");
@@ -490,7 +489,6 @@ const TeamKnowledgeCollectionCompletionFlowPanel = createLazyNamedTeamPanel(load
 const TeamSourceCollectionConversationWorkspacePanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionConversationWorkspacePanel");
 const TeamSourceCollectionScreeningWorkspacePanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionScreeningWorkspacePanel");
 const TeamSourceCollectionExtractionRecoveryWorkspacePanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionExtractionRecoveryWorkspacePanel");
-const TeamSourceCollectionCandidateWorkspacePanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionCandidateWorkspacePanel");
 const TeamSourceCollectionGraphWorkspacePanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionGraphWorkspacePanel");
 const TeamSourceCollectionMemoryWorkspacePanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionMemoryWorkspacePanel");
 const TeamSourceCollectionSelectedSourceWorkspacePanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionSelectedSourceWorkspacePanel");
@@ -2250,42 +2248,6 @@ export function TeamsRoute({
     );
   }
 
-  function renderSourceCollectionCandidatePanel() {
-    return (
-      <TeamSourceCollectionCandidateWorkspacePanel
-        lang={lang}
-        sourceCollectionFilteredRunCandidates={sourceCollectionFilteredRunCandidates}
-        sourceCollectionPageItems={sourceCollectionPageItems}
-        sourceCollectionCandidateProjection={sourceCollectionCandidateProjection}
-        sourceCollectionSourceFilter={sourceCollectionSourceFilter}
-        sourceCollectionDisplayedCandidateCount={sourceCollectionDisplayedCandidateCount}
-        sourceCollectionCountText={sourceCollectionCountText}
-        sourceCollectionPrimaryDataLoading={sourceCollectionPrimaryDataLoading}
-        sourceCollectionDataSyncText={sourceCollectionDataSyncText}
-        sourceCollectionRunCandidateCount={sourceCollectionRunCandidateCount}
-        sourceCollectionFocusedPanelId={sourceCollectionFocusedPanelId}
-        selectedSourceCollectionStageId={selectedSourceCollectionStageId}
-        sourceCollectionExpandedPanelId={sourceCollectionExpandedPanelId}
-        setSourceCollectionExpandedPanelId={setSourceCollectionExpandedPanelId}
-        sourceCollectionExtractionDefaultPanelId={sourceCollectionExtractionDefaultPanelId}
-        sourceCollectionCandidateStepState={sourceCollectionCandidateStepState}
-        sourceCollectionDisplayedCandidateFilterCounts={sourceCollectionDisplayedCandidateFilterCounts}
-        renderSourceCollectionFilterBar={renderSourceCollectionFilterBar}
-        sourceCollectionDisplayedCandidateCountText={sourceCollectionDisplayedCandidateCountText}
-        sourceCollectionProjectedAssessedCountText={sourceCollectionProjectedAssessedCountText}
-        sourceCollectionProjectedApprovedCountText={sourceCollectionProjectedApprovedCountText}
-        sourceCollectionRunPendingScreeningCountText={sourceCollectionRunPendingScreeningCountText}
-        sourceCollectionEvidenceReadyCandidateCount={sourceCollectionEvidenceReadyCandidateCount}
-        sourceCollectionMissingEvidenceAnchorCount={sourceCollectionMissingEvidenceAnchorCount}
-        sourceCollectionProjectedCollectedCount={sourceCollectionProjectedCollectedCount}
-        renderSourceCollectionExtractionRecoveryPanel={renderSourceCollectionExtractionRecoveryPanel}
-        renderSourceCollectionPagination={renderSourceCollectionPagination}
-        selectedSourceCollectionCandidateId={selectedSourceCollectionCandidateId}
-        selectSourceCollectionCandidate={selectSourceCollectionCandidate}
-      />
-    );
-  }
-
   function renderSourceCollectionGraphPanel() {
     return (
       <TeamSourceCollectionGraphWorkspacePanel
@@ -2463,8 +2425,8 @@ export function TeamsRoute({
         sourceCollectionFindingStageCompact={sourceCollectionFindingStageCompact}
         selectedTeamStartSourceCollectionStageTaskError={selectedTeamStartSourceCollectionStageTaskError}
         renderSourceCollectionConversation={renderSourceCollectionConversation}
-        renderSourceCollectionCandidatePanel={renderSourceCollectionCandidatePanel}
         renderSourceCollectionScreeningPanel={renderSourceCollectionScreeningPanel}
+        renderSourceCollectionRecoveryPanel={() => renderSourceCollectionExtractionRecoveryPanel(sourceCollectionCandidateProjection)}
         renderSourceCollectionGraphPanel={renderSourceCollectionGraphPanel}
         renderSourceCollectionMemoryPanel={renderSourceCollectionMemoryPanel}
       />
@@ -4006,9 +3968,6 @@ export function TeamsRoute({
     if (panelId === "source-collection-screening-panel") {
       return "extraction";
     }
-    if (panelId === "source-collection-candidates-panel") {
-      return "extraction";
-    }
     if (panelId === "source-collection-graph-panel") {
       return "relations";
     }
@@ -4089,7 +4048,7 @@ export function TeamsRoute({
     if (!selectedTeam?.teamId) {
       return;
     }
-    scrollSourceCollectionPanelIntoView("source-collection-candidates-panel");
+    scrollSourceCollectionPanelIntoView("source-collection-screening-panel");
   };
   const runSourceCollectionCandidateExtractionAction = () => {
     openSourceCollectionStage("extraction");
@@ -4354,12 +4313,7 @@ export function TeamsRoute({
   const sourceCollectionCandidateStepState: SourceCollectionStepState = sourceCollectionExtractionCanProceedAfterExclusions
     ? "done"
     : sourceCollectionCandidateStepStateRaw;
-  const sourceCollectionExtractionDefaultPanelId =
-    sourceCollectionRunPendingScreeningCount > 0
-    || sourceCollectionScreeningStepState === "active"
-    || sourceCollectionScreeningStepState === "pending"
-      ? "source-collection-screening-panel"
-      : "source-collection-candidates-panel";
+  const sourceCollectionExtractionDefaultPanelId = "source-collection-screening-panel";
   const sourceCollectionGraphFallbackStepState: SourceCollectionStepState = selectedTeamBuildCandidateGraphError || teamWorkflowCandidateGraphQuery.error
     ? "failed"
       : selectedTeamBuildCandidateGraphPending

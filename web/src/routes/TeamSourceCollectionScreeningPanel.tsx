@@ -64,7 +64,7 @@ export function TeamSourceCollectionScreeningPanel({
       tabIndex={-1}
     >
       <summary>
-        <span>{lang === "zh" ? "资料提炼复核" : "Source review"}</span>
+        <span>{lang === "zh" ? "资料提炼与复核" : "Source extraction and review"}</span>
         <small>{rangeText}</small>
       </summary>
       {filterBar}

@@ -3,8 +3,6 @@ import { describe, expect, it } from "vitest";
 import persistedHeightListShellSource from "../components/layout/PersistedHeightListShell.tsx?raw";
 import activeStageSource from "./TeamSourceCollectionActiveStagePanel.tsx?raw";
 import activeStageStyles from "./TeamSourceCollectionActiveStagePanel.styles";
-import candidatePanelSource from "./TeamSourceCollectionCandidatePanel.tsx?raw";
-import candidatePanelStyles from "./TeamSourceCollectionCandidatePanel.styles";
 import screeningPanelSource from "./TeamSourceCollectionScreeningPanel.tsx?raw";
 import screeningPanelStyles from "./TeamSourceCollectionScreeningPanel.styles";
 import standaloneStageSource from "./TeamSourceCollectionStandaloneStagePanel.tsx?raw";
@@ -45,16 +43,31 @@ describe("source collection vertical three-column workbench", () => {
   it("uses the available extraction workspace before paginating source material", () => {
     expect(SOURCE_COLLECTION_RESULT_PAGE_SIZE).toBe(16);
     expect(activeStageStyles.sourceCollectionExtractionPanels).toContain("h-full");
-    expect(activeStageStyles.sourceCollectionExtractionPanels).toContain("overflow-auto");
-    expect(activeStageStyles.sourceCollectionExtractionPanels).toContain("flex-col");
-    expect(candidatePanelStyles.sourceCollectionExpandedContentPanel).toContain("overflow-visible");
+    expect(activeStageStyles.sourceCollectionExtractionScrollRegion).toContain("overflow-auto");
     expect(screeningPanelStyles.sourceCollectionExpandedContentPanel).toContain("overflow-visible");
-    expect(candidatePanelStyles.sourceCollectionCandidateListShell).toContain("self-start");
     expect(screeningPanelStyles.sourceCollectionScreeningListShell).toContain("self-start");
-    expect(candidatePanelSource).toContain("expandToContent");
     expect(screeningPanelSource).toContain("expandToContent");
     expect(persistedHeightListShellSource).toContain("expandToContent");
     expect(persistedHeightListShellSource).toContain('height: "auto"');
     expect(persistedHeightListShellSource).toContain("expandToContent ? null");
+  });
+
+  it("renders one source-review list and keeps extraction recovery docked below its scroller", () => {
+    expect(activeStageSource).not.toContain("renderCandidatePanel");
+    expect(activeStageSource.match(/renderScreeningPanel\(\)/g)).toHaveLength(1);
+    expect(activeStageSource).toContain("renderRecoveryPanel()");
+    expect(activeStageStyles.sourceCollectionExtractionPanels).toContain(
+      "grid-rows-[minmax(0,1fr)_auto]",
+    );
+    expect(activeStageStyles.sourceCollectionExtractionPanels).toContain("overflow-hidden");
+    expect(activeStageStyles.sourceCollectionExtractionScrollRegion).toContain("overflow-auto");
+    expect(activeStageStyles.sourceCollectionExtractionScrollRegion).not.toContain(
+      "max-[1020px]:overflow-visible",
+    );
+    expect(activeStageStyles.sourceCollectionExtractionRecoveryDock).toContain("shrink-0");
+    expect(activeStageStyles.sourceCollectionExtractionRecoveryDock).toContain(
+      "max-h-[min(42dvh,300px)]",
+    );
+    expect(activeStageStyles.sourceCollectionExtractionRecoveryDock).toContain("overflow-auto");
   });
 });
