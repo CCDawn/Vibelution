@@ -64,6 +64,7 @@ type QuestionRow = {
   kind: "黄金样例" | "试运行题";
   machinePassed: boolean;
   humanApproved: boolean;
+  humanStatus: "approved" | "pending" | "revision_requested" | "rejected";
 };
 
 function cx(...tokens: Array<string | false | null | undefined>) {
@@ -146,34 +147,75 @@ export function ChallengeCupOperationsWorkspace({
   const questionIds = [goldenId, ...trialIds].filter(Boolean);
   const machineCompleted = stage1?.mvpManifest.completedQuestionCount ?? 0;
   const machineRequired = stage1?.mvpManifest.requiredQuestionCount ?? 4;
-  const humanApproved = stage1?.trialRun.outcomeCounts.approved ?? (stage1?.acceptance.allFourHumanGatesApproved ? 1 : 0);
-  const reviewRequired = stage1?.trialRun.outcomeCounts.review_required ?? Math.max(0, machineRequired - humanApproved);
+  const humanReview = stage1?.humanReview;
+  const humanApproved = humanReview?.approvedQuestionCount
+    ?? stage1?.trialRun.outcomeCounts.approved
+    ?? (stage1?.acceptance.allFourHumanGatesApproved ? machineRequired : 0);
+  const reviewRequired = humanReview?.pendingQuestionIds.length
+    ?? stage1?.trialRun.outcomeCounts.review_required
+    ?? Math.max(0, machineRequired - humanApproved);
+  const revisionRequired = (
+    humanReview?.revisionRequiredQuestionIds.length
+    ?? stage1?.trialRun.outcomeCounts.needs_revision
+    ?? 0
+  ) + (
+    humanReview?.rejectedQuestionIds.length
+    ?? stage1?.trialRun.outcomeCounts.rejected
+    ?? 0
+  );
+  const humanOutstanding = reviewRequired + revisionRequired;
   const officialCallCount = stage1?.officialModelCallEvidence.count ?? 0;
   const modelLabel = stage1?.dashscopeQwenProvider.modelRefs[0]?.split("/").at(-1) || "Qwen";
-  const goldenApproved = Boolean(stage1?.acceptance.allFourHumanGatesApproved);
-  const approvedTrialCount = Math.max(0, humanApproved - (goldenApproved ? 1 : 0));
+  const goldenApproved = humanReview
+    ? humanReview.approvedQuestionIds.includes(goldenId)
+    : (stage1?.trialRun.outcomeCounts.approved ?? 0) > 0;
+  const approvedTrialCount = humanReview
+    ? humanReview.approvedQuestionIds.filter((questionId) => questionId !== goldenId).length
+    : Math.max(0, humanApproved - (goldenApproved ? 1 : 0));
   const questions = useMemo<QuestionRow[]>(
-    () => questionIds.map((id, index) => ({
-      id,
-      kind: index === 0 ? "黄金样例" : "试运行题",
-      machinePassed: index === 0
-        ? Boolean(stage1?.singleQuestionSample.completed)
-        : Boolean(stage1?.trialRun.completedQuestionIds.includes(id)),
-      humanApproved: index === 0 ? goldenApproved : index <= approvedTrialCount,
-    })),
+    () => questionIds.map((id, index) => {
+      const humanStatus: QuestionRow["humanStatus"] = humanReview?.rejectedQuestionIds.includes(id)
+        ? "rejected"
+        : humanReview?.revisionRequiredQuestionIds.includes(id)
+          ? "revision_requested"
+          : humanReview?.pendingQuestionIds.includes(id)
+            ? "pending"
+            : humanReview?.approvedQuestionIds.includes(id)
+              ? "approved"
+            : (index === 0 ? goldenApproved : index <= approvedTrialCount)
+              ? "approved"
+              : "pending";
+      return {
+        id,
+        kind: index === 0 ? "黄金样例" : "试运行题",
+        machinePassed: index === 0
+          ? Boolean(stage1?.singleQuestionSample.completed)
+          : Boolean(stage1?.trialRun.completedQuestionIds.includes(id)),
+        humanApproved: humanStatus === "approved",
+        humanStatus,
+      };
+    }),
     [
       approvedTrialCount,
       goldenApproved,
+      humanReview,
       questionIds.join("|"),
       stage1?.singleQuestionSample.completed,
       stage1?.trialRun.completedQuestionIds,
     ],
   );
   const pendingQuestions = questions.filter((question) => question.machinePassed && !question.humanApproved);
+  const humanStatusLabel = (status: QuestionRow["humanStatus"]) => {
+    if (status === "approved") return "已批准";
+    if (status === "revision_requested") return "需修订";
+    if (status === "rejected") return "已拒绝";
+    return "待抽检";
+  };
   const schemaGate = Boolean(stage1?.acceptance.schemaValidation);
   const citationGate = Boolean(stage1?.acceptance.citationValidation);
   const dimensionsGate = Boolean(stage1?.acceptance.allSevenDimensionsReviewed);
-  const humanGate = reviewRequired === 0 && humanApproved >= machineRequired;
+  const humanGate = humanReview?.allQuestionsApproved
+    ?? (humanOutstanding === 0 && humanApproved >= machineRequired);
   const completeGateCount = [schemaGate, citationGate, dimensionsGate, humanGate].filter(Boolean).length;
   const humanPercent = machineRequired > 0 ? Math.round((humanApproved / machineRequired) * 100) : 0;
   const readyAgentCount = agents.filter((agent) => agent.tone === "ready").length;
@@ -182,8 +224,14 @@ export function ChallengeCupOperationsWorkspace({
   ).replace("的AI", "的 AI");
   const programId = projection?.program.officialProblemId || "XH-202619";
   const programTrack = projection?.program.track || "赛道一 / 方向一 / A 科学假设生成与研究计划设计";
-  const currentGate = reviewRequired > 0 ? "等待人工验收" : machineCompleted >= machineRequired ? "MVP 验收完成" : "等待机器验证";
-  const isReady = machineCompleted >= machineRequired && reviewRequired === 0;
+  const currentGate = revisionRequired > 0
+    ? "等待修订"
+    : reviewRequired > 0
+      ? "等待人工验收"
+      : machineCompleted >= machineRequired
+        ? "MVP 验收完成"
+        : "等待机器验证";
+  const isReady = machineCompleted >= machineRequired && humanGate;
   const activeStageHref = stageHrefs[activeStage] || graphHref;
 
   const stageState = (stage: PlatformStage) => {
@@ -240,7 +288,7 @@ export function ChallengeCupOperationsWorkspace({
     ? questions.slice(0, 3).map((question) => ({
         id: question.id,
         title: question.id,
-        summary: `${question.kind} · ${question.humanApproved ? "已通过人工审核" : question.machinePassed ? "待人工审核" : "待机器验证"}`,
+        summary: `${question.kind} · ${question.machinePassed ? humanStatusLabel(question.humanStatus) : "待机器验证"}`,
         tone: question.humanApproved ? "ready" : question.machinePassed ? "active" : "neutral",
       }))
     : activeStage === "experiment"
@@ -383,7 +431,7 @@ export function ChallengeCupOperationsWorkspace({
                       <div className={cx("platform-metrics")}>
                         <article><span>题目记录</span><strong>{machineCompleted}</strong></article>
                         <article><span>模型调用证据</span><strong>{officialCallCount}</strong></article>
-                        <article><span>待人工审核</span><strong>{reviewRequired}</strong></article>
+                        <article><span>人工待处理</span><strong>{humanOutstanding}</strong></article>
                         <article><span>团队成员</span><strong>{readyAgentCount} / {agents.length}</strong></article>
                       </div>
 
@@ -400,7 +448,7 @@ export function ChallengeCupOperationsWorkspace({
                         <dl>
                           <div><dt>当前批次</dt><dd>{stage1.mvpManifest.goldenSampleQuestionId || "未登记"}</dd></div>
                           <div><dt>最近更新</dt><dd>{stage1.acceptance.feedbackRevisionCount} 次反馈修订</dd></div>
-                          <div><dt>阶段判断</dt><dd>{humanGate ? "证据与人工门禁已闭环" : "资料已找到，等待人工验收"}</dd></div>
+                          <div><dt>阶段判断</dt><dd>{humanGate ? "证据与人工门禁已闭环" : revisionRequired > 0 ? "人工审核已退回，等待修订" : "资料已找到，等待人工验收"}</dd></div>
                         </dl>
                       </section>
 
@@ -422,7 +470,7 @@ export function ChallengeCupOperationsWorkspace({
                                   <td><strong>{question.id}</strong><span>{question.kind}</span></td>
                                   <td>{modelLabel}</td>
                                   <td><span className={cx("status-icon", question.machinePassed ? "success" : "warning")}>{question.machinePassed ? "通过" : "待验证"}</span></td>
-                                  <td><span className={cx("status-icon", question.humanApproved ? "success" : "warning")}>{question.humanApproved ? "已批准" : "待抽检"}</span></td>
+                                  <td><span className={cx("status-icon", question.humanApproved ? "success" : "warning")}>{humanStatusLabel(question.humanStatus)}</span></td>
                                   <td>{question.machinePassed ? "可追溯" : "待生成"}</td>
                                 </tr>
                               ))}
@@ -507,7 +555,11 @@ export function ChallengeCupOperationsWorkspace({
                   <section>
                     <span>下一步</span>
                     <strong>{activeStage === "knowledge_collection"
-                      ? reviewRequired > 0 ? `完成 ${reviewRequired} 项人工审核` : "进入实验设计"
+                      ? revisionRequired > 0
+                        ? `修订 ${revisionRequired} 项审核问题`
+                        : reviewRequired > 0
+                          ? `完成 ${reviewRequired} 项人工审核`
+                          : "进入实验设计"
                       : activeStage === "experiment"
                         ? "补齐并冻结设计"
                         : "审查最佳版本与边界"}</strong>
@@ -554,7 +606,7 @@ export function ChallengeCupOperationsWorkspace({
               研究关系图
             </Link>
             <VNativeButton className={cx("button", "primary")} type="button" onClick={() => selectTab("questions")}>
-              审核 {reviewRequired} 个待抽检题
+              {revisionRequired > 0 ? `修订 ${revisionRequired} 个退回题` : `审核 ${reviewRequired} 个待抽检题`}
               <ArrowMark />
             </VNativeButton>
           </div>
@@ -628,8 +680,12 @@ export function ChallengeCupOperationsWorkspace({
                 <article>
                   <span className={cx("stat-label")}>人工审核</span>
                   <strong>{humanApproved} / {machineRequired}</strong>
-                  <span className={cx("stat-note", reviewRequired > 0 ? "warning-text" : "success-text")}>
-                    {reviewRequired > 0 ? `${reviewRequired} 题待抽检` : "全部通过"}
+                  <span className={cx("stat-note", humanOutstanding > 0 ? "warning-text" : "success-text")}>
+                    {revisionRequired > 0
+                      ? `${revisionRequired} 题需修订`
+                      : reviewRequired > 0
+                        ? `${reviewRequired} 题待抽检`
+                        : "全部通过"}
                   </span>
                 </article>
                 <article>
@@ -666,7 +722,7 @@ export function ChallengeCupOperationsWorkspace({
                           <strong>{question.id}</strong>
                           <span>{question.kind}</span>
                           <small>
-                            {question.machinePassed ? "机器通过" : "机器待验证"} · {question.humanApproved ? "人工通过" : "待人工"}
+                            {question.machinePassed ? "机器通过" : "机器待验证"} · {humanStatusLabel(question.humanStatus)}
                           </small>
                         </div>
                       </article>
@@ -685,7 +741,7 @@ export function ChallengeCupOperationsWorkspace({
                             <td>{modelLabel}</td>
                             <td><span className={cx("status-icon", question.machinePassed ? "success" : "warning")}>{question.machinePassed ? "通过" : "待验证"}</span></td>
                             <td>{question.machinePassed ? "已追溯" : "待生成"}</td>
-                            <td><span className={cx("status-icon", question.humanApproved ? "success" : "warning")}>{question.humanApproved ? "已批准" : "待抽检"}</span></td>
+                            <td><span className={cx("status-icon", question.humanApproved ? "success" : "warning")}>{humanStatusLabel(question.humanStatus)}</span></td>
                             <td><VNativeButton className={cx("text-button")} type="button" onClick={() => selectTab("questions")}>{question.humanApproved ? "查看" : "审核"}</VNativeButton></td>
                           </tr>
                         ))}
@@ -697,9 +753,21 @@ export function ChallengeCupOperationsWorkspace({
                 <aside className={cx("side-stack")}>
                   <section className={cx("surface", "next-action")} aria-labelledby="challenge-next-action-title">
                     <span className={cx("eyebrow")}>下一步</span>
-                    <h2 id="challenge-next-action-title">{reviewRequired > 0 ? `完成 ${reviewRequired} 题人工抽检` : "准备 MVP 验收记录"}</h2>
-                    <p>{reviewRequired > 0 ? "机器验证已完成，但尚不能把试运行题计为人工验收通过。" : "机器验证与人工审核均已完成，可进入 MVP 验收记录。"}</p>
-                    <div className={cx("action-meta")}><span>预计操作</span><strong>逐题审查 · {reviewRequired} 项</strong></div>
+                    <h2 id="challenge-next-action-title">
+                      {revisionRequired > 0
+                        ? `修订 ${revisionRequired} 题证据与计划`
+                        : reviewRequired > 0
+                          ? `完成 ${reviewRequired} 题人工抽检`
+                          : "准备 MVP 验收记录"}
+                    </h2>
+                    <p>
+                      {revisionRequired > 0
+                        ? "人工审核已发现来源或研究设计问题；机器验证记录保留，但不得计为 MVP 人工通过。"
+                        : reviewRequired > 0
+                          ? "机器验证已完成，但尚不能把试运行题计为人工验收通过。"
+                          : "机器验证与人工审核均已完成，可进入 MVP 验收记录。"}
+                    </p>
+                    <div className={cx("action-meta")}><span>预计操作</span><strong>{revisionRequired > 0 ? `逐题修订 · ${revisionRequired} 项` : `逐题审查 · ${reviewRequired} 项`}</strong></div>
                     <VNativeButton className={cx("button", "primary", "full")} type="button" onClick={() => selectTab("questions")}>进入人工审核</VNativeButton>
                   </section>
 
@@ -712,7 +780,7 @@ export function ChallengeCupOperationsWorkspace({
                       <li className={cx(schemaGate && "done")}><span />结构化输出符合 Schema</li>
                       <li className={cx(citationGate && "done")}><span />来源与证据锚点完整</li>
                       <li className={cx(dimensionsGate && "done")}><span />七维独立评估已记录</li>
-                      <li className={cx(humanGate && "done")}><span />{humanGate ? "人工抽检全部完成" : `${reviewRequired} 题人工抽检待完成`}</li>
+                      <li className={cx(humanGate && "done")}><span />{humanGate ? "人工抽检全部完成" : revisionRequired > 0 ? `${revisionRequired} 题需修订` : `${reviewRequired} 题人工抽检待完成`}</li>
                     </ul>
                   </section>
                 </aside>
@@ -739,7 +807,7 @@ export function ChallengeCupOperationsWorkspace({
             >
               <header className={cx("panel-heading")}>
                 <div><span className={cx("eyebrow")}>题目与结果</span><h2>人工抽检队列</h2><p>机器结果与人工决定分开记录，任何待审项都不会被计为正式通过。</p></div>
-                <div className={cx("panel-actions")}><span className={cx("badge", reviewRequired > 0 ? "warning" : "success")}>{reviewRequired} 个待处理结果</span></div>
+                <div className={cx("panel-actions")}><span className={cx("badge", humanOutstanding > 0 ? "warning" : "success")}>{humanOutstanding} 个待处理结果</span></div>
               </header>
               <div className={cx("question-review-list")}>
                 {(pendingQuestions.length ? pendingQuestions : questions).map((question) => (
@@ -748,7 +816,7 @@ export function ChallengeCupOperationsWorkspace({
                     <div><span>机器验证</span><strong className={cx(question.machinePassed ? "success-text" : "warning-text")}>{question.machinePassed ? "通过" : "待验证"}</strong></div>
                     <div><span>证据状态</span><strong>{question.machinePassed ? "可追溯" : "待生成"}</strong></div>
                     <div><span>假设输出</span><strong>≥ {stage1.acceptance.minimumHypothesisCount} 条</strong></div>
-                    <div><span>人工状态</span><strong className={cx(question.humanApproved ? "success-text" : "warning-text")}>{question.humanApproved ? "已批准" : "待抽检"}</strong></div>
+                    <div><span>人工状态</span><strong className={cx(question.humanApproved ? "success-text" : "warning-text")}>{humanStatusLabel(question.humanStatus)}</strong></div>
                     <VNativeButton className={cx("button", "secondary")} type="button" title="审核写入仍由现有人工门禁流程负责">
                       {question.humanApproved ? "查看记录" : "开始审核"}
                     </VNativeButton>
@@ -776,7 +844,7 @@ export function ChallengeCupOperationsWorkspace({
                 <ol>
                   {questions.map((question) => (
                     <li key={question.id}>
-                      <time>{question.humanApproved ? "已批准" : "待抽检"}</time>
+                      <time>{humanStatusLabel(question.humanStatus)}</time>
                       <strong>{question.id} {question.machinePassed ? "Schema 与引用校验通过" : "等待机器验证"}</strong>
                       <span>{question.machinePassed ? "模型调用与输出摘要可追溯" : "尚无正式完成证据"}</span>
                     </li>

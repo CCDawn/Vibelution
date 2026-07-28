@@ -35,9 +35,9 @@ function projection(): ChallengeProjection {
       completed: false,
     },
     stage1ComplianceReadiness: {
-      status: "completed",
+      status: "blocked",
       completionDefinition: "one_golden_sample_and_three_trial_questions_pass_mvp_gates",
-      blockers: [],
+      blockers: ["mvp_human_review_revision_required"],
       dashscopeQwenProvider: {
         configured: true,
         providerIds: ["dashscope"],
@@ -58,7 +58,7 @@ function projection(): ChallengeProjection {
         completed: 3,
         realCallsRequired: true,
         completedQuestionIds: ["SCI-031", "SCI-097", "SCI-118"],
-        outcomeCounts: { approved: 1, review_required: 3 },
+        outcomeCounts: { approved: 1, needs_revision: 3 },
       },
       mvpManifest: {
         requiredQuestionCount: 4,
@@ -68,6 +68,15 @@ function projection(): ChallengeProjection {
         testQuestionIds: ["SCI-031", "SCI-097", "SCI-118"],
         scaleUpDeferred: true,
       },
+        humanReview: {
+          requiredQuestionCount: 4,
+          approvedQuestionCount: 1,
+          approvedQuestionIds: ["SCI-096"],
+          pendingQuestionIds: [],
+          revisionRequiredQuestionIds: ["SCI-031", "SCI-097", "SCI-118"],
+        rejectedQuestionIds: [],
+        allQuestionsApproved: false,
+      },
       independentEvaluationDimensions: ["novelty", "testability", "evidence", "impact", "feasibility", "clarity", "risk"],
       aggregateScoreAllowed: false,
       humanGates: ["scope", "evidence", "hypothesis", "plan"],
@@ -76,13 +85,13 @@ function projection(): ChallengeProjection {
         citationValidation: true,
         minimumHypothesisCount: 2,
         allSevenDimensionsReviewed: true,
-        allFourHumanGatesApproved: true,
+        allFourHumanGatesApproved: false,
         researchPlanPresent: true,
         feedbackRevisionCount: 1,
       },
     },
     stage2BatchGovernance: {
-      status: "deferred_after_mvp",
+      status: "blocked_by_stage1",
       completionDefinition: "all_125_questions_schema_valid_traceable_and_audited",
       questionCount: 125,
       completedQuestionCount: 0,
@@ -153,7 +162,7 @@ function renderWorkspace(overrides: Partial<ChallengeCupOperationsWorkspaceProps
 }
 
 describe("ChallengeCupOperationsWorkspace", () => {
-  it("renders the approved desktop MVP hierarchy from the live projection", () => {
+  it("keeps machine validation separate from human revision requirements", () => {
     const markup = renderWorkspace();
 
     expect(markup).toContain("XH-202619");
@@ -162,7 +171,8 @@ describe("ChallengeCupOperationsWorkspace", () => {
     expect(markup).toContain("<strong>4 / 4</strong>");
     expect(markup).toContain("人工审核");
     expect(markup).toContain("<strong>1 / 4</strong>");
-    expect(markup).toContain("3 题待抽检");
+    expect(markup).toContain("3 题需修订");
+    expect(markup).toContain("修订 3 题证据与计划");
     expect(markup).toContain("1 个黄金样例 + 3 个试运行题（共 4 题）");
     expect(markup).toContain("模型调用证据");
     expect(markup).toContain("125 题批处理与 3 个代表性深研案例");

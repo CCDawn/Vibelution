@@ -267,6 +267,15 @@ export type ExperimentPlanningStatusPayload = {
         testQuestionIds: string[];
         scaleUpDeferred: boolean;
       };
+      humanReview?: {
+        requiredQuestionCount: number;
+        approvedQuestionCount: number;
+        approvedQuestionIds: string[];
+        pendingQuestionIds: string[];
+        revisionRequiredQuestionIds: string[];
+        rejectedQuestionIds: string[];
+        allQuestionsApproved: boolean;
+      };
       independentEvaluationDimensions: string[];
       aggregateScoreAllowed: boolean;
       humanGates: string[];
