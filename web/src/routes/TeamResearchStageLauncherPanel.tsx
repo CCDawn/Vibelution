@@ -234,6 +234,8 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
     teamId: workflowTeamId,
     enabled: challengeCupResearchTeamSelected,
   });
+  const challengeProgramSurfaceSelected = challengeCupResearchTeamSelected
+    && (Boolean(selectedChallengeQuestionId) || challengeTeamSurface === "progress");
 
   const startResearchProjectAgentTask = async (
     taskKind: ResearchProjectAgentTaskKind,
@@ -257,7 +259,7 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
     if (!researchWorkflowTeamSelected) {
       return null;
     }
-    if (challengeCupResearchTeamSelected) {
+    if (challengeProgramSurfaceSelected) {
       const challengeProjection = experimentPlanningStatus?.challengeProgramProjection;
       const challengeTeamId = workflowTeamId;
       if (selectedChallengeQuestionId) {
