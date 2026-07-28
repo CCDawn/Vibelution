@@ -1401,6 +1401,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("challengeWorkspaceBody");
     expect(teamResearchStageLauncherPanelSource).toContain("MVP 黄金样例");
     expect(teamResearchStageLauncherPanelSource).toContain("3 题试运行");
+    expect(teamResearchStageLauncherPanelSource).toContain("challengeTrialRevisionRequiredCount");
+    expect(teamResearchStageLauncherPanelSource).toContain("MVP 需修订");
     expect(teamResearchStageLauncherPanelSource).toContain("后续规模化与深研");
     expect(teamResearchStageLauncherPanelSource).toContain("125 题批跑、三个深研案例和最终参赛封装均延后到 MVP 验收之后");
     expect(teamResearchStageLauncherPanelSource).toContain("stage1ComplianceReadiness.mvpManifest.completedQuestionCount");

@@ -139,7 +139,7 @@ def test_valid_but_unapproved_candidate_does_not_complete_golden_sample():
     assert stage1["singleQuestionSample"]["latestCandidate"]["questionId"] == "SCI-096"
 
 
-def test_approved_golden_sample_and_three_validated_tests_complete_mvp_without_claiming_scale_up():
+def test_machine_validated_trials_keep_mvp_blocked_when_human_review_requests_revision():
     projection = build_challenge_program_projection(
         legacy_lifecycle={"stage2": {}, "stage3": {}},
         public_config={
@@ -164,7 +164,7 @@ def test_approved_golden_sample_and_three_validated_tests_complete_mvp_without_c
             "validCandidateCount": 4,
             "validatedQuestionCount": 4,
             "validatedQuestionIds": ["SCI-031", "SCI-096", "SCI-097", "SCI-118"],
-            "validatedOutcomeCounts": {"approved": 1, "review_required": 3},
+            "validatedOutcomeCounts": {"approved": 1, "needs_revision": 3},
             "validatedQuestionResults": [
                 {
                     "questionId": "SCI-096",
@@ -180,7 +180,25 @@ def test_approved_golden_sample_and_three_validated_tests_complete_mvp_without_c
                         },
                     },
                     "humanGates": {"allApproved": True},
-                }
+                },
+                *[
+                    {
+                        "questionId": question_id,
+                        "runId": f"mvp-test-{question_id.lower()}-v1",
+                        "status": "needs_revision",
+                        "validation": {
+                            "schemaValidation": "passed",
+                            "citationValidation": "passed",
+                            "semantic": {
+                                "allSevenDimensionsReviewed": True,
+                                "researchPlanPresent": True,
+                                "feedbackRevisionCount": 1,
+                            },
+                        },
+                        "humanGates": {"allApproved": False},
+                    }
+                    for question_id in ("SCI-031", "SCI-097", "SCI-118")
+                ],
             ],
             "completedCount": 1,
             "completedQuestionIds": ["SCI-096"],
@@ -204,16 +222,25 @@ def test_approved_golden_sample_and_three_validated_tests_complete_mvp_without_c
     stage1 = projection["stage1ComplianceReadiness"]
     assert projection["program"]["deliveryMode"] == "mvp"
     assert projection["program"]["immediateQuestionCount"] == 4
-    assert stage1["status"] == "completed"
-    assert stage1["blockers"] == []
+    assert stage1["status"] == "blocked"
+    assert stage1["blockers"] == ["mvp_human_review_revision_required"]
     assert stage1["singleQuestionSample"]["completed"] == 1
-    assert stage1["acceptance"]["allFourHumanGatesApproved"] is True
+    assert stage1["acceptance"]["allFourHumanGatesApproved"] is False
+    assert stage1["humanReview"] == {
+        "requiredQuestionCount": 4,
+        "approvedQuestionCount": 1,
+        "approvedQuestionIds": ["SCI-096"],
+        "pendingQuestionIds": [],
+        "revisionRequiredQuestionIds": ["SCI-031", "SCI-097", "SCI-118"],
+        "rejectedQuestionIds": [],
+        "allQuestionsApproved": False,
+    }
     assert stage1["trialRun"] == {
         "required": 3,
         "completed": 3,
         "realCallsRequired": True,
         "completedQuestionIds": ["SCI-031", "SCI-097", "SCI-118"],
-        "outcomeCounts": {"approved": 1, "review_required": 3},
+        "outcomeCounts": {"approved": 1, "needs_revision": 3},
     }
     assert stage1["mvpManifest"] == {
         "requiredQuestionCount": 4,
@@ -224,8 +251,69 @@ def test_approved_golden_sample_and_three_validated_tests_complete_mvp_without_c
         "scaleUpDeferred": True,
     }
     assert projection["stage2BatchGovernance"]["completedQuestionCount"] == 0
-    assert projection["stage2BatchGovernance"]["status"] == "deferred_after_mvp"
+    assert projection["stage2BatchGovernance"]["status"] == "blocked_by_stage1"
     assert projection["program"]["completed"] is False
+
+
+def test_all_four_human_approved_questions_complete_mvp_readiness():
+    question_ids = ["SCI-031", "SCI-096", "SCI-097", "SCI-118"]
+    projection = build_challenge_program_projection(
+        legacy_lifecycle={"stage2": {}, "stage3": {}},
+        public_config={
+            "llm": {
+                "providers": {
+                    "dashscope_main": {
+                        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                        "credential_ref": "env:DASHSCOPE_API_KEY",
+                        "models": {"qwen3.6-plus": {"upstream_id": "qwen3.6-plus"}},
+                    }
+                }
+            }
+        },
+        official_model_evidence=[
+            {
+                "evidenceId": "model-evidence-real-1",
+                "modelProvider": "dashscope",
+                "status": "registered",
+            }
+        ],
+        question_run_summary={
+            "validatedQuestionIds": question_ids,
+            "validatedOutcomeCounts": {"approved": 4},
+            "validatedQuestionResults": [
+                {
+                    "questionId": question_id,
+                    "status": "approved",
+                    "validation": {
+                        "schemaValidation": "passed",
+                        "citationValidation": "passed",
+                        "semantic": {
+                            "allSevenDimensionsReviewed": True,
+                            "researchPlanPresent": True,
+                            "feedbackRevisionCount": 1,
+                        },
+                    },
+                    "humanGates": {"allApproved": True},
+                }
+                for question_id in question_ids
+            ],
+            "completedQuestionIds": question_ids,
+        },
+    )
+
+    stage1 = projection["stage1ComplianceReadiness"]
+    assert stage1["status"] == "completed"
+    assert stage1["blockers"] == []
+    assert stage1["acceptance"]["allFourHumanGatesApproved"] is True
+    assert stage1["humanReview"]["approvedQuestionCount"] == 4
+    assert stage1["humanReview"]["approvedQuestionIds"] == [
+        "SCI-096",
+        "SCI-031",
+        "SCI-097",
+        "SCI-118",
+    ]
+    assert stage1["humanReview"]["allQuestionsApproved"] is True
+    assert projection["stage2BatchGovernance"]["status"] == "deferred_after_mvp"
 
 
 def test_program_projection_reports_no_deep_case_when_legacy_iteration_never_started():

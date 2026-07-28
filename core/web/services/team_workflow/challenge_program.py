@@ -210,6 +210,31 @@ def build_challenge_program_projection(
         for question_id in validated_question_ids
         if question_id != MVP_GOLDEN_SAMPLE_QUESTION_ID
     ][:MVP_TRIAL_QUESTION_COUNT]
+    mvp_question_ids = [MVP_GOLDEN_SAMPLE_QUESTION_ID, *mvp_trial_question_ids]
+    validated_result_by_question_id = {
+        str(item.get("questionId") or ""): item
+        for item in validated_question_results
+        if str(item.get("questionId") or "")
+    }
+    human_review_approved_question_ids = [
+        question_id for question_id in mvp_question_ids if question_id in completed_question_ids
+    ]
+    human_review_pending_question_ids: list[str] = []
+    human_review_revision_required_question_ids: list[str] = []
+    human_review_rejected_question_ids: list[str] = []
+    for question_id in mvp_question_ids:
+        if question_id in human_review_approved_question_ids:
+            continue
+        review_status = str((validated_result_by_question_id.get(question_id) or {}).get("status") or "")
+        if review_status == "needs_revision":
+            human_review_revision_required_question_ids.append(question_id)
+        elif review_status == "rejected":
+            human_review_rejected_question_ids.append(question_id)
+        else:
+            human_review_pending_question_ids.append(question_id)
+    all_mvp_questions_human_approved = (
+        len(human_review_approved_question_ids) == MVP_TOTAL_QUESTION_COUNT
+    )
     golden_sample_candidate_count = int(MVP_GOLDEN_SAMPLE_QUESTION_ID in validated_question_ids)
     mvp_trial_completed = len(mvp_trial_question_ids)
     latest_candidate = run_summary.get("latestCandidate") if isinstance(run_summary.get("latestCandidate"), dict) else {}
@@ -229,11 +254,6 @@ def build_challenge_program_projection(
     latest_semantic = (
         latest_validation.get("semantic") if isinstance(latest_validation.get("semantic"), dict) else {}
     )
-    latest_gates = (
-        golden_sample_candidate.get("humanGates")
-        if isinstance(golden_sample_candidate.get("humanGates"), dict)
-        else {}
-    )
     stage1_blockers: list[str] = []
     if not provider["configured"]:
         stage1_blockers.append("dashscope_qwen_provider_missing")
@@ -243,6 +263,15 @@ def build_challenge_program_projection(
         stage1_blockers.append("mvp_golden_sample_not_approved")
     if mvp_trial_completed < MVP_TRIAL_QUESTION_COUNT:
         stage1_blockers.append("mvp_three_trial_questions_missing")
+    if (
+        golden_sample_candidate_count >= MVP_GOLDEN_SAMPLE_COUNT
+        and mvp_trial_completed >= MVP_TRIAL_QUESTION_COUNT
+        and not all_mvp_questions_human_approved
+    ):
+        if human_review_revision_required_question_ids or human_review_rejected_question_ids:
+            stage1_blockers.append("mvp_human_review_revision_required")
+        else:
+            stage1_blockers.append("mvp_human_review_incomplete")
 
     case_records = _legacy_case_records(legacy_lifecycle)
     case_recovery_source = "legacy_lifecycle" if case_records else "none"
@@ -296,6 +325,15 @@ def build_challenge_program_projection(
                 "testQuestionIds": mvp_trial_question_ids,
                 "scaleUpDeferred": True,
             },
+            "humanReview": {
+                "requiredQuestionCount": MVP_TOTAL_QUESTION_COUNT,
+                "approvedQuestionCount": len(human_review_approved_question_ids),
+                "approvedQuestionIds": human_review_approved_question_ids,
+                "pendingQuestionIds": human_review_pending_question_ids,
+                "revisionRequiredQuestionIds": human_review_revision_required_question_ids,
+                "rejectedQuestionIds": human_review_rejected_question_ids,
+                "allQuestionsApproved": all_mvp_questions_human_approved,
+            },
             "independentEvaluationDimensions": list(INDEPENDENT_EVALUATION_DIMENSIONS),
             "aggregateScoreAllowed": False,
             "humanGates": list(HUMAN_GATES),
@@ -304,7 +342,7 @@ def build_challenge_program_projection(
                 "citationValidation": latest_validation.get("citationValidation") == "passed",
                 "minimumHypothesisCount": 2,
                 "allSevenDimensionsReviewed": latest_semantic.get("allSevenDimensionsReviewed") is True,
-                "allFourHumanGatesApproved": latest_gates.get("allApproved") is True,
+                "allFourHumanGatesApproved": all_mvp_questions_human_approved,
                 "researchPlanPresent": latest_semantic.get("researchPlanPresent") is True,
                 "feedbackRevisionCount": int(latest_semantic.get("feedbackRevisionCount") or 0),
             },

@@ -490,8 +490,29 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
       selectedTeam?.teamId || RESEARCH_TEAM_ID,
       "experiment",
     )}&experimentMethod=${encodeURIComponent(selectedExperimentMethod)}`;
-    const challengeTrialReviewRequiredCount = challengeProgramProjection?.stage1ComplianceReadiness.trialRun.outcomeCounts.review_required || 0;
-    const challengeTrialApprovedCount = challengeProgramProjection?.stage1ComplianceReadiness.trialRun.outcomeCounts.approved || 0;
+    const challengeStage1 = challengeProgramProjection?.stage1ComplianceReadiness;
+    const challengeTrialReviewRequiredCount = challengeStage1?.humanReview?.pendingQuestionIds.length
+      ?? challengeStage1?.trialRun.outcomeCounts.review_required
+      ?? 0;
+    const challengeTrialRevisionRequiredCount = (
+      challengeStage1?.humanReview?.revisionRequiredQuestionIds.length
+      ?? challengeStage1?.trialRun.outcomeCounts.needs_revision
+      ?? 0
+    ) + (
+      challengeStage1?.humanReview?.rejectedQuestionIds.length
+      ?? challengeStage1?.trialRun.outcomeCounts.rejected
+      ?? 0
+    );
+    const challengeHumanReviewOutstandingCount = challengeTrialReviewRequiredCount + challengeTrialRevisionRequiredCount;
+    const challengeTrialApprovedCount = challengeStage1?.humanReview
+      ? challengeStage1.humanReview.approvedQuestionIds.filter(
+        (questionId) => questionId !== challengeStage1.mvpManifest.goldenSampleQuestionId,
+      ).length
+      : Math.max(
+        0,
+        (challengeStage1?.trialRun.outcomeCounts.approved ?? 0)
+          - ((challengeStage1?.singleQuestionSample.completed || 0) > 0 ? 1 : 0),
+      );
     const challengeStageLabel = (stageType: ResearchStageType) => {
       if (stageType === "knowledge_collection") {
         return lang === "zh" ? "MVP 黄金样例" : "MVP golden sample";
@@ -521,8 +542,10 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
             return lang === "zh" ? "等待黄金样例" : "waiting for golden sample";
           }
           return stage1.trialRun.completed >= stage1.trialRun.required
-            ? challengeTrialReviewRequiredCount > 0
-              ? (lang === "zh" ? "机器验证完成 · 待人工抽检" : "machine checks complete · human review pending")
+            ? challengeTrialRevisionRequiredCount > 0
+              ? (lang === "zh" ? "机器验证完成 · 需修订" : "machine checks complete · revision required")
+              : challengeTrialReviewRequiredCount > 0
+                ? (lang === "zh" ? "机器验证完成 · 待人工抽检" : "machine checks complete · human review pending")
               : (lang === "zh" ? "验证完成" : "validation complete")
             : (lang === "zh" ? "待测试" : "pending");
         }
@@ -565,7 +588,7 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
             : styles.researchStageStatusUnavailable;
         }
         if (stageType === "experiment") {
-          return stage1.trialRun.completed >= stage1.trialRun.required
+          return stage1.trialRun.completed >= stage1.trialRun.required && challengeHumanReviewOutstandingCount === 0
             ? styles.researchStageStatusRecorded
             : styles.researchStageStatusPending;
         }
@@ -689,8 +712,12 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
                   : `Machine validation ${stage1.mvpManifest.completedQuestionCount}/${stage1.mvpManifest.requiredQuestionCount}; human review is tracked separately`}
               </span>
             </div>
-            <span className={`${styles.researchStageStatus} ${styles.researchStageStatusRecorded}`}>
-              {lang === "zh" ? "MVP 可验收" : "MVP ready for acceptance"}
+            <span className={`${styles.researchStageStatus} ${challengeHumanReviewOutstandingCount > 0 ? styles.researchStageStatusPending : styles.researchStageStatusRecorded}`}>
+              {challengeTrialRevisionRequiredCount > 0
+                ? (lang === "zh" ? "MVP 需修订" : "MVP revision required")
+                : challengeTrialReviewRequiredCount > 0
+                  ? (lang === "zh" ? "MVP 待人工审核" : "MVP human review pending")
+                  : (lang === "zh" ? "MVP 可验收" : "MVP ready for acceptance")}
             </span>
           </header>
           <div className={styles.challengeProgramResultGrid}>
@@ -715,10 +742,12 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
             <article id="challenge-mvp-trials" className={styles.challengeProgramResultCard}>
               <header>
                 <strong>{lang === "zh" ? "三题试运行" : "Three trial questions"}</strong>
-                <span className={`${styles.researchStageStatus} ${challengeTrialReviewRequiredCount > 0 ? styles.researchStageStatusPending : styles.researchStageStatusRecorded}`}>
-                  {challengeTrialReviewRequiredCount > 0
-                    ? (lang === "zh" ? `待人工抽检 ${challengeTrialReviewRequiredCount}` : `${challengeTrialReviewRequiredCount} awaiting human review`)
-                    : (lang === "zh" ? "审核完成" : "review complete")}
+                <span className={`${styles.researchStageStatus} ${challengeHumanReviewOutstandingCount > 0 ? styles.researchStageStatusPending : styles.researchStageStatusRecorded}`}>
+                  {challengeTrialRevisionRequiredCount > 0
+                    ? (lang === "zh" ? `需修订 ${challengeTrialRevisionRequiredCount}` : `${challengeTrialRevisionRequiredCount} require revision`)
+                    : challengeTrialReviewRequiredCount > 0
+                      ? (lang === "zh" ? `待人工抽检 ${challengeTrialReviewRequiredCount}` : `${challengeTrialReviewRequiredCount} awaiting human review`)
+                      : (lang === "zh" ? "审核完成" : "review complete")}
                 </span>
               </header>
               <div className={styles.challengeProgramQuestionList}>
@@ -726,8 +755,8 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
               </div>
               <p>
                 {lang === "zh"
-                  ? `机器验证 ${stage1.trialRun.completed}/${stage1.trialRun.required}；人工已批准 ${challengeTrialApprovedCount}，其余保持待审核，不计作正式人工通过。`
-                  : `Machine validation ${stage1.trialRun.completed}/${stage1.trialRun.required}; ${challengeTrialApprovedCount} human-approved, with the remainder explicitly pending.`}
+                  ? `机器验证 ${stage1.trialRun.completed}/${stage1.trialRun.required}；试运行题人工批准 ${challengeTrialApprovedCount}，待审 ${challengeTrialReviewRequiredCount}，需修订 ${challengeTrialRevisionRequiredCount}。`
+                  : `Machine validation ${stage1.trialRun.completed}/${stage1.trialRun.required}; ${challengeTrialApprovedCount} trial question(s) approved, ${challengeTrialReviewRequiredCount} pending, ${challengeTrialRevisionRequiredCount} requiring revision.`}
               </p>
             </article>
             <article id="challenge-mvp-roadmap" className={styles.challengeProgramResultCard}>
@@ -915,7 +944,14 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
                     ) : stageType === "experiment" ? (
                       <>
                         <span>{lang === "zh" ? "试运行题" : "trial questions"} {challengeProgramProjection.stage1ComplianceReadiness.trialRun.completed}/{challengeProgramProjection.stage1ComplianceReadiness.trialRun.required}</span>
-                        <span>{lang === "zh" ? "人工抽检" : "human review"} {challengeTrialReviewRequiredCount > 0 ? (lang === "zh" ? `待 ${challengeTrialReviewRequiredCount}` : `${challengeTrialReviewRequiredCount} pending`) : (lang === "zh" ? "完成" : "complete")}</span>
+                        <span>
+                          {lang === "zh" ? "人工抽检" : "human review"}{" "}
+                          {challengeTrialRevisionRequiredCount > 0
+                            ? (lang === "zh" ? `需修订 ${challengeTrialRevisionRequiredCount}` : `${challengeTrialRevisionRequiredCount} require revision`)
+                            : challengeTrialReviewRequiredCount > 0
+                              ? (lang === "zh" ? `待 ${challengeTrialReviewRequiredCount}` : `${challengeTrialReviewRequiredCount} pending`)
+                              : (lang === "zh" ? "完成" : "complete")}
+                        </span>
                         <span>{lang === "zh" ? "MVP 总进度" : "MVP progress"} {challengeProgramProjection.stage1ComplianceReadiness.mvpManifest.completedQuestionCount}/{challengeProgramProjection.stage1ComplianceReadiness.mvpManifest.requiredQuestionCount}</span>
                         <span>{lang === "zh" ? "规模化" : "scale-up"} {lang === "zh" ? "已延后" : "deferred"}</span>
                       </>
