@@ -83,8 +83,9 @@ describe("conversation process trace styles", () => {
     expect(styles.timelineCellPreview).not.toContain("[font-size:var(--vui-font-xs)]");
   });
 
-  it("gives final answers stronger hierarchy than commentary and completed tools", () => {
-    expect(styles.codexTranscriptCommentaryCell).toContain("text-[var(--fg-secondary)]");
+  it("keeps progress commentary readable while completed tool summaries remain quiet", () => {
+    expect(styles.codexTranscriptCommentaryCell).toContain("text-[var(--fg-primary)]");
+    expect(styles.codexTranscriptCommentaryCell).not.toContain("text-[var(--fg-secondary)]");
     expect(styles.codexTranscriptCommentaryCell).toContain("bg-transparent");
     expect(styles.codexTranscriptFinalCell).toContain("leading-[var(--vui-line-readable)]");
     expect(styles.codexTranscriptFinalCell).toContain("text-[var(--fg-primary)]");

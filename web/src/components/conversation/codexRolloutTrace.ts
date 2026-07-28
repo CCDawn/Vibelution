@@ -43,11 +43,18 @@ export function buildCodexRolloutTraceEvents(
   operations: AgentMessageOperation[] | AgentMessageOperation,
 ): CodexRolloutTraceEvent[] {
   const model = buildCodexToolLifecycleModel(operations);
-  return model.toolCalls.flatMap((toolCall) => eventsForToolCall(
-    toolCall,
-    model.terminalOperations.find((operation) => operation.operationId === toolCall.terminalOperationId),
-    model.modelObservations.find((observation) => observation.toolCallId === toolCall.toolCallId),
-  ));
+  const eventsById = new Map<string, CodexRolloutTraceEvent>();
+  for (const toolCall of model.toolCalls) {
+    const events = eventsForToolCall(
+      toolCall,
+      model.terminalOperations.find((operation) => operation.operationId === toolCall.terminalOperationId),
+      model.modelObservations.find((observation) => observation.toolCallId === toolCall.toolCallId),
+    );
+    for (const event of events) {
+      eventsById.set(event.id, event);
+    }
+  }
+  return Array.from(eventsById.values());
 }
 
 function eventsForToolCall(
