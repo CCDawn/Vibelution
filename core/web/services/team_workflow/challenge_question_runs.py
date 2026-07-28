@@ -14,7 +14,10 @@ from jsonschema import Draft202012Validator, FormatChecker
 
 from core.web.services import team_service
 from core.web.services.runtime_scene_service import record_runtime_scene_event
-from core.web.services.team_workflow.research_projects import resolve_team_workflow_root
+from core.web.services.team_workflow.research_projects import (
+    resolve_research_project_workspace_root,
+    resolve_team_program_root,
+)
 
 
 STORE_SCHEMA_VERSION = 1
@@ -39,7 +42,7 @@ def _project_root() -> Path:
 
 
 def _workflow_root(team_id: str) -> Path:
-    return resolve_team_workflow_root(team_id)
+    return resolve_team_program_root(team_id)
 
 
 def _store_path(team_id: str) -> Path:
@@ -255,8 +258,331 @@ def _official_model_evidence_ids(team_id: str) -> set[str]:
         str(item.get("evidenceId") or "")
         for item in evidence
         if isinstance(item, dict)
-        and str(item.get("modelProvider") or "").lower() in OFFICIAL_PROVIDERS
+        and any(
+            marker in str(item.get("modelProvider") or "").lower()
+            for marker in OFFICIAL_PROVIDERS
+        )
         and str(item.get("status") or "").lower() != "derived_from_candidate_store"
+    }
+
+
+def _evidence_store_path(root: Path) -> Path:
+    return root / "official_model_evidence" / "index.json"
+
+
+def _load_evidence_store(path: Path, team_id: str) -> dict[str, Any]:
+    store = _read_json(path)
+    if store.get("storeKind") == "official_model_evidence_store" and isinstance(store.get("evidence"), list):
+        return store
+    now = _utc_now()
+    return {
+        "schemaVersion": 1,
+        "storeKind": "official_model_evidence_store",
+        "teamId": team_id,
+        "evidence": [],
+        "createdAt": now,
+        "updatedAt": now,
+    }
+
+
+def _normalized_string_list(value: Any, *, max_items: int = 16, max_length: int = 160) -> list[str]:
+    values = value if isinstance(value, list) else []
+    result: list[str] = []
+    for item in values:
+        normalized = str(item or "").strip()[:max_length]
+        if normalized and normalized not in result:
+            result.append(normalized)
+        if len(result) >= max_items:
+            break
+    return result
+
+
+def normalize_challenge_research_task_policy(
+    question_id: Any,
+    required_model_policy: Any,
+) -> dict[str, Any]:
+    """Validate the explicit question and official Qwen route contract."""
+    normalized_question_id = str(question_id or "").strip()[:32]
+    policy = dict(required_model_policy) if isinstance(required_model_policy, dict) else {}
+    if not normalized_question_id and not policy:
+        return {}
+    if not normalized_question_id or not policy:
+        raise ValueError("challenge_task_contract_incomplete: questionId and requiredModelPolicy are both required.")
+    if _catalog_question(normalized_question_id) is None:
+        raise ValueError("challenge_task_question_unknown: questionId is not present in the official catalog.")
+    provider_ids = _normalized_string_list(policy.get("providerIds"))
+    model_ids = _normalized_string_list(policy.get("modelIds"))
+    require_official = policy.get("requireOfficialProvider") is not False
+    if not provider_ids or not model_ids or not require_official:
+        raise ValueError(
+            "challenge_task_model_policy_invalid: official providerIds, modelIds and requireOfficialProvider=true are required."
+        )
+    if any(not any(marker in provider_id.lower() for marker in OFFICIAL_PROVIDERS) for provider_id in provider_ids):
+        raise ValueError("challenge_task_model_policy_invalid: providerIds must identify DashScope/Bailian/Aliyun.")
+    if any("qwen" not in model_id.lower() for model_id in model_ids):
+        raise ValueError("challenge_task_model_policy_invalid: modelIds must identify Qwen models.")
+    return {
+        "questionId": normalized_question_id,
+        "requiredModelPolicy": {
+            "providerIds": provider_ids,
+            "modelIds": model_ids,
+            "requireOfficialProvider": True,
+        },
+    }
+
+
+def bind_challenge_research_task_model(
+    *,
+    team_id: str,
+    research_project_id: str,
+    question_id: Any,
+    required_model_policy: Any,
+    dialogue_model_id: Any,
+    model_library: dict[str, Any],
+) -> dict[str, Any]:
+    """Resolve and fail closed on the effective Agent route before submission."""
+    contract = normalize_challenge_research_task_policy(question_id, required_model_policy)
+    if not contract:
+        return {}
+    resolve_research_project_workspace_root(team_id, research_project_id)
+    model_ref = str(dialogue_model_id or "").strip()
+    entry = model_library.get(model_ref) if isinstance(model_library, dict) else None
+    if not model_ref or not isinstance(entry, dict):
+        raise ValueError(
+            "challenge_required_model_unavailable: Agent dialogue model is missing from the effective model library."
+        )
+    provider_id = str(entry.get("provider_id") or "").strip() or model_ref.partition("/")[0]
+    upstream_model_id = str(entry.get("upstream_id") or entry.get("model") or "").strip()
+    policy = contract["requiredModelPolicy"]
+    allowed_provider_ids = {item.lower() for item in policy["providerIds"]}
+    allowed_model_ids = {item.lower() for item in policy["modelIds"]}
+    model_candidates = {model_ref.lower(), upstream_model_id.lower()}
+    if (
+        provider_id.lower() not in allowed_provider_ids
+        or not any(marker in provider_id.lower() for marker in OFFICIAL_PROVIDERS)
+        or not (model_candidates & allowed_model_ids)
+        or "qwen" not in upstream_model_id.lower()
+    ):
+        raise ValueError(
+            "challenge_required_model_mismatch: Challenge task requires the configured DashScope/Qwen route before the first LLM call."
+        )
+    return {
+        **contract,
+        "researchProjectId": research_project_id,
+        "effectiveRoute": {
+            "modelRef": model_ref,
+            "providerId": provider_id,
+            "modelId": upstream_model_id,
+        },
+        "evidencePolicy": {
+            "recordCanonicalSuccessOnly": True,
+            "rawPayloadPersistence": "forbidden",
+            "publishRequiredForProgramLedger": True,
+        },
+    }
+
+
+def register_challenge_task_model_evidence(
+    team_id: str,
+    task: dict[str, Any],
+    *,
+    final_status: str,
+    llm_usage: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Idempotently bind a successful canonical call to a project/task/turn."""
+    contract = task.get("challengeTaskContract") if isinstance(task.get("challengeTaskContract"), dict) else {}
+    usage = dict(llm_usage) if isinstance(llm_usage, dict) else {}
+    if not contract or str(final_status or "").strip() != "completed":
+        return None
+    if str(usage.get("source") or "").strip() in {"", "missing", "not_called", "not_called_preflight"}:
+        return None
+    effective = contract.get("effectiveRoute") if isinstance(contract.get("effectiveRoute"), dict) else {}
+    usage_provider = str(usage.get("provider") or "").strip()
+    usage_model = str(usage.get("model") or "").strip()
+    usage_model_ref = str(usage.get("llmModelId") or "").strip()
+    expected_provider = str(effective.get("providerId") or "").strip()
+    expected_model = str(effective.get("modelId") or "").strip()
+    expected_model_ref = str(effective.get("modelRef") or "").strip()
+    if (
+        not usage_provider
+        or not any(marker in usage_provider.lower() for marker in OFFICIAL_PROVIDERS)
+        or usage_provider.lower() not in {expected_provider.lower(), expected_provider.partition("_")[0].lower()}
+        or usage_model.lower() != expected_model.lower()
+        or (usage_model_ref and usage_model_ref != expected_model_ref)
+    ):
+        return None
+    research_project_id = str(contract.get("researchProjectId") or task.get("researchProjectId") or "").strip()
+    question_id = str(contract.get("questionId") or "").strip()
+    task_id = str(task.get("taskId") or "").strip()
+    turn = task.get("turn") if isinstance(task.get("turn"), dict) else {}
+    turn_id = str(turn.get("turnId") or "").strip()
+    if not all((research_project_id, question_id, task_id, turn_id)):
+        return None
+    identity = "|".join((team_id, research_project_id, question_id, task_id, turn_id, expected_model_ref))
+    evidence_id = f"model-evidence-{hashlib.sha256(identity.encode('utf-8')).hexdigest()[:20]}"
+    path = _evidence_store_path(resolve_research_project_workspace_root(team_id, research_project_id))
+    with _STORE_LOCK:
+        store = _load_evidence_store(path, team_id)
+        evidence = [item for item in store.get("evidence", []) if isinstance(item, dict)]
+        existing = next((item for item in evidence if str(item.get("evidenceId") or "") == evidence_id), None)
+        if existing is not None:
+            return deepcopy(existing)
+        now = _utc_now()
+        record = {
+            "schemaVersion": 1,
+            "evidenceId": evidence_id,
+            "teamId": team_id,
+            "researchProjectId": research_project_id,
+            "questionId": question_id,
+            "sourceRunId": str(task.get("runId") or ""),
+            "taskId": task_id,
+            "turnId": turn_id,
+            "taskType": str(task.get("agentRole") or task.get("stageId") or ""),
+            "workflowNode": str(task.get("stageId") or ""),
+            "modelProvider": usage_provider,
+            "providerId": expected_provider,
+            "modelId": usage_model,
+            "modelRef": expected_model_ref,
+            "evidenceKind": "invocation_log",
+            "logRef": f"session:{task.get('sessionId', '')}/turn:{turn_id}",
+            "status": "canonical_success",
+            "recordedByAgent": str(task.get("agentId") or ""),
+            "metadata": {
+                "llmUsageSource": str(usage.get("source") or ""),
+                "inputTokens": int(usage.get("inputTokens") or 0),
+                "outputTokens": int(usage.get("outputTokens") or 0),
+                "totalTokens": int(usage.get("totalTokens") or 0),
+            },
+            "officialBoundary": {
+                "candidateOnly": True,
+                "publishRequired": True,
+                "humanApprovalGranted": False,
+                "rawPayloadPersisted": False,
+            },
+            "createdAt": now,
+            "updatedAt": now,
+        }
+        evidence.append(record)
+        store["evidence"] = evidence
+        store["updatedAt"] = now
+        _write_json(path, store)
+        return deepcopy(record)
+
+
+def publish_research_project_challenge_question_output(
+    team_id: str,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    """Promote one validated project result into the stable program candidate ledger."""
+    team_service.get_team(team_id)
+    research_project_id = str(payload.get("researchProjectId") or "").strip()
+    question_id = str(payload.get("questionId") or "").strip()
+    task_id = str(payload.get("taskId") or "").strip()
+    turn_id = str(payload.get("turnId") or "").strip()
+    evidence_id = str(payload.get("projectEvidenceId") or "").strip()
+    if not all((research_project_id, question_id, task_id, turn_id, evidence_id)):
+        raise ValueError(
+            "challenge_question_publish_contract_incomplete: researchProjectId, questionId, taskId, turnId and projectEvidenceId are required."
+        )
+    project_evidence_path = _evidence_store_path(
+        resolve_research_project_workspace_root(team_id, research_project_id)
+    )
+    project_store = _load_evidence_store(project_evidence_path, team_id)
+    project_evidence = next(
+        (
+            item
+            for item in project_store.get("evidence", [])
+            if isinstance(item, dict) and str(item.get("evidenceId") or "") == evidence_id
+        ),
+        None,
+    )
+    if project_evidence is None:
+        raise ValueError("challenge_question_publish_evidence_missing: project evidence was not found.")
+    expected_binding = {
+        "researchProjectId": research_project_id,
+        "questionId": question_id,
+        "taskId": task_id,
+        "turnId": turn_id,
+    }
+    if any(str(project_evidence.get(key) or "") != value for key, value in expected_binding.items()):
+        raise ValueError("challenge_question_publish_evidence_mismatch: evidence binding does not match the publish request.")
+    if str(project_evidence.get("status") or "") != "canonical_success":
+        raise ValueError("challenge_question_publish_evidence_invalid: only canonical successful calls can be published.")
+
+    raw_output = payload.get("output")
+    if not isinstance(raw_output, dict):
+        raise ValueError("output must be an object.")
+    output = deepcopy(raw_output)
+    if str(output.get("question_id") or "") != question_id:
+        raise ValueError("challenge_question_publish_question_mismatch: output.question_id must match questionId.")
+    run = output.get("run") if isinstance(output.get("run"), dict) else {}
+    if (
+        str(run.get("model_provider") or "").strip().lower() not in OFFICIAL_PROVIDERS
+        or str(run.get("model_id") or "").strip().lower()
+        not in {
+            str(project_evidence.get("modelId") or "").strip().lower(),
+            str(project_evidence.get("modelRef") or "").strip().lower(),
+        }
+    ):
+        raise ValueError("challenge_question_publish_model_mismatch: output model does not match canonical evidence.")
+    invocation_refs = _normalized_string_list(run.get("invocation_evidence_refs"), max_items=64)
+    if evidence_id not in invocation_refs:
+        invocation_refs.append(evidence_id)
+    run["invocation_evidence_refs"] = invocation_refs
+    output["run"] = run
+
+    preview = deepcopy(output)
+    _set_pending_human_gates(preview)
+    citation_checks = payload.get("citationChecks") if isinstance(payload.get("citationChecks"), list) else []
+    citation = _citation_validation(preview, citation_checks)
+    semantic = _semantic_validation(preview)
+    issues = _schema_issues(preview)
+    catalog_question = _catalog_question(question_id)
+    if catalog_question is None:
+        issues.append({"path": "question_id", "message": "Question id is not present in the official catalog."})
+    elif str(catalog_question.get("question_en") or "") != str(preview.get("question_en") or ""):
+        issues.append({"path": "question_en", "message": "Question text does not match the official catalog."})
+    issues.extend(semantic["issues"])
+    if issues or citation["status"] != "passed" or semantic["status"] != "passed":
+        raise ValueError("challenge_question_publish_not_ready: schema, citations, hypotheses, seven reviews and research plan must pass.")
+
+    program_evidence_path = _evidence_store_path(_workflow_root(team_id))
+    with _STORE_LOCK:
+        program_store = _load_evidence_store(program_evidence_path, team_id)
+        program_evidence = [item for item in program_store.get("evidence", []) if isinstance(item, dict)]
+        promoted = next((item for item in program_evidence if str(item.get("evidenceId") or "") == evidence_id), None)
+        if promoted is None:
+            promoted = {
+                **deepcopy(project_evidence),
+                "status": "published_to_challenge_program",
+                "publishedAt": _utc_now(),
+                "officialBoundary": {
+                    "candidateOnly": False,
+                    "publishedToChallengeProgram": True,
+                    "humanApprovalGranted": False,
+                    "rawPayloadPersisted": False,
+                },
+            }
+            program_evidence.append(promoted)
+            program_store["evidence"] = program_evidence
+            program_store["updatedAt"] = promoted["publishedAt"]
+            _write_json(program_evidence_path, program_store)
+        registered = register_challenge_question_output(
+            team_id,
+            {
+                "output": output,
+                "citationChecks": citation_checks,
+                "registeredBy": str(payload.get("registeredBy") or ""),
+                "parentRunId": str(payload.get("parentRunId") or ""),
+                "lineageRefs": payload.get("lineageRefs") if isinstance(payload.get("lineageRefs"), list) else [],
+            },
+        )
+    return {
+        **registered,
+        "researchProjectId": research_project_id,
+        "projectEvidenceId": evidence_id,
+        "publishedEvidence": deepcopy(promoted),
+        "humanReviewRequired": True,
     }
 
 

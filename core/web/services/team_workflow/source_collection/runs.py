@@ -46,6 +46,13 @@ def start_source_collection_run(team_id: str, payload: dict[str, Any] | None = N
     owner_agent_id = s._trim_text(request_payload.get("ownerAgentId"), max_length=160) or default_owner_agent_id
     requested_by_agent = s._trim_text(request_payload.get("requestedByAgent"), max_length=160) or owner_agent_id
     prompt_cache_policy = s._source_collection_prompt_cache_policy(normalized_team_id, request_payload, roles)
+    try:
+        challenge_task_contract = s.normalize_challenge_research_task_policy(
+            request_payload.get("questionId"),
+            request_payload.get("requiredModelPolicy"),
+        )
+    except ValueError as exc:
+        raise s.TeamWorkflowOrchestrationError(str(exc)) from exc
     scope = s._normalize_metadata(request_payload.get("scope"))
     if goal:
         scope["goal"] = goal
@@ -58,6 +65,8 @@ def start_source_collection_run(team_id: str, payload: dict[str, Any] | None = N
     scope["researchProjectId"] = research_project["projectId"]
     scope["experimentName"] = research_project["name"]
     scope["promptCachePolicyRef"] = s._source_collection_prompt_cache_policy_ref(prompt_cache_policy)
+    if challenge_task_contract:
+        scope.update(challenge_task_contract)
     preliminary_search_plan = s._build_source_collection_search_plan(
         team_id=normalized_team_id,
         run_id="",
@@ -85,6 +94,7 @@ def start_source_collection_run(team_id: str, payload: dict[str, Any] | None = N
             "collectionMode": collection_mode,
             "researchProjectId": research_project["projectId"],
             "experimentName": research_project["name"],
+            **challenge_task_contract,
             "requestedByAgent": requested_by_agent,
             "ownerAgentId": owner_agent_id,
             "searchPlanId": preliminary_search_plan["planId"],
@@ -189,6 +199,7 @@ def start_source_collection_run(team_id: str, payload: dict[str, Any] | None = N
         "sessionCleanup": session_cleanup,
         "researchProjectId": research_project["projectId"],
         "experimentName": research_project["name"],
+        **challenge_task_contract,
         "localWorkspaceScan": local_workspace_scan,
         "assignments": assignments,
         "assignmentCount": len(assignments),

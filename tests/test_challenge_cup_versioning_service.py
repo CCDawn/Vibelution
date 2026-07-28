@@ -88,6 +88,57 @@ def test_candidate_versioning_store_records_versions_relations_and_rejections(tm
     assert child_payload["evidenceRefCount"] == 1
 
 
+def test_candidate_versioning_status_and_lookup_are_project_scoped(
+    tmp_path, monkeypatch
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = _create_research_team()
+    version_a = challenge_cup_versioning_service.record_candidate_version_event(
+        team["teamId"],
+        {
+            "researchProjectId": "project-a",
+            "operation": "record_version",
+            "candidateId": "candidate-a",
+        },
+    )["event"]
+    challenge_cup_versioning_service.record_candidate_version_event(
+        team["teamId"],
+        {
+            "researchProjectId": "project-b",
+            "operation": "record_version",
+            "candidateId": "candidate-b",
+        },
+    )
+
+    status = challenge_cup_versioning_service.get_candidate_versioning_status(
+        team["teamId"],
+        research_project_id="project-a",
+    )
+
+    assert version_a["researchProjectId"] == "project-a"
+    assert status["researchProjectId"] == "project-a"
+    assert [item["candidateId"] for item in status["versionHistory"]] == [
+        "candidate-a"
+    ]
+    assert (
+        challenge_cup_versioning_service.require_candidate_version(
+            team["teamId"],
+            version_a["versionId"],
+            research_project_id="project-a",
+        )["versionId"]
+        == version_a["versionId"]
+    )
+    with pytest.raises(
+        challenge_cup_versioning_service.ChallengeCupVersioningError,
+        match="does not belong",
+    ):
+        challenge_cup_versioning_service.require_candidate_version(
+            team["teamId"],
+            version_a["versionId"],
+            research_project_id="project-b",
+        )
+
+
 def test_candidate_versioning_requires_relation_target_version(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team = _create_research_team()

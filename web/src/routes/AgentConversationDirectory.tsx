@@ -47,6 +47,37 @@ export function isVisibleDirectoryAgent(agent: AgentInstance) {
   );
 }
 
+export function visibleDirectoryAgents(
+  agents: AgentInstance[],
+  sessions: SessionSummary[],
+) {
+  const experimentAgentIds = new Set(
+    sessions
+      .filter((session) => {
+        const binding = session.experimentBinding;
+        const sessionAgentId = String(session.agentId || "").trim();
+        return Boolean(
+          binding
+          && String(binding.teamId || "").trim()
+          && String(binding.researchProjectId || "").trim()
+          && String(binding.agentId || "").trim() === sessionAgentId,
+        );
+      })
+      .map((session) => String(session.agentId || "").trim()),
+  );
+  return agents.filter((agent) => {
+    if (isVisibleDirectoryAgent(agent)) {
+      return true;
+    }
+    return (
+      String(agent.kind || "").trim() === "persistent"
+      && String(agent.status || "").trim() !== "archived"
+      && storedConversationIndexKind(agent) === "team_agent"
+      && experimentAgentIds.has(String(agent.agentId || "").trim())
+    );
+  });
+}
+
 export function agentDirectorySection(agent: AgentInstance): AgentDirectorySection {
   const primaryMode = String(agent.primaryMode || "").trim();
   const roleKey = String(agent.roleKey || "").trim();
@@ -87,7 +118,8 @@ export function AgentConversationDirectory({
   onContextMenu,
   onOpenAgent,
 }: AgentConversationDirectoryProps) {
-  const visibleAgents = agents.filter(isVisibleDirectoryAgent).filter((agent) => isAgentMatch(agent, filterText));
+  const visibleAgents = visibleDirectoryAgents(agents, sessions)
+    .filter((agent) => isAgentMatch(agent, filterText));
   const conversationAgents = visibleAgents.filter((agent) => agentDirectorySection(agent) === "conversation");
   const specialAgents = visibleAgents.filter((agent) => agentDirectorySection(agent) === "special");
   const [collapsedSections, setCollapsedSections] = useState<Record<AgentDirectorySection, boolean>>(
