@@ -17,7 +17,6 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, PointerEvent, WheelEvent } from "react";
-import { Link } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
@@ -33,7 +32,14 @@ import {
   ResearchOrgMessageResponse,
   ResearchOrgProposalResponse,
 } from "../api/types";
-import { VButton, VNativeInput, VNativeSelect, VNativeTextarea, VRouteHeader } from "../components/vui";
+import {
+  VButton,
+  VNativeInput,
+  VNativeSelect,
+  VNativeTextarea,
+  VRouteHeader,
+  VRouteLinkButton,
+} from "../components/vui";
 import { agentDisplayInfo } from "./agentDisplay";
 import styles from "./ResearchFlowCanvasRoute.styles";
 
@@ -2305,37 +2311,36 @@ export function ResearchFlowCanvasRoute() {
         meta="持续锁定到项目组织架构；Agent 节点和通信线实时来自科研团队事实源。"
         actions={(
           <div className={styles.headerActions}>
-          <Link className={styles.secondaryButton} to="/research">
-            <ArrowLeft size={16} />
-            返回科研页
-          </Link>
-          <VButton className={styles.secondaryButton} type="button" onClick={fitView} isDisabled={!draft}>
-            <MousePointer2 size={16} />
-            复位视图
-          </VButton>
-          <VButton
-            className={styles.secondaryButton}
-            type="button"
-            onClick={() => {
-              canvasQuery.refetch();
-              organizationQuery.refetch();
-              setObservationMessage("已请求刷新科研组织图。");
-            }}
-            isDisabled={canvasQuery.isFetching || organizationQuery.isFetching}
-          >
-            <RefreshCw size={16} />
-            刷新组织图
-          </VButton>
-          <VButton
-            className={`${styles.primaryButton} ${styles.lockButtonActive}`}
-            type="button"
-            onClick={toggleCanvasLock}
-            title="画布持续锁定，拓扑来自项目组织架构。"
-            aria-pressed="true"
-          >
-            <Lock size={16} />
-            持续锁定
-          </VButton>
+            <VRouteLinkButton className={styles.secondaryButton} to="/research" icon={<ArrowLeft size={16} />}>
+              返回科研页
+            </VRouteLinkButton>
+            <VButton className={styles.secondaryButton} type="button" onClick={fitView} isDisabled={!draft}>
+              <MousePointer2 size={16} />
+              复位视图
+            </VButton>
+            <VButton
+              className={styles.secondaryButton}
+              type="button"
+              onClick={() => {
+                canvasQuery.refetch();
+                organizationQuery.refetch();
+                setObservationMessage("已请求刷新科研组织图。");
+              }}
+              isDisabled={canvasQuery.isFetching || organizationQuery.isFetching}
+            >
+              <RefreshCw size={16} />
+              刷新组织图
+            </VButton>
+            <VButton
+              className={`${styles.primaryButton} ${styles.lockButtonActive}`}
+              type="button"
+              onClick={toggleCanvasLock}
+              title="画布持续锁定，拓扑来自项目组织架构。"
+              aria-pressed="true"
+            >
+              <Lock size={16} />
+              持续锁定
+            </VButton>
           </div>
         )}
       />
