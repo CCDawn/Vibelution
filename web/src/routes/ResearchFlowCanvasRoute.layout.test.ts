@@ -16,6 +16,8 @@ describe("ResearchFlowCanvasRoute layout contract", () => {
     expect(routeSource).toContain("<VNativeInput");
     expect(routeSource).toContain("<VNativeSelect");
     expect(routeSource).toContain("<VNativeTextarea");
+    expect(routeSource).toContain("<VRouteLinkButton");
+    expect(routeSource).not.toContain('import { Link } from "react-router-dom"');
     expect(routeSource).not.toMatch(/<button\b/);
     expect(routeSource).not.toMatch(/<input\b/);
     expect(routeSource).not.toMatch(/<select\b/);
