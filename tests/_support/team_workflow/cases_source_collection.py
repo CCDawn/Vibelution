@@ -7199,6 +7199,137 @@ def test_challenge_stage_task_blocks_non_qwen_agent_before_submit(tmp_path, monk
     ) == []
 
 
+def test_challenge_source_run_derives_required_policy_from_official_prompt_cache_route(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "load_public_config",
+        lambda: {
+            "llm": {
+                "profiles": {},
+                "model_library": {
+                    "dashscope_main/qwen3.6-plus": {
+                        "model": "qwen3.6-plus",
+                        "upstream_id": "qwen3.6-plus",
+                        "provider_id": "dashscope_main",
+                        "prompt_cache": {"mode": "explicit_cache_control"},
+                    }
+                },
+            }
+        },
+    )
+    team = team_service.create_team(name="挑战杯科研团队")
+
+    response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "predictive coding",
+            "agentRoles": ["source_finder"],
+            "querySeeds": ["predictive coding"],
+            "promptCachePolicy": {
+                "requirement": "required_for_llm_execution",
+                "modelId": "dashscope_main/qwen3.6-plus",
+            },
+            "scope": {
+                "questionId": "SCI-096",
+                "workflowKind": "challenge_cup_research",
+            },
+        },
+    )
+
+    expected_policy = {
+        "providerIds": ["dashscope_main"],
+        "modelIds": ["qwen3.6-plus"],
+        "requireOfficialProvider": True,
+    }
+    assert response["questionId"] == "SCI-096"
+    assert response["requiredModelPolicy"] == expected_policy
+    assert response["run"]["scope"]["requiredModelPolicy"] == expected_policy
+    assert response["run"]["metadata"]["requiredModelPolicy"] == expected_policy
+
+
+def test_legacy_challenge_stage_task_recovers_policy_from_prompt_cache_snapshot(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "load_public_config",
+        lambda: {
+            "llm": {
+                "profiles": {},
+                "model_library": {
+                    "dashscope_main/qwen3.6-plus": {
+                        "model": "qwen3.6-plus",
+                        "upstream_id": "qwen3.6-plus",
+                        "provider_id": "dashscope_main",
+                        "prompt_cache": {"mode": "explicit_cache_control"},
+                    }
+                },
+            }
+        },
+    )
+    finder = agent_directory_service.create_agent_instance(
+        display_name="资料寻找",
+        llm_bindings={"dialogue": {"modelId": "dashscope_main/qwen3.6-plus"}},
+    )
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": finder["agentId"], "role": "source_finder", "agentName": "资料寻找"}],
+    )
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "predictive coding",
+            "agentRoles": ["source_finder"],
+            "agentIds": {"source_finder": finder["agentId"]},
+            "querySeeds": ["predictive coding"],
+            "promptCachePolicy": {
+                "requirement": "required_for_llm_execution",
+                "modelId": "dashscope_main/qwen3.6-plus",
+            },
+        },
+    )
+    run_id = run_response["run"]["runId"]
+    real_get_processing_run = data_processing_service.get_processing_run
+
+    def legacy_get_processing_run(requested_run_id):
+        run = real_get_processing_run(requested_run_id)
+        if requested_run_id == run_id:
+            run["scope"]["questionId"] = "SCI-096"
+            run["scope"].pop("requiredModelPolicy", None)
+            run["metadata"].pop("requiredModelPolicy", None)
+        return run
+
+    monkeypatch.setattr(data_processing_service, "get_processing_run", legacy_get_processing_run)
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda session_id, content, **kwargs: {
+            "accepted": True,
+            "sessionId": session_id,
+            "turnId": "turn-legacy-challenge-qwen-1",
+            "status": "running",
+        },
+    )
+
+    task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_id,
+        {"stageId": "finding", "agentId": finder["agentId"], "agentRole": "source_finder"},
+    )
+
+    assert task["task"]["challengeTaskContract"]["questionId"] == "SCI-096"
+    assert task["task"]["challengeTaskContract"]["requiredModelPolicy"] == {
+        "providerIds": ["dashscope_main"],
+        "modelIds": ["qwen3.6-plus"],
+        "requireOfficialProvider": True,
+    }
+    assert task["task"]["challengeTaskContract"]["effectiveRoute"] == {
+        "modelRef": "dashscope_main/qwen3.6-plus",
+        "providerId": "dashscope_main",
+        "modelId": "qwen3.6-plus",
+    }
+
+
 def test_challenge_qwen_stage_task_records_bounded_canonical_evidence(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(
