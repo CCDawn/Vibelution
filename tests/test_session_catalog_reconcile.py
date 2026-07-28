@@ -187,3 +187,70 @@ def test_invalid_candidate_does_not_replace_last_good_catalog(tmp_path):
     assert result.status == "complete"
     assert result.session_count == 0
     assert store.query_sessions(limit=10) == []
+
+
+def test_successful_reconcile_clears_dirty_sessions_and_untrusted_sentinel(tmp_path):
+    snapshot = build_catalog_snapshot(
+        _conversations(),
+        _journal_inventory(),
+        workspace_key="workspace-test",
+        indexed_at="2026-07-27T00:00:02Z",
+    )
+    store = _store(tmp_path)
+    assert store.mark_dirty(
+        "session-a",
+        reason="canonical_mutation",
+        source_revision="state:5",
+        observed_at="2026-07-28T00:00:00Z",
+    )
+    assert store.mark_untrusted("CatalogWriteError")
+
+    result = CatalogReconciler(store, source_loader=lambda: snapshot).reconcile(
+        owner="worker-a",
+        now="2026-07-28T00:00:00Z",
+        lease_expires_at="2026-07-28T00:05:00Z",
+    )
+
+    assert result.status == "complete"
+    assert store.dirty_session_count() == 0
+    assert not store.untrusted_sentinel_path.exists()
+
+
+def test_reconcile_preserves_dirty_marker_written_after_capture(monkeypatch, tmp_path):
+    snapshot = build_catalog_snapshot(
+        _conversations(),
+        _journal_inventory(),
+        workspace_key="workspace-test",
+        indexed_at="2026-07-27T00:00:02Z",
+    )
+    store = _store(tmp_path)
+    assert store.mark_dirty(
+        "session-a",
+        reason="canonical_mutation",
+        source_revision="state:5",
+        observed_at="2026-07-28T00:00:00Z",
+    )
+    assert store.mark_untrusted("CatalogWriteError")
+    original_clear = store.clear_dirty_sessions_if_unchanged
+
+    def clear_after_newer_mutation(records):
+        assert store.mark_dirty(
+            "session-a",
+            reason="canonical_mutation",
+            source_revision="state:6",
+            observed_at="2026-07-28T00:00:01Z",
+        )
+        return original_clear(records)
+
+    monkeypatch.setattr(store, "clear_dirty_sessions_if_unchanged", clear_after_newer_mutation)
+
+    result = CatalogReconciler(store, source_loader=lambda: snapshot).reconcile(
+        owner="worker-a",
+        now="2026-07-28T00:00:00Z",
+        lease_expires_at="2026-07-28T00:05:00Z",
+    )
+
+    assert result.status == "complete"
+    assert store.dirty_session_count() == 1
+    assert store.dirty_sessions()[0].source_revision == "state:6"
+    assert store.untrusted_sentinel_path.exists()

@@ -1,13 +1,24 @@
 import json
 from contextlib import contextmanager
 
+import pytest
+
 from core.ui.chat_state import chat_state_path, load_chat_state, save_chat_state
 from core.web.services import session_service
 
 
+@pytest.fixture(autouse=True)
+def _isolated_data_home(tmp_path, monkeypatch):
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(tmp_path / "operator-data"))
+
+
 def test_save_chat_state_uses_valid_replace_target(tmp_path):
     payload = {"version": 1, "conversations": [{"conversation_id": "default", "messages": []}]}
-    expected = {"version": 1, "conversations": [{"conversation_id": "default"}]}
+    expected = {
+        "version": 1,
+        "state_revision": 1,
+        "conversations": [{"conversation_id": "default"}],
+    }
 
     save_chat_state(tmp_path, payload)
 

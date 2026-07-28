@@ -246,6 +246,7 @@ class CatalogReconciler:
                 source_revision="",
             )
         try:
+            dirty_before_reconcile = self._store.dirty_sessions()
             candidate = self._source_loader()
             confirmation = self._source_loader()
             if candidate.source_revision != confirmation.source_revision:
@@ -261,6 +262,11 @@ class CatalogReconciler:
             if not published:
                 self._store.release_lease(owner, status="pending")
                 return _result("source_changed", candidate)
+            try:
+                self._store.clear_dirty_sessions_if_unchanged(dirty_before_reconcile)
+                self._store.clear_untrusted_after_reconcile()
+            except CatalogError as exc:
+                self._store.mark_untrusted(type(exc).__name__)
             return _result("complete", candidate)
         except Exception:
             try:

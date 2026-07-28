@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ctypes
 import hashlib
+import json
 import os
 import sqlite3
 from contextlib import closing
@@ -15,6 +16,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
+
+from core.infrastructure.atomic_io import atomic_write_text
 
 
 SCHEMA_VERSION = 1
@@ -64,6 +67,16 @@ class Migration:
     def checksum(self) -> str:
         payload = "\n;\n".join(statement.strip() for statement in self.statements)
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+@dataclass(frozen=True)
+class CatalogDirtySession:
+    """A bounded invalidation record captured before one reconcile generation."""
+
+    session_id: str
+    reason: str
+    source_revision: str
+    observed_at: str
 
 
 _SCHEMA_V1_STATEMENTS = (
@@ -372,6 +385,178 @@ class SessionCatalogStore:
         for key in ("lease_owner", "lease_expires_at"):
             row[key] = str(row.get(key) or "")
         return row
+
+    @property
+    def untrusted_sentinel_path(self) -> Path:
+        return self.database_path.with_name("catalog.untrusted")
+
+    def mark_dirty(
+        self,
+        session_id: str,
+        *,
+        reason: str,
+        source_revision: str,
+        observed_at: str = "",
+    ) -> bool:
+        """Record a pre-invalidation hint without risking canonical writes."""
+
+        normalized_session_id = str(session_id or "").strip()
+        if not normalized_session_id:
+            raise ValueError("session_id is required")
+        try:
+            with closing(self._connect()) as connection:
+                self._validate_schema(connection)
+                connection.execute(
+                    """
+                    INSERT INTO catalog_dirty_sessions(
+                      session_id, reason, source_revision, observed_at
+                    ) VALUES (?, ?, ?, ?)
+                    ON CONFLICT(session_id) DO UPDATE SET
+                      reason=excluded.reason,
+                      source_revision=excluded.source_revision,
+                      observed_at=excluded.observed_at
+                    """,
+                    (
+                        normalized_session_id,
+                        str(reason or "canonical_mutation").strip()[:80]
+                        or "canonical_mutation",
+                        str(source_revision or "").strip()[:512],
+                        str(observed_at or _utcnow()).strip() or _utcnow(),
+                    ),
+                )
+                connection.commit()
+                return True
+        except CatalogError as exc:
+            self.mark_untrusted(type(exc).__name__)
+            return False
+        except sqlite3.Error as exc:
+            self.mark_untrusted(type(exc).__name__)
+            return False
+
+    def dirty_session_count(self) -> int:
+        try:
+            with closing(self._connect()) as connection:
+                self._validate_schema(connection)
+                return int(
+                    connection.execute(
+                        "SELECT COUNT(*) FROM catalog_dirty_sessions"
+                    ).fetchone()[0]
+                )
+        except sqlite3.Error as exc:
+            _raise_sqlite_error(exc)
+
+    def dirty_sessions(self) -> tuple[CatalogDirtySession, ...]:
+        try:
+            with closing(self._connect()) as connection:
+                self._validate_schema(connection)
+                rows = connection.execute(
+                    """
+                    SELECT session_id, reason, source_revision, observed_at
+                    FROM catalog_dirty_sessions
+                    ORDER BY session_id ASC
+                    """
+                ).fetchall()
+                return tuple(
+                    CatalogDirtySession(
+                        session_id=str(row["session_id"] or ""),
+                        reason=str(row["reason"] or ""),
+                        source_revision=str(row["source_revision"] or ""),
+                        observed_at=str(row["observed_at"] or ""),
+                    )
+                    for row in rows
+                )
+        except sqlite3.Error as exc:
+            _raise_sqlite_error(exc)
+
+    def clear_dirty_sessions(self, session_ids: Sequence[str] | None = None) -> None:
+        normalized_ids = [str(item or "").strip() for item in session_ids or ()]
+        normalized_ids = [item for item in normalized_ids if item]
+        try:
+            with closing(self._connect()) as connection:
+                self._validate_schema(connection)
+                if session_ids is None:
+                    connection.execute("DELETE FROM catalog_dirty_sessions")
+                elif normalized_ids:
+                    placeholders = ", ".join("?" for _ in normalized_ids)
+                    connection.execute(
+                        f"DELETE FROM catalog_dirty_sessions WHERE session_id IN ({placeholders})",
+                        tuple(normalized_ids),
+                    )
+                connection.commit()
+        except sqlite3.Error as exc:
+            _raise_sqlite_error(exc)
+
+    def clear_dirty_sessions_if_unchanged(
+        self,
+        records: Sequence[CatalogDirtySession],
+    ) -> int:
+        """Clear only records captured before a source-stable reconcile.
+
+        A later canonical mutation replaces the row's source revision or
+        observation time, so this conditional delete leaves the new dirty hint
+        in place and prevents a stale catalog from being treated as fresh.
+        """
+
+        cleared = 0
+        try:
+            with closing(self._connect()) as connection:
+                self._validate_schema(connection)
+                for record in records:
+                    result = connection.execute(
+                        """
+                        DELETE FROM catalog_dirty_sessions
+                        WHERE session_id = ?
+                          AND reason = ?
+                          AND source_revision = ?
+                          AND observed_at = ?
+                        """,
+                        (
+                            str(record.session_id or ""),
+                            str(record.reason or ""),
+                            str(record.source_revision or ""),
+                            str(record.observed_at or ""),
+                        ),
+                    )
+                    cleared += int(result.rowcount or 0)
+                connection.commit()
+                return cleared
+        except sqlite3.Error as exc:
+            _raise_sqlite_error(exc)
+
+    def mark_untrusted(self, error_type: str) -> bool:
+        """Latch catalog reads to legacy without storing an unbounded error."""
+
+        try:
+            self._ensure_local_target()
+            self.untrusted_sentinel_path.parent.mkdir(parents=True, exist_ok=True)
+            atomic_write_text(
+                self.untrusted_sentinel_path,
+                json.dumps(
+                    {
+                        "schemaVersion": 1,
+                        "errorType": str(error_type or "CatalogError")[:120],
+                        "markedAt": _utcnow(),
+                    },
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ),
+            )
+            return True
+        except (CatalogError, OSError):
+            return False
+
+    def clear_untrusted_after_reconcile(self) -> bool:
+        """Clear the local latch only after the caller finished a clean reconcile."""
+
+        if self.dirty_session_count() != 0:
+            return False
+        try:
+            self.untrusted_sentinel_path.unlink()
+        except FileNotFoundError:
+            return True
+        except OSError:
+            return False
+        return True
 
     def quick_check(self) -> str:
         try:

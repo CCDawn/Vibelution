@@ -300,6 +300,7 @@ def load_chat_state(project_root: Path) -> dict[str, Any]:
         cleaned, changed = _drop_legacy_chat_state_messages(payload, project_root=project_root)
         if changed:
             try:
+                cleaned["state_revision"] = _next_state_revision(path)
                 atomic_write_text(path, json.dumps(cleaned, ensure_ascii=False, indent=2))
             except OSError as exc:
                 _debug_logger.warning(
@@ -313,7 +314,23 @@ def save_chat_state(project_root: Path, state: dict[str, Any]) -> None:
         path = chat_state_path(project_root)
         path.parent.mkdir(parents=True, exist_ok=True)
         cleaned, _changed = _drop_legacy_chat_state_messages(state, project_root=project_root)
+        cleaned["state_revision"] = _next_state_revision(path)
         atomic_write_text(path, json.dumps(cleaned, ensure_ascii=False, indent=2))
+
+
+def _next_state_revision(path: Path) -> int:
+    """Advance only from the locked on-disk state, never caller-provided data."""
+
+    try:
+        current = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, json.JSONDecodeError):
+        return 1
+    if not isinstance(current, dict):
+        return 1
+    try:
+        return max(0, int(current.get("state_revision") or 0)) + 1
+    except (TypeError, ValueError):
+        return 1
 
 
 def _drop_legacy_chat_state_messages(
