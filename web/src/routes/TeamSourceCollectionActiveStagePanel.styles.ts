@@ -5,7 +5,7 @@ import {
 
 const styles = {
   sourceCollectionExtractionPanels:
-    "sourceCollectionExtractionPanels min-w-0 grid content-start gap-2 grid-cols-[minmax(0,1fr)]",
+    "sourceCollectionExtractionPanels min-w-0 flex h-full min-h-0 flex-col content-start gap-2 overflow-auto [scrollbar-gutter:stable] max-[1020px]:h-auto max-[1020px]:overflow-visible",
   sourceCollectionIngestionPanels:
     "sourceCollectionIngestionPanels min-w-0 grid min-h-0 content-stretch gap-2 grid-rows-[auto_minmax(0,1fr)] overflow-hidden max-[860px]:min-h-[560px] max-[860px]:grid-rows-[auto_minmax(0,1fr)] max-[860px]:overflow-hidden",
   sourceCollectionStageChatActions:

@@ -23,7 +23,7 @@ export type SourceCollectionEvidenceDetailItem = {
 
 export const SOURCE_COLLECTION_STAGE_WRITEBACK_SYNC_GRACE_MS = 30_000;
 export const SOURCE_COLLECTION_RUN_PREVIEW_LIMIT = 20;
-export const SOURCE_COLLECTION_RESULT_PAGE_SIZE = 8;
+export const SOURCE_COLLECTION_RESULT_PAGE_SIZE = 16;
 export const SOURCE_COLLECTION_SEARCH_EXECUTION_ROLES = new Set(["source_finder"]);
 export const SOURCE_COLLECTION_LOCAL_SCAN_DEFAULT_ROOTS = "workspace/knowledge";
 export const SOURCE_COLLECTION_PROMPT_CACHE_POLICY = {

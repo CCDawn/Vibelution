@@ -3,6 +3,8 @@ import { vuiOpaqueRowClass } from "../design/vuiSurfaceRecipes";
 const styles = {
   empty:
     "empty min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
+  sourceCollectionExpandedContentPanel:
+    "sourceCollectionExpandedContentPanel min-h-max overflow-visible",
   // Wave 6E: height from PersistedHeightListShell / pane-heights.v1, not fixed max-h.
   sourceCollectionCandidateListShell:
     "sourceCollectionCandidateListShell min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto rounded-[var(--radius-control)] border border-[color:var(--border-soft)] bg-[color:var(--source-workbench-card)] p-1.5 text-[var(--fg-primary)] items-start self-start [scrollbar-gutter:stable]",
