@@ -74,6 +74,7 @@ from core.web.services.team_workflow.research_projects import (
     list_research_projects,
     lock_research_project_name,
     resolve_research_project_workspace_root,
+    resolve_team_program_root,
     update_research_project,
 )
 from core.web.services.team_workflow.research_project_agent_sessions import (
@@ -512,7 +513,11 @@ from core.web.services.team_workflow.experiment import (
     run_experiment_smoke_run,
 )
 from core.web.services.team_workflow.challenge_question_runs import (
+    bind_challenge_research_task_model,
     get_challenge_question_run_status,
+    normalize_challenge_research_task_policy,
+    publish_research_project_challenge_question_output,
+    register_challenge_task_model_evidence,
     register_challenge_question_output,
     review_challenge_question_output,
 )
@@ -727,6 +732,7 @@ from core.web.services.team_workflow.knowledge_kernel import (
     _research_memory_knowledge_results,
     _stage_coordination_purpose,
     _load_official_model_evidence_store,
+    _load_program_official_model_evidence_store,
     _official_model_evidence_entries,
     _build_official_model_evidence_record,
     _official_model_evidence_from_candidates,
@@ -734,6 +740,7 @@ from core.web.services.team_workflow.knowledge_kernel import (
     _official_model_evidence_coverage,
     _official_model_evidence_action_items,
     _official_model_evidence_boundary,
+    _program_official_model_evidence_store_path,
     _normalize_official_model_task_type,
     _official_model_task_type_from_node,
     _normalize_official_model_evidence_kind,

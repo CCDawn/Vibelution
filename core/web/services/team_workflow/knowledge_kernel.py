@@ -3624,6 +3624,23 @@ def _load_official_model_evidence_store(team_id: str) -> dict[str, Any]:
     }
 
 
+def _load_program_official_model_evidence_store(team_id: str) -> dict[str, Any]:
+    s = _service()
+    path = s._program_official_model_evidence_store_path(team_id)
+    store = s._read_json(path)
+    if store.get("storeKind") == "official_model_evidence_store" and isinstance(store.get("evidence"), list):
+        return store
+    now = s.utc_now_iso()
+    return {
+        "schemaVersion": s.SCHEMA_VERSION,
+        "storeKind": "official_model_evidence_store",
+        "teamId": team_id,
+        "evidence": [],
+        "createdAt": now,
+        "updatedAt": now,
+    }
+
+
 def _official_model_evidence_entries(store: dict[str, Any]) -> list[dict[str, Any]]:
     s = _service()
     return [item for item in list(store.get("evidence") or []) if isinstance(item, dict)]
@@ -4070,3 +4087,8 @@ def _transfer_records_path(team_id: str) -> Path:
 def _official_model_evidence_store_path(team_id: str) -> Path:
     s = _service()
     return s._team_workflow_root(team_id) / "official_model_evidence" / "index.json"
+
+
+def _program_official_model_evidence_store_path(team_id: str) -> Path:
+    s = _service()
+    return s.resolve_team_program_root(team_id) / "official_model_evidence" / "index.json"

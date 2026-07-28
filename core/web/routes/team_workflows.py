@@ -70,6 +70,7 @@ from core.web.services.team_workflow_orchestration_service import (
     rollback_official_research_graph,
     run_experiment_smoke_run,
     prepare_experiment_full_run,
+    publish_research_project_challenge_question_output,
     run_knowledge_collection_ingestion,
     run_knowledge_ingestion_precheck,
     seed_source_collection_agent_session_context,
@@ -170,6 +171,8 @@ class DataRecordSourceImportPayload(BaseModel):
 
 class SourceCollectionRunStartPayload(BaseModel):
     researchProjectId: str = Field("", max_length=160)
+    questionId: str = Field("", max_length=32)
+    requiredModelPolicy: dict[str, Any] = Field(default_factory=dict)
     title: str = Field("", max_length=180)
     workflowPurpose: str = Field("", max_length=80)
     workflowKind: str = Field("", max_length=80)
@@ -211,6 +214,8 @@ class SourceCollectionAgentSessionContextPayload(BaseModel):
 
 
 class SourceCollectionStageSessionTaskPayload(SourceCollectionAgentSessionContextPayload):
+    questionId: str = Field("", max_length=32)
+    requiredModelPolicy: dict[str, Any] = Field(default_factory=dict)
     requestedByAgent: str = Field("", max_length=160)
     returnTo: str = Field("", max_length=1000)
     returnLabel: str = Field("", max_length=240)
@@ -526,6 +531,14 @@ class ChallengeQuestionOutputPayload(BaseModel):
     registeredBy: str = Field("", max_length=160)
     parentRunId: str = Field("", max_length=160)
     lineageRefs: list[str] = Field(default_factory=list, max_length=64)
+
+
+class ChallengeQuestionPublishPayload(ChallengeQuestionOutputPayload):
+    researchProjectId: str = Field(..., min_length=1, max_length=160)
+    questionId: str = Field(..., min_length=1, max_length=32)
+    taskId: str = Field(..., min_length=1, max_length=160)
+    turnId: str = Field(..., min_length=1, max_length=200)
+    projectEvidenceId: str = Field(..., min_length=1, max_length=160)
 
 
 class ChallengeQuestionReviewPayload(BaseModel):
@@ -1161,6 +1174,33 @@ def team_workflow_challenge_question_run_register(team_id: str, payload: Challen
             exc,
             status_code=422,
             fields={"registeredBy": payload.registeredBy},
+        )
+
+
+@router.post(
+    "/teams/{team_id}/workflow-orchestration/challenge-program/question-runs/publish",
+    status_code=status.HTTP_201_CREATED,
+)
+def team_workflow_challenge_question_run_publish(
+    team_id: str,
+    payload: ChallengeQuestionPublishPayload,
+) -> dict:
+    try:
+        return publish_research_project_challenge_question_output(team_id, payload.model_dump())
+    except TeamNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (ValueError, TeamServiceError, TeamWorkflowOrchestrationError) as exc:
+        _raise_team_workflow_route_error(
+            "challenge_question_run.publish",
+            team_id,
+            exc,
+            status_code=422,
+            fields={
+                "researchProjectId": payload.researchProjectId,
+                "questionId": payload.questionId,
+                "taskId": payload.taskId,
+                "turnId": payload.turnId,
+            },
         )
 
 
