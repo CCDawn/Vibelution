@@ -131,7 +131,13 @@ export function TeamSourceCollectionExtractionRecoveryWorkspacePanel(props: Team
     );
     const sourceCollectionExtractionRecoveryEvidenceGapOnly = Boolean(
       !sourceCollectionExtractionRecoveryHasHardFailure
-      && sourceCollectionExtractionRecoveryEvidenceWorkCount > 0
+      && sourceCollectionExtractionRecoveryEvidenceGapCount > 0
+      && materializedEvidenceGapCount !== 0
+    );
+    const sourceCollectionExtractionRecoverySourceVerificationOnly = Boolean(
+      !sourceCollectionExtractionRecoveryHasHardFailure
+      && materializedEvidenceGapCount === 0
+      && sourceCollectionExtractionRecoverySourceVerificationCount > 0
     );
     const recoveryNeedsWork = Boolean(
       sourceCollectionExtractionRecoveryHasHardFailure
@@ -142,7 +148,9 @@ export function TeamSourceCollectionExtractionRecoveryWorkspacePanel(props: Team
     }
     const sourceCollectionExtractionRecoveryIssueCount = sourceCollectionExtractionRecoveryHasHardFailure
       ? sourceCollectionExtractionRecoveryFailureCount
-      : sourceCollectionExtractionRecoveryEvidenceGapCount || sourceCollectionExtractionRecoverySourceVerificationCount;
+      : sourceCollectionExtractionRecoverySourceVerificationOnly
+        ? sourceCollectionExtractionRecoverySourceVerificationCount
+        : sourceCollectionExtractionRecoveryEvidenceGapCount;
     const recoveryFailureText = sourceCollectionExtractionRecoveryIssueCount > 0
       ? sourceCollectionExtractionRecoveryInputCount > 0
         ? `${sourceCollectionExtractionRecoveryIssueCount}/${sourceCollectionExtractionRecoveryInputCount}`
@@ -163,6 +171,10 @@ export function TeamSourceCollectionExtractionRecoveryWorkspacePanel(props: Team
     const sourceCollectionImportCandidateActionText = lang === "zh" ? "补导入候选" : "Import candidates";
     const recoverySummary = sourceCollectionExtractionExcludedRecoveryState.blockedByExcludedSources
       ? sourceCollectionExtractionExcludedRecoveryState.summary
+      : sourceCollectionExtractionRecoverySourceVerificationOnly
+        ? (lang === "zh"
+          ? `候选资料已提炼 ${sourceCollectionExtractionRecoverySalvageCount}/${sourceCollectionExtractionRecoveryInputCount}；其中 ${sourceCollectionExtractionRecoverySourceVerificationCount} 条来源需要核验版本或可靠性，不代表缺少证据锚点。`
+          : `${sourceCollectionExtractionRecoverySalvageCount}/${sourceCollectionExtractionRecoveryInputCount} candidate sources were extracted; ${sourceCollectionExtractionRecoverySourceVerificationCount} still need version or reliability verification, not additional evidence anchors.`)
       : sourceCollectionStageUserSummary(candidateProjection, lang)
       || (lang === "zh"
         ? "本轮资料提炼没有完全闭环；先保留可用候选，再补齐失败记录。"
@@ -177,22 +189,30 @@ export function TeamSourceCollectionExtractionRecoveryWorkspacePanel(props: Team
             : "danger"}
         ariaLabel={sourceCollectionExtractionExcludedRecoveryState.blockedByExcludedSources
           ? sourceCollectionExtractionExcludedRecoveryState.panelAriaLabel
+          : sourceCollectionExtractionRecoverySourceVerificationOnly
+            ? (lang === "zh" ? "资料提炼来源核验工作台" : "Source extraction verification panel")
           : sourceCollectionExtractionRecoveryEvidenceGapOnly
             ? (lang === "zh" ? "资料提炼证据补全工作台" : "Source extraction evidence completion panel")
             : undefined}
         titleLabel={sourceCollectionExtractionExcludedRecoveryState.blockedByExcludedSources
           ? sourceCollectionExtractionExcludedRecoveryState.panelTitle
+          : sourceCollectionExtractionRecoverySourceVerificationOnly
+            ? (lang === "zh" ? "来源核验" : "Source verification")
           : sourceCollectionExtractionRecoveryEvidenceGapOnly
             ? (lang === "zh" ? "证据补全" : "Evidence completion")
             : undefined}
         statusLabel={sourceCollectionExtractionExcludedRecoveryState.blockedByExcludedSources
           ? sourceCollectionExtractionExcludedRecoveryState.statusLabel
+          : sourceCollectionExtractionRecoverySourceVerificationOnly
+            ? (lang === "zh" ? "提炼完成，待核验来源" : "Extraction complete; sources need verification")
           : sourceCollectionExtractionRecoveryEvidenceGapOnly
             ? (lang === "zh" ? "提炼完成，待补证据" : "Extraction complete; evidence needed")
             : sourceCollectionStageRecoveryStatusLabel("extraction", lang)}
         summary={recoverySummary}
         failedLabel={sourceCollectionExtractionExcludedRecoveryState.blockedByExcludedSources
           ? sourceCollectionExtractionExcludedRecoveryState.failedLabel
+          : sourceCollectionExtractionRecoverySourceVerificationOnly
+            ? (lang === "zh" ? "待核验来源" : "sources to verify")
           : sourceCollectionExtractionRecoveryEvidenceGapOnly
             ? (lang === "zh" ? "待补证据" : "evidence gaps")
             : undefined}
