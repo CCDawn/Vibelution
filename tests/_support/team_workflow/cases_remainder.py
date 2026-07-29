@@ -160,7 +160,11 @@ def test_content_extraction_writeback_downgrades_unanchored_evidence_ledger(tmp_
                         "summary": "预测编码可启发控制结构，但尚未写页码或 citation。",
                         "claims": [{"claim": "Predictive coding supports a hierarchy analogy.", "sourceRef": "source-1"}],
                         "keyFindings": [{"finding": "层级误差可用于控制结构类比。", "sourceRef": "source-1"}],
-                        "sourceRefs": [{"type": "paper", "id": "source-1", "label": "Missing Anchor Source"}],
+                        "sourceRefs": [{"type": "doi", "id": "10.0000/missing-anchor", "label": "Missing Anchor Source"}],
+                        "evidenceRefs": [
+                            {"type": "doi", "id": "10.0000/missing-anchor", "label": "DOI locator only"},
+                            {"type": "url", "id": "https://doi.org/10.0000/missing-anchor", "label": "URL locator only"},
+                        ],
                     }
                 ]
             },
@@ -175,6 +179,23 @@ def test_content_extraction_writeback_downgrades_unanchored_evidence_ledger(tmp_
     assert response["writeback"]["materializedContentExtraction"]["missingEvidenceAnchorCount"] == 1
     assert extraction["evidenceStatus"] == "missing_evidence_anchor"
     assert extraction["evidenceLedger"]["status"] == "missing_evidence_anchor"
+
+def test_content_extraction_writeback_contract_distinguishes_source_locators_from_evidence_anchors():
+    contract = team_workflow_orchestration_service._source_collection_stage_task_writeback_contract(
+        "team-extraction-contract",
+        "run-extraction-contract",
+        "task-extraction-contract",
+        stage_id="extraction",
+        agent_id="extractor-agent",
+        agent_role="source_extractor",
+    )
+
+    result_contract = contract["resultContract"]
+    assert result_contract["acceptedCollections"] == ["candidateExtractions", "recordExtractions"]
+    assert result_contract["sourceLocatorFields"] == ["sourceRefs"]
+    assert result_contract["evidenceAnchorFields"] == ["evidenceRefs", "claims", "keyFindings", "citations"]
+    assert result_contract["locatorOnlyTypes"] == ["doi", "url", "uri", "paper"]
+    assert result_contract["locatorOnlySatisfiesEvidenceAnchor"] is False
 
 def test_stage_checklist_accepts_persisted_writeback_recorded_after_interrupted_turn(monkeypatch):
     context_event = SimpleNamespace(

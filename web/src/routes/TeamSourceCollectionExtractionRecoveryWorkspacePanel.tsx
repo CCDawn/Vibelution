@@ -16,6 +16,14 @@ import { TeamSourceCollectionExtractionRecoveryPanel } from "./TeamSourceCollect
 
 type Lang = "zh" | "en";
 
+function extractionMissingEvidenceAnchorCount(candidateProjection: SourceCollectionStageCardProjection | null | undefined) {
+  const materialized = candidateProjection?.latestTask?.materializedContentExtraction;
+  const value = materialized?.missingEvidenceAnchorCount;
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.max(0, value)
+    : undefined;
+}
+
 export type TeamSourceCollectionExtractionRecoveryWorkspacePanelProps = {
   candidateProjection: SourceCollectionStageCardProjection | null | undefined;
   lang: Lang;
@@ -85,9 +93,16 @@ export function TeamSourceCollectionExtractionRecoveryWorkspacePanel(props: Team
       candidateProjection?.latestTask?.invalidCandidateIds?.length ?? 0,
     );
     const sourceCollectionExtractionRecoveryCoverageMissingCount = recoveryNumber(recoveryCoverage?.missing);
-    const sourceCollectionExtractionRecoveryEvidenceGapCount = Math.max(
+    const sourceCollectionExtractionRecoverySourceVerificationCount = Math.max(
       recoveryNumber(recoveryClosure?.blockedCount),
       recoveryNumber(recoveryCoverage?.blocked),
+    );
+    const materializedEvidenceGapCount = extractionMissingEvidenceAnchorCount(candidateProjection);
+    const sourceCollectionExtractionRecoveryEvidenceGapCount = materializedEvidenceGapCount
+      ?? sourceCollectionExtractionRecoverySourceVerificationCount;
+    const sourceCollectionExtractionRecoveryEvidenceWorkCount = Math.max(
+      sourceCollectionExtractionRecoveryEvidenceGapCount,
+      sourceCollectionExtractionRecoverySourceVerificationCount,
     );
     const sourceCollectionExtractionRecoveryFailureCount = Math.max(
       recoveryNumber(recoveryClosure?.failedCount),
@@ -116,18 +131,18 @@ export function TeamSourceCollectionExtractionRecoveryWorkspacePanel(props: Team
     );
     const sourceCollectionExtractionRecoveryEvidenceGapOnly = Boolean(
       !sourceCollectionExtractionRecoveryHasHardFailure
-      && sourceCollectionExtractionRecoveryEvidenceGapCount > 0
+      && sourceCollectionExtractionRecoveryEvidenceWorkCount > 0
     );
     const recoveryNeedsWork = Boolean(
       sourceCollectionExtractionRecoveryHasHardFailure
-      || sourceCollectionExtractionRecoveryEvidenceGapCount > 0
+      || sourceCollectionExtractionRecoveryEvidenceWorkCount > 0
     );
     if (!recoveryNeedsWork) {
       return null;
     }
     const sourceCollectionExtractionRecoveryIssueCount = sourceCollectionExtractionRecoveryHasHardFailure
       ? sourceCollectionExtractionRecoveryFailureCount
-      : sourceCollectionExtractionRecoveryEvidenceGapCount;
+      : sourceCollectionExtractionRecoveryEvidenceGapCount || sourceCollectionExtractionRecoverySourceVerificationCount;
     const recoveryFailureText = sourceCollectionExtractionRecoveryIssueCount > 0
       ? sourceCollectionExtractionRecoveryInputCount > 0
         ? `${sourceCollectionExtractionRecoveryIssueCount}/${sourceCollectionExtractionRecoveryInputCount}`

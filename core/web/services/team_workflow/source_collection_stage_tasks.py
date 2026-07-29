@@ -33,6 +33,42 @@ def source_collection_stage_can_materialize_formal_knowledge(stage_id: str, agen
     )
 
 
+def _source_collection_extraction_result_contract() -> dict[str, Any]:
+    return {
+        "acceptedCollections": ["candidateExtractions", "recordExtractions"],
+        "requiredItemFields": ["decision"],
+        "candidateIdentityField": "candidateId",
+        "recordIdentityField": "recordId",
+        "sourceLocatorFields": ["sourceRefs"],
+        "evidenceAnchorFields": ["evidenceRefs", "claims", "keyFindings", "citations"],
+        "locatorOnlyTypes": ["doi", "url", "uri", "paper"],
+        "locatorOnlySatisfiesEvidenceAnchor": False,
+        "claimAnchorRule": {
+            "required": ["sourceRef"],
+            "oneOf": ["page", "pageRange", "citation", "evidenceRef"],
+        },
+        "acceptedEvidenceRefTypes": [
+            "page",
+            "pdf_page",
+            "page_anchor",
+            "record_anchor",
+            "section",
+            "paragraph",
+            "html_paragraph",
+            "quote",
+            "citation",
+            "excerpt",
+            "abstract",
+            "sentence",
+            "line",
+            "table",
+            "figure",
+            "timestamp",
+        ],
+        "missingAnchorBehavior": "preserve_decision_and_mark_missing_evidence_anchor",
+    }
+
+
 def source_collection_stage_task_writeback_contract(
     team_id: str,
     run_id: str,
@@ -45,7 +81,7 @@ def source_collection_stage_task_writeback_contract(
 ) -> dict[str, Any]:
     endpoint = f"/api/teams/{urllib.parse.quote(team_id, safe='')}/workflow-orchestration/stage-session-tasks/{urllib.parse.quote(task_id, safe='')}/writeback"
     can_materialize_formal_knowledge = source_collection_stage_can_materialize_formal_knowledge(stage_id, agent_role)
-    return {
+    contract = {
         "schemaVersion": schema_version,
         "contractKind": "source_collection_stage_session_task_writeback",
         "toolName": "source_collection_stage_writeback_tool",
@@ -65,6 +101,9 @@ def source_collection_stage_task_writeback_contract(
         if can_materialize_formal_knowledge
         else "source_collection_stage_writeback_tool",
     }
+    if normalize_source_collection_stage_id(stage_id, default="") == "extraction":
+        contract["resultContract"] = _source_collection_extraction_result_contract()
+    return contract
 
 
 def source_collection_stage_task_title(stage_id: str) -> str:
