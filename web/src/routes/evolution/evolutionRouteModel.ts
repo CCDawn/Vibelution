@@ -171,7 +171,12 @@ export function supervisedWorkflowStepLabel(step: SupervisedWorkflowDefinition |
   return lang === "zh" ? definition?.zh ?? step.id : definition?.en ?? step.id;
 }
 
-export function activeSupervisedWorkflowStep(run: EvolutionActiveRun | null | undefined): SupervisedWorkflowStepId {
+export function activeSupervisedWorkflowStep(
+  run: EvolutionActiveRun | null | undefined,
+): SupervisedWorkflowStepId | null {
+  if (!run) {
+    return null;
+  }
   const backendCurrent = (run?.workflowSteps ?? []).find((step) => step.current);
   const backendId = String(backendCurrent?.id || "").trim() as SupervisedWorkflowStepId;
   if (SUPERVISED_WORKFLOW_STEPS.some((step) => step.id === backendId)) {

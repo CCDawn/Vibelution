@@ -101,6 +101,13 @@ describe("supervised workspace controls", () => {
     expect(tabsStylesSource).toContain("min-w-0");
   });
 
+  it("explains the governance impact before switching review modes", () => {
+    expect(controlsSource).toContain("modeImpactHint");
+    expect(controlsSource).toContain("候选池的手工治理动作会被锁定");
+    expect(controlsSource).toContain("保留接纳、激活、回滚和删除操作");
+    expect(controlsSource).toContain("tooltip={modeImpactHint(mode)}");
+  });
+
   it("keeps workflow tabs from expanding into tall VButton cards", () => {
     expect(tabsStylesSource).toContain("!inline-grid");
     expect(tabsStylesSource).toContain("h-[34px]");

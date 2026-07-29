@@ -307,7 +307,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const [formInitialized, setFormInitialized] = useState(false);
   const [sourceKind, setSourceKind] = useState<"dataset" | "bundle">("dataset");
   const [datasetName, setDatasetName] = useState("");
-  const [selectedDatasetCatalogFilter, setSelectedDatasetCatalogFilter] = useState<DatasetCatalogFilter>("all");
+  const [selectedDatasetCatalogFilter, setSelectedDatasetCatalogFilter] = useState<DatasetCatalogFilter>("runnable");
   const [datasetLimitInput, setDatasetLimitInput] = useState("");
   const datasetLimitInputRef = useRef<HTMLInputElement | null>(null);
   const [bundleNameInput, setBundleNameInput] = useState("");
@@ -705,7 +705,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     SUPERVISED_WORKFLOW_STEPS.some((step) => step.id === backendWorkflowCurrent?.id)
       ? backendWorkflowCurrent?.id
       : activeSupervisedWorkflowStep(supervisedMembersRun)
-  ) as SupervisedWorkflowStepId;
+  ) as SupervisedWorkflowStepId | null;
   const supervisedWorkflowCards = SUPERVISED_WORKFLOW_STEPS.map((definition): SupervisedWorkflowCard => {
     const backendStep = backendWorkflowSteps.find((step) => step.id === definition.id);
     const member = definition.role ? supervisedRunMemberByRole.get(definition.role) : undefined;
@@ -899,6 +899,13 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     })
     : null;
   const supervisedWorkflowTabSummary = (step: SupervisedWorkflowCard | undefined) => {
+    if (!supervisedWorkflowRun) {
+      return {
+        status: statusLabel("idle"),
+        detail: lang === "zh" ? "等待启动" : "Waiting to start",
+        count: 0,
+      };
+    }
     if (!step) {
       return {
         status: statusLabel("idle"),
@@ -1251,6 +1258,51 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       )
       ? t("sourceOfficialVerifierWarning")
       : "";
+  const selectedSourcePlannedCases = sourceKind === "dataset" && datasetLimitInput.trim()
+    ? `${datasetLimitInput.trim()} / ${selectedSourceOption?.caseCount ?? "--"}`
+    : selectedSourceCaseText;
+  const configuredSupervisedAgentCount = supervisedRunMembers.filter((member) => Boolean(member.agentId)).length;
+  const renderSupervisedRunPlan = () => {
+    if (!supervisedWorkflowRun) {
+      return (
+        <div className={styles.supervisedRunPlan} role="status">
+          <div className={styles.supervisedRunPlanLead}>
+            <span className={styles.secondaryPill}>{lang === "zh" ? "运行前计划" : "Run plan"}</span>
+            <h3>{lang === "zh" ? "准备开始监督进化" : "Ready to start supervised evolution"}</h3>
+            <p>
+              {lang === "zh"
+                ? "开始后将依次完成基线评测、候选 worktree 改良、复跑评分和用户审批；结果不会自动写入运行时。"
+                : "The run proceeds through baseline evaluation, candidate worktree improvement, rerun scoring, and user approval; results are not written to runtime automatically."}
+            </p>
+          </div>
+          <div className={styles.supervisedRunPlanGrid}>
+            <article>
+              <span>{lang === "zh" ? "评测来源" : "Evaluation source"}</span>
+              <strong>{selectedSourceOption?.label || "--"}</strong>
+            </article>
+            <article>
+              <span>{lang === "zh" ? "计划样本" : "Planned cases"}</span>
+              <strong>{selectedSourcePlannedCases}</strong>
+            </article>
+            <article>
+              <span>{lang === "zh" ? "监督成员" : "Supervised members"}</span>
+              <strong>{configuredSupervisedAgentCount} / {SUPERVISED_RUN_MEMBER_ROLES.length}</strong>
+            </article>
+            <article>
+              <span>{lang === "zh" ? "生效方式" : "Runtime effect"}</span>
+              <strong>{lang === "zh" ? "用户审批后决定" : "Decided after approval"}</strong>
+            </article>
+          </div>
+          <p className={styles.supervisedRunPlanHint}>
+            {lang === "zh"
+              ? "运行启动后，这里会切换为当前 Agent 的真实会话轨迹。"
+              : "After launch, this area switches to the active Agent's real conversation trace."}
+          </p>
+        </div>
+      );
+    }
+    return null;
+  };
   const normalizedLibrarySearch = librarySearchInput.trim().toLowerCase();
   const filterLibraryEntries = (entries: EvolutionLibraryEntry[]) =>
     entries.filter((item) => {
@@ -2371,14 +2423,17 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                 />
               </VSection>
               {datasetCatalog.length > 0 ? (
-                <div className={styles.datasetCatalogPanel}>
-                  <div className={styles.datasetCatalogHeader}>
-                    <div>
+                <details className={styles.datasetCatalogPanel}>
+                  <summary className={styles.datasetCatalogSummary}>
+                    <span>
                       <strong>{t("datasetCatalog")}</strong>
                       <span>
                         {datasetCatalog.length} · {lang === "zh" ? "可运行" : "runnable"} {datasetCatalogGroups.runnable.length}
                       </span>
-                    </div>
+                    </span>
+                    <span>{lang === "zh" ? "展开管理" : "Manage"}</span>
+                  </summary>
+                  <div className={styles.datasetCatalogBody}>
                     <div className={styles.datasetCatalogFilterRow} role="tablist" aria-label={t("datasetCatalog")}>
                       {([
                         ["all", t("datasetCatalogAll"), datasetCatalogGroups.all.length],
@@ -2401,37 +2456,37 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                         </VButton>
                       ))}
                     </div>
+                    <div className={styles.datasetCatalogList}>
+                      {visibleDatasetCatalog.length > 0 ? (
+                        visibleDatasetCatalog.map((item) => {
+                          const statusText = datasetCatalogStatusLabel(item, lang);
+                          const reason = item.visibility === "primary"
+                            ? item.usabilityReason
+                            : (item.visibilityReason || item.usabilityReason);
+                          return (
+                            <article key={item.name} className={styles.datasetCatalogItem}>
+                              <div className={styles.datasetCatalogItemMain}>
+                                <VTooltip content={item.name} width="wide">
+                                  <strong tabIndex={0}>{item.name}</strong>
+                                </VTooltip>
+                                <span>{item.benchmarkFamily || item.taskType || item.bundleName || "--"}</span>
+                              </div>
+                              <span className={styles.datasetCatalogStatus}>{statusText}</span>
+                              {reason ? (
+                                <p>
+                                  <span>{item.visibility === "primary" ? statusText : t("datasetCatalogHiddenReason")}</span>
+                                  {reason}
+                                </p>
+                              ) : null}
+                            </article>
+                          );
+                        })
+                      ) : (
+                        <p className={styles.datasetCatalogEmpty}>{lang === "zh" ? "当前筛选无条目。" : "No entries for this filter."}</p>
+                      )}
+                    </div>
                   </div>
-                  <div className={styles.datasetCatalogList}>
-                    {visibleDatasetCatalog.length > 0 ? (
-                      visibleDatasetCatalog.map((item) => {
-                        const statusText = datasetCatalogStatusLabel(item, lang);
-                        const reason = item.visibility === "primary"
-                          ? item.usabilityReason
-                          : (item.visibilityReason || item.usabilityReason);
-                        return (
-                          <article key={item.name} className={styles.datasetCatalogItem}>
-                            <div className={styles.datasetCatalogItemMain}>
-                              <VTooltip content={item.name} width="wide">
-                                <strong tabIndex={0}>{item.name}</strong>
-                              </VTooltip>
-                              <span>{item.benchmarkFamily || item.taskType || item.bundleName || "--"}</span>
-                            </div>
-                            <span className={styles.datasetCatalogStatus}>{statusText}</span>
-                            {reason ? (
-                              <p>
-                                <span>{item.visibility === "primary" ? statusText : t("datasetCatalogHiddenReason")}</span>
-                                {reason}
-                              </p>
-                            ) : null}
-                          </article>
-                        );
-                      })
-                    ) : (
-                      <p className={styles.datasetCatalogEmpty}>{lang === "zh" ? "当前筛选无条目。" : "No entries for this filter."}</p>
-                    )}
-                  </div>
-                </div>
+                </details>
               ) : null}
               {workbenchCatalogUnavailable ? (
                 <p className={styles.errorTextCompact}>
@@ -2783,7 +2838,9 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
               <div className={styles.surfaceHeaderCompact}>
                 <div>
                   <p className={styles.eyebrow}>
-                    {supervisedApprovalSelected
+                    {!supervisedWorkflowRun
+                      ? lang === "zh" ? "运行前计划" : "Run plan"
+                      : supervisedApprovalSelected
                       ? supervisedWorkflowStepLabel(supervisedSelectedWorkflowStep, lang)
                       : lang === "zh" ? "Agent 对话" : "Agent conversations"}
                   </p>
@@ -2795,6 +2852,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                       <h2 className={`${styles.sectionTitle} ${styles.truncateText}`} tabIndex={0}>
                         {supervisedApprovalSelected
                           ? supervisedSelectedWorkflowStep.label || t("currentCaseOutput")
+                          : !supervisedWorkflowRun
+                            ? lang === "zh" ? "本轮监督进化" : "Supervised evolution run"
                           : supervisedSelectedAgentMember?.name || runRoleLabel(supervisedSelectedAgentRole)}
                       </h2>
                     </VTooltip>
@@ -2802,16 +2861,20 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                     <h2 className={`${styles.sectionTitle} ${styles.truncateText}`}>
                       {supervisedApprovalSelected
                         ? supervisedSelectedWorkflowStep.label || t("currentCaseOutput")
+                        : !supervisedWorkflowRun
+                          ? lang === "zh" ? "本轮监督进化" : "Supervised evolution run"
                         : supervisedSelectedAgentMember?.name || runRoleLabel(supervisedSelectedAgentRole)}
                     </h2>
                   )}
                 </div>
                 <div className={styles.liveStatusRow}>
-                  {!supervisedApprovalSelected ? (
+                  {supervisedWorkflowRun && !supervisedApprovalSelected ? (
                     <span className={styles.secondaryPill}>{runRoleLabel(supervisedSelectedAgentRole)}</span>
                   ) : null}
                   <span className={styles.secondaryPill}>
-                    {supervisedApprovalSelected
+                    {!supervisedWorkflowRun
+                      ? lang === "zh" ? "未开始" : "Not started"
+                      : supervisedApprovalSelected
                       ? statusLabel(supervisedSelectedWorkflowStep.status)
                       : statusLabel(
                         supervisedSelectedAgentMember?.conversationSession?.status
@@ -2829,7 +2892,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
               </div>
 
               <div className={styles.liveIoPane}>
-                {supervisedApprovalSelected ? (
+                {!supervisedWorkflowRun ? renderSupervisedRunPlan() : supervisedApprovalSelected ? (
                   <div className={styles.approvalEvidencePanel}>
                     {approvalEvidenceItems.map((item) => (
                       <article key={item.label} className={styles.approvalEvidenceItem}>

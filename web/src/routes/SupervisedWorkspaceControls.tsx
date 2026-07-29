@@ -44,7 +44,7 @@ export function SupervisedWorkspaceControls({
   configIntakeMode,
   tabSummaries,
 }: SupervisedWorkspaceControlsProps) {
-  const { t, intakeModeLabel } = useAppI18n({ domains: ["evolution"] });
+  const { lang, t, intakeModeLabel } = useAppI18n({ domains: ["evolution"] });
   const queryClient = useQueryClient();
   const shouldFetchConfig = configIntakeMode == null;
   const shouldFetchOverview = overviewIntakeMode == null;
@@ -87,6 +87,16 @@ export function SupervisedWorkspaceControls({
     overviewIntakeMode ?? overviewQuery.data?.intakeMode,
     configIntakeMode ?? configQuery.data?.intakeMode,
   );
+  const modeImpactHint = (mode: IntakeMode) => {
+    if (mode === "auto") {
+      return lang === "zh"
+        ? "候选会自动进入审核流程；候选池的手工治理动作会被锁定。"
+        : "Candidates enter review automatically; manual candidate-governance actions are locked.";
+    }
+    return lang === "zh"
+      ? "逐步确认候选，并保留接纳、激活、回滚和删除操作。"
+      : "Review candidates step by step and keep accept, activate, rollback, and delete actions available.";
+  };
 
   return (
     <div className={styles.controlsShellClass}>
@@ -114,6 +124,7 @@ export function SupervisedWorkspaceControls({
                 }
                 aria-pressed={currentIntakeMode === mode}
                 isDisabled={intakeModeMutation.isPending}
+                tooltip={modeImpactHint(mode)}
                 onPress={() => intakeModeMutation.mutate(mode)}
               >
                 {intakeModeLabel(mode)}

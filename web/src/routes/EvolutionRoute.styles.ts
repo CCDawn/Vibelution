@@ -143,8 +143,8 @@ const styles = {
     "[border-color:color-mix(in_srgb,_var(--accent-warm)_35%,_var(--border-soft))] [background:color-mix(in_srgb,_var(--accent-warm)_12%,_var(--vui-surface-row))] [color:var(--accent-warm-2)]",
   datasetCatalogFilterRow:
     "flex [flex-wrap:wrap] [gap:4px] min-w-0",
-  datasetCatalogHeader:
-    "grid [gap:6px] min-w-0 [&_div]:first-child:grid [&_div]:first-child:[gap:2px] [&_div]:first-child:min-w-0 [&_strong]:min-w-0 [&_strong]:[overflow:hidden] [&_strong]:[color:var(--fg-primary)] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap] [&_span]:[color:var(--fg-tertiary)] [&_span]:[font-size:var(--vui-font-xs)]",
+  datasetCatalogBody:
+    "grid [gap:7px] min-h-0 [padding:0_8px_8px]",
   datasetCatalogItem:
     "grid [grid-template-columns:minmax(0,_1fr)_auto] [gap:4px_8px] min-w-0 [padding:7px_8px] [border:1px_solid_var(--border-hairline)] [border-radius:8px] [background:var(--vui-surface-row)] [&_p]:[grid-column:1_/_-1] [&_p]:[margin:0] [&_p]:[color:var(--fg-tertiary)] [&_p]:[font-size:var(--vui-font-xs)] [&_p]:[line-height:1.35] [&_p]:[overflow-wrap:anywhere] [&_span]:[margin-right:6px] [&_span]:[color:var(--fg-secondary)] [&_span]:[font-weight:700]",
   datasetCatalogItemMain:
@@ -152,7 +152,9 @@ const styles = {
   datasetCatalogList:
     "grid [gap:6px] min-h-0 [max-height:min(158px,_20vh)] [overflow:auto] [padding-right:2px]",
   datasetCatalogPanel:
-    "grid [gap:8px] min-w-0 [max-height:min(238px,_34vh)] [padding:8px] [border:1px_solid_var(--border-hairline)] [border-radius:8px] [background:var(--vui-surface-row)] [overflow:hidden]",
+    "min-w-0 [max-height:min(238px,_34vh)] [border:1px_solid_var(--border-hairline)] [border-radius:8px] [background:var(--vui-surface-row)] [overflow:hidden] open:[overflow:auto]",
+  datasetCatalogSummary:
+    "grid [grid-template-columns:minmax(0,_1fr)_auto] [align-items:center] [gap:8px] min-w-0 [padding:8px] [cursor:pointer] [list-style:none] [&::-webkit-details-marker]:hidden [&>span:first-child]:grid [&>span:first-child]:[gap:2px] [&_strong]:min-w-0 [&_strong]:[overflow:hidden] [&_strong]:[color:var(--fg-primary)] [&_strong]:[text-overflow:ellipsis] [&_strong]:[white-space:nowrap] [&_span]:[color:var(--fg-tertiary)] [&_span]:[font-size:var(--vui-font-xs)] hover:[background:var(--vui-surface-row-hover)] focus-visible:[outline:1px_solid_color-mix(in_srgb,_var(--accent-cool)_42%,_transparent)]",
   datasetCatalogStatus:
     "[align-self:start] [max-width:116px] [padding:3px_7px] [border:1px_solid_var(--border-soft)] [border-radius:999px] [background:var(--vui-surface-row)] [color:var(--fg-secondary)] [font-size:var(--vui-font-xs)] [line-height:1.2] [overflow:hidden] [text-overflow:ellipsis] [white-space:nowrap]",
   detailHeader:
@@ -341,7 +343,7 @@ const styles = {
   supervisedMembersPanel:
     "grid [gap:6px] [align-self:start] min-h-0 [padding:8px] [border:1px_solid_var(--border-hairline)] [border-radius:8px] [background:var(--vui-surface-row)] [overflow:hidden] max-[900px]:[max-height:none]",
   supervisedRunConsole:
-    "[container-type:inline-size] [grid-template-rows:auto_auto_minmax(0,_1fr)]",
+    "[container-type:inline-size] [grid-auto-rows:max-content]",
   supervisedRunConsoleGrid:
     "grid [grid-template-columns:minmax(0,_1fr)] [grid-auto-rows:max-content] [align-content:start] [gap:7px] min-h-0 [@container(min-width:560px)]:[grid-template-columns:minmax(0,_1.08fr)_minmax(214px,_0.72fr)] [@container(min-width:560px)]:[align-items:start]",
   supervisedRunConsoleHeader:
@@ -350,6 +352,14 @@ const styles = {
     "inline-flex [flex-wrap:wrap] [justify-content:flex-end] [gap:5px] min-w-0",
   supervisedRunOptions:
     "grid [grid-template-columns:minmax(0,_0.95fr)_minmax(126px,_1.05fr)] [gap:6px] [align-items:end] min-w-0 [@container(min-width:560px)]:[grid-template-columns:max-content_minmax(140px,_1fr)] [@container(max-width:430px)]:[grid-template-columns:1fr]",
+  supervisedRunPlan:
+    "grid [align-content:center] [gap:14px] [min-height:100%] [padding:18px] [background:var(--vui-surface-base)] [background-image:linear-gradient(to_right,color-mix(in_srgb,var(--vui-border-subtle)_22%,transparent)_1px,transparent_1px),linear-gradient(to_bottom,color-mix(in_srgb,var(--vui-border-subtle)_16%,transparent)_1px,transparent_1px)] [background-size:40px_40px]",
+  supervisedRunPlanGrid:
+    "grid [grid-template-columns:repeat(2,_minmax(0,_1fr))] [gap:8px] min-w-0 max-[640px]:[grid-template-columns:1fr] [&_article]:grid [&_article]:[gap:4px] [&_article]:min-w-0 [&_article]:[padding:10px_11px] [&_article]:[border:1px_solid_var(--vui-border-subtle)] [&_article]:[border-radius:8px] [&_article]:[background:var(--vui-surface-row)] [&_span]:[color:var(--fg-tertiary)] [&_span]:[font-size:var(--vui-font-xs)] [&_strong]:min-w-0 [&_strong]:[overflow:hidden] [&_strong]:[text-overflow:ellipsis] [&_strong]:[color:var(--fg-primary)] [&_strong]:[font-size:var(--vui-font-sm)]",
+  supervisedRunPlanHint:
+    "[margin:0] [color:var(--fg-tertiary)] [font-size:var(--vui-font-xs)] [line-height:1.45] [text-align:center]",
+  supervisedRunPlanLead:
+    "grid [justify-items:center] [gap:7px] [text-align:center] [&_h3]:[margin:0] [&_h3]:[color:var(--fg-primary)] [&_h3]:[font-size:1rem] [&_p]:[margin:0] [&_p]:[max-width:620px] [&_p]:[color:var(--fg-secondary)] [&_p]:[font-size:var(--vui-font-xs)] [&_p]:[line-height:1.55]",
   supervisedRunSetup:
     "grid [align-content:start] [gap:7px] min-w-0 min-h-0",
   supervisedWorkflowFollowButton:
