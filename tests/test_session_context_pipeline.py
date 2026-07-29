@@ -190,6 +190,26 @@ def test_context_assembler_keeps_recent_tail_and_omits_old_events(tmp_path):
     assert assembled.dynamic_context_hash
 
 
+def test_context_assembler_replays_all_uncheckpointed_history_when_limit_is_none(tmp_path):
+    messages = []
+    for index in range(12):
+        messages.append({"role": "user", "content": f"用户消息 {index}"})
+        messages.append({"role": "assistant", "content": f"回答 {index}"})
+
+    assembled = assemble_conversation_context(
+        [],
+        session_id="session-uncheckpointed",
+        recent_message_limit=None,
+        ledger_events=_ledger_events_from_messages(tmp_path, "session-uncheckpointed", messages),
+    )
+
+    assert [item["content"] for item in assembled.history_messages] == [
+        message["content"] for message in messages
+    ]
+    assert assembled.omitted_event_count == 0
+    assert assembled.checkpoint_event_id == ""
+
+
 def test_context_assembler_keeps_recent_tool_results_complete_for_model_input(tmp_path):
     huge_output = "terminal-line\n" * 1000
     full_result = f"[EXEC FAILURE | Exit Code: 1]\n{huge_output}"
@@ -966,6 +986,55 @@ def test_context_assembler_uses_ledger_checkpoint_as_compressed_history(tmp_path
     assert "旧回答" not in contents
     assert "最新请求" in contents
     assert "当前轮不进入历史" not in contents
+    assert assembled.checkpoint_event_id
+
+
+def test_context_assembler_replays_every_post_checkpoint_event_when_limit_is_none(tmp_path):
+    append_conversation_event(
+        tmp_path,
+        "session-post-checkpoint",
+        "turn-old",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "被 checkpoint 覆盖的旧请求"},
+    )
+    append_context_compression_checkpoint(
+        tmp_path,
+        "session-post-checkpoint",
+        turn_id="turn-checkpoint",
+        current_turn_id="turn-current",
+        summary="旧请求已经压缩到这里。",
+        level="standard",
+        reason="context_limit",
+        before_tokens=1000,
+        after_tokens=300,
+        iteration=1,
+        trigger_source="test",
+    )
+    for index in range(12):
+        append_conversation_event(
+            tmp_path,
+            "session-post-checkpoint",
+            f"turn-new-{index}",
+            EVENT_USER_MESSAGE,
+            status="recorded",
+            payload={"content": f"checkpoint 后事件 {index}"},
+        )
+
+    assembled = assemble_conversation_context(
+        [],
+        session_id="session-post-checkpoint",
+        current_turn_id="turn-current",
+        recent_message_limit=None,
+        ledger_events=load_conversation_events(tmp_path, "session-post-checkpoint"),
+    )
+    contents = "\n".join(str(item.get("content") or "") for item in assembled.history_messages)
+
+    assert "旧请求已经压缩到这里" in contents
+    assert "被 checkpoint 覆盖的旧请求" not in contents
+    for index in range(12):
+        assert f"checkpoint 后事件 {index}" in contents
+    assert assembled.omitted_event_count == 0
     assert assembled.checkpoint_event_id
 
 
