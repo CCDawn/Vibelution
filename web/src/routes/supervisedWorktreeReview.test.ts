@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { SupervisedWorktreeRun } from "../api/types";
 import {
+  buildSupervisedWorktreeLedgerSummary,
   isSelfEvolutionWorktreeRun,
   readRecentSupervisedWorktreeRunId,
   rememberRecentSupervisedWorktreeRunId,
@@ -100,6 +101,45 @@ describe("selectRecentSupervisedWorktreeRun", () => {
     });
 
     expect(selectRecentSupervisedWorktreeRun([completedRun, failedRun], null)).toBeNull();
+  });
+});
+
+describe("buildSupervisedWorktreeLedgerSummary", () => {
+  it("projects the current supervised approval run instead of a stale legacy ledger", () => {
+    expect(buildSupervisedWorktreeLedgerSummary(runWith({
+      runId: "swte-current",
+      status: "done",
+      latestMessage: "等待用户审批。",
+      bundleName: "acceptance_bundle",
+      reviewGate: { status: "pending" },
+      baselineConversationSessionId: "session-baseline",
+      rerunConversationSessionId: "session-rerun",
+      judgeConversationSessionId: "session-judge",
+      baselineJudgment: {
+        conversationSessionId: "session-judge",
+      },
+      candidateJudgment: {
+        conversationSessionId: "session-judge",
+        decision: "PROMOTE",
+        score: 92,
+      },
+    }))).toEqual({
+      runId: "swte-current",
+      status: "done",
+      decision: "PROMOTE",
+      description: "等待用户审批。",
+      reviewStatus: "pending",
+      roleSessionCount: 3,
+      candidateScore: 92,
+      bundleName: "acceptance_bundle",
+    });
+  });
+
+  it("does not project a self-evolution review run into the supervised ledger", () => {
+    expect(buildSupervisedWorktreeLedgerSummary(runWith({
+      runId: "swte-self",
+      selfEvolutionOrigin: { sourceTrack: "self_evolution" },
+    }))).toBeNull();
   });
 });
 

@@ -128,6 +128,7 @@ import { SupervisedWorkspaceControls } from "./SupervisedWorkspaceControls";
 import { SupervisedAgentConversationPanel } from "./SupervisedAgentConversationPanel";
 import { type SupervisedWorkspaceWorkflowStep } from "./SupervisedWorkspaceTabs";
 import {
+  buildSupervisedWorktreeLedgerSummary,
   isSelfEvolutionWorktreeRun,
   readRecentSupervisedWorktreeRunId,
   rememberRecentSupervisedWorktreeRunId,
@@ -585,6 +586,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     workspaceSnapshot?.latestClosedLoopRecord
     ?? latestSupervisedRunSnapshot?.closedLoopRecord
     ?? null;
+  const supervisedWorktreeLedgerSummary = buildSupervisedWorktreeLedgerSummary(recentSupervisedWorktreeRun);
   const showTrackToggle = !forcedTrack && selfTrackEnabled && supervisedTrackEnabled;
   const routeEyebrow = activeTrack === "self" ? t("navSelfEvolution") : t("navSupervisedEvolution");
   const routeTitle =
@@ -1075,8 +1077,53 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       timestamp: compactTimestamp(item.timestamp),
     }))
     : [];
-  const supervisedClosedLoopLedger: EvolutionActiveRunClosedLoopLedger | null = supervisedClosedLoopRecord
+  const supervisedClosedLoopLedger: EvolutionActiveRunClosedLoopLedger | null = supervisedWorktreeLedgerSummary
     ? {
+      eyebrow: lang === "zh" ? "闭环记录库" : "Closed-loop ledger",
+      title: supervisedWorktreeLedgerSummary.runId,
+      statusLabel: supervisedWorktreeLedgerSummary.decision
+        ? displayDecisionLabel(supervisedWorktreeLedgerSummary.decision)
+        : statusLabel(supervisedWorktreeLedgerSummary.status),
+      statusTone: ["failed", "cancelled"].includes(supervisedWorktreeLedgerSummary.status.toLowerCase())
+        ? "primary"
+        : "secondary",
+      description: supervisedWorktreeLedgerSummary.description || "--",
+      evidence: [
+        {
+          id: "review",
+          label: lang === "zh" ? "审批状态" : "Approval",
+          value: supervisedWorktreeLedgerSummary.reviewStatus === "approved"
+            ? (lang === "zh" ? "已批准" : "Approved")
+            : (lang === "zh" ? "待审批" : "Pending"),
+        },
+        {
+          id: "sessions",
+          label: lang === "zh" ? "Agent 会话" : "Agent sessions",
+          value: supervisedWorktreeLedgerSummary.roleSessionCount,
+        },
+        {
+          id: "candidate-score",
+          label: lang === "zh" ? "候选得分" : "Candidate score",
+          value: supervisedWorktreeLedgerSummary.candidateScore ?? "--",
+        },
+        {
+          id: "bundle",
+          label: lang === "zh" ? "评测包" : "Evaluation bundle",
+          value: supervisedWorktreeLedgerSummary.bundleName || "--",
+        },
+      ],
+      action: {
+        label: lang === "zh" ? "查看审批" : "Review approval",
+        title: supervisedWorktreeLedgerSummary.description,
+        onClick: () => {
+          setSelectedSupervisedWorkflowStepId("approval");
+          setSelectedSupervisedAgentRole(null);
+          goToSupervisedView("live");
+        },
+      },
+    }
+    : supervisedClosedLoopRecord
+      ? {
       eyebrow: lang === "zh" ? "闭环记录库" : "Closed-loop ledger",
       title: supervisedClosedLoopRecord.runId,
       statusLabel: supervisedClosedLoopDecisionLabel || "--",
@@ -1119,8 +1166,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
           goToSupervisedView("library");
         },
       },
-    }
-    : null;
+      }
+      : null;
   const supervisedActiveRunMonitorRun: EvolutionActiveRunMonitorRunView | null = monitoredRun
     ? {
       termination: {
