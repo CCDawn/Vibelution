@@ -23,6 +23,7 @@ from scripts.evolution_harness import (
 
 from .session_service import (
     create_supervised_agent_session,
+    get_session_detail,  # noqa: F401 - retained as the no-full-detail test seam
     get_session_turn_completion_snapshot,
     request_stop_session_turn,
     submit_session_message,
