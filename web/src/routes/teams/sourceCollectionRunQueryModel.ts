@@ -32,6 +32,11 @@ export type SourceCollectionSummaryPayload = {
   status: string;
   run?: DataProcessingRunListPayload["runs"][number] | Record<string, unknown>;
   runStatus?: DataProcessingStatus;
+  searchPlan?: {
+    planId?: string;
+    querySeeds?: string[];
+    queryCount?: number;
+  };
   scope?: {
     kind?: string;
     runId?: string;
@@ -61,3 +66,16 @@ export type SourceCollectionSummaryPayload = {
   storageArtifacts?: Partial<SourceCollectionStorageArtifacts>;
   updatedAt?: string;
 };
+
+export function sourceCollectionSummaryQuerySeedText(
+  payload: SourceCollectionSummaryPayload | null | undefined,
+  selectedRunId: string,
+) {
+  if (!payload || payload.runId !== selectedRunId) {
+    return "";
+  }
+  return (payload.searchPlan?.querySeeds ?? [])
+    .map((seed) => String(seed || "").trim())
+    .filter(Boolean)
+    .join("\n");
+}

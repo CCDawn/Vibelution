@@ -465,6 +465,40 @@ def load_source_collection_work_run_summary() -> dict[str, Any]:
         "activeItems": [active_for_lifecycle] if isinstance(active_for_lifecycle, dict) else [],
     }
 
+
+def _source_collection_summary_search_plan(team_id: str, run_id: str) -> dict[str, Any]:
+    """Project the bounded search-plan identity needed to resume a selected run."""
+
+    s = _service()
+    if not run_id:
+        return {}
+    path = s._source_collection_storage_artifact_paths(team_id, run_id)["searchPlanPath"]
+    if not path.is_file():
+        return {}
+    try:
+        payload = s.json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    query_seeds = s._normalize_text_list(
+        payload.get("querySeeds"),
+        max_items=s.SOURCE_COLLECTION_MAX_QUERIES,
+        max_length=220,
+    )
+    queries = [item for item in list(payload.get("queries") or []) if isinstance(item, dict)]
+    return {
+        "planId": s._trim_text(payload.get("planId"), max_length=128),
+        "querySeeds": query_seeds,
+        "queryCount": s._normalize_int(
+            payload.get("queryCount"),
+            default=len(queries),
+            minimum=0,
+            maximum=s.SOURCE_COLLECTION_MAX_QUERIES,
+        ),
+    }
+
+
 def get_source_collection_summary(team_id: str, *, run_id: str = "") -> dict[str, Any]:
     """Return the fast first-paint source collection state without heavy repair reads."""
 
@@ -563,6 +597,7 @@ def get_source_collection_summary(team_id: str, *, run_id: str = "") -> dict[str
         ),
         "run": selected_run or {},
         "runStatus": run_status,
+        "searchPlan": _source_collection_summary_search_plan(normalized_team_id, normalized_run_id),
         "scope": {
             "kind": "source_run",
             "runId": normalized_run_id,

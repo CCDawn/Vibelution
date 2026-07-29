@@ -156,6 +156,7 @@ export function selectSourceCollectionStagePrimaryBinding<T extends { agent?: un
 export function resolveSourceCollectionStageAgentChatState<T extends { agent?: unknown; agentId?: string }>(input: {
   binding: T | null;
   route: string;
+  stageSessionPending?: boolean;
   agentSummaryPending: boolean;
   agentSummaryFetching: boolean;
   agentSummaryError: boolean;
@@ -165,6 +166,9 @@ export function resolveSourceCollectionStageAgentChatState<T extends { agent?: u
   status: SourceCollectionStageAgentChatStatus;
 } {
   const { binding, route } = input;
+  if (input.stageSessionPending) {
+    return { binding, route: "", status: "loading" };
+  }
   if (route || binding?.agent) {
     return { binding, route, status: "ready" };
   }
