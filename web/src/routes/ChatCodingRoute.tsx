@@ -86,6 +86,10 @@ import {
   useSessionIndexQuery,
 } from "./chatSessionIndexQuery";
 import {
+  shouldEnableSessionIndexQuery,
+  shouldShowConversationIndexLoading,
+} from "./chatSessionStartupGate";
+import {
   ACTIVE_BACKGROUND_SYNC_POLL_MS,
   ACTIVE_INDEX_POLL_MS,
   resolveChatLiveQueryPolicy,
@@ -706,10 +710,14 @@ export function ChatCodingRoute() {
     queryFn: ({ signal }) => fetchJson<{ activeSessionId: string }>("/api/sessions/active", { signal }),
     staleTime: 5_000,
   });
-  // Prefer URL targets immediately; otherwise wait for active-session bootstrap (empty id still settles).
-  const sessionIndexQueryEnabled =
-    Boolean(requestedSessionId || requestedRoomId)
-    || activeSessionBootstrapQuery.isFetched;
+  // Prefer URL targets immediately. If the bootstrap is cancelled or fails, let
+  // the canonical session index recover instead of leaving the directory gated.
+  const sessionIndexQueryEnabled = shouldEnableSessionIndexQuery({
+    hasRouteTarget: Boolean(requestedSessionId || requestedRoomId),
+    bootstrapIsFetched: activeSessionBootstrapQuery.isFetched,
+    bootstrapIsError: activeSessionBootstrapQuery.isError,
+    bootstrapFetchStatus: activeSessionBootstrapQuery.fetchStatus,
+  });
   const modelLabelsById = useMemo(
     () => new Map(Object.entries(configSummaryQuery.data?.modelLabels ?? {})),
     [configSummaryQuery.data?.modelLabels],
@@ -2556,6 +2564,13 @@ export function ChatCodingRoute() {
     contextMenuSession?.agentId
     && isAgentRootSession(contextMenuSession)
   );
+  const conversationIndexLoading = shouldShowConversationIndexLoading({
+    bootstrapIsLoading: activeSessionBootstrapQuery.isLoading,
+    conversationsHasData: Boolean(conversationsQuery.data),
+    conversationsIsLoading: conversationsQuery.isLoading,
+    sessionsHasData: Boolean(sessionsQuery.data),
+    sessionsIsLoading: sessionsQuery.isLoading,
+  });
   const contextMenuAgentArchivePending = Boolean(
     agentContextMenu
     && archiveAgentMutation.isPending
@@ -2578,7 +2593,7 @@ export function ChatCodingRoute() {
       ) : null}
       {sessionsErrorState.blockingError ? (
         <VStateSurface className={styles.panelState} tone="error" title={sessionsErrorMessage} />
-      ) : conversationsQuery.isPending && !conversationsQuery.data && sessionsQuery.isPending && !sessionsQuery.data ? (
+      ) : conversationIndexLoading ? (
         <ConversationIndexLoadingShell label={t("loadingSession")} />
       ) : filteredConversations.length === 0 && visibleChatAgents.length === 0 && filteredTeams.length === 0 && filteredStandaloneGroupConversations.length === 0 ? (
         <VStateSurface

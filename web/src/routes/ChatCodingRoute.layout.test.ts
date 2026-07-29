@@ -2317,6 +2317,11 @@ describe("ChatCodingRoute layout contract", () => {
 
   it("renders structural index and workspace shells while conversation data loads", () => {
     expect(routeSource).toContain("ConversationIndexLoadingShell");
+    expect(routeSource).toContain("const conversationIndexLoading = shouldShowConversationIndexLoading");
+    expect(routeSource).toContain("bootstrapIsLoading: activeSessionBootstrapQuery.isLoading");
+    expect(routeSource).toContain("conversationsIsLoading: conversationsQuery.isLoading");
+    expect(routeSource).toContain("sessionsIsLoading: sessionsQuery.isLoading");
+    expect(routeSource).toContain(") : conversationIndexLoading ? (");
     expect(routeSource).toContain('<ConversationIndexLoadingShell label={t("loadingSession")} />');
     expect(chatSessionWorkspacePanelSource).toContain("ConversationWorkspaceLoadingShell");
     expect(chatSessionWorkspacePanelSource).not.toContain("skeletonLines={2}");
@@ -2875,7 +2880,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("enabled: sessionIndexQueryEnabled");
     expect(routeSource).toContain("const sessionIndexQueryEnabled =");
     expect(routeSource).toContain("Boolean(requestedSessionId || requestedRoomId)");
-    expect(routeSource).toContain("activeSessionBootstrapQuery.isFetched");
+    expect(routeSource).toContain("shouldEnableSessionIndexQuery");
+    expect(routeSource).toContain("bootstrapIsFetched: activeSessionBootstrapQuery.isFetched");
+    expect(routeSource).toContain("bootstrapIsError: activeSessionBootstrapQuery.isError");
+    expect(routeSource).toContain("bootstrapFetchStatus: activeSessionBootstrapQuery.fetchStatus");
     expect(routeSource).toContain("sessionIndexHasMore");
     expect(routeSource).toContain("加载更多会话");
     expect(routeSource).toContain("已加载全部会话");
@@ -2995,7 +3003,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(bootstrapQueryStart).toBeGreaterThan(0);
     expect(sessionIndexCallStart).toBeGreaterThan(bootstrapQueryStart);
     expect(routeSource).toContain("const sessionIndexQueryEnabled =");
-    expect(routeSource).toContain("|| activeSessionBootstrapQuery.isFetched");
+    expect(routeSource).toContain("shouldEnableSessionIndexQuery");
+    expect(routeSource).toContain("bootstrapFetchStatus: activeSessionBootstrapQuery.fetchStatus");
     expect(routeSource).toContain("enabled: sessionIndexQueryEnabled");
     const bootstrapEffectStart = routeAndSelectionSource.indexOf(
       "const bootstrapSessionId = String(bootstrapActiveSessionId ?? \"\").trim()",
