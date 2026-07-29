@@ -154,6 +154,7 @@ from .agent_directory_service import (
     list_group_context_events_for_agent,
     next_wakeable_agent_inbox_message_for_agent,
     resolve_memory_policy_for_agent,
+    supervised_role_runtime_tools,
     update_agent_instance,
 )
 from .runtime_scene_service import record_runtime_scene_conversation_event, record_runtime_scene_event
@@ -851,6 +852,7 @@ from core.web.services.session.runtime_glue import (
     _submit_session_cycle_message_projection,
     _supervised_completion_marker_present,
     _supervised_role_for_runtime_context,
+    _supervised_runtime_tool_grants_for_context,
     _supervised_workspace_override_path,
     _task_goal_dedupe_key,
     _thought_duplicates_reply,

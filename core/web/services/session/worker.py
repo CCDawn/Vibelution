@@ -146,6 +146,10 @@ def _run_session_turn(context: dict[str, Any]) -> None:
     agent_instance = supplied_agent or (s.get_agent(agent_id, include_archived=False) if agent_id else None)
     historical_agent = None if agent_instance else (s.get_agent(agent_id, include_archived=True) if agent_id else None)
     supervised_runtime_role = s._supervised_role_for_runtime_context(context, agent_instance)
+    supervised_runtime_tool_grants = s._supervised_runtime_tool_grants_for_context(
+        context,
+        supervised_runtime_role,
+    )
     prepare_timings["agentLookupMs"] = s._elapsed_ms(stage_started_at)
     stage_started_at = s._perf_counter()
     prompt_snapshot_hint = (
@@ -390,7 +394,11 @@ def _run_session_turn(context: dict[str, Any]) -> None:
             "taskWorkspaceIsolated": task_workspace != Path(tool_workspace),
             "toolWorkspaceScope": str(getattr(workspace_decision, "scope", "") or ""),
             "supervisedRuntimeRole": supervised_runtime_role,
-            "supervisedRuntimeToolSource": "supervised_conversation_harness" if supervised_runtime_role else "",
+            "supervisedRuntimeToolSource": (
+                "supervised_baseline_self_edit"
+                if supervised_runtime_tool_grants is not None
+                else ("supervised_conversation_harness" if supervised_runtime_role else "")
+            ),
             **s._session_prompt_cache_log_fields(scope=prompt_cache_scope, partition=prompt_cache_partition),
             "executorWaitMs": s._elapsed_ms_between(context.get("_executor_submitted_at_monotonic"), prepare_started_at),
             "schedulerToWorkerStartedMs": s._elapsed_ms_between(
@@ -498,6 +506,12 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                 session_id=session_id,
                 turn_id=turn_id,
                 supervised_role=supervised_runtime_role,
+                runtime_tool_grants=supervised_runtime_tool_grants,
+                runtime_tool_source=(
+                    "supervised_baseline_self_edit"
+                    if supervised_runtime_tool_grants is not None
+                    else ""
+                ),
             ),
             s.mental_model_enabled_override(mental_model_enabled),
             task_workspace_context,
