@@ -756,7 +756,6 @@ def _normalize_start_payload(
     lang: str,
     project_root: Path | None = None,
 ) -> dict[str, Any]:
-    root = (project_root or PROJECT_ROOT).resolve()
     storage_project_root = _storage_project_root_arg(project_root)
     source_kind = str(payload.get("sourceKind") or "bundle").strip().lower()
     mode = str(payload.get("mode") or "auto").strip().lower()
@@ -1272,6 +1271,14 @@ def _build_reflection(snapshot: dict[str, Any], baseline: dict[str, Any]) -> dic
             f"用户请求目标：{requested_goal}\n"
             "你可以在隔离 worktree 中实现候选改动，但候选必须等待监督 review 后才能合并。"
         )
+    baseline_is_full_score = total > 0 and successes >= total
+    target = (
+        "目标：基线已经满分；不要为了制造分数提升而削弱现有成功路径。"
+        "请只考虑同一题集未覆盖的边界鲁棒性、错误恢复或诊断改进；"
+        "如果没有可信改进，保守地不做无依据改动。"
+        if baseline_is_full_score
+        else "目标：让候选 agent 在同一题集复测时比基线分数更高。"
+    )
     prompt = (
         "你正在隔离 worktree 中执行监督自改闭环。\n"
         "先用中文简短反思基线运行，再直接修改本项目中你认为最能提升同一题集表现的内容。\n"
@@ -1279,11 +1286,15 @@ def _build_reflection(snapshot: dict[str, Any], baseline: dict[str, Any]) -> dic
         "修改后运行你认为必要的最小验证。不要提交 git，不要合并。\n\n"
         f"基线结果：{successes}/{total} 通过，失败数 {failures}。\n"
         f"基线摘要：{baseline.get('summary') or '-'}\n"
-        "目标：让候选 agent 在同一题集复测时比基线分数更高。"
+        f"{target}"
         f"{goal_section}"
     )
     return {
-        "summary": f"基线 {successes}/{total} 通过，候选需要针对失败点自改。",
+        "summary": (
+            f"基线 {successes}/{total} 通过；候选只在有可信边界改进时修改。"
+            if baseline_is_full_score
+            else f"基线 {successes}/{total} 通过，候选需要针对失败点自改。"
+        ),
         "selfModificationPrompt": prompt,
     }
 
@@ -1973,7 +1984,7 @@ def _workflow_status(snapshot: dict[str, Any], step_id: str) -> str:
             return "running"
         return "done" if snapshot.get("candidate") or snapshot.get("decision") else "pending"
     if step_id == "approval":
-        return "pending" if status == "done" else ("running" if status in _ACTIVE_STATUSES else "pending")
+        return "pending"
     return "pending"
 
 

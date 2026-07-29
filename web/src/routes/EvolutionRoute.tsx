@@ -127,7 +127,10 @@ import {
 import { SupervisedWorkspaceControls } from "./SupervisedWorkspaceControls";
 import { SupervisedAgentConversationPanel } from "./SupervisedAgentConversationPanel";
 import { type SupervisedWorkspaceWorkflowStep } from "./SupervisedWorkspaceTabs";
-import { isSelfEvolutionWorktreeRun } from "./supervisedWorktreeReview";
+import {
+  isSelfEvolutionWorktreeRun,
+  selectRecentSupervisedWorktreeRun,
+} from "./supervisedWorktreeReview";
 import {
   isLiveSupervisedRunStatus,
   parseRunStreamSnapshot,
@@ -316,6 +319,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const [selectedSupervisedWorkflowStepId, setSelectedSupervisedWorkflowStepId] = useState<SupervisedWorkflowStepId | null>(null);
   const [selectedSupervisedAgentRole, setSelectedSupervisedAgentRole] = useState<SupervisedMemberRole | null>(null);
   const [liveActiveRun, setLiveActiveRun] = useState<EvolutionActiveRun | null>(null);
+  const [recentSupervisedWorktreeRunId, setRecentSupervisedWorktreeRunId] = useState<string | null>(null);
   const [selfGoalInput, setSelfGoalInput] = useState("");
   const [selfGoalInitialized, setSelfGoalInitialized] = useState(false);
   const [selectedSelfObservationRunId, setSelectedSelfObservationRunId] = useState("");
@@ -538,6 +542,16 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     ? activeWorktreeRun
     : null;
   const worktreeRuns = workspaceSnapshot?.worktreeRuns ?? EMPTY_WORKTREE_RUNS;
+  const supervisedWorktreeLiveRunId = supervisedWorktreeLiveRun?.runId ?? "";
+  useEffect(() => {
+    if (supervisedWorktreeLiveRunId) {
+      setRecentSupervisedWorktreeRunId(supervisedWorktreeLiveRunId);
+    }
+  }, [supervisedWorktreeLiveRunId]);
+  const recentSupervisedWorktreeRun = selectRecentSupervisedWorktreeRun(
+    worktreeRuns,
+    recentSupervisedWorktreeRunId,
+  );
   const selfWorktreeRuns = workspaceSnapshot?.selfWorktreeRuns ?? worktreeRuns.filter((run) => isSelfEvolutionWorktreeRun(run));
   const selfWorktreeRun =
     workspaceSnapshot?.selfWorktreeActiveRun
@@ -589,7 +603,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     : null;
   const monitoredRun = effectiveActiveRunSnapshot
     ?? visibleLiveRunSnapshot;
-  const supervisedWorkflowRun = supervisedWorktreeLiveRun ?? monitoredRun;
+  const supervisedWorkflowRun = supervisedWorktreeLiveRun ?? monitoredRun ?? recentSupervisedWorktreeRun;
   const supervisedMembersRun = monitoredRun;
   const supervisedMembersUseRunBindings = hasSupervisedAgentBindings(supervisedWorkflowRun?.agentBindings);
   const supervisedMembersBindings = supervisedMembersUseRunBindings

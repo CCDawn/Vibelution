@@ -23,7 +23,6 @@ from scripts.evolution_harness import (
 
 from .session_service import (
     create_supervised_agent_session,
-    get_session_detail,
     get_session_turn_completion_snapshot,
     request_stop_session_turn,
     submit_session_message,
@@ -49,6 +48,39 @@ _CONVERSATION_HARNESS_MESSAGE_FIELDS = {
     "references",
     "metadata",
 }
+
+
+def _supervised_continuation_prompt(*, role: str, scenario: str) -> str:
+    normalized_role = str(role or "").strip().lower()
+    normalized_scenario = str(scenario or "").strip().lower()
+    if normalized_scenario == "candidate_self_improvement":
+        return (
+            "继续完成当前监督自改任务。请从上一回合进度继续，完成必要修改和最小验证；"
+            "只有任务真正完成或有明确不可继续原因时才结束。"
+        )
+    if normalized_role == "baseline":
+        return (
+            "继续完成当前监督基线评测。请从上一回合进度继续，只做任务要求的检查和验证；"
+            "不要修改源码或已有工作区改动。只有任务真正完成或有明确不可继续原因时才结束。"
+        )
+    if normalized_role == "judge":
+        return (
+            "继续完成当前监督评分。请从上一回合进度继续，只基于已有轨迹和证据完成裁决；"
+            "不要修改源码或已有工作区改动。只有评分完成或有明确不可继续原因时才结束。"
+        )
+    return (
+        "继续完成当前监督评测任务。请从上一回合进度继续，只执行当前角色被要求的检查和验证；"
+        "不要修改源码或已有工作区改动，除非任务明确要求修改。"
+    )
+
+
+def _evolution_transaction_closed(summary: dict[str, Any] | None) -> bool:
+    transaction = summary.get("transaction") if isinstance(summary, dict) else {}
+    return bool(
+        isinstance(transaction, dict)
+        and transaction.get("opened")
+        and transaction.get("closed")
+    )
 
 
 def run_supervised_conversation_harness(
@@ -233,8 +265,23 @@ def run_supervised_conversation_harness(
             or latest_detail.get("lastTurnStatus")
             or ""
         ).strip().lower()
+        latest_output = str(latest_completion_snapshot.get("assistantText") or "").strip() or _conversation_harness_latest_assistant(latest_detail)
+        if last_status == "needs_continue":
+            continuation_summary = _conversation_harness_evolution_summary(
+                latest_detail,
+                assistant_text=latest_output,
+                restart_expected=expect_restart,
+                repo_root=repo_root,
+            )
+            if _evolution_transaction_closed(continuation_summary):
+                last_status = "ready"
+                latest_completion_snapshot = {
+                    **latest_completion_snapshot,
+                    "terminalStatus": "ready",
+                    "lastTurnStatus": "ready",
+                    "completionSource": "evolution_transaction_closed",
+                }
         if callable(progress_callback):
-            latest_output = str(latest_completion_snapshot.get("assistantText") or "").strip() or _conversation_harness_latest_assistant(latest_detail)
             progress_callback(
                 {
                     "phase": "conversation_turn_finished" if completion_terminal or last_status not in {"queued", "running"} else "conversation_turn_running",
@@ -263,10 +310,7 @@ def run_supervised_conversation_harness(
             and time.monotonic() < deadline
         ):
             continuation_count += 1
-            continuation_prompt = (
-                "继续完成当前监督自改任务。请从上一回合进度继续，完成必要修改和最小验证；"
-                "只有任务真正完成或有明确不可继续原因时才结束。"
-            )
+            continuation_prompt = _supervised_continuation_prompt(role=role, scenario=scenario)
             try:
                 accepted = submit_session_message(
                     session_id,

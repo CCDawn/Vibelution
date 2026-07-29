@@ -448,6 +448,81 @@ def test_conversation_harness_continues_needs_continue_turn_before_finishing(mon
     assert backend["turn_ids"] == ["turn-1", "turn-2"]
 
 
+def test_conversation_harness_does_not_continue_after_transaction_closed(monkeypatch, tmp_path: Path):
+    submissions: list[str] = []
+    monkeypatch.setattr(
+        adapter,
+        "create_supervised_agent_session",
+        lambda **kwargs: {"id": "session-baseline"},
+    )
+
+    def submit(session_id, content, **kwargs):
+        submissions.append(content)
+        return {"turnId": f"turn-{len(submissions)}"}
+
+    monkeypatch.setattr(adapter, "submit_session_message", submit)
+    monkeypatch.setattr(
+        adapter,
+        "get_session_turn_completion_snapshot",
+        lambda session_id, turn_id: {
+            "terminal": True,
+            "terminalStatus": "needs_continue",
+            "lastTurnStatus": "needs_continue",
+            "assistantText": "验证与事务关账已经完成。",
+        },
+    )
+    monkeypatch.setattr(
+        adapter,
+        "_conversation_harness_evolution_summary",
+        lambda *args, **kwargs: {
+            "transaction": {
+                "opened": True,
+                "closed": True,
+                "status": "success",
+                "txn_id": "txn-closed",
+            },
+            "validation": {"passed": 1, "failed": 0, "last": None},
+            "git": {"commit_detected": False, "commit_refs": []},
+            "restart": {"expected": False, "triggered": False, "reentered": False},
+            "guarded_tools": {"total": 0, "restart_guarded": 0},
+        },
+    )
+    ticks = iter([0.0, 0.1, 0.2, 0.3])
+    monkeypatch.setattr(adapter.time, "monotonic", lambda: next(ticks, 0.4))
+    monkeypatch.setattr(adapter.time, "sleep", lambda seconds: None)
+
+    result = adapter.run_supervised_conversation_harness(
+        repo_root=tmp_path,
+        mode="single_turn",
+        prompt="inspect baseline",
+        timeout_seconds=5,
+        expect_restart=False,
+        post_restart_observe_seconds=0,
+        keep_worktree=True,
+        scenario="transaction",
+        agent_binding={"agentId": "agent-baseline", "role": "baseline"},
+    )
+
+    assert result.status == "success"
+    assert len(submissions) == 1
+    backend = result.evolution_summary["conversation_backend"]
+    assert backend["continuation_count"] == 0
+    assert backend["observed_terminal_status"] == "ready"
+
+
+def test_supervised_continuation_prompt_respects_role_boundaries():
+    baseline_prompt = adapter._supervised_continuation_prompt(role="baseline", scenario="transaction")
+    candidate_prompt = adapter._supervised_continuation_prompt(
+        role="candidate",
+        scenario="candidate_self_improvement",
+    )
+
+    assert "基线评测" in baseline_prompt
+    assert "不要修改源码或已有工作区改动" in baseline_prompt
+    assert "监督自改任务" not in baseline_prompt
+    assert "监督自改任务" in candidate_prompt
+
+
 def test_conversation_harness_preserves_needs_continue_after_continuation_limit(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(adapter, "CONVERSATION_HARNESS_MAX_CONTINUATIONS", 0)
     monkeypatch.setattr(

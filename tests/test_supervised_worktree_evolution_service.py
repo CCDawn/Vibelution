@@ -196,6 +196,42 @@ def _make_candidate_repo(tmp_path: Path, project_root: Path, *, changed_path: st
     return candidate
 
 
+def test_active_baseline_keeps_future_approval_pending():
+    snapshot = {
+        "runId": "swte-live-baseline",
+        "status": "running",
+        "phase": "baseline",
+        "latestMessage": "hidden conversation",
+        "baseline": {},
+        "candidate": {},
+        "candidateModification": {},
+        "decision": {},
+    }
+
+    workflow_steps = service._build_workflow_steps(snapshot)
+
+    assert workflow_steps[0]["status"] == "running"
+    assert workflow_steps[0]["current"] is True
+    assert workflow_steps[3]["status"] == "pending"
+    assert workflow_steps[3]["current"] is False
+
+
+def test_full_score_reflection_does_not_invent_a_failure_target():
+    reflection = service._build_reflection(
+        {},
+        {
+            "successes": 1,
+            "total": 1,
+            "failures": 0,
+            "summary": "baseline score 100.0",
+        },
+    )
+
+    assert reflection["summary"] == "基线 1/1 通过；候选只在有可信边界改进时修改。"
+    assert "同一题集复测时比基线分数更高" not in reflection["selfModificationPrompt"]
+    assert "如果没有可信改进，保守地不做无依据改动" in reflection["selfModificationPrompt"]
+
+
 def test_supervised_worktree_flow_preserves_improved_candidate_and_records_merge_analysis(tmp_path):
     project_root = tmp_path / "project"
     _init_repo(project_root)
