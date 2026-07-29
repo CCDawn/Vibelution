@@ -396,7 +396,7 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(detailsMarkup.slice(0, summaryEnd)).toContain("itemChevron");
     expect(detailsMarkup.slice(0, summaryEnd)).not.toContain("技术详情");
     expect(detailsMarkup.indexOf("turnErrorReasonList")).toBeGreaterThan(summaryEnd);
-    expect(toolActivityStyles.itemDetailsBody).toContain("ml-6");
+    expect(toolActivityStyles.itemDetailsBody).not.toContain("ml-");
     expect(toolActivityStyles.itemDetailsBody).not.toContain("mr-");
   });
 

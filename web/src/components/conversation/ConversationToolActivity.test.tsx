@@ -285,9 +285,12 @@ describe("ConversationToolActivity", () => {
     expect(styles.activity).not.toContain("ml-");
     expect(styles.activityChevron).not.toContain("ml-auto");
     expect(styles.activityDetails).not.toContain("border-l");
+    expect(styles.activityDetails).not.toContain("ml-");
     expect(styles.itemChevron).not.toContain("rotate-");
     expect(styles.batchDetails).not.toContain("border-l");
+    expect(styles.batchDetails).not.toContain("ml-");
     expect(styles.itemDetailsBody).toContain("max-h-56");
+    expect(styles.itemDetailsBody).not.toContain("ml-");
   });
 
   it("opens the running activity and its current tool detail by default", () => {
