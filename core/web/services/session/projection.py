@@ -1462,6 +1462,12 @@ def _codex_tool_lifecycle_projection_from_source(
     tool_call_id = f"tool_call:{operation_id}"
     runtime_kind = s._codex_runtime_kind(source)
     terminal_session_key = s._codex_terminal_session_key(source)
+    terminal_request = s._codex_terminal_request(source, summary, title) if runtime_kind == "terminal" else {}
+    if runtime_kind == "terminal" and not terminal_session_key and terminal_request.get("displayCommand"):
+        # Direct cli_tool/exec_command events do not always carry a terminal session
+        # identifier. A projection-local key preserves their real command/output
+        # hierarchy without inventing one for legacy summaries or write_stdin.
+        terminal_session_key = f"tool-call:{operation_id}"
     terminal_operation_id = f"terminal_operation:{ordinal}" if runtime_kind == "terminal" and terminal_session_key else ""
     tool_call = s._compact_codex_record(
         {
@@ -1496,7 +1502,7 @@ def _codex_tool_lifecycle_projection_from_source(
             "terminalId": terminal_id,
             "kind": s._codex_terminal_operation_kind(source),
             "status": status,
-            "request": s._codex_terminal_request(source, summary, title),
+            "request": terminal_request,
             "result": None if status in {"pending", "running"} else s._codex_terminal_result(source, summary, status),
             "durationSeconds": s._coerce_tool_number(
                 s._first_present_mapping_value(source, ("durationSeconds", "duration_seconds"))
