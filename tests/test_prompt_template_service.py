@@ -103,6 +103,8 @@ def test_prompt_template_registry_repairs_research_defaults(tmp_path, monkeypatc
     assert "candidateExtractions" in source_extractor["content"]
     assert "candidateDecisions" in source_extractor["content"]
     assert "不能根据截断上下文猜结果" in source_extractor["content"]
+    assert "普通 assistant commentary" in source_extractor["content"]
+    assert "不是隐藏 reasoning 或思维链" in source_extractor["content"]
     source_relation_mapper = prompt_template_service.get_prompt_template("prompt-source-relation-mapper")
     assert source_relation_mapper is not None
     assert source_relation_mapper["metadata"]["roleKey"] == "source_relation_mapper"
@@ -363,7 +365,7 @@ def test_prompt_template_repair_upgrades_builtin_challenge_stage_prompt_content(
     prompt_template_service.repair_prompt_templates()
     detail = prompt_template_service.get_prompt_template("prompt-source-extractor")
 
-    assert detail["metadata"]["builtinContentVersion"] == prompt_template_service.SOURCE_COLLECTION_STAGE_TOOL_PROTOCOL_VERSION
+    assert detail["metadata"]["builtinContentVersion"] == prompt_template_service.SOURCE_EXTRACTOR_VISIBLE_PROGRESS_VERSION
     assert "资料提炼阶段" in detail["content"]
     assert "source_collection_stage_writeback_tool" in detail["content"]
     assert "candidateExtractions" in detail["content"]
@@ -388,6 +390,8 @@ def test_source_extractor_prompt_requires_candidate_paging_and_structured_decisi
     assert "系统会按真实 candidateId/recordId 累计上一批结果" in detail["content"]
     assert "资料入库/知识库管理员" not in detail["content"]
     assert "无有效内容" in detail["content"]
+    assert "每完成一页" in detail["content"]
+    assert "不要虚构进展" in detail["content"]
 
 
 def test_source_collection_stage_prompts_align_backend_bound_checklist_protocol(tmp_path, monkeypatch):
