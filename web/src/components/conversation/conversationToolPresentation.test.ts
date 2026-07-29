@@ -7,6 +7,16 @@ import {
 } from "./conversationToolPresentation";
 
 describe("conversation tool presentation", () => {
+  it.each([
+    ["web_search_tool", "网页搜索", "Web search"],
+    ["web_fetch_tool", "网页读取", "Read web page"],
+    ["source_collection_context_tool", "读取资料上下文", "Read source context"],
+    ["source_collection_stage_writeback_tool", "资料提炼回写", "Write source extraction"],
+  ])("uses a product label for %s", (toolName, zh, en) => {
+    expect(conversationToolPresentationLabel(toolName, "zh")).toBe(zh);
+    expect(conversationToolPresentationLabel(toolName, "en")).toBe(en);
+  });
+
   it("keeps completed terminal output out of the collapsed command summary", () => {
     expect(
       completedToolPresentationSummary({

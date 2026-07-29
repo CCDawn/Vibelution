@@ -90,15 +90,22 @@ function familyForToolName(name: string): ConversationToolRendererFamily {
   }
   if (
     ["apply_patch_tool", "apply_diff_edit_tool", "write_file_tool"].includes(normalized)
+    || normalized === "source_collection_stage_writeback_tool"
     || normalized.includes("patch")
     || normalized.includes("edit")
   ) {
     return "edit";
   }
-  if (["read_file_tool", "glob_tool"].includes(normalized) || normalized.includes("file")) {
+  if (
+    ["read_file_tool", "glob_tool", "web_fetch_tool", "source_collection_context_tool"].includes(normalized)
+    || normalized.includes("file")
+  ) {
     return "files";
   }
-  if (["grep_search_tool", "search_code_tool"].includes(normalized) || normalized.includes("search")) {
+  if (
+    ["grep_search_tool", "search_code_tool", "web_search_tool"].includes(normalized)
+    || normalized.includes("search")
+  ) {
     return "search";
   }
   if (
