@@ -3952,6 +3952,14 @@ class SelfEvolvingAgent:
 
     def set_turn_interrupt_checker(self, checker=None) -> None:
         self._turn_interrupt_checker = checker
+        set_cancel_checker = getattr(getattr(self, "tool_executor", None), "set_cancel_checker", None)
+        if callable(set_cancel_checker):
+            # Cached chat Agents can resume on a different worker thread. Bind the
+            # checker in that thread's ContextVar so an active tool sees stop now.
+            set_cancel_checker(
+                self._current_turn_stop_reason if callable(checker) else None,
+                owner=self,
+            )
 
     def _current_turn_stop_reason(self) -> str:
         checker = getattr(self, "_turn_interrupt_checker", None)

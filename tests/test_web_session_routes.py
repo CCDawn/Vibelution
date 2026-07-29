@@ -182,6 +182,44 @@ def test_session_events_runs_initial_and_iterator_on_dedicated_executor(monkeypa
     assert all(name.startswith("session-stream") for name in thread_names)
 
 
+def test_session_stream_executor_admits_fifth_blocking_iterator():
+    release = threading.Event()
+    entered = [threading.Event() for _ in range(5)]
+
+    class BlockingIterator:
+        def __init__(self, index: int):
+            self.index = index
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            entered[self.index].set()
+            release.wait(timeout=2)
+            raise StopIteration
+
+        def close(self):
+            return None
+
+    async def consume(iterator):
+        async for _item in session_routes._iterate_session_stream(iterator):
+            pass
+
+    async def exercise_stream_capacity() -> bool:
+        tasks = [asyncio.create_task(consume(BlockingIterator(index))) for index in range(5)]
+        try:
+            for _ in range(20):
+                if entered[4].is_set():
+                    break
+                await asyncio.sleep(0.01)
+            return entered[4].is_set()
+        finally:
+            release.set()
+            await asyncio.wait_for(asyncio.gather(*tasks), timeout=2)
+
+    assert asyncio.run(exercise_stream_capacity()) is True
+
+
 def test_session_detail_exists(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
