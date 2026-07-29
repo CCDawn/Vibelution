@@ -635,8 +635,14 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("不会自动写入运行时");
     expect(routeSource).toContain("styles.supervisedRunPlan");
     expect(routeSource).toContain("styles.supervisedRunPlanGrid");
-    expect(routeStyles.supervisedRunPlan).toContain("[align-content:center]");
-    expect(routeStyles.supervisedRunPlanGrid).toContain("[grid-template-columns:repeat(2,_minmax(0,_1fr))]");
+    expect(routeSource).toContain("styles.supervisedRunPlanActions");
+    expect(routeStyles.supervisedRunPlan).toContain("[align-content:start]");
+    expect(routeStyles.supervisedRunPlan).toContain("[container-type:inline-size]");
+    expect(routeStyles.supervisedRunPlanGrid).toContain("[grid-template-columns:repeat(4,_minmax(0,_1fr))]");
+    expect(routeStyles.supervisedRunPlanGrid).toContain(
+      "[@container(max-width:780px)]:[grid-template-columns:repeat(2,_minmax(0,_1fr))]",
+    );
+    expect(routeStyles.supervisedRunPlanLead).toContain("[text-align:left]");
   });
 
   it("builds the supervised Agent conversation chrome from stable VUI product APIs", () => {
@@ -741,11 +747,18 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(activeRunMonitorStyles.compactTextAction).toContain("[width:fit-content]");
     expect(activeRunMonitorStyles.compactTextAction).toContain("[max-width:160px]");
     expect(activeRunMonitorStyles.closedLoopLedger).toContain("[background:color-mix(in_srgb,_var(--accent-cool)_7%,_var(--vui-surface-row))]");
+    expect(activeRunMonitorStyles.metricStrip).toContain(
+      "[grid-template-columns:repeat(2,_minmax(0,_1fr))]",
+    );
+    expect(activeRunMonitorStyles.metricStrip).not.toContain(
+      "[grid-template-columns:repeat(4,_minmax(0,_1fr))]",
+    );
   });
 
   it("explains closed-loop launch and dataset case limits without changing review actions", () => {
     expect(routeSource).toContain('t("caseLimitHint")');
     expect(routeSource).toContain("styles.closedLoopLaunchBlock");
+    expect(routeSource).toContain("styles.closedLoopContent");
     expect(routeSource).toContain('t("closedLoopLaunchPanelTitle")');
     expect(routeSource).toContain('t("closedLoopLaunchPanelHint")');
     expect(routeSource).toContain("disabledReason={supervisedStartDisabledReason}");
@@ -756,7 +769,15 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("当前只演练编排链路，不调用真实 LLM 自改。");
     expect(evolutionDictionarySource).toContain("结果会进入下方候选审核，不会自动合并。");
     expect(routeStyles.closedLoopLaunchBlock).toContain("[grid-template-columns:minmax(0,_1fr)_minmax(92px,_auto)]");
+    expect(routeStyles.closedLoopLaunchBlock).not.toContain("[&_div]:grid");
     expect(routeStyles.closedLoopModeBadge).toContain("[border-radius:999px]");
+  });
+
+  it("keeps supervised operation icons in the VButton icon slot", () => {
+    expect(routeSource).toMatch(/icon=\{\s*supervisedStartSubmitting \|\| supervisedPrimaryRunning/);
+    expect(routeSource).toMatch(/icon=\{\s*startSimulationWorktreeRunMutation\.isPending/);
+    expect(activeRunMonitorPanelSource.split('icon={<Activity size={15} />}')).toHaveLength(3);
+    expect(activeRunMonitorPanelSource.split('icon={<LibraryBig size={15} />}')).toHaveLength(3);
   });
 
   it("keeps the supervised live console as a dense desktop split before narrow layouts", () => {

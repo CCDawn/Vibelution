@@ -56,7 +56,7 @@ const styles = {
   liveSummaryRow:
     `grid [grid-template-columns:auto_minmax(0,_1fr)] [gap:8px] [align-items:start] min-w-0 [padding:8px_10px] ${rowSurfaceSoft}`,
   metricStrip:
-    "grid [grid-template-columns:repeat(4,_minmax(0,_1fr))] [gap:6px] max-[900px]:[grid-template-columns:repeat(2,_minmax(0,_1fr))] max-[640px]:[grid-template-columns:1fr]",
+    "grid [grid-template-columns:repeat(2,_minmax(0,_1fr))] [gap:6px] max-[640px]:[grid-template-columns:1fr]",
   metricTile:
     metricSurface,
   monitorMetricsDense:

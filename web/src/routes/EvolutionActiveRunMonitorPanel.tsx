@@ -164,8 +164,8 @@ function EvolutionActiveRunClosedLoopLedgerPanel({
           isDisabled={ledger.action.disabled}
           onClick={ledger.action.onClick}
           title={ledger.action.title}
+          icon={<LibraryBig size={15} />}
         >
-          <LibraryBig size={15} />
           {ledger.action.label}
         </VButton>
       </div>
@@ -223,8 +223,8 @@ export function EvolutionActiveRunMonitorPanel({
                   isDisabled={run.openSessionAction.disabled}
                   onClick={run.openSessionAction.onClick}
                   title={run.openSessionAction.title}
+                  icon={<Activity size={15} />}
                 >
-                  <Activity size={15} />
                   {run.openSessionAction.label}
                 </VButton>
               ) : null}
@@ -290,8 +290,8 @@ export function EvolutionActiveRunMonitorPanel({
               isDisabled={idle.latestRunAction.disabled}
               onClick={idle.latestRunAction.onClick}
               title={idle.latestRunAction.title}
+              icon={<Activity size={15} />}
             >
-              <Activity size={15} />
               {idle.latestRunAction.label}
             </VButton>
             <VButton
@@ -300,8 +300,8 @@ export function EvolutionActiveRunMonitorPanel({
               isDisabled={idle.libraryAction.disabled}
               onClick={idle.libraryAction.onClick}
               title={idle.libraryAction.title}
+              icon={<LibraryBig size={15} />}
             >
-              <LibraryBig size={15} />
               {idle.libraryAction.label}
             </VButton>
           </div>
