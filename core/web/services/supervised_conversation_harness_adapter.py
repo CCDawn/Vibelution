@@ -33,6 +33,17 @@ CONVERSATION_HARNESS_CANCEL_GRACE_SECONDS = 8.0
 CONVERSATION_HARNESS_MAX_CONTINUATIONS = 3
 _CONVERSATION_HARNESS_TRANSCRIPT_LIMIT = 8
 _AUTO_CLOSE_TRANSACTION_SUMMARY = "监督会话结束时事务仍处于 open，系统已自动失败关账。"
+_BASELINE_SELF_EDIT_EXECUTION_CONTRACT = (
+    "\n\n[Baseline self-edit execution contract]\n"
+    "- 本回合的自改指令覆盖同一会话中此前“基线测量阶段不要修改文件”的只读限制；"
+    "你仍是原基线 Agent，但现在必须实施已被代码证据支持的改进。\n"
+    "- 当前回合已临时提供 apply_patch_tool。若 Judge 指出了具体缺口且源码证据确认缺口存在，"
+    "必须先调用 apply_patch_tool 产生有意义的候选 worktree diff，再运行聚焦验证；"
+    "不要只重复诊断、测试或失败关账。\n"
+    "- 只有当源码证据否定 Judge 反馈，或确实没有安全且可信的改动时，"
+    "才可以不修改；此时必须明确输出 NO_JUSTIFIED_CHANGE，并列出支持证据。\n"
+    "- 不得使用 write_file_tool，不得提交、合并、发布或修改主工作区。"
+)
 _CONVERSATION_HARNESS_MESSAGE_FIELDS = {
     "id",
     "role",
@@ -73,6 +84,14 @@ def _supervised_continuation_prompt(*, role: str, scenario: str) -> str:
         "继续完成当前监督评测任务。请从上一回合进度继续，只执行当前角色被要求的检查和验证；"
         "不要修改源码或已有工作区改动，除非任务明确要求修改。"
     )
+
+
+def _supervised_initial_prompt(*, prompt: str, role: str, scenario: str) -> str:
+    normalized_role = str(role or "").strip().lower()
+    normalized_scenario = str(scenario or "").strip().lower()
+    if normalized_role == "baseline" and normalized_scenario == "candidate_self_improvement":
+        return f"{str(prompt or '').rstrip()}{_BASELINE_SELF_EDIT_EXECUTION_CONTRACT}"
+    return str(prompt or "")
 
 
 def _evolution_transaction_closed(summary: dict[str, Any] | None) -> bool:
@@ -133,7 +152,11 @@ def run_supervised_conversation_harness(
             mental_model_enabled=mental_model_enabled,
         )
 
-    prompt_text = materialize_scenario_prompt(scenario, prompt, repo_root) or ""
+    prompt_text = _supervised_initial_prompt(
+        prompt=materialize_scenario_prompt(scenario, prompt, repo_root) or "",
+        role=role,
+        scenario=scenario,
+    )
     normalized_workspace_override = str(Path(workspace_override).resolve()) if workspace_override else ""
     requested_session_id = str(conversation_session_id or "").strip()
     if clean_room and requested_session_id:

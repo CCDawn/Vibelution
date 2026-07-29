@@ -319,6 +319,24 @@ def test_conversation_harness_passes_workspace_override_to_supervised_session(mo
     assert captured_submit["message_source"] == "supervised_evolution"
 
 
+def test_baseline_self_edit_initial_prompt_supersedes_measurement_read_only_contract():
+    prompt = adapter._supervised_initial_prompt(
+        prompt="PHASE: BASELINE_SELF_EDIT_IMPLEMENTATION\nJudge feedback",
+        role="baseline",
+        scenario="candidate_self_improvement",
+    )
+
+    assert "覆盖同一会话中此前“基线测量阶段不要修改文件”的只读限制" in prompt
+    assert "必须先调用 apply_patch_tool" in prompt
+    assert "不要只重复诊断、测试或失败关账" in prompt
+    assert "NO_JUSTIFIED_CHANGE" in prompt
+    assert adapter._supervised_initial_prompt(
+        prompt="baseline probe",
+        role="baseline",
+        scenario="transaction",
+    ) == "baseline probe"
+
+
 def test_conversation_harness_can_reuse_existing_supervised_session(monkeypatch, tmp_path: Path):
     created_sessions: list[dict] = []
     captured_submit: dict[str, object] = {}
