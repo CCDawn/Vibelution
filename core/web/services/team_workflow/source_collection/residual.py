@@ -1541,9 +1541,44 @@ def _source_collection_extraction_evidence_ledger(
     return compact
 
 
+def _source_collection_evidence_ref_has_anchor(value: dict[str, Any]) -> bool:
+    s = _service()
+    ref_type = s._trim_text(value.get("type"), max_length=80).lower().replace("-", "_")
+    ref_id = s._trim_text(value.get("id"), max_length=240)
+    if not ref_type or not ref_id:
+        return False
+    if ref_type in {"doi", "url", "uri", "paper", "source", "data_record", "candidate", "record", "text"}:
+        return False
+    return (
+        ref_type in {
+            "page",
+            "pdf_page",
+            "page_anchor",
+            "record_anchor",
+            "section",
+            "paragraph",
+            "html_paragraph",
+            "quote",
+            "citation",
+            "excerpt",
+            "abstract",
+            "sentence",
+            "line",
+            "table",
+            "figure",
+            "timestamp",
+        }
+        or "anchor" in ref_type
+        or ref_type.endswith("_page")
+    )
+
+
 def _source_collection_extraction_has_evidence_anchor(ledger: dict[str, Any]) -> bool:
     s = _service()
-    if s._normalize_ref_list(ledger.get("evidenceRefs"), max_items=24):
+    if any(
+        _source_collection_evidence_ref_has_anchor(item)
+        for item in s._normalize_ref_list(ledger.get("evidenceRefs"), max_items=24)
+    ):
         return True
     for key in ("claims", "keyFindings", "citations"):
         for item in list(ledger.get(key) or []):

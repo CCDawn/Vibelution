@@ -1436,6 +1436,20 @@ describe("ChatCodingRoute layout contract", () => {
     expect(llmPayloadTracePanelSource).toContain("styles.llmPayloadTraceMuted");
   });
 
+  it("keeps Prompt assembly diagnostics in the status rail instead of the conversation timeline", () => {
+    expect(chatSessionWorkspacePanelSource).not.toContain("ChatPromptAssemblyInspector");
+    expect(chatSessionWorkspacePanelSource).not.toContain("promptSnapshot");
+    expect(chatStatusRailSource).toContain('import { ChatPromptAssemblyInspector }');
+    expect(chatStatusRailSource).toContain("promptSnapshot?: SessionAgentPromptSnapshot");
+    expect(chatStatusRailSource).toContain("promptAssembly?: SessionPromptAssemblyManifest");
+    expect(chatStatusRailSource).toContain("<ChatPromptAssemblyInspector");
+    expect(chatStatusRailSource.indexOf("<ChatPromptAssemblyInspector")).toBeGreaterThan(
+      chatStatusRailSource.indexOf("<TokenCoreStatusPanel"),
+    );
+    expect(routeSource).toContain("promptSnapshot={detail?.agentPromptSnapshot}");
+    expect(routeSource).toContain("promptAssembly={detail?.lastPromptAssembly}");
+  });
+
   it("disables the cache metric trigger when cache details are unavailable", () => {
     const unavailableHtml = renderToStaticMarkup(
       createElement(TokenCoreStatusPanel, {

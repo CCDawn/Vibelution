@@ -3381,7 +3381,7 @@ def test_source_collection_context_retry_evidence_returns_only_missing_anchor_ca
                         "candidateId": candidates[0]["candidateId"],
                         "decision": "keep",
                         "summary": "已有摘要证据。",
-                        "evidenceRefs": [{"type": "doi", "id": "10.0000/retry-evidence-0"}],
+                        "evidenceRefs": [{"type": "record_anchor", "id": "retry-evidence-0-abstract"}],
                     },
                     {
                         "candidateId": candidates[1]["candidateId"],
@@ -3458,14 +3458,14 @@ def test_source_collection_context_retry_evidence_returns_only_missing_anchor_ca
         retry_task["taskId"],
         {
             "status": "needs_review",
-            "summary": "已为剩余候选补入受控 DOI 锚点。",
+            "summary": "已为剩余候选补入受控摘要记录锚点。",
             "result": {
                 "candidateExtractions": [
                     {
                         "candidateId": candidates[1]["candidateId"],
                         "decision": "needs_more_info",
-                        "summary": "仅登记 DOI 元数据，不扩展全文结论。",
-                        "evidenceRefs": [{"type": "doi", "id": "10.0000/retry-evidence-1"}],
+                        "summary": "仅登记受控摘要记录锚点，不扩展全文结论。",
+                        "evidenceRefs": [{"type": "record_anchor", "id": "retry-evidence-1-abstract"}],
                     }
                 ],
                 # A retry can retain record-oriented output from an earlier pre-candidate pass.
