@@ -32,9 +32,7 @@ export function isSelfEvolutionWorktreeRun(run: SupervisedWorktreeRun | null | u
     || String(origin?.riskReason || "").trim()
     || origin?.requiresSupervisedReview,
   );
-  return hasSelfEvolutionOrigin
-    || Boolean(run.reviewGate?.required)
-    || Boolean(run.mergeAnalysis?.reviewGate?.required);
+  return hasSelfEvolutionOrigin;
 }
 
 export function selectRecentSupervisedWorktreeRun(
@@ -52,11 +50,14 @@ export function selectRecentSupervisedWorktreeRun(
     }
   }
 
-  return runs.find((run) => (
-    !isSelfEvolutionWorktreeRun(run)
-    && String(run.status || "").trim().toLowerCase() === "done"
-    && String(run.outcome || "").trim().toLowerCase() === "needs_manual_decision"
-  )) ?? null;
+  return runs.find((run) => {
+    const outcome = String(run.outcome || "").trim().toLowerCase();
+    return (
+      !isSelfEvolutionWorktreeRun(run)
+      && String(run.status || "").trim().toLowerCase() === "done"
+      && ["needs_manual_decision", "awaiting_user_approval"].includes(outcome)
+    );
+  }) ?? null;
 }
 
 export function readRecentSupervisedWorktreeRunId(storage: RunIdStorage | null | undefined) {
