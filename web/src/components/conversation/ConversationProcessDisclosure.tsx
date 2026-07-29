@@ -126,6 +126,7 @@ export function ConversationProcessDisclosure({
                     styles.row,
                     expanded ? styles.rowExpanded : styles.rowCollapsed,
                   ].join(" ")}
+                  // Bounded animation exception: the delay depends on the rendered row index.
                   style={{
                     transitionDelay: expanded
                       ? `${Math.min(index, PROCESS_ROW_STAGGER_LIMIT) * PROCESS_ROW_STAGGER_MS}ms`

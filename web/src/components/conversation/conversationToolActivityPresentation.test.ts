@@ -91,6 +91,24 @@ describe("buildConversationToolActivityPresentation", () => {
       { kind: "batch", title: "验证", count: 2 },
     ]);
   });
+
+  it("keeps source collection tools as distinct semantic batches", () => {
+    const items = buildConversationToolActivityPresentation([
+      ...Array.from({ length: 5 }, (_, index) => toolCell(`context-${index}`, {
+        title: "source_collection_context_tool",
+      })),
+      ...Array.from({ length: 2 }, (_, index) => toolCell(`fetch-${index}`, {
+        title: "web_fetch_tool",
+      })),
+      toolCell("writeback", { title: "source_collection_stage_writeback_tool" }),
+    ], "zh");
+
+    expect(items).toMatchObject([
+      { kind: "batch", title: "读取资料上下文", count: 5 },
+      { kind: "batch", title: "网页读取", count: 2 },
+      { kind: "single", id: "writeback" },
+    ]);
+  });
 });
 
 describe("buildConversationToolActivityDigestPresentation", () => {
@@ -165,5 +183,17 @@ describe("buildConversationToolActivityDigestPresentation", () => {
 
     expect(digest.meta).toBe("代码分析 1 · 搜索 1 · Git 检查 1 · 另 1 类");
     expect(digest.meta).not.toContain("修改文件");
+  });
+
+  it("omits metadata that only repeats the total tool count", () => {
+    const digest = buildConversationToolActivityDigestPresentation([
+      toolCell("vendor-1", { title: "unregistered_vendor_tool" }),
+      toolCell("vendor-2", { title: "unregistered_vendor_tool" }),
+    ], "zh");
+
+    expect(digest).toMatchObject({
+      title: "运行了 2 个工具",
+      meta: "",
+    });
   });
 });
