@@ -2804,6 +2804,8 @@ export function ChatCodingRoute() {
         cacheDetailOpenLabel={cacheDetailOpenLabel}
         tokenStatusMetrics={tokenStatusMetrics}
         onOpenCacheDetail={openCacheDetail}
+        promptSnapshot={detail?.agentPromptSnapshot}
+        promptAssembly={detail?.lastPromptAssembly}
         lastLlmPayloadTrace={lastLlmPayloadTrace}
         mentalCompactLine={mentalCompactLine}
         mentalSourceLabel={mentalSourceLabel}
@@ -3095,8 +3097,6 @@ export function ChatCodingRoute() {
               loadingSessionLabel={t("loadingSession")}
               noSessionsLabel={t("noSessionsYet")}
               notices={activeRuntimeNotices}
-              promptSnapshot={detail?.agentPromptSnapshot}
-              promptAssembly={detail?.lastPromptAssembly}
               sessionsPending={sessionsQuery.isPending}
               toolApproval={pendingToolApproval ? {
                 pending: pendingToolApprovalPending,

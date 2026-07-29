@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import type { SessionAgentPromptSnapshot, SessionPromptAssemblyManifest } from "../../api/types";
 import { ChatPromptAssemblyInspector } from "./ChatPromptAssemblyInspector";
+import styles from "./ChatPromptAssemblyInspector.styles";
 
 const snapshot: SessionAgentPromptSnapshot = {
   schemaVersion: 3,
@@ -71,6 +72,11 @@ describe("ChatPromptAssemblyInspector", () => {
     expect(html).toContain("完整");
     expect(html).toContain("已截断");
     expect(html).not.toContain("不得泄漏的正文");
+    expect(styles.root).not.toContain("mx-");
+    expect(styles.root).not.toContain("mt-");
+    expect(styles.summary).toContain("grid-cols-1");
+    expect(styles.facts).not.toContain("auto-fit");
+    expect(styles.tier).toContain("col-span-2");
   });
 
   it("identifies legacy snapshots without reconstructing their prompt", () => {
