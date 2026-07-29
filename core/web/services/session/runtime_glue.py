@@ -2348,6 +2348,30 @@ def _supervised_role_for_runtime_context(context: dict[str, Any], agent_instance
     return ""
 
 
+def _supervised_runtime_tool_grants_for_context(
+    context: dict[str, Any],
+    supervised_role: str,
+) -> list[str] | None:
+    """Return a turn-scoped tool package without changing the Agent's supervised identity."""
+    s = _service()
+    if (
+        str(context.get("user_message_source") or "").strip() != "supervised_evolution"
+        or str(supervised_role or "").strip() != "baseline"
+    ):
+        return None
+    candidates: list[Any] = [
+        context.get("message_metadata"),
+        context.get("supervised_context"),
+    ]
+    for payload in candidates:
+        if not isinstance(payload, dict):
+            continue
+        scenario = str(payload.get("scenario") or "").strip()
+        if scenario == "candidate_self_improvement":
+            return s.supervised_role_runtime_tools("baseline_self_edit")
+    return None
+
+
 def _supervised_workspace_override_path(context: dict[str, Any]) -> Path | None:
     """Return a per-turn candidate worktree override for supervised hidden sessions."""
     s = _service()

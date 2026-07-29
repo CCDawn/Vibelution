@@ -159,6 +159,60 @@ def test_ensure_supervised_agent_instances_creates_fixed_role_agents_without_ste
     assert state["active_conversation_id"] == "session-user"
 
 
+def test_baseline_self_edit_grants_apply_patch_only_for_the_improvement_turn():
+    normal_context = {
+        "user_message_source": "supervised_evolution",
+        "message_metadata": {
+            "supervisedRole": "baseline",
+            "scenario": "baseline_execution",
+        },
+    }
+    self_edit_context = {
+        "user_message_source": "supervised_evolution",
+        "message_metadata": {
+            "supervisedRole": "baseline",
+            "scenario": "candidate_self_improvement",
+        },
+    }
+
+    assert (
+        session_service._supervised_runtime_tool_grants_for_context(
+            normal_context,
+            "baseline",
+        )
+        is None
+    )
+    grants = session_service._supervised_runtime_tool_grants_for_context(
+        self_edit_context,
+        "baseline",
+    )
+
+    assert grants is not None
+    assert "apply_patch_tool" in grants
+    assert "write_file_tool" not in grants
+    assert "open_evolution_transaction_tool" in grants
+    with agent_directory_service.active_agent_runtime(
+        supervised_role="baseline",
+        runtime_tool_grants=grants,
+        runtime_tool_source="supervised_baseline_self_edit",
+    ) as runtime:
+        visible = agent_directory_service.effective_visible_tool_names_for_current_agent(
+            ["apply_patch_tool", "write_file_tool", "grep_search_tool"]
+        )
+
+    assert runtime["supervisedRole"] == "baseline"
+    assert "apply_patch_tool" in visible
+    assert "write_file_tool" not in visible
+    assert runtime["toolPolicy"]["runtimeToolSource"] == "supervised_baseline_self_edit"
+    assert (
+        session_service._supervised_runtime_tool_grants_for_context(
+            self_edit_context,
+            "judge",
+        )
+        is None
+    )
+
+
 def test_supervised_runtime_tools_are_granted_only_during_role_runtime(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(supervised_agent_service, "_current_config", lambda: _model_config())
