@@ -1531,6 +1531,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("renderSourceCollectionConversation");
     expect(routeSource).toContain("renderSourceCollectionControlsPanel");
     expect(routeSource).toContain("知识搜集工作台");
+    expect(routeSource).not.toContain("挑战杯ai科研团队 / 知识搜集阶段");
     expect(routeSource).toContain("researchStageAgentDirectChatRoute");
     expect(routeSource).toContain("openSourceCollectionStageAgentChat");
     expect(routeSource).not.toContain("sourceCollectionStageChatRoute");
