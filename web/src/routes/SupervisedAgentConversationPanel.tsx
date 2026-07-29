@@ -398,7 +398,7 @@ export function SupervisedAgentConversationPanel({
               showSessionOverview={Boolean(supplementalContent)}
               supplementalContent={supplementalContent}
               showComposer={false}
-              processDisplayMode="answer"
+              processDisplayMode="trace"
               autoScrollToLatest={true}
               composerValue=""
               composerPlaceholder={lang === "zh" ? "监督进化会话只读" : "Supervised conversation is read-only"}

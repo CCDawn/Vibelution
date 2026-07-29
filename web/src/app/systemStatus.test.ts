@@ -675,7 +675,7 @@ describe("systemStatus", () => {
     ]);
   });
 
-  it("classifies supervised worktree evolution as supervised work instead of chat", () => {
+  it("classifies a supervised child conversation under its parent worktree run", () => {
     const indicator = deriveActiveWorkIndicator(
       runtimeWithActiveWork({
         supervised_worktree_evolution_run: {
@@ -684,6 +684,19 @@ describe("systemStatus", () => {
           status: "running",
           currentPhase: "candidate_worktree",
           latestMessage: "正在创建候选隔离工作树。",
+          workflowSteps: [
+            {
+              id: "baseline_eval",
+              conversationSessionId: "session-supervised-baseline",
+            },
+          ],
+        },
+        chat_turn: {
+          runId: "turn-supervised-baseline",
+          runKind: "chat_turn",
+          status: "running",
+          sessionId: "session-supervised-baseline",
+          userMessage: "Run this supervised baseline",
         },
       }),
     );
@@ -696,7 +709,9 @@ describe("systemStatus", () => {
       runId: "swte-candidate-1",
       count: 1,
       overflowCount: 0,
+      href: "/supervised-evolution",
     });
+    expect(indicator?.items).toHaveLength(1);
   });
 
   it("uses self-evolution goals as summaries and marks queued work as caution", () => {

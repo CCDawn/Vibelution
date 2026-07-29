@@ -460,7 +460,6 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   });
   const {
     startWorktreeRunMutation,
-    startSimulationWorktreeRunMutation,
     startSelfWorktreeRunMutation,
     startSelfObservationMutation,
     selfObservationActionMutation,
@@ -976,7 +975,6 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const supervisedControlError =
     approvalWorktreeActionMutation.error?.message
     ?? startWorktreeRunMutation.error?.message
-    ?? startSimulationWorktreeRunMutation.error?.message
     ?? "";
   const terminateSupervisedDisabledReason = disabledReason(terminateSupervisedAction);
   const supervisedActiveRunMonitorMetrics: EvolutionActiveRunMonitorMetric[] = monitoredRun
@@ -1166,17 +1164,6 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       ? (lang === "zh" ? "监督运行控制暂不可用。" : "Supervised run controls are unavailable.")
       : startWorktreeRunMutation.isPending
         ? (lang === "zh" ? "监督运行正在启动。" : "The supervised run is starting.")
-        : sourceKind === "dataset" && !datasetName
-          ? (lang === "zh" ? "先选择数据集。" : "Choose a dataset first.")
-          : sourceKind === "bundle" && !selectedBundleExists
-            ? (lang === "zh" ? "先选择有效的评测包。" : "Choose a valid evaluation bundle first.")
-            : undefined;
-  const simulationStartDisabledReason = runLocked || worktreeRunLocked
-    ? t("runningLockHint")
-    : !workbenchControl
-      ? (lang === "zh" ? "监督运行控制暂不可用。" : "Supervised run controls are unavailable.")
-      : startSimulationWorktreeRunMutation.isPending
-        ? (lang === "zh" ? "模拟闭环正在启动。" : "The simulated loop is starting.")
         : sourceKind === "dataset" && !datasetName
           ? (lang === "zh" ? "先选择数据集。" : "Choose a dataset first.")
           : sourceKind === "bundle" && !selectedBundleExists
@@ -2633,44 +2620,6 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                         }
                       >
                         {supervisedStartButtonLabel}
-                      </VButton>
-                    </div>
-                    <div className={styles.closedLoopLaunchBlock}>
-                      <div className={styles.closedLoopContent}>
-                        <div className={styles.closedLoopTitleRow}>
-                          <strong className={styles.formLabelWithHint}>
-                            {t("closedLoopLaunchPanelTitle")}
-                            <VContextualHint content={t("closedLoopLaunchPanelHint")} label={`${t("closedLoopLaunchPanelTitle")}说明`} />
-                          </strong>
-                          <span className={styles.closedLoopModeBadge}>{lang === "zh" ? "模拟" : "Simulation"}</span>
-                        </div>
-                        <span>
-                          {lang === "zh"
-                            ? "当前只演练编排链路，不调用真实 LLM 自改。"
-                            : "Runs the orchestration rehearsal without real LLM self-editing."}
-                        </span>
-                      </div>
-                      <VButton
-                        type="button"
-                        className={styles.inlineAction}
-                        isDisabled={
-                          runLocked
-                          || worktreeRunLocked
-                          || !workbenchControl
-                          || startSimulationWorktreeRunMutation.isPending
-                          || (sourceKind === "dataset" && !datasetName)
-                          || (sourceKind === "bundle" && !selectedBundleExists)
-                        }
-                        onClick={() => startSimulationWorktreeRunMutation.mutate()}
-                        tooltip={t("startClosedLoopHint")}
-                        disabledReason={simulationStartDisabledReason}
-                        icon={
-                          startSimulationWorktreeRunMutation.isPending
-                            ? <LoaderCircle size={15} />
-                            : <Sparkles size={15} />
-                        }
-                      >
-                        {t("startClosedLoopRun")}
                       </VButton>
                     </div>
                     {runLocked || worktreeRunLocked ? <p className={styles.noticeText}>{t("runningLockHint")}</p> : null}
