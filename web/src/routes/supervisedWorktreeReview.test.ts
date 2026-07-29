@@ -23,16 +23,16 @@ describe("isSelfEvolutionWorktreeRun", () => {
     }))).toBe(false);
   });
 
-  it("recognizes explicit self-evolution provenance and review gates", () => {
+  it("uses explicit self-evolution provenance instead of the shared review gate", () => {
     expect(isSelfEvolutionWorktreeRun(runWith({
       runId: "swte-self-origin",
       selfEvolutionOrigin: { sourceTrack: "self_evolution" },
     }))).toBe(true);
     expect(isSelfEvolutionWorktreeRun(runWith({
-      runId: "swte-self-review",
+      runId: "swte-supervised-review",
       selfEvolutionOrigin: {},
       reviewGate: { required: true },
-    }))).toBe(true);
+    }))).toBe(false);
   });
 });
 
@@ -68,7 +68,8 @@ describe("selectRecentSupervisedWorktreeRun", () => {
     const actionableRun = runWith({
       runId: "swte-actionable",
       status: "done",
-      outcome: "needs_manual_decision",
+      outcome: "awaiting_user_approval",
+      reviewGate: { required: true },
     });
     const olderActionableRun = runWith({
       runId: "swte-older-actionable",
