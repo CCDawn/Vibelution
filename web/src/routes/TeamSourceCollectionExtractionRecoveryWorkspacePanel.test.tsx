@@ -98,4 +98,23 @@ describe("TeamSourceCollectionExtractionRecoveryWorkspacePanel", () => {
     expect(markup).toContain("提炼失败");
     expect(markup).toContain("1/14");
   });
+
+  it("separates source verification from missing evidence anchors", () => {
+    const markup = renderRecoveryPanel(projectionWithClosure({
+      blockedCount: 2,
+      missingEvidenceAnchorCount: 0,
+    }));
+
+    expect(markup).toContain("来源核验");
+    expect(markup).toContain("提炼完成，待核验来源");
+    expect(markup).toContain("待核验来源");
+    expect(markup).toContain("2/14");
+    expect(markup).toContain("提炼覆盖");
+    expect(markup).toContain("不代表缺少证据锚点");
+    expect(markup).toContain("lucide-circle-check");
+    expect(markup).not.toContain("lucide-triangle-alert");
+    expect(markup).not.toContain("待补提炼");
+    expect(markup).not.toContain("待补证据");
+    expect(markup).not.toContain("证据补全");
+  });
 });

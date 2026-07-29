@@ -6,6 +6,7 @@ import {
   sourceCollectionPhaseCloseGateNextStage,
   sourceCollectionStageBackendActionReadiness,
   sourceCollectionStageCardsFromStatus,
+  selectSourceCollectionStageRound,
   sourceCollectionStageProjectionCount,
   sourceCollectionStageProjectionState,
   sourceCollectionStageUserStatusLabel,
@@ -156,6 +157,72 @@ describe("source collection stage projection", () => {
     const card = stageCard("closed_loop", { latestTask: { taskId: "task-summary" } });
 
     expect(sourceCollectionStageCardsFromStatus({ stageCards: [card] })).toEqual([card]);
+  });
+
+  it("keeps the live source summary when a stale phase snapshot has the same round id", () => {
+    const liveCard = stageCard("partial_current_inputs", {
+      latestTask: {
+        taskId: "task-live",
+        materializedContentExtraction: { missingEvidenceAnchorCount: 0 },
+      },
+    });
+    const staleCard = stageCard("partial_current_inputs", {
+      latestTask: {
+        taskId: "task-stale",
+        materializedContentExtraction: { missingEvidenceAnchorCount: 2 },
+      },
+    });
+    const liveRound = {
+      stageRoundId: "round-1",
+      stageType: "knowledge_collection" as const,
+      roundNumber: 1,
+      status: "needs_attention",
+      topic: "",
+      goal: "",
+      sourceRunIds: ["run-1"],
+      sourceCollectionStageCards: [liveCard],
+    };
+    const staleRound = {
+      ...liveRound,
+      sourceCollectionStageCards: [staleCard],
+    };
+
+    expect(selectSourceCollectionStageRound(
+      liveRound,
+      [{
+        stageType: "knowledge_collection",
+        label: "知识搜集",
+        status: "needs_attention",
+        roundCount: 1,
+        activeRoundId: "round-1",
+        latestRound: staleRound,
+        primaryAction: "continue",
+        secondaryAction: "inspect",
+        canStart: true,
+        canContinue: true,
+        canNewRound: false,
+        requiresUserDecision: false,
+      }],
+      {
+        schemaVersion: 1,
+        teamId: "research-team",
+        status: "needs_attention",
+        currentStage: "knowledge_collection",
+        phases: [],
+        activeRounds: [staleRound],
+        latestRound: staleRound,
+        roundCount: 1,
+        boundaries: {
+          externalSearchTriggered: false,
+          writesFormalKnowledge: false,
+          writesRag: false,
+          writesOfficialGraph: false,
+          autoTransitionsNextStage: false,
+          stageRecordsOnly: true,
+        },
+      },
+      "run-1",
+    )?.sourceCollectionStageCards).toEqual([liveCard]);
   });
 
   it("accepts a phase-close gate only when it belongs to the selected source run", () => {
