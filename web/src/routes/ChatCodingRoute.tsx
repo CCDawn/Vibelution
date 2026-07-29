@@ -1914,6 +1914,7 @@ export function ChatCodingRoute() {
     activeAgentImageInputUnsupported,
     activeImageInputModelId,
     latestUserMessageId,
+    activeTurnId: activeTurnLayer?.turnId,
     detail,
     setMentalModelEnabledForNextTurn,
   });

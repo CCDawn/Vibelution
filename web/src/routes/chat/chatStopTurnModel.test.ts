@@ -44,6 +44,25 @@ describe("chat stop turn model", () => {
     }))).toBe("turn-active");
   });
 
+  it("prefers the accepted active-layer turn over a stale detail projection", () => {
+    expect(resolveSessionStopTurnId(detail({
+      activeTurnId: "turn-stale",
+      messages: [
+        {
+          id: "user-1",
+          role: "user",
+          content: "hello",
+          timestamp: "",
+          metadata: { turnId: "turn-stale" },
+        },
+      ],
+    }), "turn-accepted")).toBe("turn-accepted");
+  });
+
+  it("does not send a stale stop request while the active layer is still optimistic", () => {
+    expect(resolveSessionStopTurnId(detail({ activeTurnId: "turn-stale" }), "optimistic-submit-1")).toBe("");
+  });
+
   it("falls back to the latest accepted user turn", () => {
     expect(resolveSessionStopTurnId(detail({
       messages: [
