@@ -523,6 +523,8 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("supervisedSelectedWorkflowStep");
     expect(routeSource).toContain("supervisedWorkflowManualSelection");
     expect(routeSource).toContain("supervisedWorkflowCards");
+    expect(routeSource).toContain('const supervisedApprovalSelected = supervisedSelectedWorkflowStep.id === "approval";');
+    expect(routeSource).not.toContain('const supervisedApprovalSelected = selectedSupervisedWorkflowStepId === "approval";');
     expect(routeSource).toContain("<SupervisedApprovalDecisionPanel");
     expect(routeSource).toContain("run={reviewCandidateWorktree}");
     expect(routeSource).toContain("onAction={(runId, action) => approvalWorktreeActionMutation.mutate({ runId, action })}");
