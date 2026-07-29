@@ -3,7 +3,8 @@ import { useMemo } from "react";
 
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
-import type { AgentInstance, SessionQueryResponse, SessionSummary } from "../api/types";
+import type { AgentInstance, SessionDetail, SessionQueryResponse, SessionSummary } from "../api/types";
+import { mergeSessionDetailIntoSummaries } from "./chatSessionState";
 
 export const SESSION_INDEX_PAGE_SIZE = 50;
 
@@ -162,6 +163,33 @@ export function updateAgentSessionSummaryCaches(queryClient: QueryClient, update
       totalEstimate:
         typeof data.totalEstimate === "number"
           ? Math.max(0, data.totalEstimate + items.length - data.items.length)
+          : data.totalEstimate,
+    };
+  });
+}
+
+/**
+ * Reconcile the selected Agent's cached session list from the authoritative
+ * detail stream without leaking that session into other Agents' query caches.
+ */
+export function reconcileAgentSessionDetailCache(queryClient: QueryClient, detail: SessionDetail) {
+  const agentId = String(detail.agentId ?? "").trim();
+  if (!agentId) {
+    return;
+  }
+  const queryKey = ["sessions", "agent", agentId] as const;
+  queryClient.setQueryData<SessionQueryResponse>(queryKey, (data) => {
+    if (!data) {
+      return data;
+    }
+    const items = mergeSessionDetailIntoSummaries(data.items, detail);
+    const addedCount = items.length - data.items.length;
+    return {
+      ...data,
+      items,
+      totalEstimate:
+        typeof data.totalEstimate === "number"
+          ? Math.max(0, data.totalEstimate + addedCount)
           : data.totalEstimate,
     };
   });
