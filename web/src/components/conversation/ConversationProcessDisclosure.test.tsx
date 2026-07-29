@@ -49,7 +49,9 @@ describe("ConversationProcessDisclosure", () => {
     // lazily mounts this subtree only after an explicit expansion.
     expect(html).toContain("处理记录内容");
     expect(html).toContain('data-codex-process-expanded="false"');
-    expect(styles.summary).not.toContain("border-b");
+    expect(styles.summary).toContain("w-full");
+    expect(styles.summary).toContain("border-b");
+    expect(styles.summary).toContain("[font-size:var(--vui-font-sm)]");
     expect(styles.content).not.toContain("border-l");
     expect(styles.content).not.toContain("ml-");
     expect(styles.content).not.toContain("pl-");

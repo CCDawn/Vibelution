@@ -366,7 +366,7 @@ describe("ConversationView Codex-like transcript adapter integration", () => {
     expect(html).not.toContain("运行提示");
   });
 
-  it("folds a structured tool failure into one attention digest with expandable diagnostics", () => {
+  it("renders a structured tool failure inline with expandable diagnostics", () => {
     const html = renderConversation([
       {
         id: "assistant-structured-tool-failure",
@@ -406,9 +406,10 @@ describe("ConversationView Codex-like transcript adapter integration", () => {
       },
     ], { processDisplayMode: "trace" });
 
-    expect(html).toContain('data-codex-tool-activity="digest"');
-    expect(html).toContain("运行了 2 个工具");
-    expect(html).toContain("1 项需关注");
+    expect(html).toContain('data-codex-tool-activity="items"');
+    expect(html).toContain('data-codex-tool-activity-state="attention"');
+    expect(html).not.toContain("运行了 2 个工具");
+    expect(html).not.toContain("1 项需关注");
     expect(html).not.toContain('data-codex-tool-error-compact="true"');
     expect(html).toContain("代码图谱");
     expect(html).toContain("索引未就绪");
@@ -427,7 +428,7 @@ describe("ConversationView Codex-like transcript adapter integration", () => {
     expect(html).not.toContain("get_recent_changes_tool");
   });
 
-  it("renders repeated tool failures as one bounded attention digest", () => {
+  it("renders repeated tool failures as one bounded inline row", () => {
     const html = renderConversation([
       {
         id: "assistant-repeated-tool-failure",
@@ -459,9 +460,10 @@ describe("ConversationView Codex-like transcript adapter integration", () => {
       },
     ], { processDisplayMode: "trace" });
 
-    expect(html).toContain('data-codex-tool-activity="digest"');
-    expect(html).toContain("运行了 4 个工具");
-    expect(html).toContain("1 项需关注");
+    expect(html).toContain('data-codex-tool-activity="items"');
+    expect(html).toContain('data-codex-tool-activity-state="attention"');
+    expect(html).not.toContain("运行了 4 个工具");
+    expect(html).not.toContain("1 项需关注");
     expect(html).not.toContain('data-codex-tool-error-compact="true"');
     expect(html).toContain("工具调用受限");
     expect(html.match(/本回合工具调用额度已用尽/g)).toHaveLength(1);
@@ -681,7 +683,8 @@ describe("ConversationView edit resend affordance", () => {
   });
 
   it("keeps expanded process details out of nested card chrome", () => {
-    expect(styles.answerOnlyProcessGroup).toContain("w-[min(100%,1360px)]");
+    expect(styles.answerOnlyProcessGroup).toContain("w-full");
+    expect(styles.answerOnlyProcessGroup).toContain("max-w-full");
     expect(styles.answerOnlyProcessGroup).toContain("bg-transparent");
     expect(styles.answerOnlyProcessGroup).toContain("shadow-none");
     expect(styles.answerOnlyProcessGroup).not.toContain("rounded-[var(--radius-control)]");
@@ -787,21 +790,24 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.timeline).toContain("px-[clamp(1rem,3vw,3rem)]");
     expect(styles.timeline).not.toContain("px-3");
     expect(styles.surfaceCompact).not.toContain("[&_.timeline]:px-3");
-    expect(styles.assistantTurn).toContain("w-full max-w-[960px]");
+    expect(styles.assistantTurn).toContain("w-full max-w-[830px]");
     expect(styles.assistantTurn).toContain("justify-self-center");
-    expect(styles.assistantTurn).toContain("grid-cols-[34px_minmax(0,1fr)]");
-    expect(styles.agentInboxTurn).toContain("w-full max-w-[960px]");
+    expect(styles.assistantTurn).toContain("grid-cols-[minmax(0,1fr)]");
+    expect(styles.assistantTurn).toContain("[&_.turnAvatar]:hidden");
+    expect(styles.assistantTurn).toContain("[&_.turnMeta]:hidden");
+    expect(styles.agentInboxTurn).toContain("w-full max-w-[830px]");
     expect(styles.agentInboxTurn).toContain("justify-self-center");
-    expect(styles.groupTranscriptTurn).toContain("w-full max-w-[960px]");
+    expect(styles.groupTranscriptTurn).toContain("w-full max-w-[830px]");
     expect(styles.groupTranscriptTurn).toContain("justify-self-center");
-    expect(styles.userTurn).toContain("w-full max-w-[960px]");
+    expect(styles.userTurn).toContain("w-full max-w-[830px]");
     expect(styles.userTurn).toContain("justify-self-center");
-    expect(styles.userTurn).toContain("grid-cols-[minmax(0,1fr)_34px]");
+    expect(styles.userTurn).toContain("grid-cols-[minmax(0,1fr)]");
+    expect(styles.userTurn).toContain("[&_.turnAvatar]:hidden");
     expect(styles.userTurn).toContain("[&_.turnContent]:w-fit");
-    expect(styles.userTurn).toContain("[&_.turnContent]:max-w-[min(70%,720px)]");
+    expect(styles.userTurn).toContain("[&_.turnContent]:max-w-[min(76%,640px)]");
     expect(styles.userTurn).toContain("max-[719px]:[&_.turnContent]:max-w-[min(88%,36rem)]");
-    expect(styles.assistantTurnContinuation).toContain("[&_.turnContent]:w-[min(100%,1360px)]");
-    expect(styles.assistantTurnContinuation).toContain("w-full max-w-[960px]");
+    expect(styles.assistantTurnContinuation).toContain("[&_.turnContent]:w-full");
+    expect(styles.assistantTurnContinuation).toContain("w-full max-w-[830px]");
     expect(styles.assistantTurnContinuation).toContain("justify-self-center");
     expect(styles.turnContent).toContain("gap-[5px]");
     expect(styles.turnMeta).toContain("inline-flex");
@@ -813,16 +819,17 @@ describe("ConversationView edit resend affordance", () => {
   it("restores chat message affordances inside semantic message bodies", () => {
     expect(styles.userMessageBody).toContain("justify-self-end");
     expect(styles.userMessageBody).toContain("w-fit");
-    expect(styles.userMessageBody).toContain("max-w-[min(100%,68ch)]");
-    expect(styles.userMessageBody).toContain("rounded-[var(--radius-panel)]");
-    expect(styles.userMessageBody).toContain("border border-[color-mix(in_srgb,var(--accent-cool)_18%,var(--vui-border-subtle))]");
-    expect(styles.userMessageBody).toContain("bg-[color-mix(in_srgb,var(--accent-cool)_6%,var(--vui-surface-panel))]");
-    expect(styles.userMessageBody).toContain("px-2.5");
-    expect(styles.userMessageBody).toContain("py-1.5");
+    expect(styles.userMessageBody).toContain("max-w-full");
+    expect(styles.userMessageBody).toContain("rounded-[16px]");
+    expect(styles.userMessageBody).toContain("border-0");
+    expect(styles.userMessageBody).toContain("bg-[var(--vui-control-muted)]");
+    expect(styles.userMessageBody).toContain("px-3");
+    expect(styles.userMessageBody).toContain("py-2");
     expect(styles.userMessageBody).toContain("shadow-none");
     expect(styles.userMessageBody).toContain("text-left");
 
-    expect(styles.responseSection).toContain("w-[min(100%,1360px)]");
+    expect(styles.responseSection).toContain("w-full");
+    expect(styles.responseSection).toContain("max-w-full");
     expect(styles.responseSection).not.toContain("justify-self-stretch");
     expect(styles.responseSection).toContain("border-l");
     expect(styles.responseSection).toContain("bg-transparent");
@@ -837,7 +844,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.responseBody).toContain("shadow-none");
     expect(styles.responseBody).not.toContain("bg-[color-mix(in_srgb,var(--surface-panel)_66%,transparent)]");
 
-    expect(styles.answerOnlyProcessGroup).toContain("w-[min(100%,1360px)]");
+    expect(styles.answerOnlyProcessGroup).toContain("w-full");
     expect(styles.answerOnlyProcessGroup).toContain("max-w-full");
     expect(styles.answerOnlyProcessGroup).toContain("bg-transparent");
     expect(styles.answerOnlyProcessGroup).toContain("shadow-none");
@@ -1920,15 +1927,16 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.operationText).toContain("max-w-full");
     expect(styles.messageBody).toContain("whitespace-pre-wrap");
     expect(styles.messageBody).toContain("[overflow-wrap:anywhere]");
-    expect(styles.messageBody).toContain("max-w-[min(100%,76ch)]");
+    expect(styles.messageBody).toContain("max-w-full");
     expect(styles.markdownBody).toContain("max-w-full");
     expect(styles.responseSegment_answer).toContain("[&_.markdownBody]:max-w-[min(100%,128ch)]");
-    expect(styles.assistantTurn).toContain("[&_.turnContent]:w-[min(100%,1360px)]");
+    expect(styles.assistantTurn).toContain("[&_.turnContent]:w-full");
     expect(styles.agentInboxTurn).toContain("[&_.turnContent]:w-[min(100%,1360px)]");
     expect(styles.groupTranscriptTurn).toContain("[&_.turnContent]:w-[min(100%,1360px)]");
     expect(styles.timelineAssistantTextCell).toContain("max-w-[min(100%,1360px)]");
-    expect(styles.codexTranscriptSurface).toContain("w-[min(100%,1360px)]");
-    expect(styles.codexTranscriptCellSummary).toContain("max-w-[min(100%,76ch)]");
+    expect(styles.codexTranscriptSurface).toContain("w-full");
+    expect(styles.codexTranscriptSurface).toContain("max-w-full");
+    expect(styles.codexTranscriptCellSummary).toContain("max-w-full");
     expect(styles.messageBody).not.toContain("max-w-[min(100%,128ch)]");
   });
 
