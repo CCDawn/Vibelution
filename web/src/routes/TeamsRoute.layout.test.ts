@@ -1987,10 +1987,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStylesSource).not.toContain(".sourceCollectionTraceBody");
     expect(routeStylesSource).not.toContain("grid-cols-[58px_minmax(0,1fr)]");
     expect(routeStylesSource).not.toMatch(/\.sourceCollectionTraceBody p \{[\s\S]*?-webkit-line-clamp: 3/);
-    expect(teamSourceCollectionPanelFrameStyles.sourceCollectionFocusedPanel).toContain(
-      "grid-cols-[minmax(0,1fr)_clamp(320px,26vw,420px)]",
-    );
-    expect(teamSourceCollectionPanelFrameStyles.sourceCollectionFocusedPanel).toContain("isolate");
+    expect(teamSourceCollectionPanelFrameStyles.sourceCollectionFocusedPanel).toContain("ring-2");
+    expect(teamSourceCollectionPanelFrameStyles.sourceCollectionFocusedPanel).not.toContain("grid-cols");
+    expect(teamSourceCollectionPanelFrameStyles.sourceCollectionFocusedPanel).not.toContain("auto-rows");
     expect(routeStyles.route).toContain("[--team-workbench-gap:4px]");
     expect(routeStyles.sourceCollectionPage).toContain("h-full");
     expect(routeStyles.sourceCollectionPage).toContain("flex-1");
@@ -2562,7 +2561,8 @@ describe("TeamsRoute layout contract", () => {
   });
 
   it("keeps source collection subpanels compact, text-safe, and mobile-safe", () => {
-    expect(teamSourceCollectionPanelFrameStyles.sourceCollectionFocusedPanel).toContain("max-[960px]:grid-cols-[minmax(0,1fr)]");
+    expect(teamSourceCollectionPanelFrameStyles.sourceCollectionFocusedPanel).toContain("ring-inset");
+    expect(teamSourceCollectionPanelFrameStyles.sourceCollectionFocusedPanel).not.toMatch(/(?:^|\s)grid(?:\s|$)/);
     expect(teamSourceCollectionControlsPanelStyles.sourceCollectionControlPanel).toContain("!grid");
     expect(teamSourceCollectionControlsPanelStyles.sourceCollectionControlPanel).toContain("grid-cols-[minmax(0,1fr)]");
     expect(teamSourceCollectionControlsPanelStyles.workflowIngestionHeader).toContain("grid-cols-[minmax(0,1fr)_auto]");
