@@ -11,6 +11,8 @@ import { TeamCandidateCard } from "../components/vui/product/team-management";
 import {
   sourceCollectionCandidateProvenance,
   sourceCollectionCandidateSourceCategory,
+  sourceCollectionCandidateVersionFamily,
+  sourceCollectionIndependentSourceCount,
   sourceCollectionEvidenceLedgerCardLabel,
   sourceCollectionEvidenceLedgerSummary,
   sourceCollectionEvidenceLedgerTone,
@@ -147,6 +149,8 @@ export function TeamSourceCollectionScreeningWorkspacePanel(props: TeamSourceCol
       ? sourceCollectionDisplayedCandidateCount
       : filteredScreeningCandidates.length;
     const screeningPanelFilteredCountText = sourceCollectionCountText(sourceCollectionPrimaryDataLoading, screeningPanelFilteredCount);
+    const screeningIndependentSourceCount = sourceCollectionIndependentSourceCount(filteredScreeningCandidates);
+    const hasVersionFamilies = filteredScreeningCandidates.some((candidate) => Boolean(candidate.sourceVersionFamily?.versionLabel));
     const screeningPanelRange = sourceCollectionPrimaryDataLoading
       ? sourceCollectionDataSyncText
       : screeningCandidates.length
@@ -175,6 +179,13 @@ export function TeamSourceCollectionScreeningWorkspacePanel(props: TeamSourceCol
         filterBar={renderSourceCollectionFilterBar(sourceCollectionDisplayedCandidateFilterCounts, lang === "zh" ? "审查资料过滤" : "Review source filters", sourceCollectionPrimaryDataLoading)}
         stats={[
           { key: "candidate", label: lang === "zh" ? "本轮候选" : "run candidates", value: sourceCollectionDisplayedCandidateCountText },
+          ...(hasVersionFamilies
+            ? [{
+              key: "independent-source",
+              label: lang === "zh" ? "独立来源" : "independent sources",
+              value: sourceCollectionCountText(sourceCollectionPrimaryDataLoading, screeningIndependentSourceCount),
+            }]
+            : []),
           { key: "filtered", label: lang === "zh" ? "当前过滤" : "filtered", value: screeningPanelFilteredCountText },
           { key: "reviewed", label: lang === "zh" ? "已审查" : "reviewed", value: sourceCollectionProjectedAssessedCountText },
           { key: "approved", label: lang === "zh" ? "通过" : "approved", value: sourceCollectionProjectedApprovedCountText },
@@ -237,6 +248,7 @@ export function TeamSourceCollectionScreeningWorkspacePanel(props: TeamSourceCol
                 const sourceQualitySummary = candidateSourceQualityAssessmentSummary(candidate);
                 const evidenceLedgerSummary = sourceCollectionEvidenceLedgerSummary(candidate);
                 const provenance = sourceCollectionCandidateProvenance(candidate, lang);
+                const versionFamily = sourceCollectionCandidateVersionFamily(candidate, lang);
                 const canPlanPaperNoteChunks = sourceCandidateHasCompletedExtraction(candidate);
                 const candidateQualityPending =
                   selectedTeamAssessSourceQualityPending
@@ -252,7 +264,9 @@ export function TeamSourceCollectionScreeningWorkspacePanel(props: TeamSourceCol
                       ? sourceCollectionEvidenceLedgerTone(evidenceLedgerSummary)
                       : sourceCollectionResultTone(candidate.qualityStatus)}
                     statusLabel={
-                      sourceQualitySummary
+                      versionFamily?.isSuperseded
+                        ? versionFamily.statusLabel
+                        : sourceQualitySummary
                         ? workflowIngestionStatusLabel(sourceQualitySummary.decision, lang)
                         : (lang === "zh" ? "待 Agent 复核" : "pending agent review")
                     }
@@ -261,6 +275,12 @@ export function TeamSourceCollectionScreeningWorkspacePanel(props: TeamSourceCol
                     meta={[
                       { key: "category", label: sourceCollectionSourceFilterLabel(sourceCollectionCandidateSourceCategory(candidate, lang), lang) },
                       { key: "updated", label: formatTime(candidate.updatedAt, lang) },
+                      ...(versionFamily
+                        ? [
+                          { key: "version-chain", label: versionFamily.chainLabel },
+                          { key: "version-evidence-policy", label: versionFamily.evidenceLabel },
+                        ]
+                        : []),
                       ...(sourceQualitySummary
                         ? [{ key: "score", label: `${lang === "zh" ? "评分" : "score"} ${sourceQualitySummary.overallScore}/100` }]
                         : []),
@@ -288,7 +308,7 @@ export function TeamSourceCollectionScreeningWorkspacePanel(props: TeamSourceCol
                         type="button"
                         onClick={(event) => {
                           event.stopPropagation();
-                          if (!selectedTeam?.teamId || selectedTeamSourceQualityPending) {
+                          if (!selectedTeam?.teamId || selectedTeamSourceQualityPending || versionFamily?.isSuperseded) {
                             return;
                           }
                           assessSourceQualityMutation.mutate({
@@ -297,7 +317,8 @@ export function TeamSourceCollectionScreeningWorkspacePanel(props: TeamSourceCol
                             decision: "approved",
                           });
                         }}
-                        disabled={!selectedTeam?.teamId || selectedTeamSourceQualityPending}
+                        disabled={!selectedTeam?.teamId || selectedTeamSourceQualityPending || versionFamily?.isSuperseded}
+                        title={versionFamily?.reviewDisabledReason || undefined}
                       >
                         <CheckCircle2 size={13} />
                         {candidateQualityPending && assessSourceQualityMutation.variables?.decision === "approved"
@@ -308,7 +329,7 @@ export function TeamSourceCollectionScreeningWorkspacePanel(props: TeamSourceCol
                         type="button"
                         onClick={(event) => {
                           event.stopPropagation();
-                          if (!selectedTeam?.teamId || selectedTeamSourceQualityPending) {
+                          if (!selectedTeam?.teamId || selectedTeamSourceQualityPending || versionFamily?.isSuperseded) {
                             return;
                           }
                           assessSourceQualityMutation.mutate({
@@ -317,7 +338,8 @@ export function TeamSourceCollectionScreeningWorkspacePanel(props: TeamSourceCol
                             decision: "needs_revision",
                           });
                         }}
-                        disabled={!selectedTeam?.teamId || selectedTeamSourceQualityPending}
+                        disabled={!selectedTeam?.teamId || selectedTeamSourceQualityPending || versionFamily?.isSuperseded}
+                        title={versionFamily?.reviewDisabledReason || undefined}
                       >
                         <AlertTriangle size={13} />
                         {candidateQualityPending && assessSourceQualityMutation.variables?.decision === "needs_revision"
@@ -328,7 +350,12 @@ export function TeamSourceCollectionScreeningWorkspacePanel(props: TeamSourceCol
                         type="button"
                         onClick={(event) => {
                           event.stopPropagation();
-                          if (!selectedTeam?.teamId || !canPlanPaperNoteChunks || planPaperNoteChunksMutation.isPending) {
+                          if (
+                            !selectedTeam?.teamId
+                            || !canPlanPaperNoteChunks
+                            || planPaperNoteChunksMutation.isPending
+                            || versionFamily?.isSuperseded
+                          ) {
                             return;
                           }
                           planPaperNoteChunksMutation.mutate({
@@ -336,7 +363,13 @@ export function TeamSourceCollectionScreeningWorkspacePanel(props: TeamSourceCol
                             candidateId: candidate.candidateId,
                           });
                         }}
-                        disabled={!selectedTeam?.teamId || !canPlanPaperNoteChunks || planPaperNoteChunksMutation.isPending}
+                        disabled={
+                          !selectedTeam?.teamId
+                          || !canPlanPaperNoteChunks
+                          || planPaperNoteChunksMutation.isPending
+                          || versionFamily?.isSuperseded
+                        }
+                        title={versionFamily?.reviewDisabledReason || undefined}
                       >
                         {chunkPlanSummary ? <RefreshCw size={13} /> : <Plus size={13} />}
                         {candidatePlanPending
