@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from config.models import AppConfig
 from core.chat.conversation_ledger import (
     EVENT_USER_MESSAGE,
     append_conversation_event,
@@ -27,6 +28,7 @@ from core.web.services import (
     session_service,
     supervised_control_service,
 )
+from core.web.services.session import catalog_bridge
 from tests.helpers.web_chat_state import _bind_seeded_session_agent, _seed_chat_state
 
 pytestmark = pytest.mark.serial
@@ -473,6 +475,91 @@ def test_session_query_paginates_searches_and_filters(tmp_path, monkeypatch):
     filtered_response = client.get("/api/sessions/query?agentId=agent-a&sessionKind=main&sort=title_asc")
     assert filtered_response.status_code == 200
     assert {item["id"] for item in filtered_response.json()["items"]} == {"session-alpha", "session-gamma"}
+
+
+def test_agent_query_includes_its_hidden_direct_session_without_revealing_other_hidden_sessions(tmp_path, monkeypatch):
+    _seed_chat_state(
+        tmp_path,
+        conversations=[
+            {
+                "conversation_id": "session-hidden-direct",
+                "title": "自进化执行 Agent",
+                "agent_id": "agent-self-evolution",
+                "agentId": "agent-self-evolution",
+                "session_kind": "main",
+                "conversation_index_kind": "hidden",
+                "conversationIndexKind": "hidden",
+                "conversation_index_visibility": "hidden",
+                "conversationIndexVisibility": "hidden",
+                "hidden_from_index": True,
+                "hiddenFromIndex": True,
+                "updated_at": "2026-07-30T01:16:54",
+                "messages": [{"role": "user", "content": "继续", "timestamp": "2026-07-30T01:16:54"}],
+            },
+            {
+                "conversation_id": "session-hidden-supervised",
+                "title": "内部监督运行",
+                "agent_id": "agent-self-evolution",
+                "agentId": "agent-self-evolution",
+                "session_kind": "supervised",
+                "conversation_index_kind": "hidden",
+                "conversationIndexKind": "hidden",
+                "conversation_index_visibility": "hidden",
+                "conversationIndexVisibility": "hidden",
+                "hidden_from_index": True,
+                "hiddenFromIndex": True,
+                "updated_at": "2026-07-30T01:17:00",
+                "messages": [{"role": "assistant", "content": "内部记录", "timestamp": "2026-07-30T01:17:00"}],
+            },
+        ],
+    )
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    agent_directory_service.save_state(
+        {
+            "agents": [
+                {
+                    "agentId": "agent-self-evolution",
+                    "displayName": "自进化执行 Agent",
+                    "status": "active",
+                    "directSessionId": "session-hidden-direct",
+                    "primaryMode": "self_evolution",
+                    "createdBy": "self_evolution",
+                    "metadata": {
+                        "conversationIndexKind": "hidden",
+                        "conversationIndexVisibility": "hidden",
+                        "directSessionVisibility": "active_session",
+                    },
+                }
+            ]
+        }
+    )
+
+    global_payload = client.get("/api/sessions/query?limit=20").json()
+    agent_response = client.get("/api/sessions/query?agentId=agent-self-evolution&limit=20")
+
+    assert "session-hidden-direct" not in {item["id"] for item in global_payload["items"]}
+    assert agent_response.status_code == 200
+    assert [item["id"] for item in agent_response.json()["items"]] == ["session-hidden-direct"]
+
+    monkeypatch.setattr(
+        session_service,
+        "get_config",
+        lambda: AppConfig.model_validate({"session_catalog": {"mode": "read_preferred"}}),
+    )
+    catalog_bridge.set_session_query_shadow_provider(
+        lambda _request: (_ for _ in ()).throw(AssertionError("hidden direct query must stay canonical"))
+    )
+    try:
+        read_preferred_payload = session_service.query_sessions(
+            agent_id="agent-self-evolution",
+            limit=20,
+        )
+    finally:
+        catalog_bridge.set_session_query_shadow_provider(None)
+
+    assert [item["id"] for item in read_preferred_payload["items"]] == ["session-hidden-direct"]
 
 
 def test_conversation_index_exposes_direct_agent_classification_fields(tmp_path, monkeypatch):
