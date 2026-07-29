@@ -42,12 +42,20 @@ export function selectRecentSupervisedWorktreeRun(
   runId: string | null | undefined,
 ) {
   const normalizedRunId = String(runId || "").trim();
-  if (!normalizedRunId) {
-    return null;
+  if (normalizedRunId) {
+    const rememberedRun = runs.find((run) => (
+      run.runId === normalizedRunId
+      && !isSelfEvolutionWorktreeRun(run)
+    ));
+    if (rememberedRun) {
+      return rememberedRun;
+    }
   }
+
   return runs.find((run) => (
-    run.runId === normalizedRunId
-    && !isSelfEvolutionWorktreeRun(run)
+    !isSelfEvolutionWorktreeRun(run)
+    && String(run.status || "").trim().toLowerCase() === "done"
+    && String(run.outcome || "").trim().toLowerCase() === "needs_manual_decision"
   )) ?? null;
 }
 
