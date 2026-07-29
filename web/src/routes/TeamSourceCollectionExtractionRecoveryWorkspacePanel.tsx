@@ -184,7 +184,7 @@ export function TeamSourceCollectionExtractionRecoveryWorkspacePanel(props: Team
         lang={lang}
         tone={sourceCollectionExtractionExcludedRecoveryState.blockedByExcludedSources
           ? sourceCollectionExtractionExcludedRecoveryState.tone
-          : sourceCollectionExtractionRecoveryEvidenceGapOnly
+          : sourceCollectionExtractionRecoveryEvidenceGapOnly || sourceCollectionExtractionRecoverySourceVerificationOnly
             ? "progressable"
             : "danger"}
         ariaLabel={sourceCollectionExtractionExcludedRecoveryState.blockedByExcludedSources
@@ -220,6 +220,8 @@ export function TeamSourceCollectionExtractionRecoveryWorkspacePanel(props: Team
         salvageText={sourceCollectionExtractionRecoverySalvageText}
         recoverLabel={sourceCollectionExtractionExcludedRecoveryState.blockedByExcludedSources
           ? sourceCollectionExtractionExcludedRecoveryState.recoverLabel
+          : sourceCollectionExtractionRecoverySourceVerificationOnly
+            ? (lang === "zh" ? "提炼覆盖" : "extraction coverage")
           : sourceCollectionExtractionRecoveryEvidenceGapOnly
             ? (lang === "zh" ? "提炼覆盖" : "extraction coverage")
             : undefined}
