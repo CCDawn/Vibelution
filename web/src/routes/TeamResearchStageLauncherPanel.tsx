@@ -657,7 +657,11 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
       if (stageType === "knowledge_collection") {
         return knowledgeCollectionPrimaryDisabled;
       }
-      return stageStatusLoading || stageStatusUnavailable || selectedTeamStartResearchStagePending;
+      const phase = researchStagePhases.find((item) => item.stageType === stageType);
+      return stageStatusLoading
+        || stageStatusUnavailable
+        || selectedTeamStartResearchStagePending
+        || phase?.readiness?.ready === false;
     };
     const runStagePrimaryAction = (stageType: ResearchStageType) => {
       if (stageType === "knowledge_collection") {

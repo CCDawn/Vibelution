@@ -8,6 +8,8 @@ import {
 import type { TeamResearchProjectAgentTask } from "../../../api/types";
 import hookSource from "./useResearchProjectAgentTasks.ts?raw";
 import launcherSource from "../../TeamResearchStageLauncherPanel.tsx?raw";
+import routeSource from "../../TeamsRoute.tsx?raw";
+import standaloneSource from "../../TeamResearchStageStandalonePagePanel.tsx?raw";
 
 function task(
   taskKind: TeamResearchProjectAgentTask["taskKind"],
@@ -76,5 +78,19 @@ describe("useResearchProjectAgentTasks", () => {
     expect(launcherSource).toContain("payload.chatRoute");
     expect(launcherSource).toContain("navigate(payload.chatRoute)");
     expect(hookSource).not.toContain("directSessionId");
+  });
+
+  it("launches experiment and iteration buttons into flat Agent task sessions", () => {
+    expect(routeSource).toContain("await startResearchStageRoundMutation.mutateAsync");
+    expect(routeSource).toContain('stageType === "experiment" ? "experiment_design" : "iteration_decision"');
+    expect(routeSource).toContain("await researchStageProjectAgentTasks.startTask");
+    expect(routeSource).toContain("navigate(agentTask.chatRoute)");
+    expect(standaloneSource).toContain("stagePhase?.readiness?.ready === false");
+  });
+
+  it("refreshes stage and experiment projections when an Agent task settles", () => {
+    expect(hookSource).toContain("experimentPlanningStatusQueryKey(options.teamId)");
+    expect(hookSource).toContain("researchStageRoundStatusQueryKey(options.teamId)");
+    expect(hookSource).toContain("lastSettledTaskStampRef");
   });
 });

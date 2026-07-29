@@ -19,6 +19,7 @@ from core.web.services.team_workflow.research_project_agent_tasks import (
     ResearchProjectAgentTaskError,
     get_research_project_agent_task_context,
     get_research_project_agent_task_status,
+    research_project_iteration_readiness,
     start_research_project_agent_task,
     update_research_project_agent_task_status,
 )
@@ -93,6 +94,28 @@ def _accepted_submitter(monkeypatch):
     return calls
 
 
+def _allow_iteration_tasks(monkeypatch, project_id: str) -> None:
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "_load_experiment_plan_store",
+        lambda _team_id: {
+            "plans": [
+                {
+                    "planId": "plan-iteration-ready",
+                    "researchProjectId": project_id,
+                    "contractValidation": {"valid": True},
+                    "readiness": {"readyForPlanReview": True},
+                    "designGate": {"status": "frozen"},
+                    "activeSmokeResult": {
+                        "smokeResultId": "smoke-iteration-ready",
+                        "status": "needs_review",
+                    },
+                }
+            ]
+        },
+    )
+
+
 def _client() -> TestClient:
     return TestClient(
         create_app(),
@@ -138,6 +161,76 @@ def test_task_start_resolves_fixed_role_and_replays_idempotently(
     assert replay["task"]["taskId"] == first["task"]["taskId"]
     assert replay["task"]["sessionId"] == first["task"]["sessionId"]
     assert len(calls) == 1
+
+
+def test_iteration_task_requires_frozen_design_and_registered_result(
+    tmp_path, monkeypatch
+):
+    team, project, _agents = _team_project_and_agents(tmp_path, monkeypatch)
+    calls = _accepted_submitter(monkeypatch)
+    plan = {
+        "planId": "plan-iteration-gate",
+        "researchProjectId": project["projectId"],
+        "contractValidation": {"valid": True},
+        "readiness": {"readyForPlanReview": True},
+        "designGate": {"status": "frozen"},
+    }
+    plan_store = {"plans": []}
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "_load_experiment_plan_store",
+        lambda _team_id: plan_store,
+    )
+
+    missing_design = research_project_iteration_readiness(
+        team["teamId"],
+        project["projectId"],
+    )
+    assert missing_design["ready"] is False
+    assert missing_design["code"] == "missing_frozen_experiment_design"
+    with pytest.raises(
+        ResearchProjectAgentTaskError,
+        match="frozen executable experiment design",
+    ):
+        start_research_project_agent_task(
+            team["teamId"],
+            project["projectId"],
+            {"taskKind": "iteration_decision"},
+        )
+
+    plan_store["plans"] = [plan]
+    missing_result = research_project_iteration_readiness(
+        team["teamId"],
+        project["projectId"],
+    )
+    assert missing_result["ready"] is False
+    assert missing_result["code"] == "missing_experiment_result"
+    with pytest.raises(
+        ResearchProjectAgentTaskError,
+        match="registered smoke or full-run result",
+    ):
+        start_research_project_agent_task(
+            team["teamId"],
+            project["projectId"],
+            {"taskKind": "iteration_decision"},
+        )
+
+    plan["activeSmokeResult"] = {
+        "smokeResultId": "smoke-needs-review",
+        "status": "needs_review",
+    }
+    ready = research_project_iteration_readiness(
+        team["teamId"],
+        project["projectId"],
+    )
+    assert ready["ready"] is True
+    started = start_research_project_agent_task(
+        team["teamId"],
+        project["projectId"],
+        {"taskKind": "iteration_decision"},
+    )
+    assert started["task"]["status"] == "running"
+    assert len(calls) == 1
     assert calls[0]["kwargs"]["turn_mode"] == "task"
     assert calls[0]["kwargs"]["message_metadata"]["researchProjectId"] == project["projectId"]
 
@@ -175,6 +268,7 @@ def test_active_task_blocks_formal_retry_then_terminal_retry_creates_attempt_two
 ):
     team, project, _agents = _team_project_and_agents(tmp_path, monkeypatch)
     _accepted_submitter(monkeypatch)
+    _allow_iteration_tasks(monkeypatch, project["projectId"])
     first = start_research_project_agent_task(
         team["teamId"],
         project["projectId"],

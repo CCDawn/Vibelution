@@ -75,6 +75,17 @@ def start_research_stage_round(team_id: str, payload: dict[str, Any] | None = No
         s._trim_text(request_payload.get("researchProjectId"), max_length=160),
     )
     stage_type = s._normalize_stage_type(request_payload.get("stageType"))
+    if stage_type == "iteration":
+        from core.web.services.team_workflow.research_project_agent_tasks import (
+            research_project_iteration_readiness,
+        )
+
+        readiness = research_project_iteration_readiness(
+            normalized_team_id,
+            research_project["projectId"],
+        )
+        if not readiness["ready"]:
+            raise s.TeamWorkflowOrchestrationError(readiness["reason"])
     start_mode = s._normalize_stage_start_mode(request_payload.get("mode") or request_payload.get("startMode"))
     requested_by_agent = s._trim_text(request_payload.get("requestedByAgent"), max_length=160) or s._source_collection_owner_agent_id(team, request_payload)
     with s._WORKFLOW_LOCK:

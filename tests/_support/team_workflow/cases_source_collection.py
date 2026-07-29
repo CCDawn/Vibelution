@@ -6538,6 +6538,69 @@ def test_start_research_stage_round_creates_experiment_planning_placeholder(tmp_
     assert experiment["stageRound"]["planningContract"]["requiresUserDecision"] is True
     assert experiment["boundaries"]["autoTransitionsNextStage"] is False
 
+
+def test_start_iteration_stage_round_requires_frozen_design_and_result(
+    tmp_path, monkeypatch
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="ai科学研究团队")
+    project = team_workflow_orchestration_service.create_research_project(
+        team["teamId"],
+        {"name": "迭代门禁验收"},
+    )["project"]
+    team_workflow_orchestration_service.activate_research_project(
+        team["teamId"],
+        project["projectId"],
+    )
+    team_workflow_orchestration_service.start_research_stage_round(
+        team["teamId"],
+        {"stageType": "experiment", "topic": "controlled experiment plan"},
+    )
+    plan = {
+        "planId": "plan-iteration-gate",
+        "researchProjectId": project["projectId"],
+        "contractValidation": {"valid": True},
+        "readiness": {"readyForPlanReview": True},
+        "designGate": {"status": "frozen"},
+    }
+    plan_store = {"plans": []}
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "_load_experiment_plan_store",
+        lambda _team_id: plan_store,
+    )
+
+    with pytest.raises(
+        team_workflow_orchestration_service.TeamWorkflowOrchestrationError,
+        match="frozen executable experiment design",
+    ):
+        team_workflow_orchestration_service.start_research_stage_round(
+            team["teamId"],
+            {"stageType": "iteration"},
+        )
+
+    plan_store["plans"] = [plan]
+    with pytest.raises(
+        team_workflow_orchestration_service.TeamWorkflowOrchestrationError,
+        match="registered smoke or full-run result",
+    ):
+        team_workflow_orchestration_service.start_research_stage_round(
+            team["teamId"],
+            {"stageType": "iteration"},
+        )
+
+    plan["activeFullRunResult"] = {
+        "fullRunResultId": "full-run-failed",
+        "status": "failed",
+    }
+    iteration = team_workflow_orchestration_service.start_research_stage_round(
+        team["teamId"],
+        {"stageType": "iteration"},
+    )
+    assert iteration["stageRound"]["stageType"] == "iteration"
+    assert iteration["stageRound"]["status"] == "planning"
+
+
 def test_start_research_stage_round_keeps_experiment_plan_when_coordination_busy(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _stub_source_collection_search_background(monkeypatch)

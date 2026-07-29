@@ -166,6 +166,7 @@ import {
   type ResearchWorkspaceView,
 } from "./teams/researchWorkspaceModel";
 import { ResearchProjectSwitcher } from "./teams/research-projects/ResearchProjectSwitcher";
+import { useResearchProjectAgentTasks } from "./teams/research-projects/useResearchProjectAgentTasks";
 import {
   SOURCE_COLLECTION_DEFAULT_ROLES,
   SOURCE_COLLECTION_TEAM_AGENT_ROLES,
@@ -871,6 +872,10 @@ export function TeamsRoute({
   const knowledgeExpansionWorkflowTeamSelected = isKnowledgeExpansionWorkflowTeam(selectedTeam);
   const researchWorkflowTeamSelected = isResearchWorkflowTeam(selectedTeam);
   const challengeCupResearchTeamSelected = isChallengeCupResearchWorkflowTeam(selectedTeam);
+  const researchStageProjectAgentTasks = useResearchProjectAgentTasks({
+    teamId: selectedTeam?.teamId || RESEARCH_TEAM_ID,
+    enabled: challengeCupResearchTeamSelected,
+  });
   const aiSearchScopeTeamSelected = isAiSearchScopeTeam(selectedTeam);
   const researchCanvasReadOnly = researchWorkflowTeamSelected && researchWorkspaceView === "canvas";
   const sourceCollectionWorkspaceSelected =
@@ -1448,19 +1453,33 @@ export function TeamsRoute({
     setSearchParams({ team: team.teamId });
   }
 
-  function launchResearchStage(stageType: ResearchStageType, mode: "continue_or_start" | "new_round" = "continue_or_start") {
+  async function launchResearchStage(stageType: ResearchStageType, mode: "continue_or_start" | "new_round" = "continue_or_start") {
     if (!selectedTeam?.teamId || selectedTeamStartResearchStagePending) {
       return;
     }
     if (stageType === "knowledge_collection" && !researchStageCanLaunch) {
       return;
     }
-    startResearchStageRoundMutation.mutate({
-      teamId: selectedTeam.teamId,
-      stageType,
-      mode,
-      draft: sourceCollectionDraft,
-    });
+    try {
+      await startResearchStageRoundMutation.mutateAsync({
+        teamId: selectedTeam.teamId,
+        stageType,
+        mode,
+        draft: sourceCollectionDraft,
+      });
+      if (stageType !== "knowledge_collection" && challengeCupResearchTeamSelected) {
+        const taskKind = stageType === "experiment" ? "experiment_design" : "iteration_decision";
+        const agentTask = await researchStageProjectAgentTasks.startTask(taskKind, {
+          returnTo: researchWorkspaceStageRoute(selectedTeam.teamId, stageType),
+          returnLabel: stageType === "experiment" ? "返回实验设计" : "返回执行与迭代",
+        });
+        if (agentTask.chatRoute) {
+          navigate(agentTask.chatRoute);
+        }
+      }
+    } catch {
+      // Both mutations expose their typed error state to the stage panel.
+    }
   }
 
   function createExperimentPlanFromWorkspace(methodRequest?: ExperimentPlanMethodRequest) {
@@ -3035,11 +3054,14 @@ export function TeamsRoute({
   const sourceCollectionCanStart = Boolean(selectedTeam?.teamId && sourceCollectionDraft.topic.trim());
   const researchStageCanLaunch = Boolean(selectedTeam?.teamId && sourceCollectionDraft.topic.trim());
   const selectedTeamStartResearchStagePending =
-    startResearchStageRoundMutation.isPending && startResearchStageRoundMutation.variables?.teamId === selectedTeam?.teamId;
+    (startResearchStageRoundMutation.isPending && startResearchStageRoundMutation.variables?.teamId === selectedTeam?.teamId)
+    || researchStageProjectAgentTasks.isStarting;
   const selectedTeamStartResearchStageError =
     startResearchStageRoundMutation.variables?.teamId === selectedTeam?.teamId && startResearchStageRoundMutation.error instanceof Error
       ? startResearchStageRoundMutation.error
-      : null;
+      : researchStageProjectAgentTasks.error instanceof Error
+        ? researchStageProjectAgentTasks.error
+        : null;
   const selectedTeamStartResearchStageResult =
     startResearchStageRoundMutation.variables?.teamId === selectedTeam?.teamId ? startResearchStageRoundMutation.data : undefined;
   const selectedTeamCreateExperimentPlanPending =

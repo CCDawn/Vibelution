@@ -138,7 +138,9 @@ export function TeamResearchStageStandalonePagePanel(props: TeamResearchStageSta
         ],
       },
     }[stageView];
-    const disabled = selectedTeamStartResearchStagePending || !selectedTeam?.teamId;
+    const disabled = selectedTeamStartResearchStagePending
+      || !selectedTeam?.teamId
+      || stagePhase?.readiness?.ready === false;
 
     return (
       <section className={`${styles.route} ${styles.researchStagePage}`}>

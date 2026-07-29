@@ -599,6 +599,73 @@ def get_research_project_agent_task_context(
     }
 
 
+def research_project_iteration_readiness(
+    team_id: str,
+    research_project_id: str,
+) -> dict[str, Any]:
+    """Return the non-bypassable prerequisites for an iteration decision."""
+    s = _service()
+    normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
+    normalized_project_id = s._normalize_required_id(
+        research_project_id,
+        "Research project id is required.",
+    )
+    s.get_research_project(normalized_team_id, normalized_project_id)
+    with s._WORKFLOW_LOCK:
+        store = s._load_experiment_plan_store(normalized_team_id)
+    plans = [
+        item
+        for item in list(store.get("plans") or [])
+        if isinstance(item, dict)
+        and (
+            not _text(item.get("researchProjectId"))
+            or _text(item.get("researchProjectId")) == normalized_project_id
+        )
+    ]
+    frozen_plan = s._latest_frozen_experiment_design(plans)
+    if frozen_plan is None:
+        return {
+            "ready": False,
+            "code": "missing_frozen_experiment_design",
+            "reason": "Iteration requires a frozen executable experiment design.",
+            "reasonZh": "需要先冻结一份可执行的实验设计。",
+            "planId": "",
+            "resultId": "",
+        }
+    result = next(
+        (
+            candidate
+            for candidate in (
+                frozen_plan.get("activeFullRunResult"),
+                frozen_plan.get("activeSmokeResult"),
+            )
+            if isinstance(candidate, dict)
+            and _text(candidate.get("status"), limit=80).lower()
+            in {"passed", "failed", "needs_review"}
+        ),
+        None,
+    )
+    if result is None:
+        return {
+            "ready": False,
+            "code": "missing_experiment_result",
+            "reason": "Iteration requires at least one registered smoke or full-run result.",
+            "reasonZh": "需要先登记至少一条 smoke 或 full-run 实验结果。",
+            "planId": _text(frozen_plan.get("planId")),
+            "resultId": "",
+        }
+    return {
+        "ready": True,
+        "code": "ready",
+        "reason": "A frozen design and registered experiment result are available.",
+        "reasonZh": "冻结设计与实验结果均已登记，可以进入迭代决策。",
+        "planId": _text(frozen_plan.get("planId")),
+        "resultId": _text(
+            result.get("fullRunResultId") or result.get("smokeResultId")
+        ),
+    }
+
+
 def start_research_project_agent_task(
     team_id: str,
     research_project_id: str,
@@ -620,6 +687,16 @@ def start_research_project_agent_task(
             code="unsupported_task_kind",
         )
     project = s.get_research_project(normalized_team_id, normalized_project_id)
+    if task_kind == "iteration_decision":
+        readiness = research_project_iteration_readiness(
+            normalized_team_id,
+            normalized_project_id,
+        )
+        if not readiness["ready"]:
+            raise ResearchProjectAgentTaskError(
+                readiness["reason"],
+                code=readiness["code"],
+            )
     _member, agent = _resolve_role_agent(normalized_team_id, contract)
     agent_id = _text(agent.get("agentId"))
     target_ref = _safe_ref(request_payload.get("targetRef"), field_name="targetRef")
