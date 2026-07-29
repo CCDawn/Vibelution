@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import persistedHeightListShellSource from "../components/layout/PersistedHeightListShell.tsx?raw";
 import activeStageSource from "./TeamSourceCollectionActiveStagePanel.tsx?raw";
 import activeStageStyles from "./TeamSourceCollectionActiveStagePanel.styles";
+import panelFrameStyles from "./TeamSourceCollectionPanelFrame.styles";
 import screeningPanelSource from "./TeamSourceCollectionScreeningPanel.tsx?raw";
 import screeningPanelStyles from "./TeamSourceCollectionScreeningPanel.styles";
 import standaloneStageSource from "./TeamSourceCollectionStandaloneStagePanel.tsx?raw";
@@ -50,6 +51,13 @@ describe("source collection vertical three-column workbench", () => {
     expect(persistedHeightListShellSource).toContain("expandToContent");
     expect(persistedHeightListShellSource).toContain('height: "auto"');
     expect(persistedHeightListShellSource).toContain("expandToContent ? null");
+  });
+
+  it("keeps the transient focused state visual without changing panel layout", () => {
+    expect(panelFrameStyles.sourceCollectionFocusedPanel).toContain("ring-2");
+    expect(panelFrameStyles.sourceCollectionFocusedPanel).not.toContain("grid-cols");
+    expect(panelFrameStyles.sourceCollectionFocusedPanel).not.toMatch(/(?:^|\s)grid(?:\s|$)/);
+    expect(panelFrameStyles.sourceCollectionFocusedPanel).not.toContain("auto-rows");
   });
 
   it("renders one source-review list and keeps extraction recovery docked below its scroller", () => {
