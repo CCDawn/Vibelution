@@ -282,10 +282,12 @@ describe("ConversationToolActivity", () => {
     expect(activityCss).toContain("> .vui-components-conversation-tool-activity.itemDetailsBody");
     expect(styles.activitySummary).toContain("inline-flex");
     expect(styles.activitySummary).not.toContain("justify-between");
+    expect(styles.activity).not.toContain("ml-");
     expect(styles.activityChevron).not.toContain("ml-auto");
     expect(styles.activityDetails).not.toContain("border-l");
     expect(styles.itemChevron).not.toContain("rotate-");
     expect(styles.batchDetails).not.toContain("border-l");
+    expect(styles.itemDetailsBody).toContain("max-h-56");
   });
 
   it("opens the running activity and its current tool detail by default", () => {

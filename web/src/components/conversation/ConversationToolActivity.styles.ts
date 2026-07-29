@@ -5,7 +5,7 @@ function cx(key: string, ...classNames: string[]) {
 }
 
 const styles = {
-  activity: cx("activity", "mb-3 ml-4 min-w-0 py-0.5"),
+  activity: cx("activity", "mb-3 min-w-0 py-0.5"),
   activitySummary: cx(
     "activitySummary",
     "inline-flex min-h-7 max-w-full cursor-pointer items-start gap-2 py-1 text-left [font-size:var(--vui-font-xs)] leading-5 text-[var(--fg-tertiary)] [&::-webkit-details-marker]:hidden hover:text-[var(--fg-secondary)] focus-visible:rounded-[var(--radius-control)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)]",
@@ -71,7 +71,7 @@ const styles = {
   ),
   itemDetailsBody: cx(
     "itemDetailsBody",
-    "ml-6 min-w-0 py-1 [&_pre]:max-h-72 [&_pre]:overflow-auto",
+    "ml-6 min-w-0 max-h-56 overflow-auto py-1 [&_pre]:max-h-56 [&_pre]:overflow-auto",
   ),
 } as const;
 
