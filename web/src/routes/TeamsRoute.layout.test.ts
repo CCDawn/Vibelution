@@ -2791,8 +2791,9 @@ describe("TeamsRoute layout contract", () => {
     );
     expect(stageRoundSource).toContain("summaryRunId");
     expect(stageRoundSource).toContain("selectedSourceCollectionRunEffectiveId && summaryRunId && summaryRunId !== selectedSourceCollectionRunEffectiveId");
-    expect(stageRoundSource).toContain("const matchingRound = rounds.find((round) => (round.sourceRunIds ?? []).includes(selectedSourceCollectionRunEffectiveId))");
-    expect(stageRoundSource).toContain("return matchingRound ?? null");
+    expect(stageRoundSource).toContain("selectSourceCollectionStageRound(");
+    expect(stageRoundSource).toContain("sourceCollectionSummaryStageRound");
+    expect(stageRoundSource).toContain("selectedSourceCollectionRunEffectiveId");
     expect(stageRoundSource).not.toContain("?? rounds[0] ?? null");
 
     const candidateListLoadingSource = routeSource.slice(
