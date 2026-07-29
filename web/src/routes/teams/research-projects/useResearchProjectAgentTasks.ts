@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback } from "react";
+import { useCallback, useEffect, useRef } from "react";
 
 import {
   getResearchProjectAgentTaskStatus,
@@ -11,6 +11,8 @@ import type {
   TeamResearchProjectAgentTask,
   TeamResearchProjectAgentTaskStatusPayload,
 } from "../../../api/types";
+import { experimentPlanningStatusQueryKey } from "../experimentLoopModel";
+import { researchStageRoundStatusQueryKey } from "../useResearchWorkflowResources";
 import { researchProjectQueryKey } from "./ResearchProjectSwitcher";
 
 export type StartResearchProjectAgentTaskOptions = {
@@ -66,6 +68,28 @@ export function useResearchProjectAgentTasks(options: {
       return data?.activeTasks.length ? 3_000 : false;
     },
   });
+  const lastSettledTaskStampRef = useRef("");
+  useEffect(() => {
+    const status = statusQuery.data;
+    if (!status || status.activeTasks.length || !status.tasks.length) {
+      return;
+    }
+    const latestTask = [...status.tasks]
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
+    const settledStamp = `${latestTask.taskId}:${latestTask.status}:${latestTask.updatedAt}`;
+    if (lastSettledTaskStampRef.current === settledStamp) {
+      return;
+    }
+    lastSettledTaskStampRef.current = settledStamp;
+    void Promise.all([
+      queryClient.invalidateQueries({
+        queryKey: experimentPlanningStatusQueryKey(options.teamId),
+      }),
+      queryClient.invalidateQueries({
+        queryKey: researchStageRoundStatusQueryKey(options.teamId),
+      }),
+    ]);
+  }, [options.teamId, queryClient, statusQuery.data]);
   const startMutation = useMutation({
     mutationFn: (variables: {
       projectId: string;

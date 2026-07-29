@@ -502,7 +502,7 @@ def _stage_phase_status(
         "canContinue": bool(active_round),
         "canNewRound": bool(stage_rounds),
         "requiresUserDecision": stage_type in {"experiment", "iteration"},
-        "readiness": s._stage_readiness(stage_type, rounds),
+        "readiness": s._stage_readiness(team_id, stage_type, rounds),
         "coordinationRoomId": str(team.get("linkedChatRoomId") or ""),
         "storagePath": s._relative_path(s._stage_round_store_path(team_id)),
     }

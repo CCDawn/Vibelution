@@ -755,7 +755,11 @@ def _stage_query_seeds(payload: dict[str, Any], previous_round: dict[str, Any] |
     return [item for item in [topic, goal] if item][:2]
 
 
-def _stage_readiness(stage_type: str, rounds: list[dict[str, Any]]) -> dict[str, Any]:
+def _stage_readiness(
+    team_id: str,
+    stage_type: str,
+    rounds: list[dict[str, Any]],
+) -> dict[str, Any]:
     s = _service()
     if stage_type == "knowledge_collection":
         return {"ready": True, "reason": "知识搜集可随时多轮启动。"}
@@ -766,9 +770,24 @@ def _stage_readiness(stage_type: str, rounds: list[dict[str, Any]]) -> dict[str,
             "reason": "已有知识搜集轮次，可由用户决定进入实验规划。" if latest_collection else "需要先启动至少一轮知识搜集。",
         }
     latest_experiment = s._latest_stage_round([item for item in rounds if str(item.get("stageType") or "") == "experiment"])
+    if not latest_experiment:
+        return {
+            "ready": False,
+            "code": "missing_experiment_stage_round",
+            "reason": "需要先启动实验规划。",
+        }
+    from core.web.services.team_workflow.research_project_agent_tasks import (
+        research_project_iteration_readiness,
+    )
+
+    research_project = s.resolve_research_project_identity(team_id, "")
+    readiness = research_project_iteration_readiness(
+        team_id,
+        research_project["projectId"],
+    )
     return {
-        "ready": bool(latest_experiment),
-        "reason": "已有实验规划轮次，可进入迭代规划。" if latest_experiment else "需要先启动实验规划。",
+        **readiness,
+        "reason": readiness.get("reasonZh") or readiness["reason"],
     }
 
 
