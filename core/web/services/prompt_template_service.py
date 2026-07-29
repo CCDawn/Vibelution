@@ -38,6 +38,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 PROMPT_TEMPLATE_INDEX_VERSION = 1
 CHALLENGE_CUP_STAGE_TASK_PROMPT_VERSION = 12
 SOURCE_COLLECTION_STAGE_TOOL_PROTOCOL_VERSION = 15
+SOURCE_EXTRACTOR_VISIBLE_PROGRESS_VERSION = 16
 PROMPT_TEMPLATE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{1,95}$")
 PROMPT_TEMPLATE_PATH = developer_sandbox.formal_workspace_path(PROJECT_ROOT, "agent_config", "prompt_templates.json")
 RETIRED_PROMPT_TEMPLATE_IDS = frozenset({"prompt-self-summarizer"})
@@ -190,6 +191,11 @@ DEFAULT_PROMPT_TEMPLATES: tuple[dict[str, Any], ...] = (
         "content": (
             "# 资料提炼 Agent\n\n"
             "你负责资料提炼阶段：对已找到资料做内容提炼和资料审查。只要资料有价值即可保留并说明缺口；没有有效内容的资料一律移出流程并记录来源。\n\n"
+            "## 可见协作协议\n"
+            "- 开始分页前，先发送一句简短、具体的普通 assistant commentary，说明本轮准备核对哪批候选资料和证据。\n"
+            "- 每完成一页、证据改变判断或准备进入回写时，如仍需继续调用工具，先发送一句新的简短 commentary，说明已确认的事实和下一步。\n"
+            "- commentary 是用户可见的进展说明，不是隐藏 reasoning 或思维链；只陈述已经获得的证据、当前动作和下一步。\n"
+            "- 不要虚构进展，也不要为每条资料或每次低层工具调用重复报幕。\n\n"
             "## 阶段私聊任务协议\n"
             "- 本阶段检查清单由后端绑定，并根据阶段工具结果与结构化写回证据自动更新；不要调用通用 task_list_tool、task_create_tool 或 task_update_tool 复制清单。\n"
             "- 先调用 source_collection_context_tool，默认使用 context_mode=evidence, candidate_limit=5, candidate_offset=0；上一轮覆盖不足时使用 context_mode=retry_missing，只缺证据锚点时使用 context_mode=retry_evidence。\n"
@@ -205,7 +211,7 @@ DEFAULT_PROMPT_TEMPLATES: tuple[dict[str, Any], ...] = (
             "3. Removed Sources：无有效内容资料的来源和移出原因。\n"
             "4. Relation Handoff：交给资料关系整理阶段的主题、证据和注意事项。"
         ),
-        "metadata": {"builtin": True, "roleKey": "source_extractor", "builtinContentVersion": SOURCE_COLLECTION_STAGE_TOOL_PROTOCOL_VERSION},
+        "metadata": {"builtin": True, "roleKey": "source_extractor", "builtinContentVersion": SOURCE_EXTRACTOR_VISIBLE_PROGRESS_VERSION},
     },
     {
         "templateId": "prompt-source-relation-mapper",
