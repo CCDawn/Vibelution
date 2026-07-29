@@ -343,4 +343,41 @@ describe("ConversationToolActivity", () => {
     expect(html).toContain("搜索 savedDraft · 4 个结果");
     expect(html).not.toContain(">代码图谱<");
   });
+
+  it("renders source collection batches with product labels and semantic icons", () => {
+    const cells = [
+      ...Array.from({ length: 5 }, (_, index) => {
+        const cell = toolCell(`context-${index}`, "已读取");
+        cell.title = "source_collection_context_tool";
+        return cell;
+      }),
+      ...Array.from({ length: 2 }, (_, index) => {
+        const cell = toolCell(`fetch-${index}`, "已读取网页");
+        cell.title = "web_fetch_tool";
+        return cell;
+      }),
+      (() => {
+        const cell = toolCell("writeback", "已回写");
+        cell.title = "source_collection_stage_writeback_tool";
+        return cell;
+      })(),
+    ];
+
+    const html = renderToStaticMarkup(
+      <ConversationToolActivity
+        activity={createCodexTranscriptToolActivity(cells)}
+        language="zh"
+        renderToolDetails={() => null}
+      />,
+    );
+
+    expect(html).toContain("运行了 8 个工具");
+    expect(html).not.toContain("工具调用 8");
+    expect(html).toContain("读取资料上下文");
+    expect(html).toContain("网页读取");
+    expect(html).toContain("资料提炼回写");
+    expect(html).not.toContain("web_fetch_tool");
+    expect(html).toContain("lucide-file-search");
+    expect(html).toContain("lucide-pencil-line");
+  });
 });

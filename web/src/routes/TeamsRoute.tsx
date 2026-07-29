@@ -5031,7 +5031,6 @@ export function TeamsRoute({
       <section className={`${styles.route} ${styles.sourceCollectionPage}`}>
         <header className={`${styles.header} ${styles.sourceCollectionPageHeader}`}>
           <div className={styles.sourceCollectionPageTitleBlock}>
-            <p>{lang === "zh" ? "挑战杯ai科研团队 / 知识搜集阶段" : "Challenge Cup AI research team / knowledge collection stage"}</p>
             <div className={styles.sourceCollectionPageTitleLine}>
               <h1>{lang === "zh" ? "知识搜集工作台" : "Knowledge collection workspace"}</h1>
               <span className={`${styles.sourceCollectionRunBadge} ${sourceCollectionStepClassName(sourceCollectionConsoleState)}`}>

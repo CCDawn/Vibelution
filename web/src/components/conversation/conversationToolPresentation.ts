@@ -330,6 +330,8 @@ export function conversationToolPresentationLabel(
     get_core_context_tool: { zh: "核心上下文", en: "Core context" },
     get_current_goal_tool: { zh: "当前目标", en: "Current goal" },
     search_code_tool: { zh: "搜索代码", en: "Search code" },
+    web_search_tool: { zh: "网页搜索", en: "Web search" },
+    web_fetch_tool: { zh: "网页读取", en: "Read web page" },
     source_collection_context_tool: { zh: "读取资料上下文", en: "Read source context" },
     source_collection_stage_writeback_tool: { zh: "资料提炼回写", en: "Write source extraction" },
     get_git_status_summary_tool: { zh: "Git 状态", en: "Git status" },
