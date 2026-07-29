@@ -317,7 +317,7 @@ def test_prompt_template_repair_drops_retired_self_evolution_summarizer(tmp_path
     assert "你不是 Judge Agent" in supervised_baseline["content"]
     assert "禁止输出 SUPERVISED_AGENT_JUDGMENT" in supervised_baseline["content"]
     assert "以本回合实际提供的工具为准" in supervised_baseline["content"]
-    assert "进入自改阶段" in supervised_baseline["content"]
+    assert "PHASE: BASELINE_SELF_EDIT_IMPLEMENTATION" in supervised_baseline["content"]
 
 
 def test_source_collection_prompt_templates_only_expose_four_stage_roles(tmp_path, monkeypatch):
@@ -521,6 +521,7 @@ def test_build_agent_prompt_template_context_reports_block_and_missing_reasons(t
     assert "close_evolution_transaction_tool" not in supervised["contextBlock"]
     assert "以本回合实际提供的工具为准" in supervised["contextBlock"]
     assert "禁止输出 SUPERVISED_AGENT_JUDGMENT" in supervised["contextBlock"]
+    assert "PHASE: BASELINE_SELF_EDIT_IMPLEMENTATION" in supervised["contextBlock"]
     assert supervised["sourcePath"] == ""
     assert supervised["sourceExists"] is False
     judge = prompt_template_service.get_prompt_template("prompt-supervised-judge")
