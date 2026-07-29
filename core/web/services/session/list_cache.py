@@ -20,7 +20,10 @@ _SESSION_LIST_CACHE_LOCK = threading.Lock()
 _SESSION_LIST_CACHE_CONDITION = threading.Condition(_SESSION_LIST_CACHE_LOCK)
 SESSION_LIST_CACHE_TTL_SECONDS = 4.0
 _SESSION_LIST_CACHE_TTL_SECONDS = SESSION_LIST_CACHE_TTL_SECONDS
-_SESSION_LIST_INFLIGHT_STALE_SECONDS = 2.0
+# Cold session-index builds can legitimately cross 10 seconds under filesystem
+# contention. Keep the fallback reclaim bounded without letting normal waiters
+# replace a live builder before it can publish the shared snapshot.
+_SESSION_LIST_INFLIGHT_STALE_SECONDS = 30.0
 _SESSION_LIST_INFLIGHT_WAIT_SECONDS = 0.2
 _SESSION_LIST_CACHE: dict[str, Any] = {}
 
