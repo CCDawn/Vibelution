@@ -64,6 +64,20 @@ describe("ConversationView process expansion defaults", () => {
     expect(feedbackRenderer).not.toContain("renderReActOperationGroup(");
   });
 
+  it("suspends follow-latest and wires a stable scroll anchor for explicit process toggles", () => {
+    const handlerStart = conversationViewSource.indexOf("const handleProcessDisclosureUserToggle");
+    const handlerEnd = conversationViewSource.indexOf(
+      "// Stick-to-bottom:",
+      handlerStart,
+    );
+    const handler = conversationViewSource.slice(handlerStart, handlerEnd);
+
+    expect(handler).toContain("followLatestRef.current = false");
+    expect(handler).toContain("captureConversationProcessScrollAnchor(timeline, summary)");
+    expect(handler).toContain("restoreConversationProcessScrollAnchor(timeline, summary, anchor)");
+    expect(conversationViewSource).toContain("onUserToggle={handleProcessDisclosureUserToggle}");
+  });
+
   it("keeps running process details expanded by default", () => {
     const html = renderConversation([
       {

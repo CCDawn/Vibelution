@@ -45,9 +45,15 @@ describe("ConversationProcessDisclosure", () => {
     expect(html).not.toContain('open=""');
     expect(html).toContain("已处理 2.9s");
     expect(html).not.toContain("个阶段");
+    // SSR keeps canonical transcript evidence inspectable; the browser client
+    // lazily mounts this subtree only after an explicit expansion.
     expect(html).toContain("处理记录内容");
+    expect(html).toContain('data-codex-process-expanded="false"');
     expect(styles.summary).not.toContain("border-b");
     expect(styles.content).toContain("border-l");
+    expect(styles.contentMotion).toContain("transition-[grid-template-rows,opacity]");
+    expect(styles.contentMotion).toContain("motion-reduce:transition-none");
+    expect(styles.contentMotion).toContain("[overflow-anchor:none]");
   });
 
   it("opens and announces only an active process without exposing per-item progress metadata", () => {
@@ -60,8 +66,10 @@ describe("ConversationProcessDisclosure", () => {
     expect(html).toContain("处理中 2.9s");
     expect(html).not.toContain("个阶段");
     expect(html).toContain('open=""');
+    expect(html).toContain('data-codex-process-expanded="true"');
     expect(html).toContain('aria-live="polite"');
     expect(html).not.toContain("1 次调用");
+    expect(html).toContain("正在执行");
   });
 
   it("keeps a stopped process collapsed with an explicit failure summary", () => {
