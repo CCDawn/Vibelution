@@ -5,19 +5,33 @@ function cx(key: string, ...classNames: string[]) {
 }
 
 const styles = {
-  disclosure: cx("disclosure", "group min-w-0"),
+  disclosure: cx("disclosure", "min-w-0"),
   summary: cx(
     "summary",
     "flex min-h-7 w-full cursor-pointer items-center justify-start gap-1 py-1 text-left [font-size:var(--vui-font-xs)] leading-5 text-[var(--fg-tertiary)] [&::-webkit-details-marker]:hidden hover:text-[var(--fg-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)] focus-visible:ring-inset",
   ),
   chevron: cx(
     "chevron",
-    "shrink-0 text-[var(--fg-tertiary)] transition-transform duration-150 group-open:rotate-90",
+    "shrink-0 text-[var(--fg-tertiary)] transition-transform duration-200 motion-reduce:transition-none",
   ),
+  chevronExpanded: cx("chevron-expanded", "rotate-90"),
+  contentMotion: cx(
+    "content-motion",
+    "grid min-w-0 transition-[grid-template-rows,opacity] duration-200 ease-out motion-reduce:transition-none [overflow-anchor:none]",
+  ),
+  contentMotionExpanded: cx("content-motion-expanded", "grid-rows-[1fr] opacity-100"),
+  contentMotionCollapsed: cx("content-motion-collapsed", "grid-rows-[0fr] opacity-0"),
+  contentClip: cx("content-clip", "min-h-0 overflow-hidden"),
   content: cx(
     "content",
     "ml-2 grid min-w-0 content-start gap-0 border-l border-[var(--vui-border-subtle)] pb-1 pl-4 pt-2",
   ),
+  row: cx(
+    "row",
+    "min-w-0 transition-[opacity,transform] duration-150 ease-out motion-reduce:transition-none",
+  ),
+  rowExpanded: cx("row-expanded", "translate-y-0 opacity-100"),
+  rowCollapsed: cx("row-collapsed", "-translate-y-1 opacity-0"),
 } as const;
 
 export default styles;
