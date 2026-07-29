@@ -85,14 +85,12 @@ export function TeamSourceCollectionExtractionRecoveryWorkspacePanel(props: Team
       candidateProjection?.latestTask?.invalidCandidateIds?.length ?? 0,
     );
     const sourceCollectionExtractionRecoveryCoverageMissingCount = recoveryNumber(recoveryCoverage?.missing);
-    const sourceCollectionExtractionRecoveryMissingCount = Math.max(
-      sourceCollectionExtractionRecoveryCoverageMissingCount,
-      recoveryNumber(candidateProjection?.counts?.pending),
+    const sourceCollectionExtractionRecoveryEvidenceGapCount = Math.max(
+      recoveryNumber(recoveryClosure?.blockedCount),
+      recoveryNumber(recoveryCoverage?.blocked),
     );
     const sourceCollectionExtractionRecoveryFailureCount = Math.max(
       recoveryNumber(recoveryClosure?.failedCount),
-      recoveryNumber(recoveryClosure?.blockedCount),
-      recoveryNumber(recoveryCoverage?.blocked),
       sourceCollectionExtractionRecoveryInvalidCount,
       recoveryCoverage?.complete === false ? sourceCollectionExtractionRecoveryCoverageMissingCount : 0,
     );
@@ -107,9 +105,8 @@ export function TeamSourceCollectionExtractionRecoveryWorkspacePanel(props: Team
     const sourceCollectionExtractionRecoverySalvageText = sourceCollectionPrimaryDataLoading
       ? sourceCollectionLoadingText
       : String(sourceCollectionExtractionRecoverySalvageCount);
-    const recoveryNeedsWork = Boolean(
+    const sourceCollectionExtractionRecoveryHasHardFailure = Boolean(
       sourceCollectionExtractionRecoveryFailureCount > 0
-      || sourceCollectionExtractionRecoveryInvalidCount > 0
       || recoveryCoverage?.complete === false
       || recoveryClosure?.userStatus === "failed"
       || candidateProjection?.status === "failed"
@@ -117,19 +114,28 @@ export function TeamSourceCollectionExtractionRecoveryWorkspacePanel(props: Team
       || candidateProjection?.status === "agent_interrupted"
       || sourceCollectionCandidateStepState === "failed"
     );
+    const sourceCollectionExtractionRecoveryEvidenceGapOnly = Boolean(
+      !sourceCollectionExtractionRecoveryHasHardFailure
+      && sourceCollectionExtractionRecoveryEvidenceGapCount > 0
+    );
+    const recoveryNeedsWork = Boolean(
+      sourceCollectionExtractionRecoveryHasHardFailure
+      || sourceCollectionExtractionRecoveryEvidenceGapCount > 0
+    );
     if (!recoveryNeedsWork) {
       return null;
     }
-    const recoveryFailureText = sourceCollectionExtractionRecoveryFailureCount > 0
+    const sourceCollectionExtractionRecoveryIssueCount = sourceCollectionExtractionRecoveryHasHardFailure
+      ? sourceCollectionExtractionRecoveryFailureCount
+      : sourceCollectionExtractionRecoveryEvidenceGapCount;
+    const recoveryFailureText = sourceCollectionExtractionRecoveryIssueCount > 0
       ? sourceCollectionExtractionRecoveryInputCount > 0
-        ? `${sourceCollectionExtractionRecoveryFailureCount}/${sourceCollectionExtractionRecoveryInputCount}`
-        : String(sourceCollectionExtractionRecoveryFailureCount)
+        ? `${sourceCollectionExtractionRecoveryIssueCount}/${sourceCollectionExtractionRecoveryInputCount}`
+        : String(sourceCollectionExtractionRecoveryIssueCount)
       : (lang === "zh" ? "需要排查" : "review");
-    const recoveryMissingText = sourceCollectionExtractionRecoveryMissingCount > 0
-      ? String(sourceCollectionExtractionRecoveryMissingCount)
-      : sourceCollectionExtractionRecoveryInvalidCount > 0
-        ? String(sourceCollectionExtractionRecoveryInvalidCount)
-        : sourceCollectionStageRecoveryStatusLabel("extraction", lang);
+    const recoveryCoverageText = recoveryNumber(recoveryCoverage?.total) > 0
+      ? `${recoveryNumber(recoveryCoverage?.processed)}/${recoveryNumber(recoveryCoverage?.total)}`
+      : sourceCollectionStageRecoveryStatusLabel("extraction", lang);
     const sourceCollectionRecoveryAgentActionText = sourceCollectionExtractionExcludedRecoveryState.blockedByExcludedSources
       ? sourceCollectionExtractionExcludedRecoveryState.primaryActionText
       : (lang === "zh" ? "继续 Agent 提炼" : "Continue Agent extraction");
@@ -149,30 +155,44 @@ export function TeamSourceCollectionExtractionRecoveryWorkspacePanel(props: Team
     return (
       <TeamSourceCollectionExtractionRecoveryPanel
         lang={lang}
-        tone={sourceCollectionExtractionExcludedRecoveryState.tone}
+        tone={sourceCollectionExtractionExcludedRecoveryState.blockedByExcludedSources
+          ? sourceCollectionExtractionExcludedRecoveryState.tone
+          : sourceCollectionExtractionRecoveryEvidenceGapOnly
+            ? "progressable"
+            : "danger"}
         ariaLabel={sourceCollectionExtractionExcludedRecoveryState.blockedByExcludedSources
           ? sourceCollectionExtractionExcludedRecoveryState.panelAriaLabel
-          : undefined}
+          : sourceCollectionExtractionRecoveryEvidenceGapOnly
+            ? (lang === "zh" ? "资料提炼证据补全工作台" : "Source extraction evidence completion panel")
+            : undefined}
         titleLabel={sourceCollectionExtractionExcludedRecoveryState.blockedByExcludedSources
           ? sourceCollectionExtractionExcludedRecoveryState.panelTitle
-          : undefined}
+          : sourceCollectionExtractionRecoveryEvidenceGapOnly
+            ? (lang === "zh" ? "证据补全" : "Evidence completion")
+            : undefined}
         statusLabel={sourceCollectionExtractionExcludedRecoveryState.blockedByExcludedSources
           ? sourceCollectionExtractionExcludedRecoveryState.statusLabel
-          : sourceCollectionStageRecoveryStatusLabel("extraction", lang)}
+          : sourceCollectionExtractionRecoveryEvidenceGapOnly
+            ? (lang === "zh" ? "提炼完成，待补证据" : "Extraction complete; evidence needed")
+            : sourceCollectionStageRecoveryStatusLabel("extraction", lang)}
         summary={recoverySummary}
         failedLabel={sourceCollectionExtractionExcludedRecoveryState.blockedByExcludedSources
           ? sourceCollectionExtractionExcludedRecoveryState.failedLabel
-          : undefined}
+          : sourceCollectionExtractionRecoveryEvidenceGapOnly
+            ? (lang === "zh" ? "待补证据" : "evidence gaps")
+            : undefined}
         failedText={recoveryFailureText}
         salvageText={sourceCollectionExtractionRecoverySalvageText}
         recoverLabel={sourceCollectionExtractionExcludedRecoveryState.blockedByExcludedSources
           ? sourceCollectionExtractionExcludedRecoveryState.recoverLabel
-          : undefined}
+          : sourceCollectionExtractionRecoveryEvidenceGapOnly
+            ? (lang === "zh" ? "提炼覆盖" : "extraction coverage")
+            : undefined}
         recoverText={sourceCollectionPrimaryDataLoading
           ? sourceCollectionLoadingText
           : sourceCollectionExtractionExcludedRecoveryState.blockedByExcludedSources
             ? sourceCollectionExtractionExcludedRecoveryState.recoverText
-            : recoveryMissingText}
+            : recoveryCoverageText}
         pendingReviewText={sourceCollectionRunPendingScreeningCountText}
         actions={(
           <>
