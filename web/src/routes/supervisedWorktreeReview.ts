@@ -18,3 +18,17 @@ export function isSelfEvolutionWorktreeRun(run: SupervisedWorktreeRun | null | u
     || Boolean(run.reviewGate?.required)
     || Boolean(run.mergeAnalysis?.reviewGate?.required);
 }
+
+export function selectRecentSupervisedWorktreeRun(
+  runs: SupervisedWorktreeRun[],
+  runId: string | null | undefined,
+) {
+  const normalizedRunId = String(runId || "").trim();
+  if (!normalizedRunId) {
+    return null;
+  }
+  return runs.find((run) => (
+    run.runId === normalizedRunId
+    && !isSelfEvolutionWorktreeRun(run)
+  )) ?? null;
+}

@@ -67,8 +67,6 @@ from scripts.evolution_harness import (
     SUPERVISED_INFEASIBLE_OUTCOME_MARKER,
     stdout_tail_looks_like_idle_chat_ui,
 )
-from core.orchestration.turn_outcome import TurnOutcomeController
-
 pytestmark = pytest.mark.serial
 
 
@@ -190,6 +188,10 @@ def test_collect_untracked_files_uses_z_output_and_filters_runtime_noise(monkeyp
             b'".codex/edge-profile-memory-cdp/Default/Extensions/file',
             b"logs/runtime_scenes/latest/timeline.jsonl",
             b"workspace/edge-headless-profile/Default/Preferences",
+            b".pnpm-store/v11/files/cache-entry",
+            b"web/.pnpm-store/v11/files/cache-entry",
+            b"web/pnpm-lock.yaml",
+            b"web/pnpm-workspace.yaml",
             b"workspace/evaluation/bundles/terminal_bench_core_v1.json",
             b"workspace/evaluation/datasets/terminal_bench_core.jsonl",
         ]
@@ -229,6 +231,10 @@ def test_copy_untracked_files_skips_runtime_noise_and_preserves_dataset_files(tm
 
 def test_should_copy_untracked_file_rejects_unsafe_snapshot_paths():
     assert should_copy_untracked_file("workspace/evaluation/bundles/case.json")
+    assert not should_copy_untracked_file(".pnpm-store/v11/files/cache-entry")
+    assert not should_copy_untracked_file("web/.pnpm-store/v11/files/cache-entry")
+    assert not should_copy_untracked_file("web/pnpm-lock.yaml")
+    assert not should_copy_untracked_file("web/pnpm-workspace.yaml")
     assert not should_copy_untracked_file("\ufeff.codex/edge-profile-memory-cdp/Default/Cache/file")
     assert not should_copy_untracked_file("\ufeffworkspace/evaluation/bundles/case.json")
     assert not should_copy_untracked_file('".codex/edge-profile-memory-cdp/Default/Cache/file')

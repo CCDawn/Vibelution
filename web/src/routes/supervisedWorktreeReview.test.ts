@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import type { SupervisedWorktreeRun } from "../api/types";
-import { isSelfEvolutionWorktreeRun } from "./supervisedWorktreeReview";
+import {
+  isSelfEvolutionWorktreeRun,
+  selectRecentSupervisedWorktreeRun,
+} from "./supervisedWorktreeReview";
 
 function runWith(
   overrides: Partial<SupervisedWorktreeRun>,
@@ -28,5 +31,29 @@ describe("isSelfEvolutionWorktreeRun", () => {
       selfEvolutionOrigin: {},
       reviewGate: { required: true },
     }))).toBe(true);
+  });
+});
+
+describe("selectRecentSupervisedWorktreeRun", () => {
+  it("keeps the terminal record for the supervised run seen by the current page", () => {
+    const previousRun = runWith({ runId: "swte-previous", status: "done" });
+    const currentRun = runWith({ runId: "swte-current", status: "failed" });
+
+    expect(selectRecentSupervisedWorktreeRun(
+      [previousRun, currentRun],
+      "swte-current",
+    )).toBe(currentRun);
+  });
+
+  it("does not select stale history or a self-evolution review run", () => {
+    const selfRun = runWith({
+      runId: "swte-self",
+      status: "done",
+      selfEvolutionOrigin: { sourceTrack: "self_evolution" },
+    });
+
+    expect(selectRecentSupervisedWorktreeRun([selfRun], null)).toBeNull();
+    expect(selectRecentSupervisedWorktreeRun([selfRun], "swte-missing")).toBeNull();
+    expect(selectRecentSupervisedWorktreeRun([selfRun], "swte-self")).toBeNull();
   });
 });

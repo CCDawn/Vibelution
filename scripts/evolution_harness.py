@@ -42,13 +42,22 @@ LIVE_CASE_TRANSCRIPT_LIMIT = 8
 LIVE_CASE_TEXT_LIMIT = 4000
 UNTRACKED_SNAPSHOT_EXCLUDED_PREFIXES = (
     ".codex/",
+    ".pnpm-store/",
     ".runtime/",
     "log_info/",
     "logs/",
+    "web/.pnpm-store/",
     "workspace/logs/",
     "workspace/edge-headless-profile/",
 )
-UNTRACKED_SNAPSHOT_EXCLUDED_NAMES = {".codex", ".runtime", "log_info", "logs"}
+UNTRACKED_SNAPSHOT_EXCLUDED_NAMES = {
+    ".codex",
+    ".runtime",
+    "log_info",
+    "logs",
+    "web/pnpm-lock.yaml",
+    "web/pnpm-workspace.yaml",
+}
 PROVIDER_TRANSPORT_ERROR_MARKERS = (
     "unexpected_eof_while_reading",
     "eof occurred in violation of protocol",
