@@ -460,6 +460,7 @@ export function ConversationView({
   const followLatestRef = useRef(true);
   const lastTimelineScrollTopRef = useRef(0);
   const streamingScrollFrameRef = useRef<number | null>(null);
+  const processDisclosureAnchorFrameRef = useRef<number | null>(null);
   const lastComposerFocusSignalRef = useRef("");
   const defaultExpansionRef = useRef<Record<string, Record<string, boolean>>>({});
   const responseSegmentCacheRef = useRef<Map<string, ResponseSegment[]>>(new Map());
@@ -936,19 +937,35 @@ export function ConversationView({
     if (!timeline) {
       return undefined;
     }
+    if (processDisclosureAnchorFrameRef.current !== null) {
+      window.cancelAnimationFrame(processDisclosureAnchorFrameRef.current);
+      processDisclosureAnchorFrameRef.current = null;
+    }
     const anchor = captureConversationProcessScrollAnchor(timeline, summary);
     atBottomRef.current = false;
     followLatestRef.current = false;
     lastTimelineScrollTopRef.current = timeline.scrollTop;
     setIsAtBottom(false);
 
-    return () => {
+    const restoreAnchor = () => {
+      if (timelineRef.current !== timeline || !summary.isConnected) {
+        return;
+      }
       restoreConversationProcessScrollAnchor(timeline, summary, anchor);
       lastTimelineScrollTopRef.current = timeline.scrollTop;
       setTimelineVirtualMetrics((current) => ({
         scrollTop: timeline.scrollTop,
         viewportHeight: timeline.clientHeight || current.viewportHeight,
       }));
+    };
+    return () => {
+      restoreAnchor();
+      processDisclosureAnchorFrameRef.current = window.requestAnimationFrame(() => {
+        processDisclosureAnchorFrameRef.current = window.requestAnimationFrame(() => {
+          processDisclosureAnchorFrameRef.current = null;
+          restoreAnchor();
+        });
+      });
     };
   }, []);
 
