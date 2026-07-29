@@ -126,6 +126,10 @@ import {
   formatCodexTranscriptDuration,
 } from "./conversationToolActivityModel";
 import { ConversationProcessDisclosure } from "./ConversationProcessDisclosure";
+import {
+  captureConversationProcessScrollAnchor,
+  restoreConversationProcessScrollAnchor,
+} from "./conversationProcessScrollAnchor";
 import { ConversationToolActivity } from "./ConversationToolActivity";
 import {
   buildConversationTerminalToolDetail,
@@ -927,16 +931,25 @@ export function ConversationView({
     });
   }
 
-  const handleProcessDisclosureUserToggle = useCallback((_summary: HTMLElement) => {
+  const handleProcessDisclosureUserToggle = useCallback((summary: HTMLElement) => {
     const timeline = timelineRef.current;
     if (!timeline) {
       return undefined;
     }
+    const anchor = captureConversationProcessScrollAnchor(summary);
     atBottomRef.current = false;
     followLatestRef.current = false;
     lastTimelineScrollTopRef.current = timeline.scrollTop;
     setIsAtBottom(false);
-    return undefined;
+
+    return () => {
+      restoreConversationProcessScrollAnchor(timeline, summary, anchor);
+      lastTimelineScrollTopRef.current = timeline.scrollTop;
+      setTimelineVirtualMetrics((current) => ({
+        scrollTop: timeline.scrollTop,
+        viewportHeight: timeline.clientHeight || current.viewportHeight,
+      }));
+    };
   }, []);
 
   // Stick-to-bottom: re-pin when timeline content resizes while following latest (streaming / reflow).
