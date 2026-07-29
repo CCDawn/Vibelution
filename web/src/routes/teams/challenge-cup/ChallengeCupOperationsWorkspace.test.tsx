@@ -268,12 +268,18 @@ describe("ChallengeCupOperationsWorkspace", () => {
     expect(unavailableMarkup).not.toContain("实验设计");
   });
 
-  it("keeps production styling desktop-only and scoped to the workspace", () => {
+  it("keeps production styling responsive, theme-aware, and scoped to the workspace", () => {
     expect(componentSource).toContain('data-testid="challenge-cup-operations-workspace"');
     expect(componentStyles).toContain(".workspace");
-    expect(componentStyles).toContain("min-width: 860px");
+    expect(componentStyles).toContain("min-width: 0");
+    expect(componentStyles).not.toContain("color-scheme: light");
+    expect(componentStyles).toContain("--bg: var(--vui-surface-workspace)");
+    expect(componentStyles).toContain("--panel: var(--vui-surface-panel)");
+    expect(componentStyles).toContain("--text: var(--fg-primary)");
+    expect(componentStyles).not.toContain("min-width: 860px");
     expect(componentStyles).toContain("container-type: inline-size");
     expect(componentStyles).toContain("@container challenge-workspace (max-width: 1080px)");
+    expect(componentStyles).toContain("@container challenge-workspace (max-width: 760px)");
     expect(componentStyles).toContain("@container challenge-workspace (min-width: 1600px)");
     expect(componentStyles).toContain(".platform-console");
     expect(componentStyles).toContain("grid-template-columns: 220px minmax(620px, 1fr) clamp(280px, 19vw, 340px)");

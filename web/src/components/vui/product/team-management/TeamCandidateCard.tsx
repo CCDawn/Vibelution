@@ -1,8 +1,6 @@
-import {
-  type KeyboardEvent as ReactKeyboardEvent,
-  type ReactNode,
-} from "react";
+import { type ReactNode } from "react";
 
+import { VNativeButton } from "../../primitives/VNativeButton";
 import { VTooltip } from "../../primitives/VTooltip";
 
 import {
@@ -37,9 +35,13 @@ const CARD_BASE =
   "max-[820px]:grid-cols-[minmax(0,1fr)]";
 
 const CARD_INTERACTIVE =
-  "cursor-pointer transition-[border-color,box-shadow,background] duration-150 ease-[var(--vui-ease)] " +
+  "transition-[border-color,box-shadow,background] duration-150 ease-[var(--vui-ease)] " +
   "hover:border-[color:color-mix(in_srgb,var(--accent-cool)_54%,var(--border-strong))] hover:bg-[color:color-mix(in_srgb,var(--accent-cool)_5%,var(--vui-surface-row))] hover:shadow-[var(--vui-elevation-1)] " +
-  "focus-visible:outline-none focus-visible:border-[color:color-mix(in_srgb,var(--accent-cool)_54%,var(--border-strong))] focus-visible:shadow-[var(--vui-elevation-1)]";
+  "has-[:focus-visible]:border-[color:color-mix(in_srgb,var(--accent-cool)_54%,var(--border-strong))] has-[:focus-visible]:shadow-[var(--vui-elevation-1)]";
+
+const ACTIVATION_BUTTON =
+  "inline-flex w-fit min-w-0 max-w-full items-center justify-start rounded-[var(--radius-control)] bg-transparent p-0 text-left text-[var(--fg-primary)] " +
+  "cursor-pointer focus-visible:outline-none focus-visible:shadow-[var(--vui-shadow-focus)] [&>strong]:min-w-0 [&>strong]:truncate";
 
 const CARD_SELECTED =
   "border-[color:color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_11%,transparent)]";
@@ -81,32 +83,10 @@ export function TeamCandidateCard({
   onActivate,
   activateTitle,
 }: TeamCandidateCardProps) {
-  const handleKeyDown = onActivate
-    ? (event: ReactKeyboardEvent<HTMLElement>) => {
-        if (event.target instanceof Element && event.target.closest("button, a")) {
-          return;
-        }
-        if (event.key !== "Enter" && event.key !== " ") {
-          return;
-        }
-        event.preventDefault();
-        onActivate();
-      }
-    : undefined;
-
-  const handleClick = onActivate
-    ? (event: React.MouseEvent<HTMLElement>) => {
-        if (event.target instanceof Element && event.target.closest("button, a")) {
-          return;
-        }
-        onActivate();
-      }
-    : undefined;
-
   const statusBadge = (
     <span
       className={`${CHIP_BASE} ${CHIP_TONE[tone]}`}
-      tabIndex={statusTitle && !activateTitle ? 0 : undefined}
+      tabIndex={statusTitle ? 0 : undefined}
       role={statusTitle ? "status" : undefined}
       aria-label={statusTitle}
     >
@@ -120,30 +100,49 @@ export function TeamCandidateCard({
         target="_blank"
         rel="noreferrer"
         aria-label={source.title}
-        onClick={(event) => event.stopPropagation()}
       >
         {source.value}
       </a>
     ) : (
-      <code tabIndex={source.title && !activateTitle ? 0 : undefined} aria-label={source.title}>{source.value}</code>
+      <code tabIndex={source.title ? 0 : undefined} aria-label={source.title}>{source.value}</code>
     )
   ) : null;
-  const card = (
+  const activationTooltip = activateTitle ? (
+    <span className="grid gap-1">
+      <span>{activateTitle}</span>
+      {statusTitle ? <span>{statusTitle}</span> : null}
+      {source?.title ? <span>{source.title}</span> : null}
+    </span>
+  ) : null;
+  const titleValue = onActivate ? (
+    <VNativeButton
+      className={ACTIVATION_BUTTON}
+      aria-label={activateTitle}
+      aria-pressed={selected}
+      onClick={onActivate}
+    >
+      <strong>{title}</strong>
+    </VNativeButton>
+  ) : (
+    <strong>{title}</strong>
+  );
+  const titleControl = activationTooltip ? (
+    <VTooltip content={activationTooltip} width="wide">
+      {titleValue}
+    </VTooltip>
+  ) : titleValue;
+
+  return (
     <article
       data-vui-product="team-candidate-card"
       data-tone={tone}
       className={[CARD_BASE, onActivate ? CARD_INTERACTIVE : "", selected ? CARD_SELECTED : ""]
         .filter(Boolean)
         .join(" ")}
-      role={onActivate ? "button" : undefined}
-      tabIndex={onActivate ? 0 : undefined}
-      aria-pressed={onActivate ? selected : undefined}
-      onClick={handleClick}
-      onKeyDown={handleKeyDown}
     >
       <div className="col-start-1 flex flex-wrap items-center gap-1.5 min-w-0 [&>strong]:min-w-0 [&>strong]:truncate [&>strong]:text-[var(--fg-primary)]">
-        <strong>{title}</strong>
-        {statusTitle && !activateTitle ? <VTooltip content={statusTitle}>{statusBadge}</VTooltip> : statusBadge}
+        {titleControl}
+        {statusTitle ? <VTooltip content={statusTitle}>{statusBadge}</VTooltip> : statusBadge}
       </div>
       {summary ? (
         <p className="col-start-1 m-0 min-w-0 truncate [font-size:var(--vui-font-xs)] text-[var(--fg-tertiary)]">{summary}</p>
@@ -161,7 +160,7 @@ export function TeamCandidateCard({
           className="col-start-2 row-start-1 row-span-3 grid min-w-0 max-w-full grid-cols-[max-content_minmax(0,1fr)] items-center self-center gap-1 overflow-hidden [font-size:var(--vui-font-xs)] [&_a]:truncate [&_code]:truncate [&_a]:text-[var(--accent-cool)] [&_code]:text-[var(--fg-tertiary)] max-[820px]:col-start-1 max-[820px]:row-start-auto max-[820px]:row-span-1 data-[missing=true]:text-[var(--state-warning)]"
         >
           <span className="text-[var(--fg-tertiary)]">{source.label}</span>
-          {source.title && !activateTitle ? (
+          {source.title ? (
             <VTooltip content={source.title} width="wide">
               {sourceValue}
             </VTooltip>
@@ -173,24 +172,4 @@ export function TeamCandidateCard({
       {actions ? <div className={ACTIONS}>{actions}</div> : null}
     </article>
   );
-
-  return activateTitle ? (
-    <VTooltip
-      content={statusTitle ? (
-        <span className="grid gap-1">
-          <span>{activateTitle}</span>
-          <span>{statusTitle}</span>
-          {source?.title ? <span>{source.title}</span> : null}
-        </span>
-      ) : source?.title ? (
-        <span className="grid gap-1">
-          <span>{activateTitle}</span>
-          <span>{source.title}</span>
-        </span>
-      ) : activateTitle}
-      width="wide"
-    >
-      {card}
-    </VTooltip>
-  ) : card;
 }

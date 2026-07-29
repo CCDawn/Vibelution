@@ -1,31 +1,30 @@
 .workspace {
-  color-scheme: light;
-  --bg: #f3f5f8;
-  --panel: #ffffff;
-  --panel-subtle: #f7f8fa;
-  --panel-muted: #eef2f6;
-  --line: #dfe4ea;
-  --line-strong: #cbd3dc;
-  --text: #17212b;
-  --text-secondary: #52606e;
-  --text-muted: #7a8794;
-  --accent: #176b73;
-  --accent-hover: #125b62;
-  --accent-soft: #e8f3f3;
-  --success: #197047;
-  --success-soft: #e8f5ee;
-  --warning: #a15c00;
-  --warning-soft: #fff3dc;
-  --danger: #b42318;
-  --danger-soft: #fef0ee;
-  --focus: #4aa7b0;
-  --shadow: 0 1px 2px rgb(16 24 40 / 4%), 0 10px 30px rgb(16 24 40 / 6%);
-  --radius: 12px;
-  --radius-sm: 8px;
+  --bg: var(--vui-surface-workspace);
+  --panel: var(--vui-surface-panel);
+  --panel-subtle: var(--vui-surface-row);
+  --panel-muted: var(--vui-control-muted);
+  --line: var(--vui-border-subtle);
+  --line-strong: var(--vui-border-strong);
+  --text: var(--fg-primary);
+  --text-secondary: var(--fg-secondary);
+  --text-muted: var(--fg-tertiary);
+  --accent: var(--accent-cool);
+  --accent-hover: var(--accent-cool-2);
+  --accent-soft: var(--vui-status-info-bg);
+  --success: var(--state-success);
+  --success-soft: var(--vui-status-success-bg);
+  --warning: var(--state-warning);
+  --warning-soft: var(--vui-status-warning-bg);
+  --danger: var(--state-error);
+  --danger-soft: var(--vui-status-danger-bg);
+  --focus: var(--accent-warm);
+  --shadow: var(--vui-elevation-panel);
+  --radius: var(--vui-radius-panel-soft);
+  --radius-sm: var(--radius-control);
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     "Microsoft YaHei", sans-serif;
-  min-width: 860px;
+  min-width: 0;
   min-height: 100%;
   color: var(--text);
   background: var(--bg);
@@ -57,7 +56,7 @@
 .workspace select:focus-visible,
 .workspace input:focus-visible,
 .workspace summary:focus-visible {
-  box-shadow: 0 0 0 3px rgb(74 167 176 / 24%);
+  box-shadow: var(--vui-shadow-focus);
 }
 
 .workspace button {
@@ -77,8 +76,8 @@
   align-items: center;
   min-height: 56px;
   padding: 0 22px;
-  border-bottom: 1px solid rgb(203 211 220 / 80%);
-  background: rgb(255 255 255 / 94%);
+  border-bottom: 1px solid var(--line);
+  background: var(--vui-surface-glass);
   backdrop-filter: blur(16px);
 }
 
@@ -111,10 +110,10 @@
   height: 30px;
   place-items: center;
   border-radius: 9px;
-  color: white;
-  background: linear-gradient(145deg, #145f67, #24818a);
+  color: var(--accent-cool-contrast);
+  background: var(--accent);
   font-weight: 820;
-  box-shadow: 0 6px 16px rgb(23 107 115 / 22%);
+  box-shadow: var(--vui-shadow-soft);
 }
 
 .brand > div {
@@ -157,7 +156,7 @@
 .global-nav a.active {
   color: var(--text);
   background: var(--panel);
-  box-shadow: 0 1px 2px rgb(16 24 40 / 8%);
+  box-shadow: var(--vui-shadow-hairline);
 }
 
 .system-status {
@@ -173,7 +172,7 @@
   height: 7px;
   border-radius: 50%;
   background: var(--success);
-  box-shadow: 0 0 0 4px var(--success-soft);
+  box-shadow: var(--vui-shadow-accent);
 }
 
 .preview-notice {
@@ -182,9 +181,9 @@
   justify-content: space-between;
   min-height: 38px;
   padding: 5px max(20px, calc((100vw - 1440px) / 2 + 24px));
-  border-bottom: 1px solid #ecd7ad;
-  color: #704d16;
-  background: #fff9ec;
+  border-bottom: 1px solid color-mix(in srgb, var(--warning) 28%, var(--line));
+  color: var(--warning);
+  background: var(--warning-soft);
   font-size: 12px;
   font-weight: 650;
 }
@@ -238,9 +237,7 @@
   padding: 18px 20px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background:
-    linear-gradient(115deg, rgb(232 243 243 / 95%), rgb(255 255 255 / 92%) 52%),
-    var(--panel);
+  background: var(--vui-gradient-route-accent), var(--panel);
   box-shadow: var(--shadow);
 }
 
@@ -272,9 +269,9 @@
 
 .id-chip {
   padding: 4px 8px;
-  border: 1px solid rgb(23 107 115 / 28%);
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line));
   color: var(--accent);
-  background: rgb(255 255 255 / 72%);
+  background: color-mix(in srgb, var(--panel) 72%, transparent);
   letter-spacing: 0.02em;
 }
 
@@ -328,9 +325,9 @@
 }
 
 .button.primary {
-  color: white;
+  color: var(--accent-cool-contrast);
   background: var(--accent);
-  box-shadow: 0 5px 14px rgb(23 107 115 / 18%);
+  box-shadow: var(--vui-shadow-soft);
 }
 
 .button.primary:hover {
@@ -345,7 +342,7 @@
 }
 
 .button.secondary:hover {
-  border-color: #aeb8c3;
+  border-color: var(--line-strong);
   background: var(--panel-subtle);
 }
 
@@ -362,8 +359,8 @@
   padding: 4px;
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: rgb(255 255 255 / 94%);
-  box-shadow: 0 4px 18px rgb(16 24 40 / 5%);
+  background: var(--vui-surface-glass);
+  box-shadow: var(--vui-shadow-soft);
   backdrop-filter: blur(14px);
 }
 
@@ -395,7 +392,7 @@
   min-height: 20px;
   padding: 0 6px;
   color: inherit;
-  background: rgb(255 255 255 / 70%);
+  background: color-mix(in srgb, var(--panel) 70%, transparent);
   font-size: 11px;
 }
 
@@ -415,7 +412,7 @@
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--panel);
-  box-shadow: 0 2px 12px rgb(16 24 40 / 4%);
+  box-shadow: var(--vui-shadow-soft);
 }
 
 .status-strip article {
@@ -482,7 +479,7 @@
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--panel);
-  box-shadow: 0 2px 14px rgb(16 24 40 / 4%);
+  box-shadow: var(--vui-shadow-soft);
 }
 
 .progress-surface,
@@ -581,7 +578,7 @@
 }
 
 .progress-step.pending .step-marker {
-  border-color: #d79a37;
+  border-color: color-mix(in srgb, var(--warning) 52%, var(--line));
   color: var(--warning);
   background: var(--warning-soft);
 }
@@ -648,7 +645,7 @@
 }
 
 .workspace tbody tr:hover td {
-  background: #fbfcfd;
+  background: var(--vui-surface-row-hover);
 }
 
 .workspace td:first-child {
@@ -698,10 +695,8 @@
 }
 
 .next-action {
-  border-color: rgb(161 92 0 / 23%);
-  background:
-    linear-gradient(150deg, rgb(255 243 220 / 80%), rgb(255 255 255 / 94%) 60%),
-    var(--panel);
+  border-color: color-mix(in srgb, var(--warning) 23%, var(--line));
+  background: color-mix(in srgb, var(--warning-soft) 58%, var(--panel));
 }
 
 .next-action p {
@@ -716,7 +711,7 @@
   gap: 10px;
   margin-bottom: 12px;
   padding: 9px 0;
-  border-block: 1px solid rgb(161 92 0 / 16%);
+  border-block: 1px solid color-mix(in srgb, var(--warning) 16%, var(--line));
   color: var(--text-muted);
   font-size: 11px;
 }
@@ -748,7 +743,7 @@
   width: 16px;
   height: 16px;
   place-items: center;
-  border: 1.5px solid #d49a43;
+  border: 1.5px solid color-mix(in srgb, var(--warning) 58%, var(--line));
   border-radius: 50%;
   background: var(--warning-soft);
 }
@@ -835,7 +830,7 @@
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--panel);
-  box-shadow: 0 2px 14px rgb(16 24 40 / 4%);
+  box-shadow: var(--vui-shadow-soft);
 }
 
 .filter-strip {
@@ -886,7 +881,7 @@
 
 .review-row:hover {
   border-color: var(--line-strong);
-  box-shadow: 0 3px 12px rgb(16 24 40 / 5%);
+  box-shadow: var(--vui-shadow-soft);
 }
 
 .review-row > div {
@@ -1045,7 +1040,7 @@
   position: relative;
   overflow: hidden;
   border-radius: 7px;
-  background: #e8ebef;
+  background: var(--panel-muted);
 }
 
 .skeleton::after,
@@ -1053,7 +1048,7 @@
 .skeleton-panel::after {
   position: absolute;
   inset: 0;
-  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 70%), transparent);
+  background: var(--vui-gradient-route-accent);
   content: "";
   transform: translateX(-100%);
   animation: shimmer 1.5s infinite;
@@ -1117,10 +1112,8 @@
   grid-template-columns: 48px minmax(0, 1fr);
   align-content: center;
   gap: 16px;
-  border-color: rgb(180 35 24 / 23%);
-  background:
-    linear-gradient(150deg, var(--danger-soft), white 62%),
-    var(--panel);
+  border-color: color-mix(in srgb, var(--danger) 23%, var(--line));
+  background: color-mix(in srgb, var(--danger-soft) 58%, var(--panel));
 }
 
 .error-icon {
@@ -1150,7 +1143,7 @@
   z-index: 50;
   max-width: min(360px, calc(100vw - 44px));
   padding: 10px 13px;
-  border: 1px solid rgb(23 107 115 / 24%);
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--line));
   border-radius: 9px;
   color: var(--text);
   background: var(--panel);
@@ -1263,9 +1256,7 @@
 
 .platform-workspace {
   min-height: 100%;
-  background:
-    radial-gradient(circle at 18% 4%, rgb(23 107 115 / 5%), transparent 28%),
-    var(--bg);
+  background: var(--vui-gradient-route-overlay), var(--bg);
 }
 
 .platform-frame {
@@ -1285,7 +1276,7 @@
   padding: 18px 20px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: linear-gradient(100deg, var(--accent-soft), var(--panel) 42%);
+  background: var(--vui-gradient-route-accent), var(--panel);
   box-shadow: var(--shadow);
 }
 
@@ -1366,7 +1357,7 @@
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--panel);
-  box-shadow: 0 1px 2px rgb(16 24 40 / 3%);
+  box-shadow: var(--vui-shadow-hairline);
 }
 
 .platform-project-switcher {
@@ -1397,7 +1388,7 @@
 
 .platform-stage-button.selected {
   border-color: color-mix(in srgb, var(--accent) 30%, var(--line));
-  box-shadow: inset 3px 0 0 var(--accent);
+  box-shadow: var(--vui-shadow-inset-accent);
   background: var(--accent-soft);
 }
 
@@ -1422,7 +1413,7 @@
 
 .selected .stage-index {
   border-color: var(--accent);
-  color: #fff;
+  color: var(--accent-cool-contrast);
   background: var(--accent);
 }
 
@@ -1657,7 +1648,7 @@
 
 .platform-substage.complete > span {
   border-color: var(--success);
-  color: #fff;
+  color: var(--accent-cool-contrast);
   background: var(--success);
 }
 
@@ -1707,7 +1698,7 @@
   padding: 15px 16px;
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: linear-gradient(100deg, var(--panel-subtle), var(--panel));
+  background: var(--vui-gradient-route-soft);
 }
 
 .platform-task-card h3,
@@ -1995,6 +1986,132 @@
 
   .platform-task-card {
     grid-template-columns: minmax(0, 1fr) 240px;
+  }
+}
+
+@container challenge-workspace (max-width: 760px) {
+  .app-header {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+    padding: 8px 12px;
+  }
+
+  .global-nav {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    justify-self: stretch;
+    max-width: none;
+  }
+
+  .system-status {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .page-frame,
+  .platform-frame {
+    padding: 8px;
+  }
+
+  .program-header,
+  .platform-project-header,
+  .platform-task-card,
+  .run-list article {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .program-actions,
+  .platform-project-actions {
+    justify-content: start;
+  }
+
+  .platform-project-actions {
+    grid-template-columns: repeat(2, minmax(0, max-content));
+  }
+
+  .platform-project-actions > span {
+    text-align: left;
+  }
+
+  .status-strip,
+  .side-stack,
+  .platform-metrics {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .status-strip article,
+  .status-strip article:nth-child(2),
+  .platform-metrics article {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .status-strip article:last-child,
+  .platform-metrics article:last-child {
+    border-bottom: 0;
+  }
+
+  .platform-console {
+    min-height: 0;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .platform-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+    min-width: 0;
+  }
+
+  .platform-stage-rail,
+  .platform-inspector {
+    position: static;
+    grid-column: 1;
+    max-height: none;
+  }
+
+  .platform-stage-rail {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .platform-project-switcher,
+  .platform-stage-objects {
+    grid-column: 1 / -1;
+  }
+
+  .platform-stage-connector {
+    display: none;
+  }
+
+  .platform-canvas {
+    grid-column: 1;
+    min-height: 0;
+  }
+
+  .platform-canvas-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .platform-canvas-actions {
+    flex-wrap: wrap;
+  }
+
+  .platform-stage-content {
+    padding: 12px;
+  }
+
+  .platform-substage-rail {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .platform-substage::after {
+    display: none;
+  }
+
+  .review-row {
+    grid-template-columns: minmax(0, 1fr) auto;
   }
 }
 

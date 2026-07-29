@@ -8,9 +8,6 @@ const allowedRestoredRouteModules = [
   "routes/teams/challenge-cup/ChallengeCupOperationsWorkspace.module.css",
   "routes/teams/research-projects/ResearchProjectSwitcher.module.css",
 ] as const;
-const isolatedVisualCompatibilityModules = new Set<string>([
-  "routes/teams/challenge-cup/ChallengeCupOperationsWorkspace.module.css",
-]);
 
 function walkCssModules(dir: string): string[] {
   if (!existsSync(dir)) {
@@ -66,14 +63,13 @@ describe("VUI CSS module contract", () => {
     expect(modulePaths).not.toContain("routes/SupervisedWorkspaceTabs.module.css");
     expect(modulePaths).not.toContain("routes/SupervisedWorktreeReviewPanel.module.css");
 
-    const semanticModules = modules.filter(({ path }) => !isolatedVisualCompatibilityModules.has(path));
-    const literalColorOffenders = semanticModules.flatMap(({ path, source }) =>
+    const literalColorOffenders = modules.flatMap(({ path, source }) =>
       [...source.matchAll(/#[0-9a-fA-F]{3,8}|rgba?\(/g)].map((match) => `${path}:${lineFor(source, match.index ?? 0)}`),
     );
-    const localGradientOffenders = semanticModules.flatMap(({ path, source }) =>
+    const localGradientOffenders = modules.flatMap(({ path, source }) =>
       [...source.matchAll(/linear-gradient\(/g)].map((match) => `${path}:${lineFor(source, match.index ?? 0)}`),
     );
-    const localHeavyShadowOffenders = semanticModules.flatMap(({ path, source }) =>
+    const localHeavyShadowOffenders = modules.flatMap(({ path, source }) =>
       [...source.matchAll(/box-shadow\s*:\s*([^;]+);/gs)]
         .filter((match) => {
           const value = match[1].trim();
