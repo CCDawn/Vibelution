@@ -92,7 +92,8 @@ describe("conversation process trace styles", () => {
     expect(styles.codexTranscriptFinalCell).not.toContain("bg-[var(--state-error)]");
     expect(styles.codexTranscriptErrorCell).toContain("border-l");
     expect(styles.codexTranscriptProcessCell).toContain("border-0");
-    expect(styles.codexTranscriptSurface).toContain("max-w-[880px]");
-    expect(styles.codexTranscriptSurface).toContain("mx-auto");
+    expect(styles.codexTranscriptSurface).toContain("w-full");
+    expect(styles.codexTranscriptSurface).toContain("max-w-full");
+    expect(styles.codexTranscriptSurface).toContain("px-0");
   });
 });

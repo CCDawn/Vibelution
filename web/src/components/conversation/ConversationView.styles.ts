@@ -24,9 +24,9 @@ function cv(key: string, ...classNames: string[]) {
 }
 
 const readableMessageText = "min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]";
-const readableMarkdownMeasure = "max-w-[min(100%,76ch)]";
-const assistantMessageMeasure = "w-[min(100%,1360px)] max-w-full";
-const transcriptTurnRail = "w-full max-w-[960px] justify-self-center";
+const readableMarkdownMeasure = "max-w-full";
+const assistantMessageMeasure = "w-full max-w-full";
+const transcriptTurnRail = "w-full max-w-[830px] justify-self-center";
 const assistantResponseSection = cv(
   "responseSection",
   "min-w-0 grid",
@@ -47,7 +47,7 @@ const answerOnlyProcessShell = cv(
 const userMessageBubble = cv(
   "userMessageBody",
   readableMessageText,
-  "w-fit max-w-[min(100%,68ch)] justify-self-end rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--accent-cool)_18%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_6%,var(--vui-surface-panel))] px-2.5 py-1.5 text-left text-[var(--fg-primary)] shadow-none",
+  "w-fit max-w-full justify-self-end rounded-[16px] border-0 bg-[var(--vui-control-muted)] px-3 py-2 text-left text-[var(--fg-primary)] shadow-none",
 );
 const conversationComposerShell = cv(
   "composer",
@@ -55,7 +55,7 @@ const conversationComposerShell = cv(
 );
 const conversationComposerCodexShell = cv(
   "composerCodex",
-  "mx-auto grid w-full max-w-[960px] min-w-0 flex-none overflow-hidden rounded-[20px] border border-[color-mix(in_srgb,var(--border-soft)_88%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_96%,var(--vui-surface-workspace))] shadow-[0_8px_26px_color-mix(in_srgb,var(--fg-primary)_7%,transparent)] max-[719px]:rounded-[16px]",
+  "mx-auto grid w-full max-w-[830px] min-w-0 flex-none overflow-hidden rounded-[20px] border border-[color-mix(in_srgb,var(--border-soft)_88%,transparent)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_96%,var(--vui-surface-workspace))] shadow-[0_8px_26px_color-mix(in_srgb,var(--fg-primary)_7%,transparent)] max-[719px]:rounded-[16px]",
 );
 const composerNativeFieldTargets =
   "[&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-[48px] [&_textarea]:max-h-[112px] [&_textarea]:resize-none [&_input]:w-full [&_select]:w-full [&_textarea]:w-full";
@@ -191,9 +191,9 @@ const styles: Record<string, string> = {
   assistantCard:
     "vui-components-conversationview assistantCard min-w-0 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-strong)_72%,transparent)] bg-[var(--vui-surface-chat-panel)] p-2 shadow-none",
   assistantTurn:
-    `vui-components-conversationview assistantTurn grid min-w-0 ${transcriptTurnRail} grid-cols-[34px_minmax(0,1fr)] gap-x-2.5 [&_.turnContent]:w-[min(100%,1360px)] [&_.turnContent]:p-0 [&_.turnContent]:border-l-0`,
+    `vui-components-conversationview assistantTurn grid min-w-0 ${transcriptTurnRail} grid-cols-[minmax(0,1fr)] [&_.turnAvatar]:hidden [&_.turnMeta]:hidden [&_.turnContent]:w-full [&_.turnContent]:p-0 [&_.turnContent]:border-l-0`,
   assistantTurnContinuation:
-    `vui-components-conversationview assistantTurnContinuation grid min-w-0 ${transcriptTurnRail} grid-cols-[34px_minmax(0,1fr)] gap-x-2.5 [&_.turnAvatar]:bg-transparent [&_.turnContent]:w-[min(100%,1360px)] [&_.turnContent]:gap-1`,
+    `vui-components-conversationview assistantTurnContinuation grid min-w-0 ${transcriptTurnRail} grid-cols-[minmax(0,1fr)] [&_.turnAvatar]:hidden [&_.turnMeta]:hidden [&_.turnContent]:w-full [&_.turnContent]:gap-1`,
   attachButton:
     cv("attachButton", "min-w-0 inline-grid", compactIconButtonSize, "place-items-center rounded-[var(--radius-control)] border p-0 [font-size:var(--vui-font-xs)] font-semibold leading-tight", composerQuietActionState),
   auxiliaryBlock:
@@ -357,13 +357,13 @@ const styles: Record<string, string> = {
   codexTranscriptCellMeta:
     "vui-components-conversationview codexTranscriptCellMeta inline-flex min-w-0 shrink-0 align-baseline whitespace-nowrap [font-size:var(--vui-font-xs)] leading-[var(--vui-line-tight)] text-[var(--fg-tertiary)]",
   codexTranscriptCellSummary:
-    "vui-components-conversationview codexTranscriptCellSummary min-w-0 max-w-[min(100%,76ch)] [font-size:var(--vui-font-xs)] leading-[1.42] text-[var(--fg-tertiary)] whitespace-normal break-words [overflow-wrap:anywhere]",
+    "vui-components-conversationview codexTranscriptCellSummary min-w-0 max-w-full [font-size:var(--vui-font-xs)] leading-[1.42] text-[var(--fg-tertiary)] whitespace-normal break-words [overflow-wrap:anywhere]",
   codexTranscriptCellTitle:
     "vui-components-conversationview codexTranscriptCellTitle min-w-0 whitespace-normal [font-size:var(--vui-font-sm)] font-semibold leading-[1.35] text-[var(--fg-secondary)] [overflow-wrap:anywhere]",
   codexTranscriptCellTitleRow:
     "vui-components-conversationview codexTranscriptCellTitleRow min-w-0 inline-flex max-w-full flex-wrap items-baseline gap-x-2 gap-y-0.5",
   codexTranscriptCommentaryCell:
-    "vui-components-conversationview codexTranscriptCommentaryCell max-w-[min(100%,76ch)] border-0 bg-transparent py-1 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-primary)]",
+    "vui-components-conversationview codexTranscriptCommentaryCell max-w-full border-0 bg-transparent py-1 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-primary)]",
   codexTranscriptErrorCell:
     "vui-components-conversationview codexTranscriptErrorCell border-0 border-l-2 border-l-[var(--state-error)] bg-[color-mix(in_srgb,var(--state-error)_5%,transparent)] px-3 py-2",
   codexTranscriptFinalCell:
@@ -379,7 +379,7 @@ const styles: Record<string, string> = {
   codexTranscriptProcessCell:
     "vui-components-conversationview codexTranscriptProcessCell grid grid-cols-[20px_minmax(0,1fr)] items-start gap-x-2 gap-y-1 border-0 bg-transparent py-1 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)]",
   codexTranscriptSurface:
-    "vui-components-conversationview codexTranscriptSurface mx-auto grid w-[min(100%,1360px)] max-w-[880px] min-w-0 content-start gap-2 px-3 sm:px-5",
+    "vui-components-conversationview codexTranscriptSurface grid w-full max-w-full min-w-0 content-start gap-2 px-0",
   conversationCellTimeline:
     "vui-components-conversationview conversationCellTimeline min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   emptyState:
@@ -1200,7 +1200,7 @@ const styles: Record<string, string> = {
     "vui-components-conversationview userCard min-w-0 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--accent-cool)_18%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_5%,var(--vui-surface-panel))] p-1.5 shadow-none",
   userMessageBody: userMessageBubble,
   userTurn:
-    `vui-components-conversationview userTurn grid min-w-0 ${transcriptTurnRail} grid-cols-[minmax(0,1fr)_34px] gap-x-2.5 [&_.turnAvatar]:col-start-2 [&_.turnAvatar]:row-start-1 [&_.turnContent]:col-start-1 [&_.turnContent]:row-start-1 [&_.turnContent]:w-fit [&_.turnContent]:max-w-[min(70%,720px)] [&_.turnContent]:justify-self-end [&_.turnMeta]:justify-self-end [&_.turnMeta]:justify-end [&_.turnMeta]:text-right [&_.turnMetaActions]:justify-end [&_.turnMetaIdentity]:justify-end [&_.turnSpeaker]:hidden max-[719px]:[&_.turnContent]:max-w-[min(88%,36rem)]`,
+    `vui-components-conversationview userTurn grid min-w-0 ${transcriptTurnRail} grid-cols-[minmax(0,1fr)] [&_.turnAvatar]:hidden [&_.turnContent]:w-fit [&_.turnContent]:max-w-[min(76%,640px)] [&_.turnContent]:justify-self-end [&_.turnMeta]:justify-self-end [&_.turnMeta]:justify-end [&_.turnMeta]:text-right [&_.turnMetaActions]:justify-end [&_.turnMetaIdentity]:justify-end [&_.turnSpeaker]:hidden max-[719px]:[&_.turnContent]:max-w-[min(88%,36rem)]`,
 };
 
 export default styles;

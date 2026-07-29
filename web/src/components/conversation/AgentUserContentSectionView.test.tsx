@@ -34,17 +34,14 @@ describe("AgentUserContentSectionView", () => {
   it("keeps user message bubbles readable for long prose and nested markdown links", () => {
     expect(styles.userMessageBody).toContain("whitespace-pre-wrap");
     expect(styles.userMessageBody).toContain("[overflow-wrap:anywhere]");
-    expect(styles.userMessageBody).toContain("max-w-[min(100%,68ch)]");
-    expect(styles.userMessageBody).toContain(
-      "border-[color-mix(in_srgb,var(--accent-cool)_18%,var(--vui-border-subtle))]",
-    );
-    expect(styles.userMessageBody).toContain(
-      "bg-[color-mix(in_srgb,var(--accent-cool)_6%,var(--vui-surface-panel))]",
-    );
-    expect(styles.userMessageBody).toContain("px-2.5");
-    expect(styles.userMessageBody).toContain("py-1.5");
+    expect(styles.userMessageBody).toContain("max-w-full");
+    expect(styles.userMessageBody).toContain("rounded-[16px]");
+    expect(styles.userMessageBody).toContain("border-0");
+    expect(styles.userMessageBody).toContain("bg-[var(--vui-control-muted)]");
+    expect(styles.userMessageBody).toContain("px-3");
+    expect(styles.userMessageBody).toContain("py-2");
     expect(styles.userMessageBody).toContain("shadow-none");
-    expect(styles.userMessageBody).toContain("[&_.markdownBody]:max-w-[min(100%,68ch)]");
+    expect(styles.userMessageBody).toContain("[&_.markdownBody]:max-w-full");
     expect(styles.userMessageBody).toContain("[&_.markdownBody]:whitespace-normal");
     expect(styles.userMessageBody).toContain("[&_.markdownBody]:break-words");
     expect(styles.userMessageBody).toContain("[&_.markdownBody]:[overflow-wrap:anywhere]");
