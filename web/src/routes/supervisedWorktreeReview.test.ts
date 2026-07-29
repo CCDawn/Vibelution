@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import type { SupervisedWorktreeRun } from "../api/types";
 import {
   isSelfEvolutionWorktreeRun,
+  readRecentSupervisedWorktreeRunId,
+  rememberRecentSupervisedWorktreeRunId,
   selectRecentSupervisedWorktreeRun,
 } from "./supervisedWorktreeReview";
 
@@ -55,5 +57,33 @@ describe("selectRecentSupervisedWorktreeRun", () => {
     expect(selectRecentSupervisedWorktreeRun([selfRun], null)).toBeNull();
     expect(selectRecentSupervisedWorktreeRun([selfRun], "swte-missing")).toBeNull();
     expect(selectRecentSupervisedWorktreeRun([selfRun], "swte-self")).toBeNull();
+  });
+});
+
+describe("recent supervised worktree run storage", () => {
+  it("survives a route remount in the current browser tab", () => {
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+    };
+
+    rememberRecentSupervisedWorktreeRunId(storage, " swte-current ");
+
+    expect(readRecentSupervisedWorktreeRunId(storage)).toBe("swte-current");
+  });
+
+  it("degrades safely when browser storage is unavailable", () => {
+    const storage = {
+      getItem: () => {
+        throw new Error("blocked");
+      },
+      setItem: () => {
+        throw new Error("blocked");
+      },
+    };
+
+    expect(readRecentSupervisedWorktreeRunId(storage)).toBeNull();
+    expect(() => rememberRecentSupervisedWorktreeRunId(storage, "swte-current")).not.toThrow();
   });
 });
