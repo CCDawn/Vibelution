@@ -2653,7 +2653,9 @@ def _source_collection_stage_session_task_message(
             "- 资料提炼阶段不需要额外提交一份 `candidateDecisions[]`；只有专门做资料审查/质检时才单独回写 `candidateDecisions[]`。",
             "- 可以分批调用 `source_collection_stage_writeback_tool`，系统会按真实 `candidateId` / `recordId` 累计上一批结果；不要因为 compact 返回未展开完整数组而重复提交同一大包。",
             "- 资料提炼采用宽松保留：只要有可用内容或有价值线索，就写 `decision=keep` 或 `needs_more_info`，并填写 `valueSummary`、`defects`、`followUpSuggestion`；不要因为缺 DOI/缺全文直接丢弃。",
-            "- 对摘要或元数据足以支持的范围，可把 `candidates[].evidenceRefs` 原样写入对应 extraction；不得据此虚构页码、直接引语或全文结论。",
+            "- 资料提炼必须区分来源定位与主张级证据：DOI/URL/论文 ID 只能写入 `sourceRefs[]`；它们只能说明资料在哪里，不能单独证明资料支持某个结论。",
+            "- `evidenceRefs[]` 只写页码、PDF 页、段落、章节、引文或受控记录锚点；`claims[]` / `keyFindings[]` / `citations[]` 每项必须包含 `sourceRef`，并至少包含 `page/pageRange/citation/evidenceRef` 之一。",
+            "- 对摘要或元数据足以支持的范围，可把 `candidates[].evidenceRefs` 中已有的真实锚点原样写入对应 extraction；如果只有 DOI/URL 或摘要定位，保留 `keep/needs_more_info` 决定，但证据状态必须保持 `missing_evidence_anchor`，不得虚构页码、直接引语或全文结论。",
             (
                 "- 资料提炼阶段若受控摘要不足，但 `candidates[].sourceUrl` 或 `doi` 存在，可用 `web_fetch_tool` 仅抓取该既有定位符补证；"
                 "不要扩展检索方向、生成新候选或调用搜索工具。每页先补证并分批回写，再读取下一页；抓取失败后再标记 `needs_more_info`。"
