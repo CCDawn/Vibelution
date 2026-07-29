@@ -868,6 +868,33 @@ export function sourceCollectionStageCardsFromStatus(
   });
 }
 
+export function selectSourceCollectionStageRound(
+  summaryRound: ResearchStageRound | null | undefined,
+  phases: ResearchStagePhaseStatus[],
+  status: ResearchStageRoundStatusPayload | null | undefined,
+  selectedRunId: string,
+) {
+  const knowledgePhase = phases.find((phase) => phase.stageType === "knowledge_collection");
+  const candidateRounds = [
+    summaryRound ?? null,
+    knowledgePhase?.latestRound ?? null,
+    status?.latestRound ?? null,
+    ...(status?.activeRounds ?? []),
+  ].filter((round): round is ResearchStageRound => Boolean(round && round.stageType === "knowledge_collection"));
+  const dedupedRounds = new Map<string, ResearchStageRound>();
+  candidateRounds.forEach((round) => {
+    const key = round.stageRoundId || `${round.stageType}-${round.roundNumber}`;
+    if (!dedupedRounds.has(key)) {
+      dedupedRounds.set(key, round);
+    }
+  });
+  const rounds = [...dedupedRounds.values()];
+  if (!selectedRunId) {
+    return rounds[0] ?? null;
+  }
+  return rounds.find((round) => (round.sourceRunIds ?? []).includes(selectedRunId)) ?? null;
+}
+
 export function sourceCollectionStageWritebackObservedTaskIds(cards: SourceCollectionStageCardProjection[]) {
   const taskIds = new Set<string>();
   cards.forEach((card) => {

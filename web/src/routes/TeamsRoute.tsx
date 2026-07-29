@@ -312,6 +312,7 @@ import {
   sourceCollectionCompletionFlowNodeState,
   sourceCollectionNonNegativeCount,
   sourceCollectionPhaseCloseGateForRun,
+  selectSourceCollectionStageRound,
   sourceCollectionStageBackendActionReadiness,
   sourceCollectionStageProjectionCount,
   sourceCollectionStageProjectionState,
@@ -2972,28 +2973,14 @@ export function TeamsRoute({
       sourceCollectionStageCardSummary: sourceCollectionSummary.stageCardSummary ?? sourceCollectionSummary.summary ?? {},
     };
   }, [selectedSourceCollectionRunEffectiveId, sourceCollectionSummary, sourceCollectionSummaryRunId]);
-  const sourceCollectionStageRound = useMemo(() => {
-    const knowledgePhase = researchStagePhases.find((phase) => phase.stageType === "knowledge_collection");
-    const candidateRounds = [
-      sourceCollectionSummaryStageRound,
-      knowledgePhase?.latestRound ?? null,
-      researchStageRoundStatus?.latestRound ?? null,
-      ...(researchStageRoundStatus?.activeRounds ?? []),
-    ].filter((round): round is ResearchStageRound => Boolean(round && round.stageType === "knowledge_collection"));
-    const dedupedRounds = new Map<string, ResearchStageRound>();
-    candidateRounds.forEach((round) => {
-      dedupedRounds.set(round.stageRoundId || `${round.stageType}-${round.roundNumber}`, round);
-    });
-    const rounds = [...dedupedRounds.values()];
-    if (!selectedSourceCollectionRunEffectiveId) {
-      return rounds[0] ?? null;
-    }
-    const matchingRound = rounds.find((round) => (round.sourceRunIds ?? []).includes(selectedSourceCollectionRunEffectiveId));
-    return matchingRound ?? null;
-  }, [
+  const sourceCollectionStageRound = useMemo(() => selectSourceCollectionStageRound(
+    sourceCollectionSummaryStageRound,
     researchStagePhases,
-    researchStageRoundStatus?.activeRounds,
-    researchStageRoundStatus?.latestRound,
+    researchStageRoundStatus,
+    selectedSourceCollectionRunEffectiveId,
+  ), [
+    researchStagePhases,
+    researchStageRoundStatus,
     selectedSourceCollectionRunEffectiveId,
     sourceCollectionSummaryStageRound,
   ]);
