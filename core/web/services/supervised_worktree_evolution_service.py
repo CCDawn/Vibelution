@@ -45,6 +45,12 @@ from .runtime_scene_service import record_runtime_scene_event
 from .session_service import list_active_session_work_runs
 from .supervised_agent_service import supervised_agent_bindings
 from .supervised_conversation_harness_adapter import run_supervised_conversation_harness
+from .supervised_judge_closed_loop import (
+    build_improvement_prompt,
+    build_judge_evaluation_prompt,
+    judge_merge_allowed,
+    normalize_judge_evaluation,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -80,7 +86,14 @@ SELF_EVOLUTION_RISKY_WRITE_INITIATOR = "self_evolution_risky_write"
 SELF_EVOLUTION_WORKTREE_ROUTE = "api:evolution.self.worktree-runs"
 REVIEW_GATE_APPROVED = "approved"
 REVIEW_GATE_PENDING = "pending"
-WORKFLOW_STEP_IDS = ("baseline_eval", "improve", "rerun_score", "approval")
+WORKFLOW_STEP_IDS = (
+    "baseline_eval",
+    "baseline_judge",
+    "improve",
+    "rerun_eval",
+    "rerun_judge",
+    "approval",
+)
 
 
 class SupervisedWorktreeRunBusyError(RuntimeError):
@@ -106,6 +119,7 @@ class SupervisedWorktreeRunActionError(RuntimeError):
 @dataclass(frozen=True)
 class WorktreeRunDependencies:
     evaluation_runner: Callable[[Path, str, str, dict[str, Any]], dict[str, Any]] | None = None
+    judge_runner: Callable[[Path, str, str, dict[str, Any]], dict[str, Any]] | None = None
     candidate_modifier: Callable[[Path, str, dict[str, Any]], dict[str, Any]] | None = None
     worktree_factory: Callable[[Path, str], dict[str, Any]] | None = None
 
@@ -164,10 +178,16 @@ def start_supervised_worktree_run(payload: dict[str, Any]) -> dict[str, Any]:
             "stages": [],
             "events": [],
             "baseline": {},
+            "baselineJudgment": {},
             "reflection": {},
             "candidateWorktree": {},
             "candidateModification": {},
             "candidate": {},
+            "candidateJudgment": {},
+            "judgeMergeTrigger": {},
+            "baselineConversationSessionId": "",
+            "rerunConversationSessionId": "",
+            "judgeConversationSessionId": "",
             "decision": {},
             "mergeAnalysis": {},
             "merge": {},
@@ -227,10 +247,16 @@ def run_supervised_worktree_flow(
         "stages": [],
         "events": [],
         "baseline": {},
+        "baselineJudgment": {},
         "reflection": {},
         "candidateWorktree": {},
         "candidateModification": {},
         "candidate": {},
+        "candidateJudgment": {},
+        "judgeMergeTrigger": {},
+        "baselineConversationSessionId": "",
+        "rerunConversationSessionId": "",
+        "judgeConversationSessionId": "",
         "decision": {},
         "mergeAnalysis": {},
         "merge": {},
@@ -546,11 +572,28 @@ def _execute_supervised_worktree_action(
         _append_event(updated, "discard", "候选工作树已丢弃。")
         return _decorate_snapshot(updated)
     if normalized_action in {"approve_review", "approve_merge_review", "mark_reviewed"}:
-        updated = _approve_review_gate(snapshot, reviewer_note=reviewer_note)
-        _append_event(updated, "review_approved", "监督 review 已批准，候选允许进入合并分析。")
-        return _decorate_snapshot(updated)
+        judgment = snapshot.get("candidateJudgment") if isinstance(snapshot.get("candidateJudgment"), dict) else {}
+        if not judge_merge_allowed(judgment, force=force):
+            decision = str(judgment.get("decision") or "INCONCLUSIVE")
+            raise SupervisedWorktreeRunActionError(
+                f"Judge decision={decision}，默认禁止合入。只有显式 force 审批可覆盖非 PROMOTE 结论。"
+            )
+        triggered = _request_judge_controlled_merge(
+            snapshot,
+            force=force,
+            reviewer_note=reviewer_note,
+        )
+        updated = _approve_review_gate(triggered, reviewer_note=reviewer_note)
+        merged = _merge_candidate(updated, force=force)
+        _append_event(merged, "review_approved", "用户审批已记录，Judge 已触发受控合入。")
+        return _decorate_snapshot(merged)
     if normalized_action == "merge":
-        updated = _merge_candidate(snapshot, force=force)
+        triggered = (
+            snapshot
+            if _review_gate_requires_approval(snapshot)
+            else _request_judge_controlled_merge(snapshot, force=force, reviewer_note=reviewer_note)
+        )
+        updated = _merge_candidate(triggered, force=force)
         _append_event(updated, "merge", "候选改动已合并到主工作区。")
         return _decorate_snapshot(updated)
     if normalized_action in {"rollback_merge", "rollback"}:
@@ -595,6 +638,7 @@ def _execute_flow(
         _raise_if_run_cancelled(snapshot)
         _transition(snapshot, "running", "baseline", "正在运行原始 agent 基线题集。")
         evaluator = dependencies.evaluation_runner or _evaluation_runner_for_mode(options["executionMode"])
+        judge = dependencies.judge_runner or _judge_runner_for_mode(options["executionMode"])
         modifier = dependencies.candidate_modifier or _candidate_modifier_for_mode(options["executionMode"])
         worktree_factory = dependencies.worktree_factory or _default_worktree_factory
 
@@ -608,18 +652,44 @@ def _execute_flow(
                 "options": options,
                 "cancelChecker": cancel_checker,
                 "workflowStepId": "baseline_eval",
+                "conversationSessionId": "",
                 "progressCallback": _workflow_progress_callback(snapshot, "baseline", "baseline_eval"),
             },
         )
         _raise_if_run_cancelled(snapshot)
         snapshot["baseline"] = baseline
+        snapshot["baselineConversationSessionId"] = _evaluation_conversation_session_id(baseline)
         if _baseline_has_retryable_provider_failure(baseline):
             _finish_baseline_unavailable(snapshot, baseline)
             return _decorate_snapshot(snapshot)
         _raise_if_run_cancelled(snapshot)
-        _transition(snapshot, "running", "reflection", "基线题集完成，正在生成反思与自改目标。")
+        _transition(snapshot, "running", "baseline_judge", "基线题集完成，Judge Agent 正在进行第一次评分。")
 
-        reflection = _build_reflection(snapshot, baseline)
+        baseline_judgment = judge(
+            root,
+            str(options["bundleName"]),
+            "baseline",
+            {
+                "runId": run_id,
+                "options": options,
+                "cancelChecker": cancel_checker,
+                "workflowStepId": "baseline_judge",
+                "conversationSessionId": "",
+                "baselineEvaluation": baseline,
+                "progressCallback": _workflow_progress_callback(snapshot, "judge", "baseline_judge"),
+            },
+        )
+        _raise_if_run_cancelled(snapshot)
+        snapshot["baselineJudgment"] = baseline_judgment
+        snapshot["judgeConversationSessionId"] = _evaluation_conversation_session_id(baseline_judgment)
+        if str(baseline_judgment.get("status") or "").strip().lower() != "success":
+            raise SupervisedWorktreeRunValidationError(
+                str(baseline_judgment.get("reason") or "Judge 第一次评分缺少有效结构化证据。")
+            )
+
+        _transition(snapshot, "running", "reflection", "Judge 首评完成，正在把改进意见交回原基线 Agent 会话。")
+
+        reflection = _build_reflection(snapshot, baseline, baseline_judgment)
         snapshot["reflection"] = reflection
         _persist_snapshot(snapshot, active_run_id=run_id if _ACTIVE_RUN_ID == run_id else "")
 
@@ -644,7 +714,7 @@ def _execute_flow(
         )
 
         _raise_if_run_cancelled(snapshot)
-        _transition(snapshot, "running", "candidate_modify", "候选 agent 正在反思并修改自身。")
+        _transition(snapshot, "running", "candidate_modify", "基线 Agent 正在原会话中依据 Judge 反馈修改自身。")
         _raise_if_run_cancelled(snapshot)
         modification = modifier(
             candidate_path,
@@ -654,14 +724,20 @@ def _execute_flow(
                 "options": options,
                 "cancelChecker": cancel_checker,
                 "workflowStepId": "improve",
-                "progressCallback": _workflow_progress_callback(snapshot, "candidate", "improve"),
+                "conversationSessionId": str(snapshot.get("baselineConversationSessionId") or ""),
+                "progressCallback": _workflow_progress_callback(snapshot, "baseline", "improve"),
             },
         )
         _raise_if_run_cancelled(snapshot)
         snapshot["candidateModification"] = modification
-        candidate_conversation_session_id = _candidate_conversation_session_id(snapshot)
-        if candidate_conversation_session_id:
-            snapshot["candidateConversationSessionId"] = candidate_conversation_session_id
+        modification_session_id = _evaluation_conversation_session_id(modification)
+        baseline_session_id = str(snapshot.get("baselineConversationSessionId") or "")
+        if modification_session_id and baseline_session_id and modification_session_id != baseline_session_id:
+            raise SupervisedWorktreeRunValidationError("基线 Agent 改进阶段未复用原始基线会话。")
+        if modification_session_id and not baseline_session_id:
+            snapshot["baselineConversationSessionId"] = modification_session_id
+        if modification_session_id:
+            snapshot["candidateConversationSessionId"] = modification_session_id
         snapshot["candidateWorktree"]["changedFiles"] = _candidate_changed_files(
             candidate_path,
             baseline_untracked=candidate_worktree.get("untrackedFiles"),
@@ -696,27 +772,62 @@ def _execute_flow(
             return _decorate_snapshot(snapshot)
 
         _raise_if_run_cancelled(snapshot)
-        _transition(snapshot, "running", "candidate_evaluation", "正在用同一题集复测候选 agent。")
+        _transition(snapshot, "running", "candidate_evaluation", "正在新建独立会话复跑改进后的基线 Agent。")
         _raise_if_run_cancelled(snapshot)
         candidate = evaluator(
             candidate_path,
             str(options["bundleName"]),
-            "candidate",
+            "baseline_rerun",
             {
                 "runId": run_id,
                 "options": options,
                 "cancelChecker": cancel_checker,
-                "workflowStepId": "rerun_score",
-                "candidateConversationSessionId": _candidate_conversation_session_id(snapshot),
+                "workflowStepId": "rerun_eval",
+                "conversationSessionId": "",
+                "cleanRoom": True,
                 "candidateVariant": snapshot["candidateWorktree"].get("variant"),
-                "progressCallback": _workflow_progress_callback(snapshot, "candidate", "rerun_score"),
+                "progressCallback": _workflow_progress_callback(snapshot, "baseline_rerun", "rerun_eval"),
             },
         )
         _raise_if_run_cancelled(snapshot)
         snapshot["candidate"] = candidate
+        snapshot["rerunConversationSessionId"] = _evaluation_conversation_session_id(candidate)
+        if (
+            snapshot["rerunConversationSessionId"]
+            and snapshot["rerunConversationSessionId"] == str(snapshot.get("baselineConversationSessionId") or "")
+        ):
+            raise SupervisedWorktreeRunValidationError("改进后复跑错误复用了基线会话，未满足 clean-room 独立性。")
 
         _raise_if_run_cancelled(snapshot)
-        _transition(snapshot, "running", "decision", "正在比较基线与候选结果。")
+        _transition(snapshot, "running", "candidate_judge", "Judge Agent 正在原 Judge 会话中进行第二次评分。")
+        candidate_judgment = judge(
+            root,
+            str(options["bundleName"]),
+            "rerun",
+            {
+                "runId": run_id,
+                "options": options,
+                "cancelChecker": cancel_checker,
+                "workflowStepId": "rerun_judge",
+                "conversationSessionId": str(snapshot.get("judgeConversationSessionId") or ""),
+                "baselineEvaluation": baseline,
+                "baselineJudgment": baseline_judgment,
+                "rerunEvaluation": candidate,
+                "candidateVariant": snapshot["candidateWorktree"].get("variant"),
+                "progressCallback": _workflow_progress_callback(snapshot, "judge", "rerun_judge"),
+            },
+        )
+        _raise_if_run_cancelled(snapshot)
+        snapshot["candidateJudgment"] = candidate_judgment
+        rerun_judge_session_id = _evaluation_conversation_session_id(candidate_judgment)
+        if rerun_judge_session_id != str(snapshot.get("judgeConversationSessionId") or ""):
+            raise SupervisedWorktreeRunValidationError("Judge 第二次评分未复用第一次评分会话。")
+        if str(candidate_judgment.get("status") or "").strip().lower() != "success":
+            raise SupervisedWorktreeRunValidationError(
+                str(candidate_judgment.get("reason") or "Judge 第二次评分缺少有效结构化证据。")
+            )
+
+        _transition(snapshot, "running", "decision", "Judge 双次评分完成，正在生成用户审批结论。")
         decision = _build_decision(snapshot, options)
         snapshot["decision"] = decision
         snapshot["mergeAnalysis"] = _build_merge_analysis(snapshot)
@@ -809,6 +920,16 @@ def _normalize_start_payload(
             agent_bindings = _normalize_worktree_agent_bindings(supervised_agent_bindings())
         except Exception as exc:
             raise SupervisedWorktreeRunValidationError(f"监督 worktree 真实闭环缺少可用 Agent 绑定：{exc}") from exc
+    if execution_mode == "real":
+        missing_bindings = [
+            label
+            for role, label in (("baseline", "基线 Agent"), ("judge", "Judge Agent"))
+            if not str((agent_bindings.get(role) or {}).get("agentId") or "").strip()
+        ]
+        if missing_bindings:
+            raise SupervisedWorktreeRunValidationError(
+                f"监督 worktree 真实闭环缺少必要绑定：{'、'.join(missing_bindings)}。"
+            )
     return {
         "sourceKind": source_kind,
         "mode": mode,
@@ -881,18 +1002,13 @@ def _normalize_self_evolution_origin(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _normalize_review_gate(payload: dict[str, Any], self_origin: dict[str, Any]) -> dict[str, Any]:
-    required = bool(payload.get("requiresSupervisedReview")) or bool(self_origin)
-    if not required:
-        return {
-            "required": False,
-            "status": "not_required",
-            "reason": "",
-            "approvedAt": "",
-            "reviewerNote": "",
-        }
     reason = str(payload.get("reviewReason") or "").strip()
     if not reason:
-        reason = "Self-evolution risky write output must be reviewed before merge."
+        reason = (
+            "Self-evolution risky write output must be reviewed before merge."
+            if self_origin
+            else "The user must approve the Judge-scored candidate before controlled merge."
+        )
     return {
         "required": True,
         "status": REVIEW_GATE_PENDING,
@@ -905,13 +1021,15 @@ def _normalize_review_gate(payload: dict[str, Any], self_origin: dict[str, Any])
 def _estimate_llm_cost(case_count: int) -> dict[str, Any]:
     safe_cases = max(1, int(case_count or 1))
     evaluation_calls = safe_cases * 2
+    judge_calls = 2
     self_edit_calls = 1
-    model_calls = evaluation_calls + self_edit_calls
-    estimated_input = evaluation_calls * 3500 + 6000
-    estimated_output = evaluation_calls * 1200 + 3500
+    model_calls = evaluation_calls + judge_calls + self_edit_calls
+    estimated_input = evaluation_calls * 3500 + judge_calls * 5000 + 6000
+    estimated_output = evaluation_calls * 1200 + judge_calls * 1500 + 3500
     return {
         "caseCount": safe_cases,
         "evaluationCalls": evaluation_calls,
+        "judgeCalls": judge_calls,
         "selfEditCalls": self_edit_calls,
         "modelCalls": model_calls,
         "estimatedInputTokens": estimated_input,
@@ -948,6 +1066,12 @@ def _evaluation_runner_for_mode(execution_mode: str) -> Callable[[Path, str, str
     return _real_evaluation_runner
 
 
+def _judge_runner_for_mode(execution_mode: str) -> Callable[[Path, str, str, dict[str, Any]], dict[str, Any]]:
+    if execution_mode == "simulation":
+        return _simulation_judge_runner
+    return _real_judge_runner
+
+
 def _candidate_modifier_for_mode(execution_mode: str) -> Callable[[Path, str, dict[str, Any]], dict[str, Any]]:
     if execution_mode == "simulation":
         return _simulation_candidate_modifier
@@ -957,18 +1081,20 @@ def _candidate_modifier_for_mode(execution_mode: str) -> Callable[[Path, str, di
 def _simulation_evaluation_runner(project_root: Path, bundle_name: str, role: str, context: dict[str, Any]) -> dict[str, Any]:
     bundle = load_supervised_bundle(bundle_name, project_root=_storage_project_root_arg(project_root))
     cases = list(bundle.get("cases") or [])
-    successes = len(cases) if role == "candidate" else max(0, len(cases) - 1)
+    successes = len(cases) if role == "baseline_rerun" else max(0, len(cases) - 1)
     total = len(cases)
-    score = round((successes / total) * 100, 3) if total else 0.0
+    execution_score = round((successes / total) * 100, 3) if total else 0.0
+    session_id = f"simulation-{role}-{str(context.get('runId') or 'run')}"
     return {
         "role": role,
         "status": "success",
-        "score": score,
+        "executionScore": execution_score,
         "successes": successes,
         "total": total,
         "failures": max(0, total - successes),
         "bundleName": bundle_name,
-        "summary": f"{role} simulation score {score}",
+        "summary": f"{role} simulation execution {successes}/{total}",
+        "conversationSessionId": session_id,
         "cases": [
             {
                 "caseId": str(case.get("case_id") or f"case-{index}"),
@@ -980,13 +1106,46 @@ def _simulation_evaluation_runner(project_root: Path, bundle_name: str, role: st
     }
 
 
+def _simulation_judge_runner(project_root: Path, bundle_name: str, phase: str, context: dict[str, Any]) -> dict[str, Any]:
+    del project_root, bundle_name
+    session_id = str(context.get("conversationSessionId") or "").strip()
+    if not session_id:
+        session_id = f"simulation-judge-{str(context.get('runId') or 'run')}"
+    if phase == "baseline":
+        return {
+            "status": "success",
+            "phase": "baseline",
+            "decision": "HOLD",
+            "score": 40.0,
+            "baselineScore": 40.0,
+            "problems": ["模拟 Judge：基线仍有可改进边界。"],
+            "improvementInstructions": ["在隔离 worktree 中补充边界验证。"],
+            "dimensions": {},
+            "evidenceRefs": ["simulation:baseline"],
+            "conversationSessionId": session_id,
+        }
+    return {
+        "status": "success",
+        "phase": "rerun",
+        "decision": "PROMOTE",
+        "score": 80.0,
+        "baselineScore": 40.0,
+        "problems": [],
+        "improvementInstructions": [],
+        "dimensions": {},
+        "evidenceRefs": ["simulation:rerun"],
+        "conversationSessionId": session_id,
+    }
+
+
 def _real_evaluation_runner(project_root: Path, bundle_name: str, role: str, context: dict[str, Any]) -> dict[str, Any]:
     bundle = load_supervised_bundle(bundle_name, project_root=_storage_project_root_arg(project_root))
     cases = list(bundle.get("cases") or [])
     run_id = str(context.get("runId") or "")
     options = context.get("options") if isinstance(context.get("options"), dict) else {}
     agent_bindings = options.get("agentBindings") if isinstance(options.get("agentBindings"), dict) else {}
-    agent_binding = dict(agent_bindings.get(role) or {})
+    binding_role = "baseline" if role in {"baseline", "baseline_rerun"} else role
+    agent_binding = dict(agent_bindings.get(binding_role) or {})
     if not agent_binding.get("agentId"):
         return {
             "role": role,
@@ -1011,11 +1170,7 @@ def _real_evaluation_runner(project_root: Path, bundle_name: str, role: str, con
     mental_model_enabled = options.get("mentalModelEnabled")
     cancel_checker = context.get("cancelChecker") if callable(context.get("cancelChecker")) else None
     progress_callback = context.get("progressCallback") if callable(context.get("progressCallback")) else None
-    conversation_session_id = (
-        str(context.get("candidateConversationSessionId") or "").strip()
-        if role == "candidate"
-        else ""
-    )
+    conversation_session_id = str(context.get("conversationSessionId") or "").strip()
     results: list[dict[str, Any]] = []
     for case in cases:
         cancel_reason = _call_cancel_checker(cancel_checker)
@@ -1032,11 +1187,7 @@ def _real_evaluation_runner(project_root: Path, bundle_name: str, role: str, con
                 "cases": results,
             }
         case_id = str(case.get("case_id") or "case").strip() or "case"
-        prompt = (
-            str(case.get("candidate_prompt") or case.get("baseline_prompt") or case.get("prompt") or "").strip()
-            if role == "candidate"
-            else str(case.get("baseline_prompt") or case.get("prompt") or "").strip()
-        )
+        prompt = str(case.get("baseline_prompt") or case.get("prompt") or "").strip()
         scenario = str(case.get("scenario") or "transaction").strip() or "transaction"
         mode = str(case.get("mode") or "single_turn").strip() or "single_turn"
         timeout_seconds = int(case.get("timeout_seconds") or bundle.get("default_timeout_seconds") or 600)
@@ -1055,8 +1206,9 @@ def _real_evaluation_runner(project_root: Path, bundle_name: str, role: str, con
             agent_binding=agent_binding,
             mental_model_mode=mental_model_mode,
             mental_model_enabled=mental_model_enabled,
-            workspace_override=project_root if role == "candidate" else None,
+            workspace_override=project_root,
             conversation_session_id=conversation_session_id or None,
+            clean_room=bool(context.get("cleanRoom")),
             progress_callback=progress_callback,
             cancel_checker=cancel_checker,
         )
@@ -1074,6 +1226,8 @@ def _real_evaluation_runner(project_root: Path, bundle_name: str, role: str, con
                 "cases": results,
             }
         results.append(_harness_result_payload(result, case_id=case_id, role=role))
+        if not conversation_session_id:
+            conversation_session_id = str((result.process_summary or {}).get("session_id") or "").strip()
         _record_worktree_scene_event(
             "evaluation",
             "supervised_worktree_run.case_finished",
@@ -1082,25 +1236,109 @@ def _real_evaluation_runner(project_root: Path, bundle_name: str, role: str, con
         )
     successes = sum(1 for item in results if item.get("status") == "success")
     total = len(results)
-    score = round((successes / total) * 100, 3) if total else 0.0
+    execution_score = round((successes / total) * 100, 3) if total else 0.0
     evaluation = {
         "role": role,
         "status": "success" if successes == total else "failed",
-        "score": score,
+        "executionScore": execution_score,
         "successes": successes,
         "total": total,
         "failures": max(0, total - successes),
         "bundleName": bundle_name,
-        "summary": f"{role} score {score}",
+        "summary": f"{role} execution {successes}/{total}",
+        "conversationSessionId": conversation_session_id,
         "cases": results,
     }
     candidate_variant = context.get("candidateVariant")
-    if role == "candidate" and isinstance(candidate_variant, dict):
+    if role == "baseline_rerun" and isinstance(candidate_variant, dict):
         evaluation["candidateVariant"] = _clone(candidate_variant)
     return evaluation
 
 
+def _real_judge_runner(project_root: Path, bundle_name: str, phase: str, context: dict[str, Any]) -> dict[str, Any]:
+    del bundle_name
+    options = context.get("options") if isinstance(context.get("options"), dict) else {}
+    agent_bindings = options.get("agentBindings") if isinstance(options.get("agentBindings"), dict) else {}
+    agent_binding = dict(agent_bindings.get("judge") or {})
+    if not agent_binding.get("agentId"):
+        return {
+            "status": "failed",
+            "phase": phase,
+            "decision": "INCONCLUSIVE",
+            "reason": "Judge evaluation missing supervised Judge Agent binding.",
+        }
+    prompt = build_judge_evaluation_prompt(
+        phase=phase,
+        baseline_evaluation=context.get("baselineEvaluation") if isinstance(context.get("baselineEvaluation"), dict) else {},
+        rerun_evaluation=context.get("rerunEvaluation") if isinstance(context.get("rerunEvaluation"), dict) else {},
+        previous_judgment=context.get("baselineJudgment") if isinstance(context.get("baselineJudgment"), dict) else {},
+        candidate_variant=context.get("candidateVariant") if isinstance(context.get("candidateVariant"), dict) else {},
+    )
+    result = run_supervised_conversation_harness(
+        repo_root=project_root,
+        mode="single_turn",
+        prompt=prompt,
+        scenario="supervised_judge_evaluation",
+        timeout_seconds=600,
+        expect_restart=False,
+        post_restart_observe_seconds=0,
+        keep_worktree=True,
+        agent_binding=agent_binding,
+        mental_model_mode=str(options.get("mentalModelMode") or "follow"),
+        mental_model_enabled=options.get("mentalModelEnabled"),
+        workspace_override=project_root,
+        conversation_session_id=str(context.get("conversationSessionId") or "").strip() or None,
+        progress_callback=context.get("progressCallback") if callable(context.get("progressCallback")) else None,
+        cancel_checker=context.get("cancelChecker") if callable(context.get("cancelChecker")) else None,
+    )
+    session_id = str((result.process_summary or {}).get("session_id") or "").strip()
+    raw_judgment = (result.evolution_summary or {}).get("agent_judgment")
+    if result.status != "success" or not isinstance(raw_judgment, dict):
+        return {
+            "status": "failed",
+            "phase": phase,
+            "decision": "INCONCLUSIVE",
+            "reason": result.reason or "Judge Agent did not emit SUPERVISED_AGENT_JUDGMENT.",
+            "conversationSessionId": session_id,
+        }
+    try:
+        normalized = normalize_judge_evaluation(raw_judgment, expected_phase=phase)
+    except ValueError as exc:
+        return {
+            "status": "failed",
+            "phase": phase,
+            "decision": "INCONCLUSIVE",
+            "reason": str(exc),
+            "conversationSessionId": session_id,
+        }
+    return {
+        **normalized,
+        "conversationSessionId": session_id,
+        "summary": result.reason or f"Judge {phase} evaluation completed.",
+    }
+
+
 def _harness_result_payload(result: HarnessResult, *, case_id: str, role: str) -> dict[str, Any]:
+    summary = result.evolution_summary if isinstance(result.evolution_summary, dict) else {}
+    trace_summary = {
+        "validation": _clone(summary.get("validation") or {}),
+        "transaction": _clone(summary.get("transaction") or {}),
+        "git": _clone(summary.get("git") or {}),
+        "restart": _clone(summary.get("restart") or {}),
+        "toolSequence": [str(item)[:160] for item in list(summary.get("tool_sequence_tail") or [])[-12:]],
+        "toolPhases": [str(item)[:200] for item in list(summary.get("tool_phase_sequence_tail") or [])[-12:]],
+        "guardedTools": _clone(summary.get("guarded_tools") or {}),
+        "evidence": _clone(summary.get("evidence") or {}),
+    }
+    for source_key, target_key in (
+        ("environment", "environment"),
+        ("final_state", "finalState"),
+        ("infeasible_outcome", "infeasibleOutcome"),
+        ("supervised_marker_errors", "markerErrors"),
+    ):
+        value = summary.get(source_key)
+        if isinstance(value, dict):
+            trace_summary[target_key] = _clone(value)
     return {
         "caseId": case_id,
         "role": role,
@@ -1108,7 +1346,10 @@ def _harness_result_payload(result: HarnessResult, *, case_id: str, role: str) -
         "reason": result.reason,
         "worktreePath": result.worktree_path,
         "checkpointCommit": result.checkpoint_commit,
-        "llmFailure": (result.evolution_summary or {}).get("llm_failure") or {},
+        "conversationSessionId": str((result.process_summary or {}).get("session_id") or ""),
+        "assistantOutput": _bounded_text("\n".join(str(item) for item in result.stdout_tail[-20:]), limit=4000),
+        "traceSummary": trace_summary,
+        "llmFailure": summary.get("llm_failure") or {},
     }
 
 
@@ -1135,13 +1376,13 @@ def _real_candidate_modifier(worktree_path: Path, prompt: str, context: dict[str
     progress_callback = context.get("progressCallback") if callable(context.get("progressCallback")) else None
     options = context.get("options") if isinstance(context.get("options"), dict) else {}
     agent_bindings = options.get("agentBindings") if isinstance(options.get("agentBindings"), dict) else {}
-    agent_binding = dict(agent_bindings.get("candidate") or {})
+    agent_binding = dict(agent_bindings.get("baseline") or {})
     if not agent_binding.get("agentId"):
         return {
             "status": "failed",
             "startedAt": started,
             "endedAt": _now_iso(),
-            "summary": "candidate self-edit missing supervised candidate Agent binding",
+            "summary": "baseline self-edit missing supervised baseline Agent binding",
         }
     result = run_supervised_conversation_harness(
         repo_root=worktree_path,
@@ -1156,6 +1397,7 @@ def _real_candidate_modifier(worktree_path: Path, prompt: str, context: dict[str
         mental_model_mode=str(options.get("mentalModelMode") or "follow"),
         mental_model_enabled=options.get("mentalModelEnabled"),
         workspace_override=worktree_path,
+        conversation_session_id=str(context.get("conversationSessionId") or "").strip() or None,
         progress_callback=progress_callback,
         cancel_checker=cancel_checker,
     )
@@ -1171,6 +1413,7 @@ def _real_candidate_modifier(worktree_path: Path, prompt: str, context: dict[str
             else "candidate self-edit conversation failed"
         ),
         "conversationSummary": result.evolution_summary,
+        "conversationSessionId": str((result.process_summary or {}).get("session_id") or ""),
         "workspaceOverride": str(worktree_path),
     }
 
@@ -1258,12 +1501,28 @@ def _ensure_bundle_available_in_candidate(project_root: Path, *, candidate_path:
     shutil.copy2(source, target)
 
 
-def _build_reflection(snapshot: dict[str, Any], baseline: dict[str, Any]) -> dict[str, Any]:
+def _build_reflection(
+    snapshot: dict[str, Any],
+    baseline: dict[str, Any],
+    baseline_judgment: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     successes = int(baseline.get("successes") or 0)
     total = int(baseline.get("total") or 0)
     failures = max(0, total - successes)
     self_origin = snapshot.get("selfEvolutionOrigin") if isinstance(snapshot.get("selfEvolutionOrigin"), dict) else {}
     requested_goal = str(self_origin.get("goal") or "").strip()
+    if isinstance(baseline_judgment, dict) and baseline_judgment:
+        return {
+            "summary": (
+                f"Judge 基线评分 {baseline_judgment.get('score')}；"
+                f"已向原基线 Agent 会话发送 {len(list(baseline_judgment.get('improvementInstructions') or []))} 条改进指令。"
+            ),
+            "selfModificationPrompt": build_improvement_prompt(
+                baseline_evaluation=baseline,
+                baseline_judgment=baseline_judgment,
+                requested_goal=requested_goal,
+            ),
+        }
     goal_section = ""
     if requested_goal:
         goal_section = (
@@ -1546,19 +1805,32 @@ def _baseline_failure_reason(baseline: dict[str, Any]) -> str:
 def _build_decision(snapshot: dict[str, Any], options: dict[str, Any]) -> dict[str, Any]:
     baseline = snapshot.get("baseline") if isinstance(snapshot.get("baseline"), dict) else {}
     candidate = snapshot.get("candidate") if isinstance(snapshot.get("candidate"), dict) else {}
+    baseline_judgment = snapshot.get("baselineJudgment") if isinstance(snapshot.get("baselineJudgment"), dict) else {}
+    candidate_judgment = snapshot.get("candidateJudgment") if isinstance(snapshot.get("candidateJudgment"), dict) else {}
     modification = snapshot.get("candidateModification") if isinstance(snapshot.get("candidateModification"), dict) else {}
     worktree = snapshot.get("candidateWorktree") if isinstance(snapshot.get("candidateWorktree"), dict) else {}
-    baseline_score = float(baseline.get("score") or 0.0)
-    candidate_score = float(candidate.get("score") or 0.0)
+    baseline_score = float(baseline_judgment.get("score") or 0.0)
+    candidate_score = float(candidate_judgment.get("score") or 0.0)
     delta = round(candidate_score - baseline_score, 3)
+    judge_decision = str(candidate_judgment.get("decision") or "INCONCLUSIVE").strip().upper()
     changed_files = list(worktree.get("changedFiles") or [])
     candidate_variant = worktree.get("variant") if isinstance(worktree.get("variant"), dict) else {}
     high_risk_files = [item for item in changed_files if bool(item.get("highRisk"))]
     gates = [
         {
-            "name": "score_improved",
-            "status": "pass" if delta > 0 else "fail",
-            "reason": f"候选分数 {candidate_score}，基线分数 {baseline_score}，delta={delta}",
+            "name": "judge_scored_twice",
+            "status": (
+                "pass"
+                if str(baseline_judgment.get("status") or "") == "success"
+                and str(candidate_judgment.get("status") or "") == "success"
+                else "fail"
+            ),
+            "reason": "两次评分均来自同一 Judge 会话的结构化输出。",
+        },
+        {
+            "name": "judge_promote",
+            "status": "pass" if judge_decision == "PROMOTE" else "hold",
+            "reason": f"Judge decision={judge_decision}，复跑分数 {candidate_score}，基线分数 {baseline_score}，delta={delta}",
         },
         {
             "name": "candidate_modified",
@@ -1589,17 +1861,16 @@ def _build_decision(snapshot: dict[str, Any], options: dict[str, Any]) -> dict[s
     ]
     pass_all = all(gate["status"] == "pass" for gate in gates)
     mode = str(options.get("mode") or "auto")
-    if mode == "manual":
-        action = "needs_manual_decision"
-        reason = "手工操作模式下，候选保留给用户决定。"
-    elif pass_all:
+    if pass_all:
         action = "preserve"
-        reason = "候选分数提升且通过自动保留闸门。"
+        reason = "Judge 建议 PROMOTE，候选通过结构化评分和工作树绑定闸门，等待用户审批。"
     else:
-        action = "discard"
-        reason = "候选未满足自动保留闸门。"
+        action = "hold"
+        reason = f"Judge decision={judge_decision}，默认禁止合入；等待用户审阅或显式强制审批。"
     return {
         "mode": mode,
+        "scoreSource": "judge_agent",
+        "judgeDecision": judge_decision,
         "baselineScore": baseline_score,
         "candidateScore": candidate_score,
         "scoreDelta": delta,
@@ -1607,25 +1878,24 @@ def _build_decision(snapshot: dict[str, Any], options: dict[str, Any]) -> dict[s
         "reason": reason,
         "gates": gates,
         "highRisk": bool(high_risk_files),
+        "baselineExecution": {
+            "successes": baseline.get("successes"),
+            "total": baseline.get("total"),
+            "executionScore": baseline.get("executionScore"),
+        },
+        "rerunExecution": {
+            "successes": candidate.get("successes"),
+            "total": candidate.get("total"),
+            "executionScore": candidate.get("executionScore"),
+        },
     }
 
 
 def _finish_by_decision(snapshot: dict[str, Any], decision: dict[str, Any], options: dict[str, Any]) -> None:
-    recommended = str(decision.get("recommendedAction") or "")
-    if recommended == "discard":
-        cleanup = _cleanup_candidate_worktree(snapshot)
-        if cleanup.get("status") == "removed":
-            outcome = "discarded"
-            message = "候选未优于基线或未过闸门，已丢弃候选工作树。"
-        else:
-            outcome = "discard_skipped"
-            message = "候选未过闸门，但候选工作树路径未通过安全校验，已跳过删除。"
-    elif recommended == "preserve":
-        outcome = "preserved"
-        message = "候选优于基线，已保留候选工作树和合并分析。"
-    else:
-        outcome = "needs_manual_decision"
-        message = "手工模式已完成闭环，候选等待用户保留、丢弃或合并。"
+    del options
+    judge_decision = str(decision.get("judgeDecision") or "INCONCLUSIVE")
+    outcome = "awaiting_user_approval"
+    message = f"Judge 双次评分完成（{judge_decision}），候选工作树已保留，等待用户审批。"
     finished = _now_iso()
     snapshot["status"] = "done"
     snapshot["phase"] = "complete"
@@ -1681,11 +1951,18 @@ def _record_workflow_progress(
                 return text
         return ""
 
+    session_fallback = ""
+    if normalized_step in {"baseline_eval", "improve"}:
+        session_fallback = str(snapshot.get("baselineConversationSessionId") or "")
+    elif normalized_step in {"baseline_judge", "rerun_judge"}:
+        session_fallback = str(snapshot.get("judgeConversationSessionId") or "")
+    elif normalized_step == "rerun_eval":
+        session_fallback = str(snapshot.get("rerunConversationSessionId") or "")
     conversation_session_id = _text(
         event.get("conversation_session_id"),
         event.get("conversationSessionId"),
         existing.get("conversationSessionId"),
-        _candidate_conversation_session_id(snapshot) if normalized_step in {"improve", "rerun_score"} else "",
+        session_fallback,
     )
     conversation_turn_id = _text(
         event.get("conversation_turn_id"),
@@ -1723,7 +2000,13 @@ def _record_workflow_progress(
         "conversationMessages": conversation_messages[-20:],
         "transcript": transcript[-20:],
     }
-    if role == "candidate" and conversation_session_id:
+    if role == "baseline" and conversation_session_id:
+        snapshot["baselineConversationSessionId"] = conversation_session_id
+    elif role == "baseline_rerun" and conversation_session_id:
+        snapshot["rerunConversationSessionId"] = conversation_session_id
+    elif role == "judge" and conversation_session_id:
+        snapshot["judgeConversationSessionId"] = conversation_session_id
+    elif role == "candidate" and conversation_session_id:
         snapshot["candidateConversationSessionId"] = conversation_session_id
     if live_preview:
         snapshot["latestMessage"] = live_preview
@@ -1754,6 +2037,25 @@ def _candidate_conversation_session_id(snapshot: dict[str, Any]) -> str:
         return session_id
     camel_backend = summary.get("conversationBackend") if isinstance(summary.get("conversationBackend"), dict) else {}
     return str(camel_backend.get("sessionId") or camel_backend.get("session_id") or "").strip()
+
+
+def _evaluation_conversation_session_id(payload: dict[str, Any]) -> str:
+    if not isinstance(payload, dict):
+        return ""
+    for key in ("conversationSessionId", "sessionId"):
+        session_id = str(payload.get(key) or "").strip()
+        if session_id:
+            return session_id
+    cases = payload.get("cases") if isinstance(payload.get("cases"), list) else []
+    for item in cases:
+        if not isinstance(item, dict):
+            continue
+        session_id = str(item.get("conversationSessionId") or item.get("sessionId") or "").strip()
+        if session_id:
+            return session_id
+    summary = payload.get("conversationSummary") if isinstance(payload.get("conversationSummary"), dict) else {}
+    backend = summary.get("conversation_backend") if isinstance(summary.get("conversation_backend"), dict) else {}
+    return str(backend.get("session_id") or backend.get("sessionId") or "").strip()
 
 
 def _is_self_evolution_worktree_snapshot(snapshot: dict[str, Any]) -> bool:
@@ -1850,18 +2152,16 @@ def _build_self_evolution_workflow_steps(snapshot: dict[str, Any]) -> list[dict[
 
 
 def _build_workflow_steps(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
-    if _is_self_evolution_worktree_snapshot(snapshot):
-        return _build_self_evolution_workflow_steps(snapshot)
-
     progress = snapshot.get("workflowProgress") if isinstance(snapshot.get("workflowProgress"), dict) else {}
     action_states = snapshot.get("actionStates") if isinstance(snapshot.get("actionStates"), dict) else {}
     baseline = snapshot.get("baseline") if isinstance(snapshot.get("baseline"), dict) else {}
     candidate = snapshot.get("candidate") if isinstance(snapshot.get("candidate"), dict) else {}
+    baseline_judgment = snapshot.get("baselineJudgment") if isinstance(snapshot.get("baselineJudgment"), dict) else {}
+    candidate_judgment = snapshot.get("candidateJudgment") if isinstance(snapshot.get("candidateJudgment"), dict) else {}
     modification = snapshot.get("candidateModification") if isinstance(snapshot.get("candidateModification"), dict) else {}
     decision = snapshot.get("decision") if isinstance(snapshot.get("decision"), dict) else {}
     merge_analysis = snapshot.get("mergeAnalysis") if isinstance(snapshot.get("mergeAnalysis"), dict) else {}
     workflow_current = _current_workflow_step_id(snapshot)
-    candidate_session_id = _candidate_conversation_session_id(snapshot)
 
     def _step_progress(step_id: str) -> dict[str, Any]:
         return progress.get(step_id) if isinstance(progress.get(step_id), dict) else {}
@@ -1877,9 +2177,14 @@ def _build_workflow_steps(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
             "conversationMessages": list(item.get("conversationMessages") or []),
         }
 
-    baseline_fields = _conversation_fields("baseline_eval")
-    improve_fields = _conversation_fields("improve", candidate_session_id)
-    rerun_fields = _conversation_fields("rerun_score", candidate_session_id)
+    baseline_session_id = str(snapshot.get("baselineConversationSessionId") or "")
+    rerun_session_id = str(snapshot.get("rerunConversationSessionId") or "")
+    judge_session_id = str(snapshot.get("judgeConversationSessionId") or "")
+    baseline_fields = _conversation_fields("baseline_eval", baseline_session_id)
+    baseline_judge_fields = _conversation_fields("baseline_judge", judge_session_id)
+    improve_fields = _conversation_fields("improve", baseline_session_id)
+    rerun_fields = _conversation_fields("rerun_eval", rerun_session_id)
+    rerun_judge_fields = _conversation_fields("rerun_judge", judge_session_id)
     changed_files = list((snapshot.get("candidateWorktree") if isinstance(snapshot.get("candidateWorktree"), dict) else {}).get("changedFiles") or [])
     approval_status = "pending" if str(snapshot.get("status") or "").strip().lower() == "done" else _workflow_status(snapshot, "approval")
     if str(snapshot.get("status") or "").strip().lower() in {"failed", "cancelled"}:
@@ -1888,7 +2193,7 @@ def _build_workflow_steps(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
     return [
         {
             "id": "baseline_eval",
-            "label": "基线评测",
+            "label": "基线运行",
             "ownerKind": "agent",
             "role": "baseline",
             "status": _workflow_status(snapshot, "baseline_eval"),
@@ -1899,37 +2204,66 @@ def _build_workflow_steps(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
             **baseline_fields,
         },
         {
-            "id": "improve",
-            "label": "提出建议与改良",
+            "id": "baseline_judge",
+            "label": "基线评分",
             "ownerKind": "agent",
-            "role": "candidate",
+            "role": "judge",
+            "status": _workflow_status(snapshot, "baseline_judge"),
+            "current": workflow_current == "baseline_judge",
+            "summary": _bounded_text(baseline_judgment.get("summary") or "等待 Judge 对基线轨迹评分。"),
+            "livePreview": _workflow_live_preview(snapshot, "baseline_judge", baseline_judgment.get("summary")),
+            "metrics": {
+                "score": baseline_judgment.get("score"),
+                "decision": baseline_judgment.get("decision"),
+                "scoreSource": "judge_agent",
+            },
+            **baseline_judge_fields,
+        },
+        {
+            "id": "improve",
+            "label": "基线自改",
+            "ownerKind": "agent",
+            "role": "baseline",
             "status": _workflow_status(snapshot, "improve"),
             "current": workflow_current == "improve",
-            "summary": _bounded_text(modification.get("summary") or (snapshot.get("reflection") or {}).get("summary") or "等待改良 Agent 给出建议并修改候选 worktree。"),
+            "summary": _bounded_text(modification.get("summary") or (snapshot.get("reflection") or {}).get("summary") or "等待原基线 Agent 在同一会话中修改候选 worktree。"),
             "livePreview": _workflow_live_preview(snapshot, "improve", modification.get("summary")),
             "metrics": {"changedFileCount": len(changed_files), "highRiskFileCount": sum(1 for item in changed_files if isinstance(item, dict) and item.get("highRisk"))},
             **improve_fields,
         },
         {
-            "id": "rerun_score",
-            "label": "复跑与评分",
+            "id": "rerun_eval",
+            "label": "独立复跑",
             "ownerKind": "agent",
-            "role": "candidate",
-            "status": _workflow_status(snapshot, "rerun_score"),
-            "current": workflow_current == "rerun_score",
-            "summary": _bounded_text(decision.get("reason") or candidate.get("summary") or "等待复跑候选并完成评分。"),
-            "livePreview": _workflow_live_preview(snapshot, "rerun_score", decision.get("reason") or candidate.get("summary")),
-            "metrics": {
-                **_score_metrics(candidate),
-                "baselineScore": decision.get("baselineScore"),
-                "candidateScore": decision.get("candidateScore"),
-                "scoreDelta": decision.get("scoreDelta"),
-            },
+            "role": "baseline_rerun",
+            "status": _workflow_status(snapshot, "rerun_eval"),
+            "current": workflow_current == "rerun_eval",
+            "summary": _bounded_text(candidate.get("summary") or "等待在全新会话中独立复跑改进后的基线 Agent。"),
+            "livePreview": _workflow_live_preview(snapshot, "rerun_eval", candidate.get("summary")),
+            "metrics": _score_metrics(candidate),
             **rerun_fields,
         },
         {
+            "id": "rerun_judge",
+            "label": "复跑评分",
+            "ownerKind": "agent",
+            "role": "judge",
+            "status": _workflow_status(snapshot, "rerun_judge"),
+            "current": workflow_current == "rerun_judge",
+            "summary": _bounded_text(decision.get("reason") or candidate_judgment.get("summary") or "等待 Judge 在原评分会话中进行第二次评分。"),
+            "livePreview": _workflow_live_preview(snapshot, "rerun_judge", decision.get("reason") or candidate_judgment.get("summary")),
+            "metrics": {
+                "baselineScore": decision.get("baselineScore"),
+                "candidateScore": decision.get("candidateScore"),
+                "scoreDelta": decision.get("scoreDelta"),
+                "decision": candidate_judgment.get("decision"),
+                "scoreSource": "judge_agent",
+            },
+            **rerun_judge_fields,
+        },
+        {
             "id": "approval",
-            "label": "用户审批",
+            "label": "用户审批与合入",
             "ownerKind": "human",
             "role": None,
             "status": approval_status,
@@ -1953,10 +2287,14 @@ def _build_workflow_steps(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
 def _current_workflow_step_id(snapshot: dict[str, Any]) -> str:
     status = str(snapshot.get("status") or "").strip().lower()
     phase = str(snapshot.get("phase") or "").strip().lower()
-    if phase in {"candidate_evaluation", "decision"}:
-        return "rerun_score"
+    if phase in {"candidate_judge", "decision"}:
+        return "rerun_judge"
+    if phase == "candidate_evaluation":
+        return "rerun_eval"
     if phase in {"reflection", "candidate_worktree", "candidate_modify"}:
         return "improve"
+    if phase == "baseline_judge":
+        return "baseline_judge"
     if status in _TERMINAL_STATUSES or phase in {"complete", "failed", "baseline_unavailable", "shutdown"}:
         return "approval"
     return "baseline_eval"
@@ -1975,14 +2313,22 @@ def _workflow_status(snapshot: dict[str, Any], step_id: str) -> str:
         if phase == "baseline" or (status in _ACTIVE_STATUSES and not snapshot.get("baseline")):
             return "running"
         return "done" if snapshot.get("baseline") else "pending"
+    if step_id == "baseline_judge":
+        if phase == "baseline_judge":
+            return "running"
+        return "done" if snapshot.get("baselineJudgment") else "pending"
     if step_id == "improve":
         if phase in {"reflection", "candidate_worktree", "candidate_modify"}:
             return "running"
         return "done" if snapshot.get("candidateModification") else "pending"
-    if step_id == "rerun_score":
-        if phase in {"candidate_evaluation", "decision"}:
+    if step_id == "rerun_eval":
+        if phase == "candidate_evaluation":
             return "running"
-        return "done" if snapshot.get("candidate") or snapshot.get("decision") else "pending"
+        return "done" if snapshot.get("candidate") else "pending"
+    if step_id == "rerun_judge":
+        if phase in {"candidate_judge", "decision"}:
+            return "running"
+        return "done" if snapshot.get("candidateJudgment") or snapshot.get("decision") else "pending"
     if step_id == "approval":
         return "pending"
     return "pending"
@@ -1991,10 +2337,14 @@ def _workflow_status(snapshot: dict[str, Any], step_id: str) -> str:
 def _step_has_output(snapshot: dict[str, Any], step_id: str) -> bool:
     if step_id == "baseline_eval":
         return bool(snapshot.get("baseline"))
+    if step_id == "baseline_judge":
+        return bool(snapshot.get("baselineJudgment"))
     if step_id == "improve":
         return bool(snapshot.get("candidateModification"))
-    if step_id == "rerun_score":
-        return bool(snapshot.get("candidate") or snapshot.get("decision"))
+    if step_id == "rerun_eval":
+        return bool(snapshot.get("candidate"))
+    if step_id == "rerun_judge":
+        return bool(snapshot.get("candidateJudgment") or snapshot.get("decision"))
     if step_id == "approval":
         return bool(snapshot.get("decision") or snapshot.get("mergeAnalysis"))
     return False
@@ -2008,7 +2358,7 @@ def _workflow_live_preview(snapshot: dict[str, Any], step_id: str, fallback: Any
 
 def _score_metrics(payload: dict[str, Any]) -> dict[str, Any]:
     return {
-        "score": payload.get("score"),
+        "executionScore": payload.get("executionScore"),
         "successes": payload.get("successes"),
         "total": payload.get("total"),
         "failures": payload.get("failures"),
@@ -2096,14 +2446,119 @@ def _build_merge_analysis(snapshot: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _request_judge_controlled_merge(
+    snapshot: dict[str, Any],
+    *,
+    force: bool,
+    reviewer_note: str,
+) -> dict[str, Any]:
+    updated = _clone(snapshot)
+    judgment = updated.get("candidateJudgment") if isinstance(updated.get("candidateJudgment"), dict) else {}
+    session_id = str(updated.get("judgeConversationSessionId") or "").strip()
+    decision = str(judgment.get("decision") or "INCONCLUSIVE").strip().upper()
+    if str(updated.get("executionMode") or "simulation").strip().lower() != "real":
+        updated["judgeMergeTrigger"] = {
+            "status": "requested",
+            "mergeRequested": True,
+            "decision": decision,
+            "conversationSessionId": session_id,
+            "force": force,
+            "mechanism": "simulated_judge_request",
+            "requestedAt": _now_iso(),
+        }
+        return updated
+
+    bindings = updated.get("agentBindings") if isinstance(updated.get("agentBindings"), dict) else {}
+    agent_binding = dict(bindings.get("judge") or {})
+    if not agent_binding.get("agentId") or not session_id:
+        raise SupervisedWorktreeRunActionError("缺少 Judge Agent 绑定或原 Judge 会话，禁止合入。")
+    prompt_payload = {
+        "runId": str(updated.get("runId") or ""),
+        "finalJudgment": judgment,
+        "candidateVariant": (
+            (updated.get("candidateWorktree") or {}).get("variant")
+            if isinstance(updated.get("candidateWorktree"), dict)
+            else {}
+        ),
+        "userApproval": {
+            "approved": True,
+            "force": force,
+            "reviewerNote": _safe_metadata_text(reviewer_note, limit=500),
+        },
+    }
+    prompt = (
+        "用户已经完成监督进化最终审批。你仍是同一个 Judge Agent；请复核你在本会话中的两次评分、"
+        "候选版本绑定和用户审批。\n"
+        "不要执行 shell、git merge 或直接修改文件。你只能决定是否请求后端受控候选应用器。\n"
+        "普通审批仅在最终 decision=PROMOTE 时请求合入；显式 force 审批允许记录覆盖非 PROMOTE 结论。\n"
+        "最后单独输出严格 JSON：\n"
+        'SUPERVISED_AGENT_JUDGMENT: {"phase":"merge_authorization","decision":"PROMOTE",'
+        '"merge_requested":true,"reason":"...","evidence_refs":[]}\n'
+        f"审批证据：{json.dumps(prompt_payload, ensure_ascii=False, sort_keys=True)}"
+    )
+    result = run_supervised_conversation_harness(
+        repo_root=_snapshot_project_root(updated),
+        mode="single_turn",
+        prompt=prompt,
+        scenario="supervised_judge_merge_trigger",
+        timeout_seconds=600,
+        expect_restart=False,
+        post_restart_observe_seconds=0,
+        keep_worktree=True,
+        agent_binding=agent_binding,
+        mental_model_mode=str(updated.get("mentalModelMode") or "follow"),
+        mental_model_enabled=updated.get("mentalModelEnabled"),
+        workspace_override=_snapshot_project_root(updated),
+        conversation_session_id=session_id,
+    )
+    observed_session_id = str((result.process_summary or {}).get("session_id") or "").strip()
+    raw_trigger = (result.evolution_summary or {}).get("agent_judgment")
+    if (
+        result.status != "success"
+        or observed_session_id != session_id
+        or not isinstance(raw_trigger, dict)
+        or str(raw_trigger.get("phase") or "").strip().lower() != "merge_authorization"
+        or raw_trigger.get("merge_requested") is not True
+    ):
+        raise SupervisedWorktreeRunActionError(
+            result.reason or "Judge 未在原会话中输出有效 merge_requested，禁止合入。"
+        )
+    trigger_decision = str(raw_trigger.get("decision") or "").strip().upper()
+    if not force and trigger_decision != "PROMOTE":
+        raise SupervisedWorktreeRunActionError(
+            f"Judge merge trigger decision={trigger_decision or 'INCONCLUSIVE'}，禁止普通合入。"
+        )
+    updated["judgeMergeTrigger"] = {
+        "status": "requested",
+        "mergeRequested": True,
+        "decision": trigger_decision,
+        "reason": str(raw_trigger.get("reason") or "").strip(),
+        "evidenceRefs": [str(item) for item in list(raw_trigger.get("evidence_refs") or [])][:20],
+        "conversationSessionId": observed_session_id,
+        "force": force,
+        "mechanism": "judge_conversation_request",
+        "requestedAt": _now_iso(),
+    }
+    return updated
+
+
 def _merge_candidate(snapshot: dict[str, Any], *, force: bool) -> dict[str, Any]:
     updated = _with_merge_analysis(snapshot)
     analysis = updated.get("mergeAnalysis") if isinstance(updated.get("mergeAnalysis"), dict) else {}
     blockers = set(str(item) for item in list(analysis.get("blockers") or []))
     if "supervised_review_pending" in blockers:
         raise SupervisedWorktreeRunActionError(
-            "self-evolution 来源的候选仍处于 pending review，必须先完成监督 review approve，不能用 force 绕过。"
+            "候选仍处于用户审批 pending，必须先完成审批，不能用 force 绕过。"
         )
+    judgment = updated.get("candidateJudgment") if isinstance(updated.get("candidateJudgment"), dict) else {}
+    if not judge_merge_allowed(judgment, force=force):
+        decision = str(judgment.get("decision") or "INCONCLUSIVE")
+        raise SupervisedWorktreeRunActionError(
+            f"Judge decision={decision}，缺少允许受控合入的 Judge 结论。"
+        )
+    merge_trigger = updated.get("judgeMergeTrigger") if isinstance(updated.get("judgeMergeTrigger"), dict) else {}
+    if str(merge_trigger.get("status") or "") != "requested" or merge_trigger.get("mergeRequested") is not True:
+        raise SupervisedWorktreeRunActionError("缺少 Judge Agent 的结构化 merge_requested，禁止合入。")
     if not bool(analysis.get("mergeAllowed")) and not force:
         raise SupervisedWorktreeRunActionError(
             "合并分析未通过。请先处理冲突/高风险项，或在明确确认后使用 force。"
@@ -2123,6 +2578,12 @@ def _merge_candidate(snapshot: dict[str, Any], *, force: bool) -> dict[str, Any]
         "status": "merged",
         "mergedAt": _now_iso(),
         "force": force,
+        "triggeredBy": {
+            "role": "judge",
+            "conversationSessionId": str(merge_trigger.get("conversationSessionId") or ""),
+            "decision": str(merge_trigger.get("decision") or judgment.get("decision") or ""),
+            "mechanism": "controlled_candidate_apply",
+        },
         "changedFiles": [item.get("path") for item in changed_files],
         "rollbackManifestPath": rollback_manifest["path"],
     }
@@ -2158,7 +2619,7 @@ def _approve_review_gate(snapshot: dict[str, Any], *, reviewer_note: str = "") -
         raise SupervisedWorktreeRunActionError("候选运行尚未结束，不能提前批准合并 review。")
     gate = snapshot.get("reviewGate") if isinstance(snapshot.get("reviewGate"), dict) else {}
     if not bool(gate.get("required")):
-        raise SupervisedWorktreeRunValidationError("此候选不需要 self-evolution merge review。")
+        raise SupervisedWorktreeRunValidationError("此候选没有可审批的受控合入闸门。")
     updated = _clone(snapshot)
     updated["reviewGate"] = {
         **gate,
@@ -2976,6 +3437,9 @@ def _action_states(snapshot: dict[str, Any]) -> dict[str, Any]:
     active = status in _ACTIVE_STATUSES
     review_pending = _review_gate_requires_approval(snapshot)
     review_gate = snapshot.get("reviewGate") if isinstance(snapshot.get("reviewGate"), dict) else {}
+    candidate_judgment = snapshot.get("candidateJudgment") if isinstance(snapshot.get("candidateJudgment"), dict) else {}
+    judge_promoted = judge_merge_allowed(candidate_judgment)
+    judge_decision = str(candidate_judgment.get("decision") or "INCONCLUSIVE")
     return {
         "terminate": {
             "enabled": active,
@@ -2985,7 +3449,12 @@ def _action_states(snapshot: dict[str, Any]) -> dict[str, Any]:
         "discard": {"enabled": done and has_worktree and outcome not in {"discarded", "discard_skipped", "merged"}},
         "analyzeMerge": {"enabled": done and has_worktree},
         "approveReview": {
-            "enabled": done and has_worktree and bool(review_gate.get("required")) and review_pending,
+            "enabled": done and has_worktree and bool(review_gate.get("required")) and review_pending and judge_promoted,
+            "reason": (
+                ""
+                if judge_promoted
+                else f"Judge decision={judge_decision}，默认审批入口已关闭；如确需覆盖，必须显式 force 审批。"
+            ),
         },
         "merge": {
             "enabled": done

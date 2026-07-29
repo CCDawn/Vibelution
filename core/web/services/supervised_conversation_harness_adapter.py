@@ -100,6 +100,7 @@ def run_supervised_conversation_harness(
     mental_model_enabled: bool | None = None,
     workspace_override: str | Path | None = None,
     conversation_session_id: str | None = None,
+    clean_room: bool = False,
     progress_callback: Any = None,
     cancel_checker: Any = None,
 ) -> HarnessResult:
@@ -135,6 +136,25 @@ def run_supervised_conversation_harness(
     prompt_text = materialize_scenario_prompt(scenario, prompt, repo_root) or ""
     normalized_workspace_override = str(Path(workspace_override).resolve()) if workspace_override else ""
     requested_session_id = str(conversation_session_id or "").strip()
+    if clean_room and requested_session_id:
+        return _conversation_harness_result(
+            run_id=run_id,
+            status="failed",
+            reason="Clean-room supervised rerun cannot reuse an existing conversation session.",
+            started_at=started_at,
+            repo_root=repo_root,
+            timeout_seconds=timeout_seconds,
+            expect_restart=expect_restart,
+            scenario=scenario,
+            agent_binding=binding,
+            session_id=requested_session_id,
+            prompt_text=prompt_text,
+            assistant_text="",
+            evolution_summary={},
+            primary_returncode=1,
+            mental_model_mode=normalized_mental_mode,
+            mental_model_enabled=mental_model_enabled,
+        )
     if requested_session_id:
         session_id = requested_session_id
     else:
@@ -148,6 +168,8 @@ def run_supervised_conversation_harness(
                 "mentalModelMode": normalized_mental_mode,
                 "mentalModelEnabled": mental_model_enabled,
                 "workspaceOverride": normalized_workspace_override,
+                "cleanRoom": bool(clean_room),
+                "excludeCurrentRunContext": bool(clean_room),
             },
         )
         session_id = str(session.get("id") or "").strip()
@@ -177,6 +199,7 @@ def run_supervised_conversation_harness(
                 "conversation_messages": _conversation_harness_prompt_messages(session_id, prompt_text, created_at),
                 "mental_model_mode": normalized_mental_mode,
                 "mental_model_enabled": mental_model_enabled,
+                "clean_room": bool(clean_room),
             }
         )
 
@@ -192,6 +215,8 @@ def run_supervised_conversation_harness(
                 "scenario": scenario,
                 "mentalModelMode": normalized_mental_mode,
                 "workspaceOverride": normalized_workspace_override,
+                "cleanRoom": bool(clean_room),
+                "excludeCurrentRunContext": bool(clean_room),
             },
             message_source="supervised_evolution",
             include_started_turn_id=True,

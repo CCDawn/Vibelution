@@ -21,7 +21,7 @@ import {
 
 describe("evolutionRouteModel", () => {
   it("keeps every runtime conversation Agent available to the supervised UI", () => {
-    expect(SUPERVISED_RUN_MEMBER_ROLES).toEqual(["baseline", "candidate", "judge"]);
+    expect(SUPERVISED_RUN_MEMBER_ROLES).toEqual(["baseline", "baseline_rerun", "judge"]);
   });
 
   it("clamps scores and formats compact timestamps", () => {
@@ -67,9 +67,11 @@ describe("evolutionRouteModel", () => {
 
   it("labels workflow steps and resolves active step from role/phase", () => {
     const step = SUPERVISED_WORKFLOW_STEPS[0];
-    expect(supervisedWorkflowStepLabel(step, "zh")).toBe("基线评测");
+    expect(supervisedWorkflowStepLabel(step, "zh")).toBe("基线运行");
     expect(activeSupervisedWorkflowStep(null)).toBeNull();
-    expect(activeSupervisedWorkflowStep({ currentRole: "candidate" } as EvolutionActiveRun)).toBe("rerun_score");
+    expect(activeSupervisedWorkflowStep({ currentRole: "baseline_rerun" } as EvolutionActiveRun)).toBe("rerun_eval");
+    expect(activeSupervisedWorkflowStep({ currentRole: "judge", currentPhase: "baseline_judge" } as EvolutionActiveRun)).toBe("baseline_judge");
+    expect(activeSupervisedWorkflowStep({ currentRole: "judge", currentPhase: "candidate_judge" } as EvolutionActiveRun)).toBe("rerun_judge");
     expect(activeSupervisedWorkflowStep({ currentPhase: "reflection" } as EvolutionActiveRun)).toBe("improve");
   });
 

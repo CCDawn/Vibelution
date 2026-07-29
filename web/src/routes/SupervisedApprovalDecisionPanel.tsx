@@ -92,7 +92,7 @@ export function SupervisedApprovalDecisionPanel({
       <header className={styles.header}>
         <div>
           <p>{lang === "zh" ? "用户审批 · 决策工作台" : "Approval · Decision workbench"}</p>
-          <h3>{lang === "zh" ? "候选改良是否进入项目" : "Should the candidate enter the project?"}</h3>
+          <h3>{lang === "zh" ? "是否批准 Judge 受控合入" : "Approve the Judge-controlled merge?"}</h3>
         </div>
         <VChip tone={TONE_MAP[model.tone]}>{model.statusLabel}</VChip>
       </header>
@@ -116,12 +116,12 @@ export function SupervisedApprovalDecisionPanel({
         <article className={styles.metric}>
           <span>{lang === "zh" ? "基线得分" : "Baseline score"}</span>
           <strong>{formatScore(model.metrics.baselineScore)}</strong>
-          <small>{lang === "zh" ? "当前正式基线" : "Current baseline"}</small>
+          <small>{lang === "zh" ? "Judge 首次评分" : "First Judge score"}</small>
         </article>
         <article className={styles.metric}>
           <span>{lang === "zh" ? "候选得分" : "Candidate score"}</span>
           <strong>{formatScore(model.metrics.candidateScore)}</strong>
-          <small>{lang === "zh" ? "同一评测集复跑" : "Same evaluation rerun"}</small>
+          <small>{lang === "zh" ? "同一 Judge 会话复评" : "Same Judge session"}</small>
         </article>
         <article className={styles.metric}>
           <span>{lang === "zh" ? "候选差异" : "Candidate diff"}</span>

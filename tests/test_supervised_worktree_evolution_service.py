@@ -69,7 +69,15 @@ def _fake_evaluator(_: Path, bundle_name: str, role: str, __: dict) -> dict:
     }
 
 
-def _fake_harness_result(*, role: str, repo_root: Path, prompt: str, status: str = "success") -> HarnessResult:
+def _fake_harness_result(
+    *,
+    role: str,
+    repo_root: Path,
+    prompt: str,
+    status: str = "success",
+    session_id: str = "",
+    agent_judgment: dict | None = None,
+) -> HarnessResult:
     return HarnessResult(
         harness_id=f"h_{role}",
         status=status,
@@ -91,7 +99,7 @@ def _fake_harness_result(*, role: str, repo_root: Path, prompt: str, status: str
         restart_expected=False,
         restart_reentered=False,
         process_history=[],
-        process_summary={},
+        process_summary={"session_id": session_id} if session_id else {},
         new_conversation_files=[],
         new_debug_files=[],
         stdout_tail=[],
@@ -105,9 +113,37 @@ def _fake_harness_result(*, role: str, repo_root: Path, prompt: str, status: str
             "git": {"commit_detected": False, "commit_refs": []},
             "restart": {"expected": False, "triggered": False, "reentered": False},
             "guarded_tools": {"total": 0, "restart_guarded": 0},
+            **({"agent_judgment": agent_judgment} if agent_judgment else {}),
         },
         agent_binding={"role": role},
     )
+
+
+def test_harness_result_payload_includes_bounded_trace_evidence_for_judge(tmp_path):
+    result = _fake_harness_result(
+        role="baseline",
+        repo_root=tmp_path,
+        prompt="run baseline",
+        session_id="session-baseline",
+    )
+    result.stdout_tail = ["analysis complete", "final answer"]
+    result.evolution_summary.update(
+        {
+            "tool_sequence_tail": ["read_file_tool", "run_test_for_tool"],
+            "tool_phase_sequence_tail": [
+                "tool:read_file_tool:success",
+                "tool:run_test_for_tool:success",
+            ],
+            "evidence": {"conversation_tool_events": 2},
+        }
+    )
+
+    payload = service._harness_result_payload(result, case_id="one", role="baseline")
+
+    assert payload["assistantOutput"] == "analysis complete final answer"
+    assert payload["traceSummary"]["toolSequence"] == ["read_file_tool", "run_test_for_tool"]
+    assert payload["traceSummary"]["validation"]["passed"] == 1
+    assert payload["traceSummary"]["evidence"]["conversation_tool_events"] == 2
 
 
 def _retryable_provider_failure_evaluator(_: Path, bundle_name: str, role: str, __: dict) -> dict:
@@ -266,15 +302,16 @@ def test_supervised_worktree_flow_preserves_improved_candidate_and_records_merge
     )
 
     assert snapshot["status"] == "done"
-    assert snapshot["outcome"] == "preserved"
-    assert snapshot["decision"]["scoreDelta"] == 50.0
+    assert snapshot["outcome"] == "awaiting_user_approval"
+    assert snapshot["decision"]["scoreDelta"] == 40.0
     assert snapshot["decision"]["recommendedAction"] == "preserve"
-    assert snapshot["mergeAnalysis"]["status"] == "ready"
-    assert snapshot["mergeAnalysis"]["mergeAllowed"] is True
+    assert snapshot["mergeAnalysis"]["status"] == "blocked"
+    assert snapshot["mergeAnalysis"]["mergeAllowed"] is False
+    assert "supervised_review_pending" in snapshot["mergeAnalysis"]["blockers"]
     assert snapshot["mergeAnalysis"]["changedFiles"][0]["path"] == "agent.py"
 
 
-def test_supervised_worktree_flow_projects_four_step_cards_with_shared_improver_session(tmp_path):
+def test_supervised_worktree_flow_projects_six_steps_with_independent_rerun_session(tmp_path):
     project_root = tmp_path / "project"
     _init_repo(project_root)
     (project_root / "agent.py").write_text("print('base')\n", encoding="utf-8")
@@ -295,19 +332,19 @@ def test_supervised_worktree_flow_projects_four_step_cards_with_shared_improver_
         }
 
     def evaluator(_: Path, bundle_name: str, role: str, context: dict) -> dict:
-        evaluator_calls.append({"role": role, "candidateSession": context.get("candidateConversationSessionId")})
-        if role == "candidate":
-            assert context.get("candidateConversationSessionId") == "session-improver"
+        evaluator_calls.append({"role": role, "session": context.get("conversationSessionId")})
+        assert context.get("conversationSessionId") == ""
         successes = 1 if role == "baseline" else 2
         return {
             "role": role,
             "status": "success",
-            "score": successes * 50.0,
+            "executionScore": successes * 50.0,
             "successes": successes,
             "total": 2,
             "failures": 2 - successes,
             "bundleName": bundle_name,
             "summary": f"{role} fake score",
+            "conversationSessionId": "session-improver" if role == "baseline" else "session-rerun",
         }
 
     def modifier(worktree_path: Path, _: str, __: dict) -> dict:
@@ -337,24 +374,152 @@ def test_supervised_worktree_flow_projects_four_step_cards_with_shared_improver_
 
     assert [item["id"] for item in snapshot["workflowSteps"]] == [
         "baseline_eval",
+        "baseline_judge",
         "improve",
-        "rerun_score",
+        "rerun_eval",
+        "rerun_judge",
         "approval",
     ]
-    improve_step = snapshot["workflowSteps"][1]
-    rerun_score_step = snapshot["workflowSteps"][2]
-    approval_step = snapshot["workflowSteps"][3]
-    assert improve_step["label"] == "提出建议与改良"
-    assert rerun_score_step["label"] == "复跑与评分"
+    improve_step = snapshot["workflowSteps"][2]
+    rerun_score_step = snapshot["workflowSteps"][3]
+    approval_step = snapshot["workflowSteps"][5]
+    assert improve_step["label"] == "基线自改"
+    assert rerun_score_step["label"] == "独立复跑"
     assert improve_step["conversationSessionId"] == "session-improver"
-    assert rerun_score_step["conversationSessionId"] == "session-improver"
+    assert rerun_score_step["conversationSessionId"] == "session-rerun"
     assert improve_step["chatRoute"].endswith("session=session-improver")
-    assert rerun_score_step["chatRoute"].endswith("session=session-improver")
-    assert approval_step["label"] == "用户审批"
+    assert rerun_score_step["chatRoute"].endswith("session=session-rerun")
+    assert approval_step["label"] == "用户审批与合入"
     assert approval_step["ownerKind"] == "human"
     assert approval_step["conversationSessionId"] == ""
-    assert approval_step["metrics"]["scoreDelta"] == 50.0
-    assert evaluator_calls[1]["candidateSession"] == "session-improver"
+    assert approval_step["metrics"]["scoreDelta"] == 40.0
+    assert evaluator_calls[1]["session"] == ""
+
+
+def test_supervised_worktree_flow_uses_three_sessions_and_same_judge_session(tmp_path):
+    project_root = tmp_path / "project"
+    _init_repo(project_root)
+    (project_root / "agent.py").write_text("print('base')\n", encoding="utf-8")
+    _write_bundle(project_root)
+    _run_git(project_root, "add", ".")
+    _run_git(project_root, "commit", "-m", "init")
+    calls: list[tuple[str, str, str]] = []
+
+    def worktree_factory(root: Path, run_id: str) -> dict:
+        candidate = _make_candidate_repo(tmp_path, root)
+        return {
+            "path": str(candidate),
+            "baseHead": "base",
+            "checkpointCommit": "base",
+            "checkpointRef": "",
+            "trackedDirty": False,
+            "untrackedFiles": [],
+        }
+
+    def evaluator(_: Path, bundle_name: str, role: str, context: dict) -> dict:
+        session_id = str(context.get("conversationSessionId") or "")
+        calls.append(("evaluate", role, session_id))
+        if role == "baseline":
+            assert session_id == ""
+            resolved_session = "session-baseline"
+            successes = 1
+        else:
+            assert role == "baseline_rerun"
+            assert session_id == ""
+            resolved_session = "session-rerun"
+            successes = 2
+        return {
+            "role": role,
+            "status": "success",
+            "executionScore": successes * 50.0,
+            "successes": successes,
+            "total": 2,
+            "failures": 2 - successes,
+            "bundleName": bundle_name,
+            "summary": f"{role} execution result",
+            "conversationSessionId": resolved_session,
+            "cases": [{"caseId": "one", "status": "success"}],
+        }
+
+    def judge(_: Path, __: str, phase: str, context: dict) -> dict:
+        session_id = str(context.get("conversationSessionId") or "")
+        calls.append(("judge", phase, session_id))
+        if phase == "baseline":
+            assert session_id == ""
+            return {
+                "status": "success",
+                "phase": "baseline",
+                "decision": "HOLD",
+                "score": 40.0,
+                "problems": ["缺少失败恢复"],
+                "improvementInstructions": ["补充失败恢复"],
+                "evidenceRefs": ["case:one"],
+                "conversationSessionId": "session-judge",
+            }
+        assert session_id == "session-judge"
+        return {
+            "status": "success",
+            "phase": "rerun",
+            "decision": "PROMOTE",
+            "baselineScore": 40.0,
+            "score": 85.0,
+            "problems": [],
+            "improvementInstructions": [],
+            "evidenceRefs": ["case:one"],
+            "conversationSessionId": "session-judge",
+        }
+
+    def modifier(worktree_path: Path, prompt: str, context: dict) -> dict:
+        session_id = str(context.get("conversationSessionId") or "")
+        calls.append(("modify", "baseline", session_id))
+        assert session_id == "session-baseline"
+        assert "缺少失败恢复" in prompt
+        marker = worktree_path / "agent.py"
+        marker.write_text(marker.read_text(encoding="utf-8") + "\n# improved by baseline\n", encoding="utf-8")
+        return {
+            "status": "success",
+            "summary": "baseline Agent improved the worktree",
+            "conversationSessionId": session_id,
+        }
+
+    snapshot = service.run_supervised_worktree_flow(
+        {"sourceKind": "bundle", "bundleName": "closed_loop_v1", "mode": "manual"},
+        project_root=project_root,
+        dependencies=service.WorktreeRunDependencies(
+            evaluation_runner=evaluator,
+            judge_runner=judge,
+            candidate_modifier=modifier,
+            worktree_factory=worktree_factory,
+        ),
+    )
+
+    assert calls == [
+        ("evaluate", "baseline", ""),
+        ("judge", "baseline", ""),
+        ("modify", "baseline", "session-baseline"),
+        ("evaluate", "baseline_rerun", ""),
+        ("judge", "rerun", "session-judge"),
+    ]
+    assert snapshot["baselineConversationSessionId"] == "session-baseline"
+    assert snapshot["rerunConversationSessionId"] == "session-rerun"
+    assert snapshot["judgeConversationSessionId"] == "session-judge"
+    assert snapshot["baselineConversationSessionId"] != snapshot["rerunConversationSessionId"]
+    assert snapshot["baselineJudgment"]["score"] == 40.0
+    assert snapshot["candidateJudgment"]["score"] == 85.0
+    assert snapshot["decision"]["judgeDecision"] == "PROMOTE"
+    assert [item["id"] for item in snapshot["workflowSteps"]] == [
+        "baseline_eval",
+        "baseline_judge",
+        "improve",
+        "rerun_eval",
+        "rerun_judge",
+        "approval",
+    ]
+    assert snapshot["workflowSteps"][0]["conversationSessionId"] == "session-baseline"
+    assert snapshot["workflowSteps"][1]["conversationSessionId"] == "session-judge"
+    assert snapshot["workflowSteps"][2]["conversationSessionId"] == "session-baseline"
+    assert snapshot["workflowSteps"][3]["conversationSessionId"] == "session-rerun"
+    assert snapshot["workflowSteps"][4]["conversationSessionId"] == "session-judge"
 
 
 def test_self_origin_worktree_flow_carries_goal_and_requires_review(tmp_path):
@@ -406,13 +571,20 @@ def test_self_origin_worktree_flow_carries_goal_and_requires_review(tmp_path):
     assert "supervised_review_pending" in snapshot["mergeAnalysis"]["blockers"]
     assert snapshot["actionStates"]["approveReview"]["enabled"] is True
     assert snapshot["actionStates"]["merge"]["enabled"] is False
-    assert [item["id"] for item in snapshot["workflowSteps"]] == ["self_evolution", "approval"]
-    self_step = snapshot["workflowSteps"][0]
-    approval_step = snapshot["workflowSteps"][1]
-    assert self_step["label"] == "自进化"
+    assert [item["id"] for item in snapshot["workflowSteps"]] == [
+        "baseline_eval",
+        "baseline_judge",
+        "improve",
+        "rerun_eval",
+        "rerun_judge",
+        "approval",
+    ]
+    self_step = snapshot["workflowSteps"][2]
+    approval_step = snapshot["workflowSteps"][5]
+    assert self_step["label"] == "基线自改"
     assert self_step["ownerKind"] == "agent"
-    assert self_step["role"] == "candidate"
-    assert approval_step["label"] == "审批"
+    assert self_step["role"] == "baseline"
+    assert approval_step["label"] == "用户审批与合入"
     assert approval_step["ownerKind"] == "human"
     assert approval_step["conversationSessionId"] == ""
 
@@ -450,12 +622,43 @@ def test_real_worktree_flow_uses_supervised_conversation_chain_for_candidate_bra
         role = str((kwargs.get("agent_binding") or {}).get("role") or "")
         repo_root = Path(kwargs["repo_root"])
         prompt = str(kwargs.get("prompt") or "")
+        requested_session = str(kwargs.get("conversation_session_id") or "")
+        agent_judgment = None
         if kwargs.get("scenario") == "candidate_self_improvement":
             (repo_root / "agent.py").write_text(
                 (repo_root / "agent.py").read_text(encoding="utf-8") + "\n# improved by candidate\n",
                 encoding="utf-8",
             )
-        return _fake_harness_result(role=role or "candidate", repo_root=repo_root, prompt=prompt)
+            session_id = requested_session
+        elif kwargs.get("scenario") == "supervised_judge_evaluation":
+            session_id = requested_session or "session-judge"
+            phase = "rerun" if requested_session else "baseline"
+            agent_judgment = {
+                "phase": phase,
+                "decision": "PROMOTE" if phase == "rerun" else "HOLD",
+                "score": 0.85 if phase == "rerun" else 0.4,
+                "baseline_score": 0.4,
+                "problems": [] if phase == "rerun" else ["improve validation"],
+                "improvement_instructions": [] if phase == "rerun" else ["run focused validation"],
+                "dimensions": {
+                    "task_understanding": 0.8,
+                    "tool_trace_quality": 0.8,
+                    "validation_evidence": 0.8,
+                    "safety_and_scope": 0.8,
+                },
+                "evidence_refs": ["case:one"],
+            }
+        else:
+            session_id = requested_session or (
+                "session-rerun" if repo_root != project_root else "session-baseline"
+            )
+        return _fake_harness_result(
+            role=role or "baseline",
+            repo_root=repo_root,
+            prompt=prompt,
+            session_id=session_id,
+            agent_judgment=agent_judgment,
+        )
 
     monkeypatch.setattr(service, "supervised_agent_bindings", fake_bindings)
     monkeypatch.setattr(service, "run_supervised_conversation_harness", fake_conversation_harness)
@@ -486,19 +689,24 @@ def test_real_worktree_flow_uses_supervised_conversation_chain_for_candidate_bra
     assert [str(call["agent_binding"]["role"]) for call in calls] == [
         "baseline",
         "baseline",
-        "candidate",
-        "candidate",
-        "candidate",
+        "judge",
+        "baseline",
+        "baseline",
+        "baseline",
+        "judge",
     ]
-    improvement_call = calls[2]
+    improvement_call = calls[3]
     assert improvement_call["scenario"] == "candidate_self_improvement"
     assert Path(improvement_call["repo_root"]).resolve() == candidate_path
     assert Path(improvement_call["workspace_override"]).resolve() == candidate_path
-    candidate_eval_calls = calls[3:]
+    candidate_eval_calls = calls[4:6]
     assert all(Path(call["repo_root"]).resolve() == candidate_path for call in candidate_eval_calls)
     assert all(Path(call["workspace_override"]).resolve() == candidate_path for call in candidate_eval_calls)
     assert snapshot["candidate"]["candidateVariant"] == variant
-    assert snapshot["agentBindings"]["candidate"]["agentId"] == "agent-candidate"
+    assert snapshot["agentBindings"]["baseline"]["agentId"] == "agent-baseline"
+    assert snapshot["baselineConversationSessionId"] == "session-baseline"
+    assert snapshot["rerunConversationSessionId"] == "session-rerun"
+    assert snapshot["judgeConversationSessionId"] == "session-judge"
     assert snapshot["mentalModelMode"] == "enabled"
 
 
@@ -589,7 +797,7 @@ def test_decision_fails_closed_without_candidate_variant_binding():
 
     variant_gate = next(gate for gate in decision["gates"] if gate["name"] == "candidate_variant_bound")
     assert variant_gate["status"] == "fail"
-    assert decision["recommendedAction"] == "discard"
+    assert decision["recommendedAction"] == "hold"
 
 
 def test_candidate_variant_gate_rejects_mismatched_variant_id():
@@ -830,7 +1038,7 @@ def test_supervised_worktree_flow_stops_when_candidate_modifier_makes_no_changes
     assert snapshot["candidate"] == {}
     assert snapshot["decision"] == {}
     assert calls["candidate_eval"] == 0
-    assert snapshot["workflowSteps"][1]["status"] == "failed"
+    assert snapshot["workflowSteps"][2]["status"] == "failed"
 
 
 def test_merge_analysis_blocks_when_main_workspace_touched_same_file(tmp_path):
@@ -934,12 +1142,16 @@ def test_force_merge_creates_rollback_manifest_and_rollback_restores_file(tmp_pa
         "status": "done",
         "projectRoot": str(project_root),
         "candidateWorktree": {"path": str(candidate), "preserved": True},
+        "candidateJudgment": {"status": "success", "phase": "rerun", "decision": "REJECT"},
+        "judgeConversationSessionId": "session-judge",
     }
     service._persist_snapshot(snapshot, active_run_id="")
 
     merged = service.execute_supervised_worktree_action("swte-merge", "merge", force=True)
 
     assert merged["merge"]["status"] == "merged"
+    assert merged["merge"]["triggeredBy"]["role"] == "judge"
+    assert merged["merge"]["triggeredBy"]["conversationSessionId"] == "session-judge"
     assert "# candidate edit" in (project_root / "agent.py").read_text(encoding="utf-8")
     manifest_path = Path(merged["rollback"]["manifestPath"])
     assert manifest_path.exists()
@@ -977,6 +1189,8 @@ def test_self_origin_merge_requires_review_even_when_forced(tmp_path):
             "approvedAt": "",
             "reviewerNote": "",
         },
+        "candidateJudgment": {"status": "success", "phase": "rerun", "decision": "PROMOTE"},
+        "judgeConversationSessionId": "session-judge",
     }
     service._persist_snapshot(snapshot, active_run_id="")
 
@@ -984,7 +1198,7 @@ def test_self_origin_merge_requires_review_even_when_forced(tmp_path):
 
     assert blocked["mergeAnalysis"]["mergeAllowed"] is False
     assert "supervised_review_pending" in blocked["mergeAnalysis"]["blockers"]
-    with pytest.raises(service.SupervisedWorktreeRunActionError, match="pending review"):
+    with pytest.raises(service.SupervisedWorktreeRunActionError, match="用户审批 pending"):
         service.execute_supervised_worktree_action("swte-self-review", "merge", force=True)
 
     approved = service.execute_supervised_worktree_action(
@@ -992,12 +1206,110 @@ def test_self_origin_merge_requires_review_even_when_forced(tmp_path):
         "approve_review",
         reviewer_note="reviewed by supervised line",
     )
-    merged = service.execute_supervised_worktree_action("swte-self-review", "merge")
-
     assert approved["reviewGate"]["status"] == "approved"
     assert approved["reviewGate"]["reviewerNote"] == "reviewed by supervised line"
-    assert merged["merge"]["status"] == "merged"
+    assert approved["merge"]["status"] == "merged"
+    assert approved["merge"]["triggeredBy"]["role"] == "judge"
     assert "# candidate edit" in (project_root / "agent.py").read_text(encoding="utf-8")
+
+
+def test_rejected_judgment_requires_explicit_force_approval(tmp_path):
+    project_root = tmp_path / "project"
+    _init_repo(project_root)
+    (project_root / "agent.py").write_text("print('base')\n", encoding="utf-8")
+    _write_bundle(project_root)
+    _run_git(project_root, "add", ".")
+    _run_git(project_root, "commit", "-m", "init")
+    candidate = _make_candidate_repo(tmp_path, project_root)
+    snapshot = {
+        "runId": "swte-rejected-approval",
+        "runKind": service.RUN_KIND,
+        "status": "done",
+        "projectRoot": str(project_root),
+        "candidateWorktree": {"path": str(candidate), "preserved": True},
+        "candidateJudgment": {"status": "success", "phase": "rerun", "decision": "REJECT"},
+        "judgeConversationSessionId": "session-judge",
+        "reviewGate": {
+            "required": True,
+            "status": "pending",
+            "reason": "user approval required",
+            "approvedAt": "",
+            "reviewerNote": "",
+        },
+    }
+    service._persist_snapshot(snapshot, active_run_id="")
+
+    projected = service.get_supervised_worktree_run("swte-rejected-approval")
+    assert projected["actionStates"]["approveReview"]["enabled"] is False
+    assert "显式 force" in projected["actionStates"]["approveReview"]["reason"]
+
+    with pytest.raises(service.SupervisedWorktreeRunActionError, match="默认禁止合入"):
+        service.execute_supervised_worktree_action("swte-rejected-approval", "approve_review")
+
+    merged = service.execute_supervised_worktree_action(
+        "swte-rejected-approval",
+        "approve_review",
+        force=True,
+        reviewer_note="explicit force approval",
+    )
+    assert merged["merge"]["status"] == "merged"
+    assert merged["merge"]["force"] is True
+    assert merged["merge"]["triggeredBy"]["decision"] == "REJECT"
+
+
+def test_real_judge_merge_trigger_reuses_judge_session_without_raw_git(tmp_path, monkeypatch):
+    calls: list[dict] = []
+
+    def fake_harness(**kwargs):
+        calls.append(dict(kwargs))
+        return _fake_harness_result(
+            role="judge",
+            repo_root=Path(kwargs["repo_root"]),
+            prompt=str(kwargs.get("prompt") or ""),
+            session_id="session-judge",
+            agent_judgment={
+                "phase": "merge_authorization",
+                "decision": "PROMOTE",
+                "merge_requested": True,
+                "reason": "approved candidate binding",
+                "evidence_refs": ["variant:one"],
+            },
+        )
+
+    monkeypatch.setattr(service, "run_supervised_conversation_harness", fake_harness)
+    snapshot = {
+        "runId": "swte-real-trigger",
+        "executionMode": "real",
+        "projectRoot": str(tmp_path),
+        "mentalModelMode": "follow",
+        "mentalModelEnabled": False,
+        "agentBindings": {
+            "judge": {"agentId": "agent-judge", "role": "judge"},
+        },
+        "judgeConversationSessionId": "session-judge",
+        "candidateJudgment": {
+            "status": "success",
+            "phase": "rerun",
+            "decision": "PROMOTE",
+        },
+        "candidateWorktree": {
+            "variant": {"variantId": "variant-one", "patchSha256": "abc"},
+        },
+    }
+
+    triggered = service._request_judge_controlled_merge(
+        snapshot,
+        force=False,
+        reviewer_note="approved by user",
+    )
+
+    assert triggered["judgeMergeTrigger"]["status"] == "requested"
+    assert triggered["judgeMergeTrigger"]["conversationSessionId"] == "session-judge"
+    assert triggered["judgeMergeTrigger"]["mechanism"] == "judge_conversation_request"
+    assert len(calls) == 1
+    assert calls[0]["conversation_session_id"] == "session-judge"
+    assert calls[0]["scenario"] == "supervised_judge_merge_trigger"
+    assert "不要执行 shell、git merge" in calls[0]["prompt"]
 
 
 def test_discard_removes_owned_candidate_worktree(tmp_path, monkeypatch):
@@ -1259,6 +1571,26 @@ def test_real_llm_mode_requires_explicit_cost_confirmation(tmp_path):
     assert "tokens" in str(exc_info.value)
 
 
+def test_real_mode_requires_baseline_and_judge_bindings_before_execution(tmp_path):
+    project_root = tmp_path / "project"
+    _write_bundle(project_root)
+
+    with pytest.raises(service.SupervisedWorktreeRunValidationError, match="Judge Agent"):
+        service._normalize_start_payload(
+            {
+                "sourceKind": "bundle",
+                "bundleName": "closed_loop_v1",
+                "executionMode": "real",
+                "confirmRealLlmCost": True,
+                "agentBindings": {
+                    "baseline": {"agentId": "agent-baseline", "role": "baseline"},
+                },
+            },
+            lang="zh",
+            project_root=project_root,
+        )
+
+
 def test_candidate_worktree_receives_ignored_runtime_bundle(tmp_path):
     project_root = tmp_path / "project"
     candidate = tmp_path / "candidate"
@@ -1467,7 +1799,7 @@ def test_get_active_run_reconciles_stopped_candidate_conversation(monkeypatch, t
     assert persisted["outcome"] == "candidate_modify_cancelled"
     assert persisted["candidateModification"]["status"] == "cancelled"
     assert persisted["candidate"] == {}
-    assert persisted["workflowSteps"][1]["status"] == "cancelled"
+    assert persisted["workflowSteps"][2]["status"] == "cancelled"
 
 
 def test_shutdown_cancel_stops_flow_before_candidate_work(tmp_path, monkeypatch):

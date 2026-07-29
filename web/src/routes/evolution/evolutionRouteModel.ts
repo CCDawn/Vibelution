@@ -16,8 +16,14 @@ import type {
 import { modelDisplayLabel } from "../agentDisplay";
 import { supervisedDecisionLabel } from "../supervisedRunRecordLabel";
 
-export type SupervisedMemberRole = "baseline" | "candidate" | "reviewer" | "auditor" | "judge";
-export type SupervisedWorkflowStepId = "baseline_eval" | "improve" | "rerun_score" | "approval";
+export type SupervisedMemberRole = "baseline" | "baseline_rerun" | "candidate" | "reviewer" | "auditor" | "judge";
+export type SupervisedWorkflowStepId =
+  | "baseline_eval"
+  | "baseline_judge"
+  | "improve"
+  | "rerun_eval"
+  | "rerun_judge"
+  | "approval";
 export type SupervisedRunMember = {
   role: SupervisedMemberRole;
   label: string;
@@ -48,12 +54,14 @@ export type SupervisedPreflightIssue = {
   reason: string;
 };
 
-export const SUPERVISED_RUN_MEMBER_ROLES: SupervisedMemberRole[] = ["baseline", "candidate", "judge"];
+export const SUPERVISED_RUN_MEMBER_ROLES: SupervisedMemberRole[] = ["baseline", "baseline_rerun", "judge"];
 export const SUPERVISED_WORKFLOW_STEPS: SupervisedWorkflowDefinition[] = [
-  { id: "baseline_eval", zh: "基线评测", en: "Baseline", role: "baseline" },
-  { id: "improve", zh: "提出建议与改良", en: "Improve", role: "candidate" },
-  { id: "rerun_score", zh: "复跑与评分", en: "Rerun + Score", role: "candidate" },
-  { id: "approval", zh: "用户审批", en: "Approval", role: null },
+  { id: "baseline_eval", zh: "基线运行", en: "Baseline run", role: "baseline" },
+  { id: "baseline_judge", zh: "基线评分", en: "Baseline score", role: "judge" },
+  { id: "improve", zh: "基线自改", en: "Baseline self-improve", role: "baseline" },
+  { id: "rerun_eval", zh: "独立复跑", en: "Clean-room rerun", role: "baseline_rerun" },
+  { id: "rerun_judge", zh: "复跑评分", en: "Rerun score", role: "judge" },
+  { id: "approval", zh: "用户审批与合入", en: "Approve + merge", role: null },
 ];
 export const LOCAL_SUPERVISED_RUN_PREFIX = "local-supervised-start-";
 export type ProposalEditDraft = {
@@ -192,10 +200,13 @@ export function activeSupervisedWorkflowStep(
     || String(run?.policyAction || "").trim(),
   );
   if (role === "baseline") {
-    return "baseline_eval";
+    return phase === "candidate_modify" ? "improve" : "baseline_eval";
   }
-  if (role === "candidate") {
-    return "rerun_score";
+  if (role === "baseline_rerun" || role === "candidate") {
+    return "rerun_eval";
+  }
+  if (role === "judge") {
+    return phase === "baseline_judge" ? "baseline_judge" : "rerun_judge";
   }
   if (hasProposalSignal || (status === "done" && decision)) {
     return "approval";
@@ -206,9 +217,15 @@ export function activeSupervisedWorkflowStep(
     return "improve";
   }
   if (
-    ["candidate_evaluation", "decision"].includes(phase)
+    phase === "candidate_evaluation"
   ) {
-    return "rerun_score";
+    return "rerun_eval";
+  }
+  if (["candidate_judge", "decision"].includes(phase)) {
+    return "rerun_judge";
+  }
+  if (phase === "baseline_judge") {
+    return "baseline_judge";
   }
   if (
     ["submitted", "queued", "preflight", "session_start", "starting", "baseline"].includes(phase)

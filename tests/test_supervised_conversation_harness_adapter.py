@@ -628,3 +628,23 @@ def test_session_turn_completion_snapshot_recovers_finished_hidden_turn(tmp_path
         with session_service._RUNNING_SESSIONS_LOCK:
             session_service._RUNNING_SESSION_IDS.discard("session-hidden")
             session_service._SESSION_ACTIVE_TURN_IDS.pop("session-hidden", None)
+
+
+def test_clean_room_rerun_rejects_existing_conversation_session(tmp_path):
+    result = adapter.run_supervised_conversation_harness(
+        repo_root=tmp_path,
+        mode="single_turn",
+        prompt="run independently",
+        timeout_seconds=10,
+        expect_restart=False,
+        post_restart_observe_seconds=0,
+        keep_worktree=True,
+        scenario="transaction",
+        agent_binding={"agentId": "agent-baseline", "role": "baseline"},
+        conversation_session_id="session-baseline",
+        clean_room=True,
+    )
+
+    assert result.status == "failed"
+    assert "Clean-room" in result.reason
+    assert result.process_summary["session_id"] == "session-baseline"

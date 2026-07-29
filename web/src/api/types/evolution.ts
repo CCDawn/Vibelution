@@ -276,7 +276,7 @@ export type EvolutionActiveRunCaseIo = {
 };
 
 export type EvolutionWorkflowStep = {
-  id: "baseline_eval" | "improve" | "rerun_score" | "approval" | string;
+  id: "baseline_eval" | "baseline_judge" | "improve" | "rerun_eval" | "rerun_judge" | "approval" | string;
   label: string;
   ownerKind: "agent" | "human" | string;
   role: string | null;
@@ -523,6 +523,7 @@ export type SupervisedWorktreeRun = {
   costEstimate: {
     caseCount: number;
     evaluationCalls: number;
+    judgeCalls?: number;
     selfEditCalls: number;
     modelCalls: number;
     estimatedInputTokens: number;
@@ -532,12 +533,52 @@ export type SupervisedWorktreeRun = {
   };
   decision: {
     mode?: string;
+    scoreSource?: string;
+    judgeDecision?: string;
     baselineScore?: number;
     candidateScore?: number;
     scoreDelta?: number;
     recommendedAction?: string;
     reason?: string;
     highRisk?: boolean;
+  };
+  baselineConversationSessionId?: string;
+  rerunConversationSessionId?: string;
+  judgeConversationSessionId?: string;
+  judgeMergeTrigger?: {
+    status?: string;
+    mergeRequested?: boolean;
+    decision?: string;
+    reason?: string;
+    evidenceRefs?: string[];
+    conversationSessionId?: string;
+    force?: boolean;
+    mechanism?: string;
+    requestedAt?: string;
+  };
+  baselineJudgment?: {
+    status?: string;
+    phase?: string;
+    decision?: string;
+    score?: number;
+    baselineScore?: number;
+    problems?: string[];
+    improvementInstructions?: string[];
+    dimensions?: Record<string, number>;
+    evidenceRefs?: string[];
+    conversationSessionId?: string;
+  };
+  candidateJudgment?: {
+    status?: string;
+    phase?: string;
+    decision?: string;
+    score?: number;
+    baselineScore?: number;
+    problems?: string[];
+    improvementInstructions?: string[];
+    dimensions?: Record<string, number>;
+    evidenceRefs?: string[];
+    conversationSessionId?: string;
   };
   mergeAnalysis: {
     status?: string;
@@ -564,6 +605,12 @@ export type SupervisedWorktreeRun = {
     status?: string;
     mergedAt?: string;
     force?: boolean;
+    triggeredBy?: {
+      role?: string;
+      conversationSessionId?: string;
+      decision?: string;
+      mechanism?: string;
+    };
     changedFiles?: string[];
     rollbackManifestPath?: string;
   };
