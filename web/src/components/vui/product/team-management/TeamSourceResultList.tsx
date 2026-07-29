@@ -1,8 +1,6 @@
-import {
-  type KeyboardEvent as ReactKeyboardEvent,
-  type ReactNode,
-} from "react";
+import { type ReactNode } from "react";
 
+import { VNativeButton } from "../../primitives/VNativeButton";
 import { VTooltip } from "../../primitives/VTooltip";
 
 export type TeamSourceResultTone = "ready" | "warning" | "danger" | "neutral";
@@ -45,9 +43,14 @@ const ROW_BASE =
   "max-[980px]:grid-cols-[max-content_minmax(0,1fr)]";
 
 const ROW_INTERACTIVE =
-  "cursor-pointer transition-[border-color,box-shadow,background] duration-150 ease-[var(--vui-ease)] " +
+  "transition-[border-color,box-shadow,background] duration-150 ease-[var(--vui-ease)] " +
   "hover:border-[color:color-mix(in_srgb,var(--accent-cool)_54%,var(--border-strong))] hover:bg-[color:color-mix(in_srgb,var(--accent-cool)_5%,var(--vui-surface-row))] hover:shadow-[var(--vui-shadow-inset-accent),var(--vui-elevation-1)] " +
-  "focus-visible:outline-none focus-visible:border-[color:color-mix(in_srgb,var(--accent-cool)_54%,var(--border-strong))] focus-visible:shadow-[var(--vui-shadow-inset-accent),var(--vui-elevation-1)]";
+  "has-[:focus-visible]:border-[color:color-mix(in_srgb,var(--accent-cool)_54%,var(--border-strong))] has-[:focus-visible]:shadow-[var(--vui-shadow-inset-accent),var(--vui-elevation-1)]";
+
+const ACTIVATION_BUTTON =
+  "inline-flex w-full min-w-0 items-center justify-start rounded-[var(--radius-control)] bg-transparent p-0 text-left " +
+  "[font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] cursor-pointer " +
+  "focus-visible:outline-none focus-visible:shadow-[var(--vui-shadow-focus)] [&>strong]:block [&>strong]:min-w-0 [&>strong]:truncate";
 
 const ROW_SELECTED =
   "border-[color:color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_11%,var(--vui-surface-row))] shadow-[var(--vui-shadow-inset-accent)]";
@@ -78,58 +81,66 @@ export function TeamSourceResultItem({
   onActivate,
   activateTitle,
 }: TeamSourceResultItemProps) {
-  const handleKeyDown = onActivate
-    ? (event: ReactKeyboardEvent<HTMLElement>) => {
-        if (event.key !== "Enter" && event.key !== " ") {
-          return;
-        }
-        event.preventDefault();
-        onActivate();
-      }
-    : undefined;
-
   const statusBadge = (
     <span
       className={`${CHIP_BASE} ${CHIP_TONE[tone]}`}
-      tabIndex={statusTitle && !activateTitle ? 0 : undefined}
+      tabIndex={statusTitle ? 0 : undefined}
       role={statusTitle ? "status" : undefined}
       aria-label={statusTitle}
     >
       {statusLabel}
     </span>
   );
-  const titleValue = <strong tabIndex={titleTooltip && !activateTitle ? 0 : undefined} aria-label={titleTooltip}>{title}</strong>;
+  const titleValue = <strong tabIndex={titleTooltip && !onActivate ? 0 : undefined} aria-label={titleTooltip}>{title}</strong>;
   const sourceValue = source.href ? (
     <a
       href={source.href}
       target="_blank"
       rel="noreferrer"
       aria-label={source.title}
-      onClick={(event) => event.stopPropagation()}
     >
       {source.value}
     </a>
   ) : (
-    <code tabIndex={source.title && !activateTitle ? 0 : undefined} aria-label={source.title}>{source.value}</code>
+    <code tabIndex={source.title ? 0 : undefined} aria-label={source.title}>{source.value}</code>
   );
+  const activationButton = onActivate ? (
+    <VNativeButton
+      className={ACTIVATION_BUTTON}
+      aria-label={activateTitle}
+      aria-pressed={selected}
+      onClick={onActivate}
+    >
+      {titleValue}
+    </VNativeButton>
+  ) : titleValue;
+  const titleControl = activateTitle ? (
+    <VTooltip
+      content={(
+        <span className="grid gap-1">
+          <span>{activateTitle}</span>
+          {titleTooltip ? <span>{titleTooltip}</span> : null}
+        </span>
+      )}
+      width="wide"
+    >
+      {activationButton}
+    </VTooltip>
+  ) : titleTooltip ? (
+    <VTooltip content={titleTooltip} width="wide">{activationButton}</VTooltip>
+  ) : activationButton;
 
-  const row = (
+  return (
     <article
       data-vui-product="team-source-result-item"
       data-tone={tone}
       className={[ROW_BASE, onActivate ? ROW_INTERACTIVE : "", selected ? ROW_SELECTED : ""]
         .filter(Boolean)
         .join(" ")}
-      role={onActivate ? "button" : undefined}
-      tabIndex={onActivate ? 0 : -1}
-      aria-pressed={onActivate ? selected : undefined}
-      aria-label={activateTitle}
-      onClick={onActivate}
-      onKeyDown={handleKeyDown}
     >
-      {statusTitle && !activateTitle ? <VTooltip content={statusTitle}>{statusBadge}</VTooltip> : statusBadge}
-      <div className="min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [&_strong]:block [&_strong]:truncate">
-        {titleTooltip && !activateTitle ? <VTooltip content={titleTooltip} width="wide">{titleValue}</VTooltip> : titleValue}
+      {statusTitle ? <VTooltip content={statusTitle}>{statusBadge}</VTooltip> : statusBadge}
+      <div className="min-w-0">
+        {titleControl}
       </div>
       <div className="flex min-w-[76px] flex-nowrap items-center gap-1 whitespace-nowrap [font-size:var(--vui-font-xs)] text-[var(--fg-tertiary)] [&_span:first-child]:text-[var(--fg-secondary)] max-[820px]:hidden">
         {meta.map((entry) => (
@@ -141,7 +152,7 @@ export function TeamSourceResultItem({
         className="grid min-w-0 max-w-full grid-cols-[max-content_minmax(0,1fr)] items-center gap-1 overflow-hidden [font-size:var(--vui-font-xs)] [&_a]:truncate [&_code]:truncate [&_a]:text-[var(--accent-cool)] [&_code]:text-[var(--fg-tertiary)] max-[980px]:col-span-2 data-[missing=true]:text-[var(--state-warning)]"
       >
         <span className="text-[var(--fg-tertiary)]">{source.label}</span>
-        {source.title && !activateTitle ? (
+        {source.title ? (
           <VTooltip content={source.title} width="wide">
             {sourceValue}
           </VTooltip>
@@ -151,22 +162,6 @@ export function TeamSourceResultItem({
       </div>
     </article>
   );
-
-  return activateTitle ? (
-    <VTooltip
-      content={(
-        <span className="grid gap-1">
-          <span>{activateTitle}</span>
-          {statusTitle ? <span>{statusTitle}</span> : null}
-          {titleTooltip ? <span>{titleTooltip}</span> : null}
-          {source.title ? <span>{source.title}</span> : null}
-        </span>
-      )}
-      width="wide"
-    >
-      {row}
-    </VTooltip>
-  ) : row;
 }
 
 export type TeamSourceResultListProps = {
