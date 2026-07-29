@@ -99,6 +99,10 @@ def test_improvement_prompt_is_for_baseline_agent_and_carries_judge_feedback():
 
     assert "你就是刚才执行基线评测的基线 Agent" in prompt
     assert "继续当前会话" in prompt
+    assert prompt.startswith("PHASE: BASELINE_SELF_EDIT_IMPLEMENTATION")
+    assert "当前阶段是基线 Agent 的代码实施阶段，不是 Judge 评分阶段" in prompt
+    assert "禁止输出 SUPERVISED_AGENT_JUDGMENT" in prompt
+    assert "禁止重复评分或生成裁决" in prompt
     assert "没有验证错误恢复" in prompt
     assert "补充错误恢复并运行聚焦测试" in prompt
     assert "提升失败恢复" in prompt
