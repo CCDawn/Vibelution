@@ -75,6 +75,7 @@ describe("ConversationView process expansion defaults", () => {
     expect(handler).toContain("followLatestRef.current = false");
     expect(handler).toContain("captureConversationProcessScrollAnchor(timeline, summary)");
     expect(handler).toContain("restoreConversationProcessScrollAnchor(timeline, summary, anchor)");
+    expect(handler.match(/window\.requestAnimationFrame/g)).toHaveLength(2);
     expect(conversationViewSource).toContain("onUserToggle={handleProcessDisclosureUserToggle}");
   });
 
