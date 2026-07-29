@@ -62,6 +62,7 @@ def test_conversation_harness_summary_uses_turn_journal_when_final_message_loses
         "closed": True,
         "status": "success",
         "txn_id": "txn-journal",
+        "summary": "",
     }
     assert "open_evolution_transaction_tool:success" in summary["tool_sequence_tail"]
     assert "close_evolution_transaction_tool:success" in summary["tool_sequence_tail"]
@@ -251,6 +252,7 @@ def test_conversation_harness_auto_closes_open_transaction_as_failed(monkeypatch
         "closed": True,
         "status": "failed",
         "txn_id": "txn-open",
+        "summary": "",
         "auto_closed": True,
     }
 
@@ -450,6 +452,10 @@ def test_conversation_harness_continues_needs_continue_turn_before_finishing(mon
 
 def test_conversation_harness_does_not_continue_after_transaction_closed(monkeypatch, tmp_path: Path):
     submissions: list[str] = []
+    close_summary = (
+        "registry probe validated: 30 focused tests passed; "
+        "the degraded PowerShell command was replaced by a compatible Python probe."
+    )
     monkeypatch.setattr(
         adapter,
         "create_supervised_agent_session",
@@ -480,6 +486,7 @@ def test_conversation_harness_does_not_continue_after_transaction_closed(monkeyp
                 "closed": True,
                 "status": "success",
                 "txn_id": "txn-closed",
+                "summary": close_summary,
             },
             "validation": {"passed": 1, "failed": 0, "last": None},
             "git": {"commit_detected": False, "commit_refs": []},
@@ -505,6 +512,7 @@ def test_conversation_harness_does_not_continue_after_transaction_closed(monkeyp
 
     assert result.status == "success"
     assert len(submissions) == 1
+    assert "\n".join(result.stdout_tail) == close_summary
     backend = result.evolution_summary["conversation_backend"]
     assert backend["continuation_count"] == 0
     assert backend["observed_terminal_status"] == "ready"

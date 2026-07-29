@@ -300,12 +300,17 @@ def run_supervised_conversation_harness(
                 repo_root=repo_root,
             )
             if _evolution_transaction_closed(continuation_summary):
+                latest_output = _closed_transaction_assistant_text(
+                    latest_output,
+                    continuation_summary,
+                )
                 last_status = "ready"
                 latest_completion_snapshot = {
                     **latest_completion_snapshot,
                     "terminalStatus": "ready",
                     "lastTurnStatus": "ready",
                     "completionSource": "evolution_transaction_closed",
+                    "assistantText": latest_output,
                 }
         if callable(progress_callback):
             progress_callback(
@@ -913,6 +918,19 @@ def _conversation_harness_evolution_summary(
         restart_reentered=False,
         child_first_event_phase="conversation_chain",
     )
+
+
+def _closed_transaction_assistant_text(
+    assistant_text: str,
+    evolution_summary: dict[str, Any] | None,
+) -> str:
+    transaction = evolution_summary.get("transaction") if isinstance(evolution_summary, dict) else {}
+    close_summary = (
+        str(transaction.get("summary") or "").strip()
+        if isinstance(transaction, dict)
+        else ""
+    )
+    return close_summary or str(assistant_text or "").strip()
 
 
 def _now_timestamp() -> str:

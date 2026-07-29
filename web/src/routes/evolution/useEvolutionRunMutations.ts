@@ -34,6 +34,7 @@ export type UseEvolutionRunMutationsOptions = {
   setSelfActionFeedback: Dispatch<SetStateAction<string>>;
   setLiveActiveRun: Dispatch<SetStateAction<any>>;
   setSelectedSelfObservationRunId: Dispatch<SetStateAction<string>>;
+  selectSupervisedWorktreeRun: (runId: string) => void;
   buildSupervisedStartPlaceholder: (input: any) => any;
   isLocalSupervisedStartPlaceholder: (run: any) => boolean;
   isSelfEvolutionWorktreeRun: (run: any) => boolean;
@@ -88,6 +89,7 @@ export function useEvolutionRunMutations(options: UseEvolutionRunMutationsOption
     },
     onSuccess: async (snapshot) => {
       options.setActionFeedback(snapshot.latestMessage || options.t("startClosedLoopQueued"));
+      options.selectSupervisedWorktreeRun(snapshot.runId);
       options.setLiveActiveRun((current: any) =>
         options.isLocalSupervisedStartPlaceholder(current) ? null : current,
       );
@@ -127,6 +129,7 @@ export function useEvolutionRunMutations(options: UseEvolutionRunMutationsOption
     },
     onSuccess: async (snapshot) => {
       options.setActionFeedback(snapshot.latestMessage || options.t("startClosedLoopQueued"));
+      options.selectSupervisedWorktreeRun(snapshot.runId);
       await options.afterWorktreeRunChanged();
     },
   });

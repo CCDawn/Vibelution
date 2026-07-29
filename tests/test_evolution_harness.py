@@ -1598,6 +1598,7 @@ def test_infer_evolution_summary_treats_done_tool_result_success_as_transaction_
         "closed": True,
         "status": "success",
         "txn_id": "txn_done",
+        "summary": "",
     }
     assert summary["validation"]["passed"] == 1
     assert "environment" not in summary
