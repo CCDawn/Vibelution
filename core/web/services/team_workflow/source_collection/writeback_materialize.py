@@ -18,6 +18,8 @@ import re
 from copy import deepcopy
 from typing import Any
 
+from ..source_collection_common import project_source_version_families
+
 
 def _service():
     from core.web.services import team_workflow_orchestration_service
@@ -852,10 +854,20 @@ def _materialize_source_collection_stage_writeback_quality(
     if not decisions:
         return s._source_collection_stage_writeback_quality_summary(status="no_candidate_decisions")
 
+    source_candidates, _source_family_summary = project_source_version_families(
+        s._source_collection_candidates_for_run(team_id, run_id)
+    )
     source_candidate_ids = {
         s._trim_text(item.get("candidateId"), max_length=160)
-        for item in s._source_collection_candidates_for_run(team_id, run_id)
+        for item in source_candidates
         if s._trim_text(item.get("candidateId"), max_length=160)
+    }
+    superseded_candidate_ids = {
+        s._trim_text(item.get("candidateId"), max_length=160)
+        for item in source_candidates
+        if isinstance(item.get("sourceVersionFamily"), dict)
+        and item["sourceVersionFamily"].get("state") == "superseded"
+        and s._trim_text(item.get("candidateId"), max_length=160)
     }
     assessed_by_agent = (
         s._trim_text(writeback.get("recordedByAgent"), max_length=160)
@@ -882,6 +894,9 @@ def _materialize_source_collection_stage_writeback_quality(
         seen.add(candidate_id)
         if candidate_id not in source_candidate_ids:
             skipped.append({"candidateId": candidate_id, "reason": "candidate_not_in_source_collection_run"})
+            continue
+        if candidate_id in superseded_candidate_ids:
+            skipped.append({"candidateId": candidate_id, "reason": "superseded_source_version"})
             continue
         normalized_decision = s._source_collection_stage_writeback_quality_decision(decision_payload)
         if not normalized_decision:
@@ -1520,7 +1535,19 @@ def _source_collection_stage_writeback_candidate_decisions(result: dict[str, Any
             value = container.get(key)
             if isinstance(value, list):
                 candidates.extend(item for item in value if isinstance(item, dict))
-    return candidates[:200]
+    if candidates:
+        return candidates[:200]
+
+    # The extraction task contract asks the Agent to return one
+    # candidateExtractions[] item per source. A separate candidateDecisions[]
+    # payload is optional, so recognized extraction decisions must feed the
+    # same quality materialization path instead of leaving the UI in a false
+    # "extraction finished / quality not started" split state.
+    return [
+        dict(item)
+        for item in s._source_collection_stage_writeback_candidate_extractions(result)
+        if s._source_collection_stage_writeback_quality_decision(item)
+    ][:200]
 
 
 def _source_collection_stage_writeback_quality_decision(payload: dict[str, Any]) -> str:

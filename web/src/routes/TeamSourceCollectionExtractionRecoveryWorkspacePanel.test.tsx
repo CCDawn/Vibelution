@@ -44,7 +44,10 @@ function projectionWithClosure(input: {
   } as unknown as SourceCollectionStageCardProjection;
 }
 
-function renderRecoveryPanel(candidateProjection: SourceCollectionStageCardProjection) {
+function renderRecoveryPanel(
+  candidateProjection: SourceCollectionStageCardProjection,
+  pendingScreeningCountText = "0",
+) {
   return renderToStaticMarkup(
     <TeamSourceCollectionExtractionRecoveryWorkspacePanel
       candidateProjection={candidateProjection}
@@ -68,7 +71,7 @@ function renderRecoveryPanel(candidateProjection: SourceCollectionStageCardProje
       runSourceCollectionScreeningAction={vi.fn()}
       sourceCollectionScreeningActionReadiness={{ disabled: false }}
       sourceCollectionScreeningButtonText="Agent 重新提炼复核"
-      sourceCollectionRunPendingScreeningCountText="0"
+      sourceCollectionRunPendingScreeningCountText={pendingScreeningCountText}
     />,
   );
 }
@@ -103,13 +106,15 @@ describe("TeamSourceCollectionExtractionRecoveryWorkspacePanel", () => {
     const markup = renderRecoveryPanel(projectionWithClosure({
       blockedCount: 2,
       missingEvidenceAnchorCount: 0,
-    }));
+    }), "10");
 
     expect(markup).toContain("来源核验");
     expect(markup).toContain("提炼完成，待核验来源");
     expect(markup).toContain("待核验来源");
     expect(markup).toContain("2/14");
     expect(markup).toContain("提炼覆盖");
+    expect(markup).toContain("待 Agent 复核");
+    expect(markup).toContain("<strong>10</strong>");
     expect(markup).toContain("不代表缺少证据锚点");
     expect(markup).toContain("lucide-circle-check");
     expect(markup).not.toContain("lucide-triangle-alert");

@@ -18,6 +18,8 @@ import threading
 from copy import deepcopy
 from typing import Any
 
+from .source_collection_common import project_source_version_families
+
 
 def _service():
     from core.web.services import team_workflow_orchestration_service
@@ -1178,6 +1180,7 @@ def assess_source_quality_batch(team_id: str, payload: dict[str, Any] | None = N
             for item in list(candidate_store.get("candidates") or [])
             if isinstance(item, dict) and str(item.get("candidateType") or "") == "source_manifest"
         ]
+        source_candidates, _source_family_summary = project_source_version_families(source_candidates)
         source_by_id = {str(item.get("candidateId") or ""): item for item in source_candidates if str(item.get("candidateId") or "")}
         if requested_candidate_ids:
             selection = [source_by_id[item] for item in requested_candidate_ids if item in source_by_id]
@@ -1189,9 +1192,26 @@ def assess_source_quality_batch(team_id: str, payload: dict[str, Any] | None = N
         else:
             selection = source_candidates
             skipped_candidates = []
-        target_candidates = [
+        reviewable_selection = [
             item
             for item in selection
+            if not (
+                isinstance(item.get("sourceVersionFamily"), dict)
+                and item["sourceVersionFamily"].get("state") == "superseded"
+            )
+        ]
+        skipped_candidates.extend(
+            {
+                "candidateId": str(item.get("candidateId") or ""),
+                "title": str(item.get("title") or s._source_manifest_label(item)),
+                "reason": "superseded_source_version",
+            }
+            for item in selection
+            if item not in reviewable_selection
+        )
+        target_candidates = [
+            item
+            for item in reviewable_selection
             if force or s._candidate_source_quality_assessment(item) is None
         ][:max_candidates]
         skipped_candidates.extend(
@@ -1200,7 +1220,7 @@ def assess_source_quality_batch(team_id: str, payload: dict[str, Any] | None = N
                 "title": str(item.get("title") or s._source_manifest_label(item)),
                 "reason": "already_assessed",
             }
-            for item in selection
+            for item in reviewable_selection
             if item not in target_candidates and s._candidate_source_quality_assessment(item) is not None
         )
         target_candidate_ids = [str(item.get("candidateId") or "") for item in target_candidates if str(item.get("candidateId") or "")]
@@ -1317,20 +1337,29 @@ def get_source_quality_status(team_id: str) -> dict[str, Any]:
         candidate_store = s._load_candidate_store(normalized_team_id)
         candidates = [item for item in list(candidate_store.get("candidates") or []) if isinstance(item, dict)]
     source_candidates = [item for item in candidates if str(item.get("candidateType") or "") == "source_manifest"]
-    assessed = [item for item in source_candidates if s._candidate_source_quality_assessment(item) is not None]
-    approved = [item for item in source_candidates if s._source_quality_bucket(item) == "approved"]
-    needs_revision = [item for item in source_candidates if s._source_quality_bucket(item) == "needs_revision"]
-    rejected = [item for item in source_candidates if s._source_quality_bucket(item) == "rejected"]
-    unassessed = [item for item in source_candidates if s._source_quality_bucket(item) == "pending"]
-    extraction_ready = [item for item in source_candidates if s._source_candidate_has_ready_extraction(item)]
+    projected_source_candidates, source_family_summary = project_source_version_families(source_candidates)
+    reviewable_source_candidates = [
+        item
+        for item in projected_source_candidates
+        if not (
+            isinstance(item.get("sourceVersionFamily"), dict)
+            and item["sourceVersionFamily"].get("state") == "superseded"
+        )
+    ]
+    assessed = [item for item in reviewable_source_candidates if s._candidate_source_quality_assessment(item) is not None]
+    approved = [item for item in reviewable_source_candidates if s._source_quality_bucket(item) == "approved"]
+    needs_revision = [item for item in reviewable_source_candidates if s._source_quality_bucket(item) == "needs_revision"]
+    rejected = [item for item in reviewable_source_candidates if s._source_quality_bucket(item) == "rejected"]
+    unassessed = [item for item in reviewable_source_candidates if s._source_quality_bucket(item) == "pending"]
+    extraction_ready = [item for item in reviewable_source_candidates if s._source_candidate_has_ready_extraction(item)]
     candidate_summaries = [s._source_quality_candidate_summary(item) for item in source_candidates]
-    action_items = s._source_quality_action_items(source_candidates, unassessed, needs_revision)
+    action_items = s._source_quality_action_items(reviewable_source_candidates, unassessed, needs_revision)
     status = "empty"
-    if source_candidates:
+    if reviewable_source_candidates:
         status = "ready" if approved else "needs_screening"
         if needs_revision or unassessed:
             status = "in_progress" if approved else "needs_screening"
-        if len(rejected) == len(source_candidates):
+        if len(rejected) == len(reviewable_source_candidates):
             status = "blocked"
     payload = {
         "schemaVersion": s.SCHEMA_VERSION,
@@ -1341,6 +1370,8 @@ def get_source_quality_status(team_id: str) -> dict[str, Any]:
         "status": status,
         "summary": {
             "sourceCandidateCount": len(source_candidates),
+            "independentSourceCandidateCount": source_family_summary["independentSourceCount"],
+            "supersededSourceCandidateCount": source_family_summary["supersededRecordCount"],
             "assessedSourceCandidateCount": len(assessed),
             "approvedSourceCandidateCount": len(approved),
             "needsRevisionSourceCandidateCount": len(needs_revision),
@@ -1378,6 +1409,8 @@ def get_source_quality_status(team_id: str) -> dict[str, Any]:
             "workflowId": workflow["workflowId"],
             "status": status,
             "sourceCandidateCount": len(source_candidates),
+            "independentSourceCandidateCount": source_family_summary["independentSourceCount"],
+            "supersededSourceCandidateCount": source_family_summary["supersededRecordCount"],
             "approvedSourceCandidateCount": len(approved),
             "needsRevisionSourceCandidateCount": len(needs_revision),
             "rejectedSourceCandidateCount": len(rejected),

@@ -3709,7 +3709,7 @@ def test_source_collection_context_minimal_strips_stale_candidate_artifacts(tmp_
     assert "summaryPreview" in context["candidates"][0]
     assert len(json.dumps(context, ensure_ascii=False)) < 2600
 
-def test_source_quality_stage_writeback_materializes_candidate_decisions(tmp_path, monkeypatch):
+def test_source_quality_stage_writeback_materializes_candidate_extraction_decisions(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
     agent = agent_directory_service.create_agent_instance(display_name="资料提炼")
@@ -3786,7 +3786,7 @@ def test_source_quality_stage_writeback_materializes_candidate_decisions(tmp_pat
             "summary": "审查 3/3 条候选：通过 1，拒绝 1，退回补充 1。",
             "result": {
                 "reviewSummary": {"total": 3, "assessed": 3, "pass": 1, "rejected": 1, "needsMoreInfo": 1},
-                "candidateDecisions": [
+                "candidateExtractions": [
                     {
                         "candidateId": approved["candidateId"],
                         "decision": "keep",
@@ -3836,6 +3836,46 @@ def test_source_quality_stage_writeback_materializes_candidate_decisions(tmp_pat
     assert screening_projection["status"] == "artifact_ready_agent_needs_review"
     assert screening_projection["counts"]["artifact"] == 3
     assert screening_projection["counts"]["pending"] == 0
+
+
+def test_source_quality_batch_skips_superseded_source_versions(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    version_candidates = [
+        team_workflow_orchestration_service.register_candidate_source(
+            team["teamId"],
+            {
+                "title": f"Sleep downscaling preprint {version_label}",
+                "sourceUrl": f"https://doi.org/10.21203/rs.3.rs-10024823/{version_label}",
+                "sourceKind": "paper",
+                "summary": "Sleep-dependent synaptic downscaling evidence from a versioned preprint.",
+                "allowedForAnalysis": True,
+                "createdByAgent": "Source Finder Agent",
+            },
+        )["candidate"]
+        for version_label in ("v1", "v2")
+    ]
+
+    response = team_workflow_orchestration_service.assess_source_quality_batch(
+        team["teamId"],
+        {"assessedByAgent": "资料提炼 Agent"},
+    )
+
+    assert response["summary"]["assessedCandidateCount"] == 1
+    assert response["assessments"][0]["candidateId"] == version_candidates[1]["candidateId"]
+    assert response["summary"]["skippedCandidateCount"] == 1
+    assert response["sourceQualityStatus"]["summary"]["sourceCandidateCount"] == 2
+    assert response["sourceQualityStatus"]["summary"]["independentSourceCandidateCount"] == 1
+    assert response["sourceQualityStatus"]["summary"]["supersededSourceCandidateCount"] == 1
+    assert response["sourceQualityStatus"]["summary"]["unassessedSourceCandidateCount"] == 0
+    assert response["skippedCandidates"] == [
+        {
+            "candidateId": version_candidates[0]["candidateId"],
+            "title": "Sleep downscaling preprint v1",
+            "reason": "superseded_source_version",
+        }
+    ]
+
 
 def test_source_collection_ingestion_stage_writeback_uses_scoped_team_base_when_ids_overlap(tmp_path, monkeypatch):
     """Stage writeback must scope a raw team KB id before granting/reviewing ingestion."""

@@ -125,9 +125,7 @@ export function TeamSourceCollectionScreeningWorkspacePanel(props: TeamSourceCol
     sourceCollectionScreeningButtonText,
     openSourceCollectionScreeningPanel,
     renderSourceCollectionPagination,
-    teamWorkflowSourceQualityStatus,
     teamWorkflowSourceQualityStatusQuery,
-    workflowIngestionTone,
     selectedTeamSourceQualityError,
     selectedSourceCollectionCandidateId,
     selectSourceCollectionCandidate,
@@ -227,13 +225,7 @@ export function TeamSourceCollectionScreeningWorkspacePanel(props: TeamSourceCol
               : (lang === "zh" ? "本轮还没有候选资料。先完成搜索资料并导入候选。" : "No candidates from this run yet.")
         }
         pagination={renderSourceCollectionPagination("extraction", filteredScreeningCandidates.length)}
-        statusItems={teamWorkflowSourceQualityStatus?.actionItems.length
-          ? teamWorkflowSourceQualityStatus.actionItems.slice(0, 3).map((item: any) => (
-            <span key={`${item.code}-${item.candidateId}`} className={workflowIngestionTone(item.severity)}>
-              {workflowIngestionStatusLabel(item.severity, lang)} · {item.message}
-            </span>
-          ))
-          : null}
+        statusItems={null}
         errors={<>
           {teamWorkflowSourceQualityStatusQuery.error instanceof Error ? (
             <div className={styles.messageError}>{teamWorkflowSourceQualityStatusQuery.error.message}</div>

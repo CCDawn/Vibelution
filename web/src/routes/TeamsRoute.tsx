@@ -3385,8 +3385,19 @@ export function TeamsRoute({
   const sourceCollectionRunCandidateCount = sourceCollectionRunCandidates.length;
   const sourceCollectionRecordFilterCounts = sourceCollectionFilterCounts(sourceCollectionRecordSourceCategories);
   const sourceCollectionCandidateFilterCounts = sourceCollectionFilterCounts(sourceCollectionRunCandidateSourceCategories);
-  const sourceCollectionRunAssessedCount = sourceCollectionRunCandidates.filter((candidate) => sourceCollectionCandidateQualityState(candidate).assessed).length;
-  const sourceCollectionRunApprovedCount = sourceCollectionRunCandidates.filter((candidate) => sourceCollectionCandidateQualityState(candidate).approved).length;
+  const sourceCollectionReviewableRunCandidates = useMemo(
+    () => sourceCollectionRunCandidates.filter(
+      (candidate) => candidate.sourceVersionFamily?.state !== "superseded",
+    ),
+    [sourceCollectionRunCandidates],
+  );
+  const sourceCollectionRunReviewableCandidateCount = sourceCollectionReviewableRunCandidates.length;
+  const sourceCollectionRunAssessedCount = sourceCollectionReviewableRunCandidates.filter(
+    (candidate) => sourceCollectionCandidateQualityState(candidate).assessed,
+  ).length;
+  const sourceCollectionRunApprovedCount = sourceCollectionReviewableRunCandidates.filter(
+    (candidate) => sourceCollectionCandidateQualityState(candidate).approved,
+  ).length;
   const sourceCollectionEvidenceLedgerSummaries = useMemo(
     () => sourceCollectionRunCandidates
       .map((candidate) => sourceCollectionEvidenceLedgerSummary(candidate))
@@ -3459,16 +3470,20 @@ export function TeamsRoute({
     "artifact",
     sourceCollectionCandidateProjectionFallbackCount,
   );
-  const sourceCollectionProjectedAssessedCount = sourceCollectionStageProjectionCount(
-    sourceCollectionScreeningProjection,
-    "artifact",
-    sourceCollectionRunAssessedCount,
-  );
-  const sourceCollectionProjectedApprovedCount = sourceCollectionStageProjectionCount(
-    sourceCollectionScreeningProjection,
-    "output",
-    sourceCollectionRunApprovedCount,
-  );
+  const sourceCollectionProjectedAssessedCount = sourceCollectionRunCandidateCount > 0
+    ? sourceCollectionRunAssessedCount
+    : sourceCollectionStageProjectionCount(
+      sourceCollectionScreeningProjection,
+      "artifact",
+      sourceCollectionRunAssessedCount,
+    );
+  const sourceCollectionProjectedApprovedCount = sourceCollectionRunCandidateCount > 0
+    ? sourceCollectionRunApprovedCount
+    : sourceCollectionStageProjectionCount(
+      sourceCollectionScreeningProjection,
+      "output",
+      sourceCollectionRunApprovedCount,
+    );
   const sourceCollectionDisplayedCandidateCount = Math.max(sourceCollectionRunCandidateCount, sourceCollectionProjectedCandidateCount);
   const sourceCollectionQueryCount =
     sourceCollectionSearchPlanRef?.queryCount
@@ -3631,7 +3646,12 @@ export function TeamsRoute({
     sourceCollectionDisplayedCandidateCount,
     sourceCollectionRunCandidateCount,
   ]);
-  const sourceCollectionRunPendingScreeningCount = Math.max(0, sourceCollectionProjectedCandidateCount - sourceCollectionProjectedAssessedCount);
+  const sourceCollectionRunPendingScreeningCount = Math.max(
+    0,
+    sourceCollectionRunCandidateCount > 0
+      ? sourceCollectionRunReviewableCandidateCount - sourceCollectionRunAssessedCount
+      : sourceCollectionProjectedCandidateCount - sourceCollectionProjectedAssessedCount,
+  );
   const sourceCollectionRunPendingScreeningCountText = sourceCollectionCountText(sourceCollectionScreeningDataLoading, sourceCollectionRunPendingScreeningCount);
   const sourceCollectionPendingCandidateImportCount = Math.max(0, sourceCollectionRawRecordCount - sourceCollectionDisplayedCandidateCount);
   const sourceCollectionExtractionRecoveryCoverage = sourceCollectionCandidateProjection?.currentCoverageSummary?.complete === false
