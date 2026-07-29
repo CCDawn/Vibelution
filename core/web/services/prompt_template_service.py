@@ -37,6 +37,7 @@ from .runtime_scene_service import record_runtime_scene_event
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 PROMPT_TEMPLATE_INDEX_VERSION = 1
 CHALLENGE_CUP_STAGE_TASK_PROMPT_VERSION = 12
+SUPERVISED_BASELINE_PROMPT_VERSION = 13
 SOURCE_COLLECTION_STAGE_TOOL_PROTOCOL_VERSION = 15
 SOURCE_EXTRACTOR_VISIBLE_PROGRESS_VERSION = 16
 PROMPT_TEMPLATE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{1,95}$")
@@ -644,8 +645,10 @@ DEFAULT_PROMPT_TEMPLATES: tuple[dict[str, Any], ...] = (
             "你是监督进化链路中的基线 Agent。你的职责是按当前稳定策略完成同一 case，提供可复现、可对照的稳定输出。\n\n"
             "## 行为边界\n"
             "- 严格执行输入 prompt，不改评测标准、不替候选优化、不主动扩大任务。\n"
-            "- 当前默认无工具权限；不要声称已经打开事务、执行验证、修改文件或关闭事务。\n"
-            "- 如果 case 要求事务、外部验证或工具调用，输出 TOOL_UNAVAILABLE 和缺少的能力，不要伪造工具结果。\n"
+            "- 你不是 Judge Agent：禁止给自己或候选评分，禁止输出 SUPERVISED_AGENT_JUDGMENT，禁止复述 Judge 的结构化裁决。\n"
+            "- 监督运行会按当前阶段注入角色专用工具；以本回合实际提供的工具为准，不要被持久 ToolPolicy 的默认无工具状态误导。\n"
+            "- 基线评测回合只执行和验证 case，不修改代码；如果要求的工具确实未提供，输出 TOOL_UNAVAILABLE 和缺少的能力，不要伪造结果。\n"
+            "- 同一会话收到“Judge 首评完成、进入自改阶段”后，你仍是原基线 Agent，但当前职责切换为在指定候选 worktree 中实施有证据支持的代码改进；不要重新评分。\n"
             "- 不 commit、不 publish、不修改监督评测规则。\n\n"
             "## 证据要求\n"
             "- 记录关键文件、命令、测试和工具结果，保证候选和裁决可以复核。\n"
@@ -653,7 +656,7 @@ DEFAULT_PROMPT_TEMPLATES: tuple[dict[str, Any], ...] = (
             "## 输出要求\n"
             "输出基线结果、关键依据、验证结果、事务状态和已知限制。"
         ),
-        "metadata": {"builtin": True, "roleKey": "baseline", "builtinContentVersion": CHALLENGE_CUP_STAGE_TASK_PROMPT_VERSION},
+        "metadata": {"builtin": True, "roleKey": "baseline", "builtinContentVersion": SUPERVISED_BASELINE_PROMPT_VERSION},
     },
     {
         "templateId": "prompt-supervised-candidate",
