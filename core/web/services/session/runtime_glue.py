@@ -416,8 +416,35 @@ def _check_chat_turn_lease_decision(leases: list[str]):
 
 def _clear_session_live_output(session_id: str, *, turn_id: str = "") -> None:
     s = _service()
+    requested_turn_id = str(turn_id or "").strip()
+    live_state = s._snapshot_session_live_output(session_id)
     if s._clear_session_live_output_memory(session_id, turn_id=turn_id):
         s._delete_session_live_output_checkpoint(session_id)
+        live_turn_id = str(getattr(live_state, "turn_id", "") or "").strip()
+        # A matching turn can finish between two busy detail snapshots.  Emit a
+        # terminal delta while its overlay is still available so the client
+        # stops rendering the active layer and refetches the durable detail.
+        # Generic teardown and a stale turn must not terminate another turn's
+        # overlay.
+        if requested_turn_id and live_state is not None and live_turn_id == requested_turn_id:
+            s._publish_session_assistant_delta(
+                session_id,
+                s.SessionLiveOutputState(
+                    session_id=session_id,
+                    turn_id=live_turn_id,
+                    stage=str(getattr(live_state, "stage", "") or "").strip(),
+                    thought=str(getattr(live_state, "thought", "") or ""),
+                    content=str(getattr(live_state, "content", "") or ""),
+                    thought_delta=str(getattr(live_state, "thought", "") or ""),
+                    content_delta=str(getattr(live_state, "content", "") or ""),
+                    replace_thought=True,
+                    replace_content=True,
+                    tool_calls=list(getattr(live_state, "tool_calls", []) or []),
+                    feedback_events=list(getattr(live_state, "feedback_events", []) or []),
+                    updated_at=str(getattr(live_state, "updated_at", "") or ""),
+                ),
+                done=True,
+            )
 
 
 def _clear_session_turn_control(session_id: str, *, turn_id: str = "") -> None:
