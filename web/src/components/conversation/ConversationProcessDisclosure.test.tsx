@@ -50,7 +50,9 @@ describe("ConversationProcessDisclosure", () => {
     expect(html).toContain("处理记录内容");
     expect(html).toContain('data-codex-process-expanded="false"');
     expect(styles.summary).not.toContain("border-b");
-    expect(styles.content).toContain("border-l");
+    expect(styles.content).not.toContain("border-l");
+    expect(styles.content).not.toContain("ml-");
+    expect(styles.content).not.toContain("pl-");
     expect(styles.contentMotion).toContain("transition-[grid-template-rows,opacity]");
     expect(styles.contentMotion).toContain("motion-reduce:transition-none");
     expect(styles.contentMotion).toContain("[overflow-anchor:none]");

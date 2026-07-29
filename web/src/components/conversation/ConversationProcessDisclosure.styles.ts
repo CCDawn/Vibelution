@@ -24,7 +24,7 @@ const styles = {
   contentClip: cx("content-clip", "min-h-0 overflow-hidden"),
   content: cx(
     "content",
-    "ml-2 grid min-w-0 content-start gap-0 border-l border-[var(--vui-border-subtle)] pb-1 pl-4 pt-2",
+    "grid min-w-0 content-start gap-0 pb-1 pt-2",
   ),
   row: cx(
     "row",

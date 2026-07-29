@@ -441,7 +441,7 @@ function reActGroupIsDisplayable(group: AgentMessageReActOperationGroup) {
   if (group.operations.some((operation) => !["thought", "mental"].includes(operation.kind))) {
     return true;
   }
-  return group.operations.some((operation) => operation.status !== "done");
+  return group.operations.some((operation) => operation.kind === "thought");
 }
 
 function reActGroupPrimaryOperations(group: AgentMessageReActOperationGroup) {
