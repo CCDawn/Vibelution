@@ -8,6 +8,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..source_collection_common import (
+    project_source_version_families,
+    summarize_projected_source_version_families,
+)
+
 
 def _service():
     from core.web.services import team_workflow_orchestration_service
@@ -507,13 +512,17 @@ def list_candidate_store(
     with s._WORKFLOW_LOCK:
         workflow = s._load_or_create_workflow(normalized_team_id)
         candidate_store = s._load_candidate_store(normalized_team_id)
-        candidates = s._filtered_candidates(
-            candidate_store,
+        all_candidates = [item for item in list(candidate_store.get("candidates") or []) if isinstance(item, dict)]
+        projected_candidates, _all_source_family_summary = project_source_version_families(all_candidates)
+        projected_store = {**candidate_store, "candidates": projected_candidates}
+        filtered_candidates = s._filtered_candidates(
+            projected_store,
             candidate_type=normalized_candidate_type,
             current_state=normalized_state,
             quality_status=normalized_quality,
-        )[:normalized_limit]
-        all_candidates = [item for item in list(candidate_store.get("candidates") or []) if isinstance(item, dict)]
+        )
+        source_family_summary = summarize_projected_source_version_families(filtered_candidates)
+        candidates = filtered_candidates[:normalized_limit]
     if include_validation:
         validation_summary = validate_candidate_store(normalized_team_id)["summary"]
     else:
@@ -537,6 +546,7 @@ def list_candidate_store(
         },
         "candidates": candidates,
         "candidateCount": len(candidates),
+        "sourceFamilySummary": source_family_summary,
         "validationSummary": validation_summary,
     }
     if include_store:

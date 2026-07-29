@@ -1564,6 +1564,18 @@ export type TeamWorkflowCandidate = {
   currentWorkflowNode: string;
   currentState: string;
   qualityStatus: string;
+  sourceVersionFamily?: {
+    familyKey: string;
+    version: number | null;
+    versionLabel: string;
+    state: "current" | "standalone" | "superseded" | string;
+    familySize: number;
+    currentCandidateId: string;
+    currentVersionLabel: string;
+    countsAsIndependentSource: boolean;
+    sourceKind: "research_square_preprint" | "standalone_source" | string;
+    evidencePolicy: "hypothesis_generation_only" | "source_specific" | string;
+  };
   validation?: TeamWorkflowCandidateValidation;
   metadata?: Record<string, unknown> & {
     graph?: TeamWorkflowCandidateGraphPayload;
@@ -1597,6 +1609,12 @@ export type TeamWorkflowCandidateListPayload = {
   };
   candidates: TeamWorkflowCandidate[];
   candidateCount: number;
+  sourceFamilySummary?: {
+    sourceRecordCount: number;
+    independentSourceCount: number;
+    versionFamilyCount: number;
+    supersededRecordCount: number;
+  };
   store?: TeamWorkflowCandidateStoreSummary;
   validationSummary: TeamWorkflowValidationSummary;
 };

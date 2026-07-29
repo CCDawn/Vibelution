@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..source_collection_common import project_source_version_families
+
 
 def _service():
     from core.web.services import team_workflow_orchestration_service
@@ -924,8 +926,11 @@ def get_source_collection_stage_task_context(
     selected_records = records[record_page_offset:record_page_offset + record_page_limit]
     next_record_offset = record_page_offset + len(selected_records)
     record_has_more = next_record_offset < len(records)
-    source_candidates = s._rank_source_collection_context_candidates(
+    projected_source_candidates, source_family_summary = project_source_version_families(
         run_bundle["sourceCandidates"],
+    )
+    source_candidates = s._rank_source_collection_context_candidates(
+        projected_source_candidates,
         stage_id=normalized_stage_id,
     ) if include_candidates else []
     memory_steward_mode = s._source_collection_stage_can_materialize_formal_knowledge(
@@ -1007,6 +1012,9 @@ def get_source_collection_stage_task_context(
             "excludedSourceCount": s._source_collection_count((run_bundle.get("excludedSourceSummary") or {}).get("excludedCount")),
             "returnedRecordCount": len(selected_records),
             "candidateCount": len(run_bundle["sourceCandidates"]),
+            "independentSourceCount": source_family_summary["independentSourceCount"],
+            "versionFamilyCount": source_family_summary["versionFamilyCount"],
+            "supersededSourceRecordCount": source_family_summary["supersededRecordCount"],
             "returnedCandidateCount": len(selected_candidates),
             "assignmentCount": len(run_bundle["assignments"]),
             "matchingAssignmentCount": len(matching_assignments),
@@ -1015,7 +1023,13 @@ def get_source_collection_stage_task_context(
         "task": s._source_collection_context_task_summary(task),
         "assignments": [s._source_collection_context_assignment_summary(item) for item in matching_assignments[:12]],
         "records": [s._source_collection_context_record_summary(item) for item in selected_records],
-        "candidates": [s._source_collection_context_candidate_summary(item) for item in selected_candidates],
+        "candidates": [
+            {
+                **s._source_collection_context_candidate_summary(item),
+                "sourceVersionFamily": s._normalize_metadata(item.get("sourceVersionFamily")),
+            }
+            for item in selected_candidates
+        ],
         "excludedSourceSummary": s._normalize_metadata(run_bundle.get("excludedSourceSummary")),
         "recordPage": {
             "offset": record_page_offset,

@@ -12,6 +12,16 @@ export type SourceCollectionCandidateWithSource = TeamWorkflowCandidate & {
   sourceUrl?: string;
 };
 
+export type SourceCollectionCandidateVersionFamilyPresentation = {
+  isVersioned: boolean;
+  isCurrent: boolean;
+  isSuperseded: boolean;
+  statusLabel: string;
+  chainLabel: string;
+  evidenceLabel: string;
+  reviewDisabledReason: string;
+};
+
 export type SourceCollectionCandidateProvenance = {
   kind: "doi" | "file" | "missing" | "ref" | "search_evidence" | "url";
   label: string;
@@ -406,6 +416,60 @@ export function sourceCollectionCandidateProvenance(
     value: lang === "zh" ? "没有 sourceUrl/sourcePath/DOI" : "No sourceUrl/sourcePath/DOI",
     href: "",
   };
+}
+
+export function sourceCollectionCandidateVersionFamily(
+  candidate: TeamWorkflowCandidate,
+  lang: "zh" | "en",
+): SourceCollectionCandidateVersionFamilyPresentation | null {
+  const family = candidate.sourceVersionFamily;
+  if (!family || family.sourceKind !== "research_square_preprint" || !family.versionLabel) {
+    return null;
+  }
+  const isCurrent = family.state === "current";
+  const isSuperseded = family.state === "superseded";
+  const versionCount = Math.max(1, Number(family.familySize) || 1);
+  const currentVersion = family.currentVersionLabel || family.versionLabel;
+  if (lang === "zh") {
+    return {
+      isVersioned: true,
+      isCurrent,
+      isSuperseded,
+      statusLabel: isSuperseded ? `历史版本 ${family.versionLabel}` : `当前版本 ${family.versionLabel}`,
+      chainLabel: isCurrent
+        ? `版本链 ${versionCount} 个版本 · 采用最新版`
+        : `版本链 ${versionCount} 个版本 · 当前 ${currentVersion}`,
+      evidenceLabel: "预印本 · 仅用于假设生成",
+      reviewDisabledReason: isSuperseded
+        ? `该记录已由 ${currentVersion} 取代，仅保留审计；请审核当前版本。`
+        : "",
+    };
+  }
+  return {
+    isVersioned: true,
+    isCurrent,
+    isSuperseded,
+    statusLabel: isSuperseded ? `Historical ${family.versionLabel}` : `Current ${family.versionLabel}`,
+    chainLabel: isCurrent
+      ? `${versionCount}-version chain · latest selected`
+      : `${versionCount}-version chain · current ${currentVersion}`,
+    evidenceLabel: "Preprint · hypothesis generation only",
+    reviewDisabledReason: isSuperseded
+      ? `Superseded by ${currentVersion}; retained for audit. Review the current version instead.`
+      : "",
+  };
+}
+
+export function sourceCollectionIndependentSourceCount(
+  candidates: TeamWorkflowCandidate[],
+) {
+  return candidates.reduce((count, candidate) => {
+    const family = candidate.sourceVersionFamily;
+    if (!family || family.countsAsIndependentSource) {
+      return count + 1;
+    }
+    return count;
+  }, 0);
 }
 
 export function sourceCollectionRecordProvenance(

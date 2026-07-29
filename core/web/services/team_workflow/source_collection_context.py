@@ -172,6 +172,7 @@ def compact_source_collection_context_candidate(
         "sourceRecordId": source_record_id,
         "qualityStatus": trim_text(candidate.get("qualityStatus"), max_length=80),
         "qualityBucket": trim_text(candidate.get("qualityBucket"), max_length=80),
+        "sourceVersionFamily": normalize_metadata(candidate.get("sourceVersionFamily")),
     }
     if evidence:
         compact["summary"] = trim_text(candidate.get("summary"), max_length=1200)
