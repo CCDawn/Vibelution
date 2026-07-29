@@ -194,6 +194,52 @@ def _direct_executable_argv(command: str) -> list[str]:
     return normalized
 
 
+def _explicit_powershell_argv(command: str) -> list[str]:
+    """Preserve a model-issued PowerShell command as one native argv payload.
+
+    ``cmd /c`` changes the quoting boundary for ``powershell -Command`` under
+    ``codex sandbox`` and can make PowerShell echo the command text rather than
+    execute it. Only recognize the explicit ``-Command``/``-c`` form; opaque
+    forms such as ``-EncodedCommand`` continue through the existing route and
+    security checks.
+    """
+
+    try:
+        tokens = shlex.split(command, posix=False)
+    except ValueError:
+        return []
+    normalized = [
+        token[1:-1]
+        if len(token) >= 2 and token[0] == token[-1] and token[0] in {'"', "'"}
+        else token
+        for token in tokens
+    ]
+    if not normalized:
+        return []
+    executable = Path(normalized[0]).name.lower()
+    if executable not in {"powershell", "powershell.exe"}:
+        return []
+    command_index = next(
+        (
+            index
+            for index, value in enumerate(normalized[1:], start=1)
+            if value.lower() in {"-command", "-c"}
+        ),
+        -1,
+    )
+    if command_index < 0 or command_index >= len(normalized) - 1:
+        return []
+    command_payload = " ".join(normalized[command_index + 1 :]).strip()
+    if not command_payload:
+        return []
+    return [
+        _powershell_executable(),
+        *normalized[1:command_index],
+        normalized[command_index],
+        command_payload,
+    ]
+
+
 def _split_unquoted_and_chain(command: str) -> list[str]:
     segments: list[str] = []
     current: list[str] = []
@@ -357,6 +403,9 @@ def _sandbox_argv(
     direct_argv = _direct_executable_argv(route.command)
     if direct_argv:
         return prefix + direct_argv
+    explicit_powershell_argv = _explicit_powershell_argv(route.command)
+    if explicit_powershell_argv:
+        return prefix + explicit_powershell_argv
     if route.route == "git_bash" and _is_native_windows_command(route.command):
         return prefix + [
             _windows_command_interpreter(),
