@@ -690,7 +690,7 @@ describe("agentMessageOperations", () => {
     ]);
   });
 
-  it("drops completed thought-only packets while keeping titled action packets", () => {
+  it("keeps completed commentary-only packets so short visible progress is not dropped", () => {
     const message: ConversationMessage = {
       id: "message-action-packet-title",
       role: "assistant",
@@ -705,13 +705,19 @@ describe("agentMessageOperations", () => {
 
     const groups = buildAgentMessageReActOperationGroups(operationsForConversationMessage(message));
 
-    expect(groups).toHaveLength(1);
+    expect(groups).toHaveLength(2);
     expect(groups[0]).toMatchObject({
       id: "react-thought-1",
       title: "读取",
       primaryKind: "tool",
     });
     expect(groups[0].operations.map((operation) => operation.sequence)).toEqual([1, 2]);
+    expect(groups[1]).toMatchObject({
+      id: "react-thought-3",
+      title: "Deep thinking",
+      primaryKind: "thought",
+    });
+    expect(groups[1].operations.map((operation) => operation.sequence)).toEqual([3]);
   });
 
   it("keeps running thought-only packets visible with a semantic title", () => {
@@ -733,6 +739,28 @@ describe("agentMessageOperations", () => {
       title: "Deep thinking",
       primaryKind: "thought",
     });
+  });
+
+  it("does not turn completed internal mental state into user-visible commentary", () => {
+    const message: ConversationMessage = {
+      id: "message-internal-mental-only",
+      role: "assistant",
+      content: "",
+      timestamp: "2026-06-05T00:00:00Z",
+      feedbackEvents: [
+        {
+          sequence: 1,
+          kind: "mental",
+          status: "done",
+          summary: "internal diagnosis",
+          resultPreview: "internal diagnosis",
+        },
+      ],
+    };
+
+    expect(
+      buildAgentMessageReActOperationGroups(operationsForConversationMessage(message)),
+    ).toEqual([]);
   });
 
   it("merges cumulative thought prefixes from mixed LLM providers without dropping final detail", () => {
