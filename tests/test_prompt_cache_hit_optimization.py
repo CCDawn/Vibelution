@@ -1,5 +1,3 @@
-import json
-
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
@@ -158,7 +156,7 @@ def test_session_list_cache_reclaims_stale_inflight_without_long_wait(monkeypatc
     monkeypatch.setattr(session_service._SESSION_LIST_CACHE_CONDITION, "wait", fail_wait)
 
     cached, should_build, waited = _begin_session_list_cache_build(
-        now=20.0,
+        now=41.0,
         signature=signature,
     )
 
@@ -167,7 +165,7 @@ def test_session_list_cache_reclaims_stale_inflight_without_long_wait(monkeypatc
     assert waited is True
     with session_service._SESSION_LIST_CACHE_CONDITION:
         assert session_service._SESSION_LIST_CACHE["inflight_signature"] == signature
-        assert session_service._SESSION_LIST_CACHE["inflight_started_at"] == 20.0
+        assert session_service._SESSION_LIST_CACHE["inflight_started_at"] == 41.0
     _finish_session_list_cache_build(signature=signature)
 
 
@@ -180,7 +178,7 @@ def test_session_list_cache_ignores_late_finish_from_reclaimed_inflight():
     assert should_build is True
     assert waited is False
 
-    cached, should_build, waited = _begin_session_list_cache_build(now=13.0, signature=signature)
+    cached, should_build, waited = _begin_session_list_cache_build(now=41.0, signature=signature)
     assert cached is None
     assert should_build is True
     assert waited is True
@@ -188,7 +186,7 @@ def test_session_list_cache_ignores_late_finish_from_reclaimed_inflight():
     _finish_session_list_cache_build(
         signature=signature,
         sessions=[{"id": "fresh-session"}],
-        started_at=13.0,
+        started_at=41.0,
         conversation_count=1,
         agent_count=1,
     )
@@ -201,7 +199,7 @@ def test_session_list_cache_ignores_late_finish_from_reclaimed_inflight():
     )
 
     cached, should_build, waited = _begin_session_list_cache_build(
-        now=13.1,
+        now=41.1,
         signature=signature,
     )
 
