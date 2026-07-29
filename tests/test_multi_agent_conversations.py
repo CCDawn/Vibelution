@@ -520,6 +520,47 @@ def test_session_list_reuses_known_ledger_presence_for_preview_projection(tmp_pa
     assert calls == ["session-preview"]
 
 
+def test_session_list_does_not_reread_empty_ledger_for_summary(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    save_chat_state(
+        tmp_path,
+        {
+            "version": 1,
+            "active_conversation_id": "session-empty-preview",
+            "conversations": [
+                {
+                    "conversation_id": "session-empty-preview",
+                    "title": "Empty Preview Agent",
+                    "updated_at": "2026-05-26T10:00:00",
+                    "messages": [],
+                }
+            ],
+        },
+    )
+    session_service._invalidate_session_list_cache()
+    session_service._invalidate_session_conversation_events_cache()
+    real_ledger_visible_messages = session_service._ledger_visible_messages_for_session
+    calls: list[str] = []
+
+    def counting_ledger_visible_messages(session_id):
+        calls.append(str(session_id))
+        return real_ledger_visible_messages(session_id)
+
+    monkeypatch.setattr(
+        session_service,
+        "_ledger_visible_messages_for_session",
+        counting_ledger_visible_messages,
+    )
+
+    sessions = {
+        item["id"]: item
+        for item in session_service.list_sessions(repair_collisions=False)
+    }
+
+    assert sessions["session-empty-preview"]["taskSummary"] == ""
+    assert calls == ["session-empty-preview"]
+
+
 def test_session_title_update_uses_lightweight_path(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     created = session_service.create_chat_session(title="Before Rename")
@@ -2098,7 +2139,7 @@ def test_session_reference_message_persists_reference_and_schedules_query_contex
 
 def test_session_reference_query_tool_only_reads_current_turn_references(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    alpha = session_service.create_chat_session(title="Alpha Agent")
+    session_service.create_chat_session(title="Alpha Agent")
     beta = session_service.create_chat_session(title="Beta Agent")
     _seed_ledger_messages(
         tmp_path,

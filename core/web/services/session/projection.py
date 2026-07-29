@@ -9,11 +9,6 @@ their own packs. Late-bound facade keeps monkeypatches stable.
 
 from __future__ import annotations
 
-import json
-import re
-import threading
-import time
-from copy import deepcopy
 from datetime import datetime
 from typing import Any, Mapping
 
@@ -409,9 +404,7 @@ def _build_session_summary(conversation: dict[str, Any], *, hydrate_agent: bool 
     s = _service()
     status = s._conversation_phase(conversation["id"], conversation)
     summary_messages = list(conversation.get("messages") or [])
-    if summary_messages and (
-        bool(conversation.get("_messagesNormalized")) or bool(conversation.get("_messagesPreview"))
-    ):
+    if bool(conversation.get("_messagesNormalized")) or bool(conversation.get("_messagesPreview")):
         normalized_summary_messages = summary_messages
     elif summary_messages:
         normalized_summary_messages = s._normalize_messages(conversation["id"], summary_messages)
@@ -1424,7 +1417,6 @@ def _build_terminal_error_codex_transcript_projection(
     message_id: str,
     error_item: Mapping[str, Any],
 ) -> dict[str, Any]:
-    s = _service()
     normalized_message_id = str(message_id or error_item.get("messageId") or "").strip()
     item_id = str(error_item.get("itemId") or error_item.get("id") or "terminal-error").strip()
     diagnostic_summary = error_item.get("diagnosticSummary")
@@ -2784,7 +2776,6 @@ def _conversation_phase(conversation_id: str, conversation: dict[str, Any]) -> s
 
 
 def _projection_edit_contract(kind: str, source_id: str, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
-    s = _service()
     from core.agent_kernel.source_authority import projection_edit_contract
 
     return projection_edit_contract(kind, source_id, metadata)
@@ -3215,7 +3206,6 @@ def _with_direct_session_agent_for_summary(
 
 
 def _timestamp_sort_key(value: str) -> float:
-    s = _service()
     text = str(value or "").strip()
     if not text:
         return 0.0
