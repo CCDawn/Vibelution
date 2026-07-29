@@ -393,7 +393,7 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(detailsStart).toBeGreaterThanOrEqual(0);
     expect(detailsEnd).toBeGreaterThan(detailsStart);
     expect(detailsMarkup.slice(0, summaryEnd)).toContain("写入终端");
-    expect(detailsMarkup.slice(0, summaryEnd)).toContain("itemChevron");
+    expect(detailsMarkup.slice(0, summaryEnd)).not.toContain("itemChevron");
     expect(detailsMarkup.slice(0, summaryEnd)).not.toContain("技术详情");
     expect(detailsMarkup.indexOf("turnErrorReasonList")).toBeGreaterThan(summaryEnd);
     expect(toolActivityStyles.itemDetailsBody).not.toContain("ml-");
@@ -909,7 +909,7 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html).not.toContain("exitCode");
   });
 
-  it("keeps commentary primary and folds adjacent tools into one digest before the final answer", () => {
+  it("keeps commentary primary and renders adjacent tools inline before the final answer", () => {
     const html = renderConversation([
       {
         id: "assistant-native-tool-activity",
@@ -964,12 +964,12 @@ describe("ConversationView native Codex transcript surface", () => {
 
     const before = html.indexOf("先检查当前实现。");
     const disclosure = html.indexOf('data-codex-process-disclosure="true"');
-    const toolDigest = html.indexOf('data-codex-tool-activity="digest"');
+    const toolActivity = html.indexOf('data-codex-tool-activity="items"');
     const after = html.indexOf("已定位关键调用。");
     const final = html.indexOf("最终回答保持在最后。");
-    expect(html).toContain("运行了 3 个工具");
-    expect(html).toContain("代码分析 3");
+    expect(html).not.toContain("运行了 3 个工具");
     expect(html).toContain("代码图谱");
+    expect(html).toContain(">· 3 次</span>");
     expect(html.match(/data-codex-tool-activity-item="true"/g)).toHaveLength(3);
     expect(html).not.toContain('data-codex-tool-activity-group="true"');
     expect(html).not.toContain("3 次调用");
@@ -977,8 +977,8 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(before).toBeGreaterThan(-1);
     expect(disclosure).toBeGreaterThan(-1);
     expect(before).toBeGreaterThan(disclosure);
-    expect(toolDigest).toBeGreaterThan(before);
-    expect(after).toBeGreaterThan(toolDigest);
+    expect(toolActivity).toBeGreaterThan(before);
+    expect(after).toBeGreaterThan(toolActivity);
     expect(final).toBeGreaterThan(after);
     expect(html).toContain('data-codex-final-response="true"');
   });
@@ -1041,7 +1041,7 @@ describe("ConversationView native Codex transcript surface", () => {
     const after = html.indexOf("The relevant calls are located.");
     const final = html.indexOf("Final answer remains last.");
     expect(before).toBeGreaterThan(-1);
-    expect(html).toContain('data-codex-tool-activity="digest"');
+    expect(html).toContain('data-codex-tool-activity="items"');
     expect(batch).toBeGreaterThan(before);
     expect(after).toBeGreaterThan(batch);
     expect(final).toBeGreaterThan(after);

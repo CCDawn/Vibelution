@@ -1,4 +1,4 @@
-import { ChevronDown, CircleAlert, LoaderCircle } from "lucide-react";
+import { CircleAlert, LoaderCircle } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 
 import "./ConversationToolActivity.css";
@@ -21,7 +21,6 @@ import {
   conversationToolActivityIsNoMatchTerminalExit,
   conversationToolActivityRendererForCell,
   conversationToolActivityTerminalExitCode,
-  type ConversationToolActivityDigestPresentation,
   type ConversationToolActivityPresentationItem,
 } from "./conversationToolActivityPresentation";
 import styles from "./ConversationToolActivity.styles";
@@ -116,25 +115,6 @@ function visibleToolSummary(cell: CodexTranscriptCell, language: ConversationToo
   });
 }
 
-function ToolActivityStatusIcon({
-  cells,
-  language,
-  state,
-}: {
-  cells: readonly CodexTranscriptCell[];
-  language: ConversationToolPresentationLanguage;
-  state: ConversationToolActivityDigestPresentation["state"];
-}) {
-  if (state === "running") {
-    return <LoaderCircle className={`${styles.activityIcon} ${styles.activityIconRunning} animate-spin`} size={15} aria-hidden="true" />;
-  }
-  if (state === "attention") {
-    return <CircleAlert className={`${styles.activityIcon} ${styles.activityIconAttention}`} size={15} aria-hidden="true" />;
-  }
-  const Icon = conversationToolActivityRendererForCell(cells[0], language).icon;
-  return <Icon className={styles.activityIcon} size={15} aria-hidden="true" />;
-}
-
 function ToolStatusIcon({
   cell,
   language,
@@ -189,7 +169,6 @@ function ToolActivityItem({
       <ToolStatusIcon cell={cell} language={language} />
       <span className={styles.itemBody}>
         <span className={styles.itemTitle}>{title}</span>
-        {expandable ? <ChevronDown className={styles.itemChevron} size={14} aria-hidden="true" /> : null}
         {preview ? <span className={styles.itemPreview}>{preview}</span> : null}
       </span>
     </>
@@ -268,7 +247,6 @@ function ToolActivityBatch({
         <span className={styles.itemBody}>
           <span className={styles.itemTitle}>{item.title}</span>
           <span className={styles.batchCount}>· {countLabel}</span>
-          <ChevronDown className={styles.itemChevron} size={14} aria-hidden="true" />
         </span>
       </summary>
       <div className={styles.batchDetails}>
@@ -291,50 +269,23 @@ export function ConversationToolActivity({
 }: ConversationToolActivityProps) {
   const items = buildConversationToolActivityPresentation(activity.cells, language);
   const digest = buildConversationToolActivityDigestPresentation(activity.cells, language);
-  const openByDefault = digest.state === "running" || digest.state === "attention";
-  const staggeredDetails = useStaggeredDetails(openByDefault);
-  const label = language === "zh"
-    ? `展开或收起工具活动：${digest.title}`
-    : `Expand or collapse tool activity: ${digest.title}`;
   return (
-    <details
-      className={`${styles.activity} group`}
-      data-codex-tool-activity="digest"
+    <div
+      className={styles.activity}
+      data-codex-tool-activity="items"
       data-codex-tool-activity-state={digest.state}
       data-codex-tool-activity-count={digest.count}
       data-codex-tool-activity-attention-count={digest.attentionCount || undefined}
-      data-closing={staggeredDetails.isClosing || undefined}
-      open={staggeredDetails.isOpen}
     >
-      <summary
-        className={styles.activitySummary}
-        aria-label={label}
-        aria-live={digest.state === "running" ? "polite" : undefined}
-        onClick={staggeredDetails.onSummaryClick}
-      >
-        <ToolActivityStatusIcon cells={activity.cells} language={language} state={digest.state} />
-        <span className={styles.activitySummaryBody}>
-          <span className={styles.activityTitle}>{digest.title}</span>
-          {digest.attentionLabel ? (
-            <span className={styles.activityAttention}>· {digest.attentionLabel}</span>
-          ) : null}
-          {digest.meta ? <span className={styles.activityMeta}>{digest.meta}</span> : null}
-          <ChevronDown className={styles.activityChevron} size={14} aria-hidden="true" />
-        </span>
-      </summary>
-      <div className={styles.activityDetails}>
-        <div className={styles.activityDetailsInner}>
-          {items.map((item, index) => (
-            <div key={item.id} className={styles.activityRow} style={staggeredRowStyle(index, items.length)}>
-              {item.kind === "batch" ? (
-                <ToolActivityBatch item={item} language={language} renderToolDetails={renderToolDetails} />
-              ) : (
-                <ToolActivityItem cell={item.cell} language={language} renderToolDetails={renderToolDetails} />
-              )}
-            </div>
-          ))}
+      {items.map((item) => (
+        <div key={item.id} className={styles.activityRow}>
+          {item.kind === "batch" ? (
+            <ToolActivityBatch item={item} language={language} renderToolDetails={renderToolDetails} />
+          ) : (
+            <ToolActivityItem cell={item.cell} language={language} renderToolDetails={renderToolDetails} />
+          )}
         </div>
-      </div>
-    </details>
+      ))}
+    </div>
   );
 }
