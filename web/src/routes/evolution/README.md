@@ -15,6 +15,7 @@ route builders should live outside the shell.
 | Live run stream target / snapshot selection | `../evolutionLiveRun.ts` |
 | Workspace cache patch helpers | `../evolutionWorkspaceCache.ts` |
 | Run / worktree start-control mutations | `useEvolutionRunMutations.ts` |
+| Supervised approval comparison / governance actions | `../SupervisedApprovalDecisionPanel.tsx` + `../supervisedApprovalDecision.ts` |
 | Proposal edit/delete/bulk mutations | `useEvolutionProposalMutations.ts` |
 | Active run monitor UI | `../EvolutionActiveRunMonitorPanel.tsx` |
 | Run records list UI | `../EvolutionRunRecordsPanel.tsx` |
@@ -29,6 +30,7 @@ route builders should live outside the shell.
 | Supervised pure presentation / drafts | `evolutionRouteModel.ts` | shell JSX |
 | Live stream selection pure math | `../evolutionLiveRun.ts` | panels |
 | Write mutations | `useEvolution*Mutations.ts` | pure files |
+| Supervised approval state model / decision UI | `../supervisedApprovalDecision.ts` + `../SupervisedApprovalDecisionPanel.tsx` | shell JSX |
 | Live / runs / library panel UI | matching `../Evolution*Panel.tsx` | Route-only inlines |
 | Shell selection + composition | `../EvolutionRoute.tsx` | re-adding pure tables |
 

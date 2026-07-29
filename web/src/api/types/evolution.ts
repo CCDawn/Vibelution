@@ -560,6 +560,19 @@ export type SupervisedWorktreeRun = {
       highRisk: boolean;
     }>;
   };
+  merge?: {
+    status?: string;
+    mergedAt?: string;
+    force?: boolean;
+    changedFiles?: string[];
+    rollbackManifestPath?: string;
+  };
+  rollback?: {
+    status?: string;
+    manifestPath?: string;
+    rolledBackAt?: string;
+    reason?: string;
+  };
   actionStates: Record<string, EvolutionActionState>;
 };
 
