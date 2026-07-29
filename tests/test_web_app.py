@@ -2179,6 +2179,45 @@ def test_submit_session_message_runs_turn_and_persists_reply(tmp_path, monkeypat
     assert event_codes.index("conversation.turn.user_visible_finished") < event_codes.index("conversation.turn.worker_finished")
 
 
+def test_session_worker_uses_unbounded_history_seed_for_direct_chat(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    session_agent = agent_directory_service.create_agent_instance(
+        display_name="Full History Seed Agent",
+        primary_mode="chat",
+    )
+    _bind_seeded_session_agent(tmp_path, session_agent)
+    captured_limits: list[object] = []
+    original_assembler = session_service.assemble_conversation_context
+
+    class DummyAgent:
+        def seed_chat_history(self, _messages):
+            return None
+
+        def run_single_turn(self, initial_prompt=None, attachments=None):
+            return {"status": "completed", "summary": "ok", "raw_output": "ok", "outcome": "done"}
+
+    def capture_assembler(*args, **kwargs):
+        captured_limits.append(kwargs.get("recent_message_limit", "missing"))
+        return original_assembler(*args, **kwargs)
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda **_kwargs: DummyAgent())
+    monkeypatch.setattr(session_service, "assemble_conversation_context", capture_assembler)
+    monkeypatch.setattr(
+        session_service,
+        "_schedule_session_turn",
+        lambda context: session_service._run_session_turn(context),
+    )
+
+    response = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "请完整保留此前未压缩的对话上下文"},
+    )
+
+    assert response.status_code == 202
+    assert captured_limits == [None]
+
+
 def test_session_submit_message_routes_slash_skill_into_scheduled_context(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     session_agent = agent_directory_service.create_agent_instance(
