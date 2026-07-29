@@ -11,6 +11,8 @@
 @source "../../routes/Evolution*.styles.ts";
 @source "../../routes/SupervisedAgentConversationPanel.tsx";
 @source "../../routes/SupervisedAgentConversationPanel.styles.ts";
+@source "../../routes/SupervisedApprovalDecisionPanel.tsx";
+@source "../../routes/SupervisedApprovalDecisionPanel.styles.ts";
 @source "../../routes/SelfEvolutionTrack.tsx";
 @source "../../routes/SelfEvolutionTrack.styles.ts";
 /* Supervised evolution toolbar + review chrome are mounted from EvolutionRoute

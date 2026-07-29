@@ -6,7 +6,6 @@ import {
   ArrowUpRight,
   ChevronDown,
   ChevronRight,
-  CheckCircle2,
   LibraryBig,
   LoaderCircle,
   Play,
@@ -78,6 +77,7 @@ import {
 } from "../components/vui";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { useShellStore } from "../store/shellStore";
+import { SupervisedApprovalDecisionPanel } from "./SupervisedApprovalDecisionPanel";
 import { useEvolutionProposalMutations } from "./evolution/useEvolutionProposalMutations";
 import { useEvolutionRunMutations } from "./evolution/useEvolutionRunMutations";
 import {
@@ -786,20 +786,6 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     || monitoredRun?.currentTask
     || "";
   const supervisedApprovalSelected = selectedSupervisedWorkflowStepId === "approval";
-  const approvalEvidenceItems = [
-    {
-      label: lang === "zh" ? "最终运行结果" : "Final result",
-      value: supervisedWorkflowRun?.status ? statusLabel(supervisedWorkflowRun.status) : "--",
-    },
-    {
-      label: lang === "zh" ? "改进提案" : "Improvement proposal",
-      value: String(supervisedWorkflowRun?.latestMessage || monitoredRun?.reason || "--"),
-    },
-    {
-      label: lang === "zh" ? "样本评审" : "Sample review",
-      value: supervisedWorkflowRun?.workflowSteps?.find((step) => step.id === "approval")?.summary || "--",
-    },
-  ];
   const selectedWorkflowIsRuntimeStep = supervisedSelectedWorkflowStep.id === supervisedRuntimeWorkflowStepId;
   const selectedWorkflowTaskSummary =
     supervisedSelectedWorkflowStep.summary
@@ -2893,43 +2879,13 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
 
               <div className={styles.liveIoPane}>
                 {!supervisedWorkflowRun ? renderSupervisedRunPlan() : supervisedApprovalSelected ? (
-                  <div className={styles.approvalEvidencePanel}>
-                    {approvalEvidenceItems.map((item) => (
-                      <article key={item.label} className={styles.approvalEvidenceItem}>
-                        <span>{item.label}</span>
-                        <strong>{item.value}</strong>
-                      </article>
-                    ))}
-                    <div className={styles.approvalEvidenceActions}>
-                      {reviewCandidateWorktree?.actionStates?.approveReview?.enabled ? (
-                        <VButton
-                          type="button"
-                          className={styles.inlineAction}
-                          isDisabled={approvalWorktreeActionMutation.isPending}
-                          disabledReason={lang === "zh" ? "审批动作正在执行。" : "Approval action is in progress."}
-                          onClick={() => approvalWorktreeActionMutation.mutate({ runId: reviewCandidateWorktree.runId, action: "approve_review" })}
-                        >
-                          {approvalWorktreeActionMutation.isPending ? <LoaderCircle size={15} /> : <CheckCircle2 size={15} />}
-                          {lang === "zh" ? "审批通过" : "Approve"}
-                        </VButton>
-                      ) : null}
-                      {reviewCandidateWorktree?.actionStates?.merge?.enabled ? (
-                        <VButton
-                          type="button"
-                          className={styles.inlineAction}
-                          isDisabled={approvalWorktreeActionMutation.isPending}
-                          disabledReason={lang === "zh" ? "入库动作正在执行。" : "Store action is in progress."}
-                          onClick={() => approvalWorktreeActionMutation.mutate({ runId: reviewCandidateWorktree.runId, action: "merge" })}
-                        >
-                          {approvalWorktreeActionMutation.isPending ? <LoaderCircle size={15} /> : <Save size={15} />}
-                          {lang === "zh" ? "人工入库" : "Store"}
-                        </VButton>
-                      ) : null}
-                    </div>
-                    {approvalWorktreeActionMutation.error?.message ? (
-                      <p className={styles.errorTextCompact}>{approvalWorktreeActionMutation.error.message}</p>
-                    ) : null}
-                  </div>
+                  <SupervisedApprovalDecisionPanel
+                    run={reviewCandidateWorktree}
+                    lang={lang}
+                    pending={approvalWorktreeActionMutation.isPending}
+                    error={approvalWorktreeActionMutation.error?.message ?? ""}
+                    onAction={(runId, action) => approvalWorktreeActionMutation.mutate({ runId, action })}
+                  />
                 ) : (
                   <SupervisedAgentConversationPanel
                     members={supervisedRunMembers}

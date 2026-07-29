@@ -16,6 +16,9 @@ import runRecordsPanelStylesSource from "./EvolutionRunRecordsPanel.styles.ts?ra
 import selfTrackBoundarySource from "./EvolutionSelfTrackBoundary.tsx?raw";
 import selfTrackBoundaryStyles from "./EvolutionSelfTrackBoundary.styles";
 import selfTrackBoundaryStylesSource from "./EvolutionSelfTrackBoundary.styles.ts?raw";
+import supervisedApprovalDecisionPanelSource from "./SupervisedApprovalDecisionPanel.tsx?raw";
+import supervisedApprovalDecisionPanelStyles from "./SupervisedApprovalDecisionPanel.styles";
+import supervisedApprovalDecisionSource from "./supervisedApprovalDecision.ts?raw";
 import supervisedAgentConversationPanelSource from "./SupervisedAgentConversationPanel.tsx?raw";
 import supervisedAgentConversationPanelStyles from "./SupervisedAgentConversationPanel.styles";
 import evolutionRouteModelSource from "./evolution/evolutionRouteModel.ts?raw";
@@ -42,6 +45,7 @@ const evolutionSources = [
   proposalActionBandsPanelSource,
   runRecordsPanelSource,
   runMutationsSource,
+  supervisedApprovalDecisionPanelSource,
 ].join("\n");
 
 describe("EvolutionRoute library user flow contract", () => {
@@ -514,10 +518,23 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("supervisedSelectedWorkflowStep");
     expect(routeSource).toContain("supervisedWorkflowManualSelection");
     expect(routeSource).toContain("supervisedWorkflowCards");
-    expect(routeSource).toContain("approvalEvidenceItems");
-    expect(routeSource).toContain("最终运行结果");
-    expect(routeSource).toContain("改进提案");
-    expect(routeSource).toContain("样本评审");
+    expect(routeSource).toContain("<SupervisedApprovalDecisionPanel");
+    expect(routeSource).toContain("run={reviewCandidateWorktree}");
+    expect(routeSource).toContain("onAction={(runId, action) => approvalWorktreeActionMutation.mutate({ runId, action })}");
+    expect(supervisedApprovalDecisionPanelSource).toContain("buildSupervisedApprovalDecision");
+    expect(supervisedApprovalDecisionPanelSource).toContain("用户审批 · 决策工作台");
+    expect(supervisedApprovalDecisionPanelSource).toContain("候选改良是否进入项目");
+    expect(supervisedApprovalDecisionPanelSource).toContain('data-vui-recipe="supervised-approval-decision"');
+    expect(supervisedApprovalDecisionPanelSource).toContain("<details");
+    expect(supervisedApprovalDecisionPanelSource).toContain("<VButton");
+    expect(supervisedApprovalDecisionPanelSource).toContain("<VChip");
+    expect(supervisedApprovalDecisionSource).toContain('"approve_review" | "merge" | "rollback"');
+    expect(supervisedApprovalDecisionSource).toContain('"refresh_required"');
+    expect(evolutionTypesSource).toContain("rollbackManifestPath?: string");
+    expect(evolutionTypesSource).toContain("rolledBackAt?: string");
+    expect(supervisedApprovalDecisionPanelStyles.metrics).toContain("@min-[720px]:grid-cols-4");
+    expect(supervisedApprovalDecisionPanelStyles.actionPath).toContain("@min-[720px]:grid-cols-3");
+    expect(supervisedApprovalDecisionPanelStyles.header).toContain("max-[520px]:flex-col");
     expect(evolutionRouteModelSource).toContain("用户审批");
     expect(routeSource).toContain("supervisedRunMembers");
     expect(routeSource).toContain("hasSupervisedAgentBindings");
@@ -542,10 +559,9 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("supervisedSelectedAgentRole");
     expect(supervisedAgentConversationPanelSource).toContain("LazyConversationView");
     expect(routeSource).toContain("approvalWorktreeActionMutation");
-    expect(routeSource).toContain('action: "approve_review"');
-    expect(routeSource).toContain('action: "merge"');
-    expect(routeSource).toContain("reviewCandidateWorktree?.actionStates?.approveReview?.enabled");
-    expect(routeSource).toContain("reviewCandidateWorktree?.actionStates?.merge?.enabled");
+    expect(supervisedApprovalDecisionSource).toContain('"pending_review"');
+    expect(supervisedApprovalDecisionSource).toContain('"ready_merge"');
+    expect(supervisedApprovalDecisionSource).toContain('"rolled_back"');
     expect(routeSource).toContain("supervisedMemberAgentManagementRoute");
     expect(evolutionRouteModelSource).toContain('new URLSearchParams({ pane: "config", returnLabel: "supervised_evolution" })');
     expect(evolutionRouteModelSource).toContain('params.set("agent", normalizedAgentId)');
@@ -600,6 +616,10 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(evolutionTailwindSource).toContain('@source "../../routes/SupervisedAgentConversationPanel.tsx"');
     expect(evolutionTailwindSource).toContain(
       '@source "../../routes/SupervisedAgentConversationPanel.styles.ts"',
+    );
+    expect(evolutionTailwindSource).toContain('@source "../../routes/SupervisedApprovalDecisionPanel.tsx"');
+    expect(evolutionTailwindSource).toContain(
+      '@source "../../routes/SupervisedApprovalDecisionPanel.styles.ts"',
     );
     expect(supervisedAgentConversationPanelStyles.empty).toContain("text-center");
     expect(supervisedAgentConversationPanelStyles.empty).toContain("w-[min(72%,_460px)]");

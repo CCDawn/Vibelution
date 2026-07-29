@@ -29,12 +29,6 @@ const styles = {
     "grid [gap:6px]",
   actionRow:
     "flex [flex-wrap:wrap] [gap:6px]",
-  approvalEvidenceActions:
-    "flex [flex-wrap:wrap] [align-items:center] [gap:8px] min-w-0",
-  approvalEvidenceItem:
-    `grid [gap:4px] min-w-0 [padding:10px] ${rowSurfaceSoft} [&_span]:[color:var(--fg-secondary)] [&_span]:[font-size:var(--vui-font-xs)] [&_span]:[font-weight:700] [&_strong]:[color:var(--fg-primary)] [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:[font-weight:700] [&_strong]:[line-height:1.5] [&_strong]:[word-break:break-word]`,
-  approvalEvidencePanel:
-    "grid [gap:8px] [align-content:start] [min-height:100%] [padding:10px]",
   batchToggle:
     "inline-flex [align-items:center] [gap:8px] [color:var(--fg-tertiary)] [font-size:var(--vui-font-xs)] [&_input]:[width:15px] [&_input]:[height:15px]",
   bulkToolbar:
