@@ -3485,24 +3485,20 @@ export function ConversationView({
                 sectionCount={agentSections.sectionCount}
                 sectionKinds={agentRenderState.sectionKinds}
                 className={turnClassName}
-                compactHeader={compactTurnHeader}
+                compactHeader={false}
                 avatar={
-                  compactTurnHeader
-                    ? null
-                    : (
-                      <ConversationTurnAvatarContent
-                        content={resolveMessageTurnAvatar(message, {
-                          resolveTurnAvatar,
-                          assistantAvatarImageUrl,
-                          assistantAvatarFallback,
-                          assistantLabel,
-                          userAvatarImageUrl,
-                          userAvatarLabel,
-                          agentInboxMessage,
-                          groupTranscriptMessage,
-                        })}
-                      />
-                    )
+                  <ConversationTurnAvatarContent
+                    content={resolveMessageTurnAvatar(message, {
+                      resolveTurnAvatar,
+                      assistantAvatarImageUrl,
+                      assistantAvatarFallback,
+                      assistantLabel,
+                      userAvatarImageUrl,
+                      userAvatarLabel,
+                      agentInboxMessage,
+                      groupTranscriptMessage,
+                    })}
+                  />
                 }
                 speakerLabel={speakerLabel}
                 identityAccessory={
