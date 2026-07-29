@@ -129,7 +129,10 @@ import { SupervisedAgentConversationPanel } from "./SupervisedAgentConversationP
 import { type SupervisedWorkspaceWorkflowStep } from "./SupervisedWorkspaceTabs";
 import {
   isSelfEvolutionWorktreeRun,
+  readRecentSupervisedWorktreeRunId,
+  rememberRecentSupervisedWorktreeRunId,
   selectRecentSupervisedWorktreeRun,
+  supervisedRunSessionStorage,
 } from "./supervisedWorktreeReview";
 import {
   isLiveSupervisedRunStatus,
@@ -319,7 +322,9 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const [selectedSupervisedWorkflowStepId, setSelectedSupervisedWorkflowStepId] = useState<SupervisedWorkflowStepId | null>(null);
   const [selectedSupervisedAgentRole, setSelectedSupervisedAgentRole] = useState<SupervisedMemberRole | null>(null);
   const [liveActiveRun, setLiveActiveRun] = useState<EvolutionActiveRun | null>(null);
-  const [recentSupervisedWorktreeRunId, setRecentSupervisedWorktreeRunId] = useState<string | null>(null);
+  const [recentSupervisedWorktreeRunId, setRecentSupervisedWorktreeRunId] = useState<string | null>(
+    () => readRecentSupervisedWorktreeRunId(supervisedRunSessionStorage()),
+  );
   const [selfGoalInput, setSelfGoalInput] = useState("");
   const [selfGoalInitialized, setSelfGoalInitialized] = useState(false);
   const [selectedSelfObservationRunId, setSelectedSelfObservationRunId] = useState("");
@@ -546,6 +551,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   useEffect(() => {
     if (supervisedWorktreeLiveRunId) {
       setRecentSupervisedWorktreeRunId(supervisedWorktreeLiveRunId);
+      rememberRecentSupervisedWorktreeRunId(supervisedRunSessionStorage(), supervisedWorktreeLiveRunId);
     }
   }, [supervisedWorktreeLiveRunId]);
   const recentSupervisedWorktreeRun = selectRecentSupervisedWorktreeRun(
