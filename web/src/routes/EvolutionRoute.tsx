@@ -808,7 +808,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     || supervisedSelectedAgentWorkflowStep?.livePreview
     || monitoredRun?.currentTask
     || "";
-  const supervisedApprovalSelected = selectedSupervisedWorkflowStepId === "approval";
+  const supervisedApprovalSelected = supervisedSelectedWorkflowStep.id === "approval";
   const selectedWorkflowIsRuntimeStep = supervisedSelectedWorkflowStep.id === supervisedRuntimeWorkflowStepId;
   const selectedWorkflowTaskSummary =
     supervisedSelectedWorkflowStep.summary
