@@ -485,8 +485,8 @@ describe("EvolutionRoute library user flow contract", () => {
 
   it("keeps the live launch panel focused on starting evaluations", () => {
     expect(routeSource).toContain("styles.liveLaunchStack");
-    expect(routeSource).toContain("styles.closedLoopLaunchBlock");
-    expect(routeSource).toContain('t("startClosedLoopRun")');
+    expect(routeSource).not.toContain("styles.closedLoopLaunchBlock");
+    expect(routeSource).not.toContain('t("startClosedLoopRun")');
     expect(routeSource).not.toContain("styles.worktreeReviewSurface");
     expect(routeSource).not.toContain("worktreeReviewPanelHint");
     expect(routeStyles.liveLaunchStack).toContain("[grid-template-rows:minmax(0,_1fr)]");
@@ -755,27 +755,21 @@ describe("EvolutionRoute library user flow contract", () => {
     );
   });
 
-  it("explains closed-loop launch and dataset case limits without changing review actions", () => {
+  it("removes the simulation launch card while retaining dataset case limits", () => {
     expect(routeSource).toContain('t("caseLimitHint")');
-    expect(routeSource).toContain("styles.closedLoopLaunchBlock");
-    expect(routeSource).toContain("styles.closedLoopContent");
-    expect(routeSource).toContain('t("closedLoopLaunchPanelTitle")');
-    expect(routeSource).toContain('t("closedLoopLaunchPanelHint")');
     expect(routeSource).toContain("disabledReason={supervisedStartDisabledReason}");
-    expect(routeSource).toContain("disabledReason={simulationStartDisabledReason}");
     expect(routeSource).not.toContain('title={t("caseLimitHint")}');
-    expect(routeSource).not.toContain('title={t("closedLoopLaunchPanelHint")}');
-    expect(routeSource).toContain("styles.closedLoopModeBadge");
-    expect(routeSource).toContain("当前只演练编排链路，不调用真实 LLM 自改。");
+    expect(routeSource).not.toContain("styles.closedLoopLaunchBlock");
+    expect(routeSource).not.toContain("styles.closedLoopContent");
+    expect(routeSource).not.toContain("styles.closedLoopModeBadge");
+    expect(routeSource).not.toContain("startSimulationWorktreeRunMutation");
+    expect(routeSource).not.toContain("simulationStartDisabledReason");
+    expect(routeSource).not.toContain("当前只演练编排链路，不调用真实 LLM 自改。");
     expect(evolutionDictionarySource).toContain("结果会进入下方候选审核，不会自动合并。");
-    expect(routeStyles.closedLoopLaunchBlock).toContain("[grid-template-columns:minmax(0,_1fr)_minmax(92px,_auto)]");
-    expect(routeStyles.closedLoopLaunchBlock).not.toContain("[&_div]:grid");
-    expect(routeStyles.closedLoopModeBadge).toContain("[border-radius:999px]");
   });
 
   it("keeps supervised operation icons in the VButton icon slot", () => {
     expect(routeSource).toMatch(/icon=\{\s*supervisedStartSubmitting \|\| supervisedPrimaryRunning/);
-    expect(routeSource).toMatch(/icon=\{\s*startSimulationWorktreeRunMutation\.isPending/);
     expect(activeRunMonitorPanelSource.split('icon={<Activity size={15} />}')).toHaveLength(3);
     expect(activeRunMonitorPanelSource.split('icon={<LibraryBig size={15} />}')).toHaveLength(3);
   });
@@ -925,7 +919,7 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("backendWorkflowCurrent?.role");
     expect(supervisedAgentConversationPanelSource).toContain("const active = isLive && member.role === activeRole");
     expect(supervisedAgentConversationPanelSource).toContain("showComposer={false}");
-    expect(supervisedAgentConversationPanelSource).toContain('processDisplayMode="answer"');
+    expect(supervisedAgentConversationPanelSource).toContain('processDisplayMode="trace"');
     expect(supervisedAgentConversationPanelSource).toContain("不会借用其他 Agent 的消息");
     expect(supervisedAgentConversationPanelSource).toContain('role="tablist"');
     expect(supervisedAgentConversationPanelSource).toContain('role="tab"');

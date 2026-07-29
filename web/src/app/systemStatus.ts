@@ -381,6 +381,28 @@ export function deriveActiveWorkIndicator(
     return null;
   }
   const activeItems = runtime?.workRuns?.activeItems;
+  const supervisedRuns = [
+    ...activeWorkRunSnapshots(
+      activeItems?.supervised_worktree_evolution_run,
+      active.supervised_worktree_evolution_run,
+    ),
+    ...activeWorkRunSnapshots(
+      activeItems?.supervised_evolution_run,
+      active.supervised_evolution_run,
+    ),
+  ];
+  const supervisedSessionIds = supervisedChildSessionIds(supervisedRuns);
+  const visibleChatItems = Array.isArray(activeItems?.chat_turn)
+    ? activeItems.chat_turn.filter((run) =>
+      !supervisedSessionIds.has(
+        firstTextValue(run, ["sessionId", "sourceSessionId", "conversationId", "directSessionId"]),
+      ))
+    : activeItems?.chat_turn;
+  const visibleChatFallback = supervisedSessionIds.has(
+    firstTextValue(active.chat_turn ?? {}, ["sessionId", "sourceSessionId", "conversationId", "directSessionId"]),
+  )
+    ? null
+    : active.chat_turn;
 
   const candidates = [
     ...activeWorkCandidatesFromItems(
@@ -400,7 +422,7 @@ export function deriveActiveWorkIndicator(
     buildActiveWorkCandidate("self", active.self_evolution_run, runtime, lang),
     ...activeWorkCandidatesFromItems("source_collection", activeItems?.source_collection_run, runtime, lang, active.source_collection_run),
     ...activeWorkCandidatesFromItems("chat_room", activeItems?.chat_room_round, runtime, lang, active.chat_room_round),
-    ...activeWorkCandidatesFromItems("chat", activeItems?.chat_turn, runtime, lang, active.chat_turn),
+    ...activeWorkCandidatesFromItems("chat", visibleChatItems, runtime, lang, visibleChatFallback),
   ].filter((item): item is ActiveWorkIndicatorItem => Boolean(item));
 
   if (!candidates.length) {
@@ -413,6 +435,48 @@ export function deriveActiveWorkIndicator(
     overflowCount: Math.max(0, candidates.length - 1),
     items: candidates,
   };
+}
+
+function activeWorkRunSnapshots(
+  items: ActiveWorkRunSnapshot[] | null | undefined,
+  fallback?: ActiveWorkRunSnapshot | null,
+): ActiveWorkRunSnapshot[] {
+  if (Array.isArray(items) && items.length) {
+    return items;
+  }
+  return fallback ? [fallback] : [];
+}
+
+function supervisedChildSessionIds(runs: ActiveWorkRunSnapshot[]): Set<string> {
+  const sessionIds = new Set<string>();
+  const add = (value: unknown) => {
+    const sessionId = textValue(value);
+    if (sessionId) {
+      sessionIds.add(sessionId);
+    }
+  };
+  for (const run of runs) {
+    add(run.conversationSessionId);
+    add(run.candidateConversationSessionId);
+    const currentCaseIo = run.currentCaseIo && typeof run.currentCaseIo === "object"
+      ? run.currentCaseIo as Record<string, unknown>
+      : null;
+    add(currentCaseIo?.conversationSessionId);
+    for (const rawStep of Array.isArray(run.workflowSteps) ? run.workflowSteps : []) {
+      if (rawStep && typeof rawStep === "object") {
+        add((rawStep as Record<string, unknown>).conversationSessionId);
+      }
+    }
+    const roleSessions = run.roleConversationSessions && typeof run.roleConversationSessions === "object"
+      ? run.roleConversationSessions as Record<string, unknown>
+      : {};
+    for (const rawSession of Object.values(roleSessions)) {
+      if (rawSession && typeof rawSession === "object") {
+        add((rawSession as Record<string, unknown>).conversationSessionId);
+      }
+    }
+  }
+  return sessionIds;
 }
 
 function activeWorkCandidatesFromItems(
@@ -555,6 +619,9 @@ function activeWorkKindLabel(kind: ActiveWorkKind, lang: "zh" | "en"): string {
 }
 
 function activeWorkHref(kind: ActiveWorkKind, run: ActiveWorkRunSnapshot): string {
+  if (kind === "supervised") {
+    return "/supervised-evolution";
+  }
   if (kind === "chat") {
     const sessionId = firstTextValue(run, ["sessionId", "sourceSessionId", "conversationId", "directSessionId"]);
     return sessionId ? `/chat?session=${encodeURIComponent(sessionId)}` : "";

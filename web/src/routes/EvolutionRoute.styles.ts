@@ -105,14 +105,6 @@ const styles = {
     "[color:var(--fg-tertiary)] [font-size:var(--vui-font-xs)]",
   checkboxRow:
     "inline-flex [align-items:center] [gap:8px] [min-height:26px] [&_input]:[width:16px] [&_input]:[height:16px]",
-  closedLoopLaunchBlock:
-    "grid [grid-template-columns:minmax(0,_1fr)_minmax(92px,_auto)] [align-items:center] [gap:8px] min-w-0 [padding:7px_9px] [border:1px_solid_color-mix(in_srgb,_var(--accent-warm)_30%,_var(--border-hairline))] [border-radius:7px] [background:color-mix(in_srgb,_var(--accent-warm)_8%,_var(--vui-surface-row))] max-[1200px]:[padding:6px_8px]",
-  closedLoopContent:
-    "grid [gap:3px] min-w-0 [&>strong]:min-w-0 [&>strong]:[overflow:hidden] [&>strong]:[color:var(--fg-primary)] [&>strong]:[font-size:var(--vui-font-xs)] [&>strong]:[text-overflow:ellipsis] [&>strong]:[white-space:nowrap] [&>span]:min-w-0 [&>span]:[overflow-wrap:anywhere] [&>span]:[color:var(--fg-tertiary)] [&>span]:[font-size:var(--vui-font-xs)] [&>span]:[line-height:1.3]",
-  closedLoopModeBadge:
-    "[flex:0_0_auto] [padding:2px_6px] [border:1px_solid_color-mix(in_srgb,_var(--accent-warm)_36%,_var(--border-hairline))] [border-radius:999px] [background:color-mix(in_srgb,_var(--accent-warm)_12%,_transparent)] [color:var(--accent-warm-2)] [font-size:var(--vui-font-xs)] [font-weight:740] [line-height:1] [white-space:nowrap]",
-  closedLoopTitleRow:
-    "inline-flex [align-items:center] [gap:6px] min-w-0",
   collapsibleEvidence:
     "grid [gap:10px] [&_summary]:[outline:0] [background:var(--vui-surface-row)]",
   compactFact:
