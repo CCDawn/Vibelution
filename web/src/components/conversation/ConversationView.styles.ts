@@ -191,9 +191,9 @@ const styles: Record<string, string> = {
   assistantCard:
     "vui-components-conversationview assistantCard min-w-0 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--vui-border-strong)_72%,transparent)] bg-[var(--vui-surface-chat-panel)] p-2 shadow-none",
   assistantTurn:
-    `vui-components-conversationview assistantTurn grid min-w-0 ${transcriptTurnRail} grid-cols-[minmax(0,1fr)] [&_.turnAvatar]:hidden [&_.turnMeta]:hidden [&_.turnContent]:w-full [&_.turnContent]:p-0 [&_.turnContent]:border-l-0`,
+    `vui-components-conversationview assistantTurn grid min-w-0 ${transcriptTurnRail} grid-cols-[2rem_minmax(0,1fr)] items-start gap-x-3 [&_.turnAvatar]:col-start-1 [&_.turnAvatar]:row-start-1 [&_.turnContent]:col-start-2 [&_.turnContent]:row-start-1 [&_.turnContent]:w-full [&_.turnContent]:p-0 [&_.turnContent]:border-l-0 max-[719px]:gap-x-2`,
   assistantTurnContinuation:
-    `vui-components-conversationview assistantTurnContinuation grid min-w-0 ${transcriptTurnRail} grid-cols-[minmax(0,1fr)] [&_.turnAvatar]:hidden [&_.turnMeta]:hidden [&_.turnContent]:w-full [&_.turnContent]:gap-1`,
+    "vui-components-conversationview assistantTurnContinuation min-w-0 [&_.turnContent]:w-full [&_.turnContent]:gap-1",
   attachButton:
     cv("attachButton", "min-w-0 inline-grid", compactIconButtonSize, "place-items-center rounded-[var(--radius-control)] border p-0 [font-size:var(--vui-font-xs)] font-semibold leading-tight", composerQuietActionState),
   auxiliaryBlock:
@@ -1200,7 +1200,7 @@ const styles: Record<string, string> = {
     "vui-components-conversationview userCard min-w-0 rounded-[var(--radius-panel)] border border-[color-mix(in_srgb,var(--accent-cool)_18%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_5%,var(--vui-surface-panel))] p-1.5 shadow-none",
   userMessageBody: userMessageBubble,
   userTurn:
-    `vui-components-conversationview userTurn grid min-w-0 ${transcriptTurnRail} grid-cols-[minmax(0,1fr)] [&_.turnAvatar]:hidden [&_.turnContent]:w-fit [&_.turnContent]:max-w-[min(76%,640px)] [&_.turnContent]:justify-self-end [&_.turnMeta]:justify-self-end [&_.turnMeta]:justify-end [&_.turnMeta]:text-right [&_.turnMetaActions]:justify-end [&_.turnMetaIdentity]:justify-end [&_.turnSpeaker]:hidden max-[719px]:[&_.turnContent]:max-w-[min(88%,36rem)]`,
+    `vui-components-conversationview userTurn grid min-w-0 ${transcriptTurnRail} grid-cols-[minmax(0,1fr)_2rem] items-start gap-x-3 [&_.turnAvatar]:col-start-2 [&_.turnAvatar]:row-start-1 [&_.turnContent]:col-start-1 [&_.turnContent]:row-start-1 [&_.turnContent]:w-fit [&_.turnContent]:max-w-[min(76%,640px)] [&_.turnContent]:justify-self-end [&_.turnMeta]:justify-self-end [&_.turnMeta]:justify-end [&_.turnMeta]:text-right [&_.turnMetaActions]:justify-end [&_.turnMetaIdentity]:justify-end max-[719px]:gap-x-2 max-[719px]:[&_.turnContent]:max-w-[min(88%,36rem)]`,
 };
 
 export default styles;
