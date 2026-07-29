@@ -8,6 +8,7 @@ import type { SourceCollectionStageCardProjection } from "./teams/source-collect
 function projectionWithClosure(input: {
   blockedCount?: number;
   failedCount?: number;
+  missingEvidenceAnchorCount?: number;
   status?: string;
   userStatus?: string;
 }) {
@@ -36,6 +37,9 @@ function projectionWithClosure(input: {
       },
       invalidCandidateIds: [],
       invalidRecordIds: [],
+      materializedContentExtraction: input.missingEvidenceAnchorCount === undefined
+        ? undefined
+        : { missingEvidenceAnchorCount: input.missingEvidenceAnchorCount },
     },
   } as unknown as SourceCollectionStageCardProjection;
 }
@@ -70,12 +74,16 @@ function renderRecoveryPanel(candidateProjection: SourceCollectionStageCardProje
 }
 
 describe("TeamSourceCollectionExtractionRecoveryWorkspacePanel", () => {
-  it("presents completed extraction with evidence gaps as evidence completion, not failure", () => {
-    const markup = renderRecoveryPanel(projectionWithClosure({ blockedCount: 2 }));
+  it("uses the materialized evidence gap count instead of source-verification blockers", () => {
+    const markup = renderRecoveryPanel(projectionWithClosure({
+      blockedCount: 2,
+      missingEvidenceAnchorCount: 14,
+    }));
 
     expect(markup).toContain("证据补全");
     expect(markup).toContain("待补证据");
-    expect(markup).toContain("2/14");
+    expect(markup).toContain("14/14");
+    expect(markup).not.toContain("2/14");
     expect(markup).not.toContain("提炼失败");
   });
 
