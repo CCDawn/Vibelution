@@ -17,7 +17,9 @@ import type {
   ChatRoomMode,
   ChatRoomPurpose,
   PetSummary,
+  SessionAgentPromptSnapshot,
   SessionLlmPayloadTrace,
+  SessionPromptAssemblyManifest,
   SessionSummary,
 } from "../../api/types";
 import { PersistedHeightListShell } from "../../components/layout/PersistedHeightListShell";
@@ -41,6 +43,7 @@ import {
   CHAT_GROUP_MEMBER_PICKER_HEIGHT_PANE,
   CHAT_LIST_HEIGHT_LAYOUT_ID,
 } from "./chatListHeights";
+import { ChatPromptAssemblyInspector } from "./ChatPromptAssemblyInspector";
 import { TokenCoreStatusPanel, type TokenCoreStatusMetric } from "./TokenCoreStatusPanel";
 import routeStyles from "../ChatCodingRoute.styles";
 import styles from "./ChatStatusRail.styles";
@@ -129,6 +132,8 @@ export type ChatStatusRailProps = {
   cacheDetailOpenLabel: string;
   tokenStatusMetrics: TokenCoreStatusMetric[];
   onOpenCacheDetail: () => void;
+  promptSnapshot?: SessionAgentPromptSnapshot;
+  promptAssembly?: SessionPromptAssemblyManifest;
   lastLlmPayloadTrace: SessionLlmPayloadTrace | null | undefined;
   mentalCompactLine: string;
   mentalSourceLabel: string;
@@ -238,6 +243,8 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
     cacheDetailOpenLabel,
     tokenStatusMetrics,
     onOpenCacheDetail,
+    promptSnapshot,
+    promptAssembly,
     lastLlmPayloadTrace,
     mentalCompactLine,
     mentalSourceLabel,
@@ -610,6 +617,19 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
           metrics={tokenStatusMetrics}
           onOpenCacheDetail={onOpenCacheDetail}
         />
+
+        {promptSnapshot ? (
+          <section
+            className={routeStyles.leftBlock}
+            aria-label={lang === "zh" ? "Prompt 装配状态" : "Prompt assembly status"}
+          >
+            <ChatPromptAssemblyInspector
+              lang={lang}
+              snapshot={promptSnapshot}
+              manifest={promptAssembly}
+            />
+          </section>
+        ) : null}
 
         {lastLlmPayloadTrace ? (
           <Suspense fallback={null}>
