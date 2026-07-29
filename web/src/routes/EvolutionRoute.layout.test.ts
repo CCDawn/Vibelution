@@ -324,7 +324,10 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("?? visibleLiveRunSnapshot;");
     expect(routeSource).not.toContain("const monitoredRun = effectiveActiveRunSnapshot\n    ?? visibleLiveRunSnapshot\n    ?? latestSupervisedRunSnapshot;");
     expect(routeSource).not.toContain("setLiveActiveRun(latestSupervisedRunSnapshot)");
-    expect(routeSource).toContain("const supervisedMembersRun = monitoredRun");
+    expect(routeSource).toContain("monitoredRun.runId === supervisedWorkflowRun.runId");
+    expect(routeSource).toContain(
+      "{supervisedWorkflowRun ? supervisedMembersRunStatusLabel : supervisedMembersIdleStatusLabel}",
+    );
     expect(routeSource).toContain("const currentSupervisedAgentBindings = workspaceSnapshot?.currentAgentBindings ?? EMPTY_AGENT_BINDINGS");
     expect(routeSource).toContain("const supervisedMembersBindings = supervisedMembersUseRunBindings");
     expect(routeSource).not.toContain("supervisedMembersRun = monitoredRun\n    ?? latestSupervisedRunSnapshot");
@@ -684,6 +687,12 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(runMutationsSource).toContain("agentBindings: payload.placeholderAgentBindings");
     expect(routeSource).not.toContain("latestSupervisedRunSnapshot?.agentBindings ?? {}");
     expect(runMutationsSource).toContain("await options.afterWorktreeRunChanged()");
+    expect(runMutationsSource).toContain("options.selectSupervisedWorktreeRun(snapshot.runId)");
+    expect(routeSource).toContain("selectSupervisedWorktreeRun: (runId) =>");
+    expect(routeSource).toContain("setRecentSupervisedWorktreeRunId(runId)");
+    expect(routeSource).toContain(
+      "rememberRecentSupervisedWorktreeRunId(supervisedRunSessionStorage(), runId)",
+    );
     expect(runMutationsSource).toContain("void options.afterWorktreeRunChanged()");
     expect(routeSource).not.toContain("isEvolutionRunCommandAccepted");
     expect(routeSource).toContain("visibleLiveRunSnapshot");
@@ -693,11 +702,15 @@ describe("EvolutionRoute library user flow contract", () => {
       "options.isLocalSupervisedStartPlaceholder(current) ? null : current,",
     );
     expect(routeSource).toContain("const supervisedStartSubmitting = startWorktreeRunMutation.isPending || isLocalSupervisedStartPlaceholder(liveActiveRun)");
+    expect(routeSource).toContain(
+      "Boolean(snapshot?.activeRun?.runId || snapshot?.worktreeActiveRun?.runId)",
+    );
     expect(routeSource).toContain("onClick={() => startWorktreeRunMutation.mutate()}");
     expect(runMutationsSource).toContain('executionMode: "real"');
     expect(runMutationsSource).toContain("confirmRealLlmCost: true");
     expect(routeSource).toContain("监督运行中");
     expect(routeSource).toContain("supervisedStartButtonLabel");
+    expect(routeSource).toContain("monitoredRun.runId === supervisedWorkflowRun.runId");
   });
 
   it("keeps supervised closed-loop review in a dedicated ledger projection", () => {

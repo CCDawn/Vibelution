@@ -2022,6 +2022,7 @@ def infer_evolution_summary(
     transaction_closed = False
     transaction_status: Optional[str] = None
     transaction_id: Optional[str] = None
+    transaction_summary = ""
     commit_detected = False
     commit_refs: List[str] = []
     tool_sequence: List[str] = []
@@ -2080,6 +2081,12 @@ def infer_evolution_summary(
                     or tool_args.get("status")
                     or "success"
                 )
+                transaction_summary = str(
+                    tool_args.get("summary")
+                    or result_payload.get("summary")
+                    or transaction_summary
+                    or ""
+                ).strip()
             elif tool_name == "close_evolution_transaction_tool":
                 transaction_id = str(result_payload.get("txn_id") or tool_args.get("txn_id") or transaction_id or "")
 
@@ -2160,6 +2167,7 @@ def infer_evolution_summary(
             "closed": transaction_closed,
             "status": transaction_status,
             "txn_id": transaction_id or None,
+            "summary": transaction_summary,
         },
         "git": {
             "commit_detected": commit_detected,

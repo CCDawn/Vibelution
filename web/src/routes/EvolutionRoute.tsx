@@ -425,7 +425,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     // R3: idle workspace — slower poll; fast only when an active run is present (see below after data).
     refetchInterval: (query) => {
       const snapshot = query.state.data as EvolutionWorkspaceSnapshot | undefined;
-      const hasActiveRun = Boolean(snapshot?.activeRun?.runId);
+      const hasActiveRun = Boolean(snapshot?.activeRun?.runId || snapshot?.worktreeActiveRun?.runId);
       return resolvePollingInterval(pageVisible, hasActiveRun ? 4_000 : 12_000);
     },
     refetchIntervalInBackground: false,
@@ -511,6 +511,10 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     setSelfActionFeedback,
     setLiveActiveRun,
     setSelectedSelfObservationRunId,
+    selectSupervisedWorktreeRun: (runId) => {
+      setRecentSupervisedWorktreeRunId(runId);
+      rememberRecentSupervisedWorktreeRunId(supervisedRunSessionStorage(), runId);
+    },
     buildSupervisedStartPlaceholder,
     isLocalSupervisedStartPlaceholder,
     isSelfEvolutionWorktreeRun,
@@ -610,7 +614,11 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const monitoredRun = effectiveActiveRunSnapshot
     ?? visibleLiveRunSnapshot;
   const supervisedWorkflowRun = supervisedWorktreeLiveRun ?? monitoredRun ?? recentSupervisedWorktreeRun;
-  const supervisedMembersRun = monitoredRun;
+  const supervisedMembersRun = monitoredRun && (
+    !supervisedWorkflowRun || monitoredRun.runId === supervisedWorkflowRun.runId
+  )
+    ? monitoredRun
+    : null;
   const supervisedMembersUseRunBindings = hasSupervisedAgentBindings(supervisedWorkflowRun?.agentBindings);
   const supervisedMembersBindings = supervisedMembersUseRunBindings
     ? supervisedWorkflowRun?.agentBindings ?? EMPTY_AGENT_BINDINGS
@@ -885,9 +893,25 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const supervisedClosedLoopLineageLabel = supervisedClosedLoopRecord?.evidence.lineageIndexPath
     ? (lang === "zh" ? "已记录" : "Recorded")
     : "--";
-  const supervisedMembersRunStatusLabel = supervisedMembersRun?.decision === "INCONCLUSIVE"
-    ? displayDecisionLabel(supervisedMembersRun.decision)
-    : statusLabel(supervisedMembersRun?.status || "");
+  const supervisedWorkflowDecision = (() => {
+    const decision = supervisedWorkflowRun?.decision;
+    if (typeof decision === "string") {
+      return decision;
+    }
+    if (decision && typeof decision === "object") {
+      const judgeDecision = String(decision.judgeDecision || "");
+      if (judgeDecision) {
+        return judgeDecision;
+      }
+    }
+    if (supervisedWorkflowRun && "candidateJudgment" in supervisedWorkflowRun) {
+      return String(supervisedWorkflowRun.candidateJudgment?.decision || "");
+    }
+    return "";
+  })();
+  const supervisedMembersRunStatusLabel = supervisedWorkflowDecision === "INCONCLUSIVE"
+    ? displayDecisionLabel(supervisedWorkflowDecision)
+    : statusLabel(supervisedWorkflowRun?.status || "");
   const supervisedMembersIdleStatusLabel = workspaceSnapshot?.currentAgentBindingStatus === "error"
     ? lang === "zh" ? "配置异常" : "Config issue"
     : workspaceSnapshot?.currentAgentBindingStatus === "partial"
@@ -2435,7 +2459,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                     {lang === "zh" ? "来源" : "Source"} {sourceCatalogCountLabel}
                   </span>
                   <span className={styles.secondaryPill}>
-                    {supervisedMembersRun ? supervisedMembersRunStatusLabel : supervisedMembersIdleStatusLabel}
+                    {supervisedWorkflowRun ? supervisedMembersRunStatusLabel : supervisedMembersIdleStatusLabel}
                   </span>
                 </div>
               </div>
