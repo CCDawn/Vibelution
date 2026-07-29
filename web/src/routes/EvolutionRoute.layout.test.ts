@@ -334,6 +334,9 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).not.toContain("latestSupervisedRunSnapshot?.agentBindings");
     expect(routeSource).toContain("const supervisedClosedLoopRecord");
     expect(routeSource).toContain("workspaceSnapshot?.latestClosedLoopRecord");
+    expect(routeSource).toContain("buildSupervisedWorktreeLedgerSummary(recentSupervisedWorktreeRun)");
+    expect(routeSource).toContain("supervisedWorktreeLedgerSummary");
+    expect(routeSource).toContain('label: lang === "zh" ? "查看审批" : "Review approval"');
     expect(routeSource).not.toContain("styles.latestSupervisedResult");
     expect(routeSource).toContain("closedLoop: supervisedClosedLoopLedger");
     expect(routeSource).not.toContain("styles.closedLoopLedger");

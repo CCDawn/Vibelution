@@ -7,6 +7,17 @@ type RunIdStorage = {
   setItem: (key: string, value: string) => void;
 };
 
+export type SupervisedWorktreeLedgerSummary = {
+  bundleName: string;
+  candidateScore: number | null;
+  decision: string;
+  description: string;
+  reviewStatus: string;
+  roleSessionCount: number;
+  runId: string;
+  status: string;
+};
+
 export function supervisedRunSessionStorage(): Storage | null {
   if (typeof window === "undefined") {
     return null;
@@ -58,6 +69,36 @@ export function selectRecentSupervisedWorktreeRun(
       && ["needs_manual_decision", "awaiting_user_approval"].includes(outcome)
     );
   }) ?? null;
+}
+
+export function buildSupervisedWorktreeLedgerSummary(
+  run: SupervisedWorktreeRun | null | undefined,
+): SupervisedWorktreeLedgerSummary | null {
+  if (!run || isSelfEvolutionWorktreeRun(run)) {
+    return null;
+  }
+  const reviewGate = run.reviewGate ?? run.mergeAnalysis?.reviewGate;
+  const roleSessionIds = new Set([
+    run.baselineConversationSessionId,
+    run.rerunConversationSessionId,
+    run.judgeConversationSessionId,
+    run.baselineJudgment?.conversationSessionId,
+    run.candidateJudgment?.conversationSessionId,
+  ].map((value) => String(value || "").trim()).filter(Boolean));
+  const candidateScore = run.decision?.candidateScore ?? run.candidateJudgment?.score;
+
+  return {
+    runId: run.runId,
+    status: String(run.status || "").trim(),
+    decision: String(run.decision?.judgeDecision || run.candidateJudgment?.decision || "").trim(),
+    description: String(run.latestMessage || reviewGate?.reason || "").trim(),
+    reviewStatus: String(reviewGate?.status || "").trim().toLowerCase(),
+    roleSessionCount: roleSessionIds.size,
+    candidateScore: typeof candidateScore === "number" && Number.isFinite(candidateScore)
+      ? candidateScore
+      : null,
+    bundleName: String(run.bundleName || "").trim(),
+  };
 }
 
 export function readRecentSupervisedWorktreeRunId(storage: RunIdStorage | null | undefined) {
