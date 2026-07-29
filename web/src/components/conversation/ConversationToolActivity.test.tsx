@@ -78,14 +78,14 @@ describe("ConversationToolActivity", () => {
       />,
     );
 
-    expect(html).toContain('data-codex-tool-activity="digest"');
-    expect(html).toContain("运行了 1 个工具");
+    expect(html).toContain('data-codex-tool-activity="items"');
+    expect(html).not.toContain("运行了 1 个工具");
     expect(html).toContain(">运行命令<");
     expect(html).not.toContain("# Vibelution Development Standard");
     expect(html).not.toContain(">running<");
   });
 
-  it("opens an activity with a meaningful nonzero terminal exit as one attention digest", () => {
+  it("shows a meaningful nonzero terminal exit inline without an extra digest row", () => {
     const cell = toolCell("terminal-nonzero", "command failed");
     cell.title = "exec_command";
     cell.toolLifecycleModel = {
@@ -131,9 +131,10 @@ describe("ConversationToolActivity", () => {
       />,
     );
 
-    expect(html).toContain("Ran 1 tool");
-    expect(html).toContain("1 item needs attention");
-    expect(openingTagContaining(html, 'data-codex-tool-activity="digest"')).toContain('open=""');
+    expect(html).toContain('data-codex-tool-activity="items"');
+    expect(html).toContain('data-codex-tool-activity-state="attention"');
+    expect(html).not.toContain("Ran 1 tool");
+    expect(html).not.toContain("1 item needs attention");
     expect(html).toContain("Command exited 1");
     expect(html).toContain("itemIconWarning");
     expect(html).not.toContain("itemIconFailed");
@@ -181,15 +182,14 @@ describe("ConversationToolActivity", () => {
       />,
     );
 
-    expect(html).toContain('data-codex-tool-activity="digest"');
-    expect(html).toContain("运行了 1 个工具");
+    expect(html).toContain('data-codex-tool-activity="items"');
+    expect(html).not.toContain("运行了 1 个工具");
     expect(html).not.toContain("项需关注");
-    expect(openingTagContaining(html, 'data-codex-tool-activity="digest"')).not.toContain('open=""');
     expect(html).toContain("未找到匹配项");
     expect(html).not.toContain("命令退出 1");
   });
 
-  it("folds one contiguous activity behind a quiet digest while preserving its tool rows", () => {
+  it("renders one contiguous activity as direct compact rows", () => {
     const html = renderToStaticMarkup(
       <ConversationToolActivity
         activity={createCodexTranscriptToolActivity([
@@ -202,10 +202,10 @@ describe("ConversationToolActivity", () => {
       />,
     );
 
-    expect(html).toContain('data-codex-tool-activity="digest"');
-    expect(html).toContain("运行了 3 个工具");
-    expect(html).toContain("代码分析 3");
-    expect(openingTagContaining(html, 'data-codex-tool-activity="digest"')).not.toContain('open=""');
+    expect(html).toContain('data-codex-tool-activity="items"');
+    expect(html).not.toContain("运行了 3 个工具");
+    expect(html).toContain(">代码分析</span>");
+    expect(html).toContain(">· 3 次</span>");
     expect(html).toContain('data-codex-tool-activity-batch="true"');
     expect(html).toContain('data-codex-tool-activity-count="3"');
     expect(html.match(/data-codex-tool-activity-item="true"/g)).toHaveLength(3);
@@ -216,7 +216,7 @@ describe("ConversationToolActivity", () => {
     expect(html).not.toContain('{&quot;status&quot;:&quot;ok&quot;,');
   });
 
-  it("keeps a small activity behind the same digest contract", () => {
+  it("keeps a small activity on the same direct-row contract", () => {
     const html = renderToStaticMarkup(
       <ConversationToolActivity
         activity={createCodexTranscriptToolActivity([toolCell("tool-1", "已完成")])}
@@ -225,8 +225,8 @@ describe("ConversationToolActivity", () => {
       />,
     );
 
-    expect(html).toContain('data-codex-tool-activity="digest"');
-    expect(html).toContain("运行了 1 个工具");
+    expect(html).toContain('data-codex-tool-activity="items"');
+    expect(html).not.toContain("运行了 1 个工具");
     expect(html).not.toContain('data-codex-tool-activity-group="true"');
     expect(html).toContain("代码图谱");
   });
@@ -253,7 +253,7 @@ describe("ConversationToolActivity", () => {
     expect(html).toContain("详情 tool-4");
   });
 
-  it("keeps tool details expandable with one compact disclosure chevron", () => {
+  it("keeps tool details expandable without a far-edge disclosure chevron", () => {
     const html = renderToStaticMarkup(
       <ConversationToolActivity
         activity={createCodexTranscriptToolActivity([toolCell("tool-1", "定位 ConversationLogger")])}
@@ -266,34 +266,26 @@ describe("ConversationToolActivity", () => {
     expect(html).toContain("工具原始结果");
     expect(html).not.toContain('data-codex-tool-detail-toggle="inline-symbol"');
     expect(html).not.toContain("完成");
-    expect(html).toContain("itemChevron");
-    expect(html.indexOf("itemChevron")).toBeGreaterThan(html.indexOf("itemTitle"));
-    expect(styles.itemSummary).toContain("grid-cols-[17px_minmax(0,1fr)]");
+    expect(html).not.toContain("itemChevron");
+    expect(styles.itemSummary).toContain("w-fit");
+    expect(styles.itemSummary).toContain("max-w-full");
+    expect(styles.itemSummary).toContain("grid-cols-[17px_minmax(0,auto)]");
     expect(styles.itemSummary).not.toContain("grid-cols-[17px_minmax(0,1fr)_16px]");
-    expect(styles.batchSummary).toContain("grid-cols-[17px_minmax(0,1fr)]");
-    expect(activityCss).toContain("transform: rotate(-90deg)");
-    expect(activityCss).toContain("details[open] > summary");
-    expect(activityCss).toContain("transform: rotate(0deg)");
-    expect(activityCss).toContain(".vui-components-conversation-tool-activity.activity:not([open])");
+    expect(styles.batchSummary).toContain("grid-cols-[17px_minmax(0,auto)]");
     expect(activityCss).toContain(".vui-components-conversation-tool-activity.batch:not([open])");
     expect(activityCss).toContain(".vui-components-conversation-tool-activity.itemDetails:not([open])");
-    expect(activityCss).toContain("> .vui-components-conversation-tool-activity.activityDetails");
     expect(activityCss).toContain("> .vui-components-conversation-tool-activity.batchDetails");
     expect(activityCss).toContain("> .vui-components-conversation-tool-activity.itemDetailsBody");
-    expect(styles.activitySummary).toContain("inline-flex");
-    expect(styles.activitySummary).not.toContain("justify-between");
+    expect(styles.activity).toContain("w-fit");
+    expect(styles.activity).toContain("max-w-full");
     expect(styles.activity).not.toContain("ml-");
-    expect(styles.activityChevron).not.toContain("ml-auto");
-    expect(styles.activityDetails).not.toContain("border-l");
-    expect(styles.activityDetails).not.toContain("ml-");
-    expect(styles.itemChevron).not.toContain("rotate-");
     expect(styles.batchDetails).not.toContain("border-l");
     expect(styles.batchDetails).not.toContain("ml-");
     expect(styles.itemDetailsBody).toContain("max-h-56");
     expect(styles.itemDetailsBody).not.toContain("ml-");
   });
 
-  it("opens the running activity and its current tool detail by default", () => {
+  it("opens the current running tool detail directly by default", () => {
     const runningCell = toolCell("tool-running", "正在执行");
     runningCell.status = "running";
     runningCell.tone = "running";
@@ -307,8 +299,8 @@ describe("ConversationToolActivity", () => {
     );
 
     expect(html).toContain('data-codex-transcript-cell-status="running"');
-    expect(html).toContain("正在运行工具");
-    expect(openingTagContaining(html, 'data-codex-tool-activity="digest"')).toContain('open=""');
+    expect(html).toContain('data-codex-tool-activity-state="running"');
+    expect(html).not.toContain("正在运行工具");
     expect(openingTagContaining(html, 'data-codex-tool-detail="true"')).toContain('open=""');
   });
 
@@ -376,7 +368,7 @@ describe("ConversationToolActivity", () => {
       />,
     );
 
-    expect(html).toContain("运行了 8 个工具");
+    expect(html).not.toContain("运行了 8 个工具");
     expect(html).not.toContain("工具调用 8");
     expect(html).toContain("读取资料上下文");
     expect(html).toContain("网页读取");
