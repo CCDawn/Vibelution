@@ -1742,6 +1742,8 @@ describe("TeamsRoute layout contract", () => {
     expect(teamResearchStageLauncherPanelSource).toContain("selectedExperimentAdapterReason");
     expect(teamResearchStageLauncherPanelSource).toContain("executableAlternativeMethods");
     expect(teamResearchStageLauncherPanelSource).toContain("可执行替代");
+    expect(teamResearchStageLauncherPanelSource).toContain("已登记");
+    expect(teamResearchStageLauncherPanelSource).toContain("当前模式尚未自动就绪");
     expect(teamResearchStageLauncherPanelSource).toContain('aria-label={lang === "zh" ? "选择实验方式" : "Select experiment method"}');
     expect(routeSource).toContain("preferredExperimentMethod=");
     // Wave 8S: experiment methods endpoint lives on useTeamResearchSecondaryQueries.
