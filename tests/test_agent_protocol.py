@@ -1354,6 +1354,84 @@ class TestToolMessageFlow:
         assert agent._last_llm_failure_attempts == 5
         assert agent._last_llm_failure_max_attempts == 5
 
+    def test_invoke_llm_maps_cancelled_provider_error_to_turn_stop(self, monkeypatch):
+        events = []
+        stop_state = {"requested": False}
+
+        class DummyContext:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        class DummyUI:
+            def thinking(self, _label):
+                return DummyContext()
+
+            def add_log(self, *_args, **_kwargs):
+                return None
+
+        class CancelledLLM(_CanonicalAgentTestLLM):
+            profile_id = "primary"
+
+            def invoke_outcome(self, _messages, **_kwargs):
+                stop_state["requested"] = True
+                raise LLMError(
+                    "cancelled",
+                    "operator stopped the turn",
+                    retryable=False,
+                    details={"stop_reason": "operator stopped the turn"},
+                )
+
+        monkeypatch.setattr(agent_module, "get_ui", lambda: DummyUI())
+        monkeypatch.setattr(agent_module.logger, "log_error", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr(
+            agent_module,
+            "_record_agent_scene_event",
+            lambda phase, code, **kwargs: events.append((phase, code, kwargs.get("fields") or {})),
+        )
+        monkeypatch.setattr(
+            agent_module,
+            "plan_llm_recovery",
+            lambda *_args, **_kwargs: SimpleNamespace(
+                category="cancelled",
+                retryable=False,
+                action="stop_current_turn",
+                user_message="operator stopped the turn",
+                wait_seconds=0,
+                stop_current_turn=True,
+                disable_streaming=False,
+                disable_tools=False,
+                request_context_compression=False,
+                fallback_profile_id=None,
+            ),
+        )
+
+        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent.llm_with_tools = CancelledLLM()
+        agent._base_llm = SimpleNamespace(profile_id="primary")
+        agent.config = SimpleNamespace(
+            llm=SimpleNamespace(
+                model_name="gpt-5.6-luna",
+                provider="relay",
+                api_base="https://example.invalid",
+                api_timeout=30,
+            ),
+        )
+        agent._should_stream_llm_for_turn = lambda *_args, **_kwargs: False
+        agent._get_llm_for_current_mode = lambda **_kwargs: agent.llm_with_tools
+        agent._turn_interrupt_checker = lambda: (
+            "operator stopped the turn" if stop_state["requested"] else ""
+        )
+
+        with pytest.raises(agent_module.TurnStopRequested, match="operator stopped the turn"):
+            agent._invoke_llm([AIMessage(content="hello")])
+
+        assert [code for _, code, _ in events].count("llm_route_cancelled") == 1
+        assert "llm_route_attempt_exhausted" not in [code for _, code, _ in events]
+        assert "llm_turn_terminal" not in [code for _, code, _ in events]
+
     def test_invoke_llm_preserves_safe_semantic_projection_diagnostics(self, monkeypatch):
         """协议投影失败应保留可定位字段，且不转存原始链路内容。"""
         events = []
