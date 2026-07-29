@@ -200,7 +200,11 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("datasetCatalogStatusLabel");
     expect(evolutionDictionarySource).toContain('datasetCatalog: "评测集目录"');
     expect(evolutionDictionarySource).toContain('datasetCatalogHiddenReason: "隐藏原因"');
-    expect(routeStyles.datasetCatalogPanel).toContain("[max-height:min(238px,_34vh)]");
+    expect(routeSource).toContain('useState<DatasetCatalogFilter>("runnable")');
+    expect(routeSource).toContain('<details className={styles.datasetCatalogPanel}>');
+    expect(routeSource).toContain("styles.datasetCatalogSummary");
+    expect(routeStyles.datasetCatalogPanel).toContain("[overflow:hidden]");
+    expect(routeStyles.datasetCatalogSummary).toContain("[cursor:pointer]");
   });
 
   it("separates inconclusive terminal status and harness-only datasets from success wording", () => {
@@ -484,6 +488,8 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeStyles.liveLaunchStack).toContain("[grid-template-rows:minmax(0,_1fr)]");
     expect(routeStyles.launchSurface).toContain("[max-height:none]");
     expect(routeStyles.supervisedRunConsole).toContain("[container-type:inline-size]");
+    expect(routeStyles.supervisedRunConsole).toContain("[grid-auto-rows:max-content]");
+    expect(routeStyles.supervisedRunConsole).not.toContain("[grid-template-rows:auto_auto_minmax(0,_1fr)]");
     expect(routeStyles.supervisedRunConsoleGrid).toContain("[grid-template-columns:minmax(0,_1fr)]");
   });
 
@@ -601,6 +607,16 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(stylesSource).not.toContain(".supervisedWorkflowCardButton");
     expect(stylesSource).not.toContain(".supervisedWorkflowCardFooter");
     expect(routeStyles.supervisedWorkflowFollowButton).toContain("[min-height:24px]");
+  });
+
+  it("shows a truthful run plan before the supervised agents start", () => {
+    expect(routeSource).toContain("if (!supervisedWorkflowRun)");
+    expect(routeSource).toContain("准备开始监督进化");
+    expect(routeSource).toContain("不会自动写入运行时");
+    expect(routeSource).toContain("styles.supervisedRunPlan");
+    expect(routeSource).toContain("styles.supervisedRunPlanGrid");
+    expect(routeStyles.supervisedRunPlan).toContain("[align-content:center]");
+    expect(routeStyles.supervisedRunPlanGrid).toContain("[grid-template-columns:repeat(2,_minmax(0,_1fr))]");
   });
 
   it("builds the supervised Agent conversation chrome from stable VUI product APIs", () => {

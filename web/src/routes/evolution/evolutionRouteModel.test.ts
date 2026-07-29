@@ -68,6 +68,7 @@ describe("evolutionRouteModel", () => {
   it("labels workflow steps and resolves active step from role/phase", () => {
     const step = SUPERVISED_WORKFLOW_STEPS[0];
     expect(supervisedWorkflowStepLabel(step, "zh")).toBe("基线评测");
+    expect(activeSupervisedWorkflowStep(null)).toBeNull();
     expect(activeSupervisedWorkflowStep({ currentRole: "candidate" } as EvolutionActiveRun)).toBe("rerun_score");
     expect(activeSupervisedWorkflowStep({ currentPhase: "reflection" } as EvolutionActiveRun)).toBe("improve");
   });
