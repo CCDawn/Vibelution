@@ -603,6 +603,16 @@ def test_materialize_full_evolution_prompt_injects_worktree_absolute_probe_path(
     assert str(tmp_path / SAFE_MODIFY_PROBE_PATH) in materialized
 
 
+def test_materialize_transaction_prompt_preserves_task_specific_validation(tmp_path: Path):
+    prompt = "运行 python -m pytest tests/test_supervised_judge_closed_loop.py -q。"
+
+    materialized = materialize_scenario_prompt("transaction", prompt, tmp_path)
+
+    assert "tests/test_supervised_judge_closed_loop.py -q" in materialized
+    assert "tests/test_dataset_registry.py -q" not in materialized
+    assert "不要套用其他 case 的命令" in materialized
+
+
 def test_select_observation_files_uses_all_restart_logs_but_primary_non_restart_log():
     files = [
         "conversation_parent.jsonl",

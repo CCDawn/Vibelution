@@ -313,9 +313,11 @@ def test_prompt_template_repair_drops_retired_self_evolution_summarizer(tmp_path
     assert (tmp_path / "workspace" / "prompts" / "research" / "source_ingestor.md").exists()
     supervised_baseline = prompt_template_service.get_prompt_template("prompt-supervised-baseline")
     assert supervised_baseline is not None
-    assert supervised_baseline["metadata"]["builtinContentVersion"] == prompt_template_service.CHALLENGE_CUP_STAGE_TASK_PROMPT_VERSION
-    assert "当前默认无工具权限" in supervised_baseline["content"]
-    assert not _contains_tool_name(supervised_baseline["content"], "open_evolution_transaction_tool")
+    assert supervised_baseline["metadata"]["builtinContentVersion"] == prompt_template_service.SUPERVISED_BASELINE_PROMPT_VERSION
+    assert "你不是 Judge Agent" in supervised_baseline["content"]
+    assert "禁止输出 SUPERVISED_AGENT_JUDGMENT" in supervised_baseline["content"]
+    assert "以本回合实际提供的工具为准" in supervised_baseline["content"]
+    assert "进入自改阶段" in supervised_baseline["content"]
 
 
 def test_source_collection_prompt_templates_only_expose_four_stage_roles(tmp_path, monkeypatch):
@@ -517,7 +519,8 @@ def test_build_agent_prompt_template_context_reports_block_and_missing_reasons(t
     assert "监督进化基线 Agent" in supervised["contextBlock"]
     assert "open_evolution_transaction_tool" not in supervised["contextBlock"]
     assert "close_evolution_transaction_tool" not in supervised["contextBlock"]
-    assert "当前默认无工具权限" in supervised["contextBlock"]
+    assert "以本回合实际提供的工具为准" in supervised["contextBlock"]
+    assert "禁止输出 SUPERVISED_AGENT_JUDGMENT" in supervised["contextBlock"]
     assert supervised["sourcePath"] == ""
     assert supervised["sourceExists"] is False
     judge = prompt_template_service.get_prompt_template("prompt-supervised-judge")
