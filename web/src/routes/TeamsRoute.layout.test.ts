@@ -1121,6 +1121,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("researchStageAgentDirectChatRoute");
     expect(routeSource).toContain("researchStageSessionChatRoute");
     expect(routeSource).toContain("sourceCollectionSummaryQuery.data?.latestTasks?.[stageId]?.sessionId");
+    expect(routeSource).toContain("sourceCollectionSummaryQuerySeedText");
+    expect(routeSource).toContain("stageSessionPending");
     expect(routeSource).toContain("sourceCollectionStageReturnRoute");
     expect(routeSource).toContain("sourceCollectionStageChatReturnLabel");
     expect(researchStageAgentPresentationSource).toContain("params.set(\"returnTo\", normalizedReturnTo)");
@@ -1132,7 +1134,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("agentSummaryQuery.isPending || agentSummaryQuery.isFetching");
     // Wave 8M: primary stage agent chat fallback state lives on active-stage workspace.
     expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain("primaryStageAgentChatLoading");
-    expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain("加载 Agent...");
+    expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain("加载本轮会话...");
     expect(routeSource).toContain('chatState.status === "repair"');
     expect(routeSource).toContain("onAction: () => void startSourceCollectionStageSessionTask(\"finding\")");
     expect(routeSource).toContain("onAction: sourceCollectionExtractionCanProceedAfterExclusions");

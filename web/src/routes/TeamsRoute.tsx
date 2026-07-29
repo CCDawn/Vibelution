@@ -21,9 +21,10 @@ import { useTeamShellMutations } from "./teams/useTeamShellMutations";
 import { useTeamWorkflowStartMutations } from "./teams/useTeamWorkflowStartMutations";
 import { useTeamResearchSecondaryQueries } from "./teams/useTeamResearchSecondaryQueries";
 import { useSourceCollectionRunQueries } from "./teams/useSourceCollectionRunQueries";
-import type {
-  DataProcessingRecordListPayload,
-  SourceCollectionSummaryPayload,
+import {
+  sourceCollectionSummaryQuerySeedText,
+  type DataProcessingRecordListPayload,
+  type SourceCollectionSummaryPayload,
 } from "./teams/sourceCollectionRunQueryModel";
 import {
   workflowIngestionTone,
@@ -653,6 +654,7 @@ export function TeamsRoute({
   const [challengeTeamSurface, setChallengeTeamSurface] = useState<"workspace" | "progress">("workspace");
   const [preferredExperimentMethod, setPreferredExperimentMethod] = useState<ExperimentMethodId | "">("");
   const sourceCollectionDraftHydratedRunIdRef = useRef("");
+  const sourceCollectionDraftHydratedSearchPlanRef = useRef("");
   const [sourceCollectionDraft, setSourceCollectionDraft] = useState<SourceCollectionDraft>({
     title: "神经算法资料搜索批次",
     topic: "神经预测编码",
@@ -1174,11 +1176,13 @@ export function TeamsRoute({
       return;
     }
     sourceCollectionDraftHydratedRunIdRef.current = selectedSourceCollectionRunEffectiveId;
+    sourceCollectionDraftHydratedSearchPlanRef.current = "";
     setSourceCollectionDraft((current) => ({
       ...current,
       title: selectedSourceCollectionRun?.title || current.title,
       topic: sourceCollectionSelectedRunTopic || current.topic,
       goal: sourceCollectionSelectedRunGoal || current.goal,
+      querySeeds: "",
     }));
   }, [
     selectedSourceCollectionRun?.title,
@@ -1215,6 +1219,29 @@ export function TeamsRoute({
     sourceCollectionStageWritebackSyncActive,
     selectedRunStatusFallback: selectedSourceCollectionRun?.status || "",
   });
+  useEffect(() => {
+    const querySeedText = sourceCollectionSummaryQuerySeedText(
+      sourceCollectionSummaryQuery.data,
+      selectedSourceCollectionRunEffectiveId,
+    );
+    const searchPlanId = String(sourceCollectionSummaryQuery.data?.searchPlan?.planId || "").trim();
+    const hydrationKey = `${selectedSourceCollectionRunEffectiveId}:${searchPlanId}`;
+    if (
+      !querySeedText
+      || !searchPlanId
+      || sourceCollectionDraftHydratedSearchPlanRef.current === hydrationKey
+    ) {
+      return;
+    }
+    sourceCollectionDraftHydratedSearchPlanRef.current = hydrationKey;
+    setSourceCollectionDraft((current) => ({
+      ...current,
+      querySeeds: querySeedText,
+    }));
+  }, [
+    selectedSourceCollectionRunEffectiveId,
+    sourceCollectionSummaryQuery.data,
+  ]);
   const autoCanvasViewportStyle = useMemo(() => canvasViewStyle(displayCanvasNodes, canvasFrameSize), [canvasFrameSize, displayCanvasNodes]);
   const canvasViewportStyle = lockedCanvasViewportStyle ?? autoCanvasViewportStyle;
   const canvasScale = canvasStyleScale(canvasViewportStyle);
@@ -1618,6 +1645,11 @@ export function TeamsRoute({
       returnRoute,
       returnLabel,
     );
+    const stageSessionPending = Boolean(
+      selectedSourceCollectionRunEffectiveId
+      && !sourceCollectionSummaryQuery.data
+      && (sourceCollectionSummaryQuery.isPending || sourceCollectionSummaryQuery.isFetching),
+    );
     const route = currentTaskSessionRoute || researchStageAgentDirectChatRoute(
       binding?.agent,
       returnRoute,
@@ -1626,6 +1658,7 @@ export function TeamsRoute({
     return resolveSourceCollectionStageAgentChatState({
       binding,
       route,
+      stageSessionPending,
       agentSummaryPending: agentSummaryQuery.isPending,
       agentSummaryFetching: agentSummaryQuery.isFetching,
       agentSummaryError: agentSummaryQuery.isError,

@@ -195,6 +195,9 @@ def test_source_collection_summary_defaults_to_latest_run_with_records(tmp_path,
     assert empty_run["run"]["runId"] != first_run_id
     assert payload["runId"] == first_run_id
     assert payload["summary"]["recordCount"] == 1
+    assert payload["searchPlan"]["planId"] == first_run["searchPlan"]["planId"]
+    assert payload["searchPlan"]["querySeeds"] == ["predictive coding"]
+    assert payload["searchPlan"]["queryCount"] == first_run["searchPlan"]["queryCount"]
 
 def test_source_collection_summary_status_ignores_legacy_collecting_after_stage_round():
     assert (

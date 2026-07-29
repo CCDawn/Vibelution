@@ -69,5 +69,17 @@ describe("teamSourceCollectionShellModel", () => {
       agentSummaryFetching: false,
       agentSummaryError: false,
     }).status).toBe("ready");
+    expect(resolveSourceCollectionStageAgentChatState({
+      binding: { agentId: "a1", agent: { id: "a1" } },
+      route: "/chat?session=legacy-direct-session",
+      stageSessionPending: true,
+      agentSummaryPending: false,
+      agentSummaryFetching: false,
+      agentSummaryError: false,
+    })).toEqual({
+      binding: { agentId: "a1", agent: { id: "a1" } },
+      route: "",
+      status: "loading",
+    });
   });
 });
