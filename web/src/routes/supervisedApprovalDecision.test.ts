@@ -37,9 +37,11 @@ function worktreeRun(overrides: Partial<SupervisedWorktreeRun> = {}): Supervised
       note: "",
     },
     decision: {
-      baselineScore: 0.72,
-      candidateScore: 0.83,
-      scoreDelta: 0.11,
+      scoreSource: "judge_agent",
+      judgeDecision: "PROMOTE",
+      baselineScore: 72,
+      candidateScore: 83,
+      scoreDelta: 11,
       recommendedAction: "preserve",
       reason: "候选得分提升且没有文件冲突。",
       highRisk: true,
@@ -81,17 +83,18 @@ function worktreeRun(overrides: Partial<SupervisedWorktreeRun> = {}): Supervised
 }
 
 describe("buildSupervisedApprovalDecision", () => {
-  it("keeps review approval separate from project merge and runtime application", () => {
+  it("presents one user approval that authorizes Judge-controlled merge", () => {
     const model = buildSupervisedApprovalDecision(worktreeRun(), "zh");
 
     expect(model.phase).toBe("pending_review");
     expect(model.primaryAction).toBe("approve_review");
-    expect(model.headline).toContain("批准评审");
+    expect(model.headline).toContain("Judge 触发受控合入");
+    expect(model.primaryActionLabel).toBe("审批并受控合入");
     expect(model.runtimeEffect).toBe("not_applied");
     expect(model.metrics).toMatchObject({
-      baselineScore: 0.72,
-      candidateScore: 0.83,
-      scoreDelta: 0.11,
+      baselineScore: 72,
+      candidateScore: 83,
+      scoreDelta: 11,
       changedFileCount: 2,
       highRiskFileCount: 1,
       overlapFileCount: 0,

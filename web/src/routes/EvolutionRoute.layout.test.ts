@@ -504,10 +504,12 @@ describe("EvolutionRoute library user flow contract", () => {
 
   it("shows a compact supervised workflow rail and center overview fallback", () => {
     expect(routeSource).toContain("SUPERVISED_WORKFLOW_STEPS");
-    expect(evolutionRouteModelSource).toContain('{ id: "baseline_eval", zh: "基线评测", en: "Baseline", role: "baseline" }');
-    expect(evolutionRouteModelSource).toContain('{ id: "improve", zh: "提出建议与改良", en: "Improve", role: "candidate" }');
-    expect(evolutionRouteModelSource).toContain('{ id: "rerun_score", zh: "复跑与评分", en: "Rerun + Score", role: "candidate" }');
-    expect(evolutionRouteModelSource).toContain('{ id: "approval", zh: "用户审批", en: "Approval", role: null }');
+    expect(evolutionRouteModelSource).toContain('{ id: "baseline_eval", zh: "基线运行", en: "Baseline run", role: "baseline" }');
+    expect(evolutionRouteModelSource).toContain('{ id: "baseline_judge", zh: "基线评分", en: "Baseline score", role: "judge" }');
+    expect(evolutionRouteModelSource).toContain('{ id: "improve", zh: "基线自改", en: "Baseline self-improve", role: "baseline" }');
+    expect(evolutionRouteModelSource).toContain('{ id: "rerun_eval", zh: "独立复跑", en: "Clean-room rerun", role: "baseline_rerun" }');
+    expect(evolutionRouteModelSource).toContain('{ id: "rerun_judge", zh: "复跑评分", en: "Rerun score", role: "judge" }');
+    expect(evolutionRouteModelSource).toContain('{ id: "approval", zh: "用户审批与合入", en: "Approve + merge", role: null }');
     expect(evolutionRouteModelSource).not.toContain('{ id: "results", zh: "运行结果"');
     expect(evolutionRouteModelSource).not.toContain('{ id: "proposal", zh: "改进提案"');
     expect(evolutionRouteModelSource).not.toContain('{ id: "review", zh: "样本评审"');
@@ -523,7 +525,7 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("onAction={(runId, action) => approvalWorktreeActionMutation.mutate({ runId, action })}");
     expect(supervisedApprovalDecisionPanelSource).toContain("buildSupervisedApprovalDecision");
     expect(supervisedApprovalDecisionPanelSource).toContain("用户审批 · 决策工作台");
-    expect(supervisedApprovalDecisionPanelSource).toContain("候选改良是否进入项目");
+    expect(supervisedApprovalDecisionPanelSource).toContain("是否批准 Judge 受控合入");
     expect(supervisedApprovalDecisionPanelSource).toContain('data-vui-recipe="supervised-approval-decision"');
     expect(supervisedApprovalDecisionPanelSource).toContain("<details");
     expect(supervisedApprovalDecisionPanelSource).toContain("<VButton");
@@ -632,7 +634,7 @@ describe("EvolutionRoute library user flow contract", () => {
   it("shows a truthful run plan before the supervised agents start", () => {
     expect(routeSource).toContain("if (!supervisedWorkflowRun)");
     expect(routeSource).toContain("准备开始监督进化");
-    expect(routeSource).toContain("不会自动写入运行时");
+    expect(routeSource).toContain("用户审批后由 Judge 触发受控合入");
     expect(routeSource).toContain("styles.supervisedRunPlan");
     expect(routeSource).toContain("styles.supervisedRunPlanGrid");
     expect(routeSource).toContain("styles.supervisedRunPlanActions");

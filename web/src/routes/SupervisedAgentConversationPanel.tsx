@@ -44,6 +44,7 @@ function roleAvatar(role: SupervisedMemberRole, lang: "zh" | "en") {
     return role.slice(0, 1).toUpperCase();
   }
   if (role === "baseline") return "基";
+  if (role === "baseline_rerun") return "复";
   if (role === "candidate") return "候";
   if (role === "judge") return "评";
   if (role === "reviewer") return "审";
@@ -53,6 +54,7 @@ function roleAvatar(role: SupervisedMemberRole, lang: "zh" | "en") {
 function roleConversationTitle(role: SupervisedMemberRole, lang: "zh" | "en") {
   const titles: Record<SupervisedMemberRole, { zh: string; en: string }> = {
     baseline: { zh: "基线 Agent", en: "Baseline Agent" },
+    baseline_rerun: { zh: "独立复跑", en: "Clean-room rerun" },
     candidate: { zh: "候选 Agent", en: "Candidate Agent" },
     judge: { zh: "评分 Agent", en: "Judge Agent" },
     reviewer: { zh: "审查 Agent", en: "Review Agent" },

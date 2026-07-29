@@ -102,8 +102,8 @@ function emptyDecision(lang: ApprovalLanguage): SupervisedApprovalDecisionModel 
     headline: text(lang, "等待监督运行生成审批证据", "Waiting for supervised evidence"),
     reason: text(
       lang,
-      "完成基线评测、候选改良和复跑评分后，这里会给出可执行的治理动作。",
-      "The governance action appears after baseline, candidate improvement, and rerun scoring finish.",
+      "完成两次 Judge 评分后，这里会给出用户审批与受控合入动作。",
+      "The user approval and controlled merge action appears after both Judge evaluations finish.",
     ),
     primaryAction: null,
     primaryActionLabel: "",
@@ -170,10 +170,10 @@ function phaseCopy(
     return {
       tone: "warning" as const,
       statusLabel: text(lang, "需用户决策", "User decision required"),
-      headline: text(lang, "建议先批准评审，再决定是否合入", "Approve review before deciding whether to merge"),
+      headline: text(lang, "审批后由 Judge 触发受控合入", "Approval lets the Judge trigger controlled merge"),
       reason: gateReason || decisionReason,
       primaryAction: "approve_review" as const,
-      primaryActionLabel: text(lang, "批准评审", "Approve review"),
+      primaryActionLabel: text(lang, "审批并受控合入", "Approve controlled merge"),
     };
   }
   if (phase === "ready_merge") {
@@ -260,19 +260,19 @@ function buildSteps(
   return [
     {
       id: "review",
-      title: text(lang, "1. 批准评审", "1. Approve review"),
+      title: text(lang, "1. 用户审批", "1. User approval"),
       status: reviewDone ? "done" : phase === "pending_review" ? "active" : "pending",
       statusLabel: reviewDone
         ? text(lang, "已完成", "Done")
         : phase === "pending_review"
           ? text(lang, "当前可执行", "Available now")
           : text(lang, "等待评测", "Waiting"),
-      description: text(lang, "确认人工已经检查候选风险，解除 review gate。", "Confirm candidate risks were reviewed and clear the review gate."),
-      consequence: text(lang, "不会写入项目，也不会改变运行时。", "Does not write project files or change runtime."),
+      description: text(lang, "确认已审阅两次 Judge 评分、改动风险和候选差异。", "Confirm both Judge scores, candidate risk, and diff were reviewed."),
+      consequence: text(lang, "PROMOTE 结论下会立即授权 Judge 触发受控合入。", "With PROMOTE, this immediately authorizes the Judge-triggered controlled merge."),
     },
     {
       id: "merge",
-      title: text(lang, "2. 合入项目", "2. Merge project"),
+      title: text(lang, "2. Judge 受控合入", "2. Judge-controlled merge"),
       status: mergeUndone
         ? "undone"
         : mergeDone
@@ -291,7 +291,7 @@ function buildSteps(
             : phase === "blocked"
               ? text(lang, "被阻塞", "Blocked")
               : text(lang, "等待评审", "Waiting for review"),
-      description: text(lang, "把候选文件写入项目，并生成回滚清单。", "Write candidate files into the project and generate a rollback manifest."),
+      description: text(lang, "Judge 通过受约束的候选应用器写入文件并生成回滚清单，不执行原始 git merge。", "The Judge triggers the constrained candidate applier and rollback manifest, not raw git merge."),
       consequence: text(lang, "需要 Launcher/runtime 刷新与复验后才能确认生效。", "Requires Launcher/runtime refresh and validation before activation is confirmed."),
     },
     {

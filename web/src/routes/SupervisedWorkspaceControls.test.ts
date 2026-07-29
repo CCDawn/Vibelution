@@ -124,11 +124,11 @@ describe("supervised workspace controls", () => {
     expect(evolutionRouteSource).toContain("supervisedTabSummaries");
     expect(evolutionRouteSource).toContain("supervisedWorkflowTabSummary");
     expect(evolutionRouteSource).toContain("supervisedWorkflowCards[0]");
-    expect(evolutionRouteSource).toContain("supervisedWorkflowCards[1]");
     expect(evolutionRouteSource).toContain("supervisedWorkflowCards[2]");
-    expect(evolutionRouteSource).toContain("supervisedWorkflowCards[3]");
+    expect(evolutionRouteSource).toContain("supervisedWorkflowCards[4]");
+    expect(evolutionRouteSource).toContain("supervisedWorkflowCards[5]");
     expect(evolutionRouteSource).toContain("handleSupervisedWorkflowStepSelect");
-    expect(evolutionRouteSource).toContain("activeWorkflowStepId={supervisedSelectedWorkflowStepId}");
+    expect(evolutionRouteSource).toContain("activeWorkflowStepId={supervisedWorkspaceActiveStepId}");
     expect(evolutionRouteSource).toContain("onWorkflowStepSelect={handleSupervisedWorkflowStepSelect}");
     expect(evolutionRouteSource).toContain("tabSummaries={supervisedTabSummaries}");
   });

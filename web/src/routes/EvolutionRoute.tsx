@@ -680,7 +680,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     const currentRole = String(supervisedMembersRun?.currentRole || backendWorkflowCurrent?.role || "").trim().toLowerCase();
     const currentAgentId = String(supervisedMembersRun?.currentAgentBinding?.agentId || "").trim();
     return SUPERVISED_RUN_MEMBER_ROLES.map((role) => {
-      const binding = bindings[role] ?? {};
+      const binding = bindings[role === "baseline_rerun" ? "baseline" : role] ?? {};
       const conversationSession = roleSessions[role]
         ?? supervisedRoleConversationSession(backendWorkflowSteps, role);
       const conversationSessionId = String(conversationSession?.conversationSessionId || "").trim();
@@ -690,7 +690,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       const modelId = supervisedMemberModelId(binding);
       const isActive =
         currentRole === role
-        || (Boolean(currentAgentId) && Boolean(agentId) && currentAgentId === agentId);
+        || (!currentRole && Boolean(currentAgentId) && Boolean(agentId) && currentAgentId === agentId);
       return {
         role,
         label: roleText,
@@ -728,11 +728,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const supervisedWorkflowCards = SUPERVISED_WORKFLOW_STEPS.map((definition): SupervisedWorkflowCard => {
     const backendStep = backendWorkflowSteps.find((step) => step.id === definition.id);
     const member = definition.role ? supervisedRunMemberByRole.get(definition.role) : undefined;
-    const candidateMember = supervisedRunMemberByRole.get("candidate");
-    const fallbackSessionId =
-      definition.id === "improve" || definition.id === "rerun_score"
-        ? candidateMember?.conversationSession?.conversationSessionId || ""
-        : member?.conversationSession?.conversationSessionId || "";
+    const fallbackSessionId = member?.conversationSession?.conversationSessionId || "";
     const conversationSessionId = String(backendStep?.conversationSessionId || fallbackSessionId || "").trim();
     const chatRoute = backendStep?.chatRoute || supervisedMemberChatRoute(conversationSessionId, supervisedMemberReturnTo, supervisedMemberReturnLabel);
     const fallbackStatus = definition.id === supervisedRuntimeWorkflowStepId ? "running" : "pending";
@@ -745,7 +741,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       current: backendStep?.current ?? definition.id === supervisedRuntimeWorkflowStepId,
       summary: backendStep?.summary || (
         definition.id === "approval"
-          ? (lang === "zh" ? "最终运行结果、改进提案和样本评审会集中在这里。" : "Final result, proposal, and sample review are gathered here.")
+          ? (lang === "zh" ? "Judge 复评结论与用户审批合入动作集中在这里。" : "The final Judge decision and user-approved merge are gathered here.")
           : member?.conversationSession?.latestMessage || member?.model || ""
       ),
       livePreview: backendStep?.livePreview || member?.conversationSession?.latestMessage || monitoredRun?.latestMessage || "",
@@ -950,13 +946,24 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   };
   const supervisedTabSummaries = {
     baseline_eval: supervisedWorkflowTabSummary(supervisedWorkflowCards[0]),
-    improve: supervisedWorkflowTabSummary(supervisedWorkflowCards[1]),
-    rerun_score: supervisedWorkflowTabSummary(supervisedWorkflowCards[2]),
-    approval: supervisedWorkflowTabSummary(supervisedWorkflowCards[3]),
+    improve: supervisedWorkflowTabSummary(supervisedWorkflowCards[2]),
+    rerun_score: supervisedWorkflowTabSummary(supervisedWorkflowCards[4]),
+    approval: supervisedWorkflowTabSummary(supervisedWorkflowCards[5]),
   };
-  const handleSupervisedWorkflowStepSelect = useCallback((stepId: SupervisedWorkspaceWorkflowStep) => {
-    setSelectedSupervisedWorkflowStepId(stepId);
-    const definition = SUPERVISED_WORKFLOW_STEPS.find((step) => step.id === stepId);
+  const supervisedWorkspaceActiveStepId: SupervisedWorkspaceWorkflowStep | null =
+    supervisedSelectedWorkflowStepId === "baseline_eval" || supervisedSelectedWorkflowStepId === "baseline_judge"
+      ? "baseline_eval"
+      : supervisedSelectedWorkflowStepId === "improve"
+        ? "improve"
+        : supervisedSelectedWorkflowStepId === "rerun_eval" || supervisedSelectedWorkflowStepId === "rerun_judge"
+          ? "rerun_score"
+          : supervisedSelectedWorkflowStepId === "approval"
+            ? "approval"
+            : null;
+  const handleSupervisedWorkflowStepSelect = useCallback((stepId: SupervisedWorkspaceWorkflowStep | SupervisedWorkflowStepId) => {
+    const resolvedStepId = stepId === "rerun_score" ? "rerun_judge" : stepId;
+    setSelectedSupervisedWorkflowStepId(resolvedStepId);
+    const definition = SUPERVISED_WORKFLOW_STEPS.find((step) => step.id === resolvedStepId);
     if (definition?.role) {
       setSelectedSupervisedAgentRole(definition.role);
     }
@@ -968,9 +975,11 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     setSelectedSupervisedAgentRole(role);
     if (role === "baseline") {
       setSelectedSupervisedWorkflowStepId("baseline_eval");
-    } else if (role === "candidate") {
+    } else if (role === "baseline_rerun") {
+      setSelectedSupervisedWorkflowStepId("rerun_eval");
+    } else if (role === "judge") {
       setSelectedSupervisedWorkflowStepId(
-        supervisedRuntimeWorkflowStepId === "rerun_score" ? "rerun_score" : "improve",
+        supervisedRuntimeWorkflowStepId === "baseline_judge" ? "baseline_judge" : "rerun_judge",
       );
     } else {
       setSelectedSupervisedWorkflowStepId(null);
@@ -1264,8 +1273,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
             <h3>{lang === "zh" ? "准备开始监督进化" : "Ready to start supervised evolution"}</h3>
             <p>
               {lang === "zh"
-                ? "开始后将依次完成基线评测、候选 worktree 改良、复跑评分和用户审批；结果不会自动写入运行时。"
-                : "The run proceeds through baseline evaluation, candidate worktree improvement, rerun scoring, and user approval; results are not written to runtime automatically."}
+                ? "开始后依次执行：基线运行、Judge 首评、原基线会话自改、新会话独立复跑、原 Judge 会话复评；用户审批后由 Judge 触发受控合入。"
+                : "The baseline runs, the Judge scores it, the same baseline session self-improves, a fresh session reruns independently, and the same Judge session scores again before user-approved controlled merge."}
             </p>
           </div>
           <div className={styles.supervisedRunPlanGrid}>
@@ -1719,6 +1728,9 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     if (normalized === "baseline") {
       return t("roleBaseline");
     }
+    if (normalized === "baseline_rerun") {
+      return lang === "zh" ? "独立复跑" : "Clean-room rerun";
+    }
     if (normalized === "candidate") {
       return t("roleCandidate");
     }
@@ -1736,7 +1748,10 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
 
   function supervisedAgentRoleDescription(role: SupervisedMemberRole) {
     if (role === "baseline") {
-      return lang === "zh" ? "执行当前策略" : "Run the current strategy";
+      return lang === "zh" ? "基线运行后在原会话中完成自改" : "Run the baseline and self-improve in the same session";
+    }
+    if (role === "baseline_rerun") {
+      return lang === "zh" ? "新会话独立复跑，不继承本轮上下文" : "Independent rerun in a fresh session";
     }
     if (role === "candidate") {
       return lang === "zh" ? "反思、改良与候选复跑" : "Reflect, improve, and rerun";
@@ -2350,7 +2365,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
             {activeTrack === "supervised" ? (
               <SupervisedWorkspaceControls
                 activeView={evolutionView}
-                activeWorkflowStepId={supervisedSelectedWorkflowStepId}
+                activeWorkflowStepId={supervisedWorkspaceActiveStepId}
                 onWorkflowStepSelect={handleSupervisedWorkflowStepSelect}
                 overviewIntakeMode={overview?.intakeMode}
                 configIntakeMode={configQuery.data?.intakeMode}
