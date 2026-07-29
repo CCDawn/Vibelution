@@ -1279,6 +1279,32 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
               <strong>{lang === "zh" ? "用户审批后决定" : "Decided after approval"}</strong>
             </article>
           </div>
+          <div className={styles.supervisedRunPlanActions}>
+            <VButton
+              type="button"
+              variant="primary"
+              className={`${styles.inlineAction} ${styles.supervisedPrimaryAction}`}
+              isDisabled={
+                runLocked
+                || worktreeRunLocked
+                || !workbenchControl
+                || startWorktreeRunMutation.isPending
+                || (sourceKind === "dataset" && !datasetName)
+                || (sourceKind === "bundle" && !selectedBundleExists)
+              }
+              onClick={() => startWorktreeRunMutation.mutate()}
+              tooltip={t("launchSupervisedRunHint")}
+              disabledReason={supervisedStartDisabledReason}
+              icon={
+                supervisedStartSubmitting || supervisedPrimaryRunning
+                  ? <LoaderCircle size={15} />
+                  : <Play size={15} />
+              }
+            >
+              {supervisedStartButtonLabel}
+            </VButton>
+            <span>{lang === "zh" ? "运行参数可在左侧调整。" : "Adjust run parameters in the left rail."}</span>
+          </div>
           <p className={styles.supervisedRunPlanHint}>
             {lang === "zh"
               ? "运行启动后，这里会切换为当前 Agent 的真实会话轨迹。"
@@ -2588,7 +2614,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                       <VButton
                         type="button"
                         variant="primary"
-                        className={styles.inlineAction}
+                        className={`${styles.inlineAction} ${styles.supervisedPrimaryAction}`}
                         isDisabled={
                           runLocked
                           || worktreeRunLocked
@@ -2600,13 +2626,17 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                         onClick={() => startWorktreeRunMutation.mutate()}
                         tooltip={t("launchSupervisedRunHint")}
                         disabledReason={supervisedStartDisabledReason}
+                        icon={
+                          supervisedStartSubmitting || supervisedPrimaryRunning
+                            ? <LoaderCircle size={15} />
+                            : <Play size={15} />
+                        }
                       >
-                        {supervisedStartSubmitting || supervisedPrimaryRunning ? <LoaderCircle size={15} /> : <Play size={15} />}
                         {supervisedStartButtonLabel}
                       </VButton>
                     </div>
                     <div className={styles.closedLoopLaunchBlock}>
-                      <div>
+                      <div className={styles.closedLoopContent}>
                         <div className={styles.closedLoopTitleRow}>
                           <strong className={styles.formLabelWithHint}>
                             {t("closedLoopLaunchPanelTitle")}
@@ -2634,8 +2664,12 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                         onClick={() => startSimulationWorktreeRunMutation.mutate()}
                         tooltip={t("startClosedLoopHint")}
                         disabledReason={simulationStartDisabledReason}
+                        icon={
+                          startSimulationWorktreeRunMutation.isPending
+                            ? <LoaderCircle size={15} />
+                            : <Sparkles size={15} />
+                        }
                       >
-                        {startSimulationWorktreeRunMutation.isPending ? <LoaderCircle size={15} /> : <Sparkles size={15} />}
                         {t("startClosedLoopRun")}
                       </VButton>
                     </div>
