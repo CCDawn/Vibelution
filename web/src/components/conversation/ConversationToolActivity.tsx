@@ -8,7 +8,6 @@ import {
   type CodexTranscriptToolActivity,
 } from "./conversationToolActivityModel";
 import {
-  conversationToolRendererForPresentationLabel,
   conversationToolRendererLabel,
 } from "./conversationToolRendererRegistry";
 import {
@@ -248,7 +247,7 @@ function ToolActivityBatch({
   renderToolDetails: ConversationToolActivityProps["renderToolDetails"];
 }) {
   const staggeredDetails = useStaggeredDetails(false);
-  const descriptor = conversationToolRendererForPresentationLabel(item.title, language);
+  const descriptor = conversationToolActivityRendererForCell(item.cells[0], language);
   const Icon = descriptor.icon;
   const countLabel = language === "zh" ? `${item.count} 次` : `${item.count} calls`;
   const label = language === "zh"

@@ -9,6 +9,12 @@ import {
 
 const BATCH_MINIMUM = 2;
 const DIGEST_META_GROUP_LIMIT = 3;
+const DISTINCT_SEMANTIC_TOOL_NAMES = new Set([
+  "source_collection_context_tool",
+  "source_collection_stage_writeback_tool",
+  "web_fetch_tool",
+  "web_search_tool",
+]);
 
 export type ConversationToolActivityPresentationItem =
   | {
@@ -143,10 +149,16 @@ export function buildConversationToolActivityDigestPresentation(
     groups.set(label, (groups.get(label) ?? 0) + toolInvocationCount(cell));
   }
   const groupEntries = [...groups.entries()];
+  const genericGroupLabel = language === "zh" ? "工具调用" : "Tool activity";
+  const onlyGroupRepeatsTotal = groupEntries.length === 1
+    && groupEntries[0]?.[0] === genericGroupLabel
+    && groupEntries[0]?.[1] === count;
   const hiddenGroupCount = Math.max(0, groupEntries.length - DIGEST_META_GROUP_LIMIT);
-  const boundedMeta = groupEntries
-    .slice(0, DIGEST_META_GROUP_LIMIT)
-    .map(([label, groupCount]) => `${label} ${groupCount}`);
+  const boundedMeta = onlyGroupRepeatsTotal
+    ? []
+    : groupEntries
+      .slice(0, DIGEST_META_GROUP_LIMIT)
+      .map(([label, groupCount]) => `${label} ${groupCount}`);
   if (hiddenGroupCount > 0) {
     boundedMeta.push(language === "zh" ? `另 ${hiddenGroupCount} 类` : `${hiddenGroupCount} more types`);
   }
@@ -173,7 +185,9 @@ function completedToolIdentity(cell: CodexTranscriptCell) {
   }
   const rawName = codexTranscriptToolRawName(cell).trim().toLowerCase();
   const family = conversationToolRendererFor(rawName).family;
-  return family === "generic" ? `generic:${rawName}` : family;
+  return family === "generic" || DISTINCT_SEMANTIC_TOOL_NAMES.has(rawName)
+    ? `${family}:${rawName}`
+    : family;
 }
 
 function presentationRunTitle(
@@ -182,7 +196,7 @@ function presentationRunTitle(
 ) {
   const rawName = codexTranscriptToolRawName(cell);
   const descriptor = conversationToolRendererFor(rawName);
-  return descriptor.family === "generic"
+  return descriptor.family === "generic" || DISTINCT_SEMANTIC_TOOL_NAMES.has(rawName.trim().toLowerCase())
     ? conversationToolRendererLabel(rawName, language)
     : descriptor.groupLabel[language];
 }
