@@ -27,7 +27,7 @@ const styles = {
     "activityChevron",
     "shrink-0 self-center text-[var(--fg-tertiary)] transition-transform duration-150",
   ),
-  activityDetails: cx("activityDetails", "ml-6 grid min-w-0 gap-0 pt-1"),
+  activityDetails: cx("activityDetails", "grid min-w-0 gap-0 pt-1"),
   activityDetailsInner: cx("activityDetailsInner", "grid min-w-0 gap-0"),
   activityRow: cx("activityRow", "min-w-0"),
   item: cx("item", "min-w-0"),
@@ -48,7 +48,7 @@ const styles = {
   batchCount: cx("batchCount", "shrink-0 text-[var(--fg-tertiary)]"),
   batchDetails: cx(
     "batchDetails",
-    "ml-6 min-w-0",
+    "min-w-0",
   ),
   batchDetailsInner: cx("batchDetailsInner", "grid min-w-0 gap-0"),
   batchRow: cx("batchRow", "min-w-0"),
@@ -71,7 +71,7 @@ const styles = {
   ),
   itemDetailsBody: cx(
     "itemDetailsBody",
-    "ml-6 min-w-0 max-h-56 overflow-auto py-1 [&_pre]:max-h-56 [&_pre]:overflow-auto",
+    "min-w-0 max-h-56 overflow-auto py-1 [&_pre]:max-h-56 [&_pre]:overflow-auto",
   ),
 } as const;
 
