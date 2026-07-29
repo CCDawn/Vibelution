@@ -58,6 +58,48 @@ describe("selectRecentSupervisedWorktreeRun", () => {
     expect(selectRecentSupervisedWorktreeRun([selfRun], "swte-missing")).toBeNull();
     expect(selectRecentSupervisedWorktreeRun([selfRun], "swte-self")).toBeNull();
   });
+
+  it("recovers the latest supervised run that still requires a user decision", () => {
+    const cancelledRun = runWith({
+      runId: "swte-cancelled",
+      status: "cancelled",
+      outcome: "candidate_modify_cancelled",
+    });
+    const actionableRun = runWith({
+      runId: "swte-actionable",
+      status: "done",
+      outcome: "needs_manual_decision",
+    });
+    const olderActionableRun = runWith({
+      runId: "swte-older-actionable",
+      status: "done",
+      outcome: "needs_manual_decision",
+    });
+
+    expect(selectRecentSupervisedWorktreeRun(
+      [cancelledRun, actionableRun, olderActionableRun],
+      null,
+    )).toBe(actionableRun);
+    expect(selectRecentSupervisedWorktreeRun(
+      [cancelledRun, actionableRun, olderActionableRun],
+      "swte-missing",
+    )).toBe(actionableRun);
+  });
+
+  it("does not recover terminal history that has no pending manual decision", () => {
+    const completedRun = runWith({
+      runId: "swte-complete",
+      status: "done",
+      outcome: "approved",
+    });
+    const failedRun = runWith({
+      runId: "swte-failed",
+      status: "failed",
+      outcome: "candidate_modify_failed",
+    });
+
+    expect(selectRecentSupervisedWorktreeRun([completedRun, failedRun], null)).toBeNull();
+  });
 });
 
 describe("recent supervised worktree run storage", () => {
