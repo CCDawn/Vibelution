@@ -769,6 +769,8 @@ class TestToolExecutorExecute:
         monkeypatch.setattr(agent_directory_service, "current_agent_runtime", lambda: {
             "agentId": "agent-policy",
             "turnId": "turn-policy",
+            "agentConfigSnapshot": {"agentId": "agent-policy", "configRevision": 1, "configHash": "test-config-hash"},
+            "permissionPreset": "request_approval",
             "toolPolicy": {
                 "policyId": "tool-agent-policy",
                 "allowedTools": ["agent_message_tool", "read_memory_tool"],
@@ -1120,6 +1122,8 @@ class TestToolExecutorTimeout:
         monkeypatch.setattr(agent_directory_service, "current_agent_runtime", lambda: {
             "agentId": "agent-policy",
             "turnId": "turn-policy",
+            "agentConfigSnapshot": {"agentId": "agent-policy", "configRevision": 1, "configHash": "test-config-hash"},
+            "permissionPreset": "request_approval",
             "toolPolicy": {
                 "policyId": "tool-agent-policy",
                 "allowedTools": ["agent_message_tool"],
@@ -1164,6 +1168,8 @@ class TestToolExecutorTimeout:
         monkeypatch.setattr(agent_directory_service, "current_agent_runtime", lambda: {
             "agentId": "agent-policy",
             "turnId": "turn-policy",
+            "agentConfigSnapshot": {"agentId": "agent-policy", "configRevision": 1, "configHash": "test-config-hash"},
+            "permissionPreset": "request_approval",
             "delegationPolicy": {
                 "allowSubagents": False,
                 "maxDepth": 0,
@@ -1196,6 +1202,8 @@ class TestToolExecutorTimeout:
         monkeypatch.setattr(agent_directory_service, "current_agent_runtime", lambda: {
             "agentId": "agent-policy",
             "turnId": "turn-policy",
+            "agentConfigSnapshot": {"agentId": "agent-policy", "configRevision": 1, "configHash": "test-config-hash"},
+            "permissionPreset": "request_approval",
             "toolPolicy": {
                 "policyId": "tool-agent-policy",
                 "allowedTools": ["agent_message_tool"],
@@ -1220,6 +1228,8 @@ class TestToolExecutorTimeout:
         monkeypatch.setattr(agent_directory_service, "current_agent_runtime", lambda: {
             "agentId": "agent-session",
             "turnId": "turn-session",
+            "agentConfigSnapshot": {"agentId": "agent-session", "configRevision": 1, "configHash": "test-config-hash"},
+            "permissionPreset": "request_approval",
             "toolPolicy": {
                 "policyId": "tool-agent-session-cli",
                 "allowedTools": ["cli_agent_run_tool"],
@@ -1259,6 +1269,8 @@ class TestToolExecutorTimeout:
         monkeypatch.setattr(agent_directory_service, "current_agent_runtime", lambda: {
             "agentId": "agent-session",
             "turnId": "turn-session",
+            "agentConfigSnapshot": {"agentId": "agent-session", "configRevision": 1, "configHash": "test-config-hash"},
+            "permissionPreset": "request_approval",
             "toolPolicy": {
                 "policyId": "tool-agent-session-cli",
                 "allowedTools": ["cli_agent_run_tool"],

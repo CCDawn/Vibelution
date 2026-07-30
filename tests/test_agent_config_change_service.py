@@ -196,6 +196,50 @@ def test_runtime_policy_resolution_ignores_shared_catalog_changes(tmp_path, monk
     assert resolved_memory_policy["readSharedGroups"] == original_memory_policy["readSharedGroups"]
 
 
+def test_unmigrated_agent_runtime_policies_fail_closed_without_catalog_fallback(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    workspace_path = "workspace/agents/agent-legacy-unmigrated"
+    agent_directory_service.save_state(
+        {
+            "agents": [
+                {
+                    "agentId": "agent-legacy-unmigrated",
+                    "displayName": "Legacy unmigrated agent",
+                    "workspacePath": workspace_path,
+                    "toolPolicyId": "shared-wide",
+                    "memoryPolicyId": "shared-memory",
+                    "status": "active",
+                }
+            ],
+            "toolPolicies": {
+                "shared-wide": {
+                    **agent_directory_service.default_tool_policy("shared-wide"),
+                    "allowedTools": ["dangerous_catalog_tool"],
+                }
+            },
+            "memoryPolicies": {
+                "shared-memory": {
+                    **agent_directory_service.default_memory_policy(
+                        "shared-memory",
+                        workspace_path,
+                    ),
+                    "readSharedGroups": ["sensitive-catalog-group"],
+                }
+            },
+        }
+    )
+
+    tool_policy = agent_directory_service.resolve_tool_policy_for_agent(
+        "agent-legacy-unmigrated"
+    )
+    memory_policy = agent_directory_service.resolve_memory_policy_for_agent(
+        "agent-legacy-unmigrated"
+    )
+
+    assert tool_policy["allowedTools"] == []
+    assert memory_policy["readSharedGroups"] == []
+
+
 def test_effective_configuration_has_only_the_agent_as_runtime_source(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     agent = agent_directory_service.create_agent_instance(

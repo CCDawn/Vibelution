@@ -205,6 +205,71 @@ def test_sandbox_runs_explicit_powershell_command_without_cmd_quote_roundtrip(mo
     assert "cmd.exe" not in argv
 
 
+def test_full_access_argv_bypasses_codex_workspace_write_sandbox(monkeypatch):
+    monkeypatch.setattr(codex_cli_sandbox.os, "name", "nt")
+    monkeypatch.setattr(
+        codex_cli_sandbox,
+        "_windows_command_interpreter",
+        lambda: r"C:\Windows\System32\cmd.exe",
+    )
+    route = SimpleNamespace(route="cmd", command="echo unrestricted")
+
+    argv = codex_cli_sandbox._sandbox_argv(
+        r"C:\Codex\codex.exe",
+        route,
+        sandbox_mode="danger_full_access",
+    )
+
+    assert argv == [
+        r"C:\Windows\System32\cmd.exe",
+        "/d",
+        "/s",
+        "/c",
+        "echo unrestricted",
+    ]
+    assert "sandbox" not in argv
+    assert "workspace-write" not in argv
+
+
+def test_execute_full_access_does_not_require_codex_sandbox_binary(monkeypatch, tmp_path):
+    recorded = {}
+    monkeypatch.setattr(codex_cli_sandbox.os, "name", "nt")
+    monkeypatch.setattr(
+        codex_cli_sandbox,
+        "_current_agent_sandbox_mode",
+        lambda: "danger_full_access",
+    )
+    monkeypatch.setattr(
+        codex_cli_sandbox,
+        "_resolve_codex_executable",
+        lambda: (_ for _ in ()).throw(
+            AssertionError("full access must not resolve codex sandbox")
+        ),
+    )
+    monkeypatch.setattr(
+        codex_cli_sandbox,
+        "_windows_command_interpreter",
+        lambda: r"C:\Windows\System32\cmd.exe",
+    )
+
+    def fake_popen(argv, **kwargs):
+        recorded["argv"] = argv
+        recorded["kwargs"] = kwargs
+        return _CompletedProcess()
+
+    monkeypatch.setattr(codex_cli_sandbox.subprocess, "Popen", fake_popen)
+
+    result = codex_cli_sandbox.execute_codex_sandbox_command(
+        command="echo unrestricted",
+        cwd=str(tmp_path),
+    )
+
+    assert result == "sandbox ok"
+    assert recorded["argv"][0] == r"C:\Windows\System32\cmd.exe"
+    assert "sandbox" not in recorded["argv"]
+    assert recorded["kwargs"]["shell"] is False
+
+
 def test_sandbox_uses_cmd_for_native_windows_and_chain(monkeypatch):
     monkeypatch.setattr(codex_cli_sandbox.os, "name", "nt")
     monkeypatch.setattr(
