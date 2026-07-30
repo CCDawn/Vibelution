@@ -133,6 +133,7 @@ def test_legacy_agent_first_update_accepts_the_revision_zero_snapshot(tmp_path, 
     updated = agent_directory_service.update_agent_instance(
         agent["agentId"],
         permission_preset="auto_review",
+        context_compression_policy={"mode": "inherit"},
         expected_updated_at=stored["updatedAt"],
         expected_config_revision=0,
     )
@@ -140,7 +141,25 @@ def test_legacy_agent_first_update_accepts_the_revision_zero_snapshot(tmp_path, 
     assert updated["configSchemaVersion"] == 2
     assert updated["configRevision"] == 2
     assert updated["permissionPreset"] == "auto_review"
+    assert updated["contextCompressionPolicy"]["mode"] == "custom"
     assert len(updated["configHash"]) == 64
+
+
+def test_current_agent_rejects_an_inherited_context_compression_policy(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="Current config agent",
+    )
+
+    with pytest.raises(
+        agent_directory_service.AgentDirectoryError,
+        match="context compression policy must be explicit",
+    ):
+        agent_directory_service.update_agent_instance(
+            agent["agentId"],
+            context_compression_policy={"mode": "inherit"},
+            expected_config_revision=agent["configRevision"],
+        )
 
 
 def test_agent_config_rejects_unknown_permission_preset(tmp_path, monkeypatch):
