@@ -611,10 +611,11 @@ def freeze_experiment_design(team_id: str, plan_id: str, payload: dict[str, Any]
         gate["frozenByAgent"] = frozen_by_agent
         plan["designGate"] = gate
         contract = plan.get("experimentContract") if isinstance(plan.get("experimentContract"), dict) else {}
-        contract["status"] = "frozen"
-        plan["experimentContract"] = contract
         plan["status"] = "design_frozen"
         plan["updatedAt"] = now
+        s._refresh_experiment_bounded_smoke_readiness(plan)
+        contract["status"] = "frozen"
+        plan["experimentContract"] = contract
         plan_store["activePlanId"] = normalized_plan_id
         plan_store["updatedAt"] = now
         s._write_json(s._experiment_plan_store_path(normalized_team_id), plan_store)

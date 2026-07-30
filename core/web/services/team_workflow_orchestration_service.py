@@ -556,6 +556,7 @@ from core.web.services.team_workflow.experiment_kernel import (
     _experiment_full_run_result_record,
     _experiment_result_ingestion_pack_record,
     _notify_knowledge_steward_for_experiment_result,
+    _refresh_experiment_bounded_smoke_readiness,
     _refresh_experiment_plan_readiness,
     _active_experiment_smoke_evidence,
     _experiment_plan_checklist,
