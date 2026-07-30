@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import experimentApiSource from "../../api/teamExperiment.ts?raw";
 import routeSource from "../TeamsRoute.tsx?raw";
 import mutationsSource from "./useTeamExperimentLoopMutations.ts?raw";
 
@@ -45,7 +46,13 @@ describe("team experiment loop mutations contract", () => {
   it("preserves key write endpoints used by experiment ledger and research loop", () => {
     expect(mutationsSource).toContain("/workflow-orchestration/experiments/plan");
     expect(mutationsSource).toContain("/baseline-artifact");
-    expect(mutationsSource).toContain("/smoke-run");
+    expect(mutationsSource).toContain("runTeamExperimentSmoke(");
+    expect(mutationsSource).not.toContain("/smoke-run");
+    expect(experimentApiSource).toContain("/smoke-run");
+    expect(experimentApiSource).toContain("encodeURIComponent(teamId)");
+    expect(experimentApiSource).toContain("encodeURIComponent(planId)");
+    expect(experimentApiSource).toContain("JSON.stringify(request)");
+    expect(experimentApiSource).toContain("recordedByAgent");
     expect(mutationsSource).toContain("/smoke-result");
     expect(mutationsSource).toContain("/full-run-result");
     expect(mutationsSource).toContain("/knowledge-ingestion-request");
