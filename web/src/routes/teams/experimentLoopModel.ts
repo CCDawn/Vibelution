@@ -221,6 +221,7 @@ export type ExperimentPlanRecord = {
   readinessChecklist: ExperimentPlanChecklistItem[];
   readiness: {
     readyForPlanReview: boolean;
+    readyForBoundedSmokeRun?: boolean;
     readyForSmoke: boolean;
     readyForFullRun: boolean;
     readyForKnowledgeIngestion?: boolean;
@@ -398,6 +399,7 @@ export type ExperimentPlanningStatusPayload = {
   };
   readiness: {
     readyToPlan: boolean;
+    readyForBoundedSmokeRun?: boolean;
     readyForSmoke: boolean;
     readyForFullRun: boolean;
     readyForKnowledgeIngestion?: boolean;

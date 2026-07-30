@@ -1778,7 +1778,7 @@ describe("TeamsRoute layout contract", () => {
     expect(teamExperimentLoopMutationsSource).toContain("runTeamExperimentSmoke");
     expect(teamExperimentApiSource).toContain("smoke-run");
     expect(teamExperimentPlanningLedgerPanelSource).toContain("运行受控 Smoke");
-    expect(teamExperimentPlanningLedgerPanelSource).toContain("activePlan.readiness.readyForSmoke");
+    expect(teamExperimentPlanningLedgerPanelSource).toContain("activePlan.readiness.readyForBoundedSmokeRun");
     expect(teamExperimentPlanningLedgerPanelSource).toContain("runExperimentSmokeFromWorkspace");
     expect(teamExperimentLoopMutationsSource).toContain("smoke-result");
     expect(routeAndPureSource).toContain("ExperimentSmokeResultRecord");
@@ -2384,7 +2384,7 @@ describe("TeamsRoute layout contract", () => {
     expect(smokeEvidenceFormGateIndex).toBeGreaterThan(smokeCardIndex);
     expect(teamExperimentPlanningLedgerPanelSource).toContain("smokeGateDetail");
     expect(teamExperimentPlanningLedgerPanelSource).toContain("先完成假设审查并冻结设计");
-    expect(teamExperimentPlanningLedgerPanelSource).toContain("先登记可复现的 active baseline artifact");
+    expect(teamExperimentPlanningLedgerPanelSource).toContain("自包含执行器会在 Smoke 中同时计算 baseline 与 variant");
     expect(teamExperimentHypothesisGovernancePanelSource).toContain("仍缺：");
   });
 
