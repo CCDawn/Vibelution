@@ -200,6 +200,7 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
     const canRegisterBaselineArtifact = Boolean(
       selectedTeam?.teamId
       && activePlan
+      && designExecutionAllowed
       && !activePlan.baselineSelection.activeBaselineReady
       && experimentBaselineArtifactDraft.artifactPath.trim()
       && experimentBaselineArtifactDraft.reproductionCommand.trim()

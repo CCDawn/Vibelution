@@ -661,7 +661,8 @@ def test_experiment_plan_draft_uses_ready_algorithm_hypotheses_and_blocks_full_r
     assert draft["stageRound"]["planningContract"]["autoExecution"] is False
     assert status["summary"]["planCount"] == 1
     assert status["summary"]["readyHypothesisCandidateCount"] == 1
-    assert any(gap["code"] == "active_baseline_not_registered" for gap in status["gaps"])
+    assert any(gap["code"] == "experiment_design_not_review_ready" for gap in status["gaps"])
+    assert not any(gap["code"] == "active_baseline_not_registered" for gap in status["gaps"])
     assert status["boundaries"]["autoExecution"] is False
     assert status["boundaries"]["createsExperimentAttempt"] is False
 
@@ -732,6 +733,27 @@ def test_experiment_plan_projects_native_v2_method_fields_into_readiness(
     assert checklist["metric"] == "pass"
     assert checklist["baseline"] == "pass"
     assert checklist["smoke_plan"] == "pass"
+    status = team_workflow_orchestration_service.get_experiment_planning_status(
+        team["teamId"]
+    )
+    assert "algorithm_hypothesis" in status["readiness"]["reason"]
+    assert not any(
+        gap["code"] == "active_baseline_not_registered"
+        for gap in status["gaps"]
+    )
+    with pytest.raises(
+        team_workflow_orchestration_service.TeamWorkflowOrchestrationError,
+        match="explicitly frozen",
+    ):
+        team_workflow_orchestration_service.register_experiment_baseline_artifact(
+            team["teamId"],
+            draft["plan"]["planId"],
+            {
+                "artifactPath": "workspace/experiments/baselines/proxy.json",
+                "reproductionCommand": "python experiments/run_proxy.py --seed 42",
+                "registeredByAgent": "Experiment Planning Agent",
+            },
+        )
 
 
 def test_experiment_plan_rejects_blocked_structured_placeholders_as_completed_fields(
