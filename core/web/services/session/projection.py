@@ -58,9 +58,12 @@ def list_sessions(
         return []
 
     try:
+        agent_directory_started_at = s._perf_counter()
         agent_by_id = s._agent_lookup_for_conversations()
         hidden_team_member_agent_ids = s._agent_directory_stub_hidden_team_member_ids()
-        load_phase_timings: dict[str, int] = {}
+        load_phase_timings: dict[str, int] = {
+            "agentDirectoryMs": s._elapsed_ms(agent_directory_started_at),
+        }
         active_id, conversations = s._load_conversations(
             repair=False,
             agent_by_id=agent_by_id,
@@ -77,7 +80,11 @@ def list_sessions(
         sessions = []
         hidden_summaries = []
         for item in conversations:
-            summary = s._build_session_summary(item, hydrate_agent=False)
+            summary = s._build_session_summary(
+                item,
+                hydrate_agent=False,
+                phase_timings=load_phase_timings,
+            )
             hidden_internal = not include_hidden_internal and s._empty_direct_agent_session_hidden_from_index(
                 item,
                 hidden_team_member_agent_ids,
@@ -116,6 +123,9 @@ def list_sessions(
             chat_state_read_ms=load_phase_timings.get("chatStateReadMs"),
             conversation_normalize_ms=load_phase_timings.get("conversationNormalizeMs"),
             summary_projection_ms=summary_projection_ms,
+            ledger_tail_ms=load_phase_timings.get("ledgerTailMs"),
+            agent_inbox_ms=load_phase_timings.get("agentInboxMs"),
+            agent_directory_ms=load_phase_timings.get("agentDirectoryMs"),
         )
         return sessions
     except Exception:
@@ -412,7 +422,12 @@ def _build_session_detail_from_summary(
     return detail
 
 
-def _build_session_summary(conversation: dict[str, Any], *, hydrate_agent: bool = True) -> dict[str, Any]:
+def _build_session_summary(
+    conversation: dict[str, Any],
+    *,
+    hydrate_agent: bool = True,
+    phase_timings: dict[str, int] | None = None,
+) -> dict[str, Any]:
     s = _service()
     status = s._conversation_phase(conversation["id"], conversation)
     summary_messages = list(conversation.get("messages") or [])
@@ -439,7 +454,13 @@ def _build_session_summary(conversation: dict[str, Any], *, hydrate_agent: bool 
     agent_role_key = str((agent or {}).get("roleKey") or "").strip()
     agent_prompt_template_id = str((agent or {}).get("promptTemplateId") or "").strip()
     dialogue_model_id = s.agent_dialogue_model_id(agent) if agent else ""
+    agent_inbox_started_at = s._perf_counter() if phase_timings is not None else None
     agent_inbox_pending_count = s._agent_inbox_pending_count_for_summary(agent)
+    if phase_timings is not None and agent_inbox_started_at is not None:
+        phase_timings["agentInboxMs"] = (
+            phase_timings.get("agentInboxMs", 0)
+            + s._elapsed_ms(agent_inbox_started_at)
+        )
     agent_primary_direct_session_id = str((agent or {}).get("directSessionId") or "").strip()
     agent_direct_session_mismatch = bool(
         agent_id
@@ -575,6 +596,7 @@ def _normalize_conversation(
     hidden_team_member_agent_ids: set[str] | None = None,
     ensure_workspace: bool = True,
     lightweight: bool = False,
+    phase_timings: dict[str, int] | None = None,
 ) -> dict[str, Any] | None:
     s = _service()
     if not isinstance(raw, dict):
@@ -642,6 +664,7 @@ def _normalize_conversation(
         agent_missing = True
         agent_status_code = agent_status_code or "missing_agent"
     if lightweight:
+        ledger_tail_started_at = s._perf_counter() if phase_timings is not None else None
         messages, has_ledger_messages = s._ledger_latest_preview_messages_for_session(
             conversation_id
         )
@@ -651,6 +674,11 @@ def _normalize_conversation(
                 raw.get("messages") or [],
             )
         messages = list(messages)
+        if phase_timings is not None and ledger_tail_started_at is not None:
+            phase_timings["ledgerTailMs"] = (
+                phase_timings.get("ledgerTailMs", 0)
+                + s._elapsed_ms(ledger_tail_started_at)
+            )
         visible_runtime_notices: list[dict[str, Any]] = []
     else:
         ledger_messages = s._session_ledger_visible_messages(conversation_id)
@@ -3095,6 +3123,7 @@ def _load_conversations(
                 hidden_team_member_agent_ids=hidden_team_member_agent_ids,
                 ensure_workspace=repair,
                 lightweight=lightweight,
+                phase_timings=phase_timings,
             )
             if conversation is not None:
                 conversations.append(conversation)
