@@ -1570,6 +1570,7 @@ def _harness_result_payload(result: HarnessResult, *, case_id: str, role: str) -
         "restart": _clone(summary.get("restart") or {}),
         "toolSequence": [str(item)[:160] for item in list(summary.get("tool_sequence_tail") or [])[-12:]],
         "toolPhases": [str(item)[:200] for item in list(summary.get("tool_phase_sequence_tail") or [])[-12:]],
+        "toolTrace": _clone(list(summary.get("tool_trace") or [])[-12:]),
         "guardedTools": _clone(summary.get("guarded_tools") or {}),
         "evidence": _clone(summary.get("evidence") or {}),
     }
