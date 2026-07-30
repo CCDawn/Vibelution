@@ -1498,11 +1498,21 @@ def recover_wakeable_agent_inbox_messages_on_startup() -> dict[str, Any]:
         "errorCount": 0,
         "wakeStatusCounts": {},
         "errorTypeCounts": {},
+        "repairDurationMs": 0,
+        "agentScanDurationMs": 0,
     }
+    repair_started_at: float | None = None
+    agent_scan_started_at: float | None = None
     try:
         # A restarted process owns no in-memory turns, so repair stale persisted
         # turn markers before submitting recovered inbox work to the scheduler.
-        s._load_conversations()
+        repair_started_at = s._perf_counter()
+        with s._CHAT_STATE_LOCK, s.chat_state_transaction(s.PROJECT_ROOT):
+            payload = s.load_chat_state(s.PROJECT_ROOT)
+            s._repair_stale_running_conversations(payload)
+        summary["repairDurationMs"] = s._elapsed_ms(repair_started_at)
+
+        agent_scan_started_at = s._perf_counter()
         agents = s.agent_directory_service.list_agents(include_archived=False, detail="summary")
         summary["scannedAgentCount"] = len(agents)
         for agent in agents:
@@ -1528,9 +1538,14 @@ def recover_wakeable_agent_inbox_messages_on_startup() -> dict[str, Any]:
                 error_counts = summary["errorTypeCounts"]
                 if len(error_counts) < 8 or error_type in error_counts:
                     error_counts[error_type] = int(error_counts.get(error_type) or 0) + 1
+        summary["agentScanDurationMs"] = s._elapsed_ms(agent_scan_started_at)
     except Exception as exc:
         summary["errorCount"] += 1
         summary["errorTypeCounts"][type(exc).__name__] = 1
+        if repair_started_at is not None and not summary["repairDurationMs"]:
+            summary["repairDurationMs"] = s._elapsed_ms(repair_started_at)
+        if agent_scan_started_at is not None and not summary["agentScanDurationMs"]:
+            summary["agentScanDurationMs"] = s._elapsed_ms(agent_scan_started_at)
     summary["durationMs"] = s._elapsed_ms(started_at)
     s._record_agent_inbox_startup_recovery_event(summary)
     return summary
