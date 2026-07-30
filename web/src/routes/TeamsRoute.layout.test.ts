@@ -2365,6 +2365,23 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStylesSource).toContain(".canvasLayoutModeSwitch");
   });
 
+  it("keeps the bounded Smoke gate visible while prerequisites are still locked", () => {
+    const smokeCardIndex = teamExperimentPlanningLedgerPanelSource.indexOf(
+      'lang === "zh" ? "受控 Smoke" : "Bounded smoke"',
+    );
+    const smokeEvidenceFormGateIndex = teamExperimentPlanningLedgerPanelSource.indexOf(
+      "{activeBaselineArtifact ? (",
+      smokeCardIndex,
+    );
+
+    expect(smokeCardIndex).toBeGreaterThan(0);
+    expect(smokeEvidenceFormGateIndex).toBeGreaterThan(smokeCardIndex);
+    expect(teamExperimentPlanningLedgerPanelSource).toContain("smokeGateDetail");
+    expect(teamExperimentPlanningLedgerPanelSource).toContain("先完成假设审查并冻结设计");
+    expect(teamExperimentPlanningLedgerPanelSource).toContain("先登记可复现的 active baseline artifact");
+    expect(teamExperimentPlanningLedgerPanelSource).toContain("候选自身缺");
+  });
+
   it("uses shared Phase 2 surfaces for Team unavailable and canvas states", () => {
     expect(routeSource).toContain("VActionGroup");
     expect(routeSource).toContain("VSurface");

@@ -1949,7 +1949,7 @@ def _experiment_planning_gaps(
             {
                 "code": "incomplete_experiment_plan",
                 "severity": "needs_attention",
-                "message": "已有算法假设，但仍需完成假设审查并补齐 dataset、metric、baseline 与 smokePlan。",
+                "message": "已有算法假设候选，但尚未完成审查或选择；需先修订为可审查状态并选择候选。",
             }
         )
     if latest_experiment and not active_plan:
@@ -2038,12 +2038,16 @@ def _experiment_planning_next_actions(*, active_plan: dict[str, Any] | None, gap
         return ["等待知识库管理员复核实验结果入库包。", "在知识库管理员批准精炼知识项之前，原始日志保持在 RAG 之外。"]
     if "missing_experiment_stage_round" in gap_codes:
         return ["Start the experiment planning stage round.", "Keep training execution disabled until a plan is reviewed."]
-    if (
-        "missing_algorithm_hypotheses" in gap_codes
-        or "incomplete_experiment_plan" in gap_codes
-        or "experiment_design_not_review_ready" in gap_codes
-    ):
-        return ["Review upstream paper notes, mechanism mappings, and algorithm_hypothesis candidates.", "Repair candidate experimentPlan fields before drafting a plan."]
+    if "missing_algorithm_hypotheses" in gap_codes:
+        return [
+            "Review upstream paper notes and mechanism mappings.",
+            "Produce an algorithm_hypothesis candidate before drafting a plan.",
+        ]
+    if "incomplete_experiment_plan" in gap_codes or "experiment_design_not_review_ready" in gap_codes:
+        return [
+            "Review and select an algorithm_hypothesis candidate that is ready for plan review.",
+            "Keep the complete active design contract unchanged unless the selected hypothesis requires a new revision.",
+        ]
     if "active_baseline_not_registered" in gap_codes:
         return ["Review the draft plan checklist.", "Register an active baseline artifact before smoke or full-run execution."]
     if "smoke_result_not_recorded" in gap_codes:
