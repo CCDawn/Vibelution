@@ -417,20 +417,6 @@ export type ExperimentSmokeResultRegisterPayload = {
   boundaries: ExperimentPlanningStatusPayload["boundaries"];
 };
 
-export type ExperimentSmokeRunPayload = {
-  schemaVersion: number;
-  teamId: string;
-  planId: string;
-  adapter: string;
-  seed: number;
-  status: ExperimentSmokeResultStatus | string;
-  decisionHint: string;
-  runnerResult: Record<string, unknown>;
-  smokeRun: ExperimentSmokeRunRecord;
-  experimentStatus: string;
-  workflowId: string;
-};
-
 export type ExperimentFullRunResultRegisterPayload = {
   fullRunResult: ExperimentFullRunResultRecord;
   plan: ExperimentPlanRecord;
