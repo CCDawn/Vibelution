@@ -62,6 +62,11 @@ import { TranslationKey } from "../i18n/dictionary";
 import { petAvatarPresetLabel } from "../i18n/petLabels";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { agentCenterConfigRoute } from "./agentCenterRoutes";
+import { ChatReadOnlySessionWorkspace } from "./chat/ChatReadOnlySessionWorkspace";
+import { fetchSessionDetailWindow } from "./chat/chatSessionDetailHelpers";
+import { avatarImageUrlFrom, avatarInitials } from "./chat/chatRoutePresentation";
+import { resolveChatUserDisplayName } from "./chatCompactPanel";
+import { mergeSessionDetailMessageWindow } from "./chatSessionState";
 import { selfEvolutionTrackStyles as styles } from "./SelfEvolutionTrack.styles";
 
 type SelfEvolutionDynamicVariable =
@@ -928,47 +933,46 @@ export function SelfEvolutionTrack({
     : observationDurationInput;
   const observationConversationSessionId = String(observationRun?.conversationSessionId || "").trim();
   const observationConversationReady = observationRunModeActive && Boolean(observationConversationSessionId);
-  const observationSessionDetailQuery = useQuery({
+  const observationSessionDetailQuery = useQuery<SessionDetail>({
     queryKey: queryKeys.session(observationConversationSessionId || "__none__"),
-    queryFn: () => fetchJson<SessionDetail>(`/api/sessions/${encodeURIComponent(observationConversationSessionId)}`),
+    queryFn: ({ signal }) => fetchSessionDetailWindow(
+      observationConversationSessionId,
+      { messageLimit: 80, signal },
+    ),
+    structuralSharing: (previous, next) =>
+      mergeSessionDetailMessageWindow(
+        previous as SessionDetail | undefined,
+        next as SessionDetail,
+      ),
     refetchInterval: resolvePollingInterval(pageVisible, observationRunActive ? 1_000 : 4_000),
     refetchIntervalInBackground: false,
     enabled: observationConversationReady,
+    retry: false,
   });
   const observationSessionDetail = observationSessionDetailQuery.data?.id === observationConversationSessionId
     ? observationSessionDetailQuery.data
     : undefined;
-  const observationSnapshotMessages = useMemo<ConversationMessage[]>(() => {
-    if (!observationRun) {
-      return [];
-    }
-    const messageTexts = (observationRun.messages && observationRun.messages.length > 0)
-      ? observationRun.messages
-      : collectUniqueLines([observationRun.latestMessage, observationRun.report]);
-    const messages: ConversationMessage[] = [];
-    messageTexts.forEach((content, index) => {
-      const text = String(content || "").trim();
-      if (!text) {
-        return;
-      }
-      messages.push({
-        id: `${observationRun.runId}-observation-${index}`,
-        role: "assistant",
-        content: text,
-        timestamp: observationRun.updatedAt || observationRun.startedAt || "",
-      });
-    });
-    return messages;
-  }, [observationRun]);
-  const observationSessionMessages = observationSessionDetail?.messages?.length
-    ? observationSessionDetail.messages
-    : observationSnapshotMessages;
+  const observationAgent = selfEvolutionAgentCards.find(
+    (card) => card.role === SELF_OBSERVATION_AGENT_ROLE,
+  )?.agent;
+  const observationAssistantDisplayName = observationSessionDetail?.agentDisplayName
+    || observationAgent?.displayName
+    || selfEvolutionAgentRoleLabel(SELF_OBSERVATION_AGENT_ROLE, lang);
+  const observationAssistantAvatarImageUrl = avatarImageUrlFrom(
+    observationSessionDetail,
+    observationAgent,
+  ) || undefined;
+  const observationAssistantAvatarFallback = avatarInitials(
+    observationSessionDetail?.agentCode || observationAgent?.agentCode,
+    observationAssistantDisplayName,
+    lang === "zh" ? "观" : "OB",
+  );
   const observationEventTail = useMemo(
     () => (observationRun?.eventTail ?? []).slice(-8).reverse(),
     [observationRun?.eventTail],
   );
   const observationDetailError = observationSessionDetailQuery.isError
-    ? (lang === "zh" ? "观察会话详情暂时无法加载，已保留运行快照。" : "Observation session detail is temporarily unavailable; showing run snapshot.")
+    ? (lang === "zh" ? "正式观察会话暂时无法刷新。" : "The canonical observation session could not refresh.")
     : "";
   const transactionFilterOptions = useMemo(() => ([
     { id: "all" as const, label: t("filterAll"), count: countTransactionsByFilter(transactionItems, "all") },
@@ -1109,20 +1113,6 @@ export function SelfEvolutionTrack({
       },
     ];
   }, [overview, selectedWorkflowStep]);
-  const observationPendingConversationMessages = useMemo<ConversationMessage[]>(() => [
-    {
-      id: "self-observation-pending",
-      role: "assistant",
-      content: joinReadableLines([
-        observationRun?.latestMessage || (lang === "zh" ? "等待自主观察 Agent 会话。" : "Waiting for the self-observation agent session."),
-        observationRun?.report,
-        lang === "zh"
-          ? "左侧观察提示词会作为完整用户消息原样发送。"
-          : "The left observation prompt is sent verbatim as the full user message.",
-      ]),
-      timestamp: observationRun?.updatedAt || "",
-    },
-  ], [lang, observationRun?.latestMessage, observationRun?.report, observationRun?.updatedAt]);
   const activeModeLabel = observationRunModeActive
     ? (lang === "zh" ? "自主观察" : "Observation")
     : (lang === "zh" ? "隔离开发" : "Isolated development");
@@ -1140,61 +1130,31 @@ export function SelfEvolutionTrack({
   const centerWorkflowSummary = observationRunModeActive
     ? activeNextAction
     : selectedWorkflowStep?.livePreview || selectedWorkflowStep?.summary || activeNextAction;
-  const activeConversationSurface: SelfEvolutionConversationSurface = observationRunModeActive
-    ? {
-      sessionId: observationConversationReady ? observationConversationSessionId : "self-observation-pending",
-      eyebrowLabel: lang === "zh" ? "自主观察" : "Self observation",
-      title: lang === "zh" ? "自主观察会话" : "Observation session",
-      phase: observationSessionDetail?.currentPhase || observationRun?.status || "idle",
-      messages: observationConversationReady ? observationSessionMessages : observationPendingConversationMessages,
-      taskSummary: observationSessionDetail?.taskSummary
-        || observationRun?.latestMessage
-        || observationRun?.report
-        || (lang === "zh" ? "等待自主观察 Agent 会话。" : "Waiting for the self-observation agent session."),
-      defaultFileContext: observationSessionDetail?.defaultFileContext || SELF_EVOLUTION_CONVERSATION_CONTEXT,
-      stats: [
-        { label: lang === "zh" ? "提示词" : "Prompt", value: observationRun?.goal || observationGoalValue || (lang === "zh" ? "输入观察提示词" : "Enter a prompt") },
-        { label: lang === "zh" ? "工具" : "Tools", value: OBSERVATION_MODE_TOOL_COUNT },
-        { label: lang === "zh" ? "时长" : "Duration", value: observationRun?.durationSeconds ?? normalizedObservationDuration },
-        { label: "worktree", value: OBSERVATION_MODE_WORKTREE_STATE },
-      ],
-      autoScrollToLatest: observationRunActive,
-      showComposer: observationRunModeActive ? false : !observationRunActive,
-      composerValue: "",
-      composerPlaceholder: "",
-      composerDisabled: true,
-      composerPending: observationStartPending,
-      composerError: observationStartError || observationDurationError || undefined,
-      submitLabel: "",
-      submitPendingLabel: "",
-      onComposerChange: () => undefined,
-      onSubmit: () => undefined,
-    }
-    : {
-      sessionId: selectedWorkflowStep?.conversationSessionId || worktreeRun?.runId || "self-evolution",
-      eyebrowLabel: selfEvolutionStep.label,
-      title: selectedWorkflowStep?.label || t("selfWorkspacePage"),
-      phase: selectedWorkflowStep?.status || worktreeRun?.status || overview?.readiness.state || "idle",
-      messages: conversationMessages,
-      taskSummary: conversationTask.latestSummary,
-      defaultFileContext: SELF_EVOLUTION_CONVERSATION_CONTEXT,
-      stats: [
-        { label: lang === "zh" ? "目标" : "Goal", value: conversationTask.goal },
-        { label: lang === "zh" ? "事务" : "Txn", value: transactionItems.length },
-        { label: lang === "zh" ? "文件" : "Files", value: changedFiles.length || overview?.worktree.dirtyFileCount || 0 },
-        { label: lang === "zh" ? "更新" : "Updated", value: compactTimestamp(conversationTask.updatedAt) },
-      ],
-      autoScrollToLatest: runIsActive,
-      showComposer: !runIsActive && !worktreeRunLocked && !runLocked,
-      composerValue: goalInput,
-      composerPlaceholder: t("selfGoalPlaceholder"),
-      composerDisabled: !startSelfAction?.enabled || runLocked || worktreeRunLocked || startPending,
-      composerPending: startPending,
-      submitLabel: t("startSelfWorktreeRun"),
-      submitPendingLabel: t("loading"),
-      onComposerChange: onGoalInputChange,
-      onSubmit: onStartRun,
-    };
+  const activeConversationSurface: SelfEvolutionConversationSurface = {
+    sessionId: selectedWorkflowStep?.conversationSessionId || worktreeRun?.runId || "self-evolution",
+    eyebrowLabel: selfEvolutionStep.label,
+    title: selectedWorkflowStep?.label || t("selfWorkspacePage"),
+    phase: selectedWorkflowStep?.status || worktreeRun?.status || overview?.readiness.state || "idle",
+    messages: conversationMessages,
+    taskSummary: conversationTask.latestSummary,
+    defaultFileContext: SELF_EVOLUTION_CONVERSATION_CONTEXT,
+    stats: [
+      { label: lang === "zh" ? "目标" : "Goal", value: conversationTask.goal },
+      { label: lang === "zh" ? "事务" : "Txn", value: transactionItems.length },
+      { label: lang === "zh" ? "文件" : "Files", value: changedFiles.length || overview?.worktree.dirtyFileCount || 0 },
+      { label: lang === "zh" ? "更新" : "Updated", value: compactTimestamp(conversationTask.updatedAt) },
+    ],
+    autoScrollToLatest: runIsActive,
+    showComposer: !runIsActive && !worktreeRunLocked && !runLocked,
+    composerValue: goalInput,
+    composerPlaceholder: t("selfGoalPlaceholder"),
+    composerDisabled: !startSelfAction?.enabled || runLocked || worktreeRunLocked || startPending,
+    composerPending: startPending,
+    submitLabel: t("startSelfWorktreeRun"),
+    submitPendingLabel: t("loading"),
+    onComposerChange: onGoalInputChange,
+    onSubmit: onStartRun,
+  };
   const worktreeTerminateVisible = runIsActive && Boolean(worktreeRun);
   const showTopTerminateAction = worktreeTerminateVisible;
   const topTerminateDisabled = worktreeActionPending || !terminateAction?.enabled;
@@ -1985,6 +1945,34 @@ export function SelfEvolutionTrack({
                         </VButton>
                       </div>
                     </section>
+                  ) : observationRunModeActive ? (
+                    <ChatReadOnlySessionWorkspace
+                      assistant={{
+                        displayName: observationAssistantDisplayName,
+                        avatarImageUrl: observationAssistantAvatarImageUrl,
+                        avatarFallback: observationAssistantAvatarFallback,
+                      }}
+                      defaultFileContext={SELF_EVOLUTION_CONVERSATION_CONTEXT}
+                      detail={observationSessionDetail}
+                      emptyLabel={lang === "zh"
+                        ? "启动自主观察后，这里会显示正式 Agent 会话。"
+                        : "Start self-observation to show the canonical Agent session."}
+                      errorMessage={observationDetailError}
+                      lang={lang}
+                      live={observationRunActive}
+                      loading={
+                        observationSessionDetailQuery.isLoading
+                        || (observationRunActive && !observationConversationSessionId)
+                      }
+                      loadingLabel={t("loadingSession")}
+                      sessionId={observationConversationSessionId}
+                      taskSummary={observationRun?.report}
+                      user={{
+                        displayName: resolveChatUserDisplayName(runtime?.userName),
+                        avatarPreset: runtime?.userProfile?.avatarPreset,
+                        avatarImageUrl: runtime?.userProfile?.avatarImageUrl,
+                      }}
+                    />
                   ) : (
                     <LazyConversationView
                       sessionId={activeConversationSurface.sessionId}
@@ -1995,7 +1983,9 @@ export function SelfEvolutionTrack({
                       messages={activeConversationSurface.messages}
                       assistantDisplayName={pet?.name}
                       assistantAvatarFallback={petAvatarFallback}
-                      userDisplayName={runtime?.userName}
+                      userDisplayName={resolveChatUserDisplayName(runtime?.userName)}
+                      userAvatarPreset={runtime?.userProfile?.avatarPreset}
+                      userAvatarImageUrl={runtime?.userProfile?.avatarImageUrl}
                       taskSummary={activeConversationSurface.taskSummary}
                       defaultFileContext={activeConversationSurface.defaultFileContext}
                       summaryItems={[]}
