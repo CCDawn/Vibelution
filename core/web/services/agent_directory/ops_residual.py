@@ -1442,6 +1442,78 @@ def list_project_memory_update_proposals(
     return proposals[: max(1, int(limit or 1))]
 
 
+def scan_wakeable_agent_inbox_messages() -> dict[str, Any]:
+    """Scan active Agent inboxes once without hydrating the Agent API directory."""
+    s = _service()
+
+    started_at = time.perf_counter()
+    registry_load_started_at = time.perf_counter()
+    state = s.load_state()
+    registry_load_duration_ms = max(0, int((time.perf_counter() - registry_load_started_at) * 1000))
+    agents = [
+        dict(item)
+        for item in list(state.get("agents") or [])
+        if isinstance(item, dict)
+        and str(item.get("status") or "active").strip().lower() != "archived"
+        and str(item.get("agentId") or "").strip()
+    ]
+    agents.sort(
+        key=lambda item: str(item.get("updatedAt") or item.get("createdAt") or ""),
+        reverse=True,
+    )
+    messages: list[dict[str, Any]] = []
+    non_empty_inbox_count = 0
+    signature_duration_seconds = 0.0
+    inbox_read_duration_seconds = 0.0
+    error_count = 0
+    error_type_counts: dict[str, int] = {}
+    for agent in agents:
+        agent_id = str(agent.get("agentId") or "").strip()
+        if not str(agent.get("workspacePath") or "").strip():
+            agent["workspacePath"] = s._agent_workspace_relative_path(agent_id)
+        try:
+            path = s._agent_workspace_event_path(agent, "agent_inbox_messages.jsonl")
+            signature_started_at = time.perf_counter()
+            signature = s._jsonl_signature(path)
+            signature_duration_seconds += max(0.0, time.perf_counter() - signature_started_at)
+            if not signature[1] or signature[3] <= 0:
+                continue
+            non_empty_inbox_count += 1
+            read_started_at = time.perf_counter()
+            message = _wakeable_agent_inbox_message_from_path(path)
+            inbox_read_duration_seconds += max(0.0, time.perf_counter() - read_started_at)
+            if message is not None:
+                messages.append(message)
+        except Exception as exc:
+            error_count += 1
+            error_type = type(exc).__name__
+            if len(error_type_counts) < 8 or error_type in error_type_counts:
+                error_type_counts[error_type] = int(error_type_counts.get(error_type) or 0) + 1
+    return {
+        "scannedAgentCount": len(agents),
+        "nonEmptyInboxCount": non_empty_inbox_count,
+        "wakeableMessageCount": len(messages),
+        "messages": messages,
+        "errorCount": error_count,
+        "errorTypeCounts": error_type_counts,
+        "agentRegistryLoadDurationMs": registry_load_duration_ms,
+        "inboxSignatureDurationMs": max(0, int(signature_duration_seconds * 1000)),
+        "inboxReadDurationMs": max(0, int(inbox_read_duration_seconds * 1000)),
+        "durationMs": max(0, int((time.perf_counter() - started_at) * 1000)),
+    }
+
+
+def _wakeable_agent_inbox_message_from_path(path: Path) -> dict[str, Any] | None:
+    s = _service()
+    for item in s._read_jsonl(path):
+        if str(item.get("status") or "pending").strip().lower() != "pending":
+            continue
+        metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+        if bool(metadata.get("wakeRequested")):
+            return item
+    return None
+
+
 def next_wakeable_agent_inbox_message_for_agent(agent_id: str) -> dict[str, Any] | None:
     """Return the oldest pending inbox message that requested an automatic wake."""
     s = _service()
@@ -1451,13 +1523,7 @@ def next_wakeable_agent_inbox_message_for_agent(agent_id: str) -> dict[str, Any]
     if not agent:
         return None
     path = s._agent_workspace_event_path(agent, "agent_inbox_messages.jsonl")
-    for item in s._read_jsonl(path):
-        if str(item.get("status") or "pending").strip().lower() != "pending":
-            continue
-        metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
-        if bool(metadata.get("wakeRequested")):
-            return item
-    return None
+    return _wakeable_agent_inbox_message_from_path(path)
 
 
 def normalize_conversation_index_kind(value: Any) -> str:
