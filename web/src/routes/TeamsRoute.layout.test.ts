@@ -425,6 +425,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("TeamResearchLoopPanel");
     expect(teamResearchLoopPanelSource).toContain("Research Loop 模板");
     expect(teamResearchLoopPanelSource).toContain("实验迭代决策");
+    expect(teamResearchLoopPanelSource).toContain("historicalEmptyLoops");
+    expect(teamResearchLoopPanelSource).toContain("历史空轮次");
+    expect(teamResearchLoopPanelSource).toContain("currentLoopCount");
     expect(teamExperimentLoopMutationsSource).toContain("noSandboxRunner: true");
     expect(teamExperimentLoopMutationsSource).toContain("noTrainingExecution: true");
     expect(teamExperimentLoopMutationsSource).toContain("commandPreviewOnly: true");

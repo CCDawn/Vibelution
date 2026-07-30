@@ -16,6 +16,7 @@ import {
   type ResearchLoopEvidenceDraft,
   type ResearchLoopEvidenceStatus,
   type ResearchLoopRecord,
+  type ResearchLoopSummary,
   type ResearchLoopStatusPayload,
   type ResearchLoopTemplatesPayload,
 } from "./teams/experimentLoopModel";
@@ -163,6 +164,10 @@ export function TeamResearchLoopPanel(props: TeamResearchLoopPanelProps) {
     const panelTitle = variant === "iteration"
       ? (lang === "zh" ? "实验迭代决策" : "Experiment iteration decision")
       : (lang === "zh" ? "Research Loop 模板" : "Research Loop template");
+    const historicalEmptyLoops = loopStatusPayload?.historicalEmptyLoops ?? [];
+    const currentLoopCount =
+      loopStatusPayload?.summary.currentLoopCount
+      ?? Math.max(0, (loopStatusPayload?.summary.totalLoopCount ?? 0) - historicalEmptyLoops.length);
 
     return (
       <section className={styles.researchLoopPanel} aria-label={panelTitle}>
@@ -184,8 +189,14 @@ export function TeamResearchLoopPanel(props: TeamResearchLoopPanelProps) {
         <div className={styles.researchLoopStats}>
           <span>
             {lang === "zh" ? "循环" : "Loops"}
-            <strong>{loopStatusPayload?.summary.totalLoopCount ?? 0}</strong>
+            <strong>{currentLoopCount}</strong>
           </span>
+          {historicalEmptyLoops.length ? (
+            <span title={historicalEmptyLoops.map((loop: ResearchLoopSummary) => loop.title || loop.loopId).join("\n")}>
+              {lang === "zh" ? "历史空轮次" : "Empty history"}
+              <strong>{historicalEmptyLoops.length}</strong>
+            </span>
+          ) : null}
           <span>
             {lang === "zh" ? "可决策" : "Decision"}
             <strong>{loopStatusPayload?.summary.readyForDecisionCount ?? 0}</strong>

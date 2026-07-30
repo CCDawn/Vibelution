@@ -72,6 +72,34 @@ def test_research_loop_status_and_lookup_are_project_scoped(
         )
 
 
+def test_research_loop_status_demotes_superseded_empty_loop_to_history(
+    tmp_path, monkeypatch
+):
+    team = _team(tmp_path, monkeypatch)
+    historical = research_loop_service.create_research_loop(
+        team["teamId"],
+        {
+            "researchQuestion": "Historical loop without evidence or decision",
+        },
+    )["loop"]
+    active = research_loop_service.create_research_loop(
+        team["teamId"],
+        {
+            "researchQuestion": "Current loop still awaiting its first evidence",
+        },
+    )["loop"]
+
+    status = research_loop_service.get_research_loop_status(team["teamId"])
+
+    assert status["activeLoopId"] == active["loopId"]
+    assert status["summary"]["totalLoopCount"] == 2
+    assert status["summary"]["currentLoopCount"] == 1
+    assert status["summary"]["historicalEmptyLoopCount"] == 1
+    assert [item["loopId"] for item in status["historicalEmptyLoops"]] == [
+        historical["loopId"]
+    ]
+
+
 def test_research_loop_records_template_evidence_and_iteration_decision(tmp_path, monkeypatch):
     team = _team(tmp_path, monkeypatch)
     created = research_loop_service.create_research_loop(

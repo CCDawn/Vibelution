@@ -50,6 +50,7 @@ import {
   SessionDetail,
   AgentToolGovernanceRequest,
   SessionRuntimeNotice,
+  SessionToolApprovalRequest,
     SessionLlmOptions,
     SessionQueryResponse,
     SessionSummary,
@@ -1292,6 +1293,7 @@ export function ChatCodingRoute() {
     sessionReasoningEffortMutation,
     loadEarlierSessionMessagesMutation,
     resolveToolApprovalMutation,
+    resolveSessionToolApprovalMutation,
     petActionMutation,
   } = useChatSessionDetailMutations({
     queryClient,
@@ -1417,6 +1419,20 @@ export function ChatCodingRoute() {
   const selectedSessionDetail =
     rawSessionDetail && rawSessionDetail.id === activeSessionId ? rawSessionDetail : undefined;
   const detail = selectedSessionDetail;
+  const sessionToolApprovalsQuery = useQuery<SessionToolApprovalRequest[]>({
+    queryKey: queryKeys.sessionToolApprovals(activeSessionId ?? "none"),
+    enabled: Boolean(activeSessionId && directSessionPanelActive),
+    queryFn: () => fetchJson<SessionToolApprovalRequest[]>(
+      `/api/sessions/${encodeURIComponent(activeSessionId ?? "")}/tool-approvals?status=pending`,
+    ),
+    refetchInterval: (query) => (
+      (query.state.data?.length ?? 0) > 0
+      || isBusyPhase(detail?.currentPhase || directSessionActiveSummary?.currentPhase || directSessionActiveSummary?.status)
+        ? 500
+        : false
+    ),
+    refetchIntervalInBackground: false,
+  });
   const handleLoadEarlierSessionMessages = useCallback(() => {
     const beforeMessageIndex = detail?.messageWindow?.nextBeforeMessageIndex ?? 0;
     if (
@@ -1713,21 +1729,39 @@ export function ChatCodingRoute() {
     cacheDetailAvailable,
     activeSessionId,
   });
-  const pendingToolApproval = useMemo(
+  const pendingToolGovernanceApproval = useMemo(
     () => (detail?.pendingToolGovernanceRequests ?? []).find((request) => request.status === "pending_review") ?? null,
     [detail?.pendingToolGovernanceRequests],
   );
+  const pendingSessionToolApproval = useMemo(
+    () => (sessionToolApprovalsQuery.data ?? []).find((request) => request.status === "pending") ?? null,
+    [sessionToolApprovalsQuery.data],
+  );
   const pendingToolApprovalLabels = useMemo(
-    () => toolApprovalLabels(pendingToolApproval),
-    [pendingToolApproval],
+    () => pendingSessionToolApproval
+      ? [{ id: pendingSessionToolApproval.toolName, label: pendingSessionToolApproval.toolName }]
+      : toolApprovalLabels(pendingToolGovernanceApproval),
+    [pendingSessionToolApproval, pendingToolGovernanceApproval],
   );
   const pendingToolApprovalRawTitle = pendingToolApprovalLabels.map((item) => item.id).join("、");
-  const pendingToolApprovalScope = toolApprovalScopeLabel(pendingToolApproval?.grantScope, lang);
-  const pendingToolApprovalRisk = toolApprovalRiskLabel(pendingToolApproval?.riskLevel, lang);
+  const pendingToolApprovalScope = pendingSessionToolApproval
+    ? (lang === "zh" ? "当前工具调用" : "this tool call")
+    : toolApprovalScopeLabel(pendingToolGovernanceApproval?.grantScope, lang);
+  const pendingToolApprovalRisk = toolApprovalRiskLabel(
+    pendingSessionToolApproval?.risk ?? pendingToolGovernanceApproval?.riskLevel,
+    lang,
+  );
   const pendingToolApprovalPending = Boolean(
-    pendingToolApproval
-    && resolveToolApprovalMutation.isPending
-    && resolveToolApprovalMutation.variables?.request.requestId === pendingToolApproval.requestId,
+    pendingSessionToolApproval
+      ? (
+        resolveSessionToolApprovalMutation.isPending
+        && resolveSessionToolApprovalMutation.variables?.request.requestId === pendingSessionToolApproval.requestId
+      )
+      : (
+        pendingToolGovernanceApproval
+        && resolveToolApprovalMutation.isPending
+        && resolveToolApprovalMutation.variables?.request.requestId === pendingToolGovernanceApproval.requestId
+      ),
   );
   const activeDraft = activeSessionId ? sessionDrafts[activeSessionId] ?? "" : "";
   const activeComposerRawError = activeSessionId ? sessionComposerErrors[activeSessionId] ?? "" : "";
@@ -3165,7 +3199,7 @@ export function ChatCodingRoute() {
               noSessionsLabel={t("noSessionsYet")}
               notices={activeRuntimeNotices}
               sessionsPending={sessionsQuery.isPending}
-              toolApproval={pendingToolApproval ? {
+              toolApproval={pendingSessionToolApproval || pendingToolGovernanceApproval ? {
                 pending: pendingToolApprovalPending,
                 rawTitle: pendingToolApprovalRawTitle,
                 riskLabel: pendingToolApprovalRisk,
@@ -3175,16 +3209,39 @@ export function ChatCodingRoute() {
               transientErrorMessage={sessionDetailErrorMessage}
               workspaceActiveTab={workspace.activeTab}
               onApproveToolApproval={() => {
-                if (!pendingToolApproval) {
+                if (pendingSessionToolApproval) {
+                  resolveSessionToolApprovalMutation.mutate({
+                    request: pendingSessionToolApproval,
+                    decision: "accept",
+                  });
                   return;
                 }
-                resolveToolApprovalMutation.mutate({ request: pendingToolApproval, decision: "approve" });
+                if (!pendingToolGovernanceApproval) {
+                  return;
+                }
+                resolveToolApprovalMutation.mutate({ request: pendingToolGovernanceApproval, decision: "approve" });
               }}
+              onApproveToolForSession={pendingSessionToolApproval?.availableDecisions.includes("acceptForSession")
+                && pendingSessionToolApproval.approval !== "always"
+                ? () => {
+                  resolveSessionToolApprovalMutation.mutate({
+                    request: pendingSessionToolApproval,
+                    decision: "acceptForSession",
+                  });
+                }
+                : undefined}
               onRejectToolApproval={() => {
-                if (!pendingToolApproval) {
+                if (pendingSessionToolApproval) {
+                  resolveSessionToolApprovalMutation.mutate({
+                    request: pendingSessionToolApproval,
+                    decision: "decline",
+                  });
                   return;
                 }
-                resolveToolApprovalMutation.mutate({ request: pendingToolApproval, decision: "reject" });
+                if (!pendingToolGovernanceApproval) {
+                  return;
+                }
+                resolveToolApprovalMutation.mutate({ request: pendingToolGovernanceApproval, decision: "reject" });
               }}
             />
           )}
