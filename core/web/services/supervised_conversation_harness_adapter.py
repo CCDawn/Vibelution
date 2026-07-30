@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from datetime import datetime
 from pathlib import Path
@@ -32,6 +33,24 @@ from .session_service import (
 CONVERSATION_HARNESS_CANCEL_GRACE_SECONDS = 8.0
 CONVERSATION_HARNESS_MAX_CONTINUATIONS = 3
 _CONVERSATION_HARNESS_TRANSCRIPT_LIMIT = 8
+_CONVERSATION_HARNESS_TOOL_TRACE_LIMIT = 12
+_CONVERSATION_HARNESS_TOOL_TRACE_ITEM_LIMIT = 20
+_CONVERSATION_HARNESS_TOOL_TRACE_TEXT_LIMIT = 500
+_CONVERSATION_HARNESS_SENSITIVE_FIELD_FRAGMENTS = (
+    "authorization",
+    "api_key",
+    "apikey",
+    "access_key",
+    "private_key",
+    "password",
+    "passwd",
+    "secret",
+    "token",
+    "cookie",
+    "bearer",
+    "credential",
+)
+_CONVERSATION_HARNESS_REDACTED = "[redacted]"
 _AUTO_CLOSE_TRANSACTION_SUMMARY = "监督会话结束时事务仍处于 open，系统已自动失败关账。"
 _BASELINE_SELF_EDIT_EXECUTION_CONTRACT = (
     "\n\n[Baseline self-edit execution contract]\n"
@@ -823,7 +842,11 @@ def _conversation_harness_latest_assistant(detail: dict[str, Any]) -> str:
     return ""
 
 
-def _conversation_harness_tool_event(tool: dict[str, Any]) -> dict[str, Any] | None:
+def _conversation_harness_tool_event(
+    tool: dict[str, Any],
+    *,
+    timestamp: str = "",
+) -> dict[str, Any] | None:
     tool_name = str(tool.get("name") or tool.get("tool_name") or tool.get("tool") or "").strip()
     if not tool_name:
         return None
@@ -846,6 +869,13 @@ def _conversation_harness_tool_event(tool: dict[str, Any]) -> dict[str, Any] | N
         "status": str(tool.get("status") or "").strip(),
         "tool_args": dict(raw_args),
         "tool_result": result_text,
+        "timestamp": str(
+            tool.get("timestamp")
+            or tool.get("createdAt")
+            or tool.get("created_at")
+            or timestamp
+            or ""
+        ).strip(),
     }
 
 
@@ -880,7 +910,10 @@ def _conversation_harness_turn_journal_tool_events(
             continue
         payload = journal_event.payload if isinstance(journal_event.payload, dict) else {}
         tool = payload.get("toolCall") if isinstance(payload.get("toolCall"), dict) else {}
-        tool_event = _conversation_harness_tool_event(tool)
+        tool_event = _conversation_harness_tool_event(
+            tool,
+            timestamp=journal_event.timestamp,
+        )
         if tool_event is not None:
             events.append(tool_event)
     return events
@@ -893,16 +926,19 @@ def _conversation_harness_events(
     repo_root: Path | None = None,
 ) -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
-    tool_event_keys: set[str] = set()
+    tool_event_indexes: dict[str, int] = {}
     session_id = str((detail or {}).get("id") or (detail or {}).get("sessionId") or "").strip()
 
     def add_tool_event(tool_event: dict[str, Any] | None) -> None:
         if tool_event is None:
             return
         event_key = _conversation_harness_tool_event_key(tool_event)
-        if event_key in tool_event_keys:
+        existing_index = tool_event_indexes.get(event_key)
+        if existing_index is not None:
+            if not events[existing_index].get("timestamp") and tool_event.get("timestamp"):
+                events[existing_index]["timestamp"] = tool_event["timestamp"]
             return
-        tool_event_keys.add(event_key)
+        tool_event_indexes[event_key] = len(events)
         events.append(tool_event)
 
     for message in list((detail or {}).get("messages") or []):
@@ -915,12 +951,119 @@ def _conversation_harness_events(
         for tool in list(message.get("toolCalls") or message.get("tool_calls") or []):
             if not isinstance(tool, dict):
                 continue
-            add_tool_event(_conversation_harness_tool_event(tool))
+            add_tool_event(
+                _conversation_harness_tool_event(
+                    tool,
+                    timestamp=str(message.get("timestamp") or "").strip(),
+                )
+            )
     for tool_event in _conversation_harness_turn_journal_tool_events(repo_root, session_id):
         add_tool_event(tool_event)
     if assistant_text and not any(event.get("type") == "llm_response" for event in events):
         events.append({"type": "llm_response", "content": assistant_text})
     return events
+
+
+def _conversation_harness_trace_text(value: Any) -> str:
+    text = str(value or "")
+    text = re.sub(
+        r"(?i)\b(bearer)\s+[A-Za-z0-9._~+/=-]+",
+        r"\1 [redacted]",
+        text,
+    )
+    text = re.sub(
+        r"(?i)\b(api[_-]?key|authorization|password|secret|token)\s*[:=]\s*[^\s,;]+",
+        r"\1=[redacted]",
+        text,
+    )
+    text = re.sub(r"(?i)\bpending-secret:[A-Za-z0-9_-]+", "pending-secret:[redacted]", text)
+    text = re.sub(r"\bsk-[A-Za-z0-9_-]{8,}\b", "sk-[redacted]", text)
+    return text[:_CONVERSATION_HARNESS_TOOL_TRACE_TEXT_LIMIT]
+
+
+def _conversation_harness_sensitive_trace_key(value: Any) -> bool:
+    normalized = str(value or "").strip().lower().replace("-", "_")
+    return any(fragment in normalized for fragment in _CONVERSATION_HARNESS_SENSITIVE_FIELD_FRAGMENTS)
+
+
+def _conversation_harness_trace_value(value: Any, *, depth: int = 0) -> Any:
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if isinstance(value, str):
+        return _conversation_harness_trace_text(value)
+    if depth >= 3:
+        return _conversation_harness_trace_text(value)
+    if isinstance(value, dict):
+        projected: dict[str, Any] = {}
+        for key, item in list(value.items())[:_CONVERSATION_HARNESS_TOOL_TRACE_ITEM_LIMIT]:
+            key_text = str(key)[:100]
+            projected[key_text] = (
+                _CONVERSATION_HARNESS_REDACTED
+                if _conversation_harness_sensitive_trace_key(key_text)
+                else _conversation_harness_trace_value(item, depth=depth + 1)
+            )
+        return projected
+    if isinstance(value, (list, tuple)):
+        return [
+            _conversation_harness_trace_value(item, depth=depth + 1)
+            for item in list(value)[:_CONVERSATION_HARNESS_TOOL_TRACE_ITEM_LIMIT]
+        ]
+    return _conversation_harness_trace_text(value)
+
+
+def _conversation_harness_tool_result_payload(event: dict[str, Any]) -> Any:
+    result_text = str(event.get("tool_result") or "").strip()
+    if not result_text:
+        return ""
+    try:
+        return json.loads(result_text)
+    except json.JSONDecodeError:
+        return result_text
+
+
+def _conversation_harness_trace_status(event: dict[str, Any], result: Any) -> str:
+    result_status = (
+        str(result.get("status") or result.get("transaction_status") or "").strip().lower()
+        if isinstance(result, dict)
+        else ""
+    )
+    event_status = str(event.get("status") or "").strip().lower()
+    failure_statuses = {"failed", "failure", "error", "blocked", "cancelled", "timeout"}
+    if result_status in failure_statuses:
+        return result_status
+    if event_status in failure_statuses:
+        return event_status
+    if result_status in {"success", "succeeded", "ok", "done", "completed"}:
+        return "success"
+    if event_status in {"success", "succeeded", "ok", "done", "completed"}:
+        return "success"
+    return result_status or event_status or "unknown"
+
+
+def _conversation_harness_bounded_tool_trace(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    indexed_events = list(enumerate(events))
+    indexed_events.sort(
+        key=lambda item: (
+            not bool(str(item[1].get("timestamp") or "").strip()),
+            str(item[1].get("timestamp") or "").strip(),
+            item[0],
+        )
+    )
+    trace: list[dict[str, Any]] = []
+    for _, event in indexed_events[-_CONVERSATION_HARNESS_TOOL_TRACE_LIMIT:]:
+        if event.get("type") != "tool_call":
+            continue
+        result = _conversation_harness_tool_result_payload(event)
+        trace.append(
+            {
+                "toolName": str(event.get("tool_name") or "")[:160],
+                "status": _conversation_harness_trace_status(event, result),
+                "timestamp": str(event.get("timestamp") or "")[:80],
+                "arguments": _conversation_harness_trace_value(event.get("tool_args") or {}),
+                "result": _conversation_harness_trace_value(result),
+            }
+        )
+    return trace
 
 
 def _conversation_harness_evolution_summary(
@@ -933,7 +1076,7 @@ def _conversation_harness_evolution_summary(
     events = _conversation_harness_events(detail, assistant_text=assistant_text, repo_root=repo_root)
     debug_lines: list[str] = []
     stdout_lines = assistant_text.splitlines()
-    return infer_evolution_summary(
+    summary = infer_evolution_summary(
         events,
         debug_lines,
         stdout_lines,
@@ -941,6 +1084,8 @@ def _conversation_harness_evolution_summary(
         restart_reentered=False,
         child_first_event_phase="conversation_chain",
     )
+    summary["tool_trace"] = _conversation_harness_bounded_tool_trace(events)
+    return summary
 
 
 def _closed_transaction_assistant_text(
