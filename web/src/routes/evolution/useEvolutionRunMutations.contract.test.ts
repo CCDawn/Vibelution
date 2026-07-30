@@ -15,4 +15,26 @@ describe("evolution mutations contract (T3)", () => {
     expect(routeSource).toContain("useEvolutionProposalMutations({");
     expect(routeSource).not.toMatch(/\bconst \w+Mutation = useMutation\(/);
   });
+
+  it("keeps self-observation status in the canonical selected run projection", () => {
+    const observationMutations = runSource.slice(
+      runSource.indexOf("const startSelfObservationMutation"),
+      runSource.indexOf("const deleteSelfHistoryMutation"),
+    );
+
+    expect(observationMutations).not.toContain(
+      "setSelfActionFeedback(snapshot.latestMessage",
+    );
+    expect(
+      observationMutations.match(/setSelectedSelfObservationRunId\(snapshot\.runId\)/g) ?? [],
+    ).toHaveLength(2);
+    expect(
+      observationMutations.match(
+        /queryKeys\.evolutionSelfObservationRun\(snapshot\.runId\)/g,
+      ) ?? [],
+    ).toHaveLength(2);
+    expect(
+      observationMutations.match(/setSelfActionFeedback\(""\)/g) ?? [],
+    ).toHaveLength(4);
+  });
 });
