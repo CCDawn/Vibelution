@@ -223,6 +223,69 @@ def test_baseline_self_edit_grants_apply_patch_only_for_the_improvement_turn():
     )
 
 
+def test_supervised_runtime_grants_bypass_approval_without_overriding_persistent_tools():
+    persistent_policy = {
+        "policyId": "tool-supervised-runtime-probe",
+        "policyVersion": 1,
+        "allowedTools": ["close_evolution_transaction_tool"],
+        "blockedTools": [],
+        "preferredTools": [],
+        "networkAccess": "none",
+        "mutationAccess": "controlled",
+        "delegationAccess": "none",
+        "maxCallsPerTurn": 16,
+        "approvalOverrides": {
+            "close_evolution_transaction_tool": "always",
+        },
+    }
+
+    runtime_policy = agent_directory_service._with_runtime_tool_grants(
+        persistent_policy,
+        [
+            "open_evolution_transaction_tool",
+            "close_evolution_transaction_tool",
+            "cli_tool",
+        ],
+        source="supervised_conversation_harness",
+    )
+    authorization = resolve_enforced_authorization(
+        runtime={
+            "agentId": "agent-supervised-runtime-probe",
+            "turnId": "turn-supervised-runtime-probe",
+            "agent": {"agentId": "agent-supervised-runtime-probe"},
+            "toolPolicy": runtime_policy,
+        }
+    )
+    approval_requirements = {
+        name: approval
+        for name, approval, _risk in authorization.decision.approval_requirements
+    }
+
+    assert approval_requirements["open_evolution_transaction_tool"] == "never"
+    assert approval_requirements["cli_tool"] == "never"
+    assert approval_requirements["close_evolution_transaction_tool"] == "always"
+    assert persistent_policy["approvalOverrides"] == {
+        "close_evolution_transaction_tool": "always",
+    }
+    non_supervised_policy = agent_directory_service._with_runtime_tool_grants(
+        persistent_policy,
+        ["open_evolution_transaction_tool"],
+        source="temporary_test_grant",
+    )
+    non_supervised_authorization = resolve_enforced_authorization(
+        runtime={
+            "agentId": "agent-temporary-runtime-probe",
+            "turnId": "turn-temporary-runtime-probe",
+            "agent": {"agentId": "agent-temporary-runtime-probe"},
+            "toolPolicy": non_supervised_policy,
+        }
+    )
+    assert dict(
+        (name, approval)
+        for name, approval, _risk in non_supervised_authorization.decision.approval_requirements
+    )["open_evolution_transaction_tool"] == "on_request"
+
+
 def test_supervised_runtime_tools_are_granted_only_during_role_runtime(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(supervised_agent_service, "_current_config", lambda: _model_config())
