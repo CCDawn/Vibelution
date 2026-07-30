@@ -133,7 +133,23 @@ def test_judge_prompt_keeps_second_evaluation_in_same_session_context():
         task_contract={"goal": "修复失败恢复"},
         rubric=rubric,
         baseline_evaluation={"summary": "baseline trace", "cases": [{"caseId": "one", "status": "success"}]},
-        rerun_evaluation={"summary": "rerun trace", "cases": [{"caseId": "one", "status": "success"}]},
+        rerun_evaluation={
+            "summary": "rerun trace",
+            "cases": [
+                {
+                    "caseId": "one",
+                    "status": "success",
+                    "worktreePath": "C:/candidate",
+                    "traceSummary": {
+                        "candidateRuntime": {
+                            "status": "verified",
+                            "runtimeEffect": "candidate_harness_executed",
+                            "moduleSha256": "d" * 64,
+                        }
+                    },
+                }
+            ],
+        },
         previous_judgment={
             "phase": "baseline",
             "score": 42.0,
@@ -147,6 +163,8 @@ def test_judge_prompt_keeps_second_evaluation_in_same_session_context():
     assert "缺少失败路径验证" in prompt
     assert "baseline trace" in prompt
     assert "rerun trace" in prompt
+    assert "candidate_harness_executed" in prompt
+    assert "moduleSha256" in prompt
     assert rubric["rubricHash"] in prompt
     assert "使用已冻结 rubric" in prompt
     assert "SUPERVISED_AGENT_JUDGMENT:" in prompt
@@ -245,6 +263,8 @@ def test_improvement_prompt_is_for_baseline_agent_and_carries_judge_feedback():
     assert "当前阶段是基线 Agent 的代码实施阶段，不是 Judge 评分阶段" in prompt
     assert "SUPERVISED_AGENT_JUDGMENT" not in prompt
     assert "第一步必须调用仓库检查工具" in prompt
+    assert "--candidate-runtime-input" in prompt
+    assert "collect_candidate_runtime_extension" in prompt
     assert "最终只允许输出实施结果或 NO_JUSTIFIED_CHANGE" in prompt
     assert "没有验证错误恢复" in prompt
     assert "补充错误恢复并运行聚焦测试" in prompt

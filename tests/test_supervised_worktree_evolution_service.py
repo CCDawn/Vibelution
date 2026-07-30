@@ -165,6 +165,105 @@ def test_harness_result_payload_includes_bounded_trace_evidence_for_judge(tmp_pa
     assert payload["traceSummary"]["evidence"]["conversation_tool_events"] == 2
 
 
+def test_harness_result_payload_includes_verified_candidate_runtime_for_judge(tmp_path):
+    result = _fake_harness_result(
+        role="baseline",
+        repo_root=tmp_path,
+        prompt="rerun candidate",
+        session_id="session-rerun",
+    )
+    result.worktree_path = str(tmp_path)
+    result.evolution_summary["candidate_runtime"] = {
+        "status": "verified",
+        "runtimeEffect": "candidate_harness_executed",
+        "candidateVariantId": "swte-variant-one",
+        "moduleSha256": "d" * 64,
+        "worktreePath": str(tmp_path),
+    }
+
+    payload = service._harness_result_payload(
+        result,
+        case_id="one",
+        role="baseline_rerun",
+    )
+
+    assert payload["worktreePath"] == str(tmp_path)
+    assert payload["traceSummary"]["candidateRuntime"] == {
+        "status": "verified",
+        "runtimeEffect": "candidate_harness_executed",
+        "candidateVariantId": "swte-variant-one",
+        "moduleSha256": "d" * 64,
+        "worktreePath": str(tmp_path),
+    }
+
+
+def test_real_rerun_evaluation_fails_closed_when_candidate_runtime_is_unverified(
+    tmp_path,
+    monkeypatch,
+):
+    candidate = tmp_path / "candidate"
+    candidate.mkdir()
+    candidate_variant = {
+        "variantId": "swte-variant-failed",
+        "patchSha256": "a" * 64,
+        "checkpointCommit": "base",
+        "bindingStatus": "verified",
+        "changedFileCount": 1,
+    }
+    monkeypatch.setattr(
+        service,
+        "load_supervised_bundle",
+        lambda *args, **kwargs: {
+            "bundle_name": "closed_loop_v1",
+            "cases": [{"case_id": "one", "prompt": "run candidate"}],
+        },
+    )
+    monkeypatch.setattr(
+        service,
+        "run_supervised_conversation_harness",
+        lambda **kwargs: _fake_harness_result(
+            role="baseline",
+            repo_root=Path(kwargs["repo_root"]),
+            prompt=str(kwargs.get("prompt") or ""),
+            session_id="session-rerun",
+        ),
+    )
+    monkeypatch.setattr(
+        service,
+        "run_candidate_runtime_evidence",
+        lambda **kwargs: (_ for _ in ()).throw(
+            service.CandidateRuntimeExecutionError("module hash mismatch")
+        ),
+    )
+
+    evaluation = service._real_evaluation_runner(
+        candidate,
+        "closed_loop_v1",
+        "baseline_rerun",
+        {
+            "runId": "swte-runtime-failed",
+            "options": {
+                "agentBindings": {
+                    "baseline": {"agentId": "agent-baseline", "role": "baseline"}
+                }
+            },
+            "candidateVariant": candidate_variant,
+            "cleanRoom": True,
+        },
+    )
+
+    assert evaluation["status"] == "failed"
+    assert evaluation["candidateRuntimeStatus"] == "failed"
+    assert evaluation["cases"][0]["status"] == "failed"
+    assert evaluation["cases"][0]["worktreePath"] == str(candidate.resolve())
+    assert evaluation["cases"][0]["traceSummary"]["candidateRuntime"] == {
+        "status": "failed",
+        "runtimeEffect": "not_applied",
+        "reason": "module hash mismatch",
+        "worktreePath": str(candidate.resolve()),
+    }
+
+
 def test_real_judge_runner_retries_wrong_phase_in_same_session(tmp_path, monkeypatch):
     calls: list[dict] = []
     rubric_hash = "a" * 64
@@ -1009,6 +1108,23 @@ def test_real_worktree_flow_uses_supervised_conversation_chain_for_candidate_bra
 
     monkeypatch.setattr(service, "supervised_agent_bindings", fake_bindings)
     monkeypatch.setattr(service, "run_supervised_conversation_harness", fake_conversation_harness)
+    monkeypatch.setattr(
+        service,
+        "run_candidate_runtime_evidence",
+        lambda **kwargs: {
+            "status": "verified",
+            "runtimeEffect": "candidate_harness_executed",
+            "candidateVariantId": kwargs["candidate_variant"]["variantId"],
+            "candidatePatchSha256": kwargs["candidate_variant"]["patchSha256"],
+            "moduleSha256": "d" * 64,
+            "worktreePath": str(Path(kwargs["candidate_path"]).resolve()),
+            "processId": 4242,
+            "executionBackend": "isolated_candidate_subprocess",
+            "evolutionSummary": {},
+            "workspaceEvidence": {},
+            "extensionEvidence": {},
+        },
+    )
 
     snapshot = service.run_supervised_worktree_flow(
         {
@@ -1051,6 +1167,10 @@ def test_real_worktree_flow_uses_supervised_conversation_chain_for_candidate_bra
     assert all(Path(call["repo_root"]).resolve() == candidate_path for call in candidate_eval_calls)
     assert all(Path(call["workspace_override"]).resolve() == candidate_path for call in candidate_eval_calls)
     assert snapshot["candidate"]["candidateVariant"] == variant
+    assert snapshot["candidate"]["candidateRuntimeStatus"] == "verified"
+    assert snapshot["candidate"]["cases"][0]["traceSummary"]["candidateRuntime"]["runtimeEffect"] == (
+        "candidate_harness_executed"
+    )
     assert snapshot["agentBindings"]["baseline"]["agentId"] == "agent-baseline"
     assert snapshot["baselineConversationSessionId"] == "session-baseline"
     assert snapshot["rerunConversationSessionId"] == "session-rerun"
