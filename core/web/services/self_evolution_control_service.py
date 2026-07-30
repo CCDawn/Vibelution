@@ -130,6 +130,12 @@ _RUN_EXECUTING_STATUSES = {"queued", "running", "stopping"}
 _RUN_LOCKED_STATUSES = {"queued", "running", "stopping", "paused"}
 _RUN_FINAL_STATUSES = {"done", "failed", "cancelled"}
 _OBSERVATION_OPERATOR_TERMINAL_STATUSES = {"terminated", "cancelled", "stopped"}
+_OBSERVATION_FINAL_STATUSES = _OBSERVATION_OPERATOR_TERMINAL_STATUSES | {
+    "done",
+    "failed",
+    "boundary_violation",
+}
+_SELF_OBSERVATION_DEADLINE_FINALIZATION_GRACE_SECONDS = 2.0
 _OBSERVATION_RUN_STATE_LOCK = threading.RLock()
 _OBSERVATION_RUNS: dict[str, dict[str, Any]] = {}
 _ACTIVE_OBSERVATION_RUN_ID: str = ""
@@ -2437,6 +2443,16 @@ def _self_observation_has_operator_terminal_state(snapshot: dict[str, Any] | Non
     return False
 
 
+def _self_observation_has_terminal_state(snapshot: dict[str, Any] | None) -> bool:
+    if not isinstance(snapshot, dict):
+        return False
+    for key in ("status", "phase", "runtimeStatus"):
+        value = str(snapshot.get(key) or "").strip().lower()
+        if value in _OBSERVATION_FINAL_STATUSES:
+            return True
+    return False
+
+
 def _set_self_observation_terminal_state(
     run_id: str,
     *,
@@ -2453,7 +2469,7 @@ def _set_self_observation_terminal_state(
         snapshot = _OBSERVATION_RUNS.get(str(run_id or "").strip())
         if not snapshot:
             return None
-        if _self_observation_has_operator_terminal_state(snapshot):
+        if _self_observation_has_terminal_state(snapshot):
             if _ACTIVE_OBSERVATION_RUN_ID == snapshot.get("runId"):
                 _ACTIVE_OBSERVATION_RUN_ID = ""
             return dict(snapshot)
@@ -2496,6 +2512,76 @@ def _self_observation_operator_terminated(run_id: str) -> bool:
     return _self_observation_has_operator_terminal_state(snapshot)
 
 
+def _self_observation_run_terminal(run_id: str) -> bool:
+    snapshot = get_self_observation_run_snapshot(run_id)
+    return _self_observation_has_terminal_state(snapshot)
+
+
+def _expire_self_observation_run_deadline(run_id: str) -> None:
+    snapshot = get_self_observation_run_snapshot(run_id)
+    if not isinstance(snapshot, dict):
+        return
+    if str(snapshot.get("status") or "").strip().lower() not in {"queued", "running"}:
+        return
+    conversation_session_id = str(snapshot.get("conversationSessionId") or "").strip()
+    _set_self_observation_terminal_state(
+        run_id,
+        status="failed",
+        latest_message=text_for(
+            get_web_language(),
+            zh="自主观察超过设置时限且未能完成。",
+            en="Observation exceeded its configured deadline before completion.",
+        ),
+        report=text_for(
+            get_web_language(),
+            zh=(
+                "当前理解：\n"
+                "- 自主观察生命周期在设置时限内未能完成。\n\n"
+                "无法验证：\n"
+                "- 模型调用前的会话初始化或模型流未在截止前收口；系统没有注入替代提示词。"
+            ),
+            en=(
+                "Current understanding:\n"
+                "- The observation lifecycle did not complete within its configured deadline.\n\n"
+                "Cannot verify:\n"
+                "- Session initialization or the model stream did not close before the deadline; "
+                "the system did not inject a fallback prompt."
+            ),
+        ),
+        conversation_session_id=conversation_session_id,
+    )
+    _record_self_scene_event(
+        "self_observation",
+        "self_observation.run.deadline_watchdog_expired",
+        run_id=run_id,
+        message="Self-observation lifecycle deadline watchdog expired.",
+        level="warning",
+        outcome="failed",
+        fields={
+            "conversationSessionId": conversation_session_id,
+            "inputMode": str(snapshot.get("inputMode") or "").strip(),
+            "durationSeconds": int(snapshot.get("durationSeconds") or 0),
+            "messageCount": len(list(snapshot.get("messages") or [])),
+        },
+        lifecycle=True,
+    )
+
+
+def _start_self_observation_deadline_watchdog(
+    run_id: str,
+    *,
+    deadline_monotonic: float,
+) -> None:
+    delay_seconds = max(0.0, float(deadline_monotonic) - time.monotonic())
+    timer = threading.Timer(
+        delay_seconds + _SELF_OBSERVATION_DEADLINE_FINALIZATION_GRACE_SECONDS,
+        _expire_self_observation_run_deadline,
+        args=(run_id,),
+    )
+    timer.daemon = True
+    timer.start()
+
+
 def _update_self_observation_progress(
     run_id: str,
     *,
@@ -2509,7 +2595,7 @@ def _update_self_observation_progress(
         snapshot = _OBSERVATION_RUNS.get(str(run_id or "").strip())
         if not snapshot:
             return None
-        if _self_observation_has_operator_terminal_state(snapshot):
+        if _self_observation_has_terminal_state(snapshot):
             if _ACTIVE_OBSERVATION_RUN_ID == snapshot.get("runId"):
                 _ACTIVE_OBSERVATION_RUN_ID = ""
             return dict(snapshot)
@@ -2588,6 +2674,14 @@ def _invoke_strict_self_observation_llm(
 ) -> dict[str, Any]:
     if _self_observation_operator_terminated(run_id):
         raise TimeoutError("Observation session was terminated before model invocation.")
+    if time.monotonic() >= float(deadline_monotonic):
+        return {
+            "content": "",
+            "toolCalls": [],
+            "modelId": "",
+            "deadlineReached": True,
+            "cancelReason": _SELF_OBSERVATION_DEADLINE_CANCEL_REASON,
+        }
     resolved, client = _resolve_self_observation_llm(agent_id, duration_seconds)
     model_id = str(getattr(resolved, "model_id", "") or "").strip()
     normalized_input_mode = _normalize_self_observation_input_mode(input_mode)
@@ -2798,7 +2892,20 @@ def _run_observation_session(
     prompt: str,
     duration_seconds: int,
     input_mode: str = _SELF_OBSERVATION_INPUT_MODE_PROMPT,
+    deadline_monotonic: float | None = None,
 ) -> dict[str, Any]:
+    effective_deadline_monotonic = (
+        float(deadline_monotonic)
+        if deadline_monotonic is not None
+        else time.monotonic() + max(0.0, float(duration_seconds or 0))
+    )
+    if time.monotonic() >= effective_deadline_monotonic or _self_observation_run_terminal(run_id):
+        return {
+            "conversationSessionId": "",
+            "messages": [],
+            "report": "",
+            "deadlineReached": True,
+        }
     observer_binding = self_observation_agent_binding()
     agent_id = str((observer_binding or {}).get("agentId") or "").strip()
     if not agent_id:
@@ -2821,6 +2928,13 @@ def _run_observation_session(
     session_id = str(session.get("id") or session.get("sessionId") or "").strip()
     if not session_id:
         raise SelfEvolutionRunValidationError("Observation session creation did not return a session id.")
+    if time.monotonic() >= effective_deadline_monotonic or _self_observation_run_terminal(run_id):
+        return {
+            "conversationSessionId": session_id,
+            "messages": [],
+            "report": "",
+            "deadlineReached": True,
+        }
     with _OBSERVATION_RUN_STATE_LOCK:
         snapshot = _OBSERVATION_RUNS.get(run_id)
         if isinstance(snapshot, dict):
@@ -2851,8 +2965,6 @@ def _run_observation_session(
         conversation_session_id=session_id,
         turn_id=turn_id,
     )
-    started_monotonic = time.monotonic()
-    deadline_monotonic = started_monotonic + max(0.0, float(duration_seconds or 0))
     assistant_messages: list[str] = []
     current_prompt = "" if normalized_input_mode == _SELF_OBSERVATION_INPUT_MODE_BLANK else prompt
     turn_duration_seconds = max(1, int(duration_seconds or 1))
@@ -2866,7 +2978,7 @@ def _run_observation_session(
             agent_id=agent_id,
             prompt=current_prompt,
             duration_seconds=turn_duration_seconds,
-            deadline_monotonic=deadline_monotonic,
+            deadline_monotonic=effective_deadline_monotonic,
             input_mode=normalized_input_mode,
             invocation_index=invocation_index,
         )
@@ -2900,7 +3012,7 @@ def _run_observation_session(
         if report and detect_self_observation_boundary_violation(report):
             break
 
-        remaining_seconds = deadline_monotonic - time.monotonic()
+        remaining_seconds = effective_deadline_monotonic - time.monotonic()
         if remaining_seconds <= 0:
             deadline_reached = True
             break
@@ -2923,7 +3035,7 @@ def _run_observation_session(
         sleep_seconds = min(_SELF_OBSERVATION_CONTINUATION_SLEEP_SECONDS, remaining_seconds)
         if sleep_seconds > 0:
             time.sleep(sleep_seconds)
-        remaining_after_wait = deadline_monotonic - time.monotonic()
+        remaining_after_wait = effective_deadline_monotonic - time.monotonic()
         if remaining_after_wait <= 0:
             deadline_reached = True
             break
@@ -2955,6 +3067,10 @@ def _run_self_observation_turn(context: dict[str, Any]) -> None:
     input_mode = _normalize_self_observation_input_mode((context or {}).get("inputMode"))
     goal = _normalize_self_observation_prompt((context or {}).get("goal"), input_mode=input_mode)
     duration_seconds = _normalize_observation_duration((context or {}).get("durationSeconds"))
+    deadline_monotonic = float(
+        (context or {}).get("deadlineMonotonic")
+        or (time.monotonic() + max(0.0, float(duration_seconds or 0)))
+    )
     if not run_id:
         return None
     started_at = _now_timestamp()
@@ -2962,7 +3078,7 @@ def _run_self_observation_turn(context: dict[str, Any]) -> None:
         snapshot = _OBSERVATION_RUNS.get(run_id)
         if not snapshot:
             return None
-        if _self_observation_has_operator_terminal_state(snapshot):
+        if _self_observation_has_terminal_state(snapshot):
             if _ACTIVE_OBSERVATION_RUN_ID == snapshot.get("runId"):
                 _ACTIVE_OBSERVATION_RUN_ID = ""
             return None
@@ -2991,6 +3107,7 @@ def _run_self_observation_turn(context: dict[str, Any]) -> None:
             prompt=build_self_observation_prompt(goal, duration_seconds, input_mode=input_mode),
             duration_seconds=duration_seconds,
             input_mode=input_mode,
+            deadline_monotonic=deadline_monotonic,
         )
         conversation_session_id = str(result.get("conversationSessionId") or "").strip()
         messages = [str(item) for item in list(result.get("messages") or []) if str(item or "").strip()]
@@ -3063,6 +3180,7 @@ def start_self_observation_run(payload: dict[str, Any]) -> dict[str, Any]:
     input_mode = _normalize_self_observation_input_mode(data.get("inputMode"))
     goal = _normalize_self_observation_prompt(data.get("goal"), input_mode=input_mode)
     duration_seconds = _normalize_observation_duration(data.get("durationSeconds"))
+    deadline_monotonic = time.monotonic() + max(0.0, float(duration_seconds or 0))
     now = _now_timestamp()
     with _OBSERVATION_RUN_STATE_LOCK:
         active = get_active_self_observation_run()
@@ -3082,6 +3200,10 @@ def start_self_observation_run(payload: dict[str, Any]) -> dict[str, Any]:
         )
         _OBSERVATION_RUNS[run_id] = snapshot
         _ACTIVE_OBSERVATION_RUN_ID = run_id
+    _start_self_observation_deadline_watchdog(
+        run_id,
+        deadline_monotonic=deadline_monotonic,
+    )
     _RUN_EXECUTOR.submit(
         _run_self_observation_turn,
         {
@@ -3089,6 +3211,7 @@ def start_self_observation_run(payload: dict[str, Any]) -> dict[str, Any]:
             "goal": goal,
             "durationSeconds": duration_seconds,
             "inputMode": input_mode,
+            "deadlineMonotonic": deadline_monotonic,
         },
     )
     return get_self_observation_run_snapshot(run_id) or snapshot
