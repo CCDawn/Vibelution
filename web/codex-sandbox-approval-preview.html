@@ -1,0 +1,835 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Vibelution · Codex 风格工具审批预览</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg-canvas: #0b0f14;
+      --surface-rail: #10161e;
+      --surface-panel: #151c25;
+      --surface-row: #1a222d;
+      --surface-hover: #202a36;
+      --line: #2b3643;
+      --line-strong: #3a4858;
+      --fg: #f1f5f9;
+      --fg-2: #b9c4d0;
+      --fg-3: #7f8b99;
+      --cool: #70b8ff;
+      --cool-soft: rgba(112, 184, 255, .11);
+      --warm: #f0b45d;
+      --warm-soft: rgba(240, 180, 93, .09);
+      --danger: #ff7f84;
+      --danger-soft: rgba(255, 127, 132, .08);
+      --success: #70d3a4;
+      --radius-panel: 12px;
+      --radius-control: 8px;
+      --shadow: 0 20px 70px rgba(0, 0, 0, .34);
+      font-family: Inter, "Segoe UI", "Microsoft YaHei UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-width: 320px;
+      min-height: 100vh;
+      color: var(--fg);
+      background:
+        radial-gradient(circle at 50% -20%, rgba(68, 124, 183, .13), transparent 42%),
+        var(--bg-canvas);
+    }
+
+    button, select { font: inherit; }
+    button, select, summary { outline: none; }
+    button:focus-visible, select:focus-visible, summary:focus-visible {
+      box-shadow: 0 0 0 2px var(--bg-canvas), 0 0 0 4px var(--cool);
+    }
+
+    .preview-bar {
+      position: sticky;
+      z-index: 10;
+      top: 0;
+      display: flex;
+      min-height: 46px;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 7px 14px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(11, 15, 20, .9);
+      backdrop-filter: blur(18px);
+    }
+    .preview-title { min-width: 0; }
+    .preview-title strong {
+      display: block;
+      font-size: 13px;
+      letter-spacing: .01em;
+    }
+    .preview-title span {
+      display: block;
+      margin-top: 2px;
+      color: var(--fg-3);
+      font-size: 11px;
+    }
+    .scenario-tabs {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 4px;
+    }
+    .scenario-tabs button {
+      min-height: 30px;
+      padding: 4px 9px;
+      border: 1px solid transparent;
+      border-radius: 7px;
+      color: var(--fg-2);
+      background: transparent;
+      cursor: pointer;
+    }
+    .scenario-tabs button:hover { background: var(--surface-hover); }
+    .scenario-tabs button[aria-pressed="true"] {
+      border-color: rgba(112, 184, 255, .32);
+      color: var(--cool);
+      background: var(--cool-soft);
+    }
+
+    .workbench {
+      display: grid;
+      width: min(1160px, calc(100vw - 28px));
+      min-height: calc(100vh - 76px);
+      margin: 15px auto;
+      grid-template-columns: 210px minmax(0, 1fr) 230px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--surface-panel);
+      box-shadow: var(--shadow);
+    }
+    .left-rail, .right-rail {
+      min-width: 0;
+      background: var(--surface-rail);
+    }
+    .left-rail { border-right: 1px solid var(--line); }
+    .right-rail { border-left: 1px solid var(--line); }
+    .rail-heading {
+      display: flex;
+      min-height: 42px;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 11px;
+      border-bottom: 1px solid var(--line);
+      color: var(--fg-2);
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .session-list {
+      display: grid;
+      gap: 3px;
+      padding: 7px;
+    }
+    .session-item {
+      display: grid;
+      grid-template-columns: 27px 1fr;
+      gap: 8px;
+      align-items: center;
+      padding: 7px;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      color: var(--fg-2);
+      font-size: 12px;
+    }
+    .session-item.active {
+      border-color: rgba(112, 184, 255, .23);
+      color: var(--fg);
+      background: var(--cool-soft);
+    }
+    .avatar {
+      display: grid;
+      width: 27px;
+      height: 27px;
+      place-items: center;
+      border: 1px solid var(--line-strong);
+      border-radius: 50%;
+      color: var(--cool);
+      background: var(--surface-row);
+      font-size: 10px;
+      font-weight: 800;
+    }
+    .session-copy { min-width: 0; }
+    .session-copy b, .session-copy small {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .session-copy small {
+      margin-top: 2px;
+      color: var(--fg-3);
+      font-size: 10px;
+    }
+
+    .chat {
+      display: grid;
+      min-width: 0;
+      grid-template-rows: 42px minmax(0, 1fr);
+      background: #111821;
+    }
+    .chat-header {
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 0 12px;
+      border-bottom: 1px solid var(--line);
+      background: var(--surface-panel);
+    }
+    .chat-header strong {
+      overflow: hidden;
+      font-size: 13px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .agent-status {
+      display: inline-flex;
+      flex: none;
+      align-items: center;
+      gap: 6px;
+      color: var(--fg-3);
+      font-size: 11px;
+    }
+    .agent-status::before {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--warm);
+      box-shadow: 0 0 0 4px rgba(240, 180, 93, .09);
+      content: "";
+    }
+    .chat-body {
+      display: grid;
+      min-height: 0;
+      grid-template-rows: minmax(0, 1fr) auto auto;
+      gap: 8px;
+      padding: 16px;
+    }
+    .messages {
+      display: grid;
+      min-height: 0;
+      align-content: end;
+      gap: 14px;
+      overflow: auto;
+    }
+    .turn {
+      display: grid;
+      max-width: 86%;
+      grid-template-columns: 28px minmax(0, 1fr);
+      gap: 8px;
+      color: var(--fg-2);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+    .turn.user {
+      justify-self: end;
+      grid-template-columns: minmax(0, 1fr) 28px;
+    }
+    .turn.user .bubble {
+      border-color: rgba(112, 184, 255, .18);
+      background: var(--cool-soft);
+    }
+    .bubble {
+      padding: 9px 11px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--surface-row);
+    }
+    .bubble p { margin: 0; }
+    .bubble small {
+      display: block;
+      margin-bottom: 4px;
+      color: var(--fg-3);
+      font-size: 10px;
+    }
+
+    .approval-card {
+      display: grid;
+      gap: 10px;
+      padding: 11px;
+      border: 1px solid color-mix(in srgb, var(--warm) 34%, var(--line));
+      border-radius: var(--radius-panel);
+      background: color-mix(in srgb, var(--warm-soft) 80%, var(--surface-panel));
+      box-shadow: 0 7px 24px rgba(0, 0, 0, .15);
+    }
+    .approval-card[data-tone="danger"] {
+      border-color: color-mix(in srgb, var(--danger) 34%, var(--line));
+      background: color-mix(in srgb, var(--danger-soft) 85%, var(--surface-panel));
+    }
+    .approval-head {
+      display: grid;
+      grid-template-columns: 30px minmax(0, 1fr) auto;
+      gap: 9px;
+      align-items: start;
+    }
+    .shield {
+      display: grid;
+      width: 30px;
+      height: 30px;
+      place-items: center;
+      border: 1px solid rgba(240, 180, 93, .28);
+      border-radius: 9px;
+      color: var(--warm);
+      background: rgba(240, 180, 93, .1);
+    }
+    .approval-card[data-tone="danger"] .shield {
+      border-color: rgba(255, 127, 132, .28);
+      color: var(--danger);
+      background: rgba(255, 127, 132, .1);
+    }
+    .approval-title { min-width: 0; }
+    .approval-title strong {
+      display: block;
+      font-size: 13px;
+      line-height: 1.35;
+    }
+    .approval-title span {
+      display: block;
+      margin-top: 3px;
+      color: var(--fg-3);
+      font-size: 11px;
+      line-height: 1.4;
+    }
+    .risk-chip {
+      padding: 4px 7px;
+      border: 1px solid rgba(240, 180, 93, .24);
+      border-radius: 999px;
+      color: var(--warm);
+      background: rgba(240, 180, 93, .07);
+      font-size: 10px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .approval-card[data-tone="danger"] .risk-chip {
+      border-color: rgba(255, 127, 132, .24);
+      color: var(--danger);
+      background: rgba(255, 127, 132, .07);
+    }
+    .approval-details {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+      padding: 8px 9px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-control);
+      background: rgba(8, 12, 17, .44);
+    }
+    .command-block {
+      min-width: 0;
+      overflow: hidden;
+      color: #dbe6f1;
+      font-family: "Cascadia Code", Consolas, monospace;
+      font-size: 11px;
+      line-height: 1.5;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .detail-meta {
+      color: var(--fg-3);
+      font-size: 10px;
+      white-space: nowrap;
+    }
+    .approval-reason {
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      gap: 7px;
+      color: var(--fg-2);
+      font-size: 11px;
+    }
+    .approval-reason svg { flex: none; color: var(--fg-3); }
+    .approval-footer {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px 12px;
+    }
+    .approval-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .btn {
+      min-height: 31px;
+      padding: 5px 10px;
+      border: 1px solid var(--line-strong);
+      border-radius: 7px;
+      color: var(--fg-2);
+      background: var(--surface-row);
+      cursor: pointer;
+    }
+    .btn:hover { color: var(--fg); background: var(--surface-hover); }
+    .btn.primary {
+      border-color: rgba(112, 184, 255, .34);
+      color: #d8ecff;
+      background: rgba(57, 132, 204, .24);
+    }
+    .btn.primary:hover { background: rgba(57, 132, 204, .34); }
+    .btn.danger {
+      border-color: rgba(255, 127, 132, .28);
+      color: #ffc8ca;
+      background: rgba(255, 127, 132, .08);
+    }
+    .btn.quiet {
+      border-color: transparent;
+      color: var(--fg-3);
+      background: transparent;
+    }
+    .btn:disabled { cursor: default; opacity: .5; }
+    .policy-control {
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      gap: 7px;
+      color: var(--fg-3);
+      font-size: 10px;
+    }
+    .policy-control select {
+      min-height: 31px;
+      max-width: 180px;
+      padding: 4px 26px 4px 8px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      color: var(--fg-2);
+      background: var(--surface-row);
+    }
+    .policy-note {
+      margin: -3px 0 0;
+      color: var(--fg-3);
+      font-size: 10px;
+      line-height: 1.45;
+    }
+
+    .resolved {
+      display: none;
+      min-height: 46px;
+      align-items: center;
+      gap: 9px;
+      padding: 8px 10px;
+      border: 1px solid rgba(112, 211, 164, .22);
+      border-radius: var(--radius-control);
+      color: var(--fg-2);
+      background: rgba(112, 211, 164, .07);
+      font-size: 11px;
+    }
+    .resolved.visible { display: flex; }
+    .resolved b { color: var(--success); }
+
+    .composer {
+      display: grid;
+      gap: 8px;
+      padding: 9px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-panel);
+      background: var(--surface-panel);
+    }
+    .composer textarea {
+      width: 100%;
+      min-height: 52px;
+      resize: none;
+      border: 0;
+      color: var(--fg);
+      background: transparent;
+      font: inherit;
+      font-size: 12px;
+      outline: none;
+    }
+    .composer-foot {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      color: var(--fg-3);
+      font-size: 10px;
+    }
+    .send {
+      width: 28px;
+      height: 28px;
+      border: 0;
+      border-radius: 8px;
+      color: #06111d;
+      background: var(--cool);
+    }
+
+    .right-content { display: grid; gap: 10px; padding: 10px; }
+    .fact-card {
+      display: grid;
+      gap: 7px;
+      padding: 9px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: var(--surface-row);
+    }
+    .fact-card b { font-size: 11px; }
+    .fact-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      color: var(--fg-3);
+      font-size: 10px;
+    }
+    .fact-row span:last-child { color: var(--fg-2); text-align: right; }
+    .safety-list {
+      display: grid;
+      gap: 7px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+    .safety-list li {
+      display: grid;
+      grid-template-columns: 7px 1fr;
+      gap: 7px;
+      color: var(--fg-2);
+      font-size: 10px;
+      line-height: 1.45;
+    }
+    .safety-list li::before {
+      width: 5px;
+      height: 5px;
+      margin-top: 5px;
+      border-radius: 50%;
+      background: var(--success);
+      content: "";
+    }
+
+    @media (max-width: 900px) {
+      .workbench { grid-template-columns: 180px minmax(0, 1fr); }
+      .right-rail { display: none; }
+    }
+    @media (max-width: 640px) {
+      .preview-bar { position: static; align-items: flex-start; flex-direction: column; }
+      .scenario-tabs { width: 100%; justify-content: flex-start; overflow-x: auto; flex-wrap: nowrap; }
+      .scenario-tabs { scrollbar-width: none; }
+      .scenario-tabs::-webkit-scrollbar { display: none; }
+      .scenario-tabs button { flex: none; }
+      .workbench {
+        width: 100%;
+        min-height: calc(100vh - 105px);
+        margin: 0;
+        grid-template-columns: minmax(0, 1fr);
+        border-right: 0;
+        border-bottom: 0;
+        border-left: 0;
+        border-radius: 0;
+      }
+      .left-rail { display: none; }
+      .chat-body { padding: 11px; }
+      .turn { max-width: 96%; }
+      .approval-head { grid-template-columns: 30px minmax(0, 1fr); }
+      .risk-chip { grid-column: 2; justify-self: start; }
+      .approval-details { grid-template-columns: minmax(0, 1fr); }
+      .detail-meta { white-space: normal; }
+      .approval-footer { align-items: stretch; flex-direction: column; }
+      .approval-actions { display: grid; grid-template-columns: 1fr 1fr; }
+      .btn { width: 100%; }
+      .policy-control { justify-content: space-between; }
+      .policy-control select { flex: 1; max-width: none; }
+    }
+  </style>
+</head>
+<body>
+  <header class="preview-bar">
+    <div class="preview-title">
+      <strong>工具调用审批 · 隔离交互预览</strong>
+      <span>模拟数据，不连接 Launcher，不执行真实工具</span>
+    </div>
+    <nav class="scenario-tabs" aria-label="预览状态">
+      <button type="button" data-scenario="command" aria-pressed="false">沙盒命令</button>
+      <button type="button" data-scenario="network" aria-pressed="true">网络请求</button>
+      <button type="button" data-scenario="danger" aria-pressed="false">破坏性操作</button>
+      <button type="button" data-scenario="resolved" aria-pressed="false">已处理</button>
+    </nav>
+  </header>
+
+  <main class="workbench">
+    <aside class="left-rail" aria-label="会话列表">
+      <div class="rail-heading"><span>会话</span><span>＋</span></div>
+      <div class="session-list">
+        <div class="session-item active">
+          <span class="avatar">LU</span>
+          <span class="session-copy"><b>Luna 沙盒验证</b><small>等待工具审批</small></span>
+        </div>
+        <div class="session-item">
+          <span class="avatar">FI</span>
+          <span class="session-copy"><b>Finder</b><small>缓存命中诊断</small></span>
+        </div>
+        <div class="session-item">
+          <span class="avatar">RE</span>
+          <span class="session-copy"><b>Research</b><small>文献提炼</small></span>
+        </div>
+      </div>
+    </aside>
+
+    <section class="chat" aria-label="对话工作区">
+      <header class="chat-header">
+        <strong>Luna 沙盒验证</strong>
+        <span class="agent-status">等待你的决定</span>
+      </header>
+      <div class="chat-body">
+        <div class="messages">
+          <article class="turn user">
+            <div class="bubble">
+              <small>你 · 10:32</small>
+              <p>检查项目依赖是否有已知安全问题，并汇总风险。</p>
+            </div>
+            <span class="avatar">我</span>
+          </article>
+          <article class="turn">
+            <span class="avatar">LU</span>
+            <div class="bubble">
+              <small>Luna · 10:32</small>
+              <p>我会先读取本地依赖清单，再访问安全漏洞数据库核对版本。</p>
+            </div>
+          </article>
+        </div>
+
+        <section class="approval-card" id="approval-card" aria-labelledby="approval-title">
+          <div class="approval-head">
+            <span class="shield" aria-hidden="true">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <path d="M12 3 5 6v5c0 4.5 2.8 8.3 7 10 4.2-1.7 7-5.5 7-10V6l-7-3Z"/>
+                <path d="M12 8v4m0 4h.01"/>
+              </svg>
+            </span>
+            <div class="approval-title">
+              <strong id="approval-title">Luna 请求访问网络</strong>
+              <span id="approval-subtitle">工具会在执行前暂停，只有你的决定能继续此调用。</span>
+            </div>
+            <span class="risk-chip" id="risk-chip">需要审批 · 网络</span>
+          </div>
+
+          <div class="approval-details">
+            <code class="command-block" id="command">web_search_tool · OSV database / npm audit advisory</code>
+            <span class="detail-meta" id="detail-meta">参数指纹 89c7…2ab1</span>
+          </div>
+
+          <div class="approval-reason">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+              <circle cx="12" cy="12" r="9"/><path d="M12 10v6m0-9h.01"/>
+            </svg>
+            <span id="reason">网络能力不在 workspace-write 沙盒的自动授权边界内。</span>
+          </div>
+
+          <div class="approval-footer">
+            <div class="approval-actions">
+              <button class="btn primary" type="button" data-decision="accept">允许本次</button>
+              <button class="btn" type="button" data-decision="acceptForSession">本会话允许</button>
+              <button class="btn danger" type="button" data-decision="decline">拒绝</button>
+              <button class="btn quiet" type="button" data-decision="cancel">停止回合</button>
+            </div>
+            <label class="policy-control">
+              <span>审批策略</span>
+              <select id="policy-select">
+                <option value="on_request" selected>自动（沙盒内）</option>
+                <option value="untrusted">谨慎（逐次询问）</option>
+                <option value="never">不询问（越界拒绝）</option>
+              </select>
+            </label>
+          </div>
+          <p class="policy-note" id="policy-note">
+            沙盒内命令自动执行；网络、外部路径和破坏性操作仍会询问。
+          </p>
+        </section>
+
+        <div class="resolved" id="resolved" role="status">
+          <span aria-hidden="true">✓</span>
+          <span><b id="resolved-title">已允许本次调用</b> · <span id="resolved-detail">Luna 可以继续访问漏洞数据库。</span></span>
+        </div>
+
+        <form class="composer" onsubmit="return false">
+          <textarea aria-label="发送消息" placeholder="向 Luna 发送消息…"></textarea>
+          <div class="composer-foot">
+            <span>工具审批期间仍可停止当前回合</span>
+            <button class="send" type="submit" aria-label="发送">↑</button>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <aside class="right-rail" aria-label="运行状态">
+      <div class="rail-heading"><span>沙盒状态</span><span>实时</span></div>
+      <div class="right-content">
+        <div class="fact-card">
+          <b>执行边界</b>
+          <div class="fact-row"><span>沙盒</span><span>workspace-write</span></div>
+          <div class="fact-row"><span>网络</span><span>默认关闭</span></div>
+          <div class="fact-row"><span>审批</span><span id="policy-side">on_request</span></div>
+        </div>
+        <div class="fact-card">
+          <b>本次请求</b>
+          <div class="fact-row"><span>Agent</span><span>Luna</span></div>
+          <div class="fact-row"><span>Call ID</span><span>call-8f21</span></div>
+          <div class="fact-row"><span>状态</span><span id="request-status">pending</span></div>
+        </div>
+        <div class="fact-card">
+          <b>安全保证</b>
+          <ul class="safety-list">
+            <li>批准绑定到 session / turn / call / 参数指纹</li>
+            <li>执行器在工具实现前再次校验</li>
+            <li>拒绝、超时、重启均 fail closed</li>
+          </ul>
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <script>
+    const scenarios = {
+      command: {
+        title: "Luna 请求运行沙盒命令",
+        subtitle: "Auto 模式已证明命令受 workspace-write 约束，可自动继续。",
+        risk: "自动批准 · 沙盒内",
+        command: "$ pnpm audit --json",
+        meta: "cwd · 项目工作区",
+        reason: "命令只能写入工作区；系统路径与网络仍由沙盒独立限制。",
+        tone: "safe",
+        autoResolve: true,
+      },
+      network: {
+        title: "Luna 请求访问网络",
+        subtitle: "工具会在执行前暂停，只有你的决定能继续此调用。",
+        risk: "需要审批 · 网络",
+        command: "web_search_tool · OSV database / npm audit advisory",
+        meta: "参数指纹 89c7…2ab1",
+        reason: "网络能力不在 workspace-write 沙盒的自动授权边界内。",
+        tone: "warm",
+        autoResolve: false,
+      },
+      danger: {
+        title: "Luna 请求执行破坏性操作",
+        subtitle: "此类操作始终逐次审批，不能使用“本会话允许”。",
+        risk: "始终审批 · 破坏性",
+        command: "trigger_self_restart_tool",
+        meta: "影响 · 当前运行服务",
+        reason: "运行时重启会中断活动任务；必须由用户对本次调用明确授权。",
+        tone: "danger",
+        autoResolve: false,
+        noSessionGrant: true,
+      },
+      resolved: {
+        title: "Luna 请求访问网络",
+        subtitle: "请求已由用户处理，执行器持有一次性审批回执。",
+        risk: "已处理",
+        command: "web_search_tool · OSV database / npm audit advisory",
+        meta: "参数指纹 89c7…2ab1",
+        reason: "回执只对当前 session / turn / call / 参数指纹有效。",
+        tone: "safe",
+        autoResolve: false,
+        resolved: true,
+      },
+    };
+
+    const card = document.querySelector("#approval-card");
+    const resolved = document.querySelector("#resolved");
+    const title = document.querySelector("#approval-title");
+    const subtitle = document.querySelector("#approval-subtitle");
+    const riskChip = document.querySelector("#risk-chip");
+    const command = document.querySelector("#command");
+    const detailMeta = document.querySelector("#detail-meta");
+    const reason = document.querySelector("#reason");
+    const status = document.querySelector("#request-status");
+    const agentStatus = document.querySelector(".agent-status");
+    const policy = document.querySelector("#policy-select");
+    const policyNote = document.querySelector("#policy-note");
+    const policySide = document.querySelector("#policy-side");
+    const sessionGrant = document.querySelector('[data-decision="acceptForSession"]');
+    let activeScenario = "network";
+
+    function setResolved(label, detail) {
+      card.hidden = true;
+      resolved.classList.add("visible");
+      document.querySelector("#resolved-title").textContent = label;
+      document.querySelector("#resolved-detail").textContent = detail;
+      status.textContent = "resolved";
+      agentStatus.textContent = "继续运行";
+    }
+
+    function renderScenario(name) {
+      activeScenario = name;
+      const data = scenarios[name];
+      document.querySelectorAll("[data-scenario]").forEach((button) => {
+        button.setAttribute("aria-pressed", String(button.dataset.scenario === name));
+      });
+      card.hidden = false;
+      resolved.classList.remove("visible");
+      card.dataset.tone = data.tone;
+      title.textContent = data.title;
+      subtitle.textContent = data.subtitle;
+      riskChip.textContent = data.risk;
+      command.textContent = data.command;
+      detailMeta.textContent = data.meta;
+      reason.textContent = data.reason;
+      status.textContent = "pending";
+      agentStatus.textContent = data.autoResolve ? "沙盒检查通过" : "等待你的决定";
+      sessionGrant.disabled = Boolean(data.noSessionGrant);
+      sessionGrant.title = data.noSessionGrant ? "破坏性操作不能获得会话级授权" : "";
+      if (data.autoResolve) {
+        setResolved("已在沙盒内自动允许", "无需用户操作；命令仍受 workspace-write 沙盒约束。");
+      } else if (data.resolved) {
+        setResolved("已允许本次调用", "Luna 可以继续访问漏洞数据库。");
+      }
+    }
+
+    document.querySelectorAll("[data-scenario]").forEach((button) => {
+      button.addEventListener("click", () => renderScenario(button.dataset.scenario));
+    });
+
+    document.querySelectorAll("[data-decision]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const decision = button.dataset.decision;
+        const labels = {
+          accept: ["已允许本次调用", "一次性审批回执已交给执行器。"],
+          acceptForSession: ["已为本会话允许", "仅相同工具与参数指纹可复用此授权。"],
+          decline: ["已拒绝工具调用", "工具实现没有运行，Agent 会收到结构化拒绝结果。"],
+          cancel: ["已停止当前回合", "等待中的审批已取消，未执行工具。"],
+        };
+        setResolved(...labels[decision]);
+      });
+    });
+
+    policy.addEventListener("change", () => {
+      const notes = {
+        on_request: "沙盒内命令自动执行；网络、外部路径和破坏性操作仍会询问。",
+        untrusted: "写入、命令、网络和高风险操作逐次询问；只读操作自动执行。",
+        never: "不会弹出审批；不能在现有沙盒边界内完成的调用直接拒绝。",
+      };
+      policyNote.textContent = notes[policy.value];
+      policySide.textContent = policy.value;
+      if (policy.value === "never" && activeScenario !== "command") {
+        setResolved("已按策略拒绝", "“不询问”模式不会扩大沙盒权限，也不会等待用户审批。");
+      }
+    });
+
+    renderScenario("network");
+    if (new URLSearchParams(location.search).get("mobileFrame") === "1") {
+      const frame = document.createElement("iframe");
+      frame.id = "mobile-preview-frame";
+      frame.title = "390px 移动端审批预览";
+      frame.src = location.pathname;
+      frame.style.cssText = [
+        "position:fixed",
+        "inset:12px auto auto 12px",
+        "width:390px",
+        "height:680px",
+        "z-index:9999",
+        "border:2px solid #70b8ff",
+        "border-radius:12px",
+        "background:#0b0f14",
+        "box-shadow:0 20px 70px rgba(0,0,0,.55)",
+      ].join(";");
+      document.body.appendChild(frame);
+    }
+  </script>
+</body>
+</html>

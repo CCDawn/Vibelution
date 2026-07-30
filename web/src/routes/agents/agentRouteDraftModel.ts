@@ -152,6 +152,7 @@ export function draftFromAgent(agent: AgentConfigWorkspaceAgent | null | undefin
     promptTemplateId: agent?.promptTemplateId ?? "",
     toolPolicyId: agent?.toolPolicyId ?? "",
     memoryPolicyId: agent?.memoryPolicyId ?? "",
+    permissionPreset: agent?.permissionPreset ?? "request_approval",
     contextCompressionPolicy: contextCompressionDraftFromAgent(agent),
     status: agent?.status ?? "active",
   };
@@ -165,6 +166,7 @@ export function configChangeSnapshotFromDraft(draft: AgentConfigDraft): Record<s
     promptTemplateId: draft.promptTemplateId,
     toolPolicyId: draft.toolPolicyId,
     memoryPolicyId: draft.memoryPolicyId,
+    permissionPreset: draft.permissionPreset,
     contextCompressionPolicy: contextCompressionPolicyFromDraft(draft.contextCompressionPolicy),
     status: draft.status,
   };
@@ -182,6 +184,7 @@ export function draftEqualsAgent(draft: AgentConfigDraft, agent: AgentConfigWork
     && draft.promptTemplateId === base.promptTemplateId
     && draft.toolPolicyId === base.toolPolicyId
     && draft.memoryPolicyId === base.memoryPolicyId
+    && draft.permissionPreset === base.permissionPreset
     && contextCompressionDraftEqualsDraft(draft.contextCompressionPolicy, base.contextCompressionPolicy)
     && draft.status === base.status
   );
@@ -431,6 +434,7 @@ export function configDraftEqualsDraft(left: AgentConfigDraft, right: AgentConfi
     && left.promptTemplateId === right.promptTemplateId
     && left.toolPolicyId === right.toolPolicyId
     && left.memoryPolicyId === right.memoryPolicyId
+    && left.permissionPreset === right.permissionPreset
     && contextCompressionDraftEqualsDraft(left.contextCompressionPolicy, right.contextCompressionPolicy)
     && left.status === right.status
   );

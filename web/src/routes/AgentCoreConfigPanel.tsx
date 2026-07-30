@@ -1,7 +1,13 @@
 import { ExternalLink, SquarePen } from "lucide-react";
 
-import { type AgentLlmBindings, type AgentLlmSlotDefinition, type AgentModelChoice } from "../api/types";
+import {
+  type AgentLlmBindings,
+  type AgentLlmSlotDefinition,
+  type AgentModelChoice,
+  type AgentPermissionPreset,
+} from "../api/types";
 import { VButton, VContextualHint, VFieldRow, VNativeInput, VNativeSelect } from "../components/vui";
+import { AgentPermissionPresetControl } from "../components/vui/product/agent-management";
 import {
   AgentContextCompressionPanel,
   type AgentContextCompressionPanelCopy,
@@ -17,6 +23,7 @@ export type AgentConfigDraft = {
   promptTemplateId: string;
   toolPolicyId: string;
   memoryPolicyId: string;
+  permissionPreset: AgentPermissionPreset;
   contextCompressionPolicy: AgentContextCompressionPolicyDraft;
   status: string;
 };
@@ -280,6 +287,22 @@ export function AgentCoreConfigPanel({
           <VNativeSelect value={draft.status} onChange={(event) => onDraftChange({ status: event.target.value })}>
             <option value="active">{lang === "zh" ? "活跃" : "Active"}</option>
           </VNativeSelect>
+        </VFieldRow>
+        <VFieldRow
+          label={lang === "zh" ? "工具调用批准" : "Tool approval"}
+          tooltip={lang === "zh"
+            ? "这是此 Agent 的唯一权限配置。消息框中的选择会写回同一字段，并从下一回合生效。"
+            : "This is the Agent's sole permission setting. Composer changes write the same field and apply next turn."}
+        >
+          <AgentPermissionPresetControl
+            value={draft.permissionPreset}
+            lang={lang}
+            surface="settings"
+            disabled={pending}
+            pending={pending}
+            agentName={agentName}
+            onChange={(permissionPreset) => onDraftChange({ permissionPreset })}
+          />
         </VFieldRow>
         {primaryLlmSlot ? (
           <section className={styles.fieldWide} aria-label={copy.llmSlotsHint}>

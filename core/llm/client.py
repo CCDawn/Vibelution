@@ -452,24 +452,49 @@ def _safe_message_role_summary(messages: List[Any]) -> Dict[str, Any]:
     }
 
 
+def _is_strict_blank_input(
+    messages: List[Any],
+    metadata: Optional[Dict[str, Any]],
+) -> bool:
+    if not isinstance(metadata, dict):
+        return False
+    if metadata.get("strictPromptPayload") is not True:
+        return False
+    if str(metadata.get("inputMode") or "").strip().lower() != "blank":
+        return False
+    if len(messages) not in {1, 2}:
+        return False
+
+    def is_plain_empty_user(message: Any) -> bool:
+        return (
+            isinstance(message, dict)
+            and set(message).issubset({"role", "content"})
+            and str(message.get("role") or "").strip().lower() == "user"
+            and message.get("content") == ""
+        )
+
+    if len(messages) == 1:
+        return is_plain_empty_user(messages[0])
+
+    continuation = messages[0]
+    if not isinstance(continuation, dict):
+        return False
+    if not set(continuation).issubset({"role", "content"}):
+        return False
+    if str(continuation.get("role") or "").strip().lower() != "assistant":
+        return False
+    if not isinstance(continuation.get("content"), str):
+        return False
+    if not continuation["content"].strip():
+        return False
+    return is_plain_empty_user(messages[1])
+
+
 def _strict_blank_responses_messages(
     messages: List[Any],
     metadata: Optional[Dict[str, Any]],
 ) -> list[dict[str, Any]] | None:
-    if not isinstance(metadata, dict):
-        return None
-    if metadata.get("strictPromptPayload") is not True:
-        return None
-    if str(metadata.get("inputMode") or "").strip().lower() != "blank":
-        return None
-    if len(messages) != 1 or not isinstance(messages[0], dict):
-        return None
-    message = messages[0]
-    if str(message.get("role") or "").strip().lower() != "user":
-        return None
-    if message.get("content") != "":
-        return None
-    if any(message.get(key) for key in ("attachments", "references", "tool_calls", "toolCalls")):
+    if len(messages) != 1 or not _is_strict_blank_input(messages, metadata):
         return None
     return [
         {
@@ -477,6 +502,35 @@ def _strict_blank_responses_messages(
             "content": [{"type": "input_text", "text": ""}],
         }
     ]
+
+
+def _strict_blank_chat_completions_messages(
+    messages: List[Any],
+    metadata: Optional[Dict[str, Any]],
+) -> list[dict[str, Any]] | None:
+    if not _is_strict_blank_input(messages, metadata):
+        return None
+    normalized = [
+        (
+            {
+                "role": "assistant",
+                "content": messages[0]["content"],
+            }
+            if len(messages) == 2
+            else {
+                "role": "user",
+                "content": [{"type": "text", "text": ""}],
+            }
+        )
+    ]
+    if len(messages) == 2:
+        normalized.append(
+            {
+                "role": "user",
+                "content": [{"type": "text", "text": ""}],
+            }
+        )
+    return normalized
 
 
 def _payload_conversation_items(payload: Dict[str, Any]) -> List[Any]:
@@ -1906,6 +1960,13 @@ class LLMClient:
                 provider_messages,
                 self.adapter,
             )
+        if self.protocol_route.wire_protocol == WireProtocol.CHAT_COMPLETIONS:
+            strict_blank_messages = _strict_blank_chat_completions_messages(
+                projection_messages,
+                metadata,
+            )
+            if strict_blank_messages is not None:
+                provider_messages = strict_blank_messages
         build_input = PayloadBuildInput(
             messages=provider_messages,
             tools=selected_tools,
