@@ -2708,7 +2708,10 @@ def _invoke_strict_self_observation_llm(
     messages = (
         [
             {"role": "assistant", "content": bounded_previous_output},
-            {"role": "user", "content": ""},
+            {
+                "role": "user",
+                "content": [{"type": "input_text", "text": ""}],
+            },
         ]
         if bounded_previous_output
         else [{"role": "user", "content": strict_prompt}]
