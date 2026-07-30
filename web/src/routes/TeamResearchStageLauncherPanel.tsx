@@ -509,8 +509,8 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
       ? `${selectedExperimentAdapter?.resolvedAdapterId} · ${selectedExperimentAdapter?.selectionSource}`
       : selectedExperimentAdapterStatus === "select_required"
         ? (lang === "zh"
-          ? `已发现 ${selectedExperimentRegisteredAdapters.length} 个可用执行器，进入配置页后明确选择。`
-          : `${selectedExperimentRegisteredAdapters.length} available adapter(s); choose one in setup.`)
+          ? `已登记 ${selectedExperimentRegisteredAdapters.length} 个候选执行器；当前模式尚未自动就绪，请明确选择满足能力要求的执行器。`
+          : `${selectedExperimentRegisteredAdapters.length} candidate adapter(s) are registered; this mode is not automatically ready, so choose one that satisfies its capability contract.`)
         : selectedExperimentAdapterStatus === "not_required"
           ? (lang === "zh"
             ? "当前闭环只生成假设与研究计划，不会启动真实实验。"

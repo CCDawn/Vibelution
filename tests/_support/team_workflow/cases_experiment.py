@@ -665,6 +665,156 @@ def test_experiment_plan_draft_uses_ready_algorithm_hypotheses_and_blocks_full_r
     assert status["boundaries"]["autoExecution"] is False
     assert status["boundaries"]["createsExperimentAttempt"] is False
 
+
+def test_experiment_plan_rejects_blocked_structured_placeholders_as_completed_fields(
+    tmp_path, monkeypatch
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="ai科学研究团队")
+    stage = team_workflow_orchestration_service.start_research_stage_round(
+        team["teamId"],
+        {"stageType": "experiment", "topic": "sleep mechanism experiment"},
+    )
+
+    draft = team_workflow_orchestration_service.create_experiment_plan(
+        team["teamId"],
+        {
+            "stageRoundId": stage["stageRound"]["stageRoundId"],
+            "createdByAgent": "Experiment Planning Agent",
+            "dataset": {"status": "blocked", "name": None, "reason": "not selected"},
+            "metric": {"status": "draft_blocked", "primaryMetric": None},
+            "baseline": {"status": "blocked", "name": None},
+            "smokePlan": {"status": "blocked", "protocol": None},
+        },
+    )
+
+    assert draft["plan"]["experimentPlan"] == {
+        "dataset": "",
+        "metric": "",
+        "baseline": "",
+        "smokePlan": "",
+    }
+    checklist = {
+        item["item"]: item["status"]
+        for item in draft["plan"]["readinessChecklist"]
+    }
+    assert checklist["dataset"] == "needs_attention"
+    assert checklist["metric"] == "needs_attention"
+    assert checklist["baseline"] == "needs_attention"
+    assert checklist["smoke_plan"] == "needs_attention"
+    assert "{'status':" not in json.dumps(draft["plan"], ensure_ascii=False)
+
+
+def test_experiment_plan_store_projects_old_structured_placeholders_without_rewrite(
+    tmp_path, monkeypatch
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="ai科学研究团队")
+    plan_path = team_workflow_orchestration_service._experiment_plan_store_path(
+        team["teamId"]
+    )
+    blocked_repr = "{'status': 'blocked', 'name': None}"
+    raw_store = {
+        "schemaVersion": 1,
+        "storeKind": team_workflow_orchestration_service.EXPERIMENT_PLAN_STORE_KIND,
+        "teamId": team["teamId"],
+        "activePlanId": "plan-old-structured-placeholder",
+        "plans": [
+            {
+                "planId": "plan-old-structured-placeholder",
+                "teamId": team["teamId"],
+                "stageRoundId": "stage-old-structured-placeholder",
+                "status": "draft",
+                "experimentPlan": {
+                    "dataset": blocked_repr,
+                    "metric": blocked_repr,
+                    "baseline": blocked_repr,
+                    "smokePlan": blocked_repr,
+                },
+                "experimentContract": {
+                    "schemaVersion": 2,
+                    "planId": "plan-old-structured-placeholder",
+                    "teamId": team["teamId"],
+                    "researchProfileId": "generic-research",
+                    "researchMode": "full_research_loop",
+                    "purpose": {
+                        "primaryPurpose": "feasibility",
+                        "secondaryPurposes": [],
+                    },
+                    "experimentMethod": "model_training_inference",
+                    "adapterSelection": {
+                        "requestedAdapterId": "",
+                        "resolvedAdapterId": "",
+                        "resolvedAdapterVersion": "",
+                        "selectionSource": "unresolved",
+                        "unavailableReason": "No Adapter satisfies required capabilities.",
+                    },
+                    "researchQuestion": "sleep mechanism experiment",
+                    "objective": "",
+                    "hypothesisRefs": [],
+                    "evidenceRefs": [],
+                    "constraints": [],
+                    "methodConfig": {
+                        "dataset": blocked_repr,
+                        "baseline": blocked_repr,
+                        "smokePlan": blocked_repr,
+                    },
+                    "metricContract": {
+                        "primaryMetric": blocked_repr,
+                        "metrics": [
+                            {"name": blocked_repr, "direction": "descriptive"}
+                        ],
+                    },
+                    "decisionContract": {
+                        "successCriteria": [],
+                        "failureCriteria": [],
+                        "inconclusiveCriteria": [],
+                    },
+                    "artifactContract": {
+                        "requiredArtifacts": [],
+                        "requiredLogTypes": [],
+                    },
+                    "reproducibilityContract": {
+                        "seeds": [],
+                        "captureEnvironment": True,
+                        "captureInputHash": True,
+                        "captureConfigHash": True,
+                        "reproductionCommand": "",
+                    },
+                    "iterationContract": {
+                        "requiresResultConclusion": True,
+                        "requiresFeedbackSignals": True,
+                        "requiresPlanDiff": True,
+                    },
+                    "supersedesPlanId": "",
+                },
+                "selectedHypotheses": [],
+                "baselineSelection": {"baseline": blocked_repr},
+                "createdAt": "2026-07-29T00:00:00+00:00",
+                "updatedAt": "2026-07-29T00:00:00+00:00",
+            }
+        ],
+    }
+    team_workflow_orchestration_service._write_json(plan_path, raw_store)
+
+    projected = team_workflow_orchestration_service._load_experiment_plan_store(
+        team["teamId"]
+    )
+
+    assert projected["plans"][0]["experimentPlan"] == {
+        "dataset": "",
+        "metric": "",
+        "baseline": "",
+        "smokePlan": "",
+    }
+    assert projected["plans"][0]["readiness"]["readyForPlanReview"] is False
+    assert (
+        projected["plans"][0]["contractMigration"]["projectionRepair"]
+        == "structured_placeholder_removed"
+    )
+    assert team_workflow_orchestration_service._read_json(plan_path) == raw_store
+
+
 def test_experiment_status_separates_frozen_design_best_result_and_latest_diagnostic(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(team_workflow_orchestration_service, "load_public_config", lambda: {"llm": {"providers": {}}})
