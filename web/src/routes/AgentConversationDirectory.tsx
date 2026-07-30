@@ -78,6 +78,22 @@ export function visibleDirectoryAgents(
   });
 }
 
+export function agentDirectorySessionCount(
+  agent: AgentInstance,
+  knownSessionCount: number,
+  knownSessionIds: ReadonlySet<string>,
+) {
+  const sessionCount = Math.max(0, knownSessionCount);
+  const directSessionId = String(agent.directSessionId || "").trim();
+  const directSessionVisibility = String(agent.metadata?.directSessionVisibility || "").trim();
+  const hasUnindexedActiveDirectSession = (
+    Boolean(directSessionId)
+    && directSessionVisibility === "active_session"
+    && !knownSessionIds.has(directSessionId)
+  );
+  return sessionCount + (hasUnindexedActiveDirectSession ? 1 : 0);
+}
+
 export function agentDirectorySection(agent: AgentInstance): AgentDirectorySection {
   const primaryMode = String(agent.primaryMode || "").trim();
   const roleKey = String(agent.roleKey || "").trim();
@@ -126,6 +142,7 @@ export function AgentConversationDirectory({
     DEFAULT_COLLAPSED_DIRECTORY_SECTIONS,
   );
   const sessionCountByAgentId = new Map<string, number>();
+  const sessionIdsByAgentId = new Map<string, Set<string>>();
   const latestSessionByAgentId = new Map<string, SessionSummary>();
   for (const session of sessions) {
     const agentId = String(session.agentId || "").trim();
@@ -133,6 +150,12 @@ export function AgentConversationDirectory({
       continue;
     }
     sessionCountByAgentId.set(agentId, (sessionCountByAgentId.get(agentId) || 0) + 1);
+    const sessionIds = sessionIdsByAgentId.get(agentId) || new Set<string>();
+    const sessionId = String(session.id || "").trim();
+    if (sessionId) {
+      sessionIds.add(sessionId);
+    }
+    sessionIdsByAgentId.set(agentId, sessionIds);
     const previous = latestSessionByAgentId.get(agentId);
     if (!previous || String(previous.updatedAt || previous.lastActive || "") < String(session.updatedAt || session.lastActive || "")) {
       latestSessionByAgentId.set(agentId, session);
@@ -143,7 +166,11 @@ export function AgentConversationDirectory({
     const agentId = String(agent.agentId || "").trim();
     const latestSession = latestSessionByAgentId.get(agentId);
     const display = agentDisplayInfo(agent, lang, { resolveModelLabel });
-    const sessionCount = sessionCountByAgentId.get(agentId) || 0;
+    const sessionCount = agentDirectorySessionCount(
+      agent,
+      sessionCountByAgentId.get(agentId) || 0,
+      sessionIdsByAgentId.get(agentId) || new Set<string>(),
+    );
     const active = agentId === activeAgentId;
     const avatarUrl = String(agent.avatarImageUrl || "").trim();
     return (
