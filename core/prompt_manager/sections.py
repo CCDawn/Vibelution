@@ -264,22 +264,36 @@ def make_task_checklist_section() -> SystemPromptSection:
     )
 
 
-def make_codebase_map_section() -> SystemPromptSection:
+def make_codebase_map_section(
+    build_context: BuildContext | None = None,
+) -> SystemPromptSection:
     """代码库认知地图 — 读取缓存文件（由 ToolExecutor 钩子自动更新）。"""
 
     def compute() -> Optional[str]:
         try:
             from core.prompt_manager.codebase_map_builder import get_codebase_map
-            return get_codebase_map(force_refresh=False) or None
+            return get_codebase_map(
+                force_refresh=False,
+                current_goal=(
+                    build_context.current_goal
+                    if build_context is not None
+                    else None
+                ),
+                state_memory=(
+                    build_context.state_memory
+                    if build_context is not None
+                    else None
+                ),
+            ) or None
         except Exception:
             return None
 
     return SystemPromptSection(
         name="CODEBASE_MAP",
         compute=compute,
-        cache_break=False,
+        cache_break=True,
         priority=30,
-        description="代码库结构认知地图（自动更新）",
+        description="代码库结构认知地图（按当前 Agent 目标自动更新）",
     )
 
 
@@ -654,6 +668,7 @@ def create_default_sections(
     project_root: Path,
     enable_workspace: bool = False,
     section_configs: Optional[List[Any]] = None,
+    build_context: BuildContext | None = None,
 ) -> List[SystemPromptSection]:
     """创建默认章节列表（不含 MEMORY，它依赖 BuildContext 在 build 时动态创建）。
 
@@ -696,7 +711,7 @@ def create_default_sections(
 
     sections.append(make_task_checklist_section())
     sections.append(make_user_profile_section())
-    sections.append(make_codebase_map_section())
+    sections.append(make_codebase_map_section(build_context))
     sections.append(make_git_memory_section())
     sections.append(make_runtime_log_index_section())
     sections.append(make_delegation_rules_section())

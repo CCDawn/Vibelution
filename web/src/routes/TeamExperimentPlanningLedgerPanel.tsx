@@ -3,7 +3,7 @@
  * Wave 8J: extracted from TeamsRoute.tsx for domain componentization.
  */
 import type { ReactNode } from "react";
-import { AlertTriangle, CheckCircle2, Save, Send } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Play, Save, Send } from "lucide-react";
 
 import type { ExperimentMethodId, Team } from "../api/types";
 import { VNativeButton, VNativeInput, VNativeSelect, VNativeTextarea } from "../components/vui";
@@ -57,6 +57,10 @@ export type TeamExperimentPlanningLedgerPanelProps = {
   selectedTeamRegisterExperimentBaselineArtifactError: Error | null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   selectedTeamRegisterExperimentBaselineArtifactResult: any;
+  selectedTeamRunExperimentSmokePending: boolean;
+  selectedTeamRunExperimentSmokeError: Error | null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  selectedTeamRunExperimentSmokeResult: any;
   selectedTeamRegisterExperimentSmokeResultPending: boolean;
   selectedTeamRegisterExperimentSmokeResultError: Error | null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -72,6 +76,7 @@ export type TeamExperimentPlanningLedgerPanelProps = {
   createExperimentPlanFromWorkspace: (methodRequest?: ExperimentPlanMethodRequest) => void;
   freezeExperimentDesignFromWorkspace: (plan: ExperimentPlanRecord) => void;
   registerExperimentBaselineArtifactFromWorkspace: (plan: ExperimentPlanRecord) => void;
+  runExperimentSmokeFromWorkspace: (plan: ExperimentPlanRecord, adapter: string, seed: number) => void;
   registerExperimentSmokeResultFromWorkspace: (plan: ExperimentPlanRecord) => void;
   registerExperimentFullRunResultFromWorkspace: (plan: ExperimentPlanRecord) => void;
   requestExperimentKnowledgeIngestionFromWorkspace: (plan: ExperimentPlanRecord) => void;
@@ -104,6 +109,9 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
     selectedTeamRegisterExperimentBaselineArtifactPending,
     selectedTeamRegisterExperimentBaselineArtifactError,
     selectedTeamRegisterExperimentBaselineArtifactResult,
+    selectedTeamRunExperimentSmokePending,
+    selectedTeamRunExperimentSmokeError,
+    selectedTeamRunExperimentSmokeResult,
     selectedTeamRegisterExperimentSmokeResultPending,
     selectedTeamRegisterExperimentSmokeResultError,
     selectedTeamRegisterExperimentSmokeResultResult,
@@ -116,6 +124,7 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
     createExperimentPlanFromWorkspace,
     freezeExperimentDesignFromWorkspace,
     registerExperimentBaselineArtifactFromWorkspace,
+    runExperimentSmokeFromWorkspace,
     registerExperimentSmokeResultFromWorkspace,
     registerExperimentFullRunResultFromWorkspace,
     requestExperimentKnowledgeIngestionFromWorkspace,
@@ -147,6 +156,7 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
       ?? statusPayload?.activePlan
       ?? null;
     const activeBaselineArtifact = activePlan?.baselineSelection.activeBaselineArtifact ?? null;
+    const activeSmokeRun = selectedTeamRunExperimentSmokeResult?.smokeRun ?? activePlan?.activeSmokeRun ?? null;
     const activeSmokeResult = activePlan?.activeSmokeResult ?? null;
     const activeFullRunResult = activePlan?.activeFullRunResult ?? null;
     const knowledgeIngestion = activePlan?.knowledgeIngestion ?? null;
@@ -160,6 +170,19 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
     const activePurposeDescriptor = experimentMethodCatalogQuery.data?.experimentPurposes.find(
       (purpose: any) => purpose.purposeId === activeExperimentContract?.purpose.primaryPurpose,
     );
+    const boundedSmokeAdapters = (experimentMethodCatalogQuery.data?.adapters ?? []).filter(
+      (adapter: any) =>
+        adapter.method === activeExperimentContract?.experimentMethod
+        && adapter.availability === "available"
+        && adapter.formalResult !== true
+        && Array.isArray(adapter.capabilities)
+        && adapter.capabilities.includes("smoke"),
+    );
+    const requestedSmokeAdapterId = activeExperimentContract?.adapterSelection?.requestedAdapterId ?? "";
+    const activeSmokeAdapter =
+      boundedSmokeAdapters.find((adapter: any) => adapter.adapterId === requestedSmokeAdapterId)
+      ?? boundedSmokeAdapters[0]
+      ?? null;
     const hypotheses = statusPayload?.readyHypothesisCandidates?.length
       ? statusPayload.readyHypothesisCandidates
       : statusPayload?.hypothesisCandidates ?? [];
@@ -177,6 +200,7 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
     const canRegisterBaselineArtifact = Boolean(
       selectedTeam?.teamId
       && activePlan
+      && designExecutionAllowed
       && !activePlan.baselineSelection.activeBaselineReady
       && experimentBaselineArtifactDraft.artifactPath.trim()
       && experimentBaselineArtifactDraft.reproductionCommand.trim()
@@ -190,6 +214,14 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
       && experimentSmokeResultDraft.metricValue.trim()
       && (experimentSmokeResultDraft.resultPath.trim() || experimentSmokeResultDraft.logRef.trim())
       && !selectedTeamRegisterExperimentSmokeResultPending,
+    );
+    const canRunBoundedSmoke = Boolean(
+      selectedTeam?.teamId
+      && activePlan
+      && designExecutionAllowed
+      && activePlan.readiness.readyForSmoke
+      && activeSmokeAdapter?.adapterId
+      && !selectedTeamRunExperimentSmokePending,
     );
     const canRegisterFullRunResult = Boolean(
       selectedTeam?.teamId
@@ -370,6 +402,31 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
             )}
             {activeBaselineArtifact ? (
               <>
+                <div className={styles.experimentBaselineArtifact}>
+                  <span>{lang === "zh" ? "受控 Smoke" : "Bounded smoke"}</span>
+                  <strong title={activeSmokeRun?.artifactHash || activeSmokeAdapter?.adapterId || ""}>
+                    {activeSmokeRun
+                      ? `${activeSmokeRun.adapter} · ${activeSmokeRun.status}`
+                      : activeSmokeAdapter?.adapterId || (lang === "zh" ? "没有可用的离线执行器" : "No offline Adapter available")}
+                  </strong>
+                  <small>
+                    {activeSmokeRun
+                      ? `${activeSmokeRun.decisionHint} · seed ${activeSmokeRun.seed}`
+                      : (lang === "zh"
+                        ? "仅运行后端白名单离线 Smoke；不会启动 full run，也不会生成正式科学结论。"
+                        : "Runs only the backend allowlisted offline smoke; no full run or formal scientific claim.")}
+                  </small>
+                  <VNativeButton
+                    type="button"
+                    onClick={() => runExperimentSmokeFromWorkspace(activePlan, activeSmokeAdapter?.adapterId || "", 42)}
+                    disabled={!canRunBoundedSmoke}
+                  >
+                    <Play size={13} />
+                    {selectedTeamRunExperimentSmokePending
+                      ? (lang === "zh" ? "Smoke 运行中" : "Running smoke")
+                      : (lang === "zh" ? "运行受控 Smoke" : "Run bounded smoke")}
+                  </VNativeButton>
+                </div>
                 {activeSmokeResult ? (
                   <div
                     className={[
@@ -752,6 +809,7 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
         {selectedTeamCreateExperimentPlanError ? <div className={styles.workflowError}>{selectedTeamCreateExperimentPlanError.message}</div> : null}
         {selectedTeamFreezeExperimentDesignError ? <div className={styles.workflowError}>{selectedTeamFreezeExperimentDesignError.message}</div> : null}
         {selectedTeamRegisterExperimentBaselineArtifactError ? <div className={styles.workflowError}>{selectedTeamRegisterExperimentBaselineArtifactError.message}</div> : null}
+        {selectedTeamRunExperimentSmokeError ? <div className={styles.workflowError}>{selectedTeamRunExperimentSmokeError.message}</div> : null}
         {selectedTeamRegisterExperimentSmokeResultError ? <div className={styles.workflowError}>{selectedTeamRegisterExperimentSmokeResultError.message}</div> : null}
         {selectedTeamRegisterExperimentFullRunResultError ? <div className={styles.workflowError}>{selectedTeamRegisterExperimentFullRunResultError.message}</div> : null}
         {selectedTeamRequestExperimentKnowledgeIngestionError ? <div className={styles.workflowError}>{selectedTeamRequestExperimentKnowledgeIngestionError.message}</div> : null}

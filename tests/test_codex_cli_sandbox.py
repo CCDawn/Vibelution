@@ -61,6 +61,18 @@ class _CompletedProcess:
 def test_execute_uses_native_codex_sandbox_without_shell(monkeypatch, tmp_path):
     recorded = {}
 
+    monkeypatch.setenv(
+        "VIBELUTION_DATA_HOME",
+        str(tmp_path.parent / "formal-vibelution-data"),
+    )
+    monkeypatch.setenv(
+        "VIBELUTION_CONFIG_HOME",
+        str(tmp_path.parent / "formal-vibelution-config"),
+    )
+    monkeypatch.setenv(
+        "VIBELUTION_CONFIG_PATH",
+        str(tmp_path.parent / "formal-vibelution-config" / "config.toml"),
+    )
     monkeypatch.setattr(codex_cli_sandbox.os, "name", "nt")
     monkeypatch.setattr(
         codex_cli_sandbox,
@@ -80,6 +92,12 @@ def test_execute_uses_native_codex_sandbox_without_shell(monkeypatch, tmp_path):
             Path(kwargs["env"]["VIBELUTION_CODEX_SANDBOX_TEMP"])
             / "sitecustomize.py"
         ).is_file()
+        recorded["vibelution_data_home_exists"] = Path(
+            kwargs["env"]["VIBELUTION_DATA_HOME"]
+        ).is_dir()
+        recorded["vibelution_config_home_exists"] = Path(
+            kwargs["env"]["VIBELUTION_CONFIG_HOME"]
+        ).is_dir()
         return _CompletedProcess()
 
     monkeypatch.setattr(codex_cli_sandbox.subprocess, "Popen", fake_popen)
@@ -112,6 +130,18 @@ def test_execute_uses_native_codex_sandbox_without_shell(monkeypatch, tmp_path):
     )
     assert "--basetemp=.runtime/codex-cli/" in recorded["kwargs"]["env"]["PYTEST_ADDOPTS"]
     assert recorded["sitecustomize_exists"] is True
+    sandbox_temp = Path(recorded["kwargs"]["env"]["VIBELUTION_CODEX_SANDBOX_TEMP"])
+    assert Path(recorded["kwargs"]["env"]["VIBELUTION_DATA_HOME"]) == (
+        sandbox_temp / "vibelution-data"
+    )
+    assert Path(recorded["kwargs"]["env"]["VIBELUTION_CONFIG_HOME"]) == (
+        sandbox_temp / "vibelution-config"
+    )
+    assert Path(recorded["kwargs"]["env"]["VIBELUTION_CONFIG_PATH"]) == (
+        sandbox_temp / "vibelution-config" / "config.toml"
+    )
+    assert recorded["vibelution_data_home_exists"] is True
+    assert recorded["vibelution_config_home_exists"] is True
     assert not list((tmp_path / ".runtime" / "codex-cli").glob("*"))
 
 

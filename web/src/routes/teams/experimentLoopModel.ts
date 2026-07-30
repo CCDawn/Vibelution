@@ -75,6 +75,22 @@ export type ExperimentSmokeResultRecord = {
   recordedAt: string;
 };
 
+export type ExperimentSmokeRunRecord = {
+  smokeRunId: string;
+  adapter: string;
+  seed: number;
+  runnerMode: string;
+  status: ExperimentSmokeResultStatus | string;
+  decisionHint: string;
+  metrics: Record<string, unknown>;
+  artifactHash: string;
+  logs: string;
+  proxyOnly: boolean;
+  boundaries: string[];
+  recordedByAgent: string;
+  recordedAt: string;
+};
+
 export type ExperimentFullRunResultStatus = "passed" | "failed" | "needs_review";
 
 export const EXPERIMENT_FULL_RUN_RESULT_STATUSES: ExperimentFullRunResultStatus[] = ["needs_review", "passed", "failed"];
@@ -168,6 +184,9 @@ export type ExperimentPlanRecord = {
   activeSmokeResultId?: string;
   activeSmokeResult?: ExperimentSmokeResultRecord;
   smokeResults?: ExperimentSmokeResultRecord[];
+  activeSmokeRunId?: string;
+  activeSmokeRun?: ExperimentSmokeRunRecord;
+  smokeRunResults?: ExperimentSmokeRunRecord[];
   activeFullRunResultId?: string;
   activeFullRunResult?: ExperimentFullRunResultRecord;
   fullRunResults?: ExperimentFullRunResultRecord[];
@@ -396,6 +415,20 @@ export type ExperimentSmokeResultRegisterPayload = {
   stageRoundStatus: ResearchStageRoundStatusPayload;
   workflow: TeamWorkflowOrchestration;
   boundaries: ExperimentPlanningStatusPayload["boundaries"];
+};
+
+export type ExperimentSmokeRunPayload = {
+  schemaVersion: number;
+  teamId: string;
+  planId: string;
+  adapter: string;
+  seed: number;
+  status: ExperimentSmokeResultStatus | string;
+  decisionHint: string;
+  runnerResult: Record<string, unknown>;
+  smokeRun: ExperimentSmokeRunRecord;
+  experimentStatus: string;
+  workflowId: string;
 };
 
 export type ExperimentFullRunResultRegisterPayload = {

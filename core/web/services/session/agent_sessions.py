@@ -935,15 +935,83 @@ def list_child_sessions(session_id: str) -> list[dict[str, Any]]:
     normalized_session_id = str(session_id or "").strip()
     if not normalized_session_id:
         return []
-    _, conversations = s._load_conversations()
-    root_id = s._root_session_id_for_conversations(normalized_session_id, conversations)
-    children = [
-        s._build_session_summary(item)
-        for item in conversations
-        if str(item.get("parentSessionId") or "").strip() == root_id
-        and str(item.get("sessionKind") or "").strip() == "child"
-    ]
+    started_at = s._perf_counter()
+    chat_state_wait_started_at = s._perf_counter()
+    with s._CHAT_STATE_LOCK, s.chat_state_transaction(s.PROJECT_ROOT):
+        chat_state_wait_ms = s._elapsed_ms(chat_state_wait_started_at)
+        chat_state_read_started_at = s._perf_counter()
+        payload = s.load_chat_state(s.PROJECT_ROOT)
+        chat_state_read_ms = s._elapsed_ms(chat_state_read_started_at)
+        relationship_scan_started_at = s._perf_counter()
+        conversations = [
+            raw
+            for raw in list(payload.get("conversations") or [])
+            if isinstance(raw, dict)
+        ]
+        source = next(
+            (
+                raw
+                for raw in conversations
+                if str(raw.get("conversation_id") or raw.get("id") or "").strip()
+                == normalized_session_id
+            ),
+            None,
+        )
+        root_id = (
+            s._raw_conversation_root_session_id(source, normalized_session_id)
+            if source is not None
+            else normalized_session_id
+        )
+        child_records = [
+            dict(raw)
+            for raw in conversations
+            if s._raw_conversation_session_kind(raw) == "child"
+            and str(raw.get("parent_session_id") or raw.get("parentSessionId") or "").strip()
+            == root_id
+        ]
+        relationship_scan_ms = s._elapsed_ms(relationship_scan_started_at)
+
+    child_projection_started_at = s._perf_counter()
+    children: list[dict[str, Any]] = []
+    if child_records:
+        agent_by_id = s._agent_lookup_for_conversations()
+        hidden_team_member_agent_ids = s._agent_directory_stub_hidden_team_member_ids()
+        for raw in child_records:
+            conversation = s._normalize_conversation(
+                raw,
+                agent_by_id=agent_by_id,
+                hidden_team_member_agent_ids=hidden_team_member_agent_ids,
+                ensure_workspace=False,
+                lightweight=True,
+            )
+            if conversation is not None:
+                children.append(s._build_session_summary(conversation, hydrate_agent=False))
     children.sort(key=lambda item: str(item.get("updatedAt") or ""), reverse=True)
+    child_projection_ms = s._elapsed_ms(child_projection_started_at)
+    try:
+        s.record_runtime_scene_event(
+            "conversation",
+            "session_child_list",
+            "session.child_list.loaded",
+            level="info",
+            outcome="observed",
+            message="Child sessions loaded through the read-only lightweight relationship index.",
+            fields={
+                "requestedSessionId": normalized_session_id,
+                "rootSessionId": root_id,
+                "resultCount": len(children),
+                "elapsedMs": s._elapsed_ms(started_at),
+                "readOnly": True,
+                "projectionSource": "lightweight_child_relationship_index",
+                "chatStateWaitMs": chat_state_wait_ms,
+                "chatStateReadMs": chat_state_read_ms,
+                "relationshipScanMs": relationship_scan_ms,
+                "childProjectionMs": child_projection_ms,
+            },
+            lifecycle=False,
+        )
+    except Exception:
+        pass
     return children
 
 

@@ -2372,6 +2372,87 @@ def test_create_child_session_api_persists_root_child_relationship(tmp_path, mon
     assert [item["id"] for item in list_response.json()] == [child_id]
 
 
+def test_list_child_sessions_uses_read_only_relationship_projection(tmp_path, monkeypatch):
+    recorded_scene_events: list[tuple[tuple, dict]] = []
+    save_chat_state(
+        tmp_path,
+        {
+            "version": 1,
+            "active_conversation_id": "session-root",
+            "conversations": [
+                {
+                    "conversation_id": "session-root",
+                    "title": "Root",
+                    "session_kind": "main",
+                    "updated_at": "2026-07-30T01:00:00Z",
+                    "messages": [],
+                },
+                {
+                    "conversation_id": "session-child-a",
+                    "title": "Child A",
+                    "session_kind": "child",
+                    "root_session_id": "session-root",
+                    "parent_session_id": "session-root",
+                    "updated_at": "2026-07-30T02:00:00Z",
+                    "messages": [],
+                },
+                {
+                    "conversation_id": "session-child-b",
+                    "title": "Child B",
+                    "session_kind": "child",
+                    "root_session_id": "session-root",
+                    "parent_session_id": "session-root",
+                    "updated_at": "2026-07-30T03:00:00Z",
+                    "messages": [],
+                },
+            ],
+        },
+    )
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        session_service,
+        "list_sessions",
+        lambda *args, **kwargs: pytest.fail("child-session listing must not replace the primary list cache"),
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_load_conversations",
+        lambda *args, **kwargs: pytest.fail("child-session listing must not rebuild full conversations"),
+    )
+    monkeypatch.setattr(
+        session_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: recorded_scene_events.append((args, kwargs)) or {"accepted": True},
+    )
+
+    children = session_service.list_child_sessions("session-child-a")
+
+    assert [item["id"] for item in children] == ["session-child-b", "session-child-a"]
+    child_list_events = [
+        item
+        for item in recorded_scene_events
+        if item[0][:3]
+        == (
+            "conversation",
+            "session_child_list",
+            "session.child_list.loaded",
+        )
+    ]
+    assert len(child_list_events) == 1
+    fields = child_list_events[0][1]["fields"]
+    assert fields["requestedSessionId"] == "session-child-a"
+    assert fields["rootSessionId"] == "session-root"
+    assert fields["resultCount"] == 2
+    assert fields["elapsedMs"] >= 0
+    assert fields["readOnly"] is True
+    assert fields["projectionSource"] == "lightweight_child_relationship_index"
+    assert fields["chatStateWaitMs"] >= 0
+    assert fields["chatStateReadMs"] >= 0
+    assert fields["relationshipScanMs"] >= 0
+    assert fields["childProjectionMs"] >= 0
+
+
 def test_create_child_session_keeps_child_out_of_top_level_index(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)

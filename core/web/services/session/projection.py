@@ -56,12 +56,15 @@ def list_sessions(
     try:
         agent_by_id = s._agent_lookup_for_conversations()
         hidden_team_member_agent_ids = s._agent_directory_stub_hidden_team_member_ids()
+        load_phase_timings: dict[str, int] = {}
         active_id, conversations = s._load_conversations(
             repair=False,
             agent_by_id=agent_by_id,
             hidden_team_member_agent_ids=hidden_team_member_agent_ids,
             lightweight=True,
+            phase_timings=load_phase_timings,
         )
+        summary_projection_started_at = s._perf_counter()
         conversations = s._append_agent_directory_conversations(
             conversations,
             agent_by_id=agent_by_id,
@@ -88,6 +91,7 @@ def list_sessions(
                 -s._timestamp_sort_key(item.get("updatedAt") or item.get("lastActive") or ""),
             )
         )
+        summary_projection_ms = s._elapsed_ms(summary_projection_started_at)
         s._finish_session_list_cache_build(
             signature=signature,
             sessions=sessions,
@@ -104,6 +108,10 @@ def list_sessions(
             cache_age_ms=0,
             cache_ttl_ms=int(round(s._SESSION_LIST_CACHE_TTL_SECONDS * 1000)),
             waited_for_inflight=waited_for_inflight,
+            chat_state_wait_ms=load_phase_timings.get("chatStateWaitMs"),
+            chat_state_read_ms=load_phase_timings.get("chatStateReadMs"),
+            conversation_normalize_ms=load_phase_timings.get("conversationNormalizeMs"),
+            summary_projection_ms=summary_projection_ms,
         )
         return sessions
     except Exception:
@@ -3003,10 +3011,18 @@ def _load_conversations(
     agent_by_id: dict[str, dict[str, Any]] | None = None,
     hidden_team_member_agent_ids: set[str] | None = None,
     lightweight: bool = False,
+    phase_timings: dict[str, int] | None = None,
 ) -> tuple[str, list[dict[str, Any]]]:
     s = _service()
+    wait_started_at = s._perf_counter()
     with s._CHAT_STATE_LOCK, s.chat_state_transaction(s.PROJECT_ROOT):
+        if phase_timings is not None:
+            phase_timings["chatStateWaitMs"] = s._elapsed_ms(wait_started_at)
+        read_started_at = s._perf_counter()
         payload = s.load_chat_state(s.PROJECT_ROOT)
+        if phase_timings is not None:
+            phase_timings["chatStateReadMs"] = s._elapsed_ms(read_started_at)
+        normalize_started_at = s._perf_counter()
         if repair:
             payload = s._repair_stale_running_conversations(payload)
         active_id = str(payload.get("active_conversation_id") or s.DEFAULT_CHAT_CONVERSATION_ID).strip()
@@ -3036,6 +3052,8 @@ def _load_conversations(
         if repair and changed:
             payload["updated_at"] = s._now_timestamp()
             s.save_chat_state(s.PROJECT_ROOT, payload)
+        if phase_timings is not None:
+            phase_timings["conversationNormalizeMs"] = s._elapsed_ms(normalize_started_at)
         return active_id or s.DEFAULT_CHAT_CONVERSATION_ID, conversations
 
 

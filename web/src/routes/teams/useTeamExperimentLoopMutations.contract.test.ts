@@ -7,6 +7,7 @@ const mutationOwners = [
   "createExperimentPlanMutation",
   "freezeExperimentDesignMutation",
   "registerExperimentBaselineArtifactMutation",
+  "runExperimentSmokeMutation",
   "registerExperimentSmokeResultMutation",
   "registerExperimentFullRunResultMutation",
   "requestExperimentKnowledgeIngestionMutation",
@@ -44,6 +45,7 @@ describe("team experiment loop mutations contract", () => {
   it("preserves key write endpoints used by experiment ledger and research loop", () => {
     expect(mutationsSource).toContain("/workflow-orchestration/experiments/plan");
     expect(mutationsSource).toContain("/baseline-artifact");
+    expect(mutationsSource).toContain("/smoke-run");
     expect(mutationsSource).toContain("/smoke-result");
     expect(mutationsSource).toContain("/full-run-result");
     expect(mutationsSource).toContain("/knowledge-ingestion-request");

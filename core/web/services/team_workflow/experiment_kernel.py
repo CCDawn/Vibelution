@@ -228,6 +228,25 @@ def _sanitize_projected_experiment_plan(plan: dict[str, Any]) -> None:
     contract = plan.get("experimentContract") if isinstance(plan.get("experimentContract"), dict) else {}
     method_config = contract.get("methodConfig") if isinstance(contract.get("methodConfig"), dict) else {}
     metric_contract = contract.get("metricContract") if isinstance(contract.get("metricContract"), dict) else {}
+    contract_migration = (
+        plan.get("contractMigration")
+        if isinstance(plan.get("contractMigration"), dict)
+        else {}
+    )
+    design_gate = plan.get("designGate") if isinstance(plan.get("designGate"), dict) else None
+    contract_validation = (
+        plan.get("contractValidation")
+        if isinstance(plan.get("contractValidation"), dict)
+        else {}
+    )
+    project_explicit_design_gate = (
+        design_gate is None
+        and str(plan.get("status") or "").strip().lower() == "draft"
+        and contract.get("schemaVersion") == 2
+        and str(contract.get("status") or "").strip().lower() == "draft"
+        and contract_validation.get("valid") is True
+        and contract_migration.get("status") != "projected_from_v1"
+    )
 
     def needs_projection_repair(value: Any) -> bool:
         if isinstance(value, str):
@@ -249,11 +268,10 @@ def _sanitize_projected_experiment_plan(plan: dict[str, Any]) -> None:
         *(method_config.get(field) for field in ("dataset", "baseline", "smokePlan")),
         metric_contract.get("primaryMetric"),
     ]
-    if not any(needs_projection_repair(value) for value in repair_values):
-        return
-
-    s = _service()
-    sanitized = {
+    structured_placeholder_found = any(
+        needs_projection_repair(value) for value in repair_values
+    )
+    legacy_projection = {
         field: _experiment_plan_field_text(
             legacy.get(field),
             preferred_keys=preferred_keys,
@@ -261,20 +279,61 @@ def _sanitize_projected_experiment_plan(plan: dict[str, Any]) -> None:
         )
         for field, preferred_keys in field_specs.items()
     }
+    canonical_projection = {
+        "dataset": _experiment_plan_field_text(
+            method_config.get("dataset"),
+            preferred_keys=field_specs["dataset"],
+            max_length=500,
+        ),
+        "metric": _experiment_plan_field_text(
+            metric_contract.get("primaryMetric"),
+            preferred_keys=field_specs["metric"],
+            max_length=500,
+        ),
+        "baseline": _experiment_plan_field_text(
+            method_config.get("baseline"),
+            preferred_keys=field_specs["baseline"],
+            max_length=500,
+        ),
+        "smokePlan": _experiment_plan_field_text(
+            method_config.get("smokePlan"),
+            preferred_keys=field_specs["smokePlan"],
+            max_length=1200,
+        ),
+    }
+    sanitized = {
+        field: canonical_projection[field] or legacy_projection[field]
+        for field in field_specs
+    }
+    projection_changed = any(
+        legacy_projection[field] != sanitized[field] for field in field_specs
+    )
+    if (
+        not structured_placeholder_found
+        and not projection_changed
+        and not project_explicit_design_gate
+    ):
+        return
+
+    s = _service()
     plan["experimentPlan"] = sanitized
+    if project_explicit_design_gate:
+        plan["designGate"] = {
+            "status": "draft",
+            "requiresExplicitFreeze": True,
+            "source": "native_v2_plan",
+            "sourceLoopId": "",
+            "sourceDecisionId": "",
+            "sourceProposalId": "",
+            "sourceIdempotencyKey": "",
+            "frozenAt": "",
+            "frozenByAgent": "",
+        }
     for field in ("dataset", "baseline", "smokePlan"):
-        method_config[field] = _experiment_plan_field_text(
-            method_config.get(field),
-            preferred_keys=field_specs[field],
-            max_length=1200 if field == "smokePlan" else 500,
-        )
+        method_config[field] = canonical_projection[field]
     contract["methodConfig"] = method_config
     metric_contract = contract.get("metricContract") if isinstance(contract.get("metricContract"), dict) else {}
-    primary_metric = _experiment_plan_field_text(
-        metric_contract.get("primaryMetric"),
-        preferred_keys=field_specs["metric"],
-        max_length=500,
-    )
+    primary_metric = canonical_projection["metric"]
     metric_contract["primaryMetric"] = primary_metric
     metric_contract["metrics"] = [
         item
@@ -300,12 +359,15 @@ def _sanitize_projected_experiment_plan(plan: dict[str, Any]) -> None:
     plan["baselineSelection"] = baseline_selection
     plan["successMetrics"] = s._dedupe_text_values([sanitized["metric"]])
     _refresh_experiment_plan_readiness(plan)
-    migration = (
-        plan.get("contractMigration")
-        if isinstance(plan.get("contractMigration"), dict)
-        else {}
-    )
-    migration["projectionRepair"] = "structured_placeholder_removed"
+    migration = contract_migration
+    if structured_placeholder_found:
+        migration["projectionRepair"] = "structured_placeholder_removed"
+    elif projection_changed:
+        migration["projectionRepair"] = "canonical_contract_projected"
+    else:
+        migration["projectionRepair"] = "explicit_design_gate_projected"
+    if project_explicit_design_gate:
+        migration["designGateProjection"] = "explicit_draft_gate_projected"
     migration["persistOnNextMutation"] = True
     migration["missingFields"] = list(
         (plan.get("contractValidation") or {}).get("missingFields") or []
@@ -996,12 +1058,19 @@ def _build_experiment_plan_record(
     now = s.utc_now_iso()
     hypothesis_summaries = [s._experiment_hypothesis_summary(item) for item in selected_hypotheses]
     payload_plan = payload.get("experimentPlan") if isinstance(payload.get("experimentPlan"), dict) else {}
+    payload_method_config = payload.get("methodConfig") if isinstance(payload.get("methodConfig"), dict) else {}
+    payload_metric_contract = (
+        payload.get("metricContract")
+        if isinstance(payload.get("metricContract"), dict)
+        else {}
+    )
     dataset = next(
         (
             text
             for value in (
                 payload.get("dataset"),
                 payload_plan.get("dataset"),
+                payload_method_config.get("dataset"),
                 *[
                     item.get("experimentPlan", {}).get("dataset")
                     for item in hypothesis_summaries
@@ -1023,6 +1092,7 @@ def _build_experiment_plan_record(
             for value in (
                 payload.get("metric"),
                 payload_plan.get("metric"),
+                payload_metric_contract.get("primaryMetric"),
                 *[
                     item.get("experimentPlan", {}).get("metric")
                     for item in hypothesis_summaries
@@ -1044,6 +1114,7 @@ def _build_experiment_plan_record(
             for value in (
                 payload.get("baseline"),
                 payload_plan.get("baseline"),
+                payload_method_config.get("baseline"),
                 *[
                     item.get("experimentPlan", {}).get("baseline")
                     for item in hypothesis_summaries
@@ -1066,6 +1137,7 @@ def _build_experiment_plan_record(
             for value in (
                 payload.get("smokePlan"),
                 payload_plan.get("smokePlan"),
+                payload_method_config.get("smokePlan"),
                 *[
                     item.get("experimentPlan", {}).get("smokePlan")
                     for item in hypothesis_summaries
@@ -1127,18 +1199,40 @@ def _build_experiment_plan_record(
     iteration_contract = contract.get("iterationContract") if isinstance(contract.get("iterationContract"), dict) else {}
     source_proposal_id = s._trim_text(iteration_contract.get("sourceProposalId"), max_length=160)
     design_gate = None
-    if source_proposal_id:
+    if contract_validation.get("valid") is True:
         design_gate = {
             "status": "draft",
             "requiresExplicitFreeze": True,
-            "source": "research_loop_decision",
-            "sourceLoopId": s._trim_text(iteration_contract.get("sourceLoopId"), max_length=160),
-            "sourceDecisionId": s._trim_text(iteration_contract.get("sourceDecisionId"), max_length=160),
-            "sourceProposalId": source_proposal_id,
-            "sourceIdempotencyKey": s._trim_text(iteration_contract.get("sourceIdempotencyKey"), max_length=240),
+            "source": "native_v2_plan",
+            "sourceLoopId": "",
+            "sourceDecisionId": "",
+            "sourceProposalId": "",
+            "sourceIdempotencyKey": "",
             "frozenAt": "",
             "frozenByAgent": "",
         }
+    if source_proposal_id:
+        if design_gate is None:
+            design_gate = {
+                "status": "draft",
+                "requiresExplicitFreeze": True,
+                "source": "research_loop_decision",
+                "sourceLoopId": "",
+                "sourceDecisionId": "",
+                "sourceProposalId": "",
+                "sourceIdempotencyKey": "",
+                "frozenAt": "",
+                "frozenByAgent": "",
+            }
+        design_gate.update(
+            {
+                "source": "research_loop_decision",
+                "sourceLoopId": s._trim_text(iteration_contract.get("sourceLoopId"), max_length=160),
+                "sourceDecisionId": s._trim_text(iteration_contract.get("sourceDecisionId"), max_length=160),
+                "sourceProposalId": source_proposal_id,
+                "sourceIdempotencyKey": s._trim_text(iteration_contract.get("sourceIdempotencyKey"), max_length=240),
+            }
+        )
     record = {
         "schemaVersion": s.SCHEMA_VERSION,
         "planId": plan_id,
@@ -1831,15 +1925,47 @@ def _experiment_planning_gaps(
 ) -> list[dict[str, str]]:
     s = _service()
     gaps: list[dict[str, str]] = []
+    active_plan_validation = (
+        active_plan.get("contractValidation")
+        if isinstance((active_plan or {}).get("contractValidation"), dict)
+        else {}
+    )
+    active_plan_readiness = (
+        active_plan.get("readiness")
+        if isinstance((active_plan or {}).get("readiness"), dict)
+        else {}
+    )
+    active_plan_review_ready = bool(
+        active_plan
+        and active_plan_validation.get("valid") is True
+        and active_plan_readiness.get("readyForPlanReview") is True
+    )
     if not latest_experiment:
         gaps.append({"code": "missing_experiment_stage_round", "severity": "blocked", "message": "需要先启动实验规划轮次。"})
     if not hypothesis_candidates:
         gaps.append({"code": "missing_algorithm_hypotheses", "severity": "needs_evidence", "message": "还没有 algorithm_hypothesis 候选可转成实验。"})
     elif not ready_hypotheses:
-        gaps.append({"code": "incomplete_experiment_plan", "severity": "needs_attention", "message": "已有算法假设，但 dataset、metric、baseline 或 smokePlan 不完整。"})
+        gaps.append(
+            {
+                "code": "incomplete_experiment_plan",
+                "severity": "needs_attention",
+                "message": "已有算法假设，但仍需完成假设审查并补齐 dataset、metric、baseline 与 smokePlan。",
+            }
+        )
     if latest_experiment and not active_plan:
         gaps.append({"code": "missing_experiment_plan_draft", "severity": "pending", "message": "实验轮次已启动，但还没有 draft plan 账本记录。"})
-    if active_plan and not bool((active_plan.get("baselineSelection") or {}).get("activeBaselineReady")):
+    if active_plan and not active_plan_review_ready and not any(
+        item.get("code") in {"missing_algorithm_hypotheses", "incomplete_experiment_plan"}
+        for item in gaps
+    ):
+        gaps.append(
+            {
+                "code": "experiment_design_not_review_ready",
+                "severity": "needs_attention",
+                "message": "实验计划草稿尚未通过合同校验与设计审查，不能进入基线或执行门禁。",
+            }
+        )
+    if active_plan_review_ready and not bool((active_plan.get("baselineSelection") or {}).get("activeBaselineReady")):
         gaps.append({"code": "active_baseline_not_registered", "severity": "needs_attention", "message": "已有计划草稿，但 active baseline artifact 仍未登记，不能进入 full run。"})
     elif active_plan and bool((active_plan.get("readiness") or {}).get("readyForSmoke")) and not bool((active_plan.get("readiness") or {}).get("readyForFullRun")):
         active_smoke_result = s._active_experiment_smoke_evidence(active_plan)
@@ -1886,6 +2012,12 @@ def _experiment_planning_readiness_reason(
     if active_plan and bool((active_plan.get("readiness") or {}).get("readyForSmoke")):
         return "active baseline artifact 已登记；可进入 smoke gate，但 full run 仍等待 smoke 结果。"
     if active_plan:
+        validation = active_plan.get("contractValidation") if isinstance(active_plan.get("contractValidation"), dict) else {}
+        readiness = active_plan.get("readiness") if isinstance(active_plan.get("readiness"), dict) else {}
+        if readiness.get("readyForPlanReview") is not True:
+            return "已有实验计划草稿，但缺少可审查的 algorithm_hypothesis；需先完成假设修订与选择。"
+        if validation.get("valid") is not True:
+            return "已有实验计划草稿，但实验合同仍不完整；需先补齐并通过设计审查。"
         return "已有实验计划草稿；下一步补 active baseline artifact 与 smoke 结果。"
     if ready_hypotheses:
         return "已有完整 algorithm_hypothesis，可生成实验计划草稿。"
@@ -1906,7 +2038,11 @@ def _experiment_planning_next_actions(*, active_plan: dict[str, Any] | None, gap
         return ["等待知识库管理员复核实验结果入库包。", "在知识库管理员批准精炼知识项之前，原始日志保持在 RAG 之外。"]
     if "missing_experiment_stage_round" in gap_codes:
         return ["Start the experiment planning stage round.", "Keep training execution disabled until a plan is reviewed."]
-    if "missing_algorithm_hypotheses" in gap_codes or "incomplete_experiment_plan" in gap_codes:
+    if (
+        "missing_algorithm_hypotheses" in gap_codes
+        or "incomplete_experiment_plan" in gap_codes
+        or "experiment_design_not_review_ready" in gap_codes
+    ):
         return ["Review upstream paper notes, mechanism mappings, and algorithm_hypothesis candidates.", "Repair candidate experimentPlan fields before drafting a plan."]
     if "active_baseline_not_registered" in gap_codes:
         return ["Review the draft plan checklist.", "Register an active baseline artifact before smoke or full-run execution."]
