@@ -477,6 +477,63 @@ export type EvolutionRunDeleteResponse = {
   summary: string;
 } | EvolutionRunCommandAccepted;
 
+export type SupervisedWorktreeTaskContract = {
+  bundleName: string;
+  benchmark: string;
+  goal: string;
+  riskReason: string;
+  cases: Array<{
+    caseId: string;
+    prompt: string;
+    expectedOutput?: string;
+  }>;
+};
+
+export type SupervisedJudgeRubricCriterion = {
+  id: string;
+  label: string;
+  description: string;
+  weight: number;
+  evidenceRequirements?: string[];
+};
+
+export type SupervisedJudgeRubric = {
+  status: string;
+  phase: string;
+  schemaVersion: number;
+  source: string;
+  taskContractHash: string;
+  taskSummary: string;
+  taskCriteria: SupervisedJudgeRubricCriterion[];
+  systemRubricVersion: string;
+  systemCriteria: SupervisedJudgeRubricCriterion[];
+  compositionWeights: {
+    taskSpecific: number;
+    systemFixed: number;
+  };
+  rubricHash: string;
+  conversationSessionId?: string;
+};
+
+export type SupervisedJudgeJudgment = {
+  status?: string;
+  phase?: string;
+  recommendation?: string;
+  decision?: string;
+  score?: number;
+  taskScore?: number;
+  systemScore?: number;
+  baselineScore?: number;
+  rubricHash?: string;
+  problems?: string[];
+  improvementInstructions?: string[];
+  taskScores?: Record<string, number>;
+  systemScores?: Record<string, number>;
+  dimensions?: Record<string, number>;
+  evidenceRefs?: string[];
+  conversationSessionId?: string;
+};
+
 export type SupervisedWorktreeRun = {
   runId: string;
   runKind: string;
@@ -490,6 +547,8 @@ export type SupervisedWorktreeRun = {
   datasetName: string;
   datasetLimit: number | null;
   bundleName: string;
+  taskContract?: SupervisedWorktreeTaskContract;
+  judgeRubric?: SupervisedJudgeRubric;
   keepWorktree: boolean;
   agentBindings?: Record<string, EvolutionActiveRunAgentBinding>;
   mentalModelMode?: string;
@@ -514,6 +573,8 @@ export type SupervisedWorktreeRun = {
     reason?: string;
     approvedAt?: string;
     reviewerNote?: string;
+    judgeRecommendation?: string;
+    overrodeJudgeRecommendation?: boolean;
   };
   startedAt: string;
   updatedAt: string;
@@ -539,6 +600,7 @@ export type SupervisedWorktreeRun = {
     candidateScore?: number;
     scoreDelta?: number;
     recommendedAction?: string;
+    judgeRecommendation?: string;
     reason?: string;
     highRisk?: boolean;
   };
@@ -549,6 +611,7 @@ export type SupervisedWorktreeRun = {
     status?: string;
     mergeRequested?: boolean;
     decision?: string;
+    recommendation?: string;
     reason?: string;
     evidenceRefs?: string[];
     conversationSessionId?: string;
@@ -556,30 +619,8 @@ export type SupervisedWorktreeRun = {
     mechanism?: string;
     requestedAt?: string;
   };
-  baselineJudgment?: {
-    status?: string;
-    phase?: string;
-    decision?: string;
-    score?: number;
-    baselineScore?: number;
-    problems?: string[];
-    improvementInstructions?: string[];
-    dimensions?: Record<string, number>;
-    evidenceRefs?: string[];
-    conversationSessionId?: string;
-  };
-  candidateJudgment?: {
-    status?: string;
-    phase?: string;
-    decision?: string;
-    score?: number;
-    baselineScore?: number;
-    problems?: string[];
-    improvementInstructions?: string[];
-    dimensions?: Record<string, number>;
-    evidenceRefs?: string[];
-    conversationSessionId?: string;
-  };
+  baselineJudgment?: SupervisedJudgeJudgment;
+  candidateJudgment?: SupervisedJudgeJudgment;
   mergeAnalysis: {
     status?: string;
     mergeAllowed?: boolean;
@@ -587,12 +628,18 @@ export type SupervisedWorktreeRun = {
     blockers?: string[];
     overlapFiles?: string[];
     highRiskFiles?: string[];
+    candidateVariantStatus?: string;
+    candidateVariantId?: string;
+    currentCandidateVariantId?: string;
+    mainDirtyFiles?: string[];
     reviewGate?: {
       required?: boolean;
       status?: string;
       reason?: string;
       approvedAt?: string;
       reviewerNote?: string;
+      judgeRecommendation?: string;
+      overrodeJudgeRecommendation?: boolean;
     };
     changedFiles?: Array<{
       path: string;

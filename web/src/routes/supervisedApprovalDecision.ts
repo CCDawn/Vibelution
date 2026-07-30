@@ -1,4 +1,7 @@
-import type { SupervisedWorktreeRun } from "../api/types";
+import type {
+  SupervisedJudgeRubricCriterion,
+  SupervisedWorktreeRun,
+} from "../api/types";
 
 export type SupervisedApprovalAction = "approve_review" | "merge" | "rollback";
 
@@ -89,38 +92,10 @@ export type SupervisedApprovalDecisionModel = {
 
 type ApprovalLanguage = "zh" | "en";
 
-type ExtendedJudgment = {
-  recommendation?: string;
-  decision?: string;
-  taskScore?: number;
-  systemScore?: number;
-  taskScores?: Record<string, number>;
-  systemScores?: Record<string, number>;
-  rubricHash?: string;
-};
-
 type RawRubricCriterion = Omit<
-  SupervisedApprovalRubricCriterionModel,
-  "baselineScore" | "candidateScore"
+  SupervisedJudgeRubricCriterion,
+  "evidenceRequirements"
 >;
-
-type ExtendedSupervisedWorktreeRun = SupervisedWorktreeRun & {
-  judgeRubric?: {
-    rubricHash?: string;
-    taskSummary?: string;
-    compositionWeights?: {
-      taskSpecific?: number;
-      systemFixed?: number;
-    };
-    taskCriteria?: RawRubricCriterion[];
-    systemCriteria?: RawRubricCriterion[];
-  };
-  baselineJudgment?: SupervisedWorktreeRun["baselineJudgment"] & ExtendedJudgment;
-  candidateJudgment?: SupervisedWorktreeRun["candidateJudgment"] & ExtendedJudgment;
-  decision: SupervisedWorktreeRun["decision"] & {
-    judgeRecommendation?: string;
-  };
-};
 
 const ACTIVE_RUN_STATUSES = new Set(["queued", "starting", "running", "stopping", "paused"]);
 
@@ -172,7 +147,7 @@ function emptyRubric(): SupervisedApprovalRubricModel {
 }
 
 function judgeRecommendation(
-  run: ExtendedSupervisedWorktreeRun | null | undefined,
+  run: SupervisedWorktreeRun | null | undefined,
   lang: ApprovalLanguage,
 ): SupervisedApprovalJudgeRecommendationModel {
   const raw = String(
@@ -196,7 +171,7 @@ function judgeRecommendation(
   };
 }
 
-function rubricModel(run: ExtendedSupervisedWorktreeRun): SupervisedApprovalRubricModel {
+function rubricModel(run: SupervisedWorktreeRun): SupervisedApprovalRubricModel {
   const rubric = run.judgeRubric;
   const withScores = (
     criteria: RawRubricCriterion[] | undefined,
@@ -449,7 +424,7 @@ function buildSteps(
 }
 
 function buildEvidence(
-  run: ExtendedSupervisedWorktreeRun,
+  run: SupervisedWorktreeRun,
   metrics: SupervisedApprovalMetricModel,
   lang: ApprovalLanguage,
 ): SupervisedApprovalEvidenceModel[] {
@@ -526,28 +501,27 @@ export function buildSupervisedApprovalDecision(
     return emptyDecision(lang);
   }
 
-  const extendedRun = run as ExtendedSupervisedWorktreeRun;
-  const changedFiles = extendedRun.mergeAnalysis?.changedFiles ?? [];
-  const blockers = extendedRun.mergeAnalysis?.blockers ?? [];
-  const highRiskFiles = extendedRun.mergeAnalysis?.highRiskFiles ?? [];
+  const changedFiles = run.mergeAnalysis?.changedFiles ?? [];
+  const blockers = run.mergeAnalysis?.blockers ?? [];
+  const highRiskFiles = run.mergeAnalysis?.highRiskFiles ?? [];
   const metrics: SupervisedApprovalMetricModel = {
-    baselineScore: score(extendedRun.decision?.baselineScore),
-    candidateScore: score(extendedRun.decision?.candidateScore),
-    scoreDelta: score(extendedRun.decision?.scoreDelta),
-    baselineTaskScore: score(extendedRun.baselineJudgment?.taskScore),
-    baselineSystemScore: score(extendedRun.baselineJudgment?.systemScore),
-    candidateTaskScore: score(extendedRun.candidateJudgment?.taskScore),
-    candidateSystemScore: score(extendedRun.candidateJudgment?.systemScore),
-    changedFileCount: changedFiles.length || extendedRun.merge?.changedFiles?.length || 0,
+    baselineScore: score(run.decision?.baselineScore),
+    candidateScore: score(run.decision?.candidateScore),
+    scoreDelta: score(run.decision?.scoreDelta),
+    baselineTaskScore: score(run.baselineJudgment?.taskScore),
+    baselineSystemScore: score(run.baselineJudgment?.systemScore),
+    candidateTaskScore: score(run.candidateJudgment?.taskScore),
+    candidateSystemScore: score(run.candidateJudgment?.systemScore),
+    changedFileCount: changedFiles.length || run.merge?.changedFiles?.length || 0,
     highRiskFileCount: Math.max(
       highRiskFiles.length,
       changedFiles.filter((item) => item.highRisk).length,
     ),
-    overlapFileCount: extendedRun.mergeAnalysis?.overlapFiles?.length ?? 0,
+    overlapFileCount: run.mergeAnalysis?.overlapFiles?.length ?? 0,
     blockerCount: blockers.length,
   };
-  const phase = approvalPhase(extendedRun);
-  const copy = phaseCopy(phase, extendedRun, lang);
+  const phase = approvalPhase(run);
+  const copy = phaseCopy(phase, run, lang);
   const runtimeEffect: SupervisedApprovalRuntimeEffect =
     phase === "merged" || phase === "rolled_back" ? "refresh_required" : "not_applied";
 
@@ -568,11 +542,11 @@ export function buildSupervisedApprovalDecision(
     runtimeEffectLabel: runtimeEffect === "refresh_required"
       ? text(lang, "项目状态已变更，运行时需刷新复验", "Project state changed; refresh and validate runtime")
       : text(lang, "运行时尚未应用", "Runtime not applied"),
-    judgeRecommendation: judgeRecommendation(extendedRun, lang),
-    rubric: rubricModel(extendedRun),
+    judgeRecommendation: judgeRecommendation(run, lang),
+    rubric: rubricModel(run),
     metrics,
-    evidence: buildEvidence(extendedRun, metrics, lang),
-    steps: buildSteps(phase, extendedRun, lang),
+    evidence: buildEvidence(run, metrics, lang),
+    steps: buildSteps(phase, run, lang),
     changedFiles,
     blockers,
   };

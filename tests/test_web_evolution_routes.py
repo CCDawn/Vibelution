@@ -1442,7 +1442,19 @@ def test_supervised_worktree_run_routes_start_and_list_simulation(tmp_path, monk
     assert detail_response.status_code == 200
     detail_payload = detail_response.json()
     assert detail_payload["status"] == "done"
-    assert detail_payload["decision"]["recommendedAction"] == "preserve"
+    assert detail_payload["decision"]["recommendedAction"] == "user_decision"
+    assert detail_payload["costEstimate"]["judgeCalls"] == 3
+    assert detail_payload["taskContract"]["cases"][0]["prompt"]
+    rubric_hash = detail_payload["judgeRubric"]["rubricHash"]
+    assert rubric_hash
+    assert detail_payload["baselineJudgment"]["rubricHash"] == rubric_hash
+    assert detail_payload["candidateJudgment"]["rubricHash"] == rubric_hash
+    assert detail_payload["decision"]["judgeRecommendation"] in {
+        "APPROVE",
+        "REVISE",
+        "REJECT",
+        "INCONCLUSIVE",
+    }
     assert detail_payload["startRequest"] == {
         "requestSource": "api:evolution.worktree-runs",
         "uiRoute": "/evolution?view=overview",
