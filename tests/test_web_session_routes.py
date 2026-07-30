@@ -240,6 +240,79 @@ def test_session_stop_route_rejects_stale_turn(monkeypatch):
     assert "turn mismatch" in response.json()["detail"]
 
 
+def test_session_tool_approval_routes_expose_pending_and_resolve_decision(monkeypatch):
+    pending = {
+        "requestId": "approval-a",
+        "sessionId": "session-active",
+        "status": "pending",
+    }
+    monkeypatch.setattr(
+        session_routes,
+        "list_tool_approval_requests",
+        lambda session_id, *, status="": [pending] if session_id == "session-active" and status == "pending" else [],
+    )
+    observed = []
+    monkeypatch.setattr(
+        session_routes,
+        "resolve_tool_approval_request",
+        lambda session_id, request_id, *, decision: (
+            observed.append((session_id, request_id, decision))
+            or {**pending, "status": "accepted", "decision": decision}
+        ),
+    )
+
+    listed = client.get("/api/sessions/session-active/tool-approvals", params={"status": "pending"})
+    resolved = client.post(
+        "/api/sessions/session-active/tool-approvals/approval-a/decision",
+        json={"decision": "acceptForSession"},
+    )
+
+    assert listed.status_code == 200
+    assert listed.json() == [pending]
+    assert resolved.status_code == 200
+    assert resolved.json()["status"] == "accepted"
+    assert observed == [("session-active", "approval-a", "acceptForSession")]
+
+
+def test_session_tool_approval_policy_routes_are_removed():
+    current = client.get("/api/sessions/session-active/tool-approval-policy")
+    updated = client.patch(
+        "/api/sessions/session-active/tool-approval-policy",
+        json={"policy": "untrusted"},
+    )
+
+    assert current.status_code == 404
+    assert updated.status_code == 405
+
+
+def test_session_tool_approval_routes_map_not_found_and_conflict(monkeypatch):
+    monkeypatch.setattr(
+        session_routes,
+        "resolve_tool_approval_request",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            session_routes.ToolApprovalNotFoundError("missing")
+        ),
+    )
+    missing = client.post(
+        "/api/sessions/session-active/tool-approvals/approval-missing/decision",
+        json={"decision": "accept"},
+    )
+    monkeypatch.setattr(
+        session_routes,
+        "resolve_tool_approval_request",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            session_routes.ToolApprovalConflictError("already resolved")
+        ),
+    )
+    conflict = client.post(
+        "/api/sessions/session-active/tool-approvals/approval-stale/decision",
+        json={"decision": "decline"},
+    )
+
+    assert missing.status_code == 404
+    assert conflict.status_code == 409
+
+
 def test_session_events_runs_initial_and_iterator_on_dedicated_executor(monkeypatch):
     thread_names: list[str] = []
     closed = threading.Event()
@@ -1672,8 +1745,40 @@ def test_supervised_agent_session_is_hidden_and_preserves_prompt_with_mental_ove
                     "primaryMode": "supervised_evolution",
                     "roleKey": "baseline",
                     "toolPolicyId": "tool-agent-supervised",
-                    "metadata": {"supervisedRole": "baseline"},
+                    "toolPolicy": {
+                        "policyId": "tool-agent-supervised",
+                        "allowedTools": [],
+                        "preferredTools": [],
+                        "blockedTools": [],
+                        "readScopes": [],
+                        "writeScopes": [],
+                        "allowedCommandKinds": [],
+                        "blockedCommandPatterns": [],
+                        "networkAccess": "none",
+                        "mutationAccess": "none",
+                        "maxCallsPerTurn": 0,
+                        "perToolRules": {},
+                    },
+                    "memoryPolicyId": "memory-agent-supervised",
+                    "memoryPolicy": {
+                        "policyId": "memory-agent-supervised",
+                        "readSharedGroups": [],
+                        "writeSharedGroups": [],
+                    },
+                    "contextCompressionPolicy": {
+                        "mode": "custom",
+                        "enabled": True,
+                    },
+                    "metadata": {
+                        "supervisedRole": "baseline",
+                        "delegationPolicy": {"allowSubagents": False},
+                        "supervisionPolicy": {"supervisionEnabled": False},
+                    },
                     "llmBindings": {"dialogue": {"modelId": "model-a"}},
+                    "configSchemaVersion": 2,
+                    "configRevision": 1,
+                    "configHash": "test-config-hash",
+                    "permissionPreset": "request_approval",
                 }
             ],
             "toolPolicies": {
@@ -1806,8 +1911,40 @@ def test_supervised_session_workspace_override_routes_tool_workspace_to_candidat
                     "primaryMode": "supervised_evolution",
                     "roleKey": "candidate",
                     "toolPolicyId": "tool-agent-candidate",
-                    "metadata": {"supervisedRole": "candidate"},
+                    "toolPolicy": {
+                        "policyId": "tool-agent-candidate",
+                        "allowedTools": [],
+                        "preferredTools": [],
+                        "blockedTools": [],
+                        "readScopes": [],
+                        "writeScopes": [],
+                        "allowedCommandKinds": [],
+                        "blockedCommandPatterns": [],
+                        "networkAccess": "none",
+                        "mutationAccess": "none",
+                        "maxCallsPerTurn": 0,
+                        "perToolRules": {},
+                    },
+                    "memoryPolicyId": "memory-agent-candidate",
+                    "memoryPolicy": {
+                        "policyId": "memory-agent-candidate",
+                        "readSharedGroups": [],
+                        "writeSharedGroups": [],
+                    },
+                    "contextCompressionPolicy": {
+                        "mode": "custom",
+                        "enabled": True,
+                    },
+                    "metadata": {
+                        "supervisedRole": "candidate",
+                        "delegationPolicy": {"allowSubagents": False},
+                        "supervisionPolicy": {"supervisionEnabled": False},
+                    },
                     "llmBindings": {"dialogue": {"modelId": "model-a"}},
+                    "configSchemaVersion": 2,
+                    "configRevision": 1,
+                    "configHash": "test-candidate-config-hash",
+                    "permissionPreset": "request_approval",
                 }
             ],
             "toolPolicies": {

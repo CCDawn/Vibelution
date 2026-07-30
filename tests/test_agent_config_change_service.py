@@ -1,6 +1,9 @@
 import pytest
 
-from core.web.services import agent_config_change_service
+from core.web.services import (
+    agent_config_change_service,
+    agent_config_effective_projection,
+)
 
 from tests.test_agent_config_workspace_service import (
     _use_tmp_project_root,
@@ -81,6 +84,210 @@ def test_agent_config_draft_rejects_a_stale_base_revision(tmp_path, monkeypatch)
         )
 
 
+def test_agent_config_is_versioned_and_permission_preset_is_canonical(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="Canonical config agent",
+        direct_session_id="session-canonical-config",
+    )
+
+    assert agent["configSchemaVersion"] == 2
+    assert agent["configRevision"] == 1
+    assert agent["permissionPreset"] == "request_approval"
+    assert len(agent["configHash"]) == 64
+    initial_hash = agent["configHash"]
+
+    updated = agent_directory_service.update_agent_instance(
+        agent["agentId"],
+        permission_preset="auto_review",
+        expected_config_revision=1,
+    )
+
+    assert updated["permissionPreset"] == "auto_review"
+    assert updated["configRevision"] == 2
+    assert updated["configHash"] != initial_hash
+
+    with pytest.raises(agent_directory_service.AgentStateConflictError):
+        agent_directory_service.update_agent_instance(
+            agent["agentId"],
+            permission_preset="full_access",
+            expected_config_revision=1,
+        )
+
+
+def test_agent_config_rejects_unknown_permission_preset(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="Strict permission agent")
+
+    with pytest.raises(agent_directory_service.AgentDirectoryError, match="permission preset"):
+        agent_directory_service.update_agent_instance(
+            agent["agentId"],
+            permission_preset="custom",
+            expected_config_revision=agent["configRevision"],
+        )
+
+
+def test_agent_patch_updates_permission_preset_with_config_revision_cas(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="Permission route agent",
+    )
+
+    updated = client.patch(
+        f"/api/agents/{agent['agentId']}",
+        json={
+            "permissionPreset": "auto_review",
+            "expectedConfigRevision": agent["configRevision"],
+        },
+    )
+
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["permissionPreset"] == "auto_review"
+    assert updated.json()["configRevision"] == agent["configRevision"] + 1
+    assert updated.json()["runtimePermissions"] == {
+        "preset": "auto_review",
+        "sandboxMode": "workspace_write",
+        "approvalPolicy": "on_request",
+        "approvalsReviewer": "auto_review",
+    }
+
+    stale = client.patch(
+        f"/api/agents/{agent['agentId']}",
+        json={
+            "permissionPreset": "full_access",
+            "expectedConfigRevision": agent["configRevision"],
+        },
+    )
+    assert stale.status_code == 409
+
+
+def test_agent_config_embeds_every_runtime_policy_at_creation(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+
+    agent = agent_directory_service.create_agent_instance(
+        display_name="Embedded policy agent",
+    )
+
+    assert agent["toolPolicy"]["policyId"] == agent["toolPolicyId"]
+    assert agent["memoryPolicy"]["policyId"] == agent["memoryPolicyId"]
+    assert agent["contextCompressionPolicy"]["mode"] == "custom"
+    assert agent["contextCompressionEffectivePolicy"]["source"] == "agent"
+    assert agent["metadata"]["delegationPolicy"] == agent_directory_service.normalize_delegation_policy({})
+    assert agent["metadata"]["supervisionPolicy"] == agent_directory_service.normalize_supervision_policy({})
+
+
+def test_runtime_policy_resolution_ignores_shared_catalog_changes(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="Private runtime policy agent",
+    )
+    original_tool_policy = agent["toolPolicy"]
+    original_memory_policy = agent["memoryPolicy"]
+
+    state = agent_directory_service.load_state()
+    state["toolPolicies"][agent["toolPolicyId"]]["allowedTools"] = ["untrusted_catalog_tool"]
+    state["memoryPolicies"][agent["memoryPolicyId"]]["readSharedGroups"] = ["untrusted-catalog-group"]
+    agent_directory_service.save_state(state)
+
+    resolved_tool_policy = agent_directory_service.resolve_tool_policy_for_agent(agent["agentId"])
+    resolved_memory_policy = agent_directory_service.resolve_memory_policy_for_agent(agent["agentId"])
+
+    assert resolved_tool_policy["allowedTools"] == original_tool_policy["allowedTools"]
+    assert resolved_memory_policy["readSharedGroups"] == original_memory_policy["readSharedGroups"]
+
+
+def test_unmigrated_agent_runtime_policies_fail_closed_without_catalog_fallback(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    workspace_path = "workspace/agents/agent-legacy-unmigrated"
+    agent_directory_service.save_state(
+        {
+            "agents": [
+                {
+                    "agentId": "agent-legacy-unmigrated",
+                    "displayName": "Legacy unmigrated agent",
+                    "workspacePath": workspace_path,
+                    "toolPolicyId": "shared-wide",
+                    "memoryPolicyId": "shared-memory",
+                    "status": "active",
+                }
+            ],
+            "toolPolicies": {
+                "shared-wide": {
+                    **agent_directory_service.default_tool_policy("shared-wide"),
+                    "allowedTools": ["dangerous_catalog_tool"],
+                }
+            },
+            "memoryPolicies": {
+                "shared-memory": {
+                    **agent_directory_service.default_memory_policy(
+                        "shared-memory",
+                        workspace_path,
+                    ),
+                    "readSharedGroups": ["sensitive-catalog-group"],
+                }
+            },
+        }
+    )
+
+    tool_policy = agent_directory_service.resolve_tool_policy_for_agent(
+        "agent-legacy-unmigrated"
+    )
+    memory_policy = agent_directory_service.resolve_memory_policy_for_agent(
+        "agent-legacy-unmigrated"
+    )
+
+    assert tool_policy["allowedTools"] == []
+    assert memory_policy["readSharedGroups"] == []
+
+
+def test_effective_configuration_has_only_the_agent_as_runtime_source(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="Single source projection agent",
+    )
+
+    projected = agent_config_effective_projection.derive_effective_configuration(agent)
+
+    assert projected["fields"]
+    for field in projected["fields"]:
+        assert field["source"]["kind"] == "agent"
+        assert field["source"]["id"] == agent["agentId"]
+        assert field["inheritanceChain"] == [
+            {
+                **field["source"],
+                "value": field["effectiveValue"],
+                "active": True,
+            }
+        ]
+
+
+def test_active_turn_keeps_one_immutable_agent_config_snapshot(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="Immutable turn config agent",
+    )
+
+    with agent_directory_service.active_agent_runtime(agent["agentId"]) as runtime:
+        captured = runtime["agentConfigSnapshot"]
+        agent_directory_service.update_agent_instance(
+            agent["agentId"],
+            permission_preset="full_access",
+            expected_config_revision=agent["configRevision"],
+        )
+
+        assert captured == {
+            "agentId": agent["agentId"],
+            "configRevision": agent["configRevision"],
+            "configHash": agent["configHash"],
+        }
+        assert runtime["agent"]["permissionPreset"] == "request_approval"
+        assert runtime["permissionPreset"] == "request_approval"
+
+    with agent_directory_service.active_agent_runtime(agent["agentId"]) as next_runtime:
+        assert next_runtime["agentConfigSnapshot"]["configRevision"] == agent["configRevision"] + 1
+        assert next_runtime["permissionPreset"] == "full_access"
+
+
 def test_agent_config_revision_does_not_consume_a_draft_when_the_published_snapshot_differs(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     agent = agent_directory_service.create_agent_instance(display_name="Mismatched draft agent")
@@ -144,7 +351,8 @@ def test_agent_config_change_routes_link_a_saved_draft_to_the_published_revision
     )
 
     assert published.status_code == 200, published.text
-    assert published.json()["configRevision"]["sourceDraftId"] == draft["draftId"]
+    assert published.json()["configRevision"] == agent["configRevision"] + 1
+    assert published.json()["publishedConfigChange"]["sourceDraftId"] == draft["draftId"]
     history = client.get(f"/api/agents/{agent['agentId']}/config-changes")
     assert history.status_code == 200, history.text
     assert history.json()["activeDraft"] is None

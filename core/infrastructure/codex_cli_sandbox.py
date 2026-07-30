@@ -28,6 +28,8 @@ _VIBELUTION_DATA_HOME_ENV = "VIBELUTION_DATA_HOME"
 _VIBELUTION_CONFIG_HOME_ENV = "VIBELUTION_CONFIG_HOME"
 _VIBELUTION_CONFIG_PATH_ENV = "VIBELUTION_CONFIG_PATH"
 _CANDIDATE_RUNTIME_ENVIRONMENT_POLICY = "candidate_runtime"
+_WORKSPACE_WRITE_SANDBOX_MODE = "workspace_write"
+_DANGER_FULL_ACCESS_SANDBOX_MODE = "danger_full_access"
 _CANDIDATE_RUNTIME_ENV_ALLOWLIST = {
     "ALLUSERSPROFILE",
     "COMSPEC",
@@ -94,6 +96,26 @@ def _sandbox_chmod(path, mode, *args, **kwargs):
 os.mkdir = _sandbox_mkdir
 os.chmod = _sandbox_chmod
 """
+
+
+def _current_agent_sandbox_mode() -> str:
+    """Read the immutable turn permission snapshot; default to sandboxed."""
+    try:
+        from core.web.services.agent_directory_service import current_agent_runtime
+
+        runtime = current_agent_runtime()
+    except Exception:
+        runtime = {}
+    permissions = (
+        runtime.get("runtimePermissions")
+        if isinstance(runtime, dict)
+        and isinstance(runtime.get("runtimePermissions"), dict)
+        else {}
+    )
+    sandbox_mode = str(permissions.get("sandboxMode") or "").strip()
+    if sandbox_mode == _DANGER_FULL_ACCESS_SANDBOX_MODE:
+        return sandbox_mode
+    return _WORKSPACE_WRITE_SANDBOX_MODE
 
 
 def _log_outcome(
@@ -439,18 +461,26 @@ def _sandbox_argv(
     route: Any,
     *,
     git_bash_executable: str = "",
+    sandbox_mode: str = _WORKSPACE_WRITE_SANDBOX_MODE,
 ) -> list[str]:
     if os.name != "nt":
         raise RuntimeError("当前 Codex CLI 沙盒接入仅支持原生 Windows")
-    prefix = [
-        executable,
-        "sandbox",
-        "-c",
-        'windows.sandbox="unelevated"',
-        "-c",
-        'sandbox_mode="workspace-write"',
-        "--",
-    ]
+    if sandbox_mode == _WORKSPACE_WRITE_SANDBOX_MODE:
+        if not str(executable or "").strip():
+            raise RuntimeError("Codex CLI sandbox executable is required")
+        prefix = [
+            executable,
+            "sandbox",
+            "-c",
+            'windows.sandbox="unelevated"',
+            "-c",
+            'sandbox_mode="workspace-write"',
+            "--",
+        ]
+    elif sandbox_mode == _DANGER_FULL_ACCESS_SANDBOX_MODE:
+        prefix = []
+    else:
+        raise RuntimeError(f"Unsupported Agent sandbox mode: {sandbox_mode}")
     direct_argv = _direct_executable_argv(route.command)
     if direct_argv:
         return prefix + direct_argv
@@ -815,8 +845,9 @@ def start_codex_sandbox_terminal_session(
     command_hash = hashlib.sha256(normalized_command.encode("utf-8")).hexdigest()[:12]
     from tools.shell_tools import _find_git_bash, _is_command_dangerous, classify_shell_command
 
+    sandbox_mode = _current_agent_sandbox_mode()
     is_dangerous, message = _is_command_dangerous(normalized_command)
-    if is_dangerous:
+    if is_dangerous and sandbox_mode != _DANGER_FULL_ACCESS_SANDBOX_MODE:
         _log_outcome(command_hash, "blocked", reason="dangerous_command")
         return _terminal_error_payload("DANGEROUS_COMMAND", message)
     workdir = _resolve_cwd(cwd)
@@ -827,8 +858,12 @@ def start_codex_sandbox_terminal_session(
     if route.blocked:
         _log_outcome(command_hash, "blocked", reason=route.reason or "shell_route")
         return _terminal_error_payload("SHELL_ROUTE_BLOCKED", str(route.error or "命令路由被拦截。"))
-    executable = _resolve_codex_executable()
-    if not executable:
+    executable = (
+        _resolve_codex_executable()
+        if sandbox_mode == _WORKSPACE_WRITE_SANDBOX_MODE
+        else ""
+    )
+    if sandbox_mode == _WORKSPACE_WRITE_SANDBOX_MODE and not executable:
         _log_outcome(command_hash, "unavailable", reason="codex_executable_missing")
         return _terminal_error_payload("CODEX_SANDBOX_UNAVAILABLE", "未找到原生 codex.exe；命令未执行。")
     timeout_seconds = _clamp_terminal_timeout(timeout, default=60, minimum=1, maximum=_TERMINAL_SESSION_MAX_LIFETIME_SECONDS)
@@ -837,6 +872,7 @@ def start_codex_sandbox_terminal_session(
         executable,
         route,
         git_bash_executable=_find_git_bash() if route.route == "git_bash" else "",
+        sandbox_mode=sandbox_mode,
     )
     sandbox_temp: Path | None = None
     try:
@@ -954,8 +990,9 @@ def execute_codex_sandbox_command(
     from tools.shell_tools import _find_git_bash
     from tools.shell_tools import classify_shell_command
 
+    sandbox_mode = _current_agent_sandbox_mode()
     is_dangerous, message = _is_command_dangerous(normalized_command)
-    if is_dangerous:
+    if is_dangerous and sandbox_mode != _DANGER_FULL_ACCESS_SANDBOX_MODE:
         _log_outcome(command_hash, "blocked", reason="dangerous_command")
         return f"[安全拦截] {message}\n该危险命令已被系统安全策略禁止执行。"
 
@@ -969,8 +1006,12 @@ def execute_codex_sandbox_command(
         _log_outcome(command_hash, "blocked", reason=route.reason or "shell_route")
         return route.error
 
-    executable = _resolve_codex_executable()
-    if not executable:
+    executable = (
+        _resolve_codex_executable()
+        if sandbox_mode == _WORKSPACE_WRITE_SANDBOX_MODE
+        else ""
+    )
+    if sandbox_mode == _WORKSPACE_WRITE_SANDBOX_MODE and not executable:
         _log_outcome(command_hash, "unavailable", reason="codex_executable_missing")
         return (
             "[错误] Codex CLI 沙盒不可用：未找到原生 codex.exe。"
@@ -989,6 +1030,7 @@ def execute_codex_sandbox_command(
         executable,
         route,
         git_bash_executable=_find_git_bash() if route.route == "git_bash" else "",
+        sandbox_mode=sandbox_mode,
     )
     is_native_windows_chain = (
         is_native_windows_command and bool(_split_unquoted_and_chain(route.command))
@@ -998,7 +1040,8 @@ def execute_codex_sandbox_command(
         route_label = "windows_native_chain" if is_native_windows_chain else "windows_native"
     _debug_logger.info(
         f"[Codex CLI 沙盒] 启动 commandHash={command_hash} "
-        f"route={route_label} cwd={workdir} timeout={timeout_seconds}s"
+        f"route={route_label} sandboxMode={sandbox_mode} "
+        f"cwd={workdir} timeout={timeout_seconds}s"
     )
     started_at = time.monotonic()
     process: subprocess.Popen[str] | None = None

@@ -172,6 +172,7 @@ def evaluate_tool_policy(
     visible: list[str] = []
     executable: list[str] = []
     denied: dict[str, ToolDenyReason] = {}
+    approval_requirements: list[tuple[str, str, str]] = []
     for descriptor in descriptor_snapshot:
         name = descriptor.name
         visibility_reason = _visibility_deny_reason(
@@ -186,6 +187,13 @@ def evaluate_tool_policy(
             denied[name] = visibility_reason
             continue
         visible.append(name)
+        approval_requirements.append(
+            (
+                name,
+                policy.approval_override_for(name) or str(descriptor.approval or "never"),
+                str(descriptor.risk or "read"),
+            )
+        )
         execution_reason = _execution_deny_reason(descriptor, policy=policy, grant=grant)
         if execution_reason is not None:
             denied[name] = execution_reason
@@ -206,6 +214,7 @@ def evaluate_tool_policy(
         "executableTools": executable,
         "preferredTools": list(preferred),
         "denied": {name: reason.public_projection() for name, reason in ordered_denied},
+        "approvalRequirements": approval_requirements,
     }
     return AuthorizationDecision(
         agent_id=normalized_agent_id,
@@ -219,6 +228,7 @@ def evaluate_tool_policy(
         denied=ordered_denied,
         decision_fingerprint=_fingerprint(decision_payload),
         generated_at=str(generated_at or ""),
+        approval_requirements=tuple(approval_requirements),
     )
 
 
@@ -284,7 +294,7 @@ def _execution_deny_reason(
     if descriptor.risk in {"write", "execute", "destructive"} and mutation_access == "none":
         return ToolDenyReason(ToolDenyCode.MUTATION_DENIED, "execution", "Mutation access is disabled")
     required_approval = policy.approval_override_for(descriptor.name) or str(descriptor.approval or "never")
-    if _APPROVAL_RANK.get(required_approval, 2) > _APPROVAL_RANK[grant.approval_mode]:
+    if grant.approval_mode == "never" and required_approval != "never":
         return ToolDenyReason(ToolDenyCode.APPROVAL_REQUIRED, "execution", "Required approval mode is not available")
     return None
 

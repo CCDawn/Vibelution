@@ -2030,10 +2030,15 @@ def _session_query_sort_key(sort: str):
 
 def _session_reasoning_effort_snapshot(session_id: str) -> str:
     s = _service()
-    initialized, current = s._initialized_session_reasoning_effort(session_id)
-    if initialized:
-        return current
-    return s._ensure_session_reasoning_effort_initialized(session_id)
+    agent_id = s._session_agent_id_snapshot(session_id)
+    if not agent_id:
+        return ""
+    agent = s.get_agent(agent_id, include_archived=False)
+    if not isinstance(agent, dict):
+        return ""
+    return s.normalize_reasoning_effort(
+        s._session_agent_reasoning_effort(agent)
+    )
 
 
 def _session_reference_prompt_block(references: list[dict[str, Any]]) -> str:

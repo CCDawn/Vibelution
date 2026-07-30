@@ -2705,17 +2705,24 @@ def _invoke_strict_self_observation_llm(
         if blank_mode
         else ""
     )
-    messages = (
-        [
+    if bounded_previous_output and replay_state is not None:
+        messages = [
             {"role": "assistant", "content": bounded_previous_output},
             {
                 "role": "user",
                 "content": [{"type": "input_text", "text": ""}],
             },
         ]
-        if bounded_previous_output
-        else [{"role": "user", "content": strict_prompt}]
-    )
+        blank_continuation_mode = "provider_replay"
+    elif bounded_previous_output:
+        messages = [
+            {"role": "assistant", "content": bounded_previous_output},
+            {"role": "user", "content": ""},
+        ]
+        blank_continuation_mode = "history_then_blank_user"
+    else:
+        messages = [{"role": "user", "content": strict_prompt}]
+        blank_continuation_mode = "initial"
     message_roles = [str(message.get("role") or "") for message in messages]
     stateful_continuation = bool(blank_mode and (bounded_previous_output or replay_state is not None))
     cache_partition = _self_observation_prompt_cache_partition(run_id, agent_id, model_id)
@@ -2733,6 +2740,7 @@ def _invoke_strict_self_observation_llm(
         "historyAssistantChars": len(bounded_previous_output),
         "statefulContinuation": stateful_continuation,
         "replayStateInputPresent": replay_state is not None,
+        "blankContinuationMode": blank_continuation_mode,
     }
     _record_self_scene_event(
         "self_observation",
@@ -2752,6 +2760,7 @@ def _invoke_strict_self_observation_llm(
             "invocationIndex": int(invocation_index or 1),
             "statefulContinuation": stateful_continuation,
             "replayStateInputPresent": replay_state is not None,
+            "blankContinuationMode": blank_continuation_mode,
         },
         lifecycle=True,
     )
@@ -2877,6 +2886,7 @@ def _invoke_strict_self_observation_llm(
                 "invocationIndex": int(invocation_index or 1),
                 "statefulContinuation": stateful_continuation,
                 "replayStateInputPresent": replay_state is not None,
+                "blankContinuationMode": blank_continuation_mode,
             },
             lifecycle=True,
         )
@@ -2903,6 +2913,7 @@ def _invoke_strict_self_observation_llm(
                 "statefulContinuation": stateful_continuation,
                 "replayStateInputPresent": replay_state is not None,
                 "replayStateOutputPresent": output_replay_state is not None,
+                "blankContinuationMode": blank_continuation_mode,
             },
             lifecycle=True,
         )

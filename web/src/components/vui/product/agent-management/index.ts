@@ -29,3 +29,10 @@ export {
   AgentWorkspacePanel,
   type AgentWorkspacePanelProps,
 } from "./AgentWorkspacePanel";
+export {
+  AgentPermissionPresetControl,
+  agentPermissionPresetOptions,
+  type AgentPermissionPresetControlProps,
+  type AgentPermissionPresetControlSurface,
+  type AgentPermissionPresetOption,
+} from "./AgentPermissionPresetControl";

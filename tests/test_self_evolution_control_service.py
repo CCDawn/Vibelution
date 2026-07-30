@@ -1241,6 +1241,7 @@ def _install_strict_self_observation_llm(
     *,
     content: str | list[str],
     model_id: str = "observer-model",
+    replay_state_supported: bool = True,
 ) -> tuple[dict[str, object], list[dict[str, object]]]:
     captured: dict[str, object] = {}
     artifact_messages: list[dict[str, object]] = []
@@ -1302,7 +1303,11 @@ def _install_strict_self_observation_llm(
         assert isinstance(calls, list)
         response_index = len(calls)
         response_content = response_contents[min(response_index, len(response_contents) - 1)]
-        output_replay_state = SimpleNamespace(response_id=f"response-{response_index + 1}")
+        output_replay_state = (
+            SimpleNamespace(response_id=f"response-{response_index + 1}")
+            if replay_state_supported
+            else None
+        )
         calls.append(
             {
                 "messages": copy.deepcopy(messages),
@@ -1545,6 +1550,46 @@ def test_self_observation_blank_mode_continues_canonical_conversation_without_us
         "strict:self-observe-blank:1",
         "strict:self-observe-blank:2",
     ]
+
+
+def test_self_observation_blank_mode_chat_continuation_adds_no_synthetic_user(monkeypatch):
+    captured, artifact_messages = _install_strict_self_observation_llm(
+        monkeypatch,
+        content=["第一段自由输出", "第二段延续输出"],
+        replay_state_supported=False,
+    )
+    monkeypatch.setattr(service, "self_observation_agent_binding", lambda: {"agentId": "agent-observer-lan"})
+    monkeypatch.setattr(service, "create_supervised_agent_session", lambda **kwargs: {"id": "session-lan"})
+    monkeypatch.setattr(service.time, "sleep", lambda seconds: None)
+    monotonic_values = iter([0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 3.1])
+    monkeypatch.setattr(service.time, "monotonic", lambda: next(monotonic_values))
+
+    result = service._run_observation_session(
+        run_id="self-observe-lan",
+        prompt="",
+        duration_seconds=3,
+        input_mode="blank",
+    )
+
+    calls = captured["calls"]
+    assert isinstance(calls, list)
+    assert len(calls) == 2
+    assert calls[0]["messages"] == [{"role": "user", "content": ""}]
+    assert calls[0]["replayState"] is None
+    assert calls[1]["messages"] == [
+        {"role": "assistant", "content": "第一段自由输出"},
+        {"role": "user", "content": ""},
+    ]
+    assert calls[1]["replayState"] is None
+    assert [message["role"] for message in calls[1]["messages"]] == ["assistant", "user"]
+    assert calls[1]["metadata"]["blankContinuationMode"] == "history_then_blank_user"
+    assert all(call["metadata"]["promptChars"] == 0 for call in calls)
+    assert all(call["metadata"]["inputMode"] == "blank" for call in calls)
+    payload_text = json.dumps([call["messages"] for call in calls], ensure_ascii=False)
+    assert "时间仍未结束" not in payload_text
+    assert "请继续下一段观察" not in payload_text
+    assert result["messages"] == ["第一段自由输出", "第二段延续输出"]
+    assert [item["content"] for item in artifact_messages] == ["第一段自由输出", "第二段延续输出"]
 
 
 def test_self_observation_deadline_stops_stream_without_retry_and_keeps_partial_output(monkeypatch):

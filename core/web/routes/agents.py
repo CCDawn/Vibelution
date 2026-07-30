@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from time import perf_counter
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, status
@@ -123,11 +123,18 @@ class AgentUpdatePayload(BaseModel):
     contextCompressionPolicy: dict[str, Any] | None = None
     delegationPolicy: dict[str, Any] | None = None
     supervisionPolicy: dict[str, Any] | None = None
+    reasoningEffortBySlot: dict[str, str] | None = None
+    permissionPreset: Literal[
+        "request_approval",
+        "auto_review",
+        "full_access",
+    ] | None = None
     personaProfile: dict[str, Any] | None = None
     taskProfile: dict[str, Any] | None = None
     metadata: dict[str, Any] | None = None
     status: str | None = None
     expectedUpdatedAt: str = ""
+    expectedConfigRevision: int | None = None
     sourceDraftId: str = ""
 
 
@@ -916,11 +923,14 @@ def agent_update(agent_id: str, payload: AgentUpdatePayload) -> dict:
                     context_compression_policy=payload.contextCompressionPolicy,
                     delegation_policy=payload.delegationPolicy,
                     supervision_policy=payload.supervisionPolicy,
+                    reasoning_effort_by_slot=payload.reasoningEffortBySlot,
+                    permission_preset=payload.permissionPreset,
                     persona_profile=payload.personaProfile,
                     task_profile=payload.taskProfile,
                     metadata=payload.metadata,
                     status="archived",
                     expected_updated_at=payload.expectedUpdatedAt,
+                    expected_config_revision=payload.expectedConfigRevision,
                 ),
             )
             return _with_agent_workspace_cache_invalidated({
@@ -941,11 +951,14 @@ def agent_update(agent_id: str, payload: AgentUpdatePayload) -> dict:
             context_compression_policy=payload.contextCompressionPolicy,
             delegation_policy=payload.delegationPolicy,
             supervision_policy=payload.supervisionPolicy,
+            reasoning_effort_by_slot=payload.reasoningEffortBySlot,
+            permission_preset=payload.permissionPreset,
             persona_profile=payload.personaProfile,
             task_profile=payload.taskProfile,
             metadata=payload.metadata,
             status=payload.status,
             expected_updated_at=payload.expectedUpdatedAt,
+            expected_config_revision=payload.expectedConfigRevision,
         )
         revision = agent_config_change_service.record_agent_config_revision(
             agent_id,
@@ -956,7 +969,7 @@ def agent_update(agent_id: str, payload: AgentUpdatePayload) -> dict:
         )
         result = {
             **updated,
-            **({"configRevision": revision} if revision else {}),
+            **({"publishedConfigChange": revision} if revision else {}),
             **({"archiveSummary": archive_summary} if archive_summary else {}),
         }
         return _with_agent_workspace_cache_invalidated(result)
