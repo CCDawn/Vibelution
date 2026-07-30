@@ -422,6 +422,42 @@ def _compact_experiment_result(
     }
 
 
+def _compact_smoke_run(value: Any) -> dict[str, Any] | None:
+    record = value if isinstance(value, dict) else {}
+    result_id = _text(record.get("smokeRunId"))
+    if not result_id:
+        return None
+    metrics_value = record.get("metrics")
+    metrics = metrics_value if isinstance(metrics_value, dict) else {}
+    bounded_metrics: dict[str, bool | float | int | str] = {}
+    for raw_key, raw_value in list(metrics.items())[:32]:
+        key = _text(raw_key, limit=120)
+        if not key or isinstance(raw_value, (dict, list, tuple, set)):
+            continue
+        if isinstance(raw_value, (bool, int, float)):
+            bounded_metrics[key] = raw_value
+        elif raw_value is not None:
+            bounded_metrics[key] = _text(raw_value, limit=240)
+    seed_value = record.get("seed")
+    seed = seed_value if isinstance(seed_value, int) and not isinstance(seed_value, bool) else None
+    return {
+        "resultId": result_id,
+        "status": _text(record.get("status"), limit=80),
+        "adapter": _text(record.get("adapter"), limit=120),
+        "seed": seed,
+        "decisionHint": _text(record.get("decisionHint"), limit=120),
+        "metrics": bounded_metrics,
+        "artifactHash": _text(record.get("artifactHash"), limit=240),
+        "proxyOnly": record.get("proxyOnly") is True,
+        "boundaries": [
+            _text(item, limit=240)
+            for item in list(record.get("boundaries") or [])[:16]
+            if _text(item, limit=240)
+        ],
+        "recordedAt": _text(record.get("recordedAt"), limit=120),
+    }
+
+
 def _compact_experiment_plan(plan: dict[str, Any]) -> dict[str, Any]:
     contract = (
         plan.get("experimentContract")
@@ -493,6 +529,7 @@ def _compact_experiment_plan(plan: dict[str, Any]) -> dict[str, Any]:
         },
         "activeBaselineArtifactId": _text(plan.get("activeBaselineArtifactId")),
         "activeSmokeResultId": _text(plan.get("activeSmokeResultId")),
+        "activeSmokeRunId": _text(plan.get("activeSmokeRunId")),
         "activeFullRunResultId": _text(plan.get("activeFullRunResultId")),
         "baselineArtifact": _compact_experiment_result(
             (
@@ -506,6 +543,7 @@ def _compact_experiment_plan(plan: dict[str, Any]) -> dict[str, Any]:
             plan.get("activeSmokeResult"),
             id_keys=("smokeResultId",),
         ),
+        "smokeRun": _compact_smoke_run(plan.get("activeSmokeRun")),
         "fullRunResult": _compact_experiment_result(
             plan.get("activeFullRunResult"),
             id_keys=("fullRunResultId",),
@@ -640,6 +678,7 @@ def research_project_iteration_readiness(
             candidate
             for candidate in (
                 frozen_plan.get("activeFullRunResult"),
+                frozen_plan.get("activeSmokeRun"),
                 frozen_plan.get("activeSmokeResult"),
             )
             if isinstance(candidate, dict)
@@ -657,14 +696,26 @@ def research_project_iteration_readiness(
             "planId": _text(frozen_plan.get("planId")),
             "resultId": "",
         }
+    result_status = _text(result.get("status"), limit=80).lower()
+    needs_review = result_status == "needs_review"
     return {
         "ready": True,
         "code": "ready",
-        "reason": "A frozen design and registered experiment result are available.",
-        "reasonZh": "冻结设计与实验结果均已登记，可以进入迭代决策。",
+        "reason": (
+            "A registered Smoke result requires review and can enter the iteration decision."
+            if needs_review
+            else "A frozen design and registered experiment result are available."
+        ),
+        "reasonZh": (
+            "已登记待复核 Smoke，可进入迭代决策进行复核与修订。"
+            if needs_review
+            else "冻结设计与实验结果均已登记，可以进入迭代决策。"
+        ),
         "planId": _text(frozen_plan.get("planId")),
         "resultId": _text(
-            result.get("fullRunResultId") or result.get("smokeResultId")
+            result.get("fullRunResultId")
+            or result.get("smokeRunId")
+            or result.get("smokeResultId")
         ),
     }
 

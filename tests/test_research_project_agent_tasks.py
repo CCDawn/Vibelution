@@ -215,15 +215,32 @@ def test_iteration_task_requires_frozen_design_and_registered_result(
             {"taskKind": "iteration_decision"},
         )
 
-    plan["activeSmokeResult"] = {
-        "smokeResultId": "smoke-needs-review",
+    plan["activeSmokeRun"] = {
+        "smokeRunId": "smoke-needs-review",
         "status": "needs_review",
+        "adapter": "predictive_coding_reconstruction_proxy",
+        "seed": 42,
+        "decisionHint": "accept",
+        "metrics": {
+            "baselineMse": 0.025838,
+            "variantMse": 0.007935,
+            "improvement": 0.017903,
+        },
+        "artifactHash": "sha256:smoke-artifact",
+        "proxyOnly": True,
+        "boundaries": [
+            "offline_numpy_proxy",
+            "not_target_dataset_evaluation",
+        ],
+        "logs": ["must-not-enter-agent-context"],
     }
     ready = research_project_iteration_readiness(
         team["teamId"],
         project["projectId"],
     )
     assert ready["ready"] is True
+    assert ready["resultId"] == "smoke-needs-review"
+    assert ready["reasonZh"] == "已登记待复核 Smoke，可进入迭代决策进行复核与修订。"
     started = start_research_project_agent_task(
         team["teamId"],
         project["projectId"],
@@ -722,6 +739,27 @@ def test_experiment_task_context_is_project_scoped_and_bounded(
                     "resultPath": str(tmp_path / "must-not-leak.json"),
                     "logRef": str(tmp_path / "must-not-leak.log"),
                 },
+                "activeSmokeRunId": "smoke-run-a",
+                "activeSmokeRun": {
+                    "smokeRunId": "smoke-run-a",
+                    "status": "needs_review",
+                    "adapter": "predictive_coding_reconstruction_proxy",
+                    "seed": 42,
+                    "decisionHint": "accept",
+                    "metrics": {
+                        "baselineMse": 0.025838,
+                        "variantMse": 0.007935,
+                        "improvement": 0.017903,
+                    },
+                    "artifactHash": "sha256:smoke-artifact-a",
+                    "proxyOnly": True,
+                    "boundaries": [
+                        "offline_numpy_proxy",
+                        "not_target_dataset_evaluation",
+                    ],
+                    "logs": ["must-not-enter-agent-context"],
+                    "resultPath": str(tmp_path / "must-not-leak-smoke.json"),
+                },
                 "updatedAt": "2026-07-28T01:00:00+00:00",
             },
             {
@@ -756,6 +794,26 @@ def test_experiment_task_context_is_project_scoped_and_bounded(
         "metricValue": "0.91",
         "delta": "+0.02",
     }
+    assert context["experiment"]["plans"][0]["smokeRun"] == {
+        "resultId": "smoke-run-a",
+        "status": "needs_review",
+        "adapter": "predictive_coding_reconstruction_proxy",
+        "seed": 42,
+        "decisionHint": "accept",
+        "metrics": {
+            "baselineMse": 0.025838,
+            "variantMse": 0.007935,
+            "improvement": 0.017903,
+        },
+        "artifactHash": "sha256:smoke-artifact-a",
+        "proxyOnly": True,
+        "boundaries": [
+            "offline_numpy_proxy",
+            "not_target_dataset_evaluation",
+        ],
+        "recordedAt": "",
+    }
+    assert "must-not-enter-agent-context" not in encoded
     assert "plan-project-b" not in encoded
     assert "storagepath" not in encoded
     assert str(tmp_path).lower() not in encoded
