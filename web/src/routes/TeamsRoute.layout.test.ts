@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import teamExperimentApiSource from "../api/teamExperiment.ts?raw";
 import { resolveLegacyTeamsRedirect } from "./LegacyTeamsRedirect";
 import canvasDataSource from "./TeamsRoute.canvasData.ts?raw";
 import routeSource from "./TeamsRoute.tsx?raw";
@@ -1768,7 +1769,8 @@ describe("TeamsRoute layout contract", () => {
       /const canRegisterBaselineArtifact[\s\S]*?&& designExecutionAllowed[\s\S]*?&& !activePlan\.baselineSelection\.activeBaselineReady/,
     );
     expect(routeSource).toContain("reproductionCommand");
-    expect(teamExperimentLoopMutationsSource).toContain("smoke-run");
+    expect(teamExperimentLoopMutationsSource).toContain("runTeamExperimentSmoke");
+    expect(teamExperimentApiSource).toContain("smoke-run");
     expect(teamExperimentPlanningLedgerPanelSource).toContain("运行受控 Smoke");
     expect(teamExperimentPlanningLedgerPanelSource).toContain("activePlan.readiness.readyForSmoke");
     expect(teamExperimentPlanningLedgerPanelSource).toContain("runExperimentSmokeFromWorkspace");
