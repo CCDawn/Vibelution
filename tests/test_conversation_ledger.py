@@ -211,6 +211,42 @@ def test_conversation_preview_slice_skips_unbounded_tool_payload_parsing(tmp_pat
     assert preview.visible_messages[-1]["content"] == "bounded final answer"
 
 
+def test_conversation_preview_slice_uses_pre_resolved_workspace_root(tmp_path, monkeypatch):
+    session_id = "session-preview-root"
+    append_conversation_event(
+        tmp_path,
+        session_id,
+        "turn-1",
+        EVENT_ASSISTANT_MESSAGE,
+        status="completed",
+        payload={"content": "pre-resolved preview"},
+    )
+    ledger_workspace_root = developer_sandbox.sandboxed_workspace_path(
+        tmp_path,
+        "sessions",
+    )
+
+    def reject_workspace_resolution(*args, **kwargs):
+        raise AssertionError("pre-resolved preview must not resolve the workspace again")
+
+    monkeypatch.setattr(
+        developer_sandbox,
+        "sandboxed_workspace_path",
+        reject_workspace_resolution,
+    )
+
+    preview = load_conversation_preview_slice(
+        tmp_path,
+        session_id,
+        event_limit=64,
+        ledger_workspace_root=ledger_workspace_root,
+    )
+
+    assert preview.safe is True
+    assert preview.reached_start is True
+    assert preview.visible_messages[-1]["content"] == "pre-resolved preview"
+
+
 def test_conversation_ledger_read_snapshot_reuses_one_load_and_returns_fresh_lists(tmp_path, monkeypatch):
     append_conversation_event(tmp_path, "session-snapshot", "turn-1", EVENT_TURN_STARTED, status="running")
     original_load = conversation_ledger.load_turn_events

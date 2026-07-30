@@ -200,14 +200,28 @@ class TurnJournalEvent:
         }
 
 
-def turn_journal_path(project_root: Path, session_id: str) -> Path:
-    token = _safe_session_workspace_token(session_id)
+def turn_journal_workspace_root(project_root: Path) -> Path:
+    """Resolve the shared sessions workspace for request-scoped reuse."""
+
     return developer_sandbox.sandboxed_workspace_path(
         Path(project_root),
         "sessions",
-        token,
-        "turn_journal.jsonl",
     )
+
+
+def turn_journal_path(
+    project_root: Path,
+    session_id: str,
+    *,
+    journal_workspace_root: Path | None = None,
+) -> Path:
+    token = _safe_session_workspace_token(session_id)
+    workspace_root = (
+        Path(journal_workspace_root)
+        if journal_workspace_root is not None
+        else turn_journal_workspace_root(project_root)
+    )
+    return workspace_root / token / "turn_journal.jsonl"
 
 
 def append_turn_event(
@@ -332,6 +346,7 @@ def load_latest_turn_events_for_preview(
     session_id: str,
     *,
     limit: int = 64,
+    journal_workspace_root: Path | None = None,
 ) -> tuple[list[TurnJournalEvent], bool, bool]:
     """Load a bounded journal tail suitable only for latest-message previews.
 
@@ -346,7 +361,11 @@ def load_latest_turn_events_for_preview(
     """
 
     normalized_limit = max(1, int(limit or 1))
-    path = turn_journal_path(project_root, session_id)
+    path = turn_journal_path(
+        project_root,
+        session_id,
+        journal_workspace_root=journal_workspace_root,
+    )
     if not path.exists():
         return [], True, True
     with _journal_thread_lock(path):
