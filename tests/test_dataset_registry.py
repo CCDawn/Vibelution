@@ -545,6 +545,54 @@ def test_materialize_candidate_patch_smoke_preserves_mutation_contract(tmp_path:
     assert "SyntaxError" not in matching_result.stderr
 
 
+def test_materialize_candidate_patch_smoke_refreshes_stale_workspace_copy(tmp_path: Path):
+    stale_bundle_path = (
+        tmp_path
+        / "workspace"
+        / "evaluation"
+        / "bundles"
+        / "supervised_candidate_patch_smoke_v1.json"
+    )
+    stale_bundle_path.parent.mkdir(parents=True)
+    stale_bundle_path.write_text(
+        json.dumps(
+            {
+                "benchmark": "vibelution_supervised_candidate_patch_smoke",
+                "bundle_name": "supervised_candidate_patch_smoke_v1",
+                "candidate_mutation_contract": {
+                    "supported": True,
+                    "required": True,
+                    "kind": "safe_patch_probe",
+                    "allowlisted_paths": [
+                        "tests/supervised_worktree_candidate_marker.py"
+                    ],
+                },
+                "cases": [
+                    {
+                        "case_id": "candidate_patch_convergence_probe",
+                        "scenario": "transaction",
+                        "mode": "single_turn",
+                        "baseline_prompt": "stale baseline prompt",
+                        "candidate_prompt": "stale candidate prompt",
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    result = materialize_dataset_bundle(
+        "supervised_candidate_patch_smoke",
+        project_root=tmp_path,
+    )
+    refreshed = json.loads(Path(result.bundle_path).read_text(encoding="utf-8"))
+
+    safe_check_marker = "受控检查命令（必须逐字复制，不得自行改写）"
+    assert safe_check_marker in refreshed["cases"][0]["baseline_prompt"]
+    assert safe_check_marker in refreshed["cases"][0]["candidate_prompt"]
+
+
 def test_materialize_custom_prompt_jsonl(tmp_path: Path):
     registry_path = ensure_dataset_registry(tmp_path)
     dataset_path = tmp_path / "workspace" / "evaluation" / "datasets" / "custom_prompt_tasks.jsonl"
