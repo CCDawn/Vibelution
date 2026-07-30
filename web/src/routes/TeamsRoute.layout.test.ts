@@ -1780,6 +1780,12 @@ describe("TeamsRoute layout contract", () => {
     expect(teamExperimentPlanningLedgerPanelSource).toContain("运行受控 Smoke");
     expect(teamExperimentPlanningLedgerPanelSource).toContain("activePlan.readiness.readyForBoundedSmokeRun");
     expect(teamExperimentPlanningLedgerPanelSource).toContain("runExperimentSmokeFromWorkspace");
+    expect(teamExperimentPlanningLedgerPanelSource).toContain("VMetricChip");
+    expect(teamExperimentPlanningLedgerPanelSource).toContain("VStatusChip");
+    expect(teamExperimentPlanningLedgerPanelSource).toContain("activeSmokeRun.smokeRunId");
+    expect(teamExperimentPlanningLedgerPanelSource).toContain("activeSmokeRun.artifactHash");
+    expect(teamExperimentPlanningLedgerPanelSource).toContain("activeSmokeRun.proxyOnly");
+    expect(teamExperimentPlanningLedgerPanelSource).toContain("activeSmokeRun.boundaries");
     expect(teamExperimentPlanningLedgerPanelSource).toMatch(
       /const statusPayload =\s*experimentPlanningStatus\s*\?\? latestFreezePayload\?\.experimentStatus/,
     );
