@@ -81,6 +81,17 @@ def update_agent_instance(
             )
         except (TypeError, ValueError):
             current_config_revision = 0
+        try:
+            current_config_schema_version = max(
+                0,
+                int(agent.get("configSchemaVersion") or 0),
+            )
+        except (TypeError, ValueError):
+            current_config_schema_version = 0
+        legacy_config_snapshot = (
+            current_config_revision == 0
+            and current_config_schema_version < 2
+        )
         if (
             expected_config_revision is not None
             and current_config_revision != int(expected_config_revision)
@@ -231,8 +242,15 @@ def update_agent_instance(
                 context_compression_policy
             )
             if normalized_context_policy.get("mode") != "custom":
-                raise s.AgentDirectoryError(
-                    "Agent context compression policy must be explicit."
+                if not legacy_config_snapshot:
+                    raise s.AgentDirectoryError(
+                        "Agent context compression policy must be explicit."
+                    )
+                normalized_context_policy = (
+                    s.materialize_agent_context_compression_policy(
+                        normalized_context_policy,
+                        creation_default=s._context_compression_base_policy_for_agents(),
+                    )
                 )
             agent["contextCompressionPolicy"] = normalized_context_policy
         if delegation_policy is not None:
