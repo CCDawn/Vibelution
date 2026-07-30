@@ -135,6 +135,8 @@ def test_plan_derived_engineering_proxy_hypothesis_is_idempotent_and_review_gate
     approved_candidate = approved_status["hypothesisCandidates"][0]
 
     assert review["decision"] == "approve"
+    assert review["experimentStatus"]["summary"]["readyHypothesisCandidateCount"] == 1
+    assert review["experimentStatus"]["hypothesisCandidates"][0]["approvedForExperiment"] is True
     assert approved_candidate["reviewDecision"] == "approve"
     assert approved_candidate["approvedForExperiment"] is True
     assert approved_status["summary"]["readyHypothesisCandidateCount"] == 1
