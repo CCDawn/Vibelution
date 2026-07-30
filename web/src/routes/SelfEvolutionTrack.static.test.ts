@@ -371,6 +371,10 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(selfEvolutionSource).toContain('observationInputModeValue !== "blank" && !observationPromptFilled');
     expect(selfEvolutionSource).toContain('value="blank"');
     expect(selfEvolutionSource).toContain('disabled={observationRunActive || observationStartPending || observationInputModeValue === "blank"}');
+    expect(selfEvolutionSource).toContain("首轮发送内容为空的 user 消息；后续复用同一模型会话");
+    expect(selfEvolutionSource).toContain("Later calls continue the same model conversation");
+    expect(selfEvolutionSource).not.toContain("不会注入默认目标、系统提示、历史或续写提示");
+    expect(selfEvolutionSource).not.toContain("with no default goal, system prompt, history, or continuation prompt");
   });
 
   it("exposes workflow and disabled action explanations through VUI tooltips", () => {
