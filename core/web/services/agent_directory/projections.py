@@ -439,6 +439,15 @@ def _agent_to_api_summary(
         "metadata": metadata,
         "createdAt": str(agent.get("createdAt") or "").strip(),
         "updatedAt": str(agent.get("updatedAt") or "").strip(),
+        "configSchemaVersion": int(agent.get("configSchemaVersion") or 0),
+        "configRevision": int(agent.get("configRevision") or 0),
+        "configHash": str(agent.get("configHash") or "").strip(),
+        "permissionPreset": str(agent.get("permissionPreset") or "").strip(),
+        "runtimePermissions": (
+            permission_runtime_contract(agent.get("permissionPreset"))
+            if str(agent.get("permissionPreset") or "").strip()
+            else None
+        ),
         "sourceRef": agent_source_ref,
         "projectionEdit": agent_projection_edit,
     }

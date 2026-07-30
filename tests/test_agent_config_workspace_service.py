@@ -1427,6 +1427,11 @@ def test_agent_api_effective_compression_uses_dialogue_model_context_window(tmp_
     )
 
     payload = agent_directory_service._agent_to_api_summary(agent)
+    assert payload["configSchemaVersion"] == 2
+    assert payload["configRevision"] == 1
+    assert payload["configHash"] == agent["configHash"]
+    assert payload["permissionPreset"] == "request_approval"
+    assert payload["runtimePermissions"]["sandboxMode"] == "workspace_write"
     policy = payload["contextCompressionEffectivePolicy"]
     assert policy["maxTokenLimit"] == 32768
     assert policy["effectiveTokenLimit"] == 32768
