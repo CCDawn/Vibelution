@@ -145,8 +145,9 @@ def test_session_list_cache_reclaims_stale_inflight_without_long_wait(monkeypatc
         session_service._SESSION_LIST_CACHE.clear()
         session_service._SESSION_LIST_CACHE.update(
             {
-                "inflight_signature": signature,
-                "inflight_started_at": 10.0,
+                "inflight_builds": {
+                    signature: 10.0,
+                },
             }
         )
 
@@ -164,8 +165,10 @@ def test_session_list_cache_reclaims_stale_inflight_without_long_wait(monkeypatc
     assert should_build is True
     assert waited is True
     with session_service._SESSION_LIST_CACHE_CONDITION:
-        assert session_service._SESSION_LIST_CACHE["inflight_signature"] == signature
-        assert session_service._SESSION_LIST_CACHE["inflight_started_at"] == 41.0
+        assert (
+            session_service._SESSION_LIST_CACHE["inflight_builds"][signature]
+            == 41.0
+        )
     _finish_session_list_cache_build(signature=signature)
 
 
