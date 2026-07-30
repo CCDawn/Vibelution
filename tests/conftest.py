@@ -39,6 +39,8 @@ _RUNTIME_ISOLATION_HINTS = (
     "project_agent_bus_service",
     "supervised_agent_service",
     "self_evolution_control_service",
+    "core.infrastructure.tool_executor",
+    "core.infrastructure import tool_executor",
     "work_run_store",
     "evolution_store",
 )
@@ -55,8 +57,6 @@ _SINGLETON_RESET_HINTS = _RUNTIME_ISOLATION_HINTS + (
     "core.infrastructure import event_bus",
     "core.orchestration.task_planner",
     "core.orchestration import task_planner",
-    "core.infrastructure.tool_executor",
-    "core.infrastructure import tool_executor",
     "core.prompt_manager",
     "core.infrastructure.git_memory",
     "core.infrastructure import git_memory",
