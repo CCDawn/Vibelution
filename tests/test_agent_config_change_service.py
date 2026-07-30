@@ -115,6 +115,34 @@ def test_agent_config_is_versioned_and_permission_preset_is_canonical(tmp_path, 
         )
 
 
+def test_legacy_agent_first_update_accepts_the_revision_zero_snapshot(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="Legacy config agent",
+    )
+    state = agent_directory_service.load_state()
+    stored = next(
+        item for item in state["agents"] if item["agentId"] == agent["agentId"]
+    )
+    stored["configSchemaVersion"] = 0
+    stored["configRevision"] = 0
+    stored["configHash"] = ""
+    stored["permissionPreset"] = ""
+    agent_directory_service.save_state(state)
+
+    updated = agent_directory_service.update_agent_instance(
+        agent["agentId"],
+        permission_preset="auto_review",
+        expected_updated_at=stored["updatedAt"],
+        expected_config_revision=0,
+    )
+
+    assert updated["configSchemaVersion"] == 2
+    assert updated["configRevision"] == 2
+    assert updated["permissionPreset"] == "auto_review"
+    assert len(updated["configHash"]) == 64
+
+
 def test_agent_config_rejects_unknown_permission_preset(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     agent = agent_directory_service.create_agent_instance(display_name="Strict permission agent")

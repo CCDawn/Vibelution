@@ -74,11 +74,16 @@ def update_agent_instance(
         agent = s._find_agent(state, agent_id)
         if agent is None:
             raise s.AgentNotFoundError(f"Agent not found: {agent_id}")
-        materialize_agent_config_identity(agent)
-        previous_config_hash = str(agent.get("configHash") or "").strip()
+        try:
+            current_config_revision = max(
+                0,
+                int(agent.get("configRevision") or 0),
+            )
+        except (TypeError, ValueError):
+            current_config_revision = 0
         if (
             expected_config_revision is not None
-            and int(agent.get("configRevision") or 0) != int(expected_config_revision)
+            and current_config_revision != int(expected_config_revision)
         ):
             raise s.AgentStateConflictError(
                 "Agent configuration revision changed. Refresh and retry."
@@ -86,6 +91,8 @@ def update_agent_instance(
         expected_agent_revision = str(expected_updated_at or "").strip()
         if expected_agent_revision and str(agent.get("updatedAt") or "").strip() != expected_agent_revision:
             raise s.AgentStateConflictError("Agent configuration changed after this editor was opened. Refresh and retry.")
+        materialize_agent_config_identity(agent)
+        previous_config_hash = str(agent.get("configHash") or "").strip()
         if display_name is not None:
             title = s.trim_lines(display_name or "", max_lines=1).strip()
             if not title:
