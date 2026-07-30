@@ -223,6 +223,21 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
       && activeSmokeAdapter?.adapterId
       && !selectedTeamRunExperimentSmokePending,
     );
+    const smokeGateDetail = !designExecutionAllowed
+      ? (lang === "zh"
+        ? "先完成假设审查并冻结设计；之后登记 baseline 才能运行。"
+        : "Review the hypothesis and freeze the design first; then register the baseline.")
+      : !activeBaselineArtifact
+        ? (lang === "zh"
+          ? "先登记可复现的 active baseline artifact。"
+          : "Register a reproducible active baseline artifact first.")
+        : !activeSmokeAdapter
+          ? (lang === "zh"
+            ? "当前实验方式没有可用的白名单离线 Smoke 执行器。"
+            : "No allowlisted offline smoke adapter is available for this method.")
+          : (lang === "zh"
+            ? "仅运行后端白名单离线 Smoke；不会启动 full run，也不会生成正式科学结论。"
+            : "Runs only the backend allowlisted offline smoke; no full run or formal scientific claim.");
     const canRegisterFullRunResult = Boolean(
       selectedTeam?.teamId
       && activePlan
@@ -400,33 +415,34 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
                 </VNativeButton>
               </div>
             )}
+            <div className={styles.experimentBaselineArtifact}>
+              <span>{lang === "zh" ? "受控 Smoke" : "Bounded smoke"}</span>
+              <strong title={activeSmokeRun?.artifactHash || activeSmokeAdapter?.adapterId || ""}>
+                {activeSmokeRun
+                  ? `${activeSmokeRun.adapter} · ${activeSmokeRun.status}`
+                  : !designExecutionAllowed
+                    ? (lang === "zh" ? "设计尚未冻结" : "Design is not frozen")
+                    : activeSmokeAdapter?.adapterId
+                      || (lang === "zh" ? "没有可用的离线执行器" : "No offline Adapter available")}
+              </strong>
+              <small>
+                {activeSmokeRun
+                  ? `${activeSmokeRun.decisionHint} · seed ${activeSmokeRun.seed}`
+                  : smokeGateDetail}
+              </small>
+              <VNativeButton
+                type="button"
+                onClick={() => runExperimentSmokeFromWorkspace(activePlan, activeSmokeAdapter?.adapterId || "", 42)}
+                disabled={!canRunBoundedSmoke}
+              >
+                <Play size={13} />
+                {selectedTeamRunExperimentSmokePending
+                  ? (lang === "zh" ? "Smoke 运行中" : "Running smoke")
+                  : (lang === "zh" ? "运行受控 Smoke" : "Run bounded smoke")}
+              </VNativeButton>
+            </div>
             {activeBaselineArtifact ? (
               <>
-                <div className={styles.experimentBaselineArtifact}>
-                  <span>{lang === "zh" ? "受控 Smoke" : "Bounded smoke"}</span>
-                  <strong title={activeSmokeRun?.artifactHash || activeSmokeAdapter?.adapterId || ""}>
-                    {activeSmokeRun
-                      ? `${activeSmokeRun.adapter} · ${activeSmokeRun.status}`
-                      : activeSmokeAdapter?.adapterId || (lang === "zh" ? "没有可用的离线执行器" : "No offline Adapter available")}
-                  </strong>
-                  <small>
-                    {activeSmokeRun
-                      ? `${activeSmokeRun.decisionHint} · seed ${activeSmokeRun.seed}`
-                      : (lang === "zh"
-                        ? "仅运行后端白名单离线 Smoke；不会启动 full run，也不会生成正式科学结论。"
-                        : "Runs only the backend allowlisted offline smoke; no full run or formal scientific claim.")}
-                  </small>
-                  <VNativeButton
-                    type="button"
-                    onClick={() => runExperimentSmokeFromWorkspace(activePlan, activeSmokeAdapter?.adapterId || "", 42)}
-                    disabled={!canRunBoundedSmoke}
-                  >
-                    <Play size={13} />
-                    {selectedTeamRunExperimentSmokePending
-                      ? (lang === "zh" ? "Smoke 运行中" : "Running smoke")
-                      : (lang === "zh" ? "运行受控 Smoke" : "Run bounded smoke")}
-                  </VNativeButton>
-                </div>
                 {activeSmokeResult ? (
                   <div
                     className={[
@@ -780,7 +796,7 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
                   <p>{candidate.hypothesis || candidate.summary || "-"}</p>
                   <small>
                     {candidate.missingExperimentPlanFields.length
-                      ? `${lang === "zh" ? "缺" : "missing"} ${candidate.missingExperimentPlanFields.join(", ")}`
+                      ? `${lang === "zh" ? "候选自身缺" : "candidate missing"} ${candidate.missingExperimentPlanFields.join(", ")}`
                       : `${candidate.experimentPlan.dataset || "-"} / ${candidate.experimentPlan.metric || "-"}`}
                   </small>
                 </article>

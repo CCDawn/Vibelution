@@ -1768,3 +1768,39 @@ def test_algorithm_hypothesis_requires_complete_experiment_plan(tmp_path, monkey
     assert response["validation"]["valid"] is False
     assert response["candidate"]["currentState"] == "hypothesis_needs_revision"
     assert any(issue["code"] == "incomplete_experiment_plan" for issue in response["validation"]["issues"])
+
+
+def test_planning_gap_does_not_claim_complete_active_design_fields_are_missing():
+    active_plan = {
+        "contractValidation": {"valid": True},
+        "readiness": {"readyForPlanReview": False},
+        "experimentPlan": {
+            "dataset": "synthetic_structured_8x8_proxy",
+            "metric": "reconstruction_mse_delta",
+            "baseline": "one_shot_pca_reconstruction",
+            "smokePlan": "predictive_coding_reconstruction_proxy",
+        },
+    }
+
+    gaps = team_workflow_orchestration_service._experiment_planning_gaps(
+        latest_experiment={"roundId": "round-v2"},
+        hypothesis_candidates=[{"candidateId": "H1", "valid": False}],
+        ready_hypotheses=[],
+        active_plan=active_plan,
+    )
+    actions = team_workflow_orchestration_service._experiment_planning_next_actions(
+        active_plan=active_plan,
+        gaps=gaps,
+    )
+
+    assert gaps == [
+        {
+            "code": "incomplete_experiment_plan",
+            "severity": "needs_attention",
+            "message": "已有算法假设候选，但尚未完成审查或选择；需先修订为可审查状态并选择候选。",
+        }
+    ]
+    assert actions == [
+        "Review and select an algorithm_hypothesis candidate that is ready for plan review.",
+        "Keep the complete active design contract unchanged unless the selected hypothesis requires a new revision.",
+    ]
