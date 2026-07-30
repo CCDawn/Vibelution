@@ -401,6 +401,63 @@ def test_explicit_design_gate_blocks_smoke_until_plan_is_frozen(tmp_path, monkey
     assert frozen["experimentStatus"]["activePlan"]["readiness"]["readyForBoundedSmokeRun"] is True
     assert response["status"] == "needs_review"
 
+
+def test_existing_frozen_plan_projects_bounded_smoke_readiness_without_rewriting_history(
+    tmp_path,
+    monkeypatch,
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    plan_store = team_workflow_orchestration_service._load_experiment_plan_store(
+        team["teamId"]
+    )
+    plan_store["plans"] = [
+        {
+            "planId": "exp_frozen_before_bounded_readiness",
+            "status": "design_frozen",
+            "designGate": {"status": "frozen", "requiresExplicitFreeze": True},
+            "contractValidation": {"valid": True, "missingFields": []},
+            "readiness": {
+                "readyForPlanReview": True,
+                "readyForSmoke": False,
+                "readyForFullRun": False,
+                "blockers": ["active_baseline_record"],
+            },
+            "experimentPlan": {
+                "dataset": "synthetic_structured_8x8_proxy",
+                "metric": "reconstruction_mse_delta",
+                "baseline": "one-shot PCA reconstruction",
+                "smokePlan": "predictive_coding_reconstruction_proxy; seed=42",
+            },
+            "experimentContract": {
+                "schemaVersion": 2,
+                "revision": 3,
+                "status": "frozen",
+            },
+            "updatedAt": "2026-07-30T00:00:00+00:00",
+        }
+    ]
+    plan_store["activePlanId"] = "exp_frozen_before_bounded_readiness"
+    store_path = team_workflow_orchestration_service._experiment_plan_store_path(
+        team["teamId"]
+    )
+    team_workflow_orchestration_service._write_json(store_path, plan_store)
+
+    status = team_workflow_orchestration_service.get_experiment_planning_status(
+        team["teamId"]
+    )
+    persisted = team_workflow_orchestration_service._read_json(store_path)
+
+    assert (
+        status["activePlan"]["readiness"]["readyForBoundedSmokeRun"] is True
+    )
+    assert status["readiness"]["readyForBoundedSmokeRun"] is True
+    assert (
+        "readyForBoundedSmokeRun"
+        not in persisted["plans"][0]["readiness"]
+    )
+
+
 def test_run_experiment_smoke_run_rejects_non_whitelisted_adapter(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")
