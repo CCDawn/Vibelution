@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
+from core.llm.message_projector import normalize_messages_for_provider
 from core.orchestration.turn_runtime import prepare_agent_turn_runtime
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
@@ -1518,7 +1519,14 @@ def test_self_observation_blank_mode_continues_canonical_conversation_without_us
     assert calls[0]["context"].conversation_bound is True
     assert calls[1]["messages"] == [
         {"role": "assistant", "content": "第一段自由输出"},
-        {"role": "user", "content": ""},
+        {
+            "role": "user",
+            "content": [{"type": "input_text", "text": ""}],
+        },
+    ]
+    assert [message["role"] for message in normalize_messages_for_provider(calls[1]["messages"])] == [
+        "assistant",
+        "user",
     ]
     assert calls[1]["replayState"] is calls[0]["outputReplayState"]
     assert calls[1]["context"].conversation_bound is True
@@ -1526,12 +1534,8 @@ def test_self_observation_blank_mode_continues_canonical_conversation_without_us
     assert all(call["metadata"]["promptChars"] == 0 for call in calls)
     assert all(call["metadata"]["inputMode"] == "blank" for call in calls)
     assert [call["metadata"]["historyAssistantChars"] for call in calls] == [0, 7]
-    assert all(
-        message["content"] == ""
-        for call in calls
-        for message in call["messages"]
-        if message["role"] == "user"
-    )
+    assert calls[0]["messages"][0]["content"] == ""
+    assert calls[1]["messages"][1]["content"] == [{"type": "input_text", "text": ""}]
     payload_text = json.dumps([call["messages"] for call in calls], ensure_ascii=False)
     assert "时间仍未结束" not in payload_text
     assert "请继续下一段观察" not in payload_text

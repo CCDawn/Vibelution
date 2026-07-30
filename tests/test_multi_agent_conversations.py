@@ -377,6 +377,9 @@ def test_session_list_uses_short_snapshot_cache_and_invalidates_on_update(tmp_pa
     assert load_calls == 1
     loaded_events = [item for item in events if item[0][2] == "session.list.loaded"]
     assert loaded_events[0][1]["fields"]["cacheHit"] is False
+    assert loaded_events[0][1]["fields"]["ledgerTailMs"] > 0
+    assert loaded_events[0][1]["fields"]["agentInboxMs"] > 0
+    assert loaded_events[0][1]["fields"]["agentDirectoryMs"] > 0
     assert loaded_events[1][1]["fields"]["cacheHit"] is True
     assert loaded_events[1][1]["fields"]["cacheAgeMs"] > 0
 
