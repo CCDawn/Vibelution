@@ -32,6 +32,18 @@ def _runtime(
         lambda: {
             "agentId": agent_id,
             "turnId": turn_id,
+            "agentConfigSnapshot": {
+                "agentId": agent_id,
+                "configRevision": 3,
+                "configHash": "config-hash-a",
+            },
+            "permissionPreset": "request_approval",
+            "runtimePermissions": {
+                "preset": "request_approval",
+                "sandboxMode": "workspace_write",
+                "approvalPolicy": "on_request",
+                "approvalsReviewer": "user",
+            },
             "toolPolicy": {
                 "policyId": "tool-agent-a",
                 "allowedTools": list(allowed_tools),
@@ -94,6 +106,32 @@ def test_stale_turn_authorization_is_blocked(monkeypatch):
     result, _action = executor.execute("allowed_tool", {}, tool_call_id="call-a")
 
     assert "不属于当前回合" in result
+    assert calls == []
+
+
+def test_stale_agent_config_authorization_is_blocked(monkeypatch):
+    _runtime(monkeypatch)
+    _install()
+    _runtime(monkeypatch)
+    runtime = agent_directory_service.current_agent_runtime()
+    runtime["agentConfigSnapshot"]["configRevision"] = 4
+    runtime["agentConfigSnapshot"]["configHash"] = "config-hash-b"
+    monkeypatch.setattr(
+        agent_directory_service,
+        "current_agent_runtime",
+        lambda: runtime,
+    )
+    executor = ToolExecutor()
+    calls = []
+    executor.register_tool("allowed_tool", lambda: calls.append("called") or "unsafe")
+
+    result, _action = executor.execute(
+        "allowed_tool",
+        {},
+        tool_call_id="call-a",
+    )
+
+    assert "配置快照不一致" in result
     assert calls == []
 
 
@@ -232,6 +270,12 @@ def test_delegation_constraint_is_enforced_by_canonical_authorization(monkeypatc
         lambda: {
             "agentId": "agent-a",
             "turnId": "turn-a",
+            "agentConfigSnapshot": {
+                "agentId": "agent-a",
+                "configRevision": 3,
+                "configHash": "config-hash-a",
+            },
+            "permissionPreset": "request_approval",
             "toolPolicy": {"allowedTools": ["spawn_agent_tool"]},
             "delegationPolicy": {"allowSubagents": False},
         },

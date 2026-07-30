@@ -1595,7 +1595,10 @@ def resolve_memory_policy_for_agent(agent_id: str) -> dict[str, Any]:
     workspace_path = str(agent.get("workspacePath") or s._agent_workspace_relative_path(agent_id)).strip()
     if isinstance(policy, dict):
         return s.normalize_memory_policy(policy, policy_id, workspace_path)
-    raise s.AgentDirectoryError(f"Agent memory policy is not materialized: {agent_id}")
+    return s.default_memory_policy(
+        policy_id or f"memory-{agent_id}",
+        workspace_path,
+    )
 
 
 def resolve_supervision_policy_for_agent(agent_id: str) -> dict[str, Any]:
@@ -1616,7 +1619,7 @@ def resolve_tool_policy_for_agent(agent_id: str, *, session_id: str = "", turn_i
     policy_id = str(agent.get("toolPolicyId") or s.DEFAULT_TOOL_POLICY_ID).strip() or s.DEFAULT_TOOL_POLICY_ID
     policy = agent.get("toolPolicy")
     if not isinstance(policy, dict):
-        raise s.AgentDirectoryError(f"Agent tool policy is not materialized: {agent_id}")
+        policy = s.default_tool_policy(policy_id)
     normalized = s._with_session_terminal_protocol_defaults(agent, s.normalize_tool_policy(policy, policy_id))
     with_grants = s._with_temporary_tool_grants(
         normalized,

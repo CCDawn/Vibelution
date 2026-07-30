@@ -27,6 +27,9 @@ class ToolExecutionAuthorizationContext:
     agent_id: str
     turn_id: str
     decision_fingerprint: str
+    config_revision: int
+    config_hash: str
+    permission_preset: str
     executable_tools: tuple[str, ...]
     approval_requirements: tuple[tuple[str, str, str], ...] = ()
     max_calls_per_turn: int = 0
@@ -164,6 +167,11 @@ def install_execution_authorization(report: AuthorizationReport) -> ToolExecutio
     decision = report.decision
     runtime = dict(current_agent_runtime() or {})
     policy = runtime.get("toolPolicy") if isinstance(runtime.get("toolPolicy"), Mapping) else {}
+    config_snapshot = (
+        runtime.get("agentConfigSnapshot")
+        if isinstance(runtime.get("agentConfigSnapshot"), Mapping)
+        else {}
+    )
     try:
         max_calls_per_turn = max(0, int(policy.get("maxCallsPerTurn") or 0))
     except (TypeError, ValueError):
@@ -172,12 +180,24 @@ def install_execution_authorization(report: AuthorizationReport) -> ToolExecutio
         agent_id=str(decision.agent_id or "").strip(),
         turn_id=str(decision.turn_id or "").strip(),
         decision_fingerprint=str(decision.decision_fingerprint or "").strip(),
+        config_revision=int(config_snapshot.get("configRevision") or 0),
+        config_hash=str(config_snapshot.get("configHash") or "").strip(),
+        permission_preset=str(runtime.get("permissionPreset") or "").strip(),
         executable_tools=tuple(decision.executable_tools),
         approval_requirements=tuple(getattr(decision, "approval_requirements", ()) or ()),
         max_calls_per_turn=max_calls_per_turn,
     )
-    if not context.agent_id or not context.turn_id or not context.decision_fingerprint:
-        raise ToolAuthorizationContextError("execution authorization requires agent, turn, and decision fingerprint")
+    if (
+        not context.agent_id
+        or not context.turn_id
+        or not context.decision_fingerprint
+        or context.config_revision < 1
+        or not context.config_hash
+        or not context.permission_preset
+    ):
+        raise ToolAuthorizationContextError(
+            "execution authorization requires Agent config identity"
+        )
     _EXECUTION_AUTHORIZATION.set(context)
     return context
 
@@ -234,6 +254,26 @@ def authorize_tool_execution(
         return _execution_denial("agent_mismatch", "工具授权决策不属于当前 Agent。", runtime_agent_id, runtime_turn_id, context)
     if runtime_turn_id and context.turn_id != runtime_turn_id:
         return _execution_denial("turn_mismatch", "工具授权决策不属于当前回合。", runtime_agent_id, runtime_turn_id, context)
+    runtime_config_snapshot = (
+        runtime.get("agentConfigSnapshot")
+        if isinstance(runtime.get("agentConfigSnapshot"), Mapping)
+        else {}
+    )
+    if (
+        int(runtime_config_snapshot.get("configRevision") or 0)
+        != context.config_revision
+        or str(runtime_config_snapshot.get("configHash") or "").strip()
+        != context.config_hash
+        or str(runtime.get("permissionPreset") or "").strip()
+        != context.permission_preset
+    ):
+        return _execution_denial(
+            "agent_config_mismatch",
+            "工具授权决策与当前 Agent 配置快照不一致。",
+            runtime_agent_id,
+            runtime_turn_id,
+            context,
+        )
     normalized_tool = str(tool_name or "").strip()
     if normalized_tool not in set(context.executable_tools):
         return _execution_denial("tool_not_executable", "当前工具未被本回合授权执行。", runtime_agent_id, runtime_turn_id, context)
@@ -302,6 +342,9 @@ def authorize_tool_execution(
                 approval=approval,
                 risk=risk,
                 decision_fingerprint=context.decision_fingerprint,
+                config_revision=context.config_revision,
+                config_hash=context.config_hash,
+                permission_preset=context.permission_preset,
                 cancel_checker=cancel_checker,
             )
         except ToolApprovalError as exc:

@@ -14,13 +14,11 @@ from typing import Any, Callable, Literal, Mapping
 from uuid import uuid4
 
 
-ToolApprovalPolicy = Literal["untrusted", "on_request", "never"]
 ToolApprovalDecision = Literal["accept", "acceptForSession", "decline", "cancel"]
 
-DEFAULT_APPROVAL_POLICY: ToolApprovalPolicy = "on_request"
 DEFAULT_APPROVAL_TIMEOUT_SECONDS = 300.0
 MAX_RETAINED_REQUESTS = 256
-_VALID_POLICIES = {"untrusted", "on_request", "never"}
+_VALID_PERMISSION_PRESETS = {"request_approval", "auto_review", "full_access"}
 _VALID_DECISIONS = {"accept", "acceptForSession", "decline", "cancel"}
 _PATCH_TARGET_PATTERN = re.compile(
     r"^\*\*\* (?:Add|Update|Delete) File: (?P<path>.+?)\s*$",
@@ -55,6 +53,9 @@ class _ApprovalRequest:
     arguments_hash: str
     argument_summary: dict[str, Any]
     decision_fingerprint: str
+    config_revision: int
+    config_hash: str
+    permission_preset: str
     created_at: str
     expires_at: float
     status: str = "pending"
@@ -75,6 +76,9 @@ class _ApprovalRequest:
             "argumentsHash": self.arguments_hash,
             "argumentSummary": dict(self.argument_summary),
             "decisionFingerprint": self.decision_fingerprint,
+            "configRevision": self.config_revision,
+            "configHash": self.config_hash,
+            "permissionPreset": self.permission_preset,
             "availableDecisions": ["accept", "acceptForSession", "decline", "cancel"],
             "createdAt": self.created_at,
             "status": self.status,
@@ -94,28 +98,7 @@ class ToolApprovalOutcome:
 _LOCK = RLock()
 _REQUESTS: dict[str, _ApprovalRequest] = {}
 _REQUEST_IDS_BY_CALL: dict[tuple[str, str, str], str] = {}
-_SESSION_POLICIES: dict[str, ToolApprovalPolicy] = {}
-_SESSION_GRANTS: set[tuple[str, str, str, str]] = set()
-
-
-def get_session_tool_approval_policy(session_id: str) -> dict[str, str]:
-    normalized_session = _required_identity(session_id, "sessionId")
-    with _LOCK:
-        policy = _SESSION_POLICIES.get(normalized_session, DEFAULT_APPROVAL_POLICY)
-    return {"sessionId": normalized_session, "policy": policy}
-
-
-def set_session_tool_approval_policy(session_id: str, policy: str) -> dict[str, str]:
-    normalized_session = _required_identity(session_id, "sessionId")
-    normalized_policy = str(policy or "").strip()
-    if normalized_policy not in _VALID_POLICIES:
-        raise ToolApprovalError(f"unsupported tool approval policy: {normalized_policy or '<empty>'}")
-    with _LOCK:
-        _SESSION_POLICIES[normalized_session] = normalized_policy  # type: ignore[assignment]
-        _SESSION_GRANTS.difference_update(
-            grant for grant in _SESSION_GRANTS if grant[0] == normalized_session
-        )
-    return {"sessionId": normalized_session, "policy": normalized_policy}
+_SESSION_GRANTS: set[tuple[str, str, int, str, str, str]] = set()
 
 
 def list_tool_approval_requests(session_id: str, *, status: str = "") -> list[dict[str, Any]]:
@@ -169,6 +152,9 @@ def authorize_or_wait(
     approval: str,
     risk: str,
     decision_fingerprint: str,
+    config_revision: int,
+    config_hash: str,
+    permission_preset: str,
     cancel_checker: Callable[[], str] | None = None,
     timeout_seconds: float = DEFAULT_APPROVAL_TIMEOUT_SECONDS,
 ) -> ToolApprovalOutcome:
@@ -181,29 +167,42 @@ def authorize_or_wait(
     normalized_risk = str(risk or "read").strip()
     if normalized_approval == "never":
         return ToolApprovalOutcome(True, "approval_not_required")
+    normalized_permission_preset = str(permission_preset or "").strip()
+    if normalized_permission_preset not in _VALID_PERMISSION_PRESETS:
+        raise ToolApprovalError(
+            f"unsupported Agent permission preset: {normalized_permission_preset or '<empty>'}"
+        )
+    try:
+        normalized_config_revision = int(config_revision)
+    except (TypeError, ValueError) as exc:
+        raise ToolApprovalError("Agent configRevision is required") from exc
+    normalized_config_hash = _required_identity(config_hash, "configHash")
+    if normalized_config_revision < 1:
+        raise ToolApprovalError("Agent configRevision is required")
+    if normalized_permission_preset == "full_access":
+        return ToolApprovalOutcome(True, "full_access_auto_approved")
 
     args_hash = _arguments_hash(tool_args)
-    grant_key = (normalized_session, normalized_agent, normalized_tool, args_hash)
+    grant_key = (
+        normalized_session,
+        normalized_agent,
+        normalized_config_revision,
+        normalized_config_hash,
+        normalized_tool,
+        args_hash,
+    )
     with _LOCK:
-        policy = _SESSION_POLICIES.get(normalized_session, DEFAULT_APPROVAL_POLICY)
         if grant_key in _SESSION_GRANTS and normalized_approval != "always":
             return ToolApprovalOutcome(True, "approved_for_session")
 
     if _can_auto_approve(
-        policy=policy,
+        permission_preset=normalized_permission_preset,
         tool_name=normalized_tool,
         tool_args=tool_args,
         approval=normalized_approval,
         risk=normalized_risk,
     ):
         return ToolApprovalOutcome(True, "auto_approved")
-    if policy == "never":
-        return ToolApprovalOutcome(
-            False,
-            "approval_policy_never",
-            "[工具审批] 当前审批策略禁止请求用户授权，且该调用无法在现有沙盒边界内自动执行。",
-        )
-
     request = _get_or_create_request(
         session_id=normalized_session,
         turn_id=normalized_turn,
@@ -215,6 +214,9 @@ def authorize_or_wait(
         arguments_hash=args_hash,
         argument_summary=_argument_summary(normalized_tool, tool_args),
         decision_fingerprint=str(decision_fingerprint or "").strip(),
+        config_revision=normalized_config_revision,
+        config_hash=normalized_config_hash,
+        permission_preset=normalized_permission_preset,
         timeout_seconds=timeout_seconds,
     )
     while not request.event.wait(0.05):
@@ -275,7 +277,6 @@ def reset_tool_approval_state() -> None:
                 _resolve_request_locked(request, "cancel")
         _REQUESTS.clear()
         _REQUEST_IDS_BY_CALL.clear()
-        _SESSION_POLICIES.clear()
         _SESSION_GRANTS.clear()
 
 
@@ -291,6 +292,9 @@ def _get_or_create_request(
     arguments_hash: str,
     argument_summary: dict[str, Any],
     decision_fingerprint: str,
+    config_revision: int,
+    config_hash: str,
+    permission_preset: str,
     timeout_seconds: float,
 ) -> _ApprovalRequest:
     key = (session_id, turn_id, call_id)
@@ -305,6 +309,9 @@ def _get_or_create_request(
                 or existing.tool_name != tool_name
                 or existing.arguments_hash != arguments_hash
                 or existing.decision_fingerprint != decision_fingerprint
+                or existing.config_revision != config_revision
+                or existing.config_hash != config_hash
+                or existing.permission_preset != permission_preset
             ):
                 raise ToolApprovalConflictError("callId was reused with different approval facts")
             return existing
@@ -320,6 +327,9 @@ def _get_or_create_request(
             arguments_hash=arguments_hash,
             argument_summary=argument_summary,
             decision_fingerprint=decision_fingerprint,
+            config_revision=config_revision,
+            config_hash=config_hash,
+            permission_preset=permission_preset,
             created_at=_utc_now(),
             expires_at=time.monotonic() + max(0.1, float(timeout_seconds)),
         )
@@ -348,7 +358,14 @@ def _resolve_request_locked(request: _ApprovalRequest, decision: str) -> None:
     elif decision == "acceptForSession":
         request.status = "accepted_for_session"
         _SESSION_GRANTS.add(
-            (request.session_id, request.agent_id, request.tool_name, request.arguments_hash)
+            (
+                request.session_id,
+                request.agent_id,
+                request.config_revision,
+                request.config_hash,
+                request.tool_name,
+                request.arguments_hash,
+            )
         )
     elif decision == "decline":
         request.status = "declined"
@@ -360,16 +377,18 @@ def _resolve_request_locked(request: _ApprovalRequest, decision: str) -> None:
 
 def _can_auto_approve(
     *,
-    policy: str,
+    permission_preset: str,
     tool_name: str,
     tool_args: Mapping[str, Any],
     approval: str,
     risk: str,
 ) -> bool:
+    if permission_preset == "request_approval":
+        return False
+    if permission_preset == "full_access":
+        return True
     if approval == "always" or risk in {"network", "destructive"}:
         return False
-    if policy == "untrusted":
-        return risk == "read" and approval == "never"
     if tool_name in _SANDBOX_CONTAINED_TOOLS:
         return True
     if tool_name in _WORKSPACE_PATH_TOOLS:
@@ -475,6 +494,9 @@ def _record_approval_event(
                 "decision": request.decision,
                 "argumentsHash": request.arguments_hash,
                 "decisionFingerprintPresent": bool(request.decision_fingerprint),
+                "configRevision": request.config_revision,
+                "configHash": request.config_hash,
+                "permissionPreset": request.permission_preset,
             },
             lifecycle=True,
         )

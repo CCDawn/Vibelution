@@ -14,7 +14,17 @@ def _bind_visible_tools(monkeypatch, visible_tools):
     monkeypatch.setattr(
         agent_directory_service,
         "current_agent_runtime",
-        lambda: {"agentId": "agent-test", "turnId": "turn-test", "toolPolicy": {}},
+        lambda: {
+            "agentId": "agent-test",
+            "turnId": "turn-test",
+            "agentConfigSnapshot": {
+                "agentId": "agent-test",
+                "configRevision": 1,
+                "configHash": "test-config-hash",
+            },
+            "permissionPreset": "request_approval",
+            "toolPolicy": {},
+        },
     )
     tool_authorization_service.install_execution_authorization(
         SimpleNamespace(decision=SimpleNamespace(
