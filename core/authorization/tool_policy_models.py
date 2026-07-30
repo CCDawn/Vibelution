@@ -145,6 +145,7 @@ class AuthorizationDecision:
     denied: tuple[tuple[str, ToolDenyReason], ...]
     decision_fingerprint: str
     generated_at: str
+    approval_requirements: tuple[tuple[str, ApprovalMode, str], ...] = ()
 
     def deny_reason_for(self, tool_name: str) -> ToolDenyReason | None:
         for name, reason in self.denied:
@@ -165,6 +166,10 @@ class AuthorizationDecision:
             "denied": {name: reason.public_projection() for name, reason in self.denied},
             "decisionFingerprint": self.decision_fingerprint,
             "generatedAt": self.generated_at,
+            "approvalRequirements": {
+                name: {"approval": approval, "risk": risk}
+                for name, approval, risk in self.approval_requirements
+            },
         }
 
 
