@@ -452,6 +452,33 @@ def _safe_message_role_summary(messages: List[Any]) -> Dict[str, Any]:
     }
 
 
+def _strict_blank_responses_messages(
+    messages: List[Any],
+    metadata: Optional[Dict[str, Any]],
+) -> list[dict[str, Any]] | None:
+    if not isinstance(metadata, dict):
+        return None
+    if metadata.get("strictPromptPayload") is not True:
+        return None
+    if str(metadata.get("inputMode") or "").strip().lower() != "blank":
+        return None
+    if len(messages) != 1 or not isinstance(messages[0], dict):
+        return None
+    message = messages[0]
+    if str(message.get("role") or "").strip().lower() != "user":
+        return None
+    if message.get("content") != "":
+        return None
+    if any(message.get(key) for key in ("attachments", "references", "tool_calls", "toolCalls")):
+        return None
+    return [
+        {
+            "role": "user",
+            "content": [{"type": "input_text", "text": ""}],
+        }
+    ]
+
+
 def _payload_conversation_items(payload: Dict[str, Any]) -> List[Any]:
     for key in ("messages", "input"):
         value = payload.get(key)
@@ -1772,6 +1799,13 @@ class LLMClient:
             )
         projection_messages = list(messages or [])
         provider_messages = normalize_messages_for_provider(projection_messages)
+        if self.protocol_route.wire_protocol == WireProtocol.RESPONSES:
+            strict_blank_messages = _strict_blank_responses_messages(
+                projection_messages,
+                metadata,
+            )
+            if strict_blank_messages is not None:
+                provider_messages = strict_blank_messages
         replay_items = tuple(getattr(replay_state, "opaque_items", ()) or ())
         provider_message_roles = list(
             _safe_message_role_summary(provider_messages).get("messageRoles") or []

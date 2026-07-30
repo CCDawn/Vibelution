@@ -240,6 +240,35 @@ def test_openai_responses_gpt_payload_includes_reasoning_effort():
     assert payload["reasoning"] == {"effort": "high"}
 
 
+def test_strict_blank_responses_payload_preserves_empty_user_item():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "relay",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://relay.example.test/v1",
+            "llm.providers.default.compat_mode": "openai",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "gpt-5.6-luna",
+            "llm.profiles.primary.transport": "responses",
+        }
+    )
+    client = LLMClient(config=config, backend=lambda payload: payload)
+
+    ordinary_payload = client._build_payload([{"role": "user", "content": ""}])
+    strict_blank_payload = client._build_payload(
+        [{"role": "user", "content": ""}],
+        metadata={"strictPromptPayload": True, "inputMode": "blank"},
+    )
+
+    assert ordinary_payload["input"] == []
+    assert strict_blank_payload["input"] == [
+        {
+            "role": "user",
+            "content": [{"type": "input_text", "text": ""}],
+        }
+    ]
+
+
 def test_openai_chat_gpt_payload_omits_reasoning_effort():
     config = make_config(
         **{
