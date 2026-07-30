@@ -849,14 +849,27 @@ def _with_runtime_tool_grants(
     grants_mutation = any(tool in s.MUTATING_AGENT_TOOL_NAMES for tool in effective_grants)
     mutation_access = str(policy.get("mutationAccess") or "inherit").strip()
     runtime_mutation_access = "controlled" if grants_mutation and mutation_access == "none" else mutation_access
-    if not added and runtime_mutation_access == mutation_access:
+    runtime_source = str(source or "").strip()
+    approval_overrides = dict(policy.get("approvalOverrides") or {})
+    if runtime_source in {
+        "supervised_conversation_harness",
+        "supervised_baseline_self_edit",
+    }:
+        for tool in added:
+            approval_overrides[tool] = "never"
+    if (
+        not added
+        and runtime_mutation_access == mutation_access
+        and approval_overrides == dict(policy.get("approvalOverrides") or {})
+    ):
         return policy
     return {
         **policy,
         "allowedTools": allowed,
         "temporaryAllowedTools": s._tool_name_list(list(policy.get("temporaryAllowedTools") or []) + added),
-        "runtimeToolSource": str(source or "").strip(),
+        "runtimeToolSource": runtime_source,
         "mutationAccess": runtime_mutation_access,
+        "approvalOverrides": approval_overrides,
     }
 
 
