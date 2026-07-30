@@ -379,13 +379,18 @@ describe("ChatCodingRoute layout contract", () => {
 
   it("surfaces pending tool approvals as an in-session dialog", () => {
     expect(routeSource).toContain("pendingToolGovernanceRequests");
+    expect(routeSource).toContain("sessionToolApprovalsQuery");
+    expect(routeSource).toContain("queryKeys.sessionToolApprovals");
+    expect(routeSource).toContain("/tool-approvals?status=pending");
     expect(routeSource).toContain("resolveToolApprovalMutation");
+    expect(routeAndDetailMutationsSource).toContain("/tool-approvals/");
+    expect(routeAndDetailMutationsSource).toContain('"acceptForSession"');
     expect(routeAndDetailMutationsSource).toContain("/tool-governance-requests/");
     expect(routeSource).toContain("onApproveToolApproval={() => {");
-    expect(routeSource).toContain("if (!pendingToolApproval) {");
-    expect(routeSource).toContain("resolveToolApprovalMutation.mutate({ request: pendingToolApproval, decision: \"approve\" })");
+    expect(routeSource).toContain("if (!pendingToolGovernanceApproval) {");
+    expect(routeSource).toContain("resolveToolApprovalMutation.mutate({ request: pendingToolGovernanceApproval, decision: \"approve\" })");
     expect(routeSource).toContain("onRejectToolApproval={() => {");
-    expect(routeSource).toContain("resolveToolApprovalMutation.mutate({ request: pendingToolApproval, decision: \"reject\" })");
+    expect(routeSource).toContain("resolveToolApprovalMutation.mutate({ request: pendingToolGovernanceApproval, decision: \"reject\" })");
     expect(chatSessionWorkspacePanelSource).toContain("<ChatToolApprovalDialog");
     expect(chatSessionWorkspacePanelSource.indexOf("<ChatToolApprovalDialog")).toBeLessThan(
       chatSessionWorkspacePanelSource.indexOf("<ChatConversationComposerBridge"),
@@ -406,6 +411,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(chatToolApprovalDialogSource).toContain("role=\"listitem\"");
     expect(chatToolApprovalDialogSource).toContain("<X size={15} aria-hidden=\"true\" />");
     expect(chatToolApprovalDialogSource).toContain("<ShieldCheck size={15} aria-hidden=\"true\" />");
+    expect(chatToolApprovalDialogSource).toContain("onApproveForSession");
+    expect(chatToolApprovalDialogSource).toContain("本会话允许");
     expect(chatToolApprovalDialogSource).toContain("className={styles.toolItem}");
     expect(chatToolApprovalDialogStyles.dialog).toContain("grid-cols-[34px_minmax(0,1fr)_auto]");
     expect(chatToolApprovalDialogStyles.dialog).toContain("shadow-none");

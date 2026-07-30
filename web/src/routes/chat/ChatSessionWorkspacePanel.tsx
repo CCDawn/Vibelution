@@ -44,6 +44,7 @@ type ChatSessionWorkspacePanelProps = {
   noSessionsLabel: string;
   notices: SessionRuntimeNotice[];
   onApproveToolApproval: () => void;
+  onApproveToolForSession?: () => void;
   onRejectToolApproval: () => void;
   sessionsPending: boolean;
   toolApproval: {
@@ -74,6 +75,7 @@ export function ChatSessionWorkspacePanel({
   noSessionsLabel,
   notices,
   onApproveToolApproval,
+  onApproveToolForSession,
   onRejectToolApproval,
   sessionsPending,
   toolApproval,
@@ -125,6 +127,7 @@ export function ChatSessionWorkspacePanel({
               scopeLabel={toolApproval.scopeLabel}
               toolLabels={toolApproval.toolLabels}
               onApprove={onApproveToolApproval}
+              onApproveForSession={onApproveToolForSession}
               onReject={onRejectToolApproval}
             />
           </Suspense>

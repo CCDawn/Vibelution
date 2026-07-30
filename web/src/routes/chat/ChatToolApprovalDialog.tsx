@@ -17,6 +17,7 @@ type ChatToolApprovalDialogProps = {
   scopeLabel: string;
   toolLabels: ChatToolApprovalLabel[];
   onApprove: () => void;
+  onApproveForSession?: () => void;
   onReject: () => void;
 };
 
@@ -28,6 +29,7 @@ export function ChatToolApprovalDialog({
   scopeLabel,
   toolLabels,
   onApprove,
+  onApproveForSession,
   onReject,
 }: ChatToolApprovalDialogProps) {
   const dialogId = useId();
@@ -93,6 +95,17 @@ export function ChatToolApprovalDialog({
             <ShieldCheck size={15} aria-hidden="true" />
             <span>{pending ? (lang === "zh" ? "处理中" : "Resolving") : (lang === "zh" ? "允许" : "Allow")}</span>
           </VButton>
+          {onApproveForSession ? (
+            <VButton
+              type="button"
+              className={styles.allowButton}
+              onClick={onApproveForSession}
+              isDisabled={pending}
+            >
+              <ShieldCheck size={15} aria-hidden="true" />
+              <span>{lang === "zh" ? "本会话允许" : "Allow for session"}</span>
+            </VButton>
+          ) : null}
         </div>
       </section>
     </div>
