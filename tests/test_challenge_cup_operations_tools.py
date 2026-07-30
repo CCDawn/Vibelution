@@ -337,6 +337,8 @@ def test_iteration_tools_reuse_unique_bound_task_for_flat_session_follow_up(
     monkeypatch,
 ):
     created_payloads = []
+    context_require_active = []
+    write_require_active = []
     monkeypatch.setattr(
         agent_directory_service,
         "current_agent_runtime",
@@ -369,16 +371,24 @@ def test_iteration_tools_reuse_unique_bound_task_for_flat_session_follow_up(
                     "researchProjectId": "project-1",
                     "sessionId": "session-project-1",
                     "status": "incomplete",
+                    "failureCode": "task_result_not_recorded",
+                    "resultRefs": [],
                     "turn": {"turnId": "turn-initial"},
                 }
             ]
         },
         raising=False,
     )
-    monkeypatch.setattr(
-        team_workflow_orchestration_service,
-        "get_research_project_agent_task_context",
-        lambda team_id, project_id, task_id: {
+
+    def get_task_context(
+        team_id,
+        project_id,
+        task_id,
+        *,
+        require_active=True,
+    ):
+        context_require_active.append(require_active)
+        return {
             "teamId": team_id,
             "researchProjectId": project_id,
             "task": {
@@ -388,20 +398,30 @@ def test_iteration_tools_reuse_unique_bound_task_for_flat_session_follow_up(
                 "researchProjectId": project_id,
             },
             "experiment": {"plans": [], "planCount": 0},
-        },
-        raising=False,
-    )
+        }
+
     monkeypatch.setattr(
         team_workflow_orchestration_service,
-        "require_research_project_agent_task",
-        lambda _team_id, project_id, task_id, **_kwargs: {
+        "get_research_project_agent_task_context",
+        get_task_context,
+        raising=False,
+    )
+
+    def require_task(_team_id, project_id, task_id, **kwargs):
+        write_require_active.append(kwargs.get("require_active", True))
+        return {
             "taskId": task_id,
             "taskKind": "iteration_decision",
             "agentId": "agent-iteration",
             "researchProjectId": project_id,
             "sessionId": "session-project-1",
             "turn": {"turnId": "turn-initial"},
-        },
+        }
+
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "require_research_project_agent_task",
+        require_task,
         raising=False,
     )
     monkeypatch.setattr(
@@ -447,6 +467,8 @@ def test_iteration_tools_reuse_unique_bound_task_for_flat_session_follow_up(
     assert context["taskContext"]["task"]["taskId"] == "task-iteration-1"
     assert created["status"] == "ok"
     assert created["task"]["taskId"] == "task-iteration-1"
+    assert context_require_active == [False]
+    assert write_require_active == [False]
     assert created_payloads == [
         {
             "title": "Continue the bound iteration",
