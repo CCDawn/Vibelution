@@ -1,0 +1,23 @@
+{
+  "benchmark": "vibelution_supervised_candidate_patch_smoke",
+  "bundle_name": "supervised_candidate_patch_smoke_v1",
+  "default_timeout_seconds": 600,
+  "candidate_mutation_contract": {
+    "supported": true,
+    "required": true,
+    "kind": "safe_patch_probe",
+    "allowlisted_paths": [
+      "tests/supervised_worktree_candidate_marker.py"
+    ]
+  },
+  "cases": [
+    {
+      "case_id": "candidate_patch_convergence_probe",
+      "scenario": "transaction",
+      "mode": "single_turn",
+      "expect_restart": false,
+      "baseline_prompt": "执行监督进化 1-case 安全补丁收敛探针。目标状态：仓库中存在 tests/supervised_worktree_candidate_marker.py，内容逐字等于 `\"\"\"Simulation marker for supervised worktree evolution.\"\"\"\\n\\nCANDIDATE_SELF_EDITED = True\\n`，并且该文件通过 Python lint。当前是测量阶段，禁止修改任何文件。步骤：1) 只调用一次 open_evolution_transaction_tool 开账，summary 写“supervised candidate patch convergence probe”；2) 使用受控仓库检查工具核对目标文件是否存在且内容精确匹配；3) 若匹配，调用 python_lint_tool 检查该文件，lint 通过后立即调用 close_evolution_transaction_tool 以 status=success 关账；4) 若文件缺失、内容不匹配或 lint 失败，立即调用 close_evolution_transaction_tool 以 status=failed 关账，并在回复中明确指出期望的安全补丁；5) 不要再次开账，不要修改文件，不要提交 git，不要触发重启，不要委派子 Agent。",
+      "candidate_prompt": "复跑监督进化 1-case 安全补丁收敛探针。目标状态：仓库中存在 tests/supervised_worktree_candidate_marker.py，内容逐字等于 `\"\"\"Simulation marker for supervised worktree evolution.\"\"\"\\n\\nCANDIDATE_SELF_EDITED = True\\n`，并且该文件通过 Python lint。当前是独立复跑测量阶段，禁止继续修改文件。只开账一次，核对内容并运行 python_lint_tool；全部满足则立即成功关账，否则失败关账并报告证据。不要提交 git、触发重启或委派子 Agent。"
+    }
+  ]
+}
