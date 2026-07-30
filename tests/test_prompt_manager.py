@@ -1338,6 +1338,37 @@ class TestConfigDrivenSections:
         assert "GIT_RULES" in names
         assert "ENV_INFO" in names
 
+    def test_codebase_map_section_uses_own_prompt_manager_build_context(self, monkeypatch):
+        from core.prompt_manager import codebase_map_builder
+        from core.prompt_manager.sections import make_codebase_map_section
+        from core.prompt_manager.types import BuildContext
+
+        captured = {}
+
+        def fake_get_codebase_map(*, force_refresh=False, current_goal=None, state_memory=None):
+            captured.update(
+                force_refresh=force_refresh,
+                current_goal=current_goal,
+                state_memory=state_memory,
+            )
+            return "agent-local map"
+
+        monkeypatch.setattr(codebase_map_builder, "get_codebase_map", fake_get_codebase_map)
+        context = BuildContext(
+            current_goal="baseline self-edit goal",
+            state_memory="baseline local state",
+        )
+
+        section = make_codebase_map_section(context)
+
+        assert section.compute() == "agent-local map"
+        assert section.cache_break is True
+        assert captured == {
+            "force_refresh": False,
+            "current_goal": "baseline self-edit goal",
+            "state_memory": "baseline local state",
+        }
+
     def test_missing_file_not_registered(self):
         """配置指向不存在的文件时不注册该章节。"""
         from core.prompt_manager.sections import create_default_sections

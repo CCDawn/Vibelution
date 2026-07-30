@@ -343,6 +343,7 @@ class PromptManager:
             self._project_root,
             enable_workspace=self._workspace_enabled,
             section_configs=section_configs,
+            build_context=self._build_context,
         )
         for s in sections:
             self._sections[s.name] = s
