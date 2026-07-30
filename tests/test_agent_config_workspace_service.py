@@ -14,7 +14,6 @@ from core.web.services import (
     agent_bulk_delete_service,
     agent_config_workspace_service,
     agent_directory_service,
-    agent_role_tool_profile_service,
     agent_tool_governance_service,
     agent_mode_binding_service,
     chat_room_service,
@@ -854,10 +853,10 @@ def test_agent_config_workspace_persists_context_compression_policy(tmp_path, mo
 
     workspace_before = agent_config_workspace_service.get_agent_config_workspace()
     before_agent = next(item for item in workspace_before["agents"] if item["agentId"] == agent["agentId"])
-    assert before_agent["contextCompressionPolicy"] == {"mode": "inherit"}
-    assert before_agent["contextCompressionEffectivePolicy"]["source"] == "global"
+    assert before_agent["contextCompressionPolicy"]["mode"] == "custom"
+    assert before_agent["contextCompressionEffectivePolicy"]["source"] == "agent"
 
-    inherited = agent_directory_service.effective_agent_context_compression_policy(
+    unmaterialized = agent_directory_service.effective_agent_context_compression_policy(
         {"contextCompressionPolicy": {"mode": "inherit"}},
         {
             "max_token_limit": 32000,
@@ -868,8 +867,9 @@ def test_agent_config_workspace_persists_context_compression_policy(tmp_path, mo
         },
         context_window_limit=12000,
     )
-    assert inherited["maxTokenLimit"] == 32000
-    assert inherited["effectiveTokenLimit"] == 12000
+    assert unmaterialized["source"] == "migration_required"
+    assert unmaterialized["enabled"] is False
+    assert unmaterialized["effectiveTokenLimit"] == 0
 
     response = client.patch(
         f"/api/agents/{agent['agentId']}",
@@ -894,7 +894,7 @@ def test_agent_config_workspace_persists_context_compression_policy(tmp_path, mo
     updated = response.json()
     assert updated["contextCompressionPolicy"]["mode"] == "custom"
     assert updated["contextCompressionPolicy"]["enabled"] is False
-    assert updated["contextCompressionEffectivePolicy"]["source"] == "agent_custom"
+    assert updated["contextCompressionEffectivePolicy"]["source"] == "agent"
     assert updated["contextCompressionEffectivePolicy"]["effectiveTokenLimit"] == 9000
     assert updated["contextCompressionEffectivePolicy"]["levels"]["standard"] == 0.7
     assert updated["contextCompressionEffectivePolicy"]["summaryChars"]["deep"] == 1200
@@ -902,7 +902,7 @@ def test_agent_config_workspace_persists_context_compression_policy(tmp_path, mo
 
     workspace_after = agent_config_workspace_service.get_agent_config_workspace()
     workspace_agent = next(item for item in workspace_after["agents"] if item["agentId"] == agent["agentId"])
-    assert workspace_agent["contextCompressionEffectivePolicy"]["source"] == "agent_custom"
+    assert workspace_agent["contextCompressionEffectivePolicy"]["source"] == "agent"
     assert workspace_agent["contextCompressionEffectivePolicy"]["maxCompressionsPerSession"] == 4
 
     stored = agent_directory_service.get_agent(agent["agentId"])
@@ -1427,6 +1427,11 @@ def test_agent_api_effective_compression_uses_dialogue_model_context_window(tmp_
     )
 
     payload = agent_directory_service._agent_to_api_summary(agent)
+    assert payload["configSchemaVersion"] == 2
+    assert payload["configRevision"] == 1
+    assert payload["configHash"] == agent["configHash"]
+    assert payload["permissionPreset"] == "request_approval"
+    assert payload["runtimePermissions"]["sandboxMode"] == "workspace_write"
     policy = payload["contextCompressionEffectivePolicy"]
     assert policy["maxTokenLimit"] == 32768
     assert policy["effectiveTokenLimit"] == 32768
@@ -1470,7 +1475,7 @@ def test_repair_agent_directory_moves_legacy_workspace_into_private_territory(tm
     raw = next(item for item in state["agents"] if item["agentId"] == agent["agentId"])
     raw["workspacePath"] = "workspace/sessions/session-legacy"
     policy_id = raw["memoryPolicyId"]
-    state["memoryPolicies"][policy_id] = {
+    raw["memoryPolicy"] = {
         "policyId": policy_id,
         "privateMemoryRoot": "workspace/sessions/session-legacy/memory",
         "readSharedGroups": ["project"],
@@ -2637,7 +2642,7 @@ def test_repair_agent_directory_uses_role_governance_prompt_for_research_org_met
     assert repaired["promptTemplateCustomized"] is True
 
 
-def test_repair_agent_directory_fills_research_agent_profiles(tmp_path, monkeypatch):
+def test_repair_agent_directory_keeps_explicit_research_agent_runtime_policy(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
     agent = agent_directory_service.create_agent_instance(
@@ -2665,17 +2670,10 @@ def test_repair_agent_directory_fills_research_agent_profiles(tmp_path, monkeypa
     repaired = agent_directory_service.get_agent(agent["agentId"])
     workspace = agent_config_workspace_service.get_agent_config_workspace(use_cache=False, include_runtime=False)
     workspace_agent = next(item for item in workspace["agents"] if item["agentId"] == agent["agentId"])
-    expected_policy = agent_role_tool_profile_service.resolve_role_tool_policy(
-        role_key="research_paper_reader",
-        primary_mode="research",
-        policy_id=f"tool-{agent['agentId']}",
-    )
-    assert expected_policy is not None
-
     assert "研究流程" in repaired["personaProfile"]["background"]
     assert "paper_reader" in repaired["taskProfile"]["taskTypes"]
-    assert repaired["toolPolicy"]["allowedTools"] == expected_policy["allowedTools"]
-    assert repaired["toolPolicy"]["preferredTools"] == expected_policy["preferredTools"]
+    assert repaired["toolPolicy"]["allowedTools"] == ["research_knowledge_query_tool"]
+    assert repaired["toolPolicy"]["preferredTools"] == ["research_knowledge_query_tool"]
     assert repaired["toolPolicy"]["mutationAccess"] == "none"
     assert repaired["toolPolicy"]["writeScopes"] == []
     assert not any(item["code"] == "agent_onboarding_incomplete" for item in workspace_agent["health"])

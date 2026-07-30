@@ -7,6 +7,7 @@ import type {
   SessionLlmModelOption,
   SessionTurnError,
   SkillLibraryItem,
+  AgentPermissionPreset,
 } from "../../api/types";
 import type { TurnAvatarResolution } from "./conversationTurnAvatar";
 import type { ConversationStreamingFramePaintMetrics } from "./conversationStreamingMetrics";
@@ -30,6 +31,14 @@ export type ConversationLlmControl = {
 };
 
 export type ConversationComposerVariant = "compact" | "codex";
+
+export type ConversationPermissionControl = {
+  value: AgentPermissionPreset;
+  disabled: boolean;
+  pending: boolean;
+  agentName?: string;
+  onChange: (permissionPreset: AgentPermissionPreset) => void;
+};
 
 export type ConversationViewProps = {
   sessionId: string;
@@ -83,6 +92,7 @@ export type ConversationViewProps = {
   composerReferences?: SessionReferenceAttachment[];
   slashCommandSuggestions?: SkillLibraryItem[];
   composerAttachmentInputDisabled?: boolean;
+  permissionControl?: ConversationPermissionControl;
   llmControl?: ConversationLlmControl;
   turnError?: SessionTurnError | null;
   nextStateSignals?: ChatNextStateSignalSummary[];

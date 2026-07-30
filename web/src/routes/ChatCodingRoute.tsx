@@ -202,6 +202,7 @@ import {
 import { useChatCliAgentTerminal } from "./chat/useChatCliAgentTerminal";
 import { buildChatCacheDetailViewModel } from "./chat/chatCacheDetailModel";
 import { useChatCacheDetailDialog } from "./chat/useChatCacheDetailDialog";
+import { useAgentPermissionPresetMutation } from "./chat/useAgentPermissionPresetMutation";
 import { buildChatTokenStatusViewModel } from "./chat/chatTokenStatusModel";
 import {
   buildAgentSessionTabs,
@@ -768,6 +769,23 @@ export function ChatCodingRoute() {
     queryKey: queryKeys.agents(),
     queryFn: () => fetchJson<AgentInstance[]>("/api/agents?detail=summary"),
     enabled: secondaryChatDataEnabled || groupComposerOpen || standardGroupRoomActive,
+  });
+  const agentPermissionPresetMutation = useAgentPermissionPresetMutation({
+    onSuccess: (_agent, input) => {
+      setSessionComposerErrors((current) => ({
+        ...current,
+        [input.sessionId]: "",
+      }));
+    },
+    onError: (error, input) => {
+      setSessionComposerErrors((current) => ({
+        ...current,
+        [input.sessionId]: describeError(
+          error,
+          lang === "zh" ? "Agent 权限更新失败" : "Failed to update Agent permissions",
+        ),
+      }));
+    },
   });
   const skillsQuery = useQuery({
     queryKey: queryKeys.skills(),
@@ -3076,6 +3094,37 @@ export function ChatCodingRoute() {
                 showSessionOverview: false,
                 showMentalSnapshots: mentalModelEnabledForNextTurn,
                 composer: conversationComposer,
+                permissionControl: activeSessionAgent ? {
+                  value: activeSessionAgent.permissionPreset || "request_approval",
+                  disabled: (
+                    agentPermissionPresetMutation.isPending
+                    || activeSessionAgent.configSchemaVersion < 2
+                    || activeSessionAgent.configRevision < 1
+                    || !activeSessionAgent.configHash
+                  ),
+                  pending: (
+                    agentPermissionPresetMutation.isPending
+                    && agentPermissionPresetMutation.variables?.agentId === activeSessionAgent.agentId
+                  ),
+                  agentName: activeAgentDisplayName,
+                  onChange: (permissionPreset) => {
+                    if (
+                      !activeSessionId
+                      || agentPermissionPresetMutation.isPending
+                      || activeSessionAgent.configSchemaVersion < 2
+                      || activeSessionAgent.configRevision < 1
+                      || !activeSessionAgent.configHash
+                    ) {
+                      return;
+                    }
+                    agentPermissionPresetMutation.mutate({
+                      agentId: activeSessionAgent.agentId,
+                      sessionId: activeSessionId,
+                      permissionPreset,
+                      expectedConfigRevision: activeSessionAgent.configRevision,
+                    });
+                  },
+                } : undefined,
                 llmControl: sessionLlmControl,
                 slashCommandSuggestions,
                 cancelComposerModeLabel: t("cancelEditMessage"),

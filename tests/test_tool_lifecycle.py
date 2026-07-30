@@ -19,7 +19,16 @@ def test_restart_special_case_obeys_canonical_execution_authorization(monkeypatc
     monkeypatch.setattr(
         agent_directory_service,
         "current_agent_runtime",
-        lambda: {"agentId": "agent-a", "turnId": "turn-a"},
+        lambda: {
+            "agentId": "agent-a",
+            "turnId": "turn-a",
+            "agentConfigSnapshot": {
+                "agentId": "agent-a",
+                "configRevision": 1,
+                "configHash": "test-config-hash",
+            },
+            "permissionPreset": "request_approval",
+        },
     )
     tool_authorization_service.install_execution_authorization(
         SimpleNamespace(
