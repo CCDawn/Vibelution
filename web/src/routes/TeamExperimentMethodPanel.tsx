@@ -160,6 +160,18 @@ export function createExperimentMethodFormDraft(
   };
 }
 
+export function createExperimentMethodDraftSyncKey(
+  activeContract?: ExperimentContractV2 | null,
+  fallbackResearchQuestion = "",
+  preferredExperimentMethod?: ExperimentMethodId,
+): string {
+  return JSON.stringify({
+    activeContract: activeContract ?? null,
+    fallbackResearchQuestion,
+    preferredExperimentMethod: preferredExperimentMethod ?? "",
+  });
+}
+
 export function selectExperimentMethod(
   draft: ExperimentMethodFormDraft,
   experimentMethod: ExperimentMethodId,
@@ -306,9 +318,14 @@ export function TeamExperimentMethodPanel({
     fallbackResearchQuestion,
     preferredExperimentMethod,
   ));
+  const draftSyncKey = createExperimentMethodDraftSyncKey(
+    activeContract,
+    fallbackResearchQuestion,
+    preferredExperimentMethod,
+  );
   useEffect(() => {
     setDraft(createExperimentMethodFormDraft(activeContract, fallbackResearchQuestion, preferredExperimentMethod));
-  }, [activeContract?.planId, activeContract?.revision, fallbackResearchQuestion, preferredExperimentMethod]);
+  }, [draftSyncKey]);
 
   const selectedMethod = catalog?.methods.find((item) => item.methodId === draft.experimentMethod);
   const adapterSelection = selectedMethod?.adapterAvailability[draft.researchMode];

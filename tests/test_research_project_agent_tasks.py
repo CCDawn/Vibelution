@@ -350,6 +350,169 @@ def test_public_task_status_is_project_scoped_and_path_prompt_secret_free(
     assert str(tmp_path).lower() not in encoded
 
 
+def test_experiment_design_task_materializes_candidate_graph_hypotheses_once(
+    tmp_path, monkeypatch
+):
+    team, project, _agents = _team_project_and_agents(tmp_path, monkeypatch)
+    _accepted_submitter(monkeypatch)
+    candidate_store = team_workflow_orchestration_service._load_candidate_store(
+        team["teamId"]
+    )
+    candidate_store["candidates"] = [
+        {
+            "candidateId": "candidate-graph-sleep",
+            "candidateType": "candidate_graph",
+            "teamId": team["teamId"],
+            "title": "Sleep evidence graph",
+            "sourceKind": "agent_writeback",
+            "sourceRefs": [],
+            "evidenceRefs": [],
+            "metadata": {
+                "agentWriteback": {
+                    "result": {
+                        "candidateGraph": {
+                            "nodes": [
+                                {
+                                    "id": "source-retained-1",
+                                    "title": "Retained source",
+                                    "evidenceRef": "evidence-anchor-1",
+                                },
+                                {
+                                    "id": "source-challenge-1",
+                                    "title": "Challenging source",
+                                    "evidenceRef": "evidence-anchor-2",
+                                },
+                            ],
+                            "falsifiableHypotheses": [
+                                {
+                                    "id": "H1",
+                                    "statement": "NREM downscaling preserves relative synaptic differences.",
+                                    "boundary": "Requires stage-specific intervention.",
+                                    "supportingCandidates": ["source-retained-1"],
+                                    "challengingCandidates": ["source-challenge-1"],
+                                },
+                                {
+                                    "id": "H2",
+                                    "statement": "NREM replay and REM recalibration have separable effects.",
+                                    "boundary": "Requires independent NREM and REM controls.",
+                                    "supportingCandidates": ["source-retained-1"],
+                                    "challengingCandidates": [],
+                                },
+                            ],
+                        }
+                    }
+                }
+            },
+            "currentWorkflowNode": "candidate_graph",
+            "currentState": "preview_ready",
+            "qualityStatus": "needs_revision",
+            "createdAt": "2026-07-29T00:00:00+00:00",
+            "updatedAt": "2026-07-29T00:00:00+00:00",
+        }
+    ]
+    project_root = (
+        team_workflow_orchestration_service.resolve_research_project_workspace_root(
+            team["teamId"],
+            project["projectId"],
+        )
+    )
+    candidate_store_path = project_root / "candidate_store" / "index.json"
+    team_workflow_orchestration_service._write_json(candidate_store_path, candidate_store)
+
+    first = start_research_project_agent_task(
+        team["teamId"],
+        project["projectId"],
+        {
+            "taskKind": "experiment_design",
+            "idempotencyKey": "design-from-graph-1",
+        },
+    )
+    replay = start_research_project_agent_task(
+        team["teamId"],
+        project["projectId"],
+        {
+            "taskKind": "experiment_design",
+            "idempotencyKey": "design-from-graph-1",
+        },
+    )
+
+    projected = [
+        item
+        for item in team_workflow_orchestration_service._read_json(
+            candidate_store_path
+        )["candidates"]
+        if item.get("candidateType") == "algorithm_hypothesis"
+    ]
+    assert first["task"]["status"] == "running"
+    assert replay["idempotentReplay"] is True
+    assert len(projected) == 2
+    assert {item["metadata"]["projection"]["graphHypothesisId"] for item in projected} == {
+        "H1",
+        "H2",
+    }
+    assert all(item["sourceKind"] == "candidate_graph_hypothesis_projection" for item in projected)
+    assert all(item["qualityStatus"] == "needs_revision" for item in projected)
+    assert all(item["metadata"]["output"]["requiresReview"] is True for item in projected)
+    assert all(item["sourceRefs"] and item["evidenceRefs"] for item in projected)
+
+
+def test_task_status_reconciles_ready_session_with_created_experiment_plan(
+    tmp_path, monkeypatch
+):
+    team, project, agents = _team_project_and_agents(tmp_path, monkeypatch)
+    _accepted_submitter(monkeypatch)
+    started = start_research_project_agent_task(
+        team["teamId"],
+        project["projectId"],
+        {
+            "taskKind": "experiment_design",
+            "idempotencyKey": "design-reconcile-1",
+        },
+    )
+    root = team_workflow_orchestration_service.resolve_research_project_workspace_root(
+        team["teamId"],
+        project["projectId"],
+    )
+    team_workflow_orchestration_service._write_json(
+        root / "experiment_plans" / "index.json",
+        {
+            "schemaVersion": 1,
+            "storeKind": team_workflow_orchestration_service.EXPERIMENT_PLAN_STORE_KIND,
+            "teamId": team["teamId"],
+            "activePlanId": "plan-reconciled",
+            "plans": [
+                {
+                    "planId": "plan-reconciled",
+                    "researchProjectId": project["projectId"],
+                    "createdByAgent": agents["experiment_planner"]["agentId"],
+                    "createdAt": "9999-07-29T00:01:00+00:00",
+                    "updatedAt": "9999-07-29T00:01:00+00:00",
+                    "status": "draft",
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        session_service,
+        "get_session_detail",
+        lambda _session_id, **_kwargs: {
+            "status": "ready",
+            "currentPhase": "ready",
+            "activeTask": None,
+        },
+    )
+
+    status = get_research_project_agent_task_status(
+        team["teamId"],
+        project["projectId"],
+    )
+
+    assert status["activeTasks"] == []
+    assert status["tasks"][0]["taskId"] == started["task"]["taskId"]
+    assert status["tasks"][0]["status"] == "completed"
+    assert status["tasks"][0]["resultRefs"] == ["plan-reconciled"]
+
+
 def test_task_start_rejects_missing_fixed_role_binding(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team = team_service.create_team(name="无实验职责团队", members=[])

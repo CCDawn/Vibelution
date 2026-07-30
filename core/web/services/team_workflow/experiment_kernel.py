@@ -7,9 +7,6 @@ keeps monkeypatches stable.
 from __future__ import annotations
 
 import json
-import re
-import threading
-from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -166,7 +163,11 @@ def _load_experiment_plan_store(team_id: str) -> dict[str, Any]:
     if path.exists():
         payload = s._read_json(path)
         if payload.get("storeKind") == s.EXPERIMENT_PLAN_STORE_KIND and isinstance(payload.get("plans"), list):
-            return s.experiment_contract.project_plan_store_contracts(payload)
+            projected = s.experiment_contract.project_plan_store_contracts(payload)
+            for plan in list(projected.get("plans") or []):
+                if isinstance(plan, dict):
+                    _sanitize_projected_experiment_plan(plan)
+            return projected
     now = s.utc_now_iso()
     payload = {
         "schemaVersion": s.SCHEMA_VERSION,
@@ -179,6 +180,400 @@ def _load_experiment_plan_store(team_id: str) -> dict[str, Any]:
     }
     s._write_json(path, payload)
     return payload
+
+
+def _experiment_plan_field_text(
+    value: Any,
+    *,
+    preferred_keys: tuple[str, ...] = (),
+    max_length: int = 1200,
+) -> str:
+    """Return a human-authored scalar, never a serialized structured placeholder."""
+    s = _service()
+    if isinstance(value, str):
+        text = s._trim_text(value, max_length=max_length)
+        if text.startswith("{") and text.endswith("}"):
+            return ""
+        return text
+    if isinstance(value, dict):
+        status = s._trim_text(value.get("status"), max_length=80).lower()
+        if status in {
+            "blocked",
+            "draft_blocked",
+            "missing",
+            "not_ready",
+            "pending_input",
+            "unresolved",
+        }:
+            return ""
+        for key in preferred_keys:
+            text = _experiment_plan_field_text(
+                value.get(key),
+                max_length=max_length,
+            )
+            if text:
+                return text
+    return ""
+
+
+def _sanitize_projected_experiment_plan(plan: dict[str, Any]) -> None:
+    """Repair read projections from older native-v2 records without rewriting history."""
+    legacy = plan.get("experimentPlan") if isinstance(plan.get("experimentPlan"), dict) else {}
+    field_specs = {
+        "dataset": ("name", "dataset", "label", "id"),
+        "metric": ("primaryMetric", "name", "metric", "label"),
+        "baseline": ("name", "baseline", "label", "id"),
+        "smokePlan": ("protocol", "smokePlan", "summary", "label"),
+    }
+    contract = plan.get("experimentContract") if isinstance(plan.get("experimentContract"), dict) else {}
+    method_config = contract.get("methodConfig") if isinstance(contract.get("methodConfig"), dict) else {}
+    metric_contract = contract.get("metricContract") if isinstance(contract.get("metricContract"), dict) else {}
+
+    def needs_projection_repair(value: Any) -> bool:
+        if isinstance(value, str):
+            text = value.strip()
+            return text.startswith("{") and text.endswith("}")
+        if not isinstance(value, dict):
+            return False
+        return str(value.get("status") or "").strip().lower() in {
+            "blocked",
+            "draft_blocked",
+            "missing",
+            "not_ready",
+            "pending_input",
+            "unresolved",
+        }
+
+    repair_values = [
+        *(legacy.get(field) for field in field_specs),
+        *(method_config.get(field) for field in ("dataset", "baseline", "smokePlan")),
+        metric_contract.get("primaryMetric"),
+    ]
+    if not any(needs_projection_repair(value) for value in repair_values):
+        return
+
+    s = _service()
+    sanitized = {
+        field: _experiment_plan_field_text(
+            legacy.get(field),
+            preferred_keys=preferred_keys,
+            max_length=1200 if field == "smokePlan" else 500,
+        )
+        for field, preferred_keys in field_specs.items()
+    }
+    plan["experimentPlan"] = sanitized
+    for field in ("dataset", "baseline", "smokePlan"):
+        method_config[field] = _experiment_plan_field_text(
+            method_config.get(field),
+            preferred_keys=field_specs[field],
+            max_length=1200 if field == "smokePlan" else 500,
+        )
+    contract["methodConfig"] = method_config
+    metric_contract = contract.get("metricContract") if isinstance(contract.get("metricContract"), dict) else {}
+    primary_metric = _experiment_plan_field_text(
+        metric_contract.get("primaryMetric"),
+        preferred_keys=field_specs["metric"],
+        max_length=500,
+    )
+    metric_contract["primaryMetric"] = primary_metric
+    metric_contract["metrics"] = [
+        item
+        for item in list(metric_contract.get("metrics") or [])
+        if isinstance(item, dict)
+        and _experiment_plan_field_text(
+            item.get("name"),
+            preferred_keys=field_specs["metric"],
+            max_length=500,
+        )
+    ]
+    contract["metricContract"] = metric_contract
+    plan["experimentContract"] = contract
+    baseline_selection = (
+        plan.get("baselineSelection")
+        if isinstance(plan.get("baselineSelection"), dict)
+        else {}
+    )
+    baseline_selection["baseline"] = sanitized["baseline"]
+    baseline_selection["status"] = (
+        "planned_not_validated" if sanitized["baseline"] else "missing"
+    )
+    plan["baselineSelection"] = baseline_selection
+    plan["successMetrics"] = s._dedupe_text_values([sanitized["metric"]])
+    _refresh_experiment_plan_readiness(plan)
+    migration = (
+        plan.get("contractMigration")
+        if isinstance(plan.get("contractMigration"), dict)
+        else {}
+    )
+    migration["projectionRepair"] = "structured_placeholder_removed"
+    migration["persistOnNextMutation"] = True
+    migration["missingFields"] = list(
+        (plan.get("contractValidation") or {}).get("missingFields") or []
+    )
+    plan["contractMigration"] = migration
+
+
+def materialize_candidate_graph_hypotheses_for_experiment_design(
+    team_id: str,
+    research_project_id: str,
+) -> dict[str, Any]:
+    """Project graph hypotheses into candidate-only drafts at the explicit design gate."""
+    s = _service()
+    normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
+    normalized_project_id = s._normalize_required_id(
+        research_project_id,
+        "Research project id is required.",
+    )
+    project_root = s.resolve_research_project_workspace_root(
+        normalized_team_id,
+        normalized_project_id,
+    )
+    store_path = project_root / "candidate_store" / "index.json"
+    with s._WORKFLOW_LOCK:
+        store = s._read_json(store_path)
+        candidates = [
+            item
+            for item in list(store.get("candidates") or [])
+            if isinstance(item, dict)
+        ]
+        graph_candidates = [
+            item
+            for item in candidates
+            if item.get("candidateType") == "candidate_graph"
+            and not s._candidate_is_archived(item)
+        ]
+        graph_candidates.sort(
+            key=lambda item: (
+                s._trim_text(item.get("updatedAt"), max_length=120),
+                s._trim_text(item.get("createdAt"), max_length=120),
+            )
+        )
+        if not graph_candidates:
+            return {
+                "candidateGraphId": "",
+                "materializedCandidateIds": [],
+                "reusedCandidateIds": [],
+            }
+        graph_candidate = graph_candidates[-1]
+        metadata = (
+            graph_candidate.get("metadata")
+            if isinstance(graph_candidate.get("metadata"), dict)
+            else {}
+        )
+        agent_writeback = (
+            metadata.get("agentWriteback")
+            if isinstance(metadata.get("agentWriteback"), dict)
+            else {}
+        )
+        writeback_result = (
+            agent_writeback.get("result")
+            if isinstance(agent_writeback.get("result"), dict)
+            else {}
+        )
+        output = (
+            metadata.get("output")
+            if isinstance(metadata.get("output"), dict)
+            else {}
+        )
+        graph_payload = next(
+            (
+                value
+                for value in (
+                    writeback_result.get("candidateGraph"),
+                    output.get("candidateGraph"),
+                    metadata.get("candidateGraph"),
+                    graph_candidate.get("candidateGraph"),
+                )
+                if isinstance(value, dict)
+            ),
+            {},
+        )
+        hypotheses = [
+            item
+            for item in list(graph_payload.get("falsifiableHypotheses") or [])
+            if isinstance(item, dict)
+            and s._trim_text(item.get("statement"), max_length=4000)
+        ][:16]
+        if not hypotheses:
+            return {
+                "candidateGraphId": s._trim_text(
+                    graph_candidate.get("candidateId"),
+                    max_length=160,
+                ),
+                "materializedCandidateIds": [],
+                "reusedCandidateIds": [],
+            }
+        graph_id = s._trim_text(graph_candidate.get("candidateId"), max_length=160)
+        existing_by_hypothesis_id = {
+            s._trim_text(
+                (
+                    (item.get("metadata") or {}).get("projection") or {}
+                ).get("graphHypothesisId"),
+                max_length=160,
+            ): item
+            for item in candidates
+            if item.get("candidateType") == "algorithm_hypothesis"
+            and isinstance(item.get("metadata"), dict)
+            and isinstance((item.get("metadata") or {}).get("projection"), dict)
+            and s._trim_text(
+                ((item.get("metadata") or {}).get("projection") or {}).get(
+                    "candidateGraphId"
+                ),
+                max_length=160,
+            )
+            == graph_id
+        }
+        nodes = {
+            s._trim_text(item.get("id") or item.get("candidateId"), max_length=160): item
+            for item in list(graph_payload.get("nodes") or [])
+            if isinstance(item, dict)
+            and s._trim_text(
+                item.get("id") or item.get("candidateId"),
+                max_length=160,
+            )
+        }
+        now = s.utc_now_iso()
+        materialized: list[str] = []
+        reused: list[str] = []
+        for index, hypothesis in enumerate(hypotheses, start=1):
+            hypothesis_id = (
+                s._trim_text(hypothesis.get("id"), max_length=160)
+                or f"H{index}"
+            )
+            existing = existing_by_hypothesis_id.get(hypothesis_id)
+            if existing is not None:
+                reused.append(
+                    s._trim_text(existing.get("candidateId"), max_length=160)
+                )
+                continue
+            supporting_ids = s._normalize_text_list(
+                hypothesis.get("supportingCandidates"),
+                max_items=24,
+                max_length=160,
+            )
+            challenging_ids = s._normalize_text_list(
+                hypothesis.get("challengingCandidates"),
+                max_items=24,
+                max_length=160,
+            )
+            linked_ids = s._dedupe_text_values(
+                [*supporting_ids, *challenging_ids]
+            )
+            source_refs = [
+                {
+                    "type": "candidate",
+                    "id": candidate_id,
+                    "label": s._trim_text(
+                        (nodes.get(candidate_id) or {}).get("title"),
+                        max_length=240,
+                    )
+                    or candidate_id,
+                }
+                for candidate_id in linked_ids
+            ]
+            evidence_refs = [
+                {
+                    "type": "evidence",
+                    "id": evidence_ref,
+                    "label": s._trim_text(
+                        (nodes.get(candidate_id) or {}).get("title"),
+                        max_length=240,
+                    )
+                    or evidence_ref,
+                }
+                for candidate_id in linked_ids
+                if (
+                    evidence_ref := s._trim_text(
+                        (nodes.get(candidate_id) or {}).get("evidenceRef"),
+                        max_length=200,
+                    )
+                )
+            ]
+            statement = s._trim_text(
+                hypothesis.get("statement"),
+                max_length=4000,
+            )
+            boundary = s._trim_text(
+                hypothesis.get("boundary"),
+                max_length=2000,
+            )
+            candidate_id = s._new_record_id("algorithm-hypothesis")
+            hypothesis_output = {
+                "candidateType": "algorithm_hypothesis",
+                "sourceRefs": source_refs,
+                "evidenceRefs": evidence_refs,
+                "candidateGraphIds": [graph_id],
+                "hypothesis": statement,
+                "baseline": "",
+                "expectedBenefit": "",
+                "expectedComputeCost": "",
+                "experimentPlan": {},
+                "uncertainty": [boundary] if boundary else [],
+                "riskFlags": [
+                    "candidate_graph_projection",
+                    "experiment_design_required",
+                ],
+                "confidence": 0,
+                "nextAction": "complete_experiment_design_and_review",
+                "requiresReview": True,
+            }
+            record = {
+                "schemaVersion": s.SCHEMA_VERSION,
+                "candidateId": candidate_id,
+                "candidateType": "algorithm_hypothesis",
+                "teamId": normalized_team_id,
+                "workflowId": graph_candidate.get("workflowId", ""),
+                "title": f"{hypothesis_id} · {statement[:180]}",
+                "sourceKind": "candidate_graph_hypothesis_projection",
+                "summary": statement,
+                "sourceRefs": source_refs,
+                "evidenceRefs": evidence_refs,
+                "metadata": {
+                    "taskType": "algorithm_hypothesis_draft",
+                    "output": hypothesis_output,
+                    "projection": {
+                        "candidateGraphId": graph_id,
+                        "graphHypothesisId": hypothesis_id,
+                        "supportingCandidateIds": supporting_ids,
+                        "challengingCandidateIds": challenging_ids,
+                        "boundary": boundary,
+                        "officialState": "candidate_only",
+                    },
+                },
+                "createdByAgent": s._trim_text(
+                    graph_candidate.get("createdByAgent"),
+                    max_length=160,
+                ),
+                "currentWorkflowNode": "algorithm_hypothesis",
+                "currentState": "hypothesis_needs_revision",
+                "qualityStatus": "needs_revision",
+                "createdAt": now,
+                "updatedAt": now,
+            }
+            record["metadata"]["validation"] = s.validate_candidate_record(record)
+            candidates.append(record)
+            materialized.append(candidate_id)
+        if materialized:
+            store["candidates"] = candidates
+            store["updatedAt"] = now
+            s._write_json(store_path, store)
+    if materialized:
+        s._record_workflow_event(
+            "candidate_graph.hypotheses_materialized_for_experiment_design",
+            normalized_team_id,
+            fields={
+                "researchProjectId": normalized_project_id,
+                "candidateGraphId": graph_id,
+                "materializedCandidateCount": len(materialized),
+                "reusedCandidateCount": len(reused),
+                "officialState": "candidate_only",
+            },
+        )
+    return {
+        "candidateGraphId": graph_id,
+        "materializedCandidateIds": materialized,
+        "reusedCandidateIds": reused,
+    }
 
 
 def _research_stage_memory_context(
@@ -223,7 +618,6 @@ def _research_stage_memory_context(
 
 
 def _experiment_plan_revision(plan: dict[str, Any] | None) -> int:
-    s = _service()
     contract = plan.get("experimentContract") if isinstance((plan or {}).get("experimentContract"), dict) else {}
     try:
         return max(0, int(contract.get("revision") or 0))
@@ -232,7 +626,6 @@ def _experiment_plan_revision(plan: dict[str, Any] | None) -> int:
 
 
 def _experiment_design_is_frozen(plan: dict[str, Any] | None) -> bool:
-    s = _service()
     if not isinstance(plan, dict):
         return False
     validation = plan.get("contractValidation") if isinstance(plan.get("contractValidation"), dict) else {}
@@ -603,10 +996,91 @@ def _build_experiment_plan_record(
     now = s.utc_now_iso()
     hypothesis_summaries = [s._experiment_hypothesis_summary(item) for item in selected_hypotheses]
     payload_plan = payload.get("experimentPlan") if isinstance(payload.get("experimentPlan"), dict) else {}
-    dataset = s._first_non_empty_text(payload.get("dataset"), payload_plan.get("dataset"), *[item.get("experimentPlan", {}).get("dataset") for item in hypothesis_summaries])
-    metric = s._first_non_empty_text(payload.get("metric"), payload_plan.get("metric"), *[item.get("experimentPlan", {}).get("metric") for item in hypothesis_summaries])
-    baseline = s._first_non_empty_text(payload.get("baseline"), payload_plan.get("baseline"), *[item.get("experimentPlan", {}).get("baseline") for item in hypothesis_summaries], *[item.get("baseline") for item in hypothesis_summaries])
-    smoke_plan = s._first_non_empty_text(payload.get("smokePlan"), payload_plan.get("smokePlan"), *[item.get("experimentPlan", {}).get("smokePlan") for item in hypothesis_summaries])
+    dataset = next(
+        (
+            text
+            for value in (
+                payload.get("dataset"),
+                payload_plan.get("dataset"),
+                *[
+                    item.get("experimentPlan", {}).get("dataset")
+                    for item in hypothesis_summaries
+                ],
+            )
+            if (
+                text := _experiment_plan_field_text(
+                    value,
+                    preferred_keys=("name", "dataset", "label", "id"),
+                    max_length=500,
+                )
+            )
+        ),
+        "",
+    )
+    metric = next(
+        (
+            text
+            for value in (
+                payload.get("metric"),
+                payload_plan.get("metric"),
+                *[
+                    item.get("experimentPlan", {}).get("metric")
+                    for item in hypothesis_summaries
+                ],
+            )
+            if (
+                text := _experiment_plan_field_text(
+                    value,
+                    preferred_keys=("primaryMetric", "name", "metric", "label"),
+                    max_length=500,
+                )
+            )
+        ),
+        "",
+    )
+    baseline = next(
+        (
+            text
+            for value in (
+                payload.get("baseline"),
+                payload_plan.get("baseline"),
+                *[
+                    item.get("experimentPlan", {}).get("baseline")
+                    for item in hypothesis_summaries
+                ],
+                *[item.get("baseline") for item in hypothesis_summaries],
+            )
+            if (
+                text := _experiment_plan_field_text(
+                    value,
+                    preferred_keys=("name", "baseline", "label", "id"),
+                    max_length=500,
+                )
+            )
+        ),
+        "",
+    )
+    smoke_plan = next(
+        (
+            text
+            for value in (
+                payload.get("smokePlan"),
+                payload_plan.get("smokePlan"),
+                *[
+                    item.get("experimentPlan", {}).get("smokePlan")
+                    for item in hypothesis_summaries
+                ],
+            )
+            if (
+                text := _experiment_plan_field_text(
+                    value,
+                    preferred_keys=("protocol", "smokePlan", "summary", "label"),
+                    max_length=1200,
+                )
+            )
+        ),
+        "",
+    )
     plan_id = s._new_record_id("exp-plan")
     hypothesis_refs = [str(item.get("candidateId") or "") for item in selected_hypotheses if item.get("candidateId")]
     evidence_refs = s._dedupe_text_values(
@@ -784,7 +1258,6 @@ def _experiment_hypothesis_missing_fields(candidate: dict[str, Any]) -> list[str
 
 
 def _find_experiment_plan(plan_store: dict[str, Any], plan_id: str) -> dict[str, Any] | None:
-    s = _service()
     for plan in list(plan_store.get("plans") or []):
         if isinstance(plan, dict) and str(plan.get("planId") or "") == plan_id:
             return plan
@@ -1285,7 +1758,6 @@ def _refresh_experiment_plan_readiness(plan: dict[str, Any]) -> None:
 
 
 def _active_experiment_smoke_evidence(plan: dict[str, Any] | None) -> dict[str, Any] | None:
-    s = _service()
     if not isinstance(plan, dict):
         return None
     registered = plan.get("activeSmokeResult")
@@ -1442,7 +1914,6 @@ def _experiment_planning_next_actions(*, active_plan: dict[str, Any] | None, gap
 
 
 def _experiment_planning_boundaries() -> dict[str, bool | str]:
-    s = _service()
     return {
         "autoExecution": False,
         "writesFormalKnowledge": False,
@@ -1455,7 +1926,6 @@ def _experiment_planning_boundaries() -> dict[str, bool | str]:
 
 
 def _experiment_plans(plan_store: dict[str, Any]) -> list[dict[str, Any]]:
-    s = _service()
     plans = [item for item in list(plan_store.get("plans") or []) if isinstance(item, dict)]
     return sorted(plans, key=lambda item: (str(item.get("updatedAt") or ""), str(item.get("planId") or "")))
 

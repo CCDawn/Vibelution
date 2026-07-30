@@ -687,6 +687,15 @@ def start_research_project_agent_task(
             code="unsupported_task_kind",
         )
     project = s.get_research_project(normalized_team_id, normalized_project_id)
+    if task_kind == "experiment_design":
+        from core.web.services.team_workflow.experiment_kernel import (
+            materialize_candidate_graph_hypotheses_for_experiment_design,
+        )
+
+        materialize_candidate_graph_hypotheses_for_experiment_design(
+            normalized_team_id,
+            normalized_project_id,
+        )
     if task_kind == "iteration_decision":
         readiness = research_project_iteration_readiness(
             normalized_team_id,
@@ -981,6 +990,44 @@ def get_research_project_agent_task_status(
     project = s.get_research_project(normalized_team_id, normalized_project_id)
     with _TASK_LOCK:
         store = _read_store(normalized_team_id, normalized_project_id)
+        active_tasks = [
+            dict(item)
+            for item in store["tasks"]
+            if item.get("status") in ACTIVE_STATUSES
+        ]
+    reconciled: dict[str, dict[str, Any]] = {}
+    for task in active_tasks:
+        terminal = _reconcile_project_agent_task_from_session(
+            normalized_team_id,
+            normalized_project_id,
+            task,
+        )
+        if terminal is not None:
+            reconciled[task["taskId"]] = terminal
+    if reconciled:
+        with _TASK_LOCK:
+            store = _read_store(normalized_team_id, normalized_project_id)
+            changed = False
+            for task in store["tasks"]:
+                terminal = reconciled.get(task.get("taskId"))
+                if terminal is None or task.get("status") not in ACTIVE_STATUSES:
+                    continue
+                task["status"] = terminal["status"]
+                task["resultRefs"] = terminal["resultRefs"]
+                task["failureCode"] = terminal["failureCode"]
+                turn = (
+                    task.get("turn")
+                    if isinstance(task.get("turn"), dict)
+                    else {}
+                )
+                turn["status"] = terminal["status"]
+                task["turn"] = turn
+                task["updatedAt"] = s.utc_now_iso()
+                changed = True
+            if changed:
+                _write_store(normalized_team_id, normalized_project_id, store)
+    with _TASK_LOCK:
+        store = _read_store(normalized_team_id, normalized_project_id)
         tasks = [_public_task(item) for item in store["tasks"]]
     return {
         "schemaVersion": SCHEMA_VERSION,
@@ -1003,3 +1050,108 @@ def get_research_project_agent_task_status(
         ],
         "updatedAt": _text(store.get("updatedAt"), limit=120),
     }
+
+
+def _reconcile_project_agent_task_from_session(
+    team_id: str,
+    research_project_id: str,
+    task: dict[str, Any],
+) -> dict[str, Any] | None:
+    s = _service()
+    session_id = _text(task.get("sessionId"))
+    if not session_id:
+        return None
+    try:
+        detail = s.session_service.get_session_detail(
+            session_id,
+            message_limit=0,
+            transcript_scope="none",
+        )
+    except Exception:
+        return None
+    if not isinstance(detail, dict):
+        return None
+    phase = _text(
+        detail.get("currentPhase") or detail.get("status"),
+        limit=80,
+    ).lower()
+    if detail.get("activeTask") or phase in {
+        "accepted",
+        "queued",
+        "running",
+        "starting",
+        "stopping",
+        "tool_call",
+        "thinking",
+    }:
+        return None
+    result_refs = _project_agent_task_result_refs(
+        team_id,
+        research_project_id,
+        task,
+    )
+    if phase in {"error", "failed", "timed_out", "timeout"}:
+        return {
+            "status": "failed",
+            "resultRefs": result_refs,
+            "failureCode": f"session_{phase}",
+        }
+    if phase in {"cancelled", "canceled", "stopped"}:
+        return {
+            "status": "stopped",
+            "resultRefs": result_refs,
+            "failureCode": f"session_{phase}",
+        }
+    if result_refs:
+        return {
+            "status": "completed",
+            "resultRefs": result_refs,
+            "failureCode": "",
+        }
+    if phase in {"ready", "completed", "complete", "idle"}:
+        return {
+            "status": "incomplete",
+            "resultRefs": [],
+            "failureCode": "task_result_not_recorded",
+        }
+    return None
+
+
+def _project_agent_task_result_refs(
+    team_id: str,
+    research_project_id: str,
+    task: dict[str, Any],
+) -> list[str]:
+    s = _service()
+    if task.get("taskKind") != "experiment_design":
+        return [
+            _safe_ref(item, field_name="resultRef")
+            for item in list(task.get("resultRefs") or [])[:24]
+            if _text(item, limit=200)
+        ]
+    root = s.resolve_research_project_workspace_root(
+        team_id,
+        research_project_id,
+    )
+    store = s._read_json(root / "experiment_plans" / "index.json")
+    created_at = s._workflow_timestamp_sort_key(task.get("createdAt"))
+    agent_id = _text(task.get("agentId"))
+    matching = [
+        item
+        for item in list(store.get("plans") or [])
+        if isinstance(item, dict)
+        and _text(item.get("researchProjectId")) == research_project_id
+        and _text(item.get("createdByAgent")) == agent_id
+        and s._workflow_timestamp_sort_key(item.get("createdAt")) >= created_at
+        and _text(item.get("planId"))
+    ]
+    matching.sort(
+        key=lambda item: (
+            _text(item.get("updatedAt"), limit=120),
+            _text(item.get("createdAt"), limit=120),
+        )
+    )
+    if not matching:
+        return []
+    plan_id = _text(matching[-1].get("planId"), limit=200)
+    return [plan_id] if _SAFE_REF.fullmatch(plan_id) else []
