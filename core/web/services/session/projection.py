@@ -3183,8 +3183,12 @@ def _agent_lookup_for_conversations() -> dict[str, dict[str, Any]]:
     s = _service()
     s._sync_agent_directory_project_root()
     state = s.agent_directory_service.load_state()
+    avatar_url_cache: dict[str, str] = {}
     return {
-        str(item.get("agentId") or "").strip(): s._conversation_agent_from_state(item)
+        str(item.get("agentId") or "").strip(): s._conversation_agent_from_state(
+            item,
+            avatar_url_cache=avatar_url_cache,
+        )
         for item in state.get("agents") or []
         if isinstance(item, dict) and str(item.get("agentId") or "").strip()
     }
