@@ -14,6 +14,8 @@ import {
   SELF_TRANSACTION_COLLAPSED_LIMIT,
 } from "./SelfEvolutionTrack";
 import { selfEvolutionTrackStyles as styles } from "./SelfEvolutionTrack.styles";
+import chatReadOnlySessionWorkspaceSource from "./chat/ChatReadOnlySessionWorkspace.tsx?raw";
+import chatSessionWorkspacePanelSource from "./chat/ChatSessionWorkspacePanel.tsx?raw";
 import selfEvolutionSource from "./SelfEvolutionTrack.tsx?raw";
 import selfEvolutionStylesSource from "./SelfEvolutionTrack.styles.ts?raw";
 
@@ -125,7 +127,8 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(selfEvolutionSource).toContain("SELF_EVOLUTION_CONVERSATION_CONTEXT");
     expect(selfEvolutionSource).toContain("self-evolution");
     expect(selfEvolutionSource).toContain("defaultFileContext={activeConversationSurface.defaultFileContext}");
-    expect(selfEvolutionSource).toContain("defaultFileContext: observationSessionDetail?.defaultFileContext || SELF_EVOLUTION_CONVERSATION_CONTEXT");
+    expect(selfEvolutionSource).toContain("defaultFileContext={SELF_EVOLUTION_CONVERSATION_CONTEXT}");
+    expect(chatReadOnlySessionWorkspaceSource).toContain("sessionDetail.defaultFileContext || defaultFileContext");
     expect(selfEvolutionSource).toContain("defaultFileContext: SELF_EVOLUTION_CONVERSATION_CONTEXT");
     expect(selfEvolutionSource).not.toContain('|| "workspace"');
   });
@@ -296,7 +299,8 @@ describe("SelfEvolutionTrack static assets", () => {
   });
 
   it("keeps the observation conversation as output-only while setup lives in the left rail", () => {
-    expect(selfEvolutionSource).toContain("showComposer: observationRunModeActive ? false");
+    expect(chatReadOnlySessionWorkspaceSource).toContain("showComposer: false");
+    expect(chatReadOnlySessionWorkspaceSource).toContain("disabled: true");
     expect(selfEvolutionSource).not.toContain('composerPlaceholder: lang === "zh" ? "描述要观察 Agent 如何思考的问题"');
     expect(selfEvolutionSource).not.toContain('submitLabel: lang === "zh" ? "开始自主观察"');
   });
@@ -332,7 +336,7 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(selfEvolutionSource).not.toContain("worktreeCreated");
   });
 
-  it("drives isolated development and observation through one center conversation surface", () => {
+  it("keeps both modes in the center while observation reuses the formal Chat surface", () => {
     const centerStart = selfEvolutionSource.indexOf("<main className={styles.centerColumn}>");
     const centerEnd = selfEvolutionSource.indexOf("</main>", centerStart);
     const centerSurface = centerStart >= 0 && centerEnd > centerStart
@@ -345,10 +349,14 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(selfEvolutionSource).toContain("activeConversationSurface.messages");
     expect(selfEvolutionSource).toContain("activeConversationSurface.submitLabel");
     expect(selfEvolutionSource).toContain("activeConversationSurface.onSubmit");
+    expect(selfEvolutionSource).toContain("ChatReadOnlySessionWorkspace");
+    expect(chatReadOnlySessionWorkspaceSource).toContain("ChatSessionWorkspacePanel");
+    expect(chatSessionWorkspacePanelSource).toContain("ChatConversationComposerBridge");
     expect(selfEvolutionSource).toContain('inputMode: observationInputModeValue');
     expect(selfEvolutionSource).toContain('goal: observationInputModeValue === "blank" ? "" : observationGoalInput');
     expect(selfEvolutionSource).toContain("onStartRun");
     expect(centerConversationViewCount).toBe(1);
+    expect(centerSurface).toContain("<ChatReadOnlySessionWorkspace");
     expect(centerSurface).toContain("sessionId={activeConversationSurface.sessionId}");
     expect(centerSurface).toContain("title={activeConversationSurface.title}");
     expect(centerSurface).toContain("messages={activeConversationSurface.messages}");
@@ -377,7 +385,7 @@ describe("SelfEvolutionTrack static assets", () => {
   it("does not split observation into a dedicated center workspace shell", () => {
     expect(selfEvolutionSource).toContain("observationConversationSessionId");
     expect(selfEvolutionSource).toContain("observationConversationReady");
-    expect(selfEvolutionSource).toContain("observationPendingConversationMessages");
+    expect(selfEvolutionSource).toContain("ChatReadOnlySessionWorkspace");
     expect(selfEvolutionSource).not.toContain("function renderObservationModeConversationPane()");
     expect(selfEvolutionSource).not.toContain("renderObservationModeConversationPane()");
     expect(selfEvolutionSource).not.toContain("function renderObservationPendingConversationShell()");
@@ -390,15 +398,25 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(selfEvolutionSource).not.toContain("等待观察目标");
   });
 
-  it("loads real observation session detail instead of rendering only snapshot text", () => {
+  it("loads the canonical observation session and preserves formal Chat identities", () => {
     expect(selfEvolutionSource).toContain("SessionDetail");
     expect(selfEvolutionSource).toContain("observationSessionDetailQuery");
     expect(selfEvolutionSource).toContain("queryKeys.session(observationConversationSessionId || \"__none__\")");
-    expect(selfEvolutionSource).toContain("fetchJson<SessionDetail>(`/api/sessions/${encodeURIComponent(observationConversationSessionId)}`)");
-    expect(selfEvolutionSource).toContain("observationSessionMessages");
-    expect(selfEvolutionSource).toContain("messages: observationConversationReady ? observationSessionMessages : observationPendingConversationMessages");
-    expect(selfEvolutionSource).toContain("messages={activeConversationSurface.messages}");
-    expect(selfEvolutionSource).not.toContain("messages={observationConversationMessages}");
+    expect(selfEvolutionSource).toContain("fetchSessionDetailWindow(");
+    expect(selfEvolutionSource).toContain("{ messageLimit: 80, signal }");
+    expect(selfEvolutionSource).toContain("mergeSessionDetailMessageWindow");
+    expect(chatReadOnlySessionWorkspaceSource).toContain("messages: sessionDetail.messages");
+    expect(chatReadOnlySessionWorkspaceSource).toContain("assistantDisplayName: assistant.displayName");
+    expect(chatReadOnlySessionWorkspaceSource).toContain("assistantAvatarImageUrl: assistant.avatarImageUrl");
+    expect(selfEvolutionSource).toContain("displayName: resolveChatUserDisplayName(runtime?.userName)");
+    expect(selfEvolutionSource).toContain("avatarPreset: runtime?.userProfile?.avatarPreset");
+    expect(selfEvolutionSource).toContain("avatarImageUrl: runtime?.userProfile?.avatarImageUrl");
+    expect(chatReadOnlySessionWorkspaceSource).toContain("showHeader: false");
+    expect(chatReadOnlySessionWorkspaceSource).toContain("showSessionOverview: false");
+    expect(chatReadOnlySessionWorkspaceSource).toContain("showComposer: false");
+    expect(selfEvolutionSource).not.toContain("observationSnapshotMessages");
+    expect(selfEvolutionSource).not.toContain("observationPendingConversationMessages");
+    expect(selfEvolutionSource).not.toContain("assistantDisplayName: pet?.name");
   });
 
   it("keeps observation mode inside the self-evolution workspace instead of switching pages", () => {
@@ -425,9 +443,10 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(selfEvolutionSource).toContain("const centerWorkflowSummary = observationRunModeActive");
     expect(centerSurface).toContain("{centerWorkflowSummary}");
     expect(centerSurface).toContain("activeConversationSurface");
-    expect(observationBranch).toBeLessThan(0);
+    expect(observationBranch).toBeGreaterThanOrEqual(0);
     expect(approvalBranch).toBeGreaterThanOrEqual(0);
-    expect(centerSurface).not.toContain('selectedWorkflowStep?.id !== "approval" && observationRunModeActive');
+    expect(centerSurface).toContain('!observationRunModeActive && selectedWorkflowStep?.id === "approval"');
+    expect(centerSurface).toContain("<ChatReadOnlySessionWorkspace");
   });
 
   it("renders self-evolution Agent cards that deep-link to config and activity logs", () => {
