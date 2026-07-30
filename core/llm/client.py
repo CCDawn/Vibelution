@@ -452,24 +452,33 @@ def _safe_message_role_summary(messages: List[Any]) -> Dict[str, Any]:
     }
 
 
+def _is_strict_blank_input(
+    messages: List[Any],
+    metadata: Optional[Dict[str, Any]],
+) -> bool:
+    if not isinstance(metadata, dict):
+        return False
+    if metadata.get("strictPromptPayload") is not True:
+        return False
+    if str(metadata.get("inputMode") or "").strip().lower() != "blank":
+        return False
+    if len(messages) != 1 or not isinstance(messages[0], dict):
+        return False
+    message = messages[0]
+    if str(message.get("role") or "").strip().lower() != "user":
+        return False
+    if message.get("content") != "":
+        return False
+    if any(message.get(key) for key in ("attachments", "references", "tool_calls", "toolCalls")):
+        return False
+    return True
+
+
 def _strict_blank_responses_messages(
     messages: List[Any],
     metadata: Optional[Dict[str, Any]],
 ) -> list[dict[str, Any]] | None:
-    if not isinstance(metadata, dict):
-        return None
-    if metadata.get("strictPromptPayload") is not True:
-        return None
-    if str(metadata.get("inputMode") or "").strip().lower() != "blank":
-        return None
-    if len(messages) != 1 or not isinstance(messages[0], dict):
-        return None
-    message = messages[0]
-    if str(message.get("role") or "").strip().lower() != "user":
-        return None
-    if message.get("content") != "":
-        return None
-    if any(message.get(key) for key in ("attachments", "references", "tool_calls", "toolCalls")):
+    if not _is_strict_blank_input(messages, metadata):
         return None
     return [
         {
@@ -1906,6 +1915,16 @@ class LLMClient:
                 provider_messages,
                 self.adapter,
             )
+        if (
+            self.protocol_route.wire_protocol == WireProtocol.CHAT_COMPLETIONS
+            and _is_strict_blank_input(projection_messages, metadata)
+        ):
+            provider_messages = [
+                {
+                    "role": "user",
+                    "content": [{"type": "text", "text": ""}],
+                }
+            ]
         build_input = PayloadBuildInput(
             messages=provider_messages,
             tools=selected_tools,
