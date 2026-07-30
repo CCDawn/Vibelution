@@ -69,6 +69,7 @@ type SelfEvolutionDynamicVariable =
   | "--self-vital-progress";
 
 type SelfEvolutionDynamicStyle = CSSProperties & Partial<Record<SelfEvolutionDynamicVariable, string>>;
+type SelfObservationInputMode = "prompt" | "blank";
 
 function workspaceLayoutStyle(sidebarCollapsed: boolean, sidebarWidth: number): SelfEvolutionDynamicStyle {
   return {
@@ -744,6 +745,7 @@ export function SelfEvolutionTrack({
     isObservationQueuedOrRunning(observationRun?.status || "") ? "observation" : "isolated_development",
   );
   const [observationGoalInput, setObservationGoalInput] = useState("");
+  const [observationInputMode, setObservationInputMode] = useState<SelfObservationInputMode>("prompt");
   const [observationDurationInput, setObservationDurationInput] = useState(String(DEFAULT_OBSERVATION_DURATION_SECONDS));
   const [worktreePage, setWorktreePage] = useState(1);
   const [activePage, setActivePage] = useState<"workspace" | "status">("workspace");
@@ -894,6 +896,9 @@ export function SelfEvolutionTrack({
   const observationRunModeActive = selfEvolutionMode === "observation";
   const observationGoalValue = observationGoalInput.trim();
   const observationPromptFilled = observationGoalValue.length > 0;
+  const observationInputModeValue: SelfObservationInputMode = observationRunActive && observationRun?.inputMode === "blank"
+    ? "blank"
+    : observationInputMode;
   const parsedObservationDuration = parseObservationDurationInput(observationDurationInput);
   const normalizedObservationDuration = parsedObservationDuration.durationSeconds;
   const observationDurationValid = parsedObservationDuration.isValid;
@@ -902,11 +907,13 @@ export function SelfEvolutionTrack({
     : "";
   const observationStartDisabled = observationStartPending
     || observationRunActive
-    || !observationPromptFilled
+    || (observationInputModeValue !== "blank" && !observationPromptFilled)
     || !observationDurationValid;
   const observationStartDisabledReason = observationRunActive
     ? (lang === "zh" ? "当前观察正在运行。" : "Observation is already running.")
-    : observationDurationError || (!observationPromptFilled ? (lang === "zh" ? "先填写观察提示词。" : "Enter an observation prompt first.") : undefined);
+    : observationDurationError || (observationInputModeValue !== "blank" && !observationPromptFilled
+      ? (lang === "zh" ? "先填写观察提示词。" : "Enter an observation prompt first.")
+      : undefined);
   const observationPrimaryActionDisabled = observationRunActive
     ? observationActionPending || !observationTerminateAction?.enabled || !observationRun?.runId
     : observationStartDisabled;
@@ -1717,14 +1724,43 @@ export function SelfEvolutionTrack({
               {observationRunModeActive ? (
                 <>
                   <div className={styles.observationConfigForm}>
+                    <div className={styles.formField}>
+                      <span>{lang === "zh" ? "模型输入" : "Model input"}</span>
+                      <div className={styles.modeSwitch} role="tablist" aria-label={lang === "zh" ? "观察模型输入模式" : "Observation model input mode"}>
+                        <VButton
+                          type="button"
+                          role="tab"
+                          aria-selected={observationInputModeValue === "prompt"}
+                          value="prompt"
+                          className={observationInputModeValue === "prompt" ? styles.modeTabActive : styles.modeTab}
+                          isDisabled={observationRunActive || observationStartPending}
+                          onClick={() => setObservationInputMode("prompt")}
+                        >
+                          {lang === "zh" ? "提示词输入" : "Prompt input"}
+                        </VButton>
+                        <VButton
+                          type="button"
+                          role="tab"
+                          aria-selected={observationInputModeValue === "blank"}
+                          value="blank"
+                          className={observationInputModeValue === "blank" ? styles.modeTabActive : styles.modeTab}
+                          isDisabled={observationRunActive || observationStartPending}
+                          onClick={() => setObservationInputMode("blank")}
+                        >
+                          {lang === "zh" ? "空白输入实验" : "Blank-input experiment"}
+                        </VButton>
+                      </div>
+                    </div>
                     <label className={styles.formField}>
                       <span>{lang === "zh" ? "观察提示词" : "Observation prompt"}</span>
                       <VNativeTextarea
                         className={styles.textArea}
                         rows={4}
-                        value={observationGoalDisplayValue}
-                        disabled={observationRunActive || observationStartPending}
-                        placeholder={lang === "zh" ? "输入要原样发送给观察 Agent 的全部内容" : "Enter the full content to send verbatim"}
+                        value={observationInputModeValue === "blank" ? "" : observationGoalDisplayValue}
+                        disabled={observationRunActive || observationStartPending || observationInputModeValue === "blank"}
+                        placeholder={observationInputModeValue === "blank"
+                          ? (lang === "zh" ? "空白模式固定发送一个内容为空的 user 消息" : "Blank mode sends one user message with empty content")
+                          : (lang === "zh" ? "输入要原样发送给观察 Agent 的全部内容" : "Enter the full content to send verbatim")}
                         onChange={(event) => setObservationGoalInput(event.target.value)}
                       />
                     </label>
@@ -1747,14 +1783,22 @@ export function SelfEvolutionTrack({
                         type="button"
                         className={observationRunActive ? styles.dangerAction : styles.primaryAction}
                         isDisabled={observationPrimaryActionDisabled}
-                        tooltip={observationRunActive ? (lang === "zh" ? "终止这一轮自主观察。" : "Stop this observation run.") : (lang === "zh" ? "使用当前提示词开始自主观察。" : "Start an observation run with the current prompt.")}
+                        tooltip={observationRunActive
+                          ? (lang === "zh" ? "终止这一轮自主观察。" : "Stop this observation run.")
+                          : observationInputModeValue === "blank"
+                            ? (lang === "zh" ? "以空 user 消息启动，不注入任何提示内容。" : "Start with an empty user message and no injected prompt content.")
+                            : (lang === "zh" ? "使用当前提示词开始自主观察。" : "Start an observation run with the current prompt.")}
                         disabledReason={observationPrimaryActionDisabledReason || undefined}
                         onClick={() => {
                           if (observationRunActive && observationRun?.runId) {
                             onTerminateObservation(observationRun.runId);
                             return;
                           }
-                          onStartObservation({ goal: observationGoalInput, durationSeconds: normalizedObservationDuration });
+                          onStartObservation({
+                            goal: observationInputModeValue === "blank" ? "" : observationGoalInput,
+                            durationSeconds: normalizedObservationDuration,
+                            inputMode: observationInputModeValue,
+                          });
                         }}
                       >
                         {(observationStartPending || observationActionPending) ? <LoaderCircle size={15} className={styles.spinning} /> : observationRunActive ? <X size={15} /> : <ArrowUpRight size={15} />}
@@ -1770,7 +1814,11 @@ export function SelfEvolutionTrack({
                     <p className={styles.noticeText}>
                       {observationRunActive
                         ? (lang === "zh" ? "观察会话正在运行，完整输出在中间会话区。" : "Observation is running; full output stays in the center conversation.")
-                        : (lang === "zh" ? "提示词会作为完整用户消息原样发送。" : "The prompt is sent verbatim as the full user message.")}
+                        : observationInputModeValue === "blank"
+                          ? (lang === "zh"
+                            ? "每次调用只发送一个内容为空的 user 消息；不会注入默认目标、系统提示、历史或续写提示。"
+                            : "Every call sends only one empty user message, with no default goal, system prompt, history, or continuation prompt.")
+                          : (lang === "zh" ? "提示词会作为完整用户消息原样发送。" : "The prompt is sent verbatim as the full user message.")}
                     </p>
                     {compactObservationPreview(observationRun?.latestMessage, 110) ? (
                       <p className={styles.compactPreviewText}>{compactObservationPreview(observationRun?.latestMessage, 110)}</p>

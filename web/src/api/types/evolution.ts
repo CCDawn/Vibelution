@@ -982,6 +982,7 @@ export type SelfObservationRun = {
   phase: string;
   runtimeStatus: string;
   goal: string;
+  inputMode?: "prompt" | "blank" | string;
   durationSeconds: number;
   allowedTools: string[];
   writeLeases: string[];
@@ -1001,6 +1002,7 @@ export type SelfObservationRun = {
 export type SelfObservationRunStartRequest = {
   goal: string;
   durationSeconds: number;
+  inputMode?: "prompt" | "blank";
   uiRoute?: string;
 };
 

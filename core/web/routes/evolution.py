@@ -144,6 +144,7 @@ class SelfEvolutionWorktreeRunStartPayload(BaseModel):
 class SelfObservationRunStartPayload(BaseModel):
     goal: str = ""
     durationSeconds: int = 300
+    inputMode: str = "prompt"
     uiRoute: str = "/evolution?track=self"
 
 
