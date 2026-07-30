@@ -243,18 +243,22 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
       selectedTeam?.teamId
       && activePlan
       && designExecutionAllowed
-      && activePlan.readiness.readyForSmoke
+      && activePlan.readiness.readyForBoundedSmokeRun
       && activeSmokeAdapter?.adapterId
       && !selectedTeamRunExperimentSmokePending,
     );
     const smokeGateDetail = !designExecutionAllowed
       ? (lang === "zh"
-        ? "先完成假设审查并冻结设计；之后登记 baseline 才能运行。"
-        : "Review the hypothesis and freeze the design first; then register the baseline.")
+        ? "先完成假设审查并冻结设计；之后可运行自包含受控 Smoke。"
+        : "Review the hypothesis and freeze the design first; then the bounded self-contained Smoke becomes available.")
       : !activeBaselineArtifact
-        ? (lang === "zh"
-          ? "先登记可复现的 active baseline artifact。"
-          : "Register a reproducible active baseline artifact first.")
+        ? activePlan?.readiness.readyForBoundedSmokeRun
+          ? (lang === "zh"
+            ? "自包含执行器会在 Smoke 中同时计算 baseline 与 variant；无需手工登记 baseline artifact。"
+            : "The self-contained runner computes baseline and variant in the Smoke; no manual baseline artifact is required.")
+          : (lang === "zh"
+            ? "冻结设计尚未满足自包含 Smoke 合同。"
+            : "The frozen design is not ready for the self-contained Smoke contract.")
         : !activeSmokeAdapter
           ? (lang === "zh"
             ? "当前实验方式没有可用的白名单离线 Smoke 执行器。"

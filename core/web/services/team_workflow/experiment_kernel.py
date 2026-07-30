@@ -950,6 +950,8 @@ def _experiment_planning_status(
         status = "ready_for_full_run"
     elif latest_experiment and active_plan and bool((active_plan.get("readiness") or {}).get("readyForSmoke")):
         status = "ready_for_smoke"
+    elif latest_experiment and active_plan and bool((active_plan.get("readiness") or {}).get("readyForBoundedSmokeRun")):
+        status = "ready_for_bounded_smoke"
     elif latest_experiment and active_plan:
         status = "planned"
     elif latest_experiment and ready_hypotheses:
@@ -987,6 +989,9 @@ def _experiment_planning_status(
         },
         "readiness": {
             "readyToPlan": bool(latest_experiment and ready_hypotheses),
+            "readyForBoundedSmokeRun": bool(
+                (active_plan or {}).get("readiness", {}).get("readyForBoundedSmokeRun")
+            ),
             "readyForSmoke": bool((active_plan or {}).get("readiness", {}).get("readyForSmoke")),
             "readyForFullRun": bool((active_plan or {}).get("readiness", {}).get("readyForFullRun")),
             "readyForKnowledgeIngestion": bool((active_plan or {}).get("readiness", {}).get("readyForKnowledgeIngestion")),
@@ -1286,6 +1291,7 @@ def _build_experiment_plan_record(
         "readinessChecklist": checklist,
         "readiness": {
             "readyForPlanReview": ready_for_plan_review,
+            "readyForBoundedSmokeRun": False,
             "readyForSmoke": False,
             "readyForFullRun": False,
             "blockers": blockers,
@@ -2086,6 +2092,39 @@ def _notify_knowledge_steward_for_experiment_result(
     return activation
 
 
+def _refresh_experiment_bounded_smoke_readiness(plan: dict[str, Any]) -> None:
+    """Project the exact prerequisites of the self-contained smoke runner."""
+    s = _service()
+    experiment_plan = (
+        plan.get("experimentPlan")
+        if isinstance(plan.get("experimentPlan"), dict)
+        else {}
+    )
+    required_fields_ready = all(
+        s._has_value(plan.get(field) or experiment_plan.get(field))
+        for field in s.EXPERIMENT_PLAN_REQUIRED_FIELDS
+    )
+    design_gate = (
+        plan.get("designGate")
+        if isinstance(plan.get("designGate"), dict)
+        else None
+    )
+    design_execution_allowed = (
+        design_gate is None
+        or str(design_gate.get("status") or "") == "frozen"
+    )
+    readiness = (
+        plan.get("readiness")
+        if isinstance(plan.get("readiness"), dict)
+        else {}
+    )
+    readiness["readyForBoundedSmokeRun"] = (
+        required_fields_ready
+        and design_execution_allowed
+    )
+    plan["readiness"] = readiness
+
+
 def _refresh_experiment_plan_readiness(plan: dict[str, Any]) -> None:
     s = _service()
     experiment_plan = plan.get("experimentPlan") if isinstance(plan.get("experimentPlan"), dict) else {}
@@ -2113,14 +2152,20 @@ def _refresh_experiment_plan_readiness(plan: dict[str, Any]) -> None:
         full_run_blockers = ["smoke_result"]
     knowledge_blockers = [] if active_full_run_status == "passed" else ["full_run_result"]
     plan["readinessChecklist"] = checklist
+    ready_for_plan_review = all(
+        item["status"] == "pass"
+        for item in checklist
+        if item["item"] != "active_baseline_record"
+    )
     plan["readiness"] = {
-        "readyForPlanReview": all(item["status"] == "pass" for item in checklist if item["item"] != "active_baseline_record"),
+        "readyForPlanReview": ready_for_plan_review,
         "readyForSmoke": not smoke_blockers,
         "readyForFullRun": not full_run_blockers,
         "readyForKnowledgeIngestion": not knowledge_blockers,
         "blockers": full_run_blockers,
         "knowledgeBlockers": knowledge_blockers,
     }
+    _refresh_experiment_bounded_smoke_readiness(plan)
     risk_controls = plan.get("riskControls") if isinstance(plan.get("riskControls"), dict) else {}
     risk_controls["autoExecution"] = False
     risk_controls["requiresUserDecision"] = True
@@ -2286,6 +2331,8 @@ def _experiment_planning_readiness_reason(
         return "smoke result 已登记但尚未通过；需要复核、修订或重跑，full run 继续阻塞。"
     if active_plan and bool((active_plan.get("readiness") or {}).get("readyForSmoke")):
         return "active baseline artifact 已登记；可进入 smoke gate，但 full run 仍等待 smoke 结果。"
+    if active_plan and bool((active_plan.get("readiness") or {}).get("readyForBoundedSmokeRun")):
+        return "冻结设计已满足自包含受控 Smoke 门禁；执行器会同时计算 baseline 与 variant，full run 仍需正式 baseline 证据。"
     if active_plan:
         validation = active_plan.get("contractValidation") if isinstance(active_plan.get("contractValidation"), dict) else {}
         readiness = active_plan.get("readiness") if isinstance(active_plan.get("readiness"), dict) else {}
