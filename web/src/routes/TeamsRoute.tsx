@@ -60,6 +60,7 @@ import {
   type ExperimentBaselineArtifactRecord,
   type ExperimentBaselineArtifactRegisterPayload,
   type ExperimentDesignFreezePayload,
+  type EngineeringProxyHypothesisDraft,
   type ExperimentFullRunResultDraft,
   type ExperimentFullRunResultRecord,
   type ExperimentFullRunResultRegisterPayload,
@@ -1376,6 +1377,9 @@ export function TeamsRoute({
 
   const {
     createExperimentPlanMutation,
+    materializeEngineeringProxyHypothesisMutation,
+    reviewExperimentHypothesisMutation,
+    createExperimentHypothesisRevisionMutation,
     freezeExperimentDesignMutation,
     registerExperimentBaselineArtifactMutation,
     runExperimentSmokeMutation,
@@ -1494,6 +1498,47 @@ export function TeamsRoute({
       stageRoundId,
       title: sourceCollectionDraft.title.trim() || experimentPhase?.latestRound?.title || "",
       methodRequest,
+    });
+  }
+
+  function materializeEngineeringProxyHypothesisFromWorkspace(
+    plan: ExperimentPlanRecord,
+    draft: EngineeringProxyHypothesisDraft,
+  ) {
+    if (!selectedTeam?.teamId || selectedTeamMaterializeEngineeringProxyPending) {
+      return;
+    }
+    materializeEngineeringProxyHypothesisMutation.mutate({
+      teamId: selectedTeam.teamId,
+      plan,
+      draft,
+    });
+  }
+
+  function reviewExperimentHypothesisFromWorkspace(candidateId: string) {
+    if (!selectedTeam?.teamId || selectedTeamReviewExperimentHypothesisCandidateId) {
+      return;
+    }
+    reviewExperimentHypothesisMutation.mutate({
+      teamId: selectedTeam.teamId,
+      candidateId,
+    });
+  }
+
+  function createExperimentHypothesisRevisionFromWorkspace(
+    plan: ExperimentPlanRecord,
+    candidateId: string,
+  ) {
+    if (
+      !selectedTeam?.teamId
+      || selectedTeamCreateExperimentHypothesisRevisionCandidateId
+    ) {
+      return;
+    }
+    createExperimentHypothesisRevisionMutation.mutate({
+      teamId: selectedTeam.teamId,
+      plan,
+      candidateId,
     });
   }
 
@@ -2592,6 +2637,12 @@ export function TeamsRoute({
         selectedTeamCreateExperimentPlanPending={selectedTeamCreateExperimentPlanPending}
         selectedTeamCreateExperimentPlanError={selectedTeamCreateExperimentPlanError}
         selectedTeamCreateExperimentPlanResult={selectedTeamCreateExperimentPlanResult}
+        selectedTeamMaterializeEngineeringProxyPending={selectedTeamMaterializeEngineeringProxyPending}
+        selectedTeamMaterializeEngineeringProxyError={selectedTeamMaterializeEngineeringProxyError}
+        selectedTeamReviewExperimentHypothesisCandidateId={selectedTeamReviewExperimentHypothesisCandidateId}
+        selectedTeamReviewExperimentHypothesisError={selectedTeamReviewExperimentHypothesisError}
+        selectedTeamCreateExperimentHypothesisRevisionCandidateId={selectedTeamCreateExperimentHypothesisRevisionCandidateId}
+        selectedTeamCreateExperimentHypothesisRevisionError={selectedTeamCreateExperimentHypothesisRevisionError}
         selectedTeamFreezeExperimentDesignPending={selectedTeamFreezeExperimentDesignPending}
         selectedTeamFreezeExperimentDesignError={selectedTeamFreezeExperimentDesignError}
         selectedTeamFreezeExperimentDesignResult={selectedTeamFreezeExperimentDesignResult}
@@ -2611,6 +2662,9 @@ export function TeamsRoute({
         selectedTeamRequestExperimentKnowledgeIngestionError={selectedTeamRequestExperimentKnowledgeIngestionError}
         selectedTeamRequestExperimentKnowledgeIngestionResult={selectedTeamRequestExperimentKnowledgeIngestionResult}
         createExperimentPlanFromWorkspace={createExperimentPlanFromWorkspace}
+        materializeEngineeringProxyHypothesisFromWorkspace={materializeEngineeringProxyHypothesisFromWorkspace}
+        reviewExperimentHypothesisFromWorkspace={reviewExperimentHypothesisFromWorkspace}
+        createExperimentHypothesisRevisionFromWorkspace={createExperimentHypothesisRevisionFromWorkspace}
         freezeExperimentDesignFromWorkspace={freezeExperimentDesignFromWorkspace}
         registerExperimentBaselineArtifactFromWorkspace={registerExperimentBaselineArtifactFromWorkspace}
         runExperimentSmokeFromWorkspace={runExperimentSmokeFromWorkspace}
@@ -3089,6 +3143,34 @@ export function TeamsRoute({
       : null;
   const selectedTeamCreateExperimentPlanResult =
     createExperimentPlanMutation.variables?.teamId === selectedTeam?.teamId ? createExperimentPlanMutation.data : undefined;
+  const selectedTeamMaterializeEngineeringProxyPending =
+    materializeEngineeringProxyHypothesisMutation.isPending
+    && materializeEngineeringProxyHypothesisMutation.variables?.teamId === selectedTeam?.teamId;
+  const selectedTeamMaterializeEngineeringProxyError =
+    materializeEngineeringProxyHypothesisMutation.variables?.teamId === selectedTeam?.teamId
+    && materializeEngineeringProxyHypothesisMutation.error instanceof Error
+      ? materializeEngineeringProxyHypothesisMutation.error
+      : null;
+  const selectedTeamReviewExperimentHypothesisCandidateId =
+    reviewExperimentHypothesisMutation.isPending
+    && reviewExperimentHypothesisMutation.variables?.teamId === selectedTeam?.teamId
+      ? reviewExperimentHypothesisMutation.variables.candidateId
+      : "";
+  const selectedTeamReviewExperimentHypothesisError =
+    reviewExperimentHypothesisMutation.variables?.teamId === selectedTeam?.teamId
+    && reviewExperimentHypothesisMutation.error instanceof Error
+      ? reviewExperimentHypothesisMutation.error
+      : null;
+  const selectedTeamCreateExperimentHypothesisRevisionCandidateId =
+    createExperimentHypothesisRevisionMutation.isPending
+    && createExperimentHypothesisRevisionMutation.variables?.teamId === selectedTeam?.teamId
+      ? createExperimentHypothesisRevisionMutation.variables.candidateId
+      : "";
+  const selectedTeamCreateExperimentHypothesisRevisionError =
+    createExperimentHypothesisRevisionMutation.variables?.teamId === selectedTeam?.teamId
+    && createExperimentHypothesisRevisionMutation.error instanceof Error
+      ? createExperimentHypothesisRevisionMutation.error
+      : null;
   const selectedTeamFreezeExperimentDesignPending =
     freezeExperimentDesignMutation.isPending && freezeExperimentDesignMutation.variables?.teamId === selectedTeam?.teamId;
   const selectedTeamFreezeExperimentDesignError =

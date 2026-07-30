@@ -23,6 +23,22 @@ def _client() -> TestClient:
     return TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()})
 
 
+def _approve_candidate_for_experiment(
+    client: TestClient,
+    team_id: str,
+    candidate_id: str,
+) -> None:
+    response = client.post(
+        f"/api/teams/{team_id}/workflow-orchestration/research/review/decide",
+        json={
+            "candidateIds": [candidate_id],
+            "reviewedByAgent": "Research Coordination Agent",
+            "decision": "approve",
+        },
+    )
+    assert response.status_code == 201, response.text
+
+
 def _fake_local_research_public_config(*, prompt_cache_mode="explicit_cache_control", model_library: dict | None = None):
     return {
         "llm": {
@@ -992,6 +1008,16 @@ def test_team_workflow_routes_create_experiment_plan_draft(tmp_path, monkeypatch
             },
         },
     )
+    review_response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/research/review/decide",
+        json={
+            "candidateIds": [
+                candidate_response.json()["candidate"]["candidateId"]
+            ],
+            "reviewedByAgent": "Research Coordination Agent",
+            "decision": "approve",
+        },
+    )
     stage_response = client.post(
         f"/api/teams/{team['teamId']}/workflow-orchestration/stage-rounds/start",
         json={"stageType": "experiment", "topic": "routing experiment plan"},
@@ -1008,6 +1034,7 @@ def test_team_workflow_routes_create_experiment_plan_draft(tmp_path, monkeypatch
     )
 
     assert candidate_response.status_code == 201, candidate_response.text
+    assert review_response.status_code == 201, review_response.text
     assert stage_response.status_code == 201, stage_response.text
     assert status_response.status_code == 200, status_response.text
     assert status_response.json()["status"] == "ready_to_plan"
@@ -1022,6 +1049,136 @@ def test_team_workflow_routes_create_experiment_plan_draft(tmp_path, monkeypatch
     assert payload["status"]["summary"]["planCount"] == 1
     assert payload["stageRoundStatus"]["phases"][1]["latestRound"]["experimentPlanRef"]["planId"] == payload["plan"]["planId"]
     assert payload["boundaries"]["autoExecution"] is False
+
+
+def test_team_workflow_routes_govern_engineering_proxy_hypothesis_revision(
+    tmp_path,
+    monkeypatch,
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    client = _client()
+    team = client.post("/api/teams", json={"name": "挑战杯科研团队"}).json()
+    stage = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/stage-rounds/start",
+        json={
+            "stageType": "experiment",
+            "topic": "bounded engineering proxy validation",
+        },
+    ).json()["stageRound"]
+    source_plan_response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/experiments/plan",
+        json={
+            "stageRoundId": stage["stageRoundId"],
+            "title": "Bounded proxy design v1",
+            "createdByAgent": "Experiment Planning Agent",
+            "researchQuestion": "Can the bounded workflow beat its fixed baseline?",
+            "researchMode": "hypothesis_and_plan",
+            "experimentPurpose": {
+                "primaryPurpose": "feasibility",
+                "secondaryPurposes": [],
+            },
+            "experimentMethod": "model_training_inference",
+            "objective": "Validate only the engineering proxy workflow.",
+            "methodConfig": {
+                "dataset": "synthetic_structured_8x8_proxy",
+                "model": "iterative_visible_residual_correction",
+                "baseline": "one_shot_pca_reconstruction",
+                "seeds": [42],
+                "budget": "CPU-only, one deterministic seed",
+                "smokePlan": "predictive_coding_reconstruction_proxy; seed=42",
+            },
+            "metricContract": {
+                "primaryMetric": "reconstruction_mse_delta",
+                "metrics": [
+                    {
+                        "name": "reconstruction_mse_delta",
+                        "direction": "maximize",
+                    }
+                ],
+            },
+            "decisionContract": {
+                "successCriteria": ["delta exceeds 0.001"],
+                "failureCriteria": ["delta is not positive"],
+                "inconclusiveCriteria": ["runner unavailable"],
+            },
+        },
+    )
+    assert source_plan_response.status_code == 201, source_plan_response.text
+    source_plan = source_plan_response.json()["plan"]
+    materialize_url = (
+        f"/api/teams/{team['teamId']}/workflow-orchestration/experiments/"
+        f"plans/{source_plan['planId']}/hypotheses/engineering-proxy"
+    )
+    materialized = client.post(
+        materialize_url,
+        json={
+            "title": "工程代理假设",
+            "hypothesis": (
+                "在固定 seed 与相同合成数据下，当前候选重建流程相对固定 baseline "
+                "可使 reconstruction_mse_delta 超过预注册阈值。"
+            ),
+            "claimBoundary": (
+                "仅验证实验编排、复现与门禁链路；"
+                "不支持睡眠、生物神经机制或临床结论。"
+            ),
+            "createdByAgent": "Experiment Planning Agent",
+            "idempotencyKey": f"{source_plan['planId']}:engineering-proxy",
+        },
+    )
+    assert materialized.status_code == 201, materialized.text
+    candidate = materialized.json()["candidate"]
+    assert materialized.json()["hypothesisSummary"]["approvedForExperiment"] is False
+    blocked_revision = client.post(
+        (
+            f"/api/teams/{team['teamId']}/workflow-orchestration/experiments/"
+            f"plans/{source_plan['planId']}/hypotheses/{candidate['candidateId']}/revision"
+        ),
+        json={
+            "createdByAgent": "Research Coordination Agent",
+            "idempotencyKey": "proxy-review-revision",
+        },
+    )
+    assert blocked_revision.status_code == 422, blocked_revision.text
+
+    review = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/research/review/decide",
+        json={
+            "candidateIds": [candidate["candidateId"]],
+            "reviewedByAgent": "Research Coordination Agent",
+            "decision": "approve",
+            "comments": "Boundary and fixed controls are explicit.",
+        },
+    )
+    assert review.status_code == 201, review.text
+    revision_url = (
+        f"/api/teams/{team['teamId']}/workflow-orchestration/experiments/"
+        f"plans/{source_plan['planId']}/hypotheses/{candidate['candidateId']}/revision"
+    )
+    revision = client.post(
+        revision_url,
+        json={
+            "createdByAgent": "Research Coordination Agent",
+            "idempotencyKey": "proxy-review-revision",
+        },
+    )
+    replay = client.post(
+        revision_url,
+        json={
+            "createdByAgent": "Research Coordination Agent",
+            "idempotencyKey": "proxy-review-revision",
+        },
+    )
+
+    assert revision.status_code == 201, revision.text
+    assert replay.status_code == 201, replay.text
+    assert revision.json()["status"] == "created"
+    assert replay.json()["status"] == "reused"
+    assert replay.json()["plan"]["planId"] == revision.json()["plan"]["planId"]
+    assert revision.json()["plan"]["designGate"]["status"] == "draft"
+    assert revision.json()["plan"]["baselineSelection"]["activeBaselineReady"] is False
+    assert revision.json()["plan"]["hypothesisCandidateIds"] == [
+        candidate["candidateId"]
+    ]
 
 
 def test_team_workflow_routes_accept_generic_simulation_experiment_contract(tmp_path, monkeypatch):
@@ -1092,7 +1249,7 @@ def test_team_workflow_routes_register_experiment_baseline_artifact(tmp_path, mo
     _use_tmp_project_root(tmp_path, monkeypatch)
     client = _client()
     team = client.post("/api/teams", json={"name": "ai科学研究团队"}).json()
-    client.post(
+    candidate_response = client.post(
         f"/api/teams/{team['teamId']}/workflow-orchestration/local-research-model/outputs",
         json={
             "taskType": "algorithm_hypothesis_draft",
@@ -1121,6 +1278,11 @@ def test_team_workflow_routes_register_experiment_baseline_artifact(tmp_path, mo
                 "requiresReview": True,
             },
         },
+    )
+    _approve_candidate_for_experiment(
+        client,
+        team["teamId"],
+        candidate_response.json()["candidate"]["candidateId"],
     )
     stage_response = client.post(
         f"/api/teams/{team['teamId']}/workflow-orchestration/stage-rounds/start",
@@ -1156,7 +1318,7 @@ def test_team_workflow_routes_register_experiment_smoke_result(tmp_path, monkeyp
     _use_tmp_project_root(tmp_path, monkeypatch)
     client = _client()
     team = client.post("/api/teams", json={"name": "ai科学研究团队"}).json()
-    client.post(
+    candidate_response = client.post(
         f"/api/teams/{team['teamId']}/workflow-orchestration/local-research-model/outputs",
         json={
             "taskType": "algorithm_hypothesis_draft",
@@ -1185,6 +1347,11 @@ def test_team_workflow_routes_register_experiment_smoke_result(tmp_path, monkeyp
                 "requiresReview": True,
             },
         },
+    )
+    _approve_candidate_for_experiment(
+        client,
+        team["teamId"],
+        candidate_response.json()["candidate"]["candidateId"],
     )
     stage_response = client.post(
         f"/api/teams/{team['teamId']}/workflow-orchestration/stage-rounds/start",
@@ -1234,7 +1401,7 @@ def test_team_workflow_routes_register_experiment_full_run_result(tmp_path, monk
     _use_tmp_project_root(tmp_path, monkeypatch)
     client = _client()
     team = client.post("/api/teams", json={"name": "ai科学研究团队"}).json()
-    client.post(
+    candidate_response = client.post(
         f"/api/teams/{team['teamId']}/workflow-orchestration/local-research-model/outputs",
         json={
             "taskType": "algorithm_hypothesis_draft",
@@ -1263,6 +1430,11 @@ def test_team_workflow_routes_register_experiment_full_run_result(tmp_path, monk
                 "requiresReview": True,
             },
         },
+    )
+    _approve_candidate_for_experiment(
+        client,
+        team["teamId"],
+        candidate_response.json()["candidate"]["candidateId"],
     )
     stage_response = client.post(
         f"/api/teams/{team['teamId']}/workflow-orchestration/stage-rounds/start",
@@ -1384,7 +1556,7 @@ def test_team_workflow_routes_request_experiment_result_knowledge_ingestion(tmp_
         "/api/teams",
         json={"name": "ai科学研究团队", "members": [{"agentId": steward["agentId"], "role": "steward"}]},
     ).json()
-    client.post(
+    candidate_response = client.post(
         f"/api/teams/{team['teamId']}/workflow-orchestration/local-research-model/outputs",
         json={
             "taskType": "algorithm_hypothesis_draft",
@@ -1413,6 +1585,11 @@ def test_team_workflow_routes_request_experiment_result_knowledge_ingestion(tmp_
                 "requiresReview": True,
             },
         },
+    )
+    _approve_candidate_for_experiment(
+        client,
+        team["teamId"],
+        candidate_response.json()["candidate"]["candidateId"],
     )
     client.post(
         f"/api/teams/{team['teamId']}/workflow-orchestration/stage-rounds/start",
