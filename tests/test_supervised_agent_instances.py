@@ -612,16 +612,67 @@ def test_supervised_agent_bindings_block_missing_dialogue_model(tmp_path, monkey
         supervised_agent_service.supervised_agent_bindings()
 
 
-def test_supervised_agent_bindings_block_unregistered_dialogue_model(tmp_path, monkeypatch):
+def test_supervised_agent_bindings_repair_stale_fixed_role_models_to_current_profiles(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    monkeypatch.setattr(supervised_agent_service, "_configured_model_library_ids", lambda: {"model-primary"})
+    monkeypatch.setattr(
+        supervised_agent_service,
+        "_current_config",
+        lambda: _model_config(include_supervised_profiles=False),
+    )
+    monkeypatch.setattr(
+        supervised_agent_service,
+        "_configured_model_library_ids",
+        lambda *args, **kwargs: {"deepseek_v4_pro"},
+    )
     agents = _seed_supervised_fixed_role_agents()
-    judge = next(agent for agent in agents if agent["metadata"]["supervisedRole"] == "judge")
     state = agent_directory_service.load_state()
     for item in state["agents"]:
-        if item.get("agentId") == judge["agentId"]:
+        if item.get("agentId") in {agent["agentId"] for agent in agents}:
+            item["llmBindings"] = {"dialogue": {"modelId": "removed-model"}}
+    agent_directory_service.registry_path().write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    bindings = supervised_agent_service.supervised_agent_bindings()
+
+    assert {binding["dialogueModelId"] for binding in bindings.values()} == {"deepseek_v4_pro"}
+    stored = {
+        item["agentId"]: item
+        for item in agent_directory_service.load_state()["agents"]
+    }
+    assert {
+        stored[agent["agentId"]]["llmBindings"]["dialogue"]["modelId"]
+        for agent in agents
+    } == {"deepseek_v4_pro"}
+
+
+def test_supervised_agent_bindings_block_unregistered_dialogue_model_on_custom_slot(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        supervised_agent_service,
+        "_current_config",
+        lambda: _model_config(include_supervised_profiles=False),
+    )
+    monkeypatch.setattr(
+        supervised_agent_service,
+        "_configured_model_library_ids",
+        lambda *args, **kwargs: {"deepseek_v4_pro"},
+    )
+    _seed_supervised_fixed_role_agents()
+    replacement = agent_directory_service.create_agent_instance(
+        display_name="自定义替换基线 Agent",
+        llm_bindings={"dialogue": {"modelId": "deepseek_v4_pro"}},
+        primary_mode="supervised_evolution",
+        role_key="baseline",
+        prompt_template_id="prompt-supervised-baseline",
+    )
+    state = agent_directory_service.load_state()
+    for item in state["agents"]:
+        if item.get("agentId") == replacement["agentId"]:
             item["llmBindings"] = {"dialogue": {"modelId": "missing-model"}}
     agent_directory_service.registry_path().write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+    mode = agent_mode_binding_service.get_mode_bindings_payload()["modes"]["supervised_evolution"]
+    slots = dict(mode["slots"])
+    slots["baseline"] = replacement["agentId"]
+    agent_mode_binding_service.update_mode_binding("supervised_evolution", slots=slots)
 
     with pytest.raises(supervised_agent_service.SupervisedAgentBindingError, match="not present in model library"):
         supervised_agent_service.supervised_agent_bindings()
