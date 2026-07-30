@@ -1168,8 +1168,16 @@ def test_real_worktree_flow_uses_supervised_conversation_chain_for_candidate_bra
     assert all(Path(call["workspace_override"]).resolve() == candidate_path for call in candidate_eval_calls)
     assert snapshot["candidate"]["candidateVariant"] == variant
     assert snapshot["candidate"]["candidateRuntimeStatus"] == "verified"
+    assert snapshot["candidate"]["trustedWorkspaceAudit"]["variantUnchanged"] is True
+    assert snapshot["candidate"]["trustedWorkspaceAudit"]["unexpectedChangedFiles"] == []
     assert snapshot["candidate"]["cases"][0]["traceSummary"]["candidateRuntime"]["runtimeEffect"] == (
         "candidate_harness_executed"
+    )
+    assert (
+        snapshot["candidate"]["cases"][0]["traceSummary"]["candidateRuntime"][
+            "trustedWorkspaceAudit"
+        ]["frozenVariantId"]
+        == variant["variantId"]
     )
     assert snapshot["agentBindings"]["baseline"]["agentId"] == "agent-baseline"
     assert snapshot["baselineConversationSessionId"] == "session-baseline"
@@ -1201,6 +1209,60 @@ def test_candidate_variant_changes_when_untracked_content_changes(tmp_path):
 
     assert first["patchSha256"] != second["patchSha256"]
     assert first["variantId"] != second["variantId"]
+
+
+def test_trusted_rerun_workspace_audit_uses_the_frozen_candidate_variant(tmp_path):
+    candidate = tmp_path / "candidate"
+    _init_repo(candidate)
+    tracked = candidate / "tracked.txt"
+    tracked.write_text("base\n", encoding="utf-8")
+    _run_git(candidate, "add", "tracked.txt")
+    _run_git(candidate, "commit", "-m", "base")
+    tracked.write_text("candidate improvement\n", encoding="utf-8")
+    frozen_variant = service._build_candidate_variant(
+        candidate,
+        checkpoint_commit=_run_git(candidate, "rev-parse", "HEAD"),
+        changed_files=service._candidate_changed_files(candidate),
+    )
+
+    audit = service._build_trusted_rerun_workspace_audit(
+        candidate,
+        frozen_variant=frozen_variant,
+    )
+
+    assert audit["status"] == "verified"
+    assert audit["basis"] == "frozen_candidate_variant"
+    assert audit["variantUnchanged"] is True
+    assert audit["patchUnchanged"] is True
+    assert audit["pathSetUnchanged"] is True
+    assert audit["unexpectedChangedFiles"] == []
+
+
+def test_trusted_rerun_workspace_audit_detects_post_freeze_content_drift(tmp_path):
+    candidate = tmp_path / "candidate"
+    _init_repo(candidate)
+    tracked = candidate / "tracked.txt"
+    tracked.write_text("base\n", encoding="utf-8")
+    _run_git(candidate, "add", "tracked.txt")
+    _run_git(candidate, "commit", "-m", "base")
+    tracked.write_text("candidate improvement\n", encoding="utf-8")
+    frozen_variant = service._build_candidate_variant(
+        candidate,
+        checkpoint_commit=_run_git(candidate, "rev-parse", "HEAD"),
+        changed_files=service._candidate_changed_files(candidate),
+    )
+    tracked.write_text("unexpected rerun mutation\n", encoding="utf-8")
+
+    audit = service._build_trusted_rerun_workspace_audit(
+        candidate,
+        frozen_variant=frozen_variant,
+    )
+
+    assert audit["status"] == "verified"
+    assert audit["variantUnchanged"] is False
+    assert audit["patchUnchanged"] is False
+    assert audit["pathSetUnchanged"] is True
+    assert audit["unexpectedChangedFiles"] == ["tracked.txt"]
 
 
 def test_candidate_variant_handles_unicode_untracked_path(tmp_path):

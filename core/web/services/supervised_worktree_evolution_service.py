@@ -858,6 +858,61 @@ def _execute_flow(
         )
         _raise_if_run_cancelled(snapshot)
         snapshot["candidate"] = candidate
+        trusted_workspace_audit = _build_trusted_rerun_workspace_audit(
+            candidate_path,
+            frozen_variant=(
+                snapshot["candidateWorktree"].get("variant")
+                if isinstance(snapshot["candidateWorktree"].get("variant"), dict)
+                else {}
+            ),
+            baseline_untracked=snapshot["candidateWorktree"].get("untrackedFiles"),
+        )
+        candidate["trustedWorkspaceAudit"] = trusted_workspace_audit
+        for case_item in list(candidate.get("cases") or []):
+            if not isinstance(case_item, dict):
+                continue
+            trace_summary = case_item.get("traceSummary")
+            if not isinstance(trace_summary, dict):
+                continue
+            candidate_runtime = trace_summary.get("candidateRuntime")
+            if isinstance(candidate_runtime, dict):
+                candidate_runtime["trustedWorkspaceAudit"] = _clone(trusted_workspace_audit)
+        workspace_audit_verified = (
+            str(trusted_workspace_audit.get("status") or "") == "verified"
+            and bool(trusted_workspace_audit.get("variantUnchanged"))
+        )
+        if not workspace_audit_verified:
+            candidate["candidateRuntimeStatus"] = "failed"
+            candidate["reason"] = str(
+                trusted_workspace_audit.get("reason")
+                or "候选复跑后工作树校验不可用。"
+            )
+        _record_worktree_scene_event(
+            "candidate_runtime",
+            (
+                "supervised_worktree_run.candidate_workspace_audit_verified"
+                if workspace_audit_verified
+                else "supervised_worktree_run.candidate_workspace_audit_failed"
+            ),
+            run_id=run_id,
+            level="info" if workspace_audit_verified else "error",
+            outcome="verified" if workspace_audit_verified else "failed",
+            fields={
+                "candidateVariantId": str(
+                    trusted_workspace_audit.get("frozenVariantId") or ""
+                ),
+                "observedVariantId": str(
+                    trusted_workspace_audit.get("observedVariantId") or ""
+                ),
+                "auditStatus": str(trusted_workspace_audit.get("status") or ""),
+                "variantUnchanged": bool(
+                    trusted_workspace_audit.get("variantUnchanged")
+                ),
+                "unexpectedChangedFiles": list(
+                    trusted_workspace_audit.get("unexpectedChangedFiles") or []
+                )[:24],
+            },
+        )
         snapshot["rerunConversationSessionId"] = _evaluation_conversation_session_id(candidate)
         if (
             snapshot["rerunConversationSessionId"]
@@ -869,7 +924,8 @@ def _execute_flow(
             and str(candidate.get("candidateRuntimeStatus") or "") != "verified"
         ):
             raise SupervisedWorktreeRunValidationError(
-                "候选 harness 未在隔离子进程中产生可验证运行证据，已停止第二次 Judge 评分。"
+                str(candidate.get("reason") or "").strip()
+                or "候选 harness 隔离执行或复跑后冻结候选校验未通过，已停止第二次 Judge 评分。"
             )
 
         _raise_if_run_cancelled(snapshot)
@@ -3531,6 +3587,98 @@ def _candidate_variant_is_bound(candidate_variant: dict[str, Any]) -> bool:
     ).encode("utf-8")
     expected_variant_id = f"swte-variant-{hashlib.sha256(binding_payload).hexdigest()}"
     return str(candidate_variant.get("variantId") or "").strip() == expected_variant_id
+
+
+def _build_trusted_rerun_workspace_audit(
+    candidate_path: Path,
+    *,
+    frozen_variant: dict[str, Any],
+    baseline_untracked: Any = None,
+) -> dict[str, Any]:
+    """Verify that the rerun left the frozen candidate worktree unchanged."""
+
+    frozen_variant_id = str(frozen_variant.get("variantId") or "").strip()
+    frozen_patch_sha = str(frozen_variant.get("patchSha256") or "").strip().lower()
+    frozen_paths = sorted(
+        {
+            str(item or "").replace("\\", "/").strip().lstrip("/")
+            for item in list(frozen_variant.get("changedPaths") or [])
+            if str(item or "").strip()
+        }
+    )
+    base = {
+        "basis": "frozen_candidate_variant",
+        "frozenVariantId": frozen_variant_id,
+        "frozenPatchSha256": frozen_patch_sha,
+    }
+    if not _candidate_variant_is_bound(frozen_variant):
+        return {
+            **base,
+            "status": "unavailable",
+            "reason": "冻结候选版本未完成可信绑定，无法校验复跑后的工作树。",
+            "variantUnchanged": False,
+            "unexpectedChangedFiles": [],
+        }
+
+    try:
+        observed_changed_files = _candidate_changed_files(
+            candidate_path,
+            baseline_untracked=baseline_untracked,
+        )
+        observed_variant = _build_candidate_variant(
+            candidate_path,
+            checkpoint_commit=str(frozen_variant.get("checkpointCommit") or ""),
+            changed_files=observed_changed_files,
+            baseline_untracked=baseline_untracked,
+        )
+    except (OSError, SupervisedWorktreeRunValidationError) as exc:
+        return {
+            **base,
+            "status": "unavailable",
+            "reason": f"复跑后候选工作树审计不可用：{_bounded_text(str(exc), limit=400)}",
+            "variantUnchanged": False,
+            "unexpectedChangedFiles": [],
+        }
+
+    observed_variant_id = str(observed_variant.get("variantId") or "").strip()
+    observed_patch_sha = str(observed_variant.get("patchSha256") or "").strip().lower()
+    observed_paths = sorted(
+        {
+            str(item or "").replace("\\", "/").strip().lstrip("/")
+            for item in list(observed_variant.get("changedPaths") or [])
+            if str(item or "").strip()
+        }
+    )
+    patch_unchanged = observed_patch_sha == frozen_patch_sha
+    path_set_unchanged = observed_paths == frozen_paths
+    variant_unchanged = (
+        observed_variant_id == frozen_variant_id
+        and patch_unchanged
+        and path_set_unchanged
+    )
+    if variant_unchanged:
+        unexpected_changed_files: list[str] = []
+    elif path_set_unchanged:
+        unexpected_changed_files = observed_paths
+    else:
+        unexpected_changed_files = sorted(set(frozen_paths).symmetric_difference(observed_paths))
+    return {
+        **base,
+        "status": "verified",
+        "reason": (
+            "复跑后的候选工作树与冻结候选版本一致。"
+            if variant_unchanged
+            else "复跑后的候选工作树偏离冻结候选版本。"
+        ),
+        "observedVariantId": observed_variant_id,
+        "observedPatchSha256": observed_patch_sha,
+        "variantUnchanged": variant_unchanged,
+        "patchUnchanged": patch_unchanged,
+        "pathSetUnchanged": path_set_unchanged,
+        "frozenChangedFiles": frozen_paths,
+        "observedChangedFiles": observed_paths,
+        "unexpectedChangedFiles": unexpected_changed_files,
+    }
 
 
 def _baseline_untracked_paths(raw: Any) -> set[str]:

@@ -145,10 +145,24 @@ def test_judge_prompt_keeps_second_evaluation_in_same_session_context():
                             "status": "verified",
                             "runtimeEffect": "candidate_harness_executed",
                             "moduleSha256": "d" * 64,
+                            "workspaceEvidence": {
+                                "file_change_count": 0,
+                            },
+                            "extensionEvidence": {
+                                "workspace_change_audit": {
+                                    "file_change_count": None,
+                                }
+                            },
                         }
                     },
                 }
             ],
+            "trustedWorkspaceAudit": {
+                "status": "verified",
+                "basis": "frozen_candidate_variant",
+                "variantUnchanged": True,
+                "unexpectedChangedFiles": [],
+            },
         },
         previous_judgment={
             "phase": "baseline",
@@ -165,6 +179,8 @@ def test_judge_prompt_keeps_second_evaluation_in_same_session_context():
     assert "rerun trace" in prompt
     assert "candidate_harness_executed" in prompt
     assert "moduleSha256" in prompt
+    assert "trustedWorkspaceAudit 是复跑后工作树是否偏离冻结候选版本的唯一权威" in prompt
+    assert "frozen_candidate_variant" in prompt
     assert rubric["rubricHash"] in prompt
     assert "使用已冻结 rubric" in prompt
     assert "SUPERVISED_AGENT_JUDGMENT:" in prompt
