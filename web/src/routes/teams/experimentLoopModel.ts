@@ -547,6 +547,8 @@ export type ResearchLoopIterationProposal = {
   nextTemplateId: string;
   nextTemplateKind: string;
   nextActions: string[];
+  allowedVariableChanges: string[];
+  frozenControls: string[];
   createdAt: string;
   createdByAgent: string;
   nextDesignPlanId?: string;
@@ -743,6 +745,8 @@ export type ResearchLoopDecisionDraft = {
   rationale: string;
   nextTemplateId: string;
   nextActions: string;
+  allowedVariableChanges: string;
+  frozenControls: string;
 };
 
 

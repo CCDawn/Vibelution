@@ -309,12 +309,24 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
     const canDraftPlan = Boolean(selectedTeam?.teamId && statusPayload?.latestExperimentRound && !selectedTeamCreateExperimentPlanPending);
     const explicitDesignGate = activePlan?.designGate;
     const designExecutionAllowed = !explicitDesignGate || explicitDesignGate.status === "frozen";
+    const activeMemoryVariableContract =
+      statusPayload?.lifecycleProjection?.stage2.memoryContextSummary?.allowedVariableContract;
+    const iterationDesignRequiresGovernance = Boolean(explicitDesignGate?.sourceProposalId);
+    const iterationVariableGovernanceReady = Boolean(
+      !iterationDesignRequiresGovernance
+      || (
+        activeMemoryVariableContract?.status !== "missing"
+        && activeMemoryVariableContract?.variables.length
+        && activeMemoryVariableContract?.frozenControls.length
+      ),
+    );
     const canFreezeDesign = Boolean(
       selectedTeam?.teamId
       && activePlan
       && explicitDesignGate?.status === "draft"
       && activePlan.contractValidation?.valid
       && activePlan.readiness.readyForPlanReview
+      && iterationVariableGovernanceReady
       && !selectedTeamFreezeExperimentDesignPending,
     );
     const canRegisterBaselineArtifact = Boolean(
@@ -496,12 +508,21 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
                   {lang === "zh" ? "来源" : "Source"} · {explicitDesignGate.sourceLoopId || explicitDesignGate.sourceProposalId}
                 </small>
                 {explicitDesignGate.status === "draft" ? (
-                  <VNativeButton type="button" onClick={() => freezeExperimentDesignFromWorkspace(activePlan)} disabled={!canFreezeDesign}>
-                    <CheckCircle2 size={13} />
-                    {selectedTeamFreezeExperimentDesignPending
-                      ? (lang === "zh" ? "冻结中" : "Freezing")
-                      : (lang === "zh" ? "冻结设计" : "Freeze design")}
-                  </VNativeButton>
+                  <>
+                    {!iterationVariableGovernanceReady ? (
+                      <small>
+                        {lang === "zh"
+                          ? "缺少允许变化路径或固定控制项，需从最新提案重新生成受治理草稿。"
+                          : "Allowed change paths or frozen controls are missing. Regenerate from the latest proposal."}
+                      </small>
+                    ) : null}
+                    <VNativeButton type="button" onClick={() => freezeExperimentDesignFromWorkspace(activePlan)} disabled={!canFreezeDesign}>
+                      <CheckCircle2 size={13} />
+                      {selectedTeamFreezeExperimentDesignPending
+                        ? (lang === "zh" ? "冻结中" : "Freezing")
+                        : (lang === "zh" ? "冻结设计" : "Freeze design")}
+                    </VNativeButton>
+                  </>
                 ) : null}
               </div>
             ) : null}

@@ -525,6 +525,8 @@ export function useTeamExperimentLoopMutations(options: UseTeamExperimentLoopMut
             rationale: payload.draft.rationale.trim(),
             nextTemplateId: payload.nextTemplateId,
             nextActions: splitDraftList(payload.draft.nextActions, 24),
+            allowedVariableChanges: splitDraftList(payload.draft.allowedVariableChanges, 24),
+            frozenControls: splitDraftList(payload.draft.frozenControls, 24),
             decidedByAgent: options.sourceCollectionOwnerAgentId,
             createNextDesignDraft:
               payload.draft.decision === "promote_to_iteration"
@@ -543,6 +545,8 @@ export function useTeamExperimentLoopMutations(options: UseTeamExperimentLoopMut
         ...draft,
         rationale: "",
         nextActions: "",
+        allowedVariableChanges: "",
+        frozenControls: "",
       }));
       void queryClient.invalidateQueries({ queryKey: researchLoopStatusQueryKey(variables.teamId) });
       if (payload.nextDesignDraft) {

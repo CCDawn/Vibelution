@@ -73,6 +73,8 @@ describe("team experiment loop mutations contract", () => {
     expect(mutationsSource).toContain("/evidence");
     expect(mutationsSource).toContain("/decision");
     expect(mutationsSource).toContain("/design-draft");
+    expect(mutationsSource).toContain("allowedVariableChanges:");
+    expect(mutationsSource).toContain("frozenControls:");
   });
 
   it("updates the experiment status cache from the authoritative review response", () => {

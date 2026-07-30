@@ -458,6 +458,12 @@ def record_research_loop_decision(team_id: str, loop_id: str, payload: dict[str,
                         rationale=rationale,
                         next_template_id=str(iteration_proposal.get("nextTemplateId") or ""),
                         next_actions=list(iteration_proposal.get("nextActions") or []),
+                        allowed_variable_changes=list(
+                            iteration_proposal.get("allowedVariableChanges") or []
+                        ),
+                        frozen_controls=list(
+                            iteration_proposal.get("frozenControls") or []
+                        ),
                         created_by_agent=decided_by_agent,
                     )
                 except TeamWorkflowOrchestrationError as exc:
@@ -570,6 +576,10 @@ def materialize_research_loop_iteration_design(
                 rationale=str(decision.get("rationale") or ""),
                 next_template_id=str(proposal.get("nextTemplateId") or ""),
                 next_actions=list(proposal.get("nextActions") or []),
+                allowed_variable_changes=list(
+                    proposal.get("allowedVariableChanges") or []
+                ),
+                frozen_controls=list(proposal.get("frozenControls") or []),
                 created_by_agent=created_by_agent,
             )
         except TeamWorkflowOrchestrationError as exc:
@@ -684,7 +694,14 @@ def _pending_iteration_design_proposals(loops: list[dict[str, Any]]) -> list[dic
                     "sourcePlanId": str((loop.get("linkedExperiment") or {}).get("planId") or ""),
                 }
             )
-    return pending[-12:]
+    return sorted(
+        pending,
+        key=lambda item: (
+            str(item.get("createdAt") or ""),
+            str(item.get("proposalId") or ""),
+        ),
+        reverse=True,
+    )[:12]
 
 
 def _loop_summary(loop: dict[str, Any]) -> dict[str, Any]:
@@ -755,6 +772,22 @@ def _iteration_proposal_for_decision(
     next_template = _TEMPLATES_BY_ID.get(next_template_id) or _TEMPLATES_BY_ID[DEFAULT_TEMPLATE_ID]
     requested_actions = _trim_list(payload.get("nextActions"), max_items=24, max_length=500)
     next_actions = requested_actions or list(next_template.get("defaultIterationActions") or [])
+    allowed_variable_changes = _trim_list(
+        payload.get("allowedVariableChanges"),
+        max_items=24,
+        max_length=240,
+    )
+    frozen_controls = _trim_list(
+        payload.get("frozenControls"),
+        max_items=24,
+        max_length=360,
+    )
+    if decision["decision"] in {"promote_to_iteration", "repair_and_repeat"} and (
+        not allowed_variable_changes or not frozen_controls
+    ):
+        raise ResearchLoopError(
+            "Iteration proposals require explicit allowed variable changes and frozen controls."
+        )
     return {
         "proposalId": _new_record_id("iteration-proposal"),
         "loopId": loop.get("loopId", ""),
@@ -763,6 +796,8 @@ def _iteration_proposal_for_decision(
         "nextTemplateId": next_template["templateId"],
         "nextTemplateKind": next_template["templateKind"],
         "nextActions": next_actions,
+        "allowedVariableChanges": allowed_variable_changes,
+        "frozenControls": frozen_controls,
         "createdAt": created_at,
         "createdByAgent": decided_by_agent,
         "executionPolicy": _manual_execution_policy(),

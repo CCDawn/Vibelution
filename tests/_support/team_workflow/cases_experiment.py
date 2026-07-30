@@ -402,6 +402,57 @@ def test_explicit_design_gate_blocks_smoke_until_plan_is_frozen(tmp_path, monkey
     assert response["status"] == "needs_review"
 
 
+def test_iteration_design_freeze_requires_explicit_variable_governance(
+    tmp_path,
+    monkeypatch,
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    plan_store = team_workflow_orchestration_service._load_experiment_plan_store(
+        team["teamId"]
+    )
+    plan_store["plans"] = [
+        {
+            "planId": "exp_iteration_without_variable_contract",
+            "status": "draft",
+            "designGate": {
+                "status": "draft",
+                "requiresExplicitFreeze": True,
+                "sourceProposalId": "iteration-proposal-legacy",
+            },
+            "contractValidation": {"valid": True, "missingFields": []},
+            "readiness": {"readyForPlanReview": True},
+            "experimentContract": {
+                "schemaVersion": 2,
+                "revision": 4,
+                "status": "draft",
+                "iterationContract": {
+                    "sourceDecision": "repair_and_repeat",
+                    "nextActions": ["repair the evidence path"],
+                },
+            },
+            "updatedAt": "2026-07-31T00:00:00+00:00",
+        }
+    ]
+    plan_store["activePlanId"] = "exp_iteration_without_variable_contract"
+    team_workflow_orchestration_service._write_json(
+        team_workflow_orchestration_service._experiment_plan_store_path(
+            team["teamId"]
+        ),
+        plan_store,
+    )
+
+    with pytest.raises(
+        team_workflow_orchestration_service.TeamWorkflowOrchestrationError,
+        match="allowed variable changes and frozen controls",
+    ):
+        team_workflow_orchestration_service.freeze_experiment_design(
+            team["teamId"],
+            "exp_iteration_without_variable_contract",
+            {"frozenByAgent": "Research Coordination Agent"},
+        )
+
+
 def test_existing_frozen_plan_projects_bounded_smoke_readiness_without_rewriting_history(
     tmp_path,
     monkeypatch,

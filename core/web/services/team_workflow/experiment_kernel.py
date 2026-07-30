@@ -646,6 +646,7 @@ def _research_stage_memory_context(
     stage_type: str,
     research_question: str,
     actor_agent_id: str,
+    control_plan: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     s = _service()
     candidate_store = s._load_candidate_store(team_id)
@@ -661,6 +662,15 @@ def _research_stage_memory_context(
         if stage_type == "iteration"
         else "experiment_design"
     )
+    plans = s._experiment_plans(plan_store)
+    if isinstance(control_plan, dict):
+        control_plan_id = str(control_plan.get("planId") or "")
+        plans = [
+            plan
+            for plan in plans
+            if str(plan.get("planId") or "") != control_plan_id
+        ]
+        plans.append(control_plan)
     return s._build_research_memory_context(
         stage_type=normalized_stage_type,
         research_question=research_question,
@@ -669,7 +679,7 @@ def _research_stage_memory_context(
             for item in list(candidate_store.get("candidates") or [])
             if isinstance(item, dict)
         ],
-        plans=s._experiment_plans(plan_store),
+        plans=plans,
         loops=[
             item
             for item in list(loop_store.get("loops") or [])
@@ -677,7 +687,11 @@ def _research_stage_memory_context(
         ],
         knowledge_results=knowledge_results,
         retrieval_status=retrieval_status,
-        control_plan=s._active_experiment_plan(plan_store),
+        control_plan=(
+            control_plan
+            if isinstance(control_plan, dict)
+            else s._active_experiment_plan(plan_store)
+        ),
     )
 
 

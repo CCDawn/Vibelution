@@ -64,6 +64,8 @@ def test_research_loop_routes_create_record_and_decide(tmp_path, monkeypatch):
             "rationale": "All required manual evidence records are present.",
             "nextTemplateId": "dataset_benchmark",
             "nextActions": ["record full-run result in experiment ledger"],
+            "allowedVariableChanges": ["methodConfig.dataset"],
+            "frozenControls": ["methodConfig.seeds", "metricContract.primaryMetric"],
             "decidedByAgent": "Research Coordination Agent",
             "createNextDesignDraft": False,
             "idempotencyKey": "route-decision-1",
@@ -76,6 +78,8 @@ def test_research_loop_routes_create_record_and_decide(tmp_path, monkeypatch):
             "rationale": "All required manual evidence records are present.",
             "nextTemplateId": "dataset_benchmark",
             "nextActions": ["record full-run result in experiment ledger"],
+            "allowedVariableChanges": ["methodConfig.dataset"],
+            "frozenControls": ["methodConfig.seeds", "metricContract.primaryMetric"],
             "decidedByAgent": "Research Coordination Agent",
             "createNextDesignDraft": False,
             "idempotencyKey": "route-decision-1",
@@ -91,6 +95,13 @@ def test_research_loop_routes_create_record_and_decide(tmp_path, monkeypatch):
     assert decision_response.status_code == 201, decision_response.text
     assert decision_response.json()["loop"]["status"] == "ready_for_iteration"
     assert decision_response.json()["iterationProposal"]["nextTemplateId"] == "dataset_benchmark"
+    assert decision_response.json()["iterationProposal"]["allowedVariableChanges"] == [
+        "methodConfig.dataset"
+    ]
+    assert decision_response.json()["iterationProposal"]["frozenControls"] == [
+        "methodConfig.seeds",
+        "metricContract.primaryMetric",
+    ]
     assert replay_response.status_code == 201, replay_response.text
     assert replay_response.json()["idempotentReplay"] is True
     assert replay_response.json()["decision"]["decisionId"] == decision_response.json()["decision"]["decisionId"]
