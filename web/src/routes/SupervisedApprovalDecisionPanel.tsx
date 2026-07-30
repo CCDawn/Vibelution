@@ -191,7 +191,7 @@ export function SupervisedApprovalDecisionPanel({
               </h4>
               <div className={styles.evidenceList}>
                 {model.rubric.taskCriteria.map((criterion) => (
-                  <div key={criterion.id} className={styles.evidenceItem} data-tone="neutral">
+                  <div key={criterion.id} className={styles.rubricCriterionItem} data-tone="neutral">
                     <span>{formatScore(criterion.weight * 100)}%</span>
                     <span>
                       <strong>{criterion.label}</strong>
@@ -223,7 +223,7 @@ export function SupervisedApprovalDecisionPanel({
               </h4>
               <div className={styles.evidenceList}>
                 {model.rubric.systemCriteria.map((criterion) => (
-                  <div key={criterion.id} className={styles.evidenceItem} data-tone="neutral">
+                  <div key={criterion.id} className={styles.rubricCriterionItem} data-tone="neutral">
                     <span>{formatScore(criterion.weight * 100)}%</span>
                     <span>
                       <strong>{criterion.label}</strong>

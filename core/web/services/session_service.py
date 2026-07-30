@@ -63,6 +63,7 @@ from core.chat.conversation_ledger import (
     append_conversation_event,
     append_conversation_turn_outcome,
     conversation_ledger_path,
+    conversation_ledger_workspace_root,
     conversation_visible_messages_from_events,
     conversation_turn_items_from_events,
     latest_ledger_sequence,

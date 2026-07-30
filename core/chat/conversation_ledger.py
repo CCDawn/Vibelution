@@ -53,6 +53,7 @@ from .turn_journal import (
     session_turn_items_from_events,
     rewrite_turn_events,
     turn_journal_path,
+    turn_journal_workspace_root,
 )
 from .context_compression_ledger import (
     append_context_compression_checkpoint,
@@ -171,11 +172,18 @@ def load_conversation_events(project_root: Path, session_id: str) -> list[Conver
     return list(cached)
 
 
+def conversation_ledger_workspace_root(project_root: Path) -> Path:
+    """Resolve the shared ledger workspace for bounded request-level reuse."""
+
+    return turn_journal_workspace_root(project_root)
+
+
 def load_conversation_preview_slice(
     project_root: Path,
     session_id: str,
     *,
     event_limit: int = 64,
+    ledger_workspace_root: Path | None = None,
 ) -> ConversationLedgerPreviewSlice:
     """Project a bounded journal tail for session-index message previews."""
 
@@ -183,6 +191,7 @@ def load_conversation_preview_slice(
         project_root,
         session_id,
         limit=event_limit,
+        journal_workspace_root=ledger_workspace_root,
     )
     return ConversationLedgerPreviewSlice(
         visible_messages=conversation_visible_messages_from_events(events),
@@ -289,6 +298,7 @@ __all__ = [
     "append_context_compression_attempt",
     "apply_context_compression_checkpoints",
     "conversation_ledger_path",
+    "conversation_ledger_workspace_root",
     "conversation_model_messages_from_events",
     "conversation_turn_items_from_events",
     "conversation_visible_messages_from_events",
