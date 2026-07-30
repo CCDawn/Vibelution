@@ -3393,6 +3393,9 @@ def test_session_list_loaded_event_marks_stale_matching_signature(monkeypatch):
         chat_state_read_ms=11,
         conversation_normalize_ms=13,
         summary_projection_ms=17,
+        ledger_tail_ms=19,
+        agent_inbox_ms=23,
+        agent_directory_ms=29,
     )
 
     fields = events[-1][1]["fields"]
@@ -3403,6 +3406,9 @@ def test_session_list_loaded_event_marks_stale_matching_signature(monkeypatch):
     assert fields["chatStateReadMs"] == 11
     assert fields["conversationNormalizeMs"] == 13
     assert fields["summaryProjectionMs"] == 17
+    assert fields["ledgerTailMs"] == 19
+    assert fields["agentInboxMs"] == 23
+    assert fields["agentDirectoryMs"] == 29
 
 def test_runtime_scene_reconciliation_closes_running_package(tmp_path, monkeypatch):
     scene_dir = _seed_runtime_scene_bundle(tmp_path, scene_id="scene-reconciled", status="running")
