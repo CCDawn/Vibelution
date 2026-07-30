@@ -721,6 +721,9 @@ def test_experiment_plan_projects_native_v2_method_fields_into_readiness(
         "smokePlan": "predictive_coding_reconstruction_proxy; seed=42",
     }
     assert draft["plan"]["baselineSelection"]["baseline"] == "one_shot_pca_reconstruction"
+    assert draft["plan"]["designGate"]["status"] == "draft"
+    assert draft["plan"]["designGate"]["requiresExplicitFreeze"] is True
+    assert draft["plan"]["designGate"]["source"] == "native_v2_plan"
     checklist = {
         item["item"]: item["status"]
         for item in draft["plan"]["readinessChecklist"]
@@ -909,6 +912,7 @@ def test_experiment_plan_store_projects_native_v2_contract_without_rewrite(
                     "schemaVersion": 2,
                     "planId": "plan-native-v2-stale-projection",
                     "teamId": team["teamId"],
+                    "status": "draft",
                     "researchMode": "hypothesis_and_plan",
                     "experimentMethod": "model_training_inference",
                     "methodConfig": {
@@ -934,6 +938,7 @@ def test_experiment_plan_store_projects_native_v2_contract_without_rewrite(
                         "inconclusiveCriteria": ["runner is unavailable"],
                     },
                 },
+                "contractValidation": {"valid": True, "missingFields": []},
                 "selectedHypotheses": [{"candidateId": "candidate-proxy"}],
                 "baselineSelection": {"baseline": "", "status": "missing"},
                 "createdAt": "2026-07-30T00:00:00+00:00",
@@ -966,6 +971,9 @@ def test_experiment_plan_store_projects_native_v2_contract_without_rewrite(
         projected_plan["contractMigration"]["projectionRepair"]
         == "canonical_contract_projected"
     )
+    assert projected_plan["designGate"]["status"] == "draft"
+    assert projected_plan["designGate"]["requiresExplicitFreeze"] is True
+    assert projected_plan["designGate"]["source"] == "native_v2_plan"
     assert team_workflow_orchestration_service._read_json(plan_path) == raw_store
 
 
@@ -1179,7 +1187,41 @@ def test_experiment_baseline_artifact_registration_unlocks_smoke_gate(tmp_path, 
     )
     draft = team_workflow_orchestration_service.create_experiment_plan(
         team["teamId"],
-        {"stageRoundId": stage["stageRound"]["stageRoundId"], "createdByAgent": "Research Coordination Agent"},
+        {
+            "stageRoundId": stage["stageRound"]["stageRoundId"],
+            "createdByAgent": "Research Coordination Agent",
+            "researchQuestion": "Can context-gated routing improve adaptation?",
+            "researchMode": "full_research_loop",
+            "experimentMethod": "model_training_inference",
+            "requestedAdapterId": "predictive_coding_reconstruction_proxy",
+            "methodConfig": {
+                "dataset": "synthetic task-switch benchmark",
+                "model": "context-gated router",
+                "baseline": "standard MoE router",
+                "seeds": [42],
+                "budget": "CPU-only bounded smoke",
+                "smokePlan": "train 200 mini-batches and compare metric direction",
+            },
+            "metricContract": {
+                "primaryMetric": "validation accuracy and routing entropy",
+                "metrics": [
+                    {
+                        "name": "validation accuracy and routing entropy",
+                        "direction": "maximize",
+                    }
+                ],
+            },
+            "decisionContract": {
+                "successCriteria": ["proxy metric improves"],
+                "failureCriteria": ["proxy metric regresses"],
+                "inconclusiveCriteria": ["proxy runner is unavailable"],
+            },
+        },
+    )
+    frozen = team_workflow_orchestration_service.freeze_experiment_design(
+        team["teamId"],
+        draft["plan"]["planId"],
+        {"frozenByAgent": "Experiment Planning Agent"},
     )
 
     registered = team_workflow_orchestration_service.register_experiment_baseline_artifact(
@@ -1196,6 +1238,7 @@ def test_experiment_baseline_artifact_registration_unlocks_smoke_gate(tmp_path, 
     status = team_workflow_orchestration_service.get_experiment_planning_status(team["teamId"])
 
     assert registered["baselineArtifact"]["artifactPath"].endswith("standard-moe-router.json")
+    assert frozen["plan"]["designGate"]["status"] == "frozen"
     assert registered["plan"]["status"] == "baseline_ready"
     assert registered["plan"]["experimentContract"]["status"] == "ready_for_prepare"
     assert registered["plan"]["baselineSelection"]["activeBaselineReady"] is True
