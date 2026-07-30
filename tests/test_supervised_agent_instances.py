@@ -4,10 +4,12 @@ from fastapi.testclient import TestClient
 import pytest
 
 from config.models import AppConfig
+from core.authorization import tool_authorization_service
 from core.authorization.tool_authorization_service import resolve_enforced_authorization
 from core.ui.chat_state import load_chat_state, save_chat_state
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
+from core.web.services.agent_config_authority import agent_config_hash
 from core.web.services import (
     agent_directory_service,
     agent_mode_binding_service,
@@ -113,6 +115,14 @@ def _seed_active_chat(root):
     )
 
 
+def _stored_agent_allowed_tools(agent_id: str) -> list[str]:
+    state = agent_directory_service.load_state()
+    agent = next(item for item in state["agents"] if item["agentId"] == agent_id)
+    policy_id = str(agent.get("toolPolicyId") or "")
+    policy = state["toolPolicies"][policy_id]
+    return list(policy.get("allowedTools") or [])
+
+
 def test_ensure_supervised_agent_instances_creates_fixed_role_agents_without_stealing_active_session(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(supervised_agent_service, "_current_config", lambda: _model_config())
@@ -213,6 +223,69 @@ def test_baseline_self_edit_grants_apply_patch_only_for_the_improvement_turn():
     )
 
 
+def test_supervised_runtime_grants_bypass_approval_without_overriding_persistent_tools():
+    persistent_policy = {
+        "policyId": "tool-supervised-runtime-probe",
+        "policyVersion": 1,
+        "allowedTools": ["close_evolution_transaction_tool"],
+        "blockedTools": [],
+        "preferredTools": [],
+        "networkAccess": "none",
+        "mutationAccess": "controlled",
+        "delegationAccess": "none",
+        "maxCallsPerTurn": 16,
+        "approvalOverrides": {
+            "close_evolution_transaction_tool": "always",
+        },
+    }
+
+    runtime_policy = agent_directory_service._with_runtime_tool_grants(
+        persistent_policy,
+        [
+            "open_evolution_transaction_tool",
+            "close_evolution_transaction_tool",
+            "cli_tool",
+        ],
+        source="supervised_conversation_harness",
+    )
+    authorization = resolve_enforced_authorization(
+        runtime={
+            "agentId": "agent-supervised-runtime-probe",
+            "turnId": "turn-supervised-runtime-probe",
+            "agent": {"agentId": "agent-supervised-runtime-probe"},
+            "toolPolicy": runtime_policy,
+        }
+    )
+    approval_requirements = {
+        name: approval
+        for name, approval, _risk in authorization.decision.approval_requirements
+    }
+
+    assert approval_requirements["open_evolution_transaction_tool"] == "never"
+    assert approval_requirements["cli_tool"] == "never"
+    assert approval_requirements["close_evolution_transaction_tool"] == "always"
+    assert persistent_policy["approvalOverrides"] == {
+        "close_evolution_transaction_tool": "always",
+    }
+    non_supervised_policy = agent_directory_service._with_runtime_tool_grants(
+        persistent_policy,
+        ["open_evolution_transaction_tool"],
+        source="temporary_test_grant",
+    )
+    non_supervised_authorization = resolve_enforced_authorization(
+        runtime={
+            "agentId": "agent-temporary-runtime-probe",
+            "turnId": "turn-temporary-runtime-probe",
+            "agent": {"agentId": "agent-temporary-runtime-probe"},
+            "toolPolicy": non_supervised_policy,
+        }
+    )
+    assert dict(
+        (name, approval)
+        for name, approval, _risk in non_supervised_authorization.decision.approval_requirements
+    )["open_evolution_transaction_tool"] == "on_request"
+
+
 def test_supervised_runtime_tools_are_granted_only_during_role_runtime(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(supervised_agent_service, "_current_config", lambda: _model_config())
@@ -253,6 +326,61 @@ def test_supervised_runtime_tools_are_granted_only_during_role_runtime(tmp_path,
         supervised_role="judge",
     ):
         assert agent_directory_service.effective_visible_tool_names_for_current_agent(probe_tools) == []
+
+
+def test_ensure_supervised_agent_instances_repairs_legacy_config_identity_without_persisting_tools(
+    tmp_path,
+    monkeypatch,
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agents = supervised_agent_service.ensure_supervised_agent_instances()
+    baseline = next(agent for agent in agents if agent["metadata"]["supervisedRole"] == "baseline")
+    baseline_id = baseline["agentId"]
+
+    state = agent_directory_service.load_state()
+    stored_baseline = next(agent for agent in state["agents"] if agent["agentId"] == baseline_id)
+    stored_baseline["configRevision"] = 0
+    stored_baseline["configHash"] = ""
+    stored_baseline["permissionPreset"] = ""
+    agent_directory_service.save_state(state)
+
+    repaired_agents = supervised_agent_service.ensure_supervised_agent_instances()
+    repaired = next(
+        agent for agent in repaired_agents if agent["metadata"]["supervisedRole"] == "baseline"
+    )
+    repaired_state = agent_directory_service.load_state()
+    repaired_stored = next(
+        agent for agent in repaired_state["agents"] if agent["agentId"] == baseline_id
+    )
+
+    assert repaired["agentId"] == baseline_id
+    assert repaired_stored["configRevision"] >= 1
+    assert repaired_stored["permissionPreset"] == "request_approval"
+    assert repaired_stored["configHash"] == agent_config_hash(repaired_stored)
+    assert _stored_agent_allowed_tools(baseline_id) == []
+
+    with agent_directory_service.active_agent_runtime(
+        baseline_id,
+        session_id="session-legacy-supervised-baseline",
+        turn_id="turn-legacy-supervised-baseline",
+        supervised_role="baseline",
+    ) as runtime:
+        report = resolve_enforced_authorization(runtime=runtime)
+        authorization = tool_authorization_service.install_execution_authorization(report)
+        try:
+            assert authorization.config_revision >= 1
+            assert authorization.config_hash == repaired_stored["configHash"]
+            assert authorization.permission_preset == "request_approval"
+            assert "open_evolution_transaction_tool" in authorization.executable_tools
+        finally:
+            tool_authorization_service.clear_execution_authorization()
+
+    supervised_agent_service.ensure_supervised_agent_instances()
+    final_state = agent_directory_service.load_state()
+    final_stored = next(agent for agent in final_state["agents"] if agent["agentId"] == baseline_id)
+    assert final_stored["configRevision"] == repaired_stored["configRevision"]
+    assert final_stored["configHash"] == repaired_stored["configHash"]
+    assert _stored_agent_allowed_tools(baseline_id) == []
 
 
 def test_ensure_supervised_agent_instances_preserves_agent_center_llm_binding(tmp_path, monkeypatch):
@@ -547,16 +675,67 @@ def test_supervised_agent_bindings_block_missing_dialogue_model(tmp_path, monkey
         supervised_agent_service.supervised_agent_bindings()
 
 
-def test_supervised_agent_bindings_block_unregistered_dialogue_model(tmp_path, monkeypatch):
+def test_supervised_agent_bindings_repair_stale_fixed_role_models_to_current_profiles(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    monkeypatch.setattr(supervised_agent_service, "_configured_model_library_ids", lambda: {"model-primary"})
+    monkeypatch.setattr(
+        supervised_agent_service,
+        "_current_config",
+        lambda: _model_config(include_supervised_profiles=False),
+    )
+    monkeypatch.setattr(
+        supervised_agent_service,
+        "_configured_model_library_ids",
+        lambda *args, **kwargs: {"deepseek_v4_pro"},
+    )
     agents = _seed_supervised_fixed_role_agents()
-    judge = next(agent for agent in agents if agent["metadata"]["supervisedRole"] == "judge")
     state = agent_directory_service.load_state()
     for item in state["agents"]:
-        if item.get("agentId") == judge["agentId"]:
+        if item.get("agentId") in {agent["agentId"] for agent in agents}:
+            item["llmBindings"] = {"dialogue": {"modelId": "removed-model"}}
+    agent_directory_service.registry_path().write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    bindings = supervised_agent_service.supervised_agent_bindings()
+
+    assert {binding["dialogueModelId"] for binding in bindings.values()} == {"deepseek_v4_pro"}
+    stored = {
+        item["agentId"]: item
+        for item in agent_directory_service.load_state()["agents"]
+    }
+    assert {
+        stored[agent["agentId"]]["llmBindings"]["dialogue"]["modelId"]
+        for agent in agents
+    } == {"deepseek_v4_pro"}
+
+
+def test_supervised_agent_bindings_block_unregistered_dialogue_model_on_custom_slot(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        supervised_agent_service,
+        "_current_config",
+        lambda: _model_config(include_supervised_profiles=False),
+    )
+    monkeypatch.setattr(
+        supervised_agent_service,
+        "_configured_model_library_ids",
+        lambda *args, **kwargs: {"deepseek_v4_pro"},
+    )
+    _seed_supervised_fixed_role_agents()
+    replacement = agent_directory_service.create_agent_instance(
+        display_name="自定义替换基线 Agent",
+        llm_bindings={"dialogue": {"modelId": "deepseek_v4_pro"}},
+        primary_mode="supervised_evolution",
+        role_key="baseline",
+        prompt_template_id="prompt-supervised-baseline",
+    )
+    state = agent_directory_service.load_state()
+    for item in state["agents"]:
+        if item.get("agentId") == replacement["agentId"]:
             item["llmBindings"] = {"dialogue": {"modelId": "missing-model"}}
     agent_directory_service.registry_path().write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+    mode = agent_mode_binding_service.get_mode_bindings_payload()["modes"]["supervised_evolution"]
+    slots = dict(mode["slots"])
+    slots["baseline"] = replacement["agentId"]
+    agent_mode_binding_service.update_mode_binding("supervised_evolution", slots=slots)
 
     with pytest.raises(supervised_agent_service.SupervisedAgentBindingError, match="not present in model library"):
         supervised_agent_service.supervised_agent_bindings()

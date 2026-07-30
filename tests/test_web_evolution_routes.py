@@ -1070,6 +1070,7 @@ def test_evolution_workbench_route_exposes_dataset_choices_and_saved_state(tmp_p
     } in payload["bundles"]
     assert {item["name"] for item in payload["datasets"]} == {
         "supervised_dry_run",
+        "supervised_candidate_patch_smoke",
         "terminal_bench_smoke",
         "terminal_bench_core",
         "terminal_bench_agent_judged",
@@ -1081,6 +1082,14 @@ def test_evolution_workbench_route_exposes_dataset_choices_and_saved_state(tmp_p
     assert dry_run["usabilityStatus"] == "ready"
     assert dry_run["visibility"] == "primary"
     assert dry_run["selectable"] is True
+    candidate_patch_smoke = next(
+        item
+        for item in payload["datasets"]
+        if item["name"] == "supervised_candidate_patch_smoke"
+    )
+    assert candidate_patch_smoke["caseCount"] == 1
+    assert candidate_patch_smoke["effective"] is True
+    assert candidate_patch_smoke["selectable"] is True
     terminal_smoke = next(item for item in payload["datasets"] if item["name"] == "terminal_bench_smoke")
     assert terminal_smoke["effective"] is True
     assert terminal_smoke["selectable"] is True
@@ -1140,6 +1149,7 @@ def test_evolution_workbench_route_exposes_full_dataset_catalog_and_preflight_fi
     catalog_names = {item["name"] for item in payload["datasetCatalog"]}
     assert dataset_names == {
         "supervised_dry_run",
+        "supervised_candidate_patch_smoke",
         "terminal_bench_smoke",
         "terminal_bench_agent_judged",
         "terminal_bench_2_1_smoke",
@@ -1869,6 +1879,7 @@ def test_workbench_dataset_list_backfills_new_builtin_datasets(tmp_path, monkeyp
     names = {item["name"] for item in rows}
     assert names == {
         "supervised_dry_run",
+        "supervised_candidate_patch_smoke",
         "terminal_bench_smoke",
         "terminal_bench_core",
         "terminal_bench_agent_judged",

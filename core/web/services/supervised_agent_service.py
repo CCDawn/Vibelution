@@ -11,6 +11,7 @@ from core.ui.chat_state import load_chat_state, save_chat_state
 
 from . import agent_directory_service, session_service
 from . import agent_mode_binding_service
+from .agent_config_authority import agent_config_hash
 from .runtime_scene_service import record_runtime_scene_event
 from .supervised_runtime_contract import (
     supervised_role_contract,
@@ -285,6 +286,12 @@ def supervised_agent_bindings() -> dict[str, dict[str, Any]]:
         model_library_ids = _configured_model_library_ids(config)
     except TypeError:
         model_library_ids = _configured_model_library_ids()
+    if _repair_stale_fixed_role_dialogue_bindings(
+        raw_slots,
+        raw_registry,
+        model_library_ids=model_library_ids,
+    ):
+        raw_registry = _load_raw_agent_registry_state()
     _assert_raw_supervised_slot_dialogue_bindings(raw_slots, raw_registry, model_library_ids=model_library_ids)
     ensure_supervised_agent_instances()
     raw_agents = {
@@ -566,6 +573,64 @@ def _assert_supervised_binding_model_ready(
         raise SupervisedAgentBindingError(
             f"Supervised role Agent dialogue model cannot be resolved: {role} ({agent_id}) modelId={model_id}: {type(exc).__name__}: {exc}"
         ) from exc
+
+
+def _repair_stale_fixed_role_dialogue_bindings(
+    raw_slots: dict[str, str],
+    raw_registry: dict[str, Any],
+    *,
+    model_library_ids: set[str],
+) -> bool:
+    if not raw_slots or not model_library_ids:
+        return False
+    raw_agents = {
+        str(agent.get("agentId") or "").strip(): agent
+        for agent in (raw_registry.get("agents") or [])
+        if isinstance(agent, dict) and str(agent.get("agentId") or "").strip()
+    }
+    fixed_roles = {item.role for item in SUPERVISED_AGENT_ROLES}
+    changed = False
+    for role, agent_id in raw_slots.items():
+        normalized_role = str(role or "").strip()
+        normalized_agent_id = str(agent_id or "").strip()
+        if normalized_role not in fixed_roles or not normalized_agent_id:
+            continue
+        agent = raw_agents.get(normalized_agent_id)
+        if not isinstance(agent, dict):
+            continue
+        metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+        if (
+            str(metadata.get("supervisedRole") or "").strip() != normalized_role
+            or metadata.get("fixedRole") is not True
+        ):
+            continue
+        llm_bindings = agent_directory_service.normalize_agent_llm_bindings(agent.get("llmBindings"))
+        dialogue_model_id = agent_directory_service.agent_dialogue_model_id({"llmBindings": llm_bindings})
+        if not dialogue_model_id or dialogue_model_id in model_library_ids:
+            continue
+        replacement_model_id = _supervised_role_model_id(normalized_role)
+        if not replacement_model_id or replacement_model_id not in model_library_ids:
+            continue
+        repaired_bindings = dict(llm_bindings)
+        repaired_bindings["dialogue"] = {"modelId": replacement_model_id}
+        agent_directory_service.update_agent_instance(
+            normalized_agent_id,
+            llm_bindings=repaired_bindings,
+        )
+        _record_supervised_agent_event(
+            "supervised.agent_instance.dialogue_model_repaired",
+            role=SupervisedAgentRole(normalized_role, str(metadata.get("supervisedRoleLabel") or normalized_role)),
+            level="warning",
+            outcome="written",
+            fields={
+                "agentId": normalized_agent_id,
+                "previousModelId": dialogue_model_id,
+                "modelId": replacement_model_id,
+                "reason": "fixed_role_model_removed_from_library",
+            },
+        )
+        changed = True
+    return changed
 
 
 def _assert_raw_supervised_slot_dialogue_bindings(
@@ -857,8 +922,9 @@ def _ensure_supervised_role(role: SupervisedAgentRole) -> tuple[dict[str, Any] |
         bool(expected_task_profile)
         and existing_task_profile != agent_directory_service.normalize_task_profile(expected_task_profile)
     )
+    config_identity_needs_repair = _stored_agent_config_identity_needs_repair(existing)
     needs_update = any(metadata.get(key) != value for key, value in expected_metadata.items())
-    if needs_update or persona_needs_update or task_needs_update:
+    if needs_update or persona_needs_update or task_needs_update or config_identity_needs_repair:
         existing = agent_directory_service.update_agent_instance(
             str(existing.get("agentId") or ""),
             primary_mode="supervised_evolution",
@@ -887,6 +953,37 @@ def _ensure_supervised_role(role: SupervisedAgentRole) -> tuple[dict[str, Any] |
         except Exception:
             pass
     return existing, changed
+
+
+def _stored_agent_config_identity_needs_repair(agent: dict[str, Any]) -> bool:
+    agent_id = str(agent.get("agentId") or "").strip()
+    stored = agent
+    if agent_id:
+        try:
+            state = agent_directory_service.load_state()
+            stored = next(
+                (
+                    item
+                    for item in state.get("agents") or []
+                    if isinstance(item, dict)
+                    and str(item.get("agentId") or "").strip() == agent_id
+                ),
+                agent,
+            )
+        except Exception:
+            stored = agent
+    try:
+        revision = int(stored.get("configRevision") or 0)
+    except (TypeError, ValueError):
+        revision = 0
+    config_hash = str(stored.get("configHash") or "").strip()
+    permission_preset = str(stored.get("permissionPreset") or "").strip()
+    return (
+        revision < 1
+        or not config_hash
+        or not permission_preset
+        or config_hash != agent_config_hash(stored)
+    )
 
 
 def _supervised_role_slot_excluded(role: str) -> bool:
