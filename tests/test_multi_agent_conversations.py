@@ -396,6 +396,39 @@ def test_session_list_uses_short_snapshot_cache_and_invalidates_on_update(tmp_pa
     assert [item for item in events if item[0][2] == "session.list.loaded"][-1][1]["fields"]["cacheHit"] is False
 
 
+def test_session_agent_lookup_reuses_avatar_url_for_shared_paths(monkeypatch):
+    shared_avatar_path = "workspace/avatars/05-broad-explorer.png"
+    monkeypatch.setattr(
+        agent_directory_service,
+        "load_state",
+        lambda: {
+            "agents": [
+                {
+                    "agentId": "agent-alpha",
+                    "displayName": "Alpha",
+                    "metadata": {"avatarImagePath": shared_avatar_path},
+                },
+                {
+                    "agentId": "agent-beta",
+                    "displayName": "Beta",
+                    "metadata": {"avatarImagePath": shared_avatar_path},
+                },
+            ]
+        },
+    )
+    avatar_url_calls = []
+    monkeypatch.setattr(
+        agent_directory_service,
+        "agent_avatar_image_url",
+        lambda avatar_path: avatar_url_calls.append(avatar_path) or "/api/agents/avatar-image/shared.png?v=1",
+    )
+
+    agents = session_service._agent_lookup_for_conversations()
+
+    assert avatar_url_calls == [shared_avatar_path]
+    assert agents["agent-alpha"]["avatarImageUrl"] == agents["agent-beta"]["avatarImageUrl"]
+
+
 def test_session_list_cache_returns_isolated_summary_snapshots(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     created = session_service.create_chat_session(title="Cached Parent")

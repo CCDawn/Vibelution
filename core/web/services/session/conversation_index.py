@@ -712,13 +712,26 @@ def _sync_agent_directory_project_root() -> None:
         s._invalidate_session_list_cache()
 
 
-def _conversation_agent_from_state(agent: dict[str, Any]) -> dict[str, Any]:
+def _conversation_agent_from_state(
+    agent: dict[str, Any],
+    *,
+    avatar_url_cache: dict[str, str] | None = None,
+) -> dict[str, Any]:
     s = _service()
     agent_id = str(agent.get("agentId") or "").strip()
     metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
     team_identity = s._agent_team_identity(agent, metadata)
     workspace_path = str(agent.get("workspacePath") or "").strip()
     avatar_path = s._agent_avatar_path(agent, metadata)
+    avatar_image_url = (
+        avatar_url_cache.get(avatar_path)
+        if avatar_url_cache is not None and avatar_path
+        else None
+    )
+    if avatar_image_url is None:
+        avatar_image_url = s.agent_directory_service.agent_avatar_image_url(avatar_path)
+        if avatar_url_cache is not None and avatar_path:
+            avatar_url_cache[avatar_path] = avatar_image_url
     llm_bindings = s.agent_directory_service.normalize_agent_llm_bindings(agent.get("llmBindings"))
     return {
         "agentId": agent_id,
@@ -737,7 +750,7 @@ def _conversation_agent_from_state(agent: dict[str, Any]) -> dict[str, Any]:
         "teamName": str(team_identity.get("teamName") or "").strip(),
         "workspacePath": workspace_path,
         "avatarImagePath": avatar_path,
-        "avatarImageUrl": s.agent_directory_service.agent_avatar_image_url(avatar_path),
+        "avatarImageUrl": avatar_image_url,
         "status": str(agent.get("status") or "active").strip() or "active",
         "createdBy": str(agent.get("createdBy") or "").strip(),
         "metadata": dict(metadata),
