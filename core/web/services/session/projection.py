@@ -10,6 +10,7 @@ their own packs. Late-bound facade keeps monkeypatches stable.
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Mapping
 
 
@@ -609,6 +610,7 @@ def _normalize_conversation(
     ensure_workspace: bool = True,
     lightweight: bool = False,
     phase_timings: dict[str, int] | None = None,
+    ledger_workspace_root: Path | None = None,
 ) -> dict[str, Any] | None:
     s = _service()
     if not isinstance(raw, dict):
@@ -678,7 +680,8 @@ def _normalize_conversation(
     if lightweight:
         ledger_tail_started_at = s._perf_counter() if phase_timings is not None else None
         messages, has_ledger_messages = s._ledger_latest_preview_messages_for_session(
-            conversation_id
+            conversation_id,
+            ledger_workspace_root=ledger_workspace_root,
         )
         if not has_ledger_messages:
             messages = s._normalize_latest_preview_messages(
@@ -3004,6 +3007,8 @@ def _ledger_visible_messages_for_session(session_id: str) -> list[dict[str, Any]
 
 def _ledger_latest_preview_messages_for_session(
     session_id: str,
+    *,
+    ledger_workspace_root: Path | None = None,
 ) -> tuple[list[dict[str, Any]], bool]:
     """Return the latest summary preview without replaying unbounded tool output."""
 
@@ -3016,6 +3021,7 @@ def _ledger_latest_preview_messages_for_session(
             s.PROJECT_ROOT,
             normalized_session_id,
             event_limit=_SESSION_SUMMARY_EVENT_SCAN_LIMIT,
+            ledger_workspace_root=ledger_workspace_root,
         )
     except Exception:
         preview_slice = None
@@ -3123,6 +3129,14 @@ def _load_conversations(
             if hidden_team_member_agent_ids is not None
             else s._agent_directory_stub_hidden_team_member_ids()
         )
+        ledger_workspace_root = None
+        if lightweight:
+            try:
+                ledger_workspace_root = s.conversation_ledger_workspace_root(
+                    s.PROJECT_ROOT
+                )
+            except Exception:
+                ledger_workspace_root = None
         if repair:
             changed = s._repair_child_root_agent_direct_session_bindings(payload, agent_by_id=agent_by_id) or changed
         for raw in list(payload.get("conversations") or []):
@@ -3136,6 +3150,7 @@ def _load_conversations(
                 ensure_workspace=repair,
                 lightweight=lightweight,
                 phase_timings=phase_timings,
+                ledger_workspace_root=ledger_workspace_root,
             )
             if conversation is not None:
                 conversations.append(conversation)

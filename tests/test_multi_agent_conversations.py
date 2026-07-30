@@ -554,6 +554,42 @@ def test_session_list_reuses_lightweight_message_preview_without_full_normalizat
     assert normalized_nonempty_inputs == []
 
 
+def test_session_list_resolves_ledger_workspace_root_once_for_preview_projection(
+    tmp_path,
+    monkeypatch,
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _seed_chat_sessions(tmp_path)
+    _seed_ledger_messages(
+        tmp_path,
+        "session-alpha",
+        [{"role": "assistant", "content": "Alpha preview", "timestamp": "2026-05-26T10:00:00"}],
+    )
+    _seed_ledger_messages(
+        tmp_path,
+        "session-beta",
+        [{"role": "assistant", "content": "Beta preview", "timestamp": "2026-05-26T10:01:00"}],
+    )
+    session_service._invalidate_session_list_cache()
+    ledger_workspace_root_calls = []
+
+    def counting_ledger_workspace_root(project_root):
+        ledger_workspace_root_calls.append(project_root)
+        return developer_sandbox.sandboxed_workspace_path(project_root, "sessions")
+
+    monkeypatch.setattr(
+        session_service,
+        "conversation_ledger_workspace_root",
+        counting_ledger_workspace_root,
+    )
+
+    sessions = {item["id"]: item for item in session_service.list_sessions()}
+
+    assert sessions["session-alpha"]["taskSummary"] == "Alpha preview"
+    assert sessions["session-beta"]["taskSummary"] == "Beta preview"
+    assert ledger_workspace_root_calls == [tmp_path]
+
+
 def test_session_list_loads_hidden_team_membership_once_per_projection(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _seed_chat_sessions(tmp_path)
@@ -573,7 +609,10 @@ def test_session_list_loads_hidden_team_membership_once_per_projection(tmp_path,
     assert team_list_calls == 1
 
 
-def test_session_list_reuses_known_ledger_presence_for_preview_projection(tmp_path, monkeypatch):
+def test_session_list_preview_projection_avoids_unbounded_ledger_replay(
+    tmp_path,
+    monkeypatch,
+):
     _use_tmp_project_root(tmp_path, monkeypatch)
     save_chat_state(
         tmp_path,
@@ -597,23 +636,25 @@ def test_session_list_reuses_known_ledger_presence_for_preview_projection(tmp_pa
     )
     session_service._invalidate_session_list_cache()
     session_service._invalidate_session_conversation_events_cache()
-    real_ledger_visible_messages = session_service._ledger_visible_messages_for_session
-    calls: list[str] = []
+    def fail_unbounded_ledger_replay(*args, **kwargs):
+        raise AssertionError("session preview must use the bounded ledger tail")
 
-    def counting_ledger_visible_messages(session_id):
-        calls.append(str(session_id))
-        return real_ledger_visible_messages(session_id)
-
-    monkeypatch.setattr(session_service, "_ledger_visible_messages_for_session", counting_ledger_visible_messages)
+    monkeypatch.setattr(
+        session_service,
+        "_ledger_visible_messages_for_session",
+        fail_unbounded_ledger_replay,
+    )
 
     sessions = {item["id"]: item for item in session_service.list_sessions()}
 
     assert sessions["session-preview"]["taskSummary"] == "Ledger preview"
     assert sessions["session-preview"]["status"] == "ready"
-    assert calls == ["session-preview"]
 
 
-def test_session_list_does_not_reread_empty_ledger_for_summary(tmp_path, monkeypatch):
+def test_session_list_empty_preview_avoids_unbounded_ledger_replay(
+    tmp_path,
+    monkeypatch,
+):
     _use_tmp_project_root(tmp_path, monkeypatch)
     save_chat_state(
         tmp_path,
@@ -632,17 +673,13 @@ def test_session_list_does_not_reread_empty_ledger_for_summary(tmp_path, monkeyp
     )
     session_service._invalidate_session_list_cache()
     session_service._invalidate_session_conversation_events_cache()
-    real_ledger_visible_messages = session_service._ledger_visible_messages_for_session
-    calls: list[str] = []
-
-    def counting_ledger_visible_messages(session_id):
-        calls.append(str(session_id))
-        return real_ledger_visible_messages(session_id)
+    def fail_unbounded_ledger_replay(*args, **kwargs):
+        raise AssertionError("empty preview must remain complete without full replay")
 
     monkeypatch.setattr(
         session_service,
         "_ledger_visible_messages_for_session",
-        counting_ledger_visible_messages,
+        fail_unbounded_ledger_replay,
     )
 
     sessions = {
@@ -651,7 +688,6 @@ def test_session_list_does_not_reread_empty_ledger_for_summary(tmp_path, monkeyp
     }
 
     assert sessions["session-empty-preview"]["taskSummary"] == ""
-    assert calls == ["session-empty-preview"]
 
 
 def test_session_title_update_uses_lightweight_path(tmp_path, monkeypatch):
