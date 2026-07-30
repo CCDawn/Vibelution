@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import locale
 import os
 import shlex
@@ -28,6 +27,23 @@ _WINDOWS_COMMAND_ENV = "VIBELUTION_CODEX_SANDBOX_COMMAND"
 _VIBELUTION_DATA_HOME_ENV = "VIBELUTION_DATA_HOME"
 _VIBELUTION_CONFIG_HOME_ENV = "VIBELUTION_CONFIG_HOME"
 _VIBELUTION_CONFIG_PATH_ENV = "VIBELUTION_CONFIG_PATH"
+_CANDIDATE_RUNTIME_ENVIRONMENT_POLICY = "candidate_runtime"
+_CANDIDATE_RUNTIME_ENV_ALLOWLIST = {
+    "ALLUSERSPROFILE",
+    "COMSPEC",
+    "NUMBER_OF_PROCESSORS",
+    "OS",
+    "PATH",
+    "PATHEXT",
+    "PROCESSOR_ARCHITECTURE",
+    "PROCESSOR_IDENTIFIER",
+    "PROCESSOR_LEVEL",
+    "PROCESSOR_REVISION",
+    "PROGRAMDATA",
+    "SYSTEMDRIVE",
+    "SYSTEMROOT",
+    "WINDIR",
+}
 _WINDOWS_CHAIN_BUILTINS = {
     "cd",
     "cls",
@@ -340,6 +356,8 @@ def _is_native_windows_command(command: str) -> bool:
 def _sandbox_process_environment(
     workdir: Path,
     command_hash: str,
+    *,
+    environment_policy: str = "default",
 ) -> tuple[dict[str, str], Path]:
     temp_root = (workdir / ".runtime" / "codex-cli").resolve()
     if not temp_root.is_relative_to(workdir):
@@ -360,7 +378,28 @@ def _sandbox_process_environment(
     sandbox_data_home.mkdir()
     sandbox_config_home.mkdir()
 
-    environment = os.environ.copy()
+    if environment_policy == _CANDIDATE_RUNTIME_ENVIRONMENT_POLICY:
+        environment = {
+            name: value
+            for name, value in os.environ.items()
+            if name.upper() in _CANDIDATE_RUNTIME_ENV_ALLOWLIST
+        }
+        sandbox_user_home = sandbox_temp / "user-home"
+        sandbox_appdata = sandbox_user_home / "AppData" / "Roaming"
+        sandbox_localappdata = sandbox_user_home / "AppData" / "Local"
+        sandbox_appdata.mkdir(parents=True)
+        sandbox_localappdata.mkdir(parents=True)
+        environment.update(
+            {
+                "APPDATA": str(sandbox_appdata),
+                "HOME": str(sandbox_user_home),
+                "LOCALAPPDATA": str(sandbox_localappdata),
+                "USERPROFILE": str(sandbox_user_home),
+                "PYTHONNOUSERSITE": "1",
+            }
+        )
+    else:
+        environment = os.environ.copy()
     for name in ("TMP", "TEMP", "TMPDIR"):
         environment[name] = str(sandbox_temp)
     relative_temp = sandbox_temp.relative_to(workdir).as_posix()
@@ -766,6 +805,7 @@ def start_codex_sandbox_terminal_session(
     yield_time_ms: int = 10_000,
     max_output_chars: int = 12_000,
     _cancel_checker: Callable[[], str] | None = None,
+    _environment_policy: str = "default",
 ) -> dict[str, Any]:
     """Start one sandboxed command and return a bounded Codex-style process snapshot."""
 
@@ -801,7 +841,11 @@ def start_codex_sandbox_terminal_session(
     sandbox_temp: Path | None = None
     try:
         encoding = locale.getpreferredencoding(False) or "utf-8"
-        environment, sandbox_temp = _sandbox_process_environment(workdir, command_hash)
+        environment, sandbox_temp = _sandbox_process_environment(
+            workdir,
+            command_hash,
+            environment_policy=_environment_policy,
+        )
         environment.pop(_WINDOWS_COMMAND_ENV, None)
         if is_native_windows_command:
             environment[_WINDOWS_COMMAND_ENV] = route.command
@@ -897,6 +941,7 @@ def execute_codex_sandbox_command(
     timeout: int = 60,
     cwd: str | None = None,
     _cancel_checker: Callable[[], str] | None = None,
+    _environment_policy: str = "default",
 ) -> str:
     """Run one shell command in the Codex workspace-write Windows sandbox."""
 
@@ -963,6 +1008,7 @@ def execute_codex_sandbox_command(
         environment, sandbox_temp = _sandbox_process_environment(
             workdir,
             command_hash,
+            environment_policy=_environment_policy,
         )
         environment.pop(_WINDOWS_COMMAND_ENV, None)
         if is_native_windows_command:

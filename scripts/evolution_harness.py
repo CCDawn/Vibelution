@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import hashlib
 import json
 import os
 import queue
@@ -37,6 +38,9 @@ from config.paths import ensure_global_config_initialized, resolve_config_path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+CANDIDATE_RUNTIME_PROTOCOL_VERSION = 1
+CANDIDATE_RUNTIME_RESULT_PREFIX = "VIBELUTION_CANDIDATE_RUNTIME_RESULT="
+CANDIDATE_RUNTIME_INPUT_LIMIT = 120_000
 REPORT_DIR = PROJECT_ROOT / "log_info" / "harness_reports"
 LIVE_CASE_TRANSCRIPT_LIMIT = 8
 LIVE_CASE_TEXT_LIMIT = 4000
@@ -2216,6 +2220,116 @@ def infer_evolution_summary(
     return summary
 
 
+def _candidate_runtime_workspace_snapshot(repo_root: Path) -> Dict[str, Any]:
+    try:
+        head = run_git(repo_root, "rev-parse", "HEAD")
+    except Exception as exc:
+        head = ""
+        head_error = f"{type(exc).__name__}: {exc}"[:400]
+    else:
+        head_error = ""
+    try:
+        status_lines = run_git(repo_root, "status", "--porcelain").splitlines()
+    except Exception as exc:
+        status_lines = []
+        status_error = f"{type(exc).__name__}: {exc}"[:400]
+    else:
+        status_error = ""
+    snapshot: Dict[str, Any] = {
+        "repo_root": str(repo_root.resolve()),
+        "head": head,
+        "status_porcelain": status_lines[:80],
+    }
+    if head_error:
+        snapshot["head_error"] = head_error
+    if status_error:
+        snapshot["status_error"] = status_error
+    return snapshot
+
+
+def build_candidate_runtime_evidence(
+    payload: Dict[str, Any],
+    *,
+    repo_root: Path,
+) -> Dict[str, Any]:
+    """Run candidate-owned harness inference over a bounded trusted-parent envelope."""
+
+    if not isinstance(payload, dict):
+        raise ValueError("candidate runtime input must be an object")
+    if int(payload.get("protocolVersion") or 0) != CANDIDATE_RUNTIME_PROTOCOL_VERSION:
+        raise ValueError("candidate runtime protocol version mismatch")
+    candidate_variant = payload.get("candidateVariant")
+    if not isinstance(candidate_variant, dict):
+        raise ValueError("candidate runtime variant is missing")
+    variant_id = str(candidate_variant.get("variantId") or "").strip()
+    patch_sha = str(candidate_variant.get("patchSha256") or "").strip().lower()
+    if not variant_id or not re.fullmatch(r"[0-9a-f]{64}", patch_sha):
+        raise ValueError("candidate runtime variant identity is invalid")
+    events = [
+        dict(item)
+        for item in list(payload.get("events") or [])[:24]
+        if isinstance(item, dict)
+    ]
+    assistant_text = str(payload.get("assistantText") or "")[:8_000]
+    summary = infer_evolution_summary(
+        events,
+        [],
+        assistant_text.splitlines(),
+        restart_expected=bool(payload.get("restartExpected")),
+        restart_reentered=False,
+        child_first_event_phase="candidate_runtime_subprocess",
+    )
+    module_path = Path(__file__).resolve()
+    snapshotter = globals().get("capture_workspace_snapshot")
+    if callable(snapshotter):
+        workspace_evidence = snapshotter(repo_root)
+    else:
+        workspace_evidence = _candidate_runtime_workspace_snapshot(repo_root)
+    extension_builder = globals().get("collect_candidate_runtime_extension")
+    extension_evidence = (
+        extension_builder(payload, repo_root)
+        if callable(extension_builder)
+        else {}
+    )
+    return {
+        "protocolVersion": CANDIDATE_RUNTIME_PROTOCOL_VERSION,
+        "status": "success",
+        "executionBackend": "isolated_candidate_subprocess",
+        "candidateVariantId": variant_id,
+        "candidatePatchSha256": patch_sha,
+        "moduleSha256": hashlib.sha256(module_path.read_bytes()).hexdigest(),
+        "processId": os.getpid(),
+        "evolutionSummary": summary,
+        "workspaceEvidence": workspace_evidence,
+        "extensionEvidence": extension_evidence,
+    }
+
+
+def _run_candidate_runtime_cli(input_path_text: str) -> int:
+    raw_path = Path(str(input_path_text or "").strip())
+    input_path = (
+        raw_path.resolve()
+        if raw_path.is_absolute()
+        else (PROJECT_ROOT / raw_path).resolve()
+    )
+    if not input_path.is_relative_to(PROJECT_ROOT) or not input_path.is_file():
+        raise ValueError("candidate runtime input must be a file inside the candidate worktree")
+    if input_path.stat().st_size > CANDIDATE_RUNTIME_INPUT_LIMIT:
+        raise ValueError("candidate runtime input exceeded the bounded contract")
+    payload = json.loads(input_path.read_text(encoding="utf-8"))
+    evidence = build_candidate_runtime_evidence(payload, repo_root=PROJECT_ROOT)
+    print(
+        CANDIDATE_RUNTIME_RESULT_PREFIX
+        + json.dumps(
+            evidence,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    )
+    return 0
+
+
 def now_iso() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
@@ -3116,11 +3230,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-steps", type=int, default=0)
     parser.add_argument("--expect-restart", action="store_true")
     parser.add_argument("--keep-worktree", action="store_true")
+    parser.add_argument(
+        "--candidate-runtime-input",
+        default="",
+        help="Run the bounded candidate-runtime protocol over one worktree-local JSON envelope.",
+    )
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
+    if args.candidate_runtime_input:
+        return _run_candidate_runtime_cli(args.candidate_runtime_input)
     options = resolve_run_options(
         scenario=args.scenario,
         mode=args.mode,
