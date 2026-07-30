@@ -165,21 +165,21 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
     const latestMutationPayload = selectedTeamCreateExperimentPlanResult;
     const latestFreezePayload = selectedTeamFreezeExperimentDesignResult;
     const statusPayload =
-      latestFreezePayload?.experimentStatus
+      experimentPlanningStatus
+      ?? latestFreezePayload?.experimentStatus
       ?? latestKnowledgeIngestionMutationPayload?.status
       ?? latestFullRunMutationPayload?.status
       ?? latestSmokeMutationPayload?.status
       ?? latestBaselineMutationPayload?.status
-      ?? latestMutationPayload?.status
-      ?? experimentPlanningStatus;
+      ?? latestMutationPayload?.status;
     const activePlan =
-      latestFreezePayload?.plan
+      statusPayload?.activePlan
+      ?? latestFreezePayload?.plan
       ?? latestKnowledgeIngestionMutationPayload?.plan
       ?? latestFullRunMutationPayload?.plan
       ?? latestSmokeMutationPayload?.plan
       ?? latestBaselineMutationPayload?.plan
       ?? latestMutationPayload?.plan
-      ?? statusPayload?.activePlan
       ?? null;
     const activeBaselineArtifact = activePlan?.baselineSelection.activeBaselineArtifact ?? null;
     const activeSmokeRun = selectedTeamRunExperimentSmokeResult?.smokeRun ?? activePlan?.activeSmokeRun ?? null;

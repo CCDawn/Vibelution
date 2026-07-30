@@ -1780,6 +1780,12 @@ describe("TeamsRoute layout contract", () => {
     expect(teamExperimentPlanningLedgerPanelSource).toContain("运行受控 Smoke");
     expect(teamExperimentPlanningLedgerPanelSource).toContain("activePlan.readiness.readyForBoundedSmokeRun");
     expect(teamExperimentPlanningLedgerPanelSource).toContain("runExperimentSmokeFromWorkspace");
+    expect(teamExperimentPlanningLedgerPanelSource).toMatch(
+      /const statusPayload =\s*experimentPlanningStatus\s*\?\? latestFreezePayload\?\.experimentStatus/,
+    );
+    expect(teamExperimentPlanningLedgerPanelSource).toMatch(
+      /const activePlan =\s*statusPayload\?\.activePlan\s*\?\? latestFreezePayload\?\.plan/,
+    );
     expect(teamExperimentLoopMutationsSource).toContain("smoke-result");
     expect(routeAndPureSource).toContain("ExperimentSmokeResultRecord");
     expect(routeAndPureSource).toContain("activeSmokeResult");
