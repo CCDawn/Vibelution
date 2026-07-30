@@ -11,6 +11,7 @@ from core.ui.chat_state import load_chat_state, save_chat_state
 
 from . import agent_directory_service, session_service
 from . import agent_mode_binding_service
+from .agent_config_authority import agent_config_hash
 from .runtime_scene_service import record_runtime_scene_event
 from .supervised_runtime_contract import (
     supervised_role_contract,
@@ -857,8 +858,9 @@ def _ensure_supervised_role(role: SupervisedAgentRole) -> tuple[dict[str, Any] |
         bool(expected_task_profile)
         and existing_task_profile != agent_directory_service.normalize_task_profile(expected_task_profile)
     )
+    config_identity_needs_repair = _stored_agent_config_identity_needs_repair(existing)
     needs_update = any(metadata.get(key) != value for key, value in expected_metadata.items())
-    if needs_update or persona_needs_update or task_needs_update:
+    if needs_update or persona_needs_update or task_needs_update or config_identity_needs_repair:
         existing = agent_directory_service.update_agent_instance(
             str(existing.get("agentId") or ""),
             primary_mode="supervised_evolution",
@@ -887,6 +889,37 @@ def _ensure_supervised_role(role: SupervisedAgentRole) -> tuple[dict[str, Any] |
         except Exception:
             pass
     return existing, changed
+
+
+def _stored_agent_config_identity_needs_repair(agent: dict[str, Any]) -> bool:
+    agent_id = str(agent.get("agentId") or "").strip()
+    stored = agent
+    if agent_id:
+        try:
+            state = agent_directory_service.load_state()
+            stored = next(
+                (
+                    item
+                    for item in state.get("agents") or []
+                    if isinstance(item, dict)
+                    and str(item.get("agentId") or "").strip() == agent_id
+                ),
+                agent,
+            )
+        except Exception:
+            stored = agent
+    try:
+        revision = int(stored.get("configRevision") or 0)
+    except (TypeError, ValueError):
+        revision = 0
+    config_hash = str(stored.get("configHash") or "").strip()
+    permission_preset = str(stored.get("permissionPreset") or "").strip()
+    return (
+        revision < 1
+        or not config_hash
+        or not permission_preset
+        or config_hash != agent_config_hash(stored)
+    )
 
 
 def _supervised_role_slot_excluded(role: str) -> bool:

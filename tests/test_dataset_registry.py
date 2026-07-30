@@ -38,6 +38,9 @@ def test_default_dataset_registry_lists_builtin_and_swe(monkeypatch: pytest.Monk
     by_name = {item["name"]: item for item in rows}
 
     assert by_name["supervised_dry_run"]["runnable"] is True
+    assert by_name["supervised_candidate_patch_smoke"]["runnable"] is True
+    assert by_name["supervised_candidate_patch_smoke"]["selectable"] is True
+    assert by_name["supervised_candidate_patch_smoke"]["case_count"] == 1
     assert by_name["chat_reviewed_multiturn"]["runnable"] is True
     assert by_name["chat_reviewed_multiturn"]["workbench_visible"] is False
     assert by_name["chat_reviewed_multiturn"]["visibility"] == "hidden"
@@ -463,6 +466,25 @@ def test_materialize_builtin_supervised_bundle_respects_limit(tmp_path: Path):
     assert Path(result.bundle_path).stem == result.bundle_name
     assert result.bundle_path != full.bundle_path
     assert len(full_bundle["cases"]) > 1
+
+
+def test_materialize_candidate_patch_smoke_preserves_mutation_contract(tmp_path: Path):
+    result = materialize_dataset_bundle(
+        "supervised_candidate_patch_smoke",
+        project_root=tmp_path,
+        limit=1,
+    )
+    bundle = json.loads(Path(result.bundle_path).read_text(encoding="utf-8"))
+
+    assert result.runnable is True
+    assert result.case_count == 1
+    assert bundle["candidate_mutation_contract"] == {
+        "supported": True,
+        "required": True,
+        "kind": "safe_patch_probe",
+        "allowlisted_paths": ["tests/supervised_worktree_candidate_marker.py"],
+    }
+    assert bundle["cases"][0]["case_id"] == "candidate_patch_convergence_probe"
 
 
 def test_materialize_custom_prompt_jsonl(tmp_path: Path):

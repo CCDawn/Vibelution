@@ -809,6 +809,18 @@ def _execute_flow(
             candidate_path,
             baseline_untracked=candidate_worktree.get("untrackedFiles"),
         )
+        mutation_contract_violations = _candidate_mutation_contract_violations(
+            snapshot["candidateWorktree"]["changedFiles"],
+            options.get("candidateMutationContract")
+            if isinstance(options.get("candidateMutationContract"), dict)
+            else {},
+        )
+        if mutation_contract_violations:
+            snapshot["candidateWorktree"]["mutationContractViolations"] = mutation_contract_violations
+            raise SupervisedWorktreeRunValidationError(
+                "候选改动超出本任务安全变更白名单："
+                f"{'、'.join(mutation_contract_violations[:8])}"
+            )
         if snapshot["candidateWorktree"]["changedFiles"]:
             candidate_variant = _build_candidate_variant(
                 candidate_path,
@@ -1043,10 +1055,12 @@ def _normalize_start_payload(
     except (FileNotFoundError, ValueError) as exc:
         raise SupervisedWorktreeRunValidationError(str(exc)) from exc
     case_count = len(list(bundle.get("cases") or []))
+    candidate_mutation_contract = _normalize_candidate_mutation_contract(bundle)
     task_contract = _build_task_contract(
         bundle,
         bundle_name=bundle_name,
         self_origin=self_origin,
+        candidate_mutation_contract=candidate_mutation_contract,
     )
     estimate = _estimate_llm_cost(case_count)
     if execution_mode == "real" and not bool(payload.get("confirmRealLlmCost")):
@@ -1071,6 +1085,11 @@ def _normalize_start_payload(
             raise SupervisedWorktreeRunValidationError(
                 f"监督 worktree 真实闭环缺少必要绑定：{'、'.join(missing_bindings)}。"
             )
+        if not _candidate_mutation_contract_supports_real_run(candidate_mutation_contract):
+            raise SupervisedWorktreeRunValidationError(
+                "所选任务缺少可执行的候选变更契约，不能进入真实监督闭环。"
+                "请选择明确声明 required=true 且提供安全 allowlisted_paths 的候选补丁任务。"
+            )
     return {
         "sourceKind": source_kind,
         "mode": mode,
@@ -1079,6 +1098,7 @@ def _normalize_start_payload(
         "datasetLimit": dataset_limit,
         "bundleName": bundle_name,
         "taskContract": task_contract,
+        "candidateMutationContract": candidate_mutation_contract,
         "keepWorktree": keep_worktree,
         "costEstimate": estimate,
         "startRequest": _normalize_start_request_metadata(payload),
@@ -1095,6 +1115,7 @@ def _build_task_contract(
     *,
     bundle_name: str,
     self_origin: dict[str, Any],
+    candidate_mutation_contract: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     cases: list[dict[str, Any]] = []
     for index, item in enumerate(list(bundle.get("cases") or [])[:50], start=1):
@@ -1124,7 +1145,65 @@ def _build_task_contract(
         "goal": _safe_metadata_text(self_origin.get("goal"), limit=500),
         "riskReason": _safe_metadata_text(self_origin.get("riskReason"), limit=300),
         "cases": cases,
+        "candidateMutationContract": _clone(candidate_mutation_contract or {}),
     }
+
+
+def _normalize_candidate_mutation_contract(bundle: dict[str, Any]) -> dict[str, Any]:
+    raw = bundle.get("candidate_mutation_contract")
+    if not isinstance(raw, dict):
+        raw = bundle.get("candidateMutationContract")
+    if not isinstance(raw, dict):
+        raw = {}
+    raw_paths = raw.get("allowlisted_paths")
+    if not isinstance(raw_paths, list):
+        raw_paths = raw.get("allowlistedPaths")
+    allowlisted_paths: list[str] = []
+    for value in raw_paths if isinstance(raw_paths, list) else []:
+        path = str(value or "").strip().replace("\\", "/").lstrip("/")
+        parts = [part for part in path.split("/") if part]
+        if (
+            not path
+            or ":" in path
+            or any(part in {".", ".."} for part in parts)
+            or path in allowlisted_paths
+        ):
+            continue
+        allowlisted_paths.append(path[:300])
+    return {
+        "supported": bool(raw.get("supported")),
+        "required": bool(raw.get("required")),
+        "kind": _safe_metadata_text(raw.get("kind"), limit=80),
+        "allowlistedPaths": allowlisted_paths[:20],
+    }
+
+
+def _candidate_mutation_contract_supports_real_run(contract: dict[str, Any]) -> bool:
+    return bool(
+        contract.get("supported")
+        and contract.get("required")
+        and str(contract.get("kind") or "").strip()
+        and list(contract.get("allowlistedPaths") or [])
+    )
+
+
+def _candidate_mutation_contract_violations(
+    changed_files: list[dict[str, Any]],
+    contract: dict[str, Any],
+) -> list[str]:
+    if not bool(contract.get("required")):
+        return []
+    allowlisted_paths = {
+        str(path or "").strip().replace("\\", "/").lstrip("/")
+        for path in list(contract.get("allowlistedPaths") or [])
+        if str(path or "").strip()
+    }
+    violations: list[str] = []
+    for item in changed_files:
+        path = str(item.get("path") or "").strip().replace("\\", "/").lstrip("/")
+        if path and path not in allowlisted_paths and path not in violations:
+            violations.append(path)
+    return violations
 
 
 def _normalize_worktree_agent_bindings(value: Any) -> dict[str, dict[str, Any]]:
