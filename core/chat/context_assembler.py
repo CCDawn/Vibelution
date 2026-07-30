@@ -97,14 +97,19 @@ def assemble_conversation_context(
     *,
     session_id: str = "",
     current_turn_id: str = "",
-    recent_message_limit: int = DEFAULT_RECENT_MESSAGE_LIMIT,
+    recent_message_limit: int | None = DEFAULT_RECENT_MESSAGE_LIMIT,
     retrieved_events: Iterable[HistoryEvent] | None = None,
     ledger_events: Iterable[ConversationLedgerEvent] | None = None,
     replace_large_tool_results_for_compression: bool = False,
     tool_result_replacement_char_limit: int = 12_000,
     history_seed_profile: str = "full",
 ) -> ContextAssemblyResult:
-    """Return the bounded ledger history view used to seed an agent turn."""
+    """Return the ledger history view used to seed an agent turn.
+
+    ``recent_message_limit=None`` replays the complete post-checkpoint history.
+    Callers use it when dropping an uncheckpointed event would lose conversation
+    state; explicit numeric limits retain the existing bounded-tail behavior.
+    """
 
     ledger_event_list = _historical_ledger_events(
         list(ledger_events or []),
@@ -117,11 +122,14 @@ def assemble_conversation_context(
     ledger_messages = conversation_model_messages_from_events(ledger_replay_events)
     normalized_messages = ProviderMessageChain.from_messages(ledger_messages).to_provider_payload()
     events = build_history_events(normalized_messages, session_id=session_id)
-    bounded_recent_limit = max(1, min(int(recent_message_limit or DEFAULT_RECENT_MESSAGE_LIMIT), 40))
-    recent_start_index = _provider_history_tail_start_index(
-        normalized_messages,
-        message_limit=bounded_recent_limit,
-    )
+    if recent_message_limit is None:
+        recent_start_index = 0
+    else:
+        bounded_recent_limit = max(1, min(int(recent_message_limit or DEFAULT_RECENT_MESSAGE_LIMIT), 40))
+        recent_start_index = _provider_history_tail_start_index(
+            normalized_messages,
+            message_limit=bounded_recent_limit,
+        )
     recent_raw_messages = normalized_messages[recent_start_index:]
     recent_messages = recent_raw_messages
     checkpoint = latest_checkpoint(events)

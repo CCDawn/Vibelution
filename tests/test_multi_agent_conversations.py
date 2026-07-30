@@ -1866,6 +1866,40 @@ def test_agent_inbox_startup_recovery_wakes_persisted_message_once(tmp_path, mon
     assert summaries[0]["startedCount"] == 1
 
 
+def test_agent_inbox_startup_recovery_repairs_stale_turn_without_full_conversation_load(
+    tmp_path,
+    monkeypatch,
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    session = session_service.create_chat_session(title="Interrupted Agent")
+    payload = load_chat_state(tmp_path)
+    conversation = next(
+        item
+        for item in payload["conversations"]
+        if item["conversation_id"] == session["id"]
+    )
+    conversation["last_turn_status"] = "running"
+    save_chat_state(tmp_path, payload)
+
+    def fail_full_load(*_args, **_kwargs):
+        raise AssertionError("startup recovery must not hydrate every conversation")
+
+    monkeypatch.setattr(session_service, "_load_conversations", fail_full_load)
+
+    summary = session_service.recover_wakeable_agent_inbox_messages_on_startup()
+
+    repaired_payload = load_chat_state(tmp_path)
+    repaired = next(
+        item
+        for item in repaired_payload["conversations"]
+        if item["conversation_id"] == session["id"]
+    )
+    assert summary["errorCount"] == 0
+    assert repaired["last_turn_status"] == "ready"
+    assert summary["repairDurationMs"] >= 0
+    assert summary["agentScanDurationMs"] >= 0
+
+
 def test_agent_inbox_wake_redirects_stale_target_session_to_current_agent_session(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     alpha = session_service.create_chat_session(title="Alpha Agent")

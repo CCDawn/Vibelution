@@ -218,10 +218,15 @@ export function useChatComposerTurnMutations({
       }));
       setSessionImageAttachments((current) => clearSessionImageAttachments(current, variables.sessionId));
       setSessionReferenceAttachments((current) => clearSessionReferenceAttachments(current, variables.sessionId));
-      queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), (detailState) =>
-        markSessionDetailRunning(markOptimisticUserMessageAccepted(detailState, variables, acceptedTurn.turnId)),
-      );
       const acceptedTurnId = String(acceptedTurn.turnId || "").trim();
+      queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), (detailState) => {
+        const acceptedDetail = markSessionDetailRunning(
+          markOptimisticUserMessageAccepted(detailState, variables, acceptedTurn.turnId),
+        );
+        return acceptedTurnId && acceptedDetail
+          ? { ...acceptedDetail, activeTurnId: acceptedTurnId }
+          : acceptedDetail;
+      });
       setActiveTurnLayersBySession((current) =>
         setActiveTurnLayerForSession(
           current,
@@ -453,6 +458,7 @@ export type UseChatComposerSubmitActionsOptions = ChatComposerTurnMutations & {
   activeAgentImageInputUnsupported: boolean;
   activeImageInputModelId: string;
   latestUserMessageId: string;
+  activeTurnId: string | undefined;
   detail: SessionDetail | undefined;
   setMentalModelEnabledForNextTurn: Dispatch<SetStateAction<boolean>>;
 };
@@ -503,6 +509,7 @@ export function useChatComposerSubmitActions({
   activeAgentImageInputUnsupported,
   activeImageInputModelId,
   latestUserMessageId,
+  activeTurnId,
   detail,
   setMentalModelEnabledForNextTurn,
 }: UseChatComposerSubmitActionsOptions): UseChatComposerSubmitActionsResult {
@@ -957,7 +964,7 @@ export function useChatComposerSubmitActions({
     if (!activeSessionId || !sessionBusy || sessionStopping) {
       return;
     }
-    const turnId = resolveSessionStopTurnId(detail);
+    const turnId = resolveSessionStopTurnId(detail, activeTurnId);
     if (!turnId) {
       setSessionComposerErrors((current) => ({
         ...current,
@@ -975,6 +982,7 @@ export function useChatComposerSubmitActions({
     });
   }, [
     activeSessionId,
+    activeTurnId,
     describeError,
     detail,
     lang,

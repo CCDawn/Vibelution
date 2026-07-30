@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { AgentInstance } from "../api/types";
 import {
+  agentDirectorySessionCount,
   agentDirectorySection,
   isVisibleDirectoryAgent,
   visibleDirectoryAgents,
@@ -42,6 +43,20 @@ describe("AgentConversationDirectory", () => {
     expect(directorySource).toContain('aria-current={active ? "page" : undefined}');
     expect(directorySource).toContain("onContextMenu={(event) => onContextMenu(event, agent, latestSession ?? null)}");
     expect(directorySource).toContain("onPress={() => onOpenAgent(agent, latestSession ?? null)}");
+  });
+
+  it("counts an active hidden direct session without double-counting a visible summary", () => {
+    const hiddenDirectAgent = agent({
+      directSessionId: "session-hidden-direct",
+      metadata: {
+        conversationIndexKind: "hidden",
+        directSessionVisibility: "active_session",
+      },
+    });
+
+    expect(agentDirectorySessionCount(hiddenDirectAgent, 0, new Set())).toBe(1);
+    expect(agentDirectorySessionCount(hiddenDirectAgent, 1, new Set(["session-hidden-direct"]))).toBe(1);
+    expect(agentDirectorySessionCount(hiddenDirectAgent, 1, new Set(["session-visible"]))).toBe(2);
   });
 
   it("uses plain multi-line button layout so avatar/title/meta are not crushed into a nowrap label", () => {

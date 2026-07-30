@@ -3,10 +3,11 @@
 agent.py 协议层回归测试
 """
 
-from types import SimpleNamespace
-from unittest.mock import MagicMock
 import copy
 import json
+import threading
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
@@ -19,6 +20,7 @@ from agent import (
     infer_result_from_tool_outputs,
 )
 from config import Settings
+from core.infrastructure.tool_executor import ToolExecutor
 from core.infrastructure.llm_utils import (
     build_cacheable_system_prefix_message,
     is_volatile_system_context_message,
@@ -128,6 +130,32 @@ def test_session_turn_reuse_refreshes_turn_scoped_tool_authorization(monkeypatch
     assert agent._tool_authorization_decision_fingerprint == "current-turn"
     assert agent._active_turn_messages is None
     assert agent._pending_runtime_context_blocks == []
+
+
+def test_turn_interrupt_checker_rebinds_tool_executor_in_worker_context():
+    agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+    agent.tool_executor = ToolExecutor()
+    agent._turn_interrupt_checker = None
+    tool_started = threading.Event()
+    outcome: dict[str, str] = {}
+
+    def cancel_probe():
+        tool_started.set()
+        return "ran"
+
+    agent.tool_executor.register_tool("cancel_probe", cancel_probe, timeout=5)
+
+    def run_worker():
+        agent.set_turn_interrupt_checker(lambda: "operator stop")
+        outcome["result"] = str(agent.tool_executor.execute("cancel_probe", {})[0])
+
+    worker = threading.Thread(target=run_worker)
+    worker.start()
+    worker.join(timeout=5)
+
+    assert not worker.is_alive()
+    assert not tool_started.is_set()
+    assert "[取消] cancel_probe 已因停止请求跳过执行：operator stop" in outcome["result"]
 
 
 def test_supervised_system_prompt_excludes_global_git_and_runtime_diagnostics():
@@ -1353,6 +1381,84 @@ class TestToolMessageFlow:
         assert agent._last_llm_error_category == "server_error"
         assert agent._last_llm_failure_attempts == 5
         assert agent._last_llm_failure_max_attempts == 5
+
+    def test_invoke_llm_maps_cancelled_provider_error_to_turn_stop(self, monkeypatch):
+        events = []
+        stop_state = {"requested": False}
+
+        class DummyContext:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        class DummyUI:
+            def thinking(self, _label):
+                return DummyContext()
+
+            def add_log(self, *_args, **_kwargs):
+                return None
+
+        class CancelledLLM(_CanonicalAgentTestLLM):
+            profile_id = "primary"
+
+            def invoke_outcome(self, _messages, **_kwargs):
+                stop_state["requested"] = True
+                raise LLMError(
+                    "cancelled",
+                    "operator stopped the turn",
+                    retryable=False,
+                    details={"stop_reason": "operator stopped the turn"},
+                )
+
+        monkeypatch.setattr(agent_module, "get_ui", lambda: DummyUI())
+        monkeypatch.setattr(agent_module.logger, "log_error", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr(
+            agent_module,
+            "_record_agent_scene_event",
+            lambda phase, code, **kwargs: events.append((phase, code, kwargs.get("fields") or {})),
+        )
+        monkeypatch.setattr(
+            agent_module,
+            "plan_llm_recovery",
+            lambda *_args, **_kwargs: SimpleNamespace(
+                category="cancelled",
+                retryable=False,
+                action="stop_current_turn",
+                user_message="operator stopped the turn",
+                wait_seconds=0,
+                stop_current_turn=True,
+                disable_streaming=False,
+                disable_tools=False,
+                request_context_compression=False,
+                fallback_profile_id=None,
+            ),
+        )
+
+        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent.llm_with_tools = CancelledLLM()
+        agent._base_llm = SimpleNamespace(profile_id="primary")
+        agent.config = SimpleNamespace(
+            llm=SimpleNamespace(
+                model_name="gpt-5.6-luna",
+                provider="relay",
+                api_base="https://example.invalid",
+                api_timeout=30,
+            ),
+        )
+        agent._should_stream_llm_for_turn = lambda *_args, **_kwargs: False
+        agent._get_llm_for_current_mode = lambda **_kwargs: agent.llm_with_tools
+        agent._turn_interrupt_checker = lambda: (
+            "operator stopped the turn" if stop_state["requested"] else ""
+        )
+
+        with pytest.raises(agent_module.TurnStopRequested, match="operator stopped the turn"):
+            agent._invoke_llm([AIMessage(content="hello")])
+
+        assert [code for _, code, _ in events].count("llm_route_cancelled") == 1
+        assert "llm_route_attempt_exhausted" not in [code for _, code, _ in events]
+        assert "llm_turn_terminal" not in [code for _, code, _ in events]
 
     def test_invoke_llm_preserves_safe_semantic_projection_diagnostics(self, monkeypatch):
         """协议投影失败应保留可定位字段，且不转存原始链路内容。"""

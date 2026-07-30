@@ -129,6 +129,43 @@ def test_native_codex_transcript_does_not_invent_terminal_session_from_legacy_to
     assert transcript.get("terminalSessions", []) == []
 
 
+def test_native_codex_transcript_projects_structured_cli_tool_without_terminal_session():
+    messages = session_service._normalize_messages(
+        "session-codex",
+        [
+            {
+                "role": "assistant",
+                "content": "命令已经完成。",
+                "feedback_events": [
+                    {
+                        "sequence": 1,
+                        "kind": "tool",
+                        "status": "done",
+                        "name": "cli_tool",
+                        "summary": "读取当前工作目录",
+                        "arguments": {
+                            "command": 'powershell -NoProfile -Command "Get-Location"',
+                            "cwd": "C:/repo",
+                        },
+                        "resultPreview": "Path\n----\nC:/repo",
+                        "exitCode": 0,
+                    }
+                ],
+            }
+        ],
+    )
+
+    transcript = messages[0]["codexTranscript"]
+    operation = transcript["terminalOperations"][0]
+
+    assert transcript["toolCalls"][0]["runtimeKind"] == "terminal"
+    assert transcript["toolCalls"][0]["terminalOperationId"] == "terminal_operation:0"
+    assert operation["kind"] == "ExecCommand"
+    assert operation["request"]["displayCommand"] == 'powershell -NoProfile -Command "Get-Location"'
+    assert operation["result"]["formattedOutput"] == "Path\n----\nC:/repo"
+    assert transcript["terminalSessions"][0]["terminalId"].startswith("terminal:tool-call:")
+
+
 def test_write_stdin_result_is_not_projected_as_a_terminal_command():
     progress_result = json.dumps(
         {

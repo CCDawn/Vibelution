@@ -5,7 +5,14 @@ function clean(value: unknown) {
   return String(value ?? "").trim();
 }
 
-export function resolveSessionStopTurnId(detail: SessionDetail | undefined) {
+export function resolveSessionStopTurnId(
+  detail: SessionDetail | undefined,
+  activeLayerTurnId = "",
+) {
+  const activeTurnId = clean(activeLayerTurnId);
+  if (activeTurnId) {
+    return activeTurnId.startsWith("optimistic-") ? "" : activeTurnId;
+  }
   return clean(detail?.activeTurnId) || latestUserTurnId(detail);
 }
 
