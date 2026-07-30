@@ -47,6 +47,30 @@ def test_relative_cwd_ignores_non_git_agent_workspace(tmp_path):
     assert resolved == codex_cli_sandbox.PROJECT_ROOT.resolve()
 
 
+def test_candidate_runtime_environment_scrubs_credentials_and_redirects_user_home(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setenv("OPENAI_API_KEY", "top-secret")
+    monkeypatch.setenv("VIBELUTION_LLM_MODEL_RELAY_API_KEY", "relay-secret")
+    monkeypatch.setenv("USERPROFILE", str(tmp_path.parent / "formal-user"))
+    monkeypatch.setenv("APPDATA", str(tmp_path.parent / "formal-appdata"))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path.parent / "formal-localappdata"))
+
+    environment, sandbox_temp = codex_cli_sandbox._sandbox_process_environment(
+        tmp_path,
+        "candidate-runtime",
+        environment_policy="candidate_runtime",
+    )
+
+    assert "OPENAI_API_KEY" not in environment
+    assert "VIBELUTION_LLM_MODEL_RELAY_API_KEY" not in environment
+    assert Path(environment["USERPROFILE"]).is_relative_to(sandbox_temp)
+    assert Path(environment["APPDATA"]).is_relative_to(sandbox_temp)
+    assert Path(environment["LOCALAPPDATA"]).is_relative_to(sandbox_temp)
+    assert environment["PYTHONNOUSERSITE"] == "1"
+
+
 class _CompletedProcess:
     pid = 4242
     returncode = 0

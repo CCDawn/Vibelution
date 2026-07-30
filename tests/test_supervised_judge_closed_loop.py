@@ -245,6 +245,8 @@ def test_improvement_prompt_is_for_baseline_agent_and_carries_judge_feedback():
     assert "当前阶段是基线 Agent 的代码实施阶段，不是 Judge 评分阶段" in prompt
     assert "SUPERVISED_AGENT_JUDGMENT" not in prompt
     assert "第一步必须调用仓库检查工具" in prompt
+    assert "--candidate-runtime-input" in prompt
+    assert "collect_candidate_runtime_extension" in prompt
     assert "最终只允许输出实施结果或 NO_JUSTIFIED_CHANGE" in prompt
     assert "没有验证错误恢复" in prompt
     assert "补充错误恢复并运行聚焦测试" in prompt

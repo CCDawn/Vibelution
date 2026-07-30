@@ -44,6 +44,10 @@ from .i18n import get_web_language, text_for
 from .runtime_scene_service import record_runtime_scene_event
 from .session_service import list_active_session_work_runs
 from .supervised_agent_service import supervised_agent_bindings
+from .supervised_candidate_runtime_service import (
+    CandidateRuntimeExecutionError,
+    run_candidate_runtime_evidence,
+)
 from .supervised_conversation_harness_adapter import run_supervised_conversation_harness
 from .supervised_judge_closed_loop import (
     build_improvement_prompt,
@@ -860,6 +864,13 @@ def _execute_flow(
             and snapshot["rerunConversationSessionId"] == str(snapshot.get("baselineConversationSessionId") or "")
         ):
             raise SupervisedWorktreeRunValidationError("改进后复跑错误复用了基线会话，未满足 clean-room 独立性。")
+        if (
+            str(snapshot.get("executionMode") or "").strip().lower() == "real"
+            and str(candidate.get("candidateRuntimeStatus") or "") != "verified"
+        ):
+            raise SupervisedWorktreeRunValidationError(
+                "候选 harness 未在隔离子进程中产生可验证运行证据，已停止第二次 Judge 评分。"
+            )
 
         _raise_if_run_cancelled(snapshot)
         _transition(snapshot, "running", "candidate_judge", "Judge Agent 正在原 Judge 会话中进行第二次评分。")
@@ -1385,6 +1396,67 @@ def _real_evaluation_runner(project_root: Path, bundle_name: str, role: str, con
             progress_callback=progress_callback,
             cancel_checker=cancel_checker,
         )
+        if role == "baseline_rerun":
+            candidate_variant = (
+                context.get("candidateVariant")
+                if isinstance(context.get("candidateVariant"), dict)
+                else {}
+            )
+            result.worktree_path = str(project_root.resolve())
+            result.checkpoint_commit = str(candidate_variant.get("checkpointCommit") or "")
+            try:
+                candidate_runtime = run_candidate_runtime_evidence(
+                    candidate_path=project_root,
+                    candidate_variant=candidate_variant,
+                    harness_result=result,
+                    cancel_checker=cancel_checker,
+                )
+            except CandidateRuntimeExecutionError as exc:
+                candidate_runtime = {
+                    "status": "failed",
+                    "runtimeEffect": "not_applied",
+                    "reason": _bounded_text(str(exc), limit=600),
+                    "worktreePath": str(project_root.resolve()),
+                }
+                result.status = "failed"
+                result.reason = f"候选 harness 隔离执行失败：{exc}"
+                result.returncode = 1
+                result.primary_returncode = 1
+                result.effective_returncode = 1
+                _record_worktree_scene_event(
+                    "candidate_runtime",
+                    "supervised_worktree_run.candidate_runtime_failed",
+                    run_id=run_id,
+                    level="error",
+                    outcome="failed",
+                    fields={
+                        "caseId": case_id,
+                        "candidateVariantId": str(candidate_variant.get("variantId") or ""),
+                        "errorType": type(exc).__name__,
+                        "reason": _bounded_text(str(exc), limit=300),
+                    },
+                )
+            else:
+                _record_worktree_scene_event(
+                    "candidate_runtime",
+                    "supervised_worktree_run.candidate_runtime_verified",
+                    run_id=run_id,
+                    outcome="verified",
+                    fields={
+                        "caseId": case_id,
+                        "candidateVariantId": str(candidate_runtime.get("candidateVariantId") or ""),
+                        "moduleSha256": str(candidate_runtime.get("moduleSha256") or ""),
+                        "executionBackend": str(candidate_runtime.get("executionBackend") or ""),
+                    },
+                )
+            result.evolution_summary = {
+                **(
+                    result.evolution_summary
+                    if isinstance(result.evolution_summary, dict)
+                    else {}
+                ),
+                "candidate_runtime": candidate_runtime,
+            }
         cancel_reason = _call_cancel_checker(cancel_checker)
         if cancel_reason:
             return {
@@ -1425,6 +1497,25 @@ def _real_evaluation_runner(project_root: Path, bundle_name: str, role: str, con
     candidate_variant = context.get("candidateVariant")
     if role == "baseline_rerun" and isinstance(candidate_variant, dict):
         evaluation["candidateVariant"] = _clone(candidate_variant)
+        candidate_runtime_statuses = [
+            str(
+                (
+                    (item.get("traceSummary") or {}).get("candidateRuntime")
+                    if isinstance(item.get("traceSummary"), dict)
+                    else {}
+                ).get("status")
+                or ""
+            )
+            for item in results
+            if isinstance(item, dict)
+        ]
+        evaluation["candidateRuntimeStatus"] = (
+            "verified"
+            if len(candidate_runtime_statuses) == total
+            and total > 0
+            and all(status == "verified" for status in candidate_runtime_statuses)
+            else "failed"
+        )
     return evaluation
 
 
@@ -1574,6 +1665,9 @@ def _harness_result_payload(result: HarnessResult, *, case_id: str, role: str) -
         "guardedTools": _clone(summary.get("guarded_tools") or {}),
         "evidence": _clone(summary.get("evidence") or {}),
     }
+    candidate_runtime = summary.get("candidate_runtime")
+    if isinstance(candidate_runtime, dict):
+        trace_summary["candidateRuntime"] = _clone(candidate_runtime)
     for source_key, target_key in (
         ("environment", "environment"),
         ("final_state", "finalState"),
