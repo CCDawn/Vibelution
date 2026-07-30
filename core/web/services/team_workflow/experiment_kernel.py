@@ -249,11 +249,10 @@ def _sanitize_projected_experiment_plan(plan: dict[str, Any]) -> None:
         *(method_config.get(field) for field in ("dataset", "baseline", "smokePlan")),
         metric_contract.get("primaryMetric"),
     ]
-    if not any(needs_projection_repair(value) for value in repair_values):
-        return
-
-    s = _service()
-    sanitized = {
+    structured_placeholder_found = any(
+        needs_projection_repair(value) for value in repair_values
+    )
+    legacy_projection = {
         field: _experiment_plan_field_text(
             legacy.get(field),
             preferred_keys=preferred_keys,
@@ -261,20 +260,45 @@ def _sanitize_projected_experiment_plan(plan: dict[str, Any]) -> None:
         )
         for field, preferred_keys in field_specs.items()
     }
+    canonical_projection = {
+        "dataset": _experiment_plan_field_text(
+            method_config.get("dataset"),
+            preferred_keys=field_specs["dataset"],
+            max_length=500,
+        ),
+        "metric": _experiment_plan_field_text(
+            metric_contract.get("primaryMetric"),
+            preferred_keys=field_specs["metric"],
+            max_length=500,
+        ),
+        "baseline": _experiment_plan_field_text(
+            method_config.get("baseline"),
+            preferred_keys=field_specs["baseline"],
+            max_length=500,
+        ),
+        "smokePlan": _experiment_plan_field_text(
+            method_config.get("smokePlan"),
+            preferred_keys=field_specs["smokePlan"],
+            max_length=1200,
+        ),
+    }
+    sanitized = {
+        field: canonical_projection[field] or legacy_projection[field]
+        for field in field_specs
+    }
+    projection_changed = any(
+        legacy_projection[field] != sanitized[field] for field in field_specs
+    )
+    if not structured_placeholder_found and not projection_changed:
+        return
+
+    s = _service()
     plan["experimentPlan"] = sanitized
     for field in ("dataset", "baseline", "smokePlan"):
-        method_config[field] = _experiment_plan_field_text(
-            method_config.get(field),
-            preferred_keys=field_specs[field],
-            max_length=1200 if field == "smokePlan" else 500,
-        )
+        method_config[field] = canonical_projection[field]
     contract["methodConfig"] = method_config
     metric_contract = contract.get("metricContract") if isinstance(contract.get("metricContract"), dict) else {}
-    primary_metric = _experiment_plan_field_text(
-        metric_contract.get("primaryMetric"),
-        preferred_keys=field_specs["metric"],
-        max_length=500,
-    )
+    primary_metric = canonical_projection["metric"]
     metric_contract["primaryMetric"] = primary_metric
     metric_contract["metrics"] = [
         item
@@ -305,7 +329,11 @@ def _sanitize_projected_experiment_plan(plan: dict[str, Any]) -> None:
         if isinstance(plan.get("contractMigration"), dict)
         else {}
     )
-    migration["projectionRepair"] = "structured_placeholder_removed"
+    migration["projectionRepair"] = (
+        "structured_placeholder_removed"
+        if structured_placeholder_found
+        else "canonical_contract_projected"
+    )
     migration["persistOnNextMutation"] = True
     migration["missingFields"] = list(
         (plan.get("contractValidation") or {}).get("missingFields") or []
@@ -996,12 +1024,19 @@ def _build_experiment_plan_record(
     now = s.utc_now_iso()
     hypothesis_summaries = [s._experiment_hypothesis_summary(item) for item in selected_hypotheses]
     payload_plan = payload.get("experimentPlan") if isinstance(payload.get("experimentPlan"), dict) else {}
+    payload_method_config = payload.get("methodConfig") if isinstance(payload.get("methodConfig"), dict) else {}
+    payload_metric_contract = (
+        payload.get("metricContract")
+        if isinstance(payload.get("metricContract"), dict)
+        else {}
+    )
     dataset = next(
         (
             text
             for value in (
                 payload.get("dataset"),
                 payload_plan.get("dataset"),
+                payload_method_config.get("dataset"),
                 *[
                     item.get("experimentPlan", {}).get("dataset")
                     for item in hypothesis_summaries
@@ -1023,6 +1058,7 @@ def _build_experiment_plan_record(
             for value in (
                 payload.get("metric"),
                 payload_plan.get("metric"),
+                payload_metric_contract.get("primaryMetric"),
                 *[
                     item.get("experimentPlan", {}).get("metric")
                     for item in hypothesis_summaries
@@ -1044,6 +1080,7 @@ def _build_experiment_plan_record(
             for value in (
                 payload.get("baseline"),
                 payload_plan.get("baseline"),
+                payload_method_config.get("baseline"),
                 *[
                     item.get("experimentPlan", {}).get("baseline")
                     for item in hypothesis_summaries
@@ -1066,6 +1103,7 @@ def _build_experiment_plan_record(
             for value in (
                 payload.get("smokePlan"),
                 payload_plan.get("smokePlan"),
+                payload_method_config.get("smokePlan"),
                 *[
                     item.get("experimentPlan", {}).get("smokePlan")
                     for item in hypothesis_summaries
