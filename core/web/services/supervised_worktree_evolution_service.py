@@ -1612,6 +1612,18 @@ def _simulation_candidate_modifier(worktree_path: Path, prompt: str, context: di
     }
 
 
+def _candidate_self_edit_protocol_violation(result: HarnessResult) -> str:
+    summary = result.evolution_summary if isinstance(result.evolution_summary, dict) else {}
+    judgment = summary.get("agent_judgment") if isinstance(summary.get("agent_judgment"), dict) else {}
+    judgment_phase = str(judgment.get("phase") or "").strip().lower()
+    if judgment_phase:
+        return judgment_phase
+    assistant_output = "\n".join(str(item) for item in list(result.stdout_tail or [])[-20:])
+    if "SUPERVISED_AGENT_JUDGMENT" in assistant_output:
+        return "structured_judgment"
+    return ""
+
+
 def _real_candidate_modifier(worktree_path: Path, prompt: str, context: dict[str, Any]) -> dict[str, Any]:
     started = _now_iso()
     timeout_seconds = 900
@@ -1627,23 +1639,63 @@ def _real_candidate_modifier(worktree_path: Path, prompt: str, context: dict[str
             "endedAt": _now_iso(),
             "summary": "baseline self-edit missing supervised baseline Agent binding",
         }
-    result = run_supervised_conversation_harness(
-        repo_root=worktree_path,
-        mode="single_turn",
-        prompt=prompt,
-        scenario="candidate_self_improvement",
-        timeout_seconds=timeout_seconds,
-        expect_restart=False,
-        post_restart_observe_seconds=0,
-        keep_worktree=True,
-        agent_binding=agent_binding,
-        mental_model_mode=str(options.get("mentalModelMode") or "follow"),
-        mental_model_enabled=options.get("mentalModelEnabled"),
-        workspace_override=worktree_path,
-        conversation_session_id=str(context.get("conversationSessionId") or "").strip() or None,
-        progress_callback=progress_callback,
-        cancel_checker=cancel_checker,
-    )
+    conversation_session_id = str(context.get("conversationSessionId") or "").strip()
+
+    def run_self_edit_turn(turn_prompt: str, *, session_id: str) -> HarnessResult:
+        return run_supervised_conversation_harness(
+            repo_root=worktree_path,
+            mode="single_turn",
+            prompt=turn_prompt,
+            scenario="candidate_self_improvement",
+            timeout_seconds=timeout_seconds,
+            expect_restart=False,
+            post_restart_observe_seconds=0,
+            keep_worktree=True,
+            agent_binding=agent_binding,
+            mental_model_mode=str(options.get("mentalModelMode") or "follow"),
+            mental_model_enabled=options.get("mentalModelEnabled"),
+            workspace_override=worktree_path,
+            conversation_session_id=session_id or None,
+            progress_callback=progress_callback,
+            cancel_checker=cancel_checker,
+        )
+
+    result = run_self_edit_turn(prompt, session_id=conversation_session_id)
+    observed_protocol = _candidate_self_edit_protocol_violation(result)
+    retry_count = 0
+    if result.status == "success" and observed_protocol and conversation_session_id:
+        retry_count = 1
+        _record_worktree_scene_event(
+            "candidate_modify",
+            "supervised_worktree_run.candidate_modify_phase_retry",
+            run_id=str(context.get("runId") or ""),
+            level="warning",
+            outcome="retrying",
+            fields={
+                "observedProtocol": observed_protocol,
+                "conversationSessionId": conversation_session_id,
+                "retryLimit": 1,
+            },
+        )
+        correction_prompt = (
+            "SELF_EDIT_PHASE_CORRECTION_REQUIRED\n"
+            "Your previous response violated the active baseline self-edit phase by returning a Judge "
+            f"structured response ({observed_protocol}). Continue in this same baseline Agent conversation. "
+            "Ignore that wrong response. Do not output SUPERVISED_AGENT_JUDGMENT, do not generate a rubric, "
+            "and do not score or judge the run. Execute the complete implementation instruction below exactly "
+            "once in the current candidate worktree, using apply_patch_tool when an evidence-backed change is "
+            "required, then run focused validation. If no safe change is justified, return "
+            "NO_JUSTIFIED_CHANGE with concrete code evidence.\n\n"
+            f"{prompt}"
+        )
+        result = run_self_edit_turn(correction_prompt, session_id=conversation_session_id)
+        remaining_protocol = _candidate_self_edit_protocol_violation(result)
+        if result.status == "success" and remaining_protocol:
+            result.status = "failed"
+            result.reason = (
+                "baseline self-edit phase mismatch after one correction: "
+                f"observed {remaining_protocol}"
+            )
     return {
         "status": result.status,
         "startedAt": started,
@@ -1658,6 +1710,7 @@ def _real_candidate_modifier(worktree_path: Path, prompt: str, context: dict[str
         "conversationSummary": result.evolution_summary,
         "conversationSessionId": str((result.process_summary or {}).get("session_id") or ""),
         "workspaceOverride": str(worktree_path),
+        "phaseRetryCount": retry_count,
     }
 
 
