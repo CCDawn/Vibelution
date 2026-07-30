@@ -75,6 +75,38 @@ AUDIT_ONLY_EVENT_TYPES = {
 
 POST_TERMINAL_MODEL_EVENT_TYPES = MODEL_VISIBLE_EVENT_TYPES - {EVENT_TURN_INTERRUPTED}
 
+_LATEST_PREVIEW_PARSED_EVENT_TYPES = {
+    EVENT_USER_MESSAGE,
+    EVENT_ASSISTANT_PARTIAL,
+    EVENT_ASSISTANT_DELTA_COMMITTED,
+    EVENT_ASSISTANT_ITEM_COMMITTED,
+    EVENT_ASSISTANT_MESSAGE,
+    EVENT_CLI_SESSION_LIFECYCLE,
+    EVENT_TURN_COMPLETED,
+    EVENT_TURN_FAILED,
+    EVENT_TURN_INTERRUPTED,
+    EVENT_COMPACTION_CHECKPOINT,
+    EVENT_COMPRESSION_ATTEMPT,
+}
+_LATEST_PREVIEW_TOOL_EVENT_TYPES = {
+    EVENT_TOOL_CALL_STARTED,
+    EVENT_TOOL_RESULT,
+    EVENT_CLI_TASK_SENT,
+    EVENT_CLI_TASK_RESULT,
+}
+_LATEST_PREVIEW_IGNORED_EVENT_TYPES = {
+    EVENT_TURN_STARTED,
+    EVENT_TURN_CONTEXT,
+}
+_LATEST_PREVIEW_KNOWN_EVENT_TYPES = (
+    _LATEST_PREVIEW_PARSED_EVENT_TYPES
+    | _LATEST_PREVIEW_TOOL_EVENT_TYPES
+    | _LATEST_PREVIEW_IGNORED_EVENT_TYPES
+)
+_LATEST_PREVIEW_EVENT_TYPE_RE = re.compile(rb'"eventType"\s*:\s*"([^"\\]+)"')
+_LATEST_PREVIEW_SEQUENCE_RE = re.compile(rb'"sequence"\s*:\s*(\d+)')
+_LATEST_PREVIEW_VISIBLE_RE = re.compile(rb'"visibleInModel"\s*:\s*(true|false)')
+
 TURN_INTERRUPTED_MARKER = (
     "<turn_interrupted>\n"
     "上一轮在完成前中断。已产生的助手内容、工具结果和 CLI 结果已经保留在上文；"
@@ -293,6 +325,164 @@ def load_turn_events(project_root: Path, session_id: str) -> list[TurnJournalEve
             return []
     events.sort(key=lambda item: (item.sequence, item.timestamp, item.event_id))
     return events
+
+
+def load_latest_turn_events_for_preview(
+    project_root: Path,
+    session_id: str,
+    *,
+    limit: int = 64,
+) -> tuple[list[TurnJournalEvent], bool, bool]:
+    """Load a bounded journal tail suitable only for latest-message previews.
+
+    Tool result payloads can contain megabytes of output even though the session
+    index only needs their position inside the latest-message scan window.  The
+    preview reader therefore replaces tool events with correlation-preserving
+    placeholders and fully parses only events that can contribute visible text.
+    Unknown event types or malformed relevant events mark the slice unsafe so
+    callers can fall back to the canonical full replay.
+
+    Returns ``(events, reached_start, safe)``.
+    """
+
+    normalized_limit = max(1, int(limit or 1))
+    path = turn_journal_path(project_root, session_id)
+    if not path.exists():
+        return [], True, True
+    with _journal_thread_lock(path):
+        if not path.exists():
+            return [], True, True
+        raw_lines, reached_start = _read_latest_journal_lines(
+            path,
+            limit=normalized_limit,
+        )
+
+    events: list[TurnJournalEvent] = []
+    safe = True
+    for raw in raw_lines:
+        event_type = _latest_preview_event_type(raw)
+        if not event_type:
+            safe = False
+            continue
+        if event_type not in _LATEST_PREVIEW_KNOWN_EVENT_TYPES:
+            safe = False
+            continue
+        if event_type in _LATEST_PREVIEW_IGNORED_EVENT_TYPES:
+            continue
+        if (
+            event_type == EVENT_ASSISTANT_ITEM_COMMITTED
+            and not _latest_preview_visible_in_model(raw)
+        ):
+            continue
+        if event_type in _LATEST_PREVIEW_TOOL_EVENT_TYPES:
+            event = _latest_preview_tool_placeholder(raw, event_type=event_type)
+        else:
+            try:
+                event = TurnJournalEvent.from_dict(json.loads(raw))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                event = None
+        if event is None:
+            safe = False
+            continue
+        events.append(event)
+
+    events.sort(key=lambda item: (item.sequence, item.timestamp, item.event_id))
+    return events, reached_start, safe
+
+
+def _read_latest_journal_lines(
+    path: Path,
+    *,
+    limit: int,
+    chunk_size: int = 64 * 1024,
+) -> tuple[list[bytes], bool]:
+    chunks: list[bytes] = []
+    newline_count = 0
+    reached_start = False
+    try:
+        with path.open("rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            position = handle.tell()
+            while position > 0 and newline_count <= limit:
+                read_size = min(chunk_size, position)
+                position -= read_size
+                handle.seek(position)
+                chunk = handle.read(read_size)
+                chunks.append(chunk)
+                newline_count += chunk.count(b"\n")
+            reached_start = position == 0
+    except OSError:
+        return [], False
+    encoded = b"".join(reversed(chunks))
+    return encoded.splitlines()[-limit:], reached_start
+
+
+def _latest_preview_event_type(raw: bytes) -> str:
+    match = _LATEST_PREVIEW_EVENT_TYPE_RE.search(raw)
+    if match is None:
+        return ""
+    try:
+        return match.group(1).decode("ascii")
+    except UnicodeDecodeError:
+        return ""
+
+
+def _latest_preview_visible_in_model(raw: bytes) -> bool:
+    matches = list(_LATEST_PREVIEW_VISIBLE_RE.finditer(raw))
+    return not matches or matches[-1].group(1) == b"true"
+
+
+def _latest_preview_json_string(raw: bytes, key: str) -> str:
+    pattern = re.compile(
+        rb'"' + re.escape(key.encode("ascii")) + rb'"\s*:\s*"((?:\\.|[^"\\])*)"'
+    )
+    match = pattern.search(raw)
+    if match is None:
+        return ""
+    try:
+        return str(json.loads(b'"' + match.group(1) + b'"') or "").strip()
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return ""
+
+
+def _latest_preview_tool_placeholder(
+    raw: bytes,
+    *,
+    event_type: str,
+) -> TurnJournalEvent | None:
+    tool_name = _latest_preview_json_string(raw, "name")
+    if event_type in {EVENT_CLI_TASK_SENT, EVENT_CLI_TASK_RESULT}:
+        tool_name = tool_name or "cli_agent_run_tool"
+    if not tool_name:
+        return None
+    tool_call_id = _latest_preview_json_string(raw, "toolCallId")
+    sequence_match = _LATEST_PREVIEW_SEQUENCE_RE.search(raw)
+    sequence = int(sequence_match.group(1)) if sequence_match is not None else 0
+    status = _latest_preview_json_string(raw, "status")
+    if not status:
+        status = "running" if event_type in {EVENT_TOOL_CALL_STARTED, EVENT_CLI_TASK_SENT} else "done"
+    tool_call = {
+        "name": tool_name,
+        "status": status,
+    }
+    if tool_call_id:
+        tool_call["id"] = tool_call_id
+        tool_call["toolCallId"] = tool_call_id
+    return TurnJournalEvent(
+        schema_version=SCHEMA_VERSION,
+        event_id=_latest_preview_json_string(raw, "eventId") or f"preview-event-{sequence}",
+        session_id=_latest_preview_json_string(raw, "sessionId"),
+        turn_id=_latest_preview_json_string(raw, "turnId"),
+        sequence=sequence,
+        event_type=event_type,
+        status=status,
+        timestamp=_latest_preview_json_string(raw, "timestamp"),
+        source="latest_preview",
+        payload={"toolCall": tool_call},
+        visible_in_model=_latest_preview_visible_in_model(raw),
+        tool_call_id=tool_call_id,
+        correlation_id=_latest_preview_json_string(raw, "correlationId"),
+    )
 
 
 def rewrite_turn_events(project_root: Path, session_id: str, events: Iterable[TurnJournalEvent]) -> None:
@@ -1587,6 +1777,7 @@ __all__ = [
     "event_projection_category",
     "latest_turn_sequence",
     "latest_open_turn_id",
+    "load_latest_turn_events_for_preview",
     "load_turn_events",
     "rewrite_turn_events",
     "model_visible_messages_from_events",

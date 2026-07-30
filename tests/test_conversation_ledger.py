@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from core.infrastructure import developer_sandbox
-from core.chat import conversation_ledger
+from core.chat import conversation_ledger, turn_journal
 from core.chat.conversation_ledger import (
     EVENT_ASSISTANT_MESSAGE,
     EVENT_ASSISTANT_PARTIAL,
@@ -26,6 +26,7 @@ from core.chat.conversation_ledger import (
     event_projection_category,
     latest_ledger_sequence,
     load_conversation_events,
+    load_conversation_preview_slice,
     project_conversation_ledger,
 )
 
@@ -151,6 +152,63 @@ def test_conversation_ledger_load_streams_journal_without_read_text(tmp_path, mo
     events = load_conversation_events(tmp_path, "session-stream-load")
 
     assert [event.sequence for event in events] == [1, 2]
+
+
+def test_conversation_preview_slice_skips_unbounded_tool_payload_parsing(tmp_path, monkeypatch):
+    session_id = "session-preview-tail"
+    append_conversation_event(
+        tmp_path,
+        session_id,
+        "turn-1",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "older prompt"},
+    )
+    marker = "UNBOUNDED_TOOL_PAYLOAD_SHOULD_NOT_BE_PARSED"
+    for index in range(70):
+        append_conversation_event(
+            tmp_path,
+            session_id,
+            "turn-1",
+            EVENT_TOOL_RESULT,
+            status="done",
+            payload={
+                "toolCall": {
+                    "id": f"tool-{index}",
+                    "name": "exec_command",
+                    "status": "done",
+                    "result": marker + ("x" * 20_000),
+                }
+            },
+            tool_call_id=f"tool-{index}",
+        )
+    append_conversation_event(
+        tmp_path,
+        session_id,
+        "turn-1",
+        EVENT_ASSISTANT_MESSAGE,
+        status="completed",
+        payload={"content": "bounded final answer"},
+    )
+    original_loads = turn_journal.json.loads
+
+    def reject_unbounded_payload(value, *args, **kwargs):
+        contains_marker = (
+            marker.encode("utf-8") in value
+            if isinstance(value, bytes)
+            else marker in str(value)
+        )
+        if contains_marker:
+            raise AssertionError("latest-preview fast path must not JSON-decode full tool payloads")
+        return original_loads(value, *args, **kwargs)
+
+    monkeypatch.setattr(turn_journal.json, "loads", reject_unbounded_payload)
+
+    preview = load_conversation_preview_slice(tmp_path, session_id, event_limit=64)
+
+    assert preview.safe is True
+    assert preview.reached_start is False
+    assert preview.visible_messages[-1]["content"] == "bounded final answer"
 
 
 def test_conversation_ledger_read_snapshot_reuses_one_load_and_returns_fresh_lists(tmp_path, monkeypatch):
