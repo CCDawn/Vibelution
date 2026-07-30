@@ -1624,6 +1624,32 @@ def _candidate_self_edit_protocol_violation(result: HarnessResult) -> str:
     return ""
 
 
+def _candidate_self_edit_correction_prompt(
+    original_prompt: str,
+    *,
+    attempt: int,
+) -> str:
+    sanitized_prompt = str(original_prompt or "").replace(
+        "SUPERVISED_AGENT_JUDGMENT",
+        "Judge structured-output marker",
+    )
+    correction_kind = (
+        "SELF_EDIT_PHASE_CORRECTION_REQUIRED\nBASELINE_IMPLEMENTATION_OUTPUT_ONLY"
+        if attempt == 1
+        else "FINAL_BASELINE_IMPLEMENTATION_CORRECTION"
+    )
+    return (
+        f"{correction_kind}\n"
+        "The previous assessment-style prose is discarded. This is an implementation turn.\n"
+        "Start with a repository inspection tool call against the candidate worktree. Use the source evidence "
+        "to choose exactly one terminal path: (A) apply an evidence-backed patch and run focused validation, "
+        "or (B) return NO_JUSTIFIED_CHANGE with concrete source evidence. Report only implementation actions "
+        "and validation evidence; do not produce scoring criteria, scores, recommendations, or a verdict.\n\n"
+        "Implementation instruction:\n"
+        f"{sanitized_prompt}"
+    )
+
+
 def _real_candidate_modifier(worktree_path: Path, prompt: str, context: dict[str, Any]) -> dict[str, Any]:
     started = _now_iso()
     timeout_seconds = 900
@@ -1663,8 +1689,14 @@ def _real_candidate_modifier(worktree_path: Path, prompt: str, context: dict[str
     result = run_self_edit_turn(prompt, session_id=conversation_session_id)
     observed_protocol = _candidate_self_edit_protocol_violation(result)
     retry_count = 0
-    if result.status == "success" and observed_protocol and conversation_session_id:
-        retry_count = 1
+    retry_limit = 2
+    while (
+        result.status == "success"
+        and observed_protocol
+        and conversation_session_id
+        and retry_count < retry_limit
+    ):
+        retry_count += 1
         _record_worktree_scene_event(
             "candidate_modify",
             "supervised_worktree_run.candidate_modify_phase_retry",
@@ -1674,28 +1706,22 @@ def _real_candidate_modifier(worktree_path: Path, prompt: str, context: dict[str
             fields={
                 "observedProtocol": observed_protocol,
                 "conversationSessionId": conversation_session_id,
-                "retryLimit": 1,
+                "retryIndex": retry_count,
+                "retryLimit": retry_limit,
             },
         )
-        correction_prompt = (
-            "SELF_EDIT_PHASE_CORRECTION_REQUIRED\n"
-            "Your previous response violated the active baseline self-edit phase by returning a Judge "
-            f"structured response ({observed_protocol}). Continue in this same baseline Agent conversation. "
-            "Ignore that wrong response. Do not output SUPERVISED_AGENT_JUDGMENT, do not generate a rubric, "
-            "and do not score or judge the run. Execute the complete implementation instruction below exactly "
-            "once in the current candidate worktree, using apply_patch_tool when an evidence-backed change is "
-            "required, then run focused validation. If no safe change is justified, return "
-            "NO_JUSTIFIED_CHANGE with concrete code evidence.\n\n"
-            f"{prompt}"
+        correction_prompt = _candidate_self_edit_correction_prompt(
+            prompt,
+            attempt=retry_count,
         )
         result = run_self_edit_turn(correction_prompt, session_id=conversation_session_id)
-        remaining_protocol = _candidate_self_edit_protocol_violation(result)
-        if result.status == "success" and remaining_protocol:
-            result.status = "failed"
-            result.reason = (
-                "baseline self-edit phase mismatch after one correction: "
-                f"observed {remaining_protocol}"
-            )
+        observed_protocol = _candidate_self_edit_protocol_violation(result)
+    if result.status == "success" and observed_protocol:
+        result.status = "failed"
+        result.reason = (
+            f"baseline self-edit phase mismatch after {retry_count} corrections: "
+            f"observed {observed_protocol}"
+        )
     return {
         "status": result.status,
         "startedAt": started,

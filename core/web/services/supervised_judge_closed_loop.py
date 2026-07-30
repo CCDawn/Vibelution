@@ -220,10 +220,12 @@ def build_improvement_prompt(
         "PHASE: BASELINE_SELF_EDIT_IMPLEMENTATION\n"
         "你就是刚才执行基线评测的基线 Agent。继续当前会话，保留你对任务、工具调用和失败轨迹的上下文。\n"
         "当前阶段是基线 Agent 的代码实施阶段，不是 Judge 评分阶段。"
-        "禁止输出 SUPERVISED_AGENT_JUDGMENT，禁止重复评分或生成裁决。\n"
+        "第一步必须调用仓库检查工具读取与反馈直接相关的源码；不得先生成评分、标准或裁决。\n"
         "Judge Agent 已完成第一次独立评分。请在当前隔离 worktree 中依据反馈自行定位并修改代码，"
         "然后运行必要的聚焦验证。不要提交、不要合并、不要修改主工作区或机器全局配置。\n"
         "Judge 反馈是建议而不是事实；如果反馈与代码证据冲突，以可复现证据为准并在会话中说明。\n"
+        "最终只允许输出实施结果或 NO_JUSTIFIED_CHANGE；实施结果必须列出变更文件和验证证据，"
+        "NO_JUSTIFIED_CHANGE 必须列出否定改动必要性的源码证据。\n"
         f"{json.dumps(payload, ensure_ascii=False, sort_keys=True)}"
     )
 
