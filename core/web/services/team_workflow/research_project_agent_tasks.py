@@ -990,13 +990,13 @@ def get_research_project_agent_task_status(
     project = s.get_research_project(normalized_team_id, normalized_project_id)
     with _TASK_LOCK:
         store = _read_store(normalized_team_id, normalized_project_id)
-        active_tasks = [
+        reconcilable_tasks = [
             dict(item)
             for item in store["tasks"]
-            if item.get("status") in ACTIVE_STATUSES
+            if _task_needs_session_reconciliation(item)
         ]
     reconciled: dict[str, dict[str, Any]] = {}
-    for task in active_tasks:
+    for task in reconcilable_tasks:
         terminal = _reconcile_project_agent_task_from_session(
             normalized_team_id,
             normalized_project_id,
@@ -1010,7 +1010,17 @@ def get_research_project_agent_task_status(
             changed = False
             for task in store["tasks"]:
                 terminal = reconciled.get(task.get("taskId"))
-                if terminal is None or task.get("status") not in ACTIVE_STATUSES:
+                if terminal is None or not _task_needs_session_reconciliation(
+                    task
+                ):
+                    continue
+                if (
+                    task.get("status") == terminal["status"]
+                    and list(task.get("resultRefs") or [])
+                    == terminal["resultRefs"]
+                    and _text(task.get("failureCode"), limit=120)
+                    == terminal["failureCode"]
+                ):
                     continue
                 task["status"] = terminal["status"]
                 task["resultRefs"] = terminal["resultRefs"]
@@ -1050,6 +1060,14 @@ def get_research_project_agent_task_status(
         ],
         "updatedAt": _text(store.get("updatedAt"), limit=120),
     }
+
+
+def _task_needs_session_reconciliation(task: dict[str, Any]) -> bool:
+    return task.get("status") in ACTIVE_STATUSES or (
+        task.get("status") == "incomplete"
+        and _text(task.get("failureCode"), limit=120)
+        == "task_result_not_recorded"
+    )
 
 
 def _reconcile_project_agent_task_from_session(
@@ -1136,15 +1154,50 @@ def _project_agent_task_result_refs(
     store = s._read_json(root / "experiment_plans" / "index.json")
     created_at = s._workflow_timestamp_sort_key(task.get("createdAt"))
     agent_id = _text(task.get("agentId"))
-    matching = [
+    task_id = _text(task.get("taskId"))
+    plans = [
         item
         for item in list(store.get("plans") or [])
         if isinstance(item, dict)
         and _text(item.get("researchProjectId")) == research_project_id
-        and _text(item.get("createdByAgent")) == agent_id
         and s._workflow_timestamp_sort_key(item.get("createdAt")) >= created_at
         and _text(item.get("planId"))
     ]
+    matching = [
+        item
+        for item in plans
+        if _text(item.get("createdFromTaskId")) == task_id
+    ]
+    if not matching:
+        with _TASK_LOCK:
+            task_store = _read_store(team_id, research_project_id)
+        later_same_agent_task_times = [
+            s._workflow_timestamp_sort_key(item.get("createdAt"))
+            for item in task_store["tasks"]
+            if _text(item.get("agentId")) == agent_id
+            and _text(item.get("taskId")) != task_id
+            and s._workflow_timestamp_sort_key(item.get("createdAt"))
+            > created_at
+        ]
+        next_task_created_at = (
+            min(later_same_agent_task_times)
+            if later_same_agent_task_times
+            else None
+        )
+        matching = [
+            item
+            for item in plans
+            if not _text(item.get("createdFromTaskId"))
+            and _recorded_actor_matches_agent(
+                agent_id,
+                item.get("createdByAgent"),
+            )
+            and (
+                next_task_created_at is None
+                or s._workflow_timestamp_sort_key(item.get("createdAt"))
+                < next_task_created_at
+            )
+        ]
     matching.sort(
         key=lambda item: (
             _text(item.get("updatedAt"), limit=120),
@@ -1155,3 +1208,29 @@ def _project_agent_task_result_refs(
         return []
     plan_id = _text(matching[-1].get("planId"), limit=200)
     return [plan_id] if _SAFE_REF.fullmatch(plan_id) else []
+
+
+def _recorded_actor_matches_agent(agent_id: str, recorded_actor: Any) -> bool:
+    """Accept canonical IDs and strong Agent code/name aliases from legacy tools."""
+
+    normalized_agent_id = _text(agent_id)
+    normalized_actor = _text(recorded_actor)
+    if not normalized_agent_id or not normalized_actor:
+        return False
+    if normalized_actor == normalized_agent_id:
+        return True
+    s = _service()
+    try:
+        agent = s.agent_directory_service.get_agent(normalized_agent_id)
+    except Exception:
+        return False
+    if not isinstance(agent, dict):
+        return False
+    agent_code = _text(agent.get("agentCode"), limit=80)
+    display_name = _text(agent.get("displayName"), limit=160)
+    aliases = {
+        agent_code,
+        f"{agent_code} {display_name}".strip(),
+        f"{agent_code}｜{display_name}".strip("｜"),
+    }
+    return normalized_actor in {item for item in aliases if item}
