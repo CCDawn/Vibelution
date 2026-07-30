@@ -669,6 +669,19 @@ def decide_research_review(team_id: str, payload: dict[str, Any] | None = None) 
         candidate_store["updatedAt"] = now
         s._write_json(s._candidate_store_path(normalized_team_id), candidate_store)
         workflow = s._load_or_create_workflow(normalized_team_id)
+        experiment_status = None
+        if any(
+            str(candidate.get("candidateType") or "") == "algorithm_hypothesis"
+            for candidate in reviewed
+        ):
+            stage_store = s._load_stage_round_store(normalized_team_id)
+            plan_store = s._load_experiment_plan_store(normalized_team_id)
+            experiment_status = s._experiment_planning_status(
+                normalized_team_id,
+                s._stage_rounds(stage_store),
+                candidate_store,
+                plan_store,
+            )
     s._record_workflow_event(
         "research.review_decided",
         normalized_team_id,
@@ -680,7 +693,7 @@ def decide_research_review(team_id: str, payload: dict[str, Any] | None = None) 
             "riskFlagCount": len(risk_flag_list),
         },
     )
-    return {
+    response = {
         "schemaVersion": s.SCHEMA_VERSION,
         "teamId": normalized_team_id,
         "reviewRecord": review_record,
@@ -689,6 +702,9 @@ def decide_research_review(team_id: str, payload: dict[str, Any] | None = None) 
         "checklist": checklist_all,
         "workflow": s._workflow_to_api(normalized_team_id, workflow, candidate_store),
     }
+    if experiment_status is not None:
+        response["experimentStatus"] = experiment_status
+    return response
 
 
 def validate_prd(team_id: str, payload: dict[str, Any] | None = None, *, registered_paths: list[str] | None = None) -> dict[str, Any]:

@@ -22,6 +22,10 @@ const mutationOwners = [
 ] as const;
 
 describe("team experiment loop mutations contract", () => {
+  const reviewMutationSource = mutationsSource
+    .split("const reviewExperimentHypothesisMutation = useMutation({")[1]
+    ?.split("const createExperimentHypothesisRevisionMutation = useMutation({")[0] ?? "";
+
   it("owns the experiment + research-loop write mutations", () => {
     expect(mutationsSource.match(/\buseMutation\(/g) ?? []).toHaveLength(mutationOwners.length);
     mutationOwners.forEach((owner) => {
@@ -69,5 +73,12 @@ describe("team experiment loop mutations contract", () => {
     expect(mutationsSource).toContain("/evidence");
     expect(mutationsSource).toContain("/decision");
     expect(mutationsSource).toContain("/design-draft");
+  });
+
+  it("updates the experiment status cache from the authoritative review response", () => {
+    expect(reviewMutationSource).toContain("if (payload.experimentStatus)");
+    expect(reviewMutationSource).toContain(
+      "queryClient.setQueryData(\n          experimentPlanningStatusQueryKey(variables.teamId),\n          payload.experimentStatus,",
+    );
   });
 });

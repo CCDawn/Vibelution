@@ -1150,6 +1150,8 @@ def test_team_workflow_routes_govern_engineering_proxy_hypothesis_revision(
         },
     )
     assert review.status_code == 201, review.text
+    assert review.json()["experimentStatus"]["summary"]["readyHypothesisCandidateCount"] == 1
+    assert review.json()["experimentStatus"]["hypothesisCandidates"][0]["approvedForExperiment"] is True
     revision_url = (
         f"/api/teams/{team['teamId']}/workflow-orchestration/experiments/"
         f"plans/{source_plan['planId']}/hypotheses/{candidate['candidateId']}/revision"
