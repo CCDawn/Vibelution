@@ -590,6 +590,76 @@ def test_session_list_resolves_ledger_workspace_root_once_for_preview_projection
     assert ledger_workspace_root_calls == [tmp_path]
 
 
+def test_session_list_skips_ledger_previews_for_sessions_hidden_before_message_projection(
+    tmp_path,
+    monkeypatch,
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    save_chat_state(
+        tmp_path,
+        {
+            "version": 1,
+            "active_conversation_id": "session-visible",
+            "conversations": [
+                {
+                    "conversation_id": "session-visible",
+                    "title": "Visible Session",
+                    "conversation_index_kind": "user_chat",
+                    "updated_at": "2026-05-26T10:00:00",
+                    "messages": [],
+                },
+                {
+                    "conversation_id": "session-hidden",
+                    "title": "Hidden Session",
+                    "conversation_index_kind": "hidden",
+                    "hidden_from_index": True,
+                    "updated_at": "2026-05-26T10:01:00",
+                    "messages": [],
+                },
+            ],
+        },
+    )
+    _seed_ledger_messages(
+        tmp_path,
+        "session-visible",
+        [{"role": "assistant", "content": "Visible preview", "timestamp": "2026-05-26T10:00:00"}],
+    )
+    _seed_ledger_messages(
+        tmp_path,
+        "session-hidden",
+        [{"role": "assistant", "content": "Hidden preview", "timestamp": "2026-05-26T10:01:00"}],
+    )
+    session_service._invalidate_session_list_cache()
+    preview_calls: list[str] = []
+    real_preview_loader = session_service.load_conversation_preview_slice
+
+    def track_preview_loader(project_root, session_id, **kwargs):
+        preview_calls.append(str(session_id))
+        return real_preview_loader(project_root, session_id, **kwargs)
+
+    monkeypatch.setattr(
+        session_service,
+        "load_conversation_preview_slice",
+        track_preview_loader,
+    )
+
+    sessions = session_service.list_sessions()
+
+    assert [item["id"] for item in sessions] == ["session-visible"]
+    assert sessions[0]["taskSummary"] == "Visible preview"
+    assert preview_calls == ["session-visible"]
+
+    preview_calls.clear()
+    hidden_sessions = session_service.list_sessions(include_hidden_internal=True)
+
+    assert {item["id"] for item in hidden_sessions} == {
+        "session-visible",
+        "session-hidden",
+    }
+    assert next(item for item in hidden_sessions if item["id"] == "session-hidden")["taskSummary"] == "Hidden preview"
+    assert set(preview_calls) == {"session-visible", "session-hidden"}
+
+
 def test_session_list_loads_hidden_team_membership_once_per_projection(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _seed_chat_sessions(tmp_path)
