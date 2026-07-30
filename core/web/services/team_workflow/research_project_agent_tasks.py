@@ -598,6 +598,8 @@ def get_research_project_agent_task_context(
     team_id: str,
     research_project_id: str,
     task_id: str,
+    *,
+    require_active: bool = True,
 ) -> dict[str, Any]:
     """Build a bounded project/task context without paths, prompts, or raw logs."""
     s = _service()
@@ -605,6 +607,7 @@ def get_research_project_agent_task_context(
         team_id,
         research_project_id,
         task_id,
+        require_active=require_active,
     )
     project = s.get_research_project(team_id, research_project_id)
     with s._WORKFLOW_LOCK:
