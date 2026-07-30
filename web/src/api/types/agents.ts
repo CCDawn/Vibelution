@@ -512,12 +512,21 @@ export type AgentContextCompressionPolicy = {
 };
 
 export type AgentContextCompressionEffectivePolicy = AgentContextCompressionPolicy & {
-  source: "global" | "agent_custom" | string;
+  source: "agent" | "migration_required" | string;
   effectiveTokenLimit: number;
   compressionTriggerTokenLimit?: number;
   contextWindowLimit: number;
   modelContextWindowLimit?: number;
   agentPolicy?: AgentContextCompressionPolicy;
+};
+
+export type AgentPermissionPreset = "request_approval" | "auto_review" | "full_access";
+
+export type AgentRuntimePermissions = {
+  preset: AgentPermissionPreset;
+  sandboxMode: "workspace_write" | "danger_full_access";
+  approvalPolicy: "on_request" | "never";
+  approvalsReviewer: "user" | "auto_review" | "none";
 };
 
 export type AgentInstance = {
@@ -554,6 +563,11 @@ export type AgentInstance = {
   };
   createdAt: string;
   updatedAt: string;
+  configSchemaVersion: number;
+  configRevision: number;
+  configHash: string;
+  permissionPreset: AgentPermissionPreset;
+  runtimePermissions: AgentRuntimePermissions;
   runtimeStatus?: AgentRuntimeStatus;
   memoryPolicy?: MemoryPolicy;
   toolPolicy?: ToolPolicy;

@@ -19,6 +19,11 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.parse import quote
 
+from ..agent_config_authority import (
+    materialize_agent_config_identity,
+    normalize_permission_preset,
+)
+
 # Local default for signature evaluation (facade remains SSOT).
 DEFAULT_AGENT_PRIMARY_MODE = "chat"
 
@@ -45,12 +50,15 @@ def update_agent_instance(
     context_compression_policy: dict[str, Any] | None = None,
     delegation_policy: dict[str, Any] | None = None,
     supervision_policy: dict[str, Any] | None = None,
+    reasoning_effort_by_slot: dict[str, Any] | None = None,
+    permission_preset: str | None = None,
     persona_profile: dict[str, Any] | None = None,
     task_profile: dict[str, Any] | None = None,
     metadata: dict[str, Any] | None = None,
     status: str | None = None,
     preserve_generated_display_name: bool = False,
     expected_updated_at: str = "",
+    expected_config_revision: int | None = None,
     expected_tool_policy_fingerprint: str = "",
     confirm_shared_tool_policy: bool = False,
 ) -> dict[str, Any]:
@@ -66,6 +74,15 @@ def update_agent_instance(
         agent = s._find_agent(state, agent_id)
         if agent is None:
             raise s.AgentNotFoundError(f"Agent not found: {agent_id}")
+        materialize_agent_config_identity(agent)
+        previous_config_hash = str(agent.get("configHash") or "").strip()
+        if (
+            expected_config_revision is not None
+            and int(agent.get("configRevision") or 0) != int(expected_config_revision)
+        ):
+            raise s.AgentStateConflictError(
+                "Agent configuration revision changed. Refresh and retry."
+            )
         expected_agent_revision = str(expected_updated_at or "").strip()
         if expected_agent_revision and str(agent.get("updatedAt") or "").strip() != expected_agent_revision:
             raise s.AgentStateConflictError("Agent configuration changed after this editor was opened. Refresh and retry.")
@@ -112,6 +129,22 @@ def update_agent_instance(
             current = dict(agent.get("metadata") or {})
             current.update(dict(metadata or {}))
             agent["metadata"] = current
+        if reasoning_effort_by_slot is not None:
+            metadata_payload = dict(agent.get("metadata") or {})
+            metadata_payload["llmReasoningEffort"] = {
+                str(slot or "").strip(): str(effort or "").strip().lower()
+                for slot, effort in dict(reasoning_effort_by_slot or {}).items()
+                if str(slot or "").strip() and str(effort or "").strip()
+            }
+            agent["metadata"] = metadata_payload
+        if permission_preset is not None:
+            try:
+                agent["permissionPreset"] = normalize_permission_preset(
+                    permission_preset,
+                    strict=True,
+                )
+            except ValueError as exc:
+                raise s.AgentDirectoryError(str(exc)) from exc
         if status is not None:
             normalized_status = str(status or "").strip() or "active"
             if normalized_status not in {"active", "archived"}:
@@ -125,59 +158,76 @@ def update_agent_instance(
             if normalized_policy_id not in policies:
                 raise s.AgentDirectoryError(f"Unknown ToolPolicy: {normalized_policy_id}")
             agent["toolPolicyId"] = normalized_policy_id
-            state["toolPolicies"] = policies
+            updated_tool_policy = s.normalize_tool_policy(
+                policies[normalized_policy_id],
+                normalized_policy_id,
+            )
+            agent["toolPolicy"] = updated_tool_policy
         if memory_policy_id is not None:
             normalized_memory_policy_id = str(memory_policy_id or "").strip()
             policies = s._memory_policies(state)
             if not normalized_memory_policy_id or normalized_memory_policy_id not in policies:
                 raise s.AgentDirectoryError(f"Unknown MemoryPolicy: {normalized_memory_policy_id}")
             agent["memoryPolicyId"] = normalized_memory_policy_id
-            state["memoryPolicies"] = policies
+            workspace_path = str(
+                agent.get("workspacePath")
+                or s._agent_workspace_relative_path(str(agent["agentId"]))
+            ).strip()
+            updated_memory_policy = s.normalize_memory_policy(
+                policies[normalized_memory_policy_id],
+                normalized_memory_policy_id,
+                workspace_path,
+            )
+            agent["memoryPolicy"] = updated_memory_policy
         if tool_policy is not None:
             policy_id = str(agent.get("toolPolicyId") or s.DEFAULT_TOOL_POLICY_ID).strip() or s.DEFAULT_TOOL_POLICY_ID
             if policy_id == s.DEFAULT_TOOL_POLICY_ID:
                 policy_id = f"tool-{agent['agentId']}"
                 agent["toolPolicyId"] = policy_id
-            policies = s._tool_policies(state)
             current_tool_policy = s.normalize_tool_policy(
-                policies.get(policy_id) or s.default_tool_policy(policy_id),
+                agent.get("toolPolicy")
+                if isinstance(agent.get("toolPolicy"), dict)
+                else s.default_tool_policy(policy_id),
                 policy_id,
             )
             expected_policy_fingerprint = str(expected_tool_policy_fingerprint or "").strip()
             if expected_policy_fingerprint and s.tool_policy_fingerprint(current_tool_policy) != expected_policy_fingerprint:
                 raise s.AgentStateConflictError("ToolPolicy changed after this editor was opened. Refresh and retry.")
-            affected_agent_count = s._count_policy_refs(state.get("agents") or [], "toolPolicyId", policy_id)
-            if affected_agent_count > 1 and not confirm_shared_tool_policy:
-                raise s.AgentStateConflictError(
-                    f"ToolPolicy {policy_id} is shared by {affected_agent_count} Agents and requires explicit confirmation."
-                )
             updated_tool_policy = s.normalize_tool_policy(
                 {**s.default_tool_policy(policy_id), **dict(tool_policy or {})},
                 policy_id,
             )
             updated_tool_policy["policyVersion"] = int(current_tool_policy.get("policyVersion") or 1) + 1
-            policies[policy_id] = updated_tool_policy
-            state["toolPolicies"] = policies
+            agent["toolPolicy"] = updated_tool_policy
         if memory_policy is not None:
             policy_id = str(agent.get("memoryPolicyId") or "").strip() or f"memory-{agent['agentId']}"
             if policy_id == s.DEFAULT_MEMORY_POLICY_ID:
                 policy_id = f"memory-{agent['agentId']}"
                 agent["memoryPolicyId"] = policy_id
-            policies = s._memory_policies(state)
             workspace_path = s._agent_workspace_relative_path(str(agent["agentId"]))
             agent["workspacePath"] = workspace_path
             s._ensure_agent_workspace(workspace_path)
-            base_policy = policies.get(policy_id) if isinstance(policies.get(policy_id), dict) else s.default_memory_policy(policy_id, workspace_path)
+            base_policy = (
+                agent.get("memoryPolicy")
+                if isinstance(agent.get("memoryPolicy"), dict)
+                else s.default_memory_policy(policy_id, workspace_path)
+            )
             updated_memory_policy = s.normalize_memory_policy(
                 {**base_policy, **dict(memory_policy or {})},
                 policy_id,
                 workspace_path,
             )
-            policies[policy_id] = updated_memory_policy
             agent["memoryPolicyId"] = policy_id
-            state["memoryPolicies"] = policies
+            agent["memoryPolicy"] = updated_memory_policy
         if context_compression_policy is not None:
-            agent["contextCompressionPolicy"] = s.normalize_agent_context_compression_policy(context_compression_policy)
+            normalized_context_policy = s.normalize_agent_context_compression_policy(
+                context_compression_policy
+            )
+            if normalized_context_policy.get("mode") != "custom":
+                raise s.AgentDirectoryError(
+                    "Agent context compression policy must be explicit."
+                )
+            agent["contextCompressionPolicy"] = normalized_context_policy
         if delegation_policy is not None:
             metadata_payload = dict(agent.get("metadata") or {})
             updated_delegation_policy = s.normalize_delegation_policy(delegation_policy)
@@ -212,13 +262,13 @@ def update_agent_instance(
                 else:
                     metadata_payload["taskProfileDefaultsDisabled"] = True
             agent["metadata"] = metadata_payload
-        if (tool_policy_id is not None or primary_mode is not None) and s._ensure_session_agent_tool_policy(state, agent):
-            policy_id = str(agent.get("toolPolicyId") or s.DEFAULT_TOOL_POLICY_ID).strip() or s.DEFAULT_TOOL_POLICY_ID
-            policies = s._tool_policies(state)
-            updated_tool_policy = s.normalize_tool_policy(policies.get(policy_id) or s.default_tool_policy(policy_id), policy_id)
-            state["toolPolicies"] = policies
         s._refresh_agent_onboarding_metadata(state, agent)
         s._ensure_agent_default_avatar(agent)
+        materialize_agent_config_identity(
+            agent,
+            increment_if_changed=True,
+            previous_hash=previous_config_hash,
+        )
         agent["updatedAt"] = s.utc_now_iso()
         s.save_state(state)
     s._record_agent_event("agent.updated", agent)
@@ -281,7 +331,10 @@ def create_agent_instance(
                     "createdBy": str(created_by or "user").strip() or "user",
                 }
             )
-        normalized_context_compression_policy = s.normalize_agent_context_compression_policy(context_compression_policy)
+        normalized_context_compression_policy = s.materialize_agent_context_compression_policy(
+            context_compression_policy,
+            creation_default=s._context_compression_base_policy_for_agents(),
+        )
         normalized_direct_session_id = str(direct_session_id or "").strip()
         s._ensure_active_direct_session_available(
             state,
@@ -297,6 +350,17 @@ def create_agent_instance(
             normalized_primary_mode,
             role_key=normalized_role_key,
         )
+        memory_policy = s.default_memory_policy(memory_policy_id, agent_workspace)
+        metadata_payload["delegationPolicy"] = s.normalize_delegation_policy(
+            metadata_payload.get("delegationPolicy")
+            if isinstance(metadata_payload.get("delegationPolicy"), dict)
+            else {}
+        )
+        metadata_payload["supervisionPolicy"] = s.normalize_supervision_policy(
+            metadata_payload.get("supervisionPolicy")
+            if isinstance(metadata_payload.get("supervisionPolicy"), dict)
+            else {}
+        )
         metadata_payload = s._with_agent_creation_spec(
             metadata_payload,
             created_by=str(created_by or "user").strip() or "user",
@@ -306,8 +370,9 @@ def create_agent_instance(
             role_key=normalized_role_key,
             prompt_template_id=normalized_prompt_template_id,
             tool_policy_id=tool_policy_id,
+            tool_policy=tool_policy,
             memory_policy_id=memory_policy_id,
-            memory_policy={"policyId": memory_policy_id},
+            memory_policy=memory_policy,
             created_at=now,
         )
         metadata_payload = s._mark_display_name_responsibility(
@@ -326,20 +391,24 @@ def create_agent_instance(
             "directSessionId": normalized_direct_session_id,
             "workspacePath": agent_workspace,
             "toolPolicyId": tool_policy_id,
+            "toolPolicy": tool_policy,
             "memoryPolicyId": memory_policy_id,
+            "memoryPolicy": memory_policy,
             "contextCompressionPolicy": normalized_context_compression_policy,
+            "permissionPreset": "request_approval",
             "createdBy": str(created_by or "user").strip() or "user",
             "status": "active",
             "metadata": metadata_payload,
             "createdAt": now,
             "updatedAt": now,
         }
+        materialize_agent_config_identity(agent)
         s._ensure_agent_default_avatar(agent)
         tool_policies = s._tool_policies(state)
         tool_policies[tool_policy_id] = tool_policy
         state["toolPolicies"] = tool_policies
         policies = s._memory_policies(state)
-        policies[memory_policy_id] = s.default_memory_policy(memory_policy_id, agent_workspace)
+        policies[memory_policy_id] = memory_policy
         state["agents"] = list(state.get("agents") or []) + [agent]
         state["memoryPolicies"] = policies
         s.save_state(state)
@@ -359,6 +428,7 @@ def _with_agent_creation_spec(
     prompt_template_id: str,
     tool_policy_id: str,
     memory_policy_id: str,
+    tool_policy: dict[str, Any] | None = None,
     memory_policy: dict[str, Any] | None = None,
     created_at: str,
 ) -> dict[str, Any]:
@@ -373,7 +443,8 @@ def _with_agent_creation_spec(
     else:
         payload["personaProfile"] = persona_profile
         payload["taskProfile"] = task_profile
-    tool_policy = payload.get("toolPolicy") if isinstance(payload.get("toolPolicy"), dict) else {}
+    metadata_tool_policy = payload.get("toolPolicy") if isinstance(payload.get("toolPolicy"), dict) else {}
+    effective_tool_policy = tool_policy if isinstance(tool_policy, dict) else metadata_tool_policy
     metadata_memory_policy = payload.get("memoryPolicy") if isinstance(payload.get("memoryPolicy"), dict) else {}
     effective_memory_policy = memory_policy if isinstance(memory_policy, dict) else metadata_memory_policy
     missing = s._agent_creation_missing_fields(
@@ -385,7 +456,7 @@ def _with_agent_creation_spec(
         persona_profile=persona_profile,
         task_profile=task_profile,
         tool_policy_id=tool_policy_id,
-        tool_policy=tool_policy,
+        tool_policy=effective_tool_policy,
         memory_policy_id=memory_policy_id,
         memory_policy=effective_memory_policy,
     )

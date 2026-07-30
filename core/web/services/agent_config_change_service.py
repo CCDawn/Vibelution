@@ -12,10 +12,11 @@ import copy
 from typing import Any
 
 from . import agent_directory_service
+from .agent_config_authority import normalize_permission_preset
 
 
 CHANGE_EVENT_FILE = "config_changes.jsonl"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 MAX_SUMMARY_LINES = 4
 MAX_SUMMARY_CHARS = 480
 ALLOWED_REASONING_EFFORTS = {"low", "medium", "high"}
@@ -36,9 +37,35 @@ def config_snapshot_from_agent(agent: dict[str, Any] | None) -> dict[str, Any]:
         ),
         "promptTemplateId": str(payload.get("promptTemplateId") or "").strip(),
         "toolPolicyId": str(payload.get("toolPolicyId") or "").strip(),
+        "toolPolicy": agent_directory_service.normalize_tool_policy(
+            payload.get("toolPolicy")
+            if isinstance(payload.get("toolPolicy"), dict)
+            else {},
+            str(payload.get("toolPolicyId") or "").strip(),
+        ),
         "memoryPolicyId": str(payload.get("memoryPolicyId") or "").strip(),
+        "memoryPolicy": agent_directory_service.normalize_memory_policy(
+            payload.get("memoryPolicy")
+            if isinstance(payload.get("memoryPolicy"), dict)
+            else {},
+            str(payload.get("memoryPolicyId") or "").strip(),
+            str(payload.get("workspacePath") or "").strip(),
+        ),
         "contextCompressionPolicy": agent_directory_service.normalize_agent_context_compression_policy(
             payload.get("contextCompressionPolicy") if isinstance(payload.get("contextCompressionPolicy"), dict) else {},
+        ),
+        "delegationPolicy": agent_directory_service.normalize_delegation_policy(
+            metadata.get("delegationPolicy")
+            if isinstance(metadata.get("delegationPolicy"), dict)
+            else {},
+        ),
+        "supervisionPolicy": agent_directory_service.normalize_supervision_policy(
+            metadata.get("supervisionPolicy")
+            if isinstance(metadata.get("supervisionPolicy"), dict)
+            else {},
+        ),
+        "permissionPreset": normalize_permission_preset(
+            payload.get("permissionPreset"),
         ),
         "status": str(payload.get("status") or "active").strip() or "active",
     }
@@ -239,11 +266,37 @@ def _normalize_snapshot(snapshot: dict[str, Any], *, fallback: dict[str, Any]) -
         "reasoningEffortBySlot": _normalize_reasoning_effort(candidate.get("reasoningEffortBySlot", base["reasoningEffortBySlot"])),
         "promptTemplateId": _short_string(candidate.get("promptTemplateId", base["promptTemplateId"]), limit=160),
         "toolPolicyId": _short_string(candidate.get("toolPolicyId", base["toolPolicyId"]), limit=160),
+        "toolPolicy": agent_directory_service.normalize_tool_policy(
+            candidate.get("toolPolicy")
+            if isinstance(candidate.get("toolPolicy"), dict)
+            else base["toolPolicy"],
+            _short_string(candidate.get("toolPolicyId", base["toolPolicyId"]), limit=160),
+        ),
         "memoryPolicyId": _short_string(candidate.get("memoryPolicyId", base["memoryPolicyId"]), limit=160),
+        "memoryPolicy": agent_directory_service.normalize_memory_policy(
+            candidate.get("memoryPolicy")
+            if isinstance(candidate.get("memoryPolicy"), dict)
+            else base["memoryPolicy"],
+            _short_string(candidate.get("memoryPolicyId", base["memoryPolicyId"]), limit=160),
+            str(fallback.get("workspacePath") or "").strip(),
+        ),
         "contextCompressionPolicy": agent_directory_service.normalize_agent_context_compression_policy(
             candidate.get("contextCompressionPolicy")
             if isinstance(candidate.get("contextCompressionPolicy"), dict)
             else base["contextCompressionPolicy"],
+        ),
+        "delegationPolicy": agent_directory_service.normalize_delegation_policy(
+            candidate.get("delegationPolicy")
+            if isinstance(candidate.get("delegationPolicy"), dict)
+            else base["delegationPolicy"],
+        ),
+        "supervisionPolicy": agent_directory_service.normalize_supervision_policy(
+            candidate.get("supervisionPolicy")
+            if isinstance(candidate.get("supervisionPolicy"), dict)
+            else base["supervisionPolicy"],
+        ),
+        "permissionPreset": normalize_permission_preset(
+            candidate.get("permissionPreset", base["permissionPreset"]),
         ),
         "status": _normalize_status(candidate.get("status", base["status"])),
     }

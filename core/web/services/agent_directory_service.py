@@ -108,6 +108,7 @@ from .agent_directory.policies import (
     evaluate_supervision_policy,
     evaluate_tool_policy,
     normalize_agent_context_compression_policy,
+    materialize_agent_context_compression_policy,
     normalize_conversation_index_visibility,
     normalize_delegation_policy,
     normalize_memory_policy,
