@@ -287,9 +287,20 @@ def test_strict_blank_chat_completions_payload_preserves_empty_user_message():
         [{"role": "user", "content": ""}],
         metadata={"strictPromptPayload": True, "inputMode": "blank"},
     )
+    strict_continuation_payload = client._build_payload(
+        [
+            {"role": "user", "content": ""},
+            {"role": "assistant", "content": "first answer"},
+        ],
+        metadata={"strictPromptPayload": True, "inputMode": "blank"},
+    )
 
     assert ordinary_payload["messages"] == []
     assert strict_blank_payload["messages"] == [{"role": "user", "content": ""}]
+    assert strict_continuation_payload["messages"] == [
+        {"role": "user", "content": ""},
+        {"role": "assistant", "content": "first answer"},
+    ]
 
 
 def test_openai_chat_gpt_payload_omits_reasoning_effort():
