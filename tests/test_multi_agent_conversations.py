@@ -2029,6 +2029,51 @@ def test_agent_inbox_startup_recovery_repairs_stale_turn_without_full_conversati
     assert summary["agentScanDurationMs"] >= 0
 
 
+def test_agent_inbox_startup_recovery_reads_registry_once_without_agent_api_hydration(
+    tmp_path,
+    monkeypatch,
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    session_service.create_chat_session(title="Alpha Agent")
+    session_service.create_chat_session(title="Beta Agent")
+    original_load_state = agent_directory_service.load_state
+    expected_scanned_agent_count = sum(
+        1
+        for item in original_load_state().get("agents") or []
+        if isinstance(item, dict)
+        and str(item.get("status") or "active").strip().lower() != "archived"
+        and str(item.get("agentId") or "").strip()
+    )
+    load_state_calls = 0
+    inbox_read_calls = 0
+
+    def counted_load_state():
+        nonlocal load_state_calls
+        load_state_calls += 1
+        return original_load_state()
+
+    def fail_agent_api_hydration(*_args, **_kwargs):
+        raise AssertionError("startup inbox recovery must not hydrate the Agent API directory")
+
+    def counted_inbox_read(*_args, **_kwargs):
+        nonlocal inbox_read_calls
+        inbox_read_calls += 1
+        return []
+
+    monkeypatch.setattr(agent_directory_service, "load_state", counted_load_state)
+    monkeypatch.setattr(agent_directory_service, "list_agents", fail_agent_api_hydration)
+    monkeypatch.setattr(agent_directory_service, "_read_jsonl", counted_inbox_read)
+
+    summary = session_service.recover_wakeable_agent_inbox_messages_on_startup()
+
+    assert summary["errorCount"] == 0
+    assert summary["scannedAgentCount"] == expected_scanned_agent_count
+    assert summary["nonEmptyInboxCount"] == 0
+    assert summary["wakeableMessageCount"] == 0
+    assert load_state_calls == 1
+    assert inbox_read_calls == 0
+
+
 def test_agent_inbox_wake_redirects_stale_target_session_to_current_agent_session(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     alpha = session_service.create_chat_session(title="Alpha Agent")
