@@ -68,6 +68,7 @@ from core.chat.conversation_ledger import (
     latest_ledger_sequence,
     latest_open_turn_id,
     load_conversation_events,
+    load_conversation_preview_slice,
     rewrite_conversation_events,
 )
 from core.chat.context_assembler import assemble_conversation_context
@@ -905,6 +906,7 @@ from core.web.services.session.projection import (
     _public_agent_prompt_snapshot,
     _public_prompt_assembly_manifest,
     _session_agent_status_payload,
+    _ledger_latest_preview_messages_for_session,
     _ledger_visible_messages_for_session,
     _normalize_child_handoff_context,
     _normalize_child_result_card,

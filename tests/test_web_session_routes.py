@@ -10,6 +10,8 @@ from fastapi.testclient import TestClient
 
 from config.models import AppConfig
 from core.chat.conversation_ledger import (
+    ConversationLedgerPreviewSlice,
+    EVENT_TOOL_RESULT,
     EVENT_USER_MESSAGE,
     append_conversation_event,
 )
@@ -99,6 +101,105 @@ def test_active_session_route_returns_empty_id_without_persisted_selection(monke
 
     assert response.status_code == 200
     assert response.json() == {"activeSessionId": ""}
+
+
+def test_lightweight_session_preview_avoids_full_ledger_replay_after_twelve_tool_rows(
+    tmp_path,
+    monkeypatch,
+):
+    session_id = "session-bounded-preview"
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    append_conversation_event(
+        tmp_path,
+        session_id,
+        "turn-1",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "older prompt"},
+    )
+    for index in range(12):
+        append_conversation_event(
+            tmp_path,
+            session_id,
+            "turn-1",
+            EVENT_TOOL_RESULT,
+            status="done",
+            payload={
+                "toolCall": {
+                    "id": f"tool-{index}",
+                    "name": "exec_command",
+                    "status": "done",
+                    "result": "done",
+                }
+            },
+            tool_call_id=f"tool-{index}",
+        )
+    monkeypatch.setattr(
+        session_service,
+        "_ledger_visible_messages_for_session",
+        lambda _session_id: pytest.fail("bounded preview must not replay the full ledger"),
+    )
+
+    conversation = session_service._normalize_conversation(
+        {
+            "conversation_id": session_id,
+            "title": "bounded preview",
+            "last_turn_status": "completed",
+        },
+        agent_by_id={},
+        ensure_workspace=False,
+        lightweight=True,
+    )
+
+    assert conversation is not None
+    assert conversation["messages"] == []
+    assert conversation["_hasLedgerMessages"] is True
+
+
+def test_lightweight_session_preview_falls_back_when_tail_has_no_visible_boundary(
+    tmp_path,
+    monkeypatch,
+):
+    session_id = "session-preview-fallback"
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        session_service,
+        "load_conversation_preview_slice",
+        lambda *_args, **_kwargs: ConversationLedgerPreviewSlice(
+            visible_messages=[],
+            reached_start=False,
+            safe=True,
+        ),
+    )
+    full_load_count = 0
+
+    def counted_full_load(target_session_id):
+        nonlocal full_load_count
+        full_load_count += 1
+        assert target_session_id == session_id
+        return [{"role": "user", "content": "preserve this preview"}]
+
+    monkeypatch.setattr(
+        session_service,
+        "_ledger_visible_messages_for_session",
+        counted_full_load,
+    )
+
+    conversation = session_service._normalize_conversation(
+        {
+            "conversation_id": session_id,
+            "title": "fallback preview",
+            "last_turn_status": "completed",
+        },
+        agent_by_id={},
+        ensure_workspace=False,
+        lightweight=True,
+    )
+
+    assert conversation is not None
+    assert [item["content"] for item in conversation["messages"]] == ["preserve this preview"]
+    assert conversation["_hasLedgerMessages"] is True
+    assert full_load_count == 1
 
 
 def test_session_stop_route_requires_exact_turn_id(monkeypatch):
