@@ -901,9 +901,22 @@ def _build_impact_chain_view(
     return "\n".join(lines)
 
 
-def _build_task_focused_view(project_root: Path, full_content: str) -> str:
+def _build_task_focused_view(
+    project_root: Path,
+    full_content: str,
+    *,
+    current_goal: str | None = None,
+    state_memory: str | None = None,
+) -> str:
     """构建面向当前任务的局部导航视图。"""
-    goal, state_memory = _get_prompt_runtime_context()
+    fallback_goal = ""
+    fallback_state_memory = ""
+    if current_goal is None or state_memory is None:
+        fallback_goal, fallback_state_memory = _get_prompt_runtime_context()
+    goal = str(fallback_goal if current_goal is None else current_goal).strip()
+    state_memory_text = str(
+        fallback_state_memory if state_memory is None else state_memory
+    ).strip()
     session = None
     attention = {}
     recent_changes = []
@@ -928,7 +941,7 @@ def _build_task_focused_view(project_root: Path, full_content: str) -> str:
         str(project_root.resolve()),
         hashlib.sha1(full_content.encode("utf-8", errors="ignore")).hexdigest(),
         goal,
-        state_memory,
+        state_memory_text,
         tuple(str(path) for path in (attention.get("modified_paths") or [])),
         tuple(str(name) for name in (attention.get("modified_entities") or [])),
         str(attention.get("last_validation_summary") or ""),
@@ -947,7 +960,9 @@ def _build_task_focused_view(project_root: Path, full_content: str) -> str:
             return str(_task_focused_view_cache.get("value") or "")
 
     files = _collect_python_files(project_root)
-    context_text = "\n".join(part for part in [goal, state_memory] if part).strip()
+    context_text = "\n".join(
+        part for part in [goal, state_memory_text] if part
+    ).strip()
     scored = []
     for fpath in files:
         score = _score_file_relevance(fpath, project_root, context_text, hot_paths)
@@ -1009,7 +1024,12 @@ def _build_task_focused_view(project_root: Path, full_content: str) -> str:
     return value
 
 
-def get_codebase_map(force_refresh: bool = False) -> str:
+def get_codebase_map(
+    force_refresh: bool = False,
+    *,
+    current_goal: str | None = None,
+    state_memory: str | None = None,
+) -> str:
     """获取代码库地图（优先读取缓存，不含 YAML front matter）。
 
     Args:
@@ -1031,7 +1051,12 @@ def get_codebase_map(force_refresh: bool = False) -> str:
             content = scan_and_build_codebase_map()
     stripped = _strip_front_matter(content)
     project_root = _resolve_project_root()
-    task_view = _build_task_focused_view(project_root, stripped)
+    task_view = _build_task_focused_view(
+        project_root,
+        stripped,
+        current_goal=current_goal,
+        state_memory=state_memory,
+    )
     if not task_view:
         return stripped
     return f"{task_view}\n\n---\n\n{stripped}"
