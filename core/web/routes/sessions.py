@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from concurrent.futures import Future, ThreadPoolExecutor
-from typing import AsyncIterator, Iterator
+from typing import AsyncIterator, Iterator, Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
@@ -44,6 +44,15 @@ from core.web.services.session_service import (
     update_session_reasoning_effort,
 )
 from core.web.services.runtime_scene_service import record_runtime_scene_event
+from core.web.services.session.tool_approvals import (
+    ToolApprovalConflictError,
+    ToolApprovalError,
+    ToolApprovalNotFoundError,
+    get_session_tool_approval_policy,
+    list_tool_approval_requests,
+    resolve_tool_approval_request,
+    set_session_tool_approval_policy,
+)
 
 
 router = APIRouter(tags=["sessions"])
@@ -226,6 +235,18 @@ class ChildSessionCreatePayload(BaseModel):
     autoStart: bool = True
     switchToChild: bool = True
     source: str = "agent_auto_split"
+
+
+class SessionToolApprovalDecisionPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    decision: Literal["accept", "acceptForSession", "decline", "cancel"]
+
+
+class SessionToolApprovalPolicyPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    policy: Literal["untrusted", "on_request", "never"]
 
 
 @router.get("/sessions")
@@ -503,6 +524,56 @@ def session_stop_turn(session_id: str, payload: SessionStopPayload) -> dict:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except SessionBusyError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get("/sessions/{session_id}/tool-approvals")
+def session_tool_approvals(
+    session_id: str,
+    approval_status: str = Query("", alias="status"),
+) -> list[dict]:
+    try:
+        return list_tool_approval_requests(session_id, status=approval_status)
+    except ToolApprovalError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/sessions/{session_id}/tool-approvals/{request_id}/decision")
+def session_resolve_tool_approval(
+    session_id: str,
+    request_id: str,
+    payload: SessionToolApprovalDecisionPayload,
+) -> dict:
+    try:
+        return resolve_tool_approval_request(
+            session_id,
+            request_id,
+            decision=payload.decision,
+        )
+    except ToolApprovalNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ToolApprovalConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ToolApprovalError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/sessions/{session_id}/tool-approval-policy")
+def session_tool_approval_policy(session_id: str) -> dict:
+    try:
+        return get_session_tool_approval_policy(session_id)
+    except ToolApprovalError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.patch("/sessions/{session_id}/tool-approval-policy")
+def session_update_tool_approval_policy(
+    session_id: str,
+    payload: SessionToolApprovalPolicyPayload,
+) -> dict:
+    try:
+        return set_session_tool_approval_policy(session_id, payload.policy)
+    except ToolApprovalError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.post("/sessions/{session_id}/guidance", status_code=status.HTTP_202_ACCEPTED)

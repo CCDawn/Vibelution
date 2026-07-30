@@ -730,7 +730,12 @@ class ToolExecutor:
 
         started_at = time.monotonic()
 
-        execution_authorization = self._check_canonical_execution_authorization(tool_name, call_id, tool_args)
+        execution_authorization = self._check_canonical_execution_authorization(
+            tool_name,
+            call_id,
+            tool_args,
+            cancel_checker=self._snapshot_cancel_checker(),
+        )
         if execution_authorization is not None and not execution_authorization.allowed:
             authorization_error = execution_authorization.message
             publish_tool_event(EventNames.TOOL_ERROR, {
@@ -1311,13 +1316,25 @@ class ToolExecutor:
         )
         return not any(re.search(pattern, lowered) for pattern in blocked_patterns)
 
-    def _check_canonical_execution_authorization(self, tool_name: str, tool_call_id: str, tool_args: dict):
+    def _check_canonical_execution_authorization(
+        self,
+        tool_name: str,
+        tool_call_id: str,
+        tool_args: dict,
+        *,
+        cancel_checker: Optional[Callable[[], str]] = None,
+    ):
         if str(tool_name or "").strip() not in self._tool_map:
             return None
         try:
             from core.authorization.tool_authorization_service import authorize_tool_execution
 
-            return authorize_tool_execution(tool_name=tool_name, tool_call_id=tool_call_id, tool_args=tool_args)
+            return authorize_tool_execution(
+                tool_name=tool_name,
+                tool_call_id=tool_call_id,
+                tool_args=tool_args,
+                cancel_checker=cancel_checker,
+            )
         except Exception as exc:
             _debug_logger.warning(f"[工具授权] canonical execution authorization failed: {type(exc).__name__}: {exc}")
             from core.authorization.tool_authorization_service import ToolExecutionAuthorizationResult

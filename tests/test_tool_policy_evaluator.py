@@ -151,6 +151,68 @@ def test_approval_mode_can_only_narrow_execution():
     assert decision.deny_reason_for("web_search_tool").code is ToolDenyCode.APPROVAL_REQUIRED
 
 
+def test_decision_carries_tool_risk_and_approval_requirements():
+    policy = _policy(
+        {
+            "allowedTools": ["grep_search_tool", "web_search_tool", "apply_patch_tool"],
+            "preferredTools": [],
+            "networkAccess": "full",
+            "mutationAccess": "workspace",
+        }
+    )
+
+    decision = _evaluate(policy, _grant())
+
+    assert decision.approval_requirements == (
+        ("apply_patch_tool", "on_request", "write"),
+        ("grep_search_tool", "never", "read"),
+        ("web_search_tool", "on_request", "network"),
+    )
+    assert decision.public_projection()["approvalRequirements"]["web_search_tool"] == {
+        "approval": "on_request",
+        "risk": "network",
+    }
+
+
+def test_always_approval_tool_remains_requestable_in_on_request_mode():
+    descriptor = tool_catalog.build_tool_descriptor(
+        "trigger_self_restart_tool",
+        args_schema={"type": "object"},
+    )
+    policy = normalize_legacy_tool_policy(
+        {
+            "policyId": "policy-restart",
+            "allowedTools": ["trigger_self_restart_tool"],
+            "preferredTools": [],
+            "mutationAccess": "controlled",
+        },
+        registered_tool_names=["trigger_self_restart_tool"],
+    )
+    grant = TurnToolGrant(
+        turn_id="turn-restart",
+        source="session",
+        allowed_capabilities=descriptor.capabilities,
+        denied_tools=(),
+        approval_mode="on_request",
+    )
+
+    decision = evaluate_tool_policy(
+        agent_id="agent-1",
+        policy=policy,
+        grant=grant,
+        descriptors=(descriptor,),
+        registry_version=1,
+        registry_fingerprint="registry-restart",
+        generated_at="2026-07-30T00:00:00Z",
+    )
+
+    assert decision.visible_tools == ("trigger_self_restart_tool",)
+    assert decision.executable_tools == ("trigger_self_restart_tool",)
+    assert decision.approval_requirements == (
+        ("trigger_self_restart_tool", "always", "destructive"),
+    )
+
+
 def test_decision_and_cache_key_are_deterministic():
     policy = _policy(
         {

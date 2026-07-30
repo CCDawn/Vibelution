@@ -240,6 +240,97 @@ def test_session_stop_route_rejects_stale_turn(monkeypatch):
     assert "turn mismatch" in response.json()["detail"]
 
 
+def test_session_tool_approval_routes_expose_pending_and_resolve_decision(monkeypatch):
+    pending = {
+        "requestId": "approval-a",
+        "sessionId": "session-active",
+        "status": "pending",
+    }
+    monkeypatch.setattr(
+        session_routes,
+        "list_tool_approval_requests",
+        lambda session_id, *, status="": [pending] if session_id == "session-active" and status == "pending" else [],
+    )
+    observed = []
+    monkeypatch.setattr(
+        session_routes,
+        "resolve_tool_approval_request",
+        lambda session_id, request_id, *, decision: (
+            observed.append((session_id, request_id, decision))
+            or {**pending, "status": "accepted", "decision": decision}
+        ),
+    )
+
+    listed = client.get("/api/sessions/session-active/tool-approvals", params={"status": "pending"})
+    resolved = client.post(
+        "/api/sessions/session-active/tool-approvals/approval-a/decision",
+        json={"decision": "acceptForSession"},
+    )
+
+    assert listed.status_code == 200
+    assert listed.json() == [pending]
+    assert resolved.status_code == 200
+    assert resolved.json()["status"] == "accepted"
+    assert observed == [("session-active", "approval-a", "acceptForSession")]
+
+
+def test_session_tool_approval_policy_routes_use_codex_style_modes(monkeypatch):
+    observed = []
+    monkeypatch.setattr(
+        session_routes,
+        "get_session_tool_approval_policy",
+        lambda session_id: {"sessionId": session_id, "policy": "on_request"},
+    )
+    monkeypatch.setattr(
+        session_routes,
+        "set_session_tool_approval_policy",
+        lambda session_id, policy: (
+            observed.append((session_id, policy))
+            or {"sessionId": session_id, "policy": policy}
+        ),
+    )
+
+    current = client.get("/api/sessions/session-active/tool-approval-policy")
+    updated = client.patch(
+        "/api/sessions/session-active/tool-approval-policy",
+        json={"policy": "untrusted"},
+    )
+
+    assert current.status_code == 200
+    assert current.json()["policy"] == "on_request"
+    assert updated.status_code == 200
+    assert updated.json()["policy"] == "untrusted"
+    assert observed == [("session-active", "untrusted")]
+
+
+def test_session_tool_approval_routes_map_not_found_and_conflict(monkeypatch):
+    monkeypatch.setattr(
+        session_routes,
+        "resolve_tool_approval_request",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            session_routes.ToolApprovalNotFoundError("missing")
+        ),
+    )
+    missing = client.post(
+        "/api/sessions/session-active/tool-approvals/approval-missing/decision",
+        json={"decision": "accept"},
+    )
+    monkeypatch.setattr(
+        session_routes,
+        "resolve_tool_approval_request",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            session_routes.ToolApprovalConflictError("already resolved")
+        ),
+    )
+    conflict = client.post(
+        "/api/sessions/session-active/tool-approvals/approval-stale/decision",
+        json={"decision": "decline"},
+    )
+
+    assert missing.status_code == 404
+    assert conflict.status_code == 409
+
+
 def test_session_events_runs_initial_and_iterator_on_dedicated_executor(monkeypatch):
     thread_names: list[str] = []
     closed = threading.Event()
