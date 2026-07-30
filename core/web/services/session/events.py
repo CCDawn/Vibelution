@@ -177,9 +177,22 @@ def _record_session_list_loaded_event(
     cache_age_ms: int = 0,
     cache_ttl_ms: int = 0,
     waited_for_inflight: bool = False,
+    chat_state_wait_ms: int | None = None,
+    chat_state_read_ms: int | None = None,
+    conversation_normalize_ms: int | None = None,
+    summary_projection_ms: int | None = None,
 ) -> None:
     s = _service()
     cache_expired = bool(cache_hit and cache_ttl_ms > 0 and cache_age_ms > cache_ttl_ms)
+    phase_timings_recorded = any(
+        value is not None
+        for value in (
+            chat_state_wait_ms,
+            chat_state_read_ms,
+            conversation_normalize_ms,
+            summary_projection_ms,
+        )
+    )
     try:
         s.record_runtime_scene_event(
             "conversation",
@@ -202,6 +215,11 @@ def _record_session_list_loaded_event(
                 "cacheExpired": cache_expired,
                 "servedStaleMatchingSignature": cache_expired,
                 "waitedForInflight": bool(waited_for_inflight),
+                "phaseTimingsRecorded": phase_timings_recorded,
+                "chatStateWaitMs": max(0, int(chat_state_wait_ms or 0)),
+                "chatStateReadMs": max(0, int(chat_state_read_ms or 0)),
+                "conversationNormalizeMs": max(0, int(conversation_normalize_ms or 0)),
+                "summaryProjectionMs": max(0, int(summary_projection_ms or 0)),
             },
             lifecycle=False,
         )
