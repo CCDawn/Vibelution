@@ -20,7 +20,6 @@ from typing import Any, Iterable
 from .turn_journal import (
     AUDIT_ONLY_EVENT_TYPES,
     EVENT_ASSISTANT_DELTA_COMMITTED,
-    EVENT_ASSISTANT_ITEM_COMMITTED,
     EVENT_ASSISTANT_MESSAGE,
     EVENT_ASSISTANT_PARTIAL,
     EVENT_CLI_SESSION_LIFECYCLE,
@@ -47,6 +46,7 @@ from .turn_journal import (
     event_projection_category,
     latest_turn_sequence,
     latest_open_turn_id,
+    load_latest_turn_events_for_preview,
     load_turn_events,
     model_messages_from_events,
     model_visible_messages_from_events,
@@ -87,6 +87,15 @@ class ConversationLedgerProjection:
             "openTurnId": self.open_turn_id,
             "eventCount": len(self.events),
         }
+
+
+@dataclass(frozen=True)
+class ConversationLedgerPreviewSlice:
+    """A bounded latest-message projection with explicit fallback signals."""
+
+    visible_messages: list[dict[str, Any]] = field(default_factory=list)
+    reached_start: bool = False
+    safe: bool = False
 
 
 def conversation_ledger_path(project_root: Path, session_id: str) -> Path:
@@ -162,6 +171,26 @@ def load_conversation_events(project_root: Path, session_id: str) -> list[Conver
     return list(cached)
 
 
+def load_conversation_preview_slice(
+    project_root: Path,
+    session_id: str,
+    *,
+    event_limit: int = 64,
+) -> ConversationLedgerPreviewSlice:
+    """Project a bounded journal tail for session-index message previews."""
+
+    events, reached_start, safe = load_latest_turn_events_for_preview(
+        project_root,
+        session_id,
+        limit=event_limit,
+    )
+    return ConversationLedgerPreviewSlice(
+        visible_messages=conversation_visible_messages_from_events(events),
+        reached_start=reached_start,
+        safe=safe,
+    )
+
+
 def rewrite_conversation_events(
     project_root: Path,
     session_id: str,
@@ -232,6 +261,7 @@ def reconcile_open_conversation_turn(
 
 __all__ = [
     "ConversationLedgerEvent",
+    "ConversationLedgerPreviewSlice",
     "ConversationLedgerProjection",
     "AUDIT_ONLY_EVENT_TYPES",
     "EVENT_ASSISTANT_DELTA_COMMITTED",
@@ -268,6 +298,7 @@ __all__ = [
     "latest_ledger_sequence",
     "latest_context_compression_checkpoint",
     "load_conversation_events",
+    "load_conversation_preview_slice",
     "rewrite_conversation_events",
     "project_conversation_ledger",
     "reconcile_open_conversation_turn",
