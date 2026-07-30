@@ -333,6 +333,181 @@ def test_experiment_tool_fails_closed_when_bound_runtime_task_is_missing(
     assert "exactly one compatible" in result["message"]
 
 
+def test_iteration_tools_reuse_unique_bound_task_for_flat_session_follow_up(
+    monkeypatch,
+):
+    created_payloads = []
+    monkeypatch.setattr(
+        agent_directory_service,
+        "current_agent_runtime",
+        lambda: {
+            "agentId": "agent-iteration",
+            "sessionId": "session-project-1",
+            "turnId": "turn-follow-up",
+        },
+    )
+    monkeypatch.setattr(
+        session_service,
+        "get_session_detail",
+        lambda _session_id, **_kwargs: {
+            "experimentBinding": {
+                "teamId": "research-team",
+                "researchProjectId": "project-1",
+                "agentId": "agent-iteration",
+            },
+        },
+    )
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "get_research_project_agent_task_status",
+        lambda _team_id, _project_id: {
+            "tasks": [
+                {
+                    "taskId": "task-iteration-1",
+                    "taskKind": "iteration_decision",
+                    "agentId": "agent-iteration",
+                    "researchProjectId": "project-1",
+                    "sessionId": "session-project-1",
+                    "status": "incomplete",
+                    "turn": {"turnId": "turn-initial"},
+                }
+            ]
+        },
+        raising=False,
+    )
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "get_research_project_agent_task_context",
+        lambda team_id, project_id, task_id: {
+            "teamId": team_id,
+            "researchProjectId": project_id,
+            "task": {
+                "taskId": task_id,
+                "taskKind": "iteration_decision",
+                "agentId": "agent-iteration",
+                "researchProjectId": project_id,
+            },
+            "experiment": {"plans": [], "planCount": 0},
+        },
+        raising=False,
+    )
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "require_research_project_agent_task",
+        lambda _team_id, project_id, task_id, **_kwargs: {
+            "taskId": task_id,
+            "taskKind": "iteration_decision",
+            "agentId": "agent-iteration",
+            "researchProjectId": project_id,
+            "sessionId": "session-project-1",
+            "turn": {"turnId": "turn-initial"},
+        },
+        raising=False,
+    )
+    monkeypatch.setattr(
+        research_loop_service,
+        "list_research_loop_templates",
+        lambda: {"templates": []},
+    )
+    monkeypatch.setattr(
+        research_loop_service,
+        "get_research_loop_status",
+        lambda team_id, research_project_id="": {
+            "teamId": team_id,
+            "researchProjectId": research_project_id,
+            "activeLoopId": "",
+        },
+    )
+    monkeypatch.setattr(
+        research_loop_service,
+        "create_research_loop",
+        lambda team_id, payload: created_payloads.append(dict(payload))
+        or {
+            "teamId": team_id,
+            "loop": {
+                "loopId": "loop-follow-up",
+                "researchProjectId": payload["researchProjectId"],
+            },
+        },
+    )
+
+    context = json.loads(
+        challenge_cup_iteration_context_tool(team_id="research-team")
+    )
+    created = json.loads(
+        challenge_cup_iteration_writeback_tool(
+            team_id="research-team",
+            operation="create_loop",
+            payload_json='{"title":"Continue the bound iteration"}',
+        )
+    )
+
+    assert context["status"] == "ok"
+    assert context["researchProjectId"] == "project-1"
+    assert context["taskContext"]["task"]["taskId"] == "task-iteration-1"
+    assert created["status"] == "ok"
+    assert created["task"]["taskId"] == "task-iteration-1"
+    assert created_payloads == [
+        {
+            "title": "Continue the bound iteration",
+            "createdByAgent": "agent-iteration",
+            "recordedByAgent": "agent-iteration",
+            "decidedByAgent": "agent-iteration",
+            "researchProjectId": "project-1",
+        }
+    ]
+
+
+def test_iteration_tool_rejects_ambiguous_flat_session_follow_up(monkeypatch):
+    monkeypatch.setattr(
+        agent_directory_service,
+        "current_agent_runtime",
+        lambda: {
+            "agentId": "agent-iteration",
+            "sessionId": "session-project-1",
+            "turnId": "turn-follow-up",
+        },
+    )
+    monkeypatch.setattr(
+        session_service,
+        "get_session_detail",
+        lambda _session_id, **_kwargs: {
+            "experimentBinding": {
+                "teamId": "research-team",
+                "researchProjectId": "project-1",
+                "agentId": "agent-iteration",
+            },
+        },
+    )
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "get_research_project_agent_task_status",
+        lambda _team_id, _project_id: {
+            "tasks": [
+                {
+                    "taskId": task_id,
+                    "taskKind": "iteration_decision",
+                    "agentId": "agent-iteration",
+                    "sessionId": "session-project-1",
+                    "turn": {"turnId": turn_id},
+                }
+                for task_id, turn_id in (
+                    ("task-iteration-1", "turn-initial"),
+                    ("task-iteration-2", "turn-later"),
+                )
+            ]
+        },
+        raising=False,
+    )
+
+    result = json.loads(
+        challenge_cup_iteration_context_tool(team_id="research-team")
+    )
+
+    assert result["status"] == "error"
+    assert "exactly one compatible" in result["message"]
+
+
 def test_experiment_evidence_writeback_requires_plan_in_same_project(
     monkeypatch,
 ):

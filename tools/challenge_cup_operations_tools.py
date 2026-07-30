@@ -664,19 +664,25 @@ def _project_task_binding(
             team_id,
             project_id,
         )
-        candidates = [
+        session_candidates = [
             item
             for item in list(status.get("tasks") or [])
             if isinstance(item, dict)
             and _text(item.get("sessionId")) == runtime_session_id
-            and _text((item.get("turn") or {}).get("turnId"))
-            == runtime_turn_id
             and (
                 not runtime_agent_id
                 or _text(item.get("agentId")) == runtime_agent_id
             )
             and item.get("taskKind") in set(allowed_task_kinds)
         ]
+        candidates = [
+            item
+            for item in session_candidates
+            if _text((item.get("turn") or {}).get("turnId"))
+            == runtime_turn_id
+        ]
+        if not candidates and len(session_candidates) == 1:
+            candidates = session_candidates
         if len(candidates) != 1:
             raise ValueError(
                 "Current runtime does not resolve to exactly one compatible "
