@@ -269,6 +269,29 @@ def test_strict_blank_responses_payload_preserves_empty_user_item():
     ]
 
 
+def test_strict_blank_chat_completions_payload_preserves_empty_user_message():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "openai",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "http://192.168.20.66:8080/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "Qwen3.6-35B-A3B-UD-Q4_K_M.gguf",
+            "llm.profiles.primary.transport": "chat_completions",
+        }
+    )
+    client = LLMClient(config=config, backend=lambda payload: payload)
+
+    ordinary_payload = client._build_payload([{"role": "user", "content": ""}])
+    strict_blank_payload = client._build_payload(
+        [{"role": "user", "content": ""}],
+        metadata={"strictPromptPayload": True, "inputMode": "blank"},
+    )
+
+    assert ordinary_payload["messages"] == []
+    assert strict_blank_payload["messages"] == [{"role": "user", "content": ""}]
+
+
 def test_openai_chat_gpt_payload_omits_reasoning_effort():
     config = make_config(
         **{
