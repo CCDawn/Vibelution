@@ -7,6 +7,7 @@ import type { Dispatch, SetStateAction } from "react";
 
 import { fetchJson } from "../../api/client";
 import { queryKeys } from "../../api/queryKeys";
+import { runTeamExperimentSmoke } from "../../api/teamExperiment";
 import type { ExperimentPlanMethodRequest } from "../TeamExperimentMethodPanel";
 import {
   experimentPlanningStatusQueryKey,
@@ -20,7 +21,6 @@ import {
   type ExperimentPlanCreatePayload,
   type ExperimentPlanRecord,
   type ExperimentResultKnowledgeIngestionPayload,
-  type ExperimentSmokeRunPayload,
   type ExperimentSmokeResultDraft,
   type ExperimentSmokeResultRegisterPayload,
   type ResearchLoopCreateDraft,
@@ -133,18 +133,11 @@ export function useTeamExperimentLoopMutations(options: UseTeamExperimentLoopMut
       adapter: string;
       seed: number;
     }) =>
-      fetchJson<ExperimentSmokeRunPayload>(
-        `/api/teams/${encodeURIComponent(payload.teamId)}/workflow-orchestration/experiments/plans/${encodeURIComponent(payload.plan.planId)}/smoke-run`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            adapter: payload.adapter,
-            seed: payload.seed,
-            recordedByAgent: options.sourceCollectionOwnerAgentId,
-          }),
-        },
-      ),
+      runTeamExperimentSmoke(payload.teamId, payload.plan.planId, {
+        adapter: payload.adapter,
+        seed: payload.seed,
+        recordedByAgent: options.sourceCollectionOwnerAgentId,
+      }),
     onSuccess: (_payload, variables) => {
       void queryClient.invalidateQueries({ queryKey: experimentPlanningStatusQueryKey(variables.teamId) });
       void queryClient.invalidateQueries({ queryKey: researchStageRoundStatusQueryKey(variables.teamId) });
