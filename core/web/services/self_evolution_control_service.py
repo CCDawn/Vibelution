@@ -24,11 +24,12 @@ from core.evaluation.self_evolution_reflection import (
     record_bounded_self_evolution_reflection,
 )
 from core.infrastructure import developer_sandbox, git_process
+from core.infrastructure.agent_session import get_session_state
 from core.infrastructure.feature_gate import FeatureDecision, resolve_feature_decision
 from core.launcher import service as launcher_service
 from core.llm import LLMInvocationContext, get_llm_client, stream_llm
 from core.llm.client import llm_cancel_context
-from core.infrastructure.agent_session import get_session_state
+from core.llm.invocation import run_streaming_llm_outcome
 from core.orchestration.context_engine import build_agent_context, record_agent_turn_result
 from core.orchestration.turn_runner import AgentSingleTurnRequest, run_agent_single_turn
 from core.orchestration.turn_runtime import AgentTurnRuntimeRequest
@@ -2661,6 +2662,15 @@ def _resolve_self_observation_llm(agent_id: str, duration_seconds: int) -> tuple
     return resolved, client
 
 
+def _bounded_self_observation_previous_output(previous_output: str) -> str:
+    bounded_previous_output = str(previous_output or "").strip()
+    if len(bounded_previous_output) > _SELF_OBSERVATION_CONTINUATION_PREVIOUS_OUTPUT_CHARS:
+        bounded_previous_output = bounded_previous_output[
+            -_SELF_OBSERVATION_CONTINUATION_PREVIOUS_OUTPUT_CHARS:
+        ]
+    return bounded_previous_output
+
+
 def _invoke_strict_self_observation_llm(
     *,
     run_id: str,
@@ -2671,6 +2681,8 @@ def _invoke_strict_self_observation_llm(
     deadline_monotonic: float,
     input_mode: str = _SELF_OBSERVATION_INPUT_MODE_PROMPT,
     invocation_index: int = 1,
+    previous_output: str = "",
+    replay_state: Any = None,
 ) -> dict[str, Any]:
     if _self_observation_operator_terminated(run_id):
         raise TimeoutError("Observation session was terminated before model invocation.")
@@ -2681,21 +2693,43 @@ def _invoke_strict_self_observation_llm(
             "modelId": "",
             "deadlineReached": True,
             "cancelReason": _SELF_OBSERVATION_DEADLINE_CANCEL_REASON,
+            "replayState": replay_state,
         }
     resolved, client = _resolve_self_observation_llm(agent_id, duration_seconds)
     model_id = str(getattr(resolved, "model_id", "") or "").strip()
     normalized_input_mode = _normalize_self_observation_input_mode(input_mode)
-    strict_prompt = "" if normalized_input_mode == _SELF_OBSERVATION_INPUT_MODE_BLANK else prompt
-    messages = [{"role": "user", "content": strict_prompt}]
+    blank_mode = normalized_input_mode == _SELF_OBSERVATION_INPUT_MODE_BLANK
+    strict_prompt = "" if blank_mode else prompt
+    bounded_previous_output = (
+        _bounded_self_observation_previous_output(previous_output)
+        if blank_mode
+        else ""
+    )
+    messages = (
+        [
+            {"role": "assistant", "content": bounded_previous_output},
+            {"role": "user", "content": ""},
+        ]
+        if bounded_previous_output
+        else [{"role": "user", "content": strict_prompt}]
+    )
+    message_roles = [str(message.get("role") or "") for message in messages]
+    stateful_continuation = bool(blank_mode and (bounded_previous_output or replay_state is not None))
     cache_partition = _self_observation_prompt_cache_partition(run_id, agent_id, model_id)
     metadata = {
         "feature": "self_observation",
         "strictPromptPayload": True,
-        "messageRoleSummary": ["user"],
+        "messageRoleSummary": message_roles,
         "toolsCount": 0,
         "promptChars": len(str(strict_prompt or "")),
         "inputMode": normalized_input_mode,
         "invocationIndex": int(invocation_index or 1),
+        "invocationId": f"strict:{run_id}:{int(invocation_index or 1)}",
+        "turnId": f"strict:{run_id}:{int(invocation_index or 1)}",
+        "iteration": max(0, int(invocation_index or 1) - 1),
+        "historyAssistantChars": len(bounded_previous_output),
+        "statefulContinuation": stateful_continuation,
+        "replayStateInputPresent": replay_state is not None,
     }
     _record_self_scene_event(
         "self_observation",
@@ -2706,12 +2740,15 @@ def _invoke_strict_self_observation_llm(
             "agentId": agent_id,
             "sessionId": session_id,
             "modelId": model_id,
-            "messageRoles": ["user"],
+            "messageRoles": message_roles,
             "toolsCount": 0,
             "promptChars": len(str(strict_prompt or "")),
+            "historyAssistantChars": len(bounded_previous_output),
             "inputMode": normalized_input_mode,
             "invocationPath": "strict_direct_llm",
             "invocationIndex": int(invocation_index or 1),
+            "statefulContinuation": stateful_continuation,
+            "replayStateInputPresent": replay_state is not None,
         },
         lifecycle=True,
     )
@@ -2726,8 +2763,12 @@ def _invoke_strict_self_observation_llm(
         cache_scope="self_observation",
         cache_partition=cache_partition,
         prompt_purpose="strict_observation",
-        conversation_bound=False,
-        metadata={"strictPromptPayload": True, "inputMode": normalized_input_mode},
+        conversation_bound=blank_mode,
+        metadata={
+            "strictPromptPayload": True,
+            "inputMode": normalized_input_mode,
+            "statefulContinuation": stateful_continuation,
+        },
     )
 
     def cancel_reason() -> str:
@@ -2747,31 +2788,68 @@ def _invoke_strict_self_observation_llm(
             "modelId": model_id,
             "deadlineReached": True,
             "cancelReason": initial_cancel_reason,
+            "replayState": replay_state,
         }
 
     content_parts: list[str] = []
     tool_calls: list[Any] = []
+    canonical_outcome: Any = None
     cancellation_reason = ""
+
+    def capture_canonical_event(event: Any) -> None:
+        event_kind = str(getattr(event, "kind", "") or "").strip()
+        if event_kind not in {"answer_delta", "commentary_delta", "interim_text_delta"}:
+            return
+        event_text = str(getattr(event, "text", "") or "")
+        if event_text:
+            content_parts.append(event_text)
+
     try:
         with llm_cancel_context(cancel_reason):
-            for chunk in stream_llm(
-                client,
-                messages,
-                tools=[],
-                context=invocation_context,
-                metadata=metadata,
-            ):
-                chunk_content = chunk.get("content") if isinstance(chunk, dict) else getattr(chunk, "content", "")
-                if isinstance(chunk_content, str):
-                    content_parts.append(chunk_content)
-                elif chunk_content:
-                    content_parts.append(str(chunk_content))
-                chunk_tool_calls = (
-                    chunk.get("tool_calls")
-                    if isinstance(chunk, dict)
-                    else getattr(chunk, "tool_calls", [])
+            if blank_mode:
+                canonical_outcome = run_streaming_llm_outcome(
+                    client,
+                    messages,
+                    tools=[],
+                    context=invocation_context,
+                    metadata=metadata,
+                    replay_state=replay_state,
+                    on_event=capture_canonical_event,
                 )
-                tool_calls.extend(list(chunk_tool_calls or []))
+                canonical_content = str(getattr(canonical_outcome, "final_text", "") or "")
+                if canonical_content:
+                    content_parts[:] = [canonical_content]
+                tool_calls.extend(list(getattr(canonical_outcome, "tool_calls", ()) or ()))
+                outcome_kind = str(getattr(canonical_outcome, "kind", "") or "").strip()
+                if outcome_kind != "final_answer":
+                    outcome_error = str(getattr(canonical_outcome, "error", "") or "").strip()
+                    raise RuntimeError(
+                        outcome_error
+                        or f"Self-observation canonical LLM outcome was {outcome_kind or 'unknown'}."
+                    )
+            else:
+                for chunk in stream_llm(
+                    client,
+                    messages,
+                    tools=[],
+                    context=invocation_context,
+                    metadata=metadata,
+                ):
+                    chunk_content = (
+                        chunk.get("content")
+                        if isinstance(chunk, dict)
+                        else getattr(chunk, "content", "")
+                    )
+                    if isinstance(chunk_content, str):
+                        content_parts.append(chunk_content)
+                    elif chunk_content:
+                        content_parts.append(str(chunk_content))
+                    chunk_tool_calls = (
+                        chunk.get("tool_calls")
+                        if isinstance(chunk, dict)
+                        else getattr(chunk, "tool_calls", [])
+                    )
+                    tool_calls.extend(list(chunk_tool_calls or []))
     except Exception as exc:
         cancellation_reason = cancel_reason()
         if not cancellation_reason:
@@ -2794,11 +2872,14 @@ def _invoke_strict_self_observation_llm(
                 "cancelReason": cancellation_reason,
                 "invocationPath": "strict_direct_llm",
                 "invocationIndex": int(invocation_index or 1),
+                "statefulContinuation": stateful_continuation,
+                "replayStateInputPresent": replay_state is not None,
             },
             lifecycle=True,
         )
 
     content = "".join(content_parts).strip()
+    output_replay_state = getattr(canonical_outcome, "replay_state", None)
     deadline_reached = cancellation_reason == _SELF_OBSERVATION_DEADLINE_CANCEL_REASON
     if not cancellation_reason:
         _record_self_scene_event(
@@ -2816,6 +2897,9 @@ def _invoke_strict_self_observation_llm(
                 "inputMode": normalized_input_mode,
                 "invocationPath": "strict_direct_llm",
                 "invocationIndex": int(invocation_index or 1),
+                "statefulContinuation": stateful_continuation,
+                "replayStateInputPresent": replay_state is not None,
+                "replayStateOutputPresent": output_replay_state is not None,
             },
             lifecycle=True,
         )
@@ -2827,6 +2911,7 @@ def _invoke_strict_self_observation_llm(
         "modelId": model_id,
         "deadlineReached": deadline_reached,
         "cancelReason": cancellation_reason,
+        "replayState": output_replay_state,
     }
 
 
@@ -2877,9 +2962,7 @@ def _build_self_observation_continuation_prompt(
     *,
     remaining_seconds: float,
 ) -> str:
-    bounded_previous_output = str(previous_output or "").strip()
-    if len(bounded_previous_output) > _SELF_OBSERVATION_CONTINUATION_PREVIOUS_OUTPUT_CHARS:
-        bounded_previous_output = bounded_previous_output[-_SELF_OBSERVATION_CONTINUATION_PREVIOUS_OUTPUT_CHARS:]
+    bounded_previous_output = _bounded_self_observation_previous_output(previous_output)
     remaining = max(0, int(remaining_seconds))
     return (
         "上一段观察输出：\n"
@@ -2972,6 +3055,8 @@ def _run_observation_session(
     turn_duration_seconds = max(1, int(duration_seconds or 1))
     invocation_index = 1
     deadline_reached = False
+    previous_model_output = ""
+    replay_state: Any = None
 
     while True:
         llm_result = _invoke_strict_self_observation_llm(
@@ -2983,8 +3068,13 @@ def _run_observation_session(
             deadline_monotonic=effective_deadline_monotonic,
             input_mode=normalized_input_mode,
             invocation_index=invocation_index,
+            previous_output=previous_model_output,
+            replay_state=replay_state,
         )
-        report = str(llm_result.get("content") or "").strip()
+        previous_model_output = str(llm_result.get("content") or "").strip()
+        report = previous_model_output
+        if normalized_input_mode == _SELF_OBSERVATION_INPUT_MODE_BLANK:
+            replay_state = llm_result.get("replayState")
         deadline_reached = bool(llm_result.get("deadlineReached"))
         if not report and not deadline_reached:
             report = (
