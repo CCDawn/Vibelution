@@ -1995,12 +1995,14 @@ def test_self_observation_start_route_returns_no_tool_snapshot(monkeypatch):
 
     response = client.post(
         "/api/evolution/self/observation-runs",
-        json={"goal": "观察思考", "durationSeconds": 60},
+        json={"goal": "", "durationSeconds": 60, "inputMode": "blank"},
     )
 
     assert response.status_code == 202
     payload = response.json()
     assert payload["runKind"] == "self_observation_run"
+    assert payload["inputMode"] == "blank"
+    assert payload["goal"] == ""
     assert payload["allowedTools"] == []
     assert payload["worktreeCreated"] is False
 

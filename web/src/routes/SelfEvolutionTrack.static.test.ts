@@ -278,13 +278,16 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(selfEvolutionSource).not.toContain("parseObservationDurationInput(String(DEFAULT_OBSERVATION_DURATION_SECONDS))");
     expect(workspaceSurface).toContain("观察配置");
     expect(workspaceSurface).toContain("观察提示词");
+    expect(workspaceSurface).toContain("空白输入实验");
+    expect(workspaceSurface).toContain("模型输入");
     expect(workspaceSurface).toContain("原样发送");
     expect(workspaceSurface).toContain("运行时长（秒）");
     expect(workspaceSurface).toContain("开始自主观察");
     expect(workspaceSurface).toContain("终止这一轮");
     expect(workspaceSurface).toContain("observationPrimaryActionDisabled");
     expect(workspaceSurface).toContain("onTerminateObservation(observationRun.runId)");
-    expect(workspaceSurface).toContain("onStartObservation({ goal: observationGoalInput, durationSeconds: normalizedObservationDuration })");
+    expect(workspaceSurface).toContain('inputMode: observationInputModeValue');
+    expect(workspaceSurface).toContain('goal: observationInputModeValue === "blank" ? "" : observationGoalInput');
     expect(workspaceSurface).not.toContain("onStartObservation({ goal: observationGoalValue");
     expect(selfEvolutionSource).not.toContain("在底部输入观察目标后开始自主观察。");
     expect(selfEvolutionSource).not.toContain("Enter an observation goal in the composer, then start observation.");
@@ -342,7 +345,8 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(selfEvolutionSource).toContain("activeConversationSurface.messages");
     expect(selfEvolutionSource).toContain("activeConversationSurface.submitLabel");
     expect(selfEvolutionSource).toContain("activeConversationSurface.onSubmit");
-    expect(selfEvolutionSource).toContain("onStartObservation({ goal: observationGoalInput, durationSeconds: normalizedObservationDuration })");
+    expect(selfEvolutionSource).toContain('inputMode: observationInputModeValue');
+    expect(selfEvolutionSource).toContain('goal: observationInputModeValue === "blank" ? "" : observationGoalInput');
     expect(selfEvolutionSource).toContain("onStartRun");
     expect(centerConversationViewCount).toBe(1);
     expect(centerSurface).toContain("sessionId={activeConversationSurface.sessionId}");
@@ -350,6 +354,15 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(centerSurface).toContain("messages={activeConversationSurface.messages}");
     expect(centerSurface).toContain("showComposer={activeConversationSurface.showComposer}");
     expect(centerSurface).toContain("onSubmit={activeConversationSurface.onSubmit}");
+  });
+
+  it("requires a prompt only in prompt mode and locks blank mode to an empty user envelope", () => {
+    expect(selfEvolutionSource).toContain('type SelfObservationInputMode = "prompt" | "blank"');
+    expect(selfEvolutionSource).toContain('const [observationInputMode, setObservationInputMode] = useState<SelfObservationInputMode>("prompt")');
+    expect(selfEvolutionSource).toContain('observationInputModeValue === "blank"');
+    expect(selfEvolutionSource).toContain('observationInputModeValue !== "blank" && !observationPromptFilled');
+    expect(selfEvolutionSource).toContain('value="blank"');
+    expect(selfEvolutionSource).toContain('disabled={observationRunActive || observationStartPending || observationInputModeValue === "blank"}');
   });
 
   it("exposes workflow and disabled action explanations through VUI tooltips", () => {

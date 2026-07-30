@@ -1170,6 +1170,33 @@ def test_start_self_observation_run_has_no_tools_no_worktree(monkeypatch):
     assert service.get_active_self_observation_run()["runId"] == snapshot["runId"]
 
 
+def test_start_self_observation_blank_mode_preserves_empty_input(monkeypatch):
+    monkeypatch.setattr(service, "get_workbench_contract", lambda: {"modeAvailability": {"self_evolution": True}})
+    submitted: dict[str, object] = {}
+
+    def fake_submit(fn, context):
+        submitted["fn"] = fn
+        submitted["context"] = copy.deepcopy(context)
+        return SimpleNamespace()
+
+    monkeypatch.setattr(service._RUN_EXECUTOR, "submit", fake_submit)
+    service.force_cancel_active_self_observation_runs_for_shutdown("test cleanup")
+
+    snapshot = service.start_self_observation_run(
+        {"goal": "这个文本在空白模式下必须被丢弃", "durationSeconds": 360, "inputMode": "blank"}
+    )
+
+    assert snapshot["goal"] == ""
+    assert snapshot["inputMode"] == "blank"
+    assert snapshot["durationSeconds"] == 360
+    assert submitted["context"] == {
+        "runId": snapshot["runId"],
+        "goal": "",
+        "durationSeconds": 360,
+        "inputMode": "blank",
+    }
+
+
 @pytest.mark.parametrize(
     "field_name, field_value",
     [
@@ -1210,7 +1237,7 @@ def _install_strict_self_observation_llm(
 
     def default_monotonic() -> float:
         monotonic_state["calls"] += 1
-        return 0.0 if monotonic_state["calls"] == 1 else 999999.0
+        return 0.0 if monotonic_state["calls"] <= 2 else 999999.0
 
     monkeypatch.setattr(service.time, "monotonic", default_monotonic)
 
@@ -1233,7 +1260,7 @@ def _install_strict_self_observation_llm(
     )
     monkeypatch.setattr(service, "get_llm_client", lambda **kwargs: SimpleNamespace(), raising=False)
 
-    def fake_invoke_llm(client, messages, *, context, tools=None, metadata=None):
+    def fake_stream_llm(client, messages, *, context, tools=None, metadata=None):
         calls = captured.setdefault("calls", [])
         assert isinstance(calls, list)
         response_content = response_contents[min(len(calls), len(response_contents) - 1)]
@@ -1249,9 +1276,9 @@ def _install_strict_self_observation_llm(
         captured["tools"] = copy.deepcopy(tools)
         captured["context"] = context
         captured["metadata"] = copy.deepcopy(metadata)
-        return SimpleNamespace(content=response_content, tool_calls=[])
+        yield SimpleNamespace(content=response_content, tool_calls=[])
 
-    monkeypatch.setattr(service, "invoke_llm", fake_invoke_llm, raising=False)
+    monkeypatch.setattr(service, "stream_llm", fake_stream_llm, raising=False)
 
     def fake_append_artifact(session_id, artifact_content, *, metadata=None, tool_calls=None):
         artifact_messages.append(
@@ -1375,7 +1402,7 @@ def test_self_observation_session_continues_until_duration_when_model_stops(monk
     monkeypatch.setattr(service, "self_observation_agent_binding", lambda: {"agentId": "agent-observer-loop"})
     monkeypatch.setattr(service, "create_supervised_agent_session", lambda **kwargs: {"id": "session-loop"})
     monkeypatch.setattr(service.time, "sleep", lambda seconds: None)
-    monotonic_values = iter([0.0, 1.0, 1.0, 3.1])
+    monotonic_values = iter([0.0, 0.5, 1.0, 1.0, 1.0, 3.1])
     monkeypatch.setattr(service.time, "monotonic", lambda: next(monotonic_values))
 
     result = service._run_observation_session(
@@ -1406,6 +1433,101 @@ def test_self_observation_session_continues_until_duration_when_model_stops(monk
     assert result["report"] == "第一段观察\n\n第二段观察"
     assert [item["content"] for item in artifact_messages] == ["第一段观察", "第二段观察"]
     assert all(item["toolCalls"] == [] for item in artifact_messages)
+
+
+def test_self_observation_blank_mode_keeps_every_model_input_empty(monkeypatch):
+    captured, artifact_messages = _install_strict_self_observation_llm(
+        monkeypatch,
+        content=["第一段自由输出", "第二段自由输出"],
+    )
+    monkeypatch.setattr(service, "self_observation_agent_binding", lambda: {"agentId": "agent-observer-blank"})
+    monkeypatch.setattr(service, "create_supervised_agent_session", lambda **kwargs: {"id": "session-blank"})
+    monkeypatch.setattr(service.time, "sleep", lambda seconds: None)
+    monotonic_values = iter([0.0, 0.5, 1.0, 1.0, 1.0, 3.1])
+    monkeypatch.setattr(service.time, "monotonic", lambda: next(monotonic_values))
+
+    result = service._run_observation_session(
+        run_id="self-observe-blank",
+        prompt="",
+        duration_seconds=3,
+        input_mode="blank",
+    )
+
+    calls = captured["calls"]
+    assert isinstance(calls, list)
+    assert len(calls) == 2
+    assert all(call["messages"] == [{"role": "user", "content": ""}] for call in calls)
+    assert all(call["tools"] == [] for call in calls)
+    assert all(call["metadata"]["promptChars"] == 0 for call in calls)
+    assert all(call["metadata"]["inputMode"] == "blank" for call in calls)
+    assert result["messages"] == ["第一段自由输出", "第二段自由输出"]
+    assert [item["content"] for item in artifact_messages] == ["第一段自由输出", "第二段自由输出"]
+
+
+def test_self_observation_deadline_stops_stream_without_retry_and_keeps_partial_output(monkeypatch):
+    captured, _artifact_messages = _install_strict_self_observation_llm(
+        monkeypatch,
+        content="unused",
+    )
+    clock = {"now": 0.0}
+    monkeypatch.setattr(service.time, "monotonic", lambda: clock["now"])
+
+    def fake_stream_llm(client, messages, *, context, tools=None, metadata=None):
+        captured["messages"] = copy.deepcopy(messages)
+        captured["tools"] = copy.deepcopy(tools)
+        captured["metadata"] = copy.deepcopy(metadata)
+        yield SimpleNamespace(content="截止前的部分输出", tool_calls=[])
+        clock["now"] = 5.0
+        raise RuntimeError("provider request interrupted at deadline")
+
+    monkeypatch.setattr(service, "stream_llm", fake_stream_llm)
+
+    result = service._invoke_strict_self_observation_llm(
+        run_id="self-observe-deadline",
+        session_id="session-deadline",
+        agent_id="agent-observer-deadline",
+        prompt="",
+        duration_seconds=5,
+        deadline_monotonic=5.0,
+        input_mode="blank",
+    )
+
+    assert captured["messages"] == [{"role": "user", "content": ""}]
+    assert captured["tools"] == []
+    assert captured["metadata"]["promptChars"] == 0
+    assert result["content"] == "截止前的部分输出"
+    assert result["deadlineReached"] is True
+    assert result["cancelReason"] == "self_observation_deadline_reached"
+
+
+def test_self_observation_session_does_not_start_another_call_after_deadline(monkeypatch):
+    monkeypatch.setattr(service, "self_observation_agent_binding", lambda: {"agentId": "agent-observer-deadline"})
+    monkeypatch.setattr(service, "create_supervised_agent_session", lambda **kwargs: {"id": "session-deadline"})
+    monkeypatch.setattr(service, "_append_self_observation_assistant_artifact", lambda **kwargs: None)
+    calls: list[dict[str, object]] = []
+
+    def fake_invoke(**kwargs):
+        calls.append(copy.deepcopy(kwargs))
+        return {
+            "content": "截止前输出",
+            "toolCalls": [],
+            "modelId": "observer-model",
+            "deadlineReached": True,
+            "cancelReason": "self_observation_deadline_reached",
+        }
+
+    monkeypatch.setattr(service, "_invoke_strict_self_observation_llm", fake_invoke)
+
+    result = service._run_observation_session(
+        run_id="self-observe-no-post-deadline-call",
+        prompt="",
+        duration_seconds=360,
+        input_mode="blank",
+    )
+
+    assert len(calls) == 1
+    assert result["messages"] == ["截止前输出"]
+    assert result["deadlineReached"] is True
 
 
 def test_self_observation_turn_marks_boundary_violation(monkeypatch):

@@ -8,7 +8,6 @@ import os
 import queue
 import re
 import shutil
-import subprocess
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -27,7 +26,8 @@ from core.evaluation.self_evolution_reflection import (
 from core.infrastructure import developer_sandbox, git_process
 from core.infrastructure.feature_gate import FeatureDecision, resolve_feature_decision
 from core.launcher import service as launcher_service
-from core.llm import LLMInvocationContext, get_llm_client, invoke_llm
+from core.llm import LLMInvocationContext, get_llm_client, stream_llm
+from core.llm.client import llm_cancel_context
 from core.infrastructure.agent_session import get_session_state
 from core.orchestration.context_engine import build_agent_context, record_agent_turn_result
 from core.orchestration.turn_runner import AgentSingleTurnRequest, run_agent_single_turn
@@ -58,7 +58,6 @@ from .session_service import (
     active_session_has_write_leases,
     get_active_session_detail,
     create_supervised_agent_session,
-    has_running_sessions,
     list_active_session_work_runs,
     request_stop_session_turn,
     submit_session_message,
@@ -137,6 +136,14 @@ _ACTIVE_OBSERVATION_RUN_ID: str = ""
 _SELF_OBSERVATION_EVENT_TAIL_LIMIT = 12
 _SELF_OBSERVATION_CONTINUATION_SLEEP_SECONDS = 1.0
 _SELF_OBSERVATION_CONTINUATION_PREVIOUS_OUTPUT_CHARS = 6000
+_SELF_OBSERVATION_INPUT_MODE_PROMPT = "prompt"
+_SELF_OBSERVATION_INPUT_MODE_BLANK = "blank"
+_SELF_OBSERVATION_INPUT_MODES = {
+    _SELF_OBSERVATION_INPUT_MODE_PROMPT,
+    _SELF_OBSERVATION_INPUT_MODE_BLANK,
+}
+_SELF_OBSERVATION_DEADLINE_CANCEL_REASON = "self_observation_deadline_reached"
+_SELF_OBSERVATION_OPERATOR_CANCEL_REASON = "self_observation_operator_terminated"
 _MANAGER_CONTROL_KEY = "runtimeManagerControl"
 SELF_OBSERVATION_MIN_DURATION_SECONDS = 30
 SELF_OBSERVATION_MAX_DURATION_SECONDS = 3600
@@ -1817,7 +1824,6 @@ def handoff_self_evolution_run_to_session(run_id: str) -> dict[str, Any]:
 
     lang = get_web_language()
     state = _require_run_snapshot(run_id)
-    rollback = state.get("rollback") if isinstance(state.get("rollback"), dict) else {}
     content = _build_session_handoff_message(state)
     active_session = get_active_session_detail()
     session_id = str((active_session or {}).get("id") or "").strip()
@@ -2208,13 +2214,33 @@ def _self_observation_tool_policy() -> dict[str, Any]:
     }
 
 
-def _normalize_self_observation_prompt(goal: Any) -> str:
+def _normalize_self_observation_input_mode(value: Any) -> str:
+    normalized = str(value or _SELF_OBSERVATION_INPUT_MODE_PROMPT).strip().lower()
+    if normalized not in _SELF_OBSERVATION_INPUT_MODES:
+        raise SelfEvolutionRunValidationError(
+            f"Unsupported self observation input mode: {normalized or '<empty>'}"
+        )
+    return normalized
+
+
+def _normalize_self_observation_prompt(
+    goal: Any,
+    *,
+    input_mode: str = _SELF_OBSERVATION_INPUT_MODE_PROMPT,
+) -> str:
+    if _normalize_self_observation_input_mode(input_mode) == _SELF_OBSERVATION_INPUT_MODE_BLANK:
+        return ""
     prompt = "" if goal is None else str(goal)
     return prompt if prompt else DEFAULT_SELF_EVOLUTION_GOAL
 
 
-def build_self_observation_prompt(goal: str, duration_seconds: int) -> str:
-    return _normalize_self_observation_prompt(goal)
+def build_self_observation_prompt(
+    goal: str,
+    duration_seconds: int,
+    *,
+    input_mode: str = _SELF_OBSERVATION_INPUT_MODE_PROMPT,
+) -> str:
+    return _normalize_self_observation_prompt(goal, input_mode=input_mode)
 
 
 def detect_self_observation_boundary_violation(text: str) -> str:
@@ -2240,6 +2266,7 @@ def _build_self_observation_snapshot(
     *,
     run_id: str,
     goal: str,
+    input_mode: str,
     duration_seconds: int,
     status: str,
     latest_message: str,
@@ -2261,6 +2288,7 @@ def _build_self_observation_snapshot(
         "phase": status,
         "runtimeStatus": status,
         "goal": goal,
+        "inputMode": input_mode,
         "durationSeconds": duration_seconds,
         "allowedTools": [],
         "toolPolicy": _self_observation_tool_policy(),
@@ -2516,23 +2544,8 @@ def _self_observation_prompt_cache_partition(run_id: str, agent_id: str, model_i
     return f"self-observation-{digest}"
 
 
-def _extract_self_observation_response_text(response: Any) -> str:
-    content = response.get("content") if isinstance(response, dict) else getattr(response, "content", "")
-    if isinstance(content, str):
-        return content.strip()
-    if isinstance(content, list):
-        parts: list[str] = []
-        for block in content:
-            if isinstance(block, dict):
-                parts.append(str(block.get("text") or block.get("content") or ""))
-            else:
-                parts.append(str(block or ""))
-        return "\n".join(part for part in parts if part).strip()
-    return str(content or "").strip()
-
-
 def _cap_self_observation_llm_timeout(config: Any, profile_id: str, duration_seconds: int) -> None:
-    timeout_limit = max(5, int(duration_seconds or 0))
+    timeout_limit = max(1, int(duration_seconds or 0))
     if timeout_limit <= 0:
         return
     try:
@@ -2569,20 +2582,25 @@ def _invoke_strict_self_observation_llm(
     agent_id: str,
     prompt: str,
     duration_seconds: int,
+    deadline_monotonic: float,
+    input_mode: str = _SELF_OBSERVATION_INPUT_MODE_PROMPT,
     invocation_index: int = 1,
 ) -> dict[str, Any]:
     if _self_observation_operator_terminated(run_id):
         raise TimeoutError("Observation session was terminated before model invocation.")
     resolved, client = _resolve_self_observation_llm(agent_id, duration_seconds)
     model_id = str(getattr(resolved, "model_id", "") or "").strip()
-    messages = [{"role": "user", "content": prompt}]
+    normalized_input_mode = _normalize_self_observation_input_mode(input_mode)
+    strict_prompt = "" if normalized_input_mode == _SELF_OBSERVATION_INPUT_MODE_BLANK else prompt
+    messages = [{"role": "user", "content": strict_prompt}]
     cache_partition = _self_observation_prompt_cache_partition(run_id, agent_id, model_id)
     metadata = {
         "feature": "self_observation",
         "strictPromptPayload": True,
         "messageRoleSummary": ["user"],
         "toolsCount": 0,
-        "promptChars": len(str(prompt or "")),
+        "promptChars": len(str(strict_prompt or "")),
+        "inputMode": normalized_input_mode,
         "invocationIndex": int(invocation_index or 1),
     }
     _record_self_scene_event(
@@ -2596,57 +2614,125 @@ def _invoke_strict_self_observation_llm(
             "modelId": model_id,
             "messageRoles": ["user"],
             "toolsCount": 0,
-            "promptChars": len(str(prompt or "")),
+            "promptChars": len(str(strict_prompt or "")),
+            "inputMode": normalized_input_mode,
             "invocationPath": "strict_direct_llm",
             "invocationIndex": int(invocation_index or 1),
         },
         lifecycle=True,
     )
-    response = invoke_llm(
-        client,
-        messages,
-        tools=[],
-        context=LLMInvocationContext(
-            surface="self_observation",
-            run_kind="self_observation_run",
-            run_id=run_id,
-            session_id=session_id,
-            agent_id=agent_id,
-            llm_slot="dialogue",
-            model_id=model_id,
-            cache_scope="self_observation",
-            cache_partition=cache_partition,
-            prompt_purpose="strict_observation",
-            conversation_bound=False,
-            metadata={"strictPromptPayload": True},
-        ),
-        metadata=metadata,
-    )
-    content = _extract_self_observation_response_text(response)
-    tool_calls = list((response.get("tool_calls") if isinstance(response, dict) else getattr(response, "tool_calls", [])) or [])
-    _record_self_scene_event(
-        "self_observation",
-        "self_observation.llm.strict_invocation_completed",
+    invocation_context = LLMInvocationContext(
+        surface="self_observation",
+        run_kind="self_observation_run",
         run_id=run_id,
-        message="Strict self-observation LLM invocation completed.",
-        outcome="succeeded",
-        fields={
-            "agentId": agent_id,
-            "sessionId": session_id,
-            "modelId": model_id,
-            "outputChars": len(content),
-            "toolCallCount": len(tool_calls),
-            "invocationPath": "strict_direct_llm",
-            "invocationIndex": int(invocation_index or 1),
-        },
-        lifecycle=True,
+        session_id=session_id,
+        agent_id=agent_id,
+        llm_slot="dialogue",
+        model_id=model_id,
+        cache_scope="self_observation",
+        cache_partition=cache_partition,
+        prompt_purpose="strict_observation",
+        conversation_bound=False,
+        metadata={"strictPromptPayload": True, "inputMode": normalized_input_mode},
     )
+
+    def cancel_reason() -> str:
+        if _self_observation_operator_terminated(run_id):
+            return _SELF_OBSERVATION_OPERATOR_CANCEL_REASON
+        if time.monotonic() >= float(deadline_monotonic):
+            return _SELF_OBSERVATION_DEADLINE_CANCEL_REASON
+        return ""
+
+    initial_cancel_reason = cancel_reason()
+    if initial_cancel_reason == _SELF_OBSERVATION_OPERATOR_CANCEL_REASON:
+        raise TimeoutError("Observation session was terminated before model invocation.")
+    if initial_cancel_reason == _SELF_OBSERVATION_DEADLINE_CANCEL_REASON:
+        return {
+            "content": "",
+            "toolCalls": [],
+            "modelId": model_id,
+            "deadlineReached": True,
+            "cancelReason": initial_cancel_reason,
+        }
+
+    content_parts: list[str] = []
+    tool_calls: list[Any] = []
+    cancellation_reason = ""
+    try:
+        with llm_cancel_context(cancel_reason):
+            for chunk in stream_llm(
+                client,
+                messages,
+                tools=[],
+                context=invocation_context,
+                metadata=metadata,
+            ):
+                chunk_content = chunk.get("content") if isinstance(chunk, dict) else getattr(chunk, "content", "")
+                if isinstance(chunk_content, str):
+                    content_parts.append(chunk_content)
+                elif chunk_content:
+                    content_parts.append(str(chunk_content))
+                chunk_tool_calls = (
+                    chunk.get("tool_calls")
+                    if isinstance(chunk, dict)
+                    else getattr(chunk, "tool_calls", [])
+                )
+                tool_calls.extend(list(chunk_tool_calls or []))
+    except Exception as exc:
+        cancellation_reason = cancel_reason()
+        if not cancellation_reason:
+            raise
+        if cancellation_reason == _SELF_OBSERVATION_OPERATOR_CANCEL_REASON:
+            raise TimeoutError("Observation session was terminated during model invocation.") from exc
+        _record_self_scene_event(
+            "self_observation",
+            "self_observation.llm.strict_invocation_cancelled",
+            run_id=run_id,
+            message="Strict self-observation LLM invocation reached its hard deadline.",
+            outcome="cancelled",
+            fields={
+                "agentId": agent_id,
+                "sessionId": session_id,
+                "modelId": model_id,
+                "outputChars": len("".join(content_parts)),
+                "toolCallCount": len(tool_calls),
+                "inputMode": normalized_input_mode,
+                "cancelReason": cancellation_reason,
+                "invocationPath": "strict_direct_llm",
+                "invocationIndex": int(invocation_index or 1),
+            },
+            lifecycle=True,
+        )
+
+    content = "".join(content_parts).strip()
+    deadline_reached = cancellation_reason == _SELF_OBSERVATION_DEADLINE_CANCEL_REASON
+    if not cancellation_reason:
+        _record_self_scene_event(
+            "self_observation",
+            "self_observation.llm.strict_invocation_completed",
+            run_id=run_id,
+            message="Strict self-observation LLM invocation completed.",
+            outcome="succeeded",
+            fields={
+                "agentId": agent_id,
+                "sessionId": session_id,
+                "modelId": model_id,
+                "outputChars": len(content),
+                "toolCallCount": len(tool_calls),
+                "inputMode": normalized_input_mode,
+                "invocationPath": "strict_direct_llm",
+                "invocationIndex": int(invocation_index or 1),
+            },
+            lifecycle=True,
+        )
     if _self_observation_operator_terminated(run_id):
         raise TimeoutError("Observation session was terminated after model invocation.")
     return {
         "content": content,
         "toolCalls": tool_calls,
         "modelId": model_id,
+        "deadlineReached": deadline_reached,
+        "cancelReason": cancellation_reason,
     }
 
 
@@ -2706,12 +2792,19 @@ def _build_self_observation_continuation_prompt(
     )
 
 
-def _run_observation_session(*, run_id: str, prompt: str, duration_seconds: int) -> dict[str, Any]:
+def _run_observation_session(
+    *,
+    run_id: str,
+    prompt: str,
+    duration_seconds: int,
+    input_mode: str = _SELF_OBSERVATION_INPUT_MODE_PROMPT,
+) -> dict[str, Any]:
     observer_binding = self_observation_agent_binding()
     agent_id = str((observer_binding or {}).get("agentId") or "").strip()
     if not agent_id:
         raise SelfEvolutionRunValidationError("Missing self observation observer agent binding.")
 
+    normalized_input_mode = _normalize_self_observation_input_mode(input_mode)
     tool_policy = _self_observation_tool_policy()
     session = create_supervised_agent_session(
         agent_id=agent_id,
@@ -2721,6 +2814,7 @@ def _run_observation_session(*, run_id: str, prompt: str, duration_seconds: int)
             "mode": "self_observation",
             "runKind": "self_observation_run",
             "runId": run_id,
+            "inputMode": normalized_input_mode,
             "toolPolicy": tool_policy,
         },
     )
@@ -2760,9 +2854,10 @@ def _run_observation_session(*, run_id: str, prompt: str, duration_seconds: int)
     started_monotonic = time.monotonic()
     deadline_monotonic = started_monotonic + max(0.0, float(duration_seconds or 0))
     assistant_messages: list[str] = []
-    current_prompt = prompt
+    current_prompt = "" if normalized_input_mode == _SELF_OBSERVATION_INPUT_MODE_BLANK else prompt
     turn_duration_seconds = max(1, int(duration_seconds or 1))
     invocation_index = 1
+    deadline_reached = False
 
     while True:
         llm_result = _invoke_strict_self_observation_llm(
@@ -2771,35 +2866,43 @@ def _run_observation_session(*, run_id: str, prompt: str, duration_seconds: int)
             agent_id=agent_id,
             prompt=current_prompt,
             duration_seconds=turn_duration_seconds,
+            deadline_monotonic=deadline_monotonic,
+            input_mode=normalized_input_mode,
             invocation_index=invocation_index,
         )
         report = str(llm_result.get("content") or "").strip()
-        if not report:
+        deadline_reached = bool(llm_result.get("deadlineReached"))
+        if not report and not deadline_reached:
             report = (
                 "当前理解：\n"
                 "- observation LLM 调用已结束，但未返回可见 assistant 输出。\n\n"
                 "无法验证：\n"
                 "- 未获得模型输出内容。"
             )
-        assistant_messages.append(report)
-        _append_self_observation_assistant_artifact(
-            run_id=run_id,
-            session_id=session_id,
-            content=report,
-            model_id=str(llm_result.get("modelId") or "").strip(),
-        )
-        _update_self_observation_progress(
-            run_id,
-            conversation_session_id=session_id,
-            latest_message=report,
-            messages=assistant_messages,
-        )
+        if report:
+            assistant_messages.append(report)
+            _append_self_observation_assistant_artifact(
+                run_id=run_id,
+                session_id=session_id,
+                content=report,
+                model_id=str(llm_result.get("modelId") or "").strip(),
+            )
+            _update_self_observation_progress(
+                run_id,
+                conversation_session_id=session_id,
+                latest_message=report,
+                messages=assistant_messages,
+            )
 
-        if detect_self_observation_boundary_violation(report):
+        if deadline_reached:
+            break
+
+        if report and detect_self_observation_boundary_violation(report):
             break
 
         remaining_seconds = deadline_monotonic - time.monotonic()
         if remaining_seconds <= 0:
+            deadline_reached = True
             break
         if _self_observation_operator_terminated(run_id):
             break
@@ -2822,12 +2925,17 @@ def _run_observation_session(*, run_id: str, prompt: str, duration_seconds: int)
             time.sleep(sleep_seconds)
         remaining_after_wait = deadline_monotonic - time.monotonic()
         if remaining_after_wait <= 0:
+            deadline_reached = True
             break
         if _self_observation_operator_terminated(run_id):
             break
-        current_prompt = _build_self_observation_continuation_prompt(
-            report,
-            remaining_seconds=remaining_after_wait,
+        current_prompt = (
+            ""
+            if normalized_input_mode == _SELF_OBSERVATION_INPUT_MODE_BLANK
+            else _build_self_observation_continuation_prompt(
+                report,
+                remaining_seconds=remaining_after_wait,
+            )
         )
         turn_duration_seconds = max(1, int(remaining_after_wait))
         invocation_index = next_invocation_index
@@ -2837,13 +2945,15 @@ def _run_observation_session(*, run_id: str, prompt: str, duration_seconds: int)
         "conversationSessionId": session_id,
         "messages": assistant_messages,
         "report": report,
+        "deadlineReached": deadline_reached,
     }
 
 
 def _run_self_observation_turn(context: dict[str, Any]) -> None:
     global _ACTIVE_OBSERVATION_RUN_ID
     run_id = str((context or {}).get("runId") or "").strip()
-    goal = _normalize_self_observation_prompt((context or {}).get("goal"))
+    input_mode = _normalize_self_observation_input_mode((context or {}).get("inputMode"))
+    goal = _normalize_self_observation_prompt((context or {}).get("goal"), input_mode=input_mode)
     duration_seconds = _normalize_observation_duration((context or {}).get("durationSeconds"))
     if not run_id:
         return None
@@ -2878,8 +2988,9 @@ def _run_self_observation_turn(context: dict[str, Any]) -> None:
     try:
         result = _run_observation_session(
             run_id=run_id,
-            prompt=build_self_observation_prompt(goal, duration_seconds),
+            prompt=build_self_observation_prompt(goal, duration_seconds, input_mode=input_mode),
             duration_seconds=duration_seconds,
+            input_mode=input_mode,
         )
         conversation_session_id = str(result.get("conversationSessionId") or "").strip()
         messages = [str(item) for item in list(result.get("messages") or []) if str(item or "").strip()]
@@ -2891,6 +3002,12 @@ def _run_self_observation_turn(context: dict[str, Any]) -> None:
                 break
         status = "boundary_violation" if violation else "done"
         latest_message = messages[-1] if messages else report
+        if not latest_message and bool(result.get("deadlineReached")):
+            latest_message = text_for(
+                get_web_language(),
+                zh="自主观察已到达设定时限。",
+                en="Observation reached the configured deadline.",
+            )
         if violation:
             latest_message = text_for(
                 get_web_language(),
@@ -2943,7 +3060,8 @@ def start_self_observation_run(payload: dict[str, Any]) -> dict[str, Any]:
                 en=f"Observation mode has zero tools and does not support tool authorization or policy override fields: {field_list}",
             )
         )
-    goal = _normalize_self_observation_prompt(data.get("goal"))
+    input_mode = _normalize_self_observation_input_mode(data.get("inputMode"))
+    goal = _normalize_self_observation_prompt(data.get("goal"), input_mode=input_mode)
     duration_seconds = _normalize_observation_duration(data.get("durationSeconds"))
     now = _now_timestamp()
     with _OBSERVATION_RUN_STATE_LOCK:
@@ -2956,6 +3074,7 @@ def start_self_observation_run(payload: dict[str, Any]) -> dict[str, Any]:
         snapshot = _build_self_observation_snapshot(
             run_id=run_id,
             goal=goal,
+            input_mode=input_mode,
             duration_seconds=duration_seconds,
             status="queued",
             latest_message=text_for(lang, zh="自主观察已排队，等待无工具会话启动。", en="Observation run queued."),
@@ -2963,7 +3082,15 @@ def start_self_observation_run(payload: dict[str, Any]) -> dict[str, Any]:
         )
         _OBSERVATION_RUNS[run_id] = snapshot
         _ACTIVE_OBSERVATION_RUN_ID = run_id
-    _RUN_EXECUTOR.submit(_run_self_observation_turn, {"runId": run_id, "goal": goal, "durationSeconds": duration_seconds})
+    _RUN_EXECUTOR.submit(
+        _run_self_observation_turn,
+        {
+            "runId": run_id,
+            "goal": goal,
+            "durationSeconds": duration_seconds,
+            "inputMode": input_mode,
+        },
+    )
     return get_self_observation_run_snapshot(run_id) or snapshot
 
 
