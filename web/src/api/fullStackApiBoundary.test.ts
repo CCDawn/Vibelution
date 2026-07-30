@@ -54,7 +54,7 @@ const legacyRouteFetchJsonCallBudgets: Record<string, number> = {
   "routes/ResearchFlowCanvasRoute.tsx": 5,
   "routes/ResearchRoute.tsx": 8,
   "routes/RuntimeScenesPane.tsx": 4,
-  "routes/SelfEvolutionTrack.tsx": 4,
+  "routes/SelfEvolutionTrack.tsx": 3,
   "routes/SkillsRoute.tsx": 2,
   "routes/SupervisedReviewRoute.tsx": 7,
   "routes/SupervisedWorkspaceControls.tsx": 3,
