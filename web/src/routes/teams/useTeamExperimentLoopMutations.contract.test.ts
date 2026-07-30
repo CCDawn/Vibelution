@@ -6,6 +6,9 @@ import mutationsSource from "./useTeamExperimentLoopMutations.ts?raw";
 
 const mutationOwners = [
   "createExperimentPlanMutation",
+  "materializeEngineeringProxyHypothesisMutation",
+  "reviewExperimentHypothesisMutation",
+  "createExperimentHypothesisRevisionMutation",
   "freezeExperimentDesignMutation",
   "registerExperimentBaselineArtifactMutation",
   "runExperimentSmokeMutation",
@@ -45,6 +48,12 @@ describe("team experiment loop mutations contract", () => {
 
   it("preserves key write endpoints used by experiment ledger and research loop", () => {
     expect(mutationsSource).toContain("/workflow-orchestration/experiments/plan");
+    expect(mutationsSource).toContain("materializeTeamEngineeringProxyHypothesis(");
+    expect(mutationsSource).toContain("reviewTeamExperimentHypothesis(");
+    expect(mutationsSource).toContain("createTeamExperimentHypothesisRevision(");
+    expect(experimentApiSource).toContain("/hypotheses/engineering-proxy");
+    expect(experimentApiSource).toContain("/research/review/decide");
+    expect(experimentApiSource).toContain("/hypotheses/${encodeURIComponent(candidateId)}/revision");
     expect(mutationsSource).toContain("/baseline-artifact");
     expect(mutationsSource).toContain("runTeamExperimentSmoke(");
     expect(mutationsSource).not.toContain("/smoke-run");

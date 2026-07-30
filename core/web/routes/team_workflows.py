@@ -21,6 +21,7 @@ from core.web.services.team_workflow_orchestration_service import (
     assess_source_quality_batch,
     build_candidate_graph,
     create_experiment_plan,
+    create_experiment_plan_revision_from_hypothesis,
     create_research_project,
     decide_research_review,
     decide_transfer_request,
@@ -53,6 +54,7 @@ from core.web.services.team_workflow_orchestration_service import (
     list_candidate_store,
     list_research_projects,
     map_mechanism_to_abstraction,
+    materialize_experiment_proxy_hypothesis,
     open_source_collection_storage_target,
     plan_paper_note_chunks_from_source_candidate,
     propose_iteration,
@@ -377,6 +379,21 @@ class ExperimentPlanCreatePayload(BaseModel):
     revision: int = Field(1, ge=1)
     supersedesPlanId: str = Field("", max_length=200)
     notes: str = Field("", max_length=4000)
+
+
+class ExperimentEngineeringProxyHypothesisPayload(BaseModel):
+    title: str = Field("", max_length=240)
+    hypothesis: str = Field("", max_length=4000)
+    claimBoundary: str = Field("", max_length=2000)
+    expectedBenefit: str = Field("", max_length=1000)
+    expectedComputeCost: str = Field("", max_length=1000)
+    createdByAgent: str = Field("", max_length=160)
+    idempotencyKey: str = Field("", max_length=240)
+
+
+class ExperimentHypothesisRevisionPayload(BaseModel):
+    createdByAgent: str = Field("", max_length=160)
+    idempotencyKey: str = Field("", max_length=240)
 
 
 class ExperimentBaselineArtifactPayload(BaseModel):
@@ -1296,6 +1313,81 @@ def team_workflow_experiment_plan_create(team_id: str, payload: ExperimentPlanCr
             exc,
             status_code=422,
             fields={"stageRoundId": payload.stageRoundId, "createdByAgent": payload.createdByAgent},
+        )
+
+
+@router.post(
+    "/teams/{team_id}/workflow-orchestration/experiments/plans/{plan_id}/hypotheses/engineering-proxy",
+    status_code=status.HTTP_201_CREATED,
+)
+def team_workflow_experiment_proxy_hypothesis_materialize(
+    team_id: str,
+    plan_id: str,
+    payload: ExperimentEngineeringProxyHypothesisPayload,
+) -> dict:
+    try:
+        return materialize_experiment_proxy_hypothesis(
+            team_id,
+            plan_id,
+            payload.model_dump(),
+        )
+    except TeamNotFoundError as exc:
+        _raise_team_workflow_route_error(
+            "experiment_hypothesis.materialize_proxy",
+            team_id,
+            exc,
+            status_code=404,
+            fields={
+                "planId": plan_id,
+                "createdByAgent": payload.createdByAgent,
+            },
+        )
+    except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
+        _raise_team_workflow_route_error(
+            "experiment_hypothesis.materialize_proxy",
+            team_id,
+            exc,
+            status_code=422,
+            fields={
+                "planId": plan_id,
+                "createdByAgent": payload.createdByAgent,
+            },
+        )
+
+
+@router.post(
+    "/teams/{team_id}/workflow-orchestration/experiments/plans/{plan_id}/hypotheses/{candidate_id}/revision",
+    status_code=status.HTTP_201_CREATED,
+)
+def team_workflow_experiment_hypothesis_revision_create(
+    team_id: str,
+    plan_id: str,
+    candidate_id: str,
+    payload: ExperimentHypothesisRevisionPayload,
+) -> dict:
+    try:
+        return create_experiment_plan_revision_from_hypothesis(
+            team_id,
+            source_plan_id=plan_id,
+            hypothesis_candidate_id=candidate_id,
+            created_by_agent=payload.createdByAgent,
+            idempotency_key=payload.idempotencyKey,
+        )
+    except TeamNotFoundError as exc:
+        _raise_team_workflow_route_error(
+            "experiment_hypothesis.create_revision",
+            team_id,
+            exc,
+            status_code=404,
+            fields={"planId": plan_id, "candidateId": candidate_id},
+        )
+    except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
+        _raise_team_workflow_route_error(
+            "experiment_hypothesis.create_revision",
+            team_id,
+            exc,
+            status_code=422,
+            fields={"planId": plan_id, "candidateId": candidate_id},
         )
 
 

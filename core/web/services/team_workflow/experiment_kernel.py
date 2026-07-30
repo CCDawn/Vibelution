@@ -6,6 +6,7 @@ keeps monkeypatches stable.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -899,7 +900,11 @@ def _experiment_planning_status(
     latest_collection = s._latest_stage_round([item for item in rounds if str(item.get("stageType") or "") == "knowledge_collection"])
     latest_iteration = s._latest_stage_round([item for item in rounds if str(item.get("stageType") or "") == "iteration"])
     hypothesis_candidates = s._experiment_hypothesis_summaries(candidate_store)
-    ready_hypotheses = [item for item in hypothesis_candidates if item.get("valid") and not item.get("missingExperimentPlanFields")]
+    ready_hypotheses = [
+        item
+        for item in hypothesis_candidates
+        if item.get("approvedForExperiment") is True
+    ]
     plans = s._experiment_plans(plan_store)
     active_plan = s._active_experiment_plan(plan_store)
     lifecycle_projection = s._experiment_lifecycle_projection(
@@ -1034,13 +1039,15 @@ def _select_experiment_hypothesis_candidates(candidate_store: dict[str, Any], pa
         selected = [by_id[item_id] for item_id in explicit_ids if item_id in by_id]
         if len(selected) != len(explicit_ids):
             raise s.TeamWorkflowOrchestrationError("One or more hypothesis candidates were not found.")
+        if not all(s._experiment_hypothesis_is_ready(item) for item in selected):
+            raise s.TeamWorkflowOrchestrationError(
+                "Hypothesis candidates must be valid, complete, and approved before experiment planning."
+            )
         return selected
     ready = [
         item
         for item in candidates
-        if s.validate_candidate_record(item).get("valid") is True
-        and not s._experiment_hypothesis_missing_fields(item)
-        and not s._candidate_is_archived(item)
+        if s._experiment_hypothesis_is_ready(item)
     ]
     return ready[:8]
 
@@ -1300,6 +1307,13 @@ def _build_experiment_plan_record(
         "createdAt": now,
         "updatedAt": now,
     }
+    hypothesis_selection = (
+        payload.get("hypothesisSelection")
+        if isinstance(payload.get("hypothesisSelection"), dict)
+        else {}
+    )
+    if hypothesis_selection:
+        record["hypothesisSelection"] = s.deepcopy(hypothesis_selection)
     if design_gate is not None:
         record["designGate"] = design_gate
     return record
@@ -1317,6 +1331,248 @@ def _experiment_hypothesis_candidates(candidate_store: dict[str, Any]) -> list[d
     return sorted(candidates, key=lambda item: (str(item.get("updatedAt") or ""), str(item.get("candidateId") or "")), reverse=True)
 
 
+def _experiment_hypothesis_review_state(candidate: dict[str, Any]) -> dict[str, str]:
+    metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+    review_records = (
+        metadata.get("reviewRecords")
+        if isinstance(metadata.get("reviewRecords"), list)
+        else []
+    )
+    latest = next(
+        (
+            item
+            for item in reversed(review_records)
+            if isinstance(item, dict)
+            and str(item.get("decision") or "").strip()
+        ),
+        None,
+    )
+    return {
+        "decision": str((latest or {}).get("decision") or "unreviewed").strip().lower(),
+        "reviewRecordId": str((latest or {}).get("reviewRecordId") or ""),
+        "reviewedAt": str((latest or {}).get("createdAt") or ""),
+    }
+
+
+def _experiment_hypothesis_is_ready(candidate: dict[str, Any]) -> bool:
+    s = _service()
+    review = s._experiment_hypothesis_review_state(candidate)
+    return (
+        review["decision"] == "approve"
+        and s.validate_candidate_record(candidate).get("valid") is True
+        and not s._experiment_hypothesis_missing_fields(candidate)
+        and not s._candidate_is_archived(candidate)
+    )
+
+
+def _experiment_proxy_hypothesis_fingerprint(
+    plan_id: str,
+    payload: dict[str, Any],
+) -> str:
+    s = _service()
+    explicit = s._trim_text(payload.get("idempotencyKey"), max_length=240)
+    if explicit:
+        return explicit
+    identity = {
+        "planId": plan_id,
+        "title": s._trim_text(payload.get("title"), max_length=240),
+        "hypothesis": s._trim_text(payload.get("hypothesis"), max_length=4000),
+        "claimBoundary": s._trim_text(payload.get("claimBoundary"), max_length=2000),
+    }
+    return "sha256:" + hashlib.sha256(
+        json.dumps(identity, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+
+
+def _find_reusable_experiment_proxy_hypothesis(
+    candidate_store: dict[str, Any],
+    *,
+    source_plan_id: str,
+    fingerprint: str,
+) -> dict[str, Any] | None:
+    for candidate in list(candidate_store.get("candidates") or []):
+        if not isinstance(candidate, dict):
+            continue
+        metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+        materialization = (
+            metadata.get("materialization")
+            if isinstance(metadata.get("materialization"), dict)
+            else {}
+        )
+        if (
+            str(candidate.get("candidateType") or "") == "algorithm_hypothesis"
+            and str(materialization.get("sourcePlanId") or "") == source_plan_id
+            and str(materialization.get("fingerprint") or "") == fingerprint
+        ):
+            return candidate
+    return None
+
+
+def _build_experiment_proxy_hypothesis_record(
+    team_id: str,
+    workflow: dict[str, Any],
+    plan: dict[str, Any],
+    payload: dict[str, Any],
+    *,
+    created_by_agent: str,
+) -> dict[str, Any]:
+    s = _service()
+    plan_id = s._normalize_required_id(
+        plan.get("planId"),
+        "Source experiment plan id is required.",
+    )
+    title = s._trim_text(payload.get("title"), max_length=240)
+    hypothesis = s._trim_text(payload.get("hypothesis"), max_length=4000)
+    claim_boundary = s._trim_text(payload.get("claimBoundary"), max_length=2000)
+    if not title:
+        raise s.TeamWorkflowOrchestrationError("Engineering proxy hypothesis title is required.")
+    if not hypothesis:
+        raise s.TeamWorkflowOrchestrationError("Engineering proxy hypothesis is required.")
+    if not claim_boundary:
+        raise s.TeamWorkflowOrchestrationError("Engineering proxy hypothesis claimBoundary is required.")
+    experiment_plan = (
+        plan.get("experimentPlan")
+        if isinstance(plan.get("experimentPlan"), dict)
+        else {}
+    )
+    missing_fields = [
+        field
+        for field in s.EXPERIMENT_PLAN_REQUIRED_FIELDS
+        if not s._has_value(experiment_plan.get(field))
+    ]
+    if missing_fields:
+        raise s.TeamWorkflowOrchestrationError(
+            "Source experiment plan is incomplete: "
+            + ", ".join(missing_fields)
+            + "."
+        )
+    contract = (
+        plan.get("experimentContract")
+        if isinstance(plan.get("experimentContract"), dict)
+        else {}
+    )
+    method_config = (
+        contract.get("methodConfig")
+        if isinstance(contract.get("methodConfig"), dict)
+        else {}
+    )
+    metric_contract = (
+        contract.get("metricContract")
+        if isinstance(contract.get("metricContract"), dict)
+        else {}
+    )
+    decision_contract = (
+        contract.get("decisionContract")
+        if isinstance(contract.get("decisionContract"), dict)
+        else {}
+    )
+    revision = s._experiment_plan_revision(plan)
+    source_refs = [
+        {
+            "type": "experiment_plan",
+            "id": plan_id,
+            "label": s._trim_text(plan.get("title"), max_length=240) or plan_id,
+        }
+    ]
+    evidence_refs = [
+        {
+            "type": "experiment_contract",
+            "id": plan_id,
+            "label": f"Experiment design contract v{revision}",
+        }
+    ]
+    primary_metric = s._trim_text(
+        metric_contract.get("primaryMetric") or experiment_plan.get("metric"),
+        max_length=500,
+    )
+    success_criteria = decision_contract.get("successCriteria")
+    success_summary = (
+        "; ".join(
+            s._normalize_text_list(success_criteria, max_items=8, max_length=400)
+        )
+        or f"meet the preregistered threshold for {primary_metric}"
+    )
+    expected_benefit = (
+        s._trim_text(payload.get("expectedBenefit"), max_length=1000)
+        or success_summary
+    )
+    expected_compute_cost = (
+        s._trim_text(payload.get("expectedComputeCost"), max_length=1000)
+        or s._trim_text(method_config.get("budget"), max_length=1000)
+        or "Bounded by the source experiment design budget."
+    )
+    now = s.utc_now_iso()
+    fingerprint = s._experiment_proxy_hypothesis_fingerprint(plan_id, payload)
+    output = {
+        "candidateType": "algorithm_hypothesis",
+        "hypothesisKind": "engineering_proxy",
+        "sourcePlanId": plan_id,
+        "researchProjectId": s._trim_text(plan.get("researchProjectId"), max_length=160),
+        "sourceRefs": source_refs,
+        "evidenceRefs": evidence_refs,
+        "hypothesis": hypothesis,
+        "baseline": s._trim_text(experiment_plan.get("baseline"), max_length=500),
+        "expectedBenefit": expected_benefit,
+        "expectedComputeCost": expected_compute_cost,
+        "experimentPlan": {
+            field: s._trim_text(
+                experiment_plan.get(field),
+                max_length=1200 if field == "smokePlan" else 500,
+            )
+            for field in s.EXPERIMENT_PLAN_REQUIRED_FIELDS
+        },
+        "factLayer": [
+            f"The source plan fixes dataset, baseline, metric, and smoke protocol for design revision {revision}."
+        ],
+        "inferenceLayer": [hypothesis],
+        "claimBoundary": claim_boundary,
+        "uncertainty": [claim_boundary],
+        "riskFlags": [
+            "engineering_proxy_only",
+            "scientific_claim_not_supported",
+        ],
+        "confidence": 0,
+        "nextAction": "send_to_research_review",
+        "requiresReview": True,
+    }
+    record = {
+        "schemaVersion": s.SCHEMA_VERSION,
+        "candidateId": s._new_record_id("algorithm-hypothesis"),
+        "candidateType": "algorithm_hypothesis",
+        "teamId": team_id,
+        "workflowId": workflow.get("workflowId", s.DEFAULT_WORKFLOW_ID),
+        "title": title,
+        "sourceKind": "experiment_plan_proxy_hypothesis",
+        "summary": hypothesis,
+        "sourceRefs": source_refs,
+        "evidenceRefs": evidence_refs,
+        "metadata": {
+            "taskType": "algorithm_hypothesis_draft",
+            "output": output,
+            "materialization": {
+                "sourcePlanId": plan_id,
+                "sourcePlanRevision": revision,
+                "researchProjectId": s._trim_text(
+                    plan.get("researchProjectId"),
+                    max_length=160,
+                ),
+                "fingerprint": fingerprint,
+                "officialState": "candidate_only",
+                "noRunExecuted": True,
+                "noScientificClaim": True,
+            },
+        },
+        "createdByAgent": created_by_agent,
+        "currentWorkflowNode": "algorithm_hypothesis",
+        "currentState": "hypothesis_review_ready",
+        "qualityStatus": "needs_review",
+        "createdAt": now,
+        "updatedAt": now,
+    }
+    record["metadata"]["validation"] = s.validate_candidate_record(record)
+    return record
+
+
 def _experiment_hypothesis_summaries(candidate_store: dict[str, Any]) -> list[dict[str, Any]]:
     s = _service()
     return [s._experiment_hypothesis_summary(item) for item in s._experiment_hypothesis_candidates(candidate_store)]
@@ -1329,6 +1585,13 @@ def _experiment_hypothesis_summary(candidate: dict[str, Any]) -> dict[str, Any]:
     experiment_plan = output.get("experimentPlan") if isinstance(output.get("experimentPlan"), dict) else {}
     validation = s.validate_candidate_record(candidate)
     missing_fields = [field for field in s.EXPERIMENT_PLAN_REQUIRED_FIELDS if not s._has_value(experiment_plan.get(field))]
+    review = s._experiment_hypothesis_review_state(candidate)
+    approved_for_experiment = (
+        review["decision"] == "approve"
+        and validation.get("valid") is True
+        and not missing_fields
+        and not s._candidate_is_archived(candidate)
+    )
     return {
         "candidateId": str(candidate.get("candidateId") or ""),
         "title": str(candidate.get("title") or ""),
@@ -1339,6 +1602,18 @@ def _experiment_hypothesis_summary(candidate: dict[str, Any]) -> dict[str, Any]:
         "valid": validation.get("valid") is True,
         "validationIssueCount": len(validation.get("issues") or []),
         "hypothesis": s._trim_text(output.get("hypothesis"), max_length=1000),
+        "hypothesisKind": s._trim_text(output.get("hypothesisKind"), max_length=80)
+        or "scientific",
+        "sourcePlanId": s._trim_text(output.get("sourcePlanId"), max_length=200),
+        "researchProjectId": s._trim_text(
+            output.get("researchProjectId"),
+            max_length=160,
+        ),
+        "claimBoundary": s._trim_text(output.get("claimBoundary"), max_length=2000),
+        "reviewDecision": review["decision"],
+        "reviewRecordId": review["reviewRecordId"],
+        "reviewedAt": review["reviewedAt"],
+        "approvedForExperiment": approved_for_experiment,
         "baseline": s._trim_text(output.get("baseline"), max_length=500),
         "expectedBenefit": s._trim_text(output.get("expectedBenefit"), max_length=1000),
         "expectedComputeCost": s._trim_text(output.get("expectedComputeCost"), max_length=1000),

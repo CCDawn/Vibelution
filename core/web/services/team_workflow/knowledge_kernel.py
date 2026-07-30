@@ -232,12 +232,15 @@ def _research_review_checklist(candidate: dict[str, Any]) -> tuple[dict[str, boo
     evidence = candidate.get("evidenceRefs") or cpayload.get("evidenceRefs") or model_output.get("evidenceRefs")
     over_analogy = str(field("overAnalogyRisk") or "").strip().lower()
     has_experiment = bool(field("experimentPlan"))
+    hypothesis_kind = str(field("hypothesisKind") or "").strip().lower()
+    claim_boundary = str(field("claimBoundary") or "").strip()
     needs_fact_boundary = candidate_type in ("mechanism_mapping", "algorithm_hypothesis")
     checklist = {
         "citation": bool(evidence),
         "factBoundary": (not needs_fact_boundary) or bool(field("factLayer") or field("inferenceLayer")),
         "overAnalogy": over_analogy != "high",
         "testability": candidate_type != "algorithm_hypothesis" or has_experiment,
+        "claimBoundary": hypothesis_kind != "engineering_proxy" or bool(claim_boundary),
     }
     flags: list[str] = []
     if not checklist["citation"]:
@@ -246,6 +249,8 @@ def _research_review_checklist(candidate: dict[str, Any]) -> tuple[dict[str, boo
         flags.append("high_over_analogy")
     if not checklist["testability"]:
         flags.append("no_metric")
+    if not checklist["claimBoundary"]:
+        flags.append("missing_claim_boundary")
     return checklist, flags
 
 
@@ -2878,9 +2883,27 @@ def _validate_mechanism_mapping_output(output: dict[str, Any]) -> list[dict[str,
 def _validate_algorithm_hypothesis_output(output: dict[str, Any]) -> list[dict[str, str]]:
     s = _service()
     issues: list[dict[str, str]] = []
+    hypothesis_kind = s._trim_text(output.get("hypothesisKind"), max_length=80).strip().lower()
     mapping_ids = output.get("mechanismMappingIds")
     mechanism_ids = output.get("neuroMechanismIds")
-    if not s._has_any_list_value(mapping_ids) and not s._has_any_list_value(mechanism_ids):
+    if hypothesis_kind == "engineering_proxy":
+        if not s._has_value(output.get("sourcePlanId")):
+            issues.append(
+                {
+                    "severity": "error",
+                    "code": "missing_source_plan_id",
+                    "message": "engineering_proxy algorithm_hypothesis requires sourcePlanId.",
+                }
+            )
+        if not s._has_value(output.get("claimBoundary")):
+            issues.append(
+                {
+                    "severity": "error",
+                    "code": "missing_claim_boundary",
+                    "message": "engineering_proxy algorithm_hypothesis requires claimBoundary.",
+                }
+            )
+    elif not s._has_any_list_value(mapping_ids) and not s._has_any_list_value(mechanism_ids):
         issues.append({"severity": "error", "code": "missing_upstream_mechanism_refs", "message": "algorithm_hypothesis requires mechanismMappingIds or neuroMechanismIds."})
     if not s._has_value(output.get("hypothesis")):
         issues.append({"severity": "error", "code": "missing_hypothesis", "message": "algorithm_hypothesis requires hypothesis."})

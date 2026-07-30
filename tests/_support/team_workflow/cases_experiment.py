@@ -2,6 +2,226 @@ from __future__ import annotations
 
 from tests._support.team_workflow.helpers import *  # noqa: F403
 
+
+def _draft_complete_proxy_plan(team_id: str) -> dict:
+    stage = team_workflow_orchestration_service.start_research_stage_round(
+        team_id,
+        {
+            "stageType": "experiment",
+            "topic": "bounded engineering proxy validation",
+        },
+    )
+    return team_workflow_orchestration_service.create_experiment_plan(
+        team_id,
+        {
+            "stageRoundId": stage["stageRound"]["stageRoundId"],
+            "title": "Bounded proxy design v1",
+            "createdByAgent": "Experiment Planning Agent",
+            "researchQuestion": "Can the bounded reconstruction workflow beat its fixed baseline?",
+            "researchMode": "hypothesis_and_plan",
+            "experimentPurpose": {
+                "primaryPurpose": "feasibility",
+                "secondaryPurposes": [],
+            },
+            "experimentMethod": "model_training_inference",
+            "objective": "Validate only the reproducible engineering proxy workflow.",
+            "constraints": [
+                "No biological or clinical claim.",
+                "No automatic training or promotion.",
+            ],
+            "methodConfig": {
+                "dataset": "synthetic_structured_8x8_proxy",
+                "model": "iterative_visible_residual_correction",
+                "baseline": "one_shot_pca_reconstruction",
+                "seeds": [42],
+                "budget": "CPU-only, one deterministic seed",
+                "smokePlan": "predictive_coding_reconstruction_proxy; seed=42",
+            },
+            "metricContract": {
+                "primaryMetric": "reconstruction_mse_delta",
+                "metrics": [
+                    {
+                        "name": "reconstruction_mse_delta",
+                        "direction": "maximize",
+                    }
+                ],
+            },
+            "decisionContract": {
+                "successCriteria": ["reconstruction_mse_delta exceeds 0.001"],
+                "failureCriteria": ["reconstruction_mse_delta is not positive"],
+                "inconclusiveCriteria": ["the bounded runner is unavailable"],
+            },
+            "artifactContract": {
+                "requiredArtifacts": ["metric summary", "artifact hash"],
+            },
+            "reproducibilityContract": {
+                "seeds": [42],
+                "environmentRefs": ["local-cpu"],
+            },
+        },
+    )
+
+
+def test_plan_derived_engineering_proxy_hypothesis_is_idempotent_and_review_gated(
+    tmp_path,
+    monkeypatch,
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    source = _draft_complete_proxy_plan(team["teamId"])
+    source_plan = source["plan"]
+    request = {
+        "title": "工程代理假设",
+        "hypothesis": (
+            "在固定 seed 与相同合成数据下，当前候选重建流程相对固定 baseline "
+            "可使 reconstruction_mse_delta 超过预注册阈值。"
+        ),
+        "claimBoundary": "仅验证实验编排、复现与门禁链路，不支持睡眠、生物神经机制或临床结论。",
+        "createdByAgent": "Experiment Planning Agent",
+        "idempotencyKey": f"{source_plan['planId']}:engineering-proxy",
+    }
+
+    created = team_workflow_orchestration_service.materialize_experiment_proxy_hypothesis(
+        team["teamId"],
+        source_plan["planId"],
+        request,
+    )
+    replayed = team_workflow_orchestration_service.materialize_experiment_proxy_hypothesis(
+        team["teamId"],
+        source_plan["planId"],
+        request,
+    )
+    candidate = created["candidate"]
+
+    assert created["status"] == "created"
+    assert replayed["status"] == "reused"
+    assert replayed["candidate"]["candidateId"] == candidate["candidateId"]
+    assert candidate["metadata"]["output"]["hypothesisKind"] == "engineering_proxy"
+    assert candidate["metadata"]["output"]["sourcePlanId"] == source_plan["planId"]
+    assert candidate["metadata"]["output"]["claimBoundary"] == request["claimBoundary"]
+    assert candidate["metadata"]["output"]["experimentPlan"] == source_plan["experimentPlan"]
+    assert candidate["metadata"]["validation"]["valid"] is True
+    assert created["hypothesisSummary"]["reviewDecision"] == "unreviewed"
+    assert created["hypothesisSummary"]["approvedForExperiment"] is False
+
+    blocked_status = team_workflow_orchestration_service.get_experiment_planning_status(
+        team["teamId"]
+    )
+    assert blocked_status["summary"]["readyHypothesisCandidateCount"] == 0
+    with pytest.raises(
+        team_workflow_orchestration_service.TeamWorkflowOrchestrationError,
+        match="approved",
+    ):
+        team_workflow_orchestration_service.create_experiment_plan_revision_from_hypothesis(
+            team["teamId"],
+            source_plan_id=source_plan["planId"],
+            hypothesis_candidate_id=candidate["candidateId"],
+            created_by_agent="Research Coordination Agent",
+            idempotency_key=f"{source_plan['planId']}:{candidate['candidateId']}:revision",
+        )
+
+    review = team_workflow_orchestration_service.decide_research_review(
+        team["teamId"],
+        {
+            "candidateIds": [candidate["candidateId"]],
+            "decision": "approve",
+            "reviewedByAgent": "Research Coordination Agent",
+            "comments": "The proxy boundary and frozen controls are explicit.",
+        },
+    )
+    approved_status = team_workflow_orchestration_service.get_experiment_planning_status(
+        team["teamId"]
+    )
+    approved_candidate = approved_status["hypothesisCandidates"][0]
+
+    assert review["decision"] == "approve"
+    assert approved_candidate["reviewDecision"] == "approve"
+    assert approved_candidate["approvedForExperiment"] is True
+    assert approved_status["summary"]["readyHypothesisCandidateCount"] == 1
+
+    unrelated_source = _draft_complete_proxy_plan(team["teamId"])
+    with pytest.raises(
+        team_workflow_orchestration_service.TeamWorkflowOrchestrationError,
+        match="plan it was derived from",
+    ):
+        team_workflow_orchestration_service.create_experiment_plan_revision_from_hypothesis(
+            team["teamId"],
+            source_plan_id=unrelated_source["plan"]["planId"],
+            hypothesis_candidate_id=candidate["candidateId"],
+            created_by_agent="Research Coordination Agent",
+            idempotency_key=(
+                f"{unrelated_source['plan']['planId']}:"
+                f"{candidate['candidateId']}:wrong-source"
+            ),
+        )
+
+    revision = (
+        team_workflow_orchestration_service.create_experiment_plan_revision_from_hypothesis(
+            team["teamId"],
+            source_plan_id=source_plan["planId"],
+            hypothesis_candidate_id=candidate["candidateId"],
+            created_by_agent="Research Coordination Agent",
+            idempotency_key=f"{source_plan['planId']}:{candidate['candidateId']}:revision",
+        )
+    )
+    revision_replay = (
+        team_workflow_orchestration_service.create_experiment_plan_revision_from_hypothesis(
+            team["teamId"],
+            source_plan_id=source_plan["planId"],
+            hypothesis_candidate_id=candidate["candidateId"],
+            created_by_agent="Research Coordination Agent",
+            idempotency_key=f"{source_plan['planId']}:{candidate['candidateId']}:revision",
+        )
+    )
+
+    assert revision["status"] == "created"
+    assert revision_replay["status"] == "reused"
+    assert revision_replay["plan"]["planId"] == revision["plan"]["planId"]
+    assert revision["plan"]["planId"] != source_plan["planId"]
+    assert revision["plan"]["experimentContract"]["revision"] == 2
+    assert revision["plan"]["experimentContract"]["supersedesPlanId"] == source_plan["planId"]
+    assert revision["plan"]["hypothesisCandidateIds"] == [candidate["candidateId"]]
+    assert revision["plan"]["designGate"]["status"] == "draft"
+    assert revision["plan"]["baselineSelection"]["activeBaselineReady"] is False
+    assert revision["plan"]["hypothesisSelection"]["reviewRecordId"] == review["reviewRecord"]["candidateId"]
+    assert source_plan["designGate"]["status"] == "draft"
+
+
+def test_unreviewed_complete_hypothesis_cannot_be_selected_for_new_plan(
+    tmp_path,
+    monkeypatch,
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    source = _draft_complete_proxy_plan(team["teamId"])
+    materialized = team_workflow_orchestration_service.materialize_experiment_proxy_hypothesis(
+        team["teamId"],
+        source["plan"]["planId"],
+        {
+            "title": "Unreviewed proxy",
+            "hypothesis": "The bounded workflow may beat its fixed baseline.",
+            "claimBoundary": "Engineering proxy only; no scientific claim.",
+            "createdByAgent": "Experiment Planning Agent",
+            "idempotencyKey": "unreviewed-proxy",
+        },
+    )
+
+    with pytest.raises(
+        team_workflow_orchestration_service.TeamWorkflowOrchestrationError,
+        match="approved",
+    ):
+        team_workflow_orchestration_service.create_experiment_plan(
+            team["teamId"],
+            {
+                "stageRoundId": source["plan"]["stageRoundId"],
+                "hypothesisCandidateIds": [
+                    materialized["candidate"]["candidateId"]
+                ],
+                "createdByAgent": "Research Coordination Agent",
+            },
+        )
+
+
 def test_decide_research_review_reads_local_model_output_experiment_plan(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")
@@ -597,7 +817,7 @@ def test_experiment_lifecycle_projection_derives_memory_summary_for_legacy_plans
 def test_experiment_plan_draft_uses_ready_algorithm_hypotheses_and_blocks_full_run(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team = team_service.create_team(name="ai科学研究团队")
-    team_workflow_orchestration_service.record_local_research_model_output(
+    hypothesis = team_workflow_orchestration_service.record_local_research_model_output(
         team["teamId"],
         {
             "taskType": "algorithm_hypothesis_draft",
@@ -625,6 +845,14 @@ def test_experiment_plan_draft_uses_ready_algorithm_hypotheses_and_blocks_full_r
                 "nextAction": "send_to_research_review",
                 "requiresReview": True,
             },
+        },
+    )["candidate"]
+    team_workflow_orchestration_service.decide_research_review(
+        team["teamId"],
+        {
+            "candidateIds": [hypothesis["candidateId"]],
+            "decision": "approve",
+            "reviewedByAgent": "Research Coordination Agent",
         },
     )
     stage = team_workflow_orchestration_service.start_research_stage_round(
@@ -1173,7 +1401,7 @@ def test_experiment_design_can_be_frozen_without_any_training_result(tmp_path, m
 def test_experiment_baseline_artifact_registration_unlocks_smoke_gate(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team = team_service.create_team(name="ai科学研究团队")
-    team_workflow_orchestration_service.record_local_research_model_output(
+    hypothesis = team_workflow_orchestration_service.record_local_research_model_output(
         team["teamId"],
         {
             "taskType": "algorithm_hypothesis_draft",
@@ -1201,6 +1429,14 @@ def test_experiment_baseline_artifact_registration_unlocks_smoke_gate(tmp_path, 
                 "nextAction": "send_to_research_review",
                 "requiresReview": True,
             },
+        },
+    )["candidate"]
+    team_workflow_orchestration_service.decide_research_review(
+        team["teamId"],
+        {
+            "candidateIds": [hypothesis["candidateId"]],
+            "decision": "approve",
+            "reviewedByAgent": "Research Coordination Agent",
         },
     )
     stage = team_workflow_orchestration_service.start_research_stage_round(

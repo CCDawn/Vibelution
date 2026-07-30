@@ -10,6 +10,7 @@ import { VNativeButton, VNativeInput, VNativeSelect, VNativeTextarea } from "../
 import {
   EXPERIMENT_FULL_RUN_RESULT_STATUSES,
   EXPERIMENT_SMOKE_RESULT_STATUSES,
+  type EngineeringProxyHypothesisDraft,
   type ExperimentBaselineArtifactDraft,
   type ExperimentFullRunResultDraft,
   type ExperimentFullRunResultStatus,
@@ -19,6 +20,7 @@ import {
   type ExperimentSmokeResultDraft,
   type ExperimentSmokeResultStatus,
 } from "./teams/experimentLoopModel";
+import { TeamExperimentHypothesisGovernancePanel } from "./TeamExperimentHypothesisGovernancePanel";
 import { TeamExperimentMethodPanel, type ExperimentPlanMethodRequest } from "./TeamExperimentMethodPanel";
 import experimentStyles from "./TeamsRoute.experiment.styles";
 import researchStyles from "./TeamsRoute.research.styles";
@@ -49,6 +51,12 @@ export type TeamExperimentPlanningLedgerPanelProps = {
   selectedTeamCreateExperimentPlanError: Error | null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   selectedTeamCreateExperimentPlanResult: any;
+  selectedTeamMaterializeEngineeringProxyPending: boolean;
+  selectedTeamMaterializeEngineeringProxyError: Error | null;
+  selectedTeamReviewExperimentHypothesisCandidateId: string;
+  selectedTeamReviewExperimentHypothesisError: Error | null;
+  selectedTeamCreateExperimentHypothesisRevisionCandidateId: string;
+  selectedTeamCreateExperimentHypothesisRevisionError: Error | null;
   selectedTeamFreezeExperimentDesignPending: boolean;
   selectedTeamFreezeExperimentDesignError: Error | null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -74,6 +82,15 @@ export type TeamExperimentPlanningLedgerPanelProps = {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   selectedTeamRequestExperimentKnowledgeIngestionResult: any;
   createExperimentPlanFromWorkspace: (methodRequest?: ExperimentPlanMethodRequest) => void;
+  materializeEngineeringProxyHypothesisFromWorkspace: (
+    plan: ExperimentPlanRecord,
+    draft: EngineeringProxyHypothesisDraft,
+  ) => void;
+  reviewExperimentHypothesisFromWorkspace: (candidateId: string) => void;
+  createExperimentHypothesisRevisionFromWorkspace: (
+    plan: ExperimentPlanRecord,
+    candidateId: string,
+  ) => void;
   freezeExperimentDesignFromWorkspace: (plan: ExperimentPlanRecord) => void;
   registerExperimentBaselineArtifactFromWorkspace: (plan: ExperimentPlanRecord) => void;
   runExperimentSmokeFromWorkspace: (plan: ExperimentPlanRecord, adapter: string, seed: number) => void;
@@ -103,6 +120,12 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
     selectedTeamCreateExperimentPlanPending,
     selectedTeamCreateExperimentPlanError,
     selectedTeamCreateExperimentPlanResult,
+    selectedTeamMaterializeEngineeringProxyPending,
+    selectedTeamMaterializeEngineeringProxyError,
+    selectedTeamReviewExperimentHypothesisCandidateId,
+    selectedTeamReviewExperimentHypothesisError,
+    selectedTeamCreateExperimentHypothesisRevisionCandidateId,
+    selectedTeamCreateExperimentHypothesisRevisionError,
     selectedTeamFreezeExperimentDesignPending,
     selectedTeamFreezeExperimentDesignError,
     selectedTeamFreezeExperimentDesignResult,
@@ -122,6 +145,9 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
     selectedTeamRequestExperimentKnowledgeIngestionError,
     selectedTeamRequestExperimentKnowledgeIngestionResult,
     createExperimentPlanFromWorkspace,
+    materializeEngineeringProxyHypothesisFromWorkspace,
+    reviewExperimentHypothesisFromWorkspace,
+    createExperimentHypothesisRevisionFromWorkspace,
     freezeExperimentDesignFromWorkspace,
     registerExperimentBaselineArtifactFromWorkspace,
     runExperimentSmokeFromWorkspace,
@@ -183,9 +209,7 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
       boundedSmokeAdapters.find((adapter: any) => adapter.adapterId === requestedSmokeAdapterId)
       ?? boundedSmokeAdapters[0]
       ?? null;
-    const hypotheses = statusPayload?.readyHypothesisCandidates?.length
-      ? statusPayload.readyHypothesisCandidates
-      : statusPayload?.hypothesisCandidates ?? [];
+    const hypotheses = statusPayload?.hypothesisCandidates ?? [];
     const canDraftPlan = Boolean(selectedTeam?.teamId && statusPayload?.latestExperimentRound && !selectedTeamCreateExperimentPlanPending);
     const explicitDesignGate = activePlan?.designGate;
     const designExecutionAllowed = !explicitDesignGate || explicitDesignGate.status === "frozen";
@@ -317,6 +341,20 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
           submitting={selectedTeamCreateExperimentPlanPending}
           canCreatePlan={canDraftPlan}
           onSubmit={createExperimentPlanFromWorkspace}
+        />
+        <TeamExperimentHypothesisGovernancePanel
+          lang={lang}
+          activePlan={activePlan}
+          hypotheses={hypotheses}
+          materializing={selectedTeamMaterializeEngineeringProxyPending}
+          reviewingCandidateId={selectedTeamReviewExperimentHypothesisCandidateId}
+          revisingCandidateId={selectedTeamCreateExperimentHypothesisRevisionCandidateId}
+          materializeError={selectedTeamMaterializeEngineeringProxyError}
+          reviewError={selectedTeamReviewExperimentHypothesisError}
+          revisionError={selectedTeamCreateExperimentHypothesisRevisionError}
+          onMaterialize={materializeEngineeringProxyHypothesisFromWorkspace}
+          onReview={reviewExperimentHypothesisFromWorkspace}
+          onCreateRevision={createExperimentHypothesisRevisionFromWorkspace}
         />
         {activePlan ? (
           <>
@@ -784,26 +822,6 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
         )}
         {renderResearchLoopPanel(activePlan, "experiment")}
         <div className={styles.experimentEvidenceGrid}>
-          <section>
-            <strong>{lang === "zh" ? "候选算法假设" : "Algorithm hypotheses"}</strong>
-            <div className={styles.experimentHypothesisList}>
-              {hypotheses.slice(0, 4).map((candidate: any) => (
-                <article key={candidate.candidateId}>
-                  <div>
-                    <span>{candidate.valid ? (lang === "zh" ? "可用" : "ready") : (lang === "zh" ? "需修订" : "rework")}</span>
-                    <strong>{candidate.title || candidate.candidateId}</strong>
-                  </div>
-                  <p>{candidate.hypothesis || candidate.summary || "-"}</p>
-                  <small>
-                    {candidate.missingExperimentPlanFields.length
-                      ? `${lang === "zh" ? "候选自身缺" : "candidate missing"} ${candidate.missingExperimentPlanFields.join(", ")}`
-                      : `${candidate.experimentPlan.dataset || "-"} / ${candidate.experimentPlan.metric || "-"}`}
-                  </small>
-                </article>
-              ))}
-              {hypotheses.length === 0 ? <span>{lang === "zh" ? "暂无可用假设候选" : "No hypothesis candidates yet"}</span> : null}
-            </div>
-          </section>
           <section>
             <strong>{lang === "zh" ? "阻塞项" : "Blockers"}</strong>
             <div className={styles.experimentGapList}>

@@ -348,7 +348,7 @@ def _fake_mixed_excluded_source_search_response(query, *, max_results, provider)
     }
 
 def _create_experiment_plan_with_active_baseline(team_id):
-    team_workflow_orchestration_service.record_local_research_model_output(
+    hypothesis = team_workflow_orchestration_service.record_local_research_model_output(
         team_id,
         {
             "taskType": "algorithm_hypothesis_draft",
@@ -376,6 +376,14 @@ def _create_experiment_plan_with_active_baseline(team_id):
                 "nextAction": "send_to_research_review",
                 "requiresReview": True,
             },
+        },
+    )["candidate"]
+    team_workflow_orchestration_service.decide_research_review(
+        team_id,
+        {
+            "candidateIds": [hypothesis["candidateId"]],
+            "decision": "approve",
+            "reviewedByAgent": "Research Coordination Agent",
         },
     )
     stage = team_workflow_orchestration_service.start_research_stage_round(

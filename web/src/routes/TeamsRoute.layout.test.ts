@@ -79,6 +79,7 @@ import teamResearchStageLauncherPanelSource from "./TeamResearchStageLauncherPan
 import teamResearchStageStandalonePagePanelSource from "./TeamResearchStageStandalonePagePanel.tsx?raw";
 import teamResearchLoopPanelSource from "./TeamResearchLoopPanel.tsx?raw";
 import teamExperimentPlanningLedgerPanelSource from "./TeamExperimentPlanningLedgerPanel.tsx?raw";
+import teamExperimentHypothesisGovernancePanelSource from "./TeamExperimentHypothesisGovernancePanel.tsx?raw";
 import teamKnowledgeCollectionCompletionFlowPanelSource from "./TeamKnowledgeCollectionCompletionFlowPanel.tsx?raw";
 import teamSourceCollectionConversationWorkspacePanelSource from "./TeamSourceCollectionConversationWorkspacePanel.tsx?raw";
 import teamSourceCollectionScreeningWorkspacePanelSource from "./TeamSourceCollectionScreeningWorkspacePanel.tsx?raw";
@@ -1734,6 +1735,11 @@ describe("TeamsRoute layout contract", () => {
     // Wave 8J: ledger UI + method mount live on TeamExperimentPlanningLedgerPanel.
     expect(teamExperimentPlanningLedgerPanelSource).toContain("实验计划账本");
     expect(teamExperimentPlanningLedgerPanelSource).toContain("TeamExperimentMethodPanel");
+    expect(teamExperimentPlanningLedgerPanelSource).toContain("TeamExperimentHypothesisGovernancePanel");
+    expect(teamExperimentHypothesisGovernancePanelSource).toContain("人工批准用于设计");
+    expect(teamExperimentHypothesisGovernancePanelSource).toContain("创建新设计修订");
+    expect(teamExperimentHypothesisGovernancePanelSource).toContain("不会自动冻结");
+    expect(teamExperimentHypothesisGovernancePanelSource).toContain("candidate.approvedForExperiment");
     expect(routeSource).toContain("experimentMethodCatalogQueryKey");
     // Wave 8S: experiment method catalog gating lives on research secondary queries.
     expect(teamResearchSecondaryQueriesSource).toContain('["overview", "experiment"].includes(options.researchWorkspaceView)');
@@ -2379,7 +2385,7 @@ describe("TeamsRoute layout contract", () => {
     expect(teamExperimentPlanningLedgerPanelSource).toContain("smokeGateDetail");
     expect(teamExperimentPlanningLedgerPanelSource).toContain("先完成假设审查并冻结设计");
     expect(teamExperimentPlanningLedgerPanelSource).toContain("先登记可复现的 active baseline artifact");
-    expect(teamExperimentPlanningLedgerPanelSource).toContain("候选自身缺");
+    expect(teamExperimentHypothesisGovernancePanelSource).toContain("仍缺：");
   });
 
   it("uses shared Phase 2 surfaces for Team unavailable and canvas states", () => {
