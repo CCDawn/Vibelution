@@ -51,6 +51,7 @@ describe("agentRouteDraftModel", () => {
 
     const draft = draftFromAgent(agent);
     expect(draft.displayName).toBe("助手");
+    expect(draft.permissionPreset).toBe("request_approval");
     expect(draftEqualsAgent(draft, agent)).toBe(true);
   });
 
@@ -100,13 +101,16 @@ describe("agentRouteDraftModel", () => {
       promptTemplateId: "p1",
       toolPolicyId: "t1",
       memoryPolicyId: "m1",
+      permissionPreset: "auto_review",
       status: "active",
       llmBindings: { dialogue: { modelId: "m1" } },
       personaProfile: { gender: "女", personality: "冷静" },
       taskProfile: { mission: "研究" },
     } as AgentConfigWorkspaceAgent;
     const config = draftFromAgent(agent);
+    expect(config.permissionPreset).toBe("auto_review");
     expect(configDraftEqualsDraft(config, config)).toBe(true);
+    expect(draftEqualsAgent({ ...config, permissionPreset: "full_access" }, agent)).toBe(false);
     expect(configDraftEqualsDraft(config, { ...config, displayName: "x" })).toBe(false);
     const persona = personaDraftFromAgent(agent);
     expect(personaDraftEqualsDraft(persona, persona)).toBe(true);

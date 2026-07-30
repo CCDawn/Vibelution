@@ -30,4 +30,9 @@ describe("agent config draft mutations contract", () => {
     expect(mutationsSource).toContain("/config-drafts");
     expect(mutationsSource).toContain("/promote");
   });
+
+  it("publishes the Agent-owned permission preset with config revision concurrency", () => {
+    expect(mutationsSource).toContain("permissionPreset: payload.draft.permissionPreset");
+    expect(mutationsSource).toContain("expectedConfigRevision: payload.agent.configRevision");
+  });
 });
