@@ -1173,6 +1173,7 @@ def test_start_self_observation_run_has_no_tools_no_worktree(monkeypatch):
 def test_start_self_observation_blank_mode_preserves_empty_input(monkeypatch):
     monkeypatch.setattr(service, "get_workbench_contract", lambda: {"modeAvailability": {"self_evolution": True}})
     submitted: dict[str, object] = {}
+    watchdog: dict[str, object] = {}
 
     def fake_submit(fn, context):
         submitted["fn"] = fn
@@ -1180,6 +1181,14 @@ def test_start_self_observation_blank_mode_preserves_empty_input(monkeypatch):
         return SimpleNamespace()
 
     monkeypatch.setattr(service._RUN_EXECUTOR, "submit", fake_submit)
+    monkeypatch.setattr(service.time, "monotonic", lambda: 100.0)
+    monkeypatch.setattr(
+        service,
+        "_start_self_observation_deadline_watchdog",
+        lambda run_id, *, deadline_monotonic: watchdog.update(
+            {"runId": run_id, "deadlineMonotonic": deadline_monotonic}
+        ),
+    )
     service.force_cancel_active_self_observation_runs_for_shutdown("test cleanup")
 
     snapshot = service.start_self_observation_run(
@@ -1194,7 +1203,9 @@ def test_start_self_observation_blank_mode_preserves_empty_input(monkeypatch):
         "goal": "",
         "durationSeconds": 360,
         "inputMode": "blank",
+        "deadlineMonotonic": 460.0,
     }
+    assert watchdog == {"runId": snapshot["runId"], "deadlineMonotonic": 460.0}
 
 
 @pytest.mark.parametrize(
@@ -1233,13 +1244,8 @@ def _install_strict_self_observation_llm(
     captured: dict[str, object] = {}
     artifact_messages: list[dict[str, object]] = []
     response_contents = list(content) if isinstance(content, list) else [content]
-    monotonic_state = {"calls": 0}
-
-    def default_monotonic() -> float:
-        monotonic_state["calls"] += 1
-        return 0.0 if monotonic_state["calls"] <= 2 else 999999.0
-
-    monkeypatch.setattr(service.time, "monotonic", default_monotonic)
+    monotonic_state = {"now": 0.0}
+    monkeypatch.setattr(service.time, "monotonic", lambda: monotonic_state["now"])
 
     monkeypatch.setattr(
         service.agent_directory_service,
@@ -1277,6 +1283,7 @@ def _install_strict_self_observation_llm(
         captured["context"] = context
         captured["metadata"] = copy.deepcopy(metadata)
         yield SimpleNamespace(content=response_content, tool_calls=[])
+        monotonic_state["now"] = 999999.0
 
     monkeypatch.setattr(service, "stream_llm", fake_stream_llm, raising=False)
 
@@ -1402,7 +1409,7 @@ def test_self_observation_session_continues_until_duration_when_model_stops(monk
     monkeypatch.setattr(service, "self_observation_agent_binding", lambda: {"agentId": "agent-observer-loop"})
     monkeypatch.setattr(service, "create_supervised_agent_session", lambda **kwargs: {"id": "session-loop"})
     monkeypatch.setattr(service.time, "sleep", lambda seconds: None)
-    monotonic_values = iter([0.0, 0.5, 1.0, 1.0, 1.0, 3.1])
+    monotonic_values = iter([0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 3.1])
     monkeypatch.setattr(service.time, "monotonic", lambda: next(monotonic_values))
 
     result = service._run_observation_session(
@@ -1443,7 +1450,7 @@ def test_self_observation_blank_mode_keeps_every_model_input_empty(monkeypatch):
     monkeypatch.setattr(service, "self_observation_agent_binding", lambda: {"agentId": "agent-observer-blank"})
     monkeypatch.setattr(service, "create_supervised_agent_session", lambda **kwargs: {"id": "session-blank"})
     monkeypatch.setattr(service.time, "sleep", lambda seconds: None)
-    monotonic_values = iter([0.0, 0.5, 1.0, 1.0, 1.0, 3.1])
+    monotonic_values = iter([0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 3.1])
     monkeypatch.setattr(service.time, "monotonic", lambda: next(monotonic_values))
 
     result = service._run_observation_session(
@@ -1528,6 +1535,73 @@ def test_self_observation_session_does_not_start_another_call_after_deadline(mon
     assert len(calls) == 1
     assert result["messages"] == ["截止前输出"]
     assert result["deadlineReached"] is True
+
+
+def test_self_observation_session_does_not_invoke_model_when_session_creation_crosses_deadline(monkeypatch):
+    clock = {"now": 0.0}
+    invoked: list[dict[str, object]] = []
+    monkeypatch.setattr(service.time, "monotonic", lambda: clock["now"])
+    monkeypatch.setattr(service, "self_observation_agent_binding", lambda: {"agentId": "agent-observer-deadline"})
+
+    def fake_create_supervised_agent_session(**kwargs):
+        clock["now"] = 6.0
+        return {"id": "session-created-too-late"}
+
+    monkeypatch.setattr(service, "create_supervised_agent_session", fake_create_supervised_agent_session)
+    monkeypatch.setattr(
+        service,
+        "_invoke_strict_self_observation_llm",
+        lambda **kwargs: invoked.append(copy.deepcopy(kwargs)),
+    )
+
+    result = service._run_observation_session(
+        run_id="self-observe-session-init-deadline",
+        prompt="",
+        duration_seconds=5,
+        input_mode="blank",
+        deadline_monotonic=5.0,
+    )
+
+    assert invoked == []
+    assert result["conversationSessionId"] == "session-created-too-late"
+    assert result["messages"] == []
+    assert result["deadlineReached"] is True
+
+
+def test_self_observation_deadline_watchdog_fails_stuck_start_and_blocks_late_worker(monkeypatch):
+    monkeypatch.setattr(service, "get_workbench_contract", lambda: {"modeAvailability": {"self_evolution": True}})
+    monkeypatch.setattr(service._RUN_EXECUTOR, "submit", lambda fn, context: None)
+    monkeypatch.setattr(service, "_start_self_observation_deadline_watchdog", lambda *args, **kwargs: None)
+    service.force_cancel_active_self_observation_runs_for_shutdown("test cleanup")
+    started = service.start_self_observation_run(
+        {"goal": "", "durationSeconds": 60, "inputMode": "blank"}
+    )
+    invoked: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        service,
+        "_run_observation_session",
+        lambda **kwargs: invoked.append(copy.deepcopy(kwargs)),
+    )
+
+    service._expire_self_observation_run_deadline(started["runId"])
+    service._run_self_observation_turn(
+        {
+            "runId": started["runId"],
+            "goal": "",
+            "durationSeconds": 60,
+            "inputMode": "blank",
+            "deadlineMonotonic": 60.0,
+        }
+    )
+
+    snapshot = service.get_self_observation_run_snapshot(started["runId"])
+    assert snapshot is not None
+    assert snapshot["status"] == "failed"
+    assert snapshot["phase"] == "failed"
+    assert snapshot["runtimeStatus"] == "failed"
+    assert snapshot["finishedAt"]
+    assert "时限" in snapshot["latestMessage"]
+    assert invoked == []
 
 
 def test_self_observation_turn_marks_boundary_violation(monkeypatch):
