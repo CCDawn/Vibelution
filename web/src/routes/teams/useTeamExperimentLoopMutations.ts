@@ -7,11 +7,17 @@ import type { Dispatch, SetStateAction } from "react";
 
 import { fetchJson } from "../../api/client";
 import { queryKeys } from "../../api/queryKeys";
-import { runTeamExperimentSmoke } from "../../api/teamExperiment";
+import {
+  createTeamExperimentHypothesisRevision,
+  materializeTeamEngineeringProxyHypothesis,
+  reviewTeamExperimentHypothesis,
+  runTeamExperimentSmoke,
+} from "../../api/teamExperiment";
 import type { ExperimentPlanMethodRequest } from "../TeamExperimentMethodPanel";
 import {
   experimentPlanningStatusQueryKey,
   researchLoopStatusQueryKey,
+  type EngineeringProxyHypothesisDraft,
   type ExperimentBaselineArtifactDraft,
   type ExperimentBaselineArtifactRegisterPayload,
   type ExperimentDesignFreezePayload,
@@ -71,6 +77,122 @@ export function useTeamExperimentLoopMutations(options: UseTeamExperimentLoopMut
       queryClient.setQueryData(queryKeys.teamWorkflow(variables.teamId), payload.workflow);
       void queryClient.invalidateQueries({ queryKey: experimentPlanningStatusQueryKey(variables.teamId) });
       void queryClient.invalidateQueries({ queryKey: researchStageRoundStatusQueryKey(variables.teamId) });
+    },
+  });
+
+  const materializeEngineeringProxyHypothesisMutation = useMutation({
+    mutationFn: (payload: {
+      teamId: string;
+      plan: ExperimentPlanRecord;
+      draft: EngineeringProxyHypothesisDraft;
+    }) =>
+      materializeTeamEngineeringProxyHypothesis(
+        payload.teamId,
+        payload.plan.planId,
+        {
+          ...payload.draft,
+          createdByAgent: options.sourceCollectionOwnerAgentId,
+          idempotencyKey: `${payload.plan.planId}:engineering-proxy`,
+        },
+      ),
+    onSuccess: (payload, variables) => {
+      if (payload.experimentStatus) {
+        queryClient.setQueryData(
+          experimentPlanningStatusQueryKey(variables.teamId),
+          payload.experimentStatus,
+        );
+      }
+      if (payload.workflow) {
+        queryClient.setQueryData(
+          queryKeys.teamWorkflow(variables.teamId),
+          payload.workflow,
+        );
+      }
+      void queryClient.invalidateQueries({
+        queryKey: experimentPlanningStatusQueryKey(variables.teamId),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.teamWorkflow(variables.teamId),
+      });
+    },
+  });
+
+  const reviewExperimentHypothesisMutation = useMutation({
+    mutationFn: (payload: { teamId: string; candidateId: string }) =>
+      reviewTeamExperimentHypothesis(
+        payload.teamId,
+        payload.candidateId,
+        {
+          reviewedByAgent: "Human Operator",
+          decision: "approve",
+          comments: (
+            "The operator explicitly approved this bounded hypothesis for "
+            + "experiment-design use. Scientific promotion remains prohibited."
+          ),
+          requiredChanges: [],
+        },
+      ),
+    onSuccess: (payload, variables) => {
+      if (payload.workflow) {
+        queryClient.setQueryData(
+          queryKeys.teamWorkflow(variables.teamId),
+          payload.workflow,
+        );
+      }
+      void queryClient.invalidateQueries({
+        queryKey: experimentPlanningStatusQueryKey(variables.teamId),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.teamWorkflow(variables.teamId),
+      });
+    },
+  });
+
+  const createExperimentHypothesisRevisionMutation = useMutation({
+    mutationFn: (payload: {
+      teamId: string;
+      plan: ExperimentPlanRecord;
+      candidateId: string;
+    }) =>
+      createTeamExperimentHypothesisRevision(
+        payload.teamId,
+        payload.plan.planId,
+        payload.candidateId,
+        {
+          createdByAgent: options.sourceCollectionOwnerAgentId,
+          idempotencyKey: (
+            `${payload.plan.planId}:${payload.candidateId}:hypothesis-revision`
+          ),
+        },
+      ),
+    onSuccess: (payload, variables) => {
+      if (payload.experimentStatus) {
+        queryClient.setQueryData(
+          experimentPlanningStatusQueryKey(variables.teamId),
+          payload.experimentStatus,
+        );
+      }
+      if (payload.stageRoundStatus) {
+        queryClient.setQueryData(
+          researchStageRoundStatusQueryKey(variables.teamId),
+          payload.stageRoundStatus,
+        );
+      }
+      if (payload.workflow) {
+        queryClient.setQueryData(
+          queryKeys.teamWorkflow(variables.teamId),
+          payload.workflow,
+        );
+      }
+      void queryClient.invalidateQueries({
+        queryKey: experimentPlanningStatusQueryKey(variables.teamId),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: researchStageRoundStatusQueryKey(variables.teamId),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.teamWorkflow(variables.teamId),
+      });
     },
   });
 
@@ -443,6 +565,9 @@ export function useTeamExperimentLoopMutations(options: UseTeamExperimentLoopMut
 
   return {
     createExperimentPlanMutation,
+    materializeEngineeringProxyHypothesisMutation,
+    reviewExperimentHypothesisMutation,
+    createExperimentHypothesisRevisionMutation,
     freezeExperimentDesignMutation,
     registerExperimentBaselineArtifactMutation,
     runExperimentSmokeMutation,

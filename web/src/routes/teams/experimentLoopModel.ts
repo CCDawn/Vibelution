@@ -25,6 +25,14 @@ export type ExperimentHypothesisCandidateSummary = {
   valid: boolean;
   validationIssueCount: number;
   hypothesis: string;
+  hypothesisKind: string;
+  sourcePlanId: string;
+  researchProjectId: string;
+  claimBoundary: string;
+  reviewDecision: string;
+  reviewRecordId: string;
+  reviewedAt: string;
+  approvedForExperiment: boolean;
   baseline: string;
   expectedBenefit: string;
   expectedComputeCost: string;
@@ -35,7 +43,17 @@ export type ExperimentHypothesisCandidateSummary = {
     smokePlan: string;
   };
   missingExperimentPlanFields: string[];
+  sourceRefs: Array<Record<string, unknown>>;
+  evidenceRefs: Array<Record<string, unknown>>;
   updatedAt: string;
+};
+
+export type EngineeringProxyHypothesisDraft = {
+  title: string;
+  hypothesis: string;
+  claimBoundary: string;
+  expectedBenefit: string;
+  expectedComputeCost: string;
 };
 
 export type ExperimentBaselineArtifactRecord = {
@@ -153,6 +171,15 @@ export type ExperimentPlanRecord = {
   goal: string;
   selectedHypotheses: ExperimentHypothesisCandidateSummary[];
   hypothesisCandidateIds: string[];
+  hypothesisSelection?: {
+    sourcePlanId: string;
+    hypothesisCandidateId: string;
+    reviewRecordId: string;
+    reviewedAt: string;
+    selectedByAgent: string;
+    selectedAt: string;
+    idempotencyKey: string;
+  };
   experimentContract?: ExperimentContractV2;
   contractValidation?: ExperimentContractValidation;
   designGate?: {
