@@ -34,19 +34,28 @@ def _init_repo(repo: Path) -> None:
     _run_git(repo, "config", "user.name", "Test User")
 
 
-def _write_bundle(project_root: Path, name: str = "closed_loop_v1") -> None:
-    payload = json.dumps(
-        {
-            "bundle_name": name,
-            "benchmark": "unit",
-            "cases": [
-                {"case_id": "one", "prompt": "case one"},
-                {"case_id": "two", "prompt": "case two"},
-            ],
-        },
-        ensure_ascii=False,
-        indent=2,
-    )
+def _write_bundle(
+    project_root: Path,
+    name: str = "closed_loop_v1",
+    *,
+    mutation_allowlist: list[str] | None = None,
+) -> None:
+    bundle = {
+        "bundle_name": name,
+        "benchmark": "unit",
+        "cases": [
+            {"case_id": "one", "prompt": "case one"},
+            {"case_id": "two", "prompt": "case two"},
+        ],
+    }
+    if mutation_allowlist:
+        bundle["candidate_mutation_contract"] = {
+            "supported": True,
+            "required": True,
+            "kind": "safe_patch_probe",
+            "allowlisted_paths": mutation_allowlist,
+        }
+    payload = json.dumps(bundle, ensure_ascii=False, indent=2)
     bundle_paths = {
         project_root / "workspace" / "evaluation" / "bundles" / f"{name}.json",
         developer_sandbox.seeded_sandbox_workspace_path(project_root, "evaluation", "bundles", f"{name}.json"),
@@ -1011,7 +1020,7 @@ def test_real_worktree_flow_uses_supervised_conversation_chain_for_candidate_bra
     project_root = tmp_path / "project"
     _init_repo(project_root)
     (project_root / "agent.py").write_text("print('base')\n", encoding="utf-8")
-    _write_bundle(project_root)
+    _write_bundle(project_root, mutation_allowlist=["agent.py"])
     _run_git(project_root, "add", ".")
     _run_git(project_root, "commit", "-m", "init")
     calls: list[dict] = []
@@ -2176,6 +2185,87 @@ def test_real_mode_requires_baseline_and_judge_bindings_before_execution(tmp_pat
             lang="zh",
             project_root=project_root,
         )
+
+
+def test_real_mode_rejects_bundle_without_candidate_mutation_contract(tmp_path):
+    project_root = tmp_path / "project"
+    _write_bundle(project_root)
+
+    with pytest.raises(
+        service.SupervisedWorktreeRunValidationError,
+        match="候选变更契约",
+    ):
+        service._normalize_start_payload(
+            {
+                "sourceKind": "bundle",
+                "bundleName": "closed_loop_v1",
+                "executionMode": "real",
+                "confirmRealLlmCost": True,
+                "agentBindings": {
+                    "baseline": {"agentId": "agent-baseline", "role": "baseline"},
+                    "judge": {"agentId": "agent-judge", "role": "judge"},
+                },
+            },
+            lang="zh",
+            project_root=project_root,
+        )
+
+
+def test_real_mode_accepts_explicit_safe_candidate_mutation_contract(tmp_path):
+    project_root = tmp_path / "project"
+    _write_bundle(
+        project_root,
+        mutation_allowlist=["tests/supervised_worktree_candidate_marker.py"],
+    )
+
+    options = service._normalize_start_payload(
+        {
+            "sourceKind": "bundle",
+            "bundleName": "closed_loop_v1",
+            "executionMode": "real",
+            "confirmRealLlmCost": True,
+            "agentBindings": {
+                "baseline": {"agentId": "agent-baseline", "role": "baseline"},
+                "judge": {"agentId": "agent-judge", "role": "judge"},
+            },
+        },
+        lang="zh",
+        project_root=project_root,
+    )
+
+    assert options["candidateMutationContract"] == {
+        "supported": True,
+        "required": True,
+        "kind": "safe_patch_probe",
+        "allowlistedPaths": ["tests/supervised_worktree_candidate_marker.py"],
+    }
+    assert (
+        options["taskContract"]["candidateMutationContract"]
+        == options["candidateMutationContract"]
+    )
+
+
+def test_candidate_mutation_contract_reports_changed_files_outside_allowlist():
+    violations = service._candidate_mutation_contract_violations(
+        [
+            {
+                "path": "tests/supervised_worktree_candidate_marker.py",
+                "changeType": "added",
+            },
+            {
+                "path": "core/web/services/unsafe_extra_change.py",
+                "changeType": "added",
+            },
+        ],
+        {
+            "supported": True,
+            "required": True,
+            "kind": "safe_patch_probe",
+            "allowlistedPaths": ["tests/supervised_worktree_candidate_marker.py"],
+        },
+    )
+
+    assert violations == ["core/web/services/unsafe_extra_change.py"]
 
 
 def test_candidate_worktree_receives_ignored_runtime_bundle(tmp_path):

@@ -616,6 +616,7 @@ def _project_task_binding(
 ) -> dict[str, Any] | None:
     project_id = _text(research_project_id)
     normalized_task_id = _text(task_id)
+    allow_incomplete_recovery = False
     if bool(project_id) != bool(normalized_task_id):
         raise ValueError(
             "research_project_id and task_id must be provided together."
@@ -664,31 +665,52 @@ def _project_task_binding(
             team_id,
             project_id,
         )
-        candidates = [
+        session_candidates = [
             item
             for item in list(status.get("tasks") or [])
             if isinstance(item, dict)
             and _text(item.get("sessionId")) == runtime_session_id
-            and _text((item.get("turn") or {}).get("turnId"))
-            == runtime_turn_id
             and (
                 not runtime_agent_id
                 or _text(item.get("agentId")) == runtime_agent_id
             )
             and item.get("taskKind") in set(allowed_task_kinds)
         ]
+        candidates = [
+            item
+            for item in session_candidates
+            if _text((item.get("turn") or {}).get("turnId"))
+            == runtime_turn_id
+        ]
+        used_session_fallback = not candidates and len(session_candidates) == 1
+        if used_session_fallback:
+            candidates = session_candidates
         if len(candidates) != 1:
             raise ValueError(
                 "Current runtime does not resolve to exactly one compatible "
                 "research project Agent task."
             )
-        normalized_task_id = _text(candidates[0].get("taskId"))
+        selected_task = candidates[0]
+        normalized_task_id = _text(selected_task.get("taskId"))
+        allow_incomplete_recovery = bool(
+            used_session_fallback
+            and selected_task.get("status") == "incomplete"
+            and _text(selected_task.get("failureCode"))
+            == "task_result_not_recorded"
+            and not list(selected_task.get("resultRefs") or [])
+        )
         recorded_by_agent = runtime_agent_id or recorded_by_agent
     if load_context:
+        context_kwargs = (
+            {"require_active": False}
+            if allow_incomplete_recovery
+            else {}
+        )
         context = workflow_service.get_research_project_agent_task_context(
             team_id,
             project_id,
             normalized_task_id,
+            **context_kwargs,
         )
         task = context.get("task") if isinstance(context.get("task"), dict) else {}
         if task.get("taskKind") not in set(allowed_task_kinds):
@@ -702,6 +724,7 @@ def _project_task_binding(
         normalized_task_id,
         allowed_task_kinds=allowed_task_kinds,
         recorded_by_agent=_text(recorded_by_agent),
+        require_active=not allow_incomplete_recovery,
     )
 
 

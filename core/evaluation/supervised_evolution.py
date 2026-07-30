@@ -28,6 +28,7 @@ from scripts.evolution_harness import HarnessResult
 
 
 DEFAULT_BUNDLE_NAME = "supervised_evolution_dry_run_v1"
+SUPERVISED_CANDIDATE_PATCH_SMOKE_BUNDLE_NAME = "supervised_candidate_patch_smoke_v1"
 DEFAULT_BUNDLE_PATH = Path("evaluation/bundles") / f"{DEFAULT_BUNDLE_NAME}.json"
 DEFAULT_BUNDLE_TEMPLATE_DIR = Path(__file__).resolve().parent / "bundles"
 TRANSACTION_REQUIRED_SCENARIOS = {"transaction", "modify_rollback", "full_evolution"}
@@ -156,14 +157,14 @@ def _should_refresh_default_bundle_from_template(bundle_path: Path, template_pat
 
 def _ensure_default_bundle_available(root: Path, bundle_name: str) -> Path:
     bundle_path = _workspace_bundle_path(root, bundle_name)
-    if bundle_name != DEFAULT_BUNDLE_NAME:
-        return bundle_path
-
     template_path = _template_bundle_path(bundle_name)
     if not template_path.exists():
         return bundle_path
 
-    if _should_refresh_default_bundle_from_template(bundle_path, template_path):
+    should_copy = not bundle_path.exists()
+    if bundle_name == DEFAULT_BUNDLE_NAME:
+        should_copy = _should_refresh_default_bundle_from_template(bundle_path, template_path)
+    if should_copy:
         bundle_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(template_path, bundle_path)
     return bundle_path
@@ -2969,6 +2970,7 @@ def _format_advisory_context_lines(advisory_context: Dict[str, Any]) -> list[str
 
 __all__ = [
     "DEFAULT_BUNDLE_NAME",
+    "SUPERVISED_CANDIDATE_PATCH_SMOKE_BUNDLE_NAME",
     "DecisionGate",
     "RunAggregate",
     "CaseDecisionSummary",

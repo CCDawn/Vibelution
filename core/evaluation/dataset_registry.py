@@ -26,6 +26,7 @@ from .supervised_intake import (
 )
 from .supervised_evolution import (
     DEFAULT_BUNDLE_NAME,
+    SUPERVISED_CANDIDATE_PATCH_SMOKE_BUNDLE_NAME,
     resolve_supervised_bundle_path,
 )
 
@@ -431,6 +432,19 @@ def _default_registry_payload() -> Dict[str, Any]:
                 "runnable": True,
                 "adapter_status": "ready",
                 "tags": ["builtin", "smoke"],
+            },
+            {
+                "name": "supervised_candidate_patch_smoke",
+                "kind": "supervised_bundle",
+                "description": (
+                    "内置 1-case 监督闭环补丁探针：基线只读测量，原基线 Agent 在候选工作树中"
+                    "实施安全补丁，随后用独立会话复跑并交由同一 Judge 会话二次评分。"
+                ),
+                "bundle_name": SUPERVISED_CANDIDATE_PATCH_SMOKE_BUNDLE_NAME,
+                "runnable": True,
+                "adapter_status": "ready",
+                "workbench_visible": True,
+                "tags": ["builtin", "smoke", "candidate-patch", "closed-loop"],
             },
             {
                 "name": "custom_prompt_jsonl",
