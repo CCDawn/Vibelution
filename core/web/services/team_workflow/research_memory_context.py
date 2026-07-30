@@ -620,6 +620,7 @@ def _allowed_variable_contract(plan: dict[str, Any] | None) -> dict[str, Any]:
     plan_id = str((plan or {}).get("planId") or "")
     explicit_paths = _text_list(
         iteration_contract.get("allowedChanges")
+        or iteration_contract.get("allowedVariableChanges")
         or iteration_contract.get("variablesAllowedToChange"),
         limit=16,
         max_length=240,
@@ -635,7 +636,12 @@ def _allowed_variable_contract(plan: dict[str, Any] | None) -> dict[str, Any]:
                 }
                 for path in explicit_paths
             ],
-            "frozenControls": _frozen_controls(contract, explicit_paths),
+            "frozenControls": _text_list(
+                iteration_contract.get("frozenControls"),
+                limit=24,
+                max_length=360,
+            )
+            or _frozen_controls(contract, explicit_paths),
         }
 
     derived_paths = _derive_allowed_paths_from_constraints(contract)

@@ -421,6 +421,9 @@ describe("TeamsRoute layout contract", () => {
     expect(teamResearchLoopPanelSource).toContain("pendingDesignProposals");
     expect(teamResearchLoopPanelSource).toContain("生成设计草稿");
     expect(teamResearchLoopPanelSource).toContain("生成后仍需人工冻结，不会自动执行实验。");
+    expect(teamResearchLoopPanelSource).toContain("允许变化路径");
+    expect(teamResearchLoopPanelSource).toContain("固定控制项");
+    expect(teamExperimentPlanningLedgerPanelSource).toContain("缺少允许变化路径或固定控制项");
     expect(routeSource).toContain("renderResearchLoopPanel");
     expect(routeSource).toContain("TeamResearchLoopPanel");
     expect(teamResearchLoopPanelSource).toContain("Research Loop 模板");

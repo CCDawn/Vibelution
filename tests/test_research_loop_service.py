@@ -171,6 +171,8 @@ def test_research_loop_records_template_evidence_and_iteration_decision(tmp_path
             "rationale": "Required environment, result, and metric evidence are recorded.",
             "nextTemplateId": "dataset_benchmark",
             "nextActions": ["compare on held-out benchmark split"],
+            "allowedVariableChanges": ["methodConfig.dataset"],
+            "frozenControls": ["methodConfig.seeds", "metricContract.primaryMetric"],
             "decidedByAgent": "Research Coordination Agent",
         },
     )
@@ -178,6 +180,9 @@ def test_research_loop_records_template_evidence_and_iteration_decision(tmp_path
     assert decided["loop"]["status"] == "ready_for_iteration"
     assert decided["loop"]["readiness"]["readyForDecision"] is True
     assert decided["iterationProposal"]["nextTemplateId"] == "dataset_benchmark"
+    assert decided["iterationProposal"]["allowedVariableChanges"] == [
+        "methodConfig.dataset"
+    ]
     assert decided["iterationProposal"]["executionPolicy"]["externalExecution"] is False
 
 
@@ -220,7 +225,7 @@ def test_iteration_decision_can_idempotently_create_next_design_draft(tmp_path, 
                 },
                 "artifactContract": {"requiredArtifacts": ["result.json"]},
                 "reproducibilityContract": {"seedPolicy": "fixed"},
-                "iterationContract": {"allowedVariableChanges": ["methodConfig.budget.epochs"]},
+                "iterationContract": {},
                 "status": "result_review",
             },
             "contractValidation": {"valid": True, "missingFields": []},
@@ -256,6 +261,8 @@ def test_iteration_decision_can_idempotently_create_next_design_draft(tmp_path, 
             "decision": "repair_and_repeat",
             "rationale": "Increase only the frozen epoch budget and repeat.",
             "nextActions": ["change methodConfig.budget.epochs only"],
+            "allowedVariableChanges": ["methodConfig.budget.epochs"],
+            "frozenControls": ["methodConfig.dataset", "methodConfig.seeds"],
             "createNextDesignDraft": True,
             "idempotencyKey": "reuse-latest-iteration-draft",
         },
@@ -268,6 +275,14 @@ def test_iteration_decision_can_idempotently_create_next_design_draft(tmp_path, 
     assert draft["plan"]["designGate"]["status"] == "draft"
     assert draft["plan"]["designGate"]["sourceProposalId"] == decided["iterationProposal"]["proposalId"]
     assert draft["plan"]["designGate"]["sourceIdempotencyKey"] == "reuse-latest-iteration-draft"
+    assert draft["plan"]["experimentContract"]["iterationContract"]["allowedChanges"] == [
+        "methodConfig.budget.epochs"
+    ]
+    assert draft["plan"]["experimentContract"]["iterationContract"]["frozenControls"] == [
+        "methodConfig.dataset",
+        "methodConfig.seeds",
+    ]
+    assert draft["plan"]["memoryContext"]["allowedVariableContract"]["status"] == "explicit"
     assert decided["iterationProposal"]["nextDesignPlanId"] == draft["plan"]["planId"]
     projected = team_workflow_orchestration_service.get_experiment_planning_status(team["teamId"])
     assert projected["lifecycleProjection"]["stage2"]["status"] == "draft"
@@ -281,6 +296,8 @@ def test_iteration_decision_can_idempotently_create_next_design_draft(tmp_path, 
             "decision": "repair_and_repeat",
             "rationale": "Increase only the frozen epoch budget and repeat.",
             "nextActions": ["change methodConfig.budget.epochs only"],
+            "allowedVariableChanges": ["methodConfig.budget.epochs"],
+            "frozenControls": ["methodConfig.dataset", "methodConfig.seeds"],
             "createNextDesignDraft": True,
             "idempotencyKey": "reuse-latest-iteration-draft",
         },
@@ -291,7 +308,7 @@ def test_iteration_decision_can_idempotently_create_next_design_draft(tmp_path, 
     assert len([plan for plan in plans if plan.get("designGate", {}).get("sourceLoopId") == loop_id]) == 1
 
 
-def test_legacy_iteration_proposal_can_materialize_one_gated_design_draft(tmp_path, monkeypatch):
+def test_iteration_proposal_materializes_one_governed_design_draft(tmp_path, monkeypatch):
     team = _team(tmp_path, monkeypatch)
     stage = team_workflow_orchestration_service.start_research_stage_round(
         team["teamId"],
@@ -366,6 +383,8 @@ def test_legacy_iteration_proposal_can_materialize_one_gated_design_draft(tmp_pa
             "rationale": "Advance the validated candidate to a dataset benchmark.",
             "nextTemplateId": "dataset_benchmark",
             "nextActions": ["freeze the benchmark dataset and protocol"],
+            "allowedVariableChanges": ["methodConfig.dataset"],
+            "frozenControls": ["methodConfig.seeds", "metricContract.primaryMetric"],
             "createNextDesignDraft": False,
         },
     )
@@ -416,6 +435,78 @@ def test_legacy_iteration_proposal_can_materialize_one_gated_design_draft(tmp_pa
     assert materialized["status"]["pendingDesignProposals"] == []
     plans = team_workflow_orchestration_service.get_experiment_planning_status(team["teamId"])["plans"]
     assert len([plan for plan in plans if plan.get("designGate", {}).get("sourceProposalId") == proposal_id]) == 1
+
+
+def test_pending_design_proposals_are_newest_first_and_free_text_only_is_blocked(
+    tmp_path,
+    monkeypatch,
+):
+    team = _team(tmp_path, monkeypatch)
+    created = research_loop_service.create_research_loop(
+        team["teamId"],
+        {
+            "templateId": "environment_probe",
+            "researchQuestion": "Which governed repair should be materialized?",
+        },
+    )
+    loop_id = created["loop"]["loopId"]
+    for evidence_type in ("environment_spec", "smoke_log"):
+        research_loop_service.record_research_loop_evidence(
+            team["teamId"],
+            loop_id,
+            {
+                "evidenceType": evidence_type,
+                "status": "passed",
+                "summary": f"{evidence_type} ready",
+            },
+        )
+    first = research_loop_service.record_research_loop_decision(
+        team["teamId"],
+        loop_id,
+        {
+            "decision": "repair_and_repeat",
+            "rationale": "First governed repair.",
+            "nextActions": ["repair metric projection"],
+            "allowedVariableChanges": ["executionEvidence.metricProjection"],
+            "frozenControls": ["methodConfig.dataset"],
+            "idempotencyKey": "first-governed-repair",
+        },
+    )
+    second = research_loop_service.record_research_loop_decision(
+        team["teamId"],
+        loop_id,
+        {
+            "decision": "repair_and_repeat",
+            "rationale": "Second governed repair.",
+            "nextActions": ["repair artifact registration"],
+            "allowedVariableChanges": ["executionEvidence.baselineArtifact"],
+            "frozenControls": ["methodConfig.dataset"],
+            "idempotencyKey": "second-governed-repair",
+        },
+    )
+
+    pending = research_loop_service.get_research_loop_status(team["teamId"])[
+        "pendingDesignProposals"
+    ]
+
+    assert [item["proposalId"] for item in pending[:2]] == [
+        second["iterationProposal"]["proposalId"],
+        first["iterationProposal"]["proposalId"],
+    ]
+    with pytest.raises(
+        research_loop_service.ResearchLoopError,
+        match="allowed variable changes and frozen controls",
+    ):
+        research_loop_service.record_research_loop_decision(
+            team["teamId"],
+            loop_id,
+            {
+                "decision": "repair_and_repeat",
+                "rationale": "Unsafe free-text-only repair.",
+                "nextActions": ["change something"],
+                "idempotencyKey": "missing-governance-contract",
+            },
+        )
 
 
 def test_research_loop_status_persists_to_team_workspace(tmp_path, monkeypatch):

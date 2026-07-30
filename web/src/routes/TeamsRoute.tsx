@@ -744,6 +744,8 @@ export function TeamsRoute({
     rationale: "",
     nextTemplateId: "",
     nextActions: "",
+    allowedVariableChanges: "",
+    frozenControls: "",
   });
   const [selectedSourceCollectionStageId, setSelectedSourceCollectionStageId] = useState<SourceCollectionStageModuleId>(
     requestedSourceCollectionStage ?? "finding",

@@ -149,6 +149,13 @@ export function TeamResearchLoopPanel(props: TeamResearchLoopPanelProps) {
       selectedTeam?.teamId
       && activeLoop
       && researchLoopDecisionDraft.rationale.trim()
+      && (
+        !["promote_to_iteration", "repair_and_repeat"].includes(researchLoopDecisionDraft.decision)
+        || (
+          researchLoopDecisionDraft.allowedVariableChanges.trim()
+          && researchLoopDecisionDraft.frozenControls.trim()
+        )
+      )
       && !selectedTeamRecordResearchLoopDecisionPending
       && (!decisionNeedsReady || activeLoop.readiness.readyForDecision),
     );
@@ -396,6 +403,26 @@ export function TeamResearchLoopPanel(props: TeamResearchLoopPanelProps) {
                   placeholder={activeTemplate?.defaultIterationActions?.join(" / ") || "revise hypothesis / add evidence"}
                 />
               </label>
+              {["promote_to_iteration", "repair_and_repeat"].includes(researchLoopDecisionDraft.decision) ? (
+                <>
+                  <label className={styles.researchLoopWide}>
+                    <span>{lang === "zh" ? "允许变化路径" : "Allowed change paths"}</span>
+                    <VNativeInput
+                      value={researchLoopDecisionDraft.allowedVariableChanges}
+                      onChange={(event) => setResearchLoopDecisionDraft((draft) => ({ ...draft, allowedVariableChanges: event.target.value }))}
+                      placeholder="executionEvidence.metricReport, artifactContract.requiredArtifacts"
+                    />
+                  </label>
+                  <label className={styles.researchLoopWide}>
+                    <span>{lang === "zh" ? "固定控制项" : "Frozen controls"}</span>
+                    <VNativeInput
+                      value={researchLoopDecisionDraft.frozenControls}
+                      onChange={(event) => setResearchLoopDecisionDraft((draft) => ({ ...draft, frozenControls: event.target.value }))}
+                      placeholder="methodConfig.dataset, methodConfig.seeds, metricContract.primaryMetric"
+                    />
+                  </label>
+                </>
+              ) : null}
             </div>
             <div className={styles.researchLoopOutcomeGrid}>
               <section>

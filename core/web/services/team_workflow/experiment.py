@@ -192,6 +192,7 @@ def create_experiment_plan(team_id: str, payload: dict[str, Any] | None = None) 
             stage_type="experiment",
             research_question=str((plan.get("experimentContract") or {}).get("researchQuestion") or plan.get("goal") or plan.get("topic") or ""),
             actor_agent_id=created_by_agent,
+            control_plan=plan,
         )
         plan["memoryContext"] = s.deepcopy(memory_context)
         stage_round["memoryContext"] = s.deepcopy(memory_context)
@@ -278,6 +279,8 @@ def create_experiment_plan_revision_from_iteration(
     rationale: str,
     next_template_id: str,
     next_actions: list[str],
+    allowed_variable_changes: list[str],
+    frozen_controls: list[str],
     created_by_agent: str,
 ) -> dict[str, Any]:
     """Clone a governed plan into one idempotent, explicitly gated next-design draft."""
@@ -286,6 +289,20 @@ def create_experiment_plan_revision_from_iteration(
     normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
     normalized_source_plan_id = s._normalize_required_id(source_plan_id, "Source experiment plan id is required.")
     normalized_proposal_id = s._normalize_required_id(proposal_id, "Iteration proposal id is required.")
+    normalized_allowed_changes = [
+        text
+        for item in allowed_variable_changes
+        if (text := s._trim_text(item, max_length=240))
+    ][:24]
+    normalized_frozen_controls = [
+        text
+        for item in frozen_controls
+        if (text := s._trim_text(item, max_length=360))
+    ][:24]
+    if not normalized_allowed_changes or not normalized_frozen_controls:
+        raise s.TeamWorkflowOrchestrationError(
+            "Iteration design requires explicit allowed variable changes and frozen controls."
+        )
     with s._WORKFLOW_LOCK:
         plan_store = s._load_experiment_plan_store(normalized_team_id)
         plans = s._experiment_plans(plan_store)
@@ -337,6 +354,8 @@ def create_experiment_plan_revision_from_iteration(
             "sourceRationale": rationale,
             "nextTemplateId": next_template_id,
             "nextActions": list(next_actions),
+            "allowedChanges": normalized_allowed_changes,
+            "frozenControls": normalized_frozen_controls,
         }
         adapter_selection = (
             source_contract.get("adapterSelection")
@@ -603,6 +622,28 @@ def freeze_experiment_design(team_id: str, plan_id: str, payload: dict[str, Any]
         readiness = plan.get("readiness") if isinstance(plan.get("readiness"), dict) else {}
         if validation.get("valid") is not True or readiness.get("readyForPlanReview") is not True:
             raise s.TeamWorkflowOrchestrationError("Experiment design must be valid and review-ready before it can be frozen.")
+        contract = plan.get("experimentContract") if isinstance(plan.get("experimentContract"), dict) else {}
+        iteration_contract = (
+            contract.get("iterationContract")
+            if isinstance(contract.get("iterationContract"), dict)
+            else {}
+        )
+        governed_iteration = bool(
+            str(gate.get("sourceProposalId") or "")
+            or str(iteration_contract.get("sourceDecision") or "")
+            in {"promote_to_iteration", "repair_and_repeat"}
+        )
+        if governed_iteration:
+            allowed_changes = list(
+                iteration_contract.get("allowedChanges")
+                or iteration_contract.get("allowedVariableChanges")
+                or []
+            )
+            frozen_controls = list(iteration_contract.get("frozenControls") or [])
+            if not allowed_changes or not frozen_controls:
+                raise s.TeamWorkflowOrchestrationError(
+                    "Iteration design requires explicit allowed variable changes and frozen controls before freeze."
+                )
         if str(gate.get("status") or "") == "frozen":
             return {"status": "already_frozen", "plan": plan}
         now = s.utc_now_iso()
@@ -610,7 +651,6 @@ def freeze_experiment_design(team_id: str, plan_id: str, payload: dict[str, Any]
         gate["frozenAt"] = now
         gate["frozenByAgent"] = frozen_by_agent
         plan["designGate"] = gate
-        contract = plan.get("experimentContract") if isinstance(plan.get("experimentContract"), dict) else {}
         plan["status"] = "design_frozen"
         plan["updatedAt"] = now
         s._refresh_experiment_bounded_smoke_readiness(plan)

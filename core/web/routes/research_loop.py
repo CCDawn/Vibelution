@@ -62,6 +62,8 @@ class ResearchLoopDecisionPayload(BaseModel):
     rationale: str = Field("", max_length=4000)
     nextTemplateId: str = Field("", max_length=96)
     nextActions: list[str] = Field(default_factory=list, max_length=24)
+    allowedVariableChanges: list[str] = Field(default_factory=list, max_length=24)
+    frozenControls: list[str] = Field(default_factory=list, max_length=24)
     decidedByAgent: str = Field("", max_length=160)
     createNextDesignDraft: bool = False
     idempotencyKey: str = Field("", max_length=240)
