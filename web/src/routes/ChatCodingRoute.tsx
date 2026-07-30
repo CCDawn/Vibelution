@@ -1419,6 +1419,10 @@ export function ChatCodingRoute() {
   const selectedSessionDetail =
     rawSessionDetail && rawSessionDetail.id === activeSessionId ? rawSessionDetail : undefined;
   const detail = selectedSessionDetail;
+  const sessionToolApprovalRuntimeActive = Boolean(
+    activeSessionId
+    && runtime?.workRuns?.active?.chat_turn?.sessionId === activeSessionId,
+  );
   const sessionToolApprovalsQuery = useQuery<SessionToolApprovalRequest[]>({
     queryKey: queryKeys.sessionToolApprovals(activeSessionId ?? "none"),
     enabled: Boolean(activeSessionId && directSessionPanelActive),
@@ -1427,6 +1431,7 @@ export function ChatCodingRoute() {
     ),
     refetchInterval: (query) => (
       (query.state.data?.length ?? 0) > 0
+      || sessionToolApprovalRuntimeActive
       || isBusyPhase(detail?.currentPhase || directSessionActiveSummary?.currentPhase || directSessionActiveSummary?.status)
         ? 500
         : false

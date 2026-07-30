@@ -382,6 +382,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("sessionToolApprovalsQuery");
     expect(routeSource).toContain("queryKeys.sessionToolApprovals");
     expect(routeSource).toContain("/tool-approvals?status=pending");
+    expect(routeSource).toContain("runtime?.workRuns?.active?.chat_turn?.sessionId === activeSessionId");
+    expect(routeSource).toContain("|| sessionToolApprovalRuntimeActive");
     expect(routeSource).toContain("resolveToolApprovalMutation");
     expect(routeAndDetailMutationsSource).toContain("/tool-approvals/");
     expect(routeAndDetailMutationsSource).toContain('"acceptForSession"');
