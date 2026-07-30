@@ -249,7 +249,7 @@ def test_real_candidate_modifier_retries_judgment_protocol_drift_in_same_session
             prompt=str(kwargs.get("prompt") or ""),
             session_id="session-baseline",
         )
-        if len(calls) == 1:
+        if len(calls) <= 2:
             result.stdout_tail = [
                 'SUPERVISED_AGENT_JUDGMENT: {"phase":"rubric","criteria":[]}'
             ]
@@ -282,12 +282,54 @@ def test_real_candidate_modifier_retries_judgment_protocol_drift_in_same_session
 
     assert result["status"] == "success"
     assert result["conversationSessionId"] == "session-baseline"
-    assert result["phaseRetryCount"] == 1
-    assert len(calls) == 2
-    assert calls[0]["conversation_session_id"] == "session-baseline"
-    assert calls[1]["conversation_session_id"] == "session-baseline"
+    assert result["phaseRetryCount"] == 2
+    assert len(calls) == 3
+    assert {call["conversation_session_id"] for call in calls} == {"session-baseline"}
     assert "SELF_EDIT_PHASE_CORRECTION_REQUIRED" in calls[1]["prompt"]
-    assert "Do not output SUPERVISED_AGENT_JUDGMENT" in calls[1]["prompt"]
+    assert "BASELINE_IMPLEMENTATION_OUTPUT_ONLY" in calls[1]["prompt"]
+    assert "SUPERVISED_AGENT_JUDGMENT" not in calls[1]["prompt"]
+    assert "FINAL_BASELINE_IMPLEMENTATION_CORRECTION" in calls[2]["prompt"]
+    assert "SUPERVISED_AGENT_JUDGMENT" not in calls[2]["prompt"]
+
+
+def test_real_candidate_modifier_fails_closed_after_two_phase_corrections(tmp_path, monkeypatch):
+    calls: list[dict] = []
+
+    def fake_conversation_harness(**kwargs):
+        calls.append(dict(kwargs))
+        result = _fake_harness_result(
+            role="baseline",
+            repo_root=tmp_path,
+            prompt=str(kwargs.get("prompt") or ""),
+            session_id="session-baseline",
+        )
+        result.stdout_tail = ['SUPERVISED_AGENT_JUDGMENT: {"phase":"rubric","criteria":[]}']
+        result.evolution_summary["agent_judgment"] = {"phase": "rubric", "criteria": []}
+        return result
+
+    monkeypatch.setattr(service, "run_supervised_conversation_harness", fake_conversation_harness)
+
+    result = service._real_candidate_modifier(
+        tmp_path,
+        "Implement the evidence-backed improvement in this candidate worktree.",
+        {
+            "runId": "swte-self-edit-phase-retry-exhausted",
+            "options": {
+                "agentBindings": {
+                    "baseline": {
+                        "agentId": "agent-baseline",
+                        "role": "baseline",
+                    }
+                }
+            },
+            "conversationSessionId": "session-baseline",
+        },
+    )
+
+    assert result["status"] == "failed"
+    assert result["phaseRetryCount"] == 2
+    assert len(calls) == 3
+    assert "after 2 corrections" in result["summary"]
 
 
 def _retryable_provider_failure_evaluator(_: Path, bundle_name: str, role: str, __: dict) -> dict:
