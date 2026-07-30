@@ -8,10 +8,16 @@ Late-bound facade keeps monkeypatches stable.
 
 from __future__ import annotations
 
+import copy
 import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterable
+
+from ..agent_config_authority import (
+    normalize_permission_preset,
+    permission_runtime_contract,
+)
 
 
 def _service():
@@ -180,6 +186,15 @@ def _agent_to_api(
         "metadata": metadata,
         "createdAt": str(agent.get("createdAt") or "").strip(),
         "updatedAt": str(agent.get("updatedAt") or "").strip(),
+        "configSchemaVersion": int(agent.get("configSchemaVersion") or 0),
+        "configRevision": int(agent.get("configRevision") or 0),
+        "configHash": str(agent.get("configHash") or "").strip(),
+        "permissionPreset": str(agent.get("permissionPreset") or "").strip(),
+        "runtimePermissions": (
+            permission_runtime_contract(agent.get("permissionPreset"))
+            if str(agent.get("permissionPreset") or "").strip()
+            else None
+        ),
         "memoryPolicy": s._memory_policy_for_agent(agent, hydration=hydration),
         "toolPolicy": tool_policy,
         "toolPolicySource": s._tool_policy_source_for_agent(agent, tool_policy),
@@ -424,6 +439,15 @@ def _agent_to_api_summary(
         "metadata": metadata,
         "createdAt": str(agent.get("createdAt") or "").strip(),
         "updatedAt": str(agent.get("updatedAt") or "").strip(),
+        "configSchemaVersion": int(agent.get("configSchemaVersion") or 0),
+        "configRevision": int(agent.get("configRevision") or 0),
+        "configHash": str(agent.get("configHash") or "").strip(),
+        "permissionPreset": str(agent.get("permissionPreset") or "").strip(),
+        "runtimePermissions": (
+            permission_runtime_contract(agent.get("permissionPreset"))
+            if str(agent.get("permissionPreset") or "").strip()
+            else None
+        ),
         "sourceRef": agent_source_ref,
         "projectionEdit": agent_projection_edit,
     }
@@ -572,14 +596,41 @@ def active_agent_runtime(
 ):
     s = _service()
     agent = s.get_agent(agent_id) if agent_id else None
+    agent_snapshot = copy.deepcopy(agent) if isinstance(agent, dict) else {}
     normalized_supervised_role = str(supervised_role or "").strip()
     grants = (
         s._tool_name_list(runtime_tool_grants or [])
         if runtime_tool_grants is not None
         else s.supervised_role_runtime_tools(normalized_supervised_role)
     )
-    delegation_policy = s.resolve_delegation_policy_for_agent(agent_id)
-    tool_policy = s.resolve_tool_policy_for_agent(agent_id, session_id=session_id, turn_id=turn_id)
+    metadata = (
+        agent_snapshot.get("metadata")
+        if isinstance(agent_snapshot.get("metadata"), dict)
+        else {}
+    )
+    delegation_policy = (
+        s.normalize_delegation_policy(metadata.get("delegationPolicy"))
+        if agent_snapshot
+        else s.resolve_delegation_policy_for_agent(agent_id)
+    )
+    tool_policy = (
+        s.normalize_tool_policy(
+            agent_snapshot.get("toolPolicy"),
+            str(agent_snapshot.get("toolPolicyId") or s.DEFAULT_TOOL_POLICY_ID),
+        )
+        if isinstance(agent_snapshot.get("toolPolicy"), dict)
+        else s.resolve_tool_policy_for_agent(
+            agent_id,
+            session_id=session_id,
+            turn_id=turn_id,
+        )
+    )
+    tool_policy = s._with_temporary_tool_grants(
+        tool_policy,
+        agent_id=agent_id,
+        session_id=session_id,
+        turn_id=turn_id,
+    )
     tool_policy = s._with_runtime_tool_grants(
         tool_policy,
         grants,
@@ -587,6 +638,21 @@ def active_agent_runtime(
         or ("supervised_conversation_harness" if normalized_supervised_role else ""),
     )
     tool_policy = s._effective_agent_tool_policy(tool_policy, delegation_policy)
+    memory_policy = (
+        copy.deepcopy(agent_snapshot.get("memoryPolicy"))
+        if isinstance(agent_snapshot.get("memoryPolicy"), dict)
+        else s.resolve_memory_policy_for_agent(agent_id)
+    )
+    supervision_policy = (
+        s.normalize_supervision_policy(metadata.get("supervisionPolicy"))
+        if agent_snapshot
+        else s.resolve_supervision_policy_for_agent(agent_id)
+    )
+    permission_preset = (
+        normalize_permission_preset(agent_snapshot.get("permissionPreset"))
+        if agent_snapshot
+        else ""
+    )
     context = {
         "agentId": str(agent_id or "").strip(),
         "sessionId": str(session_id or "").strip(),
@@ -594,11 +660,22 @@ def active_agent_runtime(
         "roomId": str(room_id or "").strip(),
         "roundId": str(round_id or "").strip(),
         "supervisedRole": normalized_supervised_role,
-        "agent": agent or {},
+        "agent": agent_snapshot,
+        "agentConfigSnapshot": {
+            "agentId": str(agent_snapshot.get("agentId") or agent_id or "").strip(),
+            "configRevision": int(agent_snapshot.get("configRevision") or 0),
+            "configHash": str(agent_snapshot.get("configHash") or "").strip(),
+        },
+        "permissionPreset": permission_preset,
+        "runtimePermissions": (
+            permission_runtime_contract(permission_preset)
+            if permission_preset
+            else None
+        ),
         "toolPolicy": tool_policy,
-        "memoryPolicy": s.resolve_memory_policy_for_agent(agent_id),
+        "memoryPolicy": memory_policy,
         "delegationPolicy": delegation_policy,
-        "supervisionPolicy": s.resolve_supervision_policy_for_agent(agent_id),
+        "supervisionPolicy": supervision_policy,
     }
     token = s._CURRENT_AGENT_RUNTIME.set(context)
     try:

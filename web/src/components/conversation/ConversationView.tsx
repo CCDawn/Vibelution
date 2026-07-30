@@ -224,6 +224,7 @@ import {
   type TurnAvatarResolution,
 } from "./conversationTurnAvatar";
 import type { ConversationViewProps } from "./conversationViewTypes";
+import { AgentPermissionPresetControl } from "../vui/product/agent-management";
 import {
   buildComputerUseStateForMessage,
   computerUseResultForOperation,
@@ -418,6 +419,7 @@ export function ConversationView({
   composerReferences = [],
   slashCommandSuggestions = [],
   composerAttachmentInputDisabled,
+  permissionControl,
   llmControl,
   turnError,
   submitLabel,
@@ -3876,6 +3878,13 @@ export function ConversationView({
               >
                 <ImagePlus size={16} />
               </VButton>
+              {permissionControl ? (
+                <AgentPermissionPresetControl
+                  {...permissionControl}
+                  lang={lang}
+                  surface="composer"
+                />
+              ) : null}
             </div>
             <div className={styles.composerToolbarEnd}>
               {llmControl ? <ConversationInferenceControl {...llmControl} /> : null}

@@ -160,8 +160,9 @@ def test_session_llm_options_expose_current_model_and_effort(monkeypatch: pytest
 
 
 def test_session_reasoning_effort_recovers_missing_chat_state_from_workspace(monkeypatch: pytest.MonkeyPatch, tmp_path):
-    """Workspace-backed sessions missing chat_state rows should rematerialize before update."""
+    """Workspace-backed sessions may rematerialize identity, but config stays on Agent."""
     state = {"conversations": [], "version": 1}
+    update_agent_calls = []
     session_id = "session-orphan"
     agent_id = "agent-orphan"
     journal = tmp_path / "turn_journal.jsonl"
@@ -222,6 +223,14 @@ def test_session_reasoning_effort_recovers_missing_chat_state_from_workspace(mon
         },
     )
     monkeypatch.setattr(session_service, "_session_fixed_model_choice", lambda _sid: _model_choices()[0])
+    monkeypatch.setattr(
+        session_service,
+        "update_agent_instance",
+        lambda *args, **kwargs: update_agent_calls.append((args, kwargs)) or {
+            "agentId": agent_id,
+            "configRevision": 2,
+        },
+    )
     monkeypatch.setattr(session_service, "get_session_llm_options", lambda sid: {
         "sessionId": sid,
         "currentModelId": "ai-pixel/gpt-5.6-luna",
@@ -234,8 +243,14 @@ def test_session_reasoning_effort_recovers_missing_chat_state_from_workspace(mon
     assert payload["currentReasoningEffort"] == "high"
     assert any(item.get("conversation_id") == session_id for item in state["conversations"])
     recovered = next(item for item in state["conversations"] if item["conversation_id"] == session_id)
-    assert recovered["reasoning_effort"] == "high"
+    assert "reasoning_effort" not in recovered
     assert recovered.get("agentId") == agent_id or recovered.get("agent_id") == agent_id
+    assert update_agent_calls == [
+        (
+            (agent_id,),
+            {"reasoning_effort_by_slot": {"dialogue": "high"}},
+        )
+    ]
 
 
 def test_agent_model_choices_preserve_model_specific_reasoning_efforts():
@@ -316,31 +331,62 @@ def _install_chat_state(monkeypatch: pytest.MonkeyPatch, efforts: dict[str, str]
     return state
 
 
-def test_reasoning_effort_snapshot_uses_initialized_chat_state_without_detail_hydration(
+def test_reasoning_effort_snapshot_reads_agent_config_and_ignores_session_value(
     monkeypatch: pytest.MonkeyPatch,
 ):
     _install_chat_state(monkeypatch, {"session-live": "high"})
     monkeypatch.setattr(
         session_service,
+        "_session_agent_id_snapshot",
+        lambda _session_id: "agent-live",
+    )
+    monkeypatch.setattr(
+        session_service,
+        "get_agent",
+        lambda agent_id, **_kwargs: {
+            "agentId": agent_id,
+            "metadata": {"llmReasoningEffort": {"dialogue": "medium"}},
+        },
+    )
+    monkeypatch.setattr(
+        session_service,
         "get_session_detail",
-        lambda *_args, **_kwargs: pytest.fail("initialized effort must not hydrate session detail"),
+        lambda *_args, **_kwargs: pytest.fail("Agent config snapshot must not hydrate session detail"),
     )
     monkeypatch.setattr(
         session_service,
         "_session_fixed_model_choice",
-        lambda *_args, **_kwargs: pytest.fail("initialized effort must not resolve model catalog"),
+        lambda *_args, **_kwargs: pytest.fail("Agent config snapshot must not resolve model catalog"),
     )
 
-    assert session_service._session_reasoning_effort_snapshot("session-live") == "high"
+    assert session_service._session_reasoning_effort_snapshot("session-live") == "medium"
 
 
-def test_session_effort_update_never_writes_agent(monkeypatch: pytest.MonkeyPatch):
+def test_session_effort_update_writes_owning_agent_and_keeps_session_as_projection(monkeypatch: pytest.MonkeyPatch):
     state = _install_chat_state(monkeypatch, {"session-live": "medium"})
     update_agent_calls = []
-    monkeypatch.setattr(session_service, "update_agent_instance", lambda *args, **kwargs: update_agent_calls.append((args, kwargs)))
+    monkeypatch.setattr(
+        session_service,
+        "update_agent_instance",
+        lambda *args, **kwargs: update_agent_calls.append((args, kwargs)) or {
+            "agentId": "agent-live",
+            "configRevision": 2,
+            "metadata": {"llmReasoningEffort": {"dialogue": "high"}},
+        },
+    )
     monkeypatch.setattr(session_service, "_is_session_running", lambda _session_id: False)
     monkeypatch.setattr(session_service, "_session_fixed_model_choice", lambda _session_id: _model_choices()[0])
     monkeypatch.setattr(session_service, "_invalidate_session_list_cache", lambda: None)
+    monkeypatch.setattr(
+        session_service,
+        "get_session_llm_options",
+        lambda session_id: {
+            "sessionId": session_id,
+            "currentModelId": "ai-pixel/gpt-5.6-luna",
+            "currentReasoningEffort": "high",
+            "model": _model_choices()[0],
+        },
+    )
 
     payload = session_service.update_session_reasoning_effort("session-live", reasoning_effort="high")
 
@@ -348,20 +394,50 @@ def test_session_effort_update_never_writes_agent(monkeypatch: pytest.MonkeyPatc
     assert payload["currentReasoningEffort"] == "high"
     assert payload["model"]["modelRef"] == "ai-pixel/gpt-5.6-luna"
     assert "models" not in payload
-    assert update_agent_calls == []
-    assert state["conversations"][0]["reasoning_effort"] == "high"
+    assert update_agent_calls == [
+        (
+            ("agent-live",),
+            {"reasoning_effort_by_slot": {"dialogue": "high"}},
+        )
+    ]
+    assert state["conversations"][0]["reasoning_effort"] == "medium"
 
 
-def test_two_sessions_keep_independent_efforts(monkeypatch: pytest.MonkeyPatch):
+def test_two_sessions_bound_to_one_agent_do_not_keep_independent_effort_authority(monkeypatch: pytest.MonkeyPatch):
     state = _install_chat_state(monkeypatch, {"session-a": "low", "session-b": "high"})
+    update_agent_calls = []
     monkeypatch.setattr(session_service, "_is_session_running", lambda _session_id: False)
     monkeypatch.setattr(session_service, "_session_fixed_model_choice", lambda _session_id: _model_choices()[0])
     monkeypatch.setattr(session_service, "_invalidate_session_list_cache", lambda: None)
+    monkeypatch.setattr(
+        session_service,
+        "update_agent_instance",
+        lambda *args, **kwargs: update_agent_calls.append((args, kwargs)) or {
+            "agentId": "agent-live",
+            "configRevision": 2,
+        },
+    )
+    monkeypatch.setattr(
+        session_service,
+        "get_session_llm_options",
+        lambda session_id: {
+            "sessionId": session_id,
+            "currentModelId": "ai-pixel/gpt-5.6-luna",
+            "currentReasoningEffort": "medium",
+            "model": _model_choices()[0],
+        },
+    )
 
     session_service.update_session_reasoning_effort("session-a", reasoning_effort="medium")
 
     efforts = {item["conversation_id"]: item["reasoning_effort"] for item in state["conversations"]}
-    assert efforts == {"session-a": "medium", "session-b": "high"}
+    assert efforts == {"session-a": "low", "session-b": "high"}
+    assert update_agent_calls == [
+        (
+            ("agent-live",),
+            {"reasoning_effort_by_slot": {"dialogue": "medium"}},
+        )
+    ]
 
 
 def test_session_reasoning_effort_rejects_unsupported_value_without_partial_update(monkeypatch: pytest.MonkeyPatch):

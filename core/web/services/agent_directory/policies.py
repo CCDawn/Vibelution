@@ -330,14 +330,26 @@ def _knowledge_steward_tool_policy() -> dict[str, Any]:
 def _memory_policy_for_agent(agent: dict[str, Any], *, hydration: Any | None = None) -> dict[str, Any]:
     s = _service()
     agent_id = str(agent.get("agentId") or "").strip()
-    if hydration is None:
-        return s.resolve_memory_policy_for_agent(agent_id)
     policy_id = str(agent.get("memoryPolicyId") or "").strip()
-    policy = hydration.memory_policies.get(policy_id)
+    policy = agent.get("memoryPolicy")
     workspace_path = str(agent.get("workspacePath") or s._agent_workspace_relative_path(agent_id)).strip()
     if isinstance(policy, dict):
         return s.normalize_memory_policy(policy, policy_id, workspace_path)
-    return s.default_memory_policy(policy_id or f"memory-{agent_id}", workspace_path)
+    legacy_policy = (
+        hydration.memory_policies.get(policy_id)
+        if hydration is not None
+        else s._memory_policies(s.load_state()).get(policy_id)
+    )
+    if isinstance(legacy_policy, dict):
+        return s.normalize_memory_policy(
+            legacy_policy,
+            policy_id,
+            workspace_path,
+        )
+    return s.default_memory_policy(
+        policy_id or f"memory-{agent_id}",
+        workspace_path,
+    )
 
 
 def _normalize_context_compression_levels(levels: Any) -> dict[str, float]:
@@ -633,11 +645,16 @@ def _tool_policies(state: dict[str, Any]) -> dict[str, Any]:
 
 def _tool_policy_for_agent(agent: dict[str, Any], *, hydration: Any | None = None) -> dict[str, Any]:
     s = _service()
-    agent_id = str(agent.get("agentId") or "").strip()
-    if hydration is None:
-        return s.resolve_tool_policy_for_agent(agent_id)
     policy_id = str(agent.get("toolPolicyId") or s.DEFAULT_TOOL_POLICY_ID).strip() or s.DEFAULT_TOOL_POLICY_ID
-    policy = hydration.tool_policies.get(policy_id) or s.default_tool_policy(policy_id)
+    policy = agent.get("toolPolicy")
+    if not isinstance(policy, dict):
+        policy = (
+            hydration.tool_policies.get(policy_id)
+            if hydration is not None
+            else s._tool_policies(s.load_state()).get(policy_id)
+        )
+    if not isinstance(policy, dict):
+        policy = s.default_tool_policy(policy_id)
     metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
     return s._effective_agent_tool_policy(
         s._with_session_terminal_protocol_defaults(agent, s.normalize_tool_policy(policy, policy_id)),
@@ -1045,54 +1062,88 @@ def effective_agent_context_compression_policy(
     context_window_limit: int = 0,
 ) -> dict[str, Any]:
     s = _service()
-    base = s._context_compression_policy_from_config(base_policy, context_window_limit=context_window_limit)
     raw_agent_policy = s.normalize_agent_context_compression_policy(
         (agent or {}).get("contextCompressionPolicy") if isinstance(agent, dict) else None
     )
     if raw_agent_policy.get("mode") != "custom":
         return {
-            **base,
-            "mode": "inherit",
-            "source": "global",
+            "mode": "unmaterialized",
+            "source": "migration_required",
             "agentPolicy": raw_agent_policy,
+            "enabled": False,
+            "maxTokenLimit": 0,
+            "effectiveTokenLimit": 0,
+            "compressionTriggerTokenLimit": 0,
+            "contextWindowLimit": max(0, int(context_window_limit or 0)),
+            "modelContextWindowLimit": max(0, int(context_window_limit or 0)),
+            "maxCompressionsPerSession": 0,
+            "levels": {},
+            "summaryChars": {},
+            "preservation": {},
         }
 
+    base = s._context_compression_policy_from_config(
+        {},
+        context_window_limit=context_window_limit,
+    )
     merged = {
         **base,
         "mode": "custom",
-        "source": "agent_custom",
+        "source": "agent",
         "agentPolicy": raw_agent_policy,
-        "enabled": bool(raw_agent_policy.get("enabled", base.get("enabled", True))),
+        "enabled": bool(raw_agent_policy.get("enabled", True)),
         "maxCompressionsPerSession": s._positive_context_compression_int(
             raw_agent_policy.get("maxCompressionsPerSession"),
-            default=int(base.get("maxCompressionsPerSession") or 20),
+            default=20,
             maximum=100,
         ),
-        "levels": {
-            **dict(base.get("levels") or {}),
-            **dict(raw_agent_policy.get("levels") or {}),
-        },
-        "summaryChars": {
-            **dict(base.get("summaryChars") or {}),
-            **dict(raw_agent_policy.get("summaryChars") or {}),
-        },
-        "preservation": {
-            **dict(base.get("preservation") or {}),
-            **dict(raw_agent_policy.get("preservation") or {}),
-        },
+        "levels": dict(raw_agent_policy.get("levels") or {}),
+        "summaryChars": dict(raw_agent_policy.get("summaryChars") or {}),
+        "preservation": dict(raw_agent_policy.get("preservation") or {}),
     }
     raw_limit = s._positive_context_compression_int(raw_agent_policy.get("maxTokenLimit"), default=0, maximum=2_000_000)
-    context_window = s._positive_context_compression_int(context_window_limit, default=int(base.get("contextWindowLimit") or 0), maximum=2_000_000)
+    context_window = s._positive_context_compression_int(
+        context_window_limit,
+        default=raw_limit,
+        maximum=2_000_000,
+    )
     if raw_limit > 0:
         merged["maxTokenLimit"] = raw_limit
         merged["effectiveTokenLimit"] = min(raw_limit, context_window) if context_window > 0 else raw_limit
     else:
-        merged["maxTokenLimit"] = int(base.get("maxTokenLimit") or base.get("effectiveTokenLimit") or 0)
-        merged["effectiveTokenLimit"] = int(base.get("effectiveTokenLimit") or merged["maxTokenLimit"])
+        merged["maxTokenLimit"] = context_window
+        merged["effectiveTokenLimit"] = context_window
     merged["compressionTriggerTokenLimit"] = int(merged.get("effectiveTokenLimit") or 0)
     merged["contextWindowLimit"] = context_window or int(merged.get("effectiveTokenLimit") or 0)
     merged["modelContextWindowLimit"] = int(merged.get("contextWindowLimit") or 0)
     return merged
+
+
+def materialize_agent_context_compression_policy(
+    policy: dict[str, Any] | None,
+    *,
+    creation_default: Any = None,
+) -> dict[str, Any]:
+    """Copy creation defaults into a complete Agent-owned policy."""
+    s = _service()
+    normalized = s.normalize_agent_context_compression_policy(policy)
+    if normalized.get("mode") == "custom":
+        return normalized
+    default_policy = s._context_compression_policy_from_config(creation_default)
+    return s.normalize_agent_context_compression_policy(
+        {
+            "mode": "custom",
+            "enabled": default_policy.get("enabled", True),
+            "maxTokenLimit": default_policy.get("maxTokenLimit"),
+            "maxCompressionsPerSession": default_policy.get(
+                "maxCompressionsPerSession",
+                20,
+            ),
+            "levels": default_policy.get("levels"),
+            "summaryChars": default_policy.get("summaryChars"),
+            "preservation": default_policy.get("preservation"),
+        }
+    )
 
 
 def evaluate_current_delegation_policy(
@@ -1540,11 +1591,14 @@ def resolve_memory_policy_for_agent(agent_id: str) -> dict[str, Any]:
     if agent is None:
         return {}
     policy_id = str(agent.get("memoryPolicyId") or "").strip()
-    policy = s._memory_policies(state).get(policy_id)
+    policy = agent.get("memoryPolicy")
     workspace_path = str(agent.get("workspacePath") or s._agent_workspace_relative_path(agent_id)).strip()
     if isinstance(policy, dict):
         return s.normalize_memory_policy(policy, policy_id, workspace_path)
-    return s.default_memory_policy(policy_id or f"memory-{agent_id}", workspace_path)
+    return s.default_memory_policy(
+        policy_id or f"memory-{agent_id}",
+        workspace_path,
+    )
 
 
 def resolve_supervision_policy_for_agent(agent_id: str) -> dict[str, Any]:
@@ -1562,9 +1616,10 @@ def resolve_tool_policy_for_agent(agent_id: str, *, session_id: str = "", turn_i
     agent = s._find_agent(s.load_state(), agent_id)
     if agent is None:
         return s.default_tool_policy(s.DEFAULT_TOOL_POLICY_ID)
-    state = s.load_state()
     policy_id = str(agent.get("toolPolicyId") or s.DEFAULT_TOOL_POLICY_ID).strip() or s.DEFAULT_TOOL_POLICY_ID
-    policy = s._tool_policies(state).get(policy_id) or s.default_tool_policy(policy_id)
+    policy = agent.get("toolPolicy")
+    if not isinstance(policy, dict):
+        policy = s.default_tool_policy(policy_id)
     normalized = s._with_session_terminal_protocol_defaults(agent, s.normalize_tool_policy(policy, policy_id))
     with_grants = s._with_temporary_tool_grants(
         normalized,
