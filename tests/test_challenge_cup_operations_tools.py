@@ -1,6 +1,12 @@
 import json
 
-from core.web.services import research_loop_service, runtime_scene_service, team_workflow_orchestration_service
+from core.web.services import (
+    agent_directory_service,
+    research_loop_service,
+    runtime_scene_service,
+    session_service,
+    team_workflow_orchestration_service,
+)
 from tools.challenge_cup_operations_tools import (
     challenge_cup_experiment_context_tool,
     challenge_cup_experiment_writeback_tool,
@@ -135,6 +141,7 @@ def test_experiment_tool_binds_project_task_and_completes_writeback(
     assert result["status"] == "ok"
     assert created_payloads[0]["researchProjectId"] == "project-1"
     assert created_payloads[0]["createdByAgent"] == "agent-planner"
+    assert created_payloads[0]["createdFromTaskId"] == "task-design-1"
     assert updates == [
         (
             "research-team",
@@ -144,6 +151,186 @@ def test_experiment_tool_binds_project_task_and_completes_writeback(
         )
     ]
     assert result["task"]["status"] == "completed"
+
+
+def test_experiment_tool_infers_project_task_from_current_runtime(
+    monkeypatch,
+):
+    updates = []
+    created_payloads = []
+    monkeypatch.setattr(
+        agent_directory_service,
+        "current_agent_runtime",
+        lambda: {
+            "agentId": "agent-planner",
+            "sessionId": "session-project-1",
+            "turnId": "turn-design-1",
+        },
+    )
+    monkeypatch.setattr(
+        session_service,
+        "get_session_detail",
+        lambda _session_id, **_kwargs: {
+            "experimentBinding": {
+                "teamId": "research-team",
+                "researchProjectId": "project-1",
+                "agentId": "agent-planner",
+            },
+        },
+    )
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "get_research_project_agent_task_status",
+        lambda _team_id, _project_id: {
+            "tasks": [
+                {
+                    "taskId": "task-design-1",
+                    "taskKind": "experiment_design",
+                    "agentId": "agent-planner",
+                    "researchProjectId": "project-1",
+                    "sessionId": "session-project-1",
+                    "status": "running",
+                    "turn": {"turnId": "turn-design-1"},
+                }
+            ]
+        },
+        raising=False,
+    )
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "require_research_project_agent_task",
+        lambda _team_id, project_id, task_id, **_kwargs: {
+            "taskId": task_id,
+            "taskKind": "experiment_design",
+            "agentId": "agent-planner",
+            "researchProjectId": project_id,
+            "sessionId": "session-project-1",
+            "turn": {"turnId": "turn-design-1"},
+        },
+        raising=False,
+    )
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "get_research_project_agent_task_context",
+        lambda team_id, project_id, task_id: {
+            "teamId": team_id,
+            "researchProjectId": project_id,
+            "task": {
+                "taskId": task_id,
+                "taskKind": "experiment_design",
+                "agentId": "agent-planner",
+                "researchProjectId": project_id,
+            },
+            "experiment": {"plans": [], "planCount": 0},
+        },
+        raising=False,
+    )
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "create_experiment_plan",
+        lambda team_id, payload: created_payloads.append(dict(payload))
+        or {
+            "teamId": team_id,
+            "plan": {
+                "planId": "plan-runtime-bound",
+                "researchProjectId": payload["researchProjectId"],
+            },
+        },
+    )
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "update_research_project_agent_task_status",
+        lambda team_id, project_id, task_id, **kwargs: updates.append(
+            (team_id, project_id, task_id, kwargs)
+        )
+        or {"taskId": task_id, "status": kwargs["status"]},
+    )
+
+    context = json.loads(
+        challenge_cup_experiment_context_tool(
+            team_id="research-team",
+            include_research_loop=True,
+        )
+    )
+    result = json.loads(
+        challenge_cup_experiment_writeback_tool(
+            team_id="research-team",
+            operation="create_plan",
+            payload_json='{"title":"Runtime-bound plan"}',
+            recorded_by_agent="A019 实验规划",
+        )
+    )
+
+    assert context["status"] == "ok"
+    assert context["researchProjectId"] == "project-1"
+    assert (
+        context["researchLoopStatus"]["status"]
+        == "project_scoped_unavailable"
+    )
+    assert result["status"] == "ok"
+    assert created_payloads == [
+        {
+            "title": "Runtime-bound plan",
+            "createdByAgent": "agent-planner",
+            "registeredByAgent": "agent-planner",
+            "recordedByAgent": "agent-planner",
+            "requestedByAgent": "agent-planner",
+            "researchProjectId": "project-1",
+            "createdFromTaskId": "task-design-1",
+            "createdFromSessionId": "session-project-1",
+            "createdFromTurnId": "turn-design-1",
+        }
+    ]
+    assert updates == [
+        (
+            "research-team",
+            "project-1",
+            "task-design-1",
+            {"status": "completed", "result_refs": ["plan-runtime-bound"]},
+        )
+    ]
+
+
+def test_experiment_tool_fails_closed_when_bound_runtime_task_is_missing(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        agent_directory_service,
+        "current_agent_runtime",
+        lambda: {
+            "agentId": "agent-planner",
+            "sessionId": "session-project-1",
+            "turnId": "turn-missing",
+        },
+    )
+    monkeypatch.setattr(
+        session_service,
+        "get_session_detail",
+        lambda _session_id, **_kwargs: {
+            "experimentBinding": {
+                "teamId": "research-team",
+                "researchProjectId": "project-1",
+                "agentId": "agent-planner",
+            },
+        },
+    )
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "get_research_project_agent_task_status",
+        lambda _team_id, _project_id: {"tasks": []},
+        raising=False,
+    )
+
+    result = json.loads(
+        challenge_cup_experiment_writeback_tool(
+            team_id="research-team",
+            operation="create_plan",
+            payload_json='{"title":"Must not be written"}',
+        )
+    )
+
+    assert result["status"] == "error"
+    assert "exactly one compatible" in result["message"]
 
 
 def test_experiment_evidence_writeback_requires_plan_in_same_project(

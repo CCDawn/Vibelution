@@ -35,7 +35,10 @@ def challenge_cup_experiment_context_tool(
             ),
         }
         if project_task_binding:
-            payload["researchProjectId"] = _text(research_project_id)
+            bound_project_id, _bound_task_id = _project_task_identity(
+                project_task_binding
+            )
+            payload["researchProjectId"] = bound_project_id
             payload["taskContext"] = project_task_binding
             payload["experimentPlanningStatus"] = project_task_binding.get(
                 "experiment",
@@ -47,12 +50,19 @@ def challenge_cup_experiment_context_tool(
             )
         if include_research_loop:
             if project_task_binding:
-                raise ValueError(
-                    "Project-scoped experiment task context does not expose the team-wide Research Loop projection."
-                )
-            from core.web.services import research_loop_service
+                payload["researchLoopStatus"] = {
+                    "status": "project_scoped_unavailable",
+                    "reason": (
+                        "Project-scoped experiment task context does not expose "
+                        "the team-wide Research Loop projection."
+                    ),
+                }
+            else:
+                from core.web.services import research_loop_service
 
-            payload["researchLoopStatus"] = research_loop_service.get_research_loop_status(team_id)
+                payload["researchLoopStatus"] = (
+                    research_loop_service.get_research_loop_status(team_id)
+                )
         _record_tool_event(
             "tool.challenge_cup_experiment_context.completed",
             fields={"teamId": _text(team_id), "includeResearchLoop": bool(include_research_loop)},
@@ -96,6 +106,7 @@ def challenge_cup_experiment_writeback_tool(
             allowed_task_kinds=allowed_task_kinds,
             recorded_by_agent=recorded_by_agent,
         )
+        bound_project_id, bound_task_id = _project_task_identity(task)
         payload = _json_object(payload_json)
         actor_agent_id = (
             _text(task.get("agentId"))
@@ -113,7 +124,12 @@ def challenge_cup_experiment_writeback_tool(
             ),
         )
         if task:
-            payload["researchProjectId"] = _text(research_project_id)
+            payload["researchProjectId"] = bound_project_id
+            payload["createdFromTaskId"] = bound_task_id
+            payload["createdFromSessionId"] = _text(task.get("sessionId"))
+            payload["createdFromTurnId"] = _text(
+                (task.get("turn") or {}).get("turnId")
+            )
         if normalized_operation == "create_plan":
             response = workflow_service.create_experiment_plan(team_id, payload)
             if task:
@@ -124,7 +140,7 @@ def challenge_cup_experiment_writeback_tool(
                 )
                 if (
                     _text(created_plan.get("researchProjectId"))
-                    != _text(research_project_id)
+                    != bound_project_id
                 ):
                     raise ValueError(
                         "Created experiment plan was not bound to the requested research project."
@@ -138,7 +154,7 @@ def challenge_cup_experiment_writeback_tool(
             if task:
                 workflow_service.require_research_project_experiment_plan(
                     team_id,
-                    research_project_id,
+                    bound_project_id,
                     plan_id,
                 )
             if normalized_operation == "register_baseline_artifact":
@@ -182,8 +198,8 @@ def challenge_cup_experiment_writeback_tool(
             task_status = (
                 workflow_service.update_research_project_agent_task_status(
                     team_id,
-                    research_project_id,
-                    task_id,
+                    bound_project_id,
+                    bound_task_id,
                     status="completed",
                     result_refs=result_refs,
                 )
@@ -192,8 +208,8 @@ def challenge_cup_experiment_writeback_tool(
             "tool.challenge_cup_experiment_writeback.completed",
             fields={
                 "teamId": _text(team_id),
-                "researchProjectId": _text(research_project_id),
-                "taskId": _text(task_id),
+                "researchProjectId": bound_project_id,
+                "taskId": bound_task_id,
                 "operation": normalized_operation,
                 "planId": _text(plan_id),
                 "recordedByAgent": actor_agent_id,
@@ -242,6 +258,9 @@ def challenge_cup_iteration_context_tool(
             recorded_by_agent="",
             load_context=True,
         )
+        bound_project_id, _bound_task_id = _project_task_identity(
+            project_task_context
+        )
         payload: dict[str, Any] = {
             "status": "ok",
             "teamId": _text(team_id),
@@ -250,7 +269,7 @@ def challenge_cup_iteration_context_tool(
                 _bounded_research_loop_status(
                     research_loop_service.get_research_loop_status(
                         team_id,
-                        research_project_id=_text(research_project_id),
+                        research_project_id=bound_project_id,
                     )
                 )
                 if project_task_context
@@ -259,7 +278,7 @@ def challenge_cup_iteration_context_tool(
             "boundaries": _operation_boundaries("research_loop_manual_record_and_command_preview_only"),
         }
         if project_task_context:
-            payload["researchProjectId"] = _text(research_project_id)
+            payload["researchProjectId"] = bound_project_id
             payload["taskContext"] = project_task_context
         if include_experiment:
             payload["experimentPlanningStatus"] = (
@@ -306,6 +325,7 @@ def challenge_cup_iteration_writeback_tool(
             allowed_task_kinds=("iteration_decision",),
             recorded_by_agent=recorded_by_agent,
         )
+        bound_project_id, bound_task_id = _project_task_identity(task)
         payload = _json_object(payload_json)
         actor_agent_id = (
             _text(task.get("agentId"))
@@ -318,7 +338,7 @@ def challenge_cup_iteration_writeback_tool(
             keys=("createdByAgent", "recordedByAgent", "decidedByAgent"),
         )
         if task:
-            payload["researchProjectId"] = _text(research_project_id)
+            payload["researchProjectId"] = bound_project_id
         if normalized_operation == "create_loop":
             response = research_loop_service.create_research_loop(team_id, payload)
             if task:
@@ -329,7 +349,7 @@ def challenge_cup_iteration_writeback_tool(
                 )
                 if (
                     _text(created_loop.get("researchProjectId"))
-                    != _text(research_project_id)
+                    != bound_project_id
                 ):
                     raise ValueError(
                         "Created Research Loop was not bound to the requested research project."
@@ -339,7 +359,7 @@ def challenge_cup_iteration_writeback_tool(
                 research_loop_service.require_research_loop(
                     team_id,
                     loop_id,
-                    research_project_id=research_project_id,
+                    research_project_id=bound_project_id,
                 )
             response = research_loop_service.record_research_loop_evidence(team_id, loop_id, payload)
         elif normalized_operation == "record_decision":
@@ -347,7 +367,7 @@ def challenge_cup_iteration_writeback_tool(
                 research_loop_service.require_research_loop(
                     team_id,
                     loop_id,
-                    research_project_id=research_project_id,
+                    research_project_id=bound_project_id,
                 )
             response = research_loop_service.record_research_loop_decision(team_id, loop_id, payload)
         else:
@@ -357,8 +377,8 @@ def challenge_cup_iteration_writeback_tool(
             task_status = (
                 workflow_service.update_research_project_agent_task_status(
                     team_id,
-                    research_project_id,
-                    task_id,
+                    bound_project_id,
+                    bound_task_id,
                     status="completed",
                     result_refs=_iteration_writeback_result_refs(
                         requested_loop_id=_text(loop_id),
@@ -370,8 +390,8 @@ def challenge_cup_iteration_writeback_tool(
             "tool.challenge_cup_iteration_writeback.completed",
             fields={
                 "teamId": _text(team_id),
-                "researchProjectId": _text(research_project_id),
-                "taskId": _text(task_id),
+                "researchProjectId": bound_project_id,
+                "taskId": bound_task_id,
                 "operation": normalized_operation,
                 "loopId": _text(loop_id),
                 "recordedByAgent": actor_agent_id,
@@ -424,6 +444,9 @@ def challenge_cup_versioning_context_tool(
             recorded_by_agent="",
             load_context=True,
         )
+        bound_project_id, _bound_task_id = _project_task_identity(
+            project_task_context
+        )
         payload = {
             "status": "ok",
             "teamId": _text(team_id),
@@ -431,7 +454,7 @@ def challenge_cup_versioning_context_tool(
                 _bounded_versioning_status(
                     challenge_cup_versioning_service.get_candidate_versioning_status(
                         team_id,
-                        research_project_id=_text(research_project_id),
+                        research_project_id=bound_project_id,
                     )
                 )
                 if project_task_context
@@ -442,7 +465,7 @@ def challenge_cup_versioning_context_tool(
             "boundaries": _operation_boundaries("candidate_versioning_ledger_only_not_official_graph"),
         }
         if project_task_context:
-            payload["researchProjectId"] = _text(research_project_id)
+            payload["researchProjectId"] = bound_project_id
             payload["taskContext"] = project_task_context
         _record_tool_event("tool.challenge_cup_versioning_context.completed", fields={"teamId": _text(team_id)})
         return _json_dump(payload)
@@ -487,6 +510,7 @@ def challenge_cup_versioning_writeback_tool(
             allowed_task_kinds=("version_governance",),
             recorded_by_agent=recorded_by_agent,
         )
+        bound_project_id, bound_task_id = _project_task_identity(task)
         actor_agent_id = (
             _text(task.get("agentId"))
             if isinstance(task, dict)
@@ -494,7 +518,7 @@ def challenge_cup_versioning_writeback_tool(
         )
         payload = {
             "operation": operation,
-            "researchProjectId": _text(research_project_id) if task else "",
+            "researchProjectId": bound_project_id if task else "",
             "candidateId": candidate_id,
             "versionLabel": version_label,
             "summary": summary,
@@ -512,13 +536,13 @@ def challenge_cup_versioning_writeback_tool(
             challenge_cup_versioning_service.require_candidate_version(
                 team_id,
                 supersedes_version_id,
-                research_project_id=research_project_id,
+                research_project_id=bound_project_id,
             )
         elif task and normalized_operation == "derive":
             challenge_cup_versioning_service.require_candidate_version(
                 team_id,
                 derived_from_version_id,
-                research_project_id=research_project_id,
+                research_project_id=bound_project_id,
             )
         response = challenge_cup_versioning_service.record_candidate_version_event(team_id, payload)
         if task:
@@ -529,7 +553,7 @@ def challenge_cup_versioning_writeback_tool(
             )
             if (
                 _text(created_version.get("researchProjectId"))
-                != _text(research_project_id)
+                != bound_project_id
             ):
                 raise ValueError(
                     "Created candidate version was not bound to the requested research project."
@@ -540,8 +564,8 @@ def challenge_cup_versioning_writeback_tool(
             task_status = (
                 workflow_service.update_research_project_agent_task_status(
                     team_id,
-                    research_project_id,
-                    task_id,
+                    bound_project_id,
+                    bound_task_id,
                     status="completed",
                     result_refs=result_refs,
                 )
@@ -550,8 +574,8 @@ def challenge_cup_versioning_writeback_tool(
             "tool.challenge_cup_versioning_writeback.completed",
             fields={
                 "teamId": _text(team_id),
-                "researchProjectId": _text(research_project_id),
-                "taskId": _text(task_id),
+                "researchProjectId": bound_project_id,
+                "taskId": bound_task_id,
                 "operation": normalized_operation,
                 "candidateId": _text(candidate_id),
             },
@@ -597,7 +621,69 @@ def _project_task_binding(
             "research_project_id and task_id must be provided together."
         )
     if not project_id:
-        return None
+        from core.web.services import agent_directory_service, session_service
+
+        runtime = agent_directory_service.current_agent_runtime()
+        runtime_session_id = _text(runtime.get("sessionId"))
+        runtime_turn_id = _text(runtime.get("turnId"))
+        runtime_agent_id = _text(runtime.get("agentId"))
+        if not runtime_session_id or not runtime_turn_id:
+            return None
+        detail = session_service.get_session_detail(
+            runtime_session_id,
+            message_limit=0,
+            transcript_scope="none",
+        )
+        experiment_binding = (
+            detail.get("experimentBinding")
+            if isinstance(detail, dict)
+            and isinstance(detail.get("experimentBinding"), dict)
+            else {}
+        )
+        if not experiment_binding:
+            return None
+        if _text(experiment_binding.get("teamId")) != _text(team_id):
+            raise ValueError(
+                "Current runtime research project task belongs to another team."
+            )
+        project_id = _text(experiment_binding.get("researchProjectId"))
+        if not project_id:
+            raise ValueError(
+                "Current runtime experiment binding is missing researchProjectId."
+            )
+        binding_agent_id = _text(experiment_binding.get("agentId"))
+        if (
+            runtime_agent_id
+            and binding_agent_id
+            and runtime_agent_id != binding_agent_id
+        ):
+            raise ValueError(
+                "Current runtime Agent does not match the experiment binding."
+            )
+        status = workflow_service.get_research_project_agent_task_status(
+            team_id,
+            project_id,
+        )
+        candidates = [
+            item
+            for item in list(status.get("tasks") or [])
+            if isinstance(item, dict)
+            and _text(item.get("sessionId")) == runtime_session_id
+            and _text((item.get("turn") or {}).get("turnId"))
+            == runtime_turn_id
+            and (
+                not runtime_agent_id
+                or _text(item.get("agentId")) == runtime_agent_id
+            )
+            and item.get("taskKind") in set(allowed_task_kinds)
+        ]
+        if len(candidates) != 1:
+            raise ValueError(
+                "Current runtime does not resolve to exactly one compatible "
+                "research project Agent task."
+            )
+        normalized_task_id = _text(candidates[0].get("taskId"))
+        recorded_by_agent = runtime_agent_id or recorded_by_agent
     if load_context:
         context = workflow_service.get_research_project_agent_task_context(
             team_id,
@@ -616,6 +702,21 @@ def _project_task_binding(
         normalized_task_id,
         allowed_task_kinds=allowed_task_kinds,
         recorded_by_agent=_text(recorded_by_agent),
+    )
+
+
+def _project_task_identity(
+    binding: dict[str, Any] | None,
+) -> tuple[str, str]:
+    payload = binding if isinstance(binding, dict) else {}
+    task = (
+        payload.get("task")
+        if isinstance(payload.get("task"), dict)
+        else payload
+    )
+    return (
+        _text(task.get("researchProjectId") or payload.get("researchProjectId")),
+        _text(task.get("taskId")),
     )
 
 
