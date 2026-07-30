@@ -181,6 +181,9 @@ def _record_session_list_loaded_event(
     chat_state_read_ms: int | None = None,
     conversation_normalize_ms: int | None = None,
     summary_projection_ms: int | None = None,
+    ledger_tail_ms: int | None = None,
+    agent_inbox_ms: int | None = None,
+    agent_directory_ms: int | None = None,
 ) -> None:
     s = _service()
     cache_expired = bool(cache_hit and cache_ttl_ms > 0 and cache_age_ms > cache_ttl_ms)
@@ -191,6 +194,9 @@ def _record_session_list_loaded_event(
             chat_state_read_ms,
             conversation_normalize_ms,
             summary_projection_ms,
+            ledger_tail_ms,
+            agent_inbox_ms,
+            agent_directory_ms,
         )
     )
     try:
@@ -220,6 +226,9 @@ def _record_session_list_loaded_event(
                 "chatStateReadMs": max(0, int(chat_state_read_ms or 0)),
                 "conversationNormalizeMs": max(0, int(conversation_normalize_ms or 0)),
                 "summaryProjectionMs": max(0, int(summary_projection_ms or 0)),
+                "ledgerTailMs": max(0, int(ledger_tail_ms or 0)),
+                "agentInboxMs": max(0, int(agent_inbox_ms or 0)),
+                "agentDirectoryMs": max(0, int(agent_directory_ms or 0)),
             },
             lifecycle=False,
         )
