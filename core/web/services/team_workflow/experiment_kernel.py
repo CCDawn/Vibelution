@@ -168,6 +168,7 @@ def _load_experiment_plan_store(team_id: str) -> dict[str, Any]:
             for plan in list(projected.get("plans") or []):
                 if isinstance(plan, dict):
                     _sanitize_projected_experiment_plan(plan)
+                    _refresh_experiment_bounded_smoke_readiness(plan)
             return projected
     now = s.utc_now_iso()
     payload = {
