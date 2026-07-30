@@ -155,6 +155,28 @@ def _should_refresh_default_bundle_from_template(bundle_path: Path, template_pat
     return existing_case_ids < template_case_ids
 
 
+def _should_refresh_candidate_patch_bundle_from_template(
+    bundle_path: Path,
+    template_path: Path,
+) -> bool:
+    """Keep the immutable built-in candidate probe aligned with its source template."""
+
+    if not bundle_path.exists():
+        return True
+    try:
+        existing = json.loads(bundle_path.read_text(encoding="utf-8"))
+        template = json.loads(template_path.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    if not isinstance(existing, dict) or not isinstance(template, dict):
+        return False
+    if existing.get("bundle_name") != template.get("bundle_name"):
+        return False
+    if existing.get("benchmark") != template.get("benchmark"):
+        return False
+    return existing != template
+
+
 def _ensure_default_bundle_available(root: Path, bundle_name: str) -> Path:
     bundle_path = _workspace_bundle_path(root, bundle_name)
     template_path = _template_bundle_path(bundle_name)
@@ -164,6 +186,11 @@ def _ensure_default_bundle_available(root: Path, bundle_name: str) -> Path:
     should_copy = not bundle_path.exists()
     if bundle_name == DEFAULT_BUNDLE_NAME:
         should_copy = _should_refresh_default_bundle_from_template(bundle_path, template_path)
+    elif bundle_name == SUPERVISED_CANDIDATE_PATCH_SMOKE_BUNDLE_NAME:
+        should_copy = _should_refresh_candidate_patch_bundle_from_template(
+            bundle_path,
+            template_path,
+        )
     if should_copy:
         bundle_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(template_path, bundle_path)

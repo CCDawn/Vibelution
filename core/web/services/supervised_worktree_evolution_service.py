@@ -1506,7 +1506,21 @@ def _real_evaluation_runner(project_root: Path, bundle_name: str, role: str, con
                 "cases": results,
             }
         case_id = str(case.get("case_id") or "case").strip() or "case"
-        prompt = str(case.get("baseline_prompt") or case.get("prompt") or "").strip()
+        if role == "baseline_rerun":
+            prompt = str(
+                case.get("candidate_prompt")
+                or case.get("candidatePrompt")
+                or case.get("baseline_prompt")
+                or case.get("prompt")
+                or ""
+            ).strip()
+        else:
+            prompt = str(
+                case.get("baseline_prompt")
+                or case.get("baselinePrompt")
+                or case.get("prompt")
+                or ""
+            ).strip()
         scenario = str(case.get("scenario") or "transaction").strip() or "transaction"
         mode = str(case.get("mode") or "single_turn").strip() or "single_turn"
         timeout_seconds = int(case.get("timeout_seconds") or bundle.get("default_timeout_seconds") or 600)

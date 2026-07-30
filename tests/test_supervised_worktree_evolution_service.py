@@ -273,6 +273,71 @@ def test_real_rerun_evaluation_fails_closed_when_candidate_runtime_is_unverified
     }
 
 
+def test_real_rerun_evaluation_uses_candidate_prompt(tmp_path, monkeypatch):
+    captured_prompts: list[str] = []
+    monkeypatch.setattr(
+        service,
+        "load_supervised_bundle",
+        lambda *args, **kwargs: {
+            "bundle_name": "closed_loop_v1",
+            "cases": [
+                {
+                    "case_id": "one",
+                    "baseline_prompt": "baseline-only prompt",
+                    "candidate_prompt": "rerun-only prompt",
+                }
+            ],
+        },
+    )
+
+    def fake_conversation_harness(**kwargs):
+        captured_prompts.append(str(kwargs.get("prompt") or ""))
+        return _fake_harness_result(
+            role="baseline",
+            repo_root=Path(kwargs["repo_root"]),
+            prompt=str(kwargs.get("prompt") or ""),
+            session_id="session-rerun",
+        )
+
+    monkeypatch.setattr(
+        service,
+        "run_supervised_conversation_harness",
+        fake_conversation_harness,
+    )
+    monkeypatch.setattr(
+        service,
+        "run_candidate_runtime_evidence",
+        lambda **kwargs: {
+            "status": "verified",
+            "runtimeEffect": "candidate_harness_executed",
+            "candidateVariantId": "swte-variant-prompt",
+            "worktreePath": str(tmp_path.resolve()),
+        },
+    )
+
+    evaluation = service._real_evaluation_runner(
+        tmp_path,
+        "closed_loop_v1",
+        "baseline_rerun",
+        {
+            "runId": "swte-rerun-prompt",
+            "options": {
+                "agentBindings": {
+                    "baseline": {"agentId": "agent-baseline", "role": "baseline"}
+                }
+            },
+            "candidateVariant": {
+                "variantId": "swte-variant-prompt",
+                "checkpointCommit": "base",
+            },
+            "cleanRoom": True,
+        },
+    )
+
+    assert evaluation["status"] == "success"
+    assert captured_prompts == ["rerun-only prompt"]
+
+
 def test_real_judge_runner_retries_wrong_phase_in_same_session(tmp_path, monkeypatch):
     calls: list[dict] = []
     rubric_hash = "a" * 64
