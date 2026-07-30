@@ -163,6 +163,9 @@ def _normalize_task(value: Any) -> dict[str, Any]:
     status = _text(payload.get("status"), limit=80).lower()
     if status not in ALLOWED_STATUSES:
         status = "queued"
+    turn = _normalize_turn(payload.get("turn"))
+    if status in TERMINAL_STATUSES and turn["status"] in ACTIVE_STATUSES:
+        turn["status"] = status
     task_kind = _text(payload.get("taskKind"), limit=80)
     contract = TASK_KIND_CONTRACTS.get(task_kind) or {}
     result_refs = [
@@ -197,7 +200,7 @@ def _normalize_task(value: Any) -> dict[str, Any]:
         "retrySourceTaskId": _text(payload.get("retrySourceTaskId")),
         "formalRetry": bool(payload.get("formalRetry")),
         "status": status,
-        "turn": _normalize_turn(payload.get("turn")),
+        "turn": turn,
         "resultRefs": result_refs,
         "failureCode": _text(payload.get("failureCode"), limit=120),
         "returnTo": _text(payload.get("returnTo"), limit=1000),
@@ -971,6 +974,14 @@ def update_research_project_agent_task_status(
         task["status"] = normalized_status
         task["resultRefs"] = normalized_refs
         task["failureCode"] = _text(failure_code, limit=120)
+        turn = (
+            task.get("turn")
+            if isinstance(task.get("turn"), dict)
+            else {}
+        )
+        if normalized_status in TERMINAL_STATUSES and turn:
+            turn["status"] = normalized_status
+            task["turn"] = turn
         task["updatedAt"] = s.utc_now_iso()
         _write_store(normalized_team_id, normalized_project_id, store)
         return _public_task(task)
