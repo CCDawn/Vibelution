@@ -228,6 +228,25 @@ def _sanitize_projected_experiment_plan(plan: dict[str, Any]) -> None:
     contract = plan.get("experimentContract") if isinstance(plan.get("experimentContract"), dict) else {}
     method_config = contract.get("methodConfig") if isinstance(contract.get("methodConfig"), dict) else {}
     metric_contract = contract.get("metricContract") if isinstance(contract.get("metricContract"), dict) else {}
+    contract_migration = (
+        plan.get("contractMigration")
+        if isinstance(plan.get("contractMigration"), dict)
+        else {}
+    )
+    design_gate = plan.get("designGate") if isinstance(plan.get("designGate"), dict) else None
+    contract_validation = (
+        plan.get("contractValidation")
+        if isinstance(plan.get("contractValidation"), dict)
+        else {}
+    )
+    project_explicit_design_gate = (
+        design_gate is None
+        and str(plan.get("status") or "").strip().lower() == "draft"
+        and contract.get("schemaVersion") == 2
+        and str(contract.get("status") or "").strip().lower() == "draft"
+        and contract_validation.get("valid") is True
+        and contract_migration.get("status") != "projected_from_v1"
+    )
 
     def needs_projection_repair(value: Any) -> bool:
         if isinstance(value, str):
@@ -289,11 +308,27 @@ def _sanitize_projected_experiment_plan(plan: dict[str, Any]) -> None:
     projection_changed = any(
         legacy_projection[field] != sanitized[field] for field in field_specs
     )
-    if not structured_placeholder_found and not projection_changed:
+    if (
+        not structured_placeholder_found
+        and not projection_changed
+        and not project_explicit_design_gate
+    ):
         return
 
     s = _service()
     plan["experimentPlan"] = sanitized
+    if project_explicit_design_gate:
+        plan["designGate"] = {
+            "status": "draft",
+            "requiresExplicitFreeze": True,
+            "source": "native_v2_plan",
+            "sourceLoopId": "",
+            "sourceDecisionId": "",
+            "sourceProposalId": "",
+            "sourceIdempotencyKey": "",
+            "frozenAt": "",
+            "frozenByAgent": "",
+        }
     for field in ("dataset", "baseline", "smokePlan"):
         method_config[field] = canonical_projection[field]
     contract["methodConfig"] = method_config
@@ -324,16 +359,15 @@ def _sanitize_projected_experiment_plan(plan: dict[str, Any]) -> None:
     plan["baselineSelection"] = baseline_selection
     plan["successMetrics"] = s._dedupe_text_values([sanitized["metric"]])
     _refresh_experiment_plan_readiness(plan)
-    migration = (
-        plan.get("contractMigration")
-        if isinstance(plan.get("contractMigration"), dict)
-        else {}
-    )
-    migration["projectionRepair"] = (
-        "structured_placeholder_removed"
-        if structured_placeholder_found
-        else "canonical_contract_projected"
-    )
+    migration = contract_migration
+    if structured_placeholder_found:
+        migration["projectionRepair"] = "structured_placeholder_removed"
+    elif projection_changed:
+        migration["projectionRepair"] = "canonical_contract_projected"
+    else:
+        migration["projectionRepair"] = "explicit_design_gate_projected"
+    if project_explicit_design_gate:
+        migration["designGateProjection"] = "explicit_draft_gate_projected"
     migration["persistOnNextMutation"] = True
     migration["missingFields"] = list(
         (plan.get("contractValidation") or {}).get("missingFields") or []
@@ -1165,18 +1199,40 @@ def _build_experiment_plan_record(
     iteration_contract = contract.get("iterationContract") if isinstance(contract.get("iterationContract"), dict) else {}
     source_proposal_id = s._trim_text(iteration_contract.get("sourceProposalId"), max_length=160)
     design_gate = None
-    if source_proposal_id:
+    if contract_validation.get("valid") is True:
         design_gate = {
             "status": "draft",
             "requiresExplicitFreeze": True,
-            "source": "research_loop_decision",
-            "sourceLoopId": s._trim_text(iteration_contract.get("sourceLoopId"), max_length=160),
-            "sourceDecisionId": s._trim_text(iteration_contract.get("sourceDecisionId"), max_length=160),
-            "sourceProposalId": source_proposal_id,
-            "sourceIdempotencyKey": s._trim_text(iteration_contract.get("sourceIdempotencyKey"), max_length=240),
+            "source": "native_v2_plan",
+            "sourceLoopId": "",
+            "sourceDecisionId": "",
+            "sourceProposalId": "",
+            "sourceIdempotencyKey": "",
             "frozenAt": "",
             "frozenByAgent": "",
         }
+    if source_proposal_id:
+        if design_gate is None:
+            design_gate = {
+                "status": "draft",
+                "requiresExplicitFreeze": True,
+                "source": "research_loop_decision",
+                "sourceLoopId": "",
+                "sourceDecisionId": "",
+                "sourceProposalId": "",
+                "sourceIdempotencyKey": "",
+                "frozenAt": "",
+                "frozenByAgent": "",
+            }
+        design_gate.update(
+            {
+                "source": "research_loop_decision",
+                "sourceLoopId": s._trim_text(iteration_contract.get("sourceLoopId"), max_length=160),
+                "sourceDecisionId": s._trim_text(iteration_contract.get("sourceDecisionId"), max_length=160),
+                "sourceProposalId": source_proposal_id,
+                "sourceIdempotencyKey": s._trim_text(iteration_contract.get("sourceIdempotencyKey"), max_length=240),
+            }
+        )
     record = {
         "schemaVersion": s.SCHEMA_VERSION,
         "planId": plan_id,
