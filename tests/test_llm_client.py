@@ -289,8 +289,8 @@ def test_strict_blank_chat_completions_payload_preserves_empty_user_message():
     )
     strict_continuation_payload = client._build_payload(
         [
-            {"role": "user", "content": ""},
             {"role": "assistant", "content": "first answer"},
+            {"role": "user", "content": ""},
         ],
         metadata={"strictPromptPayload": True, "inputMode": "blank"},
     )
@@ -298,8 +298,8 @@ def test_strict_blank_chat_completions_payload_preserves_empty_user_message():
     assert ordinary_payload["messages"] == []
     assert strict_blank_payload["messages"] == [{"role": "user", "content": ""}]
     assert strict_continuation_payload["messages"] == [
-        {"role": "user", "content": ""},
         {"role": "assistant", "content": "first answer"},
+        {"role": "user", "content": ""},
     ]
 
 

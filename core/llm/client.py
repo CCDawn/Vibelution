@@ -462,28 +462,32 @@ def _is_strict_blank_input(
         return False
     if str(metadata.get("inputMode") or "").strip().lower() != "blank":
         return False
-    if len(messages) not in {1, 2} or not isinstance(messages[0], dict):
+    if len(messages) not in {1, 2}:
         return False
-    message = messages[0]
-    if not set(message).issubset({"role", "content"}):
+
+    def is_plain_empty_user(message: Any) -> bool:
+        return (
+            isinstance(message, dict)
+            and set(message).issubset({"role", "content"})
+            and str(message.get("role") or "").strip().lower() == "user"
+            and message.get("content") == ""
+        )
+
+    if len(messages) == 1:
+        return is_plain_empty_user(messages[0])
+
+    continuation = messages[0]
+    if not isinstance(continuation, dict):
         return False
-    if str(message.get("role") or "").strip().lower() != "user":
+    if not set(continuation).issubset({"role", "content"}):
         return False
-    if message.get("content") != "":
+    if str(continuation.get("role") or "").strip().lower() != "assistant":
         return False
-    if len(messages) == 2:
-        continuation = messages[1]
-        if not isinstance(continuation, dict):
-            return False
-        if not set(continuation).issubset({"role", "content"}):
-            return False
-        if str(continuation.get("role") or "").strip().lower() != "assistant":
-            return False
-        if not isinstance(continuation.get("content"), str):
-            return False
-        if not continuation["content"].strip():
-            return False
-    return True
+    if not isinstance(continuation.get("content"), str):
+        return False
+    if not continuation["content"].strip():
+        return False
+    return is_plain_empty_user(messages[1])
 
 
 def _strict_blank_responses_messages(
@@ -507,16 +511,23 @@ def _strict_blank_chat_completions_messages(
     if not _is_strict_blank_input(messages, metadata):
         return None
     normalized = [
-        {
-            "role": "user",
-            "content": [{"type": "text", "text": ""}],
-        }
+        (
+            {
+                "role": "assistant",
+                "content": messages[0]["content"],
+            }
+            if len(messages) == 2
+            else {
+                "role": "user",
+                "content": [{"type": "text", "text": ""}],
+            }
+        )
     ]
     if len(messages) == 2:
         normalized.append(
             {
-                "role": "assistant",
-                "content": messages[1]["content"],
+                "role": "user",
+                "content": [{"type": "text", "text": ""}],
             }
         )
     return normalized
