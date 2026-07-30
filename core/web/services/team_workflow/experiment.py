@@ -26,6 +26,107 @@ def get_experiment_planning_status(team_id: str) -> dict[str, Any]:
         plan_store = s._load_experiment_plan_store(normalized_team_id)
     return s._experiment_planning_status(normalized_team_id, rounds, candidate_store, plan_store)
 
+
+def materialize_experiment_proxy_hypothesis(
+    team_id: str,
+    plan_id: str,
+    payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Create one append-only engineering proxy hypothesis from a saved design.
+
+    The record proves only that a bounded experiment contract exists. It never
+    upgrades the proxy to a scientific claim and always enters human review.
+    """
+
+    s = _service()
+    normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
+    normalized_plan_id = s._normalize_required_id(
+        plan_id,
+        "Experiment plan id is required.",
+    )
+    s.team_service.get_team(normalized_team_id)
+    request_payload = payload if isinstance(payload, dict) else {}
+    created_by_agent = (
+        s._trim_text(request_payload.get("createdByAgent"), max_length=160)
+        or s.DEFAULT_OWNER_AGENT_ID
+    )
+    created = False
+    with s._WORKFLOW_LOCK:
+        plan_store = s._load_experiment_plan_store(normalized_team_id)
+        plan = s._find_experiment_plan(plan_store, normalized_plan_id)
+        if plan is None:
+            raise s.TeamWorkflowOrchestrationError("Experiment plan not found.")
+        candidate_store = s._load_candidate_store(normalized_team_id)
+        fingerprint = s._experiment_proxy_hypothesis_fingerprint(
+            normalized_plan_id,
+            request_payload,
+        )
+        candidate = s._find_reusable_experiment_proxy_hypothesis(
+            candidate_store,
+            source_plan_id=normalized_plan_id,
+            fingerprint=fingerprint,
+        )
+        workflow = s._load_or_create_workflow(normalized_team_id)
+        if candidate is None:
+            candidate = s._build_experiment_proxy_hypothesis_record(
+                normalized_team_id,
+                workflow,
+                plan,
+                request_payload,
+                created_by_agent=created_by_agent,
+            )
+            candidate_store.setdefault("candidates", []).append(candidate)
+            candidate_store["updatedAt"] = candidate["updatedAt"]
+            s._write_json(
+                s._candidate_store_path(normalized_team_id),
+                candidate_store,
+            )
+            created = True
+        stage_store = s._load_stage_round_store(normalized_team_id)
+        rounds = s._stage_rounds(stage_store)
+        experiment_status = s._experiment_planning_status(
+            normalized_team_id,
+            rounds,
+            candidate_store,
+            plan_store,
+        )
+        hypothesis_summary = s._experiment_hypothesis_summary(candidate)
+    if created:
+        s._record_workflow_event(
+            "candidate.engineering_proxy_hypothesis_materialized",
+            normalized_team_id,
+            fields={
+                "workflowId": workflow["workflowId"],
+                "planId": normalized_plan_id,
+                "candidateId": str(candidate.get("candidateId") or ""),
+                "researchProjectId": str(plan.get("researchProjectId") or ""),
+                "officialState": "candidate_only",
+                "requiresReview": True,
+                "noRunExecuted": True,
+            },
+        )
+    return {
+        "schemaVersion": s.SCHEMA_VERSION,
+        "teamId": normalized_team_id,
+        "planId": normalized_plan_id,
+        "status": "created" if created else "reused",
+        "candidate": candidate,
+        "hypothesisSummary": hypothesis_summary,
+        "experimentStatus": experiment_status,
+        "workflow": s._workflow_to_api(
+            normalized_team_id,
+            workflow,
+            candidate_store,
+        ),
+        "boundaries": {
+            "officialState": "candidate_only",
+            "requiresHumanReview": True,
+            "createsExperimentAttempt": False,
+            "writesScientificClaim": False,
+        },
+    }
+
+
 def get_experiment_method_catalog(team_id: str) -> dict[str, Any]:
     s = _service()
     normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
@@ -286,6 +387,202 @@ def create_experiment_plan_revision_from_iteration(
         },
     )
     return {"status": "created", "plan": created["plan"]}
+
+
+def create_experiment_plan_revision_from_hypothesis(
+    team_id: str,
+    *,
+    source_plan_id: str,
+    hypothesis_candidate_id: str,
+    created_by_agent: str,
+    idempotency_key: str = "",
+) -> dict[str, Any]:
+    """Clone one design after an explicitly approved hypothesis selection."""
+
+    s = _service()
+    normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
+    normalized_source_plan_id = s._normalize_required_id(
+        source_plan_id,
+        "Source experiment plan id is required.",
+    )
+    normalized_candidate_id = s._normalize_required_id(
+        hypothesis_candidate_id,
+        "Hypothesis candidate id is required.",
+    )
+    normalized_created_by = (
+        s._trim_text(created_by_agent, max_length=160)
+        or s.DEFAULT_OWNER_AGENT_ID
+    )
+    normalized_idempotency_key = (
+        s._trim_text(idempotency_key, max_length=240)
+        or f"{normalized_source_plan_id}:{normalized_candidate_id}:hypothesis-revision"
+    )
+    with s._WORKFLOW_LOCK:
+        plan_store = s._load_experiment_plan_store(normalized_team_id)
+        plans = s._experiment_plans(plan_store)
+        for existing in plans:
+            selection = (
+                existing.get("hypothesisSelection")
+                if isinstance(existing.get("hypothesisSelection"), dict)
+                else {}
+            )
+            if (
+                str(selection.get("sourcePlanId") or "")
+                == normalized_source_plan_id
+                and str(selection.get("hypothesisCandidateId") or "")
+                == normalized_candidate_id
+                and str(selection.get("idempotencyKey") or "")
+                == normalized_idempotency_key
+            ):
+                return {
+                    "status": "reused",
+                    "plan": existing,
+                    "experimentStatus": s.get_experiment_planning_status(
+                        normalized_team_id
+                    ),
+                }
+        source_plan = s._find_experiment_plan(
+            plan_store,
+            normalized_source_plan_id,
+        )
+        if source_plan is None:
+            raise s.TeamWorkflowOrchestrationError(
+                "Source experiment plan not found for hypothesis revision."
+            )
+        candidate_store = s._load_candidate_store(normalized_team_id)
+        candidate = s._find_candidate(candidate_store, normalized_candidate_id)
+        if candidate is None:
+            raise s.TeamWorkflowOrchestrationError(
+                "Hypothesis candidate not found for experiment revision."
+            )
+        if not s._experiment_hypothesis_is_ready(candidate):
+            raise s.TeamWorkflowOrchestrationError(
+                "Hypothesis candidate must be valid, complete, and approved before creating a new design revision."
+            )
+        candidate_summary = s._experiment_hypothesis_summary(candidate)
+        candidate_source_plan_id = s._trim_text(
+            candidate_summary.get("sourcePlanId"),
+            max_length=160,
+        )
+        if (
+            candidate_summary.get("hypothesisKind") == "engineering_proxy"
+            and candidate_source_plan_id != normalized_source_plan_id
+        ):
+            raise s.TeamWorkflowOrchestrationError(
+                "Engineering proxy hypothesis must revise the experiment plan it was derived from."
+            )
+        source_project_id = s._trim_text(
+            source_plan.get("researchProjectId"),
+            max_length=160,
+        )
+        candidate_project_id = s._trim_text(
+            candidate_summary.get("researchProjectId"),
+            max_length=160,
+        )
+        if (
+            source_project_id
+            and candidate_project_id
+            and source_project_id != candidate_project_id
+        ):
+            raise s.TeamWorkflowOrchestrationError(
+                "Hypothesis candidate belongs to a different research project."
+            )
+        review = s._experiment_hypothesis_review_state(candidate)
+        source_contract = (
+            source_plan.get("experimentContract")
+            if isinstance(source_plan.get("experimentContract"), dict)
+            else {}
+        )
+        source_legacy = (
+            source_plan.get("experimentPlan")
+            if isinstance(source_plan.get("experimentPlan"), dict)
+            else {}
+        )
+        adapter_selection = (
+            source_contract.get("adapterSelection")
+            if isinstance(source_contract.get("adapterSelection"), dict)
+            else {}
+        )
+        next_revision = max(
+            [s._experiment_plan_revision(plan) for plan in plans] or [0]
+        ) + 1
+        request_payload = {
+            "stageRoundId": str(source_plan.get("stageRoundId") or ""),
+            "researchProjectId": str(source_plan.get("researchProjectId") or ""),
+            "title": f"{str(source_plan.get('title') or 'Experiment design')} · v{next_revision}",
+            "createdByAgent": normalized_created_by,
+            "hypothesisCandidateIds": [normalized_candidate_id],
+            "dataset": source_legacy.get("dataset"),
+            "metric": source_legacy.get("metric"),
+            "baseline": source_legacy.get("baseline"),
+            "smokePlan": source_legacy.get("smokePlan"),
+            "researchProfileId": source_contract.get("researchProfileId"),
+            "researchQuestion": source_contract.get("researchQuestion"),
+            "researchMode": source_contract.get("researchMode"),
+            "experimentPurpose": source_contract.get("purpose"),
+            "experimentMethod": source_contract.get("experimentMethod"),
+            "requestedAdapterId": adapter_selection.get("requestedAdapterId")
+            or adapter_selection.get("resolvedAdapterId"),
+            "objective": source_contract.get("objective"),
+            "constraints": list(source_contract.get("constraints") or []),
+            "methodConfig": s.deepcopy(source_contract.get("methodConfig") or {}),
+            "metricContract": s.deepcopy(
+                source_contract.get("metricContract") or {}
+            ),
+            "decisionContract": s.deepcopy(
+                source_contract.get("decisionContract") or {}
+            ),
+            "artifactContract": s.deepcopy(
+                source_contract.get("artifactContract") or {}
+            ),
+            "reproducibilityContract": s.deepcopy(
+                source_contract.get("reproducibilityContract") or {}
+            ),
+            "iterationContract": s.deepcopy(
+                source_contract.get("iterationContract") or {}
+            ),
+            "recommendation": s.deepcopy(
+                source_contract.get("recommendation") or {}
+            ),
+            "revision": next_revision,
+            "supersedesPlanId": normalized_source_plan_id,
+            "hypothesisSelection": {
+                "sourcePlanId": normalized_source_plan_id,
+                "hypothesisCandidateId": normalized_candidate_id,
+                "reviewRecordId": review["reviewRecordId"],
+                "reviewedAt": review["reviewedAt"],
+                "selectedByAgent": normalized_created_by,
+                "selectedAt": s.utc_now_iso(),
+                "idempotencyKey": normalized_idempotency_key,
+            },
+            "notes": (
+                "Created from an explicitly approved hypothesis selection. "
+                "The new design remains draft and requires explicit freeze."
+            ),
+        }
+        created = create_experiment_plan(normalized_team_id, request_payload)
+    s._record_workflow_event(
+        "experiment_plan.hypothesis_revision_created",
+        normalized_team_id,
+        fields={
+            "sourcePlanId": normalized_source_plan_id,
+            "planId": str((created.get("plan") or {}).get("planId") or ""),
+            "hypothesisCandidateId": normalized_candidate_id,
+            "reviewRecordId": review["reviewRecordId"],
+            "revision": next_revision,
+            "requiresExplicitFreeze": True,
+            "createsExperimentAttempt": False,
+        },
+    )
+    return {
+        "status": "created",
+        "plan": created["plan"],
+        "experimentStatus": created["status"],
+        "stageRound": created["stageRound"],
+        "stageRoundStatus": created["stageRoundStatus"],
+        "workflow": created["workflow"],
+        "boundaries": created["boundaries"],
+    }
 
 
 def freeze_experiment_design(team_id: str, plan_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
