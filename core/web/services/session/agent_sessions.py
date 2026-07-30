@@ -1568,6 +1568,11 @@ def recover_wakeable_agent_inbox_messages_on_startup() -> dict[str, Any]:
         "errorTypeCounts": {},
         "repairDurationMs": 0,
         "agentScanDurationMs": 0,
+        "agentRegistryLoadDurationMs": 0,
+        "inboxSignatureDurationMs": 0,
+        "inboxReadDurationMs": 0,
+        "nonEmptyInboxCount": 0,
+        "wakeableMessageCount": 0,
     }
     repair_started_at: float | None = None
     agent_scan_started_at: float | None = None
@@ -1581,16 +1586,32 @@ def recover_wakeable_agent_inbox_messages_on_startup() -> dict[str, Any]:
         summary["repairDurationMs"] = s._elapsed_ms(repair_started_at)
 
         agent_scan_started_at = s._perf_counter()
-        agents = s.agent_directory_service.list_agents(include_archived=False, detail="summary")
-        summary["scannedAgentCount"] = len(agents)
-        for agent in agents:
-            agent_id = str(agent.get("agentId") or "").strip()
-            if not agent_id:
+        scan = s.agent_directory_service.scan_wakeable_agent_inbox_messages()
+        for field in (
+            "scannedAgentCount",
+            "agentRegistryLoadDurationMs",
+            "inboxSignatureDurationMs",
+            "inboxReadDurationMs",
+            "nonEmptyInboxCount",
+            "wakeableMessageCount",
+        ):
+            summary[field] = max(0, int(scan.get(field) or 0))
+        scan_error_type_counts = scan.get("errorTypeCounts")
+        if isinstance(scan_error_type_counts, dict):
+            for error_type, count in scan_error_type_counts.items():
+                normalized_error_type = str(error_type or "").strip()
+                if not normalized_error_type:
+                    continue
+                if len(summary["errorTypeCounts"]) < 8 or normalized_error_type in summary["errorTypeCounts"]:
+                    summary["errorTypeCounts"][normalized_error_type] = (
+                        int(summary["errorTypeCounts"].get(normalized_error_type) or 0)
+                        + max(0, int(count or 0))
+                    )
+        summary["errorCount"] += max(0, int(scan.get("errorCount") or 0))
+        for message in list(scan.get("messages") or []):
+            if not isinstance(message, dict):
                 continue
             try:
-                message = s.next_wakeable_agent_inbox_message_for_agent(agent_id)
-                if not message:
-                    continue
                 summary["eligibleAgentCount"] += 1
                 delivery = s.wake_agent_for_inbox_message(message)
                 wake_status = str(delivery.get("wakeStatus") or "unknown").strip() or "unknown"
