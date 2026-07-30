@@ -25,6 +25,9 @@ _TERMINAL_SESSION_MAX_OUTPUT_CHARS = 120_000
 _TERMINAL_SESSION_TTL_SECONDS = 15 * 60
 _TERMINAL_SESSION_MAX_LIFETIME_SECONDS = 15 * 60
 _WINDOWS_COMMAND_ENV = "VIBELUTION_CODEX_SANDBOX_COMMAND"
+_VIBELUTION_DATA_HOME_ENV = "VIBELUTION_DATA_HOME"
+_VIBELUTION_CONFIG_HOME_ENV = "VIBELUTION_CONFIG_HOME"
+_VIBELUTION_CONFIG_PATH_ENV = "VIBELUTION_CONFIG_PATH"
 _WINDOWS_CHAIN_BUILTINS = {
     "cd",
     "cls",
@@ -352,6 +355,10 @@ def _sandbox_process_environment(
         _PYTHON_SITECUSTOMIZE,
         encoding="utf-8",
     )
+    sandbox_data_home = sandbox_temp / "vibelution-data"
+    sandbox_config_home = sandbox_temp / "vibelution-config"
+    sandbox_data_home.mkdir()
+    sandbox_config_home.mkdir()
 
     environment = os.environ.copy()
     for name in ("TMP", "TEMP", "TMPDIR"):
@@ -370,6 +377,11 @@ def _sandbox_process_environment(
         part for part in (str(sandbox_temp), existing_python_path) if part
     )
     environment["VIBELUTION_CODEX_SANDBOX_TEMP"] = str(sandbox_temp)
+    environment[_VIBELUTION_DATA_HOME_ENV] = str(sandbox_data_home)
+    environment[_VIBELUTION_CONFIG_HOME_ENV] = str(sandbox_config_home)
+    environment[_VIBELUTION_CONFIG_PATH_ENV] = str(
+        sandbox_config_home / "config.toml"
+    )
     return environment, sandbox_temp
 
 
