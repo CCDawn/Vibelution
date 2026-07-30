@@ -72,17 +72,23 @@ function supervisedDecisionText(decision: string, lang: SummaryLanguage) {
   if (normalizedDecision === "PROMOTE") {
     return sentenceFor(lang, "建议晋升", "promote");
   }
+  if (normalizedDecision === "APPROVE") {
+    return sentenceFor(lang, "建议批准", "recommend approval");
+  }
   if (normalizedDecision === "HOLD") {
     return sentenceFor(lang, "继续观察", "observe");
   }
+  if (normalizedDecision === "REVISE") {
+    return sentenceFor(lang, "建议继续改进", "recommend revision");
+  }
   if (normalizedDecision === "REJECT") {
-    return sentenceFor(lang, "候选未采纳", "not adopted");
+    return sentenceFor(lang, "建议拒绝", "recommend rejection");
   }
   if (normalizedDecision === "ROLLBACK") {
     return sentenceFor(lang, "建议回滚", "rollback");
   }
   if (normalizedDecision === "INCONCLUSIVE") {
-    return sentenceFor(lang, "评测无结论", "inconclusive");
+    return sentenceFor(lang, "证据不足", "insufficient evidence");
   }
   return clean(decision);
 }

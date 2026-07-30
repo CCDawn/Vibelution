@@ -20,10 +20,35 @@ export type SupervisedApprovalMetricModel = {
   baselineScore: number | null;
   candidateScore: number | null;
   scoreDelta: number | null;
+  baselineTaskScore: number | null;
+  baselineSystemScore: number | null;
+  candidateTaskScore: number | null;
+  candidateSystemScore: number | null;
   changedFileCount: number;
   highRiskFileCount: number;
   overlapFileCount: number;
   blockerCount: number;
+};
+
+export type SupervisedApprovalRubricCriterionModel = {
+  id: string;
+  label: string;
+  description: string;
+  weight: number;
+};
+
+export type SupervisedApprovalRubricModel = {
+  hash: string;
+  taskSummary: string;
+  taskWeight: number | null;
+  systemWeight: number | null;
+  taskCriteria: SupervisedApprovalRubricCriterionModel[];
+  systemCriteria: SupervisedApprovalRubricCriterionModel[];
+};
+
+export type SupervisedApprovalJudgeRecommendationModel = {
+  code: string;
+  label: string;
 };
 
 export type SupervisedApprovalEvidenceModel = {
@@ -51,6 +76,8 @@ export type SupervisedApprovalDecisionModel = {
   primaryActionReason: string;
   runtimeEffect: SupervisedApprovalRuntimeEffect;
   runtimeEffectLabel: string;
+  judgeRecommendation: SupervisedApprovalJudgeRecommendationModel;
+  rubric: SupervisedApprovalRubricModel;
   metrics: SupervisedApprovalMetricModel;
   evidence: SupervisedApprovalEvidenceModel[];
   steps: SupervisedApprovalStepModel[];
@@ -59,6 +86,32 @@ export type SupervisedApprovalDecisionModel = {
 };
 
 type ApprovalLanguage = "zh" | "en";
+
+type ExtendedJudgment = {
+  recommendation?: string;
+  decision?: string;
+  taskScore?: number;
+  systemScore?: number;
+  rubricHash?: string;
+};
+
+type ExtendedSupervisedWorktreeRun = SupervisedWorktreeRun & {
+  judgeRubric?: {
+    rubricHash?: string;
+    taskSummary?: string;
+    compositionWeights?: {
+      taskSpecific?: number;
+      systemFixed?: number;
+    };
+    taskCriteria?: SupervisedApprovalRubricCriterionModel[];
+    systemCriteria?: SupervisedApprovalRubricCriterionModel[];
+  };
+  baselineJudgment?: SupervisedWorktreeRun["baselineJudgment"] & ExtendedJudgment;
+  candidateJudgment?: SupervisedWorktreeRun["candidateJudgment"] & ExtendedJudgment;
+  decision: SupervisedWorktreeRun["decision"] & {
+    judgeRecommendation?: string;
+  };
+};
 
 const ACTIVE_RUN_STATUSES = new Set(["queued", "starting", "running", "stopping", "paused"]);
 
@@ -87,10 +140,62 @@ function emptyMetrics(): SupervisedApprovalMetricModel {
     baselineScore: null,
     candidateScore: null,
     scoreDelta: null,
+    baselineTaskScore: null,
+    baselineSystemScore: null,
+    candidateTaskScore: null,
+    candidateSystemScore: null,
     changedFileCount: 0,
     highRiskFileCount: 0,
     overlapFileCount: 0,
     blockerCount: 0,
+  };
+}
+
+function emptyRubric(): SupervisedApprovalRubricModel {
+  return {
+    hash: "",
+    taskSummary: "",
+    taskWeight: null,
+    systemWeight: null,
+    taskCriteria: [],
+    systemCriteria: [],
+  };
+}
+
+function judgeRecommendation(
+  run: ExtendedSupervisedWorktreeRun | null | undefined,
+  lang: ApprovalLanguage,
+): SupervisedApprovalJudgeRecommendationModel {
+  const raw = String(
+    run?.decision?.judgeRecommendation
+    ?? run?.candidateJudgment?.recommendation
+    ?? run?.candidateJudgment?.decision
+    ?? run?.decision?.judgeDecision
+    ?? "",
+  ).trim().toUpperCase();
+  const code = raw === "PROMOTE" ? "APPROVE" : raw === "HOLD" ? "REVISE" : raw;
+  const labels: Record<string, [string, string]> = {
+    APPROVE: ["建议批准", "Recommend approval"],
+    REVISE: ["建议继续改进", "Recommend revision"],
+    REJECT: ["建议拒绝", "Recommend rejection"],
+    INCONCLUSIVE: ["证据不足", "Insufficient evidence"],
+  };
+  const label = labels[code];
+  return {
+    code,
+    label: label ? text(lang, label[0], label[1]) : text(lang, "尚无建议", "No recommendation"),
+  };
+}
+
+function rubricModel(run: ExtendedSupervisedWorktreeRun): SupervisedApprovalRubricModel {
+  const rubric = run.judgeRubric;
+  return {
+    hash: String(rubric?.rubricHash ?? ""),
+    taskSummary: String(rubric?.taskSummary ?? ""),
+    taskWeight: score(rubric?.compositionWeights?.taskSpecific),
+    systemWeight: score(rubric?.compositionWeights?.systemFixed),
+    taskCriteria: Array.isArray(rubric?.taskCriteria) ? rubric.taskCriteria : [],
+    systemCriteria: Array.isArray(rubric?.systemCriteria) ? rubric.systemCriteria : [],
   };
 }
 
@@ -110,6 +215,8 @@ function emptyDecision(lang: ApprovalLanguage): SupervisedApprovalDecisionModel 
     primaryActionReason: "",
     runtimeEffect: "not_applied",
     runtimeEffectLabel: text(lang, "运行时尚未应用", "Runtime not applied"),
+    judgeRecommendation: judgeRecommendation(null, lang),
+    rubric: emptyRubric(),
     metrics: emptyMetrics(),
     evidence: [],
     steps: [],
@@ -268,7 +375,11 @@ function buildSteps(
           ? text(lang, "当前可执行", "Available now")
           : text(lang, "等待评测", "Waiting"),
       description: text(lang, "确认已审阅两次 Judge 评分、改动风险和候选差异。", "Confirm both Judge scores, candidate risk, and diff were reviewed."),
-      consequence: text(lang, "PROMOTE 结论下会立即授权 Judge 触发受控合入。", "With PROMOTE, this immediately authorizes the Judge-triggered controlled merge."),
+      consequence: text(
+        lang,
+        "用户决定批准后，Judge 在原会话中确认结构化请求并触发受控合入；评分不构成硬门。",
+        "After user approval, the Judge confirms the structured request in the original session; scores are not a hard gate.",
+      ),
     },
     {
       id: "merge",
@@ -312,11 +423,22 @@ function buildSteps(
 }
 
 function buildEvidence(
-  run: SupervisedWorktreeRun,
+  run: ExtendedSupervisedWorktreeRun,
   metrics: SupervisedApprovalMetricModel,
   lang: ApprovalLanguage,
 ): SupervisedApprovalEvidenceModel[] {
   const evidence: SupervisedApprovalEvidenceModel[] = [];
+  const recommendation = judgeRecommendation(run, lang);
+  if (recommendation.code) {
+    evidence.push({
+      tone: "neutral",
+      text: text(
+        lang,
+        `Judge ${recommendation.label}，该建议和评分仅供参考，最终由用户决定。`,
+        `Judge: ${recommendation.label}. The scores are advisory; the user makes the final decision.`,
+      ),
+    });
+  }
   if (metrics.scoreDelta !== null) {
     evidence.push({
       tone: metrics.scoreDelta > 0 ? "positive" : metrics.scoreDelta < 0 ? "warning" : "neutral",
@@ -378,23 +500,28 @@ export function buildSupervisedApprovalDecision(
     return emptyDecision(lang);
   }
 
-  const changedFiles = run.mergeAnalysis?.changedFiles ?? [];
-  const blockers = run.mergeAnalysis?.blockers ?? [];
-  const highRiskFiles = run.mergeAnalysis?.highRiskFiles ?? [];
+  const extendedRun = run as ExtendedSupervisedWorktreeRun;
+  const changedFiles = extendedRun.mergeAnalysis?.changedFiles ?? [];
+  const blockers = extendedRun.mergeAnalysis?.blockers ?? [];
+  const highRiskFiles = extendedRun.mergeAnalysis?.highRiskFiles ?? [];
   const metrics: SupervisedApprovalMetricModel = {
-    baselineScore: score(run.decision?.baselineScore),
-    candidateScore: score(run.decision?.candidateScore),
-    scoreDelta: score(run.decision?.scoreDelta),
-    changedFileCount: changedFiles.length || run.merge?.changedFiles?.length || 0,
+    baselineScore: score(extendedRun.decision?.baselineScore),
+    candidateScore: score(extendedRun.decision?.candidateScore),
+    scoreDelta: score(extendedRun.decision?.scoreDelta),
+    baselineTaskScore: score(extendedRun.baselineJudgment?.taskScore),
+    baselineSystemScore: score(extendedRun.baselineJudgment?.systemScore),
+    candidateTaskScore: score(extendedRun.candidateJudgment?.taskScore),
+    candidateSystemScore: score(extendedRun.candidateJudgment?.systemScore),
+    changedFileCount: changedFiles.length || extendedRun.merge?.changedFiles?.length || 0,
     highRiskFileCount: Math.max(
       highRiskFiles.length,
       changedFiles.filter((item) => item.highRisk).length,
     ),
-    overlapFileCount: run.mergeAnalysis?.overlapFiles?.length ?? 0,
+    overlapFileCount: extendedRun.mergeAnalysis?.overlapFiles?.length ?? 0,
     blockerCount: blockers.length,
   };
-  const phase = approvalPhase(run);
-  const copy = phaseCopy(phase, run, lang);
+  const phase = approvalPhase(extendedRun);
+  const copy = phaseCopy(phase, extendedRun, lang);
   const runtimeEffect: SupervisedApprovalRuntimeEffect =
     phase === "merged" || phase === "rolled_back" ? "refresh_required" : "not_applied";
 
@@ -415,9 +542,11 @@ export function buildSupervisedApprovalDecision(
     runtimeEffectLabel: runtimeEffect === "refresh_required"
       ? text(lang, "项目状态已变更，运行时需刷新复验", "Project state changed; refresh and validate runtime")
       : text(lang, "运行时尚未应用", "Runtime not applied"),
+    judgeRecommendation: judgeRecommendation(extendedRun, lang),
+    rubric: rubricModel(extendedRun),
     metrics,
-    evidence: buildEvidence(run, metrics, lang),
-    steps: buildSteps(phase, run, lang),
+    evidence: buildEvidence(extendedRun, metrics, lang),
+    steps: buildSteps(phase, extendedRun, lang),
     changedFiles,
     blockers,
   };

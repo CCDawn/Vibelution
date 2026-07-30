@@ -200,12 +200,12 @@ describe("buildSupervisedRunControlSummary", () => {
 
     expect(summary.tone).toBe("warning");
     expect(summary.headline).toContain("本轮评测已完成");
-    expect(summary.headline).toContain("治理结论为 评测无结论");
+    expect(summary.headline).toContain("治理结论为 证据不足");
     expect(summary.headline).toContain("2 个失败或超时样例");
     expect(summary.nextAction).toContain("这不是中断");
   });
 
-  it("describes rejected finished runs as not adopted instead of failed", () => {
+  it("describes rejected finished runs as an advisory recommendation instead of failure", () => {
     const summary = buildSupervisedRunControlSummary(
       activeRun({
         status: "done",
@@ -230,7 +230,23 @@ describe("buildSupervisedRunControlSummary", () => {
     );
 
     expect(summary.tone).toBe("success");
-    expect(summary.headline).toContain("治理结论为 候选未采纳");
+    expect(summary.headline).toContain("治理结论为 建议拒绝");
     expect(summary.headline).not.toContain("失败");
+  });
+
+  it("renders the new Judge advisory recommendation vocabulary", () => {
+    const approved = buildSupervisedRunControlSummary(
+      activeRun({ status: "done", currentPhase: "done", decision: "APPROVE" }),
+      "zh",
+      labels,
+    );
+    const revised = buildSupervisedRunControlSummary(
+      activeRun({ status: "done", currentPhase: "done", decision: "REVISE" }),
+      "zh",
+      labels,
+    );
+
+    expect(approved.headline).toContain("建议批准");
+    expect(revised.headline).toContain("建议继续改进");
   });
 });

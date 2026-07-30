@@ -48,8 +48,10 @@ from .supervised_conversation_harness_adapter import run_supervised_conversation
 from .supervised_judge_closed_loop import (
     build_improvement_prompt,
     build_judge_evaluation_prompt,
+    build_judge_rubric_prompt,
     judge_merge_allowed,
     normalize_judge_evaluation,
+    normalize_judge_rubric,
 )
 
 
@@ -162,6 +164,7 @@ def start_supervised_worktree_run(payload: dict[str, Any]) -> dict[str, Any]:
             "datasetName": options["datasetName"],
             "datasetLimit": options["datasetLimit"],
             "bundleName": options["bundleName"],
+            "taskContract": options["taskContract"],
             "keepWorktree": bool(options["keepWorktree"]),
             "startRequest": options["startRequest"],
             "selfEvolutionOrigin": options["selfEvolutionOrigin"],
@@ -178,6 +181,7 @@ def start_supervised_worktree_run(payload: dict[str, Any]) -> dict[str, Any]:
             "stages": [],
             "events": [],
             "baseline": {},
+            "judgeRubric": {},
             "baselineJudgment": {},
             "reflection": {},
             "candidateWorktree": {},
@@ -231,6 +235,7 @@ def run_supervised_worktree_flow(
         "datasetName": options["datasetName"],
         "datasetLimit": options["datasetLimit"],
         "bundleName": options["bundleName"],
+        "taskContract": options["taskContract"],
         "keepWorktree": bool(options["keepWorktree"]),
         "startRequest": options["startRequest"],
         "selfEvolutionOrigin": options["selfEvolutionOrigin"],
@@ -247,6 +252,7 @@ def run_supervised_worktree_flow(
         "stages": [],
         "events": [],
         "baseline": {},
+        "judgeRubric": {},
         "baselineJudgment": {},
         "reflection": {},
         "candidateWorktree": {},
@@ -574,9 +580,8 @@ def _execute_supervised_worktree_action(
     if normalized_action in {"approve_review", "approve_merge_review", "mark_reviewed"}:
         judgment = snapshot.get("candidateJudgment") if isinstance(snapshot.get("candidateJudgment"), dict) else {}
         if not judge_merge_allowed(judgment, force=force):
-            decision = str(judgment.get("decision") or "INCONCLUSIVE")
             raise SupervisedWorktreeRunActionError(
-                f"Judge decision={decision}，默认禁止合入。只有显式 force 审批可覆盖非 PROMOTE 结论。"
+                "Judge 第二次结构化评分尚未完成，不能进入用户最终审批。"
             )
         triggered = _request_judge_controlled_merge(
             snapshot,
@@ -663,8 +668,60 @@ def _execute_flow(
             _finish_baseline_unavailable(snapshot, baseline)
             return _decorate_snapshot(snapshot)
         _raise_if_run_cancelled(snapshot)
-        _transition(snapshot, "running", "baseline_judge", "基线题集完成，Judge Agent 正在进行第一次评分。")
+        _transition(
+            snapshot,
+            "running",
+            "baseline_judge",
+            "基线题集完成，Judge Agent 正在根据任务合同生成并冻结本轮 rubric。",
+        )
 
+        judge_rubric = judge(
+            root,
+            str(options["bundleName"]),
+            "rubric",
+            {
+                "runId": run_id,
+                "options": options,
+                "cancelChecker": cancel_checker,
+                "workflowStepId": "baseline_judge",
+                "conversationSessionId": "",
+                "taskContract": options["taskContract"],
+                "progressCallback": _workflow_progress_callback(snapshot, "judge", "baseline_judge"),
+            },
+        )
+        _raise_if_run_cancelled(snapshot)
+        snapshot["judgeRubric"] = judge_rubric
+        snapshot["judgeConversationSessionId"] = _evaluation_conversation_session_id(judge_rubric)
+        if str(judge_rubric.get("status") or "").strip().lower() != "success":
+            raise SupervisedWorktreeRunValidationError(
+                str(judge_rubric.get("reason") or "Judge 未能生成有效任务 rubric。")
+            )
+        if not str(judge_rubric.get("rubricHash") or "").strip():
+            raise SupervisedWorktreeRunValidationError("Judge rubric 缺少冻结哈希。")
+        _record_worktree_scene_event(
+            "judge_rubric",
+            "supervised_worktree_run.judge_rubric_frozen",
+            run_id=run_id,
+            message="Judge task rubric frozen for baseline and rerun scoring.",
+            outcome="frozen",
+            fields={
+                "rubricHash": str(judge_rubric["rubricHash"]),
+                "taskCriterionCount": len(judge_rubric.get("taskCriteria") or []),
+                "systemRubricVersion": str(judge_rubric.get("systemRubricVersion") or ""),
+                "judgeConversationSessionId": str(snapshot.get("judgeConversationSessionId") or ""),
+            },
+            child_log_payload={
+                "rubricHash": str(judge_rubric["rubricHash"]),
+                "taskCriterionCount": len(judge_rubric.get("taskCriteria") or []),
+                "systemRubricVersion": str(judge_rubric.get("systemRubricVersion") or ""),
+            },
+        )
+        _transition(
+            snapshot,
+            "running",
+            "baseline_judge",
+            "任务 rubric 已冻结，Judge Agent 正在同一会话中进行基线评分。",
+        )
         baseline_judgment = judge(
             root,
             str(options["bundleName"]),
@@ -674,18 +731,24 @@ def _execute_flow(
                 "options": options,
                 "cancelChecker": cancel_checker,
                 "workflowStepId": "baseline_judge",
-                "conversationSessionId": "",
+                "conversationSessionId": str(snapshot.get("judgeConversationSessionId") or ""),
+                "taskContract": options["taskContract"],
+                "rubric": judge_rubric,
                 "baselineEvaluation": baseline,
                 "progressCallback": _workflow_progress_callback(snapshot, "judge", "baseline_judge"),
             },
         )
         _raise_if_run_cancelled(snapshot)
         snapshot["baselineJudgment"] = baseline_judgment
-        snapshot["judgeConversationSessionId"] = _evaluation_conversation_session_id(baseline_judgment)
+        baseline_judge_session_id = _evaluation_conversation_session_id(baseline_judgment)
+        if baseline_judge_session_id != str(snapshot.get("judgeConversationSessionId") or ""):
+            raise SupervisedWorktreeRunValidationError("Judge 基线评分未复用 rubric 生成会话。")
         if str(baseline_judgment.get("status") or "").strip().lower() != "success":
             raise SupervisedWorktreeRunValidationError(
                 str(baseline_judgment.get("reason") or "Judge 第一次评分缺少有效结构化证据。")
             )
+        if str(baseline_judgment.get("rubricHash") or "") != str(judge_rubric.get("rubricHash") or ""):
+            raise SupervisedWorktreeRunValidationError("Judge 基线评分未使用冻结 rubric。")
 
         _transition(snapshot, "running", "reflection", "Judge 首评完成，正在把改进意见交回原基线 Agent 会话。")
 
@@ -810,6 +873,8 @@ def _execute_flow(
                 "cancelChecker": cancel_checker,
                 "workflowStepId": "rerun_judge",
                 "conversationSessionId": str(snapshot.get("judgeConversationSessionId") or ""),
+                "taskContract": options["taskContract"],
+                "rubric": snapshot.get("judgeRubric"),
                 "baselineEvaluation": baseline,
                 "baselineJudgment": baseline_judgment,
                 "rerunEvaluation": candidate,
@@ -826,6 +891,10 @@ def _execute_flow(
             raise SupervisedWorktreeRunValidationError(
                 str(candidate_judgment.get("reason") or "Judge 第二次评分缺少有效结构化证据。")
             )
+        if str(candidate_judgment.get("rubricHash") or "") != str(
+            (snapshot.get("judgeRubric") or {}).get("rubricHash") or ""
+        ):
+            raise SupervisedWorktreeRunValidationError("Judge 第二次评分未使用与基线相同的冻结 rubric。")
 
         _transition(snapshot, "running", "decision", "Judge 双次评分完成，正在生成用户审批结论。")
         decision = _build_decision(snapshot, options)
@@ -907,6 +976,11 @@ def _normalize_start_payload(
     except (FileNotFoundError, ValueError) as exc:
         raise SupervisedWorktreeRunValidationError(str(exc)) from exc
     case_count = len(list(bundle.get("cases") or []))
+    task_contract = _build_task_contract(
+        bundle,
+        bundle_name=bundle_name,
+        self_origin=self_origin,
+    )
     estimate = _estimate_llm_cost(case_count)
     if execution_mode == "real" and not bool(payload.get("confirmRealLlmCost")):
         raise SupervisedWorktreeRunValidationError(
@@ -937,6 +1011,7 @@ def _normalize_start_payload(
         "datasetName": dataset_name,
         "datasetLimit": dataset_limit,
         "bundleName": bundle_name,
+        "taskContract": task_contract,
         "keepWorktree": keep_worktree,
         "costEstimate": estimate,
         "startRequest": _normalize_start_request_metadata(payload),
@@ -945,6 +1020,43 @@ def _normalize_start_payload(
         "agentBindings": agent_bindings,
         "mentalModelMode": mental_model_mode,
         "mentalModelEnabled": mental_model_enabled,
+    }
+
+
+def _build_task_contract(
+    bundle: dict[str, Any],
+    *,
+    bundle_name: str,
+    self_origin: dict[str, Any],
+) -> dict[str, Any]:
+    cases: list[dict[str, Any]] = []
+    for index, item in enumerate(list(bundle.get("cases") or [])[:50], start=1):
+        if not isinstance(item, dict):
+            continue
+        case = {
+            "caseId": _safe_metadata_text(
+                item.get("case_id") or item.get("caseId") or f"case-{index}",
+                limit=120,
+            ),
+            "prompt": str(
+                item.get("baseline_prompt")
+                or item.get("baselinePrompt")
+                or item.get("prompt")
+                or item.get("task")
+                or item.get("instruction")
+                or ""
+            ).strip()[:4000],
+        }
+        expected = item.get("expected_output", item.get("expectedOutput"))
+        if expected is not None:
+            case["expectedOutput"] = str(expected)[:2000]
+        cases.append(case)
+    return {
+        "bundleName": bundle_name,
+        "benchmark": _safe_metadata_text(bundle.get("benchmark"), limit=160),
+        "goal": _safe_metadata_text(self_origin.get("goal"), limit=500),
+        "riskReason": _safe_metadata_text(self_origin.get("riskReason"), limit=300),
+        "cases": cases,
     }
 
 
@@ -1021,7 +1133,7 @@ def _normalize_review_gate(payload: dict[str, Any], self_origin: dict[str, Any])
 def _estimate_llm_cost(case_count: int) -> dict[str, Any]:
     safe_cases = max(1, int(case_count or 1))
     evaluation_calls = safe_cases * 2
-    judge_calls = 2
+    judge_calls = 3
     self_edit_calls = 1
     model_calls = evaluation_calls + judge_calls + self_edit_calls
     estimated_input = evaluation_calls * 3500 + judge_calls * 5000 + 6000
@@ -1035,7 +1147,7 @@ def _estimate_llm_cost(case_count: int) -> dict[str, Any]:
         "estimatedInputTokens": estimated_input,
         "estimatedOutputTokens": estimated_output,
         "estimatedTotalTokens": estimated_input + estimated_output,
-        "note": "粗略估算，仅用于启动前确认；真实消耗取决于模型重试、工具输出和题目长度。",
+        "note": "粗略估算，包含 rubric 生成与两次同会话评分；真实消耗取决于模型重试、工具输出和题目长度。",
     }
 
 
@@ -1111,28 +1223,89 @@ def _simulation_judge_runner(project_root: Path, bundle_name: str, phase: str, c
     session_id = str(context.get("conversationSessionId") or "").strip()
     if not session_id:
         session_id = f"simulation-judge-{str(context.get('runId') or 'run')}"
+    if phase == "rubric":
+        rubric = normalize_judge_rubric(
+            {
+                "phase": "rubric",
+                "task_summary": "按题集任务完成目标并提供可验证运行证据。",
+                "criteria": [
+                    {
+                        "id": "task_completion",
+                        "label": "任务完成度",
+                        "description": "完成题集声明的任务目标。",
+                        "weight": 0.7,
+                        "evidence_requirements": ["case result"],
+                    },
+                    {
+                        "id": "task_specific_quality",
+                        "label": "任务定向质量",
+                        "description": "结果满足本轮任务的定向质量要求。",
+                        "weight": 0.3,
+                        "evidence_requirements": ["case trace"],
+                    },
+                ],
+            },
+            task_contract=context.get("taskContract") if isinstance(context.get("taskContract"), dict) else {},
+        )
+        return {
+            **rubric,
+            "conversationSessionId": session_id,
+        }
+    rubric = context.get("rubric") if isinstance(context.get("rubric"), dict) else {}
     if phase == "baseline":
+        task_scores = {
+            str(item.get("id") or ""): 40.0
+            for item in list(rubric.get("taskCriteria") or [])
+            if isinstance(item, dict) and str(item.get("id") or "")
+        }
+        system_scores = {
+            str(item.get("id") or ""): 40.0
+            for item in list(rubric.get("systemCriteria") or [])
+            if isinstance(item, dict) and str(item.get("id") or "")
+        }
         return {
             "status": "success",
             "phase": "baseline",
-            "decision": "HOLD",
+            "recommendation": "REVISE",
+            "decision": "REVISE",
             "score": 40.0,
+            "taskScore": 40.0,
+            "systemScore": 40.0,
             "baselineScore": 40.0,
+            "rubricHash": rubric.get("rubricHash"),
             "problems": ["模拟 Judge：基线仍有可改进边界。"],
             "improvementInstructions": ["在隔离 worktree 中补充边界验证。"],
-            "dimensions": {},
+            "taskScores": task_scores,
+            "systemScores": system_scores,
+            "dimensions": system_scores,
             "evidenceRefs": ["simulation:baseline"],
             "conversationSessionId": session_id,
         }
+    task_scores = {
+        str(item.get("id") or ""): 80.0
+        for item in list(rubric.get("taskCriteria") or [])
+        if isinstance(item, dict) and str(item.get("id") or "")
+    }
+    system_scores = {
+        str(item.get("id") or ""): 80.0
+        for item in list(rubric.get("systemCriteria") or [])
+        if isinstance(item, dict) and str(item.get("id") or "")
+    }
     return {
         "status": "success",
         "phase": "rerun",
-        "decision": "PROMOTE",
+        "recommendation": "APPROVE",
+        "decision": "APPROVE",
         "score": 80.0,
+        "taskScore": 80.0,
+        "systemScore": 80.0,
         "baselineScore": 40.0,
+        "rubricHash": rubric.get("rubricHash"),
         "problems": [],
         "improvementInstructions": [],
-        "dimensions": {},
+        "taskScores": task_scores,
+        "systemScores": system_scores,
+        "dimensions": system_scores,
         "evidenceRefs": ["simulation:rerun"],
         "conversationSessionId": session_id,
     }
@@ -1267,13 +1440,25 @@ def _real_judge_runner(project_root: Path, bundle_name: str, phase: str, context
             "decision": "INCONCLUSIVE",
             "reason": "Judge evaluation missing supervised Judge Agent binding.",
         }
-    prompt = build_judge_evaluation_prompt(
-        phase=phase,
-        baseline_evaluation=context.get("baselineEvaluation") if isinstance(context.get("baselineEvaluation"), dict) else {},
-        rerun_evaluation=context.get("rerunEvaluation") if isinstance(context.get("rerunEvaluation"), dict) else {},
-        previous_judgment=context.get("baselineJudgment") if isinstance(context.get("baselineJudgment"), dict) else {},
-        candidate_variant=context.get("candidateVariant") if isinstance(context.get("candidateVariant"), dict) else {},
-    )
+    task_contract = context.get("taskContract") if isinstance(context.get("taskContract"), dict) else {}
+    if phase == "rubric":
+        prompt = build_judge_rubric_prompt(task_contract=task_contract)
+    else:
+        rubric = context.get("rubric") if isinstance(context.get("rubric"), dict) else {}
+        previous_judgment = (
+            context.get("baselineJudgment")
+            if isinstance(context.get("baselineJudgment"), dict)
+            else {}
+        )
+        prompt = build_judge_evaluation_prompt(
+            phase=phase,
+            task_contract=task_contract,
+            rubric=rubric,
+            baseline_evaluation=context.get("baselineEvaluation") if isinstance(context.get("baselineEvaluation"), dict) else {},
+            rerun_evaluation=context.get("rerunEvaluation") if isinstance(context.get("rerunEvaluation"), dict) else {},
+            previous_judgment=previous_judgment,
+            candidate_variant=context.get("candidateVariant") if isinstance(context.get("candidateVariant"), dict) else {},
+        )
     result = run_supervised_conversation_harness(
         repo_root=project_root,
         mode="single_turn",
@@ -1302,7 +1487,21 @@ def _real_judge_runner(project_root: Path, bundle_name: str, phase: str, context
             "conversationSessionId": session_id,
         }
     try:
-        normalized = normalize_judge_evaluation(raw_judgment, expected_phase=phase)
+        if phase == "rubric":
+            normalized = normalize_judge_rubric(raw_judgment, task_contract=task_contract)
+        else:
+            normalized = normalize_judge_evaluation(
+                raw_judgment,
+                expected_phase=phase,
+                rubric=context.get("rubric") if isinstance(context.get("rubric"), dict) else {},
+                baseline_score=(
+                    float((context.get("baselineJudgment") or {}).get("score"))
+                    if phase == "rerun"
+                    and isinstance(context.get("baselineJudgment"), dict)
+                    and isinstance((context.get("baselineJudgment") or {}).get("score"), (int, float))
+                    else None
+                ),
+            )
     except ValueError as exc:
         return {
             "status": "failed",
@@ -1807,12 +2006,18 @@ def _build_decision(snapshot: dict[str, Any], options: dict[str, Any]) -> dict[s
     candidate = snapshot.get("candidate") if isinstance(snapshot.get("candidate"), dict) else {}
     baseline_judgment = snapshot.get("baselineJudgment") if isinstance(snapshot.get("baselineJudgment"), dict) else {}
     candidate_judgment = snapshot.get("candidateJudgment") if isinstance(snapshot.get("candidateJudgment"), dict) else {}
+    judge_rubric = snapshot.get("judgeRubric") if isinstance(snapshot.get("judgeRubric"), dict) else {}
     modification = snapshot.get("candidateModification") if isinstance(snapshot.get("candidateModification"), dict) else {}
     worktree = snapshot.get("candidateWorktree") if isinstance(snapshot.get("candidateWorktree"), dict) else {}
     baseline_score = float(baseline_judgment.get("score") or 0.0)
     candidate_score = float(candidate_judgment.get("score") or 0.0)
     delta = round(candidate_score - baseline_score, 3)
-    judge_decision = str(candidate_judgment.get("decision") or "INCONCLUSIVE").strip().upper()
+    judge_recommendation = str(
+        candidate_judgment.get("recommendation")
+        or candidate_judgment.get("decision")
+        or "INCONCLUSIVE"
+    ).strip().upper()
+    rubric_hash = str(judge_rubric.get("rubricHash") or "")
     changed_files = list(worktree.get("changedFiles") or [])
     candidate_variant = worktree.get("variant") if isinstance(worktree.get("variant"), dict) else {}
     high_risk_files = [item for item in changed_files if bool(item.get("highRisk"))]
@@ -1823,14 +2028,20 @@ def _build_decision(snapshot: dict[str, Any], options: dict[str, Any]) -> dict[s
                 "pass"
                 if str(baseline_judgment.get("status") or "") == "success"
                 and str(candidate_judgment.get("status") or "") == "success"
+                and rubric_hash
+                and str(baseline_judgment.get("rubricHash") or "") == rubric_hash
+                and str(candidate_judgment.get("rubricHash") or "") == rubric_hash
                 else "fail"
             ),
-            "reason": "两次评分均来自同一 Judge 会话的结构化输出。",
+            "reason": "两次评分均来自同一 Judge 会话，并使用同一个冻结 rubric。",
         },
         {
-            "name": "judge_promote",
-            "status": "pass" if judge_decision == "PROMOTE" else "hold",
-            "reason": f"Judge decision={judge_decision}，复跑分数 {candidate_score}，基线分数 {baseline_score}，delta={delta}",
+            "name": "judge_recommendation",
+            "status": "advisory",
+            "reason": (
+                f"Judge recommendation={judge_recommendation}，复跑分数 {candidate_score}，"
+                f"基线分数 {baseline_score}，delta={delta}；仅供用户决策参考。"
+            ),
         },
         {
             "name": "candidate_modified",
@@ -1859,22 +2070,30 @@ def _build_decision(snapshot: dict[str, Any], options: dict[str, Any]) -> dict[s
             "files": [item.get("path") for item in high_risk_files],
         },
     ]
-    pass_all = all(gate["status"] == "pass" for gate in gates)
     mode = str(options.get("mode") or "auto")
-    if pass_all:
-        action = "preserve"
-        reason = "Judge 建议 PROMOTE，候选通过结构化评分和工作树绑定闸门，等待用户审批。"
-    else:
-        action = "hold"
-        reason = f"Judge decision={judge_decision}，默认禁止合入；等待用户审阅或显式强制审批。"
+    technical_failures = [
+        gate
+        for gate in gates
+        if gate["name"] != "judge_recommendation" and gate["status"] != "pass"
+    ]
+    reason = (
+        f"Judge 建议 {judge_recommendation}，但评分和建议仅供参考；"
+        "最终是否批准由用户决定。"
+        if not technical_failures
+        else (
+            f"Judge 建议 {judge_recommendation}；仍有 {len(technical_failures)} 个技术完整性项"
+            "需要在受控合入前处理。"
+        )
+    )
     return {
         "mode": mode,
         "scoreSource": "judge_agent",
-        "judgeDecision": judge_decision,
+        "judgeRecommendation": judge_recommendation,
+        "judgeDecision": judge_recommendation,
         "baselineScore": baseline_score,
         "candidateScore": candidate_score,
         "scoreDelta": delta,
-        "recommendedAction": action,
+        "recommendedAction": "user_decision",
         "reason": reason,
         "gates": gates,
         "highRisk": bool(high_risk_files),
@@ -1893,9 +2112,16 @@ def _build_decision(snapshot: dict[str, Any], options: dict[str, Any]) -> dict[s
 
 def _finish_by_decision(snapshot: dict[str, Any], decision: dict[str, Any], options: dict[str, Any]) -> None:
     del options
-    judge_decision = str(decision.get("judgeDecision") or "INCONCLUSIVE")
+    judge_recommendation = str(
+        decision.get("judgeRecommendation")
+        or decision.get("judgeDecision")
+        or "INCONCLUSIVE"
+    )
     outcome = "awaiting_user_approval"
-    message = f"Judge 双次评分完成（{judge_decision}），候选工作树已保留，等待用户审批。"
+    message = (
+        f"Judge 双次评分完成（建议：{judge_recommendation}），"
+        "候选工作树已保留，最终由用户审批。"
+    )
     finished = _now_iso()
     snapshot["status"] = "done"
     snapshot["phase"] = "complete"
@@ -2424,6 +2650,29 @@ def _build_merge_analysis(snapshot: dict[str, Any]) -> dict[str, Any]:
     overlap = [item for item in changed_files if item["path"] in dirty_main]
     high_risk = [item for item in changed_files if bool(item.get("highRisk"))]
     blockers: list[str] = []
+    frozen_variant = worktree.get("variant") if isinstance(worktree.get("variant"), dict) else {}
+    variant_status = "verified"
+    current_variant: dict[str, Any] = {}
+    if not _candidate_variant_is_bound(frozen_variant):
+        variant_status = "unbound"
+        blockers.append("candidate_variant_unbound")
+    else:
+        try:
+            current_variant = _build_candidate_variant(
+                candidate_path,
+                checkpoint_commit=str(frozen_variant.get("checkpointCommit") or ""),
+                changed_files=changed_files,
+                baseline_untracked=worktree.get("untrackedFiles"),
+            )
+        except SupervisedWorktreeRunValidationError:
+            variant_status = "unverifiable"
+            blockers.append("candidate_variant_unverifiable")
+        else:
+            if str(current_variant.get("variantId") or "") != str(
+                frozen_variant.get("variantId") or ""
+            ):
+                variant_status = "drifted"
+                blockers.append("candidate_variant_changed_after_judging")
     if overlap:
         blockers.append("main_workspace_overlap")
     if high_risk:
@@ -2440,6 +2689,9 @@ def _build_merge_analysis(snapshot: dict[str, Any]) -> dict[str, Any]:
         "overlapFiles": [item["path"] for item in overlap],
         "highRiskFiles": [item["path"] for item in high_risk],
         "blockers": blockers,
+        "candidateVariantStatus": variant_status,
+        "candidateVariantId": str(frozen_variant.get("variantId") or ""),
+        "currentCandidateVariantId": str(current_variant.get("variantId") or ""),
         "mainDirtyFiles": sorted(dirty_main),
         "reviewGate": snapshot.get("reviewGate") if isinstance(snapshot.get("reviewGate"), dict) else {},
         "analyzedAt": _now_iso(),
@@ -2455,12 +2707,17 @@ def _request_judge_controlled_merge(
     updated = _clone(snapshot)
     judgment = updated.get("candidateJudgment") if isinstance(updated.get("candidateJudgment"), dict) else {}
     session_id = str(updated.get("judgeConversationSessionId") or "").strip()
-    decision = str(judgment.get("decision") or "INCONCLUSIVE").strip().upper()
+    recommendation = str(
+        judgment.get("recommendation")
+        or judgment.get("decision")
+        or "INCONCLUSIVE"
+    ).strip().upper()
     if str(updated.get("executionMode") or "simulation").strip().lower() != "real":
         updated["judgeMergeTrigger"] = {
             "status": "requested",
             "mergeRequested": True,
-            "decision": decision,
+            "decision": recommendation,
+            "recommendation": recommendation,
             "conversationSessionId": session_id,
             "force": force,
             "mechanism": "simulated_judge_request",
@@ -2490,9 +2747,11 @@ def _request_judge_controlled_merge(
         "用户已经完成监督进化最终审批。你仍是同一个 Judge Agent；请复核你在本会话中的两次评分、"
         "候选版本绑定和用户审批。\n"
         "不要执行 shell、git merge 或直接修改文件。你只能决定是否请求后端受控候选应用器。\n"
-        "普通审批仅在最终 decision=PROMOTE 时请求合入；显式 force 审批允许记录覆盖非 PROMOTE 结论。\n"
+        "评分与 recommendation 仅供用户参考；用户审批是最终产品决策。"
+        "只要任务记录、冻结 rubric、候选绑定和用户审批证据完整，就必须请求后端受控合入；"
+        "不得再使用分数或你自己的 recommendation 否决用户决定。\n"
         "最后单独输出严格 JSON：\n"
-        'SUPERVISED_AGENT_JUDGMENT: {"phase":"merge_authorization","decision":"PROMOTE",'
+        'SUPERVISED_AGENT_JUDGMENT: {"phase":"merge_authorization","decision":"APPROVE",'
         '"merge_requested":true,"reason":"...","evidence_refs":[]}\n'
         f"审批证据：{json.dumps(prompt_payload, ensure_ascii=False, sort_keys=True)}"
     )
@@ -2524,10 +2783,6 @@ def _request_judge_controlled_merge(
             result.reason or "Judge 未在原会话中输出有效 merge_requested，禁止合入。"
         )
     trigger_decision = str(raw_trigger.get("decision") or "").strip().upper()
-    if not force and trigger_decision != "PROMOTE":
-        raise SupervisedWorktreeRunActionError(
-            f"Judge merge trigger decision={trigger_decision or 'INCONCLUSIVE'}，禁止普通合入。"
-        )
     updated["judgeMergeTrigger"] = {
         "status": "requested",
         "mergeRequested": True,
@@ -2552,13 +2807,26 @@ def _merge_candidate(snapshot: dict[str, Any], *, force: bool) -> dict[str, Any]
         )
     judgment = updated.get("candidateJudgment") if isinstance(updated.get("candidateJudgment"), dict) else {}
     if not judge_merge_allowed(judgment, force=force):
-        decision = str(judgment.get("decision") or "INCONCLUSIVE")
-        raise SupervisedWorktreeRunActionError(
-            f"Judge decision={decision}，缺少允许受控合入的 Judge 结论。"
-        )
+        raise SupervisedWorktreeRunActionError("Judge 第二次结构化评分不完整，禁止受控合入。")
     merge_trigger = updated.get("judgeMergeTrigger") if isinstance(updated.get("judgeMergeTrigger"), dict) else {}
     if str(merge_trigger.get("status") or "") != "requested" or merge_trigger.get("mergeRequested") is not True:
         raise SupervisedWorktreeRunActionError("缺少 Judge Agent 的结构化 merge_requested，禁止合入。")
+    if "main_workspace_overlap" in blockers:
+        overlap_files = ", ".join(str(item) for item in list(analysis.get("overlapFiles") or []))
+        raise SupervisedWorktreeRunActionError(
+            f"主工作区冲突不能被 force 覆盖：{overlap_files or 'unknown'}。"
+        )
+    variant_blockers = {
+        "candidate_variant_unbound",
+        "candidate_variant_unverifiable",
+        "candidate_variant_changed_after_judging",
+    }
+    if blockers.intersection(variant_blockers):
+        raise SupervisedWorktreeRunActionError(
+            "候选版本绑定与 Judge 评分时不一致，禁止受控合入。"
+        )
+    if "empty_candidate_diff" in blockers:
+        raise SupervisedWorktreeRunActionError("候选差异为空，禁止受控合入。")
     if not bool(analysis.get("mergeAllowed")) and not force:
         raise SupervisedWorktreeRunActionError(
             "合并分析未通过。请先处理冲突/高风险项，或在明确确认后使用 force。"
@@ -2621,12 +2889,21 @@ def _approve_review_gate(snapshot: dict[str, Any], *, reviewer_note: str = "") -
     if not bool(gate.get("required")):
         raise SupervisedWorktreeRunValidationError("此候选没有可审批的受控合入闸门。")
     updated = _clone(snapshot)
+    judgment = updated.get("candidateJudgment") if isinstance(updated.get("candidateJudgment"), dict) else {}
+    recommendation = str(
+        judgment.get("recommendation")
+        or judgment.get("decision")
+        or "INCONCLUSIVE"
+    ).strip().upper()
+    overrode_recommendation = recommendation != "APPROVE"
     updated["reviewGate"] = {
         **gate,
         "required": True,
         "status": REVIEW_GATE_APPROVED,
         "approvedAt": _now_iso(),
         "reviewerNote": _safe_metadata_text(reviewer_note, limit=500),
+        "judgeRecommendation": recommendation,
+        "overrodeJudgeRecommendation": overrode_recommendation,
     }
     updated["updatedAt"] = _now_iso()
     updated["mergeAnalysis"] = _build_merge_analysis(updated)
@@ -2641,6 +2918,8 @@ def _approve_review_gate(snapshot: dict[str, Any], *, reviewer_note: str = "") -
             "reviewGateStatus": REVIEW_GATE_APPROVED,
             "sourceTrack": str(self_origin.get("sourceTrack") or ""),
             "reviewerNotePreview": str(reviewer_note or "")[:160],
+            "judgeRecommendation": recommendation,
+            "overrodeJudgeRecommendation": overrode_recommendation,
         },
         lifecycle=True,
     )
@@ -3438,8 +3717,7 @@ def _action_states(snapshot: dict[str, Any]) -> dict[str, Any]:
     review_pending = _review_gate_requires_approval(snapshot)
     review_gate = snapshot.get("reviewGate") if isinstance(snapshot.get("reviewGate"), dict) else {}
     candidate_judgment = snapshot.get("candidateJudgment") if isinstance(snapshot.get("candidateJudgment"), dict) else {}
-    judge_promoted = judge_merge_allowed(candidate_judgment)
-    judge_decision = str(candidate_judgment.get("decision") or "INCONCLUSIVE")
+    judge_scoring_complete = judge_merge_allowed(candidate_judgment)
     return {
         "terminate": {
             "enabled": active,
@@ -3449,11 +3727,17 @@ def _action_states(snapshot: dict[str, Any]) -> dict[str, Any]:
         "discard": {"enabled": done and has_worktree and outcome not in {"discarded", "discard_skipped", "merged"}},
         "analyzeMerge": {"enabled": done and has_worktree},
         "approveReview": {
-            "enabled": done and has_worktree and bool(review_gate.get("required")) and review_pending and judge_promoted,
+            "enabled": (
+                done
+                and has_worktree
+                and bool(review_gate.get("required"))
+                and review_pending
+                and judge_scoring_complete
+            ),
             "reason": (
                 ""
-                if judge_promoted
-                else f"Judge decision={judge_decision}，默认审批入口已关闭；如确需覆盖，必须显式 force 审批。"
+                if judge_scoring_complete
+                else "Judge 第二次结构化评分尚未完成，暂不能进入用户审批。"
             ),
         },
         "merge": {

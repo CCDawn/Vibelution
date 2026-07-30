@@ -99,7 +99,8 @@ export function SupervisedApprovalDecisionPanel({
 
       <section className={styles.decisionBanner} data-tone={model.tone}>
         <div className={styles.decisionCopy}>
-          <small>{lang === "zh" ? "建议动作" : "Recommended action"}</small>
+          <small>{lang === "zh" ? "Judge 建议（仅供参考）" : "Judge recommendation (advisory)"}</small>
+          <VChip tone="neutral">{model.judgeRecommendation.label}</VChip>
           <strong>{model.headline}</strong>
           <p>{model.reason}</p>
         </div>
@@ -173,6 +174,71 @@ export function SupervisedApprovalDecisionPanel({
           </div>
         </section>
       </div>
+
+      {model.rubric.taskCriteria.length > 0 || model.rubric.systemCriteria.length > 0 ? (
+        <details className={styles.detail}>
+          <summary>
+            <span>{lang === "zh" ? "查看本轮冻结评分表" : "View frozen rubric"}</span>
+            <span className={styles.detailMeta}>
+              {model.rubric.hash ? `#${model.rubric.hash.slice(0, 10)}` : "--"}
+            </span>
+          </summary>
+          <div className={styles.bodyGrid}>
+            <section className={styles.evidenceSurface}>
+              <h4 className={styles.sectionHeading}>
+                {lang === "zh" ? "任务定向标准" : "Task-specific criteria"}
+                {model.rubric.taskWeight !== null ? ` · ${formatScore(model.rubric.taskWeight * 100)}%` : ""}
+              </h4>
+              <div className={styles.evidenceList}>
+                {model.rubric.taskCriteria.map((criterion) => (
+                  <div key={criterion.id} className={styles.evidenceItem} data-tone="neutral">
+                    <span>{formatScore(criterion.weight * 100)}%</span>
+                    <span>
+                      <strong>{criterion.label}</strong>
+                      {" · "}
+                      {criterion.description}
+                    </span>
+                  </div>
+                ))}
+                <div className={styles.evidenceItem} data-tone="neutral">
+                  <span aria-hidden="true">↳</span>
+                  <span>
+                    {lang === "zh"
+                      ? `基线 ${formatScore(model.metrics.baselineTaskScore)} · 改进后 ${formatScore(model.metrics.candidateTaskScore)}`
+                      : `Baseline ${formatScore(model.metrics.baselineTaskScore)} · Rerun ${formatScore(model.metrics.candidateTaskScore)}`}
+                  </span>
+                </div>
+              </div>
+            </section>
+            <section className={styles.evidenceSurface}>
+              <h4 className={styles.sectionHeading}>
+                {lang === "zh" ? "系统固定评分表" : "System-fixed criteria"}
+                {model.rubric.systemWeight !== null ? ` · ${formatScore(model.rubric.systemWeight * 100)}%` : ""}
+              </h4>
+              <div className={styles.evidenceList}>
+                {model.rubric.systemCriteria.map((criterion) => (
+                  <div key={criterion.id} className={styles.evidenceItem} data-tone="neutral">
+                    <span>{formatScore(criterion.weight * 100)}%</span>
+                    <span>
+                      <strong>{criterion.label}</strong>
+                      {" · "}
+                      {criterion.description}
+                    </span>
+                  </div>
+                ))}
+                <div className={styles.evidenceItem} data-tone="neutral">
+                  <span aria-hidden="true">↳</span>
+                  <span>
+                    {lang === "zh"
+                      ? `基线 ${formatScore(model.metrics.baselineSystemScore)} · 改进后 ${formatScore(model.metrics.candidateSystemScore)}`
+                      : `Baseline ${formatScore(model.metrics.baselineSystemScore)} · Rerun ${formatScore(model.metrics.candidateSystemScore)}`}
+                  </span>
+                </div>
+              </div>
+            </section>
+          </div>
+        </details>
+      ) : null}
 
       {model.blockers.length > 0 ? (
         <ul className={styles.blockerList}>

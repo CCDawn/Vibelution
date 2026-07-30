@@ -75,17 +75,23 @@ export function supervisedDecisionLabel(decision: string, lang: RunRecordLanguag
   if (normalizedDecision === "PROMOTE") {
     return lang === "zh" ? "建议晋升" : "promote";
   }
+  if (normalizedDecision === "APPROVE") {
+    return lang === "zh" ? "建议批准" : "recommend approval";
+  }
   if (normalizedDecision === "HOLD") {
     return lang === "zh" ? "继续观察" : "observe";
   }
+  if (normalizedDecision === "REVISE") {
+    return lang === "zh" ? "建议继续改进" : "recommend revision";
+  }
   if (normalizedDecision === "REJECT") {
-    return lang === "zh" ? "候选未采纳" : "not adopted";
+    return lang === "zh" ? "建议拒绝" : "recommend rejection";
   }
   if (normalizedDecision === "ROLLBACK") {
     return lang === "zh" ? "建议回滚" : "rollback";
   }
   if (normalizedDecision === "INCONCLUSIVE") {
-    return lang === "zh" ? "评测无结论" : "inconclusive";
+    return lang === "zh" ? "证据不足" : "insufficient evidence";
   }
   return fallback(decision);
 }

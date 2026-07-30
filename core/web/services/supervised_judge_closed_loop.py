@@ -2,22 +2,145 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import math
+import re
 from typing import Any
 
 
-JUDGE_DECISIONS = {"PROMOTE", "HOLD", "REJECT", "INCONCLUSIVE"}
-JUDGE_DIMENSIONS = (
-    "task_understanding",
-    "tool_trace_quality",
-    "validation_evidence",
-    "safety_and_scope",
+JUDGE_RECOMMENDATIONS = {"APPROVE", "REVISE", "REJECT", "INCONCLUSIVE"}
+JUDGE_DECISIONS = JUDGE_RECOMMENDATIONS
+RUBRIC_SCHEMA_VERSION = 1
+SYSTEM_RUBRIC_VERSION = "supervised-execution-v1"
+COMPOSITION_WEIGHTS = {
+    "taskSpecific": 0.7,
+    "systemFixed": 0.3,
+}
+SYSTEM_RUBRIC_CRITERIA = (
+    {
+        "id": "evidence_verifiability",
+        "label": "证据真实性与可验证性",
+        "description": "结论可由运行轨迹、产物和验证结果复核，不用口头声明代替证据。",
+        "weight": 0.30,
+    },
+    {
+        "id": "tool_transaction_discipline",
+        "label": "工具与事务纪律",
+        "description": "工具调用、写入、验证和收口顺序清晰，状态与实际动作一致。",
+        "weight": 0.25,
+    },
+    {
+        "id": "scope_and_safety",
+        "label": "范围与安全",
+        "description": "遵守任务范围、权限、隔离、候选工作树和不可覆盖边界。",
+        "weight": 0.25,
+    },
+    {
+        "id": "recovery_and_state_consistency",
+        "label": "错误恢复与状态一致性",
+        "description": "失败、取消或重试后保持可恢复且不制造虚假成功状态。",
+        "weight": 0.15,
+    },
+    {
+        "id": "efficiency_and_minimality",
+        "label": "效率与最小充分性",
+        "description": "以完成任务所需的最小充分动作取得结果，避免无依据扩张。",
+        "weight": 0.05,
+    },
 )
+
+
+def build_judge_rubric_prompt(*, task_contract: dict[str, Any]) -> str:
+    bounded_contract = _bounded_mapping(task_contract)
+    return (
+        "你是监督进化 Judge Agent。当前只生成本轮评分 rubric，不评分任何运行结果，"
+        "也不要修改代码或执行合入。\n"
+        "请根据本轮要评估的任务合同生成 2..8 个任务定向标准；这些标准必须能够由后续运行证据评分，"
+        "不得加入与任务无关的偏好。系统固定评分表由后端追加，你不要重复生成。\n"
+        "criteria 的 weight 使用 0..1 正数，后端会归一化；"
+        "evidence_requirements 写明每个标准需要看到的证据。\n"
+        "最后单独输出一行严格 JSON：\n"
+        'SUPERVISED_AGENT_JUDGMENT: {"phase":"rubric","task_summary":"...",'
+        '"criteria":[{"id":"task_completion","label":"任务完成度","description":"...",'
+        '"weight":1.0,"evidence_requirements":["..."]}]}\n'
+        "本轮要评估的任务合同：\n"
+        f"{json.dumps(bounded_contract, ensure_ascii=False, sort_keys=True)}"
+    )
+
+
+def normalize_judge_rubric(
+    payload: dict[str, Any],
+    *,
+    task_contract: dict[str, Any],
+) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise ValueError("Judge rubric must be an object.")
+    phase = str(payload.get("phase") or "").strip().lower()
+    if phase != "rubric":
+        raise ValueError(f"Judge rubric phase mismatch: expected rubric, got {phase or '-'}.")
+    raw_criteria = payload.get("criteria")
+    if not isinstance(raw_criteria, list) or not 2 <= len(raw_criteria) <= 8:
+        raise ValueError("Judge rubric requires 2..8 task-specific criteria.")
+
+    criteria: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    raw_weights: list[float] = []
+    for index, item in enumerate(raw_criteria):
+        if not isinstance(item, dict):
+            raise ValueError(f"Judge rubric criteria[{index}] must be an object.")
+        criterion_id = str(item.get("id") or "").strip().lower()
+        if not re.fullmatch(r"[a-z][a-z0-9_]{1,63}", criterion_id):
+            raise ValueError(f"Judge rubric criteria[{index}].id is invalid.")
+        if criterion_id in seen_ids:
+            raise ValueError(f"Judge rubric criterion id is duplicated: {criterion_id}.")
+        seen_ids.add(criterion_id)
+        label = str(item.get("label") or "").strip()[:120]
+        description = str(item.get("description") or "").strip()[:500]
+        if not label or not description:
+            raise ValueError(f"Judge rubric criteria[{index}] requires label and description.")
+        weight = _positive_weight(item.get("weight"), field=f"criteria[{index}].weight")
+        raw_weights.append(weight)
+        criteria.append(
+            {
+                "id": criterion_id,
+                "label": label,
+                "description": description,
+                "weight": weight,
+                "evidenceRequirements": _string_list(
+                    item.get("evidence_requirements") or item.get("evidenceRequirements")
+                )[:8],
+            }
+        )
+    weight_total = sum(raw_weights)
+    for criterion in criteria:
+        criterion["weight"] = round(float(criterion["weight"]) / weight_total, 6)
+
+    bounded_contract = _bounded_mapping(task_contract)
+    task_contract_hash = _stable_hash(bounded_contract)
+    rubric_core = {
+        "schemaVersion": RUBRIC_SCHEMA_VERSION,
+        "source": "judge_agent",
+        "taskContractHash": task_contract_hash,
+        "taskSummary": str(payload.get("task_summary") or payload.get("taskSummary") or "").strip()[:1000],
+        "taskCriteria": criteria,
+        "systemRubricVersion": SYSTEM_RUBRIC_VERSION,
+        "systemCriteria": [dict(item) for item in SYSTEM_RUBRIC_CRITERIA],
+        "compositionWeights": dict(COMPOSITION_WEIGHTS),
+    }
+    return {
+        "status": "success",
+        "phase": "rubric",
+        **rubric_core,
+        "rubricHash": _stable_hash(rubric_core),
+    }
 
 
 def build_judge_evaluation_prompt(
     *,
     phase: str,
+    task_contract: dict[str, Any],
+    rubric: dict[str, Any],
     baseline_evaluation: dict[str, Any],
     rerun_evaluation: dict[str, Any] | None = None,
     previous_judgment: dict[str, Any] | None = None,
@@ -32,16 +155,15 @@ def build_judge_evaluation_prompt(
         "比较独立复跑轨迹与第一次基线轨迹。"
         if second_turn
         else
-        "这是同一 Judge 会话中的第一次评估。冻结本轮量表和证据标准，"
+        "这是同一 Judge 会话中的第一次评估。使用已冻结 rubric 和证据标准，"
         "对基线真实运行轨迹评分，并给出可直接交给基线 Agent 的改进指令。"
     )
-    decision_instruction = (
-        "decision 只能为 PROMOTE、HOLD、REJECT、INCONCLUSIVE。只有证据充分且改进后得分更高时才可 PROMOTE。"
-        if second_turn
-        else
-        "第一次评估的 decision 使用 HOLD；此时尚未看到独立复跑，不得 PROMOTE。"
-    )
+    rubric_hash = str(rubric.get("rubricHash") or "").strip()
+    if not rubric_hash:
+        raise ValueError("Frozen Judge rubric hash is required.")
     payload = {
+        "taskContract": _bounded_mapping(task_contract),
+        "rubric": _bounded_mapping(rubric),
         "baselineEvaluation": _bounded_evaluation(baseline_evaluation),
         "previousJudgment": _bounded_mapping(previous_judgment or {}),
         "rerunEvaluation": _bounded_evaluation(rerun_evaluation or {}) if second_turn else {},
@@ -51,16 +173,16 @@ def build_judge_evaluation_prompt(
         "你是监督进化 Judge Agent，只负责读取运行证据、评分、给出改进反馈和合入建议；"
         "不要修改代码，不要运行 git merge，不要把测试通过率直接当作质量分。\n"
         f"{phase_instruction}\n"
-        "评分范围 0..1，必须分别评估 task_understanding、tool_trace_quality、"
-        "validation_evidence、safety_and_scope。缺少轨迹或证据时必须 INCONCLUSIVE。\n"
-        f"{decision_instruction}\n"
+        "必须逐项使用已冻结 rubric，task_scores 和 system_scores 的每项评分范围均为 0..1。"
+        "不得修改标准、权重或 rubric_hash；缺少证据时在对应项降分并将 recommendation 设为 INCONCLUSIVE。\n"
+        "recommendation 只能为 APPROVE、REVISE、REJECT、INCONCLUSIVE，且只是给用户的建议，"
+        "不得把任何分数或建议当成合入硬门。总分由后端计算，你不要输出总分。\n"
         "最后单独输出一行严格 JSON：\n"
         'SUPERVISED_AGENT_JUDGMENT: {"phase":"'
         f'{normalized_phase}'
-        '","decision":"HOLD","score":0.0,"baseline_score":0.0,'
-        '"problems":[],"improvement_instructions":[],"dimensions":'
-        '{"task_understanding":0.0,"tool_trace_quality":0.0,'
-        '"validation_evidence":0.0,"safety_and_scope":0.0},"evidence_refs":[]}\n'
+        f'","recommendation":"REVISE","rubric_hash":"{rubric_hash}",'
+        '"problems":[],"improvement_instructions":[],"task_scores":{},'
+        '"system_scores":{},"evidence_refs":[]}\n'
         "证据包：\n"
         f"{json.dumps(payload, ensure_ascii=False, sort_keys=True)}"
     )
@@ -110,6 +232,8 @@ def normalize_judge_evaluation(
     payload: dict[str, Any],
     *,
     expected_phase: str,
+    rubric: dict[str, Any],
+    baseline_score: float | None = None,
 ) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError("Judge judgment must be an object.")
@@ -117,57 +241,128 @@ def normalize_judge_evaluation(
     normalized_expected = str(expected_phase or "").strip().lower()
     if phase != normalized_expected:
         raise ValueError(f"Judge phase mismatch: expected {normalized_expected}, got {phase or '-'}")
-    decision = str(payload.get("decision") or "").strip().upper()
-    if decision not in JUDGE_DECISIONS:
-        raise ValueError("Judge decision must be PROMOTE, HOLD, REJECT, or INCONCLUSIVE.")
-    if phase == "baseline" and decision == "PROMOTE":
-        raise ValueError("Baseline Judge decision cannot be PROMOTE before an independent rerun.")
-    score = _score_percent(payload.get("score"), field="score")
-    baseline_score_value = payload.get("baseline_score", payload.get("baselineScore"))
-    baseline_score = (
-        _score_percent(baseline_score_value, field="baseline_score")
-        if baseline_score_value is not None
-        else (score if phase == "baseline" else None)
-    )
-    raw_dimensions = payload.get("dimensions")
-    if not isinstance(raw_dimensions, dict):
-        raise ValueError("Judge dimensions are required.")
-    dimensions = {
-        dimension: _score_percent(raw_dimensions.get(dimension), field=f"dimensions.{dimension}")
-        for dimension in JUDGE_DIMENSIONS
-    }
+    recommendation = str(payload.get("recommendation") or "").strip().upper()
+    if recommendation not in JUDGE_RECOMMENDATIONS:
+        raise ValueError("Judge recommendation must be APPROVE, REVISE, REJECT, or INCONCLUSIVE.")
+    expected_hash = str(rubric.get("rubricHash") or "").strip()
+    observed_hash = str(payload.get("rubric_hash") or payload.get("rubricHash") or "").strip()
+    if not expected_hash or observed_hash != expected_hash:
+        raise ValueError("Judge rubric hash does not match the frozen rubric.")
+    task_criteria = rubric.get("taskCriteria")
+    system_criteria = rubric.get("systemCriteria")
+    if not isinstance(task_criteria, list) or not isinstance(system_criteria, list):
+        raise ValueError("Frozen Judge rubric criteria are missing.")
+    task_scores = _criterion_scores(payload.get("task_scores"), task_criteria, group="task_scores")
+    system_scores = _criterion_scores(payload.get("system_scores"), system_criteria, group="system_scores")
+    task_score = _weighted_score(task_scores, task_criteria)
+    system_score = _weighted_score(system_scores, system_criteria)
+    composition = rubric.get("compositionWeights") if isinstance(rubric.get("compositionWeights"), dict) else {}
+    task_weight = float(composition.get("taskSpecific") or 0.0)
+    system_weight = float(composition.get("systemFixed") or 0.0)
+    if round(task_weight + system_weight, 6) != 1.0:
+        raise ValueError("Frozen Judge rubric composition weights must sum to 1.")
+    score = round(task_score * task_weight + system_score * system_weight, 3)
+    resolved_baseline_score = score if phase == "baseline" else baseline_score
     return {
         "status": "success",
         "phase": phase,
-        "decision": decision,
+        "recommendation": recommendation,
+        "decision": recommendation,
         "score": score,
-        "baselineScore": baseline_score,
+        "taskScore": task_score,
+        "systemScore": system_score,
+        "baselineScore": resolved_baseline_score,
+        "rubricHash": expected_hash,
         "problems": _string_list(payload.get("problems")),
         "improvementInstructions": _string_list(
             payload.get("improvement_instructions")
             or payload.get("improvementInstructions")
         ),
-        "dimensions": dimensions,
+        "taskScores": task_scores,
+        "systemScores": system_scores,
+        "dimensions": system_scores,
         "evidenceRefs": _string_list(payload.get("evidence_refs") or payload.get("evidenceRefs")),
     }
 
 
 def judge_merge_allowed(judgment: dict[str, Any], *, force: bool = False) -> bool:
+    del force
     if str(judgment.get("status") or "").strip().lower() != "success":
         return False
     if str(judgment.get("phase") or "").strip().lower() != "rerun":
         return False
-    decision = str(judgment.get("decision") or "").strip().upper()
-    return decision == "PROMOTE" or (force and decision in JUDGE_DECISIONS)
+    recommendation = str(
+        judgment.get("recommendation") or judgment.get("decision") or ""
+    ).strip().upper()
+    recommendation = {
+        "PROMOTE": "APPROVE",
+        "HOLD": "REVISE",
+    }.get(recommendation, recommendation)
+    return recommendation in JUDGE_RECOMMENDATIONS
 
 
 def _score_percent(value: Any, *, field: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"Judge {field} must be numeric.")
     score = float(value)
-    if not 0.0 <= score <= 1.0:
+    if not math.isfinite(score) or not 0.0 <= score <= 1.0:
         raise ValueError(f"Judge {field} must be in 0..1.")
     return round(score * 100.0, 3)
+
+
+def _positive_weight(value: Any, *, field: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"Judge rubric {field} must be numeric.")
+    weight = float(value)
+    if not math.isfinite(weight) or weight <= 0.0:
+        raise ValueError(f"Judge rubric {field} must be positive.")
+    return weight
+
+
+def _criterion_scores(
+    value: Any,
+    criteria: list[Any],
+    *,
+    group: str,
+) -> dict[str, float]:
+    if not isinstance(value, dict):
+        raise ValueError(f"Judge {group} are required.")
+    expected_ids = [
+        str(item.get("id") or "")
+        for item in criteria
+        if isinstance(item, dict) and str(item.get("id") or "")
+    ]
+    if set(value) != set(expected_ids):
+        raise ValueError(f"Judge {group} must score every frozen rubric criterion exactly once.")
+    return {
+        criterion_id: _score_percent(value.get(criterion_id), field=f"{group}.{criterion_id}")
+        for criterion_id in expected_ids
+    }
+
+
+def _weighted_score(scores: dict[str, float], criteria: list[Any]) -> float:
+    total = 0.0
+    weight_total = 0.0
+    for item in criteria:
+        if not isinstance(item, dict):
+            continue
+        criterion_id = str(item.get("id") or "")
+        weight = float(item.get("weight") or 0.0)
+        total += float(scores.get(criterion_id) or 0.0) * weight
+        weight_total += weight
+    if weight_total <= 0.0:
+        raise ValueError("Frozen Judge rubric has no positive criterion weights.")
+    return round(total / weight_total, 3)
+
+
+def _stable_hash(value: Any) -> str:
+    encoded = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _string_list(value: Any) -> list[str]:
