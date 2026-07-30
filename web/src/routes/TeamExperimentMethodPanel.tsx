@@ -142,20 +142,22 @@ export function createExperimentMethodFormDraft(
   if (activeContract) {
     methodConfigs[method] = { ...methodConfigs[method], ...serializeMethodConfig(activeContract.methodConfig) };
   }
-  const metric = activeContract?.metricContract.metrics.find((item) => item.name === activeContract.metricContract.primaryMetric)
-    ?? activeContract?.metricContract.metrics[0];
+  const metrics = activeContract?.metricContract?.metrics ?? [];
+  const primaryMetric = activeContract?.metricContract?.primaryMetric ?? "";
+  const metric = metrics.find((item) => item.name === primaryMetric) ?? metrics[0];
+  const decisionContract = activeContract?.decisionContract;
   return {
     researchMode: activeContract?.researchMode ?? "full_research_loop",
-    primaryPurpose: activeContract?.purpose.primaryPurpose ?? "baseline_comparison",
+    primaryPurpose: activeContract?.purpose?.primaryPurpose ?? "baseline_comparison",
     experimentMethod: method,
-    requestedAdapterId: activeContract?.adapterSelection.requestedAdapterId ?? "",
+    requestedAdapterId: activeContract?.adapterSelection?.requestedAdapterId ?? "",
     researchQuestion: activeContract?.researchQuestion ?? fallbackResearchQuestion,
     objective: activeContract?.objective ?? "",
-    primaryMetric: activeContract?.metricContract.primaryMetric ?? "",
+    primaryMetric,
     metricDirection: (metric?.direction as ExperimentMethodFormDraft["metricDirection"]) ?? "maximize",
-    successCriteria: activeContract?.decisionContract.successCriteria.join("\n") ?? "",
-    failureCriteria: activeContract?.decisionContract.failureCriteria.join("\n") ?? "",
-    inconclusiveCriteria: activeContract?.decisionContract.inconclusiveCriteria.join("\n") ?? "",
+    successCriteria: (decisionContract?.successCriteria ?? []).join("\n"),
+    failureCriteria: (decisionContract?.failureCriteria ?? []).join("\n"),
+    inconclusiveCriteria: (decisionContract?.inconclusiveCriteria ?? []).join("\n"),
     methodConfigs,
   };
 }
