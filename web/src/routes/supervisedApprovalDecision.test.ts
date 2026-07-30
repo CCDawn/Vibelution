@@ -83,6 +83,74 @@ function worktreeRun(overrides: Partial<SupervisedWorktreeRun> = {}): Supervised
 }
 
 describe("buildSupervisedApprovalDecision", () => {
+  it("presents the Judge recommendation as advisory with the frozen rubric breakdown", () => {
+    const run = worktreeRun();
+    Object.assign(run as unknown as Record<string, unknown>, {
+      judgeRubric: {
+        rubricHash: "abc123",
+        taskSummary: "修复失败恢复",
+        compositionWeights: { taskSpecific: 0.7, systemFixed: 0.3 },
+        taskCriteria: [
+          { id: "failure_recovery", label: "失败恢复", description: "恢复后状态一致", weight: 1 },
+        ],
+        systemCriteria: [
+          { id: "scope_and_safety", label: "范围与安全", description: "不越界", weight: 1 },
+        ],
+      },
+      baselineJudgment: {
+        status: "success",
+        phase: "baseline",
+        recommendation: "REVISE",
+        decision: "REVISE",
+        score: 61,
+        taskScore: 58,
+        systemScore: 68,
+        rubricHash: "abc123",
+      },
+      candidateJudgment: {
+        status: "success",
+        phase: "rerun",
+        recommendation: "REJECT",
+        decision: "REJECT",
+        score: 79,
+        taskScore: 82,
+        systemScore: 72,
+        rubricHash: "abc123",
+      },
+      decision: {
+        ...run.decision,
+        judgeRecommendation: "REJECT",
+        judgeDecision: "REJECT",
+        baselineScore: 61,
+        candidateScore: 79,
+        scoreDelta: 18,
+        recommendedAction: "user_decision",
+      },
+    });
+
+    const model = buildSupervisedApprovalDecision(run, "zh");
+
+    expect(model.judgeRecommendation).toEqual({
+      code: "REJECT",
+      label: "建议拒绝",
+    });
+    expect(model.rubric).toMatchObject({
+      hash: "abc123",
+      taskSummary: "修复失败恢复",
+      taskWeight: 0.7,
+      systemWeight: 0.3,
+    });
+    expect(model.rubric.taskCriteria[0].label).toBe("失败恢复");
+    expect(model.rubric.systemCriteria[0].label).toBe("范围与安全");
+    expect(model.metrics).toMatchObject({
+      baselineTaskScore: 58,
+      baselineSystemScore: 68,
+      candidateTaskScore: 82,
+      candidateSystemScore: 72,
+    });
+    expect(model.evidence.some((item) => item.text.includes("最终由用户决定"))).toBe(true);
+  });
+
   it("presents one user approval that authorizes Judge-controlled merge", () => {
     const model = buildSupervisedApprovalDecision(worktreeRun(), "zh");
 

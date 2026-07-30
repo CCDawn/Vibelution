@@ -69,7 +69,7 @@ describe("buildSupervisedRunRecordDisplay", () => {
     expect(display.title).toContain("05/31");
     expect(display.title).toContain("16:36");
     expect(display.title).toContain("terminal_bench_core_v1");
-    expect(display.subtitle).toBe("评测无结论 · baseline 0 / candidate 0");
+    expect(display.subtitle).toBe("证据不足 · baseline 0 / candidate 0");
     expect(display.idLabel).toBe("supervised_20260531_163627");
   });
 
@@ -102,7 +102,7 @@ describe("buildSupervisedRunRecordDisplay", () => {
     expect(display.idLabel).toBe("supervised_latest");
   });
 
-  it("renders REJECT as a governance non-adoption label instead of a failure label", () => {
+  it("renders Judge recommendations as advisory labels", () => {
     const display = buildSupervisedRunRecordDisplay(
       run({
         decision: "REJECT",
@@ -113,7 +113,14 @@ describe("buildSupervisedRunRecordDisplay", () => {
       labels,
     );
 
-    expect(display.subtitle).toBe("候选未采纳 · baseline 100 / candidate 100");
+    expect(display.subtitle).toBe("建议拒绝 · baseline 100 / candidate 100");
     expect(display.subtitle).not.toContain("失败");
+
+    expect(
+      buildSupervisedRunRecordDisplay(run({ decision: "APPROVE" }), "zh", labels).subtitle,
+    ).toContain("建议批准");
+    expect(
+      buildSupervisedRunRecordDisplay(run({ decision: "REVISE" }), "zh", labels).subtitle,
+    ).toContain("建议继续改进");
   });
 });

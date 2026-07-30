@@ -535,6 +535,10 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(supervisedApprovalDecisionPanelSource).toContain("用户审批 · 决策工作台");
     expect(supervisedApprovalDecisionPanelSource).toContain("是否批准 Judge 受控合入");
     expect(supervisedApprovalDecisionPanelSource).toContain('data-vui-recipe="supervised-approval-decision"');
+    expect(supervisedApprovalDecisionPanelSource).toContain("Judge 建议（仅供参考）");
+    expect(supervisedApprovalDecisionPanelSource).toContain("任务定向标准");
+    expect(supervisedApprovalDecisionPanelSource).toContain("系统固定评分表");
+    expect(supervisedApprovalDecisionPanelSource).not.toContain("PROMOTE 结论下");
     expect(supervisedApprovalDecisionPanelSource).toContain("<details");
     expect(supervisedApprovalDecisionPanelSource).toContain("<VButton");
     expect(supervisedApprovalDecisionPanelSource).toContain("<VChip");

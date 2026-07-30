@@ -1,4 +1,5 @@
 import json
+import re
 import subprocess
 from pathlib import Path
 
@@ -232,6 +233,31 @@ def _make_candidate_repo(tmp_path: Path, project_root: Path, *, changed_path: st
     return candidate
 
 
+def _bound_candidate_worktree(
+    candidate: Path,
+    *,
+    baseline_untracked: list[str] | None = None,
+) -> dict:
+    baseline_noise = list(baseline_untracked or [])
+    checkpoint_commit = _run_git(candidate, "rev-parse", "HEAD")
+    changed_files = service._candidate_changed_files(
+        candidate,
+        baseline_untracked=baseline_noise,
+    )
+    return {
+        "path": str(candidate),
+        "preserved": True,
+        "checkpointCommit": checkpoint_commit,
+        "untrackedFiles": baseline_noise,
+        "variant": service._build_candidate_variant(
+            candidate,
+            checkpoint_commit=checkpoint_commit,
+            changed_files=changed_files,
+            baseline_untracked=baseline_noise,
+        ),
+    }
+
+
 def test_active_baseline_keeps_future_approval_pending():
     snapshot = {
         "runId": "swte-live-baseline",
@@ -250,6 +276,30 @@ def test_active_baseline_keeps_future_approval_pending():
     assert workflow_steps[0]["current"] is True
     assert workflow_steps[3]["status"] == "pending"
     assert workflow_steps[3]["current"] is False
+
+
+def test_task_contract_uses_the_same_baseline_prompt_that_the_agent_executes():
+    contract = service._build_task_contract(
+        {
+            "benchmark": "unit",
+            "cases": [
+                {
+                    "case_id": "baseline-only",
+                    "baseline_prompt": "执行真实基线任务",
+                    "prompt": "不得替代真实基线任务的旧字段",
+                }
+            ],
+        },
+        bundle_name="baseline_contract_v1",
+        self_origin={},
+    )
+
+    assert contract["cases"] == [
+        {
+            "caseId": "baseline-only",
+            "prompt": "执行真实基线任务",
+        }
+    ]
 
 
 def test_full_score_reflection_does_not_invent_a_failure_target():
@@ -304,7 +354,13 @@ def test_supervised_worktree_flow_preserves_improved_candidate_and_records_merge
     assert snapshot["status"] == "done"
     assert snapshot["outcome"] == "awaiting_user_approval"
     assert snapshot["decision"]["scoreDelta"] == 40.0
-    assert snapshot["decision"]["recommendedAction"] == "preserve"
+    assert snapshot["decision"]["recommendedAction"] == "user_decision"
+    assert set(snapshot["baselineJudgment"]["taskScores"]) == {
+        item["id"] for item in snapshot["judgeRubric"]["taskCriteria"]
+    }
+    assert set(snapshot["candidateJudgment"]["systemScores"]) == {
+        item["id"] for item in snapshot["judgeRubric"]["systemCriteria"]
+    }
     assert snapshot["mergeAnalysis"]["status"] == "blocked"
     assert snapshot["mergeAnalysis"]["mergeAllowed"] is False
     assert "supervised_review_pending" in snapshot["mergeAnalysis"]["blockers"]
@@ -396,7 +452,7 @@ def test_supervised_worktree_flow_projects_six_steps_with_independent_rerun_sess
     assert evaluator_calls[1]["session"] == ""
 
 
-def test_supervised_worktree_flow_uses_three_sessions_and_same_judge_session(tmp_path):
+def test_supervised_worktree_flow_uses_three_sessions_and_same_judge_session(tmp_path, monkeypatch):
     project_root = tmp_path / "project"
     _init_repo(project_root)
     (project_root / "agent.py").write_text("print('base')\n", encoding="utf-8")
@@ -404,6 +460,12 @@ def test_supervised_worktree_flow_uses_three_sessions_and_same_judge_session(tmp
     _run_git(project_root, "add", ".")
     _run_git(project_root, "commit", "-m", "init")
     calls: list[tuple[str, str, str]] = []
+    scene_events: list[tuple[str, str, str, dict]] = []
+
+    def record_scene_event(component, phase, event_code, **kwargs):
+        scene_events.append((component, phase, event_code, kwargs))
+
+    monkeypatch.setattr(service, "record_runtime_scene_event", record_scene_event)
 
     def worktree_factory(root: Path, run_id: str) -> dict:
         candidate = _make_candidate_repo(tmp_path, root)
@@ -444,25 +506,62 @@ def test_supervised_worktree_flow_uses_three_sessions_and_same_judge_session(tmp
     def judge(_: Path, __: str, phase: str, context: dict) -> dict:
         session_id = str(context.get("conversationSessionId") or "")
         calls.append(("judge", phase, session_id))
-        if phase == "baseline":
+        if phase == "rubric":
             assert session_id == ""
+            assert context["taskContract"]["cases"][0]["prompt"] == "case one"
+            assert "baselineEvaluation" not in context
+            rubric = service.normalize_judge_rubric(
+                {
+                    "phase": "rubric",
+                    "task_summary": "完成题集并提供可信运行证据",
+                    "criteria": [
+                        {
+                            "id": "task_completion",
+                            "label": "任务完成度",
+                            "description": "完成题集要求。",
+                            "weight": 0.7,
+                            "evidence_requirements": ["case trace"],
+                        },
+                        {
+                            "id": "task_quality",
+                            "label": "任务质量",
+                            "description": "任务结果满足题目约束。",
+                            "weight": 0.3,
+                            "evidence_requirements": ["case result"],
+                        },
+                    ],
+                },
+                task_contract=context["taskContract"],
+            )
+            return {
+                **rubric,
+                "conversationSessionId": "session-judge",
+            }
+        if phase == "baseline":
+            assert session_id == "session-judge"
+            assert context["rubric"]["rubricHash"]
             return {
                 "status": "success",
                 "phase": "baseline",
-                "decision": "HOLD",
+                "recommendation": "REVISE",
+                "decision": "REVISE",
                 "score": 40.0,
+                "rubricHash": context["rubric"]["rubricHash"],
                 "problems": ["缺少失败恢复"],
                 "improvementInstructions": ["补充失败恢复"],
                 "evidenceRefs": ["case:one"],
                 "conversationSessionId": "session-judge",
             }
         assert session_id == "session-judge"
+        assert context["rubric"]["rubricHash"]
         return {
             "status": "success",
             "phase": "rerun",
-            "decision": "PROMOTE",
+            "recommendation": "REJECT",
+            "decision": "REJECT",
             "baselineScore": 40.0,
             "score": 85.0,
+            "rubricHash": context["rubric"]["rubricHash"],
             "problems": [],
             "improvementInstructions": [],
             "evidenceRefs": ["case:one"],
@@ -495,7 +594,8 @@ def test_supervised_worktree_flow_uses_three_sessions_and_same_judge_session(tmp
 
     assert calls == [
         ("evaluate", "baseline", ""),
-        ("judge", "baseline", ""),
+        ("judge", "rubric", ""),
+        ("judge", "baseline", "session-judge"),
         ("modify", "baseline", "session-baseline"),
         ("evaluate", "baseline_rerun", ""),
         ("judge", "rerun", "session-judge"),
@@ -506,7 +606,11 @@ def test_supervised_worktree_flow_uses_three_sessions_and_same_judge_session(tmp
     assert snapshot["baselineConversationSessionId"] != snapshot["rerunConversationSessionId"]
     assert snapshot["baselineJudgment"]["score"] == 40.0
     assert snapshot["candidateJudgment"]["score"] == 85.0
-    assert snapshot["decision"]["judgeDecision"] == "PROMOTE"
+    assert snapshot["judgeRubric"]["rubricHash"]
+    assert snapshot["baselineJudgment"]["rubricHash"] == snapshot["judgeRubric"]["rubricHash"]
+    assert snapshot["candidateJudgment"]["rubricHash"] == snapshot["judgeRubric"]["rubricHash"]
+    assert snapshot["decision"]["judgeRecommendation"] == "REJECT"
+    assert snapshot["decision"]["recommendedAction"] == "user_decision"
     assert [item["id"] for item in snapshot["workflowSteps"]] == [
         "baseline_eval",
         "baseline_judge",
@@ -520,6 +624,18 @@ def test_supervised_worktree_flow_uses_three_sessions_and_same_judge_session(tmp
     assert snapshot["workflowSteps"][2]["conversationSessionId"] == "session-baseline"
     assert snapshot["workflowSteps"][3]["conversationSessionId"] == "session-rerun"
     assert snapshot["workflowSteps"][4]["conversationSessionId"] == "session-judge"
+    rubric_event = next(
+        item for item in scene_events if item[2] == "supervised_worktree_run.judge_rubric_frozen"
+    )
+    assert rubric_event[1] == "judge_rubric"
+    assert rubric_event[3]["outcome"] == "frozen"
+    assert rubric_event[3]["fields"] == {
+        "runId": snapshot["runId"],
+        "rubricHash": snapshot["judgeRubric"]["rubricHash"],
+        "taskCriterionCount": 2,
+        "systemRubricVersion": snapshot["judgeRubric"]["systemRubricVersion"],
+        "judgeConversationSessionId": "session-judge",
+    }
 
 
 def test_self_origin_worktree_flow_carries_goal_and_requires_review(tmp_path):
@@ -632,22 +748,50 @@ def test_real_worktree_flow_uses_supervised_conversation_chain_for_candidate_bra
             session_id = requested_session
         elif kwargs.get("scenario") == "supervised_judge_evaluation":
             session_id = requested_session or "session-judge"
-            phase = "rerun" if requested_session else "baseline"
-            agent_judgment = {
-                "phase": phase,
-                "decision": "PROMOTE" if phase == "rerun" else "HOLD",
-                "score": 0.85 if phase == "rerun" else 0.4,
-                "baseline_score": 0.4,
-                "problems": [] if phase == "rerun" else ["improve validation"],
-                "improvement_instructions": [] if phase == "rerun" else ["run focused validation"],
-                "dimensions": {
-                    "task_understanding": 0.8,
-                    "tool_trace_quality": 0.8,
-                    "validation_evidence": 0.8,
-                    "safety_and_scope": 0.8,
-                },
-                "evidence_refs": ["case:one"],
-            }
+            if '"phase":"rubric"' in prompt:
+                agent_judgment = {
+                    "phase": "rubric",
+                    "task_summary": "complete the supervised bundle",
+                    "criteria": [
+                        {
+                            "id": "task_completion",
+                            "label": "Task completion",
+                            "description": "Complete the requested task.",
+                            "weight": 0.7,
+                            "evidence_requirements": ["case result"],
+                        },
+                        {
+                            "id": "task_quality",
+                            "label": "Task quality",
+                            "description": "Preserve task-specific correctness.",
+                            "weight": 0.3,
+                            "evidence_requirements": ["trace"],
+                        },
+                    ],
+                }
+            else:
+                phase = "rerun" if '"phase":"rerun"' in prompt else "baseline"
+                rubric_hash_match = re.search(r'"rubric_hash":"([a-f0-9]{64})"', prompt)
+                assert rubric_hash_match is not None
+                agent_judgment = {
+                    "phase": phase,
+                    "recommendation": "APPROVE" if phase == "rerun" else "REVISE",
+                    "rubric_hash": rubric_hash_match.group(1),
+                    "problems": [] if phase == "rerun" else ["improve validation"],
+                    "improvement_instructions": [] if phase == "rerun" else ["run focused validation"],
+                    "task_scores": {
+                        "task_completion": 0.85 if phase == "rerun" else 0.4,
+                        "task_quality": 0.85 if phase == "rerun" else 0.4,
+                    },
+                    "system_scores": {
+                        "evidence_verifiability": 0.8,
+                        "tool_transaction_discipline": 0.8,
+                        "scope_and_safety": 0.8,
+                        "recovery_and_state_consistency": 0.8,
+                        "efficiency_and_minimality": 0.8,
+                    },
+                    "evidence_refs": ["case:one"],
+                }
         else:
             session_id = requested_session or (
                 "session-rerun" if repo_root != project_root else "session-baseline"
@@ -690,16 +834,17 @@ def test_real_worktree_flow_uses_supervised_conversation_chain_for_candidate_bra
         "baseline",
         "baseline",
         "judge",
+        "judge",
         "baseline",
         "baseline",
         "baseline",
         "judge",
     ]
-    improvement_call = calls[3]
+    improvement_call = calls[4]
     assert improvement_call["scenario"] == "candidate_self_improvement"
     assert Path(improvement_call["repo_root"]).resolve() == candidate_path
     assert Path(improvement_call["workspace_override"]).resolve() == candidate_path
-    candidate_eval_calls = calls[4:6]
+    candidate_eval_calls = calls[5:7]
     assert all(Path(call["repo_root"]).resolve() == candidate_path for call in candidate_eval_calls)
     assert all(Path(call["workspace_override"]).resolve() == candidate_path for call in candidate_eval_calls)
     assert snapshot["candidate"]["candidateVariant"] == variant
@@ -797,7 +942,7 @@ def test_decision_fails_closed_without_candidate_variant_binding():
 
     variant_gate = next(gate for gate in decision["gates"] if gate["name"] == "candidate_variant_bound")
     assert variant_gate["status"] == "fail"
-    assert decision["recommendedAction"] == "hold"
+    assert decision["recommendedAction"] == "user_decision"
 
 
 def test_candidate_variant_gate_rejects_mismatched_variant_id():
@@ -1102,11 +1247,10 @@ def test_merge_analysis_ignores_untracked_noise_from_worktree_baseline(tmp_path)
         "runKind": service.RUN_KIND,
         "status": "done",
         "projectRoot": str(project_root),
-        "candidateWorktree": {
-            "path": str(candidate),
-            "preserved": True,
-            "untrackedFiles": [".codex/visual-checks/noise.png"],
-        },
+        "candidateWorktree": _bound_candidate_worktree(
+            candidate,
+            baseline_untracked=[".codex/visual-checks/noise.png"],
+        ),
     }
     service._persist_snapshot(snapshot, active_run_id="")
 
@@ -1126,11 +1270,10 @@ def test_merge_analysis_ignores_untracked_noise_from_worktree_baseline(tmp_path)
     assert "main_workspace_overlap" not in updated["mergeAnalysis"]["blockers"]
 
 
-def test_force_merge_creates_rollback_manifest_and_rollback_restores_file(tmp_path):
+def test_force_merge_never_overwrites_main_workspace_overlap(tmp_path):
     project_root = tmp_path / "project"
     _init_repo(project_root)
-    original = "print('base')\n"
-    (project_root / "agent.py").write_text(original, encoding="utf-8")
+    (project_root / "agent.py").write_text("print('base')\n", encoding="utf-8")
     _write_bundle(project_root)
     _run_git(project_root, "add", ".")
     _run_git(project_root, "commit", "-m", "init")
@@ -1141,13 +1284,38 @@ def test_force_merge_creates_rollback_manifest_and_rollback_restores_file(tmp_pa
         "runKind": service.RUN_KIND,
         "status": "done",
         "projectRoot": str(project_root),
-        "candidateWorktree": {"path": str(candidate), "preserved": True},
+        "candidateWorktree": _bound_candidate_worktree(candidate),
         "candidateJudgment": {"status": "success", "phase": "rerun", "decision": "REJECT"},
         "judgeConversationSessionId": "session-judge",
     }
     service._persist_snapshot(snapshot, active_run_id="")
 
-    merged = service.execute_supervised_worktree_action("swte-merge", "merge", force=True)
+    with pytest.raises(service.SupervisedWorktreeRunActionError, match="主工作区冲突"):
+        service.execute_supervised_worktree_action("swte-merge", "merge", force=True)
+
+    assert (project_root / "agent.py").read_text(encoding="utf-8") == "print('user edit')\n"
+
+
+def test_force_merge_creates_rollback_manifest_and_rollback_restores_file(tmp_path):
+    project_root = tmp_path / "project"
+    _init_repo(project_root)
+    (project_root / "agent.py").write_text("print('base')\n", encoding="utf-8")
+    _write_bundle(project_root)
+    _run_git(project_root, "add", ".")
+    _run_git(project_root, "commit", "-m", "init")
+    candidate = _make_candidate_repo(tmp_path, project_root)
+    snapshot = {
+        "runId": "swte-merge-rollback",
+        "runKind": service.RUN_KIND,
+        "status": "done",
+        "projectRoot": str(project_root),
+        "candidateWorktree": _bound_candidate_worktree(candidate),
+        "candidateJudgment": {"status": "success", "phase": "rerun", "decision": "REJECT"},
+        "judgeConversationSessionId": "session-judge",
+    }
+    service._persist_snapshot(snapshot, active_run_id="")
+
+    merged = service.execute_supervised_worktree_action("swte-merge-rollback", "merge", force=True)
 
     assert merged["merge"]["status"] == "merged"
     assert merged["merge"]["triggeredBy"]["role"] == "judge"
@@ -1156,10 +1324,40 @@ def test_force_merge_creates_rollback_manifest_and_rollback_restores_file(tmp_pa
     manifest_path = Path(merged["rollback"]["manifestPath"])
     assert manifest_path.exists()
 
-    rolled_back = service.execute_supervised_worktree_action("swte-merge", "rollback")
+    rolled_back = service.execute_supervised_worktree_action("swte-merge-rollback", "rollback")
 
     assert rolled_back["rollback"]["status"] == "rolled_back"
-    assert (project_root / "agent.py").read_text(encoding="utf-8") == "print('user edit')\n"
+    assert (project_root / "agent.py").read_text(encoding="utf-8") == "print('base')\n"
+
+
+def test_merge_rejects_candidate_mutated_after_judge_variant_binding(tmp_path):
+    project_root = tmp_path / "project"
+    _init_repo(project_root)
+    (project_root / "agent.py").write_text("print('base')\n", encoding="utf-8")
+    _write_bundle(project_root)
+    _run_git(project_root, "add", ".")
+    _run_git(project_root, "commit", "-m", "init")
+    candidate = _make_candidate_repo(tmp_path, project_root)
+    worktree = _bound_candidate_worktree(candidate)
+    snapshot = {
+        "runId": "swte-variant-drift",
+        "runKind": service.RUN_KIND,
+        "status": "done",
+        "projectRoot": str(project_root),
+        "candidateWorktree": worktree,
+        "candidateJudgment": {"status": "success", "phase": "rerun", "decision": "APPROVE"},
+        "judgeConversationSessionId": "session-judge",
+    }
+    service._persist_snapshot(snapshot, active_run_id="")
+    (candidate / "agent.py").write_text(
+        (candidate / "agent.py").read_text(encoding="utf-8") + "# post-judge mutation\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(service.SupervisedWorktreeRunActionError, match="候选版本绑定"):
+        service.execute_supervised_worktree_action("swte-variant-drift", "merge", force=True)
+
+    assert (project_root / "agent.py").read_text(encoding="utf-8") == "print('base')\n"
 
 
 def test_self_origin_merge_requires_review_even_when_forced(tmp_path):
@@ -1175,7 +1373,7 @@ def test_self_origin_merge_requires_review_even_when_forced(tmp_path):
         "runKind": service.RUN_KIND,
         "status": "done",
         "projectRoot": str(project_root),
-        "candidateWorktree": {"path": str(candidate), "preserved": True},
+        "candidateWorktree": _bound_candidate_worktree(candidate),
         "selfEvolutionOrigin": {
             "sourceTrack": "self_evolution",
             "goal": "修复核心代码",
@@ -1213,7 +1411,7 @@ def test_self_origin_merge_requires_review_even_when_forced(tmp_path):
     assert "# candidate edit" in (project_root / "agent.py").read_text(encoding="utf-8")
 
 
-def test_rejected_judgment_requires_explicit_force_approval(tmp_path):
+def test_rejected_judgment_remains_advisory_and_user_can_approve_without_force(tmp_path):
     project_root = tmp_path / "project"
     _init_repo(project_root)
     (project_root / "agent.py").write_text("print('base')\n", encoding="utf-8")
@@ -1226,8 +1424,13 @@ def test_rejected_judgment_requires_explicit_force_approval(tmp_path):
         "runKind": service.RUN_KIND,
         "status": "done",
         "projectRoot": str(project_root),
-        "candidateWorktree": {"path": str(candidate), "preserved": True},
-        "candidateJudgment": {"status": "success", "phase": "rerun", "decision": "REJECT"},
+        "candidateWorktree": _bound_candidate_worktree(candidate),
+        "candidateJudgment": {
+            "status": "success",
+            "phase": "rerun",
+            "recommendation": "REJECT",
+            "decision": "REJECT",
+        },
         "judgeConversationSessionId": "session-judge",
         "reviewGate": {
             "required": True,
@@ -1240,24 +1443,21 @@ def test_rejected_judgment_requires_explicit_force_approval(tmp_path):
     service._persist_snapshot(snapshot, active_run_id="")
 
     projected = service.get_supervised_worktree_run("swte-rejected-approval")
-    assert projected["actionStates"]["approveReview"]["enabled"] is False
-    assert "显式 force" in projected["actionStates"]["approveReview"]["reason"]
-
-    with pytest.raises(service.SupervisedWorktreeRunActionError, match="默认禁止合入"):
-        service.execute_supervised_worktree_action("swte-rejected-approval", "approve_review")
+    assert projected["actionStates"]["approveReview"]["enabled"] is True
+    assert projected["actionStates"]["approveReview"]["reason"] == ""
 
     merged = service.execute_supervised_worktree_action(
         "swte-rejected-approval",
         "approve_review",
-        force=True,
-        reviewer_note="explicit force approval",
+        reviewer_note="user reviewed the Judge recommendation and approved",
     )
     assert merged["merge"]["status"] == "merged"
-    assert merged["merge"]["force"] is True
+    assert merged["merge"]["force"] is False
     assert merged["merge"]["triggeredBy"]["decision"] == "REJECT"
+    assert merged["reviewGate"]["overrodeJudgeRecommendation"] is True
 
 
-def test_real_judge_merge_trigger_reuses_judge_session_without_raw_git(tmp_path, monkeypatch):
+def test_real_judge_merge_trigger_honors_user_approval_even_when_recommendation_is_reject(tmp_path, monkeypatch):
     calls: list[dict] = []
 
     def fake_harness(**kwargs):
@@ -1269,9 +1469,9 @@ def test_real_judge_merge_trigger_reuses_judge_session_without_raw_git(tmp_path,
             session_id="session-judge",
             agent_judgment={
                 "phase": "merge_authorization",
-                "decision": "PROMOTE",
+                "decision": "REJECT",
                 "merge_requested": True,
-                "reason": "approved candidate binding",
+                "reason": "user approved despite advisory rejection",
                 "evidence_refs": ["variant:one"],
             },
         )
@@ -1290,7 +1490,8 @@ def test_real_judge_merge_trigger_reuses_judge_session_without_raw_git(tmp_path,
         "candidateJudgment": {
             "status": "success",
             "phase": "rerun",
-            "decision": "PROMOTE",
+            "recommendation": "REJECT",
+            "decision": "REJECT",
         },
         "candidateWorktree": {
             "variant": {"variantId": "variant-one", "patchSha256": "abc"},
@@ -1304,6 +1505,7 @@ def test_real_judge_merge_trigger_reuses_judge_session_without_raw_git(tmp_path,
     )
 
     assert triggered["judgeMergeTrigger"]["status"] == "requested"
+    assert triggered["judgeMergeTrigger"]["decision"] == "REJECT"
     assert triggered["judgeMergeTrigger"]["conversationSessionId"] == "session-judge"
     assert triggered["judgeMergeTrigger"]["mechanism"] == "judge_conversation_request"
     assert len(calls) == 1
