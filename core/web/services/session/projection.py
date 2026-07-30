@@ -13,6 +13,10 @@ from datetime import datetime
 from typing import Any, Mapping
 
 
+_SESSION_SUMMARY_MESSAGE_SCAN_LIMIT = 12
+_SESSION_SUMMARY_EVENT_SCAN_LIMIT = 64
+
+
 def _service():
     from core.web.services import session_service
 
@@ -638,12 +642,15 @@ def _normalize_conversation(
         agent_missing = True
         agent_status_code = agent_status_code or "missing_agent"
     if lightweight:
-        ledger_messages = s._ledger_visible_messages_for_session(conversation_id)
-        if ledger_messages:
-            messages = s._normalize_latest_preview_messages(conversation_id, ledger_messages)
-        else:
-            messages = s._normalize_latest_preview_messages(conversation_id, raw.get("messages") or [])
-        has_ledger_messages = bool(ledger_messages)
+        messages, has_ledger_messages = s._ledger_latest_preview_messages_for_session(
+            conversation_id
+        )
+        if not has_ledger_messages:
+            messages = s._normalize_latest_preview_messages(
+                conversation_id,
+                raw.get("messages") or [],
+            )
+        messages = list(messages)
         visible_runtime_notices: list[dict[str, Any]] = []
     else:
         ledger_messages = s._session_ledger_visible_messages(conversation_id)
@@ -2953,6 +2960,48 @@ def _ledger_visible_messages_for_session(session_id: str) -> list[dict[str, Any]
     if not events:
         return []
     return s.conversation_visible_messages_from_events(events)
+
+
+def _ledger_latest_preview_messages_for_session(
+    session_id: str,
+) -> tuple[list[dict[str, Any]], bool]:
+    """Return the latest summary preview without replaying unbounded tool output."""
+
+    s = _service()
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return [], False
+    try:
+        preview_slice = s.load_conversation_preview_slice(
+            s.PROJECT_ROOT,
+            normalized_session_id,
+            event_limit=_SESSION_SUMMARY_EVENT_SCAN_LIMIT,
+        )
+    except Exception:
+        preview_slice = None
+    if preview_slice is not None and bool(preview_slice.safe):
+        visible_messages = list(preview_slice.visible_messages or [])
+        preview_messages = s._normalize_latest_preview_messages(
+            normalized_session_id,
+            visible_messages,
+            scan_limit=_SESSION_SUMMARY_MESSAGE_SCAN_LIMIT,
+        )
+        if (
+            bool(preview_slice.reached_start)
+            or bool(preview_messages)
+            or len(visible_messages) >= _SESSION_SUMMARY_MESSAGE_SCAN_LIMIT
+        ):
+            return preview_messages, bool(visible_messages)
+
+    visible_messages = s._ledger_visible_messages_for_session(normalized_session_id)
+    return (
+        s._normalize_latest_preview_messages(
+            normalized_session_id,
+            visible_messages,
+            scan_limit=_SESSION_SUMMARY_MESSAGE_SCAN_LIMIT,
+        ),
+        bool(visible_messages),
+    )
 
 
 def _normalize_child_handoff_context(value: Any) -> dict[str, Any] | None:
