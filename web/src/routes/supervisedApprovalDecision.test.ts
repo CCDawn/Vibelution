@@ -105,6 +105,8 @@ describe("buildSupervisedApprovalDecision", () => {
         score: 61,
         taskScore: 58,
         systemScore: 68,
+        taskScores: { failure_recovery: 58 },
+        systemScores: { scope_and_safety: 68 },
         rubricHash: "abc123",
       },
       candidateJudgment: {
@@ -115,6 +117,8 @@ describe("buildSupervisedApprovalDecision", () => {
         score: 79,
         taskScore: 82,
         systemScore: 72,
+        taskScores: { failure_recovery: 82 },
+        systemScores: { scope_and_safety: 72 },
         rubricHash: "abc123",
       },
       decision: {
@@ -141,7 +145,15 @@ describe("buildSupervisedApprovalDecision", () => {
       systemWeight: 0.3,
     });
     expect(model.rubric.taskCriteria[0].label).toBe("失败恢复");
+    expect(model.rubric.taskCriteria[0]).toMatchObject({
+      baselineScore: 58,
+      candidateScore: 82,
+    });
     expect(model.rubric.systemCriteria[0].label).toBe("范围与安全");
+    expect(model.rubric.systemCriteria[0]).toMatchObject({
+      baselineScore: 68,
+      candidateScore: 72,
+    });
     expect(model.metrics).toMatchObject({
       baselineTaskScore: 58,
       baselineSystemScore: 68,

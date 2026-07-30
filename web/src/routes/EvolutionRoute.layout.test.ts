@@ -538,6 +538,8 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(supervisedApprovalDecisionPanelSource).toContain("Judge 建议（仅供参考）");
     expect(supervisedApprovalDecisionPanelSource).toContain("任务定向标准");
     expect(supervisedApprovalDecisionPanelSource).toContain("系统固定评分表");
+    expect(supervisedApprovalDecisionPanelSource).toContain("criterion.baselineScore");
+    expect(supervisedApprovalDecisionPanelSource).toContain("criterion.candidateScore");
     expect(supervisedApprovalDecisionPanelSource).not.toContain("PROMOTE 结论下");
     expect(supervisedApprovalDecisionPanelSource).toContain("<details");
     expect(supervisedApprovalDecisionPanelSource).toContain("<VButton");
