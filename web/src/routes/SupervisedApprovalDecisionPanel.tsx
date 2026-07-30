@@ -197,6 +197,12 @@ export function SupervisedApprovalDecisionPanel({
                       <strong>{criterion.label}</strong>
                       {" · "}
                       {criterion.description}
+                      <br />
+                      <small>
+                        {lang === "zh"
+                          ? `基线 ${formatScore(criterion.baselineScore)} → 改进后 ${formatScore(criterion.candidateScore)}`
+                          : `Baseline ${formatScore(criterion.baselineScore)} → Rerun ${formatScore(criterion.candidateScore)}`}
+                      </small>
                     </span>
                   </div>
                 ))}
@@ -223,6 +229,12 @@ export function SupervisedApprovalDecisionPanel({
                       <strong>{criterion.label}</strong>
                       {" · "}
                       {criterion.description}
+                      <br />
+                      <small>
+                        {lang === "zh"
+                          ? `基线 ${formatScore(criterion.baselineScore)} → 改进后 ${formatScore(criterion.candidateScore)}`
+                          : `Baseline ${formatScore(criterion.baselineScore)} → Rerun ${formatScore(criterion.candidateScore)}`}
+                      </small>
                     </span>
                   </div>
                 ))}

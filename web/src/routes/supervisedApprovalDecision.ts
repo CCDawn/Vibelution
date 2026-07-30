@@ -35,6 +35,8 @@ export type SupervisedApprovalRubricCriterionModel = {
   label: string;
   description: string;
   weight: number;
+  baselineScore: number | null;
+  candidateScore: number | null;
 };
 
 export type SupervisedApprovalRubricModel = {
@@ -92,8 +94,15 @@ type ExtendedJudgment = {
   decision?: string;
   taskScore?: number;
   systemScore?: number;
+  taskScores?: Record<string, number>;
+  systemScores?: Record<string, number>;
   rubricHash?: string;
 };
+
+type RawRubricCriterion = Omit<
+  SupervisedApprovalRubricCriterionModel,
+  "baselineScore" | "candidateScore"
+>;
 
 type ExtendedSupervisedWorktreeRun = SupervisedWorktreeRun & {
   judgeRubric?: {
@@ -103,8 +112,8 @@ type ExtendedSupervisedWorktreeRun = SupervisedWorktreeRun & {
       taskSpecific?: number;
       systemFixed?: number;
     };
-    taskCriteria?: SupervisedApprovalRubricCriterionModel[];
-    systemCriteria?: SupervisedApprovalRubricCriterionModel[];
+    taskCriteria?: RawRubricCriterion[];
+    systemCriteria?: RawRubricCriterion[];
   };
   baselineJudgment?: SupervisedWorktreeRun["baselineJudgment"] & ExtendedJudgment;
   candidateJudgment?: SupervisedWorktreeRun["candidateJudgment"] & ExtendedJudgment;
@@ -189,13 +198,30 @@ function judgeRecommendation(
 
 function rubricModel(run: ExtendedSupervisedWorktreeRun): SupervisedApprovalRubricModel {
   const rubric = run.judgeRubric;
+  const withScores = (
+    criteria: RawRubricCriterion[] | undefined,
+    baselineScores: Record<string, number> | undefined,
+    candidateScores: Record<string, number> | undefined,
+  ) => (Array.isArray(criteria) ? criteria : []).map((criterion) => ({
+    ...criterion,
+    baselineScore: score(baselineScores?.[criterion.id]),
+    candidateScore: score(candidateScores?.[criterion.id]),
+  }));
   return {
     hash: String(rubric?.rubricHash ?? ""),
     taskSummary: String(rubric?.taskSummary ?? ""),
     taskWeight: score(rubric?.compositionWeights?.taskSpecific),
     systemWeight: score(rubric?.compositionWeights?.systemFixed),
-    taskCriteria: Array.isArray(rubric?.taskCriteria) ? rubric.taskCriteria : [],
-    systemCriteria: Array.isArray(rubric?.systemCriteria) ? rubric.systemCriteria : [],
+    taskCriteria: withScores(
+      rubric?.taskCriteria,
+      run.baselineJudgment?.taskScores,
+      run.candidateJudgment?.taskScores,
+    ),
+    systemCriteria: withScores(
+      rubric?.systemCriteria,
+      run.baselineJudgment?.systemScores,
+      run.candidateJudgment?.systemScores,
+    ),
   };
 }
 
