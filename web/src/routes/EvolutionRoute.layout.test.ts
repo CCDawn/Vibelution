@@ -606,8 +606,20 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeStyles.workflowStepButton).toContain("hover:[border-color:");
     expect(routeStyles.workflowStepButton).toContain("[background:var(--vui-surface-row)]");
     expect(routeStyles.workflowStepButton).toContain("w-full");
+    expect(routeStyles.workflowStepButton).toContain("!grid");
+    expect(routeStyles.workflowStepButton).toContain("[grid-template-columns:minmax(0,_1fr)]");
     expect(routeStyles.workflowStepButtonActive).toContain("[border-color:");
     expect(routeStyles.workflowStepPreview).toContain("[-webkit-line-clamp:2]");
+    expect(supervisedApprovalDecisionPanelSource).toContain("styles.rubricCriterionItem");
+    expect(supervisedApprovalDecisionPanelStyles.rubricCriterionItem).toContain(
+      "grid-cols-[max-content_minmax(0,1fr)]",
+    );
+    expect(supervisedApprovalDecisionPanelStyles.rubricCriterionItem).toContain(
+      "[&>span:first-child]:whitespace-nowrap",
+    );
+    expect(supervisedApprovalDecisionPanelStyles.rubricCriterionItem).toContain(
+      "[&>span:last-child]:min-w-0",
+    );
     expect(supervisedAgentConversationPanelStyles.tabRail).toContain("overflow-x-auto");
     expect(supervisedAgentConversationPanelStyles.tabRail).toContain("grid-flow-col");
     expect(supervisedAgentConversationPanelStyles.tabRail).toContain("auto-cols-[minmax(152px,1fr)]");

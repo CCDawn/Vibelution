@@ -384,7 +384,7 @@ const styles = {
   viewStack:
     "grid [gap:16px] [align-content:start] min-h-0 [overflow:auto] [padding-right:4px]",
   workflowStepButton:
-    "grid w-full [gap:3px] min-w-0 [padding:7px_8px] [border:1px_solid_var(--vui-border-subtle)] [border-radius:7px] [background:var(--vui-surface-row)] [color:inherit] [font:inherit] [text-align:left] [cursor:pointer] [transition:border-color_120ms_ease,_background_120ms_ease] hover:[border-color:color-mix(in_srgb,_var(--accent-cool)_42%,_var(--vui-border-subtle))] hover:[background:var(--vui-surface-row-hover)] hover:[outline:none] focus-visible:[border-color:color-mix(in_srgb,_var(--accent-cool)_42%,_var(--vui-border-subtle))] focus-visible:[background:var(--vui-surface-row-hover)] focus-visible:[outline:none] [&_strong]:min-w-0 [&_strong]:[overflow:hidden] [&_strong]:[text-overflow:ellipsis] [&_strong]:[color:var(--fg-primary)] [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:[font-weight:750] [&_strong]:[white-space:nowrap]",
+    "!grid w-full [grid-template-columns:minmax(0,_1fr)] [gap:3px] min-w-0 [padding:7px_8px] [border:1px_solid_var(--vui-border-subtle)] [border-radius:7px] [background:var(--vui-surface-row)] [color:inherit] [font:inherit] [text-align:left] [cursor:pointer] [transition:border-color_120ms_ease,_background_120ms_ease] hover:[border-color:color-mix(in_srgb,_var(--accent-cool)_42%,_var(--vui-border-subtle))] hover:[background:var(--vui-surface-row-hover)] hover:[outline:none] focus-visible:[border-color:color-mix(in_srgb,_var(--accent-cool)_42%,_var(--vui-border-subtle))] focus-visible:[background:var(--vui-surface-row-hover)] focus-visible:[outline:none] [&_strong]:min-w-0 [&_strong]:[overflow:hidden] [&_strong]:[text-overflow:ellipsis] [&_strong]:[color:var(--fg-primary)] [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:[font-weight:750] [&_strong]:[white-space:nowrap]",
   workflowStepButtonActive:
     "[border-color:color-mix(in_srgb,_var(--accent-cool)_54%,_var(--border-soft))] [background:color-mix(in_srgb,_var(--accent-cool)_10%,_var(--vui-surface-panel))]",
   workflowStepItem:
@@ -392,7 +392,7 @@ const styles = {
   workflowStepItemCurrent:
     "[color:var(--accent-warm-2)]",
   workflowStepMeta:
-    "min-w-0 [overflow:hidden] [text-overflow:ellipsis] flex [align-items:center] [justify-content:space-between] [gap:6px] [color:var(--fg-tertiary)] [font-size:var(--vui-font-xs)] [font-weight:650] [line-height:1.2] [white-space:nowrap]",
+    "grid min-w-0 [grid-template-columns:minmax(0,_1fr)_auto] [align-items:center] [gap:6px] [color:var(--fg-tertiary)] [font-size:var(--vui-font-xs)] [font-weight:650] [line-height:1.2] [white-space:nowrap] [&>span:first-child]:min-w-0 [&>span:first-child]:[overflow:hidden] [&>span:first-child]:[text-overflow:ellipsis]",
   workflowStepPreview:
     "min-w-0 [overflow:hidden] [text-overflow:ellipsis] [display:-webkit-box] [color:var(--fg-secondary)] [font-size:var(--vui-font-xs)] [line-height:1.35] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]",
   workflowStepRail:
