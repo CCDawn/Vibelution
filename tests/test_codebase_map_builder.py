@@ -68,6 +68,33 @@ def test_build_task_focused_view_prefers_goal_and_hot_paths(monkeypatch, tmp_pat
     assert "## 子系统概览" in rendered
 
 
+def test_build_task_focused_view_prefers_explicit_agent_context(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        cmb,
+        "_get_prompt_runtime_context",
+        lambda: ("你是监督进化 Judge Agent。当前只生成 rubric。", "judge state"),
+    )
+    monkeypatch.setattr(cmb, "_collect_python_files", lambda _root: [])
+    monkeypatch.setattr(
+        "core.infrastructure.agent_session.get_session_state",
+        lambda: SimpleNamespace(get_attention_snapshot=lambda: {}),
+    )
+    monkeypatch.setattr(
+        "core.infrastructure.git_memory.get_git_memory_service",
+        lambda: SimpleNamespace(get_recent_project_changes=lambda limit=4: []),
+    )
+
+    rendered = cmb._build_task_focused_view(
+        tmp_path,
+        "## 子系统概览\n- prompt manager",
+        current_goal="基线 Agent 在候选工作树中实施改进",
+        state_memory="baseline self-edit",
+    )
+
+    assert "当前目标: 基线 Agent 在候选工作树中实施改进" in rendered
+    assert "监督进化 Judge Agent" not in rendered
+
+
 def test_build_impact_chain_view_shows_dependents_and_tests(monkeypatch, tmp_path):
     (tmp_path / "core" / "prompt_manager").mkdir(parents=True)
     (tmp_path / "core" / "infrastructure").mkdir(parents=True)

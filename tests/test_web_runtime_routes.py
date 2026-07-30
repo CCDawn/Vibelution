@@ -32,6 +32,7 @@ from core.web.services import (
     session_service,
     supervised_control_service,
 )
+from tests.helpers.web_chat_state import _bind_seeded_session_agent
 from tests.helpers.web_runtime_scene import _runtime_scene_local_index_parts, _seed_runtime_scene_bundle
 
 pytestmark = pytest.mark.serial
@@ -310,7 +311,7 @@ def test_runtime_summary_uses_light_active_session_summary(monkeypatch):
 
 def test_runtime_summary_falls_back_when_agent_model_identity_fails(monkeypatch):
     public_config = copy.deepcopy(load_public_config())
-    expected_profile = str(public_config["runtime"]["profile"])
+    expected_profile = str(public_config.get("runtime", {}).get("profile") or "safe_local")
     primary_profile = public_config["llm"]["profiles"]["primary"]
     fallback_model_ref = str(primary_profile.get("model_ref") or primary_profile.get("model"))
     scene_events: list[tuple[str, str, str, dict]] = []
@@ -2505,11 +2506,24 @@ def test_runtime_shutdown_blocks_active_chat_turn_before_manager_close(tmp_path,
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
-    agent_directory_service.ensure_agent_for_session(
+    cfg = runtime_service.get_config().model_copy(deep=True)
+    primary_profile = cfg.llm.get_profile(role="primary")
+    provider_id = primary_profile.provider_id
+    cfg.llm.providers[provider_id].context_window = 8192
+    cfg.llm.model_library["runtime-shutdown-test"] = {
+        "provider_id": provider_id,
+        "model": "runtime-shutdown-test",
+        "label": "Runtime shutdown test",
+    }
+    monkeypatch.setattr(runtime_service, "get_config", lambda: cfg)
+    monkeypatch.setattr(session_service, "get_config", lambda: cfg)
+    agent = agent_directory_service.ensure_agent_for_session(
         "session-live",
         display_name="真实会话",
+        llm_bindings={"dialogue": {"modelId": "runtime-shutdown-test"}},
         prompt_template_id="prompt-chat-default",
     )
+    _bind_seeded_session_agent(tmp_path, agent)
     monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: None)
     script_path = tmp_path / "vibelution_launcher.ps1"
     script_path.write_text("Write-Host managed\n", encoding="utf-8")
@@ -3375,11 +3389,20 @@ def test_session_list_loaded_event_marks_stale_matching_signature(monkeypatch):
         cache_age_ms=5000,
         cache_ttl_ms=4000,
         waited_for_inflight=False,
+        chat_state_wait_ms=7,
+        chat_state_read_ms=11,
+        conversation_normalize_ms=13,
+        summary_projection_ms=17,
     )
 
     fields = events[-1][1]["fields"]
     assert fields["cacheExpired"] is True
     assert fields["servedStaleMatchingSignature"] is True
+    assert fields["phaseTimingsRecorded"] is True
+    assert fields["chatStateWaitMs"] == 7
+    assert fields["chatStateReadMs"] == 11
+    assert fields["conversationNormalizeMs"] == 13
+    assert fields["summaryProjectionMs"] == 17
 
 def test_runtime_scene_reconciliation_closes_running_package(tmp_path, monkeypatch):
     scene_dir = _seed_runtime_scene_bundle(tmp_path, scene_id="scene-reconciled", status="running")

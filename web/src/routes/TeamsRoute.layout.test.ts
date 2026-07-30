@@ -1764,7 +1764,14 @@ describe("TeamsRoute layout contract", () => {
     expect(teamExperimentMethodPanelStyles.form).toContain("min-h-[18rem]");
     expect(teamExperimentLoopMutationsSource).toContain("baseline-artifact");
     expect(teamExperimentPlanningLedgerPanelSource).toContain("登记基线工件");
+    expect(teamExperimentPlanningLedgerPanelSource).toMatch(
+      /const canRegisterBaselineArtifact[\s\S]*?&& designExecutionAllowed[\s\S]*?&& !activePlan\.baselineSelection\.activeBaselineReady/,
+    );
     expect(routeSource).toContain("reproductionCommand");
+    expect(teamExperimentLoopMutationsSource).toContain("smoke-run");
+    expect(teamExperimentPlanningLedgerPanelSource).toContain("运行受控 Smoke");
+    expect(teamExperimentPlanningLedgerPanelSource).toContain("activePlan.readiness.readyForSmoke");
+    expect(teamExperimentPlanningLedgerPanelSource).toContain("runExperimentSmokeFromWorkspace");
     expect(teamExperimentLoopMutationsSource).toContain("smoke-result");
     expect(routeAndPureSource).toContain("ExperimentSmokeResultRecord");
     expect(routeAndPureSource).toContain("activeSmokeResult");

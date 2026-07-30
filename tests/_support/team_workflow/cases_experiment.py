@@ -661,9 +661,99 @@ def test_experiment_plan_draft_uses_ready_algorithm_hypotheses_and_blocks_full_r
     assert draft["stageRound"]["planningContract"]["autoExecution"] is False
     assert status["summary"]["planCount"] == 1
     assert status["summary"]["readyHypothesisCandidateCount"] == 1
-    assert any(gap["code"] == "active_baseline_not_registered" for gap in status["gaps"])
+    assert any(gap["code"] == "experiment_design_not_review_ready" for gap in status["gaps"])
+    assert not any(gap["code"] == "active_baseline_not_registered" for gap in status["gaps"])
     assert status["boundaries"]["autoExecution"] is False
     assert status["boundaries"]["createsExperimentAttempt"] is False
+
+
+def test_experiment_plan_projects_native_v2_method_fields_into_readiness(
+    tmp_path, monkeypatch
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="ai科学研究团队")
+    stage = team_workflow_orchestration_service.start_research_stage_round(
+        team["teamId"],
+        {"stageType": "experiment", "topic": "bounded proxy workflow acceptance"},
+    )
+
+    draft = team_workflow_orchestration_service.create_experiment_plan(
+        team["teamId"],
+        {
+            "stageRoundId": stage["stageRound"]["stageRoundId"],
+            "createdByAgent": "Experiment Planning Agent",
+            "researchQuestion": "Can the bounded offline workflow reproduce its proxy artifact?",
+            "researchMode": "hypothesis_and_plan",
+            "experimentPurpose": {
+                "primaryPurpose": "feasibility",
+                "secondaryPurposes": [],
+            },
+            "experimentMethod": "model_training_inference",
+            "requestedAdapterId": "predictive_coding_reconstruction_proxy",
+            "methodConfig": {
+                "dataset": "synthetic_structured_8x8_proxy",
+                "model": "iterative_visible_residual_correction",
+                "baseline": "one_shot_pca_reconstruction",
+                "seeds": [42],
+                "budget": "CPU-only, one deterministic seed",
+                "smokePlan": "predictive_coding_reconstruction_proxy; seed=42",
+            },
+            "metricContract": {
+                "primaryMetric": "reconstruction_mse_delta",
+                "metrics": [
+                    {
+                        "name": "reconstruction_mse_delta",
+                        "direction": "maximize",
+                    }
+                ],
+            },
+            "decisionContract": {
+                "successCriteria": ["artifact hash is reproducible"],
+                "failureCriteria": ["proxy metric does not improve"],
+                "inconclusiveCriteria": ["runner is unavailable"],
+            },
+        },
+    )
+
+    assert draft["plan"]["experimentPlan"] == {
+        "dataset": "synthetic_structured_8x8_proxy",
+        "metric": "reconstruction_mse_delta",
+        "baseline": "one_shot_pca_reconstruction",
+        "smokePlan": "predictive_coding_reconstruction_proxy; seed=42",
+    }
+    assert draft["plan"]["baselineSelection"]["baseline"] == "one_shot_pca_reconstruction"
+    assert draft["plan"]["designGate"]["status"] == "draft"
+    assert draft["plan"]["designGate"]["requiresExplicitFreeze"] is True
+    assert draft["plan"]["designGate"]["source"] == "native_v2_plan"
+    checklist = {
+        item["item"]: item["status"]
+        for item in draft["plan"]["readinessChecklist"]
+    }
+    assert checklist["dataset"] == "pass"
+    assert checklist["metric"] == "pass"
+    assert checklist["baseline"] == "pass"
+    assert checklist["smoke_plan"] == "pass"
+    status = team_workflow_orchestration_service.get_experiment_planning_status(
+        team["teamId"]
+    )
+    assert "algorithm_hypothesis" in status["readiness"]["reason"]
+    assert not any(
+        gap["code"] == "active_baseline_not_registered"
+        for gap in status["gaps"]
+    )
+    with pytest.raises(
+        team_workflow_orchestration_service.TeamWorkflowOrchestrationError,
+        match="explicitly frozen",
+    ):
+        team_workflow_orchestration_service.register_experiment_baseline_artifact(
+            team["teamId"],
+            draft["plan"]["planId"],
+            {
+                "artifactPath": "workspace/experiments/baselines/proxy.json",
+                "reproductionCommand": "python experiments/run_proxy.py --seed 42",
+                "registeredByAgent": "Experiment Planning Agent",
+            },
+        )
 
 
 def test_experiment_plan_rejects_blocked_structured_placeholders_as_completed_fields(
@@ -812,6 +902,100 @@ def test_experiment_plan_store_projects_old_structured_placeholders_without_rewr
         projected["plans"][0]["contractMigration"]["projectionRepair"]
         == "structured_placeholder_removed"
     )
+    assert team_workflow_orchestration_service._read_json(plan_path) == raw_store
+
+
+def test_experiment_plan_store_projects_native_v2_contract_without_rewrite(
+    tmp_path, monkeypatch
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="ai科学研究团队")
+    plan_path = team_workflow_orchestration_service._experiment_plan_store_path(
+        team["teamId"]
+    )
+    raw_store = {
+        "schemaVersion": 2,
+        "storeKind": team_workflow_orchestration_service.EXPERIMENT_PLAN_STORE_KIND,
+        "teamId": team["teamId"],
+        "activePlanId": "plan-native-v2-stale-projection",
+        "plans": [
+            {
+                "planId": "plan-native-v2-stale-projection",
+                "teamId": team["teamId"],
+                "stageRoundId": "stage-native-v2-stale-projection",
+                "status": "draft",
+                "experimentPlan": {
+                    "dataset": "",
+                    "metric": "",
+                    "baseline": "",
+                    "smokePlan": "",
+                },
+                "experimentContract": {
+                    "schemaVersion": 2,
+                    "planId": "plan-native-v2-stale-projection",
+                    "teamId": team["teamId"],
+                    "status": "draft",
+                    "researchMode": "hypothesis_and_plan",
+                    "experimentMethod": "model_training_inference",
+                    "methodConfig": {
+                        "dataset": "synthetic_structured_8x8_proxy",
+                        "model": "iterative_visible_residual_correction",
+                        "baseline": "one_shot_pca_reconstruction",
+                        "seeds": [42],
+                        "budget": "CPU-only, one deterministic seed",
+                        "smokePlan": "predictive_coding_reconstruction_proxy; seed=42",
+                    },
+                    "metricContract": {
+                        "primaryMetric": "reconstruction_mse_delta",
+                        "metrics": [
+                            {
+                                "name": "reconstruction_mse_delta",
+                                "direction": "maximize",
+                            }
+                        ],
+                    },
+                    "decisionContract": {
+                        "successCriteria": ["artifact hash is reproducible"],
+                        "failureCriteria": ["proxy metric does not improve"],
+                        "inconclusiveCriteria": ["runner is unavailable"],
+                    },
+                },
+                "contractValidation": {"valid": True, "missingFields": []},
+                "selectedHypotheses": [{"candidateId": "candidate-proxy"}],
+                "baselineSelection": {"baseline": "", "status": "missing"},
+                "createdAt": "2026-07-30T00:00:00+00:00",
+                "updatedAt": "2026-07-30T00:00:00+00:00",
+            }
+        ],
+    }
+    team_workflow_orchestration_service._write_json(plan_path, raw_store)
+
+    projected = team_workflow_orchestration_service._load_experiment_plan_store(
+        team["teamId"]
+    )
+    projected_plan = projected["plans"][0]
+
+    assert projected_plan["experimentPlan"] == {
+        "dataset": "synthetic_structured_8x8_proxy",
+        "metric": "reconstruction_mse_delta",
+        "baseline": "one_shot_pca_reconstruction",
+        "smokePlan": "predictive_coding_reconstruction_proxy; seed=42",
+    }
+    checklist = {
+        item["item"]: item["status"]
+        for item in projected_plan["readinessChecklist"]
+    }
+    assert checklist["dataset"] == "pass"
+    assert checklist["metric"] == "pass"
+    assert checklist["baseline"] == "pass"
+    assert checklist["smoke_plan"] == "pass"
+    assert (
+        projected_plan["contractMigration"]["projectionRepair"]
+        == "canonical_contract_projected"
+    )
+    assert projected_plan["designGate"]["status"] == "draft"
+    assert projected_plan["designGate"]["requiresExplicitFreeze"] is True
+    assert projected_plan["designGate"]["source"] == "native_v2_plan"
     assert team_workflow_orchestration_service._read_json(plan_path) == raw_store
 
 
@@ -1025,7 +1209,41 @@ def test_experiment_baseline_artifact_registration_unlocks_smoke_gate(tmp_path, 
     )
     draft = team_workflow_orchestration_service.create_experiment_plan(
         team["teamId"],
-        {"stageRoundId": stage["stageRound"]["stageRoundId"], "createdByAgent": "Research Coordination Agent"},
+        {
+            "stageRoundId": stage["stageRound"]["stageRoundId"],
+            "createdByAgent": "Research Coordination Agent",
+            "researchQuestion": "Can context-gated routing improve adaptation?",
+            "researchMode": "full_research_loop",
+            "experimentMethod": "model_training_inference",
+            "requestedAdapterId": "predictive_coding_reconstruction_proxy",
+            "methodConfig": {
+                "dataset": "synthetic task-switch benchmark",
+                "model": "context-gated router",
+                "baseline": "standard MoE router",
+                "seeds": [42],
+                "budget": "CPU-only bounded smoke",
+                "smokePlan": "train 200 mini-batches and compare metric direction",
+            },
+            "metricContract": {
+                "primaryMetric": "validation accuracy and routing entropy",
+                "metrics": [
+                    {
+                        "name": "validation accuracy and routing entropy",
+                        "direction": "maximize",
+                    }
+                ],
+            },
+            "decisionContract": {
+                "successCriteria": ["proxy metric improves"],
+                "failureCriteria": ["proxy metric regresses"],
+                "inconclusiveCriteria": ["proxy runner is unavailable"],
+            },
+        },
+    )
+    frozen = team_workflow_orchestration_service.freeze_experiment_design(
+        team["teamId"],
+        draft["plan"]["planId"],
+        {"frozenByAgent": "Experiment Planning Agent"},
     )
 
     registered = team_workflow_orchestration_service.register_experiment_baseline_artifact(
@@ -1042,6 +1260,7 @@ def test_experiment_baseline_artifact_registration_unlocks_smoke_gate(tmp_path, 
     status = team_workflow_orchestration_service.get_experiment_planning_status(team["teamId"])
 
     assert registered["baselineArtifact"]["artifactPath"].endswith("standard-moe-router.json")
+    assert frozen["plan"]["designGate"]["status"] == "frozen"
     assert registered["plan"]["status"] == "baseline_ready"
     assert registered["plan"]["experimentContract"]["status"] == "ready_for_prepare"
     assert registered["plan"]["baselineSelection"]["activeBaselineReady"] is True

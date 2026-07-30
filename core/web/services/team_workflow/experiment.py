@@ -362,6 +362,7 @@ def register_experiment_baseline_artifact(team_id: str, plan_id: str, payload: d
         plan = s._find_experiment_plan(plan_store, normalized_plan_id)
         if plan is None:
             raise s.TeamWorkflowOrchestrationError("Experiment plan not found.")
+        s._require_explicit_experiment_design_frozen(plan)
         artifact = s._experiment_baseline_artifact_record(plan, request_payload, registered_by_agent=registered_by_agent)
         baseline_selection = plan.get("baselineSelection") if isinstance(plan.get("baselineSelection"), dict) else {}
         artifacts = [item for item in list(baseline_selection.get("artifacts") or []) if isinstance(item, dict)]
