@@ -133,6 +133,12 @@ export function useTeamExperimentLoopMutations(options: UseTeamExperimentLoopMut
         },
       ),
     onSuccess: (payload, variables) => {
+      if (payload.experimentStatus) {
+        queryClient.setQueryData(
+          experimentPlanningStatusQueryKey(variables.teamId),
+          payload.experimentStatus,
+        );
+      }
       if (payload.workflow) {
         queryClient.setQueryData(
           queryKeys.teamWorkflow(variables.teamId),
