@@ -2073,6 +2073,11 @@ def _build_reflection(
                 baseline_evaluation=baseline,
                 baseline_judgment=baseline_judgment,
                 requested_goal=requested_goal,
+                task_contract=(
+                    snapshot.get("taskContract")
+                    if isinstance(snapshot.get("taskContract"), dict)
+                    else {}
+                ),
             ),
         }
     goal_section = ""

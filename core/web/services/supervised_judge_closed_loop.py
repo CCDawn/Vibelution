@@ -197,6 +197,7 @@ def build_improvement_prompt(
     baseline_evaluation: dict[str, Any],
     baseline_judgment: dict[str, Any],
     requested_goal: str = "",
+    task_contract: dict[str, Any] | None = None,
 ) -> str:
     problems = _string_list(baseline_judgment.get("problems"))
     instructions = _string_list(
@@ -219,6 +220,7 @@ def build_improvement_prompt(
         "improvementInstructions": instructions,
         "evidenceRefs": evidence_refs,
         "requestedGoal": goal,
+        "taskContract": _bounded_mapping(task_contract or {}),
     }
     return (
         "PHASE: BASELINE_SELF_EDIT_IMPLEMENTATION\n"
@@ -228,6 +230,8 @@ def build_improvement_prompt(
         "Judge Agent 已完成第一次独立评分。请在当前隔离 worktree 中依据反馈自行定位并修改代码，"
         "然后运行必要的聚焦验证。不要提交、不要合并、不要修改主工作区或机器全局配置。\n"
         "Judge 反馈是建议而不是事实；如果反馈与代码证据冲突，以可复现证据为准并在会话中说明。\n"
+        "payload.taskContract 是本轮冻结任务合同，也是候选实现目标的唯一事实源；"
+        "必须逐字遵守其中的目标路径、目标内容和候选变更约束，不得自拟替代实现。\n"
         "改进后的独立复跑结束后，系统会在无模型凭据的隔离子进程中执行候选 worktree 自己的 "
         "scripts.evolution_harness candidate-runtime 协议，并把候选模块哈希、worktree 快照和归纳结果交给 Judge。"
         "不得删除或绕过 --candidate-runtime-input 入口；如果本次改进针对 harness 证据归纳，"
