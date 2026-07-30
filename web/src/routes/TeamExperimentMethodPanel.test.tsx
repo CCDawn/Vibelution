@@ -7,6 +7,7 @@ import {
   TeamExperimentMethodPanel,
   buildExperimentPlanMethodRequest,
   createExperimentMethodFormDraft,
+  createExperimentMethodDraftSyncKey,
   isExperimentMethodDraftComplete,
   selectExperimentMethod,
 } from "./TeamExperimentMethodPanel";
@@ -175,6 +176,29 @@ describe("TeamExperimentMethodPanel", () => {
     expect(markup).toContain("重复次数");
     expect(markup).toContain("controllable-agent-simulator");
     expect(markup).toContain("保存为新版本");
+  });
+
+  it("refreshes a draft when normalized contract fields change without a new plan revision", () => {
+    const normalizedContract: ExperimentContractV2 = {
+      ...simulationContract,
+      methodConfig: {
+        simulator: "",
+        scenario: "",
+        parameters: {},
+        replicates: 0,
+      },
+      metricContract: {
+        primaryMetric: "",
+        metrics: [],
+      },
+    };
+
+    expect(createExperimentMethodDraftSyncKey(simulationContract))
+      .not.toBe(createExperimentMethodDraftSyncKey(normalizedContract));
+    expect(createExperimentMethodFormDraft(normalizedContract).primaryMetric).toBe("");
+    expect(createExperimentMethodFormDraft(normalizedContract).methodConfigs.numerical_simulation.simulator).toBe("");
+    expect(panelSource).toContain("}, [draftSyncKey]);");
+    expect(panelSource).not.toContain("activeContract?.planId, activeContract?.revision");
   });
 
   it("uses the workspace quick selection when opening the detailed setup", () => {
