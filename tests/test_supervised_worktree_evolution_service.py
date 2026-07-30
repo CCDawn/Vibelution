@@ -238,6 +238,58 @@ def test_real_judge_runner_retries_wrong_phase_in_same_session(tmp_path, monkeyp
     assert "expected phase=baseline" in calls[1]["prompt"]
 
 
+def test_real_candidate_modifier_retries_judgment_protocol_drift_in_same_session(tmp_path, monkeypatch):
+    calls: list[dict] = []
+
+    def fake_conversation_harness(**kwargs):
+        calls.append(dict(kwargs))
+        result = _fake_harness_result(
+            role="baseline",
+            repo_root=tmp_path,
+            prompt=str(kwargs.get("prompt") or ""),
+            session_id="session-baseline",
+        )
+        if len(calls) == 1:
+            result.stdout_tail = [
+                'SUPERVISED_AGENT_JUDGMENT: {"phase":"rubric","criteria":[]}'
+            ]
+            result.evolution_summary["agent_judgment"] = {
+                "phase": "rubric",
+                "criteria": [],
+            }
+        else:
+            result.stdout_tail = ["Applied the supported candidate change and ran focused validation."]
+        return result
+
+    monkeypatch.setattr(service, "run_supervised_conversation_harness", fake_conversation_harness)
+
+    result = service._real_candidate_modifier(
+        tmp_path,
+        "Implement the evidence-backed improvement in this candidate worktree.",
+        {
+            "runId": "swte-self-edit-phase-retry",
+            "options": {
+                "agentBindings": {
+                    "baseline": {
+                        "agentId": "agent-baseline",
+                        "role": "baseline",
+                    }
+                }
+            },
+            "conversationSessionId": "session-baseline",
+        },
+    )
+
+    assert result["status"] == "success"
+    assert result["conversationSessionId"] == "session-baseline"
+    assert result["phaseRetryCount"] == 1
+    assert len(calls) == 2
+    assert calls[0]["conversation_session_id"] == "session-baseline"
+    assert calls[1]["conversation_session_id"] == "session-baseline"
+    assert "SELF_EDIT_PHASE_CORRECTION_REQUIRED" in calls[1]["prompt"]
+    assert "Do not output SUPERVISED_AGENT_JUDGMENT" in calls[1]["prompt"]
+
+
 def _retryable_provider_failure_evaluator(_: Path, bundle_name: str, role: str, __: dict) -> dict:
     assert role == "baseline"
     return {
