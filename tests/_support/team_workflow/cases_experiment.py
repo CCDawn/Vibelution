@@ -395,8 +395,10 @@ def test_explicit_design_gate_blocks_smoke_until_plan_is_frozen(tmp_path, monkey
 
     assert frozen["plan"]["designGate"]["status"] == "frozen"
     assert frozen["plan"]["experimentContract"]["status"] == "frozen"
+    assert frozen["plan"]["readiness"]["readyForBoundedSmokeRun"] is True
     assert frozen["experimentStatus"]["lifecycleProjection"]["stage2"]["status"] == "frozen"
     assert frozen["experimentStatus"]["lifecycleProjection"]["stage2"]["readyForExecution"] is True
+    assert frozen["experimentStatus"]["activePlan"]["readiness"]["readyForBoundedSmokeRun"] is True
     assert response["status"] == "needs_review"
 
 def test_run_experiment_smoke_run_rejects_non_whitelisted_adapter(tmp_path, monkeypatch):
@@ -885,6 +887,7 @@ def test_experiment_plan_draft_uses_ready_algorithm_hypotheses_and_blocks_full_r
     ]
     assert draft["plan"]["baselineSelection"]["activeBaselineReady"] is False
     assert draft["plan"]["readiness"]["readyForPlanReview"] is True
+    assert draft["plan"]["readiness"]["readyForBoundedSmokeRun"] is False
     assert draft["plan"]["readiness"]["readyForSmoke"] is False
     assert "active_baseline_record" in draft["plan"]["readiness"]["blockers"]
     assert draft["stageRound"]["experimentPlanRef"]["planId"] == draft["plan"]["planId"]
