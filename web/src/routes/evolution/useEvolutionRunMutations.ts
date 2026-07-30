@@ -2,10 +2,11 @@
  * Evolution run start / action mutations (T3).
  * Draft/selection state is injected via options so callers stay thin.
  */
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { Dispatch, SetStateAction } from "react";
 
 import { fetchJson } from "../../api/client";
+import { queryKeys } from "../../api/queryKeys";
 import type {
   EvolutionRunActionResponse,
   SelfEvolutionHistoryDeleteResponse,
@@ -44,6 +45,7 @@ export type UseEvolutionRunMutationsOptions = {
 };
 
 export function useEvolutionRunMutations(options: UseEvolutionRunMutationsOptions) {
+  const queryClient = useQueryClient();
   const uiRoute = () => `${options.locationPathname}${options.locationSearch}`;
 
   const startWorktreeRunMutation = useMutation({
@@ -171,8 +173,12 @@ export function useEvolutionRunMutations(options: UseEvolutionRunMutationsOption
         body: JSON.stringify({ ...payload, uiRoute: "/evolution?track=self" }),
       }),
     onSuccess: async (snapshot) => {
+      queryClient.setQueryData(
+        queryKeys.evolutionSelfObservationRun(snapshot.runId),
+        snapshot,
+      );
       options.setSelectedSelfObservationRunId(snapshot.runId);
-      options.setSelfActionFeedback(snapshot.latestMessage || "");
+      options.setSelfActionFeedback("");
       await options.afterSelfEvolutionChanged();
     },
   });
@@ -191,8 +197,12 @@ export function useEvolutionRunMutations(options: UseEvolutionRunMutationsOption
         },
       ),
     onSuccess: async (snapshot) => {
+      queryClient.setQueryData(
+        queryKeys.evolutionSelfObservationRun(snapshot.runId),
+        snapshot,
+      );
       options.setSelectedSelfObservationRunId(snapshot.runId);
-      options.setSelfActionFeedback(snapshot.latestMessage || "");
+      options.setSelfActionFeedback("");
       await options.afterSelfEvolutionChanged();
     },
   });
