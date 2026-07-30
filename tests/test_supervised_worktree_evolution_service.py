@@ -629,6 +629,43 @@ def test_full_score_reflection_does_not_invent_a_failure_target():
     assert "如果没有可信改进，保守地不做无依据改动" in reflection["selfModificationPrompt"]
 
 
+def test_judge_reflection_carries_frozen_task_contract_to_baseline_self_edit():
+    reflection = service._build_reflection(
+        {
+            "taskContract": {
+                "benchmark": "vibelution_supervised_candidate_patch_smoke",
+                "candidateMutationContract": {
+                    "required": True,
+                    "allowlistedPaths": ["tests/supervised_worktree_candidate_marker.py"],
+                },
+                "cases": [
+                    {
+                        "caseId": "candidate_patch_convergence_probe",
+                        "prompt": "CANDIDATE_SELF_EDITED = True",
+                    }
+                ],
+            }
+        },
+        {
+            "successes": 0,
+            "total": 1,
+            "failures": 1,
+            "summary": "baseline execution 0/1",
+        },
+        {
+            "score": 38.975,
+            "problems": ["目标内容没有得到验证"],
+            "improvementInstructions": ["严格实现冻结任务合同"],
+        },
+    )
+
+    prompt = reflection["selfModificationPrompt"]
+    assert '"taskContract"' in prompt
+    assert "vibelution_supervised_candidate_patch_smoke" in prompt
+    assert "tests/supervised_worktree_candidate_marker.py" in prompt
+    assert "CANDIDATE_SELF_EDITED = True" in prompt
+
+
 def test_supervised_worktree_flow_preserves_improved_candidate_and_records_merge_analysis(tmp_path):
     project_root = tmp_path / "project"
     _init_repo(project_root)

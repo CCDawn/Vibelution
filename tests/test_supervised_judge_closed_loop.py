@@ -262,6 +262,23 @@ def test_judge_recommendation_never_replaces_the_users_final_decision():
 
 
 def test_improvement_prompt_is_for_baseline_agent_and_carries_judge_feedback():
+    task_contract = {
+        "benchmark": "vibelution_supervised_candidate_patch_smoke",
+        "candidateMutationContract": {
+            "required": True,
+            "allowlistedPaths": ["tests/supervised_worktree_candidate_marker.py"],
+        },
+        "cases": [
+            {
+                "caseId": "candidate_patch_convergence_probe",
+                "prompt": (
+                    "目标内容必须逐字等于 "
+                    '"""Simulation marker for supervised worktree evolution."""'
+                    "\\n\\nCANDIDATE_SELF_EDITED = True\\n"
+                ),
+            }
+        ],
+    }
     prompt = build_improvement_prompt(
         baseline_evaluation={"summary": "baseline summary", "successes": 1, "total": 2},
         baseline_judgment={
@@ -271,6 +288,7 @@ def test_improvement_prompt_is_for_baseline_agent_and_carries_judge_feedback():
             "evidenceRefs": ["case:two"],
         },
         requested_goal="提升失败恢复",
+        task_contract=task_contract,
     )
 
     assert "你就是刚才执行基线评测的基线 Agent" in prompt
@@ -285,3 +303,7 @@ def test_improvement_prompt_is_for_baseline_agent_and_carries_judge_feedback():
     assert "没有验证错误恢复" in prompt
     assert "补充错误恢复并运行聚焦测试" in prompt
     assert "提升失败恢复" in prompt
+    assert '"taskContract"' in prompt
+    assert "vibelution_supervised_candidate_patch_smoke" in prompt
+    assert "tests/supervised_worktree_candidate_marker.py" in prompt
+    assert "CANDIDATE_SELF_EDITED = True" in prompt

@@ -2,6 +2,9 @@
 """数据集注册与 bundle 物化测试。"""
 
 import json
+import re
+import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -485,6 +488,61 @@ def test_materialize_candidate_patch_smoke_preserves_mutation_contract(tmp_path:
         "allowlisted_paths": ["tests/supervised_worktree_candidate_marker.py"],
     }
     assert bundle["cases"][0]["case_id"] == "candidate_patch_convergence_probe"
+    safe_check_marker = "受控检查命令（必须逐字复制，不得自行改写）"
+    expected_content_base64 = (
+        "IiIiU2ltdWxhdGlvbiBtYXJrZXIgZm9yIHN1cGVydmlzZWQgd29ya3RyZWUg"
+        "ZXZvbHV0aW9uLiIiIgoKQ0FORElEQVRFX1NFTEZfRURJVEVEID0gVHJ1ZQo="
+    )
+    baseline_prompt = bundle["cases"][0]["baseline_prompt"]
+    candidate_prompt = bundle["cases"][0]["candidate_prompt"]
+    assert safe_check_marker in baseline_prompt
+    assert safe_check_marker in candidate_prompt
+    assert expected_content_base64 in baseline_prompt
+    assert expected_content_base64 in candidate_prompt
+
+    match = re.search(
+        rf"{re.escape(safe_check_marker)}：`([^`]+)`",
+        baseline_prompt,
+    )
+    assert match is not None
+    safe_command = match.group(1)
+    assert safe_command.startswith("python -c ")
+
+    probe_root = tmp_path / "safe-command-probe"
+    probe_root.mkdir()
+    executable_command = f'"{sys.executable}"' + safe_command[len("python") :]
+    missing_result = subprocess.run(
+        executable_command,
+        cwd=probe_root,
+        shell=True,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert missing_result.returncode == 0
+    assert "exists=False" in missing_result.stdout
+    assert "exact=False" in missing_result.stdout
+    assert "SyntaxError" not in missing_result.stderr
+
+    marker_path = probe_root / "tests" / "supervised_worktree_candidate_marker.py"
+    marker_path.parent.mkdir(parents=True)
+    marker_path.write_text(
+        '"""Simulation marker for supervised worktree evolution."""\n\n'
+        "CANDIDATE_SELF_EDITED = True\n",
+        encoding="utf-8",
+    )
+    matching_result = subprocess.run(
+        executable_command,
+        cwd=probe_root,
+        shell=True,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert matching_result.returncode == 0
+    assert "exists=True" in matching_result.stdout
+    assert "exact=True" in matching_result.stdout
+    assert "SyntaxError" not in matching_result.stderr
 
 
 def test_materialize_custom_prompt_jsonl(tmp_path: Path):
