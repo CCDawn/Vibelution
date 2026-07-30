@@ -175,6 +175,10 @@ def build_judge_evaluation_prompt(
         f"{phase_instruction}\n"
         "必须逐项使用已冻结 rubric，task_scores 和 system_scores 的每项评分范围均为 0..1。"
         "不得修改标准、权重或 rubric_hash；缺少证据时在对应项降分并将 recommendation 设为 INCONCLUSIVE。\n"
+        "在第二次评估中，rerunEvaluation.trustedWorkspaceAudit 是复跑后工作树是否偏离冻结候选版本的唯一权威；"
+        "candidateRuntime.workspaceEvidence 和 extensionEvidence 只是候选进程补充证据，不能覆盖该结论。"
+        "当 trustedWorkspaceAudit.status=verified 且 variantUnchanged=true 时，不得把冻结候选本身已有的文件"
+        "计作复跑新增写入；当该审计 unavailable 或 variantUnchanged=false 时才按缺证或偏移处理。\n"
         "recommendation 只能为 APPROVE、REVISE、REJECT、INCONCLUSIVE，且只是给用户的建议，"
         "不得把任何分数或建议当成合入硬门。总分由后端计算，你不要输出总分。\n"
         "最后单独输出一行严格 JSON：\n"
@@ -388,6 +392,11 @@ def _bounded_evaluation(value: dict[str, Any]) -> dict[str, Any]:
         "successes": value.get("successes"),
         "total": value.get("total"),
         "failures": value.get("failures"),
+        "trustedWorkspaceAudit": _bounded_mapping(
+            value.get("trustedWorkspaceAudit")
+            if isinstance(value.get("trustedWorkspaceAudit"), dict)
+            else {}
+        ),
         "cases": [_bounded_mapping(item) for item in cases[:20] if isinstance(item, dict)],
     }
 

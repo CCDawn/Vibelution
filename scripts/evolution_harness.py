@@ -359,9 +359,17 @@ def supervised_agent_binding_env(agent_binding: Optional[Dict[str, Any]], *, run
     return env
 
 
+def _scoped_git_args(repo_root: Path, *args: str) -> tuple[str, ...]:
+    return (
+        "-c",
+        f"safe.directory={repo_root.resolve()}",
+        *args,
+    )
+
+
 def run_git(repo_root: Path, *args: str) -> str:
     proc = git_process.run_git(
-        args,
+        _scoped_git_args(repo_root, *args),
         cwd=str(repo_root),
         capture_output=True,
         text=True,
@@ -379,7 +387,7 @@ def run_git(repo_root: Path, *args: str) -> str:
 
 def run_git_bytes(repo_root: Path, *args: str) -> bytes:
     proc = git_process.run_git(
-        args,
+        _scoped_git_args(repo_root, *args),
         cwd=str(repo_root),
         capture_output=True,
         text=False,
@@ -2220,6 +2228,38 @@ def infer_evolution_summary(
     return summary
 
 
+def _candidate_runtime_porcelain(
+    repo_root: Path,
+) -> tuple[List[str], List[str]]:
+    raw = run_git_bytes(
+        repo_root,
+        "status",
+        "--porcelain=v1",
+        "-z",
+        "--untracked-files=all",
+    )
+    records = [
+        item.decode("utf-8", errors="surrogateescape")
+        for item in raw.split(b"\0")
+        if item
+    ]
+    status_lines: List[str] = []
+    changed_files: List[str] = []
+    index = 0
+    while index < len(records):
+        record = records[index]
+        index += 1
+        if len(record) < 4:
+            continue
+        status = record[:2]
+        path = record[3:].replace("\\", "/")
+        status_lines.append(record)
+        changed_files.append(path)
+        if ("R" in status or "C" in status) and index < len(records):
+            index += 1
+    return status_lines, changed_files
+
+
 def _candidate_runtime_workspace_snapshot(repo_root: Path) -> Dict[str, Any]:
     try:
         head = run_git(repo_root, "rev-parse", "HEAD")
@@ -2229,16 +2269,32 @@ def _candidate_runtime_workspace_snapshot(repo_root: Path) -> Dict[str, Any]:
     else:
         head_error = ""
     try:
-        status_lines = run_git(repo_root, "status", "--porcelain").splitlines()
+        status_lines, changed_files = _candidate_runtime_porcelain(repo_root)
     except Exception as exc:
         status_lines = []
+        changed_files = []
         status_error = f"{type(exc).__name__}: {exc}"[:400]
     else:
         status_error = ""
+    if not head_error and not status_error:
+        snapshot_status = "verified"
+    elif head or not status_error:
+        snapshot_status = "partial"
+    else:
+        snapshot_status = "unavailable"
+    status_verified = not status_error
     snapshot: Dict[str, Any] = {
+        "status": snapshot_status,
         "repo_root": str(repo_root.resolve()),
         "head": head,
         "status_porcelain": status_lines[:80],
+        "file_change_count": len(status_lines) if status_verified else None,
+        "changed_files": changed_files[:80] if status_verified else None,
+        "write_audit": {
+            "status": "verified" if status_verified else "unavailable",
+            "files_changed": len(status_lines) if status_verified else None,
+            "clean": not status_lines if status_verified else None,
+        },
     }
     if head_error:
         snapshot["head_error"] = head_error

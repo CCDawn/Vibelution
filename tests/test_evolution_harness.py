@@ -5,6 +5,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -68,6 +69,96 @@ from scripts.evolution_harness import (
     stdout_tail_looks_like_idle_chat_ui,
 )
 pytestmark = pytest.mark.serial
+
+
+def test_harness_git_calls_scope_safe_directory_to_the_requested_repo(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    candidate = tmp_path / "candidate"
+    candidate.mkdir()
+    captured: dict[str, object] = {}
+
+    def fake_run_git(args, **kwargs):
+        captured["args"] = list(args)
+        captured["cwd"] = kwargs.get("cwd")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(evolution_harness.git_process, "run_git", fake_run_git)
+
+    evolution_harness.run_git(candidate, "status", "--porcelain")
+
+    assert captured["args"] == [
+        "-c",
+        f"safe.directory={candidate.resolve()}",
+        "status",
+        "--porcelain",
+    ]
+    assert captured["cwd"] == str(candidate)
+
+
+def test_candidate_runtime_workspace_snapshot_never_treats_git_failure_as_clean(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    candidate = tmp_path / "candidate"
+    candidate.mkdir()
+
+    def fake_run_git(_repo_root: Path, *args: str) -> str:
+        assert args == ("rev-parse", "HEAD")
+        return "frozen-head"
+
+    monkeypatch.setattr(evolution_harness, "run_git", fake_run_git)
+    monkeypatch.setattr(
+        evolution_harness,
+        "run_git_bytes",
+        lambda *_args: (_ for _ in ()).throw(
+            RuntimeError("git status failed: dubious ownership")
+        ),
+    )
+
+    snapshot = evolution_harness._candidate_runtime_workspace_snapshot(candidate)
+
+    assert snapshot["status"] == "partial"
+    assert snapshot["file_change_count"] is None
+    assert snapshot["changed_files"] is None
+    assert snapshot["write_audit"] == {
+        "status": "unavailable",
+        "files_changed": None,
+        "clean": None,
+    }
+    assert "dubious ownership" in snapshot["status_error"]
+
+
+def test_candidate_runtime_workspace_snapshot_preserves_porcelain_paths(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    candidate = tmp_path / "candidate"
+    candidate.mkdir()
+    monkeypatch.setattr(
+        evolution_harness,
+        "run_git",
+        lambda *_args: "frozen-head",
+    )
+    monkeypatch.setattr(
+        evolution_harness,
+        "run_git_bytes",
+        lambda *_args: b" M scripts/evolution_harness.py\0?? new-file.txt\0",
+    )
+
+    snapshot = evolution_harness._candidate_runtime_workspace_snapshot(candidate)
+
+    assert snapshot["status"] == "verified"
+    assert snapshot["status_porcelain"] == [
+        " M scripts/evolution_harness.py",
+        "?? new-file.txt",
+    ]
+    assert snapshot["changed_files"] == [
+        "scripts/evolution_harness.py",
+        "new-file.txt",
+    ]
+    assert snapshot["file_change_count"] == 2
 
 
 def test_candidate_runtime_evidence_uses_candidate_summary_and_optional_extension(
@@ -236,7 +327,13 @@ def test_run_git_hides_console_windows_on_windows(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(git_process.subprocess, "run", fake_run)
 
     assert evolution_harness.run_git(tmp_path, "rev-parse", "HEAD") == "abc123"
-    assert calls[0][0] == [resolved_git, "rev-parse", "HEAD"]
+    assert calls[0][0] == [
+        resolved_git,
+        "-c",
+        f"safe.directory={tmp_path.resolve()}",
+        "rev-parse",
+        "HEAD",
+    ]
     assert calls[0][1]["creationflags"] & 0x08000000
 
 
