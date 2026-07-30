@@ -81,6 +81,7 @@ import {
   mergeSessionDetailIntoSummaries,
 } from "./chatSessionState";
 import {
+  reconcileAgentSessionDetailCache,
   SESSION_INDEX_PAGE_SIZE,
   updateSessionSummaryCaches,
   useSessionIndexQuery,
@@ -623,6 +624,7 @@ export function ChatCodingRoute() {
       updateSessionSummaryCaches(queryClient, (sessions) =>
         mergeSessionDetailIntoSummaries(sessions, detail),
       );
+      reconcileAgentSessionDetailCache(queryClient, detail);
       const detailRootSessionId = rootSessionIdFor(detail);
       if (isChildSession(detail) && detailRootSessionId) {
         queryClient.setQueryData<SessionSummary[]>(queryKeys.sessionChildSessions(detailRootSessionId), (sessions) =>
@@ -1914,6 +1916,7 @@ export function ChatCodingRoute() {
     activeAgentImageInputUnsupported,
     activeImageInputModelId,
     latestUserMessageId,
+    activeTurnId: activeTurnLayer?.turnId,
     detail,
     setMentalModelEnabledForNextTurn,
   });

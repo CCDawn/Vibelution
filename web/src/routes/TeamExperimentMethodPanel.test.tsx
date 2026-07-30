@@ -201,6 +201,36 @@ describe("TeamExperimentMethodPanel", () => {
     expect(panelSource).not.toContain("activeContract?.planId, activeContract?.revision");
   });
 
+  it("renders a partially migrated contract without assuming nested arrays exist", () => {
+    const partialContract = {
+      ...simulationContract,
+      metricContract: {
+        primaryMetric: "",
+      },
+      decisionContract: {},
+    } as unknown as ExperimentContractV2;
+
+    const draft = createExperimentMethodFormDraft(partialContract);
+    const markup = renderToStaticMarkup(
+      <TeamExperimentMethodPanel
+        lang="zh"
+        catalog={catalog}
+        activeContract={partialContract}
+        activePlanStatus="draft"
+        loading={false}
+        submitting={false}
+        canCreatePlan
+        onSubmit={() => undefined}
+      />,
+    );
+
+    expect(draft.primaryMetric).toBe("");
+    expect(draft.successCriteria).toBe("");
+    expect(draft.failureCriteria).toBe("");
+    expect(draft.inconclusiveCriteria).toBe("");
+    expect(markup).toContain("保存为新版本");
+  });
+
   it("uses the workspace quick selection when opening the detailed setup", () => {
     const markup = renderToStaticMarkup(
       <TeamExperimentMethodPanel

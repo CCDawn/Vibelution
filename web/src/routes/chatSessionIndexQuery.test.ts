@@ -2,10 +2,11 @@ import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
 
 import { queryKeys } from "../api/queryKeys";
-import type { AgentInstance, SessionQueryResponse, SessionSummary } from "../api/types";
+import type { AgentInstance, SessionDetail, SessionQueryResponse, SessionSummary } from "../api/types";
 import {
   captureAgentSessionCacheSnapshots,
   captureSessionIndexCacheSnapshots,
+  reconcileAgentSessionDetailCache,
   removeSessionFromAgentSessionCaches,
   renameAgentDirectoryEntries,
   restoreAgentSessionCacheSnapshots,
@@ -44,6 +45,23 @@ function page(items: SessionSummary[], nextCursor = "", totalEstimate = items.le
   };
 }
 
+function detail(patch: Partial<SessionDetail> = {}): SessionDetail {
+  return {
+    ...session("session-a", "Alpha"),
+    agentId: "agent-a",
+    messages: [],
+    defaultFileContext: "",
+    previewTabs: [],
+    activePreviewPath: "",
+    changedFiles: [],
+    readFiles: [],
+    stopRequested: false,
+    stopRequestedAt: "",
+    stopReason: "",
+    ...patch,
+  } as SessionDetail;
+}
+
 describe("chatSessionIndexQuery cache helpers", () => {
   it("updates legacy and paginated session caches together", () => {
     const queryClient = new QueryClient();
@@ -76,6 +94,44 @@ describe("chatSessionIndexQuery cache helpers", () => {
 
     expect(queryClient.getQueryData<SessionQueryResponse>(agentAKey)?.items[0]?.title).toBe("Renamed Alpha");
     expect(queryClient.getQueryData<SessionQueryResponse>(agentBKey)?.items[0]?.title).toBe("Beta");
+  });
+
+  it("reconciles an authoritative detail only into its owning Agent session cache", () => {
+    const queryClient = new QueryClient();
+    const agentAKey = ["sessions", "agent", "agent-a"] as const;
+    const agentBKey = ["sessions", "agent", "agent-b"] as const;
+    queryClient.setQueryData(agentAKey, page([{
+      ...session("session-a", "Alpha"),
+      agentId: "agent-a",
+      status: "stopping",
+      currentPhase: "stopping",
+      childStatus: "stopping",
+    }]));
+    queryClient.setQueryData(agentBKey, page([{
+      ...session("session-b", "Beta"),
+      agentId: "agent-b",
+      status: "running",
+      currentPhase: "running",
+    }]));
+
+    reconcileAgentSessionDetailCache(queryClient, detail({
+      status: "ready",
+      currentPhase: "ready",
+      childStatus: "ready",
+      taskSummary: "本轮已按请求停止。",
+    }));
+
+    const reconciled = queryClient.getQueryData<SessionQueryResponse>(agentAKey)?.items[0];
+    expect(reconciled).toMatchObject({
+      status: "ready",
+      currentPhase: "ready",
+      childStatus: "ready",
+      taskSummary: "本轮已按请求停止。",
+    });
+    expect(queryClient.getQueryData<SessionQueryResponse>(agentBKey)?.items[0]).toMatchObject({
+      status: "running",
+      currentPhase: "running",
+    });
   });
 
   it("updates the root Agent directory label without renaming other Agents", () => {

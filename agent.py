@@ -3658,6 +3658,27 @@ class SelfEvolvingAgent:
                     category = recovery.category
                     is_retryable = recovery.retryable
                     user_msg = recovery.user_message
+                    stop_reason = (
+                        self._current_turn_stop_reason()
+                        or str(llm_error_details.get("stop_reason") or "").strip()
+                    )
+                    if category == "cancelled" and stop_reason:
+                        _record_agent_scene_event(
+                            "llm_route",
+                            "llm_route_cancelled",
+                            message="LLM route cancelled by the active turn stop request.",
+                            fields={
+                                **trace_fields,
+                                "routeAttempt": route_attempt,
+                                "routeId": _llm_effective_route_id(
+                                    llm_for_turn if "llm_for_turn" in locals() else None
+                                ),
+                                "reasonCode": "turn_stop_requested",
+                            },
+                            level="info",
+                            outcome="cancelled",
+                        )
+                        raise TurnStopRequested(stop_reason)
                     try:
                         streaming_enabled_for_failed_attempt = bool(
                             self._should_stream_llm_for_turn(
@@ -3931,6 +3952,14 @@ class SelfEvolvingAgent:
 
     def set_turn_interrupt_checker(self, checker=None) -> None:
         self._turn_interrupt_checker = checker
+        set_cancel_checker = getattr(getattr(self, "tool_executor", None), "set_cancel_checker", None)
+        if callable(set_cancel_checker):
+            # Cached chat Agents can resume on a different worker thread. Bind the
+            # checker in that thread's ContextVar so an active tool sees stop now.
+            set_cancel_checker(
+                self._current_turn_stop_reason if callable(checker) else None,
+                owner=self,
+            )
 
     def _current_turn_stop_reason(self) -> str:
         checker = getattr(self, "_turn_interrupt_checker", None)

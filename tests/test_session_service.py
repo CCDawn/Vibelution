@@ -982,6 +982,52 @@ def test_session_live_progress_and_tool_updates_do_not_publish_full_snapshot(mon
     assert events[-1]["ledgerSeq"] == 11
 
 
+def test_clearing_matching_live_turn_emits_terminal_assistant_delta(monkeypatch, tmp_path):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_write_session_live_output_checkpoint", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(session_service, "_delete_session_live_output_checkpoint", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(session_service, "_session_ledger_sequence", lambda _session_id: 23)
+    session_id = "session-terminal-delta"
+    turn_id = "turn-terminal-delta"
+    subscriber = queue.Queue()
+    session_service._set_session_running(session_id, True, turn_id=turn_id)
+    session_service._set_session_live_output(
+        session_id,
+        turn_id=turn_id,
+        content="正在停止命令。",
+        thought="等待终端确认。",
+        feedback_events=[
+            {
+                "sequence": 1,
+                "kind": "tool",
+                "status": "cancelled",
+                "name": "cli_tool",
+                "summary": "[取消] cli_tool 已因停止请求中断。",
+            }
+        ],
+    )
+    session_service._register_session_stream_subscriber(session_id, subscriber)
+    try:
+        session_service._clear_session_live_output(session_id, turn_id=turn_id)
+        event = subscriber.get_nowait()
+    finally:
+        session_service._unregister_session_stream_subscriber(session_id, subscriber)
+        session_service._clear_session_live_output(session_id, turn_id=turn_id)
+        session_service._set_session_running(session_id, False, turn_id=turn_id)
+
+    assert event["type"] == "assistant_delta"
+    assert event["sessionId"] == session_id
+    assert event["turnId"] == turn_id
+    assert event["ledgerSeq"] == 23
+    assert event["done"] is True
+    assert event["contentDelta"] == "正在停止命令。"
+    assert event["thoughtDelta"] == "等待终端确认。"
+    assert event["replaceContent"] is True
+    assert event["replaceThought"] is True
+    assert event["feedbackEvents"][0]["status"] == "cancelled"
+    assert session_service._snapshot_session_live_output(session_id) is None
+
+
 def test_session_diagnostics_do_not_block_on_full_snapshot(monkeypatch, tmp_path):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     snapshot_calls = []

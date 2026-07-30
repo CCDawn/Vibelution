@@ -772,6 +772,43 @@ def _get_cached_session_query_sessions(*, now: float) -> list[dict[str, Any]] | 
     return sessions
 
 
+def _agent_direct_session_query_summary(*, agent_id: str) -> dict[str, Any] | None:
+    """Project one Agent-owned direct session without widening the global index."""
+    s = _service()
+
+    normalized_agent_id = str(agent_id or "").strip()
+    if not normalized_agent_id:
+        return None
+    agent_by_id = s._agent_lookup_for_conversations()
+    agent = s._agent_from_lookup(agent_by_id, normalized_agent_id)
+    if not isinstance(agent, dict) or str(agent.get("status") or "active").strip().lower() == "archived":
+        return None
+    direct_session_id = str(agent.get("directSessionId") or "").strip()
+    if not direct_session_id:
+        return None
+
+    payload = s.load_chat_state(s.PROJECT_ROOT)
+    raw = s._find_conversation_entry(payload, direct_session_id)
+    if not isinstance(raw, dict):
+        return None
+    conversation = s._normalize_conversation(
+        raw,
+        agent_by_id=agent_by_id,
+        ensure_workspace=False,
+        lightweight=True,
+    )
+    if not isinstance(conversation, dict):
+        return None
+    if (
+        str(conversation.get("id") or "").strip() != direct_session_id
+        or str(conversation.get("agentId") or "").strip() != normalized_agent_id
+        or str(conversation.get("sessionKind") or "").strip().lower() != "main"
+        or bool(conversation.get("agentDirectSessionMismatch"))
+    ):
+        return None
+    return s._build_session_summary(conversation, hydrate_agent=False)
+
+
 def query_sessions(
     *,
     limit: int = 50,
@@ -814,6 +851,15 @@ def query_sessions(
         "state": normalized_state,
         "sort": normalized_sort,
     }
+    agent_direct_summary = (
+        _agent_direct_session_query_summary(agent_id=normalized_agent_id)
+        if normalized_agent_id
+        else None
+    )
+    agent_direct_hidden_from_index = bool(
+        isinstance(agent_direct_summary, dict)
+        and (agent_direct_summary.get("hiddenFromIndex") or agent_direct_summary.get("hidden_from_index"))
+    )
     try:
         catalog_config = getattr(s.get_config(), "session_catalog", None)
         catalog_mode = str(getattr(catalog_config, "mode", "off") or "off").strip().lower()
@@ -822,7 +868,7 @@ def query_sessions(
 
     catalog_status = "disabled"
     catalog_error_type = ""
-    if catalog_mode == "read_preferred":
+    if catalog_mode == "read_preferred" and not agent_direct_hidden_from_index:
         candidate_payload: dict[str, Any] | None = None
         try:
             from . import catalog_bridge
@@ -881,11 +927,20 @@ def query_sessions(
                 elapsed_ms=s._elapsed_ms(started_at),
             )
             return payload
+    elif catalog_mode == "read_preferred" and agent_direct_hidden_from_index:
+        # The catalog intentionally mirrors the user session index. A hidden
+        # direct session remains canonical-only for its owning Agent query.
+        catalog_status = "canonical_direct_session"
 
     sessions = s._get_cached_session_query_sessions(now=started_at)
     if sessions is None:
         # A cache miss remains a read-only legacy projection.
         sessions = s.list_sessions(repair_collisions=False)
+    if isinstance(agent_direct_summary, dict) and not any(
+        str(item.get("id") or "").strip() == str(agent_direct_summary.get("id") or "").strip()
+        for item in sessions
+    ):
+        sessions = [*sessions, agent_direct_summary]
 
     has_filters = bool(normalized_query or normalized_agent_id or normalized_session_kind or normalized_state)
     if not has_filters and normalized_sort == "updatedAt_desc":

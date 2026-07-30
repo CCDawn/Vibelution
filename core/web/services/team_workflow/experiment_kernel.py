@@ -1191,6 +1191,18 @@ def _build_experiment_plan_record(
         },
         "notes": s._trim_text(payload.get("notes"), max_length=4000),
         "createdByAgent": created_by_agent,
+        "createdFromTaskId": s._trim_text(
+            payload.get("createdFromTaskId"),
+            max_length=160,
+        ),
+        "createdFromSessionId": s._trim_text(
+            payload.get("createdFromSessionId"),
+            max_length=160,
+        ),
+        "createdFromTurnId": s._trim_text(
+            payload.get("createdFromTurnId"),
+            max_length=200,
+        ),
         "createdAt": now,
         "updatedAt": now,
     }

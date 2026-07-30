@@ -513,6 +513,119 @@ def test_task_status_reconciles_ready_session_with_created_experiment_plan(
     assert status["tasks"][0]["resultRefs"] == ["plan-reconciled"]
 
 
+def test_task_status_heals_incomplete_result_from_same_agent_alias_plan(
+    tmp_path, monkeypatch
+):
+    team, project, agents = _team_project_and_agents(tmp_path, monkeypatch)
+    _accepted_submitter(monkeypatch)
+    started = start_research_project_agent_task(
+        team["teamId"],
+        project["projectId"],
+        {
+            "taskKind": "experiment_design",
+            "idempotencyKey": "design-late-alias-reconcile-1",
+        },
+    )
+    update_research_project_agent_task_status(
+        team["teamId"],
+        project["projectId"],
+        started["task"]["taskId"],
+        status="incomplete",
+        failure_code="task_result_not_recorded",
+    )
+    root = team_workflow_orchestration_service.resolve_research_project_workspace_root(
+        team["teamId"],
+        project["projectId"],
+    )
+    planner = agents["experiment_planner"]
+    team_workflow_orchestration_service._write_json(
+        root / "experiment_plans" / "index.json",
+        {
+            "schemaVersion": 1,
+            "storeKind": team_workflow_orchestration_service.EXPERIMENT_PLAN_STORE_KIND,
+            "teamId": team["teamId"],
+            "activePlanId": "plan-late-alias",
+            "plans": [
+                {
+                    "planId": "plan-late-alias",
+                    "researchProjectId": project["projectId"],
+                    "createdByAgent": (
+                        f"{planner['agentCode']} {planner['displayName']}"
+                    ),
+                    "createdAt": "9999-07-29T00:01:00+00:00",
+                    "updatedAt": "9999-07-29T00:01:00+00:00",
+                    "status": "draft",
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        session_service,
+        "get_session_detail",
+        lambda _session_id, **_kwargs: {
+            "status": "ready",
+            "currentPhase": "ready",
+            "activeTask": None,
+        },
+    )
+
+    status = get_research_project_agent_task_status(
+        team["teamId"],
+        project["projectId"],
+    )
+
+    assert status["activeTasks"] == []
+    assert status["tasks"][0]["status"] == "completed"
+    assert status["tasks"][0]["failureCode"] == ""
+    assert status["tasks"][0]["resultRefs"] == ["plan-late-alias"]
+
+
+def test_completed_task_projects_and_persists_terminal_turn_status(
+    tmp_path, monkeypatch
+):
+    team, project, _agents = _team_project_and_agents(tmp_path, monkeypatch)
+    _accepted_submitter(monkeypatch)
+    started = start_research_project_agent_task(
+        team["teamId"],
+        project["projectId"],
+        {
+            "taskKind": "experiment_design",
+            "idempotencyKey": "design-terminal-turn-status-1",
+        },
+    )
+
+    completed = update_research_project_agent_task_status(
+        team["teamId"],
+        project["projectId"],
+        started["task"]["taskId"],
+        status="completed",
+        result_refs=["plan-terminal-turn"],
+    )
+
+    assert completed["status"] == "completed"
+    assert completed["turn"]["status"] == "completed"
+
+    root = team_workflow_orchestration_service.resolve_research_project_workspace_root(
+        team["teamId"],
+        project["projectId"],
+    )
+    store_path = root / "research_project_agent_tasks.json"
+    store = json.loads(store_path.read_text(encoding="utf-8"))
+    store["tasks"][0]["turn"]["status"] = "running"
+    store_path.write_text(
+        json.dumps(store, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    status = get_research_project_agent_task_status(
+        team["teamId"],
+        project["projectId"],
+    )
+
+    assert status["tasks"][0]["status"] == "completed"
+    assert status["tasks"][0]["turn"]["status"] == "completed"
+
+
 def test_task_start_rejects_missing_fixed_role_binding(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team = team_service.create_team(name="无实验职责团队", members=[])

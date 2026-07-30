@@ -129,6 +129,28 @@ def test_sandbox_runs_rewritten_python_command_without_cmd_quote_roundtrip(monke
     assert "cmd.exe" not in argv
 
 
+def test_sandbox_runs_explicit_powershell_command_without_cmd_quote_roundtrip(monkeypatch):
+    monkeypatch.setattr(codex_cli_sandbox.os, "name", "nt")
+    monkeypatch.setattr(
+        codex_cli_sandbox,
+        "_powershell_executable",
+        lambda: r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+    )
+    route = shell_tools.classify_shell_command(
+        'powershell -NoProfile -Command "Get-Location"'
+    )
+
+    argv = codex_cli_sandbox._sandbox_argv(r"C:\Codex\codex.exe", route)
+
+    assert argv[-4:] == [
+        r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+        "-NoProfile",
+        "-Command",
+        "Get-Location",
+    ]
+    assert "cmd.exe" not in argv
+
+
 def test_sandbox_uses_cmd_for_native_windows_and_chain(monkeypatch):
     monkeypatch.setattr(codex_cli_sandbox.os, "name", "nt")
     monkeypatch.setattr(

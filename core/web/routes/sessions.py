@@ -47,7 +47,10 @@ from core.web.services.runtime_scene_service import record_runtime_scene_event
 
 
 router = APIRouter(tags=["sessions"])
-_SESSION_STREAM_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="session-stream")
+# Each synchronous SSE iterator can wait on its subscriber queue until the
+# heartbeat. Keep this bounded, while allowing a reconnect/new page to begin
+# before four older streams have observed their disconnect.
+_SESSION_STREAM_EXECUTOR = ThreadPoolExecutor(max_workers=8, thread_name_prefix="session-stream")
 _SESSION_STREAM_END = object()
 
 
