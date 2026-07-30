@@ -1577,11 +1577,12 @@ def test_self_observation_blank_mode_chat_continuation_adds_no_synthetic_user(mo
     assert calls[0]["messages"] == [{"role": "user", "content": ""}]
     assert calls[0]["replayState"] is None
     assert calls[1]["messages"] == [
-        {"role": "user", "content": ""},
         {"role": "assistant", "content": "第一段自由输出"},
+        {"role": "user", "content": ""},
     ]
     assert calls[1]["replayState"] is None
-    assert [message["role"] for message in calls[1]["messages"]] == ["user", "assistant"]
+    assert [message["role"] for message in calls[1]["messages"]] == ["assistant", "user"]
+    assert calls[1]["metadata"]["blankContinuationMode"] == "history_then_blank_user"
     assert all(call["metadata"]["promptChars"] == 0 for call in calls)
     assert all(call["metadata"]["inputMode"] == "blank" for call in calls)
     payload_text = json.dumps([call["messages"] for call in calls], ensure_ascii=False)
