@@ -70,6 +70,65 @@ from scripts.evolution_harness import (
 pytestmark = pytest.mark.serial
 
 
+def test_candidate_runtime_evidence_uses_candidate_summary_and_optional_extension(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    candidate_module = tmp_path / "scripts" / "evolution_harness.py"
+    candidate_module.parent.mkdir(parents=True)
+    candidate_module.write_text("# candidate module\n", encoding="utf-8")
+    monkeypatch.setattr(evolution_harness, "__file__", str(candidate_module))
+    monkeypatch.setattr(
+        evolution_harness,
+        "collect_candidate_runtime_extension",
+        lambda payload, repo_root: {
+            "variant": payload["candidateVariant"]["variantId"],
+            "repoRoot": str(repo_root),
+        },
+        raising=False,
+    )
+    monkeypatch.setattr(
+        evolution_harness,
+        "capture_workspace_snapshot",
+        lambda repo_root: {"repo_root": str(repo_root), "snapshot": "candidate-defined"},
+        raising=False,
+    )
+    payload = {
+        "protocolVersion": 1,
+        "candidateVariant": {
+            "variantId": "swte-variant-one",
+            "patchSha256": "a" * 64,
+        },
+        "events": [
+            {
+                "type": "tool_call",
+                "tool_name": "python_lint_tool",
+                "status": "success",
+                "tool_args": {"source_path": "scripts/evolution_harness.py"},
+                "tool_result": '{"status":"ok","issue_count":0}',
+            }
+        ],
+        "assistantText": "validation complete",
+        "restartExpected": False,
+    }
+
+    evidence = evolution_harness.build_candidate_runtime_evidence(
+        payload,
+        repo_root=tmp_path,
+    )
+
+    assert evidence["status"] == "success"
+    assert evidence["executionBackend"] == "isolated_candidate_subprocess"
+    assert evidence["candidateVariantId"] == "swte-variant-one"
+    assert evidence["candidatePatchSha256"] == "a" * 64
+    assert evidence["moduleSha256"] == evolution_harness.hashlib.sha256(
+        candidate_module.read_bytes()
+    ).hexdigest()
+    assert evidence["evolutionSummary"]["validation"]["passed"] == 1
+    assert evidence["workspaceEvidence"]["snapshot"] == "candidate-defined"
+    assert evidence["extensionEvidence"]["variant"] == "swte-variant-one"
+
+
 def test_create_worktree_lets_git_create_path_under_controlled_sibling_root(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
