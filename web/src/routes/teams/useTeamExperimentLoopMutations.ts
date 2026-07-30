@@ -20,6 +20,7 @@ import {
   type ExperimentPlanCreatePayload,
   type ExperimentPlanRecord,
   type ExperimentResultKnowledgeIngestionPayload,
+  type ExperimentSmokeRunPayload,
   type ExperimentSmokeResultDraft,
   type ExperimentSmokeResultRegisterPayload,
   type ResearchLoopCreateDraft,
@@ -122,6 +123,32 @@ export function useTeamExperimentLoopMutations(options: UseTeamExperimentLoopMut
       queryClient.setQueryData(queryKeys.teamWorkflow(variables.teamId), payload.workflow);
       void queryClient.invalidateQueries({ queryKey: experimentPlanningStatusQueryKey(variables.teamId) });
       void queryClient.invalidateQueries({ queryKey: researchStageRoundStatusQueryKey(variables.teamId) });
+    },
+  });
+
+  const runExperimentSmokeMutation = useMutation({
+    mutationFn: (payload: {
+      teamId: string;
+      plan: ExperimentPlanRecord;
+      adapter: string;
+      seed: number;
+    }) =>
+      fetchJson<ExperimentSmokeRunPayload>(
+        `/api/teams/${encodeURIComponent(payload.teamId)}/workflow-orchestration/experiments/plans/${encodeURIComponent(payload.plan.planId)}/smoke-run`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            adapter: payload.adapter,
+            seed: payload.seed,
+            recordedByAgent: options.sourceCollectionOwnerAgentId,
+          }),
+        },
+      ),
+    onSuccess: (_payload, variables) => {
+      void queryClient.invalidateQueries({ queryKey: experimentPlanningStatusQueryKey(variables.teamId) });
+      void queryClient.invalidateQueries({ queryKey: researchStageRoundStatusQueryKey(variables.teamId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflow(variables.teamId) });
     },
   });
 
@@ -425,6 +452,7 @@ export function useTeamExperimentLoopMutations(options: UseTeamExperimentLoopMut
     createExperimentPlanMutation,
     freezeExperimentDesignMutation,
     registerExperimentBaselineArtifactMutation,
+    runExperimentSmokeMutation,
     registerExperimentSmokeResultMutation,
     registerExperimentFullRunResultMutation,
     requestExperimentKnowledgeIngestionMutation,
