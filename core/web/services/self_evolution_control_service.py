@@ -2716,10 +2716,10 @@ def _invoke_strict_self_observation_llm(
         blank_continuation_mode = "provider_replay"
     elif bounded_previous_output:
         messages = [
-            {"role": "user", "content": ""},
             {"role": "assistant", "content": bounded_previous_output},
+            {"role": "user", "content": ""},
         ]
-        blank_continuation_mode = "assistant_prefill"
+        blank_continuation_mode = "history_then_blank_user"
     else:
         messages = [{"role": "user", "content": strict_prompt}]
         blank_continuation_mode = "initial"
