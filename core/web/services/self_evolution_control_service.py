@@ -2835,6 +2835,7 @@ def _append_self_observation_assistant_artifact(
     run_id: str,
     session_id: str,
     content: str,
+    invocation_index: int,
     model_id: str = "",
 ) -> None:
     if not str(content or "").strip():
@@ -2851,7 +2852,8 @@ def _append_self_observation_assistant_artifact(
                 "strictPromptPayload": True,
                 "toolsCount": 0,
                 "modelId": str(model_id or "").strip(),
-                "turnId": f"strict:{run_id}",
+                "invocationIndex": int(invocation_index or 1),
+                "turnId": f"strict:{run_id}:{int(invocation_index or 1)}",
             },
             tool_calls=[],
         )
@@ -2997,6 +2999,7 @@ def _run_observation_session(
                 run_id=run_id,
                 session_id=session_id,
                 content=report,
+                invocation_index=invocation_index,
                 model_id=str(llm_result.get("modelId") or "").strip(),
             )
             _update_self_observation_progress(
