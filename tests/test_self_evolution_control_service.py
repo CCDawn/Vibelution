@@ -1287,6 +1287,52 @@ def _install_strict_self_observation_llm(
 
     monkeypatch.setattr(service, "stream_llm", fake_stream_llm, raising=False)
 
+    def fake_run_streaming_llm_outcome(
+        client,
+        messages,
+        *,
+        context,
+        on_event,
+        tools=None,
+        metadata=None,
+        replay_state=None,
+    ):
+        calls = captured.setdefault("calls", [])
+        assert isinstance(calls, list)
+        response_index = len(calls)
+        response_content = response_contents[min(response_index, len(response_contents) - 1)]
+        output_replay_state = SimpleNamespace(response_id=f"response-{response_index + 1}")
+        calls.append(
+            {
+                "messages": copy.deepcopy(messages),
+                "tools": copy.deepcopy(tools),
+                "context": context,
+                "metadata": copy.deepcopy(metadata),
+                "replayState": replay_state,
+                "outputReplayState": output_replay_state,
+            }
+        )
+        captured["messages"] = copy.deepcopy(messages)
+        captured["tools"] = copy.deepcopy(tools)
+        captured["context"] = context
+        captured["metadata"] = copy.deepcopy(metadata)
+        captured["replayState"] = replay_state
+        on_event(SimpleNamespace(kind="answer_delta", text=response_content))
+        monotonic_state["now"] = 999999.0
+        return SimpleNamespace(
+            kind="final_answer",
+            final_text=response_content,
+            tool_calls=(),
+            replay_state=output_replay_state,
+        )
+
+    monkeypatch.setattr(
+        service,
+        "run_streaming_llm_outcome",
+        fake_run_streaming_llm_outcome,
+        raising=False,
+    )
+
     def fake_append_artifact(session_id, artifact_content, *, metadata=None, tool_calls=None):
         artifact_messages.append(
             {
@@ -1446,10 +1492,10 @@ def test_self_observation_session_continues_until_duration_when_model_stops(monk
     ]
 
 
-def test_self_observation_blank_mode_keeps_every_model_input_empty(monkeypatch):
+def test_self_observation_blank_mode_continues_canonical_conversation_without_user_prompt(monkeypatch):
     captured, artifact_messages = _install_strict_self_observation_llm(
         monkeypatch,
-        content=["重复的自由输出", "重复的自由输出"],
+        content=["第一段自由输出", "第二段延续输出"],
     )
     monkeypatch.setattr(service, "self_observation_agent_binding", lambda: {"agentId": "agent-observer-blank"})
     monkeypatch.setattr(service, "create_supervised_agent_session", lambda **kwargs: {"id": "session-blank"})
@@ -1467,12 +1513,30 @@ def test_self_observation_blank_mode_keeps_every_model_input_empty(monkeypatch):
     calls = captured["calls"]
     assert isinstance(calls, list)
     assert len(calls) == 2
-    assert all(call["messages"] == [{"role": "user", "content": ""}] for call in calls)
+    assert calls[0]["messages"] == [{"role": "user", "content": ""}]
+    assert calls[0]["replayState"] is None
+    assert calls[0]["context"].conversation_bound is True
+    assert calls[1]["messages"] == [
+        {"role": "assistant", "content": "第一段自由输出"},
+        {"role": "user", "content": ""},
+    ]
+    assert calls[1]["replayState"] is calls[0]["outputReplayState"]
+    assert calls[1]["context"].conversation_bound is True
     assert all(call["tools"] == [] for call in calls)
     assert all(call["metadata"]["promptChars"] == 0 for call in calls)
     assert all(call["metadata"]["inputMode"] == "blank" for call in calls)
-    assert result["messages"] == ["重复的自由输出", "重复的自由输出"]
-    assert [item["content"] for item in artifact_messages] == ["重复的自由输出", "重复的自由输出"]
+    assert [call["metadata"]["historyAssistantChars"] for call in calls] == [0, 7]
+    assert all(
+        message["content"] == ""
+        for call in calls
+        for message in call["messages"]
+        if message["role"] == "user"
+    )
+    payload_text = json.dumps([call["messages"] for call in calls], ensure_ascii=False)
+    assert "时间仍未结束" not in payload_text
+    assert "请继续下一段观察" not in payload_text
+    assert result["messages"] == ["第一段自由输出", "第二段延续输出"]
+    assert [item["content"] for item in artifact_messages] == ["第一段自由输出", "第二段延续输出"]
     assert [item["metadata"]["turnId"] for item in artifact_messages] == [
         "strict:self-observe-blank:1",
         "strict:self-observe-blank:2",
@@ -1487,15 +1551,33 @@ def test_self_observation_deadline_stops_stream_without_retry_and_keeps_partial_
     clock = {"now": 0.0}
     monkeypatch.setattr(service.time, "monotonic", lambda: clock["now"])
 
-    def fake_stream_llm(client, messages, *, context, tools=None, metadata=None):
+    def fake_run_streaming_llm_outcome(
+        client,
+        messages,
+        *,
+        context,
+        on_event,
+        tools=None,
+        metadata=None,
+        replay_state=None,
+    ):
         captured["messages"] = copy.deepcopy(messages)
         captured["tools"] = copy.deepcopy(tools)
         captured["metadata"] = copy.deepcopy(metadata)
-        yield SimpleNamespace(content="截止前的部分输出", tool_calls=[])
+        captured["replayState"] = replay_state
+        on_event(SimpleNamespace(kind="answer_delta", text="截止前的部分输出"))
         clock["now"] = 5.0
         raise RuntimeError("provider request interrupted at deadline")
 
-    monkeypatch.setattr(service, "stream_llm", fake_stream_llm)
+    monkeypatch.setattr(service, "stream_llm", lambda *_args, **_kwargs: (_ for _ in ()).throw(
+        AssertionError("blank mode must use canonical streaming outcome")
+    ))
+    monkeypatch.setattr(
+        service,
+        "run_streaming_llm_outcome",
+        fake_run_streaming_llm_outcome,
+        raising=False,
+    )
 
     result = service._invoke_strict_self_observation_llm(
         run_id="self-observe-deadline",

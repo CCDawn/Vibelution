@@ -1719,7 +1719,7 @@ export function SelfEvolutionTrack({
                         value={observationInputModeValue === "blank" ? "" : observationGoalDisplayValue}
                         disabled={observationRunActive || observationStartPending || observationInputModeValue === "blank"}
                         placeholder={observationInputModeValue === "blank"
-                          ? (lang === "zh" ? "空白模式固定发送一个内容为空的 user 消息" : "Blank mode sends one user message with empty content")
+                          ? (lang === "zh" ? "空白模式不填写提示词，首轮发送空 user 消息" : "Blank mode starts with an empty user message and no prompt")
                           : (lang === "zh" ? "输入要原样发送给观察 Agent 的全部内容" : "Enter the full content to send verbatim")}
                         onChange={(event) => setObservationGoalInput(event.target.value)}
                       />
@@ -1746,7 +1746,9 @@ export function SelfEvolutionTrack({
                         tooltip={observationRunActive
                           ? (lang === "zh" ? "终止这一轮自主观察。" : "Stop this observation run.")
                           : observationInputModeValue === "blank"
-                            ? (lang === "zh" ? "以空 user 消息启动，不注入任何提示内容。" : "Start with an empty user message and no injected prompt content.")
+                            ? (lang === "zh"
+                              ? "以空 user 消息启动并复用同一模型会话，不注入任何提示内容。"
+                              : "Start with an empty user message and continue the same model conversation without injected prompt content.")
                             : (lang === "zh" ? "使用当前提示词开始自主观察。" : "Start an observation run with the current prompt.")}
                         disabledReason={observationPrimaryActionDisabledReason || undefined}
                         onClick={() => {
@@ -1776,8 +1778,8 @@ export function SelfEvolutionTrack({
                         ? (lang === "zh" ? "观察会话正在运行，完整输出在中间会话区。" : "Observation is running; full output stays in the center conversation.")
                         : observationInputModeValue === "blank"
                           ? (lang === "zh"
-                            ? "每次调用只发送一个内容为空的 user 消息；不会注入默认目标、系统提示、历史或续写提示。"
-                            : "Every call sends only one empty user message, with no default goal, system prompt, history, or continuation prompt.")
+                            ? "首轮发送内容为空的 user 消息；后续复用同一模型会话，只携带上一轮真实 assistant 输出的有界历史和新的空 user 消息，不注入默认目标、系统提示或续写提示。"
+                            : "The first call sends an empty user message. Later calls continue the same model conversation with bounded prior assistant output and a new empty user message; no default goal, system prompt, or continuation prompt is injected.")
                           : (lang === "zh" ? "提示词会作为完整用户消息原样发送。" : "The prompt is sent verbatim as the full user message.")}
                     </p>
                     {compactObservationPreview(observationRun?.latestMessage, 110) ? (
