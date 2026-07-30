@@ -68,6 +68,112 @@ def test_conversation_harness_summary_uses_turn_journal_when_final_message_loses
     assert "close_evolution_transaction_tool:success" in summary["tool_sequence_tail"]
 
 
+def test_conversation_harness_summary_projects_bounded_redacted_tool_trace(tmp_path: Path):
+    session_id = "session-hidden-supervised-trace"
+    turn_id = "turn-trace"
+    append_turn_event(
+        tmp_path,
+        session_id,
+        turn_id,
+        EVENT_TOOL_RESULT,
+        status="done",
+        timestamp="2026-07-30T12:00:01Z",
+        payload={
+            "toolCall": {
+                "name": "open_evolution_transaction_tool",
+                "status": "done",
+                "arguments": {
+                    "summary": "supervised probe",
+                    "api_key": "must-not-leak",
+                },
+                "result": {
+                    "status": "success",
+                    "txn_id": "txn-trace",
+                    "authorization": "Bearer must-not-leak",
+                },
+            }
+        },
+        source="session_ui_capture",
+    )
+    detail = {
+        "id": session_id,
+        "messages": [
+            {
+                "role": "assistant",
+                "content": "lint passed, closing transaction",
+                "timestamp": "2026-07-30T12:00:03Z",
+                "tool_calls": [
+                    {
+                        "name": "close_evolution_transaction_tool",
+                        "status": "done",
+                        "arguments": {
+                            "txn_id": "txn-trace",
+                            "status": "success",
+                        },
+                        "result": {
+                            "status": "success",
+                            "transaction_status": "success",
+                        },
+                    }
+                ],
+            }
+        ],
+    }
+
+    summary = adapter._conversation_harness_evolution_summary(
+        detail,
+        assistant_text="lint passed, closing transaction",
+        restart_expected=False,
+        repo_root=tmp_path,
+    )
+
+    assert summary["tool_trace"] == [
+        {
+            "toolName": "open_evolution_transaction_tool",
+            "status": "success",
+            "timestamp": "2026-07-30T12:00:01Z",
+            "arguments": {
+                "summary": "supervised probe",
+                "api_key": "[redacted]",
+            },
+            "result": {
+                "status": "success",
+                "txn_id": "txn-trace",
+                "authorization": "[redacted]",
+            },
+        },
+        {
+            "toolName": "close_evolution_transaction_tool",
+            "status": "success",
+            "timestamp": "2026-07-30T12:00:03Z",
+            "arguments": {"txn_id": "txn-trace", "status": "success"},
+            "result": {"status": "success", "transaction_status": "success"},
+        },
+    ]
+
+
+def test_conversation_harness_tool_trace_keeps_only_latest_bounded_events():
+    events = [
+        {
+            "type": "tool_call",
+            "tool_name": f"tool_{index}",
+            "status": "success",
+            "timestamp": f"2026-07-30T12:00:{index:02d}Z",
+            "tool_args": {"value": "x" * 800},
+            "tool_result": "y" * 800,
+        }
+        for index in range(13)
+    ]
+
+    trace = adapter._conversation_harness_bounded_tool_trace(events)
+
+    assert len(trace) == 12
+    assert trace[0]["toolName"] == "tool_1"
+    assert trace[-1]["toolName"] == "tool_12"
+    assert len(trace[0]["arguments"]["value"]) == 500
+    assert len(trace[0]["result"]) == 500
+
+
 def test_conversation_harness_recovers_completed_turn_from_completion_snapshot(monkeypatch, tmp_path: Path):
     assistant_text = (
         "完成动态重规划。\n"

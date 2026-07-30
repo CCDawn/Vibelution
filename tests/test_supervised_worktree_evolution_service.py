@@ -135,6 +135,15 @@ def test_harness_result_payload_includes_bounded_trace_evidence_for_judge(tmp_pa
                 "tool:read_file_tool:success",
                 "tool:run_test_for_tool:success",
             ],
+            "tool_trace": [
+                {
+                    "toolName": "run_test_for_tool",
+                    "status": "success",
+                    "timestamp": "2026-07-30T12:00:02Z",
+                    "arguments": {"source_path": "tests/test_demo.py"},
+                    "result": {"status": "success", "passed": 1},
+                }
+            ],
             "evidence": {"conversation_tool_events": 2},
         }
     )
@@ -143,6 +152,15 @@ def test_harness_result_payload_includes_bounded_trace_evidence_for_judge(tmp_pa
 
     assert payload["assistantOutput"] == "analysis complete final answer"
     assert payload["traceSummary"]["toolSequence"] == ["read_file_tool", "run_test_for_tool"]
+    assert payload["traceSummary"]["toolTrace"] == [
+        {
+            "toolName": "run_test_for_tool",
+            "status": "success",
+            "timestamp": "2026-07-30T12:00:02Z",
+            "arguments": {"source_path": "tests/test_demo.py"},
+            "result": {"status": "success", "passed": 1},
+        }
+    ]
     assert payload["traceSummary"]["validation"]["passed"] == 1
     assert payload["traceSummary"]["evidence"]["conversation_tool_events"] == 2
 
