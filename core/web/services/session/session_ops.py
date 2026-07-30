@@ -1361,20 +1361,15 @@ def update_session_reasoning_effort(
         raise s.SessionValidationError(
             f"模型 {selected.get('label') or selected.get('modelId')} 不支持推理强度 {normalized_effort or '-'}。"
         )
-    with s._CHAT_STATE_LOCK:
-        if s._is_session_running(normalized_session_id):
-            raise s.SessionBusyError("会话运行中，不能切换推理强度。")
-        payload = s.load_chat_state(s.PROJECT_ROOT)
-        conversation = s._find_conversation_entry(payload, normalized_session_id)
-        if conversation is None:
-            raise s.SessionNotFoundError(f"Session not found: {normalized_session_id}")
-        s._ensure_session_mutable(
-            normalized_session_id,
-            conversation=conversation,
-        )
-        conversation["reasoning_effort"] = normalized_effort
-        conversation["updated_at"] = s._now_timestamp()
-        s.save_chat_state(s.PROJECT_ROOT, payload)
+    if s._is_session_running(normalized_session_id):
+        raise s.SessionBusyError("会话运行中，不能切换推理强度。")
+    agent_id = s._session_agent_id_snapshot(normalized_session_id)
+    if not agent_id:
+        raise s.SessionValidationError("当前会话缺少有效 Agent，不能修改推理强度。")
+    s.update_agent_instance(
+        agent_id,
+        reasoning_effort_by_slot={"dialogue": normalized_effort},
+    )
     s._invalidate_session_list_cache()
     try:
         s.record_runtime_scene_event(
@@ -1383,13 +1378,14 @@ def update_session_reasoning_effort(
             "conversation.reasoning_effort.updated",
             level="info",
             outcome="updated",
-            message="Session reasoning effort updated without changing the Agent model binding.",
+            message="Agent reasoning effort updated through the session projection.",
             fields={
                 "sessionId": normalized_session_id,
+                "agentId": agent_id,
                 "modelRef": str(selected.get("modelRef") or selected.get("modelId") or "").strip(),
                 "reasoningEffortRequested": normalized_effort,
                 "reasoningEffortAdapter": str(selected.get("reasoningAdapter") or "none").strip(),
-                "source": "session_record",
+                "source": "agent_config",
             },
             lifecycle=True,
         )
