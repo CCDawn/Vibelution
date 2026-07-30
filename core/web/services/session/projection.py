@@ -70,6 +70,7 @@ def list_sessions(
             agent_by_id=agent_by_id,
             hidden_team_member_agent_ids=hidden_team_member_agent_ids,
             lightweight=True,
+            defer_hidden_previews=not include_hidden_internal,
             phase_timings=load_phase_timings,
         )
         summary_projection_started_at = s._perf_counter()
@@ -602,6 +603,32 @@ def _public_experiment_binding(value: Any) -> dict[str, Any] | None:
     }
 
 
+def _load_lightweight_conversation_preview(
+    conversation_id: str,
+    raw_messages: Any,
+    *,
+    phase_timings: dict[str, int] | None = None,
+    ledger_workspace_root: Path | None = None,
+) -> tuple[list[dict[str, Any]], bool]:
+    s = _service()
+    ledger_tail_started_at = s._perf_counter() if phase_timings is not None else None
+    messages, has_ledger_messages = s._ledger_latest_preview_messages_for_session(
+        conversation_id,
+        ledger_workspace_root=ledger_workspace_root,
+    )
+    if not has_ledger_messages:
+        messages = s._normalize_latest_preview_messages(
+            conversation_id,
+            raw_messages or [],
+        )
+    if phase_timings is not None and ledger_tail_started_at is not None:
+        phase_timings["ledgerTailMs"] = (
+            phase_timings.get("ledgerTailMs", 0)
+            + s._elapsed_ms(ledger_tail_started_at)
+        )
+    return list(messages), has_ledger_messages
+
+
 def _normalize_conversation(
     raw: Any,
     *,
@@ -609,6 +636,7 @@ def _normalize_conversation(
     hidden_team_member_agent_ids: set[str] | None = None,
     ensure_workspace: bool = True,
     lightweight: bool = False,
+    load_message_preview: bool = True,
     phase_timings: dict[str, int] | None = None,
     ledger_workspace_root: Path | None = None,
 ) -> dict[str, Any] | None:
@@ -677,23 +705,17 @@ def _normalize_conversation(
     elif missing_agent_id and agent_lookup_checked and agent is None:
         agent_missing = True
         agent_status_code = agent_status_code or "missing_agent"
-    if lightweight:
-        ledger_tail_started_at = s._perf_counter() if phase_timings is not None else None
-        messages, has_ledger_messages = s._ledger_latest_preview_messages_for_session(
+    if lightweight and load_message_preview:
+        messages, has_ledger_messages = _load_lightweight_conversation_preview(
             conversation_id,
+            raw.get("messages") or [],
+            phase_timings=phase_timings,
             ledger_workspace_root=ledger_workspace_root,
         )
-        if not has_ledger_messages:
-            messages = s._normalize_latest_preview_messages(
-                conversation_id,
-                raw.get("messages") or [],
-            )
-        messages = list(messages)
-        if phase_timings is not None and ledger_tail_started_at is not None:
-            phase_timings["ledgerTailMs"] = (
-                phase_timings.get("ledgerTailMs", 0)
-                + s._elapsed_ms(ledger_tail_started_at)
-            )
+        visible_runtime_notices: list[dict[str, Any]] = []
+    elif lightweight:
+        messages = []
+        has_ledger_messages = False
         visible_runtime_notices: list[dict[str, Any]] = []
     else:
         ledger_messages = s._session_ledger_visible_messages(conversation_id)
@@ -3106,6 +3128,7 @@ def _load_conversations(
     agent_by_id: dict[str, dict[str, Any]] | None = None,
     hidden_team_member_agent_ids: set[str] | None = None,
     lightweight: bool = False,
+    defer_hidden_previews: bool = False,
     phase_timings: dict[str, int] | None = None,
 ) -> tuple[str, list[dict[str, Any]]]:
     s = _service()
@@ -3149,9 +3172,24 @@ def _load_conversations(
                 hidden_team_member_agent_ids=hidden_team_member_agent_ids,
                 ensure_workspace=repair,
                 lightweight=lightweight,
+                load_message_preview=not (lightweight and defer_hidden_previews),
                 phase_timings=phase_timings,
                 ledger_workspace_root=ledger_workspace_root,
             )
+            if (
+                conversation is not None
+                and lightweight
+                and defer_hidden_previews
+                and s._session_agent_visible_in_indexes(conversation)
+            ):
+                messages, has_ledger_messages = _load_lightweight_conversation_preview(
+                    conversation["id"],
+                    raw.get("messages") or [],
+                    phase_timings=phase_timings,
+                    ledger_workspace_root=ledger_workspace_root,
+                )
+                conversation["messages"] = messages
+                conversation["_hasLedgerMessages"] = has_ledger_messages
             if conversation is not None:
                 conversations.append(conversation)
         if repair and changed:
