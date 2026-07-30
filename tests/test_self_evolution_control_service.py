@@ -1440,12 +1440,16 @@ def test_self_observation_session_continues_until_duration_when_model_stops(monk
     assert result["report"] == "第一段观察\n\n第二段观察"
     assert [item["content"] for item in artifact_messages] == ["第一段观察", "第二段观察"]
     assert all(item["toolCalls"] == [] for item in artifact_messages)
+    assert [item["metadata"]["turnId"] for item in artifact_messages] == [
+        "strict:self-observe-loop:1",
+        "strict:self-observe-loop:2",
+    ]
 
 
 def test_self_observation_blank_mode_keeps_every_model_input_empty(monkeypatch):
     captured, artifact_messages = _install_strict_self_observation_llm(
         monkeypatch,
-        content=["第一段自由输出", "第二段自由输出"],
+        content=["重复的自由输出", "重复的自由输出"],
     )
     monkeypatch.setattr(service, "self_observation_agent_binding", lambda: {"agentId": "agent-observer-blank"})
     monkeypatch.setattr(service, "create_supervised_agent_session", lambda **kwargs: {"id": "session-blank"})
@@ -1467,8 +1471,12 @@ def test_self_observation_blank_mode_keeps_every_model_input_empty(monkeypatch):
     assert all(call["tools"] == [] for call in calls)
     assert all(call["metadata"]["promptChars"] == 0 for call in calls)
     assert all(call["metadata"]["inputMode"] == "blank" for call in calls)
-    assert result["messages"] == ["第一段自由输出", "第二段自由输出"]
-    assert [item["content"] for item in artifact_messages] == ["第一段自由输出", "第二段自由输出"]
+    assert result["messages"] == ["重复的自由输出", "重复的自由输出"]
+    assert [item["content"] for item in artifact_messages] == ["重复的自由输出", "重复的自由输出"]
+    assert [item["metadata"]["turnId"] for item in artifact_messages] == [
+        "strict:self-observe-blank:1",
+        "strict:self-observe-blank:2",
+    ]
 
 
 def test_self_observation_deadline_stops_stream_without_retry_and_keeps_partial_output(monkeypatch):
