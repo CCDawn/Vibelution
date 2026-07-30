@@ -8,6 +8,7 @@ import type {
   PetActionResponse,
   SessionDetail,
   SessionLlmOptions,
+  SessionToolApprovalRequest,
   SessionSummary,
 } from "../../api/types";
 import { mergeSessionDetailMessageWindow } from "../chatSessionState";
@@ -48,6 +49,12 @@ export type UseChatSessionDetailMutationsResult = {
     AgentToolGovernanceRequest,
     Error,
     { request: AgentToolGovernanceRequest; decision: "approve" | "reject" },
+    unknown
+  >;
+  resolveSessionToolApprovalMutation: UseMutationResult<
+    SessionToolApprovalRequest,
+    Error,
+    { request: SessionToolApprovalRequest; decision: "accept" | "acceptForSession" | "decline" },
     unknown
   >;
   petActionMutation: UseMutationResult<
@@ -155,6 +162,47 @@ export function useChatSessionDetailMutations({
     },
   });
 
+  const resolveSessionToolApprovalMutation = useMutation({
+    mutationFn: (
+      { request, decision }: {
+        request: SessionToolApprovalRequest;
+        decision: "accept" | "acceptForSession" | "decline";
+      },
+    ) =>
+      fetchJson<SessionToolApprovalRequest>(
+        `/api/sessions/${encodeURIComponent(request.sessionId)}/tool-approvals/${encodeURIComponent(request.requestId)}/decision`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ decision }),
+        },
+      ),
+    onSuccess: (_payload, variables) => {
+      queryClient.setQueryData<SessionToolApprovalRequest[]>(
+        queryKeys.sessionToolApprovals(variables.request.sessionId),
+        (current) => (current ?? []).filter((item) => item.requestId !== variables.request.requestId),
+      );
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.sessionToolApprovals(variables.request.sessionId),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.session(variables.request.sessionId),
+      });
+      void chatWorkspaceCache.refreshSessionRuntime(variables.request.sessionId);
+    },
+    onError: (error, variables) => {
+      setSessionComposerErrors((current) => ({
+        ...current,
+        [variables.request.sessionId]: describeError(
+          error,
+          lang === "zh" ? "处理本轮工具审批失败" : "Resolve session tool approval failed",
+        ),
+      }));
+    },
+  });
+
   const petActionMutation = useMutation({
     mutationFn: async ({ action }: { action: PetInteractionAction }) =>
       fetchJson<PetActionResponse>("/api/pet/actions", {
@@ -179,6 +227,7 @@ export function useChatSessionDetailMutations({
     sessionReasoningEffortMutation,
     loadEarlierSessionMessagesMutation,
     resolveToolApprovalMutation,
+    resolveSessionToolApprovalMutation,
     petActionMutation,
   };
 }

@@ -640,6 +640,28 @@ export type SessionRuntimeNotice = {
   previousStatus?: string;
 };
 
+export type SessionToolApprovalRequest = {
+  requestId: string;
+  sessionId: string;
+  turnId: string;
+  agentId: string;
+  callId: string;
+  toolName: string;
+  approval: string;
+  risk: string;
+  argumentsHash: string;
+  argumentSummary: Record<string, unknown>;
+  decisionFingerprint: string;
+  configRevision: number;
+  configHash: string;
+  permissionPreset: string;
+  availableDecisions: Array<"accept" | "acceptForSession" | "decline" | "cancel" | string>;
+  createdAt: string;
+  status: "pending" | "accepted" | "accepted_for_session" | "declined" | "cancelled" | "expired" | string;
+  decision: string | null;
+  resolvedAt: string | null;
+};
+
 export type ChatNextStateSignalSummary = {
   signalId: string;
   sessionId: string;

@@ -624,9 +624,12 @@ export type ResearchLoopStatusPayload = {
   activeLoopId: string;
   activeLoop: ResearchLoopRecord | null;
   loops: ResearchLoopSummary[];
+  historicalEmptyLoops?: ResearchLoopSummary[];
   pendingDesignProposals: ResearchLoopPendingDesignProposal[];
   summary: {
     totalLoopCount: number;
+    currentLoopCount?: number;
+    historicalEmptyLoopCount?: number;
     readyForDecisionCount: number;
     readyForIterationCount: number;
     blockedLoopCount: number;

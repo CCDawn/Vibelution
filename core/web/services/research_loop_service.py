@@ -621,9 +621,19 @@ def utc_now_iso() -> str:
 def _status_payload(team_id: str, team: dict[str, Any], store: dict[str, Any], *, active_loop: dict[str, Any] | None) -> dict[str, Any]:
     loop_records = _loop_records(store)
     loops = [_loop_summary(loop) for loop in loop_records]
+    active_loop_id = str(store.get("activeLoopId") or "")
+    historical_empty_loops = [
+        loop
+        for loop in loops
+        if loop.get("loopId") != active_loop_id
+        and int(loop.get("evidenceRecordCount") or 0) == 0
+        and int(loop.get("decisionCount") or 0) == 0
+    ]
     pending_design_proposals = _pending_iteration_design_proposals(loop_records)
     summary = {
         "totalLoopCount": len(loops),
+        "currentLoopCount": len(loops) - len(historical_empty_loops),
+        "historicalEmptyLoopCount": len(historical_empty_loops),
         "readyForDecisionCount": sum(1 for loop in loops if loop.get("readyForDecision")),
         "readyForIterationCount": sum(1 for loop in loops if loop.get("status") == "ready_for_iteration"),
         "blockedLoopCount": sum(1 for loop in loops if loop.get("status") in {"evidence_incomplete", "needs_more_evidence"}),
@@ -636,6 +646,7 @@ def _status_payload(team_id: str, team: dict[str, Any], store: dict[str, Any], *
         "activeLoopId": store.get("activeLoopId", ""),
         "activeLoop": active_loop,
         "loops": loops,
+        "historicalEmptyLoops": historical_empty_loops,
         "pendingDesignProposals": pending_design_proposals,
         "summary": summary,
         "templates": [deepcopy(template) for template in RESEARCH_LOOP_TEMPLATES],
