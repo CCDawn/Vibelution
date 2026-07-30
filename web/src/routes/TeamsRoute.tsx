@@ -1378,6 +1378,7 @@ export function TeamsRoute({
     createExperimentPlanMutation,
     freezeExperimentDesignMutation,
     registerExperimentBaselineArtifactMutation,
+    runExperimentSmokeMutation,
     registerExperimentSmokeResultMutation,
     registerExperimentFullRunResultMutation,
     requestExperimentKnowledgeIngestionMutation,
@@ -1522,6 +1523,18 @@ export function TeamsRoute({
       teamId: selectedTeam.teamId,
       plan,
       draft: experimentSmokeResultDraft,
+    });
+  }
+
+  function runExperimentSmokeFromWorkspace(plan: ExperimentPlanRecord, adapter: string, seed: number) {
+    if (!selectedTeam?.teamId || selectedTeamRunExperimentSmokePending) {
+      return;
+    }
+    runExperimentSmokeMutation.mutate({
+      teamId: selectedTeam.teamId,
+      plan,
+      adapter,
+      seed,
     });
   }
 
@@ -2585,6 +2598,9 @@ export function TeamsRoute({
         selectedTeamRegisterExperimentBaselineArtifactPending={selectedTeamRegisterExperimentBaselineArtifactPending}
         selectedTeamRegisterExperimentBaselineArtifactError={selectedTeamRegisterExperimentBaselineArtifactError}
         selectedTeamRegisterExperimentBaselineArtifactResult={selectedTeamRegisterExperimentBaselineArtifactResult}
+        selectedTeamRunExperimentSmokePending={selectedTeamRunExperimentSmokePending}
+        selectedTeamRunExperimentSmokeError={selectedTeamRunExperimentSmokeError}
+        selectedTeamRunExperimentSmokeResult={selectedTeamRunExperimentSmokeResult}
         selectedTeamRegisterExperimentSmokeResultPending={selectedTeamRegisterExperimentSmokeResultPending}
         selectedTeamRegisterExperimentSmokeResultError={selectedTeamRegisterExperimentSmokeResultError}
         selectedTeamRegisterExperimentSmokeResultResult={selectedTeamRegisterExperimentSmokeResultResult}
@@ -2597,6 +2613,7 @@ export function TeamsRoute({
         createExperimentPlanFromWorkspace={createExperimentPlanFromWorkspace}
         freezeExperimentDesignFromWorkspace={freezeExperimentDesignFromWorkspace}
         registerExperimentBaselineArtifactFromWorkspace={registerExperimentBaselineArtifactFromWorkspace}
+        runExperimentSmokeFromWorkspace={runExperimentSmokeFromWorkspace}
         registerExperimentSmokeResultFromWorkspace={registerExperimentSmokeResultFromWorkspace}
         registerExperimentFullRunResultFromWorkspace={registerExperimentFullRunResultFromWorkspace}
         requestExperimentKnowledgeIngestionFromWorkspace={requestExperimentKnowledgeIngestionFromWorkspace}
@@ -3091,6 +3108,16 @@ export function TeamsRoute({
   const selectedTeamRegisterExperimentBaselineArtifactResult =
     registerExperimentBaselineArtifactMutation.variables?.teamId === selectedTeam?.teamId
       ? registerExperimentBaselineArtifactMutation.data
+      : undefined;
+  const selectedTeamRunExperimentSmokePending =
+    runExperimentSmokeMutation.isPending && runExperimentSmokeMutation.variables?.teamId === selectedTeam?.teamId;
+  const selectedTeamRunExperimentSmokeError =
+    runExperimentSmokeMutation.variables?.teamId === selectedTeam?.teamId && runExperimentSmokeMutation.error instanceof Error
+      ? runExperimentSmokeMutation.error
+      : null;
+  const selectedTeamRunExperimentSmokeResult =
+    runExperimentSmokeMutation.variables?.teamId === selectedTeam?.teamId
+      ? runExperimentSmokeMutation.data
       : undefined;
   const selectedTeamRegisterExperimentSmokeResultPending =
     registerExperimentSmokeResultMutation.isPending && registerExperimentSmokeResultMutation.variables?.teamId === selectedTeam?.teamId;
