@@ -79,11 +79,13 @@ def list_sessions(
         )
         sessions = []
         hidden_summaries = []
+        agent_inbox_pending_count_cache: dict[str, int] = {}
         for item in conversations:
             summary = s._build_session_summary(
                 item,
                 hydrate_agent=False,
                 phase_timings=load_phase_timings,
+                agent_inbox_pending_count_cache=agent_inbox_pending_count_cache,
             )
             hidden_internal = not include_hidden_internal and s._empty_direct_agent_session_hidden_from_index(
                 item,
@@ -427,6 +429,7 @@ def _build_session_summary(
     *,
     hydrate_agent: bool = True,
     phase_timings: dict[str, int] | None = None,
+    agent_inbox_pending_count_cache: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     s = _service()
     status = s._conversation_phase(conversation["id"], conversation)
@@ -455,7 +458,16 @@ def _build_session_summary(
     agent_prompt_template_id = str((agent or {}).get("promptTemplateId") or "").strip()
     dialogue_model_id = s.agent_dialogue_model_id(agent) if agent else ""
     agent_inbox_started_at = s._perf_counter() if phase_timings is not None else None
-    agent_inbox_pending_count = s._agent_inbox_pending_count_for_summary(agent)
+    if (
+        agent_inbox_pending_count_cache is not None
+        and agent_id
+        and agent_id in agent_inbox_pending_count_cache
+    ):
+        agent_inbox_pending_count = agent_inbox_pending_count_cache[agent_id]
+    else:
+        agent_inbox_pending_count = s._agent_inbox_pending_count_for_summary(agent)
+        if agent_inbox_pending_count_cache is not None and agent_id:
+            agent_inbox_pending_count_cache[agent_id] = agent_inbox_pending_count
     if phase_timings is not None and agent_inbox_started_at is not None:
         phase_timings["agentInboxMs"] = (
             phase_timings.get("agentInboxMs", 0)

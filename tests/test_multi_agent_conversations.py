@@ -429,6 +429,63 @@ def test_session_agent_lookup_reuses_avatar_url_for_shared_paths(monkeypatch):
     assert agents["agent-alpha"]["avatarImageUrl"] == agents["agent-beta"]["avatarImageUrl"]
 
 
+def test_session_list_reuses_agent_inbox_count_for_shared_agent(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    parent = session_service.create_chat_session(title="Shared Agent")
+    child_session_id = "session-shared-agent-child"
+    state = load_chat_state(tmp_path)
+    parent_conversation = next(
+        item for item in state["conversations"]
+        if item["conversation_id"] == parent["id"]
+    )
+    parent_conversation["child_session_ids"] = [child_session_id]
+    state["conversations"].append(
+        {
+            "conversation_id": child_session_id,
+            "title": "Shared Agent Child",
+            "task_title": "Shared Agent Child",
+            "updated_at": "2026-07-30T08:00:00",
+            "agent_id": parent["agentId"],
+            "session_kind": "child",
+            "parent_session_id": parent["id"],
+            "root_session_id": parent["id"],
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "Child task",
+                    "timestamp": "2026-07-30T08:00:00",
+                }
+            ],
+        }
+    )
+    save_chat_state(tmp_path, state)
+    session_service._invalidate_session_list_cache()
+    inbox_count_calls = []
+
+    def counting_agent_inbox_pending_count(agent):
+        inbox_count_calls.append(str((agent or {}).get("agentId") or ""))
+        return 3
+
+    monkeypatch.setattr(
+        session_service,
+        "_agent_inbox_pending_count_for_summary",
+        counting_agent_inbox_pending_count,
+    )
+
+    sessions = session_service.list_sessions(repair_collisions=False)
+    shared_agent_sessions = [
+        item for item in sessions
+        if item["agentId"] == parent["agentId"]
+    ]
+
+    assert {item["id"] for item in shared_agent_sessions} == {
+        parent["id"],
+        child_session_id,
+    }
+    assert all(item["agentInboxPendingCount"] == 3 for item in shared_agent_sessions)
+    assert inbox_count_calls.count(parent["agentId"]) == 1
+
+
 def test_session_list_cache_returns_isolated_summary_snapshots(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     created = session_service.create_chat_session(title="Cached Parent")
