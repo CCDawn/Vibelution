@@ -311,7 +311,7 @@ def test_runtime_summary_uses_light_active_session_summary(monkeypatch):
 
 def test_runtime_summary_falls_back_when_agent_model_identity_fails(monkeypatch):
     public_config = copy.deepcopy(load_public_config())
-    expected_profile = str(public_config["runtime"]["profile"])
+    expected_profile = str(public_config.get("runtime", {}).get("profile") or "safe_local")
     primary_profile = public_config["llm"]["profiles"]["primary"]
     fallback_model_ref = str(primary_profile.get("model_ref") or primary_profile.get("model"))
     scene_events: list[tuple[str, str, str, dict]] = []
