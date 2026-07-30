@@ -59,6 +59,8 @@ const styles = {
     "grid h-full min-h-0 min-w-0 content-start gap-2.5 overflow-auto p-3 [container-type:inline-size] [background:var(--vui-surface-base)]",
   runtimeEffect:
     "inline-flex min-w-0 items-center gap-1.5 text-[length:var(--vui-font-xs)] leading-[1.4] text-[var(--fg-secondary)] [&_svg]:shrink-0 [&_svg]:text-[var(--state-warning)]",
+  rubricCriterionItem:
+    "grid min-w-0 grid-cols-[max-content_minmax(0,1fr)] items-start gap-x-2 gap-y-1 rounded-md bg-[var(--vui-control-muted)] px-2 py-1.5 text-[length:var(--vui-font-xs)] leading-[1.45] text-[var(--fg-secondary)] [&>span:first-child]:whitespace-nowrap [&>span:first-child]:text-right [&>span:first-child]:tabular-nums [&>span:last-child]:min-w-0 [&>span:last-child]:[overflow-wrap:anywhere]",
   sectionHeading:
     "m-0 text-[length:var(--vui-font-sm)] font-semibold text-[var(--fg-primary)]",
 } as const;

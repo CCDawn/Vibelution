@@ -69,6 +69,87 @@ def test_session_list_cache_single_flight_begin_finish() -> None:
     list_cache.invalidate_session_list_cache()
 
 
+def test_session_list_cache_keeps_distinct_signature_build_owners() -> None:
+    visible_signature = ("shared-source", False)
+    hidden_signature = ("shared-source", True)
+    list_cache.invalidate_session_list_cache()
+
+    visible_cached, visible_should_build, visible_waited = (
+        list_cache.begin_session_list_cache_build(
+            now=200.0,
+            signature=visible_signature,
+        )
+    )
+    hidden_cached, hidden_should_build, hidden_waited = (
+        list_cache.begin_session_list_cache_build(
+            now=200.1,
+            signature=hidden_signature,
+        )
+    )
+
+    assert visible_cached is None
+    assert visible_should_build is True
+    assert visible_waited is False
+    assert hidden_cached is None
+    assert hidden_should_build is True
+    assert hidden_waited is False
+
+    list_cache.finish_session_list_cache_build(
+        signature=visible_signature,
+        sessions=[{"id": "visible", "title": "visible"}],
+        started_at=200.0,
+        conversation_count=1,
+        agent_count=2,
+    )
+    list_cache.finish_session_list_cache_build(
+        signature=hidden_signature,
+        sessions=[{"id": "hidden", "title": "hidden"}],
+        started_at=200.1,
+        conversation_count=2,
+        agent_count=2,
+    )
+
+    visible_hit = list_cache.get_session_list_cache(
+        now=200.5,
+        signature=visible_signature,
+    )
+    hidden_hit = list_cache.get_session_list_cache(
+        now=200.5,
+        signature=hidden_signature,
+    )
+
+    assert visible_hit is not None
+    assert visible_hit[0][0]["id"] == "visible"
+    assert hidden_hit is not None
+    assert hidden_hit[0][0]["id"] == "hidden"
+    list_cache.invalidate_session_list_cache()
+
+
+def test_session_list_cache_bounds_distinct_signature_snapshots() -> None:
+    list_cache.invalidate_session_list_cache()
+    signatures = [
+        (f"source-{index}", bool(index % 2))
+        for index in range(list_cache._SESSION_LIST_CACHE_MAX_ENTRIES + 2)
+    ]
+
+    for index, signature in enumerate(signatures):
+        list_cache.set_session_list_cache(
+            [{"id": f"session-{index}", "title": f"session-{index}"}],
+            now=100.0 + index,
+            signature=signature,
+            conversation_count=index + 1,
+            agent_count=2,
+        )
+
+    with list_cache._SESSION_LIST_CACHE_LOCK:
+        entries = list_cache._SESSION_LIST_CACHE["entries"]
+        assert len(entries) == list_cache._SESSION_LIST_CACHE_MAX_ENTRIES
+        assert signatures[0] not in entries
+        assert signatures[1] not in entries
+        assert signatures[-1] in entries
+    list_cache.invalidate_session_list_cache()
+
+
 def test_session_list_cache_keeps_slow_live_builder_as_single_owner(monkeypatch) -> None:
     signature = ("slow-inflight-signature", False)
     list_cache.invalidate_session_list_cache()
