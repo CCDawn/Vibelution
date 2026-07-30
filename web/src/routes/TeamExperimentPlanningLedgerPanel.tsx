@@ -6,7 +6,15 @@ import type { ReactNode } from "react";
 import { AlertTriangle, CheckCircle2, Play, Save, Send } from "lucide-react";
 
 import type { ExperimentMethodId, Team } from "../api/types";
-import { VNativeButton, VNativeInput, VNativeSelect, VNativeTextarea } from "../components/vui";
+import {
+  VMetricChip,
+  VNativeButton,
+  VNativeInput,
+  VNativeSelect,
+  VNativeTextarea,
+  VStatusChip,
+  type VStatusTone,
+} from "../components/vui";
 import {
   EXPERIMENT_FULL_RUN_RESULT_STATUSES,
   EXPERIMENT_SMOKE_RESULT_STATUSES,
@@ -29,6 +37,91 @@ import workflowStyles from "./TeamsRoute.workflow.styles";
 const styles = { ...experimentStyles, ...researchStyles, ...workflowStyles } as Record<string, string>;
 
 type Lang = "zh" | "en";
+
+type SmokeMetricValue = string | number | boolean;
+
+type SmokeMetricEntry = {
+  label: string;
+  value: SmokeMetricValue;
+};
+
+const smokeBoundaryCopy: Record<string, Record<Lang, string>> = {
+  offline_numpy_only: {
+    zh: "仅离线 NumPy 代理",
+    en: "Offline NumPy proxy only",
+  },
+  does_not_replace_target_dataset_evaluation: {
+    zh: "不替代目标数据集评估",
+    en: "Does not replace target-dataset evaluation",
+  },
+  does_not_validate_neural_realism: {
+    zh: "不验证神经真实性",
+    en: "Does not validate neural realism",
+  },
+  no_full_run_promotion_from_proxy_only: {
+    zh: "代理结果不可晋升 Full run",
+    en: "Proxy result cannot promote a full run",
+  },
+};
+
+function isSmokeMetricValue(value: unknown): value is SmokeMetricValue {
+  return typeof value === "string" || typeof value === "number" || typeof value === "boolean";
+}
+
+function readSmokeMetric(
+  metrics: Record<string, unknown>,
+  group: string,
+  key: string,
+): SmokeMetricValue | null {
+  const metricGroup = metrics[group];
+  if (!metricGroup || typeof metricGroup !== "object" || Array.isArray(metricGroup)) {
+    return null;
+  }
+  const value = (metricGroup as Record<string, unknown>)[key];
+  return isSmokeMetricValue(value) ? value : null;
+}
+
+function buildSmokeMetricEntries(metrics: Record<string, unknown>): SmokeMetricEntry[] {
+  const preferredMetrics = [
+    { group: "baseline", key: "reconstruction_mse", label: "Baseline MSE" },
+    { group: "variant", key: "reconstruction_mse", label: "Variant MSE" },
+    { group: "delta", key: "mse_improvement", label: "Improvement" },
+    { group: "threshold", key: "mse_improvement", label: "Threshold" },
+  ];
+  const preferredEntries = preferredMetrics.flatMap(({ group, key, label }) => {
+    const value = readSmokeMetric(metrics, group, key);
+    return value === null ? [] : [{ label, value }];
+  });
+  if (preferredEntries.length > 0) {
+    return preferredEntries;
+  }
+
+  return Object.entries(metrics)
+    .flatMap(([group, value]) => {
+      if (isSmokeMetricValue(value)) {
+        return [{ label: group, value }];
+      }
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return [];
+      }
+      return Object.entries(value as Record<string, unknown>).flatMap(([key, nestedValue]) =>
+        isSmokeMetricValue(nestedValue)
+          ? [{ label: `${group}.${key}`, value: nestedValue }]
+          : [],
+      );
+    })
+    .slice(0, 6);
+}
+
+function smokeStatusTone(status: string): VStatusTone {
+  if (status === "passed") {
+    return "success";
+  }
+  if (status === "failed") {
+    return "danger";
+  }
+  return "warning";
+}
 
 export type TeamExperimentPlanningLedgerPanelProps = {
   lang: Lang;
@@ -183,6 +276,9 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
       ?? null;
     const activeBaselineArtifact = activePlan?.baselineSelection.activeBaselineArtifact ?? null;
     const activeSmokeRun = selectedTeamRunExperimentSmokeResult?.smokeRun ?? activePlan?.activeSmokeRun ?? null;
+    const activeSmokeMetricEntries = activeSmokeRun
+      ? buildSmokeMetricEntries(activeSmokeRun.metrics ?? {})
+      : [];
     const activeSmokeResult = activePlan?.activeSmokeResult ?? null;
     const activeFullRunResult = activePlan?.activeFullRunResult ?? null;
     const knowledgeIngestion = activePlan?.knowledgeIngestion ?? null;
@@ -483,6 +579,57 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
                   : (lang === "zh" ? "运行受控 Smoke" : "Run bounded smoke")}
               </VNativeButton>
             </div>
+            {activeSmokeRun ? (
+              <section
+                className={styles.experimentSmokeRunEvidence}
+                aria-label={lang === "zh" ? "本次受控 Smoke 证据" : "Bounded smoke evidence"}
+              >
+                <header className={styles.experimentSmokeRunHeader}>
+                  <div>
+                    <span>{lang === "zh" ? "本次 Smoke 证据" : "Smoke evidence"}</span>
+                    <strong>{activeSmokeRun.adapter}</strong>
+                  </div>
+                  <div className={styles.experimentSmokeMeta}>
+                    <VStatusChip tone={smokeStatusTone(activeSmokeRun.status)}>
+                      {activeSmokeRun.status === "needs_review"
+                        ? (lang === "zh" ? "待人工复核" : "Needs review")
+                        : activeSmokeRun.status}
+                    </VStatusChip>
+                    {activeSmokeRun.proxyOnly ? (
+                      <VStatusChip tone="warning">
+                        {lang === "zh" ? "仅代理验证" : "Proxy only"}
+                      </VStatusChip>
+                    ) : null}
+                  </div>
+                </header>
+                {activeSmokeMetricEntries.length > 0 ? (
+                  <div className={styles.experimentSmokeMetricList}>
+                    {activeSmokeMetricEntries.map((entry) => (
+                      <VMetricChip key={entry.label} label={entry.label} value={String(entry.value)} />
+                    ))}
+                  </div>
+                ) : null}
+                <dl className={styles.experimentSmokeEvidenceGrid}>
+                  <div>
+                    <dt>Run ID</dt>
+                    <dd>{activeSmokeRun.smokeRunId}</dd>
+                  </div>
+                  <div>
+                    <dt>Artifact hash</dt>
+                    <dd>{activeSmokeRun.artifactHash}</dd>
+                  </div>
+                </dl>
+                {(activeSmokeRun.boundaries ?? []).length > 0 ? (
+                  <div className={styles.experimentSmokeBoundaryList}>
+                    {(activeSmokeRun.boundaries ?? []).map((boundary: string) => (
+                      <VStatusChip key={boundary} tone="neutral">
+                        {smokeBoundaryCopy[boundary]?.[lang] ?? boundary}
+                      </VStatusChip>
+                    ))}
+                  </div>
+                ) : null}
+              </section>
+            ) : null}
             {activeBaselineArtifact ? (
               <>
                 {activeSmokeResult ? (

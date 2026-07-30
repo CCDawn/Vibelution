@@ -44,6 +44,15 @@ const styles = {
     "experimentSmokeForm min-w-0 grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
   experimentSmokeMeta:
     "experimentSmokeMeta min-w-0 flex flex-wrap items-center gap-1.5",
+  experimentSmokeRunEvidence: `experimentSmokeRunEvidence min-w-0 ${vuiFlatPanelClass} grid gap-2 p-2`,
+  experimentSmokeRunHeader:
+    "experimentSmokeRunHeader min-w-0 flex flex-wrap items-start justify-between gap-2 [&>div:first-child]:grid [&>div:first-child]:min-w-0 [&>div:first-child]:gap-0.5 [&_span]:[font-size:var(--vui-font-xs)] [&_span]:text-vui-fg-tertiary [&_strong]:break-words [&_strong]:[font-size:var(--vui-font-sm)] [&_strong]:text-vui-fg-primary",
+  experimentSmokeMetricList:
+    "experimentSmokeMetricList min-w-0 flex flex-wrap items-center gap-1.5",
+  experimentSmokeEvidenceGrid:
+    "experimentSmokeEvidenceGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(14rem,1fr))] [&>div]:min-w-0 [&>div]:rounded-[var(--radius-control)] [&>div]:border [&>div]:border-vui-border-subtle [&>div]:bg-vui-surface-row/70 [&>div]:px-2 [&>div]:py-1.5 [&_dt]:[font-size:var(--vui-font-xs)] [&_dt]:text-vui-fg-tertiary [&_dd]:m-0 [&_dd]:break-all [&_dd]:font-mono [&_dd]:[font-size:var(--vui-font-xs)] [&_dd]:text-vui-fg-secondary",
+  experimentSmokeBoundaryList:
+    "experimentSmokeBoundaryList min-w-0 flex flex-wrap items-center gap-1.5",
   experimentSmokeResult:
     "experimentSmokeResult min-w-0",
   experimentSmokeResultPass:
