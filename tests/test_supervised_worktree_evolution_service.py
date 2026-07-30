@@ -147,6 +147,97 @@ def test_harness_result_payload_includes_bounded_trace_evidence_for_judge(tmp_pa
     assert payload["traceSummary"]["evidence"]["conversation_tool_events"] == 2
 
 
+def test_real_judge_runner_retries_wrong_phase_in_same_session(tmp_path, monkeypatch):
+    calls: list[dict] = []
+    rubric_hash = "a" * 64
+    rubric = {
+        "rubricHash": rubric_hash,
+        "taskCriteria": [
+            {
+                "id": "task_completion",
+                "label": "Task completion",
+                "description": "Complete the requested task.",
+                "weight": 1.0,
+            }
+        ],
+        "systemCriteria": [
+            {
+                "id": "evidence_verifiability",
+                "label": "Evidence",
+                "description": "Provide verifiable evidence.",
+                "weight": 1.0,
+            }
+        ],
+        "compositionWeights": {"taskSpecific": 0.7, "systemFixed": 0.3},
+    }
+
+    def fake_conversation_harness(**kwargs):
+        calls.append(dict(kwargs))
+        if len(calls) == 1:
+            judgment = {
+                "phase": "rubric",
+                "task_summary": "stale rubric response",
+                "criteria": [
+                    {
+                        "id": "task_completion",
+                        "label": "Task completion",
+                        "description": "Complete the requested task.",
+                        "weight": 1.0,
+                    }
+                ],
+            }
+        else:
+            judgment = {
+                "phase": "baseline",
+                "recommendation": "REVISE",
+                "rubric_hash": rubric_hash,
+                "problems": ["missing evidence"],
+                "improvement_instructions": ["add evidence"],
+                "task_scores": {"task_completion": 0.6},
+                "system_scores": {"evidence_verifiability": 0.5},
+                "evidence_refs": ["case:one"],
+            }
+        return _fake_harness_result(
+            role="judge",
+            repo_root=tmp_path,
+            prompt=str(kwargs.get("prompt") or ""),
+            session_id="session-judge",
+            agent_judgment=judgment,
+        )
+
+    monkeypatch.setattr(service, "run_supervised_conversation_harness", fake_conversation_harness)
+
+    result = service._real_judge_runner(
+        tmp_path,
+        "closed_loop_v1",
+        "baseline",
+        {
+            "runId": "swte-phase-retry",
+            "options": {
+                "agentBindings": {
+                    "judge": {
+                        "agentId": "agent-judge",
+                        "role": "judge",
+                    }
+                }
+            },
+            "conversationSessionId": "session-judge",
+            "taskContract": {"benchmark": "unit", "cases": [{"caseId": "one"}]},
+            "rubric": rubric,
+            "baselineEvaluation": {"status": "success", "cases": []},
+        },
+    )
+
+    assert result["status"] == "success"
+    assert result["phase"] == "baseline"
+    assert result["conversationSessionId"] == "session-judge"
+    assert len(calls) == 2
+    assert calls[0]["conversation_session_id"] == "session-judge"
+    assert calls[1]["conversation_session_id"] == "session-judge"
+    assert "PHASE_CORRECTION_REQUIRED" in calls[1]["prompt"]
+    assert "expected phase=baseline" in calls[1]["prompt"]
+
+
 def _retryable_provider_failure_evaluator(_: Path, bundle_name: str, role: str, __: dict) -> dict:
     assert role == "baseline"
     return {

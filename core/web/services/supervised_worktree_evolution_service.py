@@ -1459,25 +1459,69 @@ def _real_judge_runner(project_root: Path, bundle_name: str, phase: str, context
             previous_judgment=previous_judgment,
             candidate_variant=context.get("candidateVariant") if isinstance(context.get("candidateVariant"), dict) else {},
         )
-    result = run_supervised_conversation_harness(
-        repo_root=project_root,
-        mode="single_turn",
-        prompt=prompt,
-        scenario="supervised_judge_evaluation",
-        timeout_seconds=600,
-        expect_restart=False,
-        post_restart_observe_seconds=0,
-        keep_worktree=True,
-        agent_binding=agent_binding,
-        mental_model_mode=str(options.get("mentalModelMode") or "follow"),
-        mental_model_enabled=options.get("mentalModelEnabled"),
-        workspace_override=project_root,
-        conversation_session_id=str(context.get("conversationSessionId") or "").strip() or None,
-        progress_callback=context.get("progressCallback") if callable(context.get("progressCallback")) else None,
-        cancel_checker=context.get("cancelChecker") if callable(context.get("cancelChecker")) else None,
-    )
+
+    def run_judge_turn(turn_prompt: str, *, conversation_session_id: str) -> HarnessResult:
+        return run_supervised_conversation_harness(
+            repo_root=project_root,
+            mode="single_turn",
+            prompt=turn_prompt,
+            scenario="supervised_judge_evaluation",
+            timeout_seconds=600,
+            expect_restart=False,
+            post_restart_observe_seconds=0,
+            keep_worktree=True,
+            agent_binding=agent_binding,
+            mental_model_mode=str(options.get("mentalModelMode") or "follow"),
+            mental_model_enabled=options.get("mentalModelEnabled"),
+            workspace_override=project_root,
+            conversation_session_id=conversation_session_id or None,
+            progress_callback=context.get("progressCallback") if callable(context.get("progressCallback")) else None,
+            cancel_checker=context.get("cancelChecker") if callable(context.get("cancelChecker")) else None,
+        )
+
+    requested_session_id = str(context.get("conversationSessionId") or "").strip()
+    result = run_judge_turn(prompt, conversation_session_id=requested_session_id)
     session_id = str((result.process_summary or {}).get("session_id") or "").strip()
     raw_judgment = (result.evolution_summary or {}).get("agent_judgment")
+    observed_phase = (
+        str(raw_judgment.get("phase") or "").strip().lower()
+        if isinstance(raw_judgment, dict)
+        else ""
+    )
+    normalized_phase = str(phase or "").strip().lower()
+    if (
+        result.status == "success"
+        and isinstance(raw_judgment, dict)
+        and observed_phase != normalized_phase
+        and (session_id or requested_session_id)
+    ):
+        retry_session_id = session_id or requested_session_id
+        _record_worktree_scene_event(
+            "judge_phase_retry",
+            "supervised_worktree_run.judge_phase_retry",
+            run_id=str(context.get("runId") or ""),
+            level="warning",
+            outcome="retrying",
+            fields={
+                "expectedPhase": normalized_phase,
+                "observedPhase": observed_phase or "-",
+                "judgeConversationSessionId": retry_session_id,
+                "retryLimit": 1,
+            },
+        )
+        retry_prompt = (
+            "PHASE_CORRECTION_REQUIRED\n"
+            f"The previous structured response used the wrong phase; expected phase={normalized_phase}, "
+            f"observed phase={observed_phase or '-'}.\n"
+            "Continue in this same Judge conversation. Ignore the previous wrong structured response, "
+            "do not regenerate or change the frozen rubric, and execute the current phase exactly once.\n"
+            "Return one new SUPERVISED_AGENT_JUDGMENT line for the expected phase. "
+            "The complete current-phase instruction follows:\n"
+            f"{prompt}"
+        )
+        result = run_judge_turn(retry_prompt, conversation_session_id=retry_session_id)
+        session_id = str((result.process_summary or {}).get("session_id") or "").strip()
+        raw_judgment = (result.evolution_summary or {}).get("agent_judgment")
     if result.status != "success" or not isinstance(raw_judgment, dict):
         return {
             "status": "failed",
