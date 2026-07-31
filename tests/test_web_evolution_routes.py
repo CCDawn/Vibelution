@@ -72,6 +72,16 @@ def enable_evolution_features_for_legacy_route_tests(monkeypatch: pytest.MonkeyP
 
     monkeypatch.setattr(supervised_control_service, "resolve_feature_decision", enabled_decision)
     monkeypatch.setattr(self_evolution_control_service, "resolve_feature_decision", enabled_decision)
+    monkeypatch.setattr(
+        evolution_service,
+        "get_workbench_contract",
+        lambda: {"intakeMode": "manual_review"},
+    )
+    monkeypatch.setattr(
+        developer_sandbox,
+        "is_developer_mode_enabled",
+        lambda: False,
+    )
 
 
 @pytest.fixture(autouse=True)
