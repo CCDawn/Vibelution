@@ -2693,8 +2693,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                         <label>{lang === "zh" ? "最终审批方式" : "Final approval mode"}</label>
                         <VContextualHint
                           content={lang === "zh"
-                            ? "人工审批由用户作最终决定；Agent 审批会启动独立审批 Agent。两者都审阅评分、评估状态、风险与证据。"
-                            : "Human approval is decided by the user; Agent approval starts an independent Approval Agent. Both review scores, states, risk, and evidence."}
+                            ? "人工审批由用户作最终决定；Agent 审批会在复评完成后自动作出最终决定，批准时自动创建 Git 提交并请求 Launcher 激活。两者都审阅评分、评估状态、风险与证据。"
+                            : "Human approval is decided by the user. Agent approval automatically makes the final decision after rerun evaluation and, when approved, creates a Git commit and requests Launcher activation. Both review scores, states, risk, and evidence."}
                           label={lang === "zh" ? "最终审批方式说明" : "Final approval mode help"}
                         />
                       </div>
@@ -2794,7 +2794,11 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                       const current = step.id === supervisedRuntimeWorkflowStepId;
                       const member = step.member;
                       const stepRoute = step.chatRoute || (member && member.chatRoute) || "";
-                      const stepMeta = step.role ? runRoleLabel(step.role) : (lang === "zh" ? "人工审批" : "Human approval");
+                      const stepMeta = step.role
+                        ? runRoleLabel(step.role)
+                        : String(supervisedMembersRun?.approvalMode ?? approvalMode).toLowerCase() === "agent"
+                          ? lang === "zh" ? "Agent 审批" : "Agent approval"
+                          : lang === "zh" ? "人工审批" : "Human approval";
                       const stepMetric = typeof step.metrics?.scoreDelta === "number"
                         ? `Δ ${step.metrics.scoreDelta}`
                           : typeof step.metrics?.score === "number"

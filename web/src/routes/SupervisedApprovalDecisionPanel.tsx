@@ -48,6 +48,10 @@ function formatDelta(value: number | null) {
   return `${value >= 0 ? "+" : ""}${formatScore(value)}`;
 }
 
+function shortCommit(value: string) {
+  return value ? value.slice(0, 12) : "--";
+}
+
 function actionStateKey(action: SupervisedApprovalAction) {
   if (action === "approve_review") return "approveReview";
   if (action === "run_agent_approval") return "runAgentApproval";
@@ -279,6 +283,51 @@ export function SupervisedApprovalDecisionPanel({
         </details>
       ) : null}
 
+      {run?.merge?.commitSha || model.runtimeActivation.targetCommit ? (
+        <section
+          aria-label={lang === "zh" ? "运行时生效证据" : "Runtime activation evidence"}
+          className={styles.actionSection}
+        >
+          <h4 className={styles.actionSectionHeading}>
+            {lang === "zh" ? "运行时生效证据" : "Runtime activation evidence"}
+          </h4>
+          <div className={styles.metrics}>
+            <article className={styles.metric}>
+              <span>{lang === "zh" ? "候选提交" : "Candidate commit"}</span>
+              <code title={run?.merge?.commitSha || ""}>{shortCommit(run?.merge?.commitSha || "")}</code>
+              <small>{lang === "zh" ? "确定性 Git 提交" : "Deterministic Git commit"}</small>
+            </article>
+            <article className={styles.metric}>
+              <span>{lang === "zh" ? "激活目标" : "Activation target"}</span>
+              <code title={model.runtimeActivation.targetCommit}>
+                {shortCommit(model.runtimeActivation.targetCommit)}
+              </code>
+              <small>
+                {model.runtimeActivation.attempt
+                  ? lang === "zh"
+                    ? `第 ${model.runtimeActivation.attempt} 次尝试`
+                    : `Attempt ${model.runtimeActivation.attempt}`
+                  : lang === "zh" ? "尚未排队" : "Not queued"}
+              </small>
+            </article>
+            <article className={styles.metric}>
+              <span>{lang === "zh" ? "运行源码" : "Runtime source"}</span>
+              <code title={model.runtimeActivation.runtimeSourceCommit}>
+                {shortCommit(model.runtimeActivation.runtimeSourceCommit)}
+              </code>
+              <small>{lang === "zh" ? "runtimeSourceCommit" : "runtimeSourceCommit"}</small>
+            </article>
+            <article className={styles.metric}>
+              <span>{lang === "zh" ? "前端构建" : "Frontend build"}</span>
+              <code title={model.runtimeActivation.frontendBuiltFromCommit}>
+                {shortCommit(model.runtimeActivation.frontendBuiltFromCommit)}
+              </code>
+              <small>{lang === "zh" ? "frontendBuiltFromCommit" : "frontendBuiltFromCommit"}</small>
+            </article>
+          </div>
+        </section>
+      ) : null}
+
       <section aria-label={lang === "zh" ? "治理动作路径" : "Governance action path"} className={styles.actionSection}>
         <h4 className={styles.actionSectionHeading}>{lang === "zh" ? "治理动作路径" : "Governance action path"}</h4>
         <div className={styles.actionPath}>
@@ -301,9 +350,11 @@ export function SupervisedApprovalDecisionPanel({
 
       <footer className={styles.actionBar}>
         <span className={styles.runtimeEffect}>
-          {model.runtimeEffect === "refresh_required"
-            ? <AlertTriangle size={14} aria-hidden="true" />
-            : <CheckCircle2 size={14} aria-hidden="true" />}
+          {model.runtimeEffect === "applied" || model.runtimeEffect === "rolled_back"
+            ? <CheckCircle2 size={14} aria-hidden="true" />
+            : model.runtimeEffect === "activating" || model.runtimeEffect === "rollback_activating"
+              ? <LoaderCircle size={14} aria-hidden="true" />
+              : <AlertTriangle size={14} aria-hidden="true" />}
           {model.runtimeEffectLabel}
         </span>
         <div className={styles.actionButtons}>
@@ -336,9 +387,11 @@ export function SupervisedApprovalDecisionPanel({
               : model.primaryActionLabel}
           </VButton>
         ) : (
-          <VChip tone={model.phase === "rolled_back" ? "success" : "neutral"}>
+          <VChip tone={model.phase === "rolled_back" || model.phase === "applied" ? "success" : "neutral"}>
             {model.phase === "rolled_back"
               ? lang === "zh" ? "已回滚" : "Rolled back"
+              : model.phase === "applied"
+                ? lang === "zh" ? "已生效" : "Applied"
               : lang === "zh" ? "暂无可执行动作" : "No action available"}
           </VChip>
         )}

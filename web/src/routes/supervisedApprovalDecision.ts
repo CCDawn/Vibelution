@@ -16,13 +16,40 @@ export type SupervisedApprovalPhase =
   | "pending_review"
   | "ready_merge"
   | "blocked"
+  | "committed"
+  | "activating"
+  | "applied"
+  | "activation_failed"
+  | "rollback_activating"
   | "merged"
   | "rolled_back"
   | "closed";
 
 export type SupervisedApprovalTone = "neutral" | "info" | "warning" | "success" | "danger";
 
-export type SupervisedApprovalRuntimeEffect = "not_applied" | "refresh_required";
+export type SupervisedApprovalRuntimeEffect =
+  | "not_applied"
+  | "commit_created"
+  | "activating"
+  | "applied"
+  | "activation_failed"
+  | "rollback_activating"
+  | "rolled_back";
+
+export type SupervisedRuntimeActivationModel = {
+  status: string;
+  attempt: number | null;
+  targetCommit: string;
+  intentStatus: string;
+  reason: string;
+  verified: boolean;
+  runtimeSourceCommit: string;
+  frontendBuiltFromCommit: string;
+  runtimeSourceTrackedClean: boolean;
+  phase: string;
+  backendHealthy: boolean;
+  activeWorkCount: number | null;
+};
 
 export type SupervisedApprovalMetricModel = {
   baselineScore: number | null;
@@ -103,6 +130,7 @@ export type SupervisedApprovalDecisionModel = {
   }>;
   runtimeEffect: SupervisedApprovalRuntimeEffect;
   runtimeEffectLabel: string;
+  runtimeActivation: SupervisedRuntimeActivationModel;
   judgeRecommendation: SupervisedApprovalJudgeRecommendationModel;
   evaluationState: SupervisedEvaluationStateModel;
   approvalMode: SupervisedApprovalModeModel;
@@ -167,6 +195,33 @@ function emptyRubric(): SupervisedApprovalRubricModel {
     systemWeight: null,
     taskCriteria: [],
     systemCriteria: [],
+  };
+}
+
+function runtimeActivationModel(
+  run: SupervisedWorktreeRun | null | undefined,
+): SupervisedRuntimeActivationModel {
+  const activation = run?.runtimeActivation;
+  const proof = activation?.proof;
+  const activeWorkCount = score(proof?.activeWorkCount);
+  return {
+    status: normalized(activation?.status),
+    attempt: score(activation?.attempt),
+    targetCommit: String(
+      activation?.targetCommit
+      ?? run?.runtimeActivationTargetCommit
+      ?? run?.merge?.commitSha
+      ?? "",
+    ).trim(),
+    intentStatus: normalized(activation?.intentStatus),
+    reason: String(activation?.reason ?? "").trim(),
+    verified: Boolean(proof?.verified),
+    runtimeSourceCommit: String(proof?.runtimeSourceCommit ?? "").trim(),
+    frontendBuiltFromCommit: String(proof?.frontendBuiltFromCommit ?? "").trim(),
+    runtimeSourceTrackedClean: Boolean(proof?.runtimeSourceTrackedClean),
+    phase: String(proof?.phase ?? "").trim(),
+    backendHealthy: Boolean(proof?.backendHealthy),
+    activeWorkCount,
   };
 }
 
@@ -300,6 +355,7 @@ function emptyDecision(lang: ApprovalLanguage): SupervisedApprovalDecisionModel 
     secondaryActions: [],
     runtimeEffect: "not_applied",
     runtimeEffectLabel: text(lang, "运行时尚未应用", "Runtime not applied"),
+    runtimeActivation: runtimeActivationModel(null),
     judgeRecommendation: judgeRecommendation(null, lang),
     evaluationState: evaluationState(null, lang),
     approvalMode: approvalMode(null, lang),
@@ -315,6 +371,7 @@ function emptyDecision(lang: ApprovalLanguage): SupervisedApprovalDecisionModel 
 function approvalPhase(run: SupervisedWorktreeRun): SupervisedApprovalPhase {
   const rollbackStatus = normalized(run.rollback?.status);
   const mergeStatus = normalized(run.merge?.status);
+  const activationStatus = normalized(run.runtimeActivation?.status);
   const gateStatus = normalized(run.reviewGate?.status ?? run.mergeAnalysis?.reviewGate?.status);
   const gateRequired = Boolean(run.reviewGate?.required ?? run.mergeAnalysis?.reviewGate?.required);
   const blockers = run.mergeAnalysis?.blockers ?? [];
@@ -323,6 +380,21 @@ function approvalPhase(run: SupervisedWorktreeRun): SupervisedApprovalPhase {
 
   if (rollbackStatus === "rolled_back") {
     return "rolled_back";
+  }
+  if (["activation_failed", "activation_blocked"].includes(activationStatus)) {
+    return "activation_failed";
+  }
+  if (rollbackStatus === "revert_committed") {
+    return "rollback_activating";
+  }
+  if (activationStatus === "applied" || mergeStatus === "applied") {
+    return "applied";
+  }
+  if (["restart_queued", "activating", "activation_verifying"].includes(activationStatus)) {
+    return "activating";
+  }
+  if (mergeStatus === "committed") {
+    return "committed";
   }
   if (mergeStatus === "merged") {
     return "merged";
@@ -359,6 +431,9 @@ function phaseCopy(
 ) {
   const changedFileCount = run.mergeAnalysis?.changedFiles?.length ?? run.merge?.changedFiles?.length ?? 0;
   const blockers = run.mergeAnalysis?.blockers ?? [];
+  const activation = runtimeActivationModel(run);
+  const rollbackAvailable =
+    normalized(run.rollback?.status) === "available" && enabled(run, "rollback");
   const gateReason = String(run.reviewGate?.reason ?? run.mergeAnalysis?.reviewGate?.reason ?? "").trim();
   const decisionReason = [
     run.approvalDecision?.reason,
@@ -413,9 +488,88 @@ function phaseCopy(
       primaryActionLabel: "",
     };
   }
+  if (phase === "committed") {
+    return {
+      tone: "warning" as const,
+      statusLabel: text(lang, "Git 提交已创建", "Git commit created"),
+      headline: text(lang, "候选已提交，运行时尚未应用", "Candidate committed; runtime not applied"),
+      reason: text(
+        lang,
+        `${changedFileCount} 个候选文件已形成可审计提交；只有 Launcher 版本证明通过后才算闭环完成。`,
+        `${changedFileCount} candidate files are in an auditable commit; closure requires verified Launcher activation.`,
+      ),
+      primaryAction: rollbackAvailable ? "rollback" as const : null,
+      primaryActionLabel: rollbackAvailable ? text(lang, "创建回退提交", "Create revert commit") : "",
+    };
+  }
+  if (phase === "activating") {
+    return {
+      tone: "info" as const,
+      statusLabel: text(lang, "Launcher 激活中", "Launcher activating"),
+      headline: text(lang, "正在激活候选提交", "Activating candidate commit"),
+      reason: text(
+        lang,
+        `当前为第 ${activation.attempt ?? 1} 次激活尝试；提交已保留，尚未获得运行版本证明。`,
+        `Activation attempt ${activation.attempt ?? 1} is running; the commit is durable but runtime proof is pending.`,
+      ),
+      primaryAction: null,
+      primaryActionLabel: "",
+    };
+  }
+  if (phase === "applied") {
+    return {
+      tone: "success" as const,
+      statusLabel: text(lang, "已提交并生效", "Committed and applied"),
+      headline: text(lang, "候选提交与运行时已生效", "Candidate commit is active in runtime"),
+      reason: activation.verified
+        ? text(
+          lang,
+          "源码提交、前端构建、干净状态、后端健康与零活动任务证据均已匹配。",
+          "Source commit, frontend build, clean state, backend health, and zero active work all match.",
+        )
+        : text(
+          lang,
+          "后端报告已应用，但当前快照缺少完整运行证明；请复核运行证据。",
+          "The backend reports applied, but this snapshot lacks complete runtime proof.",
+        ),
+      primaryAction: rollbackAvailable ? "rollback" as const : null,
+      primaryActionLabel: rollbackAvailable ? text(lang, "创建回退提交", "Create revert commit") : "",
+    };
+  }
+  if (phase === "activation_failed") {
+    const reverting = normalized(run.rollback?.status) === "revert_committed";
+    return {
+      tone: "danger" as const,
+      statusLabel: text(lang, "运行时激活失败", "Runtime activation failed"),
+      headline: reverting
+        ? text(lang, "回退提交已保留，但运行时尚未恢复", "Revert commit preserved; runtime not restored")
+        : text(lang, "候选提交已保留，但运行时未应用", "Candidate commit preserved; runtime not applied"),
+      reason: activation.reason || text(
+        lang,
+        "自动激活已达到重试上限；不要把 Git 提交误判为运行成功，可检查状态后创建可审计回退。",
+        "Automatic activation exhausted its retry; do not treat the Git commit as runtime success. Inspect evidence and create an auditable revert if needed.",
+      ),
+      primaryAction: rollbackAvailable && !reverting ? "rollback" as const : null,
+      primaryActionLabel: rollbackAvailable && !reverting
+        ? text(lang, "创建回退提交", "Create revert commit")
+        : "",
+    };
+  }
+  if (phase === "rollback_activating") {
+    return {
+      tone: "info" as const,
+      statusLabel: text(lang, "回退激活中", "Revert activating"),
+      headline: text(lang, "Git 回退提交已创建，等待运行时恢复", "Git revert created; runtime restoration pending"),
+      reason: run.rollback?.reason || text(
+        lang,
+        "只有 Launcher 证明运行版本已切换到回退提交后，才能标记为已回滚。",
+        "Rollback completes only after Launcher proves the runtime is on the revert commit.",
+      ),
+      primaryAction: null,
+      primaryActionLabel: "",
+    };
+  }
   if (phase === "merged") {
-    const rollbackAvailable =
-      normalized(run.rollback?.status) === "available" && enabled(run, "rollback");
     return {
       tone: rollbackAvailable ? "success" as const : "warning" as const,
       statusLabel: rollbackAvailable
@@ -473,13 +627,24 @@ function buildSteps(
   const approvalDecision = String(run.approvalDecision?.decision ?? "").trim().toUpperCase();
   const decisionRecorded = approvalStatus === "decided";
   const mergeUnauthorized = decisionRecorded && approvalDecision !== "APPROVE";
+  const committedPhases = new Set<SupervisedApprovalPhase>([
+    "committed",
+    "activating",
+    "applied",
+    "activation_failed",
+    "rollback_activating",
+    "merged",
+    "rolled_back",
+  ]);
   const reviewDone = decisionRecorded
     || gateStatus === "approved"
-    || phase === "merged"
-    || phase === "rolled_back";
-  const mergeDone = phase === "merged";
-  const mergeUndone = phase === "rolled_back";
+    || committedPhases.has(phase);
+  const mergeDone = committedPhases.has(phase)
+    && phase !== "rollback_activating"
+    && phase !== "rolled_back";
+  const mergeUndone = phase === "rollback_activating" || phase === "rolled_back";
   const rollbackDone = phase === "rolled_back";
+  const rollbackActivating = phase === "rollback_activating";
   const mode = approvalMode(run, lang);
   const reviewDoneLabel = approvalDecision === "RERUN_REQUIRED"
     ? text(lang, "已要求复跑", "Rerun required")
@@ -511,7 +676,7 @@ function buildSteps(
     },
     {
       id: "merge",
-      title: text(lang, "2. 后端受控合入", "2. Backend controlled merge"),
+      title: text(lang, "2. 提交并激活", "2. Commit and activate"),
       status: mergeUndone
         ? "undone"
         : mergeDone
@@ -526,7 +691,11 @@ function buildSteps(
       statusLabel: mergeUndone
         ? text(lang, "已撤销", "Undone")
         : mergeDone
-          ? text(lang, "已合入", "Merged")
+          ? phase === "applied"
+            ? text(lang, "已生效", "Applied")
+            : phase === "activation_failed"
+              ? text(lang, "提交已保留", "Commit preserved")
+              : text(lang, "提交已创建", "Commit created")
           : mergeUnauthorized
             ? mergeUnauthorizedLabel
           : phase === "ready_merge"
@@ -534,22 +703,30 @@ function buildSteps(
             : phase === "blocked"
               ? text(lang, "被阻塞", "Blocked")
               : text(lang, "等待评审", "Waiting for review"),
-      description: text(lang, "后端仅凭 APPROVE 审批记录调用受约束候选应用器并生成回滚清单。", "The backend accepts only an APPROVE record, then uses the constrained candidate applier and rollback manifest."),
-      consequence: text(lang, "需要 Launcher/runtime 刷新与复验后才能确认生效。", "Requires Launcher/runtime refresh and validation before activation is confirmed."),
+      description: text(lang, "后端仅凭 APPROVE 审批记录创建精确 Git 提交，再由 Launcher 激活并核对源码与前端构建版本。", "The backend accepts only an APPROVE record, creates an exact Git commit, then asks Launcher to activate and verify source and frontend revisions."),
+      consequence: text(lang, "提交成功不等于运行时生效；只有版本、健康、干净状态和活动任务证据全部匹配才完成。", "A successful commit is not runtime activation; revision, health, clean-state, and active-work proofs must all match."),
     },
     {
       id: "rollback",
       title: text(lang, "3. 回滚合入", "3. Rollback merge"),
-      status: rollbackDone ? "done" : phase === "merged" && enabled(run, "rollback") ? "active" : "pending",
+      status: rollbackDone
+        ? "done"
+        : rollbackActivating
+          ? "active"
+          : committedPhases.has(phase) && enabled(run, "rollback")
+            ? "active"
+            : "pending",
       statusLabel: rollbackDone
         ? text(lang, "已回滚", "Rolled back")
-        : phase === "merged" && enabled(run, "rollback")
-          ? text(lang, "当前可执行", "Available now")
-          : text(lang, "合入后可用", "Available after merge"),
-      description: text(lang, "按回滚清单恢复合入前文件状态。", "Restore the pre-merge file state from the rollback manifest."),
+        : rollbackActivating
+          ? text(lang, "等待运行时恢复", "Waiting for runtime")
+          : committedPhases.has(phase) && enabled(run, "rollback")
+            ? text(lang, "当前可执行", "Available now")
+            : text(lang, "提交后可用", "Available after commit"),
+      description: text(lang, "创建可审计 Git revert，并由 Launcher 激活回退提交。", "Create an auditable Git revert and activate it through Launcher."),
       consequence: rollbackDone
-        ? text(lang, "项目文件已恢复；运行时仍需按实际刷新状态复验。", "Project files restored; runtime still needs validation based on refresh state.")
-        : text(lang, "只恢复项目文件，不会删除评测证据。", "Restores project files without deleting evaluation evidence."),
+        ? text(lang, "项目与运行时均已切换到回退提交；评测证据继续保留。", "Project and runtime now use the revert commit; evaluation evidence remains.")
+        : text(lang, "不会删除评测证据；回退提交也必须通过运行时版本证明。", "Evaluation evidence remains, and the revert commit must pass runtime revision proof."),
     },
   ];
 }
@@ -562,6 +739,7 @@ function buildEvidence(
   const evidence: SupervisedApprovalEvidenceModel[] = [];
   const recommendation = judgeRecommendation(run, lang);
   const state = evaluationState(run, lang);
+  const activation = runtimeActivationModel(run);
   evidence.push({
     tone: state.mergeEligible ? "positive" : "warning",
     text: text(
@@ -630,7 +808,64 @@ function buildEvidence(
       ),
     });
   }
+  if (run.merge?.commitSha) {
+    evidence.push({
+      tone: activation.verified ? "positive" : "neutral",
+      text: text(
+        lang,
+        `候选 Git 提交：${run.merge.commitSha.slice(0, 12)}。`,
+        `Candidate Git commit: ${run.merge.commitSha.slice(0, 12)}.`,
+      ),
+    });
+  }
+  if (["activation_failed", "activation_blocked"].includes(activation.status)) {
+    evidence.push({
+      tone: "warning",
+      text: text(
+        lang,
+        `Launcher 激活未完成：${activation.reason || "未提供失败原因"}。Git 提交仍保留。`,
+        `Launcher activation did not complete: ${activation.reason || "no failure reason provided"}. The Git commit is preserved.`,
+      ),
+    });
+  } else if (activation.verified) {
+    evidence.push({
+      tone: "positive",
+      text: text(
+        lang,
+        "运行时源码提交、前端构建提交、后端健康与活动任务证明均已核验。",
+        "Runtime source, frontend build, backend health, and active-work proofs are verified.",
+      ),
+    });
+  }
   return evidence;
+}
+
+function runtimeEffectForPhase(
+  phase: SupervisedApprovalPhase,
+): SupervisedApprovalRuntimeEffect {
+  if (phase === "committed" || phase === "merged") return "commit_created";
+  if (phase === "activating") return "activating";
+  if (phase === "applied") return "applied";
+  if (phase === "activation_failed") return "activation_failed";
+  if (phase === "rollback_activating") return "rollback_activating";
+  if (phase === "rolled_back") return "rolled_back";
+  return "not_applied";
+}
+
+function runtimeEffectLabel(
+  effect: SupervisedApprovalRuntimeEffect,
+  lang: ApprovalLanguage,
+) {
+  const copy: Record<SupervisedApprovalRuntimeEffect, [string, string]> = {
+    not_applied: ["运行时尚未应用", "Runtime not applied"],
+    commit_created: ["Git 提交已创建，运行时尚未应用", "Git commit created; runtime not applied"],
+    activating: ["Launcher 正在激活并核验版本", "Launcher is activating and verifying revisions"],
+    applied: ["源码与前端构建已在运行时生效", "Source and frontend build are active in runtime"],
+    activation_failed: ["提交已保留，运行时激活失败", "Commit preserved; runtime activation failed"],
+    rollback_activating: ["回退提交已创建，等待运行时恢复", "Revert commit created; runtime restoration pending"],
+    rolled_back: ["项目与运行时均已回退", "Project and runtime rolled back"],
+  };
+  return text(lang, copy[effect][0], copy[effect][1]);
 }
 
 export function buildSupervisedApprovalDecision(
@@ -664,8 +899,7 @@ export function buildSupervisedApprovalDecision(
   const copy = phaseCopy(phase, run, lang);
   const state = evaluationState(run, lang);
   const mode = approvalMode(run, lang);
-  const runtimeEffect: SupervisedApprovalRuntimeEffect =
-    phase === "merged" || phase === "rolled_back" ? "refresh_required" : "not_applied";
+  const runtimeEffect = runtimeEffectForPhase(phase);
 
   return {
     phase,
@@ -701,9 +935,8 @@ export function buildSupervisedApprovalDecision(
         ]
       : [],
     runtimeEffect,
-    runtimeEffectLabel: runtimeEffect === "refresh_required"
-      ? text(lang, "项目状态已变更，运行时需刷新复验", "Project state changed; refresh and validate runtime")
-      : text(lang, "运行时尚未应用", "Runtime not applied"),
+    runtimeEffectLabel: runtimeEffectLabel(runtimeEffect, lang),
+    runtimeActivation: runtimeActivationModel(run),
     judgeRecommendation: judgeRecommendation(run, lang),
     evaluationState: state,
     approvalMode: mode,
