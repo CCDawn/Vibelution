@@ -122,6 +122,7 @@ class SupervisedWorktreeRunStartPayload(BaseModel):
     bundleName: str = ""
     keepWorktree: bool = True
     mode: str = "auto"
+    approvalMode: str = "human"
     executionMode: str = "simulation"
     confirmRealLlmCost: bool = False
     mentalModelMode: str = "follow"

@@ -16,6 +16,7 @@ function worktreeRun(overrides: Partial<SupervisedWorktreeRun> = {}): Supervised
     runtimeStatus: "idle",
     outcome: "preserved",
     mode: "manual",
+    approvalMode: "human",
     executionMode: "simulation",
     sourceKind: "dataset",
     datasetName: "supervised_dry_run",
@@ -45,6 +46,19 @@ function worktreeRun(overrides: Partial<SupervisedWorktreeRun> = {}): Supervised
       recommendedAction: "preserve",
       reason: "候选得分提升且没有文件冲突。",
       highRisk: true,
+      evaluationState: "VALID",
+    },
+    candidateJudgment: {
+      status: "success",
+      phase: "rerun",
+      evaluationState: "VALID",
+      recommendation: "REJECT",
+    },
+    approvalDecision: {
+      schemaVersion: 1,
+      mode: "human",
+      status: "pending",
+      decision: "",
     },
     reviewGate: {
       required: true,
@@ -160,16 +174,22 @@ describe("buildSupervisedApprovalDecision", () => {
       candidateTaskScore: 82,
       candidateSystemScore: 72,
     });
-    expect(model.evidence.some((item) => item.text.includes("最终由用户决定"))).toBe(true);
+    expect(model.evidence.some((item) => item.text.includes("不能覆盖评估状态"))).toBe(true);
   });
 
-  it("presents one user approval that authorizes Judge-controlled merge", () => {
+  it("presents human approval as the final immutable merge decision", () => {
     const model = buildSupervisedApprovalDecision(worktreeRun(), "zh");
 
     expect(model.phase).toBe("pending_review");
     expect(model.primaryAction).toBe("approve_review");
-    expect(model.headline).toContain("Judge 触发受控合入");
-    expect(model.primaryActionLabel).toBe("审批并受控合入");
+    expect(model.headline).toContain("人工决定");
+    expect(model.primaryActionLabel).toBe("批准并受控合入");
+    expect(model.approvalMode.code).toBe("human");
+    expect(model.evaluationState.code).toBe("VALID");
+    expect(model.secondaryActions.map((item) => item.action)).toEqual([
+      "request_rerun",
+      "reject_review",
+    ]);
     expect(model.runtimeEffect).toBe("not_applied");
     expect(model.metrics).toMatchObject({
       baselineScore: 72,
@@ -180,6 +200,108 @@ describe("buildSupervisedApprovalDecision", () => {
       overlapFileCount: 0,
       blockerCount: 0,
     });
+  });
+
+  it("uses an independent Agent approval action when the run was frozen in agent mode", () => {
+    const model = buildSupervisedApprovalDecision(
+      worktreeRun({
+        approvalMode: "agent",
+        approvalDecision: {
+          schemaVersion: 1,
+          mode: "agent",
+          status: "pending",
+          decision: "",
+        },
+        actionStates: {
+          approveReview: action(false, "agent mode"),
+          runAgentApproval: action(true),
+          rollback: action(false),
+        },
+      }),
+      "zh",
+    );
+
+    expect(model.phase).toBe("pending_review");
+    expect(model.approvalMode).toEqual({ code: "agent", label: "Agent 审批" });
+    expect(model.primaryAction).toBe("run_agent_approval");
+    expect(model.primaryActionLabel).toBe("启动 Agent 审批");
+    expect(model.secondaryActions).toEqual([]);
+  });
+
+  it("keeps an inconclusive score visible but blocks approval and offers rerun or reject", () => {
+    const run = worktreeRun({
+      candidateJudgment: {
+        status: "success",
+        phase: "rerun",
+        evaluationState: "INCONCLUSIVE",
+        recommendation: "INCONCLUSIVE",
+        score: 91,
+      },
+      decision: {
+        baselineScore: 88,
+        candidateScore: 91,
+        scoreDelta: 3,
+        evaluationState: "INCONCLUSIVE",
+      },
+      actionStates: {
+        approveReview: action(false, "INCONCLUSIVE cannot approve"),
+        requestRerun: action(true),
+        rejectReview: action(true),
+        rollback: action(false),
+      },
+    });
+
+    const model = buildSupervisedApprovalDecision(run, "zh");
+
+    expect(model.metrics.candidateScore).toBe(91);
+    expect(model.evaluationState.code).toBe("INCONCLUSIVE");
+    expect(model.phase).toBe("blocked");
+    expect(model.primaryAction).toBeNull();
+    expect(model.secondaryActions.map((item) => item.action)).toEqual([
+      "request_rerun",
+      "reject_review",
+    ]);
+  });
+
+  it("projects an immutable rerun decision as completed review with merge unauthorized", () => {
+    const model = buildSupervisedApprovalDecision(
+      worktreeRun({
+        status: "done",
+        phase: "complete",
+        outcome: "approval_rerun_required",
+        latestMessage: "审批要求补充证据并重新运行。",
+        reviewGate: { required: true, status: "rejected" },
+        approvalDecision: {
+          schemaVersion: 1,
+          mode: "human",
+          status: "decided",
+          decision: "RERUN_REQUIRED",
+          evaluationState: "INCONCLUSIVE",
+          reason: "",
+        },
+        actionStates: {
+          approveReview: action(false),
+          requestRerun: action(false),
+          rejectReview: action(false),
+          merge: action(false),
+          rollback: action(false),
+        },
+      }),
+      "zh",
+    );
+
+    expect(model.phase).toBe("closed");
+    expect(model.reason).toBe("候选得分提升且没有文件冲突。");
+    expect(model.steps.find((step) => step.id === "review")).toMatchObject({
+      status: "done",
+      statusLabel: "已要求复跑",
+    });
+    expect(model.steps.find((step) => step.id === "merge")).toMatchObject({
+      status: "blocked",
+      statusLabel: "未授权 · 待复跑",
+    });
+    expect(model.primaryAction).toBeNull();
+    expect(model.secondaryActions).toEqual([]);
   });
 
   it("offers rollback after merge without claiming the runtime has been refreshed", () => {
@@ -213,10 +335,17 @@ describe("buildSupervisedApprovalDecision", () => {
     expect(model.headline).toContain("回滚保护可用");
   });
 
-  it("moves to a separate manual merge action after review approval", () => {
+  it("projects an existing approved record as backend merge-ready", () => {
     const model = buildSupervisedApprovalDecision(
       worktreeRun({
         reviewGate: { required: true, status: "approved" },
+        approvalDecision: {
+          schemaVersion: 1,
+          mode: "human",
+          status: "decided",
+          decision: "APPROVE",
+          evaluationState: "VALID",
+        },
         actionStates: {
           approveReview: action(false),
           merge: action(true),
@@ -227,8 +356,8 @@ describe("buildSupervisedApprovalDecision", () => {
     );
 
     expect(model.phase).toBe("ready_merge");
-    expect(model.primaryAction).toBe("merge");
-    expect(model.headline).toContain("可将候选写入项目");
+    expect(model.primaryAction).toBeNull();
+    expect(model.headline).toContain("后端受控合入");
     expect(model.runtimeEffect).toBe("not_applied");
   });
 

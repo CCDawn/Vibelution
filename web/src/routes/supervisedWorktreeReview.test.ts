@@ -7,6 +7,8 @@ import {
   readRecentSupervisedWorktreeRunId,
   rememberRecentSupervisedWorktreeRunId,
   selectRecentSupervisedWorktreeRun,
+  supervisedApprovalWorkflowStatus,
+  supervisedWorktreeLedgerApprovalLabel,
 } from "./supervisedWorktreeReview";
 
 function runWith(
@@ -88,6 +90,18 @@ describe("selectRecentSupervisedWorktreeRun", () => {
     )).toBe(actionableRun);
   });
 
+  it("recovers the latest supervised run that still requires an agent decision", () => {
+    const actionableRun = runWith({
+      runId: "swte-agent-actionable",
+      status: "done",
+      outcome: "awaiting_agent_approval",
+      approvalMode: "agent",
+      approvalDecision: { status: "pending" },
+    });
+
+    expect(selectRecentSupervisedWorktreeRun([actionableRun], null)).toBe(actionableRun);
+  });
+
   it("does not recover terminal history that has no pending manual decision", () => {
     const completedRun = runWith({
       runId: "swte-complete",
@@ -129,10 +143,44 @@ describe("buildSupervisedWorktreeLedgerSummary", () => {
       decision: "PROMOTE",
       description: "等待用户审批。",
       reviewStatus: "pending",
+      approvalDecision: "",
       roleSessionCount: 3,
       candidateScore: 92,
       bundleName: "acceptance_bundle",
     });
+  });
+
+  it("projects an immutable rerun decision instead of leaving the ledger pending", () => {
+    const summary = buildSupervisedWorktreeLedgerSummary(runWith({
+      runId: "swte-rerun-required",
+      status: "done",
+      latestMessage: "审批要求补充证据并重新运行。",
+      reviewGate: { status: "rejected" },
+      approvalDecision: {
+        status: "decided",
+        decision: "RERUN_REQUIRED",
+        evaluationState: "INCONCLUSIVE",
+      },
+    }));
+
+    expect(summary).toMatchObject({
+      reviewStatus: "rejected",
+      approvalDecision: "RERUN_REQUIRED",
+    });
+    expect(supervisedWorktreeLedgerApprovalLabel(summary!, "zh")).toBe("需补证复跑");
+    expect(supervisedWorktreeLedgerApprovalLabel(summary!, "en")).toBe("Rerun required");
+  });
+
+  it("marks the approval workflow step complete once its immutable decision exists", () => {
+    const decidedRun = runWith({
+      approvalDecision: {
+        status: "decided",
+        decision: "RERUN_REQUIRED",
+      },
+    });
+
+    expect(supervisedApprovalWorkflowStatus(decidedRun, "pending")).toBe("done");
+    expect(supervisedApprovalWorkflowStatus(runWith({}), "pending")).toBe("pending");
   });
 
   it("does not project a self-evolution review run into the supervised ledger", () => {
