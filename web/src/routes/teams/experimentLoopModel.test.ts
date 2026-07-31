@@ -6,6 +6,7 @@ import {
   experimentPlanningStatusQueryKey,
   researchDiagnosticStatusLabel,
   researchIterationLifecycleStatusLabel,
+  researchKnowledgeLifecycleStatusLabel,
   researchLoopStatusQueryKey,
 } from "./experimentLoopModel";
 
@@ -24,6 +25,9 @@ describe("experimentLoopModel", () => {
   it("labels iteration lifecycle and diagnostic statuses", () => {
     expect(researchIterationLifecycleStatusLabel("accepted_for_writeup", "zh")).toContain("晋升");
     expect(researchIterationLifecycleStatusLabel("not_started", "en")).toBe("not started");
+    expect(researchIterationLifecycleStatusLabel("needs_more_evidence", "zh")).toBe("待补证据");
+    expect(researchKnowledgeLifecycleStatusLabel("ready_for_hypothesis", "未开始", "zh")).toBe("已完成");
+    expect(researchKnowledgeLifecycleStatusLabel("collecting", "搜集中", "zh")).toBe("搜集中");
     expect(researchDiagnosticStatusLabel("smoke_passed", "zh")).toContain("Smoke");
     expect(researchDiagnosticStatusLabel("", "en")).toBe("none");
   });

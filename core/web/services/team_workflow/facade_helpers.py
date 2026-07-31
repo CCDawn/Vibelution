@@ -31,8 +31,23 @@ def _service():
 
 def _active_research_loop_projection(team_id: str) -> dict[str, Any] | None:
     s = _service()
-    store = s._read_json(s._team_workflow_root(team_id) / "research_loops" / "index.json")
-    loops = [item for item in list(store.get("loops") or []) if isinstance(item, dict)]
+    active_project = s.get_active_research_project(team_id)
+    active_project_id = str(active_project.get("projectId") or "")
+    store = s._read_json(
+        s.resolve_team_program_root(team_id) / "research_loops" / "index.json"
+    )
+    loops = [
+        item
+        for item in list(store.get("loops") or [])
+        if isinstance(item, dict)
+        and (
+            str(item.get("researchProjectId") or "") == active_project_id
+            or (
+                active_project_id == s.LEGACY_PROJECT_ID
+                and not str(item.get("researchProjectId") or "")
+            )
+        )
+    ]
     active_loop_id = str(store.get("activeLoopId") or "")
     for loop in loops:
         if str(loop.get("loopId") or "") == active_loop_id:

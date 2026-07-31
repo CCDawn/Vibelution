@@ -24,6 +24,7 @@ import {
 import { ChallengeQuestionDetailPanel } from "./teams/challenge-cup/ChallengeQuestionDetailPanel";
 import {
   researchIterationLifecycleStatusLabel,
+  researchKnowledgeLifecycleStatusLabel,
   type ExperimentPlanningStatusPayload,
 } from "./teams/experimentLoopModel";
 import { isChallengeCupResearchWorkflowTeam } from "./teams/teamKindModel";
@@ -594,7 +595,11 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
         return lang === "zh" ? "MVP 后再启动" : "deferred until after MVP";
       }
       if (stageType === "knowledge_collection") {
-        return knowledgeCollectionStatusLabel;
+        return researchKnowledgeLifecycleStatusLabel(
+          experimentLifecycleProjection?.stage1.status || "",
+          knowledgeCollectionStatusLabel,
+          lang,
+        );
       }
       if (stageType === "experiment" && experimentLifecycleProjection?.stage2) {
         if (experimentLifecycleProjection.stage2.status === "frozen") {
@@ -642,6 +647,12 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
       if (stageType !== "knowledge_collection" && stageStatusUnavailable) {
         return styles.researchStageStatusUnavailable;
       }
+      if (
+        stageType === "knowledge_collection"
+        && experimentLifecycleProjection?.stage1.status === "ready_for_hypothesis"
+      ) {
+        return styles.researchStageStatusRecorded;
+      }
       if (active) {
         return styles.researchStageStatusActive;
       }
@@ -688,6 +699,11 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
           : "The 125-question run, three deep cases, and submission package are deferred until after MVP acceptance.";
       }
       if (stageType === "knowledge_collection") {
+        if (experimentLifecycleProjection?.stage1.status === "ready_for_hypothesis") {
+          return lang === "zh"
+            ? "知识搜集已形成可用假设；可查看历史，或按新问题补充资料。"
+            : "Knowledge collection produced usable hypotheses; review the history or collect more for a new question.";
+        }
         if (!selectedSourceCollectionRun) {
           return lang === "zh" ? "生成搜索计划和团队分工，先把资料搜索跑起来。" : "Create the search plan and team assignments.";
         }
@@ -722,6 +738,11 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
         return lang === "zh"
           ? "最佳版本已通过评估；最近诊断单独展示，不覆盖主线结果。"
           : "The best version passed review; diagnostics remain separate from the main result.";
+      }
+      if (experimentLifecycleProjection?.stage3.status === "needs_more_evidence") {
+        return lang === "zh"
+          ? "人工评审已完成；按决策补充正式 baseline、目标数据集多 seed 与机制/反证证据后再评审。"
+          : "Human review is complete; add the requested baseline, multi-seed target-dataset, and mechanism or counter-evidence before review.";
       }
       if (active) {
         return lang === "zh" ? "按冻结设计执行、评估、归因并受控迭代。" : "Execute the frozen design, evaluate, diagnose, and iterate under control.";
