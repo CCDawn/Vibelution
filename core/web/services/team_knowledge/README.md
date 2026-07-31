@@ -13,8 +13,8 @@ Prefer slice modules over growing `team_knowledge_service.py` when possible.
 | Search tokenize / BM25 / filters | `search_ranking.py` | store paths; ACL |
 | Paths / JSONL / owner context / id helpers | `store.py` | promotion domain; ACL policy |
 | ACL / can_* / steward permission helpers | `permissions.py` | inbox promotion domain; store IO |
+| Owner inbox / central promotion domain | `source_inbox.py` | KB CRUD/proposals; pure path helpers |
 | Knowledge base CRUD / proposals | facade (until pack) | pure ranking; path helpers |
-| Owner inbox / central promotion domain | facade (until pack) | pure path helpers (`store`) |
 
 ## Sole-owner rules
 
@@ -31,7 +31,8 @@ Prefer slice modules over growing `team_knowledge_service.py` when possible.
 | `search_ranking.py` | **done** | pure BM25/semantic filter helpers |
 | `store.py` | **done** | roots/paths/JSONL/owner context/id helpers late-bind facade |
 | `permissions.py` | **done** | can_*/ACL/steward/require gates late-bind facade |
-| inbox / central domain packs | pending | next slices |
+| `source_inbox.py` | **done** | collect/list/review inbox + central promote/list late-bind facade |
+| KB CRUD / proposals / ratings packs | pending | next slices |
 
 ## Related
 

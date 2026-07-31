@@ -3,7 +3,13 @@
 from __future__ import annotations
 
 from core.web.services import team_knowledge_service as facade
-from core.web.services.team_knowledge import constants, permissions, search_ranking, store
+from core.web.services.team_knowledge import (
+    constants,
+    permissions,
+    search_ranking,
+    source_inbox,
+    store,
+)
 
 
 def test_facade_reexports_constants() -> None:
@@ -106,3 +112,23 @@ def test_permissions_normalize_acl_and_member_role() -> None:
     role = permissions._member_role({"members": [{"agentId": "a1", "role": "steward"}]}, "a1")
     assert role == "steward"
     assert permissions._member_role({"members": []}, "missing") == ""
+
+
+def test_facade_reexports_source_inbox() -> None:
+    assert facade.update_owner_source_governance is source_inbox.update_owner_source_governance
+    assert facade.collect_source_to_inbox is source_inbox.collect_source_to_inbox
+    assert facade.list_owner_source_inbox is source_inbox.list_owner_source_inbox
+    assert facade.review_owner_inbox_source is source_inbox.review_owner_inbox_source
+    assert facade.create_source_artifact_from_central_source is source_inbox.create_source_artifact_from_central_source
+    assert facade.list_central_sources is source_inbox.list_central_sources
+    assert facade._normalize_source_review_decision is source_inbox._normalize_source_review_decision
+    assert facade._write_owner_inbox_source_file is source_inbox._write_owner_inbox_source_file
+    assert facade._promote_owner_source_to_central_locked is source_inbox._promote_owner_source_to_central_locked
+    assert facade._require_central_source_for_owner is source_inbox._require_central_source_for_owner
+    assert facade._direct_ingest_accepted_source_locked is source_inbox._direct_ingest_accepted_source_locked
+
+
+def test_source_inbox_normalizes_review_decision() -> None:
+    assert source_inbox._normalize_source_review_decision("accept") == "accepted"
+    assert source_inbox._normalize_source_review_decision("reject") == "rejected"
+    assert source_inbox._normalize_source_review_decision("needs_more") == "needs_more_context"
