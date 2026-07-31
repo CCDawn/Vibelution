@@ -25,6 +25,7 @@ import {
 } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
+import { listPendingSessionToolApprovals } from "../api/chat";
 import { fetchJson } from "../api/client";
 import { createChatWorkspaceCache } from "./chatWorkspaceCache";
 import { prefetchConversationView } from "../components/conversation/prefetchConversationView";
@@ -1426,9 +1427,7 @@ export function ChatCodingRoute() {
   const sessionToolApprovalsQuery = useQuery<SessionToolApprovalRequest[]>({
     queryKey: queryKeys.sessionToolApprovals(activeSessionId ?? "none"),
     enabled: Boolean(activeSessionId && directSessionPanelActive),
-    queryFn: () => fetchJson<SessionToolApprovalRequest[]>(
-      `/api/sessions/${encodeURIComponent(activeSessionId ?? "")}/tool-approvals?status=pending`,
-    ),
+    queryFn: () => listPendingSessionToolApprovals(activeSessionId ?? ""),
     refetchInterval: (query) => (
       (query.state.data?.length ?? 0) > 0
       || sessionToolApprovalRuntimeActive
