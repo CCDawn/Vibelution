@@ -67,7 +67,7 @@ export function selectRecentSupervisedWorktreeRun(
     return (
       !isSelfEvolutionWorktreeRun(run)
       && String(run.status || "").trim().toLowerCase() === "done"
-      && ["needs_manual_decision", "awaiting_user_approval"].includes(outcome)
+      && ["needs_manual_decision", "awaiting_user_approval", "awaiting_agent_approval"].includes(outcome)
     );
   }) ?? null;
 }

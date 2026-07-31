@@ -90,6 +90,18 @@ describe("selectRecentSupervisedWorktreeRun", () => {
     )).toBe(actionableRun);
   });
 
+  it("recovers the latest supervised run that still requires an agent decision", () => {
+    const actionableRun = runWith({
+      runId: "swte-agent-actionable",
+      status: "done",
+      outcome: "awaiting_agent_approval",
+      approvalMode: "agent",
+      approvalDecision: { status: "pending" },
+    });
+
+    expect(selectRecentSupervisedWorktreeRun([actionableRun], null)).toBe(actionableRun);
+  });
+
   it("does not recover terminal history that has no pending manual decision", () => {
     const completedRun = runWith({
       runId: "swte-complete",
