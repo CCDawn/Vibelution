@@ -58,6 +58,7 @@ from .team import canvas_normalize as _canvas_normalize
 from .team import ai_search as _ai_search
 from .team import research_organization as _research_organization
 from .team import team_crud as _team_crud
+from .team import team_repair as _team_repair
 from core.logging.logger import debug as _debug_logger
 
 
@@ -499,6 +500,21 @@ _new_team_id = _team_crud._new_team_id
 _normalized_team_dedupe_key = _team_crud._normalized_team_dedupe_key
 _summary = _team_crud._summary
 
+_ensure_team_member_agents_can_archive = _team_repair._ensure_team_member_agents_can_archive
+_archive_team_member_agents = _team_repair._archive_team_member_agents
+_repair_archived_team_member_agents = _team_repair._repair_archived_team_member_agents
+_repair_archived_team_member_agents_for_team = _team_repair._repair_archived_team_member_agents_for_team
+_prune_missing_archived_team_members = _team_repair._prune_missing_archived_team_members
+_repair_index_state = _team_repair._repair_index_state
+_repair_index_shape = _team_repair._repair_index_shape
+_repair_index_compact_contracts = _team_repair._repair_index_compact_contracts
+_repair_team_contract_only = _team_repair._repair_team_contract_only
+_repair_team = _team_repair._repair_team
+_prune_unavailable_derived_team_members = _team_repair._prune_unavailable_derived_team_members
+_stale_member_agent_ids = _team_repair._stale_member_agent_ids
+_repair_members = _team_repair._repair_members
+
+
 
 
 
@@ -582,113 +598,6 @@ def _unique_active_member_agent_ids(
         seen.add(agent_id)
         agent_ids.append(agent_id)
     return agent_ids
-
-
-def _ensure_team_member_agents_can_archive(team: dict[str, Any], agent_ids: list[str]) -> None:
-    for agent_id in agent_ids:
-        try:
-            agent_directory_service.ensure_agent_archive_allowed(agent_id)
-        except agent_directory_service.AgentDirectoryError as exc:
-            _record_team_archive_rejected(team, reason="agent_archive_rejected", agent_id=agent_id, error=exc)
-            raise TeamServiceError(str(exc)) from exc
-
-
-def _archive_team_member_agents(team: dict[str, Any], agent_ids: list[str], *, reason: str) -> list[str]:
-    archived_agent_ids: list[str] = []
-    for agent_id in agent_ids:
-        archived_agent = agent_directory_service.archive_agent_instance(agent_id)
-        archived_agent_ids.append(str(archived_agent.get("agentId") or agent_id).strip())
-    if archived_agent_ids and reason != "team_archive":
-        _record_archived_team_member_cascade_repaired(team, archived_agent_ids, reason=reason)
-    return archived_agent_ids
-
-
-def _repair_archived_team_member_agents(
-    state: dict[str, Any],
-    *,
-    reason: str,
-    strict: bool,
-    agent_refs: dict[str, dict[str, dict[str, Any]]] | None = None,
-) -> bool:
-    changed = False
-    for team in list(state.get("teams") or []):
-        if isinstance(team, dict):
-            changed = _repair_archived_team_member_agents_for_team(
-                team,
-                state,
-                reason=reason,
-                strict=strict,
-                agent_refs=agent_refs,
-            ) or changed
-    return changed
-
-
-def _repair_archived_team_member_agents_for_team(
-    team: dict[str, Any],
-    state: dict[str, Any],
-    *,
-    reason: str,
-    strict: bool,
-    agent_refs: dict[str, dict[str, dict[str, Any]]] | None = None,
-) -> bool:
-    if str(team.get("status") or DEFAULT_TEAM_STATUS).strip() != "archived":
-        return False
-    if not _team_kind_allows_member_agent_cascade(team):
-        return False
-    changed = _prune_missing_archived_team_members(team, agent_refs=agent_refs)
-    agent_ids = _unique_active_member_agent_ids(team, agent_refs=agent_refs)
-    if not agent_ids:
-        if changed:
-            team["updatedAt"] = utc_now_iso()
-            state["updatedAt"] = team["updatedAt"]
-        return changed
-    try:
-        _ensure_team_member_agents_can_archive(team, agent_ids)
-    except TeamServiceError:
-        if strict:
-            raise
-        return changed
-    try:
-        _remove_team_member_agents_from_chat_rooms(team, agent_ids)
-    except TeamServiceError:
-        if strict:
-            raise
-        return changed
-    _archive_team_member_agents(team, agent_ids, reason=reason)
-    team["updatedAt"] = utc_now_iso()
-    state["updatedAt"] = team["updatedAt"]
-    return True
-
-
-def _prune_missing_archived_team_members(
-    team: dict[str, Any],
-    *,
-    agent_refs: dict[str, dict[str, dict[str, Any]]] | None = None,
-) -> bool:
-    kept_members: list[dict[str, Any]] = []
-    removed_agent_ids: list[str] = []
-    for member in list(team.get("members") or []):
-        if not isinstance(member, dict):
-            continue
-        agent_id = str(member.get("agentId") or "").strip()
-        if not agent_id:
-            continue
-        if _agent_reference(agent_id, include_archived=True, agent_refs=agent_refs):
-            kept_members.append(member)
-            continue
-        removed_agent_ids.append(agent_id)
-    if not removed_agent_ids:
-        return False
-    team["members"] = kept_members
-    _record_team_event(
-        "team.archived_missing_members_pruned",
-        team,
-        fields={
-            "removedAgentIds": removed_agent_ids,
-            "removedAgentCount": len(removed_agent_ids),
-        },
-    )
-    return True
 
 
 def _active_member_agent_ids(
@@ -1012,231 +921,6 @@ def _agent_reference(
         agent = (agent_refs.get(key) or {}).get(normalized_agent_id)
         return dict(agent) if isinstance(agent, dict) else None
     return agent_directory_service.get_agent(normalized_agent_id, include_archived=include_archived)
-
-
-def _repair_index_state(
-    state: dict[str, Any],
-    *,
-    agent_refs: dict[str, dict[str, dict[str, Any]]] | None = None,
-) -> bool:
-    changed = False
-    if state.get("schemaVersion") != SCHEMA_VERSION:
-        state["schemaVersion"] = SCHEMA_VERSION
-        changed = True
-    if not isinstance(state.get("teams"), list):
-        state["teams"] = []
-        changed = True
-    for team in state.get("teams") or []:
-        if isinstance(team, dict):
-            changed = _repair_team(team, agent_refs=agent_refs) or changed
-    return changed
-
-
-def _repair_index_shape(state: dict[str, Any]) -> bool:
-    changed = False
-    if state.get("schemaVersion") != SCHEMA_VERSION:
-        state["schemaVersion"] = SCHEMA_VERSION
-        changed = True
-    if not isinstance(state.get("teams"), list):
-        state["teams"] = []
-        changed = True
-    return changed
-
-
-def _repair_index_compact_contracts(
-    state: dict[str, Any],
-    *,
-    compact_rooms_by_id: dict[str, dict[str, Any]] | None = None,
-) -> bool:
-    changed = _repair_index_shape(state)
-    for team in state.get("teams") or []:
-        if not isinstance(team, dict):
-            continue
-        if _repair_team_contract_only(team, compact_rooms_by_id=compact_rooms_by_id):
-            changed = True
-    return changed
-
-
-def _repair_team_contract_only(
-    team: dict[str, Any],
-    *,
-    compact_rooms_by_id: dict[str, dict[str, Any]] | None = None,
-) -> bool:
-    changed = False
-    team_id = _safe_token(team.get("teamId"), default="", max_length=96)
-    if team.get("teamId") != team_id:
-        team["teamId"] = team_id
-        changed = True
-    expected_path = _relative_path(_team_canvas_path(team_id)) if team_id else ""
-    if team.get("canvasPath") != expected_path:
-        team["canvasPath"] = expected_path
-        changed = True
-    if _infer_team_kind(team) == "ai_search":
-        expected_source_scope_path = _relative_path(_ai_search_source_scope_path())
-        if team.get("sourceScopePath") != expected_source_scope_path:
-            team["sourceScopePath"] = expected_source_scope_path
-            changed = True
-        if _ensure_ai_search_source_scope_file():
-            changed = True
-    if "linkedChatRoomId" not in team:
-        team["linkedChatRoomId"] = ""
-        changed = True
-    if _apply_team_contract(team):
-        changed = True
-    if _sync_compact_team_chat_room_metadata(team, compact_rooms_by_id=compact_rooms_by_id):
-        changed = True
-    return changed
-
-
-def _repair_team(
-    team: dict[str, Any],
-    *,
-    agent_refs: dict[str, dict[str, dict[str, Any]]] | None = None,
-) -> bool:
-    changed = False
-    team_id = _safe_token(team.get("teamId"), default="", max_length=96)
-    if team.get("teamId") != team_id:
-        team["teamId"] = team_id
-        changed = True
-    if not str(team.get("name") or "").strip():
-        team["name"] = team_id or "Team"
-        changed = True
-    if str(team.get("status") or DEFAULT_TEAM_STATUS) not in TEAM_STATUSES:
-        team["status"] = DEFAULT_TEAM_STATUS
-        changed = True
-    expected_path = _relative_path(_team_canvas_path(team_id)) if team_id else ""
-    if team.get("canvasPath") != expected_path:
-        team["canvasPath"] = expected_path
-        changed = True
-    if _infer_team_kind(team) == "ai_search":
-        expected_source_scope_path = _relative_path(_ai_search_source_scope_path())
-        if team.get("sourceScopePath") != expected_source_scope_path:
-            team["sourceScopePath"] = expected_source_scope_path
-            changed = True
-        if _ensure_ai_search_source_scope_file():
-            changed = True
-    if "linkedChatRoomId" not in team:
-        team["linkedChatRoomId"] = ""
-        changed = True
-    if _apply_team_contract(team):
-        changed = True
-    members = team.get("members") if isinstance(team.get("members"), list) else []
-    stale_member_agent_ids = _stale_member_agent_ids(members)
-    repaired_members = _repair_members(members, agent_refs=agent_refs)
-    if repaired_members != members:
-        team["members"] = repaired_members
-        changed = True
-    removed_agent_ids = _prune_unavailable_derived_team_members(
-        team,
-        agent_refs=agent_refs,
-        stale_member_agent_ids=stale_member_agent_ids,
-    )
-    if removed_agent_ids:
-        changed = True
-        for removed_agent_id in removed_agent_ids:
-            _remove_agent_from_team_canvas(team, removed_agent_id)
-    if _infer_team_kind(team) == "research":
-        _sync_research_team_member_agent_roles(team.get("members") or [])
-    if removed_agent_ids or _team_chat_room_needs_sync(team, agent_refs=agent_refs):
-        _ensure_team_chat_room_link(team, agent_refs=agent_refs)
-        changed = True
-    if removed_agent_ids:
-        _record_team_event(
-            "team.derived_unavailable_members_pruned",
-            team,
-            fields={
-                "removedAgentIds": removed_agent_ids,
-                "removedAgentCount": len(removed_agent_ids),
-                "teamKind": _infer_team_kind(team),
-            },
-        )
-    return changed
-
-
-def _prune_unavailable_derived_team_members(
-    team: dict[str, Any],
-    *,
-    agent_refs: dict[str, dict[str, dict[str, Any]]] | None = None,
-    stale_member_agent_ids: set[str] | None = None,
-) -> list[str]:
-    if str(team.get("status") or DEFAULT_TEAM_STATUS).strip() == "archived":
-        return []
-    if _infer_team_kind(team) not in DERIVED_TEAM_KINDS:
-        return []
-    stale_member_agent_ids = {
-        str(agent_id or "").strip()
-        for agent_id in set(stale_member_agent_ids or set())
-        if str(agent_id or "").strip()
-    }
-    if not stale_member_agent_ids:
-        return []
-    kept_members: list[dict[str, Any]] = []
-    removed_agent_ids: list[str] = []
-    seen_removed: set[str] = set()
-    for member in list(team.get("members") or []):
-        if not isinstance(member, dict):
-            continue
-        agent_id = str(member.get("agentId") or "").strip()
-        if not agent_id:
-            continue
-        if agent_id not in stale_member_agent_ids:
-            kept_members.append(member)
-            continue
-        if _agent_reference(agent_id, include_archived=False, agent_refs=agent_refs):
-            kept_members.append(member)
-            continue
-        if agent_id not in seen_removed:
-            seen_removed.add(agent_id)
-            removed_agent_ids.append(agent_id)
-    if removed_agent_ids:
-        team["members"] = kept_members
-        team["updatedAt"] = utc_now_iso()
-    return removed_agent_ids
-
-
-def _stale_member_agent_ids(members: list[Any]) -> set[str]:
-    return {
-        str(member.get("agentId") or "").strip()
-        for member in list(members or [])
-        if isinstance(member, dict)
-        and str(member.get("agentId") or "").strip()
-        and str(member.get("agentStatus") or "").strip().lower() == "stale"
-    }
-
-
-def _repair_members(
-    members: list[Any],
-    *,
-    agent_refs: dict[str, dict[str, dict[str, Any]]] | None = None,
-) -> list[dict[str, Any]]:
-    repaired: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for index, item in enumerate(members):
-        if not isinstance(item, dict):
-            continue
-        agent_id = str(item.get("agentId") or "").strip()
-        if not agent_id or agent_id in seen:
-            continue
-        seen.add(agent_id)
-        agent = _agent_reference(agent_id, include_archived=True, agent_refs=agent_refs)
-        active = _agent_reference(agent_id, include_archived=False, agent_refs=agent_refs) if agent_id else None
-        repaired.append(
-            {
-                "memberId": _safe_token(item.get("memberId"), default=f"member-{index + 1}", max_length=96),
-                "agentId": agent_id,
-                "agentCode": str((agent or {}).get("agentCode") or item.get("agentCode") or "").strip(),
-                "agentName": str((agent or {}).get("displayName") or item.get("agentName") or "").strip(),
-                "role": trim_lines(item.get("role") or "", max_lines=1).strip(),
-                "purpose": trim_lines(item.get("purpose") or "", max_lines=4).strip(),
-                "responsibilities": [
-                    trim_lines(value, max_lines=2).strip()
-                    for value in list(item.get("responsibilities") or [])[:8]
-                    if str(value or "").strip()
-                ],
-                "agentStatus": "active" if active else "stale",
-            }
-        )
-    return repaired
 
 
 def _load_index() -> dict[str, Any]:
