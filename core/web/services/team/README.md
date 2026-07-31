@@ -21,6 +21,7 @@ Prefer slice modules over growing `team_service.py` when possible.
 | Active membership / contract helpers | `team_membership.py` | runtime-scene telemetry; public CRUD |
 | Team runtime-scene logging helpers | `team_logging.py` | membership resolve; index IO |
 | Team index / path / lock store helpers | `team_store.py` | domain CRUD; system materialize |
+| Team domain constants / role catalogs | `team_constants.py` | mutable locks; kind maps (`kind_helpers`) |
 | System team bootstrap control plane | `system_bootstrap.py` | ensure_* materialization bodies |
 | System team ensure / AI search team materialize | `system_teams.py` | bootstrap control-plane state; generic CRUD |
 | Team linked chat-room sync / repair | `chat_room_links.py` | team CRUD; canvas IO |
@@ -52,6 +53,7 @@ Prefer slice modules over growing `team_service.py` when possible.
 | team membership pack | **done** | active-member resolve / contract late-bind facade helpers |
 | team logging pack | **done** | runtime-scene team events / detail rollup late-bind facade state |
 | team store pack | **done** | index/path/lock/json helpers late-bind facade constants & locks |
+| team constants pack | **done** | display names / roles / source-scope catalogs; pure data |
 
 ## Related
 
