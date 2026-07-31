@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { ChatNextStateSignalSummary, ConversationMessage, SessionTurnError } from "../../api/types";
 import { conversationMessageToAgentMessage } from "../../agent-thread";
@@ -20,6 +20,13 @@ import { ConversationView } from "./ConversationView";
 import type { ConversationProcessDisplayMode } from "./conversationViewTypes";
 import { shouldShowNextStateSignalInConversation } from "./conversationNextStateSignal";
 import { isAgentInboxMessage } from "./conversationMessagePredicates";
+
+// Server-rendered integration tests must exercise the loaded Markdown renderer.
+// Production keeps it lazy so the initial ConversationView chunk stays small.
+vi.mock("./LazyConversationMarkdownRenderer", async () => {
+  const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
+  return { LazyConversationMarkdownRenderer: ConversationMarkdownRenderer };
+});
 
 const conversationViewStylesSource = [
   conversationViewStylesModuleSource,

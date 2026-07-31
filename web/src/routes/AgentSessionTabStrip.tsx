@@ -185,7 +185,7 @@ export function AgentSessionTabStrip({
           session,
           isActive: tabActive,
         });
-        const statusIndicatorClass = agentSessionStatusIndicatorClassName(statusTone);
+        const statusIndicatorClassName = agentSessionStatusIndicatorClassName(statusTone);
         const statusShortLabel = agentSessionStatusShortLabel(statusTone, lang);
         const sessionTitle =
           session.title
@@ -348,7 +348,7 @@ export function AgentSessionTabStrip({
                   ].filter(Boolean).join(" ")}
                 >
                   <span
-                    className={statusIndicatorClass}
+                    className={statusIndicatorClassName}
                     aria-hidden="true"
                     title={sessionStatusTitle}
                   >
@@ -376,7 +376,7 @@ export function AgentSessionTabStrip({
       {cliAgentRuns.map((run) => {
         const tabActive = activeCliAgentRunId === run.id;
         const statusTone = agentSessionStatusTone(run.status);
-        const statusIndicatorClass = agentSessionStatusIndicatorClassName(statusTone);
+        const statusIndicatorClassName = agentSessionStatusIndicatorClassName(statusTone);
         const statusShortLabel = agentSessionStatusShortLabel(statusTone, lang);
         const runStatusLabel = statusLabel(run.status);
         const title = [run.title, statusShortLabel, run.summary].filter(Boolean).join(" · ");
@@ -443,7 +443,7 @@ export function AgentSessionTabStrip({
                   ].filter(Boolean).join(" ")}
                 >
                   <span
-                    className={statusIndicatorClass}
+                    className={statusIndicatorClassName}
                     aria-hidden="true"
                     title={[statusShortLabel, runStatusLabel].filter(Boolean).join(" · ")}
                   >

@@ -60,22 +60,23 @@ describe("source collection vertical three-column workbench", () => {
     expect(panelFrameStyles.sourceCollectionFocusedPanel).not.toContain("auto-rows");
   });
 
-  it("renders one source-review list and keeps extraction recovery docked below its scroller", () => {
+  it("renders one source-review list and integrates extraction recovery into the stage header", () => {
     expect(activeStageSource).not.toContain("renderCandidatePanel");
     expect(activeStageSource.match(/renderScreeningPanel\(\)/g)).toHaveLength(1);
-    expect(activeStageSource).toContain("renderRecoveryPanel()");
+    expect(activeStageSource).toContain("renderIntegratedRecovery?: () => ReactNode");
+    expect(activeStageSource).toContain("sourceCollectionStageIntegratedRecovery");
+    expect(activeStageSource).not.toContain("renderRecoveryPanel");
     expect(activeStageStyles.sourceCollectionExtractionPanels).toContain(
-      "grid-rows-[minmax(0,1fr)_auto]",
+      "grid-rows-[minmax(0,1fr)]",
     );
     expect(activeStageStyles.sourceCollectionExtractionPanels).toContain("overflow-hidden");
     expect(activeStageStyles.sourceCollectionExtractionScrollRegion).toContain("overflow-auto");
     expect(activeStageStyles.sourceCollectionExtractionScrollRegion).not.toContain(
       "max-[1020px]:overflow-visible",
     );
-    expect(activeStageStyles.sourceCollectionExtractionRecoveryDock).toContain("shrink-0");
-    expect(activeStageStyles.sourceCollectionExtractionRecoveryDock).toContain(
-      "max-h-[min(42dvh,300px)]",
+    expect(activeStageStyles.sourceCollectionStageIntegratedRecovery).toContain(
+      "max-h-[min(48dvh,360px)]",
     );
-    expect(activeStageStyles.sourceCollectionExtractionRecoveryDock).toContain("overflow-auto");
+    expect(activeStageStyles.sourceCollectionStageIntegratedRecovery).toContain("overflow-auto");
   });
 });
