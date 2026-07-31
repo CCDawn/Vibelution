@@ -15,7 +15,7 @@ Prefer slice modules over growing `team_service.py` when possible.
 | AI search runs / source-scope IO | `ai_search.py` | system team materialize; pure ranking |
 | Research organization team sync | `research_organization.py` | generic CRUD |
 | Canvas node/member normalize (Agent lookup) | `canvas_normalize.py` | pure edge normalize (`canvas_primitives`) |
-| Team CRUD list/get/create/archive | facade | agent_directory profiles |
+| Team CRUD list/get/create/archive | `team_crud.py` | repair index internals; pure ranking |
 | System team bootstrap control plane | `system_bootstrap.py` | ensure_* materialization bodies |
 | System team ensure / AI search team materialize | `system_teams.py` | bootstrap control-plane state; generic CRUD |
 | Team linked chat-room sync / repair | `chat_room_links.py` | team CRUD; canvas IO |
@@ -41,6 +41,7 @@ Prefer slice modules over growing `team_service.py` when possible.
 | chat-room link pack | **done** | sync/repair/historical link helpers late-bind facade index locks |
 | AI search runs pack | **done** | list/start/scope/page-fallback late-binds facade ensure/constants |
 | research organization pack | **done** | ensure/canvas/role sync late-binds facade index/contract helpers |
+| team CRUD pack | **done** | list/create/update/archive/membership/message late-binds facade |
 
 ## Related
 
