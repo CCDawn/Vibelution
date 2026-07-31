@@ -43,8 +43,11 @@ def _build_service(tmp_path, *, hook_overrides=None):
             "branch": "codex/self-loop-candidate",
             "worktreePath": "C:/workspace/self-loop-candidate",
             "baseCommit": "a" * 40,
-            "headCommit": "b" * 40,
-            "changedFiles": ["core/example.py", "tests/test_example.py"],
+            "headCommit": "a" * 40,
+            "changedFiles": [
+                {"path": "core/example.py", "changeType": "modified"},
+                {"path": "tests/test_example.py", "changeType": "added"},
+            ],
             "verification": [{"command": "pytest tests/test_example.py", "outcome": "passed"}],
             "conversationSessionId": "session-executor",
             "variantId": "variant-001",
@@ -107,6 +110,10 @@ def test_run_stops_at_user_approval_without_evaluation_or_git_integration(tmp_pa
     assert result["plan"]["steps"][0]["id"] == "state-machine"
     assert result["plan"]["conversationSessionId"] == "session-observer"
     assert result["candidate"]["branch"] == "codex/self-loop-candidate"
+    assert result["candidate"]["changedFiles"][0] == {
+        "path": "core/example.py",
+        "changeType": "modified",
+    }
     assert result["candidate"]["conversationSessionId"] == "session-executor"
     assert result["candidate"]["variantId"] == "variant-001"
     assert result["resultReport"]["summary"] == "候选改动已在隔离工作树完成。"
@@ -146,7 +153,7 @@ def test_only_explicit_user_approval_can_merge_then_cleanup(tmp_path):
         "cleanup",
     ]
     integration_context = calls[-2][1]
-    assert integration_context["candidate"]["headCommit"] == "b" * 40
+    assert integration_context["candidate"]["headCommit"] == "a" * 40
     assert integration_context["approval"]["actorType"] == "user"
     cleanup_context = calls[-1][1]
     assert cleanup_context["integration"]["mergedHead"] == "d" * 40
