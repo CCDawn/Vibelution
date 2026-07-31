@@ -10,6 +10,7 @@ import conversationViewSource from "../components/conversation/ConversationView.
 import routeErrorBoundarySource from "../app/RouteErrorBoundary.tsx?raw";
 import routerSource from "../app/router.tsx?raw";
 import shellStoreSource from "../store/shellStore.ts?raw";
+import chatApiSource from "../api/chat.ts?raw";
 import agentSessionTabStripSource from "./AgentSessionTabStrip.tsx?raw";
 import routeSource from "./ChatCodingRoute.tsx?raw";
 import conversationIndexRailSource from "./chat/ChatConversationIndexRail.tsx?raw";
@@ -195,7 +196,7 @@ const routeAndStreamSource = `${routeSource}\n${sessionDetailStreamSource}\n${gr
 const routeAndSelectionSource = `${routeSource}\n${chatSessionSelectionSource}`;
 const routeAndHelpersSource = `${routeSource}\n${chatSessionDetailHelpersSource}\n${chatRoutePresentationSource}`;
 const routeAndLifecycleSource = `${routeSource}\n${chatWorkspaceLifecycleSource}\n${chatSessionDetailHelpersSource}`;
-const routeAndDetailMutationsSource = `${routeSource}\n${chatSessionDetailMutationsSource}`;
+const routeAndDetailMutationsSource = `${routeSource}\n${chatSessionDetailMutationsSource}\n${chatApiSource}`;
 const routeAndActionsSource = `${routeSource}\n${chatWorkspaceActionsSource}`;
 const routeAndGroupPresentationSource = `${routeSource}\n${chatGroupMessagePresentationSource}\n${chatRoutePresentationSource}`;
 const routeAndRenameMenuSource = `${routeSource}\n${chatSessionRenameMenuSource}`;
@@ -381,11 +382,13 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("pendingToolGovernanceRequests");
     expect(routeSource).toContain("sessionToolApprovalsQuery");
     expect(routeSource).toContain("queryKeys.sessionToolApprovals");
-    expect(routeSource).toContain("/tool-approvals?status=pending");
+    expect(routeSource).toContain("listPendingSessionToolApprovals");
+    expect(chatApiSource).toContain("/tool-approvals?status=pending");
     expect(routeSource).toContain("runtime?.workRuns?.active?.chat_turn?.sessionId === activeSessionId");
     expect(routeSource).toContain("|| sessionToolApprovalRuntimeActive");
     expect(routeSource).toContain("resolveToolApprovalMutation");
-    expect(routeAndDetailMutationsSource).toContain("/tool-approvals/");
+    expect(routeAndDetailMutationsSource).toContain("resolveSessionToolApprovalDecision");
+    expect(chatApiSource).toContain("/tool-approvals/");
     expect(routeAndDetailMutationsSource).toContain('"acceptForSession"');
     expect(routeAndDetailMutationsSource).toContain("/tool-governance-requests/");
     expect(routeSource).toContain("onApproveToolApproval={() => {");
