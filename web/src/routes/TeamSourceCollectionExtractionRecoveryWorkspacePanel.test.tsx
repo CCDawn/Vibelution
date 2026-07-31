@@ -109,13 +109,15 @@ describe("TeamSourceCollectionExtractionRecoveryWorkspacePanel", () => {
     }), "10");
 
     expect(markup).toContain("来源核验");
-    expect(markup).toContain("提炼完成，待核验来源");
-    expect(markup).toContain("待核验来源");
+    expect(markup).toContain("提炼完成，待补充材料");
+    expect(markup).toContain("待补材料来源");
     expect(markup).toContain("2/14");
-    expect(markup).toContain("提炼覆盖");
+    expect(markup).toContain("已提炼");
+    expect(markup).toContain("要求 Agent 补充材料");
+    expect(markup).toContain("补充可核验材料");
     expect(markup).toContain("待 Agent 复核");
     expect(markup).toContain("<strong>10</strong>");
-    expect(markup).toContain("不代表缺少证据锚点");
+    expect(markup).toContain("当前没有证据锚点缺口");
     expect(markup).toContain("lucide-circle-check");
     expect(markup).not.toContain("lucide-triangle-alert");
     expect(markup).not.toContain("待补提炼");
