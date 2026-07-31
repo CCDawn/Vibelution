@@ -124,6 +124,7 @@ import {
   codexTranscriptToolRawName,
   createCodexTranscriptToolActivity,
   formatCodexTranscriptDuration,
+  shouldAttachToolApprovalToActivity,
 } from "./conversationToolActivityModel";
 import { ConversationProcessDisclosure } from "./ConversationProcessDisclosure";
 import {
@@ -420,6 +421,7 @@ export function ConversationView({
   slashCommandSuggestions = [],
   composerAttachmentInputDisabled,
   permissionControl,
+  toolApproval = null,
   llmControl,
   turnError,
   submitLabel,
@@ -455,6 +457,9 @@ export function ConversationView({
   const { lang, t, statusLabel } = useAppI18n({ domains: ["chat"] });
   const timelineRef = useRef<HTMLDivElement | null>(null);
   const historyScrollAnchorRef = useRef<TimelineScrollRowKeyAnchor | null>(null);
+  /** Ensures a pending tool approval mounts under at most one tool activity per render. */
+  const toolApprovalConsumedRef = useRef(false);
+  toolApprovalConsumedRef.current = false;
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
   const attachmentInputRef = useRef<HTMLInputElement | null>(null);
   const initializedSessionRef = useRef("");
@@ -1690,16 +1695,50 @@ export function ConversationView({
     );
     const processCells = visibleCells.filter((cell) => !isFinalResponseCell(cell));
     const finalCells = visibleCells.filter(isFinalResponseCell);
-    const renderTimelineNodes = (timelineCells: CodexTranscriptCell[]) => (
-      buildCodexTranscriptTimelineNodes(timelineCells).map((node) => node.kind === "tool_activity" ? (
-        <ConversationToolActivity
-          key={node.activity.id}
-          activity={node.activity}
-          language={lang === "en" ? "en" : "zh"}
-          renderToolDetails={renderCodexTranscriptToolDetailContent}
-        />
-      ) : renderCodexTranscriptCell(message, node.cell))
-    );
+    const renderTimelineNodes = (
+      timelineCells: CodexTranscriptCell[],
+      options?: { attachToolApproval?: boolean },
+    ) => {
+      const nodes = buildCodexTranscriptTimelineNodes(timelineCells);
+      const canAttach = Boolean(options?.attachToolApproval && toolApproval && !toolApprovalConsumedRef.current);
+      const toolActivities = nodes.filter((node) => node.kind === "tool_activity");
+      const matchedActivityId = canAttach
+        ? (
+          toolActivities.find((node) => node.kind === "tool_activity" && shouldAttachToolApprovalToActivity(
+            node.activity,
+            toolApproval?.toolName,
+            { preferAnyOpenWhenUnmatched: false },
+          ))
+          ?? toolActivities.find((node) => node.kind === "tool_activity" && shouldAttachToolApprovalToActivity(
+            node.activity,
+            toolApproval?.toolName,
+            { preferAnyOpenWhenUnmatched: true },
+          ))
+          ?? toolActivities[toolActivities.length - 1]
+        )
+        : null;
+      const matchedId = matchedActivityId && matchedActivityId.kind === "tool_activity"
+        ? matchedActivityId.activity.id
+        : "";
+      return nodes.map((node) => {
+        if (node.kind !== "tool_activity") {
+          return renderCodexTranscriptCell(message, node.cell, { attachToolApproval: false });
+        }
+        const attachApproval = Boolean(canAttach && node.activity.id === matchedId);
+        if (attachApproval) {
+          toolApprovalConsumedRef.current = true;
+        }
+        return (
+          <ConversationToolActivity
+            key={node.activity.id}
+            activity={node.activity}
+            language={lang === "en" ? "en" : "zh"}
+            renderToolDetails={renderCodexTranscriptToolDetailContent}
+            approvalSlot={attachApproval && toolApproval ? toolApproval.content : null}
+          />
+        );
+      });
+    };
     return (
       <div
         className={styles.codexTranscriptSurface}
@@ -1712,12 +1751,12 @@ export function ConversationView({
             language={lang === "en" ? "en" : "zh"}
             onUserToggle={handleProcessDisclosureUserToggle}
           >
-            {renderTimelineNodes(processCells)}
+            {renderTimelineNodes(processCells, { attachToolApproval: true })}
           </ConversationProcessDisclosure>
         ) : null}
         {finalCells.length > 0 ? (
           <div data-codex-final-response="true">
-            {renderTimelineNodes(finalCells)}
+            {renderTimelineNodes(finalCells, { attachToolApproval: false })}
           </div>
         ) : null}
       </div>
@@ -1747,7 +1786,11 @@ export function ConversationView({
     });
   }
 
-  function renderCodexTranscriptCell(message: ConversationMessage, cell: CodexTranscriptCell) {
+  function renderCodexTranscriptCell(
+    message: ConversationMessage,
+    cell: CodexTranscriptCell,
+    options?: { attachToolApproval?: boolean },
+  ) {
     if (cell.kind === "assistant_markdown") {
       const text = cell.text?.trim() ?? "";
       if (!text || isNoFinalAnswerStatusContent(text) || isStreamingStatusPlaceholderContent(text)) {
@@ -1903,12 +1946,23 @@ export function ConversationView({
       );
     }
     if (cell.kind === "tool_call") {
+      const activity = createCodexTranscriptToolActivity([cell]);
+      const attachApproval = Boolean(
+        options?.attachToolApproval
+        && toolApproval
+        && !toolApprovalConsumedRef.current
+        && shouldAttachToolApprovalToActivity(activity, toolApproval.toolName, { preferAnyOpenWhenUnmatched: true }),
+      );
+      if (attachApproval) {
+        toolApprovalConsumedRef.current = true;
+      }
       return (
         <ConversationToolActivity
           key={cell.id}
-          activity={createCodexTranscriptToolActivity([cell])}
+          activity={activity}
           language={lang === "en" ? "en" : "zh"}
           renderToolDetails={renderCodexTranscriptToolDetailContent}
+          approvalSlot={attachApproval && toolApproval ? toolApproval.content : null}
         />
       );
     }
@@ -3652,6 +3706,12 @@ export function ConversationView({
           <ArrowDown size={16} />
           <span>{t("backToBottom")}</span>
         </VButton>
+      ) : null}
+
+      {toolApproval && !toolApprovalConsumedRef.current ? (
+        <div className={styles.toolApprovalFallback} data-codex-tool-approval-fallback="true">
+          {toolApproval.content}
+        </div>
       ) : null}
 
       {turnError?.message && !hasVisibleTurnErrorMessage ? (

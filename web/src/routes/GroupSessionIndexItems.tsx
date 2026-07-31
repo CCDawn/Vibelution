@@ -123,6 +123,8 @@ type TeamConversationIndexItemProps = {
   team: ConversationIndexTeam;
   teamRoute: string;
   statusLabel: (status: string) => string;
+  /** When nested under a team section header, prefer a chat-only title. */
+  displayTitle?: string;
   onOpen: (roomId: string) => void;
 };
 
@@ -133,12 +135,14 @@ export function TeamConversationIndexItem({
   team,
   teamRoute,
   statusLabel,
+  displayTitle,
   onOpen,
 }: TeamConversationIndexItemProps) {
   void teamRoute;
   const itemClassName = active
     ? `${styles.sessionItem} ${styles.teamTreeItem} ${styles.sessionItemActive}`
     : `${styles.sessionItem} ${styles.teamTreeItem}`;
+  const title = String(displayTitle || team.name || "").trim() || team.name;
   const teamStatus = teamStatusLabel(team.status, lang, statusLabel);
   const roomTitle = roomId ? (lang === "zh" ? "团队群聊已同步" : "Team room linked") : (lang === "zh" ? "团队群聊待同步" : "Team room pending");
   const memberTitle = teamMemberStatusTitle(team, lang);
@@ -147,7 +151,7 @@ export function TeamConversationIndexItem({
     ? `已合并 ${duplicateCount} 个同名团队记录`
     : `${duplicateCount} same-name Team records merged`;
   const disabledReasonId = roomId ? undefined : `team-row-disabled-reason-${team.teamId}`;
-  const tooltip = indexItemTooltip(team.name, [teamStatus, memberTitle, roomTitle, duplicateCount > 1 ? duplicateTitle : ""]);
+  const tooltip = indexItemTooltip(title, [team.name, teamStatus, memberTitle, roomTitle, duplicateCount > 1 ? duplicateTitle : ""]);
   const row = (
     <VNativeButton
       type="button"
@@ -155,7 +159,7 @@ export function TeamConversationIndexItem({
       disabled={!roomId}
       aria-current={active ? "true" : undefined}
       aria-describedby={disabledReasonId}
-      aria-label={[team.name, teamStatus, memberTitle, roomTitle, duplicateCount > 1 ? duplicateTitle : ""].filter(Boolean).join(" · ")}
+      aria-label={[title, team.name, teamStatus, memberTitle, roomTitle, duplicateCount > 1 ? duplicateTitle : ""].filter(Boolean).join(" · ")}
       onClick={() => onOpen(roomId)}
     >
       <span className={`${styles.conversationAvatar} ${styles.conversationAvatarGroup}`} aria-hidden="true">
@@ -163,7 +167,7 @@ export function TeamConversationIndexItem({
       </span>
       <span className={styles.conversationCopy}>
         <span className={styles.conversationTitleRow}>
-          <span className={styles.sessionItemTitle}>{team.name}</span>
+          <span className={styles.sessionItemTitle}>{title}</span>
           <span aria-label={teamStatus}>
             <VChip tone="success" className={styles.sessionState}>
               <CircleDot size={10} aria-hidden="true" />

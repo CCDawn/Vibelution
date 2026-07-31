@@ -68,6 +68,12 @@ export type TeamSourceCollectionScreeningWorkspacePanelProps = {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   sourceCollectionScreeningActionReadiness: any;
   sourceCollectionScreeningButtonText: string;
+  sourceCollectionScreeningButtonTitle?: string;
+  sourceCollectionScreeningStatusText?: string | null;
+  sourceCollectionQualityBatchFeedback?: string | null;
+  /** When true, quality review is demoted: materials must be repaired first. */
+  sourceCollectionQualityReviewIsSecondary?: boolean;
+  sourceCollectionRecommendedNextHint?: string | null;
   openSourceCollectionScreeningPanel: () => void;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   renderSourceCollectionPagination: (stageId: SourceCollectionStageModuleId, total: number) => ReactNode;
@@ -123,6 +129,11 @@ export function TeamSourceCollectionScreeningWorkspacePanel(props: TeamSourceCol
     sourceCollectionActionDisabledTitle,
     sourceCollectionScreeningActionReadiness,
     sourceCollectionScreeningButtonText,
+    sourceCollectionScreeningButtonTitle,
+    sourceCollectionScreeningStatusText,
+    sourceCollectionQualityBatchFeedback,
+    sourceCollectionQualityReviewIsSecondary = false,
+    sourceCollectionRecommendedNextHint = null,
     openSourceCollectionScreeningPanel,
     renderSourceCollectionPagination,
     teamWorkflowSourceQualityStatusQuery,
@@ -187,7 +198,7 @@ export function TeamSourceCollectionScreeningWorkspacePanel(props: TeamSourceCol
           { key: "filtered", label: lang === "zh" ? "当前过滤" : "filtered", value: screeningPanelFilteredCountText },
           { key: "reviewed", label: lang === "zh" ? "已审查" : "reviewed", value: sourceCollectionProjectedAssessedCountText },
           { key: "approved", label: lang === "zh" ? "通过" : "approved", value: sourceCollectionProjectedApprovedCountText },
-          { key: "pending", label: lang === "zh" ? "待 Agent 复核" : "pending agent review", value: sourceCollectionRunPendingScreeningCountText },
+          { key: "pending", label: lang === "zh" ? "待质量审查" : "pending quality review", value: sourceCollectionRunPendingScreeningCountText },
           { key: "evidence-ready", label: "evidence_ready", value: sourceCollectionEvidenceReadyCandidateCount },
           { key: "missing-evidence-anchor", label: "missing_evidence_anchor", value: sourceCollectionMissingEvidenceAnchorCount },
         ]}
@@ -195,11 +206,15 @@ export function TeamSourceCollectionScreeningWorkspacePanel(props: TeamSourceCol
           <VButton
             type="button"
             density="compact"
-            variant="primary"
+            variant={sourceCollectionQualityReviewIsSecondary ? "secondary" : "primary"}
             icon={<CheckCircle2 size={13} />}
             onPress={runSourceCollectionScreeningAction}
             isDisabled={sourceCollectionScreeningDisabled || selectedTeamSourceQualityPending}
-            title={sourceCollectionActionDisabledTitle(sourceCollectionScreeningActionReadiness, sourceCollectionScreeningButtonText)}
+            title={sourceCollectionActionDisabledTitle(sourceCollectionScreeningActionReadiness, sourceCollectionScreeningButtonText)
+              || sourceCollectionScreeningButtonTitle
+              || (sourceCollectionQualityReviewIsSecondary
+                ? (lang === "zh" ? "请先在右侧点主按钮补材料，再审查" : "Repair materials with the right-stage primary button first")
+                : sourceCollectionScreeningButtonText)}
           >
             {sourceCollectionScreeningButtonText}
           </VButton>
@@ -219,19 +234,30 @@ export function TeamSourceCollectionScreeningWorkspacePanel(props: TeamSourceCol
         listNeedsScrollHint={screeningListNeedsScrollHint}
         emptyMessage={
           sourceCollectionPrimaryDataLoading
-            ? (lang === "zh" ? "正在加载资料提炼复核候选..." : "Loading review candidates...")
+            ? (lang === "zh" ? "正在加载质量审查候选..." : "Loading quality-review candidates...")
             : sourceCollectionDisplayedCandidateCount
               ? (lang === "zh" ? "当前过滤条件下没有候选资料。" : "No candidates match this filter.")
               : (lang === "zh" ? "本轮还没有候选资料。先完成搜索资料并导入候选。" : "No candidates from this run yet.")
         }
         pagination={renderSourceCollectionPagination("extraction", filteredScreeningCandidates.length)}
-        statusItems={null}
+        statusItems={(sourceCollectionRecommendedNextHint || sourceCollectionScreeningStatusText) ? (
+          <div className={styles.messageResult} role="status">
+            {sourceCollectionRecommendedNextHint
+              ? sourceCollectionRecommendedNextHint
+              : `${lang === "zh" ? "当前状态：" : "Status: "}${sourceCollectionScreeningStatusText}`}
+          </div>
+        ) : null}
         errors={<>
           {teamWorkflowSourceQualityStatusQuery.error instanceof Error ? (
             <div className={styles.messageError}>{teamWorkflowSourceQualityStatusQuery.error.message}</div>
           ) : null}
           {selectedTeamSourceQualityError ? (
             <div className={styles.messageError}>{selectedTeamSourceQualityError.message}</div>
+          ) : null}
+          {sourceCollectionQualityBatchFeedback ? (
+            <div className={styles.messageResult} role="status">
+              {sourceCollectionQualityBatchFeedback}
+            </div>
           ) : null}
         </>}
       >
@@ -263,7 +289,7 @@ export function TeamSourceCollectionScreeningWorkspacePanel(props: TeamSourceCol
                         ? versionFamily.statusLabel
                         : qualityPresentation
                         ? qualityPresentation.label
-                        : (lang === "zh" ? "待 Agent 复核" : "pending agent review")
+                        : (lang === "zh" ? "待质量审查" : "pending quality review")
                     }
                     statusTitle={
                       versionFamily?.isSuperseded

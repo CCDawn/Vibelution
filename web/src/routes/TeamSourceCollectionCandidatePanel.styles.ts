@@ -22,8 +22,6 @@ const styles = {
     "sourceCollectionScreeningScrollHint min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   workflowCandidateList:
     "workflowCandidateList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
-  workflowSourceQualityStats:
-    "workflowSourceQualityStats min-w-0 grid gap-2 !grid grid-cols-[repeat(5,minmax(72px,1fr))] gap-[5px]",
 } as const;
 
 export default styles;

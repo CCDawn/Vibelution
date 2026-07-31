@@ -15,6 +15,7 @@ import evidenceModelSource from "./teams/source-collection/evidenceModel.ts?raw"
 import presentationModelSource from "./teams/source-collection/presentationModel.ts?raw";
 import runModelSource from "./teams/source-collection/runModel.ts?raw";
 import stageProjectionSource from "./teams/source-collection/stageProjection.ts?raw";
+import extractionRecoveryViewModelSource from "./teams/source-collection/extractionRecoveryViewModel.ts?raw";
 import researchWorkflowResourcesSource from "./teams/useResearchWorkflowResources.ts?raw";
 import teamExperimentLoopMutationsSource from "./teams/useTeamExperimentLoopMutations.ts?raw";
 import teamSourceCollectionMutationsSource from "./teams/useTeamSourceCollectionMutations.ts?raw";
@@ -935,7 +936,7 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourceCollectionConversationWorkspacePanelSource).toContain("当前筛选没有资料");
     expect(teamSourceCollectionConversationWorkspacePanelSource).toContain("查看全部来源");
     expect(routeSource).toContain("搜索问题");
-    expect(routeSource).toContain("待 Agent 复核");
+    expect(routeSource).toContain("待质量审查");
     expect(routeSource).not.toContain("<span>{lang === \"zh\" ? \"缓存\" : \"cache\"}");
     expect(routeSource).toContain("sourceCollectionScreeningButtonText");
     expect(routeSource).toContain("sourceCollectionScreeningDisabled");
@@ -946,7 +947,7 @@ describe("TeamsRoute layout contract", () => {
     // Wave 8P: batch assess endpoint lives on useTeamSourceCollectionMutations.
     expect(teamSourceCollectionMutationsSource).toContain("source-quality/assess-batch");
     expect(runModelSource).toContain("执行资料提炼复核");
-    expect(routeSource).toContain("Agent 复核中");
+    expect(routeSource).toContain("质量审查中");
     expect(routeSource).toContain("sourceCollectionExpandedPanelId");
     expect(routeSource).toContain("sourceCollectionFocusedPanelId");
     expect(routeSource).toContain("sourceCollectionControlPanelRef");
@@ -976,7 +977,7 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourceCollectionScreeningPanelSource).toContain("source-collection-screening-panel");
     expect(teamSourceCollectionScreeningPanelSource).toContain("sourceCollectionScreeningListShell");
     expect(teamSourceCollectionScreeningPanelSource).toContain("sourceCollectionScreeningScrollHint");
-    expect(teamSourceCollectionScreeningPanelSource).toContain("资料提炼复核候选列表，可向下滚动查看更多");
+    expect(teamSourceCollectionScreeningPanelSource).toContain("质量审查候选列表，可向下滚动查看更多");
     expect(teamSourceCollectionScreeningPanelSource).toContain("向下滚动查看更多本页候选");
     expect(routeSource).not.toContain("TeamSourceCollectionCandidateWorkspacePanel");
     expect(teamSourceCollectionCandidatePanelSource).toContain("source-collection-candidates-panel");
@@ -991,21 +992,24 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("openSourceCollectionCandidatePanel");
     expect(routeSource).not.toContain("renderSourceCollectionCandidatePanel");
     expect(routeSource).not.toContain("sourceCollectionRunCandidates.slice(0, 6)");
-    expect(routeSource).toContain("TeamSourceCollectionExtractionRecoveryPanel");
-    expect(routeSource).toContain("renderSourceCollectionExtractionRecoveryPanel");
+    // Recovery metrics integrate into the extraction stage card (ActiveStage workspace).
+    expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain("TeamSourceCollectionExtractionRecoveryWorkspacePanel");
+    expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain("renderIntegratedRecovery");
+    expect(routeSource).toContain("extractionRecovery=");
+    expect(routeSource).not.toContain("renderSourceCollectionExtractionRecoveryPanel");
     expect(teamSourceCollectionExtractionRecoveryPanelSource).toContain("sourceCollectionExtractionRecoveryStats");
     expect(teamSourceCollectionExtractionRecoveryPanelSource).toContain("sourceCollectionExtractionRecoveryActions");
     expect(teamSourceCollectionExtractionRecoveryPanelSource).toContain("titleLabel");
     expect(teamSourceCollectionExtractionRecoveryPanelSource).toContain("failedLabel");
     expect(teamSourceCollectionExtractionRecoveryPanelSource).toContain("recoverLabel");
     expect(teamSourceCollectionExtractionRecoveryPanelSource).toContain("可保留");
+    expect(teamSourceCollectionExtractionRecoveryPanelSource).toContain("待质量审查");
     // Wave 8L: recovery CTA copy / open-chat wiring live on recovery workspace panel.
     expect(teamSourceCollectionExtractionRecoveryWorkspacePanelSource).toContain("进入 Agent 私聊");
+    expect(teamSourceCollectionExtractionRecoveryWorkspacePanelSource).toContain("qualityReviewActionText");
     expect(routeSource).toContain("runSourceCollectionCandidateExtractionAction");
     expect(routeSource).toContain("runSourceCollectionScreeningAction");
     expect(teamSourceCollectionExtractionRecoveryWorkspacePanelSource).toContain("openSourceCollectionStageAgentChat(\"extraction\")");
-    expect(teamSourceCollectionExtractionRecoveryWorkspacePanelSource).toContain("sourceCollectionExtractionRecoveryFailureCount");
-    expect(teamSourceCollectionExtractionRecoveryWorkspacePanelSource).toContain("sourceCollectionExtractionRecoverySalvageCount");
     expect(routeSource).toContain(
       `const sourceCollectionExtractionAgentMaterialCount = Math.max(
     sourceCollectionExtractionSourceVerificationCount,
@@ -1074,7 +1078,7 @@ describe("TeamsRoute layout contract", () => {
     expect(evidenceModelSource).toContain("待补提炼");
     expect(stageProjectionSource).toContain("已中断，需要继续");
     expect(stageProjectionSource).toContain("继续这次任务");
-    expect(routeSource).toContain("待 Agent 复核");
+    expect(routeSource).toContain("待质量审查");
     expect(evidenceModelSource).toContain("继续补全提炼");
     expect(routeSource).not.toContain("sourceCollectionStageBlockingReasonLabel(module.projection.blockingReasons[0], lang)");
     expect(stageProjectionSource).toContain("sourceCollectionStageBlockingReasonsLabel");
@@ -1112,13 +1116,15 @@ describe("TeamsRoute layout contract", () => {
     expect(stageProjectionSource).toContain("剩余检查项");
     expect(routeSource).toContain('sourceCollectionStageModules.find((module) => module.state === "failed")');
     expect(routeSource).not.toContain("仍需完成检查项或生成本阶段产物");
-    // Wave 8L: recovery panel consumes invalid id counts from projection.
-    expect(teamSourceCollectionExtractionRecoveryWorkspacePanelSource).toContain("invalidRecordIds");
+    // Wave 8L: recovery view-model consumes invalid id counts from projection.
+    expect(extractionRecoveryViewModelSource).toContain("invalidRecordIds");
     expect(stageProjectionSource).toContain("本轮未生成候选资料");
     expect(evidenceModelSource).toContain("没有生成候选资料");
     expect(stageProjectionSource).toContain("完整 recordId");
     expect(stageProjectionSource).toContain("sourceCollectionCoverageMetric");
-    expect(teamSourceCollectionExtractionRecoveryWorkspacePanelSource).toContain("invalidCandidateIds");
+    expect(extractionRecoveryViewModelSource).toContain("invalidCandidateIds");
+    expect(extractionRecoveryViewModelSource).toContain("重新质量审查");
+    expect(extractionRecoveryViewModelSource).toContain("操作顺序");
     expect(stageProjectionSource).toContain("materializedContentExtraction");
     expect(evidenceModelSource).toContain("继续补全提炼");
     expect(evidenceModelSource).toContain("继续补全提炼");
@@ -1127,7 +1133,7 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourceCollectionConversationWorkspacePanelSource).toContain("已提炼");
     expect(evidenceModelSource).toContain("待补提炼");
     expect(routeSource).toContain("已审");
-    expect(routeSource).toContain("待 Agent 复核");
+    expect(routeSource).toContain("待质量审查");
     expect(routeSource).not.toContain("未匹配资料");
     // Wave 8L: graph projection selection lives on graph workspace panel.
     expect(teamSourceCollectionGraphWorkspacePanelSource).toContain("graphForSelectedSourceRun");
@@ -1266,7 +1272,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).not.toContain("sourceCollectionOpenAssignmentCount > 0 ? <Search");
     // Wave 8M: ingestion feedback copy lives on controls workspace panel.
     expect(teamSourceCollectionControlsWorkspacePanelSource).toContain("条资料通过审查");
-    expect(routeSource).toContain("Agent 重新提炼复核");
+    expect(routeSource).toContain("重新质量审查");
+    expect(routeSource).toContain("Agent 质量审查");
+    expect(routeSource).toContain("质量审查完成");
     expect(routeSource).toContain("sourceCollectionIngestorAgentId");
     expect(routeSource).toContain("runKnowledgeIngestionPrecheckMutation");
     // Wave 8P: ingestion precheck/complete write endpoints live on useTeamSourceCollectionMutations.
@@ -1325,7 +1333,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("forceRescreen");
     expect(routeSource).toContain("force: forceRescreen");
     expect(teamSourceCollectionScreeningPanelSource).toContain("sourceCollectionPanelActions");
-    expect(routeSource).toContain("Source Extractor Agent re-screened already assessed source_manifest candidates");
+    expect(routeSource).toContain("Source Extractor Agent re-ran quality scoring on already assessed source_manifest candidates");
     expect(routeSource).toContain("通知资料入库 Agent");
     expect(routeSource).not.toContain("待继续搜索");
     // Wave 8P: storage open write endpoint lives on useTeamSourceCollectionMutations.
@@ -1373,13 +1381,19 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourceCollectionActiveStagePanelSource).toContain("styles.sourceCollectionExtractionPanels");
     expect(teamSourceCollectionActiveStagePanelSource).not.toContain("renderCandidatePanel");
     expect(teamSourceCollectionActiveStagePanelSource).toContain("renderScreeningPanel()");
-    expect(teamSourceCollectionActiveStagePanelSource).toContain("renderRecoveryPanel()");
+    expect(teamSourceCollectionActiveStagePanelSource).toContain("renderIntegratedRecovery");
+    expect(teamSourceCollectionActiveStagePanelSource).not.toContain("renderRecoveryPanel()");
     // Wave 8M: stage panel render-prop mounts live on active-stage workspace.
+    // Extraction recovery is merged into the right-hand stage card (not candidate list / dock).
     expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain("renderGraphPanel={renderSourceCollectionGraphPanel}");
     expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain("renderMemoryPanel={renderSourceCollectionMemoryPanel}");
     expect(teamSourceCollectionActiveStageWorkspacePanelSource).not.toContain("renderCandidatePanel=");
     expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain("renderScreeningPanel={renderSourceCollectionScreeningPanel}");
-    expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain("renderRecoveryPanel={renderSourceCollectionRecoveryPanel}");
+    expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain("renderIntegratedRecovery=");
+    expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain("extractionRecovery");
+    expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain('presentation="stageCard"');
+    expect(teamSourceCollectionCandidateWorkspacePanelSource).not.toContain("renderSourceCollectionExtractionRecoveryPanel");
+    expect(teamSourceCollectionCandidatePanelSource).not.toContain("recoveryPanel");
     // Wave 8L: graph open condition lives on graph workspace panel.
     const graphPanelOpenSource = teamSourceCollectionGraphWorkspacePanelSource.slice(
       teamSourceCollectionGraphWorkspacePanelSource.indexOf("<TeamSourceCollectionGraphPanel"),
@@ -1407,7 +1421,7 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourceCollectionMemoryPanelStyles.sourceCollectionMemoryListShell).not.toContain("max-h-[44vh]");
     expect(teamSourceCollectionMemoryPanelStyles.sourceCollectionMemoryListShell).not.toContain("max-[860px]:max-h-[58vh]");
     expect(teamSourceCollectionMemoryPanelStyles.sourceCollectionMemoryListShell).toContain("[scrollbar-gutter:stable]");
-    expect(routeSource).toContain("待 Agent 复核");
+    expect(routeSource).toContain("待质量审查");
     expect(routeSource).not.toContain("待质检");
     expect(routeSource).not.toContain("workflowSourceCollectionPrimaryButton");
     // Wave 8H: stage primary action labels live on TeamResearchStageLauncherPanel.

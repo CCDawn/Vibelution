@@ -1135,6 +1135,8 @@ const styles: Record<string, string> = {
     "vui-components-conversationview turnContent grid min-w-0 gap-[5px]",
   turnEditBadge: `vui-components-conversationview turnEditBadge min-w-0 ${vuiOpaqueRowClass} p-2 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]`,
   turnEditing: `vui-components-conversationview turnEditing min-w-0 ${vuiOpaqueRowClass} p-2`,
+  toolApprovalFallback:
+    "toolApprovalFallback min-w-0 w-full max-w-[min(42rem,100%)] justify-self-center px-2 pb-2",
   turnError:
     "vui-components-conversationview turnError mx-auto grid w-[min(100%,760px)] min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-2 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--state-error)_28%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_5%,var(--vui-surface-row))] px-3 py-2.5 text-[var(--state-error)] shadow-none",
   turnErrorDiagnostics:

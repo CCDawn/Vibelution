@@ -40,6 +40,14 @@ export type ConversationPermissionControl = {
   onChange: (permissionPreset: AgentPermissionPreset) => void;
 };
 
+/** Codex-style per-call tool approval bound into the transcript tool activity. */
+export type ConversationToolApprovalSurface = {
+  /** Match against the open tool cell name (e.g. web_fetch_tool). */
+  toolName?: string;
+  /** Pre-built approval card (owned by the chat route). */
+  content: ReactNode;
+};
+
 export type ConversationViewProps = {
   sessionId: string;
   title: string;
@@ -93,6 +101,8 @@ export type ConversationViewProps = {
   slashCommandSuggestions?: SkillLibraryItem[];
   composerAttachmentInputDisabled?: boolean;
   permissionControl?: ConversationPermissionControl;
+  /** Pending tool approval shown under the matching running tool (Codex-style). */
+  toolApproval?: ConversationToolApprovalSurface | null;
   llmControl?: ConversationLlmControl;
   turnError?: SessionTurnError | null;
   nextStateSignals?: ChatNextStateSignalSummary[];

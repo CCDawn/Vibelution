@@ -5,21 +5,47 @@ import {
 
 const styles = {
   sourceCollectionExtractionPanels:
-    "sourceCollectionExtractionPanels min-w-0 grid h-full min-h-0 grid-rows-[minmax(0,1fr)_auto] gap-2 overflow-hidden",
+    "sourceCollectionExtractionPanels min-w-0 grid h-full min-h-0 grid-rows-[minmax(0,1fr)] gap-2 overflow-hidden",
   sourceCollectionExtractionScrollRegion:
     "sourceCollectionExtractionScrollRegion min-w-0 min-h-0 overflow-auto [scrollbar-gutter:stable]",
-  sourceCollectionExtractionRecoveryDock:
-    "sourceCollectionExtractionRecoveryDock relative z-[1] min-w-0 max-h-[min(42dvh,300px)] shrink-0 overflow-auto [grid-row:2] [overscroll-behavior:contain]",
+  sourceCollectionStageIntegratedRecovery:
+    "sourceCollectionStageIntegratedRecovery min-w-0 max-h-[min(48dvh,360px)] overflow-auto [overscroll-behavior:contain] [&_.sourceCollectionExtractionRecoveryPanel]:border-0 [&_.sourceCollectionExtractionRecoveryPanel]:bg-transparent [&_.sourceCollectionExtractionRecoveryPanel]:p-0",
   sourceCollectionIngestionPanels:
     "sourceCollectionIngestionPanels min-w-0 grid min-h-0 content-stretch gap-2 grid-rows-[auto_minmax(0,1fr)] overflow-hidden max-[860px]:min-h-[560px] max-[860px]:grid-rows-[auto_minmax(0,1fr)] max-[860px]:overflow-hidden",
   sourceCollectionStageChatActions:
     "sourceCollectionStageChatActions min-w-0 !grid grid-cols-[repeat(2,minmax(0,1fr))] items-center gap-1.5 [&_a]:inline-flex [&_a]:w-full [&_a]:max-w-full [&_a]:items-center [&_a]:justify-center [&_a]:gap-1.5 [&_a]:min-h-[30px] [&_a]:px-2 [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[color:color-mix(in_srgb,var(--accent-cool)_36%,var(--border-soft))] [&_a]:bg-[var(--vui-surface-row)] [&_a]:text-[var(--fg-primary)] [&_a]:font-[760] [&_a]:no-underline [&_a]:whitespace-nowrap [&_[data-vui=native-button]]:min-h-[30px] [&_[data-vui=native-button]]:w-full [&_[data-vui=native-button]]:max-w-full [&_[data-vui=native-button]:first-child]:col-span-2 max-[1020px]:grid-cols-[repeat(3,max-content)] max-[1020px]:justify-start max-[1020px]:[&_[data-vui=native-button]]:w-fit max-[1020px]:[&_a]:w-fit max-[1020px]:[&_[data-vui=native-button]:first-child]:col-span-1",
+  sourceCollectionStageNextAction:
+    "sourceCollectionStageNextAction min-w-0 grid gap-1.5 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-cool)_42%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_12%,var(--vui-surface-panel))] p-2 shadow-[0_0_0_1px_color-mix(in_srgb,var(--accent-cool)_18%,transparent)]",
+  sourceCollectionStageNextActionLabel:
+    "sourceCollectionStageNextActionLabel m-0 [font-size:var(--vui-font-xs)] font-bold tracking-wide text-[var(--accent-cool)]",
+  sourceCollectionStageNextActionButton:
+    `sourceCollectionStageNextActionButton min-w-0 !flex !w-full !max-w-full items-center justify-center gap-2 !min-h-[44px] !px-3 !rounded-[var(--radius-control)] !border-0 !text-[var(--vui-font-sm)] !font-[800] !leading-tight ${vuiStateSelectedRowClass}`,
+  sourceCollectionStageNextActionHint:
+    "sourceCollectionStageNextActionHint m-0 [font-size:var(--vui-font-xs)] leading-snug text-[var(--fg-secondary)]",
+  sourceCollectionStageMoreActions:
+    "sourceCollectionStageMoreActions min-w-0 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] [&_summary]:cursor-pointer [&_summary]:list-none [&_summary]:px-2 [&_summary]:py-1.5 [&_summary]:[font-size:var(--vui-font-xs)] [&_summary]:font-semibold [&_summary]:text-[var(--fg-tertiary)] [&_summary::-webkit-details-marker]:hidden",
+  sourceCollectionStageMoreActionsBody:
+    "sourceCollectionStageMoreActionsBody min-w-0 grid grid-cols-1 gap-1.5 border-t border-[var(--vui-border-subtle)] p-1.5 [&_a]:inline-flex [&_a]:w-full [&_a]:items-center [&_a]:justify-center [&_a]:gap-1.5 [&_a]:min-h-[30px] [&_a]:px-2 [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[var(--vui-border-subtle)] [&_a]:bg-[var(--vui-control-muted)] [&_a]:text-[var(--fg-secondary)] [&_a]:[font-size:var(--vui-font-xs)] [&_a]:no-underline [&_[data-vui=native-button]]:w-full [&_[data-vui=native-button]]:min-h-[30px] [&_[data-vui=native-button]]:justify-center [&_[data-vui=native-button]]:text-[var(--fg-secondary)]",
   sourceCollectionStageErrors:
     "sourceCollectionStageErrors min-w-0 col-start-2 row-start-2 grid min-h-0 content-start gap-1.5 overflow-auto empty:hidden max-[1020px]:col-start-1 max-[1020px]:row-start-2 max-[1020px]:overflow-visible",
   sourceCollectionStageHandoff:
     "sourceCollectionStageHandoff min-w-0 grid gap-0.5 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-secondary)] [&>span]:min-w-0 [&>span]:grid [&>span]:grid-cols-[minmax(64px,0.7fr)_minmax(0,1fr)] [&>span]:gap-2 [&>span]:break-words [&>span]:[overflow-wrap:anywhere] [&>span]:border-b [&>span]:border-[var(--vui-border-subtle)] [&>span]:py-1.5 [&>span:last-child]:border-b-0 [&_b]:text-[var(--fg-tertiary)]",
   sourceCollectionStageHandoffNext:
     "sourceCollectionStageHandoffNext min-w-0 text-[var(--fg-primary)]",
+  sourceCollectionStageFlowGuide:
+    "sourceCollectionStageFlowGuide min-w-0 grid gap-1.5 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-cool)_28%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_7%,var(--vui-surface-row))] p-2",
+  sourceCollectionStageFlowSteps:
+    "sourceCollectionStageFlowSteps m-0 flex list-none flex-wrap gap-1 p-0",
+  sourceCollectionStageFlowStep:
+    "sourceCollectionStageFlowStep inline-flex max-w-full items-center rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-0.5 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-tertiary)]",
+  sourceCollectionStageFlowStepCurrent:
+    "sourceCollectionStageFlowStepCurrent border-[color-mix(in_srgb,var(--accent-cool)_48%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_16%,var(--vui-surface-panel))] text-[var(--fg-primary)]",
+  sourceCollectionStageFlowStepDone:
+    "sourceCollectionStageFlowStepDone border-[color-mix(in_srgb,var(--state-success)_40%,var(--vui-border-subtle))] text-[var(--fg-secondary)]",
+  sourceCollectionStageFlowHints:
+    "sourceCollectionStageFlowHints min-w-0 grid gap-0.5 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-secondary)] [&>span]:min-w-0 [&>span]:grid [&>span]:grid-cols-[minmax(48px,auto)_minmax(0,1fr)] [&>span]:gap-1.5 [&>span]:break-words [&_b]:text-[var(--fg-tertiary)]",
+  sourceCollectionStageFlowNow:
+    "sourceCollectionStageFlowNow text-[var(--fg-primary)] font-semibold",
   sourceCollectionStagePrimaryAction:
     `sourceCollectionStagePrimaryAction min-w-0 flex w-fit max-w-full flex-wrap items-center justify-center gap-1.5 ${vuiStateSelectedRowClass}`,
   sourceCollectionStageResult:

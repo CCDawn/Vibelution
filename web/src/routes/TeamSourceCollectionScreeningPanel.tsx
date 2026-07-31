@@ -64,7 +64,7 @@ export function TeamSourceCollectionScreeningPanel({
       tabIndex={-1}
     >
       <summary>
-        <span>{lang === "zh" ? "资料提炼与复核" : "Source extraction and review"}</span>
+        <span>{lang === "zh" ? "资料列表与质量审查" : "Source list and quality review"}</span>
         <small>{rangeText}</small>
       </summary>
       {filterBar}
@@ -80,13 +80,13 @@ export function TeamSourceCollectionScreeningPanel({
         <PersistedHeightListShell
           layoutId={TEAM_SOURCE_COLLECTION_LAYOUT_ID}
           pane={TEAM_SOURCE_COLLECTION_SCREENING_HEIGHT_PANE}
-          label={lang === "zh" ? "调整资料提炼复核列表高度" : "Resize source review list height"}
+          label={lang === "zh" ? "调整质量审查列表高度" : "Resize quality-review list height"}
           className={styles.sourceCollectionScreeningListShell}
           resizeHandleClassName={styles.sourceCollectionListResizeHandle}
           expandToContent
           role="region"
           tabIndex={0}
-          aria-label={lang === "zh" ? "资料提炼复核候选列表，可向下滚动查看更多" : "Source review candidate list, scroll for more"}
+          aria-label={lang === "zh" ? "质量审查候选列表，可向下滚动查看更多" : "Quality-review candidate list, scroll for more"}
         >
           <div className={`${styles.workflowCandidateList} ${styles.sourceCollectionScreeningList}`}>
             {children}

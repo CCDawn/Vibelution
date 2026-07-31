@@ -26,6 +26,8 @@ describe("team management product interaction semantics", () => {
     expect(articleOpeningTag(markup)).not.toContain('role="button"');
     expect(articleOpeningTag(markup)).not.toContain('tabindex="0"');
     expect(markup).toContain('data-vui="native-button"');
+    expect(markup).toContain('data-vui="chip"');
+    expect(markup).toContain('data-tone="warning"');
     expect(markup).toContain('aria-pressed="true"');
     expect(markup).toContain("打开候选资料");
     expect(markup).toContain("通过复核");
@@ -52,6 +54,8 @@ describe("team management product interaction semantics", () => {
     expect(articleOpeningTag(markup)).not.toContain('role="button"');
     expect(articleOpeningTag(markup)).not.toContain('tabindex="0"');
     expect(markup).toContain('data-vui="native-button"');
+    expect(markup).toContain('data-vui="chip"');
+    expect(markup).toContain('data-tone="success"');
     expect(markup).toContain('aria-pressed="false"');
     expect(markup).toContain("打开资料详情");
     expect(markup).toContain('href="https://doi.org/10.1000/example"');

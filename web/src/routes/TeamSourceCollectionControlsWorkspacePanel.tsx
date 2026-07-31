@@ -183,7 +183,7 @@ export function TeamSourceCollectionControlsWorkspacePanel(props: TeamSourceColl
             <span>{lang === "zh" ? "本轮候选" : "run candidates"} <strong>{sourceCollectionDisplayedCandidateCountText}</strong></span>
             <span>{lang === "zh" ? "已审查" : "reviewed"} <strong>{sourceCollectionProjectedAssessedCountText}</strong></span>
             <span>{lang === "zh" ? "通过" : "approved"} <strong>{sourceCollectionProjectedApprovedCountText}</strong></span>
-            <span>{lang === "zh" ? "待 Agent 复核" : "pending agent review"} <strong>{sourceCollectionRunPendingScreeningCountText}</strong></span>
+            <span>{lang === "zh" ? "待质量审查" : "pending quality review"} <strong>{sourceCollectionRunPendingScreeningCountText}</strong></span>
           </div>
         ) : null}
         {selectedSourceCollectionStageId === "extraction" ? renderSourceCollectionStorageActions() : null}

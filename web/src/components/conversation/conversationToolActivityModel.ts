@@ -77,6 +77,60 @@ export function codexTranscriptToolRawName(cell: CodexTranscriptCell) {
   return cell.title?.trim() || rawToolName;
 }
 
+function normalizeToolIdentity(value: string) {
+  return value.trim().toLowerCase().replace(/[\s-]+/g, "_");
+}
+
+/** Whether a transcript tool cell matches a pending approval tool name. */
+export function codexTranscriptCellMatchesToolName(
+  cell: CodexTranscriptCell,
+  toolName: string | null | undefined,
+) {
+  const expected = normalizeToolIdentity(String(toolName || ""));
+  if (!expected) {
+    return false;
+  }
+  const raw = normalizeToolIdentity(codexTranscriptToolRawName(cell));
+  if (!raw) {
+    return false;
+  }
+  return raw === expected
+    || raw.endsWith(`_${expected}`)
+    || expected.endsWith(`_${raw}`)
+    || raw.includes(expected)
+    || expected.includes(raw);
+}
+
+/**
+ * Codex places approval under the active command. Prefer an open tool cell that
+ * matches the pending tool name; otherwise the last open tool activity.
+ */
+export function shouldAttachToolApprovalToActivity(
+  activity: CodexTranscriptToolActivity,
+  toolName: string | null | undefined,
+  options?: { preferAnyOpenWhenUnmatched?: boolean },
+) {
+  const openCells = activity.cells.filter(
+    (cell) => cell.status === "running" || cell.status === "pending",
+  );
+  if (!openCells.length) {
+    // Still attach when the approval is waiting and the cell briefly shows failed
+    // after a timeout — prefer name match on any cell.
+    if (toolName) {
+      return activity.cells.some((cell) => codexTranscriptCellMatchesToolName(cell, toolName));
+    }
+    return false;
+  }
+  if (toolName) {
+    const matched = openCells.some((cell) => codexTranscriptCellMatchesToolName(cell, toolName));
+    if (matched) {
+      return true;
+    }
+    return options?.preferAnyOpenWhenUnmatched === true;
+  }
+  return true;
+}
+
 export function codexTranscriptToolDurationSeconds(cell: CodexTranscriptCell) {
   const terminalDuration = cell.toolLifecycleModel?.terminalOperations
     ?.map((operation) => operation.durationSeconds)

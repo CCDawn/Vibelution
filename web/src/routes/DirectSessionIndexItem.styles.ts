@@ -88,6 +88,16 @@ const styles = {
     `vui-routes-chatcodingroute sessionRunningBadge !inline-flex !h-[22px] !min-h-[22px] !w-fit max-w-full shrink-0 items-center justify-center gap-1 overflow-hidden ${vuiStateSuccessSoftClass} px-1.5 [font-size:var(--vui-font-xs)] font-semibold leading-none [&_span]:leading-none [&_svg]:size-[10px] [&_svg]:shrink-0 [&_svg]:animate-spin`,
   sessionStatusCluster:
     "vui-routes-chatcodingroute sessionStatusCluster inline-flex min-w-0 items-center justify-end gap-1",
+  sessionActivitySpinner:
+    "vui-routes-chatcodingroute sessionActivitySpinner animate-spin",
+  sessionActivityRunning:
+    "vui-routes-chatcodingroute sessionActivityRunning inline-grid h-4 w-4 place-items-center text-[var(--state-success)]",
+  sessionActivityApproval:
+    "vui-routes-chatcodingroute sessionActivityApproval inline-grid h-4 w-4 place-items-center text-[var(--state-warning)]",
+  sessionActivityError:
+    "vui-routes-chatcodingroute sessionActivityError h-2.5 w-2.5 shrink-0 rounded-full bg-[var(--state-error)] shadow-[0_0_0_2px_color-mix(in_srgb,var(--state-error)_18%,transparent)]",
+  sessionActivityCompleted:
+    "vui-routes-chatcodingroute sessionActivityCompleted h-2.5 w-2.5 shrink-0 rounded-full bg-[var(--accent-cool)] shadow-[0_0_0_2px_color-mix(in_srgb,var(--accent-cool)_18%,transparent)]",
   sessionTitleInput:
     "vui-routes-chatcodingroute sessionTitleInput min-w-0 grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full [font-size:var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
   sessionUnreadBadge:

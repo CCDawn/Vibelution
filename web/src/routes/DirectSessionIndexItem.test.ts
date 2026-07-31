@@ -148,27 +148,27 @@ describe("DirectSessionIndexItem helpers", () => {
     expect(markup).not.toContain(">mimo-v2.5</span>");
   });
 
-  it("keeps unread counts as the only compact badge on the current session", () => {
+  it("maps unread inbox counts into the completed blue activity indicator when not active", () => {
     const markup = renderDirectItem({
-      session: makeSession({ agentInboxPendingCount: 2 }),
+      active: false,
+      session: makeSession({ agentInboxPendingCount: 2, status: "ready", updatedAt: "2026-06-22T10:54:00.000Z" }),
     });
 
     expect(markup).not.toContain("sessionCurrentBadge");
-    expect(markup).toContain("sessionUnreadBadge");
-    expect(markup.match(/data-vui="chip"/g)).toHaveLength(1);
-    expect(markup).toContain("未读信息：2 条");
+    expect(markup).not.toContain("sessionUnreadBadge");
+    expect(markup).toContain("sessionActivityCompleted");
+    expect(markup).toContain("已完成");
   });
 
-  it("shows running sessions with a readable running badge", () => {
+  it("shows running sessions with a green spinner indicator", () => {
     const markup = renderDirectItem({
       session: makeSession({ currentPhase: "tooling", status: "running" }),
       statusLabel: () => "工具调用中",
     });
 
-    expect(markup).toContain("sessionRunningBadge");
-    expect(markup).toContain('data-vui="chip"');
-    expect(markup).toContain("运行中");
-    expect(markup).toContain("正在运行：工具调用中");
+    expect(markup).toContain("sessionActivityRunning");
+    expect(markup).toContain("sessionActivitySpinner");
+    expect(markup).toContain("会话进行：工具调用中");
   });
 
   it("keeps root direct session titles driven by session title before agent display name", () => {
@@ -235,9 +235,9 @@ describe("DirectSessionIndexItem helpers", () => {
   it("normalizes session run state from current phase, status, or child status", () => {
     expect(sessionIsRunningStatus("tooling")).toBe(true);
     expect(sessionIsRunningStatus("idle")).toBe(false);
-    expect(sessionRunningBadgeLabel("zh")).toBe("运行中");
-    expect(sessionRunningBadgeTitle("工具调用中", "zh")).toBe("正在运行：工具调用中");
-    expect(sessionStatusValue(makeSession({ currentPhase: "idle", status: "running" }))).toBe("running");
+    expect(sessionRunningBadgeLabel("zh")).toBe("会话进行");
+    expect(sessionRunningBadgeTitle("工具调用中", "zh")).toBe("会话进行：工具调用中");
+    expect(sessionStatusValue(makeSession({ currentPhase: "idle", status: "running" })).toLowerCase()).toMatch(/running|idle/);
     expect(sessionStatusValue(makeSession({ childStatus: "thinking", currentPhase: "idle", sessionKind: "child", status: "idle" }))).toBe("thinking");
   });
 

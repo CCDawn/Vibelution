@@ -1,9 +1,15 @@
 import { type ReactNode } from "react";
 
+import { VChip } from "../../primitives/VChip";
 import { VNativeButton } from "../../primitives/VNativeButton";
 import { VTooltip } from "../../primitives/VTooltip";
 
-export type TeamSourceResultTone = "ready" | "warning" | "danger" | "neutral";
+import {
+  teamSourceResultToneToVuiTone,
+  type TeamSourceResultTone,
+} from "./teamSourceTone";
+
+export type { TeamSourceResultTone } from "./teamSourceTone";
 
 export type TeamSourceResultMetaEntry = {
   key: string;
@@ -55,19 +61,7 @@ const ACTIVATION_BUTTON =
 const ROW_SELECTED =
   "border-[color:color-mix(in_srgb,var(--accent-cool)_38%,transparent)] bg-[color:color-mix(in_srgb,var(--accent-cool)_11%,var(--vui-surface-row))] shadow-[var(--vui-shadow-inset-accent)]";
 
-const CHIP_BASE =
-  "inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full border px-2 " +
-  "[font-size:var(--vui-font-xs)] font-semibold leading-none whitespace-nowrap justify-self-start min-w-0";
-
-const CHIP_TONE: Record<TeamSourceResultTone, string> = {
-  ready:
-    "border-[color:color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color:color-mix(in_srgb,var(--state-success)_9%,transparent)] text-[var(--state-success)]",
-  warning:
-    "border-[color:color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color:color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
-  danger:
-    "border-[color:color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color:color-mix(in_srgb,var(--state-error)_9%,transparent)] text-[var(--state-error)]",
-  neutral: "border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] text-[var(--fg-secondary)]",
-};
+const STATUS_CHIP = "justify-self-start min-w-0 max-w-full";
 
 export function TeamSourceResultItem({
   tone,
@@ -82,14 +76,15 @@ export function TeamSourceResultItem({
   activateTitle,
 }: TeamSourceResultItemProps) {
   const statusBadge = (
-    <span
-      className={`${CHIP_BASE} ${CHIP_TONE[tone]}`}
+    <VChip
+      tone={teamSourceResultToneToVuiTone(tone)}
+      className={STATUS_CHIP}
       tabIndex={statusTitle ? 0 : undefined}
       role={statusTitle ? "status" : undefined}
       aria-label={statusTitle}
     >
       {statusLabel}
-    </span>
+    </VChip>
   );
   const titleValue = <strong tabIndex={titleTooltip && !onActivate ? 0 : undefined} aria-label={titleTooltip}>{title}</strong>;
   const sourceValue = source.href ? (

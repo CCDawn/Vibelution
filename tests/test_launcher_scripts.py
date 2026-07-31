@@ -211,13 +211,73 @@ def test_python_launcher_stop_reconciles_stale_state_with_real_project_port_owne
     assert written[-1]["backendPid"] == 0
 
 
-def test_python_launcher_start_rejects_an_existing_port_owner(monkeypatch):
+def test_python_launcher_start_auto_relocates_when_foreign_port_owner_exists(monkeypatch, tmp_path):
     launcher = _load_python_launcher()
-    monkeypatch.setattr(launcher, "_read_state", lambda: {})
-    monkeypatch.setattr(launcher, "_listening_pid_for_port", lambda port: 222)
+    remembered: list[tuple[int, str]] = []
 
-    with pytest.raises(RuntimeError, match="already occupied by pid 222"):
-        launcher._start_backend(8000, "127.0.0.1", no_browser=True)
+    def listening(port: int) -> int:
+        return 222 if int(port) == 8000 else 0
+
+    monkeypatch.setattr(launcher, "RUNTIME_DIR", tmp_path)
+    monkeypatch.setattr(launcher, "PORTS_PATH", tmp_path / "ports.json")
+    monkeypatch.setattr(launcher, "_listening_pid_for_port", listening)
+    monkeypatch.setattr(launcher, "_is_project_workbench_pid", lambda pid: False)
+    monkeypatch.setattr(
+        launcher,
+        "_remember_project_backend_port",
+        lambda port, *, reason="": remembered.append((int(port), str(reason))),
+    )
+
+    # Foreign owner on preferred → free neighboring port (multi-checkout safe).
+    port, note = launcher._resolve_start_backend_port(8000, "127.0.0.1")
+    assert port == 8001
+    assert "auto-bound" in note
+    assert "222" in note
+    assert remembered and remembered[-1][0] == 8001
+
+    # Same project's healthy owner → reuse without relocating.
+    monkeypatch.setattr(launcher, "_is_project_workbench_pid", lambda pid: pid == 222)
+    monkeypatch.setattr(launcher, "_backend_healthy", lambda port, host: True)
+    port2, note2 = launcher._resolve_start_backend_port(8000, "127.0.0.1")
+    assert port2 == 8000
+    assert note2 == "reuse_project_workbench"
+
+
+def test_python_launcher_project_workbench_pid_requires_this_checkout_path(monkeypatch):
+    launcher = _load_python_launcher()
+
+    class Proc:
+        def __init__(self, cmdline: list[str]):
+            self._cmdline = cmdline
+
+        def cmdline(self):
+            return list(self._cmdline)
+
+    import types
+
+    fake_psutil = types.SimpleNamespace(
+        Process=lambda pid: Proc(
+            [
+                "python.exe",
+                r"C:\Users\Administrator\Desktop\Vibelution-live-acceptance\scripts\web_workbench.py",
+                "--port",
+                "8000",
+            ]
+        )
+        if pid == 1
+        else Proc(
+            [
+                "python.exe",
+                str(launcher.PROJECT_ROOT / "scripts" / "web_workbench.py"),
+                "--port",
+                "8000",
+            ]
+        ),
+    )
+    monkeypatch.setitem(__import__("sys").modules, "psutil", fake_psutil)
+    # pid 1 is live-acceptance → foreign; pid 2 is this PROJECT_ROOT → owned
+    assert launcher._is_project_workbench_pid(1) is False
+    assert launcher._is_project_workbench_pid(2) is True
 
 
 def test_python_launcher_restart_builds_before_stopping_backend(monkeypatch):
