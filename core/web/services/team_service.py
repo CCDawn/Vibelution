@@ -47,18 +47,19 @@ from .team import team_projection as _team_projection
 from .team import team_membership as _team_membership
 from .team import team_logging as _team_logging
 from .team import team_store as _team_store
+from .team import team_constants as _team_constants
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-SCHEMA_VERSION = 1
-CANVAS_KIND = "team_organization_canvas"
-RESEARCH_TEAM_DISPLAY_NAME = "挑战杯ai科研团队"
-AI_SEARCH_TEAM_ID = "ai-search-team"
-AI_SEARCH_TEAM_DISPLAY_NAME = "AI 搜索范围团队"
-KNOWLEDGE_EXPANSION_TEAM_ID = "knowledge-expansion-team"
-KNOWLEDGE_EXPANSION_TEAM_DISPLAY_NAME = "知识库内容扩充团队"
-DEFAULT_TEAM_STATUS = "active"
-TEAM_STATUSES = {"active", "archived"}
+SCHEMA_VERSION = _team_constants.SCHEMA_VERSION
+CANVAS_KIND = _team_constants.CANVAS_KIND
+RESEARCH_TEAM_DISPLAY_NAME = _team_constants.RESEARCH_TEAM_DISPLAY_NAME
+AI_SEARCH_TEAM_ID = _KIND_AI_SEARCH_TEAM_ID
+AI_SEARCH_TEAM_DISPLAY_NAME = _team_constants.AI_SEARCH_TEAM_DISPLAY_NAME
+KNOWLEDGE_EXPANSION_TEAM_ID = _KIND_KNOWLEDGE_EXPANSION_TEAM_ID
+KNOWLEDGE_EXPANSION_TEAM_DISPLAY_NAME = _team_constants.KNOWLEDGE_EXPANSION_TEAM_DISPLAY_NAME
+DEFAULT_TEAM_STATUS = _team_constants.DEFAULT_TEAM_STATUS
+TEAM_STATUSES = _team_constants.TEAM_STATUSES
 _TEAM_LOCK = threading.RLock()
 _TEAM_SYSTEM_BOOTSTRAP_LOCK = threading.Lock()
 _TEAM_SYSTEM_BOOTSTRAP_THREAD: threading.Thread | None = None
@@ -76,263 +77,30 @@ _TEAM_SYSTEM_BOOTSTRAP_STATE: dict[str, Any] = {
 }
 _TEAM_DETAIL_LOG_LOCK = threading.Lock()
 _TEAM_DETAIL_LOG_STATE: dict[str, dict[str, Any]] = {}
-TEAM_DETAIL_LOG_SLOW_THRESHOLD_MS = 250
-TEAM_DETAIL_LOG_ROLLUP_REPEAT_THRESHOLD = 5
-TEAM_DETAIL_LOG_ROLLUP_WINDOW_SECONDS = 5.0
-TEAM_SYSTEM_BOOTSTRAP_READY_CACHE_TTL_SECONDS = 30.0
-AI_SEARCH_SOURCE_PAGE_TIMEOUT_SECONDS = 8.0
-AI_SEARCH_SOURCE_PAGE_MAX_BYTES = 400_000
-AI_SEARCH_SOURCE_PAGE_USER_AGENT = "Vibelution-AI-Search/1.0"
-EVOLUTION_SYSTEM_TEAM_IDS = {"self-evolution-team", "supervised-evolution-team"}
-EVOLUTION_SYSTEM_TEAM_SPECS = (
-    {
-        "teamId": "self-evolution-team",
-        "name": "自进化团队",
-        "description": "由自进化固定角色自动同步的系统团队。",
-        "purpose": "承接自进化执行、评审与旁路观察角色的团队通讯。",
-        "source": "self_evolution",
-        "teamKind": "self_evolution",
-        "teamCategory": "自进化系统团队",
-        "teamSource": "self_evolution",
-        "chatRoomPurpose": "self_evolution",
-    },
-    {
-        "teamId": "supervised-evolution-team",
-        "name": "监督进化团队",
-        "description": "由监督进化固定角色自动同步的系统团队。",
-        "purpose": "承接监督进化基线、候选、评审、审计与裁决角色的团队通讯。",
-        "source": "supervised_evolution",
-        "teamKind": "supervised_evolution",
-        "teamCategory": "监督进化系统团队",
-        "teamSource": "supervised_evolution",
-        "chatRoomPurpose": "supervised_evolution",
-    },
-)
+TEAM_DETAIL_LOG_SLOW_THRESHOLD_MS = _team_constants.TEAM_DETAIL_LOG_SLOW_THRESHOLD_MS
+TEAM_DETAIL_LOG_ROLLUP_REPEAT_THRESHOLD = _team_constants.TEAM_DETAIL_LOG_ROLLUP_REPEAT_THRESHOLD
+TEAM_DETAIL_LOG_ROLLUP_WINDOW_SECONDS = _team_constants.TEAM_DETAIL_LOG_ROLLUP_WINDOW_SECONDS
+TEAM_SYSTEM_BOOTSTRAP_READY_CACHE_TTL_SECONDS = _team_constants.TEAM_SYSTEM_BOOTSTRAP_READY_CACHE_TTL_SECONDS
+AI_SEARCH_SOURCE_PAGE_TIMEOUT_SECONDS = _team_constants.AI_SEARCH_SOURCE_PAGE_TIMEOUT_SECONDS
+AI_SEARCH_SOURCE_PAGE_MAX_BYTES = _team_constants.AI_SEARCH_SOURCE_PAGE_MAX_BYTES
+AI_SEARCH_SOURCE_PAGE_USER_AGENT = _team_constants.AI_SEARCH_SOURCE_PAGE_USER_AGENT
+EVOLUTION_SYSTEM_TEAM_IDS = _team_constants.EVOLUTION_SYSTEM_TEAM_IDS
+EVOLUTION_SYSTEM_TEAM_SPECS = _team_constants.EVOLUTION_SYSTEM_TEAM_SPECS
 TEAM_KIND_DEFAULTS = _KIND_TEAM_KIND_DEFAULTS
 DERIVED_TEAM_KINDS = _KIND_DERIVED_TEAM_KINDS
 TEAM_SOURCE_TO_KIND = _KIND_TEAM_SOURCE_TO_KIND
 TEAM_ID_TO_KIND = _KIND_TEAM_ID_TO_KIND
-RESEARCH_TEAM_MEMBER_ROLE_KEYS = {
-    "research_coordination": "challenge_cup_coordinator",
-    "source_finder": "source_finder",
-    "source_extractor": "source_extractor",
-    "source_relation_mapper": "source_relation_mapper",
-    "source_ingestor": "source_ingestor",
-    "experiment_planner": "challenge_cup_experiment_planner",
-    "experiment_ledger": "challenge_cup_experiment_ledger",
-    "iteration_planner": "challenge_cup_iteration_planner",
-    "iteration_versioning": "challenge_cup_versioning",
-}
-CHALLENGE_CUP_RESEARCH_TEAM_ID = "research-team"
-CHALLENGE_CUP_RESEARCH_TEAM_AGENT_CREATED_BY = "challenge_cup_team"
-CHALLENGE_CUP_RESEARCH_TEAM_ROLES: tuple[dict[str, Any], ...] = (
-    {
-        "role": "research_coordination",
-        "roleKey": "challenge_cup_coordinator",
-        "label": "科研协调",
-        "purpose": "阶段调度与分工",
-        "responsibilities": ["判断当前阶段", "组织返工转移", "把任务交接给功能 Agent"],
-    },
-    {
-        "role": "source_finder",
-        "roleKey": "source_finder",
-        "label": "资料寻找",
-        "purpose": "搜索、获取并登记可追溯资料",
-        "responsibilities": ["生成检索问题", "搜索和下载有效资料", "登记无效来源用于后续去重排除"],
-    },
-    {
-        "role": "source_extractor",
-        "roleKey": "source_extractor",
-        "label": "资料提炼",
-        "purpose": "提炼价值、复核质量并决定保留/排除",
-        "responsibilities": ["逐条提炼候选资料", "保留有价值但不完整的资料并说明限制", "排除无有效内容来源"],
-    },
-    {
-        "role": "source_relation_mapper",
-        "roleKey": "source_relation_mapper",
-        "label": "资料关系整理",
-        "purpose": "整理候选资料之间的主题和证据关系",
-        "responsibilities": ["生成候选关系", "标注断链缺口", "预览入库前关系边界"],
-    },
-    {
-        "role": "source_ingestor",
-        "roleKey": "source_ingestor",
-        "label": "资料入库",
-        "purpose": "最终审核并写入正式 Team Knowledge",
-        "responsibilities": ["复核可入库资料", "执行正式知识库入库", "拒绝低置信或缺证据资料"],
-    },
-    {
-        "role": "experiment_planner",
-        "roleKey": "challenge_cup_experiment_planner",
-        "label": "实验规划",
-        "purpose": "实验计划账本",
-        "responsibilities": ["生成实验计划草稿", "对齐 dataset/metric/baseline", "标注 smoke gate 和人工门禁"],
-    },
-    {
-        "role": "experiment_ledger",
-        "roleKey": "challenge_cup_experiment_ledger",
-        "label": "实验证据",
-        "purpose": "实验结果证据登记",
-        "responsibilities": ["登记 baseline 工件", "登记 smoke/full-run 结果", "整理实验结果入库申请"],
-    },
-    {
-        "role": "iteration_planner",
-        "roleKey": "challenge_cup_iteration_planner",
-        "label": "迭代决策",
-        "purpose": "Research Loop 决策账本",
-        "responsibilities": ["创建 Research Loop", "登记迭代证据", "生成下一轮修复/接受/归档决策"],
-    },
-    {
-        "role": "iteration_versioning",
-        "roleKey": "challenge_cup_versioning",
-        "label": "版本治理",
-        "purpose": "候选版本与拒绝归档",
-        "responsibilities": ["维护 versionHistory", "记录 supersedes/derived_from", "归档 rejectionArchive"],
-    },
-)
-KNOWLEDGE_EXPANSION_TEAM_AGENT_CREATED_BY = "knowledge_expansion_team"
-KNOWLEDGE_EXPANSION_TEAM_ROLES: tuple[dict[str, Any], ...] = (
-    {
-        "role": "source_finder",
-        "roleKey": "source_finder",
-        "label": "资料寻找",
-        "purpose": "本地资料导入、网络资料发现和可追溯登记",
-        "responsibilities": ["扫描本地知识资料", "搜索公开资料线索", "把有效来源写回受控资料批次"],
-    },
-    {
-        "role": "source_extractor",
-        "roleKey": "source_extractor",
-        "label": "资料提炼",
-        "purpose": "提炼价值、复核质量并决定保留/排除",
-        "responsibilities": ["提炼可入库摘要", "标注证据引用", "排除无有效内容来源并记录来源"],
-    },
-    {
-        "role": "source_relation_mapper",
-        "roleKey": "source_relation_mapper",
-        "label": "资料关系整理",
-        "purpose": "候选知识关系预览",
-        "responsibilities": ["生成候选关系", "检查断链", "保持正式图谱写入边界"],
-    },
-    {
-        "role": "source_ingestor",
-        "roleKey": "source_ingestor",
-        "label": "资料入库",
-        "purpose": "最终审核并写入正式 Team Knowledge",
-        "responsibilities": ["复核高置信资料", "执行正式知识库入库", "拒绝低置信或缺证据资料"],
-    },
-)
+RESEARCH_TEAM_MEMBER_ROLE_KEYS = _team_constants.RESEARCH_TEAM_MEMBER_ROLE_KEYS
+CHALLENGE_CUP_RESEARCH_TEAM_ID = _team_constants.CHALLENGE_CUP_RESEARCH_TEAM_ID
+CHALLENGE_CUP_RESEARCH_TEAM_AGENT_CREATED_BY = _team_constants.CHALLENGE_CUP_RESEARCH_TEAM_AGENT_CREATED_BY
+CHALLENGE_CUP_RESEARCH_TEAM_ROLES = _team_constants.CHALLENGE_CUP_RESEARCH_TEAM_ROLES
+KNOWLEDGE_EXPANSION_TEAM_AGENT_CREATED_BY = _team_constants.KNOWLEDGE_EXPANSION_TEAM_AGENT_CREATED_BY
+KNOWLEDGE_EXPANSION_TEAM_ROLES = _team_constants.KNOWLEDGE_EXPANSION_TEAM_ROLES
 TEMPLATE_MEMBER_PREFIX_TO_TEMPLATE_ID = _KIND_TEMPLATE_MEMBER_PREFIX_TO_TEMPLATE_ID
-AI_SEARCH_SYSTEM_ROLES: tuple[dict[str, Any], ...] = (
-    {
-        "role": "ai_search_scope_lead",
-        "label": "搜索范围负责人",
-        "purpose": "维护搜索边界、可信度分层和默认启用规则。",
-        "responsibilities": ["维护白名单边界", "定义 Tier 规则", "决定默认启用范围"],
-        "expertise": ["搜索范围治理", "可信来源分层", "一键搜索策略"],
-    },
-    {
-        "role": "global_primary_sources",
-        "label": "全球官方源维护",
-        "purpose": "维护 OpenAI、Anthropic、Google DeepMind、Meta、Microsoft、NVIDIA 等全球一手源。",
-        "responsibilities": ["维护全球官方入口", "识别模型与产品更新", "保留一手证据链接"],
-        "expertise": ["全球 AI 实验室", "官方博客", "研究公告"],
-    },
-    {
-        "role": "cn_primary_sources",
-        "label": "中国 AI 源维护",
-        "purpose": "维护 DeepSeek、通义、智谱、Kimi、文心、豆包、腾讯混元等中国主流 AI 源。",
-        "responsibilities": ["维护中文官方入口", "跟踪国产模型更新", "标注语言与地区覆盖"],
-        "expertise": ["中国 AI 生态", "中文官方源", "模型平台动态"],
-    },
-    {
-        "role": "signal_quality_gate",
-        "label": "信号源质检",
-        "purpose": "管理新闻、社区和社交信号，要求所有信号回链到一手证据后再进入结论。",
-        "responsibilities": ["社区信号去噪", "新闻源可信度标注", "要求一手源回链"],
-        "expertise": ["来源质检", "去重", "证据回链"],
-    },
-)
-AI_SEARCH_SOURCE_SCOPE_SCHEMA_VERSION = 1
-AI_SEARCH_SOURCE_SCOPE_CURATED_AT = "2026-06-11"
-AI_SEARCH_SOURCE_SCOPE_GROUPS: tuple[dict[str, Any], ...] = (
-    {
-        "groupId": "global_official",
-        "label": "全球官方源",
-        "tier": "tier1",
-        "evidenceRole": "primary",
-        "enabledByDefault": True,
-        "ownerRole": "global_primary_sources",
-        "description": "全球主流 AI 实验室、模型平台和基础设施厂商的一手公告入口。",
-        "sources": (
-            {"sourceId": "openai_news", "name": "OpenAI News", "url": "https://openai.com/news/", "region": "global", "language": "en", "sourceType": "official_news", "tags": ("model", "product", "research", "safety")},
-            {"sourceId": "anthropic_news", "name": "Anthropic News", "url": "https://www.anthropic.com/news", "region": "global", "language": "en", "sourceType": "official_news", "tags": ("model", "product", "safety", "policy")},
-            {"sourceId": "google_deepmind_blog", "name": "Google DeepMind Blog", "url": "https://deepmind.google/blog/", "region": "global", "language": "en", "sourceType": "official_blog", "tags": ("research", "model", "science")},
-            {"sourceId": "google_ai_updates", "name": "Google AI Updates", "url": "https://blog.google/innovation-and-ai/technology/ai/", "region": "global", "language": "en", "sourceType": "official_news", "tags": ("product", "model", "developer")},
-            {"sourceId": "meta_ai_blog", "name": "AI at Meta Blog", "url": "https://ai.meta.com/blog/", "region": "global", "language": "en", "sourceType": "official_blog", "tags": ("llama", "research", "product")},
-            {"sourceId": "microsoft_ai_blog", "name": "Microsoft AI Blog", "url": "https://microsoft.ai/blog/", "region": "global", "language": "en", "sourceType": "official_blog", "tags": ("copilot", "agent", "platform")},
-            {"sourceId": "nvidia_ai_blog", "name": "NVIDIA AI Blog", "url": "https://blogs.nvidia.com/blog/category/generative-ai/", "region": "global", "language": "en", "sourceType": "official_blog", "tags": ("infrastructure", "model", "agent")},
-            {"sourceId": "huggingface_blog", "name": "Hugging Face Blog", "url": "https://huggingface.co/blog", "region": "global", "language": "en", "sourceType": "platform_blog", "tags": ("open_source", "model", "dataset")},
-            {"sourceId": "mistral_news", "name": "Mistral AI News", "url": "https://mistral.ai/news/", "region": "eu", "language": "en", "sourceType": "official_news", "tags": ("model", "product", "enterprise")},
-            {"sourceId": "xai_news", "name": "xAI News", "url": "https://x.ai/news", "region": "global", "language": "en", "sourceType": "official_news", "tags": ("model", "product")},
-            {"sourceId": "cohere_blog", "name": "Cohere Blog", "url": "https://cohere.com/blog", "region": "global", "language": "en", "sourceType": "official_blog", "tags": ("enterprise", "model", "research")},
-            {"sourceId": "stability_news", "name": "Stability AI News", "url": "https://stability.ai/news-updates", "region": "global", "language": "en", "sourceType": "official_news", "tags": ("image", "audio", "open_model")},
-        ),
-    },
-    {
-        "groupId": "cn_official",
-        "label": "中国官方源",
-        "tier": "tier1",
-        "evidenceRole": "primary",
-        "enabledByDefault": True,
-        "ownerRole": "cn_primary_sources",
-        "description": "中国主流大模型厂商、实验室和模型平台的一手公告入口。",
-        "sources": (
-            {"sourceId": "deepseek_api_updates", "name": "DeepSeek API Updates", "url": "https://api-docs.deepseek.com/updates", "region": "cn", "language": "en", "sourceType": "official_changelog", "tags": ("model", "api", "developer")},
-            {"sourceId": "deepseek_home", "name": "DeepSeek", "url": "https://www.deepseek.com/en/", "region": "cn", "language": "en", "sourceType": "official_site", "tags": ("model", "research")},
-            {"sourceId": "qwen_blog", "name": "Qwen Blog", "url": "https://qwen.ai/blog", "region": "cn", "language": "en", "sourceType": "official_blog", "tags": ("model", "open_source", "developer")},
-            {"sourceId": "tongyi_lab", "name": "通义实验室", "url": "https://tongyi.aliyun.com/", "region": "cn", "language": "zh", "sourceType": "official_site", "tags": ("qwen", "model", "product")},
-            {"sourceId": "zhipu_news", "name": "智谱 AI 新闻", "url": "https://www.zhipuai.cn/en/news?tab=2", "region": "cn", "language": "zh", "sourceType": "official_news", "tags": ("glm", "product", "ecosystem")},
-            {"sourceId": "moonshot_blog", "name": "Moonshot AI / Kimi Blog", "url": "https://platform.kimi.ai/blog", "region": "cn", "language": "en", "sourceType": "official_blog", "tags": ("kimi", "model", "api")},
-            {"sourceId": "bytedance_seed_blog", "name": "ByteDance Seed Blog", "url": "https://seed.bytedance.com/zh/blog", "region": "cn", "language": "zh", "sourceType": "official_blog", "tags": ("model", "research", "multimodal")},
-            {"sourceId": "volcengine_doubao", "name": "豆包大模型", "url": "https://www.volcengine.com/product/doubao", "region": "cn", "language": "zh", "sourceType": "official_product", "tags": ("doubao", "model", "platform")},
-            {"sourceId": "tencent_hunyuan", "name": "Tencent Hunyuan Research", "url": "https://hy.tencent.com/", "region": "cn", "language": "zh", "sourceType": "official_site", "tags": ("hunyuan", "model", "research")},
-            {"sourceId": "baidu_wenxin", "name": "文心", "url": "https://wenxin.baidu.com/", "region": "cn", "language": "zh", "sourceType": "official_product", "tags": ("ernie", "product", "model")},
-            {"sourceId": "minimax_news", "name": "MiniMax News", "url": "https://www.minimax.io/news", "region": "cn", "language": "en", "sourceType": "official_news", "tags": ("model", "multimodal", "product")},
-        ),
-    },
-    {
-        "groupId": "trusted_indices",
-        "label": "可信研究与新闻索引",
-        "tier": "tier2",
-        "evidenceRole": "secondary",
-        "enabledByDefault": True,
-        "ownerRole": "signal_quality_gate",
-        "description": "用于补充发现论文、开源模型和产业动态；结论仍需回链 Tier1 或论文原文。",
-        "sources": (
-            {"sourceId": "arxiv_cs_ai_recent", "name": "arXiv cs.AI Recent", "url": "https://arxiv.org/list/cs.AI/recent", "region": "global", "language": "en", "sourceType": "paper_index", "tags": ("paper", "research")},
-            {"sourceId": "arxiv_cs_cl_recent", "name": "arXiv cs.CL Recent", "url": "https://arxiv.org/list/cs.CL/recent", "region": "global", "language": "en", "sourceType": "paper_index", "tags": ("paper", "language_model")},
-            {"sourceId": "huggingface_papers", "name": "Hugging Face Papers", "url": "https://huggingface.co/papers", "region": "global", "language": "en", "sourceType": "paper_index", "tags": ("paper", "model", "community")},
-            {"sourceId": "papers_with_code", "name": "Papers with Code", "url": "https://paperswithcode.com/", "region": "global", "language": "en", "sourceType": "paper_index", "tags": ("paper", "benchmark", "code")},
-            {"sourceId": "mit_tech_review_ai", "name": "MIT Technology Review AI", "url": "https://www.technologyreview.com/topic/artificial-intelligence/", "region": "global", "language": "en", "sourceType": "news", "tags": ("analysis", "policy", "industry")},
-            {"sourceId": "techcrunch_ai", "name": "TechCrunch AI", "url": "https://techcrunch.com/category/artificial-intelligence/", "region": "global", "language": "en", "sourceType": "news", "tags": ("startup", "product", "funding")},
-        ),
-    },
-    {
-        "groupId": "community_signals",
-        "label": "社区信号",
-        "tier": "tier3",
-        "evidenceRole": "signal",
-        "enabledByDefault": False,
-        "ownerRole": "signal_quality_gate",
-        "description": "只用于发现线索和热度异常；任何结论必须回链一手公告、论文或代码仓库。",
-        "sources": (
-            {"sourceId": "hacker_news_ai", "name": "Hacker News AI Search", "url": "https://hn.algolia.com/?q=AI", "region": "global", "language": "en", "sourceType": "community_search", "tags": ("discussion", "startup", "engineering")},
-            {"sourceId": "reddit_localllama", "name": "Reddit LocalLLaMA", "url": "https://www.reddit.com/r/LocalLLaMA/", "region": "global", "language": "en", "sourceType": "community", "tags": ("open_model", "community", "signal")},
-            {"sourceId": "github_trending_python", "name": "GitHub Trending Python", "url": "https://github.com/trending/python?since=daily", "region": "global", "language": "en", "sourceType": "code_signal", "tags": ("open_source", "code", "trend")},
-            {"sourceId": "product_hunt_ai", "name": "Product Hunt AI", "url": "https://www.producthunt.com/topics/artificial-intelligence", "region": "global", "language": "en", "sourceType": "product_signal", "tags": ("product", "startup", "signal")},
-        ),
-    },
-)
+AI_SEARCH_SYSTEM_ROLES = _team_constants.AI_SEARCH_SYSTEM_ROLES
+AI_SEARCH_SOURCE_SCOPE_SCHEMA_VERSION = _team_constants.AI_SEARCH_SOURCE_SCOPE_SCHEMA_VERSION
+AI_SEARCH_SOURCE_SCOPE_CURATED_AT = _team_constants.AI_SEARCH_SOURCE_SCOPE_CURATED_AT
+AI_SEARCH_SOURCE_SCOPE_GROUPS = _team_constants.AI_SEARCH_SOURCE_SCOPE_GROUPS
 
 
 class TeamServiceError(ValueError):
