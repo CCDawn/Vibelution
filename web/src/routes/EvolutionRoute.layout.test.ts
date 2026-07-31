@@ -537,6 +537,8 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(supervisedApprovalDecisionPanelSource).toContain("评估状态");
     expect(supervisedApprovalDecisionPanelSource).toContain("runAgentApproval");
     expect(routeSource).toContain("最终审批方式");
+    expect(routeSource).toContain("自动作出最终决定");
+    expect(routeSource).toContain('supervisedMembersRun?.approvalMode ?? approvalMode');
     expect(supervisedApprovalDecisionPanelSource).toContain('data-vui-recipe="supervised-approval-decision"');
     expect(supervisedApprovalDecisionPanelSource).toContain("Judge 建议（仅供参考）");
     expect(supervisedApprovalDecisionPanelSource).toContain("任务定向标准");
@@ -550,8 +552,14 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(supervisedApprovalDecisionSource).toContain('| "run_agent_approval"');
     expect(supervisedApprovalDecisionSource).toContain('| "request_rerun"');
     expect(supervisedApprovalDecisionSource).toContain('| "reject_review"');
-    expect(supervisedApprovalDecisionSource).toContain('"refresh_required"');
+    expect(supervisedApprovalDecisionSource).toContain('"commit_created"');
+    expect(supervisedApprovalDecisionSource).toContain('"activation_failed"');
+    expect(supervisedApprovalDecisionSource).toContain('"rollback_activating"');
     expect(evolutionTypesSource).toContain("rollbackManifestPath?: string");
+    expect(evolutionTypesSource).toContain("runtimeActivation?:");
+    expect(evolutionTypesSource).toContain("frontendBuiltFromCommit?: string");
+    expect(supervisedApprovalDecisionPanelSource).toContain("运行时生效证据");
+    expect(supervisedApprovalDecisionPanelSource).toContain("model.runtimeActivation.targetCommit");
     expect(evolutionTypesSource).toContain("rolledBackAt?: string");
     expect(supervisedApprovalDecisionPanelStyles.metrics).toContain("@min-[720px]:grid-cols-4");
     expect(supervisedApprovalDecisionPanelStyles.actionPath).toContain("@min-[720px]:grid-cols-3");

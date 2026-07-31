@@ -12,6 +12,25 @@ from scripts.evolution_harness import HarnessResult
 pytestmark = pytest.mark.slow
 
 
+@pytest.fixture(autouse=True)
+def _isolate_launcher_activation(monkeypatch):
+    monkeypatch.setattr(
+        service,
+        "_queue_runtime_activation",
+        lambda snapshot, attempt=1: {
+            "status": "activating",
+            "attempt": attempt,
+            "intentId": f"intent-{snapshot.get('runId')}",
+            "commandId": f"command-{snapshot.get('runId')}",
+            "targetCommit": str(
+                snapshot.get("runtimeActivationTargetCommit")
+                or (snapshot.get("merge") or {}).get("commitSha")
+                or ""
+            ),
+        },
+    )
+
+
 def _run_git(repo: Path, *args: str) -> str:
     proc = subprocess.run(
         ["git", *args],
@@ -29,7 +48,7 @@ def _run_git(repo: Path, *args: str) -> str:
 
 def _init_repo(repo: Path) -> None:
     repo.mkdir(parents=True, exist_ok=True)
-    _run_git(repo, "init")
+    _run_git(repo, "init", "-b", "main")
     _run_git(repo, "config", "user.email", "test@example.local")
     _run_git(repo, "config", "user.name", "Test User")
 
@@ -588,21 +607,19 @@ def _retryable_provider_html_reason_evaluator(_: Path, bundle_name: str, role: s
 
 def _make_candidate_repo(tmp_path: Path, project_root: Path, *, changed_path: str = "agent.py") -> Path:
     candidate = tmp_path / f"candidate-{changed_path.replace('/', '-')}"
-    _init_repo(candidate)
-    for source in project_root.rglob("*"):
-        if not source.is_file():
-            continue
-        try:
-            rel = source.relative_to(project_root)
-        except ValueError:
-            continue
-        if ".git" in rel.parts:
-            continue
-        target = candidate / rel
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(source.read_bytes())
-    _run_git(candidate, "add", ".")
-    _run_git(candidate, "commit", "-m", "base")
+    clone = subprocess.run(
+        ["git", "clone", "--no-hardlinks", str(project_root), str(candidate)],
+        cwd=str(tmp_path),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    if clone.returncode != 0:
+        raise AssertionError(clone.stderr or clone.stdout)
+    _run_git(candidate, "config", "user.email", "test@example.local")
+    _run_git(candidate, "config", "user.name", "Test User")
     target = candidate / changed_path
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(target.read_text(encoding="utf-8") + "\n# candidate edit\n", encoding="utf-8")
@@ -1708,7 +1725,7 @@ def test_merge_analysis_blocks_when_main_workspace_touched_same_file(tmp_path):
     assert updated["mergeAnalysis"]["overlapFiles"] == ["agent.py"]
 
 
-def test_merge_analysis_ignores_untracked_noise_from_worktree_baseline(tmp_path):
+def test_merge_analysis_blocks_any_untracked_main_workspace_noise(tmp_path):
     project_root = tmp_path / "project"
     _init_repo(project_root)
     (project_root / "agent.py").write_text("print('base')\n", encoding="utf-8")
@@ -1752,8 +1769,8 @@ def test_merge_analysis_ignores_untracked_noise_from_worktree_baseline(tmp_path)
 
     updated = service.execute_supervised_worktree_action("swte-noise", "analyze_merge")
 
-    assert updated["mergeAnalysis"]["status"] == "ready"
-    assert updated["mergeAnalysis"]["mergeAllowed"] is True
+    assert updated["mergeAnalysis"]["status"] == "blocked"
+    assert updated["mergeAnalysis"]["mergeAllowed"] is False
     assert updated["mergeAnalysis"]["changedFiles"] == [
         {
             "path": "tests/supervised_worktree_candidate_marker.py",
@@ -1764,6 +1781,43 @@ def test_merge_analysis_ignores_untracked_noise_from_worktree_baseline(tmp_path)
     ]
     assert updated["mergeAnalysis"]["overlapFiles"] == []
     assert "main_workspace_overlap" not in updated["mergeAnalysis"]["blockers"]
+    assert "main_workspace_dirty" in updated["mergeAnalysis"]["blockers"]
+    assert updated["mergeAnalysis"]["mainDirtyFiles"] == [
+        ".codex/visual-checks/noise.png"
+    ]
+
+
+def test_merge_analysis_blocks_when_main_head_advanced_after_candidate_freeze(tmp_path):
+    project_root = tmp_path / "project"
+    _init_repo(project_root)
+    (project_root / "agent.py").write_text("print('base')\n", encoding="utf-8")
+    _write_bundle(project_root)
+    _run_git(project_root, "add", ".")
+    _run_git(project_root, "commit", "-m", "init")
+    candidate = _make_candidate_repo(tmp_path, project_root)
+    frozen = _bound_candidate_worktree(candidate)
+    (project_root / "unrelated.py").write_text("UNRELATED = True\n", encoding="utf-8")
+    _run_git(project_root, "add", "unrelated.py")
+    _run_git(project_root, "commit", "-m", "advance main")
+    snapshot = {
+        "runId": "swte-head-drift",
+        "runKind": service.RUN_KIND,
+        "status": "done",
+        "projectRoot": str(project_root),
+        "candidateWorktree": frozen,
+    }
+    service._persist_snapshot(snapshot, active_run_id="")
+
+    updated = service.execute_supervised_worktree_action(
+        "swte-head-drift",
+        "analyze_merge",
+    )
+
+    assert updated["mergeAnalysis"]["status"] == "blocked"
+    assert "main_head_drift" in updated["mergeAnalysis"]["blockers"]
+    assert updated["mergeAnalysis"]["mainHead"] != updated["mergeAnalysis"][
+        "expectedMainHead"
+    ]
 
 
 def test_force_merge_never_overwrites_main_workspace_overlap(tmp_path):
@@ -1835,8 +1889,9 @@ def test_force_merge_creates_rollback_manifest_and_rollback_restores_file(tmp_pa
 
     merged = service.execute_supervised_worktree_action("swte-merge-rollback", "merge", force=True)
 
-    assert merged["merge"]["status"] == "merged"
+    assert merged["merge"]["status"] == "committed"
     assert merged["merge"]["triggeredBy"]["role"] == "approval_executor"
+    assert merged["merge"]["triggeredBy"]["mechanism"] == "controlled_candidate_commit"
     assert merged["merge"]["triggeredBy"]["conversationSessionId"] == ""
     assert "# candidate edit" in (project_root / "agent.py").read_text(encoding="utf-8")
     manifest_path = Path(merged["rollback"]["manifestPath"])
@@ -1844,8 +1899,340 @@ def test_force_merge_creates_rollback_manifest_and_rollback_restores_file(tmp_pa
 
     rolled_back = service.execute_supervised_worktree_action("swte-merge-rollback", "rollback")
 
-    assert rolled_back["rollback"]["status"] == "rolled_back"
+    assert rolled_back["rollback"]["status"] == "revert_committed"
+    assert rolled_back["rollback"]["revertCommit"]
+    assert rolled_back["outcome"] == "rollback_activation_pending"
     assert (project_root / "agent.py").read_text(encoding="utf-8") == "print('base')\n"
+
+
+def test_approved_candidate_creates_commit_and_queues_runtime_activation(
+    tmp_path,
+    monkeypatch,
+):
+    project_root = tmp_path / "project"
+    _init_repo(project_root)
+    (project_root / "agent.py").write_text("print('base')\n", encoding="utf-8")
+    _write_bundle(project_root)
+    _run_git(project_root, "add", ".")
+    _run_git(project_root, "commit", "-m", "init")
+    base_commit = _run_git(project_root, "rev-parse", "HEAD")
+    candidate = _make_candidate_repo(tmp_path, project_root)
+    queued: list[dict] = []
+
+    def fake_queue(snapshot: dict) -> dict:
+        queued.append(dict(snapshot))
+        return {
+            "status": "activating",
+            "attempt": 1,
+            "intentId": "intent-supervised",
+            "commandId": "command-supervised",
+            "targetCommit": snapshot["merge"]["commitSha"],
+        }
+
+    monkeypatch.setattr(service, "_queue_runtime_activation", fake_queue)
+    snapshot = {
+        "runId": "swte-commit-activation",
+        "runKind": service.RUN_KIND,
+        "status": "done",
+        "projectRoot": str(project_root),
+        "candidateWorktree": _bound_candidate_worktree(candidate),
+        "candidateJudgment": {
+            "status": "success",
+            "phase": "rerun",
+            "evaluationState": "VALID",
+            "decision": "APPROVE",
+        },
+        "approvalDecision": {
+            "status": "decided",
+            "decision": "APPROVE",
+            "evaluationState": "VALID",
+            "mode": "agent",
+            "decidedBy": {"conversationSessionId": "session-auditor"},
+        },
+        "reviewGate": {"required": True, "status": "approved"},
+    }
+    service._persist_snapshot(snapshot, active_run_id="")
+
+    merged = service.execute_supervised_worktree_action(
+        "swte-commit-activation",
+        "merge",
+    )
+
+    commit_sha = _run_git(project_root, "rev-parse", "HEAD")
+    assert commit_sha != base_commit
+    assert _run_git(project_root, "status", "--porcelain=v1") == ""
+    assert merged["merge"]["status"] == "committed"
+    assert merged["merge"]["baseCommit"] == base_commit
+    assert merged["merge"]["commitSha"] == commit_sha
+    assert merged["merge"]["triggeredBy"]["mechanism"] == "controlled_candidate_commit"
+    assert merged["runtimeActivation"] == {
+        "status": "activating",
+        "attempt": 1,
+        "intentId": "intent-supervised",
+        "commandId": "command-supervised",
+        "targetCommit": commit_sha,
+    }
+    assert merged["outcome"] == "activation_pending"
+    assert queued[0]["merge"]["commitSha"] == commit_sha
+
+
+def test_agent_approval_mode_automatically_runs_auditor_and_merge(monkeypatch):
+    calls: list[str] = []
+    snapshot = {
+        "runId": "swte-auto-agent-approval",
+        "status": "running",
+        "phase": "decision",
+        "runtimeStatus": "running",
+        "approvalMode": "agent",
+        "candidateJudgment": {
+            "status": "success",
+            "phase": "rerun",
+            "evaluationState": "VALID",
+            "decision": "APPROVE",
+        },
+        "approvalDecision": {
+            "schemaVersion": 1,
+            "mode": "agent",
+            "status": "pending",
+            "decision": "",
+        },
+    }
+
+    def fake_approval(current: dict, *, allow_active: bool = False) -> dict:
+        calls.append(f"approval:{current['status']}:{allow_active}")
+        return {
+            **current,
+            "approvalDecision": {
+                "schemaVersion": 1,
+                "mode": "agent",
+                "status": "decided",
+                "decision": "APPROVE",
+                "evaluationState": "VALID",
+            },
+        }
+
+    def fake_merge(current: dict, *, force: bool) -> dict:
+        calls.append(f"merge:{current['status']}:{force}")
+        return {
+            **current,
+            "merge": {"status": "committed", "commitSha": "commit-123"},
+            "runtimeActivation": {"status": "activating"},
+            "outcome": "activation_pending",
+        }
+
+    monkeypatch.setattr(service, "_request_independent_agent_approval", fake_approval)
+    monkeypatch.setattr(service, "_merge_candidate", fake_merge)
+    monkeypatch.setattr(service, "_persist_snapshot", lambda *args, **kwargs: None)
+    monkeypatch.setattr(service, "_record_worktree_scene_event", lambda *args, **kwargs: None)
+
+    result = service._finish_and_maybe_auto_approve(
+        snapshot,
+        {
+            "judgeRecommendation": "APPROVE",
+            "baselineScore": 70,
+            "candidateScore": 85,
+            "scoreDelta": 15,
+        },
+        {},
+    )
+
+    assert calls == ["approval:running:True", "merge:done:False"]
+    assert result["status"] == "done"
+    assert result["phase"] == "complete"
+    assert result["approvalDecision"]["decision"] == "APPROVE"
+    assert result["merge"]["commitSha"] == "commit-123"
+    assert result["outcome"] == "activation_pending"
+
+
+def test_agent_approval_automatically_requests_rerun_for_inconclusive_state(
+    tmp_path,
+    monkeypatch,
+):
+    snapshot = {
+        "runId": "swte-auto-agent-inconclusive",
+        "status": "running",
+        "phase": "decision",
+        "runtimeStatus": "running",
+        "executionMode": "simulation",
+        "approvalMode": "agent",
+        "projectRoot": str(tmp_path),
+        "candidateJudgment": {
+            "status": "success",
+            "phase": "rerun",
+            "evaluationState": "INCONCLUSIVE",
+            "recommendation": "INCONCLUSIVE",
+            "decision": "INCONCLUSIVE",
+        },
+        "approvalDecision": {
+            "schemaVersion": 1,
+            "mode": "agent",
+            "status": "pending",
+            "decision": "",
+        },
+    }
+    monkeypatch.setattr(service, "_persist_snapshot", lambda *args, **kwargs: None)
+    monkeypatch.setattr(service, "_record_worktree_scene_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        service,
+        "_merge_candidate",
+        lambda *args, **kwargs: pytest.fail("INCONCLUSIVE must never merge"),
+    )
+
+    result = service._finish_and_maybe_auto_approve(
+        snapshot,
+        {
+            "judgeRecommendation": "INCONCLUSIVE",
+            "baselineScore": 70,
+            "candidateScore": 70,
+            "scoreDelta": 0,
+        },
+        {},
+    )
+
+    assert result["status"] == "done"
+    assert result["approvalDecision"]["decision"] == "RERUN_REQUIRED"
+    assert result["approvalDecision"]["evaluationState"] == "INCONCLUSIVE"
+    assert result["outcome"] == "approval_rerun_required"
+    assert result.get("merge") in (None, {})
+
+
+def test_runtime_activation_reconciles_only_after_commit_and_frontend_proof(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        service.launcher_service,
+        "get_lifecycle_intent",
+        lambda _: {
+            "intentId": "intent-supervised",
+            "status": "succeeded",
+            "commandId": "command-supervised",
+            "result": {"ok": True},
+        },
+    )
+    monkeypatch.setattr(
+        service,
+        "_runtime_activation_proof",
+        lambda commit: {
+            "verified": True,
+            "targetCommit": commit,
+            "runtimeSourceCommit": commit,
+            "frontendBuiltFromCommit": commit,
+            "runtimeSourceTrackedClean": True,
+            "phase": "steady",
+            "backendHealthy": True,
+            "activeWorkCount": 0,
+        },
+    )
+    snapshot = {
+        "runId": "swte-activation-proof",
+        "status": "done",
+        "merge": {"status": "committed", "commitSha": "commit-123"},
+        "runtimeActivation": {
+            "status": "activating",
+            "attempt": 1,
+            "intentId": "intent-supervised",
+            "commandId": "command-supervised",
+            "targetCommit": "commit-123",
+        },
+        "outcome": "activation_pending",
+    }
+
+    reconciled = service._reconcile_runtime_activation(snapshot)
+
+    assert reconciled["runtimeActivation"]["status"] == "applied"
+    assert reconciled["runtimeActivation"]["proof"]["verified"] is True
+    assert reconciled["merge"]["status"] == "applied"
+    assert reconciled["outcome"] == "applied"
+
+
+def test_runtime_activation_retries_once_then_keeps_failed_commit(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        service.launcher_service,
+        "get_lifecycle_intent",
+        lambda _: {
+            "intentId": "intent-first",
+            "status": "failed",
+            "commandId": "command-first",
+            "result": {"ok": False, "message": "restart failed"},
+        },
+    )
+    queued: list[int] = []
+
+    def fake_retry(snapshot: dict, *, attempt: int = 1) -> dict:
+        queued.append(attempt)
+        return {
+            "status": "activating",
+            "attempt": attempt,
+            "intentId": "intent-second",
+            "commandId": "command-second",
+            "targetCommit": snapshot["merge"]["commitSha"],
+        }
+
+    monkeypatch.setattr(service, "_queue_runtime_activation", fake_retry)
+    snapshot = {
+        "runId": "swte-activation-retry",
+        "status": "done",
+        "merge": {"status": "committed", "commitSha": "commit-123"},
+        "runtimeActivation": {
+            "status": "activating",
+            "attempt": 1,
+            "intentId": "intent-first",
+            "targetCommit": "commit-123",
+        },
+        "outcome": "activation_pending",
+    }
+
+    retried = service._reconcile_runtime_activation(snapshot)
+
+    assert queued == [2]
+    assert retried["merge"]["status"] == "committed"
+    assert retried["runtimeActivation"]["attempt"] == 2
+    assert retried["runtimeActivation"]["intentId"] == "intent-second"
+    assert retried["runtimeActivation"]["previousIntentId"] == "intent-first"
+    assert retried["outcome"] == "activation_pending"
+
+    retried["runtimeActivation"]["intentId"] = "intent-second"
+    failed = service._reconcile_runtime_activation(retried)
+    assert failed["merge"]["status"] == "committed"
+    assert failed["runtimeActivation"]["status"] == "activation_failed"
+    assert failed["outcome"] == "activation_failed"
+
+
+def test_runtime_activation_proof_requires_exact_runtime_and_frontend_commit(
+    tmp_path,
+    monkeypatch,
+):
+    state_path = tmp_path / "launcher-state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "runtimeSourceCommit": "commit-123",
+                "frontendBuiltFromCommit": "stale-frontend",
+                "runtimeSourceTrackedClean": True,
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(service, "LAUNCHER_STATE_PATH", state_path)
+    monkeypatch.setattr(
+        service.launcher_service,
+        "get_launcher_status",
+        lambda: {
+            "projectBundle": {
+                "phase": "steady",
+                "backend": {"healthy": True},
+            },
+            "lifecycleProof": {"activeWorkRuns": {"count": 0}},
+        },
+    )
+
+    proof = service._runtime_activation_proof("commit-123")
+
+    assert proof["verified"] is False
+    assert proof["runtimeSourceCommit"] == "commit-123"
+    assert proof["frontendBuiltFromCommit"] == "stale-frontend"
 
 
 def test_merge_rejects_candidate_mutated_after_judge_variant_binding(tmp_path):
@@ -1935,7 +2322,7 @@ def test_self_origin_merge_requires_review_even_when_forced(tmp_path):
     )
     assert approved["reviewGate"]["status"] == "approved"
     assert approved["reviewGate"]["reviewerNote"] == "reviewed by supervised line"
-    assert approved["merge"]["status"] == "merged"
+    assert approved["merge"]["status"] == "committed"
     assert approved["merge"]["triggeredBy"]["role"] == "approval_executor"
     assert "# candidate edit" in (project_root / "agent.py").read_text(encoding="utf-8")
 
@@ -1988,7 +2375,7 @@ def test_rejected_judgment_remains_advisory_and_user_can_approve_without_force(t
         "approve_review",
         reviewer_note="user reviewed the Judge recommendation and approved",
     )
-    assert merged["merge"]["status"] == "merged"
+    assert merged["merge"]["status"] == "committed"
     assert merged["merge"]["force"] is False
     assert merged["merge"]["triggeredBy"]["decision"] == "REJECT"
     assert merged["merge"]["triggeredBy"]["role"] == "approval_executor"
