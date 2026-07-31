@@ -88,6 +88,12 @@ describe("useResearchProjectAgentTasks", () => {
     expect(standaloneSource).toContain("stagePhase?.readiness?.ready === false");
   });
 
+  it("defers project task queries on source-collection surfaces", () => {
+    expect(routeSource).toMatch(
+      /enabled:\s*challengeCupResearchTeamSelected\s*&&\s*!sourceCollectionStandalone\s*&&\s*researchWorkspaceView !== "source_collection"\s*&&\s*researchWorkspaceView !== "knowledge_collection"/,
+    );
+  });
+
   it("refreshes stage and experiment projections when an Agent task settles", () => {
     expect(hookSource).toContain("experimentPlanningStatusQueryKey(options.teamId)");
     expect(hookSource).toContain("researchStageRoundStatusQueryKey(options.teamId)");

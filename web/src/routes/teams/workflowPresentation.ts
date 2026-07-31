@@ -6,6 +6,7 @@ export const LINKED_ROOM_IDLE_REFETCH_MS = 30_000;
 export const TEAM_BOOTSTRAP_ACTIVE_REFETCH_MS = 2_000;
 export const TEAM_BOOTSTRAP_BACKGROUND_REFETCH_MS = 12_000;
 export const TEAM_BOOTSTRAP_REFETCH_STATUSES = new Set(["running", "needs_retry"]);
+export const SOURCE_COLLECTION_RUN_LIST_ACTIVE_REFETCH_MS = 5_000;
 
 export function linkedRoomRefetchInterval(pageVisible: boolean, status: string) {
   const normalized = String(status || "").toLowerCase();
@@ -21,6 +22,13 @@ export function sourceCollectionRunRefetchInterval(pageVisible: boolean, status:
   return resolvePollingInterval(
     pageVisible,
     normalized === "collecting" || normalized === "processing" ? 1500 : false,
+  );
+}
+
+export function sourceCollectionRunListRefetchInterval(pageVisible: boolean, hasActiveRun: boolean) {
+  return resolvePollingInterval(
+    pageVisible,
+    hasActiveRun ? SOURCE_COLLECTION_RUN_LIST_ACTIVE_REFETCH_MS : false,
   );
 }
 
