@@ -410,7 +410,7 @@ def test_python_launcher_rebuilds_when_sources_are_newer_than_dist(monkeypatch, 
     assert commands == [(["npm", "run", "build"], "npm build")]
 
 
-def test_python_launcher_reuses_build_when_frontend_tree_matches_main(monkeypatch, tmp_path):
+def test_python_launcher_reattests_reused_build_for_current_matching_tree(monkeypatch, tmp_path):
     launcher = _load_python_launcher()
     web_dir = tmp_path / "web"
     source = web_dir / "src" / "App.tsx"
@@ -454,7 +454,8 @@ def test_python_launcher_reuses_build_when_frontend_tree_matches_main(monkeypatc
 
     assert commands == []
     assert result["sourceCommit"] == "2" * 40
-    assert result["builtFromCommit"] == "1" * 40
+    assert result["builtFromCommit"] == "2" * 40
+    assert result["reusedArtifactFromCommit"] == "1" * 40
     assert result["rebuilt"] is False
 
 
