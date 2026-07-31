@@ -792,6 +792,16 @@ def _run_waitable_launcher_process(
     return subprocess.CompletedProcess(args=args, returncode=int(return_code or 0))
 
 
+def _explicit_workbench_port_env_value() -> str:
+    """Return a valid explicit VIBELUTION_PORT override from the parent env, else ""."""
+    raw_value = str(os.environ.get("VIBELUTION_PORT") or "").strip()
+    try:
+        port = int(raw_value)
+    except ValueError:
+        return ""
+    return raw_value if 0 < port < 65536 else ""
+
+
 def run_launcher_action(
     action: str,
     *,
@@ -801,7 +811,7 @@ def run_launcher_action(
 ) -> subprocess.CompletedProcess[str]:
     args = _launcher_command_args(action, no_browser=no_browser)
     env = os.environ.copy()
-    env["VIBELUTION_PORT"] = str(configured_backend_port())
+    env["VIBELUTION_PORT"] = _explicit_workbench_port_env_value() or str(configured_backend_port())
     env[INTERNAL_LAUNCHER_ENV] = INTERNAL_LAUNCHER_VALUE
     if allow_dirty_launch:
         # Tray rebuild-and-start intentionally runs with local dirty worktrees.
