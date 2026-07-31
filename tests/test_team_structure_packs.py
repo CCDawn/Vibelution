@@ -14,6 +14,8 @@ from core.web.services.team import (
     system_bootstrap,
     system_teams,
     team_crud,
+    team_logging,
+    team_membership,
     team_projection,
     team_repair,
 )
@@ -76,6 +78,34 @@ def test_facade_reexports_team_projection() -> None:
     assert facade._get_team_record is team_projection._get_team_record
     assert facade._agent_reference_maps is team_projection._agent_reference_maps
     assert facade._merged_agent_reference_maps is team_projection._merged_agent_reference_maps
+
+
+def test_facade_reexports_team_membership() -> None:
+    assert facade._find_active_team_for_agent is team_membership._find_active_team_for_agent
+    assert facade._find_active_team_for_agent_in_state is team_membership._find_active_team_for_agent_in_state
+    assert facade._unique_active_member_agent_ids is team_membership._unique_active_member_agent_ids
+    assert facade._active_member_agent_ids is team_membership._active_member_agent_ids
+    assert facade._active_member_session_ids is team_membership._active_member_session_ids
+    assert facade._apply_team_contract is team_membership._apply_team_contract
+
+
+def test_facade_reexports_team_logging() -> None:
+    assert facade._record_team_event is team_logging._record_team_event
+    assert facade._team_detail_log_fields is team_logging._team_detail_log_fields
+    assert facade._team_detail_log_signature is team_logging._team_detail_log_signature
+    assert facade._emit_team_detail_loaded is team_logging._emit_team_detail_loaded
+    assert facade._emit_team_detail_rollup is team_logging._emit_team_detail_rollup
+    assert facade._record_team_detail_loaded is team_logging._record_team_detail_loaded
+    assert facade._record_team_membership_conflict is team_logging._record_team_membership_conflict
+    assert facade._record_team_archive_rejected is team_logging._record_team_archive_rejected
+    assert facade._record_archived_team_member_cascade_repaired is team_logging._record_archived_team_member_cascade_repaired
+    assert facade._record_system_team_membership_conflict is team_logging._record_system_team_membership_conflict
+    assert facade._record_system_team_sync_failed is team_logging._record_system_team_sync_failed
+    # Shared mutable telemetry state remains on the facade for pack late-bind.
+    assert hasattr(facade, "_TEAM_DETAIL_LOG_LOCK")
+    assert isinstance(facade._TEAM_DETAIL_LOG_STATE, dict)
+    assert facade.TEAM_DETAIL_LOG_SLOW_THRESHOLD_MS == 250
+    assert facade.TEAM_DETAIL_LOG_ROLLUP_REPEAT_THRESHOLD == 5
 
 
 def test_facade_reexports_team_repair() -> None:
