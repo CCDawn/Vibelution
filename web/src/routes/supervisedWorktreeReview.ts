@@ -8,6 +8,7 @@ type RunIdStorage = {
 };
 
 export type SupervisedWorktreeLedgerSummary = {
+  approvalDecision: string;
   bundleName: string;
   candidateScore: number | null;
   decision: string;
@@ -93,12 +94,32 @@ export function buildSupervisedWorktreeLedgerSummary(
     decision: String(run.decision?.judgeDecision || run.candidateJudgment?.decision || "").trim(),
     description: String(run.latestMessage || reviewGate?.reason || "").trim(),
     reviewStatus: String(reviewGate?.status || "").trim().toLowerCase(),
+    approvalDecision: String(run.approvalDecision?.decision || "").trim().toUpperCase(),
     roleSessionCount: roleSessionIds.size,
     candidateScore: typeof candidateScore === "number" && Number.isFinite(candidateScore)
       ? candidateScore
       : null,
     bundleName: String(run.bundleName || "").trim(),
   };
+}
+
+export function supervisedWorktreeLedgerApprovalLabel(
+  summary: SupervisedWorktreeLedgerSummary,
+  lang: "zh" | "en",
+) {
+  if (summary.approvalDecision === "RERUN_REQUIRED") {
+    return lang === "zh" ? "需补证复跑" : "Rerun required";
+  }
+  if (summary.approvalDecision === "REJECT") {
+    return lang === "zh" ? "已拒绝合入" : "Merge rejected";
+  }
+  if (summary.approvalDecision === "APPROVE" || summary.reviewStatus === "approved") {
+    return lang === "zh" ? "已批准" : "Approved";
+  }
+  if (summary.reviewStatus === "rejected") {
+    return lang === "zh" ? "未获批准" : "Not approved";
+  }
+  return lang === "zh" ? "待审批" : "Pending";
 }
 
 export function readRecentSupervisedWorktreeRunId(storage: RunIdStorage | null | undefined) {

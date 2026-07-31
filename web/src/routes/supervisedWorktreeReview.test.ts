@@ -7,6 +7,7 @@ import {
   readRecentSupervisedWorktreeRunId,
   rememberRecentSupervisedWorktreeRunId,
   selectRecentSupervisedWorktreeRun,
+  supervisedWorktreeLedgerApprovalLabel,
 } from "./supervisedWorktreeReview";
 
 function runWith(
@@ -129,10 +130,32 @@ describe("buildSupervisedWorktreeLedgerSummary", () => {
       decision: "PROMOTE",
       description: "等待用户审批。",
       reviewStatus: "pending",
+      approvalDecision: "",
       roleSessionCount: 3,
       candidateScore: 92,
       bundleName: "acceptance_bundle",
     });
+  });
+
+  it("projects an immutable rerun decision instead of leaving the ledger pending", () => {
+    const summary = buildSupervisedWorktreeLedgerSummary(runWith({
+      runId: "swte-rerun-required",
+      status: "done",
+      latestMessage: "审批要求补充证据并重新运行。",
+      reviewGate: { status: "rejected" },
+      approvalDecision: {
+        status: "decided",
+        decision: "RERUN_REQUIRED",
+        evaluationState: "INCONCLUSIVE",
+      },
+    }));
+
+    expect(summary).toMatchObject({
+      reviewStatus: "rejected",
+      approvalDecision: "RERUN_REQUIRED",
+    });
+    expect(supervisedWorktreeLedgerApprovalLabel(summary!, "zh")).toBe("需补证复跑");
+    expect(supervisedWorktreeLedgerApprovalLabel(summary!, "en")).toBe("Rerun required");
   });
 
   it("does not project a self-evolution review run into the supervised ledger", () => {

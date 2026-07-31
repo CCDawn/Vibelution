@@ -134,6 +134,7 @@ import {
   rememberRecentSupervisedWorktreeRunId,
   selectRecentSupervisedWorktreeRun,
   supervisedRunSessionStorage,
+  supervisedWorktreeLedgerApprovalLabel,
 } from "./supervisedWorktreeReview";
 import {
   isLiveSupervisedRunStatus,
@@ -1094,9 +1095,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
         {
           id: "review",
           label: lang === "zh" ? "审批状态" : "Approval",
-          value: supervisedWorktreeLedgerSummary.reviewStatus === "approved"
-            ? (lang === "zh" ? "已批准" : "Approved")
-            : (lang === "zh" ? "待审批" : "Pending"),
+          value: supervisedWorktreeLedgerApprovalLabel(supervisedWorktreeLedgerSummary, lang),
         },
         {
           id: "sessions",
