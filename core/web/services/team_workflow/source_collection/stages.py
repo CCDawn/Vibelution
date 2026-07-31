@@ -11,6 +11,15 @@ from typing import Any
 from ..source_collection_common import project_source_version_families
 
 
+_AUTO_FORMAL_RETRY_STATUSES = {
+    "error",
+    "failed",
+    "incomplete",
+    "timed_out",
+    "timeout",
+}
+
+
 def _service():
     from core.web.services import team_workflow_orchestration_service
 
@@ -235,7 +244,7 @@ def start_source_collection_stage_session_task(
     return_label = s._trim_text(request_payload.get("returnLabel"), max_length=240)
     requested_by = s._trim_text(request_payload.get("requestedByAgent"), max_length=160)
     idempotency_key = s._trim_text(request_payload.get("idempotencyKey"), max_length=240)
-    formal_retry = bool(request_payload.get("formalRetry"))
+    formal_retry_requested = bool(request_payload.get("formalRetry"))
     if stage_id not in s.SOURCE_COLLECTION_AGENT_CONTEXT_STAGE_ROLES:
         raise s.TeamWorkflowOrchestrationError(f"Unsupported source collection stage: {stage_id}")
     if not agent_id:
@@ -384,6 +393,49 @@ def start_source_collection_stage_session_task(
             and s._trim_text(item.get("agentId"), max_length=160) == agent_id
         ]
     )
+    if (
+        isinstance(previous_stage_task, dict)
+        and s._trim_text(previous_stage_task.get("status"), max_length=80).lower()
+        in {"queued", "running"}
+    ):
+        previous_stage_task = s._reconcile_source_collection_stage_session_task(
+            normalized_team_id,
+            normalized_run_id,
+            previous_stage_task,
+        )
+    previous_stage_task_status = s._trim_text(
+        previous_stage_task.get("status") if isinstance(previous_stage_task, dict) else "",
+        max_length=80,
+    ).lower()
+    auto_formal_retry = (
+        not formal_retry_requested
+        and previous_stage_task_status in _AUTO_FORMAL_RETRY_STATUSES
+    )
+    formal_retry = formal_retry_requested or auto_formal_retry
+    formal_retry_reason = (
+        "requested"
+        if formal_retry_requested
+        else "previous_stage_task_failed"
+        if auto_formal_retry
+        else ""
+    )
+    if auto_formal_retry:
+        s._record_workflow_event(
+            "source_collection.stage_session_task_auto_formal_retry",
+            normalized_team_id,
+            fields={
+                "runId": normalized_run_id,
+                "stageId": stage_id,
+                "agentId": agent_id,
+                "agentRole": agent_role,
+                "previousTaskId": s._trim_text(
+                    previous_stage_task.get("taskId"),
+                    max_length=160,
+                ),
+                "previousTaskStatus": previous_stage_task_status,
+                "reason": formal_retry_reason,
+            },
+        )
     source_context_mode = s._source_collection_stage_task_context_mode(
         stage_id=stage_id,
         agent_role=agent_role,
@@ -469,6 +521,8 @@ def start_source_collection_stage_session_task(
         "retryOfSessionId": experiment_session["retryOfSessionId"],
         "challengeTaskContract": challenge_task_contract,
         "formalRetry": formal_retry,
+        "formalRetryRequested": formal_retry_requested,
+        "formalRetryReason": formal_retry_reason,
         "status": "queued",
         "title": s._source_collection_stage_task_title(stage_id),
         "summary": "",

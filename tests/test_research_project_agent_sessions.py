@@ -425,19 +425,54 @@ def test_source_stage_tasks_use_project_session_without_direct_session_and_retry
             },
         )
 
-    latest = dict(second["task"])
-    latest["status"] = "failed"
+    needs_review = dict(second["task"])
+    needs_review["status"] = "needs_review"
+    team_workflow_orchestration_service._upsert_source_collection_stage_session_task(
+        team["teamId"],
+        run["runId"],
+        needs_review,
+    )
+    supplement = (
+        team_workflow_orchestration_service.start_source_collection_stage_session_task(
+            team["teamId"],
+            run["runId"],
+            {
+                "stageId": "finding",
+                "agentId": agent["agentId"],
+                "agentRole": "source_finder",
+                "idempotencyKey": "ordinary-supplement",
+            },
+        )
+    )
+    assert supplement["sessionCreated"] is False
+    assert supplement["sessionId"] == first["sessionId"]
+    assert supplement["task"]["formalRetry"] is False
+
+    latest = dict(supplement["task"])
+    latest["status"] = "running"
     team_workflow_orchestration_service._upsert_source_collection_stage_session_task(
         team["teamId"],
         run["runId"],
         latest,
+    )
+    reconciliation_calls: list[str] = []
+
+    def reconcile_stale_running_task(team_id, run_id, task):
+        assert team_id == team["teamId"]
+        assert run_id == run["runId"]
+        reconciliation_calls.append(task["taskId"])
+        return {**task, "status": "failed"}
+
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "_reconcile_source_collection_stage_session_task",
+        reconcile_stale_running_task,
     )
     retry_request = {
         "stageId": "finding",
         "agentId": agent["agentId"],
         "agentRole": "source_finder",
         "idempotencyKey": "retry-terminal",
-        "formalRetry": True,
     }
     retry = (
         team_workflow_orchestration_service.start_source_collection_stage_session_task(
@@ -457,10 +492,14 @@ def test_source_stage_tasks_use_project_session_without_direct_session_and_retry
     assert retry["sessionAttempt"] == 2
     assert retry["sessionId"] != first["sessionId"]
     assert retry["retryOfSessionId"] == first["sessionId"]
+    assert retry["task"]["formalRetry"] is True
+    assert retry["task"]["formalRetryReason"] == "previous_stage_task_failed"
+    assert reconciliation_calls == [latest["taskId"]]
     assert duplicate["alreadyPresent"] is True
     assert duplicate["taskId"] == retry["taskId"]
     assert duplicate["sessionId"] == retry["sessionId"]
     assert submitted_sessions == [
+        first["sessionId"],
         first["sessionId"],
         first["sessionId"],
         retry["sessionId"],
