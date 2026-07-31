@@ -1006,6 +1006,13 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourceCollectionExtractionRecoveryWorkspacePanelSource).toContain("openSourceCollectionStageAgentChat(\"extraction\")");
     expect(teamSourceCollectionExtractionRecoveryWorkspacePanelSource).toContain("sourceCollectionExtractionRecoveryFailureCount");
     expect(teamSourceCollectionExtractionRecoveryWorkspacePanelSource).toContain("sourceCollectionExtractionRecoverySalvageCount");
+    expect(routeSource).toContain(
+      `const sourceCollectionExtractionAgentMaterialCount = Math.max(
+    sourceCollectionExtractionSourceVerificationCount,
+    sourceCollectionExtractionMissingEvidenceAnchorCount,
+    sourceCollectionStageProjectionCount(sourceCollectionCandidateProjection, "pending", 0),
+  );`,
+    );
     expect(routeSource).toContain("deriveSourceCollectionExcludedRecoveryState");
     expect(routeSource).toContain("sourceCollectionExtractionExcludedRecoveryState");
     expect(evidenceModelSource).toContain("剩余资料已被排除");

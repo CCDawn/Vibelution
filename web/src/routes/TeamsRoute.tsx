@@ -3700,6 +3700,7 @@ export function TeamsRoute({
   const sourceCollectionExtractionAgentMaterialCount = Math.max(
     sourceCollectionExtractionSourceVerificationCount,
     sourceCollectionExtractionMissingEvidenceAnchorCount,
+    sourceCollectionStageProjectionCount(sourceCollectionCandidateProjection, "pending", 0),
   );
   const sourceCollectionExtractionNeedsAgentMaterial = sourceCollectionExtractionAgentMaterialCount > 0;
   const sourceCollectionExtractionRecoveryMissingCount = Math.max(
