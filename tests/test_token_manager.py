@@ -40,7 +40,10 @@ from tools.token_manager import (
     MessagePriority,
     TokenBudget,
 )
-from core.infrastructure.runtime_input import build_external_request_message
+from core.infrastructure.runtime_input import (
+    build_chat_user_message,
+    build_external_request_message,
+)
 
 
 # ============================================================================
@@ -250,6 +253,45 @@ class TestEstimateMessagesTokens:
         ]
         tokens = estimate_messages_tokens(messages)
         assert tokens > 0
+
+    def test_estimate_provider_dict_chat_user_message(self):
+        """Chat user dicts are part of the provider payload and compression budget."""
+        message = build_chat_user_message("DICT-HISTORY-ANCHOR " + ("x" * 10_000))
+
+        tokens = estimate_messages_tokens([message])
+
+        assert tokens >= 2_500
+
+
+def test_compression_preserves_latest_provider_user_message_and_summarizes_older_users():
+    from langchain_core.messages import AIMessage, SystemMessage
+
+    old_user_one = build_chat_user_message("OLD-ANCHOR-ONE " + ("a" * 8_000))
+    old_user_two = build_chat_user_message("OLD-ANCHOR-TWO " + ("b" * 8_000))
+    current_user = build_chat_user_message("CURRENT-ANCHOR-KEEP-VERBATIM")
+    messages = [
+        SystemMessage(content="stable system"),
+        old_user_one,
+        AIMessage(content="ack one"),
+        old_user_two,
+        AIMessage(content="ack two"),
+        current_user,
+    ]
+    compressor = EnhancedTokenCompressor(token_budget=4_000)
+
+    compressed, result = compressor.compress(
+        messages,
+        max_chars=600,
+        keep_count=1,
+        preserve_errors=True,
+        use_llm_summary=False,
+    )
+
+    assert compressed[-1] is current_user
+    assert old_user_one not in compressed
+    assert old_user_two not in compressed
+    assert "OLD-ANCHOR" in result.summary
+    assert result.tokens_after < result.tokens_before
 
 
 # ============================================================================
