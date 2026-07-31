@@ -37,4 +37,10 @@ describe("source-collection run queries contract", () => {
   it("refreshes the selected run summary whenever the stage workspace mounts", () => {
     expect(queriesSource).toContain('refetchOnMount: "always"');
   });
+
+  it("does not resolve the summary before a selected run is known", () => {
+    expect(queriesSource).toMatch(
+      /enabled:\s*Boolean\(\s*options\.effectiveTeamId\s*&&\s*options\.sourceCollectionWorkspaceSelected\s*&&\s*options\.selectedSourceCollectionRunEffectiveId\s*,?\s*\)/,
+    );
+  });
 });
