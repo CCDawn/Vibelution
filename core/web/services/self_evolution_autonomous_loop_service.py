@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 import uuid
+import re
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -20,6 +21,23 @@ MAX_GOAL_LENGTH = 4_000
 MAX_SUMMARY_LENGTH = 8_000
 MAX_CHANGED_FILES = 400
 MAX_VERIFICATION_ITEMS = 100
+MAX_EVIDENCE_TEXT_LENGTH = 8_000
+MAX_EVIDENCE_DEPTH = 6
+_SECRET_KEY_MARKERS = {
+    "api_key",
+    "apikey",
+    "authorization",
+    "bearer",
+    "cookie",
+    "credential",
+    "password",
+    "secret",
+    "token",
+}
+_SECRET_ASSIGNMENT_RE = re.compile(
+    r"(?i)\b(api[_-]?key|authorization|bearer|cookie|credential|password|secret|token)"
+    r"(\s*[:=]\s*|\s+)([^\s,;]+)"
+)
 _LOCK = threading.RLock()
 
 
@@ -273,7 +291,9 @@ class SelfEvolutionAutonomousLoopService:
             updates={
                 "error": {
                     "type": type(exc).__name__,
-                    "message": _trim_text(str(exc), MAX_SUMMARY_LENGTH),
+                    "message": _redact_text(
+                        _trim_text(str(exc), MAX_SUMMARY_LENGTH)
+                    ),
                 }
             },
         )
@@ -316,7 +336,10 @@ def _normalize_observation(payload: dict[str, Any]) -> dict[str, Any]:
         raise AutonomousLoopValidationError("Observation evidence must be a list.")
     return {
         "summary": summary,
-        "evidence": deepcopy(evidence[:MAX_VERIFICATION_ITEMS]),
+        "evidence": [
+            _sanitize_evidence(item)
+            for item in evidence[:MAX_VERIFICATION_ITEMS]
+        ],
     }
 
 
@@ -328,7 +351,10 @@ def _normalize_plan(payload: dict[str, Any]) -> dict[str, Any]:
         raise AutonomousLoopValidationError("Plan steps must be a non-empty list.")
     return {
         "summary": summary,
-        "steps": deepcopy(steps[:MAX_VERIFICATION_ITEMS]),
+        "steps": [
+            _sanitize_evidence(item)
+            for item in steps[:MAX_VERIFICATION_ITEMS]
+        ],
     }
 
 
@@ -499,11 +525,43 @@ def _bounded_object_list(value: Any, label: str, *, limit: int) -> list[dict[str
     result = [deepcopy(item) for item in value[:limit] if isinstance(item, dict)]
     if not result:
         raise AutonomousLoopValidationError(f"{label} must not be empty.")
-    return result
+    return [_sanitize_evidence(item) for item in result]
 
 
 def _trim_text(value: Any, limit: int) -> str:
     return str(value or "").strip()[:limit]
+
+
+def _sanitize_evidence(value: Any, *, depth: int = 0) -> Any:
+    if depth >= MAX_EVIDENCE_DEPTH:
+        return "[TRUNCATED]"
+    if isinstance(value, dict):
+        result: dict[str, Any] = {}
+        for raw_key, raw_value in list(value.items())[:MAX_VERIFICATION_ITEMS]:
+            key = _trim_text(raw_key, 200)
+            normalized_key = key.lower().replace("-", "_")
+            if any(marker in normalized_key for marker in _SECRET_KEY_MARKERS):
+                result[key] = "[REDACTED]"
+            else:
+                result[key] = _sanitize_evidence(raw_value, depth=depth + 1)
+        return result
+    if isinstance(value, list):
+        return [
+            _sanitize_evidence(item, depth=depth + 1)
+            for item in value[:MAX_VERIFICATION_ITEMS]
+        ]
+    if isinstance(value, str):
+        return _redact_text(value[:MAX_EVIDENCE_TEXT_LENGTH])
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    return _redact_text(str(value)[:MAX_EVIDENCE_TEXT_LENGTH])
+
+
+def _redact_text(value: str) -> str:
+    return _SECRET_ASSIGNMENT_RE.sub(
+        lambda match: f"{match.group(1)}{match.group(2)}[REDACTED]",
+        str(value or ""),
+    )
 
 
 def _record_lifecycle_event(snapshot: dict[str, Any]) -> None:
