@@ -56,6 +56,23 @@ function reviewRun(): SelfEvolutionAutonomousLoopRun {
 }
 
 describe("SelfEvolutionAutonomousLoopPanel", () => {
+  it("keeps launch failures visible before a run record exists", () => {
+    const markup = renderToStaticMarkup(
+      <MemoryRouter>
+        <SelfEvolutionAutonomousLoopPanel
+          lang="zh"
+          run={null}
+          pending={false}
+          error="主工作区当前不干净"
+          onAction={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(markup).toContain("主工作区当前不干净");
+    expect(markup).toContain("必须由用户审查");
+  });
+
   it("renders the no-score lifecycle and user-only approval boundary", () => {
     const markup = renderToStaticMarkup(
       <MemoryRouter>
@@ -64,7 +81,6 @@ describe("SelfEvolutionAutonomousLoopPanel", () => {
           run={reviewRun()}
           pending={false}
           error=""
-          onStart={vi.fn()}
           onAction={vi.fn()}
         />
       </MemoryRouter>,
@@ -76,7 +92,7 @@ describe("SelfEvolutionAutonomousLoopPanel", () => {
     expect(markup).toContain("隔离进化");
     expect(markup).toContain("等待用户审查");
     expect(markup).toContain("批准并自动合入");
-    expect(markup).toContain("退回继续修改");
+    expect(markup).toContain("拒绝并保留候选");
     expect(markup).toContain("pytest 48 passed");
     expect(markup).toContain("data-vui=\"surface\"");
     expect(markup).toContain("data-vui=\"metric-strip\"");
@@ -119,7 +135,6 @@ describe("SelfEvolutionAutonomousLoopPanel", () => {
           run={completed}
           pending={false}
           error=""
-          onStart={vi.fn()}
           onAction={vi.fn()}
         />
       </MemoryRouter>,
@@ -129,5 +144,35 @@ describe("SelfEvolutionAutonomousLoopPanel", () => {
     expect(markup).toContain("工作树已删除");
     expect(markup).toContain("本地分支已删除");
     expect(markup).toContain("闭环完成");
+  });
+
+  it("shows an interrupted integration without claiming cleanup", () => {
+    const failed = {
+      ...reviewRun(),
+      status: "failed",
+      phase: "integration_failed",
+      error: {
+        type: "CandidateIntegrationError",
+        message: "main HEAD 已变化，候选环境已保留",
+      },
+      finishedAt: "2026-08-01T00:04:30Z",
+    } satisfies SelfEvolutionAutonomousLoopRun;
+
+    const markup = renderToStaticMarkup(
+      <MemoryRouter>
+        <SelfEvolutionAutonomousLoopPanel
+          lang="zh"
+          run={failed}
+          pending={false}
+          error=""
+          onAction={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(markup).toContain("自动闭环未完成");
+    expect(markup).toContain("main HEAD 已变化");
+    expect(markup).toContain("已保留");
+    expect(markup).not.toContain("工作树已删除");
   });
 });

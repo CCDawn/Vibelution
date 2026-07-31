@@ -12,7 +12,9 @@ export const selfEvolutionTrackStyles = {
   pageStack: "grid h-full max-h-full min-h-0 min-w-0 max-w-full overflow-hidden overflow-x-hidden rounded-[var(--radius-panel)] bg-vui-surface-panel max-[1180px]:overflow-visible max-[1180px]:overflow-x-hidden",
   trackShell: `grid h-full max-h-full min-h-0 min-w-0 max-w-full grid-rows-[auto_minmax(0,1fr)] items-stretch content-start overflow-hidden overflow-x-hidden ${vuiFlatPanelClass} p-3 max-[1180px]:h-auto max-[1180px]:overflow-visible max-[1180px]:overflow-x-hidden max-[760px]:p-2`,
   trackBody:
-    "min-h-0 min-w-0 max-w-full overflow-hidden overflow-x-hidden pt-2 max-[1180px]:overflow-visible max-[1180px]:overflow-x-hidden",
+    "flex min-h-0 min-w-0 max-w-full flex-col gap-2 overflow-hidden overflow-x-hidden pt-2 max-[1180px]:overflow-visible max-[1180px]:overflow-x-hidden",
+  trackBodyContent:
+    "min-h-0 min-w-0 max-w-full flex-1 overflow-hidden overflow-x-hidden max-[1180px]:overflow-visible max-[1180px]:overflow-x-hidden",
   // Header row must stay content-height (auto track) — never stretch into a tall empty band.
   pageTabsRow:
     "grid min-w-0 w-full shrink-0 self-start grid-cols-[minmax(0,1fr)_auto] items-center gap-2.5 border-b border-vui-border-subtle pb-2 max-[1180px]:grid-cols-1 max-[1180px]:items-start",

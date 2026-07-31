@@ -267,6 +267,26 @@ def test_supervised_runtime_grants_bypass_approval_without_overriding_persistent
     assert persistent_policy["approvalOverrides"] == {
         "close_evolution_transaction_tool": "always",
     }
+    self_evolution_policy = agent_directory_service._with_runtime_tool_grants(
+        persistent_policy,
+        ["grep_search_tool", "apply_patch_tool"],
+        source="self_evolution_autonomous_loop",
+    )
+    self_evolution_authorization = resolve_enforced_authorization(
+        runtime={
+            "agentId": "agent-self-evolution-runtime-probe",
+            "turnId": "turn-self-evolution-runtime-probe",
+            "agent": {"agentId": "agent-self-evolution-runtime-probe"},
+            "toolPolicy": self_evolution_policy,
+        }
+    )
+    self_evolution_approvals = {
+        name: approval
+        for name, approval, _risk in self_evolution_authorization.decision.approval_requirements
+    }
+    assert self_evolution_approvals["grep_search_tool"] == "never"
+    assert self_evolution_approvals["apply_patch_tool"] == "never"
+    assert self_evolution_policy["runtimeToolSource"] == "self_evolution_autonomous_loop"
     non_supervised_policy = agent_directory_service._with_runtime_tool_grants(
         persistent_policy,
         ["open_evolution_transaction_tool"],

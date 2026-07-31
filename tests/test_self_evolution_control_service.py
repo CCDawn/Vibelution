@@ -1,6 +1,7 @@
 import copy
 import hashlib
 import json
+from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -24,6 +25,57 @@ pytestmark = pytest.mark.serial
 
 
 client = TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()})
+
+
+def test_autonomous_role_turn_projects_exact_runtime_tool_grants(monkeypatch):
+    captured: dict = {}
+    monkeypatch.setattr(
+        service,
+        "build_agent_context",
+        lambda agent_id, **_kwargs: SimpleNamespace(
+            agent_id=agent_id,
+            session_id="session-observer",
+            context_block="",
+            static_context_block="",
+            dynamic_context_block="",
+        ),
+    )
+    monkeypatch.setattr(service, "_self_evolution_agent_config", lambda _binding: None)
+    monkeypatch.setattr(service, "record_agent_turn_result", lambda *_args, **_kwargs: None)
+
+    def active_runtime(*_args, **kwargs):
+        captured.update(kwargs)
+        return nullcontext({})
+
+    monkeypatch.setattr(agent_directory_service, "active_agent_runtime", active_runtime)
+    monkeypatch.setattr(
+        service,
+        "run_agent_single_turn",
+        lambda _request: SimpleNamespace(
+            result={"status": "completed", "summary": "观察完成"},
+            carryover={},
+            runtime=None,
+        ),
+    )
+
+    result = service._run_self_evolution_agent_role_turn(
+        role="observer",
+        binding={
+            "agentId": "agent-observer",
+            "directSessionId": "session-observer",
+        },
+        run_id="self-loop-tools",
+        prompt="只读观察",
+        runtime_tool_grants=["grep_search_tool", "code_symbol_tool"],
+        runtime_tool_source="self_evolution_autonomous_loop",
+    )
+
+    assert result["result"]["status"] == "completed"
+    assert captured["runtime_tool_grants"] == [
+        "grep_search_tool",
+        "code_symbol_tool",
+    ]
+    assert captured["runtime_tool_source"] == "self_evolution_autonomous_loop"
 
 
 @pytest.fixture(autouse=True)

@@ -22,7 +22,6 @@ type SelfEvolutionAutonomousLoopPanelProps = {
   run?: SelfEvolutionAutonomousLoopRun | null;
   pending: boolean;
   error: string;
-  onStart: () => void;
   onAction: (
     action: "approve" | "reject" | "retry_cleanup",
     comment?: string,
@@ -42,6 +41,18 @@ function phaseIndex(phase: string): number {
   const normalized = String(phase || "").trim().toLowerCase();
   if (normalized === "queued") {
     return -1;
+  }
+  if (normalized === "observing_failed") {
+    return 0;
+  }
+  if (normalized === "planning_failed") {
+    return 1;
+  }
+  if (normalized === "evolving_failed") {
+    return 2;
+  }
+  if (normalized === "integration_failed") {
+    return 4;
   }
   if (normalized === "cleanup_pending" || normalized === "cleanup_failed") {
     return 4;
@@ -93,19 +104,21 @@ export function SelfEvolutionAutonomousLoopPanel({
   run,
   pending,
   error,
-  onStart,
   onAction,
 }: SelfEvolutionAutonomousLoopPanelProps) {
   const currentIndex = phaseIndex(run?.phase ?? "");
   const changedFiles = run?.candidate?.changedFiles ?? [];
   const verification = run?.candidate?.verification ?? [];
   const awaitingReview = run?.status === "awaiting_user_approval";
+  const failed = run?.status === "failed";
   const cleanupFailed = run?.phase === "cleanup_failed";
   const completed = run?.status === "completed" && run?.phase === "completed";
   const statusLabel = completed
     ? lang === "zh" ? "闭环完成" : "Complete"
     : awaitingReview
       ? lang === "zh" ? "等待用户审查" : "Waiting for user review"
+      : failed
+        ? lang === "zh" ? "闭环中断" : "Loop interrupted"
       : run?.status || (lang === "zh" ? "尚未启动" : "Not started");
 
   if (!run) {
@@ -114,20 +127,13 @@ export function SelfEvolutionAutonomousLoopPanel({
         title={lang === "zh" ? "自进化自动闭环" : "Autonomous self-evolution loop"}
         tone="empty"
         icon={<ArrowUpRight size={15} />}
-        actions={(
-          <VButton
-            type="button"
-            variant="primary"
-            isDisabled={pending}
-            onPress={onStart}
-          >
-            {lang === "zh" ? "启动自动闭环" : "Start autonomous loop"}
-          </VButton>
-        )}
       >
-        {lang === "zh"
-          ? "Agent 将观察现状、制定计划并在隔离工作树中进化；结果报告后必须由用户审查，批准后才会创建 Git 提交并删除本地候选分支。"
-          : "Agents observe, plan, and evolve in an isolated worktree. A user must review the report before Git integration and local candidate cleanup."}
+        <p>
+          {lang === "zh"
+            ? "Agent 将观察现状、制定计划并在隔离工作树中进化；结果报告后必须由用户审查，批准后才会创建 Git 提交并删除本地候选分支。"
+            : "Agents observe, plan, and evolve in an isolated worktree. A user must review the report before Git integration and local candidate cleanup."}
+        </p>
+        {error ? <p className={styles.error}>{error}</p> : null}
       </VStateSurface>
     );
   }
@@ -284,14 +290,14 @@ export function SelfEvolutionAutonomousLoopPanel({
                 isDisabled={pending}
                 onPress={() => onAction("reject", lang === "zh" ? "用户退回候选" : "User rejected candidate")}
               >
-                {lang === "zh" ? "退回继续修改" : "Return for changes"}
+                {lang === "zh" ? "拒绝并保留候选" : "Reject and preserve candidate"}
               </VButton>
             </>
           )}
         >
           {lang === "zh"
-            ? "批准后由确定性后端创建 Git 提交；提交成功后删除本地候选工作树与分支。"
-            : "Approval lets the deterministic backend create a Git commit, then remove the local candidate worktree and branch."}
+            ? "批准后由确定性后端创建 Git 提交并清理候选环境；拒绝只记录决定并保留候选工作树，便于人工检查。"
+            : "Approval creates the Git commit and cleans the candidate environment. Rejection records the decision and preserves the candidate worktree for inspection."}
         </VStateSurface>
       ) : null}
 
@@ -312,6 +318,30 @@ export function SelfEvolutionAutonomousLoopPanel({
           )}
         >
           {run.error?.message || "--"}
+        </VStateSurface>
+      ) : null}
+
+      {failed ? (
+        <VStateSurface
+          title={lang === "zh" ? "自动闭环未完成" : "Autonomous loop did not complete"}
+          tone="error"
+          icon={<X size={15} />}
+          facts={[
+            {
+              key: "phase",
+              label: lang === "zh" ? "中断阶段" : "Interrupted phase",
+              value: run.phase,
+            },
+            {
+              key: "candidate",
+              label: lang === "zh" ? "候选环境" : "Candidate environment",
+              value: run.candidate?.worktreePath
+                ? lang === "zh" ? "已保留" : "Preserved"
+                : lang === "zh" ? "尚未生成" : "Not created",
+            },
+          ]}
+        >
+          {run.error?.message || (lang === "zh" ? "请检查失败原因后重新启动一轮。" : "Inspect the failure and start a new loop.")}
         </VStateSurface>
       ) : null}
 

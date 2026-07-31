@@ -83,6 +83,27 @@ def test_candidate_inspection_freezes_added_modified_and_deleted_files(tmp_path)
     ]
 
 
+def test_candidate_inspection_includes_agent_commits_on_owned_branch(tmp_path):
+    root = _repo(tmp_path)
+    workspace = create_candidate_workspace(
+        root,
+        run_id="self-loop-committed",
+        worktree_root=tmp_path / "candidates",
+    )
+    candidate = Path(workspace["worktreePath"])
+    (candidate / "kept.txt").write_text("committed candidate\n", encoding="utf-8")
+    _git(candidate, "add", "kept.txt")
+    _git(candidate, "commit", "-m", "candidate implementation")
+
+    inspection = inspect_candidate_workspace(root, workspace)
+
+    assert inspection["headCommit"] != workspace["baseCommit"]
+    assert inspection["changedFiles"] == [
+        {"path": "kept.txt", "changeType": "modified"},
+    ]
+    assert inspection["variantId"].startswith("sha256:")
+
+
 def test_candidate_creation_rejects_dirty_or_non_main_target(tmp_path):
     root = _repo(tmp_path)
     (root / "kept.txt").write_text("dirty\n", encoding="utf-8")

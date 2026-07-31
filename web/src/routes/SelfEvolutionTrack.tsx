@@ -36,6 +36,7 @@ import {
   EvolutionWorkflowStep,
   PetSummary,
   RuntimeSummary,
+  SelfEvolutionAutonomousLoopRun,
   SelfEvolutionOverview,
   SelfObservationRun,
   SelfObservationRunStartRequest,
@@ -68,6 +69,7 @@ import { avatarImageUrlFrom, avatarInitials } from "./chat/chatRoutePresentation
 import { resolveChatUserDisplayName } from "./chatCompactPanel";
 import { mergeSessionDetailMessageWindow } from "./chatSessionState";
 import { selfEvolutionTrackStyles as styles } from "./SelfEvolutionTrack.styles";
+import { SelfEvolutionAutonomousLoopPanel } from "./SelfEvolutionAutonomousLoopPanel";
 
 type SelfEvolutionDynamicVariable =
   | "--self-sidebar-width"
@@ -100,9 +102,15 @@ type SelfEvolutionTrackProps = {
   overview?: SelfEvolutionOverview;
   worktreeRun?: SupervisedWorktreeRun | null;
   observationRun?: SelfObservationRun | null;
+  autonomousRun?: SelfEvolutionAutonomousLoopRun | null;
   goalInput: string;
   onGoalInputChange: (value: string) => void;
   onStartRun: () => void;
+  onAutonomousAction: (
+    runId: string,
+    action: "approve" | "reject" | "retry_cleanup",
+    comment?: string,
+  ) => void;
   onStartObservation: (payload: SelfObservationRunStartRequest) => void;
   onTerminateObservation: (runId: string) => void;
   onWorktreeAction: (runId: string, action: string) => void;
@@ -111,11 +119,13 @@ type SelfEvolutionTrackProps = {
   observationStartPending: boolean;
   observationActionPending: boolean;
   worktreeActionPending: boolean;
+  autonomousActionPending: boolean;
   deleteHistoryPending: boolean;
   startWorktreeError: string;
   observationStartError: string;
   observationActionError: string;
   worktreeActionError: string;
+  autonomousActionError: string;
   deleteHistoryError: string;
   actionFeedback: string;
   runLocked: boolean;
@@ -722,9 +732,11 @@ export function SelfEvolutionTrack({
   overview,
   worktreeRun,
   observationRun,
+  autonomousRun,
   goalInput,
   onGoalInputChange,
   onStartRun,
+  onAutonomousAction,
   onStartObservation,
   onTerminateObservation,
   onWorktreeAction,
@@ -733,11 +745,13 @@ export function SelfEvolutionTrack({
   observationStartPending,
   observationActionPending,
   worktreeActionPending,
+  autonomousActionPending,
   deleteHistoryPending,
   startWorktreeError,
   observationStartError,
   observationActionError,
   worktreeActionError,
+  autonomousActionError,
   deleteHistoryError,
   actionFeedback,
   runLocked,
@@ -1602,13 +1616,21 @@ export function SelfEvolutionTrack({
                 <VButton
                   type="button"
                   className={styles.primaryAction}
-                  isDisabled={runLocked || worktreeRunLocked || startPending || !startSelfAction?.enabled}
-                  tooltip={t("startSelfWorktreeRun")}
-                  disabledReason={disabledReason(startSelfAction) || (startPending ? (lang === "zh" ? "自进化运行正在启动。" : "The self-evolution run is starting.") : runLocked || worktreeRunLocked ? (lang === "zh" ? "当前已有运行占用工作区。" : "Another run currently owns the workspace.") : undefined)}
+                  isDisabled={runLocked || worktreeRunLocked || startPending || !goalInput.trim()}
+                  tooltip={lang === "zh" ? "启动无评分的自进化自动闭环。" : "Start the no-score autonomous self-evolution loop."}
+                  disabledReason={
+                    startPending
+                      ? lang === "zh" ? "自进化自动闭环正在启动。" : "The autonomous loop is starting."
+                      : runLocked || worktreeRunLocked
+                        ? lang === "zh" ? "当前已有运行占用工作区。" : "Another run currently owns the workspace."
+                        : !goalInput.trim()
+                          ? lang === "zh" ? "请先填写自进化目标。" : "Enter a self-evolution goal first."
+                          : undefined
+                  }
                   onClick={onStartRun}
                 >
                   {startPending ? <LoaderCircle size={15} className={styles.spinning} /> : <ArrowUpRight size={15} />}
-                  {t("startSelfWorktreeRun")}
+                  {lang === "zh" ? "启动自动闭环" : "Start autonomous loop"}
                 </VButton>
               ) : null}
             </div>
@@ -1632,6 +1654,20 @@ export function SelfEvolutionTrack({
         </div>
 
         <div className={styles.trackBody}>
+          {activePage === "workspace" && !observationRunModeActive ? (
+            <SelfEvolutionAutonomousLoopPanel
+              lang={lang}
+              run={autonomousRun}
+              pending={startPending || autonomousActionPending}
+              error={autonomousActionError || startWorktreeError}
+              onAction={(action, comment) => {
+                if (autonomousRun?.runId) {
+                  onAutonomousAction(autonomousRun.runId, action, comment);
+                }
+              }}
+            />
+          ) : null}
+          <div className={styles.trackBodyContent}>
           {activePage === "workspace" ? (
             <div
               ref={selfLayoutRef}
@@ -2506,6 +2542,7 @@ export function SelfEvolutionTrack({
           </div>
             </div>
           )}
+          </div>
         </div>
       </div>
     </div>

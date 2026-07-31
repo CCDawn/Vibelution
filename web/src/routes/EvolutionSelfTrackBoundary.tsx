@@ -3,6 +3,7 @@ import { Suspense, lazy } from "react";
 
 import type {
   SelfEvolutionOverview,
+  SelfEvolutionAutonomousLoopRun,
   SelfEvolutionTransaction,
   SelfObservationRun,
   SelfObservationRunStartRequest,
@@ -20,9 +21,15 @@ export type EvolutionSelfTrackBoundaryProps = {
   overview?: SelfEvolutionOverview;
   worktreeRun?: SupervisedWorktreeRun | null;
   observationRun?: SelfObservationRun | null;
+  autonomousRun?: SelfEvolutionAutonomousLoopRun | null;
   goalInput: string;
   onGoalInputChange: (value: string) => void;
   onStartRun: () => void;
+  onAutonomousAction: (
+    runId: string,
+    action: "approve" | "reject" | "retry_cleanup",
+    comment?: string,
+  ) => void;
   onStartObservation: (payload: SelfObservationRunStartRequest) => void;
   onTerminateObservation: (runId: string) => void;
   onWorktreeAction: (runId: string, action: string) => void;
@@ -31,11 +38,13 @@ export type EvolutionSelfTrackBoundaryProps = {
   observationStartPending: boolean;
   observationActionPending: boolean;
   worktreeActionPending: boolean;
+  autonomousActionPending: boolean;
   deleteHistoryPending: boolean;
   startWorktreeError: string;
   observationStartError: string;
   observationActionError: string;
   worktreeActionError: string;
+  autonomousActionError: string;
   deleteHistoryError: string;
   actionFeedback: string;
   runLocked: boolean;
@@ -65,9 +74,11 @@ export function EvolutionSelfTrackBoundary({
   overview,
   worktreeRun,
   observationRun,
+  autonomousRun,
   goalInput,
   onGoalInputChange,
   onStartRun,
+  onAutonomousAction,
   onStartObservation,
   onTerminateObservation,
   onWorktreeAction,
@@ -76,11 +87,13 @@ export function EvolutionSelfTrackBoundary({
   observationStartPending,
   observationActionPending,
   worktreeActionPending,
+  autonomousActionPending,
   deleteHistoryPending,
   startWorktreeError,
   observationStartError,
   observationActionError,
   worktreeActionError,
+  autonomousActionError,
   deleteHistoryError,
   actionFeedback,
   runLocked,
@@ -95,9 +108,11 @@ export function EvolutionSelfTrackBoundary({
           overview={overview}
           worktreeRun={worktreeRun}
           observationRun={observationRun}
+          autonomousRun={autonomousRun}
           goalInput={goalInput}
           onGoalInputChange={onGoalInputChange}
           onStartRun={onStartRun}
+          onAutonomousAction={onAutonomousAction}
           onStartObservation={onStartObservation}
           onTerminateObservation={onTerminateObservation}
           onWorktreeAction={onWorktreeAction}
@@ -106,11 +121,13 @@ export function EvolutionSelfTrackBoundary({
           observationStartPending={observationStartPending}
           observationActionPending={observationActionPending}
           worktreeActionPending={worktreeActionPending}
+          autonomousActionPending={autonomousActionPending}
           deleteHistoryPending={deleteHistoryPending}
           startWorktreeError={startWorktreeError}
           observationStartError={observationStartError}
           observationActionError={observationActionError}
           worktreeActionError={worktreeActionError}
+          autonomousActionError={autonomousActionError}
           deleteHistoryError={deleteHistoryError}
           actionFeedback={actionFeedback}
           runLocked={runLocked}

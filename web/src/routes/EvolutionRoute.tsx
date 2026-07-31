@@ -37,6 +37,7 @@ import {
   EvolutionLibraryEntry,
   EvolutionWorkspaceSnapshot,
   SupervisedWorktreeRun,
+  SelfEvolutionAutonomousLoopRun,
   SelfEvolutionOverview,
   SelfObservationRun,
   SelfObservationRunStartRequest,
@@ -429,7 +430,11 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     // R3: idle workspace — slower poll; fast only when an active run is present (see below after data).
     refetchInterval: (query) => {
       const snapshot = query.state.data as EvolutionWorkspaceSnapshot | undefined;
-      const hasActiveRun = Boolean(snapshot?.activeRun?.runId || snapshot?.worktreeActiveRun?.runId);
+      const hasActiveRun = Boolean(
+        snapshot?.activeRun?.runId
+        || snapshot?.worktreeActiveRun?.runId
+        || snapshot?.selfAutonomousActiveRun?.runId,
+      );
       return resolvePollingInterval(pageVisible, hasActiveRun ? 4_000 : 12_000);
     },
     refetchIntervalInBackground: false,
@@ -473,9 +478,10 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   });
   const {
     startWorktreeRunMutation,
-    startSelfWorktreeRunMutation,
     startSelfObservationMutation,
     selfObservationActionMutation,
+    startSelfAutonomousLoopMutation,
+    selfAutonomousLoopActionMutation,
     deleteSelfHistoryMutation,
     actionMutation,
     approvalWorktreeActionMutation,
@@ -581,6 +587,10 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const selfTransactions = selfTransactionsQuery.data ?? workspaceSnapshot?.selfTransactions ?? [];
   const selfObservationRun = workspaceSnapshot?.selfObservationActiveRun
     ?? selectedSelfObservationRunQuery.data
+    ?? null;
+  const selfAutonomousRun: SelfEvolutionAutonomousLoopRun | null =
+    workspaceSnapshot?.selfAutonomousActiveRun
+    ?? workspaceSnapshot?.selfAutonomousLatestRun
     ?? null;
   const selfTrackLoading = selfTrackQueriesEnabled
     && !selfOverview
@@ -1237,8 +1247,14 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     },
   ];
   const selfRunLocked = Boolean(
-    selfWorktreeRun
-    && ["queued", "running", "paused", "stopping"].includes(String(selfWorktreeRun.status || "").trim().toLowerCase()),
+    (
+      selfWorktreeRun
+      && ["queued", "running", "paused", "stopping"].includes(String(selfWorktreeRun.status || "").trim().toLowerCase())
+    )
+    || (
+      selfAutonomousRun
+      && ["queued", "running"].includes(String(selfAutonomousRun.status || "").trim().toLowerCase())
+    ),
   );
   const selectedDataset = workbenchControl?.datasets.find((item) => item.name === datasetName) ?? null;
   const datasetCatalog = workbenchControl?.datasetCatalog ?? workbenchControl?.datasets ?? [];
@@ -2459,22 +2475,30 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
           overview={selfOverview}
           worktreeRun={selfWorktreeRun}
           observationRun={selfObservationRun ?? null}
+          autonomousRun={selfAutonomousRun}
           goalInput={selfGoalInput}
           onGoalInputChange={setSelfGoalInput}
-          onStartRun={() => startSelfWorktreeRunMutation.mutate()}
+          onStartRun={() => startSelfAutonomousLoopMutation.mutate({
+            goal: selfGoalInput.trim(),
+            maxIterations: 1,
+          })}
+          onAutonomousAction={(runId, action, comment) =>
+            selfAutonomousLoopActionMutation.mutate({ runId, action, comment })}
           onStartObservation={(payload) => startSelfObservationMutation.mutate(payload)}
           onTerminateObservation={(runId) => selfObservationActionMutation.mutate({ runId, action: "terminate" })}
           onWorktreeAction={(runId, action) => approvalWorktreeActionMutation.mutate({ runId, action })}
           onDeleteHistoryGroups={(txnIds) => deleteSelfHistoryMutation.mutate(txnIds)}
-          startPending={startSelfWorktreeRunMutation.isPending}
+          startPending={startSelfAutonomousLoopMutation.isPending}
           observationStartPending={startSelfObservationMutation.isPending}
           observationActionPending={selfObservationActionMutation.isPending}
           worktreeActionPending={approvalWorktreeActionMutation.isPending}
+          autonomousActionPending={selfAutonomousLoopActionMutation.isPending}
           deleteHistoryPending={deleteSelfHistoryMutation.isPending}
-          startWorktreeError={startSelfWorktreeRunMutation.error?.message ?? ""}
+          startWorktreeError={startSelfAutonomousLoopMutation.error?.message ?? ""}
           observationStartError={startSelfObservationMutation.error?.message ?? ""}
           observationActionError={selfObservationActionMutation.error?.message ?? ""}
           worktreeActionError={approvalWorktreeActionMutation.error?.message ?? ""}
+          autonomousActionError={selfAutonomousLoopActionMutation.error?.message ?? ""}
           deleteHistoryError={deleteSelfHistoryMutation.error?.message ?? ""}
           actionFeedback={selfActionFeedback}
           runLocked={selfRunLocked}

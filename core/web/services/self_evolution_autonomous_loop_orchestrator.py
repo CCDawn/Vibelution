@@ -177,6 +177,7 @@ def build_default_orchestrator(
         store=WorkRunStore(root=workspace_root / "work_runs"),
         hooks=build_autonomous_loop_hooks(dependencies),
     )
+    service.reconcile_interrupted_on_startup()
     return SelfEvolutionAutonomousLoopOrchestrator(
         service=service,
         executor=executor,

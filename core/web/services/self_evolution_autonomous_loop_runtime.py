@@ -13,6 +13,21 @@ from .self_evolution_autonomous_loop_service import AutonomousLoopHooks
 RuntimeCallable = Callable[[dict[str, Any]], dict[str, Any]]
 RoleTurnCallable = Callable[..., dict[str, Any]]
 BindingsCallable = Callable[[], dict[str, dict[str, Any]]]
+AUTONOMOUS_RUNTIME_TOOL_SOURCE = "self_evolution_autonomous_loop"
+OBSERVER_RUNTIME_TOOLS = (
+    "grep_search_tool",
+    "code_symbol_tool",
+)
+EXECUTOR_RUNTIME_TOOLS = (
+    "open_evolution_transaction_tool",
+    "close_evolution_transaction_tool",
+    "grep_search_tool",
+    "code_symbol_tool",
+    "apply_patch_tool",
+    "write_file_tool",
+    "cli_tool",
+    "python_lint_tool",
+)
 
 
 class AutonomousLoopRuntimeError(RuntimeError):
@@ -74,6 +89,8 @@ def build_autonomous_loop_hooks(
             run_id=run_id,
             prompt=_observation_prompt(context),
             carryover=None,
+            runtime_tool_grants=list(OBSERVER_RUNTIME_TOOLS),
+            runtime_tool_source=AUTONOMOUS_RUNTIME_TOOL_SOURCE,
         )
         with state_lock:
             carryovers[run_id] = deepcopy(turn.get("carryover") or {})
@@ -96,6 +113,8 @@ def build_autonomous_loop_hooks(
             run_id=run_id,
             prompt=_planning_prompt(context),
             carryover=carryover,
+            runtime_tool_grants=list(OBSERVER_RUNTIME_TOOLS),
+            runtime_tool_source=AUTONOMOUS_RUNTIME_TOOL_SOURCE,
         )
         result = turn["result"]
         with state_lock:
@@ -130,6 +149,8 @@ def build_autonomous_loop_hooks(
             run_id=run_id,
             prompt=_evolution_prompt(context),
             carryover=None,
+            runtime_tool_grants=list(EXECUTOR_RUNTIME_TOOLS),
+            runtime_tool_source=AUTONOMOUS_RUNTIME_TOOL_SOURCE,
         )
         inspection = dependencies.inspect_candidate(
             {
