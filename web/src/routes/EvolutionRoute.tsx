@@ -133,6 +133,7 @@ import {
   readRecentSupervisedWorktreeRunId,
   rememberRecentSupervisedWorktreeRunId,
   selectRecentSupervisedWorktreeRun,
+  supervisedApprovalWorkflowStatus,
   supervisedRunSessionStorage,
   supervisedWorktreeLedgerApprovalLabel,
 } from "./supervisedWorktreeReview";
@@ -745,12 +746,15 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     const conversationSessionId = String(backendStep?.conversationSessionId || fallbackSessionId || "").trim();
     const chatRoute = backendStep?.chatRoute || supervisedMemberChatRoute(conversationSessionId, supervisedMemberReturnTo, supervisedMemberReturnLabel);
     const fallbackStatus = definition.id === supervisedRuntimeWorkflowStepId ? "running" : "pending";
+    const backendStatus = backendStep?.status || fallbackStatus;
     return {
       id: definition.id,
       label: backendStep?.label || supervisedWorkflowStepLabel(definition, lang),
       ownerKind: backendStep?.ownerKind || (definition.role ? "agent" : "human"),
       role: backendStep?.role ?? definition.role,
-      status: backendStep?.status || fallbackStatus,
+      status: definition.id === "approval"
+        ? supervisedApprovalWorkflowStatus(recentSupervisedWorktreeRun, backendStatus)
+        : backendStatus,
       current: backendStep?.current ?? definition.id === supervisedRuntimeWorkflowStepId,
       summary: backendStep?.summary || (
         definition.id === "approval"

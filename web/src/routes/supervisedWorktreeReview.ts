@@ -122,6 +122,15 @@ export function supervisedWorktreeLedgerApprovalLabel(
   return lang === "zh" ? "待审批" : "Pending";
 }
 
+export function supervisedApprovalWorkflowStatus(
+  run: SupervisedWorktreeRun | null | undefined,
+  backendStatus: string,
+) {
+  return String(run?.approvalDecision?.status || "").trim().toLowerCase() === "decided"
+    ? "done"
+    : backendStatus;
+}
+
 export function readRecentSupervisedWorktreeRunId(storage: RunIdStorage | null | undefined) {
   if (!storage) {
     return null;
