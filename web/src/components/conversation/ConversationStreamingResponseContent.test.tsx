@@ -1,10 +1,18 @@
 import { existsSync } from "node:fs";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import styles from "./ConversationStreamingResponseContent.styles";
 import conversationViewSource from "./ConversationView.tsx?raw";
+
+// The production stream surface keeps Markdown lazy. These server-rendered
+// assertions cover the post-load renderer while the fallback has its own
+// inert-markup contract in LazyConversationMarkdownRenderer.test.tsx.
+vi.mock("./LazyConversationMarkdownRenderer", async () => {
+  const { ConversationMarkdownRenderer } = await import("./ConversationMarkdownRenderer");
+  return { LazyConversationMarkdownRenderer: ConversationMarkdownRenderer };
+});
 
 const classNames = {
   ...styles,

@@ -1131,7 +1131,7 @@ describe("TeamsRoute layout contract", () => {
     expect(stageProjectionSource).toContain("sourceCollectionCoverageMetric");
     expect(extractionRecoveryViewModelSource).toContain("invalidCandidateIds");
     expect(extractionRecoveryViewModelSource).toContain("重新质量审查");
-    expect(extractionRecoveryViewModelSource).toContain("操作顺序");
+    expect(extractionRecoveryViewModelSource).toContain("现在只点主按钮推进");
     expect(stageProjectionSource).toContain("materializedContentExtraction");
     expect(evidenceModelSource).toContain("继续补全提炼");
     expect(evidenceModelSource).toContain("继续补全提炼");
@@ -2055,7 +2055,7 @@ describe("TeamsRoute layout contract", () => {
     expect(workflowGraphViewStyles.workflowGraphNode).toContain("overflow-hidden");
     expect(workflowGraphViewStyles.workflowGraphNode).toContain("[&_strong]:truncate");
     expect(workflowGraphViewStyles.workflowGraphNode).toContain("[&_span]:truncate");
-    expect(teamSourceFilterBarSource).toContain("min-w-[76px]");
+    expect(teamSourceFilterBarSource).toContain("min-w-[4.75rem]");
     expect(teamSourceFilterBarSource).toContain("flex-none");
     expect(routeStylesSource).not.toContain("min-height: 122px");
     expect(routeStylesSource).not.toContain("min-height: 96px");
@@ -2175,7 +2175,7 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourceResultListSource).toContain("flex-1");
     expect(teamSourceResultListSource).toContain("overflow-auto");
     expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionExtractionPanels).toContain(
-      "grid-rows-[minmax(0,1fr)_auto]",
+      "grid-rows-[minmax(0,1fr)]",
     );
     expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionExtractionScrollRegion).toContain("overflow-auto");
     expect(teamStageCommandBarSource).toContain('data-vui-product="team-stage-command-bar"');
