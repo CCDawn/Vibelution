@@ -360,7 +360,13 @@ function phaseCopy(
   const changedFileCount = run.mergeAnalysis?.changedFiles?.length ?? run.merge?.changedFiles?.length ?? 0;
   const blockers = run.mergeAnalysis?.blockers ?? [];
   const gateReason = String(run.reviewGate?.reason ?? run.mergeAnalysis?.reviewGate?.reason ?? "").trim();
-  const decisionReason = String(run.decision?.reason ?? run.mergeAnalysis?.reason ?? run.latestMessage ?? "").trim();
+  const decisionReason = String(
+    run.approvalDecision?.reason
+    ?? run.decision?.reason
+    ?? run.mergeAnalysis?.reason
+    ?? run.latestMessage
+    ?? "",
+  ).trim();
 
   if (phase === "running") {
     return {
@@ -464,11 +470,28 @@ function buildSteps(
   lang: ApprovalLanguage,
 ): SupervisedApprovalStepModel[] {
   const gateStatus = normalized(run.reviewGate?.status ?? run.mergeAnalysis?.reviewGate?.status);
-  const reviewDone = gateStatus === "approved" || phase === "merged" || phase === "rolled_back";
+  const approvalStatus = normalized(run.approvalDecision?.status);
+  const approvalDecision = String(run.approvalDecision?.decision ?? "").trim().toUpperCase();
+  const decisionRecorded = approvalStatus === "decided";
+  const mergeUnauthorized = decisionRecorded && approvalDecision !== "APPROVE";
+  const reviewDone = decisionRecorded
+    || gateStatus === "approved"
+    || phase === "merged"
+    || phase === "rolled_back";
   const mergeDone = phase === "merged";
   const mergeUndone = phase === "rolled_back";
   const rollbackDone = phase === "rolled_back";
   const mode = approvalMode(run, lang);
+  const reviewDoneLabel = approvalDecision === "RERUN_REQUIRED"
+    ? text(lang, "已要求复跑", "Rerun required")
+    : approvalDecision === "REJECT"
+      ? text(lang, "已拒绝", "Rejected")
+      : approvalDecision === "APPROVE"
+        ? text(lang, "已批准", "Approved")
+        : text(lang, "已完成", "Done");
+  const mergeUnauthorizedLabel = approvalDecision === "RERUN_REQUIRED"
+    ? text(lang, "未授权 · 待复跑", "Unauthorized · rerun required")
+    : text(lang, "未授权", "Unauthorized");
 
   return [
     {
@@ -476,7 +499,7 @@ function buildSteps(
       title: text(lang, `1. ${mode.label}`, `1. ${mode.label}`),
       status: reviewDone ? "done" : phase === "pending_review" ? "active" : "pending",
       statusLabel: reviewDone
-        ? text(lang, "已完成", "Done")
+        ? reviewDoneLabel
         : phase === "pending_review"
           ? text(lang, "当前可执行", "Available now")
           : text(lang, "等待评测", "Waiting"),
@@ -494,6 +517,8 @@ function buildSteps(
         ? "undone"
         : mergeDone
           ? "done"
+          : mergeUnauthorized
+            ? "blocked"
           : phase === "ready_merge"
             ? "active"
             : phase === "blocked"
@@ -503,6 +528,8 @@ function buildSteps(
         ? text(lang, "已撤销", "Undone")
         : mergeDone
           ? text(lang, "已合入", "Merged")
+          : mergeUnauthorized
+            ? mergeUnauthorizedLabel
           : phase === "ready_merge"
             ? text(lang, "当前可执行", "Available now")
             : phase === "blocked"

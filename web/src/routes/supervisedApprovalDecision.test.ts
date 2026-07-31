@@ -263,6 +263,45 @@ describe("buildSupervisedApprovalDecision", () => {
     ]);
   });
 
+  it("projects an immutable rerun decision as completed review with merge unauthorized", () => {
+    const model = buildSupervisedApprovalDecision(
+      worktreeRun({
+        status: "done",
+        phase: "complete",
+        outcome: "approval_rerun_required",
+        latestMessage: "审批要求补充证据并重新运行。",
+        reviewGate: { required: true, status: "rejected" },
+        approvalDecision: {
+          schemaVersion: 1,
+          mode: "human",
+          status: "decided",
+          decision: "RERUN_REQUIRED",
+          evaluationState: "INCONCLUSIVE",
+        },
+        actionStates: {
+          approveReview: action(false),
+          requestRerun: action(false),
+          rejectReview: action(false),
+          merge: action(false),
+          rollback: action(false),
+        },
+      }),
+      "zh",
+    );
+
+    expect(model.phase).toBe("closed");
+    expect(model.steps.find((step) => step.id === "review")).toMatchObject({
+      status: "done",
+      statusLabel: "已要求复跑",
+    });
+    expect(model.steps.find((step) => step.id === "merge")).toMatchObject({
+      status: "blocked",
+      statusLabel: "未授权 · 待复跑",
+    });
+    expect(model.primaryAction).toBeNull();
+    expect(model.secondaryActions).toEqual([]);
+  });
+
   it("offers rollback after merge without claiming the runtime has been refreshed", () => {
     const model = buildSupervisedApprovalDecision(
       worktreeRun({
