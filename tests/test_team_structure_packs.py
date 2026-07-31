@@ -3,7 +3,13 @@
 from __future__ import annotations
 
 from core.web.services import team_service as facade
-from core.web.services.team import ai_search_ranking, canvas_primitives, kind_helpers, system_bootstrap
+from core.web.services.team import (
+    ai_search_ranking,
+    canvas_primitives,
+    kind_helpers,
+    system_bootstrap,
+    system_teams,
+)
 
 
 def test_facade_reexports_canvas_primitives() -> None:
@@ -53,6 +59,19 @@ def test_facade_reexports_system_bootstrap_control_plane() -> None:
     assert hasattr(facade, "_TEAM_SYSTEM_BOOTSTRAP_THREAD")
     assert isinstance(facade._TEAM_SYSTEM_BOOTSTRAP_STATE, dict)
     assert facade.TEAM_SYSTEM_BOOTSTRAP_READY_CACHE_TTL_SECONDS == 30.0
+
+
+def test_facade_reexports_system_teams_materialize() -> None:
+    assert facade.ensure_ai_search_system_team is system_teams.ensure_ai_search_system_team
+    assert facade.ensure_challenge_cup_research_team_agents is system_teams.ensure_challenge_cup_research_team_agents
+    assert facade.ensure_knowledge_expansion_team_agents is system_teams.ensure_knowledge_expansion_team_agents
+    assert facade.ensure_evolution_system_teams is system_teams.ensure_evolution_system_teams
+    assert facade.evolution_system_teams_missing is system_teams.evolution_system_teams_missing
+    assert facade.ai_search_system_team_missing is system_teams.ai_search_system_team_missing
+    assert facade.challenge_cup_research_team_agents_need_repair is system_teams.challenge_cup_research_team_agents_need_repair
+    assert facade.knowledge_expansion_team_agents_need_repair is system_teams.knowledge_expansion_team_agents_need_repair
+    assert facade._ensure_evolution_system_team_in_state is system_teams._ensure_evolution_system_team_in_state
+    assert facade._system_members_from_agents is system_teams._system_members_from_agents
 
 
 def test_system_bootstrap_required_steps_orders_missing_checks(monkeypatch) -> None:

@@ -15,7 +15,7 @@ Prefer slice modules over growing `team_service.py` when possible.
 | Canvas node/member normalize (Agent lookup) | facade (later pack) | workflow SC runs |
 | Team CRUD list/get/create/archive | facade | agent_directory profiles |
 | System team bootstrap control plane | `system_bootstrap.py` | ensure_* materialization bodies |
-| System team ensure / AI search team materialize | facade | bootstrap control-plane state |
+| System team ensure / AI search team materialize | `system_teams.py` | bootstrap control-plane state; generic CRUD |
 | Canvas save/load IO | facade | knowledge steward |
 
 ## Sole-owner rules
@@ -34,6 +34,7 @@ Prefer slice modules over growing `team_service.py` when possible.
 | `ai_search_ranking.py` | done (ROI D3) | page link keyword rank/filter |
 | node/member normalize pack | deferred | still Agent-IO coupled |
 | system bootstrap pack | **done** | control plane late-binds facade ensure_* bodies |
+| system teams materialize pack | **done** | ensure_*/need_repair probes late-bind facade index helpers |
 | chat-room link pack | deferred | still multi-service IO |
 
 ## Related
