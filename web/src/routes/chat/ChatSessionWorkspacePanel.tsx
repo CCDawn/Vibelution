@@ -1,4 +1,4 @@
-import { lazy, Suspense, type ComponentProps } from "react";
+import { lazy, Suspense, type ComponentProps, type ReactNode } from "react";
 
 import type {
   FileContent,
@@ -8,15 +8,12 @@ import { VStateSurface } from "../../components/vui";
 import { ChatConversationComposerBridge } from "./ChatConversationComposerBridge";
 import { ConversationWorkspaceLoadingShell } from "./ChatLoadingShell";
 import { ChatRuntimeNoticeStack } from "./ChatRuntimeNoticeStack";
-import type { ChatToolApprovalLabel } from "./ChatToolApprovalDialog";
+import { ChatToolApprovalDialog, type ChatToolApprovalLabel } from "./ChatToolApprovalDialog";
 import styles from "./ChatSessionWorkspacePanel.styles";
 
-/** T2: file preview / tool approval only when those surfaces are active. */
+/** T2: file preview only when that surface is active. Tool approval is eager (blocking path). */
 const ChatFilePreviewPanel = lazy(() =>
   import("./ChatFilePreviewPanel").then((module) => ({ default: module.ChatFilePreviewPanel })),
-);
-const ChatToolApprovalDialog = lazy(() =>
-  import("./ChatToolApprovalDialog").then((module) => ({ default: module.ChatToolApprovalDialog })),
 );
 
 type ConversationBridgeProps = Omit<ComponentProps<typeof ChatConversationComposerBridge>, "fallback">;
@@ -112,37 +109,47 @@ export function ChatSessionWorkspacePanel({
       return conversationLoadingFallback;
     }
 
+    const inlineToolApproval = toolApproval
+      ? {
+        toolName: toolApproval.toolName,
+        content: (
+          <ChatToolApprovalDialog
+            lang={lang}
+            pending={toolApproval.pending}
+            rawTitle={toolApproval.rawTitle}
+            riskLabel={toolApproval.riskLabel}
+            scopeLabel={toolApproval.scopeLabel}
+            toolLabels={toolApproval.toolLabels}
+            actionPreview={toolApproval.actionPreview}
+            sessionGrantScope={toolApproval.sessionGrantScope}
+            toolName={toolApproval.toolName}
+            variant="inline"
+            onApprove={onApproveToolApproval}
+            onApproveForSession={onApproveToolForSession}
+            onReject={onRejectToolApproval}
+          />
+        ) as ReactNode,
+      }
+      : null;
+
     return (
-      <div className={conversationFocused ? `${styles.conversationFrame} ${styles.conversationFrameFocus}` : styles.conversationFrame}>
-        {hasTransientError ? (
-          <div className={styles.inlineNotice} role="status">
-            {transientErrorMessage}
-          </div>
-        ) : null}
-        <ChatRuntimeNoticeStack lang={lang} notices={notices} />
-        {toolApproval ? (
-          <Suspense fallback={null}>
-            <ChatToolApprovalDialog
-              lang={lang}
-              pending={toolApproval.pending}
-              rawTitle={toolApproval.rawTitle}
-              riskLabel={toolApproval.riskLabel}
-              scopeLabel={toolApproval.scopeLabel}
-              toolLabels={toolApproval.toolLabels}
-              actionPreview={toolApproval.actionPreview}
-              sessionGrantScope={toolApproval.sessionGrantScope}
-              toolName={toolApproval.toolName}
-              onApprove={onApproveToolApproval}
-              onApproveForSession={onApproveToolForSession}
-              onReject={onRejectToolApproval}
+      <div className={conversationFocused ? `${styles.conversationShell} ${styles.conversationFrameFocus}` : styles.conversationShell}>
+        <div className={styles.conversationFrame}>
+          {hasTransientError ? (
+            <div className={styles.inlineNotice} role="status">
+              {transientErrorMessage}
+            </div>
+          ) : null}
+          <ChatRuntimeNoticeStack lang={lang} notices={notices} />
+          <div className={styles.conversationBody}>
+            <ChatConversationComposerBridge
+              {...conversation}
+              toolApproval={inlineToolApproval}
+              composer={conversation.composer}
+              fallback={conversationLoadingFallback}
             />
-          </Suspense>
-        ) : null}
-        <ChatConversationComposerBridge
-          {...conversation}
-          composer={conversation.composer}
-          fallback={conversationLoadingFallback}
-        />
+          </div>
+        </div>
       </div>
     );
   }

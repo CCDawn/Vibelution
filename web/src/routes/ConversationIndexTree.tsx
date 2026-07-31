@@ -48,8 +48,10 @@ type ConversationIndexTreeProps = {
   renamePending: boolean;
   renameSessionId: string;
   resolveModelLabel?: ModelLabelResolver;
+  runtimeRunningSessionIds?: readonly string[];
   searchHasTerm: boolean;
   sessionComposerErrors: Record<string, string>;
+  sessionIdsNeedingApproval?: readonly string[];
   sessionsById: Map<string, SessionSummary>;
   statusLabel: (status: string) => string;
   t: (key: TranslationKey) => string;
@@ -96,8 +98,10 @@ export function ConversationIndexTree({
   renamePending,
   renameSessionId,
   resolveModelLabel,
+  runtimeRunningSessionIds = [],
   searchHasTerm,
   sessionComposerErrors,
+  sessionIdsNeedingApproval = [],
   sessionsById,
   statusLabel,
   t,
@@ -110,7 +114,8 @@ export function ConversationIndexTree({
   onSubmitRename,
   onToggleConversationGroup,
 }: ConversationIndexTreeProps) {
-  const configuredTeams = filteredTeams.filter(isConfiguredConversationIndexTeam);
+  // Configured teams (with members) live under AgentConversationDirectory team blocks
+  // so each team nests team chat + member agents. This tree only keeps setup / unlinked rooms.
   const setupTeams = filteredTeams.filter((team) => !isConfiguredConversationIndexTeam(team));
 
   return (
@@ -164,7 +169,9 @@ export function ConversationIndexTree({
               renamePending={renamePending}
               renameSessionId={renameSessionId}
               resolveModelLabel={resolveModelLabel}
+              runtimeRunningSessionIds={runtimeRunningSessionIds}
               sessionComposerErrors={sessionComposerErrors}
+              sessionIdsNeedingApproval={sessionIdsNeedingApproval}
               sessionsById={sessionsById}
               statusLabel={statusLabel}
               t={t}
@@ -178,31 +185,6 @@ export function ConversationIndexTree({
           </ConversationIndexSection>
         );
       }) : null}
-      {configuredTeams.length ? (
-        <ConversationIndexSection
-          className={styles.teamTreeGroup}
-          count={configuredTeams.length}
-          expanded={searchHasTerm || !collapsedConversationGroups.teams}
-          label={conversationGroupLabel("teams", lang === "zh" ? "zh" : "en")}
-          onToggle={() => onToggleConversationGroup("teams")}
-        >
-          {configuredTeams.map((team) => {
-            const roomId = String(team.linkedChatRoomId ?? "").trim();
-            return (
-              <TeamConversationIndexItem
-                key={team.teamId}
-                active={Boolean(roomId && activeGroupRoomId === roomId)}
-                lang={lang}
-                roomId={roomId}
-                team={team}
-                teamRoute={teamRouteFor(team)}
-                statusLabel={statusLabel}
-                onOpen={onOpenGroupRoom}
-              />
-            );
-          })}
-        </ConversationIndexSection>
-      ) : null}
       {setupTeams.length ? (
         <ConversationIndexSection
           className={styles.teamTreeGroup}

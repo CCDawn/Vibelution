@@ -32,6 +32,7 @@ export type SessionSummary = {
   lastActive: string;
   updatedAt: string;
   currentPhase: string;
+  lastTurnStatus?: string;
   sessionKind?: "main" | "child" | string;
   sessionRole?: "primary" | "workspace" | "supervised" | string;
   parentSessionId?: string;

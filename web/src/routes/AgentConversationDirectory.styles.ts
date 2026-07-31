@@ -25,12 +25,18 @@ const styles = {
     "vui-routes-agentconversationdirectory agentTitleRow flex min-w-0 items-center gap-1.5",
   agentTitle:
     "vui-routes-agentconversationdirectory agentTitle min-w-0 flex-1 truncate [font-size:var(--vui-font-sm)] font-semibold leading-tight [color:var(--fg-primary)]",
-  agentStatus:
-    "vui-routes-agentconversationdirectory agentStatus h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--fg-tertiary)]",
-  agentStatusRunning:
-    "vui-routes-agentconversationdirectory agentStatusRunning bg-[var(--state-success)] shadow-[0_0_0_2px_color-mix(in_srgb,var(--state-success)_14%,transparent)]",
-  agentStatusError:
-    "vui-routes-agentconversationdirectory agentStatusError bg-[var(--state-error)]",
+  agentActivity:
+    "vui-routes-agentconversationdirectory agentActivity inline-grid shrink-0 place-items-center",
+  agentActivitySpinner:
+    "vui-routes-agentconversationdirectory agentActivitySpinner animate-spin",
+  agentActivityRunning:
+    "vui-routes-agentconversationdirectory agentActivityRunning h-4 w-4 text-[var(--state-success)]",
+  agentActivityApproval:
+    "vui-routes-agentconversationdirectory agentActivityApproval h-4 w-4 text-[var(--state-warning)]",
+  agentActivityError:
+    "vui-routes-agentconversationdirectory agentActivityError h-2.5 w-2.5 rounded-full bg-[var(--state-error)] shadow-[0_0_0_2px_color-mix(in_srgb,var(--state-error)_18%,transparent)]",
+  agentActivityCompleted:
+    "vui-routes-agentconversationdirectory agentActivityCompleted h-2.5 w-2.5 rounded-full bg-[var(--accent-cool)] shadow-[0_0_0_2px_color-mix(in_srgb,var(--accent-cool)_18%,transparent)]",
   agentMeta:
     "vui-routes-agentconversationdirectory agentMeta flex min-w-0 items-center gap-1.5 overflow-hidden [font-size:var(--vui-font-xs)] leading-tight [color:var(--fg-secondary)]",
   agentMetaItem:

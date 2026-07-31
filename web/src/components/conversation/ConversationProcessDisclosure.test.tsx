@@ -76,16 +76,27 @@ describe("ConversationProcessDisclosure", () => {
     expect(html).toContain("正在执行");
   });
 
-  it("keeps a stopped process collapsed with an explicit failure summary", () => {
+  it("keeps a failed process collapsed with tool failure summary", () => {
     const html = renderToStaticMarkup(
       <ConversationProcessDisclosure cells={[processCell("failed")]} language="en">
         <span>Stopped process details</span>
       </ConversationProcessDisclosure>,
     );
 
-    expect(html).toContain("Processing stopped 2.9s");
+    expect(html).toContain("Tool failed 2.9s");
+    expect(html).toContain("cli_tool");
     expect(html).not.toContain("stage");
     expect(html).toContain('data-codex-process-state="failed"');
     expect(html).not.toContain('open=""');
+  });
+
+  it("labels Chinese tool failures without implying the whole session stopped", () => {
+    const html = renderToStaticMarkup(
+      <ConversationProcessDisclosure cells={[processCell("failed")]} language="zh">
+        <span>失败细节</span>
+      </ConversationProcessDisclosure>,
+    );
+    expect(html).toContain("工具失败");
+    expect(html).not.toContain("处理已停止");
   });
 });
