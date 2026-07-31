@@ -358,7 +358,7 @@ def create_agent_instance(
             )
         normalized_context_compression_policy = s.materialize_agent_context_compression_policy(
             context_compression_policy,
-            creation_default=s._context_compression_base_policy_for_agents(),
+            creation_default=s.DEFAULT_AGENT_CONTEXT_COMPRESSION_CREATION_POLICY,
         )
         normalized_direct_session_id = str(direct_session_id or "").strip()
         s._ensure_active_direct_session_available(

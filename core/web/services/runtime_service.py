@@ -1933,15 +1933,19 @@ def _context_compression_summary(runtime_state: dict, context_usage: dict[str, i
     if not isinstance(last_compression, dict):
         last_compression = {}
     preservation = _compression_policy_get(strategy_source, "preservation", default={})
+    policy_source = str(
+        (policy_payload or {}).get("appliedPolicySource")
+        or (policy_payload or {}).get("source")
+        or ("runtime_state_applied_policy" if has_applied_runtime_policy else "global")
+    ).strip() or "global"
+    if policy_source == "agent":
+        policy_source = "agent_custom"
 
     return {
         "enabled": enabled,
         "source": "conversation_ledger" if ledger_compression.get("compressionCount") else "runtime_state",
         "policyMode": str((policy_payload or {}).get("mode") or "inherit").strip() or "inherit",
-        "policySource": str(
-            (policy_payload or {}).get("source")
-            or ("runtime_state_applied_policy" if has_applied_runtime_policy else "global")
-        ).strip() or "global",
+        "policySource": policy_source,
         "policyAgentId": str((policy_payload or {}).get("agentId") or "").strip(),
         "scope": "runtime_prompt_estimate",
         "tokenBasis": "current_context_tokens",

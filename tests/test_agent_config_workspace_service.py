@@ -910,6 +910,33 @@ def test_agent_config_workspace_persists_context_compression_policy(tmp_path, mo
     assert stored["contextCompressionPolicy"]["maxTokenLimit"] == 9000
 
 
+def test_new_luna_agent_materializes_authoritative_262144_compression_policy(
+    tmp_path,
+    monkeypatch,
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    cfg = config_package.get_config().model_copy(deep=True)
+    cfg.context_compression.enabled = False
+    cfg.context_compression.max_token_limit = 500_000
+    monkeypatch.setattr(config_package, "get_config", lambda: cfg)
+
+    agent = agent_directory_service.create_agent_instance(
+        display_name="Luna 长上下文 Agent",
+        llm_bindings={"dialogue": {"modelId": "relay_gpt_5_6_luna"}},
+    )
+
+    stored = agent_directory_service.get_agent(agent["agentId"])
+    policy = stored["contextCompressionPolicy"]
+    assert policy["mode"] == "custom"
+    assert policy["enabled"] is True
+    assert policy["maxTokenLimit"] == 262_144
+    assert policy["maxCompressionsPerSession"] == 20
+    assert policy["levels"]["standard"] == 0.8
+    assert policy["preservation"]["preserveErrors"] is True
+    assert stored["contextCompressionEffectivePolicy"]["source"] == "agent"
+    assert stored["contextCompressionEffectivePolicy"]["effectiveTokenLimit"] == 262_144
+
+
 def test_agent_config_workspace_projects_effective_configuration_sources(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
@@ -1424,6 +1451,11 @@ def test_agent_api_effective_compression_uses_dialogue_model_context_window(tmp_
     agent = agent_directory_service.create_agent_instance(
         display_name="窗口 Agent",
         llm_bindings={"dialogue": {"modelId": "window-test-model"}},
+        context_compression_policy={
+            "mode": "custom",
+            "enabled": True,
+            "maxTokenLimit": 32_768,
+        },
     )
 
     payload = agent_directory_service._agent_to_api_summary(agent)

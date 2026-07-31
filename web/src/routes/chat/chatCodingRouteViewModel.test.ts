@@ -6,6 +6,7 @@ import {
   getResizeBounds,
   isBusyPhase,
   normalizePanelWidths,
+  runtimeMatchesSelectedChatSession,
   shouldSuppressComposerErrorForTurnError,
 } from "./chatCodingRouteViewModel";
 
@@ -32,6 +33,24 @@ describe("chat coding route view model", () => {
     expect(formatTokenSpeedValue(0.4)).toBe("<1 t/s");
     expect(formatTokenSpeedValue(3.6)).toBe("4 t/s");
     expect(formatTokenSpeedValue(0)).toBe("");
+  });
+
+  it("keeps idle active-session runtime telemetry attached to the selected session", () => {
+    expect(runtimeMatchesSelectedChatSession({
+      selectedSessionId: "session-luna",
+      activeRuntimeSessionId: "session-luna",
+      activeWorkSessionIds: [],
+    })).toBe(true);
+    expect(runtimeMatchesSelectedChatSession({
+      selectedSessionId: "session-other",
+      activeRuntimeSessionId: "session-luna",
+      activeWorkSessionIds: [],
+    })).toBe(false);
+    expect(runtimeMatchesSelectedChatSession({
+      selectedSessionId: "session-luna",
+      activeRuntimeSessionId: "session-other",
+      activeWorkSessionIds: ["session-luna"],
+    })).toBe(true);
   });
 
   it("suppresses composer errors already visible in the latest turn failure", () => {

@@ -1127,9 +1127,29 @@ def materialize_agent_context_compression_policy(
     """Copy creation defaults into a complete Agent-owned policy."""
     s = _service()
     normalized = s.normalize_agent_context_compression_policy(policy)
+    default_policy = s._context_compression_policy_from_config(
+        creation_default
+        if creation_default is not None
+        else s.DEFAULT_AGENT_CONTEXT_COMPRESSION_CREATION_POLICY
+    )
     if normalized.get("mode") == "custom":
-        return normalized
-    default_policy = s._context_compression_policy_from_config(creation_default)
+        return s.normalize_agent_context_compression_policy(
+            {
+                "mode": "custom",
+                "enabled": normalized.get("enabled", default_policy.get("enabled", True)),
+                "maxTokenLimit": normalized.get(
+                    "maxTokenLimit",
+                    default_policy.get("maxTokenLimit"),
+                ),
+                "maxCompressionsPerSession": normalized.get(
+                    "maxCompressionsPerSession",
+                    default_policy.get("maxCompressionsPerSession", 20),
+                ),
+                "levels": normalized.get("levels") or default_policy.get("levels"),
+                "summaryChars": normalized.get("summaryChars") or default_policy.get("summaryChars"),
+                "preservation": normalized.get("preservation") or default_policy.get("preservation"),
+            }
+        )
     return s.normalize_agent_context_compression_policy(
         {
             "mode": "custom",
