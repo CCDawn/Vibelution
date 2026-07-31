@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from core.web.services import team_knowledge_service as facade
-from core.web.services.team_knowledge import constants, search_ranking, store
+from core.web.services.team_knowledge import constants, permissions, search_ranking, store
 
 
 def test_facade_reexports_constants() -> None:
@@ -82,3 +82,27 @@ def test_store_safe_token_and_unique_strings() -> None:
     assert store._safe_token("Hello World!!", default="x", max_length=32) == "Hello-World"
     assert store._unique_strings(["a", "a", "b"]) == ["a", "b"]
     assert store._bounded_dict({"k" * 100: 1, "ok": 2})  # keys truncated
+
+
+def test_facade_reexports_permissions() -> None:
+    assert facade._permissions_for_actor is permissions._permissions_for_actor
+    assert facade._require_permission is permissions._require_permission
+    assert facade._require_rating_suggestion_permission is permissions._require_rating_suggestion_permission
+    assert facade._can_access is permissions._can_access
+    assert facade._can_collect_owner_source is permissions._can_collect_owner_source
+    assert facade._can_read_owner_source_inbox is permissions._can_read_owner_source_inbox
+    assert facade._can_review_owner_source is permissions._can_review_owner_source
+    assert facade._can_configure_owner_source_governance is permissions._can_configure_owner_source_governance
+    assert facade._is_global_knowledge_steward is permissions._is_global_knowledge_steward
+    assert facade._permission_explain is permissions._permission_explain
+    assert facade._member_role is permissions._member_role
+    assert facade._normalize_acl is permissions._normalize_acl
+
+
+def test_permissions_normalize_acl_and_member_role() -> None:
+    acl = permissions._normalize_acl({})
+    assert acl["read"] == "team"
+    assert acl["grants"]["read"] == []
+    role = permissions._member_role({"members": [{"agentId": "a1", "role": "steward"}]}, "a1")
+    assert role == "steward"
+    assert permissions._member_role({"members": []}, "missing") == ""
