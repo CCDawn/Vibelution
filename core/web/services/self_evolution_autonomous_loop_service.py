@@ -383,7 +383,7 @@ def _normalize_candidate(payload: dict[str, Any]) -> dict[str, Any]:
         ),
         "baseCommit": _required_text(item.get("baseCommit"), "Candidate baseCommit"),
         "headCommit": _required_text(item.get("headCommit"), "Candidate headCommit"),
-        "changedFiles": _bounded_string_list(
+        "changedFiles": _bounded_change_list(
             item.get("changedFiles"),
             "Candidate changedFiles",
             limit=MAX_CHANGED_FILES,
@@ -398,9 +398,10 @@ def _normalize_candidate(payload: dict[str, Any]) -> dict[str, Any]:
         raise AutonomousLoopValidationError(
             "Candidate branch must be an isolated task branch."
         )
-    if candidate["baseCommit"] == candidate["headCommit"]:
+    variant_id = _trim_text(item.get("variantId"), 300)
+    if candidate["baseCommit"] == candidate["headCommit"] and not variant_id:
         raise AutonomousLoopValidationError(
-            "Candidate headCommit must differ from baseCommit."
+            "A dirty candidate must provide a frozen variantId."
         )
     _copy_optional_text(
         item,
@@ -408,7 +409,8 @@ def _normalize_candidate(payload: dict[str, Any]) -> dict[str, Any]:
         "conversationSessionId",
         max_length=300,
     )
-    _copy_optional_text(item, candidate, "variantId", max_length=300)
+    if variant_id:
+        candidate["variantId"] = variant_id
     return candidate
 
 
@@ -527,14 +529,44 @@ def _required_text(value: Any, label: str) -> str:
     return text
 
 
-def _bounded_string_list(value: Any, label: str, *, limit: int) -> list[str]:
+def _bounded_change_list(
+    value: Any,
+    label: str,
+    *,
+    limit: int,
+) -> list[dict[str, str]]:
     if not isinstance(value, list):
         raise AutonomousLoopValidationError(f"{label} must be a list.")
-    result = [
-        _trim_text(item, MAX_SUMMARY_LENGTH)
-        for item in value[:limit]
-        if _trim_text(item, MAX_SUMMARY_LENGTH)
-    ]
+    result: list[dict[str, str]] = []
+    for item in value[:limit]:
+        if isinstance(item, dict):
+            path = _trim_text(item.get("path"), MAX_SUMMARY_LENGTH)
+            change_type = _trim_text(
+                item.get("changeType"),
+                40,
+            ).lower()
+        else:
+            path = _trim_text(item, MAX_SUMMARY_LENGTH)
+            change_type = "modified"
+        normalized_path = path.replace("\\", "/")
+        if (
+            not normalized_path
+            or normalized_path.startswith("/")
+            or any(part in {"", ".", ".."} for part in normalized_path.split("/"))
+        ):
+            raise AutonomousLoopValidationError(
+                f"{label} contains an unsafe path."
+            )
+        if change_type not in {"added", "modified", "deleted"}:
+            raise AutonomousLoopValidationError(
+                f"{label} contains an invalid changeType."
+            )
+        result.append(
+            {
+                "path": normalized_path,
+                "changeType": change_type,
+            }
+        )
     if not result:
         raise AutonomousLoopValidationError(f"{label} must not be empty.")
     return result
