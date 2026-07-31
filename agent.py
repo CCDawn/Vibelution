@@ -638,7 +638,9 @@ def _format_tool_result_replacement_summary(state: Dict[str, Any]) -> str:
 SUBAGENT_RESULT_MARKER = "__VIBELUTION_SUBAGENT_RESULT__"
 
 
-def _runtime_agent_binding_from_env() -> Dict[str, Any]:
+def _runtime_agent_binding_from_env(
+    explicit_binding: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     key_map = {
         "agentId": "VIBELUTION_AGENT_ID",
         "profileId": "VIBELUTION_AGENT_PROFILE_ID",
@@ -647,6 +649,16 @@ def _runtime_agent_binding_from_env() -> Dict[str, Any]:
         "workspacePath": "VIBELUTION_AGENT_WORKSPACE_PATH",
         "supervisedRole": "VIBELUTION_SUPERVISED_ROLE",
     }
+    if explicit_binding is not None:
+        runtime = {
+            target_key: value
+            for target_key in key_map
+            if (value := str(explicit_binding.get(target_key) or "").strip())
+        }
+        llm_bindings = normalize_agent_llm_bindings(explicit_binding.get("llmBindings"))
+        if llm_bindings:
+            runtime["llmBindings"] = llm_bindings
+        return runtime
     runtime: Dict[str, Any] = {
         target_key: value
         for target_key, env_key in key_map.items()
@@ -749,10 +761,11 @@ class SelfEvolvingAgent:
         config: Optional[AppConfig] = None,
         mode: Optional[str] = None,
         workspace_path: Optional[str] = None,
+        runtime_agent_binding: Optional[Dict[str, Any]] = None,
     ) -> None:
         """初始化 Agent 实例"""
         self.config = config or get_config()
-        self.runtime_agent_binding = _runtime_agent_binding_from_env()
+        self.runtime_agent_binding = _runtime_agent_binding_from_env(runtime_agent_binding)
         self._runtime_agent_llm_resolution = None
         self._apply_runtime_agent_profile_binding()
         self._apply_runtime_agent_llm_slot_binding()

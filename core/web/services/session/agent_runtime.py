@@ -567,12 +567,15 @@ def _session_agent_runtime_cache_fingerprint(
         for key in (
             "agentId",
             "updatedAt",
+            "configRevision",
+            "configHash",
             "status",
             "primaryMode",
             "promptTemplateId",
             "profileId",
             "roleKey",
             "llmBindings",
+            "contextCompressionPolicy",
             "toolPolicy",
             "capabilities",
             "memoryPolicy",
@@ -731,11 +734,24 @@ def _create_chat_agent_for_session(
 ) -> Any:
     s = _service()
     agent_config = getattr(resolved_llm, "config", None) or s._session_agent_config_for_llm_slot(agent_instance, llm_slot)
+    runtime_agent_binding = None
+    if isinstance(agent_instance, dict):
+        runtime_agent_binding = {
+            key: value
+            for key, value in {
+                "agentId": str(agent_instance.get("agentId") or "").strip(),
+                "directSessionId": str(agent_instance.get("directSessionId") or "").strip(),
+                "workspacePath": str(agent_instance.get("workspacePath") or "").strip(),
+                "llmSlot": str(llm_slot or SESSION_LLM_SLOT_DIALOGUE).strip() or SESSION_LLM_SLOT_DIALOGUE,
+            }.items()
+            if value
+        }
     runtime_agent = s.call_agent_factory_with_supported_kwargs(
         s.create_chat_agent,
         mode=mode,
         workspace_path=session_workspace,
         config=agent_config,
+        runtime_agent_binding=runtime_agent_binding,
     )
     try:
         runtime_agent._allow_session_subagent_auto_delegation = False
@@ -744,12 +760,18 @@ def _create_chat_agent_for_session(
     return runtime_agent
 
 
-def create_chat_agent(workspace_path: str | Path | None = None, config: Any | None = None, mode: str = "chat") -> Any:
+def create_chat_agent(
+    workspace_path: str | Path | None = None,
+    config: Any | None = None,
+    mode: str = "chat",
+    runtime_agent_binding: dict[str, Any] | None = None,
+) -> Any:
     s = _service()
     return s.create_agent_runtime(
         mode=str(mode or "chat").strip() or "chat",
         workspace_path=str(workspace_path) if workspace_path else None,
         config=config,
+        runtime_agent_binding=runtime_agent_binding,
     )
 
 
