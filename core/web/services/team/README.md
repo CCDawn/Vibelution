@@ -20,10 +20,11 @@ Prefer slice modules over growing `team_service.py` when possible.
 | Team API projection / agent refs | `team_projection.py` | index write repair |
 | Active membership / contract helpers | `team_membership.py` | runtime-scene telemetry; public CRUD |
 | Team runtime-scene logging helpers | `team_logging.py` | membership resolve; index IO |
+| Team index / path / lock store helpers | `team_store.py` | domain CRUD; system materialize |
 | System team bootstrap control plane | `system_bootstrap.py` | ensure_* materialization bodies |
 | System team ensure / AI search team materialize | `system_teams.py` | bootstrap control-plane state; generic CRUD |
 | Team linked chat-room sync / repair | `chat_room_links.py` | team CRUD; canvas IO |
-| Canvas save/load IO | facade | knowledge steward |
+| Canvas save/load domain flow | `canvas_normalize.py` | pure path helpers (`team_store`) |
 
 ## Sole-owner rules
 
@@ -50,6 +51,7 @@ Prefer slice modules over growing `team_service.py` when possible.
 | team projection pack | **done** | to_api / agent reference maps late-bind facade helpers |
 | team membership pack | **done** | active-member resolve / contract late-bind facade helpers |
 | team logging pack | **done** | runtime-scene team events / detail rollup late-bind facade state |
+| team store pack | **done** | index/path/lock/json helpers late-bind facade constants & locks |
 
 ## Related
 

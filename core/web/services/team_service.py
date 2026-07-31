@@ -2,26 +2,11 @@
 
 from __future__ import annotations
 
-import json
-import copy
-import re
-import shutil
 import threading
-from html.parser import HTMLParser
-from datetime import datetime, timezone
 from pathlib import Path
-from time import perf_counter
 from typing import Any
-from urllib.parse import urljoin, urlparse
-from uuid import uuid4
 
-import httpx
-
-from core.infrastructure import developer_sandbox
-
-from . import agent_directory_service, chat_room_service, project_agent_bus_service
 from .runtime_scene_service import record_runtime_scene_event
-from .team_conversation_contract import build_team_conversation_projection
 from .team.canvas_primitives import (
     EDGE_TYPES,
     NODE_TYPES,
@@ -61,7 +46,7 @@ from .team import team_repair as _team_repair
 from .team import team_projection as _team_projection
 from .team import team_membership as _team_membership
 from .team import team_logging as _team_logging
-from core.logging.logger import debug as _debug_logger
+from .team import team_store as _team_store
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -358,29 +343,24 @@ class TeamNotFoundError(TeamServiceError):
     """Raised when a team does not exist."""
 
 
-def utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-def _perf_counter() -> float:
-    return perf_counter()
-
-
-def _elapsed_ms(started_at: float) -> int:
-    return max(0, int(round((_perf_counter() - started_at) * 1000)))
-
-
-def _try_acquire_team_lock() -> bool:
-    try:
-        return bool(_TEAM_LOCK.acquire(blocking=False))
-    except TypeError:
-        return bool(_TEAM_LOCK.acquire(False))
-
-
-def _release_team_lock_if_acquired(acquired: bool) -> None:
-    if acquired:
-        _TEAM_LOCK.release()
-
+utc_now_iso = _team_store.utc_now_iso
+_perf_counter = _team_store._perf_counter
+_elapsed_ms = _team_store._elapsed_ms
+_try_acquire_team_lock = _team_store._try_acquire_team_lock
+_release_team_lock_if_acquired = _team_store._release_team_lock_if_acquired
+_load_index = _team_store._load_index
+_save_index = _team_store._save_index
+_read_json = _team_store._read_json
+_write_json = _team_store._write_json
+_teams_root = _team_store._teams_root
+_teams_index_path = _team_store._teams_index_path
+_team_canvas_path = _team_store._team_canvas_path
+_project_root = _team_store._project_root
+_sync_project_bus_root = _team_store._sync_project_bus_root
+_relative_path = _team_store._relative_path
+_find_team = _team_store._find_team
+_normalize_required_id = _team_store._normalize_required_id
+_format_validation_error = _team_store._format_validation_error
 
 request_system_team_bootstrap = _system_bootstrap.request_system_team_bootstrap
 _run_system_team_bootstrap_discovery = _system_bootstrap._run_system_team_bootstrap_discovery
@@ -581,90 +561,3 @@ _ai_search_role_metadata = _system_teams._ai_search_role_metadata
 _ai_search_members_from_agents = _system_teams._ai_search_members_from_agents
 _ensure_evolution_system_team_in_state = _system_teams._ensure_evolution_system_team_in_state
 _system_members_from_agents = _system_teams._system_members_from_agents
-
-
-def _load_index() -> dict[str, Any]:
-    path = _teams_index_path()
-    if not path.exists():
-        return {"schemaVersion": SCHEMA_VERSION, "updatedAt": utc_now_iso(), "teams": []}
-    try:
-        data = _read_json(path)
-    except (OSError, json.JSONDecodeError) as exc:
-        _debug_logger.warning(f"Failed to read Team index. path={path} error={type(exc).__name__}: {exc}")
-        return {"schemaVersion": SCHEMA_VERSION, "updatedAt": utc_now_iso(), "teams": []}
-    return data if isinstance(data, dict) else {"schemaVersion": SCHEMA_VERSION, "updatedAt": utc_now_iso(), "teams": []}
-
-
-def _save_index(state: dict[str, Any]) -> None:
-    _write_json(_teams_index_path(), state)
-
-
-def _read_json(path: Path) -> dict[str, Any]:
-    data = json.loads(path.read_text(encoding="utf-8-sig"))
-    return data if isinstance(data, dict) else {}
-
-
-def _write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-
-
-def _teams_root() -> Path:
-    return developer_sandbox.seeded_sandbox_workspace_path(_project_root(), "teams")
-
-
-def _teams_index_path() -> Path:
-    return _teams_root() / "teams.json"
-
-
-def _team_canvas_path(team_id: str) -> Path:
-    return _teams_root() / _safe_token(team_id, default="team", max_length=96) / "canvas.json"
-
-
-def _project_root() -> Path:
-    root = Path(PROJECT_ROOT).resolve()
-    return root.parent if root.name.lower() == "workspace" else root
-
-
-def _sync_project_bus_root() -> None:
-    if project_agent_bus_service.PROJECT_ROOT != PROJECT_ROOT:
-        project_agent_bus_service.PROJECT_ROOT = PROJECT_ROOT
-
-
-def _relative_path(path: Path) -> str:
-    resolved = path.resolve()
-    workspace_root = developer_sandbox.formal_workspace_path(_project_root()).resolve()
-    try:
-        return f"workspace/{resolved.relative_to(workspace_root).as_posix()}"
-    except ValueError:
-        pass
-    sandbox_root = developer_sandbox.sandbox_workspace_path(_project_root())
-    if sandbox_root is not None:
-        try:
-            return f"workspace/{resolved.relative_to(sandbox_root.resolve()).as_posix()}"
-        except ValueError:
-            pass
-    try:
-        return str(resolved.relative_to(_project_root())).replace("\\", "/")
-    except ValueError:
-        return str(path).replace("\\", "/")
-
-
-def _find_team(state: dict[str, Any], team_id: str) -> dict[str, Any] | None:
-    for item in list(state.get("teams") or []):
-        if isinstance(item, dict) and str(item.get("teamId") or "").strip() == team_id:
-            return item
-    return None
-
-
-def _normalize_required_id(value: str, message: str) -> str:
-    normalized = _safe_token(value, default="", max_length=96)
-    if not normalized:
-        raise TeamServiceError(message)
-    return normalized
-
-
-def _format_validation_error(validation: dict[str, Any]) -> str:
-    issues = validation.get("issues") if isinstance(validation.get("issues"), list) else []
-    details = "; ".join(str(item.get("message") or item.get("code") or "") for item in issues[:3] if isinstance(item, dict))
-    return f"Team canvas contract invalid: {details or 'unknown validation error'}"
