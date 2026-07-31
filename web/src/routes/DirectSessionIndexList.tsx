@@ -18,7 +18,11 @@ type DirectSessionIndexListProps = {
   renameSessionId: string;
   renamePending: boolean;
   resolveModelLabel?: ModelLabelResolver;
+  /** Session ids with an active runtime chat_turn. */
+  runtimeRunningSessionIds?: readonly string[];
   sessionComposerErrors: Record<string, string>;
+  /** Session ids waiting on tool/permission approval. */
+  sessionIdsNeedingApproval?: readonly string[];
   sessionsById: Map<string, SessionSummary>;
   statusLabel: (status: string) => string;
   formatTime: (value: string) => string;
@@ -129,7 +133,9 @@ export function DirectSessionIndexList({
   renameSessionId,
   renamePending,
   resolveModelLabel,
+  runtimeRunningSessionIds = [],
   sessionComposerErrors,
+  sessionIdsNeedingApproval = [],
   sessionsById,
   statusLabel,
   formatTime,
@@ -146,6 +152,12 @@ export function DirectSessionIndexList({
   onRenameTitleChange,
   onSubmitRename,
 }: DirectSessionIndexListProps) {
+  const approvalSessionIds = new Set(
+    sessionIdsNeedingApproval.map((id) => String(id || "").trim()).filter(Boolean),
+  );
+  const runtimeSessionIds = new Set(
+    runtimeRunningSessionIds.map((id) => String(id || "").trim()).filter(Boolean),
+  );
   return (
     <>
       {conversations.map((conversation) => {
@@ -176,6 +188,8 @@ export function DirectSessionIndexList({
             itemMessage={sessionView.itemMessage}
             itemIsNotice={sessionView.itemIsNotice}
             missingAgentMessage={sessionView.missingAgentMessage}
+            needsApproval={approvalSessionIds.has(session.id)}
+            isRuntimeRunning={runtimeSessionIds.has(session.id)}
             renamePending={sessionRenamePending}
             session={session}
             sessionAvatarFallback={avatarInitials(session.agentCode, sessionView.sessionTitle)}

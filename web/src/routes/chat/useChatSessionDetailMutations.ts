@@ -174,20 +174,36 @@ export function useChatSessionDetailMutations({
       },
     ) =>
       resolveSessionToolApprovalDecision(request, decision),
-    onSuccess: (_payload, variables) => {
+    onMutate: async (variables) => {
+      const key = queryKeys.sessionToolApprovals(variables.request.sessionId);
+      await queryClient.cancelQueries({ queryKey: key });
+      const previous = queryClient.getQueryData<SessionToolApprovalRequest[]>(key);
+      // Drop the banner immediately so the operator is not blocked on network round-trips.
       queryClient.setQueryData<SessionToolApprovalRequest[]>(
-        queryKeys.sessionToolApprovals(variables.request.sessionId),
+        key,
         (current) => (current ?? []).filter((item) => item.requestId !== variables.request.requestId),
       );
+      return { previous, sessionId: variables.request.sessionId };
+    },
+    onSuccess: (_payload, variables) => {
       void queryClient.invalidateQueries({
         queryKey: queryKeys.sessionToolApprovals(variables.request.sessionId),
       });
-      void queryClient.invalidateQueries({
-        queryKey: queryKeys.session(variables.request.sessionId),
+      // Session detail refresh is deferred slightly so the approval UI can clear first.
+      void Promise.resolve().then(() => {
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.session(variables.request.sessionId),
+        });
+        void chatWorkspaceCache.refreshSessionRuntime(variables.request.sessionId);
       });
-      void chatWorkspaceCache.refreshSessionRuntime(variables.request.sessionId);
     },
-    onError: (error, variables) => {
+    onError: (error, variables, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(
+          queryKeys.sessionToolApprovals(context.sessionId),
+          context.previous,
+        );
+      }
       setSessionComposerErrors((current) => ({
         ...current,
         [variables.request.sessionId]: describeError(

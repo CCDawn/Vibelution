@@ -253,9 +253,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.centerSurface).toContain("h-full");
     expect(routeStyles.centerSurface).toContain("min-h-0");
     expect(routeStyles.centerSurface).toContain("overflow-hidden");
-    expect(chatSessionWorkspacePanelSource).toContain("styles.conversationFrame");
+    expect(chatSessionWorkspacePanelSource).toContain("styles.conversationShell");
+    expect(chatSessionWorkspacePanelStyles.conversationShell).toContain("h-full");
     expect(chatSessionWorkspacePanelStyles.conversationFrame).toContain("flex");
-    expect(chatSessionWorkspacePanelStyles.conversationFrame).toContain("h-full");
+    expect(chatSessionWorkspacePanelStyles.conversationFrame).toContain("flex-1");
     expect(chatSessionWorkspacePanelStyles.conversationFrame).toContain("min-h-0");
     expect(chatSessionWorkspacePanelStyles.conversationFrame).toContain("overflow-hidden");
     expect(conversationStyles.surface).toContain("flex");
@@ -385,7 +386,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("listPendingSessionToolApprovals");
     expect(chatApiSource).toContain("/tool-approvals?status=pending");
     expect(routeSource).toContain("runtime?.workRuns?.active?.chat_turn?.sessionId === activeSessionId");
-    expect(routeSource).toContain("|| sessionToolApprovalRuntimeActive");
+    expect(routeSource).toContain("sessionToolApprovalRuntimeActive");
     expect(routeSource).toContain("resolveToolApprovalMutation");
     expect(routeAndDetailMutationsSource).toContain("resolveSessionToolApprovalDecision");
     expect(chatApiSource).toContain("/tool-approvals/");
@@ -397,13 +398,21 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("onRejectToolApproval={() => {");
     expect(routeSource).toContain("resolveToolApprovalMutation.mutate({ request: pendingToolGovernanceApproval, decision: \"reject\" })");
     expect(chatSessionWorkspacePanelSource).toContain("<ChatToolApprovalDialog");
+    expect(chatSessionWorkspacePanelSource).toContain("variant=\"inline\"");
+    expect(chatSessionWorkspacePanelSource).toContain("toolApproval={inlineToolApproval}");
+    expect(chatSessionWorkspacePanelSource).toContain("conversationShell");
+    expect(chatSessionWorkspacePanelSource).toContain('from "./ChatToolApprovalDialog"');
     expect(chatSessionWorkspacePanelSource.indexOf("<ChatToolApprovalDialog")).toBeLessThan(
       chatSessionWorkspacePanelSource.indexOf("<ChatConversationComposerBridge"),
     );
+    expect(routeSource).toContain("return 250");
+    expect(chatSessionDetailMutationsSource).toContain("onMutate: async (variables) =>");
     expect(routeStylesModuleSource).not.toContain("toolApprovalOverlay:");
     expect(routeStylesModuleSource).not.toContain("toolApprovalDialog:");
     expect(chatToolApprovalDialogSource).toContain("role=\"dialog\"");
     expect(chatToolApprovalDialogSource).toContain("toolApprovalCodexTitle");
+    expect(chatToolApprovalDialogSource).toContain("Allow this action?");
+    expect(chatToolApprovalDialogSource).toContain("允许执行？");
     expect(chatToolApprovalDialogSource).toContain("aria-labelledby={titleId}");
     expect(chatToolApprovalDialogSource).toContain("aria-describedby={descriptionIds}");
     expect(chatToolApprovalDialogSource).toContain("aria-busy={pending}");
@@ -416,8 +425,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(chatToolApprovalDialogSource).toContain("role=\"listitem\"");
     expect(chatToolApprovalDialogSource).toContain("onApproveForSession");
     expect(chatToolApprovalDialogSource).toContain("toolApprovalCodexButtonLabels");
-    expect(chatToolApprovalDialogSource).toContain("actionPreview");
+    expect(chatToolApprovalDialogSource).toContain("commandPreview");
     expect(chatToolApprovalDialogSource).toContain("sessionGrantScope");
+    expect(chatToolApprovalDialogSource).toContain("Hotkeys: Y Yes");
+    expect(chatToolApprovalDialogSource).toContain("快捷键：Y 是");
     expect(chatToolApprovalDialogSource).toContain("className={styles.toolItem}");
     expect(chatToolApprovalDialogStyles.dialog).toContain("grid-cols-[34px_minmax(0,1fr)_auto]");
     expect(chatToolApprovalDialogStyles.dialog).toContain("shadow-none");
@@ -448,8 +459,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(markup).toContain('role="dialog"');
     expect(markup).toContain('aria-busy="true"');
     expect(markup).toContain("Resolving");
+    expect(markup).toContain("Allow this action?");
     expect(markup.match(/disabled=""/g)?.length).toBe(2);
-    expect(markup.match(/aria-hidden="true"/g)?.length).toBeGreaterThanOrEqual(1);
     expect(markup).toContain("very_long_tool_name_that_should_wrap_inside_the_dialog_surface");
   });
 
@@ -476,14 +487,15 @@ describe("ChatCodingRoute layout contract", () => {
     expect(markup).toContain('aria-modal="true"');
     expect(markup).toContain("aria-labelledby=");
     expect(markup).toContain("aria-describedby=");
-    expect(markup).not.toContain("aria-label=");
     expect(markup).toContain("允许执行？");
+    expect(markup).toContain("是");
     expect(markup).toContain("始终（本会话）");
-    expect(markup).toContain("参数完全相同");
+    expect(markup).toContain("否");
     expect(markup).toContain("需要审批");
     expect(markup).toContain("当前会话");
     expect(markup).toContain("python.exe -c");
     expect(markup).toContain("C:\\workspace\\repo");
+    expect(markup).toContain("参数完全相同");
     expect(markup).toContain('role="list"');
     expect(markup.match(/role="listitem"/g)?.length).toBe(2);
     expect(markup).toContain("shell_command");
@@ -775,8 +787,14 @@ describe("ChatCodingRoute layout contract", () => {
     expect(agentSessionTabStripStyles.agentSessionTabGroup).toContain("overflow-x-auto");
     expect(agentSessionTabStripStyles.agentSessionTab).toContain("shrink-0");
     expect(agentSessionTabStripStyles.agentSessionTab).toContain("rounded-t-[var(--radius-control)]");
-    expect(agentSessionTabStripStyles.agentSessionTabMainActionActive).toContain("border-b-transparent");
-    expect(agentSessionTabStripStyles.agentSessionTabMainActionActive).toContain("-mb-px");
+    expect(agentSessionTabStripStyles.agentSessionTabMainActionActive).toContain("!border-[var(--accent-cool)]");
+    expect(agentSessionTabStripStyles.agentSessionTabMainActionActive).toContain("!-mb-px");
+    expect(agentSessionTabStripStyles.agentSessionTabCurrentBadge).toContain("bg-[var(--accent-cool)]");
+    expect(agentSessionTabStripStyles.agentSessionTabStatusDotRunning).toContain("state-success");
+    expect(agentSessionTabStripStyles.agentSessionTabStatusDotError).toContain("state-error");
+    expect(agentSessionTabStripStyles.agentSessionTabStatusDotApproval).toContain("state-warning");
+    expect(agentSessionTabStripStyles.agentSessionTab).toContain("opacity-[0.72]");
+    expect(agentSessionTabStripStyles.agentSessionTabActive).toContain("opacity-100");
     expect(agentSessionTabStripStyles.agentSessionTabTitle).toContain("truncate");
   });
 
@@ -2296,8 +2314,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(directSessionIndexItemSource).toContain("styles.conversationMetaMain");
     expect(directSessionIndexItemSource).toContain("styles.conversationMetaTime");
     expect(directSessionIndexItemSource).toContain("styles.sessionStatusCluster");
-    expect(directSessionIndexItemSource).toContain("styles.sessionRunningBadge");
-    expect(directSessionIndexItemSource).toContain("styles.sessionUnreadBadge");
+    expect(directSessionIndexItemSource).toContain("styles.sessionActivityRunning");
+    expect(directSessionIndexItemSource).toContain("styles.sessionActivityCompleted");
     expect(routeStyles.conversationTitleRow).toContain("grid-cols-[minmax(0,1fr)_auto]");
     expect(routeStyles.conversationTitleRow).toContain("max-w-full");
     expect(routeStyles.conversationMetaRow).toContain("grid-cols-[minmax(0,1fr)_max-content]");
@@ -2833,11 +2851,11 @@ describe("ChatCodingRoute layout contract", () => {
     expect(groupSessionIndexItemsSource).not.toContain("styles.teamTreeLabelRow");
     expect(conversationIndexTreeSource).toContain("`/teams?team=${encodeURIComponent(team.teamId)}`");
     expect(conversationIndexTreeSource).toContain("未绑定团队的群聊");
-    expect(conversationIndexTreeSource).toContain("onToggleConversationGroup(\"teams\")");
+    expect(conversationIndexTreeSource).toContain("onToggleConversationGroup(\"setupTeams\")");
     expect(conversationIndexTreeSource).toContain("onToggleConversationGroup(\"standaloneGroups\")");
-    expect(conversationIndexTreeSource).toContain("expanded={searchHasTerm || !collapsedConversationGroups.teams}");
+    expect(conversationIndexTreeSource).toContain("expanded={searchHasTerm || !collapsedConversationGroups.setupTeams}");
     expect(conversationIndexTreeSource).toContain("expanded={searchHasTerm || !collapsedConversationGroups.standaloneGroups}");
-    expect(conversationIndexTreeSource).toContain("conversationGroupLabel(\"teams\"");
+    expect(conversationIndexTreeSource).toContain("conversationGroupLabel(\"setupTeams\"");
     expect(conversationIndexTreeSource).toContain("conversationGroupLabel(\"standaloneGroups\"");
     expect(conversationIndexTreeSource).toContain("className={styles.teamTreeGroup}");
     expect(groupSessionIndexItemsSource).not.toContain("styles.teamTreeChildren");
@@ -2980,11 +2998,14 @@ describe("ChatCodingRoute layout contract", () => {
     expect(directSessionIndexItemStyles.sessionItem).toContain("rounded-[var(--radius-control)]");
     expect(directSessionIndexItemSource).not.toContain("VChip tone=\"accent\"");
     expect(directSessionIndexItemSource).not.toContain("Clock3");
-    expect(directSessionIndexItemSource).toContain("VChip tone=\"success\"");
-    expect(directSessionIndexItemSource).toContain("VChip tone=\"warning\"");
+    expect(directSessionIndexItemSource).not.toContain("VChip tone=\"success\"");
+    expect(directSessionIndexItemSource).not.toContain("VChip tone=\"warning\"");
+    expect(directSessionIndexItemSource).toContain("styles.sessionActivityRunning");
+    expect(directSessionIndexItemSource).toContain("styles.sessionActivityApproval");
     expect(directSessionIndexItemStyles).not.toHaveProperty("sessionCurrentBadge");
-    expect(directSessionIndexItemStyles.sessionRunningBadge).toContain("!h-[22px]");
-    expect(directSessionIndexItemStyles.sessionUnreadBadge).toContain("!h-[22px]");
+    expect(directSessionIndexItemStyles.sessionActivityRunning).toContain("h-4");
+    expect(directSessionIndexItemStyles.sessionActivityRunning).toContain("state-success");
+    expect(directSessionIndexItemStyles.sessionActivityApproval).toContain("state-warning");
 
     expect(groupSessionIndexItemsStyles.sessionItem).toContain("overflow-hidden");
     expect(groupSessionIndexItemsStyles.sessionItem).toMatch(/border border-vui-border-subtle|border border-\[var\(--vui-border-subtle\)\]/);

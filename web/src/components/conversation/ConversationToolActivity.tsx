@@ -29,6 +29,8 @@ type ConversationToolActivityProps = {
   activity: CodexTranscriptToolActivity;
   language: ConversationToolPresentationLanguage;
   renderToolDetails: (cell: CodexTranscriptCell, detailsId: string) => ReactNode;
+  /** Codex-style approval card rendered under the matching tool call. */
+  approvalSlot?: ReactNode;
 };
 
 const STAGGERED_DETAILS_CLOSE_DURATION_MS = 520;
@@ -266,6 +268,7 @@ export function ConversationToolActivity({
   activity,
   language,
   renderToolDetails,
+  approvalSlot = null,
 }: ConversationToolActivityProps) {
   const items = buildConversationToolActivityPresentation(activity.cells, language);
   const digest = buildConversationToolActivityDigestPresentation(activity.cells, language);
@@ -276,6 +279,7 @@ export function ConversationToolActivity({
       data-codex-tool-activity-state={digest.state}
       data-codex-tool-activity-count={digest.count}
       data-codex-tool-activity-attention-count={digest.attentionCount || undefined}
+      data-codex-tool-approval-attached={approvalSlot ? "true" : undefined}
     >
       {items.map((item) => (
         <div key={item.id} className={styles.activityRow}>
@@ -286,6 +290,11 @@ export function ConversationToolActivity({
           )}
         </div>
       ))}
+      {approvalSlot ? (
+        <div className={styles.approvalSlot} data-codex-tool-approval-inline="true">
+          {approvalSlot}
+        </div>
+      ) : null}
     </div>
   );
 }

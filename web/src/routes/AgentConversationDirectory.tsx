@@ -1,26 +1,51 @@
-import { useState, type MouseEvent as ReactMouseEvent } from "react";
+import { LoaderCircle } from "lucide-react";
+import { useMemo, useState, type MouseEvent as ReactMouseEvent } from "react";
 
-import type { AgentInstance, SessionSummary } from "../api/types";
+import type { AgentInstance, SessionSummary, Team } from "../api/types";
 import { VButton } from "../components/vui";
 import { agentDisplayInfo } from "./agentDisplay";
+import {
+  agentDirectoryBucket,
+  agentDirectorySection,
+  buildAgentDirectoryPartition,
+  isConversationDirectoryAgent,
+  isEligibleDirectoryAgent,
+  isVisibleFlatDirectoryAgent,
+} from "./agentConversationDirectoryModel";
 import { ConversationIndexSection } from "./ConversationIndexSection";
+import { TeamConversationIndexItem } from "./GroupSessionIndexItems";
+import {
+  resolveAgentActivityTone,
+  resolveSessionActivityTone,
+  sessionActivityLabel,
+  type SessionActivityTone,
+} from "./sessionActivityIndicator";
 import styles from "./AgentConversationDirectory.styles";
 
 export type AgentConversationDirectoryProps = {
   activeAgentId: string;
+  activeSessionId?: string | null;
+  activeGroupRoomId?: string;
   agents: AgentInstance[];
   avatarInitials: (agentCode?: string, name?: string, fallback?: string) => string;
   filterText: string;
   formatTime: (value: string) => string;
   lang: "zh" | "en";
   resolveModelLabel: (modelId: string) => string | undefined;
+  /** Session ids with an active runtime chat_turn (green spinner). */
+  runtimeRunningSessionIds?: readonly string[];
   sessions: SessionSummary[];
+  /** Session ids waiting on tool/permission approval (yellow spinner). */
+  sessionIdsNeedingApproval?: readonly string[];
+  statusLabel: (status: string) => string;
+  teams?: Team[];
   onContextMenu: (
     event: ReactMouseEvent<HTMLElement>,
     agent: AgentInstance,
     latestSession: SessionSummary | null,
   ) => void;
   onOpenAgent: (agent: AgentInstance, latestSession: SessionSummary | null) => void;
+  onOpenGroupRoom?: (roomId: string) => void;
 };
 
 export type AgentDirectorySection = "conversation" | "special";
@@ -30,52 +55,32 @@ const DEFAULT_COLLAPSED_DIRECTORY_SECTIONS: Record<AgentDirectorySection, boolea
   special: false,
 };
 
-function storedConversationIndexKind(agent: AgentInstance) {
-  return String(
-    agent.conversationIndexKind
-    || agent.metadata?.conversationIndexKind
-    || "",
-  ).trim();
-}
+// Re-export model helpers so existing imports from this module keep working.
+export {
+  agentDirectoryBucket,
+  agentDirectorySection,
+  buildAgentDirectoryPartition,
+  isConversationDirectoryAgent,
+  isEligibleDirectoryAgent,
+  isVisibleFlatDirectoryAgent,
+};
 
+/** @deprecated Prefer isVisibleFlatDirectoryAgent / buildAgentDirectoryPartition. */
 export function isVisibleDirectoryAgent(agent: AgentInstance) {
-  const kind = storedConversationIndexKind(agent);
-  return (
-    String(agent.kind || "").trim() === "persistent"
-    && String(agent.status || "").trim() !== "archived"
-    && kind !== "team_agent"
-  );
+  return isVisibleFlatDirectoryAgent(agent);
 }
 
+/**
+ * Agents that appear in the flat (non-team) directory list historically.
+ * Team members now live under team blocks; experiment-backed team_agent rows
+ * remain discoverable via partition special orphans if needed.
+ */
 export function visibleDirectoryAgents(
   agents: AgentInstance[],
   sessions: SessionSummary[],
 ) {
-  const experimentAgentIds = new Set(
-    sessions
-      .filter((session) => {
-        const binding = session.experimentBinding;
-        const sessionAgentId = String(session.agentId || "").trim();
-        return Boolean(
-          binding
-          && String(binding.teamId || "").trim()
-          && String(binding.researchProjectId || "").trim()
-          && String(binding.agentId || "").trim() === sessionAgentId,
-        );
-      })
-      .map((session) => String(session.agentId || "").trim()),
-  );
-  return agents.filter((agent) => {
-    if (isVisibleDirectoryAgent(agent)) {
-      return true;
-    }
-    return (
-      String(agent.kind || "").trim() === "persistent"
-      && String(agent.status || "").trim() !== "archived"
-      && storedConversationIndexKind(agent) === "team_agent"
-      && experimentAgentIds.has(String(agent.agentId || "").trim())
-    );
-  });
+  void sessions;
+  return agents.filter((agent) => isVisibleFlatDirectoryAgent(agent));
 }
 
 export function agentDirectorySessionCount(
@@ -94,55 +99,63 @@ export function agentDirectorySessionCount(
   return sessionCount + (hasUnindexedActiveDirectSession ? 1 : 0);
 }
 
-export function agentDirectorySection(agent: AgentInstance): AgentDirectorySection {
-  const primaryMode = String(agent.primaryMode || "").trim();
-  const roleKey = String(agent.roleKey || "").trim();
-  return primaryMode === "chat" && !roleKey ? "conversation" : "special";
-}
-
-function isAgentMatch(agent: AgentInstance, filterText: string) {
-  const query = String(filterText || "").trim().toLocaleLowerCase();
-  if (!query) {
-    return true;
+function agentActivityClass(tone: SessionActivityTone) {
+  if (tone === "running") {
+    return styles.agentActivityRunning;
   }
-  return [agent.displayName, agent.agentCode, agent.roleKey]
-    .join(" ")
-    .toLocaleLowerCase()
-    .includes(query);
-}
-
-function agentStateClass(agent: AgentInstance) {
-  const state = String(agent.status || "").trim().toLowerCase();
-  if (state.includes("running") || state.includes("处理中")) {
-    return styles.agentStatusRunning;
+  if (tone === "approval") {
+    return styles.agentActivityApproval;
   }
-  if (state.includes("error") || state.includes("failed") || state.includes("失败")) {
-    return styles.agentStatusError;
+  if (tone === "error") {
+    return styles.agentActivityError;
+  }
+  if (tone === "completed") {
+    return styles.agentActivityCompleted;
   }
   return "";
 }
 
+function teamRouteFor(team: Team) {
+  return `/teams?team=${encodeURIComponent(team.teamId)}`;
+}
+
 export function AgentConversationDirectory({
   activeAgentId,
+  activeSessionId = null,
+  activeGroupRoomId = "",
   agents,
   avatarInitials,
   filterText,
   formatTime,
   lang,
   resolveModelLabel,
+  runtimeRunningSessionIds = [],
   sessions,
+  sessionIdsNeedingApproval = [],
+  statusLabel,
+  teams = [],
   onContextMenu,
   onOpenAgent,
+  onOpenGroupRoom,
 }: AgentConversationDirectoryProps) {
-  const visibleAgents = visibleDirectoryAgents(agents, sessions)
-    .filter((agent) => isAgentMatch(agent, filterText));
-  const conversationAgents = visibleAgents.filter((agent) => agentDirectorySection(agent) === "conversation");
-  const specialAgents = visibleAgents.filter((agent) => agentDirectorySection(agent) === "special");
-  const [collapsedSections, setCollapsedSections] = useState<Record<AgentDirectorySection, boolean>>(
-    DEFAULT_COLLAPSED_DIRECTORY_SECTIONS,
+  const partition = useMemo(
+    () => buildAgentDirectoryPartition({ agents, teams, sessions, filterText }),
+    [agents, teams, sessions, filterText],
+  );
+  const { conversationAgents, specialAgents, teamBlocks, listedAgentIds } = partition;
+
+  const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({
+    ...DEFAULT_COLLAPSED_DIRECTORY_SECTIONS,
+  });
+  const approvalSessionIds = new Set(
+    sessionIdsNeedingApproval.map((id) => String(id || "").trim()).filter(Boolean),
+  );
+  const runtimeSessionIds = new Set(
+    runtimeRunningSessionIds.map((id) => String(id || "").trim()).filter(Boolean),
   );
   const sessionCountByAgentId = new Map<string, number>();
   const sessionIdsByAgentId = new Map<string, Set<string>>();
+  const sessionsByAgentId = new Map<string, SessionSummary[]>();
   const latestSessionByAgentId = new Map<string, SessionSummary>();
   for (const session of sessions) {
     const agentId = String(session.agentId || "").trim();
@@ -156,11 +169,30 @@ export function AgentConversationDirectory({
       sessionIds.add(sessionId);
     }
     sessionIdsByAgentId.set(agentId, sessionIds);
+    const agentSessions = sessionsByAgentId.get(agentId) || [];
+    agentSessions.push(session);
+    sessionsByAgentId.set(agentId, agentSessions);
     const previous = latestSessionByAgentId.get(agentId);
     if (!previous || String(previous.updatedAt || previous.lastActive || "") < String(session.updatedAt || session.lastActive || "")) {
       latestSessionByAgentId.set(agentId, session);
     }
   }
+
+  const isSectionExpanded = (sectionKey: string, defaultCollapsed = false) => {
+    if (Object.prototype.hasOwnProperty.call(collapsedSections, sectionKey)) {
+      return !collapsedSections[sectionKey];
+    }
+    return !defaultCollapsed;
+  };
+
+  const toggleSection = (sectionKey: string, defaultCollapsed = false) => {
+    setCollapsedSections((current) => {
+      const currentlyCollapsed = Object.prototype.hasOwnProperty.call(current, sectionKey)
+        ? Boolean(current[sectionKey])
+        : defaultCollapsed;
+      return { ...current, [sectionKey]: !currentlyCollapsed };
+    });
+  };
 
   const renderAgent = (agent: AgentInstance) => {
     const agentId = String(agent.agentId || "").trim();
@@ -173,6 +205,17 @@ export function AgentConversationDirectory({
     );
     const active = agentId === activeAgentId;
     const avatarUrl = String(agent.avatarImageUrl || "").trim();
+    const agentSessions = sessionsByAgentId.get(agentId) || [];
+    const sessionTones = agentSessions.map((session) =>
+      resolveSessionActivityTone(session, {
+        needsApproval: approvalSessionIds.has(String(session.id || "").trim()),
+        isRuntimeRunning: runtimeSessionIds.has(String(session.id || "").trim()),
+        isActive: String(session.id || "").trim() === String(activeSessionId || "").trim(),
+      }),
+    );
+    const activityTone = resolveAgentActivityTone(sessionTones);
+    const activityLabel = sessionActivityLabel(activityTone, lang);
+    const activityClass = agentActivityClass(activityTone);
     return (
       <VButton
         key={agentId}
@@ -206,7 +249,17 @@ export function AgentConversationDirectory({
         <span className={styles.agentCopy}>
           <span className={styles.agentTitleRow}>
             <span className={styles.agentTitle}>{display.name}</span>
-            <span className={[styles.agentStatus, agentStateClass(agent)].filter(Boolean).join(" ")} />
+            {activityTone !== "none" ? (
+              <span
+                className={[styles.agentActivity, activityClass].filter(Boolean).join(" ")}
+                aria-label={activityLabel}
+                title={activityLabel}
+              >
+                {activityTone === "running" || activityTone === "approval" ? (
+                  <LoaderCircle size={12} aria-hidden="true" className={styles.agentActivitySpinner} />
+                ) : null}
+              </span>
+            ) : null}
           </span>
           <span className={styles.agentMeta}>
             <span className={styles.agentMetaItem}>{display.functionLabel}</span>
@@ -223,37 +276,73 @@ export function AgentConversationDirectory({
     );
   };
 
-  const renderSection = (section: AgentDirectorySection, sectionAgents: AgentInstance[]) => {
+  const renderAgentSection = (section: AgentDirectorySection, sectionAgents: AgentInstance[]) => {
     if (!sectionAgents.length) {
       return null;
     }
     const label = section === "conversation"
       ? (lang === "zh" ? "会话 Agent" : "Conversation Agents")
       : (lang === "zh" ? "特殊 Agent" : "Special Agents");
-    const expanded = !collapsedSections[section];
+    const expanded = isSectionExpanded(section, DEFAULT_COLLAPSED_DIRECTORY_SECTIONS[section]);
     return (
       <ConversationIndexSection
         className={styles.agentSection}
         count={sectionAgents.length}
         expanded={expanded}
         label={label}
-        onToggle={() => setCollapsedSections((current) => ({ ...current, [section]: !current[section] }))}
+        onToggle={() => toggleSection(section, DEFAULT_COLLAPSED_DIRECTORY_SECTIONS[section])}
       >
         <div className={styles.agentDirectoryList}>{sectionAgents.map(renderAgent)}</div>
       </ConversationIndexSection>
     );
   };
 
+  const renderTeamBlock = (block: (typeof teamBlocks)[number]) => {
+    const teamId = String(block.team.teamId || "").trim();
+    const sectionKey = `team:${teamId}`;
+    // Team blocks default collapsed when there are many teams.
+    const defaultCollapsed = teamBlocks.length > 3;
+    const expanded = isSectionExpanded(sectionKey, defaultCollapsed);
+    const count = (block.roomId ? 1 : 0) + block.agents.length;
+    return (
+      <ConversationIndexSection
+        key={sectionKey}
+        className={styles.agentSection}
+        count={count}
+        expanded={expanded}
+        label={block.team.name || teamId}
+        onToggle={() => toggleSection(sectionKey, defaultCollapsed)}
+      >
+        <div className={styles.agentDirectoryList}>
+          <TeamConversationIndexItem
+            active={Boolean(block.roomId && activeGroupRoomId === block.roomId)}
+            displayTitle={lang === "zh" ? "团队群聊" : "Team chat"}
+            lang={lang}
+            roomId={block.roomId}
+            team={block.team}
+            teamRoute={teamRouteFor(block.team)}
+            statusLabel={statusLabel}
+            onOpen={(roomId) => onOpenGroupRoom?.(roomId)}
+          />
+          {block.agents.map(renderAgent)}
+        </div>
+      </ConversationIndexSection>
+    );
+  };
+
+  const hasContent = listedAgentIds.length > 0 || teamBlocks.length > 0;
+
   return (
     <nav className={styles.agentDirectory} aria-label={lang === "zh" ? "Agent 目录" : "Agent directory"}>
       <div className={styles.agentDirectoryHeader}>
         <span>{lang === "zh" ? "Agent" : "Agents"}</span>
-        <span className={styles.agentDirectoryCount}>{visibleAgents.length}</span>
+        <span className={styles.agentDirectoryCount}>{listedAgentIds.length}</span>
       </div>
-      {visibleAgents.length ? (
+      {hasContent ? (
         <>
-          {renderSection("conversation", conversationAgents)}
-          {renderSection("special", specialAgents)}
+          {renderAgentSection("conversation", conversationAgents)}
+          {teamBlocks.map(renderTeamBlock)}
+          {renderAgentSection("special", specialAgents)}
         </>
       ) : (
         <p className={styles.agentEmpty}>
