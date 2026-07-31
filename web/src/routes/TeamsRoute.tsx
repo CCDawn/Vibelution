@@ -399,6 +399,7 @@ import {
 } from "./teams/teamWorkflowQueryKeys";
 import {
   isForeignTeamDetailQueryKey,
+  resolveLinkedChatRoomQueryEnabled,
   resolveResearchSecondaryStatusQueryEnabled,
   resolveSourceCollectionRunsQueryEnabled,
   resolveTeamCanvasQueryEnabled,
@@ -1041,10 +1042,17 @@ export function TeamsRoute({
   });
   const linkedChatRoomId = selectedTeam?.linkedChatRoomId ?? "";
   const linkedRoomStatusForPolling = String(selectedTeam?.linkedChatRoom?.status || "").toLowerCase();
+  const linkedChatRoomQueryEnabled = resolveLinkedChatRoomQueryEnabled({
+    linkedChatRoomId,
+    teamDetailReady: Boolean(teamDetailQuery.data),
+    researchWorkflowTeamSelected,
+    researchCanvasVisible: researchCanvasReadOnly,
+    researchWorkspaceView,
+  });
   const linkedChatRoomQuery = useQuery({
     queryKey: queryKeys.chatRoom(linkedChatRoomId || "none"),
     queryFn: ({ signal }) => fetchJson<ChatRoomDetail>(`/api/chat-rooms/${encodeURIComponent(linkedChatRoomId)}`, { signal }),
-    enabled: Boolean(linkedChatRoomId && teamDetailQuery.data),
+    enabled: linkedChatRoomQueryEnabled,
     refetchInterval: (query) => {
       const detail = query.state.data as ChatRoomDetail | undefined;
       return linkedRoomRefetchInterval(pageVisible, detail?.status || linkedRoomStatusForPolling);
