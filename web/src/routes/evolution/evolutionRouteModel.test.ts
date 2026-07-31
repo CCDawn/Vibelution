@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { EvolutionActiveRun, EvolutionLibraryEntry, EvolutionProposalDetail, EvolutionWorkflowStep } from "../../api/types";
 import {
   activeSupervisedWorkflowStep,
+  buildSupervisedStartPlaceholder,
   canOpenProposalSourceRun,
   clampScore,
   compactTimestamp,
@@ -20,6 +21,22 @@ import {
 } from "./evolutionRouteModel";
 
 describe("evolutionRouteModel", () => {
+  it("keeps the selected approval mode in the optimistic run projection", () => {
+    const run = buildSupervisedStartPlaceholder({
+      sourceKind: "dataset",
+      datasetName: "supervised_dry_run",
+      datasetLimit: 1,
+      bundleName: "",
+      keepWorktree: true,
+      approvalMode: "agent",
+      mentalModelMode: "follow",
+      lang: "zh",
+    });
+
+    expect(run.approvalMode).toBe("agent");
+    expect(run.eventTail[0].approvalMode).toBe("agent");
+  });
+
   it("keeps every runtime conversation Agent available to the supervised UI", () => {
     expect(SUPERVISED_RUN_MEMBER_ROLES).toEqual(["baseline", "baseline_rerun", "judge"]);
   });

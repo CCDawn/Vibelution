@@ -9,6 +9,8 @@ const borderedSurface =
 const styles = {
   actionBar:
     "flex min-w-0 flex-wrap items-center justify-between gap-2 border-t border-[var(--vui-border-subtle)] pt-2.5 max-[560px]:items-stretch max-[560px]:[&>button]:w-full",
+  actionButtons:
+    "flex min-w-0 flex-wrap items-center justify-end gap-2 max-[640px]:w-full max-[640px]:[&>button]:flex-1",
   actionCard:
     `grid min-w-0 content-start gap-1.5 ${borderedSurface} p-2.5 data-[status=active]:border-[color-mix(in_srgb,var(--accent-cool)_42%,var(--vui-border-subtle))] data-[status=blocked]:border-[color-mix(in_srgb,var(--state-error)_36%,var(--vui-border-subtle))] data-[status=done]:border-[color-mix(in_srgb,var(--state-success)_32%,var(--vui-border-subtle))] [&_p]:m-0 [&_p]:text-[length:var(--vui-font-xs)] [&_p]:leading-[1.45] [&_p]:text-[var(--fg-secondary)] [&_small]:text-[length:var(--vui-font-xs)] [&_small]:leading-[1.4] [&_small]:text-[var(--fg-tertiary)]`,
   actionCardHeader:

@@ -37,4 +37,11 @@ describe("evolution mutations contract (T3)", () => {
       observationMutations.match(/setSelfActionFeedback\(""\)/g) ?? [],
     ).toHaveLength(4);
   });
+
+  it("freezes the selected approval mode into real and simulation start requests", () => {
+    expect(runSource).toContain('approvalMode: "human" | "agent"');
+    expect(runSource.match(/approvalMode: payload\.approvalMode/g) ?? []).toHaveLength(3);
+    expect(routeSource).toContain('useState<"human" | "agent">("human")');
+    expect(routeSource).toContain("最终审批方式");
+  });
 });

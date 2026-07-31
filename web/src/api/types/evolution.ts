@@ -232,6 +232,7 @@ export type EvolutionActiveRunEvent = {
   title: string;
   summary: string;
   status: string;
+  approvalMode?: "human" | "agent" | string;
   caseId?: string;
   caseIndex?: number | null;
   caseTotal?: number | null;
@@ -398,6 +399,7 @@ export type EvolutionActiveRun = {
   datasetName: string;
   datasetLimit: number | null;
   keepWorktree: boolean;
+  approvalMode?: "human" | "agent" | string;
   mentalModelMode?: string;
   mentalModelEnabled?: boolean | null;
   retryOfRunId?: string;
@@ -518,6 +520,7 @@ export type SupervisedJudgeRubric = {
 export type SupervisedJudgeJudgment = {
   status?: string;
   phase?: string;
+  evaluationState?: "VALID" | "INVALID" | "ERROR" | "INCONCLUSIVE" | string;
   recommendation?: string;
   decision?: string;
   score?: number;
@@ -542,6 +545,7 @@ export type SupervisedWorktreeRun = {
   runtimeStatus: string;
   outcome: string;
   mode: string;
+  approvalMode?: "human" | "agent" | string;
   executionMode: string;
   sourceKind: string;
   datasetName: string;
@@ -576,6 +580,25 @@ export type SupervisedWorktreeRun = {
     judgeRecommendation?: string;
     overrodeJudgeRecommendation?: boolean;
   };
+  approvalDecision?: {
+    schemaVersion?: number;
+    mode?: "human" | "agent" | string;
+    status?: "pending" | "decided" | string;
+    decision?: "APPROVE" | "REJECT" | "RERUN_REQUIRED" | string;
+    evaluationState?: "VALID" | "INVALID" | "ERROR" | "INCONCLUSIVE" | string;
+    reason?: string;
+    evidenceRefs?: string[];
+    judgeRecommendation?: string;
+    baselineScore?: number;
+    candidateScore?: number;
+    scoreDelta?: number;
+    decidedBy?: {
+      kind?: "human" | "agent" | string;
+      actorId?: string;
+      conversationSessionId?: string;
+    };
+    decidedAt?: string;
+  };
   startedAt: string;
   updatedAt: string;
   finishedAt: string;
@@ -600,6 +623,8 @@ export type SupervisedWorktreeRun = {
     candidateScore?: number;
     scoreDelta?: number;
     recommendedAction?: string;
+    approvalMode?: string;
+    evaluationState?: "VALID" | "INVALID" | "ERROR" | "INCONCLUSIVE" | string;
     judgeRecommendation?: string;
     reason?: string;
     highRisk?: boolean;
@@ -607,6 +632,7 @@ export type SupervisedWorktreeRun = {
   baselineConversationSessionId?: string;
   rerunConversationSessionId?: string;
   judgeConversationSessionId?: string;
+  approvalConversationSessionId?: string;
   judgeMergeTrigger?: {
     status?: string;
     mergeRequested?: boolean;
@@ -654,6 +680,7 @@ export type SupervisedWorktreeRun = {
     force?: boolean;
     triggeredBy?: {
       role?: string;
+      approvalMode?: string;
       conversationSessionId?: string;
       decision?: string;
       mechanism?: string;

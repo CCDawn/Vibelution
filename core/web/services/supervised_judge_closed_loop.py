@@ -280,6 +280,9 @@ def normalize_judge_evaluation(
     return {
         "status": "success",
         "phase": phase,
+        "evaluationState": (
+            "INCONCLUSIVE" if recommendation == "INCONCLUSIVE" else "VALID"
+        ),
         "recommendation": recommendation,
         "decision": recommendation,
         "score": score,
@@ -305,6 +308,9 @@ def judge_merge_allowed(judgment: dict[str, Any], *, force: bool = False) -> boo
         return False
     if str(judgment.get("phase") or "").strip().lower() != "rerun":
         return False
+    evaluation_state = str(judgment.get("evaluationState") or "").strip().upper()
+    if evaluation_state and evaluation_state != "VALID":
+        return False
     recommendation = str(
         judgment.get("recommendation") or judgment.get("decision") or ""
     ).strip().upper()
@@ -312,7 +318,7 @@ def judge_merge_allowed(judgment: dict[str, Any], *, force: bool = False) -> boo
         "PROMOTE": "APPROVE",
         "HOLD": "REVISE",
     }.get(recommendation, recommendation)
-    return recommendation in JUDGE_RECOMMENDATIONS
+    return recommendation in JUDGE_RECOMMENDATIONS - {"INCONCLUSIVE"}
 
 
 def _score_percent(value: Any, *, field: str) -> float:

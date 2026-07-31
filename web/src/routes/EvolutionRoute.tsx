@@ -133,7 +133,9 @@ import {
   readRecentSupervisedWorktreeRunId,
   rememberRecentSupervisedWorktreeRunId,
   selectRecentSupervisedWorktreeRun,
+  supervisedApprovalWorkflowStatus,
   supervisedRunSessionStorage,
+  supervisedWorktreeLedgerApprovalLabel,
 } from "./supervisedWorktreeReview";
 import {
   isLiveSupervisedRunStatus,
@@ -319,6 +321,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const datasetLimitInputRef = useRef<HTMLInputElement | null>(null);
   const [bundleNameInput, setBundleNameInput] = useState("");
   const [keepWorktree, setKeepWorktree] = useState(false);
+  const [approvalMode, setApprovalMode] = useState<"human" | "agent">("human");
   const [supervisedMentalModelMode, setSupervisedMentalModelMode] = useState<SupervisedMentalModelMode>("follow");
   const [selectedSupervisedWorkflowStepId, setSelectedSupervisedWorkflowStepId] = useState<SupervisedWorkflowStepId | null>(null);
   const [selectedSupervisedAgentRole, setSelectedSupervisedAgentRole] = useState<SupervisedMemberRole | null>(null);
@@ -491,6 +494,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       ),
       bundleName: bundleNameInput,
       keepWorktree,
+      approvalMode,
       mentalModelMode: supervisedMentalModelMode,
       currentIntakeMode,
       placeholderAgentBindings:
@@ -742,12 +746,15 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     const conversationSessionId = String(backendStep?.conversationSessionId || fallbackSessionId || "").trim();
     const chatRoute = backendStep?.chatRoute || supervisedMemberChatRoute(conversationSessionId, supervisedMemberReturnTo, supervisedMemberReturnLabel);
     const fallbackStatus = definition.id === supervisedRuntimeWorkflowStepId ? "running" : "pending";
+    const backendStatus = backendStep?.status || fallbackStatus;
     return {
       id: definition.id,
       label: backendStep?.label || supervisedWorkflowStepLabel(definition, lang),
       ownerKind: backendStep?.ownerKind || (definition.role ? "agent" : "human"),
       role: backendStep?.role ?? definition.role,
-      status: backendStep?.status || fallbackStatus,
+      status: definition.id === "approval"
+        ? supervisedApprovalWorkflowStatus(recentSupervisedWorktreeRun, backendStatus)
+        : backendStatus,
       current: backendStep?.current ?? definition.id === supervisedRuntimeWorkflowStepId,
       summary: backendStep?.summary || (
         definition.id === "approval"
@@ -1092,9 +1099,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
         {
           id: "review",
           label: lang === "zh" ? "审批状态" : "Approval",
-          value: supervisedWorktreeLedgerSummary.reviewStatus === "approved"
-            ? (lang === "zh" ? "已批准" : "Approved")
-            : (lang === "zh" ? "待审批" : "Pending"),
+          value: supervisedWorktreeLedgerApprovalLabel(supervisedWorktreeLedgerSummary, lang),
         },
         {
           id: "sessions",
@@ -2683,6 +2688,27 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                     >
                       <span className={styles.checkboxLabel}>{lang === "zh" ? "保留 worktree" : "Keep worktree"}</span>
                     </VCheckbox>
+                    <div className={styles.formField}>
+                      <div className={styles.formLabelWithHint}>
+                        <label>{lang === "zh" ? "最终审批方式" : "Final approval mode"}</label>
+                        <VContextualHint
+                          content={lang === "zh"
+                            ? "人工审批由用户作最终决定；Agent 审批会启动独立审批 Agent。两者都审阅评分、评估状态、风险与证据。"
+                            : "Human approval is decided by the user; Agent approval starts an independent Approval Agent. Both review scores, states, risk, and evidence."}
+                          label={lang === "zh" ? "最终审批方式说明" : "Final approval mode help"}
+                        />
+                      </div>
+                      <VStringSelect
+                        ariaLabel={lang === "zh" ? "最终审批方式" : "Final approval mode"}
+                        className={styles.selectInput}
+                        value={approvalMode}
+                        options={[
+                          { value: "human", label: lang === "zh" ? "人工审批" : "Human approval" },
+                          { value: "agent", label: lang === "zh" ? "Agent 审批" : "Agent approval" },
+                        ]}
+                        onValueChange={(value) => setApprovalMode(value === "agent" ? "agent" : "human")}
+                      />
+                    </div>
                     <div className={styles.formField}>
                       <div className={styles.formLabelWithHint}>
                         <label>{t("supervisedMentalMode")}</label>
