@@ -18,6 +18,7 @@ from core.web.services.team import (
     team_membership,
     team_projection,
     team_repair,
+    team_constants,
     team_store,
 )
 
@@ -132,6 +133,24 @@ def test_facade_reexports_team_store() -> None:
     assert hasattr(facade, "_TEAM_LOCK")
     assert facade.SCHEMA_VERSION == 1
     assert facade.PROJECT_ROOT is not None
+
+
+def test_facade_reexports_team_constants() -> None:
+    assert facade.SCHEMA_VERSION is team_constants.SCHEMA_VERSION
+    assert facade.CANVAS_KIND is team_constants.CANVAS_KIND
+    assert facade.DEFAULT_TEAM_STATUS is team_constants.DEFAULT_TEAM_STATUS
+    assert facade.TEAM_STATUSES is team_constants.TEAM_STATUSES
+    assert facade.AI_SEARCH_SYSTEM_ROLES is team_constants.AI_SEARCH_SYSTEM_ROLES
+    assert facade.AI_SEARCH_SOURCE_SCOPE_GROUPS is team_constants.AI_SEARCH_SOURCE_SCOPE_GROUPS
+    assert facade.CHALLENGE_CUP_RESEARCH_TEAM_ROLES is team_constants.CHALLENGE_CUP_RESEARCH_TEAM_ROLES
+    assert facade.KNOWLEDGE_EXPANSION_TEAM_ROLES is team_constants.KNOWLEDGE_EXPANSION_TEAM_ROLES
+    assert facade.EVOLUTION_SYSTEM_TEAM_SPECS is team_constants.EVOLUTION_SYSTEM_TEAM_SPECS
+    assert facade.AI_SEARCH_TEAM_ID is kind_helpers.AI_SEARCH_TEAM_ID
+    assert facade.KNOWLEDGE_EXPANSION_TEAM_ID is kind_helpers.KNOWLEDGE_EXPANSION_TEAM_ID
+    # Mutable locks/state remain on the facade.
+    assert hasattr(facade, "_TEAM_LOCK")
+    assert hasattr(facade, "_TEAM_SYSTEM_BOOTSTRAP_STATE")
+    assert isinstance(facade._TEAM_DETAIL_LOG_STATE, dict)
 
 
 def test_facade_reexports_team_repair() -> None:
