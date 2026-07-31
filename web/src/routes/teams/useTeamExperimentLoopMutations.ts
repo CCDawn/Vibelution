@@ -52,6 +52,32 @@ export type UseTeamExperimentLoopMutationsOptions = {
   setResearchLoopDecisionDraft: Dispatch<SetStateAction<ResearchLoopDecisionDraft>>;
 };
 
+export function buildResearchLoopDecisionIdempotencyKey(payload: {
+  loopId: string;
+  loopUpdatedAt: string;
+  nextTemplateId: string;
+  draft: Pick<
+    ResearchLoopDecisionDraft,
+    "decision" | "rationale" | "nextActions" | "allowedVariableChanges" | "frozenControls"
+  >;
+}): string {
+  const fingerprint = JSON.stringify([
+    payload.loopUpdatedAt,
+    payload.nextTemplateId,
+    payload.draft.decision,
+    payload.draft.rationale.trim(),
+    payload.draft.nextActions.trim(),
+    payload.draft.allowedVariableChanges.trim(),
+    payload.draft.frozenControls.trim(),
+  ]);
+  let hash = 2166136261;
+  for (let index = 0; index < fingerprint.length; index += 1) {
+    hash ^= fingerprint.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `${payload.loopId}:${payload.draft.decision}:${(hash >>> 0).toString(16).padStart(8, "0")}`.slice(0, 240);
+}
+
 export function useTeamExperimentLoopMutations(options: UseTeamExperimentLoopMutationsOptions) {
   const queryClient = useQueryClient();
 
@@ -531,7 +557,12 @@ export function useTeamExperimentLoopMutations(options: UseTeamExperimentLoopMut
             createNextDesignDraft:
               payload.draft.decision === "promote_to_iteration"
               || payload.draft.decision === "repair_and_repeat",
-            idempotencyKey: `${payload.loop.loopId}:${payload.loop.updatedAt}:${payload.draft.decision}`,
+            idempotencyKey: buildResearchLoopDecisionIdempotencyKey({
+              loopId: payload.loop.loopId,
+              loopUpdatedAt: payload.loop.updatedAt,
+              nextTemplateId: payload.nextTemplateId,
+              draft: payload.draft,
+            }),
             metadata: {
               enteredFrom: "teams_research_loop_panel",
               noAutomaticIterationExecution: true,
