@@ -2,6 +2,7 @@
  * Research loop template / evidence / decision panel.
  * Wave 8J: extracted from TeamsRoute.tsx for domain componentization.
  */
+import { useEffect, useRef } from "react";
 import { AlertTriangle, Plus, RefreshCw, Save, Send } from "lucide-react";
 
 import type { Team } from "../api/types";
@@ -26,6 +27,84 @@ import workflowStyles from "./TeamsRoute.workflow.styles";
 const styles = { ...researchStyles, ...workflowStyles } as Record<string, string>;
 
 type Lang = "zh" | "en";
+
+function metricText(value: unknown): string {
+  return typeof value === "number" && Number.isFinite(value)
+    ? String(value)
+    : typeof value === "string"
+      ? value
+      : "";
+}
+
+function nestedMetric(
+  metrics: Record<string, unknown>,
+  group: string,
+  key: string,
+): string {
+  const groupValue = metrics[group];
+  if (!groupValue || typeof groupValue !== "object" || Array.isArray(groupValue)) {
+    return "";
+  }
+  return metricText((groupValue as Record<string, unknown>)[key]);
+}
+
+export function buildBoundedSmokeEvidenceDraft(
+  activePlan: ExperimentPlanRecord | null,
+  lang: Lang,
+): ResearchLoopEvidenceDraft | null {
+  const smokeRun = activePlan?.activeSmokeRun;
+  if (!smokeRun?.smokeRunId) {
+    return null;
+  }
+  const metrics = smokeRun.metrics ?? {};
+  const improvement =
+    nestedMetric(metrics, "delta", "mse_improvement")
+    || nestedMetric(metrics, "delta", "reconstruction_mse");
+  const baselineMetricValue = nestedMetric(metrics, "baseline", "reconstruction_mse");
+  const variantMetricValue = nestedMetric(metrics, "variant", "reconstruction_mse");
+  const summary = lang === "zh"
+    ? `受控代理 Smoke ${smokeRun.smokeRunId} 已完成，结果仅用于流程与工程可执行性复核；不得据此声称睡眠机制或神经真实性。`
+    : `Bounded proxy Smoke ${smokeRun.smokeRunId} completed. Review it only as workflow and engineering evidence; it does not establish sleep mechanisms or neural realism.`;
+  return {
+    evidenceType: "metric_report",
+    status: smokeRun.status === "failed" ? "failed" : "needs_review",
+    summary,
+    metricName: activePlan?.experimentPlan.metric || "smoke_proxy_metric",
+    metricValue: improvement || variantMetricValue,
+    baselineMetricValue,
+    delta: improvement,
+    artifactRef: smokeRun.artifactHash || smokeRun.smokeRunId,
+    datasetRefs: activePlan?.experimentPlan.dataset || "",
+    environmentRefs: [
+      smokeRun.runnerMode,
+      `seed=${smokeRun.seed}`,
+      smokeRun.proxyOnly ? "proxy-only" : "",
+    ].filter(Boolean).join(", "),
+    logRefs: smokeRun.smokeRunId,
+    commandPreview: smokeRun.adapter,
+  };
+}
+
+function evidenceDraftHasUserContent(draft: ResearchLoopEvidenceDraft): boolean {
+  return Boolean(
+    draft.summary.trim()
+    || draft.metricValue.trim()
+    || draft.baselineMetricValue.trim()
+    || draft.delta.trim()
+    || draft.artifactRef.trim()
+    || draft.datasetRefs.trim()
+    || draft.environmentRefs.trim()
+    || draft.logRefs.trim()
+    || draft.commandPreview.trim(),
+  );
+}
+
+export function mergeBoundedSmokeEvidenceDraft(
+  draft: ResearchLoopEvidenceDraft,
+  prefill: ResearchLoopEvidenceDraft,
+): ResearchLoopEvidenceDraft {
+  return evidenceDraftHasUserContent(draft) ? draft : prefill;
+}
 
 export type TeamResearchLoopPanelProps = {
   activePlan: ExperimentPlanRecord | null;
@@ -96,6 +175,19 @@ export function TeamResearchLoopPanel(props: TeamResearchLoopPanelProps) {
     recordResearchLoopDecisionFromWorkspace,
   } = props;
 
+    const hydratedSmokeRunIdRef = useRef("");
+    useEffect(() => {
+      const smokeRunId = activePlan?.activeSmokeRun?.smokeRunId || "";
+      if (!smokeRunId || hydratedSmokeRunIdRef.current === smokeRunId) {
+        return;
+      }
+      hydratedSmokeRunIdRef.current = smokeRunId;
+      const prefill = buildBoundedSmokeEvidenceDraft(activePlan, lang);
+      if (!prefill) {
+        return;
+      }
+      setResearchLoopEvidenceDraft((draft) => mergeBoundedSmokeEvidenceDraft(draft, prefill));
+    }, [activePlan, lang, setResearchLoopEvidenceDraft]);
 
     const loopStatusPayload =
       selectedTeamRecordResearchLoopDecisionResult?.status
