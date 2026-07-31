@@ -304,35 +304,145 @@ describe("buildSupervisedApprovalDecision", () => {
     expect(model.secondaryActions).toEqual([]);
   });
 
-  it("offers rollback after merge without claiming the runtime has been refreshed", () => {
-    const model = buildSupervisedApprovalDecision(
-      worktreeRun({
-        outcome: "merged",
-        reviewGate: { required: true, status: "approved" },
-        merge: {
-          status: "merged",
-          mergedAt: "2026-07-29T04:12:00Z",
-          changedFiles: ["core/agent/prompt_policy.py", "tests/test_prompt_policy.py"],
-          rollbackManifestPath: "workspace/rollback.json",
-        },
-        rollback: {
-          status: "available",
-          manifestPath: "workspace/rollback.json",
-          reason: "已生成合并回滚清单。",
-        },
-        actionStates: {
-          approveReview: action(false),
-          merge: action(false),
-          rollback: action(true),
-        },
-      }),
-      "zh",
-    );
+  it("distinguishes a durable Git commit from runtime activation", () => {
+    const run = worktreeRun({
+      outcome: "integration_committed",
+      reviewGate: { required: true, status: "approved" },
+      merge: {
+        status: "committed",
+        committedAt: "2026-07-29T04:12:00Z",
+        baseCommit: "base-123",
+        commitSha: "commit-456",
+        candidateVariantId: "variant-789",
+        changedFiles: ["core/agent/prompt_policy.py", "tests/test_prompt_policy.py"],
+        rollbackManifestPath: ".git/vibelution/supervised-integration/run.json",
+      },
+      rollback: {
+        status: "available",
+        manifestPath: ".git/vibelution/supervised-integration/run.json",
+        integrationCommit: "commit-456",
+        reason: "已生成候选提交；回退将创建可审计的 Git revert 提交。",
+      },
+      actionStates: {
+        approveReview: action(false),
+        merge: action(false),
+        rollback: action(true),
+      },
+    });
+    Object.assign(run as unknown as Record<string, unknown>, {
+      runtimeActivation: {
+        status: "activation_failed",
+        attempt: 2,
+        targetCommit: "commit-456",
+        intentStatus: "failed",
+        reason: "restart failed",
+      },
+    });
 
-    expect(model.phase).toBe("merged");
+    const model = buildSupervisedApprovalDecision(run, "zh");
+
+    expect(model.phase).toBe("activation_failed");
     expect(model.primaryAction).toBe("rollback");
-    expect(model.runtimeEffect).toBe("refresh_required");
-    expect(model.headline).toContain("回滚保护可用");
+    expect(model.runtimeEffect).toBe("activation_failed");
+    expect(model.headline).toContain("提交已保留");
+    expect(model.runtimeActivation).toMatchObject({
+      attempt: 2,
+      targetCommit: "commit-456",
+      reason: "restart failed",
+    });
+  });
+
+  it("marks the candidate applied only with exact runtime and frontend proof", () => {
+    const run = worktreeRun({
+      outcome: "applied",
+      reviewGate: { required: true, status: "approved" },
+      merge: {
+        status: "applied",
+        committedAt: "2026-07-29T04:12:00Z",
+        appliedAt: "2026-07-29T04:13:00Z",
+        baseCommit: "base-123",
+        commitSha: "commit-456",
+        candidateVariantId: "variant-789",
+        changedFiles: ["core/agent/prompt_policy.py"],
+        rollbackManifestPath: ".git/vibelution/supervised-integration/run.json",
+      },
+      rollback: {
+        status: "available",
+        integrationCommit: "commit-456",
+      },
+      actionStates: {
+        approveReview: action(false),
+        merge: action(false),
+        rollback: action(true),
+      },
+    });
+    Object.assign(run as unknown as Record<string, unknown>, {
+      runtimeActivation: {
+        status: "applied",
+        attempt: 1,
+        targetCommit: "commit-456",
+        intentStatus: "succeeded",
+        proof: {
+          verified: true,
+          targetCommit: "commit-456",
+          runtimeSourceCommit: "commit-456",
+          frontendBuiltFromCommit: "commit-456",
+          runtimeSourceTrackedClean: true,
+          phase: "steady",
+          backendHealthy: true,
+          activeWorkCount: 0,
+        },
+      },
+    });
+
+    const model = buildSupervisedApprovalDecision(run, "zh");
+
+    expect(model.phase).toBe("applied");
+    expect(model.runtimeEffect).toBe("applied");
+    expect(model.headline).toContain("运行时已生效");
+    expect(model.runtimeActivation).toMatchObject({
+      verified: true,
+      runtimeSourceCommit: "commit-456",
+      frontendBuiltFromCommit: "commit-456",
+    });
+  });
+
+  it("shows a Git revert commit as waiting for runtime activation", () => {
+    const run = worktreeRun({
+      outcome: "rollback_activation_pending",
+      reviewGate: { required: true, status: "approved" },
+      merge: {
+        status: "committed",
+        commitSha: "commit-456",
+        changedFiles: ["core/agent/prompt_policy.py"],
+      },
+      rollback: {
+        status: "revert_committed",
+        integrationCommit: "commit-456",
+        revertedCommit: "commit-456",
+        revertCommit: "revert-789",
+        reason: "已创建可审计的 Git revert 提交，等待 Launcher 激活。",
+      },
+      actionStates: {
+        approveReview: action(false),
+        merge: action(false),
+        rollback: action(false),
+      },
+    });
+    Object.assign(run as unknown as Record<string, unknown>, {
+      runtimeActivation: {
+        status: "activating",
+        attempt: 1,
+        targetCommit: "revert-789",
+        intentStatus: "executing",
+      },
+    });
+
+    const model = buildSupervisedApprovalDecision(run, "zh");
+
+    expect(model.phase).toBe("rollback_activating");
+    expect(model.runtimeEffect).toBe("rollback_activating");
+    expect(model.headline).toContain("回退提交");
   });
 
   it("projects an existing approved record as backend merge-ready", () => {
@@ -441,6 +551,6 @@ describe("buildSupervisedApprovalDecision", () => {
     expect(model.phase).toBe("rolled_back");
     expect(model.primaryAction).toBeNull();
     expect(model.headline).toContain("已恢复合入前文件状态");
-    expect(model.runtimeEffect).toBe("refresh_required");
+    expect(model.runtimeEffect).toBe("rolled_back");
   });
 });
