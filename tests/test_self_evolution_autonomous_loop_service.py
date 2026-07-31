@@ -56,11 +56,16 @@ def _build_service(tmp_path, *, hook_overrides=None):
     def integrate(context):
         calls.append(("integrate", deepcopy(context)))
         return {
-            "status": "merged",
-            "targetBranch": "main",
-            "previousHead": "c" * 40,
-            "mergedHead": "d" * 40,
-            "candidateHead": context["candidate"]["headCommit"],
+            "status": "committed",
+            "mechanism": "controlled_candidate_commit",
+            "baseCommit": context["candidate"]["baseCommit"],
+            "commitSha": "d" * 40,
+            "candidateVariantId": context["candidate"]["variantId"],
+            "changedFiles": [
+                item["path"] for item in context["candidate"]["changedFiles"]
+            ],
+            "rollbackManifestPath": "C:/workspace/manifests/self-loop-001.json",
+            "committedAt": "2026-08-01T00:00:00+00:00",
         }
 
     def cleanup(context):
@@ -123,6 +128,23 @@ def test_run_stops_at_user_approval_without_evaluation_or_git_integration(tmp_pa
     assert service.load("self-loop-001") == result
 
 
+def test_queue_returns_before_agent_work_and_worker_resumes_persisted_run(tmp_path):
+    service, calls = _build_service(tmp_path)
+
+    queued = service.queue({"goal": "建立异步自动闭环"})
+
+    assert calls == []
+    assert queued["status"] == "queued"
+    assert queued["phase"] == "queued"
+    assert service.load("self-loop-001") == queued
+
+    awaiting_review = service.run_until_review("self-loop-001")
+
+    assert [name for name, _ in calls] == ["observe", "plan", "evolve"]
+    assert awaiting_review["status"] == "awaiting_user_approval"
+    assert awaiting_review["phase"] == "reporting"
+
+
 def test_only_explicit_user_approval_can_merge_then_cleanup(tmp_path):
     service, calls = _build_service(tmp_path)
     service.start({"goal": "建立自动闭环"})
@@ -156,11 +178,12 @@ def test_only_explicit_user_approval_can_merge_then_cleanup(tmp_path):
     assert integration_context["candidate"]["headCommit"] == "a" * 40
     assert integration_context["approval"]["actorType"] == "user"
     cleanup_context = calls[-1][1]
-    assert cleanup_context["integration"]["mergedHead"] == "d" * 40
+    assert cleanup_context["integration"]["commitSha"] == "d" * 40
     assert approved["status"] == "completed"
     assert approved["phase"] == "completed"
     assert approved["reviewGate"]["status"] == "approved"
-    assert approved["integration"]["targetBranch"] == "main"
+    assert approved["integration"]["status"] == "committed"
+    assert approved["integration"]["commitSha"] == "d" * 40
     assert approved["cleanup"]["worktreeRemoved"] is True
     assert approved["cleanup"]["localBranchDeleted"] is True
 
@@ -217,7 +240,7 @@ def test_cleanup_failure_preserves_merged_fact_and_can_be_retried(tmp_path):
 
     assert partial["status"] == "partial"
     assert partial["phase"] == "cleanup_failed"
-    assert partial["integration"]["status"] == "merged"
+    assert partial["integration"]["status"] == "committed"
     assert partial["error"]["message"] == "branch is still checked out"
 
     completed = service.retry_cleanup("self-loop-001")
