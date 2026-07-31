@@ -2,7 +2,7 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { ConversationProcessDisclosure } from "./ConversationProcessDisclosure";
+import { ConversationProcessDisclosure, processLabel } from "./ConversationProcessDisclosure";
 import styles from "./ConversationProcessDisclosure.styles";
 import type { CodexTranscriptCell } from "./codexTranscriptCells";
 
@@ -98,5 +98,18 @@ describe("ConversationProcessDisclosure", () => {
     );
     expect(html).toContain("工具失败");
     expect(html).not.toContain("处理已停止");
+  });
+
+  it("keeps failure details in the expanded transcript instead of duplicating them in the summary", () => {
+    const failed = {
+      ...processCell("failed"),
+      summary: "终端会话已结束，不能继续写入。",
+    };
+
+    const label = processLabel([failed], "zh");
+
+    expect(label).toContain("工具失败");
+    expect(label).toContain("cli_tool");
+    expect(label).not.toContain(failed.summary);
   });
 });

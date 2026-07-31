@@ -352,11 +352,11 @@ export function DirectSessionIndexItem({
     </span>
   );
 
-  const activityBadgeClass = sessionActivityBadgeClass(activityTone);
+  const activityBadgeClassName = sessionActivityBadgeClass(activityTone);
   const statusCluster = (
     <span className={styles.sessionStatusCluster}>
       {activityTone === "running" || activityTone === "approval" ? (
-        <span aria-label={statusTitle} title={statusTitle} className={activityBadgeClass}>
+        <span aria-label={statusTitle} title={statusTitle} className={activityBadgeClassName}>
           <LoaderCircle size={12} aria-hidden="true" className={styles.sessionActivitySpinner} />
         </span>
       ) : null}
@@ -364,7 +364,7 @@ export function DirectSessionIndexItem({
         <span
           aria-label={statusTitle}
           title={statusTitle}
-          className={activityBadgeClass}
+          className={activityBadgeClassName}
         />
       ) : null}
     </span>

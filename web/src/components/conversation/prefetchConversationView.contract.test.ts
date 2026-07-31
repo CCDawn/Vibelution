@@ -21,6 +21,8 @@ describe("conversation view load contract (T1/T2)", () => {
     expect(workspaceSource).toContain("if (!activeSessionId && !sessionsPending)");
     expect(workspaceSource).toContain("ChatConversationComposerBridge");
     expect(workspaceSource).toContain('import("./ChatFilePreviewPanel")');
-    expect(workspaceSource).toContain('import("./ChatToolApprovalDialog")');
+    expect(workspaceSource).toContain('from "./ChatToolApprovalDialog"');
+    expect(workspaceSource).toContain("ChatToolApprovalDialog");
+    expect(workspaceSource).not.toContain('import("./ChatToolApprovalDialog")');
   });
 });

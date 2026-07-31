@@ -19,7 +19,7 @@ const styles = {
   sourceCollectionStageNextActionLabel:
     "sourceCollectionStageNextActionLabel m-0 [font-size:var(--vui-font-xs)] font-bold tracking-wide text-[var(--accent-cool)]",
   sourceCollectionStageNextActionButton:
-    `sourceCollectionStageNextActionButton min-w-0 !flex !w-full !max-w-full items-center justify-center gap-2 !min-h-[44px] !px-3 !rounded-[var(--radius-control)] !border-0 !text-[var(--vui-font-sm)] !font-[800] !leading-tight ${vuiStateSelectedRowClass}`,
+    `sourceCollectionStageNextActionButton min-w-0 !flex !w-full !max-w-full items-center justify-center gap-2 !min-h-[44px] !px-3 !rounded-[var(--radius-control)] !border-0 ![font-size:var(--vui-font-sm)] !font-[800] !leading-tight ${vuiStateSelectedRowClass}`,
   sourceCollectionStageNextActionHint:
     "sourceCollectionStageNextActionHint m-0 [font-size:var(--vui-font-xs)] leading-snug text-[var(--fg-secondary)]",
   sourceCollectionStageMoreActions:
