@@ -1011,6 +1011,7 @@ describe("TeamsRoute layout contract", () => {
     sourceCollectionExtractionSourceVerificationCount,
     sourceCollectionExtractionMissingEvidenceAnchorCount,
     sourceCollectionStageProjectionCount(sourceCollectionCandidateProjection, "pending", 0),
+    sourceCollectionRunNeedsRevisionCount,
   );`,
     );
     expect(routeSource).toContain("deriveSourceCollectionExcludedRecoveryState");

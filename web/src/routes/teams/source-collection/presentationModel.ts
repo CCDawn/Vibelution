@@ -609,8 +609,13 @@ export function sourceCollectionCandidateQualityState(candidate: TeamWorkflowCan
     summary?.decision === "approved"
     || normalized.includes("source_screened")
     || normalized.includes(" approved");
+  const needsRevision =
+    summary?.decision === "needs_revision"
+    || normalized.includes("needs_revision")
+    || normalized.includes("revision");
   return {
     assessed,
     approved,
+    needsRevision,
   };
 }

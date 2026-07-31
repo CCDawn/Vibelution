@@ -3425,6 +3425,9 @@ export function TeamsRoute({
   const sourceCollectionRunApprovedCount = sourceCollectionReviewableRunCandidates.filter(
     (candidate) => sourceCollectionCandidateQualityState(candidate).approved,
   ).length;
+  const sourceCollectionRunNeedsRevisionCount = sourceCollectionReviewableRunCandidates.filter(
+    (candidate) => sourceCollectionCandidateQualityState(candidate).needsRevision,
+  ).length;
   const sourceCollectionEvidenceLedgerSummaries = useMemo(
     () => sourceCollectionRunCandidates
       .map((candidate) => sourceCollectionEvidenceLedgerSummary(candidate))
@@ -3701,6 +3704,7 @@ export function TeamsRoute({
     sourceCollectionExtractionSourceVerificationCount,
     sourceCollectionExtractionMissingEvidenceAnchorCount,
     sourceCollectionStageProjectionCount(sourceCollectionCandidateProjection, "pending", 0),
+    sourceCollectionRunNeedsRevisionCount,
   );
   const sourceCollectionExtractionNeedsAgentMaterial = sourceCollectionExtractionAgentMaterialCount > 0;
   const sourceCollectionExtractionRecoveryMissingCount = Math.max(
