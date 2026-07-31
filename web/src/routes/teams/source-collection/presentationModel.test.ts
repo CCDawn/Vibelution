@@ -97,7 +97,8 @@ describe("source-collection presentationModel", () => {
     expect(presentation.label).toBe("待补资料");
     expect(presentation.title).toContain("补充可核验的全文或公开摘要");
     expect(presentation.title).toContain("证据锚点");
-    expect(presentation.title).toContain("重新运行资料质量审查");
+    expect(presentation.title).toContain("重新质量审查");
+    expect(presentation.title).toContain("仅点审查不会自动变成");
     expect(sourceCollectionCandidateQualityState(source)).toEqual({
       assessed: true,
       approved: false,

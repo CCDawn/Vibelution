@@ -27,8 +27,6 @@ import {
   TeamSourceCollectionControlsWorkspacePanel,
   TeamSourceCollectionConversationPanel,
   TeamSourceCollectionConversationWorkspacePanel,
-  TeamSourceCollectionExtractionRecoveryPanel,
-  TeamSourceCollectionExtractionRecoveryWorkspacePanel,
   TeamSourceCollectionFilterBar,
   TeamSourceCollectionFindingDetailsPanel,
   TeamSourceCollectionGraphPanel,
@@ -2244,6 +2242,25 @@ export function TeamsRoute({
         sourceCollectionActionDisabledTitle={sourceCollectionActionDisabledTitle}
         sourceCollectionScreeningActionReadiness={sourceCollectionScreeningActionReadiness}
         sourceCollectionScreeningButtonText={sourceCollectionScreeningButtonText}
+        sourceCollectionScreeningButtonTitle={sourceCollectionScreeningButtonTitle}
+        sourceCollectionScreeningStatusText={sourceCollectionScreeningStatusText}
+        sourceCollectionQualityBatchFeedback={sourceCollectionQualityBatchFeedback}
+        sourceCollectionQualityReviewIsSecondary={sourceCollectionExtractionNeedsAgentMaterial}
+        sourceCollectionRecommendedNextHint={
+          sourceCollectionExtractionNeedsAgentMaterial
+            ? (lang === "zh"
+              ? "推荐下一步：右侧主按钮「补材料」→ 完成后再质量审查。不要只点审查。"
+              : "Recommended: right-stage primary “repair materials”, then quality review. Do not review alone.")
+            : sourceCollectionRunPendingScreeningCount > 0
+              ? (lang === "zh"
+                ? `推荐下一步：点「${sourceCollectionScreeningButtonText}」推进审查。`
+                : `Recommended: run “${sourceCollectionScreeningButtonText}”.`)
+              : sourceCollectionProjectedApprovedCount > 0 && sourceCollectionRunPendingScreeningCount <= 0
+                ? (lang === "zh"
+                  ? "推荐下一步：右侧主按钮「进入关系整理」。"
+                  : "Recommended: right-stage primary “Go to relations”.")
+                : null
+        }
         openSourceCollectionScreeningPanel={openSourceCollectionScreeningPanel}
         renderSourceCollectionPagination={renderSourceCollectionPagination}
         teamWorkflowSourceQualityStatus={teamWorkflowSourceQualityStatus}
@@ -2259,34 +2276,6 @@ export function TeamsRoute({
         planPaperNoteChunksMutation={planPaperNoteChunksMutation}
         sourceCandidateHasCompletedExtraction={sourceCandidateHasCompletedExtraction}
         candidatePaperNoteChunkPlanSummary={candidatePaperNoteChunkPlanSummary}
-      />
-    );
-  }
-
-  function renderSourceCollectionExtractionRecoveryPanel(
-    candidateProjection: SourceCollectionStageCardProjection | null | undefined,
-  ) {
-    return (
-      <TeamSourceCollectionExtractionRecoveryWorkspacePanel
-        candidateProjection={candidateProjection}
-        lang={lang}
-        sourceCollectionRawRecordCount={sourceCollectionRawRecordCount}
-        sourceCollectionRunApprovedCount={sourceCollectionRunApprovedCount}
-        sourceCollectionDisplayedCandidateCount={sourceCollectionDisplayedCandidateCount}
-        sourceCollectionPrimaryDataLoading={sourceCollectionPrimaryDataLoading}
-        sourceCollectionLoadingText={sourceCollectionLoadingText}
-        sourceCollectionCandidateStepState={sourceCollectionCandidateStepState}
-        sourceCollectionExtractionExcludedRecoveryState={sourceCollectionExtractionExcludedRecoveryState}
-        sourceCollectionActionDisabledTitle={sourceCollectionActionDisabledTitle}
-        sourceCollectionStageActionReadinessFor={sourceCollectionStageActionReadinessFor}
-        openSourceCollectionStageAgentChat={openSourceCollectionStageAgentChat}
-        startSourceCollectionStageSessionTask={startSourceCollectionStageSessionTask}
-        runSourceCollectionCandidateExtractionAction={runSourceCollectionCandidateExtractionAction}
-        sourceCollectionCandidateExtractionActionReadiness={sourceCollectionCandidateExtractionActionReadiness}
-        runSourceCollectionScreeningAction={runSourceCollectionScreeningAction}
-        sourceCollectionScreeningActionReadiness={sourceCollectionScreeningActionReadiness}
-        sourceCollectionScreeningButtonText={sourceCollectionScreeningButtonText}
-        sourceCollectionRunPendingScreeningCountText={sourceCollectionRunPendingScreeningCountText}
       />
     );
   }
@@ -2465,13 +2454,37 @@ export function TeamsRoute({
         sourceCollectionStagePrimaryAgentBinding={sourceCollectionStagePrimaryAgentBinding}
         stageChatLabels={SOURCE_COLLECTION_STAGE_CHAT_LABELS}
         openSourceCollectionStageAgentChat={openSourceCollectionStageAgentChat}
+        startSourceCollectionStageSessionTask={startSourceCollectionStageSessionTask}
         sourceCollectionFindingStageCompact={sourceCollectionFindingStageCompact}
         selectedTeamStartSourceCollectionStageTaskError={selectedTeamStartSourceCollectionStageTaskError}
         renderSourceCollectionConversation={renderSourceCollectionConversation}
         renderSourceCollectionScreeningPanel={renderSourceCollectionScreeningPanel}
-        renderSourceCollectionRecoveryPanel={() => renderSourceCollectionExtractionRecoveryPanel(sourceCollectionCandidateProjection)}
         renderSourceCollectionGraphPanel={renderSourceCollectionGraphPanel}
         renderSourceCollectionMemoryPanel={renderSourceCollectionMemoryPanel}
+        extractionRecovery={{
+          candidateProjection: sourceCollectionCandidateProjection,
+          sourceCollectionRawRecordCount,
+          sourceCollectionRunApprovedCount,
+          sourceCollectionDisplayedCandidateCount,
+          sourceCollectionPrimaryDataLoading,
+          sourceCollectionLoadingText,
+          sourceCollectionCandidateStepState,
+          sourceCollectionExtractionExcludedRecoveryState,
+          runSourceCollectionCandidateExtractionAction,
+          sourceCollectionCandidateExtractionActionReadiness,
+          runSourceCollectionScreeningAction,
+          sourceCollectionScreeningActionReadiness,
+          sourceCollectionScreeningButtonText,
+          sourceCollectionScreeningButtonTitle,
+          sourceCollectionRunPendingScreeningCountText,
+          sourceCollectionQualityBatchFeedback,
+          needsAgentMaterial: sourceCollectionExtractionNeedsAgentMaterial,
+          pendingScreeningCount: sourceCollectionRunPendingScreeningCount,
+          pendingImportCount: sourceCollectionPendingCandidateImportCount,
+          canProceedAfterExclusions: sourceCollectionExtractionCanProceedAfterExclusions,
+          qualityReviewPending: selectedTeamSourceQualityPending,
+          advanceToRelations: () => selectSourceCollectionStage("relations"),
+        }}
       />
     );
   }
@@ -3839,6 +3852,32 @@ export function TeamsRoute({
       : null;
   const selectedTeamSourceQualityPending = selectedTeamAssessSourceQualityPending || selectedTeamAssessSourceQualityBatchPending;
   const selectedTeamSourceQualityError = selectedTeamAssessSourceQualityError || selectedTeamAssessSourceQualityBatchError;
+  const selectedTeamSourceQualityBatchResult =
+    assessSourceQualityBatchMutation.isSuccess
+    && assessSourceQualityBatchMutation.variables?.teamId === selectedTeam?.teamId
+    && assessSourceQualityBatchMutation.data
+      ? assessSourceQualityBatchMutation.data
+      : null;
+  const sourceCollectionQualityBatchFeedback = selectedTeamSourceQualityBatchResult
+    ? (() => {
+      const summary = selectedTeamSourceQualityBatchResult.summary;
+      const approved = Number(summary?.approvedCandidateCount || 0);
+      const needsRevision = Number(summary?.needsRevisionCandidateCount || 0);
+      const rejected = Number(summary?.rejectedCandidateCount || 0);
+      const assessed = Number(summary?.assessedCandidateCount || 0);
+      const skipped = Number(summary?.skippedCandidateCount || 0);
+      if (lang === "zh") {
+        const stillBlocked = needsRevision > 0
+          ? " 仍为「待补」的条目需要先补充全文/DOI/证据锚点，再审查；只点审查不会自动通过。"
+          : "";
+        return `质量审查完成：通过 ${approved} · 待补 ${needsRevision} · 排除 ${rejected}（本批评估 ${assessed}${skipped ? `，跳过 ${skipped}` : ""}）。${stillBlocked}`;
+      }
+      const stillBlocked = needsRevision > 0
+        ? " Needs-revision items stay blocked until materials are fixed; review alone does not auto-approve."
+        : "";
+      return `Quality review finished: approved ${approved} · needs revision ${needsRevision} · rejected ${rejected} (assessed ${assessed}${skipped ? `, skipped ${skipped}` : ""}).${stillBlocked}`;
+    })()
+    : null;
   const sourceCollectionAcceptedBackgroundFailed = Boolean(
     selectedSourceCollectionActiveWorkRun
     && ["failed", "blocked"].includes(String(selectedSourceCollectionActiveWorkRun.status || "").toLowerCase()),
@@ -4072,19 +4111,32 @@ export function TeamsRoute({
         ? (lang === "zh" ? "审查并生成关系图" : "Review and build map")
         : (lang === "zh" ? "Agent 生成关系图" : "Agent build map");
   const sourceCollectionScreeningDisabled = sourceCollectionScreeningActionReadiness.disabled;
+  const sourceCollectionScreeningForceRescreen = sourceCollectionRunPendingScreeningCount <= 0 && sourceCollectionDisplayedCandidateCount > 0;
+  // Quality review only (re-score). Do not imply "re-extract" — that confuses 待补 users.
   const sourceCollectionScreeningButtonText = selectedTeamSourceQualityPending
-    ? (lang === "zh" ? "Agent 复核中" : "Agent reviewing")
+    ? (lang === "zh" ? "质量审查中" : "Reviewing quality")
     : sourceCollectionRunPendingScreeningCount > 0
-      ? (lang === "zh" ? "Agent 提炼复核" : "Agent review")
-      : sourceCollectionDisplayedCandidateCount > 0
-        ? (lang === "zh" ? "Agent 重新提炼复核" : "Agent re-review")
-        : (lang === "zh" ? "资料提炼复核" : "Review");
+      ? (lang === "zh" ? "Agent 质量审查" : "Agent quality review")
+      : sourceCollectionScreeningForceRescreen
+        ? (lang === "zh" ? "重新质量审查" : "Re-run quality review")
+        : (lang === "zh" ? "Agent 质量审查" : "Agent quality review");
+  const sourceCollectionScreeningButtonTitle = selectedTeamSourceQualityPending
+    ? (lang === "zh" ? "资料提炼 Agent 正在按现有材料重新打分" : "Source Extractor is re-scoring with current materials")
+    : sourceCollectionScreeningForceRescreen
+      ? (lang === "zh"
+        ? "仅重新质量打分，不会自动补全文/DOI/证据锚点。列表「待补资料」需先补充材料再审查，否则结果仍可能是待补。"
+        : "Re-scores only; does not auto-fill full text/DOI/anchors. Repair needs-revision sources first or they stay blocked.")
+      : (lang === "zh"
+        ? "对尚未审查的候选做来源质量打分（通过 / 待补 / 排除）。"
+        : "Score pending candidates (approved / needs revision / rejected).");
   const sourceCollectionScreeningStatusText = selectedTeamSourceQualityPending
     ? (lang === "zh" ? "进行中" : "running")
     : sourceCollectionPrimaryDataLoading
       ? sourceCollectionLoadingText
     : sourceCollectionRunPendingScreeningCount > 0
-      ? `${sourceCollectionRunPendingScreeningCountText} ${lang === "zh" ? "待 Agent 复核" : "pending agent review"}`
+      ? `${sourceCollectionRunPendingScreeningCountText} ${lang === "zh" ? "待质量审查" : "pending quality review"}`
+      : sourceCollectionExtractionNeedsAgentMaterial
+        ? (lang === "zh" ? "有待补资料：先补材料再审查" : "needs material first")
       : sourceCollectionDisplayedCandidateCount > 0
         ? (lang === "zh" ? "已审查" : "done")
         : (lang === "zh" ? "暂无候选" : "no candidates");
@@ -4171,8 +4223,8 @@ export function TeamsRoute({
       maxCandidates: Math.max(1, Math.min(200, maxCandidates)),
       force: forceRescreen,
       notes: forceRescreen
-        ? "Source Extractor Agent re-screened already assessed source_manifest candidates on user request."
-        : "Source Extractor Agent screened pending source_manifest candidates.",
+        ? "Source Extractor Agent re-ran quality scoring on already assessed source_manifest candidates (no content rewrite)."
+        : "Source Extractor Agent ran quality scoring on pending source_manifest candidates.",
     });
   };
   const openSourceCollectionCandidatePanel = () => {
@@ -4660,8 +4712,8 @@ export function TeamsRoute({
         ? sourceCollectionExtractionProceedableSummary
         : sourceCollectionExtractionNeedsAgentMaterial
         ? (lang === "zh"
-          ? `${sourceCollectionExtractionAgentMaterialCount} 条来源需要 Agent 补充材料后再复核`
-          : `${sourceCollectionExtractionAgentMaterialCount} sources need Agent material before review can run again`)
+          ? `${sourceCollectionExtractionAgentMaterialCount} 条待补：现在只点右侧主按钮补材料，完成后流程会自动切到质量审查。`
+          : `${sourceCollectionExtractionAgentMaterialCount} need material: use the right-stage primary button only; review becomes the next recommended step after repair.`)
         : sourceCollectionStageUserSummary(sourceCollectionExtractionProjection, lang) || (sourceCollectionPrimaryDataLoading
         ? sourceCollectionLoadingSummary
         : sourceCollectionDisplayedCandidateCount <= 0
@@ -4955,7 +5007,7 @@ export function TeamsRoute({
         ...(sourceQualitySummary
           ? [{ key: "decision", label: `${lang === "zh" ? "质量判断" : "source quality"} ${workflowIngestionStatusLabel(sourceQualitySummary.decision, lang)} · ${sourceQualitySummary.overallScore}/100` }]
           : candidate.candidateType === "source_manifest"
-            ? [{ key: "decision", label: lang === "zh" ? "待提炼复核" : "pending extraction review" }]
+            ? [{ key: "decision", label: lang === "zh" ? "待质量审查" : "pending quality review" }]
             : []),
         ...(chunkPlanSummary
           ? [{ key: "chunks", label: `paper_note chunks ${chunkPlanSummary.completedChunkCount}/${chunkPlanSummary.chunkCount}` }]

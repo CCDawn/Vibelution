@@ -57,14 +57,14 @@ export function TeamSourceCollectionConversationPanel({
           stats={stats}
         />
         {pendingCandidateImportCount > 0 ? (
-          <div className={styles.sourceCollectionResultWarning}>
+          <div className={styles.sourceCollectionResultWarning} role="status">
             {lang === "zh"
               ? `还有 ${pendingCandidateImportCount} 条原始记录尚未进入候选库，所以“已搜到”和“候选资料”不会相等。`
               : `${pendingCandidateImportCount} raw records are not imported into candidates yet, so raw and candidate counts will differ.`}
           </div>
         ) : null}
         {missingSourceCount > 0 ? (
-          <div className={styles.sourceCollectionResultWarning}>
+          <div className={styles.sourceCollectionResultWarning} role="status">
             {lang === "zh"
               ? `${missingSourceCount} 条原始记录缺少 DOI、链接或本地文件路径，暂时不能视为可溯源结果。`
               : `${missingSourceCount} raw records are missing DOI, link, or local file path.`}

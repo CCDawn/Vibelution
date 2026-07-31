@@ -70,7 +70,7 @@ function renderRecoveryPanel(
       sourceCollectionCandidateExtractionActionReadiness={{ disabled: false }}
       runSourceCollectionScreeningAction={vi.fn()}
       sourceCollectionScreeningActionReadiness={{ disabled: false }}
-      sourceCollectionScreeningButtonText="Agent 重新提炼复核"
+      sourceCollectionScreeningButtonText="重新质量审查"
       sourceCollectionRunPendingScreeningCountText={pendingScreeningCountText}
     />,
   );
@@ -109,19 +109,55 @@ describe("TeamSourceCollectionExtractionRecoveryWorkspacePanel", () => {
     }), "10");
 
     expect(markup).toContain("来源核验");
-    expect(markup).toContain("提炼完成，待补充材料");
-    expect(markup).toContain("待补材料来源");
+    expect(markup).toContain("来源核验");
+    expect(markup).toContain("提炼完成，待核验来源");
+    expect(markup).toContain("待核验来源");
     expect(markup).toContain("2/14");
-    expect(markup).toContain("已提炼");
+    expect(markup).toContain("提炼覆盖");
     expect(markup).toContain("要求 Agent 补充材料");
-    expect(markup).toContain("补充可核验材料");
-    expect(markup).toContain("待 Agent 复核");
+    expect(markup).toContain("需核验版本/可靠性");
+    expect(markup).toContain("不等于缺证据锚点");
+    expect(markup).toContain("现在只点主按钮推进");
+    expect(markup).toContain("重新质量审查");
+    expect(markup).toContain("待质量审查");
     expect(markup).toContain("<strong>10</strong>");
-    expect(markup).toContain("当前没有证据锚点缺口");
     expect(markup).toContain("lucide-circle-check");
     expect(markup).not.toContain("lucide-triangle-alert");
     expect(markup).not.toContain("待补提炼");
     expect(markup).not.toContain("待补证据");
     expect(markup).not.toContain("证据补全");
+  });
+
+  it("stageCard presentation omits action buttons so the stage header owns CTAs", () => {
+    const markup = renderToStaticMarkup(
+      <TeamSourceCollectionExtractionRecoveryWorkspacePanel
+        candidateProjection={projectionWithClosure({ blockedCount: 2, missingEvidenceAnchorCount: 0 })}
+        lang="zh"
+        sourceCollectionRawRecordCount={14}
+        sourceCollectionRunApprovedCount={0}
+        sourceCollectionDisplayedCandidateCount={14}
+        sourceCollectionPrimaryDataLoading={false}
+        sourceCollectionLoadingText="加载中"
+        sourceCollectionCandidateStepState="pending"
+        sourceCollectionExtractionExcludedRecoveryState={{ blockedByExcludedSources: false, tone: "danger" }}
+        sourceCollectionActionDisabledTitle={() => undefined}
+        sourceCollectionStageActionReadinessFor={() => ({ disabled: false })}
+        openSourceCollectionStageAgentChat={vi.fn()}
+        startSourceCollectionStageSessionTask={vi.fn()}
+        runSourceCollectionCandidateExtractionAction={vi.fn()}
+        sourceCollectionCandidateExtractionActionReadiness={{ disabled: false }}
+        runSourceCollectionScreeningAction={vi.fn()}
+        sourceCollectionScreeningActionReadiness={{ disabled: false }}
+        sourceCollectionScreeningButtonText="重新质量审查"
+        sourceCollectionRunPendingScreeningCountText="0"
+        presentation="stageCard"
+        includeChatAction={false}
+      />,
+    );
+    expect(markup).toContain("来源核验");
+    expect(markup).toContain("2/14");
+    expect(markup).not.toContain("要求 Agent 补充材料");
+    expect(markup).not.toContain("进入 Agent 私聊");
+    expect(markup).not.toContain("补导入候选");
   });
 });
