@@ -1,6 +1,10 @@
 import { useMutation, type QueryClient, type UseMutationResult } from "@tanstack/react-query";
 import type { Dispatch, SetStateAction } from "react";
 
+import {
+  resolveSessionToolApprovalDecision,
+  type SessionToolApprovalDecision,
+} from "../../api/chat";
 import { fetchJson } from "../../api/client";
 import { queryKeys } from "../../api/queryKeys";
 import type {
@@ -54,7 +58,7 @@ export type UseChatSessionDetailMutationsResult = {
   resolveSessionToolApprovalMutation: UseMutationResult<
     SessionToolApprovalRequest,
     Error,
-    { request: SessionToolApprovalRequest; decision: "accept" | "acceptForSession" | "decline" },
+    { request: SessionToolApprovalRequest; decision: SessionToolApprovalDecision },
     unknown
   >;
   petActionMutation: UseMutationResult<
@@ -166,19 +170,10 @@ export function useChatSessionDetailMutations({
     mutationFn: (
       { request, decision }: {
         request: SessionToolApprovalRequest;
-        decision: "accept" | "acceptForSession" | "decline";
+        decision: SessionToolApprovalDecision;
       },
     ) =>
-      fetchJson<SessionToolApprovalRequest>(
-        `/api/sessions/${encodeURIComponent(request.sessionId)}/tool-approvals/${encodeURIComponent(request.requestId)}/decision`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ decision }),
-        },
-      ),
+      resolveSessionToolApprovalDecision(request, decision),
     onSuccess: (_payload, variables) => {
       queryClient.setQueryData<SessionToolApprovalRequest[]>(
         queryKeys.sessionToolApprovals(variables.request.sessionId),
