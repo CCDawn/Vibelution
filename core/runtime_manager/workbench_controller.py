@@ -22,9 +22,7 @@ from typing import Any
 from config.workbench import configured_backend_port
 
 from .constants import (
-    DEFAULT_HEALTH_URL,
     DEFAULT_URL,
-    LAUNCHER_SCRIPT_PATH,
     LAUNCHER_STATE_PATH,
     PROJECT_ROOT,
     PYTHON_LAUNCHER_SCRIPT_PATH,
