@@ -7,6 +7,10 @@ function cx(key: string, ...classNames: string[]) {
 const styles = {
   activity: cx("activity", "grid w-fit max-w-full min-w-0 gap-0 py-0.5"),
   activityRow: cx("activityRow", "w-fit max-w-full min-w-0"),
+  approvalSlot: cx(
+    "approvalSlot",
+    "mt-1.5 w-full max-w-[min(42rem,100%)] min-w-[min(20rem,100%)]",
+  ),
   item: cx("item", "w-fit max-w-full min-w-0"),
   itemDetails: cx("itemDetails", "w-fit max-w-full min-w-0"),
   itemSummary: cx(

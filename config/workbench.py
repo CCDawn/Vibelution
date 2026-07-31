@@ -48,13 +48,35 @@ def _first_env_port(names: tuple[str, ...]) -> str:
     return ""
 
 
+def _project_local_backend_port() -> int | None:
+    """Read checkout-local port assignment written by the launcher on multi-project conflict."""
+
+    import json
+
+    from config.paths import PROJECT_ROOT
+
+    ports_path = PROJECT_ROOT / ".runtime" / "launcher" / "ports.json"
+    try:
+        raw = json.loads(ports_path.read_text(encoding="utf-8"))
+    except (OSError, TypeError, ValueError):
+        return None
+    if not isinstance(raw, dict):
+        return None
+    return parse_port(raw.get("backendPort"))
+
+
 def configured_backend_port(*, default: int = DEFAULT_BACKEND_PORT, include_env: bool = True) -> int:
-    configured_port = _configured_workbench_port("backend_port", default)
     raw_override = _first_env_port(("VIBELUTION_PORT", "AGENT_WORKBENCH_BACKEND_PORT")) if include_env else ""
     if include_env and raw_override:
         env_port = parse_port(raw_override)
         if env_port is not None:
             return env_port
+    # Prefer this checkout's remembered free port over the shared operator config default,
+    # so Desktop\Vibelution and Vibelution-live-acceptance can coexist on one machine.
+    project_port = _project_local_backend_port()
+    if project_port is not None:
+        return project_port
+    configured_port = _configured_workbench_port("backend_port", default)
     return configured_port
 
 

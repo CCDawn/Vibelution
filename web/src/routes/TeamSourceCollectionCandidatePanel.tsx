@@ -1,6 +1,10 @@
 import { type ReactNode, type SyntheticEvent } from "react";
 
 import { PersistedHeightListShell } from "../components/layout/PersistedHeightListShell";
+import {
+  TeamSourceResultStats,
+  type TeamSourceResultStat,
+} from "../components/vui/product/team-management";
 import panelFrameStyles from "./TeamSourceCollectionPanelFrame.styles";
 import styles from "./TeamSourceCollectionCandidatePanel.styles";
 import {
@@ -8,11 +12,7 @@ import {
   TEAM_SOURCE_COLLECTION_LAYOUT_ID,
 } from "./teamSourceCollectionListHeights";
 
-export type TeamSourceCollectionCandidatePanelStat = {
-  key: string;
-  label: ReactNode;
-  value: ReactNode;
-};
+export type TeamSourceCollectionCandidatePanelStat = TeamSourceResultStat;
 
 type TeamSourceCollectionCandidatePanelProps = {
   lang: "zh" | "en";
@@ -25,7 +25,6 @@ type TeamSourceCollectionCandidatePanelProps = {
   hasCandidates: boolean;
   listNeedsScrollHint: boolean;
   emptyMessage: ReactNode;
-  recoveryPanel: ReactNode;
   pagination: ReactNode;
   children: ReactNode;
   onToggle: (event: SyntheticEvent<HTMLDetailsElement>) => void;
@@ -42,7 +41,6 @@ export function TeamSourceCollectionCandidatePanel({
   hasCandidates,
   listNeedsScrollHint,
   emptyMessage,
-  recoveryPanel,
   pagination,
   children,
   onToggle,
@@ -66,13 +64,10 @@ export function TeamSourceCollectionCandidatePanel({
         <small>{rangeText}</small>
       </summary>
       {filterBar}
-      <div className={styles.workflowSourceQualityStats}>
-        {stats.map((stat) => (
-          <span key={stat.key}>
-            {stat.label} <strong>{stat.value}</strong>
-          </span>
-        ))}
-      </div>
+      <TeamSourceResultStats
+        ariaLabel={lang === "zh" ? "候选统计" : "Candidate stats"}
+        stats={stats}
+      />
       {hasCandidates ? (
         <PersistedHeightListShell
           layoutId={TEAM_SOURCE_COLLECTION_LAYOUT_ID}
@@ -117,7 +112,6 @@ export function TeamSourceCollectionCandidatePanel({
       ) : (
         <div className={styles.empty}>{emptyMessage}</div>
       )}
-      {recoveryPanel}
       {pagination}
     </details>
   );

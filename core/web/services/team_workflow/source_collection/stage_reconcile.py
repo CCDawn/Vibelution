@@ -1572,9 +1572,9 @@ def _source_collection_stage_task_status_from_turn_result(turn_result: dict[str,
     s = _service()
     status = s._trim_text(turn_result.get("status"), max_length=80).lower()
     summary = s._trim_text(turn_result.get("summary"), max_length=2000).lower()
-    if status in {"failed", "error"}:
+    if status in {"failed", "error", "failed_runtime", "failed_provider", "timeout"}:
         return "failed"
-    if status in {"interrupted", "stopped", "needs_continue"}:
+    if status in {"interrupted", "stopped", "stopped_by_user", "needs_continue"}:
         return "interrupted"
     if status in {"cancelled", "canceled", "superseded"}:
         return "cancelled"

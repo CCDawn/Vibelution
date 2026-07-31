@@ -129,6 +129,10 @@ import {
   AgentConversationDirectory,
   visibleDirectoryAgents,
 } from "./AgentConversationDirectory";
+import {
+  markSessionActivitySeen,
+  sessionActivityStamp,
+} from "./sessionActivityIndicator";
 import type { AgentContextMenuState } from "./AgentContextMenu";
 import { ConversationIndexTree } from "./ConversationIndexTree";
 import {
@@ -1314,7 +1318,16 @@ export function ChatCodingRoute() {
   const activeGroupRoom = activeGroupRoomQuery.data;
   const teams = teamsQuery.data?.teams ?? [];
   const linkedTeamRoomIds = useMemo(() => {
-    return new Set(teams.map((team) => String(team.linkedChatRoomId ?? "").trim()).filter(Boolean));
+    // Prefer explicit link fields; fall back to nested linkedChatRoom so valid team
+    // rooms never land in 未归属群聊 when the flat id is briefly empty.
+    const ids = new Set<string>();
+    for (const team of teams) {
+      const roomId = String(team.linkedChatRoomId || team.linkedChatRoom?.roomId || "").trim();
+      if (roomId) {
+        ids.add(roomId);
+      }
+    }
+    return ids;
   }, [teams]);
   const activeGroupTeam = useMemo(() => {
     const roomId = String(activeGroupRoom?.roomId || activeGroupRoomId || "").trim();
@@ -1433,13 +1446,17 @@ export function ChatCodingRoute() {
     queryKey: queryKeys.sessionToolApprovals(activeSessionId ?? "none"),
     enabled: Boolean(activeSessionId && directSessionPanelActive),
     queryFn: () => listPendingSessionToolApprovals(activeSessionId ?? ""),
-    refetchInterval: (query) => (
-      (query.state.data?.length ?? 0) > 0
-      || sessionToolApprovalRuntimeActive
-      || isBusyPhase(detail?.currentPhase || directSessionActiveSummary?.currentPhase || directSessionActiveSummary?.status)
-        ? 500
-        : false
-    ),
+    // Blocking path: poll quickly while a turn may wait on the user.
+    refetchInterval: (query) => {
+      const hasPending = (query.state.data?.length ?? 0) > 0;
+      const busy = sessionToolApprovalRuntimeActive
+        || isBusyPhase(detail?.currentPhase || directSessionActiveSummary?.currentPhase || directSessionActiveSummary?.status);
+      if (hasPending || busy) {
+        return 250;
+      }
+      // Light keep-alive so a just-started tool wait is not missed for seconds.
+      return directSessionPanelActive ? 1500 : false;
+    },
     refetchIntervalInBackground: false,
   });
   const handleLoadEarlierSessionMessages = useCallback(() => {
@@ -1748,6 +1765,23 @@ export function ChatCodingRoute() {
     () => (sessionToolApprovalsQuery.data ?? []).find((request) => request.status === "pending") ?? null,
     [sessionToolApprovalsQuery.data],
   );
+  const sessionIdsNeedingApproval = useMemo(
+    () => (
+      activeSessionId
+      && (pendingSessionToolApproval || pendingToolGovernanceApproval)
+        ? [activeSessionId]
+        : []
+    ),
+    [activeSessionId, pendingSessionToolApproval, pendingToolGovernanceApproval],
+  );
+  const runtimeRunningSessionIds = useMemo(() => {
+    return [
+      ...(runtime?.workRuns?.activeItems?.chat_turn ?? []),
+      runtime?.workRuns?.active?.chat_turn,
+    ]
+      .map((run) => String(run?.sessionId ?? "").trim())
+      .filter(Boolean);
+  }, [runtime?.workRuns?.active?.chat_turn, runtime?.workRuns?.activeItems?.chat_turn]);
   const pendingToolApprovalLabels = useMemo(
     () => pendingSessionToolApproval
       ? [{
@@ -1759,13 +1793,10 @@ export function ChatCodingRoute() {
   );
   const pendingToolApprovalRawTitle = pendingToolApprovalLabels.map((item) => item.id).join("、");
   const pendingToolApprovalActionPreview = pendingSessionToolApproval
-    ? toolApprovalActionPreview(
-      pendingSessionToolApproval.argumentSummary,
-      pendingSessionToolApproval.toolName,
-    )
+    ? toolApprovalActionPreview(pendingSessionToolApproval.argumentSummary, pendingSessionToolApproval.toolName)
     : pendingToolApprovalLabels.map((item) => item.label).join(" · ");
   const pendingToolApprovalScope = pendingSessionToolApproval
-    ? (lang === "zh" ? "当前工具调用" : "this tool call")
+    ? (lang === "zh" ? "本次调用" : "this call")
     : toolApprovalScopeLabel(pendingToolGovernanceApproval?.grantScope, lang);
   const pendingToolApprovalRisk = toolApprovalRiskLabel(
     pendingSessionToolApproval?.risk ?? pendingToolGovernanceApproval?.riskLevel,
@@ -1892,7 +1923,25 @@ export function ChatCodingRoute() {
     || activeImageUploadPending;
   const sessionRunning = isRunningPhase(detail?.currentPhase);
   const sessionStopping = isStoppingPhase(detail?.currentPhase) || Boolean(detail?.stopRequested);
-  const sessionBusy = isBusyPhase(detail?.currentPhase);
+  const lastTurnStatusNormalized = String(detail?.lastTurnStatus || "").trim().toLowerCase();
+  const lastTurnTerminal = [
+    "ready",
+    "completed",
+    "failed",
+    "failed_runtime",
+    "failed_provider",
+    "needs_continue",
+    "paused_limit",
+    "stopped_by_user",
+    "superseded",
+    "cancelled",
+  ].includes(lastTurnStatusNormalized);
+  const liveActiveTurnOpen = Boolean(detail?.activeTurnId)
+    && !activeTurnSettledByDetail;
+  // When the turn is already terminal and no live activeTurn remains, do not
+  // keep the stop button solely because phase/work-run lag behind.
+  const sessionBusy = isBusyPhase(detail?.currentPhase)
+    && !(lastTurnTerminal && !liveActiveTurnOpen && !sessionStopping);
   const composerStopPending = (stopTurnMutation.isPending && stopMutationMatchesActiveSession) || sessionStopping;
   const composerSafeGuidancePending =
     sessionGuidanceMutation.isPending
@@ -2211,6 +2260,36 @@ export function ChatCodingRoute() {
   const sessionsById = useMemo(() => {
     return new Map(allVisibleSessions.map((session) => [session.id, session]));
   }, [allVisibleSessions]);
+
+  // Mark completed/unread activity as seen when the operator opens the session.
+  // Blue dots clear after read; a later stamp (new turn) can show them again.
+  useEffect(() => {
+    if (!activeSessionId) {
+      return;
+    }
+    const session =
+      sessionsById.get(activeSessionId)
+      || directSessionActiveSummary
+      || (detail?.id === activeSessionId ? detail : undefined);
+    if (!session) {
+      return;
+    }
+    const stamp = sessionActivityStamp({
+      id: activeSessionId,
+      updatedAt: session.updatedAt,
+      lastActive: session.lastActive,
+      lastTurnStatus: session.lastTurnStatus,
+    });
+    if (!stamp) {
+      return;
+    }
+    markSessionActivitySeen(activeSessionId, stamp);
+  }, [
+    activeSessionId,
+    detail,
+    directSessionActiveSummary,
+    sessionsById,
+  ]);
 
   const visibleChatAgents = useMemo(() => {
     return visibleDirectoryAgents(agentsQuery.data ?? [], allVisibleSessions);
@@ -2670,7 +2749,7 @@ export function ChatCodingRoute() {
         <VStateSurface className={styles.panelState} tone="error" title={sessionsErrorMessage} />
       ) : conversationIndexLoading ? (
         <ConversationIndexLoadingShell label={t("loadingSession")} />
-      ) : filteredConversations.length === 0 && visibleChatAgents.length === 0 && filteredTeams.length === 0 && filteredStandaloneGroupConversations.length === 0 ? (
+      ) : filteredConversations.length === 0 && (agentsQuery.data?.length ?? 0) === 0 && filteredTeams.length === 0 && filteredStandaloneGroupConversations.length === 0 ? (
         <VStateSurface
           className={styles.panelState}
           tone="empty"
@@ -2680,13 +2759,19 @@ export function ChatCodingRoute() {
         <>
           <AgentConversationDirectory
             activeAgentId={selectedChatAgentId}
-            agents={visibleChatAgents}
+            activeSessionId={activeSessionId}
+            activeGroupRoomId={activeGroupRoomId}
+            agents={agentsQuery.data ?? []}
             avatarInitials={avatarInitials}
             filterText={sessionFilter}
             formatTime={formatConversationIndexTime}
             lang={lang}
             resolveModelLabel={resolveModelLabel}
+            runtimeRunningSessionIds={runtimeRunningSessionIds}
             sessions={allVisibleSessions}
+            sessionIdsNeedingApproval={sessionIdsNeedingApproval}
+            statusLabel={statusLabel}
+            teams={teams}
             onContextMenu={openAgentContextMenu}
             onOpenAgent={(agent, latestSession) => {
               if (latestSession?.id) {
@@ -2699,6 +2784,7 @@ export function ChatCodingRoute() {
               }
               handleCreateAgentSession(agent);
             }}
+            onOpenGroupRoom={handleOpenGroupRoom}
           />
           {agentContextMenu ? (
             <Suspense fallback={null}>
@@ -2741,8 +2827,10 @@ export function ChatCodingRoute() {
             renamePending={renameSessionMutation.isPending}
             renameSessionId={renameSessionMutation.variables?.sessionId ?? ""}
             resolveModelLabel={resolveModelLabel}
+            runtimeRunningSessionIds={runtimeRunningSessionIds}
             searchHasTerm={searchHasTerm}
             sessionComposerErrors={sessionComposerErrors}
+            sessionIdsNeedingApproval={sessionIdsNeedingApproval}
             sessionsById={sessionsById}
             statusLabel={statusLabel}
             t={t}
@@ -2995,6 +3083,8 @@ export function ChatCodingRoute() {
               renameSessionId={renameSessionMutation.variables?.sessionId ?? ""}
               resolveModelLabel={resolveModelLabel}
               sessions={agentSessionTabs}
+              runtimeRunningSessionIds={runtimeRunningSessionIds}
+              sessionIdsNeedingApproval={sessionIdsNeedingApproval}
               statusLabel={statusLabel}
               t={t}
               workspaceActiveTab={workspace.activeTab}

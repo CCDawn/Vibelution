@@ -11,17 +11,15 @@ export type TeamSourceResultStatsProps = {
   stats: TeamSourceResultStat[];
 };
 
-const GRID = "grid grid-cols-[repeat(auto-fit,minmax(92px,1fr))] gap-[5px] min-w-0";
+const GRID = "grid min-w-0 grid-cols-[repeat(auto-fit,minmax(5.75rem,1fr))] gap-1.5";
 const PILL =
-  "flex min-w-0 min-h-[24px] items-center justify-between gap-1.5 px-[7px] rounded-[7px] " +
-  "border border-[color:color-mix(in_srgb,var(--accent-success)_22%,var(--border-soft))] " +
-  "bg-[image:var(--vui-gradient-route-soft)] bg-[color:var(--source-workbench-card)] " +
-  "text-[0.62rem] font-[760] text-[var(--fg-muted)]";
-const VALUE = "flex-none text-[0.74rem] text-[var(--fg-primary)]";
+  "flex min-h-6 min-w-0 items-center justify-between gap-1.5 rounded-[var(--radius-control)] " +
+  "border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] px-2 " +
+  "[font-size:var(--vui-font-xs)] font-semibold text-[var(--fg-secondary)]";
+const VALUE = "flex-none text-[var(--fg-primary)]";
 
 /**
- * Faithful reproduction of `.sourceCollectionResultStats`: an auto-fit row of
- * compact stat pills (min 92px) with a subtle success-tinted border.
+ * Compact auto-fit stat pills for source-collection workbench headers.
  */
 export function TeamSourceResultStats({ ariaLabel, stats }: TeamSourceResultStatsProps) {
   return (

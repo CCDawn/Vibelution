@@ -1,6 +1,11 @@
 import { TOOL_APPROVAL_LABELS } from "./toolApprovalLabels";
 
-export function toolApprovalDisplayName(toolName: string | null | undefined, lang: "zh" | "en") {
+/**
+ * Codex-style approval preview helpers.
+ * Codex CLI prompts "Allow command?" with Yes / Always / No and shows the action body.
+ */
+
+export function toolApprovalDisplayName(toolName: string | undefined | null, lang: "zh" | "en") {
   const key = String(toolName || "").trim();
   if (!key) {
     return lang === "zh" ? "工具操作" : "tool action";
@@ -13,30 +18,32 @@ export function toolApprovalActionPreview(
   toolName?: string | null,
 ): string {
   const summary = argumentSummary && typeof argumentSummary === "object" ? argumentSummary : {};
-  const lines: string[] = [];
-  const command = String(summary.commandPreview || "").trim();
-  const cwd = String(summary.cwdPreview || "").trim();
+  const command = String(summary.commandPreview || summary.command || summary.cmd || "").trim();
+  const cwd = String(summary.cwdPreview || summary.cwd || "").trim();
   const terminalSessionId = String(summary.terminalSessionId || "").trim();
   const stdinPreview = String(summary.stdinPreview ?? "");
   const stdinChars = Number(summary.stdinChars ?? stdinPreview.length);
-  const path = String(summary.pathPreview || "").trim();
   if (command) {
-    lines.push(`$ ${command}`);
+    return [`$ ${command}`, cwd ? `cwd: ${cwd}` : ""].filter(Boolean).join("\n");
   }
-  if (cwd) {
-    lines.push(`cwd: ${cwd}`);
+  if (terminalSessionId || "stdinPreview" in summary) {
+    return [
+      terminalSessionId ? `terminal: ${terminalSessionId}` : "",
+      `stdin (${Number.isFinite(stdinChars) ? stdinChars : stdinPreview.length} chars):`,
+      stdinPreview || "(empty)",
+    ].filter(Boolean).join("\n");
   }
-  if (terminalSessionId) {
-    lines.push(`terminal: ${terminalSessionId}`);
+  const path = String(summary.pathPreview || summary.file_path || summary.path || "").trim();
+  if (path) {
+    return path;
   }
-  if ("stdinPreview" in summary) {
-    lines.push(`stdin (${Number.isFinite(stdinChars) ? stdinChars : stdinPreview.length} chars):`);
-    lines.push(stdinPreview || "(empty)");
+  const keys = Array.isArray(summary.argumentKeys)
+    ? summary.argumentKeys.map((item) => String(item || "").trim()).filter(Boolean)
+    : [];
+  if (keys.length) {
+    return keys.slice(0, 8).join(", ");
   }
-  if (!lines.length && path) {
-    lines.push(path);
-  }
-  return lines.join("\n") || toolApprovalDisplayName(toolName, "en");
+  return toolApprovalDisplayName(toolName, "en");
 }
 
 export function toolApprovalSessionGrantDescription(
@@ -59,7 +66,18 @@ export function toolApprovalCodexTitle(lang: "zh" | "en") {
 }
 
 export function toolApprovalCodexButtonLabels(lang: "zh" | "en") {
-  return lang === "zh"
-    ? { yes: "是", always: "始终（本会话）", no: "否", resolving: "处理中…" }
-    : { yes: "Yes", always: "Always (session)", no: "No", resolving: "Resolving…" };
+  if (lang === "zh") {
+    return {
+      yes: "是",
+      always: "始终（本会话）",
+      no: "否",
+      resolving: "处理中…",
+    };
+  }
+  return {
+    yes: "Yes",
+    always: "Always (session)",
+    no: "No",
+    resolving: "Resolving…",
+  };
 }

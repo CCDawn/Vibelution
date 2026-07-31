@@ -57,8 +57,6 @@ export type TeamSourceCollectionCandidateWorkspacePanelProps = {
   sourceCollectionMissingEvidenceAnchorCount: number | string;
   sourceCollectionProjectedCollectedCount: number;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  renderSourceCollectionExtractionRecoveryPanel: (projection: any) => ReactNode;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   renderSourceCollectionPagination: (stageId: SourceCollectionStageModuleId, total: number) => ReactNode;
   selectedSourceCollectionCandidateId: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -92,7 +90,6 @@ export function TeamSourceCollectionCandidateWorkspacePanel(props: TeamSourceCol
     sourceCollectionEvidenceReadyCandidateCount,
     sourceCollectionMissingEvidenceAnchorCount,
     sourceCollectionProjectedCollectedCount,
-    renderSourceCollectionExtractionRecoveryPanel,
     renderSourceCollectionPagination,
     selectedSourceCollectionCandidateId,
     selectSourceCollectionCandidate,
@@ -139,7 +136,7 @@ export function TeamSourceCollectionCandidateWorkspacePanel(props: TeamSourceCol
           { key: "filtered", label: lang === "zh" ? "当前过滤" : "filtered", value: candidatePanelFilteredCountText },
           { key: "reviewed", label: lang === "zh" ? "已审查" : "reviewed", value: sourceCollectionProjectedAssessedCountText },
           { key: "approved", label: lang === "zh" ? "通过" : "approved", value: sourceCollectionProjectedApprovedCountText },
-          { key: "pending", label: lang === "zh" ? "待 Agent 复核" : "pending agent review", value: sourceCollectionRunPendingScreeningCountText },
+          { key: "pending", label: lang === "zh" ? "待质量审查" : "pending quality review", value: sourceCollectionRunPendingScreeningCountText },
           { key: "evidence-ready", label: "evidence_ready", value: sourceCollectionEvidenceReadyCandidateCount },
           { key: "missing-evidence-anchor", label: "missing_evidence_anchor", value: sourceCollectionMissingEvidenceAnchorCount },
         ]}
@@ -155,7 +152,6 @@ export function TeamSourceCollectionCandidateWorkspacePanel(props: TeamSourceCol
           rawRecordCount: sourceCollectionProjectedCollectedCount,
           projection: candidateProjection,
         })}
-        recoveryPanel={renderSourceCollectionExtractionRecoveryPanel(candidateProjection)}
         pagination={renderSourceCollectionPagination("extraction", filteredCandidates.length)}
       >
         {visibleCandidates.map((candidate: any) => {

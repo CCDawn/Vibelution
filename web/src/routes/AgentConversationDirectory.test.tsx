@@ -7,6 +7,7 @@ import {
   isVisibleDirectoryAgent,
   visibleDirectoryAgents,
 } from "./AgentConversationDirectory";
+import { buildAgentDirectoryPartition } from "./agentConversationDirectoryModel";
 import directorySource from "./AgentConversationDirectory.tsx?raw";
 import styles from "./AgentConversationDirectory.styles";
 
@@ -43,6 +44,32 @@ describe("AgentConversationDirectory", () => {
     expect(directorySource).toContain('aria-current={active ? "page" : undefined}');
     expect(directorySource).toContain("onContextMenu={(event) => onContextMenu(event, agent, latestSession ?? null)}");
     expect(directorySource).toContain("onPress={() => onOpenAgent(agent, latestSession ?? null)}");
+  });
+
+  it("aggregates session activity into agent row indicators without gray idle dots", () => {
+    expect(directorySource).toContain("resolveAgentActivityTone");
+    expect(directorySource).toContain("resolveSessionActivityTone");
+    expect(directorySource).toContain("sessionIdsNeedingApproval");
+    expect(directorySource).toContain("runtimeRunningSessionIds");
+    expect(directorySource).toContain("LoaderCircle");
+    expect(directorySource).toContain("agentActivityRunning");
+    expect(directorySource).toContain("agentActivityApproval");
+    expect(directorySource).toContain("agentActivityError");
+    expect(directorySource).toContain("agentActivityCompleted");
+    expect(directorySource).not.toContain("agentStatusRunning");
+    expect(styles.agentActivityRunning).toContain("state-success");
+    expect(styles.agentActivityApproval).toContain("state-warning");
+    expect(styles.agentActivityError).toContain("state-error");
+    expect(styles.agentActivityCompleted).toContain("accent-cool");
+  });
+
+  it("nests team chat and member agents under collapsible team blocks", () => {
+    expect(directorySource).toContain("buildAgentDirectoryPartition");
+    expect(directorySource).toContain("teamBlocks.map(renderTeamBlock)");
+    expect(directorySource).toContain("TeamConversationIndexItem");
+    expect(directorySource).toContain('displayTitle={lang === "zh" ? "团队群聊" : "Team chat"}');
+    expect(directorySource).toContain("onOpenGroupRoom");
+    expect(directorySource).toContain("teams = []");
   });
 
   it("counts an active hidden direct session without double-counting a visible summary", () => {
@@ -101,10 +128,10 @@ describe("AgentConversationDirectory", () => {
     expect(isVisibleDirectoryAgent(teamAgent)).toBe(false);
   });
 
-  it("adds only experiment-backed team Agents to the flat Agent directory", () => {
+  it("no longer dumps all team members into the flat special section", () => {
     const personalAgent = agent();
-    const experimentAgent = agent({
-      agentId: "agent-team-experiment",
+    const teamMember = agent({
+      agentId: "agent-team-member",
       displayName: "资料寻找",
       primaryMode: "research",
       roleKey: "source_finder",
@@ -112,46 +139,46 @@ describe("AgentConversationDirectory", () => {
       conversationIndexVisibility: "team_private",
       metadata: { conversationIndexKind: "team_agent" },
     });
-    const inactiveTeamAgent = agent({
-      agentId: "agent-team-inactive",
-      displayName: "资料入库",
-      primaryMode: "research",
-      roleKey: "source_ingestor",
-      conversationIndexKind: "team_agent",
-      conversationIndexVisibility: "team_private",
-      metadata: { conversationIndexKind: "team_agent" },
-    });
-    const sessions = [{
-      id: "session-experiment",
-      title: "Alpha 实验｜资料寻找",
-      agentId: experimentAgent.agentId,
-      status: "ready",
-      lastActive: "2026-07-27T13:47:44Z",
-      updatedAt: "2026-07-27T13:47:44Z",
-      currentPhase: "ready",
-      experimentBinding: {
+    const partition = buildAgentDirectoryPartition({
+      agents: [personalAgent, teamMember],
+      teams: [{
         teamId: "research-team",
-        researchProjectId: "research-alpha",
-        experimentName: "Alpha 实验",
-        agentId: experimentAgent.agentId,
-        roleKey: "source_finder",
-        roleLabel: "资料寻找",
-        attempt: 1,
-        retryOfSessionId: "",
-        createdFromTaskId: "",
-        createdAt: "2026-07-27T13:47:44Z",
-      },
-    }];
+        name: "挑战杯团队",
+        description: "",
+        purpose: "",
+        status: "active",
+        teamKind: "research",
+        teamCategory: "research",
+        teamSource: "manual",
+        members: [{
+          memberId: "m1",
+          agentId: "agent-team-member",
+          agentCode: "T1",
+          agentName: "资料寻找",
+          role: "source_finder",
+          purpose: "",
+          agentStatus: "active",
+        }],
+        memberCount: 1,
+        linkedChatRoomId: "room-1",
+        canvasPath: "",
+        createdAt: "",
+        updatedAt: "",
+        canvas: { path: "", nodeCount: 0, edgeCount: 0 },
+      }],
+    });
 
-    expect(
-      visibleDirectoryAgents([personalAgent, experimentAgent, inactiveTeamAgent], sessions)
-        .map((item) => item.agentId),
-    ).toEqual(["agent-1", "agent-team-experiment"]);
+    expect(partition.conversationAgents.map((item) => item.agentId)).toEqual(["agent-1"]);
+    expect(partition.specialAgents).toEqual([]);
+    expect(partition.teamBlocks[0]?.agents.map((item) => item.agentId)).toEqual(["agent-team-member"]);
+    // Flat helper no longer auto-promotes experiment team agents into the flat list.
+    expect(visibleDirectoryAgents([personalAgent, teamMember], []).map((item) => item.agentId)).toEqual(["agent-1"]);
   });
 
-  it("renders separate conversation and special Agent section labels", () => {
+  it("renders separate conversation and special Agent section labels and team blocks", () => {
     expect(directorySource).toContain('lang === "zh" ? "会话 Agent" : "Conversation Agents"');
     expect(directorySource).toContain('lang === "zh" ? "特殊 Agent" : "Special Agents"');
+    expect(directorySource).toContain("teamBlocks.map(renderTeamBlock)");
   });
 
   it("keeps each Agent directory section independently collapsible and accessible", () => {
@@ -160,7 +187,7 @@ describe("AgentConversationDirectory", () => {
     expect(directorySource).toContain('import { ConversationIndexSection } from "./ConversationIndexSection"');
     expect(directorySource).toContain("<ConversationIndexSection");
     expect(directorySource).toContain("expanded={expanded}");
-    expect(directorySource).toContain("onToggle={() => setCollapsedSections");
+    expect(directorySource).toContain("toggleSection");
     expect(styles.agentSection).toContain("gap-1.5");
     expect(styles.agentDirectoryList).toContain("gap-1.5");
     expect(styles.agentDirectoryList).toContain("pl-1");

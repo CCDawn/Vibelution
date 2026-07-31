@@ -18,7 +18,7 @@ type TeamSourceCollectionExtractionRecoveryPanelProps = {
   recoverLabel?: ReactNode;
   recoverText: ReactNode;
   pendingReviewText: ReactNode;
-  actions: ReactNode;
+  actions?: ReactNode | null;
 };
 
 export function TeamSourceCollectionExtractionRecoveryPanel({
@@ -34,7 +34,7 @@ export function TeamSourceCollectionExtractionRecoveryPanel({
   recoverLabel,
   recoverText,
   pendingReviewText,
-  actions,
+  actions = null,
 }: TeamSourceCollectionExtractionRecoveryPanelProps) {
   const StatusIcon = tone === "progressable" ? CheckCircle2 : AlertTriangle;
   const panelClassName = `${styles.sourceCollectionExtractionRecoveryPanel} ${
@@ -68,12 +68,14 @@ export function TeamSourceCollectionExtractionRecoveryPanel({
             <strong>{recoverText}</strong>
           </span>
           <span>
-            {lang === "zh" ? "待 Agent 复核" : "pending agent review"}
+            {lang === "zh" ? "待质量审查" : "pending quality review"}
             <strong>{pendingReviewText}</strong>
           </span>
         </div>
       </div>
-      <div className={styles.sourceCollectionExtractionRecoveryActions}>{actions}</div>
+      {actions ? (
+        <div className={styles.sourceCollectionExtractionRecoveryActions}>{actions}</div>
+      ) : null}
     </section>
   );
 }

@@ -2,13 +2,20 @@ import { Bot, Check, LoaderCircle, MessageCircle, X } from "lucide-react";
 import type { DragEvent, KeyboardEvent, MouseEvent } from "react";
 
 import type { AgentInstance, SessionSummary } from "../api/types";
-import { VChip, VIconButton, VNativeButton, VNativeInput, VTooltip } from "../components/vui";
+import { VIconButton, VNativeButton, VNativeInput, VTooltip } from "../components/vui";
 import type { TranslationKey } from "../i18n/dictionary";
 import {
   sessionAgentDisplayInfo,
   type AgentDisplayInfo,
   type ModelLabelResolver,
 } from "./agentDisplay";
+import {
+  resolveSessionActivityTone,
+  sessionActivityLabel,
+  sessionIsRunningStatus as sharedSessionIsRunningStatus,
+  sessionPrimaryStatus,
+  type SessionActivityTone,
+} from "./sessionActivityIndicator";
 import styles from "./DirectSessionIndexItem.styles";
 
 export function sessionListTitle(
@@ -119,20 +126,23 @@ export function sessionUnreadBadgeTitle(count: number, lang: "zh" | "en") {
   return lang === "zh" ? `未读信息：${count} 条` : `${count} unread message${count === 1 ? "" : "s"}`;
 }
 
-export function sessionStatusValue(session: Pick<SessionSummary, "childStatus" | "currentPhase" | "status" | "sessionKind">) {
+export function sessionStatusValue(session: Pick<SessionSummary, "childStatus" | "currentPhase" | "status" | "sessionKind" | "lastTurnStatus">) {
+  const primary = sessionPrimaryStatus(session);
+  if (sharedSessionIsRunningStatus(primary)) {
+    return primary;
+  }
   const candidates = isChildSession(session)
-    ? [session.childStatus, session.currentPhase, session.status]
-    : [session.currentPhase, session.status];
-  return candidates.find(sessionIsRunningStatus) || candidates.find((value) => String(value ?? "").trim()) || "";
+    ? [session.childStatus, session.currentPhase, session.status, session.lastTurnStatus]
+    : [session.currentPhase, session.status, session.lastTurnStatus];
+  return candidates.find((value) => String(value ?? "").trim()) || "";
 }
 
 export function sessionIsRunningStatus(value: string | null | undefined) {
-  const status = String(value ?? "").trim().toLowerCase();
-  return ["queued", "running", "thinking", "tooling", "answering", "planning", "reading", "editing", "verifying", "starting"].includes(status);
+  return sharedSessionIsRunningStatus(value);
 }
 
 export function sessionRunningBadgeLabel(lang: "zh" | "en") {
-  return lang === "zh" ? "运行中" : "Running";
+  return sessionActivityLabel("running", lang) || (lang === "zh" ? "会话进行" : "In session");
 }
 
 export function sessionRunningBadgeTitle(statusText: string, lang: "zh" | "en") {
@@ -140,7 +150,23 @@ export function sessionRunningBadgeTitle(statusText: string, lang: "zh" | "en") 
   if (!text) {
     return sessionRunningBadgeLabel(lang);
   }
-  return lang === "zh" ? `正在运行：${text}` : `Running: ${text}`;
+  return lang === "zh" ? `会话进行：${text}` : `In session: ${text}`;
+}
+
+export function sessionActivityBadgeClass(tone: SessionActivityTone) {
+  if (tone === "running") {
+    return styles.sessionActivityRunning;
+  }
+  if (tone === "approval") {
+    return styles.sessionActivityApproval;
+  }
+  if (tone === "error") {
+    return styles.sessionActivityError;
+  }
+  if (tone === "completed") {
+    return styles.sessionActivityCompleted;
+  }
+  return "";
 }
 
 export type DirectSessionIndexViewModel = {
@@ -216,6 +242,10 @@ type DirectSessionIndexItemProps = {
   itemMessage: string;
   itemIsNotice: boolean;
   missingAgentMessage: string;
+  /** True when this session has a pending tool/permission approval. */
+  needsApproval?: boolean;
+  /** True when runtime reports an active chat_turn for this session. */
+  isRuntimeRunning?: boolean;
   renamePending: boolean;
   session: SessionSummary;
   sessionAvatarFallback: string;
@@ -251,6 +281,8 @@ export function DirectSessionIndexItem({
   itemMessage,
   itemIsNotice,
   missingAgentMessage,
+  needsApproval = false,
+  isRuntimeRunning = false,
   renamePending,
   session,
   sessionAvatarFallback,
@@ -277,11 +309,17 @@ export function DirectSessionIndexItem({
   const sessionSummaryVisible = showSessionSummaryInline(sessionSummary, lang, sessionIsChild);
   const unreadCount = sessionUnreadCount(session);
   const unreadTitle = sessionUnreadBadgeTitle(unreadCount, lang);
-  const sessionRunning = sessionIsRunningStatus(sessionStatus);
+  const activityTone = resolveSessionActivityTone(session, {
+    needsApproval,
+    isRuntimeRunning,
+    isActive: active,
+  });
+  const activityLabel = sessionActivityLabel(activityTone, lang);
+  const sessionRunning = activityTone === "running";
   const sessionMetaVisible = sessionIsChild
     || Boolean(sessionAgentMeta)
     || sessionFunctionVisible
-    || sessionRunning
+    || activityTone !== "none"
     || unreadCount > 0;
   const sessionItemClassName = [
     styles.sessionItem,
@@ -295,16 +333,17 @@ export function DirectSessionIndexItem({
   const saveLabel = t(sessionIsChild ? "saveTaskName" : isAgentRootSession(session) ? "saveAgentName" : "saveSessionName");
   const kindLabel = sessionIsChild ? (lang === "zh" ? "子对话" : "Child") : (lang === "zh" ? "会话" : "Chat");
   const statusText = statusLabel(sessionStatus);
-  const statusTitle = sessionRunningBadgeTitle(statusText, lang);
-  const runningBadgeLabel = sessionRunningBadgeLabel(lang);
+  const statusTitle = activityTone === "running"
+    ? sessionRunningBadgeTitle(statusText, lang)
+    : activityLabel;
   const sessionItemTooltip = (
     <span className={styles.disabledReason}>
       <strong className={styles.disabledReasonTitle}>{sessionTitle}</strong>
       {sessionModelTitle ? <span>{sessionModelTitle}</span> : null}
       {sessionSummaryVisible ? <span>{sessionSummary}</span> : null}
       {sessionFunctionVisible ? <span>{sessionDisplay.functionLabel}</span> : null}
-      {sessionRunning ? <span>{statusTitle}</span> : null}
-      {unreadTitle ? <span>{unreadTitle}</span> : null}
+      {activityTone !== "none" ? <span>{statusTitle}</span> : null}
+      {unreadTitle && activityTone !== "completed" ? <span>{unreadTitle}</span> : null}
     </span>
   );
   const sessionUpdatedTime = (
@@ -313,22 +352,20 @@ export function DirectSessionIndexItem({
     </span>
   );
 
+  const activityBadgeClass = sessionActivityBadgeClass(activityTone);
   const statusCluster = (
     <span className={styles.sessionStatusCluster}>
-      {sessionRunning ? (
-        <span aria-label={statusTitle}>
-          <VChip tone="success" className={styles.sessionRunningBadge}>
-            <LoaderCircle size={10} aria-hidden="true" />
-            <span>{runningBadgeLabel}</span>
-          </VChip>
+      {activityTone === "running" || activityTone === "approval" ? (
+        <span aria-label={statusTitle} title={statusTitle} className={activityBadgeClass}>
+          <LoaderCircle size={12} aria-hidden="true" className={styles.sessionActivitySpinner} />
         </span>
       ) : null}
-      {unreadCount > 0 ? (
-        <span aria-label={unreadTitle}>
-          <VChip tone="warning" className={styles.sessionUnreadBadge}>
-            {unreadCount}
-          </VChip>
-        </span>
+      {activityTone === "error" || activityTone === "completed" ? (
+        <span
+          aria-label={statusTitle}
+          title={statusTitle}
+          className={activityBadgeClass}
+        />
       ) : null}
     </span>
   );
