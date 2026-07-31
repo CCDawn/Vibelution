@@ -5310,13 +5310,13 @@ class TestLocalProviderBootstrap:
         assert llm_for_turn.bound_tool_count == 1
 
     def test_runtime_agent_context_compression_policy_overrides_global_config(self, monkeypatch):
-        monkeypatch.setenv("VIBELUTION_AGENT_ID", "agent-compression-runtime")
+        monkeypatch.delenv("VIBELUTION_AGENT_ID", raising=False)
         monkeypatch.delenv("VIBELUTION_AGENT_LLM_SLOT", raising=False)
         monkeypatch.setattr(agent_module.Key_Tools, "create_llm_facing_tools", lambda: [])
 
         def fake_model_discovery(self):
-            self._context_window_limit = 50000
-            return 16000
+            self._context_window_limit = 1_000_000
+            return 500_000
 
         monkeypatch.setattr(SelfEvolvingAgent, "_init_model_discovery", fake_model_discovery)
         monkeypatch.setattr(SelfEvolvingAgent, "_init_token_compressor", lambda self: None)
@@ -5344,7 +5344,7 @@ class TestLocalProviderBootstrap:
             "contextCompressionPolicy": {
                 "mode": "custom",
                 "enabled": True,
-                "maxTokenLimit": 9000,
+                "maxTokenLimit": 262_144,
                 "maxCompressionsPerSession": 4,
                 "levels": {"light": 0.5, "standard": 0.7, "deep": 0.86, "emergency": 0.94},
                 "summaryChars": {"light": 300, "standard": 700, "deep": 1300, "emergency": 1900},
@@ -5368,11 +5368,17 @@ class TestLocalProviderBootstrap:
 
         monkeypatch.setattr(agent_module, "get_llm_client", lambda role=None, profile_id=None, config=None: DummyClient())
 
-        agent = SelfEvolvingAgent(config=config)
+        agent = SelfEvolvingAgent(
+            config=config,
+            mode="chat",
+            runtime_agent_binding={
+                "agentId": "agent-compression-runtime",
+            },
+        )
         strategy_config = agent._compression_strategy.get_config(agent_module.CompressionLevel.STANDARD)
 
-        assert agent._context_compression_policy["source"] == "agent_custom"
-        assert agent.config.context_compression.max_token_limit == 9000
+        assert agent._context_compression_policy["source"] == "agent"
+        assert agent.config.context_compression.max_token_limit == 262_144
         assert agent.config.context_compression.max_compressions_per_session == 4
         assert agent.config.context_compression.levels.standard == 0.7
         assert agent.config.context_compression.summary_chars.deep == 1300
@@ -5383,6 +5389,22 @@ class TestLocalProviderBootstrap:
         assert strategy_config.keep_ai_messages == 2
         assert strategy_config.preserve_errors is False
         assert strategy_config.extract_key_decisions is False
+
+    def test_explicit_runtime_agent_binding_overrides_process_environment(self, monkeypatch):
+        monkeypatch.setenv("VIBELUTION_AGENT_ID", "agent-from-process-env")
+        monkeypatch.setenv("VIBELUTION_AGENT_LLM_SLOT", "subagentExecution")
+
+        binding = agent_module._runtime_agent_binding_from_env(
+            {
+                "agentId": "agent-from-web-session",
+                "llmSlot": "dialogue",
+                "directSessionId": "session-luna-pressure",
+            }
+        )
+
+        assert binding["agentId"] == "agent-from-web-session"
+        assert binding["llmSlot"] == "dialogue"
+        assert binding["directSessionId"] == "session-luna-pressure"
 
     def test_think_and_act_auto_compresses_at_standard_context_threshold(self, monkeypatch):
         agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)

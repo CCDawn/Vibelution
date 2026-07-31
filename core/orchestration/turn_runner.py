@@ -44,12 +44,23 @@ class AgentSingleTurnResult:
     runtime: AgentTurnRuntime | None = None
 
 
-def default_agent_factory(*, mode: str, workspace_path: str | None = None, config: Any = None) -> Any:
+def default_agent_factory(
+    *,
+    mode: str,
+    workspace_path: str | None = None,
+    config: Any = None,
+    runtime_agent_binding: dict[str, Any] | None = None,
+) -> Any:
     """Create the concrete runtime Agent lazily to keep imports one-way."""
 
     from agent import SelfEvolvingAgent
 
-    return SelfEvolvingAgent(mode=mode, workspace_path=workspace_path, config=config)
+    return SelfEvolvingAgent(
+        mode=mode,
+        workspace_path=workspace_path,
+        config=config,
+        runtime_agent_binding=runtime_agent_binding,
+    )
 
 
 def create_agent_runtime(
@@ -57,11 +68,19 @@ def create_agent_runtime(
     mode: str,
     workspace_path: str | None = None,
     config: Any = None,
+    runtime_agent_binding: dict[str, Any] | None = None,
     agent_factory: AgentFactory = default_agent_factory,
 ) -> Any:
     """Create a runtime Agent through the shared Core First seam."""
 
-    return agent_factory(mode=mode, workspace_path=workspace_path, config=config)
+    factory_kwargs: dict[str, Any] = {
+        "mode": mode,
+        "workspace_path": workspace_path,
+        "config": config,
+    }
+    if runtime_agent_binding is not None:
+        factory_kwargs["runtime_agent_binding"] = runtime_agent_binding
+    return agent_factory(**factory_kwargs)
 
 
 def call_agent_factory_with_supported_kwargs(factory: Callable[..., Any], **kwargs: Any) -> Any:
