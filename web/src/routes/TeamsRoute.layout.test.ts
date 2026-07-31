@@ -1158,7 +1158,12 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("onAction: sourceCollectionExtractionCanProceedAfterExclusions");
     expect(routeSource).toContain(": () => void startSourceCollectionStageSessionTask(\"extraction\")");
     expect(routeSource).toContain("onAction: () => void startSourceCollectionStageSessionTask(\"relations\")");
-    expect(routeSource).toContain("onAction: () => void startSourceCollectionStageSessionTask(\"ingestion\")");
+    expect(routeSource).toContain("const sourceCollectionIngestionReadyForExperiment = sourceCollectionProjectedFormalKnowledgeCount > 0");
+    expect(routeSource).toContain("const sourceCollectionExperimentPlanningRoute = researchWorkspaceStageRoute(");
+    expect(routeSource).toContain('selectedTeam?.teamId || RESEARCH_TEAM_ID,\n    "experiment",');
+    expect(routeSource).toContain("onAction: sourceCollectionIngestionReadyForExperiment");
+    expect(routeSource).toContain("navigate(sourceCollectionExperimentPlanningRoute)");
+    expect(routeSource).toContain(": () => void startSourceCollectionStageSessionTask(\"ingestion\")");
     expect(routeSource).toContain("repairChallengeCupTeamAgentsMutation");
     // Wave 8Q: agent repair endpoints live on useTeamShellMutations.
     expect(teamShellMutationsSource).toContain("/challenge-cup-agents/repair");
@@ -2747,7 +2752,9 @@ describe("TeamsRoute layout contract", () => {
       stageModuleSource.indexOf('id: "ingestion"'),
       stageModuleSource.indexOf("];"),
     );
-    expect(ingestionModuleSource).toContain('onAction: () => void startSourceCollectionStageSessionTask("ingestion")');
+    expect(ingestionModuleSource).toContain("onAction: sourceCollectionIngestionReadyForExperiment");
+    expect(ingestionModuleSource).toContain("navigate(sourceCollectionExperimentPlanningRoute)");
+    expect(ingestionModuleSource).toContain(': () => void startSourceCollectionStageSessionTask("ingestion")');
     expect(ingestionModuleSource).not.toContain("runKnowledgeCollectionCompletionAction");
     expect(ingestionModuleSource).not.toContain("runKnowledgeCollectionCompletionMutation");
     expect(ingestionModuleSource).not.toContain("runKnowledgeCollectionIngestMutation.mutate");
