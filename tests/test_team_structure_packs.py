@@ -5,6 +5,7 @@ from __future__ import annotations
 from core.web.services import team_service as facade
 from core.web.services.team import (
     ai_search_ranking,
+    canvas_normalize,
     canvas_primitives,
     chat_room_links,
     kind_helpers,
@@ -60,6 +61,19 @@ def test_facade_reexports_system_bootstrap_control_plane() -> None:
     assert hasattr(facade, "_TEAM_SYSTEM_BOOTSTRAP_THREAD")
     assert isinstance(facade._TEAM_SYSTEM_BOOTSTRAP_STATE, dict)
     assert facade.TEAM_SYSTEM_BOOTSTRAP_READY_CACHE_TTL_SECONDS == 30.0
+
+
+def test_facade_reexports_canvas_normalize() -> None:
+    assert facade.get_team_canvas is canvas_normalize.get_team_canvas
+    assert facade.save_team_canvas is canvas_normalize.save_team_canvas
+    assert facade._normalize_canvas is canvas_normalize._normalize_canvas
+    assert facade._normalize_node is canvas_normalize._normalize_node
+    assert facade._validate_canvas is canvas_normalize._validate_canvas
+    assert facade._normalize_members is canvas_normalize._normalize_members
+    assert facade._default_canvas_for_team is canvas_normalize._default_canvas_for_team
+    assert facade._ai_search_canvas_for_team is canvas_normalize._ai_search_canvas_for_team
+    assert facade._default_nodes_for_members is canvas_normalize._default_nodes_for_members
+    assert facade._default_edges_for_team is canvas_normalize._default_edges_for_team
 
 
 def test_facade_reexports_chat_room_links() -> None:
