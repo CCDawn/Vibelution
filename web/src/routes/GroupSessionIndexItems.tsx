@@ -143,6 +143,8 @@ export function TeamConversationIndexItem({
     ? `${styles.sessionItem} ${styles.teamTreeItem} ${styles.sessionItemActive}`
     : `${styles.sessionItem} ${styles.teamTreeItem}`;
   const title = String(displayTitle || team.name || "").trim() || team.name;
+  const teamName = String(team.name || "").trim();
+  const secondaryTeamName = teamName && teamName !== title ? teamName : "";
   const teamStatus = teamStatusLabel(team.status, lang, statusLabel);
   const roomTitle = roomId ? (lang === "zh" ? "团队群聊已同步" : "Team room linked") : (lang === "zh" ? "团队群聊待同步" : "Team room pending");
   const memberTitle = teamMemberStatusTitle(team, lang);
@@ -151,7 +153,7 @@ export function TeamConversationIndexItem({
     ? `已合并 ${duplicateCount} 个同名团队记录`
     : `${duplicateCount} same-name Team records merged`;
   const disabledReasonId = roomId ? undefined : `team-row-disabled-reason-${team.teamId}`;
-  const tooltip = indexItemTooltip(title, [team.name, teamStatus, memberTitle, roomTitle, duplicateCount > 1 ? duplicateTitle : ""]);
+  const tooltip = indexItemTooltip(title, [secondaryTeamName, teamStatus, memberTitle, roomTitle, duplicateCount > 1 ? duplicateTitle : ""]);
   const row = (
     <VNativeButton
       type="button"
@@ -159,7 +161,7 @@ export function TeamConversationIndexItem({
       disabled={!roomId}
       aria-current={active ? "true" : undefined}
       aria-describedby={disabledReasonId}
-      aria-label={[title, team.name, teamStatus, memberTitle, roomTitle, duplicateCount > 1 ? duplicateTitle : ""].filter(Boolean).join(" · ")}
+      aria-label={[title, secondaryTeamName, teamStatus, memberTitle, roomTitle, duplicateCount > 1 ? duplicateTitle : ""].filter(Boolean).join(" · ")}
       onClick={() => onOpen(roomId)}
     >
       <span className={`${styles.conversationAvatar} ${styles.conversationAvatarGroup}`} aria-hidden="true">
