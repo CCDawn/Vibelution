@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 // @ts-expect-error Vitest runs this contract in Node; the web project intentionally omits global Node types.
 import { readFileSync } from "node:fs";
+import selfEvolutionApiSource from "../api/selfEvolution.ts?raw";
 import routeSource from "./EvolutionRoute.tsx?raw";
 import runMutationsSource from "./evolution/useEvolutionRunMutations.ts?raw";
 import activeRunMonitorPanelSource from "./EvolutionActiveRunMonitorPanel.tsx?raw";
@@ -112,7 +113,8 @@ describe("EvolutionRoute library user flow contract", () => {
 
   it("routes the primary self-evolution start into the user-reviewed autonomous loop", () => {
     expect(routeSource).toContain("startSelfAutonomousLoopMutation");
-    expect(runMutationsSource).toContain('"/api/evolution/self/autonomous-runs"');
+    expect(runMutationsSource).toContain("startSelfEvolutionAutonomousLoop(payload)");
+    expect(selfEvolutionApiSource).toContain('"/api/evolution/self/autonomous-runs"');
     expect(routeSource).toContain("goal: selfGoalInput.trim()");
     expect(routeSource).toContain("maxIterations: 1");
     expect(routeSource).toContain("onStartRun={() => startSelfAutonomousLoopMutation.mutate({");
