@@ -89,6 +89,7 @@ export function buildSupervisedStartPlaceholder(input: {
   datasetLimit: number | null;
   bundleName: string;
   keepWorktree: boolean;
+  approvalMode: "human" | "agent";
   mentalModelMode: SupervisedMentalModelMode;
   agentBindings?: Record<string, EvolutionActiveRunAgentBinding>;
   lang: "zh" | "en";
@@ -112,6 +113,7 @@ export function buildSupervisedStartPlaceholder(input: {
     datasetName: sourceKind === "dataset" ? input.datasetName : "",
     datasetLimit: input.datasetLimit,
     keepWorktree: input.keepWorktree,
+    approvalMode: input.approvalMode,
     mentalModelMode: input.mentalModelMode,
     mentalModelEnabled: input.mentalModelMode === "enabled" ? true : input.mentalModelMode === "disabled" ? false : null,
     startedAt: timestamp,
@@ -152,6 +154,7 @@ export function buildSupervisedStartPlaceholder(input: {
         datasetLimit: input.datasetLimit,
         bundleName: sourceKind === "bundle" ? input.bundleName : "",
         keepWorktree: input.keepWorktree,
+        approvalMode: input.approvalMode,
         mentalModelMode: input.mentalModelMode,
         mentalModelEnabled: input.mentalModelMode === "enabled" ? true : input.mentalModelMode === "disabled" ? false : null,
       },

@@ -3,7 +3,12 @@ import type {
   SupervisedWorktreeRun,
 } from "../api/types";
 
-export type SupervisedApprovalAction = "approve_review" | "merge" | "rollback";
+export type SupervisedApprovalAction =
+  | "approve_review"
+  | "run_agent_approval"
+  | "reject_review"
+  | "request_rerun"
+  | "rollback";
 
 export type SupervisedApprovalPhase =
   | "empty"
@@ -56,6 +61,18 @@ export type SupervisedApprovalJudgeRecommendationModel = {
   label: string;
 };
 
+export type SupervisedEvaluationStateModel = {
+  code: "VALID" | "INVALID" | "ERROR" | "INCONCLUSIVE";
+  label: string;
+  description: string;
+  mergeEligible: boolean;
+};
+
+export type SupervisedApprovalModeModel = {
+  code: "human" | "agent";
+  label: string;
+};
+
 export type SupervisedApprovalEvidenceModel = {
   tone: "positive" | "warning" | "neutral";
   text: string;
@@ -79,9 +96,16 @@ export type SupervisedApprovalDecisionModel = {
   primaryAction: SupervisedApprovalAction | null;
   primaryActionLabel: string;
   primaryActionReason: string;
+  secondaryActions: Array<{
+    action: SupervisedApprovalAction;
+    label: string;
+    reason: string;
+  }>;
   runtimeEffect: SupervisedApprovalRuntimeEffect;
   runtimeEffectLabel: string;
   judgeRecommendation: SupervisedApprovalJudgeRecommendationModel;
+  evaluationState: SupervisedEvaluationStateModel;
+  approvalMode: SupervisedApprovalModeModel;
   rubric: SupervisedApprovalRubricModel;
   metrics: SupervisedApprovalMetricModel;
   evidence: SupervisedApprovalEvidenceModel[];
@@ -171,6 +195,65 @@ function judgeRecommendation(
   };
 }
 
+function evaluationState(
+  run: SupervisedWorktreeRun | null | undefined,
+  lang: ApprovalLanguage,
+): SupervisedEvaluationStateModel {
+  const explicit = String(
+    run?.approvalDecision?.evaluationState
+    ?? run?.decision?.evaluationState
+    ?? run?.candidateJudgment?.evaluationState
+    ?? "",
+  ).trim().toUpperCase();
+  const recommendation = String(
+    run?.candidateJudgment?.recommendation
+    ?? run?.candidateJudgment?.decision
+    ?? "",
+  ).trim().toUpperCase();
+  let code: SupervisedEvaluationStateModel["code"];
+  if (["VALID", "INVALID", "ERROR", "INCONCLUSIVE"].includes(explicit)) {
+    code = explicit as SupervisedEvaluationStateModel["code"];
+  } else if (normalized(run?.candidateJudgment?.status) && normalized(run?.candidateJudgment?.status) !== "success") {
+    code = "ERROR";
+  } else if (recommendation === "INCONCLUSIVE") {
+    code = "INCONCLUSIVE";
+  } else if (
+    normalized(run?.candidateJudgment?.status) === "success"
+    && normalized(run?.candidateJudgment?.phase) === "rerun"
+  ) {
+    code = "VALID";
+  } else {
+    code = "INVALID";
+  }
+  const copy: Record<SupervisedEvaluationStateModel["code"], [string, string, string, string]> = {
+    VALID: ["有效", "Valid", "证据协议完整，可进入最终审批；是否合入仍由审批决定。", "Evidence is structurally valid and may enter final approval."],
+    INVALID: ["无效", "Invalid", "证据或协议不满足要求，禁止批准；请修复评估链路。", "Evidence or protocol is invalid; approval is blocked."],
+    ERROR: ["错误", "Error", "评估执行发生错误，当前分数不能作为合入依据。", "Evaluation failed; scores cannot authorize merge."],
+    INCONCLUSIVE: ["不可判定", "Inconclusive", "现有证据不足以支持批准，应补证据并复跑。", "Evidence is insufficient; collect evidence and rerun."],
+  };
+  return {
+    code,
+    label: text(lang, copy[code][0], copy[code][1]),
+    description: text(lang, copy[code][2], copy[code][3]),
+    mergeEligible: code === "VALID",
+  };
+}
+
+function approvalMode(
+  run: SupervisedWorktreeRun | null | undefined,
+  lang: ApprovalLanguage,
+): SupervisedApprovalModeModel {
+  const code = String(run?.approvalMode ?? run?.approvalDecision?.mode ?? "human").toLowerCase() === "agent"
+    ? "agent"
+    : "human";
+  return {
+    code,
+    label: code === "agent"
+      ? text(lang, "Agent 审批", "Agent approval")
+      : text(lang, "人工审批", "Human approval"),
+  };
+}
+
 function rubricModel(run: SupervisedWorktreeRun): SupervisedApprovalRubricModel {
   const rubric = run.judgeRubric;
   const withScores = (
@@ -208,15 +291,18 @@ function emptyDecision(lang: ApprovalLanguage): SupervisedApprovalDecisionModel 
     headline: text(lang, "等待监督运行生成审批证据", "Waiting for supervised evidence"),
     reason: text(
       lang,
-      "完成两次 Judge 评分后，这里会给出用户审批与受控合入动作。",
-      "The user approval and controlled merge action appears after both Judge evaluations finish.",
+      "完成两次 Judge 评分后，这里会按本轮选择显示人工或 Agent 最终审批。",
+      "After both Judge evaluations, this surface shows the selected human or Agent final approval.",
     ),
     primaryAction: null,
     primaryActionLabel: "",
     primaryActionReason: "",
+    secondaryActions: [],
     runtimeEffect: "not_applied",
     runtimeEffectLabel: text(lang, "运行时尚未应用", "Runtime not applied"),
     judgeRecommendation: judgeRecommendation(null, lang),
+    evaluationState: evaluationState(null, lang),
+    approvalMode: approvalMode(null, lang),
     rubric: emptyRubric(),
     metrics: emptyMetrics(),
     evidence: [],
@@ -232,6 +318,8 @@ function approvalPhase(run: SupervisedWorktreeRun): SupervisedApprovalPhase {
   const gateStatus = normalized(run.reviewGate?.status ?? run.mergeAnalysis?.reviewGate?.status);
   const gateRequired = Boolean(run.reviewGate?.required ?? run.mergeAnalysis?.reviewGate?.required);
   const blockers = run.mergeAnalysis?.blockers ?? [];
+  const approvalStatus = normalized(run.approvalDecision?.status);
+  const approvalDecision = String(run.approvalDecision?.decision ?? "").toUpperCase();
 
   if (rollbackStatus === "rolled_back") {
     return "rolled_back";
@@ -242,7 +330,17 @@ function approvalPhase(run: SupervisedWorktreeRun): SupervisedApprovalPhase {
   if (ACTIVE_RUN_STATUSES.has(normalized(run.status))) {
     return "running";
   }
-  if (enabled(run, "approveReview") || (gateRequired && gateStatus !== "approved")) {
+  if (approvalStatus === "decided" && approvalDecision !== "APPROVE") {
+    return "closed";
+  }
+  if (!evaluationState(run, "zh").mergeEligible) {
+    return "blocked";
+  }
+  if (
+    enabled(run, "approveReview")
+    || enabled(run, "runAgentApproval")
+    || (gateRequired && gateStatus !== "approved")
+  ) {
     return "pending_review";
   }
   if (blockers.length > 0 || run.mergeAnalysis?.mergeAllowed === false) {
@@ -275,31 +373,37 @@ function phaseCopy(
     };
   }
   if (phase === "pending_review") {
+    const mode = approvalMode(run, lang);
     return {
       tone: "warning" as const,
-      statusLabel: text(lang, "需用户决策", "User decision required"),
-      headline: text(lang, "审批后由 Judge 触发受控合入", "Approval lets the Judge trigger controlled merge"),
+      statusLabel: mode.label,
+      headline: mode.code === "agent"
+        ? text(lang, "启动独立审批 Agent 作最终决定", "Run the independent Approval Agent")
+        : text(lang, "人工决定是否执行受控合入", "Human decides whether to run controlled merge"),
       reason: gateReason || decisionReason,
-      primaryAction: "approve_review" as const,
-      primaryActionLabel: text(lang, "审批并受控合入", "Approve controlled merge"),
+      primaryAction: mode.code === "agent" ? "run_agent_approval" as const : "approve_review" as const,
+      primaryActionLabel: mode.code === "agent"
+        ? text(lang, "启动 Agent 审批", "Run Agent approval")
+        : text(lang, "批准并受控合入", "Approve controlled merge"),
     };
   }
   if (phase === "ready_merge") {
     return {
       tone: "success" as const,
-      statusLabel: text(lang, "可人工合入", "Ready for manual merge"),
-      headline: text(lang, "评审已通过，可将候选写入项目", "Review approved; candidate can enter the project"),
-      reason: decisionReason || text(lang, "当前合并分析允许人工合入。", "Merge analysis currently permits a manual merge."),
-      primaryAction: "merge" as const,
-      primaryActionLabel: text(lang, "合入项目", "Merge into project"),
+      statusLabel: text(lang, "审批已通过", "Approval recorded"),
+      headline: text(lang, "审批记录已授权后端受控合入", "Approval record authorizes backend controlled merge"),
+      reason: decisionReason || text(lang, "不再提供独立人工 merge 旁路。", "No separate manual merge bypass is exposed."),
+      primaryAction: null,
+      primaryActionLabel: "",
     };
   }
   if (phase === "blocked") {
+    const state = evaluationState(run, lang);
     return {
       tone: "danger" as const,
-      statusLabel: text(lang, "存在阻塞", "Blocked"),
-      headline: text(lang, "当前候选不能安全合入", "Candidate cannot be merged safely"),
-      reason: blockers.join("；") || run.mergeAnalysis?.reason || decisionReason,
+      statusLabel: state.label,
+      headline: text(lang, "当前评估状态禁止批准合入", "Current evaluation state blocks approval"),
+      reason: state.description || blockers.join("；") || run.mergeAnalysis?.reason || decisionReason,
       primaryAction: null,
       primaryActionLabel: "",
     };
@@ -364,27 +468,28 @@ function buildSteps(
   const mergeDone = phase === "merged";
   const mergeUndone = phase === "rolled_back";
   const rollbackDone = phase === "rolled_back";
+  const mode = approvalMode(run, lang);
 
   return [
     {
       id: "review",
-      title: text(lang, "1. 用户审批", "1. User approval"),
+      title: text(lang, `1. ${mode.label}`, `1. ${mode.label}`),
       status: reviewDone ? "done" : phase === "pending_review" ? "active" : "pending",
       statusLabel: reviewDone
         ? text(lang, "已完成", "Done")
         : phase === "pending_review"
           ? text(lang, "当前可执行", "Available now")
           : text(lang, "等待评测", "Waiting"),
-      description: text(lang, "确认已审阅两次 Judge 评分、改动风险和候选差异。", "Confirm both Judge scores, candidate risk, and diff were reviewed."),
+      description: text(lang, "同时审阅两次评分、评估状态、证据完整性、风险与候选差异。", "Review both scores, evaluation state, evidence integrity, risk, and candidate diff."),
       consequence: text(
         lang,
-        "用户决定批准后，Judge 在原会话中确认结构化请求并触发受控合入；评分不构成硬门。",
-        "After user approval, the Judge confirms the structured request in the original session; scores are not a hard gate.",
+        "审批决定写入不可变记录；分数不是硬门，INVALID / ERROR / INCONCLUSIVE 均不能直接批准。",
+        "The decision becomes immutable; scores are not a hard gate, and non-VALID states cannot be approved.",
       ),
     },
     {
       id: "merge",
-      title: text(lang, "2. Judge 受控合入", "2. Judge-controlled merge"),
+      title: text(lang, "2. 后端受控合入", "2. Backend controlled merge"),
       status: mergeUndone
         ? "undone"
         : mergeDone
@@ -403,7 +508,7 @@ function buildSteps(
             : phase === "blocked"
               ? text(lang, "被阻塞", "Blocked")
               : text(lang, "等待评审", "Waiting for review"),
-      description: text(lang, "Judge 通过受约束的候选应用器写入文件并生成回滚清单，不执行原始 git merge。", "The Judge triggers the constrained candidate applier and rollback manifest, not raw git merge."),
+      description: text(lang, "后端仅凭 APPROVE 审批记录调用受约束候选应用器并生成回滚清单。", "The backend accepts only an APPROVE record, then uses the constrained candidate applier and rollback manifest."),
       consequence: text(lang, "需要 Launcher/runtime 刷新与复验后才能确认生效。", "Requires Launcher/runtime refresh and validation before activation is confirmed."),
     },
     {
@@ -430,13 +535,22 @@ function buildEvidence(
 ): SupervisedApprovalEvidenceModel[] {
   const evidence: SupervisedApprovalEvidenceModel[] = [];
   const recommendation = judgeRecommendation(run, lang);
+  const state = evaluationState(run, lang);
+  evidence.push({
+    tone: state.mergeEligible ? "positive" : "warning",
+    text: text(
+      lang,
+      `评估状态：${state.label}。${state.description}`,
+      `Evaluation state: ${state.label}. ${state.description}`,
+    ),
+  });
   if (recommendation.code) {
     evidence.push({
       tone: "neutral",
       text: text(
         lang,
-        `Judge ${recommendation.label}，该建议和评分仅供参考，最终由用户决定。`,
-        `Judge: ${recommendation.label}. The scores are advisory; the user makes the final decision.`,
+        `Judge ${recommendation.label}；建议与分数仅供审批主体参考，不能覆盖评估状态。`,
+        `Judge: ${recommendation.label}. Scores are advisory and cannot override evaluation state.`,
       ),
     });
   }
@@ -522,6 +636,8 @@ export function buildSupervisedApprovalDecision(
   };
   const phase = approvalPhase(run);
   const copy = phaseCopy(phase, run, lang);
+  const state = evaluationState(run, lang);
+  const mode = approvalMode(run, lang);
   const runtimeEffect: SupervisedApprovalRuntimeEffect =
     phase === "merged" || phase === "rolled_back" ? "refresh_required" : "not_applied";
 
@@ -535,14 +651,36 @@ export function buildSupervisedApprovalDecision(
     primaryActionLabel: copy.primaryActionLabel,
     primaryActionReason: copy.primaryAction
       ? run.actionStates?.[
-        copy.primaryAction === "approve_review" ? "approveReview" : copy.primaryAction
+        copy.primaryAction === "approve_review"
+          ? "approveReview"
+          : copy.primaryAction === "run_agent_approval"
+            ? "runAgentApproval"
+            : copy.primaryAction
       ]?.reason ?? ""
       : "",
+    secondaryActions: mode.code === "human"
+      && normalized(run.approvalDecision?.status) !== "decided"
+      && !ACTIVE_RUN_STATUSES.has(normalized(run.status))
+      ? [
+          {
+            action: "request_rerun",
+            label: text(lang, "要求补证据并复跑", "Request evidence and rerun"),
+            reason: run.actionStates?.requestRerun?.reason ?? "",
+          },
+          {
+            action: "reject_review",
+            label: text(lang, "拒绝合入", "Reject merge"),
+            reason: run.actionStates?.rejectReview?.reason ?? "",
+          },
+        ]
+      : [],
     runtimeEffect,
     runtimeEffectLabel: runtimeEffect === "refresh_required"
       ? text(lang, "项目状态已变更，运行时需刷新复验", "Project state changed; refresh and validate runtime")
       : text(lang, "运行时尚未应用", "Runtime not applied"),
     judgeRecommendation: judgeRecommendation(run, lang),
+    evaluationState: state,
+    approvalMode: mode,
     rubric: rubricModel(run),
     metrics,
     evidence: buildEvidence(run, metrics, lang),
