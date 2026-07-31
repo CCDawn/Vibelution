@@ -215,7 +215,7 @@ export function AgentConversationDirectory({
     );
     const activityTone = resolveAgentActivityTone(sessionTones);
     const activityLabel = sessionActivityLabel(activityTone, lang);
-    const activityClass = agentActivityClass(activityTone);
+    const activityClassName = agentActivityClass(activityTone);
     return (
       <VButton
         key={agentId}
@@ -251,7 +251,7 @@ export function AgentConversationDirectory({
             <span className={styles.agentTitle}>{display.name}</span>
             {activityTone !== "none" ? (
               <span
-                className={[styles.agentActivity, activityClass].filter(Boolean).join(" ")}
+                className={[styles.agentActivity, activityClassName].filter(Boolean).join(" ")}
                 aria-label={activityLabel}
                 title={activityLabel}
               >

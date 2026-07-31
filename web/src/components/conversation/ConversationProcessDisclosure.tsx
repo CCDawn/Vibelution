@@ -48,21 +48,14 @@ function processDuration(cells: readonly CodexTranscriptCell[]) {
   return durations.reduce((total, duration) => total + duration, 0);
 }
 
-function firstFailedToolHint(cells: readonly CodexTranscriptCell[]) {
+function firstFailedToolIdentity(cells: readonly CodexTranscriptCell[]) {
   const failed = cells.find((cell) => cell.status === "failed");
   if (!failed) {
     return "";
   }
-  const toolName = codexTranscriptToolRawName(failed);
-  const summary = String(failed.summary || failed.text || failed.title || "").trim();
-  const compactSummary = summary
-    .replace(/\s+/g, " ")
-    .slice(0, 48)
-    .trim();
-  if (toolName && compactSummary && compactSummary !== toolName) {
-    return `${toolName}: ${compactSummary}`;
-  }
-  return toolName || compactSummary;
+  // The expanded transcript row owns failure details. Keep the collapsed
+  // summary identifiable without repeating its full error message.
+  return codexTranscriptToolRawName(failed) || String(failed.title || "").trim();
 }
 
 export function processLabel(cells: readonly CodexTranscriptCell[], language: "zh" | "en") {
@@ -76,9 +69,9 @@ export function processLabel(cells: readonly CodexTranscriptCell[], language: "z
     duration === null ? "" : formatCodexTranscriptDuration(duration),
   ];
   if (state === "failed") {
-    const hint = firstFailedToolHint(cells);
-    if (hint) {
-      parts.push(language === "zh" ? `· ${hint}` : `· ${hint}`);
+    const toolIdentity = firstFailedToolIdentity(cells);
+    if (toolIdentity) {
+      parts.push(language === "zh" ? `· ${toolIdentity}` : `· ${toolIdentity}`);
     } else {
       parts.push(language === "zh" ? "· 展开查看原因" : "· expand for details");
     }
