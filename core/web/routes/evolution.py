@@ -56,6 +56,19 @@ from core.web.services.self_evolution_control_service import (
     start_self_observation_run,
     stream_self_observation_run_events,
 )
+from core.web.services.self_evolution_autonomous_loop_orchestrator import (
+    approve_autonomous_self_evolution,
+    get_active_autonomous_self_evolution_run,
+    get_autonomous_self_evolution_run,
+    get_latest_autonomous_self_evolution_run,
+    reject_autonomous_self_evolution,
+    retry_autonomous_self_evolution_cleanup,
+    start_autonomous_self_evolution,
+)
+from core.web.services.self_evolution_autonomous_loop_service import (
+    AutonomousLoopConflictError,
+    AutonomousLoopValidationError,
+)
 from core.web.services.supervised_control_service import (
     SupervisedRunDeleteError,
     SupervisedRunActionError,
@@ -151,6 +164,16 @@ class SelfObservationRunStartPayload(BaseModel):
 
 class SelfObservationRunActionPayload(BaseModel):
     action: str = ""
+
+
+class SelfEvolutionAutonomousRunStartPayload(BaseModel):
+    goal: str = ""
+    maxIterations: int = 1
+
+
+class SelfEvolutionAutonomousRunActionPayload(BaseModel):
+    action: str = ""
+    comment: str = ""
 
 
 class SupervisedWorktreeRunActionPayload(BaseModel):
@@ -259,6 +282,14 @@ def evolution_workspace_snapshot(includeSelf: bool = False) -> dict:
         "self_observation_active_run",
         get_active_self_observation_run if includeSelf else (lambda: None),
     )
+    self_autonomous_active_run = timed(
+        "self_autonomous_active_run",
+        get_active_autonomous_self_evolution_run if includeSelf else (lambda: None),
+    )
+    self_autonomous_latest_run = timed(
+        "self_autonomous_latest_run",
+        get_latest_autonomous_self_evolution_run if includeSelf else (lambda: None),
+    )
     supervised_runtime_active_run = (
         worktree_active_run
         if isinstance(worktree_active_run, dict) and not _is_self_evolution_worktree_run(worktree_active_run)
@@ -288,6 +319,8 @@ def evolution_workspace_snapshot(includeSelf: bool = False) -> dict:
         "selfWorktreeActiveRun": self_worktree_active_run,
         "selfWorktreeRuns": self_worktree_runs if includeSelf else [],
         "selfObservationActiveRun": self_observation_active_run,
+        "selfAutonomousActiveRun": self_autonomous_active_run,
+        "selfAutonomousLatestRun": self_autonomous_latest_run,
         "selfTransactions": self_transactions,
     }
     duration_ms = (time.perf_counter() - started_at) * 1000
@@ -558,6 +591,72 @@ def self_observation_run_action(run_id: str, payload: SelfObservationRunActionPa
     except SelfEvolutionRunBusyError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except SelfEvolutionRunValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post(
+    "/evolution/self/autonomous-runs",
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def self_evolution_start_autonomous_run(
+    payload: SelfEvolutionAutonomousRunStartPayload,
+) -> dict:
+    try:
+        return start_autonomous_self_evolution(payload.model_dump())
+    except AutonomousLoopConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except AutonomousLoopValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/evolution/self/autonomous-runs/active")
+def self_evolution_active_autonomous_run() -> dict | None:
+    return get_active_autonomous_self_evolution_run()
+
+
+@router.get("/evolution/self/autonomous-runs/latest")
+def self_evolution_latest_autonomous_run() -> dict | None:
+    return get_latest_autonomous_self_evolution_run()
+
+
+@router.get("/evolution/self/autonomous-runs/{run_id}")
+def self_evolution_autonomous_run(run_id: str) -> dict:
+    try:
+        return get_autonomous_self_evolution_run(run_id)
+    except AutonomousLoopValidationError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/evolution/self/autonomous-runs/{run_id}/actions")
+def self_evolution_autonomous_run_action(
+    run_id: str,
+    payload: SelfEvolutionAutonomousRunActionPayload,
+) -> dict:
+    action = str(payload.action or "").strip().lower()
+    decision = {
+        "actorType": "user",
+        "actorId": "local-user",
+        "comment": payload.comment,
+    }
+    try:
+        if action == "approve":
+            return approve_autonomous_self_evolution(
+                run_id,
+                decision=decision,
+            )
+        if action == "reject":
+            return reject_autonomous_self_evolution(
+                run_id,
+                decision=decision,
+            )
+        if action == "retry_cleanup":
+            return retry_autonomous_self_evolution_cleanup(run_id)
+        raise AutonomousLoopValidationError(
+            "Autonomous-loop action must be approve, reject, or retry_cleanup."
+        )
+    except AutonomousLoopConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except AutonomousLoopValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 

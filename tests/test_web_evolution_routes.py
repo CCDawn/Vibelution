@@ -754,6 +754,22 @@ def test_evolution_workspace_snapshot_can_include_full_self_payload(monkeypatch)
     monkeypatch.setattr(evolution_routes, "get_self_evolution_light_overview", lambda: pytest.fail("includeSelf should request full overview"))
     monkeypatch.setattr(evolution_routes, "get_self_evolution_overview", lambda: {"enabled": True, "goal": "full"})
     monkeypatch.setattr(evolution_routes, "list_self_evolution_transactions", lambda: [{"txnId": "txn-1"}])
+    autonomous_run = {
+        "runId": "self-loop-latest",
+        "runKind": "self_evolution_autonomous_loop",
+        "status": "awaiting_user_approval",
+        "phase": "reporting",
+    }
+    monkeypatch.setattr(
+        evolution_routes,
+        "get_active_autonomous_self_evolution_run",
+        lambda: autonomous_run,
+    )
+    monkeypatch.setattr(
+        evolution_routes,
+        "get_latest_autonomous_self_evolution_run",
+        lambda: autonomous_run,
+    )
     monkeypatch.setattr(
         evolution_routes,
         "current_supervised_agent_bindings_snapshot",
@@ -771,6 +787,8 @@ def test_evolution_workspace_snapshot_can_include_full_self_payload(monkeypatch)
     assert payload["evolutionRuntime"]["byKind"]["self_worktree"]["runId"] == "swte-self-latest"
     assert payload["evolutionRuntime"]["byKind"]["self_worktree"]["currentStepId"] == "approval"
     assert payload["evolutionRuntime"]["byKind"]["self_worktree"]["primaryConversationSessionId"] == "session-self"
+    assert payload["selfAutonomousActiveRun"] == autonomous_run
+    assert payload["selfAutonomousLatestRun"] == autonomous_run
     assert "selfLatestRun" not in payload
     assert payload["selfTransactions"] == [{"txnId": "txn-1"}]
 
@@ -2079,6 +2097,101 @@ def test_self_observation_action_route_returns_409_for_non_active_run(monkeypatc
     assert first.status_code == 200
     assert second.status_code == 409
     assert "not active" in second.json()["detail"]
+
+
+def test_autonomous_self_evolution_routes_expose_start_and_read_models(monkeypatch):
+    queued = {
+        "runId": "self-loop-web",
+        "runKind": "self_evolution_autonomous_loop",
+        "status": "queued",
+        "phase": "queued",
+    }
+    calls: list[dict] = []
+    monkeypatch.setattr(
+        evolution_routes,
+        "start_autonomous_self_evolution",
+        lambda payload: calls.append(payload) or queued,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        evolution_routes,
+        "get_autonomous_self_evolution_run",
+        lambda run_id: {**queued, "runId": run_id},
+        raising=False,
+    )
+    monkeypatch.setattr(
+        evolution_routes,
+        "get_active_autonomous_self_evolution_run",
+        lambda: queued,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        evolution_routes,
+        "get_latest_autonomous_self_evolution_run",
+        lambda: {**queued, "status": "completed", "phase": "completed"},
+        raising=False,
+    )
+
+    started = client.post(
+        "/api/evolution/self/autonomous-runs",
+        json={"goal": "整理自进化流程", "maxIterations": 2},
+    )
+    detail = client.get("/api/evolution/self/autonomous-runs/self-loop-web")
+    active = client.get("/api/evolution/self/autonomous-runs/active")
+    latest = client.get("/api/evolution/self/autonomous-runs/latest")
+
+    assert started.status_code == 202
+    assert started.json() == queued
+    assert calls == [{"goal": "整理自进化流程", "maxIterations": 2}]
+    assert detail.status_code == 200
+    assert detail.json()["runId"] == "self-loop-web"
+    assert active.status_code == 200
+    assert active.json() == queued
+    assert latest.status_code == 200
+    assert latest.json()["status"] == "completed"
+
+
+def test_autonomous_self_evolution_action_route_enforces_user_actor(monkeypatch):
+    calls: list[tuple[str, str, dict]] = []
+
+    def approve(run_id: str, *, decision: dict):
+        calls.append(("approve", run_id, decision))
+        return {
+            "runId": run_id,
+            "status": "completed",
+            "phase": "completed",
+            "approval": decision,
+        }
+
+    monkeypatch.setattr(
+        evolution_routes,
+        "approve_autonomous_self_evolution",
+        approve,
+        raising=False,
+    )
+
+    response = client.post(
+        "/api/evolution/self/autonomous-runs/self-loop-web/actions",
+        json={
+            "action": "approve",
+            "comment": "用户确认合入",
+            "actorType": "agent",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "completed"
+    assert calls == [
+        (
+            "approve",
+            "self-loop-web",
+            {
+                "actorType": "user",
+                "actorId": "local-user",
+                "comment": "用户确认合入",
+            },
+        )
+    ]
 
 
 def test_active_supervised_run_events_is_quiet_when_no_active_run():

@@ -27,6 +27,7 @@ from core.web.services import (
     log_service,
     runtime_scene_service,
     runtime_service,
+    self_evolution_autonomous_loop_orchestrator,
     self_evolution_control_service,
     self_evolution_service,
     session_service,
@@ -1088,6 +1089,72 @@ def test_runtime_lifecycle_proof_ignores_finished_needs_continue_work_run(monkey
     assert proof["overallState"] == "closed"
     assert proof["activeWorkRuns"]["count"] == 0
     assert runtime_service._restart_guard_active_work_runs() == []
+
+
+def test_runtime_summary_projects_autonomous_self_evolution_loop(monkeypatch):
+    active = {
+        "runId": "self-loop-active",
+        "runKind": "self_evolution_autonomous_loop",
+        "status": "running",
+        "phase": "planning",
+    }
+    latest = {
+        "runId": "self-loop-latest",
+        "runKind": "self_evolution_autonomous_loop",
+        "status": "completed",
+        "phase": "completed",
+        "finishedAt": "2026-08-01T00:00:00Z",
+    }
+    monkeypatch.setattr(runtime_service, "_safe_load_chat_turn_work_run_summary", lambda: {})
+    monkeypatch.setattr(runtime_service, "_safe_load_chat_room_work_run_summary", lambda: {})
+    monkeypatch.setattr(runtime_service, "_safe_load_source_collection_work_run_summary", lambda: {})
+    monkeypatch.setattr(runtime_service, "_safe_load_evolution_work_run", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(runtime_service, "_safe_load_supervised_worktree_work_run", lambda **_kwargs: None)
+    monkeypatch.setattr(
+        self_evolution_autonomous_loop_orchestrator,
+        "get_active_autonomous_self_evolution_run",
+        lambda: active,
+    )
+    monkeypatch.setattr(
+        self_evolution_autonomous_loop_orchestrator,
+        "get_latest_autonomous_self_evolution_run",
+        lambda: latest,
+    )
+
+    summary = runtime_service._work_run_summary()
+
+    assert summary["active"]["self_evolution_autonomous_loop"] == active
+    assert summary["latest"]["self_evolution_autonomous_loop"] == latest
+    assert runtime_service._active_work_runs(summary) == [
+        {
+            "kind": "self_evolution_autonomous_loop",
+            "runId": "self-loop-active",
+            "status": "running",
+            "sessionId": "",
+        }
+    ]
+
+
+def test_autonomous_self_evolution_review_wait_does_not_block_launcher(monkeypatch):
+    review_wait = {
+        "runId": "self-loop-review",
+        "runKind": "self_evolution_autonomous_loop",
+        "status": "awaiting_user_approval",
+        "phase": "reporting",
+    }
+    monkeypatch.setattr(
+        self_evolution_autonomous_loop_orchestrator,
+        "get_active_autonomous_self_evolution_run",
+        lambda: review_wait,
+    )
+    monkeypatch.setattr(
+        self_evolution_autonomous_loop_orchestrator,
+        "get_latest_autonomous_self_evolution_run",
+        lambda: review_wait,
+    )
+
+    assert runtime_service._safe_load_autonomous_self_evolution_work_run(active=True) is None
+    assert runtime_service._safe_load_autonomous_self_evolution_work_run(active=False) == review_wait
 
 
 def test_runtime_lifecycle_proof_does_not_mark_closed_when_backend_port_is_still_owned(monkeypatch):
