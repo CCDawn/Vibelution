@@ -22,6 +22,7 @@ def _build_service(tmp_path, *, hook_overrides=None):
         return {
             "summary": "发现 self-evolution 尚未形成用户审批后的自动收口。",
             "evidence": [{"kind": "source", "ref": "core/web/services/self_evolution_control_service.py"}],
+            "conversationSessionId": "session-observer",
         }
 
     def plan(context):
@@ -32,6 +33,7 @@ def _build_service(tmp_path, *, hook_overrides=None):
                 {"id": "state-machine", "title": "建立持久化状态机"},
                 {"id": "integration", "title": "用户批准后自动合并并清理"},
             ],
+            "conversationSessionId": "session-observer",
         }
 
     def evolve(context):
@@ -44,6 +46,8 @@ def _build_service(tmp_path, *, hook_overrides=None):
             "headCommit": "b" * 40,
             "changedFiles": ["core/example.py", "tests/test_example.py"],
             "verification": [{"command": "pytest tests/test_example.py", "outcome": "passed"}],
+            "conversationSessionId": "session-executor",
+            "variantId": "variant-001",
         }
 
     def integrate(context):
@@ -99,8 +103,12 @@ def test_run_stops_at_user_approval_without_evaluation_or_git_integration(tmp_pa
         "requiredActorType": "user",
     }
     assert result["observation"]["summary"].startswith("发现")
+    assert result["observation"]["conversationSessionId"] == "session-observer"
     assert result["plan"]["steps"][0]["id"] == "state-machine"
+    assert result["plan"]["conversationSessionId"] == "session-observer"
     assert result["candidate"]["branch"] == "codex/self-loop-candidate"
+    assert result["candidate"]["conversationSessionId"] == "session-executor"
+    assert result["candidate"]["variantId"] == "variant-001"
     assert result["resultReport"]["summary"] == "候选改动已在隔离工作树完成。"
     assert "evaluation" not in result
     assert "judge" not in result

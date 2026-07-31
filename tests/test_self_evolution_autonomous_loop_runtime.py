@@ -1,0 +1,258 @@
+from __future__ import annotations
+
+from copy import deepcopy
+
+import pytest
+
+from core.web.services.self_evolution_autonomous_loop_runtime import (
+    AutonomousLoopRuntimeDependencies,
+    AutonomousLoopRuntimeError,
+    build_autonomous_loop_hooks,
+)
+
+
+def _snapshot(**updates):
+    payload = {
+        "runId": "self-loop-001",
+        "request": {"goal": "优化当前自进化流程", "maxIterations": 4},
+        "observation": {
+            "summary": "当前只有观察入口",
+            "evidence": [],
+            "conversationSessionId": "session-observer",
+        },
+        "plan": {
+            "summary": "建立无评分闭环",
+            "steps": [{"id": "implement", "title": "实现闭环"}],
+            "conversationSessionId": "session-observer",
+        },
+        "candidate": {
+            "branch": "codex/self-loop-candidate",
+            "worktreePath": "C:/workspace/self-loop-candidate",
+            "baseCommit": "a" * 40,
+            "headCommit": "b" * 40,
+            "changedFiles": ["core/example.py"],
+        },
+        "approval": {
+            "decision": "approve",
+            "actorType": "user",
+            "actorId": "local-user",
+        },
+        "integration": {
+            "status": "merged",
+            "mergedHead": "d" * 40,
+        },
+    }
+    payload.update(updates)
+    return payload
+
+
+def test_runtime_hooks_use_one_observer_context_then_isolated_executor():
+    calls: list[tuple[str, dict]] = []
+
+    def load_bindings():
+        return {
+            "observer": {
+                "agentId": "observer-agent",
+                "directSessionId": "session-observer",
+                "workspacePath": "C:/workspace/main",
+            },
+            "executor": {
+                "agentId": "executor-agent",
+                "directSessionId": "session-executor",
+                "workspacePath": "C:/workspace/main",
+            },
+        }
+
+    def run_role_turn(**kwargs):
+        calls.append(("turn", deepcopy(kwargs)))
+        if kwargs["role"] == "observer" and not kwargs.get("carryover"):
+            return {
+                "result": {
+                    "status": "completed",
+                    "summary": "发现自动闭环缺少用户批准后的 Git 收口。",
+                    "tool_trace": [{"name": "runtime_snapshot", "status": "completed"}],
+                },
+                "carryover": {"previousResponseId": "response-observe"},
+                "conversationSessionId": "session-observer",
+            }
+        if kwargs["role"] == "observer":
+            return {
+                "result": {
+                    "status": "completed",
+                    "summary": "新增状态机、真实执行适配和确定性 Git 接线。",
+                    "steps": [
+                        {"id": "state", "title": "状态机"},
+                        {"id": "git", "title": "Git 收口"},
+                    ],
+                },
+                "carryover": {"previousResponseId": "response-plan"},
+                "conversationSessionId": "session-observer",
+            }
+        return {
+            "result": {
+                "status": "completed",
+                "summary": "候选实现完成，聚焦测试通过。",
+                "tool_trace": [{"name": "pytest", "status": "completed"}],
+            },
+            "carryover": {},
+            "conversationSessionId": "session-executor",
+        }
+
+    def create_candidate(context):
+        calls.append(("create_candidate", deepcopy(context)))
+        return {
+            "branch": "codex/self-loop-candidate",
+            "worktreePath": "C:/workspace/self-loop-candidate",
+            "baseCommit": "a" * 40,
+        }
+
+    def inspect_candidate(context):
+        calls.append(("inspect_candidate", deepcopy(context)))
+        return {
+            "headCommit": "b" * 40,
+            "changedFiles": ["core/example.py", "tests/test_example.py"],
+            "variantId": "variant-001",
+        }
+
+    hooks = build_autonomous_loop_hooks(
+        AutonomousLoopRuntimeDependencies(
+            load_bindings=load_bindings,
+            run_role_turn=run_role_turn,
+            create_candidate=create_candidate,
+            inspect_candidate=inspect_candidate,
+            integrate_candidate=lambda context: {
+                "status": "merged",
+                "targetBranch": "main",
+                "previousHead": "c" * 40,
+                "mergedHead": "d" * 40,
+                "candidateHead": context["candidate"]["headCommit"],
+            },
+            cleanup_candidate=lambda _context: {
+                "status": "cleaned",
+                "worktreeRemoved": True,
+                "localBranchDeleted": True,
+            },
+        )
+    )
+
+    observation = hooks.observe(_snapshot(observation=None, plan=None, candidate=None))
+    plan = hooks.plan(_snapshot(observation=observation, plan=None, candidate=None))
+    candidate = hooks.evolve(_snapshot(observation=observation, plan=plan, candidate=None))
+
+    turn_calls = [payload for name, payload in calls if name == "turn"]
+    assert [call["role"] for call in turn_calls] == [
+        "observer",
+        "observer",
+        "executor",
+    ]
+    assert all(call["role"] != "reviewer" for call in turn_calls)
+    assert turn_calls[1]["carryover"] == {
+        "previousResponseId": "response-observe"
+    }
+    assert "当前观察结果" in turn_calls[1]["prompt"]
+    assert turn_calls[2]["binding"]["workspacePath"] == (
+        "C:/workspace/self-loop-candidate"
+    )
+    assert "不得执行评分" in turn_calls[2]["prompt"]
+    assert observation["conversationSessionId"] == "session-observer"
+    assert plan["steps"][1]["id"] == "git"
+    assert candidate["conversationSessionId"] == "session-executor"
+    assert candidate["variantId"] == "variant-001"
+    assert candidate["changedFiles"] == [
+        "core/example.py",
+        "tests/test_example.py",
+    ]
+
+
+def test_runtime_integration_and_cleanup_hooks_are_deterministic_passthroughs():
+    captured: list[tuple[str, dict]] = []
+    hooks = build_autonomous_loop_hooks(
+        AutonomousLoopRuntimeDependencies(
+            load_bindings=lambda: {},
+            run_role_turn=lambda **_kwargs: {},
+            create_candidate=lambda _context: {},
+            inspect_candidate=lambda _context: {},
+            integrate_candidate=lambda context: captured.append(
+                ("integrate", deepcopy(context))
+            )
+            or {
+                "status": "merged",
+                "targetBranch": "main",
+                "previousHead": "c" * 40,
+                "mergedHead": "d" * 40,
+                "candidateHead": context["candidate"]["headCommit"],
+            },
+            cleanup_candidate=lambda context: captured.append(
+                ("cleanup", deepcopy(context))
+            )
+            or {
+                "status": "cleaned",
+                "worktreeRemoved": True,
+                "localBranchDeleted": True,
+            },
+        )
+    )
+
+    integration = hooks.integrate(_snapshot())
+    cleanup = hooks.cleanup(_snapshot())
+
+    assert [name for name, _ in captured] == ["integrate", "cleanup"]
+    assert integration["mergedHead"] == "d" * 40
+    assert cleanup["localBranchDeleted"] is True
+
+
+@pytest.mark.parametrize("status", ["failed", "stopped"])
+def test_runtime_rejects_non_successful_agent_turn(status):
+    hooks = build_autonomous_loop_hooks(
+        AutonomousLoopRuntimeDependencies(
+            load_bindings=lambda: {
+                "observer": {"agentId": "observer-agent"},
+                "executor": {"agentId": "executor-agent"},
+            },
+            run_role_turn=lambda **_kwargs: {
+                "result": {"status": status, "error": "model unavailable"},
+                "carryover": {},
+            },
+            create_candidate=lambda _context: {},
+            inspect_candidate=lambda _context: {},
+            integrate_candidate=lambda _context: {},
+            cleanup_candidate=lambda _context: {},
+        )
+    )
+
+    with pytest.raises(AutonomousLoopRuntimeError, match="model unavailable"):
+        hooks.observe(_snapshot(observation=None, plan=None, candidate=None))
+
+
+def test_runtime_rejects_candidate_without_changed_files():
+    hooks = build_autonomous_loop_hooks(
+        AutonomousLoopRuntimeDependencies(
+            load_bindings=lambda: {
+                "observer": {"agentId": "observer-agent"},
+                "executor": {
+                    "agentId": "executor-agent",
+                    "workspacePath": "C:/workspace/main",
+                },
+            },
+            run_role_turn=lambda **_kwargs: {
+                "result": {"status": "completed", "summary": "完成"},
+                "carryover": {},
+                "conversationSessionId": "session-executor",
+            },
+            create_candidate=lambda _context: {
+                "branch": "codex/self-loop-candidate",
+                "worktreePath": "C:/workspace/self-loop-candidate",
+                "baseCommit": "a" * 40,
+            },
+            inspect_candidate=lambda _context: {
+                "headCommit": "a" * 40,
+                "changedFiles": [],
+                "variantId": "",
+            },
+            integrate_candidate=lambda _context: {},
+            cleanup_candidate=lambda _context: {},
+        )
+    )
+
+    with pytest.raises(AutonomousLoopRuntimeError, match="no changed files"):
+        hooks.evolve(_snapshot(candidate=None))

@@ -334,13 +334,20 @@ def _normalize_observation(payload: dict[str, Any]) -> dict[str, Any]:
     evidence = item.get("evidence")
     if not isinstance(evidence, list):
         raise AutonomousLoopValidationError("Observation evidence must be a list.")
-    return {
+    normalized = {
         "summary": summary,
         "evidence": [
             _sanitize_evidence(item)
             for item in evidence[:MAX_VERIFICATION_ITEMS]
         ],
     }
+    _copy_optional_text(
+        item,
+        normalized,
+        "conversationSessionId",
+        max_length=300,
+    )
+    return normalized
 
 
 def _normalize_plan(payload: dict[str, Any]) -> dict[str, Any]:
@@ -349,13 +356,20 @@ def _normalize_plan(payload: dict[str, Any]) -> dict[str, Any]:
     steps = item.get("steps")
     if not isinstance(steps, list) or not steps:
         raise AutonomousLoopValidationError("Plan steps must be a non-empty list.")
-    return {
+    normalized = {
         "summary": summary,
         "steps": [
             _sanitize_evidence(item)
             for item in steps[:MAX_VERIFICATION_ITEMS]
         ],
     }
+    _copy_optional_text(
+        item,
+        normalized,
+        "conversationSessionId",
+        max_length=300,
+    )
+    return normalized
 
 
 def _normalize_candidate(payload: dict[str, Any]) -> dict[str, Any]:
@@ -388,6 +402,13 @@ def _normalize_candidate(payload: dict[str, Any]) -> dict[str, Any]:
         raise AutonomousLoopValidationError(
             "Candidate headCommit must differ from baseCommit."
         )
+    _copy_optional_text(
+        item,
+        candidate,
+        "conversationSessionId",
+        max_length=300,
+    )
+    _copy_optional_text(item, candidate, "variantId", max_length=300)
     return candidate
 
 
@@ -530,6 +551,18 @@ def _bounded_object_list(value: Any, label: str, *, limit: int) -> list[dict[str
 
 def _trim_text(value: Any, limit: int) -> str:
     return str(value or "").strip()[:limit]
+
+
+def _copy_optional_text(
+    source: dict[str, Any],
+    target: dict[str, Any],
+    key: str,
+    *,
+    max_length: int,
+) -> None:
+    value = _trim_text(source.get(key), max_length)
+    if value:
+        target[key] = value
 
 
 def _sanitize_evidence(value: Any, *, depth: int = 0) -> Any:
