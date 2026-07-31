@@ -10,6 +10,7 @@ from core.web.services.team import (
     canvas_primitives,
     chat_room_links,
     kind_helpers,
+    research_organization,
     system_bootstrap,
     system_teams,
 )
@@ -62,6 +63,14 @@ def test_facade_reexports_system_bootstrap_control_plane() -> None:
     assert hasattr(facade, "_TEAM_SYSTEM_BOOTSTRAP_THREAD")
     assert isinstance(facade._TEAM_SYSTEM_BOOTSTRAP_STATE, dict)
     assert facade.TEAM_SYSTEM_BOOTSTRAP_READY_CACHE_TTL_SECONDS == 30.0
+
+
+def test_facade_reexports_research_organization() -> None:
+    assert facade.ensure_research_team_from_organization is research_organization.ensure_research_team_from_organization
+    assert facade._members_from_research_organization is research_organization._members_from_research_organization
+    assert facade._canvas_from_research_organization is research_organization._canvas_from_research_organization
+    assert facade._organization_reporting_edges is research_organization._organization_reporting_edges
+    assert facade._sync_research_team_member_agent_roles is research_organization._sync_research_team_member_agent_roles
 
 
 def test_facade_reexports_ai_search_runs() -> None:
