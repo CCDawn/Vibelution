@@ -161,7 +161,11 @@ export function TeamSourceCollectionExtractionRecoveryWorkspacePanel(props: Team
       : sourceCollectionStageRecoveryStatusLabel("extraction", lang);
     const sourceCollectionRecoveryAgentActionText = sourceCollectionExtractionExcludedRecoveryState.blockedByExcludedSources
       ? sourceCollectionExtractionExcludedRecoveryState.primaryActionText
-      : (lang === "zh" ? "继续 Agent 提炼" : "Continue Agent extraction");
+      : sourceCollectionExtractionRecoverySourceVerificationOnly
+        ? (lang === "zh" ? "要求 Agent 补充材料" : "Request Agent material supplement")
+        : sourceCollectionExtractionRecoveryEvidenceGapOnly
+          ? (lang === "zh" ? "要求 Agent 补充证据" : "Request Agent evidence supplement")
+          : (lang === "zh" ? "继续 Agent 提炼" : "Continue Agent extraction");
     const sourceCollectionRecoveryAgentActionTitle = sourceCollectionExtractionExcludedRecoveryState.blockedByExcludedSources
       ? sourceCollectionExtractionExcludedRecoveryState.primaryActionTitle
       : sourceCollectionActionDisabledTitle(
@@ -173,8 +177,8 @@ export function TeamSourceCollectionExtractionRecoveryWorkspacePanel(props: Team
       ? sourceCollectionExtractionExcludedRecoveryState.summary
       : sourceCollectionExtractionRecoverySourceVerificationOnly
         ? (lang === "zh"
-          ? `候选资料已提炼 ${sourceCollectionExtractionRecoverySalvageCount}/${sourceCollectionExtractionRecoveryInputCount}；其中 ${sourceCollectionExtractionRecoverySourceVerificationCount} 条来源需要核验版本或可靠性，不代表缺少证据锚点。`
-          : `${sourceCollectionExtractionRecoverySalvageCount}/${sourceCollectionExtractionRecoveryInputCount} candidate sources were extracted; ${sourceCollectionExtractionRecoverySourceVerificationCount} still need version or reliability verification, not additional evidence anchors.`)
+          ? `资料已提炼 ${sourceCollectionExtractionRecoverySalvageCount}/${sourceCollectionExtractionRecoveryInputCount}；其中 ${sourceCollectionExtractionRecoverySourceVerificationCount} 条来源需要 Agent 补充可核验材料（全文、公开摘要、版本或 DOI），补齐后会重新进入来源质量复核；当前没有证据锚点缺口。`
+          : `${sourceCollectionExtractionRecoverySalvageCount}/${sourceCollectionExtractionRecoveryInputCount} sources were extracted; ${sourceCollectionExtractionRecoverySourceVerificationCount} need verifiable material from the Agent (full text, public abstract, version, or DOI) before source-quality review can run again; no evidence-anchor gap is reported.`)
       : sourceCollectionStageUserSummary(candidateProjection, lang)
       || (lang === "zh"
         ? "本轮资料提炼没有完全闭环；先保留可用候选，再补齐失败记录。"
@@ -204,7 +208,7 @@ export function TeamSourceCollectionExtractionRecoveryWorkspacePanel(props: Team
         statusLabel={sourceCollectionExtractionExcludedRecoveryState.blockedByExcludedSources
           ? sourceCollectionExtractionExcludedRecoveryState.statusLabel
           : sourceCollectionExtractionRecoverySourceVerificationOnly
-            ? (lang === "zh" ? "提炼完成，待核验来源" : "Extraction complete; sources need verification")
+            ? (lang === "zh" ? "提炼完成，待补充材料" : "Extraction complete; material supplement required")
           : sourceCollectionExtractionRecoveryEvidenceGapOnly
             ? (lang === "zh" ? "提炼完成，待补证据" : "Extraction complete; evidence needed")
             : sourceCollectionStageRecoveryStatusLabel("extraction", lang)}
@@ -212,7 +216,7 @@ export function TeamSourceCollectionExtractionRecoveryWorkspacePanel(props: Team
         failedLabel={sourceCollectionExtractionExcludedRecoveryState.blockedByExcludedSources
           ? sourceCollectionExtractionExcludedRecoveryState.failedLabel
           : sourceCollectionExtractionRecoverySourceVerificationOnly
-            ? (lang === "zh" ? "待核验来源" : "sources to verify")
+            ? (lang === "zh" ? "待补材料来源" : "sources needing material")
           : sourceCollectionExtractionRecoveryEvidenceGapOnly
             ? (lang === "zh" ? "待补证据" : "evidence gaps")
             : undefined}
@@ -221,7 +225,7 @@ export function TeamSourceCollectionExtractionRecoveryWorkspacePanel(props: Team
         recoverLabel={sourceCollectionExtractionExcludedRecoveryState.blockedByExcludedSources
           ? sourceCollectionExtractionExcludedRecoveryState.recoverLabel
           : sourceCollectionExtractionRecoverySourceVerificationOnly
-            ? (lang === "zh" ? "提炼覆盖" : "extraction coverage")
+            ? (lang === "zh" ? "已提炼" : "extracted")
           : sourceCollectionExtractionRecoveryEvidenceGapOnly
             ? (lang === "zh" ? "提炼覆盖" : "extraction coverage")
             : undefined}

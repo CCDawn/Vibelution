@@ -3791,6 +3791,18 @@ export function TeamsRoute({
     ? sourceCollectionCandidateProjection.currentCoverageSummary
     : sourceCollectionCandidateProjection?.latestTask?.coverageSummary;
   const sourceCollectionExtractionRecoveryClosure = sourceCollectionCandidateProjection?.latestTask?.closureSummary;
+  const sourceCollectionExtractionSourceVerificationCount = Math.max(
+    sourceCollectionNonNegativeCount(sourceCollectionExtractionRecoveryClosure?.blockedCount),
+    sourceCollectionNonNegativeCount(sourceCollectionExtractionRecoveryCoverage?.blocked),
+  );
+  const sourceCollectionExtractionMissingEvidenceAnchorCount = sourceCollectionNonNegativeCount(
+    sourceCollectionCandidateProjection?.latestTask?.materializedContentExtraction?.missingEvidenceAnchorCount,
+  );
+  const sourceCollectionExtractionAgentMaterialCount = Math.max(
+    sourceCollectionExtractionSourceVerificationCount,
+    sourceCollectionExtractionMissingEvidenceAnchorCount,
+  );
+  const sourceCollectionExtractionNeedsAgentMaterial = sourceCollectionExtractionAgentMaterialCount > 0;
   const sourceCollectionExtractionRecoveryMissingCount = Math.max(
     sourceCollectionNonNegativeCount(sourceCollectionExtractionRecoveryCoverage?.missing),
     sourceCollectionStageProjectionCount(sourceCollectionCandidateProjection, "pending", 0),
@@ -4687,7 +4699,10 @@ export function TeamsRoute({
     ? (lang === "zh"
       ? `已处理 ${sourceCollectionProjectedAssessedCount}/${sourceCollectionProjectedCandidateCount} · ${sourceCollectionDataSyncText}`
       : `${sourceCollectionProjectedAssessedCount}/${sourceCollectionProjectedCandidateCount} processed · ${sourceCollectionDataSyncText}`)
-    : (lang === "zh" ? "提炼进度 加载中" : "extraction loading");
+      : (lang === "zh" ? "提炼进度 加载中" : "extraction loading");
+  const sourceCollectionExtractionMaterialMetric = lang === "zh"
+    ? `已提炼 ${sourceCollectionProjectedCandidateCount}/${sourceCollectionProjectedCandidateCount} · ${sourceCollectionExtractionAgentMaterialCount} 条待补材料`
+    : `${sourceCollectionProjectedCandidateCount}/${sourceCollectionProjectedCandidateCount} extracted · ${sourceCollectionExtractionAgentMaterialCount} need material`;
   const sourceCollectionExtractionLoadingOutputLabel = sourceCollectionProjectedCandidateCount > 0 || sourceCollectionProjectedApprovedCount > 0
     ? (lang === "zh"
       ? `${sourceCollectionProjectedApprovedCount} 条保留 / ${sourceCollectionRunPendingScreeningCount} 条待处理 · ${sourceCollectionDataSyncText}`
@@ -4730,6 +4745,8 @@ export function TeamsRoute({
       label: lang === "zh" ? "提炼" : "Extract",
       metric: sourceCollectionScreeningDataLoading || sourceCollectionPrimaryDataLoading
         ? sourceCollectionExtractionLoadingMetric
+        : sourceCollectionExtractionNeedsAgentMaterial
+          ? sourceCollectionExtractionMaterialMetric
         : (lang === "zh" ? `已处理 ${sourceCollectionProjectedAssessedCountText}/${sourceCollectionProjectedCandidateCountText}` : `${sourceCollectionProjectedAssessedCountText}/${sourceCollectionProjectedCandidateCountText} processed`),
       summary: sourceCollectionStageLaunchActive("extraction")
         ? sourceCollectionStageLaunchSummary("extraction")
@@ -4737,6 +4754,10 @@ export function TeamsRoute({
         ? sourceCollectionLoadingSummary
         : sourceCollectionExtractionCanProceedAfterExclusions
         ? sourceCollectionExtractionProceedableSummary
+        : sourceCollectionExtractionNeedsAgentMaterial
+        ? (lang === "zh"
+          ? `${sourceCollectionExtractionAgentMaterialCount} 条来源需要 Agent 补充材料后再复核`
+          : `${sourceCollectionExtractionAgentMaterialCount} sources need Agent material before review can run again`)
         : sourceCollectionStageUserSummary(sourceCollectionExtractionProjection, lang) || (sourceCollectionPrimaryDataLoading
         ? sourceCollectionLoadingSummary
         : sourceCollectionDisplayedCandidateCount <= 0
@@ -4749,8 +4770,12 @@ export function TeamsRoute({
         ? sourceCollectionExtractionLoadingOutputLabel
         : sourceCollectionExtractionCanProceedAfterExclusions
           ? (lang === "zh" ? `${sourceCollectionProjectedApprovedCountText} 条保留 / ${sourceCollectionExtractionExcludedRecoveryState.excludedCount} 条已排除` : `${sourceCollectionProjectedApprovedCountText} kept / ${sourceCollectionExtractionExcludedRecoveryState.excludedCount} excluded`)
+          : sourceCollectionExtractionNeedsAgentMaterial
+            ? (lang === "zh" ? `${sourceCollectionProjectedCandidateCountText} 条已提炼 / ${sourceCollectionExtractionAgentMaterialCount} 条待补材料` : `${sourceCollectionProjectedCandidateCountText} extracted / ${sourceCollectionExtractionAgentMaterialCount} need material`)
           : (lang === "zh" ? `${sourceCollectionProjectedApprovedCountText} 条保留 / ${sourceCollectionRunPendingScreeningCountText} 条待处理` : `${sourceCollectionProjectedApprovedCountText} kept / ${sourceCollectionRunPendingScreeningCountText} pending`),
-      nextLabel: sourceCollectionRunPendingScreeningCount > 0
+      nextLabel: sourceCollectionExtractionNeedsAgentMaterial
+        ? (lang === "zh" ? "要求 Agent 补充材料" : "Request Agent material supplement")
+        : sourceCollectionRunPendingScreeningCount > 0
         ? (lang === "zh" ? "Agent 继续提炼" : "Agent continues extraction")
         : (lang === "zh" ? "进入资料关系整理" : "Move to relation mapping"),
       state: sourceCollectionStageDisplayState("extraction", sourceCollectionExtractionCanProceedAfterExclusions ? "done" : sourceCollectionExtractionDisplayState),
@@ -4758,13 +4783,17 @@ export function TeamsRoute({
         "extraction",
         sourceCollectionExtractionDisplayLoading
           ? sourceCollectionCandidateSyncStatusText
-          : sourceCollectionExtractionCanProceedAfterExclusions
+        : sourceCollectionExtractionCanProceedAfterExclusions
             ? sourceCollectionExtractionExcludedRecoveryState.statusLabel
+            : sourceCollectionExtractionNeedsAgentMaterial
+              ? (lang === "zh" ? "待补材料" : "material needed")
             : sourceCollectionStepStatusText(sourceCollectionExtractionStepState),
       ),
       detailLabel: lang === "zh" ? "查看提炼结果" : "View extraction details",
       actionLabel: sourceCollectionExtractionCanProceedAfterExclusions
         ? sourceCollectionExtractionExcludedRecoveryState.primaryActionText
+        : sourceCollectionExtractionNeedsAgentMaterial
+          ? (lang === "zh" ? "要求 Agent 补充材料" : "Request Agent material supplement")
         : sourceCollectionStageActionLabelFor(
           "extraction",
           sourceCollectionDisplayedCandidateCount > 0
