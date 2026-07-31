@@ -150,10 +150,10 @@ export function sourceCollectionStatusLabel(value: string | undefined | null, la
     needs_attention: "需处理",
     open: "待执行",
     pending: "待启动",
-    pending_screening: "待 Agent 复核",
+    pending_screening: "待质量审查",
     planned: "已计划",
     processing: "已搜索待审查",
-    reviewing: "待 Agent 复核",
+    reviewing: "待质量审查",
     ready: "已就绪",
     ready_for_screening: "可审查",
     returned: "已退回",
@@ -561,8 +561,8 @@ export function sourceCollectionSimpleRecordStatusPresentation(
     return {
       label: lang === "zh" ? "待补资料" : "needs evidence",
       title: lang === "zh"
-        ? `质量审查未通过。需要：${actions.join("；")}。补齐后重新运行资料质量审查。`
-        : `Quality review did not pass. Required: ${actions.join("; ")}. Re-run source quality review after repair.`,
+        ? `质量审查未通过（不是“没点到按钮”）。需要：${actions.join("；")}。操作顺序：① 先点「要求 Agent 补充材料」或「继续 Agent 提炼」补齐；② 再点「重新质量审查」。仅点审查不会自动变成「通过」。`
+        : `Quality review failed (not a missed click). Required: ${actions.join("; ")}. Order: (1) Request Agent material / continue extraction, then (2) re-run quality review. Review alone will not auto-approve.`,
     };
   }
   if (sourceQualitySummary || normalized.includes("screened")) {

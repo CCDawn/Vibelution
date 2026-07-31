@@ -1,6 +1,6 @@
 import { type ReactNode } from "react";
 
-import { VButton } from "../../index";
+import { VButton } from "../../primitives/VButton";
 
 export type TeamSourceFilterOption = {
   key: string;
@@ -15,24 +15,25 @@ export type TeamSourceFilterBarProps = {
   onSelect: (key: string) => void;
 };
 
-const BAR = "flex min-w-0 gap-[5px] overflow-x-auto pb-px";
+const BAR = "flex min-w-0 gap-1.5 overflow-x-auto pb-px";
 
+/** Compact filter toggle chips — VButton + density tokens (not a second chip system). */
 const CHIP_BASE =
-  "min-w-[76px] min-h-[28px] flex-none justify-between gap-2 rounded-[7px] border px-2 " +
-  "text-[0.64rem] font-[820] bg-[color:var(--source-workbench-card)] " +
-  "border-[var(--border-soft)] text-[var(--fg-muted)] " +
-  "hover:border-[color:color-mix(in_srgb,var(--accent-primary)_48%,var(--border-soft))] hover:bg-[color:color-mix(in_srgb,var(--accent-primary)_9%,var(--vui-surface-row))] hover:text-[var(--fg-primary)] " +
-  "focus-visible:outline-none focus-visible:border-[color:color-mix(in_srgb,var(--accent-primary)_48%,var(--border-soft))] focus-visible:bg-[color:color-mix(in_srgb,var(--accent-primary)_9%,var(--vui-surface-row))] focus-visible:text-[var(--fg-primary)]";
+  "min-w-[4.75rem] flex-none justify-between gap-1.5 rounded-[var(--radius-control)] border px-2 " +
+  "[font-size:var(--vui-font-xs)] font-semibold " +
+  "bg-[var(--vui-surface-row)] border-[var(--vui-border-subtle)] text-[var(--fg-secondary)] " +
+  "hover:border-[color:color-mix(in_srgb,var(--accent-cool)_48%,var(--vui-border-subtle))] " +
+  "hover:bg-[color:color-mix(in_srgb,var(--accent-cool)_9%,var(--vui-surface-row))] hover:text-[var(--fg-primary)] " +
+  "focus-visible:outline-none focus-visible:shadow-[var(--vui-shadow-focus)]";
 
 const CHIP_ACTIVE =
-  "border-[color:color-mix(in_srgb,var(--accent-primary)_48%,var(--border-soft))] bg-[color:color-mix(in_srgb,var(--accent-primary)_9%,var(--vui-surface-row))] text-[var(--fg-primary)]";
+  "border-[color:color-mix(in_srgb,var(--accent-cool)_48%,var(--vui-border-subtle))] " +
+  "bg-[color:color-mix(in_srgb,var(--accent-cool)_9%,var(--vui-surface-row))] text-[var(--fg-primary)]";
 
-const CHIP_COUNT = "text-[var(--fg-primary)] text-[0.68rem]";
+const CHIP_COUNT = "text-[var(--fg-primary)] [font-size:var(--vui-font-xs)] font-semibold";
 
 /**
- * Faithful reproduction of `.sourceCollectionFilterBar`: a horizontally
- * scrollable row of compact filter chips (label + count) with an accent-tinted
- * active state.
+ * Horizontally scrollable filter chips (label + count) with accent-tinted active state.
  */
 export function TeamSourceFilterBar({ ariaLabel, options, onSelect }: TeamSourceFilterBarProps) {
   return (
@@ -42,6 +43,7 @@ export function TeamSourceFilterBar({ ariaLabel, options, onSelect }: TeamSource
           key={option.key}
           density="compact"
           type="button"
+          variant="secondary"
           trailingIcon={<strong className={CHIP_COUNT}>{option.count}</strong>}
           className={[CHIP_BASE, option.selected ? CHIP_ACTIVE : ""].filter(Boolean).join(" ")}
           onClick={() => onSelect(option.key)}
