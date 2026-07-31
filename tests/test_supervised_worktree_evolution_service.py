@@ -2424,6 +2424,36 @@ def test_agent_approval_mode_requires_independent_auditor_binding(tmp_path):
         )
 
 
+def test_agent_approval_mode_preserves_independent_auditor_binding(tmp_path):
+    project_root = tmp_path / "project"
+    _write_bundle(
+        project_root,
+        mutation_allowlist=["tests/supervised_worktree_candidate_marker.py"],
+    )
+
+    options = service._normalize_start_payload(
+        {
+            "sourceKind": "bundle",
+            "bundleName": "closed_loop_v1",
+            "executionMode": "real",
+            "approvalMode": "agent",
+            "confirmRealLlmCost": True,
+            "agentBindings": {
+                "baseline": {"agentId": "agent-baseline", "role": "baseline"},
+                "auditor": {"agentId": "agent-approval", "role": "auditor"},
+                "judge": {"agentId": "agent-judge", "role": "judge"},
+            },
+        },
+        lang="zh",
+        project_root=project_root,
+    )
+
+    assert options["agentBindings"]["auditor"] == {
+        "agentId": "agent-approval",
+        "role": "auditor",
+    }
+
+
 def test_approval_mode_is_normalized_and_frozen_per_run(tmp_path):
     project_root = tmp_path / "project"
     _write_bundle(project_root)
