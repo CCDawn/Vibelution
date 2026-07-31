@@ -1340,7 +1340,7 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourceCollectionConversationWorkspacePanelSource).toContain("TeamSourceResultList");
     expect(teamSourceCollectionConversationWorkspacePanelSource).toContain("TeamSourceResultItem");
     expect(teamSourceCollectionConversationWorkspacePanelSource).toContain("sourceCollectionResultTone");
-    expect(teamSourceCollectionConversationWorkspacePanelSource).toContain("resultStatusLabel");
+    expect(teamSourceCollectionConversationWorkspacePanelSource).toContain("statusLabel={resultStatus.label}");
     expect(teamSourceCollectionScreeningWorkspacePanelSource).toContain("当前过滤条件下没有候选资料");
     // Wave 8L: graph/memory empty filter copy live on workspace panels.
     expect(teamSourceCollectionGraphWorkspacePanelSource).toContain("当前过滤条件下没有入库关系节点");
@@ -2957,13 +2957,15 @@ describe("TeamsRoute layout contract", () => {
 
     // Wave 8K: raw-record list body lives on conversation workspace panel.
     const rawRecordSource = teamSourceCollectionConversationWorkspacePanelSource;
-    expect(rawRecordSource).toContain("sourceCollectionSimpleRecordStatusLabel");
+    expect(rawRecordSource).toContain("sourceCollectionSimpleRecordStatusPresentation");
+    expect(rawRecordSource).toContain("statusTitle={resultStatus.title}");
     expect(rawRecordSource).not.toContain("<p title={record.summary || record.recordId}>");
     expect(rawRecordSource).not.toContain("formatTime(record.updatedAt || record.createdAt");
 
     // Wave 8L: candidate list body lives on candidate workspace panel.
     const candidatePanelSource = teamSourceCollectionCandidateWorkspacePanelSource;
-    expect(candidatePanelSource).toContain("sourceCollectionSimpleCandidateStatusLabel");
+    expect(candidatePanelSource).toContain("sourceCollectionSimpleCandidateStatusPresentation");
+    expect(candidatePanelSource).toContain("statusTitle={qualityPresentation.title}");
     expect(candidatePanelSource).not.toContain("<p>{candidate.summary || candidate.candidateId}</p>");
     expect(candidatePanelSource).not.toContain("formatTime(candidate.updatedAt");
     expect(candidatePanelSource).not.toContain("sourceCollectionStageTechnicalDetails");

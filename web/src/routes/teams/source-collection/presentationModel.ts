@@ -442,20 +442,85 @@ export function candidateSourceQualityAssessmentSummary(candidate: TeamWorkflowC
     return null;
   }
   const scores = isRecord(assessment.scores) ? assessment.scores : {};
+  const requiredFixes = Array.isArray(assessment.requiredFixes)
+    ? assessment.requiredFixes.map((item) => String(item || "").trim()).filter(Boolean)
+    : [];
+  const riskFlags = Array.isArray(assessment.riskFlags)
+    ? assessment.riskFlags.map((item) => String(item || "").trim()).filter(Boolean)
+    : [];
   return {
     assessmentId: String(assessment.assessmentId || ""),
     decision: String(assessment.decision || ""),
     overallScore: Number(scores.overall || 0),
+    scores: {
+      relevance: Number(scores.relevance || 0),
+      reliability: Number(scores.reliability || 0),
+      accessibility: Number(scores.accessibility || 0),
+      extractionReadiness: Number(scores.extractionReadiness || 0),
+    },
+    requiredFixes,
+    riskFlags,
   };
 }
 
-export function sourceCollectionSimpleRecordStatusLabel(
+function sourceCollectionRevisionActions(
+  linkedCandidate: TeamWorkflowCandidate,
+  sourceQualitySummary: ReturnType<typeof candidateSourceQualityAssessmentSummary>,
+  lang: "zh" | "en",
+) {
+  if (sourceQualitySummary?.requiredFixes.length) {
+    return sourceQualitySummary.requiredFixes;
+  }
+  const metadata = isRecord(linkedCandidate.metadata) ? linkedCandidate.metadata : {};
+  const extraction = isRecord(metadata.contentExtraction)
+    ? metadata.contentExtraction
+    : (isRecord(metadata.sourceExtraction) ? metadata.sourceExtraction : {});
+  const evidenceRefs = Array.isArray(extraction.evidenceRefs) ? extraction.evidenceRefs : [];
+  const pageAnchors = Array.isArray(extraction.pageAnchors) ? extraction.pageAnchors : [];
+  const keyFindings = Array.isArray(extraction.keyFindings) ? extraction.keyFindings : [];
+  const extractionSummary = String(extraction.summary || "").trim();
+  const actions: string[] = [];
+
+  if (
+    metadata.metadataOnlyDownload === true
+    && !extractionSummary
+    && keyFindings.length === 0
+  ) {
+    actions.push(lang === "zh" ? "补充可核验的全文或公开摘要" : "Add accessible full text or a verifiable public abstract");
+  }
+  if (
+    evidenceRefs.length === 0
+    && pageAnchors.length === 0
+  ) {
+    actions.push(lang === "zh" ? "提取可定位的页码、段落或 DOI 证据锚点" : "Extract locatable page, paragraph, or DOI evidence anchors");
+  }
+  if ((sourceQualitySummary?.scores.accessibility || 0) > 0 && (sourceQualitySummary?.scores.accessibility || 0) < 55) {
+    actions.push(lang === "zh" ? "确认来源可访问且允许分析，或更换可访问来源" : "Confirm access and analysis permission, or replace the source");
+  }
+  if ((sourceQualitySummary?.scores.reliability || 0) > 0 && (sourceQualitySummary?.scores.reliability || 0) < 55) {
+    actions.push(lang === "zh" ? "补充 DOI、出版信息或本地文件哈希" : "Add DOI, publication metadata, or a local file hash");
+  }
+  if ((sourceQualitySummary?.scores.relevance || 0) > 0 && (sourceQualitySummary?.scores.relevance || 0) < 55) {
+    actions.push(lang === "zh" ? "补充与研究问题的相关性说明，或更换来源" : "Explain relevance to the research question, or replace the source");
+  }
+  if (!actions.length) {
+    actions.push(lang === "zh" ? "打开资料详情确认质量缺口并补充来源证据" : "Open source details and repair the recorded quality gap");
+  }
+  return actions;
+}
+
+export function sourceCollectionSimpleRecordStatusPresentation(
   linkedCandidate: TeamWorkflowCandidate | null,
   sourceQualitySummary: ReturnType<typeof candidateSourceQualityAssessmentSummary>,
   lang: "zh" | "en",
 ) {
   if (!linkedCandidate) {
-    return lang === "zh" ? "待提炼" : "extract";
+    return {
+      label: lang === "zh" ? "待提炼" : "extract",
+      title: lang === "zh"
+        ? "尚未导入候选。先完成资料提炼，再进行来源质量审查。"
+        : "Not imported as a candidate yet. Extract the source before quality review.",
+    };
   }
   const normalized = [
     sourceQualitySummary?.decision,
@@ -468,24 +533,68 @@ export function sourceCollectionSimpleRecordStatusLabel(
     || normalized.includes("ready")
     || normalized.includes("prefiltered")
   ) {
-    return lang === "zh" ? "通过" : "kept";
+    return {
+      label: lang === "zh" ? "通过" : "kept",
+      title: lang === "zh"
+        ? "来源质量审查已通过，可以进入内容提炼。"
+        : "Source quality review passed. Content extraction can continue.",
+    };
   }
-  if (
-    normalized.includes("rejected")
-    || normalized.includes("invalid")
-    || normalized.includes("broken")
-    || normalized.includes("revision")
-  ) {
-    return lang === "zh" ? "需补" : "revise";
+  if (normalized.includes("rejected")) {
+    return {
+      label: lang === "zh" ? "已排除" : "rejected",
+      title: lang === "zh"
+        ? "该来源已被质量审查排除，不会进入后续提炼。"
+        : "This source was rejected by quality review and will not be extracted.",
+    };
+  }
+  if (normalized.includes("invalid") || normalized.includes("broken")) {
+    return {
+      label: lang === "zh" ? "记录异常" : "invalid",
+      title: lang === "zh"
+        ? "来源记录无效或已损坏。打开资料详情修复记录，或更换来源。"
+        : "The source record is invalid or broken. Repair it in source details or replace the source.",
+    };
+  }
+  if (normalized.includes("revision")) {
+    const actions = sourceCollectionRevisionActions(linkedCandidate, sourceQualitySummary, lang);
+    return {
+      label: lang === "zh" ? "待补资料" : "needs evidence",
+      title: lang === "zh"
+        ? `质量审查未通过。需要：${actions.join("；")}。补齐后重新运行资料质量审查。`
+        : `Quality review did not pass. Required: ${actions.join("; ")}. Re-run source quality review after repair.`,
+    };
   }
   if (sourceQualitySummary || normalized.includes("screened")) {
-    return lang === "zh" ? "已审" : "reviewed";
+    return {
+      label: lang === "zh" ? "已审" : "reviewed",
+      title: lang === "zh"
+        ? "质量审查已有结果。打开资料详情查看评分与处理建议。"
+        : "Quality review is available. Open source details for scores and next actions.",
+    };
   }
-  return lang === "zh" ? "待审" : "review";
+  return {
+    label: lang === "zh" ? "待审" : "review",
+    title: lang === "zh"
+      ? "等待资料提炼 Agent 完成来源质量审查。"
+      : "Waiting for the Source Extractor Agent to complete quality review.",
+  };
+}
+
+export function sourceCollectionSimpleRecordStatusLabel(
+  linkedCandidate: TeamWorkflowCandidate | null,
+  sourceQualitySummary: ReturnType<typeof candidateSourceQualityAssessmentSummary>,
+  lang: "zh" | "en",
+) {
+  return sourceCollectionSimpleRecordStatusPresentation(linkedCandidate, sourceQualitySummary, lang).label;
 }
 
 export function sourceCollectionSimpleCandidateStatusLabel(candidate: TeamWorkflowCandidate, lang: "zh" | "en") {
   return sourceCollectionSimpleRecordStatusLabel(candidate, candidateSourceQualityAssessmentSummary(candidate), lang);
+}
+
+export function sourceCollectionSimpleCandidateStatusPresentation(candidate: TeamWorkflowCandidate, lang: "zh" | "en") {
+  return sourceCollectionSimpleRecordStatusPresentation(candidate, candidateSourceQualityAssessmentSummary(candidate), lang);
 }
 
 export function sourceCollectionCandidateQualityState(candidate: TeamWorkflowCandidate) {
