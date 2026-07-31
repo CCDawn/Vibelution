@@ -823,16 +823,16 @@ def _split_apply_patch_sections(patch_text: str) -> Tuple[bool, str, List[Tuple[
     return True, "", sections
 
 
-def _apply_patch_update(path: Path, body: List[str]) -> Tuple[bool, str]:
+def _build_patch_update(path: Path, body: List[str]) -> Tuple[bool, str, Optional[str]]:
     if not path.exists():
-        return False, f"[patch] 错误: 文件不存在 - {path}"
+        return False, f"[patch] 错误: 文件不存在 - {path}", None
     if not path.is_file():
-        return False, f"[patch] 错误: 路径不是文件 - {path}"
+        return False, f"[patch] 错误: 路径不是文件 - {path}", None
 
     try:
         content = path.read_text(encoding="utf-8")
     except Exception as exc:
-        return False, f"[patch] 错误: 无法读取文件 - {exc}"
+        return False, f"[patch] 错误: 无法读取文件 - {exc}", None
 
     hunks: List[Tuple[str, str]] = []
     old_lines: List[str] = []
@@ -867,30 +867,26 @@ def _apply_patch_update(path: Path, body: List[str]) -> Tuple[bool, str]:
         elif prefix == "+":
             new_lines.append(value)
         else:
-            return False, f"[patch] 错误: hunk 行需要以空格、+ 或 - 开头：{raw_line}"
+            return False, f"[patch] 错误: hunk 行需要以空格、+ 或 - 开头：{raw_line}", None
     flush_hunk()
 
     if not hunks:
-        return False, "[patch] 错误: Update File 缺少 @@ hunk。"
+        return False, "[patch] 错误: Update File 缺少 @@ hunk。", None
 
     new_content = content
     for old_text, new_text in hunks:
         if old_text == "":
-            return False, "[patch] 错误: Update hunk 缺少可定位的上下文或删除行。"
+            return False, "[patch] 错误: Update hunk 缺少可定位的上下文或删除行。", None
         if old_text not in new_content:
             similar = _find_similar_snippet(new_content, old_text)
             return False, (
                 "[patch] 错误: 在文件中找不到 hunk 内容。\n"
                 f"[目标文件] {path}\n"
                 f"[搜索内容]\n{old_text[:400]}\n\n{similar}"
-            )
+            ), None
         new_content = new_content.replace(old_text, new_text, 1)
 
-    try:
-        path.write_text(new_content, encoding="utf-8", newline="")
-    except Exception as exc:
-        return False, f"[patch] 错误: 无法写入文件 - {exc}"
-    return True, f"[patch] 更新: {path}"
+    return True, f"[patch] 更新: {path}", new_content
 
 
 def apply_patch_edit(patch_text: str, cwd: str = ".") -> str:
@@ -909,9 +905,18 @@ def apply_patch_edit(patch_text: str, cwd: str = ".") -> str:
         )
 
     cwd_path = Path(cwd or ".").resolve()
-    changed: List[str] = []
+    planned: List[Tuple[str, Path, Optional[str]]] = []
+    seen_paths: set[Path] = set()
     for action, target, body in sections:
         path = _resolve_patch_path(cwd_path, target)
+        if path != cwd_path and not path.is_relative_to(cwd_path):
+            return (
+                f"[patch] [SECURITY] 目标路径超出 cwd 工作区边界: "
+                f"{path}; allowed={cwd_path}"
+            )
+        if path in seen_paths:
+            return f"[patch] 错误: 同一 patch 不允许重复操作目标 - {path}"
+        seen_paths.add(path)
         if action == "add":
             if path.exists():
                 return f"[patch] 错误: Add File 目标已存在 - {path}"
@@ -920,27 +925,61 @@ def apply_patch_edit(patch_text: str, cwd: str = ".") -> str:
                 if not raw_line.startswith("+"):
                     return f"[patch] 错误: Add File 内容行需要以 + 开头：{raw_line}"
                 add_lines.append(raw_line[1:])
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text("\n".join(add_lines) + ("\n" if add_lines else ""), encoding="utf-8")
-            changed.append(str(path))
+            planned.append(
+                (
+                    action,
+                    path,
+                    "\n".join(add_lines) + ("\n" if add_lines else ""),
+                )
+            )
         elif action == "delete":
             if not path.exists():
                 return f"[patch] 错误: Delete File 目标不存在 - {path}"
             if not path.is_file():
                 return f"[patch] 错误: Delete File 目标不是文件 - {path}"
-            path.unlink()
-            changed.append(str(path))
+            planned.append((action, path, None))
         elif action == "update":
-            success, result = _apply_patch_update(path, body)
+            success, result, new_content = _build_patch_update(path, body)
             if not success:
                 return result
-            changed.append(str(path))
+            planned.append((action, path, new_content))
+
+    originals: Dict[Path, Optional[bytes]] = {}
+    applied: List[Path] = []
+    try:
+        for action, path, content in planned:
+            originals[path] = path.read_bytes() if path.exists() else None
+            applied.append(path)
+            if action == "delete":
+                path.unlink()
+            else:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(content or "", encoding="utf-8", newline="")
+    except Exception as exc:
+        rollback_errors = []
+        for path in reversed(applied):
+            try:
+                original = originals[path]
+                if original is None:
+                    if path.exists():
+                        path.unlink()
+                else:
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(original)
+            except Exception as rollback_exc:
+                rollback_errors.append(f"{path}: {rollback_exc}")
+        rollback_detail = (
+            f"; rollbackErrors={rollback_errors}"
+            if rollback_errors
+            else "; rollback=completed"
+        )
+        return f"[patch] 错误: 原子应用失败 - {exc}{rollback_detail}"
 
     return json.dumps(
         {
             "status": "ok",
-            "changedFiles": changed,
-            "changeCount": len(changed),
+            "changedFiles": [str(path) for _action, path, _content in planned],
+            "changeCount": len(planned),
         },
         ensure_ascii=False,
         indent=2,

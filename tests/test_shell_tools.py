@@ -21,7 +21,8 @@ from tools.shell_tools import (
     read_file, list_directory, create_file, edit_file,
     check_python_syntax, execute_shell_command, run_powershell,
     run_batch, get_agent_status, backup_project, cleanup_test_files,
-    extract_symbols, self_test,
+    extract_symbols, self_test, resolve_agent_tool_path,
+    workspace_root_override,
 )
 
 # ============================================================================
@@ -950,6 +951,58 @@ class TestShellToolsIntegration:
 
 class TestSecurityFeatures:
     """安全功能测试"""
+
+    def test_workspace_write_path_rejects_sibling_directory(self, tmp_path):
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        outside = tmp_path / "outside" / "secret.txt"
+
+        with workspace_root_override(workspace):
+            with pytest.raises(PermissionError, match="工作区边界"):
+                resolve_agent_tool_path(
+                    str(outside),
+                    base_dir=workspace,
+                    operation="read",
+                )
+
+    def test_danger_full_access_path_allows_explicit_sibling_directory(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        from core.infrastructure import codex_cli_sandbox
+
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        outside = tmp_path / "outside" / "allowed.txt"
+        monkeypatch.setattr(
+            codex_cli_sandbox,
+            "_current_agent_sandbox_mode",
+            lambda: codex_cli_sandbox._DANGER_FULL_ACCESS_SANDBOX_MODE,
+        )
+
+        with workspace_root_override(workspace):
+            resolved = resolve_agent_tool_path(
+                str(outside),
+                base_dir=workspace,
+                operation="write",
+            )
+
+        assert resolved == outside.resolve()
+
+    def test_git_worktree_override_does_not_allow_primary_project_path(self, tmp_path):
+        candidate = tmp_path / "candidate"
+        candidate.mkdir()
+        (candidate / ".git").write_text("gitdir: test\n", encoding="utf-8")
+
+        with workspace_root_override(candidate):
+            with pytest.raises(PermissionError) as exc_info:
+                resolve_agent_tool_path(
+                    shell_tools_module.PROJECT_ROOT / "agent.py",
+                    operation="write",
+                )
+
+        assert str(candidate.resolve()) in str(exc_info.value)
 
     def test_destructive_command_chain_still_blocked_by_blacklist(self):
         """放宽模式下，链式命令本身不拦，但破坏性命令仍被黑名单阻止。"""

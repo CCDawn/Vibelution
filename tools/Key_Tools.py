@@ -141,7 +141,7 @@ _CLI_TOOL_DOCSTRING = """
 Args:
     command: Shell 命令
     timeout: 文件操作 30s, 编译 60s, 测试/网络 120s
-    cwd: 工作目录，默认项目根目录
+    cwd: 工作目录，默认项目根目录；workspace_write 模式不得指向当前 Agent 工作区之外
     max_output_chars: 最大返回字符数，默认 12000；超出时保留开头和结尾摘要
 """
 
@@ -156,7 +156,7 @@ Args:
     cmd: 要在工作区写入沙盒中执行的命令。
     yield_time_ms: 最多等待多久再返回本轮输出，默认 10000，最大 30000。
     timeout: 该进程的最大生命周期秒数，默认 60，最大 900。
-    cwd: 可选工作目录；相对路径以当前 Agent 工作区解析。
+    cwd: 可选工作目录；相对路径以当前 Agent 工作区解析，workspace_write 模式拒绝外部绝对路径。
     max_output_chars: 本次返回的最大输出字符数，默认 12000。
 """
 
@@ -321,10 +321,26 @@ def _build_key_tools() -> List[BaseTool]:
         Returns:
             JSON 格式的搜索结果，包含文件路径、行号和匹配内容
         """
+        from tools.shell_tools import get_workspace_root_override, resolve_agent_tool_path
+
+        workspace_override = get_workspace_root_override()
+        base_dir = (
+            workspace_override
+            if workspace_override is not None and (workspace_override / ".git").exists()
+            else Path(__file__).resolve().parents[1]
+        )
+        try:
+            resolved_search_dir = resolve_agent_tool_path(
+                search_dir,
+                base_dir=base_dir,
+                operation="read",
+            )
+        except PermissionError as exc:
+            return f"[搜索] [SECURITY] {exc}"
         return _grep_search_impl(
             regex_pattern=regex_pattern,
             include_ext=include_ext,
-            search_dir=search_dir,
+            search_dir=str(resolved_search_dir),
             case_sensitive=case_sensitive,
             max_results=max_results
         )
@@ -352,21 +368,30 @@ def _build_key_tools() -> List[BaseTool]:
             操作结果。格式错误时返回具体原因。
         """
         from tools.code_analysis_tools import apply_diff_edit, validate_diff_format
-        from tools.shell_tools import get_workspace_root_override
+        from tools.shell_tools import get_workspace_root_override, resolve_agent_tool_path
 
         is_valid, msg = validate_diff_format(diff_text)
         if not is_valid:
             return f"[编辑] 格式验证失败: {msg}"
         target_path = Path(file_path)
         workspace_override = get_workspace_root_override()
-        if workspace_override is not None and not target_path.is_absolute():
-            target_path = workspace_override / target_path
+        base_dir = workspace_override or Path(__file__).resolve().parents[1]
+        try:
+            target_path = resolve_agent_tool_path(
+                target_path,
+                base_dir=base_dir,
+                operation="write",
+            )
+        except PermissionError as exc:
+            return f"[编辑] [SECURITY] {exc}"
         return apply_diff_edit(file_path=str(target_path), diff_text=diff_text, allow_fuzzy=allow_fuzzy)
 
     @tool
     def apply_patch_tool(patch_text: str, cwd: str = ".") -> str:
         """
         Codex 风格 patch 编辑器。适合一次提交多文件 Add/Update/Delete patch。
+        所有目标必须位于 cwd 内；整份 patch 会先完成路径与 hunk 校验，
+        应用中失败时回滚本次已写文件，避免留下部分修改。
 
         格式：
         *** Begin Patch
@@ -378,18 +403,25 @@ def _build_key_tools() -> List[BaseTool]:
 
         Args:
             patch_text: Codex 风格 patch 文本
-            cwd: 相对路径解析根目录，默认项目根目录
+            cwd: 相对路径解析根目录；workspace_write 模式必须位于项目或当前 Agent 工作区内
 
         Returns:
             JSON 格式的修改结果；格式或匹配失败时返回可纠正错误。
         """
         from tools.code_analysis_tools import apply_patch_edit
-        from tools.shell_tools import get_workspace_root_override
+        from tools.shell_tools import get_workspace_root_override, resolve_agent_tool_path
 
         cwd_path = Path(cwd or ".")
         workspace_override = get_workspace_root_override()
-        if workspace_override is not None and not cwd_path.is_absolute():
-            cwd_path = workspace_override / cwd_path
+        base_dir = workspace_override or Path(__file__).resolve().parents[1]
+        try:
+            cwd_path = resolve_agent_tool_path(
+                cwd_path,
+                base_dir=base_dir,
+                operation="write",
+            )
+        except PermissionError as exc:
+            return f"[patch] [SECURITY] {exc}"
         return apply_patch_edit(patch_text=patch_text, cwd=str(cwd_path))
 
     @tool
@@ -1238,8 +1270,27 @@ def _build_key_tools() -> List[BaseTool]:
         Returns:
             JSON 格式的匹配文件列表
         """
-        from tools.shell_tools import glob_files
-        return glob_files(pattern=pattern, search_dir=search_dir)
+        from tools.shell_tools import (
+            get_workspace_root_override,
+            glob_files,
+            resolve_agent_tool_path,
+        )
+
+        workspace_override = get_workspace_root_override()
+        base_dir = (
+            workspace_override
+            if workspace_override is not None and (workspace_override / ".git").exists()
+            else Path(__file__).resolve().parents[1]
+        )
+        try:
+            resolved_search_dir = resolve_agent_tool_path(
+                search_dir,
+                base_dir=base_dir,
+                operation="read",
+            )
+        except PermissionError as exc:
+            return f"[Glob] [SECURITY] {exc}"
+        return glob_files(pattern=pattern, search_dir=str(resolved_search_dir))
 
     # ── TaskManager 工具（基于 tasks.json） ─────────────────────────────
 

@@ -165,14 +165,24 @@ def _resolve_codex_executable() -> str:
 
 
 def _resolve_cwd(cwd: str | None) -> Path:
-    from tools.shell_tools import _get_workspace_root
+    from tools.shell_tools import _get_workspace_root, get_workspace_root_override
 
     active_workspace = _get_workspace_root().resolve()
     workspace_root = active_workspace if (active_workspace / ".git").exists() else PROJECT_ROOT
     raw = Path(str(cwd or "").strip()) if str(cwd or "").strip() else workspace_root
     if not raw.is_absolute():
         raw = workspace_root / raw
-    return raw.resolve()
+    resolved = raw.resolve()
+    if (
+        get_workspace_root_override() is not None
+        and _current_agent_sandbox_mode() != _DANGER_FULL_ACCESS_SANDBOX_MODE
+        and resolved != workspace_root
+        and not resolved.is_relative_to(workspace_root)
+    ):
+        raise PermissionError(
+            f"工作目录超出 Agent 工作区边界: {resolved}; allowed={workspace_root}"
+        )
+    return resolved
 
 
 def _windows_command_interpreter() -> str:
@@ -850,7 +860,11 @@ def start_codex_sandbox_terminal_session(
     if is_dangerous and sandbox_mode != _DANGER_FULL_ACCESS_SANDBOX_MODE:
         _log_outcome(command_hash, "blocked", reason="dangerous_command")
         return _terminal_error_payload("DANGEROUS_COMMAND", message)
-    workdir = _resolve_cwd(cwd)
+    try:
+        workdir = _resolve_cwd(cwd)
+    except PermissionError as exc:
+        _log_outcome(command_hash, "blocked", reason="cwd_outside_sandbox")
+        return _terminal_error_payload("CWD_OUTSIDE_SANDBOX", str(exc))
     if not workdir.is_dir():
         _log_outcome(command_hash, "unavailable", reason="invalid_cwd")
         return _terminal_error_payload("INVALID_CWD", f"工作目录不存在: {workdir}")
@@ -996,7 +1010,11 @@ def execute_codex_sandbox_command(
         _log_outcome(command_hash, "blocked", reason="dangerous_command")
         return f"[安全拦截] {message}\n该危险命令已被系统安全策略禁止执行。"
 
-    workdir = _resolve_cwd(cwd)
+    try:
+        workdir = _resolve_cwd(cwd)
+    except PermissionError as exc:
+        _log_outcome(command_hash, "blocked", reason="cwd_outside_sandbox")
+        return f"[安全拦截] {exc}"
     if not workdir.is_dir():
         _log_outcome(command_hash, "unavailable", reason="invalid_cwd")
         return f"[错误] 工作目录不存在: {workdir}"

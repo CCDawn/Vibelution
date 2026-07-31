@@ -492,6 +492,59 @@ def get_workspace_root_override() -> Optional[Path]:
     return Path(override).resolve() if override else None
 
 
+def _agent_has_danger_full_access() -> bool:
+    try:
+        from core.infrastructure.codex_cli_sandbox import (
+            _DANGER_FULL_ACCESS_SANDBOX_MODE,
+            _current_agent_sandbox_mode,
+        )
+
+        return _current_agent_sandbox_mode() == _DANGER_FULL_ACCESS_SANDBOX_MODE
+    except Exception:
+        return False
+
+
+def _path_is_within(path: Path, root: Path) -> bool:
+    try:
+        return path == root or path.is_relative_to(root)
+    except (AttributeError, OSError, ValueError):
+        try:
+            path.relative_to(root)
+            return True
+        except (OSError, ValueError):
+            return False
+
+
+def resolve_agent_tool_path(
+    path_str: str | Path,
+    *,
+    base_dir: str | Path | None = None,
+    operation: str = "access",
+) -> Path:
+    """Resolve an Agent file-tool path and enforce workspace-write boundaries."""
+
+    raw = Path(str(path_str or "").strip() or ".")
+    anchor = Path(base_dir).resolve() if base_dir is not None else PROJECT_ROOT.resolve()
+    resolved = raw.resolve() if raw.is_absolute() else (anchor / raw).resolve()
+    if _agent_has_danger_full_access():
+        return resolved
+
+    workspace_override = get_workspace_root_override()
+    if workspace_override is not None and (workspace_override / ".git").exists():
+        roots = [workspace_override.resolve()]
+    else:
+        roots = [PROJECT_ROOT.resolve()]
+        if workspace_override is not None:
+            roots.append(workspace_override.resolve())
+    if any(_path_is_within(resolved, root) for root in roots):
+        return resolved
+
+    boundaries = ", ".join(str(root) for root in roots)
+    raise PermissionError(
+        f"{operation} 路径超出 Agent 工作区边界: {resolved}; allowed={boundaries}"
+    )
+
+
 def _get_workspace_root() -> Path:
     """稳定获取 workspace 根目录。"""
     override = get_workspace_root_override()

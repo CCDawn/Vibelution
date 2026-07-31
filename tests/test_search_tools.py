@@ -808,6 +808,75 @@ class TestSearchSecurity:
         assert ("错误" in result or "不存在" in result or 
                 "not found" in result.lower())
 
+    def test_agent_search_wrapper_rejects_existing_sibling_directory(self, tmp_path):
+        from tools.Key_Tools import create_key_tools
+        from tools.shell_tools import workspace_root_override
+
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "secret.py").write_text("secret = True\n", encoding="utf-8")
+        grep_tool = next(
+            tool
+            for tool in create_key_tools()
+            if getattr(tool, "name", "") == "grep_search_tool"
+        )
+
+        with workspace_root_override(workspace):
+            result = grep_tool.invoke(
+                {
+                    "regex_pattern": "secret",
+                    "include_ext": ".py",
+                    "search_dir": str(outside),
+                }
+            )
+
+        assert "[SECURITY]" in result
+        assert "secret = True" not in result
+
+    def test_agent_search_wrapper_anchors_dot_to_active_git_worktree(self, tmp_path):
+        from tools.Key_Tools import create_key_tools
+        from tools.shell_tools import workspace_root_override
+
+        candidate = tmp_path / "candidate"
+        candidate.mkdir()
+        (candidate / ".git").write_text("gitdir: test\n", encoding="utf-8")
+        (candidate / "candidate_probe.py").write_text(
+            "candidate_boundary_probe = True\n",
+            encoding="utf-8",
+        )
+        grep_tool = next(
+            tool
+            for tool in create_key_tools()
+            if getattr(tool, "name", "") == "grep_search_tool"
+        )
+
+        with workspace_root_override(candidate):
+            result = grep_tool.invoke(
+                {
+                    "regex_pattern": "candidate_boundary_probe",
+                    "include_ext": ".py",
+                    "search_dir": ".",
+                }
+            )
+
+        assert "candidate_probe.py" in result
+        assert "candidate_boundary_probe = True" in result
+
+    def test_programming_tool_descriptions_explain_workspace_boundaries_and_patch_rollback(self):
+        from tools.Key_Tools import create_key_tools
+
+        tools_by_name = {
+            getattr(tool, "name", ""): tool
+            for tool in create_key_tools()
+        }
+
+        assert "workspace_write" in tools_by_name["exec_command"].description
+        assert "外部绝对路径" in tools_by_name["exec_command"].description
+        assert "所有目标必须位于 cwd 内" in tools_by_name["apply_patch_tool"].description
+        assert "回滚本次已写文件" in tools_by_name["apply_patch_tool"].description
+
     def test_search_does_not_write_files(self, sample_project):
         """测试搜索不写入文件"""
         # 搜索前后文件系统应只读

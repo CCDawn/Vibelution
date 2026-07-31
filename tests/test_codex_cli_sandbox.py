@@ -47,6 +47,32 @@ def test_relative_cwd_ignores_non_git_agent_workspace(tmp_path):
     assert resolved == codex_cli_sandbox.PROJECT_ROOT.resolve()
 
 
+def test_workspace_write_rejects_cwd_outside_active_git_workspace(monkeypatch, tmp_path):
+    candidate_worktree = tmp_path / "candidate"
+    candidate_worktree.mkdir()
+    (candidate_worktree / ".git").write_text("gitdir: test\n", encoding="utf-8")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+
+    monkeypatch.setattr(
+        codex_cli_sandbox,
+        "_resolve_codex_executable",
+        lambda: (_ for _ in ()).throw(
+            AssertionError("outside cwd must be rejected before resolving Codex")
+        ),
+    )
+
+    with workspace_root_override(candidate_worktree):
+        result = codex_cli_sandbox.start_codex_sandbox_terminal_session(
+            "echo must-not-run",
+            cwd=str(outside),
+        )
+
+    assert result["status"] == "failed"
+    assert result["code"] == "CWD_OUTSIDE_SANDBOX"
+    assert str(candidate_worktree.resolve()) in result["message"]
+
+
 def test_candidate_runtime_environment_scrubs_credentials_and_redirects_user_home(
     monkeypatch,
     tmp_path,
