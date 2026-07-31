@@ -7,6 +7,7 @@ import {
   readRecentSupervisedWorktreeRunId,
   rememberRecentSupervisedWorktreeRunId,
   selectRecentSupervisedWorktreeRun,
+  supervisedApprovalWorkflowStatus,
   supervisedWorktreeLedgerApprovalLabel,
 } from "./supervisedWorktreeReview";
 
@@ -156,6 +157,18 @@ describe("buildSupervisedWorktreeLedgerSummary", () => {
     });
     expect(supervisedWorktreeLedgerApprovalLabel(summary!, "zh")).toBe("需补证复跑");
     expect(supervisedWorktreeLedgerApprovalLabel(summary!, "en")).toBe("Rerun required");
+  });
+
+  it("marks the approval workflow step complete once its immutable decision exists", () => {
+    const decidedRun = runWith({
+      approvalDecision: {
+        status: "decided",
+        decision: "RERUN_REQUIRED",
+      },
+    });
+
+    expect(supervisedApprovalWorkflowStatus(decidedRun, "pending")).toBe("done");
+    expect(supervisedApprovalWorkflowStatus(runWith({}), "pending")).toBe("pending");
   });
 
   it("does not project a self-evolution review run into the supervised ledger", () => {
