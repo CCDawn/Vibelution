@@ -47,6 +47,7 @@ export type TeamResearchStageStandalonePagePanelProps = {
   activeTeamMemberCount: number;
   selectedTeamSyncPending: boolean;
   researchStageRoundStatusQuery: { isFetching: boolean; refetch: () => unknown };
+  refreshStageWorkspace: () => void;
   renderResearchStageAgentPanel: (stageType: ResearchStageType, variant?: "compact" | "page") => ReactNode;
   launchResearchStage: (stageType: ResearchStageType, mode?: "continue_or_start" | "new_round") => void;
   selectedTeamStartResearchStageError: Error | null;
@@ -71,6 +72,7 @@ export function TeamResearchStageStandalonePagePanel(props: TeamResearchStageSta
     activeTeamMemberCount,
     selectedTeamSyncPending,
     researchStageRoundStatusQuery,
+    refreshStageWorkspace,
     renderResearchStageAgentPanel,
     launchResearchStage,
     selectedTeamStartResearchStageError,
@@ -173,7 +175,7 @@ export function TeamResearchStageStandalonePagePanel(props: TeamResearchStageSta
               <ArrowLeft size={14} />
               {lang === "zh" ? "返回团队页面" : "Back to team"}
             </Link>
-            <VNativeButton type="button" onClick={() => void researchStageRoundStatusQuery.refetch()} disabled={researchStageRoundStatusQuery.isFetching}>
+            <VNativeButton type="button" onClick={refreshStageWorkspace} disabled={researchStageRoundStatusQuery.isFetching}>
               <RefreshCw size={14} />
               {lang === "zh" ? "刷新" : "Refresh"}
             </VNativeButton>

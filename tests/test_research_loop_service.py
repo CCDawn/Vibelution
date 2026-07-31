@@ -509,6 +509,37 @@ def test_pending_design_proposals_are_newest_first_and_free_text_only_is_blocked
         )
 
 
+def test_pending_design_proposals_exclude_legacy_entries_without_governance_contract():
+    pending = research_loop_service._pending_iteration_design_proposals(
+        [
+            {
+                "loopId": "loop-legacy",
+                "title": "Legacy loop",
+                "linkedExperiment": {"planId": "plan-v5"},
+                "decisions": [
+                    {
+                        "decision": "repair_and_repeat",
+                        "iterationProposalId": "proposal-legacy",
+                    }
+                ],
+                "iterationProposals": [
+                    {
+                        "proposalId": "proposal-legacy",
+                        "status": "proposed",
+                        "nextTemplateId": "algorithm_model_experiment",
+                        "nextActions": ["repair the metric chain"],
+                        "allowedVariableChanges": [],
+                        "frozenControls": [],
+                        "createdAt": "2026-07-29T00:00:00Z",
+                    }
+                ],
+            }
+        ]
+    )
+
+    assert pending == []
+
+
 def test_research_loop_status_persists_to_team_workspace(tmp_path, monkeypatch):
     team = _team(tmp_path, monkeypatch)
     created = research_loop_service.create_research_loop(
