@@ -6,6 +6,7 @@ from core.web.services import team_service as facade
 from core.web.services.team import (
     ai_search_ranking,
     canvas_primitives,
+    chat_room_links,
     kind_helpers,
     system_bootstrap,
     system_teams,
@@ -59,6 +60,16 @@ def test_facade_reexports_system_bootstrap_control_plane() -> None:
     assert hasattr(facade, "_TEAM_SYSTEM_BOOTSTRAP_THREAD")
     assert isinstance(facade._TEAM_SYSTEM_BOOTSTRAP_STATE, dict)
     assert facade.TEAM_SYSTEM_BOOTSTRAP_READY_CACHE_TTL_SECONDS == 30.0
+
+
+def test_facade_reexports_chat_room_links() -> None:
+    assert facade.sync_team_chat_room is chat_room_links.sync_team_chat_room
+    assert facade.list_archived_team_linked_chat_room_ids is chat_room_links.list_archived_team_linked_chat_room_ids
+    assert facade.repair_archived_team_chat_rooms is chat_room_links.repair_archived_team_chat_rooms
+    assert facade._ensure_team_chat_room_link is chat_room_links._ensure_team_chat_room_link
+    assert facade._team_chat_room_needs_sync is chat_room_links._team_chat_room_needs_sync
+    assert facade._compact_chat_room is chat_room_links._compact_chat_room
+    assert facade._sync_compact_team_chat_room_metadata is chat_room_links._sync_compact_team_chat_room_metadata
 
 
 def test_facade_reexports_system_teams_materialize() -> None:
