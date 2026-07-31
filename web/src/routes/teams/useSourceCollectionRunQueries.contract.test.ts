@@ -34,8 +34,13 @@ describe("source-collection run queries contract", () => {
     expect(queriesSource).toContain("/status");
   });
 
-  it("refreshes the selected run summary whenever the stage workspace mounts", () => {
-    expect(queriesSource).toContain('refetchOnMount: "always"');
+  it("reuses a recent selected-run summary across workspace remounts", () => {
+    expect(queriesSource).toContain("staleTime: 10_000");
+    expect(queriesSource).not.toContain('refetchOnMount: "always"');
+  });
+
+  it("uses a slower poll for the run list than for active run details", () => {
+    expect(routeSource).toContain("sourceCollectionRunListRefetchInterval");
   });
 
   it("does not resolve the summary before a selected run is known", () => {

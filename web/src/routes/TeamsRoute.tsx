@@ -385,6 +385,7 @@ import {
   chatRoomStatusLabel,
   isRecord,
   linkedRoomRefetchInterval,
+  sourceCollectionRunListRefetchInterval,
   sourceCollectionRunRefetchInterval,
   teamConversationStatusLabel,
   workRunNumber,
@@ -877,7 +878,11 @@ export function TeamsRoute({
   const challengeCupResearchTeamSelected = isChallengeCupResearchWorkflowTeam(selectedTeam);
   const researchStageProjectAgentTasks = useResearchProjectAgentTasks({
     teamId: selectedTeam?.teamId || RESEARCH_TEAM_ID,
-    enabled: challengeCupResearchTeamSelected,
+    enabled:
+      challengeCupResearchTeamSelected
+      && !sourceCollectionStandalone
+      && researchWorkspaceView !== "source_collection"
+      && researchWorkspaceView !== "knowledge_collection",
   });
   const aiSearchScopeTeamSelected = isAiSearchScopeTeam(selectedTeam);
   const researchCanvasReadOnly = researchWorkflowTeamSelected && researchWorkspaceView === "canvas";
@@ -1048,8 +1053,9 @@ export function TeamsRoute({
     refetchInterval: (query) => {
       const payload = query.state.data as DataProcessingRunListPayload | undefined;
       const hasActiveRun = (payload?.runs ?? []).some((run) => ["collecting", "processing"].includes(String(run.status || "").toLowerCase()));
-      return resolvePollingInterval(pageVisible, hasActiveRun ? 1500 : false);
+      return sourceCollectionRunListRefetchInterval(pageVisible, hasActiveRun);
     },
+    staleTime: 5_000,
   });
   const linkedChatRoomId = selectedTeam?.linkedChatRoomId ?? "";
   const linkedRoomStatusForPolling = String(selectedTeam?.linkedChatRoom?.status || "").toLowerCase();

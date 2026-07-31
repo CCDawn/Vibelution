@@ -52,7 +52,7 @@ export function useSourceCollectionRunQueries(options: UseSourceCollectionRunQue
       && options.sourceCollectionWorkspaceSelected
       && options.selectedSourceCollectionRunEffectiveId,
     ),
-    refetchOnMount: "always",
+    staleTime: 10_000,
     refetchInterval: (query) => {
       const payload = query.state.data as SourceCollectionSummaryPayload | undefined;
       const active = payload?.status === "active";
