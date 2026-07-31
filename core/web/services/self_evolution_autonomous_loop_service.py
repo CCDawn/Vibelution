@@ -86,6 +86,12 @@ class SelfEvolutionAutonomousLoopService:
     def start(self, request: dict[str, Any]) -> dict[str, Any]:
         """Run observe, plan, and evolve phases, then stop for user review."""
 
+        queued = self.queue(request)
+        return self.run_until_review(str(queued["runId"]))
+
+    def queue(self, request: dict[str, Any]) -> dict[str, Any]:
+        """Persist a queued run without blocking on Agent execution."""
+
         normalized_request = _normalize_request(request)
         with _LOCK:
             active = self._store.load_active_snapshot(RUN_KIND)
@@ -101,8 +107,8 @@ class SelfEvolutionAutonomousLoopService:
                 "schemaVersion": SCHEMA_VERSION,
                 "runKind": RUN_KIND,
                 "runId": run_id,
-                "status": "running",
-                "phase": "observing",
+                "status": "queued",
+                "phase": "queued",
                 "request": normalized_request,
                 "reviewGate": {
                     "status": "not_ready",
@@ -112,8 +118,19 @@ class SelfEvolutionAutonomousLoopService:
                 "startedAt": now,
                 "updatedAt": now,
             }
-            snapshot = self._persist(snapshot, active=True)
+            return self._persist(snapshot, active=True)
 
+    def run_until_review(self, run_id: str) -> dict[str, Any]:
+        """Resume one queued run through the user-approval boundary."""
+
+        with _LOCK:
+            snapshot = self._load_required(run_id)
+            _require_phase(snapshot, "queued", status="queued")
+            snapshot = self._advance(
+                snapshot,
+                status="running",
+                phase="observing",
+            )
         try:
             observation = _normalize_observation(
                 self._hooks.observe(_phase_context(snapshot))
@@ -211,9 +228,9 @@ class SelfEvolutionAutonomousLoopService:
         with _LOCK:
             snapshot = self._load_required(run_id)
             _require_phase(snapshot, "cleanup_failed", status="partial")
-            if str((snapshot.get("integration") or {}).get("status") or "") != "merged":
+            if str((snapshot.get("integration") or {}).get("status") or "") != "committed":
                 raise AutonomousLoopConflictError(
-                    "Cleanup retry requires a persisted merged integration."
+                    "Cleanup retry requires a persisted committed integration."
                 )
             snapshot = deepcopy(snapshot)
             snapshot.pop("error", None)
@@ -227,6 +244,12 @@ class SelfEvolutionAutonomousLoopService:
 
     def load(self, run_id: str) -> dict[str, Any]:
         return self._load_required(run_id)
+
+    def load_active(self) -> dict[str, Any] | None:
+        return self._store.load_active_snapshot(RUN_KIND)
+
+    def load_latest(self) -> dict[str, Any] | None:
+        return self._store.load_latest_snapshot(RUN_KIND)
 
     def _run_cleanup(self, snapshot: dict[str, Any]) -> dict[str, Any]:
         try:
@@ -439,30 +462,68 @@ def _normalize_integration(
     candidate: dict[str, Any],
 ) -> dict[str, Any]:
     item = _require_object(payload, "Integration result")
-    if str(item.get("status") or "").strip() != "merged":
+    if str(item.get("status") or "").strip() != "committed":
         raise AutonomousLoopValidationError(
-            "Integration result must confirm status=merged."
+            "Integration result must confirm status=committed."
         )
-    candidate_head = _required_text(
-        item.get("candidateHead"),
-        "Integration candidateHead",
+    base_commit = _required_text(
+        item.get("baseCommit"),
+        "Integration baseCommit",
     )
-    if candidate_head != str(candidate.get("headCommit") or ""):
+    if base_commit != str(candidate.get("baseCommit") or ""):
         raise AutonomousLoopValidationError(
-            "Integration candidateHead does not match the approved candidate."
+            "Integration baseCommit does not match the approved candidate."
+        )
+    variant_id = _required_text(
+        item.get("candidateVariantId"),
+        "Integration candidateVariantId",
+    )
+    if variant_id != str(candidate.get("variantId") or ""):
+        raise AutonomousLoopValidationError(
+            "Integration candidateVariantId does not match the approved candidate."
+        )
+    commit_sha = _required_text(item.get("commitSha"), "Integration commitSha")
+    if commit_sha == base_commit:
+        raise AutonomousLoopValidationError(
+            "Integration commitSha must advance main HEAD."
+        )
+    changed_files = item.get("changedFiles")
+    if not isinstance(changed_files, list):
+        raise AutonomousLoopValidationError(
+            "Integration changedFiles must be a list."
+        )
+    normalized_changed_files = sorted(
+        _trim_text(path, MAX_SUMMARY_LENGTH).replace("\\", "/")
+        for path in changed_files
+        if _trim_text(path, MAX_SUMMARY_LENGTH)
+    )
+    expected_changed_files = sorted(
+        str(change.get("path") or "")
+        for change in candidate.get("changedFiles") or []
+        if isinstance(change, dict)
+    )
+    if normalized_changed_files != expected_changed_files:
+        raise AutonomousLoopValidationError(
+            "Integration changedFiles do not match the approved candidate."
         )
     return {
-        "status": "merged",
-        "targetBranch": _required_text(
-            item.get("targetBranch"),
-            "Integration targetBranch",
+        "status": "committed",
+        "mechanism": _required_text(
+            item.get("mechanism"),
+            "Integration mechanism",
         ),
-        "previousHead": _required_text(
-            item.get("previousHead"),
-            "Integration previousHead",
+        "baseCommit": base_commit,
+        "commitSha": commit_sha,
+        "candidateVariantId": variant_id,
+        "changedFiles": normalized_changed_files,
+        "rollbackManifestPath": _required_text(
+            item.get("rollbackManifestPath"),
+            "Integration rollbackManifestPath",
         ),
-        "mergedHead": _required_text(item.get("mergedHead"), "Integration mergedHead"),
-        "candidateHead": candidate_head,
+        "committedAt": _required_text(
+            item.get("committedAt"),
+            "Integration committedAt",
+        ),
     }
 
 

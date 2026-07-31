@@ -31,6 +31,7 @@ def _snapshot(**updates):
             "baseCommit": "a" * 40,
             "headCommit": "b" * 40,
             "changedFiles": ["core/example.py"],
+            "variantId": "variant-001",
         },
         "approval": {
             "decision": "approve",
@@ -121,11 +122,9 @@ def test_runtime_hooks_use_one_observer_context_then_isolated_executor():
             create_candidate=create_candidate,
             inspect_candidate=inspect_candidate,
             integrate_candidate=lambda context: {
-                "status": "merged",
-                "targetBranch": "main",
-                "previousHead": "c" * 40,
-                "mergedHead": "d" * 40,
-                "candidateHead": context["candidate"]["headCommit"],
+                "status": "committed",
+                "commitSha": "d" * 40,
+                "candidateVariantId": context["candidate"]["variantId"],
             },
             cleanup_candidate=lambda _context: {
                 "status": "cleaned",
@@ -176,11 +175,9 @@ def test_runtime_integration_and_cleanup_hooks_are_deterministic_passthroughs():
                 ("integrate", deepcopy(context))
             )
             or {
-                "status": "merged",
-                "targetBranch": "main",
-                "previousHead": "c" * 40,
-                "mergedHead": "d" * 40,
-                "candidateHead": context["candidate"]["headCommit"],
+                "status": "committed",
+                "commitSha": "d" * 40,
+                "candidateVariantId": context["candidate"]["variantId"],
             },
             cleanup_candidate=lambda context: captured.append(
                 ("cleanup", deepcopy(context))
@@ -197,7 +194,7 @@ def test_runtime_integration_and_cleanup_hooks_are_deterministic_passthroughs():
     cleanup = hooks.cleanup(_snapshot())
 
     assert [name for name, _ in captured] == ["integrate", "cleanup"]
-    assert integration["mergedHead"] == "d" * 40
+    assert integration["commitSha"] == "d" * 40
     assert cleanup["localBranchDeleted"] is True
 
 
