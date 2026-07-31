@@ -20,6 +20,8 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+from ..source_collection_common import project_source_version_families
+
 
 def _service():
     from core.web.services import team_workflow_orchestration_service
@@ -850,8 +852,37 @@ def _source_collection_stage_cards_projection(
         if str(item.get("candidateType") or "") == "source_manifest"
         and s._source_collection_candidate_trace_run_id(item) == normalized_run_id
     ]
-    assessed_sources = [item for item in source_candidates if s._candidate_source_quality_assessment(item) is not None]
-    approved_sources = [item for item in source_candidates if s._source_quality_bucket(item) == "approved"]
+    projected_source_candidates, source_family_summary = project_source_version_families(source_candidates)
+    reviewable_source_candidates = [
+        item
+        for item in projected_source_candidates
+        if not (
+            isinstance(item.get("sourceVersionFamily"), dict)
+            and item["sourceVersionFamily"].get("state") == "superseded"
+        )
+    ]
+    assessed_sources = [
+        item
+        for item in reviewable_source_candidates
+        if s._candidate_source_quality_assessment(item) is not None
+    ]
+    approved_sources = [
+        item for item in reviewable_source_candidates
+        if s._source_quality_bucket(item) == "approved"
+    ]
+    needs_revision_sources = [
+        item for item in reviewable_source_candidates
+        if s._source_quality_bucket(item) == "needs_revision"
+    ]
+    rejected_sources = [
+        item for item in reviewable_source_candidates
+        if s._source_quality_bucket(item) == "rejected"
+    ]
+    unassessed_sources = [
+        item for item in reviewable_source_candidates
+        if s._source_quality_bucket(item) == "pending"
+    ]
+    extraction_pending_count = len(needs_revision_sources) + len(unassessed_sources)
     source_candidate_ids = {
         s._trim_text(item.get("candidateId"), max_length=160)
         for item in source_candidates
@@ -933,14 +964,39 @@ def _source_collection_stage_cards_projection(
         s._source_collection_stage_card_projection(
             "extraction",
             stage_task_groups.get("extraction", ([], []))[0],
-            artifact_count=max(len(source_candidates), len(assessed_sources)),
+            artifact_count=max(len(reviewable_source_candidates), len(assessed_sources)),
             input_count=active_record_count,
             output_count=len(approved_sources),
-            pending_count=max(0, len(source_candidates) - len(assessed_sources)) if source_candidates else max(0, active_record_count - len(source_candidates)),
-            artifact_status="ready" if source_candidates and len(assessed_sources) >= len(source_candidates) else ("partial" if source_candidates or assessed_sources else "empty"),
-            artifact_summary=f"{len(source_candidates)} source_manifest candidates; {len(assessed_sources)}/{len(source_candidates)} assessed; {len(approved_sources)} approved; {excluded_source_count} excluded.",
+            pending_count=(
+                extraction_pending_count
+                if reviewable_source_candidates
+                else max(0, active_record_count - len(source_candidates))
+            ),
+            artifact_status=(
+                "ready"
+                if reviewable_source_candidates and extraction_pending_count <= 0
+                else ("partial" if reviewable_source_candidates or assessed_sources else "empty")
+            ),
+            artifact_summary=(
+                f"{len(source_candidates)} source_manifest records; "
+                f"{len(reviewable_source_candidates)} current sources; "
+                f"{len(assessed_sources)}/{len(reviewable_source_candidates)} assessed; "
+                f"{len(approved_sources)} approved; "
+                f"{len(needs_revision_sources)} need material supplements; "
+                f"{len(rejected_sources)} rejected; "
+                f"{source_family_summary['supersededRecordCount']} superseded; "
+                f"{excluded_source_count} excluded."
+            ),
             historical_task_count=len(stage_task_groups.get("extraction", ([], []))[1]),
-            extra_counts={"excluded": excluded_source_count, "rawRecord": raw_record_count},
+            extra_counts={
+                "excluded": excluded_source_count,
+                "rawRecord": raw_record_count,
+                "independent": len(reviewable_source_candidates),
+                "superseded": source_family_summary["supersededRecordCount"],
+                "needsRevision": len(needs_revision_sources),
+                "rejected": len(rejected_sources),
+                "unassessed": len(unassessed_sources),
+            },
         ),
         s._source_collection_stage_card_projection(
             "relations",
@@ -982,8 +1038,13 @@ def _source_collection_stage_cards_projection(
             "rawRecordCount": raw_record_count,
             "excludedSourceCount": excluded_source_count,
             "sourceCandidateCount": len(source_candidates),
+            "independentSourceCandidateCount": len(reviewable_source_candidates),
+            "supersededSourceCandidateCount": source_family_summary["supersededRecordCount"],
             "assessedSourceCandidateCount": len(assessed_sources),
             "approvedSourceCandidateCount": len(approved_sources),
+            "needsRevisionSourceCandidateCount": len(needs_revision_sources),
+            "rejectedSourceCandidateCount": len(rejected_sources),
+            "unassessedSourceCandidateCount": len(unassessed_sources),
             "graphNodeCount": s._source_collection_count(graph_summary.get("nodeCount")),
             "stewardPackCount": steward_pack_count,
             "formalKnowledgeSyncCount": formal_synced_count,
