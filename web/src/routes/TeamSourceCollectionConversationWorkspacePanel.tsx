@@ -20,7 +20,7 @@ import {
 import {
   candidateSourceQualityAssessmentSummary,
   sourceCollectionResultTone,
-  sourceCollectionSimpleRecordStatusLabel,
+  sourceCollectionSimpleRecordStatusPresentation,
 } from "./teams/source-collection/presentationModel";
 import {
   sourceCollectionRunCandidateMetric,
@@ -239,10 +239,7 @@ export function TeamSourceCollectionConversationWorkspacePanel(props: TeamSource
                 const sourceQualitySummary = linkedCandidate ? candidateSourceQualityAssessmentSummary(linkedCandidate) : null;
                 const provenance = sourceCollectionRecordProvenance(record, lang);
                 const selected = Boolean(linkedCandidate && selectedSourceCollectionCandidateId === linkedCandidate.candidateId);
-                const resultStatusLabel = sourceCollectionSimpleRecordStatusLabel(linkedCandidate, sourceQualitySummary, lang);
-                const resultStatusRaw = linkedCandidate
-                  ? (sourceQualitySummary?.decision || linkedCandidate.qualityStatus || linkedCandidate.currentState)
-                  : "candidate_pending";
+                const resultStatus = sourceCollectionSimpleRecordStatusPresentation(linkedCandidate, sourceQualitySummary, lang);
                 const resultScoreLabel = sourceQualitySummary
                   ? `${sourceQualitySummary.overallScore}/100`
                   : linkedCandidate
@@ -252,8 +249,8 @@ export function TeamSourceCollectionConversationWorkspacePanel(props: TeamSource
                   <TeamSourceResultItem
                     key={record.recordId}
                     tone={linkedCandidate ? sourceCollectionResultTone(linkedCandidate.qualityStatus) : "warning"}
-                    statusLabel={resultStatusLabel}
-                    statusTitle={resultStatusRaw}
+                    statusLabel={resultStatus.label}
+                    statusTitle={resultStatus.title}
                     title={record.title || record.recordId}
                     titleTooltip={[record.title || record.recordId, record.summary || ""].filter(Boolean).join("\n")}
                     meta={[

@@ -1064,6 +1064,41 @@ def get_paper_note_chunk_status(team_id: str) -> dict[str, Any]:
     return payload
 
 
+def _default_source_quality_required_fixes(
+    candidate: dict[str, Any],
+    scores: dict[str, int],
+    validation: dict[str, Any],
+) -> list[str]:
+    metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+    extraction = (
+        metadata.get("contentExtraction")
+        if isinstance(metadata.get("contentExtraction"), dict)
+        else metadata.get("sourceExtraction")
+        if isinstance(metadata.get("sourceExtraction"), dict)
+        else {}
+    )
+    evidence_refs = extraction.get("evidenceRefs") if isinstance(extraction.get("evidenceRefs"), list) else []
+    page_anchors = extraction.get("pageAnchors") if isinstance(extraction.get("pageAnchors"), list) else []
+    key_findings = extraction.get("keyFindings") if isinstance(extraction.get("keyFindings"), list) else []
+    extraction_summary = str(extraction.get("summary") or "").strip()
+    required_fixes: list[str] = []
+    if not validation.get("valid"):
+        required_fixes.append("修复 source_manifest 校验错误后再通过质量筛选。")
+    if metadata.get("metadataOnlyDownload") is True and not extraction_summary and not key_findings:
+        required_fixes.append("补充可核验的全文或公开摘要。")
+    if not evidence_refs and not page_anchors:
+        required_fixes.append("提取可定位的页码、段落或 DOI 证据锚点。")
+    if int(scores.get("accessibility") or 0) < 55:
+        required_fixes.append("确认来源可访问且允许分析，或更换可访问来源。")
+    if int(scores.get("reliability") or 0) < 55:
+        required_fixes.append("补充 DOI、出版信息或本地文件 sha256。")
+    if int(scores.get("relevance") or 0) < 55:
+        required_fixes.append("补充与研究问题的相关性说明，或更换来源。")
+    if not required_fixes:
+        required_fixes.append("打开资料详情确认质量缺口，补充来源证据后重新评估。")
+    return required_fixes[:12]
+
+
 def assess_source_candidate_quality(team_id: str, candidate_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     s = _service()
     normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
@@ -1092,8 +1127,8 @@ def assess_source_candidate_quality(team_id: str, candidate_id: str, payload: di
         decision = requested_decision or s._default_source_quality_decision(scores, validation)
         if decision == "approved" and not validation.get("valid"):
             decision = "needs_revision"
-            if not required_fixes:
-                required_fixes = ["修复 source_manifest 校验错误后再通过质量筛选。"]
+        if decision == "needs_revision" and not required_fixes:
+            required_fixes = _default_source_quality_required_fixes(candidate, scores, validation)
         source_label = s._source_manifest_label(candidate)
         assessment = {
             "schemaVersion": s.SCHEMA_VERSION,

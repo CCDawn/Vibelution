@@ -919,6 +919,47 @@ def test_team_workflow_route_force_rescreens_source_quality_batch(tmp_path, monk
     assert payload["officialBoundary"]["candidateOnly"] is True
 
 
+def test_team_workflow_route_explains_required_fixes_for_low_quality_source(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    client = _client()
+    team = client.post("/api/teams", json={"name": "ai科学研究团队"}).json()
+    candidate = team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"],
+        {
+            "title": "Sleep and synaptic homeostasis review",
+            "sourceUrl": "https://doi.org/10.0000/sleep-review",
+            "sourceKind": "paper",
+            "summary": "Container metadata only",
+            "tags": ["sleep", "synaptic"],
+            "createdByAgent": "Source Finder Agent",
+            "metadata": {
+                "metadataOnlyDownload": True,
+                "contentExtraction": {
+                    "status": "extracted",
+                    "summary": "",
+                    "evidenceRefs": [],
+                    "keyFindings": [],
+                },
+            },
+        },
+    )["candidate"]
+
+    response = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/source-quality/assess-batch",
+        json={"assessedByAgent": "Source Extractor Agent"},
+    )
+
+    assert response.status_code == 201, response.text
+    assessment = next(
+        item
+        for item in response.json()["assessments"]
+        if item["candidateId"] == candidate["candidateId"]
+    )
+    assert assessment["decision"] == "needs_revision"
+    assert "补充可核验的全文或公开摘要。" in assessment["requiredFixes"]
+    assert "提取可定位的页码、段落或 DOI 证据锚点。" in assessment["requiredFixes"]
+
+
 def test_team_workflow_route_blocks_source_collection_without_prompt_cache(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(

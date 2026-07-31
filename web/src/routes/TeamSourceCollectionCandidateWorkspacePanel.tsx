@@ -17,7 +17,7 @@ import {
 import {
   candidateSourceQualityAssessmentSummary,
   sourceCollectionResultTone,
-  sourceCollectionSimpleCandidateStatusLabel,
+  sourceCollectionSimpleCandidateStatusPresentation,
 } from "./teams/source-collection/presentationModel";
 import type { SourceCollectionStageModuleId } from "./teams/source-collection/stageProjection";
 import { TeamSourceCollectionCandidatePanel } from "./TeamSourceCollectionCandidatePanel";
@@ -162,7 +162,7 @@ export function TeamSourceCollectionCandidateWorkspacePanel(props: TeamSourceCol
                 const sourceQualitySummary = candidateSourceQualityAssessmentSummary(candidate);
                 const evidenceLedgerSummary = sourceCollectionEvidenceLedgerSummary(candidate);
                 const provenance = sourceCollectionCandidateProvenance(candidate, lang);
-                const qualityText = sourceCollectionSimpleCandidateStatusLabel(candidate, lang);
+                const qualityPresentation = sourceCollectionSimpleCandidateStatusPresentation(candidate, lang);
                 const scoreText = sourceQualitySummary
                   ? `${sourceQualitySummary.overallScore}/100`
                   : (lang === "zh" ? "待审" : "review");
@@ -171,7 +171,8 @@ export function TeamSourceCollectionCandidateWorkspacePanel(props: TeamSourceCol
                   <TeamCandidateCard
                     key={candidate.candidateId}
                     tone={evidenceLedgerSummary ? sourceCollectionEvidenceLedgerTone(evidenceLedgerSummary) : sourceCollectionResultTone(candidate.qualityStatus)}
-                    statusLabel={qualityText}
+                    statusLabel={qualityPresentation.label}
+                    statusTitle={qualityPresentation.title}
                     title={
                       <span title={[candidate.title || candidate.candidateId, candidate.summary || ""].filter(Boolean).join("\n")}>
                         {candidate.title || candidate.candidateId}
