@@ -7,10 +7,13 @@ import type { Dispatch, SetStateAction } from "react";
 
 import { fetchJson } from "../../api/client";
 import { queryKeys } from "../../api/queryKeys";
+import {
+  executeSelfEvolutionAutonomousLoopAction,
+  startSelfEvolutionAutonomousLoop,
+} from "../../api/selfEvolution";
 import type {
   EvolutionRunActionResponse,
   SelfEvolutionAutonomousLoopActionRequest,
-  SelfEvolutionAutonomousLoopRun,
   SelfEvolutionAutonomousLoopStartRequest,
   SelfEvolutionHistoryDeleteResponse,
   SelfObservationRun,
@@ -219,14 +222,7 @@ export function useEvolutionRunMutations(options: UseEvolutionRunMutationsOption
       options.setSelfActionFeedback("");
     },
     mutationFn: (payload: SelfEvolutionAutonomousLoopStartRequest) =>
-      fetchJson<SelfEvolutionAutonomousLoopRun>(
-        "/api/evolution/self/autonomous-runs",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        },
-      ),
+      startSelfEvolutionAutonomousLoop(payload),
     onSuccess: async () => {
       options.setSelfActionFeedback(
         options.lang === "zh"
@@ -242,17 +238,7 @@ export function useEvolutionRunMutations(options: UseEvolutionRunMutationsOption
       options.setSelfActionFeedback("");
     },
     mutationFn: (payload: SelfEvolutionAutonomousLoopActionRequest) =>
-      fetchJson<SelfEvolutionAutonomousLoopRun>(
-        `/api/evolution/self/autonomous-runs/${encodeURIComponent(payload.runId)}/actions`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            action: payload.action,
-            comment: payload.comment ?? "",
-          }),
-        },
-      ),
+      executeSelfEvolutionAutonomousLoopAction(payload),
     onSuccess: async (snapshot) => {
       options.setSelfActionFeedback(
         snapshot.status === "completed"

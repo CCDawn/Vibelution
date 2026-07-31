@@ -5,7 +5,7 @@ export const selfEvolutionAutonomousLoopPanelStyles = {
     "flex min-w-0 flex-wrap items-start justify-between gap-2 border-b border-vui-border-subtle pb-2",
   heading: "grid min-w-0 gap-0.5",
   eyebrow:
-    "text-[0.66rem] font-[780] uppercase tracking-[0.08em] text-vui-fg-tertiary",
+    "text-[var(--vui-font-xs)] font-[780] uppercase tracking-[0.08em] text-vui-fg-tertiary",
   title: "text-[0.98rem] font-[820] leading-tight text-vui-fg-primary",
   summary: "max-w-[88ch] text-[var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-vui-fg-secondary",
   phaseGrid:
@@ -17,7 +17,7 @@ export const selfEvolutionAutonomousLoopPanelStyles = {
   phaseDone:
     "border-[color-mix(in_srgb,var(--state-success)_34%,var(--vui-border-subtle))]",
   phaseLabel: "truncate text-[var(--vui-font-xs)] font-[780] text-vui-fg-primary",
-  phaseStatus: "truncate text-[0.64rem] text-vui-fg-tertiary",
+  phaseStatus: "truncate text-[var(--vui-font-xs)] text-vui-fg-tertiary",
   cards: "grid min-w-0 grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-2",
   card:
     "grid min-w-0 content-start gap-2 rounded-[var(--radius-control)] border border-vui-border-subtle bg-vui-surface-row p-2.5",
@@ -34,7 +34,7 @@ export const selfEvolutionAutonomousLoopPanelStyles = {
   proof:
     "grid min-w-0 grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-1.5 rounded-[var(--radius-control)] border border-vui-border-subtle bg-vui-surface-inset p-2",
   proofItem: "grid min-w-0 gap-0.5",
-  proofLabel: "text-[0.62rem] uppercase text-vui-fg-tertiary",
+  proofLabel: "text-[var(--vui-font-xs)] uppercase text-vui-fg-tertiary",
   proofValue: "truncate font-mono text-[var(--vui-font-xs)] font-semibold text-vui-fg-primary",
   error: "text-[var(--vui-font-xs)] text-[var(--state-error)]",
 };

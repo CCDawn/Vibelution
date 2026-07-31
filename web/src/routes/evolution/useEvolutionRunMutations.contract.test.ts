@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import routeSource from "../EvolutionRoute.tsx?raw";
+import autonomousApiSource from "../../api/selfEvolution.ts?raw";
 import runSource from "./useEvolutionRunMutations.ts?raw";
 import proposalSource from "./useEvolutionProposalMutations.ts?raw";
 
@@ -8,6 +9,15 @@ describe("evolution mutations contract (T3)", () => {
   it("owns run and proposal write mutations", () => {
     expect(runSource.match(/\buseMutation\(/g) ?? []).toHaveLength(10);
     expect(proposalSource.match(/\buseMutation\(/g) ?? []).toHaveLength(5);
+  });
+
+  it("keeps autonomous self-evolution transport in the domain API layer", () => {
+    expect(runSource).toContain("startSelfEvolutionAutonomousLoop(payload)");
+    expect(runSource).toContain("executeSelfEvolutionAutonomousLoopAction(payload)");
+    expect(runSource).not.toContain('fetchJson<SelfEvolutionAutonomousLoopRun>');
+    expect(autonomousApiSource).toContain('"/api/evolution/self/autonomous-runs"');
+    expect(autonomousApiSource).toContain("encodeURIComponent(payload.runId)");
+    expect(autonomousApiSource).toContain("comment: payload.comment ?? \"\"");
   });
 
   it("is wired from EvolutionRoute without inline useMutation definitions", () => {
