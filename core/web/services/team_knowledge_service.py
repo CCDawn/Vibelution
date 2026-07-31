@@ -4,13 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 import os
-import re
 import shutil
 import threading
 import uuid
-from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -19,72 +16,31 @@ from core.chat.chat_task_types import trim_lines
 
 from . import agent_directory_service, chat_room_service, team_service
 from .runtime_scene_service import record_runtime_scene_event
+from .team_knowledge import constants as _tk_constants
+from .team_knowledge import search_ranking as _tk_search_ranking
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-SCHEMA_VERSION = 1
-SOURCE_TYPES = {
-    "team_chat_refinement",
-    "external_search_refinement",
-    "pdf_refinement",
-    "agent_authored",
-    "runtime_evidence_refinement",
-    "manual_user_entry",
-}
-INGESTION_ADAPTERS = {
-    "team_chat_refinement": {
-        "label": "Team chat refinement",
-        "requiredSourceRef": ["roomId", "messageRange|roundId"],
-        "optionalSourceRef": ["teamId", "threadId"],
-        "evidenceKinds": ["message_range", "round"],
-    },
-    "external_search_refinement": {
-        "label": "External search refinement",
-        "requiredSourceRef": ["url|query"],
-        "optionalSourceRef": ["retrievedAt", "searchEngine", "rank"],
-        "evidenceKinds": ["url", "query", "excerpt"],
-    },
-    "pdf_refinement": {
-        "label": "PDF refinement",
-        "requiredSourceRef": ["filePath|url"],
-        "optionalSourceRef": ["pageRange", "documentHash"],
-        "evidenceKinds": ["file", "page_range", "excerpt"],
-    },
-    "agent_authored": {
-        "label": "Agent authored",
-        "requiredSourceRef": ["agentId"],
-        "optionalSourceRef": ["sessionId", "turnId"],
-        "evidenceKinds": ["agent_note"],
-    },
-    "runtime_evidence_refinement": {
-        "label": "Runtime evidence refinement",
-        "requiredSourceRef": ["runtimeSceneId|runId"],
-        "optionalSourceRef": ["logPath", "eventCode", "artifactPath"],
-        "evidenceKinds": ["runtime_scene", "log_ref", "artifact"],
-    },
-    "manual_user_entry": {
-        "label": "Manual user entry",
-        "requiredSourceRef": ["note|title"],
-        "optionalSourceRef": ["author", "context"],
-        "evidenceKinds": ["manual_note"],
-    },
-}
-REVIEW_ROLES = {"owner", "lead", "steward", "knowledge_steward", "source_ingestor", "coordinator"}
-IMPORTANCE_LEVELS = {"low", "medium", "high", "critical"}
-STABILITY_VALUES = {"temporary", "evolving", "stable", "deprecated"}
-SCOPES = {"agent", "team", "project", "global"}
-REVIEW_PRIORITIES = {"normal", "elevated", "urgent"}
-SUGGESTION_STATUSES = {"pending", "applied", "rejected"}
-KNOWLEDGE_OWNER_TYPES = {"team", "agent"}
-SOURCE_INBOX_STATUSES = {"pending", "accepted", "rejected", "duplicate", "needs_more_context"}
-SOURCE_REVIEW_DECISIONS = {"accepted", "rejected", "duplicate", "needs_more_context"}
-CENTRAL_SOURCE_STATUSES = {"active", "archived", "superseded"}
-KNOWLEDGE_SEARCH_MODES = {"exact", "semantic", "hybrid", "bm25"}
-BM25_K1 = 1.5
-BM25_B = 0.75
-_SAFE_ID_FRAGMENT = re.compile(r"[^A-Za-z0-9_.-]+")
-_SEARCH_TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_.-]+|[\u4e00-\u9fff]")
+SCHEMA_VERSION = _tk_constants.SCHEMA_VERSION
+SOURCE_TYPES = _tk_constants.SOURCE_TYPES
+INGESTION_ADAPTERS = _tk_constants.INGESTION_ADAPTERS
+REVIEW_ROLES = _tk_constants.REVIEW_ROLES
+IMPORTANCE_LEVELS = _tk_constants.IMPORTANCE_LEVELS
+STABILITY_VALUES = _tk_constants.STABILITY_VALUES
+SCOPES = _tk_constants.SCOPES
+REVIEW_PRIORITIES = _tk_constants.REVIEW_PRIORITIES
+SUGGESTION_STATUSES = _tk_constants.SUGGESTION_STATUSES
+KNOWLEDGE_OWNER_TYPES = _tk_constants.KNOWLEDGE_OWNER_TYPES
+SOURCE_INBOX_STATUSES = _tk_constants.SOURCE_INBOX_STATUSES
+SOURCE_REVIEW_DECISIONS = _tk_constants.SOURCE_REVIEW_DECISIONS
+CENTRAL_SOURCE_STATUSES = _tk_constants.CENTRAL_SOURCE_STATUSES
+KNOWLEDGE_SEARCH_MODES = _tk_constants.KNOWLEDGE_SEARCH_MODES
+BM25_K1 = _tk_constants.BM25_K1
+BM25_B = _tk_constants.BM25_B
+_SAFE_ID_FRAGMENT = _tk_constants._SAFE_ID_FRAGMENT
+_SEARCH_TOKEN_PATTERN = _tk_constants._SEARCH_TOKEN_PATTERN
 _LOCK = threading.RLock()
+
 
 
 class TeamKnowledgeError(ValueError):
@@ -3046,208 +3002,18 @@ def _require_proposal(owner_value: Any, knowledge_base_id: str, proposal_id: str
     return proposal
 
 
-def _search_text_for_payload(payload: Any) -> str:
-    values: list[str] = []
-
-    def collect(value: Any) -> None:
-        if value is None:
-            return
-        if isinstance(value, str):
-            text = value.strip()
-            if text:
-                values.append(text)
-            return
-        if isinstance(value, (int, float)):
-            values.append(str(value))
-            return
-        if isinstance(value, dict):
-            for nested in value.values():
-                collect(nested)
-            return
-        if isinstance(value, (list, tuple, set)):
-            for nested in value:
-                collect(nested)
-
-    collect(payload)
-    return " ".join(values).lower()
-
-
-def _tokenize_search_text(text: str) -> set[str]:
-    return {
-        match.group(0).lower()
-        for match in _SEARCH_TOKEN_PATTERN.finditer(str(text or "").lower())
-        if match.group(0).strip()
-    }
-
-
-def _tokenize_bm25_text(text: str) -> list[str]:
-    return [
-        match.group(0).lower()
-        for match in _SEARCH_TOKEN_PATTERN.finditer(str(text or "").lower())
-        if match.group(0).strip()
-    ]
-
-
-def _rank_bm25_search_results(results: list[dict[str, Any]], query: str) -> list[dict[str, Any]]:
-    normalized_query = str(query or "").strip().lower()
-    if not results:
-        return []
-    if not normalized_query:
-        ranked = []
-        for result in results:
-            item = dict(result)
-            item["semanticScore"] = 1.0
-            item["bm25Score"] = 1.0
-            item["matchReason"] = "no_query"
-            ranked.append(item)
-        ranked.sort(key=lambda item: str(item.get("updatedAt") or item.get("createdAt") or ""), reverse=True)
-        return ranked
-
-    query_terms = list(dict.fromkeys(_tokenize_bm25_text(normalized_query)))
-    if not query_terms:
-        return []
-    document_terms = [_tokenize_bm25_text(_bm25_text_for_result(item)) for item in results]
-    document_term_sets = [set(terms) for terms in document_terms]
-    document_lengths = [len(terms) for terms in document_terms]
-    document_count = len(document_terms)
-    average_document_length = max(1.0, sum(document_lengths) / max(document_count, 1))
-    document_frequencies = {
-        term: sum(1 for terms in document_term_sets if term in terms)
-        for term in query_terms
-    }
-    ranked: list[dict[str, Any]] = []
-    for result, terms, document_length in zip(results, document_terms, document_lengths):
-        counts = Counter(terms)
-        score = 0.0
-        for term in query_terms:
-            term_frequency = counts.get(term, 0)
-            if term_frequency <= 0:
-                continue
-            document_frequency = document_frequencies.get(term, 0)
-            if document_frequency <= 0:
-                continue
-            idf = math.log(1.0 + ((document_count - document_frequency + 0.5) / (document_frequency + 0.5)))
-            denominator = term_frequency + BM25_K1 * (
-                1.0 - BM25_B + BM25_B * (document_length / average_document_length)
-            )
-            if denominator <= 0:
-                continue
-            score += idf * ((term_frequency * (BM25_K1 + 1.0)) / denominator)
-        item = dict(result)
-        rounded_score = round(score, 6)
-        item["semanticScore"] = rounded_score
-        item["bm25Score"] = rounded_score
-        item["searchMode"] = "bm25"
-        item["matchReason"] = "bm25" if rounded_score > 0 else "metadata_filter"
-        ranked.append(item)
-    ranked.sort(
-        key=lambda item: (
-            float(item.get("semanticScore") or 0.0),
-            str(item.get("updatedAt") or item.get("createdAt") or ""),
-        ),
-        reverse=True,
-    )
-    return ranked
-
-
-def _bm25_text_for_result(result: dict[str, Any]) -> str:
-    tags = " ".join(str(tag or "").strip() for tag in list(result.get("tags") or []) if str(tag or "").strip())
-    source_parts: list[str] = []
-    for source in list(result.get("sourceSummaries") or []):
-        if not isinstance(source, dict):
-            continue
-        source_parts.extend(
-            [
-                str(source.get("title") or "").strip(),
-                str(source.get("summary") or "").strip(),
-            ]
-        )
-    parts = [
-        " ".join([str(result.get("title") or "").strip()] * 3),
-        " ".join([str(result.get("summary") or "").strip()] * 2),
-        str(result.get("content") or "").strip(),
-        tags,
-        " ".join(part for part in source_parts if part),
-    ]
-    return " ".join(part for part in parts if part)
-
-
-def _semantic_match_score(payload: Any, query: str) -> float:
-    normalized_query = str(query or "").strip().lower()
-    if not normalized_query:
-        return 1.0
-    haystack = payload if isinstance(payload, str) else _search_text_for_payload(payload)
-    if normalized_query in haystack:
-        return 1.0
-    query_tokens = _tokenize_search_text(normalized_query)
-    if not query_tokens:
-        return 0.0
-    haystack_tokens = _tokenize_search_text(haystack)
-    if not haystack_tokens:
-        return 0.0
-    return round(len(query_tokens.intersection(haystack_tokens)) / len(query_tokens), 4)
-
-
-def _search_match_reason(view: dict[str, Any], query: str, score: float) -> str:
-    if not str(query or "").strip():
-        return "no_query"
-    if str(query or "").strip().lower() in _search_text_for_payload(view):
-        return "exact_phrase"
-    if score > 0:
-        return "token_overlap"
-    return "metadata_filter"
-
-
-def _item_matches_filters(
-    item: dict[str, Any],
-    *,
-    query: str,
-    tags: set[str],
-    source_type: str,
-    importance_level: str,
-    confidence_min: float | None,
-    stability: str,
-    created_from: str,
-    created_to: str,
-    artifacts_by_id: dict[str, dict[str, Any]],
-    search_mode: str = "exact",
-) -> bool:
-    if query:
-        normalized_search_mode = str(search_mode or "exact").strip().lower()
-        haystack = _search_text_for_payload([item, list(artifacts_by_id.values())])
-        exact_match = query in haystack
-        semantic_score = _semantic_match_score(haystack, query)
-        if normalized_search_mode == "exact" and not exact_match:
-            return False
-        if normalized_search_mode == "semantic" and semantic_score <= 0:
-            return False
-        if normalized_search_mode == "hybrid" and not exact_match and semantic_score <= 0:
-            return False
-    if tags and not tags.issubset({str(tag or "").strip().lower() for tag in list(item.get("tags") or [])}):
-        return False
-    if source_type:
-        source_ids = [str(value or "") for value in list(item.get("sourceArtifactIds") or [])]
-        if not any(str((artifacts_by_id.get(source_id) or {}).get("sourceType") or "") == source_type for source_id in source_ids):
-            return False
-    if importance_level and str(item.get("importanceLevel") or "") != importance_level:
-        return False
-    if confidence_min is not None:
-        try:
-            if float(item.get("confidence") or 0.0) < float(confidence_min):
-                return False
-        except (TypeError, ValueError):
-            return False
-    if stability and str(item.get("stability") or "") != stability:
-        return False
-    created_at = str(item.get("createdAt") or item.get("appliedAt") or "")
-    if created_from and created_at < str(created_from):
-        return False
-    if created_to and created_at > str(created_to):
-        return False
-    return True
+_search_text_for_payload = _tk_search_ranking._search_text_for_payload
+_tokenize_search_text = _tk_search_ranking._tokenize_search_text
+_tokenize_bm25_text = _tk_search_ranking._tokenize_bm25_text
+_rank_bm25_search_results = _tk_search_ranking._rank_bm25_search_results
+_bm25_text_for_result = _tk_search_ranking._bm25_text_for_result
+_semantic_match_score = _tk_search_ranking._semantic_match_score
+_search_match_reason = _tk_search_ranking._search_match_reason
+_item_matches_filters = _tk_search_ranking._item_matches_filters
 
 
 def _search_item_view(
+
     item: dict[str, Any],
     base: dict[str, Any],
     owner_value: dict[str, Any],
