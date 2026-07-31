@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from core.web.services import team_service as facade
 from core.web.services.team import (
+    ai_search,
     ai_search_ranking,
     canvas_normalize,
     canvas_primitives,
@@ -61,6 +62,16 @@ def test_facade_reexports_system_bootstrap_control_plane() -> None:
     assert hasattr(facade, "_TEAM_SYSTEM_BOOTSTRAP_THREAD")
     assert isinstance(facade._TEAM_SYSTEM_BOOTSTRAP_STATE, dict)
     assert facade.TEAM_SYSTEM_BOOTSTRAP_READY_CACHE_TTL_SECONDS == 30.0
+
+
+def test_facade_reexports_ai_search_runs() -> None:
+    assert facade.list_ai_search_source_scope_runs is ai_search.list_ai_search_source_scope_runs
+    assert facade.start_ai_search_source_scope_run is ai_search.start_ai_search_source_scope_run
+    assert facade._default_ai_search_source_scope is ai_search._default_ai_search_source_scope
+    assert facade._load_ai_search_source_scope is ai_search._load_ai_search_source_scope
+    assert facade._execute_ai_search_query_card is ai_search._execute_ai_search_query_card
+    assert facade._AiSearchSourcePageParser is ai_search._AiSearchSourcePageParser
+    assert facade._ai_search_source_scope_path is ai_search._ai_search_source_scope_path
 
 
 def test_facade_reexports_canvas_normalize() -> None:

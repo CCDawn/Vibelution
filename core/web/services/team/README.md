@@ -12,6 +12,7 @@ Prefer slice modules over growing `team_service.py` when possible.
 | Canvas edge / token pure helpers | `canvas_primitives.py` | Agent mutations |
 | Team kind / template / chat-room purpose pure maps | `kind_helpers.py` | Agent mutations |
 | AI search page link ranking pure | `ai_search_ranking.py` | HTTP fetch / disk scope files |
+| AI search runs / source-scope IO | `ai_search.py` | system team materialize; pure ranking |
 | Canvas node/member normalize (Agent lookup) | `canvas_normalize.py` | pure edge normalize (`canvas_primitives`) |
 | Team CRUD list/get/create/archive | facade | agent_directory profiles |
 | System team bootstrap control plane | `system_bootstrap.py` | ensure_* materialization bodies |
@@ -37,6 +38,7 @@ Prefer slice modules over growing `team_service.py` when possible.
 | system bootstrap pack | **done** | control plane late-binds facade ensure_* bodies |
 | system teams materialize pack | **done** | ensure_*/need_repair probes late-bind facade index helpers |
 | chat-room link pack | **done** | sync/repair/historical link helpers late-bind facade index locks |
+| AI search runs pack | **done** | list/start/scope/page-fallback late-binds facade ensure/constants |
 
 ## Related
 
