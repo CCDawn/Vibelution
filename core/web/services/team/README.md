@@ -18,6 +18,8 @@ Prefer slice modules over growing `team_service.py` when possible.
 | Team CRUD list/get/create/archive | `team_crud.py` | repair index internals; pure ranking |
 | Team index / membership repair | `team_repair.py` | public CRUD entrypoints |
 | Team API projection / agent refs | `team_projection.py` | index write repair |
+| Active membership / contract helpers | `team_membership.py` | runtime-scene telemetry; public CRUD |
+| Team runtime-scene logging helpers | `team_logging.py` | membership resolve; index IO |
 | System team bootstrap control plane | `system_bootstrap.py` | ensure_* materialization bodies |
 | System team ensure / AI search team materialize | `system_teams.py` | bootstrap control-plane state; generic CRUD |
 | Team linked chat-room sync / repair | `chat_room_links.py` | team CRUD; canvas IO |
@@ -46,6 +48,8 @@ Prefer slice modules over growing `team_service.py` when possible.
 | team CRUD pack | **done** | list/create/update/archive/membership/message late-binds facade |
 | team repair pack | **done** | index/member/archive cascade repair late-binds facade helpers |
 | team projection pack | **done** | to_api / agent reference maps late-bind facade helpers |
+| team membership pack | **done** | active-member resolve / contract late-bind facade helpers |
+| team logging pack | **done** | runtime-scene team events / detail rollup late-bind facade state |
 
 ## Related
 

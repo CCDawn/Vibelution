@@ -17,7 +17,6 @@ from uuid import uuid4
 
 import httpx
 
-from core.chat.chat_task_types import trim_lines
 from core.infrastructure import developer_sandbox
 
 from . import agent_directory_service, chat_room_service, project_agent_bus_service
@@ -60,6 +59,8 @@ from .team import research_organization as _research_organization
 from .team import team_crud as _team_crud
 from .team import team_repair as _team_repair
 from .team import team_projection as _team_projection
+from .team import team_membership as _team_membership
+from .team import team_logging as _team_logging
 from core.logging.logger import debug as _debug_logger
 
 
@@ -528,11 +529,24 @@ _agent_reference_maps_from_agents = _team_projection._agent_reference_maps_from_
 _merged_agent_reference_maps = _team_projection._merged_agent_reference_maps
 _agent_reference = _team_projection._agent_reference
 
+_find_active_team_for_agent = _team_membership._find_active_team_for_agent
+_find_active_team_for_agent_in_state = _team_membership._find_active_team_for_agent_in_state
+_unique_active_member_agent_ids = _team_membership._unique_active_member_agent_ids
+_active_member_agent_ids = _team_membership._active_member_agent_ids
+_active_member_session_ids = _team_membership._active_member_session_ids
+_apply_team_contract = _team_membership._apply_team_contract
 
-
-
-
-
+_record_team_event = _team_logging._record_team_event
+_team_detail_log_fields = _team_logging._team_detail_log_fields
+_team_detail_log_signature = _team_logging._team_detail_log_signature
+_emit_team_detail_loaded = _team_logging._emit_team_detail_loaded
+_emit_team_detail_rollup = _team_logging._emit_team_detail_rollup
+_record_team_detail_loaded = _team_logging._record_team_detail_loaded
+_record_team_membership_conflict = _team_logging._record_team_membership_conflict
+_record_team_archive_rejected = _team_logging._record_team_archive_rejected
+_record_archived_team_member_cascade_repaired = _team_logging._record_archived_team_member_cascade_repaired
+_record_system_team_membership_conflict = _team_logging._record_system_team_membership_conflict
+_record_system_team_sync_failed = _team_logging._record_system_team_sync_failed
 
 _knowledge_expansion_team_agent_direct_session_available = _system_teams._knowledge_expansion_team_agent_direct_session_available
 ensure_knowledge_expansion_team_agents = _system_teams.ensure_knowledge_expansion_team_agents
@@ -567,119 +581,6 @@ _ai_search_role_metadata = _system_teams._ai_search_role_metadata
 _ai_search_members_from_agents = _system_teams._ai_search_members_from_agents
 _ensure_evolution_system_team_in_state = _system_teams._ensure_evolution_system_team_in_state
 _system_members_from_agents = _system_teams._system_members_from_agents
-
-
-
-def _find_active_team_for_agent(agent_id: str, *, excluding_team_id: str = "") -> dict[str, Any] | None:
-    state = _load_index()
-    return _find_active_team_for_agent_in_state(state, agent_id, excluding_team_id=excluding_team_id)
-
-
-def _find_active_team_for_agent_in_state(state: dict[str, Any], agent_id: str, *, excluding_team_id: str = "") -> dict[str, Any] | None:
-    normalized_agent_id = str(agent_id or "").strip()
-    normalized_excluding_team_id = str(excluding_team_id or "").strip()
-    if not normalized_agent_id:
-        return None
-    for team in list(state.get("teams") or []):
-        if not isinstance(team, dict):
-            continue
-        team_id = str(team.get("teamId") or "").strip()
-        if team_id == normalized_excluding_team_id:
-            continue
-        if str(team.get("status") or DEFAULT_TEAM_STATUS).strip() == "archived":
-            continue
-        for member in list(team.get("members") or []):
-            if isinstance(member, dict) and str(member.get("agentId") or "").strip() == normalized_agent_id:
-                return team
-    return None
-
-
-def _unique_active_member_agent_ids(
-    team: dict[str, Any],
-    *,
-    agent_refs: dict[str, dict[str, dict[str, Any]]] | None = None,
-) -> list[str]:
-    agent_ids: list[str] = []
-    seen: set[str] = set()
-    for member in list(team.get("members") or []):
-        if not isinstance(member, dict):
-            continue
-        agent_id = str(member.get("agentId") or "").strip()
-        if not agent_id or agent_id in seen:
-            continue
-        agent = _agent_reference(agent_id, include_archived=True, agent_refs=agent_refs)
-        if not agent or str(agent.get("status") or "active").strip() == "archived":
-            continue
-        seen.add(agent_id)
-        agent_ids.append(agent_id)
-    return agent_ids
-
-
-def _active_member_agent_ids(
-    team: dict[str, Any],
-    *,
-    agent_refs: dict[str, dict[str, dict[str, Any]]] | None = None,
-) -> list[str]:
-    ids: list[str] = []
-    seen: set[str] = set()
-    for member in list(team.get("members") or []):
-        if not isinstance(member, dict):
-            continue
-        agent_id = str(member.get("agentId") or "").strip()
-        if not agent_id or agent_id in seen:
-            continue
-        if not _agent_reference(agent_id, include_archived=False, agent_refs=agent_refs):
-            continue
-        seen.add(agent_id)
-        ids.append(agent_id)
-    return ids
-
-
-def _active_member_session_ids(
-    team: dict[str, Any],
-    *,
-    agent_refs: dict[str, dict[str, dict[str, Any]]] | None = None,
-) -> list[str]:
-    session_ids: list[str] = []
-    seen: set[str] = set()
-    for agent_id in _active_member_agent_ids(team, agent_refs=agent_refs):
-        agent = _agent_reference(agent_id, include_archived=False, agent_refs=agent_refs)
-        session_id = str((agent or {}).get("directSessionId") or "").strip()
-        if not session_id or session_id in seen:
-            continue
-        seen.add(session_id)
-        session_ids.append(session_id)
-    return session_ids
-
-
-def _apply_team_contract(
-    team: dict[str, Any],
-    *,
-    team_kind: str = "",
-    team_category: str = "",
-    team_source: str = "",
-    team_template_id: str = "",
-) -> bool:
-    inferred_kind = _infer_team_kind(team, fallback=team_kind)
-    defaults = TEAM_KIND_DEFAULTS.get(inferred_kind, TEAM_KIND_DEFAULTS["custom"])
-    expected = {
-        "teamKind": inferred_kind,
-        "teamCategory": trim_lines(team_category or team.get("teamCategory") or defaults["teamCategory"], max_lines=1).strip(),
-        "teamSource": str(team_source or team.get("teamSource") or defaults["teamSource"]).strip(),
-        "teamTemplateId": str(team_template_id or team.get("teamTemplateId") or "").strip(),
-    }
-    if expected["teamSource"] in TEAM_SOURCE_TO_KIND:
-        expected["teamKind"] = TEAM_SOURCE_TO_KIND[expected["teamSource"]]
-    if expected["teamKind"] != "template_demo":
-        expected["teamTemplateId"] = ""
-    elif not expected["teamTemplateId"]:
-        expected["teamTemplateId"] = _infer_team_template_id(team)
-    changed = False
-    for key, value in expected.items():
-        if team.get(key) != value:
-            team[key] = value
-            changed = True
-    return changed
 
 
 def _load_index() -> dict[str, Any]:
@@ -763,282 +664,7 @@ def _normalize_required_id(value: str, message: str) -> str:
     return normalized
 
 
-
-
-
 def _format_validation_error(validation: dict[str, Any]) -> str:
     issues = validation.get("issues") if isinstance(validation.get("issues"), list) else []
     details = "; ".join(str(item.get("message") or item.get("code") or "") for item in issues[:3] if isinstance(item, dict))
     return f"Team canvas contract invalid: {details or 'unknown validation error'}"
-
-
-def _record_team_event(event_code: str, team: dict[str, Any], *, fields: dict[str, Any] | None = None) -> None:
-    try:
-        record_runtime_scene_event(
-            "team_service",
-            "team",
-            event_code,
-            message=f"Team {team.get('teamId')} {event_code}",
-            outcome="succeeded",
-            fields={
-                "teamId": team.get("teamId"),
-                "teamName": team.get("name"),
-                "status": team.get("status"),
-                "teamKind": team.get("teamKind"),
-                "teamCategory": team.get("teamCategory"),
-                "teamSource": team.get("teamSource"),
-                "teamTemplateId": team.get("teamTemplateId"),
-                **(fields or {}),
-            },
-        )
-    except Exception as exc:
-        _debug_logger.warning(f"Failed to emit team loaded event. error={exc}")
-
-
-def _team_detail_log_fields(team: dict[str, Any], started_at: float) -> dict[str, Any]:
-    canvas = team.get("canvas") if isinstance(team.get("canvas"), dict) else {}
-    return {
-        "teamId": str(team.get("teamId") or "").strip(),
-        "teamName": str(team.get("name") or "").strip(),
-        "teamKind": str(team.get("teamKind") or "").strip(),
-        "teamCategory": str(team.get("teamCategory") or "").strip(),
-        "teamSource": str(team.get("teamSource") or "").strip(),
-        "teamTemplateId": str(team.get("teamTemplateId") or "").strip(),
-        "linkedChatRoomId": str(team.get("linkedChatRoomId") or "").strip(),
-        "memberCount": len(list(team.get("members") or [])),
-        "canvasNodeCount": len(list(canvas.get("nodes") or [])),
-        "canvasEdgeCount": len(list(canvas.get("edges") or [])),
-        "elapsedMs": _elapsed_ms(started_at),
-    }
-
-
-def _team_detail_log_signature(fields: dict[str, Any]) -> tuple[Any, ...]:
-    return (
-        fields.get("teamKind"),
-        fields.get("teamSource"),
-        fields.get("teamTemplateId"),
-        fields.get("linkedChatRoomId"),
-        fields.get("memberCount"),
-        fields.get("canvasNodeCount"),
-        fields.get("canvasEdgeCount"),
-    )
-
-
-def _emit_team_detail_loaded(fields: dict[str, Any], *, reason: str) -> None:
-    record_runtime_scene_event(
-        "team_service",
-        "team_detail",
-        "team.detail.loaded",
-        message="Team detail loaded.",
-        outcome="observed",
-        fields={**fields, "logReason": reason},
-    )
-
-
-def _emit_team_detail_rollup(team_id: str, state: dict[str, Any], *, now: float) -> None:
-    repeat_count = int(state.get("repeatCount") or 0)
-    if repeat_count <= 0:
-        return
-    fields = dict(state.get("lastFields") or {})
-    record_runtime_scene_event(
-        "team_service",
-        "team_detail",
-        "team.detail.loaded_rollup",
-        message="Repeated team detail loads suppressed.",
-        outcome="observed",
-        fields={
-            "teamId": team_id,
-            "teamName": str(fields.get("teamName") or ""),
-            "teamKind": str(fields.get("teamKind") or ""),
-            "teamSource": str(fields.get("teamSource") or ""),
-            "linkedChatRoomId": str(fields.get("linkedChatRoomId") or ""),
-            "memberCount": fields.get("memberCount", 0),
-            "canvasNodeCount": fields.get("canvasNodeCount", 0),
-            "canvasEdgeCount": fields.get("canvasEdgeCount", 0),
-            "repeatCount": repeat_count,
-            "windowSeconds": round(max(0.0, now - float(state.get("windowStartedAt") or now)), 3),
-            "maxElapsedMs": state.get("maxElapsedMs", 0),
-            "lastElapsedMs": fields.get("elapsedMs", 0),
-            "rollupReason": "same_signature_repeated",
-        },
-    )
-    state["repeatCount"] = 0
-    state["windowStartedAt"] = now
-    state["lastRollupAt"] = now
-
-
-def _record_team_detail_loaded(team: dict[str, Any], started_at: float) -> None:
-    try:
-        fields = _team_detail_log_fields(team, started_at)
-        team_id = str(fields.get("teamId") or "").strip()
-        if not team_id:
-            return
-        now = _perf_counter()
-        signature = _team_detail_log_signature(fields)
-        elapsed_ms = int(fields.get("elapsedMs") or 0)
-        with _TEAM_DETAIL_LOG_LOCK:
-            state = _TEAM_DETAIL_LOG_STATE.get(team_id)
-            if state is None:
-                _TEAM_DETAIL_LOG_STATE[team_id] = {
-                    "signature": signature,
-                    "repeatCount": 0,
-                    "windowStartedAt": now,
-                    "lastRollupAt": 0.0,
-                    "maxElapsedMs": elapsed_ms,
-                    "lastFields": fields,
-                }
-                _emit_team_detail_loaded(fields, reason="initial")
-                return
-
-            previous_signature = state.get("signature")
-            if previous_signature != signature:
-                _emit_team_detail_rollup(team_id, state, now=now)
-                state.update(
-                    {
-                        "signature": signature,
-                        "repeatCount": 0,
-                        "windowStartedAt": now,
-                        "maxElapsedMs": elapsed_ms,
-                        "lastFields": fields,
-                    }
-                )
-                _emit_team_detail_loaded(fields, reason="changed")
-                return
-
-            state["lastFields"] = fields
-            state["maxElapsedMs"] = max(int(state.get("maxElapsedMs") or 0), elapsed_ms)
-            if elapsed_ms >= TEAM_DETAIL_LOG_SLOW_THRESHOLD_MS:
-                _emit_team_detail_rollup(team_id, state, now=now)
-                state["maxElapsedMs"] = elapsed_ms
-                _emit_team_detail_loaded(fields, reason="slow")
-                return
-
-            state["repeatCount"] = int(state.get("repeatCount") or 0) + 1
-            if (
-                int(state.get("repeatCount") or 0) >= TEAM_DETAIL_LOG_ROLLUP_REPEAT_THRESHOLD
-            ):
-                _emit_team_detail_rollup(team_id, state, now=now)
-    except Exception as exc:
-        _debug_logger.warning(f"Failed to record team detail loaded telemetry. error={exc}")
-
-
-def _record_team_membership_conflict(team_id: str, agent_id: str, conflict: dict[str, Any]) -> None:
-    try:
-        record_runtime_scene_event(
-            "team_service",
-            "team",
-            "team.membership_conflict_rejected",
-            message="Team member assignment rejected because the Agent already belongs to another active Team",
-            outcome="blocked",
-            fields={
-                "teamId": team_id,
-                "agentId": agent_id,
-                "conflictTeamId": conflict.get("teamId"),
-                "conflictTeamName": conflict.get("name"),
-            },
-        )
-    except Exception as exc:
-        _debug_logger.warning(f"Failed to record team membership conflict for team={team_id}. error={exc}")
-
-
-def _record_team_archive_rejected(
-    team: dict[str, Any],
-    *,
-    reason: str,
-    agent_id: str = "",
-    error: Exception | None = None,
-) -> None:
-    try:
-        record_runtime_scene_event(
-            "team_service",
-            "team",
-            "team.archive_rejected",
-            message="Team archive rejected before cascading Agent archive.",
-            outcome="blocked",
-            fields={
-                "teamId": str(team.get("teamId") or "").strip(),
-                "teamName": str(team.get("name") or "").strip(),
-                "teamKind": str(team.get("teamKind") or _infer_team_kind(team)).strip(),
-                "teamCategory": str(team.get("teamCategory") or "").strip(),
-                "teamSource": str(team.get("teamSource") or "").strip(),
-                "reason": str(reason or "").strip(),
-                "agentId": str(agent_id or "").strip(),
-                "errorType": type(error).__name__ if error else "",
-                "message": str(error) if error else "",
-            },
-        )
-    except Exception as exc:
-        _debug_logger.warning(f"Failed to record team archive rejected for team={team.get('teamId')}. error={exc}")
-
-
-def _record_archived_team_member_cascade_repaired(
-    team: dict[str, Any],
-    archived_agent_ids: list[str],
-    *,
-    reason: str,
-) -> None:
-    try:
-        record_runtime_scene_event(
-            "team_service",
-            "team_repair",
-            "team.archived_agent_cascade_repaired",
-            message="Archived Team had active member Agents; cascading archive repair applied.",
-            outcome="repaired",
-            fields={
-                "teamId": str(team.get("teamId") or "").strip(),
-                "teamName": str(team.get("name") or "").strip(),
-                "teamKind": str(team.get("teamKind") or _infer_team_kind(team)).strip(),
-                "teamCategory": str(team.get("teamCategory") or "").strip(),
-                "teamSource": str(team.get("teamSource") or "").strip(),
-                "teamTemplateId": str(team.get("teamTemplateId") or "").strip(),
-                "archivedAgentIds": archived_agent_ids,
-                "archivedAgentCount": len(archived_agent_ids),
-                "reason": str(reason or "").strip(),
-            },
-        )
-    except Exception as exc:
-        _debug_logger.warning(
-            f"Failed to record archived team member cascade repaired for team={team.get('teamId')}. error={exc}"
-        )
-
-
-def _record_system_team_membership_conflict(team_id: str, agent_id: str, conflict: dict[str, Any], *, source: str) -> None:
-    try:
-        record_runtime_scene_event(
-            "team_service",
-            "team",
-            "team.system_membership_conflict",
-            message="System Team member was not synced because the Agent already belongs to another active Team",
-            outcome="blocked",
-            fields={
-                "teamId": team_id,
-                "agentId": agent_id,
-                "source": source,
-                "conflictTeamId": conflict.get("teamId"),
-                "conflictTeamName": conflict.get("name"),
-            },
-        )
-    except Exception as exc:
-        _debug_logger.warning(f"Failed to record system team membership conflict for team={team_id}. error={exc}")
-
-
-def _record_system_team_sync_failed(source: str, exc: Exception) -> None:
-    try:
-        normalized_source = str(source or "").strip()
-        event_code = "team.ai_search_system_sync_failed" if normalized_source == "ai_search" else "team.system_evolution_sync_failed"
-        message = "AI search system Team sync failed" if normalized_source == "ai_search" else "System evolution Team sync failed"
-        record_runtime_scene_event(
-            "team_service",
-            "team",
-            event_code,
-            message=message,
-            level="warning",
-            outcome="failed",
-            fields={
-                "source": normalized_source,
-                "errorType": type(exc).__name__,
-                "message": str(exc),
-            },
-        )
-    except Exception as exc:
-        _debug_logger.warning(f"Failed to record system team sync failure source={source}. error={exc}")
