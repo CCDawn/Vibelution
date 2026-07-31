@@ -417,6 +417,10 @@ describe("TeamsRoute layout contract", () => {
     expect(teamExperimentPlanningLedgerPanelSource).toContain("进入执行与迭代");
     expect(teamExperimentPlanningLedgerPanelSource).toContain("openIterationWorkspace");
     expect(routeSource).toContain('researchWorkspaceStageRoute(selectedTeam.teamId, "iteration")');
+    expect(teamResearchStageStandalonePagePanelSource).toContain("refreshStageWorkspace");
+    expect(routeSource).toContain("experimentMethodCatalogQuery.refetch()");
+    expect(routeSource).toContain("researchLoopStatusQuery.refetch()");
+    expect(routeSource).toContain("createExperimentPlanMutation.reset()");
     expect(routeSource).toContain("freezeExperimentDesignMutation");
     expect(teamExperimentLoopMutationsSource).toContain("/freeze`");
     expect(teamExperimentPlanningLedgerPanelSource).toContain("冻结设计");
