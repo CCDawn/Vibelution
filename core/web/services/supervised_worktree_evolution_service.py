@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import base64
 import hashlib
 import json
 import queue
@@ -23,8 +22,10 @@ from core.evaluation.supervised_evolution import (
     supervised_mental_model_enabled_for_mode,
 )
 from core.infrastructure import developer_sandbox, git_process
+from core.launcher import service as launcher_service
 from core.llm.errors import classify_exception
 from core.runtime_manager import work_run_store
+from core.runtime_manager.constants import LAUNCHER_STATE_PATH
 from core.runtime_manager.work_run_leases import (
     EVALUATION_LEASE,
     WORKTREE_WRITE_LEASE,
@@ -47,6 +48,11 @@ from .supervised_agent_service import supervised_agent_bindings
 from .supervised_candidate_runtime_service import (
     CandidateRuntimeExecutionError,
     run_candidate_runtime_evidence,
+)
+from .supervised_candidate_integration_service import (
+    CandidateIntegrationError,
+    integrate_candidate,
+    revert_candidate_commit,
 )
 from .supervised_conversation_harness_adapter import run_supervised_conversation_harness
 from .supervised_judge_closed_loop import (
@@ -206,6 +212,8 @@ def start_supervised_worktree_run(payload: dict[str, Any]) -> dict[str, Any]:
             "mergeAnalysis": {},
             "merge": {},
             "rollback": {},
+            "runtimeActivation": {},
+            "runtimeActivationTargetCommit": "",
             "error": "",
             "errorType": "",
         }
@@ -280,6 +288,8 @@ def run_supervised_worktree_flow(
         "mergeAnalysis": {},
         "merge": {},
         "rollback": {},
+        "runtimeActivation": {},
+        "runtimeActivationTargetCommit": "",
         "error": "",
         "errorType": "",
     }
@@ -296,6 +306,10 @@ def get_supervised_worktree_run(run_id: str) -> dict[str, Any] | None:
         return None
     snapshot = _work_run_store().load_snapshot(RUN_KIND, normalized)
     snapshot = _reconcile_orphaned_supervised_worktree_snapshot(snapshot)
+    before_reconcile = _clone(snapshot) if isinstance(snapshot, dict) else None
+    snapshot = _reconcile_runtime_activation(snapshot)
+    if snapshot and snapshot != before_reconcile:
+        snapshot = _persist_snapshot(snapshot, active_run_id="")
     return _decorate_snapshot(snapshot) if snapshot else None
 
 
@@ -322,6 +336,10 @@ def list_supervised_worktree_runs(limit: int = 20) -> list[dict[str, Any]]:
             continue
         if isinstance(payload, dict):
             payload = _reconcile_orphaned_supervised_worktree_snapshot(payload) or payload
+            before_reconcile = _clone(payload)
+            payload = _reconcile_runtime_activation(payload) or payload
+            if payload != before_reconcile:
+                payload = _persist_snapshot(payload, active_run_id="")
             items.append(_decorate_snapshot(payload))
     items.sort(key=lambda item: str(item.get("updatedAt") or item.get("startedAt") or ""), reverse=True)
     return items[: max(1, min(int(limit or 20), 100))]
@@ -1004,7 +1022,7 @@ def _execute_flow(
         decision = _build_decision(snapshot, options)
         snapshot["decision"] = decision
         snapshot["mergeAnalysis"] = _build_merge_analysis(snapshot)
-        _finish_by_decision(snapshot, decision, options)
+        _finish_and_maybe_auto_approve(snapshot, decision, options)
         return _decorate_snapshot(snapshot)
     except SupervisedWorktreeRunCancelled:
         persisted = _work_run_store().load_snapshot(RUN_KIND, run_id)
@@ -2601,6 +2619,70 @@ def _finish_by_decision(snapshot: dict[str, Any], decision: dict[str, Any], opti
     )
 
 
+def _finish_and_maybe_auto_approve(
+    snapshot: dict[str, Any],
+    decision: dict[str, Any],
+    options: dict[str, Any],
+) -> dict[str, Any]:
+    approval_mode = str(snapshot.get("approvalMode") or "human").strip().lower()
+    if approval_mode != "agent":
+        _finish_by_decision(snapshot, decision, options)
+        return snapshot
+
+    recommendation = str(
+        decision.get("judgeRecommendation")
+        or decision.get("judgeDecision")
+        or "INCONCLUSIVE"
+    ).strip().upper()
+    message = (
+        f"Judge 双次评分完成（建议：{recommendation}），"
+        "正在启动独立审批 Agent 作出最终合入决定。"
+    )
+    snapshot["status"] = "running"
+    snapshot["phase"] = "approval"
+    snapshot["runtimeStatus"] = "running"
+    snapshot["outcome"] = "agent_approval_running"
+    snapshot["latestMessage"] = message
+    snapshot["updatedAt"] = _now_iso()
+    _append_stage(snapshot, "approval", "running", message)
+    _persist_snapshot(snapshot, active_run_id=str(snapshot.get("runId") or ""))
+    _record_worktree_scene_event(
+        "approval",
+        "supervised_worktree_run.agent_approval.started",
+        run_id=str(snapshot.get("runId") or ""),
+        outcome="running",
+        fields={"judgeRecommendation": recommendation},
+        lifecycle=True,
+    )
+
+    decided = _request_independent_agent_approval(snapshot, allow_active=True)
+    finished = _now_iso()
+    decided["status"] = "done"
+    decided["phase"] = "complete"
+    decided["runtimeStatus"] = "idle"
+    decided["finishedAt"] = finished
+    decided["updatedAt"] = finished
+    final_decision = str(
+        ((decided.get("approvalDecision") or {}).get("decision"))
+        if isinstance(decided.get("approvalDecision"), dict)
+        else ""
+    ).strip().upper()
+    if final_decision == "APPROVE":
+        decided["latestMessage"] = "独立审批 Agent 已批准，正在创建受控 Git 提交并激活运行时。"
+    else:
+        decided["latestMessage"] = (
+            f"独立审批 Agent 已作出 {final_decision or 'UNKNOWN'} 决定，"
+            "候选未进入自动合入。"
+        )
+    _append_stage(decided, "complete", "done", str(decided["latestMessage"]))
+    _persist_snapshot(decided, active_run_id="")
+    if final_decision == "APPROVE":
+        decided = _merge_candidate(decided, force=False)
+    snapshot.clear()
+    snapshot.update(decided)
+    return snapshot
+
+
 def _workflow_progress_callback(snapshot: dict[str, Any], role: str, step_id: str) -> Callable[[dict[str, Any]], None]:
     def _callback(event: dict[str, Any]) -> None:
         if not isinstance(event, dict):
@@ -3106,6 +3188,15 @@ def _build_merge_analysis(snapshot: dict[str, Any]) -> dict[str, Any]:
     high_risk = [item for item in changed_files if bool(item.get("highRisk"))]
     blockers: list[str] = []
     frozen_variant = worktree.get("variant") if isinstance(worktree.get("variant"), dict) else {}
+    current_branch = _git_scalar(project_root, "branch", "--show-current")
+    current_head = _git_scalar(project_root, "rev-parse", "HEAD")
+    checkpoint_commit = str(frozen_variant.get("checkpointCommit") or "").strip()
+    if current_branch != "main":
+        blockers.append("main_branch_required")
+    if dirty_main:
+        blockers.append("main_workspace_dirty")
+    if not checkpoint_commit or current_head != checkpoint_commit:
+        blockers.append("main_head_drift")
     variant_status = "verified"
     current_variant: dict[str, Any] = {}
     if not _candidate_variant_is_bound(frozen_variant):
@@ -3154,6 +3245,9 @@ def _build_merge_analysis(snapshot: dict[str, Any]) -> dict[str, Any]:
         "candidateVariantId": str(frozen_variant.get("variantId") or ""),
         "currentCandidateVariantId": str(current_variant.get("variantId") or ""),
         "mainDirtyFiles": sorted(dirty_main),
+        "mainBranch": current_branch,
+        "mainHead": current_head,
+        "expectedMainHead": checkpoint_commit,
         "reviewGate": snapshot.get("reviewGate") if isinstance(snapshot.get("reviewGate"), dict) else {},
         "analyzedAt": _now_iso(),
     }
@@ -3168,15 +3262,22 @@ def _record_approval_decision(
     actor_id: str = "",
     conversation_session_id: str = "",
     evidence_refs: list[str] | None = None,
+    allow_active_agent: bool = False,
 ) -> dict[str, Any]:
     status = str(snapshot.get("status") or "").strip().lower()
-    if status not in _TERMINAL_STATUSES:
-        raise SupervisedWorktreeRunActionError("候选运行尚未结束，不能提前作出最终审批。")
     normalized_decision = str(decision or "").strip().upper()
     if normalized_decision not in APPROVAL_DECISIONS:
         raise SupervisedWorktreeRunValidationError("审批决定必须是 APPROVE、REJECT 或 RERUN_REQUIRED。")
     approval_mode = str(snapshot.get("approvalMode") or "human").strip().lower()
     normalized_actor = str(actor_kind or "").strip().lower()
+    active_agent_approval = (
+        allow_active_agent
+        and normalized_actor == "agent"
+        and status in _ACTIVE_STATUSES
+        and str(snapshot.get("phase") or "").strip().lower() == "approval"
+    )
+    if status not in _TERMINAL_STATUSES and not active_agent_approval:
+        raise SupervisedWorktreeRunActionError("候选运行尚未结束，不能提前作出最终审批。")
     if approval_mode not in APPROVAL_MODES:
         raise SupervisedWorktreeRunActionError("本轮审批模式无效，禁止写入审批决定。")
     if normalized_actor != approval_mode:
@@ -3253,14 +3354,14 @@ def _record_approval_decision(
     return updated
 
 
-def _request_independent_agent_approval(snapshot: dict[str, Any]) -> dict[str, Any]:
+def _request_independent_agent_approval(
+    snapshot: dict[str, Any],
+    *,
+    allow_active: bool = False,
+) -> dict[str, Any]:
     if str(snapshot.get("approvalMode") or "").strip().lower() != "agent":
         raise SupervisedWorktreeRunActionError("本轮不是 Agent 审批模式。")
     evaluation_state = _evaluation_state(snapshot)
-    if evaluation_state != "VALID":
-        raise SupervisedWorktreeRunActionError(
-            f"当前评估状态为 {evaluation_state}，不能启动批准流程；请补证据或复跑。"
-        )
     if str(snapshot.get("executionMode") or "simulation").strip().lower() != "real":
         recommendation = str(
             ((snapshot.get("candidateJudgment") or {}).get("recommendation"))
@@ -3274,6 +3375,7 @@ def _request_independent_agent_approval(snapshot: dict[str, Any]) -> dict[str, A
             actor_id="simulated-independent-approval-agent",
             reason="Simulation approval projection; no real Approval Agent was called.",
             evidence_refs=["simulation:approval"],
+            allow_active_agent=allow_active,
         )
 
     bindings = snapshot.get("agentBindings") if isinstance(snapshot.get("agentBindings"), dict) else {}
@@ -3359,6 +3461,7 @@ def _request_independent_agent_approval(snapshot: dict[str, Any]) -> dict[str, A
         conversation_session_id=observed_session_id,
         reason=str(raw_decision.get("reason") or ""),
         evidence_refs=list(raw_decision.get("evidence_refs") or []),
+        allow_active_agent=allow_active,
     )
     updated["approvalConversationSessionId"] = observed_session_id
     _persist_snapshot(updated, active_run_id="")
@@ -3409,15 +3512,32 @@ def _merge_candidate(snapshot: dict[str, Any], *, force: bool) -> dict[str, Any]
     if not candidate_path.exists() or not candidate_path.is_dir():
         raise SupervisedWorktreeRunActionError("候选工作树不可用或已被清理，无法执行合并。")
     changed_files = list(analysis.get("changedFiles") or [])
-    rollback_manifest = _apply_candidate_files(
-        _snapshot_project_root(updated),
-        candidate_path,
-        changed_files,
-        force=force,
+    candidate_variant = (
+        worktree.get("variant")
+        if isinstance(worktree.get("variant"), dict)
+        else {}
     )
+    project_root = _snapshot_project_root(updated)
+    try:
+        integration = integrate_candidate(
+            project_root=project_root,
+            candidate_root=candidate_path,
+            changed_files=changed_files,
+            expected_head=str(candidate_variant.get("checkpointCommit") or ""),
+            expected_variant_id=str(candidate_variant.get("variantId") or ""),
+            run_id=str(updated.get("runId") or ""),
+            manifest_root=(
+                project_root
+                / ".git"
+                / "vibelution"
+                / "supervised-integration"
+            ),
+        )
+    except CandidateIntegrationError as exc:
+        raise SupervisedWorktreeRunActionError(str(exc)) from exc
     updated["merge"] = {
-        "status": "merged",
-        "mergedAt": _now_iso(),
+        "status": "committed",
+        "committedAt": str(integration.get("committedAt") or _now_iso()),
         "force": force,
         "triggeredBy": {
             "role": "approval_executor",
@@ -3428,28 +3548,299 @@ def _merge_candidate(snapshot: dict[str, Any], *, force: bool) -> dict[str, Any]
                 else ""
             ),
             "decision": str(judgment.get("decision") or judgment.get("recommendation") or ""),
-            "mechanism": "controlled_candidate_apply",
+            "mechanism": "controlled_candidate_commit",
         },
-        "changedFiles": [item.get("path") for item in changed_files],
-        "rollbackManifestPath": rollback_manifest["path"],
+        "baseCommit": str(integration.get("baseCommit") or ""),
+        "commitSha": str(integration.get("commitSha") or ""),
+        "candidateVariantId": str(integration.get("candidateVariantId") or ""),
+        "changedFiles": list(integration.get("changedFiles") or []),
+        "rollbackManifestPath": str(integration.get("rollbackManifestPath") or ""),
     }
     updated["rollback"] = {
         "status": "available",
-        "manifestPath": rollback_manifest["path"],
-        "reason": "已生成合并回滚清单。",
+        "manifestPath": str(integration.get("rollbackManifestPath") or ""),
+        "integrationCommit": str(integration.get("commitSha") or ""),
+        "reason": "已生成候选提交；回退将创建可审计的 Git revert 提交。",
     }
-    updated["outcome"] = "merged"
+    updated["outcome"] = "integration_committed"
     updated["updatedAt"] = _now_iso()
     _persist_snapshot(updated, active_run_id="")
     _record_worktree_scene_event(
         "merge",
-        "supervised_worktree_run.merge.applied",
+        "supervised_worktree_run.merge.committed",
         run_id=str(updated.get("runId") or ""),
         outcome="succeeded",
-        fields={"force": force, "fileCount": len(changed_files)},
+        fields={
+            "force": force,
+            "fileCount": len(changed_files),
+            "baseCommit": str(integration.get("baseCommit") or ""),
+            "commitSha": str(integration.get("commitSha") or ""),
+            "candidateVariantId": str(integration.get("candidateVariantId") or ""),
+        },
         lifecycle=True,
     )
+    activation = _queue_runtime_activation(updated)
+    updated["runtimeActivation"] = activation
+    activation_status = str(activation.get("status") or "").strip().lower()
+    updated["outcome"] = (
+        "activation_pending"
+        if activation_status in {"restart_queued", "activating"}
+        else "activation_failed"
+    )
+    updated["latestMessage"] = (
+        "候选已形成干净 Git 提交，Launcher 正在激活该提交。"
+        if updated["outcome"] == "activation_pending"
+        else "候选已形成 Git 提交，但 Launcher 激活未启动；运行时尚未应用。"
+    )
+    updated["updatedAt"] = _now_iso()
+    _persist_snapshot(updated, active_run_id="")
     return updated
+
+
+def _queue_runtime_activation(
+    snapshot: dict[str, Any],
+    *,
+    attempt: int = 1,
+) -> dict[str, Any]:
+    merge = snapshot.get("merge") if isinstance(snapshot.get("merge"), dict) else {}
+    commit_sha = str(
+        snapshot.get("runtimeActivationTargetCommit")
+        or merge.get("commitSha")
+        or ""
+    ).strip()
+    run_id = str(snapshot.get("runId") or "").strip()
+    if not commit_sha or not run_id:
+        return {
+            "status": "activation_failed",
+            "attempt": attempt,
+            "targetCommit": commit_sha,
+            "reason": "missing_integration_commit_or_run_id",
+        }
+    worktree = (
+        snapshot.get("candidateWorktree")
+        if isinstance(snapshot.get("candidateWorktree"), dict)
+        else {}
+    )
+    approval = (
+        snapshot.get("approvalDecision")
+        if isinstance(snapshot.get("approvalDecision"), dict)
+        else {}
+    )
+    decided_by = (
+        approval.get("decidedBy")
+        if isinstance(approval.get("decidedBy"), dict)
+        else {}
+    )
+    try:
+        intent = launcher_service.submit_lifecycle_intent(
+            {
+                "action": "restart_after_apply",
+                "reason": f"activate supervised candidate commit {commit_sha[:12]}",
+                "idempotencyKey": f"{run_id}:restart_after_apply:{attempt}",
+            },
+            actor_context={
+                "actorType": "supervised_approval_agent",
+                "actorId": str(decided_by.get("actorId") or "supervised-approval"),
+                "sourceRunId": run_id,
+                "sourceTaskId": "",
+                "sourceWorktree": str(worktree.get("path") or ""),
+            },
+        )
+    except Exception as exc:
+        return {
+            "status": "activation_failed",
+            "attempt": attempt,
+            "targetCommit": commit_sha,
+            "reason": f"{type(exc).__name__}: {exc}",
+        }
+    intent_status = str(intent.get("status") or "").strip().lower()
+    if intent_status == "rejected":
+        projected_status = "activation_blocked"
+    elif intent_status in {"accepted", "executing"}:
+        projected_status = "activating"
+    elif intent_status == "succeeded":
+        projected_status = "activation_verifying"
+    else:
+        projected_status = "activation_failed"
+    return {
+        "status": projected_status,
+        "attempt": attempt,
+        "targetCommit": commit_sha,
+        "intentId": str(intent.get("intentId") or ""),
+        "commandId": str(intent.get("commandId") or ""),
+        "intentStatus": intent_status,
+        "reason": str(intent.get("rejectionReason") or ""),
+        "requestedAt": _now_iso(),
+    }
+
+
+def _reconcile_runtime_activation(
+    snapshot: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if not isinstance(snapshot, dict):
+        return snapshot
+    activation = (
+        snapshot.get("runtimeActivation")
+        if isinstance(snapshot.get("runtimeActivation"), dict)
+        else {}
+    )
+    activation_status = str(activation.get("status") or "").strip().lower()
+    if activation_status not in {
+        "restart_queued",
+        "activating",
+        "activation_verifying",
+    }:
+        return snapshot
+    intent_id = str(activation.get("intentId") or "").strip()
+    if not intent_id:
+        return snapshot
+    updated = _clone(snapshot)
+    current = dict(activation)
+    try:
+        intent = launcher_service.get_lifecycle_intent(intent_id)
+    except Exception:
+        return snapshot
+    intent_status = str(intent.get("status") or "").strip().lower()
+    previous_intent_status = str(current.get("intentStatus") or "")
+    previous_command_id = str(current.get("commandId") or "")
+    current["intentStatus"] = intent_status
+    current["commandId"] = str(intent.get("commandId") or current.get("commandId") or "")
+    if intent_status in {"accepted", "executing"}:
+        if (
+            activation_status == "activating"
+            and previous_intent_status == intent_status
+            and previous_command_id == str(current.get("commandId") or "")
+        ):
+            return snapshot
+        current["status"] = "activating"
+        current["lastCheckedAt"] = _now_iso()
+        updated["runtimeActivation"] = current
+        return updated
+    if intent_status == "succeeded":
+        target_commit = str(current.get("targetCommit") or "").strip()
+        proof = _runtime_activation_proof(target_commit)
+        current["proof"] = proof
+        if bool(proof.get("verified")):
+            current["status"] = "applied"
+            current["appliedAt"] = _now_iso()
+            merge = updated.get("merge") if isinstance(updated.get("merge"), dict) else {}
+            updated["merge"] = {**merge, "status": "applied", "appliedAt": current["appliedAt"]}
+            rollback = (
+                updated.get("rollback")
+                if isinstance(updated.get("rollback"), dict)
+                else {}
+            )
+            if str(rollback.get("status") or "") == "revert_committed":
+                updated["rollback"] = {
+                    **rollback,
+                    "status": "rolled_back",
+                    "runtimeAppliedAt": current["appliedAt"],
+                }
+                updated["outcome"] = "merge_rolled_back"
+                updated["latestMessage"] = "候选回退提交已由 Launcher 激活。"
+            else:
+                updated["outcome"] = "applied"
+                updated["latestMessage"] = "候选 Git 提交与前端构建均已由 Launcher 激活。"
+        else:
+            current["status"] = "activation_failed"
+            current["reason"] = "runtime_proof_mismatch"
+            updated["outcome"] = "activation_failed"
+            updated["latestMessage"] = "Launcher 命令已结束，但运行提交或前端构建证据不匹配。"
+        updated["runtimeActivation"] = current
+        updated["updatedAt"] = _now_iso()
+        return updated
+    if intent_status == "failed" and int(current.get("attempt") or 1) < 2:
+        retry = _queue_runtime_activation(
+            updated,
+            attempt=int(current.get("attempt") or 1) + 1,
+        )
+        retry["previousIntentId"] = intent_id
+        retry["previousFailure"] = intent.get("result") or {}
+        updated["runtimeActivation"] = retry
+        updated["outcome"] = (
+            "activation_pending"
+            if str(retry.get("status") or "") in {"restart_queued", "activating"}
+            else "activation_failed"
+        )
+        updated["latestMessage"] = (
+            "首次 Launcher 激活失败，已自动排队最后一次重试。"
+            if updated["outcome"] == "activation_pending"
+            else "首次 Launcher 激活失败，自动重试也未能启动。"
+        )
+        updated["updatedAt"] = _now_iso()
+        return updated
+    current["status"] = (
+        "activation_blocked" if intent_status == "rejected" else "activation_failed"
+    )
+    current["reason"] = str(
+        intent.get("rejectionReason")
+        or ((intent.get("result") or {}).get("message") if isinstance(intent.get("result"), dict) else "")
+        or intent_status
+        or "unknown_lifecycle_failure"
+    )
+    updated["runtimeActivation"] = current
+    updated["outcome"] = "activation_failed"
+    updated["latestMessage"] = (
+        "候选 Git 提交已保留，但 Launcher 激活失败；请查看状态后决定是否回退。"
+    )
+    updated["updatedAt"] = _now_iso()
+    return updated
+
+
+def _runtime_activation_proof(target_commit: str) -> dict[str, Any]:
+    expected = str(target_commit or "").strip()
+    try:
+        launcher_state = json.loads(
+            LAUNCHER_STATE_PATH.read_text(encoding="utf-8-sig")
+        )
+    except (OSError, json.JSONDecodeError):
+        launcher_state = {}
+    try:
+        launcher_status = launcher_service.get_launcher_status()
+    except Exception:
+        launcher_status = {}
+    bundle = (
+        launcher_status.get("projectBundle")
+        if isinstance(launcher_status.get("projectBundle"), dict)
+        else {}
+    )
+    lifecycle = (
+        launcher_status.get("lifecycleProof")
+        if isinstance(launcher_status.get("lifecycleProof"), dict)
+        else {}
+    )
+    active = (
+        lifecycle.get("activeWorkRuns")
+        if isinstance(lifecycle.get("activeWorkRuns"), dict)
+        else {}
+    )
+    runtime_commit = str(launcher_state.get("runtimeSourceCommit") or "").strip()
+    frontend_commit = str(
+        launcher_state.get("frontendBuiltFromCommit") or ""
+    ).strip()
+    backend = bundle.get("backend") if isinstance(bundle.get("backend"), dict) else {}
+    verified = bool(
+        expected
+        and runtime_commit == expected
+        and frontend_commit == expected
+        and bool(launcher_state.get("runtimeSourceTrackedClean"))
+        and str(bundle.get("phase") or "").strip().lower() == "steady"
+        and bool(backend.get("healthy"))
+        and int(active.get("count") or 0) == 0
+    )
+    return {
+        "verified": verified,
+        "targetCommit": expected,
+        "runtimeSourceCommit": runtime_commit,
+        "frontendBuiltFromCommit": frontend_commit,
+        "runtimeSourceTrackedClean": bool(
+            launcher_state.get("runtimeSourceTrackedClean")
+        ),
+        "phase": str(bundle.get("phase") or ""),
+        "backendHealthy": bool(backend.get("healthy")),
+        "activeWorkCount": int(active.get("count") or 0),
+        "verifiedAt": _now_iso(),
+    }
 
 
 def _review_gate_requires_approval(snapshot: dict[str, Any]) -> bool:
@@ -3506,32 +3897,32 @@ def _approve_review_gate(snapshot: dict[str, Any], *, reviewer_note: str = "") -
 
 def _rollback_merge(snapshot: dict[str, Any]) -> dict[str, Any]:
     rollback = snapshot.get("rollback") if isinstance(snapshot.get("rollback"), dict) else {}
-    manifest_path = Path(str(rollback.get("manifestPath") or ""))
-    if not manifest_path.exists():
-        raise SupervisedWorktreeRunActionError("未找到可执行的合并回滚清单。")
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    entries = manifest.get("entries") if isinstance(manifest.get("entries"), list) else []
-    for entry in entries:
-        rel = str(entry.get("path") or "")
-        target = _safe_project_path(_snapshot_project_root(snapshot), rel)
-        if bool(entry.get("existed")):
-            data = base64.b64decode(str(entry.get("contentBase64") or ""))
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(data)
-        else:
-            if target.exists():
-                if target.is_dir():
-                    shutil.rmtree(target)
-                else:
-                    target.unlink()
+    merge = snapshot.get("merge") if isinstance(snapshot.get("merge"), dict) else {}
+    integration_commit = str(
+        rollback.get("integrationCommit") or merge.get("commitSha") or ""
+    ).strip()
+    if not integration_commit:
+        raise SupervisedWorktreeRunActionError("未找到可执行的候选合入提交。")
+    try:
+        reverted = revert_candidate_commit(
+            project_root=_snapshot_project_root(snapshot),
+            integration_commit=integration_commit,
+            run_id=str(snapshot.get("runId") or ""),
+        )
+    except CandidateIntegrationError as exc:
+        raise SupervisedWorktreeRunActionError(str(exc)) from exc
     updated = _clone(snapshot)
     updated["rollback"] = {
         **rollback,
-        "status": "rolled_back",
+        "status": "revert_committed",
+        "revertedCommit": str(reverted.get("revertedCommit") or ""),
+        "revertCommit": str(reverted.get("revertCommit") or ""),
         "rolledBackAt": _now_iso(),
-        "reason": "已恢复合并前文件状态。",
+        "reason": "已创建可审计的 Git revert 提交，等待 Launcher 激活。",
     }
-    updated["outcome"] = "merge_rolled_back"
+    updated["runtimeActivationTargetCommit"] = str(reverted.get("revertCommit") or "")
+    updated["runtimeActivation"] = _queue_runtime_activation(updated)
+    updated["outcome"] = "rollback_activation_pending"
     updated["updatedAt"] = _now_iso()
     _persist_snapshot(updated, active_run_id="")
     _record_worktree_scene_event(
@@ -3539,58 +3930,13 @@ def _rollback_merge(snapshot: dict[str, Any]) -> dict[str, Any]:
         "supervised_worktree_run.merge.rolled_back",
         run_id=str(updated.get("runId") or ""),
         outcome="succeeded",
-        fields={"fileCount": len(entries)},
+        fields={
+            "integrationCommit": str(reverted.get("revertedCommit") or ""),
+            "revertCommit": str(reverted.get("revertCommit") or ""),
+        },
         lifecycle=True,
     )
     return updated
-
-
-def _apply_candidate_files(
-    project_root: Path,
-    candidate_path: Path,
-    changed_files: list[dict[str, Any]],
-    *,
-    force: bool,
-) -> dict[str, Any]:
-    run_id = f"merge-{uuid4().hex[:12]}"
-    root = project_root.resolve()
-    manifest_dir = _run_store_root(root) / "merge_rollback"
-    manifest_dir.mkdir(parents=True, exist_ok=True)
-    entries: list[dict[str, Any]] = []
-    for item in changed_files:
-        rel = str(item.get("path") or "").strip()
-        if not rel:
-            continue
-        target = _safe_project_path(root, rel)
-        source = _safe_project_path(candidate_path, rel)
-        entry = {
-            "path": rel,
-            "existed": target.exists(),
-            "contentBase64": "",
-        }
-        if target.exists() and target.is_file():
-            entry["contentBase64"] = base64.b64encode(target.read_bytes()).decode("ascii")
-        entries.append(entry)
-        if str(item.get("changeType") or "") == "deleted" or not source.exists():
-            if target.exists():
-                if target.is_dir():
-                    shutil.rmtree(target)
-                else:
-                    target.unlink()
-            continue
-        if source.is_dir():
-            raise SupervisedWorktreeRunActionError(f"暂不支持合并目录路径：{rel}")
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, target)
-    manifest_path = manifest_dir / f"{run_id}.json"
-    payload = {
-        "runId": run_id,
-        "createdAt": _now_iso(),
-        "force": force,
-        "entries": entries,
-    }
-    manifest_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    return {"path": str(manifest_path), "entries": entries}
 
 
 def _mark_preserved(snapshot: dict[str, Any]) -> dict[str, Any]:
@@ -4043,6 +4389,24 @@ def _git_status_files(repo_root: Path) -> list[dict[str, str]]:
     return items
 
 
+def _git_scalar(repo_root: Path, *args: str) -> str:
+    try:
+        proc = git_process.run_git(
+            list(args),
+            cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+    except OSError:
+        return ""
+    if proc.returncode != 0:
+        return ""
+    return str(proc.stdout or "").strip()
+
+
 def _call_cancel_checker(cancel_checker: Callable[[], Any] | None) -> str:
     if not callable(cancel_checker):
         return ""
@@ -4407,13 +4771,25 @@ def _action_states(snapshot: dict[str, Any]) -> dict[str, Any]:
     evaluation_state = _evaluation_state(snapshot)
     candidate_judgment = snapshot.get("candidateJudgment") if isinstance(snapshot.get("candidateJudgment"), dict) else {}
     judge_scoring_complete = judge_merge_allowed(candidate_judgment)
+    merge_status = str(merge.get("status") or "").strip().lower()
+    integrated = merge_status in {"committed", "applied", "reverted"}
     return {
         "terminate": {
             "enabled": active,
             "reason": "" if active else "这一轮没有正在运行的监督工作树进化任务。",
         },
-        "preserve": {"enabled": done and has_worktree and outcome not in {"preserved", "merged"}},
-        "discard": {"enabled": done and has_worktree and outcome not in {"discarded", "discard_skipped", "merged"}},
+        "preserve": {
+            "enabled": done
+            and has_worktree
+            and not integrated
+            and outcome not in {"preserved", "merged", "applied"}
+        },
+        "discard": {
+            "enabled": done
+            and has_worktree
+            and not integrated
+            and outcome not in {"discarded", "discard_skipped", "merged", "applied"}
+        },
         "analyzeMerge": {"enabled": done and has_worktree},
         "approveReview": {
             "enabled": (
@@ -4439,14 +4815,16 @@ def _action_states(snapshot: dict[str, Any]) -> dict[str, Any]:
                 done
                 and has_worktree
                 and review_pending
-                and judge_scoring_complete
                 and approval_mode == "agent"
                 and approval_pending
             ),
             "reason": (
                 ""
                 if judge_scoring_complete
-                else f"当前评估状态为 {evaluation_state}，不能启动 Agent 批准流程。"
+                else (
+                    f"当前评估状态为 {evaluation_state}；审批 Agent 只能拒绝或要求复跑，"
+                    "不能批准合入。"
+                )
             ),
         },
         "rejectReview": {
@@ -4468,13 +4846,16 @@ def _action_states(snapshot: dict[str, Any]) -> dict[str, Any]:
         "merge": {
             "enabled": done
             and has_worktree
-            and str(merge.get("status") or "") != "merged"
+            and not integrated
             and str(approval.get("status") or "").strip().lower() == "decided"
             and str(approval.get("decision") or "").strip().upper() == "APPROVE"
             and evaluation_state == "VALID"
             and not review_pending
         },
-        "rollback": {"enabled": str(rollback.get("status") or "") == "available"},
+        "rollback": {
+            "enabled": str(rollback.get("status") or "") == "available"
+            and merge_status in {"committed", "applied"}
+        },
     }
 
 
