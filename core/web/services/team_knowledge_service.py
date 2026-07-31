@@ -17,6 +17,7 @@ from .runtime_scene_service import record_runtime_scene_event
 from .team_knowledge import constants as _tk_constants
 from .team_knowledge import search_ranking as _tk_search_ranking
 from .team_knowledge import store as _tk_store
+from .team_knowledge import permissions as _tk_permissions
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -2763,151 +2764,6 @@ def _pending_proposals_for_base(owner_value: Any, knowledge_base_id: str) -> lis
     return proposals[:12]
 
 
-def _permissions_for_actor(owner_value: Any, base: dict[str, Any], agent_id: str, *, internal: bool = False) -> dict[str, bool]:
-    return {
-        "canRead": _can_access(owner_value, base, agent_id, "read", internal=internal),
-        "canPropose": _can_access(owner_value, base, agent_id, "propose", internal=internal),
-        "canReview": _can_access(owner_value, base, agent_id, "review", internal=internal),
-        "canRate": _can_access(owner_value, base, agent_id, "rate", internal=internal),
-    }
-
-
-def _require_permission(owner_value: Any, base: dict[str, Any], agent_id: str, action: str) -> None:
-    if not _can_access(owner_value, base, agent_id, action):
-        raise TeamKnowledgePermissionError(f"Agent is not allowed to {action} this knowledge base.")
-
-
-def _require_rating_suggestion_permission(owner_value: Any, base: dict[str, Any], agent_id: str) -> None:
-    if _can_access(owner_value, base, agent_id, "rate") or _is_global_knowledge_steward(agent_id):
-        return
-    raise TeamKnowledgePermissionError("Agent is not allowed to suggest ratings for this knowledge base.")
-
-
-def _can_access(owner_value: Any, base: dict[str, Any], agent_id: str, action: str, *, internal: bool = False) -> bool:
-    owner = _coerce_owner_context(owner_value)
-    normalized_agent_id = str(agent_id or "").strip()
-    if internal:
-        return True
-    if not normalized_agent_id:
-        return False
-    if _is_global_knowledge_steward(normalized_agent_id) and action in {"read", "propose"}:
-        return True
-    acl = _normalize_acl(base.get("acl") if isinstance(base.get("acl"), dict) else {})
-    grants = acl.get("grants") if isinstance(acl.get("grants"), dict) else {}
-    agent_grants = _unique_strings((grants.get(action) or []) + (grants.get("*") or [])) if isinstance(grants, dict) else []
-    if normalized_agent_id in agent_grants:
-        return True
-    owner_type = str(owner.get("ownerType") or "team").strip()
-    owner_id = str(owner.get("ownerId") or "").strip()
-    if owner_type == "agent":
-        return normalized_agent_id == owner_id
-    team = owner.get("team") if isinstance(owner.get("team"), dict) else owner
-    role = _member_role(team, normalized_agent_id)
-    if action == "read":
-        return bool(role)
-    if action == "propose":
-        return bool(role)
-    if action == "review":
-        return role in REVIEW_ROLES
-    if action == "rate":
-        return role in REVIEW_ROLES
-    return False
-
-
-def _can_collect_owner_source(owner_value: Any, agent_id: str) -> bool:
-    owner = _coerce_owner_context(owner_value)
-    normalized_agent_id = str(agent_id or "").strip()
-    if not normalized_agent_id:
-        return False
-    if _is_global_knowledge_steward(normalized_agent_id):
-        return True
-    if str(owner.get("ownerType") or "") == "agent":
-        return str(owner.get("ownerId") or "") == normalized_agent_id
-    return bool(_member_role(owner.get("team") if isinstance(owner.get("team"), dict) else {}, normalized_agent_id))
-
-
-def _can_read_owner_source_inbox(owner_value: Any, agent_id: str) -> bool:
-    return _can_collect_owner_source(owner_value, agent_id) or _can_review_owner_source(owner_value, agent_id)
-
-
-def _can_review_owner_source(owner_value: Any, agent_id: str) -> bool:
-    owner = _coerce_owner_context(owner_value)
-    normalized_agent_id = str(agent_id or "").strip()
-    if not normalized_agent_id:
-        return False
-    if _is_global_knowledge_steward(normalized_agent_id):
-        return True
-    if normalized_agent_id in _source_governance_for_owner(owner).get("localStewardAgentIds", []):
-        return True
-    if str(owner.get("ownerType") or "") == "agent":
-        return str(owner.get("ownerId") or "") == normalized_agent_id
-    role = _member_role(owner.get("team") if isinstance(owner.get("team"), dict) else {}, normalized_agent_id)
-    return role in REVIEW_ROLES
-
-
-def _can_configure_owner_source_governance(owner_value: Any, agent_id: str) -> bool:
-    owner = _coerce_owner_context(owner_value)
-    normalized_agent_id = str(agent_id or "").strip()
-    if not normalized_agent_id:
-        return False
-    if _is_global_knowledge_steward(normalized_agent_id):
-        return True
-    if str(owner.get("ownerType") or "") == "agent":
-        return str(owner.get("ownerId") or "") == normalized_agent_id
-    role = _member_role(owner.get("team") if isinstance(owner.get("team"), dict) else {}, normalized_agent_id)
-    return role in REVIEW_ROLES
-
-
-def _is_global_knowledge_steward(agent_id: str) -> bool:
-    normalized_agent_id = str(agent_id or "").strip()
-    if not normalized_agent_id:
-        return False
-    if normalized_agent_id == getattr(agent_directory_service, "KNOWLEDGE_STEWARD_AGENT_ID", ""):
-        return True
-    try:
-        agent = agent_directory_service.get_agent(normalized_agent_id, include_archived=True)
-    except Exception:
-        agent = {}
-    metadata = agent.get("metadata") if isinstance(agent, dict) and isinstance(agent.get("metadata"), dict) else {}
-    return str(metadata.get("governanceRole") or metadata.get("systemRole") or "").strip() == "knowledge_steward"
-
-
-def _permission_explain(
-    team: dict[str, Any],
-    base: dict[str, Any],
-    agent_id: str,
-    action: str,
-    policy_ids: set[str],
-    internal: bool = False,
-) -> dict[str, Any]:
-    owner = _coerce_owner_context(team)
-    base_id = str(base.get("knowledgeBaseId") or "")
-    team_allowed = _can_access(owner, base, agent_id, action, internal=internal)
-    policy_allowed = knowledge_base_policy_allows(_owner_scoped_knowledge_base_id(owner, base_id), policy_ids)
-    allowed = team_allowed and policy_allowed
-    reason = "allowed"
-    if not team_allowed:
-        reason = "agent_owner_blocked" if str(owner.get("ownerType") or "") == "agent" else "team_acl_blocked"
-    elif not policy_allowed:
-        reason = "memory_policy_blocked"
-    return {
-        "allowed": allowed,
-        "reason": reason,
-        "teamAclAllowed": team_allowed if str(owner.get("ownerType") or "") == "team" else False,
-        "agentOwnerAllowed": team_allowed if str(owner.get("ownerType") or "") == "agent" else False,
-        "memoryPolicyAllowed": policy_allowed,
-        "memoryPolicyExplicit": bool(policy_ids),
-    }
-
-
-def _member_role(team: dict[str, Any], agent_id: str) -> str:
-    normalized_agent_id = str(agent_id or "").strip()
-    for member in list(team.get("members") or []):
-        if isinstance(member, dict) and str(member.get("agentId") or "").strip() == normalized_agent_id:
-            return str(member.get("role") or "member").strip().lower() or "member"
-    return ""
-
-
 def _validate_team_chat_source(team: dict[str, Any], source_ref: dict[str, Any]) -> None:
     room_id = str(source_ref.get("roomId") or "").strip()
     if not room_id:
@@ -3048,6 +2904,19 @@ _parse_owner_scoped_knowledge_base_id = _tk_store._parse_owner_scoped_knowledge_
 _new_id = _tk_store._new_id
 _new_event_id = _tk_store._new_event_id
 _unique_strings = _tk_store._unique_strings
+
+_permissions_for_actor = _tk_permissions._permissions_for_actor
+_require_permission = _tk_permissions._require_permission
+_require_rating_suggestion_permission = _tk_permissions._require_rating_suggestion_permission
+_can_access = _tk_permissions._can_access
+_can_collect_owner_source = _tk_permissions._can_collect_owner_source
+_can_read_owner_source_inbox = _tk_permissions._can_read_owner_source_inbox
+_can_review_owner_source = _tk_permissions._can_review_owner_source
+_can_configure_owner_source_governance = _tk_permissions._can_configure_owner_source_governance
+_is_global_knowledge_steward = _tk_permissions._is_global_knowledge_steward
+_permission_explain = _tk_permissions._permission_explain
+_member_role = _tk_permissions._member_role
+_normalize_acl = _tk_permissions._normalize_acl
 
 
 def _search_item_view(
@@ -3466,21 +3335,6 @@ def _direct_ingest_accepted_source_locked(
         "batch": batch,
         "item": item,
         "updatedAt": now,
-    }
-
-
-def _normalize_acl(raw: Any) -> dict[str, Any]:
-    payload = raw if isinstance(raw, dict) else {}
-    return {
-        "read": str(payload.get("read") or "team").strip() or "team",
-        "propose": str(payload.get("propose") or "team").strip() or "team",
-        "review": str(payload.get("review") or "review_roles").strip() or "review_roles",
-        "grants": {
-            "read": _unique_strings((payload.get("grants") or {}).get("read") if isinstance(payload.get("grants"), dict) else []),
-            "propose": _unique_strings((payload.get("grants") or {}).get("propose") if isinstance(payload.get("grants"), dict) else []),
-            "review": _unique_strings((payload.get("grants") or {}).get("review") if isinstance(payload.get("grants"), dict) else []),
-            "*": _unique_strings((payload.get("grants") or {}).get("*") if isinstance(payload.get("grants"), dict) else []),
-        },
     }
 
 
