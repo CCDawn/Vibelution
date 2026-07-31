@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from core.llm.message_projector import normalize_messages_for_provider
+from core.infrastructure.feature_gate import FeatureDecision
 from core.orchestration.turn_runtime import prepare_agent_turn_runtime
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
@@ -25,6 +26,23 @@ pytestmark = pytest.mark.serial
 
 
 client = TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()})
+
+
+@pytest.fixture(autouse=True)
+def enable_evolution_features_for_service_contracts(monkeypatch: pytest.MonkeyPatch):
+    def enabled_decision(feature: str, **kwargs) -> FeatureDecision:
+        requested = kwargs.get("requested")
+        return FeatureDecision(
+            feature=feature,
+            configured_enabled=True,
+            effective_enabled=requested is not False,
+            source="test_operator_config",
+            reason="operator_config_enabled" if requested is not False else "run_narrowed_disabled",
+            config_revision="test-enabled",
+            run_requested=requested,
+        )
+
+    monkeypatch.setattr(service, "resolve_feature_decision", enabled_decision)
 
 
 def test_autonomous_role_turn_projects_exact_runtime_tool_grants(monkeypatch):
@@ -2096,7 +2114,7 @@ def test_runtime_manager_start_self_evolution_ignores_cleaned_stale_supervised_l
         "get_workbench_contract",
         lambda: {"modeAvailability": {"self_evolution": True}},
     )
-    monkeypatch.setattr(service, "has_running_sessions", lambda: False)
+    monkeypatch.setattr(service, "active_session_has_write_leases", lambda: False)
     monkeypatch.setattr(service, "get_active_supervised_run", lambda: None)
     monkeypatch.setattr(service, "_ensure_runtime_manager_daemon", lambda: calls.append("ensure"))
     monkeypatch.setattr(
@@ -2389,7 +2407,7 @@ def test_resume_self_evolution_run_requeues_paused_run(monkeypatch):
             "carryover": {},
         }
         service._ACTIVE_RUN_ID = run_id
-    monkeypatch.setattr(service, "has_running_sessions", lambda: False)
+    monkeypatch.setattr(service, "active_session_has_write_leases", lambda: False)
     monkeypatch.setattr(service, "get_active_supervised_run", lambda: None)
     monkeypatch.setattr(
         service._RUN_EXECUTOR,
