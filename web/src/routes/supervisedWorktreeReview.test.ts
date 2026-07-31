@@ -102,6 +102,20 @@ describe("selectRecentSupervisedWorktreeRun", () => {
     expect(selectRecentSupervisedWorktreeRun([actionableRun], null)).toBe(actionableRun);
   });
 
+  it("keeps the latest automatic approval closure visible through activation", () => {
+    const appliedRun = runWith({
+      runId: "swte-agent-applied",
+      status: "done",
+      outcome: "applied",
+      approvalMode: "agent",
+      approvalDecision: { status: "decided", decision: "APPROVE" },
+      merge: { status: "applied", commitSha: "commit-456" },
+      runtimeActivation: { status: "applied", targetCommit: "commit-456" },
+    });
+
+    expect(selectRecentSupervisedWorktreeRun([appliedRun], null)).toBe(appliedRun);
+  });
+
   it("does not recover terminal history that has no pending manual decision", () => {
     const completedRun = runWith({
       runId: "swte-complete",
