@@ -27,6 +27,7 @@ import tomllib
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 RUNTIME_DIR = PROJECT_ROOT / ".runtime" / "launcher"
 STATE_PATH = RUNTIME_DIR / "state.json"
+PORTS_PATH = RUNTIME_DIR / "ports.json"
 ACTIVE_RUNTIME_SCENE_PATH = RUNTIME_DIR / "active-runtime-scene.json"
 RUNTIME_SCENE_ROOT = PROJECT_ROOT / "logs" / "runtime_scenes"
 BACKEND_STDOUT_PATH = RUNTIME_DIR / "backend.stdout.log"
@@ -208,7 +209,101 @@ def _is_project_workbench_pid(pid: int) -> bool:
     except Exception:
         return False
     expected_script = str(PROJECT_ROOT / "scripts" / "web_workbench.py")
-    return expected_script.lower() in command_line.lower()
+    # Require this checkout's project root so sibling checkouts (e.g. live-acceptance)
+    # are never treated as the same managed workbench.
+    project_marker = str(PROJECT_ROOT).lower()
+    command_lower = command_line.lower()
+    return expected_script.lower() in command_lower and project_marker in command_lower
+
+
+def _read_project_ports() -> dict:
+    try:
+        payload = json.loads(PORTS_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, TypeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _write_project_ports(ports: dict) -> None:
+    RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+    PORTS_PATH.write_text(json.dumps(ports, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _saved_project_backend_port() -> int:
+    ports = _read_project_ports()
+    try:
+        port = int(ports.get("backendPort") or 0)
+    except (TypeError, ValueError):
+        return 0
+    return port if 0 < port < 65536 else 0
+
+
+def _remember_project_backend_port(port: int, *, reason: str = "") -> None:
+    if int(port or 0) <= 0:
+        return
+    payload = {
+        **_read_project_ports(),
+        "schemaVersion": 1,
+        "backendPort": int(port),
+        "projectRoot": str(PROJECT_ROOT),
+        "updatedAt": _now_iso(),
+    }
+    if reason:
+        payload["lastReason"] = str(reason)
+    _write_project_ports(payload)
+
+
+def _find_free_backend_port(preferred: int, *, max_tries: int = 48) -> int:
+    """Pick a free TCP listen port starting at preferred, then preferred+1…"""
+
+    base = int(preferred or DEFAULT_PORT)
+    if base <= 0 or base >= 65536:
+        base = DEFAULT_PORT
+    for offset in range(max(1, int(max_tries))):
+        candidate = base + offset
+        if candidate >= 65536:
+            candidate = DEFAULT_PORT + (offset % 1000)
+        if candidate <= 0 or candidate >= 65536:
+            continue
+        if _listening_pid_for_port(candidate) <= 0:
+            return int(candidate)
+    raise RuntimeError(
+        f"No free workbench backend port found near {base} "
+        f"(scanned {max_tries} candidates). Stop the other project or set VIBELUTION_PORT."
+    )
+
+
+def _resolve_start_backend_port(preferred: int, host: str) -> tuple[int, str]:
+    """
+    Resolve a bindable backend port for this project checkout.
+
+    - Free preferred port → use it
+    - Preferred owned by this project's workbench → reuse (already running)
+    - Preferred owned by another process/project → auto-pick a free port and remember it
+    """
+
+    preferred_port = int(preferred or DEFAULT_PORT)
+    if preferred_port <= 0:
+        preferred_port = DEFAULT_PORT
+    owner_pid = _listening_pid_for_port(preferred_port)
+    if owner_pid <= 0:
+        return preferred_port, ""
+    if _is_project_workbench_pid(owner_pid):
+        if _backend_healthy(preferred_port, host):
+            return preferred_port, "reuse_project_workbench"
+        raise RuntimeError(
+            f"Workbench port {preferred_port} is held by this project's unhealthy process "
+            f"pid {owner_pid}; stop it first, then start again."
+        )
+    free_port = _find_free_backend_port(preferred_port + 1)
+    _remember_project_backend_port(
+        free_port,
+        reason=f"auto_relocated_from_{preferred_port}_occupied_by_pid_{owner_pid}",
+    )
+    return free_port, (
+        f"port {preferred_port} occupied by foreign pid {owner_pid}; "
+        f"auto-bound this project to {free_port}"
+    )
 
 
 def _wait_for_port_release(port: int, timeout_seconds: float = 8.0) -> bool:
@@ -975,12 +1070,37 @@ def _frontend_sources_are_newer_than_dist(web_dir: Path, dist_index: Path) -> bo
 def _start_backend(port: int, host: str, *, no_browser: bool) -> dict:
     RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
     previous_state = _read_state()
-    existing_owner_pid = _listening_pid_for_port(port)
-    if existing_owner_pid > 0:
-        raise RuntimeError(
-            f"Workbench port {int(port)} is already occupied by pid {existing_owner_pid}; "
-            "refusing to treat an existing service as this launch."
-        )
+    preferred_port = int(port or DEFAULT_PORT)
+    resolved_port, resolve_note = _resolve_start_backend_port(preferred_port, host)
+    port = int(resolved_port)
+    if resolve_note == "reuse_project_workbench":
+        owner_pid = _listening_pid_for_port(port)
+        url = f"http://{host}:{int(port)}"
+        state = {
+            **_preserved_launcher_control_state(previous_state),
+            "schemaVersion": 1,
+            "launcherAdapter": "python_headless",
+            "desiredState": "open",
+            "observedState": "open",
+            "phase": "steady",
+            "sessionRole": "workbench",
+            "backendPid": int(owner_pid),
+            "backendLaunchPid": int(previous_state.get("backendLaunchPid") or owner_pid),
+            "url": url,
+            "host": host,
+            "backendPort": int(port),
+            "port": int(port),
+            "statusLine": "Workbench is running.",
+            "failureMessage": "",
+            "lastReason": "python_launcher_reuse_existing",
+            "lastSource": "python_launcher",
+            "runtimeProjectRoot": str(PROJECT_ROOT),
+            "updatedAt": _now_iso(),
+        }
+        _remember_project_backend_port(port, reason="reuse_project_workbench")
+        _write_state(state)
+        return state
+    # Foreign occupancy is resolved by auto-binding another free port (multi-checkout safe).
     source_identity = _runtime_source_identity()
     frontend_provenance = _ensure_frontend_build(source_identity)
     _assert_runtime_source_identity(source_identity)
@@ -1067,7 +1187,13 @@ def _start_backend(port: int, host: str, *, no_browser: bool) -> dict:
         "host": host,
         "backendPort": int(port),
         "port": int(port),
-        "statusLine": "Workbench is running.",
+        "preferredBackendPort": int(preferred_port),
+        "portRelocationNote": str(resolve_note or ""),
+        "statusLine": (
+            f"Workbench is running on port {int(port)}."
+            if resolve_note and "auto-bound" in resolve_note
+            else "Workbench is running."
+        ),
         "failureMessage": "",
         "lastReason": "python_launcher_start",
         "lastSource": "python_launcher",
@@ -1089,6 +1215,7 @@ def _start_backend(port: int, host: str, *, no_browser: bool) -> dict:
         "frontendRebuilt": bool(frontend_provenance.get("rebuilt")),
         "updatedAt": _now_iso(),
     }
+    _remember_project_backend_port(port, reason=resolve_note or "python_launcher_start")
     _write_state(state)
     return state
 
@@ -1163,7 +1290,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("-Action", "--action", default="start")
     parser.add_argument("-NoBrowser", "--no-browser", action="store_true")
     parser.add_argument("--host", default=os.environ.get("VIBELUTION_HOST", DEFAULT_HOST))
-    parser.add_argument("--port", type=int, default=int(os.environ.get("VIBELUTION_PORT", "8000")))
+    default_port = int(os.environ.get("VIBELUTION_PORT") or _saved_project_backend_port() or DEFAULT_PORT)
+    parser.add_argument("--port", type=int, default=default_port)
     return parser.parse_args(argv)
 
 
