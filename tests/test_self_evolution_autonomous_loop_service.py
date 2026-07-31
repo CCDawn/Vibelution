@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 
 import pytest
@@ -244,3 +245,48 @@ def test_second_active_run_is_rejected_until_first_reaches_review_boundary(tmp_p
         match="active self-evolution autonomous loop",
     ):
         service.start({"goal": "并发启动第二轮"})
+
+
+def test_persisted_evidence_is_bounded_and_redacts_common_credentials(tmp_path):
+    def observe(_context):
+        return {
+            "summary": "观察完成",
+            "evidence": [
+                {
+                    "authorization": "Bearer top-secret-token",
+                    "detail": "api_key=sk-private-value",
+                    "output": "x" * 20_000,
+                }
+            ],
+        }
+
+    service, _calls = _build_service(
+        tmp_path,
+        hook_overrides={"observe": observe},
+    )
+
+    result = service.start({"goal": "建立自动闭环"})
+    serialized = json.dumps(result, ensure_ascii=False)
+
+    assert "top-secret-token" not in serialized
+    assert "sk-private-value" not in serialized
+    assert "[REDACTED]" in serialized
+    assert len(result["observation"]["evidence"][0]["output"]) < 9_000
+
+
+def test_persisted_hook_error_redacts_credential_text(tmp_path):
+    def fail_integration(_context):
+        raise RuntimeError("request failed: token=top-secret-token")
+
+    service, _calls = _build_service(
+        tmp_path,
+        hook_overrides={"integrate": fail_integration},
+    )
+    service.start({"goal": "建立自动闭环"})
+
+    failed = service.approve(
+        "self-loop-001",
+        decision={"actorType": "user", "actorId": "local-user"},
+    )
+
+    assert failed["error"]["message"] == "request failed: token=[REDACTED]"
