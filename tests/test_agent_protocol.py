@@ -718,6 +718,34 @@ class TestToolMessageFlow:
         assert "完整 canonical 工具结果" in semantic_tool_messages[0].content
         assert sum("完整 canonical 工具结果" in str(message.content) for message in restored) == 1
 
+    def test_seed_chat_history_clears_previous_provider_continuation_before_new_user_turn(self):
+        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent.mode_policy = ModePolicy(
+            mode=AgentMode.CHAT,
+            orchestrator_kind="chat",
+            keep_multi_turn_context=True,
+            allow_auto_loop=False,
+            capture_chat_dataset_candidates=True,
+            reset_context_before_turn=False,
+            reset_context_between_cases=False,
+            allow_direct_supervised_payload=False,
+            finish_after_direct_response=False,
+            runtime_input_builder=build_chat_user_message,
+        )
+        agent.config = isolated_settings_config()
+        agent._mental_model_enabled_override = False
+        agent.mental_model = None
+        agent._chat_provider_replay_state = object()
+
+        agent.seed_chat_history(
+            [
+                {"role": "user", "content": "上一轮用户任务"},
+                {"role": "assistant", "content": "上一轮已经完成"},
+            ]
+        )
+
+        assert agent._chat_provider_replay_state is None
+
     def test_chat_state_normalization_preserves_camel_case_tool_calls(self):
         from core.ui.chat_state import normalize_chat_messages
 
@@ -6339,6 +6367,109 @@ class TestRuntimeStateMemoryFlow:
         assert attempt.call_args.kwargs["summary"] == "压缩摘要收益不足。"
         agent.prompt_manager.update_state_memory.assert_not_called()
 
+    def test_high_token_context_with_four_messages_reaches_compressor_and_records_preflight(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent.project_root = str(tmp_path)
+        agent.prompt_manager = MagicMock()
+        agent.runtime_agent_binding = {
+            "agentId": "agent-compression",
+            "directSessionId": "session-compression",
+        }
+        agent._last_compression_iteration = 0
+        agent._compression_min_iteration_gap = 0
+        agent._compression_count_this_turn = 0
+        agent._effective_max_token_limit = 10000
+        agent.config = SimpleNamespace(
+            context_compression=SimpleNamespace(
+                enabled=True,
+                max_compressions_per_session=3,
+                effectiveness_threshold=0.0,
+                levels=SimpleNamespace(standard=0.8),
+            )
+        )
+        agent._get_mode_policy = lambda: ModePolicy(
+            mode=AgentMode.CHAT,
+            orchestrator_kind="chat",
+            keep_multi_turn_context=True,
+            allow_auto_loop=False,
+            capture_chat_dataset_candidates=True,
+            reset_context_before_turn=False,
+            reset_context_between_cases=False,
+            allow_direct_supervised_payload=False,
+            finish_after_direct_response=False,
+            runtime_input_builder=lambda value: value,
+        )
+        compressed = [{"role": "user", "content": "current"}]
+        compressor = MagicMock()
+        compressor.compress.return_value = (compressed, "历史已压缩。")
+        agent.token_compressor = compressor
+        agent._compression_strategy = SimpleNamespace(
+            determine_level_with_iteration=lambda *_args: agent_module.CompressionLevel.STANDARD,
+            get_config=lambda *_args: SimpleNamespace(
+                summary_max_chars=1000,
+                keep_ai_messages=5,
+                preserve_errors=True,
+            ),
+        )
+        messages = [
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": "old"},
+            {"role": "assistant", "content": "old answer"},
+            {"role": "user", "content": "current"},
+        ]
+        monkeypatch.setattr(
+            agent_module,
+            "estimate_messages_tokens",
+            lambda value: 12000 if value is messages else 3000,
+        )
+        monkeypatch.setattr(
+            agent_module,
+            "_turn_runtime_from_env",
+            lambda: {"sessionId": "session-compression", "runId": "turn-compression"},
+        )
+        monkeypatch.setattr(
+            agent_module,
+            "get_ui",
+            lambda: SimpleNamespace(add_log=MagicMock(), note_context_compression_event=MagicMock()),
+        )
+        monkeypatch.setattr(
+            agent_module,
+            "get_state_manager",
+            lambda: SimpleNamespace(set_state=MagicMock()),
+        )
+        scene_event = MagicMock()
+        monkeypatch.setattr(agent_module, "_record_agent_scene_event", scene_event)
+
+        result, should_break = agent._compress_messages(
+            messages,
+            iteration=1,
+            reason="达到配置的上下文压缩阈值",
+        )
+
+        assert result is compressed
+        assert should_break is False
+        compressor.compress.assert_called_once()
+        preflight = next(
+            call for call in scene_event.call_args_list
+            if call.args[1] == "agent.context_compression.preflight"
+        )
+        assert preflight.kwargs["fields"] == {
+            "agentId": "agent-compression",
+            "sessionId": "session-compression",
+            "turnId": "turn-compression",
+            "iteration": 1,
+            "estimatedTokens": 12000,
+            "effectiveLimit": 10000,
+            "thresholdTokens": 8000,
+            "messageCount": 4,
+            "eligible": True,
+            "guardReason": "",
+        }
+
     def test_chat_emergency_compression_continues_to_llm(self, monkeypatch, tmp_path):
         agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
         agent.project_root = str(tmp_path)
@@ -6460,8 +6591,11 @@ class TestRuntimeStateMemoryFlow:
         attempt.assert_called_once()
         assert attempt.call_args.kwargs["status"] == "failed_preserved"
         assert attempt.call_args.kwargs["error_type"] == "RuntimeError"
-        scene_event.assert_called_once()
-        assert scene_event.call_args.args[1] == "agent.context_compression_checkpoint_failed"
+        checkpoint_failure = next(
+            call for call in scene_event.call_args_list
+            if call.args[1] == "agent.context_compression_checkpoint_failed"
+        )
+        assert checkpoint_failure.kwargs["fields"]["errorType"] == "RuntimeError"
         agent.prompt_manager.update_state_memory.assert_not_called()
 
     def test_sync_runtime_state_memory_includes_restart_focus_guidance(self, monkeypatch):

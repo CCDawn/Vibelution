@@ -262,6 +262,10 @@ import {
   toolApprovalRiskLabel,
   toolApprovalScopeLabel,
 } from "./chat/toolApprovalLabels";
+import {
+  toolApprovalActionPreview,
+  toolApprovalDisplayName,
+} from "./chat/toolApprovalPreview";
 import { postSubmitTelemetry } from "./chat/chatSubmitTelemetry";
 import {
   buildSessionReferencePayload,
@@ -1743,11 +1747,20 @@ export function ChatCodingRoute() {
   );
   const pendingToolApprovalLabels = useMemo(
     () => pendingSessionToolApproval
-      ? [{ id: pendingSessionToolApproval.toolName, label: pendingSessionToolApproval.toolName }]
+      ? [{
+        id: pendingSessionToolApproval.toolName,
+        label: toolApprovalDisplayName(pendingSessionToolApproval.toolName, lang),
+      }]
       : toolApprovalLabels(pendingToolGovernanceApproval),
-    [pendingSessionToolApproval, pendingToolGovernanceApproval],
+    [lang, pendingSessionToolApproval, pendingToolGovernanceApproval],
   );
   const pendingToolApprovalRawTitle = pendingToolApprovalLabels.map((item) => item.id).join("、");
+  const pendingToolApprovalActionPreview = pendingSessionToolApproval
+    ? toolApprovalActionPreview(
+      pendingSessionToolApproval.argumentSummary,
+      pendingSessionToolApproval.toolName,
+    )
+    : pendingToolApprovalLabels.map((item) => item.label).join(" · ");
   const pendingToolApprovalScope = pendingSessionToolApproval
     ? (lang === "zh" ? "当前工具调用" : "this tool call")
     : toolApprovalScopeLabel(pendingToolGovernanceApproval?.grantScope, lang);
@@ -3209,6 +3222,9 @@ export function ChatCodingRoute() {
                 riskLabel: pendingToolApprovalRisk,
                 scopeLabel: pendingToolApprovalScope,
                 toolLabels: pendingToolApprovalLabels,
+                actionPreview: pendingToolApprovalActionPreview,
+                sessionGrantScope: pendingSessionToolApproval?.sessionGrantScope,
+                toolName: pendingSessionToolApproval?.toolName || pendingToolApprovalLabels[0]?.id,
               } : null}
               transientErrorMessage={sessionDetailErrorMessage}
               workspaceActiveTab={workspace.activeTab}

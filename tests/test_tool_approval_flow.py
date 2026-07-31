@@ -373,6 +373,71 @@ def test_accept_for_session_is_bound_to_same_tool_and_arguments(monkeypatch):
     assert "已取消" in different_box["value"][0]
 
 
+def test_write_stdin_session_grant_is_bound_to_terminal_not_input_chars(monkeypatch):
+    _runtime(monkeypatch)
+    _install(("write_stdin", "on_request", "write"))
+    calls = []
+    executor = ToolExecutor()
+    executor.register_tool("write_stdin", lambda **kwargs: calls.append(kwargs) or "ok")
+    first_box = {}
+    first = threading.Thread(
+        target=lambda: (
+            _install(("write_stdin", "on_request", "write")),
+            first_box.setdefault(
+                "value",
+                executor.execute(
+                    "write_stdin",
+                    {"session_id": "sandbox-terminal-a", "chars": "READY\n"},
+                    tool_call_id="call-stdin-first",
+                ),
+            ),
+        )
+    )
+    first.start()
+    request = _wait_for_pending()
+
+    assert request["sessionGrantScope"] == {
+        "kind": "terminal_session",
+        "terminalSessionId": "sandbox-terminal-a",
+    }
+    assert request["argumentSummary"]["terminalSessionId"] == "sandbox-terminal-a"
+    assert request["argumentSummary"]["stdinPreview"] == "READY\n"
+    assert request["argumentSummary"]["stdinChars"] == 6
+
+    tool_approvals.resolve_tool_approval_request(
+        "session-a",
+        request["requestId"],
+        decision="acceptForSession",
+    )
+    first.join(timeout=2)
+
+    same_terminal, _ = executor.execute(
+        "write_stdin",
+        {"session_id": "sandbox-terminal-a", "chars": "ORBIT-71\n"},
+        tool_call_id="call-stdin-same-terminal",
+    )
+
+    assert same_terminal == "ok"
+    assert tool_approvals.list_tool_approval_requests("session-a", status="pending") == []
+    assert calls == [
+        {"session_id": "sandbox-terminal-a", "chars": "READY\n"},
+        {"session_id": "sandbox-terminal-a", "chars": "ORBIT-71\n"},
+    ]
+
+
+def test_exec_approval_summary_includes_command_and_cwd():
+    summary = tool_approvals._argument_summary(
+        "exec_command",
+        {
+            "cmd": '.\\.venv\\Scripts\\python.exe -c "print(123)"',
+            "cwd": r"C:\workspace\repo",
+        },
+    )
+
+    assert summary["commandPreview"] == '.\\.venv\\Scripts\\python.exe -c "print(123)"'
+    assert summary["cwdPreview"] == r"C:\workspace\repo"
+
+
 def test_session_grant_is_invalidated_by_the_next_agent_config_revision(monkeypatch):
     _runtime(monkeypatch, permission_preset="request_approval", config_revision=3)
     _install(("web_search_tool", "on_request", "network"))

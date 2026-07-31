@@ -209,6 +209,23 @@ def test_sandbox_runs_rewritten_python_command_without_cmd_quote_roundtrip(monke
     assert "cmd.exe" not in argv
 
 
+def test_sandbox_runs_relative_python_command_with_escaped_code_quotes_without_cmd_roundtrip(monkeypatch):
+    monkeypatch.setattr(codex_cli_sandbox.os, "name", "nt")
+    route = SimpleNamespace(
+        route="cmd",
+        command=r'.\.venv\Scripts\python.exe -c "print(\"READY\")"',
+    )
+
+    argv = codex_cli_sandbox._sandbox_argv(r"C:\Codex\codex.exe", route)
+
+    assert argv[-3:] == [
+        r".\.venv\Scripts\python.exe",
+        "-c",
+        'print("READY")',
+    ]
+    assert "cmd.exe" not in argv
+
+
 def test_sandbox_runs_explicit_powershell_command_without_cmd_quote_roundtrip(monkeypatch):
     monkeypatch.setattr(codex_cli_sandbox.os, "name", "nt")
     monkeypatch.setattr(
@@ -603,6 +620,38 @@ def test_terminal_session_exec_and_stdin_keep_one_explicit_session_id(monkeypatc
     assert continued["terminalSessionId"] == session_id
     assert continued["status"] == "completed"
     assert continued["sessionOpen"] is False
+
+
+def test_terminal_session_write_refreshes_idle_deadline_after_approval_roundtrip(monkeypatch, tmp_path):
+    clock = {"now": 0.0}
+    monkeypatch.setattr(codex_cli_sandbox.time, "monotonic", lambda: clock["now"])
+    process = _TerminalSessionProcess()
+    sandbox_temp = tmp_path / ".runtime" / "codex-cli" / "approval-roundtrip"
+    sandbox_temp.mkdir(parents=True)
+    session = codex_cli_sandbox._SandboxTerminalSession(
+        session_id="sandbox-approval-roundtrip",
+        process=process,
+        command_hash="approval-roundtrip",
+        workdir=tmp_path,
+        sandbox_temp=sandbox_temp,
+        timeout_seconds=60,
+    )
+    codex_cli_sandbox._SANDBOX_TERMINAL_SESSIONS.clear()
+    codex_cli_sandbox._SANDBOX_TERMINAL_SESSIONS[session.session_id] = session
+    clock["now"] = 75.0
+
+    try:
+        result = codex_cli_sandbox.write_codex_sandbox_terminal_stdin(
+            session.session_id,
+            "ORBIT-71\n",
+            yield_time_ms=0,
+        )
+    finally:
+        codex_cli_sandbox._SANDBOX_TERMINAL_SESSIONS.clear()
+
+    assert process.stdin.writes == ["ORBIT-71\n"]
+    assert result["status"] == "completed"
+    assert result["timedOut"] is False
 
 
 def test_terminal_session_stdin_rejects_unknown_session_without_starting_process():

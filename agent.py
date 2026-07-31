@@ -1616,31 +1616,62 @@ class SelfEvolvingAgent:
     def _compress_messages(self, messages: list, iteration: int, reason: str = ""):
         """执行消息压缩。返回 (messages, should_break)。"""
         ui = get_ui()
+        self._last_context_compression_applied = False
+        current_tokens = estimate_messages_tokens(messages)
+        budget = max(1, int(self._effective_max_token_limit))
+        threshold_tokens = int(
+            budget * self._automatic_context_compression_threshold()
+        )
+        runtime_binding = getattr(self, "runtime_agent_binding", {}) or {}
+        turn_runtime = _turn_runtime_from_env()
+        session_id = str(
+            turn_runtime.get("sessionId")
+            or runtime_binding.get("directSessionId")
+            or ""
+        ).strip()
+        turn_id = str(turn_runtime.get("runId") or "").strip()
+
+        def record_preflight(*, eligible: bool, guard_reason: str = "") -> None:
+            _record_agent_scene_event(
+                "runtime",
+                "agent.context_compression.preflight",
+                message="Agent context compression preflight evaluated.",
+                outcome="eligible" if eligible else "skipped",
+                fields={
+                    "agentId": str(runtime_binding.get("agentId") or "").strip(),
+                    "sessionId": session_id,
+                    "turnId": turn_id,
+                    "iteration": iteration,
+                    "estimatedTokens": current_tokens,
+                    "effectiveLimit": budget,
+                    "thresholdTokens": threshold_tokens,
+                    "messageCount": len(messages),
+                    "eligible": eligible,
+                    "guardReason": guard_reason,
+                },
+            )
 
         # Guard: 压缩未启用
         if self.token_compressor is None or not resolve_feature_decision(
             "context_compression",
             config=self.config,
         ).effective_enabled:
-            return messages, False
-
-        # Guard: 消息太少
-        if len(messages) <= 4:
+            record_preflight(eligible=False, guard_reason="disabled")
             return messages, False
 
         # Guard: 速率限制
         if self._last_compression_iteration > 0:
             if iteration - self._last_compression_iteration < self._compression_min_iteration_gap:
+                record_preflight(eligible=False, guard_reason="iteration_gap")
                 return messages, False
 
         # Guard: 超过最大压缩次数
         max_comp = getattr(self.config.context_compression, "max_compressions_per_session", 3)
         if self._compression_count_this_turn >= max_comp:
+            record_preflight(eligible=False, guard_reason="max_compressions")
             return messages, False
 
-        # 估算 Token
-        current_tokens = estimate_messages_tokens(messages)
-        budget = self._effective_max_token_limit
+        record_preflight(eligible=True)
 
         # 确定压缩级别
         strategy = getattr(self, "_compression_strategy", None) or get_compression_strategy()
@@ -1670,11 +1701,20 @@ class SelfEvolvingAgent:
         except Exception:
             messages_for_compression = messages
             tool_result_replacement_state = {"replacements": []}
+        ai_message_count = sum(
+            1
+            for message in messages_for_compression
+            if isinstance(message, AIMessage) or getattr(message, "type", "") == "ai"
+        )
+        keep_ai_messages = min(
+            max(0, int(comp_config.keep_ai_messages or 0)),
+            max(0, ai_message_count - 1),
+        )
         compressed, summary = self.token_compressor.compress(
             messages_for_compression,
             max_chars=comp_config.summary_max_chars,
             reason=combined_reason,
-            keep_count=comp_config.keep_ai_messages,
+            keep_count=keep_ai_messages,
             preserve_errors=comp_config.preserve_errors,
             use_llm_summary=use_llm,
         )
@@ -1685,6 +1725,25 @@ class SelfEvolvingAgent:
         # 日志
         after_tokens = estimate_messages_tokens(compressed)
         token_saved = current_tokens - after_tokens
+        self._last_context_compression_applied = token_saved > 0
+        if not summary and token_saved <= 0:
+            _record_agent_scene_event(
+                "runtime",
+                "agent.context_compression.skipped",
+                message="Context compression had no safely compressible history.",
+                outcome="skipped",
+                fields={
+                    "agentId": str(runtime_binding.get("agentId") or "").strip(),
+                    "sessionId": session_id,
+                    "turnId": turn_id,
+                    "iteration": iteration,
+                    "estimatedTokens": current_tokens,
+                    "effectiveLimit": budget,
+                    "thresholdTokens": threshold_tokens,
+                    "messageCount": len(messages),
+                    "guardReason": "no_compressible_history",
+                },
+            )
         try:
             effectiveness_threshold = float(
                 getattr(self.config.context_compression, "effectiveness_threshold", 0.0) or 0.0
@@ -1888,6 +1947,10 @@ class SelfEvolvingAgent:
             if callable(mental_clear):
                 mental_clear()
             return
+        # A new user turn seeds the full canonical history. Responses
+        # ``previous_response_id`` is valid only for tool continuations inside
+        # one turn; carrying it across this boundary can replay stale tools.
+        self._chat_provider_replay_state = None
         canonical_messages = normalize_model_messages(list(messages or []))
         if self.is_mental_model_enabled_for_turn():
             mental_seed = getattr(getattr(self, "mental_model", None), "seed_conversation_context", None)
@@ -2807,12 +2870,13 @@ class SelfEvolvingAgent:
                         pass
                     if should_break:
                         break
-                    # 告知 agent 压缩已发生，让它了解上下文变化
-                    after_tokens = estimate_messages_tokens(messages)
-                    messages.append(build_runtime_notice_message(
-                        f"由于上下文超过最大承受能力，现在强制进行了一次压缩"
-                        f"（{current_tokens} → {after_tokens} tokens）。"
-                    ))
+                    # 只有实际缩减上下文时才写 notice，禁止把 guard skip 伪装成已压缩。
+                    if bool(getattr(self, "_last_context_compression_applied", False)):
+                        after_tokens = estimate_messages_tokens(messages)
+                        messages.append(build_runtime_notice_message(
+                            f"由于上下文超过最大承受能力，现在强制进行了一次压缩"
+                            f"（{current_tokens} → {after_tokens} tokens）。"
+                        ))
                 self._raise_if_turn_stop_requested()
                 _record_agent_scene_event(
                     "llm",
@@ -2821,6 +2885,16 @@ class SelfEvolvingAgent:
                     fields={
                         "iteration": iteration,
                         "messageCount": len(messages),
+                        "contextEstimatedTokens": current_tokens,
+                        "contextCompressionThresholdTokens": int(
+                            self._effective_max_token_limit
+                            * self._automatic_context_compression_threshold()
+                        ),
+                        "contextCompressionTriggered": bool(
+                            current_tokens
+                            > self._effective_max_token_limit
+                            * self._automatic_context_compression_threshold()
+                        ),
                         "gitRefreshMs": git_refresh_ms,
                         "runtimeStateSyncMs": runtime_sync_ms,
                         "promptBuildMs": prompt_build_ms,

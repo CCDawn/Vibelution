@@ -403,7 +403,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStylesModuleSource).not.toContain("toolApprovalOverlay:");
     expect(routeStylesModuleSource).not.toContain("toolApprovalDialog:");
     expect(chatToolApprovalDialogSource).toContain("role=\"dialog\"");
-    expect(chatToolApprovalDialogSource).toContain("Tool permission approval");
+    expect(chatToolApprovalDialogSource).toContain("toolApprovalCodexTitle");
     expect(chatToolApprovalDialogSource).toContain("aria-labelledby={titleId}");
     expect(chatToolApprovalDialogSource).toContain("aria-describedby={descriptionIds}");
     expect(chatToolApprovalDialogSource).toContain("aria-busy={pending}");
@@ -414,15 +414,16 @@ describe("ChatCodingRoute layout contract", () => {
     expect(chatToolApprovalDialogSource).toContain("id={toolListId}");
     expect(chatToolApprovalDialogSource).toContain("role=\"list\"");
     expect(chatToolApprovalDialogSource).toContain("role=\"listitem\"");
-    expect(chatToolApprovalDialogSource).toContain("<X size={15} aria-hidden=\"true\" />");
-    expect(chatToolApprovalDialogSource).toContain("<ShieldCheck size={15} aria-hidden=\"true\" />");
     expect(chatToolApprovalDialogSource).toContain("onApproveForSession");
-    expect(chatToolApprovalDialogSource).toContain("本会话允许");
+    expect(chatToolApprovalDialogSource).toContain("toolApprovalCodexButtonLabels");
+    expect(chatToolApprovalDialogSource).toContain("actionPreview");
+    expect(chatToolApprovalDialogSource).toContain("sessionGrantScope");
     expect(chatToolApprovalDialogSource).toContain("className={styles.toolItem}");
     expect(chatToolApprovalDialogStyles.dialog).toContain("grid-cols-[34px_minmax(0,1fr)_auto]");
     expect(chatToolApprovalDialogStyles.dialog).toContain("shadow-none");
     expect(chatToolApprovalDialogStyles.dialog).not.toContain("vui-shadow-hairline");
     expect(chatToolApprovalDialogStyles.actions).toContain("flex");
+    expect(chatToolApprovalDialogStyles.commandPreview).toContain("font-mono");
     expect(chatToolApprovalDialogStyles.toolList).toContain("overflow-auto");
     expect(chatToolApprovalDialogStyles.toolItem).toContain("min-w-0");
     expect(chatToolApprovalDialogStyles.toolItem).toContain("max-w-full");
@@ -448,7 +449,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(markup).toContain('aria-busy="true"');
     expect(markup).toContain("Resolving");
     expect(markup.match(/disabled=""/g)?.length).toBe(2);
-    expect(markup.match(/aria-hidden="true"/g)?.length).toBeGreaterThanOrEqual(3);
+    expect(markup.match(/aria-hidden="true"/g)?.length).toBeGreaterThanOrEqual(1);
     expect(markup).toContain("very_long_tool_name_that_should_wrap_inside_the_dialog_surface");
   });
 
@@ -459,11 +460,15 @@ describe("ChatCodingRoute layout contract", () => {
       rawTitle: "shell_command, read_file",
       riskLabel: "需要审批",
       scopeLabel: "当前会话",
+      actionPreview: '$ .\\.venv\\Scripts\\python.exe -c "print(123)"\ncwd: C:\\workspace\\repo',
+      sessionGrantScope: { kind: "exact_arguments" },
+      toolName: "exec_command",
       toolLabels: [
         { id: "shell", label: "shell_command" },
         { id: "read", label: "read_file" },
       ],
       onApprove: () => undefined,
+      onApproveForSession: () => undefined,
       onReject: () => undefined,
     }));
 
@@ -472,9 +477,13 @@ describe("ChatCodingRoute layout contract", () => {
     expect(markup).toContain("aria-labelledby=");
     expect(markup).toContain("aria-describedby=");
     expect(markup).not.toContain("aria-label=");
-    expect(markup).toContain("工具权限审批");
+    expect(markup).toContain("允许执行？");
+    expect(markup).toContain("始终（本会话）");
+    expect(markup).toContain("参数完全相同");
     expect(markup).toContain("需要审批");
     expect(markup).toContain("当前会话");
+    expect(markup).toContain("python.exe -c");
+    expect(markup).toContain("C:\\workspace\\repo");
     expect(markup).toContain('role="list"');
     expect(markup.match(/role="listitem"/g)?.length).toBe(2);
     expect(markup).toContain("shell_command");

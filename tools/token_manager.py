@@ -690,15 +690,27 @@ class EnhancedTokenCompressor:
             m for m in messages
             if isinstance(m, SystemMessage) and not is_external_request_message(m)
         ]
-        external_request_msgs = [
-            m for m in messages
-            if is_external_request_message(m)
+        external_request_indices = [
+            index for index, message in enumerate(messages)
+            if is_external_request_message(message)
         ]
-        
-        # 提取所有非系统、非外部输入的普通消息
+        latest_external_request_index = (
+            external_request_indices[-1] if external_request_indices else None
+        )
+        latest_external_request = (
+            messages[latest_external_request_index]
+            if latest_external_request_index is not None
+            else None
+        )
+
+        # Only the current external request is protected verbatim. Prior user
+        # requests remain compactable and therefore enter the summary instead
+        # of disappearing silently.
         other_msgs = [
-            m for m in messages
-            if not isinstance(m, SystemMessage) and not is_external_request_message(m)
+            message
+            for index, message in enumerate(messages)
+            if (not isinstance(message, SystemMessage) or is_external_request_message(message))
+            and index != latest_external_request_index
         ]
         
         # 找出所有 AI 消息（带 tool_calls 或纯文本回复）
@@ -707,13 +719,16 @@ class EnhancedTokenCompressor:
             if isinstance(msg, AIMessage) or (hasattr(msg, 'type') and msg.type == 'ai'):
                 ai_indices.append(i)
         
-        if not ai_indices:
+        if not ai_indices and keep_count > 0:
             return CompressionOutput(
                 messages,
                 CompressionResult("", current_tokens, current_tokens, 0, "none"),
             )
-        
-        if len(ai_indices) <= keep_count:
+
+        if keep_count <= 0:
+            kept_msgs = []
+            old_msgs = list(other_msgs)
+        elif len(ai_indices) <= keep_count:
             kept_msgs = list(other_msgs)
             old_msgs = []
         else:
@@ -750,8 +765,8 @@ class EnhancedTokenCompressor:
             compressed.append(system_msgs[0])
         
         # 2. 最新的外部任务输入
-        if external_request_msgs:
-            compressed.append(external_request_msgs[-1])
+        if latest_external_request is not None:
+            compressed.append(latest_external_request)
         
         # 3. 历史摘要（如果有）
         if summary:

@@ -11,7 +11,7 @@ import subprocess
 import threading
 import time
 import uuid
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any, Callable
 
 from core.logging import debug_logger as _debug_logger
@@ -225,24 +225,62 @@ def _has_unquoted_shell_operator(command: str) -> bool:
 
 
 def _direct_executable_argv(command: str) -> list[str]:
-    if not command.startswith('"') or _has_unquoted_shell_operator(command):
+    if _has_unquoted_shell_operator(command):
         return []
-    try:
-        tokens = shlex.split(command, posix=False)
-    except ValueError:
-        return []
+    tokens = _split_windows_command_line(command)
     if not tokens:
         return []
-    normalized = [
-        token[1:-1]
-        if len(token) >= 2 and token[0] == token[-1] and token[0] in {'"', "'"}
-        else token
-        for token in tokens
-    ]
-    executable = normalized[0]
-    if not Path(executable).is_absolute() or not executable.lower().endswith(".exe"):
+    executable = tokens[0]
+    explicit_relative = executable.startswith((".\\", "./"))
+    if (
+        not (
+            Path(executable).is_absolute()
+            or PureWindowsPath(executable).is_absolute()
+            or explicit_relative
+        )
+        or not executable.lower().endswith(".exe")
+    ):
         return []
-    return normalized
+    return tokens
+
+
+def _split_windows_command_line(command: str) -> list[str]:
+    """Parse one Windows command line using CRT-compatible quote rules."""
+
+    args: list[str] = []
+    index = 0
+    length = len(command)
+    while index < length:
+        while index < length and command[index].isspace():
+            index += 1
+        if index >= length:
+            break
+        current: list[str] = []
+        in_quotes = False
+        while index < length:
+            if command[index].isspace() and not in_quotes:
+                break
+            backslashes = 0
+            while index < length and command[index] == "\\":
+                backslashes += 1
+                index += 1
+            if index < length and command[index] == '"':
+                current.extend("\\" for _ in range(backslashes // 2))
+                if backslashes % 2:
+                    current.append('"')
+                else:
+                    in_quotes = not in_quotes
+                index += 1
+                continue
+            current.extend("\\" for _ in range(backslashes))
+            if index >= length:
+                break
+            current.append(command[index])
+            index += 1
+        if in_quotes:
+            return []
+        args.append("".join(current))
+    return args
 
 
 def _explicit_powershell_argv(command: str) -> list[str]:
@@ -620,7 +658,12 @@ class _SandboxTerminalSession:
         self.workdir = workdir
         self.sandbox_temp = sandbox_temp
         self.started_at = time.monotonic()
-        self.deadline = self.started_at + timeout_seconds
+        self.idle_timeout_seconds = timeout_seconds
+        self.hard_deadline = self.started_at + _TERMINAL_SESSION_MAX_LIFETIME_SECONDS
+        self.deadline = min(
+            self.started_at + self.idle_timeout_seconds,
+            self.hard_deadline,
+        )
         self.last_accessed_at = self.started_at
         self._status = "running"
         self._lock = threading.RLock()
@@ -673,6 +716,22 @@ class _SandboxTerminalSession:
             return
         self._status = "timeout"
         _terminate_process_tree(self.process)
+
+    def refresh_client_lease(self) -> None:
+        """Keep a live process available across model and approval round trips."""
+
+        now = time.monotonic()
+        with self._lock:
+            self.last_accessed_at = now
+            if (
+                self._status == "running"
+                and now < self.hard_deadline
+                and self._is_alive()
+            ):
+                self.deadline = min(
+                    now + self.idle_timeout_seconds,
+                    self.hard_deadline,
+                )
 
     def _terminal_status(self) -> str:
         self._expire_if_needed()
@@ -954,10 +1013,14 @@ def write_codex_sandbox_terminal_stdin(
 ) -> dict[str, Any]:
     """Send stdin to a live sandbox command or poll its bounded output."""
 
-    _prune_sandbox_terminal_sessions()
     session_id = str(terminal_session_id or "").strip()
     if not session_id:
         return _terminal_error_payload("MISSING_SESSION_ID", "write_stdin 需要提供 session_id 参数。")
+    with _SANDBOX_TERMINAL_SESSIONS_LOCK:
+        session = _SANDBOX_TERMINAL_SESSIONS.get(session_id)
+    if session is not None:
+        session.refresh_client_lease()
+    _prune_sandbox_terminal_sessions()
     with _SANDBOX_TERMINAL_SESSIONS_LOCK:
         session = _SANDBOX_TERMINAL_SESSIONS.get(session_id)
     if session is None:

@@ -651,6 +651,7 @@ export type SessionToolApprovalRequest = {
   risk: string;
   argumentsHash: string;
   argumentSummary: Record<string, unknown>;
+  sessionGrantScope: Record<string, unknown>;
   decisionFingerprint: string;
   configRevision: number;
   configHash: string;
