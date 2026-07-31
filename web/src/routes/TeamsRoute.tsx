@@ -2580,12 +2580,42 @@ export function TeamsRoute({
         registerExperimentSmokeResultFromWorkspace={registerExperimentSmokeResultFromWorkspace}
         registerExperimentFullRunResultFromWorkspace={registerExperimentFullRunResultFromWorkspace}
         requestExperimentKnowledgeIngestionFromWorkspace={requestExperimentKnowledgeIngestionFromWorkspace}
+        openIterationWorkspace={() => {
+          if (!selectedTeam?.teamId) {
+            return;
+          }
+          navigate(researchWorkspaceStageRoute(selectedTeam.teamId, "iteration"));
+        }}
         renderResearchLoopPanel={renderResearchLoopPanel}
       />
     );
   }
 
   function renderResearchStageStandalonePage(stageView: Exclude<ResearchStageWorkspaceView, "knowledge_collection">) {
+    const refreshStageWorkspace = () => {
+      createExperimentPlanMutation.reset();
+      materializeEngineeringProxyHypothesisMutation.reset();
+      reviewExperimentHypothesisMutation.reset();
+      createExperimentHypothesisRevisionMutation.reset();
+      freezeExperimentDesignMutation.reset();
+      registerExperimentBaselineArtifactMutation.reset();
+      runExperimentSmokeMutation.reset();
+      registerExperimentSmokeResultMutation.reset();
+      registerExperimentFullRunResultMutation.reset();
+      requestExperimentKnowledgeIngestionMutation.reset();
+      createResearchLoopMutation.reset();
+      recordResearchLoopEvidenceMutation.reset();
+      recordResearchLoopDecisionMutation.reset();
+      materializeResearchLoopIterationDesignMutation.reset();
+      void Promise.all([
+        researchStageRoundStatusQuery.refetch(),
+        experimentPlanningStatusQuery.refetch(),
+        experimentMethodCatalogQuery.refetch(),
+        researchLoopTemplatesQuery.refetch(),
+        researchLoopStatusQuery.refetch(),
+      ]);
+    };
+
     return (
       <TeamResearchStageStandalonePagePanel
         stageView={stageView}
@@ -2599,6 +2629,7 @@ export function TeamsRoute({
         activeTeamMemberCount={activeTeamMemberCount}
         selectedTeamSyncPending={selectedTeamSyncPending}
         researchStageRoundStatusQuery={researchStageRoundStatusQuery}
+        refreshStageWorkspace={refreshStageWorkspace}
         renderResearchStageAgentPanel={renderResearchStageAgentPanel}
         launchResearchStage={launchResearchStage}
         selectedTeamStartResearchStageError={selectedTeamStartResearchStageError}
@@ -4664,6 +4695,11 @@ export function TeamsRoute({
       ? `${sourceCollectionProjectedApprovedCount} 条保留 / ${sourceCollectionRunPendingScreeningCount} 条待处理 · ${sourceCollectionDataSyncText}`
       : `${sourceCollectionProjectedApprovedCount} kept / ${sourceCollectionRunPendingScreeningCount} pending · ${sourceCollectionDataSyncText}`)
     : (lang === "zh" ? "提炼结果加载中" : "extraction result loading");
+  const sourceCollectionIngestionReadyForExperiment = sourceCollectionProjectedFormalKnowledgeCount > 0;
+  const sourceCollectionExperimentPlanningRoute = researchWorkspaceStageRoute(
+    selectedTeam?.teamId || RESEARCH_TEAM_ID,
+    "experiment",
+  );
   const sourceCollectionStageModules: SourceCollectionStageModule[] = [
     {
       id: "finding",
@@ -4821,7 +4857,7 @@ export function TeamsRoute({
           ? sourceCollectionProjectedCandidateCountLabel
           : (lang === "zh" ? `${sourceCollectionProjectedCandidateCountText} 条候选资料` : `${sourceCollectionProjectedCandidateCountText} candidate sources`),
       outputLabel: lang === "zh" ? `${sourceCollectionProjectedFormalKnowledgeCount} 条正式知识 / ${sourceCollectionProjectedGraphNodeCount} 个关系节点` : `${sourceCollectionProjectedFormalKnowledgeCount} formal / ${sourceCollectionProjectedGraphNodeCount} graph nodes`,
-      nextLabel: sourceCollectionProjectedFormalKnowledgeCount > 0
+      nextLabel: sourceCollectionIngestionReadyForExperiment
         ? (lang === "zh" ? "进入实验规划" : "Move to experiment planning")
         : sourceCollectionProjectedStewardPackCount > 0
           ? (lang === "zh" ? "等待入库完成" : "Wait for ingestion")
@@ -4829,12 +4865,18 @@ export function TeamsRoute({
       state: sourceCollectionStageDisplayState("ingestion", sourceCollectionIngestionDisplayState),
       status: sourceCollectionStageDisplayStatus("ingestion", sourceCollectionIngestionDisplayLoading ? sourceCollectionDataSyncText : sourceCollectionStepStatusText(sourceCollectionMemoryStepState)),
       detailLabel: lang === "zh" ? "查看入库详情" : "View ingestion details",
-      actionLabel: sourceCollectionStageActionLabelFor("ingestion", sourceCollectionMemoryActionLabel),
-      actionDisabled: sourceCollectionStageActionReadinessFor("ingestion").disabled,
+      actionLabel: sourceCollectionIngestionReadyForExperiment
+        ? (lang === "zh" ? "进入实验规划" : "Plan experiments")
+        : sourceCollectionStageActionLabelFor("ingestion", sourceCollectionMemoryActionLabel),
+      actionDisabled: sourceCollectionIngestionReadyForExperiment
+        ? false
+        : sourceCollectionStageActionReadinessFor("ingestion").disabled,
       actionTone: "primary",
       actionIcon: "check",
       projection: sourceCollectionMemoryProjection,
-      onAction: () => void startSourceCollectionStageSessionTask("ingestion"),
+      onAction: sourceCollectionIngestionReadyForExperiment
+        ? () => navigate(sourceCollectionExperimentPlanningRoute)
+        : () => void startSourceCollectionStageSessionTask("ingestion"),
       onDetail: () => openSourceCollectionStage("ingestion"),
     },
   ];

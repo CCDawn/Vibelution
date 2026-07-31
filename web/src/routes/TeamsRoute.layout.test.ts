@@ -411,10 +411,17 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("recordResearchLoopEvidenceMutation");
     expect(routeSource).toContain("recordResearchLoopDecisionMutation");
     expect(teamExperimentLoopMutationsSource).toContain("createNextDesignDraft:");
-    expect(teamExperimentLoopMutationsSource).toContain("idempotencyKey: `${payload.loop.loopId}:${payload.loop.updatedAt}:${payload.draft.decision}`");
+    expect(teamExperimentLoopMutationsSource).toContain("idempotencyKey: buildResearchLoopDecisionIdempotencyKey({");
     // Wave 8J: research-loop UI + design-draft CTA live on TeamResearchLoopPanel.
     expect(teamResearchLoopPanelSource).toContain("nextDesignPlanId");
     expect(teamResearchLoopPanelSource).toContain("已生成下一版设计");
+    expect(teamExperimentPlanningLedgerPanelSource).toContain("进入执行与迭代");
+    expect(teamExperimentPlanningLedgerPanelSource).toContain("openIterationWorkspace");
+    expect(routeSource).toContain('researchWorkspaceStageRoute(selectedTeam.teamId, "iteration")');
+    expect(teamResearchStageStandalonePagePanelSource).toContain("refreshStageWorkspace");
+    expect(routeSource).toContain("experimentMethodCatalogQuery.refetch()");
+    expect(routeSource).toContain("researchLoopStatusQuery.refetch()");
+    expect(routeSource).toContain("createExperimentPlanMutation.reset()");
     expect(routeSource).toContain("freezeExperimentDesignMutation");
     expect(teamExperimentLoopMutationsSource).toContain("/freeze`");
     expect(teamExperimentPlanningLedgerPanelSource).toContain("冻结设计");
@@ -1164,7 +1171,12 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("onAction: sourceCollectionExtractionCanProceedAfterExclusions");
     expect(routeSource).toContain(": () => void startSourceCollectionStageSessionTask(\"extraction\")");
     expect(routeSource).toContain("onAction: () => void startSourceCollectionStageSessionTask(\"relations\")");
-    expect(routeSource).toContain("onAction: () => void startSourceCollectionStageSessionTask(\"ingestion\")");
+    expect(routeSource).toContain("const sourceCollectionIngestionReadyForExperiment = sourceCollectionProjectedFormalKnowledgeCount > 0");
+    expect(routeSource).toContain("const sourceCollectionExperimentPlanningRoute = researchWorkspaceStageRoute(");
+    expect(routeSource).toContain('selectedTeam?.teamId || RESEARCH_TEAM_ID,\n    "experiment",');
+    expect(routeSource).toContain("onAction: sourceCollectionIngestionReadyForExperiment");
+    expect(routeSource).toContain("navigate(sourceCollectionExperimentPlanningRoute)");
+    expect(routeSource).toContain(": () => void startSourceCollectionStageSessionTask(\"ingestion\")");
     expect(routeSource).toContain("repairChallengeCupTeamAgentsMutation");
     // Wave 8Q: agent repair endpoints live on useTeamShellMutations.
     expect(teamShellMutationsSource).toContain("/challenge-cup-agents/repair");
@@ -2761,7 +2773,9 @@ describe("TeamsRoute layout contract", () => {
       stageModuleSource.indexOf('id: "ingestion"'),
       stageModuleSource.indexOf("];"),
     );
-    expect(ingestionModuleSource).toContain('onAction: () => void startSourceCollectionStageSessionTask("ingestion")');
+    expect(ingestionModuleSource).toContain("onAction: sourceCollectionIngestionReadyForExperiment");
+    expect(ingestionModuleSource).toContain("navigate(sourceCollectionExperimentPlanningRoute)");
+    expect(ingestionModuleSource).toContain(': () => void startSourceCollectionStageSessionTask("ingestion")');
     expect(ingestionModuleSource).not.toContain("runKnowledgeCollectionCompletionAction");
     expect(ingestionModuleSource).not.toContain("runKnowledgeCollectionCompletionMutation");
     expect(ingestionModuleSource).not.toContain("runKnowledgeCollectionIngestMutation.mutate");
