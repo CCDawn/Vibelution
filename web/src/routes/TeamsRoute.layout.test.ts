@@ -410,7 +410,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("recordResearchLoopEvidenceMutation");
     expect(routeSource).toContain("recordResearchLoopDecisionMutation");
     expect(teamExperimentLoopMutationsSource).toContain("createNextDesignDraft:");
-    expect(teamExperimentLoopMutationsSource).toContain("idempotencyKey: `${payload.loop.loopId}:${payload.loop.updatedAt}:${payload.draft.decision}`");
+    expect(teamExperimentLoopMutationsSource).toContain("idempotencyKey: buildResearchLoopDecisionIdempotencyKey({");
     // Wave 8J: research-loop UI + design-draft CTA live on TeamResearchLoopPanel.
     expect(teamResearchLoopPanelSource).toContain("nextDesignPlanId");
     expect(teamResearchLoopPanelSource).toContain("已生成下一版设计");
