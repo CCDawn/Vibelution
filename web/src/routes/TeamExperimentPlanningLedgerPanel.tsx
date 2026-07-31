@@ -3,7 +3,7 @@
  * Wave 8J: extracted from TeamsRoute.tsx for domain componentization.
  */
 import type { ReactNode } from "react";
-import { AlertTriangle, CheckCircle2, Play, Save, Send } from "lucide-react";
+import { AlertTriangle, ArrowRight, CheckCircle2, Play, Save, Send } from "lucide-react";
 
 import type { ExperimentMethodId, Team } from "../api/types";
 import {
@@ -190,6 +190,7 @@ export type TeamExperimentPlanningLedgerPanelProps = {
   registerExperimentSmokeResultFromWorkspace: (plan: ExperimentPlanRecord) => void;
   registerExperimentFullRunResultFromWorkspace: (plan: ExperimentPlanRecord) => void;
   requestExperimentKnowledgeIngestionFromWorkspace: (plan: ExperimentPlanRecord) => void;
+  openIterationWorkspace: () => void;
   renderResearchLoopPanel: (activePlan: ExperimentPlanRecord | null, variant?: "experiment" | "iteration") => ReactNode;
 };
 
@@ -247,6 +248,7 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
     registerExperimentSmokeResultFromWorkspace,
     registerExperimentFullRunResultFromWorkspace,
     requestExperimentKnowledgeIngestionFromWorkspace,
+    openIterationWorkspace,
     renderResearchLoopPanel,
   } = props;
 
@@ -649,6 +651,10 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
                     ))}
                   </div>
                 ) : null}
+                <VNativeButton type="button" onClick={openIterationWorkspace}>
+                  <ArrowRight size={13} />
+                  {lang === "zh" ? "进入执行与迭代" : "Open execution and iteration"}
+                </VNativeButton>
               </section>
             ) : null}
             {activeBaselineArtifact ? (
