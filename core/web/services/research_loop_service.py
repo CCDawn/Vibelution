@@ -679,10 +679,22 @@ def _pending_iteration_design_proposals(loops: list[dict[str, Any]]) -> list[dic
             if not isinstance(proposal, dict):
                 continue
             proposal_id = str(proposal.get("proposalId") or "")
+            allowed_variable_changes = _trim_list(
+                proposal.get("allowedVariableChanges"),
+                max_items=24,
+                max_length=240,
+            )
+            frozen_controls = _trim_list(
+                proposal.get("frozenControls"),
+                max_items=24,
+                max_length=360,
+            )
             if (
                 not proposal_id
                 or proposal_id not in governed_proposal_ids
                 or str(proposal.get("nextDesignPlanId") or "")
+                or not allowed_variable_changes
+                or not frozen_controls
             ):
                 continue
             pending.append(

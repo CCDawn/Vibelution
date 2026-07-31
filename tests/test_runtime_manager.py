@@ -5066,6 +5066,63 @@ def test_run_launcher_action_passes_configured_port_to_launcher_env(monkeypatch)
     assert completed["durationMs"] >= 0
 
 
+def test_run_launcher_action_preserves_explicit_port_env_override(monkeypatch):
+    captured = {}
+    events: list[tuple[str, dict]] = []
+
+    class FakeProcess:
+        def __init__(self, *args, **kwargs):
+            captured["kwargs"] = kwargs
+            kwargs["stdout"].write(b"ok\n")
+            kwargs["stdout"].flush()
+
+        def wait(self, timeout=None):
+            return 0
+
+    monkeypatch.setenv("VIBELUTION_PORT", "9123")
+    monkeypatch.setattr(workbench_controller, "configured_backend_port", lambda: 9101)
+    monkeypatch.setattr(workbench_controller.subprocess, "Popen", FakeProcess)
+    monkeypatch.setattr(
+        workbench_controller,
+        "append_runtime_manager_file_event",
+        lambda event_type, payload, **_kwargs: events.append((event_type, payload)),
+    )
+
+    result = workbench_controller.run_launcher_action("internal-start")
+
+    assert result.returncode == 0
+    assert captured["kwargs"]["env"]["VIBELUTION_PORT"] == "9123"
+    completed = _event_payload(events, "launcher.action.completed")
+    assert completed["portSet"] is True
+
+
+def test_run_launcher_action_falls_back_to_configured_port_when_explicit_env_invalid(monkeypatch):
+    captured = {}
+
+    class FakeProcess:
+        def __init__(self, *args, **kwargs):
+            captured["kwargs"] = kwargs
+            kwargs["stdout"].write(b"ok\n")
+            kwargs["stdout"].flush()
+
+        def wait(self, timeout=None):
+            return 0
+
+    monkeypatch.setenv("VIBELUTION_PORT", "not-a-port")
+    monkeypatch.setattr(workbench_controller, "configured_backend_port", lambda: 9101)
+    monkeypatch.setattr(workbench_controller.subprocess, "Popen", FakeProcess)
+    monkeypatch.setattr(
+        workbench_controller,
+        "append_runtime_manager_file_event",
+        lambda event_type, payload, **_kwargs: None,
+    )
+
+    result = workbench_controller.run_launcher_action("internal-start")
+
+    assert result.returncode == 0
+    assert captured["kwargs"]["env"]["VIBELUTION_PORT"] == "9101"
+
+
 def test_run_launcher_action_uses_python_adapter_without_detached_process(monkeypatch):
     captured = {}
 

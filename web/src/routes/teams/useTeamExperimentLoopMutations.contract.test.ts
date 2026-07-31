@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import experimentApiSource from "../../api/teamExperiment.ts?raw";
 import routeSource from "../TeamsRoute.tsx?raw";
+import {
+  buildResearchLoopDecisionIdempotencyKey,
+} from "./useTeamExperimentLoopMutations";
 import mutationsSource from "./useTeamExperimentLoopMutations.ts?raw";
 
 const mutationOwners = [
@@ -82,5 +85,40 @@ describe("team experiment loop mutations contract", () => {
     expect(reviewMutationSource).toContain(
       "queryClient.setQueryData(\n          experimentPlanningStatusQueryKey(variables.teamId),\n          payload.experimentStatus,",
     );
+  });
+
+  it("changes the research-loop decision idempotency key when the governed contract changes", () => {
+    const baseDraft = {
+      decision: "repair_and_repeat",
+      rationale: "Proxy evidence still needs formal review.",
+      nextActions: "Register the formal baseline artifact.",
+      allowedVariableChanges: "executionEvidence.baselineArtifact",
+      frozenControls: "methodConfig.dataset, methodConfig.seeds",
+    };
+    const first = buildResearchLoopDecisionIdempotencyKey({
+      loopId: "loop-1",
+      loopUpdatedAt: "2026-07-31T14:00:00Z",
+      nextTemplateId: "algorithm_model_experiment",
+      draft: baseDraft,
+    });
+    const same = buildResearchLoopDecisionIdempotencyKey({
+      loopId: "loop-1",
+      loopUpdatedAt: "2026-07-31T14:00:00Z",
+      nextTemplateId: "algorithm_model_experiment",
+      draft: baseDraft,
+    });
+    const revised = buildResearchLoopDecisionIdempotencyKey({
+      loopId: "loop-1",
+      loopUpdatedAt: "2026-07-31T14:00:00Z",
+      nextTemplateId: "algorithm_model_experiment",
+      draft: {
+        ...baseDraft,
+        allowedVariableChanges: "executionEvidence.metricReport",
+      },
+    });
+
+    expect(first).toBe(same);
+    expect(revised).not.toBe(first);
+    expect(first.length).toBeLessThanOrEqual(240);
   });
 });

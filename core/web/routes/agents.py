@@ -625,13 +625,16 @@ def agent_create(payload: AgentCreatePayload) -> dict:
         if metadata:
             agent = update_agent_instance(agent_id, metadata=metadata)
         if payload.primaryMode or payload.roleKey or payload.promptTemplateId or payload.contextCompressionPolicy:
+            runtime_policy_updates: dict[str, Any] = {}
+            if payload.contextCompressionPolicy:
+                runtime_policy_updates["context_compression_policy"] = payload.contextCompressionPolicy
             agent = update_agent_instance(
                 agent_id,
                 llm_bindings=llm_bindings,
                 primary_mode=payload.primaryMode or None,
                 role_key=payload.roleKey or None,
                 prompt_template_id=payload.promptTemplateId or None,
-                context_compression_policy=payload.contextCompressionPolicy,
+                **runtime_policy_updates,
             )
         if persona_profile:
             agent = update_agent_instance(agent_id, persona_profile=persona_profile)
