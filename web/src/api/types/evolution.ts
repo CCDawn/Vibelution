@@ -677,7 +677,12 @@ export type SupervisedWorktreeRun = {
   merge?: {
     status?: string;
     mergedAt?: string;
+    committedAt?: string;
+    appliedAt?: string;
     force?: boolean;
+    baseCommit?: string;
+    commitSha?: string;
+    candidateVariantId?: string;
     triggeredBy?: {
       role?: string;
       approvalMode?: string;
@@ -688,10 +693,40 @@ export type SupervisedWorktreeRun = {
     changedFiles?: string[];
     rollbackManifestPath?: string;
   };
+  runtimeActivation?: {
+    status?: string;
+    attempt?: number;
+    targetCommit?: string;
+    intentId?: string;
+    commandId?: string;
+    intentStatus?: string;
+    reason?: string;
+    requestedAt?: string;
+    appliedAt?: string;
+    lastCheckedAt?: string;
+    previousIntentId?: string;
+    previousFailure?: Record<string, unknown>;
+    proof?: {
+      verified?: boolean;
+      targetCommit?: string;
+      runtimeSourceCommit?: string;
+      frontendBuiltFromCommit?: string;
+      runtimeSourceTrackedClean?: boolean;
+      phase?: string;
+      backendHealthy?: boolean;
+      activeWorkCount?: number;
+      verifiedAt?: string;
+    };
+  };
+  runtimeActivationTargetCommit?: string;
   rollback?: {
     status?: string;
     manifestPath?: string;
+    integrationCommit?: string;
+    revertedCommit?: string;
+    revertCommit?: string;
     rolledBackAt?: string;
+    runtimeAppliedAt?: string;
     reason?: string;
   };
   actionStates: Record<string, EvolutionActionState>;

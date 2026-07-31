@@ -1,6 +1,17 @@
 import type { SupervisedWorktreeRun } from "../api/types";
 
 const RECENT_SUPERVISED_WORKTREE_RUN_ID_KEY = "vibelution.supervised-evolution.recent-worktree-run-id";
+const SUPERVISED_REVIEW_OUTCOMES = new Set([
+  "needs_manual_decision",
+  "awaiting_user_approval",
+  "awaiting_agent_approval",
+  "integration_committed",
+  "activation_pending",
+  "activation_failed",
+  "applied",
+  "rollback_activation_pending",
+  "merge_rolled_back",
+]);
 
 type RunIdStorage = {
   getItem: (key: string) => string | null;
@@ -67,7 +78,7 @@ export function selectRecentSupervisedWorktreeRun(
     return (
       !isSelfEvolutionWorktreeRun(run)
       && String(run.status || "").trim().toLowerCase() === "done"
-      && ["needs_manual_decision", "awaiting_user_approval", "awaiting_agent_approval"].includes(outcome)
+      && SUPERVISED_REVIEW_OUTCOMES.has(outcome)
     );
   }) ?? null;
 }
