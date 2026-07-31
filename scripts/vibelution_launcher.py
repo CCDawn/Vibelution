@@ -1028,8 +1028,9 @@ def _ensure_frontend_build(source_identity: dict[str, object] | None = None) -> 
         "sourceBranch": identity.get("branch"),
         "sourceCommit": identity.get("commit"),
         "frontendTree": identity.get("frontendTree"),
-        "builtFromCommit": (
-            identity.get("commit") if needs_build else previous_provenance.get("builtFromCommit")
+        "builtFromCommit": identity.get("commit"),
+        "reusedArtifactFromCommit": (
+            "" if needs_build else previous_provenance.get("builtFromCommit")
         ),
         "rebuilt": needs_build,
         "validatedAt": _now_iso(),
