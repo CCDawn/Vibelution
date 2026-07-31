@@ -677,7 +677,12 @@ export type SupervisedWorktreeRun = {
   merge?: {
     status?: string;
     mergedAt?: string;
+    committedAt?: string;
+    appliedAt?: string;
     force?: boolean;
+    baseCommit?: string;
+    commitSha?: string;
+    candidateVariantId?: string;
     triggeredBy?: {
       role?: string;
       approvalMode?: string;
@@ -688,10 +693,40 @@ export type SupervisedWorktreeRun = {
     changedFiles?: string[];
     rollbackManifestPath?: string;
   };
+  runtimeActivation?: {
+    status?: string;
+    attempt?: number;
+    targetCommit?: string;
+    intentId?: string;
+    commandId?: string;
+    intentStatus?: string;
+    reason?: string;
+    requestedAt?: string;
+    appliedAt?: string;
+    lastCheckedAt?: string;
+    previousIntentId?: string;
+    previousFailure?: Record<string, unknown>;
+    proof?: {
+      verified?: boolean;
+      targetCommit?: string;
+      runtimeSourceCommit?: string;
+      frontendBuiltFromCommit?: string;
+      runtimeSourceTrackedClean?: boolean;
+      phase?: string;
+      backendHealthy?: boolean;
+      activeWorkCount?: number;
+      verifiedAt?: string;
+    };
+  };
+  runtimeActivationTargetCommit?: string;
   rollback?: {
     status?: string;
     manifestPath?: string;
+    integrationCommit?: string;
+    revertedCommit?: string;
+    revertCommit?: string;
     rolledBackAt?: string;
+    runtimeAppliedAt?: string;
     reason?: string;
   };
   actionStates: Record<string, EvolutionActionState>;
@@ -900,6 +935,8 @@ export type EvolutionWorkspaceSnapshot = {
   selfWorktreeActiveRun?: SupervisedWorktreeRun | null;
   selfWorktreeRuns?: SupervisedWorktreeRun[];
   selfObservationActiveRun?: SelfObservationRun | null;
+  selfAutonomousActiveRun?: SelfEvolutionAutonomousLoopRun | null;
+  selfAutonomousLatestRun?: SelfEvolutionAutonomousLoopRun | null;
   selfTransactions: SelfEvolutionTransaction[];
 };
 
@@ -1082,6 +1119,100 @@ export type SelfObservationRunStartRequest = {
 
 export type SelfObservationRunActionRequest = {
   action: "terminate" | "stop" | "cancel" | string;
+};
+
+export type SelfEvolutionAutonomousChangedFile = {
+  path: string;
+  changeType: "added" | "modified" | "deleted" | string;
+};
+
+export type SelfEvolutionAutonomousLoopRun = {
+  schemaVersion: number;
+  runKind: "self_evolution_autonomous_loop" | string;
+  runId: string;
+  status: string;
+  phase: string;
+  request: {
+    goal: string;
+    maxIterations: number;
+  };
+  observation?: {
+    summary: string;
+    evidence: unknown[];
+    conversationSessionId?: string;
+  };
+  plan?: {
+    summary: string;
+    steps: unknown[];
+    conversationSessionId?: string;
+  };
+  candidate?: {
+    summary: string;
+    changedFiles: SelfEvolutionAutonomousChangedFile[];
+    verification: unknown[];
+    baseCommit: string;
+    headCommit: string;
+    worktreePath: string;
+    branchName: string;
+    variantId?: string;
+    conversationSessionId?: string;
+  };
+  resultReport?: {
+    summary: string;
+    changedFiles: SelfEvolutionAutonomousChangedFile[];
+    verification: unknown[];
+    candidateHead: string;
+  };
+  reviewGate: {
+    status: string;
+    requiredActorType: "user";
+    decision?: {
+      decision: "approve" | "reject" | string;
+      actorType: "user";
+      actorId: string;
+      comment: string;
+    };
+  };
+  approval?: {
+    decision: "approve" | string;
+    actorType: "user";
+    actorId: string;
+    comment: string;
+  };
+  integration?: {
+    status: "committed" | string;
+    mechanism: string;
+    baseCommit: string;
+    commitSha: string;
+    candidateVariantId: string;
+    changedFiles: string[];
+    rollbackManifestPath: string;
+    committedAt: string;
+  };
+  cleanup?: {
+    status: "cleaned" | string;
+    worktreeRemoved: boolean;
+    localBranchDeleted: boolean;
+  };
+  error?: {
+    type: string;
+    message: string;
+  };
+  createdAt: string;
+  startedAt: string;
+  updatedAt: string;
+  finishedAt?: string;
+};
+
+export type SelfEvolutionAutonomousLoopStartRequest = {
+  goal: string;
+  maxIterations: number;
+};
+
+export type SelfEvolutionAutonomousLoopActionRequest = {
+  runId: string;
+  action: "approve" | "reject" | "retry_cleanup";
+  comment?: string;
 };
 
 export type SelfEvolutionHistoryDeleteResponse = {

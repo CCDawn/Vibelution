@@ -1,0 +1,133 @@
+import React from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { MemoryRouter } from "react-router-dom";
+import { describe, expect, it, vi } from "vitest";
+
+import type { SelfEvolutionAutonomousLoopRun } from "../api/types";
+import { SelfEvolutionAutonomousLoopPanel } from "./SelfEvolutionAutonomousLoopPanel";
+
+function reviewRun(): SelfEvolutionAutonomousLoopRun {
+  return {
+    schemaVersion: 1,
+    runKind: "self_evolution_autonomous_loop",
+    runId: "self-loop-panel",
+    status: "awaiting_user_approval",
+    phase: "reporting",
+    request: { goal: "收敛自进化流程", maxIterations: 1 },
+    observation: {
+      summary: "发现状态机仍依赖旧评估阶段。",
+      evidence: ["route contract"],
+      conversationSessionId: "session-observe",
+    },
+    plan: {
+      summary: "拆出无评分自动闭环。",
+      steps: ["新增状态机", "接入 Git 事务"],
+      conversationSessionId: "session-plan",
+    },
+    candidate: {
+      summary: "候选已完成并通过聚焦测试。",
+      changedFiles: [
+        { path: "core/web/services/self_loop.py", changeType: "added" },
+      ],
+      verification: ["pytest 48 passed"],
+      baseCommit: "base123",
+      headCommit: "candidate456",
+      worktreePath: "C:/tmp/self-loop",
+      branchName: "codex/self-evolution-self-loop-panel",
+      variantId: "sha256:candidate",
+      conversationSessionId: "session-evolve",
+    },
+    resultReport: {
+      summary: "候选已完成并通过聚焦测试。",
+      changedFiles: [
+        { path: "core/web/services/self_loop.py", changeType: "added" },
+      ],
+      verification: ["pytest 48 passed"],
+      candidateHead: "candidate456",
+    },
+    reviewGate: {
+      status: "pending",
+      requiredActorType: "user",
+    },
+    createdAt: "2026-08-01T00:00:00Z",
+    startedAt: "2026-08-01T00:00:00Z",
+    updatedAt: "2026-08-01T00:03:00Z",
+  };
+}
+
+describe("SelfEvolutionAutonomousLoopPanel", () => {
+  it("renders the no-score lifecycle and user-only approval boundary", () => {
+    const markup = renderToStaticMarkup(
+      <MemoryRouter>
+        <SelfEvolutionAutonomousLoopPanel
+          lang="zh"
+          run={reviewRun()}
+          pending={false}
+          error=""
+          onStart={vi.fn()}
+          onAction={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(markup).toContain("自动闭环");
+    expect(markup).toContain("观察现状");
+    expect(markup).toContain("制定计划");
+    expect(markup).toContain("隔离进化");
+    expect(markup).toContain("等待用户审查");
+    expect(markup).toContain("批准并自动合入");
+    expect(markup).toContain("退回继续修改");
+    expect(markup).toContain("pytest 48 passed");
+    expect(markup).toContain("data-vui=\"surface\"");
+    expect(markup).toContain("data-vui=\"metric-strip\"");
+    expect(markup).not.toContain("Judge");
+    expect(markup).not.toContain("候选评分");
+    expect(markup).not.toContain("分数");
+  });
+
+  it("reports exact Git and cleanup proof after completion", () => {
+    const completed = {
+      ...reviewRun(),
+      status: "completed",
+      phase: "completed",
+      reviewGate: {
+        status: "approved",
+        requiredActorType: "user" as const,
+      },
+      integration: {
+        status: "committed",
+        mechanism: "git_commit",
+        baseCommit: "base123",
+        commitSha: "commit789",
+        candidateVariantId: "sha256:candidate",
+        changedFiles: ["core/web/services/self_loop.py"],
+        rollbackManifestPath: "manifests/self-loop-panel.json",
+        committedAt: "2026-08-01T00:04:00Z",
+      },
+      cleanup: {
+        status: "cleaned",
+        worktreeRemoved: true,
+        localBranchDeleted: true,
+      },
+      finishedAt: "2026-08-01T00:04:30Z",
+    } satisfies SelfEvolutionAutonomousLoopRun;
+
+    const markup = renderToStaticMarkup(
+      <MemoryRouter>
+        <SelfEvolutionAutonomousLoopPanel
+          lang="zh"
+          run={completed}
+          pending={false}
+          error=""
+          onStart={vi.fn()}
+          onAction={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(markup).toContain("commit789");
+    expect(markup).toContain("工作树已删除");
+    expect(markup).toContain("本地分支已删除");
+    expect(markup).toContain("闭环完成");
+  });
+});
