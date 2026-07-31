@@ -13,6 +13,7 @@ from core.web.services.team import (
     research_organization,
     system_bootstrap,
     system_teams,
+    team_crud,
 )
 
 
@@ -63,6 +64,18 @@ def test_facade_reexports_system_bootstrap_control_plane() -> None:
     assert hasattr(facade, "_TEAM_SYSTEM_BOOTSTRAP_THREAD")
     assert isinstance(facade._TEAM_SYSTEM_BOOTSTRAP_STATE, dict)
     assert facade.TEAM_SYSTEM_BOOTSTRAP_READY_CACHE_TTL_SECONDS == 30.0
+
+
+def test_facade_reexports_team_crud() -> None:
+    assert facade.list_teams is team_crud.list_teams
+    assert facade.list_teams_compact is team_crud.list_teams_compact
+    assert facade.create_team is team_crud.create_team
+    assert facade.get_team is team_crud.get_team
+    assert facade.update_team is team_crud.update_team
+    assert facade.archive_team is team_crud.archive_team
+    assert facade.remove_agents_from_teams is team_crud.remove_agents_from_teams
+    assert facade.restore_removed_agents_to_teams is team_crud.restore_removed_agents_to_teams
+    assert facade.send_team_message is team_crud.send_team_message
 
 
 def test_facade_reexports_research_organization() -> None:
