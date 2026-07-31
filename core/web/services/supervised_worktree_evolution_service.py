@@ -1248,7 +1248,7 @@ def _normalize_worktree_agent_bindings(value: Any) -> dict[str, dict[str, Any]]:
     if not isinstance(value, dict):
         return {}
     bindings: dict[str, dict[str, Any]] = {}
-    for role in ("baseline", "candidate", "judge"):
+    for role in ("baseline", "candidate", "auditor", "judge"):
         item = value.get(role)
         if not isinstance(item, dict):
             continue
