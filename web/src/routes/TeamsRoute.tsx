@@ -3632,7 +3632,12 @@ export function TeamsRoute({
           sourceCollectionRecordsDataLoading
           || sourceCollectionAssignmentsDataLoading
           || (sourceCollectionRunsQuery.isPending && !sourceCollectionRunsQuery.data)
-          || (sourceCollectionSummaryQuery.isPending && sourceCollectionWorkspaceSelected && !sourceCollectionSummaryQuery.data)
+          || (
+            selectedSourceCollectionRunEffectiveId
+            && sourceCollectionSummaryQuery.isPending
+            && sourceCollectionWorkspaceSelected
+            && !sourceCollectionSummaryQuery.data
+          )
         )
       )
     ),
