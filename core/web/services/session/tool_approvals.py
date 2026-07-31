@@ -52,6 +52,8 @@ class _ApprovalRequest:
     risk: str
     arguments_hash: str
     argument_summary: dict[str, Any]
+    session_grant_scope: dict[str, Any]
+    session_grant_key: str
     decision_fingerprint: str
     config_revision: int
     config_hash: str
@@ -75,6 +77,7 @@ class _ApprovalRequest:
             "risk": self.risk,
             "argumentsHash": self.arguments_hash,
             "argumentSummary": dict(self.argument_summary),
+            "sessionGrantScope": dict(self.session_grant_scope),
             "decisionFingerprint": self.decision_fingerprint,
             "configRevision": self.config_revision,
             "configHash": self.config_hash,
@@ -183,13 +186,14 @@ def authorize_or_wait(
         return ToolApprovalOutcome(True, "full_access_auto_approved")
 
     args_hash = _arguments_hash(tool_args)
+    session_grant_scope = _session_grant_scope(normalized_tool, tool_args, args_hash)
     grant_key = (
         normalized_session,
         normalized_agent,
         normalized_config_revision,
         normalized_config_hash,
         normalized_tool,
-        args_hash,
+        _session_grant_key(session_grant_scope),
     )
     with _LOCK:
         if grant_key in _SESSION_GRANTS and normalized_approval != "always":
@@ -213,6 +217,8 @@ def authorize_or_wait(
         risk=normalized_risk,
         arguments_hash=args_hash,
         argument_summary=_argument_summary(normalized_tool, tool_args),
+        session_grant_scope=session_grant_scope,
+        session_grant_key=_session_grant_key(session_grant_scope),
         decision_fingerprint=str(decision_fingerprint or "").strip(),
         config_revision=normalized_config_revision,
         config_hash=normalized_config_hash,
@@ -291,6 +297,8 @@ def _get_or_create_request(
     risk: str,
     arguments_hash: str,
     argument_summary: dict[str, Any],
+    session_grant_scope: dict[str, Any],
+    session_grant_key: str,
     decision_fingerprint: str,
     config_revision: int,
     config_hash: str,
@@ -326,6 +334,8 @@ def _get_or_create_request(
             risk=risk,
             arguments_hash=arguments_hash,
             argument_summary=argument_summary,
+            session_grant_scope=session_grant_scope,
+            session_grant_key=session_grant_key,
             decision_fingerprint=decision_fingerprint,
             config_revision=config_revision,
             config_hash=config_hash,
@@ -364,7 +374,7 @@ def _resolve_request_locked(request: _ApprovalRequest, decision: str) -> None:
                 request.config_revision,
                 request.config_hash,
                 request.tool_name,
-                request.arguments_hash,
+                request.session_grant_key,
             )
         )
     elif decision == "decline":
@@ -446,11 +456,57 @@ def _argument_summary(tool_name: str, tool_args: Mapping[str, Any]) -> dict[str,
         if command:
             summary["commandPreview"] = command[:500]
             summary["commandTruncated"] = len(command) > 500
+        cwd = str(args.get("cwd") or "").strip()
+        if cwd:
+            summary["cwdPreview"] = cwd[:300]
+            summary["cwdTruncated"] = len(cwd) > 300
+    if tool_name == "write_stdin":
+        terminal_session_id = str(
+            args.get("session_id") or args.get("terminal_session_id") or ""
+        ).strip()
+        chars = str(args.get("chars") or "")
+        if terminal_session_id:
+            summary["terminalSessionId"] = terminal_session_id[:160]
+        summary["stdinPreview"] = chars[:500]
+        summary["stdinTruncated"] = len(chars) > 500
+        summary["stdinChars"] = len(chars)
     path = str(args.get("file_path") or "").strip()
     if path:
         summary["pathPreview"] = path[:300]
         summary["pathTruncated"] = len(path) > 300
     return summary
+
+
+def _session_grant_scope(
+    tool_name: str,
+    tool_args: Mapping[str, Any],
+    arguments_hash: str,
+) -> dict[str, Any]:
+    if tool_name == "write_stdin":
+        terminal_session_id = str(
+            tool_args.get("session_id")
+            or tool_args.get("terminal_session_id")
+            or ""
+        ).strip()
+        if terminal_session_id:
+            return {
+                "kind": "terminal_session",
+                "terminalSessionId": terminal_session_id,
+            }
+    return {
+        "kind": "exact_arguments",
+        "argumentsHash": arguments_hash,
+    }
+
+
+def _session_grant_key(scope: Mapping[str, Any]) -> str:
+    encoded = json.dumps(
+        dict(scope or {}),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return sha256(encoded.encode("utf-8")).hexdigest()
 
 
 def _prune_requests_locked() -> None:

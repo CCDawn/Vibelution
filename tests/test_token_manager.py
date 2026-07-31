@@ -537,6 +537,27 @@ class TestEnhancedTokenCompressor:
         assert all(not isinstance(msg, HumanMessage) for msg in compressed)
         assert any("外部任务输入" in getattr(msg, "content", "") for msg in compressed)
 
+    def test_forced_short_history_compacts_prior_external_request_and_preserves_current_request(self):
+        from langchain_core.messages import AIMessage
+
+        messages = [
+            build_external_request_message("旧任务锚点 ALPHA-17"),
+            AIMessage(content="旧回答 " + ("details " * 300)),
+            build_external_request_message("当前任务锚点 ORBIT-71"),
+        ]
+        compressor = EnhancedTokenCompressor(token_budget=1000, max_history_pairs=1)
+
+        compressed, stats = compressor.compress(
+            messages,
+            keep_count=0,
+            use_llm_summary=False,
+        )
+
+        rendered = "\n".join(str(getattr(message, "content", "")) for message in compressed)
+        assert "旧任务锚点 ALPHA-17" in rendered
+        assert rendered.count("当前任务锚点 ORBIT-71") == 1
+        assert stats.tokens_after < stats.tokens_before
+
     def test_rule_based_summary_prefers_external_request_protocol(self):
         """规则摘要应直接识别外部任务输入协议。"""
         messages = [

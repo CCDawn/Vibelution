@@ -1,8 +1,14 @@
 import { useId } from "react";
-import { ShieldAlert, ShieldCheck, X } from "lucide-react";
+import { ShieldAlert } from "lucide-react";
 
 import { VButton } from "../../components/vui";
 import styles from "./ChatToolApprovalDialog.styles";
+import {
+  toolApprovalCodexButtonLabels,
+  toolApprovalCodexTitle,
+  toolApprovalDisplayName,
+  toolApprovalSessionGrantDescription,
+} from "./toolApprovalPreview";
 
 export type ChatToolApprovalLabel = {
   id: string;
@@ -16,6 +22,9 @@ type ChatToolApprovalDialogProps = {
   riskLabel: string;
   scopeLabel: string;
   toolLabels: ChatToolApprovalLabel[];
+  actionPreview?: string;
+  sessionGrantScope?: Record<string, unknown>;
+  toolName?: string;
   onApprove: () => void;
   onApproveForSession?: () => void;
   onReject: () => void;
@@ -28,6 +37,9 @@ export function ChatToolApprovalDialog({
   riskLabel,
   scopeLabel,
   toolLabels,
+  actionPreview,
+  sessionGrantScope,
+  toolName,
   onApprove,
   onApproveForSession,
   onReject,
@@ -38,7 +50,11 @@ export function ChatToolApprovalDialog({
   const scopeId = `${dialogId}-scope`;
   const riskId = `${dialogId}-risk`;
   const toolListId = `${dialogId}-tools`;
-  const descriptionIds = `${descriptionId} ${riskId} ${scopeId} ${toolListId}`;
+  const previewId = `${dialogId}-preview`;
+  const grantId = `${dialogId}-grant`;
+  const descriptionIds = `${descriptionId} ${riskId} ${scopeId} ${toolListId} ${previewId} ${grantId}`;
+  const buttons = toolApprovalCodexButtonLabels(lang);
+  const displayName = toolApprovalDisplayName(toolName || toolLabels[0]?.id, lang);
   const visibleLabels = toolLabels.slice(0, 4);
   const extraCount = Math.max(0, toolLabels.length - visibleLabels.length);
 
@@ -57,15 +73,19 @@ export function ChatToolApprovalDialog({
         </div>
         <div className={styles.body}>
           <div className={styles.header}>
-            <strong id={titleId}>{lang === "zh" ? "工具权限审批" : "Tool permission approval"}</strong>
+            <strong id={titleId}>{toolApprovalCodexTitle(lang)}</strong>
             <span id={riskId}>{riskLabel}</span>
           </div>
           <p id={descriptionId}>
             {lang === "zh"
-              ? `当前助手请求启用${toolLabels.length > 1 ? "这些能力" : "此能力"}，批准后仅在${scopeLabel}生效。`
-              : `The current agent requests tool access. Approval applies to ${scopeLabel}.`}
+              ? `助手请求执行「${displayName}」。请选择本次允许、会话内始终允许或拒绝。`
+              : `The agent wants to run “${displayName}”. Allow once, always for this session, or decline.`}
           </p>
           <span id={scopeId} className={styles.visuallyHidden}>{scopeLabel}</span>
+          <pre id={previewId} className={styles.commandPreview}>{actionPreview || rawTitle}</pre>
+          <p id={grantId} className={styles.grantDescription}>
+            {toolApprovalSessionGrantDescription(sessionGrantScope, lang)}
+          </p>
           <div id={toolListId} className={styles.toolList} title={rawTitle} role="list">
             {visibleLabels.length
               ? visibleLabels.map((item) => (
@@ -80,20 +100,11 @@ export function ChatToolApprovalDialog({
         <div className={styles.actions}>
           <VButton
             type="button"
-            onClick={onReject}
-            isDisabled={pending}
-          >
-            <X size={15} aria-hidden="true" />
-            <span>{lang === "zh" ? "拒绝" : "Reject"}</span>
-          </VButton>
-          <VButton
-            type="button"
             className={styles.allowButton}
             onClick={onApprove}
             isDisabled={pending}
           >
-            <ShieldCheck size={15} aria-hidden="true" />
-            <span>{pending ? (lang === "zh" ? "处理中" : "Resolving") : (lang === "zh" ? "允许" : "Allow")}</span>
+            <span>{pending ? buttons.resolving : buttons.yes}</span>
           </VButton>
           {onApproveForSession ? (
             <VButton
@@ -102,10 +113,16 @@ export function ChatToolApprovalDialog({
               onClick={onApproveForSession}
               isDisabled={pending}
             >
-              <ShieldCheck size={15} aria-hidden="true" />
-              <span>{lang === "zh" ? "本会话允许" : "Allow for session"}</span>
+              <span>{buttons.always}</span>
             </VButton>
           ) : null}
+          <VButton
+            type="button"
+            onClick={onReject}
+            isDisabled={pending}
+          >
+            <span>{buttons.no}</span>
+          </VButton>
         </div>
       </section>
     </div>

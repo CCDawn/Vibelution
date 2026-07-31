@@ -53,6 +53,9 @@ type ChatSessionWorkspacePanelProps = {
     riskLabel: string;
     scopeLabel: string;
     toolLabels: ChatToolApprovalLabel[];
+    actionPreview?: string;
+    sessionGrantScope?: Record<string, unknown>;
+    toolName?: string;
   } | null;
   transientErrorMessage: string;
   workspaceActiveTab: string;
@@ -126,6 +129,9 @@ export function ChatSessionWorkspacePanel({
               riskLabel={toolApproval.riskLabel}
               scopeLabel={toolApproval.scopeLabel}
               toolLabels={toolApproval.toolLabels}
+              actionPreview={toolApproval.actionPreview}
+              sessionGrantScope={toolApproval.sessionGrantScope}
+              toolName={toolApproval.toolName}
               onApprove={onApproveToolApproval}
               onApproveForSession={onApproveToolForSession}
               onReject={onRejectToolApproval}
