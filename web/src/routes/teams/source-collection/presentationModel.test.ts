@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { TeamWorkflowCandidate } from "../../../api/types";
 import {
   compactSourceCollectionQuerySeeds,
+  sourceCollectionCandidateQualityState,
   sourceCollectionCollectionModeLabel,
   sourceCollectionModeForTeam,
   sourceCollectionResultTone,
@@ -66,38 +67,41 @@ describe("source-collection presentationModel", () => {
   });
 
   it("explains how to repair a source that needs revision", () => {
-    const presentation = sourceCollectionSimpleCandidateStatusPresentation(
-      candidate({
-        candidateId: "c-needs-evidence",
-        qualityStatus: "source_quality_needs_revision",
-        currentState: "source_needs_quality_revision",
-        metadata: {
-          metadataOnlyDownload: true,
-          contentExtraction: {
-            status: "extracted",
-            summary: "",
-            evidenceRefs: [],
-            keyFindings: [],
-          },
-          sourceQualityAssessment: {
-            decision: "needs_revision",
-            requiredFixes: [],
-            scores: {
-              relevance: 82,
-              reliability: 76,
-              accessibility: 57,
-              extractionReadiness: 58,
-              overall: 68,
-            },
+    const source = candidate({
+      candidateId: "c-needs-evidence",
+      qualityStatus: "source_quality_needs_revision",
+      currentState: "source_needs_quality_revision",
+      metadata: {
+        metadataOnlyDownload: true,
+        contentExtraction: {
+          status: "extracted",
+          summary: "",
+          evidenceRefs: [],
+          keyFindings: [],
+        },
+        sourceQualityAssessment: {
+          decision: "needs_revision",
+          requiredFixes: [],
+          scores: {
+            relevance: 82,
+            reliability: 76,
+            accessibility: 57,
+            extractionReadiness: 58,
+            overall: 68,
           },
         },
-      }),
-      "zh",
-    );
+      },
+    });
+    const presentation = sourceCollectionSimpleCandidateStatusPresentation(source, "zh");
 
     expect(presentation.label).toBe("待补资料");
     expect(presentation.title).toContain("补充可核验的全文或公开摘要");
     expect(presentation.title).toContain("证据锚点");
     expect(presentation.title).toContain("重新运行资料质量审查");
+    expect(sourceCollectionCandidateQualityState(source)).toEqual({
+      assessed: true,
+      approved: false,
+      needsRevision: true,
+    });
   });
 });
