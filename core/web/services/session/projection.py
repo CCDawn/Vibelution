@@ -2840,6 +2840,20 @@ def _conversation_phase(conversation_id: str, conversation: dict[str, Any]) -> s
         if normalized == "queued":
             return "queued"
         return "running"
+    # Process-local worker is gone. If a chat_turn work-run is still marked
+    # active for this session, release it so shell/top-bar stop showing "running".
+    stale_work_run = s._active_chat_turn_work_run_for_session(conversation_id)
+    if isinstance(stale_work_run, dict):
+        finished_at = str(stale_work_run.get("updatedAt") or s._now_timestamp()).strip() or s._now_timestamp()
+        s._release_stale_chat_turn_work_run(
+            session_id=conversation_id,
+            finished_at=finished_at,
+            summary=s.text_for(
+                s.get_web_language(),
+                zh="会话 worker 已结束，已清除残留运行态。",
+                en="Session worker finished; cleared residual running state.",
+            ),
+        )
     if normalized in {
         "queued",
         "failed",
