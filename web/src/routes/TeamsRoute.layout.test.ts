@@ -1342,6 +1342,9 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourceCollectionConversationWorkspacePanelSource).toContain("sourceCollectionResultTone");
     expect(teamSourceCollectionConversationWorkspacePanelSource).toContain("statusLabel={resultStatus.label}");
     expect(teamSourceCollectionScreeningWorkspacePanelSource).toContain("当前过滤条件下没有候选资料");
+    expect(teamSourceCollectionScreeningWorkspacePanelSource).toContain("sourceCollectionSimpleCandidateStatusPresentation");
+    expect(teamSourceCollectionScreeningWorkspacePanelSource).toContain("statusTitle={");
+    expect(teamSourceCollectionScreeningWorkspacePanelSource).not.toContain("workflowIngestionStatusLabel(sourceQualitySummary.decision");
     // Wave 8L: graph/memory empty filter copy live on workspace panels.
     expect(teamSourceCollectionGraphWorkspacePanelSource).toContain("当前过滤条件下没有入库关系节点");
     expect(teamSourceCollectionMemoryWorkspacePanelSource).toContain("当前过滤条件下没有入库资料");
