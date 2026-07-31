@@ -374,28 +374,71 @@ def estimate_tokens_precise(text: str) -> int:
     return int(base_tokens * 1.2) + 50  # 额外加50作为消息结构开销
 
 
+def _message_role(message: Any) -> str:
+    if isinstance(message, dict):
+        value = message.get("role")
+    else:
+        value = getattr(message, "type", None) or getattr(message, "role", None)
+    normalized = str(value or "").strip().lower()
+    return {"human": "user", "ai": "assistant"}.get(normalized, normalized)
+
+
+def _message_content(message: Any) -> Any:
+    if isinstance(message, dict):
+        return message.get("content")
+    return getattr(message, "content", None)
+
+
+def _message_content_text(message: Any) -> str:
+    content = _message_content(message)
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, dict):
+                parts.append(str(block.get("text") or block.get("content") or ""))
+            elif isinstance(block, str):
+                parts.append(block)
+        return "".join(parts)
+    return str(content or "")
+
+
+def _message_tool_calls(message: Any) -> list[dict[str, Any]]:
+    if isinstance(message, dict):
+        raw = message.get("tool_calls") or message.get("toolCalls") or []
+    else:
+        raw = getattr(message, "tool_calls", None) or []
+    return [item for item in list(raw or []) if isinstance(item, dict)]
+
+
+def _is_provider_user_message(message: Any) -> bool:
+    return _message_role(message) == "user"
+
+
+def _estimate_message_content_tokens(content: Any) -> int:
+    if isinstance(content, str):
+        return estimate_tokens_precise(content)
+    if isinstance(content, list):
+        total = 0
+        for block in content:
+            if isinstance(block, dict) and "text" in block:
+                total += estimate_tokens_precise(block["text"])
+            elif isinstance(block, dict) and str(block.get("type") or "").lower() in {"image_url", "input_image"}:
+                total += 256
+            elif isinstance(block, str):
+                total += estimate_tokens_precise(block)
+        return total
+    if content is None:
+        return 0
+    return estimate_tokens_precise(str(content)[:10000])
+
+
 def _estimate_messages_tokens_uncached(messages: list) -> int:
-    total = 0
-    for msg in messages:
-        if not hasattr(msg, 'content'):
-            continue
-        content = msg.content
-        # 兼容 LangChain 消息格式：content 可能是 str、list 或其他类型
-        if isinstance(content, str):
-            total += estimate_tokens_precise(content)
-        elif isinstance(content, list):
-            # LangChain content blocks 格式（如 [{"type": "text", "text": "..."}]）
-            for block in content:
-                if isinstance(block, dict) and "text" in block:
-                    total += estimate_tokens_precise(block["text"])
-                elif isinstance(block, dict) and str(block.get("type") or "").lower() in {"image_url", "input_image"}:
-                    total += 256
-                elif isinstance(block, str):
-                    total += estimate_tokens_precise(block)
-        else:
-            # 其他类型（尝试转为字符串估算）
-            total += estimate_tokens_precise(str(content)[:10000])
-    return total
+    return sum(
+        _estimate_message_content_tokens(_message_content(message))
+        for message in messages
+    )
 
 
 # 单槽缓存：典型 agent iteration 会连续 4 次询问同一个 messages 的 token 数
@@ -409,11 +452,17 @@ _estimate_cache_value: int = 0
 def _messages_token_fingerprint(messages: list) -> tuple:
     if not messages:
         return (id(messages), 0)
+    first_content = _message_content(messages[0])
+    last_content = _message_content(messages[-1])
     return (
         id(messages),
         len(messages),
         id(messages[0]),
+        id(first_content),
+        len(first_content) if isinstance(first_content, (str, list)) else 0,
         id(messages[-1]),
+        id(last_content),
+        len(last_content) if isinstance(last_content, (str, list)) else 0,
     )
 
 
@@ -694,13 +743,23 @@ class EnhancedTokenCompressor:
             index for index, message in enumerate(messages)
             if is_external_request_message(message)
         ]
-        latest_external_request_index = (
-            external_request_indices[-1] if external_request_indices else None
+        provider_user_indices = [
+            index for index, message in enumerate(messages)
+            if _is_provider_user_message(message)
+        ]
+        protected_request_indices = sorted(
+            {*external_request_indices, *provider_user_indices}
         )
-        latest_external_request = (
-            messages[latest_external_request_index]
-            if latest_external_request_index is not None
+        latest_request_index = (
+            protected_request_indices[-1] if protected_request_indices else None
+        )
+        latest_request = (
+            messages[latest_request_index]
+            if latest_request_index is not None
             else None
+        )
+        latest_request_is_provider_user = bool(
+            latest_request is not None and _is_provider_user_message(latest_request)
         )
 
         # Only the current external request is protected verbatim. Prior user
@@ -710,13 +769,13 @@ class EnhancedTokenCompressor:
             message
             for index, message in enumerate(messages)
             if (not isinstance(message, SystemMessage) or is_external_request_message(message))
-            and index != latest_external_request_index
+            and index != latest_request_index
         ]
         
         # 找出所有 AI 消息（带 tool_calls 或纯文本回复）
         ai_indices = []
         for i, msg in enumerate(other_msgs):
-            if isinstance(msg, AIMessage) or (hasattr(msg, 'type') and msg.type == 'ai'):
+            if isinstance(msg, AIMessage) or _message_role(msg) == "assistant":
                 ai_indices.append(i)
         
         if not ai_indices and keep_count > 0:
@@ -742,7 +801,7 @@ class EnhancedTokenCompressor:
                             '错误', '异常', '失败', '超时', '权限']
             still_old = []
             for msg in old_msgs:
-                content = getattr(msg, 'content', '')
+                content = _message_content_text(msg)
                 if isinstance(content, str) and any(kw in content.lower() for kw in ERROR_KEYWORDS):
                     kept_msgs.insert(0, msg)
                 else:
@@ -764,9 +823,9 @@ class EnhancedTokenCompressor:
         if system_msgs:
             compressed.append(system_msgs[0])
         
-        # 2. 最新的外部任务输入
-        if latest_external_request is not None:
-            compressed.append(latest_external_request)
+        # 2. 旧式外部任务 SystemMessage 保持原有前置顺序。
+        if latest_request is not None and not latest_request_is_provider_user:
+            compressed.append(latest_request)
         
         # 3. 历史摘要（如果有）
         if summary:
@@ -774,6 +833,10 @@ class EnhancedTokenCompressor:
         
         # 4. 保留的最近 3 条 AI 及上下文（原始不变）
         compressed.extend(kept_msgs)
+
+        # 5. 当前 chat user 输入必须保持 provider user role 且位于历史之后。
+        if latest_request_is_provider_user:
+            compressed.append(latest_request)
         
         # 记录压缩统计
         old_tokens = current_tokens
@@ -893,10 +956,10 @@ class EnhancedTokenCompressor:
         # 收集工具调用
         tool_calls = []
         for msg in messages:
-            if hasattr(msg, 'tool_calls') and msg.tool_calls:
-                for tc in msg.tool_calls:
-                    name = tc.get('name', 'unknown')
-                    tool_calls.append(name)
+            for tool_call in _message_tool_calls(msg):
+                function = tool_call.get("function") if isinstance(tool_call.get("function"), dict) else {}
+                name = str(tool_call.get("name") or function.get("name") or "unknown")
+                tool_calls.append(name)
 
         if tool_calls:
             unique_tools = list(dict.fromkeys(tool_calls))[:10]  # 去重，最多10个
@@ -905,8 +968,8 @@ class EnhancedTokenCompressor:
         # 收集外部任务输入
         external_request_msgs = []
         for msg in messages:
-            content_text = str(getattr(msg, 'content', '') or '')
-            if is_external_request_message(msg):
+            content_text = _message_content_text(msg)
+            if is_external_request_message(msg) or _is_provider_user_message(msg):
                 content = content_text[:100]
                 if content:
                     external_request_msgs.append(content)
@@ -917,9 +980,9 @@ class EnhancedTokenCompressor:
         # 收集 AI 消息
         ai_contents = []
         for msg in messages:
-            if hasattr(msg, 'type') and msg.type == 'ai':
-                content = getattr(msg, 'content', '')
-                if content and not hasattr(msg, 'tool_calls'):
+            if _message_role(msg) == "assistant":
+                content = _message_content_text(msg)
+                if content and not _message_tool_calls(msg):
                     ai_contents.append(content[:80])
 
         if ai_contents:
@@ -988,19 +1051,20 @@ class EnhancedTokenCompressor:
         """将消息列表格式化为摘要输入文本"""
         lines = []
         for i, msg in enumerate(messages):
-            msg_type = getattr(msg, 'type', 'unknown')
-            content = getattr(msg, 'content', str(msg))
+            msg_type = _message_role(msg) or "unknown"
+            content = _message_content_text(msg)
             
-            if is_external_request_message(msg):
+            if is_external_request_message(msg) or _is_provider_user_message(msg):
                 lines.append(f"[外部输入] {content[:300]}...")
             elif msg_type == 'system':
                 lines.append(f"[系统] {content[:200]}...")
-            elif msg_type == 'ai':
-                tool_calls = getattr(msg, 'tool_calls', None)
+            elif msg_type == 'assistant':
+                tool_calls = _message_tool_calls(msg)
                 if tool_calls:
                     for tc in tool_calls:
-                        name = tc.get('name', 'unknown')
-                        args = tc.get('args', {})
+                        function = tc.get("function") if isinstance(tc.get("function"), dict) else {}
+                        name = str(tc.get("name") or function.get("name") or "unknown")
+                        args = tc.get('args', tc.get("arguments", function.get("arguments", {})))
                         lines.append(f"[AI 工具调用] {name}({args})")
                 else:
                     lines.append(f"[AI] {content[:300]}...")
