@@ -9,6 +9,7 @@ import researchMemoryEvidencePanelSource from "./teams/ResearchMemoryEvidencePan
 import canvasGeometrySource from "./teams/canvasGeometry.ts?raw";
 import researchWorkspaceModelSource from "./teams/researchWorkspaceModel.ts?raw";
 import researchProjectSwitcherSource from "./teams/research-projects/ResearchProjectSwitcher.tsx?raw";
+import teamLazyPanelsSource from "./teams/teamLazyPanels.tsx?raw";
 import teamKindModelSource from "./teams/teamKindModel.ts?raw";
 import evidenceModelSource from "./teams/source-collection/evidenceModel.ts?raw";
 import presentationModelSource from "./teams/source-collection/presentationModel.ts?raw";
@@ -548,16 +549,17 @@ describe("TeamsRoute layout contract", () => {
   it("extracts the research source-collection workspace through a route-local wrapper", () => {
     expect(routeSource).toContain("TeamsSourceCollectionPanel");
     // Wave 8N: path-scoped secondary packs (shared / research / source-collection).
-    expect(routeSource).toContain('import("./teams/teamSharedPanels")');
-    expect(routeSource).toContain('import("./teams/teamResearchPanels")');
-    expect(routeSource).toContain('import("./teams/teamResearchExperimentPanels")');
-    expect(routeSource).toContain('import("./teams/teamResearchSearchPanels")');
-    expect(routeSource).toContain("loadTeamResearchExperimentPanels");
-    expect(routeSource).toContain("loadTeamResearchSearchPanels");
-    expect(routeSource).toContain('createLazyNamedTeamPanel(loadTeamResearchSearchPanels, "TeamAiSearchWorkspacePanel")');
-    expect(routeSource).toContain('createLazyNamedTeamPanel(loadTeamResearchExperimentPanels, "TeamExperimentPlanningLedgerPanel")');
-    expect(routeSource).toContain('import("./teams/teamSourceCollectionPanels")');
-    expect(routeSource).toContain('createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamsSourceCollectionPanel")');
+    expect(routeSource).toContain('from "./teams/teamLazyPanels"');
+    expect(teamLazyPanelsSource).toContain('import("./teamSharedPanels")');
+    expect(teamLazyPanelsSource).toContain('import("./teamResearchPanels")');
+    expect(teamLazyPanelsSource).toContain('import("./teamResearchExperimentPanels")');
+    expect(teamLazyPanelsSource).toContain('import("./teamResearchSearchPanels")');
+    expect(teamLazyPanelsSource).toContain("loadTeamResearchExperimentPanels");
+    expect(teamLazyPanelsSource).toContain("loadTeamResearchSearchPanels");
+    expect(teamLazyPanelsSource).toContain('createLazyNamedTeamPanel(loadTeamResearchSearchPanels, "TeamAiSearchWorkspacePanel")');
+    expect(teamLazyPanelsSource).toContain('createLazyNamedTeamPanel(loadTeamResearchExperimentPanels, "TeamExperimentPlanningLedgerPanel")');
+    expect(teamLazyPanelsSource).toContain('import("./teamSourceCollectionPanels")');
+    expect(teamLazyPanelsSource).toContain('createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamsSourceCollectionPanel")');
     // Wave 8N+prefetch: warm packs after team/view switch, not mount-all.
     expect(routeSource).toContain("resolveTeamsPanelPrefetchPacks");
     expect(routeSource).toContain("prefetchTeamsPanelPacks");
@@ -3214,7 +3216,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("const sourceCollectionPhaseCloseGate = sourceCollectionPhaseCloseGateForRun(");
     expect(routeSource).toContain("<TeamSourceCollectionPhaseCloseGatePanel");
     expect(routeSource).toContain("onOpenStage={selectSourceCollectionStage}");
-    expect(routeSource).toContain('createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionSearchBriefPanel")');
+    expect(teamLazyPanelsSource).toContain('createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionSearchBriefPanel")');
     expect(routeSource).toContain("function renderSourceCollectionSearchBrief()");
     expect(standaloneSource).toContain("searchBrief={renderSourceCollectionSearchBrief()}");
     expect(standaloneSource).toContain("runHistoryLabel=");
