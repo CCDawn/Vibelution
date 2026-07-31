@@ -277,6 +277,7 @@ describe("buildSupervisedApprovalDecision", () => {
           status: "decided",
           decision: "RERUN_REQUIRED",
           evaluationState: "INCONCLUSIVE",
+          reason: "",
         },
         actionStates: {
           approveReview: action(false),
@@ -290,6 +291,7 @@ describe("buildSupervisedApprovalDecision", () => {
     );
 
     expect(model.phase).toBe("closed");
+    expect(model.reason).toBe("候选得分提升且没有文件冲突。");
     expect(model.steps.find((step) => step.id === "review")).toMatchObject({
       status: "done",
       statusLabel: "已要求复跑",

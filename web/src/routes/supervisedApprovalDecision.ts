@@ -360,13 +360,12 @@ function phaseCopy(
   const changedFileCount = run.mergeAnalysis?.changedFiles?.length ?? run.merge?.changedFiles?.length ?? 0;
   const blockers = run.mergeAnalysis?.blockers ?? [];
   const gateReason = String(run.reviewGate?.reason ?? run.mergeAnalysis?.reviewGate?.reason ?? "").trim();
-  const decisionReason = String(
-    run.approvalDecision?.reason
-    ?? run.decision?.reason
-    ?? run.mergeAnalysis?.reason
-    ?? run.latestMessage
-    ?? "",
-  ).trim();
+  const decisionReason = [
+    run.approvalDecision?.reason,
+    run.decision?.reason,
+    run.mergeAnalysis?.reason,
+    run.latestMessage,
+  ].map((value) => String(value ?? "").trim()).find(Boolean) ?? "";
 
   if (phase === "running") {
     return {
