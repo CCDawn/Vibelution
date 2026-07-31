@@ -2567,6 +2567,12 @@ export function TeamsRoute({
         registerExperimentSmokeResultFromWorkspace={registerExperimentSmokeResultFromWorkspace}
         registerExperimentFullRunResultFromWorkspace={registerExperimentFullRunResultFromWorkspace}
         requestExperimentKnowledgeIngestionFromWorkspace={requestExperimentKnowledgeIngestionFromWorkspace}
+        openIterationWorkspace={() => {
+          if (!selectedTeam?.teamId) {
+            return;
+          }
+          navigate(researchWorkspaceStageRoute(selectedTeam.teamId, "iteration"));
+        }}
         renderResearchLoopPanel={renderResearchLoopPanel}
       />
     );

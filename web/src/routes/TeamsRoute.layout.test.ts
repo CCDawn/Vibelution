@@ -414,6 +414,9 @@ describe("TeamsRoute layout contract", () => {
     // Wave 8J: research-loop UI + design-draft CTA live on TeamResearchLoopPanel.
     expect(teamResearchLoopPanelSource).toContain("nextDesignPlanId");
     expect(teamResearchLoopPanelSource).toContain("已生成下一版设计");
+    expect(teamExperimentPlanningLedgerPanelSource).toContain("进入执行与迭代");
+    expect(teamExperimentPlanningLedgerPanelSource).toContain("openIterationWorkspace");
+    expect(routeSource).toContain('researchWorkspaceStageRoute(selectedTeam.teamId, "iteration")');
     expect(routeSource).toContain("freezeExperimentDesignMutation");
     expect(teamExperimentLoopMutationsSource).toContain("/freeze`");
     expect(teamExperimentPlanningLedgerPanelSource).toContain("冻结设计");
