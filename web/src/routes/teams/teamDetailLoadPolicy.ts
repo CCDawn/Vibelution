@@ -60,21 +60,27 @@ export function resolveSourceCollectionRunsQueryEnabled(options: {
 }
 
 /**
- * Experiment planning / research-loop status are unused on SC-only surfaces and
- * should not fire for every research team overview refresh.
+ * Experiment planning / research-loop status are costly live projections. Keep
+ * them off the general workspace overview; load them only for active experiment
+ * or iteration work, plus the Challenge Program progress surface that consumes
+ * its projection directly.
  */
 export function resolveResearchSecondaryStatusQueryEnabled(options: {
   effectiveTeamId: string;
   researchWorkflowTeamSelected: boolean;
   researchWorkspaceView: ResearchWorkspaceViewLike;
   sourceCollectionStandalone: boolean;
+  challengeProgramProgressVisible: boolean;
 }): boolean {
   if (!options.effectiveTeamId || !options.researchWorkflowTeamSelected || options.sourceCollectionStandalone) {
     return false;
   }
-  return options.researchWorkspaceView !== "source_collection"
-    && options.researchWorkspaceView !== "knowledge_collection"
-    && options.researchWorkspaceView !== "canvas";
+  if (["source_collection", "knowledge_collection", "canvas"].includes(options.researchWorkspaceView)) {
+    return false;
+  }
+  return options.challengeProgramProgressVisible
+    || options.researchWorkspaceView === "experiment"
+    || options.researchWorkspaceView === "iteration";
 }
 
 export function isForeignTeamDetailQueryKey(
