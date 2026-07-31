@@ -26,6 +26,7 @@ export type UseEvolutionRunMutationsOptions = {
     datasetLimit: number | null;
     bundleName: string;
     keepWorktree: boolean;
+    approvalMode: "human" | "agent";
     mentalModelMode: string;
     currentIntakeMode: string;
     placeholderAgentBindings: unknown;
@@ -63,6 +64,7 @@ export function useEvolutionRunMutations(options: UseEvolutionRunMutationsOption
           datasetLimit: payload.datasetLimit,
           bundleName: payload.sourceKind === "bundle" ? payload.bundleName : "",
           keepWorktree: payload.keepWorktree,
+          approvalMode: payload.approvalMode,
           mentalModelMode: payload.mentalModelMode,
           agentBindings: payload.placeholderAgentBindings,
           lang: options.lang,
@@ -80,6 +82,7 @@ export function useEvolutionRunMutations(options: UseEvolutionRunMutationsOption
           datasetLimit: payload.datasetLimit,
           bundleName: payload.sourceKind === "bundle" ? payload.bundleName : "",
           keepWorktree: true,
+          approvalMode: payload.approvalMode,
           mode: payload.currentIntakeMode === "auto" ? "auto" : "manual",
           executionMode: "real",
           confirmRealLlmCost: true,
@@ -120,6 +123,7 @@ export function useEvolutionRunMutations(options: UseEvolutionRunMutationsOption
           datasetLimit: payload.datasetLimit,
           bundleName: payload.sourceKind === "bundle" ? payload.bundleName : "",
           keepWorktree: true,
+          approvalMode: payload.approvalMode,
           mode: payload.currentIntakeMode === "auto" ? "auto" : "manual",
           executionMode: "simulation",
           confirmRealLlmCost: false,

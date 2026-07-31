@@ -1,7 +1,6 @@
 import {
   AlertTriangle,
   CheckCircle2,
-  GitMerge,
   LoaderCircle,
   RotateCcw,
   ShieldCheck,
@@ -50,18 +49,19 @@ function formatDelta(value: number | null) {
 }
 
 function actionStateKey(action: SupervisedApprovalAction) {
-  return action === "approve_review" ? "approveReview" : action;
+  if (action === "approve_review") return "approveReview";
+  if (action === "run_agent_approval") return "runAgentApproval";
+  if (action === "reject_review") return "rejectReview";
+  if (action === "request_rerun") return "requestRerun";
+  return action;
 }
 
 function actionIcon(action: SupervisedApprovalAction, pending: boolean) {
   if (pending) {
     return <LoaderCircle size={15} aria-hidden="true" />;
   }
-  if (action === "approve_review") {
+  if (action === "approve_review" || action === "run_agent_approval") {
     return <ShieldCheck size={15} aria-hidden="true" />;
-  }
-  if (action === "merge") {
-    return <GitMerge size={15} aria-hidden="true" />;
   }
   return <RotateCcw size={15} aria-hidden="true" />;
 }
@@ -84,15 +84,15 @@ export function SupervisedApprovalDecisionPanel({
 
   return (
     <section
-      aria-label={lang === "zh" ? "用户审批决策工作台" : "Approval decision workbench"}
+      aria-label={lang === "zh" ? "最终审批决策工作台" : "Final approval decision workbench"}
       aria-busy={pending}
       className={styles.panel}
       data-vui-recipe="supervised-approval-decision"
     >
       <header className={styles.header}>
         <div>
-          <p>{lang === "zh" ? "用户审批 · 决策工作台" : "Approval · Decision workbench"}</p>
-          <h3>{lang === "zh" ? "是否批准 Judge 受控合入" : "Approve the Judge-controlled merge?"}</h3>
+          <p>{lang === "zh" ? `${model.approvalMode.label} · 最终决策` : `${model.approvalMode.label} · Final decision`}</p>
+          <h3>{lang === "zh" ? "是否授权后端受控合入" : "Authorize backend controlled merge?"}</h3>
         </div>
         <VChip tone={TONE_MAP[model.tone]}>{model.statusLabel}</VChip>
       </header>
@@ -101,6 +101,9 @@ export function SupervisedApprovalDecisionPanel({
         <div className={styles.decisionCopy}>
           <small>{lang === "zh" ? "Judge 建议（仅供参考）" : "Judge recommendation (advisory)"}</small>
           <VChip tone="neutral">{model.judgeRecommendation.label}</VChip>
+          <VChip tone={model.evaluationState.mergeEligible ? "success" : "danger"}>
+            {lang === "zh" ? `评估状态 · ${model.evaluationState.label}` : `Evaluation · ${model.evaluationState.label}`}
+          </VChip>
           <strong>{model.headline}</strong>
           <p>{model.reason}</p>
         </div>
@@ -303,6 +306,22 @@ export function SupervisedApprovalDecisionPanel({
             : <CheckCircle2 size={14} aria-hidden="true" />}
           {model.runtimeEffectLabel}
         </span>
+        <div className={styles.actionButtons}>
+        {model.secondaryActions.map((item) => {
+          const state = run?.actionStates?.[actionStateKey(item.action)];
+          return (
+            <VButton
+              key={item.action}
+              type="button"
+              variant={item.action === "reject_review" ? "danger" : "secondary"}
+              isDisabled={pending || !state?.enabled}
+              disabledReason={item.reason || state?.reason || ""}
+              onPress={() => run && onAction(run.runId, item.action)}
+            >
+              {item.label}
+            </VButton>
+          );
+        })}
         {model.primaryAction && run ? (
           <VButton
             type="button"
@@ -323,6 +342,7 @@ export function SupervisedApprovalDecisionPanel({
               : lang === "zh" ? "暂无可执行动作" : "No action available"}
           </VChip>
         )}
+        </div>
       </footer>
     </section>
   );

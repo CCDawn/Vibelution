@@ -214,6 +214,7 @@ def test_judge_normalization_backend_composes_score_and_keeps_recommendation_adv
     )
 
     assert judgment["status"] == "success"
+    assert judgment["evaluationState"] == "VALID"
     assert judgment["recommendation"] == "REJECT"
     assert judgment["decision"] == "REJECT"
     assert judgment["taskScore"] == 86.0
@@ -244,21 +245,68 @@ def test_judge_normalization_backend_composes_score_and_keeps_recommendation_adv
         )
 
 
-def test_judge_recommendation_never_replaces_the_users_final_decision():
-    for recommendation in ("APPROVE", "REVISE", "REJECT", "INCONCLUSIVE"):
+def test_judge_recommendation_is_advisory_but_only_valid_evaluation_can_enter_approval():
+    for recommendation in ("APPROVE", "REVISE", "REJECT"):
         judgment = {
             "status": "success",
             "phase": "rerun",
             "recommendation": recommendation,
+            "evaluationState": "VALID",
         }
         assert judge_merge_allowed(judgment) is True
 
+    assert judge_merge_allowed(
+        {
+            "status": "success",
+            "phase": "rerun",
+            "recommendation": "INCONCLUSIVE",
+            "evaluationState": "INCONCLUSIVE",
+        }
+    ) is False
+    assert judge_merge_allowed(
+        {
+            "status": "success",
+            "phase": "rerun",
+            "recommendation": "APPROVE",
+            "evaluationState": "INVALID",
+        }
+    ) is False
     assert judge_merge_allowed(
         {"status": "failed", "phase": "rerun", "recommendation": "APPROVE"}
     ) is False
     assert judge_merge_allowed(
         {"status": "success", "phase": "baseline", "recommendation": "APPROVE"}
     ) is False
+
+
+def test_inconclusive_judge_result_keeps_score_but_is_not_a_valid_merge_evaluation():
+    rubric = _rubric()
+    judgment = normalize_judge_evaluation(
+        {
+            "phase": "rerun",
+            "recommendation": "INCONCLUSIVE",
+            "rubric_hash": rubric["rubricHash"],
+            "task_scores": {
+                "failure_recovery": 0.8,
+                "task_completion": 0.7,
+            },
+            "system_scores": {
+                "evidence_verifiability": 0.4,
+                "tool_transaction_discipline": 0.8,
+                "scope_and_safety": 0.9,
+                "recovery_and_state_consistency": 0.6,
+                "efficiency_and_minimality": 0.7,
+            },
+            "evidence_refs": [],
+        },
+        expected_phase="rerun",
+        rubric=rubric,
+        baseline_score=50,
+    )
+
+    assert judgment["score"] > 0
+    assert judgment["evaluationState"] == "INCONCLUSIVE"
+    assert judge_merge_allowed(judgment) is False
 
 
 def test_improvement_prompt_is_for_baseline_agent_and_carries_judge_feedback():

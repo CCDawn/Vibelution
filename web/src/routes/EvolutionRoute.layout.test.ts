@@ -532,8 +532,11 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("run={reviewCandidateWorktree}");
     expect(routeSource).toContain("onAction={(runId, action) => approvalWorktreeActionMutation.mutate({ runId, action })}");
     expect(supervisedApprovalDecisionPanelSource).toContain("buildSupervisedApprovalDecision");
-    expect(supervisedApprovalDecisionPanelSource).toContain("用户审批 · 决策工作台");
-    expect(supervisedApprovalDecisionPanelSource).toContain("是否批准 Judge 受控合入");
+    expect(supervisedApprovalDecisionPanelSource).toContain("最终审批决策工作台");
+    expect(supervisedApprovalDecisionPanelSource).toContain("是否授权后端受控合入");
+    expect(supervisedApprovalDecisionPanelSource).toContain("评估状态");
+    expect(supervisedApprovalDecisionPanelSource).toContain("runAgentApproval");
+    expect(routeSource).toContain("最终审批方式");
     expect(supervisedApprovalDecisionPanelSource).toContain('data-vui-recipe="supervised-approval-decision"');
     expect(supervisedApprovalDecisionPanelSource).toContain("Judge 建议（仅供参考）");
     expect(supervisedApprovalDecisionPanelSource).toContain("任务定向标准");
@@ -544,7 +547,9 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(supervisedApprovalDecisionPanelSource).toContain("<details");
     expect(supervisedApprovalDecisionPanelSource).toContain("<VButton");
     expect(supervisedApprovalDecisionPanelSource).toContain("<VChip");
-    expect(supervisedApprovalDecisionSource).toContain('"approve_review" | "merge" | "rollback"');
+    expect(supervisedApprovalDecisionSource).toContain('| "run_agent_approval"');
+    expect(supervisedApprovalDecisionSource).toContain('| "request_rerun"');
+    expect(supervisedApprovalDecisionSource).toContain('| "reject_review"');
     expect(supervisedApprovalDecisionSource).toContain('"refresh_required"');
     expect(evolutionTypesSource).toContain("rollbackManifestPath?: string");
     expect(evolutionTypesSource).toContain("rolledBackAt?: string");

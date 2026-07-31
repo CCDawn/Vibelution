@@ -92,6 +92,9 @@ SELF_EVOLUTION_RISKY_WRITE_INITIATOR = "self_evolution_risky_write"
 SELF_EVOLUTION_WORKTREE_ROUTE = "api:evolution.self.worktree-runs"
 REVIEW_GATE_APPROVED = "approved"
 REVIEW_GATE_PENDING = "pending"
+APPROVAL_MODES = {"human", "agent"}
+APPROVAL_DECISIONS = {"APPROVE", "REJECT", "RERUN_REQUIRED"}
+EVALUATION_STATES = {"VALID", "INVALID", "ERROR", "INCONCLUSIVE"}
 WORKFLOW_STEP_IDS = (
     "baseline_eval",
     "baseline_judge",
@@ -173,6 +176,8 @@ def start_supervised_worktree_run(payload: dict[str, Any]) -> dict[str, Any]:
             "startRequest": options["startRequest"],
             "selfEvolutionOrigin": options["selfEvolutionOrigin"],
             "reviewGate": options["reviewGate"],
+            "approvalMode": options["approvalMode"],
+            "approvalDecision": options["approvalDecision"],
             "agentBindings": options["agentBindings"],
             "mentalModelMode": options["mentalModelMode"],
             "mentalModelEnabled": options["mentalModelEnabled"],
@@ -196,6 +201,7 @@ def start_supervised_worktree_run(payload: dict[str, Any]) -> dict[str, Any]:
             "baselineConversationSessionId": "",
             "rerunConversationSessionId": "",
             "judgeConversationSessionId": "",
+            "approvalConversationSessionId": "",
             "decision": {},
             "mergeAnalysis": {},
             "merge": {},
@@ -244,6 +250,8 @@ def run_supervised_worktree_flow(
         "startRequest": options["startRequest"],
         "selfEvolutionOrigin": options["selfEvolutionOrigin"],
         "reviewGate": options["reviewGate"],
+        "approvalMode": options["approvalMode"],
+        "approvalDecision": options["approvalDecision"],
         "agentBindings": options["agentBindings"],
         "mentalModelMode": options["mentalModelMode"],
         "mentalModelEnabled": options["mentalModelEnabled"],
@@ -267,6 +275,7 @@ def run_supervised_worktree_flow(
         "baselineConversationSessionId": "",
         "rerunConversationSessionId": "",
         "judgeConversationSessionId": "",
+        "approvalConversationSessionId": "",
         "decision": {},
         "mergeAnalysis": {},
         "merge": {},
@@ -582,27 +591,43 @@ def _execute_supervised_worktree_action(
         _append_event(updated, "discard", "候选工作树已丢弃。")
         return _decorate_snapshot(updated)
     if normalized_action in {"approve_review", "approve_merge_review", "mark_reviewed"}:
-        judgment = snapshot.get("candidateJudgment") if isinstance(snapshot.get("candidateJudgment"), dict) else {}
-        if not judge_merge_allowed(judgment, force=force):
-            raise SupervisedWorktreeRunActionError(
-                "Judge 第二次结构化评分尚未完成，不能进入用户最终审批。"
-            )
-        triggered = _request_judge_controlled_merge(
+        if str(snapshot.get("approvalMode") or "human").strip().lower() != "human":
+            raise SupervisedWorktreeRunActionError("本轮使用 Agent 审批，不能写入人工审批决定。")
+        updated = _record_approval_decision(
             snapshot,
-            force=force,
-            reviewer_note=reviewer_note,
+            decision="APPROVE",
+            actor_kind="human",
+            reason=reviewer_note,
         )
-        updated = _approve_review_gate(triggered, reviewer_note=reviewer_note)
         merged = _merge_candidate(updated, force=force)
-        _append_event(merged, "review_approved", "用户审批已记录，Judge 已触发受控合入。")
+        _append_event(merged, "review_approved", "人工审批决定已记录，后端已执行受控合入。")
         return _decorate_snapshot(merged)
-    if normalized_action == "merge":
-        triggered = (
-            snapshot
-            if _review_gate_requires_approval(snapshot)
-            else _request_judge_controlled_merge(snapshot, force=force, reviewer_note=reviewer_note)
+    if normalized_action in {"reject_review", "reject_approval"}:
+        updated = _record_approval_decision(
+            snapshot,
+            decision="REJECT",
+            actor_kind="human",
+            reason=reviewer_note,
         )
-        updated = _merge_candidate(triggered, force=force)
+        _append_event(updated, "review_rejected", "人工审批已拒绝本次候选合入。")
+        return _decorate_snapshot(updated)
+    if normalized_action in {"request_rerun", "rerun_required"}:
+        updated = _record_approval_decision(
+            snapshot,
+            decision="RERUN_REQUIRED",
+            actor_kind="human",
+            reason=reviewer_note,
+        )
+        _append_event(updated, "review_rerun_required", "审批要求补充证据并重新运行。")
+        return _decorate_snapshot(updated)
+    if normalized_action in {"run_agent_approval", "agent_approval"}:
+        decided = _request_independent_agent_approval(snapshot)
+        if str((decided.get("approvalDecision") or {}).get("decision") or "") == "APPROVE":
+            decided = _merge_candidate(decided, force=force)
+        _append_event(decided, "agent_approval_decided", "独立审批 Agent 已写入最终决定。")
+        return _decorate_snapshot(decided)
+    if normalized_action == "merge":
+        updated = _merge_candidate(snapshot, force=force)
         _append_event(updated, "merge", "候选改动已合并到主工作区。")
         return _decorate_snapshot(updated)
     if normalized_action in {"rollback_merge", "rollback"}:
@@ -1018,18 +1043,21 @@ def _normalize_start_payload(
     storage_project_root = _storage_project_root_arg(project_root)
     source_kind = str(payload.get("sourceKind") or "bundle").strip().lower()
     mode = str(payload.get("mode") or "auto").strip().lower()
+    approval_mode = str(payload.get("approvalMode") or "human").strip().lower()
     execution_mode = str(payload.get("executionMode") or "simulation").strip().lower()
     keep_worktree = bool(payload.get("keepWorktree"))
     dataset_name = str(payload.get("datasetName") or "").strip()
     bundle_name = str(payload.get("bundleName") or "").strip()
     dataset_limit = _coerce_optional_int(payload.get("datasetLimit"))
     self_origin = _normalize_self_evolution_origin(payload)
-    review_gate = _normalize_review_gate(payload, self_origin)
+    review_gate = _normalize_review_gate(payload, self_origin, approval_mode=approval_mode)
     mental_model_mode = normalize_supervised_mental_model_mode(payload.get("mentalModelMode") or "follow")
     mental_model_enabled = supervised_mental_model_enabled_for_mode(mental_model_mode)
 
     if mode not in {"auto", "manual"}:
         raise SupervisedWorktreeRunValidationError("mode must be auto or manual.")
+    if approval_mode not in APPROVAL_MODES:
+        raise SupervisedWorktreeRunValidationError("approvalMode must be human or agent.")
     if execution_mode not in {"simulation", "real"}:
         raise SupervisedWorktreeRunValidationError("executionMode must be simulation or real.")
     if source_kind not in {"dataset", "bundle"}:
@@ -1076,9 +1104,12 @@ def _normalize_start_payload(
         except Exception as exc:
             raise SupervisedWorktreeRunValidationError(f"监督 worktree 真实闭环缺少可用 Agent 绑定：{exc}") from exc
     if execution_mode == "real":
+        required_bindings = [("baseline", "基线 Agent"), ("judge", "Judge Agent")]
+        if approval_mode == "agent":
+            required_bindings.append(("auditor", "审批 Agent"))
         missing_bindings = [
             label
-            for role, label in (("baseline", "基线 Agent"), ("judge", "Judge Agent"))
+            for role, label in required_bindings
             if not str((agent_bindings.get(role) or {}).get("agentId") or "").strip()
         ]
         if missing_bindings:
@@ -1093,6 +1124,13 @@ def _normalize_start_payload(
     return {
         "sourceKind": source_kind,
         "mode": mode,
+        "approvalMode": approval_mode,
+        "approvalDecision": {
+            "schemaVersion": 1,
+            "mode": approval_mode,
+            "status": "pending",
+            "decision": "",
+        },
         "executionMode": execution_mode,
         "datasetName": dataset_name,
         "datasetLimit": dataset_limit,
@@ -1259,13 +1297,22 @@ def _normalize_self_evolution_origin(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _normalize_review_gate(payload: dict[str, Any], self_origin: dict[str, Any]) -> dict[str, Any]:
+def _normalize_review_gate(
+    payload: dict[str, Any],
+    self_origin: dict[str, Any],
+    *,
+    approval_mode: str,
+) -> dict[str, Any]:
     reason = str(payload.get("reviewReason") or "").strip()
     if not reason:
         reason = (
             "Self-evolution risky write output must be reviewed before merge."
             if self_origin
-            else "The user must approve the Judge-scored candidate before controlled merge."
+            else (
+                "An independent Approval Agent must decide before controlled merge."
+                if approval_mode == "agent"
+                else "The user must decide before controlled merge."
+            )
         )
     return {
         "required": True,
@@ -2373,6 +2420,36 @@ def _baseline_failure_reason(baseline: dict[str, Any]) -> str:
     return str(baseline.get("summary") or "baseline provider transport failure")
 
 
+def _evaluation_state(snapshot: dict[str, Any]) -> str:
+    judgment = (
+        snapshot.get("candidateJudgment")
+        if isinstance(snapshot.get("candidateJudgment"), dict)
+        else {}
+    )
+    if not judgment:
+        return "ERROR" if str(snapshot.get("status") or "").lower() == "failed" else "INVALID"
+    if str(judgment.get("status") or "").strip().lower() != "success":
+        return "ERROR"
+    if str(judgment.get("phase") or "").strip().lower() != "rerun":
+        return "INVALID"
+    explicit = str(judgment.get("evaluationState") or "").strip().upper()
+    if explicit in EVALUATION_STATES and explicit != "VALID":
+        return explicit
+    recommendation = str(
+        judgment.get("recommendation") or judgment.get("decision") or ""
+    ).strip().upper()
+    if recommendation == "INCONCLUSIVE":
+        return "INCONCLUSIVE"
+    if recommendation not in {"APPROVE", "REVISE", "REJECT", "PROMOTE", "HOLD"}:
+        return "INVALID"
+    rubric = snapshot.get("judgeRubric") if isinstance(snapshot.get("judgeRubric"), dict) else {}
+    expected_hash = str(rubric.get("rubricHash") or "").strip()
+    observed_hash = str(judgment.get("rubricHash") or "").strip()
+    if expected_hash and observed_hash and expected_hash != observed_hash:
+        return "INVALID"
+    return "VALID"
+
+
 def _build_decision(snapshot: dict[str, Any], options: dict[str, Any]) -> dict[str, Any]:
     baseline = snapshot.get("baseline") if isinstance(snapshot.get("baseline"), dict) else {}
     candidate = snapshot.get("candidate") if isinstance(snapshot.get("candidate"), dict) else {}
@@ -2459,13 +2536,17 @@ def _build_decision(snapshot: dict[str, Any], options: dict[str, Any]) -> dict[s
     )
     return {
         "mode": mode,
+        "approvalMode": str(
+            snapshot.get("approvalMode") or options.get("approvalMode") or "human"
+        ),
+        "evaluationState": _evaluation_state(snapshot),
         "scoreSource": "judge_agent",
         "judgeRecommendation": judge_recommendation,
         "judgeDecision": judge_recommendation,
         "baselineScore": baseline_score,
         "candidateScore": candidate_score,
         "scoreDelta": delta,
-        "recommendedAction": "user_decision",
+        "recommendedAction": "approval_decision",
         "reason": reason,
         "gates": gates,
         "highRisk": bool(high_risk_files),
@@ -2489,10 +2570,11 @@ def _finish_by_decision(snapshot: dict[str, Any], decision: dict[str, Any], opti
         or decision.get("judgeDecision")
         or "INCONCLUSIVE"
     )
-    outcome = "awaiting_user_approval"
+    approval_mode = str(snapshot.get("approvalMode") or "human").strip().lower()
+    outcome = "awaiting_agent_approval" if approval_mode == "agent" else "awaiting_user_approval"
     message = (
         f"Judge 双次评分完成（建议：{judge_recommendation}），"
-        "候选工作树已保留，最终由用户审批。"
+        f"候选工作树已保留，最终由{'独立审批 Agent' if approval_mode == 'agent' else '用户'}审批。"
     )
     finished = _now_iso()
     snapshot["status"] = "done"
@@ -2729,8 +2811,8 @@ def _build_self_evolution_workflow_steps(snapshot: dict[str, Any]) -> list[dict[
         {
             "id": "approval",
             "label": "审批",
-            "ownerKind": "human",
-            "role": None,
+            "ownerKind": "agent" if str(snapshot.get("approvalMode") or "human") == "agent" else "human",
+            "role": "auditor" if str(snapshot.get("approvalMode") or "human") == "agent" else None,
             "status": approval_status,
             "current": status in _TERMINAL_STATUSES,
             "summary": _bounded_text(_approval_summary(snapshot, decision, merge_analysis, action_states)),
@@ -2861,9 +2943,9 @@ def _build_workflow_steps(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
         },
         {
             "id": "approval",
-            "label": "用户审批与合入",
-            "ownerKind": "human",
-            "role": None,
+            "label": "最终审批与合入",
+            "ownerKind": "agent" if str(snapshot.get("approvalMode") or "human") == "agent" else "human",
+            "role": "auditor" if str(snapshot.get("approvalMode") or "human") == "agent" else None,
             "status": approval_status,
             "current": workflow_current == "approval",
             "summary": _bounded_text(_approval_summary(snapshot, decision, merge_analysis, action_states)),
@@ -2973,7 +3055,8 @@ def _approval_summary(
         action = str(decision.get("recommendedAction") or snapshot.get("outcome") or "").strip()
         delta = decision.get("scoreDelta")
         if action:
-            return f"等待用户审批：建议 {action}，scoreDelta={delta}。"
+            actor = "独立审批 Agent" if str(snapshot.get("approvalMode") or "human") == "agent" else "用户"
+            return f"等待{actor}审批：建议 {action}，scoreDelta={delta}。"
         if bool((action_states.get("merge") if isinstance(action_states.get("merge"), dict) else {}).get("enabled")):
             return "候选可进入人工入库或合并。"
     if merge_analysis:
@@ -3047,7 +3130,13 @@ def _build_merge_analysis(snapshot: dict[str, Any]) -> dict[str, Any]:
                 blockers.append("candidate_variant_changed_after_judging")
     if overlap:
         blockers.append("main_workspace_overlap")
-    if high_risk:
+    approval = snapshot.get("approvalDecision") if isinstance(snapshot.get("approvalDecision"), dict) else {}
+    approval_authorized = (
+        str(approval.get("status") or "").strip().lower() == "decided"
+        and str(approval.get("decision") or "").strip().upper() == "APPROVE"
+        and str(approval.get("evaluationState") or "").strip().upper() == "VALID"
+    )
+    if high_risk and not approval_authorized:
         blockers.append("high_risk_files")
     if not changed_files:
         blockers.append("empty_candidate_diff")
@@ -3070,102 +3159,209 @@ def _build_merge_analysis(snapshot: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _request_judge_controlled_merge(
+def _record_approval_decision(
     snapshot: dict[str, Any],
     *,
-    force: bool,
-    reviewer_note: str,
+    decision: str,
+    actor_kind: str,
+    reason: str = "",
+    actor_id: str = "",
+    conversation_session_id: str = "",
+    evidence_refs: list[str] | None = None,
 ) -> dict[str, Any]:
-    updated = _clone(snapshot)
-    judgment = updated.get("candidateJudgment") if isinstance(updated.get("candidateJudgment"), dict) else {}
-    session_id = str(updated.get("judgeConversationSessionId") or "").strip()
+    status = str(snapshot.get("status") or "").strip().lower()
+    if status not in _TERMINAL_STATUSES:
+        raise SupervisedWorktreeRunActionError("候选运行尚未结束，不能提前作出最终审批。")
+    normalized_decision = str(decision or "").strip().upper()
+    if normalized_decision not in APPROVAL_DECISIONS:
+        raise SupervisedWorktreeRunValidationError("审批决定必须是 APPROVE、REJECT 或 RERUN_REQUIRED。")
+    approval_mode = str(snapshot.get("approvalMode") or "human").strip().lower()
+    normalized_actor = str(actor_kind or "").strip().lower()
+    if approval_mode not in APPROVAL_MODES:
+        raise SupervisedWorktreeRunActionError("本轮审批模式无效，禁止写入审批决定。")
+    if normalized_actor != approval_mode:
+        raise SupervisedWorktreeRunActionError(
+            f"本轮审批模式为 {approval_mode}，不能由 {normalized_actor or 'unknown'} 写入最终决定。"
+        )
+    existing = (
+        snapshot.get("approvalDecision")
+        if isinstance(snapshot.get("approvalDecision"), dict)
+        else {}
+    )
+    if str(existing.get("status") or "").strip().lower() == "decided":
+        raise SupervisedWorktreeRunActionError("最终审批记录不可变，不能覆盖已有决定。")
+    evaluation_state = _evaluation_state(snapshot)
+    if normalized_decision == "APPROVE" and evaluation_state != "VALID":
+        raise SupervisedWorktreeRunActionError(
+            f"当前评估状态为 {evaluation_state}，禁止批准合入；请拒绝或要求复跑。"
+        )
+    judgment = (
+        snapshot.get("candidateJudgment")
+        if isinstance(snapshot.get("candidateJudgment"), dict)
+        else {}
+    )
     recommendation = str(
-        judgment.get("recommendation")
-        or judgment.get("decision")
-        or "INCONCLUSIVE"
+        judgment.get("recommendation") or judgment.get("decision") or "INCONCLUSIVE"
     ).strip().upper()
-    if str(updated.get("executionMode") or "simulation").strip().lower() != "real":
-        updated["judgeMergeTrigger"] = {
-            "status": "requested",
-            "mergeRequested": True,
-            "decision": recommendation,
-            "recommendation": recommendation,
-            "conversationSessionId": session_id,
-            "force": force,
-            "mechanism": "simulated_judge_request",
-            "requestedAt": _now_iso(),
-        }
-        return updated
+    updated = _clone(snapshot)
+    decided_at = _now_iso()
+    updated["approvalDecision"] = {
+        "schemaVersion": 1,
+        "mode": approval_mode,
+        "status": "decided",
+        "decision": normalized_decision,
+        "evaluationState": evaluation_state,
+        "reason": _safe_metadata_text(reason, limit=1000),
+        "evidenceRefs": [
+            _safe_metadata_text(item, limit=240)
+            for item in list(evidence_refs or [])[:20]
+            if str(item or "").strip()
+        ],
+        "judgeRecommendation": recommendation,
+        "baselineScore": (updated.get("decision") or {}).get("baselineScore"),
+        "candidateScore": (updated.get("decision") or {}).get("candidateScore"),
+        "scoreDelta": (updated.get("decision") or {}).get("scoreDelta"),
+        "decidedBy": {
+            "kind": normalized_actor,
+            "actorId": _safe_metadata_text(actor_id, limit=160),
+            "conversationSessionId": _safe_metadata_text(
+                conversation_session_id,
+                limit=200,
+            ),
+        },
+        "decidedAt": decided_at,
+    }
+    gate = updated.get("reviewGate") if isinstance(updated.get("reviewGate"), dict) else {}
+    updated["reviewGate"] = {
+        **gate,
+        "required": True,
+        "status": "approved" if normalized_decision == "APPROVE" else "rejected",
+        "approvedAt": decided_at if normalized_decision == "APPROVE" else "",
+        "reviewerNote": _safe_metadata_text(reason, limit=500),
+        "judgeRecommendation": recommendation,
+        "overrodeJudgeRecommendation": (
+            normalized_decision == "APPROVE" and recommendation != "APPROVE"
+        ),
+    }
+    if normalized_decision == "REJECT":
+        updated["outcome"] = "approval_rejected"
+    elif normalized_decision == "RERUN_REQUIRED":
+        updated["outcome"] = "approval_rerun_required"
+    updated["updatedAt"] = decided_at
+    updated["mergeAnalysis"] = _build_merge_analysis(updated)
+    _persist_snapshot(updated, active_run_id="")
+    return updated
 
-    bindings = updated.get("agentBindings") if isinstance(updated.get("agentBindings"), dict) else {}
-    agent_binding = dict(bindings.get("judge") or {})
-    if not agent_binding.get("agentId") or not session_id:
-        raise SupervisedWorktreeRunActionError("缺少 Judge Agent 绑定或原 Judge 会话，禁止合入。")
-    prompt_payload = {
-        "runId": str(updated.get("runId") or ""),
-        "finalJudgment": judgment,
+
+def _request_independent_agent_approval(snapshot: dict[str, Any]) -> dict[str, Any]:
+    if str(snapshot.get("approvalMode") or "").strip().lower() != "agent":
+        raise SupervisedWorktreeRunActionError("本轮不是 Agent 审批模式。")
+    evaluation_state = _evaluation_state(snapshot)
+    if evaluation_state != "VALID":
+        raise SupervisedWorktreeRunActionError(
+            f"当前评估状态为 {evaluation_state}，不能启动批准流程；请补证据或复跑。"
+        )
+    if str(snapshot.get("executionMode") or "simulation").strip().lower() != "real":
+        recommendation = str(
+            ((snapshot.get("candidateJudgment") or {}).get("recommendation"))
+            or "INCONCLUSIVE"
+        ).strip().upper()
+        simulated_decision = "APPROVE" if recommendation == "APPROVE" else "RERUN_REQUIRED"
+        return _record_approval_decision(
+            snapshot,
+            decision=simulated_decision,
+            actor_kind="agent",
+            actor_id="simulated-independent-approval-agent",
+            reason="Simulation approval projection; no real Approval Agent was called.",
+            evidence_refs=["simulation:approval"],
+        )
+
+    bindings = snapshot.get("agentBindings") if isinstance(snapshot.get("agentBindings"), dict) else {}
+    agent_binding = dict(bindings.get("auditor") or {})
+    agent_id = str(agent_binding.get("agentId") or "").strip()
+    if not agent_id:
+        raise SupervisedWorktreeRunActionError("缺少独立审批 Agent 绑定，禁止 Agent 审批。")
+    merge_analysis = _build_merge_analysis(snapshot)
+    approval_neutral_blockers = [
+        item
+        for item in list(merge_analysis.get("blockers") or [])
+        if str(item) != "supervised_review_pending"
+    ]
+    merge_analysis = {
+        **merge_analysis,
+        "blockers": approval_neutral_blockers,
+        "mergeAllowedAfterApproval": not approval_neutral_blockers,
+    }
+    evidence_package = {
+        "runId": str(snapshot.get("runId") or ""),
+        "evaluationState": evaluation_state,
+        "judgeRubric": snapshot.get("judgeRubric") or {},
+        "baselineJudgment": snapshot.get("baselineJudgment") or {},
+        "candidateJudgment": snapshot.get("candidateJudgment") or {},
+        "decision": snapshot.get("decision") or {},
+        "mergeAnalysis": merge_analysis,
         "candidateVariant": (
-            (updated.get("candidateWorktree") or {}).get("variant")
-            if isinstance(updated.get("candidateWorktree"), dict)
+            (snapshot.get("candidateWorktree") or {}).get("variant")
+            if isinstance(snapshot.get("candidateWorktree"), dict)
             else {}
         ),
-        "userApproval": {
-            "approved": True,
-            "force": force,
-            "reviewerNote": _safe_metadata_text(reviewer_note, limit=500),
-        },
     }
     prompt = (
-        "用户已经完成监督进化最终审批。你仍是同一个 Judge Agent；请复核你在本会话中的两次评分、"
-        "候选版本绑定和用户审批。\n"
-        "不要执行 shell、git merge 或直接修改文件。你只能决定是否请求后端受控候选应用器。\n"
-        "评分与 recommendation 仅供用户参考；用户审批是最终产品决策。"
-        "只要任务记录、冻结 rubric、候选绑定和用户审批证据完整，就必须请求后端受控合入；"
-        "不得再使用分数或你自己的 recommendation 否决用户决定。\n"
+        "你是独立审批 Agent，不是本轮 Judge，也不是基线 Agent。"
+        "你只能读取冻结评分、评估状态、候选版本和合并分析，不能调用工具、修改文件或改写评分。\n"
+        "分数不是硬门槛。必须同时审查 evaluationState、证据完整性、候选版本绑定、冲突和风险。"
+        "仅当 evaluationState=VALID 且证据足以承担合入风险时才可 APPROVE；"
+        "否则输出 REJECT 或 RERUN_REQUIRED。\n"
         "最后单独输出严格 JSON：\n"
-        'SUPERVISED_AGENT_JUDGMENT: {"phase":"merge_authorization","decision":"APPROVE",'
-        '"merge_requested":true,"reason":"...","evidence_refs":[]}\n'
-        f"审批证据：{json.dumps(prompt_payload, ensure_ascii=False, sort_keys=True)}"
+        'SUPERVISED_AGENT_JUDGMENT: {"phase":"approval_decision",'
+        '"decision":"APPROVE|REJECT|RERUN_REQUIRED","reason":"...",'
+        '"evidence_refs":[]}\n'
+        f"冻结审批证据：{json.dumps(evidence_package, ensure_ascii=False, sort_keys=True)}"
     )
     result = run_supervised_conversation_harness(
-        repo_root=_snapshot_project_root(updated),
+        repo_root=_snapshot_project_root(snapshot),
         mode="single_turn",
         prompt=prompt,
-        scenario="supervised_judge_merge_trigger",
+        scenario="supervised_independent_approval",
         timeout_seconds=600,
         expect_restart=False,
         post_restart_observe_seconds=0,
         keep_worktree=True,
         agent_binding=agent_binding,
-        mental_model_mode=str(updated.get("mentalModelMode") or "follow"),
-        mental_model_enabled=updated.get("mentalModelEnabled"),
-        workspace_override=_snapshot_project_root(updated),
-        conversation_session_id=session_id,
+        mental_model_mode=str(snapshot.get("mentalModelMode") or "follow"),
+        mental_model_enabled=snapshot.get("mentalModelEnabled"),
+        workspace_override=_snapshot_project_root(snapshot),
+        conversation_session_id="",
     )
+    raw_decision = (result.evolution_summary or {}).get("agent_judgment")
     observed_session_id = str((result.process_summary or {}).get("session_id") or "").strip()
-    raw_trigger = (result.evolution_summary or {}).get("agent_judgment")
+    forbidden_sessions = {
+        str(snapshot.get("baselineConversationSessionId") or "").strip(),
+        str(snapshot.get("rerunConversationSessionId") or "").strip(),
+        str(snapshot.get("judgeConversationSessionId") or "").strip(),
+    } - {""}
     if (
         result.status != "success"
-        or observed_session_id != session_id
-        or not isinstance(raw_trigger, dict)
-        or str(raw_trigger.get("phase") or "").strip().lower() != "merge_authorization"
-        or raw_trigger.get("merge_requested") is not True
+        or not observed_session_id
+        or observed_session_id in forbidden_sessions
+        or not isinstance(raw_decision, dict)
+        or str(raw_decision.get("phase") or "").strip().lower() != "approval_decision"
     ):
         raise SupervisedWorktreeRunActionError(
-            result.reason or "Judge 未在原会话中输出有效 merge_requested，禁止合入。"
+            result.reason or "独立审批 Agent 未在新会话中输出有效最终决定。"
         )
-    trigger_decision = str(raw_trigger.get("decision") or "").strip().upper()
-    updated["judgeMergeTrigger"] = {
-        "status": "requested",
-        "mergeRequested": True,
-        "decision": trigger_decision,
-        "reason": str(raw_trigger.get("reason") or "").strip(),
-        "evidenceRefs": [str(item) for item in list(raw_trigger.get("evidence_refs") or [])][:20],
-        "conversationSessionId": observed_session_id,
-        "force": force,
-        "mechanism": "judge_conversation_request",
-        "requestedAt": _now_iso(),
-    }
+    decision = str(raw_decision.get("decision") or "").strip().upper()
+    updated = _record_approval_decision(
+        snapshot,
+        decision=decision,
+        actor_kind="agent",
+        actor_id=agent_id,
+        conversation_session_id=observed_session_id,
+        reason=str(raw_decision.get("reason") or ""),
+        evidence_refs=list(raw_decision.get("evidence_refs") or []),
+    )
+    updated["approvalConversationSessionId"] = observed_session_id
+    _persist_snapshot(updated, active_run_id="")
     return updated
 
 
@@ -3175,14 +3371,19 @@ def _merge_candidate(snapshot: dict[str, Any], *, force: bool) -> dict[str, Any]
     blockers = set(str(item) for item in list(analysis.get("blockers") or []))
     if "supervised_review_pending" in blockers:
         raise SupervisedWorktreeRunActionError(
-            "候选仍处于用户审批 pending，必须先完成审批，不能用 force 绕过。"
+            "候选仍处于最终审批 pending，必须先完成审批，不能用 force 绕过。"
         )
     judgment = updated.get("candidateJudgment") if isinstance(updated.get("candidateJudgment"), dict) else {}
+    approval = updated.get("approvalDecision") if isinstance(updated.get("approvalDecision"), dict) else {}
+    if (
+        str(approval.get("status") or "").strip().lower() != "decided"
+        or str(approval.get("decision") or "").strip().upper() != "APPROVE"
+    ):
+        raise SupervisedWorktreeRunActionError("缺少不可变的 APPROVE 审批记录，禁止受控合入。")
+    if str(approval.get("evaluationState") or "").strip().upper() != "VALID":
+        raise SupervisedWorktreeRunActionError("审批记录未绑定 VALID 评估状态，禁止受控合入。")
     if not judge_merge_allowed(judgment, force=force):
-        raise SupervisedWorktreeRunActionError("Judge 第二次结构化评分不完整，禁止受控合入。")
-    merge_trigger = updated.get("judgeMergeTrigger") if isinstance(updated.get("judgeMergeTrigger"), dict) else {}
-    if str(merge_trigger.get("status") or "") != "requested" or merge_trigger.get("mergeRequested") is not True:
-        raise SupervisedWorktreeRunActionError("缺少 Judge Agent 的结构化 merge_requested，禁止合入。")
+        raise SupervisedWorktreeRunActionError("Judge 第二次结构化评分状态不可用于审批，禁止受控合入。")
     if "main_workspace_overlap" in blockers:
         overlap_files = ", ".join(str(item) for item in list(analysis.get("overlapFiles") or []))
         raise SupervisedWorktreeRunActionError(
@@ -3219,9 +3420,14 @@ def _merge_candidate(snapshot: dict[str, Any], *, force: bool) -> dict[str, Any]
         "mergedAt": _now_iso(),
         "force": force,
         "triggeredBy": {
-            "role": "judge",
-            "conversationSessionId": str(merge_trigger.get("conversationSessionId") or ""),
-            "decision": str(merge_trigger.get("decision") or judgment.get("decision") or ""),
+            "role": "approval_executor",
+            "approvalMode": str(approval.get("mode") or ""),
+            "conversationSessionId": str(
+                ((approval.get("decidedBy") or {}).get("conversationSessionId"))
+                if isinstance(approval.get("decidedBy"), dict)
+                else ""
+            ),
+            "decision": str(judgment.get("decision") or judgment.get("recommendation") or ""),
             "mechanism": "controlled_candidate_apply",
         },
         "changedFiles": [item.get("path") for item in changed_files],
@@ -4152,6 +4358,21 @@ def _decorate_snapshot(snapshot: dict[str, Any] | None) -> dict[str, Any] | None
     if snapshot is None:
         return None
     payload = _clone(snapshot)
+    decision = payload.get("decision") if isinstance(payload.get("decision"), dict) else {}
+    if decision or str(payload.get("status") or "").strip().lower() == "done":
+        payload["decision"] = {
+            **decision,
+            "approvalMode": str(payload.get("approvalMode") or decision.get("approvalMode") or "human"),
+            "evaluationState": _evaluation_state(payload),
+            "recommendedAction": "approval_decision",
+        }
+    if not isinstance(payload.get("approvalDecision"), dict):
+        payload["approvalDecision"] = {
+            "schemaVersion": 1,
+            "mode": str(payload.get("approvalMode") or "human"),
+            "status": "pending",
+            "decision": "",
+        }
     worktree = payload.get("candidateWorktree")
     if isinstance(worktree, dict) and str(worktree.get("path") or "").strip():
         project_root = _snapshot_project_root(payload)
@@ -4180,6 +4401,10 @@ def _action_states(snapshot: dict[str, Any]) -> dict[str, Any]:
     active = status in _ACTIVE_STATUSES
     review_pending = _review_gate_requires_approval(snapshot)
     review_gate = snapshot.get("reviewGate") if isinstance(snapshot.get("reviewGate"), dict) else {}
+    approval_mode = str(snapshot.get("approvalMode") or "human").strip().lower()
+    approval = snapshot.get("approvalDecision") if isinstance(snapshot.get("approvalDecision"), dict) else {}
+    approval_pending = str(approval.get("status") or "pending").strip().lower() != "decided"
+    evaluation_state = _evaluation_state(snapshot)
     candidate_judgment = snapshot.get("candidateJudgment") if isinstance(snapshot.get("candidateJudgment"), dict) else {}
     judge_scoring_complete = judge_merge_allowed(candidate_judgment)
     return {
@@ -4197,17 +4422,56 @@ def _action_states(snapshot: dict[str, Any]) -> dict[str, Any]:
                 and bool(review_gate.get("required"))
                 and review_pending
                 and judge_scoring_complete
+                and approval_mode == "human"
+                and approval_pending
             ),
             "reason": (
                 ""
                 if judge_scoring_complete
-                else "Judge 第二次结构化评分尚未完成，暂不能进入用户审批。"
+                else (
+                    f"当前评估状态为 {evaluation_state}，不能批准；"
+                    "可拒绝或要求补充证据后复跑。"
+                )
+            ),
+        },
+        "runAgentApproval": {
+            "enabled": (
+                done
+                and has_worktree
+                and review_pending
+                and judge_scoring_complete
+                and approval_mode == "agent"
+                and approval_pending
+            ),
+            "reason": (
+                ""
+                if judge_scoring_complete
+                else f"当前评估状态为 {evaluation_state}，不能启动 Agent 批准流程。"
+            ),
+        },
+        "rejectReview": {
+            "enabled": (
+                done
+                and has_worktree
+                and approval_mode == "human"
+                and approval_pending
+            ),
+        },
+        "requestRerun": {
+            "enabled": (
+                done
+                and has_worktree
+                and approval_mode == "human"
+                and approval_pending
             ),
         },
         "merge": {
             "enabled": done
             and has_worktree
             and str(merge.get("status") or "") != "merged"
+            and str(approval.get("status") or "").strip().lower() == "decided"
+            and str(approval.get("decision") or "").strip().upper() == "APPROVE"
+            and evaluation_state == "VALID"
             and not review_pending
         },
         "rollback": {"enabled": str(rollback.get("status") or "") == "available"},

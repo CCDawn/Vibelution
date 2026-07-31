@@ -767,7 +767,7 @@ def test_supervised_worktree_flow_preserves_improved_candidate_and_records_merge
     assert snapshot["status"] == "done"
     assert snapshot["outcome"] == "awaiting_user_approval"
     assert snapshot["decision"]["scoreDelta"] == 40.0
-    assert snapshot["decision"]["recommendedAction"] == "user_decision"
+    assert snapshot["decision"]["recommendedAction"] == "approval_decision"
     assert set(snapshot["baselineJudgment"]["taskScores"]) == {
         item["id"] for item in snapshot["judgeRubric"]["taskCriteria"]
     }
@@ -858,7 +858,7 @@ def test_supervised_worktree_flow_projects_six_steps_with_independent_rerun_sess
     assert rerun_score_step["conversationSessionId"] == "session-rerun"
     assert improve_step["chatRoute"].endswith("session=session-improver")
     assert rerun_score_step["chatRoute"].endswith("session=session-rerun")
-    assert approval_step["label"] == "用户审批与合入"
+    assert approval_step["label"] == "最终审批与合入"
     assert approval_step["ownerKind"] == "human"
     assert approval_step["conversationSessionId"] == ""
     assert approval_step["metrics"]["scoreDelta"] == 40.0
@@ -1023,7 +1023,7 @@ def test_supervised_worktree_flow_uses_three_sessions_and_same_judge_session(tmp
     assert snapshot["baselineJudgment"]["rubricHash"] == snapshot["judgeRubric"]["rubricHash"]
     assert snapshot["candidateJudgment"]["rubricHash"] == snapshot["judgeRubric"]["rubricHash"]
     assert snapshot["decision"]["judgeRecommendation"] == "REJECT"
-    assert snapshot["decision"]["recommendedAction"] == "user_decision"
+    assert snapshot["decision"]["recommendedAction"] == "approval_decision"
     assert [item["id"] for item in snapshot["workflowSteps"]] == [
         "baseline_eval",
         "baseline_judge",
@@ -1113,7 +1113,7 @@ def test_self_origin_worktree_flow_carries_goal_and_requires_review(tmp_path):
     assert self_step["label"] == "基线自改"
     assert self_step["ownerKind"] == "agent"
     assert self_step["role"] == "baseline"
-    assert approval_step["label"] == "用户审批与合入"
+    assert approval_step["label"] == "最终审批与合入"
     assert approval_step["ownerKind"] == "human"
     assert approval_step["conversationSessionId"] == ""
 
@@ -1438,7 +1438,7 @@ def test_decision_fails_closed_without_candidate_variant_binding():
 
     variant_gate = next(gate for gate in decision["gates"] if gate["name"] == "candidate_variant_bound")
     assert variant_gate["status"] == "fail"
-    assert decision["recommendedAction"] == "user_decision"
+    assert decision["recommendedAction"] == "approval_decision"
 
 
 def test_candidate_variant_gate_rejects_mismatched_variant_id():
@@ -1781,7 +1781,18 @@ def test_force_merge_never_overwrites_main_workspace_overlap(tmp_path):
         "status": "done",
         "projectRoot": str(project_root),
         "candidateWorktree": _bound_candidate_worktree(candidate),
-        "candidateJudgment": {"status": "success", "phase": "rerun", "decision": "REJECT"},
+        "candidateJudgment": {
+            "status": "success",
+            "phase": "rerun",
+            "evaluationState": "VALID",
+            "decision": "REJECT",
+        },
+        "approvalDecision": {
+            "status": "decided",
+            "decision": "APPROVE",
+            "evaluationState": "VALID",
+            "mode": "human",
+        },
         "judgeConversationSessionId": "session-judge",
     }
     service._persist_snapshot(snapshot, active_run_id="")
@@ -1806,7 +1817,18 @@ def test_force_merge_creates_rollback_manifest_and_rollback_restores_file(tmp_pa
         "status": "done",
         "projectRoot": str(project_root),
         "candidateWorktree": _bound_candidate_worktree(candidate),
-        "candidateJudgment": {"status": "success", "phase": "rerun", "decision": "REJECT"},
+        "candidateJudgment": {
+            "status": "success",
+            "phase": "rerun",
+            "evaluationState": "VALID",
+            "decision": "REJECT",
+        },
+        "approvalDecision": {
+            "status": "decided",
+            "decision": "APPROVE",
+            "evaluationState": "VALID",
+            "mode": "human",
+        },
         "judgeConversationSessionId": "session-judge",
     }
     service._persist_snapshot(snapshot, active_run_id="")
@@ -1814,8 +1836,8 @@ def test_force_merge_creates_rollback_manifest_and_rollback_restores_file(tmp_pa
     merged = service.execute_supervised_worktree_action("swte-merge-rollback", "merge", force=True)
 
     assert merged["merge"]["status"] == "merged"
-    assert merged["merge"]["triggeredBy"]["role"] == "judge"
-    assert merged["merge"]["triggeredBy"]["conversationSessionId"] == "session-judge"
+    assert merged["merge"]["triggeredBy"]["role"] == "approval_executor"
+    assert merged["merge"]["triggeredBy"]["conversationSessionId"] == ""
     assert "# candidate edit" in (project_root / "agent.py").read_text(encoding="utf-8")
     manifest_path = Path(merged["rollback"]["manifestPath"])
     assert manifest_path.exists()
@@ -1841,7 +1863,18 @@ def test_merge_rejects_candidate_mutated_after_judge_variant_binding(tmp_path):
         "status": "done",
         "projectRoot": str(project_root),
         "candidateWorktree": worktree,
-        "candidateJudgment": {"status": "success", "phase": "rerun", "decision": "APPROVE"},
+        "candidateJudgment": {
+            "status": "success",
+            "phase": "rerun",
+            "evaluationState": "VALID",
+            "decision": "APPROVE",
+        },
+        "approvalDecision": {
+            "status": "decided",
+            "decision": "APPROVE",
+            "evaluationState": "VALID",
+            "mode": "human",
+        },
         "judgeConversationSessionId": "session-judge",
     }
     service._persist_snapshot(snapshot, active_run_id="")
@@ -1892,7 +1925,7 @@ def test_self_origin_merge_requires_review_even_when_forced(tmp_path):
 
     assert blocked["mergeAnalysis"]["mergeAllowed"] is False
     assert "supervised_review_pending" in blocked["mergeAnalysis"]["blockers"]
-    with pytest.raises(service.SupervisedWorktreeRunActionError, match="用户审批 pending"):
+    with pytest.raises(service.SupervisedWorktreeRunActionError, match="审批 pending"):
         service.execute_supervised_worktree_action("swte-self-review", "merge", force=True)
 
     approved = service.execute_supervised_worktree_action(
@@ -1903,7 +1936,7 @@ def test_self_origin_merge_requires_review_even_when_forced(tmp_path):
     assert approved["reviewGate"]["status"] == "approved"
     assert approved["reviewGate"]["reviewerNote"] == "reviewed by supervised line"
     assert approved["merge"]["status"] == "merged"
-    assert approved["merge"]["triggeredBy"]["role"] == "judge"
+    assert approved["merge"]["triggeredBy"]["role"] == "approval_executor"
     assert "# candidate edit" in (project_root / "agent.py").read_text(encoding="utf-8")
 
 
@@ -1924,8 +1957,16 @@ def test_rejected_judgment_remains_advisory_and_user_can_approve_without_force(t
         "candidateJudgment": {
             "status": "success",
             "phase": "rerun",
+            "evaluationState": "VALID",
             "recommendation": "REJECT",
             "decision": "REJECT",
+        },
+        "approvalMode": "human",
+        "approvalDecision": {
+            "schemaVersion": 1,
+            "mode": "human",
+            "status": "pending",
+            "decision": "",
         },
         "judgeConversationSessionId": "session-judge",
         "reviewGate": {
@@ -1950,64 +1991,133 @@ def test_rejected_judgment_remains_advisory_and_user_can_approve_without_force(t
     assert merged["merge"]["status"] == "merged"
     assert merged["merge"]["force"] is False
     assert merged["merge"]["triggeredBy"]["decision"] == "REJECT"
-    assert merged["reviewGate"]["overrodeJudgeRecommendation"] is True
+    assert merged["merge"]["triggeredBy"]["role"] == "approval_executor"
+    assert merged["approvalDecision"]["status"] == "decided"
+    assert merged["approvalDecision"]["decision"] == "APPROVE"
+    assert merged["approvalDecision"]["decidedBy"]["kind"] == "human"
+    assert merged["approvalDecision"]["judgeRecommendation"] == "REJECT"
+
+    with pytest.raises(service.SupervisedWorktreeRunActionError, match="不可变"):
+        service.execute_supervised_worktree_action(
+            "swte-rejected-approval",
+            "reject_review",
+            reviewer_note="attempt to overwrite",
+        )
 
 
-def test_real_judge_merge_trigger_honors_user_approval_even_when_recommendation_is_reject(tmp_path, monkeypatch):
+def test_inconclusive_evaluation_cannot_be_approved_or_forced(tmp_path):
+    project_root = tmp_path / "project"
+    _init_repo(project_root)
+    (project_root / "agent.py").write_text("print('base')\n", encoding="utf-8")
+    _write_bundle(project_root)
+    _run_git(project_root, "add", ".")
+    _run_git(project_root, "commit", "-m", "init")
+    candidate = _make_candidate_repo(tmp_path, project_root)
+    snapshot = {
+        "runId": "swte-inconclusive-approval",
+        "runKind": service.RUN_KIND,
+        "status": "done",
+        "projectRoot": str(project_root),
+        "candidateWorktree": _bound_candidate_worktree(candidate),
+        "candidateJudgment": {
+            "status": "success",
+            "phase": "rerun",
+            "evaluationState": "INCONCLUSIVE",
+            "recommendation": "INCONCLUSIVE",
+            "decision": "INCONCLUSIVE",
+        },
+        "approvalMode": "human",
+        "approvalDecision": {
+            "schemaVersion": 1,
+            "mode": "human",
+            "status": "pending",
+            "decision": "",
+        },
+        "reviewGate": {
+            "required": True,
+            "status": "pending",
+            "reason": "approval required",
+        },
+    }
+    service._persist_snapshot(snapshot, active_run_id="")
+
+    projected = service.get_supervised_worktree_run("swte-inconclusive-approval")
+    assert projected["decision"]["evaluationState"] == "INCONCLUSIVE"
+    assert projected["actionStates"]["approveReview"]["enabled"] is False
+    assert projected["actionStates"]["requestRerun"]["enabled"] is True
+    with pytest.raises(service.SupervisedWorktreeRunActionError, match="INCONCLUSIVE"):
+        service.execute_supervised_worktree_action(
+            "swte-inconclusive-approval",
+            "approve_review",
+            force=True,
+        )
+
+
+def test_real_agent_approval_uses_independent_new_session_and_writes_final_record(
+    tmp_path,
+    monkeypatch,
+):
     calls: list[dict] = []
 
     def fake_harness(**kwargs):
         calls.append(dict(kwargs))
         return _fake_harness_result(
-            role="judge",
+            role="auditor",
             repo_root=Path(kwargs["repo_root"]),
             prompt=str(kwargs.get("prompt") or ""),
-            session_id="session-judge",
+            session_id="session-approval-new",
             agent_judgment={
-                "phase": "merge_authorization",
+                "phase": "approval_decision",
                 "decision": "REJECT",
-                "merge_requested": True,
-                "reason": "user approved despite advisory rejection",
-                "evidence_refs": ["variant:one"],
+                "reason": "candidate risk is not sufficiently bounded",
+                "evidence_refs": ["merge-analysis:high-risk"],
             },
         )
 
     monkeypatch.setattr(service, "run_supervised_conversation_harness", fake_harness)
     snapshot = {
-        "runId": "swte-real-trigger",
+        "runId": "swte-agent-approval",
+        "runKind": service.RUN_KIND,
+        "status": "done",
         "executionMode": "real",
+        "approvalMode": "agent",
         "projectRoot": str(tmp_path),
         "mentalModelMode": "follow",
         "mentalModelEnabled": False,
         "agentBindings": {
-            "judge": {"agentId": "agent-judge", "role": "judge"},
+            "auditor": {"agentId": "agent-approval", "role": "auditor"},
         },
+        "baselineConversationSessionId": "session-baseline",
+        "rerunConversationSessionId": "session-rerun",
         "judgeConversationSessionId": "session-judge",
         "candidateJudgment": {
             "status": "success",
             "phase": "rerun",
-            "recommendation": "REJECT",
-            "decision": "REJECT",
+            "evaluationState": "VALID",
+            "recommendation": "APPROVE",
+            "decision": "APPROVE",
         },
-        "candidateWorktree": {
-            "variant": {"variantId": "variant-one", "patchSha256": "abc"},
+        "approvalDecision": {
+            "schemaVersion": 1,
+            "mode": "agent",
+            "status": "pending",
+            "decision": "",
         },
     }
 
-    triggered = service._request_judge_controlled_merge(
-        snapshot,
-        force=False,
-        reviewer_note="approved by user",
-    )
+    decided = service._request_independent_agent_approval(snapshot)
 
-    assert triggered["judgeMergeTrigger"]["status"] == "requested"
-    assert triggered["judgeMergeTrigger"]["decision"] == "REJECT"
-    assert triggered["judgeMergeTrigger"]["conversationSessionId"] == "session-judge"
-    assert triggered["judgeMergeTrigger"]["mechanism"] == "judge_conversation_request"
-    assert len(calls) == 1
-    assert calls[0]["conversation_session_id"] == "session-judge"
-    assert calls[0]["scenario"] == "supervised_judge_merge_trigger"
-    assert "不要执行 shell、git merge" in calls[0]["prompt"]
+    assert calls[0]["conversation_session_id"] == ""
+    assert calls[0]["scenario"] == "supervised_independent_approval"
+    assert "你是独立审批 Agent，不是本轮 Judge" in calls[0]["prompt"]
+    assert decided["approvalConversationSessionId"] == "session-approval-new"
+    assert decided["approvalDecision"]["decision"] == "REJECT"
+    assert decided["approvalDecision"]["decidedBy"] == {
+        "kind": "agent",
+        "actorId": "agent-approval",
+        "conversationSessionId": "session-approval-new",
+    }
+    assert decided["approvalDecision"]["evaluationState"] == "VALID"
 
 
 def test_discard_removes_owned_candidate_worktree(tmp_path, monkeypatch):
@@ -2287,6 +2397,55 @@ def test_real_mode_requires_baseline_and_judge_bindings_before_execution(tmp_pat
             lang="zh",
             project_root=project_root,
         )
+
+
+def test_agent_approval_mode_requires_independent_auditor_binding(tmp_path):
+    project_root = tmp_path / "project"
+    _write_bundle(
+        project_root,
+        mutation_allowlist=["tests/supervised_worktree_candidate_marker.py"],
+    )
+
+    with pytest.raises(service.SupervisedWorktreeRunValidationError, match="审批 Agent"):
+        service._normalize_start_payload(
+            {
+                "sourceKind": "bundle",
+                "bundleName": "closed_loop_v1",
+                "executionMode": "real",
+                "approvalMode": "agent",
+                "confirmRealLlmCost": True,
+                "agentBindings": {
+                    "baseline": {"agentId": "agent-baseline", "role": "baseline"},
+                    "judge": {"agentId": "agent-judge", "role": "judge"},
+                },
+            },
+            lang="zh",
+            project_root=project_root,
+        )
+
+
+def test_approval_mode_is_normalized_and_frozen_per_run(tmp_path):
+    project_root = tmp_path / "project"
+    _write_bundle(project_root)
+
+    options = service._normalize_start_payload(
+        {
+            "sourceKind": "bundle",
+            "bundleName": "closed_loop_v1",
+            "executionMode": "simulation",
+            "approvalMode": "agent",
+        },
+        lang="zh",
+        project_root=project_root,
+    )
+
+    assert options["approvalMode"] == "agent"
+    assert options["approvalDecision"] == {
+        "schemaVersion": 1,
+        "mode": "agent",
+        "status": "pending",
+        "decision": "",
+    }
 
 
 def test_real_mode_rejects_bundle_without_candidate_mutation_contract(tmp_path):
