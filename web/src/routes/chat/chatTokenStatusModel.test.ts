@@ -157,4 +157,60 @@ describe("chatTokenStatusModel", () => {
     expect(inputMetric?.title).toContain("禁止默认兜底");
     expect(model.modelInputMetaLine).toContain("禁止默认兜底");
   });
+
+  it("labels an unmaterialized Agent compression policy instead of inherited global", () => {
+    const model = buildChatTokenStatusViewModel({
+      detail: null,
+      lastCacheComposition: null,
+      lastContextComposition: null,
+      compression: {
+        enabled: false,
+        policyMode: "unmaterialized",
+        policySource: "migration_required",
+        currentTokens: 9181,
+        effectiveTokenLimit: 500000,
+        contextWindowLimit: 1000000,
+        usageRatio: 0.0184,
+        currentLevel: "normal",
+        source: "runtime_state",
+        compressionCount: 0,
+        lastCompression: null,
+        strategy: {
+          levels: [],
+          preserveErrors: true,
+          errorProtectionKeywords: [],
+          summaryStorage: "state_memory",
+          algorithm: "",
+        },
+        updatedAt: "",
+      } as never,
+      cache: {
+        cacheDetailAvailable: false,
+        cacheCompositionPercent: 0,
+        providerCachedInputTokens: 0,
+        providerCacheInputTokens: 0,
+        cacheCompositionSummary: "",
+        cacheDetailOpenLabel: "",
+        cacheCompositionTitle: "",
+      },
+      tokenSpeedTracker: null,
+      activeSessionId: "session-luna",
+      groupPanelActive: false,
+      sessionStateValue: "idle",
+      sessionStateLabel: "空闲",
+      sessionStateLine: "ready",
+      lang: "zh",
+      t: ((key: string) => key === "compressionDisabled" ? "未启用" : key) as never,
+      numberFormatter: new Intl.NumberFormat("zh-CN"),
+      compactNumberFormatter: new Intl.NumberFormat("zh-CN", { notation: "compact" }),
+      locale: "zh-CN",
+      formatTime: (value) => value,
+    });
+
+    const compressionMetric = model.tokenStatusMetrics.find((item) => item.key === "compression");
+    expect(compressionMetric?.value).toBe("2%");
+    expect(compressionMetric?.meta).toContain("未启用");
+    expect(compressionMetric?.title).toContain("Agent 策略未物化");
+    expect(compressionMetric?.title).not.toContain("继承全局策略");
+  });
 });

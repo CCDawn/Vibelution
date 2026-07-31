@@ -127,6 +127,24 @@ export function formatTokenSpeedValue(tokensPerSecond: number | null | undefined
   return tokensPerSecond < 1 ? "<1 t/s" : `${Math.round(tokensPerSecond)} t/s`;
 }
 
+export function runtimeMatchesSelectedChatSession(options: {
+  selectedSessionId: string | null | undefined;
+  activeRuntimeSessionId: string | null | undefined;
+  activeWorkSessionIds: Iterable<string>;
+}) {
+  const selectedSessionId = String(options.selectedSessionId || "").trim();
+  if (!selectedSessionId) {
+    return false;
+  }
+  const activeRuntimeSessionId = String(options.activeRuntimeSessionId || "").trim();
+  if (activeRuntimeSessionId === selectedSessionId) {
+    return true;
+  }
+  return Array.from(options.activeWorkSessionIds).some(
+    (sessionId) => String(sessionId || "").trim() === selectedSessionId,
+  );
+}
+
 export function chatStreamPerformanceNowMs() {
   return typeof performance === "undefined" ? Date.now() : performance.now();
 }

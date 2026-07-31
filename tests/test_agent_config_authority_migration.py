@@ -88,6 +88,38 @@ def test_agent_config_migration_dry_run_is_read_only_and_deterministic(
     assert not (data_root / ".migration").exists()
 
 
+def test_agent_config_migration_previews_unmaterialized_compression_policy_without_writing(
+    tmp_path,
+    monkeypatch,
+):
+    legacy = _legacy_agent()
+    legacy["contextCompressionPolicy"] = {"mode": "inherit"}
+    data_root, registry_path, _ = _seed_data_root(
+        tmp_path,
+        monkeypatch,
+        agents=[legacy],
+    )
+    before = registry_path.read_bytes()
+
+    dry_run = migration.plan_agent_config_migration(data_root=data_root)
+
+    assert dry_run["status"] == "dry_run"
+    assert dry_run["manifest"]["contextCompressionPolicyChanges"] == 1
+    assert dry_run["manifest"]["defaultContextCompressionMaxTokenLimit"] == 262_144
+    assert registry_path.read_bytes() == before
+    assert not (data_root / ".migration").exists()
+
+    migration.apply_agent_config_migration(
+        data_root=data_root,
+        approved_manifest_hash=dry_run["manifest"]["manifestHash"],
+    )
+    migrated = json.loads(registry_path.read_text(encoding="utf-8"))
+    policy = migrated["agents"][0]["contextCompressionPolicy"]
+    assert policy["mode"] == "custom"
+    assert policy["enabled"] is True
+    assert policy["maxTokenLimit"] == 262_144
+
+
 def test_agent_config_migration_apply_requires_matching_manifest_and_preserves_registry_data(
     tmp_path,
     monkeypatch,

@@ -10,6 +10,29 @@ from typing import Any
 
 AGENT_CONFIG_SCHEMA_VERSION = 2
 DEFAULT_PERMISSION_PRESET = "request_approval"
+DEFAULT_AGENT_CONTEXT_COMPRESSION_CREATION_POLICY = {
+    "mode": "custom",
+    "enabled": True,
+    "maxTokenLimit": 262_144,
+    "maxCompressionsPerSession": 20,
+    "levels": {
+        "light": 0.6,
+        "standard": 0.8,
+        "deep": 0.9,
+        "emergency": 0.95,
+    },
+    "summaryChars": {
+        "light": 500,
+        "standard": 1_000,
+        "deep": 2_000,
+        "emergency": 3_000,
+    },
+    "preservation": {
+        "keepAiMessages": 5,
+        "preserveErrors": True,
+        "extractKeyDecisions": True,
+    },
+}
 PERMISSION_PRESETS = {
     "request_approval",
     "auto_review",
