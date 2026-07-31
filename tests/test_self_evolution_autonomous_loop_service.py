@@ -99,7 +99,7 @@ def test_run_stops_at_user_approval_without_evaluation_or_git_integration(tmp_pa
     result = service.start(
         {
             "goal": "根据当前状态持续改进自进化流程",
-            "maxIterations": 4,
+            "maxIterations": 1,
         }
     )
 
@@ -126,6 +126,16 @@ def test_run_stops_at_user_approval_without_evaluation_or_git_integration(tmp_pa
     assert "judge" not in result
     assert "score" not in result
     assert service.load("self-loop-001") == result
+
+
+def test_run_rejects_unimplemented_multi_candidate_iteration_contract(tmp_path):
+    service, _calls = _build_service(tmp_path)
+
+    with pytest.raises(
+        AutonomousLoopValidationError,
+        match="maxIterations must be 1",
+    ):
+        service.start({"goal": "建立自动闭环", "maxIterations": 2})
 
 
 def test_queue_returns_before_agent_work_and_worker_resumes_persisted_run(tmp_path):
@@ -283,6 +293,28 @@ def test_second_active_run_is_rejected_until_first_reaches_review_boundary(tmp_p
         match="active self-evolution autonomous loop",
     ):
         service.start({"goal": "并发启动第二轮"})
+
+
+def test_startup_reconciliation_releases_stale_queued_run(tmp_path):
+    service, _calls = _build_service(tmp_path)
+    service.queue({"goal": "建立自动闭环"})
+
+    reconciled = service.reconcile_interrupted_on_startup()
+
+    assert reconciled["status"] == "failed"
+    assert reconciled["phase"] == "queued_interrupted"
+    assert reconciled["error"]["type"] == "ProcessRestart"
+    assert service.load_active() is None
+
+
+def test_startup_reconciliation_preserves_user_review_boundary(tmp_path):
+    service, _calls = _build_service(tmp_path)
+    pending = service.start({"goal": "建立自动闭环"})
+
+    reconciled = service.reconcile_interrupted_on_startup()
+
+    assert reconciled == pending
+    assert service.load_active()["runId"] == "self-loop-001"
 
 
 def test_persisted_evidence_is_bounded_and_redacts_common_credentials(tmp_path):

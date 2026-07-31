@@ -14,7 +14,7 @@ from core.web.services.self_evolution_autonomous_loop_runtime import (
 def _snapshot(**updates):
     payload = {
         "runId": "self-loop-001",
-        "request": {"goal": "优化当前自进化流程", "maxIterations": 4},
+        "request": {"goal": "优化当前自进化流程", "maxIterations": 1},
         "observation": {
             "summary": "当前只有观察入口",
             "evidence": [],
@@ -145,6 +145,30 @@ def test_runtime_hooks_use_one_observer_context_then_isolated_executor():
         "executor",
     ]
     assert all(call["role"] != "reviewer" for call in turn_calls)
+    assert turn_calls[0]["runtime_tool_grants"] == [
+        "grep_search_tool",
+        "code_symbol_tool",
+    ]
+    assert turn_calls[1]["runtime_tool_grants"] == [
+        "grep_search_tool",
+        "code_symbol_tool",
+    ]
+    assert "apply_patch_tool" not in turn_calls[0]["runtime_tool_grants"]
+    assert "cli_tool" not in turn_calls[0]["runtime_tool_grants"]
+    assert turn_calls[2]["runtime_tool_grants"] == [
+        "open_evolution_transaction_tool",
+        "close_evolution_transaction_tool",
+        "grep_search_tool",
+        "code_symbol_tool",
+        "apply_patch_tool",
+        "write_file_tool",
+        "cli_tool",
+        "python_lint_tool",
+    ]
+    assert all(
+        call["runtime_tool_source"] == "self_evolution_autonomous_loop"
+        for call in turn_calls
+    )
     assert turn_calls[1]["carryover"] == {
         "previousResponseId": "response-observe"
     }

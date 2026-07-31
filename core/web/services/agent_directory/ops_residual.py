@@ -852,6 +852,7 @@ def _with_runtime_tool_grants(
     runtime_source = str(source or "").strip()
     approval_overrides = dict(policy.get("approvalOverrides") or {})
     if runtime_source in {
+        "self_evolution_autonomous_loop",
         "supervised_conversation_harness",
         "supervised_baseline_self_edit",
     }:

@@ -16,7 +16,7 @@ from core.web.services.runtime_scene_service import record_runtime_scene_event
 
 RUN_KIND = "self_evolution_autonomous_loop"
 SCHEMA_VERSION = 1
-MAX_ITERATIONS = 20
+MAX_ITERATIONS = 1
 MAX_GOAL_LENGTH = 4_000
 MAX_SUMMARY_LENGTH = 8_000
 MAX_CHANGED_FILES = 400
@@ -251,6 +251,46 @@ class SelfEvolutionAutonomousLoopService:
     def load_latest(self) -> dict[str, Any] | None:
         return self._store.load_latest_snapshot(RUN_KIND)
 
+    def reconcile_interrupted_on_startup(self) -> dict[str, Any] | None:
+        """Release stale process-owned phases while preserving user review."""
+
+        with _LOCK:
+            snapshot = self._store.load_active_snapshot(RUN_KIND)
+            if snapshot is None:
+                return None
+            status = str(snapshot.get("status") or "").strip()
+            phase = str(snapshot.get("phase") or "").strip()
+            if status == "awaiting_user_approval" and phase == "reporting":
+                return snapshot
+            if (
+                status == "running"
+                and phase == "cleanup_pending"
+                and str((snapshot.get("integration") or {}).get("status") or "")
+                == "committed"
+            ):
+                resume_cleanup = True
+            else:
+                resume_cleanup = False
+                return self._advance(
+                    snapshot,
+                    status="failed",
+                    phase=f"{phase or 'unknown'}_interrupted",
+                    terminal=True,
+                    updates={
+                        "error": {
+                            "type": "ProcessRestart",
+                            "message": (
+                                "The autonomous loop was interrupted before the "
+                                "process restarted. Any candidate evidence already "
+                                "written was left untouched."
+                            ),
+                        }
+                    },
+                )
+        if resume_cleanup:
+            return self._run_cleanup(snapshot)
+        return snapshot
+
     def _run_cleanup(self, snapshot: dict[str, Any]) -> dict[str, Any]:
         try:
             cleanup = _normalize_cleanup(
@@ -341,9 +381,10 @@ def _normalize_request(request: dict[str, Any]) -> dict[str, Any]:
         max_iterations = int(request.get("maxIterations") or 1)
     except (TypeError, ValueError) as exc:
         raise AutonomousLoopValidationError("maxIterations must be an integer.") from exc
-    if not 1 <= max_iterations <= MAX_ITERATIONS:
+    if max_iterations != MAX_ITERATIONS:
         raise AutonomousLoopValidationError(
-            f"maxIterations must be between 1 and {MAX_ITERATIONS}."
+            "maxIterations must be 1 until multi-candidate iteration "
+            "semantics are implemented."
         )
     return {
         "goal": goal,

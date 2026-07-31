@@ -6,7 +6,7 @@ import proposalSource from "./useEvolutionProposalMutations.ts?raw";
 
 describe("evolution mutations contract (T3)", () => {
   it("owns run and proposal write mutations", () => {
-    expect(runSource.match(/\buseMutation\(/g) ?? []).toHaveLength(8);
+    expect(runSource.match(/\buseMutation\(/g) ?? []).toHaveLength(10);
     expect(proposalSource.match(/\buseMutation\(/g) ?? []).toHaveLength(5);
   });
 
@@ -19,7 +19,7 @@ describe("evolution mutations contract (T3)", () => {
   it("keeps self-observation status in the canonical selected run projection", () => {
     const observationMutations = runSource.slice(
       runSource.indexOf("const startSelfObservationMutation"),
-      runSource.indexOf("const deleteSelfHistoryMutation"),
+      runSource.indexOf("const startSelfAutonomousLoopMutation"),
     );
 
     expect(observationMutations).not.toContain(

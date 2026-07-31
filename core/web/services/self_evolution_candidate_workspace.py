@@ -92,9 +92,23 @@ def inspect_candidate_workspace(
 
     root = Path(project_root).resolve()
     candidate_path, branch = _require_owned_workspace(root, workspace)
-    changed_files = _candidate_changes(candidate_path)
-    head_commit = _git_text(candidate_path, "rev-parse", "HEAD")
     base_commit = str(workspace.get("baseCommit") or "").strip()
+    head_commit = _git_text(candidate_path, "rev-parse", "HEAD")
+    if (
+        not base_commit
+        or _run_git(
+            candidate_path,
+            "merge-base",
+            "--is-ancestor",
+            base_commit,
+            head_commit,
+        ).returncode
+        != 0
+    ):
+        raise CandidateWorkspaceError(
+            "Candidate branch no longer descends from its frozen base commit."
+        )
+    changed_files = _candidate_changes(candidate_path, base_commit=base_commit)
     digest = hashlib.sha256()
     digest.update(base_commit.encode("utf-8"))
     digest.update(b"\0")
@@ -183,44 +197,48 @@ def cleanup_candidate_workspace(
     }
 
 
-def _candidate_changes(candidate_path: Path) -> list[dict[str, str]]:
-    raw = _git_bytes(
-        candidate_path,
-        "status",
-        "--porcelain=v1",
-        "-z",
-        "--untracked-files=all",
-    )
-    records = raw.split(b"\0")
+def _candidate_changes(
+    candidate_path: Path,
+    *,
+    base_commit: str,
+) -> list[dict[str, str]]:
     changes: dict[str, str] = {}
-    index = 0
-    while index < len(records):
-        record = records[index]
-        index += 1
-        if not record:
-            continue
-        text = record.decode("utf-8", errors="replace")
-        if len(text) < 4:
-            raise CandidateWorkspaceError("Candidate Git status is malformed.")
-        status = text[:2]
-        path = _normalize_relative_path(text[3:])
-        if "R" in status or "C" in status:
-            if index >= len(records) or not records[index]:
-                raise CandidateWorkspaceError(
-                    "Candidate rename status is missing its source path."
+    for change_type, diff_filter in (
+        ("added", "A"),
+        ("deleted", "D"),
+        ("modified", "MTCUXB"),
+    ):
+        raw = _git_bytes(
+            candidate_path,
+            "diff",
+            "--no-renames",
+            "--name-only",
+            "-z",
+            f"--diff-filter={diff_filter}",
+            base_commit,
+            "--",
+        )
+        for record in raw.split(b"\0"):
+            if record:
+                changes[
+                    _normalize_relative_path(
+                        record.decode("utf-8", errors="replace")
+                    )
+                ] = change_type
+    untracked = _git_bytes(
+        candidate_path,
+        "ls-files",
+        "--others",
+        "--exclude-standard",
+        "-z",
+    )
+    for record in untracked.split(b"\0"):
+        if record:
+            changes[
+                _normalize_relative_path(
+                    record.decode("utf-8", errors="replace")
                 )
-            source_path = _normalize_relative_path(
-                records[index].decode("utf-8", errors="replace")
-            )
-            index += 1
-            changes[source_path] = "deleted"
-            changes[path] = "added"
-        elif status == "??" or "A" in status:
-            changes[path] = "added"
-        elif "D" in status:
-            changes[path] = "deleted"
-        else:
-            changes[path] = "modified"
+            ] = "added"
     return [
         {"path": path, "changeType": changes[path]}
         for path in sorted(changes)

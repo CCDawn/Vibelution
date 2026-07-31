@@ -110,12 +110,14 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("libraryListCollapsed");
   });
 
-  it("routes self-evolution starts only into the reviewed worktree endpoint", () => {
-    expect(routeSource).toContain("startSelfWorktreeRunMutation");
-    expect(runMutationsSource).toContain('"/api/evolution/self/worktree-runs"');
-    expect(runMutationsSource).toContain('mode: "manual"');
-    expect(routeSource).toContain("onStartRun={() => startSelfWorktreeRunMutation.mutate()}");
-    expect(routeSource).toContain("startWorktreeError={startSelfWorktreeRunMutation.error?.message ?? \"\"}");
+  it("routes the primary self-evolution start into the user-reviewed autonomous loop", () => {
+    expect(routeSource).toContain("startSelfAutonomousLoopMutation");
+    expect(runMutationsSource).toContain('"/api/evolution/self/autonomous-runs"');
+    expect(routeSource).toContain("goal: selfGoalInput.trim()");
+    expect(routeSource).toContain("maxIterations: 1");
+    expect(routeSource).toContain("onStartRun={() => startSelfAutonomousLoopMutation.mutate({");
+    expect(routeSource).toContain("startWorktreeError={startSelfAutonomousLoopMutation.error?.message ?? \"\"}");
+    expect(routeSource).not.toContain("startSelfWorktreeRunMutation");
     expect(routeSource).not.toContain('"/api/evolution/self/runs"');
     expect(routeSource).not.toContain("startSelfRunMutation");
     expect(routeSource).not.toContain("liveSelfRun");
@@ -738,9 +740,9 @@ describe("EvolutionRoute library user flow contract", () => {
       "options.isLocalSupervisedStartPlaceholder(current) ? null : current,",
     );
     expect(routeSource).toContain("const supervisedStartSubmitting = startWorktreeRunMutation.isPending || isLocalSupervisedStartPlaceholder(liveActiveRun)");
-    expect(routeSource).toContain(
-      "Boolean(snapshot?.activeRun?.runId || snapshot?.worktreeActiveRun?.runId)",
-    );
+    expect(routeSource).toContain("snapshot?.activeRun?.runId");
+    expect(routeSource).toContain("snapshot?.worktreeActiveRun?.runId");
+    expect(routeSource).toContain("snapshot?.selfAutonomousActiveRun?.runId");
     expect(routeSource).toContain("onClick={() => startWorktreeRunMutation.mutate()}");
     expect(runMutationsSource).toContain('executionMode: "real"');
     expect(runMutationsSource).toContain("confirmRealLlmCost: true");
