@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   isForeignTeamDetailQueryKey,
+  resolveLinkedChatRoomQueryEnabled,
   resolveResearchSecondaryStatusQueryEnabled,
   resolveSourceCollectionRunsQueryEnabled,
   resolveTeamCanvasQueryEnabled,
@@ -84,6 +85,23 @@ describe("teamDetailLoadPolicy", () => {
         sourceCollectionStandalone: false,
       }),
     ).toBe(true);
+  });
+
+  it("loads linked-room detail only for visible communication surfaces", () => {
+    const base = {
+      linkedChatRoomId: "room-1",
+      teamDetailReady: true,
+      researchWorkflowTeamSelected: true,
+      researchCanvasVisible: false,
+      researchWorkspaceView: "overview" as const,
+    };
+    expect(resolveLinkedChatRoomQueryEnabled(base)).toBe(false);
+    expect(resolveLinkedChatRoomQueryEnabled({ ...base, researchWorkspaceView: "source_collection" })).toBe(false);
+    expect(resolveLinkedChatRoomQueryEnabled({ ...base, researchWorkspaceView: "discussion" })).toBe(true);
+    expect(resolveLinkedChatRoomQueryEnabled({ ...base, researchCanvasVisible: true, researchWorkspaceView: "discussion" })).toBe(false);
+    expect(resolveLinkedChatRoomQueryEnabled({ ...base, researchWorkflowTeamSelected: false })).toBe(true);
+    expect(resolveLinkedChatRoomQueryEnabled({ ...base, teamDetailReady: false })).toBe(false);
+    expect(resolveLinkedChatRoomQueryEnabled({ ...base, linkedChatRoomId: "" })).toBe(false);
   });
 
   it("detects foreign team detail cache keys", () => {
