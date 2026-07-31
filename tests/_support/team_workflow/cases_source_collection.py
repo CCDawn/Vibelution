@@ -3833,9 +3833,12 @@ def test_source_quality_stage_writeback_materializes_candidate_extraction_decisi
         for card in team_workflow_orchestration_service._source_collection_stage_cards_projection(team["teamId"], run_id)["cards"]
         if card["stageId"] == "extraction"
     )
-    assert screening_projection["status"] == "artifact_ready_agent_needs_review"
+    assert screening_projection["status"] == "partial_current_inputs"
     assert screening_projection["counts"]["artifact"] == 3
-    assert screening_projection["counts"]["pending"] == 0
+    assert screening_projection["counts"]["pending"] == 1
+    assert screening_projection["counts"]["needsRevision"] == 1
+    assert screening_projection["artifactStatus"] == "partial"
+    assert screening_projection["isClosedLoop"] is False
 
 
 def test_source_quality_batch_skips_superseded_source_versions(tmp_path, monkeypatch):
