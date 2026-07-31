@@ -14,6 +14,7 @@ from core.web.services.team import (
     system_bootstrap,
     system_teams,
     team_crud,
+    team_projection,
     team_repair,
 )
 
@@ -65,6 +66,16 @@ def test_facade_reexports_system_bootstrap_control_plane() -> None:
     assert hasattr(facade, "_TEAM_SYSTEM_BOOTSTRAP_THREAD")
     assert isinstance(facade._TEAM_SYSTEM_BOOTSTRAP_STATE, dict)
     assert facade.TEAM_SYSTEM_BOOTSTRAP_READY_CACHE_TTL_SECONDS == 30.0
+
+
+def test_facade_reexports_team_projection() -> None:
+    assert facade._team_to_api is team_projection._team_to_api
+    assert facade._team_to_compact_reference is team_projection._team_to_compact_reference
+    assert facade._team_detail_to_api is team_projection._team_detail_to_api
+    assert facade._members_to_api is team_projection._members_to_api
+    assert facade._get_team_record is team_projection._get_team_record
+    assert facade._agent_reference_maps is team_projection._agent_reference_maps
+    assert facade._merged_agent_reference_maps is team_projection._merged_agent_reference_maps
 
 
 def test_facade_reexports_team_repair() -> None:
