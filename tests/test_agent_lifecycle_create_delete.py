@@ -57,6 +57,10 @@ def test_agent_create_api_adds_direct_agent_with_safe_defaults(tmp_path, monkeyp
     assert agent["primaryMode"] == "research"
     assert agent["roleKey"] == "research_broad"
     assert agent["promptTemplateId"] == "prompt-research-broad"
+    assert agent["contextCompressionPolicy"]["mode"] == "custom"
+    assert agent["contextCompressionPolicy"]["enabled"] is True
+    assert agent["contextCompressionPolicy"]["maxTokenLimit"] == 262_144
+    assert agent["contextCompressionEffectivePolicy"]["source"] == "agent"
     assert agent["directSessionId"]
     assert agent["conversationIndexKind"] == agent_directory_service.CONVERSATION_INDEX_KIND_PERSONAL_AGENT
     direct_session = session_service.get_session_detail(agent["directSessionId"])
