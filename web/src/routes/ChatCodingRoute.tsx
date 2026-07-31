@@ -175,6 +175,7 @@ import {
   MAX_RIGHT_PANEL_WIDTH,
   MIN_LEFT_PANEL_WIDTH,
   MIN_RIGHT_PANEL_WIDTH,
+  runtimeMatchesSelectedChatSession,
   shouldSuppressComposerErrorForTurnError,
 } from "./chat/chatCodingRouteViewModel";
 import { useChatWorkbenchLayout } from "./chat/useChatWorkbenchLayout";
@@ -1558,9 +1559,11 @@ export function ChatCodingRoute() {
       .map((run) => String(run?.sessionId ?? "").trim())
       .filter(Boolean),
   );
-  const runtimeMatchesSelectedSession = Boolean(
-    activeSessionId && runtimeActiveChatTurnSessionIds.has(activeSessionId),
-  );
+  const runtimeMatchesSelectedSession = runtimeMatchesSelectedChatSession({
+    selectedSessionId: activeSessionId,
+    activeRuntimeSessionId: activeSessionBootstrapQuery.data?.activeSessionId,
+    activeWorkSessionIds: runtimeActiveChatTurnSessionIds,
+  });
   const runtimeActiveChatTurnSessionId = runtimeActiveChatTurnSessionIds.values().next().value ?? "";
   const runtimeActiveSessionLabel = runtimeActiveChatTurnSessionId
     ? sessionsQuery.data?.find((session) => session.id === runtimeActiveChatTurnSessionId)?.title

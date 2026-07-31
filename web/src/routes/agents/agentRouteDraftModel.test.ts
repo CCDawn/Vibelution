@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { AgentConfigWorkspaceAgent } from "../../api/types";
 import {
+  DEFAULT_AGENT_CONTEXT_COMPRESSION_DRAFT,
   configDraftEqualsDraft,
   contextCompressionDraftFromAgent,
   contextCompressionPolicyFromDraft,
@@ -83,6 +84,20 @@ describe("agentRouteDraftModel", () => {
     const policy = contextCompressionPolicyFromDraft(customDraft);
     expect(policy.mode).toBe("custom");
     expect(policy.maxTokenLimit).toBe(8000);
+  });
+
+  it("starts a new Agent with an explicit 262144 compression policy", () => {
+    const draft = contextCompressionDraftFromAgent(undefined);
+
+    expect(DEFAULT_AGENT_CONTEXT_COMPRESSION_DRAFT.mode).toBe("custom");
+    expect(draft.mode).toBe("custom");
+    expect(draft.enabled).toBe(true);
+    expect(draft.maxTokenLimit).toBe("262144");
+    expect(contextCompressionPolicyFromDraft(draft)).toMatchObject({
+      mode: "custom",
+      enabled: true,
+      maxTokenLimit: 262144,
+    });
   });
 
   it("detects work-session agents from boundary type", () => {

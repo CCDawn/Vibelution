@@ -561,7 +561,7 @@ def test_runtime_summary_uses_active_agent_context_compression_policy(monkeypatc
     assert agent_reads == ["agent-compression", "agent-compression"]
 
 
-def test_runtime_summary_keeps_applied_runtime_compression_snapshot_for_inherited_agent(monkeypatch):
+def test_runtime_summary_keeps_applied_snapshot_but_marks_agent_policy_unmaterialized(monkeypatch):
     monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {"agentId": "agent-inherit"})
     monkeypatch.setattr(
         runtime_service,
@@ -602,8 +602,8 @@ def test_runtime_summary_keeps_applied_runtime_compression_snapshot_for_inherite
     payload = runtime_service.get_runtime_summary()
     compression = payload["contextCompression"]
 
-    assert compression["policyMode"] == "inherit"
-    assert compression["policySource"] == "runtime_state_applied_policy"
+    assert compression["policyMode"] == "unmaterialized"
+    assert compression["policySource"] == "migration_required"
     assert compression["policyAgentId"] == "agent-inherit"
     assert compression["currentTokens"] == 43372
     assert compression["effectiveTokenLimit"] == 500000

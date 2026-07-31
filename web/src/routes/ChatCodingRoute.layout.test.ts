@@ -1629,8 +1629,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("setActiveTurnLayerForSession(current, activeSessionId, undefined)");
     expect(routeSource).toContain('eventCode: "browser.session_stream.active_layer_reconciled"');
     expect(routeSource).toContain('source: "session_detail_query"');
-    expect(routeSource).toContain("const runtimeMatchesSelectedSession = Boolean(");
-    expect(routeSource).toContain("runtimeActiveChatTurnSessionIds.has(activeSessionId)");
+    expect(routeSource).toContain("const runtimeMatchesSelectedSession = runtimeMatchesSelectedChatSession({");
+    expect(routeSource).toContain("activeRuntimeSessionId: activeSessionBootstrapQuery.data?.activeSessionId");
+    expect(routeSource).toContain("activeWorkSessionIds: runtimeActiveChatTurnSessionIds");
     expect(routeSource).toContain("const runtimeMismatchLine = runtimeActiveChatTurnSessionId && !runtimeMatchesSelectedSession");
     expect(routeAndSessionSurfaceSource).toContain("const noActiveDirectSessionTitle =");
     expect(routeAndSessionSurfaceSource).toMatch(/!\s*activeSessionId\s*\?\s*noActiveDirectSessionTitle/);

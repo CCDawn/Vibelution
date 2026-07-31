@@ -5418,6 +5418,19 @@ class TestLocalProviderBootstrap:
         assert strategy_config.preserve_errors is False
         assert strategy_config.extract_key_decisions is False
 
+    def test_262144_auto_compression_boundary_triggers_only_above_standard_threshold(self):
+        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent._effective_max_token_limit = 262_144
+        agent.config = SimpleNamespace(
+            context_compression=SimpleNamespace(
+                levels=SimpleNamespace(standard=0.8),
+            )
+        )
+
+        assert agent._automatic_context_compression_threshold_tokens() == 209_715
+        assert agent._should_automatically_compress(209_715) is False
+        assert agent._should_automatically_compress(209_716) is True
+
     def test_explicit_runtime_agent_binding_overrides_process_environment(self, monkeypatch):
         monkeypatch.setenv("VIBELUTION_AGENT_ID", "agent-from-process-env")
         monkeypatch.setenv("VIBELUTION_AGENT_LLM_SLOT", "subagentExecution")
