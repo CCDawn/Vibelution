@@ -10,7 +10,56 @@ import { PaneResizeHandle } from "../components/layout/PaneResizeHandle";
 import { type PaneSpec } from "../components/layout/paneLayoutPersistence";
 import { usePersistedPaneResize } from "../components/layout/usePersistedPaneResize";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
-import { createLazyNamedTeamPanel } from "./teams/lazyTeamPanel";
+import {
+  ResearchMemoryEvidencePanel,
+  TeamAiSearchWorkspacePanel,
+  TeamExperimentPlanningLedgerPanel,
+  TeamKnowledgeCollectionCompletionFlowPanel,
+  TeamMemoryIndexPanel,
+  TeamResearchLoopPanel,
+  TeamResearchStageAgentPanel,
+  TeamResearchStageAgentSummary,
+  TeamResearchStageLauncherPanel,
+  TeamResearchStageStandalonePagePanel,
+  TeamSourceCollectionActiveStagePanel,
+  TeamSourceCollectionActiveStageWorkspacePanel,
+  TeamSourceCollectionControlsPanel,
+  TeamSourceCollectionControlsWorkspacePanel,
+  TeamSourceCollectionConversationPanel,
+  TeamSourceCollectionConversationWorkspacePanel,
+  TeamSourceCollectionExtractionRecoveryPanel,
+  TeamSourceCollectionExtractionRecoveryWorkspacePanel,
+  TeamSourceCollectionFilterBar,
+  TeamSourceCollectionFindingDetailsPanel,
+  TeamSourceCollectionGraphPanel,
+  TeamSourceCollectionGraphWorkspacePanel,
+  TeamSourceCollectionManualWritebackPanel,
+  TeamSourceCollectionMemoryPanel,
+  TeamSourceCollectionMemoryWorkspacePanel,
+  TeamSourceCollectionPagination,
+  TeamSourceCollectionPhaseCloseGatePanel,
+  TeamSourceCollectionRunSettingsPanel,
+  TeamSourceCollectionRunSwitcherPanel,
+  TeamSourceCollectionScreeningPanel,
+  TeamSourceCollectionScreeningWorkspacePanel,
+  TeamSourceCollectionSearchBriefPanel,
+  TeamSourceCollectionSelectedSourceWorkspacePanel,
+  TeamSourceCollectionSourceDetailPanel,
+  TeamSourceCollectionStageAgentsPanel,
+  TeamSourceCollectionStandaloneStagePanel,
+  TeamSourceCollectionStorageActionsPanel,
+  TeamsSourceCollectionPanel,
+  TeamWorkflowCandidateGraphStatusPanel,
+  TeamWorkflowCandidatePreviewPanel,
+  TeamWorkflowCoordinationStatusPanel,
+  TeamWorkflowGraphView,
+  TeamWorkflowKnowledgeIngestionStatusPanel,
+  TeamWorkflowModelEvidenceStatusPanel,
+  TeamWorkflowPaperNoteChunkStatusPanel,
+  TeamWorkflowSourceQualityStatusPanel,
+  teamsPanelPackLoaders,
+} from "./teams/teamLazyPanels";
+import { createExperimentWorkspaceActions } from "./teams/experimentWorkspaceActions";
 import {
   prefetchTeamsPanelPacks,
   resolveTeamsPanelPrefetchPacks,
@@ -253,7 +302,6 @@ import { agentCenterMemoryRoute, teamMemoryRoute } from "./agentCenterRoutes";
 import { agentDisplayInfo } from "./agentDisplay";
 import { createChatWorkspaceCache } from "./chatWorkspaceCache";
 import type { TeamMemoryIndexMember } from "./TeamMemoryIndexPanel";
-import type { ExperimentPlanMethodRequest } from "./TeamExperimentMethodPanel";
 import type { TeamSourceCollectionStageAgentCard, TeamSourceCollectionStageAgentTone } from "./TeamSourceCollectionStageAgentsPanel";
 import type { TeamSourceCollectionRunSwitcherRun } from "./TeamSourceCollectionRunSwitcherPanel";
 import type {
@@ -459,64 +507,6 @@ const styles = {
   ...experimentRouteStyles,
   ...workflowRouteStyles,
 } as Record<string, string>;
-
-/**
- * Path-scoped Teams UI packs (see teams/README.md).
- * Shared | research core | research experiment | research search | SC (U4).
- */
-const loadTeamSharedPanels = () => import("./teams/teamSharedPanels");
-const loadTeamResearchPanels = () => import("./teams/teamResearchPanels");
-const loadTeamResearchExperimentPanels = () => import("./teams/teamResearchExperimentPanels");
-const loadTeamResearchSearchPanels = () => import("./teams/teamResearchSearchPanels");
-const loadTeamSourceCollectionPanels = () => import("./teams/teamSourceCollectionPanels");
-
-const TeamMemoryIndexPanel = createLazyNamedTeamPanel(loadTeamResearchSearchPanels, "TeamMemoryIndexPanel");
-const TeamAiSearchWorkspacePanel = createLazyNamedTeamPanel(loadTeamResearchSearchPanels, "TeamAiSearchWorkspacePanel");
-const TeamResearchStageAgentPanel = createLazyNamedTeamPanel(loadTeamResearchPanels, "TeamResearchStageAgentPanel");
-const TeamResearchStageAgentSummary = createLazyNamedTeamPanel(loadTeamResearchPanels, "TeamResearchStageAgentSummary");
-const TeamResearchStageLauncherPanel = createLazyNamedTeamPanel(loadTeamResearchPanels, "TeamResearchStageLauncherPanel");
-const TeamResearchStageStandalonePagePanel = createLazyNamedTeamPanel(loadTeamResearchPanels, "TeamResearchStageStandalonePagePanel");
-const TeamResearchLoopPanel = createLazyNamedTeamPanel(loadTeamResearchPanels, "TeamResearchLoopPanel");
-const TeamExperimentPlanningLedgerPanel = createLazyNamedTeamPanel(loadTeamResearchExperimentPanels, "TeamExperimentPlanningLedgerPanel");
-// TeamExperimentMethodPanel is mounted inside TeamExperimentPlanningLedgerPanel (same experiment pack).
-const TeamSourceCollectionActiveStagePanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionActiveStagePanel");
-const TeamSourceCollectionPhaseCloseGatePanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionPhaseCloseGatePanel");
-const TeamSourceCollectionStageAgentsPanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionStageAgentsPanel");
-const TeamSourceCollectionRunSwitcherPanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionRunSwitcherPanel");
-const TeamSourceCollectionFindingDetailsPanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionFindingDetailsPanel");
-const TeamSourceCollectionConversationPanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionConversationPanel");
-const TeamSourceCollectionControlsPanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionControlsPanel");
-const TeamSourceCollectionExtractionRecoveryPanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionExtractionRecoveryPanel");
-const TeamSourceCollectionGraphPanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionGraphPanel");
-const TeamSourceCollectionManualWritebackPanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionManualWritebackPanel");
-const TeamSourceCollectionMemoryPanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionMemoryPanel");
-const TeamSourceCollectionScreeningPanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionScreeningPanel");
-const TeamKnowledgeCollectionCompletionFlowPanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamKnowledgeCollectionCompletionFlowPanel");
-const TeamSourceCollectionConversationWorkspacePanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionConversationWorkspacePanel");
-const TeamSourceCollectionScreeningWorkspacePanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionScreeningWorkspacePanel");
-const TeamSourceCollectionExtractionRecoveryWorkspacePanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionExtractionRecoveryWorkspacePanel");
-const TeamSourceCollectionGraphWorkspacePanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionGraphWorkspacePanel");
-const TeamSourceCollectionMemoryWorkspacePanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionMemoryWorkspacePanel");
-const TeamSourceCollectionSelectedSourceWorkspacePanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionSelectedSourceWorkspacePanel");
-const TeamSourceCollectionControlsWorkspacePanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionControlsWorkspacePanel");
-const TeamSourceCollectionActiveStageWorkspacePanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionActiveStageWorkspacePanel");
-const TeamSourceCollectionSourceDetailPanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionSourceDetailPanel");
-const TeamSourceCollectionStandaloneStagePanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionStandaloneStagePanel");
-const TeamSourceCollectionSearchBriefPanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionSearchBriefPanel");
-const TeamSourceCollectionRunSettingsPanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionRunSettingsPanel");
-const TeamSourceCollectionFilterBar = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionFilterBar");
-const TeamSourceCollectionPagination = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionPagination");
-const TeamSourceCollectionStorageActionsPanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionStorageActionsPanel");
-const TeamWorkflowCandidatePreviewPanel = createLazyNamedTeamPanel(loadTeamResearchExperimentPanels, "TeamWorkflowCandidatePreviewPanel");
-const TeamsSourceCollectionPanel = createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamsSourceCollectionPanel");
-const ResearchMemoryEvidencePanel = createLazyNamedTeamPanel(loadTeamSharedPanels, "ResearchMemoryEvidencePanel");
-const TeamWorkflowGraphView = createLazyNamedTeamPanel(loadTeamSharedPanels, "TeamWorkflowGraphView");
-const TeamWorkflowCandidateGraphStatusPanel = createLazyNamedTeamPanel(loadTeamResearchExperimentPanels, "TeamWorkflowCandidateGraphStatusPanel");
-const TeamWorkflowCoordinationStatusPanel = createLazyNamedTeamPanel(loadTeamResearchExperimentPanels, "TeamWorkflowCoordinationStatusPanel");
-const TeamWorkflowKnowledgeIngestionStatusPanel = createLazyNamedTeamPanel(loadTeamResearchExperimentPanels, "TeamWorkflowKnowledgeIngestionStatusPanel");
-const TeamWorkflowModelEvidenceStatusPanel = createLazyNamedTeamPanel(loadTeamResearchExperimentPanels, "TeamWorkflowModelEvidenceStatusPanel");
-const TeamWorkflowPaperNoteChunkStatusPanel = createLazyNamedTeamPanel(loadTeamResearchExperimentPanels, "TeamWorkflowPaperNoteChunkStatusPanel");
-const TeamWorkflowSourceQualityStatusPanel = createLazyNamedTeamPanel(loadTeamResearchExperimentPanels, "TeamWorkflowSourceQualityStatusPanel");
 
 const TEAMS_LAYOUT_ID = WORKBENCH_LAYOUT_IDS.teams;
 const TEAMS_INSPECTOR_PANE: PaneSpec = {
@@ -899,13 +889,7 @@ export function TeamsRoute({
     if (packs.length === 0) {
       return;
     }
-    prefetchTeamsPanelPacks(packs, {
-      shared: loadTeamSharedPanels,
-      research: loadTeamResearchPanels,
-      research_experiment: loadTeamResearchExperimentPanels,
-      research_search: loadTeamResearchSearchPanels,
-      source_collection: loadTeamSourceCollectionPanels,
-    });
+    prefetchTeamsPanelPacks(packs, teamsPanelPackLoaders);
   }, [
     researchWorkflowTeamSelected,
     aiSearchScopeTeamSelected,
@@ -1495,189 +1479,93 @@ export function TeamsRoute({
     }
   }
 
-  function createExperimentPlanFromWorkspace(methodRequest?: ExperimentPlanMethodRequest) {
-    if (!selectedTeam?.teamId || selectedTeamCreateExperimentPlanPending) {
-      return;
-    }
-    const experimentPhase = researchStagePhases.find((phase) => phase.stageType === "experiment");
-    const stageRoundId = experimentPhase?.activeRoundId || experimentPhase?.latestRound?.stageRoundId || experimentPlanningStatus?.latestExperimentRound?.stageRoundId || "";
-    createExperimentPlanMutation.mutate({
-      teamId: selectedTeam.teamId,
-      stageRoundId,
-      title: sourceCollectionDraft.title.trim() || experimentPhase?.latestRound?.title || "",
-      methodRequest,
-    });
-  }
-
-  function materializeEngineeringProxyHypothesisFromWorkspace(
-    plan: ExperimentPlanRecord,
-    draft: EngineeringProxyHypothesisDraft,
-  ) {
-    if (!selectedTeam?.teamId || selectedTeamMaterializeEngineeringProxyPending) {
-      return;
-    }
-    materializeEngineeringProxyHypothesisMutation.mutate({
-      teamId: selectedTeam.teamId,
-      plan,
-      draft,
-    });
-  }
-
-  function reviewExperimentHypothesisFromWorkspace(candidateId: string) {
-    if (!selectedTeam?.teamId || selectedTeamReviewExperimentHypothesisCandidateId) {
-      return;
-    }
-    reviewExperimentHypothesisMutation.mutate({
-      teamId: selectedTeam.teamId,
-      candidateId,
-    });
-  }
-
-  function createExperimentHypothesisRevisionFromWorkspace(
-    plan: ExperimentPlanRecord,
-    candidateId: string,
-  ) {
-    if (
-      !selectedTeam?.teamId
-      || selectedTeamCreateExperimentHypothesisRevisionCandidateId
-    ) {
-      return;
-    }
-    createExperimentHypothesisRevisionMutation.mutate({
-      teamId: selectedTeam.teamId,
-      plan,
-      candidateId,
-    });
-  }
-
-  function registerExperimentBaselineArtifactFromWorkspace(plan: ExperimentPlanRecord) {
-    if (!selectedTeam?.teamId || selectedTeamRegisterExperimentBaselineArtifactPending) {
-      return;
-    }
-    registerExperimentBaselineArtifactMutation.mutate({
-      teamId: selectedTeam.teamId,
-      plan,
-      draft: experimentBaselineArtifactDraft,
-    });
-  }
-
-  function freezeExperimentDesignFromWorkspace(plan: ExperimentPlanRecord) {
-    if (!selectedTeam?.teamId || selectedTeamFreezeExperimentDesignPending) {
-      return;
-    }
-    freezeExperimentDesignMutation.mutate({ teamId: selectedTeam.teamId, plan });
-  }
-
-  function registerExperimentSmokeResultFromWorkspace(plan: ExperimentPlanRecord) {
-    if (!selectedTeam?.teamId || selectedTeamRegisterExperimentSmokeResultPending) {
-      return;
-    }
-    registerExperimentSmokeResultMutation.mutate({
-      teamId: selectedTeam.teamId,
-      plan,
-      draft: experimentSmokeResultDraft,
-    });
-  }
-
-  function runExperimentSmokeFromWorkspace(plan: ExperimentPlanRecord, adapter: string, seed: number) {
-    if (!selectedTeam?.teamId || selectedTeamRunExperimentSmokePending) {
-      return;
-    }
-    runExperimentSmokeMutation.mutate({
-      teamId: selectedTeam.teamId,
-      plan,
-      adapter,
-      seed,
-    });
-  }
-
-  function registerExperimentFullRunResultFromWorkspace(plan: ExperimentPlanRecord) {
-    if (!selectedTeam?.teamId || selectedTeamRegisterExperimentFullRunResultPending) {
-      return;
-    }
-    registerExperimentFullRunResultMutation.mutate({
-      teamId: selectedTeam.teamId,
-      plan,
-      draft: experimentFullRunResultDraft,
-    });
-  }
-
-  function requestExperimentKnowledgeIngestionFromWorkspace(plan: ExperimentPlanRecord) {
-    if (!selectedTeam?.teamId || selectedTeamRequestExperimentKnowledgeIngestionPending) {
-      return;
-    }
-    requestExperimentKnowledgeIngestionMutation.mutate({
-      teamId: selectedTeam.teamId,
-      plan,
-      draft: experimentKnowledgeIngestionDraft,
-    });
-  }
-
-  function createResearchLoopFromWorkspace(plan: ExperimentPlanRecord | null) {
-    if (!selectedTeam?.teamId || selectedTeamCreateResearchLoopPending) {
-      return;
-    }
-    const templates = researchLoopTemplatesPayload?.templates ?? researchLoopStatus?.templates ?? [];
-    const templateId = selectedResearchLoopTemplateId || researchLoopTemplatesPayload?.defaultTemplateId || templates[0]?.templateId || "algorithm_model_experiment";
-    const researchQuestion = researchLoopCreateDraft.researchQuestion.trim() || plan?.goal || plan?.topic || sourceCollectionDraft.goal;
-    if (!researchQuestion.trim()) {
-      return;
-    }
-    createResearchLoopMutation.mutate({
-      teamId: selectedTeam.teamId,
-      plan,
-      templateId,
-      draft: researchLoopCreateDraft,
-    });
-  }
-
-  function recordResearchLoopEvidenceFromWorkspace(loop: ResearchLoopRecord) {
-    if (!selectedTeam?.teamId || selectedTeamRecordResearchLoopEvidencePending) {
-      return;
-    }
-    const evidenceType =
-      researchLoopEvidenceDraft.evidenceType
-      || loop.readiness.missingEvidenceTypes[0]
-      || loop.readiness.requiredEvidenceTypes[0]
-      || "";
-    const hasEvidencePayload = Boolean(
-      researchLoopEvidenceDraft.summary.trim()
-      || researchLoopEvidenceDraft.metricValue.trim()
-      || researchLoopEvidenceDraft.artifactRef.trim()
-      || researchLoopEvidenceDraft.datasetRefs.trim()
-      || researchLoopEvidenceDraft.environmentRefs.trim()
-      || researchLoopEvidenceDraft.logRefs.trim()
-      || researchLoopEvidenceDraft.commandPreview.trim(),
-    );
-    if (!evidenceType || !hasEvidencePayload) {
-      return;
-    }
-    recordResearchLoopEvidenceMutation.mutate({
-      teamId: selectedTeam.teamId,
-      loop,
-      draft: researchLoopEvidenceDraft,
-      evidenceType,
-    });
-  }
-
-  function recordResearchLoopDecisionFromWorkspace(loop: ResearchLoopRecord) {
-    if (!selectedTeam?.teamId || selectedTeamRecordResearchLoopDecisionPending || !researchLoopDecisionDraft.rationale.trim()) {
-      return;
-    }
-    const templates = researchLoopTemplatesPayload?.templates ?? researchLoopStatus?.templates ?? [];
-    const nextTemplateId =
-      researchLoopDecisionDraft.nextTemplateId
-      || selectedResearchLoopTemplateId
-      || loop.templateId
-      || templates[0]?.templateId
-      || "algorithm_model_experiment";
-    recordResearchLoopDecisionMutation.mutate({
-      teamId: selectedTeam.teamId,
-      loop,
-      draft: researchLoopDecisionDraft,
-      nextTemplateId,
-    });
-  }
+  const {
+    createExperimentPlanFromWorkspace,
+    materializeEngineeringProxyHypothesisFromWorkspace,
+    reviewExperimentHypothesisFromWorkspace,
+    createExperimentHypothesisRevisionFromWorkspace,
+    registerExperimentBaselineArtifactFromWorkspace,
+    freezeExperimentDesignFromWorkspace,
+    registerExperimentSmokeResultFromWorkspace,
+    runExperimentSmokeFromWorkspace,
+    registerExperimentFullRunResultFromWorkspace,
+    requestExperimentKnowledgeIngestionFromWorkspace,
+    createResearchLoopFromWorkspace,
+    recordResearchLoopEvidenceFromWorkspace,
+    recordResearchLoopDecisionFromWorkspace,
+  } = createExperimentWorkspaceActions({
+    teamId: selectedTeam?.teamId || "",
+    createExperimentPlanPending:
+      createExperimentPlanMutation.isPending
+      && createExperimentPlanMutation.variables?.teamId === selectedTeam?.teamId,
+    materializeEngineeringProxyPending:
+      materializeEngineeringProxyHypothesisMutation.isPending
+      && materializeEngineeringProxyHypothesisMutation.variables?.teamId === selectedTeam?.teamId,
+    reviewExperimentHypothesisCandidateId:
+      reviewExperimentHypothesisMutation.isPending
+      && reviewExperimentHypothesisMutation.variables?.teamId === selectedTeam?.teamId
+        ? reviewExperimentHypothesisMutation.variables.candidateId
+        : "",
+    createExperimentHypothesisRevisionCandidateId:
+      createExperimentHypothesisRevisionMutation.isPending
+      && createExperimentHypothesisRevisionMutation.variables?.teamId === selectedTeam?.teamId
+        ? createExperimentHypothesisRevisionMutation.variables.candidateId
+        : "",
+    freezeExperimentDesignPending:
+      freezeExperimentDesignMutation.isPending
+      && freezeExperimentDesignMutation.variables?.teamId === selectedTeam?.teamId,
+    registerExperimentBaselineArtifactPending:
+      registerExperimentBaselineArtifactMutation.isPending
+      && registerExperimentBaselineArtifactMutation.variables?.teamId === selectedTeam?.teamId,
+    registerExperimentSmokeResultPending:
+      registerExperimentSmokeResultMutation.isPending
+      && registerExperimentSmokeResultMutation.variables?.teamId === selectedTeam?.teamId,
+    runExperimentSmokePending:
+      runExperimentSmokeMutation.isPending
+      && runExperimentSmokeMutation.variables?.teamId === selectedTeam?.teamId,
+    registerExperimentFullRunResultPending:
+      registerExperimentFullRunResultMutation.isPending
+      && registerExperimentFullRunResultMutation.variables?.teamId === selectedTeam?.teamId,
+    requestExperimentKnowledgeIngestionPending:
+      requestExperimentKnowledgeIngestionMutation.isPending
+      && requestExperimentKnowledgeIngestionMutation.variables?.teamId === selectedTeam?.teamId,
+    createResearchLoopPending:
+      createResearchLoopMutation.isPending
+      && createResearchLoopMutation.variables?.teamId === selectedTeam?.teamId,
+    recordResearchLoopEvidencePending:
+      recordResearchLoopEvidenceMutation.isPending
+      && recordResearchLoopEvidenceMutation.variables?.teamId === selectedTeam?.teamId,
+    recordResearchLoopDecisionPending:
+      recordResearchLoopDecisionMutation.isPending
+      && recordResearchLoopDecisionMutation.variables?.teamId === selectedTeam?.teamId,
+    researchStagePhases: researchStageRoundStatusQuery.data?.phases ?? [],
+    experimentPlanningStatus: experimentPlanningStatusQuery.data ?? null,
+    sourceCollectionDraftTitle: sourceCollectionDraft.title,
+    sourceCollectionDraftGoal: sourceCollectionDraft.goal,
+    experimentBaselineArtifactDraft,
+    experimentSmokeResultDraft,
+    experimentFullRunResultDraft,
+    experimentKnowledgeIngestionDraft,
+    selectedResearchLoopTemplateId,
+    researchLoopCreateDraft,
+    researchLoopEvidenceDraft,
+    researchLoopDecisionDraft,
+    researchLoopTemplatesPayload: researchLoopTemplatesQuery.data ?? null,
+    researchLoopStatus: researchLoopStatusQuery.data ?? null,
+    createExperimentPlanMutation,
+    materializeEngineeringProxyHypothesisMutation,
+    reviewExperimentHypothesisMutation,
+    createExperimentHypothesisRevisionMutation,
+    registerExperimentBaselineArtifactMutation,
+    freezeExperimentDesignMutation,
+    registerExperimentSmokeResultMutation,
+    runExperimentSmokeMutation,
+    registerExperimentFullRunResultMutation,
+    requestExperimentKnowledgeIngestionMutation,
+    createResearchLoopMutation,
+    recordResearchLoopEvidenceMutation,
+    recordResearchLoopDecisionMutation,
+  });
 
   function renderResearchStageAgentSummary(stageType: ResearchStageType) {
     const bindings = researchStageAgentBindingsByStage[stageType] ?? [];

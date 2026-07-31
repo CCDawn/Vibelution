@@ -47,6 +47,8 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 | Team memory index UI | `../TeamMemoryIndexPanel.tsx` (via secondary pack) | bus timeline |
 | Source-collection UI panels (`TeamSourceCollection*`) | panel file under `routes/` (via secondary pack) | pure models |
 | Secondary-lazy loader helper | `lazyTeamPanel.tsx` | business logic |
+| Lazy pack loaders + panel facades | `teamLazyPanels.tsx` | route orchestration |
+| Experiment/research-loop workspace action adapters | `experimentWorkspaceActions.ts` | mutation hooks / draft ownership |
 | Shared UI pack barrel | `teamSharedPanels.ts` | path-specific orchestration |
 | Research core UI pack barrel | `teamResearchPanels.ts` | experiment / AI-search packs |
 | Research experiment UI pack barrel | `teamResearchExperimentPanels.ts` | core / SC packs |
@@ -138,9 +140,10 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 
 ## Next (planned) — Phase 9+
 
-1. Optional: collapse SC chrome+workspace double layer when inject surface stabilizes.
-2. Optional: extract remaining style-bound shell helpers only if they block a concrete claim.
-3. Optional: cross-route query/mutation patterns (Chat/Agents) only with a new phase charter.
+1. **Done (structure wave):** lazy pack facades → `teamLazyPanels.tsx`; experiment/research-loop workspace action adapters → `experimentWorkspaceActions.ts`.
+2. Optional: collapse SC chrome+workspace double layer when inject surface stabilizes.
+3. Optional: extract remaining style-bound shell helpers only if they block a concrete claim.
+4. Optional: cross-route query/mutation patterns (Chat/Agents) only with a new phase charter.
 
 ## Rules
 
