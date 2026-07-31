@@ -11,9 +11,9 @@ Prefer slice modules over growing `team_knowledge_service.py` when possible.
 |-----------|-------------------|--------|
 | Source types / enums / BM25 params | `constants.py` | IO; permission checks |
 | Search tokenize / BM25 / filters | `search_ranking.py` | store paths; ACL |
-| Knowledge base CRUD / proposals | facade (until pack) | pure ranking |
-| Owner inbox / central sources | facade (until pack) | pure ranking |
-| Path / JSONL store helpers | facade (until pack) | domain review flow |
+| Paths / JSONL / owner context / id helpers | `store.py` | promotion domain; ACL policy |
+| Knowledge base CRUD / proposals | facade (until pack) | pure ranking; path helpers |
+| Owner inbox / central promotion domain | facade (until pack) | pure path helpers (`store`) |
 
 ## Sole-owner rules
 
@@ -28,7 +28,8 @@ Prefer slice modules over growing `team_knowledge_service.py` when possible.
 | Map README | done | this file |
 | `constants.py` | **done** | source types, adapters, enums, BM25/token patterns |
 | `search_ranking.py` | **done** | pure BM25/semantic filter helpers |
-| store / permissions / inbox packs | pending | next slices |
+| `store.py` | **done** | roots/paths/JSONL/owner context/id helpers late-bind facade |
+| permissions / inbox-central domain packs | pending | next slices |
 
 ## Related
 

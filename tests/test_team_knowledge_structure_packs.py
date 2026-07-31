@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from core.web.services import team_knowledge_service as facade
-from core.web.services.team_knowledge import constants, search_ranking
+from core.web.services.team_knowledge import constants, search_ranking, store
 
 
 def test_facade_reexports_constants() -> None:
@@ -57,3 +57,28 @@ def test_search_ranking_bm25_prefers_title_overlap() -> None:
     assert results
     assert "model" in str(results[0].get("title") or "").lower()
     assert float(results[0].get("bm25Score") or 0) > 0
+
+
+def test_facade_reexports_store() -> None:
+    assert facade._read_jsonl is store._read_jsonl
+    assert facade._write_jsonl is store._write_jsonl
+    assert facade._write_json is store._write_json
+    assert facade._owner_context is store._owner_context
+    assert facade._coerce_owner_context is store._coerce_owner_context
+    assert facade._knowledge_root_for_owner is store._knowledge_root_for_owner
+    assert facade._load_bases_state_for_owner is store._load_bases_state_for_owner
+    assert facade._save_bases_state_for_owner is store._save_bases_state_for_owner
+    assert facade._project_root is store._project_root
+    assert facade._safe_token is store._safe_token
+    assert facade._new_event_id is store._new_event_id
+    assert facade._unique_strings is store._unique_strings
+    assert facade._central_source_registry_path is store._central_source_registry_path
+    # Shared mutable lock and project root remain on the facade.
+    assert hasattr(facade, "_LOCK")
+    assert facade.PROJECT_ROOT is not None
+
+
+def test_store_safe_token_and_unique_strings() -> None:
+    assert store._safe_token("Hello World!!", default="x", max_length=32) == "Hello-World"
+    assert store._unique_strings(["a", "a", "b"]) == ["a", "b"]
+    assert store._bounded_dict({"k" * 100: 1, "ok": 2})  # keys truncated
