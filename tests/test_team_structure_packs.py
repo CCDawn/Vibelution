@@ -18,6 +18,7 @@ from core.web.services.team import (
     team_membership,
     team_projection,
     team_repair,
+    team_store,
 )
 
 
@@ -106,6 +107,31 @@ def test_facade_reexports_team_logging() -> None:
     assert isinstance(facade._TEAM_DETAIL_LOG_STATE, dict)
     assert facade.TEAM_DETAIL_LOG_SLOW_THRESHOLD_MS == 250
     assert facade.TEAM_DETAIL_LOG_ROLLUP_REPEAT_THRESHOLD == 5
+
+
+def test_facade_reexports_team_store() -> None:
+    assert facade.utc_now_iso is team_store.utc_now_iso
+    assert facade._perf_counter is team_store._perf_counter
+    assert facade._elapsed_ms is team_store._elapsed_ms
+    assert facade._try_acquire_team_lock is team_store._try_acquire_team_lock
+    assert facade._release_team_lock_if_acquired is team_store._release_team_lock_if_acquired
+    assert facade._load_index is team_store._load_index
+    assert facade._save_index is team_store._save_index
+    assert facade._read_json is team_store._read_json
+    assert facade._write_json is team_store._write_json
+    assert facade._teams_root is team_store._teams_root
+    assert facade._teams_index_path is team_store._teams_index_path
+    assert facade._team_canvas_path is team_store._team_canvas_path
+    assert facade._project_root is team_store._project_root
+    assert facade._sync_project_bus_root is team_store._sync_project_bus_root
+    assert facade._relative_path is team_store._relative_path
+    assert facade._find_team is team_store._find_team
+    assert facade._normalize_required_id is team_store._normalize_required_id
+    assert facade._format_validation_error is team_store._format_validation_error
+    # Shared mutable registry lock remains on the facade for pack late-bind.
+    assert hasattr(facade, "_TEAM_LOCK")
+    assert facade.SCHEMA_VERSION == 1
+    assert facade.PROJECT_ROOT is not None
 
 
 def test_facade_reexports_team_repair() -> None:
