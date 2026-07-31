@@ -22,7 +22,7 @@ import {
   candidateSourceQualityAssessmentSummary,
   formatTime,
   sourceCollectionResultTone,
-  workflowIngestionStatusLabel,
+  sourceCollectionSimpleCandidateStatusPresentation,
 } from "./teams/source-collection/presentationModel";
 import type { SourceCollectionStageModuleId } from "./teams/source-collection/stageProjection";
 import { TeamSourceCollectionScreeningPanel } from "./TeamSourceCollectionScreeningPanel";
@@ -238,6 +238,9 @@ export function TeamSourceCollectionScreeningWorkspacePanel(props: TeamSourceCol
         {screeningCandidates.map((candidate: any) => {
                 const chunkPlanSummary = candidatePaperNoteChunkPlanSummary(candidate);
                 const sourceQualitySummary = candidateSourceQualityAssessmentSummary(candidate);
+                const qualityPresentation = sourceQualitySummary
+                  ? sourceCollectionSimpleCandidateStatusPresentation(candidate, lang)
+                  : null;
                 const evidenceLedgerSummary = sourceCollectionEvidenceLedgerSummary(candidate);
                 const provenance = sourceCollectionCandidateProvenance(candidate, lang);
                 const versionFamily = sourceCollectionCandidateVersionFamily(candidate, lang);
@@ -258,9 +261,14 @@ export function TeamSourceCollectionScreeningWorkspacePanel(props: TeamSourceCol
                     statusLabel={
                       versionFamily?.isSuperseded
                         ? versionFamily.statusLabel
-                        : sourceQualitySummary
-                        ? workflowIngestionStatusLabel(sourceQualitySummary.decision, lang)
+                        : qualityPresentation
+                        ? qualityPresentation.label
                         : (lang === "zh" ? "待 Agent 复核" : "pending agent review")
+                    }
+                    statusTitle={
+                      versionFamily?.isSuperseded
+                        ? versionFamily.reviewDisabledReason
+                        : qualityPresentation?.title
                     }
                     title={candidate.title || candidate.candidateId}
                     summary={candidate.summary || candidate.candidateType}
