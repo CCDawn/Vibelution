@@ -124,10 +124,14 @@ export function buildChatTokenStatusViewModel(options: {
   const compressionMainLine = compression
     ? `${numberFormatter.format(compression.currentTokens)} / ${numberFormatter.format(compression.effectiveTokenLimit)} · ${compressionCurrentPercent}%`
     : t("loadingContext");
+  const compressionPolicyUnmaterialized = compression?.policyMode === "unmaterialized"
+    || compression?.policySource === "migration_required";
   const compressionPolicySourceLine = compression
-    ? compression.policySource === "agent_custom"
-      ? (lang === "zh" ? "Agent 自定义策略" : "Agent custom policy")
-      : (lang === "zh" ? "继承全局策略" : "Inherited global policy")
+    ? compressionPolicyUnmaterialized
+      ? (lang === "zh" ? "Agent 策略未物化" : "Agent policy not materialized")
+      : compression.policySource === "agent_custom"
+        ? (lang === "zh" ? "Agent 自定义策略" : "Agent custom policy")
+        : (lang === "zh" ? "继承全局策略" : "Inherited global policy")
     : t("loadingContext");
   const compressionScopeLine = compression
     ? `${t("compressionScopeRuntime")} · ${compressionPolicySourceLine}`

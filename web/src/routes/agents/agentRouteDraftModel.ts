@@ -29,9 +29,9 @@ export type AgentToolPolicyDraft = {
 };
 
 export const DEFAULT_AGENT_CONTEXT_COMPRESSION_DRAFT: AgentContextCompressionPolicyDraft = {
-  mode: "inherit",
+  mode: "custom",
   enabled: true,
-  maxTokenLimit: "16000",
+  maxTokenLimit: "262144",
   maxCompressionsPerSession: "20",
   lightThreshold: "60",
   standardThreshold: "80",
@@ -87,7 +87,11 @@ export function contextCompressionDraftFromAgent(agent: AgentConfigWorkspaceAgen
   const preservation = source?.preservation ?? effective?.preservation ?? {};
   const defaults = DEFAULT_AGENT_CONTEXT_COMPRESSION_DRAFT;
   return {
-    mode: stored?.mode === "custom" ? "custom" : "inherit",
+    mode: stored?.mode === "custom"
+      ? "custom"
+      : agent
+        ? "inherit"
+        : defaults.mode,
     enabled: source?.enabled ?? effective?.enabled ?? defaults.enabled,
     maxTokenLimit: numericText(source?.maxTokenLimit ?? effective?.effectiveTokenLimit, Number(defaults.maxTokenLimit)),
     maxCompressionsPerSession: numericText(

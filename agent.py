@@ -1220,6 +1220,15 @@ class SelfEvolvingAgent:
             threshold = 0.95
         return min(1.0, max(0.01, threshold))
 
+    def _automatic_context_compression_threshold_tokens(self) -> int:
+        return int(
+            max(1, int(self._effective_max_token_limit))
+            * self._automatic_context_compression_threshold()
+        )
+
+    def _should_automatically_compress(self, current_tokens: int) -> bool:
+        return max(0, int(current_tokens)) > self._automatic_context_compression_threshold_tokens()
+
     def _init_llm(self):
         """初始化统一 LLM client。"""
         llm = get_llm_client(role="primary", config=self.config)
@@ -1619,9 +1628,7 @@ class SelfEvolvingAgent:
         self._last_context_compression_applied = False
         current_tokens = estimate_messages_tokens(messages)
         budget = max(1, int(self._effective_max_token_limit))
-        threshold_tokens = int(
-            budget * self._automatic_context_compression_threshold()
-        )
+        threshold_tokens = self._automatic_context_compression_threshold_tokens()
         runtime_binding = getattr(self, "runtime_agent_binding", {}) or {}
         turn_runtime = _turn_runtime_from_env()
         session_id = str(
@@ -2857,7 +2864,7 @@ class SelfEvolvingAgent:
 
                 # 硬限制：超出最大上下文时强制压缩
                 current_tokens = estimate_messages_tokens(messages)
-                if current_tokens > self._effective_max_token_limit * self._automatic_context_compression_threshold():
+                if self._should_automatically_compress(current_tokens):
                     messages, should_break = self._compress_messages(
                         messages, iteration, reason="达到配置的上下文压缩阈值"
                     )
@@ -2886,14 +2893,11 @@ class SelfEvolvingAgent:
                         "iteration": iteration,
                         "messageCount": len(messages),
                         "contextEstimatedTokens": current_tokens,
-                        "contextCompressionThresholdTokens": int(
-                            self._effective_max_token_limit
-                            * self._automatic_context_compression_threshold()
+                        "contextCompressionThresholdTokens": (
+                            self._automatic_context_compression_threshold_tokens()
                         ),
-                        "contextCompressionTriggered": bool(
+                        "contextCompressionTriggered": self._should_automatically_compress(
                             current_tokens
-                            > self._effective_max_token_limit
-                            * self._automatic_context_compression_threshold()
                         ),
                         "gitRefreshMs": git_refresh_ms,
                         "runtimeStateSyncMs": runtime_sync_ms,

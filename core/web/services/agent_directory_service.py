@@ -35,6 +35,9 @@ from core.logging import debug as _debug_logger
 from core.ui.chat_state import load_chat_state
 
 from . import agent_role_tool_profile_service
+from .agent_config_authority import (
+    DEFAULT_AGENT_CONTEXT_COMPRESSION_CREATION_POLICY,
+)
 from .runtime_scene_service import record_runtime_scene_event
 from .supervised_runtime_contract import supervised_role_runtime_tools
 from .agent_directory.profiles import (

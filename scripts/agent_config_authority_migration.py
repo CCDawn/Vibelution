@@ -27,6 +27,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from core.web.services.agent_config_authority import (  # noqa: E402
     AGENT_CONFIG_SCHEMA_VERSION,
+    DEFAULT_AGENT_CONTEXT_COMPRESSION_CREATION_POLICY,
     DEFAULT_PERMISSION_PRESET,
     materialize_agent_config_identity,
 )
@@ -178,6 +179,7 @@ def _build_plan(*, data_root: Path) -> _MigrationPlan:
     source_agents = source["agents"]
     candidate_agents = candidate["agents"]
     changed_count = 0
+    context_compression_policy_changes = 0
     agent_prefixed = 0
     session_repair_count = 0
     for source_agent, candidate_agent in zip(
@@ -190,6 +192,16 @@ def _build_plan(*, data_root: Path) -> _MigrationPlan:
             agent_prefixed += 1
         if str(source_agent.get("createdBy") or "").strip() == "session_repair":
             session_repair_count += 1
+        source_compression_policy = (
+            source_agent.get("contextCompressionPolicy")
+            if isinstance(source_agent.get("contextCompressionPolicy"), dict)
+            else {}
+        )
+        if str(source_compression_policy.get("mode") or "").strip().lower() != "custom":
+            candidate_agent["contextCompressionPolicy"] = copy.deepcopy(
+                DEFAULT_AGENT_CONTEXT_COMPRESSION_CREATION_POLICY
+            )
+            context_compression_policy_changes += 1
         previous_hash = str(candidate_agent.get("configHash") or "").strip()
         materialize_agent_config_identity(
             candidate_agent,
@@ -240,6 +252,10 @@ def _build_plan(*, data_root: Path) -> _MigrationPlan:
         "anomalies": {
             "sessionRepairAgents": session_repair_count,
         },
+        "contextCompressionPolicyChanges": context_compression_policy_changes,
+        "defaultContextCompressionMaxTokenLimit": (
+            DEFAULT_AGENT_CONTEXT_COMPRESSION_CREATION_POLICY["maxTokenLimit"]
+        ),
         "inputSha256": _bytes_sha256(input_bytes),
         "candidateSha256": _bytes_sha256(candidate_bytes),
         "policyHashesBefore": {
