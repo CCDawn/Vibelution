@@ -2579,6 +2579,30 @@ export function TeamsRoute({
   }
 
   function renderResearchStageStandalonePage(stageView: Exclude<ResearchStageWorkspaceView, "knowledge_collection">) {
+    const refreshStageWorkspace = () => {
+      createExperimentPlanMutation.reset();
+      materializeEngineeringProxyHypothesisMutation.reset();
+      reviewExperimentHypothesisMutation.reset();
+      createExperimentHypothesisRevisionMutation.reset();
+      freezeExperimentDesignMutation.reset();
+      registerExperimentBaselineArtifactMutation.reset();
+      runExperimentSmokeMutation.reset();
+      registerExperimentSmokeResultMutation.reset();
+      registerExperimentFullRunResultMutation.reset();
+      requestExperimentKnowledgeIngestionMutation.reset();
+      createResearchLoopMutation.reset();
+      recordResearchLoopEvidenceMutation.reset();
+      recordResearchLoopDecisionMutation.reset();
+      materializeResearchLoopIterationDesignMutation.reset();
+      void Promise.all([
+        researchStageRoundStatusQuery.refetch(),
+        experimentPlanningStatusQuery.refetch(),
+        experimentMethodCatalogQuery.refetch(),
+        researchLoopTemplatesQuery.refetch(),
+        researchLoopStatusQuery.refetch(),
+      ]);
+    };
+
     return (
       <TeamResearchStageStandalonePagePanel
         stageView={stageView}
@@ -2592,6 +2616,7 @@ export function TeamsRoute({
         activeTeamMemberCount={activeTeamMemberCount}
         selectedTeamSyncPending={selectedTeamSyncPending}
         researchStageRoundStatusQuery={researchStageRoundStatusQuery}
+        refreshStageWorkspace={refreshStageWorkspace}
         renderResearchStageAgentPanel={renderResearchStageAgentPanel}
         launchResearchStage={launchResearchStage}
         selectedTeamStartResearchStageError={selectedTeamStartResearchStageError}
