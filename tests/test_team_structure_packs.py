@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from core.web.services import team_service as facade
-from core.web.services.team import ai_search_ranking, canvas_primitives, kind_helpers
+from core.web.services.team import ai_search_ranking, canvas_primitives, kind_helpers, system_bootstrap
 
 
 def test_facade_reexports_canvas_primitives() -> None:
@@ -39,6 +39,33 @@ def test_kind_helpers_infer_known_team_ids() -> None:
     assert kind_helpers.infer_team_kind({"teamKind": "custom"}) == "custom"
     assert kind_helpers.team_kind_allows_member_agent_cascade({"teamKind": "custom"}) is True
     assert kind_helpers.team_kind_allows_member_agent_cascade({"teamKind": "research"}) is False
+
+
+def test_facade_reexports_system_bootstrap_control_plane() -> None:
+    assert facade.request_system_team_bootstrap is system_bootstrap.request_system_team_bootstrap
+    assert facade._run_system_team_bootstrap is system_bootstrap._run_system_team_bootstrap
+    assert facade._run_system_team_bootstrap_discovery is system_bootstrap._run_system_team_bootstrap_discovery
+    assert facade._system_team_bootstrap_required_steps is system_bootstrap._system_team_bootstrap_required_steps
+    assert facade._system_team_bootstrap_state_snapshot_locked is system_bootstrap._system_team_bootstrap_state_snapshot_locked
+    assert facade._record_system_team_bootstrap_event is system_bootstrap._record_system_team_bootstrap_event
+    # Shared mutable control-plane state remains on the facade for route/test access.
+    assert hasattr(facade, "_TEAM_SYSTEM_BOOTSTRAP_LOCK")
+    assert hasattr(facade, "_TEAM_SYSTEM_BOOTSTRAP_THREAD")
+    assert isinstance(facade._TEAM_SYSTEM_BOOTSTRAP_STATE, dict)
+    assert facade.TEAM_SYSTEM_BOOTSTRAP_READY_CACHE_TTL_SECONDS == 30.0
+
+
+def test_system_bootstrap_required_steps_orders_missing_checks(monkeypatch) -> None:
+    calls: list[str] = []
+
+    monkeypatch.setattr(facade, "evolution_system_teams_missing", lambda: calls.append("evolution") or True)
+    monkeypatch.setattr(facade, "ai_search_system_team_missing", lambda: calls.append("ai_search") or False)
+    monkeypatch.setattr(facade, "challenge_cup_research_team_agents_need_repair", lambda: calls.append("challenge") or True)
+    monkeypatch.setattr(facade, "knowledge_expansion_team_agents_need_repair", lambda: calls.append("knowledge") or False)
+
+    steps = system_bootstrap._system_team_bootstrap_required_steps()
+    assert steps == ["evolution_system_teams", "challenge_cup_research_team_agents"]
+    assert calls == ["evolution", "ai_search", "challenge", "knowledge"]
 
 
 def test_ai_search_ranking_filters_and_scores() -> None:
