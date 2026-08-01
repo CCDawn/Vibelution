@@ -127,9 +127,14 @@ def test_autonomous_role_turn_binds_candidate_workspace_and_exact_targets(
         from core.infrastructure.evolution_governor import (
             current_evolution_target_allowlist,
         )
-        from tools.shell_tools import create_file, get_workspace_root_override
+        from tools.shell_tools import (
+            create_file,
+            get_git_safe_directory_override,
+            get_workspace_root_override,
+        )
 
         captured["workspace"] = get_workspace_root_override()
+        captured["gitSafeDirectory"] = get_git_safe_directory_override()
         captured["targets"] = current_evolution_target_allowlist()
         captured["writeResult"] = create_file(
             "core/example.py",
@@ -158,6 +163,7 @@ def test_autonomous_role_turn_binds_candidate_workspace_and_exact_targets(
     )
 
     assert captured["workspace"] == candidate_root.resolve()
+    assert captured["gitSafeDirectory"] == candidate_root.resolve()
     assert captured["targets"] == (planned_target.resolve(),)
     assert "[OK]" in captured["writeResult"]
     assert planned_target.read_text(encoding="utf-8") == "CANDIDATE_ONLY = True\n"

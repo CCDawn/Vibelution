@@ -1095,9 +1095,16 @@ def _run_self_evolution_agent_role_turn(
         contexts.enter_context(runtime_context)
         workspace_path = str((binding or {}).get("workspacePath") or "").strip()
         if workspace_path:
-            from tools.shell_tools import workspace_root_override
+            from tools.shell_tools import (
+                git_safe_directory_override,
+                workspace_root_override,
+            )
 
             contexts.enter_context(workspace_root_override(workspace_path))
+            if allowed_target_paths is not None:
+                contexts.enter_context(
+                    git_safe_directory_override(workspace_path)
+                )
         if allowed_target_paths is not None:
             from core.infrastructure.evolution_governor import (
                 evolution_target_allowlist,

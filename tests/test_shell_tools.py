@@ -502,6 +502,55 @@ class TestExecuteShellCommand:
         assert "git status" in calls[0][0]
         assert calls[0][1]["creationflags"] & 0x08000000
 
+    def test_git_safe_directory_override_scopes_subprocess_environment(
+        self,
+        tmp_path,
+        monkeypatch,
+    ):
+        """候选 worktree 的 Git 信任只进入当前 Agent 命令子进程。"""
+        calls = []
+
+        class FakeProcess:
+            returncode = 0
+            pid = 12345
+
+            def communicate(self, timeout=None):
+                return "ok\n", ""
+
+            def poll(self):
+                return self.returncode
+
+            def wait(self, timeout=None):
+                return self.returncode
+
+        def fake_popen(command, **kwargs):
+            calls.append((command, kwargs))
+            return FakeProcess()
+
+        candidate = (tmp_path / "candidate").resolve()
+        candidate.mkdir()
+        monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+        monkeypatch.setenv("GIT_CONFIG_KEY_0", "user.name")
+        monkeypatch.setenv("GIT_CONFIG_VALUE_0", "Scoped Agent")
+        monkeypatch.setattr(shell_tools_module.subprocess, "Popen", fake_popen)
+
+        with shell_tools_module.git_safe_directory_override(candidate):
+            assert execute_shell_command("git status", cwd=str(candidate)) == "ok"
+        assert execute_shell_command("git status", cwd=str(candidate)) == "ok"
+
+        scoped_env = calls[0][1]["env"]
+        assert scoped_env["GIT_CONFIG_COUNT"] == "2"
+        assert scoped_env["GIT_CONFIG_KEY_0"] == "user.name"
+        assert scoped_env["GIT_CONFIG_VALUE_0"] == "Scoped Agent"
+        assert scoped_env["GIT_CONFIG_KEY_1"] == "safe.directory"
+        assert scoped_env["GIT_CONFIG_VALUE_1"] == str(candidate)
+        unscoped_env = calls[1][1]["env"]
+        assert unscoped_env["GIT_CONFIG_COUNT"] == "1"
+        assert unscoped_env["GIT_CONFIG_KEY_0"] == "user.name"
+        assert unscoped_env["GIT_CONFIG_VALUE_0"] == "Scoped Agent"
+        assert "GIT_CONFIG_KEY_1" not in unscoped_env
+        assert "GIT_CONFIG_VALUE_1" not in unscoped_env
+
     def test_windows_unix_marker_command_returns_cross_platform_warning(self):
         """Windows 下遇到 Unix shell 片段应直接返回兼容警告，避免误判路径问题。"""
         with patch.object(shell_tools_module, "IS_WINDOWS", True), patch.object(shell_tools_module, "IS_UNIX", False):
