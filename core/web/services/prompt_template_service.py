@@ -45,6 +45,7 @@ PROMPT_TEMPLATE_PATH = developer_sandbox.formal_workspace_path(PROJECT_ROOT, "ag
 RETIRED_PROMPT_TEMPLATE_IDS = frozenset({"prompt-self-summarizer"})
 RESEARCH_DEFAULT_PROMPT_VERSION = 1
 CHAT_AGENT_BASE_PROMPT_VERSION = 2
+SELF_EVOLUTION_EXECUTOR_PROMPT_VERSION = 1
 AGENT_PROMPT_SNAPSHOT_SCHEMA_VERSION = 3
 
 CHAT_AGENT_BASE_PROMPT = """## Conversation Agent Common Prompt
@@ -746,11 +747,17 @@ DEFAULT_PROMPT_TEMPLATES: tuple[dict[str, Any], ...] = (
             "## 行为边界\n"
             "- 只执行已确认目标和范围，不主动扩大变更面。\n"
             "- 每一步都围绕可观察结果、验证证据和阻塞点推进。\n"
-            "- 不宣称进化成功，最终质量由评审角色判断。\n\n"
+            "- 当前执行阶段已获自动闭环授权，无需再次请求用户确认。\n"
+            "- 必须实际调用工具实施、验证并收口；纯文本复述计划不算完成。\n"
+            "- 不执行评分、Judge 或自行批准合入；候选最终由用户审查。\n\n"
             "## 输出要求\n"
             "输出执行结果、变更范围、验证证据、阻塞点和剩余风险。"
         ),
-        "metadata": {"builtin": True, "roleKey": "executor"},
+        "metadata": {
+            "builtin": True,
+            "roleKey": "executor",
+            "builtinContentVersion": SELF_EVOLUTION_EXECUTOR_PROMPT_VERSION,
+        },
     },
     {
         "templateId": "prompt-self-reviewer",

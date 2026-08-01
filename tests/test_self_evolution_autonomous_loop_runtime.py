@@ -246,6 +246,17 @@ def test_runtime_rejects_non_successful_agent_turn(status):
 
 
 def test_runtime_rejects_candidate_without_changed_files():
+    turn_calls = 0
+
+    def run_role_turn(**_kwargs):
+        nonlocal turn_calls
+        turn_calls += 1
+        return {
+            "result": {"status": "completed", "summary": "完成"},
+            "carryover": {},
+            "conversationSessionId": "session-executor",
+        }
+
     hooks = build_autonomous_loop_hooks(
         AutonomousLoopRuntimeDependencies(
             load_bindings=lambda: {
@@ -255,11 +266,7 @@ def test_runtime_rejects_candidate_without_changed_files():
                     "workspacePath": "C:/workspace/main",
                 },
             },
-            run_role_turn=lambda **_kwargs: {
-                "result": {"status": "completed", "summary": "完成"},
-                "carryover": {},
-                "conversationSessionId": "session-executor",
-            },
+            run_role_turn=run_role_turn,
             create_candidate=lambda _context: {
                 "branch": "codex/self-loop-candidate",
                 "worktreePath": "C:/workspace/self-loop-candidate",
@@ -277,3 +284,99 @@ def test_runtime_rejects_candidate_without_changed_files():
 
     with pytest.raises(AutonomousLoopRuntimeError, match="no changed files"):
         hooks.evolve(_snapshot(candidate=None))
+    assert turn_calls == 2
+
+
+def test_runtime_retries_executor_once_when_first_turn_only_repeats_the_plan(
+    monkeypatch,
+):
+    turn_calls: list[dict] = []
+    inspection_calls = 0
+    scene_events: list[tuple[tuple, dict]] = []
+    monkeypatch.setattr(
+        "core.web.services.self_evolution_autonomous_loop_runtime."
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: scene_events.append((args, kwargs)),
+    )
+
+    def run_role_turn(**kwargs):
+        turn_calls.append(deepcopy(kwargs))
+        if len(turn_calls) == 1:
+            return {
+                "result": {
+                    "status": "completed",
+                    "summary": "我已经制定计划，请确认后再执行。",
+                    "tool_call_count": 0,
+                },
+                "carryover": {"previousResponseId": "response-plan-only"},
+                "conversationSessionId": "session-executor",
+            }
+        return {
+            "result": {
+                "status": "completed",
+                "summary": "已实施候选并完成聚焦验证。",
+                "tool_call_count": 3,
+                "tool_trace": [
+                    {"name": "open_evolution_transaction_tool", "status": "success"},
+                    {"name": "apply_patch_tool", "status": "success"},
+                    {"name": "close_evolution_transaction_tool", "status": "success"},
+                ],
+            },
+            "carryover": {"previousResponseId": "response-implemented"},
+            "conversationSessionId": "session-executor",
+        }
+
+    def inspect_candidate(_context):
+        nonlocal inspection_calls
+        inspection_calls += 1
+        if inspection_calls == 1:
+            return {
+                "headCommit": "a" * 40,
+                "changedFiles": [],
+                "variantId": "",
+            }
+        return {
+            "headCommit": "b" * 40,
+            "changedFiles": ["core/example.py"],
+            "variantId": "variant-retry",
+        }
+
+    hooks = build_autonomous_loop_hooks(
+        AutonomousLoopRuntimeDependencies(
+            load_bindings=lambda: {
+                "observer": {"agentId": "observer-agent"},
+                "executor": {
+                    "agentId": "executor-agent",
+                    "workspacePath": "C:/workspace/main",
+                },
+            },
+            run_role_turn=run_role_turn,
+            create_candidate=lambda _context: {
+                "branch": "codex/self-loop-candidate",
+                "worktreePath": "C:/workspace/self-loop-candidate",
+                "baseCommit": "a" * 40,
+            },
+            inspect_candidate=inspect_candidate,
+            integrate_candidate=lambda _context: {},
+            cleanup_candidate=lambda _context: {},
+        )
+    )
+
+    candidate = hooks.evolve(_snapshot(candidate=None))
+
+    assert len(turn_calls) == 2
+    assert inspection_calls == 2
+    assert turn_calls[1]["carryover"] == {
+        "previousResponseId": "response-plan-only"
+    }
+    assert "不要复述计划" in turn_calls[1]["prompt"]
+    assert "无需再次请求用户确认" in turn_calls[1]["prompt"]
+    assert "open_evolution_transaction_tool" in turn_calls[1]["prompt"]
+    assert candidate["changedFiles"] == ["core/example.py"]
+    assert candidate["variantId"] == "variant-retry"
+    assert scene_events[0][0][2] == (
+        "self_evolution.autonomous_loop.executor_retry_requested"
+    )
+    assert scene_events[0][1]["fields"]["reason"] == (
+        "no_tool_calls_and_no_changed_files"
+    )

@@ -7,6 +7,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from .runtime_scene_service import record_runtime_scene_event
 from .self_evolution_autonomous_loop_service import AutonomousLoopHooks
 
 
@@ -152,17 +153,38 @@ def build_autonomous_loop_hooks(
             runtime_tool_grants=list(EXECUTOR_RUNTIME_TOOLS),
             runtime_tool_source=AUTONOMOUS_RUNTIME_TOOL_SOURCE,
         )
-        inspection = dependencies.inspect_candidate(
-            {
-                "runId": run_id,
-                "snapshot": deepcopy(context),
-                "candidateWorkspace": deepcopy(workspace),
-                "agentResult": deepcopy(turn["result"]),
-            }
+        inspection = _inspect_candidate(
+            dependencies,
+            run_id=run_id,
+            context=context,
+            workspace=workspace,
+            turn=turn,
         )
-        if not isinstance(inspection, dict):
-            raise AutonomousLoopRuntimeError(
-                "Candidate inspection returned an invalid result."
+        changed_files = inspection.get("changedFiles")
+        if (
+            (not isinstance(changed_files, list) or not changed_files)
+            and _result_tool_call_count(turn["result"]) == 0
+        ):
+            _record_executor_retry(
+                run_id=run_id,
+                reason="no_tool_calls_and_no_changed_files",
+            )
+            turn = _run_successful_turn(
+                dependencies.run_role_turn,
+                role="executor",
+                binding=executor_binding,
+                run_id=run_id,
+                prompt=_evolution_retry_prompt(context),
+                carryover=deepcopy(turn.get("carryover") or {}),
+                runtime_tool_grants=list(EXECUTOR_RUNTIME_TOOLS),
+                runtime_tool_source=AUTONOMOUS_RUNTIME_TOOL_SOURCE,
+            )
+            inspection = _inspect_candidate(
+                dependencies,
+                run_id=run_id,
+                context=context,
+                workspace=workspace,
+                turn=turn,
             )
         changed_files = inspection.get("changedFiles")
         if not isinstance(changed_files, list) or not changed_files:
@@ -213,6 +235,29 @@ def build_autonomous_loop_hooks(
     )
 
 
+def _inspect_candidate(
+    dependencies: AutonomousLoopRuntimeDependencies,
+    *,
+    run_id: str,
+    context: dict[str, Any],
+    workspace: dict[str, Any],
+    turn: dict[str, Any],
+) -> dict[str, Any]:
+    inspection = dependencies.inspect_candidate(
+        {
+            "runId": run_id,
+            "snapshot": deepcopy(context),
+            "candidateWorkspace": deepcopy(workspace),
+            "agentResult": deepcopy(turn["result"]),
+        }
+    )
+    if not isinstance(inspection, dict):
+        raise AutonomousLoopRuntimeError(
+            "Candidate inspection returned an invalid result."
+        )
+    return inspection
+
+
 def _run_successful_turn(
     runner: RoleTurnCallable,
     **kwargs: Any,
@@ -232,6 +277,17 @@ def _run_successful_turn(
         ).strip()
         raise AutonomousLoopRuntimeError(detail)
     return turn
+
+
+def _result_tool_call_count(result: dict[str, Any]) -> int:
+    for key in ("tool_call_count", "toolCallCount"):
+        try:
+            count = int(result.get(key) or 0)
+        except (TypeError, ValueError):
+            count = 0
+        if count > 0:
+            return count
+    return len(_result_evidence(result))
 
 
 def _result_summary(result: dict[str, Any], *, label: str) -> str:
@@ -329,8 +385,47 @@ def _evolution_prompt(context: dict[str, Any]) -> str:
         f"观察：{str(observation.get('summary') or '').strip()}\n"
         f"计划：{str(plan.get('summary') or '').strip()}\n\n"
         "要求：\n"
-        "1. 只修改计划范围内文件，运行与改动相称的测试。\n"
-        "2. 不写主工作区，不刷新 Launcher，不执行远端操作。\n"
-        "3. 不得执行评分、Judge 或自行批准合入。\n"
-        "4. 完成后报告改动、测试、未覆盖边界和剩余风险。"
+        "1. 当前阶段已经获得自动闭环的执行授权，无需再次请求用户确认。\n"
+        "2. 必须实际调用工具实施计划；先调用 open_evolution_transaction_tool，"
+        "再读取、修改并验证候选，最后调用 close_evolution_transaction_tool 收口。\n"
+        "3. 只修改计划范围内文件，运行与改动相称的测试；纯文本复述计划不算完成。\n"
+        "4. 不写主工作区，不刷新 Launcher，不执行远端操作。\n"
+        "5. 不得执行评分、Judge 或自行批准合入。\n"
+        "6. 完成后报告改动、测试、未覆盖边界和剩余风险。"
     )
+
+
+def _evolution_retry_prompt(context: dict[str, Any]) -> str:
+    plan = context.get("plan") if isinstance(context.get("plan"), dict) else {}
+    return (
+        "上一条回复没有调用任何工具，候选工作树也没有产生变更，因此执行尚未开始。\n"
+        f"既定计划：{str(plan.get('summary') or '').strip()}\n\n"
+        "现在立即在当前隔离 worktree 中实施既定计划：\n"
+        "1. 不要复述计划，不要再次制定计划，也无需再次请求用户确认。\n"
+        "2. 先调用 open_evolution_transaction_tool 开账，再使用读取、编辑和测试工具"
+        "产生并验证候选变更，最后调用 close_evolution_transaction_tool 收口。\n"
+        "3. 仍须遵守原定范围；不要写主工作区、刷新 Launcher、执行远端操作、"
+        "评分、Judge 或自行批准合入。\n"
+        "4. 如果计划无法安全实施，使用工具收集阻塞证据并以 failed 状态关账。"
+    )
+
+
+def _record_executor_retry(*, run_id: str, reason: str) -> None:
+    try:
+        record_runtime_scene_event(
+            "work_run",
+            "evolving",
+            "self_evolution.autonomous_loop.executor_retry_requested",
+            message="Self-evolution executor received one bounded execution correction.",
+            level="warning",
+            outcome="retrying",
+            fields={
+                "runKind": "self_evolution_autonomous_loop",
+                "runId": run_id,
+                "reason": reason,
+                "attempt": 1,
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        return

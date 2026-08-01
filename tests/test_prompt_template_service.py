@@ -138,6 +138,11 @@ def test_prompt_template_registry_repairs_research_defaults(tmp_path, monkeypatc
     assert "prompt-self-executor" in self_evolution_template_ids
     assert "prompt-self-reviewer" in self_evolution_template_ids
     assert "prompt-self-summarizer" not in self_evolution_template_ids
+    self_executor = prompt_template_service.get_prompt_template("prompt-self-executor")
+    assert self_executor is not None
+    assert "必须实际调用工具实施" in self_executor["content"]
+    assert "无需再次请求用户确认" in self_executor["content"]
+    assert "最终质量由评审角色判断" not in self_executor["content"]
     search_scope = prompt_template_service.get_prompt_template("prompt-ai-search-scope-lead")
     assert search_scope is not None
     assert search_scope["metadata"]["roleKey"] == "ai_search_scope_lead"
@@ -284,6 +289,50 @@ def test_prompt_template_repair_upgrades_versioned_research_defaults(tmp_path, m
     assert "Evidence Chain" in by_id["prompt-research-deep"]["content"]
 
 
+def test_prompt_template_repair_upgrades_self_evolution_executor_contract(
+    tmp_path,
+    monkeypatch,
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    path = prompt_template_service.prompt_template_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "templates": [
+                    {
+                        "templateId": "prompt-self-executor",
+                        "name": "Self-evolution executor",
+                        "category": "self_evolution",
+                        "content": (
+                            "# 自进化执行 Agent\n\n"
+                            "等待用户再次确认后再执行计划。"
+                        ),
+                        "metadata": {
+                            "builtin": True,
+                            "roleKey": "executor",
+                        },
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    prompt_template_service.repair_prompt_templates()
+    detail = prompt_template_service.get_prompt_template("prompt-self-executor")
+
+    assert detail is not None
+    assert "必须实际调用工具实施" in detail["content"]
+    assert "无需再次请求用户确认" in detail["content"]
+    assert "等待用户再次确认" not in detail["content"]
+    assert detail["metadata"]["builtinContentVersion"] == (
+        prompt_template_service.SELF_EVOLUTION_EXECUTOR_PROMPT_VERSION
+    )
+
+
 def test_prompt_template_repair_drops_retired_self_evolution_summarizer(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     path = prompt_template_service.prompt_template_path()
@@ -420,7 +469,9 @@ def test_challenge_cup_source_collection_contract_names_source_ingestor_as_inges
         repo_root / "core" / "web" / "services" / "agent_directory" / "repair_store.py"
     ).read_text(encoding="utf-8")
     prompt_template_source = (repo_root / "core" / "web" / "services" / "prompt_template_service.py").read_text(encoding="utf-8")
-    team_service_source = (repo_root / "core" / "web" / "services" / "team_service.py").read_text(encoding="utf-8")
+    team_service_source = (
+        repo_root / "core" / "web" / "services" / "team" / "system_teams.py"
+    ).read_text(encoding="utf-8")
     flow_builder_source = (repo_root / "挑战杯" / "build_research_flow_site.mjs").read_text(encoding="utf-8")
 
     assert "资料入库/知识库管理员" not in agent_directory_source
