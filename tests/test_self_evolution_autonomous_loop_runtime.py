@@ -371,6 +371,99 @@ def test_runtime_plan_retries_once_without_tools_for_invalid_target_contract():
     )
 
 
+def test_runtime_plan_corrects_targets_outside_explicit_user_file_scope(
+    monkeypatch,
+):
+    turn_calls: list[dict] = []
+    scene_events: list[tuple[tuple, dict]] = []
+    monkeypatch.setattr(
+        "core.web.services.self_evolution_autonomous_loop_runtime."
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: scene_events.append((args, kwargs)),
+    )
+
+    def run_role_turn(**kwargs):
+        turn_calls.append(deepcopy(kwargs))
+        if len(turn_calls) == 1:
+            return {
+                "result": {
+                    "status": "completed",
+                    "summary": "改做无关浏览器恢复。",
+                    "targetFiles": [
+                        "web/src/lib/browser/api.ts",
+                        "web/src/lib/browser/api.test.ts",
+                    ],
+                },
+                "carryover": {"previousResponseId": "response-drifted-plan"},
+                "conversationSessionId": "session-observer",
+            }
+        return {
+            "result": {
+                "status": "completed",
+                "summary": "纠正为用户明确限定的两个文件。",
+                "targetFiles": [
+                    "core/web/services/self_evolution_control_service.py",
+                    "tests/test_self_evolution_control_service.py",
+                ],
+            },
+            "carryover": {"previousResponseId": "response-corrected-plan"},
+            "conversationSessionId": "session-observer",
+        }
+
+    hooks = build_autonomous_loop_hooks(
+        AutonomousLoopRuntimeDependencies(
+            load_bindings=lambda: {
+                "observer": {
+                    "agentId": "observer-agent",
+                    "directSessionId": "session-observer",
+                },
+                "executor": {"agentId": "executor-agent"},
+            },
+            run_role_turn=run_role_turn,
+            create_candidate=lambda _context: {},
+            inspect_candidate=lambda _context: {},
+            integrate_candidate=lambda _context: {},
+            cleanup_candidate=lambda _context: {},
+        )
+    )
+
+    plan = hooks.plan(
+        _snapshot(
+            request={
+                "goal": (
+                    "计划和修改范围必须且只能是 "
+                    "core/web/services/self_evolution_control_service.py "
+                    "与 tests/test_self_evolution_control_service.py。"
+                ),
+                "maxIterations": 1,
+            },
+            observation={
+                "summary": "已确认候选 Git 绑定缺少有界事件。",
+                "evidence": [],
+                "conversationSessionId": "session-observer",
+            },
+            plan=None,
+            candidate=None,
+        )
+    )
+
+    assert len(turn_calls) == 2
+    assert plan["targetFiles"] == [
+        "core/web/services/self_evolution_control_service.py",
+        "tests/test_self_evolution_control_service.py",
+    ]
+    assert turn_calls[1]["runtime_tool_grants"] == []
+    assert turn_calls[1]["disable_tools"] is True
+    assert "用户明确限定的可修改文件" in turn_calls[1]["prompt"]
+    assert "core/web/services/self_evolution_control_service.py" in (
+        turn_calls[1]["prompt"]
+    )
+    assert "web/src/lib/browser/api.ts" not in turn_calls[1]["prompt"]
+    assert scene_events[0][1]["fields"]["reason"] == (
+        "request_target_mismatch"
+    )
+
+
 @pytest.mark.parametrize(
     "target_file",
     [
