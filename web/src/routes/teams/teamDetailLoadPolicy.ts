@@ -60,6 +60,27 @@ export function resolveSourceCollectionRunsQueryEnabled(options: {
 }
 
 /**
+ * Full linked-room detail is only needed when the communication panel is visible.
+ * Team detail already carries a compact room reference for links and status chrome;
+ * avoid the participant/session-summary scan on research first-paint surfaces.
+ */
+export function resolveLinkedChatRoomQueryEnabled(options: {
+  linkedChatRoomId: string;
+  teamDetailReady: boolean;
+  researchWorkflowTeamSelected: boolean;
+  researchCanvasVisible: boolean;
+  researchWorkspaceView: ResearchWorkspaceViewLike;
+}): boolean {
+  if (!options.linkedChatRoomId || !options.teamDetailReady) {
+    return false;
+  }
+  if (!options.researchWorkflowTeamSelected) {
+    return true;
+  }
+  return !options.researchCanvasVisible && options.researchWorkspaceView === "discussion";
+}
+
+/**
  * Experiment planning / research-loop status are unused on SC-only surfaces and
  * should not fire for every research team overview refresh.
  */
