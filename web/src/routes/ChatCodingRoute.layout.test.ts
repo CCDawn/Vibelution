@@ -766,9 +766,9 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("uses the unified Agent session tab strip for multi-session or CLI states", () => {
-    expect(routeSource).toContain("agentSessionTabs.length > 0 || cliAgentRunTabs.length > 0");
+    expect(routeSource).toContain("selectedChatAgentId || agentSessionTabs.length > 0 || cliAgentRunTabs.length > 0");
     expect(routeSource).not.toContain("agentSessionTabs.length > 1 || cliAgentRunTabs.length > 0");
-    expect(agentSessionTabStripSource).toContain("cliAgentRuns.length === 0 && sessions.length === 0");
+    expect(agentSessionTabStripSource).not.toContain("cliAgentRuns.length === 0 && sessions.length === 0");
     expect(agentSessionTabStripSource).not.toContain("sessions.length <= 1");
 
     expect(routeStyles.agentSessionTabGroup).toBeTypeOf("string");
@@ -778,23 +778,23 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.agentSessionTabActive).toBeTypeOf("string");
   });
 
-  it("renders Agent sessions as a full-width browser-like navigation rail", () => {
+  it("renders Agent sessions as a compact browser-like navigation rail", () => {
     expect(routeStyles.tabStrip).toContain("overflow-hidden");
     expect(routeStyles.tabStrip).toContain("border-b");
     expect(routeStyles.tabStrip).toContain("items-end");
-    expect(agentSessionTabStripStyles.agentSessionTabGroup).toContain("w-full");
+    expect(agentSessionTabStripStyles.agentSessionTabRail).toContain("w-fit");
+    expect(agentSessionTabStripStyles.agentSessionTabRail).toContain("max-w-full");
     expect(agentSessionTabStripStyles.agentSessionTabGroup).toContain("flex-nowrap");
-    expect(agentSessionTabStripStyles.agentSessionTabGroup).toContain("overflow-x-auto");
+    expect(agentSessionTabStripStyles.agentSessionTabRail).toContain("overflow-x-auto");
     expect(agentSessionTabStripStyles.agentSessionTab).toContain("shrink-0");
     expect(agentSessionTabStripStyles.agentSessionTab).toContain("rounded-t-[var(--radius-control)]");
-    expect(agentSessionTabStripStyles.agentSessionTabMainActionActive).toContain("!border-[var(--accent-cool)]");
-    expect(agentSessionTabStripStyles.agentSessionTabMainActionActive).toContain("!-mb-px");
-    expect(agentSessionTabStripStyles.agentSessionTabCurrentBadge).toContain("bg-[var(--accent-cool)]");
+    expect(agentSessionTabStripStyles.agentSessionTabMainActionActive).toContain("!shadow-none");
+    expect(agentSessionTabStripStyles.agentSessionTabCreateButton).toContain("shrink-0");
+    expect(agentSessionTabStripStyles.agentSessionTabRail).toContain("flex-[0_1_auto]");
     expect(agentSessionTabStripStyles.agentSessionTabStatusDotRunning).toContain("state-success");
     expect(agentSessionTabStripStyles.agentSessionTabStatusDotError).toContain("state-error");
     expect(agentSessionTabStripStyles.agentSessionTabStatusDotApproval).toContain("state-warning");
-    expect(agentSessionTabStripStyles.agentSessionTab).toContain("opacity-[0.72]");
-    expect(agentSessionTabStripStyles.agentSessionTabActive).toContain("opacity-100");
+    expect(agentSessionTabStripStyles.agentSessionTab).not.toContain("opacity-[0.72]");
     expect(agentSessionTabStripStyles.agentSessionTabTitle).toContain("truncate");
   });
 
@@ -2587,7 +2587,24 @@ describe("ChatCodingRoute layout contract", () => {
     expect(directSessionIndexListSource).toContain("onPrefetch={onPrefetch}");
     expect(routeSource).toContain("onSubmitRename={submitRenameSession}");
     expect(routeSource).toContain("onCancelRename={cancelRenameSession}");
+    expect(routeSource).toContain("onCreateSession={handleCreateSession}");
+    expect(routeSource).toContain("onDeleteSession={handleDeleteSession}");
+    expect(routeSource).toContain("deletePending={deleteSessionMutation.isPending}");
+    expect(agentSessionTabStripSource).toContain("className={styles.agentSessionTabCreateButton}");
+    expect(agentSessionTabStripSource).toContain("className={styles.agentSessionTabCloseButton}");
+    expect(agentSessionTabStripSource).not.toContain("styles.agentSessionTabCurrentBadge");
+    expect(agentSessionTabStripSource).not.toContain("styles.agentSessionTabStatusText");
+    expect(agentSessionTabStripSource).toContain('role="presentation"');
+    expect(agentSessionTabStripSource).toContain("data-agent-session-tab-container");
+    expect(agentSessionTabStripSource).toContain('closest("[data-agent-session-tab-container]")?.contains(nextFocus)');
+    expect(agentSessionTabStripSource).toContain('role="tab"');
+    expect(agentSessionTabStripSource).toContain('event.key === "ArrowRight"');
+    expect(agentSessionTabStripSource).toContain('event.key === "ArrowLeft"');
+    expect(agentSessionTabStripSource).toContain('event.key === "Home"');
+    expect(agentSessionTabStripSource).toContain('event.key === "End"');
+    expect(agentSessionTabStripSource).toContain("isBusyPhase(session.currentPhase || session.status) || deletePending");
     expect(agentSessionTabStripSource).toContain("styles.agentSessionTabGroup");
+    expect(agentSessionTabStripSource).toContain("styles.agentSessionTabRail");
     expect(agentSessionTabStripSource).toContain("styles.agentSessionTabActive");
     expect(agentSessionTabStripSource).not.toContain("styles.agentSessionTabChild");
     expect(agentSessionTabStripSource).toContain("styles.agentSessionTabRoot");
@@ -3101,6 +3118,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndActionsSource).toContain("if (!window.confirm(sessionConfirmMessage))");
     expect(routeAndActionsSource).toContain("if (!window.confirm(groupConfirmMessage))");
     expect(routeAndActionsSource).toContain("[session.id]: t(\"deleteSessionBusy\")");
+    expect(routeAndActionsSource).toContain("deleteSessionMutation.isPending || isBusyPhase(session.currentPhase || session.status)");
     expect(routeSource).toContain('deleteBusyLabel={t("deleteSessionBusy")}');
     expect(directSessionIndexListSource).toContain("deleteBusyLabel");
     expect(directSessionIndexItemSource).toContain("const deleteBusyReason = sessionBusy ? deleteBusyLabel : \"\"");

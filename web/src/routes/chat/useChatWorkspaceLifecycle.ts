@@ -1,5 +1,5 @@
 import { useMutation, type QueryClient, type UseMutationResult } from "@tanstack/react-query";
-import type { Dispatch, SetStateAction } from "react";
+import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 
 import { fetchJson } from "../../api/client";
 import {
@@ -79,6 +79,7 @@ export type UseChatWorkspaceLifecycleOptions = {
   setGroupManageModeDraft: Dispatch<SetStateAction<string>>;
   setGroupManagePurposeDraft: Dispatch<SetStateAction<string>>;
   setProjectBusDraft: Dispatch<SetStateAction<string>>;
+  editingSessionIdRef: MutableRefObject<string | null>;
   setEditingSessionId: Dispatch<SetStateAction<string | null>>;
   setEditingSessionTitle: Dispatch<SetStateAction<string>>;
 };
@@ -188,6 +189,7 @@ export function useChatWorkspaceLifecycle({
   setGroupManageModeDraft,
   setGroupManagePurposeDraft,
   setProjectBusDraft,
+  editingSessionIdRef,
   setEditingSessionId,
   setEditingSessionTitle,
 }: UseChatWorkspaceLifecycleOptions): UseChatWorkspaceLifecycleResult {
@@ -210,6 +212,9 @@ export function useChatWorkspaceLifecycle({
         ...current,
         [nextDetail.id]: "",
       }));
+      editingSessionIdRef.current = nextDetail.id;
+      setEditingSessionId(nextDetail.id);
+      setEditingSessionTitle(String(nextDetail.title || t("newSession")).trim() || t("newSession"));
       syncSessionDetail(nextDetail);
       if (nextDetail.agentId || variables.agentId) {
         void queryClient.invalidateQueries({ queryKey: ["sessions", "agent", String(nextDetail.agentId || variables.agentId).trim()] });
@@ -596,6 +601,7 @@ export function useChatWorkspaceLifecycle({
       const targetSessionKind = String(targetSession?.sessionKind || "main").trim().toLowerCase();
       const renameSummaries = (sessions: SessionSummary[] | undefined) =>
         renameSessionInSummaries(sessions, variables.sessionId, variables.title, updatedAt);
+      editingSessionIdRef.current = null;
       setEditingSessionId(null);
       setEditingSessionTitle("");
       setSessionComposerErrors((current) => ({
@@ -669,8 +675,11 @@ export function useChatWorkspaceLifecycle({
       if (context?.previousAgents !== undefined) {
         queryClient.setQueryData(queryKeys.agents(), context.previousAgents);
       }
-      setEditingSessionId(variables.sessionId);
-      setEditingSessionTitle(variables.title);
+      if (!editingSessionIdRef.current || editingSessionIdRef.current === variables.sessionId) {
+        editingSessionIdRef.current = variables.sessionId;
+        setEditingSessionId(variables.sessionId);
+        setEditingSessionTitle(variables.title);
+      }
       setSessionComposerErrors((current) => ({
         ...current,
         [variables.sessionId]: describeError(error, t("renameSessionFailed")),

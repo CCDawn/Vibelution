@@ -1,6 +1,6 @@
 const styles = {
   agentSessionTab:
-    "vui-routes-chatcodingroute agentSessionTab -mb-px min-w-0 inline-flex h-9 w-fit max-w-[16rem] shrink-0 items-end rounded-t-[var(--radius-control)] rounded-b-none opacity-[0.72]",
+    "vui-routes-chatcodingroute agentSessionTab -mb-px min-w-0 inline-flex h-9 w-fit max-w-[16rem] shrink-0 items-center rounded-t-[var(--radius-control)] rounded-b-none",
   agentSessionTabActive:
     "vui-routes-chatcodingroute agentSessionTabActive min-w-0 z-[1] opacity-100",
   agentSessionTabChild:
@@ -10,7 +10,9 @@ const styles = {
   agentSessionTabClosable:
     "vui-routes-chatcodingroute agentSessionTabClosable min-w-0 gap-0.5",
   agentSessionTabCloseButton:
-    "vui-routes-chatcodingroute agentSessionTabCloseButton h-7 min-h-7 w-7 min-w-7 rounded-t-[var(--radius-control)] rounded-b-none border-transparent bg-transparent px-0 text-[var(--fg-tertiary)] hover:border-[var(--vui-border-subtle)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)]",
+    "vui-routes-chatcodingroute agentSessionTabCloseButton h-7 min-h-7 w-7 min-w-7 shrink-0 rounded-[var(--radius-control)] border-transparent bg-transparent px-0 text-[var(--fg-tertiary)] hover:border-[var(--vui-border-subtle)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)]",
+  agentSessionTabCreateButton:
+    "vui-routes-chatcodingroute agentSessionTabCreateButton h-8 min-h-8 w-8 min-w-8 shrink-0 rounded-[var(--radius-control)] border-transparent bg-transparent px-0 text-[var(--fg-secondary)] hover:border-[var(--vui-border-subtle)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)]",
   agentSessionTabContextTarget:
     "vui-routes-chatcodingroute agentSessionTabContextTarget min-w-0 opacity-100",
   agentSessionTabCopy:
@@ -24,7 +26,9 @@ const styles = {
   agentSessionTabEditing:
     "vui-routes-chatcodingroute agentSessionTabEditing min-w-[12rem] max-w-[18rem] gap-1.5 rounded-t-[var(--radius-control)] rounded-b-none border border-b-transparent border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-row))] px-2 py-1 opacity-100",
   agentSessionTabGroup:
-    "vui-routes-chatcodingroute agentSessionTabGroup min-w-0 flex w-full flex-1 flex-nowrap items-end gap-0.5 overflow-x-auto overflow-y-hidden pr-2 [scrollbar-width:thin]",
+    "vui-routes-chatcodingroute agentSessionTabGroup min-w-0 flex w-fit flex-none flex-nowrap items-end gap-0.5",
+  agentSessionTabRail:
+    "vui-routes-chatcodingroute agentSessionTabRail min-w-0 flex w-fit max-w-full flex-[0_1_auto] flex-nowrap items-end gap-0.5 overflow-x-auto overflow-y-hidden pr-2 [scrollbar-width:thin]",
   agentSessionTabIcon:
     "vui-routes-chatcodingroute agentSessionTabIcon inline-grid h-4 w-4 shrink-0 place-items-center text-[var(--fg-tertiary)]",
   agentSessionTabIconActive:
@@ -32,27 +36,18 @@ const styles = {
   agentSessionTabKicker:
     "vui-routes-chatcodingroute agentSessionTabKicker min-w-0 text-[10px] font-semibold leading-none text-[var(--fg-tertiary)]",
   // Force through VButton slots so selection is never washed out by default secondary styles.
-  agentSessionTabMainAction: `vui-routes-chatcodingroute agentSessionTabMainAction !h-9 !min-h-9 min-w-0 max-w-full !rounded-t-[var(--radius-control)] !rounded-b-none !border-2 !border-[var(--vui-border-subtle)] !bg-[var(--vui-control-muted)] !px-2.5 !text-[var(--fg-secondary)] !shadow-none hover:!border-[var(--vui-control-hover-border)] hover:!bg-[var(--vui-control-hover-bg)] hover:!text-[var(--vui-control-hover-fg)] [&_[data-slot=vui-button-content]]:max-w-full [&_[data-slot=vui-button-content]]:!gap-1.5 [&_[data-slot=vui-button-label]]:flex [&_[data-slot=vui-button-label]]:min-w-0 [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:!gap-1.5 [&_[data-slot=vui-button-label]]:truncate`,
-  // Selected = explicit border ring (user request); status color stays on the dot only.
-  agentSessionTabMainActionActive: `vui-routes-chatcodingroute agentSessionTabMainActionActive !-mb-px !border-2 !border-[var(--accent-cool)] !border-b-[var(--vui-surface-panel)] !bg-[color-mix(in_srgb,var(--accent-cool)_16%,var(--vui-surface-panel))] !text-[var(--fg-primary)] !shadow-[0_0_0_1px_color-mix(in_srgb,var(--accent-cool)_35%,transparent)]`,
+  agentSessionTabMainAction: `vui-routes-chatcodingroute agentSessionTabMainAction !h-9 !min-h-9 min-w-0 max-w-full !rounded-t-[var(--radius-control)] !rounded-b-none !border !border-transparent !bg-transparent !px-2 !text-[var(--fg-secondary)] !shadow-none hover:!border-[var(--vui-border-subtle)] hover:!bg-[var(--vui-control-muted-hover)] hover:!text-[var(--vui-control-hover-fg)] [&_[data-slot=vui-button-content]]:max-w-full [&_[data-slot=vui-button-content]]:!gap-1.5 [&_[data-slot=vui-button-label]]:flex [&_[data-slot=vui-button-label]]:min-w-0 [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:!gap-1.5 [&_[data-slot=vui-button-label]]:truncate`,
+  agentSessionTabMainActionActive: `vui-routes-chatcodingroute agentSessionTabMainActionActive !border-[color-mix(in_srgb,var(--accent-cool)_42%,var(--vui-border-subtle))] !bg-[color-mix(in_srgb,var(--accent-cool)_9%,var(--vui-surface-panel))] !text-[var(--fg-primary)] !shadow-none`,
   agentSessionTabMainActionContextTarget:
     "vui-routes-chatcodingroute agentSessionTabMainActionContextTarget !border-[color-mix(in_srgb,var(--accent-cool)_40%,transparent)] !bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
   agentSessionTabMeta:
     "vui-routes-chatcodingroute agentSessionTabMeta min-w-0 max-w-full text-left [font-size:var(--vui-font-xs)] leading-none text-[var(--fg-tertiary)]",
   agentSessionTabRoot:
     "vui-routes-chatcodingroute agentSessionTabRoot min-w-0",
-  agentSessionTabCurrentBadge:
-    "vui-routes-chatcodingroute agentSessionTabCurrentBadge shrink-0 rounded-full border border-[color-mix(in_srgb,var(--accent-cool)_45%,transparent)] bg-[var(--accent-cool)] px-1.5 py-0.5 text-[10px] font-extrabold leading-none tracking-wide text-white",
   agentSessionTabTitleBlock:
     "vui-routes-chatcodingroute agentSessionTabTitleBlock min-w-0 inline-flex max-w-[12.5rem] items-center gap-1",
   agentSessionTabStatus:
     "vui-routes-chatcodingroute agentSessionTabStatus inline-flex shrink-0 items-center gap-1",
-  agentSessionTabStatusMuted:
-    "vui-routes-chatcodingroute agentSessionTabStatusMuted opacity-70",
-  agentSessionTabStatusText:
-    "vui-routes-chatcodingroute agentSessionTabStatusText max-w-[3.5rem] truncate text-[10px] font-semibold leading-none text-[var(--fg-tertiary)]",
-  agentSessionTabStatusTextActive:
-    "vui-routes-chatcodingroute agentSessionTabStatusTextActive text-[var(--fg-secondary)]",
   agentSessionTabStatusIndicator:
     "vui-routes-chatcodingroute agentSessionTabStatusIndicator inline-grid shrink-0 place-items-center",
   agentSessionTabStatusSpinner:
@@ -79,7 +74,7 @@ const styles = {
   agentSessionTabTitle:
     "vui-routes-chatcodingroute agentSessionTabTitle min-w-0 max-w-[9rem] truncate text-left [font-size:var(--vui-font-sm)] font-semibold leading-none text-[var(--fg-secondary)]",
   agentSessionTabTitleActive:
-    "vui-routes-chatcodingroute agentSessionTabTitleActive !text-[var(--fg-primary)] !font-extrabold",
+    "vui-routes-chatcodingroute agentSessionTabTitleActive !text-[var(--fg-primary)]",
   agentSessionTabTitleInput:
     "vui-routes-chatcodingroute agentSessionTabTitleInput min-w-0 grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-7 [&_select]:min-h-7 [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full [font-size:var(--vui-font-sm)] font-semibold leading-tight text-[var(--fg-primary)]",
 } as const;
