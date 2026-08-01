@@ -325,9 +325,16 @@ describe("AppShell layout contract", () => {
     expect(shellStyles).toContain('[data-theme-background-readability="standard"]');
     expect(shellStyles).toContain('[data-theme-background-readability="strong"]');
     expect(shellStyles).toContain("--theme-background-blur");
-    expect(shellStyles).toContain("backdrop-filter: blur(var(--theme-background-blur))");
+    // Full-window blur + fixed attachment caused Edge --app whole-window flicker.
+    expect(shellStyles).toContain("backdrop-filter: none");
+    expect(shellStyles).toContain("background-attachment: scroll, scroll, scroll");
     expect(shellStyles).toContain("var(--workbench-theme-background-image)");
     expect(shellStyles).toContain("background-size: auto, cover, auto");
+  });
+
+  it("avoids background health/runtime fetchStatus re-renders of the whole shell", () => {
+    expect(shellSource).toContain('notifyOnChangeProps: ["data", "error", "isError", "isPending", "isSuccess", "isRefetchError"]');
+    expect(shellSource).toContain("shareRuntimeSummaryIfOnlyVolatileChanged");
   });
 
   it("shows the current app version in the brand area", () => {

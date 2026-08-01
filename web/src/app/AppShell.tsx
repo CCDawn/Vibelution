@@ -747,6 +747,8 @@ export function AppShell() {
     refetchIntervalInBackground: shellStartupWarmupActive,
     staleTime: 0,
     retry: false,
+    // Ignore fetchStatus churn so background health polls do not re-render the whole shell.
+    notifyOnChangeProps: ["data", "error", "isError", "isPending", "isSuccess", "isRefetchError"],
   });
   // Phase-1 shell ready depends only on config + health; runtime summary is a phase-2 enhancement.
   useEffect(() => {
@@ -762,6 +764,7 @@ export function AppShell() {
     refetchIntervalInBackground: shellStartupWarmupActive,
     // Heartbeat-only field churn must not re-render the whole shell + route tree.
     structuralSharing: shareRuntimeSummaryIfOnlyVolatileChanged,
+    notifyOnChangeProps: ["data", "error", "isError", "isPending", "isSuccess", "isRefetchError"],
   });
 
   useEffect(() => syncWorkbenchThemeRoot(theme), [theme]);
