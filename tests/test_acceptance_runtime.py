@@ -28,7 +28,26 @@ def _project(tmp_path: Path) -> Path:
     (project / "scripts" / "web_workbench.py").write_text("# fixture\n", encoding="utf-8")
     (project / "web").mkdir()
     (project / "web" / "package.json").write_text("{}\n", encoding="utf-8")
+    vite_entry = project / "web" / "node_modules" / "vite" / "bin" / "vite.js"
+    vite_entry.parent.mkdir(parents=True, exist_ok=True)
+    vite_entry.write_text("// fixture\n", encoding="utf-8")
     return project
+
+
+def test_frontend_command_tracks_vite_node_process_directly(runtime, tmp_path, monkeypatch):
+    project = _project(tmp_path)
+    vite_entry = project / "web" / "node_modules" / "vite" / "bin" / "vite.js"
+    monkeypatch.setattr(
+        runtime.shutil,
+        "which",
+        lambda name: "C:/node/node.exe" if name in {"node.exe", "node"} else None,
+    )
+
+    command = runtime._frontend_command(project=project, frontend_port=5200)
+
+    assert command[:2] == ["C:/node/node.exe", str(vite_entry.resolve())]
+    assert command[2:] == ["--host", "127.0.0.1", "--port", "5200", "--strictPort"]
+    assert all("npm" not in part.lower() for part in command)
 
 
 def test_two_instances_receive_distinct_atomic_port_leases(runtime, tmp_path, monkeypatch):
@@ -105,7 +124,7 @@ def test_instance_environment_and_state_are_private(runtime, tmp_path, monkeypat
     monkeypatch.setattr(runtime, "_process_matches", lambda pid, create_time: True)
     monkeypatch.setattr(runtime, "_port_available", lambda port, host="127.0.0.1": True)
     monkeypatch.setattr(runtime, "_source_commit", lambda project_root: "abc123")
-    monkeypatch.setattr(runtime.shutil, "which", lambda name: "npm.cmd")
+    monkeypatch.setattr(runtime.shutil, "which", lambda name: "node.exe")
 
     state = runtime.start_instance(
         instance_id="task-a",
@@ -191,7 +210,7 @@ def test_startup_failure_rolls_back_processes_and_leases(runtime, tmp_path, monk
     monkeypatch.setattr(runtime, "_process_create_time", lambda pid: float(pid))
     monkeypatch.setattr(runtime, "_process_matches", lambda pid, create_time: True)
     monkeypatch.setattr(runtime, "_port_available", lambda port, host="127.0.0.1": True)
-    monkeypatch.setattr(runtime.shutil, "which", lambda name: "npm.cmd")
+    monkeypatch.setattr(runtime.shutil, "which", lambda name: "node.exe")
 
     with pytest.raises(RuntimeError, match="boom"):
         runtime.start_instance(
