@@ -26,6 +26,7 @@ class AgentSingleTurnRequest:
     initial_prompt: str
     workspace_path: str | None = None
     config: Any = None
+    disable_tools: bool = False
     carryover: dict[str, Any] | None = None
     chat_history: list[dict[str, Any]] | None = None
     turn_identity: str = ""
@@ -299,6 +300,7 @@ def run_agent_single_turn(
     raw_result = _execute_existing_agent_single_turn(
         agent,
         initial_prompt=request.initial_prompt,
+        disable_tools=request.disable_tools,
         prompt_cache_partition=prompt_cache_partition,
     )
     result = raw_result if isinstance(raw_result, dict) else {}

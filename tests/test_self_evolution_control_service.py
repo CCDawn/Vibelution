@@ -96,6 +96,60 @@ def test_autonomous_role_turn_projects_exact_runtime_tool_grants(monkeypatch):
     assert captured["runtime_tool_source"] == "self_evolution_autonomous_loop"
 
 
+def test_autonomous_role_turn_applies_isolated_iteration_budget(monkeypatch):
+    captured: dict = {}
+    source_config = SimpleNamespace(agent=SimpleNamespace(max_iterations=200))
+    monkeypatch.setattr(
+        service,
+        "build_agent_context",
+        lambda agent_id, **_kwargs: SimpleNamespace(
+            agent_id=agent_id,
+            session_id="session-observer",
+            context_block="",
+            static_context_block="",
+            dynamic_context_block="",
+        ),
+    )
+    monkeypatch.setattr(
+        service,
+        "_self_evolution_agent_config",
+        lambda _binding: source_config,
+    )
+    monkeypatch.setattr(service, "record_agent_turn_result", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        agent_directory_service,
+        "active_agent_runtime",
+        lambda *_args, **_kwargs: nullcontext({}),
+    )
+
+    def run_single_turn(request):
+        captured["request"] = request
+        return SimpleNamespace(
+            result={"status": "completed", "summary": "观察完成"},
+            carryover={},
+            runtime=None,
+        )
+
+    monkeypatch.setattr(service, "run_agent_single_turn", run_single_turn)
+
+    service._run_self_evolution_agent_role_turn(
+        role="observer",
+        binding={
+            "agentId": "agent-observer",
+            "directSessionId": "session-observer",
+        },
+        run_id="self-loop-budget",
+        prompt="只读观察",
+        max_iterations=6,
+        disable_tools=True,
+    )
+
+    assert source_config.agent.max_iterations == 200
+    assert captured["request"].config is not source_config
+    assert captured["request"].config.agent.max_iterations == 6
+    assert captured["request"].disable_tools is True
+
+
 @pytest.fixture(autouse=True)
 def reset_self_evolution_run_state(monkeypatch: pytest.MonkeyPatch):
     manager_store: dict[str, dict[str, dict]] = {"self": {}, "supervised": {}}

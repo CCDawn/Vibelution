@@ -15,6 +15,9 @@ RuntimeCallable = Callable[[dict[str, Any]], dict[str, Any]]
 RoleTurnCallable = Callable[..., dict[str, Any]]
 BindingsCallable = Callable[[], dict[str, dict[str, Any]]]
 AUTONOMOUS_RUNTIME_TOOL_SOURCE = "self_evolution_autonomous_loop"
+OBSERVER_MAX_ITERATIONS = 8
+PLANNER_MAX_ITERATIONS = 4
+ANALYSIS_FINALIZATION_MAX_ITERATIONS = 2
 OBSERVER_RUNTIME_TOOLS = (
     "grep_search_tool",
     "code_symbol_tool",
@@ -83,8 +86,9 @@ def build_autonomous_loop_hooks(
     def observe(context: dict[str, Any]) -> dict[str, Any]:
         run_id = _run_id(context)
         binding = bindings_for(context)["observer"]
-        turn = _run_successful_turn(
+        turn = _run_bounded_analysis_turn(
             dependencies.run_role_turn,
+            phase="observation",
             role="observer",
             binding=binding,
             run_id=run_id,
@@ -92,6 +96,8 @@ def build_autonomous_loop_hooks(
             carryover=None,
             runtime_tool_grants=list(OBSERVER_RUNTIME_TOOLS),
             runtime_tool_source=AUTONOMOUS_RUNTIME_TOOL_SOURCE,
+            max_iterations=OBSERVER_MAX_ITERATIONS,
+            disable_tools=False,
         )
         with state_lock:
             carryovers[run_id] = deepcopy(turn.get("carryover") or {})
@@ -107,8 +113,9 @@ def build_autonomous_loop_hooks(
         binding = bindings_for(context)["observer"]
         with state_lock:
             carryover = deepcopy(carryovers.get(run_id) or {})
-        turn = _run_successful_turn(
+        turn = _run_bounded_analysis_turn(
             dependencies.run_role_turn,
+            phase="planning",
             role="observer",
             binding=binding,
             run_id=run_id,
@@ -116,6 +123,8 @@ def build_autonomous_loop_hooks(
             carryover=carryover,
             runtime_tool_grants=list(OBSERVER_RUNTIME_TOOLS),
             runtime_tool_source=AUTONOMOUS_RUNTIME_TOOL_SOURCE,
+            max_iterations=PLANNER_MAX_ITERATIONS,
+            disable_tools=False,
         )
         result = turn["result"]
         with state_lock:
@@ -262,7 +271,10 @@ def _run_successful_turn(
     runner: RoleTurnCallable,
     **kwargs: Any,
 ) -> dict[str, Any]:
-    turn = runner(**kwargs)
+    return _require_successful_turn(runner(**kwargs))
+
+
+def _require_successful_turn(turn: Any) -> dict[str, Any]:
     if not isinstance(turn, dict):
         raise AutonomousLoopRuntimeError("Agent turn returned an invalid result.")
     result = turn.get("result")
@@ -277,6 +289,36 @@ def _run_successful_turn(
         ).strip()
         raise AutonomousLoopRuntimeError(detail)
     return turn
+
+
+def _run_bounded_analysis_turn(
+    runner: RoleTurnCallable,
+    *,
+    phase: str,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    turn = runner(**kwargs)
+    result = turn.get("result") if isinstance(turn, dict) else None
+    exhausted = bool(
+        isinstance(result, dict)
+        and result.get("max_iteration_exhausted")
+    )
+    if not exhausted:
+        return _require_successful_turn(turn)
+    run_id = str(kwargs.get("run_id") or "").strip()
+    _record_analysis_finalization(run_id=run_id, phase=phase)
+    finalization_turn = runner(
+        role=kwargs["role"],
+        binding=kwargs["binding"],
+        run_id=run_id,
+        prompt=_analysis_finalization_prompt(phase),
+        carryover=deepcopy(turn.get("carryover") or {}),
+        runtime_tool_grants=[],
+        runtime_tool_source=AUTONOMOUS_RUNTIME_TOOL_SOURCE,
+        max_iterations=ANALYSIS_FINALIZATION_MAX_ITERATIONS,
+        disable_tools=True,
+    )
+    return _require_successful_turn(finalization_turn)
 
 
 def _result_tool_call_count(result: dict[str, Any]) -> int:
@@ -348,7 +390,8 @@ def _observation_prompt(context: dict[str, Any]) -> str:
         "要求：\n"
         "1. 只报告与目标直接相关的现状、证据、约束和风险。\n"
         "2. 不修改文件，不执行 Git 合入，不做评分或 Judge 判断。\n"
-        "3. 给出可供下一轮制定计划的简洁事实摘要。"
+        "3. 最多调用 6 次只读工具；证据足够时立即停止继续搜索。\n"
+        "4. 必须在第 8 轮前保留一次最终回答，给出可供下一轮制定计划的简洁事实摘要。"
     )
 
 
@@ -367,7 +410,18 @@ def _planning_prompt(context: dict[str, Any]) -> str:
         "要求：\n"
         "1. 计划必须能在隔离 worktree 内完成并留下测试证据。\n"
         "2. 不执行计划，不评分，不调用 Judge。\n"
-        "3. 明确修改范围、验证方法和停止条件。"
+        "3. 最多补充调用 2 次只读工具；已有观察证据足够时不得重复搜索。\n"
+        "4. 必须在第 4 轮前输出计划，明确修改范围、验证方法和停止条件。"
+    )
+
+
+def _analysis_finalization_prompt(phase: str) -> str:
+    label = "观察摘要" if phase == "observation" else "实施计划"
+    return (
+        f"当前{label}的只读工具预算已经用完。现在停止调用工具，"
+        "仅使用同一会话中已经获得的证据输出最终可见回答。\n"
+        "不要继续搜索，不要修改文件，不要请求用户确认，不要评分或调用 Judge。\n"
+        f"直接输出简洁、可执行的{label}；证据不足的部分明确标为未验证。"
     )
 
 
@@ -424,6 +478,28 @@ def _record_executor_retry(*, run_id: str, reason: str) -> None:
                 "runId": run_id,
                 "reason": reason,
                 "attempt": 1,
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        return
+
+
+def _record_analysis_finalization(*, run_id: str, phase: str) -> None:
+    try:
+        record_runtime_scene_event(
+            "work_run",
+            phase,
+            "self_evolution.autonomous_loop.analysis_finalization_requested",
+            message="Self-evolution analysis reached its bounded tool budget.",
+            level="warning",
+            outcome="finalizing",
+            fields={
+                "runKind": "self_evolution_autonomous_loop",
+                "runId": run_id,
+                "phase": phase,
+                "toolsDisabled": True,
+                "maxIterations": ANALYSIS_FINALIZATION_MAX_ITERATIONS,
             },
             lifecycle=True,
         )

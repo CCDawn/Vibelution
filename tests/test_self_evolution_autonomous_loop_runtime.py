@@ -153,6 +153,10 @@ def test_runtime_hooks_use_one_observer_context_then_isolated_executor():
         "grep_search_tool",
         "code_symbol_tool",
     ]
+    assert turn_calls[0]["max_iterations"] == 8
+    assert turn_calls[1]["max_iterations"] == 4
+    assert turn_calls[0]["disable_tools"] is False
+    assert turn_calls[1]["disable_tools"] is False
     assert "apply_patch_tool" not in turn_calls[0]["runtime_tool_grants"]
     assert "cli_tool" not in turn_calls[0]["runtime_tool_grants"]
     assert turn_calls[2]["runtime_tool_grants"] == [
@@ -185,6 +189,76 @@ def test_runtime_hooks_use_one_observer_context_then_isolated_executor():
         "core/example.py",
         "tests/test_example.py",
     ]
+
+
+def test_observer_exhaustion_gets_one_tool_disabled_summary_turn(monkeypatch):
+    turn_calls: list[dict] = []
+    scene_events: list[tuple[tuple, dict]] = []
+    monkeypatch.setattr(
+        "core.web.services.self_evolution_autonomous_loop_runtime."
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: scene_events.append((args, kwargs)),
+    )
+
+    def run_role_turn(**kwargs):
+        turn_calls.append(deepcopy(kwargs))
+        if len(turn_calls) == 1:
+            return {
+                "result": {
+                    "status": "stopped",
+                    "summary": "已达到本轮最大迭代次数 8。",
+                    "max_iteration_exhausted": True,
+                    "tool_call_count": 8,
+                    "tool_trace": [
+                        {"name": "grep_search_tool", "status": "success"}
+                    ],
+                },
+                "carryover": {"previousResponseId": "response-observe-tools"},
+                "conversationSessionId": "session-observer",
+            }
+        return {
+            "result": {
+                "status": "completed",
+                "summary": "已完成有界观察摘要。",
+                "tool_call_count": 0,
+            },
+            "carryover": {"previousResponseId": "response-observe-summary"},
+            "conversationSessionId": "session-observer",
+        }
+
+    hooks = build_autonomous_loop_hooks(
+        AutonomousLoopRuntimeDependencies(
+            load_bindings=lambda: {
+                "observer": {
+                    "agentId": "observer-agent",
+                    "directSessionId": "session-observer",
+                },
+                "executor": {"agentId": "executor-agent"},
+            },
+            run_role_turn=run_role_turn,
+            create_candidate=lambda _context: {},
+            inspect_candidate=lambda _context: {},
+            integrate_candidate=lambda _context: {},
+            cleanup_candidate=lambda _context: {},
+        )
+    )
+
+    observation = hooks.observe(_snapshot(observation=None, plan=None, candidate=None))
+
+    assert observation["summary"] == "已完成有界观察摘要。"
+    assert len(turn_calls) == 2
+    assert turn_calls[0]["max_iterations"] == 8
+    assert turn_calls[0]["disable_tools"] is False
+    assert turn_calls[1]["max_iterations"] == 2
+    assert turn_calls[1]["disable_tools"] is True
+    assert turn_calls[1]["runtime_tool_grants"] == []
+    assert turn_calls[1]["carryover"] == {
+        "previousResponseId": "response-observe-tools"
+    }
+    assert "停止调用工具" in turn_calls[1]["prompt"]
+    assert scene_events[0][0][2] == (
+        "self_evolution.autonomous_loop.analysis_finalization_requested"
+    )
 
 
 def test_runtime_integration_and_cleanup_hooks_are_deterministic_passthroughs():
