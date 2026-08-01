@@ -391,6 +391,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndDetailMutationsSource).toContain("resolveSessionToolApprovalDecision");
     expect(chatApiSource).toContain("/tool-approvals/");
     expect(routeAndDetailMutationsSource).toContain('"acceptForSession"');
+    expect(routeSource).toContain('"acceptAlways"');
     expect(routeAndDetailMutationsSource).toContain("/tool-governance-requests/");
     expect(routeSource).toContain("onApproveToolApproval={() => {");
     expect(routeSource).toContain("if (!pendingToolGovernanceApproval) {");
@@ -489,7 +490,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(markup).toContain("aria-describedby=");
     expect(markup).toContain("允许执行？");
     expect(markup).toContain("是");
-    expect(markup).toContain("始终（本会话）");
+    expect(markup).toContain("始终（此 Agent）");
     expect(markup).toContain("否");
     expect(markup).toContain("需要审批");
     expect(markup).toContain("当前会话");

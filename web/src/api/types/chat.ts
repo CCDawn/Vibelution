@@ -657,7 +657,9 @@ export type SessionToolApprovalRequest = {
   configRevision: number;
   configHash: string;
   permissionPreset: string;
-  availableDecisions: Array<"accept" | "acceptForSession" | "decline" | "cancel" | string>;
+  availableDecisions: Array<
+    "accept" | "acceptForSession" | "acceptAlways" | "decline" | "cancel" | string
+  >;
   createdAt: string;
   status: "pending" | "accepted" | "accepted_for_session" | "declined" | "cancelled" | "expired" | string;
   decision: string | null;

@@ -1,3 +1,4 @@
+from copy import deepcopy
 import threading
 import time
 from types import SimpleNamespace
@@ -10,12 +11,114 @@ from core.web.services import agent_directory_service
 from core.web.services.session import tool_approvals
 
 
+@pytest.fixture()
+def _agent_directory_state(monkeypatch):
+    def agent(agent_id, *, default_policy=False):
+        policy_id = (
+            agent_directory_service.DEFAULT_TOOL_POLICY_ID
+            if default_policy
+            else f"tool-{agent_id}"
+        )
+        return {
+            "agentId": agent_id,
+            "configRevision": 3,
+            "configHash": f"config-hash-{agent_id}",
+            "toolPolicyId": policy_id,
+            "toolPolicy": {
+                "policyId": policy_id,
+                "policyVersion": 1,
+                "allowedTools": ["exec_command", "web_search_tool"],
+                "preferredTools": [],
+                "blockedTools": [],
+                "maxCallsPerTurn": 20,
+                "perToolRules": {},
+            },
+        }
+
+    state = {
+        "agents": {
+            "agent-a": agent("agent-a"),
+            "agent-b": agent("agent-b"),
+            "agent-default": agent("agent-default", default_policy=True),
+        },
+        "updates": [],
+    }
+
+    def get_agent(agent_id, **_kwargs):
+        current = state["agents"].get(agent_id)
+        return deepcopy(current) if current else None
+
+    def list_agents(**_kwargs):
+        return [deepcopy(item) for item in state["agents"].values()]
+
+    def resolve_tool_policy_for_agent(agent_id, **_kwargs):
+        current = state["agents"].get(agent_id)
+        return deepcopy((current or {}).get("toolPolicy") or {})
+
+    def update_agent_instance(
+        agent_id,
+        *,
+        tool_policy=None,
+        expected_config_revision=None,
+        expected_tool_policy_fingerprint="",
+        **_kwargs,
+    ):
+        current = state["agents"].get(agent_id)
+        if current is None:
+            raise agent_directory_service.AgentNotFoundError(f"Agent not found: {agent_id}")
+        if (
+            expected_config_revision is not None
+            and current["configRevision"] != expected_config_revision
+        ):
+            raise agent_directory_service.AgentStateConflictError(
+                "Agent configuration revision changed. Refresh and retry."
+            )
+        current_policy = deepcopy(current["toolPolicy"])
+        if current["toolPolicyId"] == agent_directory_service.DEFAULT_TOOL_POLICY_ID:
+            current["toolPolicyId"] = f"tool-{agent_id}"
+            current_policy["policyId"] = current["toolPolicyId"]
+        if (
+            expected_tool_policy_fingerprint
+            and agent_directory_service.tool_policy_fingerprint(current_policy)
+            != expected_tool_policy_fingerprint
+        ):
+            raise agent_directory_service.AgentStateConflictError(
+                "ToolPolicy changed after this editor was opened. Refresh and retry."
+            )
+        updated_policy = deepcopy(tool_policy or current_policy)
+        updated_policy["policyVersion"] = int(current_policy.get("policyVersion") or 1) + 1
+        current["toolPolicy"] = updated_policy
+        current["configRevision"] += 1
+        current["configHash"] = f"config-hash-{agent_id}-r{current['configRevision']}"
+        state["updates"].append(deepcopy(current))
+        return deepcopy(current)
+
+    monkeypatch.setattr(agent_directory_service, "get_agent", get_agent)
+    monkeypatch.setattr(agent_directory_service, "list_agents", list_agents)
+    monkeypatch.setattr(
+        agent_directory_service,
+        "resolve_tool_policy_for_agent",
+        resolve_tool_policy_for_agent,
+    )
+    monkeypatch.setattr(agent_directory_service, "update_agent_instance", update_agent_instance)
+    monkeypatch.setattr(
+        tool_approvals,
+        "_canonical_agent_configs",
+        lambda agent_id="": [
+            deepcopy(item)
+            for key, item in state["agents"].items()
+            if not agent_id or key == agent_id
+        ],
+    )
+    return state
+
+
 @pytest.fixture(autouse=True)
 def _reset_approval_state():
-    tool_approvals.reset_tool_approval_state()
+    tool_approvals.reset_tool_approval_state(clear_durable=False)
     tool_authorization_service.clear_execution_authorization()
     yield
-    tool_approvals.reset_tool_approval_state()
+    tool_approvals.reset_tool_approval_state(clear_durable=False)
     tool_authorization_service.clear_execution_authorization()
 
 
@@ -214,7 +317,13 @@ def test_network_tool_waits_for_single_call_user_approval(monkeypatch):
 
     assert calls == []
     assert request["toolName"] == "web_search_tool"
-    assert request["availableDecisions"] == ["accept", "acceptForSession", "decline", "cancel"]
+    assert request["availableDecisions"] == [
+        "accept",
+        "acceptForSession",
+        "acceptAlways",
+        "decline",
+        "cancel",
+    ]
     assert "query" not in request
     assert request["argumentsHash"]
 
@@ -556,3 +665,271 @@ def test_service_reset_fails_closed_for_pending_requests(monkeypatch):
     assert not worker.is_alive()
     assert result_box["value"].allowed is False
     assert result_box["value"].code == "approval_cancelled"
+
+
+def test_accept_always_persists_in_agent_tool_policy_across_process_reset(
+    monkeypatch,
+    _agent_directory_state,
+):
+    monkeypatch.setattr(
+        agent_directory_service,
+        "resolve_tool_policy_for_agent",
+        lambda *_args, **_kwargs: pytest.fail(
+            "durable approval must not persist a runtime-effective ToolPolicy projection"
+        ),
+    )
+    _runtime(monkeypatch, session_id="session-a")
+    _install(("web_search_tool", "on_request", "network"))
+    first_box = {}
+    first = threading.Thread(
+        target=lambda: (
+            _install(("web_search_tool", "on_request", "network")),
+            first_box.setdefault(
+                "value",
+                tool_authorization_service.authorize_tool_execution(
+                    tool_name="web_search_tool",
+                    tool_call_id="call-always-first",
+                    tool_args={"query": "same"},
+                ),
+            ),
+        )
+    )
+    first.start()
+    request = _wait_for_pending("session-a")
+    resolved = tool_approvals.resolve_tool_approval_request(
+        "session-a",
+        request["requestId"],
+        decision="acceptAlways",
+    )
+    first.join(timeout=2)
+
+    assert resolved["status"] == "accepted_always"
+    assert first_box["value"].allowed is True
+    grants = tool_approvals.list_durable_tool_approval_grants(agent_id="agent-a")
+    assert len(grants) == 1
+    assert grants[0]["toolName"] == "web_search_tool"
+    persisted_agent = _agent_directory_state["agents"]["agent-a"]
+    persisted_rule = persisted_agent["toolPolicy"]["perToolRules"]["web_search_tool"]
+    assert persisted_rule["approvalGrants"] == [
+        {
+            "grantKey": grants[0]["grantKey"],
+            "scope": grants[0]["scope"],
+            "createdAt": grants[0]["createdAt"],
+            "updatedAt": grants[0]["updatedAt"],
+            "sourceSessionId": "session-a",
+            "sourceRequestId": request["requestId"],
+        }
+    ]
+    assert persisted_agent["configRevision"] == 4
+    assert len(_agent_directory_state["updates"]) == 1
+
+    # Drop only ephemeral process state; Agent ToolPolicy remains authoritative.
+    tool_approvals.reset_tool_approval_state(clear_durable=False)
+
+    _runtime(
+        monkeypatch,
+        session_id="session-b",
+        config_revision=persisted_agent["configRevision"],
+        config_hash=persisted_agent["configHash"],
+    )
+    _install(("web_search_tool", "on_request", "network"))
+    second = tool_authorization_service.authorize_tool_execution(
+        tool_name="web_search_tool",
+        tool_call_id="call-always-second",
+        tool_args={"query": "same"},
+    )
+    assert second.allowed is True
+    assert second.code == "approved_for_agent"
+    assert tool_approvals.list_tool_approval_requests("session-b", status="pending") == []
+
+
+def test_accept_always_is_isolated_by_agent_and_arguments(
+    monkeypatch,
+    _agent_directory_state,
+):
+    _runtime(monkeypatch, session_id="session-a")
+    _install(("web_search_tool", "on_request", "network"))
+    first_box = {}
+    first = threading.Thread(
+        target=lambda: (
+            _install(("web_search_tool", "on_request", "network")),
+            first_box.setdefault(
+                "value",
+                tool_authorization_service.authorize_tool_execution(
+                    tool_name="web_search_tool",
+                    tool_call_id="call-iso-first",
+                    tool_args={"query": "alpha"},
+                ),
+            ),
+        )
+    )
+    first.start()
+    request = _wait_for_pending()
+    tool_approvals.resolve_tool_approval_request(
+        "session-a",
+        request["requestId"],
+        decision="acceptAlways",
+    )
+    first.join(timeout=2)
+    assert first_box["value"].allowed is True
+
+    # Different arguments still require approval.
+    different_box = {}
+    different = threading.Thread(
+        target=lambda: (
+            _install(("web_search_tool", "on_request", "network")),
+            different_box.setdefault(
+                "value",
+                tool_authorization_service.authorize_tool_execution(
+                    tool_name="web_search_tool",
+                    tool_call_id="call-iso-args",
+                    tool_args={"query": "beta"},
+                ),
+            ),
+        )
+    )
+    different.start()
+    other_request = _wait_for_pending()
+    assert other_request["argumentsHash"] != request["argumentsHash"]
+    tool_approvals.resolve_tool_approval_request(
+        "session-a",
+        other_request["requestId"],
+        decision="cancel",
+    )
+    different.join(timeout=2)
+    assert different_box["value"].allowed is False
+
+    # Different agent still requires approval for the same arguments.
+    tool_approvals.reset_tool_approval_state(clear_durable=False)
+    foreign_box = {}
+    foreign = threading.Thread(
+        target=lambda: foreign_box.setdefault(
+            "value",
+            tool_approvals.authorize_or_wait(
+                session_id="session-a",
+                turn_id="turn-a",
+                agent_id="agent-b",
+                call_id="call-iso-agent",
+                tool_name="web_search_tool",
+                tool_args={"query": "alpha"},
+                approval="on_request",
+                risk="network",
+                decision_fingerprint="decision-b",
+                config_revision=3,
+                config_hash="config-hash-a",
+                permission_preset="request_approval",
+            ),
+        )
+    )
+    foreign.start()
+    foreign_request = _wait_for_pending()
+    assert foreign_request["agentId"] == "agent-b"
+    tool_approvals.resolve_tool_approval_request(
+        "session-a",
+        foreign_request["requestId"],
+        decision="cancel",
+    )
+    foreign.join(timeout=2)
+    assert foreign_box["value"].allowed is False
+    assert foreign_box["value"].code == "approval_cancelled"
+
+
+def test_accept_always_fails_closed_when_agent_config_revision_is_stale(
+    monkeypatch,
+    _agent_directory_state,
+):
+    _runtime(monkeypatch, session_id="session-a")
+    _install(("web_search_tool", "on_request", "network"))
+    result_box = {}
+    worker = threading.Thread(
+        target=lambda: (
+            _install(("web_search_tool", "on_request", "network")),
+            result_box.setdefault(
+                "value",
+                tool_authorization_service.authorize_tool_execution(
+                    tool_name="web_search_tool",
+                    tool_call_id="call-always-stale",
+                    tool_args={"query": "stale"},
+                ),
+            ),
+        )
+    )
+    worker.start()
+    request = _wait_for_pending()
+    _agent_directory_state["agents"]["agent-a"]["configRevision"] = 4
+
+    with pytest.raises(
+        tool_approvals.ToolApprovalConflictError,
+        match="configuration revision changed",
+    ):
+        tool_approvals.resolve_tool_approval_request(
+            "session-a",
+            request["requestId"],
+            decision="acceptAlways",
+        )
+
+    pending = tool_approvals.get_tool_approval_request("session-a", request["requestId"])
+    assert pending["status"] == "pending"
+    assert tool_approvals.list_durable_tool_approval_grants(agent_id="agent-a") == []
+    tool_approvals.resolve_tool_approval_request(
+        "session-a",
+        request["requestId"],
+        decision="cancel",
+    )
+    worker.join(timeout=2)
+    assert result_box["value"].allowed is False
+
+
+def test_accept_always_materializes_agent_owned_policy_from_default(
+    _agent_directory_state,
+):
+    tool_approvals._add_durable_grant(
+        agent_id="agent-default",
+        tool_name="web_search_tool",
+        grant_key="grant-default",
+        scope={"kind": "arguments", "argumentsHash": "hash-default"},
+        source_session_id="session-default",
+        source_request_id="approval-default",
+        expected_config_revision=3,
+    )
+
+    persisted = _agent_directory_state["agents"]["agent-default"]
+    assert persisted["toolPolicyId"] == "tool-agent-default"
+    assert persisted["toolPolicy"]["policyId"] == "tool-agent-default"
+    grants = persisted["toolPolicy"]["perToolRules"]["web_search_tool"][
+        "approvalGrants"
+    ]
+    assert [item["grantKey"] for item in grants] == ["grant-default"]
+
+
+def test_accept_always_persists_through_real_agent_directory_authority(
+    tmp_path,
+    monkeypatch,
+):
+    from tests.helpers.system_agent_state import _mark_config_agent_instances_present
+    from tests.test_agent_config_workspace_service import _use_tmp_project_root
+
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _mark_config_agent_instances_present()
+    agent = agent_directory_service.create_agent_instance(
+        display_name="Durable approval Agent",
+        primary_mode="chat",
+    )
+
+    tool_approvals._add_durable_grant(
+        agent_id=agent["agentId"],
+        tool_name="web_search_tool",
+        grant_key="grant-real-directory",
+        scope={"kind": "arguments", "argumentsHash": "hash-real-directory"},
+        source_session_id="session-real-directory",
+        source_request_id="approval-real-directory",
+        expected_config_revision=agent["configRevision"],
+    )
+
+    persisted = tool_approvals._canonical_agent_configs(agent["agentId"])[0]
+    assert persisted["configRevision"] == agent["configRevision"] + 1
+    assert persisted["toolPolicyId"] == f"tool-{agent['agentId']}"
+    rule = persisted["toolPolicy"]["perToolRules"]["web_search_tool"]
+    assert [item["grantKey"] for item in rule["approvalGrants"]] == [
+        "grant-real-directory"
+    ]

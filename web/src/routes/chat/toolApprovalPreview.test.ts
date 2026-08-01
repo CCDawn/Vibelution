@@ -42,13 +42,15 @@ describe("toolApprovalPreview", () => {
     expect(toolApprovalCodexTitle("en")).toBe("Allow this action?");
     expect(toolApprovalCodexButtonLabels("en")).toMatchObject({
       yes: "Yes",
-      always: "Always (session)",
+      always: "Always (this agent)",
       no: "No",
     });
     expect(toolApprovalCodexButtonLabels("zh")).toMatchObject({
       yes: "是",
-      always: "始终（本会话）",
+      always: "始终（此 Agent）",
       no: "否",
     });
+    expect(toolApprovalSessionGrantDescription({ kind: "exact_arguments" }, "zh"))
+      .toContain("永久");
   });
 });

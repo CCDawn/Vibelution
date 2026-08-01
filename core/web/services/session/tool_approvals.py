@@ -1,7 +1,13 @@
-"""Codex-style per-call tool approval coordination for live session turns."""
+"""Codex-style per-call tool approval coordination for live session turns.
+
+Session grants (`acceptForSession`) stay process-local and scoped by sessionId.
+Durable grants (`acceptAlways`) live inside the owning Agent's ToolPolicy so the
+Agent configuration remains the sole authority across processes and sessions.
+"""
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from hashlib import sha256
@@ -14,12 +20,25 @@ from typing import Any, Callable, Literal, Mapping
 from uuid import uuid4
 
 
-ToolApprovalDecision = Literal["accept", "acceptForSession", "decline", "cancel"]
+ToolApprovalDecision = Literal[
+    "accept",
+    "acceptForSession",
+    "acceptAlways",
+    "decline",
+    "cancel",
+]
 
 DEFAULT_APPROVAL_TIMEOUT_SECONDS = 300.0
 MAX_RETAINED_REQUESTS = 256
+MAX_DURABLE_GRANTS_PER_TOOL = 64
 _VALID_PERMISSION_PRESETS = {"request_approval", "auto_review", "full_access"}
-_VALID_DECISIONS = {"accept", "acceptForSession", "decline", "cancel"}
+_VALID_DECISIONS = {
+    "accept",
+    "acceptForSession",
+    "acceptAlways",
+    "decline",
+    "cancel",
+}
 _PATCH_TARGET_PATTERN = re.compile(
     r"^\*\*\* (?:Add|Update|Delete) File: (?P<path>.+?)\s*$",
     re.MULTILINE,
@@ -82,7 +101,13 @@ class _ApprovalRequest:
             "configRevision": self.config_revision,
             "configHash": self.config_hash,
             "permissionPreset": self.permission_preset,
-            "availableDecisions": ["accept", "acceptForSession", "decline", "cancel"],
+            "availableDecisions": [
+                "accept",
+                "acceptForSession",
+                "acceptAlways",
+                "decline",
+                "cancel",
+            ],
             "createdAt": self.created_at,
             "status": self.status,
             "decision": self.decision or None,
@@ -101,6 +126,7 @@ class ToolApprovalOutcome:
 _LOCK = RLock()
 _REQUESTS: dict[str, _ApprovalRequest] = {}
 _REQUEST_IDS_BY_CALL: dict[tuple[str, str, str], str] = {}
+# (session_id, agent_id, config_revision, config_hash, tool_name, grant_key)
 _SESSION_GRANTS: set[tuple[str, str, int, str, str, str]] = set()
 
 
@@ -138,8 +164,13 @@ def resolve_tool_approval_request(
             raise ToolApprovalConflictError(
                 f"tool approval request is already {request.status}: {request.request_id}"
             )
-        if normalized_decision == "acceptForSession" and request.approval == "always":
-            raise ToolApprovalConflictError("always-approval tools cannot be approved for the session")
+        if (
+            normalized_decision in {"acceptForSession", "acceptAlways"}
+            and request.approval == "always"
+        ):
+            raise ToolApprovalConflictError(
+                "always-approval tools cannot receive session or durable grants"
+            )
         _resolve_request_locked(request, normalized_decision)
     return request.public_projection()
 
@@ -198,6 +229,12 @@ def authorize_or_wait(
     with _LOCK:
         if grant_key in _SESSION_GRANTS and normalized_approval != "always":
             return ToolApprovalOutcome(True, "approved_for_session")
+        if normalized_approval != "always" and _has_durable_grant(
+            agent_id=normalized_agent,
+            tool_name=normalized_tool,
+            grant_key=_session_grant_key(session_grant_scope),
+        ):
+            return ToolApprovalOutcome(True, "approved_for_agent")
 
     if _can_auto_approve(
         permission_preset=normalized_permission_preset,
@@ -259,6 +296,8 @@ def authorize_or_wait(
         return ToolApprovalOutcome(True, "approved", request_id=request.request_id)
     if request.status == "accepted_for_session":
         return ToolApprovalOutcome(True, "approved_for_session", request_id=request.request_id)
+    if request.status == "accepted_always":
+        return ToolApprovalOutcome(True, "approved_for_agent", request_id=request.request_id)
     if request.status == "declined":
         return ToolApprovalOutcome(
             False,
@@ -274,8 +313,12 @@ def authorize_or_wait(
     )
 
 
-def reset_tool_approval_state() -> None:
-    """Cancel live waiters and clear ephemeral session approvals."""
+def reset_tool_approval_state(*, clear_durable: bool = False) -> None:
+    """Cancel live waiters and clear ephemeral session approvals.
+
+    Durable agent grants are kept by default so process restarts and tests that
+    only reset in-memory session state do not wipe permanent approvals.
+    """
 
     with _LOCK:
         for request in _REQUESTS.values():
@@ -284,6 +327,47 @@ def reset_tool_approval_state() -> None:
         _REQUESTS.clear()
         _REQUEST_IDS_BY_CALL.clear()
         _SESSION_GRANTS.clear()
+    if clear_durable:
+        clear_durable_tool_approval_grants()
+
+
+def clear_durable_tool_approval_grants(*, agent_id: str = "") -> int:
+    """Remove durable grants for one agent or all agents. Returns removed count."""
+
+    normalized_agent = str(agent_id or "").strip()
+    agents = _agent_directory_agents(normalized_agent)
+    removed = 0
+    for agent in agents:
+        policy = _agent_tool_policy(agent)
+        grants = _approval_grant_records(policy, agent_id=str(agent.get("agentId") or ""))
+        if not grants:
+            continue
+        updated_policy = _policy_without_approval_grants(policy)
+        _update_agent_tool_policy(agent, updated_policy)
+        removed += len(grants)
+    return removed
+
+
+def list_durable_tool_approval_grants(*, agent_id: str = "") -> list[dict[str, Any]]:
+    """Return durable grant projections (for diagnostics / future settings UI)."""
+
+    normalized_agent = str(agent_id or "").strip()
+    records: list[dict[str, Any]] = []
+    for agent in _agent_directory_agents(normalized_agent):
+        records.extend(
+            _approval_grant_records(
+                _agent_tool_policy(agent),
+                agent_id=str(agent.get("agentId") or ""),
+            )
+        )
+    records.sort(
+        key=lambda item: (
+            str(item.get("createdAt") or ""),
+            str(item.get("agentId") or ""),
+            str(item.get("toolName") or ""),
+        )
+    )
+    return [dict(item) for item in records]
 
 
 def _get_or_create_request(
@@ -361,6 +445,16 @@ def _get_request(session_id: str, request_id: str) -> _ApprovalRequest:
 
 
 def _resolve_request_locked(request: _ApprovalRequest, decision: str) -> None:
+    if decision == "acceptAlways":
+        _add_durable_grant(
+            agent_id=request.agent_id,
+            tool_name=request.tool_name,
+            grant_key=request.session_grant_key,
+            scope=dict(request.session_grant_scope),
+            source_session_id=request.session_id,
+            source_request_id=request.request_id,
+            expected_config_revision=request.config_revision,
+        )
     request.decision = decision
     request.resolved_at = _utc_now()
     if decision == "accept":
@@ -377,12 +471,307 @@ def _resolve_request_locked(request: _ApprovalRequest, decision: str) -> None:
                 request.session_grant_key,
             )
         )
+    elif decision == "acceptAlways":
+        request.status = "accepted_always"
+        # Also warm the current-process session cache for immediate reuse.
+        _SESSION_GRANTS.add(
+            (
+                request.session_id,
+                request.agent_id,
+                request.config_revision,
+                request.config_hash,
+                request.tool_name,
+                request.session_grant_key,
+            )
+        )
     elif decision == "decline":
         request.status = "declined"
     else:
         request.status = "cancelled"
     request.event.set()
     _record_approval_event("tool.approval.resolved", request, outcome=request.status)
+
+
+def _has_durable_grant(*, agent_id: str, tool_name: str, grant_key: str) -> bool:
+    try:
+        agents = _canonical_agent_configs(agent_id)
+        if not agents:
+            return False
+        return any(
+            record["toolName"] == tool_name and record["grantKey"] == grant_key
+            for record in _approval_grant_records(
+                _agent_tool_policy(agents[0]),
+                agent_id=agent_id,
+            )
+        )
+    except Exception:
+        # A storage/read failure never upgrades a call; it falls back to asking.
+        return False
+
+
+def _add_durable_grant(
+    *,
+    agent_id: str,
+    tool_name: str,
+    grant_key: str,
+    scope: Mapping[str, Any],
+    source_session_id: str,
+    source_request_id: str,
+    expected_config_revision: int,
+) -> None:
+    agents = _canonical_agent_configs(agent_id)
+    if not agents:
+        raise ToolApprovalConflictError(f"Agent configuration not found: {agent_id}")
+    agent = agents[0]
+    policy = _agent_tool_policy(agent)
+    records = _approval_grant_records(
+        policy,
+        agent_id=agent_id,
+        tool_name=tool_name,
+    )
+    existing = next(
+        (
+            item
+            for item in records
+            if item["grantKey"] == grant_key
+        ),
+        None,
+    )
+    record = {
+        "agentId": agent_id,
+        "toolName": tool_name,
+        "grantKey": grant_key,
+        "scope": dict(scope or {}),
+        "createdAt": str((existing or {}).get("createdAt") or "").strip() or _utc_now(),
+        "updatedAt": _utc_now(),
+        "sourceSessionId": source_session_id,
+        "sourceRequestId": source_request_id,
+    }
+    records = [
+        item
+        for item in records
+        if item["grantKey"] != grant_key
+    ]
+    records.append(record)
+    records.sort(
+        key=lambda item: (
+            str(item.get("updatedAt") or item.get("createdAt") or ""),
+            str(item.get("grantKey") or ""),
+        )
+    )
+    records = records[-MAX_DURABLE_GRANTS_PER_TOOL:]
+    updated_policy = _policy_with_tool_approval_grants(
+        policy,
+        tool_name=tool_name,
+        records=records,
+    )
+    try:
+        _update_agent_tool_policy(
+            agent,
+            updated_policy,
+            expected_config_revision=expected_config_revision,
+        )
+    except ToolApprovalError:
+        raise
+    except Exception as exc:
+        from core.web.services import agent_directory_service
+
+        if isinstance(
+            exc,
+            (
+                agent_directory_service.AgentStateConflictError,
+                agent_directory_service.AgentNotFoundError,
+            ),
+        ):
+            raise ToolApprovalConflictError(str(exc)) from exc
+        raise ToolApprovalError(
+            "Unable to persist durable approval in Agent ToolPolicy."
+        ) from exc
+
+
+def _agent_directory_agents(agent_id: str = "") -> list[dict[str, Any]]:
+    return _canonical_agent_configs(agent_id)
+
+
+def _canonical_agent_configs(agent_id: str = "") -> list[dict[str, Any]]:
+    """Read canonical Agent config without runtime/effective-policy projection."""
+
+    from core.web.services import agent_directory_service
+
+    normalized_agent = str(agent_id or "").strip()
+    with agent_directory_service._STATE_LOCK:
+        state = agent_directory_service.load_state()
+        raw_agents = [
+            item
+            for item in list(state.get("agents") or [])
+            if isinstance(item, dict)
+            and (
+                not normalized_agent
+                or str(item.get("agentId") or "").strip() == normalized_agent
+            )
+        ]
+        policies = agent_directory_service._tool_policies(state)
+        snapshots: list[dict[str, Any]] = []
+        for raw_agent in raw_agents:
+            policy_id = (
+                str(
+                    raw_agent.get("toolPolicyId")
+                    or agent_directory_service.DEFAULT_TOOL_POLICY_ID
+                ).strip()
+                or agent_directory_service.DEFAULT_TOOL_POLICY_ID
+            )
+            raw_policy = raw_agent.get("toolPolicy")
+            if not isinstance(raw_policy, dict):
+                raw_policy = policies.get(policy_id)
+            snapshots.append(
+                {
+                    "agentId": str(raw_agent.get("agentId") or "").strip(),
+                    "configRevision": int(raw_agent.get("configRevision") or 0),
+                    "configHash": str(raw_agent.get("configHash") or "").strip(),
+                    "toolPolicyId": policy_id,
+                    "toolPolicy": deepcopy(
+                        agent_directory_service.normalize_tool_policy(
+                            raw_policy if isinstance(raw_policy, dict) else {},
+                            policy_id,
+                        )
+                    ),
+                }
+            )
+    return snapshots
+
+
+def _agent_tool_policy(agent: Mapping[str, Any]) -> dict[str, Any]:
+    policy = agent.get("toolPolicy")
+    return dict(policy) if isinstance(policy, dict) else {}
+
+
+def _approval_grant_records(
+    policy: Mapping[str, Any],
+    *,
+    agent_id: str,
+    tool_name: str = "",
+) -> list[dict[str, Any]]:
+    rules = policy.get("perToolRules")
+    if not isinstance(rules, dict):
+        return []
+    records: list[dict[str, Any]] = []
+    normalized_filter = str(tool_name or "").strip()
+    for rule_tool_name, raw_rule in rules.items():
+        normalized_tool = str(rule_tool_name or "").strip()
+        if normalized_filter and normalized_tool != normalized_filter:
+            continue
+        if not normalized_tool or not isinstance(raw_rule, dict):
+            continue
+        raw_grants = raw_rule.get("approvalGrants")
+        if not isinstance(raw_grants, list):
+            continue
+        for item in raw_grants:
+            if not isinstance(item, dict):
+                continue
+            grant_key = str(item.get("grantKey") or "").strip()
+            if not grant_key:
+                continue
+            records.append(
+                {
+                    "agentId": agent_id,
+                    "toolName": normalized_tool,
+                    "grantKey": grant_key,
+                    "scope": (
+                        dict(item.get("scope"))
+                        if isinstance(item.get("scope"), dict)
+                        else {}
+                    ),
+                    "createdAt": str(item.get("createdAt") or "").strip(),
+                    "updatedAt": str(item.get("updatedAt") or "").strip(),
+                    "sourceSessionId": str(item.get("sourceSessionId") or "").strip(),
+                    "sourceRequestId": str(item.get("sourceRequestId") or "").strip(),
+                }
+            )
+    return records
+
+
+def _policy_with_tool_approval_grants(
+    policy: Mapping[str, Any],
+    *,
+    tool_name: str,
+    records: list[dict[str, Any]],
+) -> dict[str, Any]:
+    updated_policy = dict(policy)
+    updated_rules = {
+        str(tool_name): dict(rule) if isinstance(rule, dict) else {}
+        for tool_name, rule in dict(policy.get("perToolRules") or {}).items()
+    }
+    rule = updated_rules.setdefault(tool_name, {})
+    rule["approvalGrants"] = [
+        {
+            key: item[key]
+            for key in (
+                "grantKey",
+                "scope",
+                "createdAt",
+                "updatedAt",
+                "sourceSessionId",
+                "sourceRequestId",
+            )
+        }
+        for item in records
+    ]
+    updated_policy["perToolRules"] = updated_rules
+    return updated_policy
+
+
+def _policy_without_approval_grants(policy: Mapping[str, Any]) -> dict[str, Any]:
+    updated_policy = dict(policy)
+    updated_rules = {
+        str(tool_name): dict(rule) if isinstance(rule, dict) else {}
+        for tool_name, rule in dict(policy.get("perToolRules") or {}).items()
+    }
+    for rule in updated_rules.values():
+        rule.pop("approvalGrants", None)
+    updated_policy["perToolRules"] = updated_rules
+    return updated_policy
+
+
+def _update_agent_tool_policy(
+    agent: Mapping[str, Any],
+    policy: dict[str, Any],
+    *,
+    expected_config_revision: int | None = None,
+) -> dict[str, Any]:
+    from core.web.services import agent_directory_service
+
+    current_policy = _agent_tool_policy(agent)
+    policy_id = (
+        str(
+            agent.get("toolPolicyId")
+            or current_policy.get("policyId")
+            or agent_directory_service.DEFAULT_TOOL_POLICY_ID
+        ).strip()
+        or agent_directory_service.DEFAULT_TOOL_POLICY_ID
+    )
+    if policy_id == agent_directory_service.DEFAULT_TOOL_POLICY_ID:
+        policy_id = f"tool-{str(agent.get('agentId') or '').strip()}"
+        current_policy = agent_directory_service.normalize_tool_policy(
+            {**current_policy, "policyId": policy_id},
+            policy_id,
+        )
+        policy = agent_directory_service.normalize_tool_policy(
+            {**policy, "policyId": policy_id},
+            policy_id,
+        )
+    revision = (
+        int(expected_config_revision)
+        if expected_config_revision is not None
+        else int(agent.get("configRevision") or 0)
+    )
+    return agent_directory_service.update_agent_instance(
+        str(agent.get("agentId") or ""),
+        tool_policy=policy,
+        expected_config_revision=revision,
+        expected_tool_policy_fingerprint=agent_directory_service.tool_policy_fingerprint(
+            current_policy
+        ),
+    )
 
 
 def _can_auto_approve(
