@@ -77,13 +77,27 @@ def explain_current_worktree_tool() -> str:
 
 def open_evolution_transaction_tool(summary: str = "") -> str:
     """打开一条演化事务记录。"""
+    session = get_session_state()
+    active_txn_id = str(session.get_active_evolution_txn() or "").strip()
+    if active_txn_id:
+        return json.dumps(
+            {
+                "status": "success",
+                "txn_id": active_txn_id,
+                "summary": summary,
+                "reused": True,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
     txn_id = get_git_memory_service().open_evolution_transaction(summary=summary)
-    get_session_state().set_active_evolution_txn(txn_id)
+    session.set_active_evolution_txn(txn_id)
     return json.dumps(
         {
             "status": "success",
             "txn_id": txn_id,
             "summary": summary,
+            "reused": False,
         },
         ensure_ascii=False,
         indent=2,

@@ -168,11 +168,9 @@ def test_runtime_hooks_use_one_observer_context_then_isolated_executor():
         "code_symbol_tool",
         "apply_patch_tool",
         "write_file_tool",
-        "cli_tool",
-        "python_lint_tool",
     ]
-    assert turn_calls[2]["max_iterations"] == 24
-    assert "24 次" in turn_calls[2]["prompt"]
+    assert turn_calls[2]["max_iterations"] == 12
+    assert "12 次" in turn_calls[2]["prompt"]
     assert all(
         call["runtime_tool_source"] == "self_evolution_autonomous_loop"
         for call in turn_calls
@@ -1097,6 +1095,166 @@ def test_runtime_recovers_once_when_executor_exhausts_before_mutation(
     assert scene_events[0][1]["fields"]["reason"] == (
         "max_iterations_exhausted_no_changed_files"
     )
+
+
+def test_runtime_mutation_retry_receives_bounded_exact_target_context(tmp_path):
+    target = tmp_path / "core" / "example.py"
+    target.parent.mkdir(parents=True)
+    target.write_text(
+        "def target_function():\n"
+        "    api_key = \"sk-live-secret\"\n"
+        "    current_value = 'before'\n"
+        "    return current_value\n",
+        encoding="utf-8",
+    )
+    turn_calls: list[dict] = []
+    inspection_calls = 0
+
+    def run_role_turn(**kwargs):
+        turn_calls.append(deepcopy(kwargs))
+        if len(turn_calls) == 1:
+            return {
+                "result": {
+                    "status": "completed",
+                    "summary": "已定位 target_function。",
+                    "tool_call_count": 2,
+                    "tool_trace": [
+                        {
+                            "name": "open_evolution_transaction_tool",
+                            "status": "success",
+                        },
+                        {"name": "code_symbol_tool", "status": "success"},
+                    ],
+                },
+                "carryover": {"previousResponseId": "response-inspected"},
+            }
+        return {
+            "result": {
+                "status": "failed",
+                "error": "stop after prompt capture",
+            },
+            "carryover": {},
+        }
+
+    def inspect_candidate(_context):
+        nonlocal inspection_calls
+        inspection_calls += 1
+        return {
+            "headCommit": "a" * 40,
+            "changedFiles": [],
+            "variantId": "",
+        }
+
+    hooks = build_autonomous_loop_hooks(
+        AutonomousLoopRuntimeDependencies(
+            load_bindings=lambda: {
+                "observer": {"agentId": "observer-agent"},
+                "executor": {"agentId": "executor-agent"},
+            },
+            run_role_turn=run_role_turn,
+            create_candidate=lambda _context: {
+                "branch": "codex/self-loop-candidate",
+                "worktreePath": str(tmp_path),
+                "baseCommit": "a" * 40,
+            },
+            inspect_candidate=inspect_candidate,
+            integrate_candidate=lambda _context: {},
+            cleanup_candidate=lambda _context: {},
+        )
+    )
+
+    context = _snapshot(candidate=None)
+    context["plan"]["targetFiles"] = ["core/example.py"]
+    context["plan"]["summary"] = "修改 target_function 的 current_value。"
+
+    with pytest.raises(
+        AutonomousLoopRuntimeError,
+        match="stop after prompt capture",
+    ):
+        hooks.evolve(context)
+
+    assert turn_calls[0]["max_iterations"] <= 12
+    assert "cli_tool" not in turn_calls[0]["runtime_tool_grants"]
+    mutation_prompt = turn_calls[1]["prompt"]
+    assert "精确源码上下文" in mutation_prompt
+    assert "def target_function():" in mutation_prompt
+    assert "    current_value = 'before'" in mutation_prompt
+    assert "sk-live-secret" not in mutation_prompt
+    assert "api_key = \"[REDACTED]\"" in mutation_prompt
+
+
+def test_runtime_failure_closes_only_transaction_opened_by_this_evolution(
+    monkeypatch,
+):
+    closed: list[tuple[str, str, str]] = []
+
+    class FakeSession:
+        active = ""
+
+        def get_active_evolution_txn(self):
+            return self.active
+
+        def set_active_evolution_txn(self, value):
+            self.active = str(value or "")
+
+    class FakeGitMemory:
+        def close_evolution_transaction(self, txn_id, status, summary=""):
+            closed.append((txn_id, status, summary))
+
+    session = FakeSession()
+    monkeypatch.setattr(
+        "core.web.services.self_evolution_autonomous_loop_runtime."
+        "get_session_state",
+        lambda: session,
+    )
+    monkeypatch.setattr(
+        "core.web.services.self_evolution_autonomous_loop_runtime."
+        "get_git_memory_service",
+        lambda: FakeGitMemory(),
+    )
+
+    def run_role_turn(**_kwargs):
+        session.active = "txn-self-loop"
+        return {
+            "result": {
+                "status": "failed",
+                "error": "executor transport failed",
+            },
+            "carryover": {},
+        }
+
+    hooks = build_autonomous_loop_hooks(
+        AutonomousLoopRuntimeDependencies(
+            load_bindings=lambda: {
+                "observer": {"agentId": "observer-agent"},
+                "executor": {"agentId": "executor-agent"},
+            },
+            run_role_turn=run_role_turn,
+            create_candidate=lambda _context: {
+                "branch": "codex/self-loop-candidate",
+                "worktreePath": "C:/workspace/self-loop-candidate",
+                "baseCommit": "a" * 40,
+            },
+            inspect_candidate=lambda _context: {},
+            integrate_candidate=lambda _context: {},
+            cleanup_candidate=lambda _context: {},
+        )
+    )
+
+    with pytest.raises(
+        AutonomousLoopRuntimeError,
+        match="executor transport failed",
+    ):
+        hooks.evolve(_snapshot(candidate=None))
+
+    assert closed == [
+        (
+            "txn-self-loop",
+            "failed",
+            "self-evolution candidate failed before transaction close",
+        )
+    ]
+    assert session.active == ""
 
 
 def test_runtime_does_not_recover_executor_failure_without_exhaustion():
