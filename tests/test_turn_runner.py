@@ -163,6 +163,57 @@ def test_run_agent_single_turn_seeds_context_and_exports_carryover():
     assert result.carryover == {"next": "state"}
 
 
+def test_run_agent_single_turn_passes_runtime_agent_binding_to_factory():
+    captured: dict[str, object] = {}
+
+    class FakeAgent:
+        def run_single_turn(self, initial_prompt=None):
+            return {"status": "completed", "prompt": initial_prompt}
+
+    def factory(**kwargs):
+        captured.update(kwargs)
+        return FakeAgent()
+
+    result = run_agent_single_turn(
+        AgentSingleTurnRequest(
+            mode="self_evolution",
+            workspace_path="workspace/observer",
+            config="observer-config",
+            initial_prompt="observe",
+            runtime=AgentTurnRuntimeRequest(
+                mode="self_evolution",
+                run_kind="self_evolution",
+                run_id="self-loop-1",
+                session_id="session-observer",
+                agent_id="agent-observer",
+                llm_slot="dialogue",
+                model_id="lan_qwen/qwen3_6",
+                cache_scope="observer",
+                workspace_path="workspace/observer",
+            ),
+        ),
+        agent_factory=factory,
+    )
+
+    assert captured == {
+        "mode": "self_evolution",
+        "workspace_path": "workspace/observer",
+        "config": "observer-config",
+        "runtime_agent_binding": {
+            "agentId": "agent-observer",
+            "llmSlot": "dialogue",
+            "directSessionId": "session-observer",
+            "workspacePath": "workspace/observer",
+            "llmBindings": {
+                "dialogue": {
+                    "modelId": "lan_qwen/qwen3_6",
+                }
+            },
+        },
+    }
+    assert result.result["turn_runtime"]["modelId"] == "lan_qwen/qwen3_6"
+
+
 def test_run_agent_single_turn_forwards_history_through_preparation():
     captured: dict[str, object] = {}
     history = [
