@@ -18,6 +18,7 @@ AUTONOMOUS_RUNTIME_TOOL_SOURCE = "self_evolution_autonomous_loop"
 OBSERVER_MAX_ITERATIONS = 4
 PLANNER_MAX_ITERATIONS = 3
 ANALYSIS_FINALIZATION_MAX_ITERATIONS = 2
+EXECUTOR_MAX_ITERATIONS = 24
 OBSERVER_RUNTIME_TOOLS = (
     "grep_search_tool",
     "code_symbol_tool",
@@ -161,6 +162,7 @@ def build_autonomous_loop_hooks(
             carryover=None,
             runtime_tool_grants=list(EXECUTOR_RUNTIME_TOOLS),
             runtime_tool_source=AUTONOMOUS_RUNTIME_TOOL_SOURCE,
+            max_iterations=EXECUTOR_MAX_ITERATIONS,
         )
         inspection = _inspect_candidate(
             dependencies,
@@ -187,6 +189,7 @@ def build_autonomous_loop_hooks(
                 carryover=deepcopy(turn.get("carryover") or {}),
                 runtime_tool_grants=list(EXECUTOR_RUNTIME_TOOLS),
                 runtime_tool_source=AUTONOMOUS_RUNTIME_TOOL_SOURCE,
+                max_iterations=EXECUTOR_MAX_ITERATIONS,
             )
             inspection = _inspect_candidate(
                 dependencies,
@@ -443,9 +446,11 @@ def _evolution_prompt(context: dict[str, Any]) -> str:
         "2. 必须实际调用工具实施计划；先调用 open_evolution_transaction_tool，"
         "再读取、修改并验证候选，最后调用 close_evolution_transaction_tool 收口。\n"
         "3. 只修改计划范围内文件，运行与改动相称的测试；纯文本复述计划不算完成。\n"
-        "4. 不写主工作区，不刷新 Launcher，不执行远端操作。\n"
-        "5. 不得执行评分、Judge 或自行批准合入。\n"
-        "6. 完成后报告改动、测试、未覆盖边界和剩余风险。"
+        "4. 本阶段最多 24 次模型/工具迭代；优先完成定位、修改与聚焦测试，"
+        "不要反复读取同一文件。\n"
+        "5. 不写主工作区，不刷新 Launcher，不执行远端操作。\n"
+        "6. 不得执行评分、Judge 或自行批准合入。\n"
+        "7. 完成后报告改动、测试、未覆盖边界和剩余风险。"
     )
 
 
@@ -458,9 +463,10 @@ def _evolution_retry_prompt(context: dict[str, Any]) -> str:
         "1. 不要复述计划，不要再次制定计划，也无需再次请求用户确认。\n"
         "2. 先调用 open_evolution_transaction_tool 开账，再使用读取、编辑和测试工具"
         "产生并验证候选变更，最后调用 close_evolution_transaction_tool 收口。\n"
-        "3. 仍须遵守原定范围；不要写主工作区、刷新 Launcher、执行远端操作、"
+        "3. 本阶段最多 24 次模型/工具迭代；不要重复读取同一证据。\n"
+        "4. 仍须遵守原定范围；不要写主工作区、刷新 Launcher、执行远端操作、"
         "评分、Judge 或自行批准合入。\n"
-        "4. 如果计划无法安全实施，使用工具收集阻塞证据并以 failed 状态关账。"
+        "5. 如果计划无法安全实施，使用工具收集阻塞证据并以 failed 状态关账。"
     )
 
 

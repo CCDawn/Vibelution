@@ -851,6 +851,8 @@ def _with_runtime_tool_grants(
     runtime_mutation_access = "controlled" if grants_mutation and mutation_access == "none" else mutation_access
     runtime_source = str(source or "").strip()
     approval_overrides = dict(policy.get("approvalOverrides") or {})
+    max_calls_per_turn = policy.get("maxCallsPerTurn")
+    runtime_max_calls_per_turn = max_calls_per_turn
     if runtime_source in {
         "self_evolution_autonomous_loop",
         "supervised_conversation_harness",
@@ -858,10 +860,17 @@ def _with_runtime_tool_grants(
     }:
         for tool in effective_grants:
             approval_overrides.setdefault(tool, "never")
+    if runtime_source == "self_evolution_autonomous_loop":
+        try:
+            current_max_calls = int(max_calls_per_turn or 0)
+        except (TypeError, ValueError):
+            current_max_calls = 0
+        runtime_max_calls_per_turn = max(current_max_calls, 24)
     if (
         not added
         and runtime_mutation_access == mutation_access
         and approval_overrides == dict(policy.get("approvalOverrides") or {})
+        and runtime_max_calls_per_turn == max_calls_per_turn
     ):
         return policy
     return {
@@ -870,6 +879,7 @@ def _with_runtime_tool_grants(
         "temporaryAllowedTools": s._tool_name_list(list(policy.get("temporaryAllowedTools") or []) + added),
         "runtimeToolSource": runtime_source,
         "mutationAccess": runtime_mutation_access,
+        "maxCallsPerTurn": runtime_max_calls_per_turn,
         "approvalOverrides": approval_overrides,
     }
 

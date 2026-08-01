@@ -169,6 +169,8 @@ def test_runtime_hooks_use_one_observer_context_then_isolated_executor():
         "cli_tool",
         "python_lint_tool",
     ]
+    assert turn_calls[2]["max_iterations"] == 24
+    assert "24 次" in turn_calls[2]["prompt"]
     assert all(
         call["runtime_tool_source"] == "self_evolution_autonomous_loop"
         for call in turn_calls
