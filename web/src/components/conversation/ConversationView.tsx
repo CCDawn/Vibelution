@@ -194,9 +194,11 @@ import {
   buildTimelineScrollSignal,
 } from "./conversationTimelineScrollSignals";
 import {
+  isTimelineNearBottom,
   recordConversationRowHeight,
   resolveConversationVirtualRange,
   resolveTimelineFollowState,
+  shouldKeepFollowingLatestOnProcessToggle,
   shouldStickTimelineToBottomOnContentResize,
 } from "./conversationTimelineFollowState";
 import {
@@ -458,6 +460,7 @@ export function ConversationView({
   void onInterruptGuidance;
   const { lang, t, statusLabel } = useAppI18n({ domains: ["chat"] });
   const timelineRef = useRef<HTMLDivElement | null>(null);
+  const timelineContentRef = useRef<HTMLDivElement | null>(null);
   const historyScrollAnchorRef = useRef<TimelineScrollRowKeyAnchor | null>(null);
   /** Ensures a pending tool approval mounts under at most one tool activity per render. */
   const toolApprovalConsumedRef = useRef(false);
@@ -465,10 +468,13 @@ export function ConversationView({
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
   const attachmentInputRef = useRef<HTMLInputElement | null>(null);
   const initializedSessionRef = useRef("");
+  const pinnedLatestUserMessageIdRef = useRef("");
   const atBottomRef = useRef(true);
   const followLatestRef = useRef(true);
   const lastTimelineScrollTopRef = useRef(0);
   const streamingScrollFrameRef = useRef<number | null>(null);
+  const autoScrollToLatestRef = useRef(autoScrollToLatest);
+  autoScrollToLatestRef.current = autoScrollToLatest;
   const lastComposerFocusSignalRef = useRef("");
   const defaultExpansionRef = useRef<Record<string, Record<string, boolean>>>({});
   const responseSegmentCacheRef = useRef<Map<string, ResponseSegment[]>>(new Map());
@@ -988,11 +994,35 @@ export function ConversationView({
     ? (onStop ?? onSubmit)
     : handleSendAndFollowLatest;
 
-  const handleProcessDisclosureUserToggle = useCallback((summary: HTMLElement) => {
+  const handleProcessDisclosureUserToggle = useCallback((summary: HTMLElement, _nextExpanded: boolean) => {
     const timeline = timelineRef.current;
     if (!timeline) {
       return undefined;
     }
+    const keepFollowing = shouldKeepFollowingLatestOnProcessToggle({
+      autoScrollToLatest: autoScrollToLatestRef.current,
+      followingLatest: followLatestRef.current,
+      scrollHeight: timeline.scrollHeight,
+      clientHeight: timeline.clientHeight,
+      scrollTop: timeline.scrollTop,
+    });
+    if (keepFollowing) {
+      // Expanding near the tail: stay stuck to bottom so growth follows downward.
+      followLatestRef.current = true;
+      atBottomRef.current = true;
+      setIsAtBottom(true);
+      return () => {
+        if (followLatestRef.current) {
+          scrollTimelineToBottom(timeline);
+        }
+        lastTimelineScrollTopRef.current = timeline.scrollTop;
+        setTimelineVirtualMetrics((current) => ({
+          scrollTop: timeline.scrollTop,
+          viewportHeight: timeline.clientHeight || current.viewportHeight,
+        }));
+      };
+    }
+    // Reading history: pin the summary so expand/collapse does not yank the viewport.
     const anchor = captureConversationProcessScrollAnchor(summary);
     atBottomRef.current = false;
     followLatestRef.current = false;
@@ -1009,7 +1039,9 @@ export function ConversationView({
     };
   }, []);
 
-  // Stick-to-bottom: re-pin when timeline content resizes while following latest (streaming / reflow).
+  // Stick-to-bottom: re-pin when timeline viewport or content height changes while following.
+  // Observe the inner content host — the scroll container's border box often stays fixed while
+  // scrollHeight grows, so observing only `timeline` misses streaming / expand growth.
   useEffect(() => {
     const timeline = timelineRef.current;
     if (!timeline || typeof ResizeObserver === "undefined") {
@@ -1017,7 +1049,7 @@ export function ConversationView({
     }
     const observer = new ResizeObserver(() => {
       if (shouldStickTimelineToBottomOnContentResize({
-        autoScrollToLatest,
+        autoScrollToLatest: autoScrollToLatestRef.current,
         followingLatest: followLatestRef.current,
       })) {
         scheduleTimelineScrollToBottom();
@@ -1034,8 +1066,12 @@ export function ConversationView({
       });
     });
     observer.observe(timeline);
+    const content = timelineContentRef.current;
+    if (content) {
+      observer.observe(content);
+    }
     return () => observer.disconnect();
-  }, [autoScrollToLatest, sessionId]);
+  }, [sessionId, activeTimelineMessages.length > 0]);
 
   useEffect(() => {
     timelineRowHeightCacheRef.current.clear();
@@ -1054,10 +1090,15 @@ export function ConversationView({
     }
     timelineHeightBumpFrameRef.current = window.requestAnimationFrame(() => {
       timelineHeightBumpFrameRef.current = null;
-      // Only recompute virtual spacers. Stick-to-bottom is owned by the timeline
-      // container ResizeObserver + streaming scroll signal — re-pinning here on every
-      // row measure caused ResizeObserver loops and visible flicker without content change.
       setTimelineRowHeightVersion((version) => version + 1);
+      // Row measure can change scrollHeight without resizing the scroll container box.
+      // While following latest, re-pin so expand/stream growth stays on the tail.
+      if (shouldStickTimelineToBottomOnContentResize({
+        autoScrollToLatest: autoScrollToLatestRef.current,
+        followingLatest: followLatestRef.current,
+      })) {
+        scheduleTimelineScrollToBottom();
+      }
     });
   }, []);
 
@@ -1151,13 +1192,42 @@ export function ConversationView({
     }
     if (initializedSessionRef.current !== sessionId) {
       initializedSessionRef.current = sessionId;
+      pinnedLatestUserMessageIdRef.current = latestUserMessageId;
       scrollTimelineToBottom(timeline, { followLatest: true });
       return;
     }
-    if (autoScrollToLatest && followLatestRef.current) {
+    // New outbound user turn (send / edit-resubmit that keeps identity still updates
+    // content via timelineScrollSignal; a brand-new latest user id always rejoins the tail).
+    const latestUserChanged = Boolean(latestUserMessageId)
+      && latestUserMessageId !== pinnedLatestUserMessageIdRef.current;
+    if (latestUserChanged) {
+      pinnedLatestUserMessageIdRef.current = latestUserMessageId;
+      if (autoScrollToLatest) {
+        scrollTimelineToBottom(timeline, { followLatest: true });
+        return;
+      }
+    }
+    if (!autoScrollToLatest) {
+      return;
+    }
+    // Content growth while still near the bottom re-enables follow even if a prior
+    // expand briefly suspended it.
+    if (
+      !followLatestRef.current
+      && isTimelineNearBottom({
+        scrollHeight: timeline.scrollHeight,
+        clientHeight: timeline.clientHeight,
+        scrollTop: timeline.scrollTop,
+      })
+    ) {
+      followLatestRef.current = true;
+      atBottomRef.current = true;
+      setIsAtBottom(true);
+    }
+    if (followLatestRef.current) {
       scheduleTimelineScrollToBottom();
     }
-  }, [autoScrollToLatest, sessionId, timelineScrollSignal]);
+  }, [autoScrollToLatest, latestUserMessageId, sessionId, timelineScrollSignal]);
 
   useEffect(() => {
     if (!streamingTimelineScrollSignal || !autoScrollToLatest || !followLatestRef.current) {
@@ -2123,9 +2193,10 @@ export function ConversationView({
     if (!fullText) {
       return null;
     }
-    // Long reasoning walls should start collapsed. Running only shows a spinner + one-line preview;
-    // the user can expand deliberately. This also avoids stream updates re-opening walls.
-    const defaultExpanded = false;
+    // Live SSE: expand while the model is still thinking so tokens stream in the body.
+    // When the cell settles, default flips false and expansion defaults auto-collapse
+    // (unless the user explicitly toggled the section open/closed).
+    const defaultExpanded = cell.status === "running" || cell.status === "pending";
     const sectionId = reasoningExpansionSectionId(cell);
     const expanded = getExpansionState(message.id, sectionId, defaultExpanded);
     const inlinePreview = fullText.replace(/\s+/g, " ").trim();
@@ -2534,10 +2605,12 @@ export function ConversationView({
     rowIdentity: AgentMessageTimelineRowIdentity,
     isActiveTimelineItem: boolean,
   ) {
-    // Keep running short thoughts expandable by default only when the preview is tiny;
-    // longer walls start collapsed so the user can always open/close deliberately.
+    // Live SSE: keep the body open while thought is running so streaming text is visible.
+    // Settled thoughts default collapsed; shouldRefreshConversationExpansionDefault auto-closes.
     const inlinePreview = String(item.preview || item.text || "").replace(/\s+/g, " ").trim();
-    const defaultExpanded = Boolean(item.defaultExpanded) && inlinePreview.length > 0 && inlinePreview.length <= 96;
+    const defaultExpanded = Boolean(item.defaultExpanded)
+      || item.status === "running"
+      || item.status === "pending";
     const sectionId = `thought:${item.id}`;
     const expanded = getExpansionState(message.id, sectionId, defaultExpanded);
     const toggleLabel = expanded ? t("thoughtProcessVisible") : t("thoughtProcessHidden");
@@ -3487,7 +3560,7 @@ export function ConversationView({
         {displayMessages.length === 0 && !activeTurnMessage ? (
           <div className={styles.emptyState}>{t("sessionNoMessages")}</div>
         ) : (
-          <>
+          <div ref={timelineContentRef} className={styles.timelineContent}>
             {timelineVirtualRange.topSpacerPx > 0 ? (
               <div
                 aria-hidden="true"
@@ -3932,7 +4005,7 @@ export function ConversationView({
                 style={{ height: timelineVirtualRange.bottomSpacerPx }}
               />
             ) : null}
-          </>
+          </div>
         )}
       </div>
 

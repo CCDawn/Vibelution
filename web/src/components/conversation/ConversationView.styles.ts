@@ -1077,7 +1077,9 @@ const styles: Record<string, string> = {
   thoughtTextBlock:
     "vui-components-conversationview thoughtTextBlock min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   timeline:
-    "vui-components-conversationview timeline grid min-h-0 min-w-0 flex-1 content-start gap-[10px] overflow-y-auto overflow-x-hidden bg-[var(--vui-surface-chat)] px-[clamp(1rem,3vw,3rem)] py-4 [scrollbar-gutter:stable]",
+    "vui-components-conversationview timeline min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden bg-[var(--vui-surface-chat)] px-[clamp(1rem,3vw,3rem)] py-4 [scrollbar-gutter:stable]",
+  timelineContent:
+    "vui-components-conversationview timelineContent grid min-w-0 w-full content-start gap-[10px]",
   timelineVirtualSpacer:
     "vui-components-conversationview timelineVirtualSpacer pointer-events-none min-w-0 shrink-0",
   timelineVirtualRow:

@@ -117,6 +117,13 @@ TURN_INTERRUPTED_MARKER = (
 _SAFE_SESSION_CHARS = re.compile(r"[^A-Za-z0-9_.-]+")
 _SEQUENCE_CACHE_LOCK = threading.Lock()
 _SEQUENCE_CACHE: dict[str, tuple[int, int, int]] = {}
+# 进程内 terminal 事件集合缓存（key: journal path -> (terminal turn ids, mtime_ns, size)）
+# 只做加速，不替代文件锁：签名不匹配时回退全文件扫描。
+_TERMINAL_SET_CACHE_LOCK = threading.Lock()
+_TERMINAL_SET_CACHE: dict = {}
+# 已确认存在的 journal 父目录，避免每个事件重复 mkdir 系统调用。
+_MKDIR_CACHE_LOCK = threading.Lock()
+_MKDIR_CACHE: set = set()
 _JOURNAL_THREAD_LOCKS_GUARD = threading.Lock()
 _JOURNAL_THREAD_LOCKS: dict[str, _ThreadLockEntry] = {}
 _JOURNAL_LOCK_TIMEOUT_SECONDS = 15.0
@@ -243,7 +250,7 @@ def append_turn_event(
     source_kind: str = "",
 ) -> TurnJournalEvent:
     path = turn_journal_path(project_root, session_id)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    _ensure_journal_parent(path)
     normalized_session_id = str(session_id or "").strip()
     normalized_turn_id = str(turn_id or "").strip()
     normalized_event_type = str(event_type or "").strip()
@@ -282,8 +289,13 @@ def append_turn_event(
             with path.open("ab") as handle:
                 handle.write(encoded)
                 handle.flush()
-                os.fsync(handle.fileno())
+                if normalized_event_type not in VOLATILE_MODEL_EVENT_TYPES:
+                    os.fsync(handle.fileno())
             _remember_sequence(path, sequence)
+            if normalized_event_type in TERMINAL_EVENTS:
+                _remember_terminal_turn_id(path, normalized_turn_id)
+            else:
+                _refresh_terminal_cache_signature(path)
     return event
 
 
@@ -291,6 +303,47 @@ def _turn_has_terminal_event(path: Path, turn_id: str) -> bool:
     normalized_turn_id = str(turn_id or "").strip()
     if not normalized_turn_id or not path.exists():
         return False
+    return normalized_turn_id in _cached_terminal_turn_ids(path)
+
+
+def _ensure_journal_parent(path: Path) -> None:
+    """Create the journal parent directory at most once per process."""
+
+    parent = path.parent
+    key = str(parent)
+    with _MKDIR_CACHE_LOCK:
+        if key in _MKDIR_CACHE:
+            return
+        parent.mkdir(parents=True, exist_ok=True)
+        _MKDIR_CACHE.add(key)
+
+
+def _cached_terminal_turn_ids(path: Path) -> frozenset[str]:
+    """Return terminal turn ids, backed by a file-signature-keyed cache.
+
+    The cache is an optimization only: when the journal file signature does
+    not match (e.g. another process appended), we fall back to a full scan
+    and rebuild the cache under the caller's file lock.
+    """
+
+    if not path.exists():
+        return frozenset()
+    key = _sequence_cache_key(path)
+    mtime_ns, size = _sequence_file_signature(path)
+    with _TERMINAL_SET_CACHE_LOCK:
+        cached = _TERMINAL_SET_CACHE.get(key)
+        if cached is not None and cached[1] == mtime_ns and cached[2] == size:
+            return cached[0]
+    terminal_ids = _scan_terminal_turn_ids(path)
+    with _TERMINAL_SET_CACHE_LOCK:
+        _TERMINAL_SET_CACHE[key] = (terminal_ids, mtime_ns, size)
+    return terminal_ids
+
+
+def _scan_terminal_turn_ids(path: Path) -> frozenset[str]:
+    """Scan the journal once and collect every turn that has a terminal event."""
+
+    found: set[str] = set()
     try:
         with path.open(encoding="utf-8") as handle:
             for line in handle:
@@ -304,13 +357,52 @@ def _turn_has_terminal_event(path: Path, turn_id: str) -> bool:
                 event = TurnJournalEvent.from_dict(parsed)
                 if (
                     event is not None
-                    and event.turn_id == normalized_turn_id
                     and event.event_type in TERMINAL_EVENTS
                 ):
-                    return True
+                    found.add(event.turn_id)
     except OSError:
-        return False
-    return False
+        return frozenset()
+    return frozenset(found)
+
+
+def _remember_terminal_turn_id(path: Path, turn_id: str) -> None:
+    """Merge a just-appended terminal turn id into the cache."""
+
+    key = _sequence_cache_key(path)
+    mtime_ns, size = _sequence_file_signature(path)
+    with _TERMINAL_SET_CACHE_LOCK:
+        cached = _TERMINAL_SET_CACHE.get(key)
+        if cached is not None and cached[1] == mtime_ns and cached[2] == size:
+            updated = frozenset(set(cached[0]) | {turn_id})
+        else:
+            # Cache missing or stale (e.g. rewritten by another process):
+            # rebuild from disk so we never lose already-terminal turns.
+            updated = frozenset(set(_scan_terminal_turn_ids(path)) | {turn_id})
+        _TERMINAL_SET_CACHE[key] = (updated, mtime_ns, size)
+
+
+def _forget_terminal_cache(path: Path) -> None:
+    """Drop the terminal-set cache after rewrite/unlink."""
+
+    with _TERMINAL_SET_CACHE_LOCK:
+        _TERMINAL_SET_CACHE.pop(_sequence_cache_key(path), None)
+
+
+def _refresh_terminal_cache_signature(path: Path) -> None:
+    """Refresh the cached file signature after a non-terminal append.
+
+    The terminal-id set itself is unchanged, but the journal file's mtime/size
+    moved; without a refresh the next check would treat the cache as stale and
+    rescan the whole file. The cached set is complete whenever it exists
+    (built by scan or by remember+scan merge), so refreshing is safe.
+    """
+
+    key = _sequence_cache_key(path)
+    mtime_ns, size = _sequence_file_signature(path)
+    with _TERMINAL_SET_CACHE_LOCK:
+        cached = _TERMINAL_SET_CACHE.get(key)
+        if cached is not None:
+            _TERMINAL_SET_CACHE[key] = (cached[0], mtime_ns, size)
 
 
 def load_turn_events(project_root: Path, session_id: str) -> list[TurnJournalEvent]:
@@ -508,7 +600,7 @@ def rewrite_turn_events(project_root: Path, session_id: str, events: Iterable[Tu
     path = turn_journal_path(project_root, session_id)
     event_list = [event for event in list(events or []) if isinstance(event, TurnJournalEvent)]
     with _journal_thread_lock(path):
-        path.parent.mkdir(parents=True, exist_ok=True)
+        _ensure_journal_parent(path)
         with _journal_file_lock(path):
             if not event_list:
                 try:
@@ -1546,7 +1638,7 @@ def _journal_file_lock(path: Path, *, timeout: float = _JOURNAL_LOCK_TIMEOUT_SEC
     """Serialize one journal's read-modify-write cycle across processes."""
 
     lock_path = path.with_name(f"{path.name}.lock")
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    _ensure_journal_parent(lock_path)
     with lock_path.open("a+b") as handle:
         handle.seek(0, os.SEEK_END)
         if handle.tell() == 0:
@@ -1713,8 +1805,11 @@ def _remember_sequence(path: Path, sequence: int) -> None:
 
 
 def _forget_sequence(path: Path) -> None:
+    """Drop sequence and terminal-set caches after rewrite/unlink/missing path."""
+
     with _SEQUENCE_CACHE_LOCK:
         _SEQUENCE_CACHE.pop(_sequence_cache_key(path), None)
+    _forget_terminal_cache(path)
 
 
 def _sequence_file_signature(path: Path) -> tuple[int, int]:

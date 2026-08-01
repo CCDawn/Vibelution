@@ -64,7 +64,7 @@ describe("ConversationView process expansion defaults", () => {
     expect(feedbackRenderer).not.toContain("renderReActOperationGroup(");
   });
 
-  it("suspends follow-latest before explicit process toggles resize the timeline", () => {
+  it("keeps follow-latest on process toggles near the bottom and anchors only when reading history", () => {
     const handlerStart = conversationViewSource.indexOf("const handleProcessDisclosureUserToggle");
     const handlerEnd = conversationViewSource.indexOf(
       "// Stick-to-bottom:",
@@ -72,6 +72,9 @@ describe("ConversationView process expansion defaults", () => {
     );
     const handler = conversationViewSource.slice(handlerStart, handlerEnd);
 
+    expect(handler).toContain("shouldKeepFollowingLatestOnProcessToggle({");
+    expect(handler).toContain("followLatestRef.current = true");
+    expect(handler).toContain("scrollTimelineToBottom(timeline)");
     expect(handler).toContain("followLatestRef.current = false");
     expect(handler).toContain("captureConversationProcessScrollAnchor(summary)");
     expect(handler).toContain("restoreConversationProcessScrollAnchor(timeline, summary, anchor)");
