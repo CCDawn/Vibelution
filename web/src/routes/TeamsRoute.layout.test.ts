@@ -40,6 +40,12 @@ import teamSourceCollectionModeFieldsSource from "./teams/TeamSourceCollectionMo
 const routeAndPureSource = `${routeSource}\n${canvasGeometrySource}\n${researchWorkspaceModelSource}\n${teamKindModelSource}\n${presentationModelSource}\n${experimentLoopModelSource}\n${aiSearchPresentationSource}\n${workflowPresentationSource}\n${researchStageRolesSource}\n${teamWorkflowQueryKeysSource}\n${researchStageAgentPresentationSource}\n${teamRouteShellModelSource}\n${teamSourceCollectionShellModelSource}`;
 
 describe("research project workspace", () => {
+  it("loads the current experiment projection on the Challenge research overview", () => {
+    expect(routeSource).toContain(
+      'challengeProgramProgressVisible: challengeCupResearchTeamSelected && (challengeTeamSurface === "progress" || researchWorkspaceView === "overview")',
+    );
+  });
+
   it("keeps active research projects out of the Challenge Program progress surface", () => {
     expect(teamResearchStageLauncherPanelSource).toContain(
       "const challengeProgramSurfaceSelected =",
