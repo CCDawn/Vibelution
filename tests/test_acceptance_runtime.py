@@ -50,6 +50,24 @@ def test_frontend_command_tracks_vite_node_process_directly(runtime, tmp_path, m
     assert all("npm" not in part.lower() for part in command)
 
 
+def test_backend_command_avoids_windows_venv_redirector(runtime, tmp_path, monkeypatch):
+    project = _project(tmp_path)
+    monkeypatch.setattr(runtime.sys, "executable", "C:/venv/Scripts/python.exe")
+    monkeypatch.setattr(runtime.sys, "_base_executable", "C:/Python312/python.exe")
+
+    command = runtime._backend_command(project=project, backend_port=8100)
+
+    assert command == [
+        "C:/Python312/python.exe",
+        str(project / "scripts" / "web_workbench.py"),
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "8100",
+        "--no-browser",
+    ]
+
+
 def test_two_instances_receive_distinct_atomic_port_leases(runtime, tmp_path, monkeypatch):
     monkeypatch.setattr(runtime, "_port_available", lambda port, host="127.0.0.1": True)
     monkeypatch.setattr(runtime, "_process_create_time", lambda pid: 1.0)
