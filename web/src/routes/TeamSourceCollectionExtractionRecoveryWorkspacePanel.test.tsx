@@ -47,6 +47,7 @@ function projectionWithClosure(input: {
 function renderRecoveryPanel(
   candidateProjection: SourceCollectionStageCardProjection,
   pendingScreeningCountText = "0",
+  candidateStepState = "pending",
 ) {
   return renderToStaticMarkup(
     <TeamSourceCollectionExtractionRecoveryWorkspacePanel
@@ -57,7 +58,7 @@ function renderRecoveryPanel(
       sourceCollectionDisplayedCandidateCount={14}
       sourceCollectionPrimaryDataLoading={false}
       sourceCollectionLoadingText="加载中"
-      sourceCollectionCandidateStepState="pending"
+      sourceCollectionCandidateStepState={candidateStepState}
       sourceCollectionExtractionExcludedRecoveryState={{
         blockedByExcludedSources: false,
         tone: "danger",
@@ -88,6 +89,32 @@ describe("TeamSourceCollectionExtractionRecoveryWorkspacePanel", () => {
     expect(markup).toContain("14/14");
     expect(markup).not.toContain("2/14");
     expect(markup).not.toContain("提炼失败");
+  });
+
+  it("trusts complete current coverage after a superseded source shrinks the active set", () => {
+    const projection = projectionWithClosure({
+      blockedCount: 14,
+      missingEvidenceAnchorCount: 14,
+    });
+    projection.currentCoverageSummary = {
+      applicable: true,
+      blocked: 13,
+      complete: true,
+      invalid: 0,
+      missing: 0,
+      processed: 13,
+      total: 13,
+    };
+
+    const markup = renderRecoveryPanel(projection, "0", "failed");
+
+    expect(markup).toContain("证据补全");
+    expect(markup).toContain("提炼完成，待补证据");
+    expect(markup).toContain("13/13");
+    expect(markup).not.toContain("14/14");
+    expect(markup).not.toContain("提炼失败恢复");
+    expect(markup).not.toContain("继续 Agent 提炼");
+    expect(markup).toContain("要求 Agent 补充证据");
   });
 
   it("preserves failure semantics for a real extraction failure", () => {
