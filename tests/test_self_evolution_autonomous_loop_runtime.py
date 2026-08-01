@@ -4,6 +4,9 @@ from copy import deepcopy
 
 import pytest
 
+from core.web.services.self_evolution_candidate_context import (
+    bounded_candidate_target_context,
+)
 from core.web.services.self_evolution_autonomous_loop_runtime import (
     AutonomousLoopRuntimeDependencies,
     AutonomousLoopRuntimeError,
@@ -650,6 +653,55 @@ def test_runtime_rejects_candidate_diff_outside_planned_target_files(monkeypatch
     assert scene_events[-1][1]["fields"]["outsideTargetCount"] == 1
 
 
+def test_runtime_accepts_structured_change_entry_for_exact_planned_target():
+    hooks = build_autonomous_loop_hooks(
+        AutonomousLoopRuntimeDependencies(
+            load_bindings=lambda: {
+                "observer": {"agentId": "observer-agent"},
+                "executor": {"agentId": "executor-agent"},
+            },
+            run_role_turn=lambda **_kwargs: {
+                "result": {
+                    "status": "completed",
+                    "summary": "候选实现完成。",
+                    "tool_trace": [
+                        {"name": "write_file_tool", "status": "success"},
+                    ],
+                },
+                "carryover": {},
+                "conversationSessionId": "session-executor",
+            },
+            create_candidate=lambda _context: {
+                "branch": "codex/self-loop-candidate",
+                "worktreePath": "C:/workspace/self-loop-candidate",
+                "baseCommit": "a" * 40,
+            },
+            inspect_candidate=lambda _context: {
+                "headCommit": "b" * 40,
+                "changedFiles": [
+                    {
+                        "path": "tests/self_evolution_candidate_marker.py",
+                        "changeType": "added",
+                    }
+                ],
+                "variantId": "variant-structured-change",
+            },
+            integrate_candidate=lambda _context: {},
+            cleanup_candidate=lambda _context: {},
+        )
+    )
+    context = _snapshot(candidate=None)
+    context["plan"]["targetFiles"] = [
+        "tests/self_evolution_candidate_marker.py"
+    ]
+
+    candidate = hooks.evolve(context)
+
+    assert candidate["changedFiles"] == [
+        "tests/self_evolution_candidate_marker.py"
+    ]
+
+
 def test_observer_exhaustion_gets_one_tool_disabled_summary_turn(monkeypatch):
     turn_calls: list[dict] = []
     scene_events: list[tuple[tuple, dict]] = []
@@ -910,6 +962,9 @@ def test_runtime_retries_executor_once_when_first_turn_only_repeats_the_plan(
     ]
     assert turn_calls[1]["max_iterations"] == 1
     assert "第一项工具调用必须产生文件修改" in turn_calls[1]["prompt"]
+    assert "只能直接修改：core/example.py" in turn_calls[1]["prompt"]
+    assert "不得创建 scratch、helper、investigate" in turn_calls[1]["prompt"]
+    assert "只有 1 次写入工具调用机会" in turn_calls[1]["prompt"]
     assert turn_calls[2]["runtime_tool_grants"] == [
         "open_evolution_transaction_tool",
         "close_evolution_transaction_tool",
@@ -1026,11 +1081,12 @@ def test_runtime_retries_executor_once_when_first_turn_only_inspects_candidate(
         "write_file_tool",
     ]
     assert turn_calls[2]["runtime_tool_grants"] == [
+        "open_evolution_transaction_tool",
         "close_evolution_transaction_tool",
         "cli_tool",
         "python_lint_tool",
     ]
-    assert "已有事务已经开账" in turn_calls[2]["prompt"]
+    assert "新的验证轮次必须重新开账" in turn_calls[2]["prompt"]
     assert candidate["changedFiles"] == ["tests/test_example.py"]
     assert scene_events[0][1]["fields"]["reason"] == (
         "tool_calls_but_no_changed_files"
@@ -1268,6 +1324,121 @@ def test_runtime_accepts_single_mutation_tool_step_before_validation():
     assert candidate["variantId"] == "variant-single-mutation"
 
 
+def test_runtime_recovers_validation_exhaustion_after_successful_lint(
+    monkeypatch,
+):
+    turn_calls: list[dict] = []
+    close_calls: list[dict] = []
+
+    def run_role_turn(**kwargs):
+        turn_calls.append(deepcopy(kwargs))
+        if len(turn_calls) == 1:
+            return {
+                "result": {
+                    "status": "failed",
+                    "summary": "写入后仍在调用只读工具。",
+                    "max_iteration_exhausted": True,
+                    "tool_call_count": 12,
+                    "tool_trace": [
+                        {
+                            "name": "open_evolution_transaction_tool",
+                            "status": "success",
+                        },
+                        {"name": "write_file_tool", "status": "success"},
+                    ],
+                },
+                "carryover": {"previousResponseId": "response-written"},
+                "conversationSessionId": "session-executor",
+            }
+        return {
+            "result": {
+                "status": "failed",
+                "summary": "Ruff 成功后达到验证轮次上限。",
+                "max_iteration_exhausted": True,
+                "tool_call_count": 8,
+                "tool_trace": [
+                    {
+                        "name": "open_evolution_transaction_tool",
+                        "status": "success",
+                    },
+                    {"name": "cli_tool", "status": "degraded"},
+                    {"name": "python_lint_tool", "status": "succeeded"},
+                ],
+            },
+            "carryover": {"previousResponseId": "response-linted"},
+            "conversationSessionId": "session-executor",
+        }
+
+    monkeypatch.setattr(
+        "core.web.services.self_evolution_autonomous_loop_runtime."
+        "_close_active_evolution_transaction_success",
+        lambda **kwargs: close_calls.append(deepcopy(kwargs)),
+    )
+    hooks = build_autonomous_loop_hooks(
+        AutonomousLoopRuntimeDependencies(
+            load_bindings=lambda: {
+                "observer": {"agentId": "observer-agent"},
+                "executor": {
+                    "agentId": "executor-agent",
+                    "workspacePath": "C:/workspace/main",
+                },
+            },
+            run_role_turn=run_role_turn,
+            create_candidate=lambda _context: {
+                "branch": "codex/self-loop-candidate",
+                "worktreePath": "C:/workspace/self-loop-candidate",
+                "baseCommit": "a" * 40,
+            },
+            inspect_candidate=lambda _context: {
+                "headCommit": "b" * 40,
+                "changedFiles": [
+                    {
+                        "path": "tests/self_evolution_lan_candidate_marker.py",
+                        "changeType": "added",
+                    }
+                ],
+                "variantId": "variant-lan-marker",
+            },
+            integrate_candidate=lambda _context: {},
+            cleanup_candidate=lambda _context: {},
+        )
+    )
+
+    candidate = hooks.evolve(
+        _snapshot(
+            candidate=None,
+            request={
+                "goal": (
+                    "只修改 tests/self_evolution_lan_candidate_marker.py，"
+                    "新建 marker 文件"
+                ),
+                "maxIterations": 1,
+            },
+            plan={
+                "summary": "新建 LAN marker 并运行 Ruff。",
+                "steps": [],
+                "targetFiles": [
+                    "tests/self_evolution_lan_candidate_marker.py"
+                ],
+            },
+        )
+    )
+
+    assert len(turn_calls) == 2
+    assert candidate["changedFiles"] == [
+        "tests/self_evolution_lan_candidate_marker.py"
+    ]
+    assert candidate["summary"] == (
+        "候选验证工具已成功完成；模型达到轮次上限后由宿主完成事务收口。"
+    )
+    assert close_calls == [
+        {
+            "run_id": "self-loop-001",
+            "summary": candidate["summary"],
+        }
+    ]
+
+
 def test_runtime_mutation_retry_receives_bounded_exact_target_context(tmp_path):
     target = tmp_path / "core" / "example.py"
     target.parent.mkdir(parents=True)
@@ -1352,6 +1523,44 @@ def test_runtime_mutation_retry_receives_bounded_exact_target_context(tmp_path):
     assert "    current_value = 'before'" in mutation_prompt
     assert "sk-live-secret" not in mutation_prompt
     assert "api_key = \"[REDACTED]\"" in mutation_prompt
+
+
+def test_bounded_candidate_context_prefers_similar_missing_symbol_prefix(
+    tmp_path,
+):
+    target = tmp_path / "tests" / "test_target.py"
+    target.parent.mkdir(parents=True)
+    target.write_text(
+        "request = {'goal': 'generic target'}\n"
+        "plan = {'targetFiles': ['tests/test_target.py']}\n"
+        "assert request and plan\n"
+        + "\n" * 70
+        + "def test_runtime_plan_rejects_forbidden_target_files():\n"
+        + "    assert True\n",
+        encoding="utf-8",
+    )
+    context = {
+        "request": {
+            "goal": (
+                "只修改 tests/test_target.py，新增聚焦测试 "
+                "test_runtime_plan_accepts_single_direct_zhi_modify_target"
+            )
+        },
+        "plan": {
+            "summary": (
+                "新增 test_runtime_plan_accepts_single_direct_zhi_modify_target"
+            ),
+            "steps": [],
+        },
+    }
+
+    rendered = bounded_candidate_target_context(
+        worktree_path=str(tmp_path),
+        target_files=["tests/test_target.py"],
+        context=context,
+    )
+
+    assert "test_runtime_plan_rejects_forbidden_target_files" in rendered
 
 
 def test_runtime_failure_closes_only_transaction_opened_by_this_evolution(

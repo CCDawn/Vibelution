@@ -268,10 +268,6 @@ def build_autonomous_loop_hooks(
             target_files=target_files,
         )
         mutation_required = not changed_files
-        transaction_opened = _result_used_tool(
-            turn["result"],
-            "open_evolution_transaction_tool",
-        )
         validation_carryover = deepcopy(turn.get("carryover") or {})
         if mutation_required:
             tool_call_count = _result_tool_call_count(turn["result"])
@@ -331,23 +327,23 @@ def build_autonomous_loop_hooks(
             )
         if mutation_required or executor_exhausted:
             validation_tools = list(EXECUTOR_VALIDATION_TOOLS)
-            if not transaction_opened:
-                validation_tools.insert(0, "open_evolution_transaction_tool")
-            turn = _run_successful_turn(
-                dependencies.run_role_turn,
-                role="executor",
-                binding=executor_binding,
-                run_id=run_id,
-                prompt=_evolution_validation_prompt(
-                    context,
-                    changed_files=changed_files,
-                    transaction_opened=transaction_opened,
+            validation_tools.insert(0, "open_evolution_transaction_tool")
+            turn = _recover_exhausted_validation_turn(
+                dependencies.run_role_turn(
+                    role="executor",
+                    binding=executor_binding,
+                    run_id=run_id,
+                    prompt=_evolution_validation_prompt(
+                        context,
+                        changed_files=changed_files,
+                    ),
+                    carryover=validation_carryover,
+                    runtime_tool_grants=validation_tools,
+                    runtime_tool_source=AUTONOMOUS_RUNTIME_TOOL_SOURCE,
+                    max_iterations=EXECUTOR_VALIDATION_MAX_ITERATIONS,
+                    allowed_target_paths=allowed_target_paths,
                 ),
-                carryover=validation_carryover,
-                runtime_tool_grants=validation_tools,
-                runtime_tool_source=AUTONOMOUS_RUNTIME_TOOL_SOURCE,
-                max_iterations=EXECUTOR_VALIDATION_MAX_ITERATIONS,
-                allowed_target_paths=allowed_target_paths,
+                run_id=run_id,
             )
             inspection = _inspect_candidate(
                 dependencies,
@@ -467,6 +463,38 @@ def _require_successful_turn(turn: Any) -> dict[str, Any]:
     return validated_turn
 
 
+def _recover_exhausted_validation_turn(
+    turn: Any,
+    *,
+    run_id: str,
+) -> dict[str, Any]:
+    validated_turn = _require_turn_result(turn)
+    result = validated_turn["result"]
+    if not bool(result.get("max_iteration_exhausted")):
+        return _require_successful_turn(validated_turn)
+    if not _result_has_successful_validation(result):
+        return _require_successful_turn(validated_turn)
+    summary = (
+        "候选验证工具已成功完成；模型达到轮次上限后由宿主完成事务收口。"
+    )
+    _close_active_evolution_transaction_success(
+        run_id=run_id,
+        summary=summary,
+    )
+    recovered_turn = deepcopy(validated_turn)
+    recovered_result = deepcopy(result)
+    recovered_result.update(
+        {
+            "status": "completed",
+            "summary": summary,
+            "max_iteration_exhausted": False,
+            "validationRecovered": True,
+        }
+    )
+    recovered_turn["result"] = recovered_result
+    return recovered_turn
+
+
 def _run_bounded_analysis_turn(
     runner: RoleTurnCallable,
     *,
@@ -508,13 +536,15 @@ def _result_tool_call_count(result: dict[str, Any]) -> int:
     return len(_result_evidence(result))
 
 
-def _result_used_tool(result: dict[str, Any], tool_name: str) -> bool:
-    expected = str(tool_name or "").strip()
-    if not expected:
-        return False
+def _result_has_successful_validation(result: dict[str, Any]) -> bool:
+    accepted_tools = {"cli_tool", "python_lint_tool"}
+    accepted_statuses = {"completed", "ok", "success", "succeeded"}
     for item in _result_evidence(result):
-        observed = str(item.get("name") or item.get("toolName") or "").strip()
-        if observed == expected:
+        tool_name = str(
+            item.get("name") or item.get("toolName") or ""
+        ).strip()
+        status = str(item.get("status") or "").strip().lower()
+        if tool_name in accepted_tools and status in accepted_statuses:
             return True
     return False
 
@@ -616,9 +646,18 @@ def _validated_candidate_changes(
     run_id: str,
     target_files: list[str],
 ) -> list[str]:
+    normalized_inspection = deepcopy(inspection)
+    raw_changes = normalized_inspection.get("changedFiles")
+    if isinstance(raw_changes, list):
+        normalized_inspection["changedFiles"] = [
+            str(item.get("path") or "").strip()
+            if isinstance(item, dict) and str(item.get("path") or "").strip()
+            else item
+            for item in raw_changes
+        ]
     try:
         return validate_candidate_changes(
-            inspection,
+            normalized_inspection,
             run_id=run_id,
             target_files=target_files,
         )
@@ -838,6 +877,7 @@ def _evolution_mutation_prompt(
 ) -> str:
     plan = context.get("plan") if isinstance(context.get("plan"), dict) else {}
     target_files = _target_files_from_context(context)
+    exact_targets = ", ".join(target_files)
     return (
         "上一轮执行后候选工作树仍没有产生任何文件变更；只读检查、复述计划"
         "或仅开事务都不算完成。\n"
@@ -848,13 +888,17 @@ def _evolution_mutation_prompt(
         f"{target_context or '[目标文件上下文不可用]'}\n\n"
         "现在进入有界写入阶段：\n"
         "1. 不要复述计划，不要再次制定计划，也无需再次请求用户确认。\n"
-        "2. 第一项工具调用必须产生文件修改；当前只提供 apply_patch_tool 和 "
-        "write_file_tool，不再读取源码、目录或测试说明。\n"
-        "3. 使用上一轮已经读取的证据，在 4 轮内完成最小安全候选修改；"
-        "不得再次开账或关账。\n"
-        "4. 仍须遵守原定范围；不要写主工作区、刷新 Launcher、执行远端操作、"
-        "评分、Judge 或自行批准合入。\n"
-        "5. 如果现有证据不足以安全修改，直接报告阻塞，不得伪造候选变更。"
+        "2. 第一项工具调用必须产生文件修改；优先直接使用 apply_patch_tool，"
+        "也可使用 write_file_tool。"
+        f"只能直接修改：{exact_targets}。\n"
+        "3. 本轮只有 1 次写入工具调用机会；不得再次开账或关账，也不得把写入"
+        "工具当作读取、探测或生成分析脚本的替代品。\n"
+        "4. 不得创建 scratch、helper、investigate 或其他临时文件，尤其不得写入 "
+        "workspace/agents；仍须遵守原定范围。\n"
+        "5. 不要写主工作区、刷新 Launcher、执行远端操作、评分、Judge 或自行"
+        "批准合入。\n"
+        "6. 如果上面的精确源码上下文仍不足以安全修改，直接报告阻塞，不得伪造"
+        "候选变更。"
     )
 
 
@@ -923,26 +967,63 @@ def _fail_new_evolution_transaction(
             return
 
 
+def _close_active_evolution_transaction_success(
+    *,
+    run_id: str,
+    summary: str,
+) -> None:
+    active_txn_id = _active_evolution_transaction_id()
+    if not active_txn_id:
+        raise AutonomousLoopRuntimeError(
+            "Validated candidate has no active evolution transaction to close."
+        )
+    try:
+        get_git_memory_service().close_evolution_transaction(
+            txn_id=active_txn_id,
+            status="success",
+            summary=summary,
+        )
+        get_session_state().set_active_evolution_txn(None)
+        record_runtime_scene_event(
+            "work_run",
+            "evolving",
+            "self_evolution.autonomous_loop.validation_exhaustion_recovered",
+            message=(
+                "Self-evolution accepted successful structured validation "
+                "evidence and closed the transaction."
+            ),
+            level="warning",
+            outcome="recovered",
+            fields={
+                "runKind": "self_evolution_autonomous_loop",
+                "runId": run_id,
+                "transactionId": active_txn_id,
+                "transactionStatus": "success",
+            },
+            lifecycle=True,
+        )
+    except Exception as exc:
+        raise AutonomousLoopRuntimeError(
+            "Validated candidate transaction could not be closed: "
+            f"{type(exc).__name__}: {exc}"
+        ) from exc
+
+
 def _evolution_validation_prompt(
     context: dict[str, Any],
     *,
     changed_files: list[Any],
-    transaction_opened: bool,
 ) -> str:
     plan = context.get("plan") if isinstance(context.get("plan"), dict) else {}
     normalized_files = [
         str(item).strip() for item in changed_files if str(item).strip()
     ]
-    transaction_line = (
-        "已有事务已经开账；不得重复调用 open_evolution_transaction_tool。"
-        if transaction_opened
-        else "尚未观察到已开事务；先开账一次，再执行验证。"
-    )
     return (
         "候选已经产生文件变更，现在只做验证与事务收口。\n"
         f"既定计划：{str(plan.get('summary') or '').strip()}\n"
         f"候选文件：{', '.join(normalized_files)}\n"
-        f"{transaction_line}\n\n"
+        "新的验证轮次必须重新开账；先调用一次 "
+        "open_evolution_transaction_tool，再执行验证。\n\n"
         "要求：\n"
         "1. 不再修改文件，不重新制定计划，不请求用户确认。\n"
         "2. 使用 cli_tool 或 python_lint_tool 运行与改动相称的聚焦验证。\n"

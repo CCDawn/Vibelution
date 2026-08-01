@@ -10,7 +10,7 @@ const styles = {
   conversationBody:
     "vui-routes-chatsessionworkspacepanel conversationBody relative flex min-h-0 min-w-0 w-full flex-1 flex-col overflow-hidden",
   toolApprovalHost:
-    "vui-routes-chatsessionworkspacepanel toolApprovalHost sticky top-0 z-[6] shrink-0 border-b border-[color-mix(in_srgb,var(--accent-warm)_22%,var(--vui-border-subtle))] bg-[var(--vui-surface-panel)] p-1.5",
+    "vui-routes-chatsessionworkspacepanel toolApprovalHost sticky top-0 z-[6] shrink-0 border-b border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--vui-surface-panel)_92%,transparent)] px-3 py-2 backdrop-blur-[2px]",
   // When status rail is closed the center track already reclaims full width.
   // Keep the reading column full-bleed inside that track (no side gutters that
   // look like a blank right panel after navigation remounts).

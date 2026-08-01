@@ -1147,9 +1147,34 @@ describe("ConversationView edit resend affordance", () => {
     expect(conversationViewSource).toContain("streamingScrollFrameRef");
     expect(conversationViewSource).toContain("function scrollTimelineToBottom");
     expect(conversationViewSource).toContain("if (!wasAtBottom) {");
-    expect(conversationViewSource).toContain("onStreamingFramePaint?.({");
+    expect(conversationViewSource).toContain("onStreamingFramePaint({");
     expect(conversationViewSource).toContain("paintedAtMs: conversationPerformanceNowMs()");
     expect(conversationViewSource).not.toContain("const frameId = window.requestAnimationFrame");
+  });
+
+  it("keeps virtual-row ResizeObservers and streaming paint free of per-render thrash", () => {
+    expect(conversationViewSource).toContain("timelineVirtualRowRefCallbacksRef");
+    expect(conversationViewSource).toContain("timelineRowNodesRef");
+    expect(conversationViewSource).toContain("streamingPaintMetricsRef");
+    expect(conversationViewSource).toContain("followLatestRef.current ? 8 : 2");
+    expect(conversationViewSource).toContain("ref={timelineVirtualRowRef(rowKey)}");
+    // Height version bumps must not re-pin scroll (that loop caused flicker).
+    expect(conversationViewSource).toMatch(
+      /scheduleTimelineHeightVersionBump[\s\S]*?setTimelineRowHeightVersion/,
+    );
+    const bumpBlock = conversationViewSource.slice(
+      conversationViewSource.indexOf("const scheduleTimelineHeightVersionBump"),
+      conversationViewSource.indexOf("const bindTimelineVirtualRow"),
+    );
+    expect(bumpBlock).not.toContain("scheduleTimelineScrollToBottom");
+    // Paint effect must not depend on Map/array identities that change every render.
+    const paintBlock = conversationViewSource.slice(
+      conversationViewSource.indexOf("if (!streamingTimelineScrollSignal || !onStreamingFramePaint)"),
+      conversationViewSource.indexOf("useEffect(() => {\n    const timeline = timelineRef.current;\n    if (!timeline) {\n      return;\n    }\n    const handleScroll"),
+    );
+    expect(paintBlock).toContain("streamingTimelineScrollSignal");
+    expect(paintBlock).not.toContain("agentRenderStatesByMessageId");
+    expect(paintBlock).not.toContain("streamingTimelineMessages");
   });
 
   it("scopes row memo invalidation to the current message state", () => {

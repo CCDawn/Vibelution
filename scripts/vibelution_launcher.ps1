@@ -5756,7 +5756,7 @@ function Start-ManagedBrowser {
     $browserArgs = @(
         "--user-data-dir=$ProfileDir",
         "--app=$resolvedAppUrl",
-        "--force-dark-mode",
+        # Avoid --force-dark-mode: conflicts with workbench data-theme and flickers Edge --app chrome.
         "--no-first-run",
         "--no-default-browser-check",
         "--disable-session-crashed-bubble",
