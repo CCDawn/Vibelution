@@ -2258,6 +2258,47 @@ def test_stream_records_usage_and_cache_hit_rate(monkeypatch):
     assert fields["payloadShape"]["toolSchemaHash"] == ""
 
 
+def test_deepseek_stream_records_prompt_cache_hit_and_miss_usage():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "deepseek",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://api.deepseek.com/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "deepseek-chat",
+        }
+    )
+    payloads = []
+
+    def backend(payload):
+        payloads.append(dict(payload))
+        return iter(
+            [
+                {"choices": [{"delta": {"content": "ok"}}]},
+                {
+                    "choices": [],
+                    "usage": {
+                        "prompt_tokens": 120,
+                        "completion_tokens": 10,
+                        "total_tokens": 130,
+                        "prompt_cache_hit_tokens": 80,
+                        "prompt_cache_miss_tokens": 40,
+                    },
+                },
+            ]
+        )
+
+    client = LLMClient(config=config, backend=backend)
+    events = list(client.stream_events([{"role": "user", "content": "ping"}]))
+
+    assert payloads[0]["stream_options"] == {"include_usage": True}
+    assert events[-1].usage is not None
+    assert events[-1].usage.input_tokens == 120
+    assert events[-1].usage.cached_input_tokens == 80
+    assert events[-1].usage.provider_raw_usage["prompt_cache_hit_tokens"] == 80
+    assert events[-1].usage.provider_raw_usage["prompt_cache_miss_tokens"] == 40
+
+
 def test_stream_records_cache_read_token_observation(monkeypatch):
     config = supported_relay_chat_config()
     recorded = []
@@ -2449,6 +2490,37 @@ def test_stream_retries_without_usage_options_when_provider_rejects_them(monkeyp
     assert success_event[1]["fields"]["selectedProtocol"] == success_event[1]["fields"]["protocol"]
     assert success_event[1]["fields"]["payloadValidationResult"] == "passed"
     assert success_event[1]["fields"]["streamUsageOptionsDowngraded"] is True
+
+
+def test_deepseek_stream_retries_without_usage_options_when_endpoint_rejects_them():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "deepseek",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://api.deepseek.com/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "deepseek-chat",
+        }
+    )
+    payloads = []
+
+    def backend(payload):
+        payloads.append(dict(payload))
+        if payload.get("stream_options"):
+            raise Exception("400 bad_request unknown parameter: stream_options.include_usage")
+        return iter([{"choices": [{"delta": {"content": "ok"}}]}])
+
+    events = list(
+        LLMClient(config=config, backend=backend).stream_events(
+            [{"role": "user", "content": "ping"}]
+        )
+    )
+
+    assert [payload.get("stream_options") for payload in payloads] == [
+        {"include_usage": True},
+        None,
+    ]
+    assert [event.type for event in events] == ["text_delta", "done"]
 
 
 def test_stream_final_chunk_exposes_usage_observation_for_ui():
@@ -4427,6 +4499,36 @@ def test_usage_observation_accepts_provider_usage_objects():
     assert usage.output_tokens == 20
     assert usage.cached_input_tokens == 32
     assert usage.provider_raw_usage["prompt_tokens_details"] == {"cached_tokens": 32}
+
+
+def test_deepseek_usage_object_preserves_prompt_cache_hit_and_miss_tokens():
+    usage_object = SimpleNamespace(
+        prompt_tokens=100,
+        completion_tokens=20,
+        total_tokens=120,
+        prompt_cache_hit_tokens=64,
+        prompt_cache_miss_tokens=36,
+    )
+    response = SimpleNamespace(usage=usage_object)
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "deepseek",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://api.deepseek.com/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "deepseek-chat",
+        }
+    )
+
+    usage = LLMClient(config=config, backend=lambda _payload: response)._usage_from_response(
+        response,
+        latency_ms=7,
+    )
+
+    assert usage.input_tokens == 100
+    assert usage.cached_input_tokens == 64
+    assert usage.provider_raw_usage["prompt_cache_hit_tokens"] == 64
+    assert usage.provider_raw_usage["prompt_cache_miss_tokens"] == 36
 
 
 def test_context_recovery_uses_larger_context_profile_only():
