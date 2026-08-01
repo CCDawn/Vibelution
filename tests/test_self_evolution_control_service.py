@@ -657,6 +657,25 @@ def test_self_evolution_agent_bindings_create_fixed_role_slots(tmp_path, monkeyp
     assert payload["modes"]["self_evolution"]["slots"]["observer"] == bindings["observer"]["agentId"]
 
 
+def test_self_evolution_agent_bindings_reuse_valid_slots_without_full_role_repair(tmp_path, monkeypatch):
+    monkeypatch.setattr(service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(service, "ROLLBACK_ROOT", tmp_path / "workspace" / "web_self_evolution")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_mode_binding_service, "PROJECT_ROOT", tmp_path)
+
+    expected = service.self_evolution_agent_bindings()
+
+    def fail_full_repair():
+        raise AssertionError("valid fixed-role bindings must not enter the full repair path")
+
+    monkeypatch.setattr(service, "ensure_self_evolution_agent_instances", fail_full_repair)
+
+    bindings = service.self_evolution_agent_bindings()
+
+    assert bindings == expected
+
+
 def test_self_observation_agent_binding_ignores_stale_non_observer_and_retired_slots(tmp_path, monkeypatch):
     monkeypatch.setattr(service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(service, "ROLLBACK_ROOT", tmp_path / "workspace" / "web_self_evolution")
