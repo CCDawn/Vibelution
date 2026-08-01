@@ -15,8 +15,8 @@ RuntimeCallable = Callable[[dict[str, Any]], dict[str, Any]]
 RoleTurnCallable = Callable[..., dict[str, Any]]
 BindingsCallable = Callable[[], dict[str, dict[str, Any]]]
 AUTONOMOUS_RUNTIME_TOOL_SOURCE = "self_evolution_autonomous_loop"
-OBSERVER_MAX_ITERATIONS = 8
-PLANNER_MAX_ITERATIONS = 4
+OBSERVER_MAX_ITERATIONS = 4
+PLANNER_MAX_ITERATIONS = 3
 ANALYSIS_FINALIZATION_MAX_ITERATIONS = 2
 OBSERVER_RUNTIME_TOOLS = (
     "grep_search_tool",
@@ -390,8 +390,8 @@ def _observation_prompt(context: dict[str, Any]) -> str:
         "要求：\n"
         "1. 只报告与目标直接相关的现状、证据、约束和风险。\n"
         "2. 不修改文件，不执行 Git 合入，不做评分或 Judge 判断。\n"
-        "3. 最多调用 6 次只读工具；证据足够时立即停止继续搜索。\n"
-        "4. 必须在第 8 轮前保留一次最终回答，给出可供下一轮制定计划的简洁事实摘要。"
+        "3. 最多补充 2 轮只读检索；证据足够时立即停止继续搜索。\n"
+        "4. 必须在第 4 轮前保留一次最终回答，给出可供下一轮制定计划的简洁事实摘要。"
     )
 
 
@@ -410,8 +410,8 @@ def _planning_prompt(context: dict[str, Any]) -> str:
         "要求：\n"
         "1. 计划必须能在隔离 worktree 内完成并留下测试证据。\n"
         "2. 不执行计划，不评分，不调用 Judge。\n"
-        "3. 最多补充调用 2 次只读工具；已有观察证据足够时不得重复搜索。\n"
-        "4. 必须在第 4 轮前输出计划，明确修改范围、验证方法和停止条件。"
+        "3. 最多补充 1 轮只读检索；已有观察证据足够时不得重复搜索。\n"
+        "4. 必须在第 3 轮前输出计划，明确修改范围、验证方法和停止条件。"
     )
 
 
