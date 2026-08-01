@@ -328,20 +328,22 @@ def build_autonomous_loop_hooks(
         if mutation_required or executor_exhausted:
             validation_tools = list(EXECUTOR_VALIDATION_TOOLS)
             validation_tools.insert(0, "open_evolution_transaction_tool")
-            turn = _run_successful_turn(
-                dependencies.run_role_turn,
-                role="executor",
-                binding=executor_binding,
-                run_id=run_id,
-                prompt=_evolution_validation_prompt(
-                    context,
-                    changed_files=changed_files,
+            turn = _recover_exhausted_validation_turn(
+                dependencies.run_role_turn(
+                    role="executor",
+                    binding=executor_binding,
+                    run_id=run_id,
+                    prompt=_evolution_validation_prompt(
+                        context,
+                        changed_files=changed_files,
+                    ),
+                    carryover=validation_carryover,
+                    runtime_tool_grants=validation_tools,
+                    runtime_tool_source=AUTONOMOUS_RUNTIME_TOOL_SOURCE,
+                    max_iterations=EXECUTOR_VALIDATION_MAX_ITERATIONS,
+                    allowed_target_paths=allowed_target_paths,
                 ),
-                carryover=validation_carryover,
-                runtime_tool_grants=validation_tools,
-                runtime_tool_source=AUTONOMOUS_RUNTIME_TOOL_SOURCE,
-                max_iterations=EXECUTOR_VALIDATION_MAX_ITERATIONS,
-                allowed_target_paths=allowed_target_paths,
+                run_id=run_id,
             )
             inspection = _inspect_candidate(
                 dependencies,
@@ -461,6 +463,38 @@ def _require_successful_turn(turn: Any) -> dict[str, Any]:
     return validated_turn
 
 
+def _recover_exhausted_validation_turn(
+    turn: Any,
+    *,
+    run_id: str,
+) -> dict[str, Any]:
+    validated_turn = _require_turn_result(turn)
+    result = validated_turn["result"]
+    if not bool(result.get("max_iteration_exhausted")):
+        return _require_successful_turn(validated_turn)
+    if not _result_has_successful_validation(result):
+        return _require_successful_turn(validated_turn)
+    summary = (
+        "候选验证工具已成功完成；模型达到轮次上限后由宿主完成事务收口。"
+    )
+    _close_active_evolution_transaction_success(
+        run_id=run_id,
+        summary=summary,
+    )
+    recovered_turn = deepcopy(validated_turn)
+    recovered_result = deepcopy(result)
+    recovered_result.update(
+        {
+            "status": "completed",
+            "summary": summary,
+            "max_iteration_exhausted": False,
+            "validationRecovered": True,
+        }
+    )
+    recovered_turn["result"] = recovered_result
+    return recovered_turn
+
+
 def _run_bounded_analysis_turn(
     runner: RoleTurnCallable,
     *,
@@ -500,6 +534,19 @@ def _result_tool_call_count(result: dict[str, Any]) -> int:
         if count > 0:
             return count
     return len(_result_evidence(result))
+
+
+def _result_has_successful_validation(result: dict[str, Any]) -> bool:
+    accepted_tools = {"cli_tool", "python_lint_tool"}
+    accepted_statuses = {"completed", "ok", "success", "succeeded"}
+    for item in _result_evidence(result):
+        tool_name = str(
+            item.get("name") or item.get("toolName") or ""
+        ).strip()
+        status = str(item.get("status") or "").strip().lower()
+        if tool_name in accepted_tools and status in accepted_statuses:
+            return True
+    return False
 
 
 def _result_summary(result: dict[str, Any], *, label: str) -> str:
@@ -918,6 +965,48 @@ def _fail_new_evolution_transaction(
             )
         except Exception:
             return
+
+
+def _close_active_evolution_transaction_success(
+    *,
+    run_id: str,
+    summary: str,
+) -> None:
+    active_txn_id = _active_evolution_transaction_id()
+    if not active_txn_id:
+        raise AutonomousLoopRuntimeError(
+            "Validated candidate has no active evolution transaction to close."
+        )
+    try:
+        get_git_memory_service().close_evolution_transaction(
+            txn_id=active_txn_id,
+            status="success",
+            summary=summary,
+        )
+        get_session_state().set_active_evolution_txn(None)
+        record_runtime_scene_event(
+            "work_run",
+            "evolving",
+            "self_evolution.autonomous_loop.validation_exhaustion_recovered",
+            message=(
+                "Self-evolution accepted successful structured validation "
+                "evidence and closed the transaction."
+            ),
+            level="warning",
+            outcome="recovered",
+            fields={
+                "runKind": "self_evolution_autonomous_loop",
+                "runId": run_id,
+                "transactionId": active_txn_id,
+                "transactionStatus": "success",
+            },
+            lifecycle=True,
+        )
+    except Exception as exc:
+        raise AutonomousLoopRuntimeError(
+            "Validated candidate transaction could not be closed: "
+            f"{type(exc).__name__}: {exc}"
+        ) from exc
 
 
 def _evolution_validation_prompt(
