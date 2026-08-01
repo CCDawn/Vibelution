@@ -1081,11 +1081,12 @@ def test_runtime_retries_executor_once_when_first_turn_only_inspects_candidate(
         "write_file_tool",
     ]
     assert turn_calls[2]["runtime_tool_grants"] == [
+        "open_evolution_transaction_tool",
         "close_evolution_transaction_tool",
         "cli_tool",
         "python_lint_tool",
     ]
-    assert "已有事务已经开账" in turn_calls[2]["prompt"]
+    assert "新的验证轮次必须重新开账" in turn_calls[2]["prompt"]
     assert candidate["changedFiles"] == ["tests/test_example.py"]
     assert scene_events[0][1]["fields"]["reason"] == (
         "tool_calls_but_no_changed_files"
