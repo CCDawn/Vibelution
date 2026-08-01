@@ -39,9 +39,13 @@ export function resolveChatSecondaryPollPolicy(input: ChatSecondaryPollPolicyInp
     petRefetchInterval: secondaryEnabled
       ? resolvePollingInterval(input.chatPollingVisible, CHAT_SECONDARY_PET_POLL_MS)
       : false,
-    // Teams list is only needed for group composer / team surfaces — not continuous direct chat.
-    teamsRefetchInterval: secondaryEnabled && input.teamsPickerNeeded
-      ? resolvePollingInterval(input.chatPollingVisible, CHAT_SECONDARY_TEAMS_POLL_MS)
+    // Left-rail agent directory needs teams for membership partitioning; group picker
+    // needs fresher data. Always poll (slower) when secondary chat data is on.
+    teamsRefetchInterval: secondaryEnabled
+      ? resolvePollingInterval(
+          input.chatPollingVisible,
+          input.teamsPickerNeeded ? CHAT_SECONDARY_TEAMS_POLL_MS : CHAT_SECONDARY_TEAMS_POLL_MS * 2,
+        )
       : false,
     projectBusRefetchInterval: input.projectBusActive
       ? resolvePollingInterval(input.chatPollingVisible, CHAT_SECONDARY_PROJECT_BUS_POLL_MS)
