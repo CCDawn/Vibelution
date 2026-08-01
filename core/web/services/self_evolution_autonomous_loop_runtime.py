@@ -268,10 +268,6 @@ def build_autonomous_loop_hooks(
             target_files=target_files,
         )
         mutation_required = not changed_files
-        transaction_opened = _result_used_tool(
-            turn["result"],
-            "open_evolution_transaction_tool",
-        )
         validation_carryover = deepcopy(turn.get("carryover") or {})
         if mutation_required:
             tool_call_count = _result_tool_call_count(turn["result"])
@@ -331,8 +327,7 @@ def build_autonomous_loop_hooks(
             )
         if mutation_required or executor_exhausted:
             validation_tools = list(EXECUTOR_VALIDATION_TOOLS)
-            if not transaction_opened:
-                validation_tools.insert(0, "open_evolution_transaction_tool")
+            validation_tools.insert(0, "open_evolution_transaction_tool")
             turn = _run_successful_turn(
                 dependencies.run_role_turn,
                 role="executor",
@@ -341,7 +336,6 @@ def build_autonomous_loop_hooks(
                 prompt=_evolution_validation_prompt(
                     context,
                     changed_files=changed_files,
-                    transaction_opened=transaction_opened,
                 ),
                 carryover=validation_carryover,
                 runtime_tool_grants=validation_tools,
@@ -506,17 +500,6 @@ def _result_tool_call_count(result: dict[str, Any]) -> int:
         if count > 0:
             return count
     return len(_result_evidence(result))
-
-
-def _result_used_tool(result: dict[str, Any], tool_name: str) -> bool:
-    expected = str(tool_name or "").strip()
-    if not expected:
-        return False
-    for item in _result_evidence(result):
-        observed = str(item.get("name") or item.get("toolName") or "").strip()
-        if observed == expected:
-            return True
-    return False
 
 
 def _result_summary(result: dict[str, Any], *, label: str) -> str:
@@ -941,22 +924,17 @@ def _evolution_validation_prompt(
     context: dict[str, Any],
     *,
     changed_files: list[Any],
-    transaction_opened: bool,
 ) -> str:
     plan = context.get("plan") if isinstance(context.get("plan"), dict) else {}
     normalized_files = [
         str(item).strip() for item in changed_files if str(item).strip()
     ]
-    transaction_line = (
-        "已有事务已经开账；不得重复调用 open_evolution_transaction_tool。"
-        if transaction_opened
-        else "尚未观察到已开事务；先开账一次，再执行验证。"
-    )
     return (
         "候选已经产生文件变更，现在只做验证与事务收口。\n"
         f"既定计划：{str(plan.get('summary') or '').strip()}\n"
         f"候选文件：{', '.join(normalized_files)}\n"
-        f"{transaction_line}\n\n"
+        "新的验证轮次必须重新开账；先调用一次 "
+        "open_evolution_transaction_tool，再执行验证。\n\n"
         "要求：\n"
         "1. 不再修改文件，不重新制定计划，不请求用户确认。\n"
         "2. 使用 cli_tool 或 python_lint_tool 运行与改动相称的聚焦验证。\n"
