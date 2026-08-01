@@ -653,6 +653,55 @@ def test_runtime_rejects_candidate_diff_outside_planned_target_files(monkeypatch
     assert scene_events[-1][1]["fields"]["outsideTargetCount"] == 1
 
 
+def test_runtime_accepts_structured_change_entry_for_exact_planned_target():
+    hooks = build_autonomous_loop_hooks(
+        AutonomousLoopRuntimeDependencies(
+            load_bindings=lambda: {
+                "observer": {"agentId": "observer-agent"},
+                "executor": {"agentId": "executor-agent"},
+            },
+            run_role_turn=lambda **_kwargs: {
+                "result": {
+                    "status": "completed",
+                    "summary": "候选实现完成。",
+                    "tool_trace": [
+                        {"name": "write_file_tool", "status": "success"},
+                    ],
+                },
+                "carryover": {},
+                "conversationSessionId": "session-executor",
+            },
+            create_candidate=lambda _context: {
+                "branch": "codex/self-loop-candidate",
+                "worktreePath": "C:/workspace/self-loop-candidate",
+                "baseCommit": "a" * 40,
+            },
+            inspect_candidate=lambda _context: {
+                "headCommit": "b" * 40,
+                "changedFiles": [
+                    {
+                        "path": "tests/self_evolution_candidate_marker.py",
+                        "changeType": "added",
+                    }
+                ],
+                "variantId": "variant-structured-change",
+            },
+            integrate_candidate=lambda _context: {},
+            cleanup_candidate=lambda _context: {},
+        )
+    )
+    context = _snapshot(candidate=None)
+    context["plan"]["targetFiles"] = [
+        "tests/self_evolution_candidate_marker.py"
+    ]
+
+    candidate = hooks.evolve(context)
+
+    assert candidate["changedFiles"] == [
+        "tests/self_evolution_candidate_marker.py"
+    ]
+
+
 def test_observer_exhaustion_gets_one_tool_disabled_summary_turn(monkeypatch):
     turn_calls: list[dict] = []
     scene_events: list[tuple[tuple, dict]] = []
