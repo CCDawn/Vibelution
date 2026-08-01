@@ -178,7 +178,14 @@ def test_runtime_hooks_use_one_observer_context_then_isolated_executor():
     assert turn_calls[1]["carryover"] == {
         "previousResponseId": "response-observe"
     }
+    assert "读取 logs/runtime_scenes 使用 grep_search_tool" in turn_calls[0]["prompt"]
+    assert "由自己触发的工具参数或目录不适配失败" in turn_calls[0]["prompt"]
+    assert "当前运行仍未恢复" in turn_calls[0]["prompt"]
+    assert "不得从最近 Git 记忆推断未验证需求" in turn_calls[0]["prompt"]
     assert "当前观察结果" in turn_calls[1]["prompt"]
+    assert "本阶段的工具预算已经独立重置" in turn_calls[1]["prompt"]
+    assert "必须与观察摘要中已验证的问题一致" in turn_calls[1]["prompt"]
+    assert "不得改用仅来自 GIT_MEMORY" in turn_calls[1]["prompt"]
     assert turn_calls[2]["binding"]["workspacePath"] == (
         "C:/workspace/self-loop-candidate"
     )
