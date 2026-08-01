@@ -516,7 +516,7 @@ def start_instance(
         )
         frontend_process = _spawn(
             frontend_command,
-            cwd=project,
+            cwd=project / "web",
             env=env,
             stdout_path=paths["logsRoot"] / "frontend.stdout.log",
             stderr_path=paths["logsRoot"] / "frontend.stderr.log",

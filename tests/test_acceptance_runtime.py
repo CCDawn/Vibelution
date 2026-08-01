@@ -111,10 +111,12 @@ def test_instance_environment_and_state_are_private(runtime, tmp_path, monkeypat
             self.terminated = True
 
     captured_envs = []
+    captured_cwds = []
 
     def fake_spawn(command, *, cwd, env, stdout_path, stderr_path):
         process = FakeProcess()
         processes.append(process)
+        captured_cwds.append(Path(cwd))
         captured_envs.append(dict(env))
         return process
 
@@ -140,6 +142,7 @@ def test_instance_environment_and_state_are_private(runtime, tmp_path, monkeypat
     assert state["status"] == "running"
     assert state["frontendUrl"] == f"http://127.0.0.1:{state['ports']['frontend']}"
     assert len(captured_envs) == 2
+    assert captured_cwds == [project, project / "web"]
     for env in captured_envs:
         assert env["VIBELUTION_PORT"] == str(state["ports"]["backend"])
         assert env["VIBELUTION_FRONTEND_PORT"] == str(state["ports"]["frontend"])
