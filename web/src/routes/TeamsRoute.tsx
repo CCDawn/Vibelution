@@ -3720,6 +3720,14 @@ export function TeamsRoute({
     : `${sourceCollectionAssignments.length} assignments`;
   const sourceCollectionDisplayedCandidateCountText = sourceCollectionCountText(sourceCollectionPrimaryDataLoading, sourceCollectionDisplayedCandidateCount);
   const sourceCollectionProjectedCandidateCountText = sourceCollectionCountText(sourceCollectionPrimaryDataLoading, sourceCollectionProjectedCandidateCount);
+  const sourceCollectionCurrentCandidateCount = sourceCollectionBoundCountToCurrentCoverage(
+    sourceCollectionCandidateProjection,
+    sourceCollectionProjectedCandidateCount,
+  );
+  const sourceCollectionCurrentCandidateCountText = sourceCollectionCountText(
+    sourceCollectionPrimaryDataLoading,
+    sourceCollectionCurrentCandidateCount,
+  );
   const sourceCollectionProjectedCandidateCountLabel = sourceCollectionCountWithUnit(sourceCollectionPrimaryDataLoading, sourceCollectionProjectedCandidateCount, "条候选资料", "candidate sources");
   const sourceCollectionProjectedAssessedCountText = sourceCollectionCountText(sourceCollectionScreeningDataLoading, sourceCollectionProjectedAssessedCount);
   const sourceCollectionProjectedApprovedCountText = sourceCollectionCountText(sourceCollectionScreeningDataLoading, sourceCollectionProjectedApprovedCount);
@@ -4700,8 +4708,8 @@ export function TeamsRoute({
       : `${sourceCollectionProjectedAssessedCount}/${sourceCollectionProjectedCandidateCount} processed · ${sourceCollectionDataSyncText}`)
       : (lang === "zh" ? "提炼进度 加载中" : "extraction loading");
   const sourceCollectionExtractionMaterialMetric = lang === "zh"
-    ? `已提炼 ${sourceCollectionProjectedCandidateCount}/${sourceCollectionProjectedCandidateCount} · ${sourceCollectionExtractionAgentMaterialCount} 条待补材料`
-    : `${sourceCollectionProjectedCandidateCount}/${sourceCollectionProjectedCandidateCount} extracted · ${sourceCollectionExtractionAgentMaterialCount} need material`;
+    ? `已提炼 ${sourceCollectionCurrentCandidateCount}/${sourceCollectionCurrentCandidateCount} · ${sourceCollectionExtractionAgentMaterialCount} 条待补材料`
+    : `${sourceCollectionCurrentCandidateCount}/${sourceCollectionCurrentCandidateCount} extracted · ${sourceCollectionExtractionAgentMaterialCount} need material`;
   const sourceCollectionExtractionLoadingOutputLabel = sourceCollectionProjectedCandidateCount > 0 || sourceCollectionProjectedApprovedCount > 0
     ? (lang === "zh"
       ? `${sourceCollectionProjectedApprovedCount} 条保留 / ${sourceCollectionRunPendingScreeningCount} 条待处理 · ${sourceCollectionDataSyncText}`
@@ -4751,7 +4759,7 @@ export function TeamsRoute({
         ? sourceCollectionExtractionLoadingMetric
         : sourceCollectionExtractionNeedsAgentMaterial
           ? sourceCollectionExtractionMaterialMetric
-        : (lang === "zh" ? `已处理 ${sourceCollectionProjectedAssessedCountText}/${sourceCollectionProjectedCandidateCountText}` : `${sourceCollectionProjectedAssessedCountText}/${sourceCollectionProjectedCandidateCountText} processed`),
+        : (lang === "zh" ? `已处理 ${sourceCollectionProjectedAssessedCountText}/${sourceCollectionCurrentCandidateCountText}` : `${sourceCollectionProjectedAssessedCountText}/${sourceCollectionCurrentCandidateCountText} processed`),
       summary: sourceCollectionStageLaunchActive("extraction")
         ? sourceCollectionStageLaunchSummary("extraction")
         : sourceCollectionExtractionDisplayLoading
@@ -4775,7 +4783,7 @@ export function TeamsRoute({
         : sourceCollectionExtractionCanProceedAfterExclusions
           ? (lang === "zh" ? `${sourceCollectionProjectedApprovedCountText} 条保留 / ${sourceCollectionExtractionExcludedRecoveryState.excludedCount} 条已排除` : `${sourceCollectionProjectedApprovedCountText} kept / ${sourceCollectionExtractionExcludedRecoveryState.excludedCount} excluded`)
           : sourceCollectionExtractionNeedsAgentMaterial
-            ? (lang === "zh" ? `${sourceCollectionProjectedCandidateCountText} 条已提炼 / ${sourceCollectionExtractionAgentMaterialCount} 条待补材料` : `${sourceCollectionProjectedCandidateCountText} extracted / ${sourceCollectionExtractionAgentMaterialCount} need material`)
+            ? (lang === "zh" ? `${sourceCollectionCurrentCandidateCountText} 条已提炼 / ${sourceCollectionExtractionAgentMaterialCount} 条待补材料` : `${sourceCollectionCurrentCandidateCountText} extracted / ${sourceCollectionExtractionAgentMaterialCount} need material`)
           : (lang === "zh" ? `${sourceCollectionProjectedApprovedCountText} 条保留 / ${sourceCollectionRunPendingScreeningCountText} 条待处理` : `${sourceCollectionProjectedApprovedCountText} kept / ${sourceCollectionRunPendingScreeningCountText} pending`),
       nextLabel: sourceCollectionExtractionNeedsAgentMaterial
         ? (lang === "zh" ? "要求 Agent 补充材料" : "Request Agent material supplement")
