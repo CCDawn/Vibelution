@@ -2221,6 +2221,7 @@ def test_stream_records_usage_and_cache_hit_rate(monkeypatch):
         return iter(
             [
                 {"choices": [{"delta": {"content": "ok"}}]},
+                {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]},
                 {
                     "choices": [],
                     "usage": {
@@ -2275,6 +2276,7 @@ def test_deepseek_stream_records_prompt_cache_hit_and_miss_usage():
         return iter(
             [
                 {"choices": [{"delta": {"content": "ok"}}]},
+                {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]},
                 {
                     "choices": [],
                     "usage": {
@@ -2297,6 +2299,10 @@ def test_deepseek_stream_records_prompt_cache_hit_and_miss_usage():
     assert events[-1].usage.cached_input_tokens == 80
     assert events[-1].usage.provider_raw_usage["prompt_cache_hit_tokens"] == 80
     assert events[-1].usage.provider_raw_usage["prompt_cache_miss_tokens"] == 40
+    outcome = events[-1].provider_payload["turn_outcome"]
+    projected = client.project_outcome_message(outcome)
+    assert projected.response_metadata["usage_observation"]["input_tokens"] == 120
+    assert projected.response_metadata["usage_observation"]["cached_input_tokens"] == 80
 
 
 def test_stream_records_cache_read_token_observation(monkeypatch):

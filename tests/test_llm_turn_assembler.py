@@ -104,6 +104,35 @@ def test_chat_successful_no_tool_terminal_promotes_interim_text_once():
     assert sum(event.kind == "turn_completed" for event in events) == 1
 
 
+def test_chat_usage_tail_after_terminal_is_preserved_in_outcome():
+    decoded = ChatCompletionsWireAdapter().decode_stream(
+        [
+            {"choices": [{"index": 0, "delta": {"content": "Done."}, "finish_reason": None}]},
+            {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]},
+            {
+                "choices": [],
+                "usage": {
+                    "prompt_tokens": 15378,
+                    "completion_tokens": 35,
+                    "total_tokens": 15413,
+                    "prompt_cache_hit_tokens": 10624,
+                    "prompt_cache_miss_tokens": 4754,
+                },
+            },
+        ],
+        route=route(),
+        scope=scope(),
+    )
+    events = tuple(decoded)
+
+    usage_event = next(event for event in events if event.kind == "usage_updated")
+    assert usage_event.diagnostic_summary["inputTokens"] == 15378
+    assert usage_event.diagnostic_summary["cachedInputTokens"] == 10624
+    assert usage_event.diagnostic_summary["uncachedInputTokens"] == 4754
+    assert decoded.outcome.kind == "final_answer"
+    assert decoded.outcome.events[-1] == usage_event
+
+
 @pytest.mark.parametrize(
     ("terminal_chunk", "expected_kind"),
     [
