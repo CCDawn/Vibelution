@@ -2631,6 +2631,7 @@ export function TeamsRoute({
         lang={lang}
         researchStagePhases={researchStagePhases}
         experimentPlanningStatus={experimentPlanningStatus}
+        experimentPlanningStatusQuery={experimentPlanningStatusQuery}
         selectedTeam={selectedTeam}
         selectedTeamStartResearchStagePending={selectedTeamStartResearchStagePending}
         linkedChatRoomId={linkedChatRoomId || ""}
