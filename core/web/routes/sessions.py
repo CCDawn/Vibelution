@@ -238,7 +238,7 @@ class ChildSessionCreatePayload(BaseModel):
 class SessionToolApprovalDecisionPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    decision: Literal["accept", "acceptForSession", "decline", "cancel"]
+    decision: Literal["accept", "acceptForSession", "acceptAlways", "decline", "cancel"]
 
 
 @router.get("/sessions")

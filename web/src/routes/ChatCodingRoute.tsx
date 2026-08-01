@@ -3334,12 +3334,20 @@ export function ChatCodingRoute() {
                 }
                 resolveToolApprovalMutation.mutate({ request: pendingToolGovernanceApproval, decision: "approve" });
               }}
-              onApproveToolForSession={pendingSessionToolApproval?.availableDecisions.includes("acceptForSession")
+              onApproveToolForSession={
+                pendingSessionToolApproval
                 && pendingSessionToolApproval.approval !== "always"
+                && (
+                  pendingSessionToolApproval.availableDecisions.includes("acceptAlways")
+                  || pendingSessionToolApproval.availableDecisions.includes("acceptForSession")
+                )
                 ? () => {
+                  const decision = pendingSessionToolApproval.availableDecisions.includes("acceptAlways")
+                    ? "acceptAlways"
+                    : "acceptForSession";
                   resolveSessionToolApprovalMutation.mutate({
                     request: pendingSessionToolApproval,
-                    decision: "acceptForSession",
+                    decision,
                   });
                 }
                 : undefined}

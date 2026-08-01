@@ -1,7 +1,11 @@
 import { fetchJson } from "./client";
 import type { SessionToolApprovalRequest } from "./types";
 
-export type SessionToolApprovalDecision = "accept" | "acceptForSession" | "decline";
+export type SessionToolApprovalDecision =
+  | "accept"
+  | "acceptForSession"
+  | "acceptAlways"
+  | "decline";
 
 export function listPendingSessionToolApprovals(
   sessionId: string,

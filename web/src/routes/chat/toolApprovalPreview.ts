@@ -53,12 +53,12 @@ export function toolApprovalSessionGrantDescription(
   const kind = String(scope?.kind || "").trim();
   if (kind === "terminal_session") {
     return lang === "zh"
-      ? "始终：仅允许本会话中同一终端的后续输入"
-      : "Always: allow later input only for this terminal in this session";
+      ? "始终：永久允许此 Agent 对同一终端的后续输入（跨会话、重启后仍有效）"
+      : "Always: permanently allow later input for this terminal on this agent (survives sessions and restarts)";
   }
   return lang === "zh"
-    ? "始终：仅允许本会话中参数完全相同的调用"
-    : "Always: allow only calls with identical arguments in this session";
+    ? "始终：永久允许此 Agent 参数完全相同的调用（跨会话、重启后仍有效）"
+    : "Always: permanently allow identical-argument calls on this agent (survives sessions and restarts)";
 }
 
 export function toolApprovalCodexTitle(lang: "zh" | "en") {
@@ -69,14 +69,14 @@ export function toolApprovalCodexButtonLabels(lang: "zh" | "en") {
   if (lang === "zh") {
     return {
       yes: "是",
-      always: "始终（本会话）",
+      always: "始终（此 Agent）",
       no: "否",
       resolving: "处理中…",
     };
   }
   return {
     yes: "Yes",
-    always: "Always (session)",
+    always: "Always (this agent)",
     no: "No",
     resolving: "Resolving…",
   };
