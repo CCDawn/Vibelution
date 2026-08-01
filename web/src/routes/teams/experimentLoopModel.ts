@@ -603,6 +603,46 @@ export type ResearchLoopRecord = {
   boundaries: ResearchLoopBoundary;
 };
 
+export function researchLoopEvidenceReadinessPresentation(
+  loop: Pick<ResearchLoopRecord, "evidenceRecords" | "readiness">,
+  lang: "zh" | "en",
+) {
+  const missingEvidenceTypes = loop.readiness.missingEvidenceTypes.filter(Boolean);
+  const pendingReviewCount = loop.evidenceRecords.filter(
+    (record) => record.status === "needs_review",
+  ).length;
+  const failedCount = loop.evidenceRecords.filter(
+    (record) => record.status === "failed",
+  ).length;
+  const gapItems = [
+    ...missingEvidenceTypes.map((item) => (
+      lang === "zh" ? `缺少证据类型：${item}` : `Missing evidence type: ${item}`
+    )),
+    ...(pendingReviewCount > 0
+      ? [lang === "zh" ? `${pendingReviewCount} 条已登记证据待人工复核` : `${pendingReviewCount} recorded evidence item(s) await review`]
+      : []),
+    ...(failedCount > 0
+      ? [lang === "zh" ? `${failedCount} 条证据已失败，需要修复或替换` : `${failedCount} evidence item(s) failed and need repair or replacement`]
+      : []),
+  ];
+  return {
+    missingEvidenceTypes,
+    pendingReviewCount,
+    failedCount,
+    typeComplete: missingEvidenceTypes.length === 0,
+    statusLabel: missingEvidenceTypes.length > 0
+      ? (lang === "zh" ? `缺少 ${missingEvidenceTypes.length} 类证据` : `${missingEvidenceTypes.length} evidence type(s) missing`)
+      : failedCount > 0
+        ? (lang === "zh" ? `${failedCount} 条失败证据` : `${failedCount} failed evidence item(s)`)
+        : pendingReviewCount > 0
+          ? (lang === "zh" ? `${pendingReviewCount} 条待复核` : `${pendingReviewCount} awaiting review`)
+          : (lang === "zh" ? "类型齐全且已复核" : "types complete and reviewed"),
+    gapItems: gapItems.length > 0
+      ? gapItems
+      : [lang === "zh" ? "无证据类型或复核缺口" : "No evidence type or review gaps"],
+  };
+}
+
 export type ResearchLoopSummary = {
   loopId: string;
   templateId: string;

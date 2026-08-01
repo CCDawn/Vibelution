@@ -619,3 +619,25 @@ export function sourceCollectionCandidateQualityState(candidate: TeamWorkflowCan
     needsRevision,
   };
 }
+
+export function sourceCollectionMaterialGapCount(input: {
+  hasCurrentCandidates: boolean;
+  needsRevisionCount: number;
+  missingEvidenceAnchorCount: number;
+  taskBlockedCount: number;
+  projectedPendingCount: number;
+}) {
+  const currentGapCount = Math.max(
+    0,
+    input.needsRevisionCount,
+    input.missingEvidenceAnchorCount,
+  );
+  if (input.hasCurrentCandidates) {
+    return currentGapCount;
+  }
+  return Math.max(
+    currentGapCount,
+    input.taskBlockedCount,
+    input.projectedPendingCount,
+  );
+}

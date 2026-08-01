@@ -7,6 +7,7 @@ import {
   researchDiagnosticStatusLabel,
   researchIterationLifecycleStatusLabel,
   researchKnowledgeLifecycleStatusLabel,
+  researchLoopEvidenceReadinessPresentation,
   researchLoopStatusQueryKey,
   selectBoundedSmokeAdapter,
 } from "./experimentLoopModel";
@@ -36,6 +37,29 @@ describe("experimentLoopModel", () => {
   it("exposes smoke and decision enum lists for draft selects", () => {
     expect(EXPERIMENT_SMOKE_RESULT_STATUSES).toContain("needs_review");
     expect(RESEARCH_LOOP_DECISION_VALUES).toContain("promote_to_iteration");
+  });
+
+  it("distinguishes registered evidence types from evidence awaiting review", () => {
+    const presentation = researchLoopEvidenceReadinessPresentation({
+      readiness: {
+        requiredEvidenceTypes: ["baseline_artifact", "dataset_benchmark", "metric_report"],
+        presentEvidenceTypes: ["baseline_artifact", "dataset_benchmark", "metric_report"],
+        missingEvidenceTypes: [],
+        evidenceRecordCount: 3,
+        readyForDecision: true,
+        readyForIteration: false,
+        blockers: [],
+      },
+      evidenceRecords: [
+        { status: "needs_review" },
+        { status: "needs_review" },
+        { status: "needs_review" },
+      ] as never,
+    }, "zh");
+
+    expect(presentation.typeComplete).toBe(true);
+    expect(presentation.statusLabel).toBe("3 条待复核");
+    expect(presentation.gapItems).toEqual(["3 条已登记证据待人工复核"]);
   });
 
   it("honors the adapter declared by a legacy string smoke plan", () => {

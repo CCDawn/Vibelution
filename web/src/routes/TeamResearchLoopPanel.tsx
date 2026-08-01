@@ -10,6 +10,7 @@ import { VNativeButton, VNativeInput, VNativeSelect } from "../components/vui";
 import {
   RESEARCH_LOOP_DECISION_VALUES,
   RESEARCH_LOOP_EVIDENCE_STATUSES,
+  researchLoopEvidenceReadinessPresentation,
   type ExperimentPlanRecord,
   type ResearchLoopCreateDraft,
   type ResearchLoopDecisionDraft,
@@ -207,6 +208,9 @@ export function TeamResearchLoopPanel(props: TeamResearchLoopPanelProps) {
       activeLoop?.templateSnapshot
       ?? templates.find((template: any) => template.templateId === activeLoop?.templateId)
       ?? selectedTemplate;
+    const evidenceReadiness = activeLoop
+      ? researchLoopEvidenceReadinessPresentation(activeLoop, lang)
+      : null;
     const evidenceOptions = activeLoop?.readiness.requiredEvidenceTypes?.length
       ? activeLoop.readiness.requiredEvidenceTypes
       : selectedTemplate?.requiredEvidenceTypes ?? [];
@@ -363,7 +367,7 @@ export function TeamResearchLoopPanel(props: TeamResearchLoopPanelProps) {
               <div className={styles.researchLoopStatusPills}>
                 <span>{activeLoop.status}</span>
                 <span>{activeTemplate?.templateKind || activeLoop.templateKind}</span>
-                <span>{activeLoop.readiness.readyForDecision ? (lang === "zh" ? "证据齐备" : "evidence ready") : (lang === "zh" ? "证据缺口" : "evidence gap")}</span>
+                <span>{evidenceReadiness?.statusLabel}</span>
               </div>
             </div>
             <div className={styles.researchLoopEvidenceForm}>
@@ -518,9 +522,9 @@ export function TeamResearchLoopPanel(props: TeamResearchLoopPanelProps) {
             </div>
             <div className={styles.researchLoopOutcomeGrid}>
               <section>
-                <strong>{lang === "zh" ? "缺失证据" : "Missing evidence"}</strong>
+                <strong>{lang === "zh" ? "证据与复核缺口" : "Evidence and review gaps"}</strong>
                 <div className={styles.experimentGapList}>
-                  {(activeLoop.readiness.missingEvidenceTypes.length ? activeLoop.readiness.missingEvidenceTypes : [lang === "zh" ? "无缺口" : "no gaps"]).map((item: any) => (
+                  {evidenceReadiness?.gapItems.map((item) => (
                     <span key={item}>{item}</span>
                   ))}
                 </div>
