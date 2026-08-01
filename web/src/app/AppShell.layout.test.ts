@@ -28,6 +28,15 @@ describe("AppShell layout contract", () => {
     expect(shellSource).not.toMatch(/<button\b/);
   });
 
+  it("isolates the 1s top clock and volatile runtime poll from whole-shell re-renders", () => {
+    expect(shellSource).toContain('from "./AppShellTopClock"');
+    expect(shellSource).toContain("<AppShellTopClock");
+    expect(shellSource).not.toContain("setClockNow");
+    expect(shellSource).not.toContain("setInterval(() => {\n      setClockNow");
+    expect(shellSource).toContain("shareRuntimeSummaryIfOnlyVolatileChanged");
+    expect(shellSource).toContain("structuralSharing: shareRuntimeSummaryIfOnlyVolatileChanged");
+  });
+
   it("exposes three stable desktop top-bar groups with shared soft-layer geometry", () => {
     expect(shellSource).toContain('data-shell-group="brand"');
     expect(shellSource).toContain('data-shell-group="navigation"');
