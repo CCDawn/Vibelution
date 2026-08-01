@@ -3720,10 +3720,13 @@ export function TeamsRoute({
     : `${sourceCollectionAssignments.length} assignments`;
   const sourceCollectionDisplayedCandidateCountText = sourceCollectionCountText(sourceCollectionPrimaryDataLoading, sourceCollectionDisplayedCandidateCount);
   const sourceCollectionProjectedCandidateCountText = sourceCollectionCountText(sourceCollectionPrimaryDataLoading, sourceCollectionProjectedCandidateCount);
-  const sourceCollectionCurrentCandidateCount = sourceCollectionBoundCountToCurrentCoverage(
+  const sourceCollectionCoverageBoundCandidateCount = sourceCollectionBoundCountToCurrentCoverage(
     sourceCollectionCandidateProjection,
     sourceCollectionProjectedCandidateCount,
   );
+  const sourceCollectionCurrentCandidateCount = sourceCollectionRunReviewableCandidateCount > 0
+    ? Math.min(sourceCollectionCoverageBoundCandidateCount, sourceCollectionRunReviewableCandidateCount)
+    : sourceCollectionCoverageBoundCandidateCount;
   const sourceCollectionCurrentCandidateCountText = sourceCollectionCountText(
     sourceCollectionPrimaryDataLoading,
     sourceCollectionCurrentCandidateCount,
