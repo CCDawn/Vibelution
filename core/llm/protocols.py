@@ -228,6 +228,7 @@ PROTOCOL_POLICIES: Dict[ModelProtocol, ProtocolPolicy] = {
         ModelProtocol.DEEPSEEK_REASONING,
         allow_explicit_tool_choice=False,
         allow_reasoning_roundtrip=True,
+        allow_stream_usage_options=True,
         reasoning_extract_policy="deepseek",
     ),
     ModelProtocol.XIAOMI_MIMO_MULTIMODAL_OPENAI_COMPAT: _policy(
