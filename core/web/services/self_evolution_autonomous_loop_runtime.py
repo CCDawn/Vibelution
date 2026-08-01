@@ -149,7 +149,27 @@ def build_autonomous_loop_hooks(
         result = turn["result"]
         with state_lock:
             carryovers.pop(run_id, None)
-        target_files = _plan_target_files(result)
+        try:
+            target_files = _plan_target_files(result)
+        except AutonomousLoopRuntimeError as exc:
+            _record_plan_target_correction(
+                run_id=run_id,
+                reason=_target_contract_error_code(str(exc)),
+            )
+            turn = _run_successful_turn(
+                dependencies.run_role_turn,
+                role="observer",
+                binding=binding,
+                run_id=run_id,
+                prompt=_planning_target_correction_prompt(),
+                carryover=deepcopy(turn.get("carryover") or {}),
+                runtime_tool_grants=[],
+                runtime_tool_source=AUTONOMOUS_RUNTIME_TOOL_SOURCE,
+                max_iterations=1,
+                disable_tools=True,
+            )
+            result = turn["result"]
+            target_files = _plan_target_files(result)
         record_plan_target_contract(
             run_id=run_id,
             target_files=target_files,
@@ -574,6 +594,19 @@ def _planning_prompt(context: dict[str, Any]) -> str:
     )
 
 
+def _planning_target_correction_prompt() -> str:
+    return (
+        "上一次实施计划的结构化目标文件清单违反了宿主安全契约。"
+        "现在只纠正计划正文中的修改范围和最后一行 TARGET_FILES_JSON，"
+        "不要调用任何工具，也不要增加新的实施目标。"
+        "不要读取或修改被拒绝的路径；不得使用目录、绝对路径、通配符、..、"
+        "workspace、logs、config、.git、docs/standards 或项目记忆路径。"
+        "请保留已经证实的目标和验证方法，并在最后一行输出最多 8 个"
+        '可修改的仓库相对文件，例如 TARGET_FILES_JSON: ["core/example.py", '
+        '"tests/test_example.py"]。'
+    )
+
+
 def _analysis_finalization_prompt(phase: str) -> str:
     label = "观察摘要" if phase == "observation" else "实施计划"
     target_contract = (
@@ -588,6 +621,42 @@ def _analysis_finalization_prompt(phase: str) -> str:
         "不要继续搜索，不要修改文件，不要请求用户确认，不要评分或调用 Judge。\n"
         f"直接输出简洁、可执行的{label}；证据不足的部分明确标为未验证。"
         f"{target_contract}"
+    )
+
+
+def _target_contract_error_code(message: str) -> str:
+    lowered = str(message or "").casefold()
+    if "forbidden" in lowered:
+        return "forbidden_target"
+    if "repository-relative" in lowered:
+        return "non_relative_target"
+    if "unsafe" in lowered or "empty" in lowered:
+        return "unsafe_target"
+    if "count exceeds" in lowered:
+        return "target_count"
+    if "structured target files" in lowered or "invalid json" in lowered:
+        return "missing_or_invalid_structure"
+    return "invalid_contract"
+
+
+def _record_plan_target_correction(*, run_id: str, reason: str) -> None:
+    record_runtime_scene_event(
+        "work_run",
+        "planning",
+        "self_evolution.autonomous_loop.plan_target_correction_requested",
+        message=(
+            "Self-evolution requested one bounded correction for an invalid "
+            "plan target contract."
+        ),
+        outcome="retrying",
+        fields={
+            "runKind": "self_evolution_autonomous_loop",
+            "runId": run_id,
+            "reason": reason,
+            "attempt": 1,
+            "toolsEnabled": False,
+        },
+        lifecycle=True,
     )
 
 

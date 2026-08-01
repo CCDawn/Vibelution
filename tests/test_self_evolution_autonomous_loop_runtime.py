@@ -296,6 +296,81 @@ def test_runtime_plan_parses_target_files_from_visible_marker():
     ]
 
 
+def test_runtime_plan_retries_once_without_tools_for_invalid_target_contract():
+    turn_calls: list[dict] = []
+
+    def run_role_turn(**kwargs):
+        turn_calls.append(deepcopy(kwargs))
+        if len(turn_calls) == 1:
+            return {
+                "result": {
+                    "status": "completed",
+                    "summary": "读取运行证据并修改实现。",
+                    "targetFiles": [
+                        "logs/runtime_scenes/latest/summary.json",
+                        "core/example.py",
+                    ],
+                },
+                "carryover": {"previousResponseId": "response-invalid-plan"},
+                "conversationSessionId": "session-observer",
+            }
+        return {
+            "result": {
+                "status": "completed",
+                "summary": "纠正目标清单，只修改源码与测试。",
+                "targetFiles": ["core/example.py", "tests/test_example.py"],
+            },
+            "carryover": {"previousResponseId": "response-corrected-plan"},
+            "conversationSessionId": "session-observer",
+        }
+
+    hooks = build_autonomous_loop_hooks(
+        AutonomousLoopRuntimeDependencies(
+            load_bindings=lambda: {
+                "observer": {
+                    "agentId": "observer-agent",
+                    "directSessionId": "session-observer",
+                },
+                "executor": {"agentId": "executor-agent"},
+            },
+            run_role_turn=run_role_turn,
+            create_candidate=lambda _context: {},
+            inspect_candidate=lambda _context: {},
+            integrate_candidate=lambda _context: {},
+            cleanup_candidate=lambda _context: {},
+        )
+    )
+
+    plan = hooks.plan(
+        _snapshot(
+            observation={
+                "summary": "已确认一个源码可观测性缺口。",
+                "evidence": [],
+                "conversationSessionId": "session-observer",
+            },
+            plan=None,
+            candidate=None,
+        )
+    )
+
+    assert plan["targetFiles"] == [
+        "core/example.py",
+        "tests/test_example.py",
+    ]
+    assert len(turn_calls) == 2
+    assert turn_calls[1]["carryover"] == {
+        "previousResponseId": "response-invalid-plan"
+    }
+    assert turn_calls[1]["runtime_tool_grants"] == []
+    assert turn_calls[1]["disable_tools"] is True
+    assert turn_calls[1]["max_iterations"] == 1
+    assert "结构化目标文件清单违反了宿主安全契约" in turn_calls[1]["prompt"]
+    assert "不要读取或修改被拒绝的路径" in turn_calls[1]["prompt"]
+    assert "logs/runtime_scenes/latest/summary.json" not in (
+        turn_calls[1]["prompt"]
+    )
+
+
 @pytest.mark.parametrize(
     "target_file",
     [
@@ -307,6 +382,21 @@ def test_runtime_plan_parses_target_files_from_visible_marker():
     ],
 )
 def test_runtime_plan_rejects_forbidden_target_files(target_file):
+    turn_count = 0
+
+    def run_role_turn(**_kwargs):
+        nonlocal turn_count
+        turn_count += 1
+        return {
+            "result": {
+                "status": "completed",
+                "summary": "有界计划",
+                "targetFiles": [target_file],
+            },
+            "carryover": {},
+            "conversationSessionId": "session-observer",
+        }
+
     hooks = build_autonomous_loop_hooks(
         AutonomousLoopRuntimeDependencies(
             load_bindings=lambda: {
@@ -316,15 +406,7 @@ def test_runtime_plan_rejects_forbidden_target_files(target_file):
                 },
                 "executor": {"agentId": "executor-agent"},
             },
-            run_role_turn=lambda **_kwargs: {
-                "result": {
-                    "status": "completed",
-                    "summary": "有界计划",
-                    "targetFiles": [target_file],
-                },
-                "carryover": {},
-                "conversationSessionId": "session-observer",
-            },
+            run_role_turn=run_role_turn,
             create_candidate=lambda _context: {},
             inspect_candidate=lambda _context: {},
             integrate_candidate=lambda _context: {},
@@ -344,6 +426,7 @@ def test_runtime_plan_rejects_forbidden_target_files(target_file):
                 candidate=None,
             )
         )
+    assert turn_count == 2
 
 
 def test_runtime_rejects_candidate_diff_outside_planned_target_files(monkeypatch):
