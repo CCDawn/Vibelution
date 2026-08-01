@@ -23,6 +23,8 @@ def dispatch_runtime_effect_intent(intent: dict[str, Any]) -> dict[str, Any]:
         requested_by=str(intent.get("actorType") or "launcher_lifecycle"),
         args={
             "reason": str(intent.get("reason") or action),
+            "allowActiveSessionId": str(intent.get("sourceSessionId") or ""),
+            "allowActiveRunId": str(intent.get("sourceRunId") or ""),
             "sourceRunId": str(intent.get("sourceRunId") or ""),
             "sourceTaskId": str(intent.get("sourceTaskId") or ""),
             "sourceWorktree": str(intent.get("sourceWorktree") or ""),

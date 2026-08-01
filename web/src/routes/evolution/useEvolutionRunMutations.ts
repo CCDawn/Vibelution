@@ -7,8 +7,14 @@ import type { Dispatch, SetStateAction } from "react";
 
 import { fetchJson } from "../../api/client";
 import { queryKeys } from "../../api/queryKeys";
+import {
+  executeSelfEvolutionAutonomousLoopAction,
+  startSelfEvolutionAutonomousLoop,
+} from "../../api/selfEvolution";
 import type {
   EvolutionRunActionResponse,
+  SelfEvolutionAutonomousLoopActionRequest,
+  SelfEvolutionAutonomousLoopStartRequest,
   SelfEvolutionHistoryDeleteResponse,
   SelfObservationRun,
   SupervisedWorktreeRun,
@@ -211,6 +217,40 @@ export function useEvolutionRunMutations(options: UseEvolutionRunMutationsOption
     },
   });
 
+  const startSelfAutonomousLoopMutation = useMutation({
+    onMutate: () => {
+      options.setSelfActionFeedback("");
+    },
+    mutationFn: (payload: SelfEvolutionAutonomousLoopStartRequest) =>
+      startSelfEvolutionAutonomousLoop(payload),
+    onSuccess: async () => {
+      options.setSelfActionFeedback(
+        options.lang === "zh"
+          ? "自动闭环已启动，Agent 正在观察现状并制定计划。"
+          : "The autonomous loop started. Agents are observing and planning.",
+      );
+      await options.afterSelfEvolutionChanged();
+    },
+  });
+
+  const selfAutonomousLoopActionMutation = useMutation({
+    onMutate: () => {
+      options.setSelfActionFeedback("");
+    },
+    mutationFn: (payload: SelfEvolutionAutonomousLoopActionRequest) =>
+      executeSelfEvolutionAutonomousLoopAction(payload),
+    onSuccess: async (snapshot) => {
+      options.setSelfActionFeedback(
+        snapshot.status === "completed"
+          ? options.lang === "zh"
+            ? "候选已创建 Git 提交，本地候选分支和工作树已清理。"
+            : "The candidate was committed and its local branch and worktree were cleaned."
+          : snapshot.error?.message ?? "",
+      );
+      await options.afterSelfEvolutionChanged();
+    },
+  });
+
   const deleteSelfHistoryMutation = useMutation({
     onMutate: () => {
       options.setSelfActionFeedback("");
@@ -271,6 +311,8 @@ export function useEvolutionRunMutations(options: UseEvolutionRunMutationsOption
     startSelfWorktreeRunMutation,
     startSelfObservationMutation,
     selfObservationActionMutation,
+    startSelfAutonomousLoopMutation,
+    selfAutonomousLoopActionMutation,
     deleteSelfHistoryMutation,
     actionMutation,
     approvalWorktreeActionMutation,
