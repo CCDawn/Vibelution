@@ -19,6 +19,8 @@ OBSERVER_MAX_ITERATIONS = 4
 PLANNER_MAX_ITERATIONS = 3
 ANALYSIS_FINALIZATION_MAX_ITERATIONS = 2
 EXECUTOR_MAX_ITERATIONS = 24
+EXECUTOR_MUTATION_MAX_ITERATIONS = 4
+EXECUTOR_VALIDATION_MAX_ITERATIONS = 8
 OBSERVER_RUNTIME_TOOLS = (
     "grep_search_tool",
     "code_symbol_tool",
@@ -30,6 +32,15 @@ EXECUTOR_RUNTIME_TOOLS = (
     "code_symbol_tool",
     "apply_patch_tool",
     "write_file_tool",
+    "cli_tool",
+    "python_lint_tool",
+)
+EXECUTOR_MUTATION_TOOLS = (
+    "apply_patch_tool",
+    "write_file_tool",
+)
+EXECUTOR_VALIDATION_TOOLS = (
+    "close_evolution_transaction_tool",
     "cli_tool",
     "python_lint_tool",
 )
@@ -182,16 +193,50 @@ def build_autonomous_loop_hooks(
                     else "tool_calls_but_no_changed_files"
                 ),
             )
+            transaction_opened = _result_used_tool(
+                turn["result"],
+                "open_evolution_transaction_tool",
+            )
+            mutation_turn = _run_successful_turn(
+                dependencies.run_role_turn,
+                role="executor",
+                binding=executor_binding,
+                run_id=run_id,
+                prompt=_evolution_mutation_prompt(context),
+                carryover=deepcopy(turn.get("carryover") or {}),
+                runtime_tool_grants=list(EXECUTOR_MUTATION_TOOLS),
+                runtime_tool_source=AUTONOMOUS_RUNTIME_TOOL_SOURCE,
+                max_iterations=EXECUTOR_MUTATION_MAX_ITERATIONS,
+            )
+            inspection = _inspect_candidate(
+                dependencies,
+                run_id=run_id,
+                context=context,
+                workspace=workspace,
+                turn=mutation_turn,
+            )
+            changed_files = inspection.get("changedFiles")
+            if not isinstance(changed_files, list) or not changed_files:
+                raise AutonomousLoopRuntimeError(
+                    "Candidate has no changed files after evolution."
+                )
+            validation_tools = list(EXECUTOR_VALIDATION_TOOLS)
+            if not transaction_opened:
+                validation_tools.insert(0, "open_evolution_transaction_tool")
             turn = _run_successful_turn(
                 dependencies.run_role_turn,
                 role="executor",
                 binding=executor_binding,
                 run_id=run_id,
-                prompt=_evolution_retry_prompt(context),
-                carryover=deepcopy(turn.get("carryover") or {}),
-                runtime_tool_grants=list(EXECUTOR_RUNTIME_TOOLS),
+                prompt=_evolution_validation_prompt(
+                    context,
+                    changed_files=changed_files,
+                    transaction_opened=transaction_opened,
+                ),
+                carryover=deepcopy(mutation_turn.get("carryover") or {}),
+                runtime_tool_grants=validation_tools,
                 runtime_tool_source=AUTONOMOUS_RUNTIME_TOOL_SOURCE,
-                max_iterations=EXECUTOR_MAX_ITERATIONS,
+                max_iterations=EXECUTOR_VALIDATION_MAX_ITERATIONS,
             )
             inspection = _inspect_candidate(
                 dependencies,
@@ -337,6 +382,17 @@ def _result_tool_call_count(result: dict[str, Any]) -> int:
     return len(_result_evidence(result))
 
 
+def _result_used_tool(result: dict[str, Any], tool_name: str) -> bool:
+    expected = str(tool_name or "").strip()
+    if not expected:
+        return False
+    for item in _result_evidence(result):
+        observed = str(item.get("name") or item.get("toolName") or "").strip()
+        if observed == expected:
+            return True
+    return False
+
+
 def _result_summary(result: dict[str, Any], *, label: str) -> str:
     for key in ("summary", "content", "message", "output"):
         value = str(result.get(key) or "").strip()
@@ -467,21 +523,51 @@ def _evolution_prompt(context: dict[str, Any]) -> str:
     )
 
 
-def _evolution_retry_prompt(context: dict[str, Any]) -> str:
+def _evolution_mutation_prompt(context: dict[str, Any]) -> str:
     plan = context.get("plan") if isinstance(context.get("plan"), dict) else {}
     return (
         "上一轮执行后候选工作树仍没有产生任何文件变更；只读检查、复述计划"
         "或仅开事务都不算完成。\n"
         f"既定计划：{str(plan.get('summary') or '').strip()}\n\n"
-        "现在立即在当前隔离 worktree 中实施既定计划：\n"
+        "现在进入有界写入阶段：\n"
         "1. 不要复述计划，不要再次制定计划，也无需再次请求用户确认。\n"
-        "2. 尚未开账时调用 open_evolution_transaction_tool；已经开账时不要重复开账。"
-        "随后使用编辑和测试工具产生并验证候选变更，最后调用 "
-        "close_evolution_transaction_tool 收口。\n"
-        "3. 本阶段最多 24 次模型/工具迭代；不要重复读取同一证据。\n"
+        "2. 第一项工具调用必须产生文件修改；当前只提供 apply_patch_tool 和 "
+        "write_file_tool，不再读取源码、目录或测试说明。\n"
+        "3. 使用上一轮已经读取的证据，在 4 轮内完成最小安全候选修改；"
+        "不得再次开账或关账。\n"
         "4. 仍须遵守原定范围；不要写主工作区、刷新 Launcher、执行远端操作、"
         "评分、Judge 或自行批准合入。\n"
-        "5. 如果计划无法安全实施，使用工具收集阻塞证据并以 failed 状态关账。"
+        "5. 如果现有证据不足以安全修改，直接报告阻塞，不得伪造候选变更。"
+    )
+
+
+def _evolution_validation_prompt(
+    context: dict[str, Any],
+    *,
+    changed_files: list[Any],
+    transaction_opened: bool,
+) -> str:
+    plan = context.get("plan") if isinstance(context.get("plan"), dict) else {}
+    normalized_files = [
+        str(item).strip() for item in changed_files if str(item).strip()
+    ]
+    transaction_line = (
+        "已有事务已经开账；不得重复调用 open_evolution_transaction_tool。"
+        if transaction_opened
+        else "尚未观察到已开事务；先开账一次，再执行验证。"
+    )
+    return (
+        "候选已经产生文件变更，现在只做验证与事务收口。\n"
+        f"既定计划：{str(plan.get('summary') or '').strip()}\n"
+        f"候选文件：{', '.join(normalized_files)}\n"
+        f"{transaction_line}\n\n"
+        "要求：\n"
+        "1. 不再修改文件，不重新制定计划，不请求用户确认。\n"
+        "2. 使用 cli_tool 或 python_lint_tool 运行与改动相称的聚焦验证。\n"
+        "3. 验证成功后调用 close_evolution_transaction_tool 以 success 收口；"
+        "验证失败则以 failed 收口并报告真实失败。\n"
+        "4. 最多 8 轮，不执行 Git 合入、Launcher 刷新、远端操作、评分、"
+        "Judge 或用户审批。"
     )
 
 
