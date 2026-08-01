@@ -39,6 +39,7 @@ def control_token_payload() -> dict[str, str]:
 
 def trusted_control_origins() -> set[str]:
     backend_port = _default_workbench_port()
+    frontend_port = _configured_frontend_port()
     origins = {
         "http://127.0.0.1:5173",
         "http://localhost:5173",
@@ -46,6 +47,8 @@ def trusted_control_origins() -> set[str]:
         "http://localhost:8000",
         f"http://127.0.0.1:{backend_port}",
         f"http://localhost:{backend_port}",
+        f"http://127.0.0.1:{frontend_port}",
+        f"http://localhost:{frontend_port}",
     }
     for host in _trusted_extra_hosts():
         origins.add(f"http://{host}:{backend_port}")
@@ -109,6 +112,19 @@ def _default_workbench_port() -> int:
     except ValueError:
         return 8000
     return port if 0 < port < 65536 else 8000
+
+
+def _configured_frontend_port() -> int:
+    raw_value = str(
+        os.environ.get("VIBELUTION_FRONTEND_PORT")
+        or os.environ.get("AGENT_WORKBENCH_FRONTEND_PORT")
+        or ""
+    ).strip()
+    try:
+        port = int(raw_value)
+    except ValueError:
+        return 5173
+    return port if 0 < port < 65536 else 5173
 
 
 def _is_trusted_host(value: str) -> bool:
