@@ -915,15 +915,7 @@ def _normalize_messages(
             if timeline_items:
                 entry["timelineItems"] = timeline_items
         if normalized_transcript_scope != "none":
-            codex_transcript = s._build_codex_transcript_projection(
-                message_id=entry["id"],
-                role=role,
-                content=content,
-                feedback_events=timeline_feedback_events,
-                tool_calls=tool_calls,
-                streaming=bool(raw.get("streaming")),
-            )
-            turn_items: list[dict[str, Any]] = []
+            is_streaming_message = bool(raw.get("streaming"))
             is_terminal_error_message = (
                 role == "assistant"
                 and isinstance(raw_metadata, dict)
@@ -932,6 +924,25 @@ def _normalize_messages(
                     or raw_metadata.get("providerFailure") is True
                 )
             )
+            # Window payloads are used for chat switch / list restore. Building full
+            # native codexTranscript (cells + rolloutEvents) dominates payload size.
+            # Keep full projection for live streaming, full scope, and terminal errors.
+            should_build_codex_transcript = (
+                normalized_transcript_scope == "all"
+                or is_streaming_message
+                or is_terminal_error_message
+            )
+            codex_transcript = None
+            if should_build_codex_transcript:
+                codex_transcript = s._build_codex_transcript_projection(
+                    message_id=entry["id"],
+                    role=role,
+                    content=content,
+                    feedback_events=timeline_feedback_events,
+                    tool_calls=tool_calls,
+                    streaming=is_streaming_message,
+                )
+            turn_items: list[dict[str, Any]] = []
             if is_terminal_error_message:
                 turn_items = s._build_session_turn_items_projection(
                     session_id=conversation_id,
@@ -952,6 +963,12 @@ def _normalize_messages(
                         message_id=entry["id"],
                         error_item=terminal_error_item,
                     )
+            if (
+                codex_transcript
+                and normalized_transcript_scope == "window"
+                and not is_streaming_message
+            ):
+                codex_transcript = s._slim_codex_transcript_for_window_payload(codex_transcript)
             if codex_transcript:
                 entry["codexTranscript"] = codex_transcript
         if attachments:
@@ -1407,6 +1424,91 @@ def _build_session_turn_items_projection(
         if item:
             items.append(item)
     return items
+
+
+def _slim_codex_transcript_for_window_payload(
+    transcript: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Drop heavy native-transcript fields for windowed session detail.
+
+    Chat switch loads use transcript_scope=window. Full cells/rolloutEvents can
+    dominate the response (often >80% of JSON). Keep a compact surface so the
+    UI can still render error/tool summaries without shipping full diagnostics.
+    """
+    s = _service()
+    if not isinstance(transcript, dict):
+        return None
+    if bool(transcript.get("streaming")):
+        return transcript
+
+    slim_cells: list[dict[str, Any]] = []
+    raw_cells = transcript.get("cells")
+    if isinstance(raw_cells, list):
+        for cell in raw_cells[:48]:
+            if not isinstance(cell, dict):
+                continue
+            text = cell.get("text")
+            if not isinstance(text, str) or not text.strip():
+                text = cell.get("markdown") if isinstance(cell.get("markdown"), str) else ""
+            text = str(text or "").strip()
+            if len(text) > 400:
+                text = f"{text[:400]}…"
+            slim_cell = s._compact_codex_record(
+                {
+                    "id": cell.get("id"),
+                    "kind": cell.get("kind"),
+                    "messageId": cell.get("messageId") or transcript.get("messageId"),
+                    "title": cell.get("title"),
+                    "status": cell.get("status"),
+                    "tone": cell.get("tone"),
+                    "phase": cell.get("phase"),
+                    "terminal": cell.get("terminal"),
+                    "text": text or None,
+                    "failureCount": cell.get("failureCount"),
+                }
+            )
+            if slim_cell:
+                slim_cells.append(slim_cell)
+
+    slim_tool_calls: list[dict[str, Any]] = []
+    raw_tool_calls = transcript.get("toolCalls")
+    if isinstance(raw_tool_calls, list):
+        for tool_call in raw_tool_calls[:40]:
+            if not isinstance(tool_call, dict):
+                continue
+            summary = str(tool_call.get("summary") or tool_call.get("detail") or "").strip()
+            if len(summary) > 240:
+                summary = f"{summary[:240]}…"
+            slim_tool_calls.append(
+                s._compact_codex_record(
+                    {
+                        "id": tool_call.get("id") or tool_call.get("callId"),
+                        "callId": tool_call.get("callId") or tool_call.get("id"),
+                        "name": tool_call.get("name"),
+                        "status": tool_call.get("status"),
+                        "summary": summary or None,
+                    }
+                )
+            )
+
+    slim = s._compact_codex_record(
+        {
+            "version": transcript.get("version") or 1,
+            "source": transcript.get("source") or "native",
+            "messageId": transcript.get("messageId") or "",
+            "streaming": False,
+            "windowSlimmed": True,
+            "cells": slim_cells,
+            "toolCalls": slim_tool_calls,
+            "terminalOperations": [],
+            "terminalSessions": [],
+            "modelObservations": [],
+            "rolloutEvents": [],
+        }
+    )
+    if not slim_cells and not slim_tool_calls:
+        return None
+    return slim
 
 
 def _build_codex_transcript_projection(

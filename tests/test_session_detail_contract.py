@@ -753,6 +753,52 @@ def test_session_detail_window_can_omit_native_transcript_for_light_payloads(tmp
     assert payload["messageWindow"]["transcriptScope"] == "none"
 
 
+def test_session_detail_window_skips_heavy_codex_transcript_for_settled_turns(tmp_path, monkeypatch):
+    """Chat-switch window payloads must not ship full native transcript cells/rollouts."""
+    _seed_chat_state(tmp_path, task_status="done")
+    _append_window_test_turn(tmp_path, "session-live", 1)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+
+    response = client.get("/api/sessions/session-live?messageLimit=4&transcriptScope=window")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assistant = next(
+        message
+        for message in payload["messages"]
+        if message["role"] == "assistant" and message.get("content") == "窗口回答 1"
+    )
+    assert assistant["toolCalls"] == [
+        {"name": "rg", "status": "done", "summary": "搜索 1", "callId": "tool-window-1"},
+    ]
+    # Settled window turns omit full codexTranscript (toolCalls remain for compact UI).
+    assert "codexTranscript" not in assistant
+    assert payload["messageWindow"]["transcriptScope"] == "window"
+
+
+def test_select_chat_session_returns_windowed_detail_contract(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    for turn_number in range(1, 4):
+        _append_window_test_turn(tmp_path, "session-live", turn_number)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+
+    response = client.post("/api/sessions/session-live/select")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["id"] == "session-live"
+    assert payload["messageWindow"]["mode"] == "window"
+    assert payload["messageWindow"]["transcriptScope"] == "window"
+    assert payload["messageWindow"]["returnedMessages"] <= 40
+    # Select must not rebuild full unwindowed history for switch latency.
+    assert all(
+        "codexTranscript" not in message
+        or message.get("codexTranscript", {}).get("windowSlimmed") is True
+        or message.get("streaming") is True
+        for message in payload["messages"]
+    )
+
+
 def test_session_detail_snapshot_publish_uses_windowed_detail_by_default(monkeypatch):
     subscriber: queue.Queue[dict[str, object]] = queue.Queue()
     captured_calls: list[dict[str, object]] = []

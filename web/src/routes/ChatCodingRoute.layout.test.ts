@@ -602,6 +602,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndSelectionSource).toContain("`/api/sessions/${encodeURIComponent(sessionId)}/select`");
     expect(routeAndActionsSource).toContain("latestDirectSessionSelectionRef.current = normalizedSessionId");
     expect(routeAndActionsSource).toContain("selectDirectSessionMutation.mutate(normalizedSessionId)");
+    expect(routeAndActionsSource).toContain("String(activeSessionId || \"\").trim() !== normalizedSessionId");
     expect(routeAndSelectionSource).toContain("if (latestSessionId && latestSessionId !== nextDetail.id)");
     expect(routeAndSelectionSource).toContain("syncSessionDetail(nextDetail)");
     expect(routeAndSelectionSource).toContain("chatWorkspaceCache.afterSessionSelected()");

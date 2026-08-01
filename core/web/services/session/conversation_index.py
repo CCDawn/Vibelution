@@ -1081,7 +1081,13 @@ def select_chat_session(session_id: str) -> dict:
             payload["updated_at"] = str(conversation.get("updated_at") or s._now_timestamp())
             s.save_chat_state(s.PROJECT_ROOT, payload)
     s._invalidate_session_list_cache()
-    detail = s.get_session_detail(normalized_session_id)
+    # Match the chat-switch window contract so /select does not rebuild a full
+    # unwindowed transcript (historically the same cost as a heavy GET detail).
+    detail = s.get_session_detail(
+        normalized_session_id,
+        message_limit=s._SESSION_STREAM_DETAIL_MESSAGE_LIMIT,
+        transcript_scope=s._SESSION_STREAM_DETAIL_TRANSCRIPT_SCOPE,
+    )
     if detail is None:
         raise s.SessionNotFoundError("Session not found")
     return detail
