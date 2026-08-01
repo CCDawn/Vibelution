@@ -10,6 +10,7 @@ import re
 import shutil
 import threading
 import time
+from contextlib import ExitStack
 from copy import deepcopy
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
@@ -1062,6 +1063,7 @@ def _run_self_evolution_agent_role_turn(
     runtime_tool_source: str = "",
     max_iterations: int | None = None,
     disable_tools: bool = False,
+    allowed_target_paths: list[str] | None = None,
 ) -> dict[str, Any]:
     role_key = str(role or "").strip()
     agent_id = str((binding or {}).get("agentId") or "").strip()
@@ -1089,7 +1091,21 @@ def _run_self_evolution_agent_role_turn(
         cache_scope=role_key,
         workspace_path=str((binding or {}).get("workspacePath") or ""),
     )
-    with runtime_context:
+    with ExitStack() as contexts:
+        contexts.enter_context(runtime_context)
+        workspace_path = str((binding or {}).get("workspacePath") or "").strip()
+        if workspace_path:
+            from tools.shell_tools import workspace_root_override
+
+            contexts.enter_context(workspace_root_override(workspace_path))
+        if allowed_target_paths is not None:
+            from core.infrastructure.evolution_governor import (
+                evolution_target_allowlist,
+            )
+
+            contexts.enter_context(
+                evolution_target_allowlist(allowed_target_paths)
+            )
         turn_result = run_agent_single_turn(
             AgentSingleTurnRequest(
                 mode="self_evolution",
