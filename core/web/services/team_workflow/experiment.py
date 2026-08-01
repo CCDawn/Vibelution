@@ -803,16 +803,72 @@ def run_experiment_smoke_run(team_id: str, plan_id: str, payload: dict[str, Any]
         raise s.TeamWorkflowOrchestrationError(f"Experiment plan missing required fields for smoke run: {missing}.")
     smoke_plan_value = plan_snapshot.get("smokePlan") or experiment_plan.get("smokePlan")
     smoke_plan = smoke_plan_value if isinstance(smoke_plan_value, dict) else {}
+    legacy_smoke_settings: dict[str, str] = {}
+    if isinstance(smoke_plan_value, str):
+        segments = [
+            segment.strip()
+            for segment in smoke_plan_value.replace("；", ";").split(";")
+            if segment.strip()
+        ]
+        if segments:
+            first_segment = segments[0]
+            if "=" not in first_segment:
+                legacy_smoke_settings["adapter"] = first_segment
+            for segment in segments:
+                if "=" not in segment:
+                    continue
+                key, value = segment.split("=", 1)
+                legacy_smoke_settings[key.strip()] = value.strip()
+    experiment_contract = (
+        plan_snapshot.get("experimentContract")
+        if isinstance(plan_snapshot.get("experimentContract"), dict)
+        else {}
+    )
+    adapter_selection = (
+        experiment_contract.get("adapterSelection")
+        if isinstance(experiment_contract.get("adapterSelection"), dict)
+        else {}
+    )
+    declared_adapter = s._trim_text(
+        adapter_selection.get("requestedAdapterId")
+        or adapter_selection.get("resolvedAdapterId")
+        or smoke_plan.get("adapter")
+        or legacy_smoke_settings.get("adapter"),
+        max_length=120,
+    )
+    known_smoke_adapters = {
+        *s.smoke_runner.WHITELIST_ADAPTERS,
+        *s.smoke_runner.NON_EXECUTABLE_ADAPTERS,
+    }
+    if declared_adapter not in known_smoke_adapters:
+        declared_adapter = ""
+    requested_adapter = s._trim_text(payload.get("adapter"), max_length=120)
+    if declared_adapter and requested_adapter and declared_adapter != requested_adapter:
+        raise s.TeamWorkflowOrchestrationError(
+            "Requested smoke adapter does not match the experiment plan."
+        )
     adapter = (
-        s._trim_text(payload.get("adapter") or smoke_plan.get("adapter"), max_length=120)
+        declared_adapter
+        or requested_adapter
         or "synthetic_classification_baseline_vs_variant"
     )
-    seed_raw = payload.get("seed") if payload.get("seed") is not None else smoke_plan.get("seed", 42)
+    seed_raw = (
+        payload.get("seed")
+        if payload.get("seed") is not None
+        else smoke_plan.get("seed", legacy_smoke_settings.get("seed", 42))
+    )
     try:
         seed = int(seed_raw)
     except (TypeError, ValueError):
         seed = 42
-    threshold_raw = payload.get("threshold") if payload.get("threshold") is not None else smoke_plan.get("successThreshold")
+    threshold_raw = (
+        payload.get("threshold")
+        if payload.get("threshold") is not None
+        else smoke_plan.get(
+            "successThreshold",
+            legacy_smoke_settings.get("successThreshold"),
+        )
+    )
     if isinstance(threshold_raw, dict):
         threshold_raw = threshold_raw.get("macro_f1_delta") or threshold_raw.get("macro_f1")
     try:
