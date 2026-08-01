@@ -853,6 +853,9 @@ export function researchIterationLifecycleStatusLabel(status: string, lang: "zh"
   if (status === "needs_more_evidence") {
     return lang === "zh" ? "待补证据" : "evidence required";
   }
+  if (status === "iteration_planned") {
+    return lang === "zh" ? "已规划 · 待补证据" : "planned · evidence required";
+  }
   if (["needs_review", "ready_for_iteration", "repair_and_repeat"].includes(status)) {
     return lang === "zh" ? "待优化" : "needs iteration";
   }
