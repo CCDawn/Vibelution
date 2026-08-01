@@ -462,7 +462,7 @@ def test_runtime_plan_corrects_targets_outside_explicit_user_file_scope(
     )
 
 
-def test_runtime_plan_rejects_corrected_targets_outside_zhi_modify_request():
+def test_runtime_plan_rejects_reference_outside_direct_zhi_modify_clause():
     turn_calls: list[dict] = []
 
     def run_role_turn(**kwargs):
@@ -484,7 +484,7 @@ def test_runtime_plan_rejects_corrected_targets_outside_zhi_modify_request():
             "result": {
                 "status": "completed",
                 "summary": "纠正为仓库内安全路径。",
-                "targetFiles": ["core/example.py"],
+                "targetFiles": ["tests/test_example.py"],
             },
             "carryover": {"previousResponseId": "response-corrected-plan"},
             "conversationSessionId": "session-observer",
@@ -516,7 +516,8 @@ def test_runtime_plan_rejects_corrected_targets_outside_zhi_modify_request():
                 request={
                     "goal": (
                         "只修改 tests/test_self_evolution_autonomous_loop_runtime.py，"
-                        "新增范围约束测试。"
+                        "新增测试，模拟 request.goal 包含"
+                        "“只修改 tests/test_example.py”。"
                     ),
                     "maxIterations": 1,
                 },
