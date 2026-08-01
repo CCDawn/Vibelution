@@ -212,6 +212,8 @@ export type EvolutionDatasetOption = {
   description: string;
   sourcePath: string;
   sourceExists: boolean;
+  sourceImportStatus?: string;
+  preflightState?: string;
   tags: string[];
   benchmarkFamily?: string;
   taskType?: string;

@@ -433,6 +433,9 @@ export function datasetCatalogStatusLabel(
   if (String(item.defaultVisibility || "").trim() === "roadmap" || item.usabilityStatus === "roadmap_only") {
     return lang === "zh" ? "路线图" : "Roadmap";
   }
+  if (String(item.sourceImportStatus || "").trim() === "not_imported") {
+    return lang === "zh" ? "未导入" : "Not imported";
+  }
   if (item.usabilityStatus === "missing_source") {
     return lang === "zh" ? "缺源文件" : "Missing source";
   }

@@ -437,6 +437,7 @@ def test_dataset_status_distinguishes_effective_empty_missing_and_harness(
     assert by_name["generated_cases"]["selectable"] is False
     assert by_name["humaneval_jsonl"]["effective"] is False
     assert by_name["humaneval_jsonl"]["usability_status"] == "missing_source"
+    assert by_name["humaneval_jsonl"]["source_import_status"] == "not_imported"
     assert by_name["humaneval_jsonl"]["visibility"] == "hidden"
     assert by_name["swe_bench_lite"]["effective"] is False
     assert by_name["swe_bench_lite"]["usability_status"] == "requires_external_harness"
@@ -445,6 +446,39 @@ def test_dataset_status_distinguishes_effective_empty_missing_and_harness(
     assert by_name["terminal_bench_core"]["effective"] is True
     assert by_name["terminal_bench_core"]["usability_status"] == "custom_harness_ready"
     assert by_name["terminal_bench_core"]["official_verifier_status"] == "harbor_pending"
+
+
+def test_dataset_status_read_does_not_initialize_or_write_registry(tmp_path: Path):
+    registry_path = tmp_path / "workspace" / "evaluation" / "datasets" / "registry.json"
+
+    rows = list_dataset_status(tmp_path, include_environment_preflight=False)
+
+    assert rows
+    assert not registry_path.exists()
+
+
+def test_dataset_status_defers_required_environment_preflight_without_reporting_ready(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    ensure_dataset_registry(tmp_path)
+    calls = []
+    monkeypatch.setattr(
+        "core.evaluation.dataset_adapters.preflight_environment_contract",
+        lambda *args, **kwargs: calls.append((args, kwargs)) or pytest.fail(
+            "catalog projection must not run the environment preflight"
+        ),
+    )
+
+    rows = list_dataset_status(tmp_path, include_environment_preflight=False)
+    terminal = next(item for item in rows if item["name"] == "terminal_bench_core")
+
+    assert calls == []
+    assert terminal["preflight_state"] == "pending"
+    assert terminal["effective"] is False
+    assert terminal["selectable"] is False
+    assert terminal["visibility"] == "hidden"
+    assert "尚未执行" in terminal["visibility_reason"]
 
 
 def test_materialize_builtin_supervised_bundle(tmp_path: Path):

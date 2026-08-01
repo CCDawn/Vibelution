@@ -106,6 +106,19 @@ def test_select_dataset_by_input_accepts_index_name_and_default():
 
 def test_prepare_dataset_run_returns_runnable_bundle(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(
+        "core.evaluation.dataset_registry.list_dataset_status",
+        lambda *args, **kwargs: [
+            {
+                "name": "custom_prompt_jsonl",
+                "bundle_name": "custom_prompt_jsonl_v1",
+                "adapter_status": "ready",
+                "effective": True,
+                "selectable": True,
+                "case_count": 2,
+            }
+        ],
+    )
+    monkeypatch.setattr(
         "core.evaluation.dataset_registry.materialize_dataset_bundle",
         lambda *args, **kwargs: SimpleNamespace(
             dataset_name="custom_prompt_jsonl",
@@ -159,6 +172,34 @@ def test_prepare_dataset_run_returns_blocked_reason(monkeypatch, tmp_path: Path)
     assert prepared.runnable is False
     assert prepared.adapter_status == "requires_swe_harness"
     assert "requires_swe_harness" in prepared.blocked_message
+
+
+def test_prepare_dataset_run_rejects_empty_dataset_before_materialization(
+    monkeypatch,
+    tmp_path: Path,
+):
+    from core.evaluation.dataset_registry import ensure_dataset_registry
+
+    ensure_dataset_registry(tmp_path)
+    monkeypatch.setattr(
+        "core.evaluation.dataset_registry.materialize_dataset_bundle",
+        lambda *args, **kwargs: pytest.fail("empty dataset must not be materialized"),
+    )
+
+    prepared = prepare_dataset_run(tmp_path, "generated_cases", None)
+
+    assert prepared.runnable is False
+    assert prepared.bundle_name == "generated_cases_v1"
+    assert prepared.adapter_status == "ready"
+    assert "没有可物化 case" in prepared.blocked_message
+
+
+def test_prepare_dataset_run_keeps_builtin_supervised_bundle_runnable(tmp_path: Path):
+    prepared = prepare_dataset_run(tmp_path, "supervised_candidate_patch_smoke", 1)
+
+    assert prepared.runnable is True
+    assert prepared.bundle_name == "supervised_candidate_patch_smoke_v1_limit_1"
+    assert prepared.blocked_message == ""
 
 
 def test_run_workbench_session_wraps_decision_summary(monkeypatch):

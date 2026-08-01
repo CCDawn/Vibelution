@@ -263,11 +263,24 @@ def get_supervised_workbench(
     """Return workbench defaults, datasets, and current live run when present."""
 
     data_root = _workbench_data_project_root()
-    dataset_catalog = list_dataset_choices(data_root) if include_catalog else []
+    dataset_catalog = (
+        list_dataset_choices(data_root, include_environment_preflight=False)
+        if include_catalog
+        else []
+    )
+    bundles = list_available_workbench_bundles(data_root) if include_catalog else []
     datasets = [item for item in dataset_catalog if item.get("visibility") == "primary"]
     dataset_payloads = [_dataset_payload(item) for item in datasets]
     catalog_payloads = [_dataset_payload(item) for item in dataset_catalog]
-    state_payload = saved_state if saved_state is not None else get_workbench_state_payload(project_root=PROJECT_ROOT)
+    state_payload = (
+        saved_state
+        if saved_state is not None
+        else get_workbench_state_payload(
+            project_root=PROJECT_ROOT,
+            datasets=dataset_catalog,
+            bundles=bundles,
+        )
+    )
     if include_catalog:
         state_payload = _workbench_saved_state_with_catalog_counts(
             state_payload,
@@ -280,7 +293,7 @@ def get_supervised_workbench(
         "defaultBundleName": default_bundle_name(),
         "savedState": state_payload,
         "storage": storage,
-        "bundles": list_available_workbench_bundles(data_root) if include_catalog else [],
+        "bundles": bundles,
         "datasets": dataset_payloads,
         "datasetCatalog": catalog_payloads,
         "activeRun": active_run if active_run_loaded else get_active_supervised_run(),
@@ -2941,6 +2954,8 @@ def _dataset_payload(item: dict[str, Any]) -> dict[str, Any]:
         "description": str(item.get("description") or "").strip(),
         "sourcePath": str(item.get("source_path") or "").strip(),
         "sourceExists": bool(item.get("source_exists")),
+        "sourceImportStatus": str(item.get("source_import_status") or "").strip(),
+        "preflightState": str(item.get("preflight_state") or "").strip(),
         "tags": [str(tag) for tag in list(item.get("tags") or []) if str(tag).strip()],
         "benchmarkFamily": str(item.get("benchmark_family") or "").strip(),
         "taskType": str(item.get("task_type") or "").strip(),
@@ -3748,11 +3763,24 @@ def get_supervised_workbench(
 ) -> dict[str, Any]:
     if _runtime_manager_live_control_enabled():
         data_root = _workbench_data_project_root()
-        dataset_catalog = list_dataset_choices(data_root) if include_catalog else []
+        dataset_catalog = (
+            list_dataset_choices(data_root, include_environment_preflight=False)
+            if include_catalog
+            else []
+        )
+        bundles = list_available_workbench_bundles(data_root) if include_catalog else []
         datasets = [item for item in dataset_catalog if item.get("visibility") == "primary"]
         dataset_payloads = [_dataset_payload(item) for item in datasets]
         catalog_payloads = [_dataset_payload(item) for item in dataset_catalog]
-        state_payload = saved_state if saved_state is not None else get_workbench_state_payload(project_root=PROJECT_ROOT)
+        state_payload = (
+            saved_state
+            if saved_state is not None
+            else get_workbench_state_payload(
+                project_root=PROJECT_ROOT,
+                datasets=dataset_catalog,
+                bundles=bundles,
+            )
+        )
         if include_catalog:
             state_payload = _workbench_saved_state_with_catalog_counts(
                 state_payload,
@@ -3765,7 +3793,7 @@ def get_supervised_workbench(
             "defaultBundleName": default_bundle_name(),
             "savedState": state_payload,
             "storage": storage,
-            "bundles": list_available_workbench_bundles(data_root) if include_catalog else [],
+            "bundles": bundles,
             "datasets": dataset_payloads,
             "datasetCatalog": catalog_payloads,
             "activeRun": active_run if active_run_loaded else get_active_supervised_run(),

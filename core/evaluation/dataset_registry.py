@@ -991,6 +991,18 @@ def load_dataset_specs(project_root: Optional[Path] = None) -> List[DatasetSpec]
     return _dataset_specs_from_payload(payload)
 
 
+def load_dataset_specs_readonly(project_root: Optional[Path] = None) -> List[DatasetSpec]:
+    """Load the effective registry without creating or rewriting workspace files."""
+
+    path = _registry_path(project_root)
+    if path.exists():
+        existing = json.loads(path.read_text(encoding="utf-8"))
+        payload = _merge_registry_payload(existing if isinstance(existing, dict) else {})
+    else:
+        payload = _default_registry_payload()
+    return _dataset_specs_from_payload(payload)
+
+
 def get_dataset_spec(dataset_name: str, *, project_root: Optional[Path] = None) -> DatasetSpec:
     for spec in load_dataset_specs(project_root):
         if spec.name == dataset_name:
@@ -1047,7 +1059,7 @@ def list_dataset_status(
 ) -> List[Dict[str, Any]]:
     root = _workspace_root(project_root)
     rows = []
-    for spec in load_dataset_specs(root):
+    for spec in load_dataset_specs_readonly(root):
         source = resolve_source_path(spec, root)
         bundle_path = root / "evaluation" / "bundles" / f"{spec.bundle_name}.json"
         available = spec.kind == "supervised_bundle" or bool(source and source.exists())
@@ -1090,6 +1102,7 @@ def list_dataset_status(
             else {}
         )
         preflight_required = bool(preflight_config.get("required")) or bool(environment_contract.get("required_paths"))
+        preflight_pending = preflight_required and not include_environment_preflight
         preflight_blocks_launch = (
             include_environment_preflight
             and preflight_required
@@ -1101,7 +1114,11 @@ def list_dataset_status(
                 usability_reason,
                 environment_preflight,
             )
-        effective = usability_status in {"ready", "agent_harness_ready", "custom_harness_ready"} and not preflight_blocks_launch
+        effective = (
+            usability_status in {"ready", "agent_harness_ready", "custom_harness_ready"}
+            and not preflight_pending
+            and not preflight_blocks_launch
+        )
         visibility = "primary" if effective and spec.workbench_visible else "hidden"
         if not spec.workbench_visible:
             visibility_reason = "底层数据池不直接作为工作台评测入口展示。"
@@ -1115,6 +1132,8 @@ def list_dataset_status(
             visibility_reason = "需要 Harbor/Docker 官方任务环境，已从主选择器隐藏。"
         elif preflight_blocks_launch:
             visibility_reason = "任务环境预检未通过，已从主选择器隐藏。"
+        elif preflight_pending:
+            visibility_reason = "任务环境尚未执行预检，启动前保持隐藏。"
         elif spec.default_visibility == "roadmap":
             visibility_reason = "长期研究评测，只登记路线图，不进入默认启动入口。"
         elif usability_status in {"invalid", "blocked"}:
@@ -1137,6 +1156,23 @@ def list_dataset_status(
             allowed_downstream_uses=spec.allowed_downstream_uses,
             holdout_allowed=spec.holdout_allowed,
             raw_chat_direct_training_allowed=spec.raw_chat_direct_training_allowed,
+        )
+        if not spec.source_path:
+            source_import_status = "not_applicable"
+        elif not source or not source.exists():
+            source_import_status = "not_imported"
+        elif case_count == 0:
+            source_import_status = "empty"
+        else:
+            source_import_status = "imported"
+        preflight_state = (
+            "pending"
+            if preflight_pending
+            else "available"
+            if preflight_required and bool(environment_preflight.get("available"))
+            else "unavailable"
+            if preflight_required
+            else "not_required"
         )
         rows.append(
             {
@@ -1164,6 +1200,8 @@ def list_dataset_status(
                 "adapter_status": spec.adapter_status,
                 "source_path": str(source) if source else None,
                 "source_exists": bool(source and source.exists()),
+                "source_import_status": source_import_status,
+                "preflight_state": preflight_state,
                 "bundle_path": str(bundle_path),
                 "bundle_exists": bundle_path.exists(),
                 "description": spec.description,
@@ -1327,6 +1365,7 @@ __all__ = [
     "list_pending_self_evolution_dataset_candidates",
     "list_dataset_status",
     "load_dataset_specs",
+    "load_dataset_specs_readonly",
     "materialize_dataset_bundle",
     "resolve_source_path",
 ]

@@ -1578,6 +1578,62 @@ def test_local_workbench_can_skip_catalog_scan(monkeypatch):
     assert payload["activeRun"]["runId"] == "active-local"
 
 
+@pytest.mark.parametrize("runtime_manager_enabled", [False, True])
+def test_workbench_catalog_scans_once_without_synchronous_environment_preflight(
+    monkeypatch,
+    runtime_manager_enabled,
+):
+    dataset_calls = []
+    bundle_calls = []
+    state_calls = []
+    datasets = [
+        {
+            "name": "supervised_dry_run",
+            "visibility": "primary",
+            "effective": True,
+            "selectable": True,
+            "source_import_status": "imported",
+            "preflight_state": "not_required",
+        }
+    ]
+    bundles = [{"name": "supervised_evolution_dry_run_v1", "caseCount": 4}]
+
+    monkeypatch.setattr(
+        service,
+        "_runtime_manager_live_control_enabled",
+        lambda: runtime_manager_enabled,
+    )
+    monkeypatch.setattr(
+        service,
+        "list_dataset_choices",
+        lambda project_root, *, include_environment_preflight=True: (
+            dataset_calls.append(include_environment_preflight) or datasets
+        ),
+    )
+    monkeypatch.setattr(
+        service,
+        "list_available_workbench_bundles",
+        lambda project_root: bundle_calls.append(project_root) or bundles,
+    )
+    monkeypatch.setattr(
+        service,
+        "get_workbench_state_payload",
+        lambda **kwargs: state_calls.append(kwargs) or {"source": "dataset"},
+    )
+    monkeypatch.setattr(service, "get_active_supervised_run", lambda: None)
+
+    payload = service.get_supervised_workbench()
+
+    assert dataset_calls == [False]
+    assert len(bundle_calls) == 1
+    assert state_calls[0]["datasets"] is datasets
+    assert state_calls[0]["bundles"] is bundles
+    assert payload["datasetCatalog"][0]["sourceImportStatus"] == "imported"
+    assert payload["datasetCatalog"][0]["preflightState"] == "not_required"
+    assert payload["bundles"] is bundles
+    assert [item["name"] for item in payload["datasets"]] == ["supervised_dry_run"]
+
+
 def test_runtime_manager_active_supervised_run_closes_stale_locked_snapshot(monkeypatch):
     run_id = "web-supervised-stale-active"
     snapshot = {
