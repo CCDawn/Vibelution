@@ -399,8 +399,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("onRejectToolApproval={() => {");
     expect(routeSource).toContain("resolveToolApprovalMutation.mutate({ request: pendingToolGovernanceApproval, decision: \"reject\" })");
     expect(chatSessionWorkspacePanelSource).toContain("<ChatToolApprovalDialog");
-    expect(chatSessionWorkspacePanelSource).toContain("variant=\"inline\"");
-    expect(chatSessionWorkspacePanelSource).toContain("toolApproval={inlineToolApproval}");
+    expect(chatSessionWorkspacePanelSource).toContain("variant=\"banner\"");
+    expect(chatSessionWorkspacePanelSource).toContain("toolApprovalHost");
+    expect(chatSessionWorkspacePanelSource).toContain("data-chat-tool-approval-host");
+    expect(chatSessionWorkspacePanelSource).toContain("toolApproval={null}");
     expect(chatSessionWorkspacePanelSource).toContain("conversationShell");
     expect(chatSessionWorkspacePanelSource).toContain('from "./ChatToolApprovalDialog"');
     expect(chatSessionWorkspacePanelSource.indexOf("<ChatToolApprovalDialog")).toBeLessThan(
@@ -428,19 +430,16 @@ describe("ChatCodingRoute layout contract", () => {
     expect(chatToolApprovalDialogSource).toContain("toolApprovalCodexButtonLabels");
     expect(chatToolApprovalDialogSource).toContain("commandPreview");
     expect(chatToolApprovalDialogSource).toContain("sessionGrantScope");
-    expect(chatToolApprovalDialogSource).toContain("Hotkeys: Y Yes");
-    expect(chatToolApprovalDialogSource).toContain("快捷键：Y 是");
+    expect(chatToolApprovalDialogSource).toContain("Y Yes · A Always · N No");
+    expect(chatToolApprovalDialogSource).toContain("Y 是 · A 始终 · N 否");
     expect(chatToolApprovalDialogSource).toContain("className={styles.toolItem}");
-    expect(chatToolApprovalDialogStyles.dialog).toContain("grid-cols-[34px_minmax(0,1fr)_auto]");
-    expect(chatToolApprovalDialogStyles.dialog).toContain("shadow-none");
-    expect(chatToolApprovalDialogStyles.dialog).not.toContain("vui-shadow-hairline");
+    expect(chatToolApprovalDialogStyles.dialog).toContain("grid-cols-[28px_minmax(0,1fr)_auto]");
+    expect(chatToolApprovalDialogStyles.dialog).toContain("max-w-[min(40rem,100%)]");
+    expect(chatToolApprovalDialogStyles.dialog).toContain("shadow-[var(--vui-elevation-panel)]");
     expect(chatToolApprovalDialogStyles.actions).toContain("flex");
     expect(chatToolApprovalDialogStyles.commandPreview).toContain("font-mono");
-    expect(chatToolApprovalDialogStyles.toolList).toContain("overflow-auto");
+    expect(chatToolApprovalDialogStyles.toolList).toContain("sr-only");
     expect(chatToolApprovalDialogStyles.toolItem).toContain("min-w-0");
-    expect(chatToolApprovalDialogStyles.toolItem).toContain("max-w-full");
-    expect(chatToolApprovalDialogStyles.toolItem).toContain("break-words");
-    expect(chatToolApprovalDialogStyles.toolItem).toContain("[overflow-wrap:anywhere]");
   });
 
   it("marks tool approval resolving state as busy without losing dialog semantics", () => {
@@ -1927,7 +1926,7 @@ describe("ChatCodingRoute layout contract", () => {
       [routeStyles.petShowcaseActions, "grid-cols-3"],
       [routeStyles.cliAgentTerminalCommand, "grid-cols-[auto_minmax(0,1fr)_auto]"],
       [chatRuntimeNoticeStackStyles.notice, "grid-cols-[16px_minmax(0,1fr)]"],
-      [chatToolApprovalDialogStyles.dialog, "grid-cols-[34px_minmax(0,1fr)_auto]"],
+      [chatToolApprovalDialogStyles.dialog, "grid-cols-[28px_minmax(0,1fr)_auto]"],
       [routeStyles.cacheDetailCalibrationNote, "grid-cols-[auto_minmax(0,1fr)_auto]"],
       [routeStyles.rightIndexTabs, "grid-cols-[repeat(2,minmax(0,1fr))]"],
       [routeStyles.memberIndexSummary, "grid-cols-[auto_minmax(0,1fr)_auto]"],
@@ -2816,6 +2815,9 @@ describe("ChatCodingRoute layout contract", () => {
   it("renders a compact QQ-style tree with direct sessions separate from Team-owned rooms", () => {
     expect(routeSource).toContain("fetchJson<TeamListPayload>(\"/api/teams\")");
     expect(routeSource).toContain("queryKeys.teams()");
+    // Directory partition needs teams without opening the group picker.
+    expect(routeSource).toContain("Must load whenever the left-rail agent directory is active");
+    expect(routeSource).not.toContain("enabled: secondaryChatDataEnabled && teamsPickerNeeded");
     expect(routeSource).toContain("linkedTeamRoomIds");
     expect(routeSource).toContain("filteredTeams");
     expect(routeSource).toContain("filteredStandaloneGroupConversations");

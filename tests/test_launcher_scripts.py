@@ -2628,8 +2628,8 @@ if ($browserText -notmatch "gui_process_without_console" -or $browserText -notma
 if ($browserText -notmatch '--app=\\$resolvedAppUrl') {
     throw "Start-ManagedBrowser should keep using a resolved app window URL so the web manifest can theme the chrome."
 }
-if ($browserText -notmatch '--force-dark-mode') {
-    throw "Start-ManagedBrowser should request dark app chrome for the managed browser window."
+if ($browserText -match '--force-dark-mode') {
+    throw "Start-ManagedBrowser must not force Chromium dark mode; it fights workbench theme and causes whole-window flicker."
 }
 if ($browserText -match '--kiosk') {
     throw "Start-ManagedBrowser should not use kiosk mode for the workbench window."

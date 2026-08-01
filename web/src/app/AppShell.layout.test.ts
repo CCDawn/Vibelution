@@ -28,6 +28,15 @@ describe("AppShell layout contract", () => {
     expect(shellSource).not.toMatch(/<button\b/);
   });
 
+  it("isolates the 1s top clock and volatile runtime poll from whole-shell re-renders", () => {
+    expect(shellSource).toContain('from "./AppShellTopClock"');
+    expect(shellSource).toContain("<AppShellTopClock");
+    expect(shellSource).not.toContain("setClockNow");
+    expect(shellSource).not.toContain("setInterval(() => {\n      setClockNow");
+    expect(shellSource).toContain("shareRuntimeSummaryIfOnlyVolatileChanged");
+    expect(shellSource).toContain("structuralSharing: shareRuntimeSummaryIfOnlyVolatileChanged");
+  });
+
   it("exposes three stable desktop top-bar groups with shared soft-layer geometry", () => {
     expect(shellSource).toContain('data-shell-group="brand"');
     expect(shellSource).toContain('data-shell-group="navigation"');
@@ -316,9 +325,16 @@ describe("AppShell layout contract", () => {
     expect(shellStyles).toContain('[data-theme-background-readability="standard"]');
     expect(shellStyles).toContain('[data-theme-background-readability="strong"]');
     expect(shellStyles).toContain("--theme-background-blur");
-    expect(shellStyles).toContain("backdrop-filter: blur(var(--theme-background-blur))");
+    // Full-window blur + fixed attachment caused Edge --app whole-window flicker.
+    expect(shellStyles).toContain("backdrop-filter: none");
+    expect(shellStyles).toContain("background-attachment: scroll, scroll, scroll");
     expect(shellStyles).toContain("var(--workbench-theme-background-image)");
     expect(shellStyles).toContain("background-size: auto, cover, auto");
+  });
+
+  it("avoids background health/runtime fetchStatus re-renders of the whole shell", () => {
+    expect(shellSource).toContain('notifyOnChangeProps: ["data", "error", "isError", "isPending", "isSuccess", "isRefetchError"]');
+    expect(shellSource).toContain("shareRuntimeSummaryIfOnlyVolatileChanged");
   });
 
   it("shows the current app version in the brand area", () => {

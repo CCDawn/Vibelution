@@ -79,6 +79,8 @@ import { VIconButton } from "../components/vui/primitives/VIconButton";
 import { getPageInstanceId } from "./pageInstance";
 import { useShellStore } from "../store/shellStore";
 import styles from "./AppShell.styles";
+import { AppShellTopClock } from "./AppShellTopClock";
+import { shareRuntimeSummaryIfOnlyVolatileChanged } from "./runtimeSummaryQueryShare";
 import packageJson from "../../package.json";
 
 const LazyAppShellUtilityMenu = lazy(() =>
@@ -679,7 +681,6 @@ export function AppShell() {
   const setTopBarMode = useShellStore((state) => state.setTopBarMode);
   const topBarHidden = topBarMode === "hidden";
   const desktopShell = useMemo(() => isElectronDesktopShell(), []);
-  const [clockNow, setClockNow] = useState(() => Date.now());
   const [theme, setTheme] = useState(() => readStoredWorkbenchTheme());
   const [frontendVisible, setFrontendVisible] = useState(
     () => (typeof document === "undefined" ? true : document.visibilityState === "visible"),
@@ -746,6 +747,8 @@ export function AppShell() {
     refetchIntervalInBackground: shellStartupWarmupActive,
     staleTime: 0,
     retry: false,
+    // Ignore fetchStatus churn so background health polls do not re-render the whole shell.
+    notifyOnChangeProps: ["data", "error", "isError", "isPending", "isSuccess", "isRefetchError"],
   });
   // Phase-1 shell ready depends only on config + health; runtime summary is a phase-2 enhancement.
   useEffect(() => {
@@ -753,12 +756,15 @@ export function AppShell() {
       setShellStartupDataReady(true);
     }
   }, [backendHealthQuery.data, configQuery.data]);
-  const runtimeQuery = useQuery({
+  const runtimeQuery = useQuery<RuntimeSummary>({
     queryKey: queryKeys.runtimeSummary(),
     queryFn: ({ signal }) => fetchJson<RuntimeSummary>("/api/runtime/summary", { signal }),
     enabled: shellStartupDataReady,
     refetchInterval: runtimeRefetchInterval,
     refetchIntervalInBackground: shellStartupWarmupActive,
+    // Heartbeat-only field churn must not re-render the whole shell + route tree.
+    structuralSharing: shareRuntimeSummaryIfOnlyVolatileChanged,
+    notifyOnChangeProps: ["data", "error", "isError", "isPending", "isSuccess", "isRefetchError"],
   });
 
   useEffect(() => syncWorkbenchThemeRoot(theme), [theme]);
@@ -865,25 +871,6 @@ export function AppShell() {
     : "运行时管理器没有成功重启工作台。请检查 launcher 和 runtime-manager 日志。";
   const restartUnconfirmedBody = restartRequestUnconfirmedBody(lang);
   const workbenchCloseGuardMessage = projectWindowCloseGuardMessage(lang, "workbench");
-  const locale = lang === "zh" ? "zh-CN" : "en-US";
-  const timezone = useMemo(
-    () => Intl.DateTimeFormat().resolvedOptions().timeZone || (lang === "en" ? "Local time" : "本地时间"),
-    [lang],
-  );
-  const clockFormatter = useMemo(
-    () =>
-      new Intl.DateTimeFormat(locale, {
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-        weekday: "long",
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-        hour12: true,
-      }),
-    [locale],
-  );
   const frontendState = deriveFrontendSystemState({
     online: frontendOnline,
     visible: frontendVisible,
@@ -942,7 +929,6 @@ export function AppShell() {
     || String(workbench?.lifecycleConsistency ?? "").toLowerCase() !== "consistent";
   const activeWorkIndicator = deriveActiveWorkIndicator(runtimeQuery.data, lang);
   const activeWorkDetailsTitle = activeWorkIndicator?.items.map((item) => item.detail).join(" · ") ?? "";
-  const currentTime = clockFormatter.format(clockNow);
   const buildId = __VIBELUTION_BUILD_ID__;
   const clearRestartCompletionDismissTimer = useCallback(() => {
     if (restartCompletionDismissTimerRef.current === null) {
@@ -1688,13 +1674,6 @@ export function AppShell() {
   }, [emitBrowserTelemetry, restartRequested, runtimeControllerState, shutdownRequested]);
 
   useEffect(() => {
-    const timer = window.setInterval(() => {
-      setClockNow(Date.now());
-    }, 1_000);
-    return () => window.clearInterval(timer);
-  }, []);
-
-  useEffect(() => {
     function handleVisibilityChange() {
       setFrontendVisible(document.visibilityState === "visible");
       emitBrowserTelemetry({
@@ -2261,10 +2240,7 @@ export function AppShell() {
             </span>
             <span className={styles.brandSubtle}>{t("brandSubtle")}</span>
           </div>
-          <div className={styles.topClock} title={timezone} aria-label={`${t("systemTime")}: ${currentTime}`}>
-            <span className={`${styles.statusDot} ${styles.status_idle}`} />
-            <span>{currentTime}</span>
-          </div>
+          <AppShellTopClock lang={lang} systemTimeLabel={t("systemTime")} />
           {activeWorkIndicator ? (
             <div
               className={styles.activeWorkChip}

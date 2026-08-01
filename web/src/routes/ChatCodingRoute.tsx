@@ -772,7 +772,10 @@ export function ChatCodingRoute() {
   const teamsQuery = useQuery({
     queryKey: queryKeys.teams(),
     queryFn: () => fetchJson<TeamListPayload>("/api/teams"),
-    enabled: secondaryChatDataEnabled && teamsPickerNeeded,
+    // Must load whenever the left-rail agent directory is active — not only when the
+    // group-room picker is open. With teams=[], research/evolution members all dump into
+    // 「特殊 Agent」and team rooms fall into 未归属.
+    enabled: secondaryChatDataEnabled,
     refetchInterval: chatSecondaryPollPolicy.teamsRefetchInterval,
     refetchIntervalInBackground: chatSecondaryPollPolicy.secondaryRefetchIntervalInBackground,
   });
