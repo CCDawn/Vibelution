@@ -316,6 +316,10 @@ def _is_explicit_bash_invocation(command: str) -> bool:
 # 项目根目录
 PROJECT_ROOT = Path(__file__).parent.parent.absolute()
 _WORKSPACE_ROOT_OVERRIDE: ContextVar[str] = ContextVar("vibelution_workspace_root_override", default="")
+_GIT_SAFE_DIRECTORY_OVERRIDE: ContextVar[str] = ContextVar(
+    "vibelution_git_safe_directory_override",
+    default="",
+)
 
 
 def _get_project_python_executable() -> Path:
@@ -489,6 +493,24 @@ def workspace_root_override(workspace_root: str | Path):
 def get_workspace_root_override() -> Optional[Path]:
     """Return the active per-session workspace root, when one is set."""
     override = _WORKSPACE_ROOT_OVERRIDE.get("").strip()
+    return Path(override).resolve() if override else None
+
+
+@contextmanager
+def git_safe_directory_override(workspace_root: str | Path):
+    """Trust one candidate worktree only for child Git commands in this context."""
+    token = _GIT_SAFE_DIRECTORY_OVERRIDE.set(
+        str(Path(workspace_root).resolve())
+    )
+    try:
+        yield
+    finally:
+        _GIT_SAFE_DIRECTORY_OVERRIDE.reset(token)
+
+
+def get_git_safe_directory_override() -> Optional[Path]:
+    """Return the current child-process Git safe.directory override."""
+    override = _GIT_SAFE_DIRECTORY_OVERRIDE.get("").strip()
     return Path(override).resolve() if override else None
 
 
@@ -825,10 +847,24 @@ def execute_shell_command(
             timeout_int = 60
 
         started_at = time.monotonic()
+        process_env = os.environ.copy()
+        git_safe_directory = get_git_safe_directory_override()
+        if git_safe_directory is not None:
+            git_config_count = int(process_env.get("GIT_CONFIG_COUNT", "0") or "0")
+            process_env.update(
+                {
+                    "GIT_CONFIG_COUNT": str(git_config_count + 1),
+                    f"GIT_CONFIG_KEY_{git_config_count}": "safe.directory",
+                    f"GIT_CONFIG_VALUE_{git_config_count}": str(
+                        git_safe_directory
+                    ),
+                }
+            )
         process = subprocess.Popen(
             final_command,
             shell=True,
             cwd=cwd,
+            env=process_env,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
