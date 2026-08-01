@@ -351,6 +351,24 @@ def _spawn(
         stderr_handle.close()
 
 
+def _frontend_command(*, project: Path, frontend_port: int) -> list[str]:
+    node = shutil.which("node.exe") or shutil.which("node")
+    if not node:
+        raise RuntimeError("node executable was not found")
+    vite_entry = (project / "web" / "node_modules" / "vite" / "bin" / "vite.js").resolve()
+    if not vite_entry.is_file():
+        raise RuntimeError(f"Vite entrypoint was not found: {vite_entry}")
+    return [
+        node,
+        str(vite_entry),
+        "--host",
+        "127.0.0.1",
+        "--port",
+        str(int(frontend_port)),
+        "--strictPort",
+    ]
+
+
 def _http_ready(url: str, timeout: float = 0.8) -> bool:
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     try:
@@ -480,22 +498,7 @@ def start_instance(
             str(backend_port),
             "--no-browser",
         ]
-        npm = shutil.which("npm.cmd") or shutil.which("npm")
-        if not npm:
-            raise RuntimeError("npm executable was not found")
-        frontend_command = [
-            npm,
-            "--prefix",
-            str(project / "web"),
-            "run",
-            "dev",
-            "--",
-            "--host",
-            "127.0.0.1",
-            "--port",
-            str(frontend_port),
-            "--strictPort",
-        ]
+        frontend_command = _frontend_command(project=project, frontend_port=frontend_port)
         backend_process = _spawn(
             backend_command,
             cwd=project,
