@@ -10,6 +10,7 @@ import re
 import shutil
 import threading
 import time
+from copy import deepcopy
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
@@ -1030,6 +1031,26 @@ def _self_evolution_agent_config(binding: dict[str, Any]) -> Any | None:
         return None
 
 
+def _self_evolution_agent_turn_config(
+    binding: dict[str, Any],
+    *,
+    max_iterations: int | None = None,
+) -> Any | None:
+    config = _self_evolution_agent_config(binding)
+    if config is None or max_iterations is None:
+        return config
+    bounded_max_iterations = max(1, min(200, int(max_iterations)))
+    try:
+        turn_config = config.model_copy(deep=True)
+    except AttributeError:
+        turn_config = deepcopy(config)
+    agent_config = getattr(turn_config, "agent", None)
+    if agent_config is None:
+        return config
+    agent_config.max_iterations = bounded_max_iterations
+    return turn_config
+
+
 def _run_self_evolution_agent_role_turn(
     *,
     role: str,
@@ -1039,6 +1060,8 @@ def _run_self_evolution_agent_role_turn(
     carryover: dict[str, Any] | None = None,
     runtime_tool_grants: list[str] | None = None,
     runtime_tool_source: str = "",
+    max_iterations: int | None = None,
+    disable_tools: bool = False,
 ) -> dict[str, Any]:
     role_key = str(role or "").strip()
     agent_id = str((binding or {}).get("agentId") or "").strip()
@@ -1071,8 +1094,12 @@ def _run_self_evolution_agent_role_turn(
             AgentSingleTurnRequest(
                 mode="self_evolution",
                 workspace_path=str((binding or {}).get("workspacePath") or "") or None,
-                config=_self_evolution_agent_config(binding),
+                config=_self_evolution_agent_turn_config(
+                    binding,
+                    max_iterations=max_iterations,
+                ),
                 initial_prompt=prompt,
+                disable_tools=disable_tools,
                 carryover=carryover if isinstance(carryover, dict) else None,
                 runtime_context=agent_context.context_block,
                 static_runtime_context=agent_context.static_context_block,

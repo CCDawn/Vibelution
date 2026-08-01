@@ -244,6 +244,31 @@ def test_run_agent_single_turn_forwards_history_through_preparation():
     }
 
 
+def test_run_agent_single_turn_can_disable_tools_for_bounded_finalization():
+    captured: dict[str, object] = {}
+
+    class FakeAgent:
+        def run_single_turn(self, initial_prompt=None, disable_tools=False):
+            captured["initial_prompt"] = initial_prompt
+            captured["disable_tools"] = disable_tools
+            return {"status": "completed", "summary": "final summary"}
+
+    result = run_agent_single_turn(
+        AgentSingleTurnRequest(
+            mode="self_evolution",
+            initial_prompt="summarize now",
+            disable_tools=True,
+        ),
+        agent_factory=lambda **_kwargs: FakeAgent(),
+    )
+
+    assert captured == {
+        "initial_prompt": "summarize now",
+        "disable_tools": True,
+    }
+    assert result.result["summary"] == "final summary"
+
+
 def test_prepare_agent_turn_uses_only_matching_nonterminal_carryover():
     captured: dict[str, object] = {}
 
