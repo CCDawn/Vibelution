@@ -4,6 +4,9 @@ from copy import deepcopy
 
 import pytest
 
+from core.web.services.self_evolution_candidate_context import (
+    bounded_candidate_target_context,
+)
 from core.web.services.self_evolution_autonomous_loop_runtime import (
     AutonomousLoopRuntimeDependencies,
     AutonomousLoopRuntimeError,
@@ -910,6 +913,9 @@ def test_runtime_retries_executor_once_when_first_turn_only_repeats_the_plan(
     ]
     assert turn_calls[1]["max_iterations"] == 1
     assert "第一项工具调用必须产生文件修改" in turn_calls[1]["prompt"]
+    assert "只能直接修改：core/example.py" in turn_calls[1]["prompt"]
+    assert "不得创建 scratch、helper、investigate" in turn_calls[1]["prompt"]
+    assert "只有 1 次写入工具调用机会" in turn_calls[1]["prompt"]
     assert turn_calls[2]["runtime_tool_grants"] == [
         "open_evolution_transaction_tool",
         "close_evolution_transaction_tool",
@@ -1352,6 +1358,44 @@ def test_runtime_mutation_retry_receives_bounded_exact_target_context(tmp_path):
     assert "    current_value = 'before'" in mutation_prompt
     assert "sk-live-secret" not in mutation_prompt
     assert "api_key = \"[REDACTED]\"" in mutation_prompt
+
+
+def test_bounded_candidate_context_prefers_similar_missing_symbol_prefix(
+    tmp_path,
+):
+    target = tmp_path / "tests" / "test_target.py"
+    target.parent.mkdir(parents=True)
+    target.write_text(
+        "request = {'goal': 'generic target'}\n"
+        "plan = {'targetFiles': ['tests/test_target.py']}\n"
+        "assert request and plan\n"
+        + "\n" * 70
+        + "def test_runtime_plan_rejects_forbidden_target_files():\n"
+        + "    assert True\n",
+        encoding="utf-8",
+    )
+    context = {
+        "request": {
+            "goal": (
+                "只修改 tests/test_target.py，新增聚焦测试 "
+                "test_runtime_plan_accepts_single_direct_zhi_modify_target"
+            )
+        },
+        "plan": {
+            "summary": (
+                "新增 test_runtime_plan_accepts_single_direct_zhi_modify_target"
+            ),
+            "steps": [],
+        },
+    }
+
+    rendered = bounded_candidate_target_context(
+        worktree_path=str(tmp_path),
+        target_files=["tests/test_target.py"],
+        context=context,
+    )
+
+    assert "test_runtime_plan_rejects_forbidden_target_files" in rendered
 
 
 def test_runtime_failure_closes_only_transaction_opened_by_this_evolution(
