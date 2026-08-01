@@ -111,6 +111,7 @@ export function SelfEvolutionAutonomousLoopPanel({
   const verification = run?.candidate?.verification ?? [];
   const awaitingReview = run?.status === "awaiting_user_approval";
   const failed = run?.status === "failed";
+  const integrationFailed = failed && run?.phase === "integration_failed";
   const cleanupFailed = run?.phase === "cleanup_failed";
   const completed = run?.status === "completed" && run?.phase === "completed";
   const statusLabel = completed
@@ -326,6 +327,22 @@ export function SelfEvolutionAutonomousLoopPanel({
           title={lang === "zh" ? "自动闭环未完成" : "Autonomous loop did not complete"}
           tone="error"
           icon={<X size={15} />}
+          actions={integrationFailed ? (
+            <VButton
+              type="button"
+              variant="primary"
+              icon={<GitCommitHorizontal size={14} />}
+              isDisabled={pending}
+              onPress={() => onAction(
+                "approve",
+                lang === "zh"
+                  ? "用户修复集成环境后重试 Git 集成"
+                  : "User retried Git integration after repairing the environment",
+              )}
+            >
+              {lang === "zh" ? "重试 Git 集成" : "Retry Git integration"}
+            </VButton>
+          ) : undefined}
           facts={[
             {
               key: "phase",
