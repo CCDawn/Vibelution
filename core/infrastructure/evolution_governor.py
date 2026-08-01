@@ -2,15 +2,48 @@ from __future__ import annotations
 
 import json
 import re
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable, List
+from typing import Any, Iterable, Iterator, List
 
 from config import get_config
 from core.infrastructure.agent_session import get_session_state
 from core.infrastructure import developer_sandbox
 from core.infrastructure.event_bus import Event, EventNames, get_event_bus
 from core.infrastructure.workspace_manager import get_workspace
+
+
+_EVOLUTION_TARGET_ALLOWLIST: ContextVar[tuple[str, ...] | None] = ContextVar(
+    "vibelution_evolution_target_allowlist",
+    default=None,
+)
+
+
+@contextmanager
+def evolution_target_allowlist(paths: Iterable[str | Path]) -> Iterator[None]:
+    """Temporarily restrict an evolution transaction to exact host-approved paths."""
+
+    normalized = tuple(
+        str(Path(path).resolve())
+        for path in paths
+        if str(path or "").strip()
+    )
+    token = _EVOLUTION_TARGET_ALLOWLIST.set(normalized)
+    try:
+        yield
+    finally:
+        _EVOLUTION_TARGET_ALLOWLIST.reset(token)
+
+
+def current_evolution_target_allowlist() -> tuple[Path, ...] | None:
+    """Return the active exact target contract, or ``None`` outside that contract."""
+
+    scoped = _EVOLUTION_TARGET_ALLOWLIST.get()
+    if scoped is None:
+        return None
+    return tuple(Path(path).resolve() for path in scoped)
 
 
 class EvolutionGovernor:
@@ -274,6 +307,9 @@ class EvolutionGovernor:
         return "/" in text or "\\" in text
 
     def _allowed_roots(self) -> List[Path]:
+        scoped_targets = current_evolution_target_allowlist()
+        if scoped_targets is not None:
+            return list(scoped_targets)
         evolution = get_config().evolution
         roots = [self._resolve_project_path(item) for item in (evolution.allowed_target_dirs or []) if str(item).strip()]
         workspace_override = self._active_workspace_override()

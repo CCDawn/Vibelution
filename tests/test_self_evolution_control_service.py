@@ -96,6 +96,73 @@ def test_autonomous_role_turn_projects_exact_runtime_tool_grants(monkeypatch):
     assert captured["runtime_tool_source"] == "self_evolution_autonomous_loop"
 
 
+def test_autonomous_role_turn_binds_candidate_workspace_and_exact_targets(
+    tmp_path,
+    monkeypatch,
+):
+    candidate_root = tmp_path / "candidate"
+    planned_target = candidate_root / "core" / "example.py"
+    candidate_root.mkdir()
+    captured: dict = {}
+    monkeypatch.setattr(
+        service,
+        "build_agent_context",
+        lambda agent_id, **_kwargs: SimpleNamespace(
+            agent_id=agent_id,
+            session_id="session-executor",
+            context_block="",
+            static_context_block="",
+            dynamic_context_block="",
+        ),
+    )
+    monkeypatch.setattr(service, "_self_evolution_agent_config", lambda _binding: None)
+    monkeypatch.setattr(service, "record_agent_turn_result", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        agent_directory_service,
+        "active_agent_runtime",
+        lambda *_args, **_kwargs: nullcontext({}),
+    )
+
+    def run_single_turn(_request):
+        from core.infrastructure.evolution_governor import (
+            current_evolution_target_allowlist,
+        )
+        from tools.shell_tools import create_file, get_workspace_root_override
+
+        captured["workspace"] = get_workspace_root_override()
+        captured["targets"] = current_evolution_target_allowlist()
+        captured["writeResult"] = create_file(
+            "core/example.py",
+            "CANDIDATE_ONLY = True\n",
+        )
+        return SimpleNamespace(
+            result={"status": "completed", "summary": "候选完成"},
+            carryover={},
+            runtime=None,
+        )
+
+    monkeypatch.setattr(service, "run_agent_single_turn", run_single_turn)
+
+    service._run_self_evolution_agent_role_turn(
+        role="executor",
+        binding={
+            "agentId": "agent-executor",
+            "directSessionId": "session-executor",
+            "workspacePath": str(candidate_root),
+        },
+        run_id="self-loop-workspace",
+        prompt="实施候选",
+        runtime_tool_grants=["apply_patch_tool"],
+        runtime_tool_source="self_evolution_autonomous_loop",
+        allowed_target_paths=[str(planned_target)],
+    )
+
+    assert captured["workspace"] == candidate_root.resolve()
+    assert captured["targets"] == (planned_target.resolve(),)
+    assert "[OK]" in captured["writeResult"]
+    assert planned_target.read_text(encoding="utf-8") == "CANDIDATE_ONLY = True\n"
+
+
 def test_autonomous_role_turn_applies_isolated_iteration_budget(monkeypatch):
     captured: dict = {}
     source_config = SimpleNamespace(agent=SimpleNamespace(max_iterations=200))

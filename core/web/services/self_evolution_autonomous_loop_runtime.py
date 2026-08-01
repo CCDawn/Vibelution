@@ -8,6 +8,14 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from .runtime_scene_service import record_runtime_scene_event
+from .self_evolution_candidate_target_contract import (
+    CandidateTargetContractError,
+    candidate_target_paths,
+    extract_plan_target_files,
+    normalize_target_files,
+    record_plan_target_contract,
+    validate_candidate_changes,
+)
 from .self_evolution_autonomous_loop_service import AutonomousLoopHooks
 
 
@@ -141,15 +149,22 @@ def build_autonomous_loop_hooks(
         result = turn["result"]
         with state_lock:
             carryovers.pop(run_id, None)
+        target_files = _plan_target_files(result)
+        record_plan_target_contract(
+            run_id=run_id,
+            target_files=target_files,
+        )
         return {
             "summary": _result_summary(result, label="Plan"),
             "steps": _plan_steps(result),
+            "targetFiles": target_files,
             "conversationSessionId": _conversation_session_id(turn, binding),
         }
 
     def evolve(context: dict[str, Any]) -> dict[str, Any]:
         run_id = _run_id(context)
         bindings = bindings_for(context)
+        target_files = _target_files_from_context(context)
         workspace = dependencies.create_candidate(deepcopy(context))
         if not isinstance(workspace, dict):
             raise AutonomousLoopRuntimeError(
@@ -162,6 +177,10 @@ def build_autonomous_loop_hooks(
             raise AutonomousLoopRuntimeError(
                 "Candidate workspace is missing branch, worktreePath, or baseCommit."
             )
+        allowed_target_paths = _candidate_target_paths(
+            worktree_path,
+            target_files,
+        )
         executor_binding = deepcopy(bindings["executor"])
         executor_binding["workspacePath"] = worktree_path
         turn = _run_successful_turn(
@@ -174,6 +193,7 @@ def build_autonomous_loop_hooks(
             runtime_tool_grants=list(EXECUTOR_RUNTIME_TOOLS),
             runtime_tool_source=AUTONOMOUS_RUNTIME_TOOL_SOURCE,
             max_iterations=EXECUTOR_MAX_ITERATIONS,
+            allowed_target_paths=allowed_target_paths,
         )
         inspection = _inspect_candidate(
             dependencies,
@@ -182,8 +202,12 @@ def build_autonomous_loop_hooks(
             workspace=workspace,
             turn=turn,
         )
-        changed_files = inspection.get("changedFiles")
-        if not isinstance(changed_files, list) or not changed_files:
+        changed_files = _validated_candidate_changes(
+            inspection,
+            run_id=run_id,
+            target_files=target_files,
+        )
+        if not changed_files:
             tool_call_count = _result_tool_call_count(turn["result"])
             _record_executor_retry(
                 run_id=run_id,
@@ -207,6 +231,7 @@ def build_autonomous_loop_hooks(
                 runtime_tool_grants=list(EXECUTOR_MUTATION_TOOLS),
                 runtime_tool_source=AUTONOMOUS_RUNTIME_TOOL_SOURCE,
                 max_iterations=EXECUTOR_MUTATION_MAX_ITERATIONS,
+                allowed_target_paths=allowed_target_paths,
             )
             inspection = _inspect_candidate(
                 dependencies,
@@ -215,8 +240,12 @@ def build_autonomous_loop_hooks(
                 workspace=workspace,
                 turn=mutation_turn,
             )
-            changed_files = inspection.get("changedFiles")
-            if not isinstance(changed_files, list) or not changed_files:
+            changed_files = _validated_candidate_changes(
+                inspection,
+                run_id=run_id,
+                target_files=target_files,
+            )
+            if not changed_files:
                 raise AutonomousLoopRuntimeError(
                     "Candidate has no changed files after evolution."
                 )
@@ -237,6 +266,7 @@ def build_autonomous_loop_hooks(
                 runtime_tool_grants=validation_tools,
                 runtime_tool_source=AUTONOMOUS_RUNTIME_TOOL_SOURCE,
                 max_iterations=EXECUTOR_VALIDATION_MAX_ITERATIONS,
+                allowed_target_paths=allowed_target_paths,
             )
             inspection = _inspect_candidate(
                 dependencies,
@@ -245,8 +275,12 @@ def build_autonomous_loop_hooks(
                 workspace=workspace,
                 turn=turn,
             )
-        changed_files = inspection.get("changedFiles")
-        if not isinstance(changed_files, list) or not changed_files:
+        changed_files = _validated_candidate_changes(
+            inspection,
+            run_id=run_id,
+            target_files=target_files,
+        )
+        if not changed_files:
             raise AutonomousLoopRuntimeError(
                 "Candidate has no changed files after evolution."
             )
@@ -401,6 +435,55 @@ def _result_summary(result: dict[str, Any], *, label: str) -> str:
     raise AutonomousLoopRuntimeError(f"{label} Agent returned no visible summary.")
 
 
+def _plan_target_files(result: dict[str, Any]) -> list[str]:
+    try:
+        return extract_plan_target_files(
+            result,
+            summary=_result_summary(result, label="Plan"),
+        )
+    except CandidateTargetContractError as exc:
+        raise AutonomousLoopRuntimeError(str(exc)) from exc
+
+
+def _target_files_from_context(context: dict[str, Any]) -> list[str]:
+    plan = context.get("plan") if isinstance(context.get("plan"), dict) else {}
+    raw_targets = plan.get("targetFiles")
+    if not isinstance(raw_targets, list) or not raw_targets:
+        raise AutonomousLoopRuntimeError(
+            "Plan did not declare structured target files."
+        )
+    try:
+        return normalize_target_files(raw_targets)
+    except CandidateTargetContractError as exc:
+        raise AutonomousLoopRuntimeError(str(exc)) from exc
+
+
+def _candidate_target_paths(
+    worktree_path: str,
+    target_files: list[str],
+) -> list[str]:
+    try:
+        return candidate_target_paths(worktree_path, target_files)
+    except CandidateTargetContractError as exc:
+        raise AutonomousLoopRuntimeError(str(exc)) from exc
+
+
+def _validated_candidate_changes(
+    inspection: dict[str, Any],
+    *,
+    run_id: str,
+    target_files: list[str],
+) -> list[str]:
+    try:
+        return validate_candidate_changes(
+            inspection,
+            run_id=run_id,
+            target_files=target_files,
+        )
+    except CandidateTargetContractError as exc:
+        raise AutonomousLoopRuntimeError(str(exc)) from exc
+
+
 def _result_evidence(result: dict[str, Any]) -> list[dict[str, Any]]:
     trace = result.get("tool_trace")
     if not isinstance(trace, list):
@@ -483,17 +566,28 @@ def _planning_prompt(context: dict[str, Any]) -> str:
         "3. 计划必须能在隔离 worktree 内完成并留下测试证据。\n"
         "4. 不执行计划，不评分，不调用 Judge。\n"
         "5. 最多补充 1 轮只读检索；已有观察证据足够时不得重复搜索。\n"
-        "6. 必须在第 3 轮前输出计划，明确修改范围、验证方法和停止条件。"
+        "6. 必须在第 3 轮前输出计划，明确修改范围、验证方法和停止条件。\n"
+        "7. 最终回答最后一行必须逐字使用 `TARGET_FILES_JSON: "
+        "[\"相对仓库路径\"]` 声明本轮最多 8 个精确目标文件；不得使用目录、"
+        "绝对路径、通配符、..、workspace、logs、config、.git、"
+        "docs/standards 或项目记忆路径。"
     )
 
 
 def _analysis_finalization_prompt(phase: str) -> str:
     label = "观察摘要" if phase == "observation" else "实施计划"
+    target_contract = (
+        "\n实施计划的最后一行仍必须逐字输出 "
+        '`TARGET_FILES_JSON: ["相对仓库路径"]`，否则计划按失效关闭处理。'
+        if phase == "planning"
+        else ""
+    )
     return (
         f"当前{label}的只读工具预算已经用完。现在停止调用工具，"
         "仅使用同一会话中已经获得的证据输出最终可见回答。\n"
         "不要继续搜索，不要修改文件，不要请求用户确认，不要评分或调用 Judge。\n"
         f"直接输出简洁、可执行的{label}；证据不足的部分明确标为未验证。"
+        f"{target_contract}"
     )
 
 
@@ -505,16 +599,19 @@ def _evolution_prompt(context: dict[str, Any]) -> str:
         else {}
     )
     plan = context.get("plan") if isinstance(context.get("plan"), dict) else {}
+    target_files = _target_files_from_context(context)
     return (
         "请在当前隔离 worktree 内实施这一轮自进化候选。\n"
         f"目标：{str(request.get('goal') or '').strip()}\n"
         f"观察：{str(observation.get('summary') or '').strip()}\n"
-        f"计划：{str(plan.get('summary') or '').strip()}\n\n"
+        f"计划：{str(plan.get('summary') or '').strip()}\n"
+        f"宿主批准的精确目标文件：{', '.join(target_files)}\n\n"
         "要求：\n"
         "1. 当前阶段已经获得自动闭环的执行授权，无需再次请求用户确认。\n"
         "2. 必须实际调用工具实施计划；先调用 open_evolution_transaction_tool，"
         "再读取、修改并验证候选，最后调用 close_evolution_transaction_tool 收口。\n"
-        "3. 只修改计划范围内文件，运行与改动相称的测试；纯文本复述计划不算完成。\n"
+        "3. 只允许修改上面列出的精确目标文件，运行与改动相称的测试；"
+        "纯文本复述计划不算完成。\n"
         "4. 本阶段最多 24 次模型/工具迭代；优先完成定位、修改与聚焦测试，"
         "不要反复读取同一文件。\n"
         "5. 不写主工作区，不刷新 Launcher，不执行远端操作。\n"
@@ -525,10 +622,12 @@ def _evolution_prompt(context: dict[str, Any]) -> str:
 
 def _evolution_mutation_prompt(context: dict[str, Any]) -> str:
     plan = context.get("plan") if isinstance(context.get("plan"), dict) else {}
+    target_files = _target_files_from_context(context)
     return (
         "上一轮执行后候选工作树仍没有产生任何文件变更；只读检查、复述计划"
         "或仅开事务都不算完成。\n"
-        f"既定计划：{str(plan.get('summary') or '').strip()}\n\n"
+        f"既定计划：{str(plan.get('summary') or '').strip()}\n"
+        f"宿主批准的精确目标文件：{', '.join(target_files)}\n\n"
         "现在进入有界写入阶段：\n"
         "1. 不要复述计划，不要再次制定计划，也无需再次请求用户确认。\n"
         "2. 第一项工具调用必须产生文件修改；当前只提供 apply_patch_tool 和 "

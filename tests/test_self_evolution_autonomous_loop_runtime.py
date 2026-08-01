@@ -23,6 +23,7 @@ def _snapshot(**updates):
         "plan": {
             "summary": "建立无评分闭环",
             "steps": [{"id": "implement", "title": "实现闭环"}],
+            "targetFiles": ["core/example.py", "tests/test_example.py"],
             "conversationSessionId": "session-observer",
         },
         "candidate": {
@@ -81,6 +82,7 @@ def test_runtime_hooks_use_one_observer_context_then_isolated_executor():
                 "result": {
                     "status": "completed",
                     "summary": "新增状态机、真实执行适配和确定性 Git 接线。",
+                    "targetFiles": ["core/example.py", "tests/test_example.py"],
                     "steps": [
                         {"id": "state", "title": "状态机"},
                         {"id": "git", "title": "Git 收口"},
@@ -186,9 +188,14 @@ def test_runtime_hooks_use_one_observer_context_then_isolated_executor():
     assert "本阶段的工具预算已经独立重置" in turn_calls[1]["prompt"]
     assert "必须与观察摘要中已验证的问题一致" in turn_calls[1]["prompt"]
     assert "不得改用仅来自 GIT_MEMORY" in turn_calls[1]["prompt"]
+    assert "TARGET_FILES_JSON" in turn_calls[1]["prompt"]
     assert turn_calls[2]["binding"]["workspacePath"] == (
         "C:/workspace/self-loop-candidate"
     )
+    assert turn_calls[2]["allowed_target_paths"] == [
+        "C:\\workspace\\self-loop-candidate\\core\\example.py",
+        "C:\\workspace\\self-loop-candidate\\tests\\test_example.py",
+    ]
     assert "不得执行评分" in turn_calls[2]["prompt"]
     assert observation["conversationSessionId"] == "session-observer"
     assert plan["steps"][1]["id"] == "git"
@@ -198,6 +205,205 @@ def test_runtime_hooks_use_one_observer_context_then_isolated_executor():
         "core/example.py",
         "tests/test_example.py",
     ]
+
+
+def test_runtime_plan_rejects_missing_structured_target_files():
+    hooks = build_autonomous_loop_hooks(
+        AutonomousLoopRuntimeDependencies(
+            load_bindings=lambda: {
+                "observer": {
+                    "agentId": "observer-agent",
+                    "directSessionId": "session-observer",
+                },
+                "executor": {"agentId": "executor-agent"},
+            },
+            run_role_turn=lambda **_kwargs: {
+                "result": {
+                    "status": "completed",
+                    "summary": "修改 core/example.py 并补充测试。",
+                },
+                "carryover": {},
+                "conversationSessionId": "session-observer",
+            },
+            create_candidate=lambda _context: {},
+            inspect_candidate=lambda _context: {},
+            integrate_candidate=lambda _context: {},
+            cleanup_candidate=lambda _context: {},
+        )
+    )
+
+    with pytest.raises(
+        AutonomousLoopRuntimeError,
+        match="structured target files",
+    ):
+        hooks.plan(
+            _snapshot(
+                observation={
+                    "summary": "已确认问题",
+                    "evidence": [],
+                    "conversationSessionId": "session-observer",
+                },
+                plan=None,
+                candidate=None,
+            )
+        )
+
+
+def test_runtime_plan_parses_target_files_from_visible_marker():
+    hooks = build_autonomous_loop_hooks(
+        AutonomousLoopRuntimeDependencies(
+            load_bindings=lambda: {
+                "observer": {
+                    "agentId": "observer-agent",
+                    "directSessionId": "session-observer",
+                },
+                "executor": {"agentId": "executor-agent"},
+            },
+            run_role_turn=lambda **_kwargs: {
+                "result": {
+                    "status": "completed",
+                    "summary": (
+                        "修改候选运行契约并补充测试。\n"
+                        'TARGET_FILES_JSON: ["core/example.py", '
+                        '"tests/test_example.py"]'
+                    ),
+                },
+                "carryover": {},
+                "conversationSessionId": "session-observer",
+            },
+            create_candidate=lambda _context: {},
+            inspect_candidate=lambda _context: {},
+            integrate_candidate=lambda _context: {},
+            cleanup_candidate=lambda _context: {},
+        )
+    )
+
+    plan = hooks.plan(
+        _snapshot(
+            observation={
+                "summary": "已确认问题",
+                "evidence": [],
+                "conversationSessionId": "session-observer",
+            },
+            plan=None,
+            candidate=None,
+        )
+    )
+
+    assert plan["targetFiles"] == [
+        "core/example.py",
+        "tests/test_example.py",
+    ]
+
+
+@pytest.mark.parametrize(
+    "target_file",
+    [
+        "../outside.py",
+        "C:/outside.py",
+        ".git/config",
+        "workspace/prompts/DYNAMIC.md",
+        "docs/standards/development-standard.md",
+    ],
+)
+def test_runtime_plan_rejects_forbidden_target_files(target_file):
+    hooks = build_autonomous_loop_hooks(
+        AutonomousLoopRuntimeDependencies(
+            load_bindings=lambda: {
+                "observer": {
+                    "agentId": "observer-agent",
+                    "directSessionId": "session-observer",
+                },
+                "executor": {"agentId": "executor-agent"},
+            },
+            run_role_turn=lambda **_kwargs: {
+                "result": {
+                    "status": "completed",
+                    "summary": "有界计划",
+                    "targetFiles": [target_file],
+                },
+                "carryover": {},
+                "conversationSessionId": "session-observer",
+            },
+            create_candidate=lambda _context: {},
+            inspect_candidate=lambda _context: {},
+            integrate_candidate=lambda _context: {},
+            cleanup_candidate=lambda _context: {},
+        )
+    )
+
+    with pytest.raises(AutonomousLoopRuntimeError, match="target file"):
+        hooks.plan(
+            _snapshot(
+                observation={
+                    "summary": "已确认问题",
+                    "evidence": [],
+                    "conversationSessionId": "session-observer",
+                },
+                plan=None,
+                candidate=None,
+            )
+        )
+
+
+def test_runtime_rejects_candidate_diff_outside_planned_target_files(monkeypatch):
+    scene_events: list[tuple[tuple, dict]] = []
+    monkeypatch.setattr(
+        "core.web.services.self_evolution_candidate_target_contract."
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: scene_events.append((args, kwargs)),
+    )
+    hooks = build_autonomous_loop_hooks(
+        AutonomousLoopRuntimeDependencies(
+            load_bindings=lambda: {
+                "observer": {"agentId": "observer-agent"},
+                "executor": {"agentId": "executor-agent"},
+            },
+            run_role_turn=lambda **_kwargs: {
+                "result": {
+                    "status": "completed",
+                    "summary": "候选实现完成。",
+                    "tool_trace": [
+                        {"name": "apply_patch_tool", "status": "success"},
+                    ],
+                },
+                "carryover": {},
+                "conversationSessionId": "session-executor",
+            },
+            create_candidate=lambda _context: {
+                "branch": "codex/self-loop-candidate",
+                "worktreePath": "C:/workspace/self-loop-candidate",
+                "baseCommit": "a" * 40,
+            },
+            inspect_candidate=lambda _context: {
+                "headCommit": "b" * 40,
+                "changedFiles": ["core/unplanned.py"],
+                "variantId": "variant-outside-plan",
+            },
+            integrate_candidate=lambda _context: {},
+            cleanup_candidate=lambda _context: {},
+        )
+    )
+
+    with pytest.raises(
+        AutonomousLoopRuntimeError,
+        match="outside planned target files",
+    ):
+        hooks.evolve(
+            _snapshot(
+                plan={
+                    "summary": "只修改计划文件",
+                    "steps": [],
+                    "targetFiles": ["core/example.py"],
+                },
+                candidate=None,
+            )
+        )
+    assert scene_events[-1][0][2] == (
+        "self_evolution.autonomous_loop.candidate_boundary_blocked"
+    )
+    assert scene_events[-1][1]["fields"]["changedFileCount"] == 1
+    assert scene_events[-1][1]["fields"]["outsideTargetCount"] == 1
 
 
 def test_observer_exhaustion_gets_one_tool_disabled_summary_turn(monkeypatch):

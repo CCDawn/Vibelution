@@ -206,6 +206,36 @@ def test_governor_allows_apply_patch_target_inside_active_workspace_override(mon
     assert message is None
 
 
+def test_governor_scoped_target_allowlist_blocks_unplanned_sibling(monkeypatch, tmp_path):
+    _patch_runtime(monkeypatch, tmp_path)
+    candidate_root = tmp_path / "candidate"
+    planned_target = candidate_root / "core" / "planned.py"
+    candidate_root.mkdir()
+    governor = governor_module.EvolutionGovernor()
+
+    from tools.shell_tools import workspace_root_override
+
+    with (
+        workspace_root_override(candidate_root),
+        governor_module.evolution_target_allowlist([planned_target]),
+    ):
+        allowed = governor.check_mutation_allowed(
+            "write_file_tool",
+            {"file_path": "core/planned.py", "content": "planned = True\n"},
+            "txn_demo",
+        )
+        denied = governor.check_mutation_allowed(
+            "write_file_tool",
+            {"file_path": "core/unplanned.py", "content": "unplanned = True\n"},
+            "txn_demo",
+        )
+
+    assert allowed is None
+    assert denied is not None
+    assert "core/unplanned.py" in denied
+    assert str(planned_target).replace("\\", "/") in denied
+
+
 def test_governor_records_complexity_for_dynamic_prompt_mutation(monkeypatch, tmp_path):
     project_root = _patch_runtime(monkeypatch, tmp_path)
     governor = governor_module.EvolutionGovernor()
