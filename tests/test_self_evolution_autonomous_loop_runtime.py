@@ -838,7 +838,7 @@ def test_runtime_retries_executor_once_when_first_turn_only_repeats_the_plan(
         "apply_patch_tool",
         "write_file_tool",
     ]
-    assert turn_calls[1]["max_iterations"] == 4
+    assert turn_calls[1]["max_iterations"] == 1
     assert "第一项工具调用必须产生文件修改" in turn_calls[1]["prompt"]
     assert turn_calls[2]["runtime_tool_grants"] == [
         "open_evolution_transaction_tool",
@@ -1076,7 +1076,7 @@ def test_runtime_recovers_once_when_executor_exhausts_before_mutation(
         "apply_patch_tool",
         "write_file_tool",
     ]
-    assert turn_calls[1]["max_iterations"] == 4
+    assert turn_calls[1]["max_iterations"] == 1
     assert turn_calls[2]["carryover"] == {
         "previousResponseId": "response-mutated"
     }
@@ -1095,6 +1095,107 @@ def test_runtime_recovers_once_when_executor_exhausts_before_mutation(
     assert scene_events[0][1]["fields"]["reason"] == (
         "max_iterations_exhausted_no_changed_files"
     )
+
+
+def test_runtime_accepts_single_mutation_tool_step_before_validation():
+    turn_calls: list[dict] = []
+    inspection_calls = 0
+
+    def run_role_turn(**kwargs):
+        turn_calls.append(deepcopy(kwargs))
+        if len(turn_calls) == 1:
+            return {
+                "result": {
+                    "status": "completed",
+                    "summary": "已定位需要补充的测试。",
+                    "tool_call_count": 2,
+                    "tool_trace": [
+                        {"name": "code_symbol_tool", "status": "success"}
+                    ],
+                },
+                "carryover": {"previousResponseId": "response-inspected"},
+                "conversationSessionId": "session-executor",
+            }
+        if len(turn_calls) == 2:
+            return {
+                "result": {
+                    "status": "failed",
+                    "summary": "单步 mutation 已产生文件修改。",
+                    "max_iteration_exhausted": True,
+                    "tool_call_count": 1,
+                    "tool_trace": [
+                        {"name": "apply_patch_tool", "status": "success"}
+                    ],
+                },
+                "carryover": {"previousResponseId": "response-mutated"},
+                "conversationSessionId": "session-executor",
+            }
+        return {
+            "result": {
+                "status": "completed",
+                "summary": "已完成聚焦验证。",
+                "tool_call_count": 3,
+                "tool_trace": [
+                    {
+                        "name": "open_evolution_transaction_tool",
+                        "status": "success",
+                    },
+                    {"name": "cli_tool", "status": "success"},
+                    {
+                        "name": "close_evolution_transaction_tool",
+                        "status": "success",
+                    },
+                ],
+            },
+            "carryover": {"previousResponseId": "response-validated"},
+            "conversationSessionId": "session-executor",
+        }
+
+    def inspect_candidate(_context):
+        nonlocal inspection_calls
+        inspection_calls += 1
+        if inspection_calls == 1:
+            return {
+                "headCommit": "a" * 40,
+                "changedFiles": [],
+                "variantId": "",
+            }
+        return {
+            "headCommit": "b" * 40,
+            "changedFiles": ["tests/test_example.py"],
+            "variantId": "variant-single-mutation",
+        }
+
+    hooks = build_autonomous_loop_hooks(
+        AutonomousLoopRuntimeDependencies(
+            load_bindings=lambda: {
+                "observer": {"agentId": "observer-agent"},
+                "executor": {
+                    "agentId": "executor-agent",
+                    "workspacePath": "C:/workspace/main",
+                },
+            },
+            run_role_turn=run_role_turn,
+            create_candidate=lambda _context: {
+                "branch": "codex/self-loop-candidate",
+                "worktreePath": "C:/workspace/self-loop-candidate",
+                "baseCommit": "a" * 40,
+            },
+            inspect_candidate=inspect_candidate,
+            integrate_candidate=lambda _context: {},
+            cleanup_candidate=lambda _context: {},
+        )
+    )
+
+    candidate = hooks.evolve(_snapshot(candidate=None))
+
+    assert len(turn_calls) == 3
+    assert turn_calls[1]["max_iterations"] == 1
+    assert turn_calls[2]["carryover"] == {
+        "previousResponseId": "response-mutated"
+    }
+    assert candidate["changedFiles"] == ["tests/test_example.py"]
+    assert candidate["variantId"] == "variant-single-mutation"
 
 
 def test_runtime_mutation_retry_receives_bounded_exact_target_context(tmp_path):

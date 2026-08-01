@@ -34,7 +34,7 @@ OBSERVER_MAX_ITERATIONS = 4
 PLANNER_MAX_ITERATIONS = 3
 ANALYSIS_FINALIZATION_MAX_ITERATIONS = 2
 EXECUTOR_MAX_ITERATIONS = 12
-EXECUTOR_MUTATION_MAX_ITERATIONS = 4
+EXECUTOR_MUTATION_MAX_ITERATIONS = 1
 EXECUTOR_VALIDATION_MAX_ITERATIONS = 8
 OBSERVER_RUNTIME_TOOLS = (
     "grep_search_tool",
@@ -282,8 +282,7 @@ def build_autonomous_loop_hooks(
                     )
                 ),
             )
-            mutation_turn = _run_successful_turn(
-                dependencies.run_role_turn,
+            mutation_turn = dependencies.run_role_turn(
                 role="executor",
                 binding=executor_binding,
                 run_id=run_id,
@@ -301,6 +300,11 @@ def build_autonomous_loop_hooks(
                 max_iterations=EXECUTOR_MUTATION_MAX_ITERATIONS,
                 allowed_target_paths=allowed_target_paths,
             )
+            mutation_exhausted = _turn_max_iteration_exhausted(
+                mutation_turn
+            )
+            if not mutation_exhausted:
+                mutation_turn = _require_successful_turn(mutation_turn)
             inspection = _inspect_candidate(
                 dependencies,
                 run_id=run_id,
