@@ -122,10 +122,16 @@ def _predictive_coding_proxy_metrics(seed: int, *, correction_steps: int = 3) ->
 
     baseline_metrics = reconstruction_metrics(baseline)
     variant_metrics = reconstruction_metrics(variant)
+    reconstruction_mse_delta = round(
+        baseline_metrics["reconstruction_mse"]
+        - variant_metrics["reconstruction_mse"],
+        6,
+    )
     delta = {
         "reconstruction_mse": round(variant_metrics["reconstruction_mse"] - baseline_metrics["reconstruction_mse"], 6),
+        "reconstruction_mse_delta": reconstruction_mse_delta,
         "masked_region_mse": round(variant_metrics["masked_region_mse"] - baseline_metrics["masked_region_mse"], 6),
-        "mse_improvement": round(baseline_metrics["reconstruction_mse"] - variant_metrics["reconstruction_mse"], 6),
+        "mse_improvement": reconstruction_mse_delta,
     }
     return {"baseline": baseline_metrics, "variant": variant_metrics, "delta": delta}, {
         "trainSamples": len(train),

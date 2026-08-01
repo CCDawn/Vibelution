@@ -749,6 +749,59 @@ export type ResearchLoopDecisionDraft = {
   frozenControls: string;
 };
 
+export type BoundedSmokeAdapterDescriptor = {
+  adapterId: string;
+};
+
+type SmokeAdapterPlanLike = {
+  experimentContract?: {
+    adapterSelection?: {
+      requestedAdapterId?: string;
+      resolvedAdapterId?: string;
+    };
+  } | null;
+  experimentPlan?: {
+    smokePlan?: unknown;
+  } | null;
+};
+
+export function experimentDeclaredSmokeAdapterId(plan: SmokeAdapterPlanLike | null | undefined) {
+  const selection = plan?.experimentContract?.adapterSelection;
+  const contractAdapter = String(
+    selection?.requestedAdapterId || selection?.resolvedAdapterId || "",
+  ).trim();
+  if (contractAdapter) {
+    return contractAdapter;
+  }
+  const smokePlan = plan?.experimentPlan?.smokePlan;
+  if (smokePlan && typeof smokePlan === "object" && !Array.isArray(smokePlan)) {
+    return String((smokePlan as { adapter?: unknown }).adapter || "").trim();
+  }
+  if (typeof smokePlan !== "string") {
+    return "";
+  }
+  const firstSegment = smokePlan
+    .replaceAll("；", ";")
+    .split(";")
+    .map((segment) => segment.trim())
+    .find(Boolean) ?? "";
+  if (!firstSegment || firstSegment.includes("=")) {
+    return "";
+  }
+  return firstSegment;
+}
+
+export function selectBoundedSmokeAdapter<T extends BoundedSmokeAdapterDescriptor>(
+  adapters: T[],
+  plan: SmokeAdapterPlanLike | null | undefined,
+): T | null {
+  const declaredAdapterId = experimentDeclaredSmokeAdapterId(plan);
+  if (declaredAdapterId) {
+    return adapters.find((adapter) => adapter.adapterId === declaredAdapterId) ?? null;
+  }
+  return adapters[0] ?? null;
+}
+
 
 export function researchIterationLifecycleStatusLabel(status: string, lang: "zh" | "en") {
   if (status === "accepted_for_writeup") {

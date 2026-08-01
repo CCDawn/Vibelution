@@ -27,6 +27,8 @@ import {
   type ExperimentPlanningStatusPayload,
   type ExperimentSmokeResultDraft,
   type ExperimentSmokeResultStatus,
+  experimentDeclaredSmokeAdapterId,
+  selectBoundedSmokeAdapter,
 } from "./teams/experimentLoopModel";
 import { TeamExperimentHypothesisGovernancePanel } from "./TeamExperimentHypothesisGovernancePanel";
 import { TeamExperimentMethodPanel, type ExperimentPlanMethodRequest } from "./TeamExperimentMethodPanel";
@@ -330,11 +332,8 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
         && Array.isArray(adapter.capabilities)
         && adapter.capabilities.includes("smoke"),
     );
-    const requestedSmokeAdapterId = activeExperimentContract?.adapterSelection?.requestedAdapterId ?? "";
-    const activeSmokeAdapter =
-      boundedSmokeAdapters.find((adapter: any) => adapter.adapterId === requestedSmokeAdapterId)
-      ?? boundedSmokeAdapters[0]
-      ?? null;
+    const declaredSmokeAdapterId = experimentDeclaredSmokeAdapterId(activePlan);
+    const activeSmokeAdapter = selectBoundedSmokeAdapter(boundedSmokeAdapters, activePlan);
     const hypotheses = statusPayload?.hypothesisCandidates ?? [];
     const canDraftPlan = Boolean(selectedTeam?.teamId && statusPayload?.latestExperimentRound && !selectedTeamCreateExperimentPlanPending);
     const explicitDesignGate = activePlan?.designGate;
@@ -389,7 +388,15 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
       ? (lang === "zh"
         ? "先完成假设审查并冻结设计；之后可运行自包含受控 Smoke。"
         : "Review the hypothesis and freeze the design first; then the bounded self-contained Smoke becomes available.")
-      : !activeBaselineArtifact
+      : !activeSmokeAdapter
+        ? declaredSmokeAdapterId
+          ? (lang === "zh"
+            ? `计划声明的离线 Smoke 执行器不可用：${declaredSmokeAdapterId}。`
+            : `The offline smoke adapter declared by the plan is unavailable: ${declaredSmokeAdapterId}.`)
+          : (lang === "zh"
+            ? "当前实验方式没有可用的白名单离线 Smoke 执行器。"
+            : "No allowlisted offline smoke adapter is available for this method.")
+        : !activeBaselineArtifact
         ? activePlan?.readiness.readyForBoundedSmokeRun
           ? (lang === "zh"
             ? "自包含执行器会在 Smoke 中同时计算 baseline 与 variant；无需手工登记 baseline artifact。"
@@ -397,11 +404,7 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
           : (lang === "zh"
             ? "冻结设计尚未满足自包含 Smoke 合同。"
             : "The frozen design is not ready for the self-contained Smoke contract.")
-        : !activeSmokeAdapter
-          ? (lang === "zh"
-            ? "当前实验方式没有可用的白名单离线 Smoke 执行器。"
-            : "No allowlisted offline smoke adapter is available for this method.")
-          : (lang === "zh"
+        : (lang === "zh"
             ? "仅运行后端白名单离线 Smoke；不会启动 full run，也不会生成正式科学结论。"
             : "Runs only the backend allowlisted offline smoke; no full run or formal scientific claim.");
     const canRegisterFullRunResult = Boolean(

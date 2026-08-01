@@ -72,6 +72,9 @@ def test_predictive_coding_reconstruction_proxy_is_bounded_and_traceable():
         - result["metrics"]["variant"]["reconstruction_mse"],
         abs=1e-6,
     )
+    assert result["metrics"]["delta"]["reconstruction_mse_delta"] == pytest.approx(
+        result["metrics"]["delta"]["mse_improvement"],
+    )
     assert result["artifactHash"].startswith("sha256:")
     assert "does_not_replace_target_dataset_evaluation" in result["boundaries"]
 

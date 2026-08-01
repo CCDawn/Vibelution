@@ -8,6 +8,7 @@ import {
   researchIterationLifecycleStatusLabel,
   researchKnowledgeLifecycleStatusLabel,
   researchLoopStatusQueryKey,
+  selectBoundedSmokeAdapter,
 } from "./experimentLoopModel";
 
 describe("experimentLoopModel", () => {
@@ -35,5 +36,46 @@ describe("experimentLoopModel", () => {
   it("exposes smoke and decision enum lists for draft selects", () => {
     expect(EXPERIMENT_SMOKE_RESULT_STATUSES).toContain("needs_review");
     expect(RESEARCH_LOOP_DECISION_VALUES).toContain("promote_to_iteration");
+  });
+
+  it("honors the adapter declared by a legacy string smoke plan", () => {
+    const adapters = [
+      { adapterId: "synthetic_classification_baseline_vs_variant" },
+      { adapterId: "predictive_coding_reconstruction_proxy" },
+    ];
+
+    expect(
+      selectBoundedSmokeAdapter(adapters, {
+        experimentContract: {
+          adapterSelection: {
+            requestedAdapterId: "",
+            resolvedAdapterId: "",
+          },
+        },
+        experimentPlan: {
+          smokePlan: "predictive_coding_reconstruction_proxy；seed=42；successThreshold=0.001",
+        },
+      }),
+    ).toEqual(adapters[1]);
+  });
+
+  it("does not silently replace an unavailable declared adapter", () => {
+    const adapters = [
+      { adapterId: "synthetic_classification_baseline_vs_variant" },
+    ];
+
+    expect(
+      selectBoundedSmokeAdapter(adapters, {
+        experimentContract: {
+          adapterSelection: {
+            requestedAdapterId: "predictive_coding_reconstruction_proxy",
+            resolvedAdapterId: "",
+          },
+        },
+        experimentPlan: {
+          smokePlan: "predictive_coding_reconstruction_proxy; seed=42",
+        },
+      }),
+    ).toBeNull();
   });
 });

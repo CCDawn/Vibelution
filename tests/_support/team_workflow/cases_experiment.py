@@ -340,6 +340,66 @@ def test_run_experiment_smoke_run_accepts_api_plan_nested_contract(tmp_path, mon
     assert response["seed"] == 42
     assert response["status"] == "needs_review"
 
+
+def test_run_experiment_smoke_run_honors_legacy_declared_adapter_and_rejects_mismatch(
+    tmp_path, monkeypatch
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    plan_store = team_workflow_orchestration_service._load_experiment_plan_store(
+        team["teamId"]
+    )
+    plan_store["plans"] = [
+        {
+            "planId": "exp_legacy_declared_adapter",
+            "status": "draft",
+            "experimentPlan": {
+                "dataset": "synthetic_structured_8x8_proxy",
+                "metric": "reconstruction_mse_delta",
+                "baseline": "one-shot PCA reconstruction",
+                "smokePlan": (
+                    "predictive_coding_reconstruction_proxy；seed=42；"
+                    "successThreshold=0.001；仅作流程代理验证"
+                ),
+            },
+            "experimentContract": {
+                "adapterSelection": {
+                    "requestedAdapterId": "",
+                    "resolvedAdapterId": "",
+                },
+            },
+            "updatedAt": "2026-06-25T00:00:00+00:00",
+        }
+    ]
+    plan_store["activePlanId"] = "exp_legacy_declared_adapter"
+    team_workflow_orchestration_service._write_json(
+        team_workflow_orchestration_service._experiment_plan_store_path(
+            team["teamId"]
+        ),
+        plan_store,
+    )
+
+    response = team_workflow_orchestration_service.run_experiment_smoke_run(
+        team["teamId"],
+        "exp_legacy_declared_adapter",
+        {},
+    )
+
+    assert response["adapter"] == "predictive_coding_reconstruction_proxy"
+    assert response["runnerResult"]["proxyOnly"] is True
+    assert "reconstruction_mse" in response["runnerResult"]["metrics"]["delta"]
+
+    with pytest.raises(
+        team_workflow_orchestration_service.TeamWorkflowOrchestrationError,
+        match="does not match the experiment plan",
+    ):
+        team_workflow_orchestration_service.run_experiment_smoke_run(
+            team["teamId"],
+            "exp_legacy_declared_adapter",
+            {"adapter": "synthetic_classification_baseline_vs_variant"},
+        )
+
+
 def test_explicit_design_gate_blocks_smoke_until_plan_is_frozen(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")
