@@ -260,10 +260,25 @@ def run_agent_single_turn(
         if runtime is not None
         else str(request.prompt_cache_partition or "").strip()
     )
+    runtime_agent_binding = None
+    if runtime is not None and runtime.agent_id:
+        runtime_agent_binding = {
+            "agentId": runtime.agent_id,
+            "llmSlot": runtime.llm_slot,
+            "directSessionId": runtime.session_id,
+            "workspacePath": runtime.workspace_path,
+        }
+        if runtime.model_id and runtime.model_id != "default":
+            runtime_agent_binding["llmBindings"] = {
+                runtime.llm_slot: {
+                    "modelId": runtime.model_id,
+                }
+            }
     agent = create_agent_runtime(
         mode=request.mode,
         workspace_path=request.workspace_path,
         config=request.config,
+        runtime_agent_binding=runtime_agent_binding,
         agent_factory=agent_factory,
     )
     prepare_agent_turn(
