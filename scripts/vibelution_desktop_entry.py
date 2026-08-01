@@ -626,7 +626,7 @@ def _managed_edge_args(url: str) -> list[str]:
     return [
         f"--user-data-dir={LAUNCHER_BROWSER_PROFILE_DIR}",
         f"--app={url}",
-        "--force-dark-mode",
+        # Avoid --force-dark-mode: conflicts with workbench data-theme and flickers Edge --app chrome.
         "--no-first-run",
         "--no-default-browser-check",
         "--disable-session-crashed-bubble",

@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
-import { updateAgentPermissionPreset } from "../../api/agents";
+import { updateAgentPermissionPresetWithRevisionRetry } from "../../api/agents";
 import { queryKeys } from "../../api/queryKeys";
 import type {
   AgentConfigWorkspace,
@@ -29,7 +29,7 @@ export function useAgentPermissionPresetMutation(
 
   return useMutation({
     mutationFn: (payload: UpdateAgentPermissionPresetInput) =>
-      updateAgentPermissionPreset(payload),
+      updateAgentPermissionPresetWithRevisionRetry(payload),
     onSuccess: (agent, input) => {
       queryClient.setQueryData<AgentInstance[] | undefined>(
         queryKeys.agents(),
