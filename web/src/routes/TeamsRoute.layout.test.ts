@@ -1500,6 +1500,10 @@ describe("TeamsRoute layout contract", () => {
     expect(teamResearchStageStandalonePagePanelSource).toContain("data-research-stage-detail-best={detailHeroBestValue}");
     expect(teamResearchStageStandalonePagePanelSource).toContain("data-research-stage-detail-diagnostic={detailHeroDiagnosticValue}");
     expect(teamResearchStageStandalonePagePanelSource).toContain("data-research-stage-detail-diagnostic-status={detailHeroDiagnosticStatus || undefined}");
+    expect(teamResearchStageStandalonePagePanelSource).toContain("experimentPlanningStatusQuery.isPending");
+    expect(teamResearchStageStandalonePagePanelSource).toContain('lang === "zh" ? "正在读取" : "loading"');
+    expect(teamResearchStageStandalonePagePanelSource).toContain("|| experimentStatusLoading");
+    expect(routeSource).toContain("experimentPlanningStatusQuery={experimentPlanningStatusQuery}");
     expect(teamResearchStageStandalonePagePanelSource).toContain("stage3Lifecycle.bestCandidateId");
     expect(teamResearchStageStandalonePagePanelSource).toContain("detailHeroDiagnosticStatus");
     expect(teamResearchStageStandalonePagePanelSource).toContain("latestDiagnosticStatus.status");

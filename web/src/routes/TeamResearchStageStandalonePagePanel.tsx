@@ -40,6 +40,7 @@ export type TeamResearchStageStandalonePagePanelProps = {
   lang: Lang;
   researchStagePhases: ResearchStagePhaseStatus[];
   experimentPlanningStatus: ExperimentPlanningStatusPayload | null | undefined;
+  experimentPlanningStatusQuery: { isPending: boolean; isFetching: boolean };
   selectedTeam: Team | null | undefined;
   selectedTeamStartResearchStagePending: boolean;
   linkedChatRoomId: string;
@@ -65,6 +66,7 @@ export function TeamResearchStageStandalonePagePanel(props: TeamResearchStageSta
     lang,
     researchStagePhases,
     experimentPlanningStatus,
+    experimentPlanningStatusQuery,
     selectedTeam,
     selectedTeamStartResearchStagePending,
     linkedChatRoomId,
@@ -86,19 +88,27 @@ export function TeamResearchStageStandalonePagePanel(props: TeamResearchStageSta
     const stageType: ResearchStageType = stageView;
     const stagePhase = researchStagePhases.find((phase) => phase.stageType === stageType);
     const latestRound = stagePhase?.latestRound;
+    const experimentStatusLoading = !experimentPlanningStatus
+      && experimentPlanningStatusQuery.isPending;
     const stage3Lifecycle = stageView === "iteration"
       ? experimentPlanningStatus?.lifecycleProjection?.stage3
       : undefined;
-    const detailHeroStatus = stage3Lifecycle
-      ? researchIterationLifecycleStatusLabel(stage3Lifecycle.status, lang)
-      : (stagePhase?.status || (lang === "zh" ? "未启动" : "not started"));
-    const detailHeroBestValue = stage3Lifecycle
-      ? (stage3Lifecycle.bestCandidateId || (lang === "zh" ? "无" : "none"))
-      : String(stagePhase?.roundCount ?? 0);
+    const detailHeroStatus = experimentStatusLoading
+      ? (lang === "zh" ? "正在读取" : "loading")
+      : stage3Lifecycle
+        ? researchIterationLifecycleStatusLabel(stage3Lifecycle.status, lang)
+        : (stagePhase?.status || (lang === "zh" ? "未启动" : "not started"));
+    const detailHeroBestValue = experimentStatusLoading
+      ? "—"
+      : stage3Lifecycle
+        ? (stage3Lifecycle.bestCandidateId || (lang === "zh" ? "无" : "none"))
+        : String(stagePhase?.roundCount ?? 0);
     const detailHeroDiagnosticStatus = stage3Lifecycle?.latestDiagnosticStatus.status || "";
-    const detailHeroDiagnosticValue = stage3Lifecycle
-      ? researchDiagnosticStatusLabel(detailHeroDiagnosticStatus, lang)
-      : (latestRound ? `${latestRound.status} #${latestRound.roundNumber}` : (lang === "zh" ? "无" : "none"));
+    const detailHeroDiagnosticValue = experimentStatusLoading
+      ? "—"
+      : stage3Lifecycle
+        ? researchDiagnosticStatusLabel(detailHeroDiagnosticStatus, lang)
+        : (latestRound ? `${latestRound.status} #${latestRound.roundNumber}` : (lang === "zh" ? "无" : "none"));
     const detailHeroBestTitle = stage3Lifecycle
       ? [stage3Lifecycle.bestValidatedPlanId, stage3Lifecycle.bestValidatedResultId].filter(Boolean).join(" · ")
       : undefined;
@@ -142,7 +152,8 @@ export function TeamResearchStageStandalonePagePanel(props: TeamResearchStageSta
     }[stageView];
     const disabled = selectedTeamStartResearchStagePending
       || !selectedTeam?.teamId
-      || stagePhase?.readiness?.ready === false;
+      || stagePhase?.readiness?.ready === false
+      || experimentStatusLoading;
 
     return (
       <section className={`${styles.route} ${styles.researchStagePage}`}>
@@ -175,14 +186,22 @@ export function TeamResearchStageStandalonePagePanel(props: TeamResearchStageSta
               <ArrowLeft size={14} />
               {lang === "zh" ? "返回团队页面" : "Back to team"}
             </Link>
-            <VNativeButton type="button" onClick={refreshStageWorkspace} disabled={researchStageRoundStatusQuery.isFetching}>
+            <VNativeButton
+              type="button"
+              onClick={refreshStageWorkspace}
+              disabled={researchStageRoundStatusQuery.isFetching || experimentPlanningStatusQuery.isFetching}
+            >
               <RefreshCw size={14} />
               {lang === "zh" ? "刷新" : "Refresh"}
             </VNativeButton>
           </div>
         </header>
         <main className={styles.researchStagePageBody}>
-          <section className={styles.researchStageHeroPanel}>
+          <section
+            className={styles.researchStageHeroPanel}
+            aria-busy={experimentStatusLoading}
+            data-research-stage-status-loading={experimentStatusLoading || undefined}
+          >
             <div>
               <strong>{stagePhase?.label || researchWorkspaceViewLabel(stageView, lang)}</strong>
               <p>{config.description}</p>
@@ -224,7 +243,13 @@ export function TeamResearchStageStandalonePagePanel(props: TeamResearchStageSta
             <div>
               <strong>{lang === "zh" ? "阶段启动" : "Stage launch"}</strong>
               <span>
-                {stagePhase?.readiness?.reason || (lang === "zh" ? "本阶段只创建规划轮次，不自动执行实验或迭代。" : "This stage creates planning rounds only.")}
+                {experimentStatusLoading
+                  ? (lang === "zh"
+                    ? "正在读取权威实验状态，读取完成前不会创建新的规划轮次。"
+                    : "Loading authoritative experiment status. No new planning round can be created yet.")
+                  : stagePhase?.readiness?.reason || (lang === "zh"
+                    ? "本阶段只创建规划轮次，不自动执行实验或迭代。"
+                    : "This stage creates planning rounds only.")}
               </span>
             </div>
             <div className={styles.researchStagePageActions}>
