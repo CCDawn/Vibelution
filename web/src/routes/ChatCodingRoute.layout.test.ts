@@ -2815,6 +2815,9 @@ describe("ChatCodingRoute layout contract", () => {
   it("renders a compact QQ-style tree with direct sessions separate from Team-owned rooms", () => {
     expect(routeSource).toContain("fetchJson<TeamListPayload>(\"/api/teams\")");
     expect(routeSource).toContain("queryKeys.teams()");
+    // Directory partition needs teams without opening the group picker.
+    expect(routeSource).toContain("Must load whenever the left-rail agent directory is active");
+    expect(routeSource).not.toContain("enabled: secondaryChatDataEnabled && teamsPickerNeeded");
     expect(routeSource).toContain("linkedTeamRoomIds");
     expect(routeSource).toContain("filteredTeams");
     expect(routeSource).toContain("filteredStandaloneGroupConversations");
