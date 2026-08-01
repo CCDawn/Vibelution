@@ -566,7 +566,7 @@ class WorkRunStore:
             },
             message=f"Work run snapshot persisted: {run_kind}/{run_id} {status or 'unknown'}",
             outcome="succeeded",
-            level="error" if status == "failed" else ("warning" if status == "partial" else "info"),
+            level="warning" if status == "partial" else "info",
             lifecycle=lifecycle_status and (lifecycle_changed or status == "failed"),
         )
         return payload

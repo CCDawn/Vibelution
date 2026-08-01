@@ -3864,7 +3864,8 @@ def test_work_run_store_records_snapshot_into_active_runtime_scene(tmp_path, mon
     ]
     event = rows[-1]
     assert event["event_code"] == "work_run.snapshot.persisted"
-    assert event["level"] == "error"
+    assert event["level"] == "info"
+    assert event["outcome"] == "succeeded"
     assert event["fields"]["runKind"] == "supervised"
     assert event["fields"]["runId"] == "run-1"
     assert event["fields"]["status"] == "failed"

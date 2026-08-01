@@ -47,6 +47,38 @@ def test_work_run_store_records_partial_as_terminal_warning(tmp_path, monkeypatc
     assert events[-1][2]["lifecycle"] is True
 
 
+def test_work_run_store_records_failed_snapshot_persistence_as_successful_io(
+    tmp_path,
+    monkeypatch,
+):
+    store = WorkRunStore(root=tmp_path / ".runtime" / "work_runs")
+    events = []
+    monkeypatch.setattr(
+        work_run_store,
+        "_record_work_run_event",
+        lambda phase, event_code, **kwargs: events.append((phase, event_code, kwargs)),
+    )
+
+    store.persist_snapshot(
+        "self_evolution_autonomous_loop",
+        {
+            "runId": "self_failed",
+            "runKind": "self_evolution_autonomous_loop",
+            "status": "failed",
+            "phase": "evolving_failed",
+            "finishedAt": "2026-08-01T06:57:41Z",
+            "error": {"type": "AutonomousLoopRuntimeError"},
+        },
+    )
+
+    event = events[-1]
+    assert event[0:2] == ("state", "work_run.snapshot.persisted")
+    assert event[2]["status"] == "failed"
+    assert event[2]["outcome"] == "succeeded"
+    assert event[2]["level"] == "info"
+    assert event[2]["lifecycle"] is True
+
+
 def test_work_run_store_skips_identical_snapshot_write_and_event(tmp_path, monkeypatch):
     store = WorkRunStore(root=tmp_path / ".runtime" / "work_runs")
     writes = []
