@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import threading
 import uuid
 import re
@@ -81,11 +82,15 @@ class SelfEvolutionAutonomousLoopService:
         hooks: AutonomousLoopHooks,
         run_id_factory: Callable[[], str] | None = None,
         now: Callable[[], str] | None = None,
+        process_id: int | None = None,
+        process_alive: Callable[[int], bool] | None = None,
     ) -> None:
         self._store = store
         self._hooks = hooks
         self._run_id_factory = run_id_factory or (lambda: f"self-loop-{uuid.uuid4().hex[:12]}")
         self._now = now or (lambda: datetime.now(timezone.utc).isoformat())
+        self._process_id = int(process_id or os.getpid())
+        self._process_alive = process_alive or _default_process_alive
 
     def start(self, request: dict[str, Any]) -> dict[str, Any]:
         """Run observe, plan, and evolve phases, then stop for user review."""
@@ -118,6 +123,7 @@ class SelfEvolutionAutonomousLoopService:
                     "status": "not_ready",
                     "requiredActorType": "user",
                 },
+                "runtimeOwner": {"pid": self._process_id},
                 "createdAt": now,
                 "startedAt": now,
                 "updatedAt": now,
@@ -134,6 +140,7 @@ class SelfEvolutionAutonomousLoopService:
                 snapshot,
                 status="running",
                 phase="observing",
+                updates={"runtimeOwner": {"pid": self._process_id}},
             )
         try:
             observation = _normalize_observation(
@@ -182,6 +189,7 @@ class SelfEvolutionAutonomousLoopService:
                 phase="integrating",
                 updates={
                     "approval": approval,
+                    "runtimeOwner": {"pid": self._process_id},
                     "reviewGate": {
                         "status": "approved",
                         "requiredActorType": "user",
@@ -243,6 +251,7 @@ class SelfEvolutionAutonomousLoopService:
                 snapshot,
                 status="running",
                 phase="cleanup_pending",
+                updates={"runtimeOwner": {"pid": self._process_id}},
             )
         return self._run_cleanup(snapshot)
 
@@ -266,6 +275,40 @@ class SelfEvolutionAutonomousLoopService:
             phase = str(snapshot.get("phase") or "").strip()
             if status == "awaiting_user_approval" and phase == "reporting":
                 return snapshot
+            owner = snapshot.get("runtimeOwner")
+            try:
+                owner_pid = int(
+                    (owner or {}).get("pid")
+                    if isinstance(owner, dict)
+                    else 0
+                )
+            except (TypeError, ValueError):
+                owner_pid = 0
+            if (
+                status in {"queued", "running"}
+                and owner_pid > 0
+                and self._process_alive(owner_pid)
+            ):
+                record_runtime_scene_event(
+                    "work_run",
+                    "reconcile",
+                    "self_evolution.autonomous_loop.startup_reconciliation_deferred",
+                    message=(
+                        "Self-evolution startup reconciliation preserved a run "
+                        "owned by a live process."
+                    ),
+                    outcome="deferred",
+                    fields={
+                        "runKind": RUN_KIND,
+                        "runId": str(snapshot.get("runId") or ""),
+                        "status": status,
+                        "phase": phase,
+                        "ownerPid": owner_pid,
+                        "reconcilerPid": self._process_id,
+                    },
+                    lifecycle=True,
+                )
+                return snapshot
             if (
                 status == "running"
                 and phase == "cleanup_pending"
@@ -273,6 +316,12 @@ class SelfEvolutionAutonomousLoopService:
                 == "committed"
             ):
                 resume_cleanup = True
+                snapshot = self._advance(
+                    snapshot,
+                    status="running",
+                    phase="cleanup_pending",
+                    updates={"runtimeOwner": {"pid": self._process_id}},
+                )
             else:
                 resume_cleanup = False
                 return self._advance(
@@ -614,6 +663,21 @@ def _result_report(candidate: dict[str, Any]) -> dict[str, Any]:
 
 def _phase_context(snapshot: dict[str, Any]) -> dict[str, Any]:
     return deepcopy(snapshot)
+
+
+def _default_process_alive(pid: int) -> bool:
+    candidate = int(pid or 0)
+    if candidate <= 0:
+        return False
+    if candidate == os.getpid():
+        return True
+    try:
+        os.kill(candidate, 0)
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
 
 
 def _require_phase(

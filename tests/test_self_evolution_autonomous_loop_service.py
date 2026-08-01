@@ -14,7 +14,13 @@ from core.web.services.self_evolution_autonomous_loop_service import (
 )
 
 
-def _build_service(tmp_path, *, hook_overrides=None):
+def _build_service(
+    tmp_path,
+    *,
+    hook_overrides=None,
+    process_id=111,
+    process_alive=lambda _pid: False,
+):
     calls: list[tuple[str, dict]] = []
 
     def observe(context):
@@ -93,6 +99,8 @@ def _build_service(tmp_path, *, hook_overrides=None):
         hooks=AutonomousLoopHooks(**hook_values),
         run_id_factory=lambda: "self-loop-001",
         now=lambda: "2026-08-01T00:00:00+00:00",
+        process_id=process_id,
+        process_alive=process_alive,
     )
     return service, calls
 
@@ -169,8 +177,9 @@ def test_queue_returns_before_agent_work_and_worker_resumes_persisted_run(tmp_pa
 
 
 def test_only_explicit_user_approval_can_merge_then_cleanup(tmp_path):
-    service, calls = _build_service(tmp_path)
-    service.start({"goal": "建立自动闭环"})
+    owner_service, owner_calls = _build_service(tmp_path, process_id=111)
+    owner_service.start({"goal": "建立自动闭环"})
+    service, approval_calls = _build_service(tmp_path, process_id=222)
 
     with pytest.raises(
         AutonomousLoopValidationError,
@@ -190,6 +199,7 @@ def test_only_explicit_user_approval_can_merge_then_cleanup(tmp_path):
         },
     )
 
+    calls = [*owner_calls, *approval_calls]
     assert [name for name, _ in calls] == [
         "observe",
         "plan",
@@ -209,6 +219,7 @@ def test_only_explicit_user_approval_can_merge_then_cleanup(tmp_path):
     assert approved["integration"]["commitSha"] == "d" * 40
     assert approved["cleanup"]["worktreeRemoved"] is True
     assert approved["cleanup"]["localBranchDeleted"] is True
+    assert approved["runtimeOwner"] == {"pid": 222}
 
 
 def test_integration_failure_does_not_cleanup_or_report_completion(tmp_path):
@@ -318,6 +329,31 @@ def test_startup_reconciliation_releases_stale_queued_run(tmp_path):
     assert reconciled["phase"] == "queued_interrupted"
     assert reconciled["error"]["type"] == "ProcessRestart"
     assert service.load_active() is None
+
+
+def test_startup_reconciliation_preserves_run_owned_by_live_process(tmp_path):
+    owner_service, _calls = _build_service(
+        tmp_path,
+        process_id=111,
+        process_alive=lambda pid: pid == 111,
+    )
+    queued = owner_service.queue({"goal": "建立自动闭环"})
+    evolving = owner_service._advance(
+        queued,
+        status="running",
+        phase="evolving",
+    )
+    observer_service, _calls = _build_service(
+        tmp_path,
+        process_id=222,
+        process_alive=lambda pid: pid == 111,
+    )
+
+    reconciled = observer_service.reconcile_interrupted_on_startup()
+
+    assert queued["runtimeOwner"] == {"pid": 111}
+    assert reconciled == evolving
+    assert observer_service.load_active()["runId"] == "self-loop-001"
 
 
 def test_startup_reconciliation_preserves_user_review_boundary(tmp_path):
