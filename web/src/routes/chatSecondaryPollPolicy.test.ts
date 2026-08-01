@@ -22,11 +22,12 @@ describe("resolveChatSecondaryPollPolicy", () => {
     const policy = resolveChatSecondaryPollPolicy(base);
     expect(policy.runtimeRefetchInterval).toBe(CHAT_SECONDARY_RUNTIME_POLL_MS);
     expect(policy.petRefetchInterval).toBe(CHAT_SECONDARY_PET_POLL_MS);
-    expect(policy.teamsRefetchInterval).toBe(false);
+    // Directory needs teams even without group picker; use the slower cadence.
+    expect(policy.teamsRefetchInterval).toBe(CHAT_SECONDARY_TEAMS_POLL_MS * 2);
     expect(policy.projectBusRefetchInterval).toBe(false);
   });
 
-  it("polls teams only when the picker surface needs it", () => {
+  it("polls teams faster when the group picker surface needs fresher membership", () => {
     const policy = resolveChatSecondaryPollPolicy({ ...base, teamsPickerNeeded: true });
     expect(policy.teamsRefetchInterval).toBe(CHAT_SECONDARY_TEAMS_POLL_MS);
   });

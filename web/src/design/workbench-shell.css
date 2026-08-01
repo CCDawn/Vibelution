@@ -44,7 +44,9 @@
   background-position: center, center, center;
   background-size: auto, cover, auto;
   background-repeat: no-repeat, no-repeat, no-repeat;
-  background-attachment: fixed, fixed, fixed;
+  /* fixed + full-window backdrop-filter repaints the entire Edge --app window on every
+     minor DOM update (clock, status). Prefer scroll attachment for stability. */
+  background-attachment: scroll, scroll, scroll;
 }
 
 :where(.vui-app-appshell).shell[data-theme-background="custom"][data-theme-background-readability="soft"] {
@@ -79,7 +81,9 @@
     radial-gradient(circle at 82% 64%, color-mix(in srgb, var(--fg-primary) 12%, transparent) 0 1px, transparent 1.5px),
     radial-gradient(circle, color-mix(in srgb, var(--fg-primary) 8%, transparent) 0 0.7px, transparent 1px);
   background-size: 263px 211px, 359px 293px, 331px 367px, 137px 173px;
-  backdrop-filter: blur(var(--theme-background-blur));
+  /* Full-viewport backdrop-filter is a known Edge/Chromium whole-window flicker source
+     when any layer invalidates; keep the starfield without live blur. */
+  backdrop-filter: none;
 }
 
 :where(.vui-app-appshell).shell::after {

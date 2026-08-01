@@ -864,7 +864,8 @@ def _managed_edge_args(url: str, profile_dir: Path) -> list[str]:
     args = [
         f"--user-data-dir={profile_dir}",
         f"--app={url}",
-        "--force-dark-mode",
+        # Do not pass --force-dark-mode: it forces Chromium auto-dark against the
+        # workbench's own data-theme / custom background and causes whole-window flicker.
         "--no-first-run",
         "--no-default-browser-check",
         "--disable-session-crashed-bubble",

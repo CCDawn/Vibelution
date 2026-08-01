@@ -519,74 +519,97 @@ def _add_durable_grant(
     source_request_id: str,
     expected_config_revision: int,
 ) -> None:
-    agents = _canonical_agent_configs(agent_id)
-    if not agents:
-        raise ToolApprovalConflictError(f"Agent configuration not found: {agent_id}")
-    agent = agents[0]
-    policy = _agent_tool_policy(agent)
-    records = _approval_grant_records(
-        policy,
-        agent_id=agent_id,
-        tool_name=tool_name,
-    )
-    existing = next(
-        (
+    """Persist a durable tool grant on the Agent ToolPolicy.
+
+    Approval requests freeze the turn's configRevision. The first ``acceptAlways``
+    in a turn already bumps the Agent revision, so later always-grants must merge
+    onto the live Agent and retry once on optimistic-lock conflicts instead of
+    failing closed with a stale request revision.
+    """
+
+    from core.web.services import agent_directory_service
+
+    last_conflict: Exception | None = None
+    # Attempt 1 uses live Agent state (not the frozen request revision).
+    # Attempt 2 re-reads after a concurrent config bump (common mid-turn always chain).
+    for attempt in range(2):
+        agents = _canonical_agent_configs(agent_id)
+        if not agents:
+            raise ToolApprovalConflictError(f"Agent configuration not found: {agent_id}")
+        agent = agents[0]
+        try:
+            live_revision = max(0, int(agent.get("configRevision") or 0))
+        except (TypeError, ValueError):
+            live_revision = 0
+        # Prefer live revision; fall back to the request hint only when live is missing.
+        write_revision = live_revision if live_revision > 0 else int(expected_config_revision)
+        policy = _agent_tool_policy(agent)
+        records = _approval_grant_records(
+            policy,
+            agent_id=agent_id,
+            tool_name=tool_name,
+        )
+        existing = next(
+            (
+                item
+                for item in records
+                if item["grantKey"] == grant_key
+            ),
+            None,
+        )
+        record = {
+            "agentId": agent_id,
+            "toolName": tool_name,
+            "grantKey": grant_key,
+            "scope": dict(scope or {}),
+            "createdAt": str((existing or {}).get("createdAt") or "").strip() or _utc_now(),
+            "updatedAt": _utc_now(),
+            "sourceSessionId": source_session_id,
+            "sourceRequestId": source_request_id,
+        }
+        records = [
             item
             for item in records
-            if item["grantKey"] == grant_key
-        ),
-        None,
-    )
-    record = {
-        "agentId": agent_id,
-        "toolName": tool_name,
-        "grantKey": grant_key,
-        "scope": dict(scope or {}),
-        "createdAt": str((existing or {}).get("createdAt") or "").strip() or _utc_now(),
-        "updatedAt": _utc_now(),
-        "sourceSessionId": source_session_id,
-        "sourceRequestId": source_request_id,
-    }
-    records = [
-        item
-        for item in records
-        if item["grantKey"] != grant_key
-    ]
-    records.append(record)
-    records.sort(
-        key=lambda item: (
-            str(item.get("updatedAt") or item.get("createdAt") or ""),
-            str(item.get("grantKey") or ""),
+            if item["grantKey"] != grant_key
+        ]
+        records.append(record)
+        records.sort(
+            key=lambda item: (
+                str(item.get("updatedAt") or item.get("createdAt") or ""),
+                str(item.get("grantKey") or ""),
+            )
         )
-    )
-    records = records[-MAX_DURABLE_GRANTS_PER_TOOL:]
-    updated_policy = _policy_with_tool_approval_grants(
-        policy,
-        tool_name=tool_name,
-        records=records,
-    )
-    try:
-        _update_agent_tool_policy(
-            agent,
-            updated_policy,
-            expected_config_revision=expected_config_revision,
+        records = records[-MAX_DURABLE_GRANTS_PER_TOOL:]
+        updated_policy = _policy_with_tool_approval_grants(
+            policy,
+            tool_name=tool_name,
+            records=records,
         )
-    except ToolApprovalError:
-        raise
-    except Exception as exc:
-        from core.web.services import agent_directory_service
-
-        if isinstance(
-            exc,
-            (
-                agent_directory_service.AgentStateConflictError,
-                agent_directory_service.AgentNotFoundError,
-            ),
-        ):
-            raise ToolApprovalConflictError(str(exc)) from exc
-        raise ToolApprovalError(
-            "Unable to persist durable approval in Agent ToolPolicy."
-        ) from exc
+        try:
+            _update_agent_tool_policy(
+                agent,
+                updated_policy,
+                expected_config_revision=write_revision,
+            )
+            return
+        except ToolApprovalError:
+            raise
+        except Exception as exc:
+            if isinstance(exc, agent_directory_service.AgentNotFoundError):
+                raise ToolApprovalConflictError(str(exc)) from exc
+            if isinstance(exc, agent_directory_service.AgentStateConflictError):
+                last_conflict = exc
+                if attempt == 0:
+                    continue
+                raise ToolApprovalConflictError(str(exc)) from exc
+            raise ToolApprovalError(
+                "Unable to persist durable approval in Agent ToolPolicy."
+            ) from exc
+    if last_conflict is not None:
+        raise ToolApprovalConflictError(str(last_conflict)) from last_conflict
+    raise ToolApprovalConflictError(
+        f"Unable to persist durable approval for agent: {agent_id}"
+    )
 
 
 def _agent_directory_agents(agent_id: str = "") -> list[dict[str, Any]]:

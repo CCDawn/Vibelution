@@ -834,10 +834,11 @@ def test_accept_always_is_isolated_by_agent_and_arguments(
     assert foreign_box["value"].code == "approval_cancelled"
 
 
-def test_accept_always_fails_closed_when_agent_config_revision_is_stale(
+def test_accept_always_merges_onto_live_agent_when_request_revision_is_stale(
     monkeypatch,
     _agent_directory_state,
 ):
+    """Turn-frozen request revision lags after a prior acceptAlways; grant still persists."""
     _runtime(monkeypatch, session_id="session-a")
     _install(("web_search_tool", "on_request", "network"))
     result_box = {}
@@ -856,11 +857,103 @@ def test_accept_always_fails_closed_when_agent_config_revision_is_stale(
     )
     worker.start()
     request = _wait_for_pending()
+    # Simulate another durable grant / config write that advanced the Agent revision
+    # while this approval request still carries the older turn snapshot revision.
     _agent_directory_state["agents"]["agent-a"]["configRevision"] = 4
+    _agent_directory_state["agents"]["agent-a"]["configHash"] = "config-hash-agent-a-r4"
+
+    resolved = tool_approvals.resolve_tool_approval_request(
+        "session-a",
+        request["requestId"],
+        decision="acceptAlways",
+    )
+    worker.join(timeout=2)
+
+    assert resolved["status"] == "accepted_always"
+    assert result_box["value"].allowed is True
+    grants = tool_approvals.list_durable_tool_approval_grants(agent_id="agent-a")
+    assert len(grants) == 1
+    assert grants[0]["toolName"] == "web_search_tool"
+    assert _agent_directory_state["agents"]["agent-a"]["configRevision"] == 5
+
+
+def test_consecutive_accept_always_with_different_args_does_not_409(
+    monkeypatch,
+    _agent_directory_state,
+):
+    """Reproduce chat mid-turn chain: always on call A then always on call B."""
+    _runtime(monkeypatch, session_id="session-a", config_revision=14)
+    _agent_directory_state["agents"]["agent-a"]["configRevision"] = 14
+    _agent_directory_state["agents"]["agent-a"]["configHash"] = "config-hash-agent-a-r14"
+
+    def run_call(call_id: str, query: str):
+        _install(("web_search_tool", "on_request", "network"))
+        box = {}
+        worker = threading.Thread(
+            target=lambda: (
+                _install(("web_search_tool", "on_request", "network")),
+                box.setdefault(
+                    "value",
+                    tool_authorization_service.authorize_tool_execution(
+                        tool_name="web_search_tool",
+                        tool_call_id=call_id,
+                        tool_args={"query": query},
+                    ),
+                ),
+            )
+        )
+        worker.start()
+        request = _wait_for_pending("session-a")
+        resolved = tool_approvals.resolve_tool_approval_request(
+            "session-a",
+            request["requestId"],
+            decision="acceptAlways",
+        )
+        worker.join(timeout=2)
+        return resolved, box["value"]
+
+    first_resolved, first_outcome = run_call("call-always-a", "alpha")
+    assert first_resolved["status"] == "accepted_always"
+    assert first_outcome.allowed is True
+    assert _agent_directory_state["agents"]["agent-a"]["configRevision"] == 15
+
+    # Second call still uses turn snapshot revision 14 (runtime context is frozen).
+    second_resolved, second_outcome = run_call("call-always-b", "beta")
+    assert second_resolved["status"] == "accepted_always"
+    assert second_outcome.allowed is True
+    grants = tool_approvals.list_durable_tool_approval_grants(agent_id="agent-a")
+    assert {item["scope"].get("argumentsHash") for item in grants if item.get("scope")}
+    assert len(grants) == 2
+    assert _agent_directory_state["agents"]["agent-a"]["configRevision"] == 16
+
+
+def test_accept_always_fails_closed_when_agent_disappears_mid_write(
+    monkeypatch,
+    _agent_directory_state,
+):
+    _runtime(monkeypatch, session_id="session-a")
+    _install(("web_search_tool", "on_request", "network"))
+    result_box = {}
+    worker = threading.Thread(
+        target=lambda: (
+            _install(("web_search_tool", "on_request", "network")),
+            result_box.setdefault(
+                "value",
+                tool_authorization_service.authorize_tool_execution(
+                    tool_name="web_search_tool",
+                    tool_call_id="call-always-missing",
+                    tool_args={"query": "gone"},
+                ),
+            ),
+        )
+    )
+    worker.start()
+    request = _wait_for_pending()
+    del _agent_directory_state["agents"]["agent-a"]
 
     with pytest.raises(
         tool_approvals.ToolApprovalConflictError,
-        match="configuration revision changed",
+        match="not found",
     ):
         tool_approvals.resolve_tool_approval_request(
             "session-a",
@@ -870,7 +963,6 @@ def test_accept_always_fails_closed_when_agent_config_revision_is_stale(
 
     pending = tool_approvals.get_tool_approval_request("session-a", request["requestId"])
     assert pending["status"] == "pending"
-    assert tool_approvals.list_durable_tool_approval_grants(agent_id="agent-a") == []
     tool_approvals.resolve_tool_approval_request(
         "session-a",
         request["requestId"],
