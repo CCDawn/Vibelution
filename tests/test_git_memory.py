@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from core.infrastructure.agent_session import get_session_state, reset_session_state
 from core.infrastructure.event_bus import EventNames
-from core.infrastructure import git_memory, git_process
+from core.infrastructure import git_process
 from core.infrastructure.git_memory import GitMemoryService, WorkingTreeFile, WorkingTreeSnapshot
 from tools.git_tools import (
     get_git_status_summary_tool,
@@ -354,6 +354,35 @@ class TestGitMemoryService:
         assert payload["transaction_status"] == "failed"
         assert session.get_active_evolution_txn() is None
 
+    def test_open_evolution_transaction_reuses_active_transaction(self, tmp_path, monkeypatch):
+        repo = _init_git_repo(tmp_path)
+        db_path = tmp_path / "brain.db"
+        fake_workspace = FakeWorkspace(repo, db_path)
+
+        class FakeBus:
+            def publish(self, name, data=None, source=None):
+                return None
+
+        monkeypatch.setattr("core.infrastructure.git_memory.get_workspace", lambda: fake_workspace)
+        monkeypatch.setattr("core.infrastructure.git_memory.get_event_bus", lambda: FakeBus())
+
+        service = GitMemoryService()
+        monkeypatch.setattr("tools.git_tools.get_git_memory_service", lambda: service)
+        reset_session_state()
+
+        import json
+
+        first = json.loads(open_evolution_transaction_tool("first"))
+        second = json.loads(open_evolution_transaction_tool("duplicate"))
+
+        assert second["txn_id"] == first["txn_id"]
+        assert second["reused"] is True
+        with fake_workspace.get_db_connection() as conn:
+            open_count = conn.execute(
+                "SELECT COUNT(*) FROM EvolutionTransaction WHERE status = 'open'"
+            ).fetchone()[0]
+        assert open_count == 1
+
     def test_close_evolution_transaction_recreates_missing_table_and_reports_missing_txn(self, tmp_path, monkeypatch):
         repo = _init_git_repo(tmp_path)
         db_path = tmp_path / "brain.db"
@@ -449,7 +478,7 @@ class TestGitMemoryService:
         monkeypatch.setattr("core.infrastructure.git_memory.get_workspace", lambda: fake_workspace)
         monkeypatch.setattr("core.infrastructure.git_memory.get_event_bus", lambda: fake_bus)
 
-        service = GitMemoryService()
+        GitMemoryService()
         session = get_session_state()
         session.record_validation_result("Environment smoke passed", True)
 
