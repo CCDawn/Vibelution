@@ -161,6 +161,7 @@ import {
   sourceCollectionEvidenceLedgerDetailItems,
   sourceCollectionLanguageLabel,
   sourceCollectionLocalScanScopeForDraft,
+  sourceCollectionMaterialGapCount,
   sourceCollectionModeForTeam,
   sourceCollectionPromptCacheModelDisplay,
   sourceCollectionPromptCacheStatusLabel,
@@ -908,8 +909,7 @@ export function TeamsRoute({
     enabled: teamCanvasQueryEnabled,
     staleTime: 10_000,
   });
-  const sourceCollectionNeedsCandidateList =
-    sourceCollectionWorkspaceSelected && selectedSourceCollectionStageId !== "finding";
+  const sourceCollectionNeedsCandidateList = sourceCollectionWorkspaceSelected;
   const teamWorkflowCandidateListEnabled = Boolean(
     effectiveTeamId
     && researchWorkflowTeamSelected
@@ -3767,12 +3767,13 @@ export function TeamsRoute({
     sourceCollectionCandidateProjection,
     sourceCollectionCandidateProjection?.latestTask?.materializedContentExtraction?.missingEvidenceAnchorCount,
   );
-  const sourceCollectionExtractionAgentMaterialCount = Math.max(
-    sourceCollectionExtractionSourceVerificationCount,
-    sourceCollectionExtractionMissingEvidenceAnchorCount,
-    sourceCollectionStageProjectionCount(sourceCollectionCandidateProjection, "pending", 0),
-    sourceCollectionRunNeedsRevisionCount,
-  );
+  const sourceCollectionExtractionAgentMaterialCount = sourceCollectionMaterialGapCount({
+    hasCurrentCandidates: Boolean(teamWorkflowCandidatesQuery.data),
+    needsRevisionCount: sourceCollectionRunNeedsRevisionCount,
+    missingEvidenceAnchorCount: sourceCollectionExtractionMissingEvidenceAnchorCount,
+    taskBlockedCount: sourceCollectionExtractionSourceVerificationCount,
+    projectedPendingCount: sourceCollectionStageProjectionCount(sourceCollectionCandidateProjection, "pending", 0),
+  });
   const sourceCollectionExtractionNeedsAgentMaterial = sourceCollectionExtractionAgentMaterialCount > 0;
   const sourceCollectionExtractionRecoveryMissingCount = Math.max(
     sourceCollectionNonNegativeCount(sourceCollectionExtractionRecoveryCoverage?.missing),

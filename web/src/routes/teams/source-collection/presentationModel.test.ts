@@ -5,6 +5,7 @@ import {
   compactSourceCollectionQuerySeeds,
   sourceCollectionCandidateQualityState,
   sourceCollectionCollectionModeLabel,
+  sourceCollectionMaterialGapCount,
   sourceCollectionModeForTeam,
   sourceCollectionResultTone,
   sourceCollectionSimpleCandidateStatusLabel,
@@ -104,5 +105,22 @@ describe("source-collection presentationModel", () => {
       approved: false,
       needsRevision: true,
     });
+  });
+
+  it("prefers current candidate quality gaps over stale task closure counts", () => {
+    expect(sourceCollectionMaterialGapCount({
+      hasCurrentCandidates: true,
+      needsRevisionCount: 4,
+      missingEvidenceAnchorCount: 0,
+      taskBlockedCount: 5,
+      projectedPendingCount: 5,
+    })).toBe(4);
+    expect(sourceCollectionMaterialGapCount({
+      hasCurrentCandidates: false,
+      needsRevisionCount: 0,
+      missingEvidenceAnchorCount: 0,
+      taskBlockedCount: 5,
+      projectedPendingCount: 4,
+    })).toBe(5);
   });
 });

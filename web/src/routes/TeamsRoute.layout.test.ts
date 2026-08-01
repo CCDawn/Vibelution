@@ -1018,14 +1018,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("runSourceCollectionCandidateExtractionAction");
     expect(routeSource).toContain("runSourceCollectionScreeningAction");
     expect(teamSourceCollectionExtractionRecoveryWorkspacePanelSource).toContain("openSourceCollectionStageAgentChat(\"extraction\")");
-    expect(routeSource).toContain(
-      `const sourceCollectionExtractionAgentMaterialCount = Math.max(
-    sourceCollectionExtractionSourceVerificationCount,
-    sourceCollectionExtractionMissingEvidenceAnchorCount,
-    sourceCollectionStageProjectionCount(sourceCollectionCandidateProjection, "pending", 0),
-    sourceCollectionRunNeedsRevisionCount,
-  );`,
-    );
+    expect(routeSource).toContain("const sourceCollectionExtractionAgentMaterialCount = sourceCollectionMaterialGapCount({");
+    expect(routeSource).toContain("hasCurrentCandidates: Boolean(teamWorkflowCandidatesQuery.data)");
+    expect(routeSource).toContain("needsRevisionCount: sourceCollectionRunNeedsRevisionCount");
     expect(routeSource).toContain("deriveSourceCollectionExcludedRecoveryState");
     expect(routeSource).toContain("sourceCollectionExtractionExcludedRecoveryState");
     expect(evidenceModelSource).toContain("剩余资料已被排除");
@@ -2904,6 +2899,8 @@ describe("TeamsRoute layout contract", () => {
     expect(candidateListLoadingSource).toContain("teamWorkflowCandidateListEnabled");
     expect(candidateListLoadingSource).toContain("sourceCollectionNeedsCandidateList");
     expect(candidateListLoadingSource).toContain("!teamWorkflowCandidatesQuery.data");
+    expect(routeSource).toContain("const sourceCollectionNeedsCandidateList = sourceCollectionWorkspaceSelected;");
+    expect(routeSource).not.toContain("selectedSourceCollectionStageId !== \"finding\"");
 
     const sourceCollectionPrimaryLoadingSource = routeSource.slice(
       routeSource.indexOf("const sourceCollectionPrimaryDataLoading = Boolean("),
