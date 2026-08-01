@@ -447,14 +447,27 @@ def test_runtime_retries_executor_once_when_first_turn_only_repeats_the_plan(
 
     candidate = hooks.evolve(_snapshot(candidate=None))
 
-    assert len(turn_calls) == 2
-    assert inspection_calls == 2
+    assert len(turn_calls) == 3
+    assert inspection_calls == 3
     assert turn_calls[1]["carryover"] == {
         "previousResponseId": "response-plan-only"
     }
     assert "不要复述计划" in turn_calls[1]["prompt"]
     assert "无需再次请求用户确认" in turn_calls[1]["prompt"]
-    assert "open_evolution_transaction_tool" in turn_calls[1]["prompt"]
+    assert turn_calls[1]["runtime_tool_grants"] == [
+        "apply_patch_tool",
+        "write_file_tool",
+    ]
+    assert turn_calls[1]["max_iterations"] == 4
+    assert "第一项工具调用必须产生文件修改" in turn_calls[1]["prompt"]
+    assert turn_calls[2]["runtime_tool_grants"] == [
+        "open_evolution_transaction_tool",
+        "close_evolution_transaction_tool",
+        "cli_tool",
+        "python_lint_tool",
+    ]
+    assert turn_calls[2]["max_iterations"] == 8
+    assert "候选已经产生文件变更" in turn_calls[2]["prompt"]
     assert candidate["changedFiles"] == ["core/example.py"]
     assert candidate["variantId"] == "variant-retry"
     assert scene_events[0][0][2] == (
@@ -553,12 +566,21 @@ def test_runtime_retries_executor_once_when_first_turn_only_inspects_candidate(
 
     candidate = hooks.evolve(_snapshot(candidate=None))
 
-    assert len(turn_calls) == 2
-    assert inspection_calls == 2
+    assert len(turn_calls) == 3
+    assert inspection_calls == 3
     assert turn_calls[1]["carryover"] == {
         "previousResponseId": "response-inspection-only"
     }
-    assert "已经开账时不要重复开账" in turn_calls[1]["prompt"]
+    assert turn_calls[1]["runtime_tool_grants"] == [
+        "apply_patch_tool",
+        "write_file_tool",
+    ]
+    assert turn_calls[2]["runtime_tool_grants"] == [
+        "close_evolution_transaction_tool",
+        "cli_tool",
+        "python_lint_tool",
+    ]
+    assert "已有事务已经开账" in turn_calls[2]["prompt"]
     assert candidate["changedFiles"] == ["tests/test_example.py"]
     assert scene_events[0][1]["fields"]["reason"] == (
         "tool_calls_but_no_changed_files"
