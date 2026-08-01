@@ -1324,6 +1324,121 @@ def test_runtime_accepts_single_mutation_tool_step_before_validation():
     assert candidate["variantId"] == "variant-single-mutation"
 
 
+def test_runtime_recovers_validation_exhaustion_after_successful_lint(
+    monkeypatch,
+):
+    turn_calls: list[dict] = []
+    close_calls: list[dict] = []
+
+    def run_role_turn(**kwargs):
+        turn_calls.append(deepcopy(kwargs))
+        if len(turn_calls) == 1:
+            return {
+                "result": {
+                    "status": "failed",
+                    "summary": "写入后仍在调用只读工具。",
+                    "max_iteration_exhausted": True,
+                    "tool_call_count": 12,
+                    "tool_trace": [
+                        {
+                            "name": "open_evolution_transaction_tool",
+                            "status": "success",
+                        },
+                        {"name": "write_file_tool", "status": "success"},
+                    ],
+                },
+                "carryover": {"previousResponseId": "response-written"},
+                "conversationSessionId": "session-executor",
+            }
+        return {
+            "result": {
+                "status": "failed",
+                "summary": "Ruff 成功后达到验证轮次上限。",
+                "max_iteration_exhausted": True,
+                "tool_call_count": 8,
+                "tool_trace": [
+                    {
+                        "name": "open_evolution_transaction_tool",
+                        "status": "success",
+                    },
+                    {"name": "cli_tool", "status": "degraded"},
+                    {"name": "python_lint_tool", "status": "succeeded"},
+                ],
+            },
+            "carryover": {"previousResponseId": "response-linted"},
+            "conversationSessionId": "session-executor",
+        }
+
+    monkeypatch.setattr(
+        "core.web.services.self_evolution_autonomous_loop_runtime."
+        "_close_active_evolution_transaction_success",
+        lambda **kwargs: close_calls.append(deepcopy(kwargs)),
+    )
+    hooks = build_autonomous_loop_hooks(
+        AutonomousLoopRuntimeDependencies(
+            load_bindings=lambda: {
+                "observer": {"agentId": "observer-agent"},
+                "executor": {
+                    "agentId": "executor-agent",
+                    "workspacePath": "C:/workspace/main",
+                },
+            },
+            run_role_turn=run_role_turn,
+            create_candidate=lambda _context: {
+                "branch": "codex/self-loop-candidate",
+                "worktreePath": "C:/workspace/self-loop-candidate",
+                "baseCommit": "a" * 40,
+            },
+            inspect_candidate=lambda _context: {
+                "headCommit": "b" * 40,
+                "changedFiles": [
+                    {
+                        "path": "tests/self_evolution_lan_candidate_marker.py",
+                        "changeType": "added",
+                    }
+                ],
+                "variantId": "variant-lan-marker",
+            },
+            integrate_candidate=lambda _context: {},
+            cleanup_candidate=lambda _context: {},
+        )
+    )
+
+    candidate = hooks.evolve(
+        _snapshot(
+            candidate=None,
+            request={
+                "goal": (
+                    "只修改 tests/self_evolution_lan_candidate_marker.py，"
+                    "新建 marker 文件"
+                ),
+                "maxIterations": 1,
+            },
+            plan={
+                "summary": "新建 LAN marker 并运行 Ruff。",
+                "steps": [],
+                "targetFiles": [
+                    "tests/self_evolution_lan_candidate_marker.py"
+                ],
+            },
+        )
+    )
+
+    assert len(turn_calls) == 2
+    assert candidate["changedFiles"] == [
+        "tests/self_evolution_lan_candidate_marker.py"
+    ]
+    assert candidate["summary"] == (
+        "候选验证工具已成功完成；模型达到轮次上限后由宿主完成事务收口。"
+    )
+    assert close_calls == [
+        {
+            "run_id": "self-loop-001",
+            "summary": candidate["summary"],
+        }
+    ]
+
+
 def test_runtime_mutation_retry_receives_bounded_exact_target_context(tmp_path):
     target = tmp_path / "core" / "example.py"
     target.parent.mkdir(parents=True)
