@@ -14,6 +14,9 @@ describe("team research secondary queries contract", () => {
 
   it("is wired from TeamsRoute", () => {
     expect(routeSource).toContain("useTeamResearchSecondaryQueries({");
+    expect(routeSource).toMatch(
+      /challengeProgramProgressVisible:\s*challengeCupResearchTeamSelected\s*&&\s*challengeTeamSurface === "progress"/,
+    );
     expect(routeSource).not.toContain("const experimentPlanningStatusQuery = useQuery({");
     expect(routeSource).not.toContain("const researchLoopStatusQuery = useQuery({");
   });
@@ -23,5 +26,10 @@ describe("team research secondary queries contract", () => {
     expect(queriesSource).toContain("/workflow-orchestration/experiments/methods");
     expect(queriesSource).toContain("/workflow-orchestration/research-loop/templates");
     expect(queriesSource).toContain("/workflow-orchestration/research-loop/status");
+  });
+
+  it("keeps the method catalog independent from live status projections", () => {
+    expect(queriesSource).toContain('["overview", "experiment"].includes(options.researchWorkspaceView)');
+    expect(queriesSource.match(/enabled: options\.researchSecondaryStatusQueryEnabled/g) ?? []).toHaveLength(3);
   });
 });

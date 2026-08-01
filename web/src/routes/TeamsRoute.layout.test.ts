@@ -2178,6 +2178,9 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionExtractionPanels).toContain(
       "grid-rows-[minmax(0,1fr)]",
     );
+    expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionExtractionPanels).not.toContain(
+      "grid-rows-[minmax(0,1fr)_auto]",
+    );
     expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionExtractionScrollRegion).toContain("overflow-auto");
     expect(teamStageCommandBarSource).toContain('data-vui-product="team-stage-command-bar"');
     expect(teamStageCommandBarSource).toContain("flex flex-wrap items-center justify-between");

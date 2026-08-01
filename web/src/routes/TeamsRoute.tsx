@@ -1007,6 +1007,7 @@ export function TeamsRoute({
     researchWorkflowTeamSelected,
     researchWorkspaceView,
     sourceCollectionStandalone,
+    challengeProgramProgressVisible: challengeCupResearchTeamSelected && challengeTeamSurface === "progress",
   });
   const {
     experimentPlanningStatusQuery,

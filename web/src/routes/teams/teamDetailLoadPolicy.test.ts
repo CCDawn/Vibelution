@@ -53,7 +53,7 @@ describe("teamDetailLoadPolicy", () => {
     ).toBe(false);
   });
 
-  it("gates source-collection runs and secondary research status queries", () => {
+  it("gates source-collection runs and defers secondary research status outside its active surfaces", () => {
     expect(
       resolveSourceCollectionRunsQueryEnabled({
         effectiveTeamId: "t1",
@@ -73,8 +73,18 @@ describe("teamDetailLoadPolicy", () => {
       resolveResearchSecondaryStatusQueryEnabled({
         effectiveTeamId: "t1",
         researchWorkflowTeamSelected: true,
+        researchWorkspaceView: "overview",
+        sourceCollectionStandalone: false,
+        challengeProgramProgressVisible: false,
+      }),
+    ).toBe(false);
+    expect(
+      resolveResearchSecondaryStatusQueryEnabled({
+        effectiveTeamId: "t1",
+        researchWorkflowTeamSelected: true,
         researchWorkspaceView: "source_collection",
         sourceCollectionStandalone: false,
+        challengeProgramProgressVisible: true,
       }),
     ).toBe(false);
     expect(
@@ -83,6 +93,25 @@ describe("teamDetailLoadPolicy", () => {
         researchWorkflowTeamSelected: true,
         researchWorkspaceView: "experiment",
         sourceCollectionStandalone: false,
+        challengeProgramProgressVisible: false,
+      }),
+    ).toBe(true);
+    expect(
+      resolveResearchSecondaryStatusQueryEnabled({
+        effectiveTeamId: "t1",
+        researchWorkflowTeamSelected: true,
+        researchWorkspaceView: "iteration",
+        sourceCollectionStandalone: false,
+        challengeProgramProgressVisible: false,
+      }),
+    ).toBe(true);
+    expect(
+      resolveResearchSecondaryStatusQueryEnabled({
+        effectiveTeamId: "t1",
+        researchWorkflowTeamSelected: true,
+        researchWorkspaceView: "overview",
+        sourceCollectionStandalone: false,
+        challengeProgramProgressVisible: true,
       }),
     ).toBe(true);
   });
