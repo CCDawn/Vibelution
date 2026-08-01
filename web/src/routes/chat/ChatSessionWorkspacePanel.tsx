@@ -1,4 +1,4 @@
-import { lazy, Suspense, type ComponentProps, type ReactNode } from "react";
+import { lazy, Suspense, type ComponentProps } from "react";
 
 import type {
   FileContent,
@@ -109,28 +109,25 @@ export function ChatSessionWorkspacePanel({
       return conversationLoadingFallback;
     }
 
-    const inlineToolApproval = toolApproval
-      ? {
-        toolName: toolApproval.toolName,
-        content: (
-          <ChatToolApprovalDialog
-            lang={lang}
-            pending={toolApproval.pending}
-            rawTitle={toolApproval.rawTitle}
-            riskLabel={toolApproval.riskLabel}
-            scopeLabel={toolApproval.scopeLabel}
-            toolLabels={toolApproval.toolLabels}
-            actionPreview={toolApproval.actionPreview}
-            sessionGrantScope={toolApproval.sessionGrantScope}
-            toolName={toolApproval.toolName}
-            variant="inline"
-            onApprove={onApproveToolApproval}
-            onApproveForSession={onApproveToolForSession}
-            onReject={onRejectToolApproval}
-          />
-        ) as ReactNode,
-      }
-      : null;
+    // Sticky host above the transcript (main chat column), not nested under left-aligned
+    // tool rows inside process disclosure — that made approvals sit on the left and look broken.
+    const approvalDialog = toolApproval ? (
+      <ChatToolApprovalDialog
+        lang={lang}
+        pending={toolApproval.pending}
+        rawTitle={toolApproval.rawTitle}
+        riskLabel={toolApproval.riskLabel}
+        scopeLabel={toolApproval.scopeLabel}
+        toolLabels={toolApproval.toolLabels}
+        actionPreview={toolApproval.actionPreview}
+        sessionGrantScope={toolApproval.sessionGrantScope}
+        toolName={toolApproval.toolName}
+        variant="banner"
+        onApprove={onApproveToolApproval}
+        onApproveForSession={onApproveToolForSession}
+        onReject={onRejectToolApproval}
+      />
+    ) : null;
 
     return (
       <div className={conversationFocused ? `${styles.conversationShell} ${styles.conversationFrameFocus}` : styles.conversationShell}>
@@ -140,11 +137,16 @@ export function ChatSessionWorkspacePanel({
               {transientErrorMessage}
             </div>
           ) : null}
+          {approvalDialog ? (
+            <div className={styles.toolApprovalHost} data-chat-tool-approval-host="sticky">
+              {approvalDialog}
+            </div>
+          ) : null}
           <ChatRuntimeNoticeStack lang={lang} notices={notices} />
           <div className={styles.conversationBody}>
             <ChatConversationComposerBridge
               {...conversation}
-              toolApproval={inlineToolApproval}
+              toolApproval={null}
               composer={conversation.composer}
               fallback={conversationLoadingFallback}
             />

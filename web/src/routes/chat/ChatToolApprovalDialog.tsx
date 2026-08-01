@@ -124,14 +124,15 @@ export function ChatToolApprovalDialog({
         </div>
         <div className={styles.body}>
           <div className={styles.header}>
-            <strong id={titleId}>{toolApprovalCodexTitle(lang)}</strong>
-            <span id={riskId}>{riskLabel}</span>
+            <strong id={titleId} className={styles.headerTitle}>{toolApprovalCodexTitle(lang)}</strong>
+            <span id={riskId} className={styles.scopeBadge}>{riskLabel}</span>
             <span className={styles.scopeBadge} id={scopeId}>{scopeLabel}</span>
+            <span className={styles.scopeBadge}>{displayName}</span>
           </div>
           <p id={descriptionId} className={styles.lead}>
             {lang === "zh"
-              ? `助手请求执行「${displayName}」。选择「是」仅本次；「始终」按下方范围授权；「否」拒绝并继续会话。`
-              : `The agent wants to run “${displayName}”. Yes = once; Always uses the exact scope below; No = decline and continue.`}
+              ? "「是」仅本次 · 「始终」按下列范围 · 「否」拒绝"
+              : "Yes = once · Always = scope below · No = decline"}
           </p>
           <pre id={previewId} className={styles.commandPreview} title={preview}>
             {preview || (lang === "zh" ? "（无命令预览）" : "(no command preview)")}
@@ -139,6 +140,7 @@ export function ChatToolApprovalDialog({
           <p id={grantId} className={styles.grantDescription}>
             {toolApprovalSessionGrantDescription(sessionGrantScope, lang)}
           </p>
+          {/* Keep labels for a11y without visual chip clutter that pulled focus left. */}
           <div id={toolListId} className={styles.toolList} title={rawTitle} role="list">
             {visibleLabels.length
               ? visibleLabels.map((item) => (
@@ -154,7 +156,7 @@ export function ChatToolApprovalDialog({
             ) : null}
           </div>
           <p className={styles.hotkeys} aria-hidden="true">
-            {lang === "zh" ? "快捷键：Y 是 · A 始终 · N 否" : "Hotkeys: Y Yes · A Always · N No"}
+            {lang === "zh" ? "Y 是 · A 始终 · N 否" : "Y Yes · A Always · N No"}
           </p>
         </div>
         <div className={styles.actions}>
