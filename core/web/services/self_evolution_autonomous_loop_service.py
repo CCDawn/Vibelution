@@ -12,6 +12,10 @@ from typing import Any, Callable
 
 from core.runtime_manager.work_run_store import WorkRunStore
 from core.web.services.runtime_scene_service import record_runtime_scene_event
+from core.web.services.self_evolution_candidate_target_contract import (
+    CandidateTargetContractError,
+    normalize_target_files,
+)
 
 
 RUN_KIND = "self_evolution_autonomous_loop"
@@ -420,12 +424,22 @@ def _normalize_plan(payload: dict[str, Any]) -> dict[str, Any]:
     steps = item.get("steps")
     if not isinstance(steps, list) or not steps:
         raise AutonomousLoopValidationError("Plan steps must be a non-empty list.")
+    raw_target_files = item.get("targetFiles")
+    if not isinstance(raw_target_files, list):
+        raise AutonomousLoopValidationError(
+            "Plan targetFiles must be a non-empty list."
+        )
+    try:
+        target_files = normalize_target_files(raw_target_files)
+    except CandidateTargetContractError as exc:
+        raise AutonomousLoopValidationError(str(exc)) from exc
     normalized = {
         "summary": summary,
         "steps": [
             _sanitize_evidence(item)
             for item in steps[:MAX_VERIFICATION_ITEMS]
         ],
+        "targetFiles": target_files,
     }
     _copy_optional_text(
         item,
