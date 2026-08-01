@@ -1099,10 +1099,6 @@ def test_evolution_workbench_route_exposes_dataset_choices_and_saved_state(tmp_p
     assert {item["name"] for item in payload["datasets"]} == {
         "supervised_dry_run",
         "supervised_candidate_patch_smoke",
-        "terminal_bench_smoke",
-        "terminal_bench_core",
-        "terminal_bench_agent_judged",
-        "terminal_bench_2_1_smoke",
     }
     dry_run = next(item for item in payload["datasets"] if item["name"] == "supervised_dry_run")
     assert dry_run["effective"] is True
@@ -1118,55 +1114,29 @@ def test_evolution_workbench_route_exposes_dataset_choices_and_saved_state(tmp_p
     assert candidate_patch_smoke["caseCount"] == 1
     assert candidate_patch_smoke["effective"] is True
     assert candidate_patch_smoke["selectable"] is True
-    terminal_smoke = next(item for item in payload["datasets"] if item["name"] == "terminal_bench_smoke")
-    assert terminal_smoke["effective"] is True
-    assert terminal_smoke["selectable"] is True
-    assert terminal_smoke["adapterStatus"] == "ready_local_smoke"
-    assert terminal_smoke["benchmarkFamily"] == "terminal_bench"
-    assert terminal_smoke["taskType"] == "terminal_task"
-    assert terminal_smoke["verifierKind"] == "local_terminal_harness"
-    assert terminal_smoke["scoreSemantics"] == "pass_rate"
-    assert terminal_smoke["runBudgetClass"] == "smoke"
-    assert "terminal-bench" in terminal_smoke["tags"]
-    terminal_21 = next(item for item in payload["datasets"] if item["name"] == "terminal_bench_2_1_smoke")
-    assert terminal_21["effective"] is True
-    assert terminal_21["selectable"] is True
-    assert terminal_21["benchmarkFamily"] == "terminal_bench"
-    assert terminal_21["taskType"] == "terminal_task"
-    assert terminal_21["verifierKind"] == "local_terminal_harness"
-    assert terminal_21["runBudgetClass"] == "smoke"
-    assert terminal_21["officialScoreAvailable"] is False
-    assert "terminus-2" in terminal_21["tags"]
-    terminal_core = next(item for item in payload["datasets"] if item["name"] == "terminal_bench_core")
-    assert terminal_core["usabilityStatus"] == "custom_harness_ready"
-    assert terminal_core["evaluationMode"] == "custom_harness"
-    assert terminal_core["officialVerifierStatus"] == "harbor_pending"
-    assert terminal_core["officialScoreAvailable"] is False
-    assert "不是 Terminal-Bench 官方成绩" in terminal_core["usabilityReason"]
-    agent_judged = next(item for item in payload["datasets"] if item["name"] == "terminal_bench_agent_judged")
-    assert agent_judged["effective"] is True
-    assert agent_judged["selectable"] is True
-    assert agent_judged["adapterStatus"] == "agent_harness_ready"
-    assert agent_judged["evaluationMode"] == "agent_judged"
-    assert agent_judged["officialVerifierStatus"] == "not_required"
-    assert agent_judged["officialScoreAvailable"] is False
-    assert "纯 agent" in agent_judged["usabilityReason"]
+    terminal_core = next(
+        item
+        for item in payload["datasetCatalog"]
+        if item["name"] == "terminal_bench_core"
+    )
+    assert terminal_core["sourceImportStatus"] == "not_imported"
+    assert terminal_core["effective"] is False
+    assert terminal_core["selectable"] is False
     assert payload["activeRun"] is None
 
 
-def test_evolution_workbench_route_exposes_full_dataset_catalog_and_preflight_filtered_counts(tmp_path, monkeypatch):
+def test_evolution_workbench_route_exposes_readonly_catalog_without_environment_preflight(
+    tmp_path,
+    monkeypatch,
+):
+    preflight_calls = []
     _reset_supervised_live_state()
     monkeypatch.setattr(evolution_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(supervised_control_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(
         "core.evaluation.dataset_adapters.preflight_environment_contract",
-        lambda *args, **kwargs: {
-            "status": "missing_verifier_dependency",
-            "available": False,
-            "checked": [],
-            "missing": [{"path": "uv"}],
-            "official_verifier": {"missing": [{"name": "docker daemon"}], "available": False},
-        },
+        lambda *args, **kwargs: preflight_calls.append((args, kwargs))
+        or pytest.fail("initial workbench catalog must not run environment preflight"),
     )
 
     response = client.get("/api/evolution/workbench")
@@ -1178,9 +1148,6 @@ def test_evolution_workbench_route_exposes_full_dataset_catalog_and_preflight_fi
     assert dataset_names == {
         "supervised_dry_run",
         "supervised_candidate_patch_smoke",
-        "terminal_bench_smoke",
-        "terminal_bench_agent_judged",
-        "terminal_bench_2_1_smoke",
     }
     assert {
         "terminal_bench_core",
@@ -1200,8 +1167,9 @@ def test_evolution_workbench_route_exposes_full_dataset_catalog_and_preflight_fi
     assert terminal_core["visibility"] == "hidden"
     assert terminal_core["selectable"] is False
     assert terminal_core["effective"] is False
-    assert "任务环境预检未通过" in terminal_core["visibilityReason"]
-    assert "uv" in terminal_core["usabilityReason"] or "docker" in terminal_core["usabilityReason"]
+    assert terminal_core["sourceImportStatus"] == "not_imported"
+    assert terminal_core["preflightState"] == "not_required"
+    assert preflight_calls == []
 
     swe_pro = next(item for item in payload["datasetCatalog"] if item["name"] == "swe_bench_pro_sample")
     assert swe_pro["visibility"] == "hidden"
@@ -1748,7 +1716,8 @@ def test_chat_review_routes_list_and_approve_candidate(tmp_path, monkeypatch):
     dataset_entry = next(
         item for item in dataset_rows if item["name"] == "chat_reviewed_multiturn"
     )
-    assert dataset_entry["available"] is True
+    assert dataset_entry["available"] is False
+    assert dataset_entry["source_import_status"] == "not_imported"
     assert dataset_entry["review_required"] is True
     assert dataset_entry["source_track"] == "dialogue"
     assert dataset_entry["holdout_allowed"] is False
@@ -1917,7 +1886,6 @@ def test_workbench_dataset_list_backfills_new_builtin_datasets(tmp_path, monkeyp
         "supervised_dry_run",
         "supervised_candidate_patch_smoke",
         "terminal_bench_smoke",
-        "terminal_bench_core",
         "terminal_bench_agent_judged",
         "terminal_bench_2_1_smoke",
     }
@@ -1931,7 +1899,11 @@ def test_workbench_dataset_list_backfills_new_builtin_datasets(tmp_path, monkeyp
     assert terminal_21_row["effective"] is True
     assert terminal_21_row["selectable"] is True
     assert terminal_21_row["taskType"] == "terminal_task"
-    core_row = next(item for item in rows if item["name"] == "terminal_bench_core")
+    core_row = next(
+        item
+        for item in response.json()["datasetCatalog"]
+        if item["name"] == "terminal_bench_core"
+    )
     agent_judged_row = next(item for item in rows if item["name"] == "terminal_bench_agent_judged")
     assert agent_judged_row["adapterStatus"] == "agent_harness_ready"
     assert agent_judged_row["selectable"] is True
@@ -1942,6 +1914,8 @@ def test_workbench_dataset_list_backfills_new_builtin_datasets(tmp_path, monkeyp
     assert core_row["usabilityStatus"] == "custom_harness_ready"
     assert core_row["officialVerifierStatus"] == "harbor_pending"
     assert core_row["officialScoreAvailable"] is False
+    assert core_row["preflightState"] == "pending"
+    assert core_row["selectable"] is False
 
 def test_start_supervised_run_from_dataset_exposes_active_snapshot_and_sse(tmp_path, monkeypatch):
     _use_test_supervised_workspace(tmp_path, monkeypatch)
