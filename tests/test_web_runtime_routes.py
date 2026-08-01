@@ -254,6 +254,53 @@ def test_runtime_summary_shape():
     assert "overallState" in payload["lifecycleProof"]
     assert "components" in payload["lifecycleProof"]
 
+
+def test_runtime_cache_usage_marks_missing_provider_usage_as_unavailable():
+    cache_usage = runtime_service._runtime_cache_usage(
+        {
+            "last_llm_usage": {"source": "missing"},
+            "last_input_tokens": 800,
+            "last_cached_input_tokens": 400,
+            "turn_input_tokens": 1200,
+            "turn_cached_input_tokens": 600,
+            "total_input_tokens": 5000,
+            "total_cached_input_tokens": 2500,
+        }
+    )
+
+    assert cache_usage["source"] == "missing"
+    assert cache_usage["lastInputTokens"] == 0
+    assert cache_usage["turnInputTokens"] == 0
+    assert cache_usage["lastCacheHitRate"] is None
+    assert cache_usage["turnCacheHitRate"] is None
+    assert cache_usage["totalCacheHitRate"] == pytest.approx(0.5)
+    assert cache_usage["totalSource"] == "provider_usage"
+
+
+def test_runtime_cache_usage_projects_observed_provider_usage():
+    cache_usage = runtime_service._runtime_cache_usage(
+        {
+            "last_llm_usage": {
+                "source": "provider_usage",
+                "inputTokens": 1000,
+                "cachedInputTokens": 640,
+            },
+            "turn_input_tokens": 1500,
+            "turn_cached_input_tokens": 900,
+            "total_input_tokens": 5000,
+            "total_cached_input_tokens": 2500,
+            "last_cache_composition": {"averageObservedTurnCount": 4},
+        }
+    )
+
+    assert cache_usage["source"] == "provider_usage"
+    assert cache_usage["lastCacheHitRate"] == pytest.approx(0.64)
+    assert cache_usage["turnCacheHitRate"] == pytest.approx(0.6)
+    assert cache_usage["totalCacheHitRate"] == pytest.approx(0.5)
+    assert cache_usage["totalObservedTurnCount"] == 4
+    assert cache_usage["totalSource"] == "provider_usage"
+
+
 def test_runtime_summary_uses_active_session_agent_dialogue_model(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
