@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable, Iterator, Mapping, Sequence
+from dataclasses import replace
 from typing import Any
 
 from ..message_projector import message_to_openai_dict
@@ -267,9 +268,15 @@ class _ChatTurnAssembler:
         return self._outcome
 
     def feed(self, raw_chunk: Any) -> list[LLMProtocolEvent]:
-        if self._terminal_seen:
-            return []
         chunk = _as_dict(raw_chunk)
+        usage = _as_dict(chunk.get("usage"))
+        if self._terminal_seen:
+            if not usage:
+                return []
+            usage_event = self._usage_event(usage)
+            if self._outcome is not None:
+                self._outcome = replace(self._outcome, events=tuple(self.events))
+            return [usage_event]
         chunk_type = str(chunk.get("type") or "")
         emitted: list[LLMProtocolEvent] = []
         response_id = str(chunk.get("id") or "")
@@ -296,7 +303,6 @@ class _ChatTurnAssembler:
                 )
             )
             return emitted
-        usage = _as_dict(chunk.get("usage"))
         if usage:
             emitted.append(self._usage_event(usage))
         for raw_choice in list(chunk.get("choices") or []):
