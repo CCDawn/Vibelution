@@ -306,6 +306,41 @@ def test_supervised_runtime_grants_bypass_approval_without_overriding_persistent
     )["open_evolution_transaction_tool"] == "on_request"
 
 
+def test_self_evolution_runtime_grant_bypasses_approval_for_preallowed_tool():
+    persistent_policy = {
+        "policyId": "tool-self-evolution-runtime-probe",
+        "policyVersion": 1,
+        "allowedTools": ["cli_tool"],
+        "blockedTools": [],
+        "preferredTools": [],
+        "networkAccess": "none",
+        "mutationAccess": "controlled",
+        "delegationAccess": "none",
+        "maxCallsPerTurn": 16,
+        "approvalOverrides": {},
+    }
+
+    runtime_policy = agent_directory_service._with_runtime_tool_grants(
+        persistent_policy,
+        ["cli_tool"],
+        source="self_evolution_autonomous_loop",
+    )
+    authorization = resolve_enforced_authorization(
+        runtime={
+            "agentId": "agent-self-evolution-runtime-probe",
+            "turnId": "turn-self-evolution-runtime-probe",
+            "agent": {"agentId": "agent-self-evolution-runtime-probe"},
+            "toolPolicy": runtime_policy,
+        }
+    )
+
+    assert dict(
+        (name, approval)
+        for name, approval, _risk in authorization.decision.approval_requirements
+    )["cli_tool"] == "never"
+    assert persistent_policy["approvalOverrides"] == {}
+
+
 def test_supervised_runtime_tools_are_granted_only_during_role_runtime(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(supervised_agent_service, "_current_config", lambda: _model_config())

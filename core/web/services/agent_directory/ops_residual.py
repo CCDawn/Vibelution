@@ -856,8 +856,8 @@ def _with_runtime_tool_grants(
         "supervised_conversation_harness",
         "supervised_baseline_self_edit",
     }:
-        for tool in added:
-            approval_overrides[tool] = "never"
+        for tool in effective_grants:
+            approval_overrides.setdefault(tool, "never")
     if (
         not added
         and runtime_mutation_access == mutation_access
