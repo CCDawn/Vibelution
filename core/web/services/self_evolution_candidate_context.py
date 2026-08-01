@@ -79,12 +79,30 @@ def bounded_candidate_target_context(
 
 def _context_anchors(value: str) -> list[str]:
     tokens = re.findall(r"[A-Za-z_][A-Za-z0-9_]{2,}", str(value or ""))
-    prioritized = [
-        token
-        for token in tokens
-        if "_" in token or token.startswith(("test", "def", "class"))
-    ]
-    return list(dict.fromkeys(prioritized + tokens))[:24]
+    unique_tokens = list(dict.fromkeys(tokens))
+    symbol_tokens = sorted(
+        (
+            token
+            for token in unique_tokens
+            if "_" in token or token.startswith(("test", "def", "class"))
+        ),
+        key=lambda token: (
+            token.count("_"),
+            len(token),
+        ),
+        reverse=True,
+    )
+    prioritized: list[str] = []
+    for token in symbol_tokens:
+        prioritized.append(token)
+        parts = [part for part in token.split("_") if part]
+        if len(parts) < 4:
+            continue
+        for size in range(len(parts) - 1, 2, -1):
+            prefix = "_".join(parts[:size])
+            if len(prefix) >= 12:
+                prioritized.append(prefix)
+    return list(dict.fromkeys(prioritized + unique_tokens))[:36]
 
 
 def _matching_line_indexes(
@@ -93,11 +111,27 @@ def _matching_line_indexes(
 ) -> list[int]:
     if not anchors:
         return []
-    return [
-        index
-        for index, line in enumerate(lines)
-        if any(anchor in line for anchor in anchors)
-    ]
+    scored: list[tuple[int, int, int, int]] = []
+    anchor_count = len(anchors)
+    for index, line in enumerate(lines):
+        matched = [
+            anchor_index
+            for anchor_index, anchor in enumerate(anchors)
+            if anchor in line
+        ]
+        if not matched:
+            continue
+        best_anchor_index = min(matched)
+        scored.append(
+            (
+                anchor_count - best_anchor_index,
+                len(anchors[best_anchor_index]),
+                len(matched),
+                -index,
+            )
+        )
+    scored.sort(reverse=True)
+    return [-item[3] for item in scored]
 
 
 def _redact_source_line(line: str) -> str:

@@ -838,6 +838,7 @@ def _evolution_mutation_prompt(
 ) -> str:
     plan = context.get("plan") if isinstance(context.get("plan"), dict) else {}
     target_files = _target_files_from_context(context)
+    exact_targets = ", ".join(target_files)
     return (
         "上一轮执行后候选工作树仍没有产生任何文件变更；只读检查、复述计划"
         "或仅开事务都不算完成。\n"
@@ -848,13 +849,17 @@ def _evolution_mutation_prompt(
         f"{target_context or '[目标文件上下文不可用]'}\n\n"
         "现在进入有界写入阶段：\n"
         "1. 不要复述计划，不要再次制定计划，也无需再次请求用户确认。\n"
-        "2. 第一项工具调用必须产生文件修改；当前只提供 apply_patch_tool 和 "
-        "write_file_tool，不再读取源码、目录或测试说明。\n"
-        "3. 使用上一轮已经读取的证据，在 4 轮内完成最小安全候选修改；"
-        "不得再次开账或关账。\n"
-        "4. 仍须遵守原定范围；不要写主工作区、刷新 Launcher、执行远端操作、"
-        "评分、Judge 或自行批准合入。\n"
-        "5. 如果现有证据不足以安全修改，直接报告阻塞，不得伪造候选变更。"
+        "2. 第一项工具调用必须产生文件修改；优先直接使用 apply_patch_tool，"
+        "也可使用 write_file_tool。"
+        f"只能直接修改：{exact_targets}。\n"
+        "3. 本轮只有 1 次写入工具调用机会；不得再次开账或关账，也不得把写入"
+        "工具当作读取、探测或生成分析脚本的替代品。\n"
+        "4. 不得创建 scratch、helper、investigate 或其他临时文件，尤其不得写入 "
+        "workspace/agents；仍须遵守原定范围。\n"
+        "5. 不要写主工作区、刷新 Launcher、执行远端操作、评分、Judge 或自行"
+        "批准合入。\n"
+        "6. 如果上面的精确源码上下文仍不足以安全修改，直接报告阻塞，不得伪造"
+        "候选变更。"
     )
 
 
