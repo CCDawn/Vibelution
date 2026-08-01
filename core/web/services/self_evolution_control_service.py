@@ -675,18 +675,29 @@ def ensure_self_evolution_agent_instances() -> list[dict[str, Any]]:
 
 
 def self_evolution_agent_bindings() -> dict[str, dict[str, Any]]:
+    role_keys = [item["role"] for item in SELF_EVOLUTION_AGENT_ROLES]
     raw_slots = _raw_self_evolution_mode_slots()
-    for role in [item["role"] for item in SELF_EVOLUTION_AGENT_ROLES]:
+    all_slots_configured = True
+    for role in role_keys:
         raw_agent_id = str(raw_slots.get(role) or "").strip()
+        if not raw_agent_id:
+            all_slots_configured = False
+            continue
         if raw_agent_id and not agent_directory_service.get_agent(raw_agent_id, include_archived=False):
             _record_self_evolution_binding_failure(role, agent_id=raw_agent_id, reason="missing_or_archived_slot_agent")
             raise SelfEvolutionRunValidationError(
                 f"Self-evolution role slot points to an archived or missing Agent: {role} ({raw_agent_id})"
             )
+    if all_slots_configured:
+        payload = agent_mode_binding_service.get_mode_bindings_payload()
+        return {
+            role: _self_evolution_binding_from_payload(payload, role)
+            for role in role_keys
+        }
     ensure_self_evolution_agent_instances()
     payload = agent_mode_binding_service.get_mode_bindings_payload()
     bindings: dict[str, dict[str, Any]] = {}
-    for role in [item["role"] for item in SELF_EVOLUTION_AGENT_ROLES]:
+    for role in role_keys:
         bindings[role] = _self_evolution_binding_from_payload(payload, role)
     return bindings
 
@@ -702,6 +713,9 @@ def self_observation_agent_binding() -> dict[str, Any]:
         raise SelfEvolutionRunValidationError(
             f"Self-evolution role slot points to an archived or missing Agent: {role} ({raw_agent_id})"
         )
+    if raw_agent_id:
+        payload = agent_mode_binding_service.get_mode_bindings_payload()
+        return _self_evolution_binding_from_payload(payload, role)
     ensure_self_evolution_agent_instances()
     payload = agent_mode_binding_service.get_mode_bindings_payload()
     return _self_evolution_binding_from_payload(payload, role)
