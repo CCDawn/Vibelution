@@ -826,6 +826,7 @@ def model_visible_messages_from_events(events: Iterable[TurnJournalEvent]) -> li
     latest_partial_by_turn: dict[str, dict[str, Any]] = {}
     final_turn_ids: set[str] = set()
     terminal_turn_ids: set[str] = set()
+    assistant_message_index_by_turn: dict[str, int] = {}
     resolved_tool_keys = {
         key
         for event in event_list
@@ -903,6 +904,7 @@ def model_visible_messages_from_events(events: Iterable[TurnJournalEvent]) -> li
                         }
                     )
                     final_turn_ids.add(turn_id)
+                    assistant_message_index_by_turn[turn_id] = len(messages) - 1
         elif event.event_type in {EVENT_ASSISTANT_PARTIAL, EVENT_ASSISTANT_DELTA_COMMITTED}:
             partial = _assistant_message_from_payload(
                 payload,
@@ -927,6 +929,7 @@ def model_visible_messages_from_events(events: Iterable[TurnJournalEvent]) -> li
             if _message_has_visible_payload(message):
                 messages.append(message)
                 final_turn_ids.add(turn_id)
+                assistant_message_index_by_turn[turn_id] = len(messages) - 1
         elif event.event_type in {EVENT_COMPACTION_CHECKPOINT, EVENT_COMPRESSION_ATTEMPT}:
             checkpoint_message = _checkpoint_message_from_event(event)
             if _message_has_visible_payload(checkpoint_message):
@@ -947,6 +950,14 @@ def model_visible_messages_from_events(events: Iterable[TurnJournalEvent]) -> li
                 messages.append(lifecycle_message)
         elif event.event_type in TERMINAL_EVENTS:
             terminal_turn_ids.add(turn_id)
+            usage = payload.get("llmUsage") or payload.get("llm_usage")
+            assistant_index = assistant_message_index_by_turn.get(turn_id)
+            if isinstance(usage, dict) and assistant_index is not None:
+                assistant_message = dict(messages[assistant_index])
+                assistant_metadata = dict(assistant_message.get("metadata") or {})
+                assistant_metadata["llmUsage"] = dict(usage)
+                assistant_message["metadata"] = assistant_metadata
+                messages[assistant_index] = assistant_message
             if event.event_type == EVENT_TURN_INTERRUPTED:
                 partial = latest_partial_by_turn.get(turn_id)
                 if partial is not None and turn_id not in final_turn_ids:

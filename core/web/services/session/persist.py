@@ -655,6 +655,7 @@ def _persist_session_turn_result(
                 "marker": s.TURN_INTERRUPTED_MARKER if terminal_event == s.EVENT_TURN_INTERRUPTED else "",
                 "errorType": error_type if runtime_failed else "",
                 "summary": visible_assistant_text,
+                "llmUsage": turn_llm_usage,
             },
             source="persist_session_turn_result",
         )

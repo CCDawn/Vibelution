@@ -10,7 +10,9 @@ import pytest
 
 import core.chat.turn_journal as turn_journal
 from core.chat.turn_journal import (
+    EVENT_ASSISTANT_ITEM_COMMITTED,
     EVENT_ASSISTANT_MESSAGE,
+    EVENT_TURN_COMPLETED,
     EVENT_USER_MESSAGE,
     TurnJournalEvent,
     append_turn_event,
@@ -75,6 +77,59 @@ def test_completed_assistant_event_does_not_project_interruption_metadata():
 
     assert len(messages) == 1
     assert messages[0]["metadata"]["interrupted"] is False
+
+
+def test_completed_turn_usage_enriches_canonical_assistant_message():
+    assistant_event = TurnJournalEvent(
+        schema_version=1,
+        event_id="event-assistant-canonical",
+        session_id="session-usage",
+        turn_id="turn-usage",
+        sequence=1,
+        event_type=EVENT_ASSISTANT_ITEM_COMMITTED,
+        status="completed",
+        timestamp="2026-08-01T00:00:00",
+        source="test",
+        payload={
+            "kind": "assistant_message",
+            "channel": "answer",
+            "phase": "final_answer",
+            "text": "CACHE-PROBE-B-OK",
+            "invocationId": "invocation-usage",
+            "itemId": "item-usage",
+            "revision": 1,
+        },
+    )
+    terminal_event = TurnJournalEvent(
+        schema_version=1,
+        event_id="event-turn-completed",
+        session_id="session-usage",
+        turn_id="turn-usage",
+        sequence=2,
+        event_type=EVENT_TURN_COMPLETED,
+        status="completed",
+        timestamp="2026-08-01T00:00:01",
+        source="test",
+        payload={
+            "llmUsage": {
+                "source": "provider_usage",
+                "inputTokens": 15418,
+                "outputTokens": 9,
+                "totalTokens": 15427,
+                "cachedInputTokens": 15360,
+                "cacheReadInputTokens": 15360,
+                "uncachedInputTokens": 58,
+                "cacheHitRate": 15360 / 15418,
+            }
+        },
+    )
+
+    messages = model_visible_messages_from_events([assistant_event, terminal_event])
+
+    assert len(messages) == 1
+    assert messages[0]["content"] == "CACHE-PROBE-B-OK"
+    assert messages[0]["metadata"]["llmUsage"]["source"] == "provider_usage"
+    assert messages[0]["metadata"]["llmUsage"]["cachedInputTokens"] == 15360
 
 
 def test_concurrent_process_appends_keep_sequences_unique_and_contiguous(tmp_path):
