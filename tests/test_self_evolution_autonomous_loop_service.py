@@ -33,6 +33,10 @@ def _build_service(tmp_path, *, hook_overrides=None):
                 {"id": "state-machine", "title": "建立持久化状态机"},
                 {"id": "integration", "title": "用户批准后自动合并并清理"},
             ],
+            "targetFiles": [
+                "core/example.py",
+                "tests/test_example.py",
+            ],
             "conversationSessionId": "session-observer",
         }
 
@@ -113,7 +117,16 @@ def test_run_stops_at_user_approval_without_evaluation_or_git_integration(tmp_pa
     assert result["observation"]["summary"].startswith("发现")
     assert result["observation"]["conversationSessionId"] == "session-observer"
     assert result["plan"]["steps"][0]["id"] == "state-machine"
+    assert result["plan"]["targetFiles"] == [
+        "core/example.py",
+        "tests/test_example.py",
+    ]
     assert result["plan"]["conversationSessionId"] == "session-observer"
+    evolve_context = calls[2][1]
+    assert evolve_context["plan"]["targetFiles"] == [
+        "core/example.py",
+        "tests/test_example.py",
+    ]
     assert result["candidate"]["branch"] == "codex/self-loop-candidate"
     assert result["candidate"]["changedFiles"][0] == {
         "path": "core/example.py",
