@@ -247,6 +247,68 @@ def test_integration_failure_does_not_cleanup_or_report_completion(tmp_path):
     assert failed["candidate"]["branch"] == "codex/self-loop-candidate"
 
 
+def test_explicit_user_reapproval_retries_failed_integration_then_cleans(tmp_path):
+    integration_attempts = 0
+
+    def integrate(context):
+        nonlocal integration_attempts
+        integration_attempts += 1
+        if integration_attempts == 1:
+            raise RuntimeError("git author identity is missing")
+        return {
+            "status": "committed",
+            "mechanism": "controlled_candidate_commit",
+            "baseCommit": context["candidate"]["baseCommit"],
+            "commitSha": "d" * 40,
+            "candidateVariantId": context["candidate"]["variantId"],
+            "changedFiles": [
+                item["path"] for item in context["candidate"]["changedFiles"]
+            ],
+            "rollbackManifestPath": "C:/workspace/manifests/self-loop-001.json",
+            "committedAt": "2026-08-01T00:00:00+00:00",
+        }
+
+    service, calls = _build_service(
+        tmp_path,
+        hook_overrides={"integrate": integrate},
+    )
+    service.start({"goal": "建立自动闭环"})
+
+    failed = service.approve(
+        "self-loop-001",
+        decision={"actorType": "user", "actorId": "local-user"},
+    )
+    completed = service.approve(
+        "self-loop-001",
+        decision={
+            "actorType": "user",
+            "actorId": "local-user",
+            "comment": "修复 Git 环境后重试集成",
+        },
+    )
+
+    assert failed["status"] == "failed"
+    assert failed["phase"] == "integration_failed"
+    assert completed["status"] == "completed"
+    assert completed["phase"] == "completed"
+    assert completed["reviewGate"]["status"] == "approved"
+    assert completed["integration"]["status"] == "committed"
+    assert completed["cleanup"]["status"] == "cleaned"
+    assert completed["integrationRetryCount"] == 1
+    assert completed["lastIntegrationError"]["message"] == (
+        "git author identity is missing"
+    )
+    assert "error" not in completed
+    assert "finishedAt" in completed
+    assert integration_attempts == 2
+    assert [name for name, _ in calls] == [
+        "observe",
+        "plan",
+        "evolve",
+        "cleanup",
+    ]
+
+
 def test_cleanup_failure_preserves_merged_fact_and_can_be_retried(tmp_path):
     cleanup_attempts = 0
 

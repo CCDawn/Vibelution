@@ -182,7 +182,25 @@ class SelfEvolutionAutonomousLoopService:
         approval = _normalize_user_decision(decision, expected="approve")
         with _LOCK:
             snapshot = self._load_required(run_id)
-            _require_phase(snapshot, "reporting", status="awaiting_user_approval")
+            integration_retry = (
+                str(snapshot.get("status") or "") == "failed"
+                and str(snapshot.get("phase") or "") == "integration_failed"
+                and str((snapshot.get("reviewGate") or {}).get("status") or "")
+                == "approved"
+            )
+            if integration_retry:
+                previous_error = deepcopy(snapshot.get("error") or {})
+                snapshot = deepcopy(snapshot)
+                snapshot.pop("error", None)
+                snapshot.pop("finishedAt", None)
+            else:
+                previous_error = {}
+                _require_phase(
+                    snapshot,
+                    "reporting",
+                    status="awaiting_user_approval",
+                )
+            retry_count = int(snapshot.get("integrationRetryCount") or 0)
             snapshot = self._advance(
                 snapshot,
                 status="running",
@@ -194,7 +212,15 @@ class SelfEvolutionAutonomousLoopService:
                         "status": "approved",
                         "requiredActorType": "user",
                         "decision": approval,
-                    }
+                    },
+                    **(
+                        {
+                            "integrationRetryCount": retry_count + 1,
+                            "lastIntegrationError": previous_error,
+                        }
+                        if integration_retry
+                        else {}
+                    ),
                 },
             )
 
