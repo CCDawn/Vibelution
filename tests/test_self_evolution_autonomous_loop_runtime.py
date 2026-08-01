@@ -153,8 +153,8 @@ def test_runtime_hooks_use_one_observer_context_then_isolated_executor():
         "grep_search_tool",
         "code_symbol_tool",
     ]
-    assert turn_calls[0]["max_iterations"] == 8
-    assert turn_calls[1]["max_iterations"] == 4
+    assert turn_calls[0]["max_iterations"] == 4
+    assert turn_calls[1]["max_iterations"] == 3
     assert turn_calls[0]["disable_tools"] is False
     assert turn_calls[1]["disable_tools"] is False
     assert "apply_patch_tool" not in turn_calls[0]["runtime_tool_grants"]
@@ -206,7 +206,7 @@ def test_observer_exhaustion_gets_one_tool_disabled_summary_turn(monkeypatch):
             return {
                 "result": {
                     "status": "stopped",
-                    "summary": "已达到本轮最大迭代次数 8。",
+                    "summary": "已达到本轮最大迭代次数 4。",
                     "max_iteration_exhausted": True,
                     "tool_call_count": 8,
                     "tool_trace": [
@@ -247,7 +247,7 @@ def test_observer_exhaustion_gets_one_tool_disabled_summary_turn(monkeypatch):
 
     assert observation["summary"] == "已完成有界观察摘要。"
     assert len(turn_calls) == 2
-    assert turn_calls[0]["max_iterations"] == 8
+    assert turn_calls[0]["max_iterations"] == 4
     assert turn_calls[0]["disable_tools"] is False
     assert turn_calls[1]["max_iterations"] == 2
     assert turn_calls[1]["disable_tools"] is True
