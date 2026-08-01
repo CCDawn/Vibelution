@@ -62,12 +62,17 @@ EXPLICIT_TARGET_SCOPE_CUES = (
     "修改范围只能",
     "计划范围只能",
     "仅修改",
+    "只修改",
     "only modify",
     "must be limited to",
 )
 REPOSITORY_FILE_REFERENCE_PATTERN = re.compile(
     r"(?<![A-Za-z0-9_.\-/])"
     r"(?:[A-Za-z0-9_.-]+/)+[A-Za-z0-9_.-]+\.[A-Za-z0-9]+"
+)
+EXPLICIT_TARGET_LIST_SEPARATOR_PATTERN = re.compile(
+    r"^(?:\s|[`'\"“”‘’\[\]\(\)（）,，、/&+]|和|与|以及|及|and)*$",
+    re.IGNORECASE,
 )
 
 
@@ -540,12 +545,26 @@ def _explicit_request_target_files(context: dict[str, Any]) -> list[str]:
         else ""
     ).strip()
     goal_casefolded = goal.casefold()
-    if not any(
-        cue.casefold() in goal_casefolded
+    cue_matches = [
+        (goal_casefolded.index(cue.casefold()), cue)
         for cue in EXPLICIT_TARGET_SCOPE_CUES
-    ):
+        if cue.casefold() in goal_casefolded
+    ]
+    if not cue_matches:
         return []
-    matches = REPOSITORY_FILE_REFERENCE_PATTERN.findall(goal)
+    cue_index, cue = min(cue_matches, key=lambda item: item[0])
+    scope_tail = goal[cue_index + len(cue) :]
+    references = list(REPOSITORY_FILE_REFERENCE_PATTERN.finditer(scope_tail))
+    if not references:
+        return []
+    matches = [references[0].group(0)]
+    previous = references[0]
+    for reference in references[1:]:
+        separator = scope_tail[previous.end() : reference.start()]
+        if not EXPLICIT_TARGET_LIST_SEPARATOR_PATTERN.fullmatch(separator):
+            break
+        matches.append(reference.group(0))
+        previous = reference
     if not matches:
         return []
     try:
