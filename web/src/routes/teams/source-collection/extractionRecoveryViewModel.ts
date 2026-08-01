@@ -90,16 +90,22 @@ export function buildExtractionRecoveryViewModel(
     sourceCollectionRunPendingScreeningCountText,
   } = input;
 
-  const recoveryCoverage = candidateProjection?.currentCoverageSummary?.complete === false
-    ? candidateProjection.currentCoverageSummary
+  const currentCoverage = candidateProjection?.currentCoverageSummary;
+  const hasCurrentCoverage = Boolean(currentCoverage?.applicable);
+  const currentCoverageComplete = hasCurrentCoverage && currentCoverage?.complete === true;
+  const recoveryCoverage = hasCurrentCoverage
+    ? currentCoverage
     : candidateProjection?.latestTask?.coverageSummary;
   const recoveryClosure = candidateProjection?.latestTask?.closureSummary;
   const recoveryNumber = sourceCollectionNonNegativeCount;
-  const inputCount = Math.max(
-    recoveryNumber(recoveryCoverage?.total),
-    recoveryNumber(candidateProjection?.counts?.input),
-    sourceCollectionRawRecordCount,
-  );
+  const currentCoverageTotal = recoveryNumber(currentCoverage?.total);
+  const inputCount = hasCurrentCoverage && currentCoverageTotal > 0
+    ? currentCoverageTotal
+    : Math.max(
+      recoveryNumber(recoveryCoverage?.total),
+      recoveryNumber(candidateProjection?.counts?.input),
+      sourceCollectionRawRecordCount,
+    );
   const invalidCount = Math.max(
     recoveryNumber(recoveryCoverage?.invalid),
     recoveryClosure?.invalidIds?.length ?? 0,
@@ -111,7 +117,12 @@ export function buildExtractionRecoveryViewModel(
     recoveryNumber(recoveryClosure?.blockedCount),
     recoveryNumber(recoveryCoverage?.blocked),
   );
-  const materializedEvidenceGapCount = missingEvidenceAnchorCount(candidateProjection);
+  const rawMaterializedEvidenceGapCount = missingEvidenceAnchorCount(candidateProjection);
+  const materializedEvidenceGapCount = rawMaterializedEvidenceGapCount === undefined
+    ? undefined
+    : inputCount > 0
+      ? Math.min(rawMaterializedEvidenceGapCount, inputCount)
+      : rawMaterializedEvidenceGapCount;
   const evidenceGapCount = materializedEvidenceGapCount ?? sourceVerificationCount;
   const evidenceWorkCount = Math.max(evidenceGapCount, sourceVerificationCount);
   const failureCount = Math.max(
@@ -124,9 +135,12 @@ export function buildExtractionRecoveryViewModel(
     recoveryNumber(candidateProjection?.counts?.output),
     sourceCollectionRunApprovedCount,
   ].filter((value) => value > 0);
-  const salvageCount = salvageSignals.length
+  const rawSalvageCount = salvageSignals.length
     ? Math.max(...salvageSignals)
     : sourceCollectionDisplayedCandidateCount;
+  const salvageCount = hasCurrentCoverage && inputCount > 0
+    ? Math.min(rawSalvageCount, inputCount)
+    : rawSalvageCount;
   const salvageText = sourceCollectionPrimaryDataLoading
     ? sourceCollectionLoadingText
     : String(salvageCount);
@@ -137,7 +151,7 @@ export function buildExtractionRecoveryViewModel(
     || candidateProjection?.status === "failed"
     || candidateProjection?.status === "agent_blocked"
     || candidateProjection?.status === "agent_interrupted"
-    || sourceCollectionCandidateStepState === "failed",
+    || (!currentCoverageComplete && sourceCollectionCandidateStepState === "failed"),
   );
   const evidenceGapOnly = Boolean(
     !hasHardFailure
