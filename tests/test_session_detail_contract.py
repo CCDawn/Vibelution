@@ -12,6 +12,7 @@ from core.chat.conversation_ledger import (
     append_conversation_event,
     load_conversation_events,
 )
+from core.chat.turn_journal import EVENT_ASSISTANT_ITEM_COMMITTED
 from core.ui.chat_state import load_chat_state, save_chat_state
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
@@ -968,6 +969,62 @@ def test_persist_turn_result_records_provider_llm_usage(tmp_path, monkeypatch):
         and event["kwargs"]["fields"]["uncachedInputTokens"] == 1200
         for event in events
     )
+
+
+def test_persist_turn_usage_enriches_existing_canonical_assistant(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        session_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: {"accepted": True},
+    )
+    turn_id = "turn-canonical-provider-usage"
+    append_conversation_event(
+        tmp_path,
+        "session-live",
+        turn_id,
+        EVENT_ASSISTANT_ITEM_COMMITTED,
+        status="completed",
+        payload={
+            "kind": "assistant_message",
+            "channel": "answer",
+            "phase": "final_answer",
+            "text": "CACHE-PROBE-B-OK",
+            "invocationId": "invocation-usage",
+            "itemId": "item-usage",
+            "revision": 1,
+        },
+    )
+    session_service._set_session_running("session-live", True, turn_id=turn_id)
+
+    session_service._persist_session_turn_result(
+        "session-live",
+        {
+            "status": "completed",
+            "summary": "CACHE-PROBE-B-OK",
+            "raw_output": "CACHE-PROBE-B-OK",
+            "outcome": "done",
+            "tool_call_count": 0,
+            "tool_trace": [],
+            "llm_usage": {
+                "source": "provider_usage",
+                "input_tokens": 15418,
+                "output_tokens": 9,
+                "cached_input_tokens": 15360,
+            },
+        },
+        turn_id=turn_id,
+    )
+
+    journal_events = load_conversation_events(tmp_path, "session-live")
+    completed_event = next(item for item in reversed(journal_events) if item.event_type == "turn_completed")
+    assert completed_event.payload["llmUsage"]["cachedInputTokens"] == 15360
+    detail = session_service.get_session_detail("session-live")
+    assistant = detail["messages"][-1]
+    assert assistant["content"] == "CACHE-PROBE-B-OK"
+    assert assistant["metadata"]["llmUsage"]["source"] == "provider_usage"
+    assert detail["llmUsage"]["cachedInputTokens"] == 15360
 
 
 def test_persist_turn_result_exposes_previous_context_and_cache_composition(tmp_path, monkeypatch):
