@@ -2492,6 +2492,62 @@ def test_source_collection_stage_card_projection_reports_processed_inputs_that_n
     assert "闭环成功" not in card["userSummary"]
     assert any("34 条需要补充证据" in reason for reason in card["blockingReasons"])
 
+
+def test_source_collection_stage_card_projection_accepts_completed_superset_after_supersession():
+    card = team_workflow_orchestration_service._source_collection_stage_card_projection(
+        "extraction",
+        [
+            {
+                "taskId": "stagetask-extraction-superseded-version",
+                "stageId": "extraction",
+                "agentId": "source-extractor-agent",
+                "agentRole": "source_extractor",
+                "sessionId": "session-source-extractor",
+                "status": "needs_review",
+                "summary": "14 条候选资料均已提炼；版本归并后当前有效候选为 13 条。",
+                "updatedAt": "2026-08-01T15:24:58+08:00",
+                "result": {
+                    "coverageSummary": {
+                        "applicable": True,
+                        "coverageKind": "candidate_extractions",
+                        "complete": True,
+                        "total": 14,
+                        "processed": 14,
+                        "missing": 0,
+                        "invalid": 0,
+                        "blocked": 14,
+                    },
+                },
+            }
+        ],
+        artifact_count=13,
+        input_count=14,
+        output_count=0,
+        pending_count=13,
+        artifact_status="partial",
+        artifact_summary="13 current candidates; all require evidence supplementation.",
+    )
+
+    assert card["status"] == "partial_current_inputs"
+    assert card["isClosedLoop"] is False
+    assert card["currentCoverageSummary"] == {
+        "applicable": True,
+        "coverageKind": "candidate_extractions",
+        "complete": True,
+        "total": 13,
+        "processed": 13,
+        "missing": 0,
+        "invalid": 0,
+        "blocked": 13,
+        "duplicate": 0,
+    }
+    assert card["userStatusLabel"] == "提炼完成，待补证据"
+    assert card["actionReadiness"]["reasonCode"] == "evidence_supplement_required"
+    assert card["actionReadiness"]["actionLabel"] == "Agent 补充证据"
+    assert "已处理 13/13" in card["userSummary"]
+    assert "13 条需要补充证据" in card["userSummary"]
+
+
 def test_source_collection_stage_card_projection_marks_stale_success_as_partial_current_inputs():
     card = team_workflow_orchestration_service._source_collection_stage_card_projection(
         "extraction",
