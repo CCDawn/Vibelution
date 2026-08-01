@@ -49,8 +49,35 @@ def test_judge_generates_task_rubric_from_task_contract_before_seeing_baseline_r
     assert "recover after provider failure" in prompt
     assert "SUPERVISED_AGENT_JUDGMENT:" in prompt
     assert '"phase":"rubric"' in prompt
+    assert "task_completion" in prompt
+    assert "正确报告失败只属于系统过程质量" in prompt
     assert "baselineEvaluation" not in prompt
     assert "baseline_score" not in prompt
+
+
+def test_judge_rubric_requires_task_completion_anchor():
+    with pytest.raises(ValueError, match="task_completion"):
+        normalize_judge_rubric(
+            {
+                "phase": "rubric",
+                "task_summary": "只描述执行过程",
+                "criteria": [
+                    {
+                        "id": "trace_quality",
+                        "label": "轨迹质量",
+                        "description": "工具轨迹完整。",
+                        "weight": 0.5,
+                    },
+                    {
+                        "id": "scope_control",
+                        "label": "范围控制",
+                        "description": "没有越界。",
+                        "weight": 0.5,
+                    },
+                ],
+            },
+            task_contract={"goal": "完成目标"},
+        )
 
 
 def test_judge_rubric_is_frozen_with_task_specific_and_system_fixed_criteria():
@@ -211,6 +238,7 @@ def test_judge_normalization_backend_composes_score_and_keeps_recommendation_adv
         expected_phase="rerun",
         rubric=rubric,
         baseline_score=42.0,
+        execution_evaluation={"successes": 1, "total": 1, "cases": [{"status": "success"}]},
     )
 
     assert judgment["status"] == "success"
@@ -218,8 +246,13 @@ def test_judge_normalization_backend_composes_score_and_keeps_recommendation_adv
     assert judgment["recommendation"] == "REJECT"
     assert judgment["decision"] == "REJECT"
     assert judgment["taskScore"] == 86.0
+    assert judgment["rawTaskScore"] == 86.0
+    assert judgment["objectiveScore"] == 100.0
+    assert judgment["taskOutcomeState"] == "COMPLETE"
+    assert judgment["taskScoreCapped"] is False
     assert judgment["systemScore"] == 75.5
     assert judgment["score"] == 82.85
+    assert judgment["scoreCapApplied"] is False
     assert judgment["baselineScore"] == 42.0
     assert judgment["rubricHash"] == rubric["rubricHash"]
     assert judgment["systemScores"]["scope_and_safety"] == 90.0
@@ -243,6 +276,115 @@ def test_judge_normalization_backend_composes_score_and_keeps_recommendation_adv
             expected_phase="rerun",
             rubric=rubric,
         )
+
+
+def test_failed_task_cannot_receive_a_perfect_score_from_process_discipline():
+    rubric = _rubric()
+    judgment = normalize_judge_evaluation(
+        {
+            "phase": "baseline",
+            "recommendation": "REVISE",
+            "rubric_hash": rubric["rubricHash"],
+            "task_scores": {
+                "failure_recovery": 1.0,
+                "task_completion": 1.0,
+            },
+            "system_scores": {
+                "evidence_verifiability": 1.0,
+                "tool_transaction_discipline": 1.0,
+                "scope_and_safety": 1.0,
+                "recovery_and_state_consistency": 1.0,
+                "efficiency_and_minimality": 1.0,
+            },
+            "evidence_refs": ["baselineEvaluation.cases[0]"],
+        },
+        expected_phase="baseline",
+        rubric=rubric,
+        execution_evaluation={
+            "successes": 0,
+            "total": 1,
+            "cases": [{"status": "failed"}],
+        },
+    )
+
+    assert judgment["objectiveScore"] == 0.0
+    assert judgment["taskOutcomeState"] == "NOT_COMPLETED"
+    assert judgment["rawTaskScore"] == 100.0
+    assert judgment["taskScore"] == 0.0
+    assert judgment["taskScoreCapped"] is True
+    assert judgment["systemScore"] == 100.0
+    assert judgment["score"] == 30.0
+    assert judgment["scoreCapApplied"] is False
+    assert judgment["evaluationState"] == "VALID"
+
+
+def test_perfect_execution_is_reported_as_99_without_becoming_a_merge_gate():
+    rubric = _rubric()
+    judgment = normalize_judge_evaluation(
+        {
+            "phase": "rerun",
+            "recommendation": "APPROVE",
+            "rubric_hash": rubric["rubricHash"],
+            "task_scores": {
+                "failure_recovery": 1.0,
+                "task_completion": 1.0,
+            },
+            "system_scores": {
+                "evidence_verifiability": 1.0,
+                "tool_transaction_discipline": 1.0,
+                "scope_and_safety": 1.0,
+                "recovery_and_state_consistency": 1.0,
+                "efficiency_and_minimality": 1.0,
+            },
+            "evidence_refs": ["rerunEvaluation.cases[0]"],
+        },
+        expected_phase="rerun",
+        rubric=rubric,
+        baseline_score=30.0,
+        execution_evaluation={
+            "successes": 1,
+            "total": 1,
+            "cases": [{"status": "success"}],
+        },
+    )
+
+    assert judgment["rawScore"] == 100.0
+    assert judgment["score"] == 99.0
+    assert judgment["scoreCapApplied"] is True
+    assert judgment["evaluationState"] == "VALID"
+    assert judge_merge_allowed(judgment) is True
+
+
+def test_missing_execution_evidence_is_inconclusive_even_when_judge_says_approve():
+    rubric = _rubric()
+    judgment = normalize_judge_evaluation(
+        {
+            "phase": "rerun",
+            "recommendation": "APPROVE",
+            "rubric_hash": rubric["rubricHash"],
+            "task_scores": {
+                "failure_recovery": 0.8,
+                "task_completion": 0.8,
+            },
+            "system_scores": {
+                "evidence_verifiability": 0.8,
+                "tool_transaction_discipline": 0.8,
+                "scope_and_safety": 0.8,
+                "recovery_and_state_consistency": 0.8,
+                "efficiency_and_minimality": 0.8,
+            },
+            "evidence_refs": [],
+        },
+        expected_phase="rerun",
+        rubric=rubric,
+        baseline_score=30.0,
+        execution_evaluation={"cases": []},
+    )
+
+    assert judgment["objectiveScore"] is None
+    assert judgment["taskOutcomeState"] == "UNKNOWN"
+    assert judgment["evaluationState"] == "INCONCLUSIVE"
+    assert judge_merge_allowed(judgment) is False
 
 
 def test_judge_recommendation_is_advisory_but_only_valid_evaluation_can_enter_approval():

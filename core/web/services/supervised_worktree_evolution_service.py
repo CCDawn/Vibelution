@@ -1839,6 +1839,12 @@ def _real_judge_runner(project_root: Path, bundle_name: str, phase: str, context
         if phase == "rubric":
             normalized = normalize_judge_rubric(raw_judgment, task_contract=task_contract)
         else:
+            evaluation_key = "baselineEvaluation" if phase == "baseline" else "rerunEvaluation"
+            execution_evaluation = (
+                context.get(evaluation_key)
+                if isinstance(context.get(evaluation_key), dict)
+                else {}
+            )
             normalized = normalize_judge_evaluation(
                 raw_judgment,
                 expected_phase=phase,
@@ -1850,6 +1856,7 @@ def _real_judge_runner(project_root: Path, bundle_name: str, phase: str, context
                     and isinstance((context.get("baselineJudgment") or {}).get("score"), (int, float))
                     else None
                 ),
+                execution_evaluation=execution_evaluation,
             )
     except ValueError as exc:
         return {

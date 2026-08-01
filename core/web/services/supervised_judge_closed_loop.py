@@ -13,6 +13,7 @@ JUDGE_RECOMMENDATIONS = {"APPROVE", "REVISE", "REJECT", "INCONCLUSIVE"}
 JUDGE_DECISIONS = JUDGE_RECOMMENDATIONS
 RUBRIC_SCHEMA_VERSION = 1
 SYSTEM_RUBRIC_VERSION = "supervised-execution-v1"
+MAX_REPORTED_SCORE = 99.0
 COMPOSITION_WEIGHTS = {
     "taskSpecific": 0.7,
     "systemFixed": 0.3,
@@ -58,6 +59,9 @@ def build_judge_rubric_prompt(*, task_contract: dict[str, Any]) -> str:
         "也不要修改代码或执行合入。\n"
         "请根据本轮要评估的任务合同生成 2..8 个任务定向标准；这些标准必须能够由后续运行证据评分，"
         "不得加入与任务无关的偏好。系统固定评分表由后端追加，你不要重复生成。\n"
+        "任务定向标准必须包含 id=task_completion，且它只评价任务目标是否实际完成；"
+        "正确报告失败只属于系统过程质量，不能把未完成目标评为 task_completion 满分。"
+        "其余任务标准评价任务结果的定向质量，不得重复奖励事务纪律、安全或诚实停止。\n"
         "criteria 的 weight 使用 0..1 正数，后端会归一化；"
         "evidence_requirements 写明每个标准需要看到的证据。\n"
         "最后单独输出一行严格 JSON：\n"
@@ -112,6 +116,8 @@ def normalize_judge_rubric(
                 )[:8],
             }
         )
+    if "task_completion" not in seen_ids:
+        raise ValueError("Judge rubric requires a task_completion criterion.")
     weight_total = sum(raw_weights)
     for criterion in criteria:
         criterion["weight"] = round(float(criterion["weight"]) / weight_total, 6)
@@ -175,6 +181,9 @@ def build_judge_evaluation_prompt(
         f"{phase_instruction}\n"
         "必须逐项使用已冻结 rubric，task_scores 和 system_scores 的每项评分范围均为 0..1。"
         "不得修改标准、权重或 rubric_hash；缺少证据时在对应项降分并将 recommendation 设为 INCONCLUSIVE。\n"
+        "task_scores 只评价任务目标完成及任务结果质量；正确失败关账、范围控制和诚实停止属于 "
+        "system_scores，不能替代 task_completion。后端会用真实 successes/total 约束任务分，"
+        f"并把最终展示总分限制为最高 {MAX_REPORTED_SCORE:.0f} 分。\n"
         "在第二次评估中，rerunEvaluation.trustedWorkspaceAudit 是复跑后工作树是否偏离冻结候选版本的唯一权威；"
         "candidateRuntime.workspaceEvidence 和 extensionEvidence 只是候选进程补充证据，不能覆盖该结论。"
         "当 trustedWorkspaceAudit.status=verified 且 variantUnchanged=true 时，不得把冻结候选本身已有的文件"
@@ -248,6 +257,7 @@ def normalize_judge_evaluation(
     expected_phase: str,
     rubric: dict[str, Any],
     baseline_score: float | None = None,
+    execution_evaluation: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError("Judge judgment must be an object.")
@@ -268,25 +278,41 @@ def normalize_judge_evaluation(
         raise ValueError("Frozen Judge rubric criteria are missing.")
     task_scores = _criterion_scores(payload.get("task_scores"), task_criteria, group="task_scores")
     system_scores = _criterion_scores(payload.get("system_scores"), system_criteria, group="system_scores")
-    task_score = _weighted_score(task_scores, task_criteria)
+    raw_task_score = _weighted_score(task_scores, task_criteria)
     system_score = _weighted_score(system_scores, system_criteria)
+    objective_score, task_outcome_state = _objective_completion_score(execution_evaluation)
+    task_score = (
+        min(raw_task_score, objective_score)
+        if objective_score is not None
+        else raw_task_score
+    )
     composition = rubric.get("compositionWeights") if isinstance(rubric.get("compositionWeights"), dict) else {}
     task_weight = float(composition.get("taskSpecific") or 0.0)
     system_weight = float(composition.get("systemFixed") or 0.0)
     if round(task_weight + system_weight, 6) != 1.0:
         raise ValueError("Frozen Judge rubric composition weights must sum to 1.")
-    score = round(task_score * task_weight + system_score * system_weight, 3)
+    raw_score = round(task_score * task_weight + system_score * system_weight, 3)
+    score = min(raw_score, MAX_REPORTED_SCORE)
     resolved_baseline_score = score if phase == "baseline" else baseline_score
+    execution_evidence_missing = execution_evaluation is not None and objective_score is None
     return {
         "status": "success",
         "phase": phase,
         "evaluationState": (
-            "INCONCLUSIVE" if recommendation == "INCONCLUSIVE" else "VALID"
+            "INCONCLUSIVE"
+            if recommendation == "INCONCLUSIVE" or execution_evidence_missing
+            else "VALID"
         ),
         "recommendation": recommendation,
         "decision": recommendation,
         "score": score,
+        "rawScore": raw_score,
+        "scoreCapApplied": score < raw_score,
         "taskScore": task_score,
+        "rawTaskScore": raw_task_score,
+        "taskScoreCapped": task_score < raw_task_score,
+        "objectiveScore": objective_score,
+        "taskOutcomeState": task_outcome_state,
         "systemScore": system_score,
         "baselineScore": resolved_baseline_score,
         "rubricHash": expected_hash,
@@ -373,6 +399,56 @@ def _weighted_score(scores: dict[str, float], criteria: list[Any]) -> float:
     if weight_total <= 0.0:
         raise ValueError("Frozen Judge rubric has no positive criterion weights.")
     return round(total / weight_total, 3)
+
+
+def _objective_completion_score(
+    execution_evaluation: dict[str, Any] | None,
+) -> tuple[float | None, str]:
+    if execution_evaluation is None:
+        return None, "NOT_EVALUATED"
+    if not isinstance(execution_evaluation, dict):
+        return None, "UNKNOWN"
+    successes = execution_evaluation.get("successes")
+    total = execution_evaluation.get("total")
+    if (
+        not isinstance(successes, bool)
+        and isinstance(successes, (int, float))
+        and not isinstance(total, bool)
+        and isinstance(total, (int, float))
+    ):
+        successes_value = float(successes)
+        total_value = float(total)
+        if (
+            math.isfinite(successes_value)
+            and math.isfinite(total_value)
+            and total_value > 0
+            and 0 <= successes_value <= total_value
+        ):
+            return _objective_score_and_state(successes_value, total_value)
+
+    cases = execution_evaluation.get("cases")
+    if not isinstance(cases, list) or not cases:
+        return None, "UNKNOWN"
+    statuses = [
+        str(item.get("status") or "").strip().lower()
+        for item in cases
+        if isinstance(item, dict) and str(item.get("status") or "").strip()
+    ]
+    if len(statuses) != len(cases):
+        return None, "UNKNOWN"
+    successful = sum(
+        1 for status in statuses if status in {"success", "passed", "done", "completed"}
+    )
+    return _objective_score_and_state(float(successful), float(len(statuses)))
+
+
+def _objective_score_and_state(successes: float, total: float) -> tuple[float, str]:
+    score = round((successes / total) * 100.0, 3)
+    if score >= 100.0:
+        return score, "COMPLETE"
+    if score <= 0.0:
+        return score, "NOT_COMPLETED"
+    return score, "PARTIAL"
 
 
 def _stable_hash(value: Any) -> str:

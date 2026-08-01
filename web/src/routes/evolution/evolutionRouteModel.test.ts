@@ -7,6 +7,7 @@ import {
   canOpenProposalSourceRun,
   clampScore,
   compactTimestamp,
+  datasetCatalogStatusLabel,
   isSelfEvolutionCandidateItem,
   proposalDisplaySourceRun,
   proposalEditDraftFromDetail,
@@ -48,6 +49,17 @@ describe("evolutionRouteModel", () => {
     expect(toLimitInput(12)).toBe("12");
     expect(toLimitInput(0)).toBe("");
     expect(compactTimestamp("2026-07-26T12:34:56.789Z")).toBe("2026-07-26 12:34:56");
+  });
+
+  it("labels missing imported benchmark sources as not imported", () => {
+    expect(datasetCatalogStatusLabel({
+      name: "humaneval_jsonl",
+      effective: false,
+      selectable: false,
+      visibility: "hidden",
+      usabilityStatus: "missing_source",
+      sourceImportStatus: "not_imported",
+    } as never, "zh")).toBe("未导入");
   });
 
   it("submits the visible supervised dataset limit and ignores invalid limits", () => {

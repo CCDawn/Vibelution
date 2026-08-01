@@ -160,10 +160,17 @@ def run_workbench_session(
     )
 
 
-def list_dataset_choices(project_root: Path | None) -> list[dict]:
+def list_dataset_choices(
+    project_root: Path | None,
+    *,
+    include_environment_preflight: bool = True,
+) -> list[dict]:
     from .dataset_registry import list_dataset_status
 
-    return list_dataset_status(project_root, include_environment_preflight=True)
+    return list_dataset_status(
+        project_root,
+        include_environment_preflight=include_environment_preflight,
+    )
 
 
 def _iter_bundle_environment_contracts(payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -228,18 +235,78 @@ def bundle_environment_preflight_block_message(bundle_path: Path, *, project_roo
 
 
 def prepare_dataset_run(project_root: Path | None, dataset_name: str, dataset_limit: int | None) -> DatasetRunPreparation:
-    from .dataset_registry import materialize_dataset_bundle
+    from .dataset_registry import (
+        ensure_dataset_registry,
+        list_dataset_status,
+        materialize_dataset_bundle,
+    )
+
+    ensure_dataset_registry(project_root)
+    dataset_status = next(
+        (
+            item
+            for item in list_dataset_status(
+                project_root,
+                include_environment_preflight=True,
+            )
+            if str(item.get("name") or "") == dataset_name
+        ),
+        None,
+    )
+    if not dataset_status:
+        return DatasetRunPreparation(
+            dataset_name=dataset_name,
+            dataset_limit=dataset_limit,
+            bundle_name="-",
+            runnable=False,
+            adapter_status="unknown",
+            summary=f"dataset: {dataset_name}\nbundle: -\ncases: -\nadapter: unknown\nrunnable: False\npath: -",
+            blocked_message=f"{dataset_name} 未登记，监督运行不会启动。",
+        )
+    if not bool(dataset_status.get("effective")) or not bool(dataset_status.get("selectable")):
+        bundle_name = str(dataset_status.get("bundle_name") or "-")
+        adapter_status = str(dataset_status.get("adapter_status") or "blocked")
+        case_count = dataset_status.get("case_count")
+        blocked_message = str(
+            dataset_status.get("usability_reason")
+            or dataset_status.get("visibility_reason")
+            or f"{dataset_name} 当前不可运行。"
+        )
+        if adapter_status and adapter_status not in blocked_message:
+            blocked_message = f"{blocked_message} (adapter_status={adapter_status})"
+        return DatasetRunPreparation(
+            dataset_name=dataset_name,
+            dataset_limit=dataset_limit,
+            bundle_name=bundle_name,
+            runnable=False,
+            adapter_status=adapter_status,
+            summary="\n".join(
+                [
+                    f"dataset: {dataset_name}",
+                    f"bundle: {bundle_name}",
+                    f"cases: {case_count if case_count is not None else '-'}",
+                    f"adapter: {adapter_status}",
+                    "runnable: False",
+                    f"path: {dataset_status.get('source_path') or '-'}",
+                ]
+            ),
+            blocked_message=blocked_message,
+        )
 
     materialized = materialize_dataset_bundle(dataset_name, project_root=project_root, limit=dataset_limit)
     adapter_status = getattr(materialized, "adapter_status", "-")
     runnable = bool(getattr(materialized, "runnable", False))
+    if int(getattr(materialized, "case_count", 0) or 0) <= 0:
+        runnable = False
     environment_root = _resolve_project_root(project_root)
     environment_block = (
         bundle_environment_preflight_block_message(Path(getattr(materialized, "bundle_path", "")), project_root=environment_root)
         if runnable
         else ""
     )
-    if environment_block:
+    if int(getattr(materialized, "case_count", 0) or 0) <= 0:
+        blocked_message = "数据集当前没有可物化 case，监督运行不会启动。"
+    elif environment_block:
         runnable = False
         blocked_message = environment_block
     elif adapter_status == "requires_harbor_task_environment":

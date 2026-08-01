@@ -440,6 +440,8 @@ def test_real_judge_runner_retries_wrong_phase_in_same_session(tmp_path, monkeyp
 
     assert result["status"] == "success"
     assert result["phase"] == "baseline"
+    assert result["evaluationState"] == "INCONCLUSIVE"
+    assert result["taskOutcomeState"] == "UNKNOWN"
     assert result["conversationSessionId"] == "session-judge"
     assert len(calls) == 2
     assert calls[0]["conversation_session_id"] == "session-judge"
