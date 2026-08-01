@@ -430,14 +430,42 @@ def _compact_smoke_run(value: Any) -> dict[str, Any] | None:
     metrics_value = record.get("metrics")
     metrics = metrics_value if isinstance(metrics_value, dict) else {}
     bounded_metrics: dict[str, bool | float | int | str] = {}
-    for raw_key, raw_value in list(metrics.items())[:32]:
-        key = _text(raw_key, limit=120)
-        if not key or isinstance(raw_value, (dict, list, tuple, set)):
-            continue
+
+    def record_metric(
+        raw_key: Any,
+        raw_value: Any,
+        *,
+        prefix: str = "",
+        depth: int = 0,
+    ) -> None:
+        if len(bounded_metrics) >= 32:
+            return
+        key_part = _text(raw_key, limit=120)
+        key = _text(f"{prefix}.{key_part}" if prefix else key_part, limit=240)
+        if not key:
+            return
+        if isinstance(raw_value, dict) and depth < 2:
+            for nested_key, nested_value in raw_value.items():
+                record_metric(
+                    nested_key,
+                    nested_value,
+                    prefix=key,
+                    depth=depth + 1,
+                )
+                if len(bounded_metrics) >= 32:
+                    break
+            return
+        if isinstance(raw_value, (list, tuple, set, dict)):
+            return
         if isinstance(raw_value, (bool, int, float)):
             bounded_metrics[key] = raw_value
         elif raw_value is not None:
             bounded_metrics[key] = _text(raw_value, limit=240)
+
+    for metric_key, metric_value in metrics.items():
+        record_metric(metric_key, metric_value)
+        if len(bounded_metrics) >= 32:
+            break
     seed_value = record.get("seed")
     seed = seed_value if isinstance(seed_value, int) and not isinstance(seed_value, bool) else None
     return {
