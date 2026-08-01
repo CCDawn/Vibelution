@@ -840,8 +840,10 @@ def run_experiment_smoke_run(team_id: str, plan_id: str, payload: dict[str, Any]
         *s.smoke_runner.WHITELIST_ADAPTERS,
         *s.smoke_runner.NON_EXECUTABLE_ADAPTERS,
     }
-    if declared_adapter not in known_smoke_adapters:
-        declared_adapter = ""
+    if declared_adapter and declared_adapter not in known_smoke_adapters:
+        raise s.TeamWorkflowOrchestrationError(
+            f"Experiment plan declares an unavailable smoke adapter: {declared_adapter}."
+        )
     requested_adapter = s._trim_text(payload.get("adapter"), max_length=120)
     if declared_adapter and requested_adapter and declared_adapter != requested_adapter:
         raise s.TeamWorkflowOrchestrationError(
