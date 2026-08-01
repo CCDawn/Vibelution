@@ -13,6 +13,14 @@ describe("chat Agent permission preset mutation contract", () => {
     expect(mutationSource).not.toContain("/api/sessions/");
   });
 
+  it("retries once after agent config revision conflict with a fresh agent snapshot", () => {
+    expect(mutationSource).toContain("updateAgentPermissionPresetWithRevisionRetry");
+    expect(apiSource).toContain("updateAgentPermissionPresetWithRevisionRetry");
+    expect(apiSource).toContain("agent_update_conflict");
+    expect(apiSource).toContain("latestRevision");
+    expect(mutationSource).not.toContain("fetchJson");
+  });
+
   it("projects the active session Agent into the composer control", () => {
     expect(routeSource).toContain("useAgentPermissionPresetMutation");
     expect(routeSource).toContain("permissionControl:");

@@ -482,7 +482,11 @@ export function ConversationView({
   /** D2+: measured row heights by conversation row key. */
   const timelineRowHeightCacheRef = useRef<Map<string, number>>(new Map());
   const timelineRowResizeObserversRef = useRef<Map<string, ResizeObserver>>(new Map());
+  const timelineRowNodesRef = useRef<Map<string, HTMLDivElement>>(new Map());
+  /** Stable per-row ref callbacks so React does not null→node thrash ResizeObservers each render. */
+  const timelineVirtualRowRefCallbacksRef = useRef<Map<string, (node: HTMLDivElement | null) => void>>(new Map());
   const timelineHeightBumpFrameRef = useRef<number | null>(null);
+  const streamingPaintMetricsRef = useRef({ streamingMessageCount: 0, renderedTextLength: 0 });
   const [timelineRowHeightVersion, setTimelineRowHeightVersion] = useState(0);
   const [computerUseSessionResults, setComputerUseSessionResults] = useState<Record<string, ComputerUseResult>>({});
   const [computerUseSessionPending, setComputerUseSessionPending] = useState<Record<string, "confirm" | "cancel" | undefined>>({});
@@ -868,6 +872,13 @@ export function ConversationView({
     }),
     [agentRenderStatesByMessageId, showMentalSnapshots, streamingTimelineMessages],
   );
+  streamingPaintMetricsRef.current = {
+    streamingMessageCount: streamingTimelineMessages.length,
+    renderedTextLength: streamingTimelineMessages.reduce(
+      (total, message) => total + (agentRenderStatesByMessageId.get(message.id)?.renderedTextLength ?? 0),
+      0,
+    ),
+  };
   const hasSessionMeta = resolvedStats.length > 0 || latestToolCalls.length > 0;
   const hasMetaSection = showSessionOverview && (hasSessionMeta || Boolean(supplementalContent));
   const operationStateLabels = useMemo<OperationStateLabels>(
@@ -993,6 +1004,8 @@ export function ConversationView({
       observer.disconnect();
     }
     timelineRowResizeObserversRef.current.clear();
+    timelineRowNodesRef.current.clear();
+    timelineVirtualRowRefCallbacksRef.current.clear();
     setTimelineRowHeightVersion((version) => version + 1);
   }, [sessionId]);
 
@@ -1002,20 +1015,33 @@ export function ConversationView({
     }
     timelineHeightBumpFrameRef.current = window.requestAnimationFrame(() => {
       timelineHeightBumpFrameRef.current = null;
+      // Only recompute virtual spacers. Stick-to-bottom is owned by the timeline
+      // container ResizeObserver + streaming scroll signal — re-pinning here on every
+      // row measure caused ResizeObserver loops and visible flicker without content change.
       setTimelineRowHeightVersion((version) => version + 1);
-      // After batched measure updates, re-stick while following latest to absorb spacer changes.
-      if (shouldStickTimelineToBottomOnContentResize({
-        autoScrollToLatest,
-        followingLatest: followLatestRef.current,
-      })) {
-        scheduleTimelineScrollToBottom();
-      }
     });
-  }, [autoScrollToLatest]);
+  }, []);
 
   const bindTimelineVirtualRow = useCallback((rowKey: string, node: HTMLDivElement | null) => {
     const key = String(rowKey || "").trim();
     if (!key) {
+      return;
+    }
+    if (!node) {
+      const previous = timelineRowResizeObserversRef.current.get(key);
+      if (previous) {
+        previous.disconnect();
+        timelineRowResizeObserversRef.current.delete(key);
+      }
+      timelineRowNodesRef.current.delete(key);
+      return;
+    }
+    // Inline ref callbacks change identity every render; React then does null→node.
+    // Skip rebind when we already observe this exact node to avoid measure thrash.
+    if (
+      timelineRowNodesRef.current.get(key) === node
+      && timelineRowResizeObserversRef.current.has(key)
+    ) {
       return;
     }
     const previous = timelineRowResizeObserversRef.current.get(key);
@@ -1023,11 +1049,14 @@ export function ConversationView({
       previous.disconnect();
       timelineRowResizeObserversRef.current.delete(key);
     }
-    if (!node || typeof ResizeObserver === "undefined") {
+    if (typeof ResizeObserver === "undefined") {
+      timelineRowNodesRef.current.set(key, node);
       return;
     }
     const publish = (height: number) => {
-      if (recordConversationRowHeight(timelineRowHeightCacheRef.current, key, height, { minDeltaPx: 2 })) {
+      // Following latest: spinner / subpixel reflow often jitters 2–6px; ignore that noise.
+      const minDeltaPx = followLatestRef.current ? 8 : 2;
+      if (recordConversationRowHeight(timelineRowHeightCacheRef.current, key, height, { minDeltaPx })) {
         scheduleTimelineHeightVersionBump();
       }
     };
@@ -1041,7 +1070,26 @@ export function ConversationView({
     });
     observer.observe(node);
     timelineRowResizeObserversRef.current.set(key, observer);
+    timelineRowNodesRef.current.set(key, node);
   }, [scheduleTimelineHeightVersionBump]);
+  const bindTimelineVirtualRowLatestRef = useRef(bindTimelineVirtualRow);
+  bindTimelineVirtualRowLatestRef.current = bindTimelineVirtualRow;
+
+  const timelineVirtualRowRef = useCallback((rowKey: string) => {
+    const key = String(rowKey || "").trim();
+    if (!key) {
+      return (_node: HTMLDivElement | null) => undefined;
+    }
+    const existing = timelineVirtualRowRefCallbacksRef.current.get(key);
+    if (existing) {
+      return existing;
+    }
+    const callback = (node: HTMLDivElement | null) => {
+      bindTimelineVirtualRowLatestRef.current(key, node);
+    };
+    timelineVirtualRowRefCallbacksRef.current.set(key, callback);
+    return callback;
+  }, []);
 
   useLayoutEffect(() => {
     const anchor = historyScrollAnchorRef.current;
@@ -1091,21 +1139,19 @@ export function ConversationView({
     if (!streamingTimelineScrollSignal || !onStreamingFramePaint) {
       return;
     }
-    onStreamingFramePaint?.({
+    // Depend only on the scroll signal string — Map/array identity changes every
+    // parent render and was re-firing paint telemetry (and layout work) with no content delta.
+    const metrics = streamingPaintMetricsRef.current;
+    onStreamingFramePaint({
       sessionId,
       paintedAtMs: conversationPerformanceNowMs(),
-      streamingMessageCount: streamingTimelineMessages.length,
-      renderedTextLength: streamingTimelineMessages.reduce(
-        (total, message) => total + (agentRenderStatesByMessageId.get(message.id)?.renderedTextLength ?? 0),
-        0,
-      ),
+      streamingMessageCount: metrics.streamingMessageCount,
+      renderedTextLength: metrics.renderedTextLength,
       scrollSignal: streamingTimelineScrollSignal,
     });
   }, [
-    agentRenderStatesByMessageId,
     onStreamingFramePaint,
     sessionId,
-    streamingTimelineMessages,
     streamingTimelineScrollSignal,
   ]);
 
@@ -3261,7 +3307,7 @@ export function ConversationView({
               return (
               <div
                 key={rowKey}
-                ref={(node) => bindTimelineVirtualRow(rowKey, node)}
+                ref={timelineVirtualRowRef(rowKey)}
                 className={styles.timelineVirtualRow}
                 data-conversation-virtual-row={rowKey}
               >

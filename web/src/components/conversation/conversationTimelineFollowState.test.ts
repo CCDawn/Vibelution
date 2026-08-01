@@ -123,6 +123,9 @@ describe("conversation timeline follow state", () => {
     expect(recordConversationRowHeight(cache, "r1", 121, { minDeltaPx: 2 })).toBe(false);
     expect(recordConversationRowHeight(cache, "r1", 123, { minDeltaPx: 2 })).toBe(true);
     expect(recordConversationRowHeight(cache, "", 50)).toBe(false);
+    // Follow-latest noise band (spinner / subpixel): 8px threshold absorbs 2–6px jitter.
+    expect(recordConversationRowHeight(cache, "r1", 128, { minDeltaPx: 8 })).toBe(false);
+    expect(recordConversationRowHeight(cache, "r1", 132, { minDeltaPx: 8 })).toBe(true);
   });
 
   it("keeps a stable min tail window while following latest", () => {
