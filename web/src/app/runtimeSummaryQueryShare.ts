@@ -9,16 +9,23 @@ import type { RuntimeSummary } from "../api/types";
  * Keep the previous data reference when only those volatile fields move.
  */
 export function shareRuntimeSummaryIfOnlyVolatileChanged(
-  previous: RuntimeSummary | undefined,
-  next: RuntimeSummary | undefined,
-): RuntimeSummary | undefined {
-  if (next === undefined) {
+  previous: unknown,
+  next: unknown,
+): unknown {
+  if (next === undefined || next === null) {
     return previous;
   }
-  if (previous === undefined || previous === next) {
+  if (previous === undefined || previous === null || previous === next) {
     return next;
   }
-  if (runtimeSummaryEqualIgnoringVolatile(previous, next)) {
+  if (
+    typeof previous === "object"
+    && typeof next === "object"
+    && runtimeSummaryEqualIgnoringVolatile(
+      previous as RuntimeSummary,
+      next as RuntimeSummary,
+    )
+  ) {
     return previous;
   }
   return next;
