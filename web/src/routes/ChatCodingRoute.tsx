@@ -7,7 +7,6 @@ import {
   ChevronRight,
   HeartHandshake,
   MessageCircleHeart,
-  Plus,
   RotateCcw,
   Search,
   Sparkles,
@@ -365,10 +364,15 @@ export function ChatCodingRoute() {
   const [sessionImageUploadPending, setSessionImageUploadPending] = useState<Record<string, boolean>>({});
   const [sessionEditTargets, setSessionEditTargets] = useState<Record<string, { messageId: string; original: string }>>({});
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const editingSessionIdRef = useRef<string | null>(null);
   const [editingSessionTitle, setEditingSessionTitle] = useState("");
   const [sessionContextMenu, setSessionContextMenu] = useState<SessionContextMenuState | null>(null);
   const [agentContextMenu, setAgentContextMenu] = useState<AgentContextMenuState | null>(null);
   const [activeTurnLayersBySession, setActiveTurnLayersBySession] = useState<Record<string, ActiveTurnLayerState>>({});
+
+  useEffect(() => {
+    editingSessionIdRef.current = editingSessionId;
+  }, [editingSessionId]);
 
   const [tokenSpeedTracker, setTokenSpeedTracker] = useState<TokenSpeedTrackerState | null>(null);
   const [petActionFeedback, setPetActionFeedback] = useState("");
@@ -1195,6 +1199,7 @@ export function ChatCodingRoute() {
     setGroupManageModeDraft,
     setGroupManagePurposeDraft,
     setProjectBusDraft,
+    editingSessionIdRef,
     setEditingSessionId,
     setEditingSessionTitle,
   });
@@ -3122,7 +3127,7 @@ export function ChatCodingRoute() {
             >
               {projectBusActive ? (lang === "zh" ? "通知流" : "Notice stream") : (lang === "zh" ? "群聊" : "Group")}
             </VButton>
-          ) : agentSessionTabs.length > 0 || cliAgentRunTabs.length > 0 ? (
+          ) : selectedChatAgentId || agentSessionTabs.length > 0 || cliAgentRunTabs.length > 0 ? (
             <>
             <AgentSessionTabStrip
               activeSessionId={activeSessionId}
@@ -3131,6 +3136,9 @@ export function ChatCodingRoute() {
               buildSessionReferencePayload={buildSessionReferencePayload}
               contextMenuSessionId={contextMenuSessionId}
               cliAgentRuns={cliAgentRunTabs}
+              createPending={createSessionMutation.isPending}
+              createDisabled={!selectedChatAgentId}
+              deletePending={deleteSessionMutation.isPending}
               editingSessionId={editingSessionId}
               editingSessionTitle={editingSessionTitle}
               lang={lang}
@@ -3157,22 +3165,14 @@ export function ChatCodingRoute() {
                   void closeCliAgentRun(run);
                 }
               }}
+              onCreateSession={handleCreateSession}
+              onDeleteSession={handleDeleteSession}
               onOpenDirectSession={handleOpenDirectSession}
               onPrefetchDirectSession={handlePrefetchDirectSession}
               onRenameTitleChange={setEditingSessionTitle}
               onSetActiveTab={setActiveTab}
               onSubmitRename={submitRenameSession}
             />
-            <VButton
-              type="button"
-              className={styles.tab}
-              icon={<Plus size={14} />}
-              onClick={handleCreateSession}
-              isDisabled={createSessionMutation.isPending || !selectedChatAgentId}
-              title={lang === "zh" ? "在当前 Agent 下新建会话" : "New session for current Agent"}
-            >
-              <span>{lang === "zh" ? "新建会话" : "New session"}</span>
-            </VButton>
             </>
           ) : (
             <VButton

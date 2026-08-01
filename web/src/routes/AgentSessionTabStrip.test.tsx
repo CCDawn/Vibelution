@@ -93,6 +93,8 @@ function renderStrip(overrides: Partial<ComponentProps<typeof AgentSessionTabStr
     onDragReference: () => undefined,
     onOpenDirectSession: () => undefined,
     onOpenCliAgentRun: () => undefined,
+    onCreateSession: () => undefined,
+    onDeleteSession: () => undefined,
     onRenameTitleChange: () => undefined,
     onSetActiveTab: () => undefined,
     onSubmitRename: () => undefined,
@@ -142,22 +144,24 @@ describe("AgentSessionTabStrip", () => {
     expect(markup).toContain("子会话摘要");
     expect(markup).not.toContain("agentSessionTabChild");
     expect(markup).toContain("会话进行 · running · GPT 5.5");
-    expect(markup).toContain("会话进行");
+    expect(markup).not.toContain(">会话进行</span>");
     expect(markup).not.toContain("空闲");
     expect(markup).not.toContain("agentSessionTabStatusDotIdle");
-    expect(markup).toContain("当前");
     expect(markup).toContain("当前会话");
     expect(markup).toContain("data-session-tab-active=\"true\"");
     expect(markup).toContain("data-session-tab-active=\"false\"");
     expect(markup).toContain("agentSessionTabStatusRunning");
     expect(markup).toContain("agentSessionTabMainActionActive");
-    expect(markup).toContain("agentSessionTabCurrentBadge");
+    expect(markup).not.toContain("agentSessionTabCurrentBadge");
     expect(markup).toContain("agentSessionTabTitleActive");
     expect(markup).toContain("aria-current=\"true\"");
     expect(markup).toContain("role=\"tablist\"");
     expect(markup.match(/role="tab"/g)?.length).toBe(2);
+    expect(markup.match(/role="presentation"/g)?.length).toBe(2);
     expect(markup).toContain("aria-selected=\"true\"");
     expect(markup).toContain("aria-selected=\"false\"");
+    expect(markup).toContain('tabindex="0"');
+    expect(markup).toContain('tabindex="-1"');
   });
 
   it("uses a browser-style tab rail for one Agent managing multiple sessions", () => {
@@ -185,8 +189,8 @@ describe("AgentSessionTabStrip", () => {
     });
 
     expect(markup).toContain("agentSessionTabGroup");
-    expect(markup).toContain("w-full");
     expect(markup).toContain("flex-nowrap");
+    expect(markup).toContain("agentSessionTabRail");
     expect(markup).toContain("overflow-x-auto");
     expect(markup.match(/role="tab"/g)?.length).toBe(3);
     expect(markup).toContain("资料核对");
@@ -195,7 +199,7 @@ describe("AgentSessionTabStrip", () => {
     expect(markup).toContain("aria-selected=\"false\"");
   });
 
-  it("pairs status indicators with short readable status labels and no gray idle dots", () => {
+  it("keeps activity semantics in accessible labels without visible status copy", () => {
     const markup = renderStrip({
       sessions: [
         session({ id: "session-running", status: "running" }),
@@ -210,9 +214,9 @@ describe("AgentSessionTabStrip", () => {
     expect(markup).toContain("agentSessionTabStatusError");
     expect(markup).toContain("agentSessionTabStatusCompleted");
     expect(markup).not.toContain("agentSessionTabStatusDotIdle");
-    expect(markup).toContain("需审批");
-    expect(markup).toContain("出错");
-    expect(markup).toContain("已完成");
+    expect(markup).not.toContain(">需审批</span>");
+    expect(markup).not.toContain(">出错</span>");
+    expect(markup).not.toContain(">已完成</span>");
     expect(markup).not.toContain("空闲");
     expect(markup).not.toContain(">running</span>");
     expect(markup).not.toContain(">error</span>");
@@ -226,7 +230,7 @@ describe("AgentSessionTabStrip", () => {
     });
     expect(markup).toContain("agentSessionTabStatusRunning");
     expect(markup).toContain("agentSessionTabStatusSpinner");
-    expect(markup).toContain("会话进行");
+    expect(markup).not.toContain(">会话进行</span>");
   });
 
   it("hides completed indicator after the session activity is marked seen", () => {
@@ -275,7 +279,91 @@ describe("AgentSessionTabStrip", () => {
     });
     expect(markup).toContain("终端 A");
     expect(markup).toContain("agentSessionTabStatusRunning");
-    expect(markup).toContain("会话进行");
+    expect(markup).not.toContain(">会话进行</span>");
+  });
+
+  it("renders adjacent close controls and a final icon-only create control", () => {
+    const markup = renderStrip();
+
+    expect(markup.match(/agentSessionTabCloseButton/g)?.length).toBe(2);
+    expect(markup).toContain('aria-label="deleteSession 顾明澈"');
+    expect(markup).toContain('aria-label="deleteSession 子任务标题"');
+    expect(markup).toContain("agentSessionTabCreateButton");
+    expect(markup).toContain('aria-label="在当前 Agent 下新建会话"');
+    expect(markup).not.toContain(">新建会话</span>");
+  });
+
+  it("wires roving tab focus keys while keeping close controls outside tab semantics", () => {
+    const markup = renderStrip();
+
+    expect(markup.match(/role="tab"/g)?.length).toBe(2);
+    expect(markup.match(/role="presentation"/g)?.length).toBe(2);
+    expect(markup).toContain('id="agent-session-tab-session-session-root"');
+    expect(markup).toContain('id="agent-session-tab-session-session-child"');
+  });
+
+  it("keeps the create control outside tablist ownership when there are no sessions", () => {
+    const markup = renderStrip({ activeSessionId: null, sessions: [], cliAgentRuns: [] });
+
+    expect(markup).not.toContain('role="tablist"');
+    expect(markup).not.toContain('role="tab"');
+    expect(markup).toContain("agentSessionTabCreateButton");
+  });
+
+  it("keeps one session keyboard-focusable while a file workspace tab is active", () => {
+    const markup = renderStrip({
+      activeSessionId: "session-root",
+      workspaceActiveTab: "file:C:/workspace/report.md",
+      sessions: [session({ id: "session-root" }), session({ id: "session-two" })],
+    });
+
+    expect(markup.match(/tabindex="0"/g)?.length).toBe(1);
+    expect(markup.match(/tabindex="-1"/g)?.length).toBe(1);
+  });
+
+  it("does not declare an empty tablist while the only session is being renamed", () => {
+    const markup = renderStrip({
+      activeSessionId: "session-root",
+      sessions: [session({ id: "session-root" })],
+      editingSessionId: "session-root",
+      editingSessionTitle: "新名称",
+    });
+
+    expect(markup).not.toContain('role="tablist"');
+    expect(markup).not.toContain('role="tab"');
+    expect(markup).toContain("agentSessionTabTitleInput");
+  });
+
+  it("disables close for a busy session and create while pending", () => {
+    const markup = renderStrip({
+      sessions: [session({ id: "session-running", status: "running" })],
+      createPending: true,
+    });
+
+    expect(markup).toContain('aria-label="deleteSessionBusy 顾明澈"');
+    expect(markup.match(/disabled=""/g)?.length).toBe(2);
+  });
+
+  it("disables every close control while one delete request is pending", () => {
+    const markup = renderStrip({
+      sessions: [
+        session({ id: "session-one", status: "idle" }),
+        session({ id: "session-two", status: "idle" }),
+      ],
+      deletePending: true,
+    });
+
+    expect(markup.match(/disabled=""/g)?.length).toBe(2);
+    expect(markup.match(/aria-label="deleteSessionBusy 顾明澈"/g)?.length).toBe(2);
+  });
+
+  it("uses currentPhase before stale summary status for delete availability", () => {
+    const markup = renderStrip({
+      sessions: [session({ id: "session-transitioning", status: "idle", currentPhase: "running" })],
+    });
+
+    expect(markup).toContain('aria-label="deleteSessionBusy 顾明澈"');
+    expect(markup).toContain('disabled=""');
   });
 
   it("marks the active session tab with selection chrome independent of status color", () => {

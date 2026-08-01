@@ -1,5 +1,5 @@
-import { Bot, Check, LoaderCircle, SquareTerminal, X } from "lucide-react";
-import type { DragEvent, MouseEvent as ReactMouseEvent } from "react";
+import { Bot, Check, LoaderCircle, Plus, SquareTerminal, X } from "lucide-react";
+import type { DragEvent, KeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
 
 import type { AgentInstance, SessionReferenceAttachment, SessionSummary } from "../api/types";
 import { VButton, VIconButton, VNativeInput } from "../components/vui";
@@ -11,6 +11,7 @@ import {
   type SessionActivityTone,
 } from "./sessionActivityIndicator";
 import styles from "./AgentSessionTabStrip.styles";
+import { isBusyPhase } from "./chat/chatCodingRouteViewModel";
 
 export type CliAgentRunTab = {
   id: string;
@@ -108,6 +109,9 @@ export type AgentSessionTabStripProps = {
   renameSessionId: string;
   resolveModelLabel: (modelId: string) => string | undefined;
   cliAgentRuns?: CliAgentRunTab[];
+  createPending?: boolean;
+  createDisabled?: boolean;
+  deletePending?: boolean;
   sessions: SessionSummary[];
   /** Session ids with an active runtime chat_turn (green spinner). */
   runtimeRunningSessionIds?: readonly string[];
@@ -123,10 +127,16 @@ export type AgentSessionTabStripProps = {
   onPrefetchDirectSession?: (sessionId: string) => void;
   onOpenCliAgentRun?: (runId: string) => void;
   onCloseCliAgentRun?: (runId: string) => void;
+  onCreateSession: () => void;
+  onDeleteSession: (session: SessionSummary) => void;
   onRenameTitleChange: (title: string) => void;
   onSetActiveTab: (sessionId: string, tab: "agent") => void;
   onSubmitRename: (session: SessionSummary) => void;
 };
+
+function agentSessionTabElementId(kind: "session" | "cli", id: string) {
+  return `agent-session-tab-${kind}-${encodeURIComponent(id)}`;
+}
 
 export function AgentSessionTabStrip({
   activeSessionId,
@@ -141,6 +151,9 @@ export function AgentSessionTabStrip({
   renameSessionId,
   resolveModelLabel,
   cliAgentRuns = [],
+  createPending = false,
+  createDisabled = false,
+  deletePending = false,
   sessions,
   runtimeRunningSessionIds = [],
   sessionIdsNeedingApproval = [],
@@ -154,26 +167,76 @@ export function AgentSessionTabStrip({
   onPrefetchDirectSession,
   onOpenCliAgentRun,
   onCloseCliAgentRun,
+  onCreateSession,
+  onDeleteSession,
   onRenameTitleChange,
   onSetActiveTab,
   onSubmitRename,
 }: AgentSessionTabStripProps) {
-  if (cliAgentRuns.length === 0 && sessions.length === 0) {
-    return null;
-  }
   const approvalSessionIds = new Set(
     sessionIdsNeedingApproval.map((id) => String(id || "").trim()).filter(Boolean),
   );
   const runtimeSessionIds = new Set(
     runtimeRunningSessionIds.map((id) => String(id || "").trim()).filter(Boolean),
   );
+  const navigationTabs = [
+    ...sessions.map((session) => ({ kind: "session" as const, id: session.id })),
+    ...cliAgentRuns.map((run) => ({ kind: "cli" as const, id: run.id })),
+  ];
+  const keyboardTabs = navigationTabs.filter((tab) => (
+    tab.kind !== "session" || tab.id !== editingSessionId
+  ));
+  const activeKeyboardTabIndex = Math.max(
+    0,
+    keyboardTabs.findIndex((tab) => (
+      activeCliAgentRunId
+        ? tab.kind === "cli" && tab.id === activeCliAgentRunId
+        : tab.kind === "session" && tab.id === activeSessionId
+    )),
+  );
+  const handleTabKeyDown = (
+    event: KeyboardEvent<HTMLButtonElement>,
+    tabIndex: number,
+  ) => {
+    let nextIndex: number | null = null;
+    if (event.key === "ArrowRight") {
+      nextIndex = (tabIndex + 1) % keyboardTabs.length;
+    } else if (event.key === "ArrowLeft") {
+      nextIndex = (tabIndex - 1 + keyboardTabs.length) % keyboardTabs.length;
+    } else if (event.key === "Home") {
+      nextIndex = 0;
+    } else if (event.key === "End") {
+      nextIndex = keyboardTabs.length - 1;
+    }
+    if (nextIndex === null || nextIndex < 0) {
+      return;
+    }
+    const nextTab = keyboardTabs[nextIndex];
+    if (!nextTab) {
+      return;
+    }
+    event.preventDefault();
+    if (nextTab.kind === "session") {
+      if (activeSessionId === nextTab.id) {
+        onSetActiveTab(nextTab.id, "agent");
+      } else {
+        onOpenDirectSession(nextTab.id);
+      }
+    } else {
+      onOpenCliAgentRun?.(nextTab.id);
+    }
+    requestAnimationFrame(() => {
+      document.getElementById(agentSessionTabElementId(nextTab.kind, nextTab.id))?.focus();
+    });
+  };
 
   return (
-    <div
-      className={styles.agentSessionTabGroup}
-      role="tablist"
-      aria-label={lang === "zh" ? "Agent 会话" : "Agent sessions"}
-    >
+    <div className={styles.agentSessionTabRail}>
+      <div
+        className={styles.agentSessionTabGroup}
+        role={keyboardTabs.length > 0 ? "tablist" : undefined}
+        aria-label={keyboardTabs.length > 0 ? (lang === "zh" ? "Agent 会话" : "Agent sessions") : undefined}
+      >
       {sessions.map((session) => {
         const sessionAgent = session.agentId ? agentsById.get(session.agentId) : undefined;
         const sessionDisplay = sessionAgentDisplayInfo(session, sessionAgent, lang, resolveModelLabel);
@@ -207,6 +270,8 @@ export function AgentSessionTabStrip({
           .join(" · ");
         const tabContextTarget = contextMenuSessionId === session.id;
         const tabEditing = editingSessionId === session.id;
+        const keyboardIndex = keyboardTabs.findIndex((tab) => tab.kind === "session" && tab.id === session.id);
+        const deleteDisabled = isBusyPhase(session.currentPhase || session.status) || deletePending;
         const tabClassName = [
           styles.agentSessionTab,
           styles.agentSessionTabRoot,
@@ -225,9 +290,8 @@ export function AgentSessionTabStrip({
             <div
               key={session.id}
               className={tabClassName}
-              role="tab"
-              aria-selected={tabActive}
-              aria-current={tabActive ? "true" : undefined}
+              role="presentation"
+              data-agent-session-tab-container
               onContextMenu={(event) => onContextMenu(event, session)}
               title={sessionHoverTitle}
             >
@@ -253,6 +317,13 @@ export function AgentSessionTabStrip({
                       event.preventDefault();
                       onCancelRename();
                     }
+                  }}
+                  onBlur={(event) => {
+                    const nextFocus = event.relatedTarget;
+                    if (nextFocus instanceof Node && event.currentTarget.closest("[data-agent-session-tab-container]")?.contains(nextFocus)) {
+                      return;
+                    }
+                    onSubmitRename(session);
                   }}
                   aria-label={t("renameSession")}
                 />
@@ -291,10 +362,9 @@ export function AgentSessionTabStrip({
         return (
           <div
             key={session.id}
-            className={tabClassName}
-            role="tab"
-            aria-selected={tabActive}
-            aria-current={tabActive ? "true" : undefined}
+            className={`${tabClassName} ${styles.agentSessionTabClosable}`}
+            role="presentation"
+            data-agent-session-tab-container
             {...dragReferenceProps}
             onContextMenu={(event) => onContextMenu(event, session)}
             title={sessionHoverTitle}
@@ -302,6 +372,12 @@ export function AgentSessionTabStrip({
             <VButton
               type="button"
               className={tabMainActionClassName}
+              id={agentSessionTabElementId("session", session.id)}
+              role="tab"
+              aria-selected={tabActive}
+              aria-current={tabActive ? "true" : undefined}
+              tabIndex={keyboardIndex === activeKeyboardTabIndex ? 0 : -1}
+              onKeyDown={(event) => handleTabKeyDown(event, keyboardIndex)}
               data-session-tab-active={tabActive ? "true" : "false"}
               onPointerEnter={() => onPrefetchDirectSession?.(session.id)}
               onFocus={() => onPrefetchDirectSession?.(session.id)}
@@ -331,11 +407,6 @@ export function AgentSessionTabStrip({
                 <Bot size={14} />
               </span>
               <span className={styles.agentSessionTabTitleBlock}>
-                {tabActive ? (
-                  <span className={styles.agentSessionTabCurrentBadge}>
-                    {lang === "zh" ? "当前" : "Now"}
-                  </span>
-                ) : null}
                 <span
                   className={[
                     styles.agentSessionTabTitle,
@@ -345,12 +416,7 @@ export function AgentSessionTabStrip({
                 >{sessionTitle}</span>
               </span>
               {statusTone !== "none" ? (
-                <span
-                  className={[
-                    styles.agentSessionTabStatus,
-                    tabActive ? "" : styles.agentSessionTabStatusMuted,
-                  ].filter(Boolean).join(" ")}
-                >
+                <span className={styles.agentSessionTabStatus}>
                   <span
                     className={statusIndicatorClassName}
                     aria-hidden="true"
@@ -360,20 +426,21 @@ export function AgentSessionTabStrip({
                       <LoaderCircle size={11} aria-hidden="true" className={styles.agentSessionTabStatusSpinner} />
                     ) : null}
                   </span>
-                  {statusShortLabel ? (
-                    <span
-                      className={[
-                        styles.agentSessionTabStatusText,
-                        tabActive ? styles.agentSessionTabStatusTextActive : "",
-                      ].filter(Boolean).join(" ")}
-                      title={sessionStatusTitle}
-                    >
-                      {statusShortLabel}
-                    </span>
-                  ) : null}
                 </span>
               ) : null}
             </VButton>
+            <VIconButton
+              type="button"
+              className={styles.agentSessionTabCloseButton}
+              onClick={(event) => {
+                event.stopPropagation();
+                onDeleteSession(session);
+              }}
+              isDisabled={deleteDisabled}
+              title={deleteDisabled ? t("deleteSessionBusy") : t("deleteSession")}
+              label={`${deleteDisabled ? t("deleteSessionBusy") : t("deleteSession")} ${sessionTitle}`}
+              icon={<X size={13} />}
+            />
           </div>
         );
       })}
@@ -393,18 +460,24 @@ export function AgentSessionTabStrip({
           styles.agentSessionTabCli,
           tabActive ? styles.agentSessionTabActive : "",
         ].filter(Boolean).join(" ");
+        const keyboardIndex = keyboardTabs.findIndex((tab) => tab.kind === "cli" && tab.id === run.id);
         return (
           <div
             key={run.id}
             className={`${tabClassName} ${styles.agentSessionTabClosable}`}
-            role="tab"
-            aria-selected={tabActive}
-            aria-current={tabActive ? "true" : undefined}
+            role="presentation"
+            data-agent-session-tab-container
             title={title}
           >
             <VButton
               type="button"
               className={tabMainActionClassName}
+              id={agentSessionTabElementId("cli", run.id)}
+              role="tab"
+              aria-selected={tabActive}
+              aria-current={tabActive ? "true" : undefined}
+              tabIndex={keyboardIndex === activeKeyboardTabIndex ? 0 : -1}
+              onKeyDown={(event) => handleTabKeyDown(event, keyboardIndex)}
               data-session-tab-active={tabActive ? "true" : "false"}
               onPress={() => onOpenCliAgentRun?.(run.id)}
               title={title}
@@ -426,11 +499,6 @@ export function AgentSessionTabStrip({
                 <SquareTerminal size={14} />
               </span>
               <span className={styles.agentSessionTabTitleBlock}>
-                {tabActive ? (
-                  <span className={styles.agentSessionTabCurrentBadge}>
-                    {lang === "zh" ? "当前" : "Now"}
-                  </span>
-                ) : null}
                 <span
                   className={[
                     styles.agentSessionTabTitle,
@@ -440,12 +508,7 @@ export function AgentSessionTabStrip({
                 >{run.title}</span>
               </span>
               {statusTone !== "none" ? (
-                <span
-                  className={[
-                    styles.agentSessionTabStatus,
-                    tabActive ? "" : styles.agentSessionTabStatusMuted,
-                  ].filter(Boolean).join(" ")}
-                >
+                <span className={styles.agentSessionTabStatus}>
                   <span
                     className={statusIndicatorClassName}
                     aria-hidden="true"
@@ -455,17 +518,6 @@ export function AgentSessionTabStrip({
                       <LoaderCircle size={11} aria-hidden="true" className={styles.agentSessionTabStatusSpinner} />
                     ) : null}
                   </span>
-                  {statusShortLabel ? (
-                    <span
-                      className={[
-                        styles.agentSessionTabStatusText,
-                        tabActive ? styles.agentSessionTabStatusTextActive : "",
-                      ].filter(Boolean).join(" ")}
-                      title={statusShortLabel}
-                    >
-                      {statusShortLabel}
-                    </span>
-                  ) : null}
                 </span>
               ) : null}
             </VButton>
@@ -483,6 +535,16 @@ export function AgentSessionTabStrip({
           </div>
         );
       })}
+      </div>
+      <VIconButton
+        type="button"
+        className={styles.agentSessionTabCreateButton}
+        onPress={onCreateSession}
+        isDisabled={createPending || createDisabled}
+        title={lang === "zh" ? "在当前 Agent 下新建会话" : "New session for current Agent"}
+        label={lang === "zh" ? "在当前 Agent 下新建会话" : "New session for current Agent"}
+        icon={<Plus size={14} />}
+      />
     </div>
   );
 }

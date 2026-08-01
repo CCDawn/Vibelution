@@ -485,7 +485,7 @@ export function useChatWorkspaceActions({
 
   const handleDeleteSession = useCallback((session: SessionSummary) => {
     setSessionContextMenu(null);
-    if (isBusyPhase(session.currentPhase || session.status)) {
+    if (deleteSessionMutation.isPending || isBusyPhase(session.currentPhase || session.status)) {
       setSessionComposerErrors((current) => ({
         ...current,
         [session.id]: t("deleteSessionBusy"),
