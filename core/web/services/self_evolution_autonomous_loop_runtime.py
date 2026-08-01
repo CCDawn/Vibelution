@@ -203,8 +203,7 @@ def build_autonomous_loop_hooks(
         )
         executor_binding = deepcopy(bindings["executor"])
         executor_binding["workspacePath"] = worktree_path
-        turn = _run_successful_turn(
-            dependencies.run_role_turn,
+        turn = dependencies.run_role_turn(
             role="executor",
             binding=executor_binding,
             run_id=run_id,
@@ -215,6 +214,9 @@ def build_autonomous_loop_hooks(
             max_iterations=EXECUTOR_MAX_ITERATIONS,
             allowed_target_paths=allowed_target_paths,
         )
+        executor_exhausted = _turn_max_iteration_exhausted(turn)
+        if not executor_exhausted:
+            turn = _require_successful_turn(turn)
         inspection = _inspect_candidate(
             dependencies,
             run_id=run_id,
@@ -227,19 +229,25 @@ def build_autonomous_loop_hooks(
             run_id=run_id,
             target_files=target_files,
         )
-        if not changed_files:
+        mutation_required = not changed_files
+        transaction_opened = _result_used_tool(
+            turn["result"],
+            "open_evolution_transaction_tool",
+        )
+        validation_carryover = deepcopy(turn.get("carryover") or {})
+        if mutation_required:
             tool_call_count = _result_tool_call_count(turn["result"])
             _record_executor_retry(
                 run_id=run_id,
                 reason=(
-                    "no_tool_calls_and_no_changed_files"
-                    if tool_call_count == 0
-                    else "tool_calls_but_no_changed_files"
+                    "max_iterations_exhausted_no_changed_files"
+                    if executor_exhausted
+                    else (
+                        "no_tool_calls_and_no_changed_files"
+                        if tool_call_count == 0
+                        else "tool_calls_but_no_changed_files"
+                    )
                 ),
-            )
-            transaction_opened = _result_used_tool(
-                turn["result"],
-                "open_evolution_transaction_tool",
             )
             mutation_turn = _run_successful_turn(
                 dependencies.run_role_turn,
@@ -269,6 +277,10 @@ def build_autonomous_loop_hooks(
                 raise AutonomousLoopRuntimeError(
                     "Candidate has no changed files after evolution."
                 )
+            validation_carryover = deepcopy(
+                mutation_turn.get("carryover") or {}
+            )
+        if mutation_required or executor_exhausted:
             validation_tools = list(EXECUTOR_VALIDATION_TOOLS)
             if not transaction_opened:
                 validation_tools.insert(0, "open_evolution_transaction_tool")
@@ -282,7 +294,7 @@ def build_autonomous_loop_hooks(
                     changed_files=changed_files,
                     transaction_opened=transaction_opened,
                 ),
-                carryover=deepcopy(mutation_turn.get("carryover") or {}),
+                carryover=validation_carryover,
                 runtime_tool_grants=validation_tools,
                 runtime_tool_source=AUTONOMOUS_RUNTIME_TOOL_SOURCE,
                 max_iterations=EXECUTOR_VALIDATION_MAX_ITERATIONS,
@@ -378,12 +390,23 @@ def _run_successful_turn(
     return _require_successful_turn(runner(**kwargs))
 
 
-def _require_successful_turn(turn: Any) -> dict[str, Any]:
+def _require_turn_result(turn: Any) -> dict[str, Any]:
     if not isinstance(turn, dict):
         raise AutonomousLoopRuntimeError("Agent turn returned an invalid result.")
     result = turn.get("result")
     if not isinstance(result, dict):
         raise AutonomousLoopRuntimeError("Agent turn result is missing.")
+    return turn
+
+
+def _turn_max_iteration_exhausted(turn: Any) -> bool:
+    validated_turn = _require_turn_result(turn)
+    return bool(validated_turn["result"].get("max_iteration_exhausted"))
+
+
+def _require_successful_turn(turn: Any) -> dict[str, Any]:
+    validated_turn = _require_turn_result(turn)
+    result = validated_turn["result"]
     status = str(result.get("status") or "").strip().lower()
     if status in {"failed", "stopped", "cancelled", "error"}:
         detail = str(
@@ -392,7 +415,7 @@ def _require_successful_turn(turn: Any) -> dict[str, Any]:
             or f"Agent turn ended with status={status}"
         ).strip()
         raise AutonomousLoopRuntimeError(detail)
-    return turn
+    return validated_turn
 
 
 def _run_bounded_analysis_turn(
