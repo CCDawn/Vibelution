@@ -200,7 +200,7 @@ def challenge_cup_experiment_writeback_tool(
                     team_id,
                     bound_project_id,
                     bound_task_id,
-                    status="completed",
+                    status="running",
                     result_refs=result_refs,
                 )
             )

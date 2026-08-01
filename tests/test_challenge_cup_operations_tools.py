@@ -67,7 +67,7 @@ def test_challenge_cup_experiment_tool_wraps_ledger_without_execution(monkeypatc
     assert blocked_events[-1]["level"] == "warning"
 
 
-def test_experiment_tool_binds_project_task_and_completes_writeback(
+def test_experiment_tool_binds_project_task_without_finishing_active_turn(
     monkeypatch,
 ):
     updates = []
@@ -147,10 +147,97 @@ def test_experiment_tool_binds_project_task_and_completes_writeback(
             "research-team",
             "project-1",
             "task-design-1",
-            {"status": "completed", "result_refs": ["plan-project-1"]},
+            {"status": "running", "result_refs": ["plan-project-1"]},
         )
     ]
-    assert result["task"]["status"] == "completed"
+    assert result["task"]["status"] == "running"
+
+
+def test_experiment_tool_allows_corrective_writeback_in_same_active_turn(
+    monkeypatch,
+):
+    state = {"status": "running"}
+    updates = []
+    created_payloads = []
+
+    def require_task(_team_id, project_id, task_id, **_kwargs):
+        if state["status"] != "running":
+            raise RuntimeError("Research project Agent task is no longer active.")
+        return {
+            "taskId": task_id,
+            "taskKind": "experiment_design",
+            "agentId": "agent-planner",
+            "researchProjectId": project_id,
+            "sessionId": "session-project-1",
+            "status": state["status"],
+            "turn": {"turnId": "turn-design-1"},
+        }
+
+    def update_task(_team_id, _project_id, task_id, **kwargs):
+        state["status"] = kwargs["status"]
+        updates.append(dict(kwargs))
+        return {
+            "taskId": task_id,
+            "status": state["status"],
+            "resultRefs": list(kwargs.get("result_refs") or []),
+        }
+
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "require_research_project_agent_task",
+        require_task,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "create_experiment_plan",
+        lambda team_id, payload: created_payloads.append(dict(payload))
+        or {
+            "teamId": team_id,
+            "plan": {
+                "planId": "plan-project-1",
+                "researchProjectId": payload["researchProjectId"],
+            },
+        },
+    )
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "update_research_project_agent_task_status",
+        update_task,
+    )
+
+    first = json.loads(
+        challenge_cup_experiment_writeback_tool(
+            team_id="research-team",
+            research_project_id="project-1",
+            task_id="task-design-1",
+            operation="create_plan",
+            payload_json='{"title":"Initial plan"}',
+            recorded_by_agent="agent-planner",
+        )
+    )
+    second = json.loads(
+        challenge_cup_experiment_writeback_tool(
+            team_id="research-team",
+            research_project_id="project-1",
+            task_id="task-design-1",
+            operation="create_plan",
+            payload_json='{"title":"Corrected plan"}',
+            recorded_by_agent="agent-planner",
+        )
+    )
+
+    assert first["status"] == "ok"
+    assert second["status"] == "ok"
+    assert [item["title"] for item in created_payloads] == [
+        "Initial plan",
+        "Corrected plan",
+    ]
+    assert updates == [
+        {"status": "running", "result_refs": ["plan-project-1"]},
+        {"status": "running", "result_refs": ["plan-project-1"]},
+    ]
+    assert state["status"] == "running"
 
 
 def test_experiment_tool_infers_project_task_from_current_runtime(
@@ -286,7 +373,7 @@ def test_experiment_tool_infers_project_task_from_current_runtime(
             "research-team",
             "project-1",
             "task-design-1",
-            {"status": "completed", "result_refs": ["plan-runtime-bound"]},
+            {"status": "running", "result_refs": ["plan-runtime-bound"]},
         )
     ]
 
