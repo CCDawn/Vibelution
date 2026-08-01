@@ -264,6 +264,11 @@ def test_supervised_runtime_grants_bypass_approval_without_overriding_persistent
     assert approval_requirements["open_evolution_transaction_tool"] == "never"
     assert approval_requirements["cli_tool"] == "never"
     assert approval_requirements["close_evolution_transaction_tool"] == "always"
+    assert runtime_policy["allowedTools"] == [
+        "close_evolution_transaction_tool",
+        "open_evolution_transaction_tool",
+        "cli_tool",
+    ]
     assert persistent_policy["approvalOverrides"] == {
         "close_evolution_transaction_tool": "always",
     }
@@ -286,7 +291,18 @@ def test_supervised_runtime_grants_bypass_approval_without_overriding_persistent
     }
     assert self_evolution_approvals["grep_search_tool"] == "never"
     assert self_evolution_approvals["apply_patch_tool"] == "never"
+    assert self_evolution_policy["allowedTools"] == [
+        "grep_search_tool",
+        "apply_patch_tool",
+    ]
+    assert "close_evolution_transaction_tool" not in self_evolution_policy["allowedTools"]
     assert self_evolution_policy["runtimeToolSource"] == "self_evolution_autonomous_loop"
+    self_evolution_no_tools_policy = agent_directory_service._with_runtime_tool_grants(
+        persistent_policy,
+        [],
+        source="self_evolution_autonomous_loop",
+    )
+    assert self_evolution_no_tools_policy["allowedTools"] == []
     non_supervised_policy = agent_directory_service._with_runtime_tool_grants(
         persistent_policy,
         ["open_evolution_transaction_tool"],
