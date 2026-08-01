@@ -616,9 +616,18 @@ def _validated_candidate_changes(
     run_id: str,
     target_files: list[str],
 ) -> list[str]:
+    normalized_inspection = deepcopy(inspection)
+    raw_changes = normalized_inspection.get("changedFiles")
+    if isinstance(raw_changes, list):
+        normalized_inspection["changedFiles"] = [
+            str(item.get("path") or "").strip()
+            if isinstance(item, dict) and str(item.get("path") or "").strip()
+            else item
+            for item in raw_changes
+        ]
     try:
         return validate_candidate_changes(
-            inspection,
+            normalized_inspection,
             run_id=run_id,
             target_files=target_files,
         )
