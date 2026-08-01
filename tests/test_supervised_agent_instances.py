@@ -338,6 +338,8 @@ def test_self_evolution_runtime_grant_bypasses_approval_for_preallowed_tool():
         (name, approval)
         for name, approval, _risk in authorization.decision.approval_requirements
     )["cli_tool"] == "never"
+    assert runtime_policy["maxCallsPerTurn"] == 24
+    assert persistent_policy["maxCallsPerTurn"] == 16
     assert persistent_policy["approvalOverrides"] == {}
 
 
