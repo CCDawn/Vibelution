@@ -2,7 +2,7 @@ import pytest
 
 from config import LLMProfile, ProviderConfig
 from core.llm.protocol_resolver import ProtocolResolutionError, resolve_model_protocol
-from core.llm.protocols import ModelProtocol, WireProtocol
+from core.llm.protocols import ModelProtocol, WireProtocol, get_protocol_policy
 from tests.helpers.isolated_config import isolated_settings_config
 
 def make_config(**kwargs):
@@ -523,3 +523,55 @@ def test_v1_keeps_diagnostic_inference() -> None:
     route = resolve_model_protocol(profile, provider)
     assert route.source == "inferred"
     assert "model_protocol.missing_explicit_protocol" in route.warnings
+
+
+def test_deepseek_reasoning_protocol_allows_stream_usage_options():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "deepseek",
+            "llm.providers.default.base_url": "https://api.deepseek.com",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "deepseek-v4",
+            "llm.profiles.primary.contract": "reasoning_chat",
+            "llm.profiles.primary.reasoning_state_field": "reasoning_content",
+        }
+    )
+
+    profile = config.llm.get_profile("primary")
+    provider = config.llm.get_provider(profile.provider_id)
+    route = resolve_model_protocol(profile, provider)
+
+    assert route.protocol == ModelProtocol.DEEPSEEK_REASONING
+    assert route.policy.allow_stream_usage_options is True
+    assert route.compat.stream_usage_options is True
+
+
+def test_deepseek_compat_override_can_disable_stream_usage_options():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "deepseek",
+            "llm.providers.default.base_url": "https://api.deepseek.com",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "deepseek-v4",
+            "llm.profiles.primary.contract": "reasoning_chat",
+            "llm.profiles.primary.compat.streamUsageOptions": False,
+        }
+    )
+
+    profile = config.llm.get_profile("primary")
+    provider = config.llm.get_provider(profile.provider_id)
+    route = resolve_model_protocol(profile, provider)
+
+    assert route.protocol == ModelProtocol.DEEPSEEK_REASONING
+    assert route.policy.allow_stream_usage_options is True
+    assert route.compat.stream_usage_options is False
+
+
+def test_stream_usage_options_policy_unchanged_for_other_protocols():
+    assert get_protocol_policy(ModelProtocol.DEEPSEEK_REASONING).allow_stream_usage_options is True
+    assert get_protocol_policy(ModelProtocol.OPENAI_CHAT_TOOLS).allow_stream_usage_options is True
+    assert get_protocol_policy(ModelProtocol.QWEN_THINKING_NO_PREFILL).allow_stream_usage_options is True
+    assert get_protocol_policy(ModelProtocol.ANTHROPIC_CHAT).allow_stream_usage_options is False
+    assert get_protocol_policy(ModelProtocol.BASIC_CHAT_NO_TOOLS).allow_stream_usage_options is False
+    assert get_protocol_policy(ModelProtocol.LLAMACPP_BASIC).allow_stream_usage_options is False
+    assert get_protocol_policy(ModelProtocol.MINIMAX_CHAT).allow_stream_usage_options is False

@@ -37,6 +37,8 @@ def usage_to_dict(usage: Any) -> Dict[str, Any]:
         "cached_input_tokens",
         "cache_read_input_tokens",
         "cache_creation_input_tokens",
+        "prompt_cache_hit_tokens",
+        "prompt_cache_miss_tokens",
         "prompt_tokens_details",
         "input_token_details",
         "input_tokens_details",

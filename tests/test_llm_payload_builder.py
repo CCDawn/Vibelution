@@ -439,3 +439,42 @@ def test_basic_chat_no_tools_blocks_tool_payload_before_provider():
         )
 
     assert exc_info.value.category == "capability_error"
+
+
+def test_deepseek_default_streaming_payload_includes_stream_usage_options_without_cache_control():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "deepseek",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://api.deepseek.com/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "deepseek-chat",
+        }
+    )
+    client = LLMClient(config=config, backend=lambda payload: payload)
+
+    payload = client._build_payload([{"role": "user", "content": "ping"}], stream=True)
+
+    assert payload["stream_options"] == {"include_usage": True}
+    assert "prompt_cache_key" not in payload
+    assert "prompt_cache_retention" not in payload
+    assert "cache_control" not in str(payload["messages"])
+    assert payload["messages"][0]["role"] == "user"
+
+
+def test_deepseek_compat_override_omits_stream_usage_options_from_payload():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "deepseek",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://api.deepseek.com/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "deepseek-chat",
+            "llm.profiles.primary.compat.streamUsageOptions": False,
+        }
+    )
+    client = LLMClient(config=config, backend=lambda payload: payload)
+
+    payload = client._build_payload([{"role": "user", "content": "ping"}], stream=True)
+
+    assert "stream_options" not in payload
