@@ -369,6 +369,21 @@ def _frontend_command(*, project: Path, frontend_port: int) -> list[str]:
     ]
 
 
+def _backend_command(*, project: Path, backend_port: int) -> list[str]:
+    python_executable = sys.executable
+    if os.name == "nt":
+        python_executable = str(getattr(sys, "_base_executable", "") or sys.executable)
+    return [
+        python_executable,
+        str(project / "scripts" / "web_workbench.py"),
+        "--host",
+        "127.0.0.1",
+        "--port",
+        str(int(backend_port)),
+        "--no-browser",
+    ]
+
+
 def _http_ready(url: str, timeout: float = 0.8) -> bool:
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     try:
@@ -489,15 +504,16 @@ def start_instance(
             data_root=paths["dataRoot"],
             config_root=paths["configRoot"],
         )
-        backend_command = [
-            sys.executable,
-            str(project / "scripts" / "web_workbench.py"),
-            "--host",
-            "127.0.0.1",
-            "--port",
-            str(backend_port),
-            "--no-browser",
-        ]
+        if os.name == "nt":
+            venv_site_packages = Path(sys.prefix) / "Lib" / "site-packages"
+            if venv_site_packages.is_dir():
+                existing_python_path = str(env.get("PYTHONPATH") or "").strip()
+                env["PYTHONPATH"] = os.pathsep.join(
+                    part
+                    for part in (str(venv_site_packages), existing_python_path)
+                    if part
+                )
+        backend_command = _backend_command(project=project, backend_port=backend_port)
         frontend_command = _frontend_command(project=project, frontend_port=frontend_port)
         backend_process = _spawn(
             backend_command,
