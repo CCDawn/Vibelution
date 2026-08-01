@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import threading
 from copy import deepcopy
 from dataclasses import dataclass
@@ -51,6 +52,18 @@ EXECUTOR_VALIDATION_TOOLS = (
     "close_evolution_transaction_tool",
     "cli_tool",
     "python_lint_tool",
+)
+EXPLICIT_TARGET_SCOPE_CUES = (
+    "必须且只能",
+    "修改范围只能",
+    "计划范围只能",
+    "仅修改",
+    "only modify",
+    "must be limited to",
+)
+REPOSITORY_FILE_REFERENCE_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9_.\-/])"
+    r"(?:[A-Za-z0-9_.-]+/)+[A-Za-z0-9_.-]+\.[A-Za-z0-9]+"
 )
 
 
@@ -151,7 +164,9 @@ def build_autonomous_loop_hooks(
             carryovers.pop(run_id, None)
         try:
             target_files = _plan_target_files(result)
+            _validate_plan_targets_against_request(context, target_files)
         except AutonomousLoopRuntimeError as exc:
+            requested_target_files = _explicit_request_target_files(context)
             _record_plan_target_correction(
                 run_id=run_id,
                 reason=_target_contract_error_code(str(exc)),
@@ -161,7 +176,9 @@ def build_autonomous_loop_hooks(
                 role="observer",
                 binding=binding,
                 run_id=run_id,
-                prompt=_planning_target_correction_prompt(),
+                prompt=_planning_target_correction_prompt(
+                    requested_target_files=requested_target_files,
+                ),
                 carryover=deepcopy(turn.get("carryover") or {}),
                 runtime_tool_grants=[],
                 runtime_tool_source=AUTONOMOUS_RUNTIME_TOOL_SOURCE,
@@ -170,6 +187,7 @@ def build_autonomous_loop_hooks(
             )
             result = turn["result"]
             target_files = _plan_target_files(result)
+            _validate_plan_targets_against_request(context, target_files)
         record_plan_target_contract(
             run_id=run_id,
             target_files=target_files,
@@ -488,6 +506,42 @@ def _plan_target_files(result: dict[str, Any]) -> list[str]:
         raise AutonomousLoopRuntimeError(str(exc)) from exc
 
 
+def _explicit_request_target_files(context: dict[str, Any]) -> list[str]:
+    request = context.get("request")
+    goal = str(
+        request.get("goal")
+        if isinstance(request, dict)
+        else ""
+    ).strip()
+    goal_casefolded = goal.casefold()
+    if not any(
+        cue.casefold() in goal_casefolded
+        for cue in EXPLICIT_TARGET_SCOPE_CUES
+    ):
+        return []
+    matches = REPOSITORY_FILE_REFERENCE_PATTERN.findall(goal)
+    if not matches:
+        return []
+    try:
+        return normalize_target_files(matches)
+    except CandidateTargetContractError as exc:
+        raise AutonomousLoopRuntimeError(str(exc)) from exc
+
+
+def _validate_plan_targets_against_request(
+    context: dict[str, Any],
+    target_files: list[str],
+) -> None:
+    requested_target_files = _explicit_request_target_files(context)
+    if not requested_target_files:
+        return
+    requested = set(requested_target_files)
+    if any(target not in requested for target in target_files):
+        raise AutonomousLoopRuntimeError(
+            "Plan target files are outside explicit request target files."
+        )
+
+
 def _target_files_from_context(context: dict[str, Any]) -> list[str]:
     plan = context.get("plan") if isinstance(context.get("plan"), dict) else {}
     raw_targets = plan.get("targetFiles")
@@ -617,11 +671,26 @@ def _planning_prompt(context: dict[str, Any]) -> str:
     )
 
 
-def _planning_target_correction_prompt() -> str:
+def _planning_target_correction_prompt(
+    *,
+    requested_target_files: list[str] | None = None,
+) -> str:
+    requested_targets = list(requested_target_files or [])
+    explicit_scope = ""
+    if requested_targets:
+        rendered_targets = ", ".join(
+            f'"{target}"' for target in requested_targets
+        )
+        explicit_scope = (
+            "用户明确限定的可修改文件只有："
+            f"[{rendered_targets}]。纠正后的 TARGET_FILES_JSON 只能从该清单"
+            "中选择，不得引入其他文件。"
+        )
     return (
         "上一次实施计划的结构化目标文件清单违反了宿主安全契约。"
         "现在只纠正计划正文中的修改范围和最后一行 TARGET_FILES_JSON，"
         "不要调用任何工具，也不要增加新的实施目标。"
+        f"{explicit_scope}"
         "不要读取或修改被拒绝的路径；不得使用目录、绝对路径、通配符、..、"
         "workspace、logs、config、.git、docs/standards 或项目记忆路径。"
         "请保留已经证实的目标和验证方法，并在最后一行输出最多 8 个"
@@ -649,6 +718,8 @@ def _analysis_finalization_prompt(phase: str) -> str:
 
 def _target_contract_error_code(message: str) -> str:
     lowered = str(message or "").casefold()
+    if "outside explicit request target files" in lowered:
+        return "request_target_mismatch"
     if "forbidden" in lowered:
         return "forbidden_target"
     if "repository-relative" in lowered:
