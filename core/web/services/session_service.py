@@ -885,6 +885,7 @@ from core.web.services.session.projection import (
     _session_detail_window_requested,
     _build_session_turn_items_projection,
     _build_codex_transcript_projection,
+    _slim_codex_transcript_for_window_payload,
     _build_terminal_error_codex_transcript_projection,
     _codex_tool_lifecycle_projection_from_source,
     _run_session_cycle_message_projection,

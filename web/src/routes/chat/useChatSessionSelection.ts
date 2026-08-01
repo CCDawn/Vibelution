@@ -66,6 +66,7 @@ export function useChatSessionSelection({
     onSuccess: (nextDetail) => {
       const latestSessionId = latestDirectSessionSelectionRef.current;
       if (latestSessionId && latestSessionId !== nextDetail.id) {
+        // Only reselect the latest target; ignore intermediate select responses.
         reselectDirectSessionRef.current(latestSessionId);
         return;
       }
@@ -74,6 +75,7 @@ export function useChatSessionSelection({
         [nextDetail.id]: "",
         __sessions__: "",
       }));
+      // Windowed select payload seeds the session query; GET may still refine it.
       syncSessionDetail(nextDetail);
       void chatWorkspaceCache.afterSessionSelected();
     },
@@ -92,6 +94,12 @@ export function useChatSessionSelection({
   reselectDirectSessionRef.current = (sessionId: string) => {
     const normalizedSessionId = String(sessionId || "").trim();
     if (!normalizedSessionId) {
+      return;
+    }
+    // Collapse rapid tab thrash: only the latest selection id is allowed to fire.
+    if (selectDirectSessionMutation.isPending
+      && latestDirectSessionSelectionRef.current === normalizedSessionId
+      && selectDirectSessionMutation.variables === normalizedSessionId) {
       return;
     }
     selectDirectSessionMutation.mutate(normalizedSessionId);

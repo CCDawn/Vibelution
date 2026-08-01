@@ -30,6 +30,7 @@ export type UseChatWorkspaceActionsOptions = {
   queryClient: QueryClient;
   chatWorkspaceCache: ChatWorkspaceCache;
   latestDirectSessionSelectionRef: MutableRefObject<string>;
+  activeSessionId?: string | null;
   setActiveSession: (sessionId: string) => void;
   activeGroupRoomId: string;
   setActiveGroupRoomId: Dispatch<SetStateAction<string>>;
@@ -118,6 +119,7 @@ export function useChatWorkspaceActions({
   queryClient,
   chatWorkspaceCache,
   latestDirectSessionSelectionRef,
+  activeSessionId = null,
   setActiveSession,
   activeGroupRoomId,
   setActiveGroupRoomId,
@@ -225,9 +227,14 @@ export function useChatWorkspaceActions({
       [normalizedSessionId]: "",
       __sessions__: "",
     }));
-    selectDirectSessionMutation.mutate(normalizedSessionId);
+    // Re-selecting the already-active session still updates server active pointer,
+    // but skip the network when the operator is just re-clicking the current tab.
+    if (String(activeSessionId || "").trim() !== normalizedSessionId) {
+      selectDirectSessionMutation.mutate(normalizedSessionId);
+    }
     navigate(`/chat?session=${encodeURIComponent(normalizedSessionId)}`, { replace: false });
   }, [
+    activeSessionId,
     latestDirectSessionSelectionRef,
     navigate,
     queryClient,

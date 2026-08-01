@@ -971,6 +971,9 @@ export function ChatCodingRoute() {
     queryKey: queryKeys.session(activeSessionId ?? "none"),
     enabled: Boolean(activeSessionId),
     queryFn: ({ signal }) => fetchSessionDetailWindow(activeSessionId, { signal }),
+    // Select + GET often race on switch; brief freshness avoids immediate double rebuild
+    // when /select already wrote a windowed detail into the same query key.
+    staleTime: 1_500,
     structuralSharing: (previous, next) =>
       mergeSessionDetailMessageWindow(previous as SessionDetail | undefined, next as SessionDetail),
     placeholderData: () =>
@@ -2566,6 +2569,7 @@ export function ChatCodingRoute() {
     queryClient,
     chatWorkspaceCache,
     latestDirectSessionSelectionRef,
+    activeSessionId,
     setActiveSession,
     activeGroupRoomId,
     setActiveGroupRoomId,
