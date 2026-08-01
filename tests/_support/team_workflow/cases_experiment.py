@@ -400,6 +400,51 @@ def test_run_experiment_smoke_run_honors_legacy_declared_adapter_and_rejects_mis
         )
 
 
+def test_run_experiment_smoke_run_rejects_unavailable_declared_adapter_before_payload_fallback(
+    tmp_path, monkeypatch
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    plan_store = team_workflow_orchestration_service._load_experiment_plan_store(
+        team["teamId"]
+    )
+    plan_store["plans"] = [
+        {
+            "planId": "exp_unavailable_declared_adapter",
+            "status": "draft",
+            "experimentPlan": {
+                "dataset": "synthetic_structured_8x8_proxy",
+                "metric": "macro_f1_delta",
+                "baseline": "majority classifier",
+                "smokePlan": "retired_smoke_adapter; seed=42",
+            },
+            "updatedAt": "2026-06-25T00:00:00+00:00",
+        }
+    ]
+    plan_store["activePlanId"] = "exp_unavailable_declared_adapter"
+    team_workflow_orchestration_service._write_json(
+        team_workflow_orchestration_service._experiment_plan_store_path(
+            team["teamId"]
+        ),
+        plan_store,
+    )
+
+    with pytest.raises(
+        team_workflow_orchestration_service.TeamWorkflowOrchestrationError,
+        match="declares an unavailable smoke adapter",
+    ):
+        team_workflow_orchestration_service.run_experiment_smoke_run(
+            team["teamId"],
+            "exp_unavailable_declared_adapter",
+            {"adapter": "synthetic_classification_baseline_vs_variant"},
+        )
+
+    stored = team_workflow_orchestration_service._load_experiment_plan_store(
+        team["teamId"]
+    )
+    assert stored["plans"][0].get("smokeRunResults") in (None, [])
+
+
 def test_explicit_design_gate_blocks_smoke_until_plan_is_frozen(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")
