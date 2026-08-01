@@ -357,6 +357,7 @@ import {
   type SourceCollectionStepState,
 } from "./teams/source-collection/runModel";
 import {
+  sourceCollectionBoundCountToCurrentCoverage,
   sourceCollectionCompletionFlowNodeState,
   sourceCollectionNonNegativeCount,
   sourceCollectionPhaseCloseGateForRun,
@@ -3743,7 +3744,7 @@ export function TeamsRoute({
   );
   const sourceCollectionRunPendingScreeningCountText = sourceCollectionCountText(sourceCollectionScreeningDataLoading, sourceCollectionRunPendingScreeningCount);
   const sourceCollectionPendingCandidateImportCount = Math.max(0, sourceCollectionRawRecordCount - sourceCollectionDisplayedCandidateCount);
-  const sourceCollectionExtractionRecoveryCoverage = sourceCollectionCandidateProjection?.currentCoverageSummary?.complete === false
+  const sourceCollectionExtractionRecoveryCoverage = sourceCollectionCandidateProjection?.currentCoverageSummary?.applicable
     ? sourceCollectionCandidateProjection.currentCoverageSummary
     : sourceCollectionCandidateProjection?.latestTask?.coverageSummary;
   const sourceCollectionExtractionRecoveryClosure = sourceCollectionCandidateProjection?.latestTask?.closureSummary;
@@ -3751,7 +3752,8 @@ export function TeamsRoute({
     sourceCollectionNonNegativeCount(sourceCollectionExtractionRecoveryClosure?.blockedCount),
     sourceCollectionNonNegativeCount(sourceCollectionExtractionRecoveryCoverage?.blocked),
   );
-  const sourceCollectionExtractionMissingEvidenceAnchorCount = sourceCollectionNonNegativeCount(
+  const sourceCollectionExtractionMissingEvidenceAnchorCount = sourceCollectionBoundCountToCurrentCoverage(
+    sourceCollectionCandidateProjection,
     sourceCollectionCandidateProjection?.latestTask?.materializedContentExtraction?.missingEvidenceAnchorCount,
   );
   const sourceCollectionExtractionAgentMaterialCount = Math.max(

@@ -341,6 +341,19 @@ export function sourceCollectionNonNegativeCount(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? Math.max(0, value) : 0;
 }
 
+export function sourceCollectionBoundCountToCurrentCoverage(
+  projection: SourceCollectionStageCardProjection | null | undefined,
+  value: unknown,
+): number {
+  const count = sourceCollectionNonNegativeCount(value);
+  const currentCoverage = projection?.currentCoverageSummary;
+  if (!currentCoverage?.applicable) {
+    return count;
+  }
+  const currentTotal = sourceCollectionNonNegativeCount(currentCoverage.total);
+  return currentTotal > 0 ? Math.min(count, currentTotal) : count;
+}
+
 export function sourceCollectionCoverageMetric(
   coverage: SourceCollectionCoverageSummary | null | undefined,
   lang: "zh" | "en",

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  sourceCollectionBoundCountToCurrentCoverage,
   sourceCollectionCompletionFlowNodeState,
   sourceCollectionPhaseCloseGateForRun,
   sourceCollectionPhaseCloseGateNextStage,
@@ -43,6 +44,24 @@ describe("source collection stage projection", () => {
     expect(sourceCollectionStageProjectionCount(projection, "artifact", 1)).toBe(4);
     expect(sourceCollectionStageProjectionCount(projection, "pending", 2)).toBe(2);
     expect(sourceCollectionStageProjectionCount(null, "artifact", 3)).toBe(3);
+  });
+
+  it("bounds historical task counts to the current candidate set", () => {
+    const projection = stageCard("partial_current_inputs", {
+      currentCoverageSummary: {
+        applicable: true,
+        blocked: 13,
+        complete: true,
+        invalid: 0,
+        missing: 0,
+        processed: 13,
+        total: 13,
+      },
+    });
+
+    expect(sourceCollectionBoundCountToCurrentCoverage(projection, 14)).toBe(13);
+    expect(sourceCollectionBoundCountToCurrentCoverage(projection, 8)).toBe(8);
+    expect(sourceCollectionBoundCountToCurrentCoverage(null, 14)).toBe(14);
   });
 
   it("projects completion-flow node statuses into the shared step-state vocabulary", () => {
