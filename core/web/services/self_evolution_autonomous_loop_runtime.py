@@ -62,6 +62,7 @@ EXPLICIT_TARGET_SCOPE_CUES = (
     "修改范围只能",
     "计划范围只能",
     "仅修改",
+    "只修改",
     "only modify",
     "must be limited to",
 )

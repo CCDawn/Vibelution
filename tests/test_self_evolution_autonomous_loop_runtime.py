@@ -462,6 +462,75 @@ def test_runtime_plan_corrects_targets_outside_explicit_user_file_scope(
     )
 
 
+def test_runtime_plan_rejects_corrected_targets_outside_zhi_modify_request():
+    turn_calls: list[dict] = []
+
+    def run_role_turn(**kwargs):
+        turn_calls.append(deepcopy(kwargs))
+        if len(turn_calls) == 1:
+            return {
+                "result": {
+                    "status": "completed",
+                    "summary": "先读取运行日志，再修改测试。",
+                    "targetFiles": [
+                        "logs/runtime_scenes/latest/summary.json",
+                        "tests/test_self_evolution_autonomous_loop_runtime.py",
+                    ],
+                },
+                "carryover": {"previousResponseId": "response-invalid-plan"},
+                "conversationSessionId": "session-observer",
+            }
+        return {
+            "result": {
+                "status": "completed",
+                "summary": "纠正为仓库内安全路径。",
+                "targetFiles": ["core/example.py"],
+            },
+            "carryover": {"previousResponseId": "response-corrected-plan"},
+            "conversationSessionId": "session-observer",
+        }
+
+    hooks = build_autonomous_loop_hooks(
+        AutonomousLoopRuntimeDependencies(
+            load_bindings=lambda: {
+                "observer": {
+                    "agentId": "observer-agent",
+                    "directSessionId": "session-observer",
+                },
+                "executor": {"agentId": "executor-agent"},
+            },
+            run_role_turn=run_role_turn,
+            create_candidate=lambda _context: {},
+            inspect_candidate=lambda _context: {},
+            integrate_candidate=lambda _context: {},
+            cleanup_candidate=lambda _context: {},
+        )
+    )
+
+    with pytest.raises(
+        AutonomousLoopRuntimeError,
+        match="outside explicit request target files",
+    ):
+        hooks.plan(
+            _snapshot(
+                request={
+                    "goal": (
+                        "只修改 tests/test_self_evolution_autonomous_loop_runtime.py，"
+                        "新增范围约束测试。"
+                    ),
+                    "maxIterations": 1,
+                },
+                plan=None,
+            )
+        )
+
+    assert len(turn_calls) == 2
+    assert (
+        "tests/test_self_evolution_autonomous_loop_runtime.py"
+        in turn_calls[1]["prompt"]
+    )
+
+
 @pytest.mark.parametrize(
     "target_file",
     [
