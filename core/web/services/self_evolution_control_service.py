@@ -1023,6 +1023,8 @@ def _run_self_evolution_agent_role_turn(
     run_id: str,
     prompt: str,
     carryover: dict[str, Any] | None = None,
+    runtime_tool_grants: list[str] | None = None,
+    runtime_tool_source: str = "",
 ) -> dict[str, Any]:
     role_key = str(role or "").strip()
     agent_id = str((binding or {}).get("agentId") or "").strip()
@@ -1036,6 +1038,8 @@ def _run_self_evolution_agent_role_turn(
         agent_id,
         session_id=session_id,
         turn_id=run_id,
+        runtime_tool_grants=runtime_tool_grants,
+        runtime_tool_source=runtime_tool_source,
     )
     turn_runtime_request = AgentTurnRuntimeRequest(
         mode="self_evolution",

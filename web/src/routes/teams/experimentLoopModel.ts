@@ -757,10 +757,24 @@ export function researchIterationLifecycleStatusLabel(status: string, lang: "zh"
   if (status === "not_started") {
     return lang === "zh" ? "待执行" : "not started";
   }
+  if (status === "needs_more_evidence") {
+    return lang === "zh" ? "待补证据" : "evidence required";
+  }
   if (["needs_review", "ready_for_iteration", "repair_and_repeat"].includes(status)) {
     return lang === "zh" ? "待优化" : "needs iteration";
   }
   return lang === "zh" ? "执行中" : "executing";
+}
+
+export function researchKnowledgeLifecycleStatusLabel(
+  status: string,
+  fallback: string,
+  lang: "zh" | "en",
+) {
+  if (status === "ready_for_hypothesis") {
+    return lang === "zh" ? "已完成" : "completed";
+  }
+  return fallback;
 }
 
 export function researchDiagnosticStatusLabel(status: string, lang: "zh" | "en") {

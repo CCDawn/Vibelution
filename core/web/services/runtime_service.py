@@ -984,11 +984,14 @@ def _work_run_summary() -> dict[str, dict[str, dict | None]]:
     supervised_latest = _safe_load_evolution_work_run("supervised", active=False)
     supervised_worktree_active = _safe_load_supervised_worktree_work_run(active=True)
     supervised_worktree_latest = _safe_load_supervised_worktree_work_run(active=False)
+    autonomous_self_active = _safe_load_autonomous_self_evolution_work_run(active=True)
+    autonomous_self_latest = _safe_load_autonomous_self_evolution_work_run(active=False)
     return {
         "active": {
             "chat_turn": chat.get("active"),
             "chat_room_round": chat_room.get("active"),
             "self_evolution_run": self_active,
+            "self_evolution_autonomous_loop": autonomous_self_active,
             "supervised_evolution_run": supervised_active,
             "supervised_worktree_evolution_run": supervised_worktree_active,
             "source_collection_run": source_collection.get("active"),
@@ -997,6 +1000,7 @@ def _work_run_summary() -> dict[str, dict[str, dict | None]]:
             "chat_turn": chat.get("latest"),
             "chat_room_round": chat_room.get("latest"),
             "self_evolution_run": self_latest,
+            "self_evolution_autonomous_loop": autonomous_self_latest,
             "supervised_evolution_run": supervised_latest,
             "supervised_worktree_evolution_run": supervised_worktree_latest,
             "source_collection_run": source_collection.get("latest"),
@@ -1120,6 +1124,28 @@ def _latest_supervised_worktree_snapshot() -> dict | None:
 
     runs = supervised_worktree_evolution_service.list_supervised_worktree_runs(limit=1)
     return runs[0] if runs else None
+
+
+def _safe_load_autonomous_self_evolution_work_run(*, active: bool) -> dict | None:
+    try:
+        from . import self_evolution_autonomous_loop_orchestrator
+
+        payload = (
+            self_evolution_autonomous_loop_orchestrator.get_active_autonomous_self_evolution_run()
+            if active
+            else self_evolution_autonomous_loop_orchestrator.get_latest_autonomous_self_evolution_run()
+        )
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    if active and str(payload.get("status") or "").strip().lower() == "awaiting_user_approval":
+        return None
+    decorated = dict(payload)
+    leases = leases_for_snapshot(decorated)
+    if leases:
+        decorated["leases"] = leases
+    return decorated
 
 
 def _workbench_payload(lang: str, runtime_manager: dict) -> dict[str, object]:

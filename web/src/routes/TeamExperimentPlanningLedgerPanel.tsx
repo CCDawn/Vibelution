@@ -123,6 +123,31 @@ function smokeStatusTone(status: string): VStatusTone {
   return "warning";
 }
 
+export function boundedSmokeReviewCopy(
+  status: string,
+  proxyOnly: boolean,
+  lang: Lang,
+): { statusLabel: string; actionLabel: string } {
+  if (proxyOnly && status === "needs_review") {
+    return lang === "zh"
+      ? {
+          statusLabel: "代理结果 · 需正式证据",
+          actionLabel: "查看评审与补证据",
+        }
+      : {
+          statusLabel: "Proxy result · formal evidence required",
+          actionLabel: "Review and add evidence",
+        };
+  }
+  return {
+    statusLabel:
+      status === "needs_review"
+        ? (lang === "zh" ? "待人工复核" : "Needs review")
+        : status,
+    actionLabel: lang === "zh" ? "进入执行与迭代" : "Open execution and iteration",
+  };
+}
+
 export type TeamExperimentPlanningLedgerPanelProps = {
   lang: Lang;
   selectedTeam: Team | null | undefined;
@@ -278,6 +303,9 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
       ?? null;
     const activeBaselineArtifact = activePlan?.baselineSelection.activeBaselineArtifact ?? null;
     const activeSmokeRun = selectedTeamRunExperimentSmokeResult?.smokeRun ?? activePlan?.activeSmokeRun ?? null;
+    const activeSmokeReviewCopy = activeSmokeRun
+      ? boundedSmokeReviewCopy(activeSmokeRun.status, Boolean(activeSmokeRun.proxyOnly), lang)
+      : null;
     const activeSmokeMetricEntries = activeSmokeRun
       ? buildSmokeMetricEntries(activeSmokeRun.metrics ?? {})
       : [];
@@ -614,9 +642,7 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
                   </div>
                   <div className={styles.experimentSmokeMeta}>
                     <VStatusChip tone={smokeStatusTone(activeSmokeRun.status)}>
-                      {activeSmokeRun.status === "needs_review"
-                        ? (lang === "zh" ? "待人工复核" : "Needs review")
-                        : activeSmokeRun.status}
+                      {activeSmokeReviewCopy?.statusLabel ?? activeSmokeRun.status}
                     </VStatusChip>
                     {activeSmokeRun.proxyOnly ? (
                       <VStatusChip tone="warning">
@@ -653,7 +679,8 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
                 ) : null}
                 <VNativeButton type="button" onClick={openIterationWorkspace}>
                   <ArrowRight size={13} />
-                  {lang === "zh" ? "进入执行与迭代" : "Open execution and iteration"}
+                  {activeSmokeReviewCopy?.actionLabel
+                    ?? (lang === "zh" ? "进入执行与迭代" : "Open execution and iteration")}
                 </VNativeButton>
               </section>
             ) : null}

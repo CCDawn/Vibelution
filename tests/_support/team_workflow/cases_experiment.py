@@ -1511,6 +1511,61 @@ def test_experiment_design_can_be_frozen_without_any_training_result(tmp_path, m
     assert lifecycle["stage3"]["status"] == "not_started"
     assert lifecycle["stage3"]["bestValidatedResultId"] == ""
 
+
+def test_active_research_loop_projection_uses_current_project_loop_from_team_ledger(
+    tmp_path,
+    monkeypatch,
+):
+    from core.web.services import research_loop_service
+
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    project_a = team_workflow_orchestration_service.create_research_project(
+        team["teamId"],
+        {"name": "Project A"},
+    )["project"]
+    project_b = team_workflow_orchestration_service.create_research_project(
+        team["teamId"],
+        {"name": "Project B"},
+    )["project"]
+    loop_a = research_loop_service.create_research_loop(
+        team["teamId"],
+        {
+            "researchProjectId": project_a["projectId"],
+            "researchQuestion": "Question A",
+        },
+    )["loop"]
+    loop_b = research_loop_service.create_research_loop(
+        team["teamId"],
+        {
+            "researchProjectId": project_b["projectId"],
+            "researchQuestion": "Question B",
+        },
+    )["loop"]
+
+    team_workflow_orchestration_service.activate_research_project(
+        team["teamId"],
+        project_a["projectId"],
+    )
+    assert (
+        team_workflow_orchestration_service._active_research_loop_projection(
+            team["teamId"]
+        )["loopId"]
+        == loop_a["loopId"]
+    )
+
+    team_workflow_orchestration_service.activate_research_project(
+        team["teamId"],
+        project_b["projectId"],
+    )
+    assert (
+        team_workflow_orchestration_service._active_research_loop_projection(
+            team["teamId"]
+        )["loopId"]
+        == loop_b["loopId"]
+    )
+
+
 def test_experiment_baseline_artifact_registration_unlocks_smoke_gate(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team = team_service.create_team(name="ai科学研究团队")

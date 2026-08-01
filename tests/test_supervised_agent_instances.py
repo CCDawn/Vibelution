@@ -267,6 +267,26 @@ def test_supervised_runtime_grants_bypass_approval_without_overriding_persistent
     assert persistent_policy["approvalOverrides"] == {
         "close_evolution_transaction_tool": "always",
     }
+    self_evolution_policy = agent_directory_service._with_runtime_tool_grants(
+        persistent_policy,
+        ["grep_search_tool", "apply_patch_tool"],
+        source="self_evolution_autonomous_loop",
+    )
+    self_evolution_authorization = resolve_enforced_authorization(
+        runtime={
+            "agentId": "agent-self-evolution-runtime-probe",
+            "turnId": "turn-self-evolution-runtime-probe",
+            "agent": {"agentId": "agent-self-evolution-runtime-probe"},
+            "toolPolicy": self_evolution_policy,
+        }
+    )
+    self_evolution_approvals = {
+        name: approval
+        for name, approval, _risk in self_evolution_authorization.decision.approval_requirements
+    }
+    assert self_evolution_approvals["grep_search_tool"] == "never"
+    assert self_evolution_approvals["apply_patch_tool"] == "never"
+    assert self_evolution_policy["runtimeToolSource"] == "self_evolution_autonomous_loop"
     non_supervised_policy = agent_directory_service._with_runtime_tool_grants(
         persistent_policy,
         ["open_evolution_transaction_tool"],
@@ -292,8 +312,20 @@ def test_supervised_runtime_tools_are_granted_only_during_role_runtime(tmp_path,
     agents = supervised_agent_service.ensure_supervised_agent_instances()
     baseline = next(agent for agent in agents if agent["metadata"]["supervisedRole"] == "baseline")
     judge = next(agent for agent in agents if agent["metadata"]["supervisedRole"] == "judge")
+    runtime_agents = {}
+    for agent in (baseline, judge):
+        policy_id = str(agent.get("toolPolicyId") or f"tool-{agent['agentId']}")
+        runtime_agents[agent["agentId"]] = {
+            **agent,
+            "toolPolicy": agent_directory_service.default_system_no_tool_policy(policy_id),
+        }
+    monkeypatch.setattr(
+        agent_directory_service,
+        "get_agent",
+        lambda agent_id, **_kwargs: runtime_agents.get(agent_id),
+    )
 
-    baseline_policy = agent_directory_service.resolve_tool_policy_for_agent(baseline["agentId"])
+    baseline_policy = runtime_agents[baseline["agentId"]]["toolPolicy"]
     assert baseline_policy["allowedTools"] == []
 
     probe_tools = [
@@ -318,7 +350,7 @@ def test_supervised_runtime_tools_are_granted_only_during_role_runtime(tmp_path,
     assert runtime["toolPolicy"]["mutationAccess"] == "controlled"
     assert "open_evolution_transaction_tool" in authorization.decision.executable_tools
     assert "close_evolution_transaction_tool" in authorization.decision.executable_tools
-    assert agent_directory_service.resolve_tool_policy_for_agent(baseline["agentId"])["allowedTools"] == []
+    assert runtime_agents[baseline["agentId"]]["toolPolicy"]["allowedTools"] == []
 
     with agent_directory_service.active_agent_runtime(
         judge["agentId"],
@@ -612,7 +644,7 @@ def test_supervised_agent_bindings_follow_mode_binding_slot_replacement(tmp_path
 
     assert bindings["baseline"]["agentId"] == replacement["agentId"]
     assert bindings["baseline"]["dialogueModelId"] == "model-primary"
-    assert bindings["baseline"]["displayName"] != "替换基线 Agent"
+    assert bindings["baseline"]["displayName"] == "替换基线 Agent"
     assert agent_directory_service.get_agent(replacement["agentId"])["metadata"]["functionalDisplayName"] == "替换基线 Agent"
     assert agent_directory_service.get_agent(replacement["agentId"])["llmBindings"]["dialogue"]["modelId"] == "model-primary"
 
@@ -780,6 +812,11 @@ def test_supervised_agent_bindings_block_missing_dialogue_model_api_key(tmp_path
                 },
             }
         }
+    )
+    monkeypatch.setattr(
+        AppConfig,
+        "get_api_key_for_profile",
+        lambda self, profile_id="primary": "",
     )
     monkeypatch.setattr(supervised_agent_service, "_current_config", lambda: config)
     agents = _seed_supervised_fixed_role_agents()

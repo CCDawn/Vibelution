@@ -3631,6 +3631,13 @@ def _queue_runtime_activation(
         if isinstance(approval.get("decidedBy"), dict)
         else {}
     )
+    source_session_id = str(
+        snapshot.get("approvalConversationSessionId")
+        or decided_by.get("conversationSessionId")
+        or snapshot.get("judgeConversationSessionId")
+        or snapshot.get("baselineConversationSessionId")
+        or ""
+    ).strip()
     try:
         intent = launcher_service.submit_lifecycle_intent(
             {
@@ -3642,6 +3649,7 @@ def _queue_runtime_activation(
                 "actorType": "supervised_approval_agent",
                 "actorId": str(decided_by.get("actorId") or "supervised-approval"),
                 "sourceRunId": run_id,
+                "sourceSessionId": source_session_id,
                 "sourceTaskId": "",
                 "sourceWorktree": str(worktree.get("path") or ""),
             },
