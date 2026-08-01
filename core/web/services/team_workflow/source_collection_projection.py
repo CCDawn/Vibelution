@@ -118,6 +118,7 @@ def source_collection_stage_card_projection(
         input_count=input_count,
         output_count=output_count,
         pending_count=effective_pending_count,
+        current_coverage_summary=current_coverage_summary,
     )
     return {
         "stageId": stage_id,
@@ -182,7 +183,7 @@ def source_collection_stage_current_coverage_summary(
     task_covers_current_inputs = (
         bool(task_coverage.get("applicable"))
         and bool(task_coverage.get("complete"))
-        and task_total == current_total
+        and task_total >= current_total
         and task_processed >= current_total
         and task_missing <= 0
         and task_invalid <= 0
@@ -197,7 +198,10 @@ def source_collection_stage_current_coverage_summary(
             "processed": current_total,
             "missing": 0,
             "invalid": 0,
-            "blocked": source_collection_count(task_coverage.get("blocked")),
+            "blocked": min(
+                current_total,
+                source_collection_count(task_coverage.get("blocked")),
+            ),
             "duplicate": source_collection_count(task_coverage.get("duplicate")),
         }
     return {
@@ -355,6 +359,8 @@ def source_collection_stage_action_label(stage_id: str, recommended_action: str 
         return "等待 Agent 完成"
     if recommended_action == "continue_interrupted":
         return "继续这次任务"
+    if recommended_action == "supplement_evidence":
+        return "Agent 补充证据"
     if stage_id == "finding":
         return "搜索下一批" if recommended_action in {"continue", "retry"} else "开始找资料"
     if stage_id == "extraction":
@@ -375,6 +381,7 @@ def source_collection_stage_action_readiness(
     input_count: int,
     output_count: int,
     pending_count: int,
+    current_coverage_summary: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if agent_status in SOURCE_COLLECTION_STAGE_SESSION_TASK_ACTIVE_STATUSES or card_status == "agent_running":
         return {
@@ -391,6 +398,20 @@ def source_collection_stage_action_readiness(
             "disabledReason": "",
             "recommendedAction": "continue",
             "actionLabel": source_collection_stage_action_label(stage_id, "continue_interrupted"),
+        }
+    current_coverage = current_coverage_summary if isinstance(current_coverage_summary, dict) else {}
+    if (
+        stage_id == "extraction"
+        and card_status == "partial_current_inputs"
+        and bool(current_coverage.get("complete"))
+        and source_collection_count(current_coverage.get("blocked")) > 0
+    ):
+        return {
+            "canStart": True,
+            "reasonCode": "evidence_supplement_required",
+            "disabledReason": "",
+            "recommendedAction": "supplement_evidence",
+            "actionLabel": source_collection_stage_action_label(stage_id, "supplement_evidence"),
         }
     has_input = any(
         source_collection_count(value) > 0
@@ -432,6 +453,12 @@ def source_collection_stage_user_status_label(
     if card_status == "agent_interrupted":
         return "已中断，需要继续"
     current_coverage = current_coverage_summary if isinstance(current_coverage_summary, dict) else {}
+    if (
+        stage_id == "extraction"
+        and bool(current_coverage.get("complete"))
+        and source_collection_count(current_coverage.get("blocked")) > 0
+    ):
+        return "提炼完成，待补证据"
     if bool(current_coverage.get("applicable")) and current_coverage.get("complete") is False:
         return source_collection_stage_recovery_status_label(stage_id)
     labels = {
