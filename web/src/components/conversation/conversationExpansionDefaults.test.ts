@@ -4,7 +4,10 @@ import type { ConversationMessage } from "../../api/types";
 import type { AgentMessageRenderState } from "./agentMessageRenderState";
 import type { AgentMessageTimelineItem } from "./agentMessageTimeline";
 import type { AgentMessageOperation, AgentMessageOperationGroups } from "./agentMessageOperations";
-import { preserveConversationExpansionDefaults } from "./conversationExpansionDefaults";
+import {
+  preserveConversationExpansionDefaults,
+  shouldRefreshConversationExpansionDefault,
+} from "./conversationExpansionDefaults";
 
 function renderState(hasResponseBlock: boolean): AgentMessageRenderState {
   return {
@@ -110,11 +113,58 @@ describe("conversation expansion defaults", () => {
     expect(defaults["message-running"].response).toBe(false);
     expect(defaults["message-running"].process).toBe(true);
     expect(defaults["message-running"].feedback).toBeUndefined();
-    expect(defaults["message-running"]["message-running-thought"]).toBe(true);
+    expect(defaults["message-running"]["thought:message-running-thought"]).toBe(true);
     expect(defaults["message-running"]["message-running-command-group"]).toBe(false);
     expect(defaults["message-completed"].response).toBe(false);
     expect(defaults["message-completed"].process).toBe(false);
     expect(defaults["message-completed"].feedback).toBe(false);
+  });
+
+  it("auto-collapses thought and reasoning expansion defaults after thinking settles", () => {
+    expect(shouldRefreshConversationExpansionDefault("thought:item-1", true, false)).toBe(true);
+    expect(shouldRefreshConversationExpansionDefault("reasoning:stable-1", true, false)).toBe(true);
+    expect(shouldRefreshConversationExpansionDefault("thought:item-1", false, true)).toBe(false);
+    expect(shouldRefreshConversationExpansionDefault("response", true, false)).toBe(false);
+
+    const settledMessage: ConversationMessage = {
+      id: "message-thought-settled",
+      role: "assistant",
+      content: "答案",
+      timestamp: "2026-08-02T12:00:00Z",
+    };
+    const settledThought: AgentMessageTimelineItem[] = [
+      {
+        id: "thought-row-1",
+        kind: "thought",
+        status: "completed",
+        text: "已经想完。",
+        preview: "已经想完。",
+        defaultExpanded: false,
+        sourceOperationIds: ["op-1"],
+      },
+    ];
+
+    const defaults = preserveConversationExpansionDefaults({
+      currentDefaults: {
+        "message-thought-settled": {
+          "thought:thought-row-1": true,
+        },
+      },
+      sectionExpansion: {},
+      messages: [settledMessage],
+      renderStatesByMessageId: new Map([
+        [settledMessage.id, renderState(true)],
+      ]),
+      timelineItemsByMessageId: new Map([
+        [settledMessage.id, settledThought],
+      ]),
+      operationGroupsByMessageId: new Map([
+        [settledMessage.id, operationGroups([])],
+      ]),
+      defaultExpandedResponseIds: new Set(),
+    });
+
+    expect(defaults["message-thought-settled"]["thought:thought-row-1"]).toBe(false);
   });
 
   it("preserves failed ReAct feedback expansion defaults during history loading", () => {

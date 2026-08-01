@@ -8,6 +8,7 @@ import {
   recordConversationRowHeight,
   resolveConversationVirtualRange,
   resolveTimelineFollowState,
+  shouldKeepFollowingLatestOnProcessToggle,
   shouldStickTimelineToBottomOnContentResize,
 } from "./conversationTimelineFollowState";
 
@@ -76,6 +77,37 @@ describe("conversation timeline follow state", () => {
     expect(shouldStickTimelineToBottomOnContentResize({
       autoScrollToLatest: true,
       followingLatest: false,
+    })).toBe(false);
+  });
+
+  it("keeps follow-latest on process toggle when already following or near bottom", () => {
+    expect(shouldKeepFollowingLatestOnProcessToggle({
+      autoScrollToLatest: true,
+      followingLatest: true,
+      scrollHeight: 2000,
+      clientHeight: 500,
+      scrollTop: 100,
+    })).toBe(true);
+    expect(shouldKeepFollowingLatestOnProcessToggle({
+      autoScrollToLatest: true,
+      followingLatest: false,
+      scrollHeight: 1200,
+      clientHeight: 500,
+      scrollTop: 680,
+    })).toBe(true);
+    expect(shouldKeepFollowingLatestOnProcessToggle({
+      autoScrollToLatest: true,
+      followingLatest: false,
+      scrollHeight: 1200,
+      clientHeight: 500,
+      scrollTop: 200,
+    })).toBe(false);
+    expect(shouldKeepFollowingLatestOnProcessToggle({
+      autoScrollToLatest: false,
+      followingLatest: true,
+      scrollHeight: 1200,
+      clientHeight: 500,
+      scrollTop: 680,
     })).toBe(false);
   });
 

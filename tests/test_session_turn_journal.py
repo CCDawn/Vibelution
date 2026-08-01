@@ -23,9 +23,11 @@ from core.chat.turn_journal import (
     latest_open_turn_id,
     load_turn_events,
     model_visible_messages_from_events,
+    rewrite_turn_events,
     session_turn_items_from_events,
     turn_journal_path,
 )
+import core.chat.turn_journal as turn_journal_module
 from core.llm.types import CanonicalItemIdentity, CanonicalToolCall, LLMProtocolEvent, TurnOutcome
 
 
@@ -485,6 +487,49 @@ def test_append_interrupted_if_open_ignores_completed_or_active_turn(tmp_path):
     assert append_interrupted_if_open(tmp_path, "session-a", active_turn_id="turn-1") is None
     assert append_interrupted_if_open(tmp_path, "session-a", reason="process_restarted") is not None
     assert append_interrupted_if_open(tmp_path, "session-a", reason="process_restarted") is None
+
+
+def test_rewrite_turn_events_invalidates_terminal_set_cache(tmp_path):
+    """rewrite/unlink must drop terminal cache so post-rewrite checks cannot see stale terminals."""
+    append_turn_event(tmp_path, "session-cache", "turn-old", EVENT_TURN_STARTED, status="running")
+    append_turn_event(tmp_path, "session-cache", "turn-old", EVENT_TURN_COMPLETED, status="completed")
+    path = turn_journal_path(tmp_path, "session-cache")
+
+    # Warm the terminal-set cache via the public reject path.
+    with pytest.raises(ValueError, match="terminal event"):
+        append_turn_event(
+            tmp_path,
+            "session-cache",
+            "turn-old",
+            EVENT_ASSISTANT_MESSAGE,
+            status="completed",
+            payload={"content": "late"},
+        )
+    cache_key = turn_journal_module._sequence_cache_key(path)
+    with turn_journal_module._TERMINAL_SET_CACHE_LOCK:
+        assert cache_key in turn_journal_module._TERMINAL_SET_CACHE
+        assert "turn-old" in turn_journal_module._TERMINAL_SET_CACHE[cache_key][0]
+
+    # Rewrite empties the journal (unlink) and must forget both sequence + terminal caches.
+    rewrite_turn_events(tmp_path, "session-cache", [])
+    with turn_journal_module._TERMINAL_SET_CACHE_LOCK:
+        assert cache_key not in turn_journal_module._TERMINAL_SET_CACHE
+    with turn_journal_module._SEQUENCE_CACHE_LOCK:
+        assert cache_key not in turn_journal_module._SEQUENCE_CACHE
+
+    # A new open turn on the same path must accept model-visible events again.
+    append_turn_event(tmp_path, "session-cache", "turn-new", EVENT_TURN_STARTED, status="running")
+    append_turn_event(
+        tmp_path,
+        "session-cache",
+        "turn-new",
+        EVENT_ASSISTANT_MESSAGE,
+        status="completed",
+        payload={"content": "fresh"},
+    )
+    events = load_turn_events(tmp_path, "session-cache")
+    assert [event.turn_id for event in events] == ["turn-new", "turn-new"]
+    assert [event.event_type for event in events] == [EVENT_TURN_STARTED, EVENT_ASSISTANT_MESSAGE]
 
 
 def test_repeated_canonical_outcome_commits_one_final_item(tmp_path):

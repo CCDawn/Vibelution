@@ -1172,7 +1172,9 @@ describe("ConversationView edit resend affordance", () => {
     expect(conversationViewSource).toContain("function handleSendAndFollowLatest");
     expect(conversationViewSource).toContain("handleSendAndFollowLatest()");
     expect(conversationViewSource).toContain("ref={timelineVirtualRowRef(rowKey)}");
-    // Height version bumps must not re-pin scroll (that loop caused flicker).
+    expect(conversationViewSource).toContain("timelineContentRef");
+    expect(conversationViewSource).toContain("styles.timelineContent");
+    // Height bumps re-pin only while following latest (coalesced rAF; content host RO is primary).
     expect(conversationViewSource).toMatch(
       /scheduleTimelineHeightVersionBump[\s\S]*?setTimelineRowHeightVersion/,
     );
@@ -1180,7 +1182,10 @@ describe("ConversationView edit resend affordance", () => {
       conversationViewSource.indexOf("const scheduleTimelineHeightVersionBump"),
       conversationViewSource.indexOf("const bindTimelineVirtualRow"),
     );
-    expect(bumpBlock).not.toContain("scheduleTimelineScrollToBottom");
+    expect(bumpBlock).toContain("shouldStickTimelineToBottomOnContentResize");
+    expect(bumpBlock).toContain("scheduleTimelineScrollToBottom()");
+    expect(conversationViewSource).toContain("pinnedLatestUserMessageIdRef");
+    expect(conversationViewSource).toContain("latestUserChanged");
     // Paint effect must not depend on Map/array identities that change every render.
     const paintBlock = conversationViewSource.slice(
       conversationViewSource.indexOf("if (!streamingTimelineScrollSignal || !onStreamingFramePaint)"),
@@ -4184,7 +4189,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("timelineCellCompactTitleRow");
   });
 
-  it("keeps long running thoughts collapsed by default so walls are not forced open", () => {
+  it("keeps long running thoughts expanded by default so SSE walls stream live", () => {
     const longRunningThought = "A".repeat(200);
     const html = renderConversation([
       {
@@ -4205,9 +4210,10 @@ describe("ConversationView edit resend affordance", () => {
       },
     ]);
 
-    expect(html).toContain('data-thought-expanded="false"');
-    expect(html).toContain("timelineThoughtInlinePreview");
-    expect(html).not.toContain("timelineThoughtText");
+    expect(html).toContain('data-thought-expanded="true"');
+    expect(html).toContain("timelineThoughtText");
+    expect(html).toContain(longRunningThought);
+    expect(html).not.toContain("timelineThoughtInlinePreview");
   });
 
   it("renders ordered feedback events as a collapsed execution package without counts", () => {

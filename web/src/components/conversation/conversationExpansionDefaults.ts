@@ -26,6 +26,7 @@ export type PreserveConversationExpansionDefaultsInput = {
  * Auto-collapse process chrome when a turn settles (Claude/ChatGPT thinking UX).
  * Never force-collapse the final answer body; never override explicit user toggles
  * (those live in sectionExpansion and short-circuit setDefault).
+ * Thought/reasoning sections use `thought:` / `reasoning:` prefixes.
  */
 export function shouldRefreshConversationExpansionDefault(
   section: string,
@@ -84,7 +85,8 @@ export function preserveConversationExpansionDefaults({
     const timelineItems = timelineItemsByMessageId.get(message.id) ?? [];
     for (const item of timelineItems) {
       if (item.kind === "thought") {
-        setDefault(item.id, item.defaultExpanded);
+        // Match ConversationView section ids: `thought:${item.id}`.
+        setDefault(`thought:${item.id}`, Boolean(item.defaultExpanded));
         continue;
       }
       if (item.kind === "command_group") {

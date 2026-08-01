@@ -50,6 +50,31 @@ export function shouldStickTimelineToBottomOnContentResize(input: {
   return Boolean(input.autoScrollToLatest && input.followingLatest);
 }
 
+/**
+ * Explicit process expand/collapse:
+ * - near bottom / already following → keep stick-to-bottom so growth follows the tail
+ * - reading history → suspend follow and pin the summary instead
+ */
+export function shouldKeepFollowingLatestOnProcessToggle(input: {
+  autoScrollToLatest: boolean;
+  followingLatest: boolean;
+  scrollHeight: number;
+  clientHeight: number;
+  scrollTop: number;
+}): boolean {
+  if (!input.autoScrollToLatest) {
+    return false;
+  }
+  if (input.followingLatest) {
+    return true;
+  }
+  return isTimelineNearBottom({
+    scrollHeight: input.scrollHeight,
+    clientHeight: input.clientHeight,
+    scrollTop: input.scrollTop,
+  });
+}
+
 /** Fallback row height when a turn has not been measured yet (px). */
 export const CONVERSATION_VIRTUAL_ROW_ESTIMATE_PX = 120;
 
