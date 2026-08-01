@@ -1868,6 +1868,7 @@ def _runtime_cache_usage(runtime_state: dict) -> dict[str, object]:
         total_input_tokens,
     ) if total_input_tokens else 0
     last_usage = _runtime_last_llm_usage(runtime_state) or {}
+    explicit_source = str(last_usage.get("source") or "").strip()
     last_input_tokens = max(
         0,
         int(last_usage.get("inputTokens") or runtime_state.get("last_input_tokens") or 0),
@@ -1881,24 +1882,52 @@ def _runtime_cache_usage(runtime_state: dict) -> dict[str, object]:
         max(0, int(runtime_state.get("turn_cached_input_tokens") or last_cached_input_tokens or 0)),
         turn_input_tokens,
     ) if turn_input_tokens else 0
+    source = explicit_source or (
+        "provider_usage"
+        if last_input_tokens > 0 or turn_input_tokens > 0
+        else "missing"
+    )
+    current_usage_observed = source == "provider_usage"
+    if not current_usage_observed:
+        last_input_tokens = 0
+        last_cached_input_tokens = 0
+        turn_input_tokens = 0
+        turn_cached_input_tokens = 0
+    last_cache_composition = _runtime_last_cache_composition(runtime_state) or {}
+    total_observed_turn_count = max(
+        0,
+        int(
+            runtime_state.get("total_observed_turn_count")
+            or runtime_state.get("totalObservedTurnCount")
+            or last_cache_composition.get("averageObservedTurnCount")
+            or last_cache_composition.get("average_observed_turn_count")
+            or 0
+        ),
+    )
+    total_source = "provider_usage" if total_input_tokens > 0 else (
+        "not_called" if source == "not_called" else "missing"
+    )
     return {
         "lastInputTokens": last_input_tokens,
         "lastCachedInputTokens": last_cached_input_tokens,
         "lastCacheReadInputTokens": last_cached_input_tokens,
         "lastUncachedInputTokens": max(0, last_input_tokens - last_cached_input_tokens),
-        "lastCacheHitRate": (last_cached_input_tokens / last_input_tokens) if last_input_tokens > 0 else 0.0,
+        "lastCacheHitRate": (last_cached_input_tokens / last_input_tokens) if last_input_tokens > 0 else None,
+        "lastSource": source,
         "turnInputTokens": turn_input_tokens,
         "turnCachedInputTokens": turn_cached_input_tokens,
         "turnCacheReadInputTokens": turn_cached_input_tokens,
         "turnUncachedInputTokens": max(0, turn_input_tokens - turn_cached_input_tokens),
-        "turnCacheHitRate": (turn_cached_input_tokens / turn_input_tokens) if turn_input_tokens > 0 else 0.0,
+        "turnCacheHitRate": (turn_cached_input_tokens / turn_input_tokens) if turn_input_tokens > 0 else None,
+        "turnSource": source,
         "totalInputTokens": total_input_tokens,
         "totalCachedInputTokens": total_cached_input_tokens,
         "totalCacheReadInputTokens": total_cached_input_tokens,
         "totalUncachedInputTokens": max(0, total_input_tokens - total_cached_input_tokens),
-        "totalCacheHitRate": (total_cached_input_tokens / total_input_tokens) if total_input_tokens > 0 else 0.0,
-        "totalObservedTurnCount": 0,
-        "source": "ui_runtime_state",
+        "totalCacheHitRate": (total_cached_input_tokens / total_input_tokens) if total_input_tokens > 0 else None,
+        "totalObservedTurnCount": total_observed_turn_count,
+        "totalSource": total_source,
+        "source": source,
     }
 
 
