@@ -754,7 +754,7 @@ export function AppShell() {
       setShellStartupDataReady(true);
     }
   }, [backendHealthQuery.data, configQuery.data]);
-  const runtimeQuery = useQuery({
+  const runtimeQuery = useQuery<RuntimeSummary>({
     queryKey: queryKeys.runtimeSummary(),
     queryFn: ({ signal }) => fetchJson<RuntimeSummary>("/api/runtime/summary", { signal }),
     enabled: shellStartupDataReady,
