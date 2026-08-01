@@ -463,3 +463,103 @@ def test_runtime_retries_executor_once_when_first_turn_only_repeats_the_plan(
     assert scene_events[0][1]["fields"]["reason"] == (
         "no_tool_calls_and_no_changed_files"
     )
+
+
+def test_runtime_retries_executor_once_when_first_turn_only_inspects_candidate(
+    monkeypatch,
+):
+    turn_calls: list[dict] = []
+    inspection_calls = 0
+    scene_events: list[tuple[tuple, dict]] = []
+    monkeypatch.setattr(
+        "core.web.services.self_evolution_autonomous_loop_runtime."
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: scene_events.append((args, kwargs)),
+    )
+
+    def run_role_turn(**kwargs):
+        turn_calls.append(deepcopy(kwargs))
+        if len(turn_calls) == 1:
+            return {
+                "result": {
+                    "status": "completed",
+                    "summary": "已读取目标源码并确认现有测试。",
+                    "tool_call_count": 5,
+                    "tool_trace": [
+                        {
+                            "name": "open_evolution_transaction_tool",
+                            "status": "success",
+                        },
+                        {"name": "glob_tool", "status": "success"},
+                        {"name": "cli_tool", "status": "success"},
+                    ],
+                },
+                "carryover": {"previousResponseId": "response-inspection-only"},
+                "conversationSessionId": "session-executor",
+            }
+        return {
+            "result": {
+                "status": "completed",
+                "summary": "已实施候选并完成聚焦验证。",
+                "tool_call_count": 3,
+                "tool_trace": [
+                    {"name": "apply_patch_tool", "status": "success"},
+                    {"name": "cli_tool", "status": "success"},
+                    {
+                        "name": "close_evolution_transaction_tool",
+                        "status": "success",
+                    },
+                ],
+            },
+            "carryover": {"previousResponseId": "response-implemented"},
+            "conversationSessionId": "session-executor",
+        }
+
+    def inspect_candidate(_context):
+        nonlocal inspection_calls
+        inspection_calls += 1
+        if inspection_calls == 1:
+            return {
+                "headCommit": "a" * 40,
+                "changedFiles": [],
+                "variantId": "",
+            }
+        return {
+            "headCommit": "b" * 40,
+            "changedFiles": ["tests/test_example.py"],
+            "variantId": "variant-inspection-retry",
+        }
+
+    hooks = build_autonomous_loop_hooks(
+        AutonomousLoopRuntimeDependencies(
+            load_bindings=lambda: {
+                "observer": {"agentId": "observer-agent"},
+                "executor": {
+                    "agentId": "executor-agent",
+                    "workspacePath": "C:/workspace/main",
+                },
+            },
+            run_role_turn=run_role_turn,
+            create_candidate=lambda _context: {
+                "branch": "codex/self-loop-candidate",
+                "worktreePath": "C:/workspace/self-loop-candidate",
+                "baseCommit": "a" * 40,
+            },
+            inspect_candidate=inspect_candidate,
+            integrate_candidate=lambda _context: {},
+            cleanup_candidate=lambda _context: {},
+        )
+    )
+
+    candidate = hooks.evolve(_snapshot(candidate=None))
+
+    assert len(turn_calls) == 2
+    assert inspection_calls == 2
+    assert turn_calls[1]["carryover"] == {
+        "previousResponseId": "response-inspection-only"
+    }
+    assert "已经开账时不要重复开账" in turn_calls[1]["prompt"]
+    assert candidate["changedFiles"] == ["tests/test_example.py"]
+    assert scene_events[0][1]["fields"]["reason"] == (
+        "tool_calls_but_no_changed_files"
+    )

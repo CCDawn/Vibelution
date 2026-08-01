@@ -172,13 +172,15 @@ def build_autonomous_loop_hooks(
             turn=turn,
         )
         changed_files = inspection.get("changedFiles")
-        if (
-            (not isinstance(changed_files, list) or not changed_files)
-            and _result_tool_call_count(turn["result"]) == 0
-        ):
+        if not isinstance(changed_files, list) or not changed_files:
+            tool_call_count = _result_tool_call_count(turn["result"])
             _record_executor_retry(
                 run_id=run_id,
-                reason="no_tool_calls_and_no_changed_files",
+                reason=(
+                    "no_tool_calls_and_no_changed_files"
+                    if tool_call_count == 0
+                    else "tool_calls_but_no_changed_files"
+                ),
             )
             turn = _run_successful_turn(
                 dependencies.run_role_turn,
@@ -468,12 +470,14 @@ def _evolution_prompt(context: dict[str, Any]) -> str:
 def _evolution_retry_prompt(context: dict[str, Any]) -> str:
     plan = context.get("plan") if isinstance(context.get("plan"), dict) else {}
     return (
-        "上一条回复没有调用任何工具，候选工作树也没有产生变更，因此执行尚未开始。\n"
+        "上一轮执行后候选工作树仍没有产生任何文件变更；只读检查、复述计划"
+        "或仅开事务都不算完成。\n"
         f"既定计划：{str(plan.get('summary') or '').strip()}\n\n"
         "现在立即在当前隔离 worktree 中实施既定计划：\n"
         "1. 不要复述计划，不要再次制定计划，也无需再次请求用户确认。\n"
-        "2. 先调用 open_evolution_transaction_tool 开账，再使用读取、编辑和测试工具"
-        "产生并验证候选变更，最后调用 close_evolution_transaction_tool 收口。\n"
+        "2. 尚未开账时调用 open_evolution_transaction_tool；已经开账时不要重复开账。"
+        "随后使用编辑和测试工具产生并验证候选变更，最后调用 "
+        "close_evolution_transaction_tool 收口。\n"
         "3. 本阶段最多 24 次模型/工具迭代；不要重复读取同一证据。\n"
         "4. 仍须遵守原定范围；不要写主工作区、刷新 Launcher、执行远端操作、"
         "评分、Judge 或自行批准合入。\n"
