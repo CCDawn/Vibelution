@@ -187,9 +187,11 @@ export function createExperimentWorkspaceActions(deps: ExperimentWorkspaceAction
     plan: ExperimentPlanRecord,
     candidateId: string,
   ) {
-    if (!deps.teamId || deps.createExperimentHypothesisRevisionCandidateId) {
+    if (!deps.teamId) {
       return;
     }
+    // The server de-duplicates revisions by plan and candidate. Keep the UI
+    // pending marker presentational so a stale marker cannot swallow a click.
     deps.createExperimentHypothesisRevisionMutation.mutate({
       teamId: deps.teamId,
       plan,
