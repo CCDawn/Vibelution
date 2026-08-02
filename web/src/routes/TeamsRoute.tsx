@@ -3195,7 +3195,7 @@ export function TeamsRoute({
   const sourceCollectionResetResearchProjectId = activeSourceCollectionResearchProjectId.trim();
   const sourceCollectionResetAvailable = Boolean(
     sourceCollectionResetResearchProjectId
-    && (sourceCollectionRuns.length > 0 || activeSourceCollectionResearchProject?.nameLocked),
+    && sourceCollectionRuns.length > 0,
   );
   const selectedResearchProjectSourceCollectionResetPending =
     resetResearchProjectSourceCollectionMutation.isPending
