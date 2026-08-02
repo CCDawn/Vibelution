@@ -58,6 +58,12 @@ class TestToolExecutorInit:
         assert executor._timeout_map is not None
         assert executor._event_bus is not None
 
+    def test_source_collection_writeback_uses_bounded_transaction_timeout(self):
+        """来源阶段回写不能被通用 30 秒工具预算误判为失败。"""
+        executor = ToolExecutor()
+
+        assert executor._resolve_timeout("source_collection_stage_writeback_tool", {}) == 180
+
     def test_get_tool_executor_singleton(self):
         """测试单例模式"""
         executor1 = get_tool_executor()
