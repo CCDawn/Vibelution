@@ -658,6 +658,10 @@ class ToolExecutor:
             "image2_generate_tool": IMAGE2_TOOL_TIMEOUT_SECONDS,
             "computer_use_session_tool": 180,
             "computer_use_task_tool": 180,
+            # 阶段回写可能会逐条物化、排除或去重候选来源。它是一次有界的
+            # 工作流事务，不能沿用轻量查询工具的 30 秒预算；否则后端已经
+            # 写入时，调用方会误判为失败并发起重复回写。
+            "source_collection_stage_writeback_tool": 180,
         }
         self._retryable_tools = {"grep_search_tool"}
 
