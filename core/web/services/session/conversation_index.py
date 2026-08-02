@@ -1189,6 +1189,15 @@ def create_chat_session(
         payload["conversations"] = conversations
         s.save_chat_state(s.PROJECT_ROOT, payload)
     s._invalidate_session_list_cache()
+    # Warm agent prompt snapshot off the first-send critical path (mature agents
+    # hide cold prepare while the user is still typing). Best-effort only.
+    if normalized_agent_id:
+        try:
+            warm_agent = bound_agent or s.get_agent(normalized_agent_id, include_archived=False)
+            if isinstance(warm_agent, dict):
+                s._ensure_session_agent_prompt_snapshot(session_id, warm_agent)
+        except Exception:
+            pass
     try:
         s.record_runtime_scene_event(
             "conversation",

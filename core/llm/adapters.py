@@ -304,10 +304,10 @@ class DeepSeekAdapter(ProviderAdapter):
     def supports_stream_usage_options(self) -> bool:
         # The official DeepSeek OpenAI-compatible Chat Completions endpoint
         # supports stream_options.include_usage so the final stream chunk
-        # carries provider usage. This only requests automatic usage
-        # observation — it never injects prompt_cache_key or client-side
-        # cache control; DeepSeek cache hit/miss accounting is parsed from
-        # the returned usage fields (prompt_cache_hit_tokens / miss).
+        # carries provider usage. DeepSeek Context Caching is server-side
+        # automatic (prefix match); payload_builder uses strategy
+        # deepseek_automatic and never injects prompt_cache_key / cache_control.
+        # Hit/miss is observed via usage.prompt_cache_hit_tokens / miss.
         return True
 
     def supports_explicit_tool_choice(self) -> bool:

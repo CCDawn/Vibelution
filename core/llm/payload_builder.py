@@ -163,6 +163,7 @@ def _prompt_cache_provider_strategy(build_input: PayloadBuildInput, prompt_cache
     route_transport = str(getattr(getattr(build_input.route, "policy", None), "transport", "") or "").strip().lower()
     host = str(getattr(build_input.provider, "base_url", "") or "").strip().lower()
     is_qwen = "qwen" in model or route_protocol.startswith("qwen_") or "dashscope.aliyuncs.com" in host
+    is_deepseek = provider_kind == "deepseek" or "api.deepseek.com" in host or model.startswith("deepseek")
     if mode == "explicit_cache_control":
         if is_qwen:
             return "qwen_explicit_cache_control"
@@ -170,6 +171,10 @@ def _prompt_cache_provider_strategy(build_input: PayloadBuildInput, prompt_cache
             return "anthropic_explicit_cache_control"
         return "explicit_cache_control"
     if mode == "automatic":
+        # DeepSeek Context Caching is server-side prefix match only — do not inject
+        # OpenAI prompt_cache_key / retention fields (they are ignored or unsupported).
+        if is_deepseek:
+            return "deepseek_automatic"
         if provider_kind in {"openai", "relay"} or provider_api in {"openai-responses", "responses"} or route_transport == "responses":
             return "openai_automatic_key"
         if is_qwen:
@@ -889,7 +894,7 @@ def build_llm_payload(
     _merge_extra_body(payload, thinking_extra_body)
 
     prompt_cache = getattr(profile, "prompt_cache", None)
-    if prompt_cache_mode == "automatic":
+    if prompt_cache_mode == "automatic" and policy_actions.prompt_cache_provider_strategy != "deepseek_automatic":
         prompt_cache_key = str(getattr(prompt_cache, "key", "") or "").strip()
         prompt_cache_retention = str(getattr(prompt_cache, "retention", "") or "").strip()
         if not prompt_cache_key:
@@ -1028,7 +1033,7 @@ def compose_runtime_wire_payload(
     _merge_extra_body(payload, thinking_extra_body)
 
     prompt_cache = getattr(profile, "prompt_cache", None)
-    if prompt_cache_mode == "automatic":
+    if prompt_cache_mode == "automatic" and actions.prompt_cache_provider_strategy != "deepseek_automatic":
         prompt_cache_key = str(getattr(prompt_cache, "key", "") or "").strip()
         prompt_cache_retention = str(getattr(prompt_cache, "retention", "") or "").strip()
         if not prompt_cache_key:

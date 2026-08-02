@@ -701,3 +701,48 @@ def test_v2_projection_rejects_whitespace_only_upstream_id() -> None:
 
     with pytest.raises(ValueError, match="^pinned model pixel_relay/gpt-5.6-luna requires upstream_id$"):
         normalize_public_config_dict(public_config)
+
+
+def test_v2_projection_defaults_deepseek_prompt_cache_to_automatic() -> None:
+    """DeepSeek server-side context caching should surface as prompt_cache.automatic."""
+
+    public_config = {
+        "llm": {
+            "schema_version": 2,
+            "providers": {
+                "deepseek_main": {
+                    "label": "DeepSeek",
+                    "service_class": "official_api",
+                    "vendor": "deepseek",
+                    "driver": "openai",
+                    "base_url": "https://api.deepseek.com",
+                    "auth_kind": "api_key",
+                    "credential_ref": "env:DEEPSEEK_API_KEY",
+                    "requires_credential": True,
+                    "protocols": {"default": "chat_completions", "allowed": ["chat_completions"]},
+                    "discovery": {"mode": "auto", "adapter": "openai_compatible", "cache_ttl_seconds": 300},
+                    "models": {
+                        "deepseek-v4-flash": {
+                            "upstream_id": "deepseek-v4-flash",
+                            "label": "DeepSeek V4 Flash",
+                            "enabled": True,
+                            "wire_protocol": "chat_completions",
+                            "interaction_contract": "reasoning_chat",
+                            "model_protocol": "deepseek_reasoning",
+                            "defaults": {"temperature": 0.7, "streaming": True},
+                        }
+                    },
+                }
+            },
+            "profiles": {
+                "primary": {"model_ref": "deepseek_main/deepseek-v4-flash"},
+            },
+        }
+    }
+
+    normalized = normalize_public_config_dict(public_config)
+    model = normalized["llm"]["model_library"]["deepseek_main/deepseek-v4-flash"]
+    profile = normalized["llm"]["profiles"]["primary"]
+
+    assert model["prompt_cache"]["mode"] == "automatic"
+    assert profile["prompt_cache"]["mode"] == "automatic"

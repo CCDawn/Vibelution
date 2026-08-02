@@ -102,6 +102,17 @@ def _is_openai_responses_provider(provider: dict[str, Any]) -> bool:
     )
 
 
+def _is_deepseek_automatic_cache_provider(provider: dict[str, Any]) -> bool:
+    """DeepSeek Context Caching is server-side automatic (no client cache_control)."""
+
+    vendor = str(provider.get("vendor") or "").strip().lower()
+    kind = str(provider.get("kind") or "").strip().lower()
+    base_url = str(provider.get("base_url") or "").strip().lower()
+    if vendor == "deepseek" or kind == "deepseek":
+        return True
+    return "api.deepseek.com" in base_url
+
+
 def _default_v2_prompt_cache(
     provider: dict[str, Any],
     raw_model: dict[str, Any],
@@ -110,6 +121,10 @@ def _default_v2_prompt_cache(
     if "prompt_cache" in raw_model or "prompt_cache" in defaults:
         return None
     if _is_openai_responses_provider(provider):
+        return {"mode": "automatic"}
+    # DeepSeek disk/context caching is always on server-side; declare automatic so
+    # capabilities/diagnostics reflect reality without injecting OpenAI-only keys.
+    if _is_deepseek_automatic_cache_provider(provider):
         return {"mode": "automatic"}
     return None
 

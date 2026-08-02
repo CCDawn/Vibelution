@@ -375,6 +375,8 @@ LLM_MODEL_PRESETS = {
             "supports_image_input": False,
             "capability_status": "unsupported",
             "capability_source": "preset",
+            # Server-side Context Caching (no client cache_control / prompt_cache_key).
+            "prompt_cache": {"mode": "automatic"},
         },
     },
     "deepseek_v4_pro": {
@@ -406,6 +408,8 @@ LLM_MODEL_PRESETS = {
             "supports_image_input": False,
             "capability_status": "unsupported",
             "capability_source": "preset",
+            # Server-side Context Caching (no client cache_control / prompt_cache_key).
+            "prompt_cache": {"mode": "automatic"},
         },
     },
     "google_gemini_flash": {
@@ -1271,6 +1275,9 @@ def _recommended_prompt_cache_mode(provider: dict[str, Any], details: dict[str, 
         return "explicit_cache_control"
     if is_qwen and provider_kind == "aliyun":
         return "explicit_cache_control"
+    # DeepSeek Context Caching is automatic server-side; declare capability only.
+    if provider_kind == "deepseek" or "api.deepseek.com" in host:
+        return "automatic"
     if (
         provider_kind in {"openai", "relay"}
         or (provider_kind == "openai_compatible" and compat_mode in {"openai", "openai_compatible"})
