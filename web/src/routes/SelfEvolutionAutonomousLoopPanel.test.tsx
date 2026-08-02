@@ -173,6 +173,7 @@ describe("SelfEvolutionAutonomousLoopPanel", () => {
     expect(markup).toContain("自动闭环未完成");
     expect(markup).toContain("main HEAD 已变化");
     expect(markup).toContain("已保留");
+    expect(markup).toContain("重试 Git 集成");
     expect(markup).not.toContain("工作树已删除");
   });
 });
