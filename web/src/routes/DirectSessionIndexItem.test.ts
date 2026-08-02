@@ -96,6 +96,12 @@ describe("DirectSessionIndexItem helpers", () => {
     expect(markup).not.toContain('title="新会话 · 模型：mimo-v2.5"');
   });
 
+  it("wires hover/focus prefetch hooks for Cursor-style session warm", () => {
+    expect(directSessionIndexItemSource).toContain("onPrefetch?: (sessionId: string) => void");
+    expect(directSessionIndexItemSource).toContain("onPointerEnter={() => onPrefetch?.(session.id)}");
+    expect(directSessionIndexItemSource).toContain("onFocus={() => onPrefetch?.(session.id)}");
+  });
+
   it("places the timestamp in the title row instead of vertically centering it beside the whole copy block", () => {
     const markup = renderDirectItem({
       session: makeSession({ currentPhase: "running", status: "running" }),
