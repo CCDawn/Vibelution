@@ -40,6 +40,7 @@ type DirectSessionIndexListProps = {
   onContextMenu: (event: MouseEvent<HTMLDivElement>, session: SessionSummary) => void;
   onDragReference: (event: DragEvent<HTMLElement>, reference: SessionReferenceAttachment) => void;
   onOpen: (sessionId: string) => void;
+  onPrefetch?: (sessionId: string) => void;
   onRenameTitleChange: (title: string) => void;
   onSubmitRename: (session: SessionSummary) => void;
 };
@@ -149,6 +150,7 @@ export function DirectSessionIndexList({
   onContextMenu,
   onDragReference,
   onOpen,
+  onPrefetch,
   onRenameTitleChange,
   onSubmitRename,
 }: DirectSessionIndexListProps) {
@@ -213,6 +215,7 @@ export function DirectSessionIndexList({
                 ),
               )}
             onOpen={onOpen}
+            onPrefetch={onPrefetch}
             onRenameTitleChange={onRenameTitleChange}
             onSubmitRename={onSubmitRename}
           />

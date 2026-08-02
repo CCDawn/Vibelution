@@ -1157,6 +1157,10 @@ describe("ConversationView edit resend affordance", () => {
     expect(conversationViewSource).toContain("timelineRowNodesRef");
     expect(conversationViewSource).toContain("streamingPaintMetricsRef");
     expect(conversationViewSource).toContain("followLatestRef.current ? 8 : 2");
+    // ChatGPT/Claude: send always re-pins stick-to-bottom even after user scrolled up.
+    expect(conversationViewSource).toContain("function pinFollowLatestForSubmit");
+    expect(conversationViewSource).toContain("function handleSendAndFollowLatest");
+    expect(conversationViewSource).toContain("handleSendAndFollowLatest()");
     expect(conversationViewSource).toContain("ref={timelineVirtualRowRef(rowKey)}");
     // Height version bumps must not re-pin scroll (that loop caused flicker).
     expect(conversationViewSource).toMatch(

@@ -67,6 +67,7 @@ export type ChatConversationIndexRailProps = {
   onCreateAgent: () => void;
   onCreateGroupRoom: () => void;
   onOpenDirectSession: (sessionId: string) => void;
+  onPrefetchDirectSession?: (sessionId: string) => void;
   onOpenProjectAgentBus: () => void;
   onToggleGroupAgent: (agentId: string) => void;
   onToggleGroupComposer: () => void;
@@ -148,6 +149,7 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
     onCreateAgent,
     onCreateGroupRoom,
     onOpenDirectSession,
+    onPrefetchDirectSession,
     onOpenProjectAgentBus,
     onToggleGroupAgent,
     onToggleGroupComposer,
@@ -310,6 +312,8 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
                           type="button"
                           contentLayout="plain"
                           className={styles.agentIndexOpenButton}
+                          onPointerEnter={() => onPrefetchDirectSession?.(participant.sessionId)}
+                          onFocus={() => onPrefetchDirectSession?.(participant.sessionId)}
                           onClick={() => onOpenDirectSession(participant.sessionId)}
                           aria-label={lang === "zh" ? `打开 ${participantDisplay.name} 单聊` : `Open direct chat with ${participantDisplay.name}`}
                           tooltip={lang === "zh"

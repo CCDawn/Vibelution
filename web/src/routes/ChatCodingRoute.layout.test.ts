@@ -2580,6 +2580,11 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("sessions={agentSessionTabs}");
     expect(routeSource).toContain("onContextMenu={openSessionContextMenu}");
     expect(routeSource).toContain("onOpenDirectSession={handleOpenDirectSession}");
+    expect(routeSource).toContain("onPrefetchDirectSession={handlePrefetchDirectSession}");
+    expect(routeSource).toContain("handlePrefetchDirectSession");
+    expect(routeSource).toContain("prefetchSessionDetailWindow");
+    expect(conversationIndexTreeSource).toContain("onPrefetch={onPrefetchDirectSession}");
+    expect(directSessionIndexListSource).toContain("onPrefetch={onPrefetch}");
     expect(routeSource).toContain("onSubmitRename={submitRenameSession}");
     expect(routeSource).toContain("onCancelRename={cancelRenameSession}");
     expect(agentSessionTabStripSource).toContain("styles.agentSessionTabGroup");

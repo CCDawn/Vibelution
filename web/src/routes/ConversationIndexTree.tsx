@@ -59,6 +59,7 @@ type ConversationIndexTreeProps = {
   onContextMenu: (event: MouseEvent<HTMLDivElement>, session: SessionSummary) => void;
   onDragReference: (event: DragEvent<HTMLElement>, reference: SessionReferenceAttachment) => void;
   onOpenDirectSession: (sessionId: string) => void;
+  onPrefetchDirectSession?: (sessionId: string) => void;
   onOpenGroupRoom: (roomId: string) => void;
   onRenameTitleChange: (title: string) => void;
   onSubmitRename: (session: SessionSummary) => void;
@@ -109,6 +110,7 @@ export function ConversationIndexTree({
   onContextMenu,
   onDragReference,
   onOpenDirectSession,
+  onPrefetchDirectSession,
   onOpenGroupRoom,
   onRenameTitleChange,
   onSubmitRename,
@@ -179,6 +181,7 @@ export function ConversationIndexTree({
               onContextMenu={onContextMenu}
               onDragReference={onDragReference}
               onOpen={onOpenDirectSession}
+              onPrefetch={onPrefetchDirectSession}
               onRenameTitleChange={onRenameTitleChange}
               onSubmitRename={onSubmitRename}
             />

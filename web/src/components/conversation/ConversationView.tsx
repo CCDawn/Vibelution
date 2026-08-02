@@ -534,7 +534,6 @@ export function ConversationView({
   const primaryActionClassName = primaryActionIsEditSubmit
     ? `${styles.composerEditSubmitButton} ${styles.composerRoundButtonPrimary}`
     : `${styles.sendButton} ${styles.composerRoundButton} ${styles.composerRoundButtonPrimary}`;
-  const handlePrimaryAction = resolvedActionMode === "stop" ? onStop ?? onSubmit : onSubmit;
   const {
     guidanceDraftReady,
     guidanceActionDisabled,
@@ -952,6 +951,41 @@ export function ConversationView({
       scrollTimelineToBottom(timeline);
     });
   }
+
+  /**
+   * ChatGPT/Claude: sending always re-pins the viewport to the latest turn.
+   * Do this before onSubmit so optimistic user + active-turn paint under followLatest.
+   */
+  function pinFollowLatestForSubmit() {
+    followLatestRef.current = true;
+    atBottomRef.current = true;
+    setIsAtBottom(true);
+    const timeline = timelineRef.current;
+    if (timeline) {
+      scrollTimelineToBottom(timeline, { followLatest: true });
+    }
+    // Optimistic message height lands after React commit + virtual range rebuild.
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        if (!followLatestRef.current) {
+          return;
+        }
+        const nextTimeline = timelineRef.current;
+        if (nextTimeline) {
+          scrollTimelineToBottom(nextTimeline, { followLatest: true });
+        }
+      });
+    });
+  }
+
+  function handleSendAndFollowLatest() {
+    pinFollowLatestForSubmit();
+    onSubmit();
+  }
+
+  const handlePrimaryAction = resolvedActionMode === "stop"
+    ? (onStop ?? onSubmit)
+    : handleSendAndFollowLatest;
 
   const handleProcessDisclosureUserToggle = useCallback((summary: HTMLElement) => {
     const timeline = timelineRef.current;
@@ -3972,7 +4006,7 @@ export function ConversationView({
                   && !resolvedActionDisabled
                   && (composerValue.trim() || hasComposerAttachments || hasComposerReferences)
                 ) {
-                  onSubmit();
+                  handleSendAndFollowLatest();
                 }
               }
             }}

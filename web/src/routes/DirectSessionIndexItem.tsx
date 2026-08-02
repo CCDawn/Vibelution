@@ -261,6 +261,8 @@ type DirectSessionIndexItemProps = {
   onContextMenu: (event: MouseEvent<HTMLDivElement>, session: SessionSummary) => void;
   onDragStart: (event: DragEvent<HTMLElement>) => void;
   onOpen: (sessionId: string) => void;
+  /** Cursor-style hover warm: prefetch session detail before click. */
+  onPrefetch?: (sessionId: string) => void;
   onRenameTitleChange: (title: string) => void;
   onSubmitRename: (session: SessionSummary) => void;
 };
@@ -298,6 +300,7 @@ export function DirectSessionIndexItem({
   onContextMenu,
   onDragStart,
   onOpen,
+  onPrefetch,
   onRenameTitleChange,
   onSubmitRename,
 }: DirectSessionIndexItemProps) {
@@ -444,6 +447,8 @@ export function DirectSessionIndexItem({
             type="button"
             className={styles.sessionItemMain}
             {...dragSessionProps}
+            onPointerEnter={() => onPrefetch?.(session.id)}
+            onFocus={() => onPrefetch?.(session.id)}
             onClick={() => onOpen(session.id)}
             aria-current={active ? "true" : undefined}
           >

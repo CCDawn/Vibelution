@@ -114,6 +114,7 @@ export type ChatStatusRailProps = {
   agentPrimaryDirectSessionId: string | null | undefined;
   sessionBindingMismatchLine: string;
   onOpenDirectSession: (sessionId: string) => void;
+  onPrefetchDirectSession?: (sessionId: string) => void;
   sessionCompactRows: Array<{ label: string; value: string; title?: string }>;
   activeSkillSummary: boolean;
   activeSkillStatusStyle: string;
@@ -225,6 +226,7 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
     agentPrimaryDirectSessionId,
     sessionBindingMismatchLine,
     onOpenDirectSession,
+    onPrefetchDirectSession,
     sessionCompactRows,
     activeSkillSummary,
     activeSkillStatusStyle,
@@ -527,6 +529,8 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
               <span>{sessionBindingMismatchLine}</span>
               <VButton
                 type="button"
+                onPointerEnter={() => onPrefetchDirectSession?.(agentPrimaryDirectSessionId)}
+                onFocus={() => onPrefetchDirectSession?.(agentPrimaryDirectSessionId)}
                 onClick={() => onOpenDirectSession(agentPrimaryDirectSessionId)}
                 title={`${t("openCurrentDirectSession")} · ${agentPrimaryDirectSessionId}`}
               >

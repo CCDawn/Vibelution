@@ -2528,6 +2528,10 @@ export function ChatCodingRoute() {
     }));
   }
 
+  const handlePrefetchDirectSession = useCallback((sessionId: string) => {
+    void prefetchSessionDetailWindow(queryClient, sessionId);
+  }, [queryClient]);
+
   const {
     handlePetInteraction,
     handleCreateSession,
@@ -2887,6 +2891,7 @@ export function ChatCodingRoute() {
             onContextMenu={openSessionContextMenu}
             onDragReference={startSessionReferenceDrag}
             onOpenDirectSession={handleOpenDirectSession}
+            onPrefetchDirectSession={handlePrefetchDirectSession}
             onOpenGroupRoom={handleOpenGroupRoom}
             onRenameTitleChange={setEditingSessionTitle}
             onSubmitRename={submitRenameSession}
@@ -3013,6 +3018,7 @@ export function ChatCodingRoute() {
         agentPrimaryDirectSessionId={agentPrimaryDirectSessionId}
         sessionBindingMismatchLine={sessionBindingMismatchLine}
         onOpenDirectSession={handleOpenDirectSession}
+        onPrefetchDirectSession={handlePrefetchDirectSession}
         sessionCompactRows={sessionCompactRows}
         activeSkillSummary={hasActiveSkill}
         activeSkillStatusStyle={activeSkillStatusStyle}
@@ -3152,6 +3158,7 @@ export function ChatCodingRoute() {
                 }
               }}
               onOpenDirectSession={handleOpenDirectSession}
+              onPrefetchDirectSession={handlePrefetchDirectSession}
               onRenameTitleChange={setEditingSessionTitle}
               onSetActiveTab={setActiveTab}
               onSubmitRename={submitRenameSession}
@@ -3481,6 +3488,7 @@ export function ChatCodingRoute() {
         projectBusActive={projectBusActive}
         onOpenProjectAgentBus={handleOpenProjectAgentBus}
         onOpenDirectSession={handleOpenDirectSession}
+        onPrefetchDirectSession={handlePrefetchDirectSession}
         resolveModelLabel={resolveModelLabel}
         statusLabel={statusLabel}
         describeError={describeError}

@@ -120,6 +120,7 @@ export type AgentSessionTabStripProps = {
   onContextMenu: (event: ReactMouseEvent<HTMLElement>, session: SessionSummary) => void;
   onDragReference: (event: DragEvent<HTMLElement>, reference: SessionReferenceAttachment) => void;
   onOpenDirectSession: (sessionId: string) => void;
+  onPrefetchDirectSession?: (sessionId: string) => void;
   onOpenCliAgentRun?: (runId: string) => void;
   onCloseCliAgentRun?: (runId: string) => void;
   onRenameTitleChange: (title: string) => void;
@@ -150,6 +151,7 @@ export function AgentSessionTabStrip({
   onContextMenu,
   onDragReference,
   onOpenDirectSession,
+  onPrefetchDirectSession,
   onOpenCliAgentRun,
   onCloseCliAgentRun,
   onRenameTitleChange,
@@ -301,6 +303,8 @@ export function AgentSessionTabStrip({
               type="button"
               className={tabMainActionClassName}
               data-session-tab-active={tabActive ? "true" : "false"}
+              onPointerEnter={() => onPrefetchDirectSession?.(session.id)}
+              onFocus={() => onPrefetchDirectSession?.(session.id)}
               onPress={() => {
                 if (activeSessionId === session.id) {
                   onSetActiveTab(session.id, "agent");
