@@ -10,6 +10,7 @@ import {
   TeamExperimentHypothesisGovernancePanel,
   createEngineeringProxyHypothesisDraft,
 } from "./TeamExperimentHypothesisGovernancePanel";
+import styles from "./TeamExperimentHypothesisGovernancePanel.styles";
 import panelSource from "./TeamExperimentHypothesisGovernancePanel.tsx?raw";
 
 const activePlan = {
@@ -233,5 +234,11 @@ describe("TeamExperimentHypothesisGovernancePanel", () => {
     expect(markup).toContain("已人工批准");
     expect(markup).toContain("创建新设计修订");
     expect(markup).toContain("不会自动冻结");
+  });
+
+  it("keeps approved-candidate actions inside a bounded card column", () => {
+    expect(styles.candidateCard).toContain("min-w-0");
+    expect(styles.candidateCard).toContain("grid-cols-[minmax(0,1fr)]");
+    expect(styles.candidateActions).toContain("min-w-0");
   });
 });

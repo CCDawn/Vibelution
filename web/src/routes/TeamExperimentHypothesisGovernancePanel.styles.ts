@@ -26,7 +26,7 @@ const styles = {
   candidateGrid:
     "grid grid-cols-2 gap-3 max-[900px]:grid-cols-[minmax(0,1fr)]",
   candidateCard:
-    "grid content-start gap-2 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-3",
+    "grid min-w-0 grid-cols-[minmax(0,1fr)] content-start gap-2 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-3",
   candidateHeader:
     "flex items-center justify-between gap-2",
   candidateTitle:
@@ -40,7 +40,7 @@ const styles = {
   metadata:
     "[font-size:var(--vui-font-xs)] text-[var(--fg-secondary)]",
   candidateActions:
-    "mt-auto flex items-center justify-end gap-2 pt-1",
+    "mt-auto flex min-w-0 items-center justify-end gap-2 pt-1",
   selected:
     "inline-flex items-center gap-1 [font-size:var(--vui-font-xs)] text-[var(--state-success)]",
   approvalNote:
