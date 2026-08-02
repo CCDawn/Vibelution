@@ -585,6 +585,8 @@ from core.web.services.session.session_ops import (
     _make_chat_message,
     _make_local_runtime_error_chat_message,
     _pending_tool_governance_requests_for_session,
+    _terminal_reason_for_turn,
+    _terminal_reason_from_conversation,
     _remove_replacement_direct_session_after_failed_agent_reset,
     _repair_child_root_agent_direct_session_bindings,
     _repair_stale_running_conversation,

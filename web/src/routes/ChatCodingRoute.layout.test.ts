@@ -408,7 +408,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(chatSessionWorkspacePanelSource.indexOf("<ChatToolApprovalDialog")).toBeLessThan(
       chatSessionWorkspacePanelSource.indexOf("<ChatConversationComposerBridge"),
     );
-    expect(routeSource).toContain("return 250");
+    expect(routeSource).toContain("return 750");
+    expect(routeSource).toContain("return 2_000");
+    expect(routeSource).toContain("return 4_000");
     expect(chatSessionDetailMutationsSource).toContain("onMutate: async (variables) =>");
     expect(routeStylesModuleSource).not.toContain("toolApprovalOverlay:");
     expect(routeStylesModuleSource).not.toContain("toolApprovalDialog:");

@@ -1496,16 +1496,22 @@ export function ChatCodingRoute() {
     queryKey: queryKeys.sessionToolApprovals(activeSessionId ?? "none"),
     enabled: Boolean(activeSessionId && directSessionPanelActive),
     queryFn: () => listPendingSessionToolApprovals(activeSessionId ?? ""),
-    // Blocking path: poll quickly while a turn may wait on the user.
+    // Avoid 250ms thrash while busy (queues behind heavy session-detail under load).
+    // Pending approvals still poll sub-second; busy-without-pending is lighter.
     refetchInterval: (query) => {
+      if (!directSessionPanelActive) {
+        return false;
+      }
       const hasPending = (query.state.data?.length ?? 0) > 0;
       const busy = sessionToolApprovalRuntimeActive
         || isBusyPhase(detail?.currentPhase || directSessionActiveSummary?.currentPhase || directSessionActiveSummary?.status);
-      if (hasPending || busy) {
-        return 250;
+      if (hasPending) {
+        return 750;
       }
-      // Light keep-alive so a just-started tool wait is not missed for seconds.
-      return directSessionPanelActive ? 1500 : false;
+      if (busy) {
+        return 2_000;
+      }
+      return 4_000;
     },
     refetchIntervalInBackground: false,
   });
@@ -1980,6 +1986,7 @@ export function ChatCodingRoute() {
   const sessionRunning = isRunningPhase(detail?.currentPhase);
   const sessionStopping = isStoppingPhase(detail?.currentPhase) || Boolean(detail?.stopRequested);
   const lastTurnStatusNormalized = String(detail?.lastTurnStatus || "").trim().toLowerCase();
+  const terminalReasonNormalized = String(detail?.terminalReason || "").trim().toLowerCase();
   const lastTurnTerminal = [
     "ready",
     "completed",
@@ -1991,7 +1998,21 @@ export function ChatCodingRoute() {
     "stopped_by_user",
     "superseded",
     "cancelled",
-  ].includes(lastTurnStatusNormalized);
+    // Canonical terminalReason values (mature-agent style explicit stop).
+    "success",
+    "aborted",
+  ].includes(lastTurnStatusNormalized)
+    || [
+      "success",
+      "failed_runtime",
+      "failed_provider",
+      "needs_continue",
+      "paused_limit",
+      "stopped_by_user",
+      "aborted",
+      "superseded",
+      "ready",
+    ].includes(terminalReasonNormalized);
   const liveActiveTurnOpen = Boolean(detail?.activeTurnId)
     && !activeTurnSettledByDetail;
   // When the turn is already terminal and no live activeTurn remains, do not

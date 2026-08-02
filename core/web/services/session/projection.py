@@ -795,6 +795,7 @@ def _normalize_conversation(
         "_hasLedgerMessages": has_ledger_messages,
         "runtimeNotices": visible_runtime_notices,
         "lastTurnStatus": last_turn_status,
+        "terminalReason": s._terminal_reason_from_conversation(raw),
         "lastTurnError": last_turn_error,
         "lastContextComposition": last_context_composition,
         "agentPromptSnapshot": agent_prompt_snapshot,

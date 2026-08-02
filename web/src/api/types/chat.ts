@@ -33,6 +33,8 @@ export type SessionSummary = {
   updatedAt: string;
   currentPhase: string;
   lastTurnStatus?: string;
+  /** Canonical turn terminal reason: success | failed_runtime | needs_continue | ... */
+  terminalReason?: string;
   sessionKind?: "main" | "child" | string;
   sessionRole?: "primary" | "workspace" | "supervised" | string;
   parentSessionId?: string;

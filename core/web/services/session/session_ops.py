@@ -13,6 +13,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import re
+import time
 from typing import Any, Mapping
 
 # Local default for signature evaluation (facade remains SSOT via s.SESSION_LLM_SLOT_DIALOGUE).
@@ -193,6 +194,74 @@ def _build_terminal_error_turn_item(
         "diagnosticSummary": diagnostic_summary,
         "metadata": {"turnId": normalized_turn_id},
     }
+
+
+# Canonical terminal reasons for chat turns (API: terminalReason).
+# Aligns with mature agent harnesses: success is only one of several explicit stops.
+TERMINAL_REASON_SUCCESS = "success"
+TERMINAL_REASON_FAILED_RUNTIME = "failed_runtime"
+TERMINAL_REASON_FAILED_PROVIDER = "failed_provider"
+TERMINAL_REASON_NEEDS_CONTINUE = "needs_continue"
+TERMINAL_REASON_PAUSED_LIMIT = "paused_limit"
+TERMINAL_REASON_STOPPED_BY_USER = "stopped_by_user"
+TERMINAL_REASON_ABORTED = "aborted"
+TERMINAL_REASON_SUPERSEDED = "superseded"
+TERMINAL_REASON_RUNNING = "running"
+TERMINAL_REASON_READY = "ready"
+
+
+def _terminal_reason_for_turn(
+    final_status: str,
+    *,
+    result: Any = None,
+    stop_requested: bool = False,
+) -> str:
+    """Map chat turn final status (+ optional result) to a stable terminalReason."""
+
+    if stop_requested:
+        return TERMINAL_REASON_STOPPED_BY_USER
+    normalized = str(final_status or "").strip().lower()
+    if normalized in {"failed_provider"}:
+        return TERMINAL_REASON_FAILED_PROVIDER
+    if normalized in {"failed_runtime", "failed", "timeout", "error"}:
+        return TERMINAL_REASON_FAILED_RUNTIME
+    if normalized in {"needs_continue"}:
+        return TERMINAL_REASON_NEEDS_CONTINUE
+    if normalized in {"paused_limit"}:
+        return TERMINAL_REASON_PAUSED_LIMIT
+    if normalized in {"stopped_by_user", "stopped"}:
+        return TERMINAL_REASON_STOPPED_BY_USER
+    if normalized in {"force_stopping", "stop_failed", "cancelled", "aborted"}:
+        return TERMINAL_REASON_ABORTED
+    if normalized in {"superseded"}:
+        return TERMINAL_REASON_SUPERSEDED
+    if normalized in {"running"}:
+        return TERMINAL_REASON_RUNNING
+    if normalized in {"completed", "success"}:
+        # Re-check contract path so "completed" that should have been needs_continue
+        # does not surface as success when callers pass the raw result_status.
+        if isinstance(result, dict):
+            refined = _chat_turn_result_status(normalized, result, stop_requested=False)
+            if refined != "completed":
+                return _terminal_reason_for_turn(refined, result=None, stop_requested=False)
+        return TERMINAL_REASON_SUCCESS
+    if normalized in {"ready", ""}:
+        return TERMINAL_REASON_READY
+    return normalized or TERMINAL_REASON_READY
+
+
+def _terminal_reason_from_conversation(conversation: Mapping[str, Any] | dict[str, Any] | None) -> str:
+    raw = conversation if isinstance(conversation, Mapping) else {}
+    explicit = str(
+        raw.get("last_turn_terminal_reason")
+        or raw.get("lastTurnTerminalReason")
+        or raw.get("terminalReason")
+        or ""
+    ).strip().lower()
+    if explicit:
+        return explicit
+    status = str(raw.get("last_turn_status") or raw.get("lastTurnStatus") or "").strip().lower()
+    return _terminal_reason_for_turn(status or "ready")
 
 
 def _chat_turn_result_status(result_status: str, result: Any, *, stop_requested: bool) -> str:
@@ -611,11 +680,22 @@ def _make_local_runtime_error_chat_message(turn_error: dict[str, Any], *, turn_i
     return message
 
 
+_PENDING_GOVERNANCE_CACHE_TTL_SECONDS = 2.0
+_PENDING_GOVERNANCE_CACHE: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+
+
 def _pending_tool_governance_requests_for_session(agent_id: str, *, limit: int = 3) -> list[dict[str, Any]]:
     s = _service()
     normalized_agent_id = str(agent_id or "").strip()
     if not normalized_agent_id:
         return []
+    cache_key = f"{normalized_agent_id}:{max(1, int(limit or 3))}"
+    now = time.time()
+    cached = _PENDING_GOVERNANCE_CACHE.get(cache_key)
+    if cached is not None:
+        expires_at, payload = cached
+        if expires_at > now:
+            return [dict(item) for item in payload]
     try:
         from core.web.services import agent_tool_governance_service
 
@@ -665,6 +745,10 @@ def _pending_tool_governance_requests_for_session(agent_id: str, *, limit: int =
                 "after": item.get("after") if isinstance(item.get("after"), dict) else {},
             }
         )
+    _PENDING_GOVERNANCE_CACHE[cache_key] = (
+        now + _PENDING_GOVERNANCE_CACHE_TTL_SECONDS,
+        [dict(item) for item in result],
+    )
     return result
 
 

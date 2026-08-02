@@ -204,6 +204,11 @@ def _persist_session_turn_result(
             if last_llm_payload_trace is not None:
                 conversation["last_llm_payload_trace"] = last_llm_payload_trace
             conversation["last_turn_status"] = "failed"
+            conversation["last_turn_terminal_reason"] = s._terminal_reason_for_turn(
+                "failed_provider",
+                result=result if isinstance(result, dict) else None,
+                stop_requested=False,
+            )
             conversation["last_turn_error"] = turn_error
             conversation["updated_at"] = timestamp
             payload["updated_at"] = timestamp
@@ -495,6 +500,11 @@ def _persist_session_turn_result(
             if final_status in {"failed_provider", "failed_runtime", "failed"}
             else ("needs_continue" if final_status == "needs_continue" else ("paused_limit" if final_status == "paused_limit" else "ready"))
         )
+        conversation["last_turn_terminal_reason"] = s._terminal_reason_for_turn(
+            final_status,
+            result=result if isinstance(result, dict) else None,
+            stop_requested=stop_requested,
+        )
         conversation["updated_at"] = assistant_entry["timestamp"]
         payload["updated_at"] = assistant_entry["timestamp"]
         s.save_chat_state(s.PROJECT_ROOT, payload)
@@ -712,6 +722,7 @@ def _persist_session_turn_runtime_error(
             return
         conversation.pop("messages", None)
         conversation["last_turn_status"] = normalized_status
+        conversation["last_turn_terminal_reason"] = s._terminal_reason_for_turn(normalized_status)
         conversation["last_turn_error"] = turn_error
         conversation["updated_at"] = timestamp
         payload["updated_at"] = timestamp
@@ -832,6 +843,7 @@ def _persist_session_turn_failure(session_id: str, context: dict[str, Any], exc:
             timestamp = str(error_entry.get("timestamp") or s._now_timestamp()).strip()
             conversation.pop("messages", None)
             conversation["last_turn_status"] = "failed"
+            conversation["last_turn_terminal_reason"] = s._terminal_reason_for_turn("failed_provider")
             conversation["last_turn_error"] = turn_error
             conversation["updated_at"] = timestamp
             payload["updated_at"] = timestamp
@@ -937,6 +949,7 @@ def _persist_session_turn_failure(session_id: str, context: dict[str, Any], exc:
         conversation.pop("messages", None)
         conversation["last_turn_error"] = turn_error
         conversation["last_turn_status"] = "failed"
+        conversation["last_turn_terminal_reason"] = s._terminal_reason_for_turn("failed_runtime")
         conversation["updated_at"] = timestamp
         payload["updated_at"] = timestamp
         s.save_chat_state(s.PROJECT_ROOT, payload)
