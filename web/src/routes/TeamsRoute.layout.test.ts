@@ -40,6 +40,12 @@ import teamSourceCollectionModeFieldsSource from "./teams/TeamSourceCollectionMo
 const routeAndPureSource = `${routeSource}\n${canvasGeometrySource}\n${researchWorkspaceModelSource}\n${teamKindModelSource}\n${presentationModelSource}\n${experimentLoopModelSource}\n${aiSearchPresentationSource}\n${workflowPresentationSource}\n${researchStageRolesSource}\n${teamWorkflowQueryKeysSource}\n${researchStageAgentPresentationSource}\n${teamRouteShellModelSource}\n${teamSourceCollectionShellModelSource}`;
 
 describe("research project workspace", () => {
+  it("never routes an active source-collection batch to a legacy direct Agent session", () => {
+    expect(routeSource).toContain(
+      'const route = currentTaskSessionRoute || (selectedSourceCollectionRunEffectiveId\n      ? ""\n      : researchStageAgentDirectChatRoute(',
+    );
+  });
+
   it("loads the current experiment projection on the Challenge research overview", () => {
     expect(routeSource).toContain(
       'challengeProgramProgressVisible: challengeCupResearchTeamSelected && (challengeTeamSurface === "progress" || researchWorkspaceView === "overview")',
