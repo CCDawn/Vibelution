@@ -7,6 +7,7 @@ import {
   sourceCollectionActiveWorkRunFromRuntime,
   sourceCollectionRunCandidateMetric,
   sourceCollectionRunRecordCount,
+  sourceCollectionRunsForTeam,
   sourceCollectionStableCountText,
 } from "./runModel";
 
@@ -70,6 +71,31 @@ describe("source collection run selection", () => {
 
     expect(sourceCollectionRunRecordCount(run)).toBe(5);
     expect(sourceCollectionRunCandidateMetric(run)).toBe(3);
+  });
+
+  it("does not surface a usable round from another research project", () => {
+    const currentProject = runFixture("chemistry-round", {}, {
+      scope: { teamId: "research-team", researchProjectId: "research-chemistry" },
+      metadata: {
+        startedFrom: "team_workflow_source_collection",
+        teamId: "research-team",
+        researchProjectId: "research-chemistry",
+      },
+    });
+    const oldProject = runFixture("neuroscience-round", { recordCount: 14 }, {
+      scope: { teamId: "research-team", researchProjectId: "research-neuroscience" },
+      metadata: {
+        startedFrom: "team_workflow_source_collection",
+        teamId: "research-team",
+        researchProjectId: "research-neuroscience",
+      },
+    });
+
+    expect(sourceCollectionRunsForTeam(
+      { schemaVersion: 1, runs: [oldProject, currentProject], summary: { runCount: 2, returnedCount: 2 } },
+      "research-team",
+      "research-chemistry",
+    )).toEqual([currentProject]);
   });
 });
 

@@ -96,11 +96,29 @@ export function selectDefaultSourceCollectionRun(
     ?? null;
 }
 
-export function sourceCollectionRunsForTeam(payload: DataProcessingRunListPayload | undefined, teamId: string) {
+const LEGACY_RESEARCH_PROJECT_ID = "legacy-default";
+
+function sourceCollectionRunResearchProjectId(run: DataProcessingRunListPayload["runs"][number]) {
+  const fromScope = String(run.scope?.researchProjectId || "").trim();
+  return fromScope || String(run.metadata?.researchProjectId || "").trim();
+}
+
+export function sourceCollectionRunsForTeam(
+  payload: DataProcessingRunListPayload | undefined,
+  teamId: string,
+  researchProjectId: string,
+) {
+  const normalizedProjectId = researchProjectId.trim();
+  if (!normalizedProjectId) {
+    return [];
+  }
   return (payload?.runs ?? []).filter(
-    (run) =>
-      run.metadata?.startedFrom === "team_workflow_source_collection"
-      && run.metadata?.teamId === teamId,
+    (run) => {
+      const runProjectId = sourceCollectionRunResearchProjectId(run);
+      return run.metadata?.startedFrom === "team_workflow_source_collection"
+        && run.metadata?.teamId === teamId
+        && (runProjectId === normalizedProjectId || (!runProjectId && normalizedProjectId === LEGACY_RESEARCH_PROJECT_ID));
+    },
   );
 }
 

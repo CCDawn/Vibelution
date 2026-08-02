@@ -506,6 +506,8 @@ def get_source_collection_summary(team_id: str, *, run_id: str = "") -> dict[str
     started_at = s.time.perf_counter()
     normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
     s.team_service.assert_team_exists(normalized_team_id)
+    active_project = s.get_active_research_project(normalized_team_id)
+    active_project_id = active_project["projectId"]
     normalized_run_id = s._trim_text(run_id, max_length=160)
     selected_run: dict[str, Any] | None = None
     if normalized_run_id:
@@ -515,6 +517,8 @@ def get_source_collection_summary(team_id: str, *, run_id: str = "") -> dict[str
             raise s.TeamWorkflowOrchestrationError(str(exc)) from exc
         if not s._source_collection_run_belongs_to_team(selected_run, normalized_team_id):
             raise s.TeamWorkflowOrchestrationError("Data processing run does not belong to this team.")
+        if not s._source_collection_run_belongs_to_research_project(selected_run, active_project_id):
+            raise s.TeamWorkflowOrchestrationError("Data processing run does not belong to the active research project.")
     else:
         try:
             runs_payload = s.data_processing_service.list_processing_runs(
@@ -525,7 +529,11 @@ def get_source_collection_summary(team_id: str, *, run_id: str = "") -> dict[str
             raise s.TeamWorkflowOrchestrationError(str(exc)) from exc
         team_runs = [
             item for item in list(runs_payload.get("runs") or [])
-            if isinstance(item, dict) and s._source_collection_run_belongs_to_team(item, normalized_team_id)
+            if (
+                isinstance(item, dict)
+                and s._source_collection_run_belongs_to_team(item, normalized_team_id)
+                and s._source_collection_run_belongs_to_research_project(item, active_project_id)
+            )
         ]
         selected_run = next(
             (item for item in team_runs if s._source_collection_run_has_usable_outputs(item)),

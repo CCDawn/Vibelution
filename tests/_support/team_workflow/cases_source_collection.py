@@ -199,6 +199,55 @@ def test_source_collection_summary_defaults_to_latest_run_with_records(tmp_path,
     assert payload["searchPlan"]["querySeeds"] == ["predictive coding"]
     assert payload["searchPlan"]["queryCount"] == first_run["searchPlan"]["queryCount"]
 
+
+def test_source_collection_summary_never_selects_a_round_from_another_research_project(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    old_run = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "predictive coding",
+            "agentRoles": ["source_finder"],
+            "querySeeds": ["predictive coding"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    old_run_id = old_run["run"]["runId"]
+    data_processing_service.add_record(
+        old_run_id,
+        {"sourceType": "paper", "sourceRef": "10.1000/old", "title": "Old project source"},
+    )
+    chemistry_project = team_workflow_orchestration_service.create_research_project(
+        team["teamId"],
+        {"name": "AI chemistry", "topic": "AI-driven reaction discovery"},
+    )["project"]
+    team_workflow_orchestration_service.activate_research_project(team["teamId"], chemistry_project["projectId"])
+    chemistry_run = data_processing_service.create_processing_run(
+        data_processing_service.DEFAULT_PROFILE_ID,
+        title="AI chemistry source collection",
+        scope={
+            "teamId": team["teamId"],
+            "workflowStage": "knowledge_collection",
+            "researchProjectId": chemistry_project["projectId"],
+        },
+        metadata={
+            "startedFrom": "team_workflow_source_collection",
+            "teamId": team["teamId"],
+            "researchProjectId": chemistry_project["projectId"],
+        },
+    )
+
+    payload = team_workflow_orchestration_service.get_source_collection_summary(team["teamId"])
+
+    assert payload["runId"] == chemistry_run["runId"]
+    assert payload["summary"]["recordCount"] == 0
+    with pytest.raises(
+        team_workflow_orchestration_service.TeamWorkflowOrchestrationError,
+        match="active research project",
+    ):
+        team_workflow_orchestration_service.get_source_collection_summary(team["teamId"], run_id=old_run_id)
+
 def test_source_collection_summary_status_ignores_legacy_collecting_after_stage_round():
     assert (
         team_workflow_orchestration_service._source_collection_summary_payload_status(
