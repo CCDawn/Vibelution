@@ -1073,6 +1073,32 @@ def test_auto_continue_pause_result_without_visible_reply_needs_continue():
     assert session_service._chat_turn_result_status("completed", result, stop_requested=False) == "needs_continue"
 
 
+def test_terminal_reason_for_turn_maps_canonical_stops():
+    assert session_service._terminal_reason_for_turn("completed") == "success"
+    assert session_service._terminal_reason_for_turn("failed_runtime") == "failed_runtime"
+    assert session_service._terminal_reason_for_turn("failed") == "failed_runtime"
+    assert session_service._terminal_reason_for_turn("failed_provider") == "failed_provider"
+    assert session_service._terminal_reason_for_turn("needs_continue") == "needs_continue"
+    assert session_service._terminal_reason_for_turn("paused_limit") == "paused_limit"
+    assert session_service._terminal_reason_for_turn("ready", stop_requested=True) == "stopped_by_user"
+    assert session_service._terminal_reason_for_turn(
+        "completed",
+        result={
+            "status": "completed",
+            "summary": "后端有 SSE 流式路由，但要确认 LLM 调用本身是否流式。",
+            "raw_output": "后端有 SSE 流式路由，但要确认 LLM 调用本身是否流式。",
+            "tool_call_count": 8,
+            "tool_trace": [{"name": "cli_tool"}],
+        },
+    ) == "needs_continue"
+    assert session_service._terminal_reason_from_conversation(
+        {"last_turn_status": "failed", "last_turn_terminal_reason": "failed_runtime"}
+    ) == "failed_runtime"
+    assert session_service._terminal_reason_from_conversation(
+        {"last_turn_status": "ready"}
+    ) == "ready"
+
+
 def test_chat_turn_result_status_main_loop_exception_is_failed_runtime():
     result = {
         "status": "completed",
