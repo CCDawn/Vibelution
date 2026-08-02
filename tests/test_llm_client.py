@@ -15,6 +15,7 @@ from core.llm.client import (
     _llm_provider_proxy_env,
     _ensure_no_proxy_for_local_base_url,
     _retry_policy_max_attempts,
+    _safe_prompt_cache_payload_summary,
     _safe_responses_continuation_summary,
     llm_cancel_context,
 )
@@ -86,6 +87,63 @@ def test_responses_continuation_summary_classifies_stateless_replay() -> None:
     assert summary["continuationMode"] == "stateless_replay"
     assert summary["responseInputItemCount"] == 2
     assert summary["functionCallOutputCount"] == 0
+
+
+def test_prompt_cache_payload_summary_fingerprints_messages_and_tool_schema_without_content() -> None:
+    payload = {
+        "messages": [
+            {"role": "system", "content": "secret-system"},
+            {"role": "user", "content": "secret-user"},
+        ],
+        "tools": [
+            {
+                "type": "function",
+                "function": {
+                    "name": "read_file",
+                    "description": "secret-tool-description",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            }
+        ],
+    }
+
+    baseline = _safe_prompt_cache_payload_summary(payload)
+    message_changed = _safe_prompt_cache_payload_summary(
+        {
+            **payload,
+            "messages": [
+                {"role": "system", "content": "secret-system"},
+                {"role": "user", "content": "changed-user"},
+            ],
+        }
+    )
+    tool_changed = _safe_prompt_cache_payload_summary(
+        {
+            **payload,
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "read_file",
+                        "description": "changed-description",
+                        "parameters": {"type": "object", "properties": {}},
+                    },
+                }
+            ],
+        }
+    )
+
+    assert baseline["promptCacheMessageHash"]
+    assert baseline["promptCacheMessageChunkHashes"]
+    assert baseline["promptCacheToolSchemaHash"]
+    assert baseline["promptCacheMessageHash"] != message_changed["promptCacheMessageHash"]
+    assert baseline["promptCacheToolSchemaHash"] == message_changed["promptCacheToolSchemaHash"]
+    assert baseline["promptCacheMessageHash"] == tool_changed["promptCacheMessageHash"]
+    assert baseline["promptCacheToolSchemaHash"] != tool_changed["promptCacheToolSchemaHash"]
+    serialized = json.dumps(baseline, ensure_ascii=False)
+    assert "secret-system" not in serialized
+    assert "secret-user" not in serialized
+    assert "secret-tool-description" not in serialized
 
 
 def supported_relay_chat_config():
@@ -2676,6 +2734,10 @@ def test_stream_records_safe_message_role_summary(monkeypatch):
         fields = event[1]["fields"]
         assert fields["messageRoles"] == ["system", "user"]
         assert fields["messageRoleCounts"] == {"system": 1, "user": 1}
+        assert fields["promptCacheMessageHash"]
+        assert fields["promptCacheMessageChunkHashes"]
+        assert fields["promptCacheToolSchemaHash"]
+        assert "system prompt" not in str(fields)
 
 
 @pytest.mark.slow
