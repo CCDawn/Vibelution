@@ -224,6 +224,164 @@ def test_unreviewed_complete_hypothesis_cannot_be_selected_for_new_plan(
         )
 
 
+def test_scientific_hypothesis_completion_is_append_only_review_gated_and_drives_next_design(
+    tmp_path,
+    monkeypatch,
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    source = _draft_complete_proxy_plan(team["teamId"])
+    source_plan = source["plan"]
+    scientific = team_workflow_orchestration_service.record_local_research_model_output(
+        team["teamId"],
+        {
+            "taskType": "algorithm_hypothesis_draft",
+            "output": {
+                "candidateType": "algorithm_hypothesis",
+                "sourceRefs": [
+                    {"type": "candidate", "id": "paper-note-1", "label": "Sleep study"}
+                ],
+                "evidenceRefs": [
+                    {"type": "evidence", "id": "evidence-1", "label": "Sleep evidence"}
+                ],
+                "candidateGraphIds": ["candidate-graph-sleep"],
+                "hypothesis": (
+                    "NREM replay and REM recalibration provide separable information "
+                    "about sleep-stage transitions."
+                ),
+                "baseline": "",
+                "expectedBenefit": "",
+                "expectedComputeCost": "",
+                "experimentPlan": {},
+                "uncertainty": ["Sleep staging is only an operational proxy."],
+                "riskFlags": ["experiment_design_required"],
+                "confidence": 0,
+                "nextAction": "complete_experiment_design_and_review",
+                "requiresReview": True,
+            },
+        },
+    )["candidate"]
+    proposal = {
+        "researchProfileId": "sleep-physiology",
+        "researchQuestion": (
+            "Do joint NREM and REM features improve subject-independent "
+            "sleep-stage transition classification?"
+        ),
+        "researchMode": "hypothesis_and_plan",
+        "experimentPurpose": {
+            "primaryPurpose": "baseline_comparison",
+            "secondaryPurposes": [],
+        },
+        "experimentMethod": "model_training_inference",
+        "requestedAdapterId": "",
+        "objective": (
+            "Test a bounded operational proxy without claiming a causal memory mechanism."
+        ),
+        "methodConfig": {
+            "dataset": "PhysioNet Sleep-EDF Expanded v1.0.0; subject-level split",
+            "model": "joint NREM/REM transition classifier",
+            "baseline": "capacity-matched global spectral-feature classifier",
+            "seeds": [17, 42, 101],
+            "budget": "data audit first; three formal seeds only after freeze",
+            "smokePlan": (
+                "Verify EDF-Hypnogram pairing, subject split, label coverage, "
+                "and one forward batch; no scientific conclusion."
+            ),
+        },
+        "metricContract": {
+            "primaryMetric": "macro_f1",
+            "metrics": [{"name": "macro_f1", "direction": "maximize"}],
+        },
+        "decisionContract": {
+            "successCriteria": [
+                "three-seed mean macro_f1 improves over the fair baseline"
+            ],
+            "failureCriteria": [
+                "the mean gain is absent or either preregistered ablation does not degrade"
+            ],
+            "inconclusiveCriteria": [
+                "subject leakage, incomplete labels, or staging-only evidence cannot support memory causality"
+            ],
+        },
+        "revision": 2,
+        "supersedesPlanId": source_plan["planId"],
+        "createdByAgent": "Experiment Planning Agent",
+    }
+
+    completed = (
+        team_workflow_orchestration_service.complete_experiment_hypothesis_from_design(
+            team["teamId"],
+            source_plan_id=source_plan["planId"],
+            hypothesis_candidate_id=scientific["candidateId"],
+            payload=proposal,
+        )
+    )
+    replayed = (
+        team_workflow_orchestration_service.complete_experiment_hypothesis_from_design(
+            team["teamId"],
+            source_plan_id=source_plan["planId"],
+            hypothesis_candidate_id=scientific["candidateId"],
+            payload=proposal,
+        )
+    )
+    revised = completed["candidate"]
+
+    assert completed["status"] == "created"
+    assert replayed["status"] == "reused"
+    assert replayed["candidate"]["candidateId"] == revised["candidateId"]
+    assert revised["candidateId"] != scientific["candidateId"]
+    assert revised["metadata"]["revisionLineage"]["supersedesCandidateId"] == scientific["candidateId"]
+    assert revised["metadata"]["validation"]["valid"] is True
+    assert revised["metadata"]["output"]["hypothesisKind"] == "scientific_revision"
+    assert revised["metadata"]["output"]["experimentPlan"]["dataset"].startswith(
+        "PhysioNet Sleep-EDF"
+    )
+    assert completed["hypothesisSummary"]["approvedForExperiment"] is False
+
+    with pytest.raises(
+        team_workflow_orchestration_service.TeamWorkflowOrchestrationError,
+        match="approved",
+    ):
+        team_workflow_orchestration_service.create_experiment_plan_revision_from_hypothesis(
+            team["teamId"],
+            source_plan_id=source_plan["planId"],
+            hypothesis_candidate_id=revised["candidateId"],
+            created_by_agent="Research Coordination Agent",
+        )
+
+    review = team_workflow_orchestration_service.decide_research_review(
+        team["teamId"],
+        {
+            "candidateIds": [revised["candidateId"]],
+            "decision": "approve",
+            "reviewedByAgent": "Human Operator",
+            "comments": "The target-data contract and claim boundary are explicit.",
+        },
+    )
+    revision = (
+        team_workflow_orchestration_service.create_experiment_plan_revision_from_hypothesis(
+            team["teamId"],
+            source_plan_id=source_plan["planId"],
+            hypothesis_candidate_id=revised["candidateId"],
+            created_by_agent="Research Coordination Agent",
+        )
+    )
+
+    assert review["decision"] == "approve"
+    assert revision["plan"]["experimentContract"]["revision"] == 2
+    assert revision["plan"]["hypothesisCandidateIds"] == [revised["candidateId"]]
+    assert revision["plan"]["experimentPlan"]["dataset"].startswith(
+        "PhysioNet Sleep-EDF"
+    )
+    assert revision["plan"]["experimentContract"]["methodConfig"]["seeds"] == [
+        17,
+        42,
+        101,
+    ]
+    assert revision["plan"]["designGate"]["status"] == "draft"
+    assert revision["plan"]["readiness"]["readyForFullRun"] is False
+
+
 def test_decide_research_review_reads_local_model_output_experiment_plan(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")

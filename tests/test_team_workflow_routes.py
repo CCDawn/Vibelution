@@ -1224,6 +1224,82 @@ def test_team_workflow_routes_govern_engineering_proxy_hypothesis_revision(
     ]
 
 
+def test_team_workflow_routes_complete_scientific_hypothesis_from_design(
+    monkeypatch,
+):
+    captured: dict[str, object] = {}
+
+    def fake_complete(
+        team_id: str,
+        *,
+        source_plan_id: str,
+        hypothesis_candidate_id: str,
+        payload: dict,
+    ) -> dict:
+        captured.update(
+            {
+                "teamId": team_id,
+                "planId": source_plan_id,
+                "candidateId": hypothesis_candidate_id,
+                "payload": payload,
+            }
+        )
+        return {
+            "status": "created",
+            "candidate": {"candidateId": "scientific-revision-1"},
+            "boundaries": {
+                "appendOnlyRevision": True,
+                "requiresHumanReview": True,
+                "createsExperimentAttempt": False,
+            },
+        }
+
+    monkeypatch.setattr(
+        team_workflows,
+        "complete_experiment_hypothesis_from_design",
+        fake_complete,
+    )
+    response = _client().post(
+        (
+            "/api/teams/team-1/workflow-orchestration/experiments/"
+            "plans/plan-v6/hypotheses/hypothesis-h2/complete-design"
+        ),
+        json={
+            "researchQuestion": "Do joint NREM and REM features improve classification?",
+            "researchMode": "hypothesis_and_plan",
+            "experimentPurpose": {"primaryPurpose": "baseline_comparison"},
+            "experimentMethod": "model_training_inference",
+            "objective": "Test a bounded operational proxy.",
+            "methodConfig": {
+                "dataset": "PhysioNet Sleep-EDF Expanded v1.0.0",
+                "model": "joint NREM/REM classifier",
+                "baseline": "global spectral-feature classifier",
+                "seeds": [17, 42, 101],
+                "budget": "three formal seeds after freeze",
+                "smokePlan": "data-contract checks only",
+            },
+            "metricContract": {
+                "primaryMetric": "macro_f1",
+                "metrics": [{"name": "macro_f1", "direction": "maximize"}],
+            },
+            "decisionContract": {
+                "successCriteria": ["mean macro_f1 improves"],
+                "failureCriteria": ["mean gain is absent"],
+                "inconclusiveCriteria": ["staging cannot support memory causality"],
+            },
+            "createdByAgent": "Experiment Planning Agent",
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    assert captured["teamId"] == "team-1"
+    assert captured["planId"] == "plan-v6"
+    assert captured["candidateId"] == "hypothesis-h2"
+    assert captured["payload"]["methodConfig"]["seeds"] == [17, 42, 101]
+    assert response.json()["boundaries"]["requiresHumanReview"] is True
+    assert response.json()["boundaries"]["createsExperimentAttempt"] is False
+
+
 def test_team_workflow_routes_accept_generic_simulation_experiment_contract(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     client = _client()

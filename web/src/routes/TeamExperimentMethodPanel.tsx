@@ -10,6 +10,7 @@ import type {
   ExperimentResearchModeId,
 } from "../api/types";
 import { VNativeButton, VNativeInput, VNativeSelect, VNativeTextarea } from "../components/vui";
+import type { ExperimentHypothesisCandidateSummary } from "./teams/experimentLoopModel";
 import styles from "./TeamExperimentMethodPanel.styles";
 
 type MethodFieldKind = "text" | "textarea" | "integer" | "number" | "list" | "integer_list" | "json" | "approval";
@@ -110,6 +111,12 @@ export type TeamExperimentMethodPanelProps = {
   submitting: boolean;
   canCreatePlan: boolean;
   onSubmit: (payload: ExperimentPlanMethodRequest) => void;
+  hypotheses?: ExperimentHypothesisCandidateSummary[];
+  completingCandidateId?: string;
+  onCompleteHypothesis?: (
+    candidateId: string,
+    payload: ExperimentPlanMethodRequest,
+  ) => void;
 };
 
 function textList(value: string): string[] {
@@ -314,12 +321,27 @@ export function TeamExperimentMethodPanel({
   submitting,
   canCreatePlan,
   onSubmit,
+  hypotheses = [],
+  completingCandidateId = "",
+  onCompleteHypothesis,
 }: TeamExperimentMethodPanelProps) {
   const [draft, setDraft] = useState(() => createExperimentMethodFormDraft(
     activeContract,
     fallbackResearchQuestion,
     preferredExperimentMethod,
   ));
+  const scientificCandidatesNeedingDesign = hypotheses.filter(
+    (candidate) => (
+      candidate.hypothesisKind !== "engineering_proxy"
+      && (
+        !candidate.valid
+        || candidate.missingExperimentPlanFields.length > 0
+      )
+    ),
+  );
+  const [selectedScientificCandidateId, setSelectedScientificCandidateId] = useState(
+    () => scientificCandidatesNeedingDesign[0]?.candidateId ?? "",
+  );
   const draftSyncKey = createExperimentMethodDraftSyncKey(
     activeContract,
     fallbackResearchQuestion,
@@ -328,6 +350,18 @@ export function TeamExperimentMethodPanel({
   useEffect(() => {
     setDraft(createExperimentMethodFormDraft(activeContract, fallbackResearchQuestion, preferredExperimentMethod));
   }, [draftSyncKey]);
+  useEffect(() => {
+    if (
+      scientificCandidatesNeedingDesign.length > 0
+      && !scientificCandidatesNeedingDesign.some(
+        (candidate) => candidate.candidateId === selectedScientificCandidateId,
+      )
+    ) {
+      setSelectedScientificCandidateId(
+        scientificCandidatesNeedingDesign[0].candidateId,
+      );
+    }
+  }, [hypotheses, selectedScientificCandidateId]);
 
   const selectedMethod = catalog?.methods.find((item) => item.methodId === draft.experimentMethod);
   const adapterSelection = selectedMethod?.adapterAvailability[draft.researchMode];
@@ -479,6 +513,58 @@ export function TeamExperimentMethodPanel({
           <VNativeTextarea value={draft.inconclusiveCriteria} onChange={(event) => setDraft((current) => ({ ...current, inconclusiveCriteria: event.target.value }))} disabled={locked} rows={3} />
         </label>
       </div>
+
+      {activeContract && scientificCandidatesNeedingDesign.length > 0 && onCompleteHypothesis ? (
+        <div className={styles.selectionRow} data-scientific-hypothesis-completion="true">
+          <label className={styles.field}>
+            <span>{isZh ? "待补全的科学假设" : "Scientific hypothesis to complete"}</span>
+            <VNativeSelect
+              value={selectedScientificCandidateId}
+              onChange={(event) => setSelectedScientificCandidateId(event.target.value)}
+              disabled={locked || Boolean(completingCandidateId)}
+            >
+              {scientificCandidatesNeedingDesign.map((candidate) => (
+                <option key={candidate.candidateId} value={candidate.candidateId}>
+                  {candidate.title || candidate.hypothesis || candidate.candidateId}
+                </option>
+              ))}
+            </VNativeSelect>
+          </label>
+          <div className={styles.section}>
+            <span>
+              {isZh
+                ? "生成新的、可审核的修订候选；保留原候选，不创建实验、不自动批准。"
+                : "Creates a new reviewable revision; preserves the source and runs nothing."}
+            </span>
+            <VNativeButton
+              type="button"
+              disabled={
+                locked
+                || !complete
+                || !selectedScientificCandidateId
+                || Boolean(completingCandidateId)
+              }
+              onClick={() => {
+                if (selectedMethod && selectedScientificCandidateId) {
+                  onCompleteHypothesis(
+                    selectedScientificCandidateId,
+                    buildExperimentPlanMethodRequest(
+                      draft,
+                      selectedMethod,
+                      activeContract,
+                    ),
+                  );
+                }
+              }}
+            >
+              <CheckCircle2 size={14} />
+              {completingCandidateId
+                ? (isZh ? "生成修订中" : "Creating revision")
+                : (isZh ? "用当前配置补全假设" : "Complete with current setup")}
+            </VNativeButton>
+          </div>
+        </div>
+      ) : null}
 
       {errorMessage ? <div className={styles.error}>{errorMessage}</div> : null}
       <div className={styles.actions}>

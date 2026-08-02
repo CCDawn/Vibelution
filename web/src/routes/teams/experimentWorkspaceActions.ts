@@ -28,6 +28,7 @@ export type ExperimentWorkspaceActionDeps = {
   teamId: string;
   createExperimentPlanPending: boolean;
   materializeEngineeringProxyPending: boolean;
+  completeScientificHypothesisCandidateId: string;
   reviewExperimentHypothesisCandidateId: string;
   createExperimentHypothesisRevisionCandidateId: string;
   freezeExperimentDesignPending: boolean;
@@ -63,6 +64,12 @@ export type ExperimentWorkspaceActionDeps = {
     teamId: string;
     plan: ExperimentPlanRecord;
     draft: EngineeringProxyHypothesisDraft;
+  }>;
+  completeScientificHypothesisFromDesignMutation: MutateFn<{
+    teamId: string;
+    plan: ExperimentPlanRecord;
+    candidateId: string;
+    methodRequest: ExperimentPlanMethodRequest;
   }>;
   reviewExperimentHypothesisMutation: MutateFn<{ teamId: string; candidateId: string }>;
   createExperimentHypothesisRevisionMutation: MutateFn<{
@@ -157,6 +164,22 @@ export function createExperimentWorkspaceActions(deps: ExperimentWorkspaceAction
     deps.reviewExperimentHypothesisMutation.mutate({
       teamId: deps.teamId,
       candidateId,
+    });
+  }
+
+  function completeScientificHypothesisFromWorkspace(
+    plan: ExperimentPlanRecord,
+    candidateId: string,
+    methodRequest: ExperimentPlanMethodRequest,
+  ) {
+    if (!deps.teamId || deps.completeScientificHypothesisCandidateId) {
+      return;
+    }
+    deps.completeScientificHypothesisFromDesignMutation.mutate({
+      teamId: deps.teamId,
+      plan,
+      candidateId,
+      methodRequest,
     });
   }
 
@@ -314,6 +337,7 @@ export function createExperimentWorkspaceActions(deps: ExperimentWorkspaceAction
   return {
     createExperimentPlanFromWorkspace,
     materializeEngineeringProxyHypothesisFromWorkspace,
+    completeScientificHypothesisFromWorkspace,
     reviewExperimentHypothesisFromWorkspace,
     createExperimentHypothesisRevisionFromWorkspace,
     registerExperimentBaselineArtifactFromWorkspace,

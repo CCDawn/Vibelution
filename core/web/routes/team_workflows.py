@@ -47,6 +47,7 @@ from core.web.services.team_workflow_orchestration_service import (
     get_team_workflow_coordination_status,
     get_team_workflow_orchestration,
     build_local_research_model_task,
+    complete_experiment_hypothesis_from_design,
     draft_paper_note_from_source_candidate,
     extract_candidate_source_pages,
     import_data_record_as_source_candidate,
@@ -393,6 +394,10 @@ class ExperimentEngineeringProxyHypothesisPayload(BaseModel):
 
 class ExperimentHypothesisRevisionPayload(BaseModel):
     createdByAgent: str = Field("", max_length=160)
+    idempotencyKey: str = Field("", max_length=240)
+
+
+class ExperimentScientificHypothesisCompletionPayload(ExperimentPlanCreatePayload):
     idempotencyKey: str = Field("", max_length=240)
 
 
@@ -1352,6 +1357,41 @@ def team_workflow_experiment_proxy_hypothesis_materialize(
                 "planId": plan_id,
                 "createdByAgent": payload.createdByAgent,
             },
+        )
+
+
+@router.post(
+    "/teams/{team_id}/workflow-orchestration/experiments/plans/{plan_id}/hypotheses/{candidate_id}/complete-design",
+    status_code=status.HTTP_201_CREATED,
+)
+def team_workflow_experiment_scientific_hypothesis_complete(
+    team_id: str,
+    plan_id: str,
+    candidate_id: str,
+    payload: ExperimentScientificHypothesisCompletionPayload,
+) -> dict:
+    try:
+        return complete_experiment_hypothesis_from_design(
+            team_id,
+            source_plan_id=plan_id,
+            hypothesis_candidate_id=candidate_id,
+            payload=payload.model_dump(),
+        )
+    except TeamNotFoundError as exc:
+        _raise_team_workflow_route_error(
+            "experiment_hypothesis.complete_design",
+            team_id,
+            exc,
+            status_code=404,
+            fields={"planId": plan_id, "candidateId": candidate_id},
+        )
+    except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
+        _raise_team_workflow_route_error(
+            "experiment_hypothesis.complete_design",
+            team_id,
+            exc,
+            status_code=422,
+            fields={"planId": plan_id, "candidateId": candidate_id},
         )
 
 

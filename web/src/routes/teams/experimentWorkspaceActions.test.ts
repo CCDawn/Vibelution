@@ -11,6 +11,7 @@ function baseDeps(overrides: Record<string, unknown> = {}) {
     teamId: "research-team",
     createExperimentPlanPending: false,
     materializeEngineeringProxyPending: false,
+    completeScientificHypothesisCandidateId: "",
     reviewExperimentHypothesisCandidateId: "",
     createExperimentHypothesisRevisionCandidateId: "",
     freezeExperimentDesignPending: false,
@@ -60,6 +61,7 @@ function baseDeps(overrides: Record<string, unknown> = {}) {
     researchLoopStatus: null,
     createExperimentPlanMutation: { mutate: vi.fn() },
     materializeEngineeringProxyHypothesisMutation: { mutate: vi.fn() },
+    completeScientificHypothesisFromDesignMutation: { mutate: vi.fn() },
     reviewExperimentHypothesisMutation: { mutate: vi.fn() },
     createExperimentHypothesisRevisionMutation: { mutate: vi.fn() },
     registerExperimentBaselineArtifactMutation: { mutate: vi.fn() },
@@ -86,6 +88,31 @@ describe("createExperimentWorkspaceActions", () => {
       title: "draft title",
       methodRequest: { methodFamily: "proxy" },
     });
+  });
+
+  it("completes a scientific hypothesis from the current design without creating a plan", () => {
+    const deps = baseDeps();
+    const actions = createExperimentWorkspaceActions(deps);
+    const plan = { planId: "plan-v6" } as ExperimentPlanRecord;
+    const methodRequest = {
+      researchQuestion: "Does stage coordination improve the target-data proxy?",
+    } as any;
+
+    actions.completeScientificHypothesisFromWorkspace(
+      plan,
+      "hypothesis-h2",
+      methodRequest,
+    );
+
+    expect(
+      deps.completeScientificHypothesisFromDesignMutation.mutate,
+    ).toHaveBeenCalledWith({
+      teamId: "research-team",
+      plan,
+      candidateId: "hypothesis-h2",
+      methodRequest,
+    });
+    expect(deps.createExperimentPlanMutation.mutate).not.toHaveBeenCalled();
   });
 
   it("skips research loop create without a research question", () => {

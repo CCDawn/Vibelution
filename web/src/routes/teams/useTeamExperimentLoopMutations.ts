@@ -8,6 +8,7 @@ import type { Dispatch, SetStateAction } from "react";
 import { fetchJson } from "../../api/client";
 import { queryKeys } from "../../api/queryKeys";
 import {
+  completeTeamScientificHypothesisFromDesign,
   createTeamExperimentHypothesisRevision,
   materializeTeamEngineeringProxyHypothesis,
   reviewTeamExperimentHypothesis,
@@ -156,6 +157,44 @@ export function useTeamExperimentLoopMutations(options: UseTeamExperimentLoopMut
             + "experiment-design use. Scientific promotion remains prohibited."
           ),
           requiredChanges: [],
+        },
+      ),
+    onSuccess: (payload, variables) => {
+      if (payload.experimentStatus) {
+        queryClient.setQueryData(
+          experimentPlanningStatusQueryKey(variables.teamId),
+          payload.experimentStatus,
+        );
+      }
+      if (payload.workflow) {
+        queryClient.setQueryData(
+          queryKeys.teamWorkflow(variables.teamId),
+          payload.workflow,
+        );
+      }
+      void queryClient.invalidateQueries({
+        queryKey: experimentPlanningStatusQueryKey(variables.teamId),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.teamWorkflow(variables.teamId),
+      });
+    },
+  });
+
+  const completeScientificHypothesisFromDesignMutation = useMutation({
+    mutationFn: (payload: {
+      teamId: string;
+      plan: ExperimentPlanRecord;
+      candidateId: string;
+      methodRequest: ExperimentPlanMethodRequest;
+    }) =>
+      completeTeamScientificHypothesisFromDesign(
+        payload.teamId,
+        payload.plan.planId,
+        payload.candidateId,
+        {
+          ...payload.methodRequest,
+          createdByAgent: options.sourceCollectionOwnerAgentId,
         },
       ),
     onSuccess: (payload, variables) => {
@@ -607,6 +646,7 @@ export function useTeamExperimentLoopMutations(options: UseTeamExperimentLoopMut
   return {
     createExperimentPlanMutation,
     materializeEngineeringProxyHypothesisMutation,
+    completeScientificHypothesisFromDesignMutation,
     reviewExperimentHypothesisMutation,
     createExperimentHypothesisRevisionMutation,
     freezeExperimentDesignMutation,
