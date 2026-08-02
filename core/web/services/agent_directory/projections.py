@@ -59,6 +59,27 @@ def build_agent_runtime_context_block(
         if isinstance(memory_policy_snapshot, dict)
         else s.resolve_memory_policy_for_agent(agent_id)
     )
+    tool_policy = (
+        agent.get("toolPolicy")
+        if isinstance(agent.get("toolPolicy"), dict)
+        else s.resolve_tool_policy_for_agent(str(agent.get("agentId") or "").strip())
+    )
+    max_calls = 0
+    if isinstance(tool_policy, dict):
+        try:
+            max_calls = int(tool_policy.get("maxCallsPerTurn") or 0)
+        except (TypeError, ValueError):
+            max_calls = 0
+    budget_lines: list[str] = []
+    if max_calls > 0:
+        reserve = max(2, min(3, max_calls // 8 or 2))
+        explore_cap = max(1, max_calls - reserve)
+        budget_lines = [
+            f"ToolCallBudget: maxCallsPerTurn={max_calls}",
+            f"- Explore/search budget soft cap: <= {explore_cap}",
+            f"- Reserve at least {reserve} calls for lint/test/git verification",
+            "- After one shell failure of the same intent, switch to code_symbol_tool/grep_search_tool",
+        ]
     lines = [
         "## Agent Runtime Context",
         f"AgentId: {agent.get('agentId') or ''}",
@@ -67,6 +88,7 @@ def build_agent_runtime_context_block(
         f"AgentWorkspace: {agent.get('workspacePath') or ''}",
         f"MemoryRoot: {memory_policy.get('privateMemoryRoot') or ''}",
         f"ProjectMemoryUpdatesPath: {memory_policy.get('projectMemoryUpdatesPath') or ''}",
+        *budget_lines,
         "TeamKnowledgeAccess:",
         f"- ReadKnowledgeBaseIds: {', '.join(list(memory_policy.get('readKnowledgeBaseIds') or [])) or 'team-membership'}",
         f"- ProposeKnowledgeBaseIds: {', '.join(list(memory_policy.get('proposeKnowledgeBaseIds') or [])) or 'team-membership'}",

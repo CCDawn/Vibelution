@@ -157,6 +157,32 @@ class TestShellCommandClassifier:
         assert route.reason == "powershell_cmdlet"
         assert route.final_command.startswith("powershell -NoProfile")
 
+    def test_powershell_variable_assignment_routes_to_powershell_on_windows(self, monkeypatch):
+        """P0: $p=Join-Path compound statement must not misroute to cmd."""
+        monkeypatch.setattr(shell_tools, "IS_WINDOWS", True)
+
+        cmd = "$p=Join-Path $env:TEMP 'probe.txt'; Set-Content -LiteralPath $p -Value 'x'; Test-Path $p"
+        route = shell_tools.classify_shell_command(cmd)
+
+        assert route.route == "powershell"
+        assert route.reason == "powershell_cmdlet"
+        assert route.final_command.startswith("powershell -NoProfile")
+
+    def test_powershell_env_var_and_dotnet_syntax_detected(self):
+        assert shell_tools._is_powershell_command("Write-Output $env:PATH") is True
+        assert shell_tools._is_powershell_command("[System.IO.File]::Exists('x')") is True
+        assert shell_tools._is_powershell_command("$items = Get-ChildItem; $items.Count") is True
+
+    def test_plain_cmd_commands_not_misclassified_as_powershell(self):
+        for cmd in [
+            "echo hello",
+            "dir /b",
+            "git status --short",
+            "cd /d C:\\foo",
+            "powershell -NoProfile -Command \"Get-ChildItem\"",
+        ]:
+            assert shell_tools._is_powershell_command(cmd) is False, cmd
+
     def test_plain_windows_command_routes_to_cmd_on_windows(self, monkeypatch):
         monkeypatch.setattr(shell_tools, "IS_WINDOWS", True)
 
@@ -165,6 +191,19 @@ class TestShellCommandClassifier:
         assert route.route == "cmd"
         assert route.reason == "windows_default_cmd"
         assert route.final_command == "cmd /c dir"
+
+    def test_shell_failure_cooldown_blocks_second_identical_intent(self):
+        shell_tools.reset_shell_failure_cooldown()
+        cmd = 'rg -n "pattern|other" path'
+        assert shell_tools.shell_failure_cooldown_hit(cmd) == (False, 0)
+        assert shell_tools.record_shell_failure(cmd) == 1
+        hit, count = shell_tools.shell_failure_cooldown_hit(cmd)
+        assert hit is True
+        assert count == 1
+        message = shell_tools.shell_failure_cooldown_message(cmd, count)
+        assert "工具纪律" in message
+        assert "code_symbol_tool" in message
+        shell_tools.reset_shell_failure_cooldown()
 
     def test_windows_command_is_blocked_on_unix(self, monkeypatch):
         monkeypatch.setattr(shell_tools, "IS_WINDOWS", False)

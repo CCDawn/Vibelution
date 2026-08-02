@@ -67,3 +67,22 @@ def test_readonly_code_tool_policy_still_allows_codebase_map_component():
 
     assert packet.allow_code_context is True
     assert "CODEBASE_MAP" in packet.allowed_components(["SOUL", "CODEBASE_MAP"])
+
+
+def test_runtime_goal_packet_renders_max_calls_per_turn_budget():
+    packet = build_runtime_goal_packet(
+        _chat_policy(),
+        "修复 shell 路由并跑测试",
+        agent_tool_policy={
+            "allowedTools": ["cli_tool", "code_symbol_tool", "grep_search_tool"],
+            "maxCallsPerTurn": 32,
+            "writeScopes": ["private"],
+            "mutationAccess": "limited",
+        },
+    )
+
+    assert packet.max_calls_per_turn == 32
+    rendered = packet.render()
+    assert "maxCallsPerTurn" in rendered or "本回合最多 32 次" in rendered
+    assert "预留" in rendered
+    assert "code_symbol_tool" in rendered or "grep_search_tool" in rendered

@@ -331,15 +331,17 @@ def make_git_rules_section(project_root: Path) -> SystemPromptSection:
 
 
 def make_reading_rules_section() -> SystemPromptSection:
-    """代码与日志阅读规则 — 默认用 CLI/ripgrep 做有界读取。"""
+    """代码与日志阅读规则 — 结构化工具优先，shell 仅作补充。"""
 
     def compute() -> str:
         return (
             "## 阅读规则\n"
-            "- 默认阅读/搜索走 `cli_tool`，先用 `rg --line-number --context 2 \"关键词\" 路径` 定位，再按命中行号读取小范围片段。\n"
-            "- Windows 小范围读取优先用 PowerShell：`Get-Content -LiteralPath \"路径\" | Select-Object -Skip N -First M`；保持输出有界。\n"
-            "- 不要调用 `read_file_tool`，也不要整文件读取大文件；已经读取过的范围不重复读取，先复用已有证据再补缺口。\n"
-            "- 需要符号级理解时可先用代码符号/搜索工具定位，再用 `cli_tool` 读取相邻上下文。\n"
+            "- **默认定位**走 `code_symbol_tool` / `grep_search_tool` / `glob_tool`，不要一上来连串 shell 探查。\n"
+            "- 需要命令行搜索时用有界 `rg -n \"关键词\" 路径`（无 Unix 管道）；Windows 上 `rg ... | head` 会被拦截。\n"
+            "- Windows 读小段用**完整 PowerShell**（如 `Get-Content -LiteralPath \"路径\" | Select-Object -First 80`），"
+            "不要假设默认 bash，也不要在 bash 里写 `Select-Object`。\n"
+            "- 不要调用 `read_file_tool`，不要整文件粗读；已读范围不重复读。\n"
+            "- 同类 shell 失败 1 次后回到结构化工具，禁止换壳重试同一意图。\n"
         )
 
     return SystemPromptSection(
@@ -347,7 +349,7 @@ def make_reading_rules_section() -> SystemPromptSection:
         compute=compute,
         cache_break=False,
         priority=36,
-        description="CLI/ripgrep 优先的有界阅读规则",
+        description="结构化工具优先的有界阅读规则",
     )
 
 
@@ -360,21 +362,20 @@ def make_env_info_section(project_root: Path) -> SystemPromptSection:
     """环境信息 — 时间以 5 分钟粒度稳定，保持缓存友好。"""
 
     def command_discipline(os_name: str) -> List[str]:
-        if os_name == "Windows":
-            return [
-                "- 命令平台纪律: 当前是 Windows，生成命令前先确认 PowerShell/cmd 兼容性。",
-                "- 不要直接执行 Unix shell 片段：`/dev/null`、`tail/head`、`grep -n/-e`、`xargs`、`$(pwd)`。",
-                "- 需要等价能力时改用 PowerShell：`2>$null`、`Select-Object -First/-Last`、`Select-String`、`Get-Location`。",
-                "- 读文件/搜索默认用 `cli_tool` 执行 Windows 兼容的 `rg`/PowerShell 小范围命令。",
-            ]
-        if os_name in {"Linux", "macOS"}:
-            return [
-                f"- 命令平台纪律: 当前是 {os_name}，不要直接执行 Windows 专用命令。",
-                "- 避免 `dir`、`type`、`findstr`、PowerShell cmdlet；需要时改用 Unix 等价命令或结构化工具。",
-            ]
-        return [
-            "- 命令平台纪律: 当前系统无法稳定归类，执行 shell 前先选择最保守的结构化工具。",
+        from tools.shell_tools import shell_command_dialect_guidance
+
+        host_key = {"Windows": "Windows", "macOS": "Darwin", "Linux": "Linux"}.get(os_name, os_name)
+        dialect_lines = [
+            f"- {line}" if line and not line.startswith("===") else line
+            for line in shell_command_dialect_guidance(host_system=host_key).splitlines()
+            if line.strip()
         ]
+        budget = [
+            "- 命令入口: 默认 `cli_tool`/`exec_command`（同一 shell 路由）；定位优先结构化工具。",
+            "- 回合预算: 工具调用有额度上限（常见 32 次）；探查失败不得耗尽额度，至少预留 2–3 次给验证。",
+            "- 大结果: 输出超过约 4KB 时只保留结论，勿整段回灌。",
+        ]
+        return [*budget, *dialect_lines]
 
     def compute() -> Optional[str]:
         now = datetime.now()
@@ -613,11 +614,27 @@ def make_spec_digest_section(ctx: BuildContext) -> SystemPromptSection:
             "verify": "验证",
         }.get(mode, mode or "运行时")
 
+        packet = getattr(ctx, "runtime_goal_packet", None)
+        max_calls = 0
+        if packet is not None:
+            try:
+                max_calls = int(getattr(packet, "max_calls_per_turn", 0) or 0)
+            except (TypeError, ValueError):
+                max_calls = 0
+        if max_calls > 0:
+            reserve = max(2, min(3, max_calls // 8 or 2))
+            budget_rule = (
+                f"- 本回合工具额度 **{max_calls}** 次（策略 maxCallsPerTurn）；"
+                f"探查建议 ≤ {max(1, max_calls - reserve)}，至少预留 {reserve} 次给验证。"
+            )
+        else:
+            budget_rule = "- 工具额度以 Agent 策略为准（常见 32 次）；探查勿耗尽，至少预留 2–3 次验证。"
         common = [
             "- 默认中文；代码、命令、路径、协议字段、必要报错可保留原文。",
-            "- 同轮同类失败不重复；被拦截的工具模式立即换路。",
-            "- 工具顺序按证据推进：优先用 cli_tool 执行 `rg`/`rg --files` 定位，再读取必要小范围；修改后用 lint/compile/test 验证。",
-            "- cli_tool 是默认本地入口；命令要短、可复现、输出有界，避免无锚点粗读和重复读。",
+            "- 同轮同类失败不重复：shell/被拦截失败 **1 次**后立即换 `code_symbol_tool`/`grep_search_tool`，禁止换壳连撞。",
+            "- 工具顺序：定位优先结构化工具 → 必要时有界 `rg`/小范围读 → 修改后 lint/compile/test。",
+            budget_rule,
+            "- cli_tool/exec_command 共用 shell 方言路由；命令要短、可复现、输出有界（默认约 6KB），大结果只消费结论。",
             "- 记忆读取可用于查历史决策；record_learning 只在形成可复用经验或踩坑规律时写入。",
         ]
         mode_rules = {

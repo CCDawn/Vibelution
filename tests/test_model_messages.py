@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from langchain_core.messages import AIMessage, ToolMessage
 
-from core.chat.model_messages import normalize_model_history_messages, normalize_provider_turn_messages
+from core.chat.model_messages import (
+    HISTORY_TOOL_RESULT_CHAR_LIMIT,
+    normalize_model_history_messages,
+    normalize_provider_turn_messages,
+)
 from core.llm.payload_validator import validate_tool_result_pairing
 
 
@@ -257,3 +261,24 @@ def test_provider_turn_messages_preserve_structured_user_content_blocks():
     assert messages[0]["role"] == "user"
     assert messages[0]["content"] == content
     assert isinstance(messages[0]["content"], list)
+
+
+def test_history_tool_result_bodies_are_bounded_for_next_turn_context():
+    bulky = "X" * (HISTORY_TOOL_RESULT_CHAR_LIMIT * 3)
+    messages = normalize_model_history_messages(
+        [
+            {
+                "role": "tool",
+                "content": f"历史工具结果: cli_tool\nstatus: done\n结果:\n{bulky}",
+                "tool_call_id": "call_bulky",
+                "metadata": {"toolName": "cli_tool"},
+            }
+        ]
+    )
+
+    assert len(messages) == 1
+    content = messages[0]["content"]
+    assert "历史工具结果" in content
+    assert "历史工具结果已截断" in content
+    assert len(content) <= HISTORY_TOOL_RESULT_CHAR_LIMIT + 200
+    assert bulky not in content

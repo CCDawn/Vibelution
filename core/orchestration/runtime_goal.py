@@ -53,6 +53,7 @@ class RuntimeGoalPacket:
     forbidden_actions: tuple[str, ...] = field(default_factory=tuple)
     capability_profile: str = "default"
     allow_code_context: bool | None = None
+    max_calls_per_turn: int = 0
 
     def allowed_components(self, registered_components: Iterable[str]) -> set[str]:
         """返回当前目标包允许激活的提示词组件。"""
@@ -73,6 +74,7 @@ class RuntimeGoalPacket:
 
     def render(self) -> str:
         forbidden = list(self.forbidden_actions) or ["无额外禁止项；仍遵守工具、日志、Git 和安全边界。"]
+        budget_lines = _tool_budget_lines(self.max_calls_per_turn)
         lines = [
             "## 当前运行目标包",
             "- 统一主体: 当前运行者始终是同一个 Vibelution agent；入口只改变目标、能力边界和完成标准。",
@@ -87,6 +89,7 @@ class RuntimeGoalPacket:
             f"  - Git 提交: {_yes_no(self.allow_git_commit)}",
             f"  - 进化事务: {_yes_no(self.allow_evolution_transaction)}",
             f"  - 子 agent: {_yes_no(self.allow_subagents)}",
+            *budget_lines,
             f"- 完成标准: {self.completion_standard}",
             "- 禁止项:",
             *[f"  - {item}" for item in forbidden],
@@ -105,6 +108,7 @@ def build_runtime_goal_packet(
 
     mode = policy.mode
     goal_text = str(goal or "").strip()
+    max_calls = _max_calls_per_turn(agent_tool_policy)
     if mode == AgentMode.CHAT:
         profile = _chat_capability_profile(policy, goal_text)
         return RuntimeGoalPacket(
@@ -121,6 +125,7 @@ def build_runtime_goal_packet(
                 profile.allow_file_writes,
                 agent_tool_policy,
             ),
+            max_calls_per_turn=max_calls,
             completion_standard=profile.completion_standard,
             forbidden_actions=profile.forbidden_actions,
         )
@@ -136,6 +141,7 @@ def build_runtime_goal_packet(
             allow_evolution_transaction=True,
             allow_subagents=False,
             allow_code_context=True,
+            max_calls_per_turn=max_calls,
             completion_standard="按给定 case 或评测请求产生可比较证据，并在边界内停止。",
             forbidden_actions=(
                 "不要把监督 case 当成新的长期人格或长期目标。",
@@ -153,9 +159,37 @@ def build_runtime_goal_packet(
         allow_evolution_transaction=True,
         allow_subagents=True,
         allow_code_context=True,
+        max_calls_per_turn=max_calls,
         completion_standard="围绕 Vibelution 稳定性、进化效率或 UI/agent 一致性完成可验证改进。",
         forbidden_actions=("不要把当前入口解释成另一个 agent；仍然是同一个 Vibelution agent 面对自进化目标。",),
     )
+
+
+def _max_calls_per_turn(agent_tool_policy: dict | None) -> int:
+    if not isinstance(agent_tool_policy, dict):
+        return 0
+    raw = agent_tool_policy.get("maxCallsPerTurn")
+    try:
+        value = int(raw or 0)
+    except (TypeError, ValueError):
+        return 0
+    return value if value > 0 else 0
+
+
+def _tool_budget_lines(max_calls_per_turn: int) -> list[str]:
+    budget = max(0, int(max_calls_per_turn or 0))
+    if budget <= 0:
+        return [
+            "- 工具调用预算: 未从策略解析到上限；仍按「少探查、失败 1 次换路、预留验证」执行。",
+        ]
+    reserve = max(2, min(3, budget // 8 or 2))
+    explore_cap = max(1, budget - reserve)
+    return [
+        f"- 工具调用预算: 本回合最多 {budget} 次（来自 Agent 工具策略 maxCallsPerTurn）。",
+        f"  - 探查/搜索建议不超过 {explore_cap} 次；至少预留 {reserve} 次给 lint/test/git 验证。",
+        "  - 额度将尽时先收束当前最小闭环并汇报，不要在验证前继续横向探查。",
+        "  - shell 同类失败 1 次后改用 code_symbol_tool/grep_search_tool，避免把额度耗在换壳重试。",
+    ]
 
 
 def _allow_code_context_for_turn(allow_file_writes: bool, agent_tool_policy: dict | None) -> bool:

@@ -42,6 +42,7 @@ import json
 import glob as glob_module
 import re
 import time
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional, List
@@ -235,12 +236,37 @@ def _is_linux_command(command: str) -> bool:
 
 
 def _is_powershell_command(command: str) -> bool:
-    """检测命令是否为 PowerShell cmdlet（Verb-Noun 形式）"""
-    parts = command.strip().split()
-    if not parts:
+    """检测命令是否为 PowerShell 语法（cmdlet Verb-Noun 或 PowerShell 专属语法）。
+
+    覆盖：
+    1. Verb-Noun cmdlet 前缀（如 Get-ChildItem、Select-Object）
+    2. 首 token 以 $ / [ 开头（变量赋值、.NET 类型调用）
+    3. 文本含 $env:
+    4. 以 ; 分隔的多语句中任一语句为 PowerShell 语法
+    """
+    text = str(command or "").strip()
+    if not text:
         return False
-    base = parts[0]
-    return any(base.startswith(prefix) for prefix in POWERSHELL_CMDLET_PREFIXES)
+    tokens = text.split()
+    base = tokens[0]
+
+    if any(base.startswith(prefix) for prefix in POWERSHELL_CMDLET_PREFIXES):
+        return True
+    if base.startswith(("$", "[")):
+        return True
+    if "$env:" in text.lower():
+        return True
+    if ";" in text:
+        for segment in text.split(";"):
+            seg = segment.strip()
+            if not seg:
+                continue
+            seg_base = seg.split()[0] if seg.split() else seg
+            if seg_base.startswith(("$", "[")):
+                return True
+            if any(seg_base.startswith(prefix) for prefix in POWERSHELL_CMDLET_PREFIXES):
+                return True
+    return False
 
 
 def _is_windows_command(command: str) -> bool:
@@ -477,6 +503,92 @@ def classify_shell_command(command: str) -> ShellCommandRoute:
         final_command=f'/bin/bash -c {json.dumps(rewritten_command)}',
         reason="unix_default_bash",
         command=rewritten_command,
+    )
+
+
+def shell_command_dialect_guidance(*, host_system: str | None = None) -> str:
+    """Return agent-facing shell dialect rules matching classify_shell_command."""
+
+    system = str(host_system or CURRENT_SYSTEM or "").strip()
+    if not system:
+        import platform
+
+        system = platform.system()
+    system_key = system.lower()
+
+    if system_key.startswith("win"):
+        return "\n".join(
+            [
+                "=== Shell 方言（Windows 宿主，与运行时路由一致）===",
+                "1. 默认普通命令 → `cmd /c`（不是 bash，也不是默认 PowerShell）。",
+                "2. PowerShell cmdlet/语法（`Get-*`、`Select-Object`、`$var`、`$env:`、`[Type]::`、`;` 多语句）→ powershell。",
+                "3. Unix 管道片段（`| head`、`grep -n`、`xargs`、`/dev/null`）→ 拦截；需要 bash 时显式 `bash -c \"...\"`。",
+                "4. 本轮选定一种写法后不要再探路；同类失败 1 次后改 `code_symbol_tool`/`grep_search_tool`。",
+                "推荐：`rg -n \"pattern\" path`（无管道）；读小段用完整 PowerShell Get-Content。",
+            ]
+        )
+    if system_key in {"linux", "darwin"}:
+        label = "macOS" if system_key == "darwin" else "Linux"
+        return "\n".join(
+            [
+                f"=== Shell 方言（{label} 宿主）===",
+                "1. 默认 bash/Unix；不要使用 Windows 专用命令或裸 PowerShell cmdlet。",
+                "2. 输出必须有界；优先 `rg -n` 与结构化工具。",
+                "3. 同类失败 1 次后改结构化工具，不要换壳硬试。",
+            ]
+        )
+    return "=== Shell 方言（宿主未归类）===\n优先结构化工具；必须 shell 时只用短、无管道、无平台特有语法命令。"
+
+
+# 同一进程内按「规范化命令」计数的 shell 失败冷却（跨回合可清理，测试可 reset）。
+_SHELL_FAIL_COOLDOWN_LOCK = threading.Lock()
+_SHELL_FAIL_COUNTS: dict[str, int] = {}
+_SHELL_FAIL_COOLDOWN_LIMIT = 1
+
+
+def _normalize_shell_command_key(command: str) -> str:
+    return re.sub(r"\s+", " ", str(command or "").strip())
+
+
+def reset_shell_failure_cooldown() -> None:
+    """Test helper: clear in-process shell failure counters."""
+
+    with _SHELL_FAIL_COOLDOWN_LOCK:
+        _SHELL_FAIL_COUNTS.clear()
+
+
+def shell_failure_cooldown_hit(command: str) -> tuple[bool, int]:
+    """Return (should_block_retry, previous_fail_count) for a shell command intent."""
+
+    key = _normalize_shell_command_key(command)
+    if not key:
+        return False, 0
+    with _SHELL_FAIL_COOLDOWN_LOCK:
+        count = int(_SHELL_FAIL_COUNTS.get(key, 0))
+    return count >= _SHELL_FAIL_COOLDOWN_LIMIT, count
+
+
+def record_shell_failure(command: str) -> int:
+    """Increment failure count for a shell command intent; return new count."""
+
+    key = _normalize_shell_command_key(command)
+    if not key:
+        return 0
+    with _SHELL_FAIL_COOLDOWN_LOCK:
+        next_count = int(_SHELL_FAIL_COUNTS.get(key, 0)) + 1
+        _SHELL_FAIL_COUNTS[key] = next_count
+        return next_count
+
+
+def shell_failure_cooldown_message(command: str, fail_count: int) -> str:
+    preview = _normalize_shell_command_key(command)
+    if len(preview) > 160:
+        preview = preview[:157] + "..."
+    return (
+        f"[工具纪律] 同一 shell 命令意图已失败 {fail_count} 次，禁止继续用同类写法重试。\n"
+        f"命令: {preview}\n"
+        "请改用 code_symbol_tool / grep_search_tool / glob_tool，"
+        "或换完全不同的策略；不要在 cmd/PowerShell/bash 之间来回探路。"
     )
 
 
@@ -1981,6 +2093,11 @@ __all__ = [
     # 命令执行
     'ShellCommandRoute',
     'classify_shell_command',
+    'shell_command_dialect_guidance',
+    'shell_failure_cooldown_hit',
+    'record_shell_failure',
+    'shell_failure_cooldown_message',
+    'reset_shell_failure_cooldown',
     'execute_shell_command',
     'execute_cli_command',
     'run_cmd',
