@@ -372,7 +372,7 @@ describe("ConversationToolActivity", () => {
     expect(html).not.toContain("工具调用 8");
     expect(html).toContain("读取资料上下文");
     expect(html).toContain("网页读取");
-    expect(html).toContain("资料提炼回写");
+    expect(html).toContain("资料阶段写回");
     expect(html).not.toContain("web_fetch_tool");
     expect(html).toContain("lucide-file-search");
     expect(html).toContain("lucide-pencil-line");

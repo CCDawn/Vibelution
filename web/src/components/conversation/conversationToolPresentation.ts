@@ -333,7 +333,7 @@ export function conversationToolPresentationLabel(
     web_search_tool: { zh: "网页搜索", en: "Web search" },
     web_fetch_tool: { zh: "网页读取", en: "Read web page" },
     source_collection_context_tool: { zh: "读取资料上下文", en: "Read source context" },
-    source_collection_stage_writeback_tool: { zh: "资料提炼回写", en: "Write source extraction" },
+    source_collection_stage_writeback_tool: { zh: "资料阶段写回", en: "Write source-stage result" },
     get_git_status_summary_tool: { zh: "Git 状态", en: "Git status" },
     get_recent_changes_tool: { zh: "查看最近改动", en: "Recent changes" },
     conversation_log_inspect_tool: {

@@ -31,7 +31,7 @@ const FRIENDLY_TOOL_LABELS: Record<string, string> = {
   task_create_tool: "创建任务",
   task_update_tool: "更新任务",
   source_collection_context_tool: "读取资料上下文",
-  source_collection_stage_writeback_tool: "资料提炼回写",
+  source_collection_stage_writeback_tool: "资料阶段写回",
   rg: "搜索",
 };
 
