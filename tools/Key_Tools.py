@@ -1157,6 +1157,7 @@ def _build_key_tools() -> List[BaseTool]:
     ) -> str:
         from core.infrastructure.codex_cli_sandbox import execute_codex_sandbox_command
         from tools.shell_tools import (
+            is_shell_execution_failure,
             record_shell_failure,
             shell_failure_cooldown_hit,
             shell_failure_cooldown_message,
@@ -1181,22 +1182,14 @@ def _build_key_tools() -> List[BaseTool]:
             _cancel_checker=_cancel_checker,
         )
         result_text = str(result or "")
-        lowered = result_text.lower()
-        failed = (
-            result_text.startswith("[跨平台警告]")
-            or result_text.startswith("[EXEC FAILURE")
-            or "shell_route_blocked" in lowered
-            or "os error 123" in lowered
-            or '"status": "failed"' in lowered
-            or '"status":"failed"' in lowered
-        )
+        failed = is_shell_execution_failure(result_text)
         if failed:
-            count = record_shell_failure(command)
+            count = record_shell_failure(command, result_text)
             if count >= 1 and "工具纪律" not in result_text:
                 result_text = (
                     f"{result_text}\n\n"
-                    f"[工具纪律] 此 shell 意图已失败 {count} 次；"
-                    "下一跳请改用 code_symbol_tool / grep_search_tool，不要换壳重试同一命令。"
+                    f"[工具纪律] 此 shell 意图/方言类别已失败 {count} 次；"
+                    "下一跳请改用 code_symbol_tool / grep_search_tool，不要换壳或改写同方言命令重试。"
                 )
         if max_output_chars > 0 and len(result_text) > max_output_chars:
             head_size = max(1200, max_output_chars // 2)
@@ -1224,6 +1217,7 @@ def _build_key_tools() -> List[BaseTool]:
     ) -> str:
         from core.infrastructure.codex_cli_sandbox import start_codex_sandbox_terminal_session
         from tools.shell_tools import (
+            is_shell_execution_failure,
             record_shell_failure,
             shell_failure_cooldown_hit,
             shell_failure_cooldown_message,
@@ -1255,8 +1249,13 @@ def _build_key_tools() -> List[BaseTool]:
         if isinstance(result, dict):
             status = str(result.get("status") or result.get("outcomeStatus") or "").lower()
             message = str(result.get("message") or result.get("stderr") or result.get("stdout") or "")
-            if status in {"failed", "error", "blocked"} or "shell_route_blocked" in message.lower() or message.startswith("[跨平台警告]"):
-                record_shell_failure(cmd)
+            combined = json.dumps(result, ensure_ascii=False)
+            if (
+                status in {"failed", "error", "blocked"}
+                or is_shell_execution_failure(message)
+                or is_shell_execution_failure(combined)
+            ):
+                record_shell_failure(cmd, message or combined)
         return json.dumps(result, ensure_ascii=False)
 
     def _write_stdin_impl(

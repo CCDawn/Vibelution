@@ -540,7 +540,8 @@ def shell_command_dialect_guidance(*, host_system: str | None = None) -> str:
     return "=== Shell 方言（宿主未归类）===\n优先结构化工具；必须 shell 时只用短、无管道、无平台特有语法命令。"
 
 
-# 同一进程内按「规范化命令」计数的 shell 失败冷却（跨回合可清理，测试可 reset）。
+# 同一进程内按「命令意图 / 失败类别」计数的 shell 失败冷却（测试可 reset）。
+# exact: 同一规范化命令；class:*: 方言/路由同类连撞（Flash 常见：换写法仍 PS-on-cmd）。
 _SHELL_FAIL_COOLDOWN_LOCK = threading.Lock()
 _SHELL_FAIL_COUNTS: dict[str, int] = {}
 _SHELL_FAIL_COOLDOWN_LIMIT = 1
@@ -550,6 +551,87 @@ def _normalize_shell_command_key(command: str) -> str:
     return re.sub(r"\s+", " ", str(command or "").strip())
 
 
+def is_shell_execution_failure(result_text: str) -> bool:
+    """Whether a shell/cli result should count as a failed intent for cooldown."""
+
+    text = str(result_text or "")
+    if not text:
+        return False
+    lowered = text.lower()
+    return (
+        text.startswith("[跨平台警告]")
+        or text.startswith("[EXEC FAILURE")
+        or text.startswith("[WARNING | Exit Code")
+        or "shell_route_blocked" in lowered
+        or "os error 123" in lowered
+        or "不是内部或外部命令" in text
+        or "is not recognized as an internal or external command" in lowered
+        or "is not recognized as a name of a cmdlet" in lowered
+        or '"status": "failed"' in lowered
+        or '"status":"failed"' in lowered
+        or '"status": "error"' in lowered
+        or '"status":"error"' in lowered
+    )
+
+
+def classify_shell_failure_class(command: str, result_text: str = "") -> str:
+    """Classify shell failure into an exact-or-class cooldown key."""
+
+    text = str(result_text or "")
+    lowered = text.lower()
+    cmd = str(command or "")
+    exact = _normalize_shell_command_key(cmd)
+
+    looks_ps = bool(
+        _is_powershell_command(cmd)
+        or re.search(r"\b(Select-Object|Get-ChildItem|Get-Content|Where-Object|ForEach-Object)\b", cmd, re.I)
+        or "$env:" in cmd
+        or re.search(r"(^|[\s;])\$[A-Za-z_]", cmd)
+    )
+
+    if "shell_route_blocked" in lowered or text.startswith("[跨平台警告]"):
+        return "class:route_blocked"
+    if (
+        "不是内部或外部命令" in text
+        or "is not recognized as an internal or external command" in lowered
+        or "is not recognized as a name of a cmdlet" in lowered
+    ):
+        if looks_ps:
+            return "class:windows_ps_syntax_mismatch"
+        if re.search(r"python(?:\.exe)?|\\\\\.venv\\\\|/\.venv/", cmd, re.I):
+            return "class:windows_python_path_mismatch"
+        return "class:windows_command_not_found"
+    if text.startswith("[EXEC FAILURE") or text.startswith("[WARNING | Exit Code"):
+        if looks_ps:
+            return "class:windows_ps_syntax_mismatch"
+        return f"exact:{exact}" if exact else "class:exec_nonzero"
+    if exact:
+        return f"exact:{exact}"
+    return "class:unknown"
+
+
+def _shell_cooldown_keys_for_command(command: str, *, result_text: str = "") -> list[str]:
+    """Keys checked before/after a shell call (exact + inferred/result class)."""
+
+    keys: list[str] = []
+    exact = _normalize_shell_command_key(command)
+    if exact:
+        keys.append(f"exact:{exact}")
+    if result_text and is_shell_execution_failure(result_text):
+        cls = classify_shell_failure_class(command, result_text)
+        if cls and cls not in keys:
+            keys.append(cls)
+    else:
+        # Pre-flight: if command already looks PowerShell-heavy, honor prior PS-class failures.
+        if _is_powershell_command(command) or re.search(
+            r"\b(Select-Object|Get-ChildItem|Get-Content|Where-Object)\b",
+            str(command or ""),
+            re.I,
+        ):
+            keys.append("class:windows_ps_syntax_mismatch")
+    return keys
+
+
 def reset_shell_failure_cooldown() -> None:
     """Test helper: clear in-process shell failure counters."""
 
@@ -557,27 +639,38 @@ def reset_shell_failure_cooldown() -> None:
         _SHELL_FAIL_COUNTS.clear()
 
 
-def shell_failure_cooldown_hit(command: str) -> tuple[bool, int]:
-    """Return (should_block_retry, previous_fail_count) for a shell command intent."""
+def shell_failure_cooldown_hit(command: str, result_text: str = "") -> tuple[bool, int]:
+    """Return (should_block_retry, max_previous_fail_count) for shell intent / class."""
 
-    key = _normalize_shell_command_key(command)
-    if not key:
+    keys = _shell_cooldown_keys_for_command(command, result_text=result_text)
+    if not keys:
         return False, 0
     with _SHELL_FAIL_COOLDOWN_LOCK:
-        count = int(_SHELL_FAIL_COUNTS.get(key, 0))
-    return count >= _SHELL_FAIL_COOLDOWN_LIMIT, count
+        counts = [int(_SHELL_FAIL_COUNTS.get(key, 0)) for key in keys]
+    max_count = max(counts) if counts else 0
+    return max_count >= _SHELL_FAIL_COOLDOWN_LIMIT, max_count
 
 
-def record_shell_failure(command: str) -> int:
-    """Increment failure count for a shell command intent; return new count."""
+def record_shell_failure(command: str, result_text: str = "") -> int:
+    """Increment failure counts for exact + class keys; return max new count."""
 
-    key = _normalize_shell_command_key(command)
-    if not key:
+    exact = _normalize_shell_command_key(command)
+    if not exact:
         return 0
+    keys = [f"exact:{exact}"]
+    text = str(result_text or "")
+    if text and is_shell_execution_failure(text):
+        cls = classify_shell_failure_class(command, text)
+        if cls and cls not in keys:
+            keys.append(cls)
+
+    max_count = 0
     with _SHELL_FAIL_COOLDOWN_LOCK:
-        next_count = int(_SHELL_FAIL_COUNTS.get(key, 0)) + 1
-        _SHELL_FAIL_COUNTS[key] = next_count
-        return next_count
+        for key in keys:
+            next_count = int(_SHELL_FAIL_COUNTS.get(key, 0)) + 1
+            _SHELL_FAIL_COUNTS[key] = next_count
+            max_count = max(max_count, next_count)
+    return max_count
 
 
 def shell_failure_cooldown_message(command: str, fail_count: int) -> str:
@@ -585,7 +678,7 @@ def shell_failure_cooldown_message(command: str, fail_count: int) -> str:
     if len(preview) > 160:
         preview = preview[:157] + "..."
     return (
-        f"[工具纪律] 同一 shell 命令意图已失败 {fail_count} 次，禁止继续用同类写法重试。\n"
+        f"[工具纪律] 同一 shell 命令意图/方言类别已失败 {fail_count} 次，禁止继续用同类写法重试。\n"
         f"命令: {preview}\n"
         "请改用 code_symbol_tool / grep_search_tool / glob_tool，"
         "或换完全不同的策略；不要在 cmd/PowerShell/bash 之间来回探路。"
@@ -2094,6 +2187,8 @@ __all__ = [
     'ShellCommandRoute',
     'classify_shell_command',
     'shell_command_dialect_guidance',
+    'is_shell_execution_failure',
+    'classify_shell_failure_class',
     'shell_failure_cooldown_hit',
     'record_shell_failure',
     'shell_failure_cooldown_message',

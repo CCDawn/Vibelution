@@ -205,6 +205,29 @@ class TestShellCommandClassifier:
         assert "code_symbol_tool" in message
         shell_tools.reset_shell_failure_cooldown()
 
+    def test_shell_failure_detects_warning_exit_and_command_not_found(self):
+        assert shell_tools.is_shell_execution_failure(
+            "[WARNING | Exit Code: 255]\n[STDERR]\n'Select-Object' 不是内部或外部命令"
+        )
+        assert shell_tools.is_shell_execution_failure(
+            "[WARNING | Exit Code: 1]\n'.venv\\Scripts\\python.exe' 不是内部或外部命令"
+        )
+        assert not shell_tools.is_shell_execution_failure("ok lines\n1 file matched")
+
+    def test_shell_failure_class_blocks_followup_powershell_variants(self):
+        """Flash thrash pattern: different PS-flavored commands after cmd dialect mismatch."""
+        shell_tools.reset_shell_failure_cooldown()
+        first = "Get-Content log.jsonl | Select-Object -First 20"
+        second = "Get-ChildItem logs | Select-Object -First 5"
+        failure = "[WARNING | Exit Code: 255]\n[STDERR]\n'Select-Object' 不是内部或外部命令，也不是可运行的程序"
+        assert shell_tools.classify_shell_failure_class(first, failure) == "class:windows_ps_syntax_mismatch"
+        assert shell_tools.record_shell_failure(first, failure) >= 1
+        hit, count = shell_tools.shell_failure_cooldown_hit(second)
+        assert hit is True
+        assert count >= 1
+        assert "工具纪律" in shell_tools.shell_failure_cooldown_message(second, count)
+        shell_tools.reset_shell_failure_cooldown()
+
     def test_windows_command_is_blocked_on_unix(self, monkeypatch):
         monkeypatch.setattr(shell_tools, "IS_WINDOWS", False)
         monkeypatch.setattr(shell_tools, "CURRENT_SYSTEM", "linux")
