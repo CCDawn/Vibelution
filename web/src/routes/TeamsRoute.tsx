@@ -172,6 +172,7 @@ import {
   sourceCollectionStorageArtifactsForRun,
   sourceCollectionStorageTargetForRef,
   sourceCollectionStorageTargetLabel,
+  sourceCollectionFreshProjectDraft,
   splitDraftList,
   workflowIngestionStatusLabel,
   type SourceCollectionDraft,
@@ -255,6 +256,7 @@ import {
   TeamCanvasNode,
   TeamListPayload,
   TeamOrganizationCanvas,
+  TeamResearchProject,
   TeamResearchProjectListPayload,
   TeamWorkflowCandidate,
   TeamWorkflowCandidateGraphBuildPayload,
@@ -651,18 +653,10 @@ export function TeamsRoute({
   const [preferredExperimentMethod, setPreferredExperimentMethod] = useState<ExperimentMethodId | "">("");
   const sourceCollectionDraftHydratedRunIdRef = useRef("");
   const sourceCollectionDraftHydratedSearchPlanRef = useRef("");
-  const [sourceCollectionDraft, setSourceCollectionDraft] = useState<SourceCollectionDraft>({
-    title: "神经算法资料搜索批次",
-    topic: "神经预测编码",
-    goal: "搜集可追踪的神经科学资料，用来支撑神经网络算法假设。",
-    querySeeds: "预测编码皮层层级\n突触可塑性学习规则\n神经门控注意机制",
-    inputRefs: "",
-    searchLanguages: "en\nzh",
-    sourceTypes: "paper\nreview\ndataset",
-    maxResultsPerQuery: 8,
-    collectionMode: "mixed",
-    localScanRoots: SOURCE_COLLECTION_LOCAL_SCAN_DEFAULT_ROOTS,
-  });
+  const sourceCollectionFreshProjectDraftIdRef = useRef("");
+  const [sourceCollectionDraft, setSourceCollectionDraft] = useState<SourceCollectionDraft>(() =>
+    sourceCollectionFreshProjectDraft({ name: "", topic: "" }),
+  );
   const [aiSearchRunTopic, setAiSearchRunTopic] = useState("AI 最新动态");
   const [selectedSourceCollectionRunId, setSelectedSourceCollectionRunId] = useState("");
   const [sourceCollectionOutputDraft, setSourceCollectionOutputDraft] = useState<SourceCollectionOutputDraft>({
@@ -1121,6 +1115,31 @@ export function TeamsRoute({
     ),
     [activeSourceCollectionResearchProjectId, effectiveTeamId, sourceCollectionRunsQuery.data],
   );
+  const activeSourceCollectionResearchProject = useMemo<TeamResearchProject | null>(
+    () => sourceCollectionResearchProjectsQuery.data?.projects.find(
+      (project) => project.projectId === activeSourceCollectionResearchProjectId,
+    ) ?? null,
+    [activeSourceCollectionResearchProjectId, sourceCollectionResearchProjectsQuery.data?.projects],
+  );
+  useEffect(() => {
+    if (
+      !activeSourceCollectionResearchProject
+      || sourceCollectionRunsQuery.isPending
+      || sourceCollectionRuns.length > 0
+      || sourceCollectionFreshProjectDraftIdRef.current === activeSourceCollectionResearchProject.projectId
+    ) {
+      return;
+    }
+    sourceCollectionFreshProjectDraftIdRef.current = activeSourceCollectionResearchProject.projectId;
+    sourceCollectionDraftHydratedRunIdRef.current = "";
+    sourceCollectionDraftHydratedSearchPlanRef.current = "";
+    setSelectedSourceCollectionRunId("");
+    setSourceCollectionDraft(sourceCollectionFreshProjectDraft(activeSourceCollectionResearchProject));
+  }, [
+    activeSourceCollectionResearchProject,
+    sourceCollectionRuns.length,
+    sourceCollectionRunsQuery.isPending,
+  ]);
   const sourceCollectionAgentIds = useMemo(() => sourceCollectionAgentIdsFromTeam(selectedTeam, canvas), [canvas, selectedTeam]);
   const sourceCollectionOwnerAgentId = useMemo(() => sourceCollectionOwnerAgentIdFromTeam(selectedTeam, canvas), [canvas, selectedTeam]);
   const sourceCollectionFinderAgentId = sourceCollectionAgentIds.source_finder || "Source Finder Agent";
@@ -1374,6 +1393,7 @@ export function TeamsRoute({
   });
 
   const {
+    resetResearchProjectSourceCollectionMutation,
     seedSourceCollectionAgentSessionContextMutation,
     startSourceCollectionStageSessionTaskMutation,
     startAiSearchRunMutation,
@@ -1384,6 +1404,7 @@ export function TeamsRoute({
     knowledgeExpansionWorkflowTeamSelected,
     sourceCollectionOwnerAgentId,
     sourceCollectionAgentIds,
+    activeSourceCollectionResearchProjectId,
     sourceCollectionStandalone,
     chatWorkspaceCache,
     setSelectedSourceCollectionRunId,
@@ -2387,19 +2408,78 @@ export function TeamsRoute({
 
   function renderSourceCollectionSearchBrief() {
     return (
-      <TeamSourceCollectionSearchBriefInject
-        lang={lang}
-        draft={sourceCollectionDraft}
-        modeFields={renderSourceCollectionModeFields()}
-        hasExistingRun={Boolean(selectedSourceCollectionRun)}
-        canStart={sourceCollectionCanStart}
-        startPending={selectedTeamStartSourceCollectionPending}
-        teamId={selectedTeam?.teamId}
-        onDraftChange={(patch) => setSourceCollectionDraft((current) => ({ ...current, ...patch }))}
-        onStart={({ teamId, draft }) => {
-          startSourceCollectionRunMutation.mutate({ teamId, draft });
-        }}
-      />
+      <>
+        {activeSourceCollectionResearchProject && sourceCollectionRuns.length > 0 ? (
+          <VStateSurface
+            title={lang === "zh" ? "重新开始本项目的资料搜集" : "Restart this project's source collection"}
+            tone="unavailable"
+            facts={[
+              {
+                key: "scope",
+                label: lang === "zh" ? "清理范围" : "Reset scope",
+                value: lang === "zh" ? `${sourceCollectionRuns.length} 个资料批次` : `${sourceCollectionRuns.length} source runs`,
+              },
+            ]}
+            actions={(
+              <VButton
+                type="button"
+                variant="danger"
+                onPress={() => {
+                  if (!selectedTeam?.teamId) {
+                    return;
+                  }
+                  resetResearchProjectSourceCollectionMutation.mutate(
+                    {
+                      teamId: selectedTeam.teamId,
+                      researchProjectId: activeSourceCollectionResearchProject.projectId,
+                    },
+                    {
+                      onSuccess: () => {
+                        sourceCollectionFreshProjectDraftIdRef.current = activeSourceCollectionResearchProject.projectId;
+                        sourceCollectionDraftHydratedRunIdRef.current = "";
+                        sourceCollectionDraftHydratedSearchPlanRef.current = "";
+                        setSelectedSourceCollectionRunId("");
+                        setSourceCollectionDraft(sourceCollectionFreshProjectDraft(activeSourceCollectionResearchProject));
+                      },
+                    },
+                  );
+                }}
+                isDisabled={selectedResearchProjectSourceCollectionResetPending}
+              >
+                <Trash2 size={14} />
+                {selectedResearchProjectSourceCollectionResetPending
+                  ? (lang === "zh" ? "正在清空…" : "Clearing…")
+                  : (lang === "zh" ? "清空本项目资料并重新开始" : "Clear this project's sources and restart")}
+              </VButton>
+            )}
+          >
+            {lang === "zh"
+              ? "仅清除当前项目尚未进入实验设计的资料批次、来源候选与资料阶段投影；不会删除其他项目、正式题目记录、知识库或 Agent 会话。"
+              : "Only clears this project's pre-design source runs, source candidates, and Stage 1 projections. Other projects, official records, knowledge items, and Agent conversations are preserved."}
+          </VStateSurface>
+        ) : null}
+        {selectedResearchProjectSourceCollectionResetError ? (
+          <VStateSurface
+            title={lang === "zh" ? "无法清空本项目资料" : "Unable to reset this project's sources"}
+            tone="error"
+          >
+            {selectedResearchProjectSourceCollectionResetError.message}
+          </VStateSurface>
+        ) : null}
+        <TeamSourceCollectionSearchBriefInject
+          lang={lang}
+          draft={sourceCollectionDraft}
+          modeFields={renderSourceCollectionModeFields()}
+          hasExistingRun={Boolean(selectedSourceCollectionRun)}
+          canStart={sourceCollectionCanStart}
+          startPending={selectedTeamStartSourceCollectionPending}
+          teamId={selectedTeam?.teamId}
+          onDraftChange={(patch) => setSourceCollectionDraft((current) => ({ ...current, ...patch }))}
+          onStart={({ teamId, draft }) => {
+            startSourceCollectionRunMutation.mutate({ teamId, draft });
+          }}
+        />
+      </>
     );
   }
 
@@ -3108,6 +3188,14 @@ export function TeamsRoute({
   }));
   const sourceCollectionCanStart = Boolean(selectedTeam?.teamId && sourceCollectionDraft.topic.trim());
   const researchStageCanLaunch = Boolean(selectedTeam?.teamId && sourceCollectionDraft.topic.trim());
+  const selectedResearchProjectSourceCollectionResetPending =
+    resetResearchProjectSourceCollectionMutation.isPending
+    && resetResearchProjectSourceCollectionMutation.variables?.teamId === selectedTeam?.teamId;
+  const selectedResearchProjectSourceCollectionResetError =
+    resetResearchProjectSourceCollectionMutation.variables?.teamId === selectedTeam?.teamId
+    && resetResearchProjectSourceCollectionMutation.error instanceof Error
+      ? resetResearchProjectSourceCollectionMutation.error
+      : null;
   const selectedTeamStartResearchStagePending =
     (startResearchStageRoundMutation.isPending && startResearchStageRoundMutation.variables?.teamId === selectedTeam?.teamId)
     || researchStageProjectAgentTasks.isStarting;

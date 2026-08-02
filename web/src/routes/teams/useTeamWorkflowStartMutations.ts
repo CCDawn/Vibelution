@@ -7,6 +7,7 @@ import type { Dispatch, SetStateAction } from "react";
 
 import { fetchJson } from "../../api/client";
 import { queryKeys } from "../../api/queryKeys";
+import { resetTeamResearchProjectSourceCollection } from "../../api/researchProjectAgentTasks";
 import type {
   AiSearchRun,
   Team,
@@ -60,6 +61,7 @@ export type UseTeamWorkflowStartMutationsOptions = {
   knowledgeExpansionWorkflowTeamSelected: boolean;
   sourceCollectionOwnerAgentId: string;
   sourceCollectionAgentIds: Record<string, string>;
+  activeSourceCollectionResearchProjectId: string;
   sourceCollectionStandalone: boolean;
   chatWorkspaceCache: TeamShellChatWorkspaceCache;
   setSelectedSourceCollectionRunId: Dispatch<SetStateAction<string>>;
@@ -73,6 +75,31 @@ export type UseTeamWorkflowStartMutationsOptions = {
 export function useTeamWorkflowStartMutations(options: UseTeamWorkflowStartMutationsOptions) {
   const queryClient = useQueryClient();
   const { chatWorkspaceCache } = options;
+
+  const resetResearchProjectSourceCollectionMutation = useMutation({
+    mutationFn: (payload: { teamId: string; researchProjectId: string }) =>
+      resetTeamResearchProjectSourceCollection(payload.teamId, payload.researchProjectId),
+    onSuccess: (payload, variables) => {
+      options.setSelectedSourceCollectionRunId("");
+      options.setSourceCollectionStageSyncUntilMs(0);
+      options.setSourceCollectionPendingStageTaskIds({});
+      options.setSourceCollectionOutputDraft((current) => ({ ...current, assignmentId: "" }));
+      for (const runId of payload.removedRunIds) {
+        queryClient.removeQueries({ queryKey: queryKeys.dataProcessingRunStatus(runId) });
+        queryClient.removeQueries({ queryKey: sourceCollectionRunRecordsQueryKey(runId) });
+        queryClient.removeQueries({ queryKey: queryKeys.dataProcessingCollectionAssignments(runId) });
+      }
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.teamWorkflowSourceCollectionRuns(variables.teamId, SOURCE_COLLECTION_RUN_PREVIEW_LIMIT),
+      });
+      void queryClient.invalidateQueries({ queryKey: sourceCollectionSummaryQueryPrefix(variables.teamId) });
+      void queryClient.invalidateQueries({ queryKey: researchStageRoundStatusQueryKey(variables.teamId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflow(variables.teamId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.teamWorkflowKnowledgeIngestionStatus(variables.teamId) });
+      void queryClient.invalidateQueries({ queryKey: sourceQualityStatusQueryKey(variables.teamId) });
+      void queryClient.invalidateQueries({ queryKey: paperNoteChunkStatusQueryKey(variables.teamId) });
+    },
+  });
 
   const seedSourceCollectionAgentSessionContextMutation = useMutation({
     mutationFn: (payload: {
@@ -189,6 +216,7 @@ export function useTeamWorkflowStartMutations(options: UseTeamWorkflowStartMutat
                 : "Challenge Cup source collection"),
             topic: payload.draft.topic.trim(),
             goal: payload.draft.goal.trim(),
+            researchProjectId: options.activeSourceCollectionResearchProjectId,
             ownerAgentId: options.sourceCollectionOwnerAgentId,
             requestedByAgent: options.sourceCollectionOwnerAgentId,
             workflowPurpose,
@@ -206,7 +234,7 @@ export function useTeamWorkflowStartMutations(options: UseTeamWorkflowStartMutat
             scope: {
               domain: options.knowledgeExpansionWorkflowTeamSelected
                 ? "team knowledge expansion"
-                : "neuroscience-inspired algorithm discovery",
+                : (payload.draft.topic.trim() || "research source collection"),
               workflowStage: "knowledge_collection",
               workflowKind,
               workflowPurpose,
@@ -366,6 +394,7 @@ export function useTeamWorkflowStartMutations(options: UseTeamWorkflowStartMutat
   });
 
   return {
+    resetResearchProjectSourceCollectionMutation,
     seedSourceCollectionAgentSessionContextMutation,
     startSourceCollectionStageSessionTaskMutation,
     startAiSearchRunMutation,

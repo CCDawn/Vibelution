@@ -104,6 +104,7 @@ from core.web.services.team_workflow.source_collection.runs import (
     execute_source_collection_search,
     get_source_collection_summary,
     load_source_collection_work_run_summary,
+    reset_research_project_source_collection,
     start_source_collection_run,
     start_source_collection_search_background,
 )

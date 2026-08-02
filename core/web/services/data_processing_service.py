@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import threading
 import uuid
 from datetime import datetime, timezone
@@ -169,6 +170,31 @@ def get_processing_run(run_id: str) -> dict[str, Any]:
         "summary": status["summary"],
         "processingStatus": status,
     }
+
+
+def delete_processing_run(run_id: str) -> dict[str, Any]:
+    """Delete one generic run after its domain owner has applied its guards.
+
+    This substrate deliberately has no opinion about whether a run may be
+    deleted.  Domain services must first prove that no downstream artifact or
+    active worker depends on it; this helper only removes the bounded run
+    directory and its local event history atomically under the service lock.
+    """
+
+    normalized_run_id = _safe_token(run_id, default="", max_length=96)
+    if not normalized_run_id:
+        raise DataProcessingNotFoundError("Data processing run id is required.")
+    root = _run_root(normalized_run_id)
+    with _LOCK:
+        if not root.is_dir():
+            raise DataProcessingNotFoundError(f"Data processing run not found: {run_id}")
+        shutil.rmtree(root)
+    _record_data_processing_event(
+        "data_processing.run.deleted",
+        run_id=normalized_run_id,
+        fields={"reason": "domain_guarded_reset"},
+    )
+    return {"schemaVersion": SCHEMA_VERSION, "runId": normalized_run_id, "deleted": True}
 
 
 def list_records(run_id: str) -> dict[str, Any]:

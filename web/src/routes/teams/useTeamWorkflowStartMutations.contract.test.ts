@@ -9,6 +9,7 @@ const mutationOwners = [
   "startSourceCollectionStageSessionTaskMutation",
   "startAiSearchRunMutation",
   "startSourceCollectionRunMutation",
+  "resetResearchProjectSourceCollectionMutation",
   "startResearchStageRoundMutation",
 ] as const;
 
@@ -47,6 +48,7 @@ describe("team workflow start mutations contract", () => {
     expect(mutationsSource).toContain("/stage-session-tasks");
     expect(mutationsSource).toContain("/ai-search-runs");
     expect(mutationsSource).toContain("/workflow-orchestration/source-collection-runs");
+    expect(mutationsSource).toContain("resetTeamResearchProjectSourceCollection(");
     expect(mutationsSource).toContain("/workflow-orchestration/stage-rounds/start");
     expect(mutationsSource).toContain("idempotencyKey: payload.idempotencyKey");
   });

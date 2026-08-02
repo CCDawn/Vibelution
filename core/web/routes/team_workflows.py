@@ -60,6 +60,7 @@ from core.web.services.team_workflow_orchestration_service import (
     plan_paper_note_chunks_from_source_candidate,
     propose_iteration,
     record_local_research_model_output,
+    reset_research_project_source_collection,
     register_experiment_baseline_artifact,
     register_challenge_question_output,
     review_challenge_question_output,
@@ -267,6 +268,18 @@ class ResearchProjectUpdatePayload(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=160)
     topic: str | None = Field(None, max_length=1000)
     experimentMethod: str | None = Field(None, max_length=120)
+
+
+class ResearchProjectSourceCollectionResetResponse(BaseModel):
+    schemaVersion: int = 1
+    teamId: str
+    researchProjectId: str
+    experimentName: str
+    removedRunIds: list[str] = Field(default_factory=list)
+    removedRunCount: int = 0
+    removedSourceCandidateCount: int = 0
+    removedStageRoundCount: int = 0
+    nextAction: str = ""
 
 
 class ResearchProjectAgentTaskStartPayload(BaseModel):
@@ -859,6 +872,31 @@ def team_workflow_research_project_activate(team_id: str, project_id: str) -> di
     except ResearchProjectError as exc:
         _raise_team_workflow_route_error(
             "research_project.activate",
+            team_id,
+            exc,
+            status_code=422,
+            fields={"projectId": project_id},
+        )
+
+
+@router.post(
+    "/teams/{team_id}/workflow-orchestration/research-projects/{project_id}/source-collection/reset",
+    response_model=ResearchProjectSourceCollectionResetResponse,
+)
+def team_workflow_research_project_source_collection_reset(team_id: str, project_id: str) -> dict:
+    try:
+        return reset_research_project_source_collection(team_id, project_id)
+    except (TeamNotFoundError, ResearchProjectNotFoundError) as exc:
+        _raise_team_workflow_route_error(
+            "research_project.source_collection_reset",
+            team_id,
+            exc,
+            status_code=404,
+            fields={"projectId": project_id},
+        )
+    except (ResearchProjectError, TeamWorkflowOrchestrationError) as exc:
+        _raise_team_workflow_route_error(
+            "research_project.source_collection_reset",
             team_id,
             exc,
             status_code=422,

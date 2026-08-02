@@ -4,6 +4,7 @@ import type {
   TeamResearchProjectAgentTaskStartPayload,
   TeamResearchProjectAgentTaskStatusPayload,
   TeamResearchProjectListPayload,
+  TeamResearchProjectSourceCollectionResetPayload,
 } from "./types";
 
 export function listTeamResearchProjects(teamId: string) {
@@ -15,6 +16,13 @@ export function listTeamResearchProjects(teamId: string) {
 export function getResearchProjectAgentTaskStatus(teamId: string, projectId: string) {
   return fetchJson<TeamResearchProjectAgentTaskStatusPayload>(
     `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/research-projects/${encodeURIComponent(projectId)}/agent-tasks/status`,
+  );
+}
+
+export function resetTeamResearchProjectSourceCollection(teamId: string, projectId: string) {
+  return fetchJson<TeamResearchProjectSourceCollectionResetPayload>(
+    `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/research-projects/${encodeURIComponent(projectId)}/source-collection/reset`,
+    { method: "POST" },
   );
 }
 

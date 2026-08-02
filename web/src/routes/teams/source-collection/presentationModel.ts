@@ -1,5 +1,6 @@
 import type {
   Team,
+  TeamResearchProject,
   TeamWorkflowCandidate,
   TeamWorkflowSourceCollectionPromptCachePolicy,
   TeamWorkflowSourceCollectionPromptCachePolicyRef,
@@ -45,6 +46,28 @@ export type SourceCollectionDraft = {
   collectionMode: SourceCollectionMode;
   localScanRoots: string;
 };
+
+/** Build a blank, project-bound first batch instead of inheriting another project's draft. */
+export function sourceCollectionFreshProjectDraft(
+  project: Pick<TeamResearchProject, "name" | "topic">,
+): SourceCollectionDraft {
+  const name = project.name.trim();
+  const topic = project.topic.trim();
+  return {
+    title: name ? `${name}｜资料搜集` : "资料搜集",
+    topic,
+    goal: name
+      ? `为“${name}”搜集可追溯资料，用于形成可检验的研究假说与研究计划。`
+      : "搜集可追溯资料，用于形成可检验的研究假说与研究计划。",
+    querySeeds: "",
+    inputRefs: "",
+    searchLanguages: "en\nzh",
+    sourceTypes: "paper\nreview\ndataset",
+    maxResultsPerQuery: 8,
+    collectionMode: "mixed",
+    localScanRoots: SOURCE_COLLECTION_LOCAL_SCAN_DEFAULT_ROOTS,
+  };
+}
 
 export type SourceCollectionStorageOpenTarget =
   | "run_directory"
