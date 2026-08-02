@@ -484,6 +484,83 @@ def test_team_workflow_route_starts_source_collection_run(tmp_path, monkeypatch)
     assert status_response.json()["boundaries"]["writesFormalKnowledge"] is False
 
 
+def test_project_source_collection_reset_only_clears_active_project_stage_one_data(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "_write_source_collection_search_plan",
+        lambda _team_id, _run_id, _search_plan: None,
+    )
+    client = _client()
+    team = client.post("/api/teams", json={"name": "Project reset team"}).json()
+    team_id = team["teamId"]
+
+    legacy_start = client.post(
+        f"/api/teams/{team_id}/workflow-orchestration/source-collection-runs",
+        json={
+            "title": "Legacy source batch",
+            "topic": "legacy topic",
+            "querySeeds": ["legacy query"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    project = client.post(
+        f"/api/teams/{team_id}/workflow-orchestration/research-projects",
+        json={"name": "SCI-010 chemistry", "topic": "catalytic reaction discovery"},
+    ).json()["project"]
+    activated = client.post(
+        f"/api/teams/{team_id}/workflow-orchestration/research-projects/{project['projectId']}/activate",
+    )
+    contaminated_start = client.post(
+        f"/api/teams/{team_id}/workflow-orchestration/source-collection-runs",
+        json={
+            "researchProjectId": project["projectId"],
+            "title": "Stale neural draft",
+            "topic": "neural predictive coding",
+            "querySeeds": ["synaptic plasticity"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    contaminated_run_id = contaminated_start.json()["run"]["runId"]
+    record = client.post(
+        f"/api/data-processing/runs/{contaminated_run_id}/records",
+        json={
+            "sourceType": "url",
+            "sourceRef": "https://example.test/stale-neural-source",
+            "title": "Stale neural source",
+            "metadata": {"allowedForAnalysis": True},
+        },
+    ).json()
+    imported = client.post(
+        f"/api/teams/{team_id}/workflow-orchestration/data-processing/runs/{contaminated_run_id}/records/{record['recordId']}/source-candidate",
+        json={"createdByAgent": "source_finder"},
+    )
+
+    reset = client.post(
+        f"/api/teams/{team_id}/workflow-orchestration/research-projects/{project['projectId']}/source-collection/reset",
+    )
+    missing_run = client.get(f"/api/data-processing/runs/{contaminated_run_id}")
+    remaining_candidates = client.get(
+        f"/api/teams/{team_id}/workflow-orchestration/candidates",
+        params={"candidateType": "source_manifest"},
+    )
+    legacy_status = client.get(
+        f"/api/data-processing/runs/{legacy_start.json()['run']['runId']}/status",
+    )
+
+    assert legacy_start.status_code == 201, legacy_start.text
+    assert activated.status_code == 200, activated.text
+    assert contaminated_start.status_code == 201, contaminated_start.text
+    assert imported.status_code == 201, imported.text
+    assert reset.status_code == 200, reset.text
+    assert reset.json()["researchProjectId"] == project["projectId"]
+    assert reset.json()["removedRunIds"] == [contaminated_run_id]
+    assert reset.json()["removedSourceCandidateCount"] == 1
+    assert missing_run.status_code == 404
+    assert remaining_candidates.json()["candidateCount"] == 0
+    assert legacy_status.status_code == 200, legacy_status.text
+
+
 def test_team_workflow_route_starts_knowledge_expansion_local_source_collection(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     client = _client()

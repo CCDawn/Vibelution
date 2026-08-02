@@ -792,6 +792,18 @@ export type TeamResearchProjectListPayload = {
   project?: TeamResearchProject;
 };
 
+export type TeamResearchProjectSourceCollectionResetPayload = {
+  schemaVersion: number;
+  teamId: string;
+  researchProjectId: string;
+  experimentName: string;
+  removedRunIds: string[];
+  removedRunCount: number;
+  removedSourceCandidateCount: number;
+  removedStageRoundCount: number;
+  nextAction: string;
+};
+
 export type ResearchProjectAgentTaskKind =
   | "experiment_design"
   | "experiment_evidence_review"

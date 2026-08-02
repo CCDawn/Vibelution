@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { TeamWorkflowCandidate } from "../../../api/types";
 import {
   compactSourceCollectionQuerySeeds,
+  sourceCollectionFreshProjectDraft,
   sourceCollectionCandidateQualityState,
   sourceCollectionCollectionModeLabel,
   sourceCollectionMaterialGapCount,
@@ -30,6 +31,19 @@ describe("source-collection presentationModel", () => {
   it("splits and compact seeds for source-collection drafts", () => {
     expect(splitDraftList("a, b；c\nd", 3)).toEqual(["a", "b", "c"]);
     expect(compactSourceCollectionQuerySeeds("主主题", "seed-a")).toEqual(["seed-a", "主主题"]);
+  });
+
+  it("derives an empty first-run draft from the active research project", () => {
+    const draft = sourceCollectionFreshProjectDraft({
+      name: "SCI-010 化学反应路径发现",
+      topic: "催化反应路径预测",
+    });
+
+    expect(draft.title).toBe("SCI-010 化学反应路径发现｜资料搜集");
+    expect(draft.topic).toBe("催化反应路径预测");
+    expect(draft.goal).toContain("SCI-010 化学反应路径发现");
+    expect(draft.querySeeds).toBe("");
+    expect(draft.goal).not.toContain("神经科学");
   });
 
   it("labels run status and collection mode", () => {

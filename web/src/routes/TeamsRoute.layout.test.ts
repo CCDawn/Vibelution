@@ -465,15 +465,19 @@ describe("TeamsRoute layout contract", () => {
     expect(routeAndPureSource).toContain("SOURCE_COLLECTION_KNOWLEDGE_EXPANSION_ROLES");
     expect(routeSource).toContain('from "./teams/teamKindModel"');
     expect(routeSource).toContain("source_finder");
-    expect(routeSource).toContain("collectionMode");
+    expect(teamWorkflowStartMutationsSource).toContain("collectionMode");
     expect(teamSourceCollectionInjectModelSource).toContain("local_workspace");
     expect(teamSourceCollectionModeFieldsSource).toContain("TeamSourceCollectionModeFields");
     expect(routeSource).toContain("TeamSourceCollectionModeFields");
-    expect(routeSource).toContain("mixed");
+    expect(presentationModelSource).toContain('collectionMode: "mixed"');
     // Wave 8R: SC run start payload fields live on useTeamWorkflowStartMutations.
     expect(teamWorkflowStartMutationsSource).toContain("localScanScope");
     expect(teamWorkflowStartMutationsSource).toContain("workflowPurpose");
     expect(teamWorkflowStartMutationsSource).toContain("workflowKind");
+    expect(teamWorkflowStartMutationsSource).toContain("resetTeamResearchProjectSourceCollection");
+    expect(teamWorkflowStartMutationsSource).toContain("researchProjectId: options.activeSourceCollectionResearchProjectId");
+    expect(routeSource).toContain("sourceCollectionFreshProjectDraft");
+    expect(routeSource).toContain("清空本项目资料并重新开始");
     expect(routeSource).toContain("recordSourceCollectionOutputMutation");
     expect(routeSource).toContain("executeSourceCollectionSearchMutation");
     // Wave 8P: execute/extract/writeback mutations live on useTeamSourceCollectionMutations.
