@@ -1142,5 +1142,24 @@ class TestPerformance:
         assert all("test" in r for r in results)
 
 
+class TestShellCommandDialectGuidance:
+    def test_windows_guidance_matches_runtime_routing_contract(self):
+        from tools.shell_tools import shell_command_dialect_guidance
+        from tools.Key_Tools import _cli_tool_docstring, _exec_command_tool_docstring
+
+        text = shell_command_dialect_guidance(host_system="Windows")
+        assert "cmd /c" in text
+        assert "powershell" in text.lower() or "PowerShell" in text
+        assert "bash -c" in text
+        assert "code_symbol_tool" in text or "失败" in text
+
+        cli_doc = _cli_tool_docstring()
+        exec_doc = _exec_command_tool_docstring()
+        assert "Shell 方言" in cli_doc
+        assert "Shell 方言" in exec_doc or "共用同一套 shell" in exec_doc
+        assert "6000" in cli_doc
+        assert "code_symbol_tool" in cli_doc
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])

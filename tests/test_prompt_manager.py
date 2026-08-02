@@ -1134,8 +1134,9 @@ class TestLoadFunctions:
         content = section.compute()
         assert content is not None
         assert "## SPEC 运行时摘要" in content
-        assert "工具顺序按证据推进" in content
-        assert "cli_tool 是默认本地入口" in content
+        assert "工具顺序" in content
+        assert "code_symbol_tool" in content or "结构化工具" in content
+        assert "cli_tool" in content
         assert "record_learning 只在形成可复用经验或踩坑规律时写入" in content
 
     def test_runtime_log_index_section_compute_uses_runtime_scene_summaries(self, tmp_path, monkeypatch):

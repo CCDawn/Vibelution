@@ -119,46 +119,66 @@ from tools.session_child_tools import (
 )
 from tools.cli_agent_tools import cli_agent_run_tool as _cli_agent_run_impl
 
-_CLI_TOOL_DOCSTRING = """
-【CLI】执行任意 Shell 命令。
+def _shell_dialect_block() -> str:
+    from tools.shell_tools import shell_command_dialect_guidance
 
-默认的本地工作入口，适合高效完成代码定位、文件检查、搜索、脚本、编译、测试和诊断。
-优先用项目可用的快速命令收窄证据，例如 `rg`/`rg --files`、PowerShell `Get-Content`
-配合 `Select-Object`、以及针对单文件或单测试目标的命令。
+    return shell_command_dialect_guidance()
 
-=== 使用建议 ===
-1. 避免交互式命令 (vim, top, less) 和无休止命令 (ping, tail -f)。
-2. 搜索优先 `rg -n "pattern" path`；列文件优先 `rg --files path`，再读取命中的小范围。
-3. 读文件要限制输出：用 `Get-Content <file> | Select-Object -First/-Skip`，或只读相关文件。
-4. 长输出先缩小目录、文件、测试名或行数；必要时用 `max_output_chars` 限制返回。
-5. 命令链与管道 (`&&`、`||`、`|`、`;`、`` ` ``、`$()`) 会增加失败面，能拆开时分步运行。
+
+def _cli_tool_docstring() -> str:
+    return f"""
+【CLI】执行本地 Shell 命令（经沙盒 + 统一路由）。
+
+定位代码时**优先** `code_symbol_tool` / `grep_search_tool` / `glob_tool`；
+shell 只在结构化工具不够或需要执行/验证（git/pytest/编译）时使用。
+
+{_shell_dialect_block()}
+
+=== 调用纪律 ===
+1. 搜索：`rg -n "pattern" path`（无管道；不要 `rg ... | head`）。
+2. Windows 读小段：完整 PowerShell，如 `Get-Content -LiteralPath "file" | Select-Object -First 80`。
+3. 同类 shell 失败 **1 次**后立即换结构化工具，禁止 cmd/PowerShell/bash 来回探路。
+4. 输出默认有界；`max_output_chars` 默认 6000，大结果只消费结论。
+5. 本回合工具有额度上限：探查不要耗尽额度，至少预留 2–3 次给 lint/test。
+6. 避免交互式/无休止命令。
 
 === 闭环 ===
-修改代码后按顺序分开执行:
-1. python -m py_compile <file>.py
-2. python -m pytest <target> -x -q
+修改后分开执行: python -m py_compile <file>.py → python -m pytest <target> -x -q
 
 Args:
-    command: Shell 命令
+    command: 按方言规则书写的 Shell 命令
     timeout: 文件操作 30s, 编译 60s, 测试/网络 120s
-    cwd: 工作目录，默认项目根目录；workspace_write 模式不得指向当前 Agent 工作区之外
-    max_output_chars: 最大返回字符数，默认 12000；超出时保留开头和结尾摘要
-"""
+    cwd: 工作目录，默认项目根；workspace_write 不得指向工作区外
+    max_output_chars: 最大返回字符数，默认 6000
+""".strip()
 
-_EXEC_COMMAND_TOOL_DOCSTRING = """
-【可继续命令】在 Codex 原生沙盒中启动一个可继续交互的命令进程。
 
-使用 `cmd` 启动命令。若进程仍在运行，返回值会包含 `terminalSessionId`；后续必须把该 ID
-原样传给 `write_stdin`，以继续输入或轮询新输出。不要从工具标题、操作 ID 或输出文本猜测会话 ID。
-这是会话 Agent 的默认命令入口；旧 `cli_tool` 仅保留给兼容旧工作流。
+def _exec_command_tool_docstring() -> str:
+    return f"""
+【可继续命令】在 Codex 原生沙盒中启动可继续交互的命令进程。
+
+`cmd` 与 `cli_tool` **共用同一套 shell 路由/方言**。进程仍在运行时返回 `terminalSessionId`，
+后续必须原样传给 `write_stdin`。旧 `cli_tool` 仅兼容旧工作流。
+
+{_shell_dialect_block()}
+
+=== 调用纪律 ===
+1. 写清与路由匹配的 `cmd`；Windows 默认勿混用 bash/PowerShell 探路。
+2. 同类失败 1 次换结构化工具或不同策略。
+3. `max_output_chars` 默认 6000；续写用 `write_stdin`。
 
 Args:
-    cmd: 要在工作区写入沙盒中执行的命令。
-    yield_time_ms: 最多等待多久再返回本轮输出，默认 10000，最大 30000。
-    timeout: 该进程的最大生命周期秒数，默认 60，最大 900。
-    cwd: 可选工作目录；相对路径以当前 Agent 工作区解析，workspace_write 模式拒绝外部绝对路径。
-    max_output_chars: 本次返回的最大输出字符数，默认 12000。
-"""
+    cmd: 按方言规则书写的命令
+    yield_time_ms: 最多等待多久再返回本轮输出，默认 10000，最大 30000
+    timeout: 进程最大生命周期秒数，默认 60，最大 900
+    cwd: 可选工作目录
+    max_output_chars: 本次返回最大字符数，默认 6000
+""".strip()
+
+
+# Keep module-level names for tests/importers that still read constants.
+_CLI_TOOL_DOCSTRING = _cli_tool_docstring()
+_EXEC_COMMAND_TOOL_DOCSTRING = _exec_command_tool_docstring()
 
 _WRITE_STDIN_TOOL_DOCSTRING = """
 【继续命令】向仍在运行的 `exec_command` 沙盒进程写入标准输入，或轮询其新输出。
@@ -1132,12 +1152,20 @@ def _build_key_tools() -> List[BaseTool]:
         command: str = "",
         timeout: int = 60,
         cwd: str = "",
-        max_output_chars: int = 12000,
+        max_output_chars: int = 6000,
         _cancel_checker=None,
     ) -> str:
         from core.infrastructure.codex_cli_sandbox import execute_codex_sandbox_command
+        from tools.shell_tools import (
+            record_shell_failure,
+            shell_failure_cooldown_hit,
+            shell_failure_cooldown_message,
+        )
         if not command:
             return '{"status": "error", "code": "MISSING_COMMAND", "message": "cli_tool 需要提供 command 参数"}'
+        cooled, fail_count = shell_failure_cooldown_hit(command)
+        if cooled:
+            return shell_failure_cooldown_message(command, fail_count)
         try:
             timeout = int(timeout)
         except (TypeError, ValueError):
@@ -1145,34 +1173,77 @@ def _build_key_tools() -> List[BaseTool]:
         try:
             max_output_chars = int(max_output_chars)
         except (TypeError, ValueError):
-            max_output_chars = 12000
+            max_output_chars = 6000
         result = execute_codex_sandbox_command(
             command,
             timeout=timeout,
             cwd=cwd or None,
             _cancel_checker=_cancel_checker,
         )
-        if max_output_chars > 0 and len(result) > max_output_chars:
-            head_size = max(2000, max_output_chars // 2)
-            tail_size = max(2000, max_output_chars - head_size)
-            result = (
-                f"{result[:head_size]}\n\n"
-                f"[输出已截断: 原始 {len(result)} 字符，仅保留前 {head_size} 和后 {tail_size} 字符]\n\n"
-                f"{result[-tail_size:]}"
+        result_text = str(result or "")
+        lowered = result_text.lower()
+        failed = (
+            result_text.startswith("[跨平台警告]")
+            or result_text.startswith("[EXEC FAILURE")
+            or "shell_route_blocked" in lowered
+            or "os error 123" in lowered
+            or '"status": "failed"' in lowered
+            or '"status":"failed"' in lowered
+        )
+        if failed:
+            count = record_shell_failure(command)
+            if count >= 1 and "工具纪律" not in result_text:
+                result_text = (
+                    f"{result_text}\n\n"
+                    f"[工具纪律] 此 shell 意图已失败 {count} 次；"
+                    "下一跳请改用 code_symbol_tool / grep_search_tool，不要换壳重试同一命令。"
+                )
+        if max_output_chars > 0 and len(result_text) > max_output_chars:
+            head_size = max(1200, max_output_chars // 2)
+            tail_size = max(1200, max_output_chars - head_size)
+            result_text = (
+                f"{result_text[:head_size]}\n\n"
+                f"[输出已截断: 原始 {len(result_text)} 字符，仅保留前 {head_size} 和后 {tail_size} 字符；"
+                f"请只消费结论，勿整段回灌。]\n\n"
+                f"{result_text[-tail_size:]}"
             )
-        return result
+        return result_text
 
-    cli_tool = StructuredTool.from_function(_cli_tool_impl, name="cli_tool", description=_CLI_TOOL_DOCSTRING)
+    cli_tool = StructuredTool.from_function(
+        _cli_tool_impl,
+        name="cli_tool",
+        description=_cli_tool_docstring(),
+    )
     def _exec_command_impl(
         cmd: str = "",
         yield_time_ms: int = 10000,
         timeout: int = 60,
         cwd: str = "",
-        max_output_chars: int = 12000,
+        max_output_chars: int = 6000,
         _cancel_checker=None,
     ) -> str:
         from core.infrastructure.codex_cli_sandbox import start_codex_sandbox_terminal_session
+        from tools.shell_tools import (
+            record_shell_failure,
+            shell_failure_cooldown_hit,
+            shell_failure_cooldown_message,
+        )
 
+        if not cmd:
+            return json.dumps(
+                {"status": "error", "code": "MISSING_COMMAND", "message": "exec_command 需要提供 cmd 参数"},
+                ensure_ascii=False,
+            )
+        cooled, fail_count = shell_failure_cooldown_hit(cmd)
+        if cooled:
+            return json.dumps(
+                {
+                    "status": "failed",
+                    "code": "SHELL_FAILURE_COOLDOWN",
+                    "message": shell_failure_cooldown_message(cmd, fail_count),
+                },
+                ensure_ascii=False,
+            )
         result = start_codex_sandbox_terminal_session(
             cmd,
             timeout=timeout,
@@ -1181,13 +1252,18 @@ def _build_key_tools() -> List[BaseTool]:
             max_output_chars=max_output_chars,
             _cancel_checker=_cancel_checker,
         )
+        if isinstance(result, dict):
+            status = str(result.get("status") or result.get("outcomeStatus") or "").lower()
+            message = str(result.get("message") or result.get("stderr") or result.get("stdout") or "")
+            if status in {"failed", "error", "blocked"} or "shell_route_blocked" in message.lower() or message.startswith("[跨平台警告]"):
+                record_shell_failure(cmd)
         return json.dumps(result, ensure_ascii=False)
 
     def _write_stdin_impl(
         session_id: str = "",
         chars: str = "",
         yield_time_ms: int = 1000,
-        max_output_chars: int = 12000,
+        max_output_chars: int = 6000,
         _cancel_checker=None,
     ) -> str:
         from core.infrastructure.codex_cli_sandbox import write_codex_sandbox_terminal_stdin
@@ -1204,7 +1280,7 @@ def _build_key_tools() -> List[BaseTool]:
     exec_command = StructuredTool.from_function(
         _exec_command_impl,
         name="exec_command",
-        description=_EXEC_COMMAND_TOOL_DOCSTRING,
+        description=_exec_command_tool_docstring(),
     )
     write_stdin = StructuredTool.from_function(
         _write_stdin_impl,

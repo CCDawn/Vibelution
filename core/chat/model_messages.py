@@ -18,6 +18,9 @@ from typing import Any, Iterable
 
 MODEL_MESSAGE_SCHEMA_VERSION = 1
 
+# Bound historical tool evidence so prior-turn large outputs do not dominate the next request.
+HISTORY_TOOL_RESULT_CHAR_LIMIT = 2_000
+
 
 @dataclass(frozen=True)
 class ProviderMessageChain:
@@ -569,6 +572,22 @@ def _provider_tool_call(tool_call: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _bound_history_tool_result_text(text: str, *, char_limit: int = HISTORY_TOOL_RESULT_CHAR_LIMIT) -> str:
+    """Keep historical tool bodies short enough for the next model request."""
+
+    content = str(text or "")
+    limit = max(400, int(char_limit or HISTORY_TOOL_RESULT_CHAR_LIMIT))
+    if len(content) <= limit:
+        return content
+    marker = (
+        f"\n\n[历史工具结果已截断: 原始 {len(content)} 字符，仅保留头尾摘要；"
+        "完整结果仍在会话历史/工具日志中。]\n\n"
+    )
+    head = max(200, (limit - len(marker)) // 2)
+    tail = max(200, limit - len(marker) - head)
+    return f"{content[:head]}{marker}{content[-tail:]}"
+
+
 def _tool_result_content(name: str, entry: dict[str, Any]) -> str:
     result = _first_non_empty(
         entry.get("result"),
@@ -602,7 +621,7 @@ def _tool_result_content(name: str, entry: dict[str, Any]) -> str:
     ):
         if key in entry and entry.get(key) not in (None, ""):
             lines.append(f"{key}: {entry.get(key)}")
-    lines.extend(["结果:", result_text])
+    lines.extend(["结果:", _bound_history_tool_result_text(result_text)])
     return "\n".join(lines)
 
 
@@ -639,15 +658,15 @@ def _history_tool_summary(name: str, entry: dict[str, Any]) -> str:
         else:
             result_text = str(result)
         if result_text.strip():
-            lines.extend(["结果:", result_text])
+            lines.extend(["结果:", _bound_history_tool_result_text(result_text)])
     return "\n".join(lines)
 
 
 def _history_tool_result_text(name: str, content: Any) -> str:
     text = _visible_text(content)
     if text.startswith("历史工具结果:"):
-        return text
-    return f"历史工具结果: {name}\n{text}".strip()
+        return _bound_history_tool_result_text(text)
+    return _bound_history_tool_result_text(f"历史工具结果: {name}\n{text}".strip())
 
 
 def _tool_name_from_text(content: Any) -> str:
