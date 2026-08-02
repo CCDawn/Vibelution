@@ -3091,32 +3091,7 @@ export function ChatCodingRoute() {
 
       <section className={centerPaneClassName} data-vui-region="chat-conversation-center">
         <div className={styles.tabStrip}>
-          <div className={styles.overlayPaneControls}>
-            {!responsiveLayout.leftVisible ? (
-              <VButton
-                id="chat-conversation-index-toggle"
-                type="button"
-                className={styles.overlayPaneToggle}
-                aria-expanded={conversationIndexOverlayOpen}
-                aria-controls="chat-conversation-index-pane"
-                onClick={() => setResponsiveOverlayPane((current) => current === "left" ? null : "left")}
-              >
-                {lang === "zh" ? "会话" : "Chats"}
-              </VButton>
-            ) : null}
-            {!responsiveLayout.rightVisible ? (
-              <VButton
-                id="chat-status-toggle"
-                type="button"
-                className={styles.overlayPaneToggle}
-                aria-expanded={statusRailOverlayOpen}
-                aria-controls="chat-status-pane"
-                onClick={() => setResponsiveOverlayPane((current) => current === "right" ? null : "right")}
-              >
-                {lang === "zh" ? "状态" : "Status"}
-              </VButton>
-            ) : null}
-          </div>
+          {/* Session tabs first so they stay left-aligned; never put ml-auto before them. */}
           {chatReturnTarget ? (
             <Link className={styles.chatReturnLink} to={chatReturnTarget} title={chatReturnLabel}>
               <ArrowLeft size={14} aria-hidden="true" />
@@ -3132,7 +3107,6 @@ export function ChatCodingRoute() {
               {projectBusActive ? (lang === "zh" ? "通知流" : "Notice stream") : (lang === "zh" ? "群聊" : "Group")}
             </VButton>
           ) : selectedChatAgentId || agentSessionTabs.length > 0 || cliAgentRunTabs.length > 0 ? (
-            <>
             <AgentSessionTabStrip
               activeSessionId={activeSessionId}
               activeCliAgentRunId={activeCliAgentRunId}
@@ -3177,7 +3151,6 @@ export function ChatCodingRoute() {
               onSetActiveTab={setActiveTab}
               onSubmitRename={submitRenameSession}
             />
-            </>
           ) : (
             <VButton
               type="button"
@@ -3203,6 +3176,35 @@ export function ChatCodingRoute() {
               }}
             />
           </Suspense>
+          {/* Overlay rail toggles last + ml-auto so they sit on the right when present. */}
+          {!responsiveLayout.leftVisible || !responsiveLayout.rightVisible ? (
+            <div className={styles.overlayPaneControls}>
+              {!responsiveLayout.leftVisible ? (
+                <VButton
+                  id="chat-conversation-index-toggle"
+                  type="button"
+                  className={styles.overlayPaneToggle}
+                  aria-expanded={conversationIndexOverlayOpen}
+                  aria-controls="chat-conversation-index-pane"
+                  onClick={() => setResponsiveOverlayPane((current) => current === "left" ? null : "left")}
+                >
+                  {lang === "zh" ? "会话" : "Chats"}
+                </VButton>
+              ) : null}
+              {!responsiveLayout.rightVisible ? (
+                <VButton
+                  id="chat-status-toggle"
+                  type="button"
+                  className={styles.overlayPaneToggle}
+                  aria-expanded={statusRailOverlayOpen}
+                  aria-controls="chat-status-pane"
+                  onClick={() => setResponsiveOverlayPane((current) => current === "right" ? null : "right")}
+                >
+                  {lang === "zh" ? "状态" : "Status"}
+                </VButton>
+              ) : null}
+            </div>
+          ) : null}
         </div>
 
         <div className={styles.centerSurface}>

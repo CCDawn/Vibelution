@@ -2579,6 +2579,11 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).not.toContain("styles.childSessionList");
     expect(routeSource).toContain("<AgentSessionTabStrip");
     expect(routeSource).toContain("sessions={agentSessionTabs}");
+    // Session tabs must precede overlayPaneControls; first-child ml-auto was pushing tabs right.
+    expect(routeSource.indexOf("<AgentSessionTabStrip")).toBeLessThan(
+      routeSource.indexOf("styles.overlayPaneControls"),
+    );
+    expect(routeSource).toContain("!responsiveLayout.leftVisible || !responsiveLayout.rightVisible");
     expect(routeSource).toContain("onContextMenu={openSessionContextMenu}");
     expect(routeSource).toContain("onOpenDirectSession={handleOpenDirectSession}");
     expect(routeSource).toContain("onPrefetchDirectSession={handlePrefetchDirectSession}");
