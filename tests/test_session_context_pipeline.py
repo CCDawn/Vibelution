@@ -1073,6 +1073,46 @@ def test_auto_continue_pause_result_without_visible_reply_needs_continue():
     assert session_service._chat_turn_result_status("completed", result, stop_requested=False) == "needs_continue"
 
 
+def test_chat_turn_result_status_main_loop_exception_is_failed_runtime():
+    result = {
+        "status": "completed",
+        "summary": "后端有 SSE 流式路由，但要确认 LLM 调用本身是否流式。",
+        "raw_output": "后端有 SSE 流式路由，但要确认 LLM 调用本身是否流式。",
+        "tool_call_count": 13,
+        "llm_failure": {
+            "category": "runtime_error",
+            "reason_code": "agent_main_loop_exception",
+            "exception_type": "TimeoutExpired",
+            "message": "Agent 主循环异常: TimeoutExpired",
+        },
+        "main_loop_exception": "TimeoutExpired",
+    }
+
+    assert (
+        session_service._chat_turn_result_status("completed", result, stop_requested=False)
+        == "failed_runtime"
+    )
+    assert (
+        session_service._chat_turn_result_status("failed", result, stop_requested=False)
+        == "failed_runtime"
+    )
+
+
+def test_chat_turn_result_status_tool_heavy_fragment_without_conclusion_needs_continue():
+    result = {
+        "status": "completed",
+        "summary": "后端有 SSE 流式路由，但要确认 LLM 调用本身是否流式。",
+        "raw_output": "后端有 SSE 流式路由，但要确认 LLM 调用本身是否流式。",
+        "tool_call_count": 8,
+        "tool_trace": [{"name": "cli_tool", "status": "done"}],
+    }
+
+    assert (
+        session_service._chat_turn_result_status("completed", result, stop_requested=False)
+        == "needs_continue"
+    )
+
+
 def test_process_reply_with_blocked_pytest_validation_needs_continue():
     result = {
         "status": "completed",

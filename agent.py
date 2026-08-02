@@ -3264,6 +3264,9 @@ class SelfEvolvingAgent:
             }
             ui.add_log("收到网页终止请求，本轮在安全点收束。", "WARN")
         except Exception as e:
+            # Keep failure sticky across finalize_round: consecutive_failures may still be 0
+            # (e.g. subprocess.TimeoutExpired) while the turn must not look completed.
+            round_return_ok = False
             self._record_turn_failure_diagnostic(
                 category="runtime_error",
                 reason_code="agent_main_loop_exception",
@@ -3273,6 +3276,13 @@ class SelfEvolvingAgent:
                 event_code="agent.turn.failed_exception",
                 exception_type=type(e).__name__,
             )
+            self._last_turn_failed = True
+            self._last_turn_metadata = {
+                **dict(getattr(self, "_last_turn_metadata", {}) or {}),
+                "status": "failed",
+                "outcome": "failed",
+                "main_loop_exception": type(e).__name__,
+            }
             ui.update_status(
                 "ERROR",
                 **round_state.current_status(),
@@ -3280,9 +3290,11 @@ class SelfEvolvingAgent:
             _debug_logger.error(f"主循环异常: {type(e).__name__}: {e}", exc_info=traceback.format_exc())
         finally:
             # 轮次结束统计（无论正常结束还是异常，都记录）
+            exception_failed = bool(getattr(self, "_last_turn_failed", False))
             finalization = self._get_turn_outcome_controller().finalize_round(round_state=round_state)
-            self._last_turn_failed = finalization.last_turn_failed
-            if bool(getattr(finalization, "max_iteration_exhausted_without_final_answer", False)):
+            # Do not let progress-only finalization wipe a main-loop / diagnostic failure.
+            self._last_turn_failed = bool(finalization.last_turn_failed or exception_failed)
+            if bool(getattr(finalization, "max_iteration_exhausted_without_final_answer", False)) and not exception_failed:
                 round_return_ok = False
                 stop_reason = str(getattr(finalization, "stop_reason", "") or "").strip()
                 ui.add_log(stop_reason, "WARN")
@@ -3295,9 +3307,15 @@ class SelfEvolvingAgent:
                     "summary": stop_reason,
                     "raw_output": stop_reason,
                 }
-            ui.note_turn_result(success=finalization.turn_success, had_progress=round_state.turn_had_progress)
+            turn_success = bool(finalization.turn_success) and not self._last_turn_failed
+            ui_status = (
+                "ERROR"
+                if self._last_turn_failed
+                else finalization.ui_status
+            )
+            ui.note_turn_result(success=turn_success, had_progress=round_state.turn_had_progress)
             ui.update_status(
-                finalization.ui_status,
+                ui_status,
                 **round_state.current_status(),
             )
             logger.log_turn_end(current_turn, finalization.turn_stats)
@@ -4236,12 +4254,12 @@ class SelfEvolvingAgent:
             latest_delegation = None
             if snapshot.get("delegation_findings"):
                 latest_delegation = snapshot["delegation_findings"][-1]
-            summary = sanitize_assistant_visible_text(self._last_visible_response_text)
+            partial_visible = sanitize_assistant_visible_text(self._last_visible_response_text)
             error_message = str(getattr(self, "_last_llm_error_message", "") or "").strip()
             parsed_payload: Dict[str, Any] = {}
-            if summary.startswith("{") and summary.endswith("}"):
+            if partial_visible.startswith("{") and partial_visible.endswith("}"):
                 try:
-                    candidate = json.loads(summary)
+                    candidate = json.loads(partial_visible)
                     if isinstance(candidate, dict):
                         parsed_payload = candidate
                 except Exception:
@@ -4249,15 +4267,19 @@ class SelfEvolvingAgent:
             inferred_payload: Dict[str, Any] = {}
             if not parsed_payload:
                 inferred_payload = infer_result_from_tool_outputs(getattr(self, "_recent_tool_outputs", []))
-            status = "completed"
-            if self._last_turn_failed:
-                status = "failed"
-            elif not ok:
-                status = "stopped"
-            if status == "failed" and not isinstance(
-                getattr(self, "_last_turn_metadata", {}).get("llm_failure"),
+            metadata_status = str(
+                (getattr(self, "_last_turn_metadata", {}) or {}).get("status") or ""
+            ).strip().lower()
+            has_llm_failure = isinstance(
+                (getattr(self, "_last_turn_metadata", {}) or {}).get("llm_failure"),
                 dict,
-            ):
+            ) and bool((getattr(self, "_last_turn_metadata", {}) or {}).get("llm_failure"))
+            status = "completed"
+            if self._last_turn_failed or has_llm_failure or metadata_status in {"failed", "error", "timeout"}:
+                status = "failed"
+            elif metadata_status == "stopped" or not ok:
+                status = "stopped"
+            if status == "failed" and not has_llm_failure:
                 self._record_turn_failure_diagnostic(
                     category=str(getattr(self, "_last_llm_error_category", "") or "runtime_error"),
                     reason_code="agent_turn_failed_without_diagnostics",
@@ -4272,12 +4294,16 @@ class SelfEvolvingAgent:
                     message=error_message,
                 )
                 error_message = str(getattr(self, "_last_llm_error_message", "") or "").strip()
-            if not summary:
-                if error_message:
-                    summary = error_message
-                elif status == "failed":
-                    summary = "当前轮执行失败，请检查 LLM 配置或日志。"
-                elif status == "stopped":
+                has_llm_failure = True
+            # Failed turns must not present intermediate stream fragments as a successful final answer.
+            summary = partial_visible
+            if status == "failed":
+                summary = (
+                    error_message
+                    or "当前轮执行失败，请检查 LLM 配置、工具超时或运行日志后重试。"
+                )
+            elif not summary:
+                if status == "stopped":
                     summary = "当前轮已停止，未产生可见回复。"
             tool_trace = list(getattr(self, "_recent_tool_records", []) or [])
             result = {
@@ -4295,22 +4321,34 @@ class SelfEvolvingAgent:
                 "tool_call_count": max(self._last_response_tool_calls, len(tool_trace)),
                 "tool_trace": tool_trace,
             }
+            if status == "failed" and partial_visible and partial_visible != summary:
+                # Keep the interrupted fragment only as non-final thought context.
+                result["thought"] = partial_visible
             if error_message:
                 result["error"] = error_message
             llm_failure = getattr(self, "_last_turn_metadata", {}).get("llm_failure")
             if isinstance(llm_failure, dict) and llm_failure:
                 result["llm_failure"] = dict(llm_failure)
-            if parsed_payload:
+            if parsed_payload and status != "failed":
                 result.update(parsed_payload)
                 result.setdefault("raw_output", summary)
                 result["status"] = result.get("status") or status
-            elif inferred_payload:
+            elif inferred_payload and status != "failed":
                 result.update(inferred_payload)
                 result.setdefault("raw_output", summary)
                 result["status"] = result.get("status") or status
             if self._last_turn_metadata:
                 result.update(self._last_turn_metadata)
-                result["status"] = result.get("status") or status
+                # Metadata may carry llm_usage/context; never allow it to downgrade a hard failure.
+                if status == "failed":
+                    result["status"] = "failed"
+                    result["outcome"] = "failed"
+                    result["summary"] = summary
+                    result["raw_output"] = summary
+                    if error_message:
+                        result["error"] = error_message
+                else:
+                    result["status"] = result.get("status") or status
             if turn_runtime_metadata:
                 result["turn_runtime"] = turn_runtime_metadata
             if policy.mode == AgentMode.CHAT:

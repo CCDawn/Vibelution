@@ -562,11 +562,21 @@ def _persist_session_turn_result(
             status=final_status,
             summary=visible_assistant_text,
             recovery_pointer={
-                "resumeAllowed": final_status in {"stopped_by_user", "paused_limit", "needs_continue"},
+                # Runtime failures (e.g. main-loop TimeoutExpired) should stay recoverable
+                # via “继续”, same as paused/needs_continue turns.
+                "resumeAllowed": final_status
+                in {
+                    "stopped_by_user",
+                    "paused_limit",
+                    "needs_continue",
+                    "failed_runtime",
+                    "failed",
+                },
                 "toolCallCount": len(tool_calls),
                 "feedbackEventCount": feedback_event_count,
                 "hasMentalSnapshot": bool(assistant_entry.get("mental_snapshot")),
                 "phantomImageSuccess": phantom_image_success,
+                "source": "runtime_failure" if runtime_failed else "turn_result",
             },
         )
         s._record_session_turn_lifecycle_event(
