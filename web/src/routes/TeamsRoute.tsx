@@ -1686,18 +1686,13 @@ export function TeamsRoute({
       selectedSourceCollectionRunEffectiveId
       && String(binding?.agent?.agentId || binding?.agentId || "").trim(),
     );
-    const route = selectedSourceCollectionRunEffectiveId
-      ? ""
-      : currentTaskSessionRoute || researchStageAgentDirectChatRoute(
-        binding?.agent,
-        returnRoute,
-        returnLabel,
-      );
+    const route = currentTaskSessionRoute;
     return resolveSourceCollectionStageAgentChatState({
       binding,
       route,
       stageSessionPending,
       canCreateProjectSession,
+      projectRunAvailable: Boolean(selectedSourceCollectionRunEffectiveId),
       agentSummaryPending: agentSummaryQuery.isPending,
       agentSummaryFetching: agentSummaryQuery.isFetching,
       agentSummaryError: agentSummaryQuery.isError,
@@ -2585,6 +2580,7 @@ export function TeamsRoute({
         stageChatLabels={SOURCE_COLLECTION_STAGE_CHAT_LABELS}
         openSourceCollectionStageAgentChat={openSourceCollectionStageAgentChat}
         startSourceCollectionStageSessionTask={startSourceCollectionStageSessionTask}
+        sourceCollectionRunAvailable={Boolean(selectedSourceCollectionRunEffectiveId)}
         sourceCollectionFindingStageCompact={sourceCollectionFindingStageCompact}
         selectedTeamStartSourceCollectionStageTaskError={selectedTeamStartSourceCollectionStageTaskError}
         renderSourceCollectionConversation={renderSourceCollectionConversation}

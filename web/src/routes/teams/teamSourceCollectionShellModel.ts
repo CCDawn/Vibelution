@@ -144,7 +144,7 @@ export function sourceCollectionStageDisplaySummary(
   return active ? summary : fallback;
 }
 
-export type SourceCollectionStageAgentChatStatus = "ready" | "loading" | "error" | "repair";
+export type SourceCollectionStageAgentChatStatus = "ready" | "loading" | "error" | "repair" | "blocked";
 
 export function selectSourceCollectionStagePrimaryBinding<T extends { agent?: unknown; agentId?: string }>(
   bindings: T[],
@@ -158,6 +158,7 @@ export function resolveSourceCollectionStageAgentChatState<T extends { agent?: u
   route: string;
   stageSessionPending?: boolean;
   canCreateProjectSession?: boolean;
+  projectRunAvailable?: boolean;
   agentSummaryPending: boolean;
   agentSummaryFetching: boolean;
   agentSummaryError: boolean;
@@ -169,6 +170,9 @@ export function resolveSourceCollectionStageAgentChatState<T extends { agent?: u
   const { binding, route } = input;
   if (input.stageSessionPending) {
     return { binding, route: "", status: "loading" };
+  }
+  if (input.projectRunAvailable === false && !route) {
+    return { binding, route: "", status: "blocked" };
   }
   if (input.canCreateProjectSession) {
     return { binding, route, status: "ready" };
