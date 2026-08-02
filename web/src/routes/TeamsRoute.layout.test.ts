@@ -3305,7 +3305,7 @@ describe("TeamsRoute layout contract", () => {
   it("keeps the project-scoped source reset visible while the project snapshot is still catching up", () => {
     expect(routeSource).toContain("const sourceCollectionResetResearchProjectId = activeSourceCollectionResearchProjectId.trim();");
     expect(routeSource).toContain("const sourceCollectionResetAvailable = Boolean(");
-    expect(routeSource).toContain("sourceCollectionRuns.length > 0 || activeSourceCollectionResearchProject?.nameLocked");
+    expect(routeSource).toContain("&& sourceCollectionRuns.length > 0,");
     expect(routeSource).toContain("{sourceCollectionResetAvailable ? (");
     expect(routeSource).toContain("researchProjectId: sourceCollectionResetResearchProjectId");
     expect(routeSource).toContain("sourceCollectionFreshProjectDraftIdRef.current = \"\";");
