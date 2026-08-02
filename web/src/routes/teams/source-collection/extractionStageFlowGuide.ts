@@ -145,11 +145,20 @@ export function buildExtractionStageFlowGuide(
     recommendedKind = recoveryPrimaryKind === "chat" ? "chat" : "supplement";
     recommendedLabel = recoveryPrimaryLabel
       || (zh ? "要求 Agent 补充材料" : "Request Agent material supplement");
-    recommendedTitle = zh
-      ? "现在只做这一步：让 Agent 补全文/DOI/证据锚点。补完后再质量审查。"
-      : "Do this now: have the Agent add full text / DOI / anchors. Review only after repair.";
-    nowHint = zh ? "只点下面大按钮，让 Agent 补材料" : "Use only the big button below to repair materials";
-    afterHint = zh ? "系统会把推荐切到「质量审查」" : "The recommended action switches to quality review";
+    const verificationOnly = recoveryPrimaryKind === "chat";
+    recommendedTitle = verificationOnly
+      ? (zh
+        ? "在私聊中补入新的可公开核验材料；不会自动重复访问已拒绝的来源链接。无法补齐时，可明确排除本轮不可核验来源。"
+        : "Add a new publicly verifiable material in chat. Rejected source URLs are not automatically retried; explicitly exclude this run's unverifiable sources if repair is impossible.")
+      : (zh
+        ? "现在只做这一步：让 Agent 补全文/DOI/证据锚点。补完后再质量审查。"
+        : "Do this now: have the Agent add full text / DOI / anchors. Review only after repair.");
+    nowHint = verificationOnly
+      ? (zh ? "补入新材料，或明确排除无法核验的来源" : "Add new material or explicitly exclude unverifiable sources")
+      : (zh ? "只点下面大按钮，让 Agent 补材料" : "Use only the big button below to repair materials");
+    afterHint = verificationOnly
+      ? (zh ? "补齐后重新质量审查；排除后可进入关系整理" : "Re-run review after repair; advance to relation mapping after exclusion")
+      : (zh ? "系统会把推荐切到「质量审查」" : "The recommended action switches to quality review");
     showQualityReviewSecondary = displayedCandidateCount > 0;
     showImportSecondary = pendingImportCount > 0;
   } else if (needsReview) {

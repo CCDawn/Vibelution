@@ -242,7 +242,7 @@ export function useTeamSourceCollectionMutations(options: UseTeamSourceCollectio
   });
 
   const assessSourceQualityMutation = useMutation({
-    mutationFn: (payload: { teamId: string; candidateId: string; decision: "approved" | "needs_revision" }) =>
+    mutationFn: (payload: { teamId: string; candidateId: string; decision: "approved" | "needs_revision" | "rejected" }) =>
       fetchJson<TeamWorkflowSourceQualityAssessmentPayload>(
         `/api/teams/${encodeURIComponent(payload.teamId)}/workflow-orchestration/candidates/${encodeURIComponent(payload.candidateId)}/source-quality/assess`,
         {
@@ -253,7 +253,9 @@ export function useTeamSourceCollectionMutations(options: UseTeamSourceCollectio
             decision: payload.decision,
             notes: payload.decision === "approved"
               ? "Source Extractor Agent approved this source for downstream paper_note extraction."
-              : "Source Extractor Agent returned this source for repair before downstream extraction.",
+              : payload.decision === "rejected"
+                ? "Operator explicitly excluded this unverifiable source from the current run; source metadata and the assessment audit remain preserved."
+                : "Source Extractor Agent returned this source for repair before downstream extraction.",
             requiredFixes: payload.decision === "needs_revision"
               ? ["补充来源路径/权限/sha256/摘要/页码锚点或相关性说明后重新筛选。"]
               : [],

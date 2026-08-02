@@ -2614,6 +2614,9 @@ export function TeamsRoute({
           canProceedAfterExclusions: sourceCollectionExtractionCanProceedAfterExclusions,
           qualityReviewPending: selectedTeamSourceQualityPending,
           advanceToRelations: () => selectSourceCollectionStage("relations"),
+          unverifiableCandidateCount: sourceCollectionUnverifiableCandidateIds.length,
+          excludeUnverifiableCandidates: excludeUnverifiableSourceCollectionCandidates,
+          excludeUnverifiableCandidatesPending: selectedTeamSourceQualityPending,
         }}
       />
     );
@@ -3910,6 +3913,24 @@ export function TeamsRoute({
     sourceCollectionNonNegativeCount(sourceCollectionExtractionRecoveryClosure?.blockedCount),
     sourceCollectionNonNegativeCount(sourceCollectionExtractionRecoveryCoverage?.blocked),
   );
+  const sourceCollectionUnverifiableCandidateIds = useMemo(() => {
+    const blockedCount = sourceCollectionExtractionSourceVerificationCount;
+    if (blockedCount <= 0) {
+      return [];
+    }
+    return sourceCollectionReviewableRunCandidates
+      .filter((candidate) => {
+        const quality = sourceCollectionCandidateQualityState(candidate);
+        const evidence = sourceCollectionEvidenceLedgerSummary(candidate);
+        return quality.needsRevision && evidence?.missingAnchor !== true;
+      })
+      .map((candidate) => String(candidate.candidateId || "").trim())
+      .filter(Boolean)
+      .slice(0, blockedCount);
+  }, [
+    sourceCollectionExtractionSourceVerificationCount,
+    sourceCollectionReviewableRunCandidates,
+  ]);
   const sourceCollectionExtractionMissingEvidenceAnchorCount = sourceCollectionBoundCountToCurrentCoverage(
     sourceCollectionCandidateProjection,
     sourceCollectionCandidateProjection?.latestTask?.materializedContentExtraction?.missingEvidenceAnchorCount,
@@ -4428,6 +4449,23 @@ export function TeamsRoute({
         ? "Source Extractor Agent re-ran quality scoring on already assessed source_manifest candidates (no content rewrite)."
         : "Source Extractor Agent ran quality scoring on pending source_manifest candidates.",
     });
+  };
+
+  const excludeUnverifiableSourceCollectionCandidates = async () => {
+    if (
+      !selectedTeam?.teamId
+      || selectedTeamSourceQualityPending
+      || sourceCollectionUnverifiableCandidateIds.length <= 0
+    ) {
+      return;
+    }
+    for (const candidateId of sourceCollectionUnverifiableCandidateIds) {
+      await assessSourceQualityMutation.mutateAsync({
+        teamId: selectedTeam.teamId,
+        candidateId,
+        decision: "rejected",
+      });
+    }
   };
   const openSourceCollectionCandidatePanel = () => {
     if (!selectedTeam?.teamId) {
