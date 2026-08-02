@@ -25,6 +25,7 @@ import {
 } from "../chatActiveTurnLayer";
 import {
   appendOptimisticUserMessage,
+  applyOptimisticEditResubmit,
   createClientSubmissionId,
   markOptimisticUserMessageAccepted,
   markSessionDetailRunning,
@@ -299,6 +300,9 @@ export function useChatComposerTurnMutations({
         }),
       }),
     onMutate: async (variables) => {
+      const sessionKey = queryKeys.session(variables.sessionId);
+      await queryClient.cancelQueries({ queryKey: sessionKey, exact: true });
+      const previousDetail = queryClient.getQueryData<SessionDetail>(sessionKey);
       const createdAt = new Date().toISOString();
       setActiveTurnLayersBySession((current) =>
         setActiveTurnLayerForSession(
@@ -311,10 +315,18 @@ export function useChatComposerTurnMutations({
           }),
         )
       );
-      queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), markSessionDetailRunning);
+      // Immediate truncate + rewrite (ChatGPT/Claude edit UX); snapshot for rollback.
+      queryClient.setQueryData<SessionDetail>(sessionKey, (detailState) =>
+        applyOptimisticEditResubmit(detailState, {
+          messageId: variables.messageId,
+          content: variables.content,
+          clientSubmissionId: variables.clientSubmissionId,
+        }),
+      );
       updateSessionSummaryCaches(queryClient, (sessions) =>
         markSessionSummaryRunning(sessions, variables.sessionId),
       );
+      return { previousDetail };
     },
     onSuccess: (nextDetail, variables) => {
       setSessionComposerErrors((current) => ({
@@ -347,7 +359,15 @@ export function useChatComposerTurnMutations({
       });
       void chatWorkspaceCache.afterSessionChanged();
     },
-    onError: (error, variables) => {
+    onError: (error, variables, context) => {
+      const previousDetail = context && typeof context === "object" && "previousDetail" in context
+        ? (context as { previousDetail?: SessionDetail }).previousDetail
+        : undefined;
+      if (previousDetail) {
+        queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), previousDetail);
+      } else {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.session(variables.sessionId), exact: true });
+      }
       setActiveTurnLayersBySession((current) =>
         setActiveTurnLayerForSession(current, variables.sessionId, undefined)
       );

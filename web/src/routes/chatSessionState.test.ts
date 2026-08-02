@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { SessionDetail, SessionSummary } from "../api/types";
 import {
   appendOptimisticUserMessage,
+  applyOptimisticEditResubmit,
   deriveSessionDetailQueryErrorState,
   deriveSessionListQueryErrorState,
   markOptimisticUserMessageAccepted,
@@ -57,6 +58,97 @@ function makeDetail(overrides: Partial<SessionDetail> = {}): SessionDetail {
 }
 
 describe("chatSessionState", () => {
+  it("optimistically rewrites the edited user message and drops later turns", () => {
+    const detail = makeDetail({
+      status: "completed",
+      currentPhase: "completed",
+      messages: [
+        {
+          id: "session-live-message-1",
+          role: "user",
+          content: "第一问",
+          timestamp: "2026-05-22T10:00:00Z",
+        },
+        {
+          id: "session-live-message-2",
+          role: "assistant",
+          content: "第一答",
+          timestamp: "2026-05-22T10:00:01Z",
+          metadata: { turnId: "turn-1" },
+        },
+        {
+          id: "session-live-message-3",
+          role: "user",
+          content: "第二问",
+          timestamp: "2026-05-22T10:00:02Z",
+        },
+        {
+          id: "session-live-message-4",
+          role: "assistant",
+          content: "第二答",
+          timestamp: "2026-05-22T10:00:03Z",
+          metadata: { turnId: "turn-2" },
+        },
+      ],
+      messageWindow: {
+        mode: "window",
+        totalMessages: 4,
+        returnedMessages: 4,
+        oldestMessageIndex: 1,
+        newestMessageIndex: 4,
+        hasEarlier: false,
+        hasLater: false,
+        nextBeforeMessageIndex: null,
+        transcriptScope: "window",
+      },
+    });
+
+    const next = applyOptimisticEditResubmit(detail, {
+      messageId: "session-live-message-1",
+      content: "改写后的第一问",
+      clientSubmissionId: "submission-edit-1",
+    });
+
+    expect(next?.status).toBe("running");
+    expect(next?.currentPhase).toBe("running");
+    expect(next?.messages).toHaveLength(1);
+    expect(next?.messages[0]).toMatchObject({
+      id: "session-live-message-1",
+      role: "user",
+      content: "改写后的第一问",
+      metadata: {
+        pending: true,
+        clientSubmissionId: "submission-edit-1",
+        optimisticUserMessage: true,
+      },
+    });
+    expect(next?.messageWindow).toMatchObject({
+      returnedMessages: 1,
+      totalMessages: 1,
+      hasLater: false,
+    });
+  });
+
+  it("keeps running status when edit target is missing without wiping history", () => {
+    const detail = makeDetail({
+      messages: [
+        {
+          id: "session-live-message-1",
+          role: "user",
+          content: "保留",
+          timestamp: "2026-05-22T10:00:00Z",
+        },
+      ],
+    });
+    const next = applyOptimisticEditResubmit(detail, {
+      messageId: "missing-message",
+      content: "不会写入",
+    });
+    expect(next?.messages).toHaveLength(1);
+    expect(next?.messages[0]?.content).toBe("保留");
+    expect(next?.status).toBe("running");
+  });
+
   it("prepends earlier session detail windows without dropping the latest loaded tail", () => {
     const current = makeDetail({
       messages: [5, 6, 7, 8].map((index) => ({

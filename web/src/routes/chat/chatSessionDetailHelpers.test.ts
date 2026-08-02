@@ -5,6 +5,7 @@ import {
   isForeignSessionDetailQueryKey,
   isSessionNotFoundError,
   isStaleLedgerUpdate,
+  resolveNeighborSessionIdsForPrefetch,
   resolveSessionDetailPlaceholder,
   sessionDetailSnapshotKey,
 } from "./chatSessionDetailHelpers";
@@ -80,5 +81,21 @@ describe("chatSessionDetailHelpers", () => {
     expect(isForeignSessionDetailQueryKey(["sessions", "new"], "new")).toBe(false);
     expect(isForeignSessionDetailQueryKey(["sessions", "new", "child-sessions"], "new")).toBe(false);
     expect(isForeignSessionDetailQueryKey(["sessions", "none"], "new")).toBe(false);
+  });
+
+  it("resolves neighbor session ids for idle prefetch without the active session", () => {
+    expect(
+      resolveNeighborSessionIdsForPrefetch({
+        sessions: [{ id: "a" }, { id: "b" }, { id: "c" }, { id: "d" }],
+        activeSessionId: "b",
+        limit: 2,
+      }),
+    ).toEqual(["a", "c"]);
+    expect(
+      resolveNeighborSessionIdsForPrefetch({
+        sessions: [{ id: "a" }],
+        activeSessionId: "a",
+      }),
+    ).toEqual([]);
   });
 });

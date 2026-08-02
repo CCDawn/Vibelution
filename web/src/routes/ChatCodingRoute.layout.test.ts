@@ -1105,7 +1105,7 @@ describe("ChatCodingRoute layout contract", () => {
     const editMutationStart = routeAndComposerSource.indexOf("const editResubmitMutation = useMutation");
     const editMutateStart = routeAndComposerSource.indexOf("onMutate: async (variables)", editMutationStart);
     const editSuccessStart = routeAndComposerSource.indexOf("onSuccess: (nextDetail, variables)", editMutateStart);
-    const editErrorStart = routeAndComposerSource.indexOf("onError: (error, variables)", editSuccessStart);
+    const editErrorStart = routeAndComposerSource.indexOf("onError: (error, variables, context)", editSuccessStart);
     const editMutateBlock = routeAndComposerSource.slice(editMutateStart, editSuccessStart);
     const editSuccessBlock = routeAndComposerSource.slice(editSuccessStart, editErrorStart);
     const editErrorBlock = routeAndComposerSource.slice(editErrorStart, routeAndComposerSource.indexOf("const stopTurnMutation", editErrorStart));
@@ -1113,10 +1113,13 @@ describe("ChatCodingRoute layout contract", () => {
     expect(editMutateBlock).toContain("setActiveTurnLayersBySession((current) =>");
     expect(editMutateBlock).toContain("createOptimisticActiveTurnLayer({");
     expect(editMutateBlock).toContain("turnId: optimisticTurnIdForSubmission(\"edit\", variables.sessionId, createdAt)");
+    expect(editMutateBlock).toContain("applyOptimisticEditResubmit");
+    expect(editMutateBlock).toContain("previousDetail");
     expect(editSuccessBlock).toContain("const acceptedTurnId = latestUserTurnId(nextDetail)");
     expect(editSuccessBlock).toContain("setActiveTurnLayersBySession((current) =>");
     expect(editSuccessBlock).toContain("turnId: acceptedTurnId");
     expect(editSuccessBlock).toContain("setActiveTurnLayerForSession(current, variables.sessionId, undefined)");
+    expect(editErrorBlock).toContain("previousDetail");
     expect(editErrorBlock).toContain("setActiveTurnLayerForSession(current, variables.sessionId, undefined)");
   });
 

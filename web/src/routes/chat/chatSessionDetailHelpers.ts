@@ -1,4 +1,7 @@
+import type { QueryClient } from "@tanstack/react-query";
+
 import { fetchJson } from "../../api/client";
+import { queryKeys } from "../../api/queryKeys";
 import type {
   ChatRoomDetail,
   ConversationMessage,
@@ -13,6 +16,9 @@ import { isAgentRootSession } from "../DirectSessionIndexItem";
 
 export const SESSION_DETAIL_INITIAL_MESSAGE_LIMIT = 40;
 export const SESSION_DETAIL_HISTORY_PAGE_SIZE = 40;
+/** Cursor/ChatGPT-style idle warm of a few nearby chats without thrashing the network. */
+export const SESSION_DETAIL_NEIGHBOR_PREFETCH_COUNT = 3;
+export const SESSION_DETAIL_PREFETCH_STALE_MS = 30_000;
 
 export type SessionDetailWindowOptions = {
   messageLimit?: number;
@@ -36,6 +42,54 @@ export function fetchSessionDetailWindow(
     `/api/sessions/${encodeURIComponent(normalizedSessionId)}?${params.toString()}`,
     { signal: options.signal },
   );
+}
+
+/**
+ * Warm a session detail window into React Query so switching chats reuses cache
+ * (Cursor hover/open prefetch pattern). Deduped by query key with the live query.
+ */
+export function prefetchSessionDetailWindow(
+  queryClient: QueryClient,
+  sessionId: string | null | undefined,
+  options: Pick<SessionDetailWindowOptions, "messageLimit"> = {},
+): Promise<SessionDetail | undefined> {
+  const normalizedSessionId = String(sessionId || "").trim();
+  if (!normalizedSessionId) {
+    return Promise.resolve(undefined);
+  }
+  return queryClient.prefetchQuery({
+    queryKey: queryKeys.session(normalizedSessionId),
+    queryFn: ({ signal }) => fetchSessionDetailWindow(normalizedSessionId, {
+      signal,
+      messageLimit: options.messageLimit,
+    }),
+    staleTime: SESSION_DETAIL_PREFETCH_STALE_MS,
+  }).then(() => queryClient.getQueryData<SessionDetail>(queryKeys.session(normalizedSessionId)));
+}
+
+/** Prefer recently updated sessions other than the active one (list order as-is). */
+export function resolveNeighborSessionIdsForPrefetch(input: {
+  sessions: Array<Pick<SessionSummary, "id">> | null | undefined;
+  activeSessionId?: string | null;
+  limit?: number;
+}): string[] {
+  const activeSessionId = String(input.activeSessionId || "").trim();
+  const limit = Math.max(0, input.limit ?? SESSION_DETAIL_NEIGHBOR_PREFETCH_COUNT);
+  if (!input.sessions?.length || limit === 0) {
+    return [];
+  }
+  const ids: string[] = [];
+  for (const session of input.sessions) {
+    const id = String(session.id || "").trim();
+    if (!id || id === activeSessionId || ids.includes(id)) {
+      continue;
+    }
+    ids.push(id);
+    if (ids.length >= limit) {
+      break;
+    }
+  }
+  return ids;
 }
 
 

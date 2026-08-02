@@ -11,6 +11,8 @@ const styles = {
     "vui-components-conversationview markdownBody min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] max-w-[min(100%,128ch)] whitespace-normal break-words [overflow-wrap:anywhere]",
   streamingResponseText:
     "vui-components-conversationview streamingResponseText min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [font-size:var(--vui-font-chat)] leading-[var(--vui-line-readable)] whitespace-normal break-words [overflow-wrap:anywhere]",
+  streamingLiveTail:
+    "vui-components-conversationview streamingLiveTail min-w-0 mt-0 [font-size:var(--vui-font-chat)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   markdownBodyWithTable:
     "vui-components-conversationview markdownBodyWithTable min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] max-w-full",
   markdownDivider:
