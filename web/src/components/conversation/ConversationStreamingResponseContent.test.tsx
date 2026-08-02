@@ -69,9 +69,26 @@ describe("ConversationStreamingResponseContent", () => {
     expect(source).not.toContain('from "./ConversationMarkdownRenderer"');
     expect(source).toContain("streamProjection.stableText");
     expect(source).toContain("streamProjection.liveText");
+    expect(source).toContain("StreamingStableMarkdown");
+    expect(source).toContain("data-streaming-live-tail");
     expect(source).not.toContain("parseStreamingMarkdownBlocks");
     expect(source).not.toContain("StableStreamingMarkdownBlocks");
     expect(source).not.toContain("blocks.map((block, index) => renderBlock(block, index))");
+  });
+
+  it("keeps completed markdown in a memoized stable region while live tail is a separate instance", async () => {
+    const { ConversationStreamingResponseContent } = await import("./ConversationStreamingResponseContent");
+    // Closed block is stable; incomplete line is live tail (Codex controller holdback).
+    const html = renderToStaticMarkup(
+      <ConversationStreamingResponseContent
+        content={"完成的段落。\n\n未完成的尾"}
+        classNames={classNames}
+      />,
+    );
+
+    expect(html).toContain("data-streaming-live-tail=\"1\"");
+    expect(html).toContain("未完成的尾");
+    expect(html).toContain("完成的段落");
   });
 
   it("keeps streaming text bounded for long tokens while preserving the table width override", () => {

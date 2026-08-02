@@ -52,6 +52,18 @@ function activeTurnRenderKey(message: AgentMessage) {
   return "";
 }
 
+/**
+ * Placeholder turn ids exist only before the backend accepts the turn.
+ * Once a canonical turn id is known, prefer it so active-layer → committed
+ * handoff keeps the same React row (ChatGPT/Claude stable bubble identity).
+ */
+function isPlaceholderAssistantTurnId(turnId: string) {
+  if (!turnId) {
+    return true;
+  }
+  return turnId === "optimistic" || turnId === "current" || turnId.startsWith("optimistic-");
+}
+
 function userSubmissionRenderKey(message: AgentMessage) {
   const clientSubmissionId = metadataText(message.metadata, "clientSubmissionId")
     || metadataText(message.source.metadata, "clientSubmissionId");
@@ -62,6 +74,11 @@ function userSubmissionRenderKey(message: AgentMessage) {
 }
 
 function baseTimelineRowKey(message: AgentMessage) {
+  const turnId = normalizedMessageTurnId(message);
+  // Canonical turn wins over active-layer renderKey so settle does not remount.
+  if (message.role === "assistant" && turnId && !isPlaceholderAssistantTurnId(turnId)) {
+    return `assistant-turn:${turnId}`;
+  }
   const renderKey = activeTurnRenderKey(message);
   if (renderKey) {
     return renderKey;
@@ -70,7 +87,6 @@ function baseTimelineRowKey(message: AgentMessage) {
   if (userRenderKey) {
     return userRenderKey;
   }
-  const turnId = normalizedMessageTurnId(message);
   if (message.role === "assistant" && turnId) {
     return `assistant-turn:${turnId}`;
   }

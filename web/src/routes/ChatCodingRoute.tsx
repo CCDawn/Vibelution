@@ -243,8 +243,10 @@ import {
   isSessionNotFoundError,
   isForeignSessionDetailQueryKey,
   latestVisibleTurnErrorMessage,
+  prefetchSessionDetailWindow,
   removeDeletedSessionFromConversations,
   mergeSessionDetailIntoConversations,
+  resolveNeighborSessionIdsForPrefetch,
   resolveSessionDetailPlaceholder,
   sessionDetailSnapshotKey,
   isStaleLedgerUpdate,
@@ -1381,6 +1383,43 @@ export function ChatCodingRoute() {
     };
   }, [activeSessionId, groupPanelActive]);
 
+  // C: idle-prefetch a few neighbor session detail windows (Cursor list warm pattern).
+  useEffect(() => {
+    if (groupPanelActive || !sessionsQuery.data?.length) {
+      return;
+    }
+    const neighborIds = resolveNeighborSessionIdsForPrefetch({
+      sessions: sessionsQuery.data,
+      activeSessionId,
+    });
+    if (!neighborIds.length) {
+      return;
+    }
+    let cancelled = false;
+    const run = () => {
+      if (cancelled) {
+        return;
+      }
+      for (const sessionId of neighborIds) {
+        void prefetchSessionDetailWindow(queryClient, sessionId);
+      }
+    };
+    const idleRequest = (window as Window & {
+      requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
+    }).requestIdleCallback;
+    const handle = typeof idleRequest === "function"
+      ? idleRequest(run, { timeout: 1_500 })
+      : window.setTimeout(run, 280);
+    return () => {
+      cancelled = true;
+      if (typeof idleRequest === "function") {
+        (window as Window & { cancelIdleCallback?: (id: number) => void }).cancelIdleCallback?.(handle as number);
+      } else {
+        window.clearTimeout(handle as number);
+      }
+    };
+  }, [activeSessionId, groupPanelActive, queryClient, sessionsQuery.data]);
+
   useEffect(() => {
     if (!activeGroupRoom) {
       return;
@@ -2515,6 +2554,7 @@ export function ChatCodingRoute() {
     lang,
     t,
     navigate,
+    queryClient,
     chatWorkspaceCache,
     latestDirectSessionSelectionRef,
     setActiveSession,

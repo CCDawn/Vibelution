@@ -157,6 +157,84 @@ export function removeOptimisticUserMessage(
   };
 }
 
+export type OptimisticEditResubmitInput = {
+  messageId: string;
+  content: string;
+  clientSubmissionId?: string;
+};
+
+/**
+ * ChatGPT/Claude-style edit-resubmit: immediately rewrite the target user message
+ * and drop every message after it so the timeline matches the operation before the
+ * server round-trip. Callers should snapshot the previous detail for rollback.
+ */
+export function applyOptimisticEditResubmit(
+  detail: SessionDetail | undefined,
+  input: OptimisticEditResubmitInput,
+): SessionDetail | undefined {
+  if (!detail) {
+    return detail;
+  }
+
+  const messageId = String(input.messageId || "").trim();
+  const content = String(input.content ?? "");
+  const clientSubmissionId = String(input.clientSubmissionId ?? "").trim();
+  const messages = detail.messages ?? [];
+  const targetIndex = messageId
+    ? messages.findIndex((message) => String(message.id || "").trim() === messageId)
+    : -1;
+
+  if (targetIndex < 0) {
+    return markSessionDetailRunning(detail);
+  }
+
+  const target = messages[targetIndex];
+  if (target.role !== "user") {
+    return markSessionDetailRunning(detail);
+  }
+
+  const nextTarget: ConversationMessage = {
+    ...target,
+    content,
+    metadata: {
+      ...(target.metadata ?? {}),
+      pending: true,
+      ...(clientSubmissionId
+        ? {
+            [CLIENT_SUBMISSION_ID_METADATA_KEY]: clientSubmissionId,
+            [OPTIMISTIC_USER_MESSAGE_METADATA_KEY]: true,
+          }
+        : {}),
+    },
+  };
+  if (clientSubmissionId) {
+    nextTarget.references = target.references;
+  }
+
+  const nextMessages = [...messages.slice(0, targetIndex), nextTarget];
+  const truncatedCount = messages.length - nextMessages.length;
+  const previousWindow = detail.messageWindow;
+  const nextWindow = previousWindow
+    ? {
+        ...previousWindow,
+        returnedMessages: nextMessages.length,
+        totalMessages: Math.max(0, (previousWindow.totalMessages || messages.length) - truncatedCount),
+        newestMessageIndex: Math.max(
+          previousWindow.oldestMessageIndex || 0,
+          (previousWindow.newestMessageIndex || messages.length) - truncatedCount,
+        ),
+        hasLater: false,
+      }
+    : previousWindow;
+
+  return markSessionDetailRunning({
+    ...detail,
+    messages: nextMessages,
+    ...(nextWindow ? { messageWindow: nextWindow } : {}),
+    updatedAt: new Date().toISOString(),
+  });
+}
+
 export type SessionDetailLoadState = {
   blockingError: boolean;
   transientError: boolean;

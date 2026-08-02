@@ -1,4 +1,5 @@
 import { useCallback, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
+import type { QueryClient } from "@tanstack/react-query";
 import type { NavigateFunction } from "react-router-dom";
 
 import type {
@@ -10,6 +11,7 @@ import type { TranslationKey } from "../../i18n/dictionary";
 import { isAgentRootSession } from "../DirectSessionIndexItem";
 import type { ChatMentionTarget } from "../chatMentionTokens";
 import type { createChatWorkspaceCache } from "../chatWorkspaceCache";
+import { prefetchSessionDetailWindow } from "./chatSessionDetailHelpers";
 import { isBusyPhase } from "./chatCodingRouteViewModel";
 
 type ChatWorkspaceCache = ReturnType<typeof createChatWorkspaceCache>;
@@ -25,6 +27,7 @@ export type UseChatWorkspaceActionsOptions = {
   lang: "zh" | "en";
   t: (key: TranslationKey) => string;
   navigate: NavigateFunction;
+  queryClient: QueryClient;
   chatWorkspaceCache: ChatWorkspaceCache;
   latestDirectSessionSelectionRef: MutableRefObject<string>;
   setActiveSession: (sessionId: string) => void;
@@ -112,6 +115,7 @@ export function useChatWorkspaceActions({
   lang,
   t,
   navigate,
+  queryClient,
   chatWorkspaceCache,
   latestDirectSessionSelectionRef,
   setActiveSession,
@@ -210,6 +214,8 @@ export function useChatWorkspaceActions({
     }
     setSessionContextMenu(null);
     latestDirectSessionSelectionRef.current = normalizedSessionId;
+    // Warm detail window before/while active query mounts (Cursor open-prefetch).
+    void prefetchSessionDetailWindow(queryClient, normalizedSessionId);
     setActiveSession(normalizedSessionId);
     setActiveGroupRoomId("");
     setRightIndexPanel("conversations");
@@ -224,6 +230,7 @@ export function useChatWorkspaceActions({
   }, [
     latestDirectSessionSelectionRef,
     navigate,
+    queryClient,
     selectDirectSessionMutation,
     setActiveGroupRoomId,
     setActiveSession,

@@ -166,6 +166,7 @@ describe("conversation expansion defaults", () => {
         "message-settled-after-streaming": {
           process: true,
           feedback: true,
+          "message-settled-after-streaming-thought": true,
         },
       },
       sectionExpansion: {},
@@ -173,7 +174,19 @@ describe("conversation expansion defaults", () => {
       renderStatesByMessageId: new Map([
         [completedMessage.id, renderState(true)],
       ]),
-      timelineItemsByMessageId: new Map(),
+      timelineItemsByMessageId: new Map([
+        [completedMessage.id, [
+          {
+            id: "message-settled-after-streaming-thought",
+            kind: "thought",
+            status: "done",
+            text: "已经想完",
+            preview: "已经想完",
+            defaultExpanded: false,
+            sourceOperationIds: ["thought-1"],
+          },
+        ]],
+      ]),
       operationGroupsByMessageId: new Map([
         [completedMessage.id, operationGroups([
           operation({ id: "thought-1", kind: "thought", status: "done", sequence: 1, resultPreview: "internal" }),
@@ -186,6 +199,9 @@ describe("conversation expansion defaults", () => {
 
     expect(defaults["message-settled-after-streaming"].process).toBe(false);
     expect(defaults["message-settled-after-streaming"].feedback).toBe(false);
+    // Claude/ChatGPT: thinking auto-collapses when the turn settles; answer stays open via response section.
+    expect(defaults["message-settled-after-streaming"]["message-settled-after-streaming-thought"]).toBe(false);
+    expect(defaults["message-settled-after-streaming"].response).toBe(false);
   });
 
   it("preserves explicit user-expanded process sections after completion", () => {

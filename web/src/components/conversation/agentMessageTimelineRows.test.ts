@@ -86,7 +86,7 @@ describe("AgentMessage timeline rows", () => {
     expect(committedRow.processKey).not.toBe(committedRow.answerKey);
   });
 
-  it("keeps an active Agent row stable while its canonical turn id is bound", () => {
+  it("uses session-active key only for placeholder turns, then locks to canonical turn id", () => {
     const optimistic = assistantMessage("session-1-message-active-optimistic", {
       streaming: true,
       turnId: "optimistic-submit",
@@ -113,12 +113,21 @@ describe("AgentMessage timeline rows", () => {
       },
       parts: [],
     });
+    const committed = assistantMessage("session-1-message-committed", {
+      streaming: false,
+      turnId: "turn-accepted",
+    });
 
     const [optimisticRow] = buildAgentMessageTimelineRowIdentities([optimistic]);
     const [boundRow] = buildAgentMessageTimelineRowIdentities([bound]);
+    const [committedRow] = buildAgentMessageTimelineRowIdentities([committed]);
 
+    // Pre-accept placeholder may use session-active renderKey.
     expect(optimisticRow.rowKey).toBe("assistant-active:session-1-active");
-    expect(boundRow.rowKey).toBe(optimisticRow.rowKey);
+    // Once the backend turn id is known, active layer and committed share one row
+    // so settle does not remount (ChatGPT/Claude stable bubble identity).
+    expect(boundRow.rowKey).toBe("assistant-turn:turn-accepted");
+    expect(committedRow.rowKey).toBe(boundRow.rowKey);
   });
 
   it("keeps an optimistic user row stable when its authoritative message arrives", () => {

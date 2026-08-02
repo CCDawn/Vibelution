@@ -22,14 +22,24 @@ export type PreserveConversationExpansionDefaultsInput = {
   defaultExpandedResponseIds: Set<string>;
 };
 
+/**
+ * Auto-collapse process chrome when a turn settles (Claude/ChatGPT thinking UX).
+ * Never force-collapse the final answer body; never override explicit user toggles
+ * (those live in sectionExpansion and short-circuit setDefault).
+ */
 export function shouldRefreshConversationExpansionDefault(
   section: string,
   currentDefault: boolean | undefined,
   nextDefault: boolean,
 ) {
-  return (section === "process" || section === "feedback")
-    && currentDefault === true
-    && nextDefault === false;
+  if (currentDefault !== true || nextDefault !== false) {
+    return false;
+  }
+  // Keep the assistant answer readable after stream ends.
+  if (section === "response") {
+    return false;
+  }
+  return true;
 }
 
 export function preserveConversationExpansionDefaults({
