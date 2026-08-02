@@ -340,6 +340,69 @@ def create_chat_review_candidate_from_session(session_id: str) -> dict:
     }
 
 
+_LAST_SUBMIT_KERNEL_TRACE_FUTURE = None
+
+
+def _enqueue_direct_session_submit_kernel_trace(
+    conversation: dict[str, Any],
+    *,
+    agent: dict[str, Any] | None,
+    turn_id: str,
+    message: str,
+    source: str,
+):
+    """Run Kernel submit audit off the accept path (traceOnly).
+
+    Returns a Future when scheduled on the cycle executor (tests may .result()).
+    """
+
+    global _LAST_SUBMIT_KERNEL_TRACE_FUTURE
+    s = _service()
+    conversation_copy = dict(conversation or {}) if isinstance(conversation, dict) else {}
+    agent_copy = dict(agent or {}) if isinstance(agent, dict) else {}
+    turn_id_value = str(turn_id or "").strip()
+    message_value = str(message or "")
+    source_value = str(source or "").strip()
+
+    def _run() -> dict[str, Any]:
+        return _create_direct_session_submit_kernel_trace(
+            conversation_copy,
+            agent=agent_copy,
+            turn_id=turn_id_value,
+            message=message_value,
+            source=source_value,
+        )
+
+    executor = getattr(s, "_SESSION_CYCLE_PROJECTION_EXECUTOR", None)
+    submit = getattr(executor, "submit", None)
+    if callable(submit):
+        future = submit(_run)
+        _LAST_SUBMIT_KERNEL_TRACE_FUTURE = future
+        return future
+    # Fallback: still never raise into the submit accept path.
+    try:
+        result = _run()
+    except Exception:
+        result = {}
+    _LAST_SUBMIT_KERNEL_TRACE_FUTURE = None
+    return result
+
+
+def _await_last_submit_kernel_trace(timeout: float = 5.0) -> dict[str, Any] | None:
+    """Test helper: wait for the most recently enqueued submit kernel trace."""
+
+    future = _LAST_SUBMIT_KERNEL_TRACE_FUTURE
+    if future is None:
+        return None
+    result = getattr(future, "result", None)
+    if not callable(result):
+        return future if isinstance(future, dict) else None
+    try:
+        return result(timeout=timeout)
+    except TypeError:
+        return result()
+
+
 def _create_direct_session_submit_kernel_trace(
     conversation: dict[str, Any],
     *,
@@ -361,7 +424,10 @@ def _create_direct_session_submit_kernel_trace(
         return {}
     if str(agent.get("agentId") or "").strip() != agent_id:
         return {}
-    if str(agent.get("directSessionId") or "").strip() != session_id:
+    # directSessionId may be missing on minimal snapshots used by deferred enqueue;
+    # only enforce when present.
+    direct_session_id = str(agent.get("directSessionId") or "").strip()
+    if direct_session_id and direct_session_id != session_id:
         return {}
 
     content = str(message or "").strip()
