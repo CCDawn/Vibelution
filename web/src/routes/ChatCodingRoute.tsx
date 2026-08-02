@@ -1870,10 +1870,16 @@ export function ChatCodingRoute() {
   const activeControlSignals = useMemo<ChatNextStateSignalSummary[]>(() => {
     const phase = detail?.currentPhase || directSessionActiveSummary?.currentPhase || directSessionActiveSummary?.status || "";
     return (detail?.nextStateSignals ?? [])
-      .filter((signal) => shouldShowNextStateSignalInConversation(signal, phase))
+      .filter((signal) => shouldShowNextStateSignalInConversation(signal, phase, detail?.messages ?? []))
       .slice(-3)
       .reverse();
-  }, [detail?.currentPhase, detail?.nextStateSignals, directSessionActiveSummary?.currentPhase, directSessionActiveSummary?.status]);
+  }, [
+    detail?.currentPhase,
+    detail?.messages,
+    detail?.nextStateSignals,
+    directSessionActiveSummary?.currentPhase,
+    directSessionActiveSummary?.status,
+  ]);
   const latestControlSignal = activeControlSignals[0] ?? null;
   const latestControlSignalSummary = latestControlSignal?.summary?.trim() ?? "";
   const latestControlSignalKindLabel = (() => {

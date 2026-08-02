@@ -22,17 +22,79 @@ type ConversationProcessDisclosureProps = {
   cells: readonly CodexTranscriptCell[];
   language: "zh" | "en";
   children: ReactNode;
+  messageOrder?: ReadonlyMap<string, number>;
   onUserToggle?: ConversationProcessUserToggle;
 };
 
 const PROCESS_ROW_STAGGER_MS = 28;
 const PROCESS_ROW_STAGGER_LIMIT = 6;
 
-export function processState(cells: readonly CodexTranscriptCell[]) {
+function canonicalCellOrder(
+  cell: CodexTranscriptCell,
+  fallbackIndex: number,
+  messageOrder?: ReadonlyMap<string, number>,
+) {
+  const projectedMessageOrder = messageOrder?.get(cell.messageId);
+  const sequence = cell.toolLifecycleModel?.toolCalls
+    .map((toolCall) => toolCall.sequence)
+    .filter((value): value is number => typeof value === "number" && Number.isFinite(value))
+    .at(-1);
+  return {
+    message: projectedMessageOrder ?? fallbackIndex,
+    sequence: sequence ?? fallbackIndex,
+    fallback: fallbackIndex,
+  };
+}
+
+function cellOccursAfter(
+  candidate: ReturnType<typeof canonicalCellOrder>,
+  failed: ReturnType<typeof canonicalCellOrder>,
+) {
+  if (candidate.message !== failed.message) {
+    return candidate.message > failed.message;
+  }
+  if (candidate.sequence !== failed.sequence) {
+    return candidate.sequence > failed.sequence;
+  }
+  return candidate.fallback > failed.fallback;
+}
+
+function unrecoveredFailedCells(
+  cells: readonly CodexTranscriptCell[],
+  messageOrder?: ReadonlyMap<string, number>,
+) {
+  return cells.filter((cell, index) => {
+    if (cell.status !== "failed") {
+      return false;
+    }
+    const toolIdentity = codexTranscriptToolRawName(cell) || String(cell.title || "").trim();
+    if (!toolIdentity) {
+      return true;
+    }
+    const failedOrder = canonicalCellOrder(cell, index, messageOrder);
+    return !cells.some((candidate, candidateIndex) => {
+      if (
+        candidate.status !== "completed"
+        || (codexTranscriptToolRawName(candidate) || String(candidate.title || "").trim()) !== toolIdentity
+      ) {
+        return false;
+      }
+      return cellOccursAfter(
+        canonicalCellOrder(candidate, candidateIndex, messageOrder),
+        failedOrder,
+      );
+    });
+  });
+}
+
+export function processState(
+  cells: readonly CodexTranscriptCell[],
+  messageOrder?: ReadonlyMap<string, number>,
+) {
   if (cells.some((cell) => cell.status === "running" || cell.status === "pending")) {
     return "running";
   }
-  if (cells.some((cell) => cell.status === "failed")) {
+  if (unrecoveredFailedCells(cells, messageOrder).length > 0) {
     return "failed";
   }
   return "completed";
@@ -48,8 +110,11 @@ function processDuration(cells: readonly CodexTranscriptCell[]) {
   return durations.reduce((total, duration) => total + duration, 0);
 }
 
-function firstFailedToolIdentity(cells: readonly CodexTranscriptCell[]) {
-  const failed = cells.find((cell) => cell.status === "failed");
+function firstFailedToolIdentity(
+  cells: readonly CodexTranscriptCell[],
+  messageOrder?: ReadonlyMap<string, number>,
+) {
+  const failed = unrecoveredFailedCells(cells, messageOrder)[0];
   if (!failed) {
     return "";
   }
@@ -58,8 +123,12 @@ function firstFailedToolIdentity(cells: readonly CodexTranscriptCell[]) {
   return codexTranscriptToolRawName(failed) || String(failed.title || "").trim();
 }
 
-export function processLabel(cells: readonly CodexTranscriptCell[], language: "zh" | "en") {
-  const state = processState(cells);
+export function processLabel(
+  cells: readonly CodexTranscriptCell[],
+  language: "zh" | "en",
+  messageOrder?: ReadonlyMap<string, number>,
+) {
+  const state = processState(cells, messageOrder);
   const labels = language === "zh"
     ? { completed: "已处理", failed: "工具失败", running: "处理中" }
     : { completed: "Processed", failed: "Tool failed", running: "Processing" };
@@ -69,7 +138,7 @@ export function processLabel(cells: readonly CodexTranscriptCell[], language: "z
     duration === null ? "" : formatCodexTranscriptDuration(duration),
   ];
   if (state === "failed") {
-    const toolIdentity = firstFailedToolIdentity(cells);
+    const toolIdentity = firstFailedToolIdentity(cells, messageOrder);
     if (toolIdentity) {
       parts.push(language === "zh" ? `· ${toolIdentity}` : `· ${toolIdentity}`);
     } else {
@@ -83,9 +152,11 @@ export function ConversationProcessDisclosure({
   cells,
   language,
   children,
+  messageOrder,
   onUserToggle,
 }: ConversationProcessDisclosureProps) {
-  const running = processState(cells) === "running";
+  const state = processState(cells, messageOrder);
+  const running = state === "running";
   const {
     expanded,
     handleContentTransitionEnd,
@@ -93,7 +164,7 @@ export function ConversationProcessDisclosure({
     mounted,
   } = useConversationProcessDisclosureMotion(running, onUserToggle);
   const contentId = useId();
-  const label = processLabel(cells, language);
+  const label = processLabel(cells, language, messageOrder);
   const toggleLabel = language === "zh"
     ? "展开或收起处理记录"
     : "Expand or collapse process details";
@@ -107,7 +178,7 @@ export function ConversationProcessDisclosure({
     <details
       className={styles.disclosure}
       data-codex-process-disclosure="true"
-      data-codex-process-state={processState(cells)}
+      data-codex-process-state={state}
       data-codex-process-expanded={expanded ? "true" : "false"}
       aria-live={running ? "polite" : undefined}
       open={mounted}

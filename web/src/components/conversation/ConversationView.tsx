@@ -692,6 +692,10 @@ export function ConversationView({
     [activeTurnMessage, timelineMessages],
   );
   const activeTimelineMessages = activeAgentMessageTimelineProjection.messages;
+  const activeTimelineMessageOrder = useMemo(
+    () => new Map(activeTimelineMessages.map((message, index) => [message.id, index])),
+    [activeTimelineMessages],
+  );
   const activeAgentMessages = activeAgentMessageTimelineProjection.agentMessages;
   const streamingTimelineMessages = activeAgentMessageTimelineProjection.streamingMessages;
   const activeTimelineRowIdentities = activeAgentMessageTimelineProjection.rowIdentities;
@@ -1795,6 +1799,7 @@ export function ConversationView({
           <ConversationProcessDisclosure
             cells={processCells}
             language={lang === "en" ? "en" : "zh"}
+            messageOrder={activeTimelineMessageOrder}
             onUserToggle={handleProcessDisclosureUserToggle}
           >
             {renderTimelineNodes(processCells, { attachToolApproval: true })}

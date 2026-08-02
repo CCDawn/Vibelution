@@ -265,6 +265,9 @@ export type SessionActiveTask = {
 export type ToolCall = {
   callId?: string;
   name: string;
+  rawToolName?: string;
+  title?: string;
+  sequence?: number;
   status: string;
   summary?: string;
   arguments?: Record<string, unknown>;
