@@ -3,11 +3,11 @@
  * Wave 8M: extracted from TeamsRoute.tsx for domain componentization.
  * Extraction stage merges recovery/verification into the right stage card.
  */
-import type { ReactNode } from "react";
-import { Link2, MessageSquare, RefreshCw } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import { CircleX, Link2, MessageSquare, RefreshCw } from "lucide-react";
 import { Link } from "react-router-dom";
 
-import { VNativeButton, VTooltip } from "../components/vui";
+import { VConfirmDialog, VNativeButton, VTooltip } from "../components/vui";
 import { researchStageAgentManagementRoute } from "./teams/researchStageAgentPresentation";
 import { buildExtractionRecoveryViewModel } from "./teams/source-collection/extractionRecoveryViewModel";
 import { buildExtractionStageFlowGuide } from "./teams/source-collection/extractionStageFlowGuide";
@@ -80,10 +80,15 @@ export type TeamSourceCollectionActiveStageWorkspacePanelProps = {
     canProceedAfterExclusions?: boolean;
     qualityReviewPending?: boolean;
     advanceToRelations?: () => void;
+    /** Sources currently blocked solely by public version/reliability verification. */
+    unverifiableCandidateCount?: number;
+    excludeUnverifiableCandidates?: () => Promise<void>;
+    excludeUnverifiableCandidatesPending?: boolean;
   };
 };
 
 export function TeamSourceCollectionActiveStageWorkspacePanel(props: TeamSourceCollectionActiveStageWorkspacePanelProps) {
+  const [excludeUnverifiableConfirmOpen, setExcludeUnverifiableConfirmOpen] = useState(false);
   const {
     lang,
     sourceCollectionStageModules,
@@ -262,6 +267,20 @@ export function TeamSourceCollectionActiveStageWorkspacePanel(props: TeamSourceC
 
   const secondaryActions = extractionFlowGuide ? (
     <>
+      {recoveryViewModel?.showExcludeUnverifiableAction
+      && Number(extractionRecovery?.unverifiableCandidateCount || 0) > 0
+      && extractionRecovery?.excludeUnverifiableCandidates ? (
+        <VNativeButton
+          type="button"
+          className={styles.sourceCollectionStageSecondaryAction ?? undefined}
+          disabled={Boolean(extractionRecovery.excludeUnverifiableCandidatesPending)}
+          onClick={() => setExcludeUnverifiableConfirmOpen(true)}
+          title={recoveryViewModel.excludeUnverifiableActionTitle}
+        >
+          <CircleX size={13} />
+          {recoveryViewModel.excludeUnverifiableActionText}
+        </VNativeButton>
+      ) : null}
       {extractionFlowGuide.showImportSecondary ? (
         <VNativeButton
           type="button"
@@ -298,7 +317,8 @@ export function TeamSourceCollectionActiveStageWorkspacePanel(props: TeamSourceC
   ) : null;
 
   return (
-    <TeamSourceCollectionActiveStagePanel
+    <>
+      <TeamSourceCollectionActiveStagePanel
       lang={lang}
       stageId={activeModule.id}
       compact={sourceCollectionActiveStageCompact}
@@ -407,6 +427,29 @@ export function TeamSourceCollectionActiveStageWorkspacePanel(props: TeamSourceC
         : undefined}
       renderGraphPanel={renderSourceCollectionGraphPanel}
       renderMemoryPanel={renderSourceCollectionMemoryPanel}
-    />
+      />
+      <VConfirmDialog
+        open={excludeUnverifiableConfirmOpen}
+        onOpenChange={setExcludeUnverifiableConfirmOpen}
+        tone="danger"
+        title={lang === "zh" ? "排除本轮不可核验来源？" : "Exclude unverifiable sources from this run?"}
+        description={lang === "zh"
+          ? `将把 ${Number(extractionRecovery?.unverifiableCandidateCount || 0)} 条当前无法公开核验的来源标记为“已排除”。不会删除资料，也不会把它们判为通过；标题、DOI、核验失败原因和评审记录都会保留。`
+          : `${Number(extractionRecovery?.unverifiableCandidateCount || 0)} source(s) that cannot currently be publicly verified will be marked as excluded. Nothing is deleted or approved; titles, DOIs, verification failures, and assessment history remain.`}
+        confirmLabel={lang === "zh" ? "确认排除并继续" : "Exclude and continue"}
+        cancelLabel={lang === "zh" ? "取消" : "Cancel"}
+        confirmPending={Boolean(extractionRecovery?.excludeUnverifiableCandidatesPending)}
+        onConfirm={() => {
+          const exclude = extractionRecovery?.excludeUnverifiableCandidates;
+          if (!exclude) {
+            return;
+          }
+          void exclude().then(
+            () => setExcludeUnverifiableConfirmOpen(false),
+            () => undefined,
+          );
+        }}
+      />
+    </>
   );
 }

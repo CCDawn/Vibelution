@@ -26,6 +26,10 @@ export type ExtractionRecoveryViewModel = {
   primaryActionText: string;
   primaryActionTitle: string | undefined;
   primaryActionKind: "chat" | "continue_task";
+  /** Explicit operator escape hatch for sources that cannot be independently verified. */
+  showExcludeUnverifiableAction: boolean;
+  excludeUnverifiableActionText: string;
+  excludeUnverifiableActionTitle: string;
   showImportAction: boolean;
   importActionText: string;
   qualityReviewActionText: string;
@@ -186,7 +190,7 @@ export function buildExtractionRecoveryViewModel(
   const primaryActionText = excluded
     ? String(sourceCollectionExtractionExcludedRecoveryState.primaryActionText || (lang === "zh" ? "进入 Agent 私聊" : "Open Agent chat"))
     : sourceVerificationOnly
-      ? (lang === "zh" ? "要求 Agent 补充材料" : "Request Agent material supplement")
+      ? (lang === "zh" ? "进入 Agent 私聊补充材料" : "Open Agent chat to add material")
       : evidenceGapOnly
         ? (lang === "zh" ? "要求 Agent 补充证据" : "Request Agent evidence supplement")
         : (lang === "zh" ? "继续 Agent 提炼" : "Continue Agent extraction");
@@ -196,8 +200,8 @@ export function buildExtractionRecoveryViewModel(
     : sourceCollectionActionDisabledTitle(primaryActionText);
 
   const nextStepGuide = lang === "zh"
-    ? "现在只点主按钮推进；质量审查是补完材料后的下一步，单独点审查不会消除「待补」。"
-    : "Use the primary button only for now; quality review is the next step after materials are repaired—review alone will not clear needs-revision.";
+    ? "请在私聊补入新的可公开核验材料；系统不会重复访问已经拒绝的来源链接。若无法补齐，可明确排除本轮不可核验来源，审计记录会保留。"
+    : "Add a new publicly verifiable material in chat; the system will not repeat a rejected source URL. If it cannot be repaired, explicitly exclude the unverifiable sources while retaining the audit.";
   const summary = excluded
     ? String(sourceCollectionExtractionExcludedRecoveryState.summary || "")
     : sourceVerificationOnly
@@ -264,7 +268,14 @@ export function buildExtractionRecoveryViewModel(
     primaryActionTitle: excluded
       ? primaryActionTitle
       : (sourceCollectionStageActionReadinessDisabled ? primaryActionTitle : undefined),
-    primaryActionKind: excluded ? "chat" : "continue_task",
+    primaryActionKind: excluded || sourceVerificationOnly ? "chat" : "continue_task",
+    showExcludeUnverifiableAction: sourceVerificationOnly,
+    excludeUnverifiableActionText: lang === "zh"
+      ? `排除 ${sourceVerificationCount} 条不可核验来源`
+      : `Exclude ${sourceVerificationCount} unverifiable source${sourceVerificationCount === 1 ? "" : "s"}`,
+    excludeUnverifiableActionTitle: lang === "zh"
+      ? "仅将本轮无法核验的来源标记为已排除；不会删除资料、不会判为通过，标题、DOI 与失败审计会保留。"
+      : "Marks only this run's unverifiable sources as excluded. It does not delete or approve them; title, DOI, and failure audit are retained.",
     showImportAction: !excluded,
     importActionText: lang === "zh" ? "补导入候选" : "Import candidates",
     /** Secondary review action: re-score only; does not rewrite source material. */

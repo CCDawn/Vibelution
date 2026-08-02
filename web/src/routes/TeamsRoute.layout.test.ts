@@ -1165,7 +1165,17 @@ describe("TeamsRoute layout contract", () => {
     expect(stageProjectionSource).toContain("sourceCollectionCoverageMetric");
     expect(extractionRecoveryViewModelSource).toContain("invalidCandidateIds");
     expect(extractionRecoveryViewModelSource).toContain("重新质量审查");
-    expect(extractionRecoveryViewModelSource).toContain("现在只点主按钮推进");
+    expect(extractionRecoveryViewModelSource).toContain("系统不会重复访问已经拒绝的来源链接");
+    expect(extractionRecoveryViewModelSource).toContain("showExcludeUnverifiableAction");
+    expect(extractionRecoveryViewModelSource).toContain("排除 ${sourceVerificationCount} 条不可核验来源");
+    expect(extractionRecoveryViewModelSource).toContain('excluded || sourceVerificationOnly ? "chat" : "continue_task"');
+    expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain("VConfirmDialog");
+    expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain("排除本轮不可核验来源？");
+    expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain("excludeUnverifiableCandidates");
+    expect(routeSource).toContain("const sourceCollectionUnverifiableCandidateIds = useMemo");
+    expect(routeSource).toContain("const excludeUnverifiableSourceCollectionCandidates = async");
+    expect(routeSource).toContain('decision: "rejected"');
+    expect(teamSourceCollectionMutationsSource).toContain('"approved" | "needs_revision" | "rejected"');
     expect(stageProjectionSource).toContain("materializedContentExtraction");
     expect(evidenceModelSource).toContain("继续补全提炼");
     expect(evidenceModelSource).toContain("继续补全提炼");
