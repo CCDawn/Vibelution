@@ -533,9 +533,21 @@ export function useChatWorkspaceLifecycle({
         return;
       }
       if (previousDirectSessionId) {
+        // Stop in-flight old-id requests (detail/llm-options/select) that were
+        // resurrecting deleted sessions via workspace recovery.
+        void queryClient.cancelQueries({ queryKey: queryKeys.session(previousDirectSessionId) });
+        void queryClient.cancelQueries({ queryKey: queryKeys.sessionLlmOptions(previousDirectSessionId) });
         clearSessionTransientUiState(previousDirectSessionId);
         queryClient.removeQueries({ queryKey: queryKeys.session(previousDirectSessionId), exact: true });
+        queryClient.removeQueries({ queryKey: queryKeys.sessionLlmOptions(previousDirectSessionId), exact: true });
         removeSessionWorkspace(previousDirectSessionId, replacementDirectSessionId);
+        // Optimistically drop the old row from list caches so UI does not flash a duplicate.
+        updateSessionSummaryCaches(queryClient, (sessions) =>
+          (sessions ?? []).filter((session) => session.id !== previousDirectSessionId),
+        );
+        queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations(), (conversations) =>
+          removeDeletedSessionFromConversations(conversations, previousDirectSessionId),
+        );
       }
       queryClient.setQueryData<AgentInstance[]>(queryKeys.agents(), (agents) =>
         agents?.map((agent) => (agent.agentId === result.agent.agentId ? result.agent : agent)),
@@ -547,7 +559,11 @@ export function useChatWorkspaceLifecycle({
         [replacementDirectSessionId]: "",
         __sessions__: "",
       }));
-      void chatWorkspaceCache.afterChatWorkspaceReset();
+      // Prefer targeted cache update over a full sessions remove+invalidate thrash.
+      void chatWorkspaceCache.afterSessionDeleted({
+        deletedSessionId: previousDirectSessionId || variables.sessionId,
+        nextSessionId: replacementDirectSessionId,
+      });
     },
     onError: (error, variables) => {
       setSessionComposerErrors((current) => ({

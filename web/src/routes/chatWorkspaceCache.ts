@@ -78,7 +78,11 @@ export function createChatWorkspaceCache(queryClient: QueryClientLike) {
       nextSessionId?: string;
       roomId?: string;
     }) {
-      queryClient.removeQueries?.({ queryKey: queryKeys.session(options.deletedSessionId), exact: true });
+      const deletedSessionId = String(options.deletedSessionId || "").trim();
+      if (deletedSessionId) {
+        queryClient.removeQueries?.({ queryKey: queryKeys.session(deletedSessionId), exact: true });
+        queryClient.removeQueries?.({ queryKey: queryKeys.sessionLlmOptions(deletedSessionId), exact: true });
+      }
       return invalidateAll(queryClient, [
         queryKeys.sessions(),
         queryKeys.conversations(),

@@ -1577,11 +1577,110 @@ def _ensure_session_conversation_record(
         return recovered
 
 
+SESSION_DELETED_MARKER_NAME = ".session_deleted"
+
+
+def _session_workspace_dir_if_present(session_id: str) -> Path | None:
+    """Locate an existing session workspace without creating one."""
+    s = _service()
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return None
+    try:
+        token = s._safe_session_workspace_token(normalized_session_id)
+        sessions_root = s.developer_sandbox.sandboxed_workspace_path(s.PROJECT_ROOT, "sessions").resolve()
+        workspace_path = (sessions_root / token).resolve()
+        if not workspace_path.is_relative_to(sessions_root):
+            return None
+        if not workspace_path.exists():
+            formal = s.developer_sandbox.formal_workspace_path(s.PROJECT_ROOT, "sessions", token)
+            if formal.exists():
+                return Path(formal).resolve()
+            return None
+        return workspace_path
+    except Exception:
+        return None
+
+
+def _session_deleted_marker_path(session_id: str) -> Path | None:
+    """Return the intentional-delete tombstone path for a session workspace."""
+    workspace = _session_workspace_dir_if_present(session_id)
+    if workspace is None:
+        return None
+    return workspace / SESSION_DELETED_MARKER_NAME
+
+
+def _is_session_workspace_intentionally_deleted(session_id: str) -> bool:
+    """True when this session was intentionally deleted and must not be recovered."""
+    marker = _session_deleted_marker_path(session_id)
+    if marker is None:
+        # Also check ensure path in case workspace was just recreated empty without marker.
+        # Prefer explicit marker only when workspace exists.
+        return False
+    try:
+        return marker.is_file()
+    except OSError:
+        return False
+
+
+def _session_workspace_has_recoverable_activity(session_id: str) -> bool:
+    """Require real transcript/journal activity before workspace recovery."""
+    workspace = _session_workspace_dir_if_present(session_id)
+    if workspace is None:
+        return False
+    candidates = (
+        workspace / "turn_journal.jsonl",
+        workspace / "logs" / "conversation.jsonl",
+        workspace / "conversation.jsonl",
+    )
+    for path in candidates:
+        try:
+            if path.is_file() and path.stat().st_size > 0:
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def _mark_session_workspace_intentionally_deleted(
+    session_id: str,
+    *,
+    reason: str = "deleted",
+    agent_id: str = "",
+) -> bool:
+    """Write a durable tombstone so workspace recovery cannot resurrect the session.
+
+    Clear/reset/delete only remove chat_state rows; leftover workspaces were being
+    auto-recovered via llm-options and list materialization. The marker blocks that.
+    """
+    s = _service()
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return False
+    try:
+        workspace = s._ensure_session_workspace(normalized_session_id)
+        marker = Path(workspace) / SESSION_DELETED_MARKER_NAME
+        payload = {
+            "schemaVersion": 1,
+            "sessionId": normalized_session_id,
+            "deleted": True,
+            "reason": str(reason or "deleted").strip()[:64] or "deleted",
+            "agentId": str(agent_id or "").strip(),
+            "deletedAt": s._now_timestamp(),
+        }
+        marker.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        return True
+    except Exception:
+        return False
+
+
 def _recover_agent_id_from_session_journal(session_id: str) -> str:
     """Best-effort agentId from turn_journal when chat_state entry is missing."""
     s = _service()
     normalized_session_id = str(session_id or "").strip()
     if not normalized_session_id:
+        return ""
+    if s._is_session_workspace_intentionally_deleted(normalized_session_id):
         return ""
     try:
         workspace = s._ensure_session_workspace(normalized_session_id)
@@ -1632,6 +1731,29 @@ def _recover_missing_conversation_from_workspace_locked(
     if not normalized_session_id:
         return False
     if s._find_conversation_entry(payload, normalized_session_id) is not None:
+        return False
+    # Intentional delete/clear/reset: never resurrect from leftover workspace files.
+    if s._is_session_workspace_intentionally_deleted(normalized_session_id):
+        try:
+            s.record_runtime_scene_event(
+                "conversation",
+                "chat_state",
+                "conversation.workspace_recover_blocked",
+                level="info",
+                outcome="blocked",
+                message="Skipped recovering a session marked intentionally deleted.",
+                fields={
+                    "sessionId": normalized_session_id,
+                    "source": str(source or "").strip()[:64],
+                    "reason": "session_deleted_tombstone",
+                },
+                lifecycle=True,
+            )
+        except Exception:
+            pass
+        return False
+    # Require real activity — bare empty workspaces must not re-enter the index.
+    if not s._session_workspace_has_recoverable_activity(normalized_session_id):
         return False
     agent_id = s._recover_agent_id_from_session_journal(normalized_session_id)
     agent = s.get_agent(agent_id, include_archived=True) if agent_id else None
