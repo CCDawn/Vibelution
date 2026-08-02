@@ -42,8 +42,10 @@ const routeAndPureSource = `${routeSource}\n${canvasGeometrySource}\n${researchW
 describe("research project workspace", () => {
   it("never routes an active source-collection batch to a legacy direct Agent session", () => {
     expect(routeSource).toContain(
-      'const route = selectedSourceCollectionRunEffectiveId\n      ? ""\n      : currentTaskSessionRoute || researchStageAgentDirectChatRoute(',
+      "const route = currentTaskSessionRoute;",
     );
+    expect(routeSource).toContain("projectRunAvailable: Boolean(selectedSourceCollectionRunEffectiveId)");
+    expect(routeSource).not.toContain("currentTaskSessionRoute || researchStageAgentDirectChatRoute(");
   });
 
   it("labels a project-session creation action as Agent chat rather than Agent repair", () => {
@@ -1190,12 +1192,13 @@ describe("TeamsRoute layout contract", () => {
     expect(researchStageAgentPresentationSource).toContain("params.set(\"returnTo\", normalizedReturnTo)");
     expect(researchStageAgentPresentationSource).toContain("params.set(\"returnLabel\", normalizedReturnLabel)");
     expect(routeSource).toContain("openSourceCollectionStageAgentChat");
-    expect(teamSourceCollectionShellModelSource).toContain('export type SourceCollectionStageAgentChatStatus = "ready" | "loading" | "error" | "repair"');
+    expect(teamSourceCollectionShellModelSource).toContain('export type SourceCollectionStageAgentChatStatus = "ready" | "loading" | "error" | "repair" | "blocked"');
     expect(routeSource).toContain("resolveSourceCollectionStageAgentChatState");
     expect(routeSource).toContain("sourceCollectionStageAgentChatState(stageId");
     expect(routeSource).toContain("agentSummaryQuery.isPending || agentSummaryQuery.isFetching");
     // Wave 8M: primary stage agent chat fallback state lives on active-stage workspace.
     expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain("primaryStageAgentChatLoading");
+    expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain("开始搜集并进入 Agent 私聊");
     expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain("加载本轮会话...");
     expect(routeSource).toContain('chatState.status === "repair"');
     expect(routeSource).toContain("onAction: () => void startSourceCollectionStageSessionTask(\"finding\")");

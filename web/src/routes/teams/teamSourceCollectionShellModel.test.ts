@@ -70,6 +70,14 @@ describe("teamSourceCollectionShellModel", () => {
       agentSummaryError: false,
     }).status).toBe("ready");
     expect(resolveSourceCollectionStageAgentChatState({
+      binding: { agentId: "a1", agent: { id: "a1" } },
+      route: "",
+      projectRunAvailable: false,
+      agentSummaryPending: false,
+      agentSummaryFetching: false,
+      agentSummaryError: false,
+    }).status).toBe("blocked");
+    expect(resolveSourceCollectionStageAgentChatState({
       binding: { agentId: "a1" },
       route: "",
       canCreateProjectSession: true,

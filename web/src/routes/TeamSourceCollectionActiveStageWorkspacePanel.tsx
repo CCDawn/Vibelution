@@ -40,6 +40,7 @@ export type TeamSourceCollectionActiveStageWorkspacePanelProps = {
   stageChatLabels: Record<string, { zh: string; en: string }>;
   openSourceCollectionStageAgentChat: (stageId: any) => void;
   startSourceCollectionStageSessionTask?: (stageId: SourceCollectionStageModuleId) => void;
+  sourceCollectionRunAvailable: boolean;
   sourceCollectionFindingStageCompact: boolean;
   selectedTeamStartSourceCollectionStageTaskError: Error | null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -95,6 +96,7 @@ export function TeamSourceCollectionActiveStageWorkspacePanel(props: TeamSourceC
     stageChatLabels,
     openSourceCollectionStageAgentChat,
     startSourceCollectionStageSessionTask,
+    sourceCollectionRunAvailable,
     sourceCollectionFindingStageCompact,
     selectedTeamStartSourceCollectionStageTaskError,
     renderSourceCollectionConversation,
@@ -112,12 +114,20 @@ export function TeamSourceCollectionActiveStageWorkspacePanel(props: TeamSourceC
   const primaryStageAgentChatLoading = primaryStageAgentChatState.status === "loading";
   const primaryStageAgentChatError = primaryStageAgentChatState.status === "error";
   const primaryStageAgentSessionCreateReady = primaryStageAgentChatState.status === "ready";
+  const primaryStageAgentNeedsCollectionStart = primaryStageAgentChatState.status === "blocked"
+    && activeModule.id === "finding"
+    && !sourceCollectionRunAvailable;
+  const primaryStageAgentBlockedByCollectionStart = primaryStageAgentChatState.status === "blocked";
   const primaryStageAgentRepairPending =
     primaryStageAgentChatState.status === "repair" && repairChallengeCupTeamAgentsMutation.isPending;
   const primaryStageAgentFallbackTitle = primaryStageAgentChatLoading
     ? (lang === "zh" ? "正在加载本轮 Agent 会话，请稍候" : "Loading the Agent session for this run")
     : primaryStageAgentChatError
       ? (lang === "zh" ? "Agent 配置加载失败，请刷新后重试" : "Agent configuration failed to load")
+      : primaryStageAgentNeedsCollectionStart
+        ? (lang === "zh" ? "开始本轮资料搜集后，将创建并打开此 Agent 的项目会话" : "Start this collection to create and open the Agent project session")
+        : primaryStageAgentBlockedByCollectionStart
+          ? (lang === "zh" ? "请先完成资料发现，再进入该阶段的 Agent 会话" : "Complete source finding before opening this stage's Agent session")
       : primaryStageAgentSessionCreateReady
         ? (lang === "zh" ? "为当前研究项目创建并打开此 Agent 的平级实验会话" : "Create and open this Agent's peer experiment session for the current research project")
         : (lang === "zh" ? "当前步骤缺少可用私聊，请先修复团队 Agent 绑定" : "No usable direct chat for this step");
@@ -125,6 +135,10 @@ export function TeamSourceCollectionActiveStageWorkspacePanel(props: TeamSourceC
     ? (lang === "zh" ? "加载本轮会话..." : "Loading session...")
     : primaryStageAgentChatError
       ? (lang === "zh" ? "Agent 加载失败" : "Agent load failed")
+      : primaryStageAgentNeedsCollectionStart
+        ? (lang === "zh" ? "开始搜集并进入 Agent 私聊" : "Start collection and open Agent chat")
+        : primaryStageAgentBlockedByCollectionStart
+          ? (lang === "zh" ? "请先开始资料搜集" : "Start source collection first")
       : primaryStageAgentSessionCreateReady
         ? (lang === "zh" ? "进入 Agent 私聊" : "Open Agent chat")
         : primaryStageAgentRepairPending
@@ -326,8 +340,14 @@ export function TeamSourceCollectionActiveStageWorkspacePanel(props: TeamSourceC
         <VNativeButton
           type="button"
           title={primaryStageAgentFallbackTitle}
-          onClick={() => openSourceCollectionStageAgentChat(activeModule.id)}
-          disabled={primaryStageAgentChatLoading || primaryStageAgentChatError || primaryStageAgentRepairPending}
+          onClick={() => {
+            if (primaryStageAgentNeedsCollectionStart) {
+              startSourceCollectionStageSessionTask?.(activeModule.id);
+              return;
+            }
+            openSourceCollectionStageAgentChat(activeModule.id);
+          }}
+          disabled={primaryStageAgentChatLoading || primaryStageAgentChatError || primaryStageAgentRepairPending || (primaryStageAgentBlockedByCollectionStart && !primaryStageAgentNeedsCollectionStart)}
         >
           <MessageSquare size={13} />
           {primaryStageAgentFallbackLabel}
