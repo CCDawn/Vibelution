@@ -2857,7 +2857,7 @@ describe("ConversationView edit resend affordance", () => {
 
     expect(html).toContain("过程");
     expect(html).toContain("工具调用 1");
-    expect(html).toContain("资料提炼回写");
+    expect(html).toContain("资料阶段写回");
     expect(html).not.toContain("source_collection_stage_writeback_tool");
     expect(html).toContain("资料提炼进行中：已完成第7批4条候选提炼");
     expect(html).not.toContain("资料提炼进行中：已完成第1批5条候选提炼");
