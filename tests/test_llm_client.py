@@ -3159,6 +3159,32 @@ def test_prompt_cache_unsupported_rejects_cache_control_without_backend_call():
     assert raised.value.details["prompt_cache_mode"] == "unsupported"
 
 
+def test_deepseek_automatic_prompt_cache_declares_capability_without_openai_keys():
+    """DeepSeek Context Caching is server-side; never inject OpenAI-only fields."""
+
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "deepseek",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://api.deepseek.com",
+            "llm.providers.default.compat_mode": "openai",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "deepseek-v4-flash",
+            "llm.profiles.primary.prompt_cache.mode": "automatic",
+            "llm.profiles.primary.prompt_cache.key": "should-not-be-sent",
+            "llm.profiles.primary.prompt_cache.retention": "24h",
+        }
+    )
+
+    client = LLMClient(config=config, backend=lambda payload: payload)
+    payload = client._build_payload([{"role": "system", "content": "stable"}, {"role": "user", "content": "hi"}])
+
+    assert client.capabilities.supports_prompt_cache is True
+    assert "prompt_cache_key" not in payload
+    assert "prompt_cache_retention" not in payload
+    assert client._last_payload_protocol_summary["promptCacheProviderStrategy"] == "deepseek_automatic"
+
+
 def test_openai_compatible_automatic_prompt_cache_strips_cache_control_and_keeps_payload_valid():
     config = make_config(
         **{

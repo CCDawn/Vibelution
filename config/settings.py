@@ -350,6 +350,9 @@ def _recommended_prompt_cache_mode(provider: Dict[str, Any], details: Dict[str, 
         return "explicit_cache_control"
     if is_dashscope_qwen:
         return "explicit_cache_control"
+    # DeepSeek Context Caching is automatic server-side; declare capability only.
+    if provider_kind == "deepseek" or "api.deepseek.com" in host:
+        return "automatic"
     if (
         provider_kind in {"openai", "relay"}
         or (provider_kind == "openai_compatible" and compat_mode in {"openai", "openai_compatible"})
