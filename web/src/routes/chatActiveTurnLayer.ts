@@ -3,6 +3,7 @@ import {
   isInternalStreamingStatusContent,
   isInternalStreamingStatusStage,
 } from "../components/conversation/conversationInternalStatus";
+import { activeTurnOptimisticStageSummary } from "../components/conversation/conversationActiveTurnStatusPresentation";
 import { shouldDisplayRuntimeStatus } from "../components/conversation/conversationDisplayProtocol";
 import type { ConversationMessage, SessionDetail, SessionStreamEvent } from "../api/types";
 import {
@@ -82,7 +83,8 @@ export function createOptimisticActiveTurnLayer(
   }
   const turnId = compactText(input.turnId) || "optimistic";
   const updatedAt = compactText(input.updatedAt) || new Date().toISOString();
-  const summary = compactText(input.summary) || "已发送，正在连接 Agent";
+  const processStage = "user_submit";
+  const summary = compactText(input.summary) || activeTurnOptimisticStageSummary(processStage, "zh");
   return {
     id: activeTurnMessageId(sessionId, turnId),
     renderKey: activeTurnRenderKey(sessionId),
@@ -90,7 +92,7 @@ export function createOptimisticActiveTurnLayer(
     turnId,
     updatedAt,
     streaming: true,
-    processStage: "user_submit",
+    processStage,
     answerContent: "",
     thoughtContent: "",
     feedbackEvents: [
@@ -98,7 +100,7 @@ export function createOptimisticActiveTurnLayer(
         sequence: 1,
         kind: "status",
         status: "running",
-        name: "user_submit",
+        name: processStage,
         summary,
       },
     ],

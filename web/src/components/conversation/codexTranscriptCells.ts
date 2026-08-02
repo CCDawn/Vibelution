@@ -95,7 +95,7 @@ export function buildCodexTranscriptCells(
       tone: "running",
     });
   }
-  return cells;
+  return settleCodexTranscriptActiveStatuses(cells);
 }
 
 function userTranscriptCells(message: AgentMessage): CodexTranscriptCell[] {
@@ -821,6 +821,50 @@ function normalizeCellStatus(status: string | undefined): CodexTranscriptCellSta
     return "running";
   }
   return "completed";
+}
+
+/**
+ * Keep only the latest in-flight process row as running/pending.
+ * Native transcripts and projected cells often leave earlier reasoning/tool rows
+ * marked running, which makes the whole transcript look like it is spinning.
+ */
+export function settleCodexTranscriptActiveStatuses(cells: CodexTranscriptCell[]): CodexTranscriptCell[] {
+  if (cells.length === 0) {
+    return cells;
+  }
+  let latestActiveIndex = -1;
+  for (let index = cells.length - 1; index >= 0; index -= 1) {
+    const cell = cells[index];
+    if (!cell || cell.kind === "user" || cell.kind === "assistant_markdown") {
+      continue;
+    }
+    if (cell.status === "running" || cell.status === "pending") {
+      latestActiveIndex = index;
+      break;
+    }
+  }
+  if (latestActiveIndex < 0) {
+    return cells;
+  }
+  let changed = false;
+  const next = cells.map((cell, index) => {
+    if (index === latestActiveIndex) {
+      return cell;
+    }
+    if (cell.status !== "running" && cell.status !== "pending") {
+      return cell;
+    }
+    if (cell.kind === "user" || cell.kind === "assistant_markdown") {
+      return cell;
+    }
+    changed = true;
+    return {
+      ...cell,
+      status: "completed" as const,
+      tone: cell.tone === "running" ? "neutral" as const : cell.tone,
+    };
+  });
+  return changed ? next : cells;
 }
 
 function cellTone(status: CodexTranscriptCellStatus): CodexTranscriptCellTone {

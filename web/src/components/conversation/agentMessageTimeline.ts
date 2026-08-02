@@ -522,9 +522,10 @@ function appendNaturalText(previous: string, next: string) {
 function firstParagraphPreview(text: string) {
   const paragraph = String(text || "")
     .split(/\n\s*\n/)
-    .map((item) => item.trim())
+    .map((item) => item.replace(/\s+/g, " ").trim())
     .find(Boolean) ?? "";
-  return paragraph.length > 180 ? `${paragraph.slice(0, 180).trimEnd()}...` : paragraph;
+  const singleLine = paragraph.replace(/\s+/g, " ").trim();
+  return singleLine.length > 140 ? `${singleLine.slice(0, 140).trimEnd()}...` : singleLine;
 }
 
 function isCommandLikeOperation(operation: AgentMessageOperation) {

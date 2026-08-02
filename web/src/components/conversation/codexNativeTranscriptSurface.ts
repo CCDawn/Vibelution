@@ -20,7 +20,10 @@ import type {
   CodexTranscriptCellStatus,
   CodexTranscriptCellTone,
 } from "./codexTranscriptCells";
-import { normalizeCodexTranscriptToolFailures } from "./codexTranscriptCells";
+import {
+  normalizeCodexTranscriptToolFailures,
+  settleCodexTranscriptActiveStatuses,
+} from "./codexTranscriptCells";
 import { shouldDisplayTranscriptCell } from "./conversationDisplayProtocol";
 import { isNoFinalAnswerStatusContent } from "./conversationInternalStatus";
 import { conversationToolSemanticLabel } from "./conversationToolSemanticLabel";
@@ -111,50 +114,52 @@ export function codexNativeTranscriptToCells(
 ): CodexTranscriptCell[] {
   const lifecycleModel = normalizeNativeToolLifecycleModel(transcript);
   const rolloutEvents = transcript.rolloutEvents ?? [];
-  return normalizeCodexTranscriptToolFailures((transcript.cells ?? [])
-    .map((cell) => {
-      const legacyMarkdown = "markdown" in cell && typeof cell.markdown === "string" ? cell.markdown : "";
-      const operationIds = [...(cell.operationIds ?? [])];
-      const cellRolloutEvents = normalizeNativeRolloutEvents(cell.rolloutTraceEvents?.length
-        ? cell.rolloutTraceEvents
-        : operationIds.length > 0
-          ? rolloutEvents.filter((event) => operationIds.includes(event.operationId))
-          : rolloutEvents);
-      const cellLifecycleModel = normalizeNativeToolLifecycleModel(cell.toolLifecycleModel ?? lifecycleModel);
-      const commandSource = nativeCellCommandSource(operationIds, cellLifecycleModel);
-      const isToolCell = cell.kind === "tool_call" || nativeCellHasToolCall(operationIds, cellLifecycleModel);
-      const rawTitle = String(cell.title ?? "").trim();
-      const title = isToolCell
-        ? conversationToolSemanticLabel({
-            toolName: rawTitle,
-            summary: cell.summary,
-            commandSource,
-          })
-        : cell.title;
-      return {
-        id: cell.id,
-        kind: cell.kind as CodexTranscriptCellKind,
-        messageId: cell.messageId || transcript.messageId,
-        status: cell.status as CodexTranscriptCellStatus,
-        tone: cell.tone as CodexTranscriptCellTone,
-        title,
-        text: cell.text || legacyMarkdown,
-        summary: cell.summary,
-        failureCount: nativeCellFailureCount(cell),
-        channel: cell.channel,
-        phase: cell.phase,
-        terminal: cell.terminal,
-        provisional: cell.provisional,
-        diagnosticSummary: isToolCell && rawTitle && title !== rawTitle
-          ? { ...(cell.diagnosticSummary ?? {}), rawToolName: rawTitle }
-          : cell.diagnosticSummary,
-        operationIds,
-        rolloutTraceEvents: cellRolloutEvents,
-        toolLifecycleModel: cellLifecycleModel,
-        sourceItemId: cell.sourceItemId,
-      };
-    })
-    .filter(shouldDisplayTranscriptCell));
+  return settleCodexTranscriptActiveStatuses(
+    normalizeCodexTranscriptToolFailures((transcript.cells ?? [])
+      .map((cell) => {
+        const legacyMarkdown = "markdown" in cell && typeof cell.markdown === "string" ? cell.markdown : "";
+        const operationIds = [...(cell.operationIds ?? [])];
+        const cellRolloutEvents = normalizeNativeRolloutEvents(cell.rolloutTraceEvents?.length
+          ? cell.rolloutTraceEvents
+          : operationIds.length > 0
+            ? rolloutEvents.filter((event) => operationIds.includes(event.operationId))
+            : rolloutEvents);
+        const cellLifecycleModel = normalizeNativeToolLifecycleModel(cell.toolLifecycleModel ?? lifecycleModel);
+        const commandSource = nativeCellCommandSource(operationIds, cellLifecycleModel);
+        const isToolCell = cell.kind === "tool_call" || nativeCellHasToolCall(operationIds, cellLifecycleModel);
+        const rawTitle = String(cell.title ?? "").trim();
+        const title = isToolCell
+          ? conversationToolSemanticLabel({
+              toolName: rawTitle,
+              summary: cell.summary,
+              commandSource,
+            })
+          : cell.title;
+        return {
+          id: cell.id,
+          kind: cell.kind as CodexTranscriptCellKind,
+          messageId: cell.messageId || transcript.messageId,
+          status: cell.status as CodexTranscriptCellStatus,
+          tone: cell.tone as CodexTranscriptCellTone,
+          title,
+          text: cell.text || legacyMarkdown,
+          summary: cell.summary,
+          failureCount: nativeCellFailureCount(cell),
+          channel: cell.channel,
+          phase: cell.phase,
+          terminal: cell.terminal,
+          provisional: cell.provisional,
+          diagnosticSummary: isToolCell && rawTitle && title !== rawTitle
+            ? { ...(cell.diagnosticSummary ?? {}), rawToolName: rawTitle }
+            : cell.diagnosticSummary,
+          operationIds,
+          rolloutTraceEvents: cellRolloutEvents,
+          toolLifecycleModel: cellLifecycleModel,
+          sourceItemId: cell.sourceItemId,
+        };
+      })
+      .filter(shouldDisplayTranscriptCell)),
+  );
 }
 
 function nativeCellFailureCount(cell: CodexTranscriptProjection["cells"][number]) {

@@ -483,6 +483,8 @@ function normalizeTimelineOperations(
     }
     merged.push(next);
   }
+  // Only the trailing in-flight step may stay "running". If a later tool/thought
+  // already completed (or the turn is not streaming), earlier "running" rows settle.
   const latestRunningIndex = messageStreaming && isRunningStatus(merged[merged.length - 1]?.status)
     ? merged.length - 1
     : -1;
