@@ -17,13 +17,31 @@ function emptyGroups(): AgentMessageOperationGroups {
 }
 
 describe("conversationFeedbackStatusPresentation", () => {
-  it("labels long-loop and prepare stages", () => {
+  it("labels long-loop, prepare, thinking, and submit stages", () => {
     expect(
       feedbackStatusPlaceholderLabel(
         { kind: "status", name: "context_prepare", status: "running" } as never,
         "zh",
       ),
     ).toBe("准备上下文");
+    expect(
+      feedbackStatusPlaceholderLabel(
+        { kind: "status", name: "user_submit", status: "running" } as never,
+        "zh",
+      ),
+    ).toBe("已发送");
+    expect(
+      feedbackStatusPlaceholderLabel(
+        { kind: "status", name: "model_thinking", status: "running" } as never,
+        "zh",
+      ),
+    ).toBe("思考中");
+    expect(
+      feedbackStatusPlaceholderLabel(
+        { kind: "status", name: "server_thinking", status: "running" } as never,
+        "en",
+      ),
+    ).toBe("Thinking");
     expect(
       feedbackStatusPlaceholderLabel(
         {

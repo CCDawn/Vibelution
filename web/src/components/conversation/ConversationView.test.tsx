@@ -963,10 +963,15 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.sendButton).toContain("w-[var(--vui-control-height-sm)]");
     expect(styles.sendButton).toContain("shrink-0");
     expect(styles.sendButton).toContain("p-0");
+    expect(styles.sendButton).toContain("overflow-visible");
+    expect(styles.sendButton).toContain("!px-0");
+    expect(styles.sendButton).toContain("[&_[data-slot=vui-button-icon]]:place-items-center");
     expect(styles.sendButton).toContain("disabled:!border-[color-mix(in_srgb,var(--border-soft)_70%,transparent)]");
     expect(styles.sendButton).toContain("disabled:!bg-[color-mix(in_srgb,var(--vui-control-muted)_62%,transparent)]");
     expect(styles.sendButton).toContain("disabled:!text-[var(--fg-tertiary)]");
     expect(styles.composerEditSubmitButton).toContain("w-fit");
+    expect(conversationViewSource).toContain("isIconOnly={!primaryActionIsEditSubmit}");
+    expect(conversationViewSource).toContain("isIconOnly");
     expect(styles.composerEditSubmitButton).toContain("px-2");
     expect(styles.composerEditSubmitButton).not.toContain("w-[var(--vui-control-height-sm)]");
 
@@ -980,15 +985,20 @@ describe("ConversationView edit resend affordance", () => {
   });
 
   it("keeps edit-mode composer chrome compact", () => {
-    expect(styles.composerEditModeBar).toContain("min-h-8");
+    expect(styles.composerEditModeBar).toContain("min-h-7");
     expect(styles.composerEditModeBar).toContain("w-full");
     expect(styles.composerEditModeBar).toContain("px-2");
+    expect(styles.composerEditModeBar).toContain("items-center");
     expect(styles.composerEditModeBar).not.toContain("shadow-[var(--vui-shadow-hairline)]");
+    expect(styles.composerEditModeBar).not.toContain("accent-cool");
     expect(styles.composerEditModeIcon).not.toContain("p-2");
     expect(styles.composerEditModeCancel).toContain("!min-h-6");
-    expect(styles.composerEditModeDescription).toContain("[overflow-wrap:anywhere]");
+    expect(styles.composerEditModeDescription).toContain("truncate");
     expect(styles.composerEditModePreview).toContain("truncate");
     expect(styles.composerEditModeWarning).toContain("state-warning");
+    expect(styles.turnEditing).toContain("userMessageBody");
+    expect(styles.turnEditing).not.toContain("vuiOpaqueRowClass");
+    expect(styles.turnEditing).not.toMatch(/\bp-2\b/);
   });
 
   it("uses shared readable scale tokens for dense conversation text", () => {
@@ -1441,7 +1451,14 @@ describe("ConversationView edit resend affordance", () => {
       },
     );
 
-    expect(html).toContain("正在处理当前任务");
+    expect(html).toContain("请求模型");
+    expect(html).toMatch(/请求模型 · \d+s/);
+    expect(html).toContain("发送");
+    expect(html).toContain("准备");
+    expect(html).toContain("思考");
+    expect(html).toContain('data-stage-phase="request"');
+    expect(html).toContain('data-stage-current="true"');
+    expect(html).not.toContain("正在处理当前任务");
     expect(html).not.toContain("正在请求");
     expect(html).not.toContain("正在思考中");
     expect(html).not.toContain("正在唤起对话 agent");
@@ -3607,10 +3624,11 @@ describe("ConversationView edit resend affordance", () => {
 
     expect(html).toContain("composerEditModeBar");
     expect(html).toContain("composerEditModeLabel");
-    expect(html).toContain("composerEditModeDescription");
-    expect(html).toContain("正在编辑最新一条用户消息；发送后会替换这条消息并重跑后续对话。");
-    expect(html).toContain("composerEditModePreview");
-    expect(html).toContain("当前内容：继续");
+    expect(html).toContain("编辑消息");
+    expect(html).toContain("aria-label=\"正在编辑最新一条用户消息；发送后会替换这条消息并重跑后续对话。\"");
+    expect(html).not.toContain("composerEditModeDescription");
+    expect(html).not.toContain("composerEditModePreview");
+    expect(html).not.toContain("当前内容：继续");
     expect(html).toContain("composerEditModeCancel");
     expect(html).toContain("composerEditSubmitButton");
     expect(html).toContain("保存并重跑");
@@ -3640,7 +3658,7 @@ describe("ConversationView edit resend affordance", () => {
       ],
       {
         editingMessageId: "message-user",
-        composerModeNotice: "正在编辑最新一条用户消息；发送后会替换这条消息并重跑后续对话。",
+        composerModeNotice: "正在编辑最新用户消息",
         composerModeTargetPreview: "继续",
         composerValue: "继续",
         submitLabel: "保存并重跑",
@@ -3653,7 +3671,7 @@ describe("ConversationView edit resend affordance", () => {
 
     expect(html).toContain("turnErrorNotice");
     expect(html).toContain("composerEditModeWarning");
-    expect(html).toContain("当前错误来自上一轮失败；保存并重跑后会生成新的后续结果。");
+    expect(html).toContain("上一轮失败；保存并重跑将生成新结果");
     expect(html).toContain("保存并重跑");
   });
 
@@ -4127,7 +4145,69 @@ describe("ConversationView edit resend affordance", () => {
 
     expect(html).toContain(">思考</span>");
     expect(html).toContain("先确认后端是否捕获 thought，再看前端是否把它渲染出来。");
+    expect(html).toContain("timelineThoughtInlinePreview");
+    expect(html).toContain("timelineCellCompactTitleRow");
+    expect(html).toContain('data-thought-expanded="false"');
+    expect(html).not.toContain("timelineThoughtText");
     expect(html).not.toContain('title="展开思考过程"');
+  });
+
+  it("keeps collapsed thought preview on one row without leaving multi-line body text", () => {
+    const longThought = [
+      "确认了：当前cli_tool环境是bash（/usr/bin/bash），PowerShell命令（Select-Object、Sort-Object）不被识别。",
+      "这是关键证据——**当前真实环境的cli_tool是bash，不是PowerShell也不是cmd**。",
+      "所以第8/10轮的Get-ChildItem...|Select-Object失败是环境误判。",
+    ].join("\n");
+    const html = renderConversation([
+      {
+        id: "message-thought-collapse",
+        role: "assistant",
+        content: "继续。",
+        timestamp: "2026-08-01T16:00:00Z",
+        feedbackEvents: [
+          {
+            sequence: 1,
+            kind: "thought",
+            status: "done",
+            summary: longThought,
+            resultPreview: longThought,
+          },
+        ],
+      },
+    ]);
+
+    expect(html).toContain('data-thought-expanded="false"');
+    expect(html).toContain("timelineThoughtInlinePreview");
+    expect(html).toContain("确认了：当前cli_tool环境是bash");
+    expect(html).not.toContain("timelineThoughtText");
+    expect(html).not.toContain("所以第8/10轮");
+    expect(html).toContain("timelineCellCompactTitleRow");
+  });
+
+  it("keeps long running thoughts collapsed by default so walls are not forced open", () => {
+    const longRunningThought = "A".repeat(200);
+    const html = renderConversation([
+      {
+        id: "message-long-running-thought",
+        role: "assistant",
+        content: "",
+        streaming: true,
+        timestamp: "2026-08-01T16:10:00Z",
+        feedbackEvents: [
+          {
+            sequence: 1,
+            kind: "thought",
+            status: "running",
+            summary: longRunningThought,
+            resultPreview: longRunningThought,
+          },
+        ],
+      },
+    ]);
+
+    expect(html).toContain('data-thought-expanded="false"');
+    expect(html).toContain("timelineThoughtInlinePreview");
+    expect(html).not.toContain("timelineThoughtText");
   });
 
   it("renders ordered feedback events as a collapsed execution package without counts", () => {
@@ -4331,41 +4411,53 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).not.toContain("responseSection");
   });
 
-  it("hides pure internal runtime pipeline steps instead of rendering a process placeholder", () => {
+  it("shows compact stage heartbeat instead of internal runtime pipeline process chrome", () => {
     const fullModelStatus = "正在请求模型，等待首个响应片段... 上下文已组装完成，正在进入 LLM 调用。";
-    const html = renderConversation([
+    const html = renderConversation(
+      [],
       {
-        id: "message-runtime-status-compact",
-        role: "assistant",
-        content: "",
-        timestamp: "2026-06-05T10:16:00Z",
-        streaming: true,
-        feedbackEvents: [
-          {
-            sequence: 1,
-            kind: "status",
-            status: "running",
-            name: "context_prepare",
-            summary: "正在准备对话上下文... 正在读取当前会话、绑定 Agent、工具权限和可恢复的上轮现场。",
+        useDefaultProcessDisplayMode: true,
+        activeTurnMessage: {
+          id: "session-1-message-active-turn-request",
+          role: "assistant",
+          content: "",
+          timestamp: "2026-06-05T10:16:00Z",
+          streaming: true,
+          streamStage: "model_request",
+          feedbackEvents: [
+            {
+              sequence: 1,
+              kind: "status",
+              status: "running",
+              name: "context_prepare",
+              summary: "正在准备对话上下文... 正在读取当前会话、绑定 Agent、工具权限和可恢复的上轮现场。",
+            },
+            {
+              sequence: 2,
+              kind: "status",
+              status: "running",
+              name: "agent_prepare",
+              summary: "正在唤起对话 agent... 正在绑定 Agent 实例、私有工作区、记忆根和工具工作区。",
+            },
+            {
+              sequence: 3,
+              kind: "status",
+              status: "running",
+              name: "model_request",
+              summary: fullModelStatus,
+            },
+          ],
+          metadata: {
+            kind: "session_active_turn_layer",
+            turnId: "turn-request",
           },
-          {
-            sequence: 2,
-            kind: "status",
-            status: "running",
-            name: "agent_prepare",
-            summary: "正在唤起对话 agent... 正在绑定 Agent 实例、私有工作区、记忆根和工具工作区。",
-          },
-          {
-            sequence: 3,
-            kind: "status",
-            status: "running",
-            name: "model_request",
-            summary: fullModelStatus,
-          },
-        ],
+        },
       },
-    ]);
+    );
 
+    expect(html).toMatch(/请求模型 · \d+s/);
+    expect(html).toContain('data-active-turn-stage="model_request"');
+    expect(html).toContain('data-stage-phase="request"');
     expect(html).not.toContain("正在请求");
     expect(html).not.toContain("执行过程");
     expect(html).not.toContain("执行中");
@@ -4374,7 +4466,6 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).not.toContain("第 1 轮");
     expect(html).not.toContain("准备上下文");
     expect(html).not.toContain("绑定 Agent");
-    expect(html).not.toContain("请求模型");
     expect(html).not.toContain("当前位置");
     expect(html).not.toContain("请求模型中");
     expect(html).not.toContain("首个响应片段等待中");
@@ -4385,11 +4476,13 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).not.toContain("answerOnlyProcessGroup");
   });
 
-  it("hides server-side model thinking status without fake reasoning content", () => {
+  it("shows compact thinking heartbeat without fake reasoning content", () => {
     const html = renderConversation(
-      [
-        {
-          id: "message-server-side-thinking",
+      [],
+      {
+        useDefaultProcessDisplayMode: true,
+        activeTurnMessage: {
+          id: "session-1-message-active-turn-thinking",
           role: "assistant",
           content: "",
           timestamp: "2026-07-04T02:10:00Z",
@@ -4405,11 +4498,17 @@ describe("ConversationView edit resend affordance", () => {
               resultPreview: "正在思考，等待模型输出。",
             },
           ],
+          metadata: {
+            kind: "session_active_turn_layer",
+            turnId: "turn-thinking",
+          },
         },
-      ],
-      { useDefaultProcessDisplayMode: true },
+      },
     );
 
+    expect(html).toMatch(/思考中 · \d+s/);
+    expect(html).toContain('data-active-turn-stage="model_thinking"');
+    expect(html).toContain('data-stage-phase="thinking"');
     expect(html).not.toContain("正在思考中");
     expect(html).not.toContain("正在请求");
     expect(html).not.toContain("思考过程");

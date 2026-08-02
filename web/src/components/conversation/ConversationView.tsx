@@ -75,6 +75,7 @@ import {
   isNoFinalAnswerStatusContent,
   isStreamingStatusPlaceholderContent,
 } from "./conversationInternalStatus";
+import { ConversationActiveTurnStatusNote } from "./ConversationActiveTurnStatusNote";
 import {
   operationGroupsWithFeedbackStatusPlaceholder,
 } from "./conversationFeedbackStatusPresentation";
@@ -115,6 +116,7 @@ import {
 import {
   buildCodexTranscriptCells,
   compactCodexTranscriptCellsAcrossMessages,
+  settleCodexTranscriptActiveStatuses,
   type CodexTranscriptCell,
 } from "./codexTranscriptCells";
 import { resolveCodexTranscriptSurface, type CodexTranscriptSurface } from "./codexNativeTranscriptSurface";
@@ -518,7 +520,6 @@ export function ConversationView({
   const userAvatarLabel = userAvatarSymbol(userAvatarPreset, userLabel);
   const {
     editModeActive: composerEditModeActive,
-    targetPreview: composerEditTargetPreview,
     failureNote: composerEditFailureNote,
   } = resolveComposerEditMode({
     modeNotice: composerModeNotice,
@@ -1351,14 +1352,40 @@ export function ConversationView({
     return messageDefaults[section];
   }
 
+  function resolveExpansionState(
+    expansion: Record<string, Record<string, boolean>>,
+    messageId: string,
+    section: string,
+    defaultExpanded: boolean,
+  ) {
+    const explicit = expansion[messageId]?.[section];
+    if (explicit !== undefined) {
+      return explicit;
+    }
+    const messageDefaults = defaultExpansionRef.current[messageId] ?? {};
+    if (messageDefaults[section] !== undefined) {
+      return messageDefaults[section];
+    }
+    return defaultExpanded;
+  }
+
   function toggleSection(messageId: string, section: string, defaultExpanded: boolean) {
-    setSectionExpansion((current) => ({
-      ...current,
-      [messageId]: {
-        ...(current[messageId] ?? {}),
-        [section]: !getExpansionState(messageId, section, defaultExpanded),
-      },
-    }));
+    setSectionExpansion((current) => {
+      const currentlyExpanded = resolveExpansionState(current, messageId, section, defaultExpanded);
+      return {
+        ...current,
+        [messageId]: {
+          ...(current[messageId] ?? {}),
+          [section]: !currentlyExpanded,
+        },
+      };
+    });
+  }
+
+  function reasoningExpansionSectionId(cell: Pick<CodexTranscriptCell, "id" | "sourceItemId">) {
+    // Prefer sourceItemId so stream updates that rewrite cell.id keep the same open/closed choice.
+    const stable = String(cell.sourceItemId || cell.id || "").trim();
+    return `reasoning:${stable || "active"}`;
   }
 
   function scrollToBottom() {
@@ -1770,7 +1797,9 @@ export function ConversationView({
     cells: CodexTranscriptCell[],
     rowIdentity: AgentMessageTimelineRowIdentity,
   ) {
-    const visibleCells = cells.filter((cell) => cell.kind !== "user");
+    const visibleCells = settleCodexTranscriptActiveStatuses(
+      cells.filter((cell) => cell.kind !== "user"),
+    );
     if (visibleCells.length === 0) {
       return null;
     }
@@ -1898,6 +1927,9 @@ export function ConversationView({
           {message.streaming ? renderStreamingResponseText(text) : renderResponseText(text, imageArtifactUrlsBeforeMessage.get(message.id))}
         </section>
       );
+    }
+    if (cell.kind === "reasoning_summary") {
+      return renderCodexReasoningSummaryCell(message, cell);
     }
     if (cell.kind === "error_notice") {
       const rawErrorTitle = cell.title?.trim() || (lang === "zh" ? "执行失败" : "Failed");
@@ -2083,6 +2115,93 @@ export function ConversationView({
     );
   }
 
+  function renderCodexReasoningSummaryCell(
+    message: ConversationMessage,
+    cell: CodexTranscriptCell,
+  ) {
+    const fullText = String(cell.text || cell.summary || "").trim();
+    if (!fullText) {
+      return null;
+    }
+    // Long reasoning walls should start collapsed. Running only shows a spinner + one-line preview;
+    // the user can expand deliberately. This also avoids stream updates re-opening walls.
+    const defaultExpanded = false;
+    const sectionId = reasoningExpansionSectionId(cell);
+    const expanded = getExpansionState(message.id, sectionId, defaultExpanded);
+    const inlinePreview = fullText.replace(/\s+/g, " ").trim();
+    const title = codexTranscriptCellTitle(cell);
+    const meta = codexTranscriptCellMeta(cell);
+    const toneClassName = styles[`codexTranscriptCell_${cell.tone}` as keyof typeof styles] ?? "";
+    const toggleLabel = expanded ? t("thoughtProcessVisible") : t("thoughtProcessHidden");
+    const toggleReasoning = (event?: { stopPropagation?: () => void }) => {
+      event?.stopPropagation?.();
+      toggleSection(message.id, sectionId, defaultExpanded);
+    };
+    return (
+      <section
+        key={cell.id}
+        className={[
+          styles.codexTranscriptCell,
+          styles.codexTranscriptReasoningCell,
+          toneClassName,
+        ].filter(Boolean).join(" ")}
+        data-codex-transcript-cell-kind={cell.kind}
+        data-codex-transcript-cell-status={cell.status}
+        data-codex-transcript-cell-tone={cell.tone}
+        data-conversation-part-key={cell.id}
+        data-thought-section={sectionId}
+        data-thought-expanded={expanded ? "true" : "false"}
+        role={cell.status === "running" || cell.status === "pending" ? "status" : undefined}
+        aria-live={cell.status === "running" || cell.status === "pending" ? "polite" : undefined}
+      >
+        <VButton
+          type="button"
+          contentLayout="plain"
+          className={styles.codexTranscriptReasoningHeader}
+          aria-expanded={expanded}
+          aria-label={toggleLabel}
+          onClick={(event) => {
+            event.stopPropagation();
+            toggleReasoning();
+          }}
+        >
+          <span className={styles.codexTranscriptCellIcon} aria-hidden="true">
+            {cell.status === "running" || cell.status === "pending"
+              ? <LoaderCircle className={styles.statusSpinner} size={14} />
+              : <BrainCircuit size={14} />}
+          </span>
+          <span className={styles.codexTranscriptReasoningHeaderBody}>
+            <span className={styles.codexTranscriptReasoningTitleRow}>
+              <span className={styles.codexTranscriptCellTitle}>{title}</span>
+              {meta ? <span className={styles.codexTranscriptCellMeta}>{meta}</span> : null}
+              {!expanded && inlinePreview ? (
+                <>
+                  <span className={styles.timelineCellSeparator} aria-hidden="true">·</span>
+                  <span className={styles.codexTranscriptReasoningInlinePreview}>{inlinePreview}</span>
+                </>
+              ) : null}
+            </span>
+          </span>
+          {expanded ? <ChevronDown size={15} aria-hidden="true" /> : <ChevronRight size={15} aria-hidden="true" />}
+        </VButton>
+        {expanded ? (
+          <VButton
+            type="button"
+            contentLayout="plain"
+            className={styles.codexTranscriptReasoningTextButton}
+            aria-label={toggleLabel}
+            onClick={(event) => {
+              event.stopPropagation();
+              toggleReasoning();
+            }}
+          >
+            <pre className={styles.codexTranscriptReasoningText}>{fullText}</pre>
+          </VButton>
+        ) : null}
+      </section>
+    );
+  }
+
   function codexTranscriptVisibleSummary(cell: CodexTranscriptCell) {
     if (cell.kind === "tool_call") {
       return cell.status === "completed"
@@ -2092,7 +2211,11 @@ export function ConversationView({
     if (cell.kind === "error_notice") {
       return "";
     }
-    return cell.kind === "reasoning_summary" ? cell.text || cell.summary : cell.summary || cell.text;
+    if (cell.kind === "reasoning_summary") {
+      // Collapsed preview is rendered by renderCodexReasoningSummaryCell.
+      return cell.summary || cell.text;
+    }
+    return cell.summary || cell.text;
   }
 
   function codexTranscriptCompletedToolSummary(cell: CodexTranscriptCell) {
@@ -2411,29 +2534,60 @@ export function ConversationView({
     rowIdentity: AgentMessageTimelineRowIdentity,
     isActiveTimelineItem: boolean,
   ) {
-    const expanded = getExpansionState(message.id, item.id, item.defaultExpanded);
+    // Keep running short thoughts expandable by default only when the preview is tiny;
+    // longer walls start collapsed so the user can always open/close deliberately.
+    const inlinePreview = String(item.preview || item.text || "").replace(/\s+/g, " ").trim();
+    const defaultExpanded = Boolean(item.defaultExpanded) && inlinePreview.length > 0 && inlinePreview.length <= 96;
+    const sectionId = `thought:${item.id}`;
+    const expanded = getExpansionState(message.id, sectionId, defaultExpanded);
+    const toggleLabel = expanded ? t("thoughtProcessVisible") : t("thoughtProcessHidden");
     return (
       <section
         key={agentMessageTimelineItemRowKey(rowIdentity, item)}
         className={styles.timelineThoughtCell}
         data-conversation-part-key={agentMessageTimelineItemRowKey(rowIdentity, item)}
+        data-thought-section={sectionId}
+        data-thought-expanded={expanded ? "true" : "false"}
       >
         <VButton
           type="button"
         contentLayout="plain"
           className={styles.timelineThoughtHeader}
           aria-expanded={expanded}
-          onClick={() => toggleSection(message.id, item.id, item.defaultExpanded)}
-          title={expanded ? t("thoughtProcessVisible") : t("thoughtProcessHidden")}
+          aria-label={toggleLabel}
+          onClick={(event) => {
+            event.stopPropagation();
+            toggleSection(message.id, sectionId, defaultExpanded);
+          }}
         >
           {isActiveTimelineItem && item.status === "running" ? <LoaderCircle className={styles.statusSpinner} size={14} /> : <BrainCircuit size={14} />}
           <span className={styles.timelineCellBody}>
-            <span className={styles.timelineCellTitle}>{lang === "zh" ? "思考" : "Thinking"}</span>
-            {!expanded && item.preview ? <span className={styles.timelineCellPreview}>{item.preview}</span> : null}
+            <span className={`${styles.timelineCellTitleRow} ${styles.timelineCellCompactTitleRow}`}>
+              <span className={styles.timelineCellTitle}>{lang === "zh" ? "思考" : "Thinking"}</span>
+              {!expanded && inlinePreview ? (
+                <>
+                  <span className={styles.timelineCellSeparator} aria-hidden="true">·</span>
+                  <span className={styles.timelineThoughtInlinePreview}>{inlinePreview}</span>
+                </>
+              ) : null}
+            </span>
           </span>
-          {expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+          {expanded ? <ChevronDown size={15} aria-hidden="true" /> : <ChevronRight size={15} aria-hidden="true" />}
         </VButton>
-        {expanded ? <pre className={styles.timelineThoughtText}>{item.text}</pre> : null}
+        {expanded ? (
+          <VButton
+            type="button"
+            contentLayout="plain"
+            className={styles.timelineThoughtTextButton}
+            aria-label={toggleLabel}
+            onClick={(event) => {
+              event.stopPropagation();
+              toggleSection(message.id, sectionId, defaultExpanded);
+            }}
+          >
+            <pre className={styles.timelineThoughtText}>{item.text}</pre>
+          </VButton>
+        ) : null}
       </section>
     );
   }
@@ -3199,6 +3353,7 @@ export function ConversationView({
       {!runningGuidanceActionsEnabled || showSafeGuidanceAction ? (
         <VButton
           className={primaryActionClassName}
+          isIconOnly={!primaryActionIsEditSubmit}
           isDisabled={runningGuidanceActionsEnabled ? guidanceActionDisabled || !onSafeGuidance : resolvedActionDisabled}
           type="button"
           onClick={runningGuidanceActionsEnabled ? onSafeGuidance : handlePrimaryAction}
@@ -3229,13 +3384,14 @@ export function ConversationView({
               <span>{resolvedActionLabel}</span>
             </>
           ) : (
-            <ArrowUp size={18} aria-hidden="true" />
+            <ArrowUp size={16} aria-hidden="true" />
           )}
         </VButton>
       ) : null}
       {runningGuidanceActionsEnabled ? (
         <VButton
           className={`${styles.sendButton} ${styles.composerRoundButton} ${styles.stopButton}`}
+          isIconOnly
           isDisabled={resolvedActionDisabled}
           type="button"
           onClick={handlePrimaryAction}
@@ -3612,10 +3768,11 @@ export function ConversationView({
               hasActiveProcess,
               turnErrorMessage,
             }) ? (
-              <div className={styles.turnStatusNote} role="status" aria-live="polite">
-                <span className={styles.turnStatusLabel}>{lang === "zh" ? "状态" : "Status"}</span>
-                <span className={styles.turnStatusText}>{lang === "zh" ? "正在处理当前任务" : "Working on the current task"}</span>
-              </div>
+              <ConversationActiveTurnStatusNote
+                message={message}
+                lang={lang}
+                statusLabel={lang === "zh" ? "状态" : "Status"}
+              />
             ) : null;
             return (
               <AgentMessageTurnView
@@ -3854,12 +4011,6 @@ export function ConversationView({
               </span>
               <span className={styles.composerEditModeCopy}>
                 <span className={styles.composerEditModeLabel}>{t("editMessage")}</span>
-                <span className={styles.composerEditModeDescription}>{composerModeNotice}</span>
-                {composerEditTargetPreview ? (
-                  <span className={styles.composerEditModePreview} title={composerModeTargetPreview}>
-                    {`${t("editMessageCurrentContentPrefix")}：${composerEditTargetPreview}`}
-                  </span>
-                ) : null}
                 {composerEditFailureNote ? (
                   <span className={styles.composerEditModeWarning}>{composerEditFailureNote}</span>
                 ) : null}
@@ -4015,6 +4166,7 @@ export function ConversationView({
             <div className={styles.composerToolbarStart}>
               <VButton
                 className={styles.attachButton}
+                isIconOnly
                 isDisabled={attachmentInputDisabled || !onAddComposerAttachments}
                 type="button"
                 onClick={() => attachmentInputRef.current?.click()}

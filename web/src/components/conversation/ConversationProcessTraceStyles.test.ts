@@ -27,8 +27,14 @@ describe("conversation process trace styles", () => {
     expect(styles.timelineCellMeta).toContain("[font-size:var(--vui-font-xs)]");
     expect(styles.timelineCellMeta).toContain("text-[var(--fg-tertiary)]");
     expect(styles.timelineThoughtHeader).toContain("grid-cols-[20px_minmax(0,1fr)_24px]");
+    expect(styles.timelineThoughtHeader).toContain("!items-center");
+    expect(styles.timelineThoughtHeader).toContain("overflow-hidden");
     expect(styles.timelineThoughtHeader).not.toContain("grid-cols-[20px_fit-content(52rem)_24px_minmax(0,1fr)]");
     expect(styles.timelineThoughtHeader).not.toContain("max-content");
+    expect(styles.timelineThoughtInlinePreview).toContain("truncate");
+    expect(styles.timelineThoughtInlinePreview).toContain("flex-1");
+    expect(styles.timelineThoughtInlinePreview).not.toContain("line-clamp-2");
+    expect(styles.timelineThoughtInlinePreview).not.toContain("whitespace-normal");
 
     expect(styles.timelineCellCompactTitleRow).toContain("[&_.timelineCellTitle]:max-w-none");
     expect(styles.timelineCellCompactTitleRow).toContain("[&_.timelineCellTitle]:shrink-0");

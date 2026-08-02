@@ -107,6 +107,9 @@ export function feedbackStatusPlaceholderLabel(event: ConversationFeedbackEvent,
   if (feedbackStatusIsLongLoopProgress(event)) {
     return zh ? "工具循环" : "Tool loop";
   }
+  if (stage === "user_submit") {
+    return zh ? "已发送" : "Sent";
+  }
   if (stage === "context_prepare") {
     return zh ? "准备上下文" : "Preparing context";
   }
@@ -122,13 +125,27 @@ export function feedbackStatusPlaceholderLabel(event: ConversationFeedbackEvent,
   if (stage === "followup_prepare") {
     return zh ? "准备下一步" : "Preparing next step";
   }
-  if (combined.includes("model_thinking") || combined.includes("正在思考") || combined.includes("reasoning")) {
-    return zh ? "模型思考" : "Model thinking";
+  if (
+    stage === "model_thinking"
+    || stage === "server_thinking"
+    || stage === "reasoning"
+    || combined.includes("model_thinking")
+    || combined.includes("server_thinking")
+    || combined.includes("正在思考")
+    || combined.includes("reasoning")
+  ) {
+    return zh ? "思考中" : "Thinking";
   }
-  if (combined.includes("model_request") || combined.includes("请求模型")) {
+  if (stage === "model_request" || combined.includes("model_request") || combined.includes("请求模型")) {
     return zh ? "请求模型" : "Request model";
   }
-  if (combined.includes("retrying") || combined.includes("model_retry") || combined.includes("模型连接正在重试")) {
+  if (
+    stage === "model_retry"
+    || stage === "retrying"
+    || combined.includes("retrying")
+    || combined.includes("model_retry")
+    || combined.includes("模型连接正在重试")
+  ) {
     return zh ? "请求重试" : "Request retry";
   }
   return zh ? "运行状态" : "Runtime status";

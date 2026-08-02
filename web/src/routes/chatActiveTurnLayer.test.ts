@@ -79,7 +79,7 @@ describe("chat active turn layer", () => {
         kind: "status",
         status: "running",
         name: "user_submit",
-        summary: "已发送，正在连接 Agent",
+        summary: "已发送，正在连接",
       },
     ]);
     expect(message).toMatchObject<Partial<ConversationMessage>>({

@@ -555,6 +555,87 @@ describe("ConversationView native Codex transcript surface", () => {
     expect(html).toContain("codexTranscriptFinalCell");
   });
 
+  it("renders running reasoning_summary collapsed by default with a clickable header", () => {
+    const reasoning = [
+      "重要发现！这次exec_command的失败模式非常关键。",
+      "具体来说：cmd中双引号内的管道符会被拆分，导致参数错误。",
+      "所以需要绕过引号问题，先定位shell_tools.py里的分派逻辑。",
+    ].join("\n");
+    const html = renderConversation([
+      {
+        id: "assistant-native-reasoning",
+        role: "assistant",
+        content: "",
+        streaming: true,
+        timestamp: "2026-08-01T16:50:00Z",
+        codexTranscript: {
+          version: 1,
+          source: "native",
+          messageId: "assistant-native-reasoning",
+          cells: [
+            {
+              id: "native-reasoning-running",
+              kind: "reasoning_summary",
+              messageId: "assistant-native-reasoning",
+              status: "running",
+              tone: "running",
+              text: reasoning,
+              summary: reasoning,
+              sourceItemId: "thought-stable-1",
+            },
+          ],
+        },
+      },
+    ]);
+
+    expect(html).toContain('data-codex-transcript-cell-kind="reasoning_summary"');
+    expect(html).toContain("codexTranscriptReasoningHeader");
+    expect(html).toContain('data-thought-expanded="false"');
+    expect(html).toContain('data-thought-section="reasoning:thought-stable-1"');
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).toContain("运行中");
+    expect(html).toContain("codexTranscriptReasoningInlinePreview");
+    expect(html).toContain("重要发现！这次exec_command的失败模式非常关键。");
+    expect(html).toContain("statusSpinner");
+    // Collapsed: full multi-line body must not remain mounted.
+    expect(html).not.toContain("codexTranscriptReasoningText");
+    expect(html).toContain('type="button"');
+  });
+
+  it("keeps completed reasoning_summary collapsed to a single-line preview by default", () => {
+    const reasoning = "确认了：当前cli_tool环境是bash，不是PowerShell。这是关键证据，需要据此修正后续命令。";
+    const html = renderConversation([
+      {
+        id: "assistant-native-reasoning-done",
+        role: "assistant",
+        content: "继续。",
+        timestamp: "2026-08-01T16:55:00Z",
+        codexTranscript: {
+          version: 1,
+          source: "native",
+          messageId: "assistant-native-reasoning-done",
+          cells: [
+            {
+              id: "native-reasoning-done",
+              kind: "reasoning_summary",
+              messageId: "assistant-native-reasoning-done",
+              status: "completed",
+              tone: "neutral",
+              text: reasoning,
+              summary: reasoning,
+            },
+          ],
+        },
+      },
+    ]);
+
+    expect(html).toContain('data-thought-expanded="false"');
+    expect(html).toContain("codexTranscriptReasoningInlinePreview");
+    expect(html).toContain("确认了：当前cli_tool环境是bash");
+    expect(html).not.toContain("codexTranscriptReasoningText");
+    expect(html).not.toContain("statusSpinner");
+  });
+
   it("renders native transcript as the primary assistant surface without duplicating legacy process or response", () => {
     const html = renderConversation([
       {

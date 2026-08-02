@@ -881,6 +881,7 @@ describe("agentMessageOperations", () => {
     expect(operations[0].rawStatus).toBe("running");
   });
 
+
   it("keeps degraded returned tool feedback terminal without reporting it as normal success", () => {
     const message: ConversationMessage = {
       id: "message-degraded-tool",

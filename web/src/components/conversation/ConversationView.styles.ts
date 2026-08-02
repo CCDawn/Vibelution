@@ -81,22 +81,29 @@ const compactIconButtonSize =
   "h-[var(--vui-control-height-sm)] min-h-[var(--vui-control-height-sm)] w-[var(--vui-control-height-sm)] min-w-[var(--vui-control-height-sm)] shrink-0";
 const composerQuietActionState =
   "border-[color-mix(in_srgb,var(--border-soft)_70%,transparent)] bg-[color-mix(in_srgb,var(--vui-control-muted)_62%,transparent)] text-[var(--fg-tertiary)] shadow-none transition-colors duration-150 hover:border-[color-mix(in_srgb,var(--border-strong)_72%,transparent)] hover:bg-[color-mix(in_srgb,var(--vui-surface-workspace)_14%,var(--vui-control-muted-hover))] hover:text-[var(--fg-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--vui-surface-panel)] active:border-[color-mix(in_srgb,var(--accent-cool)_24%,var(--vui-border-subtle))] active:bg-[color-mix(in_srgb,var(--vui-surface-workspace)_18%,var(--vui-control-muted-hover))] disabled:cursor-default disabled:opacity-45 disabled:hover:border-[color-mix(in_srgb,var(--border-soft)_70%,transparent)] disabled:hover:bg-[color-mix(in_srgb,var(--vui-control-muted)_62%,transparent)] disabled:hover:text-[var(--fg-tertiary)]";
+const composerIconOnlySlot =
+  "overflow-visible !px-0 !py-0 [&_[data-slot=vui-button-content]]:!inline-grid [&_[data-slot=vui-button-content]]:!size-full [&_[data-slot=vui-button-content]]:!max-w-none [&_[data-slot=vui-button-content]]:place-items-center [&_[data-slot=vui-button-icon]]:!inline-grid [&_[data-slot=vui-button-icon]]:!size-full [&_[data-slot=vui-button-icon]]:place-items-center [&_[data-slot=vui-button-icon]_svg]:shrink-0";
 const composerRoundActionButton = cv(
   "composerRoundButton",
   "min-w-0 inline-grid",
   compactIconButtonSize,
   "place-items-center rounded-full border p-0",
+  composerIconOnlySlot,
   composerQuietActionState,
 );
 const composerPrimaryActionButton = cv(
   "composerRoundButtonPrimary",
   compactIconButtonSize,
-  "p-0 !border-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)] !bg-[color-mix(in_srgb,var(--accent-cool)_14%,var(--vui-surface-row))] !text-[var(--accent-cool)] hover:!border-[color-mix(in_srgb,var(--accent-cool)_56%,transparent)] hover:!bg-[color-mix(in_srgb,var(--accent-cool)_18%,var(--vui-control-muted-hover))] hover:!text-[var(--accent-cool)] focus-visible:!ring-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)] active:!border-[color-mix(in_srgb,var(--accent-cool)_62%,transparent)] active:!bg-[color-mix(in_srgb,var(--accent-cool)_22%,var(--vui-surface-row))] disabled:hover:!border-[color-mix(in_srgb,var(--border-soft)_70%,transparent)] disabled:hover:!bg-[color-mix(in_srgb,var(--vui-control-muted)_62%,transparent)] disabled:hover:!text-[var(--fg-tertiary)]",
+  "p-0",
+  composerIconOnlySlot,
+  "!border-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)] !bg-[color-mix(in_srgb,var(--accent-cool)_14%,var(--vui-surface-row))] !text-[var(--accent-cool)] hover:!border-[color-mix(in_srgb,var(--accent-cool)_56%,transparent)] hover:!bg-[color-mix(in_srgb,var(--accent-cool)_18%,var(--vui-control-muted-hover))] hover:!text-[var(--accent-cool)] focus-visible:!ring-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)] active:!border-[color-mix(in_srgb,var(--accent-cool)_62%,transparent)] active:!bg-[color-mix(in_srgb,var(--accent-cool)_22%,var(--vui-surface-row))] disabled:hover:!border-[color-mix(in_srgb,var(--border-soft)_70%,transparent)] disabled:hover:!bg-[color-mix(in_srgb,var(--vui-control-muted)_62%,transparent)] disabled:hover:!text-[var(--fg-tertiary)]",
 );
 const composerSendActionButton = cv(
   "sendButton",
   compactIconButtonSize,
-  "inline-grid place-items-center rounded-full border p-0 !border-[var(--fg-primary)] !bg-[var(--fg-primary)] !text-[var(--vui-surface-workspace)] shadow-none transition-colors duration-150 hover:translate-y-0 hover:!border-[color-mix(in_srgb,var(--fg-primary)_82%,var(--accent-cool))] hover:!bg-[color-mix(in_srgb,var(--fg-primary)_82%,var(--accent-cool))] hover:!text-[var(--vui-surface-workspace)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--vui-surface-panel)] active:!bg-[color-mix(in_srgb,var(--fg-primary)_72%,var(--accent-cool))] disabled:!border-[color-mix(in_srgb,var(--border-soft)_70%,transparent)] disabled:!bg-[color-mix(in_srgb,var(--vui-control-muted)_62%,transparent)] disabled:!text-[var(--fg-tertiary)] disabled:hover:!border-[color-mix(in_srgb,var(--border-soft)_70%,transparent)] disabled:hover:!bg-[color-mix(in_srgb,var(--vui-control-muted)_62%,transparent)] disabled:hover:!text-[var(--fg-tertiary)]",
+  "inline-grid place-items-center rounded-full border p-0",
+  composerIconOnlySlot,
+  "!border-[var(--fg-primary)] !bg-[var(--fg-primary)] !text-[var(--vui-surface-workspace)] shadow-none transition-colors duration-150 hover:translate-y-0 hover:!border-[color-mix(in_srgb,var(--fg-primary)_82%,var(--accent-cool))] hover:!bg-[color-mix(in_srgb,var(--fg-primary)_82%,var(--accent-cool))] hover:!text-[var(--vui-surface-workspace)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)] focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--vui-surface-panel)] active:!bg-[color-mix(in_srgb,var(--fg-primary)_72%,var(--accent-cool))] disabled:!border-[color-mix(in_srgb,var(--border-soft)_70%,transparent)] disabled:!bg-[color-mix(in_srgb,var(--vui-control-muted)_62%,transparent)] disabled:!text-[var(--fg-tertiary)] disabled:hover:!border-[color-mix(in_srgb,var(--border-soft)_70%,transparent)] disabled:hover:!bg-[color-mix(in_srgb,var(--vui-control-muted)_62%,transparent)] disabled:hover:!text-[var(--fg-tertiary)]",
 );
 const composerHiddenAttachmentField = cv("hiddenAttachmentInput", composerFieldBase, "hidden");
 const composerGenericInputField = cv("input", composerFieldBase);
@@ -195,7 +202,7 @@ const styles: Record<string, string> = {
   assistantTurnContinuation:
     "vui-components-conversationview assistantTurnContinuation min-w-0 [&_.turnContent]:w-full [&_.turnContent]:gap-1",
   attachButton:
-    cv("attachButton", "min-w-0 inline-grid", compactIconButtonSize, "place-items-center rounded-[var(--radius-control)] border p-0 [font-size:var(--vui-font-xs)] font-semibold leading-tight", composerQuietActionState),
+    cv("attachButton", "min-w-0 inline-grid", compactIconButtonSize, "place-items-center rounded-[var(--radius-control)] border p-0 [font-size:var(--vui-font-xs)] font-semibold leading-tight", composerIconOnlySlot, composerQuietActionState),
   auxiliaryBlock:
     "vui-components-conversationview auxiliaryBlock min-w-0",
   auxiliaryBlock_active:
@@ -290,17 +297,17 @@ const styles: Record<string, string> = {
   composerError:
     `vui-components-conversationview composerError min-w-0 ${vuiStateDangerSoftClass}`,
   composerEditModeDescription:
-    "vui-components-conversationview composerEditModeDescription min-w-0 whitespace-normal break-words [font-size:var(--vui-font-xs)] font-medium leading-[1.45] text-[var(--fg-secondary)] [overflow-wrap:anywhere]",
+    "vui-components-conversationview composerEditModeDescription min-w-0 truncate [font-size:var(--vui-font-xs)] font-medium leading-tight text-[var(--fg-tertiary)]",
   composerEditModeBar:
-    "vui-components-conversationview composerEditModeBar grid min-w-0 min-h-8 w-full max-w-full grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-2 gap-y-1 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--accent-cool)_24%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_8%,transparent)] px-2 py-1.5 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-secondary)]",
+    "vui-components-conversationview composerEditModeBar grid min-w-0 min-h-7 w-full max-w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-subtle)_88%,transparent)] bg-[color-mix(in_srgb,var(--vui-control-muted)_55%,transparent)] px-2 py-1 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-secondary)]",
   composerEditModeCancel:
     "vui-components-conversationview composerEditModeCancel !min-h-6 !w-fit !rounded-[var(--radius-control)] !px-1.5 !py-0 [font-size:var(--vui-font-xs)] font-semibold leading-none",
   composerEditModeCopy:
-    "vui-components-conversationview composerEditModeCopy grid min-w-0 gap-0.5",
+    "vui-components-conversationview composerEditModeCopy grid min-w-0 items-center gap-0.5",
   composerEditModeIcon:
-    "vui-components-conversationview composerEditModeIcon min-w-0 shrink-0 pt-0.5 text-[var(--accent-cool)]",
+    "vui-components-conversationview composerEditModeIcon min-w-0 shrink-0 text-[var(--fg-tertiary)]",
   composerEditModeLabel:
-    "vui-components-conversationview composerEditModeLabel min-w-0 truncate font-semibold text-[var(--fg-primary)]",
+    "vui-components-conversationview composerEditModeLabel min-w-0 truncate font-semibold text-[var(--fg-secondary)]",
   composerEditModePreview:
     "vui-components-conversationview composerEditModePreview min-w-0 max-w-full truncate [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   composerEditModeWarning:
@@ -378,6 +385,20 @@ const styles: Record<string, string> = {
     "vui-components-conversationview codexTranscriptCell_warning text-[var(--state-warning)] [&_.codexTranscriptCellIcon]:text-[var(--state-warning)] [&_.codexTranscriptCellMeta]:text-[var(--state-warning)] [&_.codexTranscriptCellTitle]:text-[var(--state-warning)]",
   codexTranscriptProcessCell:
     "vui-components-conversationview codexTranscriptProcessCell grid grid-cols-[20px_minmax(0,1fr)] items-start gap-x-2 gap-y-1 border-0 bg-transparent py-1 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)]",
+  codexTranscriptReasoningCell:
+    "vui-components-conversationview codexTranscriptReasoningCell min-w-0 grid min-h-0 content-start gap-1 border-0 bg-transparent py-1 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)]",
+  codexTranscriptReasoningHeader:
+    "vui-components-conversationview codexTranscriptReasoningHeader min-w-0 overflow-hidden !grid !h-auto !min-h-0 !w-full !max-w-full grid-cols-[20px_minmax(0,1fr)_24px] !items-center !justify-start gap-x-2 gap-y-0 !border-0 !bg-transparent !p-0 !text-left !shadow-none hover:border-transparent hover:bg-transparent hover:shadow-none hover:!border-transparent hover:!bg-transparent hover:!shadow-none [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
+  codexTranscriptReasoningHeaderBody:
+    "vui-components-conversationview codexTranscriptReasoningHeaderBody min-w-0 overflow-hidden text-left",
+  codexTranscriptReasoningTitleRow:
+    "vui-components-conversationview codexTranscriptReasoningTitleRow inline-flex min-w-0 max-w-full flex-nowrap items-center gap-x-2 overflow-hidden",
+  codexTranscriptReasoningInlinePreview:
+    "vui-components-conversationview codexTranscriptReasoningInlinePreview min-w-0 flex-1 truncate [font-size:var(--vui-font-sm)] font-normal leading-[1.42] text-[var(--fg-tertiary)]",
+  codexTranscriptReasoningText:
+    "vui-components-conversationview codexTranscriptReasoningText min-w-0 max-w-[min(100%,128ch)] whitespace-pre-wrap break-words [overflow-wrap:anywhere] border-0 bg-transparent p-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+  codexTranscriptReasoningTextButton:
+    "vui-components-conversationview codexTranscriptReasoningTextButton min-w-0 !h-auto !w-full !max-w-full cursor-pointer !justify-start !rounded-none !border-0 !bg-transparent !p-0 !pl-[28px] !text-left !shadow-none hover:!border-transparent hover:!bg-transparent hover:!shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] focus-visible:ring-offset-1 [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
   codexTranscriptSurface:
     "vui-components-conversationview codexTranscriptSurface grid w-full max-w-full min-w-0 content-start gap-2 px-0",
   conversationCellTimeline:
@@ -1096,7 +1117,9 @@ const styles: Record<string, string> = {
   timelineHistoryGate:
     "vui-components-conversationview timelineHistoryGate min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   timelineThoughtHeader:
-    "vui-components-conversationview timelineThoughtHeader min-w-0 overflow-visible !grid !h-auto !w-full grid-cols-[20px_minmax(0,1fr)_24px] !items-start !justify-start gap-x-2 gap-y-1 !border-0 !bg-transparent !p-0 !text-left !shadow-none hover:border-transparent hover:bg-transparent hover:shadow-none hover:!border-transparent hover:!bg-transparent hover:!shadow-none [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
+    "vui-components-conversationview timelineThoughtHeader min-w-0 overflow-hidden !grid !h-auto !min-h-0 !w-full !max-w-full grid-cols-[20px_minmax(0,1fr)_24px] !items-center !justify-start gap-x-2 gap-y-0 !border-0 !bg-transparent !p-0 !text-left !shadow-none hover:border-transparent hover:bg-transparent hover:shadow-none hover:!border-transparent hover:!bg-transparent hover:!shadow-none [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
+  timelineThoughtInlinePreview:
+    "vui-components-conversationview timelineThoughtInlinePreview min-w-0 flex-1 truncate [font-size:var(--vui-font-sm)] font-normal leading-[1.42] text-[var(--fg-tertiary)]",
   timelineOperationCell:
     "vui-components-conversationview timelineOperationCell min-w-0 grid min-h-0 content-start gap-1.5 overflow-visible text-[var(--fg-secondary)]",
   timelineOperationCell_pending:
@@ -1115,6 +1138,8 @@ const styles: Record<string, string> = {
     "vui-components-conversationview timelineThoughtCell min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   timelineThoughtText:
     "vui-components-conversationview timelineThoughtText min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] !block max-w-[min(100%,128ch)] whitespace-pre-wrap overflow-visible text-left border-0 bg-transparent",
+  timelineThoughtTextButton:
+    "vui-components-conversationview timelineThoughtTextButton min-w-0 !h-auto !w-full !max-w-full cursor-pointer !justify-start !rounded-none !border-0 !bg-transparent !p-0 !text-left !shadow-none hover:!border-transparent hover:!bg-transparent hover:!shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] focus-visible:ring-offset-1 [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
   title:
     "vui-components-conversationview title min-w-0 [font-size:var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)]",
   toolPill:
@@ -1134,7 +1159,8 @@ const styles: Record<string, string> = {
   turnContent:
     "vui-components-conversationview turnContent grid min-w-0 gap-[5px]",
   turnEditBadge: `vui-components-conversationview turnEditBadge min-w-0 ${vuiOpaqueRowClass} p-2 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)]`,
-  turnEditing: `vui-components-conversationview turnEditing min-w-0 ${vuiOpaqueRowClass} p-2`,
+  turnEditing:
+    "vui-components-conversationview turnEditing min-w-0 [&_.userMessageBody]:border-[color-mix(in_srgb,var(--accent-cool)_34%,var(--vui-border-subtle))] [&_.userMessageBody]:bg-[color-mix(in_srgb,var(--accent-cool)_7%,var(--vui-surface-panel))] [&_.userMessageBody]:ring-1 [&_.userMessageBody]:ring-inset [&_.userMessageBody]:ring-[color-mix(in_srgb,var(--accent-cool)_22%,transparent)]",
   toolApprovalFallback:
     "toolApprovalFallback min-w-0 w-full max-w-[min(42rem,100%)] justify-self-center px-2 pb-2",
   turnError:

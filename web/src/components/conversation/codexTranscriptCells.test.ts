@@ -7,6 +7,7 @@ import codexTranscriptCellsSource from "./codexTranscriptCells.ts?raw";
 import {
   buildCodexTranscriptCells,
   compactCodexTranscriptCellsAcrossMessages,
+  settleCodexTranscriptActiveStatuses,
   type CodexTranscriptCell,
   type CodexTranscriptCellKind,
 } from "./codexTranscriptCells";
@@ -65,6 +66,39 @@ describe("codexTranscriptCells", () => {
         text: "先检查对话布局。\n\n再收口 adapter。",
       }),
     ]);
+  });
+
+  it("settles historical running process rows so only the latest active step keeps spinning", () => {
+    const cells = settleCodexTranscriptActiveStatuses([
+      {
+        id: "r1",
+        kind: "reasoning_summary",
+        messageId: "m1",
+        status: "running",
+        tone: "running",
+        text: "旧思考仍标 running",
+      },
+      {
+        id: "r2",
+        kind: "reasoning_summary",
+        messageId: "m1",
+        status: "running",
+        tone: "running",
+        text: "中间思考也 running",
+      },
+      {
+        id: "t1",
+        kind: "tool_call",
+        messageId: "m1",
+        status: "running",
+        tone: "running",
+        title: "read_file",
+        summary: "当前工具",
+      },
+    ]);
+
+    expect(cells.map((cell) => cell.status)).toEqual(["completed", "completed", "running"]);
+    expect(cells.map((cell) => cell.tone)).toEqual(["neutral", "neutral", "running"]);
   });
 
   it("maps assistant answers and reasoning summaries from timeline items", () => {
