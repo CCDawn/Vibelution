@@ -1795,20 +1795,16 @@ def test_session_submit_kernel_bridge_records_trace_without_agent_inbox_delivery
         include_started_turn_id=True,
     )
 
-    user_message = next(item for item in accepted["messages"] if item["role"] == "user")
-    metadata = user_message["metadata"]
-    kernel_trace = metadata["kernel"]
+    # Kernel audit is deferred off the accept path; wait for the async bridge.
+    kernel_trace = session_service._await_last_submit_kernel_trace(timeout=5.0) or {}
     assert accepted["startedTurnId"]
-    assert metadata["turnId"] == accepted["startedTurnId"]
-    assert metadata["kernelTaskId"] == kernel_trace["taskId"]
-    assert metadata["kernelEventId"] == kernel_trace["eventId"]
-    assert metadata["kernelWorkRunId"] == kernel_trace["workRunId"]
-    assert metadata["kernelOutcomeId"] == kernel_trace["outcomeId"]
-    assert kernel_trace["status"] == "recorded"
-    assert kernel_trace["sourceSurface"] == "session_submit"
-    assert kernel_trace["traceOnly"] is True
+    assert kernel_trace.get("status") == "recorded"
+    assert kernel_trace.get("sourceSurface") == "session_submit"
+    assert kernel_trace.get("traceOnly") is True
+    kernel_task_id = str(kernel_trace.get("taskId") or "").strip()
+    assert kernel_task_id
 
-    timeline = agent_kernel_service.get_kernel_task_timeline(metadata["kernelTaskId"])
+    timeline = agent_kernel_service.get_kernel_task_timeline(kernel_task_id)
     assert timeline["event"]["deliveryPolicy"]["traceOnly"] is True
     assert timeline["event"]["deliveryPolicy"]["wakeTarget"] is False
     assert timeline["task"]["assignedAgentIds"] == [detail["agentId"]]
@@ -1826,10 +1822,11 @@ def test_session_submit_kernel_bridge_records_trace_without_agent_inbox_delivery
     assert message_ref["projectionEdit"]["mode"] == "deep_link_to_source"
     assert message_ref["canonicalEditRoute"].startswith(f"/chat?session={detail['id']}&message=")
     assert agent_directory_service.list_agent_inbox_messages_for_agent(detail["agentId"], status="") == []
-    assert captured_contexts[0]["message_metadata"]["kernelTaskId"] == metadata["kernelTaskId"]
+    # Scheduled context must not block on kernel ids (accept path is kernel-free).
+    assert "kernelTaskId" not in (captured_contexts[0].get("message_metadata") or {})
     assert any(
         event[0][:3] == ("conversation", "kernel", "session.submit.kernel_trace_recorded")
-        and event[1]["fields"]["kernelTaskId"] == metadata["kernelTaskId"]
+        and event[1]["fields"]["kernelTaskId"] == kernel_task_id
         for event in recorded_events
     )
 
@@ -1851,14 +1848,13 @@ def test_session_submit_kernel_bridge_failure_does_not_block_turn(tmp_path, monk
         include_started_turn_id=True,
     )
 
-    user_message = next(item for item in accepted["messages"] if item["role"] == "user")
-    metadata = user_message["metadata"]
     assert accepted["startedTurnId"]
-    assert metadata["turnId"] == accepted["startedTurnId"]
-    assert "kernelTaskId" not in metadata
-    assert metadata["kernel"]["status"] == "failed"
-    assert metadata["kernel"]["errorType"] == "RuntimeError"
-    assert captured_contexts[0]["message_metadata"]["kernel"]["status"] == "failed"
+    # Turn is scheduled even if deferred kernel audit fails.
+    assert captured_contexts
+    assert captured_contexts[0]["turn_id"] == accepted["startedTurnId"]
+    kernel_trace = session_service._await_last_submit_kernel_trace(timeout=5.0) or {}
+    assert kernel_trace.get("status") == "failed"
+    assert kernel_trace.get("errorType") == "RuntimeError"
 
 
 def test_agent_inbox_message_api_round_trip(tmp_path, monkeypatch):

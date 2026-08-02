@@ -113,6 +113,7 @@ def submit_session_message(
     s = _service()
     submit_started_at = s._perf_counter()
     submit_timing_fields: dict[str, Any] = {}
+    deferred_kernel_trace: dict[str, Any] | None = None
     lang = s.get_web_language()
     conversation_id = str(session_id or "").strip()
     normalized_client_submission_id = str(client_submission_id or "").strip()
@@ -275,27 +276,22 @@ def submit_session_message(
         if normalized_client_submission_id:
             persisted_message_metadata["clientSubmissionId"] = normalized_client_submission_id
         persisted_message_metadata.setdefault("turnId", turn_control.turn_id)
-        kernel_trace_started_at = s._perf_counter()
-        kernel_trace = s._create_direct_session_submit_kernel_trace(
-            conversation,
-            agent=agent,
-            turn_id=turn_control.turn_id,
-            message=message,
-            source=normalized_message_source,
-        )
-        submit_timing_fields["kernelTraceMs"] = s._elapsed_ms(kernel_trace_started_at)
-        if kernel_trace:
-            persisted_message_metadata["kernel"] = kernel_trace
-            if str(kernel_trace.get("status") or "").strip() == "recorded":
-                for source_key, metadata_key in (
-                    ("eventId", "kernelEventId"),
-                    ("taskId", "kernelTaskId"),
-                    ("workRunId", "kernelWorkRunId"),
-                    ("outcomeId", "kernelOutcomeId"),
-                ):
-                    value = str(kernel_trace.get(source_key) or "").strip()
-                    if value:
-                        persisted_message_metadata[metadata_key] = value
+        # Kernel bridge is audit/traceOnly: never hold CHAT_STATE_LOCK or block
+        # Prefer: respond-async accept on its latency (measured cold path ~5s).
+        deferred_kernel_trace = {
+            "conversationId": conversation_id,
+            "agent": dict(agent) if isinstance(agent, dict) else {},
+            "turnId": turn_control.turn_id,
+            "message": message,
+            "source": normalized_message_source,
+        }
+        conversation_snapshot_for_kernel = {
+            "id": conversation_id,
+            "conversation_id": conversation_id,
+            "agent_id": agent_id,
+            "agentId": agent_id,
+        }
+        deferred_kernel_trace["conversation"] = conversation_snapshot_for_kernel
         if session_references:
             persisted_message_metadata["sessionReferences"] = session_references
         if skill_invocation:
@@ -609,6 +605,19 @@ def submit_session_message(
         s._persist_session_turn_failure(conversation_id, context, exc)
         s._publish_session_detail_snapshot(conversation_id)
         raise
+    # Defer kernel audit after schedule so accept latency is not gated by Kernel I/O.
+    kernel_enqueue_started_at = s._perf_counter()
+    if deferred_kernel_trace is not None:
+        s._enqueue_direct_session_submit_kernel_trace(
+            conversation=deferred_kernel_trace.get("conversation") or {},
+            agent=deferred_kernel_trace.get("agent") or {},
+            turn_id=str(deferred_kernel_trace.get("turnId") or ""),
+            message=str(deferred_kernel_trace.get("message") or ""),
+            source=str(deferred_kernel_trace.get("source") or ""),
+        )
+    submit_timing_fields["kernelTraceMs"] = 0
+    submit_timing_fields["kernelTraceDeferred"] = True
+    submit_timing_fields["kernelTraceEnqueueMs"] = s._elapsed_ms(kernel_enqueue_started_at)
     s._record_session_turn_accepted_event(context, submit_timing_fields)
     if lightweight_response:
         return _accepted_session_turn_payload(

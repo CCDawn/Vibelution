@@ -66,6 +66,12 @@ VOLATILE_MODEL_EVENT_TYPES = {
     EVENT_ASSISTANT_DELTA_COMMITTED,
 }
 
+# Flush-only events: durable enough for crash recovery of non-critical markers.
+# User content (user_message) still fsyncs; turn_started is reconstructible from work-run.
+DEFERRED_FSYNC_EVENT_TYPES = {
+    EVENT_TURN_STARTED,
+}
+
 AUDIT_ONLY_EVENT_TYPES = {
     EVENT_TURN_STARTED,
     EVENT_TURN_CONTEXT,
@@ -289,7 +295,10 @@ def append_turn_event(
             with path.open("ab") as handle:
                 handle.write(encoded)
                 handle.flush()
-                if normalized_event_type not in VOLATILE_MODEL_EVENT_TYPES:
+                if (
+                    normalized_event_type not in VOLATILE_MODEL_EVENT_TYPES
+                    and normalized_event_type not in DEFERRED_FSYNC_EVENT_TYPES
+                ):
                     os.fsync(handle.fileno())
             _remember_sequence(path, sequence)
             if normalized_event_type in TERMINAL_EVENTS:

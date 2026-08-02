@@ -36,3 +36,10 @@ def test_facade_reexports_submit_entrypoints() -> None:
     assert session_service.submit_session_message_lightweight is submit.submit_session_message_lightweight
     assert session_service.edit_and_resubmit_session_message is submit.edit_and_resubmit_session_message
     assert session_service.submit_session_guidance is submit.submit_session_guidance
+
+
+def test_turn_started_is_deferred_fsync_event() -> None:
+    from core.chat import turn_journal
+
+    assert turn_journal.EVENT_TURN_STARTED in turn_journal.DEFERRED_FSYNC_EVENT_TYPES
+    assert turn_journal.EVENT_USER_MESSAGE not in turn_journal.DEFERRED_FSYNC_EVENT_TYPES
