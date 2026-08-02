@@ -497,6 +497,50 @@ def test_python_launcher_runtime_identity_rejects_dirty_main(monkeypatch, tmp_pa
         launcher._runtime_source_identity()
 
 
+def test_python_launcher_runtime_identity_allows_known_user_scene_manifest(monkeypatch, tmp_path):
+    launcher = _load_python_launcher()
+    monkeypatch.setattr(launcher, "PROJECT_ROOT", tmp_path)
+    monkeypatch.delenv("VIBELUTION_ALLOW_DIRTY_LAUNCH", raising=False)
+
+    def fake_capture(args, *, cwd, label, timeout=15.0):
+        values = {
+            "git root identity": str(tmp_path),
+            "git branch identity": "main",
+            "git commit identity": "a" * 40,
+            "git worktree identity": "?? scripts/_tmp_stash_p3_manifest/LATEST.json\n?? scripts/_tmp_stash_p3_manifest/manifest.json",
+            "frontend tree identity": "tree-a",
+        }
+        return values[label]
+
+    monkeypatch.setattr(launcher, "_run_capture", fake_capture)
+
+    identity = launcher._runtime_source_identity()
+
+    assert identity["trackedClean"] is True
+    assert identity["ignoredUserSceneEntries"] == 2
+
+
+def test_python_launcher_runtime_identity_rejects_other_untracked_files(monkeypatch, tmp_path):
+    launcher = _load_python_launcher()
+    monkeypatch.setattr(launcher, "PROJECT_ROOT", tmp_path)
+    monkeypatch.delenv("VIBELUTION_ALLOW_DIRTY_LAUNCH", raising=False)
+
+    def fake_capture(args, *, cwd, label, timeout=15.0):
+        values = {
+            "git root identity": str(tmp_path),
+            "git branch identity": "main",
+            "git commit identity": "a" * 40,
+            "git worktree identity": "?? scripts/_tmp_stash_p3_manifest/LATEST.json\n?? core/unsafe_runtime_override.py",
+            "frontend tree identity": "tree-a",
+        }
+        return values[label]
+
+    monkeypatch.setattr(launcher, "_run_capture", fake_capture)
+
+    with pytest.raises(RuntimeError, match="core/unsafe_runtime_override.py"):
+        launcher._runtime_source_identity()
+
+
 def test_python_launcher_runtime_identity_allows_dirty_when_opted_in(monkeypatch, tmp_path):
     launcher = _load_python_launcher()
     monkeypatch.setattr(launcher, "PROJECT_ROOT", tmp_path)
