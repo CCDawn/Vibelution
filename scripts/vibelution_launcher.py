@@ -42,6 +42,7 @@ TRUSTED_WEB_HOSTS_ENV = "VIBELUTION_TRUSTED_WEB_HOSTS"
 FRONTEND_PACKAGE_MANAGER_ENV = "VIBELUTION_FRONTEND_PM"
 INTERNAL_LAUNCHER_ENV = "VIBELUTION_RUNTIME_MANAGER_INTERNAL_LAUNCHER"
 INTERNAL_ACTIONS = {"internal-start", "internal-focus", "internal-stop", "internal-restart"}
+RUNTIME_SAFE_UNTRACKED_PREFIXES = ("scripts/_tmp_stash_p3_manifest/",)
 
 
 def _now_iso() -> str:
@@ -412,6 +413,24 @@ def _allow_dirty_launch() -> bool:
     return str(os.environ.get(ALLOW_DIRTY_LAUNCH_ENV) or "").strip() in {"1", "true", "TRUE", "yes", "YES"}
 
 
+def _runtime_relevant_worktree_status(worktree_status: str) -> tuple[list[str], int]:
+    """Keep runtime source checks strict while ignoring the preserved user-scene manifest."""
+
+    relevant: list[str] = []
+    ignored_user_scene_entries = 0
+    for raw_line in str(worktree_status or "").splitlines():
+        line = raw_line.strip()
+        if not line.startswith("?? "):
+            relevant.append(raw_line)
+            continue
+        path = line[3:].replace("\\", "/")
+        if any(path.startswith(prefix) for prefix in RUNTIME_SAFE_UNTRACKED_PREFIXES):
+            ignored_user_scene_entries += 1
+            continue
+        relevant.append(raw_line)
+    return relevant, ignored_user_scene_entries
+
+
 def _runtime_source_identity(*, allow_dirty: bool | None = None) -> dict[str, object]:
     allow_dirty_worktree = _allow_dirty_launch() if allow_dirty is None else bool(allow_dirty)
     git_command = shutil.which("git.exe" if os.name == "nt" else "git") or shutil.which("git") or "git"
@@ -444,9 +463,10 @@ def _runtime_source_identity(*, allow_dirty: bool | None = None) -> dict[str, ob
         cwd=PROJECT_ROOT,
         label="git worktree identity",
     )
-    tracked_clean = not bool(worktree_status)
-    if worktree_status and not allow_dirty_worktree:
-        preview = " | ".join(worktree_status.splitlines()[:8])
+    relevant_worktree_status, ignored_user_scene_entries = _runtime_relevant_worktree_status(worktree_status)
+    tracked_clean = not bool(relevant_worktree_status)
+    if relevant_worktree_status and not allow_dirty_worktree:
+        preview = " | ".join(relevant_worktree_status[:8])
         raise RuntimeError(
             "Launcher restart requires a clean local main so runtime code cannot drift from HEAD"
             f": {preview}"
@@ -464,6 +484,7 @@ def _runtime_source_identity(*, allow_dirty: bool | None = None) -> dict[str, ob
         "frontendTree": frontend_tree,
         "trackedClean": tracked_clean,
         "allowDirty": allow_dirty_worktree,
+        "ignoredUserSceneEntries": ignored_user_scene_entries,
     }
 
 
