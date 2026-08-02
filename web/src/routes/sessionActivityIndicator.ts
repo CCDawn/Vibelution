@@ -201,10 +201,15 @@ export function resolveSessionActivityTone(
   if (candidates.some((value) => sessionIsErrorStatus(value))) {
     return "error";
   }
-  if (options?.isRuntimeRunning || candidates.some((value) => sessionIsRunningStatus(value))) {
+  // A real live phase always reports running. The runtime-running flag only
+  // covers lagging statuses and must not override a terminal authoritative one.
+  if (candidates.some((value) => sessionIsRunningStatus(value))) {
     return "running";
   }
   const status = candidates[0] || "";
+  if (options?.isRuntimeRunning && !sessionIsCompletedStatus(status)) {
+    return "running";
+  }
   if (sessionIsCompletedStatus(status) || Number(session.agentInboxPendingCount || 0) > 0) {
     if (options?.isActive) {
       return "none";
