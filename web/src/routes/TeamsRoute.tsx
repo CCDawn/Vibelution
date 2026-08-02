@@ -1682,13 +1682,13 @@ export function TeamsRoute({
       && !sourceCollectionSummaryQuery.data
       && (sourceCollectionSummaryQuery.isPending || sourceCollectionSummaryQuery.isFetching),
     );
-    const route = currentTaskSessionRoute || (selectedSourceCollectionRunEffectiveId
+    const route = selectedSourceCollectionRunEffectiveId
       ? ""
-      : researchStageAgentDirectChatRoute(
+      : currentTaskSessionRoute || researchStageAgentDirectChatRoute(
         binding?.agent,
         returnRoute,
         returnLabel,
-      ));
+      );
     return resolveSourceCollectionStageAgentChatState({
       binding,
       route,
