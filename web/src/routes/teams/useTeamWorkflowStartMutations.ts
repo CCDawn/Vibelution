@@ -331,7 +331,10 @@ export function useTeamWorkflowStartMutations(options: UseTeamWorkflowStartMutat
             maxResultsPerQuery: payload.draft.maxResultsPerQuery,
             promptCachePolicy: SOURCE_COLLECTION_PROMPT_CACHE_POLICY,
             scope: {
-              domain: "neuroscience-inspired algorithm discovery",
+              // The source plan also expands scope.domain into query seeds.
+              // Keep it aligned with the active research project instead of
+              // carrying an old predictive-coding demo subject into every run.
+              domain: payload.draft.topic.trim(),
               workflowStage: payload.stageType,
               uiEntry: "teams_research_stage_launcher",
             },

@@ -59,4 +59,9 @@ describe("team workflow start mutations contract", () => {
     expect(mutationsSource).toContain("!removedRunIds.has(run.runId)");
     expect(mutationsSource).toContain("await queryClient.invalidateQueries({");
   });
+
+  it("derives the research-stage search domain from the active project draft", () => {
+    expect(mutationsSource).toContain("domain: payload.draft.topic.trim()");
+    expect(mutationsSource).not.toContain('domain: "neuroscience-inspired algorithm discovery"');
+  });
 });
