@@ -1073,6 +1073,79 @@ def test_auto_continue_pause_result_without_visible_reply_needs_continue():
     assert session_service._chat_turn_result_status("completed", result, stop_requested=False) == "needs_continue"
 
 
+def test_session_detail_include_secondary_false_skips_side_lists(tmp_path, monkeypatch):
+    from core.web.services.session import projection as session_projection
+
+    conversation = {
+        "id": "session-light",
+        "conversation_id": "session-light",
+        "title": "light",
+        "status": "ready",
+        "messages": [],
+        "last_turn_status": "ready",
+        "agent_id": "agent-light",
+    }
+    summary = {
+        "id": "session-light",
+        "title": "light",
+        "status": "ready",
+        "taskSummary": "",
+        "lastActive": "",
+        "updatedAt": "",
+        "currentPhase": "ready",
+        "agentId": "agent-light",
+    }
+
+    def boom(*_args, **_kwargs):
+        raise AssertionError("secondary hydrate should be skipped")
+
+    monkeypatch.setattr(session_service, "_recent_chat_next_state_signal_summaries", boom)
+    monkeypatch.setattr(session_service, "list_group_context_events_for_agent", boom)
+    monkeypatch.setattr(session_service, "list_agent_inbox_messages_for_agent", boom)
+    monkeypatch.setattr(session_service, "_pending_tool_governance_requests_for_session", boom)
+    monkeypatch.setattr(session_service, "_session_agent_is_available", lambda _summary: True)
+    monkeypatch.setattr(
+        session_service,
+        "_session_detail_agent_snapshot",
+        lambda *_args, **_kwargs: {"toolPolicy": {}, "memoryPolicy": {}},
+    )
+    monkeypatch.setattr(session_service, "_get_session_turn_control", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(session_service, "_active_chat_turn_work_run_for_session", lambda *_a, **_k: None)
+    monkeypatch.setattr(session_service, "_normalize_session_active_task", lambda value: value if isinstance(value, dict) else None)
+    monkeypatch.setattr(session_service, "_is_task_tool_backed_active_task", lambda _task: False)
+    monkeypatch.setattr(session_service, "_session_detail_window_requested", lambda **_kwargs: False)
+    monkeypatch.setattr(session_service, "_messages_with_live_output", lambda *_a, **_k: [])
+    monkeypatch.setattr(session_service, "_normalize_messages", lambda *_a, **_k: [])
+    monkeypatch.setattr(session_service, "_build_session_context_usage", lambda *_a, **_k: {})
+    monkeypatch.setattr(session_service, "_session_last_llm_usage", lambda *_a, **_k: None)
+    monkeypatch.setattr(session_service, "_build_session_cache_usage", lambda *_a, **_k: {})
+    monkeypatch.setattr(session_service, "_current_session_live_context_composition", lambda *_a, **_k: None)
+    monkeypatch.setattr(session_service, "_normalize_session_context_composition", lambda *_a, **_k: None)
+    monkeypatch.setattr(session_service, "_current_session_live_llm_payload_trace", lambda *_a, **_k: None)
+    monkeypatch.setattr(session_service, "_normalize_session_llm_payload_trace", lambda *_a, **_k: None)
+    monkeypatch.setattr(session_service, "_session_last_cache_composition", lambda *_a, **_k: None)
+    monkeypatch.setattr(session_service, "_session_ledger_sequence", lambda *_a, **_k: 0)
+    monkeypatch.setattr(session_service, "_active_task_to_api", lambda *_a, **_k: None)
+    monkeypatch.setattr(session_service, "_visible_session_runtime_notices", lambda *_a, **_k: [])
+    monkeypatch.setattr(session_service, "_normalize_session_runtime_notices", lambda *_a, **_k: [])
+    monkeypatch.setattr(session_service, "normalize_active_skill_contract", lambda *_a, **_k: {})
+    monkeypatch.setattr(session_service, "_normalize_child_handoff_context", lambda *_a, **_k: {})
+    monkeypatch.setattr(session_service, "_session_turn_error_to_api", lambda *_a, **_k: {})
+    monkeypatch.setattr(session_service, "_current_session_turn_id", lambda *_a, **_k: "")
+
+    detail = session_projection._build_session_detail_from_summary(
+        conversation,
+        summary,
+        hydrate_agent=True,
+        include_secondary=False,
+    )
+    assert detail["secondaryHydrated"] is False
+    assert detail["nextStateSignals"] == []
+    assert detail["groupContextEvents"] == []
+    assert detail["agentInboxMessages"] == []
+    assert detail["pendingToolGovernanceRequests"] == []
+
+
 def test_terminal_reason_for_turn_maps_canonical_stops():
     assert session_service._terminal_reason_for_turn("completed") == "success"
     assert session_service._terminal_reason_for_turn("failed_runtime") == "failed_runtime"

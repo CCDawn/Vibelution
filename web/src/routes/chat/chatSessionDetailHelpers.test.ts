@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildSessionDetailShellFromSummary,
+  fetchSessionDetailWindow,
   isForeignSessionDetailQueryKey,
   isSessionNotFoundError,
   isStaleLedgerUpdate,
@@ -10,6 +11,8 @@ import {
   sessionDetailSnapshotKey,
 } from "./chatSessionDetailHelpers";
 import type { SessionDetail, SessionSummary } from "../../api/types";
+import * as client from "../../api/client";
+import { vi } from "vitest";
 
 describe("chatSessionDetailHelpers", () => {
   it("detects session-not-found errors across locales", () => {
@@ -74,6 +77,15 @@ describe("chatSessionDetailHelpers", () => {
         summary: { id: "other", title: "Nope" } as SessionSummary,
       }),
     ).toBeUndefined();
+  });
+
+  it("passes includeSecondary=false for light session detail polls", async () => {
+    const spy = vi.spyOn(client, "fetchJson").mockResolvedValue({ id: "s1" } as SessionDetail);
+    await fetchSessionDetailWindow("s1", { includeSecondary: false });
+    expect(spy).toHaveBeenCalled();
+    const url = String(spy.mock.calls[0]?.[0] || "");
+    expect(url).toContain("includeSecondary=false");
+    spy.mockRestore();
   });
 
   it("detects foreign session detail query keys for cancel-on-switch", () => {

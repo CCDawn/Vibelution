@@ -287,12 +287,14 @@ def session_detail(
     messageLimit: int = Query(default=0, ge=0, le=200),
     beforeMessageIndex: int = Query(default=0, ge=0),
     transcriptScope: str = Query(default="all"),
+    includeSecondary: bool = Query(default=True),
 ) -> dict:
     detail = get_session_detail(
         session_id,
         message_limit=messageLimit,
         before_message_index=beforeMessageIndex,
         transcript_scope=transcriptScope,
+        include_secondary=includeSecondary,
     )
     if detail is None:
         raise HTTPException(status_code=404, detail="Session not found")

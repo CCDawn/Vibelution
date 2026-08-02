@@ -143,13 +143,20 @@ def get_session_detail(
     message_limit: Any = None,
     before_message_index: Any = None,
     transcript_scope: Any = "all",
+    include_secondary: Any = True,
 ) -> dict | None:
-    """Return a session detail payload by persisted conversation id."""
+    """Return a session detail payload by persisted conversation id.
+
+    include_secondary=False skips expensive side lists (inbox / governance /
+    group context / next-state signals) for high-frequency poll while SSE owns
+    the live transcript path.
+    """
     s = _service()
 
     normalized_session_id = str(session_id or "").strip()
     if not normalized_session_id:
         return None
+    include_secondary_lists = _coerce_include_secondary(include_secondary)
     window_requested = s._session_detail_window_requested(
         message_limit=message_limit,
         before_message_index=before_message_index,
@@ -168,6 +175,7 @@ def get_session_detail(
             message_limit=message_limit,
             before_message_index=before_message_index,
             transcript_scope=transcript_scope,
+            include_secondary=include_secondary_lists,
         )
 
     with s._RUNNING_SESSIONS_LOCK:
@@ -192,8 +200,20 @@ def get_session_detail(
             message_limit=message_limit,
             before_message_index=before_message_index,
             transcript_scope=transcript_scope,
+            include_secondary=include_secondary_lists,
         )
     return None
+
+
+def _coerce_include_secondary(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    text = str(value or "").strip().lower()
+    if text in {"0", "false", "no", "off"}:
+        return False
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    return True
 
 
 def get_active_session_detail() -> dict | None:
@@ -248,6 +268,7 @@ def _build_session_detail(
     message_limit: Any = None,
     before_message_index: Any = None,
     transcript_scope: Any = "all",
+    include_secondary: bool = True,
 ) -> dict[str, Any]:
     s = _service()
     summary = s._build_session_summary(conversation)
@@ -258,6 +279,7 @@ def _build_session_detail(
         message_limit=message_limit,
         before_message_index=before_message_index,
         transcript_scope=transcript_scope,
+        include_secondary=include_secondary,
     )
 
 
@@ -269,6 +291,7 @@ def _build_session_detail_from_summary(
     message_limit: Any = None,
     before_message_index: Any = None,
     transcript_scope: Any = "all",
+    include_secondary: bool = True,
 ) -> dict[str, Any]:
     s = _service()
     turn_control = s._get_session_turn_control(conversation["id"])
@@ -395,15 +418,22 @@ def _build_session_detail_from_summary(
         "lastCacheComposition": last_cache_composition,
         "handoffContext": s._normalize_child_handoff_context(conversation.get("handoffContext") or conversation.get("handoff_context")),
         "lastTurnError": s._session_turn_error_to_api(conversation.get("lastTurnError")),
-        "nextStateSignals": s._recent_chat_next_state_signal_summaries(conversation["id"], limit=5) if hydrate_agent else [],
+        # Secondary lists are expensive (disk/agent-directory). Poll paths that
+        # already own live transcript via SSE should set include_secondary=False.
+        "secondaryHydrated": bool(include_secondary and hydrate_agent),
+        "nextStateSignals": (
+            s._recent_chat_next_state_signal_summaries(conversation["id"], limit=5)
+            if hydrate_agent and include_secondary
+            else []
+        ),
         "groupContextEvents": s.list_group_context_events_for_agent(available_agent_id, limit=8)
-        if available_agent_id and hydrate_agent
+        if available_agent_id and hydrate_agent and include_secondary
         else [],
         "agentInboxMessages": s.list_agent_inbox_messages_for_agent(available_agent_id, limit=8, status="pending")
-        if available_agent_id and hydrate_agent
+        if available_agent_id and hydrate_agent and include_secondary
         else [],
         "pendingToolGovernanceRequests": s._pending_tool_governance_requests_for_session(available_agent_id)
-        if available_agent_id and hydrate_agent
+        if available_agent_id and hydrate_agent and include_secondary
         else [],
         "toolPolicy": (available_agent or {}).get("toolPolicy") if available_agent_id else None,
         "memoryPolicy": (available_agent or {}).get("memoryPolicy") if available_agent_id else None,

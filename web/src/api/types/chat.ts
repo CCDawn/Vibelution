@@ -822,6 +822,8 @@ export type SessionDetail = SessionSummary & {
   readFiles: string[];
   messages: ConversationMessage[];
   messageWindow?: SessionMessageWindow;
+  /** False when GET used includeSecondary=false (light poll). */
+  secondaryHydrated?: boolean;
   runtimeNotices?: SessionRuntimeNotice[];
   contextUsage?: {
     used: number;

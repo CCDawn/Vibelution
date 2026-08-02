@@ -210,6 +210,54 @@ describe("chatSessionState", () => {
     });
   });
 
+  it("preserves secondary lists when a light poll response arrives", () => {
+    const full = makeDetail({
+      secondaryHydrated: true,
+      agentInboxMessages: [{ id: "inbox-1" }] as never,
+      pendingToolGovernanceRequests: [{ requestId: "gov-1" }] as never,
+      nextStateSignals: [{ id: "sig-1" }] as never,
+      groupContextEvents: [{ id: "grp-1" }] as never,
+      messageWindow: {
+        mode: "window",
+        totalMessages: 2,
+        returnedMessages: 2,
+        oldestMessageIndex: 1,
+        newestMessageIndex: 2,
+        hasEarlier: false,
+        hasLater: false,
+        nextBeforeMessageIndex: null,
+        transcriptScope: "window",
+      },
+    });
+    const light = makeDetail({
+      secondaryHydrated: false,
+      agentInboxMessages: [],
+      pendingToolGovernanceRequests: [],
+      nextStateSignals: [],
+      groupContextEvents: [],
+      currentPhase: "running",
+      messageWindow: {
+        mode: "window",
+        totalMessages: 2,
+        returnedMessages: 2,
+        oldestMessageIndex: 1,
+        newestMessageIndex: 2,
+        hasEarlier: false,
+        hasLater: false,
+        nextBeforeMessageIndex: null,
+        transcriptScope: "window",
+      },
+    });
+
+    const merged = mergeSessionDetailMessageWindow(full, light);
+    expect(merged.secondaryHydrated).toBe(true);
+    expect(merged.agentInboxMessages).toEqual([{ id: "inbox-1" }]);
+    expect(merged.pendingToolGovernanceRequests).toEqual([{ requestId: "gov-1" }]);
+    expect(merged.nextStateSignals).toEqual([{ id: "sig-1" }]);
+    expect(merged.groupContextEvents).toEqual([{ id: "grp-1" }]);
+    expect(merged.currentPhase).toBe("running");
+  });
+
   it("derives a sidebar-safe summary from active session detail", () => {
     expect(sessionSummaryFromDetail(makeDetail())).toEqual({
       id: "session-live",
