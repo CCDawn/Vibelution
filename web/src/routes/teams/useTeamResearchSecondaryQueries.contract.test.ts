@@ -13,9 +13,13 @@ describe("team research secondary queries contract", () => {
   });
 
   it("is wired from TeamsRoute", () => {
+    expect(routeSource).toContain("resolveResearchSecondaryStatusQueryEnabled({");
+    expect(routeSource).toMatch(
+      /challengeProgramProgressVisible:\s*challengeCupResearchTeamSelected\s*&&\s*\(challengeTeamSurface === "progress"\s*\|\|\s*researchWorkspaceView === "overview"\)/,
+    );
     expect(routeSource).toContain("useTeamResearchSecondaryQueries({");
     expect(routeSource).toMatch(
-      /challengeProgramProgressVisible:\s*challengeCupResearchTeamSelected\s*&&\s*challengeTeamSurface === "progress"/,
+      /useTeamResearchSecondaryQueries\(\{[\s\S]*researchSecondaryStatusQueryEnabled,[\s\S]*\}\)/,
     );
     expect(routeSource).not.toContain("const experimentPlanningStatusQuery = useQuery({");
     expect(routeSource).not.toContain("const researchLoopStatusQuery = useQuery({");

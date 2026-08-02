@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 
-import styles from "./AppShell.styles";
+import styles from "./AppShellTopClock.styles";
 
 type AppShellTopClockProps = {
   lang: "zh" | "en" | string;
