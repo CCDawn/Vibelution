@@ -201,18 +201,48 @@ def _chat_turn_result_status(result_status: str, result: Any, *, stop_requested:
         return "stopped_by_user"
     normalized = str(result_status or "").strip().lower()
     if isinstance(result, dict):
+        llm_failure = result.get("llm_failure") if isinstance(result.get("llm_failure"), dict) else {}
+        failure_reason = str(
+            llm_failure.get("reason_code")
+            or llm_failure.get("reasonCode")
+            or result.get("main_loop_exception")
+            or ""
+        ).strip().lower()
+        # Main-loop / runtime failures must never project as a successful completed turn,
+        # even when a short intermediate stream fragment exists.
+        if (
+            normalized in {"failed", "timeout", "error", "failed_runtime"}
+            or failure_reason in {"agent_main_loop_exception", "agent_turn_failed_without_diagnostics"}
+            or (
+                llm_failure
+                and str(llm_failure.get("category") or "").strip().lower()
+                in {"runtime_error", "protocol_error", "provider_error", "provider_protocol_error"}
+            )
+        ):
+            return "failed_runtime"
         contract = s.build_chat_coding_result_contract(result)
         outcome = str(contract.get("outcome") or result.get("outcome") or result.get("task_outcome") or "").strip().lower()
         explicit_outcome = s._explicit_chat_result_outcome(result)
         visible = s._visible_reply_candidate(result)
+        tool_count = s._coerce_nonnegative_int(result.get("tool_call_count") or 0)
+        tool_trace = list(result.get("tool_trace") or result.get("tool_calls") or [])
         if normalized == "completed" and s._chat_contract_blocks_unexecuted_validation(contract):
+            return "needs_continue"
+        if normalized == "completed" and not visible and (tool_count > 0 or tool_trace):
+            return "needs_continue"
+        # Tool-heavy turns that only left intermediate notes (no conclusion / next step)
+        # must not look finished to the user.
+        if (
+            normalized == "completed"
+            and visible
+            and (tool_count > 0 or tool_trace)
+            and explicit_outcome != "progress"
+            and not s.has_conclusion_signal(visible)
+            and not s.has_next_action_signal(visible)
+        ):
             return "needs_continue"
         if normalized == "completed" and explicit_outcome != "progress" and visible:
             return "completed"
-        tool_count = s._coerce_nonnegative_int(result.get("tool_call_count") or 0)
-        tool_trace = list(result.get("tool_trace") or result.get("tool_calls") or [])
-        if normalized == "completed" and not visible and (tool_count > 0 or tool_trace):
-            return "needs_continue"
         if outcome == "progress":
             return "needs_continue"
     if normalized == "completed":

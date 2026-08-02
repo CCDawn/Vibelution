@@ -4095,6 +4095,85 @@ class TestToolMessageFlow:
         assert result["raw_output"] == result["summary"]
         assert result["error"] == result["summary"]
 
+    def test_run_single_turn_main_loop_timeout_does_not_complete_with_fragment(self, monkeypatch):
+        """TimeoutExpired-style main-loop failure must not publish intermediate stream as completed."""
+        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent.name = "tester"
+        agent.config = SimpleNamespace(
+            llm=SimpleNamespace(model_name="deepseek-v4-flash"),
+            agent=SimpleNamespace(max_iterations=3, awake_interval=1),
+        )
+        agent.mode_policy = ModePolicy(
+            mode=AgentMode.CHAT,
+            orchestrator_kind="chat",
+            keep_multi_turn_context=True,
+            allow_auto_loop=False,
+            capture_chat_dataset_candidates=False,
+            reset_context_before_turn=False,
+            reset_context_between_cases=False,
+            allow_direct_supervised_payload=False,
+            finish_after_direct_response=False,
+            runtime_input_builder=lambda text: text,
+        )
+        agent._effective_max_token_limit = 1024
+        agent.key_tools = [object()]
+        agent._last_turn_failed = False
+        agent._last_turn_metadata = {}
+
+        fragment = "后端有 SSE 流式路由，但要确认 LLM 调用本身是否流式。"
+
+        def fake_think_and_act(user_prompt=None, goal_override=None, attachments=None, **kwargs):
+            agent._last_visible_response_text = fragment
+            agent._last_response_tool_calls = 13
+            agent._recent_tool_records = [{"name": "cli_tool", "status": "done"}]
+            agent._record_turn_failure_diagnostic(
+                category="runtime_error",
+                reason_code="agent_main_loop_exception",
+                reason_summary="Agent 主循环异常",
+                reason_detail="Agent 主循环发生 TimeoutExpired，请按 Trace 定位运行场景。",
+                chain_stage="agent_main_loop",
+                event_code="agent.turn.failed_exception",
+                exception_type="TimeoutExpired",
+            )
+            agent._last_turn_failed = True
+            agent._last_turn_metadata = {
+                **dict(agent._last_turn_metadata or {}),
+                "status": "failed",
+                "outcome": "failed",
+                "main_loop_exception": "TimeoutExpired",
+            }
+            # Simulate the historical bug path: finalize overwrote failure to False
+            # but metadata still carries llm_failure — status must stay failed.
+            return True
+
+        agent.think_and_act = fake_think_and_act
+        monkeypatch.setattr(agent_module.logger, "start_session", lambda metadata=None, **kwargs: None)
+        monkeypatch.setattr(agent_module.logger, "end_session", lambda summary=None: None)
+        monkeypatch.setattr(agent_module._debug_logger, "start_session", lambda session_id: None)
+        monkeypatch.setattr(agent_module._debug_logger, "system", lambda *args, **kwargs: None)
+        monkeypatch.setattr(agent_module._debug_logger, "info", lambda *args, **kwargs: None)
+        monkeypatch.setattr(agent_module._debug_logger, "end_session", lambda: None)
+        monkeypatch.setattr(
+            agent_module,
+            "_record_agent_scene_event",
+            lambda *args, **kwargs: None,
+        )
+        monkeypatch.setattr(
+            agent_module,
+            "get_session_state",
+            lambda: SimpleNamespace(get_attention_snapshot=lambda: {}),
+        )
+
+        result = agent.run_single_turn(initial_prompt="为什么首字慢")
+
+        assert result["status"] == "failed"
+        assert result["outcome"] == "failed"
+        assert result["summary"] != fragment
+        assert "TimeoutExpired" in str(result.get("error") or result.get("summary") or "")
+        assert result.get("thought") == fragment
+        assert result["tool_call_count"] == 13
+        assert result.get("llm_failure", {}).get("reason_code") == "agent_main_loop_exception"
+
     def test_run_single_turn_preserves_structured_chain_failure(self, monkeypatch):
         agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
         agent.name = "tester"
