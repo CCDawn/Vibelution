@@ -1504,55 +1504,57 @@ export function TeamsRoute({
     recordResearchLoopEvidenceFromWorkspace,
     recordResearchLoopDecisionFromWorkspace,
   } = createExperimentWorkspaceActions({
-    teamId: selectedTeam?.teamId || "",
+    // Keep actions on the route-stable ID while richer Team detail refreshes.
+    // Otherwise an enabled control can silently return without a mutation.
+    teamId: effectiveTeamId,
     createExperimentPlanPending:
       createExperimentPlanMutation.isPending
-      && createExperimentPlanMutation.variables?.teamId === selectedTeam?.teamId,
+      && createExperimentPlanMutation.variables?.teamId === effectiveTeamId,
     materializeEngineeringProxyPending:
       materializeEngineeringProxyHypothesisMutation.isPending
-      && materializeEngineeringProxyHypothesisMutation.variables?.teamId === selectedTeam?.teamId,
+      && materializeEngineeringProxyHypothesisMutation.variables?.teamId === effectiveTeamId,
     completeScientificHypothesisCandidateId:
       completeScientificHypothesisFromDesignMutation.isPending
-      && completeScientificHypothesisFromDesignMutation.variables?.teamId === selectedTeam?.teamId
+      && completeScientificHypothesisFromDesignMutation.variables?.teamId === effectiveTeamId
         ? completeScientificHypothesisFromDesignMutation.variables.candidateId
         : "",
     reviewExperimentHypothesisCandidateId:
       reviewExperimentHypothesisMutation.isPending
-      && reviewExperimentHypothesisMutation.variables?.teamId === selectedTeam?.teamId
+      && reviewExperimentHypothesisMutation.variables?.teamId === effectiveTeamId
         ? reviewExperimentHypothesisMutation.variables.candidateId
         : "",
     createExperimentHypothesisRevisionCandidateId:
       createExperimentHypothesisRevisionMutation.isPending
-      && createExperimentHypothesisRevisionMutation.variables?.teamId === selectedTeam?.teamId
+      && createExperimentHypothesisRevisionMutation.variables?.teamId === effectiveTeamId
         ? createExperimentHypothesisRevisionMutation.variables.candidateId
         : "",
     freezeExperimentDesignPending:
       freezeExperimentDesignMutation.isPending
-      && freezeExperimentDesignMutation.variables?.teamId === selectedTeam?.teamId,
+      && freezeExperimentDesignMutation.variables?.teamId === effectiveTeamId,
     registerExperimentBaselineArtifactPending:
       registerExperimentBaselineArtifactMutation.isPending
-      && registerExperimentBaselineArtifactMutation.variables?.teamId === selectedTeam?.teamId,
+      && registerExperimentBaselineArtifactMutation.variables?.teamId === effectiveTeamId,
     registerExperimentSmokeResultPending:
       registerExperimentSmokeResultMutation.isPending
-      && registerExperimentSmokeResultMutation.variables?.teamId === selectedTeam?.teamId,
+      && registerExperimentSmokeResultMutation.variables?.teamId === effectiveTeamId,
     runExperimentSmokePending:
       runExperimentSmokeMutation.isPending
-      && runExperimentSmokeMutation.variables?.teamId === selectedTeam?.teamId,
+      && runExperimentSmokeMutation.variables?.teamId === effectiveTeamId,
     registerExperimentFullRunResultPending:
       registerExperimentFullRunResultMutation.isPending
-      && registerExperimentFullRunResultMutation.variables?.teamId === selectedTeam?.teamId,
+      && registerExperimentFullRunResultMutation.variables?.teamId === effectiveTeamId,
     requestExperimentKnowledgeIngestionPending:
       requestExperimentKnowledgeIngestionMutation.isPending
-      && requestExperimentKnowledgeIngestionMutation.variables?.teamId === selectedTeam?.teamId,
+      && requestExperimentKnowledgeIngestionMutation.variables?.teamId === effectiveTeamId,
     createResearchLoopPending:
       createResearchLoopMutation.isPending
-      && createResearchLoopMutation.variables?.teamId === selectedTeam?.teamId,
+      && createResearchLoopMutation.variables?.teamId === effectiveTeamId,
     recordResearchLoopEvidencePending:
       recordResearchLoopEvidenceMutation.isPending
-      && recordResearchLoopEvidenceMutation.variables?.teamId === selectedTeam?.teamId,
+      && recordResearchLoopEvidenceMutation.variables?.teamId === effectiveTeamId,
     recordResearchLoopDecisionPending:
       recordResearchLoopDecisionMutation.isPending
-      && recordResearchLoopDecisionMutation.variables?.teamId === selectedTeam?.teamId,
+      && recordResearchLoopDecisionMutation.variables?.teamId === effectiveTeamId,
     researchStagePhases: researchStageRoundStatusQuery.data?.phases ?? [],
     experimentPlanningStatus: experimentPlanningStatusQuery.data ?? null,
     sourceCollectionDraftTitle: sourceCollectionDraft.title,
