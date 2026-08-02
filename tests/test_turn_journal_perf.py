@@ -101,20 +101,27 @@ def test_terminal_check_cache_avoids_full_scan(tmp_path, monkeypatch):
 
 
 def test_mkdir_deduplicated(tmp_path, monkeypatch):
-    mkdir_calls = []
-    real_mkdir = Path.mkdir
+    ensure_calls: list[tuple[str, bool]] = []
+    real_ensure = turn_journal._ensure_journal_parent
 
-    def counting_mkdir(self, *args, **kwargs):
-        mkdir_calls.append(str(self))
-        return real_mkdir(self, *args, **kwargs)
+    def counting_ensure(path):
+        key = str(path.parent)
+        with turn_journal._MKDIR_CACHE_LOCK:
+            was_cached = key in turn_journal._MKDIR_CACHE
+        ensure_calls.append((key, was_cached))
+        return real_ensure(path)
 
-    monkeypatch.setattr(Path, "mkdir", counting_mkdir)
+    monkeypatch.setattr(turn_journal, "_ensure_journal_parent", counting_ensure)
 
     append_turn_event(tmp_path, "sess", "t1", EVENT_TURN_STARTED, status="running")
     append_turn_event(tmp_path, "sess", "t1", EVENT_USER_MESSAGE, status="recorded")
     append_turn_event(tmp_path, "sess", "t1", EVENT_TOOL_RESULT, status="done")
 
-    assert len(mkdir_calls) == 1, mkdir_calls
+    assert ensure_calls, "expected journal parent ensure calls"
+    assert ensure_calls[0][1] is False
+    assert all(was_cached for _, was_cached in ensure_calls[1:]), ensure_calls
+    assert len({key for key, _ in ensure_calls}) == 1
+    assert len(turn_journal._MKDIR_CACHE) == 1
 
 
 def test_terminal_check_still_blocks_post_terminal_events(tmp_path):
