@@ -115,6 +115,27 @@ describe("createExperimentWorkspaceActions", () => {
     expect(deps.createExperimentPlanMutation.mutate).not.toHaveBeenCalled();
   });
 
+  it("dispatches a hypothesis revision even when a stale visual pending marker remains", () => {
+    const deps = baseDeps({
+      createExperimentHypothesisRevisionCandidateId: "hypothesis-h2",
+    });
+    const actions = createExperimentWorkspaceActions(deps);
+    const plan = { planId: "plan-v6" } as ExperimentPlanRecord;
+
+    actions.createExperimentHypothesisRevisionFromWorkspace(
+      plan,
+      "hypothesis-h2",
+    );
+
+    expect(
+      deps.createExperimentHypothesisRevisionMutation.mutate,
+    ).toHaveBeenCalledWith({
+      teamId: "research-team",
+      plan,
+      candidateId: "hypothesis-h2",
+    });
+  });
+
   it("skips research loop create without a research question", () => {
     const deps = baseDeps({
       researchLoopCreateDraft: { researchQuestion: "   " },
