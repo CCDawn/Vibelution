@@ -216,7 +216,7 @@ describe("conversation expansion defaults", () => {
         "message-settled-after-streaming": {
           process: true,
           feedback: true,
-          "message-settled-after-streaming-thought": true,
+          "thought:message-settled-after-streaming-thought": true,
         },
       },
       sectionExpansion: {},
@@ -250,7 +250,7 @@ describe("conversation expansion defaults", () => {
     expect(defaults["message-settled-after-streaming"].process).toBe(false);
     expect(defaults["message-settled-after-streaming"].feedback).toBe(false);
     // Claude/ChatGPT: thinking auto-collapses when the turn settles; answer stays open via response section.
-    expect(defaults["message-settled-after-streaming"]["message-settled-after-streaming-thought"]).toBe(false);
+    expect(defaults["message-settled-after-streaming"]["thought:message-settled-after-streaming-thought"]).toBe(false);
     expect(defaults["message-settled-after-streaming"].response).toBe(false);
   });
 
