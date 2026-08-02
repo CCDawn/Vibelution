@@ -2409,7 +2409,7 @@ export function TeamsRoute({
   function renderSourceCollectionSearchBrief() {
     return (
       <>
-        {sourceCollectionResetResearchProjectId && sourceCollectionRuns.length > 0 ? (
+        {sourceCollectionResetAvailable ? (
           <VStateSurface
             title={lang === "zh" ? "重新开始本项目的资料搜集" : "Restart this project's source collection"}
             tone="unavailable"
@@ -3193,6 +3193,10 @@ export function TeamsRoute({
   const sourceCollectionCanStart = Boolean(selectedTeam?.teamId && sourceCollectionDraft.topic.trim());
   const researchStageCanLaunch = Boolean(selectedTeam?.teamId && sourceCollectionDraft.topic.trim());
   const sourceCollectionResetResearchProjectId = activeSourceCollectionResearchProjectId.trim();
+  const sourceCollectionResetAvailable = Boolean(
+    sourceCollectionResetResearchProjectId
+    && (sourceCollectionRuns.length > 0 || activeSourceCollectionResearchProject?.nameLocked),
+  );
   const selectedResearchProjectSourceCollectionResetPending =
     resetResearchProjectSourceCollectionMutation.isPending
     && resetResearchProjectSourceCollectionMutation.variables?.teamId === selectedTeam?.teamId;
