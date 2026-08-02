@@ -1682,6 +1682,10 @@ export function TeamsRoute({
       && !sourceCollectionSummaryQuery.data
       && (sourceCollectionSummaryQuery.isPending || sourceCollectionSummaryQuery.isFetching),
     );
+    const canCreateProjectSession = Boolean(
+      selectedSourceCollectionRunEffectiveId
+      && String(binding?.agent?.agentId || binding?.agentId || "").trim(),
+    );
     const route = selectedSourceCollectionRunEffectiveId
       ? ""
       : currentTaskSessionRoute || researchStageAgentDirectChatRoute(
@@ -1693,6 +1697,7 @@ export function TeamsRoute({
       binding,
       route,
       stageSessionPending,
+      canCreateProjectSession,
       agentSummaryPending: agentSummaryQuery.isPending,
       agentSummaryFetching: agentSummaryQuery.isFetching,
       agentSummaryError: agentSummaryQuery.isError,

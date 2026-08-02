@@ -157,6 +157,7 @@ export function resolveSourceCollectionStageAgentChatState<T extends { agent?: u
   binding: T | null;
   route: string;
   stageSessionPending?: boolean;
+  canCreateProjectSession?: boolean;
   agentSummaryPending: boolean;
   agentSummaryFetching: boolean;
   agentSummaryError: boolean;
@@ -168,6 +169,9 @@ export function resolveSourceCollectionStageAgentChatState<T extends { agent?: u
   const { binding, route } = input;
   if (input.stageSessionPending) {
     return { binding, route: "", status: "loading" };
+  }
+  if (input.canCreateProjectSession) {
+    return { binding, route, status: "ready" };
   }
   if (route || binding?.agent) {
     return { binding, route, status: "ready" };
