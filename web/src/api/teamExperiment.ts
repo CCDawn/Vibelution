@@ -42,6 +42,10 @@ export type TeamExperimentHypothesisRevisionRequest = {
   idempotencyKey: string;
 };
 
+export type TeamScientificHypothesisCompletionRequest = Record<string, unknown> & {
+  createdByAgent: string;
+};
+
 export type TeamExperimentMutationPayload = {
   status?: string;
   decision?: string;
@@ -109,6 +113,22 @@ export function createTeamExperimentHypothesisRevision(
 ) {
   return fetchJson<TeamExperimentMutationPayload>(
     `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/experiments/plans/${encodeURIComponent(planId)}/hypotheses/${encodeURIComponent(candidateId)}/revision`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request),
+    },
+  );
+}
+
+export function completeTeamScientificHypothesisFromDesign(
+  teamId: string,
+  planId: string,
+  candidateId: string,
+  request: TeamScientificHypothesisCompletionRequest,
+) {
+  return fetchJson<TeamExperimentMutationPayload>(
+    `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/experiments/plans/${encodeURIComponent(planId)}/hypotheses/${encodeURIComponent(candidateId)}/complete-design`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },

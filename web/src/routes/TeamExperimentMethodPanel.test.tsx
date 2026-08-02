@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import type { ExperimentContractV2, ExperimentMethodCatalogPayload } from "../api/types";
+import type { ExperimentHypothesisCandidateSummary } from "./teams/experimentLoopModel";
 import {
   TeamExperimentMethodPanel,
   buildExperimentPlanMethodRequest,
@@ -104,6 +105,33 @@ const simulationContract: ExperimentContractV2 = {
   status: "draft",
 };
 
+const incompleteScientificHypothesis = {
+  candidateId: "hypothesis-h2",
+  title: "H2 · NREM 与 REM 阶段协同",
+  summary: "Scientific hypothesis awaiting an executable design.",
+  currentState: "hypothesis_needs_revision",
+  qualityStatus: "needs_revision",
+  valid: false,
+  validationIssueCount: 4,
+  hypothesis: "NREM replay and REM recalibration provide separable information.",
+  hypothesisKind: "scientific",
+  sourcePlanId: "",
+  researchProjectId: "research-sleep",
+  claimBoundary: "",
+  reviewDecision: "unreviewed",
+  reviewRecordId: "",
+  reviewedAt: "",
+  approvedForExperiment: false,
+  baseline: "",
+  expectedBenefit: "",
+  expectedComputeCost: "",
+  experimentPlan: { dataset: "", metric: "", baseline: "", smokePlan: "" },
+  missingExperimentPlanFields: ["dataset", "metric", "baseline", "smokePlan"],
+  sourceRefs: [{ type: "candidate", id: "paper-note-1", label: "Sleep study" }],
+  evidenceRefs: [{ type: "evidence", id: "evidence-1", label: "Sleep evidence" }],
+  updatedAt: "2026-08-02T00:00:00Z",
+} satisfies ExperimentHypothesisCandidateSummary;
+
 describe("TeamExperimentMethodPanel", () => {
   it("renders the three-level selection and model-specific fields from the backend catalog", () => {
     const markup = renderToStaticMarkup(
@@ -176,6 +204,29 @@ describe("TeamExperimentMethodPanel", () => {
     expect(markup).toContain("重复次数");
     expect(markup).toContain("controllable-agent-simulator");
     expect(markup).toContain("保存为新版本");
+  });
+
+  it("offers an append-only scientific hypothesis completion action from the current setup", () => {
+    const markup = renderToStaticMarkup(
+      <TeamExperimentMethodPanel
+        lang="zh"
+        catalog={catalog}
+        activeContract={simulationContract}
+        activePlanStatus="draft"
+        hypotheses={[incompleteScientificHypothesis]}
+        completingCandidateId=""
+        loading={false}
+        submitting={false}
+        canCreatePlan
+        onSubmit={() => undefined}
+        onCompleteHypothesis={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain('data-scientific-hypothesis-completion="true"');
+    expect(markup).toContain("H2 · NREM 与 REM 阶段协同");
+    expect(markup).toContain("用当前配置补全假设");
+    expect(markup).toContain("不创建实验、不自动批准");
   });
 
   it("refreshes a draft when normalized contract fields change without a new plan revision", () => {

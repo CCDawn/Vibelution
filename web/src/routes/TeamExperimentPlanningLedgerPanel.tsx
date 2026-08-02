@@ -173,6 +173,8 @@ export type TeamExperimentPlanningLedgerPanelProps = {
   selectedTeamCreateExperimentPlanResult: any;
   selectedTeamMaterializeEngineeringProxyPending: boolean;
   selectedTeamMaterializeEngineeringProxyError: Error | null;
+  selectedTeamCompleteScientificHypothesisCandidateId: string;
+  selectedTeamCompleteScientificHypothesisError: Error | null;
   selectedTeamReviewExperimentHypothesisCandidateId: string;
   selectedTeamReviewExperimentHypothesisError: Error | null;
   selectedTeamCreateExperimentHypothesisRevisionCandidateId: string;
@@ -205,6 +207,11 @@ export type TeamExperimentPlanningLedgerPanelProps = {
   materializeEngineeringProxyHypothesisFromWorkspace: (
     plan: ExperimentPlanRecord,
     draft: EngineeringProxyHypothesisDraft,
+  ) => void;
+  completeScientificHypothesisFromWorkspace: (
+    plan: ExperimentPlanRecord,
+    candidateId: string,
+    methodRequest: ExperimentPlanMethodRequest,
   ) => void;
   reviewExperimentHypothesisFromWorkspace: (candidateId: string) => void;
   createExperimentHypothesisRevisionFromWorkspace: (
@@ -243,6 +250,8 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
     selectedTeamCreateExperimentPlanResult,
     selectedTeamMaterializeEngineeringProxyPending,
     selectedTeamMaterializeEngineeringProxyError,
+    selectedTeamCompleteScientificHypothesisCandidateId,
+    selectedTeamCompleteScientificHypothesisError,
     selectedTeamReviewExperimentHypothesisCandidateId,
     selectedTeamReviewExperimentHypothesisError,
     selectedTeamCreateExperimentHypothesisRevisionCandidateId,
@@ -267,6 +276,7 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
     selectedTeamRequestExperimentKnowledgeIngestionResult,
     createExperimentPlanFromWorkspace,
     materializeEngineeringProxyHypothesisFromWorkspace,
+    completeScientificHypothesisFromWorkspace,
     reviewExperimentHypothesisFromWorkspace,
     createExperimentHypothesisRevisionFromWorkspace,
     freezeExperimentDesignFromWorkspace,
@@ -478,14 +488,28 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
             || ""
           }
           loading={experimentMethodCatalogQuery.isFetching}
-          errorMessage={
-            experimentMethodCatalogQuery.error instanceof Error
-              ? experimentMethodCatalogQuery.error.message
-              : selectedTeamCreateExperimentPlanError?.message
-          }
           submitting={selectedTeamCreateExperimentPlanPending}
           canCreatePlan={canDraftPlan}
           onSubmit={createExperimentPlanFromWorkspace}
+          hypotheses={hypotheses}
+          completingCandidateId={selectedTeamCompleteScientificHypothesisCandidateId}
+          onCompleteHypothesis={(candidateId, methodRequest) => {
+            if (activePlan) {
+              completeScientificHypothesisFromWorkspace(
+                activePlan,
+                candidateId,
+                methodRequest,
+              );
+            }
+          }}
+          errorMessage={
+            selectedTeamCompleteScientificHypothesisError?.message
+            || (
+              experimentMethodCatalogQuery.error instanceof Error
+                ? experimentMethodCatalogQuery.error.message
+                : selectedTeamCreateExperimentPlanError?.message
+            )
+          }
         />
         <TeamExperimentHypothesisGovernancePanel
           lang={lang}

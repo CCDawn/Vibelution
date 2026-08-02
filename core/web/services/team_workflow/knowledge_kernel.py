@@ -2886,6 +2886,7 @@ def _validate_algorithm_hypothesis_output(output: dict[str, Any]) -> list[dict[s
     hypothesis_kind = s._trim_text(output.get("hypothesisKind"), max_length=80).strip().lower()
     mapping_ids = output.get("mechanismMappingIds")
     mechanism_ids = output.get("neuroMechanismIds")
+    candidate_graph_ids = output.get("candidateGraphIds")
     if hypothesis_kind == "engineering_proxy":
         if not s._has_value(output.get("sourcePlanId")):
             issues.append(
@@ -2903,8 +2904,21 @@ def _validate_algorithm_hypothesis_output(output: dict[str, Any]) -> list[dict[s
                     "message": "engineering_proxy algorithm_hypothesis requires claimBoundary.",
                 }
             )
-    elif not s._has_any_list_value(mapping_ids) and not s._has_any_list_value(mechanism_ids):
-        issues.append({"severity": "error", "code": "missing_upstream_mechanism_refs", "message": "algorithm_hypothesis requires mechanismMappingIds or neuroMechanismIds."})
+    elif (
+        not s._has_any_list_value(mapping_ids)
+        and not s._has_any_list_value(mechanism_ids)
+        and not s._has_any_list_value(candidate_graph_ids)
+    ):
+        issues.append(
+            {
+                "severity": "error",
+                "code": "missing_upstream_mechanism_refs",
+                "message": (
+                    "algorithm_hypothesis requires mechanismMappingIds, "
+                    "neuroMechanismIds, or a governed candidateGraphIds projection."
+                ),
+            }
+        )
     if not s._has_value(output.get("hypothesis")):
         issues.append({"severity": "error", "code": "missing_hypothesis", "message": "algorithm_hypothesis requires hypothesis."})
     for field, code in (

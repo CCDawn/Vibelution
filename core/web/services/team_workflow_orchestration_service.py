@@ -499,6 +499,7 @@ from core.web.services.team_workflow.source_collection.storage import (
 )
 from core.web.services.team_workflow.experiment import (
     create_experiment_plan,
+    complete_experiment_hypothesis_from_design,
     create_experiment_plan_revision_from_hypothesis,
     create_experiment_plan_revision_from_iteration,
     execute_experiment_full_run,
@@ -549,6 +550,10 @@ from core.web.services.team_workflow.experiment_kernel import (
     _experiment_hypothesis_missing_fields,
     _experiment_proxy_hypothesis_fingerprint,
     _find_reusable_experiment_proxy_hypothesis,
+    _scientific_hypothesis_completion_fingerprint,
+    _find_reusable_scientific_hypothesis_completion,
+    _scientific_hypothesis_design_request,
+    _build_scientific_hypothesis_completion_record,
     _build_experiment_proxy_hypothesis_record,
     _find_experiment_plan,
     _experiment_baseline_artifact_record,

@@ -1429,6 +1429,380 @@ def _find_reusable_experiment_proxy_hypothesis(
     return None
 
 
+def _scientific_hypothesis_completion_fingerprint(
+    source_plan_id: str,
+    source_candidate_id: str,
+    payload: dict[str, Any],
+) -> str:
+    identity = {
+        "sourcePlanId": source_plan_id,
+        "sourceCandidateId": source_candidate_id,
+        "researchProfileId": payload.get("researchProfileId"),
+        "researchQuestion": payload.get("researchQuestion"),
+        "researchMode": payload.get("researchMode"),
+        "experimentPurpose": payload.get("experimentPurpose"),
+        "experimentMethod": payload.get("experimentMethod"),
+        "requestedAdapterId": payload.get("requestedAdapterId"),
+        "objective": payload.get("objective"),
+        "constraints": payload.get("constraints"),
+        "methodConfig": payload.get("methodConfig"),
+        "metricContract": payload.get("metricContract"),
+        "decisionContract": payload.get("decisionContract"),
+        "artifactContract": payload.get("artifactContract"),
+        "reproducibilityContract": payload.get("reproducibilityContract"),
+        "iterationContract": payload.get("iterationContract"),
+        "recommendation": payload.get("recommendation"),
+    }
+    return "sha256:" + hashlib.sha256(
+        json.dumps(identity, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+
+
+def _find_reusable_scientific_hypothesis_completion(
+    candidate_store: dict[str, Any],
+    *,
+    source_plan_id: str,
+    source_candidate_id: str,
+    fingerprint: str,
+) -> dict[str, Any] | None:
+    for candidate in list(candidate_store.get("candidates") or []):
+        if not isinstance(candidate, dict):
+            continue
+        metadata = (
+            candidate.get("metadata")
+            if isinstance(candidate.get("metadata"), dict)
+            else {}
+        )
+        completion = (
+            metadata.get("designCompletion")
+            if isinstance(metadata.get("designCompletion"), dict)
+            else {}
+        )
+        if (
+            str(candidate.get("candidateType") or "") == "algorithm_hypothesis"
+            and str(completion.get("sourcePlanId") or "") == source_plan_id
+            and str(completion.get("supersedesCandidateId") or "")
+            == source_candidate_id
+            and str(completion.get("fingerprint") or "") == fingerprint
+        ):
+            return candidate
+    return None
+
+
+def _scientific_hypothesis_design_request(
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    s = _service()
+    scalar_fields = (
+        "researchProfileId",
+        "researchQuestion",
+        "researchMode",
+        "experimentMethod",
+        "requestedAdapterId",
+        "objective",
+        "supersedesPlanId",
+    )
+    object_fields = (
+        "experimentPurpose",
+        "methodConfig",
+        "metricContract",
+        "decisionContract",
+        "artifactContract",
+        "reproducibilityContract",
+        "iterationContract",
+        "recommendation",
+    )
+    result = {
+        field: s._trim_text(
+            payload.get(field),
+            max_length=4000 if field in {"researchQuestion", "objective"} else 240,
+        )
+        for field in scalar_fields
+    }
+    for field in object_fields:
+        value = payload.get(field)
+        result[field] = s.deepcopy(value) if isinstance(value, dict) else {}
+    result["constraints"] = s._normalize_text_list(
+        payload.get("constraints"),
+        max_items=40,
+        max_length=500,
+    )
+    result["revision"] = max(int(payload.get("revision") or 1), 1)
+    return result
+
+
+def _build_scientific_hypothesis_completion_record(
+    team_id: str,
+    workflow: dict[str, Any],
+    source_plan: dict[str, Any],
+    source_candidate: dict[str, Any],
+    payload: dict[str, Any],
+    *,
+    created_by_agent: str,
+) -> dict[str, Any]:
+    s = _service()
+    source_plan_id = s._normalize_required_id(
+        source_plan.get("planId"),
+        "Source experiment plan id is required.",
+    )
+    source_candidate_id = s._normalize_required_id(
+        source_candidate.get("candidateId"),
+        "Source hypothesis candidate id is required.",
+    )
+    if str(source_candidate.get("candidateType") or "") != "algorithm_hypothesis":
+        raise s.TeamWorkflowOrchestrationError(
+            "Only an algorithm_hypothesis can be completed from an experiment design."
+        )
+    source_summary = s._experiment_hypothesis_summary(source_candidate)
+    if source_summary.get("hypothesisKind") == "engineering_proxy":
+        raise s.TeamWorkflowOrchestrationError(
+            "Engineering proxy hypotheses cannot be converted into scientific hypotheses."
+        )
+    source_output = (
+        (source_candidate.get("metadata") or {}).get("output")
+        if isinstance(source_candidate.get("metadata"), dict)
+        and isinstance((source_candidate.get("metadata") or {}).get("output"), dict)
+        else {}
+    )
+    if not s._has_value(source_output.get("hypothesis")):
+        raise s.TeamWorkflowOrchestrationError(
+            "Source scientific hypothesis text is required."
+        )
+    if not list(source_candidate.get("sourceRefs") or source_output.get("sourceRefs") or []):
+        raise s.TeamWorkflowOrchestrationError(
+            "Source scientific hypothesis must preserve sourceRefs."
+        )
+    if not list(
+        source_candidate.get("evidenceRefs")
+        or source_output.get("evidenceRefs")
+        or []
+    ):
+        raise s.TeamWorkflowOrchestrationError(
+            "Source scientific hypothesis must preserve evidenceRefs."
+        )
+
+    proposed_request = s._scientific_hypothesis_design_request(payload)
+    method_config = (
+        proposed_request.get("methodConfig")
+        if isinstance(proposed_request.get("methodConfig"), dict)
+        else {}
+    )
+    metric_contract = (
+        proposed_request.get("metricContract")
+        if isinstance(proposed_request.get("metricContract"), dict)
+        else {}
+    )
+    decision_contract = (
+        proposed_request.get("decisionContract")
+        if isinstance(proposed_request.get("decisionContract"), dict)
+        else {}
+    )
+    experiment_plan = {
+        "dataset": _experiment_plan_field_text(
+            method_config.get("dataset"),
+            preferred_keys=("name", "dataset", "label", "id"),
+            max_length=500,
+        ),
+        "metric": _experiment_plan_field_text(
+            metric_contract.get("primaryMetric"),
+            preferred_keys=("primaryMetric", "name", "metric", "label"),
+            max_length=500,
+        ),
+        "baseline": _experiment_plan_field_text(
+            method_config.get("baseline"),
+            preferred_keys=("name", "baseline", "label", "id"),
+            max_length=500,
+        ),
+        "smokePlan": _experiment_plan_field_text(
+            method_config.get("smokePlan"),
+            preferred_keys=("protocol", "smokePlan", "summary", "label"),
+            max_length=1200,
+        ),
+    }
+    missing_fields = [
+        field
+        for field in s.EXPERIMENT_PLAN_REQUIRED_FIELDS
+        if not s._has_value(experiment_plan.get(field))
+    ]
+    if missing_fields:
+        raise s.TeamWorkflowOrchestrationError(
+            "Scientific hypothesis completion requires a full experiment design: "
+            + ", ".join(missing_fields)
+            + "."
+        )
+    source_refs = s.deepcopy(
+        list(source_candidate.get("sourceRefs") or source_output.get("sourceRefs") or [])
+    )
+    evidence_refs = s.deepcopy(
+        list(
+            source_candidate.get("evidenceRefs")
+            or source_output.get("evidenceRefs")
+            or []
+        )
+    )
+    proposed_plan_id = (
+        "hypothesis-design-proposal-"
+        + s._scientific_hypothesis_completion_fingerprint(
+            source_plan_id,
+            source_candidate_id,
+            proposed_request,
+        ).removeprefix("sha256:")[:16]
+    )
+    proposed_contract = s.experiment_contract.build_experiment_contract(
+        plan_id=proposed_plan_id,
+        team_id=team_id,
+        research_question=s._trim_text(
+            proposed_request.get("researchQuestion"),
+            max_length=4000,
+        ),
+        payload=proposed_request,
+        legacy_plan=experiment_plan,
+        hypothesis_refs=[source_candidate_id],
+        evidence_refs=[
+            s._first_non_empty_text(
+                ref.get("id"),
+                ref.get("evidenceRef"),
+                ref.get("sourceRef"),
+            )
+            for ref in evidence_refs
+            if isinstance(ref, dict)
+        ],
+    )
+    contract_validation = s.experiment_contract.validate_experiment_contract(
+        proposed_contract
+    )
+    if contract_validation.get("valid") is not True:
+        missing = ", ".join(
+            str(item)
+            for item in list(contract_validation.get("missingFields") or [])
+        )
+        raise s.TeamWorkflowOrchestrationError(
+            "Scientific hypothesis design contract is incomplete"
+            + (f": {missing}." if missing else ".")
+        )
+
+    success_criteria = s._normalize_text_list(
+        decision_contract.get("successCriteria"),
+        max_items=8,
+        max_length=400,
+    )
+    inconclusive_criteria = s._normalize_text_list(
+        decision_contract.get("inconclusiveCriteria"),
+        max_items=8,
+        max_length=400,
+    )
+    hypothesis = s._trim_text(source_output.get("hypothesis"), max_length=4000)
+    expected_benefit = (
+        "; ".join(success_criteria)
+        or "Meet the preregistered target-data comparison gate."
+    )
+    expected_compute_cost = (
+        s._trim_text(method_config.get("budget"), max_length=1000)
+        or "Bounded by the proposed experiment-design budget."
+    )
+    claim_boundary = (
+        s._trim_text(source_output.get("claimBoundary"), max_length=2000)
+        or "; ".join(inconclusive_criteria)
+    )
+    if not claim_boundary:
+        raise s.TeamWorkflowOrchestrationError(
+            "Scientific hypothesis completion requires an explicit inconclusive "
+            "or claim-boundary condition."
+        )
+    fingerprint = s._scientific_hypothesis_completion_fingerprint(
+        source_plan_id,
+        source_candidate_id,
+        proposed_request,
+    )
+    now = s.utc_now_iso()
+    output = {
+        **s.deepcopy(source_output),
+        "candidateType": "algorithm_hypothesis",
+        "hypothesisKind": "scientific_revision",
+        "sourcePlanId": source_plan_id,
+        "researchProjectId": s._trim_text(
+            source_plan.get("researchProjectId"),
+            max_length=160,
+        ),
+        "sourceRefs": source_refs,
+        "evidenceRefs": evidence_refs,
+        "hypothesis": hypothesis,
+        "baseline": experiment_plan["baseline"],
+        "expectedBenefit": expected_benefit,
+        "expectedComputeCost": expected_compute_cost,
+        "experimentPlan": experiment_plan,
+        "claimBoundary": claim_boundary,
+        "uncertainty": s._dedupe_text_values(
+            [
+                *s._normalize_text_list(
+                    source_output.get("uncertainty"),
+                    max_items=12,
+                    max_length=500,
+                ),
+                *inconclusive_criteria,
+            ]
+        ),
+        "riskFlags": s._dedupe_text_values(
+            [
+                *s._normalize_text_list(
+                    source_output.get("riskFlags"),
+                    max_items=12,
+                    max_length=160,
+                ),
+                "requires_human_design_review",
+                "no_execution_evidence",
+            ]
+        ),
+        "nextAction": "send_to_research_review",
+        "requiresReview": True,
+    }
+    record = {
+        "schemaVersion": s.SCHEMA_VERSION,
+        "candidateId": s._new_record_id("algorithm-hypothesis"),
+        "candidateType": "algorithm_hypothesis",
+        "teamId": team_id,
+        "workflowId": workflow.get("workflowId", s.DEFAULT_WORKFLOW_ID),
+        "title": (
+            s._trim_text(source_candidate.get("title"), max_length=210)
+            or "Scientific hypothesis"
+        )
+        + " · 实验设计修订",
+        "sourceKind": "scientific_hypothesis_design_completion",
+        "summary": hypothesis,
+        "sourceRefs": source_refs,
+        "evidenceRefs": evidence_refs,
+        "metadata": {
+            "taskType": "algorithm_hypothesis_draft",
+            "output": output,
+            "revisionLineage": {
+                "supersedesCandidateId": source_candidate_id,
+                "sourcePlanId": source_plan_id,
+                "appendOnly": True,
+            },
+            "designCompletion": {
+                "sourcePlanId": source_plan_id,
+                "supersedesCandidateId": source_candidate_id,
+                "researchProjectId": s._trim_text(
+                    source_plan.get("researchProjectId"),
+                    max_length=160,
+                ),
+                "fingerprint": fingerprint,
+                "proposedExperimentRequest": proposed_request,
+                "proposedContractValidation": contract_validation,
+                "noRunExecuted": True,
+            },
+        },
+        "createdByAgent": created_by_agent,
+        "currentWorkflowNode": "algorithm_hypothesis",
+        "currentState": "hypothesis_review_ready",
+        "qualityStatus": "needs_review",
+        "createdAt": now,
+        "updatedAt": now,
+    }
+    record["metadata"]["validation"] = s.validate_candidate_record(record)
+    return record
+
+
 def _build_experiment_proxy_hypothesis_record(
     team_id: str,
     workflow: dict[str, Any],

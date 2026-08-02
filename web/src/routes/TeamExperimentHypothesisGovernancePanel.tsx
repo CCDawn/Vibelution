@@ -150,8 +150,8 @@ export function TeamExperimentHypothesisGovernancePanel(
           </strong>
           <span className={styles.subtitle}>
             {lang === "zh"
-              ? "科学候选继续保留；工程代理候选必须人工批准后，才能生成新的设计修订。"
-              : "Scientific candidates remain pending; a proxy candidate needs explicit human approval before a new design revision."}
+              ? "科学候选先用实验配置生成追加式修订；所有完整候选都必须人工批准后，才能生成新设计。"
+              : "Scientific candidates first receive an append-only design revision; every complete candidate needs human approval before a new design."}
           </span>
         </div>
         <span className={styles.guardBadge}>
