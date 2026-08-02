@@ -452,7 +452,8 @@ def _lexical_project_path(path_value: str) -> Path:
 def _list_recent_tool_governance_requests_for_agent(agent_id: str, *, limit: int = 6) -> list[dict[str, Any]]:
     s = _service()
     try:
-        from .agent_tool_governance_service import list_tool_governance_requests
+        # Governance service lives under core.web.services, not agent_directory.
+        from core.web.services.agent_tool_governance_service import list_tool_governance_requests
 
         return list_tool_governance_requests(agent_id=agent_id, status="", limit=limit)
     except Exception as exc:
