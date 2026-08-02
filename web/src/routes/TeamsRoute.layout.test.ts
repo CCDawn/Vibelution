@@ -42,7 +42,7 @@ const routeAndPureSource = `${routeSource}\n${canvasGeometrySource}\n${researchW
 describe("research project workspace", () => {
   it("never routes an active source-collection batch to a legacy direct Agent session", () => {
     expect(routeSource).toContain(
-      'const route = currentTaskSessionRoute || (selectedSourceCollectionRunEffectiveId\n      ? ""\n      : researchStageAgentDirectChatRoute(',
+      'const route = selectedSourceCollectionRunEffectiveId\n      ? ""\n      : currentTaskSessionRoute || researchStageAgentDirectChatRoute(',
     );
   });
 
