@@ -214,7 +214,7 @@ import {
   type ResearchStageWorkspaceView,
   type ResearchWorkspaceView,
 } from "./teams/researchWorkspaceModel";
-import { ResearchProjectSwitcher } from "./teams/research-projects/ResearchProjectSwitcher";
+import { ResearchProjectSwitcher, researchProjectQueryKey } from "./teams/research-projects/ResearchProjectSwitcher";
 import { useResearchProjectAgentTasks } from "./teams/research-projects/useResearchProjectAgentTasks";
 import {
   SOURCE_COLLECTION_DEFAULT_ROLES,
@@ -255,6 +255,7 @@ import {
   TeamCanvasNode,
   TeamListPayload,
   TeamOrganizationCanvas,
+  TeamResearchProjectListPayload,
   TeamWorkflowCandidate,
   TeamWorkflowCandidateGraphBuildPayload,
   TeamWorkflowCandidateGraphPayload,
@@ -1027,14 +1028,28 @@ export function TeamsRoute({
     researchWorkflowTeamSelected,
     sourceCollectionWorkspaceSelected,
   });
+  const sourceCollectionResearchProjectsQuery = useQuery<TeamResearchProjectListPayload>({
+    queryKey: researchProjectQueryKey(effectiveTeamId || "none"),
+    queryFn: ({ signal }) =>
+      fetchJson<TeamResearchProjectListPayload>(
+        `/api/teams/${encodeURIComponent(effectiveTeamId)}/workflow-orchestration/research-projects`,
+        { signal },
+      ),
+    enabled: sourceCollectionRunsQueryEnabled,
+    staleTime: 10_000,
+  });
+  const activeSourceCollectionResearchProjectId = sourceCollectionResearchProjectsQuery.data?.activeProjectId || "";
   const sourceCollectionRunsQuery = useQuery({
-    queryKey: queryKeys.teamWorkflowSourceCollectionRuns(effectiveTeamId || "none", SOURCE_COLLECTION_RUN_PREVIEW_LIMIT),
+    queryKey: [
+      ...queryKeys.teamWorkflowSourceCollectionRuns(effectiveTeamId || "none", SOURCE_COLLECTION_RUN_PREVIEW_LIMIT),
+      activeSourceCollectionResearchProjectId || "unresolved-project",
+    ],
     queryFn: ({ signal }) =>
       fetchJson<DataProcessingRunListPayload>(
         `/api/data-processing/runs?limit=${SOURCE_COLLECTION_RUN_PREVIEW_LIMIT}&teamId=${encodeURIComponent(effectiveTeamId)}&startedFrom=team_workflow_source_collection`,
         { signal },
       ),
-    enabled: sourceCollectionRunsQueryEnabled,
+    enabled: sourceCollectionRunsQueryEnabled && Boolean(activeSourceCollectionResearchProjectId),
     refetchInterval: (query) => {
       const payload = query.state.data as DataProcessingRunListPayload | undefined;
       const hasActiveRun = (payload?.runs ?? []).some((run) => ["collecting", "processing"].includes(String(run.status || "").toLowerCase()));
@@ -1099,8 +1114,12 @@ export function TeamsRoute({
     [organizationEdges, visibleCommunicationEdges],
   );
   const sourceCollectionRuns = useMemo(
-    () => sourceCollectionRunsForTeam(sourceCollectionRunsQuery.data, effectiveTeamId),
-    [effectiveTeamId, sourceCollectionRunsQuery.data],
+    () => sourceCollectionRunsForTeam(
+      sourceCollectionRunsQuery.data,
+      effectiveTeamId,
+      activeSourceCollectionResearchProjectId,
+    ),
+    [activeSourceCollectionResearchProjectId, effectiveTeamId, sourceCollectionRunsQuery.data],
   );
   const sourceCollectionAgentIds = useMemo(() => sourceCollectionAgentIdsFromTeam(selectedTeam, canvas), [canvas, selectedTeam]);
   const sourceCollectionOwnerAgentId = useMemo(() => sourceCollectionOwnerAgentIdFromTeam(selectedTeam, canvas), [canvas, selectedTeam]);

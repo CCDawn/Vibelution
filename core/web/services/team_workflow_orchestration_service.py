@@ -274,6 +274,7 @@ from core.web.services.team_workflow.source_collection.residual import (
     _source_collection_result_from_crossref_item,
     _source_collection_result_identity_key,
     _source_collection_role_assignment_inputs,
+    _source_collection_run_belongs_to_research_project,
     _source_collection_run_belongs_to_team,
     _source_collection_run_context_bundle,
     _source_collection_run_has_usable_outputs,

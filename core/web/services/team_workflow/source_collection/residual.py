@@ -2451,6 +2451,26 @@ def _source_collection_run_belongs_to_team(run: dict[str, Any], team_id: str) ->
     )
 
 
+def _source_collection_run_belongs_to_research_project(run: dict[str, Any], research_project_id: str) -> bool:
+    """Keep source rounds inside their active research-project boundary.
+
+    Legacy rounds predate research-project isolation. They remain visible only
+    while the legacy project itself is active; an isolated project must never
+    adopt a legacy or another project's usable historical round as its default.
+    """
+
+    s = _service()
+    scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
+    metadata = run.get("metadata") if isinstance(run.get("metadata"), dict) else {}
+    run_project_id = s._trim_text(
+        scope.get("researchProjectId") or metadata.get("researchProjectId"),
+        max_length=160,
+    )
+    if run_project_id:
+        return run_project_id == research_project_id
+    return research_project_id == s.LEGACY_PROJECT_ID
+
+
 def _source_collection_run_context_bundle(team_id: str, run_id: str) -> dict[str, Any]:
     s = _service()
     try:
