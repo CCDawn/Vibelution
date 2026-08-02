@@ -2409,7 +2409,7 @@ export function TeamsRoute({
   function renderSourceCollectionSearchBrief() {
     return (
       <>
-        {activeSourceCollectionResearchProject && sourceCollectionRuns.length > 0 ? (
+        {sourceCollectionResetResearchProjectId && sourceCollectionRuns.length > 0 ? (
           <VStateSurface
             title={lang === "zh" ? "重新开始本项目的资料搜集" : "Restart this project's source collection"}
             tone="unavailable"
@@ -2431,15 +2431,19 @@ export function TeamsRoute({
                   resetResearchProjectSourceCollectionMutation.mutate(
                     {
                       teamId: selectedTeam.teamId,
-                      researchProjectId: activeSourceCollectionResearchProject.projectId,
+                      researchProjectId: sourceCollectionResetResearchProjectId,
                     },
                     {
                       onSuccess: () => {
-                        sourceCollectionFreshProjectDraftIdRef.current = activeSourceCollectionResearchProject.projectId;
                         sourceCollectionDraftHydratedRunIdRef.current = "";
                         sourceCollectionDraftHydratedSearchPlanRef.current = "";
                         setSelectedSourceCollectionRunId("");
-                        setSourceCollectionDraft(sourceCollectionFreshProjectDraft(activeSourceCollectionResearchProject));
+                        if (activeSourceCollectionResearchProject) {
+                          sourceCollectionFreshProjectDraftIdRef.current = activeSourceCollectionResearchProject.projectId;
+                          setSourceCollectionDraft(sourceCollectionFreshProjectDraft(activeSourceCollectionResearchProject));
+                        } else {
+                          sourceCollectionFreshProjectDraftIdRef.current = "";
+                        }
                       },
                     },
                   );
@@ -3188,6 +3192,7 @@ export function TeamsRoute({
   }));
   const sourceCollectionCanStart = Boolean(selectedTeam?.teamId && sourceCollectionDraft.topic.trim());
   const researchStageCanLaunch = Boolean(selectedTeam?.teamId && sourceCollectionDraft.topic.trim());
+  const sourceCollectionResetResearchProjectId = activeSourceCollectionResearchProjectId.trim();
   const selectedResearchProjectSourceCollectionResetPending =
     resetResearchProjectSourceCollectionMutation.isPending
     && resetResearchProjectSourceCollectionMutation.variables?.teamId === selectedTeam?.teamId;

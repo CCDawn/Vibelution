@@ -3301,4 +3301,11 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourceCollectionPhaseCloseGatePanelStyles.phaseCloseGateAction).toContain("w-fit");
     expect(teamSourceCollectionPhaseCloseGatePanelStyles.phaseCloseGateHeader).toContain("max-[640px]");
   });
+
+  it("keeps the project-scoped source reset visible while the project snapshot is still catching up", () => {
+    expect(routeSource).toContain("const sourceCollectionResetResearchProjectId = activeSourceCollectionResearchProjectId.trim();");
+    expect(routeSource).toContain("sourceCollectionResetResearchProjectId && sourceCollectionRuns.length > 0");
+    expect(routeSource).toContain("researchProjectId: sourceCollectionResetResearchProjectId");
+    expect(routeSource).toContain("sourceCollectionFreshProjectDraftIdRef.current = \"\";");
+  });
 });
