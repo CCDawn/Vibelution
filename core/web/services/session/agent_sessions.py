@@ -2069,6 +2069,15 @@ def _delete_chat_session_state(session_id: str, *, activate_replacement: bool = 
     s._clear_session_turn_control(conversation_id)
     s._clear_session_live_output(conversation_id)
     removed_runtime_cache_entries = s._invalidate_session_agent_runtime_cache(conversation_id)
+    # Block workspace auto-recovery (llm-options / materialize) from resurrecting
+    # intentionally deleted sessions after clear/reset/delete.
+    tombstone_written = bool(
+        s._mark_session_workspace_intentionally_deleted(
+            conversation_id,
+            reason="chat_session_deleted",
+            agent_id=target_agent_id,
+        )
+    )
     timings["runtime_cleanup"] = s._elapsed_ms(cleanup_started_at)
     s._record_session_delete_event(
         "deleted",
@@ -2080,6 +2089,7 @@ def _delete_chat_session_state(session_id: str, *, activate_replacement: bool = 
             "replacementDirectSessionId": replacement_direct_session_id,
             "remainingCount": len(remaining),
             "removedAgentRuntimeCacheEntries": removed_runtime_cache_entries,
+            "sessionDeletedTombstone": tombstone_written,
             "durationMs": s._elapsed_ms(started_at),
             "timingsMs": timings,
         },

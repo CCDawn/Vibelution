@@ -3120,6 +3120,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(clearMutationSource).toContain("resetRuntimePolicy: false");
     expect(clearMutationSource).toContain("removeSessionWorkspace(previousDirectSessionId, replacementDirectSessionId)");
     expect(clearMutationSource).toContain("setActiveSession(replacementDirectSessionId)");
+    expect(clearMutationSource).toContain("cancelQueries({ queryKey: queryKeys.session(previousDirectSessionId) })");
+    expect(clearMutationSource).toContain("queryKeys.sessionLlmOptions(previousDirectSessionId)");
+    expect(clearMutationSource).toContain("afterSessionDeleted");
     expect(clearMutationSource).toContain("chatWorkspaceCache.afterChatWorkspaceReset()");
     expect(routeAndActionsSource).toContain("t(\"clearSessionHistoryConfirm\").replace(\"{title}\"");
     expect(routeAndActionsSource).toContain("clearSessionHistoryMutation.mutate({ sessionId: session.id, agentId: session.agentId })");

@@ -79,3 +79,13 @@ def test_agent_reset_direct_session_success_rebinds_before_removing_old_session(
     assert payload["resetSummary"]["skippedPaths"] == []
     assert session_service.get_session_detail(direct_session["id"]) is None
     assert session_service.get_session_detail(payload["agent"]["directSessionId"]) is not None
+    # Intentional-delete tombstone must block workspace recovery (clear-session bug).
+    assert session_service._is_session_workspace_intentionally_deleted(direct_session["id"]) is True
+    recovered = session_service._ensure_session_conversation_record(
+        direct_session["id"],
+        source="session.llm_options",
+    )
+    assert recovered is False
+    assert session_service.get_session_detail(direct_session["id"]) is None
+    session_ids = {item["id"] for item in session_service.list_sessions()}
+    assert direct_session["id"] not in session_ids
