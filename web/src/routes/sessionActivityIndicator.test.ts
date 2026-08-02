@@ -52,10 +52,47 @@ describe("sessionActivityIndicator", () => {
     expect(sessionIsRunningStatus("ready")).toBe(false);
   });
 
-  it("treats runtime-running as in-session even when status lags", () => {
+  it("treats runtime-running as in-session while the status is not terminal", () => {
     expect(resolveSessionActivityTone(
-      { id: "s-lag", status: "ready", updatedAt: "t1" },
+      { id: "s-lag", updatedAt: "t1" },
       { isRuntimeRunning: true },
     )).toBe("running");
+    expect(resolveSessionActivityTone(
+      { id: "s-lag-phase", currentPhase: "idle", updatedAt: "t1" },
+      { isRuntimeRunning: true },
+    )).toBe("running");
+  });
+
+  it("does not let a stale runtime flag override a terminal authoritative status", () => {
+    expect(resolveSessionActivityTone(
+      { id: "s-stale", status: "ready", updatedAt: "t1" },
+      { isRuntimeRunning: true },
+    )).toBe("completed");
+    expect(resolveSessionActivityTone(
+      { id: "s-stale-done", status: "done", updatedAt: "t1" },
+      { isRuntimeRunning: true },
+    )).toBe("completed");
+  });
+
+  it("keeps priority and hiding semantics when the stale runtime flag is set", () => {
+    // Real live phases still win even when another field is terminal.
+    expect(resolveSessionActivityTone(
+      { id: "s-live", status: "ready", currentPhase: "tooling" },
+      { isRuntimeRunning: true },
+    )).toBe("running");
+    // Approval and error still outrank the stale flag.
+    expect(resolveSessionActivityTone(
+      { id: "s-approve", status: "ready", updatedAt: "t1" },
+      { isRuntimeRunning: true, needsApproval: true },
+    )).toBe("approval");
+    expect(resolveSessionActivityTone(
+      { id: "s-error", currentPhase: "failed", updatedAt: "t1" },
+      { isRuntimeRunning: true },
+    )).toBe("error");
+    // Seen/active completed semantics are preserved.
+    expect(resolveSessionActivityTone(
+      { id: "s-open", status: "completed", updatedAt: "t1" },
+      { isRuntimeRunning: true, isActive: true },
+    )).toBe("none");
   });
 });
