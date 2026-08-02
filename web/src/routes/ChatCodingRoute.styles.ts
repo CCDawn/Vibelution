@@ -97,8 +97,10 @@ const styles: Record<string, string> = {
     "vui-routes-chatcodingroute overlayBackdrop fixed inset-0 z-30 border-0 bg-black/35",
   overlayPane:
     `vui-routes-chatcodingroute overlayPane fixed inset-y-[var(--shell-topbar-height)] z-40 w-[min(86vw,320px)] ${vuiRailFillClass} shadow-[var(--vui-elevation-panel)]`,
+  // ml-auto only when this block is the last flex child (narrow overlay toggles).
+  // Never put ml-auto on the first tabStrip child — it pushes session tabs to the right.
   overlayPaneControls:
-    "vui-routes-chatcodingroute overlayPaneControls ml-auto flex min-w-0 items-center gap-1",
+    "vui-routes-chatcodingroute overlayPaneControls ml-auto flex min-w-0 shrink-0 items-center gap-1",
   overlayPaneLeft:
     "vui-routes-chatcodingroute overlayPaneLeft left-0",
   overlayPaneRight:
