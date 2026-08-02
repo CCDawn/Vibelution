@@ -24,6 +24,11 @@ export type SessionDetailWindowOptions = {
   messageLimit?: number;
   beforeMessageIndex?: number;
   transcriptScope?: "all" | "window" | "none";
+  /**
+   * When false, backend skips expensive side lists (inbox / governance / group /
+   * next-state). Use for high-frequency poll while SSE owns live transcript.
+   */
+  includeSecondary?: boolean;
   signal?: AbortSignal;
 };
 
@@ -37,6 +42,9 @@ export function fetchSessionDetailWindow(
   params.set("transcriptScope", options.transcriptScope ?? "window");
   if (options.beforeMessageIndex && options.beforeMessageIndex > 0) {
     params.set("beforeMessageIndex", String(options.beforeMessageIndex));
+  }
+  if (options.includeSecondary === false) {
+    params.set("includeSecondary", "false");
   }
   return fetchJson<SessionDetail>(
     `/api/sessions/${encodeURIComponent(normalizedSessionId)}?${params.toString()}`,

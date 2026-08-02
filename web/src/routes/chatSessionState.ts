@@ -312,19 +312,42 @@ function mergedMessageWindow(
   };
 }
 
+function withPreservedSecondaryLists(
+  previous: SessionDetail | undefined,
+  next: SessionDetail,
+): SessionDetail {
+  if (next.secondaryHydrated !== false || !previous || previous.id !== next.id) {
+    return next;
+  }
+  return {
+    ...next,
+    nextStateSignals: previous.nextStateSignals ?? next.nextStateSignals,
+    groupContextEvents: previous.groupContextEvents ?? next.groupContextEvents,
+    agentInboxMessages: previous.agentInboxMessages ?? next.agentInboxMessages,
+    pendingToolGovernanceRequests:
+      previous.pendingToolGovernanceRequests ?? next.pendingToolGovernanceRequests,
+    // Keep prior "full" secondaryHydrated so UI knows we still have side data.
+    secondaryHydrated: previous.secondaryHydrated === true ? true : next.secondaryHydrated,
+  };
+}
+
 export function mergeSessionDetailMessageWindow(
   previous: SessionDetail | undefined,
   next: SessionDetail,
 ): SessionDetail {
-  if (!previous || previous.id !== next.id || !previous.messageWindow || !next.messageWindow) {
-    return next;
+  // Light poll responses omit expensive secondary lists; keep prior values so
+  // inbox / governance UI does not flash empty while SSE owns the transcript.
+  const merged = withPreservedSecondaryLists(previous, next);
+  if (!previous || previous.id !== merged.id || !previous.messageWindow || !merged.messageWindow) {
+    return merged;
   }
-  const messages = mergeConversationMessageWindows(previous.messages ?? [], next.messages ?? []);
-  const base = next.messageWindow.hasLater ? previous : next;
+  const messages = mergeConversationMessageWindows(previous.messages ?? [], merged.messages ?? []);
+  const base = merged.messageWindow.hasLater ? previous : merged;
   return {
     ...base,
+    ...merged,
     messages,
-    messageWindow: mergedMessageWindow(previous.messageWindow, next.messageWindow, messages),
+    messageWindow: mergedMessageWindow(previous.messageWindow, merged.messageWindow, messages),
   };
 }
 

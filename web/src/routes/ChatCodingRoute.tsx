@@ -970,7 +970,12 @@ export function ChatCodingRoute() {
   const sessionDetailQuery = useQuery<SessionDetail>({
     queryKey: queryKeys.session(activeSessionId ?? "none"),
     enabled: Boolean(activeSessionId),
-    queryFn: ({ signal }) => fetchSessionDetailWindow(activeSessionId, { signal }),
+    queryFn: ({ signal }) => fetchSessionDetailWindow(activeSessionId, {
+      signal,
+      // When SSE owns live transcript, skip expensive secondary lists on poll/refetch.
+      // First paint still hydrates fully until stream ownership is true.
+      includeSecondary: !chatLiveQueryPolicy.directSessionStreamOwnsLiveQueries,
+    }),
     // Select + GET often race on switch; brief freshness avoids immediate double rebuild
     // when /select already wrote a windowed detail into the same query key.
     staleTime: 1_500,
