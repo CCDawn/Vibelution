@@ -865,7 +865,17 @@ def _safe_prompt_cache_payload_summary(payload: Dict[str, Any]) -> Dict[str, Any
         for block in content:
             if isinstance(block, dict) and block.get("cache_control"):
                 cache_control_blocks += 1
+    message_chunk_hashes = [
+        _short_hash(messages[index : index + 16])
+        for index in range(0, len(messages), 16)
+    ]
+    tool_schemas = payload.get("tools")
+    if not isinstance(tool_schemas, list):
+        tool_schemas = []
     return {
+        "promptCacheMessageHash": _short_hash(messages),
+        "promptCacheMessageChunkHashes": ",".join(message_chunk_hashes),
+        "promptCacheToolSchemaHash": _short_hash(tool_schemas),
         "promptCachePayload": {
             "keyField": cache_key_field,
             "keyHash": _short_hash(cache_key),

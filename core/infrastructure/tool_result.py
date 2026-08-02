@@ -1268,27 +1268,62 @@ def tool_result_facts_payload(facts: ToolResultFacts) -> dict[str, Any]:
     return payload
 
 
-def render_tool_result_for_model(facts: ToolResultFacts) -> str:
-    """把工具结果渲染成 Agent 可自然读取的事实块。"""
-    lines = ["[Tool Result Facts]"]
-    if facts.tool_name:
-        lines.append(f"toolName: {facts.tool_name}")
-    lines.append(f"transportStatus: {facts.transport_status}")
-    lines.append(f"semanticStatus: {facts.semantic_status}")
-    if facts.exit_code is not None:
-        lines.append(f"exitCode: {facts.exit_code}")
-    lines.append(f"timedOut: {str(bool(facts.timed_out)).lower()}")
-    if facts.failure_class:
-        lines.append(f"failureClass: {facts.failure_class}")
-    lines.append(f"resultKind: {facts.result_kind}")
-    lines.append(f"truncated: {str(bool(facts.truncated)).lower()}")
-    lines.append(f"originalLength: {facts.original_length}")
-    if facts.action:
-        lines.append(f"action: {facts.action}")
-    if facts.range_info:
-        lines.append(f"rangeInfo: {facts.range_info}")
-    lines.extend(["", "Result:", facts.content])
-    return "\n".join(lines)
+def render_tool_result_for_model(
+    facts: ToolResultFacts,
+    *,
+    max_chars: int = DEFAULT_MAX_CHARS,
+) -> str:
+    """把工具结果渲染成 Agent 可自然读取的有界事实块。
+
+    ``facts`` 之前的原始结果仍由工具观察器、事件与 journal 持有；这里的
+    限长只作用于送回模型的 ToolMessage，避免事实头叠加后重新越过上下文边界。
+    """
+    bounded_limit = max(1, int(max_chars or DEFAULT_MAX_CHARS))
+    effective_truncated = bool(facts.truncated)
+
+    def _render(content: str, *, truncated: bool) -> str:
+        lines = ["[Tool Result Facts]"]
+        if facts.tool_name:
+            lines.append(f"toolName: {facts.tool_name}")
+        lines.append(f"transportStatus: {facts.transport_status}")
+        lines.append(f"semanticStatus: {facts.semantic_status}")
+        if facts.exit_code is not None:
+            lines.append(f"exitCode: {facts.exit_code}")
+        lines.append(f"timedOut: {str(bool(facts.timed_out)).lower()}")
+        if facts.failure_class:
+            lines.append(f"failureClass: {facts.failure_class}")
+        lines.append(f"resultKind: {facts.result_kind}")
+        lines.append(f"truncated: {str(bool(truncated)).lower()}")
+        lines.append(f"originalLength: {facts.original_length}")
+        if facts.action:
+            lines.append(f"action: {facts.action}")
+        if facts.range_info:
+            lines.append(f"rangeInfo: {facts.range_info}")
+        lines.extend(["", "Result:", content])
+        return "\n".join(lines)
+
+    rendered = _render(facts.content, truncated=effective_truncated)
+    if len(rendered) <= bounded_limit:
+        return rendered
+
+    effective_truncated = True
+    empty_render = _render("", truncated=True)
+    content_budget = max(0, bounded_limit - len(empty_render))
+    marker = (
+        f"[...模型上下文已限长，原始工具结果 {facts.original_length} 字符...]"
+    )
+    if content_budget <= len(marker):
+        bounded_content = marker[:content_budget]
+    else:
+        excerpt_budget = max(0, content_budget - len(marker) - 1)
+        head = max(0, excerpt_budget * 2 // 3)
+        tail = max(0, excerpt_budget - head)
+        if tail:
+            excerpt = f"{facts.content[:head]}\n{facts.content[-tail:]}"
+        else:
+            excerpt = facts.content[:head]
+        bounded_content = f"{excerpt}\n{marker}" if excerpt else marker
+    return _render(bounded_content, truncated=True)[:bounded_limit]
 
 
 def infer_result_from_tool_outputs(tool_outputs: List[str]) -> Dict[str, Any]:

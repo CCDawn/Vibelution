@@ -583,7 +583,7 @@ class TestFormatToolMessage:
         result_str, _ = format_tool_message(
             {"id": "call_1"}, long_result
         )
-        assert len(result_str) <= DEFAULT_MAX_CHARS + 700
+        assert len(result_str) <= DEFAULT_MAX_CHARS
         assert "[Tool Result Facts]" in result_str
         assert "truncated: true" in result_str
         assert "[...结果已截断" in result_str

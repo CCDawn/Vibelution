@@ -109,6 +109,26 @@ def test_execute_tool_projects_runtime_metadata_without_leaking_navigation_to_mo
     assert "offset=20" not in messages[0].content
 
 
+def test_tool_result_observer_keeps_full_evidence_while_model_message_is_bounded():
+    raw = "full-evidence:" + ("X" * 8000)
+    observed: list[str] = []
+    bridge = ToolLifecycleBridge(
+        tool_executor_execute=lambda *_args, **_kwargs: (raw, None),
+        tool_result_observer=lambda _call, result, _action: observed.append(str(result)),
+    )
+    messages: list[Any] = []
+    tool_call = {"name": "read_file_tool", "args": {"path": "large.txt"}, "id": "call-large"}
+
+    result, action = bridge.execute_tool(tool_call, messages)
+    ToolLifecycleBridge.handle_tool_result(tool_call, result, action, messages)
+
+    assert observed == [raw]
+    assert messages[0].tool_call_id == "call-large"
+    assert len(messages[0].content) <= 4000
+    assert "originalLength: 8014" in messages[0].content
+    assert "truncated: true" in messages[0].content
+
+
 def test_readonly_batch_isolates_worker_exception_and_preserves_success_results():
     original_messages: list[Any] = []
     worker_message_ids: list[int] = []
