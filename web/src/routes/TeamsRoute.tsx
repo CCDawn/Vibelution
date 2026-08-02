@@ -1770,7 +1770,11 @@ export function TeamsRoute({
     stageId: SourceCollectionStageModuleId,
     options: { formalRetry?: boolean } = {},
   ) {
-    if (!selectedTeam?.teamId || startSourceCollectionStageSessionTaskMutation.isPending) {
+    if (
+      !selectedTeam?.teamId
+      || startSourceCollectionStageSessionTaskMutation.isPending
+      || resetResearchProjectSourceCollectionMutation.isPending
+    ) {
       return;
     }
     const actionReadiness = sourceCollectionStageActionReadinessFor(stageId);

@@ -10,6 +10,7 @@ import { queryKeys } from "../../api/queryKeys";
 import { resetTeamResearchProjectSourceCollection } from "../../api/researchProjectAgentTasks";
 import type {
   AiSearchRun,
+  DataProcessingRunListPayload,
   Team,
   TeamWorkflowSourceCollectionAgentSessionContextPayload,
   TeamWorkflowSourceCollectionRunStartPayload,
@@ -79,7 +80,39 @@ export function useTeamWorkflowStartMutations(options: UseTeamWorkflowStartMutat
   const resetResearchProjectSourceCollectionMutation = useMutation({
     mutationFn: (payload: { teamId: string; researchProjectId: string }) =>
       resetTeamResearchProjectSourceCollection(payload.teamId, payload.researchProjectId),
-    onSuccess: (payload, variables) => {
+    onSuccess: async (payload, variables) => {
+      const sourceRunListQueryKey = queryKeys.teamWorkflowSourceCollectionRuns(
+        variables.teamId,
+        SOURCE_COLLECTION_RUN_PREVIEW_LIMIT,
+      );
+      const removedRunIds = new Set(payload.removedRunIds);
+      // A reset can race an already-in-flight run-list request.  Cancel it and
+      // remove the reset runs from every matching cache entry before clearing
+      // selection, otherwise the default selector can briefly route the next
+      // stage task back to a historical run with records.
+      await queryClient.cancelQueries({ queryKey: sourceRunListQueryKey });
+      queryClient.setQueriesData<DataProcessingRunListPayload>(
+        { queryKey: sourceRunListQueryKey },
+        (current) => {
+          if (!current) {
+            return current;
+          }
+          const runs = current.runs.filter((run) => !removedRunIds.has(run.runId));
+          const removedCount = current.runs.length - runs.length;
+          if (!removedCount) {
+            return current;
+          }
+          return {
+            ...current,
+            runs,
+            summary: {
+              ...current.summary,
+              runCount: Math.max(0, current.summary.runCount - removedCount),
+              returnedCount: Math.max(0, current.summary.returnedCount - removedCount),
+            },
+          };
+        },
+      );
       options.setSelectedSourceCollectionRunId("");
       options.setSourceCollectionStageSyncUntilMs(0);
       options.setSourceCollectionPendingStageTaskIds({});
@@ -89,8 +122,8 @@ export function useTeamWorkflowStartMutations(options: UseTeamWorkflowStartMutat
         queryClient.removeQueries({ queryKey: sourceCollectionRunRecordsQueryKey(runId) });
         queryClient.removeQueries({ queryKey: queryKeys.dataProcessingCollectionAssignments(runId) });
       }
-      void queryClient.invalidateQueries({
-        queryKey: queryKeys.teamWorkflowSourceCollectionRuns(variables.teamId, SOURCE_COLLECTION_RUN_PREVIEW_LIMIT),
+      await queryClient.invalidateQueries({
+        queryKey: sourceRunListQueryKey,
       });
       void queryClient.invalidateQueries({ queryKey: sourceCollectionSummaryQueryPrefix(variables.teamId) });
       void queryClient.invalidateQueries({ queryKey: researchStageRoundStatusQueryKey(variables.teamId) });

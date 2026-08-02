@@ -52,4 +52,11 @@ describe("team workflow start mutations contract", () => {
     expect(mutationsSource).toContain("/workflow-orchestration/stage-rounds/start");
     expect(mutationsSource).toContain("idempotencyKey: payload.idempotencyKey");
   });
+
+  it("removes reset runs from the query cache before allowing a fresh source batch", () => {
+    expect(mutationsSource).toContain("await queryClient.cancelQueries({");
+    expect(mutationsSource).toContain("queryClient.setQueriesData<DataProcessingRunListPayload>(");
+    expect(mutationsSource).toContain("!removedRunIds.has(run.runId)");
+    expect(mutationsSource).toContain("await queryClient.invalidateQueries({");
+  });
 });

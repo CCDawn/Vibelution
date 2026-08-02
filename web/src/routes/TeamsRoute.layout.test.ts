@@ -408,6 +408,7 @@ describe("TeamsRoute layout contract", () => {
     expect(teamWorkflowStartMutationsSource).toContain("/source-collection-runs/${encodeURIComponent(payload.runId)}/stage-session-tasks");
     expect(routeSource).toContain("async function startSourceCollectionStageSessionTask(");
     expect(routeSource).toContain("options: { formalRetry?: boolean }");
+    expect(routeSource).toContain("resetResearchProjectSourceCollectionMutation.isPending");
     expect(routeSource).toContain("await startSourceCollectionStageSessionTaskMutation.mutateAsync");
     expect(routeSource).toContain("sourceCollectionStageTaskClickKey(stageId)");
     // Wave 8R: stage-session idempotency lives on useTeamWorkflowStartMutations.
