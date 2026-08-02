@@ -2,7 +2,11 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { ConversationProcessDisclosure, processLabel } from "./ConversationProcessDisclosure";
+import {
+  ConversationProcessDisclosure,
+  processLabel,
+  processState,
+} from "./ConversationProcessDisclosure";
 import styles from "./ConversationProcessDisclosure.styles";
 import type { CodexTranscriptCell } from "./codexTranscriptCells";
 
@@ -111,5 +115,63 @@ describe("ConversationProcessDisclosure", () => {
     expect(label).toContain("工具失败");
     expect(label).toContain("cli_tool");
     expect(label).not.toContain(failed.summary);
+  });
+
+  it("marks a failed tool call as recovered when the same tool succeeds later", () => {
+    const failed = {
+      ...processCell("failed"),
+      id: "writeback-failed",
+      title: "challenge_cup_iteration_writeback_tool",
+    };
+    const recovered = {
+      ...processCell("completed"),
+      id: "writeback-recovered",
+      title: "challenge_cup_iteration_writeback_tool",
+    };
+
+    expect(processState([failed, recovered])).toBe("completed");
+    expect(processLabel([failed, recovered], "zh")).toContain("已处理");
+    expect(processLabel([failed, recovered], "zh")).not.toContain("工具失败");
+  });
+
+  it("uses canonical message order when compacted cells place an older failure last", () => {
+    const olderFailure = {
+      ...processCell("failed"),
+      id: "writeback-failed",
+      messageId: "assistant-message-35",
+      title: "challenge_cup_iteration_writeback_tool",
+    };
+    const laterSuccess = {
+      ...processCell("completed"),
+      id: "writeback-recovered",
+      messageId: "assistant-message-37",
+      title: "challenge_cup_iteration_writeback_tool",
+    };
+    const messageOrder = new Map([
+      ["assistant-message-35", 0],
+      ["assistant-message-37", 1],
+    ]);
+
+    expect(processState([laterSuccess, olderFailure], messageOrder)).toBe("completed");
+    expect(processLabel([laterSuccess, olderFailure], "zh", messageOrder)).toContain("已处理");
+  });
+
+  it("keeps a failure visible when only another tool succeeds later", () => {
+    const failed = {
+      ...processCell("failed"),
+      id: "writeback-failed",
+      title: "challenge_cup_iteration_writeback_tool",
+    };
+    const otherTool = {
+      ...processCell("completed"),
+      id: "context-completed",
+      title: "challenge_cup_iteration_context_tool",
+    };
+
+    expect(processState([failed, otherTool])).toBe("failed");
+    expect(processLabel([failed, otherTool], "zh")).toContain("工具失败");
+    expect(processLabel([failed, otherTool], "zh")).toContain(
+      "challenge_cup_iteration_writeback_tool",
+    );
   });
 });

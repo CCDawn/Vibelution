@@ -1683,7 +1683,9 @@ describe("ChatCodingRoute layout contract", () => {
 
   it("moves recent control signals into the current session status bar", () => {
     expect(routeSource).toContain("const activeControlSignals = useMemo<ChatNextStateSignalSummary[]>");
-    expect(routeSource).toContain("shouldShowNextStateSignalInConversation(signal, phase)");
+    expect(routeSource).toContain(
+      "shouldShowNextStateSignalInConversation(signal, phase, detail?.messages ?? [])",
+    );
     expect(routeSource).toContain("const latestControlSignalKindLabel = (() =>");
     expect(routeSource).toContain("const latestControlSignalLine = latestControlSignal");
     expect(routeSource).toContain("return lang === \"zh\" ? \"工具失败\" : \"Tool failed\"");

@@ -42,6 +42,75 @@ function renderConversation(messages: ConversationMessage[], processDisplayMode:
 }
 
 describe("ConversationView native Codex transcript surface", () => {
+  it("clears a failed process summary when the same tool succeeds later in the user turn", () => {
+    const toolName = "challenge_cup_iteration_writeback_tool";
+    const processCell = (
+      messageId: string,
+      status: "failed" | "completed",
+      operationId: string,
+    ) => ({
+      id: `${messageId}-${operationId}`,
+      kind: status === "failed" ? "error_notice" as const : "tool_call" as const,
+      messageId,
+      status,
+      tone: status === "failed" ? "error" as const : "neutral" as const,
+      title: toolName,
+      operationIds: [operationId],
+      toolLifecycleModel: {
+        toolCalls: [
+          {
+            toolCallId: `tool_call:${operationId}`,
+            rawOperationId: operationId,
+            status,
+            title: toolName,
+            rawToolName: toolName,
+          },
+        ],
+        terminalOperations: [],
+        terminalSessions: [],
+        modelObservations: [],
+      },
+    });
+    const html = renderConversation([
+      {
+        id: "user-run-iteration",
+        role: "user",
+        content: "继续执行迭代",
+        timestamp: "2026-08-02T01:50:00Z",
+      },
+      {
+        id: "assistant-writeback-failed",
+        role: "assistant",
+        content: "",
+        timestamp: "2026-08-02T01:51:00Z",
+        toolCalls: [{ name: toolName, status: "failed", error: "validation failed" }],
+        codexTranscript: {
+          version: 1,
+          source: "native",
+          messageId: "assistant-writeback-failed",
+          cells: [processCell("assistant-writeback-failed", "failed", "writeback-failed")],
+        },
+      },
+      {
+        id: "assistant-writeback-recovered",
+        role: "assistant",
+        content: "",
+        timestamp: "2026-08-02T01:52:00Z",
+        toolCalls: [{ name: toolName, status: "completed", resultPreview: "ok" }],
+        codexTranscript: {
+          version: 1,
+          source: "native",
+          messageId: "assistant-writeback-recovered",
+          cells: [processCell("assistant-writeback-recovered", "completed", "writeback-recovered")],
+        },
+      },
+    ]);
+
+    expect(html.match(/data-codex-process-state="failed"/g)).toBeNull();
+    expect(html.match(/data-codex-process-state="completed"/g)).toHaveLength(1);
+    expect(html).not.toContain(`工具失败 · ${toolName}`);
+  });
+
   it("hides internal runtime process when a native transcript owns the final answer", () => {
     const answer = "你好，我在。";
     const html = renderConversation([
