@@ -46,6 +46,16 @@ describe("research project workspace", () => {
     );
   });
 
+  it("anchors experiment mutations to the stable route team while details are deferred", () => {
+    const experimentActionSource = routeSource.slice(
+      routeSource.indexOf("} = createExperimentWorkspaceActions({"),
+      routeSource.indexOf("function renderResearchStageAgentSummary"),
+    );
+
+    expect(experimentActionSource).toContain("teamId: effectiveTeamId");
+    expect(experimentActionSource).not.toContain('teamId: selectedTeam?.teamId || ""');
+  });
+
   it("keeps active research projects out of the Challenge Program progress surface", () => {
     expect(teamResearchStageLauncherPanelSource).toContain(
       "const challengeProgramSurfaceSelected =",
