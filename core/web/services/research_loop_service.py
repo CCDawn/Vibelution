@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import threading
@@ -301,8 +302,33 @@ def record_research_loop_evidence(team_id: str, loop_id: str, payload: dict[str,
         raise ResearchLoopError("Evidence requires at least summary, metric, artifact, dataset, environment, log, or command preview.")
     now = utc_now_iso()
     recorded_by_agent = _trim_text(request_payload.get("recordedByAgent"), max_length=160) or DEFAULT_OWNER_AGENT_ID
+    artifact_refs = _normalize_refs(request_payload.get("artifactRefs"), max_items=24)
+    artifact_marker = _trim_text(request_payload.get("artifact"), max_length=500)
+    if artifact_marker and not any(
+        artifact_marker in {str(item.get("ref") or ""), str(item.get("path") or "")}
+        for item in artifact_refs
+    ):
+        artifact_refs.append({"ref": artifact_marker})
+    log_refs = _trim_list(request_payload.get("logRefs"), max_items=24, max_length=500)
+    source_marker = _trim_text(request_payload.get("source"), max_length=500)
+    if source_marker and source_marker not in log_refs:
+        log_refs.append(source_marker)
+    metadata = _normalize_metadata(request_payload.get("metadata"))
+    structured_metrics = _normalize_metadata(request_payload.get("metrics"))
+    if structured_metrics:
+        metadata["metrics"] = structured_metrics
+    idempotency_key = _evidence_idempotency_key(
+        request_payload,
+        evidence_type=evidence_type,
+        status_value=status_value,
+        artifact_refs=artifact_refs,
+        source_refs=_normalize_refs(request_payload.get("sourceRefs"), max_items=24),
+        log_refs=log_refs,
+        structured_metrics=structured_metrics,
+    )
     evidence = {
         "evidenceId": _new_record_id("loop-evidence"),
+        "idempotencyKey": idempotency_key,
         "evidenceType": evidence_type,
         "status": status_value,
         "summary": _trim_text(request_payload.get("summary"), max_length=4000),
@@ -310,33 +336,47 @@ def record_research_loop_evidence(team_id: str, loop_id: str, payload: dict[str,
         "metricValue": _trim_text(request_payload.get("metricValue"), max_length=240),
         "baselineMetricValue": _trim_text(request_payload.get("baselineMetricValue"), max_length=240),
         "delta": _trim_text(request_payload.get("delta"), max_length=240),
-        "artifactRefs": _normalize_refs(request_payload.get("artifactRefs"), max_items=24),
+        "artifactRefs": artifact_refs,
         "sourceRefs": _normalize_refs(request_payload.get("sourceRefs"), max_items=24),
         "datasetRefs": _trim_list(request_payload.get("datasetRefs"), max_items=24, max_length=500),
         "environmentRefs": _trim_list(request_payload.get("environmentRefs"), max_items=24, max_length=500),
-        "logRefs": _trim_list(request_payload.get("logRefs"), max_items=24, max_length=500),
+        "logRefs": log_refs,
         "commandPreview": _trim_text(request_payload.get("commandPreview"), max_length=2000),
         "recordedAt": now,
         "recordedByAgent": recorded_by_agent,
-        "metadata": _normalize_metadata(request_payload.get("metadata")),
+        "metadata": metadata,
         "executionBoundary": _manual_execution_policy(),
     }
+    reused = False
     with _LOCK:
         store = _load_research_loop_store(normalized_team_id)
         loop = _find_loop(store, normalized_loop_id)
         if loop is None:
             raise ResearchLoopError("Research loop not found.")
         records = [item for item in loop.get("evidenceRecords") or [] if isinstance(item, dict)]
-        records.append(evidence)
-        loop["evidenceRecords"] = records[-MAX_EVIDENCE_RECORDS:]
-        loop["updatedAt"] = now
-        loop["status"] = "evidence_recorded"
-        _refresh_loop_readiness(loop)
-        store["activeLoopId"] = loop["loopId"]
-        store["updatedAt"] = now
-        _write_json(_research_loop_store_path(normalized_team_id), store)
+        existing_evidence = next(
+            (
+                item
+                for item in reversed(records)
+                if idempotency_key
+                and str(item.get("idempotencyKey") or "") == idempotency_key
+            ),
+            None,
+        )
+        if existing_evidence is not None:
+            evidence = existing_evidence
+            reused = True
+        else:
+            records.append(evidence)
+            loop["evidenceRecords"] = records[-MAX_EVIDENCE_RECORDS:]
+            loop["updatedAt"] = now
+            loop["status"] = "evidence_recorded"
+            _refresh_loop_readiness(loop)
+            store["activeLoopId"] = loop["loopId"]
+            store["updatedAt"] = now
+            _write_json(_research_loop_store_path(normalized_team_id), store)
     _record_research_loop_event(
-        "research_loop.evidence_recorded",
+        "research_loop.evidence_reused" if reused else "research_loop.evidence_recorded",
         normalized_team_id,
         fields={
             "loopId": loop["loopId"],
@@ -346,6 +386,7 @@ def record_research_loop_evidence(team_id: str, loop_id: str, payload: dict[str,
             "status": status_value,
             "readyForDecision": bool((loop.get("readiness") or {}).get("readyForDecision")),
             "recordedByAgent": recorded_by_agent,
+            "reused": reused,
             "autoExecution": False,
         },
     )
@@ -353,6 +394,10 @@ def record_research_loop_evidence(team_id: str, loop_id: str, payload: dict[str,
         "evidence": evidence,
         "loop": loop,
         "status": _status_payload(normalized_team_id, team, store, active_loop=loop),
+        "idempotency": {
+            "key": idempotency_key,
+            "reused": reused,
+        },
         "boundaries": _research_loop_boundaries(),
     }
 
@@ -844,11 +889,62 @@ def _research_loop_next_actions(active_loop: dict[str, Any] | None) -> list[dict
 
 
 def _has_evidence_payload(payload: dict[str, Any]) -> bool:
-    text_fields = ("summary", "metricName", "metricValue", "baselineMetricValue", "delta", "commandPreview")
+    text_fields = (
+        "summary",
+        "metricName",
+        "metricValue",
+        "baselineMetricValue",
+        "delta",
+        "commandPreview",
+        "source",
+        "artifact",
+    )
     if any(_trim_text(payload.get(field), max_length=32) for field in text_fields):
+        return True
+    if isinstance(payload.get("metrics"), dict) and payload["metrics"]:
         return True
     list_fields = ("artifactRefs", "sourceRefs", "datasetRefs", "environmentRefs", "logRefs")
     return any(bool(payload.get(field)) for field in list_fields)
+
+
+def _evidence_idempotency_key(
+    payload: dict[str, Any],
+    *,
+    evidence_type: str,
+    status_value: str,
+    artifact_refs: list[dict[str, Any]],
+    source_refs: list[dict[str, Any]],
+    log_refs: list[str],
+    structured_metrics: dict[str, Any],
+) -> str:
+    explicit_key = _trim_text(payload.get("idempotencyKey"), max_length=240)
+    if explicit_key:
+        return explicit_key
+    if not artifact_refs and not source_refs and not log_refs:
+        return ""
+    fingerprint = {
+        "evidenceType": evidence_type,
+        "status": status_value,
+        "artifactRefs": artifact_refs,
+        "sourceRefs": source_refs,
+        "logRefs": log_refs,
+        "metricName": _trim_text(payload.get("metricName"), max_length=500),
+        "metricValue": _trim_text(payload.get("metricValue"), max_length=240),
+        "baselineMetricValue": _trim_text(
+            payload.get("baselineMetricValue"), max_length=240
+        ),
+        "delta": _trim_text(payload.get("delta"), max_length=240),
+        "metrics": structured_metrics,
+    }
+    digest = hashlib.sha256(
+        json.dumps(
+            fingerprint,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
+    return f"evidence:{digest[:32]}"
 
 
 def _template_by_id(template_id: str) -> dict[str, Any]:

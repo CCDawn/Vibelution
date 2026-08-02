@@ -186,6 +186,66 @@ def test_research_loop_records_template_evidence_and_iteration_decision(tmp_path
     assert decided["iterationProposal"]["executionPolicy"]["externalExecution"] is False
 
 
+def test_research_loop_reuses_identical_evidence_from_the_same_run(
+    tmp_path, monkeypatch
+):
+    team = _team(tmp_path, monkeypatch)
+    loop_id = research_loop_service.create_research_loop(
+        team["teamId"],
+        {
+            "researchQuestion": "Does the bounded proxy improve reconstruction?",
+        },
+    )["loop"]["loopId"]
+    payload = {
+        "evidenceType": "metric_report",
+        "status": "needs_review",
+        "source": "smokerun-001",
+        "artifact": "sha256:abc123",
+        "summary": "First wording for the same measured result.",
+        "metrics": {
+            "baseline.reconstruction_mse": 0.025838,
+            "variant.reconstruction_mse": 0.007935,
+            "delta.reconstruction_mse_delta": 0.017903,
+        },
+        "recordedByAgent": "Iteration Agent",
+    }
+
+    first = research_loop_service.record_research_loop_evidence(
+        team["teamId"], loop_id, payload
+    )
+    repeated = research_loop_service.record_research_loop_evidence(
+        team["teamId"],
+        loop_id,
+        {
+            **payload,
+            "summary": "Different prose must not duplicate the same structured result.",
+        },
+    )
+
+    assert repeated["evidence"]["evidenceId"] == first["evidence"]["evidenceId"]
+    assert repeated["idempotency"]["reused"] is True
+    assert repeated["loop"]["readiness"]["evidenceRecordCount"] == 1
+    assert repeated["evidence"]["logRefs"] == ["smokerun-001"]
+    assert repeated["evidence"]["artifactRefs"] == [{"ref": "sha256:abc123"}]
+    assert repeated["evidence"]["metadata"]["metrics"] == payload["metrics"]
+
+    changed = research_loop_service.record_research_loop_evidence(
+        team["teamId"],
+        loop_id,
+        {
+            **payload,
+            "metrics": {
+                **payload["metrics"],
+                "delta.reconstruction_mse_delta": 0.0185,
+            },
+        },
+    )
+
+    assert changed["evidence"]["evidenceId"] != first["evidence"]["evidenceId"]
+    assert changed["idempotency"]["reused"] is False
+    assert changed["loop"]["readiness"]["evidenceRecordCount"] == 2
+
+
 def test_iteration_decision_can_idempotently_create_next_design_draft(tmp_path, monkeypatch):
     team = _team(tmp_path, monkeypatch)
     stage = team_workflow_orchestration_service.start_research_stage_round(
