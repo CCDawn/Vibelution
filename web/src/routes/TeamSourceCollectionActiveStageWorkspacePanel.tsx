@@ -111,20 +111,25 @@ export function TeamSourceCollectionActiveStageWorkspacePanel(props: TeamSourceC
   const primaryStageAgentChatRoute = primaryStageAgentChatState.route;
   const primaryStageAgentChatLoading = primaryStageAgentChatState.status === "loading";
   const primaryStageAgentChatError = primaryStageAgentChatState.status === "error";
+  const primaryStageAgentSessionCreateReady = primaryStageAgentChatState.status === "ready";
   const primaryStageAgentRepairPending =
     primaryStageAgentChatState.status === "repair" && repairChallengeCupTeamAgentsMutation.isPending;
   const primaryStageAgentFallbackTitle = primaryStageAgentChatLoading
     ? (lang === "zh" ? "正在加载本轮 Agent 会话，请稍候" : "Loading the Agent session for this run")
     : primaryStageAgentChatError
       ? (lang === "zh" ? "Agent 配置加载失败，请刷新后重试" : "Agent configuration failed to load")
-      : (lang === "zh" ? "当前步骤缺少可用私聊，请先修复团队 Agent 绑定" : "No usable direct chat for this step");
+      : primaryStageAgentSessionCreateReady
+        ? (lang === "zh" ? "为当前研究项目创建并打开此 Agent 的平级实验会话" : "Create and open this Agent's peer experiment session for the current research project")
+        : (lang === "zh" ? "当前步骤缺少可用私聊，请先修复团队 Agent 绑定" : "No usable direct chat for this step");
   const primaryStageAgentFallbackLabel = primaryStageAgentChatLoading
     ? (lang === "zh" ? "加载本轮会话..." : "Loading session...")
     : primaryStageAgentChatError
       ? (lang === "zh" ? "Agent 加载失败" : "Agent load failed")
-      : primaryStageAgentRepairPending
-        ? (lang === "zh" ? "修复中" : "Repairing")
-        : (lang === "zh" ? "修复团队 Agent" : "Repair Team Agents");
+      : primaryStageAgentSessionCreateReady
+        ? (lang === "zh" ? "进入 Agent 私聊" : "Open Agent chat")
+        : primaryStageAgentRepairPending
+          ? (lang === "zh" ? "修复中" : "Repairing")
+          : (lang === "zh" ? "修复团队 Agent" : "Repair Team Agents");
   const primaryStageAgentBinding = sourceCollectionStagePrimaryAgentBinding(activeModule.id);
   const primaryStageAgentConfigRoute = primaryStageAgentBinding?.agentId
     ? researchStageAgentManagementRoute(primaryStageAgentBinding.agentId)

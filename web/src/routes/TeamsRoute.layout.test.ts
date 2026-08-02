@@ -46,6 +46,15 @@ describe("research project workspace", () => {
     );
   });
 
+  it("labels a project-session creation action as Agent chat rather than Agent repair", () => {
+    expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain(
+      'const primaryStageAgentSessionCreateReady = primaryStageAgentChatState.status === "ready";',
+    );
+    expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain(
+      'primaryStageAgentSessionCreateReady\n        ? (lang === "zh" ? "进入 Agent 私聊" : "Open Agent chat")',
+    );
+  });
+
   it("loads the current experiment projection on the Challenge research overview", () => {
     expect(routeSource).toContain(
       'challengeProgramProgressVisible: challengeCupResearchTeamSelected && (challengeTeamSurface === "progress" || researchWorkspaceView === "overview")',
