@@ -16,8 +16,9 @@ describe("conversation process trace styles", () => {
     expect(styles.timelineCellTitleRow).toContain("inline-flex");
     expect(styles.timelineCellTitleRow).toContain("items-baseline");
     expect(styles.timelineCellTitle).toContain("[overflow-wrap:anywhere]");
-    expect(styles.timelineCellTitle).toContain("[font-size:var(--vui-font-sm)]");
-    expect(styles.timelineCellTitle).toContain("font-semibold");
+    expect(styles.timelineCellTitle).toContain("[font-size:var(--vui-font-xs)]");
+    expect(styles.timelineCellTitle).toContain("font-normal");
+    expect(styles.timelineCellTitle).toContain("text-[var(--fg-tertiary)]");
     expect(styles.timelineCellMeta).toContain("inline-flex");
     expect(styles.timelineCellMeta).toContain("align-baseline");
     expect(styles.timelineCellMeta).toContain("whitespace-nowrap");
@@ -43,20 +44,23 @@ describe("conversation process trace styles", () => {
     expect(styles.timelineCellInlineChevron).not.toMatch(/border|rounded|shadow/);
 
     expect(styles.timelineCommandRow).toContain("bg-transparent");
-    expect(styles.timelineCommandRow).toContain("grid-cols-[20px_minmax(0,1fr)]");
+    expect(styles.timelineCommandRow).toContain("grid-cols-[15px_minmax(0,1fr)]");
     expect(styles.timelineCommandRow).not.toContain("_max-content");
-    expect(styles.timelineCommandRow).toContain("py-2");
-    expect(styles.timelineCommandRow).toContain("[font-size:var(--vui-font-sm)]");
+    expect(styles.timelineCommandRow).toContain("py-[0.35rem]");
+    expect(styles.timelineCommandRow).toContain("[font-size:var(--vui-font-xs)]");
+    expect(styles.timelineCommandRow).toContain("text-[var(--fg-tertiary)]");
     expect(styles.timelineCommandRow).toContain("border-b");
     expect(styles.timelineCommandRow).not.toContain("overflow-auto");
     expect(styles.timelineCommandRow).not.toContain("bg-[var(--vui-surface-row)]");
+    expect(styles.timelineCommandList).toContain("border-y");
+    expect(styles.timelineCommandList).toContain("max-h-[min(18rem,42vh)]");
     expect(styles.timelineCommandError).toContain("col-start-2");
     expect(styles.timelineCommandError).not.toContain("col-span-2");
-    expect(styles.timelineCommandError).toContain("[font-size:var(--vui-font-sm)]");
+    expect(styles.timelineCommandError).toContain("[font-size:var(--vui-font-xs)]");
   });
 
   it("keeps normal completed process rows neutral and reserves red for failures", () => {
-    expect(styles.timelineOperationCell_success).toContain("text-[var(--fg-secondary)]");
+    expect(styles.timelineOperationCell_success).toContain("text-[var(--fg-tertiary)]");
     expect(styles.timelineOperationCell_success).not.toContain("state-success");
     expect(styles.answerOnlyProcessGroup_success).toContain("text-[var(--fg-secondary)]");
     expect(styles.answerOnlyProcessGroup_success).not.toContain("state-success");
@@ -75,6 +79,14 @@ describe("conversation process trace styles", () => {
     expect(styles.operationIcon_success).toContain("!text-[var(--fg-tertiary)]");
     expect(styles.operationText_failed).toContain("!text-[var(--state-error)]");
     expect(styles.timelineOperationCell_failed).toContain("state-error");
+  });
+
+  it("separates narrative body color from process/tool rail color like Codex", () => {
+    expect(styles.codexTranscriptCommentaryCell).toContain("text-[var(--fg-primary)]");
+    expect(styles.codexTranscriptFinalCell).toContain("text-[var(--fg-primary)]");
+    expect(styles.codexTranscriptProcessCell).toContain("text-[var(--fg-tertiary)]");
+    expect(styles.codexTranscriptCellTitle).toContain("text-[var(--fg-tertiary)]");
+    expect(styles.codexTranscriptCellTitle).toContain("font-normal");
   });
 
   it("keeps compact chat surface readable over the page background", () => {

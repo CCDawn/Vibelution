@@ -203,6 +203,7 @@ describe("ConversationToolActivity", () => {
     );
 
     expect(html).toContain('data-codex-tool-activity="items"');
+    expect(html).toContain('data-codex-tool-activity-rail="true"');
     expect(html).not.toContain("运行了 3 个工具");
     expect(html).toContain(">代码分析</span>");
     expect(html).toContain(">· 3 次</span>");
@@ -214,6 +215,17 @@ describe("ConversationToolActivity", () => {
     expect(html).not.toContain("3 次调用");
     expect(html).toContain("定位 ConversationLogger");
     expect(html).not.toContain('{&quot;status&quot;:&quot;ok&quot;,');
+  });
+
+  it("keeps Codex-style tool rail frame, capped height, and muted tool type color", () => {
+    expect(styles.activity).toContain("border-y");
+    expect(styles.activity).toContain("max-h-[min(18rem,42vh)]");
+    expect(styles.activity).toContain("overflow-y-auto");
+    expect(styles.itemTitle).toContain("text-[var(--fg-tertiary)]");
+    expect(styles.itemTitle).not.toContain("font-semibold");
+    expect(styles.itemBody).toContain("text-[var(--fg-tertiary)]");
+    expect(styles.itemBody).toContain("[font-size:var(--vui-font-xs)]");
+    expect(styles.itemPreview).toContain("text-[color-mix(in_srgb,var(--fg-tertiary)");
   });
 
   it("keeps a small activity on the same direct-row contract", () => {
@@ -267,21 +279,22 @@ describe("ConversationToolActivity", () => {
     expect(html).not.toContain('data-codex-tool-detail-toggle="inline-symbol"');
     expect(html).not.toContain("完成");
     expect(html).not.toContain("itemChevron");
-    expect(styles.itemSummary).toContain("w-fit");
+    expect(styles.itemSummary).toContain("w-full");
     expect(styles.itemSummary).toContain("max-w-full");
-    expect(styles.itemSummary).toContain("grid-cols-[17px_minmax(0,auto)]");
+    expect(styles.itemSummary).toContain("grid-cols-[15px_minmax(0,1fr)]");
     expect(styles.itemSummary).not.toContain("grid-cols-[17px_minmax(0,1fr)_16px]");
-    expect(styles.batchSummary).toContain("grid-cols-[17px_minmax(0,auto)]");
+    expect(styles.batchSummary).toContain("grid-cols-[15px_minmax(0,1fr)]");
     expect(activityCss).toContain(".vui-components-conversation-tool-activity.batch:not([open])");
     expect(activityCss).toContain(".vui-components-conversation-tool-activity.itemDetails:not([open])");
     expect(activityCss).toContain("> .vui-components-conversation-tool-activity.batchDetails");
     expect(activityCss).toContain("> .vui-components-conversation-tool-activity.itemDetailsBody");
-    expect(styles.activity).toContain("w-fit");
+    expect(styles.activity).toContain("w-full");
     expect(styles.activity).toContain("max-w-full");
+    expect(styles.activity).toContain("max-h-[min(18rem,42vh)]");
     expect(styles.activity).not.toContain("ml-");
     expect(styles.batchDetails).not.toContain("border-l");
     expect(styles.batchDetails).not.toContain("ml-");
-    expect(styles.itemDetailsBody).toContain("max-h-56");
+    expect(styles.itemDetailsBody).toContain("max-h-48");
     expect(styles.itemDetailsBody).not.toContain("ml-");
   });
 

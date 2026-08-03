@@ -276,6 +276,7 @@ export function ConversationToolActivity({
     <div
       className={styles.activity}
       data-codex-tool-activity="items"
+      data-codex-tool-activity-rail="true"
       data-codex-tool-activity-state={digest.state}
       data-codex-tool-activity-count={digest.count}
       data-codex-tool-activity-attention-count={digest.attentionCount || undefined}
