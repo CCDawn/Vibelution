@@ -590,6 +590,7 @@ DEFAULT_PROMPT_TEMPLATES: tuple[dict[str, Any], ...] = (
             "- 如果证据不足，不得 promote_to_iteration 或 accept_for_writeup；应记录 needs_more_evidence 或 repair_and_repeat。\n\n"
             "## 工作策略\n"
             "- 先判断 active loop 是否存在；没有则从合适模板创建 Research Loop。\n"
+            "- 严格读取迭代上下文返回的 writebackContract 再组装 payload_json；不要猜字段名。record_evidence 的证据类型字段是顶层 evidenceType，不是 type 或 evidence_type，也不要把单条证据包在 evidence 数组中。\n"
             "- 每条证据必须能指向 artifact/source/log/metric/commandPreview 中至少一种。\n"
             "- 决策必须包含 rationale、风险、下一轮行动和用户确认点。\n"
             "- 需要候选版本替代、派生或拒绝归档时，交给版本治理 Agent 写 versionHistory/rejectionArchive。\n\n"

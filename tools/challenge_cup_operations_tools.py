@@ -7,6 +7,75 @@ import json
 from typing import Any
 
 
+def _iteration_writeback_contract() -> dict[str, Any]:
+    return {
+        "create_loop": {
+            "requiredFields": ["researchQuestion"],
+            "example": {
+                "researchQuestion": "Does the candidate improve the registered metric?",
+                "templateId": "algorithm_model_experiment",
+                "title": "Registered metric review",
+            },
+        },
+        "record_evidence": {
+            "requiredFields": ["evidenceType"],
+            "oneOfEvidenceFields": [
+                "summary",
+                "metricName",
+                "metricValue",
+                "baselineMetricValue",
+                "delta",
+                "metrics",
+                "artifact",
+                "commandPreview",
+                "source",
+                "artifactRefs",
+                "sourceRefs",
+                "datasetRefs",
+                "environmentRefs",
+                "logRefs",
+            ],
+            "statusValues": [
+                "passed",
+                "failed",
+                "needs_review",
+                "not_applicable",
+            ],
+            "example": {
+                "evidenceType": "metric_report",
+                "status": "passed",
+                "summary": (
+                    "reconstruction_mse improved from 0.025838 to 0.007935"
+                ),
+                "metrics": {
+                    "baseline": 0.025838,
+                    "variant": 0.007935,
+                    "improvement": 0.017903,
+                },
+            },
+        },
+        "record_decision": {
+            "requiredFields": ["decision", "rationale"],
+            "decisionValues": [
+                "promote_to_iteration",
+                "repair_and_repeat",
+                "needs_more_evidence",
+                "reject_or_archive",
+                "accept_for_writeup",
+            ],
+            "example": {
+                "decision": "accept_for_writeup",
+                "rationale": (
+                    "Registered evidence is sufficient for a bounded write-up."
+                ),
+                "nextActions": [
+                    "Preserve the proxy-only boundary in the report."
+                ],
+            },
+        },
+    }
+
+
 def challenge_cup_experiment_context_tool(
     team_id: str = "research-team",
     include_research_loop: bool = False,
@@ -265,6 +334,7 @@ def challenge_cup_iteration_context_tool(
             "status": "ok",
             "teamId": _text(team_id),
             "templates": research_loop_service.list_research_loop_templates(),
+            "writebackContract": _iteration_writeback_contract(),
             "researchLoopStatus": (
                 _bounded_research_loop_status(
                     research_loop_service.get_research_loop_status(
