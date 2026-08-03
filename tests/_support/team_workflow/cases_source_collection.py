@@ -4629,6 +4629,112 @@ def test_source_collection_stage_turn_completion_reconciles_feedback_event_check
     assert stored_task["taskToolProgress"]["completed"] == len(stored_task["taskChecklist"])
     assert stored_task["taskToolProgress"]["source"] == "feedback_events"
 
+
+def test_source_collection_ingestion_reconciles_nested_decision_after_no_steward_pack(
+    tmp_path, monkeypatch
+):
+    """A saved nested ingestion decision must recover without another model turn."""
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: None)
+    source_work_runs = WorkRunStore(root=tmp_path / ".runtime" / "work_runs")
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "_source_collection_work_run_store",
+        lambda: source_work_runs,
+    )
+    ingestor = agent_directory_service.create_agent_instance(display_name="资料入库")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": ingestor["agentId"], "role": "source_ingestor", "agentName": "资料入库"}],
+    )
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "神经预测编码资料入库恢复",
+            "agentRoles": ["source_ingestor"],
+            "agentIds": {"source_ingestor": ingestor["agentId"]},
+            "querySeeds": ["predictive coding neural algorithm"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = run_response["run"]["runId"]
+    candidate = team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"],
+        {
+            "title": "Predictive coding nested ingestion recovery candidate",
+            "sourceUrl": "https://doi.org/10.0000/nested-ingestion-recovery",
+            "sourceKind": "paper",
+            "summary": "A quality-approved candidate that should be recovered into governed knowledge.",
+            "allowedForAnalysis": True,
+            "metadata": {
+                "sourceCollectionRunId": run_id,
+                "doi": "10.0000/nested-ingestion-recovery",
+            },
+            "createdByAgent": ingestor["agentId"],
+        },
+    )["candidate"]
+    team_workflow_orchestration_service.assess_source_candidate_quality(
+        team["teamId"],
+        candidate["candidateId"],
+        {
+            "assessedByAgent": ingestor["agentId"],
+            "decision": "approved",
+            "notes": "来源可追踪，允许进入受控知识入库。",
+            "evidenceRefs": [
+                {"type": "doi", "id": "10.0000/nested-ingestion-recovery"}
+            ],
+        },
+    )
+    task_response = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_id,
+        {"stageId": "ingestion", "agentId": ingestor["agentId"], "agentRole": "source_ingestor"},
+    )
+    task = task_response["task"]
+    _append_stage_task_tool_trace(tmp_path, task)
+    nested_result = {
+        "ingestionDecision": {
+            "decision": "approved",
+            "approvedCandidateIds": [candidate["candidateId"]],
+            "targetDomain": "神经机制启发神经网络算法",
+        },
+        "stewardAssessment": {"decision": "approved", "reason": "候选已通过资料质检。"},
+    }
+    recovered_task = dict(task)
+    recovered_task.update(
+        {
+            "status": "needs_review",
+            "result": dict(nested_result),
+            "writeback": {
+                "status": "needs_review",
+                "agentRequestedStatus": "completed",
+                "summary": "已有入库决定，但旧版本未生成知识审核包。",
+                "result": dict(nested_result),
+                "recordedByAgent": ingestor["agentId"],
+                "materializedKnowledgeIngestion": {"status": "no_steward_pack"},
+            },
+        }
+    )
+    team_workflow_orchestration_service._upsert_source_collection_stage_session_task(
+        team["teamId"],
+        run_id,
+        recovered_task,
+    )
+
+    team_workflow_orchestration_service.get_source_collection_summary(team["teamId"], run_id=run_id)
+
+    stored_task, _stored_run_id = team_workflow_orchestration_service._find_source_collection_stage_session_task_by_id(
+        team["teamId"],
+        task["taskId"],
+    )
+    materialized = stored_task["writeback"]["materializedKnowledgeIngestion"]
+    assert materialized["status"] == "completed", materialized
+    assert materialized["formalKnowledgeItemCount"] >= 1
+    assert stored_task["completionGate"]["artifactComplete"] is True
+    assert stored_task["status"] == "completed"
+
+
 def test_source_collection_stage_task_after_turn_accepts_continuation_turn_for_same_task(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)

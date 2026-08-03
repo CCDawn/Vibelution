@@ -1315,9 +1315,22 @@ def _materialize_source_collection_stage_writeback_knowledge_ingestion(
         source_candidates_by_id,
     )
 
-    decision = result.get("autoIngestDecision") if isinstance(result.get("autoIngestDecision"), dict) else {}
-    if not decision and isinstance(result.get("steward_assessment"), dict):
-        decision = result.get("steward_assessment")
+    decision: dict[str, Any] = {}
+    for key in (
+        "autoIngestDecision",
+        "auto_ingest_decision",
+        "steward_assessment",
+        "stewardAssessment",
+        "ingestionDecision",
+        "ingestion_decision",
+    ):
+        candidate_decision = result.get(key)
+        if isinstance(candidate_decision, dict):
+            decision = candidate_decision
+            break
+        if isinstance(candidate_decision, str) and candidate_decision.strip():
+            decision = {"decision": candidate_decision}
+            break
     if not decision and approved_candidate_ids_from_result:
         decision = {"decision": "approved", "confidence": s._source_collection_stage_writeback_approved_confidence(result)}
     normalized_decision = s._safe_token(decision.get("decision"), default="", max_length=80)
@@ -1878,6 +1891,8 @@ def _source_collection_stage_writeback_approved_candidate_ids(result: dict[str, 
     for container_key in (
         "autoIngestDecision",
         "auto_ingest_decision",
+        "ingestionDecision",
+        "ingestion_decision",
         "stewardPackDraft",
         "steward_pack_draft",
         "stewardPack",
@@ -1937,9 +1952,18 @@ def _source_collection_stage_writeback_target_domain(result: dict[str, Any]) -> 
     for value in (
         result.get("targetDomain"),
         result.get("knowledgeDomain"),
-        (result.get("steward_assessment") or {}).get("targetDomain") if isinstance(result.get("steward_assessment"), dict) else "",
-        (result.get("stewardAssessment") or {}).get("targetDomain") if isinstance(result.get("stewardAssessment"), dict) else "",
-        (result.get("autoIngestDecision") or {}).get("targetDomain") if isinstance(result.get("autoIngestDecision"), dict) else "",
+        (result.get("steward_assessment") or {}).get("targetDomain")
+        if isinstance(result.get("steward_assessment"), dict)
+        else "",
+        (result.get("stewardAssessment") or {}).get("targetDomain")
+        if isinstance(result.get("stewardAssessment"), dict)
+        else "",
+        (result.get("autoIngestDecision") or {}).get("targetDomain")
+        if isinstance(result.get("autoIngestDecision"), dict)
+        else "",
+        (result.get("ingestionDecision") or {}).get("targetDomain")
+        if isinstance(result.get("ingestionDecision"), dict)
+        else "",
     ):
         target = s._trim_text(value, max_length=160)
         if target:
