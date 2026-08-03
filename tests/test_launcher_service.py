@@ -307,20 +307,30 @@ def test_launcher_status_projects_active_desktop_session_window(tmp_path, monkey
     monkeypatch.setattr(launcher_service, "RESULTS_DIR", tmp_path / ".runtime" / "runtime-manager" / "results")
     monkeypatch.setattr(launcher_service, "EVENTS_PATH", tmp_path / ".runtime" / "runtime-manager" / "events.jsonl")
     monkeypatch.setattr(launcher_service, "LAUNCHER_STATE_PATH", tmp_path / ".runtime" / "launcher" / "state.json")
-    monkeypatch.setattr(launcher_service, "load_state", lambda: {})
+    monkeypatch.setattr(
+        launcher_service,
+        "load_state",
+        lambda: {
+            "daemonRunning": True,
+            "workbench": {"desiredState": "open", "observedState": "partial", "phase": "steady"},
+        },
+    )
     monkeypatch.setattr(launcher_service, "load_pid", lambda: 0)
     monkeypatch.setattr(launcher_service, "_is_process_alive", lambda pid: False)
     monkeypatch.setattr(
         launcher_service,
         "observe_workbench",
         lambda *args, **kwargs: {
-            "observedState": "closed",
+            "observedState": "partial",
             "sessionRole": "workbench",
-            "backendAlive": False,
-            "backendHealthy": False,
+            "backendAlive": True,
+            "backendHealthy": True,
+            "backendObserved": True,
+            "backendPortListening": True,
             "browserWindowAlive": False,
             "browserManaged": True,
-            "url": "",
+            "lifecycleConsistency": "browser_missing",
+            "url": "http://127.0.0.1:8000/",
         },
     )
     created = launcher_service.register_desktop_session(
@@ -355,6 +365,9 @@ def test_launcher_status_projects_active_desktop_session_window(tmp_path, monkey
     assert payload["projectBundle"]["desktopSessionLeaseExpiresAt"]
     assert payload["projectBundle"]["browser"]["managed"] is False
     assert payload["lifecycleProof"]["browserManaged"] is False
+    assert payload["projectBundle"]["observedState"] == "open"
+    assert payload["projectBundle"]["lifecycleConsistency"] == "consistent"
+    assert payload["projectBundle"]["statusLine"] == "工作台正在运行。"
 
 
 def test_standalone_launcher_app_exposes_desktop_session_routes(monkeypatch):

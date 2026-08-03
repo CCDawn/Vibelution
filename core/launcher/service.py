@@ -1770,6 +1770,11 @@ def _workbench_payload(*, runtime_state: dict[str, Any], observed_workbench: dic
     lifecycle_consistency = str(
         observed_or_state("lifecycleConsistency", "consistent") or "consistent"
     ).strip() or "consistent"
+    if desktop_window and bool(desktop_window.get("windowManaged")) and lifecycle_consistency == "browser_missing":
+        # An active Electron workbench window is the managed frontend.  The
+        # legacy browser process probe cannot observe it, so its stale
+        # browser_missing result must not override desktop-session evidence.
+        lifecycle_consistency = "consistent"
     browser_missing = bool(
         lifecycle_consistency == "browser_missing"
         or (
