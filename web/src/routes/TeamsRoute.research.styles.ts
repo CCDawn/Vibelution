@@ -31,6 +31,14 @@ const styles = {
     "researchInspector min-w-0",
   researchLoopActive:
     `researchLoopActive min-w-0 ${vuiStateSelectedRowClass}`,
+  researchLoopChoice:
+    "researchLoopChoice min-w-0 max-w-full !h-auto !min-h-[var(--vui-control-height-sm)] !whitespace-normal break-words px-2 py-1 text-left leading-[var(--vui-line-compact)]",
+  researchLoopChoiceActive:
+    `researchLoopChoiceActive ${vuiStateSelectedRowFillClass} !border-[color:color-mix(in_srgb,var(--accent-cool)_52%,var(--border-soft))] !text-[var(--fg-primary)]`,
+  researchLoopChoiceField:
+    "researchLoopChoiceField min-w-0 grid content-start gap-1",
+  researchLoopChoiceGrid:
+    "researchLoopChoiceGrid min-w-0 flex flex-wrap items-stretch gap-1",
   researchLoopDecisionForm:
     "researchLoopDecisionForm min-w-0 grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
   researchLoopEvidenceForm:

@@ -4,6 +4,7 @@ import {
   buildBoundedSmokeEvidenceDraft,
   mergeBoundedSmokeEvidenceDraft,
 } from "./TeamResearchLoopPanel";
+import panelSource from "./TeamResearchLoopPanel.tsx?raw";
 import type {
   ExperimentPlanRecord,
   ResearchLoopEvidenceDraft,
@@ -63,6 +64,13 @@ function planWithSmoke(): ExperimentPlanRecord {
 }
 
 describe("bounded Smoke iteration evidence prefill", () => {
+  it("keeps evidence review and final decision choices mouse-operable", () => {
+    expect(panelSource).toContain('role="group" aria-label={lang === "zh" ? "证据类型"');
+    expect(panelSource).toContain('role="group" aria-label={lang === "zh" ? "状态"');
+    expect(panelSource).toContain('role="group" aria-label={lang === "zh" ? "决策"');
+    expect(panelSource).not.toContain("value={researchLoopDecisionDraft.decision}");
+  });
+
   it("prefills the review form with the real run evidence and proxy boundary", () => {
     const draft = buildBoundedSmokeEvidenceDraft(planWithSmoke(), "zh");
 
