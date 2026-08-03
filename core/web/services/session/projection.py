@@ -862,6 +862,48 @@ def _normalize_conversation(
     }
 
 
+# Journal tool events are projected as role=assistant shells for process data.
+# Only the per-turn timeline target may surface as a bubble host; the rest are air.
+_TOOL_EVENT_BUBBLE_KINDS = frozenset(
+    {
+        "tool_result",
+        "tool_call_started",
+        "cli_task_result",
+        "cli_task_sent",
+        "cli_session_lifecycle",
+    }
+)
+
+
+def _is_ephemeral_tool_event_bubble(
+    raw: dict[str, Any],
+    *,
+    content: str,
+    thought: str,
+    mental_snapshot: Any,
+    feedback_events: list[Any],
+    attachments: list[Any],
+    references: list[Any],
+) -> bool:
+    """True when this row is only a tool journal shell with no user-visible answer text."""
+
+    if str(raw.get("role") or "").strip().lower() != "assistant":
+        return False
+    if str(content or "").strip() or str(thought or "").strip():
+        return False
+    if mental_snapshot is not None or feedback_events or attachments or references:
+        return False
+    metadata = raw.get("metadata") if isinstance(raw.get("metadata"), dict) else {}
+    kind = str(metadata.get("kind") or "").strip().lower()
+    if kind in _TOOL_EVENT_BUBBLE_KINDS:
+        return True
+    # Defensive: empty assistant rows that only carry toolCalls and tool-ish kinds.
+    tool_calls = raw.get("tool_calls") or raw.get("toolCalls") or raw.get("tools") or []
+    if tool_calls and (kind.startswith("tool") or kind.startswith("cli_")):
+        return True
+    return False
+
+
 def _normalize_messages(
     conversation_id: str,
     items: Any,
@@ -876,10 +918,11 @@ def _normalize_messages(
     timeline_lang = s.get_web_language() if include_timeline else ""
     normalized_start_index = max(1, int(source_start_index or 1))
     normalized_transcript_scope = s._normalize_session_detail_transcript_scope(transcript_scope)
-    timeline_target_indices = (
-        s._assistant_timeline_target_indices(raw_items, source_start_index=normalized_start_index)
-        if include_timeline
-        else {}
+    # Always compute per-turn hosts so tool-event air bubbles can be collapsed even
+    # when timeline/transcript enrichment is disabled for a payload window.
+    timeline_target_indices = s._assistant_timeline_target_indices(
+        raw_items,
+        source_start_index=normalized_start_index,
     )
     messages: list[dict[str, Any]] = []
     for index, raw in enumerate(raw_items, start=normalized_start_index):
@@ -904,6 +947,20 @@ def _normalize_messages(
         references = s._normalize_session_references(raw.get("references") or (raw.get("metadata") or {}).get("sessionReferences") or [])
         if not content and not thought and mental_snapshot is None and not tool_calls and not feedback_events and not attachments and not references:
             continue
+        # Mature chat list: one process host per turn (timeline target). Intermediate
+        # tool_result shells are process data, not empty avatar bubbles.
+        turn_id = s._message_turn_id(raw)
+        if _is_ephemeral_tool_event_bubble(
+            raw,
+            content=content,
+            thought=thought or "",
+            mental_snapshot=mental_snapshot,
+            feedback_events=feedback_events,
+            attachments=attachments,
+            references=references,
+        ):
+            if not turn_id or timeline_target_indices.get(turn_id) != index:
+                continue
         entry: dict[str, Any] = {
             "id": f"{conversation_id}-message-{index}",
             "role": role,
