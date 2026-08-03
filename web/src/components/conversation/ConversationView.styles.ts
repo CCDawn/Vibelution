@@ -365,26 +365,27 @@ const styles: Record<string, string> = {
     "vui-components-conversationview codexTranscriptCellMeta inline-flex min-w-0 shrink-0 align-baseline whitespace-nowrap [font-size:var(--vui-font-xs)] leading-[var(--vui-line-tight)] text-[var(--fg-tertiary)]",
   codexTranscriptCellSummary:
     "vui-components-conversationview codexTranscriptCellSummary min-w-0 max-w-full [font-size:var(--vui-font-xs)] leading-[1.42] text-[var(--fg-tertiary)] whitespace-normal break-words [overflow-wrap:anywhere]",
+  // Process/tool titles stay muted so narrative (primary) and tools (tertiary) separate like Codex.
   codexTranscriptCellTitle:
-    "vui-components-conversationview codexTranscriptCellTitle min-w-0 whitespace-normal [font-size:var(--vui-font-sm)] font-semibold leading-[1.35] text-[var(--fg-secondary)] [overflow-wrap:anywhere]",
+    "vui-components-conversationview codexTranscriptCellTitle min-w-0 whitespace-normal [font-size:var(--vui-font-xs)] font-normal leading-[1.4] text-[var(--fg-tertiary)] [overflow-wrap:anywhere]",
   codexTranscriptCellTitleRow:
     "vui-components-conversationview codexTranscriptCellTitleRow min-w-0 inline-flex max-w-full flex-wrap items-baseline gap-x-2 gap-y-0.5",
   codexTranscriptCommentaryCell:
-    "vui-components-conversationview codexTranscriptCommentaryCell max-w-full border-0 bg-transparent py-1 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-primary)]",
+    "vui-components-conversationview codexTranscriptCommentaryCell max-w-full border-0 bg-transparent py-1.5 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-primary)] [&_.markdownBody]:text-[var(--fg-primary)] [&_p]:text-[var(--fg-primary)]",
   codexTranscriptErrorCell:
     "vui-components-conversationview codexTranscriptErrorCell border-0 border-l-2 border-l-[var(--state-error)] bg-[color-mix(in_srgb,var(--state-error)_5%,transparent)] px-3 py-2",
   codexTranscriptFinalCell:
-    "vui-components-conversationview codexTranscriptFinalCell border-0 bg-transparent py-2 text-[var(--fg-primary)] leading-[var(--vui-line-readable)] [&_.markdownBody]:max-w-full [&_.markdownBody]:text-[var(--fg-primary)] [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_table]:max-w-full [&_img]:max-w-full [&_a]:break-words",
+    "vui-components-conversationview codexTranscriptFinalCell border-0 bg-transparent py-2 text-[var(--fg-primary)] leading-[var(--vui-line-readable)] [&_.markdownBody]:max-w-full [&_.markdownBody]:text-[var(--fg-primary)] [&_p]:text-[var(--fg-primary)] [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_table]:max-w-full [&_img]:max-w-full [&_a]:break-words",
   codexTranscriptCell_error:
-    "vui-components-conversationview codexTranscriptCell_error border-0 bg-transparent py-1 text-[var(--fg-secondary)] [&_.codexTranscriptCellIcon]:text-[var(--state-error)]",
+    "vui-components-conversationview codexTranscriptCell_error border-0 bg-transparent py-1 text-[var(--fg-tertiary)] [&_.codexTranscriptCellIcon]:text-[var(--state-error)]",
   codexTranscriptCell_neutral:
-    "vui-components-conversationview codexTranscriptCell_neutral text-[var(--fg-secondary)]",
+    "vui-components-conversationview codexTranscriptCell_neutral text-[var(--fg-tertiary)]",
   codexTranscriptCell_running:
-    "vui-components-conversationview codexTranscriptCell_running text-[var(--fg-secondary)]",
+    "vui-components-conversationview codexTranscriptCell_running text-[var(--fg-tertiary)]",
   codexTranscriptCell_warning:
     "vui-components-conversationview codexTranscriptCell_warning text-[var(--state-warning)] [&_.codexTranscriptCellIcon]:text-[var(--state-warning)] [&_.codexTranscriptCellMeta]:text-[var(--state-warning)] [&_.codexTranscriptCellTitle]:text-[var(--state-warning)]",
   codexTranscriptProcessCell:
-    "vui-components-conversationview codexTranscriptProcessCell grid grid-cols-[20px_minmax(0,1fr)] items-start gap-x-2 gap-y-1 border-0 bg-transparent py-1 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)]",
+    "vui-components-conversationview codexTranscriptProcessCell grid grid-cols-[15px_minmax(0,1fr)] items-start gap-x-2 gap-y-0.5 border-0 bg-transparent py-[0.2rem] [font-size:var(--vui-font-xs)] leading-[1.45] text-[var(--fg-tertiary)]",
   codexTranscriptReasoningCell:
     "vui-components-conversationview codexTranscriptReasoningCell min-w-0 grid min-h-0 content-start gap-1 border-0 bg-transparent py-1 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)]",
   codexTranscriptReasoningHeader:
@@ -1107,13 +1108,13 @@ const styles: Record<string, string> = {
   timelineCellPreview:
     "vui-components-conversationview timelineCellPreview min-w-0 border-0 bg-transparent p-0 [font-size:var(--vui-font-sm)] leading-[1.42] text-[var(--fg-secondary)] shadow-none grid min-h-0 content-start gap-1.5 overflow-hidden whitespace-normal break-words [overflow-wrap:anywhere] line-clamp-2",
   timelineCellTitle:
-    "vui-components-conversationview timelineCellTitle min-w-0 whitespace-normal [font-size:var(--vui-font-sm)] font-semibold leading-[1.35] [overflow-wrap:anywhere]",
+    "vui-components-conversationview timelineCellTitle min-w-0 whitespace-normal [font-size:var(--vui-font-xs)] font-normal leading-[1.4] text-[var(--fg-tertiary)] [overflow-wrap:anywhere]",
   timelineCommandError:
-    "vui-components-conversationview timelineCommandError col-start-2 mt-0.5 min-w-0 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] px-2 py-1.5 [font-size:var(--vui-font-sm)] leading-[1.45] text-[var(--state-error)] whitespace-pre-wrap [overflow-wrap:anywhere]",
+    "vui-components-conversationview timelineCommandError col-start-2 mt-0.5 min-w-0 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--state-error)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_9%,transparent)] px-2 py-1.5 [font-size:var(--vui-font-xs)] leading-[1.45] text-[var(--state-error)] whitespace-pre-wrap [overflow-wrap:anywhere]",
   timelineCommandList:
-    "vui-components-conversationview timelineCommandList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
+    "vui-components-conversationview timelineCommandList min-w-0 grid min-h-0 content-start gap-0 border-y border-[color-mix(in_srgb,var(--fg-tertiary)_22%,var(--vui-border-subtle))] py-1.5 my-1 max-h-[min(18rem,42vh)] overflow-y-auto overflow-x-hidden [scrollbar-width:thin]",
   timelineCommandRow:
-    "vui-components-conversationview timelineCommandRow min-w-0 grid grid-cols-[20px_minmax(0,1fr)] items-start gap-x-2 gap-y-1 border-b border-[color-mix(in_srgb,var(--vui-border-subtle)_70%,transparent)] bg-transparent py-2 [font-size:var(--vui-font-sm)] leading-[1.42] text-[var(--fg-secondary)] last:border-b-0",
+    "vui-components-conversationview timelineCommandRow min-w-0 grid grid-cols-[15px_minmax(0,1fr)] items-start gap-x-2 gap-y-0.5 border-b border-[color-mix(in_srgb,var(--vui-border-subtle)_55%,transparent)] bg-transparent py-[0.35rem] [font-size:var(--vui-font-xs)] leading-[1.45] text-[var(--fg-tertiary)] last:border-b-0",
   timelineHistoryButton:
     "vui-components-conversationview timelineHistoryButton min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55",
   timelineHistoryGate:
@@ -1123,15 +1124,15 @@ const styles: Record<string, string> = {
   timelineThoughtInlinePreview:
     "vui-components-conversationview timelineThoughtInlinePreview min-w-0 flex-1 truncate [font-size:var(--vui-font-sm)] font-normal leading-[1.42] text-[var(--fg-tertiary)]",
   timelineOperationCell:
-    "vui-components-conversationview timelineOperationCell min-w-0 grid min-h-0 content-start gap-1.5 overflow-visible text-[var(--fg-secondary)]",
+    "vui-components-conversationview timelineOperationCell min-w-0 grid min-h-0 content-start gap-1 overflow-visible text-[var(--fg-tertiary)]",
   timelineOperationCell_pending:
-    "vui-components-conversationview timelineOperationCell_pending min-w-0 grid min-h-0 content-start gap-1.5 overflow-visible text-[var(--fg-secondary)]",
+    "vui-components-conversationview timelineOperationCell_pending min-w-0 grid min-h-0 content-start gap-1 overflow-visible text-[var(--fg-tertiary)]",
   timelineOperationCell_running:
-    "vui-components-conversationview timelineOperationCell_running min-w-0 grid min-h-0 content-start gap-1.5 overflow-visible text-[var(--fg-secondary)]",
+    "vui-components-conversationview timelineOperationCell_running min-w-0 grid min-h-0 content-start gap-1 overflow-visible text-[var(--fg-tertiary)]",
   timelineOperationCell_failed:
-    "vui-components-conversationview timelineOperationCell_failed min-w-0 grid min-h-0 content-start gap-1.5 overflow-visible border-0 bg-transparent p-0 text-[var(--fg-secondary)] [&_.operationIcon]:text-[var(--state-error)] [&_.timelineCellTitle]:text-[var(--state-error)]",
+    "vui-components-conversationview timelineOperationCell_failed min-w-0 grid min-h-0 content-start gap-1 overflow-visible border-0 bg-transparent p-0 text-[var(--fg-tertiary)] [&_.operationIcon]:text-[var(--state-error)] [&_.timelineCellTitle]:text-[var(--state-error)]",
   timelineOperationCell_success:
-    "vui-components-conversationview timelineOperationCell_success min-w-0 grid min-h-0 content-start gap-1.5 overflow-visible text-[var(--fg-secondary)]",
+    "vui-components-conversationview timelineOperationCell_success min-w-0 grid min-h-0 content-start gap-1 overflow-visible text-[var(--fg-tertiary)]",
   timelineOperationCell_warning:
     "vui-components-conversationview timelineOperationCell_warning min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto text-[var(--state-warning)]",
   timelineOperationResult:
