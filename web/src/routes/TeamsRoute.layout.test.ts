@@ -1844,6 +1844,8 @@ describe("TeamsRoute layout contract", () => {
     expect(teamResearchStageLauncherPanelSource).toContain("researchExperimentMethodQuickSelect");
     expect(teamResearchStageLauncherPanelSource).toContain("selectedExperimentAdapterStatus");
     expect(teamResearchStageLauncherPanelSource).toContain("selectedExperimentAdapterReason");
+    expect(teamResearchStageLauncherPanelSource).toContain("activeExperimentContractAdapterSelection");
+    expect(teamResearchStageLauncherPanelSource).toContain("selectedExperimentResolvedAdapterId");
     expect(teamResearchStageLauncherPanelSource).toContain("executableAlternativeMethods");
     expect(teamResearchStageLauncherPanelSource).toContain("可执行替代");
     expect(teamResearchStageLauncherPanelSource).toContain("已登记");
