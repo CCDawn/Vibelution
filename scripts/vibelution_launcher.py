@@ -929,16 +929,28 @@ def _start_managed_browser(url: str) -> dict[str, object]:
         startupinfo=_hidden_startup_info(),
     )
     app_identity = _apply_managed_browser_app_identity(int(process.pid), "workbench")
+    window_pid = int(app_identity.get("windowPid") or process.pid)
+    # Collapse dual Edge --app frames (blank shell + titled workbench) under the
+    # same profile process. Import is local to avoid circular import at module load.
+    converge: dict[str, object] = {}
+    try:
+        from core.runtime_manager.workbench_controller import _converge_browser_windows
+
+        converge = dict(_converge_browser_windows(int(window_pid), focus_kept=True) or {})
+    except Exception:
+        converge = {}
     return {
         "browserManaged": True,
         "browserExecutable": executable,
         "browserLaunchPid": int(process.pid),
-        "browserWindowPid": int(app_identity.get("windowPid") or process.pid),
+        "browserWindowPid": int(window_pid),
         "browserProfileDir": str(WORKBENCH_BROWSER_PROFILE_DIR),
         "browserAppUserModelId": str(app_identity.get("appUserModelId") or ""),
         "browserIconResource": str(app_identity.get("iconResource") or ""),
         "browserAppIdentityApplied": bool(app_identity.get("applied")),
         "browserWindowIconApplied": bool(app_identity.get("windowIconApplied")),
+        "browserWindowKeptHwnd": int(converge.get("keptHwnd") or 0),
+        "browserWindowClosedCount": len(list(converge.get("closedHwnds") or [])),
     }
 
 

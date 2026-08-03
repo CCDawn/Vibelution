@@ -80,6 +80,49 @@ def _is_process_alive(pid: int) -> bool:
     return True
 
 
+_WORKBENCH_TITLE_MARKERS = ("Vibelution", "工作台", "Workbench")
+_WM_CLOSE = 0x0010
+_SW_RESTORE = 9
+_SW_SHOW = 5
+
+
+def _browser_window_title_is_workbench(title: object) -> bool:
+    text = str(title or "")
+    return any(marker in text for marker in _WORKBENCH_TITLE_MARKERS)
+
+
+def _score_browser_window(item: dict[str, int | bool | str]) -> int:
+    """Rank managed Edge --app frames. Titled workbench always beats blank shells."""
+
+    title = str(item.get("title") or "")
+    score = 0
+    if _browser_window_title_is_workbench(title):
+        score += 10_000
+    elif title.strip():
+        score += 500
+    # Untitled large black frames must lose to a small titled workbench window.
+    if bool(item.get("visible")) and not bool(item.get("iconic")):
+        score += 1_000
+    elif bool(item.get("visible")):
+        score += 400
+    elif bool(item.get("iconic")):
+        score += 200
+    width = max(0, int(item.get("width") or 0))
+    height = max(0, int(item.get("height") or 0))
+    area = width * height
+    if _browser_window_title_is_workbench(title):
+        # Mild size preference among real workbench titles only.
+        score += min(area // 40_000, 80)
+        if width >= 640 and height >= 480:
+            score += 40
+    else:
+        # Penalize blank shells so they are closed when a titled peer exists.
+        score -= 2_000
+        if not title.strip():
+            score -= 500
+    return score
+
+
 def _iter_browser_candidate_windows(pid: int) -> list[dict[str, int | bool | str]]:
     """Return candidate top-level windows owned by ``pid`` (Windows only)."""
 
@@ -133,6 +176,120 @@ def _iter_browser_candidate_windows(pid: int) -> list[dict[str, int | bool | str
     return found
 
 
+def _close_browser_window_hwnd(hwnd: int) -> bool:
+    """Post WM_CLOSE to a top-level Edge app frame without killing the process tree."""
+
+    if os.name != "nt" or int(hwnd or 0) <= 0:
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+    except Exception:
+        return False
+    user32 = ctypes.windll.user32
+    try:
+        return bool(
+            user32.PostMessageW(
+                wintypes.HWND(int(hwnd)),
+                _WM_CLOSE,
+                0,
+                0,
+            )
+        )
+    except Exception:
+        return False
+
+
+def _focus_browser_window_hwnd(hwnd: int) -> bool:
+    if os.name != "nt" or int(hwnd or 0) <= 0:
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+    except Exception:
+        return False
+    user32 = ctypes.windll.user32
+    handle = wintypes.HWND(int(hwnd))
+    try:
+        user32.ShowWindow(handle, _SW_RESTORE)
+        user32.ShowWindow(handle, _SW_SHOW)
+        user32.SetForegroundWindow(handle)
+        return bool(user32.IsWindowVisible(handle))
+    except Exception:
+        return False
+
+
+def _converge_browser_windows(pid: int, *, focus_kept: bool = True) -> dict[str, Any]:
+    """Keep the single best workbench HWND for ``pid``; close orphan Edge --app frames.
+
+    Edge --app under one profile process can leave a large untitled black shell plus a
+    small titled ``Vibelution 工作台`` window. Process-level MainWindowHandle checks
+    cannot see that dual-window state; HWND enumeration + scoring is required.
+    """
+
+    if os.name != "nt" or int(pid or 0) <= 0:
+        return {
+            "pid": int(pid or 0),
+            "keptHwnd": 0,
+            "keptTitle": "",
+            "closedHwnds": [],
+            "candidateCount": 0,
+            "changed": False,
+        }
+
+    candidates = list(_iter_browser_candidate_windows(int(pid)))
+    if not candidates:
+        return {
+            "pid": int(pid),
+            "keptHwnd": 0,
+            "keptTitle": "",
+            "closedHwnds": [],
+            "candidateCount": 0,
+            "changed": False,
+        }
+
+    ranked = sorted(
+        candidates,
+        key=lambda item: (
+            _score_browser_window(item),
+            int(item.get("width") or 0) * int(item.get("height") or 0),
+            int(item.get("hwnd") or 0),
+        ),
+        reverse=True,
+    )
+    winner = ranked[0]
+    kept_hwnd = int(winner.get("hwnd") or 0)
+    kept_title = str(winner.get("title") or "")
+    closed: list[int] = []
+    for item in ranked[1:]:
+        hwnd = int(item.get("hwnd") or 0)
+        if hwnd <= 0 or hwnd == kept_hwnd:
+            continue
+        extra_title = str(item.get("title") or "")
+        # Never close Edge DevTools / explicit debug surfaces under the profile.
+        if any(marker in extra_title for marker in ("DevTools", "Developer Tools")):
+            continue
+        # Managed --app profile: blank shells and duplicate workbench frames are orphans.
+        if _close_browser_window_hwnd(hwnd):
+            closed.append(hwnd)
+
+    if focus_kept and kept_hwnd > 0:
+        if not (bool(winner.get("visible")) and not bool(winner.get("iconic"))):
+            _focus_browser_window_hwnd(kept_hwnd)
+        elif closed:
+            # Re-assert foreground on the real workbench after closing a blank shell.
+            _focus_browser_window_hwnd(kept_hwnd)
+
+    return {
+        "pid": int(pid),
+        "keptHwnd": kept_hwnd,
+        "keptTitle": kept_title,
+        "closedHwnds": closed,
+        "candidateCount": len(candidates),
+        "changed": bool(closed),
+    }
+
+
 def _visible_top_level_window_handles(pid: int) -> list[int]:
     """Return visible top-level HWND values owned by ``pid`` (Windows only)."""
 
@@ -144,39 +301,39 @@ def _visible_top_level_window_handles(pid: int) -> list[int]:
 
 
 def _restore_hidden_browser_windows(pid: int) -> list[int]:
-    """Show/restore managed Edge app windows that exist but are not visible."""
+    """Show/restore the single best managed Edge app window when none are visible."""
 
     if os.name != "nt" or int(pid or 0) <= 0:
         return []
-    try:
-        import ctypes
-    except Exception:
+    candidates = list(_iter_browser_candidate_windows(int(pid)))
+    if not candidates:
         return []
 
-    user32 = ctypes.windll.user32
-    SW_RESTORE = 9
-    SW_SHOW = 5
-    restored: list[int] = []
-    for item in _iter_browser_candidate_windows(pid):
+    visible = [
+        item
+        for item in candidates
+        if bool(item.get("visible")) and not bool(item.get("iconic"))
+    ]
+    if visible:
+        # Already visible: still collapse dual frames to one workbench HWND.
+        result = _converge_browser_windows(int(pid), focus_kept=True)
+        kept = int(result.get("keptHwnd") or 0)
+        return [kept] if kept > 0 else [int(item["hwnd"]) for item in visible]
+
+    ranked = sorted(candidates, key=_score_browser_window, reverse=True)
+    for item in ranked:
+        title = str(item.get("title") or "")
+        # Prefer titled workbench windows; still accept large untitled app frames.
+        if title and not _browser_window_title_is_workbench(title):
+            continue
         hwnd = int(item.get("hwnd") or 0)
         if hwnd <= 0:
             continue
-        if bool(item.get("visible")) and not bool(item.get("iconic")):
-            restored.append(hwnd)
-            continue
-        title = str(item.get("title") or "")
-        # Prefer titled workbench windows; still accept large untitled app frames.
-        if title and ("Vibelution" not in title and "工作台" not in title and "Workbench" not in title):
-            continue
-        try:
-            user32.ShowWindow(hwnd, SW_RESTORE)
-            user32.ShowWindow(hwnd, SW_SHOW)
-            user32.SetForegroundWindow(hwnd)
-            if user32.IsWindowVisible(hwnd):
-                restored.append(hwnd)
-        except Exception:
-            continue
-    return restored
+        if _focus_browser_window_hwnd(hwnd):
+            # Close any remaining peers after the winner is shown.
+            _converge_browser_windows(int(pid), focus_kept=True)
+            return [hwnd]
+    return []
 
 
 def _is_browser_window_alive(pid: int) -> bool:
@@ -185,15 +342,20 @@ def _is_browser_window_alive(pid: int) -> bool:
     Chromium/Edge often leaves a process tree after the app window is closed, or
     keeps a hidden window after a bad ``--window-size``. Process-only checks then
     report Workbench as open while the user sees nothing.
+
+    When multiple top-level frames exist under the same Edge process (blank shell +
+    titled workbench), converge to a single kept HWND before reporting alive.
     """
 
     if not _is_process_alive(pid):
         return False
     if os.name != "nt":
         return True
-    if _visible_top_level_window_handles(int(pid)):
-        return True
-    # Self-heal: restore hidden-but-present managed app windows.
+    handles = _visible_top_level_window_handles(int(pid))
+    if handles:
+        _converge_browser_windows(int(pid), focus_kept=False)
+        return bool(_visible_top_level_window_handles(int(pid)) or handles)
+    # Self-heal: restore the best hidden managed app window, then converge.
     return bool(_restore_hidden_browser_windows(int(pid)))
 
 
@@ -635,7 +797,25 @@ def observe_workbench(
         })
 
     state_backend_alive = _is_process_alive(state_backend_pid)
+    browser_window_converge: dict[str, Any] = {
+        "pid": int(browser_window_pid or 0),
+        "keptHwnd": 0,
+        "keptTitle": "",
+        "closedHwnds": [],
+        "candidateCount": 0,
+        "changed": False,
+    }
     browser_window_alive = _is_browser_window_alive(browser_window_pid)
+    if browser_window_alive and browser_window_pid > 0 and os.name == "nt":
+        # observe re-converges so dual Edge frames are closed even when the
+        # initial alive check used focus_kept=False. Only demote alive when we
+        # actually saw top-level frames and none remain after close.
+        browser_window_converge = _converge_browser_windows(browser_window_pid, focus_kept=True)
+        if int(browser_window_converge.get("candidateCount") or 0) > 0:
+            browser_window_alive = bool(
+                int(browser_window_converge.get("keptHwnd") or 0) > 0
+                or bool(_visible_top_level_window_handles(browser_window_pid))
+            )
     if (
         session_role == "workbench"
         and not recover_browser_window
@@ -722,6 +902,13 @@ def observe_workbench(
             browser_window_pid = recovered_browser_window_pid
             browser_window_alive = True
             browser_window_recovery_source = "managed_profile"
+            if os.name == "nt":
+                browser_window_converge = _converge_browser_windows(browser_window_pid, focus_kept=True)
+                if int(browser_window_converge.get("candidateCount") or 0) > 0:
+                    browser_window_alive = bool(
+                        int(browser_window_converge.get("keptHwnd") or 0) > 0
+                        or bool(_visible_top_level_window_handles(browser_window_pid))
+                    )
     launcher_browser_window_alive = _is_browser_window_alive(launcher_browser_window_pid)
     managed_browser_missing = bool(
         observed_session_role != "launcher_control_surface"
@@ -763,6 +950,9 @@ def observe_workbench(
         "browserWindowPid": browser_window_pid,
         "browserWindowRecoveredPid": recovered_browser_window_pid,
         "browserWindowRecoverySource": browser_window_recovery_source,
+        "browserWindowConverge": browser_window_converge,
+        "browserWindowKeptHwnd": int(browser_window_converge.get("keptHwnd") or 0),
+        "browserWindowClosedCount": len(browser_window_converge.get("closedHwnds") or []),
         "browserProfileDir": browser_profile_dir,
         "launcherBrowserLaunchPid": launcher_browser_launch_pid,
         "launcherBrowserWindowPid": launcher_browser_window_pid,
