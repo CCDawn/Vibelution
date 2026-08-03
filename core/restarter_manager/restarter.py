@@ -294,14 +294,18 @@ def spawn_new_process(
         import subprocess
 
         if IS_WINDOWS:
-            creation_flags = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+            # Detach from parent console group and never flash a visible window.
+            detach_flags = (
+                int(getattr(subprocess, "DETACHED_PROCESS", 0x00000008))
+                | int(getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200))
+            )
             with open(log_file, 'a', encoding='utf-8') as f:
                 process = subprocess.Popen(
                     [sys.executable, script_abs, *restart_args],
                     env=process_env,
-                    creationflags=creation_flags,
                     stdout=f,
-                    stderr=subprocess.STDOUT
+                    stderr=subprocess.STDOUT,
+                    **no_window_subprocess_kwargs(creationflags=detach_flags),
                 )
             new_pid = process.pid
             logger.info(f"新进程已启动，PID: {new_pid}") if logger else print(f"新进程已启动，PID: {new_pid}")

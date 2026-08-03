@@ -41,6 +41,32 @@ def test_global_governance_uses_root_agents_and_docs_standards():
     assert not (PROJECT_ROOT / "core" / "core_prompt" / "SPEC.md").exists()
 
 
+def test_windows_no_console_red_line_is_normative():
+    """Visible console popups are permanently forbidden for product runtime."""
+
+    agents = (PROJECT_ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    standard = (PROJECT_ROOT / "docs" / "standards" / "development-standard.md").read_text(
+        encoding="utf-8"
+    )
+    standards_index = (PROJECT_ROOT / "docs" / "standards" / "README.md").read_text(
+        encoding="utf-8"
+    )
+    assert "禁止任何可见控制台弹窗" in agents
+    assert "CREATE_NO_WINDOW" in agents
+    assert "无控制台弹窗" in agents
+    assert "### 8.0 Windows No-Console Absolute Red Line" in standard
+    assert "merge blocker" in standard
+    assert "taskkill.exe" in standard
+    assert "禁止 cmd/控制台弹窗" in standards_index
+    rebirth = (PROJECT_ROOT / "tools" / "rebirth_tools.py").read_text(encoding="utf-8")
+    assert "CREATE_NO_WINDOW" in rebirth
+    restarter = (
+        PROJECT_ROOT / "core" / "restarter_manager" / "restarter.py"
+    ).read_text(encoding="utf-8")
+    assert "no_window_subprocess_kwargs" in restarter
+    assert "CREATE_NEW_PROCESS_GROUP" in restarter
+
+
 def test_governance_entry_links_resolve():
     _assert_local_links_resolve(PROJECT_ROOT / "AGENTS.md")
     _assert_local_links_resolve(PROJECT_ROOT / "docs" / "README.md")
