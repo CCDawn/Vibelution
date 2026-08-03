@@ -15,5 +15,11 @@
       "dir"
     ],
     "artifactName": "Vibelution-${version}-${arch}.${ext}"
+  },
+  "linux": {
+    "target": [
+      "dir"
+    ],
+    "artifactName": "Vibelution-${version}-${arch}.${ext}"
   }
 }

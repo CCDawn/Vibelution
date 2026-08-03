@@ -149,3 +149,40 @@ process behavior:
    mechanism plus the sandbox's own process group);
 6. `danger_full_access` commands still run without a Codex binary, through the
    host Unix shell, under the same security classification and cwd boundary.
+
+## Native Electron Taskbar Launcher
+
+For a Linux ARM64 desktop, build the native Launcher bundle from the tracked
+Electron package:
+
+```sh
+npm --prefix desktop/electron ci --no-audit --no-fund
+npm --prefix desktop/electron run package:linux-arm64:dir
+```
+
+The output is `dist/desktop/linux-arm64-unpacked/`.  It includes the Electron
+runtime and Vibelution's compiled desktop shell, so it can create a native
+window and a taskbar entry without opening the system browser.  It deliberately
+does not include a second project checkout, Python environment, operator
+configuration, provider credentials, or user data.
+
+Deploy the unpacked directory beside (not inside) the verified source
+checkout.  The Linux desktop entry must invoke its `vibelution-desktop` binary
+with the existing checkout and external environment supplied explicitly:
+
+```sh
+VIBELUTION_WORKSPACE_ROOT=/srv/vibelution \
+VIBELUTION_PYTHON_PATH=/srv/vibelution/.venv/bin/python \
+VIBELUTION_CONFIG_PATH=/path/outside/source/config.toml \
+/srv/vibelution-launcher/vibelution-desktop --workspace /srv/vibelution --no-browser
+```
+
+Use a desktop-session launcher (`.desktop`) rather than a terminal command so
+the process is owned by the graphical session and no console window is shown.
+Before replacing a browser shortcut, verify all of the following separately:
+
+1. the packaged binary and `resources/app.asar` exist;
+2. double-clicking the desktop entry shows a native Vibelution window and a
+   taskbar item;
+3. the existing Launcher control service reports healthy; and
+4. one application-path request succeeds with the external operator config.
