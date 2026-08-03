@@ -79,31 +79,36 @@ chooses a platform.
 
 ### Install And Pin The ARM64 Codex CLI
 
-Download the pinned release tarball for `aarch64-unknown-linux-musl`, verify the
-published checksum, and install it under `/opt/codex-cli`:
+Use the pinned official npm platform artifact for `linux-arm64`. Unlike the
+single-binary GitHub release archive, this artifact keeps `codex-resources/bwrap`
+and the other native resources beside the Codex executable. That matters on
+hosts whose system bubblewrap is too old for the current Codex sandbox.
 
 ```sh
-CODEX_VERSION=<pinned-version>
+CODEX_VERSION=<pinned-version-without-rust-v-prefix>
 mkdir -p /opt/codex-cli
-curl -fsSL \
-  "https://github.com/openai/codex/releases/download/${CODEX_VERSION}/codex-aarch64-unknown-linux-musl.tar.gz" \
-  -o /tmp/codex-cli.tar.gz
-echo "<published-sha256>  /tmp/codex-cli.tar.gz" | sha256sum -c -
-tar -xzf /tmp/codex-cli.tar.gz -C /opt/codex-cli
-mv \
-  /opt/codex-cli/codex-aarch64-unknown-linux-musl \
-  /opt/codex-cli/codex
-chmod 0755 /opt/codex-cli/codex
-ln -sf /opt/codex-cli/codex /usr/local/bin/codex
-codex --version
+npm view "@openai/codex@${CODEX_VERSION}-linux-arm64" dist.integrity
+npm pack \
+  "@openai/codex@${CODEX_VERSION}-linux-arm64" \
+  --pack-destination /tmp
+tar -xzf \
+  "/tmp/openai-codex-${CODEX_VERSION}-linux-arm64.tgz" \
+  -C /opt/codex-cli \
+  --strip-components=3
+chmod 0755 \
+  /opt/codex-cli/bin/codex \
+  /opt/codex-cli/codex-resources/bwrap \
+  /opt/codex-cli/codex-path/rg
+/opt/codex-cli/bin/codex --version
 ```
 
-Record the exact version and checksum in the deployment log. To force a specific
-binary without relying on `PATH`, export `VIBELUTION_CODEX_PATH=/opt/codex-cli/codex`
-for the launcher process. The resolver checks, in order: `VIBELUTION_CODEX_PATH`,
-`PATH` lookup of `codex` (on Windows additionally the OpenAI local install
-directory and `codex.exe`); when no binary is found the sandbox fails closed and
-Agent shell commands are refused instead of falling back to an unsandboxed mode.
+Record the exact version, npm integrity value and downloaded archive checksum in
+the deployment log. To force a specific binary without relying on `PATH`, export
+`VIBELUTION_CODEX_PATH=/opt/codex-cli/bin/codex` for the launcher process. The
+resolver checks, in order: `VIBELUTION_CODEX_PATH`, `PATH` lookup of `codex` (on
+Windows additionally the OpenAI local install directory and `codex.exe`); when
+no binary is found the sandbox fails closed and Agent shell commands are refused
+instead of falling back to an unsandboxed mode.
 
 ### Startup Capability Probe
 
@@ -111,13 +116,20 @@ On first use the backend resolves the Codex binary and host shell automatically.
 Validate the deployment before accepting traffic:
 
 ```sh
-codex --version
-codex sandbox --help
+/opt/codex-cli/bin/codex --version
+/opt/codex-cli/bin/codex sandbox --help
+/opt/codex-cli/bin/codex \
+  sandbox \
+  -c sandbox_mode=workspace-write \
+  -- /bin/sh -c 'printf CODEX_LINUX_SANDBOX_OK'
 ```
 
-`codex sandbox --help` must list the workspace-write sandbox subcommand. If the
-probe fails, Agent `exec_command`/`cli_tool` return
-`CODEX_SANDBOX_UNAVAILABLE` and never execute the command outside the sandbox.
+The final command must print `CODEX_LINUX_SANDBOX_OK`; checking only
+`codex sandbox --help` does not prove that a suitable system or bundled
+bubblewrap is available. A missing Codex executable returns
+`CODEX_SANDBOX_UNAVAILABLE`; a missing sandbox backend returns the native Codex
+failure. Both paths fail closed and never execute the command outside the
+sandbox.
 
 ### Real Sandbox Acceptance
 
