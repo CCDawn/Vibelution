@@ -23,6 +23,7 @@ import {
   setActiveTurnLayerForSession,
   type ActiveTurnLayerState,
 } from "../chatActiveTurnLayer";
+import { isTempSessionId } from "../sessionOptimisticIds";
 import {
   appendOptimisticUserMessage,
   applyOptimisticEditResubmit,
@@ -783,6 +784,16 @@ export function useChatComposerSubmitActions({
 
   const handleSubmitTurn = useCallback(() => {
     if (!activeSessionId) {
+      return;
+    }
+    // Optimistic create shells are local-only until the server id is rebased.
+    if (isTempSessionId(activeSessionId)) {
+      setSessionComposerErrors((current) => ({
+        ...current,
+        [activeSessionId]: lang === "zh"
+          ? "新会话正在创建，请稍候再发送。"
+          : "The new session is still being created. Please wait a moment before sending.",
+      }));
       return;
     }
     const content = activeDraftEffective.trim();

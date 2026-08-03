@@ -99,12 +99,25 @@ describe("createChatWorkspaceCache", () => {
       queryKeys.sessions(),
       queryKeys.conversations(),
       queryKeys.agents(),
-      queryKeys.agentConfigWorkspace(),
       queryKeys.runtimeSummary(),
-      queryKeys.chatRooms(),
       queryKeys.session("session-b"),
+      queryKeys.chatRooms(),
       queryKeys.chatRoom("room-a"),
     ]);
+  });
+
+  it("refreshes only agent config surfaces after config save", async () => {
+    const { cache, queryKeysFromCalls } = makeCache();
+
+    await cache.afterAgentConfigSaved("agent-1");
+
+    expect(queryKeysFromCalls()).toEqual([
+      queryKeys.agentConfigWorkspace(),
+      queryKeys.agentSummary(true),
+      queryKeys.agent("agent-1"),
+    ]);
+    expect(queryKeysFromCalls()).not.toContain(queryKeys.sessions());
+    expect(queryKeysFromCalls()).not.toContain(queryKeys.conversations());
   });
 
   it("refreshes Agent chat-room membership without a route-level recipe", async () => {

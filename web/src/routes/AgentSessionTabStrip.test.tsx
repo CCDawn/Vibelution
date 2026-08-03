@@ -349,17 +349,18 @@ describe("AgentSessionTabStrip", () => {
     expect(markup.match(/disabled=""/g)?.length).toBe(2);
   });
 
-  it("disables every close control while one delete request is pending", () => {
+  it("disables only the deleting session close control while delete is pending", () => {
     const markup = renderStrip({
       sessions: [
         session({ id: "session-one", status: "idle" }),
         session({ id: "session-two", status: "idle" }),
       ],
-      deletePending: true,
+      deletePendingSessionId: "session-one",
     });
 
-    expect(markup.match(/disabled=""/g)?.length).toBe(2);
-    expect(markup.match(/aria-label="deleteSessionBusy 顾明澈"/g)?.length).toBe(2);
+    // Create button stays enabled; only the target tab close is busy.
+    expect(markup.match(/aria-label="deleteSessionBusy 顾明澈"/g)?.length).toBe(1);
+    expect(markup).toContain('aria-label="deleteSession 顾明澈"');
   });
 
   it("uses currentPhase before stale summary status for delete availability", () => {
