@@ -57,8 +57,8 @@ describe("agentMessageTimeline", () => {
     expect(agentMessageTimelineSource).not.toContain("ConversationTimelineItem as");
   });
 
-  it("places fallback streaming assistant text before running operations without duplicating either", () => {
-    const message: AgentMessage = {
+  it("anchors fallback answer after process rows and keeps that slot when streaming ends", () => {
+    const streamingMessage: AgentMessage = {
       id: "agent-message-timeline",
       role: "assistant",
       createdAt: "2026-07-02T10:00:00Z",
@@ -98,38 +98,64 @@ describe("agentMessageTimeline", () => {
         },
       ],
     };
+    const completedMessage: AgentMessage = {
+      ...streamingMessage,
+      streaming: false,
+      parts: streamingMessage.parts.map((part) => (
+        part.type === "tool-call" && part.status === "running"
+          ? { ...part, status: "done" }
+          : part.type === "thought" && part.status === "running"
+            ? { ...part, status: "done" }
+            : part
+      )),
+    };
 
-    const items = buildAgentMessageTimelineItems(
-      message,
-      buildAgentMessageOperations(message, labels),
+    const streamingItems = buildAgentMessageTimelineItems(
+      streamingMessage,
+      buildAgentMessageOperations(streamingMessage, labels),
+      { lang: "zh" },
+    );
+    const completedItems = buildAgentMessageTimelineItems(
+      completedMessage,
+      buildAgentMessageOperations(completedMessage, labels),
       { lang: "zh" },
     );
 
-    expect(items.map((item) => item.kind)).toEqual(["thought", "assistant_text", "operation", "operation"]);
-    expect(items[0]).toMatchObject({
+    // Process first, answer last — same relative order while streaming and after complete.
+    expect(streamingItems.map((item) => item.kind)).toEqual(["thought", "operation", "operation", "assistant_text"]);
+    expect(completedItems.map((item) => item.kind)).toEqual(["thought", "operation", "operation", "assistant_text"]);
+    expect(streamingItems.map((item) => item.id)).toEqual(completedItems.map((item) => item.id));
+    expect(streamingItems[0]).toMatchObject({
       kind: "thought",
       text: "先检查 timeline 入口",
       defaultExpanded: false,
     });
-    expect(items[1]).toMatchObject({
-      kind: "assistant_text",
-      status: "running",
-      text: "正在收束 timeline 迁移",
-    });
-    expect(items[2]).toMatchObject({
+    expect(streamingItems[1]).toMatchObject({
       kind: "operation",
       status: "completed",
       title: "搜索",
       summary: "搜索 timeline 调用",
     });
-    expect(items[3]).toMatchObject({
+    expect(streamingItems[2]).toMatchObject({
       kind: "operation",
       status: "running",
       title: "读取文件",
       summary: "读取 agentMessageTimeline.ts",
     });
-    expect(items.filter((item) => item.kind === "assistant_text")).toHaveLength(1);
-    expect(items.filter((item) => item.kind === "operation")).toHaveLength(2);
+    expect(streamingItems[3]).toMatchObject({
+      id: "agent-message-timeline-timeline-response",
+      kind: "assistant_text",
+      status: "running",
+      text: "正在收束 timeline 迁移",
+    });
+    expect(completedItems[3]).toMatchObject({
+      id: "agent-message-timeline-timeline-response",
+      kind: "assistant_text",
+      status: "completed",
+      text: "正在收束 timeline 迁移",
+    });
+    expect(streamingItems.filter((item) => item.kind === "assistant_text")).toHaveLength(1);
+    expect(streamingItems.filter((item) => item.kind === "operation")).toHaveLength(2);
   });
 
   it("strictly preserves backend assistant text and operation order", () => {
