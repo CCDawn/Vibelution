@@ -35,21 +35,46 @@ export function observeWorkbenchWindowMode(
   return fillsWidth && fillsHeight ? "fullscreen" : "windowed";
 }
 
+/** Usable workbench floor — never persist Edge --app chrome sizes like 320x240. */
+export const WORKBENCH_WINDOW_SIZE_MIN_WIDTH = 960;
+export const WORKBENCH_WINDOW_SIZE_MIN_HEIGHT = 600;
+
 export function observeWorkbenchWindowSize(
   win: Pick<Window, "outerWidth" | "outerHeight" | "screen"> = window,
 ): string {
-  const rawWidth = Math.max(320, Math.round(Number(win.outerWidth) || 0));
-  const rawHeight = Math.max(240, Math.round(Number(win.outerHeight) || 0));
-  const availWidth = Math.max(320, Math.round(Number(win.screen?.availWidth) || rawWidth));
-  const availHeight = Math.max(240, Math.round(Number(win.screen?.availHeight) || rawHeight));
+  const rawWidth = Math.round(Number(win.outerWidth) || 0);
+  const rawHeight = Math.round(Number(win.outerHeight) || 0);
+  const availWidth = Math.max(
+    WORKBENCH_WINDOW_SIZE_MIN_WIDTH,
+    Math.round(Number(win.screen?.availWidth) || rawWidth),
+  );
+  const availHeight = Math.max(
+    WORKBENCH_WINDOW_SIZE_MIN_HEIGHT,
+    Math.round(Number(win.screen?.availHeight) || rawHeight),
+  );
   // Never persist a size larger than the work area — oversized --window-size can
   // leave Edge app windows created but not visible on the next start.
-  const width = Math.min(rawWidth, availWidth);
-  const height = Math.min(rawHeight, availHeight);
+  const width = Math.min(Math.max(rawWidth, 0), availWidth);
+  const height = Math.min(Math.max(rawHeight, 0), availHeight);
   // Quantize slightly so micro-resizes do not thrash config writes.
   const qWidth = Math.round(width / SIZE_QUANTUM) * SIZE_QUANTUM;
   const qHeight = Math.round(height / SIZE_QUANTUM) * SIZE_QUANTUM;
-  return `${Math.max(320, qWidth)}x${Math.max(240, qHeight)}`;
+  return `${Math.max(WORKBENCH_WINDOW_SIZE_MIN_WIDTH, qWidth)}x${Math.max(WORKBENCH_WINDOW_SIZE_MIN_HEIGHT, qHeight)}`;
+}
+
+export function isPersistableWorkbenchWindowSize(size: string): boolean {
+  const match = /^(\d{3,5})x(\d{3,5})$/.exec(String(size || "").trim().toLowerCase());
+  if (!match) {
+    return false;
+  }
+  const width = Number(match[1]);
+  const height = Number(match[2]);
+  return (
+    width >= WORKBENCH_WINDOW_SIZE_MIN_WIDTH
+    && height >= WORKBENCH_WINDOW_SIZE_MIN_HEIGHT
+    && width <= 7680
+    && height <= 4320
+  );
 }
 
 async function persistObservedWindow(mode: ObservedWorkbenchWindowMode, size: string): Promise<void> {
@@ -59,7 +84,9 @@ async function persistObservedWindow(mode: ObservedWorkbenchWindowMode, size: st
   const workbench: { windowMode: ObservedWorkbenchWindowMode; windowSize?: string } = {
     windowMode: mode,
   };
-  if (mode === "windowed" && size) {
+  // Skip tiny frames (orphan Edge shells / failed restores) so the next start
+  // is not locked to 320x240-class sizes.
+  if (mode === "windowed" && size && isPersistableWorkbenchWindowSize(size)) {
     workbench.windowSize = size;
   }
   try {

@@ -262,7 +262,8 @@ function Test-WorkbenchWindowSizeValue {
         if (-not [int]::TryParse($matches[2], [ref]$height)) {
             return $false
         }
-        return ($width -ge 320 -and $width -le 7680 -and $height -ge 240 -and $height -le 4320)
+        # Usable workbench floor (reject 320x240-class Edge shells that lock next start tiny).
+        return ($width -ge 960 -and $width -le 7680 -and $height -ge 600 -and $height -le 4320)
     } else {
         return $false
     }
