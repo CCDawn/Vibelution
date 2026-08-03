@@ -137,13 +137,14 @@ describe("AgentSessionTabStrip", () => {
 
     expect(markup).toContain("Agent 会话");
     expect(markup).toContain("顾明澈");
-    expect(markup).toContain("GPT 5.5");
     expect(markup).not.toContain("idle · GPT 5.5</span>");
     expect(markup).not.toContain(">子对话</span>");
     expect(markup).toContain("子任务标题");
-    expect(markup).toContain("子会话摘要");
+    // Hover detail (model/summary/status) lives only in VButton VTooltip — no nested native title.
+    expect(markup).not.toMatch(/data-agent-session-tab-container[^>]*\stitle=/);
+    expect(markup).not.toMatch(/agentSessionTabTitle[^>]*\stitle="/);
+    expect(markup).not.toMatch(/agentSessionTabStatusIndicator[^>]*\stitle="/);
     expect(markup).not.toContain("agentSessionTabChild");
-    expect(markup).toContain("会话进行 · running · GPT 5.5");
     expect(markup).not.toContain(">会话进行</span>");
     expect(markup).not.toContain("空闲");
     expect(markup).not.toContain("agentSessionTabStatusDotIdle");
