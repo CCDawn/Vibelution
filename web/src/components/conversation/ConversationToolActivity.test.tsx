@@ -92,7 +92,15 @@ describe("ConversationToolActivity", () => {
 
     expect(html).toContain('data-codex-tool-activity="items"');
     expect(html).not.toContain("运行了 1 个工具");
-    expect(html).toContain("已在 1.2s 内运行 type README.md");
+    // Codex pill pair: action | status + muted subject/duration (not prose line).
+    expect(html).toContain('data-codex-tool-action-pill="true"');
+    expect(html).toContain("执行命令");
+    expect(html).toContain('data-codex-tool-status-pill="true"');
+    expect(html).toContain('data-codex-tool-status-kind="completed"');
+    expect(html).toContain("执行完成");
+    expect(html).toContain("type README.md");
+    expect(html).toContain("1.2s");
+    expect(html).not.toContain("已在 1.2s 内运行 type README.md");
     expect(html).not.toContain("# Vibelution Development Standard");
     expect(html).not.toContain(">running<");
   });
@@ -147,8 +155,10 @@ describe("ConversationToolActivity", () => {
     expect(html).toContain('data-codex-tool-activity-state="attention"');
     expect(html).not.toContain("Ran 1 tool");
     expect(html).not.toContain("1 item needs attention");
-    // Nonzero exit is settled failure styling (Codex: no spinner, muted fail).
-    expect(html).toMatch(/失败|Failed|Command exited 1|退出/);
+    // Nonzero exit uses attention status pill (Codex: no spinner).
+    expect(html).toContain("Run command");
+    expect(html).toContain("Non-zero exit");
+    expect(html).toContain('data-codex-tool-status-kind="attention"');
     expect(html).toContain("itemIcon");
   });
 
@@ -197,7 +207,9 @@ describe("ConversationToolActivity", () => {
     expect(html).toContain('data-codex-tool-activity="items"');
     expect(html).not.toContain("运行了 1 个工具");
     expect(html).not.toContain("项需关注");
-    expect(html).toContain("未找到匹配项");
+    expect(html).toContain("执行命令");
+    expect(html).toContain("无匹配");
+    expect(html).toContain('data-codex-tool-status-kind="attention"');
     expect(html).not.toContain("命令退出 1");
   });
 
@@ -228,14 +240,16 @@ describe("ConversationToolActivity", () => {
     expect(html).not.toMatch(/代码图谱 · \{&quot;status&quot;/);
   });
 
-  it("keeps Codex-style tool rail frame, capped height, and muted tool type color", () => {
+  it("keeps Codex-style tool rail frame, capped height, and pill chrome", () => {
     expect(styles.activity).toContain("border-y");
     expect(styles.activity).toContain("max-h-[min(18rem,42vh)]");
     expect(styles.activity).toContain("overflow-y-auto");
-    expect(styles.itemTitle).toContain("text-[var(--fg-tertiary)]");
-    expect(styles.itemTitle).not.toContain("font-semibold");
     expect(styles.itemBody).toContain("text-[var(--fg-tertiary)]");
     expect(styles.itemBody).toContain("[font-size:var(--vui-font-xs)]");
+    expect(styles.actionPill).toContain("rounded-full");
+    expect(styles.statusPill).toContain("rounded-full");
+    expect(styles.statusPill_completed).toContain("text-[var(--fg-tertiary)]");
+    expect(styles.statusPill_running).toContain("text-[var(--accent-cool)]");
     expect(styles.itemPreview).toContain("text-[color-mix(in_srgb,var(--fg-tertiary)");
   });
 
@@ -251,7 +265,9 @@ describe("ConversationToolActivity", () => {
     expect(html).toContain('data-codex-tool-activity="items"');
     expect(html).not.toContain("运行了 1 个工具");
     expect(html).not.toContain('data-codex-tool-activity-group="true"');
-    expect(html).toMatch(/代码图谱|已完成/);
+    expect(html).toContain("代码图谱");
+    expect(html).toContain("执行完成");
+    expect(html).toContain('data-codex-tool-status-kind="completed"');
   });
 
   it("folds a long same-tool run into one in-place batch while preserving its details", () => {
@@ -288,13 +304,13 @@ describe("ConversationToolActivity", () => {
     expect(html).toContain('data-codex-tool-detail="true"');
     expect(html).toContain("工具原始结果");
     expect(html).not.toContain('data-codex-tool-detail-toggle="inline-symbol"');
-    expect(html).not.toContain("完成");
+    expect(html).toContain("执行完成");
     expect(html).not.toContain("itemChevron");
     expect(styles.itemSummary).toContain("w-full");
     expect(styles.itemSummary).toContain("max-w-full");
-    expect(styles.itemSummary).toContain("grid-cols-[15px_minmax(0,1fr)]");
+    expect(styles.itemSummary).toContain("items-center");
     expect(styles.itemSummary).not.toContain("grid-cols-[17px_minmax(0,1fr)_16px]");
-    expect(styles.batchSummary).toContain("grid-cols-[15px_minmax(0,1fr)]");
+    expect(styles.batchSummary).toContain("items-center");
     expect(activityCss).toContain(".vui-components-conversation-tool-activity.batch:not([open])");
     expect(activityCss).toContain(".vui-components-conversation-tool-activity.itemDetails:not([open])");
     expect(activityCss).toContain("> .vui-components-conversation-tool-activity.batchDetails");
@@ -361,8 +377,11 @@ describe("ConversationToolActivity", () => {
       />,
     );
 
+    // Action pill keeps the tool family; semantic search lands in muted subject.
+    expect(html).toContain("代码图谱");
+    expect(html).toContain("执行完成");
     expect(html).toContain("搜索 savedDraft · 4 个结果");
-    expect(html).not.toContain(">代码图谱<");
+    expect(html).toContain('data-codex-tool-subject="true"');
   });
 
   it("renders source collection batches with product labels and semantic icons", () => {

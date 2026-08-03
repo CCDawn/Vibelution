@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildCodexToolActivityPills,
   completedToolPresentationSummary,
   conversationToolDetailPresentation,
   conversationToolPresentationLabel,
@@ -113,7 +114,7 @@ describe("conversation tool presentation", () => {
     ["get_core_context_tool", "核心上下文"],
     ["get_current_goal_tool", "当前目标"],
     ["conversation_log_inspect_tool", "检查会话日志"],
-    ["exec_command", "运行命令"],
+    ["exec_command", "执行命令"],
     ["write_stdin", "写入终端"],
   ])("maps %s to its Chinese display label", (toolName, expected) => {
     expect(conversationToolPresentationLabel(toolName, "zh")).toBe(expected);
@@ -211,6 +212,60 @@ describe("conversation tool presentation", () => {
     expect(presented).toContain(" 947  setSavedDraft(nextSnapshot)");
     expect(presented).not.toContain('"status"');
     expect(presented).not.toContain('"results"');
+  });
+});
+
+describe("buildCodexToolActivityPills", () => {
+  it("builds shell action/status pills with muted subject and duration", () => {
+    expect(buildCodexToolActivityPills({
+      toolName: "cli_tool",
+      status: "completed",
+      language: "zh",
+      durationLabel: "12s",
+      displayCommand: "pnpm test",
+    })).toEqual({
+      actionLabel: "执行命令",
+      statusLabel: "执行完成",
+      statusKind: "completed",
+      subject: "pnpm test",
+      durationLabel: "12s",
+    });
+
+    expect(buildCodexToolActivityPills({
+      toolName: "exec_command",
+      status: "running",
+      language: "zh",
+      displayCommand: "type README.md",
+    })).toEqual({
+      actionLabel: "执行命令",
+      statusLabel: "执行中",
+      statusKind: "running",
+      subject: "type README.md",
+      durationLabel: "",
+    });
+  });
+
+  it("maps failure and timeout to status pills", () => {
+    expect(buildCodexToolActivityPills({
+      toolName: "code_symbol_tool",
+      status: "failed",
+      language: "zh",
+    })).toMatchObject({
+      actionLabel: "代码图谱",
+      statusLabel: "失败",
+      statusKind: "failed",
+    });
+
+    expect(buildCodexToolActivityPills({
+      toolName: "cli_tool",
+      status: "completed",
+      language: "en",
+      timedOut: true,
+    })).toMatchObject({
+      actionLabel: "Run command",
+      statusLabel: "Timed out",
+      statusKind: "timeout",
+    });
   });
 });
 
