@@ -158,6 +158,8 @@ describe("TeamExperimentMethodPanel", () => {
     expect(markup).toContain("执行器尚未就绪");
     expect(markup).toContain("执行器选择");
     expect(markup).toContain("fashion_mnist_predictive_coding_multi_seed");
+    expect(markup).toContain('role="group" aria-label="执行器选择"');
+    expect(markup).not.toContain('<select aria-label="执行器选择"');
     expect(markup).toContain("预测编码是否改善基线？");
   });
 

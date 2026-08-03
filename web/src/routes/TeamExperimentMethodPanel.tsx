@@ -447,22 +447,31 @@ export function TeamExperimentMethodPanel({
         </div>
       ) : null}
 
-      <label className={styles.fieldWide}>
+      <div className={styles.fieldWide}>
         <span>{isZh ? "执行器" : "Execution adapter"}</span>
-        <VNativeSelect
-          value={draft.requestedAdapterId}
-          onChange={(event) => setDraft((current) => ({ ...current, requestedAdapterId: event.target.value }))}
-          disabled={locked}
-          aria-label={isZh ? "执行器选择" : "Execution adapter selection"}
-        >
-          <option value="">{isZh ? "自动选择（仅使用默认可用执行器）" : "Automatic selection (default available adapters only)"}</option>
+        <div className={styles.adapterChoices} role="group" aria-label={isZh ? "执行器选择" : "Execution adapter selection"}>
+          <VNativeButton
+            className={[styles.adapterChoice, draft.requestedAdapterId === "" ? styles.adapterChoiceActive : ""].join(" ")}
+            aria-pressed={draft.requestedAdapterId === ""}
+            disabled={locked}
+            onClick={() => setDraft((current) => ({ ...current, requestedAdapterId: "" }))}
+          >
+            {isZh ? "自动选择（仅使用默认可用执行器）" : "Automatic selection (default available adapters only)"}
+          </VNativeButton>
           {adaptersForMethod.map((adapter) => (
-            <option key={adapter.adapterId} value={adapter.adapterId}>
+            <VNativeButton
+              key={adapter.adapterId}
+              className={[styles.adapterChoice, draft.requestedAdapterId === adapter.adapterId ? styles.adapterChoiceActive : ""].join(" ")}
+              aria-pressed={draft.requestedAdapterId === adapter.adapterId}
+              disabled={locked}
+              title={adapter.adapterId}
+              onClick={() => setDraft((current) => ({ ...current, requestedAdapterId: adapter.adapterId }))}
+            >
               {adapter.adapterId}{adapter.requiresExplicitSelection ? (isZh ? "（需显式选择）" : " (explicit selection required)") : ""}
-            </option>
+            </VNativeButton>
           ))}
-        </VNativeSelect>
-      </label>
+        </div>
+      </div>
 
       <div className={[styles.adapterStatus, (selectedAdapter || adapterSelection?.resolvedAdapterId) ? styles.adapterStatusReady : styles.adapterStatusBlocked].join(" ")} aria-live="polite">
         {(selectedAdapter || adapterSelection?.resolvedAdapterId) ? <CheckCircle2 size={14} /> : <AlertTriangle size={14} />}
