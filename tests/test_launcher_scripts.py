@@ -7,6 +7,8 @@ import shutil
 import subprocess
 import sys
 import time
+import types
+import uuid
 from argparse import Namespace
 from pathlib import Path
 
@@ -98,6 +100,40 @@ def test_python_launcher_workbench_window_applies_vibelution_app_identity():
     assert "_apply_managed_browser_app_identity(int(process.pid), \"workbench\")" in source
     assert "browserAppIdentityApplied" in source
     assert "browserWindowIconApplied" in source
+
+
+def test_python_launcher_imports_safely_on_non_windows(monkeypatch):
+    fake_os = types.ModuleType("os")
+    fake_os.name = "posix"
+    fake_os.environ = os.environ
+    monkeypatch.setitem(sys.modules, "os", fake_os)
+    launcher = _load_python_launcher()
+
+    # Windows-only shell identity structures must not be constructed off-Windows;
+    # importing on POSIX previously raised ValueError from _GUID.from_buffer_copy.
+    assert launcher.PKEY_APPUSERMODEL_ID is None
+    assert launcher.PKEY_APPUSERMODEL_RELAUNCH_DISPLAY_NAME is None
+    assert launcher.PKEY_APPUSERMODEL_RELAUNCH_ICON_RESOURCE is None
+    assert launcher.IID_IPROPERTY_STORE is None
+    result = launcher._apply_managed_browser_app_identity(0, "workbench")
+    assert result["applied"] is False
+    assert result["reason"] == "non_windows"
+    assert result["appUserModelId"] == "Vibelution.Workbench"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows shell identity contract is Windows-only")
+def test_python_launcher_windows_identity_runtime_contract():
+    launcher = _load_python_launcher()
+
+    assert isinstance(launcher.PKEY_APPUSERMODEL_ID, launcher._PROPERTYKEY)
+    assert isinstance(launcher.PKEY_APPUSERMODEL_RELAUNCH_DISPLAY_NAME, launcher._PROPERTYKEY)
+    assert isinstance(launcher.PKEY_APPUSERMODEL_RELAUNCH_ICON_RESOURCE, launcher._PROPERTYKEY)
+    assert launcher.PKEY_APPUSERMODEL_ID.fmtid.Data1 == 0x9F4C2855
+    assert launcher.PKEY_APPUSERMODEL_ID.pid == 5
+    assert launcher.PKEY_APPUSERMODEL_RELAUNCH_DISPLAY_NAME.pid == 4
+    assert launcher.PKEY_APPUSERMODEL_RELAUNCH_ICON_RESOURCE.pid == 3
+    assert isinstance(launcher.IID_IPROPERTY_STORE, launcher._GUID)
+    assert bytes(launcher.IID_IPROPERTY_STORE) == uuid.UUID("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99").bytes_le
 
 
 def test_python_launcher_icon_binding_requires_exact_browser_process_window():
