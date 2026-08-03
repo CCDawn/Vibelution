@@ -109,8 +109,13 @@ from core.llm.agent_runtime import (
 # 导入工具
 from tools import Key_Tools
 from tools.token_manager import (
-    EnhancedTokenCompressor, estimate_messages_tokens, estimate_tokens_precise,
-    is_compression_requested, consume_compression_request, request_compression,
+    EnhancedTokenCompressor,
+    estimate_messages_tokens,
+    estimate_messages_tokens_for_threshold,
+    estimate_tokens_precise,
+    is_compression_requested,
+    consume_compression_request,
+    request_compression,
 )
 from tools.compression_strategy import (
     CompressionLevel,
@@ -453,34 +458,47 @@ def _record_agent_scene_event(
         return
 
 
-def _git_memory_state_signature(state: Any) -> tuple[Any, ...]:
-    if state is None:
-        return ()
-    return (
-        getattr(state, "available", None),
-        getattr(state, "head_rev", None),
-        getattr(state, "indexed_head_rev", None),
-        getattr(state, "dirty", None),
-        getattr(state, "error", None),
+def _can_reuse_system_prompt(
+    *,
+    has_cached_prompt: bool,
+    prompt_built_with_runtime_key: str,
+    current_runtime_state_memory_key: str,
+) -> bool:
+    """Reuse the built system prompt while runtime state-memory key is unchanged.
+
+    Git is tool-driven and is not part of this decision. Prompt rebuild is only
+    needed when runtime state memory actually changes (typically after tools).
+    """
+    return bool(
+        has_cached_prompt
+        and prompt_built_with_runtime_key == current_runtime_state_memory_key
     )
 
 
 def _can_reuse_initial_prompt(
     *,
-    pending: bool,
-    initial_git_state: Any,
-    current_git_state: Any,
-    initial_runtime_state_memory_key: str,
-    current_runtime_state_memory_key: str,
+    pending: bool = True,
+    initial_runtime_state_memory_key: str = "",
+    current_runtime_state_memory_key: str = "",
+    # Legacy kwargs kept for call-site compatibility.
+    initial_git_state: Any = None,
+    current_git_state: Any = None,
+    has_cached_prompt: bool = True,
+    prompt_built_with_runtime_key: str = "",
 ) -> bool:
+    del initial_git_state, current_git_state
+    # Prefer the modern signature when callers pass explicit build-key fields.
+    if prompt_built_with_runtime_key or not pending:
+        return _can_reuse_system_prompt(
+            has_cached_prompt=has_cached_prompt if prompt_built_with_runtime_key else bool(pending),
+            prompt_built_with_runtime_key=(
+                prompt_built_with_runtime_key or initial_runtime_state_memory_key
+            ),
+            current_runtime_state_memory_key=current_runtime_state_memory_key,
+        )
     return bool(
         pending
-        and bool(getattr(initial_git_state, "available", False))
-        and bool(getattr(current_git_state, "available", False))
-        and not bool(getattr(initial_git_state, "dirty", False))
-        and not bool(getattr(current_git_state, "dirty", False))
-        and _git_memory_state_signature(current_git_state)
-        == _git_memory_state_signature(initial_git_state)
+        and has_cached_prompt
         and current_runtime_state_memory_key == initial_runtime_state_memory_key
     )
 
@@ -1413,8 +1431,18 @@ class SelfEvolvingAgent:
             except TypeError:
                 raise exc
 
-    def _sync_runtime_state_memory(self):
-        """将会话级短期约束同步到 MEMORY/state_memory。"""
+    def _mark_runtime_state_memory_dirty(self) -> None:
+        """Request a runtime state-memory resync before the next LLM preflight."""
+        self._runtime_state_memory_dirty = True
+
+    def _sync_runtime_state_memory(self, *, force: bool = False):
+        """将会话级短期约束同步到 MEMORY/state_memory。
+
+        Cheap no-op when not dirty and not forced. Main loop marks dirty after tools
+        (and similar side effects) so we do not re-render every iteration blindly.
+        """
+        if not force and not bool(getattr(self, "_runtime_state_memory_dirty", True)):
+            return
         try:
             runtime_summary = get_session_state().render_dialogue_runtime_observations()
             restart_focus = (
@@ -1429,7 +1457,12 @@ class SelfEvolvingAgent:
             )
             summary_key = build_state_memory_key(summary)
             if summary_key == getattr(self, "_last_runtime_state_memory_key", ""):
+                # An empty, unchanged projection is not a stable observation yet:
+                # keep the next preflight eligible to pick up a diagnostic that
+                # materializes without an intervening tool call.
+                self._runtime_state_memory_dirty = not bool(summary)
                 return
+            self._runtime_state_memory_dirty = False
             self._last_runtime_state_memory = summary
             self._last_runtime_state_memory_key = summary_key
             if summary:
@@ -1437,7 +1470,7 @@ class SelfEvolvingAgent:
             else:
                 self.prompt_manager.clear_state_memory(persist=False)
         except Exception:
-            pass
+            self._runtime_state_memory_dirty = False
 
     def _load_previous_session_constraints(self):
         """从最近一次会话分析中恢复下一轮短期约束。"""
@@ -2636,15 +2669,18 @@ class SelfEvolvingAgent:
         get_session_state().reset_runtime_constraints()
         self._last_runtime_state_memory = ""
         self._last_runtime_state_memory_key = ""
+        self._runtime_state_memory_dirty = True
         self.prompt_manager.clear_state_memory(persist=False)
         initial_context_started = time.perf_counter()
-        initial_git_started = time.perf_counter()
-        initial_git_state = self.git_memory.refresh_git_memory(force=True)
-        initial_git_ms = max(0, int((time.perf_counter() - initial_git_started) * 1000))
+        # Git worktree scans are tool-driven (e.g. get_git_status_summary_tool).
+        # Do not auto-refresh git memory on every agent turn — that caused TimeoutExpired
+        # main-loop failures and is the wrong ownership for git observation.
+        initial_git_ms = 0
         initial_runtime_sync_started = time.perf_counter()
-        self._sync_runtime_state_memory()
+        self._sync_runtime_state_memory(force=True)
         initial_runtime_sync_ms = max(0, int((time.perf_counter() - initial_runtime_sync_started) * 1000))
         initial_runtime_state_memory_key = self._last_runtime_state_memory_key
+        prompt_built_with_runtime_key = initial_runtime_state_memory_key
         initial_prompt_build_started = time.perf_counter()
         sp = self._build_system_prompt_for_turn(stable_session_prompt=stable_session_prompt)
         initial_prompt_build_ms = max(0, int((time.perf_counter() - initial_prompt_build_started) * 1000))
@@ -2655,6 +2691,7 @@ class SelfEvolvingAgent:
             message="Agent initial context prepared.",
             fields={
                 "gitRefreshMs": initial_git_ms,
+                "gitRefreshPolicy": "tool_driven",
                 "runtimeStateSyncMs": initial_runtime_sync_ms,
                 "promptBuildMs": initial_prompt_build_ms,
                 "totalMs": max(0, int((time.perf_counter() - initial_context_started) * 1000)),
@@ -2754,7 +2791,10 @@ class SelfEvolvingAgent:
             )
         try:
             get_ui().note_context_window(
-                estimate_messages_tokens(messages),
+                estimate_messages_tokens_for_threshold(
+                    messages,
+                    self._automatic_context_compression_threshold_tokens(),
+                ),
                 context_limit,
             )
         except Exception:
@@ -2792,7 +2832,6 @@ class SelfEvolvingAgent:
                 else None
             )
             responses_continuation_disabled = False
-            initial_prompt_reuse_pending = True
             for _ in range(round_state.max_iterations):
                 self._raise_if_turn_stop_requested()
                 iteration = round_state.next_iteration()
@@ -2801,22 +2840,21 @@ class SelfEvolvingAgent:
                     "THINKING",
                     **round_state.thinking_status(user_prompt),
                 )
-                if initial_prompt_reuse_pending:
-                    current_git_state = initial_git_state
-                    git_refresh_ms = 0
-                else:
-                    git_refresh_started = time.perf_counter()
-                    current_git_state = self.git_memory.refresh_git_memory()
-                    git_refresh_ms = max(0, int((time.perf_counter() - git_refresh_started) * 1000))
+                # Git memory is not refreshed here; agents must call git tools when needed.
+                git_refresh_ms = 0
+                # Runtime state memory: only re-sync when marked dirty (after tools / side effects).
                 runtime_sync_started = time.perf_counter()
+                did_runtime_sync = bool(getattr(self, "_runtime_state_memory_dirty", False))
                 self._sync_runtime_state_memory()
-                runtime_sync_ms = max(0, int((time.perf_counter() - runtime_sync_started) * 1000))
+                runtime_sync_ms = (
+                    max(0, int((time.perf_counter() - runtime_sync_started) * 1000))
+                    if did_runtime_sync
+                    else 0
+                )
                 prompt_build_started = time.perf_counter()
-                prompt_build_reused = _can_reuse_initial_prompt(
-                    pending=initial_prompt_reuse_pending,
-                    initial_git_state=initial_git_state,
-                    current_git_state=current_git_state,
-                    initial_runtime_state_memory_key=initial_runtime_state_memory_key,
+                prompt_build_reused = _can_reuse_system_prompt(
+                    has_cached_prompt=bool(self._cached_system_prompt),
+                    prompt_built_with_runtime_key=prompt_built_with_runtime_key,
                     current_runtime_state_memory_key=self._last_runtime_state_memory_key,
                 )
                 if prompt_build_reused:
@@ -2825,7 +2863,8 @@ class SelfEvolvingAgent:
                     current_sp = self._build_system_prompt_for_turn(
                         stable_session_prompt=stable_session_prompt
                     )
-                initial_prompt_reuse_pending = False
+                    sp = current_sp
+                    prompt_built_with_runtime_key = self._last_runtime_state_memory_key
                 current_prompt = to_string(current_sp)
                 if current_prompt != self._cached_system_prompt:
                     messages[0] = build_cacheable_system_prefix_message(current_sp)
@@ -2849,11 +2888,15 @@ class SelfEvolvingAgent:
                     self._cached_system_prompt = current_prompt
                 prompt_build_ms = max(0, int((time.perf_counter() - prompt_build_started) * 1000))
                 context_estimate_started = time.perf_counter()
+                # Single estimate for UI + compress gate. Far under the compress
+                # threshold uses a conservative char upper bound (no full precise walk).
+                compress_threshold_tokens = self._automatic_context_compression_threshold_tokens()
+                current_tokens = estimate_messages_tokens_for_threshold(
+                    messages,
+                    compress_threshold_tokens,
+                )
                 try:
-                    ui.note_context_window(
-                        estimate_messages_tokens(messages),
-                        context_limit,
-                    )
+                    ui.note_context_window(current_tokens, context_limit)
                 except Exception:
                     pass
                 context_estimate_ms = max(0, int((time.perf_counter() - context_estimate_started) * 1000))
@@ -2863,23 +2906,21 @@ class SelfEvolvingAgent:
                 self._raise_if_turn_stop_requested()
 
                 # 硬限制：超出最大上下文时强制压缩
-                current_tokens = estimate_messages_tokens(messages)
-                if self._should_automatically_compress(current_tokens):
+                compression_triggered = self._should_automatically_compress(current_tokens)
+                if compression_triggered:
                     messages, should_break = self._compress_messages(
                         messages, iteration, reason="达到配置的上下文压缩阈值"
                     )
+                    # Re-estimate only after messages actually changed.
+                    after_tokens = estimate_messages_tokens(messages)
                     try:
-                        ui.note_context_window(
-                            estimate_messages_tokens(messages),
-                            context_limit,
-                        )
+                        ui.note_context_window(after_tokens, context_limit)
                     except Exception:
                         pass
                     if should_break:
                         break
                     # 只有实际缩减上下文时才写 notice，禁止把 guard skip 伪装成已压缩。
                     if bool(getattr(self, "_last_context_compression_applied", False)):
-                        after_tokens = estimate_messages_tokens(messages)
                         messages.append(build_runtime_notice_message(
                             f"由于上下文超过最大承受能力，现在强制进行了一次压缩"
                             f"（{current_tokens} → {after_tokens} tokens）。"
@@ -2893,12 +2934,8 @@ class SelfEvolvingAgent:
                         "iteration": iteration,
                         "messageCount": len(messages),
                         "contextEstimatedTokens": current_tokens,
-                        "contextCompressionThresholdTokens": (
-                            self._automatic_context_compression_threshold_tokens()
-                        ),
-                        "contextCompressionTriggered": self._should_automatically_compress(
-                            current_tokens
-                        ),
+                        "contextCompressionThresholdTokens": compress_threshold_tokens,
+                        "contextCompressionTriggered": compression_triggered,
                         "gitRefreshMs": git_refresh_ms,
                         "runtimeStateSyncMs": runtime_sync_ms,
                         "promptBuildMs": prompt_build_ms,
@@ -3225,10 +3262,14 @@ class SelfEvolvingAgent:
                     if executable_tool_calls
                     else None
                 )
+                # Tools (and tool blockers / validation notes) may change runtime state memory.
+                if executable_tool_calls or tool_calls:
+                    self._mark_runtime_state_memory_dirty()
                 self._raise_if_turn_stop_requested()
                 if lifecycle_action == "turn_complete":
                     round_state.note_lifecycle_completion()
                     get_session_state().note_scope_completion("当前事务已完成，停止当前轮继续扩散。")
+                    self._mark_runtime_state_memory_dirty()
                 lifecycle_decision = (
                     self._get_turn_outcome_controller().handle_lifecycle_action(lifecycle_action)
                     if lifecycle_action
@@ -3253,6 +3294,7 @@ class SelfEvolvingAgent:
                     reason = consume_compression_request()
                     _debug_logger.info(f"[压缩] 感知层请求压缩: {reason}", tag="STATE")
                     messages, _ = self._compress_messages(messages, iteration, reason=reason)
+                    self._mark_runtime_state_memory_dirty()
                     self._raise_if_turn_stop_requested()
 
         except TurnStopRequested as stop_request:
@@ -3267,11 +3309,19 @@ class SelfEvolvingAgent:
             # Keep failure sticky across finalize_round: consecutive_failures may still be 0
             # (e.g. subprocess.TimeoutExpired) while the turn must not look completed.
             round_return_ok = False
+            exception_preview = str(e or "").strip()
+            if len(exception_preview) > 240:
+                exception_preview = exception_preview[:237] + "..."
+            reason_detail = (
+                f"Agent 主循环发生 {type(e).__name__}"
+                + (f"：{exception_preview}" if exception_preview else "")
+                + "，请按 Trace 定位运行场景。"
+            )
             self._record_turn_failure_diagnostic(
                 category="runtime_error",
                 reason_code="agent_main_loop_exception",
                 reason_summary="Agent 主循环异常",
-                reason_detail=f"Agent 主循环发生 {type(e).__name__}，请按 Trace 定位运行场景。",
+                reason_detail=reason_detail,
                 chain_stage="agent_main_loop",
                 event_code="agent.turn.failed_exception",
                 exception_type=type(e).__name__,

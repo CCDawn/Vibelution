@@ -127,6 +127,38 @@ class TestGitMemoryService:
         assert snapshot.base_rev == "abcdef"
         assert calls == [["status", "--porcelain=1"], ["rev-parse", "HEAD"]]
 
+    def test_run_git_timeout_degrades_without_raising(self, tmp_path, monkeypatch):
+        """Git hangs must not raise TimeoutExpired into agent main-loop refresh."""
+        repo = _init_git_repo(tmp_path)
+        db_path = tmp_path / "brain.db"
+        fake_workspace = FakeWorkspace(repo, db_path)
+
+        class FakeBus:
+            def publish(self, name, data=None, source=None):
+                return None
+
+            def subscribe(self, name, handler, priority=0):
+                return True
+
+        monkeypatch.setattr("core.infrastructure.git_memory.get_workspace", lambda: fake_workspace)
+        monkeypatch.setattr("core.infrastructure.git_memory.get_event_bus", lambda: FakeBus())
+
+        service = GitMemoryService()
+
+        def fake_run_git(*args, **kwargs):
+            raise subprocess.TimeoutExpired(cmd=kwargs.get("args") or args, timeout=kwargs.get("timeout", 20))
+
+        monkeypatch.setattr(git_process, "run_git", fake_run_git)
+
+        result = service._run_git(["status", "--porcelain=1"])
+        assert result.returncode == -1
+        assert "timed out" in (result.stderr or "").lower()
+
+        state = service.refresh_git_memory(force=True)
+        assert state.available is False
+        assert state.error
+        assert "timed out" in str(state.error).lower() or "timeout" in str(state.error).lower() or "git" in str(state.error).lower()
+
     def test_refresh_indexes_commits_and_worktree(self, tmp_path, monkeypatch):
         repo = _init_git_repo(tmp_path)
         db_path = tmp_path / "brain.db"

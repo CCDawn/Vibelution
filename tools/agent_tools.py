@@ -1059,7 +1059,17 @@ def spawn_agent(
         returncode = process.wait(timeout=5)
     except Exception:
         _terminate_process_tree(process)
-        returncode = process.wait(timeout=5)
+        try:
+            returncode = process.wait(timeout=5)
+        except Exception:
+            # process tree may still be stuck after terminate; never raise into agent main loop
+            _debug_logger.warning(
+                "[子代理] 终止后进程树仍未退出，降级返回失败码："
+                f"pid={getattr(process, 'pid', None)} task_type={task_type or 'inspect'}"
+            )
+            returncode = getattr(process, "returncode", None)
+            if returncode is None:
+                returncode = -1
 
     payload = _extract_structured_result(
         stdout="".join(stdout_parts),

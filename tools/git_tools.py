@@ -22,6 +22,11 @@ def _short_subject(subject: str | None) -> str | None:
     return first_line or subject.strip()
 
 
+def _refresh_git_memory_for_tool() -> None:
+    """Git observation is tool-driven: refresh only when an agent calls a git tool."""
+    get_git_memory_service().refresh_git_memory(force=True)
+
+
 def get_git_status_summary_tool(limit: int = 5) -> str:
     """获取当前 Git 工作区与会话注意力摘要。"""
     try:
@@ -29,6 +34,7 @@ def get_git_status_summary_tool(limit: int = 5) -> str:
     except (TypeError, ValueError):
         normalized_limit = 5
     normalized_limit = max(1, min(normalized_limit, 10))
+    _refresh_git_memory_for_tool()
     return get_git_memory_service().get_git_status_summary(limit=normalized_limit)
 
 
@@ -39,12 +45,14 @@ def get_worktree_status_bundle_tool(limit: int = 5) -> str:
     except (TypeError, ValueError):
         normalized_limit = 5
     normalized_limit = max(1, min(normalized_limit, 10))
+    _refresh_git_memory_for_tool()
     payload = get_git_memory_service().build_worktree_status_bundle(limit=normalized_limit)
     return json.dumps(payload, ensure_ascii=False, indent=2)
 
 
 def get_recent_changes_tool(limit: int = 10) -> str:
     """获取最近提交变化摘要。"""
+    _refresh_git_memory_for_tool()
     changes = get_git_memory_service().get_recent_project_changes(limit=limit)
     payload = []
     for change in changes:
@@ -63,6 +71,7 @@ def get_recent_changes_tool(limit: int = 10) -> str:
 
 def get_entity_history_tool(entity_ref: str, limit: int = 10) -> str:
     """获取某个实体的最近变化历史。"""
+    _refresh_git_memory_for_tool()
     return json.dumps(
         get_git_memory_service().get_entity_history(entity_ref=entity_ref, limit=limit),
         ensure_ascii=False,
@@ -72,6 +81,7 @@ def get_entity_history_tool(entity_ref: str, limit: int = 10) -> str:
 
 def explain_current_worktree_tool() -> str:
     """详细解释当前 working tree 变化。"""
+    _refresh_git_memory_for_tool()
     return get_git_memory_service().explain_current_worktree()
 
 

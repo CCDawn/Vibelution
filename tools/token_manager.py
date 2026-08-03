@@ -441,13 +441,51 @@ def _estimate_messages_tokens_uncached(messages: list) -> int:
     )
 
 
-# 单槽缓存：典型 agent iteration 会连续 4 次询问同一个 messages 的 token 数
+def _content_char_upper_bound(content: Any) -> int:
+    """Conservative char budget used as a token upper bound (never below precise)."""
+    if isinstance(content, str):
+        return len(content)
+    if isinstance(content, list):
+        total = 0
+        for block in content:
+            if isinstance(block, dict) and "text" in block:
+                total += len(str(block.get("text") or ""))
+            elif isinstance(block, dict) and str(block.get("type") or "").lower() in {
+                "image_url",
+                "input_image",
+            }:
+                total += 256
+            elif isinstance(block, str):
+                total += len(block)
+            elif block is not None:
+                total += min(len(str(block)), 10000)
+        return total
+    if content is None:
+        return 0
+    return min(len(str(content)), 10000)
+
+
+def rough_upper_bound_messages_tokens(messages: list) -> int:
+    """Fast, conservative upper bound (chars + per-message overhead).
+
+    Always >= the precise estimator for the same content, so it is safe for
+    "definitely under threshold → skip precise scan" gates.
+    """
+    if not messages:
+        return 0
+    total = 0
+    for message in messages:
+        total += _content_char_upper_bound(_message_content(message))
+        total += 50  # matches estimate_tokens_precise structure overhead floor
+    return int(total)
+
+
+# 单槽缓存：典型 agent iteration 会连续多次询问同一个 messages 的 token 数
 # （UI 显示 / 压缩触发 / 压缩后回显 / 错误诊断），但消息列表整轮里通常不变。
 # 缓存指纹覆盖 append/pop/messages[0] 重写/_compress_messages 返回新列表这几条
 # 实际突变路径；极端的"中段就地替换"会被漏掉，但本仓库内无此模式。
 _estimate_cache_fingerprint: tuple = ()
 _estimate_cache_value: int = 0
-
 
 def _messages_token_fingerprint(messages: list) -> tuple:
     if not messages:
@@ -476,6 +514,20 @@ def estimate_messages_tokens(messages: list) -> int:
     _estimate_cache_fingerprint = fingerprint
     _estimate_cache_value = value
     return value
+
+
+def estimate_messages_tokens_for_threshold(messages: list, threshold: int) -> int:
+    """Estimate tokens for compress/UI gates.
+
+    When a conservative char upper bound is still <= threshold, skip the
+    expensive per-character precise walk. Near/over the threshold, fall back to
+    the precise cached estimator so compress decisions stay correct.
+    """
+    limit = max(0, int(threshold or 0))
+    rough = rough_upper_bound_messages_tokens(messages)
+    if rough <= limit:
+        return rough
+    return estimate_messages_tokens(messages)
 
 
 def estimate_messages_tokens_uncached(messages: list) -> int:
