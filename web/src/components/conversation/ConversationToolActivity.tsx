@@ -10,8 +10,10 @@ import {
   type CodexTranscriptToolActivity,
 } from "./conversationToolActivityModel";
 import {
+  buildCodexToolActivityPills,
   completedToolPresentationSummary,
-  formatCodexStyleToolActivityLine,
+  type CodexToolActivityPillStatusKind,
+  type CodexToolActivityPills,
   type ConversationToolPresentationLanguage,
 } from "./conversationToolPresentation";
 import {
@@ -24,6 +26,15 @@ import {
   type ConversationToolActivityPresentationItem,
 } from "./conversationToolActivityPresentation";
 import styles from "./ConversationToolActivity.styles";
+
+const STATUS_PILL_CLASS: Record<CodexToolActivityPillStatusKind, string> = {
+  running: styles.statusPill_running,
+  completed: styles.statusPill_completed,
+  failed: styles.statusPill_failed,
+  timeout: styles.statusPill_timeout,
+  attention: styles.statusPill_attention,
+  idle: styles.statusPill_idle,
+};
 
 type ConversationToolActivityProps = {
   activity: CodexTranscriptToolActivity;
@@ -114,15 +125,22 @@ function isSettledFailedCell(cell: CodexTranscriptCell) {
     || cellLooksTimedOut(cell);
 }
 
-function codexStyleToolLine(cell: CodexTranscriptCell, language: ConversationToolPresentationLanguage) {
+function buildToolActivityPills(
+  cell: CodexTranscriptCell,
+  language: ConversationToolPresentationLanguage,
+  options?: { noMatch?: boolean },
+): CodexToolActivityPills {
   const toolCall = cell.toolLifecycleModel?.toolCalls?.[0];
   const terminal = cell.toolLifecycleModel?.terminalOperations?.[0];
   const durationSeconds = codexTranscriptToolDurationSeconds(cell);
   const exitCode = conversationToolActivityTerminalExitCode(cell);
+  const nonzeroExit = exitCode !== null && exitCode !== 0
+    && !options?.noMatch
+    && !isSettledFailedCell(cell);
   const status = isSettledFailedCell(cell)
     ? "failed"
-    : exitCode !== null && exitCode !== 0
-      ? "failed"
+    : nonzeroExit
+      ? "completed"
       : cell.status;
   const displayCommand = String(
     terminal?.request?.displayCommand
@@ -131,7 +149,9 @@ function codexStyleToolLine(cell: CodexTranscriptCell, language: ConversationToo
   ).trim();
   const toolName = codexTranscriptToolRawName(cell);
   const durationLabel = durationSeconds === null ? "" : formatCodexTranscriptDuration(durationSeconds);
-  // Preserve structured code-graph semantic titles (搜索/检查 …).
+  let cellSummary = cell.summary;
+  let toolSummary = toolCall?.summary;
+  // Prefer structured code-graph semantic titles as the muted subject.
   if (toolName.trim().toLowerCase() === "code_symbol_tool" && status === "completed") {
     const semantic = completedToolPresentationSummary({
       toolSummary: toolCall?.summary,
@@ -143,23 +163,31 @@ function codexStyleToolLine(cell: CodexTranscriptCell, language: ConversationToo
       language,
     });
     if (semantic && /^(搜索|检查|Search |Inspect )/i.test(semantic)) {
-      return durationLabel
-        ? (language === "zh" ? `已在 ${durationLabel} 内${semantic}` : `${semantic} in ${durationLabel}`)
-        : semantic;
+      cellSummary = semantic;
+      toolSummary = semantic;
     }
   }
-  return formatCodexStyleToolActivityLine({
+  return buildCodexToolActivityPills({
     toolName,
     status,
     language,
     durationSeconds,
     durationLabel,
-    toolSummary: toolCall?.summary,
-    cellSummary: cell.summary,
+    toolSummary,
+    cellSummary,
     resultPreview: toolCall?.resultPreview || cell.text,
     displayCommand,
     timedOut: cellLooksTimedOut(cell) || Boolean(terminal?.result?.timedOut),
+    noMatch: Boolean(options?.noMatch),
+    nonzeroExit,
   });
+}
+
+function toolActivityAriaTitle(pills: CodexToolActivityPills) {
+  const parts = [pills.actionLabel, pills.statusLabel];
+  if (pills.subject) parts.push(pills.subject);
+  if (pills.durationLabel) parts.push(pills.durationLabel);
+  return parts.join(" ");
 }
 
 function ToolStatusIcon({
@@ -195,10 +223,9 @@ function ToolActivityItem({
   language: ConversationToolPresentationLanguage;
   renderToolDetails: ConversationToolActivityProps["renderToolDetails"];
 }) {
-  const toolName = codexTranscriptToolRawName(cell);
-  const title = conversationToolActivityIsNoMatchTerminalExit(cell)
-    ? (language === "zh" ? "未找到匹配项" : "No matches found")
-    : codexStyleToolLine(cell, language);
+  const noMatch = conversationToolActivityIsNoMatchTerminalExit(cell);
+  const pills = buildToolActivityPills(cell, language, { noMatch });
+  const title = toolActivityAriaTitle(pills);
   const detailsId = `codex-tool-detail-${cell.id}`;
   const details = renderToolDetails(cell, detailsId);
   const expandable = details !== null && details !== undefined && details !== false;
@@ -211,7 +238,29 @@ function ToolActivityItem({
     <>
       <ToolStatusIcon cell={cell} language={language} />
       <span className={styles.itemBody}>
-        <span className={styles.itemTitle} title={title}>{title}</span>
+        <span className={styles.actionPill} data-codex-tool-action-pill="true">
+          {pills.actionLabel}
+        </span>
+        <span
+          className={`${styles.statusPill} ${STATUS_PILL_CLASS[pills.statusKind]}`}
+          data-codex-tool-status-pill="true"
+          data-codex-tool-status-kind={pills.statusKind}
+        >
+          {pills.statusKind === "running" ? (
+            <LoaderCircle className="animate-spin" size={12} aria-hidden="true" />
+          ) : null}
+          {pills.statusLabel}
+        </span>
+        {pills.subject ? (
+          <span className={styles.itemPreview} title={pills.subject} data-codex-tool-subject="true">
+            {pills.subject}
+          </span>
+        ) : null}
+        {pills.durationLabel ? (
+          <span className={styles.itemDuration} data-codex-tool-duration="true">
+            {pills.durationLabel}
+          </span>
+        ) : null}
       </span>
     </>
   );
