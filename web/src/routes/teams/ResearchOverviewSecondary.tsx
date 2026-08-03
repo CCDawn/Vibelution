@@ -1,6 +1,8 @@
 import { useId, useState, type ReactNode } from "react";
 import { ChevronDown } from "lucide-react";
 
+import { VNativeButton, VSurface } from "../../components/vui";
+
 /**
  * GitHub "Details" / Linear "More" pattern: one quiet disclosure row, no fake dual CTAs.
  */
@@ -20,17 +22,19 @@ export function ResearchOverviewSecondary({
   const label = lang === "zh" ? "高级详情" : "Advanced details";
 
   return (
-    <div
-      className="min-w-0 rounded-lg border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)]"
+    <VSurface
+      tone="row"
+      elevation="flat"
+      padding="none"
+      className="min-w-0 overflow-hidden rounded-lg border border-[var(--vui-border-subtle)]"
       data-testid="research-overview-secondary"
     >
-      <button
+      <VNativeButton
         type="button"
         className={[
-          "flex h-9 w-full items-center gap-2 px-3 text-left",
-          "text-[13px] font-medium text-[var(--fg-secondary)]",
-          "hover:bg-[color-mix(in_srgb,var(--vui-control-muted)_55%,transparent)]",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--accent-cool)]",
+          "!flex h-9 w-full !items-center !justify-start gap-2 !rounded-none !border-0 !bg-transparent px-3 text-left",
+          "!text-[13px] !font-medium !text-[var(--fg-secondary)]",
+          "hover:!bg-[color-mix(in_srgb,var(--vui-control-muted)_55%,transparent)]",
         ].join(" ")}
         aria-expanded={open}
         aria-controls={panelId}
@@ -50,7 +54,7 @@ export function ResearchOverviewSecondary({
             ? (lang === "zh" ? "收起" : "Hide")
             : (lang === "zh" ? "证据与校验" : "Evidence & checks")}
         </span>
-      </button>
+      </VNativeButton>
       {open ? (
         <div
           id={panelId}
@@ -59,6 +63,6 @@ export function ResearchOverviewSecondary({
           {children}
         </div>
       ) : null}
-    </div>
+    </VSurface>
   );
 }

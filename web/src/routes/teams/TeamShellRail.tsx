@@ -1,7 +1,12 @@
 import { useMemo, useState } from "react";
 
 import type { Team } from "../../api/types";
-import { isChallengeCupResearchWorkflowTeam, isAiSearchScopeTeam, isKnowledgeExpansionWorkflowTeam } from "./teamKindModel";
+import { VChip, VInput, VNativeButton, VSurface } from "../../components/vui";
+import {
+  isAiSearchScopeTeam,
+  isChallengeCupResearchWorkflowTeam,
+  isKnowledgeExpansionWorkflowTeam,
+} from "./teamKindModel";
 import { teamShellStatusLabel, type TeamShellListItem } from "./teamShellModel";
 
 export type TeamShellRailProps = {
@@ -38,6 +43,7 @@ function toListItem(team: Team, lang: "zh" | "en"): TeamShellListItem {
 
 /**
  * Left rail: select a team, then the right pane shows full team content.
+ * VUI controls only — width ownership stays with VSplitWorkspace + layoutId.
  */
 export function TeamShellRail({
   lang,
@@ -62,13 +68,18 @@ export function TeamShellRail({
   }, [filter, items]);
 
   return (
-    <aside
+    <VSurface
+      as="aside"
+      tone="rail"
+      elevation="flat"
+      padding="compact"
       className={[
-        "teamShellRail min-w-0 flex h-full min-h-0 flex-col gap-3 overflow-hidden border-r border-[var(--vui-border-subtle)] bg-[var(--vui-surface-rail)] p-3",
+        "teamShellRail flex h-full min-h-0 min-w-0 flex-col gap-3 overflow-hidden",
         className,
       ].filter(Boolean).join(" ")}
       data-testid="team-shell-rail"
       data-vui="team-shell-rail"
+      data-vui-region="teams-sidebar"
       aria-label={lang === "zh" ? "团队列表" : "Team list"}
     >
       <div className="flex min-w-0 items-center justify-between gap-2 px-0.5">
@@ -77,17 +88,14 @@ export function TeamShellRail({
         </h2>
         <span className="text-[11px] text-[var(--fg-tertiary)]">{teams.length}</span>
       </div>
-      <label className="grid min-w-0 gap-1">
-        <span className="sr-only">{lang === "zh" ? "搜索团队" : "Search teams"}</span>
-        <input
-          type="search"
-          value={filter}
-          onChange={(event) => setFilter(event.target.value)}
-          placeholder={lang === "zh" ? "搜索团队…" : "Search teams…"}
-          className="min-h-8 w-full rounded-lg border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] px-2.5 text-[12.5px] text-[var(--fg-primary)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-cool)]"
-          data-testid="team-shell-search"
-        />
-      </label>
+      <VInput
+        type="search"
+        value={filter}
+        onChange={(event) => setFilter(event.target.value)}
+        placeholder={lang === "zh" ? "搜索团队…" : "Search teams…"}
+        aria-label={lang === "zh" ? "搜索团队" : "Search teams"}
+        data-testid="team-shell-search"
+      />
       <div
         className="grid min-h-0 flex-1 content-start gap-1.5 overflow-auto"
         role="listbox"
@@ -96,7 +104,7 @@ export function TeamShellRail({
         {filtered.length ? filtered.map(({ team, item }) => {
           const active = item.teamId === selectedTeamId;
           return (
-            <button
+            <VNativeButton
               key={item.teamId}
               type="button"
               role="option"
@@ -104,25 +112,20 @@ export function TeamShellRail({
               data-active={active ? "true" : "false"}
               data-testid={`team-shell-item-${item.teamId}`}
               className={[
-                "grid min-w-0 gap-1 rounded-lg border px-2.5 py-2 text-left transition-colors",
+                "!grid h-auto min-h-0 w-full min-w-0 gap-1 rounded-lg border px-2.5 py-2 text-left !whitespace-normal",
                 active
-                  ? "border-[var(--fg-primary)] bg-[var(--fg-primary)] text-[var(--vui-surface-base)]"
-                  : "border-transparent bg-transparent text-[var(--fg-primary)] hover:bg-[var(--vui-surface-row)]",
+                  ? "!border-[var(--fg-primary)] !bg-[var(--fg-primary)] !text-[var(--vui-surface-base)]"
+                  : "!border-transparent !bg-transparent !text-[var(--fg-primary)] hover:!bg-[var(--vui-surface-row)]",
               ].join(" ")}
               onClick={() => onSelectTeam(team)}
             >
               <span className="flex min-w-0 items-center justify-between gap-2">
                 <span className="min-w-0 truncate text-[13px] font-[720]">{item.name}</span>
-                <span
-                  className={[
-                    "shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] font-[740]",
-                    active
-                      ? "border-[color-mix(in_srgb,var(--vui-surface-base)_35%,transparent)]"
-                      : "border-[var(--vui-border-subtle)] text-[var(--fg-tertiary)]",
-                  ].join(" ")}
+                <VChip
+                  className={active ? "!border-[color-mix(in_srgb,var(--vui-surface-base)_35%,transparent)] !bg-transparent !text-inherit" : undefined}
                 >
                   {item.status}
-                </span>
+                </VChip>
               </span>
               <span
                 className={[
@@ -143,7 +146,7 @@ export function TeamShellRail({
               >
                 {item.purpose}
               </span>
-            </button>
+            </VNativeButton>
           );
         }) : (
           <p className="m-0 px-1 text-[12px] text-[var(--fg-tertiary)]">
@@ -153,9 +156,9 @@ export function TeamShellRail({
       </div>
       <p className="m-0 px-0.5 text-[11px] leading-snug text-[var(--fg-tertiary)]">
         {lang === "zh"
-          ? "左侧选团队，右侧展示整队内容。可用看板 / 画布模式。"
-          : "Select a team on the left. Use board or canvas mode on the right."}
+          ? "左侧选团队，右侧展示整队内容。拖拽分隔条可调整宽度。"
+          : "Select a team on the left. Drag the separator to resize."}
       </p>
-    </aside>
+    </VSurface>
   );
 }

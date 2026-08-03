@@ -1,6 +1,6 @@
 import { ArrowRight, Compass } from "lucide-react";
 
-import { VSurface } from "../../components/vui";
+import { VButton, VSurface } from "../../components/vui";
 import {
   researchPrimaryActionDetail,
   researchPrimaryActionLabel,
@@ -146,24 +146,15 @@ export function ResearchPrimaryActionBar({
 
           <div className="pt-1">
             {/* Single solid CTA — no sibling ghost "open stage" control */}
-            <button
+            <VButton
               type="button"
               data-vui="research-primary-cta"
               data-testid="research-primary-cta"
-              disabled={disabled}
+              variant={effectiveAction.blocked ? "secondary" : "primary"}
+              isDisabled={disabled}
               aria-label={buttonLabel}
               title={buttonLabel}
-              className={[
-                "inline-flex h-9 items-center justify-center gap-1.5 rounded-lg px-3.5",
-                "text-[13px] font-semibold leading-none",
-                "transition-[filter,opacity] duration-150",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-cool)] focus-visible:ring-offset-2",
-                "disabled:cursor-not-allowed disabled:opacity-50",
-                effectiveAction.blocked
-                  ? "border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] text-[var(--fg-secondary)]"
-                  : "border border-transparent bg-[var(--accent-cool)] text-white hover:brightness-110",
-              ].join(" ")}
-              onClick={() => {
+              onPress={() => {
                 if (disabled) return;
                 onPrimaryAction(effectiveAction);
               }}
@@ -172,7 +163,7 @@ export function ResearchPrimaryActionBar({
               {!pending && !effectiveAction.blocked ? (
                 <ArrowRight size={14} aria-hidden="true" strokeWidth={2.25} />
               ) : null}
-            </button>
+            </VButton>
           </div>
         </div>
       </VSurface>
