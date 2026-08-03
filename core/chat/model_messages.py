@@ -5,8 +5,9 @@ This module is the boundary between persisted/UI conversation shapes and the
 LLM-facing message chain. UI projections may keep camelCase fields such as
 ``toolCalls``.
 
-Complete current-turn tool chains keep their provider structure. Persisted
-history and incomplete fragments are projected into semantic assistant text.
+Mature-agent alignment: keep protocol-faithful ``assistant.tool_calls`` +
+``tool`` result chains for both live turns and history seed. Do not rewrite
+completed tools into truncated "历史工具结果" prose.
 """
 
 from __future__ import annotations
@@ -48,10 +49,14 @@ def normalize_model_messages(messages: Iterable[Any]) -> list[Any]:
 
 
 def normalize_model_history_messages(messages: Iterable[Any]) -> list[Any]:
-    """Return provider-safe semantic history without replay-only tool roles."""
+    """Return protocol-faithful history for the next model request.
 
-    provider_messages = ProviderMessageChain.from_messages(messages).to_provider_payload()
-    return _provider_chain_to_semantic_history(provider_messages)
+    Tool call / tool result pairs stay structured (same as the live provider
+    chain). Orphan or illegal fragments are repaired by
+    ``ProviderMessageChain`` without prose splicing or char truncation.
+    """
+
+    return normalize_provider_turn_messages(messages)
 
 
 def normalize_provider_turn_messages(messages: Iterable[Any]) -> list[Any]:
@@ -144,16 +149,15 @@ def _assistant_provider_messages(message: dict[str, Any], *, source_index: int) 
         tool_entries,
         source_index=source_index,
     )
-    if any(_tool_entry_has_result(entry) for entry in tool_entries) and not (
-        interrupted_tool_call_ids
-        and not any(_tool_entry_has_material_result(entry) for entry in tool_entries)
-    ):
-        return _assistant_history_messages(message, source_index=source_index)
     if not tool_entries:
+        if not _visible_text(content) and not _visible_text(message.get("reasoning_content")):
+            return []
         assistant = _base_message("assistant", content, source_index=source_index)
         _copy_optional(message, assistant, ("metadata", "reasoning_content", "mental_snapshot", "mentalSnapshot"))
         return [assistant]
 
+    # Keep completed and incomplete tools as provider tool_calls + tool messages.
+    # Do not collapse them into truncated "历史工具结果" assistant prose.
     tool_calls: list[dict[str, Any]] = []
     tool_messages: list[dict[str, Any]] = []
     for tool_index, entry in enumerate(tool_entries, start=1):
@@ -161,7 +165,7 @@ def _assistant_provider_messages(message: dict[str, Any], *, source_index: int) 
         if not normalized:
             continue
         tool_calls.append(normalized)
-        result_content = _tool_result_content(normalized["name"], entry)
+        result_content = _raw_tool_result_body(entry)
         if result_content:
             tool_messages.append(
                 _embedded_tool_result_message(
@@ -183,6 +187,26 @@ def _assistant_provider_messages(message: dict[str, Any], *, source_index: int) 
         metadata["interruptedToolCallIds"] = sorted(interrupted_tool_call_ids)
         assistant["metadata"] = metadata
     return [assistant, *tool_messages]
+
+
+def _raw_tool_result_body(entry: dict[str, Any]) -> str:
+    """Return the tool payload body without history framing or char truncation."""
+
+    result = _first_non_empty(
+        entry.get("result"),
+        entry.get("error"),
+        entry.get("resultSegments"),
+        entry.get("stdoutPreview"),
+        entry.get("stderrPreview"),
+        entry.get("resultPreview"),
+        entry.get("result_preview"),
+        entry.get("summary"),
+    )
+    if result in (None, ""):
+        return ""
+    if isinstance(result, (list, dict)):
+        return json.dumps(result, ensure_ascii=False, sort_keys=True)
+    return str(result)
 
 
 _INTERRUPTED_TOOL_STATUSES = frozenset(

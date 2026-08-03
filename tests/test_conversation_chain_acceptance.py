@@ -71,11 +71,7 @@ def test_canonical_history_keeps_two_equal_user_submissions_and_complete_semanti
 
     history = normalize_model_history_messages(fixture["provider_messages"])
     users = [message for message in history if message["role"] == "user"]
-    semantic_tool_results = [
-        message
-        for message in history
-        if message["role"] == "assistant" and "历史工具结果:" in str(message.get("content") or "")
-    ]
+    tool_messages = [message for message in history if message["role"] == "tool"]
     assistant_messages = [message for message in history if message["role"] == "assistant"]
     expected_call_ids = ["call-weather-002", "call-notes-002"]
 
@@ -88,15 +84,12 @@ def test_canonical_history_keeps_two_equal_user_submissions_and_complete_semanti
         "submission-golden-001",
         "submission-golden-002",
     ]
-    assert not any(message.get("tool_calls") for message in history)
-    assert not any(message["role"] == "tool" for message in history)
-    assert [message["metadata"]["toolCallId"] for message in semantic_tool_results] == expected_call_ids
-    assert [message["metadata"]["toolName"] for message in semantic_tool_results] == [
-        "weather_lookup",
-        "notes_lookup",
-    ]
-    assert "Shanghai" in semantic_tool_results[0]["content"]
-    assert "semantic history" in semantic_tool_results[1]["content"]
+    # Mature-agent alignment: keep provider tool chains, do not prose-splice.
+    assert any(message.get("tool_calls") for message in history)
+    assert [message["tool_call_id"] for message in tool_messages] == expected_call_ids
+    joined_tools = "\n".join(str(message.get("content") or "") for message in tool_messages)
+    assert "Shanghai" in joined_tools
+    assert "semantic history" in joined_tools
     assert assistant_messages[-1]["content"] == "第二轮完成：天气晴朗，且语义历史与 wire parity 均已确认。"
 
 

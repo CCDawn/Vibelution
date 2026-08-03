@@ -12,7 +12,7 @@ from core.chat.model_messages import (
 from core.llm.payload_validator import validate_tool_result_pairing
 
 
-def test_history_tool_calls_project_to_semantic_messages_not_provider_tool_role():
+def test_history_tool_calls_keep_provider_tool_chain():
     messages = normalize_model_history_messages(
         [
             {"role": "user", "content": "你现在能用什么工具"},
@@ -31,34 +31,37 @@ def test_history_tool_calls_project_to_semantic_messages_not_provider_tool_role(
         ]
     )
 
-    assert [message["role"] for message in messages] == ["user", "assistant"]
-    assert not any(message.get("role") == "tool" for message in messages)
-    assert "历史工具结果" in messages[1]["content"]
-    assert "task_list_tool" in messages[1]["content"]
+    assert [message["role"] for message in messages] == ["user", "assistant", "tool"]
+    assert messages[1].get("tool_calls")
+    assert messages[1]["tool_calls"][0]["id"] == "call_task_list"
+    assert messages[2]["tool_call_id"] == "call_task_list"
+    assert "已有 3 个任务完成。" in messages[2]["content"]
     assert validate_tool_result_pairing(messages).ok
 
 
-def test_history_orphan_tool_result_is_demoted_to_semantic_context():
+def test_history_orphan_tool_result_is_repaired_without_prose_splice():
     messages = normalize_model_history_messages(
         [
             {"role": "system", "content": "stable"},
             {
                 "role": "tool",
                 "tool_call_id": "call_core_context",
-                "content": "历史工具调用: get_core_context_tool\n状态: done\n结果:\nA014 程听澜",
+                "content": "A014 程听澜",
             },
             {"role": "assistant", "content": "你好，我是程听澜。"},
             {"role": "user", "content": "你好"},
         ]
     )
 
-    assert [message["role"] for message in messages] == ["system", "assistant", "assistant", "user"]
-    assert "历史工具结果" in messages[1]["content"]
-    assert "get_core_context_tool" in messages[1]["content"]
+    roles = [message["role"] for message in messages]
+    assert "system" in roles
+    assert "user" in roles
+    # Orphan tool results are repaired into a valid pairing or dropped safely.
     assert validate_tool_result_pairing(messages).ok
+    assert any("程听澜" in str(message.get("content") or "") for message in messages)
 
 
-def test_history_tool_result_resolves_name_from_previous_tool_call_id():
+def test_history_tool_result_keeps_provider_pairing():
     messages = normalize_model_history_messages(
         [
             {
@@ -76,9 +79,10 @@ def test_history_tool_result_resolves_name_from_previous_tool_call_id():
         ]
     )
 
-    assert [message["role"] for message in messages] == ["assistant"]
-    assert "历史工具结果: cli_tool" in messages[0]["content"]
-    assert "All checks passed." in messages[0]["content"]
+    assert [message["role"] for message in messages] == ["assistant", "tool"]
+    assert messages[0]["tool_calls"][0]["id"] == "call_cli"
+    assert messages[1]["tool_call_id"] == "call_cli"
+    assert messages[1]["content"] == "All checks passed."
     assert validate_tool_result_pairing(messages).ok
 
 
@@ -263,22 +267,31 @@ def test_provider_turn_messages_preserve_structured_user_content_blocks():
     assert isinstance(messages[0]["content"], list)
 
 
-def test_history_tool_result_bodies_are_bounded_for_next_turn_context():
+def test_history_tool_result_bodies_are_not_prose_truncated():
     bulky = "X" * (HISTORY_TOOL_RESULT_CHAR_LIMIT * 3)
     messages = normalize_model_history_messages(
         [
             {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_bulky",
+                        "type": "function",
+                        "function": {"name": "cli_tool", "arguments": "{}"},
+                    }
+                ],
+            },
+            {
                 "role": "tool",
-                "content": f"历史工具结果: cli_tool\nstatus: done\n结果:\n{bulky}",
+                "content": bulky,
                 "tool_call_id": "call_bulky",
                 "metadata": {"toolName": "cli_tool"},
-            }
+            },
         ]
     )
 
-    assert len(messages) == 1
-    content = messages[0]["content"]
-    assert "历史工具结果" in content
-    assert "历史工具结果已截断" in content
-    assert len(content) <= HISTORY_TOOL_RESULT_CHAR_LIMIT + 200
-    assert bulky not in content
+    assert [message["role"] for message in messages] == ["assistant", "tool"]
+    assert messages[1]["content"] == bulky
+    assert "历史工具结果已截断" not in messages[1]["content"]
+    assert validate_tool_result_pairing(messages).ok
