@@ -1938,6 +1938,10 @@ class WorkbenchConfig(BaseModel):
     frontend_port: int = Field(default=5173, ge=1, le=65535, description="前端开发服务端口")
     window_mode: str = Field(default="fullscreen", description="工作台窗口模式：windowed / fullscreen")
     window_size: str = Field(default="auto", description="工作台窗口化启动尺寸：auto 或 WIDTHxHEIGHT")
+    window_position: str = Field(
+        default="auto",
+        description="工作台窗口化启动位置：auto 或 X,Y（屏幕坐标，支持负值多显示器）",
+    )
 
     @field_validator("window_mode")
     @classmethod
@@ -1966,6 +1970,25 @@ class WorkbenchConfig(BaseModel):
         if not (960 <= width <= 7680 and 600 <= height <= 4320):
             return "auto"
         return f"{width}x{height}"
+
+    @field_validator("window_position")
+    @classmethod
+    def normalize_window_position(cls, v: str) -> str:
+        value = (v or "auto").strip().lower()
+        if value == "auto":
+            return value
+        if "," not in value:
+            return "auto"
+        x_text, y_text = value.split(",", 1)
+        try:
+            x = int(x_text.strip())
+            y = int(y_text.strip())
+        except ValueError:
+            return "auto"
+        # Multi-monitor virtual desktop range (Edge --window-position).
+        if not (-20000 <= x <= 20000 and -20000 <= y <= 20000):
+            return "auto"
+        return f"{x},{y}"
 
 
 # ============================================================================

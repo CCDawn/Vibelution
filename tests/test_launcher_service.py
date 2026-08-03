@@ -1018,6 +1018,71 @@ def test_launcher_startup_settings_rejects_tiny_edge_chrome_window_size(tmp_path
     assert setting["workbench"]["effectiveWindowSize"] == "auto"
 
 
+def test_launcher_startup_settings_persist_workbench_window_position(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        "[workbench]\nwindow_mode = \"windowed\"\nwindow_size = \"1600x900\"\nwindow_position = \"auto\"\n",
+        encoding="utf-8",
+    )
+    events = []
+    monkeypatch.setattr(launcher_service, "CONFIG_PATH", config_path)
+    monkeypatch.delenv("VIBELUTION_WORKBENCH_WINDOW_POSITION", raising=False)
+    monkeypatch.delenv("AGENT_WORKBENCH_WINDOW_POSITION", raising=False)
+    monkeypatch.setattr(
+        launcher_service,
+        "append_runtime_manager_file_event",
+        lambda event_code, payload, **kwargs: events.append((event_code, payload)) or "2026-06-06T00:00:00+00:00",
+    )
+
+    response = launcher_service.update_launcher_startup_settings(
+        {"workbench": {"windowPosition": "120,80"}}
+    )
+
+    text = config_path.read_text(encoding="utf-8")
+    assert response["ok"] is True
+    assert response["setting"]["workbench"]["windowPosition"] == "120,80"
+    assert response["setting"]["workbench"]["effectiveWindowPosition"] == "120,80"
+    assert 'window_position = "120,80"' in text
+    assert events[-1][0] == "launcher.settings.startup.updated"
+    assert events[-1][1]["fields"]["current"]["windowPosition"] == "120,80"
+
+
+def test_launcher_startup_settings_accepts_negative_multi_monitor_position(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("[workbench]\n", encoding="utf-8")
+    monkeypatch.setattr(launcher_service, "CONFIG_PATH", config_path)
+    monkeypatch.delenv("VIBELUTION_WORKBENCH_WINDOW_POSITION", raising=False)
+    monkeypatch.delenv("AGENT_WORKBENCH_WINDOW_POSITION", raising=False)
+    monkeypatch.setattr(
+        launcher_service,
+        "append_runtime_manager_file_event",
+        lambda event_code, payload, **kwargs: "2026-06-06T00:00:00+00:00",
+    )
+
+    response = launcher_service.update_launcher_startup_settings(
+        {"workbench": {"windowPosition": "-640,120"}}
+    )
+
+    assert response["ok"] is True
+    assert response["setting"]["workbench"]["windowPosition"] == "-640,120"
+    assert 'window_position = "-640,120"' in config_path.read_text(encoding="utf-8")
+
+
+def test_launcher_startup_settings_rejects_invalid_workbench_window_position(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("[workbench]\n", encoding="utf-8")
+    monkeypatch.setattr(launcher_service, "CONFIG_PATH", config_path)
+
+    try:
+        launcher_service.update_launcher_startup_settings({"workbench": {"windowPosition": "center"}})
+    except ValueError as exc:
+        error = str(exc)
+    else:
+        raise AssertionError("expected invalid window position to be rejected")
+
+    assert "workbench.windowPosition" in error
+
+
 def test_standalone_launcher_active_work_guard_reads_runtime_manager_store(tmp_path, monkeypatch):
     work_runs_dir = tmp_path / ".runtime" / "runtime-manager" / "work_runs"
     store = WorkRunStore(root=work_runs_dir)

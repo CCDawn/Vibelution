@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  isPersistableWorkbenchWindowPosition,
   isPersistableWorkbenchWindowSize,
   observeWorkbenchWindowMode,
+  observeWorkbenchWindowPosition,
   observeWorkbenchWindowSize,
 } from "./workbenchWindowMemory";
 
@@ -80,5 +82,27 @@ describe("workbenchWindowMemory", () => {
     expect(isPersistableWorkbenchWindowSize("320x240")).toBe(false);
     expect(isPersistableWorkbenchWindowSize("960x600")).toBe(true);
     expect(isPersistableWorkbenchWindowSize("1600x900")).toBe(true);
+  });
+
+  it("quantizes window position for stable config writes", () => {
+    expect(
+      observeWorkbenchWindowPosition({
+        screenX: 123,
+        screenY: 87,
+      }),
+    ).toBe("120,88");
+  });
+
+  it("accepts multi-monitor negative positions", () => {
+    expect(
+      observeWorkbenchWindowPosition({
+        screenX: -640,
+        screenY: 120,
+      }),
+    ).toBe("-640,120");
+    expect(isPersistableWorkbenchWindowPosition("-640,120")).toBe(true);
+    expect(isPersistableWorkbenchWindowPosition("120,80")).toBe(true);
+    expect(isPersistableWorkbenchWindowPosition("auto")).toBe(false);
+    expect(isPersistableWorkbenchWindowPosition("bogus")).toBe(false);
   });
 });

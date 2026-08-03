@@ -246,6 +246,46 @@ function Resolve-ConfiguredWorkbenchWindowSize {
     return $resolvedSize
 }
 
+function Resolve-ConfiguredWorkbenchWindowPosition {
+    $resolvedPosition = "auto"
+    if (Test-Path $configPath) {
+        try {
+            $inWorkbenchBlock = $false
+            foreach ($line in Get-Content -LiteralPath $configPath -Encoding utf8) {
+                $trimmed = ([string]$line).Trim()
+                if ($trimmed -match '^\[(.+)\]$') {
+                    $inWorkbenchBlock = ($matches[1] -eq "workbench")
+                    continue
+                }
+                if (-not $inWorkbenchBlock) {
+                    continue
+                }
+                if ($trimmed -match '^window_position\s*=\s*"?(-?\d{1,5},-?\d{1,5}|auto)"?\s*(?:#.*)?$') {
+                    $candidate = ([string]$matches[1]).Trim().ToLowerInvariant()
+                    if (Test-WorkbenchWindowPositionValue -Value $candidate) {
+                        $resolvedPosition = $candidate
+                    }
+                    break
+                }
+            }
+        } catch {
+        }
+    }
+
+    $envPositionValue = $env:VIBELUTION_WORKBENCH_WINDOW_POSITION
+    if (-not $envPositionValue) {
+        $envPositionValue = $env:AGENT_WORKBENCH_WINDOW_POSITION
+    }
+    if ($envPositionValue) {
+        $envPosition = ([string]$envPositionValue).Trim().ToLowerInvariant()
+        if (Test-WorkbenchWindowPositionValue -Value $envPosition) {
+            $resolvedPosition = $envPosition
+        }
+    }
+
+    return $resolvedPosition
+}
+
 function Test-WorkbenchWindowSizeValue {
     param([string]$Value)
 
@@ -269,6 +309,29 @@ function Test-WorkbenchWindowSizeValue {
     }
 }
 
+function Test-WorkbenchWindowPositionValue {
+    param([string]$Value)
+
+    $normalized = ([string]$Value).Trim().ToLowerInvariant()
+    if ($normalized -eq "auto") {
+        return $true
+    }
+    if ($normalized -match '^(-?\d{1,5}),(-?\d{1,5})$') {
+        $x = 0
+        $y = 0
+        if (-not [int]::TryParse($matches[1], [ref]$x)) {
+            return $false
+        }
+        if (-not [int]::TryParse($matches[2], [ref]$y)) {
+            return $false
+        }
+        # Virtual desktop range for multi-monitor restore.
+        return ($x -ge -20000 -and $x -le 20000 -and $y -ge -20000 -and $y -le 20000)
+    } else {
+        return $false
+    }
+}
+
 function ConvertTo-EdgeWindowSizeArgument {
     param([string]$Value)
 
@@ -279,10 +342,21 @@ function ConvertTo-EdgeWindowSizeArgument {
     return ($normalized -replace "x", ",")
 }
 
+function ConvertTo-EdgeWindowPositionArgument {
+    param([string]$Value)
+
+    $normalized = ([string]$Value).Trim().ToLowerInvariant()
+    if (-not (Test-WorkbenchWindowPositionValue -Value $normalized) -or $normalized -eq "auto") {
+        return ""
+    }
+    return $normalized
+}
+
 $port = Resolve-ConfiguredWorkbenchPort
 $launcherControlPort = Resolve-ConfiguredLauncherControlPort -WorkbenchPort $port
 $workbenchWindowMode = Resolve-ConfiguredWorkbenchWindowMode
 $workbenchWindowSize = Resolve-ConfiguredWorkbenchWindowSize
+$workbenchWindowPosition = Resolve-ConfiguredWorkbenchWindowPosition
 $url = "http://$bindHost`:$port"
 $backendReadyUrl = $url
 $healthUrl = "$url/api/health"
@@ -6006,11 +6080,14 @@ function Start-ManagedBrowser {
 
     $configuredWindowMode = if ($script:workbenchWindowMode) { [string]$script:workbenchWindowMode } else { "fullscreen" }
     $configuredWindowSize = if ($script:workbenchWindowSize) { [string]$script:workbenchWindowSize } else { "auto" }
+    $configuredWindowPosition = if ($script:workbenchWindowPosition) { [string]$script:workbenchWindowPosition } else { "auto" }
     $windowMode = if ($WindowPurpose -eq "launcher_control_surface") { "windowed" } else { $configuredWindowMode }
     $windowSize = if ($WindowPurpose -eq "launcher_control_surface") { "auto" } else { $configuredWindowSize }
+    $windowPosition = if ($WindowPurpose -eq "launcher_control_surface") { "auto" } else { $configuredWindowPosition }
     $windowPolicy = if ($WindowPurpose -eq "launcher_control_surface") { "launcher_taskbar_windowed" } else { "configured_workbench_window_mode" }
     $fullscreenForced = ($windowMode -eq "fullscreen")
     $windowSizeArgument = if (-not $fullscreenForced) { ConvertTo-EdgeWindowSizeArgument -Value $windowSize } else { "" }
+    $windowPositionArgument = if (-not $fullscreenForced) { ConvertTo-EdgeWindowPositionArgument -Value $windowPosition } else { "" }
     $browserArgs = @(
         "--user-data-dir=$ProfileDir",
         "--app=$resolvedAppUrl",
@@ -6033,11 +6110,14 @@ function Start-ManagedBrowser {
     if ($windowSizeArgument) {
         $browserArgs += "--window-size=$windowSizeArgument"
     }
+    if ($windowPositionArgument) {
+        $browserArgs += "--window-position=$windowPositionArgument"
+    }
 
-    Write-Note "Starting managed Edge app window ($windowMode mode, size=$windowSize) ..."
+    Write-Note "Starting managed Edge app window ($windowMode mode, size=$windowSize, position=$windowPosition) ..."
     if ($script:currentRuntimeSceneId) {
-        Update-RuntimeSceneManifest @{ browser = @{ status = "launching"; executable = $BrowserExecutable; window_mode = $windowMode; configured_window_mode = $configuredWindowMode; window_size = $windowSize; configured_window_size = $configuredWindowSize; window_size_argument = $windowSizeArgument; window_policy = $windowPolicy; fullscreen_forced = $fullscreenForced; profile_dir = $ProfileDir; app_url = $resolvedAppUrl; window_purpose = $WindowPurpose } }
-        Append-RuntimeSceneRawLog -RelativePath (Get-RuntimeSceneRelativePaths).Browser -Message "Launching managed browser window ($windowMode mode, size=$windowSize)."
+        Update-RuntimeSceneManifest @{ browser = @{ status = "launching"; executable = $BrowserExecutable; window_mode = $windowMode; configured_window_mode = $configuredWindowMode; window_size = $windowSize; configured_window_size = $configuredWindowSize; window_size_argument = $windowSizeArgument; window_position = $windowPosition; configured_window_position = $configuredWindowPosition; window_position_argument = $windowPositionArgument; window_policy = $windowPolicy; fullscreen_forced = $fullscreenForced; profile_dir = $ProfileDir; app_url = $resolvedAppUrl; window_purpose = $WindowPurpose } }
+        Append-RuntimeSceneRawLog -RelativePath (Get-RuntimeSceneRelativePaths).Browser -Message "Launching managed browser window ($windowMode mode, size=$windowSize, position=$windowPosition)."
         Write-RuntimeSceneEvent `
             -Component "browser" `
             -Phase "window" `

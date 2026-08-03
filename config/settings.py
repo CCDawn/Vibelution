@@ -995,9 +995,13 @@ class ConfigLoader:
             f"{prefix}WORKBENCH_BACKEND_PORT": "workbench.backend_port",
             f"{prefix}WORKBENCH_FRONTEND_PORT": "workbench.frontend_port",
             f"{prefix}WORKBENCH_WINDOW_MODE": "workbench.window_mode",
+            f"{prefix}WORKBENCH_WINDOW_SIZE": "workbench.window_size",
+            f"{prefix}WORKBENCH_WINDOW_POSITION": "workbench.window_position",
             "VIBELUTION_PORT": "workbench.backend_port",
             "VIBELUTION_FRONTEND_PORT": "workbench.frontend_port",
             "VIBELUTION_WORKBENCH_WINDOW_MODE": "workbench.window_mode",
+            "VIBELUTION_WORKBENCH_WINDOW_SIZE": "workbench.window_size",
+            "VIBELUTION_WORKBENCH_WINDOW_POSITION": "workbench.window_position",
 
             # === 上下文压缩配置 ===
             f"{prefix}COMPRESSION_ENABLED": "context_compression.enabled",
