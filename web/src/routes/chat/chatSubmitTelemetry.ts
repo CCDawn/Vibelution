@@ -7,6 +7,7 @@ export function submitTelemetryFields(
     attachmentCount?: number;
     referenceCount?: number;
     mentalModelEnabled?: boolean;
+    runtimeStatusEnabled?: boolean;
     editTargetId?: string;
     composerDisabled?: boolean;
     sessionBusy?: boolean;
@@ -39,6 +40,9 @@ export function submitTelemetryFields(
   }
   if (options.mentalModelEnabled !== undefined) {
     fields.mentalModelEnabled = options.mentalModelEnabled;
+  }
+  if (options.runtimeStatusEnabled !== undefined) {
+    fields.runtimeStatusEnabled = options.runtimeStatusEnabled;
   }
   if (options.editTargetId !== undefined) {
     fields.editTargetId = options.editTargetId;
