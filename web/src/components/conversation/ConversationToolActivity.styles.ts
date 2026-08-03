@@ -27,16 +27,16 @@ const styles = {
   itemDetails: cx("itemDetails", "w-full max-w-full min-w-0"),
   itemSummary: cx(
     "itemSummary",
-    "inline-grid w-full max-w-full min-w-0 cursor-pointer grid-cols-[15px_minmax(0,1fr)] items-start gap-x-2 py-[0.2rem] text-left [&::-webkit-details-marker]:hidden focus-visible:rounded-[var(--radius-control)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)]",
+    "flex w-full max-w-full min-w-0 cursor-pointer items-center gap-x-2 py-[0.28rem] text-left [&::-webkit-details-marker]:hidden focus-visible:rounded-[var(--radius-control)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)]",
   ),
   itemStatic: cx(
     "itemStatic",
-    "inline-grid w-full max-w-full min-w-0 grid-cols-[15px_minmax(0,1fr)] items-start gap-x-2 py-[0.2rem]",
+    "flex w-full max-w-full min-w-0 items-center gap-x-2 py-[0.28rem]",
   ),
   batch: cx("batch", "w-full max-w-full min-w-0"),
   batchSummary: cx(
     "batchSummary",
-    "inline-grid w-full max-w-full min-w-0 cursor-pointer grid-cols-[15px_minmax(0,1fr)] items-start gap-x-2 py-[0.2rem] text-left [&::-webkit-details-marker]:hidden focus-visible:rounded-[var(--radius-control)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)]",
+    "flex w-full max-w-full min-w-0 cursor-pointer items-center gap-x-2 py-[0.28rem] text-left [&::-webkit-details-marker]:hidden focus-visible:rounded-[var(--radius-control)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)]",
   ),
   batchCount: cx(
     "batchCount",
@@ -46,16 +46,49 @@ const styles = {
     "batchDetails",
     "min-w-0",
   ),
-  batchDetailsInner: cx("batchDetailsInner", "grid min-w-0 gap-0 pl-[23px]"),
+  batchDetailsInner: cx("batchDetailsInner", "grid min-w-0 gap-0 pl-1"),
   batchRow: cx("batchRow", "min-w-0"),
   // Tool chrome stays quieter than narrative body (fg-primary).
-  itemIcon: cx("itemIcon", "mt-[0.2rem] shrink-0 text-[color-mix(in_srgb,var(--fg-tertiary)_90%,transparent)]"),
+  itemIcon: cx("itemIcon", "shrink-0 text-[color-mix(in_srgb,var(--fg-tertiary)_90%,transparent)]"),
   itemIconRunning: cx("itemIconRunning", "text-[var(--accent-cool)]"),
   itemIconFailed: cx("itemIconFailed", "text-[var(--fg-tertiary)]"),
   itemIconWarning: cx("itemIconWarning", "text-[var(--state-warning)]"),
   itemBody: cx(
     "itemBody",
-    "inline-flex w-full max-w-full min-w-0 items-baseline gap-x-1.5 [font-size:var(--vui-font-xs)] leading-[1.45] text-[var(--fg-tertiary)]",
+    "inline-flex w-full max-w-full min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 [font-size:var(--vui-font-xs)] leading-[1.45] text-[var(--fg-tertiary)]",
+  ),
+  // Codex-style pill pair: action | status
+  actionPill: cx(
+    "actionPill",
+    "inline-flex shrink-0 items-center rounded-full border border-[color-mix(in_srgb,var(--fg-tertiary)_22%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--vui-control-muted)_72%,transparent)] px-2 py-[0.12rem] [font-size:var(--vui-font-xs)] font-medium leading-[1.35] text-[var(--fg-secondary)]",
+  ),
+  statusPill: cx(
+    "statusPill",
+    "inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-[0.12rem] [font-size:var(--vui-font-xs)] font-medium leading-[1.35]",
+  ),
+  statusPill_running: cx(
+    "statusPill_running",
+    "border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,transparent)] text-[var(--accent-cool)]",
+  ),
+  statusPill_completed: cx(
+    "statusPill_completed",
+    "border-[color-mix(in_srgb,var(--fg-tertiary)_20%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--vui-control-muted)_55%,transparent)] text-[var(--fg-tertiary)]",
+  ),
+  statusPill_failed: cx(
+    "statusPill_failed",
+    "border-[color-mix(in_srgb,var(--state-error)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_10%,transparent)] text-[var(--state-error)]",
+  ),
+  statusPill_timeout: cx(
+    "statusPill_timeout",
+    "border-[color-mix(in_srgb,var(--state-warning)_34%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
+  ),
+  statusPill_attention: cx(
+    "statusPill_attention",
+    "border-[color-mix(in_srgb,var(--state-warning)_28%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_8%,transparent)] text-[var(--state-warning)]",
+  ),
+  statusPill_idle: cx(
+    "statusPill_idle",
+    "border-[color-mix(in_srgb,var(--fg-tertiary)_20%,var(--vui-border-subtle))] bg-transparent text-[var(--fg-tertiary)]",
   ),
   itemTitle: cx(
     "itemTitle",
@@ -65,9 +98,13 @@ const styles = {
     "itemPreview",
     "max-w-full min-w-0 truncate font-normal text-[color-mix(in_srgb,var(--fg-tertiary)_82%,transparent)] max-[719px]:whitespace-normal max-[719px]:[overflow-wrap:anywhere]",
   ),
+  itemDuration: cx(
+    "itemDuration",
+    "shrink-0 font-normal text-[color-mix(in_srgb,var(--fg-tertiary)_78%,transparent)]",
+  ),
   itemDetailsBody: cx(
     "itemDetailsBody",
-    "min-w-0 max-h-48 overflow-auto py-1 pl-[23px] text-[var(--fg-tertiary)] [font-size:var(--vui-font-xs)] leading-[1.45] [&_pre]:max-h-48 [&_pre]:overflow-auto [&_pre]:text-[var(--fg-tertiary)]",
+    "min-w-0 max-h-48 overflow-auto py-1 pl-1 text-[var(--fg-tertiary)] [font-size:var(--vui-font-xs)] leading-[1.45] [&_pre]:max-h-48 [&_pre]:overflow-auto [&_pre]:text-[var(--fg-tertiary)]",
   ),
 } as const;
 

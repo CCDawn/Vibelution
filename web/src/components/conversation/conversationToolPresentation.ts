@@ -348,8 +348,129 @@ function extractToolSubject(options: {
   return "";
 }
 
+export type CodexToolActivityPillStatusKind =
+  | "running"
+  | "completed"
+  | "failed"
+  | "timeout"
+  | "attention"
+  | "idle";
+
+export type CodexToolActivityPills = {
+  actionLabel: string;
+  statusLabel: string;
+  statusKind: CodexToolActivityPillStatusKind;
+  subject: string;
+  durationLabel: string;
+};
+
 /**
- * Codex-style one-line tool activity title.
+ * Codex pill pair: action chip + status chip (e.g. 执行命令 | 执行完成).
+ * Subject/command stays as optional muted text, not inside the pills.
+ */
+export function buildCodexToolActivityPills(options: {
+  toolName: string;
+  status?: string;
+  language: ConversationToolPresentationLanguage;
+  durationSeconds?: number | null;
+  durationLabel?: string;
+  toolSummary?: string;
+  cellSummary?: string;
+  resultPreview?: string;
+  displayCommand?: string;
+  filePath?: string;
+  timedOut?: boolean;
+  noMatch?: boolean;
+  nonzeroExit?: boolean;
+}): CodexToolActivityPills {
+  const language = options.language;
+  const toolName = String(options.toolName || "").trim().toLowerCase();
+  const status = String(options.status || "").trim().toLowerCase();
+  const timedOut = Boolean(options.timedOut)
+    || /超时|timed?\s*out/i.test(`${options.toolSummary || ""} ${options.cellSummary || ""}`);
+  const actionLabel = conversationToolPresentationLabel(toolName, language);
+  let subject = extractToolSubject({
+    toolName,
+    toolSummary: options.toolSummary,
+    cellSummary: options.cellSummary,
+    resultPreview: options.resultPreview,
+    displayCommand: options.displayCommand,
+    filePath: options.filePath,
+  });
+  const subjectKey = subject.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (
+    !subject
+    || subjectKey === toolName
+    || subjectKey === actionLabel.toLowerCase().replace(/[\s-]+/g, "_")
+    || subjectKey.endsWith("_tool")
+  ) {
+    subject = "";
+  }
+  const durationLabel = String(options.durationLabel || "").trim();
+
+  if (options.noMatch) {
+    return {
+      actionLabel,
+      statusLabel: language === "zh" ? "无匹配" : "No matches",
+      statusKind: "attention",
+      subject,
+      durationLabel,
+    };
+  }
+
+  if (status === "running" || status === "pending") {
+    return {
+      actionLabel,
+      statusLabel: language === "zh" ? "执行中" : "Running",
+      statusKind: "running",
+      subject,
+      durationLabel,
+    };
+  }
+
+  if (status === "failed" || timedOut) {
+    return {
+      actionLabel,
+      statusLabel: timedOut
+        ? (language === "zh" ? "超时" : "Timed out")
+        : (language === "zh" ? "失败" : "Failed"),
+      statusKind: timedOut ? "timeout" : "failed",
+      subject,
+      durationLabel,
+    };
+  }
+
+  if (options.nonzeroExit) {
+    return {
+      actionLabel,
+      statusLabel: language === "zh" ? "退出异常" : "Non-zero exit",
+      statusKind: "attention",
+      subject,
+      durationLabel,
+    };
+  }
+
+  if (status === "degraded") {
+    return {
+      actionLabel,
+      statusLabel: language === "zh" ? "降级完成" : "Degraded",
+      statusKind: "attention",
+      subject,
+      durationLabel,
+    };
+  }
+
+  return {
+    actionLabel,
+    statusLabel: language === "zh" ? "执行完成" : "Done",
+    statusKind: "completed",
+    subject,
+    durationLabel,
+  };
+}
+
+/**
+ * Codex-style one-line tool activity title (legacy prose; prefer pills in UI).
  * Examples: "已在 12s 内运行 pnpm test", "已编辑 foo.ts", "失败 · 代码图谱".
  */
 export function formatCodexStyleToolActivityLine(options: {
@@ -488,8 +609,10 @@ export function conversationToolPresentationLabel(
     string,
     Record<ConversationToolPresentationLanguage, string>
   > = {
-    cli_tool: { zh: "命令", en: "Command" },
-    exec_command: { zh: "运行命令", en: "Run command" },
+    cli_tool: { zh: "执行命令", en: "Run command" },
+    exec_command: { zh: "执行命令", en: "Run command" },
+    run_terminal_command: { zh: "执行命令", en: "Run command" },
+    shell_tool: { zh: "执行命令", en: "Run command" },
     write_stdin: { zh: "写入终端", en: "Write to terminal" },
     grep_search_tool: { zh: "搜索", en: "Search" },
     read_file_tool: { zh: "读取文件", en: "Read file" },
