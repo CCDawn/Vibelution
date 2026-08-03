@@ -707,6 +707,45 @@ def test_challenge_cup_iteration_tool_wraps_research_loop_decisions(monkeypatch)
     assert context["templates"]["templates"][0]["templateId"] == "algorithm_model_experiment"
     assert context["experimentPlanningStatus"]["status"] == "planned"
     assert context["boundaries"]["autoExecution"] is False
+    assert context["writebackContract"]["record_evidence"] == {
+        "requiredFields": ["evidenceType"],
+        "oneOfEvidenceFields": [
+            "summary",
+            "metricName",
+            "metricValue",
+            "baselineMetricValue",
+            "delta",
+            "metrics",
+            "artifact",
+            "commandPreview",
+            "source",
+            "artifactRefs",
+            "sourceRefs",
+            "datasetRefs",
+            "environmentRefs",
+            "logRefs",
+        ],
+        "statusValues": [
+            "passed",
+            "failed",
+            "needs_review",
+            "not_applicable",
+        ],
+        "example": {
+            "evidenceType": "metric_report",
+            "status": "passed",
+            "summary": "reconstruction_mse improved from 0.025838 to 0.007935",
+            "metrics": {
+                "baseline": 0.025838,
+                "variant": 0.007935,
+                "improvement": 0.017903,
+            },
+        },
+    }
+    assert context["writebackContract"]["record_decision"]["requiredFields"] == [
+        "decision",
+        "rationale",
+    ]
 
     created = json.loads(
         challenge_cup_iteration_writeback_tool(

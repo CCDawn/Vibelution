@@ -519,6 +519,10 @@ def test_prompt_template_registry_repairs_challenge_cup_experiment_iteration_rol
         assert detail is not None
         assert detail["category"] == "research"
         assert detail["metadata"]["roleKey"] == role_key
+        if template_id == "prompt-challenge-cup-iteration-planner":
+            assert "writebackContract" in detail["content"]
+            assert "evidenceType" in detail["content"]
+            assert "不要猜字段名" in detail["content"]
         assert detail["metadata"]["builtinContentVersion"] == prompt_template_service.CHALLENGE_CUP_STAGE_TASK_PROMPT_VERSION
         assert _contains_tool_name(detail["content"], read_tool)
         assert _contains_tool_name(detail["content"], write_tool)

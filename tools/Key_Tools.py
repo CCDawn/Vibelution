@@ -844,7 +844,11 @@ def _build_key_tools() -> List[BaseTool]:
             team_id: 团队 ID
             operation: create_loop / record_evidence / record_decision
             loop_id: Research Loop ID，create_loop 可留空
-            payload_json: JSON 对象字符串
+            payload_json: JSON 对象字符串；字段必须严格遵循
+                challenge_cup_iteration_context_tool 返回的 writebackContract。
+                record_evidence 使用顶层 evidenceType，并至少同时提供
+                summary / metrics / artifactRefs 等 oneOfEvidenceFields 之一；
+                不要使用 type、evidence_type，也不要把证据包在 evidence 数组中。
             recorded_by_agent: 记录者 Agent
 
         Returns:
