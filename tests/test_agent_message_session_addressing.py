@@ -168,6 +168,7 @@ def test_write_agent_inbox_message_respects_explicit_target_session(tmp_path, mo
         "workspacePath": str(tmp_path / "ws"),
     }
     (tmp_path / "ws" / "events").mkdir(parents=True)
+    written: list[dict] = []
 
     service = SimpleNamespace(
         get_agent=lambda agent_id, include_archived=False: agent if agent_id == "agent-target" else None,
@@ -179,19 +180,28 @@ def test_write_agent_inbox_message_respects_explicit_target_session(tmp_path, mo
         trim_lines=lambda text, max_lines=4: str(text or "")[:200],
         _safe_metadata=lambda metadata: dict(metadata or {}),
         _agent_workspace_event_path=lambda target_agent, name: tmp_path / "ws" / "events" / name,
-        _append_jsonl=lambda path, payload: path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8"),
+        _append_jsonl=lambda path, payload: written.append(payload) or path.write_text(
+            json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8"
+        ),
         _record_memory_event=lambda *a, **k: None,
         _resolve_project_path=lambda p: tmp_path / "ws",
     )
     monkeypatch.setattr(ops_residual, "_service", lambda: service)
+    full_body = "line1\nline2\nline3\nline4\nline5 full collab body"
     message = ops_residual.write_agent_inbox_message(
         "agent-target",
-        content="hi",
+        content=full_body,
+        summary="short preview",
         source_agent_id="",
         target_session_id="session-collab-tab",
+        metadata={"ssot": "session", "bodyPreviewOnly": True},
     )
     assert message["targetSessionId"] == "session-collab-tab"
     assert message["messageId"] == "agentmsg-fixed"
+    # SSOT: inbox must not keep full body when bodyPreviewOnly/ssot=session.
+    assert message["content"] == "short preview"
+    assert message["summary"] == "short preview"
+    assert full_body not in message["content"]
 
 
 def test_wake_prefers_persisted_target_session(monkeypatch) -> None:
