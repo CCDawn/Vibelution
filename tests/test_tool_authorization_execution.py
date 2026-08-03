@@ -69,6 +69,27 @@ def test_authorized_tool_reaches_implementation(monkeypatch):
     assert calls == ["called"]
 
 
+def test_call_budget_exhausted_hard_stops_without_running_tool(monkeypatch):
+    """Quota exhaust must stop the turn — no more tool work, next turn resets count."""
+
+    _runtime(monkeypatch, max_calls_per_turn=1)
+    _install()
+    context = tool_authorization_service.current_execution_authorization()
+    assert context is not None
+    context.max_calls_per_turn = 1
+    context.call_count = 1
+    executor = ToolExecutor()
+    calls = []
+    executor.register_tool("allowed_tool", lambda: calls.append("called") or "ok")
+
+    result, action = executor.execute("allowed_tool", {}, tool_call_id="call-budget")
+
+    assert "额度已用尽" in result
+    assert "下一用户消息将重新统计额度" in result
+    assert action == "tool_budget_exhausted"
+    assert calls == []
+
+
 def test_unassigned_tool_is_blocked_before_implementation(monkeypatch):
     _runtime(monkeypatch)
     _install()

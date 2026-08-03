@@ -180,14 +180,11 @@ def _tool_budget_lines(max_calls_per_turn: int) -> list[str]:
     budget = max(0, int(max_calls_per_turn or 0))
     if budget <= 0:
         return [
-            "- 工具调用预算: 未从策略解析到上限；仍按「少探查、失败 1 次换路、预留验证」执行。",
+            "- 工具调用预算: 未从策略解析到上限；仍按「失败 1 次换路」执行。",
         ]
-    reserve = max(2, min(3, budget // 8 or 2))
-    explore_cap = max(1, budget - reserve)
     return [
-        f"- 工具调用预算: 本回合最多 {budget} 次（来自 Agent 工具策略 maxCallsPerTurn）。",
-        f"  - 探查/搜索建议不超过 {explore_cap} 次；至少预留 {reserve} 次给 lint/test/git 验证。",
-        "  - 额度将尽时先收束当前最小闭环并汇报，不要在验证前继续横向探查。",
+        f"- 工具调用预算: 本回合最多 {budget} 次（maxCallsPerTurn）；用尽即停，下一用户消息重新计数。",
+        "  - 额度用尽后禁止再调工具，也不要额外探查或长篇收束；直接结束本轮即可。",
         "  - shell 同类失败 1 次后改用 code_symbol_tool/grep_search_tool，避免把额度耗在换壳重试。",
     ]
 

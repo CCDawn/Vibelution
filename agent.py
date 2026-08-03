@@ -3351,6 +3351,9 @@ class SelfEvolvingAgent:
                     round_state.note_lifecycle_completion()
                     get_session_state().note_scope_completion("当前事务已完成，停止当前轮继续扩散。")
                     self._mark_runtime_state_memory_dirty()
+                if lifecycle_action == "tool_budget_exhausted":
+                    # Hard stop: budget resets on the next user message's auth install.
+                    self._mark_runtime_state_memory_dirty()
                 lifecycle_decision = (
                     self._get_turn_outcome_controller().handle_lifecycle_action(lifecycle_action)
                     if lifecycle_action

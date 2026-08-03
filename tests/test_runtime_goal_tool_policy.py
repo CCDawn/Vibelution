@@ -84,5 +84,5 @@ def test_runtime_goal_packet_renders_max_calls_per_turn_budget():
     assert packet.max_calls_per_turn == 32
     rendered = packet.render()
     assert "maxCallsPerTurn" in rendered or "本回合最多 32 次" in rendered
-    assert "预留" in rendered
+    assert "用尽即停" in rendered or "重新计数" in rendered
     assert "code_symbol_tool" in rendered or "grep_search_tool" in rendered

@@ -468,6 +468,13 @@ class TurnOutcomeController:
                 break_round=True,
                 info_log="当前演化事务已成功关账，本轮停止并等待下一轮。",
             )
+        if lifecycle_action == "tool_budget_exhausted":
+            # Hard stop only: do not keep iterating for wrap-up probes.
+            # The next user message installs a fresh execution authorization budget.
+            return LifecycleDecision(
+                break_round=True,
+                info_log="本回合工具额度已用尽，停止工具循环；下一用户消息重新计数。",
+            )
         return LifecycleDecision()
 
     def finalize_round(self, *, round_state) -> TurnFinalization:

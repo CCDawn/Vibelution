@@ -175,17 +175,16 @@ def format_turn_status_bar(snapshot: TurnStatusBarSnapshot) -> str:
             lines.append("- intervention: none (normal)")
     if snapshot.budget_status == "tight":
         lines.append(
-            "- action: budget tight — stop broad exploration; reserve remaining calls for "
-            "lint/test/git or final read-only checks; summarize if verification is impossible."
+            "- action: budget tight — prefer finishing the current step; do not start new exploration branches."
         )
     elif snapshot.budget_status == "exhausted":
         lines.append(
-            "- action: budget exhausted — do not request more tools; summarize current state, "
-            "what is done, what is blocked, and the smallest next user action."
+            "- action: budget exhausted — stop tool calls now; next user message resets the quota. "
+            "Do not probe further or write a long wrap-up."
         )
     elif snapshot.budget_status == "ok":
         lines.append(
-            "- action: prefer structured tools over repeated shell retries; keep reserve_for_verify free."
+            "- action: prefer structured tools over repeated shell retries."
         )
     return "\n".join(lines)
 
