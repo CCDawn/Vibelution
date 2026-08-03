@@ -733,11 +733,45 @@ def _configured_window_size() -> str:
     return "auto"
 
 
+def _configured_window_position() -> str:
+    env_value = os.environ.get("VIBELUTION_WORKBENCH_WINDOW_POSITION") or os.environ.get(
+        "AGENT_WORKBENCH_WINDOW_POSITION"
+    )
+    raw = str(env_value or _workbench_config().get("window_position") or "auto").strip().lower()
+    if raw == "auto":
+        return raw
+    parts = raw.split(",", 1)
+    if len(parts) == 2:
+        try:
+            x = int(parts[0].strip())
+            y = int(parts[1].strip())
+        except ValueError:
+            return "auto"
+        if -20000 <= x <= 20000 and -20000 <= y <= 20000:
+            return f"{x},{y}"
+    return "auto"
+
+
 def _edge_window_size_argument(value: str) -> str:
     normalized = str(value or "").strip().lower()
     if normalized == "auto" or "x" not in normalized:
         return ""
     return normalized.replace("x", ",")
+
+
+def _edge_window_position_argument(value: str) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized == "auto" or "," not in normalized:
+        return ""
+    parts = normalized.split(",", 1)
+    try:
+        x = int(parts[0].strip())
+        y = int(parts[1].strip())
+    except ValueError:
+        return ""
+    if -20000 <= x <= 20000 and -20000 <= y <= 20000:
+        return f"{x},{y}"
+    return ""
 
 
 def _edge_executable() -> str:
@@ -956,6 +990,7 @@ def _apply_managed_browser_app_identity(browser_pid: int, role: str) -> dict[str
 def _managed_edge_args(url: str, profile_dir: Path) -> list[str]:
     window_mode = _configured_window_mode()
     window_size = _configured_window_size()
+    window_position = _configured_window_position()
     args = [
         f"--user-data-dir={profile_dir}",
         f"--app={url}",
@@ -979,6 +1014,9 @@ def _managed_edge_args(url: str, profile_dir: Path) -> list[str]:
         size_arg = _edge_window_size_argument(window_size)
         if size_arg:
             args.append(f"--window-size={size_arg}")
+        position_arg = _edge_window_position_argument(window_position)
+        if position_arg:
+            args.append(f"--window-position={position_arg}")
     return args
 
 

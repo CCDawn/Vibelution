@@ -41,6 +41,7 @@ RuntimeProfile = Literal["safe_local", "safe_remote", "debug", "ci"]
 UiLanguage = Literal["zh", "en"]
 WorkbenchWindowMode = Literal["fullscreen", "windowed"]
 WorkbenchWindowSize = str
+WorkbenchWindowPosition = str
 
 ACTIVE_WORK_BLOCK_MESSAGE_RESTART = "有进行中的任务，无法重启 Vibelution。请等待任务完成或先停止任务。"
 ACTIVE_WORK_BLOCK_MESSAGE_STOP = "有进行中的任务，无法停止 Vibelution。请等待任务完成或先停止任务。"
@@ -57,6 +58,8 @@ _WORKBENCH_WINDOW_MODES: tuple[WorkbenchWindowMode, ...] = ("fullscreen", "windo
 _WORKBENCH_WINDOW_SIZE_DEFAULT = "auto"
 _WORKBENCH_WINDOW_SIZE_RE = re.compile(r"^([1-9][0-9]{2,4})x([1-9][0-9]{2,4})$", re.IGNORECASE)
 _WORKBENCH_WINDOW_SIZE_PRESETS: tuple[str, ...] = ("auto", "1280x800", "1600x900", "1920x1080")
+_WORKBENCH_WINDOW_POSITION_DEFAULT = "auto"
+_WORKBENCH_WINDOW_POSITION_RE = re.compile(r"^(-?\d{1,5}),(-?\d{1,5})$")
 _WORKBENCH_WINDOW_MODE_LABELS = {
     "fullscreen": {"zh": "全屏", "en": "Fullscreen"},
     "windowed": {"zh": "窗口化", "en": "Windowed"},
@@ -289,6 +292,8 @@ def get_launcher_startup_settings() -> dict[str, Any]:
     window_env_override = _read_workbench_window_mode_env_override() or ""
     configured_window_size = _normalize_workbench_window_size(workbench.get("window_size"))
     window_size_env_override = _read_workbench_window_size_env_override() or ""
+    configured_window_position = _normalize_workbench_window_position(workbench.get("window_position"))
+    window_position_env_override = _read_workbench_window_position_env_override() or ""
     configured_backend_port = _normalize_port(workbench.get("backend_port"), default=8000)
     configured_frontend_port = _normalize_port(workbench.get("frontend_port"), default=5173)
     backend_port_override = _read_port_env_override(("VIBELUTION_PORT", "AGENT_WORKBENCH_BACKEND_PORT"))
@@ -326,6 +331,9 @@ def get_launcher_startup_settings() -> dict[str, Any]:
             "effectiveWindowSize": window_size_env_override or configured_window_size,
             "windowSizeEnvOverride": window_size_env_override,
             "windowSizeOptions": _workbench_window_size_options(),
+            "windowPosition": configured_window_position,
+            "effectiveWindowPosition": window_position_env_override or configured_window_position,
+            "windowPositionEnvOverride": window_position_env_override,
             "windowModeOptions": [
                 {
                     "mode": mode,
@@ -484,6 +492,8 @@ def update_launcher_startup_settings(payload: dict[str, Any]) -> dict[str, Any]:
         workbench["window_mode"] = _parse_workbench_window_mode(workbench_payload.get("windowMode"))
     if "windowSize" in workbench_payload:
         workbench["window_size"] = _parse_workbench_window_size(workbench_payload.get("windowSize"))
+    if "windowPosition" in workbench_payload:
+        workbench["window_position"] = _parse_workbench_window_position(workbench_payload.get("windowPosition"))
     if "language" in interface_payload:
         ui["language"] = _parse_ui_language(interface_payload.get("language"))
 
@@ -563,6 +573,50 @@ def _parse_workbench_window_size(value: object) -> WorkbenchWindowSize:
 def _workbench_window_size_in_range(width: int, height: int) -> bool:
     # Floor is a usable workbench chrome size (not Edge minimum 320x240).
     return 960 <= width <= 7680 and 600 <= height <= 4320
+
+
+def _normalize_workbench_window_position(
+    value: object,
+    *,
+    default: str = _WORKBENCH_WINDOW_POSITION_DEFAULT,
+) -> WorkbenchWindowPosition:
+    raw = str(value or "").strip().lower()
+    if raw == "auto":
+        return "auto"
+    match = _WORKBENCH_WINDOW_POSITION_RE.match(raw)
+    if match:
+        x = int(match.group(1))
+        y = int(match.group(2))
+        if _workbench_window_position_in_range(x, y):
+            return f"{x},{y}"
+    fallback = str(default or _WORKBENCH_WINDOW_POSITION_DEFAULT).strip().lower()
+    if fallback == "auto":
+        return "auto"
+    fallback_match = _WORKBENCH_WINDOW_POSITION_RE.match(fallback)
+    if fallback_match:
+        x = int(fallback_match.group(1))
+        y = int(fallback_match.group(2))
+        if _workbench_window_position_in_range(x, y):
+            return f"{x},{y}"
+    return _WORKBENCH_WINDOW_POSITION_DEFAULT
+
+
+def _parse_workbench_window_position(value: object) -> WorkbenchWindowPosition:
+    raw = str(value or "").strip().lower()
+    if raw == "auto":
+        return "auto"
+    match = _WORKBENCH_WINDOW_POSITION_RE.match(raw)
+    if match:
+        x = int(match.group(1))
+        y = int(match.group(2))
+        if _workbench_window_position_in_range(x, y):
+            return f"{x},{y}"
+    raise ValueError("workbench.windowPosition must be 'auto' or a position like '120,80'")
+
+
+def _workbench_window_position_in_range(x: int, y: int) -> bool:
+    # Virtual desktop range for multi-monitor; not limited to primary screen origin.
+    return -20000 <= x <= 20000 and -20000 <= y <= 20000
 
 
 def _workbench_window_size_options() -> list[dict[str, Any]]:
@@ -696,6 +750,18 @@ def _read_workbench_window_size_env_override() -> WorkbenchWindowSize | None:
     return None
 
 
+def _read_workbench_window_position_env_override() -> WorkbenchWindowPosition | None:
+    for env_name in ("VIBELUTION_WORKBENCH_WINDOW_POSITION", "AGENT_WORKBENCH_WINDOW_POSITION"):
+        raw_value = str(os.environ.get(env_name) or "").strip()
+        if not raw_value:
+            continue
+        try:
+            return _parse_workbench_window_position(raw_value)
+        except ValueError:
+            continue
+    return None
+
+
 def _startup_settings_event_fields(setting: dict[str, Any]) -> dict[str, Any]:
     launcher = _read_config_section(setting, "launcher")
     runtime = _read_config_section(setting, "runtime")
@@ -712,6 +778,8 @@ def _startup_settings_event_fields(setting: dict[str, Any]) -> dict[str, Any]:
         "windowMode": workbench.get("windowMode"),
         "windowSize": workbench.get("windowSize"),
         "effectiveWindowSize": workbench.get("effectiveWindowSize"),
+        "windowPosition": workbench.get("windowPosition"),
+        "effectiveWindowPosition": workbench.get("effectiveWindowPosition"),
         "language": interface.get("language"),
     }
 

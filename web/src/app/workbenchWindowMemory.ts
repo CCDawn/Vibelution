@@ -1,9 +1,9 @@
 /**
- * Remember Workbench window presentation (fullscreen vs windowed + size).
+ * Remember Workbench window presentation (fullscreen vs windowed + size + position).
  *
- * Launcher starts Edge with --start-fullscreen / --window-size from operator
- * config. F11 and manual windowize must write those settings back so the next
- * start matches what the user left on screen.
+ * Launcher starts Edge with --start-fullscreen / --window-size / --window-position
+ * from operator config. F11, resize, and drag-move must write those settings back so
+ * the next start matches what the user left on screen.
  */
 
 import { fetchJson } from "../api/client";
@@ -13,10 +13,15 @@ export type ObservedWorkbenchWindowMode = "fullscreen" | "windowed";
 
 const SAVE_DEBOUNCE_MS = 700;
 const SIZE_QUANTUM = 16;
+const POSITION_QUANTUM = 8;
+/** Pure window moves do not fire `resize`; poll lightly so drag position is durable. */
+const POSITION_POLL_MS = 1000;
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
+let positionPollTimer: ReturnType<typeof setInterval> | null = null;
 let lastSavedMode: ObservedWorkbenchWindowMode | null = null;
 let lastSavedSize = "";
+let lastSavedPosition = "";
 let started = false;
 
 /** Fullscreen covers the whole screen (including taskbar region); maximize usually does not. */
@@ -77,17 +82,58 @@ export function isPersistableWorkbenchWindowSize(size: string): boolean {
   );
 }
 
-async function persistObservedWindow(mode: ObservedWorkbenchWindowMode, size: string): Promise<void> {
-  if (mode === lastSavedMode && (mode === "fullscreen" || size === lastSavedSize)) {
+/**
+ * Observe top-left outer position as `X,Y` (screen coords; may be negative on multi-monitor).
+ * Quantized so drag micro-jitter does not thrash operator config writes.
+ */
+export function observeWorkbenchWindowPosition(
+  win: Pick<Window, "screenX" | "screenY"> = window,
+): string {
+  const rawX = Math.round(Number(win.screenX) || 0);
+  const rawY = Math.round(Number(win.screenY) || 0);
+  // Keep within the same virtual-desktop range launcher accepts.
+  const x = Math.min(20000, Math.max(-20000, rawX));
+  const y = Math.min(20000, Math.max(-20000, rawY));
+  const qX = Math.round(x / POSITION_QUANTUM) * POSITION_QUANTUM;
+  const qY = Math.round(y / POSITION_QUANTUM) * POSITION_QUANTUM;
+  return `${qX},${qY}`;
+}
+
+export function isPersistableWorkbenchWindowPosition(position: string): boolean {
+  const match = /^(-?\d{1,5}),(-?\d{1,5})$/.exec(String(position || "").trim().toLowerCase());
+  if (!match) {
+    return false;
+  }
+  const x = Number(match[1]);
+  const y = Number(match[2]);
+  return Number.isFinite(x) && Number.isFinite(y) && x >= -20000 && x <= 20000 && y >= -20000 && y <= 20000;
+}
+
+async function persistObservedWindow(
+  mode: ObservedWorkbenchWindowMode,
+  size: string,
+  position: string,
+): Promise<void> {
+  if (
+    mode === lastSavedMode
+    && (mode === "fullscreen" || (size === lastSavedSize && position === lastSavedPosition))
+  ) {
     return;
   }
-  const workbench: { windowMode: ObservedWorkbenchWindowMode; windowSize?: string } = {
+  const workbench: {
+    windowMode: ObservedWorkbenchWindowMode;
+    windowSize?: string;
+    windowPosition?: string;
+  } = {
     windowMode: mode,
   };
   // Skip tiny frames (orphan Edge shells / failed restores) so the next start
-  // is not locked to 320x240-class sizes.
+  // is not locked to 320x240-class sizes. Position is only meaningful when windowed.
   if (mode === "windowed" && size && isPersistableWorkbenchWindowSize(size)) {
     workbench.windowSize = size;
+  }
+  if (mode === "windowed" && position && isPersistableWorkbenchWindowPosition(position)) {
+    workbench.windowPosition = position;
   }
   try {
     // Startup settings accept empty baseHash (soft write). Only patch workbench.
@@ -99,6 +145,7 @@ async function persistObservedWindow(mode: ObservedWorkbenchWindowMode, size: st
     lastSavedMode = mode;
     if (mode === "windowed") {
       lastSavedSize = size;
+      lastSavedPosition = position;
     }
   } catch {
     // Backend may be restarting; try again on next observation.
@@ -116,12 +163,14 @@ function schedulePersist(): void {
     saveTimer = null;
     const mode = observeWorkbenchWindowMode();
     const size = observeWorkbenchWindowSize();
-    void persistObservedWindow(mode, size);
+    const position = observeWorkbenchWindowPosition();
+    void persistObservedWindow(mode, size, position);
   }, SAVE_DEBOUNCE_MS);
 }
 
 /**
- * Observe F11 / resize / visibility and persist window_mode (+ window_size when windowed).
+ * Observe F11 / resize / drag-move / visibility and persist
+ * window_mode (+ window_size / window_position when windowed).
  * Returns a disposer.
  */
 export function startWorkbenchWindowMemory(): () => void {
@@ -150,12 +199,17 @@ export function startWorkbenchWindowMemory(): () => void {
   window.addEventListener("resize", onResize);
   window.addEventListener("keydown", onKeyDown);
   document.addEventListener("visibilitychange", onVisibility);
+  positionPollTimer = window.setInterval(schedulePersist, POSITION_POLL_MS);
 
   return () => {
     started = false;
     window.removeEventListener("resize", onResize);
     window.removeEventListener("keydown", onKeyDown);
     document.removeEventListener("visibilitychange", onVisibility);
+    if (positionPollTimer) {
+      clearInterval(positionPollTimer);
+      positionPollTimer = null;
+    }
     if (saveTimer) {
       clearTimeout(saveTimer);
       saveTimer = null;
@@ -167,6 +221,11 @@ export function resetWorkbenchWindowMemoryForTests(): void {
   started = false;
   lastSavedMode = null;
   lastSavedSize = "";
+  lastSavedPosition = "";
+  if (positionPollTimer) {
+    clearInterval(positionPollTimer);
+    positionPollTimer = null;
+  }
   if (saveTimer) {
     clearTimeout(saveTimer);
     saveTimer = null;
