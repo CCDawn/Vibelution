@@ -282,10 +282,15 @@ describe("AgentSessionTabStrip", () => {
     expect(markup).not.toContain(">会话进行</span>");
   });
 
-  it("renders adjacent close controls and a final icon-only create control", () => {
+  it("renders close controls inside each session card shell and a final icon-only create control", () => {
     const markup = renderStrip();
 
     expect(markup.match(/agentSessionTabCloseButton/g)?.length).toBe(2);
+    expect(markup.match(/agentSessionTabClosable/g)?.length).toBe(2);
+    // Close is a sibling of the tab hit target, still inside the card shell (data-agent-session-tab-container).
+    expect(markup).toMatch(
+      /data-agent-session-tab-container[\s\S]*?agentSessionTabCloseButton[\s\S]*?<\/div>/,
+    );
     expect(markup).toContain('aria-label="deleteSession 顾明澈"');
     expect(markup).toContain('aria-label="deleteSession 子任务标题"');
     expect(markup).toContain("agentSessionTabCreateButton");
