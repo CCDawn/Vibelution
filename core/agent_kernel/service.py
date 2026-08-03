@@ -540,28 +540,46 @@ def _deliver_event_to_recipients(event: dict[str, Any], task: dict[str, Any]) ->
     inbox_created_by = _metadata_text(inbox_metadata, "inboxCreatedBy") or "kernel"
     prompt_eligible = bool(inbox_metadata.get("promptEligible", True))
     deliveries: list[dict[str, Any]] = []
+    explicit_target_session_id = _metadata_text(inbox_metadata, "targetSessionId")
+    # ADR 0002 SSOT: with an explicit target session, session history holds full body;
+    # inbox stores preview/index only (no second full-body authority).
+    session_ssot = bool(explicit_target_session_id)
     for agent_id in list(event.get("recipients") or []):
         target_agent_id = str(agent_id or "").strip()
         delivery = {
             "targetAgentId": target_agent_id,
             "status": "pending",
             "inboxMessageId": "",
-            "targetSessionId": "",
+            "targetSessionId": explicit_target_session_id,
+            "historyStatus": "",
+            "historyMessageId": "",
             "reason": "",
             "wake": {
                 "wakeRequested": wake_target,
                 "wakeStatus": "not_requested" if not wake_target else "skipped",
                 "messageId": "",
                 "targetAgentId": target_agent_id,
-                "targetSessionId": "",
+                "targetSessionId": explicit_target_session_id,
                 "turnId": "",
                 "reason": "",
             },
         }
         try:
+            shared_message_id = str(
+                _metadata_text(inbox_metadata, "sourceMessageId")
+                or _metadata_text(inbox_metadata, "agentMessageToolSourceId")
+                or ""
+            ).strip()
+            row_metadata = dict(inbox_metadata)
+            if session_ssot:
+                row_metadata["ssot"] = "session"
+                row_metadata["bodyPreviewOnly"] = True
+                row_metadata["targetSessionId"] = explicit_target_session_id
+            # Index row: at most summary preview when session is SSOT.
+            inbox_content = message_summary if session_ssot else content
             message = agent_directory_service.write_agent_inbox_message(
                 agent_id,
-                content=content,
+                content=inbox_content,
                 source_agent_id=str(event.get("senderAgentId") or "").strip(),
                 source_session_id=_metadata_text(inbox_metadata, "sourceSessionId"),
                 source_room_id=source_room_id,
@@ -571,35 +589,118 @@ def _deliver_event_to_recipients(event: dict[str, Any], task: dict[str, Any]) ->
                 summary=message_summary,
                 prompt_eligible=prompt_eligible,
                 created_by=inbox_created_by,
-                metadata=inbox_metadata,
+                metadata=row_metadata,
+                target_session_id=explicit_target_session_id,
+                message_id=shared_message_id,
             )
+            inbox_message_id = str(message.get("messageId") or message.get("eventId") or "").strip()
+            resolved_target_session = str(message.get("targetSessionId") or explicit_target_session_id or "").strip()
             delivery.update(
                 {
                     "status": "delivered",
-                    "inboxMessageId": str(message.get("messageId") or message.get("eventId") or "").strip(),
-                    "targetSessionId": str(message.get("targetSessionId") or "").strip(),
+                    "inboxMessageId": inbox_message_id,
+                    "targetSessionId": resolved_target_session,
+                    "inboxStatus": "recorded",
                 }
             )
-            delivery["wake"]["messageId"] = delivery["inboxMessageId"]
-            delivery["wake"]["targetSessionId"] = delivery["targetSessionId"]
+            delivery["wake"]["messageId"] = inbox_message_id
+            delivery["wake"]["targetSessionId"] = resolved_target_session
+            # Full body travels in-memory for wake formatting only; not re-persisted as inbox SSOT.
+            wake_message = dict(message)
+            wake_message["content"] = content
+            wake_message["summary"] = message_summary
             if wake_target:
                 try:
-                    delivery["wake"] = session_service.wake_agent_for_inbox_message(message)
+                    delivery["wake"] = session_service.wake_agent_for_inbox_message(wake_message)
+                    wake_status = str((delivery.get("wake") or {}).get("wakeStatus") or "").strip()
+                    turn_id = str((delivery.get("wake") or {}).get("turnId") or "").strip()
+                    # Body lands on session via submit_session_message during wake.
+                    if wake_status in {"started", "started_consume_failed", "skipped_busy"}:
+                        delivery["historyStatus"] = "appended" if wake_status == "started" else "pending"
+                        delivery["historyMessageId"] = inbox_message_id
+                    elif wake_status == "skipped_busy":
+                        delivery["historyStatus"] = "deferred"
+                    else:
+                        delivery["historyStatus"] = "rejected" if wake_status.startswith("skipped") else "pending"
+                    if turn_id:
+                        delivery["historyMessageId"] = delivery.get("historyMessageId") or inbox_message_id
                 except Exception as wake_exc:
                     delivery["wake"] = {
                         "wakeRequested": True,
                         "wakeStatus": "failed",
-                        "messageId": delivery["inboxMessageId"],
+                        "messageId": inbox_message_id,
                         "targetAgentId": target_agent_id,
-                        "targetSessionId": delivery["targetSessionId"],
+                        "targetSessionId": resolved_target_session,
                         "turnId": "",
                         "reason": f"{type(wake_exc).__name__}: {_trim(str(wake_exc), 240)}",
                     }
+                    delivery["historyStatus"] = "pending"
+            elif session_ssot and resolved_target_session:
+                # No wake: still land body on session history once (SSOT without double-submit).
+                history = _append_collab_body_to_session(
+                    session_id=resolved_target_session,
+                    message_id=inbox_message_id,
+                    content=content,
+                    summary=message_summary,
+                    source_agent_id=str(event.get("senderAgentId") or "").strip(),
+                    metadata=row_metadata,
+                )
+                delivery["historyStatus"] = str(history.get("historyStatus") or "")
+                delivery["historyMessageId"] = str(history.get("historyMessageId") or inbox_message_id)
         except Exception as exc:
             delivery["status"] = "failed"
             delivery["reason"] = f"{type(exc).__name__}: {_trim(str(exc), 240)}"
+            delivery["inboxStatus"] = "failed"
         deliveries.append(delivery)
     return deliveries
+
+
+def _append_collab_body_to_session(
+    *,
+    session_id: str,
+    message_id: str,
+    content: str,
+    summary: str,
+    source_agent_id: str,
+    metadata: dict[str, Any],
+) -> dict[str, str]:
+    """Persist collaboration body on session history only (no-wake path)."""
+
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return {"historyStatus": "rejected", "historyMessageId": ""}
+    try:
+        turn_id = f"collab-{message_id or utc_now_iso()}"
+        session_service._append_session_conversation_event(  # noqa: SLF001 — kernel landing path
+            normalized_session_id,
+            turn_id,
+            session_service.EVENT_USER_MESSAGE,
+            status="recorded",
+            payload={
+                "content": content,
+                "metadata": {
+                    "kind": "agent_collaboration",
+                    "messageId": message_id,
+                    "summary": summary,
+                    "sourceAgentId": source_agent_id,
+                    "ssot": "session",
+                    **{
+                        key: metadata[key]
+                        for key in ("sourceSessionId", "sourceAgentCode", "inboxKind")
+                        if key in metadata
+                    },
+                },
+                "source": "agent_collaboration",
+            },
+            source="agent_kernel_collab_landing",
+        )
+        return {"historyStatus": "appended", "historyMessageId": message_id}
+    except Exception as exc:
+        return {
+            "historyStatus": "rejected",
+            "historyMessageId": "",
+            "reason": f"{type(exc).__name__}: {_trim(str(exc), 240)}",
+        }
 
 
 def _kernel_inbox_metadata(event: dict[str, Any], task: dict[str, Any]) -> dict[str, Any]:
@@ -627,6 +728,7 @@ def _kernel_inbox_metadata(event: dict[str, Any], task: dict[str, Any]) -> dict[
         "targetAgentCode",
         "agentId",
         "agentMessageToolSourceId",
+        "targetSessionId",
         "inboxKind",
         "messageSummary",
         "messageContentHash",

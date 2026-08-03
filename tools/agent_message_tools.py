@@ -13,25 +13,30 @@ from core.logging import debug as _debug_logger
 
 
 def agent_message_tool(
-    target_agent: str,
     content: str,
+    target_session: str = "",
+    target_agent: str = "",
     summary: str = "",
     wake_target: bool = True,
     thread_id: str = "",
     metadata_json: str = "",
 ) -> str:
     """
-    Send a persistent message from the current Agent to another Agent.
+    Send a collaboration message that lands on a concrete target session.
 
-    Messages involving explicit research organization Agents are routed through
-    the research organization graph policy before any inbox write.
+    ADR 0002: ``target_session`` is required. Session history is the user-visible
+    landing surface (via immediate wake/submit). Agent inbox is retained as a
+    delivery log with the same message id. Default ``wake_target=true`` wakes
+    that session immediately.
 
     Args:
-        target_agent: Target Agent id, stable code such as A002, or unique display name.
-        content: Message body for the target Agent.
+        content: Message body for the target session.
+        target_session: Required target session id (conversation tab).
+        target_agent: Optional; if set must match the session owner Agent
+            (id / code / unique name). Deprecated as sole address.
         summary: Optional short summary.
-        wake_target: Whether to wake the target Agent's direct session when it is idle.
-        thread_id: Optional conversation thread id.
+        wake_target: Whether to immediately wake the target session (default True).
+        thread_id: Optional conversation thread / correlation id.
         metadata_json: Optional JSON object with small structured metadata.
 
     Returns:
@@ -44,6 +49,7 @@ def agent_message_tool(
             get_agent,
             list_agents,
         )
+        from core.web.services import session_service
 
         runtime = current_agent_runtime()
         source_agent_id = str(runtime.get("agentId") or "").strip()
@@ -58,17 +64,6 @@ def agent_message_tool(
                 }
             )
 
-        normalized_target = str(target_agent or "").strip()
-        if not normalized_target:
-            return _json_result(
-                {
-                    "ok": False,
-                    "status": "blocked",
-                    "error": "target_required",
-                    "message": "请提供目标 Agent 的 agentId、代号或唯一名称。",
-                }
-            )
-
         message_body = str(content or "").strip()
         if not message_body:
             return _json_result(
@@ -76,34 +71,114 @@ def agent_message_tool(
                     "ok": False,
                     "status": "blocked",
                     "error": "content_required",
-                    "message": "请提供要发送给目标 Agent 的消息内容。",
+                    "message": "请提供要发送的消息内容。",
                 }
             )
 
-        agents = list_agents(include_archived=False)
-        target = _resolve_target_agent(normalized_target, agents)
-        if not target.get("ok"):
-            return _json_result(target)
-        target_agent_payload = target["agent"]
-        target_agent_id = str(target_agent_payload.get("agentId") or "").strip()
-        if target_agent_id == source_agent_id:
+        normalized_target_session = str(target_session or "").strip()
+        # Transitional: allow target_session inside metadata_json only if top-level empty.
+        metadata = _parse_metadata(metadata_json)
+        if not normalized_target_session:
+            normalized_target_session = str(
+                metadata.get("targetSessionId") or metadata.get("target_session") or ""
+            ).strip()
+        if not normalized_target_session:
             return _json_result(
                 {
                     "ok": False,
                     "status": "blocked",
-                    "error": "self_message_blocked",
-                    "message": "Agent 私信工具用于发送给其他 Agent，不发送给自己。",
-                    "targetAgentId": target_agent_id,
+                    "error": "target_session_required",
+                    "message": "请提供目标会话 target_session（sessionId）。协作消息以会话为落脚点，不再仅用 Agent 地址。",
                 }
             )
 
-        metadata = _parse_metadata(metadata_json)
+        if normalized_target_session == source_session_id:
+            return _json_result(
+                {
+                    "ok": False,
+                    "status": "blocked",
+                    "error": "self_session_blocked",
+                    "message": "不能把协作消息发到当前正在运行的同一会话。",
+                    "targetSessionId": normalized_target_session,
+                }
+            )
+
+        session_detail = session_service.get_session_detail(
+            normalized_target_session,
+            message_limit=0,
+            transcript_scope="none",
+            include_secondary=False,
+        )
+        if not session_detail:
+            return _json_result(
+                {
+                    "ok": False,
+                    "status": "blocked",
+                    "error": "session_not_found",
+                    "message": f"未找到目标会话: {normalized_target_session}",
+                    "targetSessionId": normalized_target_session,
+                }
+            )
+
+        session_owner_agent_id = str(session_detail.get("agentId") or "").strip()
+        if not session_owner_agent_id:
+            return _json_result(
+                {
+                    "ok": False,
+                    "status": "blocked",
+                    "error": "session_agent_mismatch",
+                    "message": "目标会话未绑定 Agent，无法投递协作消息。",
+                    "targetSessionId": normalized_target_session,
+                }
+            )
+
+        agents = list_agents(include_archived=False)
+        optional_agent_label = str(target_agent or "").strip()
+        if optional_agent_label:
+            resolved = _resolve_target_agent(optional_agent_label, agents)
+            if not resolved.get("ok"):
+                return _json_result(resolved)
+            claimed_agent_id = str((resolved.get("agent") or {}).get("agentId") or "").strip()
+            if claimed_agent_id and claimed_agent_id != session_owner_agent_id:
+                return _json_result(
+                    {
+                        "ok": False,
+                        "status": "blocked",
+                        "error": "session_agent_mismatch",
+                        "message": "target_agent 与目标会话所属 Agent 不一致。",
+                        "targetSessionId": normalized_target_session,
+                        "targetAgentId": session_owner_agent_id,
+                        "claimedAgentId": claimed_agent_id,
+                    }
+                )
+
+        target_agent_payload = get_agent(session_owner_agent_id, include_archived=False) or {}
+        if not target_agent_payload:
+            # Fall back to list match if get_agent misses a race.
+            for item in agents:
+                if str(item.get("agentId") or "").strip() == session_owner_agent_id:
+                    target_agent_payload = item
+                    break
+        if not target_agent_payload:
+            return _json_result(
+                {
+                    "ok": False,
+                    "status": "blocked",
+                    "error": "target_not_found",
+                    "message": f"目标会话所属 Agent 不可用: {session_owner_agent_id}",
+                    "targetSessionId": normalized_target_session,
+                    "targetAgentId": session_owner_agent_id,
+                }
+            )
+
+        target_agent_id = session_owner_agent_id
         source_agent_payload = get_agent(source_agent_id, include_archived=True) or {}
         research_org_result = _try_send_research_org_message(
             source_agent=source_agent_payload,
             target_agent=target_agent_payload,
             source_agent_id=source_agent_id,
             source_session_id=source_session_id,
+            target_session_id=normalized_target_session,
             content=message_body,
             summary=summary,
             wake_target=wake_target,
@@ -119,6 +194,7 @@ def agent_message_tool(
             source_agent_id=source_agent_id,
             source_session_id=source_session_id,
             target_agent_id=target_agent_id,
+            target_session_id=normalized_target_session,
             content=message_body,
             summary=summary,
             wake_target=wake_target,
@@ -129,38 +205,51 @@ def agent_message_tool(
         delivery = _flatten_kernel_delivery(
             kernel_delivery,
             target_agent_id=target_agent_id,
-            target_session_id=str(target_agent_payload.get("directSessionId") or "").strip(),
+            target_session_id=normalized_target_session,
             wake_target=bool(wake_target),
         )
         sent = str(kernel_delivery.get("status") or "").strip() == "delivered"
+        wake_status = str(delivery.get("wakeStatus") or "").strip()
+        # Partial: history/inbox landed but wake failed.
+        if sent and bool(wake_target) and wake_status in {"failed", "skipped_invalid_session"}:
+            status = "partial"
+            ok = True
+        else:
+            status = "sent" if sent else "blocked"
+            ok = sent
         message_id = str(delivery.get("messageId") or delivery.get("inboxMessageId") or "").strip()
+        resolved_target_session = str(
+            delivery.get("targetSessionId") or normalized_target_session
+        ).strip()
         tool_message = {
             "messageId": message_id,
             "sourceAgentId": source_agent_id,
             "sourceSessionId": source_session_id,
             "targetAgentId": target_agent_id,
-            "targetSessionId": str(delivery.get("targetSessionId") or target_agent_payload.get("directSessionId") or "").strip(),
+            "targetSessionId": resolved_target_session,
         }
         kernel_trace = _kernel_trace_fields(kernel_result)
         _record_agent_message_tool_event(
             tool_message,
             delivery,
             route="kernel",
-            outcome="sent" if sent else "blocked",
+            outcome="sent" if ok else "blocked",
             extra_fields=kernel_trace,
         )
         return _json_result(
             {
-                "ok": sent,
-                "status": "sent" if sent else "blocked",
+                "ok": ok,
+                "status": status,
                 "route": "kernel",
                 "messageId": message_id,
                 "sourceAgentId": source_agent_id,
                 "sourceSessionId": source_session_id,
                 "targetAgentId": target_agent_id,
                 "targetAgentCode": target_agent_payload.get("agentCode") or "",
-                "targetSessionId": target_agent_payload.get("directSessionId") or "",
-                "wakeStatus": delivery.get("wakeStatus") or "",
+                "targetSessionId": resolved_target_session,
+                "historyStatus": "appended" if sent and bool(wake_target) else ("recorded" if sent else "rejected"),
+                "inboxStatus": "recorded" if sent else "failed",
+                "wakeStatus": wake_status,
                 "reason": delivery.get("reason") or "",
                 "delivery": delivery,
                 "kernel": kernel_trace,
@@ -290,6 +379,7 @@ def _send_direct_agent_message_via_kernel(
     source_agent_id: str,
     source_session_id: str,
     target_agent_id: str,
+    target_session_id: str = "",
     content: str,
     summary: str,
     wake_target: bool,
@@ -301,6 +391,7 @@ def _send_direct_agent_message_via_kernel(
     source_message_id = f"agent-message-tool-{uuid.uuid4().hex}"
     source_agent_code = str(source_agent.get("agentCode") or "").strip()
     target_agent_code = str(target_agent.get("agentCode") or "").strip()
+    resolved_target_session_id = str(target_session_id or "").strip()
     kernel_metadata = {
         "sourceSurface": "agent_message_tool",
         "sourceSessionId": source_session_id,
@@ -308,6 +399,7 @@ def _send_direct_agent_message_via_kernel(
         "senderAgentId": source_agent_id,
         "sourceMessageId": source_message_id,
         "agentMessageToolSourceId": source_message_id,
+        "targetSessionId": resolved_target_session_id,
         "inboxKind": "agent_direct_message",
         "messageSummary": trim_lines(str(summary or content or ""), max_lines=4),
         "agentToolMetadataJson": json.dumps(metadata, ensure_ascii=False, sort_keys=True) if metadata else "{}",
@@ -316,7 +408,10 @@ def _send_direct_agent_message_via_kernel(
         kernel_metadata["sourceAgentCode"] = source_agent_code
     if target_agent_code:
         kernel_metadata["targetAgentCode"] = target_agent_code
-    resolved_thread_id = str(thread_id or f"agent:{source_agent_id}->{target_agent_id}").strip()
+    resolved_thread_id = str(
+        thread_id
+        or (f"session:{resolved_target_session_id}" if resolved_target_session_id else f"agent:{source_agent_id}->{target_agent_id}")
+    ).strip()
     return submit_agent_message_event(
         source="agent_message_tool",
         sender={
@@ -416,6 +511,7 @@ def _try_send_research_org_message(
     target_agent: dict[str, Any],
     source_agent_id: str,
     source_session_id: str,
+    target_session_id: str = "",
     content: str,
     summary: str,
     wake_target: bool,
@@ -456,7 +552,7 @@ def _try_send_research_org_message(
             "sourceSessionId": source_session_id,
             "targetAgentId": target_agent_id,
             "targetAgentCode": target_agent.get("agentCode") or "",
-            "targetSessionId": target_agent.get("directSessionId") or "",
+            "targetSessionId": str(target_session_id or target_agent.get("directSessionId") or "").strip(),
             "wakeStatus": "blocked",
             "delivery": {
                 "allowed": False,
@@ -467,12 +563,14 @@ def _try_send_research_org_message(
         }
     delivery_mode = _metadata_text(metadata, "researchOrgDeliveryMode", "deliveryMode") or "private"
     mailbox_only = _metadata_bool(metadata, "researchOrgMailboxOnly", "mailboxOnly")
+    resolved_target_session = str(target_session_id or target_agent.get("directSessionId") or "").strip()
     result = research_organization_service.send_research_org_message(
         {
             "sourceType": "agent",
             "sourceAgentId": source_agent_id,
             "sourceSessionId": source_session_id,
             "targetAgentId": target_agent_id,
+            "targetSessionId": resolved_target_session,
             "messageType": message_type,
             "intent": intent,
             "deliveryMode": delivery_mode,
@@ -497,7 +595,9 @@ def _try_send_research_org_message(
         "sourceAgentId": source_agent_id,
         "sourceSessionId": source_session_id,
         "targetAgentId": target_agent_id,
-        "targetSessionId": str(target_agent.get("directSessionId") or "").strip(),
+        "targetSessionId": str(
+            delivery.get("targetSessionId") or resolved_target_session or target_agent.get("directSessionId") or ""
+        ).strip(),
     }
     _record_agent_message_tool_event(
         tool_message,
