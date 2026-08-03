@@ -193,6 +193,15 @@ WINDOWS_COMMANDS = {
     'find', 'sort', 'fc', 'comp', 'convert', 'diskcomp',
 }
 
+# These names exist on both command families. On Unix they must remain native
+# shell commands instead of being rejected merely because cmd.exe also exposes
+# a builtin or executable with the same name.
+UNIX_COMMANDS_SHARING_WINDOWS_NAMES = (
+    LINUX_COMMANDS
+    | {'cd', 'set', 'pushd', 'popd', 'ping', 'nslookup'}
+)
+WINDOWS_ONLY_COMMANDS = WINDOWS_COMMANDS - UNIX_COMMANDS_SHARING_WINDOWS_NAMES
+
 # PowerShell cmdlet 特征：Verb-Noun 形式（含连字符）
 # 这类命令走 powershell.exe，不走 cmd
 POWERSHELL_CMDLET_PREFIXES = {
@@ -275,7 +284,7 @@ def _is_windows_command(command: str) -> bool:
     if not parts:
         return False
     base = parts[0].lower()
-    return base in WINDOWS_COMMANDS
+    return base in WINDOWS_ONLY_COMMANDS
 
 
 def _has_unix_shell_markers(command: str) -> bool:

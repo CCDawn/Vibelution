@@ -1143,6 +1143,22 @@ class TestPerformance:
 
 
 class TestShellCommandDialectGuidance:
+    def test_unix_shared_command_names_stay_on_native_shell(self, monkeypatch):
+        from tools import shell_tools as shell_tools_module
+
+        monkeypatch.setattr(shell_tools_module, "CURRENT_SYSTEM", "linux")
+        monkeypatch.setattr(shell_tools_module, "IS_WINDOWS", False)
+        monkeypatch.setattr(shell_tools_module, "IS_UNIX", True)
+
+        for command in ("echo ok", "mkdir -p output", "cd /tmp", "find . -maxdepth 1"):
+            route = shell_tools_module.classify_shell_command(command)
+            assert route.route == "bash"
+            assert not route.error
+
+        blocked = shell_tools_module.classify_shell_command("del output.txt")
+        assert blocked.route == "blocked"
+        assert blocked.reason == "windows_command_on_unix"
+
     def test_windows_guidance_matches_runtime_routing_contract(self):
         from tools.shell_tools import shell_command_dialect_guidance
         from tools.Key_Tools import _cli_tool_docstring, _exec_command_tool_docstring
