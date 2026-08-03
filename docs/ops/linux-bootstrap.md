@@ -25,6 +25,18 @@ identity check. Record the source commit in the deployment log before startup.
 `scripts/remote_test_runner.py` is a test-only archive tool: it intentionally
 excludes `.git` and must not be used as the production deployment source.
 
+For a Linux checkout, activate the tracked hooks after the source is present:
+
+```sh
+git config core.autocrlf false
+git config core.hooksPath .githooks
+git checkout-index -f -- .githooks/pre-commit .githooks/post-merge
+chmod 755 .githooks/pre-commit .githooks/post-merge
+```
+
+This is intentionally targeted: it preserves the worktree while restoring the
+LF, executable hook files Git expects.
+
 ## Configuration And Secrets
 
 - Keep `VIBELUTION_CONFIG_PATH`, runtime environment files, data directories,

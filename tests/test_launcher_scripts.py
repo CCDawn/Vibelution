@@ -67,8 +67,21 @@ def test_launcher_precommit_hook_supports_posix_venv_and_verifies_web_lock():
     assert '"$repo_root/.venv/Scripts/python.exe"' in source
     assert '"$repo_root/.venv/bin/python"' in source
     assert 'npm --silent --prefix "$repo_root/web" ci --ignore-scripts --dry-run --no-audit --no-fund' in source
-    assert ".githooks/pre-commit text eol=lf" in attributes
+    assert ".githooks/* text eol=lf" in attributes
     assert mode == "100755"
+
+
+def test_launcher_posix_git_hooks_are_executable() -> None:
+    for hook_name in ("pre-commit", "post-merge"):
+        mode = subprocess.run(
+            ["git", "ls-files", "--stage", "--", f".githooks/{hook_name}"],
+            cwd=PROJECT_ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.split(maxsplit=1)[0]
+
+        assert mode == "100755"
 
 
 def test_launcher_ci_verifies_package_lock_stays_in_sync():
