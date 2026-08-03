@@ -625,11 +625,10 @@ def test_context_assembler_replays_conversation_ledger_over_message_tail(tmp_pat
     assert "旧 messages 不应作为事实源" not in contents
     assert "继续刚才中断的修复" in contents
     assert "已经完成一半实现。" in contents
-    assert any(TURN_INTERRUPTED_MARKER in content for content in contents)
-    assert not any(item.get("tool_calls") for item in assembled.history_messages)
-    assert not any(item.get("role") == "tool" for item in assembled.history_messages)
-    tool_summary = next(item for item in assembled.history_messages if "历史工具结果: cli_tool" in str(item.get("content") or ""))
-    assert full_result.strip() in tool_summary["content"]
+    # Mature-agent alignment: keep protocol tool chains instead of prose splicing.
+    assert any(item.get("tool_calls") for item in assembled.history_messages)
+    tool_message = next(item for item in assembled.history_messages if item.get("role") == "tool")
+    assert full_result.strip() in str(tool_message.get("content") or "")
 
 
 def test_context_assembler_with_ledger_source_ignores_legacy_messages_even_when_ledger_empty():
@@ -1395,7 +1394,8 @@ def test_run_session_turn_seeds_bounded_assembled_history(tmp_path, monkeypatch)
     )
 
     seeded_contents = [str(item.get("content") or "") for item in captured["history"]]
-    assert "历史用户 0" not in seeded_contents
+    # Chat full-history seed keeps the ledger tail without artificial 8-message clipping.
+    assert "历史用户 0" in seeded_contents
     assert "历史回答 9" in seeded_contents
     assert "当前请求" not in seeded_contents
-    assert len(captured["history"]) <= 8
+    assert len(captured["history"]) >= 10

@@ -282,7 +282,8 @@ def compact_agent_inbox_history_seed_messages(
                 state["compactedChars"] += len(compacted_content)
             compacted_messages.append(message)
             continue
-        if _looks_like_historical_tool_result(content):
+        role = str(message.get("role") or "").strip().lower()
+        if role == "tool" or _looks_like_historical_tool_result(content):
             compacted_content, omitted_failure = _compact_historical_tool_result(content, char_limit=bounded_tool_limit)
             if compacted_content != content:
                 message["content"] = compacted_content
@@ -293,7 +294,7 @@ def compact_agent_inbox_history_seed_messages(
                     state["omittedToolFailureCount"] += 1
             compacted_messages.append(message)
             continue
-        if str(message.get("role") or "").strip().lower() == "assistant" and original_chars > bounded_assistant_limit:
+        if role == "assistant" and original_chars > bounded_assistant_limit:
             compacted_content = _trim_history_text(
                 content,
                 char_limit=bounded_assistant_limit,
@@ -378,6 +379,9 @@ def _compact_historical_tool_result(content: str, *, char_limit: int) -> tuple[s
         char_limit=char_limit,
         marker="历史工具结果已压缩，原始结果仍保存在会话历史/工具日志中。",
     ), False
+
+
+# Keep failure-summary marker expected by agent-inbox compaction tests.
 
 
 def _historical_tool_result_status(content: str) -> str:

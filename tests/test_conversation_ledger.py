@@ -79,10 +79,11 @@ def test_conversation_ledger_appends_and_projects_model_messages(tmp_path):
     assert messages[0]["role"] == "user"
     assert messages[0]["content"] == "继续修复单一事实源"
     assert messages[1]["role"] == "assistant"
-    assert "tool_calls" not in messages[1]
-    assert messages[1]["metadata"]["kind"] == "historical_tool_context"
-    assert messages[1]["metadata"]["toolCallId"] == "tool-1"
-    assert "测试通过" in messages[1]["content"]
+    assert messages[1].get("tool_calls")
+    assert messages[1]["tool_calls"][0]["id"] == "tool-1"
+    assert messages[2]["role"] == "tool"
+    assert messages[2]["tool_call_id"] == "tool-1"
+    assert "测试通过" in messages[2]["content"]
 
 
 def test_conversation_ledger_keeps_same_text_from_distinct_turns(tmp_path):
