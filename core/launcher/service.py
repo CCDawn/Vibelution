@@ -1869,26 +1869,7 @@ def _workbench_payload(*, runtime_state: dict[str, Any], observed_workbench: dic
 
 
 def _desktop_session_workbench_projection() -> dict[str, Any]:
-    try:
-        window = desktop_session_store.latest_active_desktop_window("workbench")
-    except Exception:
-        return {}
-    if not window:
-        return {}
-    is_open = bool(window.get("open", False))
-    return {
-        "observedState": "open" if is_open else "closed",
-        "browserWindowAlive": is_open,
-        "browserManaged": False,
-        "windowProvider": "electron",
-        "windowManaged": is_open,
-        "windowId": int(window.get("windowId") or 0),
-        "rendererProcessId": int(window.get("rendererProcessId") or 0),
-        "url": str(window.get("url") or "").strip(),
-        "desktopSessionId": str(window.get("desktopSessionId") or "").strip(),
-        "desktopSessionRevision": int(window.get("desktopSessionRevision") or 0),
-        "desktopSessionLeaseExpiresAt": str(window.get("desktopSessionLeaseExpiresAt") or "").strip(),
-    }
+    return desktop_session_store.latest_active_workbench_projection()
 
 
 def _runtime_manager_payload(runtime_state: dict[str, Any]) -> dict[str, Any]:

@@ -226,6 +226,31 @@ def latest_active_desktop_window(role: str) -> dict[str, Any]:
     return {}
 
 
+def latest_active_workbench_projection() -> dict[str, Any]:
+    """Project the current Electron workbench into the shared window contract."""
+
+    try:
+        window = latest_active_desktop_window("workbench")
+    except (OSError, sqlite3.Error, TypeError, ValueError):
+        return {}
+    if not window:
+        return {}
+    is_open = bool(window.get("open", False))
+    return {
+        "observedState": "open" if is_open else "closed",
+        "browserWindowAlive": is_open,
+        "browserManaged": False,
+        "windowProvider": "electron",
+        "windowManaged": is_open,
+        "windowId": int(window.get("windowId") or 0),
+        "rendererProcessId": int(window.get("rendererProcessId") or 0),
+        "url": str(window.get("url") or "").strip(),
+        "desktopSessionId": str(window.get("desktopSessionId") or "").strip(),
+        "desktopSessionRevision": int(window.get("desktopSessionRevision") or 0),
+        "desktopSessionLeaseExpiresAt": str(window.get("desktopSessionLeaseExpiresAt") or "").strip(),
+    }
+
+
 def _ensure_session_row(conn: sqlite3.Connection, desktop_session_id: str, now: str) -> sqlite3.Row:
     if not desktop_session_id:
         raise ValueError("desktopSessionId is required")

@@ -681,8 +681,8 @@ def test_runtime_summary_prefers_current_phase_over_stale_task_progress(monkeypa
 
 
 def test_runtime_summary_exposes_runtime_manager_workbench_state(monkeypatch):
-    monkeypatch.setattr(runtime_service, "get_active_session_summary", lambda: {})
-    monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", dict)
+    monkeypatch.setattr(runtime_service, "_load_runtime_state", dict)
     monkeypatch.setattr(
         runtime_service,
         "_load_runtime_manager_snapshot",
@@ -898,6 +898,97 @@ def test_runtime_summary_marks_missing_managed_window_as_partial(monkeypatch):
     window = next(component for component in proof["components"] if component["id"] == "workbench_window")
     assert backend["ok"] is True
     assert window["state"] == "missing"
+
+
+def test_runtime_summary_uses_active_electron_workbench_session(tmp_path, monkeypatch):
+    from core.launcher import desktop_session_store
+
+    monkeypatch.setattr(
+        desktop_session_store,
+        "DESKTOP_SESSION_DB_PATH",
+        tmp_path / ".runtime" / "launcher" / "desktop_sessions.sqlite3",
+    )
+    monkeypatch.setattr(runtime_service, "get_active_session_summary", dict)
+    monkeypatch.setattr(runtime_service, "_load_runtime_state", dict)
+    monkeypatch.setattr(
+        runtime_service,
+        "_work_run_summary",
+        lambda: {
+            "active": {
+                "chat_turn": None,
+                "self_evolution_run": None,
+                "supervised_evolution_run": None,
+            },
+            "latest": {
+                "chat_turn": None,
+                "self_evolution_run": None,
+                "supervised_evolution_run": None,
+            },
+        },
+    )
+    monkeypatch.setattr(
+        runtime_service,
+        "_load_runtime_manager_snapshot",
+        lambda: {
+            "daemonRunning": True,
+            "runtimeState": "running",
+            "managerPid": 9912,
+            "stateVersion": 18,
+            "projectRoot": str(runtime_service.PROJECT_ROOT),
+            "runtimeManager": {"sourceMatches": True},
+            "workbench": {
+                "desiredState": "open",
+                "observedState": "partial",
+                "phase": "steady",
+                "backendPid": 3001,
+                "backendAlive": True,
+                "backendHealthy": True,
+                "backendObserved": True,
+                "backendPort": 8000,
+                "backendPortListening": True,
+                "backendPortOwnerPid": 3001,
+                "backendPortOwnerTrusted": True,
+                "backendPortConflict": False,
+                "browserWindowPid": 4002,
+                "browserWindowAlive": False,
+                "browserManaged": True,
+                "lifecycleConsistency": "browser_missing",
+                "url": "http://127.0.0.1:8000",
+                "lastReason": "start",
+                "failureMessage": "",
+            },
+        },
+    )
+    created = desktop_session_store.register_desktop_session(
+        {
+            "desktopSessionId": "desktop-session-1",
+            "provider": "electron",
+            "workspaceRoot": str(tmp_path),
+            "capabilities": ["desktop_actions.claim"],
+        }
+    )
+    desktop_session_store.update_desktop_session_window(
+        "desktop-session-1",
+        "workbench",
+        {
+            "revision": created["revision"],
+            "provider": "electron",
+            "open": True,
+            "focused": True,
+            "windowId": 42,
+            "rendererProcessId": 4242,
+            "url": "http://127.0.0.1:8000/",
+        },
+    )
+
+    payload = runtime_service.get_runtime_summary()
+
+    assert payload["workbench"]["windowProvider"] == "electron"
+    assert payload["workbench"]["windowManaged"] is True
+    assert payload["workbench"]["observedState"] == "open"
+    assert payload["workbench"]["lifecycleConsistency"] == "consistent"
+    assert payload["workbench"]["statusLine"] == "工作台正在运行。"
+    assert payload["lifecycleProof"]["overallState"] == "ready"
 
 
 def test_runtime_lifecycle_proof_marks_ready_when_components_agree(monkeypatch):
