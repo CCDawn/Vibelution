@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Agent-to-agent messaging tools."""
+"""Session-addressed agent collaboration messaging tools."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from core.logging import debug as _debug_logger
 
 def agent_message_tool(
     content: str,
-    target_session: str = "",
+    target_session: str,
     target_agent: str = "",
     summary: str = "",
     wake_target: bool = True,
@@ -22,25 +22,32 @@ def agent_message_tool(
     metadata_json: str = "",
 ) -> str:
     """
-    Send a collaboration message that lands on a concrete target session.
+    Send a collaboration message into another conversation session and wake it.
 
-    ADR 0002: ``target_session`` is required. Session history is the user-visible
-    landing surface (via immediate wake/submit). Agent inbox is retained as a
-    delivery log with the same message id. Default ``wake_target=true`` wakes
-    that session immediately.
+    Use this to deliver to a concrete session tab (not Agent-only address, not
+    inbox-as-UX). Session history is the single source of truth for the body;
+    Agent inbox keeps an index/log only. Default ``wake_target=true`` immediately
+    schedules the target session.
+
+    When the user dragged a session into the composer this turn, pass that
+    reference's ``sessionId`` as ``target_session``. Do not search logs/code for
+    the id. To only read history of a dragged reference, use
+    ``session_reference_query_tool`` (read-only); sending still requires this tool.
 
     Args:
-        content: Message body for the target session.
-        target_session: Required target session id (conversation tab).
-        target_agent: Optional; if set must match the session owner Agent
-            (id / code / unique name). Deprecated as sole address.
-        summary: Optional short summary.
-        wake_target: Whether to immediately wake the target session (default True).
-        thread_id: Optional conversation thread / correlation id.
-        metadata_json: Optional JSON object with small structured metadata.
+        content: Message body for the target session (required).
+        target_session: Target session id (required). Prefer
+            attached sessionReferences[].sessionId when the user dropped a session.
+        target_agent: Optional owner check (agentId / code / unique name). Must
+            match the session's Agent if provided. Cannot replace target_session.
+        summary: Optional short summary for lists/logs (not a second body authority).
+        wake_target: Immediately wake the target session (default True).
+        thread_id: Optional correlation / thread id.
+        metadata_json: Optional small JSON metadata (research org may need intent fields).
 
     Returns:
-        JSON string with status, message id, target identity, and wake delivery status.
+        JSON with ok/status, messageId, targetSessionId, targetAgentId, wakeStatus,
+        historyStatus, inboxStatus, and delivery details.
     """
 
     try:

@@ -11,17 +11,25 @@ import pytest
 from tools import agent_message_tools
 
 
+def test_agent_message_tool_signature_requires_target_session() -> None:
+    import inspect
+
+    signature = inspect.signature(agent_message_tools.agent_message_tool)
+    assert signature.parameters["content"].default is inspect.Parameter.empty
+    assert signature.parameters["target_session"].default is inspect.Parameter.empty
+    doc = agent_message_tools.agent_message_tool.__doc__ or ""
+    assert "target_session" in doc
+    assert "sessionReferences" in doc or "sessionId" in doc
+    assert "session_reference_query_tool" in doc
+
+
 def test_agent_message_tool_requires_target_session(monkeypatch) -> None:
-    monkeypatch.setattr(
-        agent_message_tools,
-        "agent_message_tool",
-        agent_message_tools.agent_message_tool,
-    )
     # Patch runtime via directory service imports inside the tool.
     import core.web.services.agent_directory_service as ads
 
     monkeypatch.setattr(ads, "current_agent_runtime", lambda: {"agentId": "agent-source", "sessionId": "session-source"})
-    result = json.loads(agent_message_tools.agent_message_tool(content="hello"))
+    # Empty string still blocked by runtime guard (schema also marks param required).
+    result = json.loads(agent_message_tools.agent_message_tool(content="hello", target_session=""))
     assert result["ok"] is False
     assert result["error"] == "target_session_required"
 

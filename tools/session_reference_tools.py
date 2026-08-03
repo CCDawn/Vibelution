@@ -66,7 +66,11 @@ def session_reference_query_tool(
     limit: int = 8,
     max_chars_per_message: int = 700,
 ) -> str:
-    """Query bounded history from a session reference attached to the current turn."""
+    """Read-only: query history of a session the user dragged into this turn's composer.
+
+    Does not send messages. To deliver to that session, call agent_message_tool with
+    target_session set to the reference sessionId (and content). Do not invent ids.
+    """
 
     reference = _allowed_reference(reference_id=reference_id, session_id=session_id)
     if reference is None:
@@ -151,6 +155,10 @@ def session_reference_query_tool(
             "matchedMessageCount": len(messages),
             "returnedMessageCount": len(selected),
             "messages": selected,
-            "usageBoundary": "Read-only. Sending to this Agent requires an explicit user request and agent_message_tool.",
+            "usageBoundary": (
+                "Read-only. To send into this session, call agent_message_tool "
+                f"with target_session={target_session_id!r} and the message content. "
+                "Do not use this tool for delivery."
+            ),
         }
     )
