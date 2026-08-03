@@ -43,7 +43,12 @@ import {
   type DesktopSmokeBootstrapSummary
 } from "./smoke/desktopSmoke.js";
 import { prepareDesktopSmokeShutdown } from "./smoke/desktopSmokeShutdown.js";
-import { closeDesktopSession, registerDesktopSession, reportDesktopWindowState } from "./windows/desktopSessionClient.js";
+import {
+  closeDesktopSession,
+  heartbeatDesktopSession,
+  registerDesktopSession,
+  reportDesktopWindowState
+} from "./windows/desktopSessionClient.js";
 import { ElectronWindowProvider } from "./windows/electronWindowProvider.js";
 import type { ManagedWindowState } from "./windows/windowProviderTypes.js";
 import { createLauncherWindow } from "./windows/launcherWindow.js";
@@ -53,11 +58,15 @@ import { resolveLauncherUrl, resolveWorkbenchUrl } from "./windows/windowUrlReso
 const DESKTOP_ACTION_POLL_MS = 2000;
 const DESKTOP_ACTION_LEASE_SECONDS = 30;
 const RUNTIME_SCENE_MAX_BUFFERED_EVENTS = 50;
+const DESKTOP_SESSION_HEARTBEAT_MS = 15000;
+const DESKTOP_SESSIONS_HEARTBEAT_CAPABILITY = "desktop_sessions.heartbeat";
 
 let windowProvider: ElectronWindowProvider | null = null;
 let launcherBootstrap: LauncherBootstrapResult | null = null;
 let desktopActionTimer: ReturnType<typeof setInterval> | null = null;
 let desktopActionPollRunning = false;
+let desktopSessionHeartbeatTimer: ReturnType<typeof setInterval> | null = null;
+let desktopSessionHeartbeatRunning = false;
 let desktopActionContext: DesktopActionLoopContext | null = null;
 let runtimeSceneBridge: RuntimeSceneBridge | null = null;
 let desktopSessionRegistered = false;
@@ -321,6 +330,7 @@ async function reportManagedWindowState(
       });
       desktopSessionRevision = registration.revision;
       desktopSessionRegistered = true;
+      startDesktopSessionHeartbeatIfNeeded(bootstrap);
     }
     const result = await reportDesktopWindowState({
       ...context,
@@ -332,6 +342,49 @@ async function reportManagedWindowState(
   } catch (error: unknown) {
     console.warn(error instanceof Error ? error.message : String(error));
   }
+}
+
+function desktopSessionHeartbeatSupported(
+  bootstrap: LauncherBootstrapResult | null
+): bootstrap is LauncherBootstrapResult {
+  return bootstrap !== null && bootstrap.capabilities.includes(DESKTOP_SESSIONS_HEARTBEAT_CAPABILITY);
+}
+
+function startDesktopSessionHeartbeatIfNeeded(bootstrap: LauncherBootstrapResult | null): void {
+  if (bootstrap === null || desktopSessionHeartbeatTimer !== null || !desktopSessionRegistered) {
+    return;
+  }
+  if (!desktopSessionHeartbeatSupported(bootstrap)) {
+    return;
+  }
+  const heartbeatOnce = async () => {
+    if (desktopSessionHeartbeatRunning) {
+      return;
+    }
+    const currentBootstrap = launcherBootstrap;
+    if (!desktopSessionRegistered || !desktopSessionHeartbeatSupported(currentBootstrap)) {
+      stopDesktopSessionHeartbeat();
+      return;
+    }
+    desktopSessionHeartbeatRunning = true;
+    try {
+      const result = await heartbeatDesktopSession(await resolveDesktopActionLoopContext(currentBootstrap));
+      desktopSessionRevision = result.revision;
+    } catch (error: unknown) {
+      console.warn(error instanceof Error ? error.message : String(error));
+    } finally {
+      desktopSessionHeartbeatRunning = false;
+    }
+  };
+  desktopSessionHeartbeatTimer = setInterval(() => void heartbeatOnce(), DESKTOP_SESSION_HEARTBEAT_MS);
+}
+
+function stopDesktopSessionHeartbeat(): void {
+  if (desktopSessionHeartbeatTimer !== null) {
+    clearInterval(desktopSessionHeartbeatTimer);
+    desktopSessionHeartbeatTimer = null;
+  }
+  desktopSessionHeartbeatRunning = false;
 }
 
 async function resolveDesktopActionLoopContext(bootstrap: LauncherBootstrapResult): Promise<DesktopActionLoopContext> {
@@ -438,6 +491,7 @@ function stopDesktopActionLoop(): void {
     desktopActionTimer = null;
   }
   desktopActionPollRunning = false;
+  stopDesktopSessionHeartbeat();
 }
 
 async function closeDesktopSessionIfRegistered(): Promise<void> {
@@ -447,6 +501,7 @@ async function closeDesktopSessionIfRegistered(): Promise<void> {
   try {
     await closeDesktopSession(await resolveDesktopActionLoopContext(launcherBootstrap));
     desktopSessionRegistered = false;
+    stopDesktopSessionHeartbeat();
   } catch (error: unknown) {
     console.warn(error instanceof Error ? error.message : String(error));
   }
