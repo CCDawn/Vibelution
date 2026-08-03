@@ -585,6 +585,49 @@ def test_python_launcher_project_workbench_pid_requires_this_checkout_path(monke
     assert launcher._is_project_workbench_pid(2) is True
 
 
+def test_python_launcher_posix_listener_fallback_works_without_psutil(monkeypatch):
+    launcher = _load_python_launcher()
+    fake_psutil = types.SimpleNamespace(net_connections=lambda **_kwargs: (_ for _ in ()).throw(RuntimeError()))
+    monkeypatch.setitem(sys.modules, "psutil", fake_psutil)
+    monkeypatch.setattr(launcher.os, "name", "posix", raising=False)
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        launcher.subprocess,
+        "run",
+        lambda args, **_kwargs: calls.append(list(args))
+        or types.SimpleNamespace(stdout='LISTEN 0 2048 127.0.0.1:8000 0.0.0.0:* users:(("python",pid=4242,fd=8))'),
+    )
+
+    assert launcher._listening_pid_for_port(8000) == 4242
+    assert calls == [["ss", "-ltnp", "sport = :8000"]]
+
+
+def test_python_launcher_posix_parent_fallback_proves_listener_ownership_without_psutil(monkeypatch):
+    launcher = _load_python_launcher()
+    fake_psutil = types.SimpleNamespace(Process=lambda _pid: (_ for _ in ()).throw(RuntimeError()))
+    monkeypatch.setitem(sys.modules, "psutil", fake_psutil)
+    monkeypatch.setattr(launcher.os, "name", "posix", raising=False)
+    parents = {4242: 3131, 3131: 2121, 2121: 1, 1: 0}
+    monkeypatch.setattr(launcher, "_posix_parent_pid", lambda pid: parents.get(pid, 0))
+
+    assert launcher._pid_belongs_to_process_tree(4242, 2121) is True
+    assert launcher._pid_belongs_to_process_tree(4242, 5151) is False
+
+
+def test_python_launcher_posix_command_line_fallback_recognizes_this_checkout_without_psutil(monkeypatch):
+    launcher = _load_python_launcher()
+    fake_psutil = types.SimpleNamespace(Process=lambda _pid: (_ for _ in ()).throw(RuntimeError()))
+    monkeypatch.setitem(sys.modules, "psutil", fake_psutil)
+    monkeypatch.setattr(launcher.os, "name", "posix", raising=False)
+    monkeypatch.setattr(
+        launcher,
+        "_posix_process_command_line",
+        lambda _pid: f"/opt/python {launcher.PROJECT_ROOT / 'scripts' / 'web_workbench.py'} --port 8000",
+    )
+
+    assert launcher._is_project_workbench_pid(4242) is True
+
+
 def test_python_launcher_restart_builds_before_stopping_backend(monkeypatch):
     launcher = _load_python_launcher()
     calls: list[tuple[str, object]] = []
