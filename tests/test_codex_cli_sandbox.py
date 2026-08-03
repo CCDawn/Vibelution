@@ -123,6 +123,7 @@ def test_execute_uses_native_codex_sandbox_without_shell(monkeypatch, tmp_path):
         "VIBELUTION_CONFIG_PATH",
         str(tmp_path.parent / "formal-vibelution-config" / "config.toml"),
     )
+    monkeypatch.setattr(shell_tools, "CURRENT_SYSTEM", "windows")
     monkeypatch.setattr(codex_cli_sandbox, "_host_platform", lambda: "windows")
     monkeypatch.setattr(
         codex_cli_sandbox,
