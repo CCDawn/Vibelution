@@ -431,6 +431,7 @@ export function AgentSessionTabStrip({
             </VButton>
             <VIconButton
               type="button"
+              variant="ghost"
               className={styles.agentSessionTabCloseButton}
               onClick={(event) => {
                 event.stopPropagation();
@@ -519,6 +520,7 @@ export function AgentSessionTabStrip({
             </VButton>
             <VIconButton
               type="button"
+              variant="ghost"
               className={styles.agentSessionTabCloseButton}
               onClick={(event) => {
                 event.stopPropagation();
@@ -534,6 +536,7 @@ export function AgentSessionTabStrip({
       </div>
       <VIconButton
         type="button"
+        variant="ghost"
         className={styles.agentSessionTabCreateButton}
         onPress={onCreateSession}
         isDisabled={createPending || createDisabled}
