@@ -628,13 +628,15 @@ def make_spec_digest_section(ctx: BuildContext) -> SystemPromptSection:
             except (TypeError, ValueError):
                 max_calls = 0
         if max_calls > 0:
-            reserve = max(2, min(3, max_calls // 8 or 2))
             budget_rule = (
-                f"- 本回合工具额度 **{max_calls}** 次（策略 maxCallsPerTurn）；"
-                f"探查建议 ≤ {max(1, max_calls - reserve)}，至少预留 {reserve} 次给验证。"
+                f"- 本回合工具额度 **{max_calls}** 次（maxCallsPerTurn）；"
+                "用尽即停，下一用户消息重新计数；不要为耗尽额度写长报告或继续探查。"
             )
         else:
-            budget_rule = "- 工具额度以 Agent 策略为准（常见 32 次）；探查勿耗尽，至少预留 2–3 次验证。"
+            budget_rule = (
+                "- 工具额度以 Agent 策略为准（常见 32 次）；"
+                "用尽即停，下一用户消息重新计数。"
+            )
         common = [
             "- 默认中文；代码、命令、路径、协议字段、必要报错可保留原文。",
             "- 同轮同类失败不重复：shell/被拦截失败 **1 次**后立即换 `code_symbol_tool`/`grep_search_tool`，禁止换壳连撞。",

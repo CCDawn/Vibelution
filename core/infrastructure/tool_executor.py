@@ -742,6 +742,14 @@ class ToolExecutor:
         )
         if execution_authorization is not None and not execution_authorization.allowed:
             authorization_error = execution_authorization.message
+            auth_code = str(getattr(execution_authorization, "code", "") or "").strip()
+            # Mature-agent contract: hard-stop the turn on tool budget exhaust.
+            # Do not invite long wrap-up probes; next user turn resets the counter.
+            if auth_code == "call_budget_exhausted":
+                authorization_error = (
+                    "当前回合工具调用额度已用尽，本轮停止。"
+                    "下一用户消息将重新统计额度；不要继续调用工具或额外探查。"
+                )
             publish_tool_event(EventNames.TOOL_ERROR, {
                 "name": tool_name,
                 "error": authorization_error,
@@ -771,6 +779,8 @@ class ToolExecutor:
                 },
                 lifecycle=True,
             )
+            if auth_code == "call_budget_exhausted":
+                return (authorization_error, "tool_budget_exhausted")
             return (authorization_error, None)
         if execution_authorization is not None and execution_authorization.enforced:
             _record_tool_scene_event(

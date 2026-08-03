@@ -390,23 +390,41 @@ class ToolLifecycleBridge:
 
         workers_cap = int(max_parallel_readonly or self.DEFAULT_PARALLEL_READONLY_WORKERS)
         lifecycle_action: Optional[str] = None
-        for batch in self._partition_tool_calls(tool_calls):
+        budget_stop_message = (
+            "当前回合工具调用额度已用尽，本轮停止。"
+            "下一用户消息将重新统计额度；不要继续调用工具或额外探查。"
+        )
+        remaining_batches = self._partition_tool_calls(tool_calls)
+        for batch_index, batch in enumerate(remaining_batches):
+            if lifecycle_action == "tool_budget_exhausted":
+                # Protocol safety: bind short denials for already-declared tool_calls,
+                # then stop the turn without more real tool work.
+                for tool_call in batch:
+                    self.handle_tool_result(
+                        tool_call,
+                        budget_stop_message,
+                        "tool_budget_exhausted",
+                        messages,
+                    )
+                continue
             if len(batch) == 1:
                 tool_call = batch[0]
                 result, action = self.execute_tool(tool_call, messages)
                 self.handle_tool_result(tool_call, result, action, messages)
-                if action in ("restart", "hibernated", "turn_complete"):
+                if action in ("restart", "hibernated", "turn_complete", "tool_budget_exhausted"):
                     lifecycle_action = action
-                    break
+                    if action != "tool_budget_exhausted":
+                        break
                 continue
             results = self._execute_readonly_batch(batch, messages, workers=workers_cap)
             for tool_call, (result, action) in zip(batch, results):
                 self.handle_tool_result(tool_call, result, action, messages)
-                if action in ("restart", "hibernated", "turn_complete"):
-                    # read-only 工具理论上不应触发生命周期切换，但出现就尊重它。
+                if action in ("restart", "hibernated", "turn_complete", "tool_budget_exhausted"):
                     lifecycle_action = action
-                    break
-            if lifecycle_action:
+            if lifecycle_action in ("restart", "hibernated", "turn_complete"):
+                break
+            # tool_budget_exhausted: keep looping only to fill remaining declared calls.
+            if lifecycle_action == "tool_budget_exhausted" and batch_index + 1 >= len(remaining_batches):
                 break
         return lifecycle_action
 
