@@ -80,8 +80,8 @@ def _is_process_alive(pid: int) -> bool:
     return True
 
 
-def _visible_top_level_window_handles(pid: int) -> list[int]:
-    """Return visible top-level HWND values owned by ``pid`` (Windows only)."""
+def _iter_browser_candidate_windows(pid: int) -> list[dict[str, int | bool | str]]:
+    """Return candidate top-level windows owned by ``pid`` (Windows only)."""
 
     if os.name != "nt" or int(pid or 0) <= 0:
         return []
@@ -92,45 +92,109 @@ def _visible_top_level_window_handles(pid: int) -> list[int]:
         return []
 
     user32 = ctypes.windll.user32
-    handles: list[int] = []
+    found: list[dict[str, int | bool | str]] = []
     enum_proc = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
 
     @enum_proc
     def callback(hwnd, _lparam):  # type: ignore[no-untyped-def]
-        if not user32.IsWindowVisible(hwnd):
-            return True
         owner_pid = wintypes.DWORD()
         user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner_pid))
-        if int(owner_pid.value) == int(pid):
-            # Skip zero-size tool windows that Edge sometimes leaves behind.
-            rect = wintypes.RECT()
-            if user32.GetWindowRect(hwnd, ctypes.byref(rect)):
-                width = int(rect.right) - int(rect.left)
-                height = int(rect.bottom) - int(rect.top)
-                if width >= 160 and height >= 120:
-                    handles.append(int(hwnd))
+        if int(owner_pid.value) != int(pid):
+            return True
+        rect = wintypes.RECT()
+        if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+            return True
+        width = int(rect.right) - int(rect.left)
+        height = int(rect.bottom) - int(rect.top)
+        if width < 160 or height < 120:
+            return True
+        length = int(user32.GetWindowTextLengthW(hwnd) or 0)
+        title = ""
+        if length > 0:
+            buf = ctypes.create_unicode_buffer(length + 1)
+            user32.GetWindowTextW(hwnd, buf, length + 1)
+            title = str(buf.value or "")
+        found.append(
+            {
+                "hwnd": int(hwnd),
+                "visible": bool(user32.IsWindowVisible(hwnd)),
+                "iconic": bool(user32.IsIconic(hwnd)),
+                "width": width,
+                "height": height,
+                "title": title,
+            }
+        )
         return True
 
     try:
         user32.EnumWindows(callback, 0)
     except Exception:
         return []
-    return handles
+    return found
+
+
+def _visible_top_level_window_handles(pid: int) -> list[int]:
+    """Return visible top-level HWND values owned by ``pid`` (Windows only)."""
+
+    return [
+        int(item["hwnd"])
+        for item in _iter_browser_candidate_windows(pid)
+        if bool(item.get("visible")) and not bool(item.get("iconic"))
+    ]
+
+
+def _restore_hidden_browser_windows(pid: int) -> list[int]:
+    """Show/restore managed Edge app windows that exist but are not visible."""
+
+    if os.name != "nt" or int(pid or 0) <= 0:
+        return []
+    try:
+        import ctypes
+    except Exception:
+        return []
+
+    user32 = ctypes.windll.user32
+    SW_RESTORE = 9
+    SW_SHOW = 5
+    restored: list[int] = []
+    for item in _iter_browser_candidate_windows(pid):
+        hwnd = int(item.get("hwnd") or 0)
+        if hwnd <= 0:
+            continue
+        if bool(item.get("visible")) and not bool(item.get("iconic")):
+            restored.append(hwnd)
+            continue
+        title = str(item.get("title") or "")
+        # Prefer titled workbench windows; still accept large untitled app frames.
+        if title and ("Vibelution" not in title and "工作台" not in title and "Workbench" not in title):
+            continue
+        try:
+            user32.ShowWindow(hwnd, SW_RESTORE)
+            user32.ShowWindow(hwnd, SW_SHOW)
+            user32.SetForegroundWindow(hwnd)
+            if user32.IsWindowVisible(hwnd):
+                restored.append(hwnd)
+        except Exception:
+            continue
+    return restored
 
 
 def _is_browser_window_alive(pid: int) -> bool:
-    """True only when the managed browser process still has a real visible window.
+    """True only when the managed browser process still has a real user window.
 
-    Chromium/Edge often leaves a headless browser process (+ utility/GPU children)
-    after the app window is closed. Process-only checks then report the Workbench
-    as open even though the user sees nothing.
+    Chromium/Edge often leaves a process tree after the app window is closed, or
+    keeps a hidden window after a bad ``--window-size``. Process-only checks then
+    report Workbench as open while the user sees nothing.
     """
 
     if not _is_process_alive(pid):
         return False
     if os.name != "nt":
         return True
-    return bool(_visible_top_level_window_handles(int(pid)))
+    if _visible_top_level_window_handles(int(pid)):
+        return True
+    # Self-heal: restore hidden-but-present managed app windows.
+    return bool(_restore_hidden_browser_windows(int(pid)))
 
 
 def _load_launcher_state() -> dict[str, Any]:
