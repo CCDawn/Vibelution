@@ -3321,6 +3321,7 @@ export function ChatCodingRoute() {
                 userAvatarPreset: runtime?.userProfile?.avatarPreset,
                 userAvatarImageUrl: runtime?.userProfile?.avatarImageUrl,
                 taskSummary: currentTaskSummary,
+                changedFiles: detail.changedFiles ?? [],
                 defaultFileContext: detail.defaultFileContext,
                 showHeader: false,
                 showSessionOverview: false,

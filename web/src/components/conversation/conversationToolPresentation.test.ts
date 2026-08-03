@@ -4,6 +4,7 @@ import {
   completedToolPresentationSummary,
   conversationToolDetailPresentation,
   conversationToolPresentationLabel,
+  formatCodexStyleToolActivityLine,
 } from "./conversationToolPresentation";
 
 describe("conversation tool presentation", () => {
@@ -210,5 +211,49 @@ describe("conversation tool presentation", () => {
     expect(presented).toContain(" 947  setSavedDraft(nextSnapshot)");
     expect(presented).not.toContain('"status"');
     expect(presented).not.toContain('"results"');
+  });
+});
+
+describe("formatCodexStyleToolActivityLine", () => {
+  it("formats completed shell runs with duration like Codex", () => {
+    expect(formatCodexStyleToolActivityLine({
+      toolName: "cli_tool",
+      status: "completed",
+      language: "zh",
+      durationLabel: "12s",
+      displayCommand: "pnpm test",
+    })).toBe("已在 12s 内运行 pnpm test");
+
+    expect(formatCodexStyleToolActivityLine({
+      toolName: "exec_command",
+      status: "completed",
+      language: "en",
+      durationLabel: "9s",
+      displayCommand: "node test.mjs",
+    })).toBe("Ran node test.mjs in 9s");
+  });
+
+  it("formats edit tools as edited file lines", () => {
+    expect(formatCodexStyleToolActivityLine({
+      toolName: "write_file_tool",
+      status: "completed",
+      language: "zh",
+      filePath: "src/lanA2a/TaskStore.ts",
+    })).toBe("已编辑 TaskStore.ts");
+  });
+
+  it("formats timeout and failure without spinner semantics", () => {
+    expect(formatCodexStyleToolActivityLine({
+      toolName: "code_symbol_tool",
+      status: "running",
+      language: "zh",
+      cellSummary: "code_symbol_tool 执行超时 (30秒)",
+      timedOut: true,
+    })).toContain("超时");
+    expect(formatCodexStyleToolActivityLine({
+      toolName: "code_symbol_tool",
+      status: "failed",
+      language: "zh",
+    })).toBe("失败 · 代码图谱");
   });
 });

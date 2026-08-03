@@ -20,6 +20,8 @@ details[open] > summary .vui-components-conversation-tool-activity.activityChevr
   > .vui-components-conversation-tool-activity.activityDetails,
 .vui-components-conversation-tool-activity.batch:not([open])
   > .vui-components-conversation-tool-activity.batchDetails,
+.vui-components-conversation-tool-activity.group:not([open])
+  > .vui-components-conversation-tool-activity.groupDetails,
 .vui-components-conversation-tool-activity.itemDetails:not([open])
   > .vui-components-conversation-tool-activity.itemDetailsBody {
   display: none;

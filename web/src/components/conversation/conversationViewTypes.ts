@@ -66,6 +66,8 @@ export type ConversationViewProps = {
   userAvatarPreset?: string;
   userAvatarImageUrl?: string;
   taskSummary?: string;
+  /** Session-level changed files for Codex-style turn footer badge. */
+  changedFiles?: string[];
   defaultFileContext: string;
   summaryItems?: Array<{
     label: string;

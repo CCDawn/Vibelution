@@ -402,6 +402,8 @@ const styles: Record<string, string> = {
     "vui-components-conversationview codexTranscriptReasoningTextButton min-w-0 !h-auto !w-full !max-w-full cursor-pointer !justify-start !rounded-none !border-0 !bg-transparent !p-0 !pl-[28px] !text-left !shadow-none hover:!border-transparent hover:!bg-transparent hover:!shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] focus-visible:ring-offset-1 [&_[data-slot=vui-button-content]]:contents [&_[data-slot=vui-button-label]]:contents",
   codexTranscriptSurface:
     "vui-components-conversationview codexTranscriptSurface grid w-full max-w-full min-w-0 content-start gap-2 px-0",
+  codexTurnChangeBadge:
+    "vui-components-conversationview codexTurnChangeBadge mt-1 inline-flex w-fit max-w-full items-center rounded-full border border-[color-mix(in_srgb,var(--fg-tertiary)_28%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--vui-surface-panel)_70%,transparent)] px-2.5 py-1 [font-size:var(--vui-font-xs)] font-normal leading-none text-[var(--fg-tertiary)]",
   conversationCellTimeline:
     "vui-components-conversationview conversationCellTimeline min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   emptyState:
