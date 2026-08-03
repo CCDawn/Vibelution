@@ -2847,7 +2847,6 @@ export function ConversationView({
               </span>
             )}
           />
-          {expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
         </VButton>
         {expanded ? (
           <div className={styles.timelineCommandList}>
@@ -2963,15 +2962,10 @@ export function ConversationView({
         {operationStatusIcon(operation, isActiveTimelineItem)}
       </span>
     );
+    // Tool rows: Codex quiet chrome — leading status icon only. A trailing
+    // ChevronRight was wrapping onto a second grid line as a lone "›" under the icon.
     const headerContent = toolPills ? (
-      <>
-        <ConversationToolActivityPills pills={toolPills} leadingIcon={leadingIcon} />
-        {canExpandDetails ? (
-          <span className={styles.timelineCellInlineChevron} aria-hidden="true">
-            {detailsExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-          </span>
-        ) : null}
-      </>
+      <ConversationToolActivityPills pills={toolPills} leadingIcon={leadingIcon} />
     ) : (
       <>
         {leadingIcon}

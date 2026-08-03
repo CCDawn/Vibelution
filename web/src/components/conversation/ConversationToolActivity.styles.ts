@@ -14,7 +14,8 @@ const styles = {
   group: cx("group", "w-full max-w-full min-w-0 my-1"),
   groupSummary: cx(
     "groupSummary",
-    "flex w-full max-w-full min-w-0 cursor-pointer items-baseline gap-x-1.5 py-1 text-left [font-size:var(--vui-font-xs)] leading-[1.45] text-[var(--fg-tertiary)] [&::-webkit-details-marker]:hidden hover:text-[var(--fg-secondary)] focus-visible:rounded-[var(--radius-control)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)]",
+    // list-none + empty ::marker: kill native <details> disclosure (Edge shows a lone ">")
+    "flex w-full max-w-full min-w-0 list-none cursor-pointer items-baseline gap-x-1.5 py-1 text-left [font-size:var(--vui-font-xs)] leading-[1.45] text-[var(--fg-tertiary)] [&::-webkit-details-marker]:hidden [&::marker]:hidden [&::marker]:content-none hover:text-[var(--fg-secondary)] focus-visible:rounded-[var(--radius-control)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)]",
   ),
   groupTitle: cx("groupTitle", "min-w-0 font-normal text-[var(--fg-tertiary)]"),
   groupMeta: cx("groupMeta", "shrink-0 text-[color-mix(in_srgb,var(--fg-tertiary)_82%,transparent)]"),
@@ -27,7 +28,7 @@ const styles = {
   itemDetails: cx("itemDetails", "w-full max-w-full min-w-0"),
   itemSummary: cx(
     "itemSummary",
-    "flex w-full max-w-full min-w-0 cursor-pointer items-center gap-x-2 py-[0.28rem] text-left [&::-webkit-details-marker]:hidden focus-visible:rounded-[var(--radius-control)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)]",
+    "flex w-full max-w-full min-w-0 list-none cursor-pointer items-center gap-x-2 py-[0.28rem] text-left [&::-webkit-details-marker]:hidden [&::marker]:hidden [&::marker]:content-none focus-visible:rounded-[var(--radius-control)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)]",
   ),
   itemStatic: cx(
     "itemStatic",
@@ -36,7 +37,7 @@ const styles = {
   batch: cx("batch", "w-full max-w-full min-w-0"),
   batchSummary: cx(
     "batchSummary",
-    "flex w-full max-w-full min-w-0 cursor-pointer items-center gap-x-2 py-[0.28rem] text-left [&::-webkit-details-marker]:hidden focus-visible:rounded-[var(--radius-control)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)]",
+    "flex w-full max-w-full min-w-0 list-none cursor-pointer items-center gap-x-2 py-[0.28rem] text-left [&::-webkit-details-marker]:hidden [&::marker]:hidden [&::marker]:content-none focus-visible:rounded-[var(--radius-control)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)]",
   ),
   batchCount: cx(
     "batchCount",
