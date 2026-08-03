@@ -1160,6 +1160,26 @@ class TestShellCommandDialectGuidance:
         assert "6000" in cli_doc
         assert "code_symbol_tool" in cli_doc
 
+    def test_tool_docstrings_declare_automatic_backend_selection(self):
+        """Agent contracts never ask the model to pick Windows/Linux/Codex backend."""
+        from tools.Key_Tools import (
+            _WRITE_STDIN_TOOL_DOCSTRING,
+            _cli_tool_docstring,
+            _exec_command_tool_docstring,
+        )
+
+        cli_doc = _cli_tool_docstring()
+        exec_doc = _exec_command_tool_docstring()
+        assert "自动选择" in cli_doc
+        assert "自动选择" in exec_doc
+        # 静态 Windows-only 示例会误导 Linux 上的 Agent
+        assert "Windows 读小段" not in cli_doc
+        assert "Windows 默认勿混用" not in exec_doc
+        assert "Select-Object -First 80" not in cli_doc
+        # 平台无关的稳定契约元素仍然存在
+        assert "terminalSessionId" in exec_doc
+        assert "session_id" in _WRITE_STDIN_TOOL_DOCSTRING
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])

@@ -69,3 +69,71 @@ starts the backend. Validate these independently:
 
 Do not treat a reachable page, a listening port, or a provider credential check
 as a substitute for the final application-path request.
+
+## Codex CLI Sandbox (workspace_write)
+
+Agent shell tools (`exec_command` / `cli_tool` / `write_stdin`) run through the
+native Codex CLI sandbox. The backend auto-selects the host platform, the Codex
+executable and the Unix shell; no Agent-facing configuration or command flag
+chooses a platform.
+
+### Install And Pin The ARM64 Codex CLI
+
+Download the pinned release tarball for `aarch64-unknown-linux-musl`, verify the
+published checksum, and install it under `/opt/codex-cli`:
+
+```sh
+CODEX_VERSION=<pinned-version>
+mkdir -p /opt/codex-cli
+curl -fsSL \
+  "https://github.com/openai/codex/releases/download/${CODEX_VERSION}/codex-aarch64-unknown-linux-musl.tar.gz" \
+  -o /tmp/codex-cli.tar.gz
+echo "<published-sha256>  /tmp/codex-cli.tar.gz" | sha256sum -c -
+tar -xzf /tmp/codex-cli.tar.gz -C /opt/codex-cli
+mv \
+  /opt/codex-cli/codex-aarch64-unknown-linux-musl \
+  /opt/codex-cli/codex
+chmod 0755 /opt/codex-cli/codex
+ln -sf /opt/codex-cli/codex /usr/local/bin/codex
+codex --version
+```
+
+Record the exact version and checksum in the deployment log. To force a specific
+binary without relying on `PATH`, export `VIBELUTION_CODEX_PATH=/opt/codex-cli/codex`
+for the launcher process. The resolver checks, in order: `VIBELUTION_CODEX_PATH`,
+`PATH` lookup of `codex` (on Windows additionally the OpenAI local install
+directory and `codex.exe`); when no binary is found the sandbox fails closed and
+Agent shell commands are refused instead of falling back to an unsandboxed mode.
+
+### Startup Capability Probe
+
+On first use the backend resolves the Codex binary and host shell automatically.
+Validate the deployment before accepting traffic:
+
+```sh
+codex --version
+codex sandbox --help
+```
+
+`codex sandbox --help` must list the workspace-write sandbox subcommand. If the
+probe fails, Agent `exec_command`/`cli_tool` return
+`CODEX_SANDBOX_UNAVAILABLE` and never execute the command outside the sandbox.
+
+### Real Sandbox Acceptance
+
+From a workspace-write Agent turn, run a bounded command and verify the child
+process behavior:
+
+1. the argv uses `codex sandbox -c 'sandbox_mode="workspace-write"' -- <shell> -c ...`
+   with **no** `windows.sandbox` configuration on Linux;
+2. the sandbox temp directory under `<workspace>/.runtime/codex-cli/` is created
+   with mode `0700` and contains no `sitecustomize.py`;
+3. `VIBELUTION_CONFIG_PATH` points into the sandbox temp directory
+   (`.../vibelution-config/config.toml`);
+4. no provider/API/token/secret/password/credential/SSH environment variable is
+   inherited by the child (PATH, locale and runtime variables are preserved);
+5. timeout/cancel/`write_stdin` sessions terminate the process group without
+   invoking `taskkill` (POSIX uses the existing descendant-termination
+   mechanism plus the sandbox's own process group);
+6. `danger_full_access` commands still run without a Codex binary, through the
+   host Unix shell, under the same security classification and cwd boundary.

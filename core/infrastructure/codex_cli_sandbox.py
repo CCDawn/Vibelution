@@ -1,21 +1,43 @@
-"""Execute Agent CLI commands through the Codex native Windows sandbox."""
+"""Execute Agent CLI commands through the automatically selected native sandbox.
+
+The host platform, Codex CLI executable and shell are resolved automatically at
+startup/first use; Agent-facing contracts (``exec_command`` / ``cli_tool`` /
+``write_stdin``) never select Windows, Linux, Shell or Codex backend.  Public
+session/cwd/security/timeout/cancel orchestration stays here; platform-specific
+executable/shell/sandbox argv lives in ``core.infrastructure.codex_sandbox``.
+"""
 
 from __future__ import annotations
 
 import hashlib
 import locale
 import os
-import shlex
 import shutil
 import subprocess
 import threading
 import time
 import uuid
-from pathlib import Path, PureWindowsPath
+from pathlib import Path
 from typing import Any, Callable
 
 from core.logging import debug_logger as _debug_logger
-from scripts.windowless_subprocess import no_window_subprocess_kwargs
+from core.infrastructure.codex_sandbox.environment import (
+    sandbox_process_environment as _adapter_sandbox_process_environment,
+)
+from core.infrastructure.codex_sandbox.platform import host_platform as _host_platform
+from core.infrastructure.codex_sandbox.process import (
+    sandbox_popen_kwargs as _sandbox_popen_kwargs,
+    terminate_process_tree as _adapter_terminate_process_tree,
+)
+from core.infrastructure.codex_sandbox.resolver import (
+    resolve_codex_executable as _resolve_codex_executable_impl,
+)
+from core.infrastructure.codex_sandbox.shell import (
+    create_shell_adapter,
+    powershell_executable as _powershell_executable,
+    unix_shell_executable as _unix_shell_executable,
+    windows_command_interpreter as _windows_command_interpreter,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -23,79 +45,8 @@ _POLL_INTERVAL_SECONDS = 0.2
 _TERMINAL_SESSION_MAX_OUTPUT_CHARS = 120_000
 _TERMINAL_SESSION_TTL_SECONDS = 15 * 60
 _TERMINAL_SESSION_MAX_LIFETIME_SECONDS = 15 * 60
-_WINDOWS_COMMAND_ENV = "VIBELUTION_CODEX_SANDBOX_COMMAND"
-_VIBELUTION_DATA_HOME_ENV = "VIBELUTION_DATA_HOME"
-_VIBELUTION_CONFIG_HOME_ENV = "VIBELUTION_CONFIG_HOME"
-_VIBELUTION_CONFIG_PATH_ENV = "VIBELUTION_CONFIG_PATH"
-_CANDIDATE_RUNTIME_ENVIRONMENT_POLICY = "candidate_runtime"
 _WORKSPACE_WRITE_SANDBOX_MODE = "workspace_write"
 _DANGER_FULL_ACCESS_SANDBOX_MODE = "danger_full_access"
-_CANDIDATE_RUNTIME_ENV_ALLOWLIST = {
-    "ALLUSERSPROFILE",
-    "COMSPEC",
-    "NUMBER_OF_PROCESSORS",
-    "OS",
-    "PATH",
-    "PATHEXT",
-    "PROCESSOR_ARCHITECTURE",
-    "PROCESSOR_IDENTIFIER",
-    "PROCESSOR_LEVEL",
-    "PROCESSOR_REVISION",
-    "PROGRAMDATA",
-    "SYSTEMDRIVE",
-    "SYSTEMROOT",
-    "WINDIR",
-}
-_WINDOWS_CHAIN_BUILTINS = {
-    "cd",
-    "cls",
-    "copy",
-    "dir",
-    "echo",
-    "md",
-    "mkdir",
-    "move",
-    "popd",
-    "pushd",
-    "rd",
-    "ren",
-    "rename",
-    "rmdir",
-    "set",
-    "type",
-    "where",
-}
-_PYTHON_SITECUSTOMIZE = """\
-import os
-from pathlib import Path
-
-_sandbox_temp = Path(os.environ["VIBELUTION_CODEX_SANDBOX_TEMP"]).resolve()
-_original_mkdir = os.mkdir
-_original_chmod = os.chmod
-
-
-def _inside_sandbox_temp(path):
-    try:
-        return Path(path).resolve().is_relative_to(_sandbox_temp)
-    except (OSError, TypeError, ValueError):
-        return False
-
-
-def _sandbox_mkdir(path, mode=0o777, *args, **kwargs):
-    if _inside_sandbox_temp(path):
-        mode = 0o777
-    return _original_mkdir(path, mode, *args, **kwargs)
-
-
-def _sandbox_chmod(path, mode, *args, **kwargs):
-    if _inside_sandbox_temp(path):
-        return None
-    return _original_chmod(path, mode, *args, **kwargs)
-
-
-os.mkdir = _sandbox_mkdir
-os.chmod = _sandbox_chmod
-"""
 
 
 def _current_agent_sandbox_mode() -> str:
@@ -143,25 +94,12 @@ def _log_outcome(
 
 
 def _resolve_codex_executable() -> str:
-    """Resolve a native Codex executable without relying on shell wrappers."""
-
-    local_bin = Path(os.environ.get("LOCALAPPDATA", "")) / "OpenAI" / "Codex" / "bin"
-    if local_bin.is_dir():
-        try:
-            candidates = sorted(
-                local_bin.glob("*/codex.exe"),
-                key=lambda path: path.stat().st_mtime,
-                reverse=True,
-            )
-        except OSError:
-            candidates = []
-        if candidates:
-            return str(candidates[0].resolve())
-
-    resolved = shutil.which("codex.exe")
-    if resolved and Path(resolved).is_file():
-        return str(Path(resolved).resolve())
-    return ""
+    """Resolve the native Codex executable for the live host (fail closed)."""
+    return _resolve_codex_executable_impl(
+        platform=_host_platform(),
+        environ=os.environ,
+        which=shutil.which,
+    )
 
 
 def _resolve_cwd(cwd: str | None) -> Path:
@@ -185,288 +123,6 @@ def _resolve_cwd(cwd: str | None) -> Path:
     return resolved
 
 
-def _windows_command_interpreter() -> str:
-    candidate = str(os.environ.get("COMSPEC") or "").strip()
-    if candidate and Path(candidate).is_file():
-        return candidate
-    system_root = str(os.environ.get("SystemRoot") or r"C:\Windows").strip()
-    fallback = Path(system_root) / "System32" / "cmd.exe"
-    return str(fallback) if fallback.is_file() else "cmd.exe"
-
-
-def _powershell_executable() -> str:
-    resolved = shutil.which("powershell.exe")
-    if resolved and Path(resolved).is_file():
-        return resolved
-    system_root = str(os.environ.get("SystemRoot") or r"C:\Windows").strip()
-    fallback = Path(system_root) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
-    return str(fallback) if fallback.is_file() else "powershell.exe"
-
-
-def _has_unquoted_shell_operator(command: str) -> bool:
-    quote = ""
-    escaped = False
-    for character in command:
-        if escaped:
-            escaped = False
-            continue
-        if character == "^" and not quote:
-            escaped = True
-            continue
-        if character in {'"', "'"}:
-            if quote == character:
-                quote = ""
-            elif not quote:
-                quote = character
-            continue
-        if not quote and character in {"&", "|", "<", ">"}:
-            return True
-    return False
-
-
-def _direct_executable_argv(command: str) -> list[str]:
-    if _has_unquoted_shell_operator(command):
-        return []
-    tokens = _split_windows_command_line(command)
-    if not tokens:
-        return []
-    executable = tokens[0]
-    explicit_relative = executable.startswith((".\\", "./"))
-    if (
-        not (
-            Path(executable).is_absolute()
-            or PureWindowsPath(executable).is_absolute()
-            or explicit_relative
-        )
-        or not executable.lower().endswith(".exe")
-    ):
-        return []
-    return tokens
-
-
-def _split_windows_command_line(command: str) -> list[str]:
-    """Parse one Windows command line using CRT-compatible quote rules."""
-
-    args: list[str] = []
-    index = 0
-    length = len(command)
-    while index < length:
-        while index < length and command[index].isspace():
-            index += 1
-        if index >= length:
-            break
-        current: list[str] = []
-        in_quotes = False
-        while index < length:
-            if command[index].isspace() and not in_quotes:
-                break
-            backslashes = 0
-            while index < length and command[index] == "\\":
-                backslashes += 1
-                index += 1
-            if index < length and command[index] == '"':
-                current.extend("\\" for _ in range(backslashes // 2))
-                if backslashes % 2:
-                    current.append('"')
-                else:
-                    in_quotes = not in_quotes
-                index += 1
-                continue
-            current.extend("\\" for _ in range(backslashes))
-            if index >= length:
-                break
-            current.append(command[index])
-            index += 1
-        if in_quotes:
-            return []
-        args.append("".join(current))
-    return args
-
-
-def _explicit_powershell_argv(command: str) -> list[str]:
-    """Preserve a model-issued PowerShell command as one native argv payload.
-
-    ``cmd /c`` changes the quoting boundary for ``powershell -Command`` under
-    ``codex sandbox`` and can make PowerShell echo the command text rather than
-    execute it. Only recognize the explicit ``-Command``/``-c`` form; opaque
-    forms such as ``-EncodedCommand`` continue through the existing route and
-    security checks.
-    """
-
-    try:
-        tokens = shlex.split(command, posix=False)
-    except ValueError:
-        return []
-    normalized = [
-        token[1:-1]
-        if len(token) >= 2 and token[0] == token[-1] and token[0] in {'"', "'"}
-        else token
-        for token in tokens
-    ]
-    if not normalized:
-        return []
-    executable = Path(normalized[0]).name.lower()
-    if executable not in {"powershell", "powershell.exe"}:
-        return []
-    command_index = next(
-        (
-            index
-            for index, value in enumerate(normalized[1:], start=1)
-            if value.lower() in {"-command", "-c"}
-        ),
-        -1,
-    )
-    if command_index < 0 or command_index >= len(normalized) - 1:
-        return []
-    command_payload = " ".join(normalized[command_index + 1 :]).strip()
-    if not command_payload:
-        return []
-    return [
-        _powershell_executable(),
-        *normalized[1:command_index],
-        normalized[command_index],
-        command_payload,
-    ]
-
-
-def _explicit_powershell_argv(command: str) -> list[str]:
-    """Preserve a model-issued PowerShell command as one native argv payload.
-
-    ``cmd /c`` changes the quoting boundary for ``powershell -Command`` under
-    ``codex sandbox`` and can make PowerShell echo the command text rather than
-    execute it. Only recognize the explicit ``-Command``/``-c`` form; opaque
-    forms such as ``-EncodedCommand`` continue through the existing route and
-    security checks.
-    """
-
-    try:
-        tokens = shlex.split(command, posix=False)
-    except ValueError:
-        return []
-    normalized = [
-        token[1:-1]
-        if len(token) >= 2 and token[0] == token[-1] and token[0] in {'"', "'"}
-        else token
-        for token in tokens
-    ]
-    if not normalized:
-        return []
-    executable = Path(normalized[0]).name.lower()
-    if executable not in {"powershell", "powershell.exe"}:
-        return []
-    command_index = next(
-        (
-            index
-            for index, value in enumerate(normalized[1:], start=1)
-            if value.lower() in {"-command", "-c"}
-        ),
-        -1,
-    )
-    if command_index < 0 or command_index >= len(normalized) - 1:
-        return []
-    command_payload = " ".join(normalized[command_index + 1 :]).strip()
-    if not command_payload:
-        return []
-    return [
-        _powershell_executable(),
-        *normalized[1:command_index],
-        normalized[command_index],
-        command_payload,
-    ]
-
-
-def _split_unquoted_and_chain(command: str) -> list[str]:
-    segments: list[str] = []
-    current: list[str] = []
-    quote = ""
-    escaped = False
-    index = 0
-    while index < len(command):
-        character = command[index]
-        if escaped:
-            current.append(character)
-            escaped = False
-            index += 1
-            continue
-        if character == "^" and not quote:
-            current.append(character)
-            escaped = True
-            index += 1
-            continue
-        if character in {'"', "'"}:
-            if quote == character:
-                quote = ""
-            elif not quote:
-                quote = character
-            current.append(character)
-            index += 1
-            continue
-        if not quote and character == "&":
-            if index + 1 >= len(command) or command[index + 1] != "&":
-                return []
-            segment = "".join(current).strip()
-            if not segment:
-                return []
-            segments.append(segment)
-            current = []
-            index += 2
-            continue
-        if not quote and character in {"|", "<", ">"}:
-            return []
-        current.append(character)
-        index += 1
-    segment = "".join(current).strip()
-    if not segment:
-        return []
-    segments.append(segment)
-    return segments if len(segments) > 1 else []
-
-
-def _is_native_windows_command_segment(command: str) -> bool:
-    try:
-        tokens = shlex.split(command, posix=False)
-    except ValueError:
-        return False
-    if not tokens:
-        return False
-    executable = tokens[0]
-    if (
-        len(executable) >= 2
-        and executable[0] == executable[-1]
-        and executable[0] in {'"', "'"}
-    ):
-        executable = executable[1:-1]
-    normalized = executable.strip()
-    if not normalized:
-        return False
-    lowered_name = Path(normalized).name.lower()
-    if lowered_name in {"bash", "bash.exe", "sh", "sh.exe", "wsl", "wsl.exe"}:
-        return False
-    if lowered_name in _WINDOWS_CHAIN_BUILTINS:
-        return True
-    resolved = shutil.which(normalized)
-    if not resolved:
-        return False
-    resolved_text = str(Path(resolved).resolve()).replace("/", "\\").lower()
-    if "\\git\\usr\\bin\\" in resolved_text:
-        return False
-    return Path(resolved).suffix.lower() in {".exe", ".com", ".cmd", ".bat"}
-
-
-def _is_native_windows_and_chain(command: str) -> bool:
-    segments = _split_unquoted_and_chain(command)
-    return bool(segments) and all(
-        _is_native_windows_command_segment(segment)
-        for segment in segments
-    )
-
-
-def _is_native_windows_command(command: str) -> bool:
-    if _is_native_windows_and_chain(command):
-        return True
-    if _has_unquoted_shell_operator(command):
-        return False
-    return _is_native_windows_command_segment(command)
 
 
 def _sandbox_process_environment(
@@ -475,69 +131,13 @@ def _sandbox_process_environment(
     *,
     environment_policy: str = "default",
 ) -> tuple[dict[str, str], Path]:
-    temp_root = (workdir / ".runtime" / "codex-cli").resolve()
-    if not temp_root.is_relative_to(workdir):
-        raise RuntimeError("Codex CLI 沙盒临时目录越出工作区")
-    sandbox_temp = (
-        temp_root
-        / f"{command_hash}-{os.getpid()}-{time.monotonic_ns()}"
-    ).resolve()
-    if not sandbox_temp.is_relative_to(temp_root):
-        raise RuntimeError("Codex CLI 沙盒临时目录解析异常")
-    sandbox_temp.mkdir(parents=True, exist_ok=False)
-    (sandbox_temp / "sitecustomize.py").write_text(
-        _PYTHON_SITECUSTOMIZE,
-        encoding="utf-8",
+    """Build the sandbox child environment for the live host platform."""
+    return _adapter_sandbox_process_environment(
+        workdir,
+        command_hash,
+        environment_policy=environment_policy,
+        platform=_host_platform(),
     )
-    sandbox_data_home = sandbox_temp / "vibelution-data"
-    sandbox_config_home = sandbox_temp / "vibelution-config"
-    sandbox_data_home.mkdir()
-    sandbox_config_home.mkdir()
-
-    if environment_policy == _CANDIDATE_RUNTIME_ENVIRONMENT_POLICY:
-        environment = {
-            name: value
-            for name, value in os.environ.items()
-            if name.upper() in _CANDIDATE_RUNTIME_ENV_ALLOWLIST
-        }
-        sandbox_user_home = sandbox_temp / "user-home"
-        sandbox_appdata = sandbox_user_home / "AppData" / "Roaming"
-        sandbox_localappdata = sandbox_user_home / "AppData" / "Local"
-        sandbox_appdata.mkdir(parents=True)
-        sandbox_localappdata.mkdir(parents=True)
-        environment.update(
-            {
-                "APPDATA": str(sandbox_appdata),
-                "HOME": str(sandbox_user_home),
-                "LOCALAPPDATA": str(sandbox_localappdata),
-                "USERPROFILE": str(sandbox_user_home),
-                "PYTHONNOUSERSITE": "1",
-            }
-        )
-    else:
-        environment = os.environ.copy()
-    for name in ("TMP", "TEMP", "TMPDIR"):
-        environment[name] = str(sandbox_temp)
-    relative_temp = sandbox_temp.relative_to(workdir).as_posix()
-    pytest_options = (
-        f"--basetemp={relative_temp}/pytest "
-        f"-o cache_dir={relative_temp}/pytest-cache"
-    )
-    existing_pytest_options = str(environment.get("PYTEST_ADDOPTS") or "").strip()
-    environment["PYTEST_ADDOPTS"] = " ".join(
-        part for part in (existing_pytest_options, pytest_options) if part
-    )
-    existing_python_path = str(environment.get("PYTHONPATH") or "").strip()
-    environment["PYTHONPATH"] = os.pathsep.join(
-        part for part in (str(sandbox_temp), existing_python_path) if part
-    )
-    environment["VIBELUTION_CODEX_SANDBOX_TEMP"] = str(sandbox_temp)
-    environment[_VIBELUTION_DATA_HOME_ENV] = str(sandbox_data_home)
-    environment[_VIBELUTION_CONFIG_HOME_ENV] = str(sandbox_config_home)
-    environment[_VIBELUTION_CONFIG_PATH_ENV] = str(
-        sandbox_config_home / "config.toml"
-    )
-    return environment, sandbox_temp
 
 
 def _cleanup_sandbox_temp(workdir: Path, sandbox_temp: Path | None) -> None:
@@ -557,84 +157,35 @@ def _sandbox_argv(
     git_bash_executable: str = "",
     sandbox_mode: str = _WORKSPACE_WRITE_SANDBOX_MODE,
 ) -> list[str]:
-    if os.name != "nt":
-        raise RuntimeError("当前 Codex CLI 沙盒接入仅支持原生 Windows")
-    if sandbox_mode == _WORKSPACE_WRITE_SANDBOX_MODE:
-        if not str(executable or "").strip():
-            raise RuntimeError("Codex CLI sandbox executable is required")
-        prefix = [
-            executable,
-            "sandbox",
-            "-c",
-            'windows.sandbox="unelevated"',
-            "-c",
-            'sandbox_mode="workspace-write"',
-            "--",
-        ]
-    elif sandbox_mode == _DANGER_FULL_ACCESS_SANDBOX_MODE:
-        prefix = []
-    else:
-        raise RuntimeError(f"Unsupported Agent sandbox mode: {sandbox_mode}")
-    direct_argv = _direct_executable_argv(route.command)
-    if direct_argv:
-        return prefix + direct_argv
-    explicit_powershell_argv = _explicit_powershell_argv(route.command)
-    if explicit_powershell_argv:
-        return prefix + explicit_powershell_argv
-    if route.route == "git_bash" and _is_native_windows_command(route.command):
-        return prefix + [
-            _windows_command_interpreter(),
-            "/d",
-            "/v:off",
-            "/s",
-            "/c",
-            "call",
-            f"%{_WINDOWS_COMMAND_ENV}%",
-        ]
-    if route.route == "powershell":
-        return prefix + [
-            _powershell_executable(),
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            route.command,
-        ]
-    if route.route == "git_bash" and git_bash_executable:
-        return prefix + [git_bash_executable, "-c", route.command]
-    return prefix + [
-        _windows_command_interpreter(),
-        "/d",
-        "/s",
-        "/c",
-        route.command,
-    ]
+    """Build the sandbox argv for the live host platform (auto-selected)."""
+    return create_shell_adapter(
+        platform=_host_platform(),
+        windows_command_interpreter_fn=_windows_command_interpreter,
+        powershell_executable_fn=_powershell_executable,
+        unix_shell_executable_fn=_unix_shell_executable,
+        which=shutil.which,
+    ).sandbox_argv(
+        executable,
+        route,
+        git_bash_executable=git_bash_executable,
+        sandbox_mode=sandbox_mode,
+    )
+
+
+def _describe_sandbox_route(route: Any) -> tuple[bool, str, str]:
+    """Return ``(is_native_windows_command, command_env_var, route_label)``."""
+    return create_shell_adapter(
+        platform=_host_platform(),
+        windows_command_interpreter_fn=_windows_command_interpreter,
+        powershell_executable_fn=_powershell_executable,
+        unix_shell_executable_fn=_unix_shell_executable,
+        which=shutil.which,
+    ).describe_route(route)
 
 
 def _terminate_process_tree(process: subprocess.Popen[str]) -> None:
-    if process.poll() is not None:
-        return
-    try:
-        subprocess.run(
-            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=5,
-            check=False,
-            **no_window_subprocess_kwargs(),
-        )
-    except Exception:
-        try:
-            process.terminate()
-        except Exception:
-            pass
-    try:
-        process.wait(timeout=2)
-    except Exception:
-        try:
-            process.kill()
-        except Exception:
-            pass
+    """Terminate the sandbox process tree for the live host platform."""
+    _adapter_terminate_process_tree(process, platform=_host_platform())
 
 
 def _collect_output(process: subprocess.Popen[str]) -> tuple[str, str]:
@@ -984,9 +535,11 @@ def start_codex_sandbox_terminal_session(
     )
     if sandbox_mode == _WORKSPACE_WRITE_SANDBOX_MODE and not executable:
         _log_outcome(command_hash, "unavailable", reason="codex_executable_missing")
-        return _terminal_error_payload("CODEX_SANDBOX_UNAVAILABLE", "未找到原生 codex.exe；命令未执行。")
+        return _terminal_error_payload("CODEX_SANDBOX_UNAVAILABLE", "未找到原生 Codex CLI 可执行文件（codex.exe / codex）；命令未执行。")
     timeout_seconds = _clamp_terminal_timeout(timeout, default=60, minimum=1, maximum=_TERMINAL_SESSION_MAX_LIFETIME_SECONDS)
-    is_native_windows_command = route.route == "git_bash" and _is_native_windows_command(route.command)
+    is_native_windows_command, command_env_name, _route_label = _describe_sandbox_route(
+        route
+    )
     argv = _sandbox_argv(
         executable,
         route,
@@ -1001,9 +554,9 @@ def start_codex_sandbox_terminal_session(
             command_hash,
             environment_policy=_environment_policy,
         )
-        environment.pop(_WINDOWS_COMMAND_ENV, None)
+        environment.pop(command_env_name, None)
         if is_native_windows_command:
-            environment[_WINDOWS_COMMAND_ENV] = route.command
+            environment[command_env_name] = route.command
         process = subprocess.Popen(
             argv,
             shell=False,
@@ -1015,7 +568,7 @@ def start_codex_sandbox_terminal_session(
             text=True,
             encoding=encoding,
             errors="replace",
-            **no_window_subprocess_kwargs(),
+            **_sandbox_popen_kwargs(platform=_host_platform()),
         )
     except (FileNotFoundError, PermissionError) as exc:
         _cleanup_sandbox_temp(workdir, sandbox_temp)
@@ -1102,7 +655,7 @@ def execute_codex_sandbox_command(
     _cancel_checker: Callable[[], str] | None = None,
     _environment_policy: str = "default",
 ) -> str:
-    """Run one shell command in the Codex workspace-write Windows sandbox."""
+    """Run one shell command in the automatically selected native sandbox."""
 
     normalized_command = str(command or "").strip()
     if not normalized_command:
@@ -1141,7 +694,7 @@ def execute_codex_sandbox_command(
     if sandbox_mode == _WORKSPACE_WRITE_SANDBOX_MODE and not executable:
         _log_outcome(command_hash, "unavailable", reason="codex_executable_missing")
         return (
-            "[错误] Codex CLI 沙盒不可用：未找到原生 codex.exe。"
+            "[错误] Codex CLI 沙盒不可用：未找到原生 Codex CLI（codex.exe / codex）。"
             "命令未执行，也未回退到非沙盒模式。"
         )
 
@@ -1150,8 +703,8 @@ def execute_codex_sandbox_command(
     except (TypeError, ValueError):
         timeout_seconds = 60
 
-    is_native_windows_command = (
-        route.route == "git_bash" and _is_native_windows_command(route.command)
+    is_native_windows_command, command_env_name, route_label = _describe_sandbox_route(
+        route
     )
     argv = _sandbox_argv(
         executable,
@@ -1159,12 +712,6 @@ def execute_codex_sandbox_command(
         git_bash_executable=_find_git_bash() if route.route == "git_bash" else "",
         sandbox_mode=sandbox_mode,
     )
-    is_native_windows_chain = (
-        is_native_windows_command and bool(_split_unquoted_and_chain(route.command))
-    )
-    route_label = route.route
-    if is_native_windows_command:
-        route_label = "windows_native_chain" if is_native_windows_chain else "windows_native"
     _debug_logger.info(
         f"[Codex CLI 沙盒] 启动 commandHash={command_hash} "
         f"route={route_label} sandboxMode={sandbox_mode} "
@@ -1180,9 +727,9 @@ def execute_codex_sandbox_command(
             command_hash,
             environment_policy=_environment_policy,
         )
-        environment.pop(_WINDOWS_COMMAND_ENV, None)
+        environment.pop(command_env_name, None)
         if is_native_windows_command:
-            environment[_WINDOWS_COMMAND_ENV] = route.command
+            environment[command_env_name] = route.command
         process = subprocess.Popen(
             argv,
             shell=False,
@@ -1193,7 +740,7 @@ def execute_codex_sandbox_command(
             text=True,
             encoding=encoding,
             errors="replace",
-            **no_window_subprocess_kwargs(),
+            **_sandbox_popen_kwargs(platform=_host_platform()),
         )
         deadline = started_at + timeout_seconds
         while True:
@@ -1263,7 +810,7 @@ def execute_codex_sandbox_command(
             started_at=started_at,
         )
         return (
-            "[错误] Codex CLI 沙盒启动失败：codex.exe 或命令解释器不存在。"
+            "[错误] Codex CLI 沙盒启动失败：Codex CLI 或命令解释器不存在。"
             "命令未执行，也未回退到非沙盒模式。"
         )
     except PermissionError:

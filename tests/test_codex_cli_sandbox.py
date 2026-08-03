@@ -10,18 +10,18 @@ from tools import shell_tools
 from tools.shell_tools import workspace_root_override
 
 
-def test_resolver_prefers_user_local_binary_over_windowsapps_path(monkeypatch, tmp_path):
+def test_resolver_prefers_user_local_binary_over_windowsapps_path(tmp_path):
+    from core.infrastructure.codex_sandbox import resolver
+
     local_executable = tmp_path / "OpenAI" / "Codex" / "bin" / "current" / "codex.exe"
     local_executable.parent.mkdir(parents=True)
     local_executable.write_bytes(b"codex")
-    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
-    monkeypatch.setattr(
-        codex_cli_sandbox.shutil,
-        "which",
-        lambda name: r"C:\Program Files\WindowsApps\OpenAI.Codex\codex.exe",
-    )
 
-    resolved = codex_cli_sandbox._resolve_codex_executable()
+    resolved = resolver.resolve_codex_executable(
+        platform="windows",
+        environ={"LOCALAPPDATA": str(tmp_path)},
+        which=lambda name: r"C:\Program Files\WindowsApps\OpenAI.Codex\codex.exe",
+    )
 
     assert resolved == str(local_executable.resolve())
 
@@ -123,7 +123,7 @@ def test_execute_uses_native_codex_sandbox_without_shell(monkeypatch, tmp_path):
         "VIBELUTION_CONFIG_PATH",
         str(tmp_path.parent / "formal-vibelution-config" / "config.toml"),
     )
-    monkeypatch.setattr(codex_cli_sandbox.os, "name", "nt")
+    monkeypatch.setattr(codex_cli_sandbox, "_host_platform", lambda: "windows")
     monkeypatch.setattr(
         codex_cli_sandbox,
         "_resolve_codex_executable",
@@ -196,7 +196,7 @@ def test_execute_uses_native_codex_sandbox_without_shell(monkeypatch, tmp_path):
 
 
 def test_sandbox_runs_rewritten_python_command_without_cmd_quote_roundtrip(monkeypatch):
-    monkeypatch.setattr(codex_cli_sandbox.os, "name", "nt")
+    monkeypatch.setattr(codex_cli_sandbox, "_host_platform", lambda: "windows")
     python_executable = r"C:\Project\.venv\Scripts\python.exe"
     route = SimpleNamespace(
         route="cmd",
@@ -210,7 +210,7 @@ def test_sandbox_runs_rewritten_python_command_without_cmd_quote_roundtrip(monke
 
 
 def test_sandbox_runs_relative_python_command_with_escaped_code_quotes_without_cmd_roundtrip(monkeypatch):
-    monkeypatch.setattr(codex_cli_sandbox.os, "name", "nt")
+    monkeypatch.setattr(codex_cli_sandbox, "_host_platform", lambda: "windows")
     route = SimpleNamespace(
         route="cmd",
         command=r'.\.venv\Scripts\python.exe -c "print(\"READY\")"',
@@ -227,7 +227,7 @@ def test_sandbox_runs_relative_python_command_with_escaped_code_quotes_without_c
 
 
 def test_sandbox_runs_explicit_powershell_command_without_cmd_quote_roundtrip(monkeypatch):
-    monkeypatch.setattr(codex_cli_sandbox.os, "name", "nt")
+    monkeypatch.setattr(codex_cli_sandbox, "_host_platform", lambda: "windows")
     monkeypatch.setattr(
         codex_cli_sandbox,
         "_powershell_executable",
@@ -249,7 +249,7 @@ def test_sandbox_runs_explicit_powershell_command_without_cmd_quote_roundtrip(mo
 
 
 def test_full_access_argv_bypasses_codex_workspace_write_sandbox(monkeypatch):
-    monkeypatch.setattr(codex_cli_sandbox.os, "name", "nt")
+    monkeypatch.setattr(codex_cli_sandbox, "_host_platform", lambda: "windows")
     monkeypatch.setattr(
         codex_cli_sandbox,
         "_windows_command_interpreter",
@@ -276,7 +276,7 @@ def test_full_access_argv_bypasses_codex_workspace_write_sandbox(monkeypatch):
 
 def test_execute_full_access_does_not_require_codex_sandbox_binary(monkeypatch, tmp_path):
     recorded = {}
-    monkeypatch.setattr(codex_cli_sandbox.os, "name", "nt")
+    monkeypatch.setattr(codex_cli_sandbox, "_host_platform", lambda: "windows")
     monkeypatch.setattr(
         codex_cli_sandbox,
         "_current_agent_sandbox_mode",
@@ -314,7 +314,7 @@ def test_execute_full_access_does_not_require_codex_sandbox_binary(monkeypatch, 
 
 
 def test_sandbox_uses_cmd_for_native_windows_and_chain(monkeypatch):
-    monkeypatch.setattr(codex_cli_sandbox.os, "name", "nt")
+    monkeypatch.setattr(codex_cli_sandbox, "_host_platform", lambda: "windows")
     monkeypatch.setattr(
         codex_cli_sandbox,
         "_windows_command_interpreter",
@@ -353,7 +353,7 @@ def test_sandbox_uses_cmd_for_native_windows_and_chain(monkeypatch):
 
 
 def test_sandbox_uses_cmd_for_single_native_windows_command(monkeypatch):
-    monkeypatch.setattr(codex_cli_sandbox.os, "name", "nt")
+    monkeypatch.setattr(codex_cli_sandbox, "_host_platform", lambda: "windows")
     monkeypatch.setattr(
         codex_cli_sandbox,
         "_windows_command_interpreter",
@@ -390,7 +390,7 @@ def test_execute_passes_native_windows_chain_through_environment(monkeypatch, tm
         "git": r"C:\Program Files\Git\cmd\git.exe",
         "rg": r"C:\Codex\bin\rg.exe",
     }
-    monkeypatch.setattr(codex_cli_sandbox.os, "name", "nt")
+    monkeypatch.setattr(codex_cli_sandbox, "_host_platform", lambda: "windows")
     monkeypatch.setattr(
         codex_cli_sandbox,
         "_resolve_codex_executable",
@@ -434,7 +434,7 @@ def test_execute_passes_native_windows_chain_through_environment(monkeypatch, tm
 
 
 def test_sandbox_keeps_unix_and_chain_on_git_bash(monkeypatch):
-    monkeypatch.setattr(codex_cli_sandbox.os, "name", "nt")
+    monkeypatch.setattr(codex_cli_sandbox, "_host_platform", lambda: "windows")
     monkeypatch.setattr(codex_cli_sandbox.shutil, "which", lambda name: None)
     command = 'ls && grep -n "candidate" README.md'
     route = SimpleNamespace(route="git_bash", command=command)
@@ -453,7 +453,7 @@ def test_sandbox_keeps_unix_and_chain_on_git_bash(monkeypatch):
 
 
 def test_sandbox_keeps_single_unix_command_on_git_bash(monkeypatch):
-    monkeypatch.setattr(codex_cli_sandbox.os, "name", "nt")
+    monkeypatch.setattr(codex_cli_sandbox, "_host_platform", lambda: "windows")
     monkeypatch.setattr(
         codex_cli_sandbox.shutil,
         "which",
@@ -476,7 +476,7 @@ def test_sandbox_keeps_single_unix_command_on_git_bash(monkeypatch):
 
 
 def test_sandbox_routes_native_command_with_quoted_and_through_cmd(monkeypatch):
-    monkeypatch.setattr(codex_cli_sandbox.os, "name", "nt")
+    monkeypatch.setattr(codex_cli_sandbox, "_host_platform", lambda: "windows")
     monkeypatch.setattr(
         codex_cli_sandbox,
         "_windows_command_interpreter",
@@ -758,7 +758,7 @@ def test_execute_terminates_sandbox_when_cancelled(monkeypatch, tmp_path):
     process = _RunningProcess()
     terminated = {"value": False}
 
-    monkeypatch.setattr(codex_cli_sandbox.os, "name", "nt")
+    monkeypatch.setattr(codex_cli_sandbox, "_host_platform", lambda: "windows")
     monkeypatch.setattr(
         codex_cli_sandbox,
         "_resolve_codex_executable",
@@ -787,3 +787,92 @@ def test_execute_terminates_sandbox_when_cancelled(monkeypatch, tmp_path):
     assert terminated["value"] is True
     assert "[取消]" in result
     assert "用户停止" in result
+
+
+# ---------------------------------------------------------------------------
+# Linux / injected-platform behavior (never mutates the global os.name)
+# ---------------------------------------------------------------------------
+
+def test_linux_workspace_write_argv_has_no_windows_configuration(monkeypatch):
+    monkeypatch.setattr(codex_cli_sandbox, "_host_platform", lambda: "linux")
+    monkeypatch.setattr(codex_cli_sandbox, "_unix_shell_executable", lambda: "/bin/bash")
+    route = SimpleNamespace(route="bash", command="pwd && ls -la")
+    executable = "/opt/codex-cli/codex"
+
+    argv = codex_cli_sandbox._sandbox_argv(executable, route)
+
+    assert argv[0] == executable
+    assert argv[1] == "sandbox"
+    assert 'sandbox_mode="workspace-write"' in argv
+    assert "windows.sandbox" not in argv
+    assert "codex.exe" not in " ".join(argv)
+    assert argv[-3:] == ["/bin/bash", "-c", "pwd && ls -la"]
+
+
+def test_linux_full_access_argv_uses_unix_shell_without_codex(monkeypatch):
+    monkeypatch.setattr(codex_cli_sandbox, "_host_platform", lambda: "linux")
+    monkeypatch.setattr(codex_cli_sandbox, "_unix_shell_executable", lambda: "/bin/bash")
+    route = SimpleNamespace(route="bash", command="echo unrestricted")
+
+    argv = codex_cli_sandbox._sandbox_argv(
+        "",
+        route,
+        sandbox_mode="danger_full_access",
+    )
+
+    assert argv == ["/bin/bash", "-c", "echo unrestricted"]
+    assert "sandbox" not in argv
+    assert "codex" not in " ".join(argv).lower()
+
+
+def test_linux_execute_does_not_install_windows_sitecustomize(monkeypatch, tmp_path):
+    monkeypatch.setattr(codex_cli_sandbox, "_host_platform", lambda: "linux")
+    monkeypatch.setenv("OPENAI_API_KEY", "top-secret")
+
+    environment, sandbox_temp = codex_cli_sandbox._sandbox_process_environment(
+        tmp_path,
+        "linux-temp",
+    )
+
+    assert not (sandbox_temp / "sitecustomize.py").exists()
+    assert "OPENAI_API_KEY" not in environment
+    assert Path(environment["VIBELUTION_CONFIG_PATH"]) == (
+        sandbox_temp / "vibelution-config" / "config.toml"
+    )
+
+
+def test_default_environment_scrubs_credential_entries(monkeypatch, tmp_path):
+    monkeypatch.setenv("OPENAI_API_KEY", "api-secret")
+    monkeypatch.setenv("VIBELUTION_LLM_RELAY_TOKEN", "relay-token")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "aws-secret")
+    monkeypatch.setenv("DB_PASSWORD", "db-password")
+    monkeypatch.setenv("GIT_SSH_COMMAND", "ssh -i /tmp/id_rsa")
+    monkeypatch.setenv("PATH", str(tmp_path))
+    monkeypatch.setenv("LANG", "en_US.UTF-8")
+
+    environment, _sandbox_temp = codex_cli_sandbox._sandbox_process_environment(
+        tmp_path,
+        "credential-scrub",
+    )
+
+    for name in (
+        "OPENAI_API_KEY",
+        "VIBELUTION_LLM_RELAY_TOKEN",
+        "AWS_SECRET_ACCESS_KEY",
+        "DB_PASSWORD",
+        "GIT_SSH_COMMAND",
+    ):
+        assert name not in environment
+    assert environment["PATH"] == str(tmp_path)
+    assert environment["LANG"] == "en_US.UTF-8"
+    assert "PYTHONPATH" in environment
+    assert environment["VIBELUTION_CONFIG_PATH"].endswith("config.toml")
+
+
+def test_platform_probe_does_not_depend_on_mutated_os_name():
+    import os
+
+    from core.infrastructure.codex_sandbox.platform import host_platform
+
+    assert host_platform() in {"windows", "linux", "darwin"}
+    assert os.name in {"nt", "posix"}  # real global value; never rewritten
