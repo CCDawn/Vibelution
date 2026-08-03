@@ -55,52 +55,46 @@ const styles = {
   itemIconWarning: cx("itemIconWarning", "text-[var(--state-warning)]"),
   itemBody: cx(
     "itemBody",
-    "inline-flex w-full max-w-full min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 [font-size:var(--vui-font-xs)] leading-[1.45] text-[var(--fg-tertiary)]",
+    // Single-line Codex tool row: icon + plain action + muted subject + duration.
+    "inline-flex w-full max-w-full min-w-0 items-center gap-x-1.5 [font-size:var(--vui-font-xs)] leading-[1.4] text-[var(--fg-tertiary)]",
   ),
-  // Codex-style pill pair: action | status
+  // Plain action label (no chip chrome). data-codex-tool-action-pill kept for tests/selectors.
+  actionLabel: cx(
+    "actionLabel",
+    "shrink-0 font-medium text-[var(--fg-secondary)]",
+  ),
+  // Legacy alias used by tests / external selectors that still reference actionPill.
   actionPill: cx(
     "actionPill",
-    "inline-flex shrink-0 items-center rounded-full border border-[color-mix(in_srgb,var(--fg-tertiary)_22%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--vui-control-muted)_72%,transparent)] px-2 py-[0.12rem] [font-size:var(--vui-font-xs)] font-medium leading-[1.35] text-[var(--fg-secondary)]",
+    "shrink-0 font-medium text-[var(--fg-secondary)]",
   ),
-  statusPill: cx(
-    "statusPill",
-    "inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-[0.12rem] [font-size:var(--vui-font-xs)] font-medium leading-[1.35]",
+  // Explicit status text only for failure / attention — never dual status chips.
+  statusLabel: cx(
+    "statusLabel",
+    "shrink-0 font-normal text-[var(--fg-tertiary)]",
   ),
-  statusPill_running: cx(
-    "statusPill_running",
-    "border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,transparent)] text-[var(--accent-cool)]",
-  ),
-  statusPill_completed: cx(
-    "statusPill_completed",
-    "border-[color-mix(in_srgb,var(--fg-tertiary)_20%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--vui-control-muted)_55%,transparent)] text-[var(--fg-tertiary)]",
-  ),
-  statusPill_failed: cx(
-    "statusPill_failed",
-    "border-[color-mix(in_srgb,var(--state-error)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-error)_10%,transparent)] text-[var(--state-error)]",
-  ),
-  statusPill_timeout: cx(
-    "statusPill_timeout",
-    "border-[color-mix(in_srgb,var(--state-warning)_34%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
-  ),
-  statusPill_attention: cx(
-    "statusPill_attention",
-    "border-[color-mix(in_srgb,var(--state-warning)_28%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_8%,transparent)] text-[var(--state-warning)]",
-  ),
-  statusPill_idle: cx(
-    "statusPill_idle",
-    "border-[color-mix(in_srgb,var(--fg-tertiary)_20%,var(--vui-border-subtle))] bg-transparent text-[var(--fg-tertiary)]",
-  ),
+  statusLabel_failed: cx("statusLabel_failed", "text-[var(--state-error)]"),
+  statusLabel_timeout: cx("statusLabel_timeout", "text-[var(--state-warning)]"),
+  statusLabel_attention: cx("statusLabel_attention", "text-[var(--state-warning)]"),
+  // Keep old keys so existing style-map tests fail clearly if reintroduced as chips.
+  statusPill: cx("statusPill", "shrink-0 font-normal text-[var(--fg-tertiary)]"),
+  statusPill_running: cx("statusPill_running", "text-[var(--accent-cool)]"),
+  statusPill_completed: cx("statusPill_completed", "text-[var(--fg-tertiary)]"),
+  statusPill_failed: cx("statusPill_failed", "text-[var(--state-error)]"),
+  statusPill_timeout: cx("statusPill_timeout", "text-[var(--state-warning)]"),
+  statusPill_attention: cx("statusPill_attention", "text-[var(--state-warning)]"),
+  statusPill_idle: cx("statusPill_idle", "text-[var(--fg-tertiary)]"),
   itemTitle: cx(
     "itemTitle",
     "min-w-0 max-w-full font-normal text-[var(--fg-tertiary)] [overflow-wrap:anywhere]",
   ),
   itemPreview: cx(
     "itemPreview",
-    "max-w-full min-w-0 truncate font-normal text-[color-mix(in_srgb,var(--fg-tertiary)_82%,transparent)] max-[719px]:whitespace-normal max-[719px]:[overflow-wrap:anywhere]",
+    "max-w-full min-w-0 flex-1 truncate font-normal text-[color-mix(in_srgb,var(--fg-tertiary)_78%,transparent)]",
   ),
   itemDuration: cx(
     "itemDuration",
-    "shrink-0 font-normal text-[color-mix(in_srgb,var(--fg-tertiary)_78%,transparent)]",
+    "ml-auto shrink-0 font-normal tabular-nums text-[color-mix(in_srgb,var(--fg-tertiary)_72%,transparent)]",
   ),
   itemDetailsBody: cx(
     "itemDetailsBody",
