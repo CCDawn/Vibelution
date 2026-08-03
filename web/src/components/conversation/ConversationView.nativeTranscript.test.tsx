@@ -1274,9 +1274,10 @@ describe("ConversationView native Codex transcript surface", () => {
       html.indexOf(">", technicalDetailsStart) + 1,
     );
     const traceStart = html.indexOf('aria-label="工具生命周期"');
-    expect(html).toMatch(/命令|正在运行|正在检查|已在 |已运行|处理中/);
+    expect(html).toMatch(/命令|正在运行|正在检查|已在 |已运行|处理中|运行中/);
     expect(html).toContain("处理中");
-    expect(html).not.toContain(">运行中<");
+    // Running tools use the unified status pill, not a bare timeline meta chip.
+    expect(html).toContain('data-codex-tool-status-kind="running"');
     expect(html).toContain("正在检查工作区");
     expect(detailsStart).toBeGreaterThan(-1);
     expect(traceStart).toBeGreaterThan(detailsStart);

@@ -5,7 +5,9 @@ import {
   completedToolPresentationSummary,
   conversationToolDetailPresentation,
   conversationToolPresentationLabel,
+  extractToolDisplayCommand,
   formatCodexStyleToolActivityLine,
+  normalizeToolActivityStatus,
 } from "./conversationToolPresentation";
 
 describe("conversation tool presentation", () => {
@@ -215,6 +217,23 @@ describe("conversation tool presentation", () => {
   });
 });
 
+describe("normalizeToolActivityStatus / extractToolDisplayCommand", () => {
+  it("maps legacy agent statuses onto the pill vocabulary", () => {
+    expect(normalizeToolActivityStatus("done")).toBe("completed");
+    expect(normalizeToolActivityStatus("success")).toBe("completed");
+    expect(normalizeToolActivityStatus("in_progress")).toBe("running");
+    expect(normalizeToolActivityStatus("error")).toBe("failed");
+    expect(normalizeToolActivityStatus("fallback")).toBe("degraded");
+  });
+
+  it("extracts display commands from argument bags", () => {
+    expect(extractToolDisplayCommand({ displayCommand: "pnpm test" })).toBe("pnpm test");
+    expect(extractToolDisplayCommand({ command: ["git", "status"] })).toBe("git status");
+    expect(extractToolDisplayCommand({ cmd: "echo hi" })).toBe("echo hi");
+    expect(extractToolDisplayCommand({})).toBe("");
+  });
+});
+
 describe("buildCodexToolActivityPills", () => {
   it("builds shell action/status pills with muted subject and duration", () => {
     expect(buildCodexToolActivityPills({
@@ -238,7 +257,7 @@ describe("buildCodexToolActivityPills", () => {
       displayCommand: "type README.md",
     })).toEqual({
       actionLabel: "执行命令",
-      statusLabel: "执行中",
+      statusLabel: "运行中",
       statusKind: "running",
       subject: "type README.md",
       durationLabel: "",
@@ -252,7 +271,7 @@ describe("buildCodexToolActivityPills", () => {
       language: "zh",
     })).toMatchObject({
       actionLabel: "代码图谱",
-      statusLabel: "失败",
+      statusLabel: "执行失败",
       statusKind: "failed",
     });
 

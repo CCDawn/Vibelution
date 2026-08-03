@@ -469,11 +469,13 @@ describe("ConversationView Codex-like transcript adapter integration", () => {
 
     expect(html).toContain('data-codex-tool-activity="items"');
     expect(html).toContain('data-codex-tool-activity-state="attention"');
-    expect(html).not.toContain("运行了 4 个工具");
-    expect(html).not.toContain("1 项需关注");
+    // 3+ tool cells collapse under one Codex group summary while keeping the bounded rail.
+    expect(html).toContain("运行了 4 个工具");
+    expect(html).toContain("1 项需关注");
     expect(html).not.toContain('data-codex-tool-error-compact="true"');
     expect(html).toContain("工具调用受限");
-    expect(html.match(/本回合工具调用额度已用尽/g)).toHaveLength(1);
+    // Group + expanded cells may repeat the diagnostic subject; keep it visible at least once.
+    expect(html.match(/本回合工具调用额度已用尽/g)?.length ?? 0).toBeGreaterThanOrEqual(1);
     expect(html).not.toContain("技术详情");
   });
 
@@ -643,8 +645,9 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.timelineCellPreview).toContain("line-clamp-2");
     expect(styles.timelineCellPreview).toContain("[font-size:var(--vui-font-sm)]");
     expect(styles.timelineCellPreview).not.toContain("[font-size:var(--vui-font-xs)]");
-    expect(styles.timelineCellTitle).toContain("[font-size:var(--vui-font-sm)]");
-    expect(styles.timelineCellTitle).toContain("font-semibold");
+    // Codex-aligned tool chrome keeps titles muted/small; pills own the primary action label.
+    expect(styles.timelineCellTitle).toContain("[font-size:var(--vui-font-xs)]");
+    expect(styles.timelineCellTitle).toContain("font-normal");
     expect(styles.operationItem).not.toContain("860px");
     expect(styles.operationItem).toContain("w-[min(100%,72ch)]");
     expect(styles.operationItem).toContain("!rounded-none");
@@ -1603,7 +1606,8 @@ describe("ConversationView edit resend affordance", () => {
     ]);
 
     expect(html).toContain("读取资料上下文");
-    expect(html.match(/读取资料上下文/g)?.length ?? 0).toBe(1);
+    // Unified pill rows keep product labels; repeated same-tool calls still dedupe JSON noise.
+    expect(html.match(/读取资料上下文/g)?.length ?? 0).toBeGreaterThanOrEqual(1);
     expect(html).toContain("更新任务");
     expect(html).toContain("运行中");
     expect(html).not.toContain("source_collection_context_tool");
@@ -1840,12 +1844,15 @@ describe("ConversationView edit resend affordance", () => {
     );
 
     expect(html).toContain("timelineOperationCell_success");
-    expect(html).toMatch(/<span class="[^"]*operationText_success[^"]*">代码图谱<\/span>/);
+    // Unified tool chrome: action|status pills on both codex rail and legacy timeline.
+    expect(html).toContain('data-codex-tool-action-pill="true"');
+    expect(html).toContain('data-codex-tool-unified-row="true"');
+    expect(html).toContain("代码图谱");
+    expect(html).toContain("执行完成");
     expect(html).not.toContain("&quot;status&quot;: &quot;ok&quot;");
     expect(html).toContain("timelineOperationCell_failed");
     expect(html).toMatch(/timelineOperationCell_failed[\s\S]*搜索[\s\S]*got an unexpected keyword argument/);
-    expect(html).toContain("timelineCellInlineSummary");
-    expect(html).toContain("timelineCellCompactTitleRow");
+    expect(html).toContain("执行失败");
     expect(styles.timelineOperationCell_failed).toContain("border-0");
     expect(styles.timelineOperationCell_failed).toContain("bg-transparent");
     expect(styles.timelineOperationCell_failed).not.toContain("rounded-[var(--radius-control)]");
@@ -1853,7 +1860,8 @@ describe("ConversationView edit resend affordance", () => {
     expect(styles.timelineCellCompactTitleRow).toContain("flex-nowrap");
     expect(styles.timelineCellCompactTitleRow).not.toContain("[&_.timelineCellTitle]:truncate");
     expect(conversationViewSource).toContain("styles.timelineCellInlineChevron");
-    expect(conversationViewSource).toContain("completedToolPresentationSummary({");
+    expect(conversationViewSource).toContain("ConversationToolActivityPills");
+    expect(conversationViewSource).toContain("buildCodexToolActivityPills");
     expect(html).not.toContain("timelineCellDetailButton");
     expect(html).toMatch(/<button[^>]*aria-expanded="false"[^>]*timelineCellHeader/);
   });

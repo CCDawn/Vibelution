@@ -98,6 +98,7 @@ describe("ConversationToolActivity", () => {
     expect(html).toContain('data-codex-tool-status-pill="true"');
     expect(html).toContain('data-codex-tool-status-kind="completed"');
     expect(html).toContain("执行完成");
+    // completed shell row keeps command as subject, not a prose "已在 … 内运行" line
     expect(html).toContain("type README.md");
     expect(html).toContain("1.2s");
     expect(html).not.toContain("已在 1.2s 内运行 type README.md");

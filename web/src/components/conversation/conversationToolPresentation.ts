@@ -332,7 +332,12 @@ function extractToolSubject(options: {
       continue;
     }
     // Skip raw JSON / protocol noise that is not human-readable subject text.
-    if (text.startsWith("{") || text.startsWith("[") || /^["']?status["']?\s*[:=]/i.test(text)) {
+    // Keep human diagnostics that merely start with a bracket tag, e.g. "[超时] …".
+    if (
+      text.startsWith("{")
+      || (text.startsWith("[") && /^\[\s*[{"]/.test(text))
+      || /^["']?status["']?\s*[:=]/i.test(text)
+    ) {
       continue;
     }
     // Prefer path-looking fragments for edit tools.
@@ -365,6 +370,47 @@ export type CodexToolActivityPills = {
 };
 
 /**
+ * Normalize legacy agent-operation statuses (done/success/in_progress/…) onto the
+ * pill status vocabulary so both render paths share one mapper.
+ */
+export function normalizeToolActivityStatus(status: string | undefined | null) {
+  const normalized = String(status || "").trim().toLowerCase();
+  if (["done", "success", "completed", "succeeded", "ok"].includes(normalized)) {
+    return "completed";
+  }
+  if (["running", "in_progress", "active", "working"].includes(normalized)) {
+    return "running";
+  }
+  if (["pending", "queued", "waiting"].includes(normalized)) {
+    return "pending";
+  }
+  if (["failed", "error", "cancelled", "canceled"].includes(normalized)) {
+    return "failed";
+  }
+  if (["degraded", "fallback", "partial", "unavailable", "recovered"].includes(normalized)) {
+    return "degraded";
+  }
+  return normalized;
+}
+
+/** Pull a human command string from tool argument bags used by legacy ops. */
+export function extractToolDisplayCommand(args?: Record<string, unknown> | null) {
+  if (!args) {
+    return "";
+  }
+  for (const key of ["displayCommand", "command", "cmd"]) {
+    const value = args[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+    if (Array.isArray(value) && value.length > 0) {
+      return value.map(String).join(" ").trim();
+    }
+  }
+  return "";
+}
+
+/**
  * Codex pill pair: action chip + status chip (e.g. 执行命令 | 执行完成).
  * Subject/command stays as optional muted text, not inside the pills.
  */
@@ -385,7 +431,7 @@ export function buildCodexToolActivityPills(options: {
 }): CodexToolActivityPills {
   const language = options.language;
   const toolName = String(options.toolName || "").trim().toLowerCase();
-  const status = String(options.status || "").trim().toLowerCase();
+  const status = normalizeToolActivityStatus(options.status);
   const timedOut = Boolean(options.timedOut)
     || /超时|timed?\s*out/i.test(`${options.toolSummary || ""} ${options.cellSummary || ""}`);
   const actionLabel = conversationToolPresentationLabel(toolName, language);
@@ -418,23 +464,70 @@ export function buildCodexToolActivityPills(options: {
     };
   }
 
+  // Preserve fine-grained degraded states before the generic mapper.
+  const rawStatus = String(options.status || "").trim().toLowerCase();
+  if (rawStatus === "fallback") {
+    return {
+      actionLabel,
+      statusLabel: language === "zh" ? "备用路径" : "Fallback",
+      statusKind: "attention",
+      subject,
+      durationLabel,
+    };
+  }
+  if (rawStatus === "partial") {
+    return {
+      actionLabel,
+      statusLabel: language === "zh" ? "部分结果" : "Partial",
+      statusKind: "attention",
+      subject,
+      durationLabel,
+    };
+  }
+  if (rawStatus === "unavailable") {
+    return {
+      actionLabel,
+      statusLabel: language === "zh" ? "不可用" : "Unavailable",
+      statusKind: "attention",
+      subject,
+      durationLabel,
+    };
+  }
+  if (rawStatus === "recovered") {
+    return {
+      actionLabel,
+      statusLabel: language === "zh" ? "已恢复" : "Recovered",
+      statusKind: "attention",
+      subject,
+      durationLabel,
+    };
+  }
+
   if (status === "running" || status === "pending") {
     return {
       actionLabel,
-      statusLabel: language === "zh" ? "执行中" : "Running",
+      statusLabel: language === "zh" ? "运行中" : "Running",
       statusKind: "running",
       subject,
       durationLabel,
     };
   }
 
-  if (status === "failed" || timedOut) {
+  // Failed wins over timeout heuristics so rows with timeout-ish error text still read as failures.
+  if (status === "failed") {
     return {
       actionLabel,
-      statusLabel: timedOut
-        ? (language === "zh" ? "超时" : "Timed out")
-        : (language === "zh" ? "失败" : "Failed"),
-      statusKind: timedOut ? "timeout" : "failed",
+      statusLabel: language === "zh" ? "执行失败" : "Failed",
+      statusKind: "failed",
+      subject,
+      durationLabel,
+    };
+  }
+  if (timedOut) {
+    return {
+      actionLabel,
+      statusLabel: language === "zh" ? "超时" : "Timed out",
+      statusKind: "timeout",
       subject,
       durationLabel,
     };
@@ -618,6 +711,7 @@ export function conversationToolPresentationLabel(
     read_file_tool: { zh: "读取文件", en: "Read file" },
     glob_tool: { zh: "列出文件", en: "List files" },
     code_symbol_tool: { zh: "代码图谱", en: "Code graph" },
+    code_graph_tool: { zh: "代码图谱", en: "Code graph" },
     explain_current_worktree_tool: {
       zh: "工作树详情",
       en: "Worktree details",
@@ -626,6 +720,7 @@ export function conversationToolPresentationLabel(
     get_current_goal_tool: { zh: "当前目标", en: "Current goal" },
     search_code_tool: { zh: "搜索代码", en: "Search code" },
     web_search_tool: { zh: "网页搜索", en: "Web search" },
+    batch_web_search_tool: { zh: "网页搜索", en: "Web search" },
     web_fetch_tool: { zh: "网页读取", en: "Read web page" },
     source_collection_context_tool: { zh: "读取资料上下文", en: "Read source context" },
     source_collection_stage_writeback_tool: { zh: "资料阶段写回", en: "Write source-stage result" },
@@ -641,6 +736,8 @@ export function conversationToolPresentationLabel(
     python_lint_tool: { zh: "代码检查", en: "Lint" },
     run_test_for_tool: { zh: "运行测试", en: "Run tests" },
     computer_use: { zh: "浏览器操作", en: "Computer use" },
+    image2_generate_tool: { zh: "生成图片", en: "Generate image" },
+    spawn_agent_tool: { zh: "派生代理", en: "Spawn agent" },
   };
   if (labels[lower]) {
     return labels[lower][language];
