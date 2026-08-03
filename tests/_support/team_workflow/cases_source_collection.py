@@ -4630,10 +4630,10 @@ def test_source_collection_stage_turn_completion_reconciles_feedback_event_check
     assert stored_task["taskToolProgress"]["source"] == "feedback_events"
 
 
-def test_source_collection_ingestion_reconciles_nested_decision_after_no_steward_pack(
+def test_source_collection_ingestion_reconciles_nested_approve_all_decision_after_no_steward_pack(
     tmp_path, monkeypatch
 ):
-    """A saved nested ingestion decision must recover without another model turn."""
+    """A saved approve-all ingestion decision must recover without another model turn."""
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)
     monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: None)
@@ -4695,11 +4695,10 @@ def test_source_collection_ingestion_reconciles_nested_decision_after_no_steward
     _append_stage_task_tool_trace(tmp_path, task)
     nested_result = {
         "ingestionDecision": {
-            "decision": "approved",
+            "decision": "approve_all",
             "approvedCandidateIds": [candidate["candidateId"]],
             "targetDomain": "神经机制启发神经网络算法",
         },
-        "stewardAssessment": {"decision": "approved", "reason": "候选已通过资料质检。"},
     }
     recovered_task = dict(task)
     recovered_task.update(
