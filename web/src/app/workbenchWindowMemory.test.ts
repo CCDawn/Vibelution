@@ -53,7 +53,18 @@ describe("workbenchWindowMemory", () => {
       observeWorkbenchWindowSize({
         outerWidth: 1605,
         outerHeight: 904,
+        screen: { availWidth: 1920, availHeight: 1080 } as Screen,
       }),
     ).toBe("1600x912");
+  });
+
+  it("clamps remembered window size to the available work area", () => {
+    expect(
+      observeWorkbenchWindowSize({
+        outerWidth: 2400,
+        outerHeight: 1400,
+        screen: { availWidth: 1536, availHeight: 864 } as Screen,
+      }),
+    ).toBe("1536x864");
   });
 });

@@ -36,14 +36,20 @@ export function observeWorkbenchWindowMode(
 }
 
 export function observeWorkbenchWindowSize(
-  win: Pick<Window, "outerWidth" | "outerHeight"> = window,
+  win: Pick<Window, "outerWidth" | "outerHeight" | "screen"> = window,
 ): string {
-  const width = Math.max(320, Math.round(Number(win.outerWidth) || 0));
-  const height = Math.max(240, Math.round(Number(win.outerHeight) || 0));
+  const rawWidth = Math.max(320, Math.round(Number(win.outerWidth) || 0));
+  const rawHeight = Math.max(240, Math.round(Number(win.outerHeight) || 0));
+  const availWidth = Math.max(320, Math.round(Number(win.screen?.availWidth) || rawWidth));
+  const availHeight = Math.max(240, Math.round(Number(win.screen?.availHeight) || rawHeight));
+  // Never persist a size larger than the work area — oversized --window-size can
+  // leave Edge app windows created but not visible on the next start.
+  const width = Math.min(rawWidth, availWidth);
+  const height = Math.min(rawHeight, availHeight);
   // Quantize slightly so micro-resizes do not thrash config writes.
   const qWidth = Math.round(width / SIZE_QUANTUM) * SIZE_QUANTUM;
   const qHeight = Math.round(height / SIZE_QUANTUM) * SIZE_QUANTUM;
-  return `${qWidth}x${qHeight}`;
+  return `${Math.max(320, qWidth)}x${Math.max(240, qHeight)}`;
 }
 
 async function persistObservedWindow(mode: ObservedWorkbenchWindowMode, size: string): Promise<void> {
