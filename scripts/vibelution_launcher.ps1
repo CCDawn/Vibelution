@@ -5062,6 +5062,205 @@ function Get-ManagedBrowserWindowProcess {
     return $null
 }
 
+function Test-WorkbenchWindowTitle {
+    param([string]$Title)
+    if ([string]::IsNullOrWhiteSpace($Title)) {
+        return $false
+    }
+    return ($Title -match "Vibelution|工作台|Workbench")
+}
+
+function Get-ManagedBrowserTopLevelWindows {
+    param(
+        [int[]]$ProcessIds = @()
+    )
+
+    if (-not $ProcessIds -or $ProcessIds.Count -eq 0) {
+        return @()
+    }
+    Ensure-WinApi
+    $pidSet = New-Object "System.Collections.Generic.HashSet[int]"
+    foreach ($processId in $ProcessIds) {
+        if ($processId -gt 0) {
+            [void]$pidSet.Add([int]$processId)
+        }
+    }
+    if ($pidSet.Count -eq 0) {
+        return @()
+    }
+
+    $found = New-Object System.Collections.Generic.List[object]
+    $callback = [VibelutionLauncher.WinApi+EnumWindowsProc]{
+        param([IntPtr]$hWnd, [IntPtr]$lParam)
+        $ownerPid = [uint32]0
+        [void][VibelutionLauncher.WinApi]::GetWindowThreadProcessId($hWnd, [ref]$ownerPid)
+        if (-not $pidSet.Contains([int]$ownerPid)) {
+            return $true
+        }
+        $rect = New-Object VibelutionLauncher.WinApi+RECT
+        if (-not [VibelutionLauncher.WinApi]::GetWindowRect($hWnd, [ref]$rect)) {
+            return $true
+        }
+        $width = [int]($rect.Right - $rect.Left)
+        $height = [int]($rect.Bottom - $rect.Top)
+        if ($width -lt 160 -or $height -lt 120) {
+            return $true
+        }
+        $titleLength = [VibelutionLauncher.WinApi]::GetWindowTextLength($hWnd)
+        $title = ""
+        if ($titleLength -gt 0) {
+            $builder = New-Object System.Text.StringBuilder ($titleLength + 1)
+            [void][VibelutionLauncher.WinApi]::GetWindowText($hWnd, $builder, $builder.Capacity)
+            $title = [string]$builder.ToString()
+        }
+        $found.Add([pscustomobject]@{
+            Hwnd = [int64]$hWnd.ToInt64()
+            Pid = [int]$ownerPid
+            Title = $title
+            Width = $width
+            Height = $height
+            Visible = [bool][VibelutionLauncher.WinApi]::IsWindowVisible($hWnd)
+            Iconic = [bool][VibelutionLauncher.WinApi]::IsIconic($hWnd)
+        }) | Out-Null
+        return $true
+    }
+    [void][VibelutionLauncher.WinApi]::EnumWindows($callback, [IntPtr]::Zero)
+    return @($found)
+}
+
+function Get-ManagedBrowserWindowScore {
+    param(
+        [Parameter(Mandatory = $true)]$Window
+    )
+
+    $title = [string]$Window.Title
+    $score = 0
+    if (Test-WorkbenchWindowTitle -Title $title) {
+        $score += 10000
+    } elseif (-not [string]::IsNullOrWhiteSpace($title)) {
+        $score += 500
+    }
+    if ($Window.Visible -and -not $Window.Iconic) {
+        $score += 1000
+    } elseif ($Window.Visible) {
+        $score += 400
+    } elseif ($Window.Iconic) {
+        $score += 200
+    }
+    $area = [math]::Max(0, [int]$Window.Width) * [math]::Max(0, [int]$Window.Height)
+    if (Test-WorkbenchWindowTitle -Title $title) {
+        $score += [math]::Min([int]([math]::Floor($area / 40000)), 80)
+        if ([int]$Window.Width -ge 640 -and [int]$Window.Height -ge 480) {
+            $score += 40
+        }
+    } else {
+        $score -= 2000
+        if ([string]::IsNullOrWhiteSpace($title)) {
+            $score -= 500
+        }
+    }
+    return $score
+}
+
+function Converge-ManagedBrowserWindows {
+    <#
+    .SYNOPSIS
+      Keep a single best workbench HWND under managed Edge --app PIDs; close blank shells.
+    #>
+    param(
+        [string]$ProfileDir = "",
+        [string]$Role = "workbench",
+        [int]$KnownWindowPid = 0,
+        [switch]$FocusKept
+    )
+
+    if (-not $ProfileDir) {
+        $profileDirVariable = Get-Variable -Scope Script -Name "browserProfileDir" -ErrorAction SilentlyContinue
+        if ($profileDirVariable) {
+            $ProfileDir = [string]$profileDirVariable.Value
+        }
+    }
+
+    $processIds = @()
+    if ($KnownWindowPid -gt 0) {
+        $processIds += [int]$KnownWindowPid
+    }
+    $processIds += @(Get-ManagedBrowserPids -ProfileDir $ProfileDir -Role $Role)
+    $processIds = @($processIds | Where-Object { $_ -gt 0 } | Sort-Object -Unique)
+    if ($processIds.Count -eq 0) {
+        return [pscustomobject]@{
+            KeptHwnd = 0
+            KeptPid = 0
+            KeptTitle = ""
+            ClosedHwnds = @()
+            CandidateCount = 0
+            Changed = $false
+        }
+    }
+
+    $candidates = @(Get-ManagedBrowserTopLevelWindows -ProcessIds $processIds)
+    if ($candidates.Count -eq 0) {
+        return [pscustomobject]@{
+            KeptHwnd = 0
+            KeptPid = 0
+            KeptTitle = ""
+            ClosedHwnds = @()
+            CandidateCount = 0
+            Changed = $false
+        }
+    }
+
+    $ranked = @($candidates | Sort-Object `
+        @{ Expression = { Get-ManagedBrowserWindowScore -Window $_ }; Descending = $true }, `
+        @{ Expression = { [int]$_.Width * [int]$_.Height }; Descending = $true }, `
+        @{ Expression = { [int64]$_.Hwnd }; Descending = $true })
+    $winner = $ranked[0]
+    $keptHwnd = [int64]$winner.Hwnd
+    $closed = New-Object System.Collections.Generic.List[int64]
+    Ensure-WinApi
+    foreach ($item in $ranked | Select-Object -Skip 1) {
+        $title = [string]$item.Title
+        if ($title -match "DevTools|Developer Tools") {
+            continue
+        }
+        $handle = [IntPtr][int64]$item.Hwnd
+        if ([VibelutionLauncher.WinApi]::PostMessage($handle, [VibelutionLauncher.WinApi]::WM_CLOSE, [IntPtr]::Zero, [IntPtr]::Zero)) {
+            $closed.Add([int64]$item.Hwnd) | Out-Null
+        }
+    }
+
+    if ($FocusKept -and $keptHwnd -ne 0) {
+        $handle = [IntPtr]$keptHwnd
+        [void][VibelutionLauncher.WinApi]::ShowWindow($handle, [VibelutionLauncher.WinApi]::SW_RESTORE)
+        [void][VibelutionLauncher.WinApi]::ShowWindow($handle, [VibelutionLauncher.WinApi]::SW_SHOW)
+        [void][VibelutionLauncher.WinApi]::SetForegroundWindow($handle)
+    }
+
+    $result = [pscustomobject]@{
+        KeptHwnd = $keptHwnd
+        KeptPid = [int]$winner.Pid
+        KeptTitle = [string]$winner.Title
+        ClosedHwnds = @($closed)
+        CandidateCount = [int]$candidates.Count
+        Changed = ($closed.Count -gt 0)
+    }
+    if ($result.Changed) {
+        Write-LauncherControlLog `
+            -Event "launcher.browser.window_converge.succeeded" `
+            -Message "Collapsed managed Edge workbench windows to a single kept HWND." `
+            -Fields @{
+                kept_hwnd = $result.KeptHwnd
+                kept_pid = $result.KeptPid
+                kept_title = $result.KeptTitle
+                closed_hwnds = @($result.ClosedHwnds)
+                candidate_count = $result.CandidateCount
+                profile_dir = $ProfileDir
+                window_purpose = $Role
+            }
+    }
+    return $result
+}
+
 function Wait-ForBrowserWindow {
     param(
         [int]$LaunchProcessId,
@@ -5185,7 +5384,51 @@ namespace VibelutionLauncher {
         public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
 
         [DllImport("user32.dll")]
+        public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+        [DllImport("user32.dll")]
         public static extern bool SetForegroundWindow(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        public static extern bool IsWindowVisible(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        public static extern bool IsIconic(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+
+        [DllImport("user32.dll")]
+        public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        public static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder lpString, int nMaxCount);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        public static extern int GetWindowTextLength(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct RECT {
+            public int Left;
+            public int Top;
+            public int Right;
+            public int Bottom;
+        }
+
+        public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+        public const uint WM_CLOSE = 0x0010;
+        public const int SW_RESTORE = 9;
+        public const int SW_SHOW = 5;
 
         [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         private static extern IntPtr LoadImage(IntPtr hInst, string lpszName, uint uType, int cxDesired, int cyDesired, uint fuLoad);
@@ -5340,8 +5583,19 @@ function Focus-ManagedBrowserWindow {
         }
     }
 
+    $converge = Converge-ManagedBrowserWindows `
+        -ProfileDir $ProfileDir `
+        -Role $Role `
+        -KnownWindowPid $KnownWindowPid `
+        -FocusKept
     $windowProcess = $null
-    if ($KnownWindowPid -gt 0) {
+    if ($converge.KeptPid -gt 0) {
+        try {
+            $windowProcess = Get-Process -Id ([int]$converge.KeptPid) -ErrorAction SilentlyContinue
+        } catch {
+        }
+    }
+    if (-not $windowProcess -and $KnownWindowPid -gt 0) {
         try {
             $knownProcess = Get-Process -Id $KnownWindowPid -ErrorAction SilentlyContinue
             if ($knownProcess -and $knownProcess.ProcessName -ieq "msedge" -and $knownProcess.MainWindowHandle -ne 0) {
@@ -5390,10 +5644,11 @@ function Focus-ManagedBrowserWindow {
     $appActivateResult = $false
     $focusError = ""
     Ensure-WinApi
+    $focusHandle = if ($converge.KeptHwnd -ne 0) { [IntPtr][int64]$converge.KeptHwnd } else { [IntPtr]$windowProcess.MainWindowHandle }
     try {
-        $showWindowResult = [bool][VibelutionLauncher.WinApi]::ShowWindowAsync([IntPtr]$windowProcess.MainWindowHandle, 9)
+        $showWindowResult = [bool][VibelutionLauncher.WinApi]::ShowWindowAsync($focusHandle, 9)
         Start-Sleep -Milliseconds 120
-        $setForegroundResult = [bool][VibelutionLauncher.WinApi]::SetForegroundWindow([IntPtr]$windowProcess.MainWindowHandle)
+        $setForegroundResult = [bool][VibelutionLauncher.WinApi]::SetForegroundWindow($focusHandle)
     } catch {
         $focusError = $_.Exception.Message
     }
@@ -5407,10 +5662,12 @@ function Focus-ManagedBrowserWindow {
         }
     }
 
-    $focused = [bool]($showWindowResult -or $setForegroundResult -or $appActivateResult)
+    $focused = [bool]($showWindowResult -or $setForegroundResult -or $appActivateResult -or ($converge.KeptHwnd -ne 0))
     $fields = @{
         window_pid = [int]$windowProcess.Id
-        main_window_handle = [string]$windowProcess.MainWindowHandle
+        main_window_handle = [string]$focusHandle
+        kept_hwnd = [int64]$converge.KeptHwnd
+        closed_hwnd_count = @($converge.ClosedHwnds).Count
         show_window = [bool]$showWindowResult
         set_foreground = [bool]$setForegroundResult
         app_activate = [bool]$appActivateResult
@@ -5756,7 +6013,7 @@ function Start-ManagedBrowser {
     $browserArgs = @(
         "--user-data-dir=$ProfileDir",
         "--app=$resolvedAppUrl",
-        # Avoid --force-dark-mode: conflicts with workbench data-theme and flickers Edge --app chrome.
+        # Do not force Chromium dark mode: it fights workbench data-theme and flickers Edge --app chrome.
         "--no-first-run",
         "--no-default-browser-check",
         "--disable-session-crashed-bubble",
@@ -5843,9 +6100,14 @@ function Start-ManagedBrowser {
     }
 
     $appIdentity = Set-ManagedBrowserWindowAppIdentity -WindowProcess $windowProcess -WindowPurpose $WindowPurpose
+    $converge = Converge-ManagedBrowserWindows `
+        -ProfileDir $ProfileDir `
+        -Role $WindowPurpose `
+        -KnownWindowPid ([int]$windowProcess.Id) `
+        -FocusKept
 
     if ($script:currentRuntimeSceneId) {
-        Update-RuntimeSceneManifest @{ browser = @{ status = "open"; executable = $BrowserExecutable; launch_pid = $proc.Id; window_pid = $windowProcess.Id; window_mode = $windowMode; configured_window_mode = $configuredWindowMode; window_size = $windowSize; configured_window_size = $configuredWindowSize; window_size_argument = $windowSizeArgument; window_policy = $windowPolicy; fullscreen_forced = $fullscreenForced; profile_dir = $ProfileDir; app_url = $resolvedAppUrl; window_purpose = $WindowPurpose; app_user_model_id = $appIdentity.AppUserModelId; icon_resource = $appIdentity.IconResource; app_identity_applied = [bool]$appIdentity.Applied; window_icon_applied = [bool]$appIdentity.WindowIconApplied } }
+        Update-RuntimeSceneManifest @{ browser = @{ status = "open"; executable = $BrowserExecutable; launch_pid = $proc.Id; window_pid = $windowProcess.Id; window_mode = $windowMode; configured_window_mode = $configuredWindowMode; window_size = $windowSize; configured_window_size = $configuredWindowSize; window_size_argument = $windowSizeArgument; window_policy = $windowPolicy; fullscreen_forced = $fullscreenForced; profile_dir = $ProfileDir; app_url = $resolvedAppUrl; window_purpose = $WindowPurpose; app_user_model_id = $appIdentity.AppUserModelId; icon_resource = $appIdentity.IconResource; app_identity_applied = [bool]$appIdentity.Applied; window_icon_applied = [bool]$appIdentity.WindowIconApplied; kept_hwnd = [int64]$converge.KeptHwnd; closed_hwnd_count = @($converge.ClosedHwnds).Count } }
         Append-RuntimeSceneRawLog -RelativePath (Get-RuntimeSceneRelativePaths).Browser -Message "Managed browser window opened (launch PID=$($proc.Id), window PID=$($windowProcess.Id))."
         Write-RuntimeSceneEvent `
             -Component "browser" `

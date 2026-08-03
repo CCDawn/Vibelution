@@ -3420,10 +3420,25 @@ foreach ($required in @(
     "browser_pids",
     "show_window",
     "set_foreground",
-    "app_activate"
+    "app_activate",
+    "Converge-ManagedBrowserWindows",
+    "kept_hwnd"
 )) {
     if ($focusText -notmatch [regex]::Escape($required)) {
         throw "Focus-ManagedBrowserWindow is missing trace field '$required'."
+    }
+}
+
+$convergeText = Get-LauncherFunctionText -Name "Converge-ManagedBrowserWindows"
+foreach ($required in @(
+    "Get-ManagedBrowserTopLevelWindows",
+    "Get-ManagedBrowserWindowScore",
+    "WM_CLOSE",
+    "Vibelution",
+    "launcher.browser.window_converge.succeeded"
+)) {
+    if ($convergeText -notmatch [regex]::Escape($required)) {
+        throw "Converge-ManagedBrowserWindows is missing required fragment '$required'."
     }
 }
 

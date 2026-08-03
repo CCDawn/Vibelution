@@ -869,6 +869,7 @@ def test_observe_workbench_keeps_launcher_control_surface_out_of_project_lifecyc
     )
     monkeypatch.setattr(workbench_controller, "LAUNCHER_STATE_PATH", launcher_state_path)
     monkeypatch.setattr(workbench_controller, "_is_process_alive", lambda pid: int(pid) == 4500)
+    monkeypatch.setattr(workbench_controller, "_is_browser_window_alive", lambda pid: int(pid) == 4500)
     monkeypatch.setattr(workbench_controller, "_is_backend_healthy", lambda url: False)
     monkeypatch.setattr(workbench_controller, "_listening_pid_for_port", lambda port: 0)
     monkeypatch.setattr(workbench_controller, "_port_is_listening_socket", lambda port: False)
@@ -903,6 +904,7 @@ def test_observe_workbench_reclassifies_launcher_surface_with_managed_backend_as
     )
     monkeypatch.setattr(workbench_controller, "LAUNCHER_STATE_PATH", launcher_state_path)
     monkeypatch.setattr(workbench_controller, "_is_process_alive", lambda pid: int(pid) in {4500, 52396})
+    monkeypatch.setattr(workbench_controller, "_is_browser_window_alive", lambda pid: int(pid) == 4500)
     monkeypatch.setattr(workbench_controller, "_is_backend_healthy", lambda url: True)
     monkeypatch.setattr(workbench_controller, "_listening_pid_for_port", lambda port: 52396)
     monkeypatch.setattr(workbench_controller, "_port_is_listening_socket", lambda port: True)
@@ -4636,6 +4638,7 @@ def test_observe_workbench_fast_closes_stale_workbench_state_without_slow_probes
         },
     )
     monkeypatch.setattr(workbench_controller, "_is_process_alive", lambda pid: int(pid) == 28296)
+    monkeypatch.setattr(workbench_controller, "_is_browser_window_alive", lambda pid: int(pid) == 28296)
     monkeypatch.setattr(workbench_controller, "_port_is_listening_socket", lambda port: False)
     monkeypatch.setattr(
         workbench_controller,
@@ -4680,6 +4683,7 @@ def test_observe_workbench_reports_orphaned_browser(monkeypatch):
         },
     )
     monkeypatch.setattr(workbench_controller, "_is_process_alive", lambda pid: pid == 12132)
+    monkeypatch.setattr(workbench_controller, "_is_browser_window_alive", lambda pid: int(pid) == 12132)
     monkeypatch.setattr(workbench_controller, "_is_backend_healthy", lambda url: False)
     monkeypatch.setattr(workbench_controller, "_listening_pid_for_port", lambda port: 0)
     monkeypatch.setattr(workbench_controller, "_port_is_listening_socket", lambda port: False)
@@ -4749,6 +4753,7 @@ def test_observe_workbench_reports_backend_launch_pid(monkeypatch):
         },
     )
     monkeypatch.setattr(workbench_controller, "_is_process_alive", lambda pid: pid in {25744, 39880})
+    monkeypatch.setattr(workbench_controller, "_is_browser_window_alive", lambda pid: int(pid) == 39880)
     monkeypatch.setattr(workbench_controller, "_is_backend_healthy", lambda url: True)
     monkeypatch.setattr(workbench_controller, "_listening_pid_for_port", lambda port: 25744)
     monkeypatch.setattr(workbench_controller, "_port_is_listening_socket", lambda port: True)
@@ -4778,6 +4783,7 @@ def test_observe_workbench_recovers_managed_browser_window_from_profile(monkeypa
         },
     )
     monkeypatch.setattr(workbench_controller, "_is_process_alive", lambda pid: pid in {25744, 4600})
+    monkeypatch.setattr(workbench_controller, "_is_browser_window_alive", lambda pid: int(pid) == 4600)
     monkeypatch.setattr(workbench_controller, "_is_backend_healthy", lambda url: True)
     monkeypatch.setattr(workbench_controller, "_listening_pid_for_port", lambda port: 25744)
     monkeypatch.setattr(workbench_controller, "_port_is_listening_socket", lambda port: True)
@@ -4881,6 +4887,7 @@ def test_observe_workbench_still_recovers_orphaned_browser_in_close_mode(monkeyp
         },
     )
     monkeypatch.setattr(workbench_controller, "_is_process_alive", lambda pid: int(pid) == 4600)
+    monkeypatch.setattr(workbench_controller, "_is_browser_window_alive", lambda pid: int(pid) == 4600)
     monkeypatch.setattr(workbench_controller, "_is_backend_healthy", lambda url: False)
     monkeypatch.setattr(workbench_controller, "_listening_pid_for_port", lambda port: 0)
     monkeypatch.setattr(workbench_controller, "_port_is_listening_socket", lambda port: False)
@@ -4895,6 +4902,97 @@ def test_observe_workbench_still_recovers_orphaned_browser_in_close_mode(monkeyp
     assert observation["browserWindowRecoveredPid"] == 4600
     assert observation["browserWindowRecoverySource"] == "managed_profile"
     assert observation["lifecycleConsistency"] == "orphaned_browser"
+
+
+def test_score_browser_window_prefers_titled_workbench_over_blank_shell():
+    titled_small = {
+        "hwnd": 101,
+        "title": "Vibelution 工作台",
+        "visible": True,
+        "iconic": False,
+        "width": 320,
+        "height": 240,
+    }
+    blank_large = {
+        "hwnd": 202,
+        "title": "",
+        "visible": True,
+        "iconic": False,
+        "width": 1536,
+        "height": 808,
+    }
+    assert workbench_controller._score_browser_window(titled_small) > workbench_controller._score_browser_window(blank_large)
+
+
+def test_converge_browser_windows_closes_blank_shell_and_keeps_workbench(monkeypatch):
+    candidates = [
+        {
+            "hwnd": 202,
+            "title": "",
+            "visible": True,
+            "iconic": False,
+            "width": 1536,
+            "height": 808,
+        },
+        {
+            "hwnd": 101,
+            "title": "Vibelution 工作台",
+            "visible": True,
+            "iconic": False,
+            "width": 320,
+            "height": 240,
+        },
+    ]
+    closed: list[int] = []
+    focused: list[int] = []
+    monkeypatch.setattr(workbench_controller.os, "name", "nt", raising=False)
+    monkeypatch.setattr(workbench_controller, "_iter_browser_candidate_windows", lambda pid: list(candidates))
+    monkeypatch.setattr(
+        workbench_controller,
+        "_close_browser_window_hwnd",
+        lambda hwnd: closed.append(int(hwnd)) or True,
+    )
+    monkeypatch.setattr(
+        workbench_controller,
+        "_focus_browser_window_hwnd",
+        lambda hwnd: focused.append(int(hwnd)) or True,
+    )
+
+    result = workbench_controller._converge_browser_windows(39060, focus_kept=True)
+
+    assert result["keptHwnd"] == 101
+    assert result["keptTitle"] == "Vibelution 工作台"
+    assert result["closedHwnds"] == [202]
+    assert result["candidateCount"] == 2
+    assert result["changed"] is True
+    assert focused == [101]
+
+
+def test_is_browser_window_alive_converges_dual_frames(monkeypatch):
+    monkeypatch.setattr(workbench_controller.os, "name", "nt", raising=False)
+    monkeypatch.setattr(workbench_controller, "_is_process_alive", lambda pid: int(pid) == 39060)
+    monkeypatch.setattr(
+        workbench_controller,
+        "_visible_top_level_window_handles",
+        lambda pid: [202, 101] if int(pid) == 39060 else [],
+    )
+    converge_calls: list[int] = []
+
+    def fake_converge(pid, focus_kept=True):
+        converge_calls.append(int(pid))
+        return {
+            "pid": int(pid),
+            "keptHwnd": 101,
+            "keptTitle": "Vibelution 工作台",
+            "closedHwnds": [202],
+            "candidateCount": 2,
+            "changed": True,
+        }
+
+    monkeypatch.setattr(workbench_controller, "_converge_browser_windows", fake_converge)
+
+    assert workbench_controller._is_browser_window_alive(39060) is True
+    assert converge_calls == [39060]
 
 
 def test_snapshot_residual_excluded_pids_includes_backend_launch_tree_root():
