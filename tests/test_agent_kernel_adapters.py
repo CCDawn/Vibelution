@@ -167,6 +167,7 @@ def test_agent_message_adapter_preserves_inbox_projection_metadata(tmp_path, mon
             "metadata": {
                 "sourceSessionId": "session-alpha",
                 "sourceMessageId": "tool-message-1",
+                "targetSessionId": "session-collab-landing",
                 "inboxKind": "agent_direct_message",
                 "messageSummary": "direct review request",
                 "agentToolMetadataJson": "{\"priority\":\"normal\"}",
@@ -179,10 +180,16 @@ def test_agent_message_adapter_preserves_inbox_projection_metadata(tmp_path, mon
     inbox = agent_directory_service.list_agent_inbox_messages_for_agent(agent["agentId"])[0]
     assert inbox["kind"] == "agent_direct_message"
     assert inbox["sourceSessionId"] == "session-alpha"
+    assert inbox["targetSessionId"] == "session-collab-landing"
     assert inbox["summary"] == "direct review request"
+    # SSOT: with targetSessionId, inbox stores preview only (summary), not a second full body authority.
+    assert inbox["content"] == "direct review request"
+    assert inbox["metadata"].get("ssot") == "session"
+    assert inbox["metadata"].get("bodyPreviewOnly") is True
     assert json.loads(inbox["metadata"]["agentToolMetadataJson"]) == {"priority": "normal"}
     assert inbox["metadata"]["kernelTaskId"] == payload["task"]["taskId"]
     assert inbox["metadata"]["kernelEventId"] == payload["event"]["eventId"]
+    assert payload["outcome"]["deliveries"][0]["targetSessionId"] == "session-collab-landing"
 
 
 def test_kernel_task_timeline_returns_read_model_with_delivery_and_projection_refs(tmp_path, monkeypatch) -> None:

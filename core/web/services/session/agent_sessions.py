@@ -1417,7 +1417,11 @@ def restore_direct_session_agent_deleted_tombstone(restore_token: dict[str, Any]
 
 
 def wake_agent_for_inbox_message(message: dict[str, Any]) -> dict[str, Any]:
-    """Start the target Agent's direct session so it can answer an inbox message."""
+    """Wake the collaboration target session so it can answer an inbox message.
+
+    ADR 0002: prefer explicit ``message.targetSessionId`` (session landing) over
+    rewriting to the Agent's current direct session.
+    """
     s = _service()
 
     message_id = str(message.get("messageId") or message.get("eventId") or "").strip()
@@ -1426,11 +1430,40 @@ def wake_agent_for_inbox_message(message: dict[str, Any]) -> dict[str, Any]:
     archived_target_agent = None if target_agent else (s.get_agent(target_agent_id, include_archived=True) if target_agent_id else None)
     persisted_target_session_id = str(message.get("targetSessionId") or "").strip()
     current_target_session_id = str((target_agent or {}).get("directSessionId") or "").strip()
-    target_session_id = (
+    # Prefer explicit session landing; only fall back to direct when unset.
+    target_session_id = persisted_target_session_id or (
         current_target_session_id
         if target_agent
-        else persisted_target_session_id or str((archived_target_agent or {}).get("directSessionId") or "").strip()
+        else str((archived_target_agent or {}).get("directSessionId") or "").strip()
     )
+    # If an explicit session was set, verify it still exists; else fall back to direct.
+    redirected_from_missing_session = False
+    if persisted_target_session_id:
+        try:
+            detail = s.get_session_detail(persisted_target_session_id, message_limit=0, transcript_scope="none")
+        except Exception:
+            detail = None
+        if not detail:
+            redirected_from_missing_session = True
+            target_session_id = current_target_session_id or persisted_target_session_id
+        else:
+            owner_agent_id = str(detail.get("agentId") or "").strip()
+            if owner_agent_id and target_agent_id and owner_agent_id != target_agent_id:
+                # Do not wake a foreign session; fail closed.
+                delivery = {
+                    "wakeRequested": True,
+                    "wakeStatus": "skipped_invalid_session",
+                    "messageId": message_id,
+                    "targetAgentId": target_agent_id,
+                    "targetSessionId": persisted_target_session_id,
+                    "persistedTargetSessionId": persisted_target_session_id,
+                    "targetSessionRedirected": False,
+                    "turnId": "",
+                    "reason": "session_agent_mismatch",
+                }
+                s._record_agent_inbox_wake_event("agent_inbox.wake_skipped", message, delivery, level="warning")
+                return delivery
+            target_session_id = persisted_target_session_id
     delivery = {
         "wakeRequested": True,
         "wakeStatus": "skipped",
@@ -1438,11 +1471,7 @@ def wake_agent_for_inbox_message(message: dict[str, Any]) -> dict[str, Any]:
         "targetAgentId": target_agent_id,
         "targetSessionId": target_session_id,
         "persistedTargetSessionId": persisted_target_session_id,
-        "targetSessionRedirected": bool(
-            target_agent
-            and persisted_target_session_id
-            and persisted_target_session_id != target_session_id
-        ),
+        "targetSessionRedirected": bool(redirected_from_missing_session),
         "turnId": "",
         "reason": "",
     }
