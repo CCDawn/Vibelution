@@ -28,6 +28,11 @@ const styles = {
     "min-w-0 grid content-start gap-1 [font-size:var(--vui-font-xs)] font-semibold text-[var(--fg-secondary)] [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
   fieldWide:
     "min-w-0 grid content-start gap-1 [font-size:var(--vui-font-xs)] font-semibold text-[var(--fg-secondary)] [&_input]:w-full [&_select]:w-full [&_textarea]:w-full md:col-span-2",
+  adapterChoices:
+    "min-w-0 grid grid-cols-[repeat(2,minmax(0,1fr))] gap-1 max-[720px]:grid-cols-[minmax(0,1fr)]",
+  adapterChoice: `min-h-10 min-w-0 w-full ${vuiOpaqueRowClass} !justify-start !whitespace-normal break-all px-2.5 py-2 text-left [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[color-mix(in_srgb,var(--accent-cool)_34%,var(--vui-border-subtle))] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent-cool)] disabled:cursor-not-allowed disabled:opacity-55`,
+  adapterChoiceActive:
+    "border-[color-mix(in_srgb,var(--accent-cool)_42%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] text-[var(--fg-primary)] shadow-[var(--vui-shadow-inset-accent)]",
   adapterStatus: `min-w-0 flex flex-wrap items-start gap-2 ${vuiOpaqueRowClass} px-2.5 py-2 [font-size:var(--vui-font-xs)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [&>div]:grid [&>div]:min-w-0 [&>div]:gap-0.5 [&_strong]:text-[var(--fg-primary)]`,
   adapterStatusReady:
     "border-[color-mix(in_srgb,var(--state-success)_36%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-success)_7%,var(--vui-surface-row))]",
