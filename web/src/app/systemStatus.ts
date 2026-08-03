@@ -32,6 +32,16 @@ export type StartupProgressState = {
   tone: SystemStatusTone;
 };
 
+export function shouldRenderStartupOverlay(
+  progress: StartupProgressState,
+  desktopShell: boolean,
+): boolean {
+  if (!progress.active) {
+    return false;
+  }
+  return desktopShell || progress.tone !== "caution";
+}
+
 type RuntimeSnapshot = Pick<RuntimeSummary, "runtimeManager" | "workbench">;
 type StartupRuntimeSnapshot = RuntimeSnapshot & Pick<RuntimeSummary, "lifecycleProof">;
 type StartupLoadingSnapshot = {

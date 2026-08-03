@@ -613,7 +613,8 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain("deriveStartupProgressState");
     expect(shellSource).toContain("deriveStartupDisconnectedState");
     expect(shellSource).toContain("startupDisconnectedProgress");
-    expect(shellSource).toContain("startupPanel.active");
+    expect(shellSource).toContain("shouldRenderStartupOverlay(startupPanel, desktopShell)");
+    expect(shellSource).toContain("startupOverlayActive");
     expect(shellSource).toContain("startupLoadingShouldBlock");
     expect(shellSource).toContain('startupLoadingProgress.tone === "failed"');
     expect(shellSource).toContain("runtimeQuery.isError || runtimeQuery.isRefetchError");
