@@ -135,6 +135,10 @@ import {
 } from "./conversationProcessScrollAnchor";
 import { ConversationToolActivity } from "./ConversationToolActivity";
 import {
+  ConversationToolActivityPills,
+  toolActivityAriaTitle,
+} from "./ConversationToolActivityPills";
+import {
   buildConversationTerminalToolDetail,
   ConversationTerminalToolDetail,
 } from "./ConversationTerminalToolDetail";
@@ -267,9 +271,12 @@ import {
 import { conversationOperationIconKind } from "./conversationOperationIconModel";
 import { getCachedResponseSegments as getCachedResponseSegmentsFromCache } from "./conversationResponseSegmentCache";
 import {
+  buildCodexToolActivityPills,
   completedToolPresentationSummary,
   conversationToolDetailPresentation,
   conversationToolPresentationLabel,
+  extractToolDisplayCommand,
+  type CodexToolActivityPills,
 } from "./conversationToolPresentation";
 import { VButton, VNativeInput, VNativeTextarea } from "../vui";
 import styles from "./ConversationView.styles";
@@ -2726,6 +2733,59 @@ export function ConversationView({
     return "";
   }
 
+  function buildLegacyToolActivityPills(
+    operation: AgentMessageOperation,
+    options?: {
+      status?: string;
+      title?: string;
+      summary?: string;
+      durationLabel?: string;
+    },
+  ): CodexToolActivityPills {
+    const rawToolName = String(
+      operation.rawLabel
+      || options?.title
+      || operation.label
+      || "",
+    ).trim();
+    const exitCode = typeof operation.exitCode === "number" ? operation.exitCode : null;
+    // Prefer rawStatus so fallback/partial survive timeline status normalization.
+    const status = operation.rawStatus || options?.status || operation.status;
+    const timedOut = Boolean(operation.timedOut)
+      || /超时|timed?\s*out/i.test(`${operation.summary || ""} ${operation.error || ""}`);
+    // Prefer product-facing labels (operation.label / timeline title) over raw tool ids.
+    const productActionLabel = [operation.label, options?.title]
+      .map((value) => String(value || "").trim())
+      .find((value) => value && value !== rawToolName && !/_tool$/i.test(value));
+    const normalizedStatus = String(status || "").trim().toLowerCase();
+    const isFailedRow = normalizedStatus === "failed"
+      || normalizedStatus === "error"
+      || timedOut;
+    // Failed rows surface diagnostics; completed rows keep command/summary only (not raw previews).
+    const diagnosticSubject = [
+      operation.error,
+      options?.summary,
+      operation.summary,
+    ].map((value) => String(value || "").trim()).find(Boolean) || "";
+    const pills = buildCodexToolActivityPills({
+      toolName: productActionLabel ? productActionLabel : rawToolName,
+      status,
+      language: lang === "en" ? "en" : "zh",
+      durationSeconds: operation.durationSeconds,
+      durationLabel: options?.durationLabel ?? formatDuration(operation.durationSeconds),
+      toolSummary: isFailedRow ? diagnosticSubject : operation.summary,
+      cellSummary: isFailedRow ? diagnosticSubject : (options?.summary || operation.summary),
+      resultPreview: isFailedRow ? diagnosticSubject : undefined,
+      displayCommand: isFailedRow ? "" : extractToolDisplayCommand(operation.arguments),
+      timedOut,
+      nonzeroExit: exitCode !== null && exitCode !== 0 && !isFailedRow,
+    });
+    if (productActionLabel && pills.actionLabel !== productActionLabel) {
+      return { ...pills, actionLabel: productActionLabel };
+    }
+    return pills;
+  }
+
   function renderCommandGroupTimelineItem(
     message: ConversationMessage,
     item: Extract<AgentMessageTimelineItem, { kind: "command_group" }>,
@@ -2739,14 +2799,24 @@ export function ConversationView({
         .filter((value): value is number => typeof value === "number" && Number.isFinite(value) && value > 0)
         .reduce((total, value) => total + value, 0),
     );
-    const visibleStatus = timelineStatusText(item);
+    const groupPills = buildCodexToolActivityPills({
+      toolName: "exec_command",
+      status: item.status,
+      language: lang === "en" ? "en" : "zh",
+      durationLabel: duration,
+      cellSummary: item.summary,
+    });
+    // Package title stays prominent; summary is the muted subject under the pill pair.
+    if (item.title?.trim()) {
+      groupPills.actionLabel = item.title.trim();
+    }
+    if (item.summary?.trim()) {
+      groupPills.subject = item.summary.trim();
+    }
     const statusTone = item.status === "completed" ? "success" : item.status === "degraded" ? "warning" : item.status;
     const timelineToneClassName = styles[`timelineOperationCell_${statusTone}` as keyof typeof styles] ?? "";
     const toneTextClassName = styles[`operationText_${statusTone}` as keyof typeof styles] ?? "";
-    const toneStatusClassName = styles[`operationStatus_${statusTone}` as keyof typeof styles] ?? "";
     const toneIconClassName = styles[`operationIcon_${statusTone}` as keyof typeof styles] ?? "";
-    const metaText = [visibleStatus, duration].filter(Boolean).join(" · ");
-    const visibleSummary = item.summary;
     const className = [
       styles.timelineOperationCell,
       timelineToneClassName,
@@ -2762,47 +2832,38 @@ export function ConversationView({
         contentLayout="plain"
           className={`${styles.timelineCellHeader} ${toneTextClassName}`}
           aria-expanded={expanded}
+          aria-label={toolActivityAriaTitle(groupPills)}
           onClick={() => toggleSection(message.id, item.id, false)}
           title={expanded ? t("executionDetailsVisible") : t("executionDetailsHidden")}
         >
-          <span className={`${styles.operationIcon} ${toneIconClassName}`}>
-            {isActiveTimelineItem && item.status === "running" ? <LoaderCircle className={styles.statusSpinner} size={14} /> : <TerminalSquare size={14} />}
-          </span>
-          <span className={styles.timelineCellBody}>
-            <span className={`${styles.timelineCellTitleRow} ${styles.timelineCellCompactTitleRow}`}>
-              <span className={`${styles.timelineCellTitle} ${toneTextClassName}`}>{item.title}</span>
-              {metaText ? <span className={`${styles.timelineCellMeta} ${toneStatusClassName}`}>{metaText}</span> : null}
-              {visibleSummary ? <span className={styles.timelineCellSeparator} aria-hidden="true">·</span> : null}
-              {visibleSummary ? <span className={styles.timelineCellInlineSummary}>{visibleSummary}</span> : null}
-            </span>
-          </span>
+          <ConversationToolActivityPills
+            pills={groupPills}
+            leadingIcon={(
+              <span className={`${styles.operationIcon} ${toneIconClassName}`}>
+                {isActiveTimelineItem && item.status === "running"
+                  ? <LoaderCircle className={styles.statusSpinner} size={14} />
+                  : <TerminalSquare size={14} />}
+              </span>
+            )}
+          />
           {expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
         </VButton>
         {expanded ? (
           <div className={styles.timelineCommandList}>
             {item.operations.map((operation) => {
-              const operationDuration = formatDuration(operation.durationSeconds);
-              const statusTone = operationStatusToneClassName(operation);
-              const operationTextClassName = styles[`operationText_${statusTone}` as keyof typeof styles] ?? "";
-              const operationStatusClassName = styles[`operationStatus_${statusTone}` as keyof typeof styles] ?? "";
-              const operationIconClassName = styles[`operationIcon_${statusTone}` as keyof typeof styles] ?? "";
-              const operationMetaText = [
-                operationStatusText(operation.status),
-                operationDuration,
-              ].filter(Boolean).join(" · ");
+              const operationIconClassName = styles[`operationIcon_${operationStatusToneClassName(operation)}` as keyof typeof styles] ?? "";
+              const pills = buildLegacyToolActivityPills(operation);
               return (
                 <div key={operation.id} className={styles.timelineCommandRow}>
-                  <span className={`${styles.operationIcon} ${operationIconClassName}`}>
-                    {operationStatusIcon(operation, isActiveTimelineItem)}
-                  </span>
-                  <span className={styles.timelineCellBody}>
-                    <span className={styles.timelineCellTitleRow}>
-                      <span className={`${styles.timelineCellTitle} ${operationTextClassName}`}>{operationLabel(operation)}</span>
-                      {operationMetaText ? <span className={`${styles.timelineCellMeta} ${operationStatusClassName}`}>{operationMetaText}</span> : null}
-                    </span>
-                    {operation.summary ? <span className={`${styles.timelineCellPreview} ${operationTextClassName}`}>{operation.summary}</span> : null}
-                    {renderRolloutTraceEvents(operation)}
-                  </span>
+                  <ConversationToolActivityPills
+                    pills={pills}
+                    leadingIcon={(
+                      <span className={`${styles.operationIcon} ${operationIconClassName}`}>
+                        {operationStatusIcon(operation, isActiveTimelineItem)}
+                      </span>
+                    )}
+                  />
+                  {renderRolloutTraceEvents(operation)}
                   {operation.error ? <span className={styles.timelineCommandError}>{operation.error}</span> : null}
                 </div>
               );
@@ -2859,15 +2920,35 @@ export function ConversationView({
       : statusTone === "failed" && operation.error?.trim()
         ? [item.summary, operation.error.trim()].filter(Boolean).join(" · ")
         : item.summary;
+    const toolPills = operation.kind === "tool"
+      ? buildLegacyToolActivityPills(operation, {
+          status: item.status,
+          title: rawToolName,
+          summary: item.summary || visibleSummary,
+          durationLabel: duration,
+        })
+      : null;
     const className = [
       styles.timelineOperationCell,
       timelineToneClassName,
     ].filter(Boolean).join(" ");
-    const headerContent = (
+    const leadingIcon = (
+      <span className={`${styles.operationIcon} ${toneIconClassName}`}>
+        {operationStatusIcon(operation, isActiveTimelineItem)}
+      </span>
+    );
+    const headerContent = toolPills ? (
       <>
-        <span className={`${styles.operationIcon} ${toneIconClassName}`}>
-          {operationStatusIcon(operation, isActiveTimelineItem)}
-        </span>
+        <ConversationToolActivityPills pills={toolPills} leadingIcon={leadingIcon} />
+        {canExpandDetails ? (
+          <span className={styles.timelineCellInlineChevron} aria-hidden="true">
+            {detailsExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+          </span>
+        ) : null}
+      </>
+    ) : (
+      <>
+        {leadingIcon}
         <span className={styles.timelineCellBody}>
           <span className={`${styles.timelineCellTitleRow} ${styles.timelineCellCompactTitleRow}`}>
             <span className={`${styles.timelineCellTitle} ${toneTextClassName}`}>{visibleTitle}</span>
@@ -2883,11 +2964,13 @@ export function ConversationView({
         </span>
       </>
     );
+    const headerAriaLabel = toolPills ? toolActivityAriaTitle(toolPills) : visibleTitle;
     return (
       <section
         key={agentMessageTimelineItemRowKey(rowIdentity, item)}
         className={className}
         data-conversation-part-key={agentMessageTimelineItemRowKey(rowIdentity, item)}
+        data-codex-tool-unified-row={toolPills ? "true" : undefined}
       >
         {canExpandDetails ? (
           <VButton
@@ -2895,6 +2978,7 @@ export function ConversationView({
             className={`${styles.timelineCellHeader} ${toneTextClassName}`}
             aria-expanded={detailsExpanded}
             aria-controls={detailsId}
+            aria-label={headerAriaLabel}
             onClick={() => toggleSection(operation.id, "details", false)}
             title={detailsExpanded ? t("toolCallDetailsVisible") : t("toolCallDetailsHidden")}
           >
@@ -2952,18 +3036,27 @@ export function ConversationView({
             const canExpandDetails = hasOperationDetails(operation);
             const computerUseResult = renderComputerUseResult(operation);
             const statusTone = operationStatusToneClassName(operation);
+            const pills = operation.kind === "tool"
+              ? buildLegacyToolActivityPills(operation)
+              : null;
             return (
               <div key={operation.id} className={`${styles.reActToolItem} ${styles[`operationItem_${statusTone}`]}`}>
                 <div className={`${styles.reActToolLine} ${styles[`operationItem_${statusTone}`]}`}>
-                  <span className={`${styles.reActToolName} ${styles[`operationText_${statusTone}`]}`}>{operationLabel(operation)}</span>
-                  {operation.summary ? (
+                  {pills ? (
+                    <ConversationToolActivityPills pills={pills} />
+                  ) : (
+                    <span className={`${styles.reActToolName} ${styles[`operationText_${statusTone}`]}`}>{operationLabel(operation)}</span>
+                  )}
+                  {!pills && operation.summary ? (
                     <span className={`${styles.reActToolSummary} ${styles[`operationText_${statusTone}`]}`}>{operation.summary}</span>
                   ) : null}
-                  <span className={`${styles.reActToolStatus} ${styles[`operationStatus_${statusTone}`]}`}>
-                    {operationStatusIcon(operation)}
-                    <span>{operationStatusText(operation.status)}</span>
-                    {duration ? <span>{duration}</span> : null}
-                  </span>
+                  {!pills ? (
+                    <span className={`${styles.reActToolStatus} ${styles[`operationStatus_${statusTone}`]}`}>
+                      {operationStatusIcon(operation)}
+                      <span>{operationStatusText(operation.status)}</span>
+                      {duration ? <span>{duration}</span> : null}
+                    </span>
+                  ) : null}
                   {canExpandDetails ? (
                     <VButton
                       type="button"
