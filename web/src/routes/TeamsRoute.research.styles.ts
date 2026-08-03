@@ -155,7 +155,7 @@ const styles = {
   challengeWorkspaceInspector:
     "challengeWorkspaceInspector min-w-0 w-full flex-1 !overflow-hidden !border-0 !bg-transparent",
   challengeWorkspaceLayout:
-    "challengeWorkspaceLayout min-w-0 w-full flex-1 !grid !grid-cols-[minmax(0,1fr)] !overflow-hidden !border-0 !bg-vui-surface-base !p-0",
+    "challengeWorkspaceLayout min-w-0 h-full max-h-full w-full flex-1 !grid !grid-cols-[minmax(0,1fr)] !overflow-hidden !border-0 !bg-vui-surface-base !p-0",
   researchStageGrid:
     "researchStageGrid min-w-0 grid items-stretch gap-3 grid-cols-[repeat(auto-fit,minmax(280px,1fr))]",
   researchExperimentMethodQuickSelect:
