@@ -36,10 +36,19 @@ export function ResearchOverviewSurface({
 }: ResearchOverviewSurfaceProps) {
   return (
     <div
-      className={["grid min-w-0 gap-3", className].filter(Boolean).join(" ")}
+      className={["grid min-w-0 gap-4", className].filter(Boolean).join(" ")}
       data-testid="research-overview-surface"
       data-vui="research-overview-surface"
     >
+      <div className="flex min-w-0 items-baseline justify-between gap-3 px-0.5">
+        <h3 className="m-0 text-[13px] font-[740] text-[var(--fg-primary)]">
+          {lang === "zh" ? "项目推进" : "Project progress"}
+        </h3>
+        <span className="text-[12px] text-[var(--fg-tertiary)]">
+          {lang === "zh" ? "看板模式 · 单一主 CTA + 三列阶段" : "Board · single primary CTA + three stages"}
+        </span>
+      </div>
+
       <div data-testid="research-overview-hero" className="grid min-w-0 gap-3">
         <ResearchPrimaryActionBar lang={lang} {...primary} />
         {errorSlot ? <div data-testid="research-overview-error">{errorSlot}</div> : null}

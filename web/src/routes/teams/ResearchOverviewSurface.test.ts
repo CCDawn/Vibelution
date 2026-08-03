@@ -6,16 +6,24 @@ const primarySource = readFileSync(new URL("./ResearchPrimaryActionBar.tsx", imp
 const routeSource = readFileSync(new URL("../TeamsRoute.tsx", import.meta.url), "utf8");
 
 describe("ResearchOverviewSurface product contract", () => {
-  it("keeps single-CTA → stages → advanced order in JSX body", () => {
+  it("keeps project-progress → single-CTA → stages → advanced order in JSX body", () => {
+    const progressLabel = surfaceSource.indexOf("项目推进");
     const hero = surfaceSource.indexOf('data-testid="research-overview-hero"');
     const stages = surfaceSource.indexOf('data-testid="research-overview-stages"');
     // Secondary is the last composition slot (not the import line).
     const secondarySlot = surfaceSource.indexOf("{advanced ? (");
-    expect(hero).toBeGreaterThan(-1);
+    expect(progressLabel).toBeGreaterThan(-1);
+    expect(hero).toBeGreaterThan(progressLabel);
     expect(stages).toBeGreaterThan(hero);
     expect(secondarySlot).toBeGreaterThan(stages);
     expect(surfaceSource.slice(secondarySlot)).toContain("ResearchOverviewSecondary");
     expect(surfaceSource).toContain("阶段看板");
+  });
+
+  it("primary CTA uses monochrome ink accent, not teal brand wash", () => {
+    expect(primarySource).toContain("monochrome ink accent");
+    expect(primarySource).toContain("shadow-[inset_3px_0_0_0_var(--fg-primary)]");
+    expect(primarySource).not.toContain("accent-cool");
   });
 
   it("wires production overview through ResearchOverviewSurface only", () => {

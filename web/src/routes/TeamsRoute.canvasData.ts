@@ -4,7 +4,8 @@ export const RESEARCH_TEAM_ID = "research-team";
 export const AI_SEARCH_TEAM_ID = "ai-search-team";
 export const KNOWLEDGE_EXPANSION_TEAM_ID = "knowledge-expansion-team";
 export const TEAM_ORGANIZATION_CANVAS_KIND = "team_organization_canvas";
-export const TEAM_PICKER_TEAM_IDS = [AI_SEARCH_TEAM_ID, KNOWLEDGE_EXPANSION_TEAM_ID, RESEARCH_TEAM_ID] as const;
+/** Rail order matches design preview: research first, then scope/expansion. */
+export const TEAM_PICKER_TEAM_IDS = [RESEARCH_TEAM_ID, AI_SEARCH_TEAM_ID, KNOWLEDGE_EXPANSION_TEAM_ID] as const;
 
 const TEAM_PICKER_TEAM_ID_SET: ReadonlySet<string> = new Set(TEAM_PICKER_TEAM_IDS);
 const AI_SEARCH_CANVAS_SKELETON_ROLES = [

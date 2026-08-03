@@ -87,18 +87,19 @@ export function ResearchPrimaryActionBar({
         padding="none"
         className={[
           "min-w-0 overflow-hidden",
-          "border border-[color-mix(in_srgb,var(--accent-cool)_28%,var(--vui-border-subtle))]",
-          "bg-[linear-gradient(165deg,color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-panel))_0%,var(--vui-surface-panel)_48%)]",
-          "shadow-[inset_3px_0_0_0_var(--accent-cool)]",
+          // Preview contract: monochrome ink accent (not teal).
+          "border border-[var(--vui-border-strong,var(--vui-border-subtle))]",
+          "bg-[var(--vui-surface-panel)]",
+          "shadow-[inset_3px_0_0_0_var(--fg-primary)]",
           effectiveAction.blocked
-            ? "border-[color-mix(in_srgb,var(--state-warning)_30%,var(--vui-border-subtle))] shadow-[inset_3px_0_0_0_var(--state-warning)]"
+            ? "border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] shadow-[inset_3px_0_0_0_var(--fg-tertiary)]"
             : "",
         ].filter(Boolean).join(" ")}
       >
         <div className="grid min-w-0 gap-3 p-4">
           <div className="flex min-w-0 items-center gap-2 text-[var(--vui-font-xs)] text-[var(--fg-tertiary)]">
-            <Compass size={14} className="shrink-0 text-[var(--accent-cool)]" aria-hidden="true" />
-            <span className="font-semibold text-[var(--accent-cool)]">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--fg-primary)] px-2 py-0.5 font-semibold text-[var(--vui-surface-base)]">
+              <Compass size={12} className="shrink-0" aria-hidden="true" />
               {lang === "zh" ? "下一步" : "Next"}
             </span>
             <span className="text-[var(--fg-tertiary)]" aria-hidden="true">·</span>
@@ -116,11 +117,11 @@ export function ResearchPrimaryActionBar({
 
           {handoff ? (
             <div
-              className="flex min-w-0 flex-wrap items-center gap-2 rounded-lg border border-[color-mix(in_srgb,var(--accent-cool)_22%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_10%,transparent)] px-3 py-2 text-[12.5px] text-[var(--fg-primary)]"
+              className="flex min-w-0 flex-wrap items-center gap-2 rounded-lg border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] px-3 py-2 text-[12.5px] text-[var(--fg-primary)]"
               role="status"
               data-testid="research-stage-handoff-banner"
             >
-              <strong className="font-[740] text-[var(--accent-cool)]">
+              <strong className="font-[740] text-[var(--fg-primary)]">
                 {lang === "zh" ? "阶段交接" : "Stage handoff"}
               </strong>
               <span className="text-[var(--fg-tertiary)]" aria-hidden="true">·</span>
