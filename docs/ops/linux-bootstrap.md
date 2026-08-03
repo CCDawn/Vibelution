@@ -29,6 +29,9 @@ excludes `.git` and must not be used as the production deployment source.
 
 - Keep `VIBELUTION_CONFIG_PATH`, runtime environment files, data directories,
   and model-provider credentials outside the deployed source tree.
+- Provider credentials referenced through `env:VARIABLE_NAME` are read after
+  trimming surrounding whitespace, so a copied line ending cannot become part
+  of an HTTP authorization header.
 - Never put a provider key, SSH private key, password, or production data into
   the Git bundle, repository config, shell history, or deployment logs.
 - Bind the first acceptance runtime to `127.0.0.1`; use an authenticated tunnel
