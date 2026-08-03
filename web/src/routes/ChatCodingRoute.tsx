@@ -369,6 +369,8 @@ export function ChatCodingRoute() {
   const [sessionEditTargets, setSessionEditTargets] = useState<Record<string, { messageId: string; original: string }>>({});
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const editingSessionIdRef = useRef<string | null>(null);
+  /** Suppress tab title blur-submit while create remaps temp id → server id. */
+  const suppressRenameBlurUntilRef = useRef(0);
   const [editingSessionTitle, setEditingSessionTitle] = useState("");
   const [sessionContextMenu, setSessionContextMenu] = useState<SessionContextMenuState | null>(null);
   const [agentContextMenu, setAgentContextMenu] = useState<AgentContextMenuState | null>(null);
@@ -1226,6 +1228,7 @@ export function ChatCodingRoute() {
     editingSessionIdRef,
     setEditingSessionId,
     setEditingSessionTitle,
+    suppressRenameBlurUntilRef,
   });
 
   const renameAgentMutation = useMutation({
@@ -2685,6 +2688,7 @@ export function ChatCodingRoute() {
     setSessionContextMenu,
     setSessionComposerErrors,
     renameSession: (variables) => renameSessionMutation.mutate(variables),
+    suppressRenameBlurUntilRef,
   });
 
   const openAgentContextMenu = useCallback((
