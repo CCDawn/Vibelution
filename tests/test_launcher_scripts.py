@@ -7,6 +7,8 @@ import shutil
 import subprocess
 import sys
 import time
+import types
+import uuid
 from argparse import Namespace
 from pathlib import Path
 
@@ -45,6 +47,49 @@ def test_launcher_script_repairs_start_menu_shortcut_entry():
     assert '$shortcutMode = "script_host_fallback"' in source
     assert "$shortcut.IconLocation" in source
     assert "[void](Repair-LauncherShortcut)" in source
+
+
+def test_launcher_script_is_utf8_with_bom_for_windows_powershell_compatibility():
+    assert LAUNCHER_SCRIPT.read_bytes().startswith(b"\xef\xbb\xbf")
+
+
+def test_launcher_precommit_hook_supports_posix_venv_and_verifies_web_lock():
+    source = (PROJECT_ROOT / ".githooks" / "pre-commit").read_text(encoding="utf-8")
+    attributes = (PROJECT_ROOT / ".gitattributes").read_text(encoding="utf-8")
+    mode = subprocess.run(
+        ["git", "ls-files", "--stage", "--", ".githooks/pre-commit"],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split(maxsplit=1)[0]
+
+    assert '"$repo_root/.venv/Scripts/python.exe"' in source
+    assert '"$repo_root/.venv/bin/python"' in source
+    assert 'npm --silent --prefix "$repo_root/web" ci --ignore-scripts --dry-run --no-audit --no-fund' in source
+    assert ".githooks/* text eol=lf" in attributes
+    assert mode == "100755"
+
+
+def test_launcher_posix_git_hooks_are_executable() -> None:
+    for hook_name in ("pre-commit", "post-merge"):
+        mode = subprocess.run(
+            ["git", "ls-files", "--stage", "--", f".githooks/{hook_name}"],
+            cwd=PROJECT_ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.split(maxsplit=1)[0]
+
+        assert mode == "100755"
+
+
+def test_launcher_ci_verifies_package_lock_stays_in_sync():
+    source = (PROJECT_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+
+    assert "Verify package lock is in sync" in source
+    assert "npm --silent install --package-lock-only --ignore-scripts --no-audit --no-fund" in source
+    assert "git diff --exit-code -- package-lock.json" in source
 
 
 def test_launcher_native_entry_source_and_build_contract():
@@ -98,6 +143,40 @@ def test_python_launcher_workbench_window_applies_vibelution_app_identity():
     assert "_apply_managed_browser_app_identity(int(process.pid), \"workbench\")" in source
     assert "browserAppIdentityApplied" in source
     assert "browserWindowIconApplied" in source
+
+
+def test_python_launcher_imports_safely_on_non_windows(monkeypatch):
+    fake_os = types.ModuleType("os")
+    fake_os.name = "posix"
+    fake_os.environ = os.environ
+    monkeypatch.setitem(sys.modules, "os", fake_os)
+    launcher = _load_python_launcher()
+
+    # Windows-only shell identity structures must not be constructed off-Windows;
+    # importing on POSIX previously raised ValueError from _GUID.from_buffer_copy.
+    assert launcher.PKEY_APPUSERMODEL_ID is None
+    assert launcher.PKEY_APPUSERMODEL_RELAUNCH_DISPLAY_NAME is None
+    assert launcher.PKEY_APPUSERMODEL_RELAUNCH_ICON_RESOURCE is None
+    assert launcher.IID_IPROPERTY_STORE is None
+    result = launcher._apply_managed_browser_app_identity(0, "workbench")
+    assert result["applied"] is False
+    assert result["reason"] == "non_windows"
+    assert result["appUserModelId"] == "Vibelution.Workbench"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows shell identity contract is Windows-only")
+def test_python_launcher_windows_identity_runtime_contract():
+    launcher = _load_python_launcher()
+
+    assert isinstance(launcher.PKEY_APPUSERMODEL_ID, launcher._PROPERTYKEY)
+    assert isinstance(launcher.PKEY_APPUSERMODEL_RELAUNCH_DISPLAY_NAME, launcher._PROPERTYKEY)
+    assert isinstance(launcher.PKEY_APPUSERMODEL_RELAUNCH_ICON_RESOURCE, launcher._PROPERTYKEY)
+    assert launcher.PKEY_APPUSERMODEL_ID.fmtid.Data1 == 0x9F4C2855
+    assert launcher.PKEY_APPUSERMODEL_ID.pid == 5
+    assert launcher.PKEY_APPUSERMODEL_RELAUNCH_DISPLAY_NAME.pid == 4
+    assert launcher.PKEY_APPUSERMODEL_RELAUNCH_ICON_RESOURCE.pid == 3
+    assert isinstance(launcher.IID_IPROPERTY_STORE, launcher._GUID)
+    assert bytes(launcher.IID_IPROPERTY_STORE) == uuid.UUID("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99").bytes_le
 
 
 def test_python_launcher_icon_binding_requires_exact_browser_process_window():
@@ -194,6 +273,255 @@ def _load_python_launcher():
     return module
 
 
+def test_python_launcher_bootstraps_project_venv_with_current_interpreter(monkeypatch, tmp_path):
+    launcher = _load_python_launcher()
+    monkeypatch.setattr(launcher.os, "name", "posix")
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    venv_python = project_dir / ".venv" / "bin" / "python"
+    requirements = project_dir / "requirements.txt"
+    requirements.write_text("fastapi>=0.111.0\nlangchain-core>=0.1.0\n", encoding="utf-8")
+    monkeypatch.setattr(launcher, "PROJECT_ROOT", project_dir)
+    monkeypatch.setattr(launcher, "VENV_DIR", project_dir / ".venv")
+    monkeypatch.setattr(launcher, "REQUIREMENTS_PATH", requirements)
+    monkeypatch.setattr(launcher, "RUNTIME_DIR", tmp_path / ".runtime" / "launcher")
+    venv_creation: list[list[str]] = []
+    installed: list[str] = []
+
+    def fake_run(args, **kwargs):
+        if args[:3] == [launcher._bootstrap_python_executable(), "-m", "venv"]:
+            venv_creation.append(list(args))
+            venv_python.parent.mkdir(parents=True)
+            venv_python.write_text("#!/usr/bin/env python3", encoding="utf-8")
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(launcher.subprocess, "run", fake_run)
+    monkeypatch.setattr(launcher, "_runtime_imports_available", lambda exe: False)
+    monkeypatch.setattr(launcher, "_install_project_dependencies", lambda exe: installed.append(exe))
+    monkeypatch.setattr(launcher, "_missing_runtime_modules", lambda exe, modules: [])
+
+    resolved = launcher._ensure_project_python_runtime()
+
+    assert resolved == str(venv_python)
+    assert venv_creation == [[launcher._bootstrap_python_executable(), "-m", "venv", str(project_dir / ".venv")]]
+    assert installed == [str(venv_python)]
+    assert (tmp_path / ".runtime" / "launcher" / "python-deps.stamp").exists()
+
+
+def test_python_launcher_skips_reinstall_when_venv_ready_and_requirements_unchanged(monkeypatch, tmp_path):
+    launcher = _load_python_launcher()
+    monkeypatch.setattr(launcher.os, "name", "posix")
+    project_dir = tmp_path / "project"
+    venv_python = project_dir / ".venv" / "bin" / "python"
+    venv_python.parent.mkdir(parents=True)
+    venv_python.write_text("#!/usr/bin/env python3", encoding="utf-8")
+    requirements = project_dir / "requirements.txt"
+    requirements.write_text("fastapi>=0.111.0\n", encoding="utf-8")
+    monkeypatch.setattr(launcher, "PROJECT_ROOT", project_dir)
+    monkeypatch.setattr(launcher, "VENV_DIR", project_dir / ".venv")
+    monkeypatch.setattr(launcher, "REQUIREMENTS_PATH", requirements)
+    monkeypatch.setattr(launcher, "RUNTIME_DIR", tmp_path / ".runtime" / "launcher")
+    monkeypatch.setattr(launcher, "_runtime_imports_available", lambda exe: True)
+    installed: list[str] = []
+    monkeypatch.setattr(launcher, "_install_project_dependencies", lambda exe: installed.append(exe))
+    monkeypatch.setattr(launcher, "_missing_runtime_modules", lambda exe, modules: [])
+    stamp_path = launcher._dependency_stamp_path()
+    stamp_path.parent.mkdir(parents=True)
+    stamp_path.write_text(launcher._requirements_fingerprint(), encoding="utf-8")
+
+    resolved = launcher._ensure_project_python_runtime()
+
+    assert resolved == str(venv_python)
+    assert installed == []
+    assert stamp_path.read_text(encoding="utf-8") == launcher._requirements_fingerprint()
+
+
+def test_python_launcher_reinstalls_when_requirements_changed(monkeypatch, tmp_path):
+    launcher = _load_python_launcher()
+    monkeypatch.setattr(launcher.os, "name", "posix")
+    project_dir = tmp_path / "project"
+    venv_python = project_dir / ".venv" / "bin" / "python"
+    venv_python.parent.mkdir(parents=True)
+    venv_python.write_text("#!/usr/bin/env python3", encoding="utf-8")
+    requirements = project_dir / "requirements.txt"
+    requirements.write_text("fastapi>=0.111.0\n", encoding="utf-8")
+    monkeypatch.setattr(launcher, "PROJECT_ROOT", project_dir)
+    monkeypatch.setattr(launcher, "VENV_DIR", project_dir / ".venv")
+    monkeypatch.setattr(launcher, "REQUIREMENTS_PATH", requirements)
+    monkeypatch.setattr(launcher, "RUNTIME_DIR", tmp_path / ".runtime" / "launcher")
+    monkeypatch.setattr(launcher, "_runtime_imports_available", lambda exe: True)
+    installed: list[str] = []
+    monkeypatch.setattr(launcher, "_install_project_dependencies", lambda exe: installed.append(exe))
+    monkeypatch.setattr(launcher, "_missing_runtime_modules", lambda exe, modules: [])
+    stamp_path = launcher._dependency_stamp_path()
+    stamp_path.parent.mkdir(parents=True)
+    stamp_path.write_text("stale-fingerprint", encoding="utf-8")
+
+    resolved = launcher._ensure_project_python_runtime()
+
+    assert resolved == str(venv_python)
+    assert installed == [str(venv_python)]
+    assert stamp_path.read_text(encoding="utf-8") == launcher._requirements_fingerprint()
+
+
+def test_python_launcher_reports_missing_runtime_dependencies_after_install(monkeypatch, tmp_path):
+    launcher = _load_python_launcher()
+    monkeypatch.setattr(launcher.os, "name", "posix")
+    project_dir = tmp_path / "project"
+    venv_python = project_dir / ".venv" / "bin" / "python"
+    venv_python.parent.mkdir(parents=True)
+    venv_python.write_text("#!/usr/bin/env python3", encoding="utf-8")
+    requirements = project_dir / "requirements.txt"
+    requirements.write_text("langchain-core>=0.1.0\n", encoding="utf-8")
+    monkeypatch.setattr(launcher, "PROJECT_ROOT", project_dir)
+    monkeypatch.setattr(launcher, "VENV_DIR", project_dir / ".venv")
+    monkeypatch.setattr(launcher, "REQUIREMENTS_PATH", requirements)
+    monkeypatch.setattr(launcher, "RUNTIME_DIR", tmp_path / ".runtime" / "launcher")
+    monkeypatch.setattr(launcher, "_runtime_imports_available", lambda exe: False)
+    installed: list[str] = []
+    monkeypatch.setattr(launcher, "_install_project_dependencies", lambda exe: installed.append(exe))
+    monkeypatch.setattr(launcher, "_missing_runtime_modules", lambda exe, modules: ["langchain_core"])
+
+    with pytest.raises(RuntimeError, match="langchain_core"):
+        launcher._ensure_project_python_runtime()
+
+    assert installed == [str(venv_python)]
+
+
+def test_python_launcher_dependency_install_failure_is_diagnosable(monkeypatch, tmp_path):
+    launcher = _load_python_launcher()
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    requirements = project_dir / "requirements.txt"
+    requirements.write_text("langchain-core>=0.1.0\n", encoding="utf-8")
+    monkeypatch.setattr(launcher, "PROJECT_ROOT", project_dir)
+    monkeypatch.setattr(launcher, "REQUIREMENTS_PATH", requirements)
+    monkeypatch.setattr(
+        launcher.subprocess,
+        "run",
+        lambda *args, **kwargs: types.SimpleNamespace(
+            returncode=2, stdout="", stderr="ERROR: No matching distribution found for langchain-core"
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="exit code 2") as exc_info:
+        launcher._install_project_dependencies(str(project_dir / ".venv" / "bin" / "python"))
+
+    assert "No matching distribution" in str(exc_info.value)
+
+
+def test_python_launcher_requirements_declarations_map_to_import_modules(monkeypatch, tmp_path):
+    launcher = _load_python_launcher()
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    requirements = project_dir / "requirements.txt"
+    requirements.write_text(
+        "\n".join(
+            [
+                "# comment",
+                "requests>=2.28.0",
+                "langchain-core>=0.1.0",
+                "openai[realtime]>=2.38.0",
+                'pywinpty>=3.0.5; platform_system == "Windows"',
+                "pytest-xdist>=3.6.1",
+                "pkg-extra @ https://example.com/pkg_extra-1.0-py3-none-any.whl",
+                "",
+                "fastapi >= 0.111.0",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(launcher, "PROJECT_ROOT", project_dir)
+    monkeypatch.setattr(launcher, "REQUIREMENTS_PATH", requirements)
+    monkeypatch.setattr(launcher.os, "name", "nt")
+
+    expected_windows = ["requests", "langchain_core", "openai", "winpty", "xdist", "pkg_extra", "fastapi"]
+    assert launcher._requirements_runtime_modules() == expected_windows
+
+    monkeypatch.setattr(launcher.os, "name", "posix")
+    assert launcher._requirements_runtime_modules() == [name for name in expected_windows if name != "winpty"]
+
+
+def test_python_launcher_start_launches_backend_with_project_venv_python(monkeypatch, tmp_path):
+    launcher = _load_python_launcher()
+    project_dir = tmp_path / "project"
+    venv_python = project_dir / ".venv" / "bin" / "python"
+    monkeypatch.setattr(launcher, "PROJECT_ROOT", project_dir)
+    runtime_dir = tmp_path / ".runtime" / "launcher"
+    monkeypatch.setattr(launcher, "RUNTIME_DIR", runtime_dir)
+    monkeypatch.setattr(launcher, "PORTS_PATH", runtime_dir / "ports.json")
+    monkeypatch.setattr(launcher, "BACKEND_STDOUT_PATH", runtime_dir / "backend.stdout.log")
+    monkeypatch.setattr(launcher, "BACKEND_STDERR_PATH", runtime_dir / "backend.stderr.log")
+    source_identity = {
+        "projectRoot": str(project_dir.resolve()),
+        "branch": "main",
+        "commit": "a" * 40,
+        "frontendTree": "tree",
+        "trackedClean": True,
+    }
+    monkeypatch.setattr(launcher, "_read_state", lambda: {})
+    monkeypatch.setattr(launcher, "_preserved_launcher_control_state", lambda state: {})
+    monkeypatch.setattr(launcher, "_resolve_start_backend_port", lambda port, host: (8000, ""))
+    monkeypatch.setattr(launcher, "_ensure_frontend_build", lambda identity: {})
+    monkeypatch.setattr(launcher, "_runtime_source_identity", lambda: source_identity)
+    monkeypatch.setattr(launcher, "_assert_runtime_source_identity", lambda identity: identity)
+    monkeypatch.setattr(
+        launcher,
+        "_start_runtime_scene",
+        lambda trigger: {
+            "runtimeSceneId": "scene-1",
+            "runtimeSceneDir": str(tmp_path / "scene-1"),
+            "startedAt": "2026-01-01T00:00:00+00:00",
+        },
+    )
+    monkeypatch.setattr(launcher, "_ensure_project_python_runtime", lambda: str(venv_python))
+    monkeypatch.setattr(launcher, "_wait_for_started_backend", lambda process, port, host: 4242)
+    monkeypatch.setattr(launcher, "_remember_project_backend_port", lambda port, *, reason="": None)
+    written: list[dict] = []
+    monkeypatch.setattr(launcher, "_write_state", lambda state: written.append(state))
+
+    popen_args: list[list[str]] = []
+
+    class FakeProcess:
+        pid = 12345
+
+        @staticmethod
+        def poll():
+            return None
+
+    def fake_popen(args, **kwargs):
+        popen_args.append(list(args))
+        return FakeProcess()
+
+    monkeypatch.setattr(launcher.subprocess, "Popen", fake_popen)
+
+    state = launcher._start_backend(8000, "127.0.0.1", no_browser=True)
+
+    assert popen_args and popen_args[0][0] == str(venv_python)
+    assert popen_args[0][0] != sys.executable
+    assert state["backendPid"] == 4242
+    assert state["pythonExecutable"] == str(venv_python)
+    assert written[-1]["pythonExecutable"] == str(venv_python)
+
+
+def test_python_launcher_selects_venv_pythonw_on_windows(monkeypatch, tmp_path):
+    launcher = _load_python_launcher()
+    venv_scripts = tmp_path / ".venv" / "Scripts"
+    venv_scripts.mkdir(parents=True)
+    python_exe = venv_scripts / "python.exe"
+    pythonw_exe = venv_scripts / "pythonw.exe"
+    python_exe.write_bytes(b"")
+    pythonw_exe.write_bytes(b"")
+    monkeypatch.setattr(launcher.os, "name", "nt")
+
+    result = launcher._select_background_python(str(python_exe))
+
+    assert result["pythonExecutable"] == str(pythonw_exe)
+    assert result["noConsolePythonExecutable"] == str(pythonw_exe)
+    assert result["consoleFallbackReason"] == ""
+    assert result["consoleWindowSuppressed"] is True
+
+
 def test_python_launcher_stop_reconciles_stale_state_with_real_project_port_owner(monkeypatch):
     launcher = _load_python_launcher()
     terminated: list[int] = []
@@ -278,6 +606,49 @@ def test_python_launcher_project_workbench_pid_requires_this_checkout_path(monke
     # pid 1 is live-acceptance → foreign; pid 2 is this PROJECT_ROOT → owned
     assert launcher._is_project_workbench_pid(1) is False
     assert launcher._is_project_workbench_pid(2) is True
+
+
+def test_python_launcher_posix_listener_fallback_works_without_psutil(monkeypatch):
+    launcher = _load_python_launcher()
+    fake_psutil = types.SimpleNamespace(net_connections=lambda **_kwargs: (_ for _ in ()).throw(RuntimeError()))
+    monkeypatch.setitem(sys.modules, "psutil", fake_psutil)
+    monkeypatch.setattr(launcher.os, "name", "posix", raising=False)
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        launcher.subprocess,
+        "run",
+        lambda args, **_kwargs: calls.append(list(args))
+        or types.SimpleNamespace(stdout='LISTEN 0 2048 127.0.0.1:8000 0.0.0.0:* users:(("python",pid=4242,fd=8))'),
+    )
+
+    assert launcher._listening_pid_for_port(8000) == 4242
+    assert calls == [["ss", "-ltnp", "sport = :8000"]]
+
+
+def test_python_launcher_posix_parent_fallback_proves_listener_ownership_without_psutil(monkeypatch):
+    launcher = _load_python_launcher()
+    fake_psutil = types.SimpleNamespace(Process=lambda _pid: (_ for _ in ()).throw(RuntimeError()))
+    monkeypatch.setitem(sys.modules, "psutil", fake_psutil)
+    monkeypatch.setattr(launcher.os, "name", "posix", raising=False)
+    parents = {4242: 3131, 3131: 2121, 2121: 1, 1: 0}
+    monkeypatch.setattr(launcher, "_posix_parent_pid", lambda pid: parents.get(pid, 0))
+
+    assert launcher._pid_belongs_to_process_tree(4242, 2121) is True
+    assert launcher._pid_belongs_to_process_tree(4242, 5151) is False
+
+
+def test_python_launcher_posix_command_line_fallback_recognizes_this_checkout_without_psutil(monkeypatch):
+    launcher = _load_python_launcher()
+    fake_psutil = types.SimpleNamespace(Process=lambda _pid: (_ for _ in ()).throw(RuntimeError()))
+    monkeypatch.setitem(sys.modules, "psutil", fake_psutil)
+    monkeypatch.setattr(launcher.os, "name", "posix", raising=False)
+    monkeypatch.setattr(
+        launcher,
+        "_posix_process_command_line",
+        lambda _pid: f"/opt/python {launcher.PROJECT_ROOT / 'scripts' / 'web_workbench.py'} --port 8000",
+    )
+
+    assert launcher._is_project_workbench_pid(4242) is True
 
 
 def test_python_launcher_restart_builds_before_stopping_backend(monkeypatch):

@@ -1,4 +1,4 @@
-param(
+﻿param(
     [ValidateSet("launcher", "toggle", "start", "stop", "restart", "status", "repair-deps", "repair-shortcut", "monitor", "supervise", "internal-start", "internal-focus", "internal-stop", "internal-restart", "internal-status")]
     [string]$Action = "launcher",
     [switch]$NoBrowser,
@@ -6013,7 +6013,7 @@ function Start-ManagedBrowser {
     $browserArgs = @(
         "--user-data-dir=$ProfileDir",
         "--app=$resolvedAppUrl",
-        # Do not force Chromium dark mode: it fights workbench data-theme and flickers Edge --app chrome.
+        # Let the workbench data-theme choose dark or light; do not force Chromium dark (avoids Edge --app flicker).
         "--no-first-run",
         "--no-default-browser-check",
         "--disable-session-crashed-bubble",

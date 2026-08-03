@@ -7,6 +7,7 @@ import argparse
 import contextlib
 import ctypes
 import ctypes.wintypes
+import hashlib
 import json
 import os
 import re
@@ -36,6 +37,12 @@ FRONTEND_BUILD_LOG_PATH = RUNTIME_DIR / "frontend-build.log"
 FRONTEND_BUILD_PROVENANCE_NAME = ".vibelution-build.json"
 WORKBENCH_BROWSER_PROFILE_DIR = RUNTIME_DIR / "workbench-app-profile"
 LAUNCHER_ICON_PATH = PROJECT_ROOT / "assets" / "icons" / "vibelution.ico"
+VENV_DIR = PROJECT_ROOT / ".venv"
+REQUIREMENTS_PATH = PROJECT_ROOT / "requirements.txt"
+REQUIREMENT_IMPORT_NAME_OVERRIDES = {
+    "pytest-xdist": "xdist",
+    "pywinpty": "winpty",
+}
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8000
 TRUSTED_WEB_HOSTS_ENV = "VIBELUTION_TRUSTED_WEB_HOSTS"
@@ -165,7 +172,7 @@ def _listening_pid_for_port(port: int) -> int:
     except Exception:
         pass
     if os.name != "nt":
-        return 0
+        return _posix_listening_pid_for_port(port)
     try:
         result = subprocess.run(
             ["netstat", "-ano", "-p", "tcp"],
@@ -186,6 +193,48 @@ def _listening_pid_for_port(port: int) -> int:
     return 0
 
 
+def _posix_listening_pid_for_port(port: int) -> int:
+    """Return a Linux listener PID using ``ss`` when the launcher lacks psutil."""
+
+    try:
+        result = subprocess.run(
+            ["ss", "-ltnp", f"sport = :{int(port)}"],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return 0
+    for raw_pid in re.findall(r"\bpid=(\d+)", str(result.stdout or "")):
+        pid = int(raw_pid)
+        if pid > 0:
+            return pid
+    return 0
+
+
+def _posix_parent_pid(pid: int) -> int:
+    """Read a process parent PID from procfs without importing optional packages."""
+
+    try:
+        raw = Path(f"/proc/{int(pid)}/stat").read_text(encoding="utf-8")
+        fields = raw.rsplit(")", 1)[1].strip().split()
+        return int(fields[1]) if len(fields) >= 2 else 0
+    except (OSError, IndexError, TypeError, ValueError):
+        return 0
+
+
+def _posix_process_command_line(pid: int) -> str:
+    """Read an argv vector from procfs without exposing environment values."""
+
+    try:
+        values = Path(f"/proc/{int(pid)}/cmdline").read_bytes().split(b"\0")
+    except (OSError, TypeError, ValueError):
+        return ""
+    return " ".join(value.decode("utf-8", errors="replace") for value in values if value)
+
+
 def _pid_belongs_to_process_tree(pid: int, root_pid: int) -> bool:
     if pid <= 0 or root_pid <= 0:
         return False
@@ -197,7 +246,16 @@ def _pid_belongs_to_process_tree(pid: int, root_pid: int) -> bool:
         process = psutil.Process(pid)
         return any(int(parent.pid) == root_pid for parent in process.parents())
     except Exception:
-        return False
+        if os.name == "nt":
+            return False
+    current_pid = int(pid)
+    seen: set[int] = set()
+    while current_pid > 0 and current_pid not in seen:
+        if current_pid == root_pid:
+            return True
+        seen.add(current_pid)
+        current_pid = _posix_parent_pid(current_pid)
+    return False
 
 
 def _is_project_workbench_pid(pid: int) -> bool:
@@ -208,6 +266,10 @@ def _is_project_workbench_pid(pid: int) -> bool:
 
         command_line = " ".join(psutil.Process(pid).cmdline())
     except Exception:
+        if os.name == "nt":
+            return False
+        command_line = _posix_process_command_line(pid)
+    if not command_line:
         return False
     expected_script = str(PROJECT_ROOT / "scripts" / "web_workbench.py")
     # Require this checkout's project root so sibling checkouts (e.g. live-acceptance)
@@ -695,45 +757,56 @@ def _edge_executable() -> str:
     raise RuntimeError("Microsoft Edge was not found.")
 
 
-class _GUID(ctypes.Structure):
-    _fields_ = (
-        ("Data1", ctypes.c_ulong),
-        ("Data2", ctypes.c_ushort),
-        ("Data3", ctypes.c_ushort),
-        ("Data4", ctypes.c_ubyte * 8),
-    )
+if os.name == "nt":
+    # Windows shell property-store identity (AppUserModelID + relaunch icon).
+    # These ctypes structures are Windows-layout-specific (c_ulong is 4 bytes
+    # on Windows but 8 bytes on POSIX, which would make _GUID 24 bytes and
+    # break _GUID.from_buffer_copy for 16-byte GUID buffers). They are
+    # therefore only constructed on Windows; off-Windows paths short-circuit
+    # in _apply_managed_browser_app_identity before any of them is used.
 
+    class _GUID(ctypes.Structure):
+        _fields_ = (
+            ("Data1", ctypes.c_ulong),
+            ("Data2", ctypes.c_ushort),
+            ("Data3", ctypes.c_ushort),
+            ("Data4", ctypes.c_ubyte * 8),
+        )
 
-class _PROPERTYKEY(ctypes.Structure):
-    _fields_ = (
-        ("fmtid", _GUID),
-        ("pid", ctypes.c_ulong),
-    )
+    class _PROPERTYKEY(ctypes.Structure):
+        _fields_ = (
+            ("fmtid", _GUID),
+            ("pid", ctypes.c_ulong),
+        )
 
+    class _PROPVARIANT(ctypes.Structure):
+        _fields_ = (
+            ("vt", ctypes.c_ushort),
+            ("wReserved1", ctypes.c_ushort),
+            ("wReserved2", ctypes.c_ushort),
+            ("wReserved3", ctypes.c_ushort),
+            ("p", ctypes.c_void_p),
+            ("p2", ctypes.c_int),
+        )
 
-class _PROPVARIANT(ctypes.Structure):
-    _fields_ = (
-        ("vt", ctypes.c_ushort),
-        ("wReserved1", ctypes.c_ushort),
-        ("wReserved2", ctypes.c_ushort),
-        ("wReserved3", ctypes.c_ushort),
-        ("p", ctypes.c_void_p),
-        ("p2", ctypes.c_int),
-    )
+    def _guid(value: str) -> _GUID:
+        return _GUID.from_buffer_copy(uuid.UUID(value).bytes_le)
 
+    def _property_key(pid: int) -> _PROPERTYKEY:
+        return _PROPERTYKEY(_guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"), int(pid))
 
-def _guid(value: str) -> _GUID:
-    return _GUID.from_buffer_copy(uuid.UUID(value).bytes_le)
+    PKEY_APPUSERMODEL_ID = _property_key(5)
+    PKEY_APPUSERMODEL_RELAUNCH_DISPLAY_NAME = _property_key(4)
+    PKEY_APPUSERMODEL_RELAUNCH_ICON_RESOURCE = _property_key(3)
+    IID_IPROPERTY_STORE = _guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99")
+else:
+    # Safe placeholders for non-Windows imports: the shell identity helpers are
+    # guarded by os.name checks and never dereference these off-Windows.
+    PKEY_APPUSERMODEL_ID = None
+    PKEY_APPUSERMODEL_RELAUNCH_DISPLAY_NAME = None
+    PKEY_APPUSERMODEL_RELAUNCH_ICON_RESOURCE = None
+    IID_IPROPERTY_STORE = None
 
-
-def _property_key(pid: int) -> _PROPERTYKEY:
-    return _PROPERTYKEY(_guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"), int(pid))
-
-
-PKEY_APPUSERMODEL_ID = _property_key(5)
-PKEY_APPUSERMODEL_RELAUNCH_DISPLAY_NAME = _property_key(4)
-PKEY_APPUSERMODEL_RELAUNCH_ICON_RESOURCE = _property_key(3)
-IID_IPROPERTY_STORE = _guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99")
 WM_SETICON = 0x0080
 ICON_SMALL = 0
 ICON_BIG = 1
@@ -967,6 +1040,239 @@ def _preserved_launcher_control_state(state: dict) -> dict[str, object]:
     return {key: state[key] for key in keys if key in state}
 
 
+def _venv_python_executable() -> Path:
+    """Project-local virtual environment interpreter (POSIX: .venv/bin/python)."""
+
+    if os.name == "nt":
+        return VENV_DIR / "Scripts" / "python.exe"
+    return VENV_DIR / "bin" / "python"
+
+
+def _dependency_stamp_path() -> Path:
+    return RUNTIME_DIR / "python-deps.stamp"
+
+
+def _requirements_runtime_modules() -> list[str]:
+    """Map requirements.txt declarations to importable module names (best effort).
+
+    Direct URL / local path / editable lines and markers that cannot be evaluated
+    cheaply are skipped so the readiness probe stays deterministic.
+    """
+
+    try:
+        lines = REQUIREMENTS_PATH.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    modules: list[str] = []
+    for raw in lines:
+        line = str(raw).strip()
+        if not line or line.startswith(("#", "-")):
+            continue
+        marker = ""
+        if ";" in line:
+            line, marker = line.split(";", 1)
+        if not _requirements_marker_applies(marker):
+            continue
+        name_part = line.strip()
+        if not name_part:
+            continue
+        if "@" in name_part:
+            name_part = name_part.split("@", 1)[0].strip()
+        elif name_part.lower().startswith(("http://", "https://", "file:", "git+")) or name_part.startswith(
+            ("./", "../")
+        ):
+            continue
+        name = re.split(r"[<>=!\[~ ]", name_part, maxsplit=1)[0].strip()
+        module = REQUIREMENT_IMPORT_NAME_OVERRIDES.get(name.lower(), name.replace("-", "_"))
+        if module and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", module) and module not in modules:
+            modules.append(module)
+    return modules
+
+
+def _requirements_marker_applies(marker: str) -> bool:
+    """Cheap platform marker evaluation (only platform_system/sys_platform)."""
+
+    marker = str(marker or "").strip()
+    if not marker:
+        return True
+    if "platform_system" not in marker and "sys_platform" not in marker:
+        # Markers we cannot evaluate cheaply (e.g. python_version) are treated as applicable.
+        return True
+    if "Windows" not in marker and "win32" not in marker:
+        return True
+    is_windows = os.name == "nt"
+    if "!=" in marker:
+        return not is_windows
+    return is_windows
+
+
+def _requirements_fingerprint() -> str:
+    try:
+        content = REQUIREMENTS_PATH.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def _read_dependency_stamp() -> str:
+    try:
+        return _dependency_stamp_path().read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
+def _write_dependency_stamp(fingerprint: str) -> None:
+    if not fingerprint:
+        return
+    RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+    _dependency_stamp_path().write_text(fingerprint, encoding="utf-8")
+
+
+def _runtime_imports_available(python_executable: str) -> bool:
+    """True when the interpreter can import the runtime dependencies in one probe."""
+
+    if not str(python_executable or "").strip():
+        return False
+    modules = _requirements_runtime_modules() or ["fastapi", "uvicorn"]
+    try:
+        result = subprocess.run(
+            [str(python_executable), "-c", "import " + ", ".join(modules)],
+            cwd=str(PROJECT_ROOT),
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            creationflags=_windows_creation_flags(),
+            startupinfo=_hidden_startup_info(),
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return int(result.returncode) == 0
+
+
+def _missing_runtime_modules(python_executable: str, modules: list[str]) -> list[str]:
+    missing: list[str] = []
+    for module in modules:
+        try:
+            result = subprocess.run(
+                [str(python_executable), "-c", f"import {module}"],
+                cwd=str(PROJECT_ROOT),
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                creationflags=_windows_creation_flags(),
+                startupinfo=_hidden_startup_info(),
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            missing.append(module)
+            continue
+        if int(result.returncode) != 0:
+            missing.append(module)
+    return missing
+
+
+def _bootstrap_python_executable() -> str:
+    """Pick the interpreter used to create the project venv (current interpreter first)."""
+
+    current = str(getattr(sys, "executable", "") or "").strip()
+    if current and Path(current).is_file():
+        return current
+    for name in ("python3", "python"):
+        resolved = shutil.which(name)
+        if resolved:
+            return resolved
+    raise RuntimeError(
+        "Project virtual environment is missing and no Python interpreter was found. "
+        "Install Python 3.11 or 3.12 first."
+    )
+
+
+def _create_project_virtualenv() -> None:
+    bootstrap_python = _bootstrap_python_executable()
+    result = subprocess.run(
+        [bootstrap_python, "-m", "venv", str(VENV_DIR)],
+        cwd=str(PROJECT_ROOT),
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        creationflags=_windows_creation_flags(),
+        startupinfo=_hidden_startup_info(),
+        check=False,
+    )
+    if result.returncode != 0 or not _venv_python_executable().exists():
+        detail = _process_output_tail(result.stderr or result.stdout, max_lines=15, max_chars=2000)
+        raise RuntimeError(
+            f"Creating project virtual environment at {VENV_DIR} with {bootstrap_python} "
+            f"failed with exit code {result.returncode}{f': {detail}' if detail else '.'}"
+        )
+
+
+def _install_project_dependencies(python_executable: str) -> None:
+    result = subprocess.run(
+        [
+            str(python_executable),
+            "-m",
+            "pip",
+            "install",
+            "--disable-pip-version-check",
+            "-r",
+            str(REQUIREMENTS_PATH),
+        ],
+        cwd=str(PROJECT_ROOT),
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        creationflags=_windows_creation_flags(),
+        startupinfo=_hidden_startup_info(),
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = _process_output_tail(result.stderr or result.stdout, max_lines=15, max_chars=2000)
+        raise RuntimeError(
+            f"Installing Python dependencies into {python_executable} failed with exit code "
+            f"{result.returncode}{f': {detail}' if detail else '.'}"
+        )
+
+
+def _ensure_project_python_runtime() -> str:
+    """Bootstrap the project venv and return its interpreter, installing requirements when needed.
+
+    - Uses the project-local .venv interpreter when present.
+    - Creates it from the current interpreter when missing.
+    - Installs requirements.txt only when the runtime imports are incomplete or the
+      requirements fingerprint changed; a ready venv is never reinstalled.
+    """
+
+    venv_python = str(_venv_python_executable())
+    if not _venv_python_executable().exists():
+        _create_project_virtualenv()
+    runtime_ready = _runtime_imports_available(venv_python)
+    fingerprint = _requirements_fingerprint()
+    stored_fingerprint = _read_dependency_stamp()
+    if runtime_ready and (not fingerprint or stored_fingerprint == fingerprint):
+        if fingerprint and not stored_fingerprint:
+            _write_dependency_stamp(fingerprint)
+        return venv_python
+    if not REQUIREMENTS_PATH.exists():
+        raise RuntimeError(
+            f"Project virtual environment at {VENV_DIR} is not usable and requirements.txt "
+            f"is missing at {REQUIREMENTS_PATH}; cannot install backend dependencies."
+        )
+    _install_project_dependencies(venv_python)
+    missing = _missing_runtime_modules(venv_python, _requirements_runtime_modules())
+    if missing:
+        raise RuntimeError(
+            "Python dependency install completed, but backend imports still failed for: "
+            f"{', '.join(missing)}. Inspect the install output and requirements.txt to repair the venv."
+        )
+    if fingerprint:
+        _write_dependency_stamp(fingerprint)
+    return venv_python
+
+
 def _select_background_python(executable: str) -> dict[str, object]:
     raw = str(executable or "").strip()
     creation_flag_names = list(_windows_creation_flag_names())
@@ -1142,7 +1448,7 @@ def _start_backend(port: int, host: str, *, no_browser: bool) -> dict:
     runtime_scene = _start_runtime_scene("python_launcher_start")
     stdout = BACKEND_STDOUT_PATH.open("ab")
     stderr = BACKEND_STDERR_PATH.open("ab")
-    python_runtime = _select_background_python(sys.executable)
+    python_runtime = _select_background_python(_ensure_project_python_runtime())
     python_command = str(python_runtime["pythonExecutable"])
     args = [
         python_command,
