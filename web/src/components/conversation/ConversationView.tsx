@@ -3851,7 +3851,10 @@ export function ConversationView({
             )
               ? renderCodexTranscriptCells(message, codexTranscriptCells, rowIdentity)
               : null;
-            const shouldForceResponseBodyVisible = showResponseBlock && !isStreamingStatusPlaceholder && defaultResponseExpanded;
+            // Only force the answer body open while tokens are still streaming.
+            // Tying this to defaultResponseExpanded made the last few answers
+            // impossible to collapse (toggle flipped aria state but body stayed).
+            const shouldForceResponseBodyVisible = isResponseStreaming;
             const isEditingMessage = userAuthoredMessage && message.id === editingMessageId;
             const agentInboxExpanded = getExpansionState(message.id, "agentInbox", false);
             const agentInboxPreview = agentInboxMessage ? compactPreview(agentInboxSummary(message), 140) : "";
