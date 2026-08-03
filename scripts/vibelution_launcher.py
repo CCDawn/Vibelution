@@ -171,7 +171,7 @@ def _listening_pid_for_port(port: int) -> int:
     except Exception:
         pass
     if os.name != "nt":
-        return 0
+        return _posix_listening_pid_for_port(port)
     try:
         result = subprocess.run(
             ["netstat", "-ano", "-p", "tcp"],
@@ -192,6 +192,48 @@ def _listening_pid_for_port(port: int) -> int:
     return 0
 
 
+def _posix_listening_pid_for_port(port: int) -> int:
+    """Return a Linux listener PID using ``ss`` when the launcher lacks psutil."""
+
+    try:
+        result = subprocess.run(
+            ["ss", "-ltnp", f"sport = :{int(port)}"],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return 0
+    for raw_pid in re.findall(r"\bpid=(\d+)", str(result.stdout or "")):
+        pid = int(raw_pid)
+        if pid > 0:
+            return pid
+    return 0
+
+
+def _posix_parent_pid(pid: int) -> int:
+    """Read a process parent PID from procfs without importing optional packages."""
+
+    try:
+        raw = Path(f"/proc/{int(pid)}/stat").read_text(encoding="utf-8")
+        fields = raw.rsplit(")", 1)[1].strip().split()
+        return int(fields[1]) if len(fields) >= 2 else 0
+    except (OSError, IndexError, TypeError, ValueError):
+        return 0
+
+
+def _posix_process_command_line(pid: int) -> str:
+    """Read an argv vector from procfs without exposing environment values."""
+
+    try:
+        values = Path(f"/proc/{int(pid)}/cmdline").read_bytes().split(b"\0")
+    except (OSError, TypeError, ValueError):
+        return ""
+    return " ".join(value.decode("utf-8", errors="replace") for value in values if value)
+
+
 def _pid_belongs_to_process_tree(pid: int, root_pid: int) -> bool:
     if pid <= 0 or root_pid <= 0:
         return False
@@ -203,7 +245,16 @@ def _pid_belongs_to_process_tree(pid: int, root_pid: int) -> bool:
         process = psutil.Process(pid)
         return any(int(parent.pid) == root_pid for parent in process.parents())
     except Exception:
-        return False
+        if os.name == "nt":
+            return False
+    current_pid = int(pid)
+    seen: set[int] = set()
+    while current_pid > 0 and current_pid not in seen:
+        if current_pid == root_pid:
+            return True
+        seen.add(current_pid)
+        current_pid = _posix_parent_pid(current_pid)
+    return False
 
 
 def _is_project_workbench_pid(pid: int) -> bool:
@@ -214,6 +265,10 @@ def _is_project_workbench_pid(pid: int) -> bool:
 
         command_line = " ".join(psutil.Process(pid).cmdline())
     except Exception:
+        if os.name == "nt":
+            return False
+        command_line = _posix_process_command_line(pid)
+    if not command_line:
         return False
     expected_script = str(PROJECT_ROOT / "scripts" / "web_workbench.py")
     # Require this checkout's project root so sibling checkouts (e.g. live-acceptance)
