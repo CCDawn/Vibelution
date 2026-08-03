@@ -995,6 +995,29 @@ def test_launcher_startup_settings_rejects_invalid_workbench_window_size(tmp_pat
     assert "workbench.windowSize" in error
 
 
+def test_launcher_startup_settings_rejects_tiny_edge_chrome_window_size(tmp_path, monkeypatch):
+    """320x240 is Edge --app minimum chrome, not a usable workbench — never accept it."""
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("[workbench]\nwindow_size = \"1600x900\"\n", encoding="utf-8")
+    monkeypatch.setattr(launcher_service, "CONFIG_PATH", config_path)
+    monkeypatch.delenv("VIBELUTION_WORKBENCH_WINDOW_SIZE", raising=False)
+    monkeypatch.delenv("AGENT_WORKBENCH_WINDOW_SIZE", raising=False)
+
+    try:
+        launcher_service.update_launcher_startup_settings({"workbench": {"windowSize": "320x240"}})
+    except ValueError as exc:
+        error = str(exc)
+    else:
+        raise AssertionError("expected 320x240 window size to be rejected")
+
+    assert "workbench.windowSize" in error
+    # Stale tiny values in config must not become the effective startup size.
+    config_path.write_text("[workbench]\nwindow_size = \"320x240\"\n", encoding="utf-8")
+    setting = launcher_service.get_launcher_startup_settings()
+    assert setting["workbench"]["windowSize"] == "auto"
+    assert setting["workbench"]["effectiveWindowSize"] == "auto"
+
+
 def test_standalone_launcher_active_work_guard_reads_runtime_manager_store(tmp_path, monkeypatch):
     work_runs_dir = tmp_path / ".runtime" / "runtime-manager" / "work_runs"
     store = WorkRunStore(root=work_runs_dir)

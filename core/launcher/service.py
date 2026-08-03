@@ -561,7 +561,8 @@ def _parse_workbench_window_size(value: object) -> WorkbenchWindowSize:
 
 
 def _workbench_window_size_in_range(width: int, height: int) -> bool:
-    return 320 <= width <= 7680 and 240 <= height <= 4320
+    # Floor is a usable workbench chrome size (not Edge minimum 320x240).
+    return 960 <= width <= 7680 and 600 <= height <= 4320
 
 
 def _workbench_window_size_options() -> list[dict[str, Any]]:

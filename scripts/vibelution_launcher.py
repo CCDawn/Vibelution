@@ -727,7 +727,8 @@ def _configured_window_size() -> str:
     if len(parts) == 2 and all(part.isdigit() for part in parts):
         width = int(parts[0])
         height = int(parts[1])
-        if 320 <= width <= 7680 and 240 <= height <= 4320:
+        # Reject unusable chrome sizes (e.g. 320x240) so startup falls back to auto.
+        if 960 <= width <= 7680 and 600 <= height <= 4320:
             return raw
     return "auto"
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  isPersistableWorkbenchWindowSize,
   observeWorkbenchWindowMode,
   observeWorkbenchWindowSize,
 } from "./workbenchWindowMemory";
@@ -66,5 +67,18 @@ describe("workbenchWindowMemory", () => {
         screen: { availWidth: 1536, availHeight: 864 } as Screen,
       }),
     ).toBe("1536x864");
+  });
+
+  it("never reports Edge chrome-sized shells (320x240) as persistable sizes", () => {
+    expect(
+      observeWorkbenchWindowSize({
+        outerWidth: 320,
+        outerHeight: 240,
+        screen: { availWidth: 1920, availHeight: 1080 } as Screen,
+      }),
+    ).toBe("960x600");
+    expect(isPersistableWorkbenchWindowSize("320x240")).toBe(false);
+    expect(isPersistableWorkbenchWindowSize("960x600")).toBe(true);
+    expect(isPersistableWorkbenchWindowSize("1600x900")).toBe(true);
   });
 });

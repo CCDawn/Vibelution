@@ -1954,15 +1954,17 @@ class WorkbenchConfig(BaseModel):
         if value == "auto":
             return value
         if "x" not in value:
-            raise ValueError("window_size must be 'auto' or WIDTHxHEIGHT")
+            # Soft-normalize so stale/operator typos do not block AppConfig load.
+            return "auto"
         width_text, height_text = value.split("x", 1)
         try:
             width = int(width_text)
             height = int(height_text)
-        except ValueError as exc:
-            raise ValueError("window_size must be 'auto' or WIDTHxHEIGHT") from exc
-        if not (320 <= width <= 7680 and 240 <= height <= 4320):
-            raise ValueError("window_size must be between 320x240 and 7680x4320")
+        except ValueError:
+            return "auto"
+        # Floor matches launcher / window memory (usable workbench, not Edge 320x240 chrome).
+        if not (960 <= width <= 7680 and 600 <= height <= 4320):
+            return "auto"
         return f"{width}x{height}"
 
 
