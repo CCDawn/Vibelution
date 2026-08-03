@@ -80,6 +80,59 @@ def _is_process_alive(pid: int) -> bool:
     return True
 
 
+def _visible_top_level_window_handles(pid: int) -> list[int]:
+    """Return visible top-level HWND values owned by ``pid`` (Windows only)."""
+
+    if os.name != "nt" or int(pid or 0) <= 0:
+        return []
+    try:
+        import ctypes
+        from ctypes import wintypes
+    except Exception:
+        return []
+
+    user32 = ctypes.windll.user32
+    handles: list[int] = []
+    enum_proc = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
+
+    @enum_proc
+    def callback(hwnd, _lparam):  # type: ignore[no-untyped-def]
+        if not user32.IsWindowVisible(hwnd):
+            return True
+        owner_pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner_pid))
+        if int(owner_pid.value) == int(pid):
+            # Skip zero-size tool windows that Edge sometimes leaves behind.
+            rect = wintypes.RECT()
+            if user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+                width = int(rect.right) - int(rect.left)
+                height = int(rect.bottom) - int(rect.top)
+                if width >= 160 and height >= 120:
+                    handles.append(int(hwnd))
+        return True
+
+    try:
+        user32.EnumWindows(callback, 0)
+    except Exception:
+        return []
+    return handles
+
+
+def _is_browser_window_alive(pid: int) -> bool:
+    """True only when the managed browser process still has a real visible window.
+
+    Chromium/Edge often leaves a headless browser process (+ utility/GPU children)
+    after the app window is closed. Process-only checks then report the Workbench
+    as open even though the user sees nothing.
+    """
+
+    if not _is_process_alive(pid):
+        return False
+    if os.name != "nt":
+        return True
+    return bool(_visible_top_level_window_handles(int(pid)))
+
+
 def _load_launcher_state() -> dict[str, Any]:
     if not LAUNCHER_STATE_PATH.exists():
         return {}
@@ -432,8 +485,10 @@ def _recover_managed_browser_window_pid(profile_dir: str) -> int:
             fallback_candidates.append(item)
 
     for candidates in (browser_candidates, fallback_candidates):
-        if candidates:
-            return int(candidates[0].get("pid") or 0)
+        for item in candidates:
+            pid = int(item.get("pid") or 0)
+            if pid > 0 and _is_browser_window_alive(pid):
+                return pid
     return 0
 
 
@@ -471,7 +526,7 @@ def observe_workbench(
     browser_managed = bool(window_projection.get("browserManaged"))
 
     port = _port_for_url(url)
-    launcher_browser_window_alive = _is_process_alive(launcher_browser_window_pid)
+    launcher_browser_window_alive = _is_browser_window_alive(launcher_browser_window_pid)
     if (
         session_role == "launcher_control_surface"
         and state_backend_pid <= 0
@@ -516,7 +571,7 @@ def observe_workbench(
         })
 
     state_backend_alive = _is_process_alive(state_backend_pid)
-    browser_window_alive = _is_process_alive(browser_window_pid)
+    browser_window_alive = _is_browser_window_alive(browser_window_pid)
     if (
         session_role == "workbench"
         and not recover_browser_window
@@ -603,7 +658,7 @@ def observe_workbench(
             browser_window_pid = recovered_browser_window_pid
             browser_window_alive = True
             browser_window_recovery_source = "managed_profile"
-    launcher_browser_window_alive = _is_process_alive(launcher_browser_window_pid)
+    launcher_browser_window_alive = _is_browser_window_alive(launcher_browser_window_pid)
     managed_browser_missing = bool(
         observed_session_role != "launcher_control_surface"
         and browser_managed
