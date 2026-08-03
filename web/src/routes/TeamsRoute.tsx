@@ -229,6 +229,7 @@ import {
 } from "./teams/teamKindModel";
 import { fetchJson } from "../api/client";
 import { kernelTaskCenterHref } from "../api/kernel";
+import { getRuntimeSummary } from "../api/launcher";
 import {
   PROJECT_AGENT_BUS_TEAM_TIMELINE_LIMIT,
   isProjectAgentBusEventRevoked,
@@ -1242,7 +1243,7 @@ export function TeamsRoute({
   );
   const runtimeSummaryQuery = useQuery({
     queryKey: queryKeys.runtimeSummary(),
-    queryFn: ({ signal }) => fetchJson<RuntimeSummary>("/api/runtime/summary", { signal }),
+    queryFn: ({ signal }) => getRuntimeSummary(signal),
     enabled: Boolean(researchWorkflowTeamSelected && researchWorkspaceView === "overview"),
     refetchInterval: (query) => {
       const runtime = query.state.data as RuntimeSummary | undefined;

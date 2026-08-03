@@ -1,6 +1,7 @@
 import { useMutation, type QueryClient, type UseMutationResult } from "@tanstack/react-query";
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 
+import { createSessionChatReviewCandidate } from "../../api/chat";
 import { fetchJson } from "../../api/client";
 import {
   revokeProjectAgentBusMessage,
@@ -884,12 +885,7 @@ export function useChatWorkspaceLifecycle({
 
   const addSessionToReviewMutation = useMutation({
     mutationFn: async ({ sessionId }: { sessionId: string }) =>
-      fetchJson<SessionChatReviewCandidateResponse>(
-        `/api/sessions/${sessionId}/chat-review-candidate`,
-        {
-          method: "POST",
-        },
-      ),
+      createSessionChatReviewCandidate(sessionId),
     onSuccess: (payload, variables) => {
       const detail = payload.summary
         ? `${t("addSessionToReviewSucceeded")} ${payload.summary}`

@@ -18,6 +18,7 @@ import type {
   LauncherStatus as BaseLauncherStatus,
   RuntimeLifecycleCancelRequest,
   RuntimeLifecycleCancelResponse,
+  RuntimeSummary,
   WorkbenchWindowModeSetting,
   WorkbenchWindowModeUpdateRequest,
   WorkbenchWindowModeUpdateResponse,
@@ -187,6 +188,15 @@ export function cancelRuntimeLifecycleCommand(request: RuntimeLifecycleCancelReq
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(request),
   });
+}
+
+/**
+ * Runtime read model shared by route-level polling surfaces.
+ * It intentionally bypasses the launcher control-plane proxy because this is
+ * served by the workbench backend itself.
+ */
+export function getRuntimeSummary(signal?: AbortSignal) {
+  return fetchJson<RuntimeSummary>("/api/runtime/summary", { signal });
 }
 
 export function updateWorkbenchWindowMode(request: WorkbenchWindowModeUpdateRequest) {

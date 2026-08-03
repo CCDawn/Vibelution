@@ -24,6 +24,7 @@ const styles = {
     "stageBar",
     "min-w-0 inline-flex max-w-full flex-wrap items-center gap-1 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   ),
+  stageBarItem: cv("stageBarItem", "inline-flex items-center gap-1"),
   stageItem: cv("stageItem", "shrink-0 text-[var(--fg-tertiary)] opacity-70"),
   stageItemReached: cv("stageItemReached", "shrink-0 text-[var(--fg-secondary)] opacity-100"),
   stageItemCurrent: cv(

@@ -20,6 +20,7 @@ const localStylesObjectPattern = /const\s+styles\s*=/;
 const parentRouteStyleImportPattern = /from\s+["']\.\/([A-Za-z0-9]+Route)\.styles["']/g;
 const productSharedParentStyleConsumers = [
   "components/layout/PersistedHeightListShell.tsx",
+  "components/conversation/ConversationToolActivityPills.tsx",
   "routes/chat/CacheDetailDialog.tsx",
   "routes/chat/ChatConversationIndexRail.tsx",
   "routes/chat/chatRoutePresentation.tsx",
