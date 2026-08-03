@@ -16,6 +16,7 @@
 | Architecture decisions | [adr/](adr/) | Durable decisions and reasons |
 | Tests | [../tests/README.md](../tests/README.md) | Test entrypoints and validation matrix |
 | Runtime logging | [../core/logging/README.md](../core/logging/README.md) | Logging implementation map |
+| Linux deployment bootstrap | [ops/linux-bootstrap.md](ops/linux-bootstrap.md) | Current source, config, and loopback acceptance boundary |
 | Frontend product API | [../web/src/components/vui/README.md](../web/src/components/vui/README.md) | VUI local implementation map |
 | Project memory | [../.docs/project-memory/INDEX.md](../.docs/project-memory/INDEX.md) | Current runtime/project state, not a normative source |
 
