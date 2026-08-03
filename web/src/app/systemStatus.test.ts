@@ -13,6 +13,7 @@ import {
   lifecycleStateLabel,
   lifecycleStateTone,
   runtimeControllerTone,
+  shouldRenderStartupOverlay,
 } from "./systemStatus";
 
 const runtimeWorkbenchBase = {
@@ -58,6 +59,21 @@ function runtimeWithActiveWork(active: {
 }
 
 describe("systemStatus", () => {
+  it("keeps browser workbench interactive when only the desktop window is missing", () => {
+    const partial = {
+      active: true,
+      title: "工作台窗口未打开",
+      detail: "后端仍在运行，但工作台窗口缺失。",
+      stage: "部分运行",
+      tone: "caution" as const,
+    };
+
+    expect(shouldRenderStartupOverlay(partial, false)).toBe(false);
+    expect(shouldRenderStartupOverlay(partial, true)).toBe(true);
+    expect(shouldRenderStartupOverlay({ ...partial, tone: "running" }, false)).toBe(true);
+    expect(shouldRenderStartupOverlay({ ...partial, active: false }, false)).toBe(false);
+  });
+
   it("derives frontend state from browser visibility and connectivity", () => {
     expect(deriveFrontendSystemState({ online: true, visible: true })).toBe("connected");
     expect(deriveFrontendSystemState({ online: true, visible: false })).toBe("background");

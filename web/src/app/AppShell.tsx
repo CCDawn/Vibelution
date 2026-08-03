@@ -43,6 +43,7 @@ import {
   deriveStartupProgressState,
   frontendSystemTone,
   runtimeControllerTone,
+  shouldRenderStartupOverlay,
   type SystemStatusTone,
 } from "./systemStatus";
 import { applyWorkbenchDocumentLanguage } from "./documentLanguage";
@@ -921,6 +922,7 @@ export function AppShell() {
     : startupLoadingShouldBlock
       ? startupLoadingProgress
       : { active: false, title: "", detail: "", stage: "", tone: "idle" as const };
+  const startupOverlayActive = shouldRenderStartupOverlay(startupPanel, desktopShell);
   const shutdownLocallyComplete = shouldTreatShutdownAsLocallyComplete({
     shutdownRequested,
     backendState,
@@ -2165,7 +2167,7 @@ export function AppShell() {
       data-browser-role="workbench"
       style={shellStyle}
     >
-      {startupPanel.active && !shutdownOpen ? (
+      {startupOverlayActive && !shutdownOpen ? (
         <div
           className={styles.startupOverlay}
           role="status"
