@@ -1,5 +1,8 @@
 import { fetchJson } from "./client";
-import type { SessionToolApprovalRequest } from "./types";
+import type {
+  SessionChatReviewCandidateResponse,
+  SessionToolApprovalRequest,
+} from "./types";
 
 export type SessionToolApprovalDecision =
   | "accept"
@@ -28,5 +31,18 @@ export function resolveSessionToolApprovalDecision(
       },
       body: JSON.stringify({ decision }),
     },
+  );
+}
+
+/**
+ * Adds a completed chat session to the human review queue.
+ * Keep this request in the chat API boundary instead of a route lifecycle hook.
+ */
+export function createSessionChatReviewCandidate(
+  sessionId: string,
+): Promise<SessionChatReviewCandidateResponse> {
+  return fetchJson<SessionChatReviewCandidateResponse>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/chat-review-candidate`,
+    { method: "POST" },
   );
 }

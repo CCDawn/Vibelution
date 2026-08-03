@@ -141,10 +141,10 @@ describe("TeamSourceCollectionExtractionRecoveryWorkspacePanel", () => {
     expect(markup).toContain("待核验来源");
     expect(markup).toContain("2/14");
     expect(markup).toContain("提炼覆盖");
-    expect(markup).toContain("要求 Agent 补充材料");
+    expect(markup).toContain("进入 Agent 私聊补充材料");
     expect(markup).toContain("需核验版本/可靠性");
     expect(markup).toContain("不等于缺证据锚点");
-    expect(markup).toContain("现在只点主按钮推进");
+    expect(markup).toContain("请在私聊补入新的可公开核验材料");
     expect(markup).toContain("重新质量审查");
     expect(markup).toContain("待质量审查");
     expect(markup).toContain("<strong>10</strong>");

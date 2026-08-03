@@ -62,7 +62,7 @@ export function ConversationActiveTurnStatusNote({
         {stageBarItems.length > 0 ? (
           <span className={styles.stageBar} aria-hidden="true">
             {stageBarItems.map((item, index) => (
-              <span key={item.phase} className="inline-flex items-center gap-1">
+              <span key={item.phase} className={styles.stageBarItem}>
                 {index > 0 ? <span className={styles.stageSeparator}>→</span> : null}
                 <span
                   className={

@@ -5,6 +5,7 @@ import {
   cancelRuntimeLifecycleCommand,
   forceStopLauncherBundle,
   getLauncherStatus,
+  getRuntimeSummary,
   launcherEndpoint,
   launcherRestartEndpoint,
   reattachLauncherSupervisor,
@@ -63,6 +64,20 @@ describe("launcher api helpers", () => {
     expect(payload.launcher.mode).toBe("standalone_control_plane");
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0][0]).toBe("http://127.0.0.1:8765/api/launcher/status");
+  });
+
+  it("fetches the workbench runtime summary directly instead of through launcher control", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ status: "ready" }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const payload = await getRuntimeSummary();
+
+    expect(payload.status).toBe("ready");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/runtime/summary");
   });
 
   it("uses the reported launcher control origin after status discovery", async () => {

@@ -10,7 +10,7 @@ describe("conversation tool renderer registry", () => {
   it.each([
     ["get_git_status_summary_tool", "git", "Git 状态"],
     ["code_symbol_tool", "code", "代码图谱"],
-    ["exec_command", "command", "运行命令"],
+    ["exec_command", "command", "执行命令"],
     ["write_stdin", "command", "写入终端"],
     ["web_search_tool", "search", "网页搜索"],
     ["web_fetch_tool", "files", "网页读取"],
