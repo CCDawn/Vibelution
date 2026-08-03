@@ -274,10 +274,16 @@ def session_query(
 
 
 @router.post("/sessions", status_code=status.HTTP_201_CREATED)
-def session_create(payload: SessionCreatePayload | None = None) -> dict:
+def session_create(
+    request: Request,
+    payload: SessionCreatePayload | None = None,
+) -> dict:
+    prefer = str(request.headers.get("prefer") or "").lower()
+    lightweight = "respond-async" in prefer
     return create_chat_session(
         agent_id=str(payload.agentId or "").strip() if payload is not None else "",
         title=str(payload.title or "").strip() if payload is not None else "",
+        lightweight=lightweight,
     )
 
 
@@ -325,9 +331,11 @@ def session_reasoning_effort_update(session_id: str, payload: SessionReasoningEf
 
 
 @router.post("/sessions/{session_id}/select")
-def session_select(session_id: str) -> dict:
+def session_select(session_id: str, request: Request) -> dict:
     try:
-        return select_chat_session(session_id)
+        prefer = str(request.headers.get("prefer") or "").lower()
+        lightweight = "respond-async" in prefer
+        return select_chat_session(session_id, lightweight=lightweight)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except SessionValidationError as exc:

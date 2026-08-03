@@ -1,6 +1,7 @@
 import type { QueryKey } from "@tanstack/react-query";
 
 import { queryKeys } from "../api/queryKeys";
+import { markSessionDeleteTombstone } from "./sessionDeleteTombstone";
 
 type QueryClientLike = {
   invalidateQueries: (options: { queryKey: QueryKey }) => Promise<unknown> | unknown;
@@ -80,18 +81,32 @@ export function createChatWorkspaceCache(queryClient: QueryClientLike) {
     }) {
       const deletedSessionId = String(options.deletedSessionId || "").trim();
       if (deletedSessionId) {
+        // Survive brief list refetch races after optimistic delete.
+        markSessionDeleteTombstone(deletedSessionId);
         queryClient.removeQueries?.({ queryKey: queryKeys.session(deletedSessionId), exact: true });
         queryClient.removeQueries?.({ queryKey: queryKeys.sessionLlmOptions(deletedSessionId), exact: true });
       }
+      // Keep this recipe narrow so delete does not thrash the whole workbench
+      // (agentConfigWorkspace + all chat rooms were freezing tab switches).
       return invalidateAll(queryClient, [
         queryKeys.sessions(),
         queryKeys.conversations(),
         queryKeys.agents(),
-        queryKeys.agentConfigWorkspace(),
         queryKeys.runtimeSummary(),
-        queryKeys.chatRooms(),
         ...(options.nextSessionId ? [queryKeys.session(options.nextSessionId)] : []),
-        ...(options.roomId ? [queryKeys.chatRoom(options.roomId)] : []),
+        ...(options.roomId ? [queryKeys.chatRooms(), queryKeys.chatRoom(options.roomId)] : []),
+      ]);
+    },
+    /**
+     * Config save / model pin: refresh agent config surfaces only.
+     * Must not invalidate sessions/conversations — that freezes chat tab UX.
+     */
+    afterAgentConfigSaved(agentId?: string) {
+      const normalizedAgentId = String(agentId || "").trim();
+      return invalidateAll(queryClient, [
+        queryKeys.agentConfigWorkspace(),
+        queryKeys.agentSummary(true),
+        ...(normalizedAgentId ? [queryKeys.agent(normalizedAgentId)] : []),
       ]);
     },
     afterSessionAgentChanged(sessionId: string) {
@@ -139,6 +154,8 @@ export function createChatWorkspaceCache(queryClient: QueryClientLike) {
       return invalidateAll(queryClient, [queryKeys.projectAgentBus()]);
     },
     afterAgentWorkspaceChanged() {
+      // Structural agent changes (create/archive/purge) may affect chat indexes.
+      // Prefer afterAgentConfigSaved for routine config PATCH.
       return invalidateAll(queryClient, [
         queryKeys.agentConfigWorkspace(),
         queryKeys.agents(),

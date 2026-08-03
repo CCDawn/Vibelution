@@ -111,6 +111,9 @@ export type AgentSessionTabStripProps = {
   cliAgentRuns?: CliAgentRunTab[];
   createPending?: boolean;
   createDisabled?: boolean;
+  /** When set, only that session's close control is pending (not a global lock). */
+  deletePendingSessionId?: string;
+  /** @deprecated use deletePendingSessionId — global true freezes every tab close. */
   deletePending?: boolean;
   sessions: SessionSummary[];
   /** Session ids with an active runtime chat_turn (green spinner). */
@@ -153,6 +156,7 @@ export function AgentSessionTabStrip({
   cliAgentRuns = [],
   createPending = false,
   createDisabled = false,
+  deletePendingSessionId = "",
   deletePending = false,
   sessions,
   runtimeRunningSessionIds = [],
@@ -271,7 +275,11 @@ export function AgentSessionTabStrip({
         const tabContextTarget = contextMenuSessionId === session.id;
         const tabEditing = editingSessionId === session.id;
         const keyboardIndex = keyboardTabs.findIndex((tab) => tab.kind === "session" && tab.id === session.id);
-        const deleteDisabled = isBusyPhase(session.currentPhase || session.status) || deletePending;
+        const sessionDeletePending = Boolean(
+          deletePending
+          || (deletePendingSessionId && deletePendingSessionId === session.id),
+        );
+        const deleteDisabled = isBusyPhase(session.currentPhase || session.status) || sessionDeletePending;
         const tabClassName = [
           styles.agentSessionTab,
           styles.agentSessionTabRoot,
