@@ -475,9 +475,10 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
     const requestedExperimentMethodIsValid = experimentMethodCatalogQuery.data?.methods.some(
       (method: any) => method.methodId === requestedExperimentMethod,
     );
+    const activeExperimentContract = experimentPlanningStatus?.activePlan?.experimentContract;
     const selectedExperimentMethod = preferredExperimentMethod
       || (requestedExperimentMethodIsValid ? requestedExperimentMethod as ExperimentMethodId : "")
-      || experimentPlanningStatus?.activePlan?.experimentContract?.experimentMethod
+      || activeExperimentContract?.experimentMethod
       || experimentMethodCatalogQuery.data?.methods[0]?.methodId
       || "model_training_inference";
     const selectedExperimentMethodDescriptor = experimentMethodCatalogQuery.data?.methods.find(
@@ -486,13 +487,25 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
     const selectedExperimentResearchMode =
       experimentPlanningStatus?.activePlan?.experimentContract?.researchMode ?? "full_research_loop";
     const selectedExperimentAdapter = selectedExperimentMethodDescriptor?.adapterAvailability[selectedExperimentResearchMode];
+    const activeExperimentContractAdapterSelection =
+      activeExperimentContract && activeExperimentContract.experimentMethod === selectedExperimentMethod
+        ? activeExperimentContract.adapterSelection
+        : undefined;
+    const selectedExperimentResolvedAdapterId =
+      activeExperimentContractAdapterSelection?.resolvedAdapterId
+      || selectedExperimentAdapter?.resolvedAdapterId
+      || "";
+    const selectedExperimentAdapterSelectionSource =
+      activeExperimentContractAdapterSelection?.selectionSource
+      || selectedExperimentAdapter?.selectionSource
+      || "unresolved";
     const selectedExperimentRegisteredAdapters = experimentMethodCatalogQuery.data?.adapters.filter(
       (adapter: any) => adapter.method === selectedExperimentMethod && adapter.availability === "available",
     ) ?? [];
     const selectedExperimentPlanningOnly = Boolean(
       selectedExperimentAdapter?.unavailableReason?.toLowerCase().includes("not required"),
     );
-    const selectedExperimentAdapterStatus = selectedExperimentAdapter?.resolvedAdapterId
+    const selectedExperimentAdapterStatus = selectedExperimentResolvedAdapterId
       ? "ready"
       : selectedExperimentRegisteredAdapters.length > 0
         ? "select_required"
@@ -507,7 +520,7 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
           ? (lang === "zh" ? "无需执行器" : "Adapter not required")
           : (lang === "zh" ? "执行器阻塞" : "Adapter blocked");
     const selectedExperimentAdapterReason = selectedExperimentAdapterStatus === "ready"
-      ? `${selectedExperimentAdapter?.resolvedAdapterId} · ${selectedExperimentAdapter?.selectionSource}`
+      ? `${selectedExperimentResolvedAdapterId} · ${selectedExperimentAdapterSelectionSource}`
       : selectedExperimentAdapterStatus === "select_required"
         ? (lang === "zh"
           ? `已登记 ${selectedExperimentRegisteredAdapters.length} 个候选执行器；当前模式尚未自动就绪，请明确选择满足能力要求的执行器。`
