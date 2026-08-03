@@ -5693,19 +5693,40 @@ def test_candidate_graph_stage_writeback_materializes_agent_relation_edges(tmp_p
                     "topicRelationCount": 1,
                     "graphBoundary": "candidate_only",
                 },
+                "candidateGraph": {
+                    "nodes": [
+                        {
+                            "candidateId": source_one["candidateId"],
+                            "nodeId": "n1",
+                            "title": "预测编码层级",
+                        },
+                        {
+                            "candidateId": source_two["candidateId"],
+                            "nodeId": "n2",
+                            "title": "注意精度调节",
+                        },
+                    ],
+                    "edges": [
+                        {
+                            "source": "n1",
+                            "target": "n2",
+                            "relationType": "theory_informs_attention",
+                        },
+                    ],
+                },
                 "themeNodes": [
                     {"themeId": "T1", "label": "预测编码基础理论"},
                     {"themeId": "T2", "label": "注意与精度调节"},
                 ],
                 "sourceThemeEdges": [
                     {
-                        "candidateId": source_one["candidateId"],
+                        "candidateId": "n1",
                         "themeId": "T1",
                         "relation": "source_supports_theme",
                         "confidence": "high",
                     },
                     {
-                        "candidateId": source_two["candidateId"],
+                        "candidateId": "n2",
                         "themeId": "T2",
                         "relation": "source_supports_theme",
                         "confidence": "high",
@@ -5736,9 +5757,9 @@ def test_candidate_graph_stage_writeback_materializes_agent_relation_edges(tmp_p
     )
 
     assert materialized["nodeCount"] == 4
-    assert materialized["edgeCount"] == 3
+    assert materialized["edgeCount"] == 4
     assert graph["summary"]["nodeCount"] == 4
-    assert graph["summary"]["edgeCount"] == 3
+    assert graph["summary"]["edgeCount"] == 4
     assert {node["candidateId"] for node in graph["nodes"]} >= {
         source_one["candidateId"],
         source_two["candidateId"],
@@ -5746,12 +5767,133 @@ def test_candidate_graph_stage_writeback_materializes_agent_relation_edges(tmp_p
         "source-theme:T2",
     }
     assert edge_triples == {
+        (source_one["candidateId"], source_two["candidateId"], "theory_informs_attention"),
         (source_one["candidateId"], "source-theme:T1", "source_supports_theme"),
         (source_two["candidateId"], "source-theme:T2", "source_supports_theme"),
         ("source-theme:T1", "source-theme:T2", "theory_informs_precision_attention"),
     }
     assert graph_projection["counts"]["artifact"] == 4
-    assert graph_projection["counts"]["output"] == 3
+    assert graph_projection["counts"]["output"] == 4
+
+
+def test_candidate_graph_stage_writeback_requires_materialized_relation_edges(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_fake_local_research_config(monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="资料关系整理")
+    session_service.ensure_agent_direct_session(agent_id=agent["agentId"], title="资料关系整理")
+    team = team_service.create_team(
+        name="挑战杯科研团队",
+        members=[{"agentId": agent["agentId"], "role": "source_relation_mapper", "agentName": "资料关系整理"}],
+    )
+    run_response = team_workflow_orchestration_service.start_source_collection_run(
+        team["teamId"],
+        {
+            "topic": "关系物化门槛",
+            "agentRoles": ["source_relation_mapper"],
+            "agentIds": {"source_relation_mapper": agent["agentId"]},
+            "querySeeds": ["candidate graph relation gate"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    run_id = run_response["run"]["runId"]
+    source_one = team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"],
+        {
+            "title": "Candidate graph source one",
+            "sourceUrl": "https://doi.org/10.0000/relation-gate-one",
+            "sourceKind": "paper",
+            "summary": "Candidate graph source one.",
+            "allowedForAnalysis": True,
+            "metadata": {"sourceCollectionRunId": run_id, "doi": "10.0000/relation-gate-one"},
+            "createdByAgent": "content-extraction-agent",
+        },
+    )["candidate"]
+    source_two = team_workflow_orchestration_service.register_candidate_source(
+        team["teamId"],
+        {
+            "title": "Candidate graph source two",
+            "sourceUrl": "https://doi.org/10.0000/relation-gate-two",
+            "sourceKind": "paper",
+            "summary": "Candidate graph source two.",
+            "allowedForAnalysis": True,
+            "metadata": {"sourceCollectionRunId": run_id, "doi": "10.0000/relation-gate-two"},
+            "createdByAgent": "content-extraction-agent",
+        },
+    )["candidate"]
+    monkeypatch.setattr(
+        session_service,
+        "submit_session_message",
+        lambda session_id, content, **kwargs: {"accepted": True, "sessionId": session_id, "turnId": "turn-relation-gate", "status": "running"},
+    )
+    task = team_workflow_orchestration_service.start_source_collection_stage_session_task(
+        team["teamId"],
+        run_id,
+        {"stageId": "relations", "agentId": agent["agentId"], "agentRole": "source_relation_mapper"},
+    )
+    _append_stage_task_tool_trace(tmp_path, task["task"])
+    original_agent_graph_edges = team_workflow_orchestration_service._source_collection_agent_graph_edges
+
+    def legacy_agent_graph_edges(agent_graph):
+        return [
+            team_workflow_orchestration_service._candidate_graph_edge(
+                "n1",
+                "n2",
+                "candidate_supports_candidate",
+            )
+        ]
+
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "_source_collection_agent_graph_edges",
+        legacy_agent_graph_edges,
+    )
+
+    response = team_workflow_orchestration_service.writeback_source_collection_stage_session_task(
+        team["teamId"],
+        task["taskId"],
+        {
+            "status": "completed",
+            "summary": "声称形成一条关系，但端点未绑定到候选资料。",
+            "result": {
+                "candidateGraph": {
+                    "nodes": [
+                        {"candidateId": source_one["candidateId"], "nodeId": "n1"},
+                        {"candidateId": source_two["candidateId"], "nodeId": "n2"},
+                    ],
+                    "edges": [
+                        {
+                            "source": "n1",
+                            "target": "n2",
+                            "relation": "candidate_supports_candidate",
+                        },
+                    ],
+                },
+            },
+            "recordedByAgent": agent["agentId"],
+        },
+    )
+
+    closure = response["task"]["result"]["closureSummary"]
+    materialized = response["writeback"]["materializedCandidateGraph"]
+    assert materialized["edgeCount"] == 0
+    assert materialized["missingLinkCount"] == 1
+    assert response["task"]["status"] == "needs_review"
+    assert closure["artifactComplete"] is False
+    assert closure["artifactStatus"] == "candidate_graph_relation_edges_missing"
+
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "_source_collection_agent_graph_edges",
+        original_agent_graph_edges,
+    )
+    reconciled = team_workflow_orchestration_service._reconcile_source_collection_stage_session_task(
+        team["teamId"],
+        run_id,
+        response["task"],
+    )
+
+    assert reconciled["status"] == "completed"
+    assert reconciled["writeback"]["materializedCandidateGraph"]["edgeCount"] == 1
 
 def test_candidate_graph_stage_writeback_materializes_root_graph_payload_on_reuse(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)

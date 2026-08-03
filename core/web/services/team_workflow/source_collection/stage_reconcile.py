@@ -1185,6 +1185,12 @@ def _reconcile_source_collection_stage_session_task_sources(team_id: str, run_id
 
     existing_graph_summary = writeback.get("materializedCandidateGraph") if isinstance(writeback.get("materializedCandidateGraph"), dict) else {}
     existing_graph_status = s._trim_text(existing_graph_summary.get("status"), max_length=80).lower()
+    existing_graph_edge_count = s._source_collection_count(existing_graph_summary.get("edgeCount"))
+    agent_graph = s._source_collection_stage_writeback_agent_graph_payload(
+        result if isinstance(result, dict) else {}
+    )
+    claimed_graph_edge_count = len(s._source_collection_agent_graph_edges(agent_graph))
+    relation_edges_need_reconciliation = claimed_graph_edge_count > 0 and existing_graph_edge_count <= 0
     should_reconcile_graph = (
         (
             s._normalize_source_collection_stage_id(task.get("stageId"), default="") == "relations"
@@ -1192,7 +1198,11 @@ def _reconcile_source_collection_stage_session_task_sources(team_id: str, run_id
         )
         and isinstance(result.get("candidateGraph"), dict)
     )
-    if should_reconcile_graph and (not existing_graph_status or existing_graph_status == "failed"):
+    if should_reconcile_graph and (
+        not existing_graph_status
+        or existing_graph_status == "failed"
+        or relation_edges_need_reconciliation
+    ):
         materialized_graph = s._materialize_source_collection_stage_writeback_candidate_graph(
             team_id,
             run_id,

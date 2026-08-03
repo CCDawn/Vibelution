@@ -996,6 +996,9 @@ def _source_collection_stage_writeback_closure_summary(
     target_label = "阶段产物"
     action_label = "继续处理"
     retry_instruction = "重试时请先读取 source_collection_context_tool 的 compact 上下文，按分页读完后再回写真实 ID。"
+    relation_edge_claim_count = 0
+    materialized_relation_edge_count = 0
+    relation_edges_not_materialized = False
     excluded_source_count = s._source_collection_count(materialized_sources.get("excludedSourceCount"))
     if stage_id == "finding" or agent_role == "source_finder":
         target_label = "原始资料"
@@ -1028,7 +1031,24 @@ def _source_collection_stage_writeback_closure_summary(
         success_count = s._source_collection_count(materialized_candidate_graph.get("createdCandidateGraphCount")) or (
             1 if materialized_candidate_graph.get("candidateGraphId") else 0
         )
-        artifact_status = "candidate_graph_ready" if success_count else "no_effect"
+        agent_graph = s._source_collection_stage_writeback_agent_graph_payload(
+            writeback.get("result") if isinstance(writeback.get("result"), dict) else {}
+        )
+        relation_edge_claim_count = len(s._source_collection_agent_graph_edges(agent_graph))
+        materialized_relation_edge_count = s._source_collection_count(materialized_candidate_graph.get("edgeCount"))
+        relation_edges_not_materialized = relation_edge_claim_count > 0 and materialized_relation_edge_count <= 0
+        artifact_status = (
+            "candidate_graph_relation_edges_missing"
+            if relation_edges_not_materialized
+            else "candidate_graph_ready"
+            if success_count
+            else "no_effect"
+        )
+        if relation_edges_not_materialized:
+            retry_instruction = (
+                "本轮声称生成了候选关系，但候选图没有物化任何可用边。"
+                "请在 Agent 私聊中读取本轮候选图节点，使用节点的 candidateId（不要使用 n1、n2 等展示别名）重新回写关系。"
+            )
     elif stage_id == "ingestion" or agent_role == "source_ingestor":
         target_label = "入库审核包"
         action_label = "入库审核"
@@ -1037,7 +1057,11 @@ def _source_collection_stage_writeback_closure_summary(
         )
         artifact_status = "knowledge_ingestion_ready" if success_count else "no_effect"
 
-    artifact_complete = bool(success_count > 0 and (not coverage or complete))
+    artifact_complete = bool(
+        success_count > 0
+        and (not coverage or complete)
+        and not relation_edges_not_materialized
+    )
     if not artifact_complete and excluded_source_count > 0 and (not coverage or complete):
         artifact_complete = True
     task_checklist = [
@@ -1057,7 +1081,13 @@ def _source_collection_stage_writeback_closure_summary(
         task_checklist_complete=task_checklist_complete,
     )
 
-    if success_count > 0 and (not coverage or complete) and task_checklist_complete:
+    if relation_edges_not_materialized:
+        user_status = "partial"
+        message = (
+            f"Agent 声称生成了 {relation_edge_claim_count} 条候选关系，但候选图实际物化为 "
+            f"{materialized_relation_edge_count} 条；请按真实 candidateId 重新建图。"
+        )
+    elif success_count > 0 and (not coverage or complete) and task_checklist_complete:
         user_status = "success"
         message = f"已生成 {success_count} 个{target_label}，本阶段闭环成功。"
     elif success_count > 0 and (not coverage or complete):
