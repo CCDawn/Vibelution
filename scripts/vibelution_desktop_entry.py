@@ -339,45 +339,55 @@ def _edge_executable() -> str:
     raise RuntimeError("Microsoft Edge was not found.")
 
 
-class _GUID(ctypes.Structure):
-    _fields_ = (
-        ("Data1", ctypes.c_ulong),
-        ("Data2", ctypes.c_ushort),
-        ("Data3", ctypes.c_ushort),
-        ("Data4", ctypes.c_ubyte * 8),
-    )
+if os.name == "nt":
+    # Windows shell property-store identity (AppUserModelID + relaunch icon).
+    # These ctypes structures are Windows-layout-specific (c_ulong is 4 bytes
+    # on Windows but 8 bytes on POSIX, which would make _GUID 24 bytes and
+    # break _GUID.from_buffer_copy for 16-byte GUID buffers). They are
+    # therefore only constructed on Windows; off-Windows paths short-circuit
+    # in _apply_managed_browser_app_identity before any of them is used.
 
+    class _GUID(ctypes.Structure):
+        _fields_ = (
+            ("Data1", ctypes.c_ulong),
+            ("Data2", ctypes.c_ushort),
+            ("Data3", ctypes.c_ushort),
+            ("Data4", ctypes.c_ubyte * 8),
+        )
 
-class _PROPERTYKEY(ctypes.Structure):
-    _fields_ = (
-        ("fmtid", _GUID),
-        ("pid", ctypes.c_ulong),
-    )
+    class _PROPERTYKEY(ctypes.Structure):
+        _fields_ = (
+            ("fmtid", _GUID),
+            ("pid", ctypes.c_ulong),
+        )
 
+    class _PROPVARIANT(ctypes.Structure):
+        _fields_ = (
+            ("vt", ctypes.c_ushort),
+            ("wReserved1", ctypes.c_ushort),
+            ("wReserved2", ctypes.c_ushort),
+            ("wReserved3", ctypes.c_ushort),
+            ("p", ctypes.c_void_p),
+            ("p2", ctypes.c_int),
+        )
 
-class _PROPVARIANT(ctypes.Structure):
-    _fields_ = (
-        ("vt", ctypes.c_ushort),
-        ("wReserved1", ctypes.c_ushort),
-        ("wReserved2", ctypes.c_ushort),
-        ("wReserved3", ctypes.c_ushort),
-        ("p", ctypes.c_void_p),
-        ("p2", ctypes.c_int),
-    )
+    def _guid(value: str) -> _GUID:
+        return _GUID.from_buffer_copy(uuid.UUID(value).bytes_le)
 
+    def _property_key(pid: int) -> _PROPERTYKEY:
+        return _PROPERTYKEY(_guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"), int(pid))
 
-def _guid(value: str) -> _GUID:
-    return _GUID.from_buffer_copy(uuid.UUID(value).bytes_le)
-
-
-def _property_key(pid: int) -> _PROPERTYKEY:
-    return _PROPERTYKEY(_guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"), int(pid))
-
-
-PKEY_APPUSERMODEL_ID = _property_key(5)
-PKEY_APPUSERMODEL_RELAUNCH_DISPLAY_NAME = _property_key(4)
-PKEY_APPUSERMODEL_RELAUNCH_ICON_RESOURCE = _property_key(3)
-IID_IPROPERTY_STORE = _guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99")
+    PKEY_APPUSERMODEL_ID = _property_key(5)
+    PKEY_APPUSERMODEL_RELAUNCH_DISPLAY_NAME = _property_key(4)
+    PKEY_APPUSERMODEL_RELAUNCH_ICON_RESOURCE = _property_key(3)
+    IID_IPROPERTY_STORE = _guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99")
+else:
+    # Safe placeholders for non-Windows imports: the shell identity helpers are
+    # guarded by os.name checks and never dereference these off-Windows.
+    PKEY_APPUSERMODEL_ID = None
+    PKEY_APPUSERMODEL_RELAUNCH_DISPLAY_NAME = None
+    PKEY_APPUSERMODEL_RELAUNCH_ICON_RESOURCE = None
+    IID_IPROPERTY_STORE = None
 WM_SETICON = 0x0080
 ICON_SMALL = 0
 ICON_BIG = 1
