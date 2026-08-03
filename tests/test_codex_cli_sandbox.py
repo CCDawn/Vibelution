@@ -393,6 +393,9 @@ def test_execute_passes_native_windows_chain_through_environment(monkeypatch, tm
         "git": r"C:\Program Files\Git\cmd\git.exe",
         "rg": r"C:\Codex\bin\rg.exe",
     }
+    monkeypatch.setattr(shell_tools, "CURRENT_SYSTEM", "windows")
+    monkeypatch.setattr(shell_tools, "IS_WINDOWS", True)
+    monkeypatch.setattr(shell_tools, "IS_UNIX", False)
     monkeypatch.setattr(codex_cli_sandbox, "_host_platform", lambda: "windows")
     monkeypatch.setattr(
         codex_cli_sandbox,
