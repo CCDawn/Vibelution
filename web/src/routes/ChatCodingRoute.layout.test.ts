@@ -792,6 +792,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(agentSessionTabStripStyles.agentSessionTab).toContain("shrink-0");
     expect(agentSessionTabStripStyles.agentSessionTab).toContain("rounded-t-[var(--radius-control)]");
     expect(agentSessionTabStripStyles.agentSessionTabMainActionActive).toContain("!shadow-none");
+    // Selection chrome is on the outer card so the close control stays inside the same surface.
+    expect(agentSessionTabStripStyles.agentSessionTabActive).toContain("border-[color-mix");
+    expect(agentSessionTabStripStyles.agentSessionTabActive).toContain("bg-[color-mix");
+    expect(agentSessionTabStripStyles.agentSessionTabCloseButton).toContain("h-6");
     expect(agentSessionTabStripStyles.agentSessionTabCreateButton).toContain("shrink-0");
     expect(agentSessionTabStripStyles.agentSessionTabRail).toContain("flex-[0_1_auto]");
     expect(agentSessionTabStripStyles.agentSessionTabStatusDotRunning).toContain("state-success");

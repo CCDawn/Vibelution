@@ -1,20 +1,21 @@
 const styles = {
+  // Card chrome lives on the outer tab shell so close control sits inside the same surface.
   agentSessionTab:
-    "vui-routes-chatcodingroute agentSessionTab -mb-px min-w-0 inline-flex h-9 w-fit max-w-[16rem] shrink-0 items-center rounded-t-[var(--radius-control)] rounded-b-none",
+    "vui-routes-chatcodingroute agentSessionTab -mb-px min-w-0 inline-flex h-9 w-fit max-w-[16rem] shrink-0 items-center gap-0 rounded-t-[var(--radius-control)] rounded-b-none border border-transparent bg-transparent pr-0.5 text-[var(--fg-secondary)] hover:border-[var(--vui-border-subtle)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--vui-control-hover-fg)]",
   agentSessionTabActive:
-    "vui-routes-chatcodingroute agentSessionTabActive min-w-0 z-[1] opacity-100",
+    "vui-routes-chatcodingroute agentSessionTabActive min-w-0 z-[1] border-[color-mix(in_srgb,var(--accent-cool)_42%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_9%,var(--vui-surface-panel))] text-[var(--fg-primary)] opacity-100 hover:border-[color-mix(in_srgb,var(--accent-cool)_42%,var(--vui-border-subtle))] hover:bg-[color-mix(in_srgb,var(--accent-cool)_9%,var(--vui-surface-panel))] hover:text-[var(--fg-primary)]",
   agentSessionTabChild:
     "vui-routes-chatcodingroute agentSessionTabChild min-w-0",
   agentSessionTabCli:
     "vui-routes-chatcodingroute agentSessionTabCli min-w-0",
   agentSessionTabClosable:
-    "vui-routes-chatcodingroute agentSessionTabClosable min-w-0 gap-0.5",
+    "vui-routes-chatcodingroute agentSessionTabClosable min-w-0",
   agentSessionTabCloseButton:
-    "vui-routes-chatcodingroute agentSessionTabCloseButton h-7 min-h-7 w-7 min-w-7 shrink-0 rounded-[var(--radius-control)] border-transparent bg-transparent px-0 text-[var(--fg-tertiary)] hover:border-[var(--vui-border-subtle)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)]",
+    "vui-routes-chatcodingroute agentSessionTabCloseButton h-6 min-h-6 w-6 min-w-6 shrink-0 rounded-[var(--radius-control)] border-transparent bg-transparent px-0 text-[var(--fg-tertiary)] hover:border-[var(--vui-border-subtle)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)]",
   agentSessionTabCreateButton:
     "vui-routes-chatcodingroute agentSessionTabCreateButton h-8 min-h-8 w-8 min-w-8 shrink-0 rounded-[var(--radius-control)] border-transparent bg-transparent px-0 text-[var(--fg-secondary)] hover:border-[var(--vui-border-subtle)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)]",
   agentSessionTabContextTarget:
-    "vui-routes-chatcodingroute agentSessionTabContextTarget min-w-0 opacity-100",
+    "vui-routes-chatcodingroute agentSessionTabContextTarget min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_40%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] opacity-100",
   agentSessionTabCopy:
     "vui-routes-chatcodingroute agentSessionTabCopy min-w-0 flex flex-1 flex-col items-start gap-0.5 text-left [font-size:var(--vui-font-sm)] leading-tight text-[var(--fg-secondary)]",
   agentSessionTabCopyCompact:
@@ -35,11 +36,11 @@ const styles = {
     "vui-routes-chatcodingroute agentSessionTabIconActive text-[var(--accent-cool)]",
   agentSessionTabKicker:
     "vui-routes-chatcodingroute agentSessionTabKicker min-w-0 text-[10px] font-semibold leading-none text-[var(--fg-tertiary)]",
-  // Force through VButton slots so selection is never washed out by default secondary styles.
-  agentSessionTabMainAction: `vui-routes-chatcodingroute agentSessionTabMainAction !h-9 !min-h-9 min-w-0 max-w-full !rounded-t-[var(--radius-control)] !rounded-b-none !border !border-transparent !bg-transparent !px-2 !text-[var(--fg-secondary)] !shadow-none hover:!border-[var(--vui-border-subtle)] hover:!bg-[var(--vui-control-muted-hover)] hover:!text-[var(--vui-control-hover-fg)] [&_[data-slot=vui-button-content]]:max-w-full [&_[data-slot=vui-button-content]]:!gap-1.5 [&_[data-slot=vui-button-label]]:flex [&_[data-slot=vui-button-label]]:min-w-0 [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:!gap-1.5 [&_[data-slot=vui-button-label]]:truncate`,
-  agentSessionTabMainActionActive: `vui-routes-chatcodingroute agentSessionTabMainActionActive !border-[color-mix(in_srgb,var(--accent-cool)_42%,var(--vui-border-subtle))] !bg-[color-mix(in_srgb,var(--accent-cool)_9%,var(--vui-surface-panel))] !text-[var(--fg-primary)] !shadow-none`,
+  // Content hit target only — selection chrome is on the outer agentSessionTab card.
+  agentSessionTabMainAction: `vui-routes-chatcodingroute agentSessionTabMainAction !h-9 !min-h-9 min-w-0 max-w-full flex-1 !rounded-none !border-0 !bg-transparent !px-2 !text-inherit !shadow-none hover:!border-transparent hover:!bg-transparent hover:!text-inherit [&_[data-slot=vui-button-content]]:max-w-full [&_[data-slot=vui-button-content]]:!gap-1.5 [&_[data-slot=vui-button-label]]:flex [&_[data-slot=vui-button-label]]:min-w-0 [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:!gap-1.5 [&_[data-slot=vui-button-label]]:truncate`,
+  agentSessionTabMainActionActive: `vui-routes-chatcodingroute agentSessionTabMainActionActive !text-[var(--fg-primary)] !shadow-none`,
   agentSessionTabMainActionContextTarget:
-    "vui-routes-chatcodingroute agentSessionTabMainActionContextTarget !border-[color-mix(in_srgb,var(--accent-cool)_40%,transparent)] !bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))]",
+    "vui-routes-chatcodingroute agentSessionTabMainActionContextTarget",
   agentSessionTabMeta:
     "vui-routes-chatcodingroute agentSessionTabMeta min-w-0 max-w-full text-left [font-size:var(--vui-font-xs)] leading-none text-[var(--fg-tertiary)]",
   agentSessionTabRoot:
