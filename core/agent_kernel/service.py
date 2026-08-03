@@ -540,20 +540,21 @@ def _deliver_event_to_recipients(event: dict[str, Any], task: dict[str, Any]) ->
     inbox_created_by = _metadata_text(inbox_metadata, "inboxCreatedBy") or "kernel"
     prompt_eligible = bool(inbox_metadata.get("promptEligible", True))
     deliveries: list[dict[str, Any]] = []
+    explicit_target_session_id = _metadata_text(inbox_metadata, "targetSessionId")
     for agent_id in list(event.get("recipients") or []):
         target_agent_id = str(agent_id or "").strip()
         delivery = {
             "targetAgentId": target_agent_id,
             "status": "pending",
             "inboxMessageId": "",
-            "targetSessionId": "",
+            "targetSessionId": explicit_target_session_id,
             "reason": "",
             "wake": {
                 "wakeRequested": wake_target,
                 "wakeStatus": "not_requested" if not wake_target else "skipped",
                 "messageId": "",
                 "targetAgentId": target_agent_id,
-                "targetSessionId": "",
+                "targetSessionId": explicit_target_session_id,
                 "turnId": "",
                 "reason": "",
             },
@@ -572,6 +573,7 @@ def _deliver_event_to_recipients(event: dict[str, Any], task: dict[str, Any]) ->
                 prompt_eligible=prompt_eligible,
                 created_by=inbox_created_by,
                 metadata=inbox_metadata,
+                target_session_id=explicit_target_session_id,
             )
             delivery.update(
                 {
@@ -627,6 +629,7 @@ def _kernel_inbox_metadata(event: dict[str, Any], task: dict[str, Any]) -> dict[
         "targetAgentCode",
         "agentId",
         "agentMessageToolSourceId",
+        "targetSessionId",
         "inboxKind",
         "messageSummary",
         "messageContentHash",

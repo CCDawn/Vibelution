@@ -1709,6 +1709,8 @@ def write_agent_inbox_message(
     prompt_eligible: bool = True,
     created_by: str = "agent",
     metadata: dict[str, Any] | None = None,
+    target_session_id: str = "",
+    message_id: str = "",
 ) -> dict[str, Any]:
     s = _service()
     target_agent = s.get_agent(target_agent_id, include_archived=False)
@@ -1722,10 +1724,17 @@ def write_agent_inbox_message(
     if normalized_source_agent_id and not source_agent:
         raise s.AgentNotFoundError(f"Source agent not found: {normalized_source_agent_id}")
     now = s.utc_now_iso()
-    message_id = s._new_event_id("agentmsg")
+    resolved_message_id = str(message_id or "").strip() or s._new_event_id("agentmsg")
+    # Prefer explicit session landing (ADR 0002); fall back to agent direct session.
+    resolved_target_session_id = str(target_session_id or "").strip()
+    if not resolved_target_session_id:
+        meta = metadata if isinstance(metadata, dict) else {}
+        resolved_target_session_id = str(meta.get("targetSessionId") or "").strip()
+    if not resolved_target_session_id:
+        resolved_target_session_id = str(target_agent.get("directSessionId") or "").strip()
     event_payload = {
-        "eventId": message_id,
-        "messageId": message_id,
+        "eventId": resolved_message_id,
+        "messageId": resolved_message_id,
         "threadId": str(thread_id or "").strip() or s._agent_inbox_thread_id(source_agent, target_agent),
         "kind": s.trim_lines(str(kind or "agent_direct_message"), max_lines=1).strip() or "agent_direct_message",
         "status": "pending",
@@ -1738,7 +1747,7 @@ def write_agent_inbox_message(
         "targetAgentId": str(target_agent.get("agentId") or "").strip(),
         "targetAgentCode": str(target_agent.get("agentCode") or "").strip(),
         "targetAgentName": str(target_agent.get("displayName") or "").strip(),
-        "targetSessionId": str(target_agent.get("directSessionId") or "").strip(),
+        "targetSessionId": resolved_target_session_id,
         "content": normalized_content,
         "summary": s.trim_lines(str(summary or normalized_content), max_lines=4),
         "promptEligible": bool(prompt_eligible),

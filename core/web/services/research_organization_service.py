@@ -1634,6 +1634,7 @@ def _deliver_message_to_agent(
             source_session_id=str(payload.get("sourceSessionId") or ""),
             source_room_id=str(payload.get("sourceRoomId") or ""),
             source_round_id=str(payload.get("sourceRoundId") or ""),
+            target_session_id=str(payload.get("targetSessionId") or ""),
             edge_id=delivery["edgeId"],
             wake_requested=wake_requested,
         )
@@ -1658,6 +1659,12 @@ def _deliver_message_to_agent(
 
     wake = kernel_delivery.get("wake") if isinstance(kernel_delivery.get("wake"), dict) else {}
     delivery["inboxMessageId"] = str(kernel_delivery.get("inboxMessageId") or wake.get("messageId") or "")
+    delivery["targetSessionId"] = str(
+        kernel_delivery.get("targetSessionId")
+        or wake.get("targetSessionId")
+        or payload.get("targetSessionId")
+        or ""
+    ).strip()
     delivery["deliveredAt"] = utc_now_iso()
     delivery["wakeRequested"] = wake_requested
     delivery["wakeStatus"] = str(wake.get("wakeStatus") or ("not_requested" if not wake_requested else "")).strip()
@@ -1678,6 +1685,7 @@ def _submit_research_org_message_to_kernel(
     source_round_id: str,
     edge_id: str,
     wake_requested: bool,
+    target_session_id: str = "",
 ) -> dict[str, Any]:
     from core.agent_kernel.adapters import submit_agent_message_event
 
@@ -1703,6 +1711,7 @@ def _submit_research_org_message_to_kernel(
         "sourceRoomId": source_room_id,
         "sourceRoundId": source_round_id,
         "sourceMessageId": message_id,
+        "targetSessionId": str(target_session_id or "").strip(),
         "projectionRef": {"kind": "research_org_message", "id": message_id},
         "sourceAgentId": source_agent_id,
         "senderAgentId": source_agent_id,
