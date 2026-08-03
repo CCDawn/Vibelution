@@ -538,14 +538,15 @@ def _build_session_summary(
     session_kind = str(conversation.get("sessionKind") or "main").strip() or "main"
     task_title = str(conversation.get("taskTitle") or raw_title).strip() or raw_title
     display_agent_name = agent_display_name or raw_title
+    # Keep default placeholders ("新会话" / "New session") so create→rename UX is not
+    # prefilled with the Agent display name before the user can type a session title.
+    # Agent identity stays on agentDisplayName / icon, not the tab title field.
     if session_kind == "child":
         display_title = task_title
     elif not s._is_default_empty_session_title(task_title):
         display_title = task_title
-    elif agent_id:
-        display_title = display_agent_name
     else:
-        display_title = task_title
+        display_title = task_title or s.text_for(s.get_web_language(), zh="新会话", en="New session")
     session_id = str(conversation["id"]).strip()
     session_source_ref = s._source_authority_ref("session", session_id)
     session_projection_edit = s._projection_edit_contract("session", session_id)
