@@ -161,7 +161,7 @@ export function AgentSessionTabStrip({
   sessions,
   runtimeRunningSessionIds = [],
   sessionIdsNeedingApproval = [],
-  statusLabel,
+  statusLabel: _statusLabel,
   t,
   workspaceActiveTab,
   onCancelRename,
@@ -265,10 +265,6 @@ export function AgentSessionTabStrip({
           || session.resultCard?.summary
           || sessionDisplay.modelLabel
           || "";
-        const sessionStatusLabel = statusLabel(sessionStatus);
-        const sessionStatusTitle = [statusShortLabel, sessionStatusLabel, sessionDisplay.modelLabel]
-          .filter(Boolean)
-          .join(" · ");
         const sessionHoverTitle = [sessionTitle, statusShortLabel, sessionSummary, sessionDisplay.modelLabel]
           .filter(Boolean)
           .join(" · ");
@@ -301,7 +297,6 @@ export function AgentSessionTabStrip({
               role="presentation"
               data-agent-session-tab-container
               onContextMenu={(event) => onContextMenu(event, session)}
-              title={sessionHoverTitle}
             >
               <span className={styles.agentSessionTabIcon} aria-hidden="true">
                 <Bot size={14} />
@@ -375,7 +370,6 @@ export function AgentSessionTabStrip({
             data-agent-session-tab-container
             {...dragReferenceProps}
             onContextMenu={(event) => onContextMenu(event, session)}
-            title={sessionHoverTitle}
           >
             <VButton
               type="button"
@@ -420,7 +414,6 @@ export function AgentSessionTabStrip({
                     styles.agentSessionTabTitle,
                     tabActive ? styles.agentSessionTabTitleActive : "",
                   ].filter(Boolean).join(" ")}
-                  title={sessionHoverTitle}
                 >{sessionTitle}</span>
               </span>
               {statusTone !== "none" ? (
@@ -428,7 +421,6 @@ export function AgentSessionTabStrip({
                   <span
                     className={statusIndicatorClassName}
                     aria-hidden="true"
-                    title={sessionStatusTitle}
                   >
                     {statusTone === "running" || statusTone === "approval" ? (
                       <LoaderCircle size={11} aria-hidden="true" className={styles.agentSessionTabStatusSpinner} />
@@ -457,7 +449,6 @@ export function AgentSessionTabStrip({
         const statusTone = agentSessionStatusTone(run.status);
         const statusIndicatorClassName = agentSessionStatusIndicatorClassName(statusTone);
         const statusShortLabel = agentSessionStatusShortLabel(statusTone, lang);
-        const runStatusLabel = statusLabel(run.status);
         const title = [run.title, statusShortLabel, run.summary].filter(Boolean).join(" · ");
         const tabMainActionClassName = [
           styles.agentSessionTabMainAction,
@@ -475,7 +466,6 @@ export function AgentSessionTabStrip({
             className={`${tabClassName} ${styles.agentSessionTabClosable}`}
             role="presentation"
             data-agent-session-tab-container
-            title={title}
           >
             <VButton
               type="button"
@@ -512,7 +502,6 @@ export function AgentSessionTabStrip({
                     styles.agentSessionTabTitle,
                     tabActive ? styles.agentSessionTabTitleActive : "",
                   ].filter(Boolean).join(" ")}
-                  title={title}
                 >{run.title}</span>
               </span>
               {statusTone !== "none" ? (
@@ -520,7 +509,6 @@ export function AgentSessionTabStrip({
                   <span
                     className={statusIndicatorClassName}
                     aria-hidden="true"
-                    title={[statusShortLabel, runStatusLabel].filter(Boolean).join(" · ")}
                   >
                     {statusTone === "running" || statusTone === "approval" ? (
                       <LoaderCircle size={11} aria-hidden="true" className={styles.agentSessionTabStatusSpinner} />

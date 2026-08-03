@@ -1,4 +1,4 @@
-import { vuiStateSelectedRowClass } from "../design/vuiSurfaceRecipes";
+import { vuiStateSelectedRowFillClass } from "../design/vuiSurfaceRecipes";
 
 const styles = {
   agentDirectory:
@@ -11,10 +11,11 @@ const styles = {
     "vui-routes-agentconversationdirectory agentSection grid min-w-0 gap-1.5",
   agentDirectoryList:
     "vui-routes-agentconversationdirectory agentDirectoryList grid min-w-0 gap-1.5 pl-1",
+  // surface-role: hover-fill — no card border; matches team section rows in the same rail
   agentRow:
-    "vui-routes-agentconversationdirectory agentRow !grid !h-auto !min-h-[3.25rem] !w-full min-w-0 max-w-full grid-cols-[32px_minmax(0,1fr)] items-center justify-start gap-2.5 rounded-[var(--radius-control)] border border-transparent px-2.5 py-2 text-left font-normal shadow-none transition-[background-color,border-color,box-shadow] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)]",
+    "vui-routes-agentconversationdirectory agentRow !grid !h-auto !min-h-[3.25rem] !w-full min-w-0 max-w-full grid-cols-[32px_minmax(0,1fr)] items-center justify-start gap-2.5 rounded-[var(--radius-control)] !border-0 [border:0] !bg-transparent px-2.5 py-2 text-left font-normal shadow-none transition-[background-color] hover:!border-transparent hover:!bg-vui-surface-card focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_38%,transparent)]",
   agentRowActive:
-    `vui-routes-agentconversationdirectory agentRowActive ${vuiStateSelectedRowClass} shadow-[var(--vui-shadow-inset-accent)]`,
+    `vui-routes-agentconversationdirectory agentRowActive !border-0 [border:0] ${vuiStateSelectedRowFillClass} !text-[var(--accent-cool)] shadow-none`,
   agentAvatar:
     "vui-routes-agentconversationdirectory agentAvatar grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_9%,transparent)] [font-size:var(--vui-font-xs)] font-semibold [color:var(--accent-cool)]",
   agentAvatarImage:
