@@ -278,6 +278,7 @@ import {
   extractToolDisplayCommand,
   type CodexToolActivityPills,
 } from "./conversationToolPresentation";
+import { humanizeReasoningPreview } from "./conversationReasoningPreview";
 import { VButton, VNativeInput, VNativeTextarea } from "../vui";
 import styles from "./ConversationView.styles";
 
@@ -2218,7 +2219,7 @@ export function ConversationView({
     const defaultExpanded = cell.status === "running" || cell.status === "pending";
     const sectionId = reasoningExpansionSectionId(cell);
     const expanded = getExpansionState(message.id, sectionId, defaultExpanded);
-    const inlinePreview = fullText.replace(/\s+/g, " ").trim();
+    const inlinePreview = humanizeReasoningPreview(fullText);
     const title = codexTranscriptCellTitle(cell);
     const meta = codexTranscriptCellMeta(cell);
     const toneClassName = styles[`codexTranscriptCell_${cell.tone}` as keyof typeof styles] ?? "";
@@ -2626,7 +2627,7 @@ export function ConversationView({
   ) {
     // Live SSE: keep the body open while thought is running so streaming text is visible.
     // Settled thoughts default collapsed; shouldRefreshConversationExpansionDefault auto-closes.
-    const inlinePreview = String(item.preview || item.text || "").replace(/\s+/g, " ").trim();
+    const inlinePreview = humanizeReasoningPreview(String(item.preview || item.text || ""));
     const defaultExpanded = Boolean(item.defaultExpanded)
       || item.status === "running"
       || item.status === "pending";
@@ -2874,12 +2875,37 @@ export function ConversationView({
     );
   }
 
+  function isLowValueToolLoopStatusOperation(operation: AgentMessageOperation) {
+    if (operation.kind !== "status") {
+      return false;
+    }
+    const haystack = [
+      operation.label,
+      operation.rawLabel,
+      operation.summary,
+      operation.resultPreview,
+      operation.error,
+    ].map((value) => String(value || "").toLowerCase()).join(" ");
+    return (
+      haystack.includes("long_loop")
+      || haystack.includes("工具循环")
+      || haystack.includes("tool loop")
+      || haystack.includes("尚未形成最终回答")
+      || haystack.includes("本轮尚未形成最终回答")
+      || haystack.includes("尚未形成最终回答")
+    );
+  }
+
   function renderOperationTimelineItem(
     item: Extract<AgentMessageTimelineItem, { kind: "operation" }>,
     rowIdentity: AgentMessageTimelineRowIdentity,
     isActiveTimelineItem: boolean,
   ) {
     const operation = item.operation;
+    // Codex does not surface internal "tool loop / no final answer yet" progress as a tool row.
+    if (isLowValueToolLoopStatusOperation(operation)) {
+      return null;
+    }
     const rawTimelineTitle = item.title.trim();
     const rawOperationLabel = String(operation.rawLabel ?? "").trim();
     const rawToolName = rawOperationLabel || rawTimelineTitle || operation.label;

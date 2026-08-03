@@ -411,8 +411,9 @@ export function extractToolDisplayCommand(args?: Record<string, unknown> | null)
 }
 
 /**
- * Codex pill pair: action chip + status chip (e.g. 执行命令 | 执行完成).
- * Subject/command stays as optional muted text, not inside the pills.
+ * Codex tool-row model: action + optional status + muted subject/duration.
+ * UI must not render dual status chips for running/completed — the leading
+ * icon carries those states (see ConversationToolActivityPills).
  */
 export function buildCodexToolActivityPills(options: {
   toolName: string;

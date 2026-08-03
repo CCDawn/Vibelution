@@ -92,12 +92,13 @@ describe("ConversationToolActivity", () => {
 
     expect(html).toContain('data-codex-tool-activity="items"');
     expect(html).not.toContain("运行了 1 个工具");
-    // Codex pill pair: action | status + muted subject/duration (not prose line).
+    // Codex quiet row: plain action + muted subject/duration; completed status is icon-only.
     expect(html).toContain('data-codex-tool-action-pill="true"');
     expect(html).toContain("执行命令");
-    expect(html).toContain('data-codex-tool-status-pill="true"');
     expect(html).toContain('data-codex-tool-status-kind="completed"');
-    expect(html).toContain("执行完成");
+    expect(html).not.toContain('data-codex-tool-status-pill="true"');
+    expect(html).not.toContain("执行完成");
+    expect(html).not.toContain("rounded-full");
     // completed shell row keeps command as subject, not a prose "已在 … 内运行" line
     expect(html).toContain("type README.md");
     expect(html).toContain("1.2s");
@@ -241,16 +242,17 @@ describe("ConversationToolActivity", () => {
     expect(html).not.toMatch(/代码图谱 · \{&quot;status&quot;/);
   });
 
-  it("keeps Codex-style tool rail frame, capped height, and pill chrome", () => {
+  it("keeps Codex-style tool rail frame, capped height, and plain-text chrome", () => {
     expect(styles.activity).toContain("border-y");
     expect(styles.activity).toContain("max-h-[min(18rem,42vh)]");
     expect(styles.activity).toContain("overflow-y-auto");
     expect(styles.itemBody).toContain("text-[var(--fg-tertiary)]");
     expect(styles.itemBody).toContain("[font-size:var(--vui-font-xs)]");
-    expect(styles.actionPill).toContain("rounded-full");
-    expect(styles.statusPill).toContain("rounded-full");
-    expect(styles.statusPill_completed).toContain("text-[var(--fg-tertiary)]");
-    expect(styles.statusPill_running).toContain("text-[var(--accent-cool)]");
+    expect(styles.itemBody).toContain("items-center");
+    expect(styles.actionLabel).toContain("font-medium");
+    expect(styles.actionLabel).not.toContain("rounded-full");
+    expect(styles.actionPill).not.toContain("rounded-full");
+    expect(styles.statusPill).not.toContain("rounded-full");
     expect(styles.itemPreview).toContain("text-[color-mix(in_srgb,var(--fg-tertiary)");
   });
 
@@ -267,7 +269,7 @@ describe("ConversationToolActivity", () => {
     expect(html).not.toContain("运行了 1 个工具");
     expect(html).not.toContain('data-codex-tool-activity-group="true"');
     expect(html).toContain("代码图谱");
-    expect(html).toContain("执行完成");
+    expect(html).not.toContain("执行完成");
     expect(html).toContain('data-codex-tool-status-kind="completed"');
   });
 
@@ -305,7 +307,7 @@ describe("ConversationToolActivity", () => {
     expect(html).toContain('data-codex-tool-detail="true"');
     expect(html).toContain("工具原始结果");
     expect(html).not.toContain('data-codex-tool-detail-toggle="inline-symbol"');
-    expect(html).toContain("执行完成");
+    expect(html).not.toContain("执行完成");
     expect(html).not.toContain("itemChevron");
     expect(styles.itemSummary).toContain("w-full");
     expect(styles.itemSummary).toContain("max-w-full");
@@ -378,9 +380,9 @@ describe("ConversationToolActivity", () => {
       />,
     );
 
-    // Action pill keeps the tool family; semantic search lands in muted subject.
+    // Plain action keeps the tool family; semantic search lands in muted subject.
     expect(html).toContain("代码图谱");
-    expect(html).toContain("执行完成");
+    expect(html).not.toContain("执行完成");
     expect(html).toContain("搜索 savedDraft · 4 个结果");
     expect(html).toContain('data-codex-tool-subject="true"');
   });
