@@ -2560,6 +2560,10 @@ describe("TeamsRoute layout contract", () => {
       expectOperationalSurface(routeStyles[key]);
     }
 
+    expect(researchRouteStyles.researchLoopActive).toContain("grid-cols-[minmax(0,1fr)_auto]");
+    expect(researchRouteStyles.researchLoopActive).toContain("[&>div:first-child]:grid");
+    expect(researchRouteStyles.researchLoopStatusPills).toContain("gap-1.5");
+
     const routeRowKeys = [
       "aiSearchRunCard",
       "aiSearchRunCardDegraded",

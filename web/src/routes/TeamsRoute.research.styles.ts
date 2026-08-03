@@ -30,7 +30,7 @@ const styles = {
   researchInspector:
     "researchInspector min-w-0",
   researchLoopActive:
-    `researchLoopActive min-w-0 ${vuiStateSelectedRowClass}`,
+    `researchLoopActive min-w-0 grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2 rounded-[var(--radius-control)] border p-2 max-[760px]:grid-cols-[minmax(0,1fr)] ${vuiStateSelectedRowClass} [&>div:first-child]:grid [&>div:first-child]:min-w-0 [&>div:first-child]:gap-1 [&_strong]:min-w-0 [&_strong]:break-words [&_small]:min-w-0 [&_small]:break-words [&_small]:leading-[var(--vui-line-readable)]`,
   researchLoopChoice:
     "researchLoopChoice min-w-0 max-w-full !h-auto !min-h-[var(--vui-control-height-sm)] !whitespace-normal break-words px-2 py-1 text-left leading-[var(--vui-line-compact)]",
   researchLoopChoiceActive:
@@ -51,7 +51,7 @@ const styles = {
   researchLoopStats:
     "researchLoopStats min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
   researchLoopStatusPills:
-    "researchLoopStatusPills min-w-0",
+    "researchLoopStatusPills min-w-0 flex flex-wrap items-center justify-end gap-1.5 max-[760px]:justify-start [&_span]:inline-flex [&_span]:max-w-full [&_span]:items-center [&_span]:rounded-full [&_span]:border [&_span]:border-[color:color-mix(in_srgb,var(--accent-cool)_30%,var(--border-soft))] [&_span]:bg-[var(--vui-surface-row)] [&_span]:px-2 [&_span]:py-0.5 [&_span]:break-all [&_span]:[font-size:var(--vui-font-xs)] [&_span]:leading-[var(--vui-line-compact)]",
   researchLoopTemplateBar:
     "researchLoopTemplateBar min-w-0 flex flex-wrap items-center gap-1.5",
   researchLoopTemplateSummary: `researchLoopTemplateSummary min-w-0 ${vuiFlatPanelClass} p-2`,
