@@ -543,6 +543,7 @@ class LLMDiscoveryConfig(BaseModel):
 DEFAULT_ROLE_PROFILE_IDS = (
     "primary",
     "mental_model",
+    "runtime_status",
     "subagent_worker",
     "subagent_explorer",
     "supervised_baseline",
@@ -1657,6 +1658,15 @@ class MentalModelConfig(BaseModel):
     enabled: bool = Field(default=False, description="是否启用心智模型")
 
 
+class RuntimeStatusConfig(BaseModel):
+    """回合运行时状态栏（预算/进度追加）功能开关。"""
+
+    model_config = ConfigDict(extra="ignore")
+    enabled: bool = Field(default=True, description="是否启用运行时状态通道")
+    inject_into_model: bool = Field(default=True, description="是否注入模型可见上下文")
+    show_in_status_rail: bool = Field(default=True, description="是否在前端状态栏展示")
+
+
 class SupervisedEvolutionFeatureConfig(BaseModel):
     """可信操作员配置控制的监督进化功能族。"""
 
@@ -2102,6 +2112,7 @@ class AppConfig(BaseModel):
         default_factory=ContextCompressionConfig
     )
     mental_model: MentalModelConfig = Field(default_factory=MentalModelConfig)
+    runtime_status: RuntimeStatusConfig = Field(default_factory=RuntimeStatusConfig)
     supervised_evolution: SupervisedEvolutionFeatureConfig = Field(
         default_factory=SupervisedEvolutionFeatureConfig
     )

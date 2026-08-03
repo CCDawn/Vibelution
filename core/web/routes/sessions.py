@@ -184,6 +184,7 @@ class SessionMessagePayload(BaseModel):
     attachmentIds: list[str] = []
     references: list[dict] = []
     mentalModelEnabled: bool | None = None
+    runtimeStatusEnabled: bool | None = None
     turnMode: str = ""
     writeIntent: bool | None = None
 
@@ -474,6 +475,7 @@ def session_submit_message(session_id: str, payload: SessionMessagePayload, requ
                 attachment_ids=payload.attachmentIds,
                 references=payload.references,
                 mental_model_enabled=payload.mentalModelEnabled,
+                runtime_status_enabled=payload.runtimeStatusEnabled,
                 turn_mode=payload.turnMode,
                 write_intent=payload.writeIntent,
             )
@@ -485,6 +487,7 @@ def session_submit_message(session_id: str, payload: SessionMessagePayload, requ
             attachment_ids=payload.attachmentIds,
             references=payload.references,
             mental_model_enabled=payload.mentalModelEnabled,
+            runtime_status_enabled=payload.runtimeStatusEnabled,
             turn_mode=payload.turnMode,
             write_intent=payload.writeIntent,
         )
@@ -507,6 +510,7 @@ def session_edit_resubmit_message(session_id: str, payload: SessionMessageEditPa
             client_submission_id=client_submission_id,
             content_utf8_base64=payload.contentUtf8Base64,
             mental_model_enabled=payload.mentalModelEnabled,
+            runtime_status_enabled=payload.runtimeStatusEnabled,
             turn_mode=payload.turnMode,
             write_intent=payload.writeIntent,
         )

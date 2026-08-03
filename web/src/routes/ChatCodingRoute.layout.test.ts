@@ -624,7 +624,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndLayoutSource).not.toContain("CHAT_COMPACT_DESKTOP_MEDIA_QUERY");
     expect(routeAndLayoutSource).not.toContain("compactDesktopAutoCollapseRef");
     expect(routeAndLayoutSource).toContain(
-      "const [rightPaneCollapsed, setRightPaneCollapsed] = useState(true)",
+      "const [rightPaneCollapsed, setRightPaneCollapsed] = useState(false)",
     );
     expect(routeAndLayoutSource).toContain("styles.layoutCompactDesktop");
     expect(routeAndLayoutSource).toContain("styles.layoutOverlay");

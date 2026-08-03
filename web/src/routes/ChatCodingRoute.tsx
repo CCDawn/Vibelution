@@ -280,6 +280,7 @@ import {
   clearSessionImageAttachments,
   clearSessionReferenceAttachments,
   readStoredMentalModelToggle,
+  readStoredRuntimeStatusToggle,
   startSessionReferenceDrag,
   type ComposerImageAttachment,
 } from "./chat/chatComposerSubmitModel";
@@ -381,6 +382,9 @@ export function ChatCodingRoute() {
   const [petActionFeedback, setPetActionFeedback] = useState("");
   const [mentalModelEnabledForNextTurn, setMentalModelEnabledForNextTurn] = useState<boolean>(
     () => readStoredMentalModelToggle() ?? false,
+  );
+  const [runtimeStatusEnabledForNextTurn, setRuntimeStatusEnabledForNextTurn] = useState<boolean>(
+    () => readStoredRuntimeStatusToggle() ?? true,
   );
   const [featurePresetState, setFeaturePresetState] = useState<Record<FeaturePresetKey, boolean>>(
     DEFAULT_CHAT_FEATURE_PRESETS,
@@ -2098,6 +2102,7 @@ export function ChatCodingRoute() {
     handleCancelEditMessage,
     handleComposerChange,
     handleMentalModelEnabledChange,
+    handleRuntimeStatusEnabledChange,
     handleAddComposerAttachments,
     handleRemoveComposerAttachment,
     handleAddComposerReference,
@@ -2122,6 +2127,7 @@ export function ChatCodingRoute() {
     activeImageAttachments,
     activeReferenceAttachments,
     mentalModelEnabledForNextTurn,
+    runtimeStatusEnabledForNextTurn,
     resolvedEditTarget,
     activeEditTarget,
     composerDisabled,
@@ -2134,6 +2140,7 @@ export function ChatCodingRoute() {
     activeTurnId: activeTurnLayer?.turnId,
     detail,
     setMentalModelEnabledForNextTurn,
+    setRuntimeStatusEnabledForNextTurn,
   });
   const sessionLlmOptions = sessionLlmOptionsQuery.data;
   const sessionLlmControl = activeSessionId && sessionLlmOptions?.model ? {
@@ -3075,8 +3082,10 @@ export function ChatCodingRoute() {
         activeSkillStatusLabel={activeSkillStatusLabel}
         activeSkillShortHash={activeSkillShortHash}
         mentalModelEnabledForNextTurn={mentalModelEnabledForNextTurn}
+        runtimeStatusEnabledForNextTurn={runtimeStatusEnabledForNextTurn}
         activeSessionId={activeSessionId}
         onMentalModelEnabledChange={handleMentalModelEnabledChange}
+        onRuntimeStatusEnabledChange={handleRuntimeStatusEnabledChange}
         featurePresetState={featurePresetState}
         onToggleFeaturePreset={toggleFeaturePreset}
         cacheDetailAvailable={cacheDetailAvailable}

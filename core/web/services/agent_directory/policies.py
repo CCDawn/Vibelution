@@ -1002,6 +1002,14 @@ def default_self_evolution_executable_tool_policy(policy_id: str) -> dict[str, A
     payload["networkAccess"] = "none"
     payload["mutationAccess"] = "restricted"
     payload["maxCallsPerTurn"] = 12
+    from core.orchestration.tool_budget_profiles import default_max_calls_by_model_family_payload
+
+    family = default_max_calls_by_model_family_payload()
+    # Self-evolution stays tighter than interactive chat, but still adapts families.
+    payload["maxCallsPerTurnByModelFamily"] = {
+        key: (min(int(value), 24) if key != "default" else 12)
+        for key, value in family.items()
+    }
     return payload
 
 
@@ -1013,6 +1021,10 @@ def default_session_agent_tool_policy(policy_id: str) -> dict[str, Any]:
     payload["readScopes"] = ["private", "shared"]
     payload["writeScopes"] = ["private"]
     payload["maxCallsPerTurn"] = 32
+    # Per-vendor tool intensity priors (DeepSeek explores more aggressively).
+    from core.orchestration.tool_budget_profiles import default_max_calls_by_model_family_payload
+
+    payload["maxCallsPerTurnByModelFamily"] = default_max_calls_by_model_family_payload()
     return payload
 
 
@@ -1051,6 +1063,7 @@ def default_tool_policy(policy_id: str = DEFAULT_TOOL_POLICY_ID) -> dict[str, An
         "networkAccess": "inherit",
         "mutationAccess": "inherit",
         "maxCallsPerTurn": 0,
+        "maxCallsPerTurnByModelFamily": {},
         "perToolRules": {},
     }
 
@@ -1574,6 +1587,11 @@ def normalize_tool_policy(policy: dict[str, Any], policy_id: str = "") -> dict[s
         payload["maxCallsPerTurn"] = max(0, int(payload.get("maxCallsPerTurn") or 0))
     except (TypeError, ValueError):
         payload["maxCallsPerTurn"] = 0
+    from core.orchestration.tool_budget_profiles import normalize_max_calls_by_model_family
+
+    payload["maxCallsPerTurnByModelFamily"] = normalize_max_calls_by_model_family(
+        payload.get("maxCallsPerTurnByModelFamily")
+    )
     try:
         payload["policyVersion"] = max(1, int(payload.get("policyVersion") or 1))
     except (TypeError, ValueError):

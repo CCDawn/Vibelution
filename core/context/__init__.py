@@ -17,6 +17,7 @@ from .skill_contract import (
 )
 from .volatility import (
     SYSTEM_DYNAMIC_CONTEXT_HEADER,
+    TURN_STATUS_BAR_HEADER,
     VOLATILE_CONTEXT_HEADERS,
     is_volatile_context_text,
 )
@@ -26,6 +27,7 @@ __all__ = [
     "ACTIVE_SKILL_CONTEXT_HEADER",
     "ContextSegment",
     "SYSTEM_DYNAMIC_CONTEXT_HEADER",
+    "TURN_STATUS_BAR_HEADER",
     "VOLATILE_CONTEXT_HEADERS",
     "build_active_skill_contract",
     "build_active_skill_runtime_context",

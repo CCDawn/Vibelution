@@ -124,8 +124,10 @@ export type ChatStatusRailProps = {
   activeSkillStatusLabel: string;
   activeSkillShortHash: string;
   mentalModelEnabledForNextTurn: boolean;
+  runtimeStatusEnabledForNextTurn: boolean;
   activeSessionId: string | null | undefined;
   onMentalModelEnabledChange: (enabled: boolean) => void;
+  onRuntimeStatusEnabledChange: (enabled: boolean) => void;
   featurePresetState: Record<FeaturePresetKey, boolean>;
   onToggleFeaturePreset: (key: FeaturePresetKey) => void;
   cacheDetailAvailable: boolean;
@@ -236,8 +238,10 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
     activeSkillStatusLabel,
     activeSkillShortHash,
     mentalModelEnabledForNextTurn,
+    runtimeStatusEnabledForNextTurn,
     activeSessionId,
     onMentalModelEnabledChange,
+    onRuntimeStatusEnabledChange,
     featurePresetState,
     onToggleFeaturePreset,
     cacheDetailAvailable,
@@ -591,6 +595,24 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
             >
               <strong>{lang === "zh" ? "心智" : t("chatFeatureMentalModel")}</strong>
               <em>{mentalModelEnabledForNextTurn ? (lang === "zh" ? "开" : "On") : (lang === "zh" ? "关" : "Off")}</em>
+            </VButton>
+            <VButton
+              type="button"
+              contentLayout="plain"
+              className={
+                runtimeStatusEnabledForNextTurn
+                  ? `${styles.featureChip} ${styles.featureChipPrimary} ${styles.featureChipPrimaryActive}`
+                  : `${styles.featureChip} ${styles.featureChipPrimary}`
+              }
+              aria-pressed={runtimeStatusEnabledForNextTurn}
+              isDisabled={!activeSessionId}
+              onClick={() => onRuntimeStatusEnabledChange(!runtimeStatusEnabledForNextTurn)}
+              title={lang === "zh"
+                ? "运行状态：把预算/进度注入模型上下文（下轮生效）"
+                : "Runtime status: inject budget/progress into model context (next turn)"}
+            >
+              <strong>{lang === "zh" ? "状态" : "Status"}</strong>
+              <em>{runtimeStatusEnabledForNextTurn ? (lang === "zh" ? "开" : "On") : (lang === "zh" ? "关" : "Off")}</em>
             </VButton>
             {CHAT_FEATURE_PRESETS.map((item) => {
               const enabled = featurePresetState[item.key];

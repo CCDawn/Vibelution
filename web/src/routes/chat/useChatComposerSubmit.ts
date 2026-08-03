@@ -54,6 +54,7 @@ import {
   sessionReferenceId,
   uploadSessionImageAttachment,
   writeStoredMentalModelToggle,
+  writeStoredRuntimeStatusToggle,
   type ComposerImageAttachment,
 } from "./chatComposerSubmitModel";
 import { postSubmitTelemetry } from "./chatSubmitTelemetry";
@@ -70,6 +71,7 @@ export type SubmitTurnVariables = {
   clientSubmissionId: string;
   content: string;
   mentalModelEnabled: boolean;
+  runtimeStatusEnabled: boolean;
   attachmentIds?: string[];
   references?: SessionReferenceAttachment[];
   requestStartedAtMs: number;
@@ -81,6 +83,7 @@ export type EditResubmitVariables = {
   clientSubmissionId: string;
   content: string;
   mentalModelEnabled: boolean;
+  runtimeStatusEnabled: boolean;
   attachmentIds?: string[];
 };
 
@@ -134,6 +137,7 @@ export function useChatComposerTurnMutations({
         clientSubmissionId,
         content,
         mentalModelEnabled,
+        runtimeStatusEnabled,
         attachmentIds,
         references,
       }: SubmitTurnVariables,
@@ -147,6 +151,7 @@ export function useChatComposerTurnMutations({
           attachmentCount: attachmentIds?.length ?? 0,
           referenceCount: references?.length ?? 0,
           mentalModelEnabled,
+          runtimeStatusEnabled,
           clientSubmissionId,
         },
       );
@@ -163,6 +168,7 @@ export function useChatComposerTurnMutations({
           attachmentIds: attachmentIds ?? [],
           references: references ?? [],
           mentalModelEnabled,
+          runtimeStatusEnabled,
         }),
       });
     },
@@ -176,6 +182,7 @@ export function useChatComposerTurnMutations({
           attachmentCount: variables.attachmentIds?.length ?? 0,
           referenceCount: variables.references?.length ?? 0,
           mentalModelEnabled: variables.mentalModelEnabled,
+          runtimeStatusEnabled: variables.runtimeStatusEnabled,
           clientSubmissionId: variables.clientSubmissionId,
         },
       );
@@ -285,6 +292,7 @@ export function useChatComposerTurnMutations({
         clientSubmissionId,
         content,
         mentalModelEnabled,
+        runtimeStatusEnabled,
       }: EditResubmitVariables,
     ) =>
       fetchJson<SessionDetail>(`/api/sessions/${sessionId}/messages/edit-resubmit`, {
@@ -298,6 +306,7 @@ export function useChatComposerTurnMutations({
           content,
           contentUtf8Base64: encodeUtf8Base64(content),
           mentalModelEnabled,
+          runtimeStatusEnabled,
         }),
       }),
     onMutate: async (variables) => {
@@ -470,6 +479,7 @@ export type UseChatComposerSubmitActionsOptions = ChatComposerTurnMutations & {
   activeImageAttachments: ComposerImageAttachment[];
   activeReferenceAttachments: SessionReferenceAttachment[];
   mentalModelEnabledForNextTurn: boolean;
+  runtimeStatusEnabledForNextTurn: boolean;
   resolvedEditTarget: ChatEditTarget | null;
   activeEditTarget: ChatEditTarget | null;
   composerDisabled: boolean;
@@ -482,11 +492,13 @@ export type UseChatComposerSubmitActionsOptions = ChatComposerTurnMutations & {
   activeTurnId: string | undefined;
   detail: SessionDetail | undefined;
   setMentalModelEnabledForNextTurn: Dispatch<SetStateAction<boolean>>;
+  setRuntimeStatusEnabledForNextTurn: Dispatch<SetStateAction<boolean>>;
 };
 
 export type UseChatComposerSubmitActionsResult = {
   handleComposerChange: (value: string) => void;
   handleMentalModelEnabledChange: (enabled: boolean) => void;
+  handleRuntimeStatusEnabledChange: (enabled: boolean) => void;
   handleAddComposerAttachments: (files: FileList | File[]) => void;
   handleRemoveComposerAttachment: (attachmentId: string) => void;
   handleAddComposerReference: (reference: SessionReferenceAttachment) => void;
@@ -521,6 +533,7 @@ export function useChatComposerSubmitActions({
   activeImageAttachments,
   activeReferenceAttachments,
   mentalModelEnabledForNextTurn,
+  runtimeStatusEnabledForNextTurn,
   resolvedEditTarget,
   activeEditTarget,
   composerDisabled,
@@ -533,6 +546,7 @@ export function useChatComposerSubmitActions({
   activeTurnId,
   detail,
   setMentalModelEnabledForNextTurn,
+  setRuntimeStatusEnabledForNextTurn,
 }: UseChatComposerSubmitActionsOptions): UseChatComposerSubmitActionsResult {
   const handleComposerChange = useCallback((value: string) => {
     if (!activeSessionId) {
@@ -552,6 +566,11 @@ export function useChatComposerSubmitActions({
     setMentalModelEnabledForNextTurn(enabled);
     writeStoredMentalModelToggle(enabled);
   }, [setMentalModelEnabledForNextTurn]);
+
+  const handleRuntimeStatusEnabledChange = useCallback((enabled: boolean) => {
+    setRuntimeStatusEnabledForNextTurn(enabled);
+    writeStoredRuntimeStatusToggle(enabled);
+  }, [setRuntimeStatusEnabledForNextTurn]);
 
   const handleAddComposerAttachments = useCallback((files: FileList | File[]) => {
     if (!activeSessionId) {
@@ -652,6 +671,7 @@ export function useChatComposerSubmitActions({
     attachments: ComposerImageAttachment[],
     references: SessionReferenceAttachment[],
     mentalModelEnabled: boolean,
+    runtimeStatusEnabled: boolean,
     clientSubmissionId: string,
   ) => {
     if (imageUploadInFlightRef.current[sessionId]) {
@@ -735,6 +755,7 @@ export function useChatComposerSubmitActions({
         clientSubmissionId,
         content,
         mentalModelEnabled,
+        runtimeStatusEnabled,
         attachmentIds: uploaded.map((attachment) => attachment.artifactId).filter(Boolean),
         references,
         requestStartedAtMs: chatStreamPerformanceNowMs(),
@@ -891,6 +912,7 @@ export function useChatComposerSubmitActions({
         clientSubmissionId,
         content,
         mentalModelEnabled: mentalModelEnabledForNextTurn,
+        runtimeStatusEnabled: runtimeStatusEnabledForNextTurn,
       });
       return;
     }
@@ -900,6 +922,7 @@ export function useChatComposerSubmitActions({
       activeImageAttachments,
       activeReferenceAttachments,
       mentalModelEnabledForNextTurn,
+      runtimeStatusEnabledForNextTurn,
       clientSubmissionId,
     );
   }, [
@@ -914,6 +937,7 @@ export function useChatComposerSubmitActions({
     editResubmitMutation,
     lang,
     mentalModelEnabledForNextTurn,
+    runtimeStatusEnabledForNextTurn,
     resolvedEditTarget,
     sessionBusy,
     setSessionComposerErrors,
@@ -1042,6 +1066,7 @@ export function useChatComposerSubmitActions({
   return {
     handleComposerChange,
     handleMentalModelEnabledChange,
+    handleRuntimeStatusEnabledChange,
     handleAddComposerAttachments,
     handleRemoveComposerAttachment,
     handleAddComposerReference,

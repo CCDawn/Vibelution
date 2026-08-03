@@ -10,6 +10,7 @@ import { COMPOSER_SESSION_REFERENCE_MIME } from "../../components/conversation/c
 import { stableCliHash } from "./cliAgentRunModel";
 
 export const MENTAL_MODEL_TOGGLE_STORAGE_KEY = "vibelution.chat.mentalModelEnabled";
+export const RUNTIME_STATUS_TOGGLE_STORAGE_KEY = "vibelution.chat.runtimeStatusEnabled";
 export const MAX_COMPOSER_IMAGE_ATTACHMENTS = 4;
 export const MAX_COMPOSER_IMAGE_BYTES = 8 * 1024 * 1024;
 export const COMPOSER_IMAGE_ACCEPT_TYPES = ["image/png", "image/jpeg", "image/webp"] as const;
@@ -216,6 +217,27 @@ export function writeStoredMentalModelToggle(enabled: boolean) {
     return;
   }
   window.localStorage.setItem(MENTAL_MODEL_TOGGLE_STORAGE_KEY, enabled ? "true" : "false");
+}
+
+export function readStoredRuntimeStatusToggle(): boolean | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  const raw = window.localStorage.getItem(RUNTIME_STATUS_TOGGLE_STORAGE_KEY);
+  if (raw === "true") {
+    return true;
+  }
+  if (raw === "false") {
+    return false;
+  }
+  return null;
+}
+
+export function writeStoredRuntimeStatusToggle(enabled: boolean) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.localStorage.setItem(RUNTIME_STATUS_TOGGLE_STORAGE_KEY, enabled ? "true" : "false");
 }
 
 export function optimisticTurnIdForSubmission(kind: "submit" | "edit", sessionId: string, createdAt: string) {
