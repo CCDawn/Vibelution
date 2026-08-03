@@ -14,9 +14,7 @@ import {
   type ExperimentPlanRecord,
   type ResearchLoopCreateDraft,
   type ResearchLoopDecisionDraft,
-  type ResearchLoopDecisionValue,
   type ResearchLoopEvidenceDraft,
-  type ResearchLoopEvidenceStatus,
   type ResearchLoopRecord,
   type ResearchLoopSummary,
   type ResearchLoopStatusPayload,
@@ -371,28 +369,38 @@ export function TeamResearchLoopPanel(props: TeamResearchLoopPanelProps) {
               </div>
             </div>
             <div className={styles.researchLoopEvidenceForm}>
-              <label>
+              <div className={styles.researchLoopChoiceField}>
                 <span>{lang === "zh" ? "证据类型" : "Evidence type"}</span>
-                <VNativeSelect
-                  value={currentEvidenceType}
-                  onChange={(event) => setResearchLoopEvidenceDraft((draft) => ({ ...draft, evidenceType: event.target.value }))}
-                >
+                <div className={styles.researchLoopChoiceGrid} role="group" aria-label={lang === "zh" ? "证据类型" : "Evidence type"}>
                   {evidenceOptions.map((item: any) => (
-                    <option key={item} value={item}>{item}</option>
+                    <VNativeButton
+                      key={item}
+                      type="button"
+                      className={`${styles.researchLoopChoice} ${currentEvidenceType === item ? styles.researchLoopChoiceActive : ""}`}
+                      aria-pressed={currentEvidenceType === item}
+                      onClick={() => setResearchLoopEvidenceDraft((draft) => ({ ...draft, evidenceType: item }))}
+                    >
+                      {item}
+                    </VNativeButton>
                   ))}
-                </VNativeSelect>
-              </label>
-              <label>
+                </div>
+              </div>
+              <div className={styles.researchLoopChoiceField}>
                 <span>{lang === "zh" ? "状态" : "Status"}</span>
-                <VNativeSelect
-                  value={researchLoopEvidenceDraft.status}
-                  onChange={(event) => setResearchLoopEvidenceDraft((draft) => ({ ...draft, status: event.target.value as ResearchLoopEvidenceStatus }))}
-                >
+                <div className={styles.researchLoopChoiceGrid} role="group" aria-label={lang === "zh" ? "状态" : "Status"}>
                   {RESEARCH_LOOP_EVIDENCE_STATUSES.map((status: any) => (
-                    <option key={status} value={status}>{status}</option>
+                    <VNativeButton
+                      key={status}
+                      type="button"
+                      className={`${styles.researchLoopChoice} ${researchLoopEvidenceDraft.status === status ? styles.researchLoopChoiceActive : ""}`}
+                      aria-pressed={researchLoopEvidenceDraft.status === status}
+                      onClick={() => setResearchLoopEvidenceDraft((draft) => ({ ...draft, status }))}
+                    >
+                      {status}
+                    </VNativeButton>
                   ))}
-                </VNativeSelect>
-              </label>
+                </div>
+              </div>
               <label>
                 <span>{lang === "zh" ? "指标" : "Metric"}</span>
                 <VNativeInput
@@ -455,17 +463,22 @@ export function TeamResearchLoopPanel(props: TeamResearchLoopPanelProps) {
               </label>
             </div>
             <div className={styles.researchLoopDecisionForm}>
-              <label>
+              <div className={styles.researchLoopChoiceField}>
                 <span>{lang === "zh" ? "决策" : "Decision"}</span>
-                <VNativeSelect
-                  value={researchLoopDecisionDraft.decision}
-                  onChange={(event) => setResearchLoopDecisionDraft((draft) => ({ ...draft, decision: event.target.value as ResearchLoopDecisionValue }))}
-                >
+                <div className={styles.researchLoopChoiceGrid} role="group" aria-label={lang === "zh" ? "决策" : "Decision"}>
                   {RESEARCH_LOOP_DECISION_VALUES.map((decision: any) => (
-                    <option key={decision} value={decision}>{decision}</option>
+                    <VNativeButton
+                      key={decision}
+                      type="button"
+                      className={`${styles.researchLoopChoice} ${researchLoopDecisionDraft.decision === decision ? styles.researchLoopChoiceActive : ""}`}
+                      aria-pressed={researchLoopDecisionDraft.decision === decision}
+                      onClick={() => setResearchLoopDecisionDraft((draft) => ({ ...draft, decision }))}
+                    >
+                      {decision}
+                    </VNativeButton>
                   ))}
-                </VNativeSelect>
-              </label>
+                </div>
+              </div>
               <label>
                 <span>{lang === "zh" ? "下一模板" : "Next template"}</span>
                 <VNativeSelect
