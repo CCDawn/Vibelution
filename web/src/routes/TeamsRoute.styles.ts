@@ -204,13 +204,25 @@ const styles: Record<string, string> = {
   toolbarLink:
     "toolbarLink min-w-0 inline-flex items-center justify-center gap-1.5",
   workspace:
-    `workspace min-w-0 flex-1 grid min-h-0 gap-0 p-0 !grid min-h-0 grid-cols-[minmax(220px,260px)_minmax(0,1fr)] overflow-hidden max-[900px]:h-auto max-[900px]:grid-cols-[minmax(0,1fr)] max-[900px]:content-start max-[900px]:overflow-auto ${vuiWorkspaceFillClass}`,
+    `workspace min-w-0 flex-1 min-h-0 overflow-hidden ${vuiWorkspaceFillClass}`,
   workspaceResearch:
     "workspaceResearch min-w-0",
   workspaceResearchCanvas:
     "workspaceResearchCanvas min-w-0",
+  teamShellWorkspace:
+    "teamShellWorkspace !flex min-h-0 w-full flex-1 flex-row overflow-hidden",
+  teamShellWorkspaceBoard:
+    "teamShellWorkspaceBoard",
+  teamShellWorkspaceCanvas:
+    "teamShellWorkspaceCanvas",
+  teamShellRailPane:
+    "teamShellRailPane min-h-0 w-[var(--teams-rail-width,248px)] min-w-[200px] max-w-[360px] shrink-0 overflow-hidden border-r border-[var(--vui-border-subtle)] [flex-basis:var(--teams-rail-width,248px)]",
+  teamShellRailResizeHandle:
+    "teamShellRailResizeHandle max-[900px]:hidden",
+  teamShellInspectorPane:
+    "teamShellInspectorPane w-[var(--teams-inspector-width,360px)] min-w-[300px] max-w-[480px] shrink-0 [flex-basis:var(--teams-inspector-width,360px)]",
   teamShellMain:
-    "teamShellMain min-w-0 flex h-full min-h-0 flex-col overflow-hidden",
+    "teamShellMain min-w-0 flex h-full min-h-0 flex-1 flex-col overflow-hidden",
   teamShellToolbar:
     "teamShellToolbar min-w-0 flex flex-wrap items-center justify-between gap-2 border-b border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] px-3 py-2",
   teamShellToolbarIdentity:
@@ -218,11 +230,13 @@ const styles: Record<string, string> = {
   teamShellToolbarActions:
     "teamShellToolbarActions min-w-0 flex flex-wrap items-center justify-end gap-2",
   teamShellContent:
-    "teamShellContent min-w-0 grid min-h-0 flex-1 overflow-hidden",
+    "teamShellContent min-h-0 min-w-0 flex-1 overflow-hidden",
   teamShellContentBoard:
-    "teamShellContentBoard min-w-0 !grid min-h-0 grid-cols-[minmax(0,1fr)] overflow-auto bg-[var(--vui-surface-panel)] [scrollbar-gutter:stable]",
+    "teamShellContentBoard !flex min-h-0 flex-col overflow-auto bg-[var(--vui-surface-panel)] [scrollbar-gutter:stable]",
   teamShellContentCanvas:
-    `teamShellContentCanvas min-w-0 !grid min-h-0 h-full grid-cols-[minmax(0,1fr)_auto_var(--teams-inspector-width,clamp(300px,24vw,400px))] overflow-hidden max-[900px]:grid-cols-[minmax(0,1fr)] max-[900px]:overflow-auto ${vuiWorkspaceFillClass}`,
+    "teamShellContentCanvas !flex min-h-0 flex-row overflow-hidden",
+  teamShellBoardBody:
+    "teamShellBoardBody !flex min-h-0 flex-1 flex-col content-start gap-3 overflow-auto p-3 [scrollbar-gutter:stable] [&>*]:flex-none",
   // Wave 4B: shared PaneResizeHandle visual.,
   inspectorResizeHandle:
     "inspectorResizeHandle max-[900px]:hidden",

@@ -1,3 +1,4 @@
+import { VNativeButton } from "../../components/vui";
 import type { TeamShellMode } from "./teamShellModel";
 import { teamShellModeLabel } from "./teamShellModel";
 
@@ -9,7 +10,7 @@ export type TeamShellModeSwitchProps = {
 };
 
 /**
- * Board (kanban/workbench) vs Canvas (organization graph) mode switch.
+ * Board vs Canvas mode switch — VNativeButton segment control for dense ops.
  */
 export function TeamShellModeSwitch({
   lang,
@@ -31,7 +32,7 @@ export function TeamShellModeSwitch({
       {(["board", "canvas"] as const).map((item) => {
         const active = mode === item;
         return (
-          <button
+          <VNativeButton
             key={item}
             type="button"
             role="tab"
@@ -39,15 +40,15 @@ export function TeamShellModeSwitch({
             data-active={active ? "true" : "false"}
             data-testid={`team-shell-mode-${item}`}
             className={[
-              "min-h-8 rounded-full px-3.5 text-[12.5px] font-[700] transition-colors",
+              "!min-h-8 !rounded-full !px-3.5 !text-[12.5px] !font-[700]",
               active
-                ? "bg-[var(--fg-primary)] text-[var(--vui-surface-base)]"
-                : "bg-transparent text-[var(--fg-secondary)] hover:text-[var(--fg-primary)]",
+                ? "!border-transparent !bg-[var(--fg-primary)] !text-[var(--vui-surface-base)]"
+                : "!border-transparent !bg-transparent !text-[var(--fg-secondary)] hover:!text-[var(--fg-primary)]",
             ].join(" ")}
             onClick={() => onChange(item)}
           >
             {teamShellModeLabel(item, lang)}
-          </button>
+          </VNativeButton>
         );
       })}
     </div>

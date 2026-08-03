@@ -47,10 +47,10 @@ export function ResearchOverviewSurface({
 
       <div className="flex min-w-0 items-baseline justify-between gap-3 px-0.5">
         <h3 className="m-0 text-[13px] font-[740] text-[var(--fg-primary)]">
-          {lang === "zh" ? "三阶段进度" : "Three-stage progress"}
+          {lang === "zh" ? "阶段看板" : "Stage board"}
         </h3>
         <span className="text-[12px] text-[var(--fg-tertiary)]">
-          {lang === "zh" ? "只读概览 · 操作请用上方主按钮" : "Read-only · use the primary CTA above"}
+          {lang === "zh" ? "卡片只读 · 操作请用上方主按钮" : "Read-only cards · use the primary CTA above"}
         </span>
       </div>
 

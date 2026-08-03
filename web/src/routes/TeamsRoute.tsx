@@ -220,8 +220,10 @@ import {
   resolveResearchStageHandoff,
   type ResearchPrimaryAction,
 } from "./teams/researchPrimaryActionModel";
+import { ResearchBoardKanban } from "./teams/ResearchBoardKanban";
 import { ResearchOverviewSurface } from "./teams/ResearchOverviewSurface";
 import { ResearchWorkflowErrorSurface } from "./teams/ResearchWorkflowErrorSurface";
+import { buildResearchBoardColumns } from "./teams/researchBoardModel";
 import { TeamShellModeSwitch } from "./teams/TeamShellModeSwitch";
 import { TeamShellRail } from "./teams/TeamShellRail";
 import {
@@ -529,13 +531,21 @@ const styles = {
 } as Record<string, string>;
 
 const TEAMS_LAYOUT_ID = WORKBENCH_LAYOUT_IDS.teams;
+/** Left team list — VUI split sidebar with persisted width. */
+const TEAMS_RAIL_PANE: PaneSpec = {
+  id: "rail",
+  defaultWidth: 248,
+  minWidth: 200,
+  maxWidth: 360,
+};
+/** Right inspector in canvas mode. */
 const TEAMS_INSPECTOR_PANE: PaneSpec = {
   id: "inspector",
   defaultWidth: 360,
-  minWidth: 320,
+  minWidth: 300,
   maxWidth: 480,
 };
-const TEAMS_PANES: PaneSpec[] = [TEAMS_INSPECTOR_PANE];
+const TEAMS_PANES: PaneSpec[] = [TEAMS_RAIL_PANE, TEAMS_INSPECTOR_PANE];
 
 type TeamsRouteProps = {
   forcedTeamId?: string;
@@ -642,8 +652,10 @@ export function TeamsRoute({
     panes: TEAMS_PANES,
     preserveMainMinWidth: 480,
   });
+  const teamsRailWidth = teamsPaneWidths.rail ?? TEAMS_RAIL_PANE.defaultWidth;
   const teamsInspectorWidth = teamsPaneWidths.inspector ?? TEAMS_INSPECTOR_PANE.defaultWidth;
   const teamsLayoutStyle = {
+    ["--teams-rail-width" as string]: `${teamsRailWidth}px`,
     ["--teams-inspector-width" as string]: `${teamsInspectorWidth}px`,
   } as CSSProperties;
   const requestedResearchViewParam = searchParams.get("researchView");
@@ -2180,9 +2192,21 @@ export function TeamsRoute({
           ) : undefined
         }
         stages={(
-          <div className={styles.researchOverviewStagesEmbed}>
-            {renderResearchStageLauncher("overview")}
-          </div>
+          <ResearchBoardKanban
+            lang={lang}
+            columns={researchBoardColumns}
+            onOpenCard={(columnId) => {
+              if (columnId === "knowledge_collection") {
+                selectResearchWorkspaceView("knowledge_collection");
+                return;
+              }
+              if (columnId === "experiment") {
+                selectResearchWorkspaceView("experiment");
+                return;
+              }
+              selectResearchWorkspaceView("iteration");
+            }}
+          />
         )}
         advanced={(
           <>
@@ -5514,24 +5538,51 @@ export function TeamsRoute({
   ];
   const workspaceClassName = [
     styles.workspace,
-    researchWorkflowTeamSelected && !researchCanvasVisible ? styles.workspaceResearch : "",
-    researchCanvasVisible ? styles.workspaceResearchCanvas : "",
-  ].filter(Boolean).join(" ");
-  const teamShellContentClassName = [
-    styles.teamShellContent,
-    researchCanvasVisible ? styles.teamShellContentCanvas : styles.teamShellContentBoard,
+    styles.teamShellWorkspace,
+    researchCanvasVisible ? styles.teamShellWorkspaceCanvas : styles.teamShellWorkspaceBoard,
   ].filter(Boolean).join(" ");
   const canvasPanelClassName = [
     styles.canvasPanel,
     !researchCanvasVisible ? styles.researchCanvasPanelHidden : "",
+    researchCanvasVisible ? "min-h-0 flex-1" : "",
   ].filter(Boolean).join(" ");
   const inspectorClassName = [
     styles.inspector,
     researchWorkflowTeamSelected ? styles.researchInspector : "",
     challengeCupResearchTeamSelected && !researchCanvasVisible ? styles.challengeWorkspaceInspector : "",
-    !researchCanvasVisible ? "min-h-0 w-full max-w-none flex-1 border-0" : "",
+    !researchCanvasVisible
+      ? "min-h-0 w-full max-w-none flex-1 !overflow-auto border-0 !bg-transparent"
+      : "min-h-0 shrink-0",
   ].filter(Boolean).join(" ");
   const showNodeBindingPanel = researchCanvasVisible && !researchCanvasReadOnly;
+  const researchBoardColumns = useMemo(
+    () => buildResearchBoardColumns({
+      lang,
+      phases: researchPrimaryActionInput.phases,
+      sourceRunCount: researchPrimaryActionInput.sourceRunCount,
+      sourceCandidateCount: researchPrimaryActionInput.sourceCandidateCount ?? 0,
+      experimentDesignFrozen: researchPrimaryActionInput.experimentDesignFrozen,
+      frozenDesignLabel: experimentPlanningStatus?.lifecycleProjection?.stage2?.activeDesignPlanId
+        || (researchPrimaryActionInput.experimentDesignFrozen
+          ? (lang === "zh" ? "冻结设计" : "Frozen design")
+          : ""),
+      bestCandidateId: experimentPlanningStatus?.lifecycleProjection?.stage3?.bestCandidateId || "",
+      latestDiagnostic: experimentPlanningStatus?.lifecycleProjection?.stage3?.latestDiagnosticStatus?.status || "",
+      sourceRunLabel: selectedSourceCollectionRun?.runId
+        ? String(selectedSourceCollectionRun.runId).slice(0, 18)
+        : "",
+      knowledgeStatusLabel: sourceCollectionDisplayState.statusText || "",
+    }),
+    [
+      experimentPlanningStatus?.lifecycleProjection?.stage2?.activeDesignPlanId,
+      experimentPlanningStatus?.lifecycleProjection?.stage3?.bestCandidateId,
+      experimentPlanningStatus?.lifecycleProjection?.stage3?.latestDiagnosticStatus?.status,
+      lang,
+      researchPrimaryActionInput,
+      selectedSourceCollectionRun?.runId,
+      sourceCollectionDisplayState.statusText,
+    ],
+  );
   // Overview IA lives in ResearchOverviewSurface; workflow panel still hosts stage-specific modules.
   const showWorkflowPanel =
     !aiSearchScopeTeamSelected
@@ -5837,47 +5888,15 @@ export function TeamsRoute({
   return (
     <VDenseOpsPage
       className={styles.route}
-      headerClassName={challengeCupResearchTeamSelected && !researchCanvasVisible ? styles.challengeWorkspaceContextHidden : styles.teamContextBar}
+      headerClassName={styles.challengeWorkspaceContextHidden}
       data-vui-domain-recipe="teams-organization-workbench"
       ariaLabel={selectedTeamContextTitle}
-      eyebrow={lang === "zh" ? "团队工作台 / 组织画布" : "Team Workspace / Canvas"}
-      title={lang === "zh" ? "团队组织画布" : "Team Organization Canvas"}
+      eyebrow={lang === "zh" ? "团队" : "Teams"}
+      title={lang === "zh" ? "团队工作台" : "Team workbench"}
       meta={teamContextMeta}
-      actions={(
-          <div className={styles.teamContextActions}>
-            <div className={styles.teamSelectField}>
-              <span className={styles.teamSelectPrefix}>{lang === "zh" ? "团队" : "Team"}</span>
-              <VSelect
-                aria-label={lang === "zh" ? "选择团队" : "Select team"}
-                className={styles.teamSelectControl}
-                selectedKey={selectedTeam?.teamId ?? effectiveTeamId}
-                options={visibleTeamOptions}
-                placeholder={selectedTeam?.name ?? (lang === "zh" ? "选择团队" : "Select team")}
-                isDisabled={!visibleTeams.length}
-                onSelectionChange={(key) => {
-                  const nextTeam = visibleTeams.find((team) => team.teamId === String(key));
-                  if (nextTeam) {
-                    selectTeamRecord(nextTeam);
-                  }
-                }}
-              />
-            </div>
-            <VIconButton
-              className={styles.teamRefreshButton}
-              label={lang === "zh" ? "刷新团队" : "Refresh teams"}
-              icon={<RefreshCw size={15} />}
-              onPress={() => void teamsQuery.refetch()}
-            />
-          </div>
-      )}
+      actions={null}
     >
-      {challengeCupResearchTeamSelected && !researchCanvasVisible ? null : (
-        <VStatusStrip
-          className={styles.teamContextChips}
-          aria-label={lang === "zh" ? "团队概况" : "Team summary"}
-          items={teamSummaryStatusItems}
-        />
-      )}
+      {/* Team pick + mode chrome live in the shell rail/toolbar (preview-aligned). */}
       {showTeamInitialLoadingSurface ? (
         <main className={styles.teamUnavailableSurface} aria-label={teamInitialLoadingTitle}>
           <VStateSurface
@@ -5962,11 +5981,26 @@ export function TeamsRoute({
         data-team-shell-mode={teamShellMode}
         data-testid="team-shell-workspace"
       >
-        <TeamShellRail
-          lang={lang}
-          teams={visibleTeams}
-          selectedTeamId={effectiveTeamId}
-          onSelectTeam={selectTeamRecord}
+        <div
+          className={styles.teamShellRailPane}
+          data-vui-region="teams-sidebar"
+        >
+          <TeamShellRail
+            lang={lang}
+            teams={visibleTeams}
+            selectedTeamId={effectiveTeamId}
+            onSelectTeam={selectTeamRecord}
+          />
+        </div>
+        <PaneResizeHandle
+          label={lang === "zh" ? "调整团队列表宽度" : "Resize team list"}
+          valueNow={teamsRailWidth}
+          valueMin={TEAMS_RAIL_PANE.minWidth}
+          valueMax={TEAMS_RAIL_PANE.maxWidth}
+          active={teamsDraggingPaneId === "rail"}
+          className={styles.teamShellRailResizeHandle}
+          onPointerDown={(event) => startTeamsInspectorResize("rail", event, { direction: 1 })}
+          onKeyDown={(event) => onTeamsInspectorResizeKeyDown("rail", event, { direction: 1 })}
         />
         <div className={styles.teamShellMain} data-testid="team-shell-main">
           <div className={styles.teamShellToolbar}>
@@ -5993,7 +6027,13 @@ export function TeamsRoute({
               />
             </div>
           </div>
-          <div className={teamShellContentClassName} data-testid="team-shell-content">
+          <div
+            className={[
+              styles.teamShellContent,
+              researchCanvasVisible ? styles.teamShellContentCanvas : styles.teamShellContentBoard,
+            ].filter(Boolean).join(" ")}
+            data-testid="team-shell-content"
+          >
         <VSurface
           as="main"
           className={canvasPanelClassName}
@@ -6223,7 +6263,7 @@ export function TeamsRoute({
 
         {researchCanvasVisible ? (
           <PaneResizeHandle
-            label={lang === "zh" ? "调整团队侧栏宽度" : "Resize team inspector"}
+            label={lang === "zh" ? "调整节点侧栏宽度" : "Resize inspector"}
             valueNow={teamsInspectorWidth}
             valueMin={TEAMS_INSPECTOR_PANE.minWidth}
             valueMax={TEAMS_INSPECTOR_PANE.maxWidth}
@@ -6234,7 +6274,13 @@ export function TeamsRoute({
           />
         ) : null}
 
-        <aside className={inspectorClassName} data-vui-region="teams-inspector">
+        <aside
+          className={[
+            inspectorClassName,
+            researchCanvasVisible ? styles.teamShellInspectorPane : "",
+          ].filter(Boolean).join(" ")}
+          data-vui-region="teams-inspector"
+        >
           {researchCanvasVisible ? (
           <div className={styles.inspectorHeader}>
             <strong>
@@ -6245,31 +6291,11 @@ export function TeamsRoute({
             {validation && !validation.valid ? <AlertTriangle size={16} /> : researchCanvasReadOnly ? <Eye size={16} /> : <Link2 size={16} />}
           </div>
           ) : null}
-          <div className={!researchCanvasVisible && challengeCupResearchTeamSelected ? styles.challengeWorkspaceBody : styles.inspectorBody}>
-            {!researchCanvasVisible && challengeCupResearchTeamSelected ? (
-              <nav className={styles.challengeSurfaceSwitch} aria-label={lang === "zh" ? "挑战杯平台视图" : "Challenge Cup platform view"}>
-                <VTooltip content={lang === "zh" ? "三阶段流程、实验方式与 Agent 操作" : "Three stages, experiment modes, and Agent operations"}>
-                  <VNativeButton
-                    type="button"
-                    className={challengeTeamSurface === "workspace" ? styles.challengeSurfaceSwitchActive : ""}
-                    aria-current={challengeTeamSurface === "workspace" ? "page" : undefined}
-                    onClick={() => setChallengeTeamSurface("workspace")}
-                  >
-                    <strong>{lang === "zh" ? "科研工作台" : "Research workspace"}</strong>
-                  </VNativeButton>
-                </VTooltip>
-                <VTooltip content={lang === "zh" ? "挑战杯任务、验收门禁与交付状态" : "Challenge task, acceptance gates, and delivery"}>
-                  <VNativeButton
-                    type="button"
-                    className={challengeTeamSurface === "progress" ? styles.challengeSurfaceSwitchActive : ""}
-                    aria-current={challengeTeamSurface === "progress" ? "page" : undefined}
-                    onClick={() => setChallengeTeamSurface("progress")}
-                  >
-                    <strong>{lang === "zh" ? "项目进展" : "Program progress"}</strong>
-                  </VNativeButton>
-                </VTooltip>
-              </nav>
-            ) : null}
+          <div className={[
+            !researchCanvasVisible && challengeCupResearchTeamSelected ? styles.challengeWorkspaceBody : styles.inspectorBody,
+            !researchCanvasVisible ? styles.teamShellBoardBody : "",
+          ].filter(Boolean).join(" ")}>
+            {/* Board mode: preview-aligned research board (CTA + 3-column kanban). */}
             {!researchCanvasVisible && researchWorkflowTeamSelected ? (
               showResearchOverview ? (
                 teamWorkflowQuery.isPending ? (

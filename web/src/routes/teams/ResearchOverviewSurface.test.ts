@@ -15,12 +15,13 @@ describe("ResearchOverviewSurface product contract", () => {
     expect(stages).toBeGreaterThan(hero);
     expect(secondarySlot).toBeGreaterThan(stages);
     expect(surfaceSource.slice(secondarySlot)).toContain("ResearchOverviewSecondary");
+    expect(surfaceSource).toContain("阶段看板");
   });
 
   it("wires production overview through ResearchOverviewSurface only", () => {
     expect(routeSource).toContain("ResearchOverviewSurface");
     expect(routeSource).toContain("renderResearchOverviewSurface");
-    expect(routeSource).toContain('renderResearchStageLauncher("overview")');
+    expect(routeSource).toContain("ResearchBoardKanban");
     // Must not re-embed a second hero CTA bar under the workflow panel.
     expect(routeSource).not.toMatch(/showResearchOverview\s*\?\s*\(\s*<div[^>]*research-overview-hero/);
   });
