@@ -25,6 +25,7 @@
 | 测试入口 | [../../tests/README.md](../../tests/README.md) |
 | 运行日志实现地图 | [../../core/logging/README.md](../../core/logging/README.md) |
 | 架构决策 | [../adr/](../adr/) |
+| Agent 协作发送（session 落脚 + 保留 inbox） | [../adr/0002-agent-collaboration-session-addressing.md](../adr/0002-agent-collaboration-session-addressing.md) |
 
 ## 边界
 
