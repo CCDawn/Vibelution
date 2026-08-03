@@ -5,6 +5,7 @@ import {
   DEFAULT_AGENT_CONTEXT_COMPRESSION_DRAFT,
   configDraftEqualsDraft,
   contextCompressionDraftFromAgent,
+  contextCompressionPolicyChangedInDraft,
   contextCompressionPolicyFromDraft,
   draftFromAgent,
   draftEqualsAgent,
@@ -61,7 +62,8 @@ describe("agentRouteDraftModel", () => {
       contextCompressionPolicy: { mode: "inherit" },
     } as AgentConfigWorkspaceAgent);
     expect(inherit.mode).toBe("inherit");
-    expect(contextCompressionPolicyFromDraft(inherit)).toEqual({ mode: "inherit" });
+    // Backend requires explicit custom; UI inherit materializes displayed values.
+    expect(contextCompressionPolicyFromDraft(inherit).mode).toBe("custom");
 
     const customDraft = {
       ...inherit,
@@ -84,6 +86,33 @@ describe("agentRouteDraftModel", () => {
     const policy = contextCompressionPolicyFromDraft(customDraft);
     expect(policy.mode).toBe("custom");
     expect(policy.maxTokenLimit).toBe(8000);
+  });
+
+  it("does not treat an untouched compression form as a patch field", () => {
+    const agent = {
+      displayName: "助手",
+      contextCompressionPolicy: { mode: "inherit" },
+      contextCompressionEffectivePolicy: {
+        mode: "custom",
+        enabled: true,
+        maxTokenLimit: 16000,
+        maxCompressionsPerSession: 20,
+        levels: { light: 0.6, standard: 0.8, deep: 0.9, emergency: 0.95 },
+        summaryChars: { light: 400, standard: 800, deep: 1200, emergency: 1600 },
+        preservation: { keepAiMessages: 4, preserveErrors: true, extractKeyDecisions: true },
+      },
+      permissionPreset: "request_approval",
+      status: "active",
+    } as AgentConfigWorkspaceAgent;
+    const draft = draftFromAgent(agent);
+    draft.displayName = "改个名字";
+    expect(contextCompressionPolicyChangedInDraft(draft, agent)).toBe(false);
+    draft.contextCompressionPolicy = {
+      ...draft.contextCompressionPolicy,
+      mode: "custom",
+      maxTokenLimit: "99999",
+    };
+    expect(contextCompressionPolicyChangedInDraft(draft, agent)).toBe(true);
   });
 
   it("starts a new Agent with an explicit 262144 compression policy", () => {

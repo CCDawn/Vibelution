@@ -113,9 +113,8 @@ export function contextCompressionDraftFromAgent(agent: AgentConfigWorkspaceAgen
 }
 
 export function contextCompressionPolicyFromDraft(draft: AgentContextCompressionPolicyDraft): AgentContextCompressionPolicy {
-  if (draft.mode !== "custom") {
-    return { mode: "inherit" };
-  }
+  // Backend rejects mode=inherit on current Agents (must be explicit). UI "继承全局"
+  // means: snapshot the currently displayed effective values as this Agent's own custom policy.
   return {
     mode: "custom",
     enabled: draft.enabled,
@@ -146,6 +145,20 @@ export function contextCompressionPolicyFromDraft(draft: AgentContextCompression
 
 export function contextCompressionDraftEqualsDraft(left: AgentContextCompressionPolicyDraft, right: AgentContextCompressionPolicyDraft) {
   return JSON.stringify(contextCompressionPolicyFromDraft(left)) === JSON.stringify(contextCompressionPolicyFromDraft(right));
+}
+
+/** True when the compression form was actually edited relative to the loaded Agent. */
+export function contextCompressionPolicyChangedInDraft(
+  draft: AgentConfigDraft,
+  agent: AgentConfigWorkspaceAgent | null | undefined,
+): boolean {
+  if (!agent) {
+    return true;
+  }
+  return !contextCompressionDraftEqualsDraft(
+    draft.contextCompressionPolicy,
+    draftFromAgent(agent).contextCompressionPolicy,
+  );
 }
 
 export function draftFromAgent(agent: AgentConfigWorkspaceAgent | null | undefined): AgentConfigDraft {
