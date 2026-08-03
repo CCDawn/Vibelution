@@ -404,6 +404,10 @@ def create_agent_instance(
             s._with_functional_display_name(metadata_payload, title),
             force=True,
         )
+        if not isinstance(metadata_payload.get("runtimeStatus"), dict):
+            from core.runtime_status_flags import default_agent_runtime_status_policy
+
+            metadata_payload["runtimeStatus"] = default_agent_runtime_status_policy()
         agent = {
             "agentId": agent_id,
             "agentCode": s._next_agent_code(state.get("agents") or []),

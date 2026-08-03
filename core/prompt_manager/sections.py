@@ -416,11 +416,14 @@ def make_memory_section(ctx: BuildContext) -> SystemPromptSection:
         current_goal = ctx.current_goal
         state_memory = ctx.state_memory
 
-        # ── 元认知干预 ──
+        # ── 元认知干预（若已走统一 Turn Status 注入，则不再塞进 MEMORY，避免双写）──
         intervention = ""
         try:
             from core.mental_model_flags import is_mental_model_enabled
+            from core.runtime_status_flags import is_runtime_status_inject_enabled
 
+            if is_runtime_status_inject_enabled():
+                raise RuntimeError("mental intervention carried by turn status bar")
             if not is_mental_model_enabled():
                 raise RuntimeError("mental model disabled for this turn")
             from core.infrastructure.mental_model import get_mental_model

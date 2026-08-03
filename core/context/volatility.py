@@ -7,11 +7,13 @@ carried as stable history or merged into the cacheable system prefix.
 from __future__ import annotations
 
 SYSTEM_DYNAMIC_CONTEXT_HEADER = "## Dynamic System Context"
+TURN_STATUS_BAR_HEADER = "## Turn Status Bar"
 
 VOLATILE_CONTEXT_HEADERS: tuple[str, ...] = (
     "## Agent Runtime Context",
     "## Runtime Context",
     SYSTEM_DYNAMIC_CONTEXT_HEADER,
+    TURN_STATUS_BAR_HEADER,
     "## Recent Operator Guidance",
     "## Slash Skill Context",
     "## Active Skill Context",

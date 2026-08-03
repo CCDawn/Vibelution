@@ -86,6 +86,7 @@ _NON_DIALOGUE_UPSTREAM_MARKERS = (
 _PROFILE_IDS = (
     "primary",
     "mental_model",
+    "runtime_status",
     "subagent_worker",
     "supervised_baseline",
     "supervised_candidate",

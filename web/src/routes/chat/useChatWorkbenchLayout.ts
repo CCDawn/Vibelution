@@ -80,7 +80,8 @@ export function useChatWorkbenchLayout({
   const layoutRef = useRef<HTMLDivElement | null>(null);
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [leftRailCollapsed, setLeftRailCollapsed] = useState(false);
-  const [rightPaneCollapsed, setRightPaneCollapsed] = useState(true);
+  // Default expanded on wide layouts so the status rail is discoverable.
+  const [rightPaneCollapsed, setRightPaneCollapsed] = useState(false);
   const [responsiveLayout, setResponsiveLayout] = useState(() =>
     resolveChatResponsiveLayout(typeof window === "undefined" ? 1440 : window.innerWidth),
   );

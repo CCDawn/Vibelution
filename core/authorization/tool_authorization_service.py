@@ -34,6 +34,10 @@ class ToolExecutionAuthorizationContext:
     approval_requirements: tuple[tuple[str, str, str], ...] = ()
     max_calls_per_turn: int = 0
     call_count: int = 0
+    budget_profile: str = ""
+    model_family: str = ""
+    model: str = ""
+    provider: str = ""
     call_count_lock: Lock = field(default_factory=Lock, repr=False)
     terminal_wait_counts: dict[str, int] = field(default_factory=dict, repr=False)
     terminal_wait_count: int = 0
@@ -161,7 +165,52 @@ def resolve_enforced_authorization(
     )
 
 
+def _runtime_llm_identity(runtime: Mapping[str, Any]) -> tuple[str, str, str]:
+    """Best-effort model/provider/profile identity for budget profiles."""
+
+    model = str(runtime.get("model") or runtime.get("llmModel") or "").strip()
+    provider = str(runtime.get("provider") or runtime.get("llmProvider") or "").strip()
+    profile_id = str(runtime.get("llmProfileId") or runtime.get("profileId") or "").strip()
+    config_snapshot = (
+        runtime.get("agentConfigSnapshot")
+        if isinstance(runtime.get("agentConfigSnapshot"), Mapping)
+        else {}
+    )
+    if isinstance(config_snapshot, Mapping):
+        model = model or str(config_snapshot.get("model") or config_snapshot.get("llmModel") or "").strip()
+        provider = provider or str(
+            config_snapshot.get("provider") or config_snapshot.get("llmProvider") or ""
+        ).strip()
+        profile_id = profile_id or str(
+            config_snapshot.get("llmProfileId") or config_snapshot.get("profileId") or ""
+        ).strip()
+        bindings = config_snapshot.get("llmBindings") if isinstance(config_snapshot.get("llmBindings"), Mapping) else {}
+        primary = bindings.get("primary") if isinstance(bindings, Mapping) else None
+        if isinstance(primary, Mapping):
+            model = model or str(primary.get("model") or primary.get("modelId") or "").strip()
+            provider = provider or str(primary.get("provider") or primary.get("providerId") or "").strip()
+    if not model or not provider:
+        try:
+            from config.settings import get_config
+
+            profile = get_config().llm.get_profile(role="primary")
+            model = model or str(getattr(profile, "model", "") or "").strip()
+            profile_id = profile_id or str(getattr(profile, "profile_id", "") or getattr(profile, "id", "") or "").strip()
+            provider_obj = getattr(profile, "provider", None)
+            if provider_obj is not None:
+                provider = provider or str(
+                    getattr(provider_obj, "provider_id", "")
+                    or getattr(provider_obj, "name", "")
+                    or provider_obj
+                    or ""
+                ).strip()
+        except Exception:
+            pass
+    return model, provider, profile_id
+
+
 def install_execution_authorization(report: AuthorizationReport) -> ToolExecutionAuthorizationContext:
+    from core.orchestration.tool_budget_profiles import resolve_max_calls_per_turn
     from core.web.services.agent_directory_service import current_agent_runtime
 
     decision = report.decision
@@ -172,10 +221,13 @@ def install_execution_authorization(report: AuthorizationReport) -> ToolExecutio
         if isinstance(runtime.get("agentConfigSnapshot"), Mapping)
         else {}
     )
-    try:
-        max_calls_per_turn = max(0, int(policy.get("maxCallsPerTurn") or 0))
-    except (TypeError, ValueError):
-        max_calls_per_turn = 0
+    model, provider, profile_id = _runtime_llm_identity(runtime)
+    max_calls_per_turn, budget_profile = resolve_max_calls_per_turn(
+        policy if isinstance(policy, Mapping) else {},
+        model=model,
+        provider=provider,
+        profile_id=profile_id,
+    )
     context = ToolExecutionAuthorizationContext(
         agent_id=str(decision.agent_id or "").strip(),
         turn_id=str(decision.turn_id or "").strip(),
@@ -186,6 +238,10 @@ def install_execution_authorization(report: AuthorizationReport) -> ToolExecutio
         executable_tools=tuple(decision.executable_tools),
         approval_requirements=tuple(getattr(decision, "approval_requirements", ()) or ()),
         max_calls_per_turn=max_calls_per_turn,
+        budget_profile=budget_profile,
+        model_family=budget_profile,
+        model=model,
+        provider=provider,
     )
     if (
         not context.agent_id

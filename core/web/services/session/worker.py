@@ -130,6 +130,7 @@ def _run_session_turn(context: dict[str, Any]) -> None:
         requested=mental_model_requested,
     )
     mental_model_enabled = mental_model_decision.effective_enabled
+    runtime_status_requested = s._normalize_optional_bool(context.get("runtime_status_enabled"))
     llm_slot = str(context.get("llm_slot") or s.SESSION_LLM_SLOT_DIALOGUE).strip() or s.SESSION_LLM_SLOT_DIALOGUE
     prepare_timings: dict[str, Any] = {}
     stage_started_at = s._perf_counter()
@@ -145,6 +146,15 @@ def _run_session_turn(context: dict[str, Any]) -> None:
         supplied_agent = None
     agent_instance = supplied_agent or (s.get_agent(agent_id, include_archived=False) if agent_id else None)
     historical_agent = None if agent_instance else (s.get_agent(agent_id, include_archived=True) if agent_id else None)
+    try:
+        from core.runtime_status_flags import is_runtime_status_inject_enabled
+
+        runtime_status_enabled = is_runtime_status_inject_enabled(
+            agent=agent_instance if isinstance(agent_instance, dict) else None,
+            requested=runtime_status_requested,
+        )
+    except Exception:
+        runtime_status_enabled = runtime_status_requested is not False
     supervised_runtime_role = s._supervised_role_for_runtime_context(context, agent_instance)
     supervised_runtime_tool_grants = s._supervised_runtime_tool_grants_for_context(
         context,
@@ -613,6 +623,13 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                 mental_override_configurer = getattr(runtime_agent, "set_mental_model_enabled_override", None)
                 if callable(mental_override_configurer):
                     mental_override_configurer(mental_model_enabled)
+                runtime_status_override_configurer = getattr(
+                    runtime_agent,
+                    "set_runtime_status_enabled_override",
+                    None,
+                )
+                if callable(runtime_status_override_configurer):
+                    runtime_status_override_configurer(runtime_status_enabled)
                 static_runtime_context_seed = getattr(runtime_agent, "seed_static_runtime_context", None)
                 runtime_context_seed = getattr(runtime_agent, "seed_runtime_context", None)
                 volatile_runtime_context_seed = getattr(runtime_agent, "seed_volatile_runtime_context", None)

@@ -54,6 +54,13 @@ from core.infrastructure.llm_utils import (
     parse_tool_args,
     plan_llm_recovery,
 )
+from core.orchestration.turn_status_bar import (
+    build_turn_status_bar_message,
+    collect_turn_status_snapshot,
+    strip_turn_status_bar_messages,
+    upsert_turn_status_bar_message,
+)
+from core.runtime_status_flags import is_runtime_status_inject_enabled
 from core.infrastructure.cli_utils import create_config_from_args, parse_args, should_launch_workbench
 from core.infrastructure.boot_pipeline import (
     configure_console_encoding,
@@ -938,6 +945,7 @@ class SelfEvolvingAgent:
         self._last_turn_metadata: Dict[str, Any] = {}
         self._turn_interrupt_checker = None
         self._mental_model_enabled_override: Optional[bool] = None
+        self._runtime_status_enabled_override: Optional[bool] = None
         if self._mental_model_enabled_override is not None:
             _record_agent_scene_event(
                 "startup",
@@ -1091,6 +1099,76 @@ class SelfEvolvingAgent:
         """Override mental-model activity for this agent instance."""
 
         self._mental_model_enabled_override = None if enabled is None else bool(enabled)
+
+    def set_runtime_status_enabled_override(self, enabled: Optional[bool]) -> None:
+        """Override runtime-status inject for this agent instance / turn request."""
+
+        self._runtime_status_enabled_override = None if enabled is None else bool(enabled)
+
+    def is_runtime_status_inject_enabled_for_turn(self) -> bool:
+        override = getattr(self, "_runtime_status_enabled_override", None)
+        agent = None
+        try:
+            from core.web.services.agent_directory_service import current_agent_runtime
+
+            runtime = current_agent_runtime() or {}
+            agent = runtime.get("agent") if isinstance(runtime.get("agent"), dict) else runtime
+        except Exception:
+            agent = None
+        return is_runtime_status_inject_enabled(
+            agent=agent if isinstance(agent, dict) else None,
+            requested=override,
+        )
+
+    def _llm_identity_for_status(self) -> tuple[str, str, str]:
+        model_name = ""
+        provider = ""
+        profile_id = ""
+        try:
+            llm_config = self.config.llm
+            profile = llm_config.get_profile(role="primary") if hasattr(llm_config, "get_profile") else None
+            if profile is not None:
+                model_name = str(getattr(profile, "model", "") or "").strip()
+                profile_id = str(getattr(profile, "profile_id", "") or getattr(profile, "id", "") or "").strip()
+                provider_obj = getattr(profile, "provider", None)
+                if provider_obj is not None:
+                    provider = str(
+                        getattr(provider_obj, "provider_id", "")
+                        or getattr(provider_obj, "name", "")
+                        or provider_obj
+                        or ""
+                    ).strip()
+            if not model_name:
+                model_name = str(getattr(llm_config, "model_name", "") or "").strip()
+        except Exception:
+            pass
+        return model_name, provider, profile_id
+
+    def _apply_turn_status_bar(self, messages: list, *, iteration: int = 0) -> list:
+        """Upsert live turn status (budget + optional mental) before the current user message."""
+
+        if not self.is_runtime_status_inject_enabled_for_turn():
+            return strip_turn_status_bar_messages(messages)
+        model_name, provider, profile_id = self._llm_identity_for_status()
+        tool_policy = None
+        try:
+            from core.web.services.agent_directory_service import current_agent_runtime
+
+            runtime = current_agent_runtime() or {}
+            tool_policy = runtime.get("toolPolicy") if isinstance(runtime.get("toolPolicy"), dict) else None
+        except Exception:
+            tool_policy = None
+        mental_enabled = self.is_mental_model_enabled_for_turn()
+        snapshot = collect_turn_status_snapshot(
+            iteration=iteration,
+            model=model_name,
+            provider=provider,
+            profile_id=profile_id,
+            tool_policy=tool_policy,
+            mental_enabled=mental_enabled,
+            mental_model=self.mental_model if mental_enabled else None,
+        )
+        return upsert_turn_status_bar_message(messages, build_turn_status_bar_message(snapshot))
 
     def is_mental_model_enabled_for_turn(self) -> bool:
         override = getattr(self, "_mental_model_enabled_override", None)
@@ -2766,6 +2844,7 @@ class SelfEvolvingAgent:
                 messages=messages,
                 context_messages=volatile_context_messages,
             )
+        messages = self._apply_turn_status_bar(messages, iteration=0)
         if dynamic_system_context_message is not None:
             _record_agent_scene_event(
                 "prompt",
@@ -2886,6 +2965,8 @@ class SelfEvolvingAgent:
                         if cacheable_prefix_merged:
                             messages[0] = merged_message
                     self._cached_system_prompt = current_prompt
+                # Live runtime status (budget/progress/mental) — every iteration.
+                messages = self._apply_turn_status_bar(messages, iteration=iteration)
                 prompt_build_ms = max(0, int((time.perf_counter() - prompt_build_started) * 1000))
                 context_estimate_started = time.perf_counter()
                 # Single estimate for UI + compress gate. Far under the compress

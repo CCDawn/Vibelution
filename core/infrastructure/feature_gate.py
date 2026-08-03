@@ -36,8 +36,12 @@ def _value(source: Any, path: str, default: bool = False) -> bool:
     current = source
     for part in path.split("."):
         if isinstance(current, dict):
+            if part not in current:
+                return default
             current = current.get(part)
         else:
+            if not hasattr(current, part):
+                return default
             current = getattr(current, part, None)
         if current is None:
             return default
@@ -47,6 +51,8 @@ def _value(source: Any, path: str, default: bool = False) -> bool:
 def _feature_values(config: Any) -> dict[str, bool]:
     return {
         "mental_model": _value(config, "mental_model.enabled"),
+        # Default-on turn runtime status (budget/progress inject + rail).
+        "runtime_status": _value(config, "runtime_status.enabled", default=True),
         "context_compression": _value(config, "context_compression.enabled"),
         "pet": _value(config, "pet.enabled"),
         "semantic_memory": _value(config, "memory.semantic_memory_enabled"),
