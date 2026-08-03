@@ -603,13 +603,16 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("useChatSessionSelection");
     expect(routeAndSelectionSource).toContain("`/api/sessions/${encodeURIComponent(sessionId)}/select`");
     expect(routeAndActionsSource).toContain("latestDirectSessionSelectionRef.current = normalizedSessionId");
-    expect(routeAndActionsSource).toContain("selectDirectSessionMutation.mutate(normalizedSessionId)");
+    expect(routeAndActionsSource).toContain("reselectDirectSessionRef.current(normalizedSessionId)");
     expect(routeAndActionsSource).toContain("String(activeSessionId || \"\").trim() !== normalizedSessionId");
+    expect(routeAndSelectionSource).toContain(
+      "selectDirectSessionMutation.mutate({ sessionId: normalizedSessionId, generation })",
+    );
     expect(routeAndSelectionSource).toContain("if (latestSessionId && latestSessionId !== nextDetail.id)");
     expect(routeAndSelectionSource).toContain("syncSessionDetail(nextDetail)");
     expect(routeAndSelectionSource).toContain("chatWorkspaceCache.afterSessionSelected()");
     expect(routeAndSelectionSource).not.toContain("afterSessionChanged({\n        sessionId: nextDetail.id");
-    expect(routeAndActionsSource.indexOf("selectDirectSessionMutation.mutate(normalizedSessionId)")).toBeLessThan(
+    expect(routeAndActionsSource.indexOf("reselectDirectSessionRef.current(normalizedSessionId)")).toBeLessThan(
       routeAndActionsSource.indexOf("navigate(`/chat?session=${encodeURIComponent(normalizedSessionId)}`"),
     );
   });
@@ -3078,8 +3081,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(requestedSessionBranch).toContain("setActiveGroupRoomId(\"\")");
     expect(requestedSessionBranch).toContain("setActiveSession(requestedSessionId)");
     expect(requestedSessionBranch).not.toContain("sessionsQuery.data?.some");
-    expect(routeSource).toContain("queryFn: ({ signal }) => fetchSessionDetailWindow(activeSessionId, { signal })");
-    expect(routeSource).toContain("enabled: Boolean(activeSessionId)");
+    expect(routeSource).toContain("queryFn: ({ signal }) => fetchSessionDetailWindow(activeSessionId, {");
+    expect(routeSource).toContain("enabled: Boolean(activeSessionId) && !isTempSessionId(activeSessionId)");
   });
 
   it("bootstraps the persisted active session before the full session index resolves", () => {
