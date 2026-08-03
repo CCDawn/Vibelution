@@ -1338,6 +1338,7 @@ def _materialize_source_collection_stage_writeback_knowledge_ingestion(
     approved_decisions = {
         "approved",
         "approve",
+        "approve_all",
         "accepted",
         "approved_for_ingestion",
         "approve_for_ingestion",
