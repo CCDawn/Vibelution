@@ -27,9 +27,9 @@ describe("ChatCodingRoute Agent-session hierarchy", () => {
     expect(tabStripSource).toContain("在当前 Agent 下新建会话");
     expect(routeSource).toContain("onCreateSession={handleCreateSession}");
     expect(routeSource).not.toContain("<span>{lang === \"zh\" ? \"新建会话\" : \"New session\"}</span>");
-    expect(lifecycleSource).toContain("setEditingSessionId(nextDetail.id)");
+    expect(lifecycleSource).toContain("setEditingSessionId(nextId)");
     expect(lifecycleSource).toContain("setEditingSessionTitle(");
-    expect(lifecycleSource).toContain("editingSessionIdRef.current = nextDetail.id");
+    expect(lifecycleSource).toContain("editingSessionIdRef.current = nextId");
     expect(lifecycleSource).toContain("editingSessionIdRef.current === variables.sessionId");
   });
 

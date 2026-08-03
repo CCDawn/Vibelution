@@ -256,6 +256,9 @@ export function useChatWorkspaceLifecycle({
         activePreviewPath: "",
         changedFiles: [],
         readFiles: [],
+        stopRequested: false,
+        stopRequestedAt: "",
+        stopReason: "",
       };
       setSessionComposerErrors((current) => ({
         ...current,

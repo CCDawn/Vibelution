@@ -22,6 +22,7 @@ type PetInteractionAction = "feed" | "talk" | "care";
 type MutateLike<TVariables> = {
   mutate: (variables: TVariables) => void;
   isPending: boolean;
+  variables?: TVariables;
 };
 
 export type UseChatWorkspaceActionsOptions = {

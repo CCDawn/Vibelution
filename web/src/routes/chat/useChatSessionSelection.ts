@@ -7,6 +7,12 @@ import type { createChatWorkspaceCache } from "../chatWorkspaceCache";
 
 type ChatWorkspaceCache = ReturnType<typeof createChatWorkspaceCache>;
 type RightIndexPanel = "conversations" | "members";
+type DirectSessionSelectionVariables = { sessionId: string; generation: number };
+type DirectSessionSelectionResult = {
+  detail: SessionDetail;
+  generation: number;
+  sessionId: string;
+};
 
 export type UseChatSessionSelectionOptions = {
   queryClient: QueryClient;
@@ -33,7 +39,12 @@ export type UseChatSessionSelectionOptions = {
 };
 
 export type UseChatSessionSelectionResult = {
-  selectDirectSessionMutation: UseMutationResult<SessionDetail, Error, string, unknown>;
+  selectDirectSessionMutation: UseMutationResult<
+    DirectSessionSelectionResult,
+    Error,
+    DirectSessionSelectionVariables,
+    unknown
+  >;
 };
 
 /**
@@ -62,7 +73,7 @@ export function useChatSessionSelection({
   setGroupRoomActionError,
 }: UseChatSessionSelectionOptions): UseChatSessionSelectionResult {
   const selectDirectSessionMutation = useMutation({
-    mutationFn: async ({ sessionId, generation }: { sessionId: string; generation: number }) => {
+    mutationFn: async ({ sessionId, generation }: DirectSessionSelectionVariables) => {
       const detail = await fetchJson<SessionDetail>(
         `/api/sessions/${encodeURIComponent(sessionId)}/select`,
         {
