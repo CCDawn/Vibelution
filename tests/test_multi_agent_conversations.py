@@ -177,6 +177,38 @@ def test_create_chat_session_creates_persistent_agent_and_direct_conversation(tm
     )
 
 
+
+
+def test_create_chat_session_lightweight_skips_full_detail_projection(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+
+    def boom_detail(*_args, **_kwargs):
+        raise AssertionError("lightweight create must not call get_session_detail")
+
+    monkeypatch.setattr(session_service, "get_session_detail", boom_detail)
+    detail = session_service.create_chat_session(title="轻量会话", lightweight=True)
+
+    assert detail["id"]
+    assert detail.get("createdLightweight") is True
+    assert isinstance(detail.get("messages"), list)
+    listed_ids = {item["id"] for item in session_service.list_sessions()}
+    assert detail["id"] in listed_ids
+
+
+def test_select_chat_session_lightweight_skips_full_detail_projection(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    created = session_service.create_chat_session(title="选中轻量")
+
+    def boom_detail(*_args, **_kwargs):
+        raise AssertionError("lightweight select must not call get_session_detail")
+
+    monkeypatch.setattr(session_service, "get_session_detail", boom_detail)
+    detail = session_service.select_chat_session(created["id"], lightweight=True)
+    assert detail["id"] == created["id"]
+    assert detail.get("selectedLightweight") is True
+    assert isinstance(detail.get("messages"), list)
+
+
 def test_legacy_session_list_is_read_only_until_detail_repairs_agent_binding(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _seed_chat_sessions(tmp_path)

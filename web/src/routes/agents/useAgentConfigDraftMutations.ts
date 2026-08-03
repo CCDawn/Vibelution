@@ -142,7 +142,8 @@ export function useAgentConfigDraftMutations(options: UseAgentConfigDraftMutatio
           : `Saved config for ${options.agentLabel(agent)}`,
       });
       void queryClient.invalidateQueries({ queryKey: ["agents", "config-changes", variables.agentId] });
-      void options.chatWorkspaceCache.afterAgentWorkspaceChanged();
+      // Config PATCH already setQueryData'd the workspace agent — do not thrash chat sessions.
+      void options.chatWorkspaceCache.afterAgentConfigSaved(variables.agentId);
     },
     onError: (error) => {
       const message = error instanceof Error ? error.message : String(error);
@@ -188,7 +189,7 @@ export function useAgentConfigDraftMutations(options: UseAgentConfigDraftMutatio
         queryClient.invalidateQueries({ queryKey: queryKeys.agentConfigWorkspace() }),
         queryClient.invalidateQueries({ queryKey: queryKeys.agentSummary(true) }),
       ]);
-      void options.chatWorkspaceCache.afterAgentWorkspaceChanged();
+      void options.chatWorkspaceCache.afterAgentConfigSaved(result.agent.agentId);
     },
     onError: (error) => {
       options.setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
