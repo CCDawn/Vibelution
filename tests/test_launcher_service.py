@@ -14,6 +14,18 @@ from core.runtime_manager.work_run_store import WorkRunStore
 pytestmark = pytest.mark.serial
 
 
+@pytest.fixture(autouse=True)
+def isolate_desktop_session_store(tmp_path, monkeypatch):
+    """Keep launcher status tests independent from a developer's live desktop session."""
+    from core.launcher import desktop_session_store
+
+    monkeypatch.setattr(
+        desktop_session_store,
+        "DESKTOP_SESSION_DB_PATH",
+        tmp_path / ".runtime" / "launcher" / "desktop_sessions.sqlite3",
+    )
+
+
 def test_standalone_launcher_app_exposes_project_lifecycle_routes(monkeypatch):
     calls = []
     monkeypatch.setattr(
@@ -713,18 +725,12 @@ def test_standalone_launcher_app_reports_missing_shell_when_index_is_absent(monk
 
 
 def test_launcher_status_is_independent_from_web_runtime_service(monkeypatch, tmp_path):
-    from core.launcher import desktop_session_store
     import core.web.services.runtime_service as runtime_service
 
     def fail_web_runtime_summary():
         raise AssertionError("standalone Launcher status must not call Web runtime_service")
 
     monkeypatch.setattr(runtime_service, "get_runtime_summary", fail_web_runtime_summary)
-    monkeypatch.setattr(
-        desktop_session_store,
-        "DESKTOP_SESSION_DB_PATH",
-        tmp_path / ".runtime" / "launcher" / "desktop_sessions.sqlite3",
-    )
     monkeypatch.setattr(launcher_service, "STATE_PATH", tmp_path / ".runtime" / "runtime-manager" / "state.json")
     monkeypatch.setattr(launcher_service, "INBOX_DIR", tmp_path / ".runtime" / "runtime-manager" / "inbox")
     monkeypatch.setattr(launcher_service, "PROCESSING_DIR", tmp_path / ".runtime" / "runtime-manager" / "processing")
