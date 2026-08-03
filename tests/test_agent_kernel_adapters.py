@@ -182,6 +182,10 @@ def test_agent_message_adapter_preserves_inbox_projection_metadata(tmp_path, mon
     assert inbox["sourceSessionId"] == "session-alpha"
     assert inbox["targetSessionId"] == "session-collab-landing"
     assert inbox["summary"] == "direct review request"
+    # SSOT: with targetSessionId, inbox stores preview only (summary), not a second full body authority.
+    assert inbox["content"] == "direct review request"
+    assert inbox["metadata"].get("ssot") == "session"
+    assert inbox["metadata"].get("bodyPreviewOnly") is True
     assert json.loads(inbox["metadata"]["agentToolMetadataJson"]) == {"priority": "normal"}
     assert inbox["metadata"]["kernelTaskId"] == payload["task"]["taskId"]
     assert inbox["metadata"]["kernelEventId"] == payload["event"]["eventId"]
