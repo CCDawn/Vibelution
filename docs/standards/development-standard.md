@@ -277,6 +277,7 @@ A DTO or projection change is not complete until backend route/service tests, fr
 
 ## 8. Implementation Boundaries
 
+- **Windows no-console is absolute**: any product background spawn that can flash `cmd.exe` / PowerShell / Windows Terminal / OpenConsole is out of policy; see §8.0 (merge blocker).
 - Prefer project-native tools and structured APIs over broad shell commands.
 - Follow reuse-first development in every development round: before adding a new service, helper, route, component, cache, tool, script, or process, search for existing project-native functionality and extend or compose it when it can satisfy the behavior; introduce a parallel path only when the existing path demonstrably cannot support the requirement, and record why in the plan, review, or final report.
 - Use focused tests and small validation loops before widening scope.
@@ -287,18 +288,43 @@ A DTO or projection change is not complete until backend route/service tests, fr
 - When building keyword-triggered runtime guards or prompt relevance checks, avoid raw substring matching for English tokens on Windows paths; use token-aware matching.
 - Chat mode user input must enter the LLM payload as `role=user` or equivalent user-message shape. Do not wrap chat user input in `SystemMessage`.
 - When an LLM call fails unexpectedly, inspect the safe message-role summary first: `system`, `user`, `assistant`, `tool`.
-- On Windows, do not assume `CREATE_NO_WINDOW` on `.venv\Scripts\python.exe` is enough for long-lived services. Verify child process trees and visible windows; prefer service-specific `pythonw.exe` when no console should appear.
-- On Windows, terminal-popup fixes must prove the full process chain, not just the first launcher layer. Inspect parent and child process command lines, visible window titles, launcher state, runtime-manager events, and any short-lived terminal hosts before deciding the root cause.
-- Do not overfit terminal-popup diagnosis to the interpreter name. `pythonw.exe` can still be the correct no-console parent; visible Git, cmd, Windows Terminal, or OpenConsole windows may come from later runtime polling code. Verify the product-owned recursive process tree instead of global process churn from Codex, IDEs, or shell tooling.
-- Avoid background runtime commands that depend on PATH wrappers when they can run from a no-console service or frontend polling path. Resolve the real executable, capture output, and apply the shared no-window startup policy instead of relying on a shell, `.cmd`, or wrapper binary.
-- Agent-run frontend tests on Windows must bypass npm's `cmd.exe` script shell. Invoke `node web/node_modules/vitest/vitest.mjs run [focused test files]` from the repository root; keep `npm test` only for an already-open interactive terminal where a console host is intentional.
-- Git commands called by runtime services, UI polling, memory overview, restart backup, or evolution harnesses must use the shared Git process helper. Do not add new `subprocess.run(["git", ...])` runtime paths; Git for Windows may resolve to `cmd\git.exe` and surface visible terminals from background code.
-- No-console Launcher entrypoints must not use `taskkill.exe` as the normal stale-process cleanup path. `taskkill.exe` can create its own console host even when called from `pythonw.exe`; prefer in-process `psutil`/WinAPI termination with focused tests that assert no `taskkill` subprocess is invoked.
-- Source-bound CLI terminal attachment must not auto-resume a stale terminal state during page restoration or Launcher startup. Return the stale state for the UI to display, and require an explicit user start/reconnect action before spawning a new CLI process.
-- Windows `.cmd` shim handling must inspect the real shim target. If the shim launches a native `.exe`, execute that `.exe` directly; only wrap JavaScript/no-extension CLI targets with `node.exe`.
-- Launcher control-surface freshness signatures must include every source module that can run startup, polling, developer-mode, shutdown, or lifecycle logic behind the long-lived Launcher backend. When a terminal-popup or lifecycle fix touches such a module, add a regression test proving that editing that source changes the stored control signature; otherwise a stale backend can keep executing the old popup-producing code after the source fix is merged.
-- Terminal-popup regressions need automated locks, not only documented lessons: add source or AST tests that forbid naked runtime Git subprocess paths, and add behavior tests for the no-console helper or source-signature freshness path that closed the bug.
-- When a terminal-popup investigation finds interactive Git editor chains such as `git merge --continue -> sh -> vim .git/COMMIT_EDITMSG`, first verify repository state (`MERGE_HEAD`, `git status`) before killing anything. Treat stale editor processes as residual cleanup only after confirming no active merge or commit operation exists.
+
+### 8.0 Windows No-Console Absolute Red Line (always on)
+
+**Product-owned Windows runtime must never flash or leave a visible console window during normal user operations.** This is a permanent red line, not a preference.
+
+Applies to every path that can run without an intentional interactive terminal:
+
+- Launcher start / stop / restart / status / tray / desktop entry / VBS / native entry
+- Workbench backend and frontend lifecycle
+- Runtime Manager and supervisor children
+- Background Git, memory refresh, health polling, tool subprocesses
+- Any agent or service path that can spawn children while the Workbench UI is open
+
+Hard bans:
+
+1. Do not spawn background work with a visible `cmd.exe`, `powershell.exe` console host, Windows Terminal, OpenConsole, or interactive Git editor (`vim`/`notepad` on commit messages).
+2. Do not use `taskkill.exe` as the normal stale-process cleanup path from no-console services; terminate in-process with `psutil`/WinAPI.
+3. Do not add new naked `subprocess.run(["git", ...])` runtime paths; use `core.infrastructure.git_process` (or successor shared helpers) so Git for Windows `cmd\git.exe` wrappers cannot surface terminals.
+4. Do not rely on PATH wrappers (`.cmd`, npm script shells, bare `python`) for long-lived or polled background services.
+5. Do not assume `CREATE_NO_WINDOW` on `python.exe` alone is sufficient; prefer `pythonw.exe` for no-console parents and still apply no-window flags to the full child tree.
+6. Agent-run frontend tests on Windows must invoke `node web/node_modules/vitest/vitest.mjs run ...` rather than `npm test` unless the console host is intentionally open.
+
+Required patterns:
+
+- Use shared helpers such as `no_console_subprocess_kwargs()` / Launcher `_creation_flags()` / Runtime Manager no-console launch policy.
+- Capture stdout/stderr to files or pipes; never inherit a console for product background processes.
+- Resolve real executables (Git, Node, CLI shims) before spawn; if a `.cmd` shim targets a native `.exe`, run that `.exe` directly.
+- Launcher control-surface freshness signatures must cover every module that can run startup, polling, developer-mode, shutdown, or lifecycle logic so a stale backend cannot keep old popup-producing code.
+
+Diagnosis and closure:
+
+- Terminal-popup issues during startup are Launcher/runtime lifecycle bugs until proven otherwise.
+- Inspect parent/child command lines, visible window titles, `.runtime/launcher/state.json`, runtime-manager events, and short-lived terminal hosts in the product-owned tree—not global IDE/Codex process noise.
+- Closure requires live evidence that the user action no longer creates visible consoles, plus focused tests (source/AST locks for naked Git subprocesses, no-console helper behavior, or control-signature freshness).
+- Exception: user-explicit interactive surfaces only (Workbench CLI terminal panel, operator-opened shell). Those must not auto-resume stale terminals on page restore or Launcher startup.
+
+Any new background spawn path that can create a console is a merge blocker.
 
 ### 8.1 Developer Mode Parity
 

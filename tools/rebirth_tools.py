@@ -250,9 +250,13 @@ def spawn_detached_process_windows(command: list, env: Optional[dict] = None) ->
         os.makedirs(log_dir, exist_ok=True)
         restarter_log = os.path.join(log_dir, 'restarter_realtime.log')
         
-        # DETACHED_PROCESS 分离控制台关联
-        # CREATE_NEW_PROCESS_GROUP 使进程完全脱离父进程组
-        creation_flags = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+        # DETACHED_PROCESS + CREATE_NEW_PROCESS_GROUP + CREATE_NO_WINDOW:
+        # detach from parent and never flash a visible console on Windows.
+        creation_flags = (
+            int(getattr(subprocess, "DETACHED_PROCESS", 0x00000008))
+            | int(getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200))
+            | int(getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000))
+        )
 
         with open(restarter_log, 'a', encoding='utf-8') as log_file:
             process = subprocess.Popen(

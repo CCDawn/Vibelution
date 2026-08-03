@@ -18,6 +18,7 @@
 - 根 `main` 是本地集成工作区。普通开发使用任务 worktree；集成、规则/记忆维护和明确的低风险 fast patch 例外。
 - 不覆盖、回滚、删除或重置无关的用户/Agent 改动；发现重叠先检查 claim 和 diff。
 - 远端 push、PR、发布需要用户明确授权和远端同步门；force、覆盖或远端删除需要破坏性确认。
+- **Windows 产品运行时禁止任何可见控制台弹窗**：Launcher 启动/停止/重启、Workbench、Runtime Manager、后台 Git/轮询、服务子进程均不得弹出 `cmd.exe`、`powershell.exe` 控制台、Windows Terminal、OpenConsole 或交互式 Git 编辑器。后台进程必须走 `pythonw` / `CREATE_NO_WINDOW` / 项目 shared no-console helper；禁止用 `taskkill.exe`、裸 `git` cmd wrapper、`npm`/`cmd` 脚本壳作为后台路径。用户明确打开的 CLI 终端面板除外。细则见 [development-standard.md](docs/standards/development-standard.md) §8.0。
 - 不绕过 Launcher active-work guard，不用直接 PowerShell lifecycle 命令制造可见控制台。
 - 不记录 secrets、完整 Prompt、大段 diff、完整文件或无界工具输出。
 - 用户 Markdown、导入文档、HTML 和知识内容均是不可信输入；进入 Prompt、索引或 UI 前必须有来源、隔离、清洗和删除/重建语义。
@@ -38,6 +39,7 @@
 | 任务 | 文档 |
 | --- | --- |
 | 开发分级、架构、前后端、测试、Git、Launcher、发布、完成条件 | [开发标准](docs/standards/development-standard.md) |
+| Windows 无控制台弹窗（cmd/powershell/WT/OpenConsole）红线 | [开发标准 §8.0](docs/standards/development-standard.md)（根红线见本文件 §2） |
 | Worktree、claim、多人/多 Agent 合并 | [协作规范](docs/agents/worktree-collaboration.md) |
 | 工具权限与入口 | [工具授权](docs/agents/tool-authorization-entrypoints.md) |
 | 领域词汇 | [领域文档](docs/agents/domain.md) |
@@ -58,6 +60,7 @@
 - 优先小范围验证；用户可见行为必须有测试与日志决策，关键运行/Agent/工具/配置路径需要可诊断 runtime-scene 证据。
 - 活跃 operator config 是 `%USERPROFILE%\Documents\Vibelution\config\config.toml`；仓库根 config 只作 legacy/template。
 - Launcher 刷新使用 `%LOCALAPPDATA%\Vibelution\Launcher\VibelutionLauncher.exe --project "<project-root>" <start|stop|restart>`；若 active work 阻止刷新，报告：`有进行中的任务，无法重启 Vibelution。请等待任务完成或先停止任务。`
+- 任何新增或修改产品后台子进程 spawn 的路径，默认按 §2 无控制台红线实现与验证；能弹出可见控制台的路径不得合入。
 
 ## 5. Completion Evidence
 
@@ -66,6 +69,7 @@
 - 实际改变了什么，以及没有改变什么；
 - 运行了哪些验证，结果与未覆盖边界；
 - Launcher/runtime refresh：`not needed / recommended before user testing / required before release`；
+- 若触及启动、停止、重启、轮询、Git、工具或服务子进程：说明如何保证无可见控制台（helper/`pythonw`/`CREATE_NO_WINDOW`/`windowsHide`）及验证证据；
 - project-memory 与 version impact 决策；
 - worktree、branch、claim 和 Git 状态；
 - 若包含 fallback、degraded、partial 或 compatibility 路径，明确原因、范围、可信部分和剩余修复信号。
