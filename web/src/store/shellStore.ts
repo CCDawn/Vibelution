@@ -44,9 +44,16 @@ const LEGACY_STATUS_LEFT_PANEL_WIDTHS: ChatPanelWidths = {
 const CHAT_LEFT_PANE_BOUNDS = { min: 260, max: 560 };
 const CHAT_RIGHT_PANE_BOUNDS = { min: 200, max: 520 };
 
-function normalizePanelWidth(value: unknown, fallback: number) {
+function normalizePanelWidth(
+  value: unknown,
+  fallback: number,
+  bounds: { min: number; max: number },
+) {
   const numericValue = typeof value === "number" ? value : Number(value);
-  return Number.isFinite(numericValue) ? Math.max(fallback, Math.round(numericValue)) : fallback;
+  if (!Number.isFinite(numericValue)) {
+    return fallback;
+  }
+  return Math.min(bounds.max, Math.max(bounds.min, Math.round(numericValue)));
 }
 
 function dualWriteChatPaneLayouts(widths: ChatPanelWidths): void {
@@ -88,8 +95,16 @@ function normalizePersistedChatPanelWidths(widths: Partial<ChatPanelWidths> | un
   }
 
   const fromShell = {
-    leftPanelWidth: normalizePanelWidth(widths?.leftPanelWidth, DEFAULT_CHAT_PANEL_WIDTHS.leftPanelWidth),
-    rightPanelWidth: normalizePanelWidth(widths?.rightPanelWidth, DEFAULT_CHAT_PANEL_WIDTHS.rightPanelWidth),
+    leftPanelWidth: normalizePanelWidth(
+      widths?.leftPanelWidth,
+      DEFAULT_CHAT_PANEL_WIDTHS.leftPanelWidth,
+      CHAT_LEFT_PANE_BOUNDS,
+    ),
+    rightPanelWidth: normalizePanelWidth(
+      widths?.rightPanelWidth,
+      DEFAULT_CHAT_PANEL_WIDTHS.rightPanelWidth,
+      CHAT_RIGHT_PANE_BOUNDS,
+    ),
   };
 
   // Prefer shell store values when present; otherwise hydrate from shared pane-layouts.
@@ -102,19 +117,43 @@ function normalizePersistedChatPanelWidths(widths: Partial<ChatPanelWidths> | un
   return fromShared ?? DEFAULT_CHAT_PANEL_WIDTHS;
 }
 
-const NOOP_SHELL_STORAGE: StateStorage = {
-  getItem: () => null,
-  setItem: () => undefined,
-  removeItem: () => undefined,
+/**
+ * Always read/write the live global localStorage.
+ * createJSONStorage() captures getStorage() once at module load; a frozen
+ * reference would break tests and any late-available storage.
+ */
+const DYNAMIC_SHELL_STORAGE: StateStorage = {
+  getItem: (name) => {
+    try {
+      if (typeof localStorage === "undefined") {
+        return null;
+      }
+      return localStorage.getItem(name);
+    } catch {
+      return null;
+    }
+  },
+  setItem: (name, value) => {
+    try {
+      if (typeof localStorage === "undefined") {
+        return;
+      }
+      localStorage.setItem(name, value);
+    } catch {
+      // Quota / private mode — ignore.
+    }
+  },
+  removeItem: (name) => {
+    try {
+      if (typeof localStorage === "undefined") {
+        return;
+      }
+      localStorage.removeItem(name);
+    } catch {
+      // ignore
+    }
+  },
 };
-
-function resolveShellStorage(): StateStorage {
-  try {
-    return typeof localStorage === "undefined" ? NOOP_SHELL_STORAGE : localStorage;
-  } catch {
-    return NOOP_SHELL_STORAGE;
-  }
-}
 
 export const useShellStore = create<ShellState>()(
   persist(
@@ -138,7 +177,7 @@ export const useShellStore = create<ShellState>()(
     }),
     {
       name: "vibelution-shell-store",
-      storage: createJSONStorage(resolveShellStorage),
+      storage: createJSONStorage(() => DYNAMIC_SHELL_STORAGE),
       partialize: (state) => ({
         evolutionTrack: state.evolutionTrack,
         evolutionView: state.evolutionView,

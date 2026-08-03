@@ -19,6 +19,22 @@ function isBrowser(): boolean {
   return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
 }
 
+type PaneLayoutPersistHook = () => void;
+let paneLayoutPersistHook: PaneLayoutPersistHook | null = null;
+
+/** Optional listener when pane widths are written (project-local dual-write). */
+export function setPaneLayoutPersistHook(hook: PaneLayoutPersistHook | null): void {
+  paneLayoutPersistHook = hook;
+}
+
+function notifyPaneLayoutPersist(): void {
+  try {
+    paneLayoutPersistHook?.();
+  } catch {
+    // Dual-write listeners must not break local persistence.
+  }
+}
+
 export function clampPaneWidth(value: number, minWidth: number, maxWidth: number): number {
   if (!Number.isFinite(value)) {
     return minWidth;
@@ -67,6 +83,7 @@ export function writeAllPaneLayouts(layouts: PaneLayoutsMap): void {
   }
   try {
     window.localStorage.setItem(PANE_LAYOUT_STORAGE_KEY, JSON.stringify(layouts));
+    notifyPaneLayoutPersist();
   } catch {
     // Quota / private mode — ignore; in-memory widths still work for the session.
   }

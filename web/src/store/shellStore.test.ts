@@ -58,7 +58,7 @@ describe("shellStore", () => {
     });
   });
 
-  it("migrates the legacy status-left Chat pane widths to the new conversation-left layout", () => {
+  it("migrates the legacy status-left Chat pane widths to the new conversation-left layout", async () => {
     localStorage.setItem(
       "vibelution-shell-store",
       JSON.stringify({
@@ -75,7 +75,7 @@ describe("shellStore", () => {
       }),
     );
 
-    useShellStore.persist.rehydrate();
+    await useShellStore.persist.rehydrate();
 
     expect(useShellStore.getState().chatPanelWidths).toEqual({
       leftPanelWidth: 300,
@@ -98,5 +98,41 @@ describe("shellStore", () => {
       right: 260,
     });
     expect(localStorage.getItem(PANE_LAYOUT_STORAGE_KEY)).toContain("chat");
+  });
+
+  it("restores preferred chat widths below the previous default floor", async () => {
+    localStorage.setItem(
+      "vibelution-shell-store",
+      JSON.stringify({
+        state: {
+          evolutionTrack: "supervised",
+          evolutionView: "live",
+          chatPanelWidths: {
+            leftPanelWidth: 280,
+            rightPanelWidth: 210,
+          },
+          topBarMode: "full",
+        },
+        version: 0,
+      }),
+    );
+
+    await useShellStore.persist.rehydrate();
+
+    expect(useShellStore.getState().chatPanelWidths).toEqual({
+      leftPanelWidth: 280,
+      rightPanelWidth: 210,
+    });
+  });
+
+  it("normalizes preferred chat widths through the store setter bounds path", () => {
+    useShellStore.getState().setChatPanelWidths({
+      leftPanelWidth: 280,
+      rightPanelWidth: 210,
+    });
+    expect(useShellStore.getState().chatPanelWidths).toEqual({
+      leftPanelWidth: 280,
+      rightPanelWidth: 210,
+    });
   });
 });

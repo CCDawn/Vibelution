@@ -35,11 +35,13 @@ from .routes.teams import router as teams_router
 from .routes.tools import router as tools_router
 from .routes.user_content import router as user_content_router
 from .routes.usage import router as usage_router
+from .routes.workbench_ui import router as workbench_ui_router
 
 
 def register_web_routers(app: FastAPI) -> None:
     app.include_router(runtime_router, prefix="/api")
     app.include_router(launcher_router, prefix="/api")
+    app.include_router(workbench_ui_router, prefix="/api")
     app.include_router(agents_router, prefix="/api")
     app.include_router(conversations_router, prefix="/api")
     app.include_router(sessions_router, prefix="/api")

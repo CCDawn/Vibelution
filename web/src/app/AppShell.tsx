@@ -54,6 +54,8 @@ import {
   writeStoredWorkbenchTheme,
   type WorkbenchTheme,
 } from "./themePreference";
+import { startWorkbenchUiPreferencesSync } from "./workbenchUiPreferencesSync";
+import { startWorkbenchWindowMemory } from "./workbenchWindowMemory";
 import { isWorkbenchDomainEnabled, isWorkbenchModeEnabled } from "./workbenchContract";
 import { requestWorkbenchExitGuard } from "./workbenchExitGuard";
 import {
@@ -768,6 +770,10 @@ export function AppShell() {
   });
 
   useEffect(() => syncWorkbenchThemeRoot(theme), [theme]);
+
+  // Project-local layout memory (port/origin stable) + F11/windowed size memory.
+  useEffect(() => startWorkbenchUiPreferencesSync(), []);
+  useEffect(() => startWorkbenchWindowMemory(), []);
 
   useEffect(() => {
     const previous = previousReturnLocationRef.current;
