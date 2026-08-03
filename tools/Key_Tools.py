@@ -132,11 +132,14 @@ def _cli_tool_docstring() -> str:
 定位代码时**优先** `code_symbol_tool` / `grep_search_tool` / `glob_tool`；
 shell 只在结构化工具不够或需要执行/验证（git/pytest/编译）时使用。
 
+底层自动选择：系统按当前宿主平台自动选择 Shell 与沙盒后端（Windows / Linux /
+Codex CLI），无需在命令中指定或选择平台；写命令时遵循下方 `Shell 方言` 规则即可。
+
 {_shell_dialect_block()}
 
 === 调用纪律 ===
 1. 搜索：`rg -n "pattern" path`（无管道；不要 `rg ... | head`）。
-2. Windows 读小段：完整 PowerShell，如 `Get-Content -LiteralPath "file" | Select-Object -First 80`。
+2. 读小段：按当前宿主方言用有界命令读取（如 `cat ... | head -n 80` 或 `Get-Content -LiteralPath "file" -TotalCount 80`）。
 3. 同类 shell 失败 **1 次**后立即换结构化工具，禁止 cmd/PowerShell/bash 来回探路。
 4. 输出默认有界；`max_output_chars` 默认 6000，大结果只消费结论。
 5. 本回合工具有额度上限：探查不要耗尽额度，至少预留 2–3 次给 lint/test。
@@ -155,7 +158,10 @@ Args:
 
 def _exec_command_tool_docstring() -> str:
     return f"""
-【可继续命令】在 Codex 原生沙盒中启动可继续交互的命令进程。
+【可继续命令】在自动选择的原生沙盒中启动可继续交互的命令进程。
+
+底层自动选择：系统自动选择宿主 Shell 与沙盒后端（Windows / Linux / Codex CLI），
+无需指定或选择平台后端。
 
 `cmd` 与 `cli_tool` **共用同一套 shell 路由/方言**。进程仍在运行时返回 `terminalSessionId`，
 后续必须原样传给 `write_stdin`。旧 `cli_tool` 仅兼容旧工作流。
@@ -163,7 +169,7 @@ def _exec_command_tool_docstring() -> str:
 {_shell_dialect_block()}
 
 === 调用纪律 ===
-1. 写清与路由匹配的 `cmd`；Windows 默认勿混用 bash/PowerShell 探路。
+1. 写清与路由匹配的 `cmd`，按当前宿主 Shell 方言书写；勿混用 bash/PowerShell 探路。
 2. 同类失败 1 次换结构化工具或不同策略。
 3. `max_output_chars` 默认 6000；续写用 `write_stdin`。
 

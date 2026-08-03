@@ -86,6 +86,48 @@ jobs:
           .\.venv\Scripts\python.exe -m coverage run -m pytest tests -q
           .\.venv\Scripts\python.exe -m coverage report --skip-covered
 
+  linux-sandbox:
+    name: Linux Codex Sandbox
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      PYTHONUTF8: "1"
+      VIBELUTION_ENABLE_USER_ENV_FALLBACK: "0"
+      OPENAI_API_KEY: ""
+      DEEPSEEK_API_KEY: ""
+      MINIMAX_API_KEY: ""
+      VIBELUTION_LLM_DEEPSEEK_V4_FLASH_API_KEY: ""
+      VIBELUTION_LLM_DEEPSEEK_V4_PRO_API_KEY: ""
+      VIBELUTION_LLM_OPENAI_GPT_5_5_API_KEY: ""
+      VIBELUTION_LLM_REMOTE_MAIN_MINIMAX_M2_7_API_KEY: ""
+      VIBELUTION_LLM_SHARE_AI_API_KEY: ""
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Create virtualenv and install dependencies
+        run: |
+          python -m venv .venv
+          ./.venv/bin/python -m pip install --upgrade pip
+          ./.venv/bin/python -m pip install -r requirements.txt
+
+      - name: Guard against os.name monkeypatching in platform tests
+        run: |
+          ! grep -RIn 'os", "name"' tests/test_codex_cli_sandbox.py tests/test_codex_sandbox_platform.py
+          ! grep -RInE 'setattr\([^,]+\.os, ?"name"' tests/test_codex_cli_sandbox.py tests/test_codex_sandbox_platform.py
+
+      - name: Run Linux sandbox tests
+        run: ./.venv/bin/python -m pytest tests/test_codex_sandbox_platform.py tests/test_codex_cli_sandbox.py -q
+
   web:
     name: Web
     runs-on: ubuntu-latest
