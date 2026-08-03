@@ -3,6 +3,7 @@
 ## Status
 
 Accepted (requirements alignment 2026-08-03).
+**Amended 2026-08-03:** dual-write of message **body** is rejected; **single source of truth (SSOT)** for collab body is the target **Session** only.
 
 ## Context
 
@@ -20,16 +21,22 @@ Mature multi-agent systems separate concerns:
 | **Thread / context / session** | Continuous dialogue and user-visible history (A2A `contextId`, OpenAI handoff thread) |
 | **Task / turn** | One unit of work that may be scheduled immediately |
 
-This ADR locks Vibelution's collaboration send path to that split, without deleting inbox infrastructure.
+**SSOT constraint:** a collaboration message body must not live as two independent full copies (session + inbox). Dual-write of body violates single source of truth, risks drift, and confuses UI/model assembly.
+
+This ADR locks Vibelution's collaboration send path to that split **with Session as the only body authority**, without deleting inbox infrastructure as an **index / delivery log**.
 
 ## Decision
 
-### 1. Semantic model: **C (session authority + inbox index/log)**
+### 1. Semantic model: **C with SSOT (session authority + inbox index only)**
 
-- **Authoritative landing** for collaboration content: the **target session's visible conversation history**.
-- **Inbox is retained** as a **delivery log / recovery index / future queue surface**, not as the primary user UX for reading collab messages.
-- Phase 1 implementation **MAY dual-write full body** into both session history and inbox, but **MUST** share one `messageId` and treat **session history as the source of truth** for UI and model context assembly.
-- Phase 2 **SHOULD** shrink inbox rows to pointers (`bodyRef` → session message) plus status machine fields.
+- **Single source of truth for collaboration content (body):** the **target session's visible conversation history** (and whatever conversation-event store backs it).
+- **Inbox is retained** only as a **delivery log / recovery index / future queue surface**:
+  - **MUST** store routing and lifecycle fields (`messageId`, `targetSessionId`, `targetAgentId`, `status`, `wakeStatus`, timestamps, policy refs).
+  - **MUST** reference the session landing via `bodyRef` / `historyMessageId` / equivalent pointer.
+  - **MUST NOT** store a second authoritative full body for new collaboration sends (no dual-write of body).
+  - **MAY** store a short **summary** for list UIs (non-authoritative preview only).
+- UI and model context assembly **MUST** read collab body from **session history**, never from inbox body as truth.
+- Legacy inbox rows that already contain full body remain readable for recovery; new writes follow index-only rules.
 
 ### 2. Addressing: explicit `targetSessionId` is required
 
@@ -52,16 +59,17 @@ This ADR locks Vibelution's collaboration send path to that split, without delet
 - Cross-agent: require organization / research-graph policy (and any future user-authorization gates) **before** write or wake.
 - Opaque execution: deliver structured collab payload only; do not dump peer internal tool traces by default.
 
-### 5. Inbox retention (not removed)
+### 5. Inbox retention (index, not second body store)
 
 Inbox remains for:
 
 - delivery audit and idempotency,
 - Agent-level pending counts / ops surfaces,
-- recovery of failed wakes,
+- recovery of failed wakes (re-point at `targetSessionId` + re-wake),
 - future queue policies (busy deferral, priority, TTL, dead-letter).
 
 Inbox **MUST NOT** be required for the user to *see* a newly sent collab message in the target session tab.
+Inbox **MUST NOT** become a second SSOT for collab text.
 
 ### 6. Out of scope (this ADR)
 
@@ -90,25 +98,44 @@ Compatibility: a transitional overload that accepts only `target_agent` is **dep
 ### Delivery object (logical)
 
 ```
-AgentCollaborationMessage
-  messageId            # shared across session row + inbox row
+# Session history (SSOT body)
+SessionCollabEvent
+  messageId
+  role/type            # e.g. agent_collab
+  content              # FULL BODY lives only here
   sourceAgentId
-  sourceSessionId      # sender runtime session when available
-  targetSessionId      # REQUIRED landing
-  targetAgentId        # derived from target session
-  content
-  summary
-  wakeTarget
-  correlationId?       # optional task/turn linkage
-  policyRoute          # same_agent | cross_agent
-  delivery
-    historyStatus      # appended | rejected
-    historyMessageId?
-    inboxStatus        # recorded | skipped_legacy | failed
-    inboxMessageId?
-    wakeStatus         # started | already_running | failed | not_requested
-    turnId?
-    reason?
+  sourceSessionId?
+  targetSessionId
+  summary?
+
+# Inbox row (index / log only — no second full body)
+InboxDeliveryRecord
+  messageId            # same id as SessionCollabEvent
+  targetSessionId
+  targetAgentId
+  sourceAgentId
+  sourceSessionId?
+  historyMessageId     # pointer into session history
+  bodyRef?             # optional explicit pointer
+  summary?             # optional non-authoritative preview
+  status               # pending | delivered | acked | failed | ...
+  wakeStatus
+  turnId?
+  reason?
+  createdAt / consumedAt?
+```
+
+Canonical send result still surfaces:
+
+```
+delivery
+  historyStatus      # appended | rejected
+  historyMessageId
+  inboxStatus        # recorded | failed
+  inboxMessageId
+  wakeStatus         # started | already_running | failed | not_requested
+  turnId?
+  reason?
 ```
 
 ### Error codes (minimum)
@@ -145,19 +172,20 @@ AgentCollaborationMessage
 
 ### Negative / costs
 
-- Kernel and `agent_message_tool` must grow session resolution and dual-write/pointer logic.
+- Kernel and `agent_message_tool` must grow session resolution and **session-first append** logic.
+- Inbox write path must be refactored to **index-only** (pointer + status), not reuse full-body dual storage.
 - Cross-agent policy path must run before side effects.
-- Dual-write phase needs careful idempotency to avoid double bubbles.
-- Legacy agent-only callers need migration.
+- Legacy agent-only callers and legacy full-body inbox rows need migration/compat reads.
+- Idempotency still required so retries do not create duplicate **session** bubbles.
 
 ### Follow-up implementation order (non-normative)
 
 1. Contract tests for address resolution and error codes.
-2. Session history append path for collab message type.
-3. Inbox write with shared `messageId` + `targetSessionId`.
-4. Wake bound to `targetSessionId`.
+2. **Session history append first** (SSOT body) with stable `messageId`.
+3. Inbox **index** write: same `messageId` + `targetSessionId` + `historyMessageId` / `bodyRef` (**no full body**).
+4. Wake bound to `targetSessionId` (submit/turn uses session history, not inbox body as truth).
 5. Deprecate agent-only addressing; update prompts/tool schemas.
-6. Phase 2: pointer-only inbox, busy queue, ack/TTL/dead-letter.
+6. Later: busy queue, ack/TTL/dead-letter on the **index** row only.
 
 ## References
 

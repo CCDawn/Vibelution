@@ -35,12 +35,12 @@ A **Project Agent Bus** event scoped by Team metadata so a selected Agent Team c
 _Avoid_: Separate team chat, ad hoc message list
 
 **Agent Collaboration Message**:
-A point-to-point collaboration send from one **Agent** runtime to a concrete **Session**. The **Session** conversation history is the user-visible and model-context landing surface; the **Agent Inbox** retains a delivery log / recovery index (phase 1 may dual-write body with a shared message id). Default policy is immediate **wake** of that target **Session**. Addressing requires an explicit target session id (see [ADR 0002](../adr/0002-agent-collaboration-session-addressing.md)).
-_Avoid_: Agent-only DM without session, mailbox-as-only-UX, implicit direct-session fallback
+A point-to-point collaboration send from one **Agent** runtime to a concrete **Session**. The **Session** conversation history is the **single source of truth** for collaboration body (user-visible and model context). The **Agent Inbox** keeps only a delivery **index/log** (pointer + status), not a second full body. Default policy is immediate **wake** of that target **Session**. Addressing requires an explicit target session id (see [ADR 0002](../adr/0002-agent-collaboration-session-addressing.md)).
+_Avoid_: Agent-only DM without session, mailbox-as-only-UX, dual-write of body, implicit direct-session fallback
 
 **Agent Inbox**:
-Per-**Agent** durable delivery records for collaboration and system notices (status, audit, pending counts, wake recovery). Not the authoritative body store for collaboration once a message has landed on a **Session**.
-_Avoid_: Primary chat transcript, required user step before reading collab content
+Per-**Agent** durable **delivery index** for collaboration and system notices (status, audit, pending counts, wake recovery, pointers to session messages). **Not** an authoritative body store for new collaboration content.
+_Avoid_: Primary chat transcript, second copy of full collab body, required user step before reading collab content
 
 **Workbench**:
 The terminal shell that lets a user enter major Vibelution modes without remembering command-line flags.
