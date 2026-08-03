@@ -7,6 +7,8 @@ export type ResearchBoardKanbanProps = {
   lang: "zh" | "en";
   columns: ResearchBoardColumn[];
   onOpenCard?: (columnId: string, cardId: string) => void;
+  /** When embedded under ResearchOverviewSurface, the parent already owns the section label. */
+  showSectionLabel?: boolean;
   className?: string;
 };
 
@@ -17,6 +19,7 @@ export function ResearchBoardKanban({
   lang,
   columns,
   onOpenCard,
+  showSectionLabel = false,
   className = "",
 }: ResearchBoardKanbanProps) {
   return (
@@ -26,14 +29,16 @@ export function ResearchBoardKanban({
       data-vui="research-board-kanban"
       aria-label={lang === "zh" ? "阶段看板" : "Stage board"}
     >
-      <div className="flex min-w-0 items-baseline justify-between gap-3 px-0.5">
-        <h3 className="m-0 text-[13px] font-[740] text-[var(--fg-primary)]">
-          {lang === "zh" ? "阶段看板" : "Stage board"}
-        </h3>
-        <span className="text-[12px] text-[var(--fg-tertiary)]">
-          {lang === "zh" ? "卡片只读 · 操作请用上方主按钮" : "Read-only cards · use the primary CTA above"}
-        </span>
-      </div>
+      {showSectionLabel ? (
+        <div className="flex min-w-0 items-baseline justify-between gap-3 px-0.5">
+          <h3 className="m-0 text-[13px] font-[740] text-[var(--fg-primary)]">
+            {lang === "zh" ? "阶段看板" : "Stage board"}
+          </h3>
+          <span className="text-[12px] text-[var(--fg-tertiary)]">
+            {lang === "zh" ? "卡片只读 · 操作请用上方主按钮" : "Read-only cards · use the primary CTA above"}
+          </span>
+        </div>
+      ) : null}
       <div className="grid min-w-0 grid-cols-1 items-start gap-3 md:grid-cols-3">
         {columns.map((column) => (
           <VSurface
@@ -41,7 +46,7 @@ export function ResearchBoardKanban({
             tone="inset"
             elevation="flat"
             padding="compact"
-            className="grid min-h-[280px] min-w-0 content-start gap-2.5"
+            className="grid min-h-[320px] min-w-0 content-start gap-2.5"
             data-testid={`research-board-column-${column.id}`}
           >
             <div className="flex min-w-0 items-center justify-between gap-2">

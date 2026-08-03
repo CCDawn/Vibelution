@@ -855,7 +855,11 @@ export function TeamsRoute({
   const requestedVisibleTeamId = resolveKnownRouteTeamId(requestedTeamId, visibleTeamIds);
   const requestedVisibleAgentTeamId = requestedAgentTeamId && visibleTeamIds.has(requestedAgentTeamId) ? requestedAgentTeamId : "";
   const selectedVisibleTeamId = selectedTeamId && visibleTeamIds.has(selectedTeamId) ? selectedTeamId : "";
-  const fallbackVisibleTeamId = visibleTeams[0]?.teamId ?? "";
+  // Preview-aligned default: land on challenge-cup research board, not AI-search ops.
+  const fallbackVisibleTeamId =
+    (visibleTeamIds.has(RESEARCH_TEAM_ID) ? RESEARCH_TEAM_ID : "")
+    || visibleTeams[0]?.teamId
+    || "";
   const effectiveTeamId = resolveTeamsRouteEffectiveTeamId({
     forcedTeamId,
     selectedTeamId: selectedVisibleTeamId,
@@ -5889,6 +5893,7 @@ export function TeamsRoute({
     <VDenseOpsPage
       className={styles.route}
       headerClassName={styles.challengeWorkspaceContextHidden}
+      bodyClassName="!flex min-h-0 flex-1 flex-col overflow-hidden"
       data-vui-domain-recipe="teams-organization-workbench"
       ariaLabel={selectedTeamContextTitle}
       eyebrow={lang === "zh" ? "团队" : "Teams"}

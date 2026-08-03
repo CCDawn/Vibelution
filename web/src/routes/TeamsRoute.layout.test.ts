@@ -346,7 +346,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).not.toContain("/api/team-templates/${encodeURIComponent(templateId)}/instantiate");
     expect(routeSource).not.toContain("instantiateTeamTemplateMutation");
     expect(routeSource).toContain("TEAM_PICKER_TEAM_IDS");
-    expect(canvasDataSource).toContain("const TEAM_PICKER_TEAM_IDS = [AI_SEARCH_TEAM_ID, KNOWLEDGE_EXPANSION_TEAM_ID, RESEARCH_TEAM_ID] as const");
+    expect(canvasDataSource).toContain("const TEAM_PICKER_TEAM_IDS = [RESEARCH_TEAM_ID, AI_SEARCH_TEAM_ID, KNOWLEDGE_EXPANSION_TEAM_ID] as const");
     expect(routeSource).toContain("fetchJson<Team>(`/api/teams/${encodeURIComponent(effectiveTeamId)}?detail=${teamDetailLoadMode}`, { signal })");
     expect(routeSource).toContain("queryKeys.agentSummary(false)");
     expect(routeSource).toContain('fetchJson<AgentConfigWorkspaceAgent[]>("/api/agents?detail=summary", { signal })');
@@ -742,6 +742,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("requestedVisibleAgentTeamId");
     expect(routeSource).toContain("selectedVisibleTeamId");
     expect(routeSource).toContain("fallbackVisibleTeamId");
+    expect(routeSource).toContain("visibleTeamIds.has(RESEARCH_TEAM_ID)");
     expect(routeSource).toContain("const hasTeams = visibleTeams.length > 0");
     expect(routeSource).toContain("visibleTeamSummary.activeTeamCount");
     expect(routeSource).toContain("visibleTeams.map((team) => (");

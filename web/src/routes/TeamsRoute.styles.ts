@@ -236,7 +236,7 @@ const styles: Record<string, string> = {
   teamShellContentCanvas:
     "teamShellContentCanvas !flex min-h-0 flex-row overflow-hidden",
   teamShellBoardBody:
-    "teamShellBoardBody !flex min-h-0 flex-1 flex-col content-start gap-3 overflow-auto p-3 [scrollbar-gutter:stable] [&>*]:flex-none",
+    "teamShellBoardBody !flex min-h-0 flex-1 flex-col content-start gap-4 overflow-auto p-4 [scrollbar-gutter:stable] [&>*]:flex-none",
   // Wave 4B: shared PaneResizeHandle visual.,
   inspectorResizeHandle:
     "inspectorResizeHandle max-[900px]:hidden",
