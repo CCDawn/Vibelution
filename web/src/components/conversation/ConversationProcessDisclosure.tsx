@@ -91,7 +91,27 @@ export function processState(
   cells: readonly CodexTranscriptCell[],
   messageOrder?: ReadonlyMap<string, number>,
 ) {
-  if (cells.some((cell) => cell.status === "running" || cell.status === "pending")) {
+  // Prefer unrecovered failures over stale "running" so timeout/fail settle the summary.
+  if (unrecoveredFailedCells(cells, messageOrder).length > 0) {
+    const stillRunning = cells.some((cell) => {
+      if (cell.status !== "running" && cell.status !== "pending") {
+        return false;
+      }
+      // Timed-out rows may briefly keep a running status while summary already says 超时.
+      const haystack = `${cell.summary || ""} ${cell.title || ""}`;
+      return !/超时|timed?\s*out/i.test(haystack);
+    });
+    if (!stillRunning) {
+      return "failed";
+    }
+  }
+  if (cells.some((cell) => {
+    if (cell.status !== "running" && cell.status !== "pending") {
+      return false;
+    }
+    const haystack = `${cell.summary || ""} ${cell.title || ""}`;
+    return !/超时|timed?\s*out/i.test(haystack);
+  })) {
     return "running";
   }
   if (unrecoveredFailedCells(cells, messageOrder).length > 0) {
@@ -133,6 +153,7 @@ export function processLabel(
     ? { completed: "已处理", failed: "工具失败", running: "处理中" }
     : { completed: "Processed", failed: "Tool failed", running: "Processing" };
   const duration = processDuration(cells);
+  // Codex: "已处理 18m 3s" — keep status + duration adjacent without middle-dot.
   const parts = [
     labels[state],
     duration === null ? "" : formatCodexTranscriptDuration(duration),
@@ -144,6 +165,9 @@ export function processLabel(
     } else {
       parts.push(language === "zh" ? "· 展开查看原因" : "· expand for details");
     }
+  } else if (state === "completed" && cells.length >= 3) {
+    // Hint that the disclosure holds a multi-step tool trail.
+    parts.push(language === "zh" ? `· ${cells.length} 步` : `· ${cells.length} steps`);
   }
   return parts.filter(Boolean).join(" ");
 }

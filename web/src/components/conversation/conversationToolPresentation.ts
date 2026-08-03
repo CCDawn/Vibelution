@@ -263,7 +263,8 @@ export function completedToolPresentationSummary({
   const normalizedToolName = String(toolName ?? "").trim().toLowerCase();
   const normalizedStatus = String(status ?? "").trim().toLowerCase();
   const terminalTool = normalizedToolName === "exec_command"
-    || normalizedToolName === "write_stdin";
+    || normalizedToolName === "write_stdin"
+    || normalizedToolName === "cli_tool";
   if (terminalTool && (normalizedStatus === "running" || normalizedStatus === "pending")) {
     return language === "zh" ? "正在运行" : "Running";
   }
@@ -282,6 +283,177 @@ export function completedToolPresentationSummary({
     }
   }
   return "";
+}
+
+const EDIT_TOOL_NAMES = new Set([
+  "apply_patch_tool",
+  "apply_diff_edit_tool",
+  "write_file_tool",
+  "edit_file_tool",
+  "str_replace_tool",
+]);
+
+const SHELL_TOOL_NAMES = new Set([
+  "cli_tool",
+  "exec_command",
+  "write_stdin",
+  "run_terminal_command",
+  "shell_tool",
+]);
+
+function basenamePath(value: string) {
+  const normalized = value.replace(/\\/g, "/").trim();
+  if (!normalized) {
+    return "";
+  }
+  const parts = normalized.split("/").filter(Boolean);
+  return parts.at(-1) || normalized;
+}
+
+function extractToolSubject(options: {
+  toolName: string;
+  toolSummary?: string;
+  cellSummary?: string;
+  resultPreview?: string;
+  displayCommand?: string;
+  filePath?: string;
+}) {
+  const filePath = String(options.filePath || "").trim();
+  if (filePath) {
+    return basenamePath(filePath);
+  }
+  const command = String(options.displayCommand || "").trim();
+  if (command) {
+    return command.length > 72 ? `${command.slice(0, 71).trimEnd()}…` : command;
+  }
+  for (const candidate of [options.toolSummary, options.cellSummary, options.resultPreview]) {
+    const text = String(candidate || "").replace(/\s+/g, " ").trim();
+    if (!text || isLowValueToolResult(text)) {
+      continue;
+    }
+    // Skip raw JSON / protocol noise that is not human-readable subject text.
+    if (text.startsWith("{") || text.startsWith("[") || /^["']?status["']?\s*[:=]/i.test(text)) {
+      continue;
+    }
+    // Prefer path-looking fragments for edit tools.
+    const pathMatch = text.match(/(?:^|[\s`"'])((?:[\w.-]+\/)+[\w.-]+\.[A-Za-z0-9]{1,12})/);
+    if (pathMatch?.[1] && EDIT_TOOL_NAMES.has(options.toolName)) {
+      return basenamePath(pathMatch[1]);
+    }
+    if (text.length > 72) {
+      return `${text.slice(0, 71).trimEnd()}…`;
+    }
+    return text;
+  }
+  return "";
+}
+
+/**
+ * Codex-style one-line tool activity title.
+ * Examples: "已在 12s 内运行 pnpm test", "已编辑 foo.ts", "失败 · 代码图谱".
+ */
+export function formatCodexStyleToolActivityLine(options: {
+  toolName: string;
+  status?: string;
+  language: ConversationToolPresentationLanguage;
+  durationSeconds?: number | null;
+  durationLabel?: string;
+  toolSummary?: string;
+  cellSummary?: string;
+  resultPreview?: string;
+  displayCommand?: string;
+  filePath?: string;
+  timedOut?: boolean;
+}) {
+  const language = options.language;
+  const toolName = String(options.toolName || "").trim().toLowerCase();
+  const status = String(options.status || "").trim().toLowerCase();
+  const label = conversationToolPresentationLabel(toolName, language);
+  let subject = extractToolSubject({
+    toolName,
+    toolSummary: options.toolSummary,
+    cellSummary: options.cellSummary,
+    resultPreview: options.resultPreview,
+    displayCommand: options.displayCommand,
+    filePath: options.filePath,
+  });
+  // Avoid "列出文件 · glob_tool" noise when subject is just the raw tool id / label.
+  const subjectKey = subject.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (
+    !subject
+    || subjectKey === toolName
+    || subjectKey === label.toLowerCase().replace(/[\s-]+/g, "_")
+    || subjectKey.endsWith("_tool")
+  ) {
+    subject = "";
+  }
+  const durationLabel = String(options.durationLabel || "").trim();
+  const isEdit = EDIT_TOOL_NAMES.has(toolName);
+  const isShell = SHELL_TOOL_NAMES.has(toolName);
+  const timedOut = Boolean(options.timedOut)
+    || /超时|timed?\s*out/i.test(`${options.toolSummary || ""} ${options.cellSummary || ""}`);
+
+  if (status === "running" || status === "pending") {
+    if (subject && /^(正在|Running\b)/i.test(subject)) {
+      return subject;
+    }
+    if (isShell && subject) {
+      return language === "zh" ? `正在运行 ${subject}` : `Running ${subject}`;
+    }
+    if (subject) {
+      return language === "zh" ? `正在${label} · ${subject}` : `${label} · ${subject}`;
+    }
+    return language === "zh" ? `正在${label}` : label;
+  }
+
+  if (status === "failed" || timedOut) {
+    const failLabel = timedOut
+      ? (language === "zh" ? "超时" : "Timed out")
+      : (language === "zh" ? "失败" : "Failed");
+    if (subject) {
+      return language === "zh" ? `${failLabel} · ${label} · ${subject}` : `${failLabel} · ${label} · ${subject}`;
+    }
+    return language === "zh" ? `${failLabel} · ${label}` : `${failLabel} · ${label}`;
+  }
+
+  if (isEdit) {
+    if (subject) {
+      return language === "zh" ? `已编辑 ${subject}` : `Edited ${subject}`;
+    }
+    return language === "zh" ? "已编辑文件" : "Edited file";
+  }
+
+  if (isShell) {
+    if (durationLabel && subject) {
+      return language === "zh"
+        ? `已在 ${durationLabel} 内运行 ${subject}`
+        : `Ran ${subject} in ${durationLabel}`;
+    }
+    if (subject) {
+      return language === "zh" ? `已运行 ${subject}` : `Ran ${subject}`;
+    }
+    if (durationLabel) {
+      return language === "zh"
+        ? `已在 ${durationLabel} 内运行命令`
+        : `Ran command in ${durationLabel}`;
+    }
+    return language === "zh" ? "已运行命令" : "Ran command";
+  }
+
+  if (durationLabel && subject) {
+    return language === "zh"
+      ? `已在 ${durationLabel} 内完成 ${label} · ${subject}`
+      : `${label} · ${subject} in ${durationLabel}`;
+  }
+  if (durationLabel) {
+    return language === "zh"
+      ? `已在 ${durationLabel} 内完成 ${label}`
+      : `${label} in ${durationLabel}`;
+  }
+  if (subject) {
+    return language === "zh" ? `${label} · ${subject}` : `${label} · ${subject}`;
+  }
+  return label;
 }
 
 export function conversationToolDetailPresentation({

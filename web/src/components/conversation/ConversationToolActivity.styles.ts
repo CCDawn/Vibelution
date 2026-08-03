@@ -11,6 +11,14 @@ const styles = {
     "grid w-full max-w-full min-w-0 gap-0 border-y border-[color-mix(in_srgb,var(--fg-tertiary)_22%,var(--vui-border-subtle))] py-1.5 my-1 max-h-[min(18rem,42vh)] overflow-y-auto overflow-x-hidden [scrollbar-width:thin] [scrollbar-color:color-mix(in_srgb,var(--fg-tertiary)_35%,transparent)_transparent]",
   ),
   activityRow: cx("activityRow", "w-full max-w-full min-w-0"),
+  group: cx("group", "w-full max-w-full min-w-0 my-1"),
+  groupSummary: cx(
+    "groupSummary",
+    "flex w-full max-w-full min-w-0 cursor-pointer items-baseline gap-x-1.5 py-1 text-left [font-size:var(--vui-font-xs)] leading-[1.45] text-[var(--fg-tertiary)] [&::-webkit-details-marker]:hidden hover:text-[var(--fg-secondary)] focus-visible:rounded-[var(--radius-control)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_42%,transparent)]",
+  ),
+  groupTitle: cx("groupTitle", "min-w-0 font-normal text-[var(--fg-tertiary)]"),
+  groupMeta: cx("groupMeta", "shrink-0 text-[color-mix(in_srgb,var(--fg-tertiary)_82%,transparent)]"),
+  groupDetails: cx("groupDetails", "min-w-0"),
   approvalSlot: cx(
     "approvalSlot",
     "mt-1.5 w-full max-w-[min(42rem,100%)] min-w-[min(20rem,100%)]",

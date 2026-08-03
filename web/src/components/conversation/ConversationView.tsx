@@ -396,6 +396,7 @@ export function ConversationView({
   userAvatarPreset,
   userAvatarImageUrl,
   taskSummary,
+  changedFiles = [],
   defaultFileContext,
   summaryItems,
   stats,
@@ -1941,6 +1942,17 @@ export function ConversationView({
         {finalCells.length > 0 ? (
           <div data-codex-final-response="true">
             {renderTimelineNodes(finalCells, { attachToolApproval: false })}
+          </div>
+        ) : null}
+        {changedFiles.length > 0 ? (
+          <div
+            className={styles.codexTurnChangeBadge}
+            data-codex-turn-change-badge="true"
+            title={changedFiles.slice(0, 12).join("\n")}
+          >
+            {lang === "zh"
+              ? `${changedFiles.length} 个文件已更改`
+              : `${changedFiles.length} file${changedFiles.length === 1 ? "" : "s"} changed`}
           </div>
         ) : null}
       </div>

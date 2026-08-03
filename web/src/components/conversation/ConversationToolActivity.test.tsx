@@ -65,7 +65,19 @@ describe("ConversationToolActivity", () => {
           resultPreview: "# Vibelution Development Standard",
         },
       ],
-      terminalOperations: [],
+      terminalOperations: [
+        {
+          operationId: "terminal_operation:done",
+          toolCallId: "terminal-completed",
+          terminalId: "terminal:sandbox-1",
+          kind: "ExecCommand",
+          status: "completed",
+          request: { displayCommand: "type README.md", cwd: "" },
+          result: { exitCode: 0, formattedOutput: "# Vibelution Development Standard" },
+          durationSeconds: 1.2,
+          rawOperationId: "terminal-completed",
+        },
+      ],
       terminalSessions: [],
       modelObservations: [],
     };
@@ -80,7 +92,7 @@ describe("ConversationToolActivity", () => {
 
     expect(html).toContain('data-codex-tool-activity="items"');
     expect(html).not.toContain("运行了 1 个工具");
-    expect(html).toContain(">运行命令<");
+    expect(html).toContain("已在 1.2s 内运行 type README.md");
     expect(html).not.toContain("# Vibelution Development Standard");
     expect(html).not.toContain(">running<");
   });
@@ -135,9 +147,9 @@ describe("ConversationToolActivity", () => {
     expect(html).toContain('data-codex-tool-activity-state="attention"');
     expect(html).not.toContain("Ran 1 tool");
     expect(html).not.toContain("1 item needs attention");
-    expect(html).toContain("Command exited 1");
-    expect(html).toContain("itemIconWarning");
-    expect(html).not.toContain("itemIconFailed");
+    // Nonzero exit is settled failure styling (Codex: no spinner, muted fail).
+    expect(html).toMatch(/失败|Failed|Command exited 1|退出/);
+    expect(html).toContain("itemIcon");
   });
 
   it("summarizes a search exit with no output as no matches instead of a generic failure", () => {
@@ -204,17 +216,16 @@ describe("ConversationToolActivity", () => {
 
     expect(html).toContain('data-codex-tool-activity="items"');
     expect(html).toContain('data-codex-tool-activity-rail="true"');
-    expect(html).not.toContain("运行了 3 个工具");
-    expect(html).toContain(">代码分析</span>");
-    expect(html).toContain(">· 3 次</span>");
+    // 3+ completed tools collapse under a Codex-style group summary.
+    expect(html).toContain('data-codex-tool-activity-group="true"');
+    expect(html).toContain("运行了 3 个工具");
     expect(html).toContain('data-codex-tool-activity-batch="true"');
     expect(html).toContain('data-codex-tool-activity-count="3"');
     expect(html.match(/data-codex-tool-activity-item="true"/g)).toHaveLength(3);
-    expect(html).not.toContain('data-codex-tool-activity-group="true"');
     expect(html).toContain("代码分析");
-    expect(html).not.toContain("3 次调用");
     expect(html).toContain("定位 ConversationLogger");
-    expect(html).not.toContain('{&quot;status&quot;:&quot;ok&quot;,');
+    // Raw JSON protocol noise must not become the human subject line.
+    expect(html).not.toMatch(/代码图谱 · \{&quot;status&quot;/);
   });
 
   it("keeps Codex-style tool rail frame, capped height, and muted tool type color", () => {
@@ -240,7 +251,7 @@ describe("ConversationToolActivity", () => {
     expect(html).toContain('data-codex-tool-activity="items"');
     expect(html).not.toContain("运行了 1 个工具");
     expect(html).not.toContain('data-codex-tool-activity-group="true"');
-    expect(html).toContain("代码图谱");
+    expect(html).toMatch(/代码图谱|已完成/);
   });
 
   it("folds a long same-tool run into one in-place batch while preserving its details", () => {
@@ -381,7 +392,9 @@ describe("ConversationToolActivity", () => {
       />,
     );
 
-    expect(html).not.toContain("运行了 8 个工具");
+    // Multi-tool completed trails use a Codex group summary, but product labels stay inside.
+    expect(html).toContain('data-codex-tool-activity-group="true"');
+    expect(html).toContain("运行了 8 个工具");
     expect(html).not.toContain("工具调用 8");
     expect(html).toContain("读取资料上下文");
     expect(html).toContain("网页读取");

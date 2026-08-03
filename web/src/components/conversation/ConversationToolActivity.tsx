@@ -4,14 +4,14 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties, type Reac
 import "./ConversationToolActivity.css";
 import type { CodexTranscriptCell } from "./codexTranscriptCells";
 import {
+  codexTranscriptToolDurationSeconds,
   codexTranscriptToolRawName,
+  formatCodexTranscriptDuration,
   type CodexTranscriptToolActivity,
 } from "./conversationToolActivityModel";
 import {
-  conversationToolRendererLabel,
-} from "./conversationToolRendererRegistry";
-import {
   completedToolPresentationSummary,
+  formatCodexStyleToolActivityLine,
   type ConversationToolPresentationLanguage,
 } from "./conversationToolPresentation";
 import {
@@ -97,23 +97,68 @@ function useStaggeredDetails(openByDefault: boolean) {
   };
 }
 
-function visibleToolSummary(cell: CodexTranscriptCell, language: ConversationToolPresentationLanguage) {
-  const exitCode = conversationToolActivityTerminalExitCode(cell);
-  if (exitCode !== null && exitCode !== 0) {
-    return language === "zh" ? `命令退出 ${exitCode}` : `Command exited ${exitCode}`;
-  }
+function cellLooksTimedOut(cell: CodexTranscriptCell) {
+  const haystack = [
+    cell.summary,
+    cell.title,
+    cell.text,
+    cell.toolLifecycleModel?.toolCalls?.[0]?.summary,
+    cell.toolLifecycleModel?.toolCalls?.[0]?.resultPreview,
+  ].map((value) => String(value || "")).join("\n");
+  return /超时|timed?\s*out/i.test(haystack);
+}
+
+function isSettledFailedCell(cell: CodexTranscriptCell) {
+  return cell.status === "failed"
+    || cell.tone === "error"
+    || cellLooksTimedOut(cell);
+}
+
+function codexStyleToolLine(cell: CodexTranscriptCell, language: ConversationToolPresentationLanguage) {
   const toolCall = cell.toolLifecycleModel?.toolCalls?.[0];
-  if (cell.status === "completed" && toolCall?.runtimeKind === "terminal") {
-    return "";
+  const terminal = cell.toolLifecycleModel?.terminalOperations?.[0];
+  const durationSeconds = codexTranscriptToolDurationSeconds(cell);
+  const exitCode = conversationToolActivityTerminalExitCode(cell);
+  const status = isSettledFailedCell(cell)
+    ? "failed"
+    : exitCode !== null && exitCode !== 0
+      ? "failed"
+      : cell.status;
+  const displayCommand = String(
+    terminal?.request?.displayCommand
+    || (Array.isArray(terminal?.request?.command) ? terminal?.request?.command.join(" ") : "")
+    || "",
+  ).trim();
+  const toolName = codexTranscriptToolRawName(cell);
+  const durationLabel = durationSeconds === null ? "" : formatCodexTranscriptDuration(durationSeconds);
+  // Preserve structured code-graph semantic titles (搜索/检查 …).
+  if (toolName.trim().toLowerCase() === "code_symbol_tool" && status === "completed") {
+    const semantic = completedToolPresentationSummary({
+      toolSummary: toolCall?.summary,
+      cellSummary: cell.summary,
+      resultPreview: toolCall?.resultPreview,
+      cellText: cell.text,
+      toolName,
+      status,
+      language,
+    });
+    if (semantic && /^(搜索|检查|Search |Inspect )/i.test(semantic)) {
+      return durationLabel
+        ? (language === "zh" ? `已在 ${durationLabel} 内${semantic}` : `${semantic} in ${durationLabel}`)
+        : semantic;
+    }
   }
-  return completedToolPresentationSummary({
+  return formatCodexStyleToolActivityLine({
+    toolName,
+    status,
+    language,
+    durationSeconds,
+    durationLabel,
     toolSummary: toolCall?.summary,
     cellSummary: cell.summary,
-    resultPreview: toolCall?.resultPreview,
-    cellText: cell.text,
-    toolName: codexTranscriptToolRawName(cell),
-    status: cell.status,
-    language,
+    resultPreview: toolCall?.resultPreview || cell.text,
+    displayCommand,
+    timedOut: cellLooksTimedOut(cell) || Boolean(terminal?.result?.timedOut),
   });
 }
 
@@ -125,11 +170,11 @@ function ToolStatusIcon({
   language: ConversationToolPresentationLanguage;
 }) {
   const descriptor = conversationToolActivityRendererForCell(cell, language);
+  if (isSettledFailedCell(cell)) {
+    return <CircleAlert className={`${styles.itemIcon} ${styles.itemIconFailed}`} size={15} />;
+  }
   if (cell.status === "running" || cell.status === "pending") {
     return <LoaderCircle className={`${styles.itemIcon} ${styles.itemIconRunning} animate-spin`} size={15} />;
-  }
-  if (cell.status === "failed") {
-    return <CircleAlert className={`${styles.itemIcon} ${styles.itemIconFailed}`} size={15} />;
   }
   if (conversationToolActivityHasNonzeroTerminalExit(cell)) {
     return <CircleAlert className={`${styles.itemIcon} ${styles.itemIconWarning}`} size={15} />;
@@ -151,18 +196,14 @@ function ToolActivityItem({
   renderToolDetails: ConversationToolActivityProps["renderToolDetails"];
 }) {
   const toolName = codexTranscriptToolRawName(cell);
-  const baseTitle = conversationToolRendererLabel(toolName, language);
-  const summary = conversationToolActivityIsNoMatchTerminalExit(cell)
+  const title = conversationToolActivityIsNoMatchTerminalExit(cell)
     ? (language === "zh" ? "未找到匹配项" : "No matches found")
-    : visibleToolSummary(cell, language);
-  const useSemanticCodeTitle = toolName.trim().toLowerCase() === "code_symbol_tool"
-    && /^(搜索|检查|Search |Inspect )/.test(summary);
-  const title = useSemanticCodeTitle ? summary : baseTitle;
-  const preview = useSemanticCodeTitle ? "" : summary;
+    : codexStyleToolLine(cell, language);
   const detailsId = `codex-tool-detail-${cell.id}`;
   const details = renderToolDetails(cell, detailsId);
   const expandable = details !== null && details !== undefined && details !== false;
-  const openByDefault = cell.status === "running" || cell.status === "pending";
+  const openByDefault = !isSettledFailedCell(cell)
+    && (cell.status === "running" || cell.status === "pending");
   const label = language === "zh"
     ? `展开或收起工具结果：${title}`
     : `Expand or collapse tool results: ${title}`;
@@ -170,8 +211,7 @@ function ToolActivityItem({
     <>
       <ToolStatusIcon cell={cell} language={language} />
       <span className={styles.itemBody}>
-        <span className={styles.itemTitle}>{title}</span>
-        {preview ? <span className={styles.itemPreview}>{preview}</span> : null}
+        <span className={styles.itemTitle} title={title}>{title}</span>
       </span>
     </>
   );
@@ -264,24 +304,17 @@ function ToolActivityBatch({
   );
 }
 
-export function ConversationToolActivity({
-  activity,
+function ToolActivityRows({
+  items,
   language,
   renderToolDetails,
-  approvalSlot = null,
-}: ConversationToolActivityProps) {
-  const items = buildConversationToolActivityPresentation(activity.cells, language);
-  const digest = buildConversationToolActivityDigestPresentation(activity.cells, language);
+}: {
+  items: ConversationToolActivityPresentationItem[];
+  language: ConversationToolPresentationLanguage;
+  renderToolDetails: ConversationToolActivityProps["renderToolDetails"];
+}) {
   return (
-    <div
-      className={styles.activity}
-      data-codex-tool-activity="items"
-      data-codex-tool-activity-rail="true"
-      data-codex-tool-activity-state={digest.state}
-      data-codex-tool-activity-count={digest.count}
-      data-codex-tool-activity-attention-count={digest.attentionCount || undefined}
-      data-codex-tool-approval-attached={approvalSlot ? "true" : undefined}
-    >
+    <>
       {items.map((item) => (
         <div key={item.id} className={styles.activityRow}>
           {item.kind === "batch" ? (
@@ -291,11 +324,80 @@ export function ConversationToolActivity({
           )}
         </div>
       ))}
+    </>
+  );
+}
+
+export function ConversationToolActivity({
+  activity,
+  language,
+  renderToolDetails,
+  approvalSlot = null,
+}: ConversationToolActivityProps) {
+  const items = buildConversationToolActivityPresentation(activity.cells, language);
+  const digest = buildConversationToolActivityDigestPresentation(activity.cells, language);
+  const railRef = useRef<HTMLDivElement | null>(null);
+  const isRunning = digest.state === "running";
+  // Codex: multi-tool completed groups collapse under a one-line summary title.
+  const collapsibleGroup = digest.count >= 3 && digest.state !== "running";
+  const groupDetails = useStaggeredDetails(isRunning || digest.state === "attention");
+
+  useEffect(() => {
+    if (!isRunning || !railRef.current) {
+      return;
+    }
+    const node = railRef.current;
+    node.scrollTop = node.scrollHeight;
+  }, [isRunning, activity.cells.length, digest.count]);
+
+  const list = (
+    <div
+      ref={railRef}
+      className={styles.activity}
+      data-codex-tool-activity="items"
+      data-codex-tool-activity-rail="true"
+      data-codex-tool-activity-state={digest.state}
+      data-codex-tool-activity-count={digest.count}
+      data-codex-tool-activity-attention-count={digest.attentionCount || undefined}
+      data-codex-tool-approval-attached={approvalSlot ? "true" : undefined}
+    >
+      <ToolActivityRows items={items} language={language} renderToolDetails={renderToolDetails} />
       {approvalSlot ? (
         <div className={styles.approvalSlot} data-codex-tool-approval-inline="true">
           {approvalSlot}
         </div>
       ) : null}
     </div>
+  );
+
+  if (!collapsibleGroup) {
+    return list;
+  }
+
+  const groupTitle = digest.meta
+    ? `${digest.title} · ${digest.meta}`
+    : digest.title;
+  const groupLabel = language === "zh"
+    ? `展开或收起连续工具调用：${groupTitle}`
+    : `Expand or collapse continuous tool calls: ${groupTitle}`;
+
+  return (
+    <details
+      className={styles.group}
+      data-codex-tool-activity-group="true"
+      data-codex-tool-activity-count={digest.count}
+      data-closing={groupDetails.isClosing || undefined}
+      open={groupDetails.isOpen}
+    >
+      <summary className={styles.groupSummary} aria-label={groupLabel} onClick={groupDetails.onSummaryClick}>
+        <span className={styles.groupTitle}>{groupTitle}</span>
+        {digest.attentionLabel ? (
+          <span className={styles.groupMeta}>· {digest.attentionLabel}</span>
+        ) : null}
+      </summary>
+      <div className={styles.groupDetails}>
+        {list}
+      </div>
+    </details>
   );
 }

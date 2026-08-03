@@ -49,6 +49,8 @@ describe("ConversationProcessDisclosure", () => {
     expect(html).not.toContain('open=""');
     expect(html).toContain("已处理 2.9s");
     expect(html).not.toContain("个阶段");
+    // Single-step trails do not append "· N 步".
+    expect(html).not.toContain("· 1 步");
     // SSR keeps canonical transcript evidence inspectable; the browser client
     // lazily mounts this subtree only after an explicit expansion.
     expect(html).toContain("处理记录内容");
