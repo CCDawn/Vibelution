@@ -1203,6 +1203,78 @@ def _reconcile_source_collection_stage_session_task_sources(team_id: str, run_id
         next_result["materializedCandidateGraph"] = materialized_graph
         changed = True
 
+    existing_ingestion_summary = (
+        writeback.get("materializedKnowledgeIngestion")
+        if isinstance(writeback.get("materializedKnowledgeIngestion"), dict)
+        else {}
+    )
+    existing_ingestion_status = s._trim_text(
+        existing_ingestion_summary.get("status"), max_length=80
+    ).lower()
+    can_reconcile_ingestion = (
+        s._source_collection_stage_can_materialize_formal_knowledge(
+            s._normalize_source_collection_stage_id(task.get("stageId"), default=""),
+            s._normalize_source_collection_agent_role(task.get("agentRole")),
+        )
+    )
+    has_approved_ingestion_candidates = bool(
+        s._source_collection_stage_writeback_approved_candidate_ids(result, writeback)
+    )
+    if (
+        can_reconcile_ingestion
+        and has_approved_ingestion_candidates
+        and existing_ingestion_status
+        in {
+            "",
+            "no_steward_pack",
+            "source_quality_pending",
+            "no_current_run_candidates",
+        }
+    ):
+        materialized_ingestion = s._materialize_source_collection_stage_writeback_knowledge_ingestion(
+            team_id,
+            run_id,
+            task,
+            writeback,
+        )
+        next_writeback["materializedKnowledgeIngestion"] = materialized_ingestion
+        next_result["materializedKnowledgeIngestion"] = materialized_ingestion
+        changed = True
+        s._record_workflow_event(
+            "source_collection.stage_session_task_knowledge_ingestion_reconciled",
+            team_id,
+            fields={
+                "runId": run_id,
+                "taskId": s._trim_text(task.get("taskId"), max_length=160),
+                "stageId": s._trim_text(task.get("stageId"), max_length=80),
+                "agentId": s._trim_text(task.get("agentId"), max_length=160),
+                "previousStatus": existing_ingestion_status or "missing",
+                "status": s._trim_text(
+                    materialized_ingestion.get("status"), max_length=80
+                ),
+                "approvedCandidateCount": s._source_collection_count(
+                    materialized_ingestion.get("approvedCandidateCount")
+                ),
+                "formalKnowledgeItemCount": s._source_collection_count(
+                    materialized_ingestion.get("formalKnowledgeItemCount")
+                ),
+            },
+            level=(
+                "warning"
+                if s._trim_text(materialized_ingestion.get("status"), max_length=80)
+                == "failed"
+                else "info"
+            ),
+            outcome=(
+                s._trim_text(materialized_ingestion.get("status"), max_length=80)
+                or "reconciled"
+            ),
+            lifecycle=(
+                s._trim_text(materialized_ingestion.get("status"), max_length=80)
+                == "failed"
+            ),
+        )
+
     if not changed:
         return task
     next_task["writeback"] = next_writeback
