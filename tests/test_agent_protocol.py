@@ -187,47 +187,73 @@ def test_supervised_system_prompt_excludes_global_git_and_runtime_diagnostics():
     assert captured["excluded_sections"] == ["GIT_MEMORY", "RUNTIME_LOG_INDEX"]
 
 
-def test_initial_prompt_reuse_requires_unchanged_git_and_runtime_state():
-    initial_git_state = SimpleNamespace(
-        available=True,
-        head_rev="abc",
-        indexed_head_rev="abc",
-        dirty=False,
-        snapshot_id="snapshot-1",
-        error=None,
-    )
-    same_git_state = SimpleNamespace(**vars(initial_git_state))
-    changed_git_state = SimpleNamespace(**{**vars(initial_git_state), "head_rev": "def"})
-    dirty_git_state = SimpleNamespace(**{**vars(initial_git_state), "dirty": True})
-
-    assert agent_module._can_reuse_initial_prompt(
-        pending=True,
-        initial_git_state=initial_git_state,
-        current_git_state=same_git_state,
-        initial_runtime_state_memory_key="runtime-1",
+def test_system_prompt_reuse_follows_runtime_state_key_not_git():
+    # Git is tool-driven; system prompt may be reused across iterations while runtime key is stable.
+    assert agent_module._can_reuse_system_prompt(
+        has_cached_prompt=True,
+        prompt_built_with_runtime_key="runtime-1",
         current_runtime_state_memory_key="runtime-1",
     )
-    assert not agent_module._can_reuse_initial_prompt(
-        pending=True,
-        initial_git_state=initial_git_state,
-        current_git_state=changed_git_state,
-        initial_runtime_state_memory_key="runtime-1",
+    assert not agent_module._can_reuse_system_prompt(
+        has_cached_prompt=False,
+        prompt_built_with_runtime_key="runtime-1",
         current_runtime_state_memory_key="runtime-1",
     )
-    assert not agent_module._can_reuse_initial_prompt(
-        pending=True,
-        initial_git_state=dirty_git_state,
-        current_git_state=dirty_git_state,
-        initial_runtime_state_memory_key="runtime-1",
-        current_runtime_state_memory_key="runtime-1",
-    )
-    assert not agent_module._can_reuse_initial_prompt(
-        pending=True,
-        initial_git_state=initial_git_state,
-        current_git_state=same_git_state,
-        initial_runtime_state_memory_key="runtime-1",
+    assert not agent_module._can_reuse_system_prompt(
+        has_cached_prompt=True,
+        prompt_built_with_runtime_key="runtime-1",
         current_runtime_state_memory_key="runtime-2",
     )
+    # Legacy helper still works for older call sites.
+    assert agent_module._can_reuse_initial_prompt(
+        pending=True,
+        initial_runtime_state_memory_key="runtime-1",
+        current_runtime_state_memory_key="runtime-1",
+    )
+    assert agent_module._can_reuse_initial_prompt(
+        pending=True,
+        initial_git_state=SimpleNamespace(dirty=True, available=False),
+        current_git_state=SimpleNamespace(dirty=True, available=False, head_rev="other"),
+        initial_runtime_state_memory_key="runtime-1",
+        current_runtime_state_memory_key="runtime-1",
+    )
+
+
+def test_runtime_state_memory_sync_is_dirty_flagged(monkeypatch):
+    agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+    agent._runtime_state_memory_dirty = False
+    agent._last_runtime_state_memory = ""
+    agent._last_runtime_state_memory_key = ""
+    agent._carryover_state_memory = ""
+    agent.prompt_manager = SimpleNamespace(
+        update_state_memory=lambda *a, **k: None,
+        clear_state_memory=lambda *a, **k: None,
+    )
+    renders = {"count": 0}
+
+    monkeypatch.setattr(
+        agent_module,
+        "get_session_state",
+        lambda: SimpleNamespace(
+            render_dialogue_runtime_observations=lambda: (
+                renders.__setitem__("count", renders["count"] + 1) or "obs"
+            )
+        ),
+    )
+    monkeypatch.setattr(agent, "_is_restart_focus_mode", lambda: False)
+    monkeypatch.setattr(agent_module, "compose_state_memory", lambda **kwargs: kwargs.get("runtime_summary") or "")
+    monkeypatch.setattr(agent_module, "build_state_memory_key", lambda summary: f"key:{summary}")
+
+    agent._sync_runtime_state_memory()
+    assert renders["count"] == 0
+
+    agent._mark_runtime_state_memory_dirty()
+    agent._sync_runtime_state_memory()
+    assert renders["count"] == 1
+    assert agent._runtime_state_memory_dirty is False
+
+    agent._sync_runtime_state_memory(force=True)
+    assert renders["count"] == 2
 
 
 def test_direct_chat_prompt_build_excludes_global_runtime_log_index():
@@ -2348,7 +2374,7 @@ class TestToolMessageFlow:
 
         agent._get_mode_policy = lambda: policy
         agent.is_mental_model_enabled_for_turn = lambda: False
-        agent._sync_runtime_state_memory = lambda: None
+        agent._sync_runtime_state_memory = lambda force=False: None
         agent._seed_runtime_agent_context_for_turn = lambda run_id: None
         agent._raise_if_turn_stop_requested = lambda: None
         agent._create_round_state = lambda: round_state
@@ -2621,7 +2647,7 @@ class TestToolMessageFlow:
 
         agent._get_mode_policy = lambda: policy
         agent.is_mental_model_enabled_for_turn = lambda: False
-        agent._sync_runtime_state_memory = lambda: None
+        agent._sync_runtime_state_memory = lambda force=False: None
         agent._seed_runtime_agent_context_for_turn = lambda run_id: None
         agent._raise_if_turn_stop_requested = lambda: None
         agent._create_round_state = lambda: round_state
@@ -2927,7 +2953,7 @@ class TestToolMessageFlow:
 
         agent._get_mode_policy = lambda: policy
         agent.is_mental_model_enabled_for_turn = lambda: False
-        agent._sync_runtime_state_memory = lambda: None
+        agent._sync_runtime_state_memory = lambda force=False: None
         agent._seed_runtime_agent_context_for_turn = lambda run_id: None
         agent._raise_if_turn_stop_requested = lambda: None
         agent._create_round_state = lambda: round_state
@@ -5575,7 +5601,8 @@ class TestLocalProviderBootstrap:
         agent._last_runtime_state_memory_key = ""
         agent._force_disable_tools_for_turn = True
         agent._compression_min_iteration_gap = 0
-        agent._sync_runtime_state_memory = lambda: None
+        agent._runtime_state_memory_dirty = False
+        agent._sync_runtime_state_memory = lambda force=False: None
         agent._seed_runtime_agent_context_for_turn = lambda run_id=None: None
         agent._refresh_retrospective_state_memory = lambda: None
         agent._current_turn_stop_reason = lambda: None
@@ -5601,9 +5628,12 @@ class TestLocalProviderBootstrap:
 
         def fake_compress(messages, iteration, reason=""):
             compress_calls.append((iteration, reason, len(messages)))
+            # Match real compress path: only then does the main loop append a runtime notice.
+            agent._last_context_compression_applied = True
             return list(messages[:2]), False
 
-        def fake_estimate(messages):
+        def fake_estimate(messages, threshold=None):
+            # Gate helper and precise estimator share this stub in the test.
             return 500 if compress_calls else 801
 
         class DummyUI:
@@ -5647,6 +5677,7 @@ class TestLocalProviderBootstrap:
         monkeypatch.setattr(agent_module, "logger", DummyLogger())
         monkeypatch.setattr(agent_module._debug_logger, "turn_end", lambda *_args, **_kwargs: None)
         monkeypatch.setattr(agent_module, "estimate_messages_tokens", fake_estimate)
+        monkeypatch.setattr(agent_module, "estimate_messages_tokens_for_threshold", fake_estimate)
         monkeypatch.setattr(agent_module, "get_session_state", lambda: SimpleNamespace(
             set_runtime_goal_packet=lambda _packet: None,
             reset_runtime_constraints=lambda: None,
@@ -6734,7 +6765,7 @@ class TestRuntimeStateMemoryFlow:
 
         agent.prompt_manager = DummyPromptManager()
         agent.git_memory = SimpleNamespace(refresh_git_memory=lambda force=False: None)
-        agent._sync_runtime_state_memory = lambda: None
+        agent._sync_runtime_state_memory = lambda force=False: None
         agent._system_prompt_written = False
         scene_events = []
 
@@ -6801,7 +6832,7 @@ class TestRuntimeStateMemoryFlow:
         agent._allow_session_subagent_auto_delegation = False
         agent.prompt_manager = DummyPromptManager()
         agent.git_memory = SimpleNamespace(refresh_git_memory=lambda force=False: None)
-        agent._sync_runtime_state_memory = lambda: None
+        agent._sync_runtime_state_memory = lambda force=False: None
         agent._system_prompt_written = False
         raw_user_message = "分析项目里为什么每次发送都很慢"
 
@@ -6852,7 +6883,7 @@ class TestRuntimeStateMemoryFlow:
 
         agent.prompt_manager = DummyPromptManager()
         agent.git_memory = SimpleNamespace(refresh_git_memory=lambda force=False: None)
-        agent._sync_runtime_state_memory = lambda: None
+        agent._sync_runtime_state_memory = lambda force=False: None
         agent._system_prompt_written = False
 
         monkeypatch.setattr(agent_module, "get_ui", lambda: SimpleNamespace())

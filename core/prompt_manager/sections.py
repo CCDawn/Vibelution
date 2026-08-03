@@ -459,7 +459,10 @@ def make_memory_section(ctx: BuildContext) -> SystemPromptSection:
 
 
 def make_git_memory_section() -> SystemPromptSection:
-    """Git 变化记忆章节 — 每轮读取最近变化与当前脏区。"""
+    """Git 变化记忆章节 — 仅使用已缓存事实，不主动扫 git。
+
+    实时 worktree 状态由 Agent 主动调用 git 工具刷新；主循环不再每轮自动 scan。
+    """
 
     def compute() -> Optional[str]:
         try:
@@ -473,7 +476,7 @@ def make_git_memory_section() -> SystemPromptSection:
         compute=compute,
         cache_break=True,
         priority=35,
-        description="Git 事实变化、当前脏区、关注实体与最近验证摘要",
+        description="缓存中的 Git 事实（工具刷新后才更新；不隐式 scan）",
     )
 
 

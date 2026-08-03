@@ -254,13 +254,41 @@ class GitMemoryService:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_git_entity_change_ref ON GitEntityChange(entity_ref)")
 
     def _run_git(self, args: List[str]) -> subprocess.CompletedProcess[str]:
-        return git_process.run_git(
-            args,
-            cwd=str(self._project_root),
-            capture_output=True,
-            text=True,
-            timeout=20,
-        )
+        # Git scans are tool-driven (or startup prewarm). Timeouts must degrade to an
+        # unavailable CompletedProcess, never raise TimeoutExpired into callers.
+        try:
+            return git_process.run_git(
+                args,
+                cwd=str(self._project_root),
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+        except subprocess.TimeoutExpired as exc:
+            timeout_seconds = getattr(exc, "timeout", 20)
+            cmd_preview = " ".join(str(part) for part in list(args or [])[:8])
+            debug_logger.warning(
+                "[GitMemory] git 命令超时，降级为不可用状态："
+                f"timeout={timeout_seconds}s cmd={cmd_preview!r}"
+            )
+            return subprocess.CompletedProcess(
+                args=list(args or []),
+                returncode=-1,
+                stdout="",
+                stderr=f"git command timed out after {timeout_seconds}s: {cmd_preview}".strip(),
+            )
+        except OSError as exc:
+            cmd_preview = " ".join(str(part) for part in list(args or [])[:8])
+            debug_logger.warning(
+                "[GitMemory] git 命令失败，降级为不可用状态："
+                f"{type(exc).__name__}: {exc} cmd={cmd_preview!r}"
+            )
+            return subprocess.CompletedProcess(
+                args=list(args or []),
+                returncode=-1,
+                stdout="",
+                stderr=f"git command failed: {type(exc).__name__}: {exc}",
+            )
 
     def is_git_available(self) -> tuple[bool, Optional[str]]:
         try:
@@ -803,22 +831,39 @@ class GitMemoryService:
             rows = cursor.fetchall()
         return [dict(row) for row in rows]
 
-    def get_current_attention_context(self) -> AttentionContext:
+    def get_current_attention_context(self, *, allow_scan: bool = False) -> AttentionContext:
+        """Build attention context from cache.
+
+        By default does **not** run git. Callers that need a live worktree view must
+        refresh first (tools call ``refresh_git_memory``) or pass ``allow_scan=True``.
+        """
         session = get_session_state()
-        snapshot = self._last_snapshot or self.scan_working_tree(store=False)
+        snapshot = self._last_snapshot
+        if snapshot is None and allow_scan:
+            snapshot = self.scan_working_tree(store=False)
         attention = session.get_attention_snapshot()
         recent_changes = self.get_recent_project_changes(limit=5)
+        if snapshot is not None:
+            dirty_summary = self._dirty_summary(snapshot)
+        else:
+            dirty_summary = str(attention.get("dirty_summary") or "").strip() or "未扫描（请调用 git 状态工具）"
         return AttentionContext(
             modified_paths=attention["modified_paths"],
             modified_entities=attention["modified_entities"],
-            dirty_summary=self._dirty_summary(snapshot),
+            dirty_summary=dirty_summary,
             last_validation_summary=attention.get("last_validation_summary"),
             recent_changes=recent_changes,
         )
 
     def format_prompt_context(self) -> str:
+        """Cached git facts only — never scans. Empty when never refreshed by a tool/prewarm."""
         state = self._last_state
-        attention = self.get_current_attention_context()
+        if self._last_snapshot is None and (
+            not state
+            or (not state.available and str(state.error or "").strip() in {"", "not_initialized"})
+        ):
+            return ""
+        attention = self.get_current_attention_context(allow_scan=False)
         session_snapshot = get_session_state().get_attention_snapshot()
         lines = ["## Git Memory"]
         if not state.available:
@@ -860,11 +905,17 @@ class GitMemoryService:
         return json.dumps(payload, ensure_ascii=False, indent=2)
 
     def build_worktree_status_bundle(self, limit: int = 5) -> Dict[str, str]:
-        """Build status summary and worktree snapshot from one working-tree scan."""
+        """Build status summary and worktree snapshot from cached (or just-refreshed) state.
+
+        Callers that need a live scan must call ``refresh_git_memory`` first (tools do).
+        """
 
         normalized_limit = max(1, min(int(limit or 5), 10))
         session = get_session_state()
-        snapshot = self._last_snapshot or self.scan_working_tree(store=False)
+        snapshot = self._last_snapshot
+        if snapshot is None:
+            snapshot = self.scan_working_tree(store=False)
+            self._last_snapshot = snapshot
         attention = session.get_attention_snapshot()
         recent_changes = self.get_recent_project_changes(limit=normalized_limit)
         status_payload = {
@@ -887,7 +938,10 @@ class GitMemoryService:
         }
 
     def explain_current_worktree(self) -> str:
-        snapshot = self._last_snapshot or self.scan_working_tree(store=False)
+        snapshot = self._last_snapshot
+        if snapshot is None:
+            snapshot = self.scan_working_tree(store=False)
+            self._last_snapshot = snapshot
         return json.dumps(asdict(snapshot), ensure_ascii=False, indent=2)
 
     def open_evolution_transaction(self, summary: str = "") -> str:

@@ -236,6 +236,39 @@ class TestEstimateMessagesTokens:
         finally:
             token_manager._estimate_messages_tokens_uncached = original
 
+    def test_estimate_messages_tokens_for_threshold_skips_precise_when_far_under(self):
+        from tools import token_manager
+        from tools.token_manager import (
+            estimate_messages_tokens_for_threshold,
+            rough_upper_bound_messages_tokens,
+        )
+
+        calls = {"n": 0}
+        original = token_manager._estimate_messages_tokens_uncached
+
+        def counting(messages):
+            calls["n"] += 1
+            return original(messages)
+
+        token_manager._estimate_messages_tokens_uncached = counting
+        token_manager._estimate_cache_fingerprint = ()
+        token_manager._estimate_cache_value = 0
+        try:
+            messages = [FakeMessage("short")]
+            rough = rough_upper_bound_messages_tokens(messages)
+            assert rough > 0
+            value = estimate_messages_tokens_for_threshold(messages, threshold=rough)
+            assert value == rough
+            assert calls["n"] == 0, "far under threshold must not run precise estimator"
+
+            # At/over rough upper bound, fall back to precise path.
+            precise = estimate_messages_tokens_for_threshold(messages, threshold=rough - 1)
+            assert precise > 0
+            assert calls["n"] == 1
+            assert precise <= rough
+        finally:
+            token_manager._estimate_messages_tokens_uncached = original
+
     def test_estimate_messages_with_none_content(self):
         """测试内容为 None 的消息"""
         msg = FakeMessage(None)
