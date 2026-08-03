@@ -312,12 +312,17 @@ describe("ConversationToolActivity", () => {
     expect(styles.itemSummary).toContain("w-full");
     expect(styles.itemSummary).toContain("max-w-full");
     expect(styles.itemSummary).toContain("items-center");
+    expect(styles.itemSummary).toContain("list-none");
+    expect(styles.itemSummary).toContain("[&::marker]:content-none");
     expect(styles.itemSummary).not.toContain("grid-cols-[17px_minmax(0,1fr)_16px]");
     expect(styles.batchSummary).toContain("items-center");
+    expect(styles.batchSummary).toContain("list-none");
     expect(activityCss).toContain(".vui-components-conversation-tool-activity.batch:not([open])");
     expect(activityCss).toContain(".vui-components-conversation-tool-activity.itemDetails:not([open])");
     expect(activityCss).toContain("> .vui-components-conversation-tool-activity.batchDetails");
     expect(activityCss).toContain("> .vui-components-conversation-tool-activity.itemDetailsBody");
+    expect(activityCss).toContain("::-webkit-details-marker");
+    expect(activityCss).toContain("::marker");
     expect(styles.activity).toContain("w-full");
     expect(styles.activity).toContain("max-w-full");
     expect(styles.activity).toContain("max-h-[min(18rem,42vh)]");

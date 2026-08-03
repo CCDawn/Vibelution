@@ -16,6 +16,29 @@ details[open] > summary .vui-components-conversation-tool-activity.activityChevr
   transform: rotate(0deg);
 }
 
+/*
+ * Edge/Chromium still paint a native details disclosure ("›"/triangle) that can
+ * wrap onto its own line under the tool row. Kill every marker path.
+ */
+.vui-components-conversation-tool-activity.itemDetails > summary,
+.vui-components-conversation-tool-activity.batch > summary,
+.vui-components-conversation-tool-activity.group > summary {
+  list-style: none;
+}
+
+.vui-components-conversation-tool-activity.itemDetails > summary::-webkit-details-marker,
+.vui-components-conversation-tool-activity.batch > summary::-webkit-details-marker,
+.vui-components-conversation-tool-activity.group > summary::-webkit-details-marker,
+.vui-components-conversation-tool-activity.itemDetails > summary::marker,
+.vui-components-conversation-tool-activity.batch > summary::marker,
+.vui-components-conversation-tool-activity.group > summary::marker {
+  display: none;
+  content: "";
+  width: 0;
+  height: 0;
+  font-size: 0;
+}
+
 .vui-components-conversation-tool-activity.activity:not([open])
   > .vui-components-conversation-tool-activity.activityDetails,
 .vui-components-conversation-tool-activity.batch:not([open])
