@@ -16,10 +16,29 @@ import {
 } from "../DirectSessionIndexItem";
 import { isTempSessionId } from "../sessionOptimisticIds";
 
-/** Placeholder titles for brand-new empty chats (create → optional rename UX). */
+/**
+ * Placeholder titles for brand-new empty chats (create → optional rename UX).
+ * Must cover both backend defaults ("新会话") and UI action copy ("新建会话").
+ */
 export function isDefaultNewSessionTitle(title: string | null | undefined): boolean {
-  const normalized = String(title || "").trim();
-  return normalized === "新会话" || normalized === "New session";
+  const normalized = String(title || "").trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+  return (
+    normalized === "新会话"
+    || normalized === "新建会话"
+    || normalized === "新对话"
+    || normalized === "默认对话"
+    || normalized === "new session"
+    || normalized === "new chat"
+    || normalized === "untitled"
+  );
+}
+
+/** Session tab placeholder aligned with backend create defaults (not the create-button label). */
+export function defaultNewSessionTitle(lang: "zh" | "en" | string = "zh"): string {
+  return lang === "en" ? "New session" : "新会话";
 }
 
 export type SessionContextMenuState = {
@@ -79,8 +98,8 @@ export function useChatSessionRenameMenu({
     // Session tab rename always edits the session/task title — Agent rename is a separate action.
     setEditingSessionTitle(
       isChildSession(session)
-        ? (session.taskTitle || session.resultCard?.title || session.title || t("newSession"))
-        : (session.title || t("newSession")),
+        ? (session.taskTitle || session.resultCard?.title || session.title || defaultNewSessionTitle())
+        : (session.title || defaultNewSessionTitle()),
     );
     setSessionComposerErrors((current) => ({
       ...current,
@@ -142,8 +161,13 @@ export function useChatSessionRenameMenu({
     const currentTitle = isChildSession(session)
       ? String(session.taskTitle || session.resultCard?.title || session.title || "").trim()
       : String(session.title || "").trim();
-    // Leaving the default placeholder is not a real rename — keep "新会话" without a PATCH.
+    // Leaving any create placeholder is not a real rename — no PATCH.
     if (isDefaultNewSessionTitle(title) && (!currentTitle || isDefaultNewSessionTitle(currentTitle))) {
+      cancelRenameSession();
+      return;
+    }
+    // Blur with no real edit should exit quietly (do not treat placeholder drift as rename).
+    if (reason === "blur" && isDefaultNewSessionTitle(title)) {
       cancelRenameSession();
       return;
     }

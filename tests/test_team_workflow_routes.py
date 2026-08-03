@@ -561,6 +561,181 @@ def test_project_source_collection_reset_only_clears_active_project_stage_one_da
     assert legacy_status.status_code == 200, legacy_status.text
 
 
+def test_project_source_collection_reset_ignores_other_project_downstream(tmp_path, monkeypatch):
+    """Sibling-project experiment/iteration must not block Stage-1 reset of the active project."""
+
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "_write_source_collection_search_plan",
+        lambda _team_id, _run_id, _search_plan: None,
+    )
+    client = _client()
+    team = client.post("/api/teams", json={"name": "Scoped reset team"}).json()
+    team_id = team["teamId"]
+
+    other_project = client.post(
+        f"/api/teams/{team_id}/workflow-orchestration/research-projects",
+        json={"name": "Other project", "topic": "other topic"},
+    ).json()["project"]
+    active_project = client.post(
+        f"/api/teams/{team_id}/workflow-orchestration/research-projects",
+        json={"name": "Active chemistry", "topic": "catalytic reaction discovery"},
+    ).json()["project"]
+    client.post(
+        f"/api/teams/{team_id}/workflow-orchestration/research-projects/{active_project['projectId']}/activate",
+    )
+    start = client.post(
+        f"/api/teams/{team_id}/workflow-orchestration/source-collection-runs",
+        json={
+            "researchProjectId": active_project["projectId"],
+            "title": "Active source batch",
+            "topic": "catalytic reaction discovery",
+            "querySeeds": ["heterogeneous catalysis"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    assert start.status_code == 201, start.text
+    run_id = start.json()["run"]["runId"]
+    record = client.post(
+        f"/api/data-processing/runs/{run_id}/records",
+        json={
+            "sourceType": "url",
+            "sourceRef": "https://example.test/active-source",
+            "title": "Active source",
+            "metadata": {"allowedForAnalysis": True},
+        },
+    ).json()
+    client.post(
+        f"/api/teams/{team_id}/workflow-orchestration/data-processing/runs/{run_id}/records/{record['recordId']}/source-candidate",
+        json={"createdByAgent": "source_finder"},
+    )
+    # Seed sibling-project experiment after SC start so reconcile cannot drop it first.
+    stage_store_path = team_workflow_orchestration_service._stage_round_store_path(team_id)
+    stage_store = team_workflow_orchestration_service._load_stage_round_store(team_id)
+    stage_store.setdefault("rounds", []).append(
+        {
+            "stageRoundId": "round-other-experiment",
+            "stageType": "experiment",
+            "status": "planning",
+            "researchProjectId": other_project["projectId"],
+            "sourceRunIds": [],
+        }
+    )
+    team_workflow_orchestration_service._write_json(stage_store_path, stage_store)
+
+    reset = client.post(
+        f"/api/teams/{team_id}/workflow-orchestration/research-projects/{active_project['projectId']}/source-collection/reset",
+    )
+    remaining_rounds = team_workflow_orchestration_service._stage_rounds(
+        team_workflow_orchestration_service._load_stage_round_store(team_id)
+    )
+
+    assert reset.status_code == 200, reset.text
+    assert reset.json()["removedRunIds"] == [run_id]
+    assert reset.json()["removedSourceCandidateCount"] == 1
+    assert any(item.get("stageRoundId") == "round-other-experiment" for item in remaining_rounds)
+
+
+def test_project_source_collection_reset_blocks_same_project_downstream(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "_write_source_collection_search_plan",
+        lambda _team_id, _run_id, _search_plan: None,
+    )
+    client = _client()
+    team = client.post("/api/teams", json={"name": "Blocked reset team"}).json()
+    team_id = team["teamId"]
+    project = client.post(
+        f"/api/teams/{team_id}/workflow-orchestration/research-projects",
+        json={"name": "Blocked project", "topic": "blocked topic"},
+    ).json()["project"]
+    client.post(
+        f"/api/teams/{team_id}/workflow-orchestration/research-projects/{project['projectId']}/activate",
+    )
+    start = client.post(
+        f"/api/teams/{team_id}/workflow-orchestration/source-collection-runs",
+        json={
+            "researchProjectId": project["projectId"],
+            "title": "Blocked batch",
+            "topic": "blocked topic",
+            "querySeeds": ["blocked query"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    assert start.status_code == 201, start.text
+    stage_store_path = team_workflow_orchestration_service._stage_round_store_path(team_id)
+    stage_store = team_workflow_orchestration_service._load_stage_round_store(team_id)
+    stage_store.setdefault("rounds", []).append(
+        {
+            "stageRoundId": "round-same-experiment",
+            "stageType": "experiment",
+            "status": "planning",
+            "researchProjectId": project["projectId"],
+            "sourceRunIds": [start.json()["run"]["runId"]],
+        }
+    )
+    team_workflow_orchestration_service._write_json(stage_store_path, stage_store)
+
+    reset = client.post(
+        f"/api/teams/{team_id}/workflow-orchestration/research-projects/{project['projectId']}/source-collection/reset",
+    )
+    assert reset.status_code in {400, 409, 422}, reset.text
+    assert "downstream experiment" in reset.text.lower() or "实验" in reset.text
+
+    cascade = client.post(
+        f"/api/teams/{team_id}/workflow-orchestration/research-projects/{project['projectId']}/progress/reset",
+    )
+    remaining_rounds = team_workflow_orchestration_service._stage_rounds(
+        team_workflow_orchestration_service._load_stage_round_store(team_id)
+    )
+    assert cascade.status_code == 200, cascade.text
+    assert cascade.json()["includeDownstream"] is True
+    assert cascade.json()["removedRunIds"] == [start.json()["run"]["runId"]]
+    assert cascade.json()["removedStageRoundCount"] >= 1
+    assert all(item.get("stageRoundId") != "round-same-experiment" for item in remaining_rounds)
+
+
+def test_research_project_progress_aggregates_active_project_facts(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "_write_source_collection_search_plan",
+        lambda _team_id, _run_id, _search_plan: None,
+    )
+    client = _client()
+    team = client.post("/api/teams", json={"name": "Progress team"}).json()
+    team_id = team["teamId"]
+    project = client.post(
+        f"/api/teams/{team_id}/workflow-orchestration/research-projects",
+        json={"name": "Progress project", "topic": "progress topic"},
+    ).json()["project"]
+    client.post(
+        f"/api/teams/{team_id}/workflow-orchestration/research-projects/{project['projectId']}/activate",
+    )
+    start = client.post(
+        f"/api/teams/{team_id}/workflow-orchestration/source-collection-runs",
+        json={
+            "researchProjectId": project["projectId"],
+            "title": "Progress batch",
+            "topic": "progress topic",
+            "querySeeds": ["progress query"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    assert start.status_code == 201, start.text
+    progress = client.get(
+        f"/api/teams/{team_id}/workflow-orchestration/research-projects/{project['projectId']}/progress",
+    )
+    assert progress.status_code == 200, progress.text
+    payload = progress.json()
+    assert payload["researchProjectId"] == project["projectId"]
+    assert payload["sourceRunCount"] == 1
+    assert payload["canResetProgress"] is True
+    assert "phases" in payload
+
+
 def test_team_workflow_route_starts_knowledge_expansion_local_source_collection(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     client = _client()

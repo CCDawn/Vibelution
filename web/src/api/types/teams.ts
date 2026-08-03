@@ -797,11 +797,36 @@ export type TeamResearchProjectSourceCollectionResetPayload = {
   teamId: string;
   researchProjectId: string;
   experimentName: string;
+  includeDownstream?: boolean;
   removedRunIds: string[];
   removedRunCount: number;
   removedSourceCandidateCount: number;
   removedStageRoundCount: number;
+  removedExperimentPlanCount?: number;
   nextAction: string;
+};
+
+export type TeamResearchProjectProgressPayload = {
+  schemaVersion: number;
+  teamId: string;
+  researchProjectId: string;
+  experimentName: string;
+  sourceRunCount: number;
+  sourceCandidateCount: number;
+  downstreamCandidateCount: number;
+  stageRoundCounts: {
+    knowledge_collection?: number;
+    experiment?: number;
+    iteration?: number;
+    [key: string]: number | undefined;
+  };
+  experimentPlanCount: number;
+  frozenExperimentPlanCount: number;
+  currentStage: string;
+  phases: Array<Record<string, unknown>>;
+  canResetSourceOnly: boolean;
+  canResetProgress: boolean;
+  updatedAt: string;
 };
 
 export type ResearchProjectAgentTaskKind =

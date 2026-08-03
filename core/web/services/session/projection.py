@@ -3594,7 +3594,17 @@ def _timestamp_sort_key(value: str) -> float:
 def _is_default_empty_session_title(title: str) -> bool:
     s = _service()
     normalized = str(title or "").strip()
-    return normalized in {s.DEFAULT_CHAT_CONVERSATION_TITLE, "新会话", "New session"}
+    # Keep in sync with web isDefaultNewSessionTitle (create placeholders / action labels).
+    return normalized in {
+        s.DEFAULT_CHAT_CONVERSATION_TITLE,
+        "新会话",
+        "新建会话",
+        "新对话",
+        "默认对话",
+        "New session",
+        "New chat",
+        "Untitled",
+    }
 
 
 def _agent_inbox_pending_count_for_summary(agent: dict[str, Any] | None) -> int:

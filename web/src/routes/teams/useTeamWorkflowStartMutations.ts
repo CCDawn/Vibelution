@@ -7,7 +7,10 @@ import type { Dispatch, SetStateAction } from "react";
 
 import { fetchJson } from "../../api/client";
 import { queryKeys } from "../../api/queryKeys";
-import { resetTeamResearchProjectSourceCollection } from "../../api/researchProjectAgentTasks";
+import {
+  resetTeamResearchProjectProgress,
+  resetTeamResearchProjectSourceCollection,
+} from "../../api/researchProjectAgentTasks";
 import type {
   AiSearchRun,
   DataProcessingRunListPayload,
@@ -78,8 +81,14 @@ export function useTeamWorkflowStartMutations(options: UseTeamWorkflowStartMutat
   const { chatWorkspaceCache } = options;
 
   const resetResearchProjectSourceCollectionMutation = useMutation({
-    mutationFn: (payload: { teamId: string; researchProjectId: string }) =>
-      resetTeamResearchProjectSourceCollection(payload.teamId, payload.researchProjectId),
+    mutationFn: (payload: {
+      teamId: string;
+      researchProjectId: string;
+      includeDownstream?: boolean;
+    }) =>
+      payload.includeDownstream
+        ? resetTeamResearchProjectProgress(payload.teamId, payload.researchProjectId)
+        : resetTeamResearchProjectSourceCollection(payload.teamId, payload.researchProjectId),
     onSuccess: async (payload, variables) => {
       const sourceRunListQueryKey = queryKeys.teamWorkflowSourceCollectionRuns(
         variables.teamId,

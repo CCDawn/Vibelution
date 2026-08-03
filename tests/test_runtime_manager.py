@@ -5348,7 +5348,7 @@ def test_run_launcher_action_cancelable_path_remains_waitable_on_windows(monkeyp
     assert startupinfo.wShowWindow == 0
 
 
-def test_listening_pid_probe_hides_powershell_adapter_with_detached_process(monkeypatch):
+def test_listening_pid_probe_hides_powershell_adapter_without_detached_process(monkeypatch):
     captured = {}
 
     def fake_run(args, **kwargs):
@@ -5366,7 +5366,8 @@ def test_listening_pid_probe_hides_powershell_adapter_with_detached_process(monk
 
     assert pid == 12345
     assert captured["args"][:5] == ["powershell.exe", "-NoProfile", "-WindowStyle", "Hidden", "-Command"]
-    assert captured["kwargs"]["creationflags"] & 0x00000008
+    # CREATE_NO_WINDOW must not be paired with DETACHED_PROCESS (MSDN ignores it).
+    assert not (captured["kwargs"]["creationflags"] & 0x00000008)
     assert captured["kwargs"]["creationflags"] & 0x00000200
     assert captured["kwargs"]["creationflags"] & 0x08000000
     assert captured["kwargs"]["stdin"] is subprocess.DEVNULL
@@ -6977,7 +6978,9 @@ def test_restart_build_preflight_uses_hidden_node_entrypoints_on_windows(monkeyp
     for call in calls:
         kwargs = call["kwargs"]
         startupinfo = kwargs["startupinfo"]
-        assert kwargs["creationflags"] & 0x00000008
+        # Waitable builds must use CREATE_NO_WINDOW without DETACHED_PROCESS
+        # (MSDN: CREATE_NO_WINDOW is ignored when combined with DETACHED).
+        assert not (kwargs["creationflags"] & 0x00000008)
         assert kwargs["creationflags"] & 0x00000200
         assert kwargs["creationflags"] & 0x08000000
         assert isinstance(startupinfo, DummyStartupInfo)

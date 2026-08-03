@@ -1,0 +1,2144 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>团队工作台 · 画布/看板预览 | Vibelution</title>
+  <style>
+/* Research overview product preview — design acceptance only.
+ * Black / white / gray monochrome (not fixed dark theme, not teal accent). */
+
+:root {
+  color-scheme: light;
+  font-family: Inter, "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+
+  --bg: #f4f4f5;
+  --bg-elevated: #ffffff;
+  --surface: #ffffff;
+  --surface-soft: #fafafa;
+  --surface-row: #f7f7f8;
+  --surface-muted: #eeeeef;
+  --text: #0a0a0a;
+  --muted: #525252;
+  --subtle: #8a8a8a;
+  --line: #e4e4e7;
+  --line-strong: #d4d4d8;
+  /* Primary action = ink black, not brand teal */
+  --accent: #111111;
+  --accent-deep: #000000;
+  --accent-soft: #f0f0f0;
+  --accent-on: #ffffff;
+  /* Status tones stay monochrome */
+  --success: #171717;
+  --success-soft: #f0f0f0;
+  --warning: #3f3f46;
+  --warning-soft: #f4f4f5;
+  --danger: #18181b;
+  --danger-soft: #f4f4f5;
+  --radius: 12px;
+  --radius-sm: 8px;
+  --shadow: 0 1px 2px rgb(0 0 0 / 4%), 0 8px 24px rgb(0 0 0 / 6%);
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 5%);
+  --focus: 0 0 0 2px rgb(0 0 0 / 35%);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+select,
+input {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+  color: inherit;
+}
+
+button:focus-visible,
+select:focus-visible {
+  outline: none;
+  box-shadow: var(--focus);
+}
+
+#root {
+  min-height: 100vh;
+}
+
+/* —— Shell —— */
+.preview-app {
+  min-height: 100vh;
+  display: grid;
+  grid-template-rows: auto 1fr;
+}
+
+.topbar {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 12px;
+  min-height: 52px;
+  padding: 8px 18px;
+  background: rgb(255 255 255 / 92%);
+  border-bottom: 1px solid var(--line);
+  backdrop-filter: blur(10px);
+  position: sticky;
+  top: 0;
+  z-index: 30;
+}
+
+.topbar-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.topbar-mark {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: var(--accent-deep);
+  box-shadow: var(--shadow-sm);
+}
+
+.topbar-brand strong {
+  display: block;
+  font-size: 13.5px;
+  font-weight: 720;
+  letter-spacing: -0.01em;
+}
+
+.topbar-brand span {
+  display: block;
+  font-size: 11px;
+  color: var(--subtle);
+}
+
+.topbar-nav {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-sm);
+}
+
+.topbar-nav button {
+  border: 0;
+  background: transparent;
+  padding: 6px 11px;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--muted);
+}
+
+.topbar-nav button[data-active="true"] {
+  background: var(--accent-deep);
+  color: var(--accent-on);
+}
+
+.topbar-meta {
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface-soft);
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--muted);
+}
+
+.pill-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent-deep);
+  box-shadow: 0 0 0 3px rgb(0 0 0 / 12%);
+}
+
+.icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.icon-btn:hover {
+  color: var(--text);
+  background: var(--surface-muted);
+}
+
+/* —— Layout —— */
+.layout {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  min-height: 0;
+}
+
+@media (max-width: 980px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+
+  .rail {
+    display: none;
+  }
+}
+
+.rail {
+  border-right: 1px solid var(--line);
+  background: var(--surface);
+  padding: 14px 12px;
+  display: grid;
+  gap: 14px;
+  align-content: start;
+}
+
+.rail-block {
+  display: grid;
+  gap: 8px;
+}
+
+.rail-label {
+  font-size: 11px;
+  font-weight: 720;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--subtle);
+  padding: 0 6px;
+}
+
+.rail-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 650;
+  text-align: left;
+}
+
+.rail-item:hover {
+  background: var(--surface-row);
+  color: var(--text);
+}
+
+.rail-item[data-active="true"] {
+  background: var(--accent-deep);
+  border-color: var(--accent-deep);
+  color: var(--accent-on);
+}
+
+.rail-item small {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--subtle);
+}
+
+.page {
+  min-width: 0;
+  width: min(1080px, 100%);
+  margin: 0 auto;
+  padding: 18px 22px 56px;
+  display: grid;
+  gap: 14px;
+}
+
+/* Scenario bar — design tool chrome */
+.scenario-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 13px;
+  border-radius: var(--radius);
+  border: 1px dashed var(--line-strong);
+  background: var(--surface-soft);
+}
+
+.scenario-bar strong {
+  font-size: 11px;
+  font-weight: 760;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text);
+}
+
+.scenario-bar button {
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--muted);
+}
+
+.scenario-bar button:hover {
+  color: var(--text);
+  border-color: var(--line-strong);
+}
+
+.scenario-bar button[data-active="true"] {
+  border-color: var(--accent-deep);
+  background: var(--accent-deep);
+  color: var(--accent-on);
+}
+
+.scenario-bar .scenario-hint {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--subtle);
+}
+
+/* Workspace tabs */
+.workspace-tabs {
+  display: flex;
+  gap: 6px;
+  padding-bottom: 2px;
+}
+
+.workspace-tabs button {
+  border: 1px solid transparent;
+  background: transparent;
+  padding: 8px 14px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 680;
+  color: var(--muted);
+}
+
+.workspace-tabs button[data-active="true"] {
+  background: var(--surface);
+  border-color: var(--line);
+  color: var(--text);
+  box-shadow: var(--shadow-sm);
+}
+
+/* Project header */
+.project-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.project-header-main {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+}
+
+.eyebrow {
+  font-size: 11px;
+  font-weight: 720;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--subtle);
+}
+
+.project-title-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.project-title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 760;
+  letter-spacing: -0.02em;
+  line-height: 1.3;
+}
+
+.state-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 740;
+  border: 1px solid transparent;
+}
+
+.state-badge[data-tone="active"] {
+  background: var(--accent-deep);
+  color: var(--accent-on);
+  border-color: var(--accent-deep);
+}
+
+.state-badge[data-tone="done"] {
+  background: var(--surface-muted);
+  color: var(--text);
+  border-color: var(--line);
+}
+
+.state-badge[data-tone="idle"] {
+  background: var(--surface-muted);
+  color: var(--muted);
+  border-color: var(--line);
+}
+
+.state-badge[data-tone="danger"] {
+  background: var(--accent-deep);
+  color: var(--accent-on);
+  border-color: var(--accent-deep);
+}
+
+.state-badge[data-tone="warning"] {
+  background: var(--surface-muted);
+  color: var(--text);
+  border-color: var(--line-strong);
+}
+
+.project-topic {
+  margin: 0;
+  max-width: 64ch;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.project-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+/* Buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--surface-soft);
+  font-size: 13px;
+  font-weight: 680;
+  color: var(--text);
+  transition: background 120ms ease, border-color 120ms ease, filter 120ms ease;
+}
+
+.btn:hover {
+  background: var(--surface-muted);
+}
+
+.btn-primary {
+  border-color: transparent;
+  background: var(--accent-deep);
+  color: var(--accent-on);
+  font-weight: 760;
+}
+
+.btn-primary:hover {
+  filter: none;
+  background: #262626;
+}
+
+.btn-primary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  filter: none;
+}
+
+.btn-danger {
+  border-color: var(--accent-deep);
+  background: var(--accent-deep);
+  color: var(--accent-on);
+}
+
+.btn-danger:hover {
+  background: #262626;
+}
+
+.btn-ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+}
+
+.btn-ghost:hover {
+  background: var(--surface-muted);
+  color: var(--text);
+}
+
+.select {
+  min-height: 34px;
+  padding: 0 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--surface-soft);
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--text);
+  max-width: 260px;
+}
+
+/* Next step hero — Linear style, single solid CTA, monochrome */
+.next-card {
+  display: grid;
+  gap: 14px;
+  padding: 18px 20px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  position: relative;
+  overflow: hidden;
+}
+
+.next-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: var(--accent-deep);
+  border-radius: 3px 0 0 3px;
+}
+
+.next-card[data-blocked="true"] {
+  border-color: var(--line-strong);
+  background: var(--surface-soft);
+}
+
+.next-card[data-blocked="true"]::before {
+  background: var(--muted);
+}
+
+.next-card-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.next-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--accent-deep);
+  color: var(--accent-on);
+  font-size: 11px;
+  font-weight: 760;
+}
+
+.next-card h2 {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 780;
+  letter-spacing: -0.025em;
+  line-height: 1.25;
+}
+
+.next-card p {
+  margin: 0;
+  max-width: 48rem;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+.handoff-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line-strong);
+  background: var(--surface-row);
+  font-size: 12.5px;
+  color: var(--text);
+}
+
+.handoff-banner strong {
+  color: var(--text);
+  font-weight: 740;
+}
+
+.metric-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.metric {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface-row);
+  font-size: 12px;
+}
+
+.metric span {
+  color: var(--subtle);
+  font-weight: 650;
+}
+
+.metric strong {
+  color: var(--text);
+  font-weight: 760;
+}
+
+.next-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding-top: 2px;
+}
+
+.next-card-actions .btn-primary {
+  min-height: 38px;
+  padding: 0 16px;
+  font-size: 13.5px;
+}
+
+/* Section label */
+.section-label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 2px 2px 0;
+}
+
+.section-label h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 740;
+  color: var(--text);
+}
+
+.section-label span {
+  font-size: 12px;
+  color: var(--subtle);
+}
+
+/* Stage pipeline with connectors */
+.stage-pipeline {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr auto 1fr;
+  gap: 0;
+  align-items: stretch;
+}
+
+@media (max-width: 900px) {
+  .stage-pipeline {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .stage-connector {
+    display: none;
+  }
+}
+
+.stage-connector {
+  width: 18px;
+  align-self: center;
+  height: 2px;
+  margin: 0 -2px;
+  background: var(--line-strong);
+  position: relative;
+}
+
+.stage-connector[data-filled="true"] {
+  background: var(--accent-deep);
+}
+
+.stage-card {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 10px;
+  min-height: 176px;
+  padding: 14px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  position: relative;
+}
+
+.stage-card[data-tone="done"] {
+  border-color: var(--line-strong);
+  background: var(--surface-soft);
+}
+
+.stage-card[data-tone="active"] {
+  border-color: var(--accent-deep);
+  box-shadow: inset 0 0 0 1px var(--accent-deep), var(--shadow-sm);
+}
+
+.stage-card[data-tone="idle"] {
+  opacity: 0.92;
+  background: var(--surface-soft);
+}
+
+.stage-head {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: start;
+}
+
+.stage-index {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: var(--surface-muted);
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--muted);
+}
+
+.stage-card[data-tone="active"] .stage-index {
+  background: var(--accent-deep);
+  color: var(--accent-on);
+}
+
+.stage-card[data-tone="done"] .stage-index {
+  background: var(--surface-muted);
+  color: var(--text);
+}
+
+.stage-head h4 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 740;
+}
+
+.status-chip {
+  display: inline-flex;
+  margin-top: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 740;
+  border: 1px solid transparent;
+}
+
+.status-chip[data-tone="done"] {
+  background: var(--surface-muted);
+  color: var(--text);
+  border-color: var(--line);
+}
+
+.status-chip[data-tone="active"] {
+  background: var(--accent-deep);
+  color: var(--accent-on);
+}
+
+.status-chip[data-tone="idle"] {
+  background: transparent;
+  color: var(--muted);
+  border-color: var(--line);
+}
+
+.stage-body {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.stage-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--subtle);
+}
+
+.stage-meta em {
+  font-style: normal;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: var(--surface-muted);
+  color: var(--muted);
+}
+
+.stage-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 2px;
+  border-top: 1px solid var(--line);
+  margin-top: 2px;
+  padding-top: 10px;
+}
+
+.stage-foot .role {
+  font-size: 11px;
+  color: var(--subtle);
+  font-weight: 650;
+}
+
+.stage-foot .btn {
+  min-height: 28px;
+  font-size: 12px;
+  padding: 0 10px;
+}
+
+/* Secondary row: agents + activity */
+.secondary-grid {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  gap: 12px;
+}
+
+@media (max-width: 800px) {
+  .secondary-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.panel-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+  box-shadow: var(--shadow-sm);
+}
+
+.panel-card header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.panel-card header h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 740;
+}
+
+.panel-card header span {
+  font-size: 11px;
+  color: var(--subtle);
+}
+
+.agent-list {
+  display: grid;
+  gap: 8px;
+}
+
+.agent-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-row);
+  border: 1px solid var(--line);
+}
+
+.avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: 780;
+  background: var(--surface-muted);
+  color: var(--text);
+  border: 1px solid var(--line);
+}
+
+.agent-row strong {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 720;
+}
+
+.agent-row small {
+  display: block;
+  font-size: 11px;
+  color: var(--subtle);
+}
+
+.online-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent-deep);
+}
+
+.online-dot[data-off="true"] {
+  background: var(--line-strong);
+}
+
+.activity-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 8px;
+}
+
+.activity-list li {
+  display: grid;
+  grid-template-columns: 48px 1fr;
+  gap: 10px;
+  font-size: 12.5px;
+}
+
+.activity-list time {
+  color: var(--subtle);
+  font-variant-numeric: tabular-nums;
+}
+
+.activity-list p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+/* Error surface */
+.error-surface {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: var(--radius);
+  border: 1px solid var(--accent-deep);
+  background: var(--surface);
+  box-shadow: inset 3px 0 0 0 var(--accent-deep);
+}
+
+.error-surface header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.error-surface header strong {
+  font-size: 13.5px;
+  font-weight: 760;
+  color: var(--text);
+}
+
+.error-surface p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.error-surface .error-raw {
+  font-size: 11px;
+  color: var(--subtle);
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+}
+
+.error-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Advanced disclosure */
+.advanced {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.advanced-toggle {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 14px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+
+.advanced-toggle:hover {
+  background: var(--surface-soft);
+}
+
+.advanced-toggle strong {
+  font-size: 13px;
+  font-weight: 720;
+  color: var(--text);
+}
+
+.advanced-toggle span {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--subtle);
+}
+
+.advanced-panel {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px 14px;
+  border-top: 1px solid var(--line);
+  background: var(--surface-soft);
+}
+
+.advanced-row {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.advanced-row dt {
+  margin: 0;
+  color: var(--subtle);
+  font-weight: 650;
+}
+
+.advanced-row dd {
+  margin: 0;
+  color: var(--muted);
+  word-break: break-all;
+}
+
+/* Design contract callout */
+.contract-note {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: var(--surface-soft);
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.contract-note strong {
+  color: var(--text);
+  font-size: 12.5px;
+}
+
+.contract-note ul {
+  margin: 0;
+  padding-left: 1.15rem;
+  display: grid;
+  gap: 4px;
+}
+
+.contract-note li::marker {
+  color: var(--text);
+}
+
+/* Toast */
+.toast {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 50;
+  max-width: 340px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  font-size: 13px;
+  color: var(--text);
+  animation: toast-in 160ms ease;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.preview-note {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: var(--subtle);
+  text-align: center;
+  line-height: 1.5;
+}
+
+.preview-note code {
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 10.5px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--surface-muted);
+  color: var(--muted);
+}
+
+/* —— Teams shell: left list + right content —— */
+.layout {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  min-height: 0;
+  height: calc(100vh - 52px);
+}
+
+@media (max-width: 980px) {
+  .layout {
+    grid-template-columns: 1fr;
+    height: auto;
+  }
+  .team-rail {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+}
+
+.team-rail {
+  border-right: 1px solid var(--line);
+  background: var(--surface);
+  padding: 14px 12px;
+  display: grid;
+  gap: 14px;
+  align-content: start;
+  overflow: auto;
+}
+
+.team-rail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 4px;
+}
+
+.team-rail-head h2 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 760;
+}
+
+.team-rail-head span {
+  font-size: 11px;
+  color: var(--subtle);
+}
+
+.team-search {
+  width: 100%;
+  min-height: 34px;
+  padding: 0 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--surface-soft);
+  color: var(--text);
+  font-size: 12.5px;
+}
+
+.team-list {
+  display: grid;
+  gap: 6px;
+}
+
+.team-item {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  padding: 10px 11px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  background: transparent;
+  text-align: left;
+}
+
+.team-item:hover {
+  background: var(--surface-row);
+}
+
+.team-item[data-active="true"] {
+  background: var(--accent-deep);
+  border-color: var(--accent-deep);
+  color: var(--accent-on);
+}
+
+.team-item[data-active="true"] .team-item-meta,
+.team-item[data-active="true"] small {
+  color: rgb(255 255 255 / 72%);
+}
+
+.team-item-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 720;
+}
+
+.team-item-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  font-size: 11px;
+  color: var(--subtle);
+}
+
+.team-item small {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+/* Right workspace */
+.workspace {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.workspace-empty {
+  display: grid;
+  place-items: center;
+  min-height: 360px;
+  padding: 40px 20px;
+  color: var(--muted);
+  text-align: center;
+  gap: 8px;
+}
+
+.workspace-empty strong {
+  color: var(--text);
+  font-size: 16px;
+}
+
+.workspace-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.workspace-identity {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.workspace-identity h1 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 760;
+  letter-spacing: -0.02em;
+}
+
+.workspace-identity p {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--muted);
+  max-width: 62ch;
+}
+
+.workspace-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.mode-switch {
+  display: inline-flex;
+  padding: 3px;
+  gap: 2px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-soft);
+}
+
+.mode-switch button {
+  border: 0;
+  background: transparent;
+  min-height: 30px;
+  padding: 0 14px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.mode-switch button[data-active="true"] {
+  background: var(--accent-deep);
+  color: var(--accent-on);
+}
+
+.workspace-body {
+  min-height: 0;
+  overflow: auto;
+  padding: 16px 18px 40px;
+}
+
+/* Canvas mode */
+.canvas-board {
+  position: relative;
+  min-height: 520px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background:
+    linear-gradient(to right, rgb(0 0 0 / 4%) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(0 0 0 / 4%) 1px, transparent 1px),
+    var(--surface);
+  background-size: 32px 32px, 32px 32px, auto;
+  box-shadow: var(--shadow-sm);
+  overflow: auto;
+}
+
+.canvas-hint {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 2;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgb(255 255 255 / 92%);
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--muted);
+}
+
+.canvas-node {
+  position: absolute;
+  width: 168px;
+  min-height: 88px;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  display: grid;
+  gap: 4px;
+  cursor: default;
+}
+
+.canvas-node[data-tone="lead"] {
+  border-color: var(--accent-deep);
+  box-shadow: inset 0 0 0 1px var(--accent-deep), var(--shadow-sm);
+}
+
+.canvas-node[data-tone="active"] {
+  border-color: var(--accent-deep);
+}
+
+.canvas-node strong {
+  font-size: 12.5px;
+  font-weight: 740;
+}
+
+.canvas-node span {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.canvas-node em {
+  font-style: normal;
+  font-size: 10.5px;
+  color: var(--subtle);
+}
+
+.canvas-edge-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.canvas-edge-layer path {
+  fill: none;
+  stroke: #a1a1aa;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+
+/* Kanban board mode */
+.kanban {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(220px, 1fr));
+  gap: 12px;
+  align-items: start;
+  min-height: 480px;
+}
+
+@media (max-width: 900px) {
+  .kanban {
+    grid-template-columns: 1fr;
+  }
+}
+
+.kanban-col {
+  display: grid;
+  gap: 10px;
+  min-height: 420px;
+  padding: 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: var(--surface-soft);
+}
+
+.kanban-col-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.kanban-col-head h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 760;
+}
+
+.kanban-col-head span {
+  min-width: 22px;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--surface-muted);
+  border: 1px solid var(--line);
+  font-size: 11px;
+  font-weight: 740;
+  display: inline-grid;
+  place-items: center;
+}
+
+.kanban-card {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.kanban-card[data-active="true"] {
+  border-color: var(--accent-deep);
+  box-shadow: inset 0 0 0 1px var(--accent-deep);
+}
+
+.kanban-card strong {
+  font-size: 13px;
+  font-weight: 740;
+}
+
+.kanban-card p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.kanban-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.kanban-card-meta em {
+  font-style: normal;
+  font-size: 10.5px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: var(--surface-muted);
+  color: var(--muted);
+}
+
+.kanban-card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--subtle);
+}
+
+/* Nested overview inside board mode */
+.board-overview {
+  display: grid;
+  gap: 14px;
+}
+
+.board-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(280px, 0.85fr);
+  gap: 12px;
+}
+
+@media (max-width: 1100px) {
+  .board-split {
+    grid-template-columns: 1fr;
+  }
+}
+
+  /* standalone overrides: old .rail hidden styles shouldn't block team-rail */
+  .team-rail { display: grid !important; }
+  .layout { height: calc(100vh - 52px); }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script>
+
+const TEAMS = [
+  {
+    id: "challenge-cup",
+    name: "挑战杯科研",
+    kind: "科研工作流",
+    members: 12,
+    status: "活跃",
+    blurb: "三阶段：知识搜集 → 实验设计 → 执行迭代",
+    purpose: "挑战杯 AI 科研团队 · 项目推进与阶段协作",
+  },
+  {
+    id: "ai-search",
+    name: "AI 搜索范围",
+    kind: "资料范围",
+    members: 4,
+    status: "活跃",
+    blurb: "跨源检索与资料准入",
+    purpose: "配置搜索范围、来源策略与准入边界",
+  },
+  {
+    id: "knowledge-expand",
+    name: "知识扩充",
+    kind: "扩充工作流",
+    members: 5,
+    status: "待命",
+    blurb: "既有知识库的补充与关系扩展",
+    purpose: "在既有知识基础上做补充搜集与结构化",
+  },
+  {
+    id: "example-collab",
+    name: "示例协作组",
+    kind: "示例",
+    members: 3,
+    status: "示例",
+    blurb: "用于演示空团队与引导态",
+    purpose: "演示未配置工作流时的空白态",
+  },
+];
+
+const CANVAS_NODES = {
+  "challenge-cup": [
+    { id: "lead", label: "科研协调", role: "Lead", tone: "lead", x: 48, y: 40, status: "在线" },
+    { id: "finder", label: "白书遥", role: "资料寻找", tone: "active", x: 280, y: 36, status: "等待任务" },
+    { id: "extract", label: "白望舒", role: "资料提炼", tone: "active", x: 500, y: 36, status: "可用" },
+    { id: "relation", label: "顾言初", role: "关系整理", tone: "idle", x: 280, y: 180, status: "待命" },
+    { id: "ingest", label: "林知序", role: "资料入库", tone: "idle", x: 500, y: 180, status: "待命" },
+    { id: "exp", label: "沈观止", role: "实验规划", tone: "active", x: 720, y: 100, status: "进行中" },
+    { id: "iter", label: "周衡", role: "执行调度", tone: "idle", x: 940, y: 100, status: "待命" },
+  ],
+  "ai-search": [
+    { id: "lead", label: "范围协调", role: "Lead", tone: "lead", x: 80, y: 80, status: "在线" },
+    { id: "web", label: "网页检索", role: "Web", tone: "active", x: 320, y: 60, status: "可用" },
+    { id: "local", label: "本地扫描", role: "Local", tone: "idle", x: 320, y: 200, status: "待命" },
+    { id: "gate", label: "准入门禁", role: "Gate", tone: "active", x: 560, y: 120, status: "运行" },
+  ],
+  "knowledge-expand": [
+    { id: "lead", label: "扩充协调", role: "Lead", tone: "lead", x: 100, y: 100, status: "在线" },
+    { id: "a", label: "补充搜集", role: "Expand", tone: "active", x: 340, y: 80, status: "进行中" },
+    { id: "b", label: "关系扩展", role: "Graph", tone: "idle", x: 340, y: 220, status: "待命" },
+  ],
+  "example-collab": [
+    { id: "lead", label: "示例 Lead", role: "Lead", tone: "lead", x: 120, y: 120, status: "示例" },
+    { id: "m1", label: "成员 A", role: "Member", tone: "idle", x: 360, y: 90, status: "—" },
+    { id: "m2", label: "成员 B", role: "Member", tone: "idle", x: 360, y: 220, status: "—" },
+  ],
+};
+
+const BOARD = {
+  "challenge-cup": {
+    projectName: "三阶段验收 | 稀疏预测误差门控假说",
+    topic: "新假说：在相同数据、固定 seed=42 下，稀疏预测误差门控可降低 reconstruction_mse。",
+    nextTitle: "进入实验设计",
+    nextBody: "资料阶段已有轮次。建议进入实验设计，将证据收敛为可证伪假设与冻结协议。",
+    cta: "进入实验设计",
+    metrics: [
+      { label: "阶段", value: "知识搜集 → 实验" },
+      { label: "资料批次", value: "2" },
+      { label: "候选", value: "17" },
+    ],
+    handoff: "知识搜集 → 实验设计 · 证据已形成可用假设",
+    columns: [
+      {
+        id: "kc",
+        title: "知识搜集",
+        cards: [
+          {
+            title: "层级机制证据补齐",
+            body: "16 条资料 · 提炼中 · 来源可追溯",
+            meta: ["批次 #2", "候选 17"],
+            foot: "进行中",
+            active: false,
+          },
+          {
+            title: "可塑性规则检索",
+            body: "8 条资料 · 已暂停",
+            meta: ["草稿"],
+            foot: "暂停",
+            active: false,
+          },
+        ],
+      },
+      {
+        id: "ex",
+        title: "实验设计",
+        cards: [
+          {
+            title: "Design v4 · 冻结基线",
+            body: "weight=0.875 · 5 seeds · formal · 可执行",
+            meta: ["冻结", "可执行"],
+            foot: "当前主线",
+            active: true,
+          },
+          {
+            title: "Design v5-diagnostic",
+            body: "alignment × mask · 待审查",
+            meta: ["修订"],
+            foot: "待审查",
+            active: false,
+          },
+        ],
+      },
+      {
+        id: "it",
+        title: "执行与迭代",
+        cards: [
+          {
+            title: "formal-v4",
+            body: "通过门禁 · +2.8% · 5 seeds",
+            meta: ["通过", "最佳"],
+            foot: "已晋升",
+            active: false,
+          },
+          {
+            title: "smoke_needs_review",
+            body: "诊断 run · 不覆盖主线结果",
+            meta: ["诊断"],
+            foot: "待审查",
+            active: false,
+          },
+        ],
+      },
+    ],
+  },
+  "ai-search": {
+    projectName: "AI 搜索范围配置",
+    topic: "定义允许的检索源、本地根目录与写入边界。",
+    nextTitle: "继续配置搜索范围",
+    nextBody: "先确认 web / local 源与准入门禁，再发起范围校验。",
+    cta: "打开范围配置",
+    metrics: [
+      { label: "源", value: "web + local" },
+      { label: "门禁", value: "2 / 3" },
+      { label: "成员", value: "4" },
+    ],
+    handoff: null,
+    columns: [
+      {
+        id: "scope",
+        title: "范围",
+        cards: [
+          { title: "Web 检索策略", body: "英文优先 · DOI 优先", meta: ["web"], foot: "已配置", active: true },
+          { title: "本地扫描根", body: "Documents/Research", meta: ["local"], foot: "已绑定", active: false },
+        ],
+      },
+      {
+        id: "gate",
+        title: "门禁",
+        cards: [
+          { title: "来源可追溯", body: "URL / 路径必须可回放", meta: ["必选"], foot: "通过", active: false },
+          { title: "写入边界", body: "禁止直接写正式知识库", meta: ["边界"], foot: "生效", active: false },
+        ],
+      },
+      {
+        id: "run",
+        title: "运行",
+        cards: [
+          { title: "最近校验", body: "通过 18 · 拒绝 2", meta: ["校验"], foot: "今天 09:20", active: false },
+        ],
+      },
+    ],
+  },
+  "knowledge-expand": {
+    projectName: "知识扩充主线",
+    topic: "在既有条目上补充缺口证据与关系边。",
+    nextTitle: "继续知识扩充",
+    nextBody: "先补齐缺口 Claim，再扩展关系图。",
+    cta: "进入扩充",
+    metrics: [
+      { label: "缺口", value: "5" },
+      { label: "新边", value: "12" },
+      { label: "成员", value: "5" },
+    ],
+    handoff: null,
+    columns: [
+      {
+        id: "gap",
+        title: "缺口",
+        cards: [
+          { title: "参数区间 Claim", body: "邻域结果不稳定", meta: ["claim"], foot: "待补证", active: true },
+        ],
+      },
+      {
+        id: "expand",
+        title: "扩充中",
+        cards: [
+          { title: "补充检索批次", body: "3 条新候选", meta: ["batch"], foot: "进行中", active: false },
+        ],
+      },
+      {
+        id: "graph",
+        title: "关系",
+        cards: [
+          { title: "关系扩展草稿", body: "12 条候选边待审", meta: ["graph"], foot: "草稿", active: false },
+        ],
+      },
+    ],
+  },
+  "example-collab": {
+    projectName: "示例协作组",
+    topic: "尚未绑定正式工作流。选择或初始化后可进入画布与看板。",
+    nextTitle: "初始化示例工作流",
+    nextBody: "当前仅用于演示布局。生产环境请选择科研或搜索团队。",
+    cta: "查看引导",
+    metrics: [
+      { label: "成员", value: "3" },
+      { label: "工作流", value: "—" },
+      { label: "状态", value: "示例" },
+    ],
+    handoff: null,
+    columns: [
+      { id: "todo", title: "待办", cards: [{ title: "绑定工作流类型", body: "选择科研 / 搜索 / 扩充", meta: ["setup"], foot: "未开始", active: true }] },
+      { id: "doing", title: "进行中", cards: [] },
+      { id: "done", title: "完成", cards: [] },
+    ],
+  },
+};
+
+const params = new URLSearchParams(location.search || "");
+let selectedTeamId = params.get("team") || "challenge-cup";
+let mode = params.get("mode") === "canvas" ? "canvas" : "board"; // board | canvas
+let advancedOpen = false;
+let toastTimer = null;
+let teamFilter = "";
+
+function el(tag, attrs, children) {
+  const node = document.createElement(tag);
+  if (attrs) {
+    Object.entries(attrs).forEach(([k, v]) => {
+      if (v == null || v === false) return;
+      if (k === "className") node.className = v;
+      else if (k === "text") node.textContent = v;
+      else if (k === "html") node.innerHTML = v;
+      else if (k.startsWith("on") && typeof v === "function") node.addEventListener(k.slice(2).toLowerCase(), v);
+      else if (k === "style" && typeof v === "object") Object.assign(node.style, v);
+      else node.setAttribute(k, v === true ? "" : String(v));
+    });
+  }
+  (children || []).forEach((c) => {
+    if (c == null || c === false) return;
+    node.appendChild(typeof c === "string" ? document.createTextNode(c) : c);
+  });
+  return node;
+}
+
+function showToast(msg) {
+  const existing = document.querySelector(".toast");
+  if (existing) existing.remove();
+  const t = el("div", { className: "toast", role: "status", text: msg });
+  document.body.appendChild(t);
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.remove(), 2200);
+}
+
+function selectedTeam() {
+  return TEAMS.find((t) => t.id === selectedTeamId) || TEAMS[0];
+}
+
+function renderCanvas(teamId) {
+  const nodes = CANVAS_NODES[teamId] || [];
+  const board = el("div", { className: "canvas-board", "aria-label": "团队组织画布" });
+  board.appendChild(el("div", { className: "canvas-hint", text: "画布模式 · 组织关系与 Agent 节点（只读预览）" }));
+
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", "canvas-edge-layer");
+  svg.setAttribute("viewBox", "0 0 1200 360");
+  svg.setAttribute("preserveAspectRatio", "none");
+  // simple chain edges
+  for (let i = 0; i < nodes.length - 1; i++) {
+    const a = nodes[i];
+    const b = nodes[i + 1];
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    const x1 = a.x + 84;
+    const y1 = a.y + 44;
+    const x2 = b.x + 84;
+    const y2 = b.y + 44;
+    const mx = (x1 + x2) / 2;
+    path.setAttribute("d", "M " + x1 + " " + y1 + " C " + mx + " " + y1 + ", " + mx + " " + y2 + ", " + x2 + " " + y2);
+    svg.appendChild(path);
+  }
+  board.appendChild(svg);
+
+  nodes.forEach((n) => {
+    board.appendChild(
+      el("article", {
+        className: "canvas-node",
+        "data-tone": n.tone,
+        style: { left: n.x + "px", top: n.y + "px" },
+        onClick: () => showToast("画布节点：" + n.label + " · " + n.role),
+      }, [
+        el("strong", { text: n.label }),
+        el("span", { text: n.role }),
+        el("em", { text: n.status }),
+      ]),
+    );
+  });
+  return board;
+}
+
+function renderBoard(teamId) {
+  const data = BOARD[teamId];
+  if (!data) {
+    return el("div", { className: "workspace-empty" }, [
+      el("strong", { text: "暂无看板数据" }),
+      el("span", { text: "请选择其他团队" }),
+    ]);
+  }
+
+  const hero = el("section", { className: "next-card" }, [
+    el("div", { className: "next-card-top" }, [
+      el("span", { className: "next-badge", text: "下一步" }),
+      el("span", { text: "·" }),
+      el("span", { text: data.projectName }),
+    ]),
+    el("h2", { text: data.nextTitle }),
+    el("p", { text: data.nextBody }),
+    data.handoff
+      ? el("div", { className: "handoff-banner", role: "status" }, [
+          el("strong", { text: "阶段交接" }),
+          el("span", { text: data.handoff }),
+        ])
+      : null,
+    el("div", { className: "metric-row" }, data.metrics.map((m) =>
+      el("div", { className: "metric" }, [el("span", { text: m.label }), el("strong", { text: m.value })],
+    ))),
+    el("div", { className: "next-card-actions" }, [
+      el("button", {
+        type: "button",
+        className: "btn btn-primary",
+        text: data.cta + " →",
+        onClick: () => showToast("主 CTA：" + data.cta),
+      }),
+    ]),
+  ].filter(Boolean));
+
+  const kanban = el("section", { className: "kanban", "aria-label": "看板" }, data.columns.map((col) =>
+    el("div", { className: "kanban-col" }, [
+      el("div", { className: "kanban-col-head" }, [
+        el("h3", { text: col.title }),
+        el("span", { text: String(col.cards.length) }),
+      ]),
+      ...(col.cards.length
+        ? col.cards.map((card) =>
+            el("article", {
+              className: "kanban-card",
+              "data-active": card.active ? "true" : "false",
+              onClick: () => showToast("看板卡片：" + card.title),
+            }, [
+              el("strong", { text: card.title }),
+              el("p", { text: card.body }),
+              el("div", { className: "kanban-card-meta" }, card.meta.map((m) => el("em", { text: m }))),
+              el("div", { className: "kanban-card-foot" }, [
+                el("span", { text: card.foot }),
+                el("button", {
+                  type: "button",
+                  className: "btn btn-ghost",
+                  text: "查看",
+                  onClick: (e) => {
+                    e.stopPropagation();
+                    showToast("查看：" + card.title);
+                  },
+                }),
+              ]),
+            ]),
+          )
+        : [el("p", { className: "preview-note", text: "本列暂无卡片", style: { textAlign: "left", margin: "4px 0" } })]),
+    ]),
+  ));
+
+  const advanced = el("section", { className: "advanced" }, [
+    el("button", {
+      type: "button",
+      className: "advanced-toggle",
+      "aria-expanded": advancedOpen ? "true" : "false",
+      onClick: () => {
+        advancedOpen = !advancedOpen;
+        render();
+      },
+    }, [
+      el("strong", { text: (advancedOpen ? "▾ " : "▸ ") + "高级详情" }),
+      el("span", { text: advancedOpen ? "收起" : "证据与校验" }),
+    ]),
+    advancedOpen
+      ? el("dl", { className: "advanced-panel" }, [
+          el("div", { className: "advanced-row" }, [el("dt", { text: "模式" }), el("dd", { text: "看板 · 团队全量内容" })]),
+          el("div", { className: "advanced-row" }, [el("dt", { text: "项目" }), el("dd", { text: data.projectName })]),
+          el("div", { className: "advanced-row" }, [el("dt", { text: "说明" }), el("dd", { text: "预览页假数据 · 黑白配色 · 可双击打开" })]),
+        ])
+      : null,
+  ]);
+
+  return el("div", { className: "board-overview" }, [
+    el("div", { className: "section-label" }, [
+      el("h3", { text: "项目推进" }),
+      el("span", { text: "看板模式 · 单一主 CTA + 三列阶段" }),
+    ]),
+    hero,
+    el("div", { className: "section-label" }, [
+      el("h3", { text: "阶段看板" }),
+      el("span", { text: "卡片只读预览 · 点击查看" }),
+    ]),
+    kanban,
+    advanced,
+  ]);
+}
+
+function render() {
+  const team = selectedTeam();
+  const root = document.getElementById("root");
+  root.innerHTML = "";
+
+  const filtered = TEAMS.filter((t) => {
+    if (!teamFilter.trim()) return true;
+    const q = teamFilter.trim().toLowerCase();
+    return [t.name, t.kind, t.blurb, t.purpose].join(" ").toLowerCase().includes(q);
+  });
+
+  const rail = el("aside", { className: "team-rail", "aria-label": "团队列表" }, [
+    el("div", { className: "team-rail-head" }, [
+      el("h2", { text: "团队" }),
+      el("span", { text: TEAMS.length + " 个" }),
+    ]),
+    el("input", {
+      className: "team-search",
+      type: "search",
+      placeholder: "搜索团队…",
+      value: teamFilter,
+      "aria-label": "搜索团队",
+      onInput: (e) => {
+        teamFilter = e.target.value;
+        render();
+      },
+    }),
+    el("div", { className: "team-list", role: "listbox", "aria-label": "可选团队" }, filtered.map((t) =>
+      el("button", {
+        type: "button",
+        className: "team-item",
+        role: "option",
+        "data-active": t.id === selectedTeamId ? "true" : "false",
+        "aria-selected": t.id === selectedTeamId ? "true" : "false",
+        onClick: () => {
+          selectedTeamId = t.id;
+          advancedOpen = false;
+          render();
+          showToast("已选择团队：" + t.name);
+        },
+      }, [
+        el("div", { className: "team-item-title" }, [
+          el("span", { text: t.name }),
+          el("em", {
+            text: t.status,
+            style: {
+              fontStyle: "normal",
+              fontSize: "10px",
+              fontWeight: "740",
+              padding: "2px 6px",
+              borderRadius: "999px",
+              border: t.id === selectedTeamId ? "1px solid rgb(255 255 255 / 35%)" : "1px solid var(--line)",
+            },
+          }),
+        ]),
+        el("div", { className: "team-item-meta" }, [
+          el("span", { text: t.kind }),
+          el("span", { text: t.members + " 成员" }),
+        ]),
+        el("small", { text: t.blurb }),
+      ]),
+    )),
+    el("p", {
+      className: "preview-note",
+      text: "左侧选团队 → 右侧展示整队内容。模式：看板 / 画布。",
+      style: { textAlign: "left", margin: "4px" },
+    }),
+  ]);
+
+  const toolbar = el("div", { className: "workspace-toolbar" }, [
+    el("div", { className: "workspace-identity" }, [
+      el("div", { className: "eyebrow", text: "当前团队" }),
+      el("h1", { text: team.name }),
+      el("p", { text: team.purpose }),
+    ]),
+    el("div", { className: "workspace-toolbar-actions" }, [
+      el("div", { className: "mode-switch", role: "tablist", "aria-label": "展示模式" }, [
+        el("button", {
+          type: "button",
+          role: "tab",
+          "data-active": mode === "board" ? "true" : "false",
+          "aria-selected": mode === "board" ? "true" : "false",
+          text: "看板模式",
+          onClick: () => {
+            mode = "board";
+            render();
+          },
+        }),
+        el("button", {
+          type: "button",
+          role: "tab",
+          "data-active": mode === "canvas" ? "true" : "false",
+          "aria-selected": mode === "canvas" ? "true" : "false",
+          text: "画布模式",
+          onClick: () => {
+            mode = "canvas";
+            render();
+          },
+        }),
+      ]),
+      el("button", {
+        type: "button",
+        className: "btn",
+        text: "研究关系图",
+        onClick: () => showToast("打开研究关系图（预览）"),
+      }),
+    ]),
+  ]);
+
+  const body = el(
+    "div",
+    { className: "workspace-body" },
+    [mode === "canvas" ? renderCanvas(team.id) : renderBoard(team.id)],
+  );
+
+  const workspace = el("section", { className: "workspace", "aria-label": "团队内容" }, [
+    toolbar,
+    body,
+  ]);
+
+  const app = el("div", { className: "preview-app" }, [
+    el("header", { className: "topbar" }, [
+      el("div", { className: "topbar-brand" }, [
+        el("div", { className: "topbar-mark" }),
+        el("div", null, [
+          el("strong", { text: "Vibelution" }),
+          el("span", { text: "团队工作台 · 黑白预览" }),
+        ]),
+      ]),
+      el("nav", { className: "topbar-nav", "aria-label": "主导航" }, [
+        el("button", { type: "button", text: "对话" }),
+        el("button", { type: "button", text: "监督进化" }),
+        el("button", { type: "button", text: "自进化" }),
+        el("button", { type: "button", "data-active": "true", text: "团队" }),
+        el("button", { type: "button", text: "Kernel" }),
+        el("button", { type: "button", text: "记忆库" }),
+      ]),
+      el("div", { className: "topbar-meta" }, [
+        el("span", { className: "pill" }, [
+          el("span", { className: "pill-dot" }),
+          document.createTextNode(" 独立页可打开"),
+        ]),
+        el("span", { text: "v1.0.16" }),
+      ]),
+    ]),
+    el("div", { className: "layout" }, [rail, workspace]),
+  ]);
+
+  root.appendChild(app);
+}
+
+document.addEventListener("DOMContentLoaded", render);
+
+  </script>
+</body>
+</html>

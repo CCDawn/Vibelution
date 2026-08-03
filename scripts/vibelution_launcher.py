@@ -392,17 +392,22 @@ def _wait_for_started_backend(process: subprocess.Popen[bytes], port: int, host:
     return 0
 
 
-def _windows_creation_flag_names() -> tuple[str, ...]:
+def _windows_creation_flag_names(*, detach: bool = False) -> tuple[str, ...]:
     if os.name != "nt":
         return ()
-    return ("DETACHED_PROCESS", "CREATE_NEW_PROCESS_GROUP", "CREATE_NO_WINDOW")
+    # MSDN: CREATE_NO_WINDOW is ignored when combined with DETACHED_PROCESS.
+    # Waitable children (tsc/vite/npm-cli): CREATE_NO_WINDOW only.
+    # True background services that already use pythonw may use DETACHED alone.
+    if detach:
+        return ("DETACHED_PROCESS", "CREATE_NEW_PROCESS_GROUP")
+    return ("CREATE_NEW_PROCESS_GROUP", "CREATE_NO_WINDOW")
 
 
-def _windows_creation_flags() -> int:
+def _windows_creation_flags(*, detach: bool = False) -> int:
     if os.name != "nt":
         return 0
     flags = 0
-    for name in _windows_creation_flag_names():
+    for name in _windows_creation_flag_names(detach=detach):
         flags |= int(getattr(subprocess, name, 0))
     return flags
 
@@ -431,7 +436,8 @@ def _run_checked(args: list[str], *, cwd: Path, label: str) -> None:
         stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
-        creationflags=_windows_creation_flags(),
+        # Waitable + no console: never DETACHED, never npm.cmd shell.
+        creationflags=_windows_creation_flags(detach=False),
         startupinfo=_hidden_startup_info(),
         check=False,
     )
@@ -648,29 +654,31 @@ def _node_command() -> str:
 
 
 def _npm_cli_script_for_node(node_command: str) -> str:
-    npm_command = shutil.which("npm")
-    if npm_command:
+    """Resolve npm-cli.js so we never invoke npm.cmd (console flash on Windows)."""
+    candidates: list[Path] = []
+    for which_name in ("npm", "npm.cmd"):
+        npm_command = shutil.which(which_name)
+        if not npm_command:
+            continue
         npm_path = Path(npm_command)
-        candidate_roots = [npm_path.parent, npm_path.parent.parent]
-        for root in candidate_roots:
-            candidate = root / "node_modules" / "npm" / "bin" / "npm-cli.js"
-            if candidate.exists():
-                return str(candidate)
+        candidates.extend([npm_path.parent, npm_path.parent.parent])
     node_path = Path(node_command)
-    candidate_roots = [node_path.parent, node_path.parent.parent]
-    for root in candidate_roots:
+    candidates.extend([node_path.parent, node_path.parent.parent])
+    for root in candidates:
         candidate = root / "node_modules" / "npm" / "bin" / "npm-cli.js"
-        if candidate.exists():
+        if candidate.is_file():
             return str(candidate)
-    return "npm"
+    raise RuntimeError(
+        "npm-cli.js was not found next to Node.js/npm. "
+        "Install Node.js with npm, or repair the Node installation. "
+        "Refusing to run npm.cmd (it opens a visible console on Windows)."
+    )
 
 
 def _npm_install_command() -> tuple[list[str], str]:
     node_command = _node_command()
     npm_cli_script = _npm_cli_script_for_node(node_command)
-    if npm_cli_script != "npm":
-        return [node_command, npm_cli_script, "install"], "node npm-cli.js install"
-    return ["npm", "install"], "npm install"
+    return [node_command, npm_cli_script, "install"], "node npm-cli.js install"
 
 
 def _frontend_build_commands(package_manager: str, web_dir: Path) -> list[tuple[list[str], str]]:

@@ -228,15 +228,107 @@ def start_source_collection_run(team_id: str, payload: dict[str, Any] | None = N
     }
 
 
-def reset_research_project_source_collection(team_id: str, project_id: str) -> dict[str, Any]:
-    """Clear only a project's still-recoverable Stage-1 source collection.
+def _stage_round_source_run_ids(item: dict[str, Any]) -> set[str]:
+    s = _service()
+    return {
+        s._trim_text(source_run_id, max_length=160)
+        for source_run_id in list(item.get("sourceRunIds") or [])
+        if s._trim_text(source_run_id, max_length=160)
+    }
 
-    This is intentionally narrower than a project reset: it preserves Agent
-    conversations, formal knowledge, question ledgers, and every downstream
-    experiment.  A reset is rejected once this project's source candidates
-    have been used to create any non-source research artifact.
-    """
 
+def _stage_round_belongs_to_research_project(
+    item: dict[str, Any],
+    research_project_id: str,
+    project_run_ids: set[str],
+) -> bool:
+    """Scope stage rounds to one research project when resetting Stage-1 sources."""
+
+    s = _service()
+    if not isinstance(item, dict):
+        return False
+    round_project_id = s._trim_text(item.get("researchProjectId"), max_length=160)
+    if round_project_id:
+        return round_project_id == research_project_id
+    source_run_ids = _stage_round_source_run_ids(item)
+    if source_run_ids:
+        return bool(source_run_ids & project_run_ids)
+    # Unscoped legacy rounds only attach to the legacy project boundary.
+    return research_project_id == s.LEGACY_PROJECT_ID
+
+
+def _candidate_belongs_to_research_project(
+    candidate: dict[str, Any],
+    research_project_id: str,
+    project_run_ids: set[str],
+) -> bool:
+    """Decide whether a candidate is owned by the project being reset."""
+
+    s = _service()
+    if not isinstance(candidate, dict):
+        return False
+    metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+    candidate_project_id = s._trim_text(
+        candidate.get("researchProjectId") or metadata.get("researchProjectId"),
+        max_length=160,
+    )
+    if candidate_project_id:
+        return candidate_project_id == research_project_id
+    imported = metadata.get("importedFromDataRecord") if isinstance(metadata.get("importedFromDataRecord"), dict) else {}
+    imported_run_id = s._trim_text(imported.get("runId"), max_length=160)
+    if imported_run_id:
+        return imported_run_id in project_run_ids
+    # Unscoped candidates without provenance stay on the legacy project only.
+    return research_project_id == s.LEGACY_PROJECT_ID
+
+
+def _project_source_collection_run_ids(team_id: str, research_project_id: str) -> set[str]:
+    s = _service()
+    runs_payload = s.data_processing_service.list_processing_runs(
+        limit=200,
+        metadata_filters={"startedFrom": "team_workflow_source_collection", "teamId": team_id},
+    )
+    return {
+        s._trim_text(item.get("runId"), max_length=160)
+        for item in list(runs_payload.get("runs") or [])
+        if isinstance(item, dict)
+        and s._source_collection_run_belongs_to_team(item, team_id)
+        and s._source_collection_run_belongs_to_research_project(item, research_project_id)
+        and s._trim_text(item.get("runId"), max_length=160)
+    }
+
+
+def _assert_project_source_search_not_active(team_id: str, run_ids: set[str]) -> None:
+    s = _service()
+    active_snapshot = s._source_collection_work_run_store().load_active_snapshot(s.SOURCE_COLLECTION_WORK_RUN_KIND)
+    active_snapshot = s._decorate_source_collection_work_run_snapshot(active_snapshot)
+    active_run_id = s._trim_text(active_snapshot.get("runId"), max_length=160) if isinstance(active_snapshot, dict) else ""
+    if active_run_id in run_ids and s._source_collection_background_snapshot_is_active(
+        active_snapshot,
+        team_id,
+        active_run_id,
+    ):
+        raise s.TeamWorkflowOrchestrationError(
+            "当前项目的资料搜索仍在进行。请等待结束后再清空本项目资料。"
+            " The current project's source search is still running. Wait for it to finish before clearing this project."
+        )
+
+
+def _delete_project_source_collection_runs(team_id: str, run_ids: set[str]) -> list[str]:
+    s = _service()
+    removed_run_ids: list[str] = []
+    for run_id in sorted(run_ids):
+        s._source_collection_work_run_store().delete_snapshot(s.SOURCE_COLLECTION_WORK_RUN_KIND, run_id)
+        artifacts = s._source_collection_storage_artifact_paths(team_id, run_id)
+        run_directory = artifacts["runDirectory"]
+        if run_directory.exists():
+            shutil.rmtree(run_directory)
+        s.data_processing_service.delete_processing_run(run_id)
+        removed_run_ids.append(run_id)
+    return removed_run_ids
+
+
+def _require_active_research_project(team_id: str, project_id: str) -> tuple[Any, str, str, dict[str, Any]]:
     s = _service()
     normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
     normalized_project_id = s._normalize_required_id(project_id, "Research project id is required.")
@@ -246,73 +338,83 @@ def reset_research_project_source_collection(team_id: str, project_id: str) -> d
         raise s.TeamWorkflowOrchestrationError(
             "Source collection can only be reset for the active research project."
         )
+    return s, normalized_team_id, normalized_project_id, active_project
 
-    runs_payload = s.data_processing_service.list_processing_runs(
-        limit=200,
-        metadata_filters={"startedFrom": "team_workflow_source_collection", "teamId": normalized_team_id},
+
+def reset_research_project_source_collection(team_id: str, project_id: str) -> dict[str, Any]:
+    """Clear only a project's still-recoverable Stage-1 source collection.
+
+    This is intentionally narrower than a project reset: it preserves Agent
+    conversations, formal knowledge, question ledgers, and every downstream
+    experiment.  A reset is rejected once **this** project's source candidates
+    have been used to create any non-source research artifact. Downstream
+    artifacts belonging to other research projects on the same team must not
+    block Stage-1 recovery for the active project.
+
+    When Stage-1 is blocked, call ``reset_research_project_progress`` for an
+    explicit cascade that also clears this project's experiment/iteration.
+    """
+
+    s, normalized_team_id, normalized_project_id, active_project = _require_active_research_project(
+        team_id, project_id
     )
-    runs = [
-        item
-        for item in list(runs_payload.get("runs") or [])
-        if isinstance(item, dict)
-        and s._source_collection_run_belongs_to_team(item, normalized_team_id)
-        and s._source_collection_run_belongs_to_research_project(item, normalized_project_id)
-    ]
-    run_ids = {
-        s._trim_text(item.get("runId"), max_length=160)
-        for item in runs
-        if s._trim_text(item.get("runId"), max_length=160)
-    }
-
-    active_snapshot = s._source_collection_work_run_store().load_active_snapshot(s.SOURCE_COLLECTION_WORK_RUN_KIND)
-    active_snapshot = s._decorate_source_collection_work_run_snapshot(active_snapshot)
-    active_run_id = s._trim_text(active_snapshot.get("runId"), max_length=160) if isinstance(active_snapshot, dict) else ""
-    if active_run_id in run_ids and s._source_collection_background_snapshot_is_active(
-        active_snapshot,
-        normalized_team_id,
-        active_run_id,
-    ):
-        raise s.TeamWorkflowOrchestrationError(
-            "The current project's source search is still running. Wait for it to finish before clearing this project."
-        )
+    run_ids = _project_source_collection_run_ids(normalized_team_id, normalized_project_id)
+    _assert_project_source_search_not_active(normalized_team_id, run_ids)
 
     removed_candidate_ids: set[str] = set()
     removed_round_ids: set[str] = set()
     with s._WORKFLOW_LOCK:
         stage_store = s._load_stage_round_store(normalized_team_id)
         stage_rounds = s._stage_rounds(stage_store)
+        # Only this project's experiment/iteration rounds block Stage-1 reset.
+        # Other projects on the same team keep their own audit trail independently.
         downstream_rounds = [
             item
             for item in stage_rounds
             if str(item.get("stageType") or "") in {"experiment", "iteration"}
+            and _stage_round_belongs_to_research_project(item, normalized_project_id, run_ids)
         ]
         if downstream_rounds:
             raise s.TeamWorkflowOrchestrationError(
-                "This project already has downstream experiment or iteration artifacts; source collection is preserved for audit."
+                "本项目已有实验设计或迭代产物，资料批次保留供审计，无法仅清空资料后重开。"
+                "请使用「连同实验与迭代一起清空」。 "
+                "This project already has downstream experiment or iteration artifacts; source collection is preserved for audit. "
+                "Use the include-downstream project reset."
             )
 
         candidate_store = s._load_candidate_store(normalized_team_id)
         candidates = [item for item in list(candidate_store.get("candidates") or []) if isinstance(item, dict)]
         removable_candidates: list[dict[str, Any]] = []
-        protected_candidates: list[dict[str, Any]] = []
+        kept_candidates: list[dict[str, Any]] = []
+        project_non_source_candidates: list[dict[str, Any]] = []
+        project_protected_source_candidates: list[dict[str, Any]] = []
         for candidate in candidates:
             metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
             imported = metadata.get("importedFromDataRecord") if isinstance(metadata.get("importedFromDataRecord"), dict) else {}
             imported_run_id = s._trim_text(imported.get("runId"), max_length=160)
             if candidate.get("candidateType") == "source_manifest" and imported_run_id in run_ids:
                 removable_candidates.append(candidate)
+                continue
+            if not _candidate_belongs_to_research_project(candidate, normalized_project_id, run_ids):
+                # Other research projects' candidates stay untouched.
+                kept_candidates.append(candidate)
+                continue
+            kept_candidates.append(candidate)
+            if str(candidate.get("candidateType") or "") != "source_manifest":
+                project_non_source_candidates.append(candidate)
             else:
-                protected_candidates.append(candidate)
-        non_source_candidates = [
-            item for item in protected_candidates if str(item.get("candidateType") or "") != "source_manifest"
-        ]
-        if non_source_candidates:
+                project_protected_source_candidates.append(candidate)
+        if project_non_source_candidates:
             raise s.TeamWorkflowOrchestrationError(
-                "This project already contains downstream research candidates; source collection is preserved for audit."
+                "本项目已有下游科研候选（非资料清单），资料批次保留供审计，无法仅清空资料后重开。"
+                "请使用「连同实验与迭代一起清空」。 "
+                "This project already contains downstream research candidates; source collection is preserved for audit. "
+                "Use the include-downstream project reset."
             )
-        if protected_candidates:
+        if project_protected_source_candidates:
             raise s.TeamWorkflowOrchestrationError(
-                "This project contains source records outside its resettable batches; source collection is preserved for audit."
+                "本项目存在不可重置的资料记录（不在当前可清空批次内），资料保留供审计。"
+                " This project contains source records outside its resettable batches; source collection is preserved for audit."
             )
 
         removed_candidate_ids = {
@@ -322,13 +424,12 @@ def reset_research_project_source_collection(team_id: str, project_id: str) -> d
         }
         remaining_rounds: list[dict[str, Any]] = []
         for item in stage_rounds:
-            source_run_ids = {
-                s._trim_text(source_run_id, max_length=160)
-                for source_run_id in list(item.get("sourceRunIds") or [])
-                if s._trim_text(source_run_id, max_length=160)
-            }
-            is_resettable_round = str(item.get("stageType") or "") == "knowledge_collection" and (
-                not source_run_ids or source_run_ids.issubset(run_ids)
+            source_run_ids = _stage_round_source_run_ids(item)
+            belongs = _stage_round_belongs_to_research_project(item, normalized_project_id, run_ids)
+            is_resettable_round = (
+                belongs
+                and str(item.get("stageType") or "") == "knowledge_collection"
+                and (not source_run_ids or source_run_ids.issubset(run_ids))
             )
             if is_resettable_round:
                 stage_round_id = s._trim_text(item.get("stageRoundId"), max_length=160)
@@ -337,7 +438,7 @@ def reset_research_project_source_collection(team_id: str, project_id: str) -> d
                 continue
             remaining_rounds.append(item)
 
-        candidate_store["candidates"] = protected_candidates
+        candidate_store["candidates"] = kept_candidates
         candidate_store["updatedAt"] = s.utc_now_iso()
         stage_store["rounds"] = remaining_rounds
         stage_store["updatedAt"] = s.utc_now_iso()
@@ -353,21 +454,14 @@ def reset_research_project_source_collection(team_id: str, project_id: str) -> d
         s._write_json(s._stage_round_store_path(normalized_team_id), stage_store)
         s._write_json(s._workflow_path(normalized_team_id), workflow)
 
-    removed_run_ids: list[str] = []
-    for run_id in sorted(run_ids):
-        s._source_collection_work_run_store().delete_snapshot(s.SOURCE_COLLECTION_WORK_RUN_KIND, run_id)
-        artifacts = s._source_collection_storage_artifact_paths(normalized_team_id, run_id)
-        run_directory = artifacts["runDirectory"]
-        if run_directory.exists():
-            shutil.rmtree(run_directory)
-        s.data_processing_service.delete_processing_run(run_id)
-        removed_run_ids.append(run_id)
+    removed_run_ids = _delete_project_source_collection_runs(normalized_team_id, run_ids)
 
     s._record_workflow_event(
         "source_collection.research_project_reset",
         normalized_team_id,
         fields={
             "researchProjectId": normalized_project_id,
+            "includeDownstream": False,
             "removedRunCount": len(removed_run_ids),
             "removedSourceCandidateCount": len(removed_candidate_ids),
             "removedStageRoundCount": len(removed_round_ids),
@@ -379,10 +473,142 @@ def reset_research_project_source_collection(team_id: str, project_id: str) -> d
         "teamId": normalized_team_id,
         "researchProjectId": normalized_project_id,
         "experimentName": active_project["name"],
+        "includeDownstream": False,
         "removedRunIds": removed_run_ids,
         "removedRunCount": len(removed_run_ids),
         "removedSourceCandidateCount": len(removed_candidate_ids),
         "removedStageRoundCount": len(removed_round_ids),
+        "removedExperimentPlanCount": 0,
+        "nextAction": "Create a fresh source-collection batch for this research project.",
+    }
+
+
+def reset_research_project_progress(team_id: str, project_id: str) -> dict[str, Any]:
+    """Explicitly clear this project's Stage-1 sources plus experiment/iteration.
+
+    Scope (active research project only):
+    - source-collection runs and storage artifacts
+    - knowledge_collection / experiment / iteration stage rounds
+    - candidates owned by the project (source manifests and downstream)
+    - experiment plans owned by the project
+
+    Preserved: other projects, Agent conversations, formal knowledge ledgers,
+    challenge question ledgers, and team-wide configuration.
+    """
+
+    s, normalized_team_id, normalized_project_id, active_project = _require_active_research_project(
+        team_id, project_id
+    )
+    run_ids = _project_source_collection_run_ids(normalized_team_id, normalized_project_id)
+    _assert_project_source_search_not_active(normalized_team_id, run_ids)
+
+    removed_candidate_ids: set[str] = set()
+    removed_round_ids: set[str] = set()
+    removed_plan_ids: set[str] = set()
+    with s._WORKFLOW_LOCK:
+        stage_store = s._load_stage_round_store(normalized_team_id)
+        stage_rounds = s._stage_rounds(stage_store)
+        remaining_rounds: list[dict[str, Any]] = []
+        for item in stage_rounds:
+            belongs = _stage_round_belongs_to_research_project(item, normalized_project_id, run_ids)
+            if belongs:
+                stage_round_id = s._trim_text(item.get("stageRoundId"), max_length=160)
+                if stage_round_id:
+                    removed_round_ids.add(stage_round_id)
+                continue
+            remaining_rounds.append(item)
+
+        candidate_store = s._load_candidate_store(normalized_team_id)
+        candidates = [item for item in list(candidate_store.get("candidates") or []) if isinstance(item, dict)]
+        kept_candidates: list[dict[str, Any]] = []
+        for candidate in candidates:
+            metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+            imported = metadata.get("importedFromDataRecord") if isinstance(metadata.get("importedFromDataRecord"), dict) else {}
+            imported_run_id = s._trim_text(imported.get("runId"), max_length=160)
+            remove = (
+                (candidate.get("candidateType") == "source_manifest" and imported_run_id in run_ids)
+                or _candidate_belongs_to_research_project(candidate, normalized_project_id, run_ids)
+            )
+            if remove:
+                candidate_id = s._trim_text(candidate.get("candidateId"), max_length=160)
+                if candidate_id:
+                    removed_candidate_ids.add(candidate_id)
+                continue
+            kept_candidates.append(candidate)
+
+        plan_store = s._load_experiment_plan_store(normalized_team_id)
+        plans = [item for item in list(plan_store.get("plans") or []) if isinstance(item, dict)]
+        kept_plans: list[dict[str, Any]] = []
+        for plan in plans:
+            plan_project_id = s._trim_text(plan.get("researchProjectId"), max_length=160)
+            plan_id = s._trim_text(plan.get("planId"), max_length=160)
+            if plan_project_id and plan_project_id == normalized_project_id:
+                if plan_id:
+                    removed_plan_ids.add(plan_id)
+                continue
+            # Plans without project id stay unless they only reference removed candidates.
+            if not plan_project_id and plan_id:
+                linked_candidate_ids = {
+                    s._trim_text(value, max_length=160)
+                    for value in [
+                        plan.get("candidateId"),
+                        plan.get("hypothesisCandidateId"),
+                        *((plan.get("hypothesisCandidateIds") or []) if isinstance(plan.get("hypothesisCandidateIds"), list) else []),
+                    ]
+                    if s._trim_text(value, max_length=160)
+                }
+                if linked_candidate_ids and linked_candidate_ids.issubset(removed_candidate_ids):
+                    removed_plan_ids.add(plan_id)
+                    continue
+            kept_plans.append(plan)
+        active_plan_id = s._trim_text(plan_store.get("activePlanId"), max_length=160)
+        if active_plan_id in removed_plan_ids:
+            plan_store["activePlanId"] = ""
+        plan_store["plans"] = kept_plans
+        plan_store["updatedAt"] = s.utc_now_iso()
+
+        candidate_store["candidates"] = kept_candidates
+        candidate_store["updatedAt"] = s.utc_now_iso()
+        stage_store["rounds"] = remaining_rounds
+        stage_store["updatedAt"] = s.utc_now_iso()
+        workflow = s._load_or_create_workflow(normalized_team_id)
+        workflow["activeWorkflowItems"] = [
+            item
+            for item in list(workflow.get("activeWorkflowItems") or [])
+            if isinstance(item, dict)
+            and s._trim_text(item.get("candidateId"), max_length=160) not in (run_ids | removed_candidate_ids)
+        ]
+        workflow["updatedAt"] = s.utc_now_iso()
+        s._write_json(s._candidate_store_path(normalized_team_id), candidate_store)
+        s._write_json(s._stage_round_store_path(normalized_team_id), stage_store)
+        s._write_json(s._experiment_plan_store_path(normalized_team_id), plan_store)
+        s._write_json(s._workflow_path(normalized_team_id), workflow)
+
+    removed_run_ids = _delete_project_source_collection_runs(normalized_team_id, run_ids)
+    s._record_workflow_event(
+        "research_project.progress_reset",
+        normalized_team_id,
+        fields={
+            "researchProjectId": normalized_project_id,
+            "includeDownstream": True,
+            "removedRunCount": len(removed_run_ids),
+            "removedSourceCandidateCount": len(removed_candidate_ids),
+            "removedStageRoundCount": len(removed_round_ids),
+            "removedExperimentPlanCount": len(removed_plan_ids),
+        },
+        outcome="completed",
+    )
+    return {
+        "schemaVersion": s.SCHEMA_VERSION,
+        "teamId": normalized_team_id,
+        "researchProjectId": normalized_project_id,
+        "experimentName": active_project["name"],
+        "includeDownstream": True,
+        "removedRunIds": removed_run_ids,
+        "removedRunCount": len(removed_run_ids),
+        "removedSourceCandidateCount": len(removed_candidate_ids),
+        "removedStageRoundCount": len(removed_round_ids),
+        "removedExperimentPlanCount": len(removed_plan_ids),
         "nextAction": "Create a fresh source-collection batch for this research project.",
     }
 

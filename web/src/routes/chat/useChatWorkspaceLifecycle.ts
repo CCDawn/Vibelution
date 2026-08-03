@@ -41,6 +41,7 @@ import {
 import { useChatWorkbenchStore } from "../../store/chatWorkbenchStore";
 import { clearSessionDeleteTombstone, markSessionDeleteTombstone } from "../sessionDeleteTombstone";
 import { createTempSessionId, isTempSessionId } from "../sessionOptimisticIds";
+import { defaultNewSessionTitle } from "./useChatSessionRenameMenu";
 
 type ChatWorkspaceCache = ReturnType<typeof createChatWorkspaceCache>;
 type RightIndexPanel = "conversations" | "members";
@@ -242,10 +243,11 @@ export function useChatWorkspaceLifecycle({
       const tempSessionId = createTempSessionId();
       const previousActiveSessionId = String(useChatWorkbenchStore.getState().activeSessionId || "").trim();
       const normalizedAgentId = String(agentId || "").trim();
-      const title = t("newSession");
+      // Match backend create default ("新会话"), not the create-button label ("新建会话").
+      const title = defaultNewSessionTitle(lang);
       const nowIso = new Date().toISOString();
       // Remount during temp→real would blur the title input and auto-finish rename; suppress that.
-      suppressRenameBlurUntilRef.current = Date.now() + 800;
+      suppressRenameBlurUntilRef.current = Date.now() + 2500;
       const optimisticDetail: SessionDetail = {
         id: tempSessionId,
         title,
@@ -292,8 +294,9 @@ export function useChatWorkspaceLifecycle({
         return;
       }
       const agentId = String(nextDetail.agentId || variables.agentId || context?.agentId || "").trim();
-      // Always keep the create placeholder; never prefill Agent display name into the tab field.
-      const title = t("newSession");
+      // Prefer server title when it is already a create placeholder; never prefill Agent name.
+      const serverTitle = String(nextDetail.title || "").trim();
+      const title = serverTitle || defaultNewSessionTitle(lang);
       const seededDetail: SessionDetail = {
         ...nextDetail,
         id: nextId,
@@ -316,7 +319,7 @@ export function useChatWorkspaceLifecycle({
       // Keep user focus if they already switched away from the temp tab.
       if (!currentActive || currentActive === tempSessionId || isTempSessionId(currentActive)) {
         // Extend blur suppress through remount so rename field stays open for typing.
-        suppressRenameBlurUntilRef.current = Date.now() + 800;
+        suppressRenameBlurUntilRef.current = Date.now() + 2500;
         setActiveSession(nextId);
         editingSessionIdRef.current = nextId;
         setEditingSessionId(nextId);
