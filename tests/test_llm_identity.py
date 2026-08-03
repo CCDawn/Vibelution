@@ -60,6 +60,16 @@ def test_credential_resolution_does_not_expose_secret_in_repr() -> None:
     assert "super-secret" not in repr(result)
 
 
+def test_credential_resolution_trims_surrounding_whitespace_from_env_secret() -> None:
+    result = resolve_credential_ref(
+        "env:RELAY_KEY",
+        env_reader=lambda name: "\r\n  provider-secret\t " if name == "RELAY_KEY" else None,
+    )
+
+    assert result.state == "configured"
+    assert result.secret == "provider-secret"
+
+
 def test_provider_fingerprint_uses_endpoint_and_reference_not_secret() -> None:
     expected = hashlib.sha256(b"https://relay.example/v1\0env:RELAY_KEY").hexdigest()
     assert (

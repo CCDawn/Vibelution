@@ -38,7 +38,7 @@ def resolve_credential_ref(
     if canonical == "none":
         return CredentialResolution(reference="none", state="not_required", source="none")
     variable = canonical.removeprefix("env:")
-    secret = str(env_reader(variable) or "")
+    secret = str(env_reader(variable) or "").strip()
     return CredentialResolution(
         reference=canonical,
         state="configured" if secret else "missing",

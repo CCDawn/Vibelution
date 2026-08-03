@@ -2,12 +2,27 @@
 set -eu
 
 repo_root=$(git rev-parse --show-toplevel)
-project_python="$repo_root/.venv/Scripts/python.exe"
+if [ -x "$repo_root/.venv/Scripts/python.exe" ]; then
+  project_python="$repo_root/.venv/Scripts/python.exe"
+elif [ -x "$repo_root/.venv/bin/python" ]; then
+  project_python="$repo_root/.venv/bin/python"
+else
+  project_python=""
+fi
 
-if [ ! -x "$project_python" ]; then
-  echo "[pre-commit] missing project Python: $project_python" >&2
+if [ -z "$project_python" ]; then
+  echo "[pre-commit] missing project Python under .venv/Scripts or .venv/bin" >&2
   echo "[pre-commit] repair: powershell -ExecutionPolicy Bypass -File scripts/vibelution_launcher.ps1 -Action repair-deps" >&2
   exit 1
 fi
+
+if ! command -v npm >/dev/null 2>&1; then
+  echo "[pre-commit] missing npm; cannot verify web/package-lock.json" >&2
+  exit 1
+fi
+
+# npm ci validates that the root package manifest and package lock describe the
+# same dependency tree without changing either file.
+npm --silent --prefix "$repo_root/web" ci --ignore-scripts --dry-run --no-audit --no-fund
 
 exec "$project_python" "$repo_root/scripts/local_quality_gate.py" commit
