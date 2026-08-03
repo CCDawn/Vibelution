@@ -2395,6 +2395,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.challengeWorkspaceInspector).toContain("w-full");
     expect(routeStyles.challengeWorkspaceLayout).toBeTypeOf("string");
     expect(routeStyles.challengeWorkspaceLayout).toContain("!grid-cols-[minmax(0,1fr)]");
+    expect(routeStyles.challengeWorkspaceLayout).toContain("h-full");
+    expect(routeStyles.challengeWorkspaceLayout).toContain("max-h-full");
     expect(routeStyles.challengeSurfaceSwitch).toBeTypeOf("string");
     expect(routeStyles.challengeSurfaceSwitchActive).toBeTypeOf("string");
     expect(routeStyles.researchStageAgentSummary).toBeTypeOf("string");
