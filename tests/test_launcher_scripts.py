@@ -56,11 +56,19 @@ def test_launcher_script_is_utf8_with_bom_for_windows_powershell_compatibility()
 def test_launcher_precommit_hook_supports_posix_venv_and_verifies_web_lock():
     source = (PROJECT_ROOT / ".githooks" / "pre-commit").read_text(encoding="utf-8")
     attributes = (PROJECT_ROOT / ".gitattributes").read_text(encoding="utf-8")
+    mode = subprocess.run(
+        ["git", "ls-files", "--stage", "--", ".githooks/pre-commit"],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split(maxsplit=1)[0]
 
     assert '"$repo_root/.venv/Scripts/python.exe"' in source
     assert '"$repo_root/.venv/bin/python"' in source
     assert 'npm --silent --prefix "$repo_root/web" ci --ignore-scripts --dry-run --no-audit --no-fund' in source
     assert ".githooks/pre-commit text eol=lf" in attributes
+    assert mode == "100755"
 
 
 def test_launcher_ci_verifies_package_lock_stays_in_sync():
