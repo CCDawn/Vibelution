@@ -23,7 +23,6 @@ import {
   captureAgentSessionCacheSnapshots,
   captureSessionIndexCacheSnapshots,
   removeSessionFromAgentSessionCaches,
-  renameAgentDirectoryEntries,
   restoreAgentSessionCacheSnapshots,
   restoreSessionIndexCacheSnapshots,
   updateAgentSessionSummaryCaches,
@@ -114,6 +113,8 @@ export type UseChatWorkspaceLifecycleOptions = {
   editingSessionIdRef: MutableRefObject<string | null>;
   setEditingSessionId: Dispatch<SetStateAction<string | null>>;
   setEditingSessionTitle: Dispatch<SetStateAction<string>>;
+  /** Ignore rename blur for a short window after optimistic create remounts the tab. */
+  suppressRenameBlurUntilRef: MutableRefObject<number>;
 };
 
 export type UseChatWorkspaceLifecycleResult = {
@@ -224,6 +225,7 @@ export function useChatWorkspaceLifecycle({
   editingSessionIdRef,
   setEditingSessionId,
   setEditingSessionTitle,
+  suppressRenameBlurUntilRef,
 }: UseChatWorkspaceLifecycleOptions): UseChatWorkspaceLifecycleResult {
   const createSessionMutation = useMutation({
     mutationFn: async ({ agentId }: { agentId: string }) =>
@@ -242,6 +244,8 @@ export function useChatWorkspaceLifecycle({
       const normalizedAgentId = String(agentId || "").trim();
       const title = t("newSession");
       const nowIso = new Date().toISOString();
+      // Remount during temp→real would blur the title input and auto-finish rename; suppress that.
+      suppressRenameBlurUntilRef.current = Date.now() + 800;
       const optimisticDetail: SessionDetail = {
         id: tempSessionId,
         title,
@@ -288,7 +292,8 @@ export function useChatWorkspaceLifecycle({
         return;
       }
       const agentId = String(nextDetail.agentId || variables.agentId || context?.agentId || "").trim();
-      const title = String(nextDetail.title || t("newSession")).trim() || t("newSession");
+      // Always keep the create placeholder; never prefill Agent display name into the tab field.
+      const title = t("newSession");
       const seededDetail: SessionDetail = {
         ...nextDetail,
         id: nextId,
@@ -310,6 +315,8 @@ export function useChatWorkspaceLifecycle({
       const currentActive = String(useChatWorkbenchStore.getState().activeSessionId || "").trim();
       // Keep user focus if they already switched away from the temp tab.
       if (!currentActive || currentActive === tempSessionId || isTempSessionId(currentActive)) {
+        // Extend blur suppress through remount so rename field stays open for typing.
+        suppressRenameBlurUntilRef.current = Date.now() + 800;
         setActiveSession(nextId);
         editingSessionIdRef.current = nextId;
         setEditingSessionId(nextId);
@@ -791,10 +798,7 @@ export function useChatWorkspaceLifecycle({
       const previousAgentSessionCaches = captureAgentSessionCacheSnapshots(queryClient);
       const previousConversations = queryClient.getQueryData<ConversationSummary[]>(queryKeys.conversations());
       const previousDetail = queryClient.getQueryData<SessionDetail>(queryKeys.session(variables.sessionId));
-      const previousAgents = queryClient.getQueryData<AgentInstance[]>(queryKeys.agents());
       const targetSession = previousDetail ?? previousSessions?.find((session) => session.id === variables.sessionId);
-      const targetAgentId = String(targetSession?.agentId || "").trim();
-      const targetSessionKind = String(targetSession?.sessionKind || "main").trim().toLowerCase();
       const renameSummaries = (sessions: SessionSummary[] | undefined) =>
         renameSessionInSummaries(sessions, variables.sessionId, variables.title, updatedAt);
       editingSessionIdRef.current = null;
@@ -812,18 +816,13 @@ export function useChatWorkspaceLifecycle({
       queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), (detail) =>
         renameSessionDetail(detail, variables.sessionId, variables.title, updatedAt),
       );
-      if (targetAgentId && targetSessionKind !== "child") {
-        queryClient.setQueryData<AgentInstance[]>(queryKeys.agents(), (agents) =>
-          renameAgentDirectoryEntries(agents, targetAgentId, variables.title),
-        );
-      }
+      // Session tab rename must not rewrite Agent displayName (multi-session Agents).
       return {
         previousSessions,
         previousSessionIndexCaches,
         previousAgentSessionCaches,
         previousConversations,
         previousDetail,
-        previousAgents,
       };
     },
     onSuccess: (nextDetail, variables) => {
@@ -847,14 +846,6 @@ export function useChatWorkspaceLifecycle({
         ...(detail ?? nextDetail),
         ...nextDetail,
       }));
-      const agentId = String(nextDetail.agentId || "").trim();
-      const sessionKind = String(nextDetail.sessionKind || "main").trim().toLowerCase();
-      if (agentId && sessionKind !== "child") {
-        queryClient.setQueryData<AgentInstance[]>(queryKeys.agents(), (agents) =>
-          renameAgentDirectoryEntries(agents, agentId, confirmedTitle),
-        );
-        void queryClient.invalidateQueries({ queryKey: queryKeys.agents() });
-      }
     },
     onError: (error, variables, context) => {
       if (context?.previousSessions) {
@@ -867,9 +858,6 @@ export function useChatWorkspaceLifecycle({
       }
       if (context?.previousDetail) {
         queryClient.setQueryData(queryKeys.session(variables.sessionId), context.previousDetail);
-      }
-      if (context?.previousAgents !== undefined) {
-        queryClient.setQueryData(queryKeys.agents(), context.previousAgents);
       }
       if (!editingSessionIdRef.current || editingSessionIdRef.current === variables.sessionId) {
         editingSessionIdRef.current = variables.sessionId;

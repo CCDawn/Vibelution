@@ -134,7 +134,7 @@ export type AgentSessionTabStripProps = {
   onDeleteSession: (session: SessionSummary) => void;
   onRenameTitleChange: (title: string) => void;
   onSetActiveTab: (sessionId: string, tab: "agent") => void;
-  onSubmitRename: (session: SessionSummary) => void;
+  onSubmitRename: (session: SessionSummary, options?: { reason?: "blur" | "explicit" }) => void;
 };
 
 function agentSessionTabElementId(kind: "session" | "cli", id: string) {
@@ -314,7 +314,7 @@ export function AgentSessionTabStrip({
                   onKeyDown={(event) => {
                     if (event.key === "Enter") {
                       event.preventDefault();
-                      onSubmitRename(session);
+                      onSubmitRename(session, { reason: "explicit" });
                     }
                     if (event.key === "Escape") {
                       event.preventDefault();
@@ -326,7 +326,7 @@ export function AgentSessionTabStrip({
                     if (nextFocus instanceof Node && event.currentTarget.closest("[data-agent-session-tab-container]")?.contains(nextFocus)) {
                       return;
                     }
-                    onSubmitRename(session);
+                    onSubmitRename(session, { reason: "blur" });
                   }}
                   aria-label={t("renameSession")}
                 />
@@ -335,7 +335,7 @@ export function AgentSessionTabStrip({
                 <VIconButton
                   type="button"
                   className={styles.agentSessionTabEditButton}
-                  onPress={() => onSubmitRename(session)}
+                  onPress={() => onSubmitRename(session, { reason: "explicit" })}
                   isDisabled={sessionRenamePending}
                   title={t("saveSessionName")}
                   label={`${t("saveSessionName")} ${sessionTitle}`}
