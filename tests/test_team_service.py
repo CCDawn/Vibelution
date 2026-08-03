@@ -288,6 +288,27 @@ def test_challenge_cup_research_team_uses_source_ingestor_for_governed_ingestion
     assert "cli_tool" not in policy["allowedTools"]
 
 
+def test_challenge_cup_managed_agents_default_to_full_access_without_changing_personal_default(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+
+    initial = team_service.ensure_challenge_cup_research_team_agents(purge_stale=True)
+    finder_member = next(member for member in initial["team"]["members"] if member["role"] == "source_finder")
+    agent_directory_service.update_agent_instance(
+        finder_member["agentId"],
+        permission_preset="request_approval",
+    )
+
+    repaired = team_service.ensure_challenge_cup_research_team_agents(purge_stale=True)
+    managed_agents = [
+        agent_directory_service.get_agent(member["agentId"])
+        for member in repaired["team"]["members"]
+    ]
+    personal_agent = agent_directory_service.create_agent_instance(display_name="Personal Agent")
+
+    assert all(agent["permissionPreset"] == "full_access" for agent in managed_agents)
+    assert personal_agent["permissionPreset"] == "request_approval"
+
+
 def test_knowledge_expansion_team_agents_seed_complete_team(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
 

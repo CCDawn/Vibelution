@@ -707,6 +707,7 @@ def _ensure_challenge_cup_research_team_role_agent(role: dict[str, Any], *, sess
         "display_name": label,
         "primary_mode": "research",
         "role_key": role_key,
+        "permission_preset": "full_access",
         "metadata": expected_metadata,
         "status": "active",
     }
