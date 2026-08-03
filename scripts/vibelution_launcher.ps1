@@ -325,8 +325,8 @@ function Test-WorkbenchWindowPositionValue {
         if (-not [int]::TryParse($matches[2], [ref]$y)) {
             return $false
         }
-        # Virtual desktop range for multi-monitor restore.
-        return ($x -ge -20000 -and $x -le 20000 -and $y -ge -20000 -and $y -le 20000)
+        # Multi-monitor range; reject extreme sentinels (e.g. -20000,-20000) that open fully off-screen.
+        return ($x -ge -8000 -and $x -le 8000 -and $y -ge -8000 -and $y -le 8000)
     } else {
         return $false
     }

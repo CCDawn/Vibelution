@@ -82,20 +82,21 @@ export function isPersistableWorkbenchWindowSize(size: string): boolean {
   );
 }
 
+/** Multi-monitor positions allowed; extremes like ±20000 are treated as unusable/off-screen. */
+export const WORKBENCH_WINDOW_POSITION_MAX_ABS = 8000;
+
 /**
  * Observe top-left outer position as `X,Y` (screen coords; may be negative on multi-monitor).
  * Quantized so drag micro-jitter does not thrash operator config writes.
+ * Does not clamp to extremes — off-screen garbage must fail isPersistable instead.
  */
 export function observeWorkbenchWindowPosition(
   win: Pick<Window, "screenX" | "screenY"> = window,
 ): string {
   const rawX = Math.round(Number(win.screenX) || 0);
   const rawY = Math.round(Number(win.screenY) || 0);
-  // Keep within the same virtual-desktop range launcher accepts.
-  const x = Math.min(20000, Math.max(-20000, rawX));
-  const y = Math.min(20000, Math.max(-20000, rawY));
-  const qX = Math.round(x / POSITION_QUANTUM) * POSITION_QUANTUM;
-  const qY = Math.round(y / POSITION_QUANTUM) * POSITION_QUANTUM;
+  const qX = Math.round(rawX / POSITION_QUANTUM) * POSITION_QUANTUM;
+  const qY = Math.round(rawY / POSITION_QUANTUM) * POSITION_QUANTUM;
   return `${qX},${qY}`;
 }
 
@@ -106,7 +107,13 @@ export function isPersistableWorkbenchWindowPosition(position: string): boolean 
   }
   const x = Number(match[1]);
   const y = Number(match[2]);
-  return Number.isFinite(x) && Number.isFinite(y) && x >= -20000 && x <= 20000 && y >= -20000 && y <= 20000;
+  // Reject ±20000-class sentinels that place the next Edge start fully off-screen.
+  return (
+    Number.isFinite(x)
+    && Number.isFinite(y)
+    && Math.abs(x) <= WORKBENCH_WINDOW_POSITION_MAX_ABS
+    && Math.abs(y) <= WORKBENCH_WINDOW_POSITION_MAX_ABS
+  );
 }
 
 async function persistObservedWindow(
