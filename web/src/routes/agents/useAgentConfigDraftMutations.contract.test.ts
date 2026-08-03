@@ -35,4 +35,10 @@ describe("agent config draft mutations contract", () => {
     expect(mutationsSource).toContain("permissionPreset: payload.draft.permissionPreset");
     expect(mutationsSource).toContain("expectedConfigRevision: payload.agent.configRevision");
   });
+
+  it("omits untouched context compression from agent config PATCH", () => {
+    expect(mutationsSource).toContain("contextCompressionPolicyChangedInDraft");
+    expect(mutationsSource).toContain("if (compressionChanged)");
+    expect(routeSource).toContain("contextCompressionPolicyChangedInDraft");
+  });
 });

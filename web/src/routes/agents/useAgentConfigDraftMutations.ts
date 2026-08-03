@@ -40,6 +40,11 @@ export type UseAgentConfigDraftMutationsOptions = {
   ) => unknown;
   normalizeAgentLlmBindings: (bindings: AgentConfigDraft["llmBindings"]) => AgentConfigDraft["llmBindings"];
   contextCompressionPolicyFromDraft: (draft: AgentConfigDraft["contextCompressionPolicy"]) => unknown;
+  /** When false, omit contextCompressionPolicy so untouched compression is not a fake edit. */
+  contextCompressionPolicyChangedInDraft?: (
+    draft: AgentConfigDraft,
+    agent: AgentConfigWorkspaceAgent | null | undefined,
+  ) => boolean;
   agentMetadataWithReasoningEffort: (
     draft: AgentConfigDraft,
     models: AgentModelChoice[] | null | undefined,
@@ -115,20 +120,32 @@ export function useAgentConfigDraftMutations(options: UseAgentConfigDraftMutatio
       fetchJson<AgentConfigWorkspaceAgent>(`/api/agents/${encodeURIComponent(payload.agentId)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          displayName: payload.draft.displayName,
-          llmBindings: options.normalizeAgentLlmBindings(payload.draft.llmBindings),
-          promptTemplateId: payload.draft.promptTemplateId,
-          toolPolicyId: payload.draft.toolPolicyId,
-          memoryPolicyId: payload.draft.memoryPolicyId,
-          permissionPreset: payload.draft.permissionPreset,
-          contextCompressionPolicy: options.contextCompressionPolicyFromDraft(payload.draft.contextCompressionPolicy),
-          metadata: options.agentMetadataWithReasoningEffort(payload.draft, payload.modelChoices),
-          status: payload.draft.status,
-          expectedUpdatedAt: payload.agent.updatedAt,
-          expectedConfigRevision: payload.agent.configRevision,
-          sourceDraftId: payload.sourceDraftId,
-        }),
+        body: JSON.stringify((() => {
+          // Full-form save used to always send compression; inherit mode then failed even when
+          // the user only changed unrelated fields. Only patch compression when the form differs.
+          const body: Record<string, unknown> = {
+            displayName: payload.draft.displayName,
+            llmBindings: options.normalizeAgentLlmBindings(payload.draft.llmBindings),
+            promptTemplateId: payload.draft.promptTemplateId,
+            toolPolicyId: payload.draft.toolPolicyId,
+            memoryPolicyId: payload.draft.memoryPolicyId,
+            permissionPreset: payload.draft.permissionPreset,
+            metadata: options.agentMetadataWithReasoningEffort(payload.draft, payload.modelChoices),
+            status: payload.draft.status,
+            expectedUpdatedAt: payload.agent.updatedAt,
+            expectedConfigRevision: payload.agent.configRevision,
+            sourceDraftId: payload.sourceDraftId,
+          };
+          const compressionChanged = options.contextCompressionPolicyChangedInDraft
+            ? options.contextCompressionPolicyChangedInDraft(payload.draft, payload.agent)
+            : true;
+          if (compressionChanged) {
+            body.contextCompressionPolicy = options.contextCompressionPolicyFromDraft(
+              payload.draft.contextCompressionPolicy,
+            );
+          }
+          return body;
+        })()),
       }),
     onSuccess: (agent, variables) => {
       queryClient.setQueryData<AgentConfigWorkspace | undefined>(
