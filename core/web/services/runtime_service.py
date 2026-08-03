@@ -14,8 +14,9 @@ import subprocess
 import threading
 import time
 
-from config.public_config import load_public_config
 from config import get_config
+from config.public_config import load_public_config
+from core.launcher import desktop_session_store
 from core.infrastructure import developer_sandbox
 from core.infrastructure.mental_model import get_mental_model
 from core.mental_model_flags import is_mental_model_enabled
@@ -1152,6 +1153,12 @@ def _workbench_payload(lang: str, runtime_manager: dict) -> dict[str, object]:
     workbench = runtime_manager.get("workbench") if isinstance(runtime_manager, dict) else {}
     if not isinstance(workbench, dict):
         workbench = {}
+    desktop_window = desktop_session_store.latest_active_workbench_projection()
+    if desktop_window:
+        # Electron is the managed workbench frontend on Linux.  Its session
+        # evidence supersedes the legacy browser-process probe, which cannot
+        # observe Electron and would otherwise leave the shell in partial state.
+        workbench = {**workbench, **desktop_window}
 
     desired_state = str(workbench.get("desiredState") or "closed").strip() or "closed"
     observed_state = str(workbench.get("observedState") or "closed").strip() or "closed"
@@ -1159,6 +1166,12 @@ def _workbench_payload(lang: str, runtime_manager: dict) -> dict[str, object]:
     phase = str(workbench.get("phase") or "steady").strip() or "steady"
     failure_message = str(workbench.get("failureMessage") or "").strip()
     lifecycle_consistency = str(workbench.get("lifecycleConsistency") or "consistent").strip() or "consistent"
+    if (
+        desktop_window
+        and bool(desktop_window.get("windowManaged"))
+        and lifecycle_consistency == "browser_missing"
+    ):
+        lifecycle_consistency = "consistent"
     frontend_orphaned = bool(workbench.get("frontendOrphaned")) or lifecycle_consistency == "orphaned_browser"
     browser_missing = bool(
         lifecycle_consistency == "browser_missing"
@@ -1244,6 +1257,17 @@ def _workbench_payload(lang: str, runtime_manager: dict) -> dict[str, object]:
         "statusLine": status_line,
         "failureMessage": failure_message,
     }
+    window_provider = str(workbench.get("windowProvider") or "").strip()
+    if window_provider:
+        payload["windowProvider"] = window_provider
+    if "windowManaged" in workbench:
+        payload["windowManaged"] = bool(workbench.get("windowManaged"))
+    window_id = int(workbench.get("windowId") or 0)
+    if window_id:
+        payload["windowId"] = window_id
+    renderer_process_id = int(workbench.get("rendererProcessId") or 0)
+    if renderer_process_id:
+        payload["rendererProcessId"] = renderer_process_id
     payload.update(window_provider_projection(payload))
     return payload
 
