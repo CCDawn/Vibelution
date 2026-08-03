@@ -4,13 +4,19 @@ import { IPC_CHANNELS } from "../src/ipc.js";
 import { assertLocalHttpUrl } from "../src/security/urlPolicy.js";
 import { assertTrustedIpcSender } from "../src/security/ipcSenderValidation.js";
 import { resolveLauncherUrl } from "../src/windows/windowUrlResolver.js";
-import { ElectronWindowProvider, type ElectronWindowLike } from "../src/windows/electronWindowProvider.js";
+import {
+  ElectronWindowProvider,
+  type ElectronWindowLike,
+  type ElectronWindowOpenDecision,
+  type ElectronWindowOpenHandler
+} from "../src/windows/electronWindowProvider.js";
 import { closedWindowState } from "../src/windows/windowProviderTypes.js";
 import type { DesktopPaths } from "../src/paths.js";
 
 class FakeWindow implements ElectronWindowLike {
   readonly id: number;
   readonly webContents: ElectronWindowLike["webContents"];
+  windowOpenHandler: ElectronWindowOpenHandler | null = null;
   focusCount = 0;
   closeCount = 0;
   overlayCalls: Array<{ icon: unknown; description: string }> = [];
@@ -27,8 +33,18 @@ class FakeWindow implements ElectronWindowLike {
       on: (event, listener) => {
         this.on(`webContents:${event}`, listener);
         return this.webContents;
+      },
+      setWindowOpenHandler: (handler) => {
+        this.windowOpenHandler = handler;
       }
     };
+  }
+
+  openRequest(url: string): ElectronWindowOpenDecision {
+    if (this.windowOpenHandler === null) {
+      throw new Error("no window open handler installed");
+    }
+    return this.windowOpenHandler({ url });
   }
 
   focus(): void {
@@ -240,6 +256,75 @@ describe("Electron window provider state", () => {
     workbenchWindow.emit("focus");
 
     expect(onWorkbenchFocusAttentionClear).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("Launcher new-window requests", () => {
+  it("routes a launcher request for the managed workbench URL into the managed workbench window", async () => {
+    const launcherWindow = new FakeWindow(7, "http://127.0.0.1:8765/launcher", 7070);
+    const workbenchWindows: FakeWindow[] = [];
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+      createLauncherWindow: () => launcherWindow,
+      createWorkbenchWindow: (url) => {
+        const window = new FakeWindow(42, url, 4242);
+        workbenchWindows.push(window);
+        return window;
+      }
+    });
+    await provider.openLauncher();
+
+    expect(launcherWindow.windowOpenHandler).not.toBeNull();
+    const decision = launcherWindow.openRequest("http://127.0.0.1:8000/");
+
+    expect(decision).toEqual({ action: "deny" });
+    await vi.waitFor(() => expect(workbenchWindows).toHaveLength(1));
+    expect(provider.isWorkbenchFocused()).toBe(true);
+  });
+
+  it("reuses the managed workbench window for repeated workbench-origin requests", async () => {
+    const launcherWindow = new FakeWindow(7, "http://127.0.0.1:8765/launcher", 7070);
+    const workbenchWindows: FakeWindow[] = [];
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+      createLauncherWindow: () => launcherWindow,
+      createWorkbenchWindow: (url) => {
+        const window = new FakeWindow(42, url, 4242);
+        workbenchWindows.push(window);
+        return window;
+      }
+    });
+    await provider.openLauncher();
+
+    launcherWindow.openRequest("http://127.0.0.1:8000/");
+    await vi.waitFor(() => expect(workbenchWindows).toHaveLength(1));
+    const focusCountAfterFirst = workbenchWindows[0].focusCount;
+
+    const decision = launcherWindow.openRequest("http://127.0.0.1:8000/some/path");
+
+    expect(decision).toEqual({ action: "deny" });
+    await vi.waitFor(() => expect(workbenchWindows[0].focusCount).toBeGreaterThan(focusCountAfterFirst));
+    expect(workbenchWindows).toHaveLength(1);
+  });
+
+  it("denies launcher new-window requests outside the workbench origin without opening a window", async () => {
+    const launcherWindow = new FakeWindow(7, "http://127.0.0.1:8765/launcher", 7070);
+    const workbenchWindows: FakeWindow[] = [];
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+      createLauncherWindow: () => launcherWindow,
+      createWorkbenchWindow: (url) => {
+        const window = new FakeWindow(42, url, 4242);
+        workbenchWindows.push(window);
+        return window;
+      }
+    });
+    await provider.openLauncher();
+
+    expect(launcherWindow.openRequest("https://example.com/open")).toEqual({ action: "deny" });
+    expect(launcherWindow.openRequest("http://127.0.0.1:9000/")).toEqual({ action: "deny" });
+    expect(() => launcherWindow.openRequest("not a url")).not.toThrow();
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(workbenchWindows).toHaveLength(0);
+    expect(provider.isWorkbenchFocused()).toBe(false);
   });
 });
 
