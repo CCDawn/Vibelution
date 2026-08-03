@@ -8,6 +8,13 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 |-----------|-------------------|--------|
 | Canvas / known team ids / org layout pure data | `../TeamsRoute.canvasData.ts` | JSX panels |
 | Research workspace views / deep links / labels | `researchWorkspaceModel.ts` | mutations, canvas drag |
+| Overview primary CTA + stage handoff pure model | `researchPrimaryActionModel.ts` | TeamsRoute orchestration only |
+| Overview surface composition (CTA → stages → advanced) | `ResearchOverviewSurface.tsx` | burying CTA under stage console |
+| Overview primary CTA UI | `ResearchPrimaryActionBar.tsx` | mutations ownership |
+| Overview advanced disclosure shell | `ResearchOverviewSecondary.tsx` | evidence/path dumps in hero |
+| Design acceptance preview (static) | `web/research-overview-preview-standalone.html` + `design/research-overview-preview.*` | production routes |
+| Teams shell (left team list + board/canvas mode) | `teamShellModel.ts` + `TeamShellRail.tsx` + `TeamShellModeSwitch.tsx` | burying team pick in dense header only |
+| Workflow API error product copy | `researchWorkflowErrorModel.ts` + `ResearchWorkflowErrorSurface.tsx` | raw Error.message in UI |
 | Team kind guards / system-team roles | `teamKindModel.ts` | UI panels |
 | Canvas geometry / auto-layout / edge paths | `canvasGeometry.ts` | styles maps, mutations |
 | Source-collection evidence / filter pure math | `source-collection/evidenceModel.ts` | EventSource, mutations |

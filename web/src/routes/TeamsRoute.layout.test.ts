@@ -496,6 +496,13 @@ describe("TeamsRoute layout contract", () => {
     expect(teamWorkflowStartMutationsSource).toContain("researchProjectId: options.activeSourceCollectionResearchProjectId");
     expect(routeSource).toContain("sourceCollectionFreshProjectDraft");
     expect(routeSource).toContain("清空本项目资料并重新开始");
+    expect(routeSource).toContain("连同实验与迭代一起清空");
+    expect(routeSource).toContain("includeDownstream: true");
+    expect(routeSource).toContain("ResearchOverviewSurface");
+    expect(routeSource).toContain("ResearchWorkflowErrorSurface");
+    expect(routeSource).toContain("getTeamResearchProjectProgress");
+    expect(routeSource).toContain("renderResearchOverviewSurface");
+    expect(routeSource).toContain('presentationMode');
     expect(routeSource).toContain("recordSourceCollectionOutputMutation");
     expect(routeSource).toContain("executeSourceCollectionSearchMutation");
     // Wave 8P: execute/extract/writeback mutations live on useTeamSourceCollectionMutations.
@@ -624,7 +631,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain('searchParams.get("researchView")');
     expect(routeSource).toContain("parseResearchWorkspaceView");
     expect(routeSource).toContain("requestedAgentTeamId");
-    expect(routeSource).toContain("setSearchParams({ team: team.teamId })");
+    expect(routeSource).toContain('nextParams.set("team", team.teamId)');
+    expect(routeSource).toContain('nextParams.set("teamMode", teamShellMode)');
   });
 
   it("exposes Team and member Agent memory deep links from the Team workspace", () => {
@@ -693,10 +701,10 @@ describe("TeamsRoute layout contract", () => {
   });
 
   it("keeps the research overview on a readable workbench surface instead of a transparent card wall", () => {
-    expect(routeStyles.workspaceResearch).toMatch(/bg-vui-surface-panel|var\(--vui-surface-panel\)/);
-    expect(routeStyles.workspaceResearch).toContain("rounded-none");
-    expect(routeStyles.workspaceResearch).toContain("gap-2");
-    expect(routeStyles.workspaceResearch).not.toContain("gap-[var(--team-workbench-gap)]");
+    // Shell: left team rail + right main; board content carries panel fill.
+    expect(routeStyles.workspace).toContain("grid-cols-[minmax(220px,260px)_minmax(0,1fr)]");
+    expect(routeStyles.teamShellContentBoard).toMatch(/bg-vui-surface-panel|var\(--vui-surface-panel\)/);
+    expect(routeStyles.teamShellMain).toContain("flex-col");
 
     expect(routeStyles.researchStageLauncher).toMatch(/bg-vui-surface-panel|var\(--vui-surface-panel\)/);
     expect(routeStyles.researchStageLauncher).toContain("rounded-[var(--radius-panel)]");
@@ -897,7 +905,18 @@ describe("TeamsRoute layout contract", () => {
     expect(teamAiSearchWorkspacePanelSource).toContain("styles.aiSearchScopePanel");
     expect(teamAiSearchWorkspacePanelSource).toContain("styles.aiSearchSourceGroups");
     expect(teamAiSearchWorkspacePanelSource).toContain("styles.aiSearchSourceItem");
-    expect(routeSource).toContain('researchWorkspaceView !== "overview"');
+    // Overview: ResearchOverviewSurface owns CTA → stages → advanced (preview contract).
+    expect(routeSource).toContain("ResearchOverviewSurface");
+    expect(routeSource).toContain("renderResearchOverviewSurface");
+    expect(routeSource).toContain('renderResearchStageLauncher("overview")');
+    expect(routeSource).toContain('renderResearchStageLauncher("interactive")');
+    expect(routeSource).toContain("styles.researchOverviewSurface");
+    // Shell: left team rail + board/canvas modes.
+    expect(routeSource).toContain("TeamShellRail");
+    expect(routeSource).toContain("TeamShellModeSwitch");
+    expect(routeSource).toContain("selectTeamShellMode");
+    expect(routeSource).toContain('data-testid="team-shell-workspace"');
+    expect(routeSource).toContain("teamShellMode");
     expect(routeSource).not.toContain("科研三阶段索引");
     expect(routeSource).not.toContain("团队专属阶段页");
     expect(routeSource).toContain("三阶段");
@@ -1489,7 +1508,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("selectTeamRecord(nextTeam)");
     expect(routeSource).toContain("setResearchWorkspaceView(\"overview\")");
     expect(routeSource).not.toContain("{renderResearchWorkspaceNav()}");
-    expect(routeSource).toContain("{renderResearchStageLauncher()}");
+    expect(routeSource).toContain("renderResearchStageLauncher");
+    expect(routeSource).toContain("renderResearchOverviewSurface");
     expect(routeSource).toContain("researchWorkflowTeamSelected && !researchCanvasVisible");
     // Wave 8H: research graph / MVP console copy and ChallengeCup workspace live on launcher panel.
     expect(teamResearchStageLauncherPanelSource).toContain("研究关系图");
@@ -1575,9 +1595,9 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourceCollectionOverviewPanelSource).toContain('id="research-workflow-source-collection"');
     expect(routeAndPureSource).toContain('id="research-organization-canvas"');
     expect(routeSource).toContain('researchWorkspaceView === "canvas"');
-    expect(routeSource).toContain('const researchCanvasReadOnly = researchWorkflowTeamSelected && researchWorkspaceView === "canvas"');
-    expect(routeSource).toContain("const researchCanvasVisible = researchCanvasReadOnly");
-    expect(routeSource).toContain("showNodeBindingPanel = !researchWorkflowTeamSelected || (researchCanvasVisible && !researchCanvasReadOnly)");
+    expect(routeSource).toContain("teamShellMode === \"canvas\"");
+    expect(routeSource).toContain("const researchCanvasVisible = teamShellMode === \"canvas\"");
+    expect(routeSource).toContain("showNodeBindingPanel = researchCanvasVisible && !researchCanvasReadOnly");
     expect(routeSource).toContain("renderResearchCanvasReadOnlyPanel");
     expect(routeSource).toContain("researchCanvasReadOnly ? renderResearchCanvasReadOnlyPanel() : null");
     expect(routeSource).toContain("只读组织画布");
@@ -2448,25 +2468,23 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.teamUnavailableSurface).toContain("content-start");
     expect(routeStyles.teamUnavailableSurface).toContain("grid-cols-[minmax(0,720px)]");
     expect(routeStyles.teamUnavailableCard).toContain("max-w-[720px]");
-    expect(routeStyles.workspace).toContain("var(--teams-inspector-width,clamp(320px,26vw,420px))");
+    expect(routeStyles.workspace).toContain("grid-cols-[minmax(220px,260px)_minmax(0,1fr)]");
     expect(routeStyles.workspace).toContain("overflow-hidden");
-    expect(routeStyles.workspace).toContain("max-[760px]:h-auto");
-    expect(routeStyles.workspace).toContain("max-[760px]:grid-cols-[minmax(0,1fr)]");
-    expect(routeStyles.workspace).toContain("max-[760px]:content-start");
-    expect(routeStyles.workspace).toContain("max-[760px]:overflow-auto");
-    expect(routeStyles.inspectorResizeHandle).toContain("max-[760px]:hidden");
+    expect(routeStyles.workspace).toContain("max-[900px]:h-auto");
+    expect(routeStyles.workspace).toContain("max-[900px]:grid-cols-[minmax(0,1fr)]");
+    expect(routeStyles.workspace).toContain("max-[900px]:content-start");
+    expect(routeStyles.workspace).toContain("max-[900px]:overflow-auto");
+    expect(routeStyles.teamShellContentCanvas).toContain("var(--teams-inspector-width,clamp(300px,24vw,400px))");
+    expect(routeStyles.inspectorResizeHandle).toContain("max-[900px]:hidden");
     expect(routeSource).toContain("PaneResizeHandle");
     expect(routeSource).toContain('data-vui-recipe="teams-organization-workbench"');
     expect(routeSource).toContain('data-vui-domain-recipe="teams-organization-workbench"');
     expect(routeSource).toContain('data-vui-region="teams-canvas"');
     expect(routeSource).toContain('data-vui-region="teams-inspector"');
-    expect(routeStyles.workspaceResearchCanvas).toContain("h-full");
-    expect(routeStyles.workspaceResearchCanvas).toContain("var(--teams-inspector-width,clamp(320px,26vw,420px))");
-    expect(routeStyles.workspaceResearchCanvas).toContain("overflow-hidden");
-    expect(routeStyles.workspaceResearchCanvas).toContain("max-[760px]:h-auto");
-    expect(routeStyles.workspaceResearchCanvas).toContain("max-[760px]:grid-cols-[minmax(0,1fr)]");
-    expect(routeStyles.workspaceResearchCanvas).toContain("max-[760px]:overflow-auto");
-    expect(routeStyles.workspaceResearchCanvas).toContain("max-[760px]:content-start");
+    expect(routeStyles.teamShellContentCanvas).toContain("h-full");
+    expect(routeStyles.teamShellContentCanvas).toContain("overflow-hidden");
+    expect(routeStyles.teamShellContentCanvas).toContain("max-[900px]:grid-cols-[minmax(0,1fr)]");
+    expect(routeStyles.teamShellContentCanvas).toContain("max-[900px]:overflow-auto");
     expect(workflowGraphViewStyles.workflowGraphFrame).toContain("h-[var(--workflow-graph-height,360px)]");
     expect(workflowGraphViewStyles.workflowGraphFrame).not.toContain("h-full");
     expect(workflowGraphViewStyles.workflowGraphFrame).toContain("overflow-auto");
@@ -2480,8 +2498,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.inspector).toContain("!flex");
     expect(routeStyles.inspector).toMatch(/bg-vui-surface-rail|bg-\[var\(--vui-surface-rail\)\]/);
     expect(routeStyles.workspace).toMatch(/bg-vui-surface-workspace|bg-\[var\(--vui-surface-workspace\)\]/);
-    expect(routeStyles.workspaceResearchCanvas).toMatch(
-      /bg-vui-surface-workspace|bg-\[var\(--vui-surface-workspace\)\]/,
+    expect(routeStyles.teamShellContentCanvas).toMatch(
+      /bg-vui-surface-workspace|bg-\[var\(--vui-surface-workspace\)\]|teamShellContentCanvas/,
     );
     expect(routeStyles.route).toMatch(/bg-vui-surface-workspace|bg-\[var\(--vui-surface-workspace\)\]/);
     expect(routeStylesSource).toContain(".canvasLayoutModeSwitch");

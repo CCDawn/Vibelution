@@ -204,14 +204,28 @@ const styles: Record<string, string> = {
   toolbarLink:
     "toolbarLink min-w-0 inline-flex items-center justify-center gap-1.5",
   workspace:
-    `workspace min-w-0 flex-1 grid min-h-0 gap-[var(--team-workbench-gap)] p-[var(--team-workbench-gap)] !grid min-h-0 grid-cols-[minmax(0,1fr)_auto_var(--teams-inspector-width,clamp(320px,26vw,420px))] gap-[var(--team-workbench-gap)] overflow-hidden max-[760px]:h-auto max-[760px]:grid-cols-[minmax(0,1fr)] max-[760px]:content-start max-[760px]:overflow-auto ${vuiWorkspaceFillClass}`,
+    `workspace min-w-0 flex-1 grid min-h-0 gap-0 p-0 !grid min-h-0 grid-cols-[minmax(220px,260px)_minmax(0,1fr)] overflow-hidden max-[900px]:h-auto max-[900px]:grid-cols-[minmax(0,1fr)] max-[900px]:content-start max-[900px]:overflow-auto ${vuiWorkspaceFillClass}`,
   workspaceResearch:
-    "workspaceResearch min-w-0 grid min-h-0 !grid-cols-[minmax(0,1fr)] !gap-2 !overflow-auto rounded-none border-0 border-t border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2 [scrollbar-gutter:stable]",
+    "workspaceResearch min-w-0",
   workspaceResearchCanvas:
-    `workspaceResearchCanvas min-w-0 grid min-h-0 gap-[var(--team-workbench-gap)] p-[var(--team-workbench-gap)] !grid h-full grid-cols-[minmax(0,1fr)_auto_var(--teams-inspector-width,clamp(320px,26vw,420px))] overflow-hidden max-[760px]:h-auto max-[760px]:grid-cols-[minmax(0,1fr)] max-[760px]:content-start max-[760px]:overflow-auto ${vuiWorkspaceFillClass}`,
+    "workspaceResearchCanvas min-w-0",
+  teamShellMain:
+    "teamShellMain min-w-0 flex h-full min-h-0 flex-col overflow-hidden",
+  teamShellToolbar:
+    "teamShellToolbar min-w-0 flex flex-wrap items-center justify-between gap-2 border-b border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] px-3 py-2",
+  teamShellToolbarIdentity:
+    "teamShellToolbarIdentity min-w-0 grid gap-0.5 [&>strong]:text-[14px] [&>strong]:font-[760] [&>strong]:text-[var(--fg-primary)] [&>span]:text-[12px] [&>span]:text-[var(--fg-secondary)]",
+  teamShellToolbarActions:
+    "teamShellToolbarActions min-w-0 flex flex-wrap items-center justify-end gap-2",
+  teamShellContent:
+    "teamShellContent min-w-0 grid min-h-0 flex-1 overflow-hidden",
+  teamShellContentBoard:
+    "teamShellContentBoard min-w-0 !grid min-h-0 grid-cols-[minmax(0,1fr)] overflow-auto bg-[var(--vui-surface-panel)] [scrollbar-gutter:stable]",
+  teamShellContentCanvas:
+    `teamShellContentCanvas min-w-0 !grid min-h-0 h-full grid-cols-[minmax(0,1fr)_auto_var(--teams-inspector-width,clamp(300px,24vw,400px))] overflow-hidden max-[900px]:grid-cols-[minmax(0,1fr)] max-[900px]:overflow-auto ${vuiWorkspaceFillClass}`,
   // Wave 4B: shared PaneResizeHandle visual.,
   inspectorResizeHandle:
-    "inspectorResizeHandle max-[760px]:hidden",
+    "inspectorResizeHandle max-[900px]:hidden",
 
 };
 

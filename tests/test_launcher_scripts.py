@@ -2735,10 +2735,17 @@ if ($hiddenProcessText -match "System.Diagnostics.Process" -or $hiddenProcessTex
 if ($hiddenProcessText -notmatch "ReadAllText") {
     throw "Invoke-HiddenProcessCapture does not read redirected native output."
 }
-foreach ($required in @("DETACHED_PROCESS", "CREATE_NO_WINDOW", "STARTF_USESTDHANDLES", "WaitForSingleObject", "GetExitCodeProcess")) {
+foreach ($required in @("CREATE_NO_WINDOW", "STARTF_USESTDHANDLES", "WaitForSingleObject", "GetExitCodeProcess")) {
     if ($source -notmatch $required) {
         throw "Launcher hidden process API is missing $required."
     }
+}
+# MSDN: CREATE_NO_WINDOW is ignored when combined with DETACHED_PROCESS.
+if ($source -match "DETACHED_PROCESS\\s*\\|\\s*CREATE_NEW_PROCESS_GROUP\\s*\\|\\s*CREATE_NO_WINDOW") {
+    throw "Hidden process CreateProcess still combines DETACHED_PROCESS with CREATE_NO_WINDOW."
+}
+if ($source -notmatch "CREATE_NEW_PROCESS_GROUP\\s*\\|\\s*CREATE_NO_WINDOW") {
+    throw "Hidden process CreateProcess does not use CREATE_NO_WINDOW without DETACHED_PROCESS."
 }
 $nativeCommandText = $nativeCommandAst.Extent.Text
 if ($nativeCommandText -notmatch "Invoke-HiddenProcessCapture") {

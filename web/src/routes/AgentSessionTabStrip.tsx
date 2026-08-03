@@ -301,39 +301,36 @@ export function AgentSessionTabStrip({
               <span className={styles.agentSessionTabIcon} aria-hidden="true">
                 <Bot size={14} />
               </span>
-              <span className={styles.agentSessionTabCopy}>
-                <span className={styles.agentSessionTabKicker}>
-                  {t("agentSession")}
-                </span>
-                <VNativeInput
-                  className={styles.agentSessionTabTitleInput}
-                  value={editingSessionTitle}
-                  maxLength={120}
-                  autoFocus
-                  onChange={(event) => onRenameTitleChange(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.preventDefault();
-                      onSubmitRename(session, { reason: "explicit" });
-                    }
-                    if (event.key === "Escape") {
-                      event.preventDefault();
-                      onCancelRename();
-                    }
-                  }}
-                  onBlur={(event) => {
-                    const nextFocus = event.relatedTarget;
-                    if (nextFocus instanceof Node && event.currentTarget.closest("[data-agent-session-tab-container]")?.contains(nextFocus)) {
-                      return;
-                    }
-                    onSubmitRename(session, { reason: "blur" });
-                  }}
-                  aria-label={t("renameSession")}
-                />
-              </span>
+              <VNativeInput
+                className={styles.agentSessionTabTitleInput}
+                value={editingSessionTitle}
+                maxLength={120}
+                autoFocus
+                placeholder={lang === "zh" ? "会话名称" : "Session name"}
+                onChange={(event) => onRenameTitleChange(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    onSubmitRename(session, { reason: "explicit" });
+                  }
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    onCancelRename();
+                  }
+                }}
+                onBlur={(event) => {
+                  const nextFocus = event.relatedTarget;
+                  if (nextFocus instanceof Node && event.currentTarget.closest("[data-agent-session-tab-container]")?.contains(nextFocus)) {
+                    return;
+                  }
+                  onSubmitRename(session, { reason: "blur" });
+                }}
+                aria-label={t("renameSession")}
+              />
               <span className={styles.agentSessionTabEditActions}>
                 <VIconButton
                   type="button"
+                  variant="ghost"
                   className={styles.agentSessionTabEditButton}
                   onPress={() => onSubmitRename(session, { reason: "explicit" })}
                   isDisabled={sessionRenamePending}
@@ -343,6 +340,7 @@ export function AgentSessionTabStrip({
                 />
                 <VIconButton
                   type="button"
+                  variant="ghost"
                   className={styles.agentSessionTabEditButton}
                   onPress={onCancelRename}
                   isDisabled={sessionRenamePending}
@@ -534,16 +532,18 @@ export function AgentSessionTabStrip({
         );
       })}
       </div>
-      <VIconButton
-        type="button"
-        variant="ghost"
-        className={styles.agentSessionTabCreateButton}
-        onPress={onCreateSession}
-        isDisabled={createPending || createDisabled}
-        title={lang === "zh" ? "在当前 Agent 下新建会话" : "New session for current Agent"}
-        label={lang === "zh" ? "在当前 Agent 下新建会话" : "New session for current Agent"}
-        icon={<Plus size={14} />}
-      />
+      {editingSessionId ? null : (
+        <VIconButton
+          type="button"
+          variant="ghost"
+          className={styles.agentSessionTabCreateButton}
+          onPress={onCreateSession}
+          isDisabled={createPending || createDisabled}
+          title={lang === "zh" ? "在当前 Agent 下新建会话" : "New session for current Agent"}
+          label={lang === "zh" ? "在当前 Agent 下新建会话" : "New session for current Agent"}
+          icon={<Plus size={14} />}
+        />
+      )}
     </div>
   );
 }

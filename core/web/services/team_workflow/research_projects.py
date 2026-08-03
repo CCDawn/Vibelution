@@ -238,6 +238,92 @@ def get_active_research_project(team_id: str) -> dict[str, Any]:
         return dict(_project_payload(store, store["activeProjectId"]))
 
 
+def get_research_project_progress(team_id: str, project_id: str = "") -> dict[str, Any]:
+    """Aggregate one research project's stage/source facts for overview UX.
+
+    Only the active project is supported (same boundary as source/progress reset).
+    """
+
+    from core.web.services import team_workflow_orchestration_service as workflow
+    from core.web.services.team_workflow.source_collection.runs import (
+        _candidate_belongs_to_research_project,
+        _project_source_collection_run_ids,
+        _stage_round_belongs_to_research_project,
+    )
+
+    normalized_team_id = str(team_id or "").strip()
+    team_service.get_team(normalized_team_id)
+    active_project = get_active_research_project(normalized_team_id)
+    requested_project_id = str(project_id or "").strip()
+    if requested_project_id and requested_project_id != str(active_project.get("projectId") or ""):
+        raise ResearchProjectError(
+            "Research project progress is only available for the active research project."
+        )
+    normalized_project_id = str(active_project.get("projectId") or "").strip()
+    run_ids = _project_source_collection_run_ids(normalized_team_id, normalized_project_id)
+    stage_status = workflow.get_research_stage_round_status(normalized_team_id)
+    # Prefer full store rounds for counts (activeRounds alone undercounts).
+    with workflow._WORKFLOW_LOCK:
+        stage_store = workflow._load_stage_round_store(normalized_team_id)
+        all_rounds = workflow._stage_rounds(stage_store)
+        candidate_store = workflow._load_candidate_store(normalized_team_id)
+        plan_store = workflow._load_experiment_plan_store(normalized_team_id)
+    project_rounds = [
+        item
+        for item in all_rounds
+        if _stage_round_belongs_to_research_project(item, normalized_project_id, run_ids)
+    ]
+    stage_round_counts = {
+        "knowledge_collection": 0,
+        "experiment": 0,
+        "iteration": 0,
+    }
+    for item in project_rounds:
+        stage_type = str(item.get("stageType") or "").strip()
+        if stage_type in stage_round_counts:
+            stage_round_counts[stage_type] += 1
+
+    candidates = [item for item in list(candidate_store.get("candidates") or []) if isinstance(item, dict)]
+    project_candidates = [
+        item
+        for item in candidates
+        if _candidate_belongs_to_research_project(item, normalized_project_id, run_ids)
+    ]
+    source_candidate_count = sum(
+        1 for item in project_candidates if str(item.get("candidateType") or "") == "source_manifest"
+    )
+    downstream_candidate_count = len(project_candidates) - source_candidate_count
+    plans = [item for item in list(plan_store.get("plans") or []) if isinstance(item, dict)]
+    project_plans = [
+        item
+        for item in plans
+        if str(item.get("researchProjectId") or "").strip() == normalized_project_id
+    ]
+    frozen_plan_count = sum(
+        1
+        for item in project_plans
+        if bool(item.get("designFrozen") or item.get("frozen") or str(item.get("status") or "").lower() in {"frozen", "design_frozen"})
+    )
+    phases = list(stage_status.get("phases") or [])
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "teamId": normalized_team_id,
+        "researchProjectId": normalized_project_id,
+        "experimentName": str(active_project.get("name") or ""),
+        "sourceRunCount": len(run_ids),
+        "sourceCandidateCount": source_candidate_count,
+        "downstreamCandidateCount": max(0, downstream_candidate_count),
+        "stageRoundCounts": stage_round_counts,
+        "experimentPlanCount": len(project_plans),
+        "frozenExperimentPlanCount": frozen_plan_count,
+        "currentStage": str(stage_status.get("currentStage") or ""),
+        "phases": phases,
+        "canResetSourceOnly": len(run_ids) > 0 and stage_round_counts["experiment"] == 0 and stage_round_counts["iteration"] == 0 and downstream_candidate_count == 0,
+        "canResetProgress": len(run_ids) > 0 or sum(stage_round_counts.values()) > 0 or len(project_candidates) > 0 or len(project_plans) > 0,
+        "updatedAt": str(stage_status.get("updatedAt") or active_project.get("updatedAt") or _utc_now()),
+    }
+
+
 def lock_research_project_name(
     team_id: str,
     project_id: str,

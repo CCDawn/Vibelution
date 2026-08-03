@@ -260,6 +260,10 @@ describe("AgentSessionTabStrip", () => {
     expect(markup).toContain("新的子任务名");
     expect(markup).toContain("agentSessionTabTitleInput");
     expect(markup).toContain("agentSessionTabEditActions");
+    // Single-row edit chrome: no stacked kicker above the field.
+    expect(markup).not.toMatch(/agentSessionTabKicker[\s\S]*agentSessionTabTitleInput/);
+    // Hide create + while renaming so check/cancel are not crowded by another icon.
+    expect(markup).not.toContain("agentSessionTabCreateButton");
   });
 
   it("renders CLI agent run tabs with activity indicators", () => {

@@ -53,6 +53,7 @@ import { ResearchProjectSwitcher } from "./teams/research-projects/ResearchProje
 import { useResearchProjectAgentTasks } from "./teams/research-projects/useResearchProjectAgentTasks";
 import { ResearchMemoryEvidencePanel } from "./teams/ResearchMemoryEvidencePanel";
 import type { ResearchMemoryContextSummary } from "./teams/ResearchMemoryEvidencePanel";
+import { ResearchWorkflowErrorSurface } from "./teams/ResearchWorkflowErrorSurface";
 import researchStyles from "./TeamsRoute.research.styles";
 import shellStyles from "./TeamsRoute.styles";
 
@@ -79,6 +80,11 @@ export type TeamResearchStageLauncherPanelProps = {
   }>;
   lang: Lang;
   challengeTeamSurface: "workspace" | "progress";
+  /**
+   * overview: stage cards are read-only progress (no start/play CTAs).
+   * interactive: full launch + details actions (stage pages / non-overview).
+   */
+  presentationMode?: "overview" | "interactive";
   sourceCollectionDraft: SourceCollectionDraft;
   setSourceCollectionDraft: (updater: (current: SourceCollectionDraft) => SourceCollectionDraft) => void;
   preferredExperimentMethod: string;
@@ -160,6 +166,7 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
     selectedTeamMemoryMembers,
     lang,
     challengeTeamSurface,
+    presentationMode = "interactive",
     sourceCollectionDraft,
     setSourceCollectionDraft,
     preferredExperimentMethod,
@@ -352,6 +359,7 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
         />
       );
     }
+    const stageCardsReadOnly = presentationMode === "overview";
     const phaseOrder: ResearchStageType[] = knowledgeExpansionWorkflowTeamSelected ? ["knowledge_collection"] : ["knowledge_collection", "experiment", "iteration"];
     const phaseFallback: Record<ResearchStageType, { label: string; primaryAction: string }> = {
       knowledge_collection: {
@@ -859,16 +867,30 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
     };
     return (
       <section
-        className={styles.researchStageLauncher}
-        aria-label={lang === "zh" ? "科研控制台" : "Research console"}
+        className={[
+          styles.researchStageLauncher,
+          stageCardsReadOnly ? "data-overview-readonly" : "",
+        ].filter(Boolean).join(" ")}
+        data-presentation={stageCardsReadOnly ? "overview" : "interactive"}
+        aria-label={
+          stageCardsReadOnly
+            ? (lang === "zh" ? "三阶段进度" : "Three-stage progress")
+            : (lang === "zh" ? "科研控制台" : "Research console")
+        }
         aria-busy={challengeProgramLoading}
         aria-live="polite"
       >
         <div className={styles.researchStageLauncherHeader}>
           <div>
-            <strong>{challengeProgramProjection?.program.title || (lang === "zh" ? "科研控制台（三阶段）" : "Research console (3 stages)")}</strong>
+            <strong>
+              {stageCardsReadOnly
+                ? (lang === "zh" ? "阶段进度" : "Stage progress")
+                : (challengeProgramProjection?.program.title || (lang === "zh" ? "科研控制台（三阶段）" : "Research console (3 stages)"))}
+            </strong>
             <span>
-              {challengeProgramProjection
+              {stageCardsReadOnly
+                ? (lang === "zh" ? "只读 · 主操作在上方「下一步」" : "Read-only · primary action is Next above")
+                : challengeProgramProjection
                 ? `${challengeProgramProjection.program.officialProblemId} · ${challengeProgramProjection.program.track}`
                 : researchStageRoundStatus
                 ? `${lang === "zh" ? "当前阶段" : "Current"} · ${currentStageLabel}`
@@ -947,10 +969,19 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
             const disabled = stagePrimaryDisabled(stageType);
             const navItem = RESEARCH_WORKSPACE_NAV_ITEMS.find((item) => item.view === stageType);
             const primaryLabel = stagePrimaryLabel(stageType, fallback.primaryAction);
+            const statusToneClass = stageStatusStyle(stageType, active, latestRound);
+            const isDoneTone = statusToneClass === styles.researchStageStatusRecorded && !active;
             return (
               <article
                 key={stageType}
-                className={active ? `${styles.researchStageCard} ${styles.researchStageCardActive}` : styles.researchStageCard}
+                className={[
+                  styles.researchStageCard,
+                  active ? styles.researchStageCardActive : "",
+                  isDoneTone ? styles.researchStageCardDone : "",
+                  stageCardsReadOnly ? styles.researchStageCardReadonly : "",
+                ].filter(Boolean).join(" ")}
+                data-presentation={stageCardsReadOnly ? "overview-readonly" : "interactive"}
+                data-tone={active ? "active" : isDoneTone ? "done" : "idle"}
                 aria-busy={stageType !== "knowledge_collection" && stageStatusLoading}
                 aria-current={active ? "step" : undefined}
               >
@@ -962,7 +993,20 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
                   </div>
                 </div>
                 <p>{stageHint(stageType, active, latestRound)}</p>
-                {!challengeProgramProjection && stageType === "experiment" ? (
+                {!challengeProgramProjection && stageType === "experiment" && stageCardsReadOnly ? (
+                  <div className={styles.researchExperimentMethodReadonly}>
+                    <span>{lang === "zh" ? "实验方式" : "Method"}</span>
+                    <strong>
+                      {selectedExperimentMethodDescriptor
+                        ? (lang === "zh" ? selectedExperimentMethodDescriptor.labelZh : selectedExperimentMethodDescriptor.labelEn)
+                        : (selectedExperimentMethod || (lang === "zh" ? "未选择" : "Not set"))}
+                    </strong>
+                    <span className={["ready", "not_required"].includes(selectedExperimentAdapterStatus) ? styles.researchExperimentMethodReady : styles.researchExperimentMethodPending}>
+                      {selectedExperimentAdapterLabel}
+                    </span>
+                  </div>
+                ) : null}
+                {!challengeProgramProjection && stageType === "experiment" && !stageCardsReadOnly ? (
                   <div className={styles.researchExperimentMethodQuickSelect}>
                     <label>
                       <span>{lang === "zh" ? "实验方式" : "Experiment method"}</span>
@@ -1093,9 +1137,17 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
                 ) : (
                   <em>{navItem ? (lang === "zh" ? navItem.zhModules : navItem.enModules) : ""}</em>
                 )}
-                {renderResearchStageAgentSummary(stageType)}
+                {stageCardsReadOnly ? null : renderResearchStageAgentSummary(stageType)}
                 <div className={styles.researchStageActions}>
-                  {challengeProgramProjection ? (
+                  {stageCardsReadOnly ? (
+                    <Link
+                      to={researchWorkspaceStageRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID, stageType)}
+                      className={styles.researchStageViewLink}
+                    >
+                      <Eye size={13} />
+                      {lang === "zh" ? "查看阶段" : "View stage"}
+                    </Link>
+                  ) : challengeProgramProjection ? (
                     <a href={stageType === "knowledge_collection"
                       ? "#challenge-mvp-sample"
                       : stageType === "experiment"
@@ -1130,7 +1182,7 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
                       {primaryLabel}
                     </VNativeButton>
                   )}
-                  {!challengeProgramProjection ? (
+                  {!stageCardsReadOnly && !challengeProgramProjection ? (
                     <Link to={researchWorkspaceStageRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID, stageType)}>
                       <Link2 size={13} />
                       {stageType === "knowledge_collection"
@@ -1145,7 +1197,15 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
         </div>
         {renderChallengeProgramResults()}
         {selectedTeamStartResearchStageError ? (
-          <div className={styles.workflowError}>{selectedTeamStartResearchStageError.message}</div>
+          stageCardsReadOnly ? (
+            <ResearchWorkflowErrorSurface
+              lang={lang}
+              message={selectedTeamStartResearchStageError.message}
+              pending={selectedTeamStartResearchStagePending}
+            />
+          ) : (
+            <div className={styles.workflowError}>{selectedTeamStartResearchStageError.message}</div>
+          )
         ) : null}
         {selectedTeamStartResearchStageResult?.stageRound ? (
           <div className={styles.workflowSuccess}>

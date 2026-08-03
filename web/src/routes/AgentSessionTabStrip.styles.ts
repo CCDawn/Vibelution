@@ -22,11 +22,12 @@ const styles = {
   agentSessionTabCopyCompact:
     "vui-routes-chatcodingroute agentSessionTabCopyCompact min-w-0 [font-size:var(--vui-font-sm)] leading-tight text-[var(--fg-secondary)]",
   agentSessionTabEditActions:
-    "vui-routes-chatcodingroute agentSessionTabEditActions min-w-0 flex items-center gap-1",
+    "vui-routes-chatcodingroute agentSessionTabEditActions flex shrink-0 items-center gap-0.5",
   agentSessionTabEditButton:
-    "vui-routes-chatcodingroute agentSessionTabEditButton h-7 min-h-7 w-7 min-w-7 rounded-[var(--radius-control)] px-0",
+    "vui-routes-chatcodingroute agentSessionTabEditButton h-6 min-h-6 w-6 min-w-6 shrink-0 rounded-[var(--radius-control)] !border-0 border-transparent bg-transparent px-0 text-[var(--fg-tertiary)] shadow-none hover:!border-transparent hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)] hover:shadow-none",
+  // Single-row rename chrome: matches normal tab height, no stacked kicker.
   agentSessionTabEditing:
-    "vui-routes-chatcodingroute agentSessionTabEditing min-w-[12rem] max-w-[18rem] gap-1.5 rounded-t-[var(--radius-control)] rounded-b-none border border-b-transparent border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-row))] px-2 py-1 opacity-100",
+    "vui-routes-chatcodingroute agentSessionTabEditing h-9 min-w-[11rem] max-w-[16rem] gap-1 rounded-t-[var(--radius-control)] rounded-b-none border border-b-transparent border-[color-mix(in_srgb,var(--accent-cool)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-row))] px-1.5 py-0 opacity-100",
   agentSessionTabGroup:
     "vui-routes-chatcodingroute agentSessionTabGroup min-w-0 flex w-fit flex-none flex-nowrap items-end gap-0.5",
   agentSessionTabRail:
@@ -77,8 +78,9 @@ const styles = {
     "vui-routes-chatcodingroute agentSessionTabTitle min-w-0 max-w-[9rem] truncate text-left [font-size:var(--vui-font-sm)] font-semibold leading-none text-[var(--fg-secondary)]",
   agentSessionTabTitleActive:
     "vui-routes-chatcodingroute agentSessionTabTitleActive !text-[var(--fg-primary)]",
+  // Inline tab rename field: strip dense form chrome so it reads as a tab title, not a dialog.
   agentSessionTabTitleInput:
-    "vui-routes-chatcodingroute agentSessionTabTitleInput min-w-0 grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-7 [&_select]:min-h-7 [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full [font-size:var(--vui-font-sm)] font-semibold leading-tight text-[var(--fg-primary)]",
+    "vui-routes-chatcodingroute agentSessionTabTitleInput min-w-0 flex-1 !h-7 !min-h-7 !w-[8.5rem] max-w-[10rem] !rounded-[var(--radius-control)] !border-0 !bg-transparent !px-1.5 !py-0 ![font-size:var(--vui-font-sm)] !font-semibold !leading-none !text-[var(--fg-primary)] !shadow-none placeholder:!font-normal placeholder:!text-[var(--fg-tertiary)] focus-visible:!outline-none focus-visible:!ring-1 focus-visible:!ring-[color-mix(in_srgb,var(--accent-cool)_55%,transparent)]",
 } as const;
 
 export default styles;

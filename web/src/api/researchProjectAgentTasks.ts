@@ -4,6 +4,7 @@ import type {
   TeamResearchProjectAgentTaskStartPayload,
   TeamResearchProjectAgentTaskStatusPayload,
   TeamResearchProjectListPayload,
+  TeamResearchProjectProgressPayload,
   TeamResearchProjectSourceCollectionResetPayload,
 } from "./types";
 
@@ -19,9 +20,23 @@ export function getResearchProjectAgentTaskStatus(teamId: string, projectId: str
   );
 }
 
+export function getTeamResearchProjectProgress(teamId: string, projectId: string) {
+  return fetchJson<TeamResearchProjectProgressPayload>(
+    `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/research-projects/${encodeURIComponent(projectId)}/progress`,
+  );
+}
+
 export function resetTeamResearchProjectSourceCollection(teamId: string, projectId: string) {
   return fetchJson<TeamResearchProjectSourceCollectionResetPayload>(
     `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/research-projects/${encodeURIComponent(projectId)}/source-collection/reset`,
+    { method: "POST" },
+  );
+}
+
+/** Explicit cascade: clear this project's sources + experiment/iteration plans. */
+export function resetTeamResearchProjectProgress(teamId: string, projectId: string) {
+  return fetchJson<TeamResearchProjectSourceCollectionResetPayload>(
+    `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/research-projects/${encodeURIComponent(projectId)}/progress/reset`,
     { method: "POST" },
   );
 }

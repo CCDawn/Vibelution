@@ -20,4 +20,14 @@ describe("TeamResearchStageLauncherPanel lifecycle truth", () => {
     expect(source).toContain("目标数据集多 seed");
     expect(source).toContain("机制/反证证据");
   });
+
+  it("keeps overview stage cards read-only without competing start CTAs", () => {
+    expect(source).toContain('presentationMode?: "overview" | "interactive"');
+    expect(source).toContain('presentationMode === "overview"');
+    expect(source).toContain('data-presentation={stageCardsReadOnly ? "overview" : "interactive"}');
+    expect(source).toContain("ResearchWorkflowErrorSurface");
+    expect(source).toContain('data-presentation={stageCardsReadOnly ? "overview-readonly" : "interactive"}');
+    expect(source).toContain('lang === "zh" ? "查看阶段" : "View stage"');
+    expect(source).toContain("researchExperimentMethodReadonly");
+  });
 });

@@ -1381,15 +1381,22 @@ def _workbench_reopen_intent_event_payload(intent: dict[str, Any], *, command_id
     }
 
 
-def _creation_flag_names() -> tuple[str, ...]:
+def _creation_flag_names(*, detach: bool = False) -> tuple[str, ...]:
     if os.name != "nt":
         return ()
-    return ("DETACHED_PROCESS", "CREATE_NEW_PROCESS_GROUP", "CREATE_NO_WINDOW")
+    # MSDN: CREATE_NO_WINDOW is ignored when combined with DETACHED_PROCESS.
+    # Prefer CREATE_NO_WINDOW for waitable node/tsc/vite so no console host flashes.
+    # DETACHED_PROCESS is only for true background daemons that do not need
+    # CREATE_NO_WINDOW (pythonw has no console subsystem).
+    names = ["CREATE_NEW_PROCESS_GROUP", "CREATE_NO_WINDOW"]
+    if detach:
+        return ("DETACHED_PROCESS", "CREATE_NEW_PROCESS_GROUP")
+    return tuple(names)
 
 
-def _creation_flags() -> int:
+def _creation_flags(*, detach: bool = False) -> int:
     flags = 0
-    for name in _creation_flag_names():
+    for name in _creation_flag_names(detach=detach):
         flags |= int(getattr(subprocess, name, 0))
     return flags
 
@@ -1470,7 +1477,8 @@ def _select_daemon_python_runtime(python_executable: str) -> dict[str, Any]:
     """Select the Python runtime used for the long-lived daemon process."""
 
     raw = str(python_executable or "").strip()
-    creation_flag_names = list(_creation_flag_names()) if os.name == "nt" else []
+    # Report the flags actually applied on daemon spawn (CREATE_NO_WINDOW path).
+    creation_flag_names = list(_creation_flag_names(detach=False)) if os.name == "nt" else []
     result = {
         "pythonExecutable": raw,
         "sourcePythonExecutable": raw,
@@ -1561,7 +1569,10 @@ def ensure_daemon_running(*, python_executable: str | None = None) -> bool:
             stdin=subprocess.DEVNULL,
             stdout=stdout_handle,
             stderr=stderr_handle,
-            creationflags=_creation_flags(),
+            # Prefer CREATE_NO_WINDOW (never combined with DETACHED). Works for
+            # pythonw and for python.exe fallback without flashing a console host.
+            creationflags=_creation_flags(detach=False),
+            startupinfo=_hidden_startup_info(),
             close_fds=True,
         )
     _append_event(
@@ -1846,9 +1857,12 @@ def _frontend_build_preflight_commands() -> list[tuple[str, list[str]]]:
 
 
 def _npm_cli_script_for_node(node_command: str) -> str:
-    npm_command = shutil.which("npm.cmd" if os.name == "nt" else "npm") or shutil.which("npm")
+    """Resolve npm-cli.js so Windows never runs npm.cmd (visible console flash)."""
     candidates: list[Path] = []
-    if npm_command:
+    for which_name in (("npm.cmd", "npm") if os.name == "nt" else ("npm",)):
+        npm_command = shutil.which(which_name)
+        if not npm_command:
+            continue
         npm_path = Path(npm_command)
         candidates.extend([npm_path.parent, npm_path.parent.parent])
     if node_command:
@@ -1858,7 +1872,10 @@ def _npm_cli_script_for_node(node_command: str) -> str:
         candidate = root / "node_modules" / "npm" / "bin" / "npm-cli.js"
         if candidate.is_file():
             return str(candidate)
-    return "npm.cmd" if os.name == "nt" else "npm"
+    raise RuntimeError(
+        "npm-cli.js was not found next to Node.js/npm. "
+        "Refusing to run npm.cmd (it opens a visible console on Windows)."
+    )
 
 
 def _frontend_dependency_restore_command() -> tuple[str, list[str]]:
@@ -1866,9 +1883,7 @@ def _frontend_dependency_restore_command() -> tuple[str, list[str]]:
     if not node_command:
         node_command = "node.exe" if os.name == "nt" else "node"
     npm_cli_script = _npm_cli_script_for_node(node_command)
-    if npm_cli_script.endswith("npm-cli.js"):
-        return "node npm-cli.js install", [node_command, npm_cli_script, "install"]
-    return "npm install", [npm_cli_script, "install"]
+    return "node npm-cli.js install", [node_command, npm_cli_script, "install"]
 
 
 def _frontend_build_preflight_missing_dependency_entries(commands: list[tuple[str, list[str]]]) -> list[dict[str, str]]:
@@ -1892,7 +1907,8 @@ def _restore_frontend_dependencies_for_restart(command_id: str, missing_entries:
             capture_output=True,
             text=True,
             timeout=_RESTART_BUILD_PREFLIGHT_TIMEOUT_SECONDS,
-            creationflags=_creation_flags(),
+            # Waitable node install: never DETACHED (would ignore CREATE_NO_WINDOW).
+            creationflags=_creation_flags(detach=False),
             startupinfo=_hidden_startup_info(),
             check=False,
         )
@@ -2047,7 +2063,8 @@ def _preflight_frontend_build_for_restart(command_id: str, *, force: bool = Fals
                 capture_output=True,
                 text=True,
                 timeout=_RESTART_BUILD_PREFLIGHT_TIMEOUT_SECONDS,
-                creationflags=_creation_flags(),
+                # Waitable tsc/vite: CREATE_NO_WINDOW only (never with DETACHED).
+                creationflags=_creation_flags(detach=False),
                 startupinfo=_hidden_startup_info(),
                 check=False,
             )

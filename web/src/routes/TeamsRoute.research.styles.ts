@@ -141,13 +141,26 @@ const styles = {
     "researchStageAgentSummaryLoading min-w-0 border-[var(--vui-border-subtle)] text-[var(--fg-muted)]",
   researchStageBoundaryPanel: `researchStageBoundaryPanel min-w-0 ${vuiFlatPanelClass} p-2`,
   researchStageCard:
-    "researchStageCard min-w-0 flex h-full flex-col gap-2 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-3",
+    "researchStageCard min-w-0 flex h-full flex-col gap-2 rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-3 shadow-[var(--vui-elevation-1)]",
   researchStageCardActive:
-    `researchStageCardActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_44%,var(--vui-border-subtle))] ${vuiStateSelectedRowFillClass}`,
+    `researchStageCardActive min-w-0 border-[color-mix(in_srgb,var(--accent-cool)_44%,var(--vui-border-subtle))] shadow-[0_0_0_1px_color-mix(in_srgb,var(--accent-cool)_14%,transparent),var(--vui-elevation-1)] ${vuiStateSelectedRowFillClass}`,
+  // Overview: progress only — no competing start CTAs; quieter metrics density.
+  researchStageCardReadonly:
+    "researchStageCardReadonly min-w-0 [&_.researchStageCardMetrics]:opacity-90 [&_.researchStageActions]:mt-auto [&_.researchStageActions]:border-t [&_.researchStageActions]:border-[var(--vui-border-subtle)] [&_.researchStageActions]:pt-2.5",
+  researchStageCardDone:
+    "researchStageCardDone min-w-0 border-[color-mix(in_srgb,var(--state-success)_32%,var(--vui-border-subtle))] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--state-success)_8%,var(--vui-surface-row)),var(--vui-surface-row)_55%)]",
+  researchExperimentMethodReadonly:
+    "researchExperimentMethodReadonly min-w-0 flex flex-wrap items-center gap-2 rounded-[var(--radius-control)] bg-[var(--vui-control-muted)] px-2 py-1.5 text-[var(--vui-font-xs)] text-[var(--fg-secondary)] [&>strong]:font-[820] [&>strong]:text-[var(--fg-primary)]",
+  researchStageViewLink:
+    "researchStageViewLink inline-flex items-center gap-1 rounded-[var(--radius-control)] border border-transparent bg-transparent px-2.5 py-1.5 text-[var(--vui-font-xs)] font-semibold text-[var(--fg-tertiary)] hover:border-[var(--vui-border-subtle)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--fg-secondary)]",
   researchStageCardHead:
     "researchStageCardHead min-w-0 !grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2.5 [&>small]:inline-flex [&>small]:h-7 [&>small]:w-7 [&>small]:items-center [&>small]:justify-center [&>small]:rounded-full [&>small]:bg-[var(--vui-control-muted)] [&>small]:font-[820] [&>small]:text-[var(--fg-muted)] [&>div]:grid [&>div]:gap-1",
   researchStageCardMetrics:
     "researchStageCardMetrics min-w-0 !grid grid-cols-[repeat(3,minmax(0,1fr))] gap-x-2 gap-y-1 rounded-[var(--radius-control)] bg-[var(--vui-control-muted)] px-2 py-1.5 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)]",
+  researchOverviewSurface:
+    "researchOverviewSurface min-w-0 grid content-start gap-3 p-3",
+  researchOverviewStagesEmbed:
+    "researchOverviewStagesEmbed min-w-0 [&_.researchStageLauncher]:border-0 [&_.researchStageLauncher]:bg-transparent [&_.researchStageLauncher]:p-0 [&_.researchStageLauncher]:shadow-none [&_.researchStageLauncherHeader]:mb-0",
   challengeWorkspaceBody:
     "challengeWorkspaceBody min-w-0 w-full flex-1 !flex min-h-0 flex-col !gap-0 !overflow-auto !p-0 [scrollbar-gutter:stable]",
   challengeWorkspaceContextHidden:

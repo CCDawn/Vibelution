@@ -1839,7 +1839,19 @@ function Get-FileFingerprint {
             throw "Get-FileFingerprint only accepts files. Received directory: $path"
         }
 
-        $hash = (Get-FileHash -Path $item.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        # Prefer .NET hash so Windows PowerShell 5.1 / constrained hosts without
+        # Microsoft.PowerShell.Utility cmdlets can still start the workbench.
+        $sha = [System.Security.Cryptography.SHA256]::Create()
+        try {
+            $stream = [System.IO.File]::OpenRead($item.FullName)
+            try {
+                $hash = ([System.BitConverter]::ToString($sha.ComputeHash($stream))).Replace("-", "").ToLowerInvariant()
+            } finally {
+                $stream.Dispose()
+            }
+        } finally {
+            $sha.Dispose()
+        }
         [void]$parts.Add("$($item.FullName)|$($item.Length)|$hash")
     }
 
@@ -3086,6 +3098,8 @@ function Start-GuiProcessWithoutConsole {
     $process.StartInfo.Arguments = ConvertTo-ProcessArgumentString -ArgumentList $ArgumentList
     $process.StartInfo.WorkingDirectory = $WorkingDirectory
     $process.StartInfo.UseShellExecute = $false
+    # GUI apps (Edge) must keep a Normal window style so the workbench paints.
+    # CreateNoWindow only suppresses an accidental console host for console-subsystem fallbacks.
     $process.StartInfo.CreateNoWindow = $true
     $process.StartInfo.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Normal
 
@@ -3256,13 +3270,16 @@ namespace VibelutionLauncher {
                 startupInfo.hStdOutput = stdoutHandle;
                 startupInfo.hStdError = stderrHandle;
 
+                // MSDN: CREATE_NO_WINDOW is ignored when combined with DETACHED_PROCESS.
+                // Waitable node/tsc/vite and redirected helpers must use CREATE_NO_WINDOW alone
+                // (plus CREATE_NEW_PROCESS_GROUP) so Windows does not flash a console host.
                 bool started = CreateProcess(
                     applicationName,
                     commandLine,
                     IntPtr.Zero,
                     IntPtr.Zero,
                     true,
-                    DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW,
+                    CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW,
                     IntPtr.Zero,
                     workingDirectory,
                     ref startupInfo,

@@ -607,7 +607,8 @@ def _listening_pid_for_port_windows(port: int) -> int:
             capture_output=True,
             text=True,
             timeout=2.0,
-            creationflags=_creation_flags(detach=True),
+            # Waitable probe: CREATE_NO_WINDOW only (never with DETACHED_PROCESS).
+            creationflags=_creation_flags(detach=False),
             startupinfo=_hidden_startup_info(),
             check=False,
         )
@@ -981,10 +982,11 @@ def observe_workbench(
 def _creation_flag_names(*, detach: bool = False) -> tuple[str, ...]:
     if os.name != "nt":
         return ()
-    names = ["CREATE_NEW_PROCESS_GROUP", "CREATE_NO_WINDOW"]
+    # MSDN: CREATE_NO_WINDOW is ignored when combined with DETACHED_PROCESS.
+    # Waitable console tools must use CREATE_NO_WINDOW alone.
     if detach:
-        names.insert(0, "DETACHED_PROCESS")
-    return tuple(names)
+        return ("DETACHED_PROCESS", "CREATE_NEW_PROCESS_GROUP")
+    return ("CREATE_NEW_PROCESS_GROUP", "CREATE_NO_WINDOW")
 
 
 def _creation_flags(*, detach: bool = False) -> int:
