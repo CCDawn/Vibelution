@@ -5,6 +5,7 @@ import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
 import type { AgentInstance, SessionDetail, SessionQueryResponse, SessionSummary } from "../api/types";
 import { mergeSessionDetailIntoSummaries } from "./chatSessionState";
+import { filterOutTombstonedSessions } from "./sessionDeleteTombstone";
 
 export const SESSION_INDEX_PAGE_SIZE = 50;
 
@@ -225,16 +226,24 @@ export function useSessionIndexQuery({
     queryFn: async ({ pageParam }) => {
       const payload = await fetchJson<SessionQueryResponse>(sessionQueryUrl(normalizedQueryText, String(pageParam || "")));
       const existing = queryClient.getQueryData<SessionSummary[]>(queryKeys.sessions()) ?? [];
-      const merged = mergeSessions([existing, payload.items]);
+      const merged = filterOutTombstonedSessions(mergeSessions([existing, payload.items])) ?? [];
+      // Drop tombstoned rows from the page payload so infinite pages stay clean.
+      const filteredItems = filterOutTombstonedSessions(payload.items) ?? [];
       queryClient.setQueryData<SessionSummary[]>(queryKeys.sessions(), merged);
-      return payload;
+      return {
+        ...payload,
+        items: filteredItems,
+      };
     },
     getNextPageParam: (lastPage) => lastPage.nextCursor || undefined,
     refetchInterval,
     refetchIntervalInBackground,
   });
 
-  const sessions = useMemo(() => (query.data ? mergeSessionPages(query.data.pages) : undefined), [query.data]);
+  const sessions = useMemo(
+    () => (query.data ? filterOutTombstonedSessions(mergeSessionPages(query.data.pages)) : undefined),
+    [query.data],
+  );
   const lastPage = query.data?.pages.at(-1);
   const loadedCount = sessions?.length ?? 0;
   const totalEstimate = typeof lastPage?.totalEstimate === "number" ? lastPage.totalEstimate : loadedCount;

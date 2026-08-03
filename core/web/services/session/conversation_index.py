@@ -1041,8 +1041,12 @@ def query_sessions(
     return payload
 
 
-def select_chat_session(session_id: str) -> dict:
-    """Make an existing or AgentDirectory direct session the active chat session."""
+def select_chat_session(session_id: str, *, lightweight: bool = False) -> dict:
+    """Make an existing or AgentDirectory direct session the active chat session.
+
+    ``lightweight=True`` returns a handoff detail from the conversation index
+    without rebuilding a full windowed transcript (UI Prefer: respond-async).
+    """
     s = _service()
 
     normalized_session_id = str(session_id or "").strip()
@@ -1080,7 +1084,17 @@ def select_chat_session(session_id: str) -> dict:
         if changed:
             payload["updated_at"] = str(conversation.get("updated_at") or s._now_timestamp())
             s.save_chat_state(s.PROJECT_ROOT, payload)
+        selected_conversation = dict(conversation)
     s._invalidate_session_list_cache()
+    if lightweight:
+        normalized = s._normalize_conversation(selected_conversation) or selected_conversation
+        detail = s._build_lightweight_session_detail(normalized)
+        if isinstance(detail, dict):
+            detail.setdefault("id", normalized_session_id)
+            detail.setdefault("messages", [])
+            detail["selectedLightweight"] = True
+            return detail
+        raise s.SessionNotFoundError("Session not found")
     # Match the chat-switch window contract so /select does not rebuild a full
     # unwindowed transcript (historically the same cost as a heavy GET detail).
     detail = s.get_session_detail(
@@ -1101,8 +1115,14 @@ def create_chat_session(
     created_by: str = "user",
     conversation_index_kind: str = agent_directory_service.CONVERSATION_INDEX_KIND_USER_CHAT,
     experiment_binding: dict[str, Any] | None = None,
+    lightweight: bool = False,
 ) -> dict:
-    """Create a new empty chat session and make it active."""
+    """Create a new empty chat session and make it active.
+
+    ``lightweight=True`` (UI Prefer: respond-async) skips full detail projection and
+    returns a handoff payload built from the just-created conversation so the chat
+    shell can switch tabs without waiting on ledger/agent hydration.
+    """
     s = _service()
 
     lang = s.get_web_language()
@@ -1188,16 +1208,32 @@ def create_chat_session(
         payload["updated_at"] = now
         payload["conversations"] = conversations
         s.save_chat_state(s.PROJECT_ROOT, payload)
+        created_conversation = dict(conversation)
     s._invalidate_session_list_cache()
-    # Warm agent prompt snapshot off the first-send critical path (mature agents
-    # hide cold prepare while the user is still typing). Best-effort only.
+
+    # Prompt snapshot warm must not block create latency.
     if normalized_agent_id:
+        warm_agent_snapshot = bound_agent if isinstance(bound_agent, dict) else None
+        warm_agent_id = normalized_agent_id
+        warm_session_id = session_id
+
+        def _warm_prompt_snapshot() -> None:
+            try:
+                agent_payload = warm_agent_snapshot or s.get_agent(warm_agent_id, include_archived=False)
+                if isinstance(agent_payload, dict):
+                    s._ensure_session_agent_prompt_snapshot(warm_session_id, agent_payload)
+            except Exception:
+                pass
+
         try:
-            warm_agent = bound_agent or s.get_agent(normalized_agent_id, include_archived=False)
-            if isinstance(warm_agent, dict):
-                s._ensure_session_agent_prompt_snapshot(session_id, warm_agent)
+            threading.Thread(
+                target=_warm_prompt_snapshot,
+                name=f"session-create-prompt-warm-{session_id[-8:]}",
+                daemon=True,
+            ).start()
         except Exception:
-            pass
+            _warm_prompt_snapshot()
+
     try:
         s.record_runtime_scene_event(
             "conversation",
@@ -1211,12 +1247,28 @@ def create_chat_session(
                 "agentId": normalized_agent_id,
                 "sessionRole": "workspace" if bound_agent is not None else "primary",
                 "createdAgent": bound_agent is None,
+                "lightweight": bool(lightweight),
             },
             lifecycle=True,
         )
     except Exception:
         pass
+
+    if lightweight:
+        normalized = s._normalize_conversation(created_conversation) or created_conversation
+        detail = s._build_lightweight_session_detail(normalized)
+        if isinstance(detail, dict):
+            detail.setdefault("messages", [])
+            detail.setdefault("id", session_id)
+            if normalized_agent_id and not str(detail.get("agentId") or "").strip():
+                detail["agentId"] = normalized_agent_id
+            if normalized_title and not str(detail.get("title") or "").strip():
+                detail["title"] = normalized_title
+            detail["createdLightweight"] = True
+        return detail if isinstance(detail, dict) else {"id": session_id, "messages": []}
+
     return s.get_session_detail(session_id) or {}
+
 
 
 def ensure_agent_direct_session(

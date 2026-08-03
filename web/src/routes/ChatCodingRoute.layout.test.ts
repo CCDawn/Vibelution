@@ -1815,6 +1815,8 @@ describe("ChatCodingRoute layout contract", () => {
   it("keeps Agent rebinding out of chat while allowing new sessions for the selected Agent", () => {
     expect(routeAndLifecycleSource).toContain("const createSessionMutation");
     expect(routeAndLifecycleSource).toContain('fetchJson<SessionDetail>("/api/sessions"');
+    expect(routeAndLifecycleSource).toContain('Prefer: "respond-async"');
+    expect(routeAndLifecycleSource).toContain("mergeSessionDetailIntoSummaries");
     expect(routeAndActionsSource).toContain("createSessionMutation.mutate({ agentId: selectedChatAgentId })");
     expect(routeSource).not.toContain("updateSessionAgentMutation");
     expect(routeSource).not.toContain("sessionAgentOptions");
@@ -2601,7 +2603,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("onCancelRename={cancelRenameSession}");
     expect(routeSource).toContain("onCreateSession={handleCreateSession}");
     expect(routeSource).toContain("onDeleteSession={handleDeleteSession}");
-    expect(routeSource).toContain("deletePending={deleteSessionMutation.isPending}");
+    expect(routeSource).toContain("deletePendingSessionId={");
+    expect(routeSource).toContain("deleteSessionMutation.isPending");
     expect(agentSessionTabStripSource).toContain("className={styles.agentSessionTabCreateButton}");
     expect(agentSessionTabStripSource).toContain("className={styles.agentSessionTabCloseButton}");
     expect(agentSessionTabStripSource).not.toContain("styles.agentSessionTabCurrentBadge");
@@ -2614,7 +2617,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(agentSessionTabStripSource).toContain('event.key === "ArrowLeft"');
     expect(agentSessionTabStripSource).toContain('event.key === "Home"');
     expect(agentSessionTabStripSource).toContain('event.key === "End"');
-    expect(agentSessionTabStripSource).toContain("isBusyPhase(session.currentPhase || session.status) || deletePending");
+    expect(agentSessionTabStripSource).toContain("deletePendingSessionId");
+    expect(agentSessionTabStripSource).toContain("sessionDeletePending");
     expect(agentSessionTabStripSource).toContain("styles.agentSessionTabGroup");
     expect(agentSessionTabStripSource).toContain("styles.agentSessionTabRail");
     expect(agentSessionTabStripSource).toContain("styles.agentSessionTabActive");
@@ -3130,7 +3134,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndActionsSource).toContain("if (!window.confirm(sessionConfirmMessage))");
     expect(routeAndActionsSource).toContain("if (!window.confirm(groupConfirmMessage))");
     expect(routeAndActionsSource).toContain("[session.id]: t(\"deleteSessionBusy\")");
-    expect(routeAndActionsSource).toContain("deleteSessionMutation.isPending || isBusyPhase(session.currentPhase || session.status)");
+    expect(routeAndActionsSource).toContain("alreadyDeletingThisSession");
+    expect(routeAndActionsSource).toContain("deleteSessionMutation.variables?.sessionId === session.id");
+    expect(routeAndActionsSource).toContain("isBusyPhase(session.currentPhase || session.status)");
     expect(routeSource).toContain('deleteBusyLabel={t("deleteSessionBusy")}');
     expect(directSessionIndexListSource).toContain("deleteBusyLabel");
     expect(directSessionIndexItemSource).toContain("const deleteBusyReason = sessionBusy ? deleteBusyLabel : \"\"");
@@ -3185,10 +3191,15 @@ describe("ChatCodingRoute layout contract", () => {
     );
     expect(deleteMutationSource).toContain("Prefer: \"respond-async\"");
     expect(deleteMutationSource).toContain("onMutate: async (variables)");
+    // cancelQueries must not be awaited — that froze tab switching during delete.
+    expect(deleteMutationSource).toContain("void queryClient.cancelQueries({ queryKey: queryKeys.sessions() })");
+    expect(deleteMutationSource).not.toContain("await Promise.all([\n        queryClient.cancelQueries({ queryKey: queryKeys.sessions() })");
+    expect(deleteMutationSource).toContain("optimisticNextActiveSessionId");
+    expect(deleteMutationSource).toContain("setActiveSession(optimisticNextActiveSessionId)");
     expect(deleteMutationSource).toContain("captureSessionIndexCacheSnapshots(queryClient)");
     expect(deleteMutationSource).toContain("previousConversations");
     expect(deleteMutationSource).toContain("previousAgents");
-    expect(deleteMutationSource).toContain("agent.directSessionId !== variables.sessionId");
+    expect(deleteMutationSource).toContain("agent.directSessionId === variables.sessionId");
     expect(deleteMutationSource).toContain("queryClient.setQueryData(queryKeys.agents(), context.previousAgents)");
     expect(deleteMutationSource).toContain("restoreSessionIndexCacheSnapshots(queryClient, context?.previousSessionIndexCaches)");
     expect(deleteMutationSource).toContain("queryClient.setQueryData(queryKeys.conversations(), context.previousConversations)");

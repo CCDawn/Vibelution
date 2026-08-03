@@ -16,6 +16,8 @@ export type UseChatSessionSelectionOptions = {
   syncSessionDetail: (detail: SessionDetail) => void;
   setSessionComposerErrors: Dispatch<SetStateAction<Record<string, string>>>;
   latestDirectSessionSelectionRef: MutableRefObject<string>;
+  /** Monotonic generation for the latest user tab selection (stale responses discarded). */
+  directSessionSelectionGenerationRef: MutableRefObject<number>;
   reselectDirectSessionRef: MutableRefObject<(sessionId: string) => void>;
   activeSessionId: string | null | undefined;
   setActiveSession: (sessionId: string) => void;
@@ -45,6 +47,7 @@ export function useChatSessionSelection({
   syncSessionDetail,
   setSessionComposerErrors,
   latestDirectSessionSelectionRef,
+  directSessionSelectionGenerationRef,
   reselectDirectSessionRef,
   activeSessionId,
   setActiveSession,
@@ -59,15 +62,27 @@ export function useChatSessionSelection({
   setGroupRoomActionError,
 }: UseChatSessionSelectionOptions): UseChatSessionSelectionResult {
   const selectDirectSessionMutation = useMutation({
-    mutationFn: async (sessionId: string) =>
-      fetchJson<SessionDetail>(`/api/sessions/${encodeURIComponent(sessionId)}/select`, {
-        method: "POST",
-      }),
-    onSuccess: (nextDetail) => {
+    mutationFn: async ({ sessionId, generation }: { sessionId: string; generation: number }) => {
+      const detail = await fetchJson<SessionDetail>(
+        `/api/sessions/${encodeURIComponent(sessionId)}/select`,
+        {
+          method: "POST",
+          headers: { Prefer: "respond-async" },
+        },
+      );
+      return { detail, generation, sessionId };
+    },
+    onSuccess: ({ detail: nextDetail, generation, sessionId }) => {
+      // Drop stale select responses after rapid tab thrash.
+      if (generation !== directSessionSelectionGenerationRef.current) {
+        return;
+      }
       const latestSessionId = latestDirectSessionSelectionRef.current;
-      if (latestSessionId && latestSessionId !== nextDetail.id) {
-        // Only reselect the latest target; ignore intermediate select responses.
+      if (latestSessionId && latestSessionId !== nextDetail.id && latestSessionId !== sessionId) {
         reselectDirectSessionRef.current(latestSessionId);
+        return;
+      }
+      if (latestSessionId && latestSessionId !== nextDetail.id) {
         return;
       }
       setSessionComposerErrors((current) => ({
@@ -79,15 +94,18 @@ export function useChatSessionSelection({
       syncSessionDetail(nextDetail);
       void chatWorkspaceCache.afterSessionSelected();
     },
-    onError: (error, sessionId) => {
-      if (latestDirectSessionSelectionRef.current !== sessionId) {
+    onError: (error, variables) => {
+      if (variables.generation !== directSessionSelectionGenerationRef.current) {
+        return;
+      }
+      if (latestDirectSessionSelectionRef.current !== variables.sessionId) {
         return;
       }
       setSessionComposerErrors((current) => ({
         ...current,
-        [sessionId]: describeError(error, lang === "zh" ? "选择会话失败" : "Select session failed"),
+        [variables.sessionId]: describeError(error, lang === "zh" ? "选择会话失败" : "Select session failed"),
       }));
-      void chatWorkspaceCache.refreshSessionRuntime(sessionId);
+      void chatWorkspaceCache.refreshSessionRuntime(variables.sessionId);
     },
   });
 
@@ -96,13 +114,10 @@ export function useChatSessionSelection({
     if (!normalizedSessionId) {
       return;
     }
-    // Collapse rapid tab thrash: only the latest selection id is allowed to fire.
-    if (selectDirectSessionMutation.isPending
-      && latestDirectSessionSelectionRef.current === normalizedSessionId
-      && selectDirectSessionMutation.variables === normalizedSessionId) {
-      return;
-    }
-    selectDirectSessionMutation.mutate(normalizedSessionId);
+    latestDirectSessionSelectionRef.current = normalizedSessionId;
+    directSessionSelectionGenerationRef.current += 1;
+    const generation = directSessionSelectionGenerationRef.current;
+    selectDirectSessionMutation.mutate({ sessionId: normalizedSessionId, generation });
   };
 
   useEffect(() => {

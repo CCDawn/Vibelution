@@ -29,6 +29,7 @@ import {
   updateSessionSummaryCaches,
 } from "../chatSessionIndexQuery";
 import {
+  mergeSessionDetailIntoSummaries,
   renameSessionDetail,
   renameSessionInSummaries,
 } from "../chatSessionState";
@@ -37,9 +38,39 @@ import {
   removeDeletedSessionFromConversations,
   renameSessionInConversations,
 } from "./chatSessionDetailHelpers";
+import { useChatWorkbenchStore } from "../../store/chatWorkbenchStore";
+import { clearSessionDeleteTombstone, markSessionDeleteTombstone } from "../sessionDeleteTombstone";
+import { createTempSessionId, isTempSessionId } from "../sessionOptimisticIds";
 
 type ChatWorkspaceCache = ReturnType<typeof createChatWorkspaceCache>;
 type RightIndexPanel = "conversations" | "members";
+
+function pickOptimisticNextActiveSessionId(
+  remainingSessions: SessionSummary[] | undefined,
+  deletedSessionId: string,
+  previousActiveSessionId: string,
+  deletedAgentId: string = "",
+): string {
+  const deletedId = String(deletedSessionId || "").trim();
+  const previousActiveId = String(previousActiveSessionId || "").trim();
+  // Deleting a background tab must not steal focus from the current active session.
+  if (previousActiveId && previousActiveId !== deletedId) {
+    return previousActiveId;
+  }
+  const remaining = (Array.isArray(remainingSessions) ? remainingSessions : [])
+    .filter((session) => session.id !== deletedId);
+  const preferredAgentId = String(deletedAgentId || "").trim();
+  if (preferredAgentId) {
+    const sameAgent = remaining.find(
+      (session) => String(session.agentId || "").trim() === preferredAgentId,
+    );
+    if (sameAgent?.id) {
+      return String(sameAgent.id).trim();
+    }
+  }
+  // Prefer the first remaining tab (list is usually recency-ordered by backend).
+  return String(remaining[0]?.id || "").trim();
+}
 
 export type AgentDirectSessionResetResponse = {
   agent: AgentInstance;
@@ -199,29 +230,124 @@ export function useChatWorkspaceLifecycle({
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          Prefer: "respond-async",
         },
         body: JSON.stringify({ agentId }),
       }),
-    onSuccess: (nextDetail, variables) => {
-      setActiveGroupRoomId("");
-      setRightIndexPanel("conversations");
-      setActiveSession(nextDetail.id);
-      setSelectedAgentId(String(nextDetail.agentId || variables.agentId || "").trim());
-      setSessionFilter("");
+    onMutate: async ({ agentId }) => {
+      // T0: mint a local temp tab immediately (ChatGPT-style). Real id arrives on success.
+      const tempSessionId = createTempSessionId();
+      const previousActiveSessionId = String(useChatWorkbenchStore.getState().activeSessionId || "").trim();
+      const normalizedAgentId = String(agentId || "").trim();
+      const title = t("newSession");
+      const nowIso = new Date().toISOString();
+      const optimisticDetail: SessionDetail = {
+        id: tempSessionId,
+        title,
+        agentId: normalizedAgentId,
+        status: "idle",
+        currentPhase: "ready",
+        taskSummary: "",
+        lastActive: nowIso,
+        updatedAt: nowIso,
+        messages: [],
+        defaultFileContext: "",
+        previewTabs: [],
+        activePreviewPath: "",
+        changedFiles: [],
+        readFiles: [],
+      };
       setSessionComposerErrors((current) => ({
         ...current,
-        [nextDetail.id]: "",
+        __sessions__: "",
+        [tempSessionId]: "",
       }));
-      editingSessionIdRef.current = nextDetail.id;
-      setEditingSessionId(nextDetail.id);
-      setEditingSessionTitle(String(nextDetail.title || t("newSession")).trim() || t("newSession"));
-      syncSessionDetail(nextDetail);
-      if (nextDetail.agentId || variables.agentId) {
-        void queryClient.invalidateQueries({ queryKey: ["sessions", "agent", String(nextDetail.agentId || variables.agentId).trim()] });
-      }
-      void chatWorkspaceCache.afterSessionChanged();
+      setActiveGroupRoomId("");
+      setRightIndexPanel("conversations");
+      updateSessionSummaryCaches(queryClient, (sessions) =>
+        mergeSessionDetailIntoSummaries(sessions, optimisticDetail),
+      );
+      queryClient.setQueryData(queryKeys.session(tempSessionId), optimisticDetail);
+      setActiveSession(tempSessionId);
+      setSelectedAgentId(normalizedAgentId);
+      setSessionFilter("");
+      editingSessionIdRef.current = tempSessionId;
+      setEditingSessionId(tempSessionId);
+      setEditingSessionTitle(title);
+      syncSessionDetail(optimisticDetail);
+      return { tempSessionId, previousActiveSessionId, agentId: normalizedAgentId };
     },
-    onError: (error) => {
+    onSuccess: (nextDetail, variables, context) => {
+      const nextId = String(nextDetail.id || "").trim();
+      const tempSessionId = String(context?.tempSessionId || "").trim();
+      if (!nextId) {
+        return;
+      }
+      const agentId = String(nextDetail.agentId || variables.agentId || context?.agentId || "").trim();
+      const title = String(nextDetail.title || t("newSession")).trim() || t("newSession");
+      const seededDetail: SessionDetail = {
+        ...nextDetail,
+        id: nextId,
+        title,
+        agentId,
+        messages: Array.isArray(nextDetail.messages) ? nextDetail.messages : [],
+      };
+      // Drop the temp shell before seeding the server id (rebased identity).
+      if (tempSessionId) {
+        updateSessionSummaryCaches(queryClient, (sessions) =>
+          (sessions ?? []).filter((session) => session.id !== tempSessionId),
+        );
+        queryClient.removeQueries({ queryKey: queryKeys.session(tempSessionId), exact: true });
+        removeSessionWorkspace(tempSessionId, nextId);
+      }
+      updateSessionSummaryCaches(queryClient, (sessions) =>
+        mergeSessionDetailIntoSummaries(sessions, seededDetail),
+      );
+      const currentActive = String(useChatWorkbenchStore.getState().activeSessionId || "").trim();
+      // Keep user focus if they already switched away from the temp tab.
+      if (!currentActive || currentActive === tempSessionId || isTempSessionId(currentActive)) {
+        setActiveSession(nextId);
+        editingSessionIdRef.current = nextId;
+        setEditingSessionId(nextId);
+        setEditingSessionTitle(title);
+        syncSessionDetail(seededDetail);
+      } else {
+        queryClient.setQueryData(queryKeys.session(nextId), seededDetail);
+      }
+      setSelectedAgentId(agentId);
+      setSessionComposerErrors((current) => {
+        const next = { ...current, [nextId]: "", __sessions__: "" };
+        if (tempSessionId) {
+          delete next[tempSessionId];
+        }
+        return next;
+      });
+      if (agentId) {
+        void queryClient.invalidateQueries({
+          queryKey: ["sessions", "agent", agentId],
+        });
+      }
+      void chatWorkspaceCache.afterSessionChanged({
+        sessionId: nextId,
+        agentId,
+      });
+    },
+    onError: (error, _variables, context) => {
+      const tempSessionId = String(context?.tempSessionId || "").trim();
+      const previousActiveSessionId = String(context?.previousActiveSessionId || "").trim();
+      if (tempSessionId) {
+        updateSessionSummaryCaches(queryClient, (sessions) =>
+          (sessions ?? []).filter((session) => session.id !== tempSessionId),
+        );
+        queryClient.removeQueries({ queryKey: queryKeys.session(tempSessionId), exact: true });
+        const currentActive = String(useChatWorkbenchStore.getState().activeSessionId || "").trim();
+        if (currentActive === tempSessionId) {
+          removeSessionWorkspace(tempSessionId, previousActiveSessionId || null);
+          setActiveSession(previousActiveSessionId);
+        } else {
+          removeSessionWorkspace(tempSessionId, currentActive || null);
+        }
+      }
       setSessionComposerErrors((current) => ({
         ...current,
         __sessions__: describeError(error, t("createSessionFailed")),
@@ -442,16 +568,24 @@ export function useChatWorkspaceLifecycle({
         },
       }),
     onMutate: async (variables) => {
-      await Promise.all([
-        queryClient.cancelQueries({ queryKey: queryKeys.sessions() }),
-        queryClient.cancelQueries({ queryKey: queryKeys.conversations() }),
-        queryClient.cancelQueries({ queryKey: queryKeys.agents() }),
-      ]);
+      // Do not await cancelQueries — waiting freezes tab switching while list
+      // queries settle. Optimistic UI must apply immediately.
+      markSessionDeleteTombstone(variables.sessionId);
+      void queryClient.cancelQueries({ queryKey: queryKeys.sessions() });
+      void queryClient.cancelQueries({ queryKey: queryKeys.conversations() });
+      void queryClient.cancelQueries({ queryKey: queryKeys.agents() });
+      void queryClient.cancelQueries({ queryKey: queryKeys.session(variables.sessionId) });
+
       const previousSessions = queryClient.getQueryData<SessionSummary[]>(queryKeys.sessions());
       const previousSessionIndexCaches = captureSessionIndexCacheSnapshots(queryClient);
       const previousAgentSessionCaches = captureAgentSessionCacheSnapshots(queryClient);
       const previousConversations = queryClient.getQueryData<ConversationSummary[]>(queryKeys.conversations());
       const previousAgents = queryClient.getQueryData<AgentInstance[]>(queryKeys.agents());
+      const previousActiveSessionId = String(useChatWorkbenchStore.getState().activeSessionId || "").trim();
+      const deletedAgentId = String(
+        (previousSessions ?? []).find((session) => session.id === variables.sessionId)?.agentId || "",
+      ).trim();
+
       updateSessionSummaryCaches(queryClient, (sessions) =>
         sessions?.filter((session) => session.id !== variables.sessionId),
       );
@@ -460,28 +594,80 @@ export function useChatWorkspaceLifecycle({
         removeDeletedSessionFromConversations(conversations, variables.sessionId),
       );
       queryClient.setQueryData<AgentInstance[]>(queryKeys.agents(), (agents) =>
-        agents?.filter((agent) => agent.directSessionId !== variables.sessionId),
+        agents?.map((agent) => (
+          agent.directSessionId === variables.sessionId
+            ? { ...agent, directSessionId: "" }
+            : agent
+        )),
       );
+
+      const remainingSessions = queryClient.getQueryData<SessionSummary[]>(queryKeys.sessions());
+      const optimisticNextActiveSessionId = pickOptimisticNextActiveSessionId(
+        remainingSessions,
+        variables.sessionId,
+        previousActiveSessionId,
+        deletedAgentId,
+      );
+
+      // Instant handoff: remove workspace and leave the deleted tab before DELETE returns.
+      clearSessionTransientUiState(variables.sessionId);
+      removeSessionWorkspace(variables.sessionId, optimisticNextActiveSessionId || null);
+      if (previousActiveSessionId === variables.sessionId) {
+        setActiveSession(optimisticNextActiveSessionId);
+        if (optimisticNextActiveSessionId) {
+          setSessionComposerErrors((current) => ({
+            ...current,
+            [variables.sessionId]: "",
+            [optimisticNextActiveSessionId]: "",
+            __sessions__: "",
+          }));
+          // Warm next detail in background; do not block delete network call.
+          void queryClient.prefetchQuery({
+            queryKey: queryKeys.session(optimisticNextActiveSessionId),
+            queryFn: () =>
+              fetchJson<SessionDetail>(`/api/sessions/${encodeURIComponent(optimisticNextActiveSessionId)}`),
+          }).catch(() => undefined);
+        }
+      }
+
+      setGroupManageSessionIds((current) => current.filter((sessionId) => sessionId !== variables.sessionId));
+
       return {
         previousSessions,
         previousSessionIndexCaches,
         previousAgentSessionCaches,
         previousConversations,
         previousAgents,
+        previousActiveSessionId,
+        optimisticNextActiveSessionId,
       };
     },
-    onSuccess: (deleteResult, variables) => {
-      const nextActiveSessionId = deleteResult.nextActiveSessionId || "";
-      clearSessionTransientUiState(variables.sessionId);
-      removeSessionWorkspace(variables.sessionId, nextActiveSessionId);
-      setActiveSession(nextActiveSessionId);
+    onSuccess: (deleteResult, variables, context) => {
+      const serverNextActiveSessionId = String(deleteResult.nextActiveSessionId || "").trim();
+      const optimisticNextActiveSessionId = String(context?.optimisticNextActiveSessionId || "").trim();
+      const nextActiveSessionId = serverNextActiveSessionId || optimisticNextActiveSessionId;
+      const currentActiveSessionId = String(useChatWorkbenchStore.getState().activeSessionId || "").trim();
+
+      // Keep the user's post-delete selection if they already switched tabs.
+      // Only apply server next-active when we still sit on empty/deleted focus.
+      if (
+        nextActiveSessionId
+        && (
+          !currentActiveSessionId
+          || currentActiveSessionId === variables.sessionId
+          || currentActiveSessionId === optimisticNextActiveSessionId
+        )
+        && currentActiveSessionId !== nextActiveSessionId
+      ) {
+        removeSessionWorkspace(variables.sessionId, nextActiveSessionId);
+        setActiveSession(nextActiveSessionId);
+      }
       if (nextActiveSessionId) {
         setSessionComposerErrors((current) => ({
           ...current,
           [nextActiveSessionId]: "",
         }));
       }
-      setGroupManageSessionIds((current) => current.filter((sessionId) => sessionId !== variables.sessionId));
       void chatWorkspaceCache.afterSessionDeleted({
         deletedSessionId: variables.sessionId,
         nextSessionId: nextActiveSessionId,
@@ -489,6 +675,8 @@ export function useChatWorkspaceLifecycle({
       });
     },
     onError: (error, variables, context) => {
+      // Allow the row back into lists after a failed delete.
+      clearSessionDeleteTombstone(variables.sessionId);
       if (context?.previousSessions) {
         queryClient.setQueryData(queryKeys.sessions(), context.previousSessions);
       }
@@ -499,6 +687,10 @@ export function useChatWorkspaceLifecycle({
       }
       if (context?.previousAgents !== undefined) {
         queryClient.setQueryData(queryKeys.agents(), context.previousAgents);
+      }
+      const previousActiveSessionId = String(context?.previousActiveSessionId || "").trim();
+      if (previousActiveSessionId) {
+        setActiveSession(previousActiveSessionId);
       }
       setSessionComposerErrors((current) => ({
         ...current,

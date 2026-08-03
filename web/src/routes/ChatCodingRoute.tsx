@@ -87,6 +87,8 @@ import {
   updateSessionSummaryCaches,
   useSessionIndexQuery,
 } from "./chatSessionIndexQuery";
+import { filterOutTombstonedConversations } from "./sessionDeleteTombstone";
+import { isTempSessionId } from "./sessionOptimisticIds";
 import {
   shouldEnableSessionIndexQuery,
   shouldShowConversationIndexLoading,
@@ -353,6 +355,7 @@ export function ChatCodingRoute() {
   const removeSessionWorkspace = useChatWorkbenchStore((state) => state.removeSession);
   const closePreviewTab = useChatWorkbenchStore((state) => state.closePreviewTab);
   const latestDirectSessionSelectionRef = useRef("");
+  const directSessionSelectionGenerationRef = useRef(0);
   const reselectDirectSessionRef = useRef<(sessionId: string) => void>(() => undefined);
   const setActiveTab = useChatWorkbenchStore((state) => state.setActiveTab);
   const [sessionFilter, setSessionFilter] = useState("");
@@ -586,7 +589,7 @@ export function ChatCodingRoute() {
   });
   const sessionStreamShouldConnect = resolveSessionStreamShouldConnect({
     activeSessionId,
-    routeTargetMatches: sessionStreamRouteTargetMatches,
+    routeTargetMatches: sessionStreamRouteTargetMatches && !isTempSessionId(activeSessionId),
     chatPollingVisible,
     routeSwitchGraceActive: sessionStreamRouteSwitchGraceActive,
   });
@@ -768,13 +771,20 @@ export function ChatCodingRoute() {
     }),
     [rawSessionsQuery, visibleSessionsData],
   );
-  const conversationsQuery = useQuery({
+  const conversationsQueryRaw = useQuery({
     queryKey: queryKeys.conversations(),
     queryFn: () => fetchJson<ConversationSummary[]>("/api/conversations"),
     enabled: secondaryChatDataEnabled,
     refetchInterval: chatLiveQueryPolicy.conversationsRefetchInterval,
     refetchIntervalInBackground: chatLiveQueryPolicy.sharedRefetchIntervalInBackground,
   });
+  const conversationsQuery = useMemo(() => {
+    const data = filterOutTombstonedConversations(conversationsQueryRaw.data);
+    return {
+      ...conversationsQueryRaw,
+      data,
+    };
+  }, [conversationsQueryRaw]);
   const teamsQuery = useQuery({
     queryKey: queryKeys.teams(),
     queryFn: () => fetchJson<TeamListPayload>("/api/teams"),
@@ -897,6 +907,7 @@ export function ChatCodingRoute() {
     syncSessionDetail,
     setSessionComposerErrors,
     latestDirectSessionSelectionRef,
+    directSessionSelectionGenerationRef,
     reselectDirectSessionRef,
     activeSessionId,
     setActiveSession,
@@ -969,7 +980,8 @@ export function ChatCodingRoute() {
   }, [activeSessionId]);
   const sessionDetailQuery = useQuery<SessionDetail>({
     queryKey: queryKeys.session(activeSessionId ?? "none"),
-    enabled: Boolean(activeSessionId),
+    // Temp create shells are local-only; never GET/stream them until rebased.
+    enabled: Boolean(activeSessionId) && !isTempSessionId(activeSessionId),
     queryFn: ({ signal }) => fetchSessionDetailWindow(activeSessionId, {
       signal,
       // When SSE owns live transcript, skip expensive secondary lists on poll/refetch.
@@ -1010,7 +1022,7 @@ export function ChatCodingRoute() {
   }, [activeSessionId, sessionDetailQuery.data, sessionDetailQuery.isFetching]);
   const sessionLlmOptionsQuery = useQuery({
     queryKey: queryKeys.sessionLlmOptions(activeSessionId ?? "none"),
-    enabled: secondaryChatDataEnabled && Boolean(activeSessionId),
+    enabled: secondaryChatDataEnabled && Boolean(activeSessionId) && !isTempSessionId(activeSessionId),
     queryFn: () => fetchJson<SessionLlmOptions>(
       `/api/sessions/${encodeURIComponent(activeSessionId ?? "")}/llm-options`,
     ),
@@ -1499,7 +1511,7 @@ export function ChatCodingRoute() {
   );
   const sessionToolApprovalsQuery = useQuery<SessionToolApprovalRequest[]>({
     queryKey: queryKeys.sessionToolApprovals(activeSessionId ?? "none"),
-    enabled: Boolean(activeSessionId && directSessionPanelActive),
+    enabled: Boolean(activeSessionId && directSessionPanelActive && !isTempSessionId(activeSessionId)),
     queryFn: () => listPendingSessionToolApprovals(activeSessionId ?? ""),
     // Avoid 250ms thrash while busy (queues behind heavy session-detail under load).
     // Pending approvals still poll sub-second; busy-without-pending is lighter.
@@ -2595,6 +2607,7 @@ export function ChatCodingRoute() {
     queryClient,
     chatWorkspaceCache,
     latestDirectSessionSelectionRef,
+    reselectDirectSessionRef,
     activeSessionId,
     setActiveSession,
     activeGroupRoomId,
@@ -2643,7 +2656,6 @@ export function ChatCodingRoute() {
     deleteSessionMutation,
     clearSessionHistoryMutation,
     addSessionToReviewMutation,
-    selectDirectSessionMutation,
     petActionMutation,
   });
 
@@ -3142,7 +3154,11 @@ export function ChatCodingRoute() {
               cliAgentRuns={cliAgentRunTabs}
               createPending={createSessionMutation.isPending}
               createDisabled={!selectedChatAgentId}
-              deletePending={deleteSessionMutation.isPending}
+              deletePendingSessionId={
+                deleteSessionMutation.isPending
+                  ? String(deleteSessionMutation.variables?.sessionId || "").trim()
+                  : ""
+              }
               editingSessionId={editingSessionId}
               editingSessionTitle={editingSessionTitle}
               lang={lang}

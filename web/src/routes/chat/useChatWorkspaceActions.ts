@@ -11,6 +11,7 @@ import type { TranslationKey } from "../../i18n/dictionary";
 import { isAgentRootSession } from "../DirectSessionIndexItem";
 import type { ChatMentionTarget } from "../chatMentionTokens";
 import type { createChatWorkspaceCache } from "../chatWorkspaceCache";
+import { isTempSessionId } from "../sessionOptimisticIds";
 import { prefetchSessionDetailWindow } from "./chatSessionDetailHelpers";
 import { isBusyPhase } from "./chatCodingRouteViewModel";
 
@@ -30,6 +31,7 @@ export type UseChatWorkspaceActionsOptions = {
   queryClient: QueryClient;
   chatWorkspaceCache: ChatWorkspaceCache;
   latestDirectSessionSelectionRef: MutableRefObject<string>;
+  reselectDirectSessionRef: MutableRefObject<(sessionId: string) => void>;
   activeSessionId?: string | null;
   setActiveSession: (sessionId: string) => void;
   activeGroupRoomId: string;
@@ -80,7 +82,6 @@ export type UseChatWorkspaceActionsOptions = {
   deleteSessionMutation: MutateLike<{ sessionId: string }>;
   clearSessionHistoryMutation: MutateLike<{ sessionId: string; agentId: string }>;
   addSessionToReviewMutation: MutateLike<{ sessionId: string }>;
-  selectDirectSessionMutation: MutateLike<string>;
   petActionMutation: MutateLike<{ action: PetInteractionAction }>;
 };
 
@@ -119,6 +120,7 @@ export function useChatWorkspaceActions({
   queryClient,
   chatWorkspaceCache,
   latestDirectSessionSelectionRef,
+  reselectDirectSessionRef,
   activeSessionId = null,
   setActiveSession,
   activeGroupRoomId,
@@ -167,7 +169,6 @@ export function useChatWorkspaceActions({
   deleteSessionMutation,
   clearSessionHistoryMutation,
   addSessionToReviewMutation,
-  selectDirectSessionMutation,
   petActionMutation,
 }: UseChatWorkspaceActionsOptions): UseChatWorkspaceActionsResult {
   const handlePetInteraction = useCallback((action: PetInteractionAction) => {
@@ -215,9 +216,13 @@ export function useChatWorkspaceActions({
       return;
     }
     setSessionContextMenu(null);
+    // Instant active switch (T0). Network select is generation-guarded (T1).
     latestDirectSessionSelectionRef.current = normalizedSessionId;
-    // Warm detail window before/while active query mounts (Cursor open-prefetch).
-    void prefetchSessionDetailWindow(queryClient, normalizedSessionId);
+    // Temp create shells are local-only — never select/prefetch against the API.
+    const tempLocal = isTempSessionId(normalizedSessionId);
+    if (!tempLocal) {
+      void prefetchSessionDetailWindow(queryClient, normalizedSessionId);
+    }
     setActiveSession(normalizedSessionId);
     setActiveGroupRoomId("");
     setRightIndexPanel("conversations");
@@ -229,16 +234,18 @@ export function useChatWorkspaceActions({
     }));
     // Re-selecting the already-active session still updates server active pointer,
     // but skip the network when the operator is just re-clicking the current tab.
-    if (String(activeSessionId || "").trim() !== normalizedSessionId) {
-      selectDirectSessionMutation.mutate(normalizedSessionId);
+    if (!tempLocal && String(activeSessionId || "").trim() !== normalizedSessionId) {
+      reselectDirectSessionRef.current(normalizedSessionId);
     }
-    navigate(`/chat?session=${encodeURIComponent(normalizedSessionId)}`, { replace: false });
+    if (!tempLocal) {
+      navigate(`/chat?session=${encodeURIComponent(normalizedSessionId)}`, { replace: false });
+    }
   }, [
     activeSessionId,
     latestDirectSessionSelectionRef,
     navigate,
     queryClient,
-    selectDirectSessionMutation,
+    reselectDirectSessionRef,
     setActiveGroupRoomId,
     setActiveSession,
     setGroupRoomActionError,
@@ -492,7 +499,11 @@ export function useChatWorkspaceActions({
 
   const handleDeleteSession = useCallback((session: SessionSummary) => {
     setSessionContextMenu(null);
-    if (deleteSessionMutation.isPending || isBusyPhase(session.currentPhase || session.status)) {
+    const alreadyDeletingThisSession = Boolean(
+      deleteSessionMutation.isPending
+      && deleteSessionMutation.variables?.sessionId === session.id,
+    );
+    if (alreadyDeletingThisSession || isBusyPhase(session.currentPhase || session.status)) {
       setSessionComposerErrors((current) => ({
         ...current,
         [session.id]: t("deleteSessionBusy"),
@@ -510,6 +521,7 @@ export function useChatWorkspaceActions({
       [session.id]: "",
       __sessions__: "",
     }));
+    // Fire-and-forget: onMutate switches tabs immediately; network continues in background.
     deleteSessionMutation.mutate({ sessionId: session.id });
   }, [deleteSessionMutation, setSessionComposerErrors, setSessionContextMenu, t]);
 
