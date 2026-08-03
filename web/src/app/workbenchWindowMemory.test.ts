@@ -105,4 +105,19 @@ describe("workbenchWindowMemory", () => {
     expect(isPersistableWorkbenchWindowPosition("auto")).toBe(false);
     expect(isPersistableWorkbenchWindowPosition("bogus")).toBe(false);
   });
+
+  it("rejects extreme off-screen positions that would hide the next start", () => {
+    expect(isPersistableWorkbenchWindowPosition("-20000,-20000")).toBe(false);
+    expect(isPersistableWorkbenchWindowPosition("20000,0")).toBe(false);
+    expect(
+      observeWorkbenchWindowPosition({
+        screenX: -20000,
+        screenY: -20000,
+      }),
+    ).toBe("-20000,-20000");
+    // Observed extremes must not be written back.
+    expect(isPersistableWorkbenchWindowPosition(
+      observeWorkbenchWindowPosition({ screenX: -20000, screenY: -20000 }),
+    )).toBe(false);
+  });
 });

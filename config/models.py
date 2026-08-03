@@ -1985,8 +1985,8 @@ class WorkbenchConfig(BaseModel):
             y = int(y_text.strip())
         except ValueError:
             return "auto"
-        # Multi-monitor virtual desktop range (Edge --window-position).
-        if not (-20000 <= x <= 20000 and -20000 <= y <= 20000):
+        # Multi-monitor range; reject extreme sentinels that open fully off-screen.
+        if not (-8000 <= x <= 8000 and -8000 <= y <= 8000):
             return "auto"
         return f"{x},{y}"
 

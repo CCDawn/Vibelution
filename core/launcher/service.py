@@ -615,8 +615,9 @@ def _parse_workbench_window_position(value: object) -> WorkbenchWindowPosition:
 
 
 def _workbench_window_position_in_range(x: int, y: int) -> bool:
-    # Virtual desktop range for multi-monitor; not limited to primary screen origin.
-    return -20000 <= x <= 20000 and -20000 <= y <= 20000
+    # Multi-monitor virtual desktop, but reject extreme sentinels (e.g. -20000,-20000)
+    # that place the next Edge --app start fully off-screen.
+    return -8000 <= x <= 8000 and -8000 <= y <= 8000
 
 
 def _workbench_window_size_options() -> list[dict[str, Any]]:

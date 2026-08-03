@@ -747,7 +747,8 @@ def _configured_window_position() -> str:
             y = int(parts[1].strip())
         except ValueError:
             return "auto"
-        if -20000 <= x <= 20000 and -20000 <= y <= 20000:
+        # Reject extreme sentinels (e.g. -20000,-20000) that open fully off-screen.
+        if -8000 <= x <= 8000 and -8000 <= y <= 8000:
             return f"{x},{y}"
     return "auto"
 
@@ -769,7 +770,7 @@ def _edge_window_position_argument(value: str) -> str:
         y = int(parts[1].strip())
     except ValueError:
         return ""
-    if -20000 <= x <= 20000 and -20000 <= y <= 20000:
+    if -8000 <= x <= 8000 and -8000 <= y <= 8000:
         return f"{x},{y}"
     return ""
 

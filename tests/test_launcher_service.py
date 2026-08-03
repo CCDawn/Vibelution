@@ -1083,6 +1083,27 @@ def test_launcher_startup_settings_rejects_invalid_workbench_window_position(tmp
     assert "workbench.windowPosition" in error
 
 
+def test_launcher_startup_settings_soft_falls_back_extreme_offscreen_position(tmp_path, monkeypatch):
+    """-20000,-20000 is a clamp sentinel that hides Edge --app completely — treat as auto."""
+    config_path = tmp_path / "config.toml"
+    config_path.write_text('[workbench]\nwindow_position = "-20000,-20000"\n', encoding="utf-8")
+    monkeypatch.setattr(launcher_service, "CONFIG_PATH", config_path)
+    monkeypatch.delenv("VIBELUTION_WORKBENCH_WINDOW_POSITION", raising=False)
+    monkeypatch.delenv("AGENT_WORKBENCH_WINDOW_POSITION", raising=False)
+
+    setting = launcher_service.get_launcher_startup_settings()
+    assert setting["workbench"]["windowPosition"] == "auto"
+    assert setting["workbench"]["effectiveWindowPosition"] == "auto"
+
+    try:
+        launcher_service.update_launcher_startup_settings({"workbench": {"windowPosition": "-20000,-20000"}})
+    except ValueError as exc:
+        error = str(exc)
+    else:
+        raise AssertionError("expected extreme off-screen position to be rejected on write")
+    assert "workbench.windowPosition" in error
+
+
 def test_standalone_launcher_active_work_guard_reads_runtime_manager_store(tmp_path, monkeypatch):
     work_runs_dir = tmp_path / ".runtime" / "runtime-manager" / "work_runs"
     store = WorkRunStore(root=work_runs_dir)
