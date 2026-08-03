@@ -4,6 +4,14 @@ import { closedWindowState, type ElectronWindowRole, type ManagedWindowState } f
 
 type ElectronWindowEventListener = (...args: unknown[]) => void;
 
+export type ElectronWindowOpenRequest = {
+  url: string;
+};
+
+export type ElectronWindowOpenDecision = { action: "deny" } | { action: "allow" };
+
+export type ElectronWindowOpenHandler = (details: ElectronWindowOpenRequest) => ElectronWindowOpenDecision;
+
 export type ElectronWindowLike = {
   id: number;
   focus(): void;
@@ -17,6 +25,7 @@ export type ElectronWindowLike = {
     getOSProcessId(): number;
     getURL(): string;
     on(event: string, listener: ElectronWindowEventListener): unknown;
+    setWindowOpenHandler?(handler: ElectronWindowOpenHandler): void;
   };
 };
 
@@ -132,6 +141,7 @@ export class ElectronWindowProvider {
 
   private attachWindowEvents(role: ElectronWindowRole, window: ElectronWindowLike): void {
     if (role === "launcher") {
+      this.interceptLauncherWindowOpenRequests(window);
       window.on("close", (event) => {
         if (!this.shouldInterceptLauncherClose()) {
           return;
@@ -161,6 +171,19 @@ export class ElectronWindowProvider {
     window.webContents.on("render-process-gone", () => void this.reportState(this.stateFor(role)));
   }
 
+  private interceptLauncherWindowOpenRequests(window: ElectronWindowLike): void {
+    if (typeof window.webContents.setWindowOpenHandler !== "function") {
+      return;
+    }
+    const workbenchOrigin = new URL(this.workbenchUrl).origin;
+    window.webContents.setWindowOpenHandler((details) => {
+      if (isManagedWorkbenchUrl(details.url, workbenchOrigin)) {
+        void this.openOrFocusWorkbench();
+      }
+      return { action: "deny" };
+    });
+  }
+
   private stateFor(role: ElectronWindowRole): ManagedWindowState {
     const window = role === "launcher" ? this.launcherWindow : this.workbenchWindow;
     if (!window || window.isDestroyed()) {
@@ -187,6 +210,14 @@ function missingWindowFactory(role: ElectronWindowRole): ElectronWindowFactory {
   return () => {
     throw new Error(`missing ${role} window factory`);
   };
+}
+
+function isManagedWorkbenchUrl(requestUrl: string, workbenchOrigin: string): boolean {
+  try {
+    return new URL(requestUrl).origin === workbenchOrigin;
+  } catch {
+    return false;
+  }
 }
 
 function preventWindowClose(event: unknown): void {
