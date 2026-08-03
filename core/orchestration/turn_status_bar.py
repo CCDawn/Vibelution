@@ -94,7 +94,10 @@ def collect_turn_status_snapshot(
         tools_max = 0
     remaining = 0 if tools_max <= 0 else max(0, tools_max - used)
     reserve = _reserve_for_verify(tools_max)
-    budget_profile = str(getattr(auth, "budget_profile", "") or "").strip() or family
+    # Prefer family resolved from the current model/policy when available so a
+    # leftover authorization context from another turn cannot mislabel the bar.
+    auth_profile = str(getattr(auth, "budget_profile", "") or "").strip() if auth is not None else ""
+    budget_profile = family or auth_profile
 
     mental_state = ""
     mental_intervention = ""
