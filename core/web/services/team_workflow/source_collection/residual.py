@@ -987,22 +987,36 @@ def _source_collection_agent_context_next_actions(stage_id: str, record_count: i
 
 def _source_collection_agent_graph_edges(agent_graph: dict[str, Any]) -> list[dict[str, str]]:
     s = _service()
+    node_aliases: dict[str, str] = {}
+    for item in list(agent_graph.get("nodes") or []):
+        if not isinstance(item, dict):
+            continue
+        candidate_id = s._trim_text(item.get("candidateId") or item.get("candidate_id"), max_length=160)
+        if not candidate_id:
+            continue
+        for raw_alias in (candidate_id, item.get("nodeId"), item.get("node_id"), item.get("id")):
+            alias = s._trim_text(raw_alias, max_length=160)
+            if alias:
+                node_aliases.setdefault(alias, candidate_id)
     edges: list[dict[str, str]] = []
     for item in list(agent_graph.get("edges") or []):
         if not isinstance(item, dict):
             continue
-        source_id = s._trim_text(item.get("sourceCandidateId") or item.get("source") or item.get("from"), max_length=160)
-        target_id = s._trim_text(item.get("targetCandidateId") or item.get("target") or item.get("to"), max_length=160)
+        source_token = s._trim_text(item.get("sourceCandidateId") or item.get("source") or item.get("from"), max_length=160)
+        target_token = s._trim_text(item.get("targetCandidateId") or item.get("target") or item.get("to"), max_length=160)
+        source_id = node_aliases.get(source_token, source_token)
+        target_id = node_aliases.get(target_token, target_token)
         relation = s._trim_text(item.get("relation") or item.get("relationType") or item.get("type"), max_length=160)
         if source_id and target_id and relation:
             edges.append(s._candidate_graph_edge(source_id, target_id, relation))
     for item in list(agent_graph.get("sourceThemeEdges") or []):
         if not isinstance(item, dict):
             continue
-        source_id = s._trim_text(
+        source_token = s._trim_text(
             item.get("candidateId") or item.get("candidate_id") or item.get("sourceCandidateId") or item.get("source_candidate_id"),
             max_length=160,
         )
+        source_id = node_aliases.get(source_token, source_token)
         theme_id = s._source_collection_agent_graph_theme_id(item)
         relation = s._trim_text(item.get("relation") or item.get("relationType") or item.get("relation_type"), max_length=160) or "source_supports_theme"
         if source_id and theme_id:
