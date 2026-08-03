@@ -86,9 +86,24 @@ export function useChatWorkbenchLayout({
     resolveChatResponsiveLayout(typeof window === "undefined" ? 1440 : window.innerWidth),
   );
   const [responsiveOverlayPane, setResponsiveOverlayPane] = useState<"left" | "right" | null>(null);
+  // Preferred widths live in shellStore (durable). Effective widths reclamp to the
+  // current shell without writing back — otherwise window shrink permanently erases
+  // the user's preferred ratio.
+  const [layoutWidth, setLayoutWidth] = useState(0);
 
-  const leftPanelWidth = chatPanelWidths.leftPanelWidth;
-  const rightPanelWidth = chatPanelWidths.rightPanelWidth;
+  const preferredLeftWidth = chatPanelWidths.leftPanelWidth;
+  const preferredRightWidth = chatPanelWidths.rightPanelWidth;
+  const effectiveWidths = useMemo(() => {
+    if (!layoutWidth) {
+      return {
+        leftPanelWidth: preferredLeftWidth,
+        rightPanelWidth: preferredRightWidth,
+      };
+    }
+    return normalizePanelWidths(layoutWidth, preferredLeftWidth, preferredRightWidth);
+  }, [layoutWidth, preferredLeftWidth, preferredRightWidth]);
+  const leftPanelWidth = effectiveWidths.leftPanelWidth;
+  const rightPanelWidth = effectiveWidths.rightPanelWidth;
 
   const conversationIndexCollapsed = responsiveLayout.leftVisible
     ? leftRailCollapsed
@@ -99,20 +114,6 @@ export function useChatWorkbenchLayout({
   const statusRailCollapsed = !statusRailDocked && !statusRailOverlayOpen;
   const responsiveOverlayOpen = conversationIndexOverlayOpen || statusRailOverlayOpen;
 
-  const syncPanelWidthsToLayout = useCallback(() => {
-    const layoutWidth = layoutRef.current?.getBoundingClientRect().width ?? 0;
-    if (!layoutWidth) {
-      return;
-    }
-    const normalized = normalizePanelWidths(layoutWidth, leftPanelWidth, rightPanelWidth);
-    if (
-      normalized.leftPanelWidth !== leftPanelWidth
-      || normalized.rightPanelWidth !== rightPanelWidth
-    ) {
-      setChatPanelWidths(normalized);
-    }
-  }, [leftPanelWidth, rightPanelWidth, setChatPanelWidths]);
-
   useEffect(() => {
     const layoutElement = layoutRef.current;
     if (!layoutElement) {
@@ -120,6 +121,7 @@ export function useChatWorkbenchLayout({
     }
     const syncResponsiveLayout = () => {
       const width = layoutElement.getBoundingClientRect().width;
+      setLayoutWidth(width);
       const nextLayout = resolveChatResponsiveLayout(width);
       setResponsiveLayout((current) => (
         current.mode === nextLayout.mode
@@ -128,15 +130,12 @@ export function useChatWorkbenchLayout({
           ? current
           : nextLayout
       ));
-      if (nextLayout.mode === "wide" || nextLayout.mode === "compact") {
-        syncPanelWidthsToLayout();
-      }
     };
     syncResponsiveLayout();
     const observer = new ResizeObserver(syncResponsiveLayout);
     observer.observe(layoutElement);
     return () => observer.disconnect();
-  }, [syncPanelWidthsToLayout]);
+  }, []);
 
   useEffect(() => {
     if (!responsiveOverlayPane || typeof window === "undefined") {
@@ -187,8 +186,8 @@ export function useChatWorkbenchLayout({
     attachAxisResizeSession({
       cursor: "col-resize",
       onMove: (moveEvent) => {
-        const layoutWidth = layoutRef.current?.getBoundingClientRect().width ?? 0;
-        if (!layoutWidth) {
+        const measuredLayoutWidth = layoutRef.current?.getBoundingClientRect().width ?? 0;
+        if (!measuredLayoutWidth) {
           return;
         }
         const delta = moveEvent.clientX - startX;
@@ -196,15 +195,16 @@ export function useChatWorkbenchLayout({
           if (conversationIndexCollapsed) {
             return;
           }
-          const bounds = getResizeBounds("left", layoutWidth, statusRailCollapsed ? 0 : startRightWidth);
+          const bounds = getResizeBounds("left", measuredLayoutWidth, statusRailCollapsed ? 0 : startRightWidth);
           const nextLeftWidth = clamp(startLeftWidth + delta, bounds.min, bounds.max);
+          // User drag writes preferred widths (durable), not ephemeral reclamp.
           setChatPanelWidths({ leftPanelWidth: Math.round(nextLeftWidth) });
           return;
         }
         if (statusRailCollapsed) {
           return;
         }
-        const bounds = getResizeBounds("right", layoutWidth, conversationIndexCollapsed ? 0 : startLeftWidth);
+        const bounds = getResizeBounds("right", measuredLayoutWidth, conversationIndexCollapsed ? 0 : startLeftWidth);
         const nextRightWidth = clamp(startRightWidth - delta, bounds.min, bounds.max);
         setChatPanelWidths({ rightPanelWidth: Math.round(nextRightWidth) });
       },
@@ -228,16 +228,16 @@ export function useChatWorkbenchLayout({
       return;
     }
 
-    const layoutWidth = layoutRef.current.getBoundingClientRect().width;
+    const measuredLayoutWidth = layoutRef.current.getBoundingClientRect().width;
 
     if (side === "left") {
-      const bounds = getResizeBounds("left", layoutWidth, statusRailCollapsed ? 0 : rightPanelWidth);
+      const bounds = getResizeBounds("left", measuredLayoutWidth, statusRailCollapsed ? 0 : preferredRightWidth);
       const nextLeftWidth = resolvePaneWidthFromKeyboardKey(event.key, {
         direction: 1,
         step: PANE_KEYBOARD_STEP,
         minWidth: bounds.min,
         maxWidth: bounds.max,
-        currentWidth: leftPanelWidth,
+        currentWidth: preferredLeftWidth,
       });
       if (nextLeftWidth == null) {
         return;
@@ -247,14 +247,14 @@ export function useChatWorkbenchLayout({
       return;
     }
 
-    const bounds = getResizeBounds("right", layoutWidth, conversationIndexCollapsed ? 0 : leftPanelWidth);
+    const bounds = getResizeBounds("right", measuredLayoutWidth, conversationIndexCollapsed ? 0 : preferredLeftWidth);
     // Right rail grows when the pointer moves left; keyboard uses inverted direction.
     const nextRightWidth = resolvePaneWidthFromKeyboardKey(event.key, {
       direction: -1,
       step: PANE_KEYBOARD_STEP,
       minWidth: bounds.min,
       maxWidth: bounds.max,
-      currentWidth: rightPanelWidth,
+      currentWidth: preferredRightWidth,
     });
     if (nextRightWidth == null) {
       return;
@@ -263,8 +263,8 @@ export function useChatWorkbenchLayout({
     setChatPanelWidths({ rightPanelWidth: nextRightWidth });
   }, [
     conversationIndexCollapsed,
-    leftPanelWidth,
-    rightPanelWidth,
+    preferredLeftWidth,
+    preferredRightWidth,
     setChatPanelWidths,
     statusRailCollapsed,
   ]);
