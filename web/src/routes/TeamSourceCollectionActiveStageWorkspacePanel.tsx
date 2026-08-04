@@ -12,9 +12,14 @@ import { researchStageAgentManagementRoute } from "./teams/researchStageAgentPre
 import { buildExtractionRecoveryViewModel } from "./teams/source-collection/extractionRecoveryViewModel";
 import { buildExtractionStageFlowGuide } from "./teams/source-collection/extractionStageFlowGuide";
 import type { SourceCollectionExtractionRecoveryBag } from "./teams/source-collection/extractionRecoveryBag";
+import {
+  pickSourceCollectionPipelineModule,
+  type SourceCollectionPipelineGraphHealth,
+} from "./teams/source-collection/stageModulesModel";
 import type { SourceCollectionStageModuleId } from "./teams/source-collection/stageProjection";
 import { TeamSourceCollectionActiveStagePanel } from "./TeamSourceCollectionActiveStagePanel";
 import { TeamSourceCollectionExtractionRecoveryWorkspacePanel } from "./TeamSourceCollectionExtractionRecoveryWorkspacePanel";
+import { TeamSourceCollectionStageActionIcon } from "./TeamSourceCollectionStandaloneStagePanel";
 import shellStyles from "./TeamsRoute.styles";
 import workflowStyles from "./TeamsRoute.workflow.styles";
 
@@ -42,10 +47,17 @@ export type TeamSourceCollectionActiveStageWorkspacePanelProps = {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   stageChatLabels: Record<string, { zh: string; en: string }>;
   openSourceCollectionStageAgentChat: (stageId: any) => void;
-  startSourceCollectionStageSessionTask?: (stageId: SourceCollectionStageModuleId) => void;
+  startSourceCollectionStageSessionTask?: (
+    stageId: SourceCollectionStageModuleId,
+    options?: { formalRetry?: boolean },
+  ) => void;
   sourceCollectionRunAvailable: boolean;
   sourceCollectionFindingStageCompact: boolean;
   selectedTeamStartSourceCollectionStageTaskError: Error | null;
+  /** Explicit product failure for the fixed advance button (never silent). */
+  sourceCollectionStageAdvanceFailure?: string;
+  /** Graph health so primary CTA never says "retry ingest" while relations still block. */
+  pipelineGraphHealth?: SourceCollectionPipelineGraphHealth | null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   renderSourceCollectionConversation: () => ReactNode;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -75,6 +87,8 @@ export function TeamSourceCollectionActiveStageWorkspacePanel(props: TeamSourceC
     sourceCollectionRunAvailable,
     sourceCollectionFindingStageCompact,
     selectedTeamStartSourceCollectionStageTaskError,
+    sourceCollectionStageAdvanceFailure = "",
+    pipelineGraphHealth = null,
     renderSourceCollectionConversation,
     renderSourceCollectionScreeningPanel,
     renderSourceCollectionGraphPanel,
@@ -85,6 +99,11 @@ export function TeamSourceCollectionActiveStageWorkspacePanel(props: TeamSourceC
   const activeModule =
     sourceCollectionStageModules.find((module: any) => module.id === selectedSourceCollectionStageId)
     ?? sourceCollectionStageModules[0];
+  // Fixed right-rail CTA follows pipeline recommendation, not merely the open card.
+  // Graph health forces relations while ingestion preflight would fail (e.g. missing links 60).
+  const pipelineModule =
+    pickSourceCollectionPipelineModule(sourceCollectionStageModules as any[], pipelineGraphHealth)
+    ?? activeModule;
   const primaryStageAgentChatState = sourceCollectionStageAgentChatState(activeModule.id);
   const primaryStageAgentChatRoute = primaryStageAgentChatState.route;
   const primaryStageAgentChatLoading = primaryStageAgentChatState.status === "loading";
@@ -101,7 +120,7 @@ export function TeamSourceCollectionActiveStageWorkspacePanel(props: TeamSourceC
     : primaryStageAgentChatError
       ? (lang === "zh" ? "Agent 配置加载失败，请刷新后重试" : "Agent configuration failed to load")
       : primaryStageAgentNeedsCollectionStart
-        ? (lang === "zh" ? "开始本轮资料搜集后，将创建并打开此 Agent 的项目会话" : "Start this collection to create and open the Agent project session")
+        ? (lang === "zh" ? "请先点上方「推荐下一步」开始搜集，再进入 Agent 私聊" : "Use the recommended next step above to start collection first")
         : primaryStageAgentBlockedByCollectionStart
           ? (lang === "zh" ? "请先完成资料发现，再进入该阶段的 Agent 会话" : "Complete source finding before opening this stage's Agent session")
       : primaryStageAgentSessionCreateReady
@@ -112,7 +131,7 @@ export function TeamSourceCollectionActiveStageWorkspacePanel(props: TeamSourceC
     : primaryStageAgentChatError
       ? (lang === "zh" ? "Agent 加载失败" : "Agent load failed")
       : primaryStageAgentNeedsCollectionStart
-        ? (lang === "zh" ? "开始搜集并进入 Agent 私聊" : "Start collection and open Agent chat")
+        ? (lang === "zh" ? "先推进搜集再进入私聊" : "Advance collection first")
         : primaryStageAgentBlockedByCollectionStart
           ? (lang === "zh" ? "请先开始资料搜集" : "Start source collection first")
       : primaryStageAgentSessionCreateReady
@@ -200,43 +219,86 @@ export function TeamSourceCollectionActiveStageWorkspacePanel(props: TeamSourceC
     }
   };
 
-  const primaryAction = extractionFlowGuide
+  const pipelineProjectionEarly = (pipelineModule as { projection?: any })?.projection;
+  const pipelineLatestTaskEarly = pipelineProjectionEarly?.latestTask;
+  const pipelineClosureEarly = pipelineLatestTaskEarly?.closureSummary;
+  const pipelineTaskBlocked = Boolean(
+    pipelineProjectionEarly?.status === "agent_blocked"
+    || pipelineLatestTaskEarly?.status === "blocked"
+    || pipelineLatestTaskEarly?.status === "failed"
+    || pipelineClosureEarly?.userStatus === "failed"
+    || pipelineClosureEarly?.advanceOutcome === "failed"
+    || pipelineClosureEarly?.artifactStatus === "no_effect"
+  );
+
+  // Extraction micro-guide only owns primary when the pipeline is on extraction.
+  const useExtractionGuidePrimary = Boolean(extractionFlowGuide) && pipelineModule.id === "extraction";
+  const pipelinePrimaryAction = {
+    tone: "primary" as const,
+    disabled: Boolean(pipelineModule.actionDisabled),
+    onAction: () => {
+      // Blocked/failed prior attempt: always formal-retry through the stage starter when available.
+      if (
+        pipelineTaskBlocked
+        && startSourceCollectionStageSessionTask
+        && (pipelineModule.id === "finding"
+          || pipelineModule.id === "extraction"
+          || pipelineModule.id === "relations"
+          || pipelineModule.id === "ingestion")
+      ) {
+        void startSourceCollectionStageSessionTask(pipelineModule.id as SourceCollectionStageModuleId, {
+          formalRetry: true,
+        });
+        return;
+      }
+      pipelineModule.onAction?.();
+    },
+    title: sourceCollectionActionDisabledTitle(
+      sourceCollectionStageActionReadinessFor(pipelineModule.id),
+      pipelineModule.actionLabel,
+    ) || String(pipelineModule.actionLabel || ""),
+    icon: pipelineModule.actionIcon || ("play" as const),
+    // Short CTA only. Retry is a badge; do not stack "系统重试：" into the button label.
+    label: pipelineModule.id === "relations" && /推进失败|关系缺口|整理关系|missing graph|relations first/i.test(
+      String(sourceCollectionStageAdvanceFailure || ""),
+    )
+      ? (lang === "zh" ? "继续整理关系" : "Continue mapping")
+      : pipelineModule.actionLabel,
+    badge: pipelineTaskBlocked
+      ? (lang === "zh" ? "系统重试" : "System retry")
+      : undefined,
+  };
+
+  const primaryAction = useExtractionGuidePrimary
     ? {
       tone: "primary" as const,
-      disabled: extractionFlowGuide.recommendedKind === "wait"
+      disabled: extractionFlowGuide!.recommendedKind === "wait"
         || (
-          (extractionFlowGuide.recommendedKind === "supplement" || extractionFlowGuide.recommendedKind === "extract")
+          (extractionFlowGuide!.recommendedKind === "supplement" || extractionFlowGuide!.recommendedKind === "extract")
           && Boolean(extractionReadiness?.disabled)
         )
         || (
-          extractionFlowGuide.recommendedKind === "quality_review"
+          extractionFlowGuide!.recommendedKind === "quality_review"
           && Boolean(extractionRecovery?.sourceCollectionScreeningActionReadiness?.disabled)
         )
         || (
-          (extractionFlowGuide.recommendedKind === "import")
+          (extractionFlowGuide!.recommendedKind === "import")
           && Boolean(extractionRecovery?.sourceCollectionCandidateExtractionActionReadiness?.disabled)
         ),
       onAction: runExtractionPrimary,
-      title: extractionFlowGuide.recommendedTitle,
-      icon: extractionFlowGuide.recommendedKind === "quality_review"
+      title: extractionFlowGuide!.recommendedTitle,
+      icon: extractionFlowGuide!.recommendedKind === "quality_review"
         ? "check" as const
-        : extractionFlowGuide.recommendedKind === "advance_relations"
+        : extractionFlowGuide!.recommendedKind === "advance_relations"
           ? "play" as const
-          : extractionFlowGuide.recommendedKind === "chat"
+          : extractionFlowGuide!.recommendedKind === "chat"
             ? "check" as const
             : "play" as const,
-      label: extractionFlowGuide.recommendedLabel,
+      label: extractionFlowGuide!.recommendedLabel,
     }
-    : {
-      tone: activeModule.actionTone,
-      disabled: activeModule.actionDisabled,
-      onAction: activeModule.onAction,
-      title: sourceCollectionActionDisabledTitle(sourceCollectionStageActionReadinessFor(activeModule.id), activeModule.actionLabel) || "",
-      icon: activeModule.actionIcon,
-      label: activeModule.actionLabel,
-    };
+    : pipelinePrimaryAction;
 
-  const secondaryActions = extractionFlowGuide ? (
+  const extractionSecondaryActions = extractionFlowGuide && pipelineModule.id === "extraction" ? (
     <>
       {recoveryViewModel?.showExcludeUnverifiableAction
       && Number(extractionRecovery?.unverifiableCandidateCount || 0) > 0
@@ -287,6 +349,81 @@ export function TeamSourceCollectionActiveStageWorkspacePanel(props: TeamSourceC
     </>
   ) : null;
 
+  const stageAdvanceSecondary = pipelineModule.secondaryActionLabel && pipelineModule.onSecondaryAction ? (
+    <VNativeButton
+      type="button"
+      className={styles.sourceCollectionStageSecondaryAction ?? undefined}
+      disabled={Boolean(pipelineModule.secondaryActionDisabled)}
+      onClick={() => pipelineModule.onSecondaryAction?.()}
+      title={pipelineModule.secondaryActionLabel}
+      data-testid="source-collection-stage-advance-secondary"
+    >
+      <TeamSourceCollectionStageActionIcon icon={pipelineModule.secondaryActionIcon || "play"} />
+      {pipelineModule.secondaryActionLabel}
+    </VNativeButton>
+  ) : null;
+
+  // When the open card is behind the pipeline (e.g. still on 找资料 while next is 提炼),
+  // keep local work (搜索下一批) under 更多操作 — never steal the fixed progress CTA.
+  const selectedLocalSecondary =
+    activeModule.id !== pipelineModule.id
+    && activeModule.actionLabel
+    && activeModule.onAction
+      ? (
+          <VNativeButton
+            type="button"
+            className={styles.sourceCollectionStageSecondaryAction ?? undefined}
+            disabled={Boolean(activeModule.actionDisabled)}
+            onClick={() => activeModule.onAction?.()}
+            title={String(activeModule.actionLabel)}
+            data-testid="source-collection-stage-local-secondary"
+          >
+            <TeamSourceCollectionStageActionIcon icon={activeModule.actionIcon || "search"} />
+            {activeModule.actionLabel}
+          </VNativeButton>
+        )
+      : null;
+
+  const secondaryActions = extractionSecondaryActions || stageAdvanceSecondary || selectedLocalSecondary
+    ? (
+        <>
+          {extractionSecondaryActions}
+          {stageAdvanceSecondary}
+          {selectedLocalSecondary}
+        </>
+      )
+    : null;
+
+  const pipelineProgressHint = lang === "zh"
+    ? `流水线当前：${pipelineModule.label} · 点下方固定按钮推进（与左栏选中卡片无关）`
+    : `Pipeline: ${pipelineModule.label} · use the fixed progress button (independent of the open card)`;
+
+  const pipelineBlockedFailureText = pipelineTaskBlocked
+    ? (
+        lang === "zh"
+          ? `推进失败（不合格）：${
+              pipelineClosureEarly?.message
+              || pipelineProjectionEarly?.userSummary
+              || "上一轮阶段任务没有产生可用产物。"
+            }${
+              pipelineClosureEarly?.retryInstruction
+                ? ` ${pipelineClosureEarly.retryInstruction}`
+                : " 请点主按钮系统重试；不要把打开会话当作成功。"
+            }`
+          : `Advance failed: ${
+              pipelineClosureEarly?.message
+              || pipelineProjectionEarly?.userSummary
+              || "Previous stage task produced no usable artifact."
+            }${
+              pipelineClosureEarly?.retryInstruction
+                ? ` ${pipelineClosureEarly.retryInstruction}`
+                : " Use the primary button to system-retry; opening chat is not success."
+            }`
+      )
+    : "";
+
+  const advanceFailureText = sourceCollectionStageAdvanceFailure || pipelineBlockedFailureText;
+
   return (
     <>
       <TeamSourceCollectionActiveStagePanel
@@ -297,28 +434,25 @@ export function TeamSourceCollectionActiveStageWorkspacePanel(props: TeamSourceC
       status={recoveryViewModel ? recoveryViewModel.statusLabel : activeModule.status}
       inputLabel={activeModule.inputLabel}
       outputLabel={activeModule.outputLabel}
-      nextLabel={activeModule.nextLabel}
-      flowSteps={extractionFlowGuide?.steps}
-      flowNowHint={extractionFlowGuide?.nowHint}
-      flowAfterHint={extractionFlowGuide?.afterHint}
-      primaryActionEyebrow={extractionFlowGuide
-        ? (lang === "zh" ? "▼ 点这里推进（只需这一个）" : "▼ Click here to proceed (only this)")
-        : null}
-      primaryActionHint={extractionFlowGuide
+      nextLabel={pipelineModule.nextLabel || activeModule.nextLabel}
+      flowSteps={useExtractionGuidePrimary ? extractionFlowGuide?.steps : null}
+      flowNowHint={useExtractionGuidePrimary ? extractionFlowGuide?.nowHint : null}
+      flowAfterHint={useExtractionGuidePrimary ? extractionFlowGuide?.afterHint : null}
+      primaryActionEyebrow={lang === "zh" ? "流程推进" : "Stage advance"}
+      primaryActionHint={useExtractionGuidePrimary
         ? (lang === "zh"
-          ? `做完后：${extractionFlowGuide.afterHint}`
-          : `Then: ${extractionFlowGuide.afterHint}`)
-        : null}
+          ? `做完后：${extractionFlowGuide!.afterHint}`
+          : `Then: ${extractionFlowGuide!.afterHint}`)
+        : pipelineProgressHint}
       primaryAction={{
         ...primaryAction,
-        label: extractionFlowGuide
-          ? (lang === "zh"
-            ? `推荐：${extractionFlowGuide.recommendedLabel}`
-            : `Recommended: ${extractionFlowGuide.recommendedLabel}`)
+        // Keep the button label short — no 推进：/推荐：/系统重试： stacking.
+        label: useExtractionGuidePrimary
+          ? extractionFlowGuide!.recommendedLabel
           : primaryAction.label,
       }}
       secondaryActions={secondaryActions}
-      collapseSecondaryActions={Boolean(extractionFlowGuide)}
+      collapseSecondaryActions
       agentChatAction={primaryStageAgentChatRoute ? (
         <Link
           to={primaryStageAgentChatRoute}
@@ -333,12 +467,17 @@ export function TeamSourceCollectionActiveStageWorkspacePanel(props: TeamSourceC
           title={primaryStageAgentFallbackTitle}
           onClick={() => {
             if (primaryStageAgentNeedsCollectionStart) {
-              startSourceCollectionStageSessionTask?.(activeModule.id);
               return;
             }
             openSourceCollectionStageAgentChat(activeModule.id);
           }}
-          disabled={primaryStageAgentChatLoading || primaryStageAgentChatError || primaryStageAgentRepairPending || (primaryStageAgentBlockedByCollectionStart && !primaryStageAgentNeedsCollectionStart)}
+          disabled={
+            primaryStageAgentChatLoading
+            || primaryStageAgentChatError
+            || primaryStageAgentRepairPending
+            || primaryStageAgentBlockedByCollectionStart
+            || primaryStageAgentNeedsCollectionStart
+          }
         >
           <MessageSquare size={13} />
           {primaryStageAgentFallbackLabel}
@@ -354,6 +493,15 @@ export function TeamSourceCollectionActiveStageWorkspacePanel(props: TeamSourceC
       )}
       errors={(
         <>
+          {advanceFailureText ? (
+            <div
+              className={styles.messageError}
+              role="alert"
+              data-testid="source-collection-stage-advance-failure"
+            >
+              {advanceFailureText}
+            </div>
+          ) : null}
           {repairChallengeCupTeamAgentsMutation.error instanceof Error ? (
             <div className={styles.messageError}>{repairChallengeCupTeamAgentsMutation.error.message}</div>
           ) : null}

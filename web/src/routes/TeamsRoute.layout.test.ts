@@ -1270,7 +1270,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("sourceCollectionStageDisplayState");
     expect(stageProjectionSource).toContain("sourceCollectionStageInterruptedSummary");
     expect(stageProjectionSource).toContain("剩余检查项");
-    expect(routeSource).toContain('sourceCollectionStageModules.find((module) => module.state === "failed")');
+    expect(routeSource).toContain('modules.find((module) => module.state === "failed")');
+    expect(routeSource).toContain("pickSourceCollectionPipelineModule");
     expect(routeSource).not.toContain("仍需完成检查项或生成本阶段产物");
     // Wave 8L: recovery view-model consumes invalid id counts from projection.
     expect(extractionRecoveryViewModelSource).toContain("invalidRecordIds");
@@ -1334,7 +1335,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("const sourceCollectionIngestionReadyForExperiment = sourceCollectionProjectedFormalKnowledgeCount > 0");
     expect(routeSource).toContain("const sourceCollectionExperimentPlanningRoute = researchWorkspaceStageRoute(");
     expect(routeSource).toContain('selectedTeam?.teamId || RESEARCH_TEAM_ID,\n    "experiment",');
-    expect(routeSource).toContain("onAction: sourceCollectionIngestionReadyForExperiment");
+    expect(routeSource).toContain("onSecondaryAction: sourceCollectionIngestionReadyForExperiment");
+    expect(routeSource).toContain("进入实验设计（离开知识搜集）");
     expect(routeSource).toContain("navigate(sourceCollectionExperimentPlanningRoute)");
     expect(routeSource).toContain(": () => void startSourceCollectionStageSessionTask(\"ingestion\")");
     expect(routeSource).toContain("repairChallengeCupTeamAgentsMutation");
@@ -2973,9 +2975,10 @@ describe("TeamsRoute layout contract", () => {
       stageModuleSource.indexOf('id: "ingestion"'),
       stageModuleSource.indexOf("];"),
     );
-    expect(ingestionModuleSource).toContain("onAction: sourceCollectionIngestionReadyForExperiment");
+    expect(ingestionModuleSource).toContain("onSecondaryAction: sourceCollectionIngestionReadyForExperiment");
     expect(ingestionModuleSource).toContain("navigate(sourceCollectionExperimentPlanningRoute)");
-    expect(ingestionModuleSource).toContain(': () => void startSourceCollectionStageSessionTask("ingestion")');
+    expect(ingestionModuleSource).toContain('onAction: () => void startSourceCollectionStageSessionTask("ingestion")');
+    expect(ingestionModuleSource).toContain("进入实验设计（离开知识搜集）");
     expect(ingestionModuleSource).not.toContain("runKnowledgeCollectionCompletionAction");
     expect(ingestionModuleSource).not.toContain("runKnowledgeCollectionCompletionMutation");
     expect(ingestionModuleSource).not.toContain("runKnowledgeCollectionIngestMutation.mutate");
@@ -3189,7 +3192,9 @@ describe("TeamsRoute layout contract", () => {
     expect(stageCardSource).not.toContain("module.onAction");
     expect(stageCardSource).not.toContain("module.actionDisabled");
     expect(stageCardSource).not.toContain("module.actionTitle");
-    expect(teamSourceCollectionActiveStagePanelSource).toContain("onClick={primaryAction.onAction}");
+    expect(teamSourceCollectionActiveStagePanelSource).toContain("onPress={primaryAction.onAction}");
+    expect(teamSourceCollectionActiveStagePanelSource).toContain("<VButton");
+    expect(teamSourceCollectionActiveStagePanelSource).toContain('variant={primaryAction.tone === "primary" ? "primary" : "secondary"}');
 
     // Wave 8K: raw-record list body lives on conversation workspace panel.
     const rawRecordSource = teamSourceCollectionConversationWorkspacePanelSource;
