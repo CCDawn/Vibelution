@@ -115,6 +115,17 @@ describe("workbench layout gate (Wave 5)", () => {
     expect(memory).not.toContain("--memory-left-width");
   });
 
+  it("keeps Memory agent-memory three-pane on VSplitWorkspace under memory layout id", () => {
+    const agent = readFileSync(resolve(webSrc, "routes/MemoryAgentMemoryPanel.tsx"), "utf-8");
+    expect(agent).toContain("VSplitWorkspace");
+    expect(agent).toContain("WORKBENCH_LAYOUT_IDS.memory");
+    expect(agent).toContain("AGENT_MEMORY_SPLIT_RESIZE");
+    expect(agent).toContain("agent-list");
+    expect(agent).toContain("agent-detail");
+    expect(agent).toContain('data-vui-region="memory-agent-workspace"');
+    expect(agent).not.toMatch(/import\s*\{[^}]*usePersistedPaneResize/);
+  });
+
   it("keeps Evolution multi-rail on registry layoutId (domain resize exception)", () => {
     const evolution = readFileSync(resolve(webSrc, "routes/EvolutionRoute.tsx"), "utf-8");
     expect(evolution).toContain("WORKBENCH_LAYOUT_IDS.evolution");

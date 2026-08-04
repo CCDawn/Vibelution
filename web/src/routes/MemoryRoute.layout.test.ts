@@ -155,6 +155,11 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("<MemoryAgentMemoryPanel");
     expect(routeSource).not.toContain("const renderAgentMemoryView = () =>");
     expect(agentMemoryPanelSource).toContain("export function MemoryAgentMemoryPanel");
+    expect(agentMemoryPanelSource).toContain("VSplitWorkspace");
+    expect(agentMemoryPanelSource).toContain("AGENT_MEMORY_SPLIT_RESIZE");
+    expect(agentMemoryPanelSource).toContain("WORKBENCH_LAYOUT_IDS.memory");
+    expect(agentMemoryPanelSource).toContain("agent-list");
+    expect(agentMemoryPanelSource).toContain("agent-detail");
     expect(agentMemoryPanelSource).toContain("styles.agentMemoryWorkspace");
     expect(agentMemoryPanelSource).toContain("styles.sourcePanel");
     expect(agentMemoryPanelSource).toContain("styles.itemPanel");

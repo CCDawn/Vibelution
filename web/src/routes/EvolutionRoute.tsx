@@ -88,7 +88,6 @@ import {
   compactCaseObject,
   compactTimestamp,
   datasetBenchmarkDetail,
-  datasetCatalogStatusLabel,
   datasetUsabilityLabel,
   displaySupervisedRunStatus,
   displaySupervisedRunSummary,
@@ -127,6 +126,10 @@ import {
 import { SupervisedWorkspaceControls } from "./SupervisedWorkspaceControls";
 import { SupervisedAgentConversationPanel } from "./SupervisedAgentConversationPanel";
 import { type SupervisedWorkspaceWorkflowStep } from "./SupervisedWorkspaceTabs";
+import {
+  EvolutionDatasetCatalogPanel,
+  type EvolutionDatasetCatalogFilter,
+} from "./EvolutionDatasetCatalogPanel";
 import {
   buildSupervisedWorktreeLedgerSummary,
   isSelfEvolutionWorktreeRun,
@@ -186,7 +189,6 @@ type LibraryStatusFilter =
   | "rolled_back"
   | "missing";
 type LibraryDeleteFilter = "all" | "deletable" | "blocked";
-type DatasetCatalogFilter = "all" | "runnable" | "blocked" | "roadmap";
 type EvolutionRouteTrack = "supervised" | "self";
 type SupervisedRouteView = "live" | "runs" | "library";
 type EvolutionRouteProps = {
@@ -314,7 +316,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const [formInitialized, setFormInitialized] = useState(false);
   const [sourceKind, setSourceKind] = useState<"dataset" | "bundle">("dataset");
   const [datasetName, setDatasetName] = useState("");
-  const [selectedDatasetCatalogFilter, setSelectedDatasetCatalogFilter] = useState<DatasetCatalogFilter>("runnable");
+  const [selectedDatasetCatalogFilter, setSelectedDatasetCatalogFilter] = useState<EvolutionDatasetCatalogFilter>("runnable");
   const [datasetLimitInput, setDatasetLimitInput] = useState("");
   const datasetLimitInputRef = useRef<HTMLInputElement | null>(null);
   const [bundleNameInput, setBundleNameInput] = useState("");
@@ -1264,7 +1266,6 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       roadmap,
     };
   }, [datasetCatalog]);
-  const visibleDatasetCatalog = datasetCatalogGroups[selectedDatasetCatalogFilter] ?? datasetCatalogGroups.all;
   const hiddenDatasetCount = Math.max(0, datasetCatalog.length - primaryDatasets.length);
   const availableBundles = workbenchControl?.bundles ?? [];
   const selectedBundleExists = availableBundles.some((item) => item.name === bundleNameInput);
@@ -2547,72 +2548,21 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                   ]}
                 />
               </VSection>
-              {datasetCatalog.length > 0 ? (
-                <details className={styles.datasetCatalogPanel}>
-                  <summary className={styles.datasetCatalogSummary}>
-                    <span>
-                      <strong>{t("datasetCatalog")}</strong>
-                      <span>
-                        {datasetCatalog.length} · {lang === "zh" ? "可运行" : "runnable"} {datasetCatalogGroups.runnable.length}
-                      </span>
-                    </span>
-                    <span>{lang === "zh" ? "展开管理" : "Manage"}</span>
-                  </summary>
-                  <div className={styles.datasetCatalogBody}>
-                    <div className={styles.datasetCatalogFilterRow} role="tablist" aria-label={t("datasetCatalog")}>
-                      {([
-                        ["all", t("datasetCatalogAll"), datasetCatalogGroups.all.length],
-                        ["runnable", t("datasetCatalogRunnable"), datasetCatalogGroups.runnable.length],
-                        ["blocked", t("datasetCatalogBlocked"), datasetCatalogGroups.blocked.length],
-                        ["roadmap", t("datasetCatalogRoadmap"), datasetCatalogGroups.roadmap.length],
-                      ] as Array<[DatasetCatalogFilter, string, number]>).map(([filter, label, count]) => (
-                        <VButton
-                          key={filter}
-                          type="button"
-                          className={
-                            selectedDatasetCatalogFilter === filter
-                              ? `${styles.datasetCatalogFilterButton} ${styles.datasetCatalogFilterButtonActive}`
-                              : styles.datasetCatalogFilterButton
-                          }
-                          onClick={() => setSelectedDatasetCatalogFilter(filter)}
-                          aria-pressed={selectedDatasetCatalogFilter === filter}
-                        >
-                          {label} {count}
-                        </VButton>
-                      ))}
-                    </div>
-                    <div className={styles.datasetCatalogList}>
-                      {visibleDatasetCatalog.length > 0 ? (
-                        visibleDatasetCatalog.map((item) => {
-                          const statusText = datasetCatalogStatusLabel(item, lang);
-                          const reason = item.visibility === "primary"
-                            ? item.usabilityReason
-                            : (item.visibilityReason || item.usabilityReason);
-                          return (
-                            <article key={item.name} className={styles.datasetCatalogItem}>
-                              <div className={styles.datasetCatalogItemMain}>
-                                <VTooltip content={item.name} width="wide">
-                                  <strong tabIndex={0}>{item.name}</strong>
-                                </VTooltip>
-                                <span>{item.benchmarkFamily || item.taskType || item.bundleName || "--"}</span>
-                              </div>
-                              <span className={styles.datasetCatalogStatus}>{statusText}</span>
-                              {reason ? (
-                                <p>
-                                  <span>{item.visibility === "primary" ? statusText : t("datasetCatalogHiddenReason")}</span>
-                                  {reason}
-                                </p>
-                              ) : null}
-                            </article>
-                          );
-                        })
-                      ) : (
-                        <p className={styles.datasetCatalogEmpty}>{lang === "zh" ? "当前筛选无条目。" : "No entries for this filter."}</p>
-                      )}
-                    </div>
-                  </div>
-                </details>
-              ) : null}
+              <EvolutionDatasetCatalogPanel
+                lang={lang}
+                copy={{
+                  datasetCatalog: t("datasetCatalog"),
+                  datasetCatalogAll: t("datasetCatalogAll"),
+                  datasetCatalogRunnable: t("datasetCatalogRunnable"),
+                  datasetCatalogBlocked: t("datasetCatalogBlocked"),
+                  datasetCatalogRoadmap: t("datasetCatalogRoadmap"),
+                  datasetCatalogHiddenReason: t("datasetCatalogHiddenReason"),
+                }}
+                items={datasetCatalog}
+                groups={datasetCatalogGroups}
+                selectedFilter={selectedDatasetCatalogFilter}
+                onFilterChange={setSelectedDatasetCatalogFilter}
+              />
               {workbenchCatalogUnavailable ? (
                 <p className={styles.errorTextCompact}>
                   {lang === "zh" ? "评测来源暂时不可用，正在等待目录刷新。" : "Evaluation sources are temporarily unavailable while the catalog refreshes."}
