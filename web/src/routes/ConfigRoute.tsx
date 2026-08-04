@@ -2611,6 +2611,12 @@ export function ConfigRoute() {
     handleCreateProvider,
     handlePinProviderModels,
     handleUnpinProviderModel: unpinProviderModel,
+    handleDeleteProvider,
+    handleUpdateProviderCredential: updateProviderCredential,
+    handleUpdateProviderContextWindow: updateProviderContextWindow,
+    handleBeginProviderRouteEdit,
+    handlePreviewProviderRoute,
+    handleApplyProviderRoutePreview: applyProviderRoutePreview,
   } = useConfigProviderDraftActions({
     baseHash,
     draftConfig,
@@ -2632,6 +2638,11 @@ export function ConfigRoute() {
     setNotice,
     setSelectedProviderId,
     setSelectedProviderTab,
+    setProviderCredentialEditId,
+    setProviderCredentialValue,
+    setRouteEditProviderId,
+    setRouteEditProvider,
+    setRoutePreview,
     dispatchProviderWizard,
     requestJson,
   });
@@ -2769,154 +2780,19 @@ export function ConfigRoute() {
     }
   }
 
-  async function handleDeleteProvider(providerId: string) {
-    if (typeof window !== "undefined" && !window.confirm(`删除 Provider ${providerId}？此操作只允许在没有固定模型时继续。`)) return;
-    setBusyAction("正在删除 Provider…");
-    try {
-      const provider = asRecord(asRecord(asRecord(requireDraft().llm).providers)[providerId]);
-      const response = await requestJson<ConfigWorkspace>(
-        `/api/config/draft/providers/${encodeURIComponent(providerId)}`,
-        buildProviderDraftRequest({ providerId, provider }),
-        "DELETE",
-      );
-      syncWorkspace(response, "success", { resetBase: false });
-      setSelectedProviderId("");
-    } catch (error) {
-      setProviderActionError(readableErrorMessage(error).slice(0, 480));
-      markError(error);
-    } finally {
-      setBusyAction("");
-    }
-  }
-
   async function handleUpdateProviderCredential(providerId: string) {
     if (structuredActionsDisabled || !providerCredentialValue.trim()) return;
     if (!credentialProvider || credentialProvider.providerId !== providerId || credentialProvider.credentialState === "not_required") return;
-    setBusyAction("正在更新 Provider API Key 草稿…");
-    setProviderActionError("");
-    setProviderActionFeedback({ kind: "credential", providerId, phase: "busy", message: "正在保存 API Key…" });
-    try {
-      const provider = asRecord(asRecord(asRecord(requireDraft().llm).providers)[providerId]);
-      const response = await requestJson<ConfigWorkspace>(
-        `/api/config/draft/providers/${encodeURIComponent(providerId)}`,
-        buildProviderDraftRequest({ providerId, provider, credentialValue: providerCredentialValue }),
-        "PUT",
-      );
-      syncWorkspace(response, "success", { resetBase: false });
-      setProviderCredentialEditId("");
-      setProviderCredentialValue("");
-      setProviderActionFeedback({ kind: "credential", providerId, phase: "success", message: "API Key 已更新到草稿" });
-    } catch (error) {
-      const message = readableErrorMessage(error).slice(0, 480);
-      setProviderActionFeedback({ kind: "credential", providerId, phase: "error", message });
-      markError(error);
-    } finally {
-      setBusyAction("");
-    }
+    await updateProviderCredential(providerId, providerCredentialValue);
   }
 
   async function handleUpdateProviderContextWindow(providerId: string, contextWindow: number | null) {
     if (structuredActionsDisabled) return;
-    setBusyAction("正在更新上下文窗口草稿…");
-    setProviderActionError("");
-    setProviderActionFeedback({
-      kind: "credential",
-      providerId,
-      phase: "busy",
-      message: "正在保存上下文窗口…",
-    });
-    try {
-      const provider = clonePublicConfig(asRecord(asRecord(asRecord(requireDraft().llm).providers)[providerId]));
-      if (contextWindow && contextWindow > 0) {
-        provider.context_window = contextWindow;
-      } else {
-        provider.context_window = null;
-      }
-      const response = await requestJson<ConfigWorkspace>(
-        `/api/config/draft/providers/${encodeURIComponent(providerId)}`,
-        buildProviderDraftRequest({ providerId, provider }),
-        "PUT",
-      );
-      syncWorkspace(response, "success", { resetBase: false });
-      setProviderActionFeedback({
-        kind: "credential",
-        providerId,
-        phase: "success",
-        message: contextWindow && contextWindow > 0
-          ? `上下文窗口已设为 ${contextWindow}（草稿）；请点右上角保存到外部配置`
-          : "已清除 Provider 上下文窗口草稿；请点右上角保存到外部配置",
-      });
-    } catch (error) {
-      const message = readableErrorMessage(error).slice(0, 480);
-      setProviderActionFeedback({ kind: "credential", providerId, phase: "error", message });
-      setProviderActionError(message);
-      markError(error);
-    } finally {
-      setBusyAction("");
-    }
-  }
-
-  function handleBeginProviderRouteEdit(providerId: string) {
-    const provider = clonePublicConfig(asRecord(asRecord(asRecord(requireDraft().llm).providers)[providerId]));
-    setRouteEditProviderId(providerId);
-    setRouteEditProvider(provider);
-    setRoutePreview(null);
-    setProviderActionFeedback(null);
-  }
-
-  async function handlePreviewProviderRoute(providerId: string, provider: Record<string, unknown>) {
-    setBusyAction("正在预览路由影响…");
-    setProviderActionError("");
-    setProviderActionFeedback({ kind: "route", providerId, phase: "busy", message: "正在生成路由预览…" });
-    try {
-      const preview = await requestJson<Omit<ProviderRoutePreview, "proposedProvider">>(
-        `/api/config/draft/providers/${encodeURIComponent(providerId)}/route-preview`,
-        buildProviderDraftRequest({ providerId, provider }),
-      );
-      setRoutePreview({ ...preview, proposedProvider: provider });
-      setProviderActionFeedback({
-        kind: "route",
-        providerId,
-        phase: "success",
-        message: preview.routeChanged ? "路由预览已生成" : "当前路由没有变化",
-      });
-    } catch (error) {
-      const message = readableErrorMessage(error).slice(0, 480);
-      setProviderActionFeedback({ kind: "route", providerId, phase: "error", message });
-      markError(error);
-    } finally {
-      setBusyAction("");
-    }
+    await updateProviderContextWindow(providerId, contextWindow);
   }
 
   async function handleApplyProviderRoutePreview() {
-    if (!routePreview?.routeChanged || !routePreview.routePreviewToken) return;
-    const providerId = routePreview.providerId;
-    setBusyAction("正在更新 Provider 路由…");
-    setProviderActionError("");
-    setProviderActionFeedback({ kind: "route", providerId, phase: "busy", message: "正在更新 Provider 路由…" });
-    try {
-      const response = await requestJson<ConfigWorkspace>(
-        `/api/config/draft/providers/${encodeURIComponent(routePreview.providerId)}`,
-        buildProviderDraftRequest({
-          providerId: routePreview.providerId,
-          provider: routePreview.proposedProvider,
-          routePreviewToken: routePreview.routePreviewToken,
-        }),
-        "PUT",
-      );
-      syncWorkspace(response, "success", { resetBase: false });
-      setRoutePreview(null);
-      setRouteEditProviderId("");
-      setRouteEditProvider({});
-      setProviderActionFeedback({ kind: "route", providerId, phase: "success", message: "Provider 路由已更新到草稿" });
-    } catch (error) {
-      const message = readableErrorMessage(error).slice(0, 480);
-      setProviderActionFeedback({ kind: "route", providerId, phase: "error", message });
-      markError(error);
-    } finally {
-      setBusyAction("");
-    }
+    await applyProviderRoutePreview(routePreview);
   }
 
   async function handlePreviewMigration(

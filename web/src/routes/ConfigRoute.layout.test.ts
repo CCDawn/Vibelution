@@ -253,11 +253,13 @@ describe("ConfigRoute layout contract", () => {
     expect(providerPanelSource).toContain('type="password"');
     expect(providerPanelSource).toContain('provider.credentialState === "not_required"');
     expect(routeSource).toContain('`/api/config/draft/providers/${encodeURIComponent(providerId)}`');
-    expect(routeSource).toContain("buildProviderDraftRequest({ providerId, provider, credentialValue: providerCredentialValue })");
+    // Credential PUT body is owned by useConfigProviderDraftActions (param name: credentialValue).
+    expect(routeSource).toContain("buildProviderDraftRequest({ providerId, provider, credentialValue })");
     expect(routeSource).toContain('"PUT"');
     expect(routeSource).toContain("handleUpdateProviderContextWindow");
     expect(routeSource).toContain("if (structuredActionsDisabled || !providerCredentialValue.trim()) return;");
     expect(routeSource).toContain('credentialProvider.credentialState === "not_required"');
+    expect(routeSource).toContain("updateProviderCredential(providerId, providerCredentialValue)");
     expect(routeSource).toContain('onSelectProvider={(providerId) => {');
     expect(routeSource).toContain('setProviderCredentialEditId("")');
     expect(routeSource).toContain('setProviderCredentialValue("")');

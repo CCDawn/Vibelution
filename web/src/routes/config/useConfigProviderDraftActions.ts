@@ -1,8 +1,9 @@
 /**
- * Config provider draft write actions (create / discover / pin / suggest / unpin).
- * Route still owns workspace sync, notices, and remaining credential/route handlers.
+ * Config provider draft write actions:
+ * create / discover / pin / suggest / unpin / delete / credential / context window / route preview.
+ * Route still owns quick-setup orchestration, LLM test, migration, and formal apply.
  */
-import { useCallback, type Dispatch, type MutableRefObject } from "react";
+import { useCallback, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
 
 import { fetchJson } from "../../api/client";
 import type {
@@ -10,13 +11,18 @@ import type {
   ConfigDraftMeta,
   ConfigWorkspace,
 } from "../../api/types";
-import { asRecord, filterAlreadyPinnedModels } from "../configRouteLogic";
+import { asRecord, clonePublicConfig } from "../configRouteLogic";
 import type { PublicConfigShape } from "../configRouteLogic";
 import {
   buildProviderWizardDraft,
+  filterAlreadyPinnedModels,
+  type ProviderWizardAction,
   type ProviderWizardState,
 } from "../configProviderLogic";
-import type { ProviderActionFeedback } from "../ConfigProviderRegistryPanel";
+import type {
+  ConfigProviderRegistryTab,
+  ProviderActionFeedback,
+} from "../ConfigProviderRegistryPanel";
 import {
   formatProviderPinBusyMessage,
   formatProviderPinErrorMessage,
@@ -31,6 +37,21 @@ type ProviderDraftRequestSnapshot = {
   draftMeta: ConfigDraftMeta;
   baseHash: string;
   modelCatalog?: ConfigWorkspace["modelCatalog"];
+};
+
+export type ProviderRouteImpact = {
+  modelRef?: string;
+  liveReferenceCount?: number;
+  historicalReferenceCount?: number;
+};
+
+export type ProviderRoutePreview = {
+  providerId: string;
+  routeChanged: boolean;
+  routePreviewToken: string;
+  modelRefs: string[];
+  impactedRefs: ProviderRouteImpact[];
+  proposedProvider: Record<string, unknown>;
 };
 
 export type UseConfigProviderDraftActionsOptions = {
@@ -50,12 +71,18 @@ export type UseConfigProviderDraftActionsOptions = {
   providerDiscoveryFailureMessage: (detail: { providerId: string; reasonCode: string; retryable: boolean } | null) => string;
   setBusyAction: (value: string) => void;
   setProviderActionError: (value: string) => void;
-  setProviderActionFeedback: (value: ProviderActionFeedback) => void;
+  setProviderActionFeedback: (value: ProviderActionFeedback | null) => void;
   setNotice: (value: { tone: NoticeTone; text: string }) => void;
   setSelectedProviderId: (value: string) => void;
-  setSelectedProviderTab: (value: "models" | "settings" | string) => void;
-  dispatchProviderWizard: Dispatch<{ type: "pin_succeeded"; modelRef: string } | { type: string; [key: string]: unknown }>;
+  setSelectedProviderTab: Dispatch<SetStateAction<ConfigProviderRegistryTab>>;
+  setProviderCredentialEditId: (value: string) => void;
+  setProviderCredentialValue: (value: string) => void;
+  setRouteEditProviderId: (value: string) => void;
+  setRouteEditProvider: (value: Record<string, unknown>) => void;
+  setRoutePreview: Dispatch<SetStateAction<ProviderRoutePreview | null>>;
+  dispatchProviderWizard: Dispatch<ProviderWizardAction>;
   requestJson?: <T>(url: string, body?: unknown, method?: string) => Promise<T>;
+  confirmDeleteProvider?: (providerId: string) => boolean;
 };
 
 async function defaultRequestJson<T>(url: string, body?: unknown, method = "POST"): Promise<T> {
@@ -90,8 +117,17 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
     setNotice,
     setSelectedProviderId,
     setSelectedProviderTab,
+    setProviderCredentialEditId,
+    setProviderCredentialValue,
+    setRouteEditProviderId,
+    setRouteEditProvider,
+    setRoutePreview,
     dispatchProviderWizard,
     requestJson = defaultRequestJson,
+    confirmDeleteProvider = (providerId: string) => (
+      typeof window === "undefined"
+      || window.confirm(`删除 Provider ${providerId}？此操作只允许在没有固定模型时继续。`)
+    ),
   } = options;
 
   const buildProviderDraftRequest = useCallback((extra: Record<string, unknown>) => {
@@ -373,6 +409,208 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
     syncWorkspace,
   ]);
 
+  const handleDeleteProvider = useCallback(async (providerId: string) => {
+    if (!confirmDeleteProvider(providerId)) return;
+    setBusyAction("正在删除 Provider…");
+    try {
+      const provider = asRecord(asRecord(asRecord(requireDraft().llm).providers)[providerId]);
+      const response = await requestJson<ConfigWorkspace>(
+        `/api/config/draft/providers/${encodeURIComponent(providerId)}`,
+        buildProviderDraftRequest({ providerId, provider }),
+        "DELETE",
+      );
+      syncWorkspace(response, "success", { resetBase: false });
+      setSelectedProviderId("");
+    } catch (error) {
+      setProviderActionError(readableErrorMessage(error).slice(0, 480));
+      markError(error);
+    } finally {
+      setBusyAction("");
+    }
+  }, [
+    buildProviderDraftRequest,
+    confirmDeleteProvider,
+    markError,
+    readableErrorMessage,
+    requestJson,
+    requireDraft,
+    setBusyAction,
+    setProviderActionError,
+    setSelectedProviderId,
+    syncWorkspace,
+  ]);
+
+  const handleUpdateProviderCredential = useCallback(async (providerId: string, credentialValue: string) => {
+    if (!credentialValue.trim()) return;
+    setBusyAction("正在更新 Provider API Key 草稿…");
+    setProviderActionError("");
+    setProviderActionFeedback({ kind: "credential", providerId, phase: "busy", message: "正在保存 API Key…" });
+    try {
+      const provider = asRecord(asRecord(asRecord(requireDraft().llm).providers)[providerId]);
+      const response = await requestJson<ConfigWorkspace>(
+        `/api/config/draft/providers/${encodeURIComponent(providerId)}`,
+        buildProviderDraftRequest({ providerId, provider, credentialValue }),
+        "PUT",
+      );
+      syncWorkspace(response, "success", { resetBase: false });
+      setProviderCredentialEditId("");
+      setProviderCredentialValue("");
+      setProviderActionFeedback({ kind: "credential", providerId, phase: "success", message: "API Key 已更新到草稿" });
+    } catch (error) {
+      const message = readableErrorMessage(error).slice(0, 480);
+      setProviderActionFeedback({ kind: "credential", providerId, phase: "error", message });
+      markError(error);
+    } finally {
+      setBusyAction("");
+    }
+  }, [
+    buildProviderDraftRequest,
+    markError,
+    readableErrorMessage,
+    requestJson,
+    requireDraft,
+    setBusyAction,
+    setProviderActionError,
+    setProviderActionFeedback,
+    setProviderCredentialEditId,
+    setProviderCredentialValue,
+    syncWorkspace,
+  ]);
+
+  const handleUpdateProviderContextWindow = useCallback(async (providerId: string, contextWindow: number | null) => {
+    setBusyAction("正在更新上下文窗口草稿…");
+    setProviderActionError("");
+    setProviderActionFeedback({
+      kind: "credential",
+      providerId,
+      phase: "busy",
+      message: "正在保存上下文窗口…",
+    });
+    try {
+      const provider = clonePublicConfig(asRecord(asRecord(asRecord(requireDraft().llm).providers)[providerId]));
+      if (contextWindow && contextWindow > 0) {
+        provider.context_window = contextWindow;
+      } else {
+        provider.context_window = null;
+      }
+      const response = await requestJson<ConfigWorkspace>(
+        `/api/config/draft/providers/${encodeURIComponent(providerId)}`,
+        buildProviderDraftRequest({ providerId, provider }),
+        "PUT",
+      );
+      syncWorkspace(response, "success", { resetBase: false });
+      setProviderActionFeedback({
+        kind: "credential",
+        providerId,
+        phase: "success",
+        message: contextWindow && contextWindow > 0
+          ? `上下文窗口已设为 ${contextWindow}（草稿）；请点右上角保存到外部配置`
+          : "已清除 Provider 上下文窗口草稿；请点右上角保存到外部配置",
+      });
+    } catch (error) {
+      const message = readableErrorMessage(error).slice(0, 480);
+      setProviderActionFeedback({ kind: "credential", providerId, phase: "error", message });
+      setProviderActionError(message);
+      markError(error);
+    } finally {
+      setBusyAction("");
+    }
+  }, [
+    buildProviderDraftRequest,
+    markError,
+    readableErrorMessage,
+    requestJson,
+    requireDraft,
+    setBusyAction,
+    setProviderActionError,
+    setProviderActionFeedback,
+    syncWorkspace,
+  ]);
+
+  const handleBeginProviderRouteEdit = useCallback((providerId: string) => {
+    const provider = clonePublicConfig(asRecord(asRecord(asRecord(requireDraft().llm).providers)[providerId]));
+    setRouteEditProviderId(providerId);
+    setRouteEditProvider(provider);
+    setRoutePreview(null);
+    setProviderActionFeedback(null);
+  }, [requireDraft, setProviderActionFeedback, setRouteEditProvider, setRouteEditProviderId, setRoutePreview]);
+
+  const handlePreviewProviderRoute = useCallback(async (providerId: string, provider: Record<string, unknown>) => {
+    setBusyAction("正在预览路由影响…");
+    setProviderActionError("");
+    setProviderActionFeedback({ kind: "route", providerId, phase: "busy", message: "正在生成路由预览…" });
+    try {
+      const preview = await requestJson<Omit<ProviderRoutePreview, "proposedProvider">>(
+        `/api/config/draft/providers/${encodeURIComponent(providerId)}/route-preview`,
+        buildProviderDraftRequest({ providerId, provider }),
+      );
+      setRoutePreview({ ...preview, proposedProvider: provider });
+      setProviderActionFeedback({
+        kind: "route",
+        providerId,
+        phase: "success",
+        message: preview.routeChanged ? "路由预览已生成" : "当前路由没有变化",
+      });
+    } catch (error) {
+      const message = readableErrorMessage(error).slice(0, 480);
+      setProviderActionFeedback({ kind: "route", providerId, phase: "error", message });
+      markError(error);
+    } finally {
+      setBusyAction("");
+    }
+  }, [
+    buildProviderDraftRequest,
+    markError,
+    readableErrorMessage,
+    requestJson,
+    setBusyAction,
+    setProviderActionError,
+    setProviderActionFeedback,
+    setRoutePreview,
+  ]);
+
+  const handleApplyProviderRoutePreview = useCallback(async (routePreview: ProviderRoutePreview | null) => {
+    if (!routePreview?.routeChanged || !routePreview.routePreviewToken) return;
+    const providerId = routePreview.providerId;
+    setBusyAction("正在更新 Provider 路由…");
+    setProviderActionError("");
+    setProviderActionFeedback({ kind: "route", providerId, phase: "busy", message: "正在更新 Provider 路由…" });
+    try {
+      const response = await requestJson<ConfigWorkspace>(
+        `/api/config/draft/providers/${encodeURIComponent(routePreview.providerId)}`,
+        buildProviderDraftRequest({
+          providerId: routePreview.providerId,
+          provider: routePreview.proposedProvider,
+          routePreviewToken: routePreview.routePreviewToken,
+        }),
+        "PUT",
+      );
+      syncWorkspace(response, "success", { resetBase: false });
+      setRoutePreview(null);
+      setRouteEditProviderId("");
+      setRouteEditProvider({});
+      setProviderActionFeedback({ kind: "route", providerId, phase: "success", message: "Provider 路由已更新到草稿" });
+    } catch (error) {
+      const message = readableErrorMessage(error).slice(0, 480);
+      setProviderActionFeedback({ kind: "route", providerId, phase: "error", message });
+      markError(error);
+    } finally {
+      setBusyAction("");
+    }
+  }, [
+    buildProviderDraftRequest,
+    markError,
+    readableErrorMessage,
+    requestJson,
+    setBusyAction,
+    setProviderActionError,
+    setProviderActionFeedback,
+    setRouteEditProvider,
+    setRouteEditProviderId,
+    setRoutePreview,
+    syncWorkspace,
+  ]);
+
   return {
     buildProviderDraftRequest,
     handleDiscoverProvider,
@@ -380,5 +618,11 @@ export function useConfigProviderDraftActions(options: UseConfigProviderDraftAct
     handleCreateProvider,
     handlePinProviderModels,
     handleUnpinProviderModel,
+    handleDeleteProvider,
+    handleUpdateProviderCredential,
+    handleUpdateProviderContextWindow,
+    handleBeginProviderRouteEdit,
+    handlePreviewProviderRoute,
+    handleApplyProviderRoutePreview,
   };
 }
