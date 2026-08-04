@@ -48,9 +48,11 @@ describe("VUI shadcn route contract", () => {
   });
 
   it("keeps project AGENTS.md frontend red line and standards route for VUI/shadcn", () => {
-    const agents = readFileSync(resolve(webSrc, "../AGENTS.md"), "utf-8");
-    const standardsIndex = readFileSync(resolve(webSrc, "../docs/standards/README.md"), "utf-8");
-    const development = readFileSync(resolve(webSrc, "../docs/standards/development-standard.md"), "utf-8");
+    // webSrc = web/src; project root is two levels up from web/src.
+    const projectRoot = resolve(webSrc, "../..");
+    const agents = readFileSync(resolve(projectRoot, "AGENTS.md"), "utf-8");
+    const standardsIndex = readFileSync(resolve(projectRoot, "docs/standards/README.md"), "utf-8");
+    const development = readFileSync(resolve(projectRoot, "docs/standards/development-standard.md"), "utf-8");
     expect(agents).toContain("前端产品 UI 强制 VUI + shadcn/Radix");
     expect(agents).toContain("vuiShadcnRouteContract.test.ts");
     expect(standardsIndex).toContain("vuiShadcnRouteContract.test.ts");
