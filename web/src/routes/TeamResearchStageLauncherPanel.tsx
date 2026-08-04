@@ -3,10 +3,8 @@
  * Wave 8H: extracted from TeamsRoute.tsx for domain componentization.
  * Presentation + local pure helpers; mutations/query objects injected by the route.
  */
-import type { ReactNode } from "react";
 import { CheckCircle2, Eye, Link2, Play, RefreshCw, Settings2 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import type { NavigateFunction } from "react-router-dom";
 import { Link } from "react-router-dom";
 
 import { getChallengeQuestionRunDetail } from "../api/challengeQuestionRuns";
@@ -14,7 +12,6 @@ import { queryKeys } from "../api/queryKeys";
 import type {
   ExperimentMethodId,
   ResearchProjectAgentTaskKind,
-  Team,
 } from "../api/types";
 import { VNativeButton, VNativeInput, VNativeSelect } from "../components/vui";
 import {
@@ -25,7 +22,6 @@ import { ChallengeQuestionDetailPanel } from "./teams/challenge-cup/ChallengeQue
 import {
   researchIterationLifecycleStatusLabel,
   researchKnowledgeLifecycleStatusLabel,
-  type ExperimentPlanningStatusPayload,
 } from "./teams/experimentLoopModel";
 import { isChallengeCupResearchWorkflowTeam } from "./teams/teamKindModel";
 import { RESEARCH_TEAM_ID } from "./TeamsRoute.canvasData";
@@ -40,13 +36,10 @@ import {
   type ResearchStageWorkspaceView,
 } from "./teams/researchWorkspaceModel";
 import type {
-  ResearchStagePhaseStatus,
-  ResearchStageRoundStatusPayload,
   ResearchStageType,
 } from "./teams/source-collection/stageProjection";
 import {
   SOURCE_COLLECTION_SEARCH_EXECUTION_ROLES,
-  type SourceCollectionDraft,
 } from "./teams/source-collection/presentationModel";
 import { sourceCollectionRunLabel } from "./teams/source-collection/runModel";
 import { ResearchProjectSwitcher } from "./teams/research-projects/ResearchProjectSwitcher";
@@ -54,107 +47,16 @@ import { useResearchProjectAgentTasks } from "./teams/research-projects/useResea
 import { ResearchMemoryEvidencePanel } from "./teams/ResearchMemoryEvidencePanel";
 import type { ResearchMemoryContextSummary } from "./teams/ResearchMemoryEvidencePanel";
 import { ResearchWorkflowErrorSurface } from "./teams/ResearchWorkflowErrorSurface";
+import {
+  flattenResearchStageLauncherProps,
+  type TeamResearchStageLauncherPanelProps,
+} from "./teams/researchStageLauncherProps";
 import researchStyles from "./TeamsRoute.research.styles";
 import shellStyles from "./TeamsRoute.styles";
 
 const styles = { ...shellStyles, ...researchStyles } as Record<string, string>;
 
-type Lang = "zh" | "en";
-
-/** Loose injection surface so TeamsRoute can pass live query/mutation objects without over-narrowing. */
-export type TeamResearchStageLauncherPanelProps = {
-  researchWorkflowTeamSelected: boolean;
-  challengeCupResearchTeamSelected: boolean;
-  knowledgeExpansionWorkflowTeamSelected: boolean;
-  experimentPlanningStatus: ExperimentPlanningStatusPayload | null | undefined;
-  selectedTeam: Team | null | undefined;
-  selectedTeamMemoryMembers: Array<{
-    id: string;
-    agentName: string;
-    agentCode: string;
-    roleLabel: string;
-    statusTitle: string;
-    statusLabel: string;
-    statusTone: string;
-    configRoute: string;
-  }>;
-  lang: Lang;
-  challengeTeamSurface: "workspace" | "progress";
-  /**
-   * overview: stage cards are read-only progress (no start/play CTAs).
-   * interactive: full launch + details actions (stage pages / non-overview).
-   */
-  presentationMode?: "overview" | "interactive";
-  sourceCollectionDraft: SourceCollectionDraft;
-  setSourceCollectionDraft: (updater: (current: SourceCollectionDraft) => SourceCollectionDraft) => void;
-  preferredExperimentMethod: string;
-  setPreferredExperimentMethod: (method: any) => void;
-  experimentPlanningStatusQuery: {
-    isPending: boolean;
-    isFetching: boolean;
-    refetch: () => unknown;
-  };
-  sourceCollectionDisplayState: { statusText: string };
-  selectedSourceCollectionRun: { runId: string } | null | undefined;
-  sourceCollectionSearchOpenAssignmentCount: number;
-  selectedTeamExecuteSourceCollectionSearchPending: boolean;
-  sourceCollectionAcceptedBackgroundActive: boolean;
-  sourceCollectionDownstreamOpenAssignmentCount: number;
-  sourceCollectionRunPendingScreeningCount: number;
-  selectedTeamStartSourceCollectionPending: boolean;
-  sourceCollectionCanStart: boolean;
-  selectedTeamStartResearchStagePending: boolean;
-  researchStageCanLaunch: boolean;
-  sourceCollectionSearchActionReadiness: { disabled: boolean; reason?: string; loading?: boolean };
-  sourceCollectionActionInitialDataPending: boolean;
-  sourceCollectionActionDataError: boolean;
-  sourceCollectionActionBusyReason: string;
-  sourceCollectionActionNoInputReason: string;
-  sourceCollectionActionLoadingReason: string;
-  sourceCollectionActionErrorReason: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  sourceCollectionActionReadiness: (...args: any[]) => { disabled: boolean; reason?: string; loading?: boolean };
-  selectedSourceCollectionAssignment: { status: string; agentRole: string; assignmentId: string } | null | undefined;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  executeSourceCollectionSearchMutation: { mutate: (payload: any) => void };
-  selectedSourceCollectionRunEffectiveId: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  startSourceCollectionRunMutation: { mutate: (payload: any) => void };
-  launchResearchStage: (stageType: ResearchStageType, mode?: "continue_or_start" | "new_round") => void;
-  navigate: NavigateFunction;
-  researchStageRoundStatus: ResearchStageRoundStatusPayload | null | undefined;
-  researchStageRoundStatusQuery: {
-    isPending: boolean;
-    isError: boolean;
-    isFetching: boolean;
-    refetch: () => unknown;
-  };
-  researchStagePhases: ResearchStagePhaseStatus[];
-  searchParams: URLSearchParams;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  experimentMethodCatalogQuery: { data?: any; isFetching: boolean };
-  researchTeamDetailDegraded: boolean;
-  selectedTeamDetailLoading: boolean;
-  teamDetailQuery: { isFetching: boolean; refetch: () => unknown };
-  sourceCollectionSearchOpenAssignmentCountText: string;
-  sourceCollectionDownstreamOpenAssignmentCountText: string;
-  sourceCollectionCollectedCountText: string;
-  sourceCollectionDisplayedCandidateCountText: string;
-  sourceCollectionQueryCountText: string;
-  renderResearchStageAgentSummary: (stageType: ResearchStageType) => ReactNode;
-  runKnowledgeCollectionLoopAction: () => void;
-  sourceCollectionLoopActionDisabled: boolean;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  sourceCollectionActionDisabledTitle: (readiness: any, label: string) => string | undefined;
-  sourceCollectionLoopActionReadiness: { disabled: boolean; reason?: string; loading?: boolean };
-  sourceCollectionLoopActionLabel: string;
-  sourceCollectionLoopStartsNewRun: boolean;
-  selectedTeamStartResearchStageError: Error | null;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  selectedTeamStartResearchStageResult: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  researchStageStartFeedbackText: (payload: any, lang: Lang, stageLabel?: string) => string;
-};
+export type { TeamResearchStageLauncherPanelProps };
 
 export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherPanelProps) {
   const {
@@ -166,7 +68,7 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
     selectedTeamMemoryMembers,
     lang,
     challengeTeamSurface,
-    presentationMode = "interactive",
+    presentationMode,
     sourceCollectionDraft,
     setSourceCollectionDraft,
     preferredExperimentMethod,
@@ -220,7 +122,7 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
     selectedTeamStartResearchStageError,
     selectedTeamStartResearchStageResult,
     researchStageStartFeedbackText,
-  } = props;
+  } = flattenResearchStageLauncherProps(props);
   const workflowTeamId = selectedTeam?.teamId || RESEARCH_TEAM_ID;
   const selectedChallengeQuestionId = searchParams.get("challengeQuestion")?.trim().toUpperCase() || "";
   const selectedChallengeRunId = searchParams.get("challengeRun")?.trim() || "";

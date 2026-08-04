@@ -21,6 +21,7 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 | Research workflow stage host | `TeamResearchWorkflowPanelHost.tsx` + `renderResearchWorkflowModules` in `TeamsRoute` | inlining workflow section chrome / stage modules twice in board+canvas |
 | Board primary overview/launcher | `TeamResearchBoardPrimarySurface.tsx` | board fill loading/empty/ready + launcher branch buried in route return |
 | Shared inspector tail | `renderTeamsInspectorSharedPanels` in `TeamsRoute` | duplicating bind/AI-search/workflow/communication stack on board+canvas |
+| Stage launcher prop bags | `researchStageLauncherProps.ts` + `TeamResearchStageLauncherPanel` | flat 60-key injection spray from TeamsRoute |
 | Workflow API error product copy | `researchWorkflowErrorModel.ts` + `ResearchWorkflowErrorSurface.tsx` | raw Error.message in UI |
 | Team kind guards / system-team roles | `teamKindModel.ts` | UI panels |
 | Canvas geometry / auto-layout / edge paths | `canvasGeometry.ts` | styles maps, mutations |

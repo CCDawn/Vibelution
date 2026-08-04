@@ -2030,68 +2030,78 @@ export function TeamsRoute({
   function renderResearchStageLauncher(presentationMode: "overview" | "interactive" = researchWorkspaceView === "overview" ? "overview" : "interactive") {
     return (
       <TeamResearchStageLauncherPanel
-        researchWorkflowTeamSelected={researchWorkflowTeamSelected}
-        challengeCupResearchTeamSelected={challengeCupResearchTeamSelected}
-        knowledgeExpansionWorkflowTeamSelected={knowledgeExpansionWorkflowTeamSelected}
-        experimentPlanningStatus={experimentPlanningStatus}
-        selectedTeam={selectedTeam}
-        selectedTeamMemoryMembers={selectedTeamMemoryMembers}
         lang={lang}
-        challengeTeamSurface={challengeTeamSurface}
         presentationMode={presentationMode}
-        sourceCollectionDraft={sourceCollectionDraft}
-        setSourceCollectionDraft={setSourceCollectionDraft}
-        preferredExperimentMethod={preferredExperimentMethod}
-        setPreferredExperimentMethod={setPreferredExperimentMethod}
-        experimentPlanningStatusQuery={experimentPlanningStatusQuery}
-        sourceCollectionDisplayState={sourceCollectionDisplayState}
-        selectedSourceCollectionRun={selectedSourceCollectionRun}
-        sourceCollectionSearchOpenAssignmentCount={sourceCollectionSearchOpenAssignmentCount}
-        selectedTeamExecuteSourceCollectionSearchPending={selectedTeamExecuteSourceCollectionSearchPending}
-        sourceCollectionAcceptedBackgroundActive={sourceCollectionAcceptedBackgroundActive}
-        sourceCollectionDownstreamOpenAssignmentCount={sourceCollectionDownstreamOpenAssignmentCount}
-        sourceCollectionRunPendingScreeningCount={sourceCollectionRunPendingScreeningCount}
-        selectedTeamStartSourceCollectionPending={selectedTeamStartSourceCollectionPending}
-        sourceCollectionCanStart={sourceCollectionCanStart}
-        selectedTeamStartResearchStagePending={selectedTeamStartResearchStagePending}
-        researchStageCanLaunch={researchStageCanLaunch}
-        sourceCollectionSearchActionReadiness={sourceCollectionSearchActionReadiness}
-        sourceCollectionActionInitialDataPending={sourceCollectionActionInitialDataPending}
-        sourceCollectionActionDataError={sourceCollectionActionDataError}
-        sourceCollectionActionBusyReason={sourceCollectionActionBusyReason}
-        sourceCollectionActionNoInputReason={sourceCollectionActionNoInputReason}
-        sourceCollectionActionLoadingReason={sourceCollectionActionLoadingReason}
-        sourceCollectionActionErrorReason={sourceCollectionActionErrorReason}
-        sourceCollectionActionReadiness={sourceCollectionActionReadiness}
-        selectedSourceCollectionAssignment={selectedSourceCollectionAssignment}
-        executeSourceCollectionSearchMutation={executeSourceCollectionSearchMutation}
-        selectedSourceCollectionRunEffectiveId={selectedSourceCollectionRunEffectiveId}
-        startSourceCollectionRunMutation={startSourceCollectionRunMutation}
-        launchResearchStage={launchResearchStage}
-        navigate={navigate}
-        researchStageRoundStatus={researchStageRoundStatus}
-        researchStageRoundStatusQuery={researchStageRoundStatusQuery}
-        researchStagePhases={researchStagePhases}
-        searchParams={searchParams}
-        experimentMethodCatalogQuery={experimentMethodCatalogQuery}
-        researchTeamDetailDegraded={researchTeamDetailDegraded}
-        selectedTeamDetailLoading={selectedTeamDetailLoading}
-        teamDetailQuery={teamDetailQuery}
-        sourceCollectionSearchOpenAssignmentCountText={sourceCollectionSearchOpenAssignmentCountText}
-        sourceCollectionDownstreamOpenAssignmentCountText={sourceCollectionDownstreamOpenAssignmentCountText}
-        sourceCollectionCollectedCountText={sourceCollectionCollectedCountText}
-        sourceCollectionDisplayedCandidateCountText={sourceCollectionDisplayedCandidateCountText}
-        sourceCollectionQueryCountText={sourceCollectionQueryCountText}
+        team={{
+          researchWorkflowSelected: researchWorkflowTeamSelected,
+          challengeCupSelected: challengeCupResearchTeamSelected,
+          knowledgeExpansionSelected: knowledgeExpansionWorkflowTeamSelected,
+          selected: selectedTeam,
+          memoryMembers: selectedTeamMemoryMembers,
+          challengeSurface: challengeTeamSurface,
+          detailDegraded: researchTeamDetailDegraded,
+          detailLoading: selectedTeamDetailLoading,
+          detailQuery: teamDetailQuery,
+        }}
+        sourceCollection={{
+          draft: sourceCollectionDraft,
+          setDraft: setSourceCollectionDraft,
+          displayState: sourceCollectionDisplayState,
+          selectedRun: selectedSourceCollectionRun,
+          selectedRunEffectiveId: selectedSourceCollectionRunEffectiveId,
+          selectedAssignment: selectedSourceCollectionAssignment,
+          searchOpenAssignmentCount: sourceCollectionSearchOpenAssignmentCount,
+          searchOpenAssignmentCountText: sourceCollectionSearchOpenAssignmentCountText,
+          executeSearchPending: selectedTeamExecuteSourceCollectionSearchPending,
+          acceptedBackgroundActive: sourceCollectionAcceptedBackgroundActive,
+          downstreamOpenAssignmentCount: sourceCollectionDownstreamOpenAssignmentCount,
+          downstreamOpenAssignmentCountText: sourceCollectionDownstreamOpenAssignmentCountText,
+          pendingScreeningCount: sourceCollectionRunPendingScreeningCount,
+          startPending: selectedTeamStartSourceCollectionPending,
+          canStart: sourceCollectionCanStart,
+          searchActionReadiness: sourceCollectionSearchActionReadiness,
+          actionInitialDataPending: sourceCollectionActionInitialDataPending,
+          actionDataError: sourceCollectionActionDataError,
+          actionBusyReason: sourceCollectionActionBusyReason,
+          actionNoInputReason: sourceCollectionActionNoInputReason,
+          actionLoadingReason: sourceCollectionActionLoadingReason,
+          actionErrorReason: sourceCollectionActionErrorReason,
+          actionReadiness: sourceCollectionActionReadiness,
+          executeSearchMutation: executeSourceCollectionSearchMutation,
+          startRunMutation: startSourceCollectionRunMutation,
+          collectedCountText: sourceCollectionCollectedCountText,
+          displayedCandidateCountText: sourceCollectionDisplayedCandidateCountText,
+          queryCountText: sourceCollectionQueryCountText,
+          runLoopAction: runKnowledgeCollectionLoopAction,
+          loopActionDisabled: sourceCollectionLoopActionDisabled,
+          actionDisabledTitle: sourceCollectionActionDisabledTitle,
+          loopActionReadiness: sourceCollectionLoopActionReadiness,
+          loopActionLabel: sourceCollectionLoopActionLabel,
+          loopStartsNewRun: sourceCollectionLoopStartsNewRun,
+        }}
+        researchStage={{
+          startPending: selectedTeamStartResearchStagePending,
+          canLaunch: researchStageCanLaunch,
+          launch: launchResearchStage,
+          roundStatus: researchStageRoundStatus,
+          roundStatusQuery: researchStageRoundStatusQuery,
+          phases: researchStagePhases,
+          startError: selectedTeamStartResearchStageError,
+          startResult: selectedTeamStartResearchStageResult,
+          startFeedbackText: researchStageStartFeedbackText,
+        }}
+        experiment={{
+          preferredMethod: preferredExperimentMethod,
+          setPreferredMethod: setPreferredExperimentMethod,
+          planningStatus: experimentPlanningStatus,
+          planningStatusQuery: experimentPlanningStatusQuery,
+          methodCatalogQuery: experimentMethodCatalogQuery,
+        }}
+        navigation={{
+          navigate,
+          searchParams,
+        }}
         renderResearchStageAgentSummary={renderResearchStageAgentSummary}
-        runKnowledgeCollectionLoopAction={runKnowledgeCollectionLoopAction}
-        sourceCollectionLoopActionDisabled={sourceCollectionLoopActionDisabled}
-        sourceCollectionActionDisabledTitle={sourceCollectionActionDisabledTitle}
-        sourceCollectionLoopActionReadiness={sourceCollectionLoopActionReadiness}
-        sourceCollectionLoopActionLabel={sourceCollectionLoopActionLabel}
-        sourceCollectionLoopStartsNewRun={sourceCollectionLoopStartsNewRun}
-        selectedTeamStartResearchStageError={selectedTeamStartResearchStageError}
-        selectedTeamStartResearchStageResult={selectedTeamStartResearchStageResult}
-        researchStageStartFeedbackText={researchStageStartFeedbackText}
       />
     );
   }
