@@ -503,6 +503,13 @@ const TEAMS_RAIL_PANE: PaneSpec = {
   minWidth: 200,
   maxWidth: 360,
 };
+/** Right board inspector (workflow / stage tools) — persisted drag column. */
+const TEAMS_BOARD_INSPECTOR_PANE: PaneSpec = {
+  id: "inspector",
+  defaultWidth: 360,
+  minWidth: 280,
+  maxWidth: 560,
+};
 type TeamsRouteProps = {
   forcedTeamId?: string;
   forcedResearchWorkspaceView?: ResearchWorkspaceView;
@@ -559,8 +566,6 @@ export function TeamsRoute({
   const requestedSourceCollectionStage = parseSourceCollectionStageModuleId(searchParams.get("collectionStage"));
   const sourceCollectionStandalone =
     sourceCollectionStandaloneProp || requestedResearchWorkspaceView === "knowledge_collection" || requestedResearchViewParam === "source_collection";
-  const stageStandaloneView: ResearchStageWorkspaceView | null =
-    requestedResearchWorkspaceView === "experiment" || requestedResearchWorkspaceView === "iteration" ? requestedResearchWorkspaceView : null;
   const pageVisible = usePageVisibility();
   const requestedTeamShellMode = parseTeamShellMode(searchParams.get("teamMode"));
   const [aiSearchRunTopic, setAiSearchRunTopic] = useState("AI 最新动态");
@@ -1142,6 +1147,23 @@ export function TeamsRoute({
 
   function selectResearchWorkspaceView(view: ResearchWorkspaceView) {
     setResearchWorkspaceView(view);
+    // Keep URL in sync so stageStandalone / deep links / refresh match React state.
+    const nextParams = new URLSearchParams(searchParams);
+    if (effectiveTeamId) {
+      nextParams.set("team", effectiveTeamId);
+    }
+    nextParams.set("researchView", view);
+    if (view === "canvas") {
+      setTeamShellMode("canvas");
+      nextParams.set("teamMode", "canvas");
+    } else {
+      // Stage destinations (experiment / iteration / overview / KC) live on board shell.
+      if (teamShellMode !== "board") {
+        setTeamShellMode("board");
+      }
+      nextParams.set("teamMode", "board");
+    }
+    setSearchParams(nextParams, { replace: true });
     if (view === "canvas") {
       window.requestAnimationFrame(() => {
         document.getElementById(researchWorkspaceAnchorId(view))?.scrollIntoView({
@@ -2472,7 +2494,7 @@ export function TeamsRoute({
   const activeWorkflowItemCount = teamWorkflow?.activeWorkflowItems.length ?? 0;
   /** Shell mode owns left/right IA: board = full team workbench, canvas = org graph. */
   const researchCanvasVisible = teamShellMode === "canvas";
-  // Board/Canvas page recipes own split geometry; rail width persists via layoutId.
+  // Board/Canvas page recipes own split geometry; rail + inspector widths persist via layoutId.
   const teamsRailResize = useMemo(
     () => ({
       sidebar: {
@@ -2480,6 +2502,12 @@ export function TeamsRoute({
         defaultWidth: TEAMS_RAIL_PANE.defaultWidth,
         minWidth: TEAMS_RAIL_PANE.minWidth,
         maxWidth: TEAMS_RAIL_PANE.maxWidth,
+      },
+      aside: {
+        id: TEAMS_BOARD_INSPECTOR_PANE.id,
+        defaultWidth: TEAMS_BOARD_INSPECTOR_PANE.defaultWidth,
+        minWidth: TEAMS_BOARD_INSPECTOR_PANE.minWidth,
+        maxWidth: TEAMS_BOARD_INSPECTOR_PANE.maxWidth,
       },
     }),
     [],
@@ -2607,11 +2635,23 @@ export function TeamsRoute({
   const showAiSearchScopePanel = aiSearchScopeTeamSelected;
   const showTeamCommunicationPanel = !researchWorkflowTeamSelected || (!researchCanvasVisible && researchWorkspaceView === "discussion");
   const showResearchOverview = researchWorkflowTeamSelected && researchWorkspaceView === "overview";
+  const showResearchStageWorkspace =
+    researchWorkflowTeamSelected
+    && !researchCanvasVisible
+    && (researchWorkspaceView === "experiment" || researchWorkspaceView === "iteration");
   const showResearchSourceCollection = researchWorkflowTeamSelected && researchWorkspaceView === "source_collection";
   const showResearchCoordination = researchWorkflowTeamSelected && researchWorkspaceView === "coordination";
   const showResearchIngestion = researchWorkflowTeamSelected && researchWorkspaceView === "ingestion";
   const showResearchGraph = researchWorkflowTeamSelected && researchWorkspaceView === "graph";
   const showResearchCandidates = researchWorkflowTeamSelected && researchWorkspaceView === "candidates";
+  const boardPrimaryMode =
+    !researchWorkflowTeamSelected || researchCanvasVisible
+      ? "hidden" as const
+      : researchWorkspaceView === "overview"
+        ? "overview" as const
+        : researchWorkspaceView === "experiment" || researchWorkspaceView === "iteration"
+          ? "stage" as const
+          : "launcher" as const;
   const teamWorkflowCandidatePreviewItems: TeamWorkflowCandidatePreviewItem[] = teamWorkflowCandidates.map((candidate) => {
     const chunkPlanSummary = candidatePaperNoteChunkPlanSummary(candidate);
     const sourceQualitySummary = candidateSourceQualityAssessmentSummary(candidate);
@@ -2985,8 +3025,9 @@ export function TeamsRoute({
               { key: "source", label: lang === "zh" ? "来源" : "Source", value: "Agent Center" },
             ]}
             actions={(
-              <VButton type="button" variant="secondary" onPress={() => void teamsQuery.refetch()} isDisabled={teamsQuery.isFetching}>
-                <RefreshCw size={14} />
+              <VButton type="button" variant="secondary" onPress={() => void teamsQuery.refetch()} isDisabled={teamsQuery.isFetching}
+                icon={<RefreshCw size={14} />}
+              >
                 {teamsQuery.isFetching ? (lang === "zh" ? "刷新中" : "Refreshing") : (lang === "zh" ? "刷新" : "Refresh")}
               </VButton>
             )}
@@ -3006,8 +3047,9 @@ export function TeamsRoute({
               { key: "status", label: lang === "zh" ? "状态" : "Status", value: lang === "zh" ? "失败" : "failed" },
             ]}
             actions={(
-              <VButton type="button" variant="secondary" onPress={() => void teamDetailQuery.refetch()} isDisabled={teamDetailQuery.isFetching}>
-                <RefreshCw size={14} />
+              <VButton type="button" variant="secondary" onPress={() => void teamDetailQuery.refetch()} isDisabled={teamDetailQuery.isFetching}
+                icon={<RefreshCw size={14} />}
+              >
                 {teamDetailQuery.isFetching ? (lang === "zh" ? "刷新中" : "Refreshing") : (lang === "zh" ? "刷新详情" : "Refresh details")}
               </VButton>
             )}
@@ -3274,9 +3316,10 @@ export function TeamsRoute({
     renderResearchLoopPanel,
   });
 
-  if (stageStandaloneView) {
-    return renderResearchStageStandalonePage(stageStandaloneView);
-  }
+  // experiment / iteration standalone pages render *inside* the board shell
+  // (TeamResearchBoardPrimarySurface stageSlot). Do not early-return the whole
+  // route — that stripped the team rail and left the three-card launcher as the
+  // only non-overview board body after CTA navigation that only updated state.
 
   const {
     researchWorkflowStatusText,
@@ -3481,6 +3524,13 @@ export function TeamsRoute({
     );
   }
 
+  // Right inspector column: stage tools / workflow (not stacked under primary → empty floor).
+  // Hide on pure overview so the kanban can use full main width; show for stage/launcher/KC.
+  const showBoardInspectorAside =
+    researchWorkflowTeamSelected
+    && !researchCanvasVisible
+    && researchWorkspaceView !== "overview";
+
   return (
     <VBoardWorkbenchPage
       className={styles.route}
@@ -3494,32 +3544,49 @@ export function TeamsRoute({
       title={lang === "zh" ? "团队工作台" : "Team workbench"}
       rail={teamShellRail}
       toolbar={teamShellToolbar}
-      boardClassName="!p-0"
+      boardClassName="!gap-0 !overflow-hidden !p-0"
       board={(
-        <aside
-          className="min-h-0 w-full flex-1 border-0 bg-transparent"
-          data-vui-region="teams-inspector"
-        >
-          <div className={[
-            challengeCupResearchTeamSelected ? styles.challengeWorkspaceBody : styles.inspectorBody,
+        <div
+          className={[
+            "flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden",
             styles.teamShellBoardBody,
-          ].filter(Boolean).join(" ")}>
-            {/* Board mode: preview-aligned research board (CTA + 3-column kanban). */}
-            <TeamResearchBoardPrimarySurface
-              lang={lang}
-              researchCanvasVisible={researchCanvasVisible}
-              researchWorkflowTeamSelected={researchWorkflowTeamSelected}
-              showResearchOverview={showResearchOverview}
-              workflowPending={teamWorkflowQuery.isPending}
-              workflowReady={Boolean(teamWorkflow)}
-              overviewSlot={renderResearchOverviewSurface()}
-              launcherSlot={renderResearchStageLauncher("interactive")}
-            />
+            challengeCupResearchTeamSelected ? styles.challengeWorkspaceBody : "",
+          ].filter(Boolean).join(" ")}
+          data-vui-region="teams-board-main"
+        >
+          {/* Board primary: overview | experiment/iteration stage | launcher hub. */}
+          <TeamResearchBoardPrimarySurface
+            lang={lang}
+            boardPrimaryMode={boardPrimaryMode}
+            workflowPending={teamWorkflowQuery.isPending}
+            workflowReady={Boolean(teamWorkflow)}
+            overviewSlot={renderResearchOverviewSurface()}
+            stageSlot={
+              showResearchStageWorkspace
+                ? renderResearchStageStandalonePage(
+                    researchWorkspaceView === "iteration" ? "iteration" : "experiment",
+                    { embeddedInBoard: true },
+                  )
+                : null
+            }
+            launcherSlot={renderResearchStageLauncher("interactive")}
+          />
+        </div>
+      )}
+      aside={
+        showBoardInspectorAside ? (
+          <div
+            className={[
+              "flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-auto p-2 [scrollbar-gutter:stable]",
+              styles.inspectorBody,
+            ].filter(Boolean).join(" ")}
+            data-vui-region="teams-inspector"
+          >
             {selectedTeam && !challengeCupResearchTeamSelected ? renderTeamMemoryIndex() : null}
             {renderTeamsInspectorSharedPanels()}
-            </div>
-        </aside>
-      )}
+          </div>
+        ) : undefined
+      }
     />
   );
 }

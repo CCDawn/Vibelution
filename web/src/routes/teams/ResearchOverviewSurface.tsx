@@ -5,6 +5,11 @@
  * 2) Read-only three-stage progress
  * 3) Advanced details collapsed
  * 4) Productized errors (optional slot)
+ *
+ * Loading contract (progressive-fill): this shell mounts immediately on
+ * overview. Primary CTA and stage kanban keep fixed geometry; inner slots
+ * fill via `loading` on child bars/boards — never swap the whole surface
+ * for a fill VStateSurface mid-load.
  */
 import type { ReactNode } from "react";
 

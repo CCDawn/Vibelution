@@ -1606,10 +1606,13 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).not.toContain("{renderResearchWorkspaceNav()}");
     expect(routeSource).toContain("renderResearchStageLauncher");
     expect(routeSource).toContain("renderResearchOverviewSurface");
-    // Board primary surface gates overview/launcher when canvas is hidden for research teams.
+    // Board primary: overview | experiment/iteration stage | launcher hub.
     expect(routeSource).toContain("TeamResearchBoardPrimarySurface");
-    expect(teamResearchBoardPrimarySurfaceSource).toContain("researchCanvasVisible");
-    expect(teamResearchBoardPrimarySurfaceSource).toContain("researchWorkflowTeamSelected");
+    expect(routeSource).toContain("boardPrimaryMode={boardPrimaryMode}");
+    expect(routeSource).toContain("stageSlot=");
+    expect(teamResearchBoardPrimarySurfaceSource).toContain('boardPrimaryMode === "stage"');
+    expect(teamResearchBoardPrimarySurfaceSource).toContain("stageSlot");
+    expect(teamResearchStageStandalonePagePanelSource).toContain("embeddedInBoard");
     // Wave 8H: research graph / MVP console copy and ChallengeCup workspace live on launcher panel.
     expect(teamResearchStageLauncherPanelSource).toContain("研究关系图");
     expect(teamResearchStageLauncherPanelSource).toContain("researchStageHeaderActions");
@@ -3138,7 +3141,7 @@ describe("TeamsRoute layout contract", () => {
   it("keeps the source collection workspace in a simple status-board mode", () => {
     const standaloneSource = routeSource.slice(
       routeSource.indexOf("if (sourceCollectionStandalone)"),
-      routeSource.indexOf("if (stageStandaloneView)"),
+      routeSource.indexOf("if (showTeamInitialLoadingSurface"),
     );
     expect(standaloneSource).toContain("sourceCollectionBoardNextStepLabel");
     expect(standaloneSource).not.toContain("{renderSourceCollectionControlsPanel()}");
@@ -3425,7 +3428,7 @@ describe("TeamsRoute layout contract", () => {
 
     const standaloneSource = routeSource.slice(
       routeSource.indexOf("if (sourceCollectionStandalone)"),
-      routeSource.indexOf("if (stageStandaloneView)"),
+      routeSource.indexOf("if (showTeamInitialLoadingSurface"),
     );
     expect(standaloneSource).toContain("researchWorkflowTeamSelected && !showTeamDetailUnavailableSurface ? (");
     expect(standaloneSource).toContain("teamWorkspaceLoadingTitle");
@@ -3445,7 +3448,7 @@ describe("TeamsRoute layout contract", () => {
   it("shows only the selected run's close gate and lets users locate its unfinished stage", () => {
     const standaloneSource = routeSource.slice(
       routeSource.indexOf("if (sourceCollectionStandalone)"),
-      routeSource.indexOf("if (stageStandaloneView)"),
+      routeSource.indexOf("if (showTeamInitialLoadingSurface"),
     );
     expect(stageProjectionSource).toContain("sourceCollectionPhaseCloseGateForRun");
     expect(stageProjectionSource).toContain('scope.kind !== "source_run"');

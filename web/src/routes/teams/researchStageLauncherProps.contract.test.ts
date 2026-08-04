@@ -7,6 +7,10 @@ import {
 } from "./researchStageLauncherProps";
 
 const routeSource = readFileSync(new URL("../TeamsRoute.tsx", import.meta.url), "utf8");
+const primarySurfaceSource = readFileSync(
+  new URL("./teamResearchPrimarySurfaceRenderers.tsx", import.meta.url),
+  "utf8",
+);
 
 function sampleProps(): TeamResearchStageLauncherPanelProps {
   return {
@@ -105,11 +109,13 @@ describe("research stage launcher grouped props", () => {
     expect(flat.lang).toBe("zh");
   });
 
-  it("TeamsRoute mounts the launcher with grouped bags, not a flat 60-key spray", () => {
-    expect(routeSource).toContain("function renderResearchStageLauncher");
-    const launcherFn = routeSource.slice(
-      routeSource.indexOf("function renderResearchStageLauncher"),
-      routeSource.indexOf("function renderResearchOverviewSurface"),
+  it("primary surface factory mounts the launcher with grouped bags, not a flat 60-key spray", () => {
+    // Launcher JSX lives in teamResearchPrimarySurfaceRenderers (extracted from TeamsRoute).
+    expect(routeSource).toContain("renderResearchStageLauncher");
+    expect(primarySurfaceSource).toContain("function renderResearchStageLauncher");
+    const launcherFn = primarySurfaceSource.slice(
+      primarySurfaceSource.indexOf("function renderResearchStageLauncher"),
+      primarySurfaceSource.indexOf("function renderResearchOverviewSurface"),
     );
     expect(launcherFn).toContain("sourceCollection={{");
     expect(launcherFn).toContain("researchStage={{");

@@ -208,12 +208,15 @@ const styles = {
     "researchStageModuleGrid min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
   researchStagePage:
     "researchStagePage min-w-0",
+  /** Fills board main column under team shell (data-fill for teamShellBoardBody). */
+  researchStagePageEmbedded:
+    "researchStagePageEmbedded !flex min-h-0 w-full flex-1 flex-col gap-3 overflow-hidden p-0",
   researchStagePageActions:
     "researchStagePageActions min-w-0 flex flex-wrap items-center gap-1.5",
   researchStagePageBody:
-    "researchStagePageBody min-w-0 flex-1 min-h-0 overflow-auto [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+    "researchStagePageBody min-w-0 flex-1 min-h-0 overflow-auto [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] grid content-start gap-3",
   researchStagePageHeader:
-    "researchStagePageHeader min-w-0 flex flex-wrap items-center gap-1.5",
+    "researchStagePageHeader min-w-0 flex flex-wrap items-center justify-between gap-2 shrink-0",
   researchStageTopicInput:
     "researchStageTopicInput min-w-0 grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
 } as const;
