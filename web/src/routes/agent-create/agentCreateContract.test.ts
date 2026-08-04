@@ -9,8 +9,6 @@ import {
   createDraftReady,
   createToolBundleSummary,
   firstAvailableModelId,
-  REQUIRED_SESSION_AGENT_ALLOWED_TOOLS,
-  REQUIRED_SESSION_AGENT_PREFERRED_TOOLS,
 } from "./agentCreateContract";
 
 function modelChoice(partial: Partial<AgentModelChoice> & Pick<AgentModelChoice, "modelId" | "providerId">): AgentModelChoice {
@@ -55,6 +53,17 @@ describe("agent create contract", () => {
       highRiskToolCount: 0,
       explicitAllowToolCount: 0,
     },
+    {
+      bundleId: "pure_chat",
+      label: "纯聊天 / 无工具",
+      description: "",
+      toolNames: [],
+      preferredToolNames: [],
+      toolCount: 0,
+      preferredToolCount: 0,
+      highRiskToolCount: 0,
+      explicitAllowToolCount: 0,
+    },
   ];
 
   it("keeps the chat default and payload tool policy derived from one selection", () => {
@@ -72,28 +81,41 @@ describe("agent create contract", () => {
       })],
       promptTemplates: [{ promptTemplateId: "prompt-chat-default", name: "Chat", category: "chat" }],
     }, bundles, "zh");
-    const summary = createToolBundleSummary(
-      draft.selectedToolBundleIds,
-      bundles,
-      "zh",
-      REQUIRED_SESSION_AGENT_ALLOWED_TOOLS,
-      REQUIRED_SESSION_AGENT_PREFERRED_TOOLS,
-    );
+    const summary = createToolBundleSummary(draft.selectedToolBundleIds, bundles, "zh");
     const payload = createAgentPayload(draft, bundles);
 
     expect(draft.primaryMode).toBe("chat");
     expect(draft.selectedToolBundleIds).toEqual(["core"]);
-    expect(summary.allowedTools).toEqual([
-      "agent_tool_permission_request_tool",
-      "exec_command",
-      "glob_tool",
-      "grep_search_tool",
-      "write_stdin",
-    ]);
+    expect(summary.allowedTools).toEqual(["glob_tool", "grep_search_tool"]);
     expect(payload.toolPolicy.allowedTools).toEqual(summary.allowedTools);
-    expect(payload.toolPolicy.preferredTools).toEqual(["exec_command", "grep_search_tool", "write_stdin"]);
+    expect(payload.toolPolicy.preferredTools).toEqual(["grep_search_tool"]);
+    expect(payload.toolPolicy.allowedTools).not.toContain("exec_command");
+    expect(payload.toolPolicy.allowedTools).not.toContain("write_stdin");
     expect(payload.toolPolicy.maxCallsPerTurn).toBe(32);
     expect(payload.metadata.creationChannel).toBe("agent_center");
+  });
+
+  it("preserves an explicit pure-chat package as a zero-tool session policy", () => {
+    const draft = {
+      displayName: "纯聊天 Agent",
+      llmBindings: { dialogue: { modelId: "provider/model" } },
+      primaryMode: "chat",
+      roleKey: "",
+      promptTemplateId: "prompt-chat-default",
+      personaSummary: "",
+      taskMission: "",
+      selectedToolBundleIds: ["pure_chat"],
+      allowedTools: "",
+      avatarImagePath: "",
+    };
+
+    const summary = createToolBundleSummary(draft.selectedToolBundleIds, bundles, "zh");
+    const payload = createAgentPayload(draft, bundles);
+
+    expect(summary.allowedTools).toEqual([]);
+    expect(summary.preferredTools).toEqual([]);
+    expect(payload.toolPolicy.allowedTools).toEqual([]);
+    expect(payload.toolPolicy.preferredTools).toEqual([]);
   });
 
   it("marks missing-key models unavailable and prefers available defaults", () => {

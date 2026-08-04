@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from core.authorization.tool_authorization_service import resolve_enforced_authorization
+from core.authorization.tool_policy_models import ToolDenyCode
 from core.web.services import agent_directory_service, tool_registry_service
 
 
@@ -117,7 +119,6 @@ def _configuration_payload(
     )
     unknown = [name for name in configured_names if name not in registry_by_name]
     available_names = [name for name, item in registry_by_name.items() if _tool_available(item)]
-    visibility = agent_directory_service.compute_effective_tool_visibility(available_names, policy=proposed_policy)
     allowed = set(proposed_policy.get("allowedTools") or [])
     blocked = set(proposed_policy.get("blockedTools") or [])
     preferred = set(proposed_policy.get("preferredTools") or [])
@@ -130,13 +131,27 @@ def _configuration_payload(
         errors.append("Tools cannot be both allowed and blocked: " + ", ".join(overlap[:12]))
     if invalid_preferred:
         errors.append("Preferred tools must also be allowed: " + ", ".join(invalid_preferred[:12]))
+    preview_policy = _policy_with_known_tools(proposed_policy, registry_by_name)
+    preview_decision = resolve_enforced_authorization(
+        runtime={
+            "agentId": str(agent.get("agentId") or "").strip(),
+            "turnId": f"tool-policy-preview:{str(agent.get('agentId') or '').strip()}",
+            "agent": agent,
+            "toolPolicy": preview_policy,
+        },
+        registry_payload=registry,
+    ).decision
     unavailable = [name for name in proposed_policy.get("allowedTools") or [] if name in registry_by_name and name not in available_names]
     approval_required = [
         name
-        for name in visibility.visible_tools
-        if _tool_requires_approval(registry_by_name.get(name) or {}, proposed_policy)
+        for name, approval, _risk in preview_decision.approval_requirements
+        if approval != "never"
     ]
-    executable = [name for name in visibility.visible_tools if name not in set(approval_required)]
+    blocked_tools = [
+        name
+        for name, reason in preview_decision.denied
+        if reason.code == ToolDenyCode.AGENT_BLOCKED
+    ]
     policy_id = str(current_policy.get("policyId") or agent.get("toolPolicyId") or "").strip()
     affected_agents = [
         _agent_identity(item)
@@ -174,10 +189,10 @@ def _configuration_payload(
             "affectedAgents": affected_agents,
         },
         "preview": {
-            "visibleTools": list(visibility.visible_tools),
-            "executableTools": executable,
-            "preferredTools": list(visibility.preferred_tools),
-            "blockedTools": list(visibility.blocked_tools),
+            "visibleTools": list(preview_decision.visible_tools),
+            "executableTools": list(preview_decision.executable_tools),
+            "preferredTools": list(preview_decision.preferred_tools),
+            "blockedTools": blocked_tools,
             "unavailableTools": unavailable,
             "unknownTools": unknown,
             "approvalRequiredTools": approval_required,
@@ -193,13 +208,23 @@ def _configuration_payload(
 
 def _tool_available(item: dict[str, Any]) -> bool:
     dependency = item.get("dependencyStatus") if isinstance(item.get("dependencyStatus"), dict) else {}
-    return bool(item.get("enabled", True)) and bool(item.get("runtimeActive", True)) and item.get("status") != "invalid" and dependency.get("available", True) is not False
+    return (
+        bool(item.get("enabled", True))
+        and bool(item.get("runtimeActive", True))
+        and bool(item.get("llmVisible", True))
+        and item.get("status") != "invalid"
+        and dependency.get("available", True) is not False
+    )
 
 
-def _tool_requires_approval(item: dict[str, Any], policy: dict[str, Any]) -> bool:
-    rules = policy.get("perToolRules") if isinstance(policy.get("perToolRules"), dict) else {}
-    rule = rules.get(str(item.get("name") or "")) if isinstance(rules.get(str(item.get("name") or "")), dict) else {}
-    return bool(rule.get("requiresApproval"))
+def _policy_with_known_tools(policy: dict[str, Any], registry_by_name: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    known_names = set(registry_by_name)
+    return {
+        **policy,
+        "allowedTools": [name for name in policy.get("allowedTools") or [] if name in known_names],
+        "blockedTools": [name for name in policy.get("blockedTools") or [] if name in known_names],
+        "preferredTools": [name for name in policy.get("preferredTools") or [] if name in known_names],
+    }
 
 
 def _tool_high_risk(item: dict[str, Any]) -> bool:

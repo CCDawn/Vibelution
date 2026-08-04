@@ -80,17 +80,6 @@ const DEFAULT_SESSION_AGENT_ALLOWED_TOOLS = [
   "conversation_log_inspect_tool",
 ];
 
-export const REQUIRED_SESSION_AGENT_ALLOWED_TOOLS = [
-  "exec_command",
-  "write_stdin",
-  "agent_tool_permission_request_tool",
-];
-
-export const REQUIRED_SESSION_AGENT_PREFERRED_TOOLS = [
-  "exec_command",
-  "write_stdin",
-];
-
 const DEFAULT_SESSION_AGENT_MAX_CALLS_PER_TURN = 32;
 
 const DIALOGUE_SLOT = "dialogue";
@@ -503,12 +492,10 @@ export function createToolBundleSummary(
   bundleIds: string[],
   bundles: ToolBundle[],
   lang: "zh" | "en",
-  requiredAllowedTools: string[] = [],
-  requiredPreferredTools: string[] = [],
 ) {
   const policy = toolBundleSelectionToPolicy(bundleIds, bundles);
-  const allowedTools = sortedIds([...requiredAllowedTools, ...policy.allowedTools]);
-  const preferredTools = sortedIds([...requiredPreferredTools, ...policy.preferredTools].filter((tool) => allowedTools.includes(tool)));
+  const allowedTools = sortedIds(policy.allowedTools);
+  const preferredTools = sortedIds(policy.preferredTools.filter((tool) => allowedTools.includes(tool)));
   const highRiskCount = policy.selectedBundles.reduce((total, bundle) => total + Math.max(0, bundle.highRiskToolCount || 0), 0);
   const explicitAllowCount = policy.selectedBundles.reduce((total, bundle) => total + Math.max(0, bundle.explicitAllowToolCount || 0), 0);
   const bundleLabels = policy.selectedBundles.map((bundle) => bundle.label);
@@ -519,7 +506,7 @@ export function createToolBundleSummary(
     bundleLabels,
     highRiskCount,
     explicitAllowCount,
-    label: bundleLabels.length ? bundleLabels.join(" / ") : requiredAllowedTools.length ? (lang === "zh" ? "会话推荐默认" : "Recommended session default") : (lang === "zh" ? "未选择工具包" : "No package selected"),
+    label: bundleLabels.length ? bundleLabels.join(" / ") : (lang === "zh" ? "未选择工具包" : "No package selected"),
     meta: [
       lang === "zh" ? `${allowedTools.length} 个允许工具` : `${allowedTools.length} allowed tools`,
       lang === "zh" ? `${preferredTools.length} 个优先工具` : `${preferredTools.length} preferred tools`,
@@ -572,14 +559,12 @@ export function createAgentPayload(draft: AgentCreateDraft, bundles: ToolBundle[
   const selectedToolPolicy = toolBundleSelectionToPolicy(draft.selectedToolBundleIds, bundles);
   const fallbackAllowedTools = bundles.length ? [] : expertiseFromDraft(draft.allowedTools);
   const selectedAllowedTools = selectedToolPolicy.allowedTools.length ? selectedToolPolicy.allowedTools : fallbackAllowedTools;
-  const requiredAllowedTools = workSession ? REQUIRED_SESSION_AGENT_ALLOWED_TOOLS : [];
-  const allowedTools = sortedIds([...selectedAllowedTools, ...requiredAllowedTools]);
+  const allowedTools = sortedIds(selectedAllowedTools);
   const selectedPreferredTools = selectedToolPolicy.preferredTools.length
     ? selectedToolPolicy.preferredTools
     : fallbackAllowedTools.includes("agent_message_tool") ? ["agent_message_tool"] : [];
-  const requiredPreferredTools = workSession ? REQUIRED_SESSION_AGENT_PREFERRED_TOOLS : [];
   const preferredTools = sortedIds(
-    [...selectedPreferredTools, ...requiredPreferredTools].filter((tool) => allowedTools.includes(tool)),
+    selectedPreferredTools.filter((tool) => allowedTools.includes(tool)),
   );
   const personaProfile = workSession ? {} : {
     personality: draft.personaSummary.trim(),
