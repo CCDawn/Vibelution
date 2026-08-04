@@ -3004,6 +3004,7 @@ export function ChatCodingRoute() {
       className={chatLayoutClassName}
       style={layoutStyle}
       data-vui-recipe="chat-session-workbench"
+      data-vui-domain-recipe="chat-dual-pane"
       data-vui-layout-id={WORKBENCH_LAYOUT_IDS.chat}
       data-chat-responsive-mode={responsiveLayout.mode}
       data-chat-status-rail={statusRailCollapsed ? "collapsed" : "visible"}

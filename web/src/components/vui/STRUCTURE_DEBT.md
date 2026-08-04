@@ -14,12 +14,13 @@
 
 | Surface | Symptom | Target recipe |
 | --- | --- | --- |
-| `TeamsRoute.tsx` | ~6.0k lines; shell recipes + SC injects + **`teamsWorkspacePanelRenderers` factory** for memory/AI-search/loop/ledger/canvas inspectors. Next: collapse remaining SC/orchestrator render glue; optional Evolution multi-rail recipe work. | keep recipes; continue module extract |
+| `TeamsRoute.tsx` | ~6.0k lines; shell recipes + SC injects + **`teamsWorkspacePanelRenderers` factory** for memory/AI-search/loop/ledger/canvas inspectors. Next: collapse remaining SC/orchestrator render glue. | keep recipes; continue module extract |
 | Agents workspace | **Migrated** outer shell to `VListDetailPage` + layoutId (`AgentWorkspaceLayoutPanel`) | keep product/agent-management panels; optional inspector UX polish |
-| Chat coding | Dual-pane domain math (OK) but chrome drift risk | Keep domain layout; enforce layoutId + regions only |
-| Memory graph | **Migrated** `MemoryGraphViewPanel` → `VCanvasWorkbenchPage` | height list still uses PaneHeightResizeHandle |
+| Chat coding | Dual-pane domain math (OK); `data-vui-domain-recipe=chat-dual-pane` + `WORKBENCH_LAYOUT_IDS.chat` + height panes in `chatListHeights.ts` | Keep domain layout; soft-select session rows only when chrome drifts |
+| Memory | Outer `VDenseOpsPage` + `data-vui-layout-id=memory`; graph `VCanvasWorkbenchPage`; lists/queues use height registry under same layoutId | Optional: knowledge/sources three-pane → `VSplitWorkspace` (still CSS vars + absolute handles) |
+| Config settings | **Migrated** nav/main to `VSplitWorkspace` + `WORKBENCH_LAYOUT_IDS.configSettings` (no route-local `usePersistedPaneResize`) | Model-assets split remains separate layoutId |
 | Research flow canvas | **Migrated** page shell → `VCanvasWorkbenchPage` | optional layoutId for inspector width |
-| Evolution queues | Multiple width rails | `VListDetailPage` / `VDenseOpsPage` + height registry |
+| Evolution queues | Multi-rail widths/heights on `WORKBENCH_LAYOUT_IDS.evolution`; `data-vui-domain-recipe=evolution-multi-rail`; soft segment track switch | Domain multi-rail not forced onto ListDetail; continue extract panels |
 
 ## Cleanup playbook (per surface)
 

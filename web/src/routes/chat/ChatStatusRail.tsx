@@ -280,6 +280,7 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
         id="chat-status-pane"
         className={statusRailClassName}
         data-vui-region="chat-status-rail"
+        data-vui-layout-id={CHAT_LIST_HEIGHT_LAYOUT_ID}
         aria-hidden={statusRailCollapsed}
         role={statusRailOverlayOpen ? "dialog" : undefined}
         aria-label={statusRailOverlayOpen ? (lang === "zh" ? "状态栏" : "Status panel") : undefined}

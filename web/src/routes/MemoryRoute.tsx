@@ -57,7 +57,7 @@ import { PaneResizeHandle } from "../components/layout/PaneResizeHandle";
 import { type PaneSpec } from "../components/layout/paneLayoutPersistence";
 import { usePersistedPaneResize } from "../components/layout/usePersistedPaneResize";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
-import { VButton, VDenseOpsPage, VRouteLinkButton } from "../components/vui";
+import { VButton, VDenseOpsPage, VRouteLinkButton, VStateSurface } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { useMemoryItemMutations } from "./memory/useMemoryItemMutations";
 import { useMemoryKnowledgeMutations } from "./memory/useMemoryKnowledgeMutations";
@@ -4238,6 +4238,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
       className={styles.route}
       headerClassName={styles.header}
       data-vui-domain-recipe="memory-knowledge-workbench"
+      data-vui-layout-id={MEMORY_LAYOUT_ID}
       ariaLabel={memoryViewLabel(copy, forcedView)}
       eyebrow={copy.eyebrow}
       title={memoryViewLabel(copy, forcedView)}
@@ -4260,12 +4261,12 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
         </div>
       )}
       toolbarSlot={(
-        <div className={styles.controlStrip}>
+        <div className={styles.controlStrip} data-vui-region="memory-subnav">
           {renderSubnav()}
         </div>
       )}
     >
-      <div className={viewStackClassName}>
+      <div className={viewStackClassName} data-vui-region="memory-main">
         {forcedView === "overview"
           ? (
             <MemoryOverviewPanel
@@ -4286,9 +4287,12 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
           : (
             <Suspense
               fallback={(
-                <div className={styles.viewStack} role="status">
-                  {lang === "zh" ? "正在加载工作区…" : "Loading workspace…"}
-                </div>
+                <VStateSurface
+                  fill
+                  density="compact"
+                  tone="info"
+                  title={lang === "zh" ? "正在加载工作区…" : "Loading workspace…"}
+                />
               )}
             >
               {forcedView === "effective"

@@ -417,7 +417,7 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("const editorSectionById = new Map(editorSections.map((section) => [section.id, section]))");
     expect(routeSource).toContain("const activeEditorSections = (activePage?.memberSectionIds ?? [])");
     expect(routeSource).toContain(".map((sectionId) => editorSectionById.get(sectionId))");
-    expect(styles.page).toContain("[grid-template-rows:minmax(0,1fr)]");
+    expect(styles.page).toContain("flex h-full min-h-0");
     expect(styles.content).toContain("flex");
     expect(styles.content).toContain("h-full");
     expect(styles.pageViewport).toContain("overflow-y-auto");
@@ -626,7 +626,7 @@ describe("ConfigRoute layout contract", () => {
     expect(stylesSource).toContain("const readableRowSurface");
     expect(stylesSource).toContain('from "../design/vuiSurfaceRecipes"');
     expect(stylesSource).toContain("vuiElevatedPanelClass");
-    expect(styles.page).toContain("[background:var(--vui-surface-workspace)]");
+    expect(styles.page).toContain("bg-vui-surface-workspace");
     expect(stylesSource).toContain("configHeader:");
     expect(styles.configHeader).toMatch(/bg-vui-surface-panel|var\(--vui-surface-panel\)/);
     expect(styles.content).toMatch(/!bg-vui-surface-panel|bg-vui-surface-panel/);
@@ -646,13 +646,14 @@ describe("ConfigRoute layout contract", () => {
   });
 
   it("keeps Config image editors and model content constrained on narrow screens", () => {
-    expect(styles.page).toContain("max-[720px]:[grid-template-columns:1fr]");
-    expect(styles.page).toContain("max-[720px]:[grid-template-rows:auto_minmax(0,1fr)]");
-    expect(styles.page).toContain("--config-settings-nav-width");
-    expect(styles.page).toContain("var(--config-settings-nav-width)_auto_minmax(0,1fr)");
-    expect(styles.settingsNavResizeHandle).toContain("max-[720px]:hidden");
-    expect(routeSource).toContain("PaneResizeHandle");
-    expect(routeSource).toContain("usePersistedPaneResize");
+    // Settings nav width is owned by VSplitWorkspace + WORKBENCH_LAYOUT_IDS.configSettings.
+    expect(routeSource).toContain("VSplitWorkspace");
+    expect(routeSource).toContain("WORKBENCH_LAYOUT_IDS.configSettings");
+    expect(routeSource).toContain("CONFIG_SETTINGS_SIDEBAR_RESIZE");
+    expect(routeSource).not.toContain("usePersistedPaneResize");
+    expect(routeSource).not.toContain("PaneResizeHandle");
+    expect(styles.page).toContain("flex h-full min-h-0");
+    expect(styles.settingsSplit).toContain("flex-1");
     expect(settingsNavigationStyles.sidebar).toContain("max-[720px]:w-full");
     expect(settingsNavigationStyles.sidebar).toContain("max-[720px]:h-auto");
     expect(settingsNavigationStyles.groupNav).toContain("max-[720px]:overflow-visible");
@@ -950,8 +951,8 @@ describe("ConfigRoute layout contract", () => {
   });
 
   it("keeps operational settings readable over custom workbench backgrounds", () => {
-    expect(styles.page).toContain("[background:var(--vui-surface-workspace)]");
-    expect(styles.page).toContain("[isolation:isolate]");
+    expect(styles.page).toContain("bg-vui-surface-workspace");
+    expect(styles.page).toContain("isolation-isolate");
     expect(styles.sidebar).toMatch(/bg-vui-surface-panel|var\(--vui-surface-panel\)/);
     expect(styles.sectionSurface).toMatch(/bg-vui-surface-panel|var\(--vui-surface-panel\)/);
     expect(styles.treeGrid).toContain("[grid-template-columns:repeat(2,minmax(0,1fr))]");
