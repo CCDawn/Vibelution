@@ -78,6 +78,7 @@ import {
   VButton,
   VActionGroup,
   VCheckbox,
+  VDialog,
   VInput,
   VPanelHeader,
   VRouteLinkButton,
@@ -3322,43 +3323,43 @@ export function ConfigRoute() {
       data-vui-layout-id={CONFIG_SETTINGS_LAYOUT_ID}
       data-vui-domain-recipe="config-settings"
     >
-      {leaveGuardOpen ? (
-        <div className={styles.leaveGuardOverlay}>
-          <VSurface
-            as="section"
-            className={styles.leaveGuardPanel}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="config-leave-guard-title"
-            elevation="overlay"
-          >
-            <div className={styles.leaveGuardCopy}>
-              <p className={styles.eyebrow}>Config</p>
-              <h2 id="config-leave-guard-title">{copy.leaveGuardTitle}</h2>
-              <p>{copy.leaveGuardBody}</p>
-              <p className={styles.helperText}>{sidebarApplyHint}</p>
-            </div>
-            <div className={styles.leaveGuardActions}>
-              <VButton
-                type="button"
-                className={styles.primaryButton}
-                isDisabled={!canSaveConfig || Boolean(busyAction)}
-                onClick={() => {
-                  void handleSaveAndLeave();
-                }}
- icon={<Save size={14} />}>
-                  {leaveGuardSaveLabel}
-                </VButton>
-              <VButton type="button" className={styles.dangerButton} isDisabled={Boolean(busyAction)} onClick={handleDiscardAndLeave}>
-                {copy.leaveGuardDiscard}
-              </VButton>
-              <VButton type="button" className={styles.actionButton} isDisabled={Boolean(busyAction)} onClick={handleCancelLeave}>
-                {copy.leaveGuardCancel}
-              </VButton>
-            </div>
-          </VSurface>
-        </div>
-      ) : null}
+      <VDialog
+        open={leaveGuardOpen}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen && !busyAction) {
+            handleCancelLeave();
+          }
+        }}
+        title={copy.leaveGuardTitle}
+        description={copy.leaveGuardBody}
+        size="md"
+        contentClassName={styles.leaveGuardPanel}
+        aria-label={copy.leaveGuardTitle}
+        hideClose={Boolean(busyAction)}
+        footer={(
+          <>
+            <VButton
+              type="button"
+              className={styles.primaryButton}
+              isDisabled={!canSaveConfig || Boolean(busyAction)}
+              onClick={() => {
+                void handleSaveAndLeave();
+              }}
+              icon={<Save size={14} />}
+            >
+              {leaveGuardSaveLabel}
+            </VButton>
+            <VButton type="button" className={styles.dangerButton} isDisabled={Boolean(busyAction)} onClick={handleDiscardAndLeave}>
+              {copy.leaveGuardDiscard}
+            </VButton>
+            <VButton type="button" className={styles.actionButton} isDisabled={Boolean(busyAction)} onClick={handleCancelLeave}>
+              {copy.leaveGuardCancel}
+            </VButton>
+          </>
+        )}
+      >
+        <p className={styles.helperText}>{sidebarApplyHint}</p>
+      </VDialog>
       <VSplitWorkspace
         className={styles.settingsSplit}
         data-vui-region="config-settings-split"
