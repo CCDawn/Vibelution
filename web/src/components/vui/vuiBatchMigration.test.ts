@@ -78,8 +78,8 @@ const migrationTargets = [
 const nativeControlTargets = [
   {
     path: "routes/AgentBulkOperationsPanel.tsx",
-    expected: ["VNativeSelect"],
-    forbidden: ["<button", "<input", "<select", "<textarea"],
+    expected: ["VStringSelect"],
+    forbidden: ["<button", "<input", "<select", "<textarea", "VNativeSelect"],
   },
   {
     path: "routes/AgentDetailHeaderPanel.tsx",
@@ -88,12 +88,13 @@ const nativeControlTargets = [
   },
   {
     path: "routes/AgentCoreConfigPanel.tsx",
-    expected: ["VNativeInput", "VNativeSelect"],
-    forbidden: ["<button", "<input", "<select", "<textarea"],
+    expected: ["VNativeInput", "VStringSelect"],
+    forbidden: ["<button", "<input", "<select", "<textarea", "VNativeSelect"],
   },
   {
     path: "routes/EvolutionRoute.tsx",
-    expected: ["VButton", "VInput", "VStringSelect", "VTextarea"],
+    // Evolution form surfaces live in extracted panels; shell keeps action VButtons.
+    expected: ["VButton"],
     forbidden: ["<button", "<input", "<select", "<textarea"],
   },
   {
@@ -283,7 +284,13 @@ function listSourceTsxFiles(root: string): string[] {
 }
 
 function isRawControlGuardExempt(path: string): boolean {
-  return rawControlAllowedFiles.has(path) || /\.test\.tsx$/.test(path) || /\.spec\.tsx$/.test(path);
+  return (
+    rawControlAllowedFiles.has(path)
+    || /\.test\.tsx$/.test(path)
+    || /\.spec\.tsx$/.test(path)
+    // Static design previews may use raw chrome; product routes stay VUI-only.
+    || path.startsWith("design/")
+  );
 }
 
 function sourceHasRawControlOutsideAllowedExceptions(path: string, source: string): boolean {

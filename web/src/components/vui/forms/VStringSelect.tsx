@@ -12,6 +12,8 @@ export type VStringSelectOption = {
 export type VStringSelectProps = {
   ariaLabel: string;
   className?: string;
+  /** Optional control id (label htmlFor / tests). */
+  id?: string;
   isDisabled?: boolean;
   onValueChange: (value: string) => void;
   options: readonly VStringSelectOption[];
@@ -37,6 +39,7 @@ export function resolveStringSelectChange(
 export function VStringSelect({
   ariaLabel,
   className,
+  id,
   isDisabled,
   onValueChange,
   options,
@@ -54,6 +57,7 @@ export function VStringSelect({
     <VSelect
       aria-label={ariaLabel}
       className={className}
+      id={id}
       isDisabled={isDisabled}
       options={vuiOptions}
       placeholder={placeholder}

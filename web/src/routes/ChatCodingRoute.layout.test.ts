@@ -14,6 +14,7 @@ import chatApiSource from "../api/chat.ts?raw";
 import agentSessionTabStripSource from "./AgentSessionTabStrip.tsx?raw";
 import routeSource from "./ChatCodingRoute.tsx?raw";
 import conversationIndexRailSource from "./chat/ChatConversationIndexRail.tsx?raw";
+import agentDirectoryActionsSource from "./chat/useChatAgentDirectoryActions.ts?raw";
 import chatStatusRailSource from "./chat/ChatStatusRail.tsx?raw";
 import cliAgentRunModelSource from "./chat/cliAgentRunModel.ts?raw";
 import sessionCacheCompositionSource from "./chat/sessionCacheComposition.ts?raw";
@@ -1148,6 +1149,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("latestMentalSnapshot");
     expect(routeAndIndexRailSource).toContain("styles.groupProfileBlock");
     expect(routeAndIndexRailSource).toContain("styles.rightIndexTabs");
+    expect(routeAndIndexRailSource).toContain("<VTabs");
     expect(routeAndIndexRailSource).toContain("styles.agentIndexRoster");
     expect(routeAndIndexRailSource).toContain("styles.agentIndexHeader");
     expect(routeAndIndexRailSource).toContain("styles.agentIndexExpandButton");
@@ -1191,12 +1193,15 @@ describe("ChatCodingRoute layout contract", () => {
   it("hides the right index tab switcher when only the conversation index is available", () => {
     const rightAsideStart = conversationIndexRailSource.indexOf('id="chat-conversation-index-pane"');
     const tabsRenderStart = conversationIndexRailSource.indexOf("{standardGroupRoomActive ? (", rightAsideStart);
-    const tabsClassStart = conversationIndexRailSource.indexOf("className={styles.rightIndexTabs}", tabsRenderStart);
+    // Radix VTabs owns the tablist; domain geometry stays via listClassName.
+    const tabsClassStart = conversationIndexRailSource.indexOf("listClassName={styles.rightIndexTabs}", tabsRenderStart);
     const memberSummaryStart = conversationIndexRailSource.indexOf("{rightIndexPanel === \"members\" && standardGroupRoomActive", tabsClassStart);
     expect(rightAsideStart).toBeGreaterThan(-1);
     expect(tabsRenderStart).toBeGreaterThan(rightAsideStart);
     expect(tabsClassStart).toBeGreaterThan(tabsRenderStart);
     expect(tabsClassStart).toBeLessThan(memberSummaryStart);
+    expect(conversationIndexRailSource).toContain("<VTabs");
+    expect(conversationIndexRailSource).toContain("triggerClassName={styles.rightIndexTab}");
     expect(routeAndIndexRailSource).not.toContain("rightIndexTabsSingle");
   });
 
@@ -2461,9 +2466,15 @@ describe("ChatCodingRoute layout contract", () => {
 
   it("opens an Agent-scoped right-click menu from Agent directory rows", () => {
     expect(routeSource).toContain("const [agentContextMenu, setAgentContextMenu]");
-    expect(routeSource).toContain("const openAgentContextMenu = useCallback");
-    expect(routeSource).toContain("event.preventDefault()");
-    expect(routeSource).toContain("setAgentContextMenu({");
+    // Directory context actions live in useChatAgentDirectoryActions; route owns mutations + menu mount.
+    expect(agentDirectoryActionsSource).toContain("const openAgentContextMenu = useCallback");
+    expect(agentDirectoryActionsSource).toContain("event.preventDefault()");
+    expect(agentDirectoryActionsSource).toContain("setAgentContextMenu({");
+    expect(agentDirectoryActionsSource).toContain("const handleRenameAgent = useCallback");
+    expect(agentDirectoryActionsSource).toContain("const handleArchiveAgent = useCallback");
+    expect(agentDirectoryActionsSource).toContain("window.confirm(message)");
+    expect(agentDirectoryActionsSource).toContain("renameAgent({ agentId, displayName: title })");
+    expect(agentDirectoryActionsSource).toContain("archiveAgent({ agentId })");
     expect(routeSource).toContain("onContextMenu={openAgentContextMenu}");
     expect(routeSource).toContain('import("./AgentContextMenu")');
     expect(routeSource).toContain("<AgentContextMenu");
@@ -2475,20 +2486,12 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("previousActiveSessionId");
     expect(routeSource).toContain("previousSelectedAgentId");
     expect(routeSource).toContain("chatWorkspaceCache.afterAgentArchived()");
-    expect(routeSource).toContain("window.confirm(");
     expect(routeSource).toContain("onArchive={handleArchiveAgent}");
-    expect(routeSource).toContain("const handleRenameAgent = useCallback");
-    expect(routeSource).toContain("window.prompt(");
-    expect(routeSource).toContain("renameAgentMutation.mutate({ agentId, displayName: title })");
-    expect(routeSource).not.toContain("renameSessionMutation.mutate({ sessionId: directSessionId, title })");
     expect(routeSource).toContain("onRename={handleRenameAgent}");
     expect(routeSource).toContain("onCreateSession={handleCreateAgentSession}");
-    expect(routeSource).toContain("onOpenAgent={(agent, latestSession) => {");
-    expect(routeSource).toContain("handleOpenDirectSession(latestSession.id)");
-    expect(routeSource).toContain("if (agent.directSessionId) {");
-    expect(routeSource).toContain("handleCreateAgentSession(agent)");
     expect(routeSource).toContain("onOpenConfig={handleOpenAgentConfig}");
     expect(routeSource).toContain("onOpenLatest={handleOpenAgentLatestSession}");
+    expect(routeSource).not.toContain("renameSessionMutation.mutate({ sessionId: directSessionId, title })");
     expect(agentConversationDirectorySource).toContain(
       "onContextMenu={(event) => onContextMenu(event, agent, latestSession ?? null)}",
     );
@@ -2644,7 +2647,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(agentSessionTabStripSource).not.toMatch(/<input\b/);
     expect(directSessionIndexItemSource).toContain("<VNativeInput");
     expect(directSessionIndexItemSource).not.toMatch(/<input\b/);
-    expect(agentSessionTabStripSource).toContain("onSubmitRename(session)");
+    expect(agentSessionTabStripSource).toContain("onSubmitRename(session, { reason:");
     expect(agentSessionTabStripSource).toContain("onCancelRename");
 
     expect(routeStyles.agentSessionTabGroup).toBeTypeOf("string");

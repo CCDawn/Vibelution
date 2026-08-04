@@ -1,5 +1,5 @@
 import type { AgentDelegationPolicy, AgentSupervisionPolicy } from "../api/types";
-import { VButton, VCheckbox, VFieldRow, VNativeInput, VNativeSelect } from "../components/vui";
+import { VButton, VCheckbox, VFieldRow, VNativeInput, VStringSelect } from "../components/vui";
 import styles from "./AgentRuntimePolicyPanel.styles";
 
 export type AgentRuntimePolicyPanelCopy = {
@@ -154,18 +154,28 @@ export function AgentRuntimePolicyPanel({
           </div>
           <div className={styles.editorGrid}>
             <VFieldRow label={copy.reviewMode}>
-              <VNativeSelect value={supervisionPolicyDraft.reviewMode} onChange={(event) => onUpdateSupervisionPolicy({ reviewMode: event.target.value })}>
-                <option value="advisory">{lang === "zh" ? "建议" : "Advisory"}</option>
-                <option value="required">{lang === "zh" ? "强制" : "Required"}</option>
-                <option value="disabled">{lang === "zh" ? "关闭" : "Disabled"}</option>
-              </VNativeSelect>
+              <VStringSelect
+                ariaLabel={copy.reviewMode}
+                value={supervisionPolicyDraft.reviewMode}
+                onValueChange={(reviewMode) => onUpdateSupervisionPolicy({ reviewMode })}
+                options={[
+                  { value: "advisory", label: lang === "zh" ? "建议" : "Advisory" },
+                  { value: "required", label: lang === "zh" ? "强制" : "Required" },
+                  { value: "disabled", label: lang === "zh" ? "关闭" : "Disabled" },
+                ]}
+              />
             </VFieldRow>
             <VFieldRow label={copy.evidenceLevel}>
-              <VNativeSelect value={supervisionPolicyDraft.evidenceLevel} onChange={(event) => onUpdateSupervisionPolicy({ evidenceLevel: event.target.value })}>
-                <option value="light">{lang === "zh" ? "轻量" : "Light"}</option>
-                <option value="standard">{lang === "zh" ? "标准" : "Standard"}</option>
-                <option value="strict">{lang === "zh" ? "严格" : "Strict"}</option>
-              </VNativeSelect>
+              <VStringSelect
+                ariaLabel={copy.evidenceLevel}
+                value={supervisionPolicyDraft.evidenceLevel}
+                onValueChange={(evidenceLevel) => onUpdateSupervisionPolicy({ evidenceLevel })}
+                options={[
+                  { value: "light", label: lang === "zh" ? "轻量" : "Light" },
+                  { value: "standard", label: lang === "zh" ? "标准" : "Standard" },
+                  { value: "strict", label: lang === "zh" ? "严格" : "Strict" },
+                ]}
+              />
             </VFieldRow>
           </div>
           <div className={styles.pathList}>

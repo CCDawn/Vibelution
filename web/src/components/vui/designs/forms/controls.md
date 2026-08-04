@@ -73,11 +73,17 @@
 - 下拉：panel 表面 + 高亮行 + check indicator
 - 表单 `name` 时输出 hidden input 便于原生提交
 
-### 何时不要用
-| 场景 | 改用 |
+### 何时使用 / 不要用
+| 场景 | 选择 |
 | --- | --- |
-| 简单 string + 原生 option 列表、极低成本 | `VNativeSelect` 或 `VStringSelect` |
+| 表单/配置面、string value | **优先 `VStringSelect`**（封装本组件） |
+| 需要 description / 非 string key | `VSelect` |
+| 密集筛选条、零 portal（Chat 侧栏、Git 过滤） | `VNativeSelect` |
 | 需要搜索过滤大量选项 | 暂用调用方 Combobox 方案（未建 `VCombobox` 前） |
+
+### 迁移
+- Agent 配置/批量/创建表单已迁到 `VStringSelect`（Radix）
+- Config / Evolution 表单面继续用 `VStringSelect`；勿回退为原生 `<select>`
 
 ### 实现落点
 - `forms/VSelect.tsx` → `renderers/shadcn/ShadcnSelect.tsx`（`@radix-ui/react-select`）

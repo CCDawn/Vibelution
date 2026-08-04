@@ -6,7 +6,7 @@ import {
   type AgentModelChoice,
   type AgentPermissionPreset,
 } from "../api/types";
-import { VButton, VContextualHint, VFieldRow, VNativeInput, VNativeSelect } from "../components/vui";
+import { VButton, VContextualHint, VFieldRow, VNativeInput, VStringSelect } from "../components/vui";
 import { AgentPermissionPresetControl } from "../components/vui/product/agent-management";
 import {
   AgentContextCompressionPanel,
@@ -198,17 +198,18 @@ function AgentLlmSlotField({
         </VButton>
       ) : null}
       {supportsReasoningEffort && reasoningEffortOptions.length > 0 ? (
-        <VNativeSelect value={reasoningEffort} aria-label={`${slot.label} ${copy.reasoningEffort}`} onChange={(event) => onReasoningEffortChange(slot.slot, event.target.value)}>
-          <option value="">{copy.reasoningEffort}: {copy.reasoningEffortDefault}</option>
-          {reasoningEffortOptions.map((option) => {
-            const label = option.label || fallbackReasoningEffortLabel(copy, option.value);
-            return (
-              <option key={option.value} value={option.value}>
-                {copy.reasoningEffort}: {label}
-              </option>
-            );
-          })}
-        </VNativeSelect>
+        <VStringSelect
+          ariaLabel={`${slot.label} ${copy.reasoningEffort}`}
+          value={reasoningEffort}
+          onValueChange={(value) => onReasoningEffortChange(slot.slot, value)}
+          options={[
+            { value: "", label: `${copy.reasoningEffort}: ${copy.reasoningEffortDefault}` },
+            ...reasoningEffortOptions.map((option) => ({
+              value: option.value,
+              label: `${copy.reasoningEffort}: ${option.label || fallbackReasoningEffortLabel(copy, option.value)}`,
+            })),
+          ]}
+        />
       ) : null}
     </section>
   );
@@ -284,9 +285,12 @@ export function AgentCoreConfigPanel({
           />
         </VFieldRow>
         <VFieldRow label={copy.status}>
-          <VNativeSelect value={draft.status} onChange={(event) => onDraftChange({ status: event.target.value })}>
-            <option value="active">{lang === "zh" ? "活跃" : "Active"}</option>
-          </VNativeSelect>
+          <VStringSelect
+            ariaLabel={copy.status}
+            value={draft.status}
+            onValueChange={(status) => onDraftChange({ status })}
+            options={[{ value: "active", label: lang === "zh" ? "活跃" : "Active" }]}
+          />
         </VFieldRow>
         <VFieldRow
           label={lang === "zh" ? "工具调用批准" : "Tool approval"}
@@ -335,14 +339,18 @@ export function AgentCoreConfigPanel({
         <section className={`${styles.fieldWide} ${styles.promptConfigField}`}>
           <span>{copy.prompt}</span>
           <div className={styles.promptConfigRow}>
-            <VNativeSelect value={draft.promptTemplateId} onChange={(event) => onDraftChange({ promptTemplateId: event.target.value })}>
-              <option value="">-</option>
-              {promptTemplateOptions.map((template) => (
-                <option key={template.value || template.label} value={template.value}>
-                  {template.label}
-                </option>
-              ))}
-            </VNativeSelect>
+            <VStringSelect
+              ariaLabel={copy.prompt}
+              value={draft.promptTemplateId}
+              onValueChange={(promptTemplateId) => onDraftChange({ promptTemplateId })}
+              options={[
+                { value: "", label: "-" },
+                ...promptTemplateOptions.map((template) => ({
+                  value: template.value,
+                  label: template.label,
+                })),
+              ]}
+            />
             <VButton
               type="button"
               variant="secondary"
@@ -358,22 +366,28 @@ export function AgentCoreConfigPanel({
             label={copy.tools}
             tooltip={toolPolicyTooltip}
           >
-            <VNativeSelect value={draft.toolPolicyId} onChange={(event) => onDraftChange({ toolPolicyId: event.target.value })}>
-              {toolPolicyOptions.map((policy) => (
-                <option key={policy.value} value={policy.value} title={policy.title}>
-                  {policy.label}
-                </option>
-              ))}
-            </VNativeSelect>
+            <VStringSelect
+              ariaLabel={copy.tools}
+              value={draft.toolPolicyId}
+              onValueChange={(toolPolicyId) => onDraftChange({ toolPolicyId })}
+              options={toolPolicyOptions.map((policy) => ({
+                value: policy.value,
+                label: policy.label,
+                description: policy.title,
+              }))}
+            />
           </VFieldRow>
           <VFieldRow label={copy.memory} tooltip={memoryPolicyTooltip}>
-            <VNativeSelect value={draft.memoryPolicyId} onChange={(event) => onDraftChange({ memoryPolicyId: event.target.value })}>
-              {memoryPolicyOptions.map((policy) => (
-                <option key={policy.value} value={policy.value} title={policy.title}>
-                  {policy.label}
-                </option>
-              ))}
-            </VNativeSelect>
+            <VStringSelect
+              ariaLabel={copy.memory}
+              value={draft.memoryPolicyId}
+              onValueChange={(memoryPolicyId) => onDraftChange({ memoryPolicyId })}
+              options={memoryPolicyOptions.map((policy) => ({
+                value: policy.value,
+                label: policy.label,
+                description: policy.title,
+              }))}
+            />
           </VFieldRow>
         </div>
         <div className={`${styles.fieldWide} ${styles.configDeepLinkRow}`}>

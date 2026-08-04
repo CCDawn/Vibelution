@@ -56,7 +56,8 @@ export function ChatFileWorkspaceTabs({
               title={closePreviewTabLabel}
               aria-label={`${closePreviewTabLabel} ${tabName}`}
               isIconOnly
-              icon={<X size={14} aria-hidden="true"/>} />
+              icon={<X size={14} aria-hidden="true" />}
+            />
           </div>
         );
       })}

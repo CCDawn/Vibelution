@@ -2,7 +2,7 @@ import { Check, ChevronLeft, ChevronRight, Plus, Sparkles } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { type AgentAvatarOptionsPayload, type ToolBundle } from "../api/types";
-import { VButton, VContextualHint, VFieldRow, VNativeButton, VNativeInput, VNativeSelect, VNativeTextarea, VStateSurface, VTooltip } from "../components/vui";
+import { VButton, VContextualHint, VFieldRow, VNativeButton, VNativeInput, VNativeTextarea, VStateSurface, VStringSelect, VTooltip } from "../components/vui";
 import {
   buildAgentProviderChoices,
   firstAvailableModelId,
@@ -313,9 +313,12 @@ export function AgentCreatePanel({
               )}
             </div>
             <VFieldRow label={copy.modeMembership} className="col-span-full">
-              <VNativeSelect value={draft.primaryMode} onChange={(event) => onPrimaryModeChange(event.target.value)}>
-                {primaryModeOptions.map((mode) => <option key={mode.value} value={mode.value}>{mode.label}</option>)}
-              </VNativeSelect>
+              <VStringSelect
+                ariaLabel={copy.modeMembership}
+                value={draft.primaryMode}
+                onValueChange={onPrimaryModeChange}
+                options={primaryModeOptions.map((mode) => ({ value: mode.value, label: mode.label }))}
+              />
             </VFieldRow>
             {!isWorkSession ? (
               <>
@@ -443,10 +446,18 @@ export function AgentCreatePanel({
                 />
               ) : null}
               <VFieldRow label={copy.prompt}>
-                <VNativeSelect value={draft.promptTemplateId} onChange={(event) => onDraftChange({ promptTemplateId: event.target.value })}>
-                  <option value="">-</option>
-                  {promptTemplateOptions.map((template) => <option key={template.value || template.label} value={template.value}>{template.label}</option>)}
-                </VNativeSelect>
+                <VStringSelect
+                  ariaLabel={copy.prompt}
+                  value={draft.promptTemplateId}
+                  onValueChange={(promptTemplateId) => onDraftChange({ promptTemplateId })}
+                  options={[
+                    { value: "", label: "-" },
+                    ...promptTemplateOptions.map((template) => ({
+                      value: template.value,
+                      label: template.label,
+                    })),
+                  ]}
+                />
               </VFieldRow>
               <section className={styles.fieldWide}>
                 <span className={styles.contextualHintRow}>
