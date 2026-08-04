@@ -144,13 +144,18 @@ const routeShellTargets = [
     forbidden: ["<header className={styles.header}"],
   },
   {
+    path: "routes/AgentWorkspaceLayoutPanel.tsx",
+    expected: ["VListDetailPage"],
+    forbidden: ["usePersistedPaneResize"],
+  },
+  {
     path: "routes/MemoryRoute.tsx",
     expected: ["VDenseOpsPage"],
     forbidden: ["<header className={styles.header}"],
   },
   {
     path: "routes/ResearchFlowCanvasRoute.tsx",
-    expected: ["VRouteHeader"],
+    expected: ["VCanvasWorkbenchPage"],
     forbidden: ["<header className={styles.header}"],
   },
   {

@@ -17,6 +17,10 @@ describe("ResearchFlowCanvasRoute layout contract", () => {
     expect(routeSource).toContain("<VNativeSelect");
     expect(routeSource).toContain("<VNativeTextarea");
     expect(routeSource).toContain("<VRouteLinkButton");
+    expect(routeSource).toContain("VCanvasWorkbenchPage");
+    expect(routeSource).toContain('domainRecipe="research-flow-canvas-workbench"');
+    expect(routeSource).toContain("canvas={(");
+    expect(routeSource).toContain("inspector={(");
     expect(routeSource).not.toContain('import { Link } from "react-router-dom"');
     expect(routeSource).not.toMatch(/<button\b/);
     expect(routeSource).not.toMatch(/<input\b/);
@@ -189,14 +193,13 @@ describe("ResearchFlowCanvasRoute layout contract", () => {
   it("uses a full canvas plus inspector layout", () => {
     expect(styles.route).toBeTypeOf("string");
     expect(styles.route).toContain("grid-rows-[auto_auto_minmax(0,1fr)]");
-    expect(styles.body).toContain("grid");
     expect(styles.body).toContain("h-full");
     expect(styles.body).toContain("min-h-0");
-    expect(styles.body).toContain("grid-cols-[minmax(0,1fr)_clamp(300px,26vw,400px)]");
     expect(styles.body).toContain("overflow-hidden");
     expect(styles.canvasShell).toBeTypeOf("string");
     expect(styles.canvasShell).toContain("grid-rows-[auto_auto_minmax(0,1fr)]");
     expect(styles.canvasShell).toContain("overflow-hidden");
+    expect(styles.canvasShellInner).toContain("grid-rows-[auto_auto_minmax(0,1fr)]");
     expect(styles.canvasScroller).toBeTypeOf("string");
     expect(styles.canvasScroller).toContain("h-full");
     expect(styles.canvasScroller).toContain("overflow-auto");
@@ -204,6 +207,9 @@ describe("ResearchFlowCanvasRoute layout contract", () => {
     expect(styles.canvasViewport).toContain("min-h-full");
     expect(styles.canvasViewport).toContain("w-[var(--research-flow-canvas-viewport-width)]");
     expect(styles.canvasViewport).toContain("h-[var(--research-flow-canvas-viewport-height)]");
+    expect(routeSource).toContain("VCanvasWorkbenchPage");
+    expect(routeSource).toContain("canvas={(");
+    expect(routeSource).toContain("inspector={(");
     expect(styles.canvasPanning).toBeTypeOf("string");
     expect(styles.canvas).toContain("w-[var(--research-flow-canvas-width)]");
     expect(styles.canvas).toContain("h-[var(--research-flow-canvas-height)]");
@@ -311,10 +317,10 @@ describe("ResearchFlowCanvasRoute layout contract", () => {
   });
 
   it("keeps narrow inspector layouts inside local scroll boundaries", () => {
-    expect(styles.body).toContain("max-[1080px]:grid-cols-1");
     expect(styles.body).toContain("overflow-hidden");
     expect(styles.canvasShell).toContain("min-w-0");
     expect(styles.canvasShell).toContain("overflow-hidden");
+    expect(styles.canvasShellInner).toContain("min-w-0");
     expect(styles.canvasScroller).toContain("min-w-0");
     expect(styles.canvasScroller).toContain("overflow-auto");
     expect(styles.inspectorBody).toContain("min-w-0");

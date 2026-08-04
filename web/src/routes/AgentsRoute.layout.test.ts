@@ -806,7 +806,8 @@ describe("AgentsRoute layout contract", () => {
     expect(coreConfigPanelSource).toContain("contextCompressionPolicy: AgentContextCompressionPolicyDraft");
     expect(agentRouteDraftModelSource).toContain("function contextCompressionDraftFromAgent");
     expect(agentRouteDraftModelSource).toContain("function contextCompressionPolicyFromDraft");
-    expect(configDraftMutationsSource).toContain("contextCompressionPolicy: options.contextCompressionPolicyFromDraft(payload.draft.contextCompressionPolicy)");
+    expect(configDraftMutationsSource).toContain("body.contextCompressionPolicy = options.contextCompressionPolicyFromDraft");
+    expect(configDraftMutationsSource).toContain("contextCompressionPolicyChangedInDraft");
     expect(routeSource).toContain("updateContextCompressionDraft");
     expect(selectedDetailContentPanelSource).toContain("<AgentConfigPrimaryPanePanel");
     expect(configPrimaryPanePanelSource).toContain("<AgentCoreConfigPanel");
@@ -1905,19 +1906,18 @@ describe("AgentsRoute layout contract", () => {
     expect(detailWorkspacePanelSource).toContain("styles.detailPanel");
     expect(workspaceLayoutStyles.workspace).toBeTruthy();
     expect(workspaceLayoutPanelSource).toContain("styles.directory");
-    expect(workspaceLayoutStyles.workspace).toContain("flex h-full");
+    expect(workspaceLayoutStyles.workspace).toContain("h-full");
     expect(workspaceLayoutStyles.workspace).toContain("overflow-hidden");
     expect(workspaceLayoutStyles.directory).toContain("grid-rows-[auto_minmax(0,1fr)]");
-    expect(workspaceLayoutPanelSource).toContain("PaneResizeHandle");
-    expect(workspaceLayoutPanelSource).toContain("usePersistedPaneResize");
+    expect(workspaceLayoutPanelSource).toContain("VListDetailPage");
+    expect(workspaceLayoutPanelSource).toContain("layoutId={LAYOUT_ID}");
+    expect(workspaceLayoutPanelSource).toContain("WORKBENCH_LAYOUT_IDS.agents");
     expect(workspaceLayoutPanelSource).toContain("data-agent-workspace=\"resizable\"");
     expect(routeSource).toContain('data-vui-recipe="agents-management-workbench"');
     expect(workspaceLayoutPanelSource).toContain('data-vui-recipe="agents-workspace-shell"');
+    expect(workspaceLayoutPanelSource).toContain('data-vui-domain-recipe="agents-management-workbench"');
     expect(workspaceLayoutPanelSource).toContain('data-vui-region="agents-directory"');
     expect(workspaceLayoutPanelSource).toContain('data-vui-region="agents-detail"');
-    expect(workspaceLayoutPanelSource).toContain('label="调整目录栏宽度"');
-    expect(workspaceLayoutStyles.workspace).toContain("max-[860px]:flex-col");
-    expect(workspaceLayoutStyles.inspector).toContain("max-[1180px]:absolute");
     expect(workspaceLayoutStyles.inspectorBackdrop).toContain("max-[1180px]:block");
     expect(listWorkspaceStyles.agentPanelIdle).toContain("[grid-template-rows:auto_minmax(0,_1fr)]");
     expect(listWorkspaceStyles.agentPanelSelecting).toContain("[grid-template-rows:auto_auto_minmax(0,_1fr)]");
@@ -1945,8 +1945,8 @@ describe("AgentsRoute layout contract", () => {
     expect(workspaceLayoutStyles.workspace).not.toContain("var(--surface-card)");
     expect(workspaceLayoutStyles.workspace).not.toContain("var(--surface-panel-strong)");
     expect(workspaceLayoutStyles.workspace).not.toContain("box-shadow");
-    expect(workspaceLayoutStyles.workspace).toContain("max-[860px]:flex-col");
     expect(workspaceLayoutStyles.workspace).toContain("max-[860px]:overflow-auto");
+    expect(workspaceLayoutStyles.directory).toContain("max-[860px]:min-h-[320px]");
   });
 
   it("uses route-level VUI density guards for Agent workspace panels and actions", () => {
@@ -2215,7 +2215,7 @@ describe("AgentsRoute layout contract", () => {
 
   it("keeps the narrow Agent management stack compact enough to preserve list and detail context", () => {
     expect(workspaceLayoutStyles.directory).toContain("max-[860px]:min-h-[320px]");
-    expect(workspaceLayoutStyles.workspace).toContain("max-[860px]:flex-col");
+    expect(workspaceLayoutStyles.workspace).toContain("max-[860px]:overflow-auto");
     expect(styles.filterPanel).toContain("max-[860px]:[min-height:150px]");
     expect(listWorkspaceStyles.agentPanel).toContain("max-[860px]:[min-height:240px]");
     expect(detailWorkspaceStyles.detailPanel).toContain("max-[860px]:[min-height:420px]");

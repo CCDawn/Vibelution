@@ -2548,23 +2548,25 @@ export function AgentsRoute() {
   } : null;
 
   return (
-    <section
-      className={styles.route}
-      data-vui-recipe="agents-management-workbench"
-    >
-      <AgentManagementHeaderPanel
-        copy={{
-          createAgent: copy.createAgent,
-          refresh: copy.refresh,
-        }}
-        createAgentButtonRef={agentCreateTriggerRef}
-        createAgentButtonId="agents-create-trigger"
-        refreshing={agentSummaryQuery.isFetching || workspaceQuery.isFetching}
-        onCreateAgent={() => setCreateWizardOpen(true)}
-        onRefresh={refresh}
-      />
-
+    // Domain shell: list-detail recipe lives in AgentWorkspaceLayoutPanel.
+    <div className={styles.routeHost} data-vui-recipe="agents-management-workbench">
       <AgentWorkspaceLayoutPanel
+        className={styles.route}
+        ariaLabel={copy.title}
+        title={copy.title}
+        toolbar={(
+          <AgentManagementHeaderPanel
+            copy={{
+              createAgent: copy.createAgent,
+              refresh: copy.refresh,
+            }}
+            createAgentButtonRef={agentCreateTriggerRef}
+            createAgentButtonId="agents-create-trigger"
+            refreshing={agentSummaryQuery.isFetching || workspaceQuery.isFetching}
+            onCreateAgent={() => setCreateWizardOpen(true)}
+            onRefresh={refresh}
+          />
+        )}
         filterRail={{
           ariaLabel: copy.agentFilters,
           searchValue: searchText,
@@ -2704,6 +2706,6 @@ export function AgentsRoute() {
           />
         </Suspense>
       ) : null}
-    </section>
+    </div>
   );
 }

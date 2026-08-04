@@ -13,9 +13,10 @@
 | Surface | Symptom | Target recipe |
 | --- | --- | --- |
 | `TeamsRoute.tsx` | Still ~6.7k lines; shell recipes + **extracted** `TeamOrganizationCanvasSurface` / `TeamNodeBindingPanel` / `TeamShellToolbar` / `TeamCanvasReadOnlyInspector`. Next: extract board workflow panel host + discussion/broadcast blocks. | keep recipes; continue module extract |
-| Agents workspace | Custom three-pane remnants | `VListDetailPage` + product/agent-management |
+| Agents workspace | **Migrated** outer shell to `VListDetailPage` + layoutId (`AgentWorkspaceLayoutPanel`) | keep product/agent-management panels; optional inspector UX polish |
 | Chat coding | Dual-pane domain math (OK) but chrome drift risk | Keep domain layout; enforce layoutId + regions only |
-| Memory graph | Graph + inspector hand shells | `VCanvasWorkbenchPage` |
+| Memory graph | **Migrated** `MemoryGraphViewPanel` → `VCanvasWorkbenchPage` | height list still uses PaneHeightResizeHandle |
+| Research flow canvas | **Migrated** page shell → `VCanvasWorkbenchPage` | optional layoutId for inspector width |
 | Evolution queues | Multiple width rails | `VListDetailPage` / `VDenseOpsPage` + height registry |
 
 ## Cleanup playbook (per surface)

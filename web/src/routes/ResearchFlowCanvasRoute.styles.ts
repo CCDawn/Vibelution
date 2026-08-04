@@ -46,7 +46,13 @@ const styles: Record<string, string> = {
   agentRoleTag_tool:
     `agentRoleTag_tool min-w-0 ${vuiStateCoolInfoClass}`,
   body:
-    "body min-w-0 max-w-full grid h-full min-h-0 grid-cols-[minmax(0,1fr)_clamp(300px,26vw,400px)] gap-2 overflow-hidden overflow-x-hidden [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] max-[1080px]:grid-cols-1 max-[1080px]:grid-rows-[minmax(420px,1fr)_minmax(240px,0.48fr)]",
+    "body min-w-0 max-w-full h-full min-h-0 overflow-hidden overflow-x-hidden [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
+  canvasToolbarStrip:
+    "canvasToolbarStrip min-w-0 flex flex-wrap items-center gap-1.5 border-b border-[var(--vui-border-subtle)] bg-transparent px-2 py-1.5",
+  canvasShellInner:
+    "canvasShellInner min-w-0 max-w-full grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden text-[var(--fg-primary)] gap-2 p-0",
+  inspectorInner:
+    "inspectorInner min-w-0 max-w-full grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden overflow-x-hidden",
   canvas:
     "canvas min-w-0 grid min-h-0 gap-2 p-2 w-[var(--research-flow-canvas-width)] h-[var(--research-flow-canvas-height)] [transform:translate(var(--research-flow-canvas-offset-x),var(--research-flow-canvas-offset-y))_scale(var(--research-flow-canvas-zoom))]",
   canvasLocked:
