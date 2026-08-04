@@ -11,6 +11,10 @@ import activeRunMonitorStylesSource from "./EvolutionActiveRunMonitorPanel.style
 import datasetCatalogPanelSource from "./EvolutionDatasetCatalogPanel.tsx?raw";
 import supervisedLiveSetupPanelSource from "./EvolutionSupervisedLiveSetupPanel.tsx?raw";
 import supervisedWorkflowMembersPanelSource from "./EvolutionSupervisedWorkflowMembersPanel.tsx?raw";
+import supervisedRunPlanPanelSource from "./EvolutionSupervisedRunPlanPanel.tsx?raw";
+import supervisedLiveIoPanelSource from "./EvolutionSupervisedLiveIoPanel.tsx?raw";
+import supervisedRunsViewSource from "./EvolutionSupervisedRunsView.tsx?raw";
+import supervisedLibraryViewSource from "./EvolutionSupervisedLibraryView.tsx?raw";
 import proposalActionBandsPanelSource from "./EvolutionProposalActionBandsPanel.tsx?raw";
 import proposalActionBandsStyles from "./EvolutionProposalActionBandsPanel.styles";
 import proposalActionBandsStylesSource from "./EvolutionProposalActionBandsPanel.styles.ts?raw";
@@ -52,6 +56,10 @@ const evolutionSources = [
   supervisedApprovalDecisionPanelSource,
   supervisedLiveSetupPanelSource,
   supervisedWorkflowMembersPanelSource,
+  supervisedRunPlanPanelSource,
+  supervisedLiveIoPanelSource,
+  supervisedRunsViewSource,
+  supervisedLibraryViewSource,
   datasetCatalogPanelSource,
 ].join("\n");
 
@@ -59,8 +67,8 @@ describe("EvolutionRoute library user flow contract", () => {
   it("uses VUI composition for supervised Evolution surfaces without native control wrappers", () => {
     expect(routeSource).toContain("VRouteHeader");
     expect(routeSource).toContain("VMetricStrip");
-    expect(routeSource).toContain("VStateSurface");
-    expect(routeSource).toContain("VStringSelect");
+    expect(supervisedLibraryViewSource).toContain("VStateSurface");
+    expect(supervisedLiveSetupPanelSource).toContain("VStringSelect");
     expect(routeSource).toContain("onKeepWorktreeChange={setKeepWorktree}");
     expect(supervisedLiveSetupPanelSource).toContain("onChange={onKeepWorktreeChange}");
     expect(routeSource).toContain("hideIntro={hideSupervisedToolbarIntro}");
@@ -75,17 +83,17 @@ describe("EvolutionRoute library user flow contract", () => {
   });
 
   it("keeps complex Evolution card buttons in the VButton plain-content layout", () => {
-    expect(routeSource.match(/contentLayout="plain"/g)).toHaveLength(3);
+    expect(routeSource.match(/contentLayout="plain"/g)).toHaveLength(1);
     expect(routeSource).toMatch(/contentLayout="plain"[\s\S]{0,160}styles\.caseTraceSummary/);
     expect(supervisedWorkflowMembersPanelSource).toMatch(/contentLayout="plain"[\s\S]{0,160}styles\.workflowStepButton/);
-    expect(routeSource.match(/contentLayout="plain"[\s\S]{0,160}styles\.proposalCardButton/g)).toHaveLength(2);
+    expect(supervisedLibraryViewSource.match(/contentLayout="plain"[\s\S]{0,160}styles\.proposalCardButton/g)).toHaveLength(2);
     expect(runRecordsPanelSource).toMatch(/contentLayout="plain"[\s\S]{0,160}styles\.runCardButton/);
   });
 
   it("shows self-evolution candidates as local pending details instead of proposal details", () => {
     expect(routeSource).toContain("selectedProposalIsSelfCandidate");
-    expect(routeSource).toContain("!selectedProposalIsSelfCandidate");
-    expect(routeSource).toContain("renderSelfEvolutionCandidateDetail(selectedProposalSummary)");
+    expect(routeSource).toContain("selectedProposalIsSelfCandidate={selectedProposalIsSelfCandidate}");
+    expect(supervisedLibraryViewSource).toContain("renderSelfEvolutionCandidateDetail(selectedProposalSummary)");
     expect(evolutionRouteModelSource).toContain("function isSelfEvolutionCandidateItem");
     expect(evolutionRouteModelSource).toContain('item?.ingestMode === "self_evolution_candidate"');
     expect(routeSource).toContain('from "./evolution/evolutionRouteModel"');
@@ -96,18 +104,18 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(evolutionRouteModelSource).toContain("item.sourceSelfRunId || item.sourceRun");
     expect(evolutionRouteModelSource).toContain("function canOpenProposalSourceRun");
     expect(evolutionRouteModelSource).toContain("!isSelfEvolutionCandidateItem(item)");
-    expect(routeSource).toContain("selectedProposalDisplaySourceRun || latestRun?.id");
-    expect(routeSource).toContain("selectedProposalSummary && selectedProposalCanOpenSourceRun");
-    expect(routeSource).toContain("item.riskLevel ? riskLabel(item.riskLevel) : \"--\"");
+    expect(supervisedLibraryViewSource).toContain("selectedProposalDisplaySourceRun || latestRunId");
+    expect(supervisedLibraryViewSource).toContain("selectedProposalSummary && selectedProposalCanOpenSourceRun");
+    expect(supervisedLibraryViewSource).toContain("item.riskLevel ? riskLabel(item.riskLevel) : \"--\"");
   });
 
   it("does not let blocked library items enter batch delete selection", () => {
-    const disabledSelectionCount = routeSource.match(/isDisabled={!item\.canDelete}/g)?.length ?? 0;
+    const disabledSelectionCount = supervisedLibraryViewSource.match(/isDisabled={!item\.canDelete}/g)?.length ?? 0;
     expect(disabledSelectionCount).toBeGreaterThanOrEqual(2);
     expect(routeSource).toContain("visibleLibraryEntries.filter((item) => item.canDelete).map((item) => item.sourceRun)");
     expect(routeSource).toContain("function toggleProposalSelection(item: EvolutionLibraryEntry)");
     expect(routeSource).toContain("if (!item.canDelete)");
-    expect(routeSource).toContain("onChange={() => toggleProposalSelection(item)}");
+    expect(supervisedLibraryViewSource).toContain("onChange={() => onToggleProposalSelection(item)}");
   });
 
   it("adds collapse handles to the supervised split panes", () => {
@@ -257,7 +265,7 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(runRecordsPanelSource).toContain('content={selectedRun.riskReasons.join(" / ")}');
     expect(runRecordsPanelSource).not.toContain('title={selectedRun.outcomeSemantics.runtimeExplanation}');
     expect(runRecordsPanelSource).not.toContain('title={selectedRun.riskReasons.join(" / ")}');
-    expect(routeSource).toContain("proposalDetailQuery.data.supervised.riskReasons.join");
+    expect(supervisedLibraryViewSource).toContain("proposalDetail.supervised.riskReasons.join");
     expect(evolutionDictionarySource).toContain('supervisedFlowRunsHint: "同一改良 Agent 提建议并改候选"');
     expect(coreDictionarySource).toContain('decision: "治理结论"');
     expect(coreDictionarySource).toContain('diagnosis: "治理结论说明"');
@@ -265,9 +273,9 @@ describe("EvolutionRoute library user flow contract", () => {
   });
 
   it("keeps supervised run records queue and detail composition in the extracted panel", () => {
-    expect(routeSource).toContain('import("./EvolutionRunRecordsPanel")');
+    expect(supervisedRunsViewSource).toContain('import("./EvolutionRunRecordsPanel")');
     expect(routeSource).not.toMatch(/import \{ EvolutionRunRecordsPanel \} from "\.\/EvolutionRunRecordsPanel"/);
-    expect(routeSource).toContain("<EvolutionRunRecordsPanel");
+    expect(supervisedRunsViewSource).toContain("<EvolutionRunRecordsPanel");
     expect(routeSource).toContain("filteredRuns={filteredRuns}");
     expect(routeSource).toContain("selectedRun={selectedRun}");
     expect(routeSource).toContain("onRunAction={triggerRunAction}");
@@ -308,10 +316,10 @@ describe("EvolutionRoute library user flow contract", () => {
   });
 
   it("keeps proposal action bands in the extracted panel while route owns mutations", () => {
-    expect(routeSource).toContain('import("./EvolutionProposalActionBandsPanel")');
+    expect(supervisedLibraryViewSource).toContain('import("./EvolutionProposalActionBandsPanel")');
     expect(routeSource).not.toMatch(/import \{ EvolutionProposalActionBandsPanel \} from "\.\/EvolutionProposalActionBandsPanel"/);
-    expect(routeSource).toContain("<EvolutionProposalActionBandsPanel");
-    expect(routeSource).toContain("proposal={proposalDetailQuery.data}");
+    expect(supervisedLibraryViewSource).toContain("<EvolutionProposalActionBandsPanel");
+    expect(supervisedLibraryViewSource).toContain("proposal={proposalDetail}");
     expect(routeSource).toContain("actionError={actionMutation.error?.message ?? \"\"}");
     expect(routeSource).toContain("deleteProposalError={deleteProposalMutation.error?.message ?? \"\"}");
     expect(routeSource).toContain("onRunAction={triggerRunAction}");
@@ -409,7 +417,7 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(selfTrackBoundarySource).not.toContain("useMutation");
     expect(selfTrackBoundarySource).not.toContain("queryClient");
     // U3: supervised secondary panels also use Suspense; self track stays boundary-owned.
-    expect(routeSource).toContain('import("./EvolutionRunRecordsPanel")');
+    expect(supervisedRunsViewSource).toContain('import("./EvolutionRunRecordsPanel")');
     expect(routeSource).toContain("<Suspense");
   });
 
@@ -687,11 +695,11 @@ describe("EvolutionRoute library user flow contract", () => {
 
   it("shows a truthful run plan before the supervised agents start", () => {
     expect(routeSource).toContain("if (!supervisedWorkflowRun)");
-    expect(routeSource).toContain("准备开始监督进化");
-    expect(routeSource).toContain("用户审批后由 Judge 触发受控合入");
-    expect(routeSource).toContain("styles.supervisedRunPlan");
-    expect(routeSource).toContain("styles.supervisedRunPlanGrid");
-    expect(routeSource).toContain("styles.supervisedRunPlanActions");
+    expect(supervisedRunPlanPanelSource).toContain("准备开始监督进化");
+    expect(supervisedRunPlanPanelSource).toContain("用户审批后由 Judge 触发受控合入");
+    expect(supervisedRunPlanPanelSource).toContain("styles.supervisedRunPlan");
+    expect(supervisedRunPlanPanelSource).toContain("styles.supervisedRunPlanGrid");
+    expect(supervisedRunPlanPanelSource).toContain("styles.supervisedRunPlanActions");
     expect(routeStyles.supervisedRunPlan).toContain("[align-content:start]");
     expect(routeStyles.supervisedRunPlan).toContain("[container-type:inline-size]");
     expect(routeStyles.supervisedRunPlanGrid).toContain("[grid-template-columns:repeat(4,_minmax(0,_1fr))]");
@@ -757,7 +765,7 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("snapshot?.activeRun?.runId");
     expect(routeSource).toContain("snapshot?.worktreeActiveRun?.runId");
     expect(routeSource).not.toContain("snapshot?.selfAutonomousActiveRun?.runId");
-    expect(routeSource).toContain("onClick={() => startWorktreeRunMutation.mutate()}");
+    expect(routeSource).toContain('onStart={() => startWorktreeRunMutation.mutate()}');
     expect(runMutationsSource).toContain('executionMode: "real"');
     expect(runMutationsSource).toContain("confirmRealLlmCost: true");
     expect(routeSource).toContain("监督运行中");
@@ -824,7 +832,8 @@ describe("EvolutionRoute library user flow contract", () => {
 
   it("removes the simulation launch card while retaining dataset case limits", () => {
     expect(routeSource).toContain('t("caseLimitHint")');
-    expect(routeSource).toContain("disabledReason={supervisedStartDisabledReason}");
+    expect(routeSource).toContain("startDisabledReason={supervisedStartDisabledReason}");
+    expect(supervisedRunPlanPanelSource).toContain("disabledReason={startDisabledReason}");
     expect(routeSource).not.toContain('title={t("caseLimitHint")}');
     expect(routeSource).not.toContain("styles.closedLoopLaunchBlock");
     expect(routeSource).not.toContain("styles.closedLoopContent");
@@ -836,7 +845,8 @@ describe("EvolutionRoute library user flow contract", () => {
   });
 
   it("keeps supervised operation icons in the VButton icon slot", () => {
-    expect(routeSource).toMatch(/icon=\{\s*supervisedStartSubmitting \|\| supervisedPrimaryRunning/);
+    expect(routeSource).toContain("startPendingVisual={supervisedStartSubmitting || supervisedPrimaryRunning}");
+    expect(supervisedRunPlanPanelSource).toMatch(/icon=\{\s*startPendingVisual/);
     expect(activeRunMonitorPanelSource.split('icon={<Activity size={15} />}')).toHaveLength(3);
     expect(activeRunMonitorPanelSource.split('icon={<LibraryBig size={15} />}')).toHaveLength(3);
   });
@@ -919,7 +929,7 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeStyles.supervisedConversationTrace).not.toContain("[max-height:340px]");
     expect(routeStyles.ioSurface).toContain("[position:relative]");
     // Wave 6A: height chrome lives on PaneHeightResizeHandle, not route style maps.
-    expect(routeSource).toContain("PaneHeightResizeHandle");
+    expect(supervisedLiveIoPanelSource).toContain("PaneHeightResizeHandle");
     expect(routeSource).not.toContain("styles.liveIoResizeHandleLine");
     expect(routeStyles.liveIoResizeHandle).not.toContain("cursor-row-resize");
     expect(routeStyles.liveIoResizeHandle).not.toContain("before:");

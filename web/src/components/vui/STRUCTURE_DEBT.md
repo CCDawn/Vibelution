@@ -20,7 +20,7 @@
 | Memory | Outer `VDenseOpsPage` + layoutId; sources/knowledge/agent-memory three-pane → `VSplitWorkspace` (`left`/`right`, `agent-list`/`agent-detail`); lists/queues on height registry | Done for main three-pane shells |
 | Config settings | **Migrated** nav/main to `VSplitWorkspace` + `configSettings`; model-assets → `configModelAssets` | Done for shell width ownership |
 | Research flow canvas | **Migrated** page shell → `VCanvasWorkbenchPage` | optional layoutId for inspector width |
-| Evolution queues | Multi-rail widths/heights on `WORKBENCH_LAYOUT_IDS.evolution`; soft segment track; catalog/setup/members → dedicated panels | Domain multi-rail intentional; next: live IO / runs-library remaining glue |
+| Evolution queues | Multi-rail layoutId; soft segment; **catalog / setup / members / run-plan / live-io / runs / library → dedicated panels** | Domain multi-rail intentional; remaining: case-trace helpers inside live run body |
 
 ## Cleanup playbook (per surface)
 

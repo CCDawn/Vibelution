@@ -3,22 +3,15 @@ import "../design/route-css/evolution.tailwind.css";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
-  ArrowUpRight,
   ChevronDown,
   ChevronRight,
-  LibraryBig,
-  LoaderCircle,
   Play,
-  Save,
   Sparkles,
-  Pencil,
-  Trash2,
   TriangleAlert,
   Wrench,
-  X,
 } from "lucide-react";
 import { lazy, Suspense, type CSSProperties, type KeyboardEvent, type PointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
@@ -57,22 +50,15 @@ import {
   migrateLegacyNumericHeight,
   type PaneHeightSpec,
 } from "../components/layout/paneHeightPersistence";
-import { PaneHeightResizeHandle } from "../components/layout/PaneHeightResizeHandle";
 import { usePersistedPaneHeight } from "../components/layout/usePersistedPaneHeight";
 import { usePersistedPaneResize } from "../components/layout/usePersistedPaneResize";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import {
   VButton,
-  VCheckbox,
-  VContextualHint,
-  VInput,
   VMetricStrip,
   VRouteHeader,
   VSection,
-  VStateSurface,
-  VStringSelect,
   VSurface,
-  VTextarea,
   VTooltip,
 } from "../components/vui";
 import { useAppI18n } from "../i18n/useAppI18n";
@@ -135,6 +121,10 @@ import {
   EvolutionSupervisedWorkflowMembersPanel,
   type EvolutionSupervisedWorkflowStepView,
 } from "./EvolutionSupervisedWorkflowMembersPanel";
+import { EvolutionSupervisedRunPlanPanel } from "./EvolutionSupervisedRunPlanPanel";
+import { EvolutionSupervisedLiveIoPanel } from "./EvolutionSupervisedLiveIoPanel";
+import { EvolutionSupervisedRunsView } from "./EvolutionSupervisedRunsView";
+import { EvolutionSupervisedLibraryView } from "./EvolutionSupervisedLibraryView";
 import {
   buildSupervisedWorktreeLedgerSummary,
   isSelfEvolutionWorktreeRun,
@@ -172,16 +162,7 @@ const EvolutionActiveRunMonitorPanel = lazy(() =>
     default: module.EvolutionActiveRunMonitorPanel,
   })),
 );
-const EvolutionRunRecordsPanel = lazy(() =>
-  import("./EvolutionRunRecordsPanel").then((module) => ({
-    default: module.EvolutionRunRecordsPanel,
-  })),
-);
-const EvolutionProposalActionBandsPanel = lazy(() =>
-  import("./EvolutionProposalActionBandsPanel").then((module) => ({
-    default: module.EvolutionProposalActionBandsPanel,
-  })),
-);
+
 
 type RunFilter = "all" | "success" | "failed";
 type LibraryView = "items" | "pending";
@@ -228,15 +209,6 @@ type SupervisedSourceOption =
       bundle: EvolutionWorkbench["bundles"][number];
     };
 
-const LIBRARY_STATUS_FILTERS: LibraryStatusFilter[] = [
-  "all",
-  "proposed",
-  "applied",
-  "active",
-  "superseded",
-  "rolled_back",
-  "missing",
-];
 const EMPTY_RUNS: EvolutionRun[] = [];
 const EMPTY_LIBRARY_ENTRIES: EvolutionLibraryEntry[] = [];
 const EMPTY_WORKTREE_RUNS: SupervisedWorktreeRun[] = [];
@@ -1351,73 +1323,27 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     ? `${datasetLimitInput.trim()} / ${selectedSourceOption?.caseCount ?? "--"}`
     : selectedSourceCaseText;
   const configuredSupervisedAgentCount = supervisedRunMembers.filter((member) => Boolean(member.agentId)).length;
-  const renderSupervisedRunPlan = () => {
-    if (!supervisedWorkflowRun) {
-      return (
-        <div className={styles.supervisedRunPlan} role="status">
-          <div className={styles.supervisedRunPlanLead}>
-            <span className={styles.secondaryPill}>{lang === "zh" ? "运行前计划" : "Run plan"}</span>
-            <h3>{lang === "zh" ? "准备开始监督进化" : "Ready to start supervised evolution"}</h3>
-            <p>
-              {lang === "zh"
-                ? "开始后依次执行：基线运行、Judge 首评、原基线会话自改、新会话独立复跑、原 Judge 会话复评；用户审批后由 Judge 触发受控合入。"
-                : "The baseline runs, the Judge scores it, the same baseline session self-improves, a fresh session reruns independently, and the same Judge session scores again before user-approved controlled merge."}
-            </p>
-          </div>
-          <div className={styles.supervisedRunPlanGrid}>
-            <article>
-              <span>{lang === "zh" ? "评测来源" : "Evaluation source"}</span>
-              <strong>{selectedSourceOption?.label || "--"}</strong>
-            </article>
-            <article>
-              <span>{lang === "zh" ? "计划样本" : "Planned cases"}</span>
-              <strong>{selectedSourcePlannedCases}</strong>
-            </article>
-            <article>
-              <span>{lang === "zh" ? "监督成员" : "Supervised members"}</span>
-              <strong>{configuredSupervisedAgentCount} / {SUPERVISED_RUN_MEMBER_ROLES.length}</strong>
-            </article>
-            <article>
-              <span>{lang === "zh" ? "生效方式" : "Runtime effect"}</span>
-              <strong>{lang === "zh" ? "用户审批后决定" : "Decided after approval"}</strong>
-            </article>
-          </div>
-          <div className={styles.supervisedRunPlanActions}>
-            <VButton
-              type="button"
-              variant="primary"
-              className={`${styles.inlineAction} ${styles.supervisedPrimaryAction}`}
-              isDisabled={
-                runLocked
-                || worktreeRunLocked
-                || !workbenchControl
-                || startWorktreeRunMutation.isPending
-                || (sourceKind === "dataset" && !datasetName)
-                || (sourceKind === "bundle" && !selectedBundleExists)
-              }
-              onClick={() => startWorktreeRunMutation.mutate()}
-              tooltip={t("launchSupervisedRunHint")}
-              disabledReason={supervisedStartDisabledReason}
-              icon={
-                supervisedStartSubmitting || supervisedPrimaryRunning
-                  ? <LoaderCircle size={15} />
-                  : <Play size={15} />
-              }
-            >
-              {supervisedStartButtonLabel}
-            </VButton>
-            <span>{lang === "zh" ? "运行参数可在左侧调整。" : "Adjust run parameters in the left rail."}</span>
-          </div>
-          <p className={styles.supervisedRunPlanHint}>
-            {lang === "zh"
-              ? "运行启动后，这里会切换为当前 Agent 的真实会话轨迹。"
-              : "After launch, this area switches to the active Agent's real conversation trace."}
-          </p>
-        </div>
-      );
-    }
-    return null;
-  };
+  const supervisedRunPlanBody = !supervisedWorkflowRun ? (
+    <EvolutionSupervisedRunPlanPanel
+      lang={lang}
+      sourceLabel={selectedSourceOption?.label || "--"}
+      plannedCasesText={selectedSourcePlannedCases}
+      memberCountText={`${configuredSupervisedAgentCount} / ${SUPERVISED_RUN_MEMBER_ROLES.length}`}
+      startDisabled={
+        runLocked
+        || worktreeRunLocked
+        || !workbenchControl
+        || startWorktreeRunMutation.isPending
+        || (sourceKind === "dataset" && !datasetName)
+        || (sourceKind === "bundle" && !selectedBundleExists)
+      }
+      startDisabledReason={supervisedStartDisabledReason}
+      startPendingVisual={supervisedStartSubmitting || supervisedPrimaryRunning}
+      startLabel={supervisedStartButtonLabel}
+      startTooltip={t("launchSupervisedRunHint")}
+      onStart={() => startWorktreeRunMutation.mutate()}
+    />
+  ) : null;
   const normalizedLibrarySearch = librarySearchInput.trim().toLowerCase();
   const filterLibraryEntries = (entries: EvolutionLibraryEntry[]) =>
     entries.filter((item) => {
@@ -2254,181 +2180,6 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     onEvolutionPaneResizeKeyDown("library-list", event as KeyboardEvent<HTMLDivElement>, { direction: 1 });
   }
 
-  function renderReviewList(lines: string[]) {
-    if (lines.length === 0) {
-      return <p>--</p>;
-    }
-    return (
-      <ul className={styles.detailList}>
-        {lines.map((line) => (
-          <li key={line}>{line}</li>
-        ))}
-      </ul>
-    );
-  }
-
-  function renderRawJson(title: string, payload: Record<string, unknown> | null) {
-    return (
-      <details className={styles.rawBlock}>
-        <summary>{title}</summary>
-        <pre className={styles.rawJson}>{JSON.stringify(payload ?? {}, null, 2)}</pre>
-      </details>
-    );
-  }
-
-  function renderSelfEvolutionCandidateDetail(item: EvolutionLibraryEntry) {
-    const evidenceRefs = item.evidenceRefs ?? [];
-    const allowedUses = item.allowedDownstreamUses ?? [];
-    const blockedUses = item.blockedDownstreamUses ?? [];
-    return (
-      <>
-        <div className={styles.detailHeader}>
-          <div>
-            <p className={styles.eyebrow}>{t("pendingReview")}</p>
-            <h2 className={styles.detailTitle}>{item.title}</h2>
-          </div>
-          <span className={styles.statusPill}>{item.outcomeSemantics.proposalStatusLabel}</span>
-        </div>
-
-        <div className={styles.detailSection}>
-          <h3>{t("reviewHeadline")}</h3>
-          <p className={styles.reviewLead}>{item.headline || item.summary}</p>
-          <VTooltip content={item.reason || item.outcomeSemantics.runtimeExplanation} width="wide">
-            <p tabIndex={0}>
-              {displaySupervisedTechnicalText(item.reason || item.outcomeSemantics.runtimeExplanation, item.decision, lang, decisionLabel)}
-            </p>
-          </VTooltip>
-        </div>
-
-        <div className={styles.detailSection}>
-          <h3>{t("resultLayersTitle")}</h3>
-          <div className={styles.relatedList}>
-            <article className={styles.relatedRow}>
-              <strong>{t("sourceRun")}</strong>
-              <span>{proposalDisplaySourceRun(item) || "--"}</span>
-            </article>
-            <article className={styles.relatedRow}>
-              <strong>candidate_id</strong>
-              <span>{item.id}</span>
-            </article>
-            <article className={styles.relatedRow}>
-              <strong>{t("proposalUpdatedAt")}</strong>
-              <span>{compactTimestamp(item.updatedAt)}</span>
-            </article>
-            <article className={styles.relatedRow}>
-              <strong>{t("proposalLayer")}</strong>
-              <span>{item.outcomeSemantics.proposalStatusLabel}</span>
-            </article>
-            <article className={styles.relatedRow}>
-              <strong>{t("runtimeLayer")}</strong>
-              <span>{item.outcomeSemantics.runtimeEffectLabel}</span>
-            </article>
-            <article className={styles.relatedRow}>
-              <strong>{t("targetLabelTitle")}</strong>
-              <span>{item.targetLabel || item.candidateType || item.targetKey || "--"}</span>
-            </article>
-            <article className={styles.relatedRow}>
-              <strong>{t("availableActions")}</strong>
-              <span>{formatAvailableActions(item.availableActions)}</span>
-            </article>
-          </div>
-          <VTooltip content={item.outcomeSemantics.runtimeExplanation} width="wide">
-            <p className={styles.noticeText} tabIndex={0}>
-              {displaySupervisedTechnicalText(item.outcomeSemantics.runtimeExplanation, item.decision, lang, decisionLabel)}
-            </p>
-          </VTooltip>
-        </div>
-
-        <div className={styles.detailSection}>
-          <h3>{t("currentStateTitle")}</h3>
-          <div className={styles.relatedList}>
-            <article className={styles.relatedRow}>
-              <strong>review_state</strong>
-              <span>{item.reviewState || "--"}</span>
-            </article>
-            <article className={styles.relatedRow}>
-              <strong>{t("riskLevel")}</strong>
-              <span>{item.riskLevel ? riskLabel(item.riskLevel) : "--"}</span>
-            </article>
-            <article className={styles.relatedRow}>
-              <strong>supervised_required</strong>
-              <span>{item.supervisedRequired ? "true" : "false"}</span>
-            </article>
-            <article className={styles.relatedRow}>
-              <strong>candidate_only</strong>
-              <span>{item.candidateOnly ? "true" : "false"}</span>
-            </article>
-            <article className={styles.relatedRow}>
-              <strong>auto_apply</strong>
-              <span>{item.autoApply ? "true" : "false"}</span>
-            </article>
-            <article className={styles.relatedRow}>
-              <strong>allowed_downstream_uses</strong>
-              <span>{allowedUses.length > 0 ? allowedUses.join(", ") : "--"}</span>
-            </article>
-            <article className={styles.relatedRow}>
-              <strong>blocked_downstream_uses</strong>
-              <span>{blockedUses.length > 0 ? blockedUses.join(", ") : "--"}</span>
-            </article>
-          </div>
-        </div>
-
-        <div className={styles.detailSection}>
-          <h3>{t("deleteAndCleanup")}</h3>
-          <div className={styles.relatedList}>
-            <article className={styles.relatedRow}>
-              <strong>{item.canDelete ? t("deletionAllowed") : t("deletionBlocked")}</strong>
-              <span>{item.canDelete ? t("deleteProposal") : item.deleteBlockReason || "--"}</span>
-            </article>
-          </div>
-        </div>
-
-        <div className={styles.detailSection}>
-          <h3>{t("evidencePaths")}</h3>
-          <div className={styles.relatedList}>
-            {evidenceRefs.length > 0 ? (
-              evidenceRefs.map((path) => (
-                <article key={path} className={styles.relatedRow}>
-                  <strong>evidence</strong>
-                  <span className={styles.pathText}>{path}</span>
-                </article>
-              ))
-            ) : (
-              <article className={styles.relatedRow}>
-                <strong>evidence</strong>
-                <span>--</span>
-              </article>
-            )}
-            {item.sourceExperienceId ? (
-              <article className={styles.relatedRow}>
-                <strong>source_experience_id</strong>
-                <span>{item.sourceExperienceId}</span>
-              </article>
-            ) : null}
-            {item.sourceReflectionId ? (
-              <article className={styles.relatedRow}>
-                <strong>source_reflection_id</strong>
-                <span>{item.sourceReflectionId}</span>
-              </article>
-            ) : null}
-            {item.txnId ? (
-              <article className={styles.relatedRow}>
-                <strong>txn_id</strong>
-                <span>{item.txnId}</span>
-              </article>
-            ) : null}
-          </div>
-        </div>
-
-        <div className={styles.detailSection}>
-          <div className={styles.rawBlockStack}>
-            {renderRawJson("candidate_payload", item.payload ?? null)}
-            {renderRawJson("provenance", item.provenance ?? null)}
-          </div>
-        </div>
-      </>
-    );
-  }
 
   return (
     <div
@@ -2752,919 +2503,241 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
             onKeyDown={handleLiveRunResizeKeyDown}
           />
 
-          <VSurface
-            as="section"
-            className={`${styles.surface} ${styles.ioSurface} ${styles.dashboardIo}`}
-            elevation="panel"
-            padding="none"
-            tone="panel"
-          >
-              <div className={styles.surfaceHeaderCompact}>
-                <div>
-                  <p className={styles.eyebrow}>
-                    {!supervisedWorkflowRun
-                      ? lang === "zh" ? "运行前计划" : "Run plan"
-                      : supervisedApprovalSelected
-                      ? supervisedWorkflowStepLabel(supervisedSelectedWorkflowStep, lang)
-                      : lang === "zh" ? "Agent 对话" : "Agent conversations"}
-                  </p>
-                  {(supervisedApprovalSelected ? selectedWorkflowTaskSummary : supervisedSelectedAgentTaskSummary) ? (
-                    <VTooltip
-                      content={supervisedApprovalSelected ? selectedWorkflowTaskSummary : supervisedSelectedAgentTaskSummary}
-                      width="wide"
-                    >
-                      <h2 className={`${styles.sectionTitle} ${styles.truncateText}`} tabIndex={0}>
-                        {supervisedApprovalSelected
-                          ? supervisedSelectedWorkflowStep.label || t("currentCaseOutput")
-                          : !supervisedWorkflowRun
-                            ? lang === "zh" ? "本轮监督进化" : "Supervised evolution run"
-                          : supervisedSelectedAgentMember?.name || runRoleLabel(supervisedSelectedAgentRole)}
-                      </h2>
-                    </VTooltip>
-                  ) : (
-                    <h2 className={`${styles.sectionTitle} ${styles.truncateText}`}>
-                      {supervisedApprovalSelected
-                        ? supervisedSelectedWorkflowStep.label || t("currentCaseOutput")
-                        : !supervisedWorkflowRun
-                          ? lang === "zh" ? "本轮监督进化" : "Supervised evolution run"
-                        : supervisedSelectedAgentMember?.name || runRoleLabel(supervisedSelectedAgentRole)}
-                    </h2>
-                  )}
-                </div>
-                <div className={styles.liveStatusRow}>
-                  {supervisedWorkflowRun && !supervisedApprovalSelected ? (
-                    <span className={styles.secondaryPill}>{runRoleLabel(supervisedSelectedAgentRole)}</span>
-                  ) : null}
-                  <span className={styles.secondaryPill}>
-                    {!supervisedWorkflowRun
-                      ? lang === "zh" ? "未开始" : "Not started"
-                      : supervisedApprovalSelected
-                      ? statusLabel(supervisedSelectedWorkflowStep.status)
-                      : statusLabel(
-                        supervisedSelectedAgentMember?.conversationSession?.status
-                        || supervisedSelectedAgentMember?.status
-                        || "idle",
-                      )}
-                  </span>
-                  {monitoredRun?.currentCaseScenario && supervisedSelectedAgentRole === normalizedSupervisedRuntimeRole ? (
-                    <span className={styles.secondaryPill}>{monitoredRun.currentCaseScenario}</span>
-                  ) : null}
-                  {monitoredRun?.currentCaseMode && supervisedSelectedAgentRole === normalizedSupervisedRuntimeRole ? (
-                    <span className={styles.secondaryPill}>{monitoredRun.currentCaseMode}</span>
-                  ) : null}
-                </div>
-              </div>
-
-              <div className={styles.liveIoPane}>
-                {!supervisedWorkflowRun ? renderSupervisedRunPlan() : supervisedApprovalSelected ? (
-                  <SupervisedApprovalDecisionPanel
-                    run={reviewCandidateWorktree}
-                    lang={lang}
-                    pending={approvalWorktreeActionMutation.isPending}
-                    error={approvalWorktreeActionMutation.error?.message ?? ""}
-                    onAction={(runId, action) => approvalWorktreeActionMutation.mutate({ runId, action })}
-                  />
-                ) : (
-                  <SupervisedAgentConversationPanel
-                    members={supervisedRunMembers}
-                    selectedRole={supervisedSelectedAgentRole}
-                    activeRole={supervisedActiveAgentRole}
-                    fallbackMessages={supervisedSelectedAgentFallbackMessages}
-                    taskSummary={supervisedSelectedAgentTaskSummary}
-                    supplementalContent={
-                      supervisedSelectedAgentRole === normalizedSupervisedRuntimeRole
-                        ? supervisedLiveConversationSupplement
-                        : undefined
-                    }
-                    isLive={supervisedRunIsLive}
-                    lang={lang}
-                    roleLabel={runRoleLabel}
-                    roleDescription={supervisedAgentRoleDescription}
-                    statusLabel={statusLabel}
-                    onSelectRole={handleSupervisedAgentSelect}
-                    onFollowLive={handleFollowSupervisedAgent}
-                  />
-                )}
-              </div>
-
-              <PaneHeightResizeHandle
-                label={resizeLiveIoLabel}
-                valueNow={liveIoHeight}
-                valueMin={EVOLUTION_LIVE_IO_HEIGHT_PANE.minHeight}
-                valueMax={EVOLUTION_LIVE_IO_HEIGHT_PANE.maxHeight}
-                active={evolutionHeightDraggingPaneId === "live-io"}
-                className={styles.liveIoResizeHandle}
-                onPointerDown={handleLiveIoResizeStart}
-                onKeyDown={handleLiveIoResizeKeyDown}
-              />
-          </VSurface>
+          <EvolutionSupervisedLiveIoPanel
+            eyebrow={
+              !supervisedWorkflowRun
+                ? (lang === "zh" ? "运行前计划" : "Run plan")
+                : supervisedApprovalSelected
+                  ? supervisedWorkflowStepLabel(supervisedSelectedWorkflowStep, lang)
+                  : (lang === "zh" ? "Agent 对话" : "Agent conversations")
+            }
+            title={
+              supervisedApprovalSelected
+                ? supervisedSelectedWorkflowStep.label || t("currentCaseOutput")
+                : !supervisedWorkflowRun
+                  ? (lang === "zh" ? "本轮监督进化" : "Supervised evolution run")
+                  : supervisedSelectedAgentMember?.name || runRoleLabel(supervisedSelectedAgentRole)
+            }
+            titleTooltip={
+              (supervisedApprovalSelected ? selectedWorkflowTaskSummary : supervisedSelectedAgentTaskSummary) || undefined
+            }
+            statusPills={[
+              ...(supervisedWorkflowRun && !supervisedApprovalSelected
+                ? [runRoleLabel(supervisedSelectedAgentRole)]
+                : []),
+              !supervisedWorkflowRun
+                ? (lang === "zh" ? "未开始" : "Not started")
+                : supervisedApprovalSelected
+                  ? statusLabel(supervisedSelectedWorkflowStep.status)
+                  : statusLabel(
+                    supervisedSelectedAgentMember?.conversationSession?.status
+                    || supervisedSelectedAgentMember?.status
+                    || "idle",
+                  ),
+              ...(monitoredRun?.currentCaseScenario && supervisedSelectedAgentRole === normalizedSupervisedRuntimeRole
+                ? [monitoredRun.currentCaseScenario]
+                : []),
+              ...(monitoredRun?.currentCaseMode && supervisedSelectedAgentRole === normalizedSupervisedRuntimeRole
+                ? [monitoredRun.currentCaseMode]
+                : []),
+            ]}
+            body={
+              !supervisedWorkflowRun
+                ? supervisedRunPlanBody
+                : supervisedApprovalSelected
+                  ? (
+                    <SupervisedApprovalDecisionPanel
+                      run={reviewCandidateWorktree}
+                      lang={lang}
+                      pending={approvalWorktreeActionMutation.isPending}
+                      error={approvalWorktreeActionMutation.error?.message ?? ""}
+                      onAction={(runId, action) => approvalWorktreeActionMutation.mutate({ runId, action })}
+                    />
+                  )
+                  : (
+                    <SupervisedAgentConversationPanel
+                      members={supervisedRunMembers}
+                      selectedRole={supervisedSelectedAgentRole}
+                      activeRole={supervisedActiveAgentRole}
+                      fallbackMessages={supervisedSelectedAgentFallbackMessages}
+                      taskSummary={supervisedSelectedAgentTaskSummary}
+                      supplementalContent={
+                        supervisedSelectedAgentRole === normalizedSupervisedRuntimeRole
+                          ? supervisedLiveConversationSupplement
+                          : undefined
+                      }
+                      isLive={supervisedRunIsLive}
+                      lang={lang}
+                      roleLabel={runRoleLabel}
+                      roleDescription={supervisedAgentRoleDescription}
+                      statusLabel={statusLabel}
+                      onSelectRole={handleSupervisedAgentSelect}
+                      onFollowLive={handleFollowSupervisedAgent}
+                    />
+                  )
+            }
+            height={liveIoHeight}
+            heightMin={EVOLUTION_LIVE_IO_HEIGHT_PANE.minHeight}
+            heightMax={EVOLUTION_LIVE_IO_HEIGHT_PANE.maxHeight}
+            heightDragging={evolutionHeightDraggingPaneId === "live-io"}
+            heightResizeLabel={resizeLiveIoLabel}
+            onHeightPointerDown={handleLiveIoResizeStart}
+            onHeightKeyDown={handleLiveIoResizeKeyDown}
+          />
 
         </div>
       ) : null}
 
       {activeTrack === "supervised" && evolutionView === "runs" ? (
-        <div className={styles.viewStack}>
-          <VSection
-            className={`${styles.surface} ${styles.runsCommandStrip}`}
-            eyebrow={t("recentRunPerformance")}
-            title={t("runList")}
-            actions={(
-              <div className={styles.filterSegmented}>
-                {(["all", "success", "failed"] as const).map((filter) => (
-                  <VButton
-                    key={filter}
-                    type="button"
-                    className={
-                      runFilter === filter
-                        ? `${styles.filterButton} ${styles.filterButtonActive}`
-                        : styles.filterButton
-                    }
-                    onClick={() => setRunFilter(filter)}
-                  >
-                    {filter === "all" ? t("allRuns") : supervisedRunBucketLabel(filter, lang, statusLabel)}
-                  </VButton>
-                ))}
-              </div>
-            )}
-          >
-
-            <div className={styles.runsCommandMetrics}>
-              <article className={styles.compactFact}>
-                <span>{t("runs")}</span>
-                <strong>{hasRuns ? `${filteredRuns.length} / ${runs.length}` : "0 / 0"}</strong>
-              </article>
-              <article className={styles.compactFact}>
-                <span>{supervisedRunBucketLabel("success", lang, statusLabel)}</span>
-                <strong>{runSuccessCount}</strong>
-              </article>
-              <article className={styles.compactFact}>
-                <span>{supervisedRunBucketLabel("failed", lang, statusLabel)}</span>
-                <strong>{runFailedCount}</strong>
-              </article>
-              <article className={styles.compactFact}>
-                <span>{t("pendingReview")}</span>
-                <strong>{runPendingCount}</strong>
-              </article>
-              <article className={styles.compactFact}>
-                <span>{t("deletionAllowed")}</span>
-                <strong>{runDeletableCount}</strong>
-              </article>
-              <article className={styles.compactFact}>
-                <span>{t("selectedCount")}</span>
-                <strong>{selectedRunIds.length}</strong>
-              </article>
-            </div>
-          </VSection>
-
-          <Suspense fallback={<p className={styles.noticeText}>{t("loading")}</p>}>
-            <EvolutionRunRecordsPanel
-              className={styles.runsWorkspace}
-              style={runsWorkspaceStyle}
-              lang={lang}
-              labels={{ t, statusLabel, decisionLabel, riskLabel, proposalActionLabel }}
-              separator={(
-                <PaneCollapseHandle
-                  side="left"
-                  collapsed={runsQueueCollapsed}
-                  separatorLabel={resizeRunsQueueLabel}
-                  collapseLabel={lang === "zh" ? "收起运行列表" : "Collapse run list"}
-                  expandLabel={lang === "zh" ? "展开运行列表" : "Expand run list"}
-                  className={styles.resizeHandle}
-                  active={evolutionDraggingPaneId === "runs-queue"}
-                  valueNow={runsQueueWidth}
-                  valueMin={EVOLUTION_RUNS_QUEUE_PANE.minWidth}
-                  valueMax={EVOLUTION_RUNS_QUEUE_PANE.maxWidth}
-                  onToggle={() => setRunsQueueCollapsed((current) => !current)}
-                  onPointerDown={handleRunsResizeStart}
-                  onKeyDown={handleRunsResizeKeyDown}
-                />
-              )}
-              queueCollapsed={runsQueueCollapsed}
-              filteredRuns={filteredRuns}
-              hasRuns={hasRuns}
-              hasFilteredRuns={hasFilteredRuns}
-              filteredRunsEmpty={filteredRunsEmpty}
-              runHeaderMessage={runHeaderMessage}
-              selectedRun={selectedRun}
-              selectedRunIds={selectedRunIds}
-              visibleDeletableRunCount={visibleDeletableRunIds.length}
-              allVisibleDeletableRunsSelected={allVisibleDeletableRunsSelected}
-              relatedLibraryItems={relatedLibraryItems}
-              relatedPendingItems={relatedPendingItems}
-              relatedProposalCount={relatedProposalCount}
-              runLocked={runLocked}
-              runRecordsFeedback={runRecordsFeedback}
-              deleteRunRecordError={deleteRunRecordMutation.error?.message ?? ""}
-              bulkDeleteRunRecordsError={bulkDeleteRunRecordsMutation.error?.message ?? ""}
-              bulkDeleteRunRecordsPending={bulkDeleteRunRecordsMutation.isPending}
-              deleteRunRecordPending={deleteRunRecordMutation.isPending}
-              actionFeedback={actionFeedback}
-              actionError={actionMutation.error?.message ?? ""}
-              actionPending={actionMutation.isPending}
-              libraryFeedback={libraryFeedback}
-              deleteProposalError={deleteProposalMutation.error?.message ?? ""}
-              deleteProposalPending={deleteProposalMutation.isPending}
-              onSelectVisibleRunRecords={selectVisibleRunRecords}
-              onClearRunSelection={() => setSelectedRunIds([])}
-              onBulkDeleteRunRecords={triggerBulkRunRecordDelete}
-              onReturnToOverview={() => goToSupervisedView("live")}
-              onShowAllRuns={() => setRunFilter("all")}
-              onSelectRun={setSelectedRunId}
-              onToggleRunSelection={toggleRunSelection}
-              onRunAction={triggerRunAction}
-              onOpenProposal={openProposalFromRun}
-              onDeleteProposal={triggerProposalDelete}
-              onDeleteRunRecord={triggerRunRecordDelete}
+        <EvolutionSupervisedRunsView
+          lang={lang}
+          labels={{ t, statusLabel, decisionLabel, riskLabel, proposalActionLabel }}
+          runFilter={runFilter}
+          onRunFilterChange={setRunFilter}
+          filteredRunsCount={filteredRuns.length}
+          totalRunsCount={runs.length}
+          hasRuns={hasRuns}
+          runSuccessCount={runSuccessCount}
+          runFailedCount={runFailedCount}
+          runPendingCount={runPendingCount}
+          runDeletableCount={runDeletableCount}
+          selectedRunCount={selectedRunIds.length}
+          runsWorkspaceStyle={runsWorkspaceStyle}
+          separator={(
+            <PaneCollapseHandle
+              side="left"
+              collapsed={runsQueueCollapsed}
+              separatorLabel={resizeRunsQueueLabel}
+              collapseLabel={lang === "zh" ? "收起运行列表" : "Collapse run list"}
+              expandLabel={lang === "zh" ? "展开运行列表" : "Expand run list"}
+              className={styles.resizeHandle}
+              active={evolutionDraggingPaneId === "runs-queue"}
+              valueNow={runsQueueWidth}
+              valueMin={EVOLUTION_RUNS_QUEUE_PANE.minWidth}
+              valueMax={EVOLUTION_RUNS_QUEUE_PANE.maxWidth}
+              onToggle={() => setRunsQueueCollapsed((current) => !current)}
+              onPointerDown={handleRunsResizeStart}
+              onKeyDown={handleRunsResizeKeyDown}
             />
-          </Suspense>
-        </div>
+          )}
+          queueCollapsed={runsQueueCollapsed}
+          filteredRuns={filteredRuns}
+          hasFilteredRuns={hasFilteredRuns}
+          filteredRunsEmpty={filteredRunsEmpty}
+          runHeaderMessage={runHeaderMessage}
+          selectedRun={selectedRun}
+          selectedRunIds={selectedRunIds}
+          visibleDeletableRunCount={visibleDeletableRunIds.length}
+          allVisibleDeletableRunsSelected={allVisibleDeletableRunsSelected}
+          relatedLibraryItems={relatedLibraryItems}
+          relatedPendingItems={relatedPendingItems}
+          relatedProposalCount={relatedProposalCount}
+          runLocked={runLocked}
+          runRecordsFeedback={runRecordsFeedback}
+          deleteRunRecordError={deleteRunRecordMutation.error?.message ?? ""}
+          bulkDeleteRunRecordsError={bulkDeleteRunRecordsMutation.error?.message ?? ""}
+          bulkDeleteRunRecordsPending={bulkDeleteRunRecordsMutation.isPending}
+          deleteRunRecordPending={deleteRunRecordMutation.isPending}
+          actionFeedback={actionFeedback}
+          actionError={actionMutation.error?.message ?? ""}
+          actionPending={actionMutation.isPending}
+          libraryFeedback={libraryFeedback}
+          deleteProposalError={deleteProposalMutation.error?.message ?? ""}
+          deleteProposalPending={deleteProposalMutation.isPending}
+          onSelectVisibleRunRecords={selectVisibleRunRecords}
+          onClearRunSelection={() => setSelectedRunIds([])}
+          onBulkDeleteRunRecords={triggerBulkRunRecordDelete}
+          onReturnToOverview={() => goToSupervisedView("live")}
+          onShowAllRuns={() => setRunFilter("all")}
+          onSelectRun={setSelectedRunId}
+          onToggleRunSelection={toggleRunSelection}
+          onRunAction={triggerRunAction}
+          onOpenProposal={openProposalFromRun}
+          onDeleteProposal={triggerProposalDelete}
+          onDeleteRunRecord={triggerRunRecordDelete}
+        />
       ) : null}
 
       {activeTrack === "supervised" && evolutionView === "library" ? (
-        <div className={`${styles.viewStack} ${styles.libraryViewStack}`}>
-          <div className={styles.librarySummaryBar}>
-            <section className={`${styles.surface} ${styles.summarySurface}`}>
-              <div className={styles.surfaceHeaderCompact}>
-                <div>
-                  <p className={styles.eyebrow}>{t("recentLibraryAdditions")}</p>
-                  <h2 className={styles.sectionTitle}>{t("library")}</h2>
-                </div>
-                <div className={styles.filterSegmented}>
-                  {(["items", "pending"] as const).map((view) => (
-                    <VButton
-                      key={view}
-                      type="button"
-                      className={
-                        libraryView === view
-                          ? `${styles.filterButton} ${styles.filterButtonActive}`
-                          : styles.filterButton
-                      }
-                      onClick={() => setLibraryView(view)}
-                    >
-                      {view === "items" ? t("libraryItems") : t("pendingReview")}
-                    </VButton>
-                  ))}
-                </div>
-              </div>
-              <div className={styles.summaryMetricStrip}>
-                <article className={styles.stripItem}>
-                  <span>{t("libraryItems")}</span>
-                  <strong>{libraryItems.length}</strong>
-                </article>
-                <article className={styles.stripItem}>
-                  <span>{t("pendingReview")}</span>
-                  <strong>{pendingItems.length}</strong>
-                </article>
-                <article className={styles.stripItem}>
-                  <span>{t("intakeMode")}</span>
-                  <strong>{intakeModeLabel(currentIntakeMode)}</strong>
-                </article>
-                <article className={styles.stripItem}>
-                  <span>{t("selectedCount")}</span>
-                  <strong>{selectedProposalRunIds.length}</strong>
-                </article>
-              </div>
-              <p className={styles.noticeText}>{t("batchDeleteHint")}</p>
-            </section>
-
-            <section className={`${styles.surface} ${styles.summarySurface}`}>
-              <div className={styles.surfaceHeaderCompact}>
-                <div>
-                  <p className={styles.eyebrow}>{t("selectedCount")}</p>
-                  <h2 className={styles.sectionTitle}>
-                    {libraryView === "items" ? t("libraryItems") : t("pendingReview")}
-                  </h2>
-                </div>
-                <span className={styles.secondaryPill}>{selectedProposalRunIds.length}</span>
-              </div>
-              <p className={styles.statusLead}>{libraryHeaderMessage}</p>
-              <div className={styles.statusMetricGrid}>
-                <article className={styles.metricTile}>
-                  <span>{t("filterResults")}</span>
-                  <strong>{`${visibleLibraryEntries.length} / ${currentLibraryEntries.length}`}</strong>
-                </article>
-                <article className={styles.metricTile}>
-                  <span>{t("selectedCount")}</span>
-                  <strong>{selectedProposalRunIds.length}</strong>
-                </article>
-                <article className={styles.metricTile}>
-                  <span>{t("deletionAllowed")}</span>
-                  <strong>{libraryDeletableCount}</strong>
-                </article>
-                <article className={styles.metricTile}>
-                  <span>{t("deletionBlocked")}</span>
-                  <strong>{libraryBlockedCount}</strong>
-                </article>
-              </div>
-              {hasLibraryFilters ? (
-                <div className={styles.actionRow}>
-                  <VButton
-                    type="button"
-                    className={styles.inlineAction}
-                    onClick={clearLibraryFilters}
-                  >
-                    {t("clearFilters")}
-                  </VButton>
-                </div>
-              ) : null}
-            </section>
-
-            <section className={`${styles.surface} ${styles.summarySurface}`}>
-              <div className={styles.surfaceHeaderCompact}>
-                <div>
-                  <p className={styles.eyebrow}>{t("proposalStatus")}</p>
-                  <h2 className={styles.sectionTitle}>
-                    {selectedProposalSummary?.title
-                      || (libraryView === "items" ? t("libraryItems") : t("pendingReview"))}
-                  </h2>
-                </div>
-                <span className={selectedProposalSummary ? styles.statusPill : styles.secondaryPill}>
-                  {selectedProposalSummary
-                    ? selectedProposalSummary.outcomeSemantics.proposalStatusLabel
-                    : intakeModeLabel(currentIntakeMode)}
-                </span>
-              </div>
-              <p className={styles.statusLead}>
-                {selectedProposalSummary
-                  ? (selectedProposalSummary.summary || selectedProposalSummary.reason || selectedProposalSummary.headline)
-                  : libraryHeaderMessage}
-              </p>
-              <div className={styles.relatedList}>
-                <article className={styles.relatedRow}>
-                  <strong>{t("latestRun")}</strong>
-                  <span>{selectedProposalDisplaySourceRun || latestRun?.id || "--"}</span>
-                </article>
-                <article className={styles.relatedRow}>
-                  <strong>{t("intakeMode")}</strong>
-                  <span>{intakeModeLabel(currentIntakeMode)}</span>
-                </article>
-              </div>
-              {selectedProposalSummary && selectedProposalCanOpenSourceRun ? (
-                <div className={styles.actionRow}>
-                  <VButton
-                    type="button"
-                    className={styles.inlineAction}
-                    onClick={() => openRun(selectedProposalSummary.sourceRun)}
-                  >
-                    <ArrowUpRight size={15} />
-                    {t("openSourceRun")}
-                  </VButton>
-                </div>
-              ) : null}
-            </section>
-          </div>
-
-          <div className={styles.masterDetail} style={libraryWorkspaceStyle}>
-            <VSurface
-              as="section"
-              className={
-                libraryListCollapsed
-                  ? `${styles.surface} ${styles.listPanel} ${styles.paneCollapsed}`
-                  : `${styles.surface} ${styles.listPanel}`
-              }
-              aria-hidden={libraryListCollapsed}
-              elevation="panel"
-              padding="none"
-              tone="rail"
-            >
-              <>
-                <div className={styles.bulkToolbar}>
-                  <div className={styles.bulkToolbarText}>
-                    <strong>{t("selectedCount")}</strong>
-                    <span>{selectedProposalRunIds.length}</span>
-                  </div>
-                  <div className={styles.actionRow}>
-                    <VButton
-                      type="button"
-                      className={styles.inlineAction}
-                      isDisabled={selectedProposalRunIds.length === 0}
-                      onClick={() => setSelectedProposalRunIds([])}
-                    >
-                      {t("clearSelection")}
-                    </VButton>
-                    <VButton
-                      type="button"
-                      variant="danger"
-                      className={styles.inlineAction}
-                      isDisabled={selectedProposalRunIds.length === 0 || bulkDeleteMutation.isPending}
-                      onClick={triggerBulkDelete}
-                    >
-                      <Trash2 size={15} />
-                      {t("deleteSelected")}
-                    </VButton>
-                  </div>
-                </div>
-                <div className={styles.libraryFilters}>
-                  <div className={styles.filterRow}>
-                    <label className={styles.filterField}>
-                      <span>{t("proposalTarget")}</span>
-                      <VInput
-                        type="text"
-                        className={styles.textInput}
-                        value={librarySearchInput}
-                        placeholder={t("proposalSearchPlaceholder")}
-                        onChange={(event) => setLibrarySearchInput(event.target.value)}
-                      />
-                    </label>
-                    <div className={styles.filterField}>
-                      <span>{t("filterByStatus")}</span>
-                      <VStringSelect
-                        ariaLabel={t("filterByStatus")}
-                        className={styles.selectInput}
-                        value={libraryStatusFilter}
-                        options={LIBRARY_STATUS_FILTERS.map((status) => ({
-                          value: status,
-                          label: status === "all" ? t("filterAll") : statusLabel(status),
-                        }))}
-                        onValueChange={(value) => setLibraryStatusFilter(value as LibraryStatusFilter)}
-                      />
-                    </div>
-                    <div className={styles.filterField}>
-                      <span>{t("filterByDeleteState")}</span>
-                      <VStringSelect
-                        ariaLabel={t("filterByDeleteState")}
-                        className={styles.selectInput}
-                        value={libraryDeleteFilter}
-                        options={[
-                          { value: "all", label: t("filterAll") },
-                          { value: "deletable", label: t("filterDeletableOnly") },
-                          { value: "blocked", label: t("filterBlockedOnly") },
-                        ]}
-                        onValueChange={(value) => setLibraryDeleteFilter(value as LibraryDeleteFilter)}
-                      />
-                    </div>
-                  </div>
-                  <div className={styles.filterMeta}>
-                    <div className={styles.selectionSummary}>
-                      <span>{t("filterResults")}</span>
-                      <strong>{visibleLibraryEntries.length} / {currentLibraryEntries.length}</strong>
-                    </div>
-                    {hasLibraryFilters ? (
-                      <VButton
-                        type="button"
-                        className={styles.inlineAction}
-                        onClick={clearLibraryFilters}
-                      >
-                        {t("clearFilters")}
-                      </VButton>
-                    ) : null}
-                  </div>
-                </div>
-                {libraryFeedback ? <p className={styles.feedbackText}>{libraryFeedback}</p> : null}
-                {bulkDeleteMutation.error ? <p className={styles.errorText}>{bulkDeleteMutation.error.message}</p> : null}
-                {libraryView === "items"
-                ? libraryItems.length === 0
-                  ? <VStateSurface className={styles.emptyState} title={t("emptyLibraryItems")} tone="empty" />
-                  : filteredLibraryItems.length === 0
-                    ? <VStateSurface className={styles.emptyState} title={t("noProposalMatches")} tone="empty" />
-                    : filteredLibraryItems.map((item) => (
-                      <article
-                        key={item.id}
-                        className={
-                          selectedLibraryItem?.id === item.id
-                            ? `${styles.proposalCard} ${styles.runItemActive}`
-                            : styles.proposalCard
-                        }
-                      >
-                        <div className={styles.selectionBar}>
-                          <VCheckbox
-                            className={styles.batchToggle}
-                            isDisabled={!item.canDelete}
-                            isSelected={proposalSelected(item.sourceRun)}
-                            onChange={() => toggleProposalSelection(item)}
-                          >
-                            {t("selectForBatchDelete")}
-                          </VCheckbox>
-                          <span className={item.canDelete ? styles.secondaryPill : styles.statusPill}>
-                            {item.canDelete ? t("deletionAllowed") : t("deletionBlocked")}
-                          </span>
-                        </div>
-                        <VButton
-                          type="button"
-                          contentLayout="plain"
-                          className={styles.proposalCardButton}
-                          onClick={() => setSelectedLibraryItemId(item.id)}
-                        >
-                          <div className={styles.listRowTop}>
-                            <strong>{item.title}</strong>
-                            <span className={styles.secondaryPill}>{item.outcomeSemantics.proposalStatusLabel}</span>
-                          </div>
-                          <div className={styles.metaRow}>
-                            <span>{displayDecisionLabel(item.decision)}</span>
-                            <span>{proposalDisplaySourceRun(item)}</span>
-                          </div>
-                          <p className={styles.cardHeadline}>{item.changeSummary || item.headline}</p>
-                          <p>{item.summary}</p>
-                          <div className={styles.cardFooter}>
-                            <span>{item.targetLabel || item.targetKey || "--"}</span>
-                            <span>{compactTimestamp(item.updatedAt)}</span>
-                          </div>
-                        </VButton>
-                      </article>
-                    ))
-                : pendingItems.length === 0
-                  ? <VStateSurface className={styles.emptyState} title={t("emptyPendingItems")} tone="empty" />
-                  : filteredPendingItems.length === 0
-                    ? <VStateSurface className={styles.emptyState} title={t("noProposalMatches")} tone="empty" />
-                    : filteredPendingItems.map((item) => (
-                      <article
-                        key={item.id}
-                        className={
-                          selectedPendingItem?.id === item.id
-                            ? `${styles.proposalCard} ${styles.runItemActive}`
-                            : styles.proposalCard
-                        }
-                      >
-                        <div className={styles.selectionBar}>
-                          <VCheckbox
-                            className={styles.batchToggle}
-                            isDisabled={!item.canDelete}
-                            isSelected={proposalSelected(item.sourceRun)}
-                            onChange={() => toggleProposalSelection(item)}
-                          >
-                            {t("selectForBatchDelete")}
-                          </VCheckbox>
-                          <span className={item.canDelete ? styles.secondaryPill : styles.statusPill}>
-                            {item.canDelete ? t("deletionAllowed") : t("deletionBlocked")}
-                          </span>
-                        </div>
-                        <VButton
-                          type="button"
-                          contentLayout="plain"
-                          className={styles.proposalCardButton}
-                          onClick={() => setSelectedPendingItemId(item.id)}
-                        >
-                          <div className={styles.listRowTop}>
-                            <strong>{item.title}</strong>
-                            <span className={styles.secondaryPill}>{item.outcomeSemantics.proposalStatusLabel}</span>
-                          </div>
-                          <div className={styles.metaRow}>
-                            <span>{displayDecisionLabel(item.decision)}</span>
-                            <span>{proposalDisplaySourceRun(item)}</span>
-                          </div>
-                          <p className={styles.cardHeadline}>{item.changeSummary || item.headline}</p>
-                          <p>{item.reason || item.summary}</p>
-                          <div className={styles.cardFooter}>
-                            <span>{item.targetLabel || item.targetKey || "--"}</span>
-                            <span>{compactTimestamp(item.updatedAt)}</span>
-                          </div>
-                        </VButton>
-                      </article>
-                    ))}
-              </>
-            </VSurface>
-
-            <PaneCollapseHandle
-              side="left"
-              collapsed={libraryListCollapsed}
-              separatorLabel={resizeLibraryListLabel}
-              collapseLabel={lang === "zh" ? "收起提案列表" : "Collapse proposal list"}
-              expandLabel={lang === "zh" ? "展开提案列表" : "Expand proposal list"}
-              className={styles.resizeHandle}
-              active={evolutionDraggingPaneId === "library-list"}
-              valueNow={libraryListWidth}
-              valueMin={EVOLUTION_LIBRARY_LIST_PANE.minWidth}
-              valueMax={EVOLUTION_LIBRARY_LIST_PANE.maxWidth}
-              onToggle={() => setLibraryListCollapsed((current) => !current)}
-              onPointerDown={handleLibraryResizeStart}
-              onKeyDown={handleLibraryResizeKeyDown}
-            />
-
-            <VSurface
-              as="section"
-              className={`${styles.surface} ${styles.detailPanel}`}
-              elevation="panel"
-              padding="none"
-              tone="panel"
-            >
-              {selectedProposalSummary ? (
-                selectedProposalIsSelfCandidate ? (
-                  renderSelfEvolutionCandidateDetail(selectedProposalSummary)
-                ) : proposalDetailQuery.data ? (
-                  <>
-                    <div className={styles.detailHeader}>
-                      <div>
-                        <p className={styles.eyebrow}>
-                          {libraryView === "items" ? t("libraryItems") : t("pendingReview")}
-                        </p>
-                        <h2 className={styles.detailTitle}>{proposalDetailQuery.data.title}</h2>
-                      </div>
-                      <span className={styles.statusPill}>
-                        {proposalDetailQuery.data.outcomeSemantics.proposalStatusLabel}
-                      </span>
-                    </div>
-
-                    <div className={styles.detailSection}>
-                      <h3>{t("reviewHeadline")}</h3>
-                      <p className={styles.reviewLead}>{proposalDetailQuery.data.review.headline}</p>
-                      <p>{proposalDetailQuery.data.review.changeSummary}</p>
-                    </div>
-
-                    <div className={styles.detailSection}>
-                      <div className={styles.sectionHeadingRow}>
-                        <h3>{t("editProposalTitle")}</h3>
-                        {proposalEditOpen ? (
-                          <div className={styles.actionRow}>
-                            <VButton
-                              type="button"
-                              className={styles.inlineAction}
-                              isDisabled={updateProposalMutation.isPending}
-                              onClick={() => cancelProposalEdit(proposalDetailQuery.data)}
-                            >
-                              <X size={15} />
-                              {t("cancelEdit")}
-                            </VButton>
-                            <VButton
-                              type="button"
-                              variant="primary"
-                              className={styles.inlineAction}
-                              isDisabled={!proposalDetailQuery.data.canEdit || updateProposalMutation.isPending}
-                              onClick={() => triggerProposalUpdate(proposalDetailQuery.data.sourceRun)}
-                            >
-                              <Save size={15} />
-                              {updateProposalMutation.isPending ? t("saving") : t("saveProposalEdit")}
-                            </VButton>
-                          </div>
-                        ) : (
-                          <VButton
-                            type="button"
-                            className={styles.inlineAction}
-                            isDisabled={!proposalDetailQuery.data.canEdit}
-                            onClick={() => beginProposalEdit(proposalDetailQuery.data)}
-                          >
-                            <Pencil size={15} />
-                            {t("editProposal")}
-                          </VButton>
-                        )}
-                      </div>
-                      {!proposalDetailQuery.data.canEdit ? (
-                        <p className={styles.noticeText}>{proposalDetailQuery.data.editBlockReason || t("proposalEditLocked")}</p>
-                      ) : null}
-                      {proposalDetailQuery.data.proposal.editedAt ? (
-                        <p className={styles.noticeText}>
-                          {t("proposalEditedAt")}: {compactTimestamp(proposalDetailQuery.data.proposal.editedAt)}
-                        </p>
-                      ) : null}
-                      {proposalEditOpen ? (
-                        <div className={styles.proposalEditGrid}>
-                          <label className={styles.formField}>
-                            <span>{t("proposalImprovementType")}</span>
-                            <VInput
-                              className={styles.textInput}
-                              value={proposalEditDraft.improvementType}
-                              onChange={(event) => updateProposalEditDraft("improvementType", event.target.value)}
-                            />
-                          </label>
-                          <label className={styles.formField}>
-                            <span>{t("proposalExpectedEffect")}</span>
-                            <VTextarea
-                              className={styles.textArea}
-                              rows={3}
-                              value={proposalEditDraft.expectedEffect}
-                              onChange={(event) => updateProposalEditDraft("expectedEffect", event.target.value)}
-                            />
-                          </label>
-                          <label className={styles.formField}>
-                            <span>{t("proposalDraftSummary")}</span>
-                            <VTextarea
-                              className={styles.textArea}
-                              rows={3}
-                              value={proposalEditDraft.summary}
-                              onChange={(event) => updateProposalEditDraft("summary", event.target.value)}
-                            />
-                          </label>
-                          <label className={styles.formField}>
-                            <span>{t("proposalCandidatePrompt")}</span>
-                            <VTextarea
-                              className={styles.textArea}
-                              rows={6}
-                              value={proposalEditDraft.candidatePrompt}
-                              onChange={(event) => updateProposalEditDraft("candidatePrompt", event.target.value)}
-                            />
-                          </label>
-                          <label className={styles.formField}>
-                            <span>{t("proposalBaselinePrompt")}</span>
-                            <VTextarea
-                              className={styles.textArea}
-                              rows={5}
-                              value={proposalEditDraft.baselinePrompt}
-                              onChange={(event) => updateProposalEditDraft("baselinePrompt", event.target.value)}
-                            />
-                          </label>
-                          <label className={styles.formField}>
-                            <span>{t("proposalEditNote")}</span>
-                            <VInput
-                              className={styles.textInput}
-                              value={proposalEditDraft.editNote}
-                              onChange={(event) => updateProposalEditDraft("editNote", event.target.value)}
-                            />
-                          </label>
-                        </div>
-                      ) : (
-                        <div className={styles.relatedList}>
-                          <article className={styles.relatedRow}>
-                            <strong>{t("proposalImprovementType")}</strong>
-                            <span>{proposalDetailQuery.data.proposal.improvementType || "--"}</span>
-                          </article>
-                          <article className={styles.relatedRow}>
-                            <strong>{t("proposalExpectedEffect")}</strong>
-                            <span>{proposalDetailQuery.data.proposal.expectedEffect || "--"}</span>
-                          </article>
-                          <article className={styles.relatedRow}>
-                            <strong>{t("proposalDraftSummary")}</strong>
-                            <span>{proposalDetailQuery.data.proposal.summary || proposalDetailQuery.data.review.changeSummary || "--"}</span>
-                          </article>
-                        </div>
-                      )}
-                      {proposalEditFeedback ? <p className={styles.feedbackText}>{proposalEditFeedback}</p> : null}
-                      {updateProposalMutation.error ? <p className={styles.errorText}>{updateProposalMutation.error.message}</p> : null}
-                    </div>
-
-                    <div className={styles.detailSection}>
-                      <h3>{t("whatChangedTitle")}</h3>
-                      {renderReviewList(proposalDetailQuery.data.review.whatChanged)}
-                    </div>
-
-                    <div className={styles.detailSection}>
-                      <h3>{t("whyCreatedTitle")}</h3>
-                      {renderReviewList(proposalDetailQuery.data.review.whyCreated)}
-                    </div>
-
-                    <div className={styles.detailSection}>
-                      <h3>{t("currentStateTitle")}</h3>
-                      {renderReviewList([
-                        ...proposalDetailQuery.data.review.currentState,
-                        proposalDetailQuery.data.review.nextAction,
-                      ])}
-                    </div>
-
-                    <div className={styles.detailSection}>
-                      <h3>{t("resultLayersTitle")}</h3>
-                      <div className={styles.relatedList}>
-                        <article className={styles.relatedRow}>
-                          <strong>{t("sourceRun")}</strong>
-                          <span>{proposalDetailQuery.data.sourceRun}</span>
-                        </article>
-                        <article className={styles.relatedRow}>
-                          <strong>{t("proposalUpdatedAt")}</strong>
-                          <span>{compactTimestamp(proposalDetailQuery.data.updatedAt)}</span>
-                        </article>
-                        <article className={styles.relatedRow}>
-                          <strong>{t("runLayer")}</strong>
-                          <span>{proposalDetailQuery.data.runSemantics.runStatusLabel}</span>
-                        </article>
-                        <article className={styles.relatedRow}>
-                          <strong>{t("decision")}</strong>
-                          <span>
-                            {displayDecisionLabel(
-                              proposalDetailQuery.data.outcomeSemantics.decision || proposalDetailQuery.data.decision,
-                            )}
-                          </span>
-                        </article>
-                        <article className={styles.relatedRow}>
-                          <strong>{t("proposalLayer")}</strong>
-                          <span>{proposalDetailQuery.data.outcomeSemantics.proposalStatusLabel}</span>
-                        </article>
-                        <article className={styles.relatedRow}>
-                          <strong>{t("runtimeLayer")}</strong>
-                          <span>{proposalDetailQuery.data.outcomeSemantics.runtimeEffectLabel}</span>
-                        </article>
-                        <article className={styles.relatedRow}>
-                          <strong>{t("targetLabelTitle")}</strong>
-                          <span>
-                            {proposalDetailQuery.data.targetLabel
-                              || proposalDetailQuery.data.targetKey
-                              || "--"}
-                          </span>
-                        </article>
-                        <article className={styles.relatedRow}>
-                          <strong>{t("baselineScore")}</strong>
-                          <span>{proposalDetailQuery.data.supervised.baselineScore}</span>
-                        </article>
-                        <article className={styles.relatedRow}>
-                          <strong>{t("candidateScore")}</strong>
-                          <span>{proposalDetailQuery.data.supervised.candidateScore}</span>
-                        </article>
-                        <article className={styles.relatedRow}>
-                          <strong>{t("scoreDelta")}</strong>
-                          <span>{proposalDetailQuery.data.supervised.deltaScore}</span>
-                        </article>
-                        <article className={styles.relatedRow}>
-                          <strong>{t("riskLevel")}</strong>
-                          <span>{riskLabel(proposalDetailQuery.data.supervised.riskLevel)}</span>
-                        </article>
-                      </div>
-                      <VTooltip content={proposalDetailQuery.data.outcomeSemantics.runtimeExplanation} width="wide">
-                        <p className={styles.noticeText} tabIndex={0}>
-                          {displaySupervisedTechnicalText(
-                            proposalDetailQuery.data.outcomeSemantics.runtimeExplanation,
-                            proposalDetailQuery.data.decision,
-                            lang,
-                            decisionLabel,
-                          )}
-                        </p>
-                      </VTooltip>
-                      <VTooltip content={proposalDetailQuery.data.supervised.decisionReason} width="wide">
-                        <p tabIndex={0}>
-                          {displaySupervisedTechnicalText(
-                            proposalDetailQuery.data.supervised.decisionReason,
-                            proposalDetailQuery.data.decision,
-                            lang,
-                            decisionLabel,
-                          )}
-                        </p>
-                      </VTooltip>
-                      {proposalDetailQuery.data.supervised.riskReasons.length > 0 ? (
-                        <VTooltip content={proposalDetailQuery.data.supervised.riskReasons.join(" / ")} width="wide">
-                          <p tabIndex={0}>
-                            {displaySupervisedTechnicalText(
-                              proposalDetailQuery.data.supervised.riskReasons.join(" / "),
-                              proposalDetailQuery.data.decision,
-                              lang,
-                              decisionLabel,
-                            )}
-                          </p>
-                        </VTooltip>
-                      ) : null}
-                      {proposalDetailQuery.data.supervised.caseDiagnostics.length > 0 ? (
-                        <div className={styles.relatedList}>
-                          {proposalDetailQuery.data.supervised.caseDiagnostics.slice(0, 3).map((item) => (
-                            <article key={item.caseId || item.summary} className={styles.relatedRow}>
-                              <strong>{item.caseId || "--"}</strong>
-                              <span>{item.summary}</span>
-                              {item.caseType && item.caseType !== "static" ? <span>{item.caseType}</span> : null}
-                              {compactCaseObject(item.expectedFinalState) ? (
-                                <span>expected final: {compactCaseObject(item.expectedFinalState)}</span>
-                              ) : null}
-                              {compactCaseObject(item.expectedInfeasibleOutcome) ? (
-                                <span>expected infeasible: {compactCaseObject(item.expectedInfeasibleOutcome)}</span>
-                              ) : null}
-                            </article>
-                          ))}
-                        </div>
-                      ) : null}
-                    </div>
-
-                    <Suspense fallback={<p className={styles.noticeText}>{t("loading")}</p>}>
-                      <EvolutionProposalActionBandsPanel
-                        proposal={proposalDetailQuery.data}
-                        labels={{ t, proposalActionLabel }}
-                        runLocked={runLocked}
-                        actionFeedback={actionFeedback}
-                        actionError={actionMutation.error?.message ?? ""}
-                        actionPending={actionMutation.isPending}
-                        deleteProposalError={deleteProposalMutation.error?.message ?? ""}
-                        deleteProposalPending={deleteProposalMutation.isPending}
-                        onRunAction={triggerRunAction}
-                        onDeleteProposal={triggerProposalDelete}
-                      />
-                    </Suspense>
-
-                    <div className={styles.detailSection}>
-                      <h3>{t("evidencePaths")}</h3>
-                      <div className={styles.relatedList}>
-                        {Object.entries(proposalDetailQuery.data.paths)
-                          .filter(([, value]) => Boolean(value))
-                          .map(([key, value]) => (
-                            <article key={key} className={styles.relatedRow}>
-                              <strong>{key}</strong>
-                              <span className={styles.pathText}>{value}</span>
-                            </article>
-                          ))}
-                      </div>
-                    </div>
-
-                    <div className={styles.detailSection}>
-                      <h3>{t("navEvolution")}</h3>
-                      <VButton
-                        type="button"
-                        className={styles.inlineAction}
-                        onClick={() => openRun(proposalDetailQuery.data.sourceRun)}
-                      >
-                        <ArrowUpRight size={15} />
-                        {t("openSourceRun")}
-                      </VButton>
-                    </div>
-
-                    <div className={styles.detailSection}>
-                      <div className={styles.rawBlockStack}>
-                        {renderRawJson(t("rawProposalJson"), proposalDetailQuery.data.rawProposal)}
-                        {renderRawJson(t("rawGymDecisionJson"), proposalDetailQuery.data.rawGymDecision)}
-                        {renderRawJson(t("rawSupervisedDecisionJson"), proposalDetailQuery.data.rawSupervisedDecision)}
-                      </div>
-                    </div>
-                  </>
-                ) : proposalDetailQuery.error ? (
-                  <VStateSurface fill className={styles.emptyState} title={proposalDetailQuery.error.message} tone="error" />
-                ) : (
-                  <VStateSurface fill className={styles.emptyState} title={t("loadingRunDetails")} tone="loading" />
-                )
-              ) : (
-                <VStateSurface fill className={styles.emptyState} title={t("chooseProposalDetail")} tone="empty" />
-              )}
-            </VSurface>
-          </div>
-        </div>
+        <EvolutionSupervisedLibraryView
+          lang={lang}
+          t={t}
+          statusLabel={statusLabel}
+          decisionLabel={decisionLabel}
+          riskLabel={riskLabel}
+          intakeModeLabel={intakeModeLabel}
+          proposalActionLabel={proposalActionLabel}
+          displayDecisionLabel={displayDecisionLabel}
+          libraryView={libraryView}
+          onLibraryViewChange={setLibraryView}
+          libraryItems={libraryItems}
+          pendingItems={pendingItems}
+          filteredLibraryItems={filteredLibraryItems}
+          filteredPendingItems={filteredPendingItems}
+          visibleLibraryEntries={visibleLibraryEntries}
+          currentLibraryEntries={currentLibraryEntries}
+          selectedLibraryItem={selectedLibraryItem}
+          selectedPendingItem={selectedPendingItem}
+          selectedProposalSummary={selectedProposalSummary}
+          selectedProposalIsSelfCandidate={selectedProposalIsSelfCandidate}
+          selectedProposalDisplaySourceRun={selectedProposalDisplaySourceRun}
+          selectedProposalCanOpenSourceRun={selectedProposalCanOpenSourceRun}
+          selectedProposalRunIds={selectedProposalRunIds}
+          libraryWorkspaceStyle={libraryWorkspaceStyle}
+          libraryListCollapsed={libraryListCollapsed}
+          libraryListWidth={libraryListWidth}
+          libraryListMinWidth={EVOLUTION_LIBRARY_LIST_PANE.minWidth}
+          libraryListMaxWidth={EVOLUTION_LIBRARY_LIST_PANE.maxWidth}
+          libraryDragging={evolutionDraggingPaneId === "library-list"}
+          resizeLibraryListLabel={resizeLibraryListLabel}
+          onToggleLibraryListCollapsed={() => setLibraryListCollapsed((current) => !current)}
+          onLibraryResizePointerDown={handleLibraryResizeStart}
+          onLibraryResizeKeyDown={handleLibraryResizeKeyDown}
+          librarySearchInput={librarySearchInput}
+          onLibrarySearchInputChange={setLibrarySearchInput}
+          libraryStatusFilter={libraryStatusFilter}
+          onLibraryStatusFilterChange={setLibraryStatusFilter}
+          libraryDeleteFilter={libraryDeleteFilter}
+          onLibraryDeleteFilterChange={setLibraryDeleteFilter}
+          hasLibraryFilters={hasLibraryFilters}
+          onClearLibraryFilters={clearLibraryFilters}
+          libraryHeaderMessage={libraryHeaderMessage}
+          libraryDeletableCount={libraryDeletableCount}
+          libraryBlockedCount={libraryBlockedCount}
+          currentIntakeMode={currentIntakeMode}
+          latestRunId={latestRun?.id}
+          libraryFeedback={libraryFeedback}
+          bulkDeleteError={bulkDeleteMutation.error?.message}
+          bulkDeletePending={bulkDeleteMutation.isPending}
+          onClearProposalSelection={() => setSelectedProposalRunIds([])}
+          onBulkDelete={triggerBulkDelete}
+          onSelectLibraryItem={setSelectedLibraryItemId}
+          onSelectPendingItem={setSelectedPendingItemId}
+          onToggleProposalSelection={toggleProposalSelection}
+          proposalSelected={proposalSelected}
+          proposalDetail={proposalDetailQuery.data}
+          proposalDetailError={proposalDetailQuery.error instanceof Error ? proposalDetailQuery.error.message : proposalDetailQuery.error ? String(proposalDetailQuery.error) : undefined}
+          proposalDetailLoading={proposalDetailQuery.isPending}
+          proposalEditOpen={proposalEditOpen}
+          proposalEditDraft={proposalEditDraft}
+          proposalEditFeedback={proposalEditFeedback}
+          updateProposalPending={updateProposalMutation.isPending}
+          updateProposalError={updateProposalMutation.error?.message ?? ""}
+          deleteProposalPending={deleteProposalMutation.isPending}
+          deleteProposalError={deleteProposalMutation.error?.message ?? ""}
+          actionFeedback={actionFeedback}
+          actionError={actionMutation.error?.message ?? ""}
+          actionPending={actionMutation.isPending}
+          runLocked={runLocked}
+          onBeginProposalEdit={beginProposalEdit}
+          onCancelProposalEdit={cancelProposalEdit}
+          onUpdateProposalEditDraft={updateProposalEditDraft}
+          onTriggerProposalUpdate={triggerProposalUpdate}
+          onRunAction={triggerRunAction}
+          onDeleteProposal={triggerProposalDelete}
+          onOpenRun={openRun}
+          formatAvailableActions={formatAvailableActions}
+        />
       ) : null}
     </div>
   );
