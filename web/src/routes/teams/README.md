@@ -135,7 +135,8 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 - **Done:** workspace navigation, team kind guards, canvas geometry, source-collection presentation, experiment/loop types+labels, AI-search presentation, workflow presentation labels, research stage agent role tables, workflow query keys, stage-agent presentation/routes.
 - **Done (M5 structure):** `teamRouteShellModel.ts` — stage module parse, node/function labels, chat feedback text, candidate graph/chunk-plan pure helpers.
 - **Done (M9 structure):** `teamCanvasNodePresentation.ts` — canvas role badge / node tone pure kinds + style-map mappers; shell keeps CSS token maps.
-- **Still in `TeamsRoute.tsx` (intentional shell):** URL/view drafts, selection, JSX composition, thin `render*` inject adapters (filterBar/pagination/modeFields), tone wrappers, and remaining shell queries.
+- **Done (SC inject factory):** filterBar/pagination/modeFields/conversation/screening/graph/memory/controls/active-stage → `teamSourceCollectionInjectRenderers.tsx`.
+- **Still in `TeamsRoute.tsx` (intentional shell):** URL/view drafts, selection, JSX composition, research launcher/overview adapters, tone wrappers, and remaining shell queries.
 - **Wave 8G–8P done:** panel extract, path packs + prefetch, experiment/loop mutations, SC write mutations (see history below).
 - **Wave 8Q done:** Team shell write mutations → `useTeamShellMutations`.
 - **Wave 8R done:** Workflow start/session mutations → `useTeamWorkflowStartMutations` + `workflowStartMutationModel`.
@@ -188,7 +189,7 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 
 1. **Done (structure wave):** lazy pack facades → `teamLazyPanels.tsx`; experiment/research-loop workspace action adapters → `experimentWorkspaceActions.ts`.
 2. **Done (state machine 1–4):** SC / experiment / shell-canvas workspace hooks + mutation surface ctx shrink.
-3. Optional: extract SC presentation/readiness/stageModules chain when inject surface stabilizes (largest remaining B-section).
+3. **Done (structure):** SC inject render adapters → `teamSourceCollectionInjectRenderers.tsx` (`createSourceCollectionInjectRenderers`).
 4. Optional: collapse SC chrome+workspace double layer; large React Context only with explicit charter.
 5. Optional: cross-route query/mutation patterns (Chat/Agents) only with a new phase charter.
 

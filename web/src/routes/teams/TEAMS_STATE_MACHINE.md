@@ -20,7 +20,8 @@ TeamsRoute (orchestration)
 |   |-- useTeamWorkflowStartMutations
 |   |-- useTeamSourceCollectionMutations
 |   +-- useTeamExperimentLoopMutations
-+-- remaining render* inject adapters / drag-save (route-local)
+|-- teamSourceCollectionInjectRenderers  # SC inject panel mounts (filter/page/controls/active-stage/…)
++-- remaining research launcher/overview adapters / drag-save (route-local)
 ```
 
 
