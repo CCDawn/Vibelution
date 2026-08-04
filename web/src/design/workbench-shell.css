@@ -384,9 +384,9 @@
 }
 
 :where(.vui-app-appshell).statusGuidePanel {
-  position: absolute;
-  top: calc(100% + 10px);
-  right: 0;
+  position: relative;
+  top: auto;
+  right: auto;
   width: min(640px, calc(100vw - 40px));
   max-width: none;
   display: grid;
@@ -398,6 +398,9 @@
     var(--vui-gradient-route-soft),
     var(--shell-panel);
   box-shadow: var(--vui-shadow-soft);
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
 }
 
 :where(.vui-app-appshell).statusGuideGrid {
@@ -1106,20 +1109,6 @@
   height: 9px;
   border-radius: 999px;
   background: currentColor;
-}
-
-:where(.vui-app-appshell).statusGuidePanel {
-  opacity: 0;
-  transform: translateY(-4px);
-  pointer-events: none;
-  transition: opacity 150ms ease, transform 150ms ease;
-}
-
-:where(.vui-app-appshell).statusCluster:hover .statusGuidePanel,
-:where(.vui-app-appshell).statusCluster:focus-within .statusGuidePanel {
-  opacity: 1;
-  transform: translateY(0);
-  pointer-events: auto;
 }
 
 :where(.vui-app-appshell).statusGuideCard {

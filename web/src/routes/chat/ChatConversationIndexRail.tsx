@@ -22,8 +22,8 @@ import {
   VContextualHint,
   VInput,
   VNativeInput,
-  VNativeSelect,
   VStateSurface,
+  VStringSelect,
   VTabs,
 } from "../../components/vui";
 import type { TranslationKey } from "../../i18n/dictionary";
@@ -446,33 +446,31 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
                 </label>
                 <label className={styles.groupComposerField}>
                   <span>{lang === "zh" ? "调度模式" : "Mode"}</span>
-                  <VNativeSelect
+                  <VStringSelect
                     className={styles.groupComposerInput}
+                    ariaLabel={lang === "zh" ? "调度模式" : "Mode"}
                     value={groupModeDraft}
-                    onChange={(event) => setGroupModeDraft(event.target.value)}
-                    disabled={chatRoomModesPending || createGroupRoomPending}
-                  >
-                    {readyChatRoomModes.map((mode) => (
-                      <option key={mode.id} value={mode.id}>
-                        {chatRoomModeLabel(mode, lang)}
-                      </option>
-                    ))}
-                  </VNativeSelect>
+                    onValueChange={setGroupModeDraft}
+                    isDisabled={chatRoomModesPending || createGroupRoomPending}
+                    options={readyChatRoomModes.map((mode) => ({
+                      value: mode.id,
+                      label: chatRoomModeLabel(mode, lang),
+                    }))}
+                  />
                 </label>
                 <label className={styles.groupComposerField}>
                   <span>{lang === "zh" ? "对话目的" : "Purpose"}</span>
-                  <VNativeSelect
+                  <VStringSelect
                     className={styles.groupComposerInput}
+                    ariaLabel={lang === "zh" ? "对话目的" : "Purpose"}
                     value={groupPurposeDraft}
-                    onChange={(event) => setGroupPurposeDraft(event.target.value)}
-                    disabled={chatRoomPurposesPending || createGroupRoomPending}
-                  >
-                    {availableChatRoomPurposes.map((purpose) => (
-                      <option key={purpose.id} value={purpose.id}>
-                        {chatRoomPurposeLabel(purpose, lang)}
-                      </option>
-                    ))}
-                  </VNativeSelect>
+                    onValueChange={setGroupPurposeDraft}
+                    isDisabled={chatRoomPurposesPending || createGroupRoomPending}
+                    options={availableChatRoomPurposes.map((purpose) => ({
+                      value: purpose.id,
+                      label: chatRoomPurposeLabel(purpose, lang),
+                    }))}
+                  />
                 </label>
                 <div className={styles.groupAgentPicker} aria-label={lang === "zh" ? "选择参与助手" : "Choose agents"}>
                   {agentsPending ? (
