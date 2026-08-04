@@ -214,6 +214,8 @@ describe("SelfEvolutionAutonomousLoopPanel", () => {
     expect(markup).toContain("中断");
     expect(markup).toContain("max-w-[9.5rem]");
     expect(markup).toContain("shrink-0");
+    expect(markup).toContain('data-density="compact"');
+    expect(markup).toContain("max-w-[min(100%,18rem)]");
     // Empty stage cards are collapsed when failed and no summaries exist.
     expect(markup).not.toContain("尚未产生观察摘要");
   });

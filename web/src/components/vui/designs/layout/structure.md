@@ -57,6 +57,11 @@
 - loading 且未指定 `skeletonLines` 时：`fill` 默认 3 条骨架，非 fill 默认 2 条
 - 父级请用 `VUI_REGION_STATE_HOST_CLASS` 或已有 `flex-1 min-h-0` 链
 
+### `density`
+- `default`：facts 用 `1fr` 网格（适合总览型状态）
+- `compact`：更紧 padding；facts 为 **内容宽度 chip**（`flex-wrap`），避免宽屏两格被拉成整行空卡
+- **行内失败/中断横幅**（如自进化闭环中断）应用 `compact`
+
 ### 何时不要用
 | 场景 | 改用 |
 | --- | --- |
