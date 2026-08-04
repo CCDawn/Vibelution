@@ -2827,6 +2827,7 @@ export function ChatCodingRoute() {
                 onOpenConfig={handleOpenAgentConfig}
                 onOpenLatest={handleOpenAgentLatestSession}
                 onRename={handleRenameAgent}
+                onDismiss={() => setAgentContextMenu(null)}
               />
             </Suspense>
           ) : null}
@@ -2907,6 +2908,7 @@ export function ChatCodingRoute() {
                 onDelete={handleDeleteSession}
                 onOpenAgentConfig={openSessionAgentConfig}
                 onRename={beginRenameSession}
+                onDismiss={() => setSessionContextMenu(null)}
               />
             </Suspense>
           ) : null}

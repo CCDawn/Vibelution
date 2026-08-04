@@ -20,6 +20,12 @@ export {
   type VDialogProps,
   type VDialogSize,
 } from "./primitives/VDialog";
+export {
+  VDropdownMenu,
+  type VDropdownMenuItem,
+  type VDropdownMenuPosition,
+  type VDropdownMenuProps,
+} from "./primitives/VDropdownMenu";
 export { VIconButton, type VIconButtonProps } from "./primitives/VIconButton";
 export { VNativeButton, type VNativeButtonProps } from "./primitives/VNativeButton";
 export { VPanel, type VPanelProps } from "./primitives/VPanel";
