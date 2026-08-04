@@ -1337,9 +1337,11 @@ describe("ChatCodingRoute layout contract", () => {
     expect(cacheDetailDialogSource).not.toContain("styles.cacheDonutLegendPreview");
     expect(cacheDetailDialogSource).not.toContain("key={`${segment.key}-${segment.status}-${index}-legend`}");
     expect(routeSource).toContain("<CacheDetailDialog");
-    expect(cacheDetailDialogSource).toContain("styles.cacheDetailOverlay");
-    expect(cacheDetailDialogSource).toContain("className={styles.cacheDetailDialog}");
-    expect(cacheDetailDialogSource).toContain("aria-modal=\"true\"");
+    expect(cacheDetailDialogSource).toContain("<VDialog");
+    expect(cacheDetailDialogSource).toContain("contentClassName={styles.cacheDetailDialog}");
+    expect(cacheDetailDialogSource).toContain("onOpenChange=");
+    expect(cacheDetailDialogSource).not.toContain("styles.cacheDetailOverlay");
+    expect(cacheDetailDialogSource).not.toContain("createPortal(");
     expect(cacheDetailDialogSource).toContain("styles.cacheDetailSummaryGrid");
     expect(cacheDetailDialogSource).toContain("styles.cacheDetailCalibrationNote");
     expect(routeSource).toContain("cacheCalibrationSummaryText={cacheCalibrationSummaryText}");
@@ -1425,10 +1427,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.cacheDonutSegmentGuidance).toBeTypeOf("string");
     expect(routeStyles.cacheDonutSegmentSkill).toBeTypeOf("string");
     expect(routeStyles.cacheDonutSegmentAttachments).toBeTypeOf("string");
-    expect(routeStyles.cacheDetailOverlay).toBeTypeOf("string");
+    expect(cacheDetailStyles.cacheDetailDialog).toBeTypeOf("string");
     expect(routeStyles.cacheDetailDialog).toBeTypeOf("string");
-    expect(routeStyles.cacheDetailHeader).toBeTypeOf("string");
-    expect(routeStyles.cacheDetailCloseButton).toBeTypeOf("string");
     expect(routeStyles.cacheDetailSummaryGrid).toBeTypeOf("string");
     expect(routeStyles.cacheDetailCalibrationNote).toBeTypeOf("string");
     expect(routeStyles.cacheDetailBody).toBeTypeOf("string");
@@ -1467,13 +1467,11 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.cacheDetailBoundaryHit).toContain("w-[var(--cache-boundary-hit-width)]");
     expect(routeStyles.cacheDetailBoundaryMiss).toContain("w-[var(--cache-boundary-miss-width)]");
     expect(routeStyles.cacheDetailBoundaryUnknown).toContain("w-[var(--cache-boundary-unknown-width)]");
-    for (const value of [routeStyles.cacheDetailHeader, routeStyles.cacheDetailSegmentHeader]) {
-      expect(value).toContain("flex");
-      expect(value).toContain("items-center");
-      expect(value).not.toContain("rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)]");
-      expect(value).not.toContain("bg-[var(--vui-surface-glass)]");
-      expect(value).not.toContain("shadow-[var(--vui-shadow-hairline)]");
-    }
+    expect(routeStyles.cacheDetailSegmentHeader).toContain("flex");
+    expect(routeStyles.cacheDetailSegmentHeader).toContain("items-center");
+    expect(routeStyles.cacheDetailSegmentHeader).not.toContain("rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)]");
+    expect(routeStyles.cacheDetailSegmentHeader).not.toContain("bg-[var(--vui-surface-glass)]");
+    expect(routeStyles.cacheDetailSegmentHeader).not.toContain("shadow-[var(--vui-shadow-hairline)]");
     for (const value of [routeStyles.cacheDonutShell, routeStyles.cacheDetailDonutShell]) {
       expect(value).toContain("grid");
       expect(value).not.toContain("bg-[var(--surface-page)]");

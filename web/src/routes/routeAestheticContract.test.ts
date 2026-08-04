@@ -63,7 +63,6 @@ const SHARED_QUIET_HOVER_TOKENS = [
 
 const HEADER_CHROME_KEYS = [
   "activeWorkDetailHeader",
-  "cacheDetailHeader",
   "cacheDetailSegmentHeader",
   "detailHeader",
   "detailMeta",

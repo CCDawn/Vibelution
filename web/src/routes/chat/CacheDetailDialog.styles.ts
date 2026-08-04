@@ -16,8 +16,8 @@ const styles: Record<string, string> = {
   cacheDetailBoundaryUnknown: `vui-routes-chatcodingroute cacheDetailBoundaryUnknown min-w-0 ${vuiGlassPanelClass} p-2 w-[var(--cache-boundary-unknown-width)]`,
   cacheDetailCalibrationNote: `vui-routes-chatcodingroute cacheDetailCalibrationNote min-w-0 ${vuiGlassPanelClass} p-2 !grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-[7px]`,
   cacheDetailCloseButton: `vui-routes-chatcodingroute cacheDetailCloseButton min-w-0 ${vuiGlassPanelClass} p-2 inline-flex min-h-[var(--vui-control-height-sm)] w-fit max-w-full items-center justify-center gap-1.5 rounded-[var(--radius-control)] bg-[var(--vui-control-muted)] px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold leading-tight text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] disabled:cursor-default disabled:opacity-55`,
-  // Dialog shell: viewport max-h (see components/layout/dialogHeightPolicy.ts).,
-  cacheDetailDialog: `vui-routes-chatcodingroute cacheDetailDialog min-w-0 ${vuiGlassPanelClass} p-2 w-[min(1120px,calc(100vw_-_44px))] max-h-[min(860px,calc(100dvh_-_52px))]`,
+  // Dialog shell on VDialog content: viewport max-h (see components/layout/dialogHeightPolicy.ts).
+  cacheDetailDialog: `vui-routes-chatcodingroute cacheDetailDialog min-w-0 w-[min(1120px,calc(100vw_-_44px))] max-h-[min(860px,calc(100dvh_-_52px))]`,
   cacheDetailDonutCenter: `vui-routes-chatcodingroute cacheDetailDonutCenter pointer-events-none absolute inset-0 m-auto grid size-[min(112px,40%)] min-w-0 place-self-center place-items-center ${vuiGlassPanelClass} p-2 text-center shadow-[var(--vui-shadow-hairline)]`,
   cacheDetailDonutLegend: `vui-routes-chatcodingroute cacheDetailDonutLegend min-w-0 ${vuiGlassPanelClass} p-2`,
   cacheDetailDonutPanel: `vui-routes-chatcodingroute cacheDetailDonutPanel min-w-0 ${vuiGlassPanelClass} p-2`,

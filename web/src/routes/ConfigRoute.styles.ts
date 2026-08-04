@@ -146,14 +146,8 @@ const styles = {
     "vui-routes-configroute inlineBadge [display:inline-flex] [align-items:center] [justify-content:center] [min-height:24px] [padding:0_8px] [border-radius:999px] [border:1px_solid_transparent] [font-size:var(--vui-font-xs)] [white-space:nowrap] [color:var(--fg-secondary)] [background:var(--vui-surface-row)]",
   inlineError:
     "vui-routes-configroute inlineError [margin:0] [color:var(--state-error)] [font-size:var(--vui-font-xs)] [line-height:1.35]",
-  leaveGuardActions:
-    "vui-routes-configroute leaveGuardActions [display:flex] [justify-content:end] [gap:8px] [flex-wrap:wrap]",
-  leaveGuardCopy:
-    "vui-routes-configroute leaveGuardCopy [display:grid] [gap:7px] [&_h2]:[margin:0] [&_p]:[margin:0] [&_h2]:[color:var(--fg-primary)] [&_h2]:[font-size:1.06rem] [&_p]:[color:var(--fg-secondary)] [&_p]:[line-height:1.42]",
-  leaveGuardOverlay:
-    "vui-routes-configroute leaveGuardOverlay [position:fixed] [inset:0] [z-index:80] [display:grid] [place-items:center] [padding:18px] [background:color-mix(in_srgb,var(--bg-canvas)_68%,transparent)] [backdrop-filter:blur(6px)]",
   leaveGuardPanel:
-    `vui-routes-configroute leaveGuardPanel [display:grid] [gap:14px] [width:min(520px,100%)] [padding:16px] ${panelSurface} [border-radius:8px] [box-shadow:var(--shadow-strong)]`,
+    "vui-routes-configroute leaveGuardPanel w-[min(520px,100%)]",
   loadingBoard:
     `vui-routes-configroute loadingBoard ${panelSurface} [display:grid] [grid-template-rows:auto_auto_minmax(0,1fr)] [align-content:start] [gap:8px] [padding:10px] [min-width:0] [overflow:hidden]`,
   loadingMetricGrid:

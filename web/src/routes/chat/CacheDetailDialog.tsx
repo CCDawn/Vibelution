@@ -1,8 +1,7 @@
-import { X } from "lucide-react";
-import { useId, type CSSProperties } from "react";
+import { type CSSProperties } from "react";
 
 import type { SessionCacheCompositionSegment } from "../../api/types";
-import { VButton } from "../../components/vui";
+import { VDialog } from "../../components/vui";
 import routeStyles from "../ChatCodingRoute.styles";
 import styles from "./CacheDetailDialog.styles";
 
@@ -340,35 +339,19 @@ export function CacheDetailDialog({
   upperBoundCacheCompositionPercent,
   upperBoundCacheInputTokens,
 }: CacheDetailDialogProps) {
-  const dialogId = useId();
-  const titleId = `${dialogId}-title`;
-  const descriptionId = `${dialogId}-description`;
-
   return (
-    <div className={styles.cacheDetailOverlay} role="presentation" onClick={onClose}>
-      <section
-        id="cache-detail-dialog"
-        className={styles.cacheDetailDialog}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        aria-describedby={descriptionId}
-        onClick={(event) => event.stopPropagation()}
-      >
-        <header className={styles.cacheDetailHeader}>
-          <div>
-            <p id={descriptionId}>{previousCacheHitLabel}</p>
-            <h3 id={titleId}>{cacheDetailDialogTitle}</h3>
-          </div>
-          <VButton
-            type="button"
-            className={styles.cacheDetailCloseButton}
-            onClick={onClose}
-            aria-label={closeLabel}
-                icon={<X size={16} aria-hidden="true" />}></VButton>
-        </header>
-
-        <div className={styles.cacheDetailSummaryGrid}>
+    <VDialog
+      open
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) onClose();
+      }}
+      title={cacheDetailDialogTitle}
+      description={previousCacheHitLabel}
+      size="xl"
+      contentClassName={styles.cacheDetailDialog}
+      aria-label={closeLabel}
+    >
+        <div id="cache-detail-dialog" className={styles.cacheDetailSummaryGrid}>
           <div>
             <span>{lang === "zh" ? "真实命中" : "True hit"}</span>
             <strong>{cacheCompositionPercent}%</strong>
@@ -577,7 +560,6 @@ export function CacheDetailDialog({
             </section>
           </div>
         </div>
-      </section>
-    </div>
+    </VDialog>
   );
 }

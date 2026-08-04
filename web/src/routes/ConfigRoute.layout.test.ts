@@ -66,6 +66,17 @@ const configSources = [
 ].join("\n");
 
 describe("ConfigRoute layout contract", () => {
+  it("hosts unsaved leave guard on VDialog instead of a hand-rolled overlay", () => {
+    expect(routeSource).toContain("<VDialog");
+    expect(routeSource).toContain("open={leaveGuardOpen}");
+    expect(routeSource).toContain("contentClassName={styles.leaveGuardPanel}");
+    expect(routeSource).toContain("handleSaveAndLeave");
+    expect(routeSource).toContain("handleDiscardAndLeave");
+    expect(routeSource).toContain("handleCancelLeave");
+    expect(routeSource).not.toContain("leaveGuardOverlay");
+    expect(styles.leaveGuardPanel).toContain("w-[min(520px,100%)]");
+  });
+
   it("invalidates the compact self-evolution snapshot after evolution configuration changes", () => {
     expect(routeSource).toContain("async function invalidateWorkbenchQueries");
     expect(routeSource).toContain("queryKeys.evolutionSelfWorkspaceSnapshot()");
