@@ -14,13 +14,14 @@
 
 | Surface | Symptom | Target recipe |
 | --- | --- | --- |
-| `TeamsRoute.tsx` | ~6.0k lines; shell recipes + SC injects + **`teamsWorkspacePanelRenderers` factory** for memory/AI-search/loop/ledger/canvas inspectors. Next: collapse remaining SC/orchestrator render glue. | keep recipes; continue module extract |
-| Agents workspace | **Migrated** outer shell to `VListDetailPage` + layoutId (`AgentWorkspaceLayoutPanel`) | keep product/agent-management panels; optional inspector UX polish |
-| Chat coding | Dual-pane domain math (OK); `data-vui-domain-recipe=chat-dual-pane` + `WORKBENCH_LAYOUT_IDS.chat` + height panes in `chatListHeights.ts`; session tabs soft cool select | Keep domain layout; region tags on center/status rails |
-| Memory | Outer `VDenseOpsPage` + layoutId; sources/knowledge/agent-memory three-pane → `VSplitWorkspace` (`left`/`right`, `agent-list`/`agent-detail`); lists/queues on height registry | Done for main three-pane shells |
-| Config settings | **Migrated** nav/main to `VSplitWorkspace` + `configSettings`; model-assets → `configModelAssets` | Done for shell width ownership |
-| Research flow canvas | **Migrated** page shell → `VCanvasWorkbenchPage` | optional layoutId for inspector width |
-| Evolution queues | Multi-rail layoutId; soft segment; **catalog / setup / members / run-plan / live-io / runs / library → dedicated panels** | Domain multi-rail intentional; remaining: case-trace helpers inside live run body |
+| `TeamsRoute.tsx` | Thick orchestrator; shell recipes + SC/canvas extracts in progress (other owner). | keep recipes; continue module extract |
+| Agents workspace | **Migrated** outer shell to `VListDetailPage` + layoutId (`AgentWorkspaceLayoutPanel`) | optional inspector UX polish |
+| Chat coding | Dual-pane domain math (OK); `chat-dual-pane` + layoutId + height panes; soft cool session tabs | Keep domain layout exception |
+| Memory | Outer `VDenseOpsPage` + layoutId; sources/knowledge/agent-memory → `VSplitWorkspace` | Done for three-pane shells |
+| Config settings | **Migrated** nav/main + model-assets to `VSplitWorkspace` layoutIds | Done for shell width ownership |
+| Research flow canvas | **Migrated** `VCanvasWorkbenchPage` + **`WORKBENCH_LAYOUT_IDS.researchFlow`** inspector resize | Done for inspector width memory |
+| Evolution queues | Multi-rail intentional; panels extracted incl. **case-trace / conversation evidence** | Done for current extract plan |
+| Git / Tools / Logs / Launcher | Shared `usePersistedPaneResize` + **`PaneCollapseHandle`** (collapse-to-zero; not VSplit) | Keep hook+collapse pattern; gate documents exception |
 
 ## Cleanup playbook (per surface)
 

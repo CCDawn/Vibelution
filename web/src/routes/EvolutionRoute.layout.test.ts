@@ -15,6 +15,8 @@ import supervisedRunPlanPanelSource from "./EvolutionSupervisedRunPlanPanel.tsx?
 import supervisedLiveIoPanelSource from "./EvolutionSupervisedLiveIoPanel.tsx?raw";
 import supervisedRunsViewSource from "./EvolutionSupervisedRunsView.tsx?raw";
 import supervisedLibraryViewSource from "./EvolutionSupervisedLibraryView.tsx?raw";
+import supervisedCaseTracePanelSource from "./EvolutionSupervisedCaseTracePanel.tsx?raw";
+import supervisedConversationEvidencePanelSource from "./EvolutionSupervisedConversationEvidencePanel.tsx?raw";
 import proposalActionBandsPanelSource from "./EvolutionProposalActionBandsPanel.tsx?raw";
 import proposalActionBandsStyles from "./EvolutionProposalActionBandsPanel.styles";
 import proposalActionBandsStylesSource from "./EvolutionProposalActionBandsPanel.styles.ts?raw";
@@ -60,6 +62,8 @@ const evolutionSources = [
   supervisedLiveIoPanelSource,
   supervisedRunsViewSource,
   supervisedLibraryViewSource,
+  supervisedCaseTracePanelSource,
+  supervisedConversationEvidencePanelSource,
   datasetCatalogPanelSource,
 ].join("\n");
 
@@ -83,8 +87,8 @@ describe("EvolutionRoute library user flow contract", () => {
   });
 
   it("keeps complex Evolution card buttons in the VButton plain-content layout", () => {
-    expect(routeSource.match(/contentLayout="plain"/g)).toHaveLength(1);
-    expect(routeSource).toMatch(/contentLayout="plain"[\s\S]{0,160}styles\.caseTraceSummary/);
+    expect(routeSource.match(/contentLayout="plain"/g) ?? []).toHaveLength(0);
+    expect(supervisedCaseTracePanelSource).toMatch(/contentLayout="plain"[\s\S]{0,160}styles\.caseTraceSummary/);
     expect(supervisedWorkflowMembersPanelSource).toMatch(/contentLayout="plain"[\s\S]{0,160}styles\.workflowStepButton/);
     expect(supervisedLibraryViewSource.match(/contentLayout="plain"[\s\S]{0,160}styles\.proposalCardButton/g)).toHaveLength(2);
     expect(runRecordsPanelSource).toMatch(/contentLayout="plain"[\s\S]{0,160}styles\.runCardButton/);
@@ -919,7 +923,7 @@ describe("EvolutionRoute library user flow contract", () => {
   it("lets the embedded supervised conversation fill the lower vertical space", () => {
     expect(routeSource).toContain("<SupervisedAgentConversationPanel");
     expect(supervisedAgentConversationPanelSource).toContain("className={styles.conversation}");
-    expect(routeSource).toContain("styles.caseRawEvidence");
+    expect(supervisedConversationEvidencePanelSource).toContain("styles.caseRawEvidence");
     expect(routeSource).toContain("currentCaseOutputLabel(monitoredRun)");
     expect(supervisedAgentConversationPanelStyles.root).toContain("flex-1");
     expect(supervisedAgentConversationPanelStyles.body).toContain("flex-1");
@@ -939,8 +943,8 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("supervisedPreflightIssue(monitoredRun, lang)");
     expect(evolutionRouteModelSource).toContain("任务环境预检失败，未启动 Agent");
     expect(evolutionRouteModelSource).toContain("missing_verifier_dependency");
-    expect(routeSource).toContain("monitoredPreflightIssue ? (");
-    expect(routeSource).toContain("styles.casePreflightIssue");
+    expect(routeSource).toContain("preflightIssue={monitoredPreflightIssue}");
+    expect(supervisedConversationEvidencePanelSource).toContain("styles.casePreflightIssue");
     expect(routeStyles.casePreflightIssue).toContain("var(--state-warning)");
   });
 
@@ -1008,16 +1012,16 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeStyles.supervisedConversationTrace).toContain("[max-height:min(260px,_30vh)]");
     expect(routeSource).not.toContain("styles.ioWaitingState");
     expect(routeSource).toContain("buildSupervisedCaseTraceItems");
-    expect(routeSource).toContain("caseTraceItemExpanded");
-    expect(routeSource).toContain("toggleCaseTraceItem");
-    expect(routeSource).toContain("renderCaseTraceSection");
-    expect(routeSource).toContain("styles.caseTraceTimeline");
-    expect(routeSource).toContain("caseTraceTimelineRef");
-    expect(routeSource).toContain("latestCaseTraceKey");
-    expect(routeSource).toContain("timeline.scrollTop = timeline.scrollHeight");
-    expect(routeSource).toContain("styles.caseTraceStack");
-    expect(routeSource).toContain("styles.caseTraceMessage");
-    expect(routeSource).toContain("styles.caseTraceMeta");
+    expect(routeSource).toContain("EvolutionSupervisedConversationEvidencePanel");
+    expect(routeSource).not.toContain("caseTraceItemExpanded");
+    expect(routeSource).not.toContain("toggleCaseTraceItem");
+    expect(routeSource).not.toContain("renderCaseTraceSection");
+    expect(supervisedConversationEvidencePanelSource).toContain("EvolutionSupervisedCaseTracePanel");
+    expect(supervisedCaseTracePanelSource).toContain("styles.caseTraceTimeline");
+    expect(supervisedCaseTracePanelSource).toContain("timeline.scrollTop = timeline.scrollHeight");
+    expect(supervisedCaseTracePanelSource).toContain("styles.caseTraceStack");
+    expect(supervisedCaseTracePanelSource).toContain("styles.caseTraceMessage");
+    expect(supervisedCaseTracePanelSource).toContain("styles.caseTraceMeta");
     expect(routeStyles.caseTraceTimeline).toContain("[content:\"\"]");
     expect(routeStyles.caseTraceStack).toContain("[justify-content:flex-end]");
     expect(routeStyles.caseTraceSummary).toContain("[grid-template-columns:26px_minmax(0,_1fr)_auto_18px]");

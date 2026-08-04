@@ -1,15 +1,6 @@
 import "../design/route-css/evolution.tailwind.css";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  Activity,
-  ChevronDown,
-  ChevronRight,
-  Play,
-  Sparkles,
-  TriangleAlert,
-  Wrench,
-} from "lucide-react";
 import { lazy, Suspense, type CSSProperties, type KeyboardEvent, type PointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
@@ -125,6 +116,7 @@ import { EvolutionSupervisedRunPlanPanel } from "./EvolutionSupervisedRunPlanPan
 import { EvolutionSupervisedLiveIoPanel } from "./EvolutionSupervisedLiveIoPanel";
 import { EvolutionSupervisedRunsView } from "./EvolutionSupervisedRunsView";
 import { EvolutionSupervisedLibraryView } from "./EvolutionSupervisedLibraryView";
+import { EvolutionSupervisedConversationEvidencePanel } from "./EvolutionSupervisedConversationEvidencePanel";
 import {
   buildSupervisedWorktreeLedgerSummary,
   isSelfEvolutionWorktreeRun,
@@ -144,7 +136,7 @@ import {
 } from "./evolutionLiveRun";
 import { supervisedDecisionLabel } from "./supervisedRunRecordLabel";
 import { buildSupervisedRunControlSummary } from "./supervisedRunSummary";
-import { buildSupervisedCaseTraceItems, type SupervisedCaseTraceItem, type SupervisedCaseTraceTone } from "./supervisedCaseTrace";
+import { buildSupervisedCaseTraceItems } from "./supervisedCaseTrace";
 import type {
   EvolutionActiveRunClosedLoopLedger,
   EvolutionActiveRunMonitorEventItem,
@@ -181,14 +173,6 @@ type EvolutionRouteProps = {
   forcedTrack?: EvolutionRouteTrack;
   forcedView?: SupervisedRouteView;
 };
-const CASE_TRACE_TURN_CLASS: Record<SupervisedCaseTraceTone, string> = {
-  input: styles.caseTraceTurn_input,
-  thought: styles.caseTraceTurn_thought,
-  tool: styles.caseTraceTurn_tool,
-  assistant: styles.caseTraceTurn_assistant,
-  error: styles.caseTraceTurn_error,
-};
-
 type SupervisedSourceOption =
   | {
       value: string;
@@ -366,7 +350,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const [libraryListCollapsed, setLibraryListCollapsed] = useState(false);
   const [liveLaunchCollapsed, setLiveLaunchCollapsed] = useState(false);
   const [liveRunCollapsed, setLiveRunCollapsed] = useState(false);
-  const [expandedCaseTraceItems, setExpandedCaseTraceItems] = useState<Record<string, boolean>>({});
+
   const configQuery = useQuery({
     queryKey: queryKeys.configPublic(),
     queryFn: () => fetchJson<ConfigSummary>("/api/config/public"),
@@ -638,15 +622,6 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       }),
     [lang, monitoredCaseTranscript],
   );
-  const caseTraceTimelineRef = useRef<HTMLDivElement | null>(null);
-  const latestCaseTraceKey = monitoredCaseTraceItems.at(-1)?.key ?? "";
-  useEffect(() => {
-    const timeline = caseTraceTimelineRef.current;
-    if (!timeline || monitoredCaseTraceItems.length === 0) {
-      return;
-    }
-    timeline.scrollTop = timeline.scrollHeight;
-  }, [latestCaseTraceKey, monitoredCaseTraceItems.length]);
   const monitoredPreflightIssue = supervisedPreflightIssue(monitoredRun, lang);
   const worktreeRunStopping = String(supervisedWorktreeLiveRun?.status || "").trim().toLowerCase() === "stopping";
   const monitoredRunIdentity = monitoredRun?.sessionId || monitoredRun?.runId || "";
@@ -804,74 +779,18 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     || monitoredRun?.currentTask
     || "";
   const supervisedLiveConversationSupplement = supervisedSelectedWorkflowStep.id === "approval" ? null : (
-    <div className={styles.supervisedConversationEvidence}>
-      {selectedWorkflowIsRuntimeStep && monitoredRun?.currentCasePrompt ? (
-        <details className={`${styles.rawBlock} ${styles.collapsibleEvidence}`}>
-          <summary>{t("currentCasePrompt")}</summary>
-          <pre className={styles.ioContent}>{monitoredRun.currentCasePrompt}</pre>
-        </details>
-      ) : null}
-      {selectedWorkflowIsRuntimeStep && monitoredPreflightIssue ? (
-        <div className={styles.casePreflightIssue}>
-          <strong>{monitoredPreflightIssue.title}</strong>
-          <span>{monitoredPreflightIssue.detail}</span>
-          {monitoredPreflightIssue.reason ? <small>{monitoredPreflightIssue.reason}</small> : null}
-        </div>
-      ) : null}
-      {selectedWorkflowIsRuntimeStep && monitoredCaseTraceItems.length > 0 ? (
-        <div className={styles.supervisedConversationTrace}>
-          <div ref={caseTraceTimelineRef} className={styles.caseTraceTimeline}>
-            <div className={styles.caseTraceStack}>
-              {monitoredCaseTraceItems.map((entry) => {
-                const expanded = caseTraceItemExpanded(entry);
-                return (
-                  <article
-                    key={entry.key}
-                    className={`${styles.caseTraceTurn} ${CASE_TRACE_TURN_CLASS[entry.tone]}`}
-                  >
-                    <VButton
-                      type="button"
-                      contentLayout="plain"
-                      className={styles.caseTraceSummary}
-                      aria-expanded={expanded}
-                      onClick={() => toggleCaseTraceItem(entry)}
-                    >
-                      <span className={styles.caseTraceIcon}>{caseTraceIcon(entry)}</span>
-                      <span className={styles.caseTraceMessage}>
-                        <span className={styles.caseTraceTitle}>{entry.title}</span>
-                        <span className={styles.caseTracePreview}>{entry.preview}</span>
-                      </span>
-                      <span className={styles.caseTraceMeta}>
-                        {entry.status ? (
-                          <span className={styles.caseTraceStatus}>{statusLabel(entry.status)}</span>
-                        ) : null}
-                        {entry.timestamp ? (
-                          <span className={styles.caseTraceTime}>{compactTimestamp(entry.timestamp)}</span>
-                        ) : null}
-                      </span>
-                      <span className={styles.caseTraceChevron}>
-                        {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                      </span>
-                    </VButton>
-                    {expanded ? (
-                      <div className={styles.caseTraceBody}>
-                        {entry.sections.map((section, sectionIndex) => renderCaseTraceSection(section, sectionIndex))}
-                      </div>
-                    ) : null}
-                  </article>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      ) : null}
-      {selectedWorkflowIsRuntimeStep && monitoredRun?.currentCaseIo?.latestOutput ? (
-        <details className={`${styles.rawBlock} ${styles.collapsibleEvidence} ${styles.caseRawEvidence}`}>
-          <summary>{currentCaseOutputLabel(monitoredRun)}</summary>
-          <pre className={styles.ioContent}>{monitoredRun.currentCaseIo.latestOutput}</pre>
-        </details>
-      ) : null}
-    </div>
+    <EvolutionSupervisedConversationEvidencePanel
+      showCasePrompt={selectedWorkflowIsRuntimeStep}
+      casePromptTitle={t("currentCasePrompt")}
+      casePrompt={monitoredRun?.currentCasePrompt}
+      preflightIssue={monitoredPreflightIssue}
+      caseTraceItems={monitoredCaseTraceItems}
+      statusLabel={statusLabel}
+      formatTimestamp={compactTimestamp}
+      showLatestOutput={selectedWorkflowIsRuntimeStep}
+      latestOutputTitle={currentCaseOutputLabel(monitoredRun)}
+      latestOutput={monitoredRun?.currentCaseIo?.latestOutput}
+    />
   );
   const supervisedClosedLoopDecisionLabel = supervisedClosedLoopRecord?.decision
     ? displayDecisionLabel(supervisedClosedLoopRecord.decision)
@@ -1968,61 +1887,6 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       return outputLabel || t("ioEntryError");
     }
     return t("currentCaseOutput");
-  }
-
-  function caseTraceIcon(item: SupervisedCaseTraceItem) {
-    if (item.tone === "tool") {
-      return <Wrench size={15} />;
-    }
-    if (item.tone === "assistant") {
-      return <Sparkles size={15} />;
-    }
-    if (item.tone === "error") {
-      return <TriangleAlert size={15} />;
-    }
-    if (item.tone === "input") {
-      return <Play size={14} />;
-    }
-    return <Activity size={15} />;
-  }
-
-  function caseTraceItemExpanded(item: SupervisedCaseTraceItem) {
-    return expandedCaseTraceItems[item.key] ?? item.defaultOpen;
-  }
-
-  function toggleCaseTraceItem(item: SupervisedCaseTraceItem) {
-    setExpandedCaseTraceItems((current) => ({
-      ...current,
-      [item.key]: !(current[item.key] ?? item.defaultOpen),
-    }));
-  }
-
-  function renderCaseTraceSection(section: SupervisedCaseTraceItem["sections"][number], index: number) {
-    if (section.kind === "state") {
-      return (
-        <div key={`${section.label}-${index}`} className={styles.caseTraceStateGrid}>
-          {section.rows.map((row) => (
-            <dl key={`${section.label}-${row.label}`} className={styles.caseTraceStateRow}>
-              <dt>{row.label}</dt>
-              <dd>{row.value}</dd>
-            </dl>
-          ))}
-        </div>
-      );
-    }
-    return (
-      <div
-        key={`${section.label}-${index}`}
-        className={
-          section.kind === "json"
-            ? `${styles.caseTraceSection} ${styles.caseTraceSectionJson}`
-            : styles.caseTraceSection
-        }
-      >
-        <span>{section.label}</span>
-        <pre>{section.content}</pre>
-      </div>
-    );
   }
 
   function triggerRunAction(sessionId: string, action: string) {

@@ -19,6 +19,9 @@ describe("ResearchFlowCanvasRoute layout contract", () => {
     expect(routeSource).toContain("<VRouteLinkButton");
     expect(routeSource).toContain("VCanvasWorkbenchPage");
     expect(routeSource).toContain('domainRecipe="research-flow-canvas-workbench"');
+    expect(routeSource).toContain("WORKBENCH_LAYOUT_IDS.researchFlow");
+    expect(routeSource).toContain("layoutId={WORKBENCH_LAYOUT_IDS.researchFlow}");
+    expect(routeSource).toContain('id: "inspector"');
     expect(routeSource).toContain("canvas={(");
     expect(routeSource).toContain("inspector={(");
     expect(routeSource).not.toContain('import { Link } from "react-router-dom"');

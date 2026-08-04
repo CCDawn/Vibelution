@@ -32,6 +32,7 @@ import {
   ResearchOrgMessageResponse,
   ResearchOrgProposalResponse,
 } from "../api/types";
+import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import {
   VButton,
   VCanvasWorkbenchPage,
@@ -2309,6 +2310,15 @@ export function ResearchFlowCanvasRoute() {
       headerClassName={styles.header}
       domainRecipe="research-flow-canvas-workbench"
       data-vui-recipe="research-flow-canvas-workbench"
+      layoutId={WORKBENCH_LAYOUT_IDS.researchFlow}
+      resize={{
+        aside: {
+          id: "inspector",
+          defaultWidth: 360,
+          minWidth: 280,
+          maxWidth: 480,
+        },
+      }}
       ariaLabel="科研组织画布"
       eyebrow="Project Organization Canvas"
       title="科研组织画布"

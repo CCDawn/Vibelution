@@ -18,6 +18,8 @@ export const WORKBENCH_LAYOUT_IDS = {
   logsRuntimeScenes: "logs-runtime-scenes",
   memory: "memory",
   promptTemplates: "prompt-templates",
+  /** Research org/flow canvas inspector width (VCanvasWorkbenchPage aside). */
+  researchFlow: "research-flow",
   skills: "skills",
   supervisedReview: "supervised-review",
   teams: "teams",
