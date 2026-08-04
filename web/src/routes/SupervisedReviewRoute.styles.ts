@@ -26,7 +26,10 @@ const reviewTextAreaField = [reviewFormLabel, reviewTextAreaTargets].join(" ");
 
 const styles = {
   page:
-    "flex h-full min-h-0 min-w-0 max-w-full flex-col gap-1.5 overflow-hidden overflow-x-hidden px-2 py-1.5 pb-2.5 text-[var(--fg-primary)] max-[980px]:overflow-y-auto max-[980px]:overflow-x-hidden max-[980px]:pb-[18px]",
+    "grid h-full min-h-0 min-w-0 max-w-full grid-rows-[auto_auto_minmax(0,1fr)] gap-1.5 overflow-hidden overflow-x-hidden px-2 py-1.5 pb-2.5 text-[var(--fg-primary)] max-[980px]:overflow-y-auto max-[980px]:overflow-x-hidden max-[980px]:pb-[18px]",
+  header:
+    "min-w-0 border-transparent !bg-transparent !shadow-none !backdrop-blur-none",
+  toolbarStack: "grid min-w-0 shrink-0 gap-1.5",
   toolbar: "flex min-w-0 flex-wrap items-center justify-between gap-[var(--route-topbar-gap)]",
   toolbarIntro: "grid min-w-0 max-w-none flex-1 gap-0.5",
   toolbarControls: "flex flex-wrap items-center justify-end gap-3",
@@ -40,9 +43,10 @@ const styles = {
   lifecyclePanel:
     `flex min-h-[34px] min-w-0 items-center justify-between gap-2 px-2 py-1.5 max-[980px]:flex-col max-[980px]:items-start ${reviewRowSurfaceSoft}`,
   lifecyclePills: "flex flex-wrap justify-end gap-2 max-[980px]:justify-start",
+  // Recipe owns resize (layoutId); keep min/fill/overflow only. Fallback grid for non-resize paths.
   workspace:
-    `grid min-h-0 min-w-0 max-w-full flex-1 grid-cols-[var(--review-queue-width,380px)_12px_minmax(0,1fr)] overflow-hidden overflow-x-hidden max-[980px]:grid-cols-1 max-[980px]:gap-y-3 max-[980px]:overflow-y-visible max-[980px]:overflow-x-hidden ${vuiWorkspaceFillClass}`,
-  // Wave 6A: PaneCollapseHandle owns the visual rule; breakpoint hide only.
+    `min-h-0 min-w-0 max-w-full flex-1 overflow-hidden overflow-x-hidden max-[980px]:overflow-y-visible max-[980px]:overflow-x-hidden ${vuiWorkspaceFillClass}`,
+  // Placement-only residual for layout gate; recipe uses VSplitWorkspace handles.
   resizeHandle: "max-[980px]:hidden",
   queuePanel:
     `grid min-h-0 min-w-0 max-w-full grid-rows-[auto_auto_auto_auto_minmax(0,1fr)] gap-2 overflow-hidden p-[9px] max-[980px]:max-h-[min(620px,72vh)] max-[980px]:overflow-hidden ${reviewPanelSurface}`,

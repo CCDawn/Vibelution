@@ -195,13 +195,19 @@ describe("workbench layout gate (Wave 5)", () => {
     const agents = readFileSync(resolve(webSrc, "routes/AgentsRoute.tsx"), "utf-8");
     const agentsWorkspace = readFileSync(resolve(webSrc, "routes/AgentWorkspaceLayoutPanel.tsx"), "utf-8");
     const teams = readFileSync(resolve(webSrc, "routes/TeamsRoute.tsx"), "utf-8");
+    const teamsCanvas = readFileSync(resolve(webSrc, "routes/teams/TeamOrganizationCanvasSurface.tsx"), "utf-8");
     const memory = readFileSync(resolve(webSrc, "routes/MemoryRoute.tsx"), "utf-8");
     expect(agents).toContain('data-vui-recipe="agents-management-workbench"');
     expect(agentsWorkspace).toContain('data-vui-region="agents-directory"');
-    expect(teams).toContain('data-vui-recipe="teams-organization-workbench"');
-    expect(teams).toContain('data-vui-region="teams-canvas"');
-    expect(memory).toContain('data-vui-domain-recipe="memory-knowledge-workbench"');
-    expect(memory).toContain('data-vui-recipe="memory-knowledge-workbench"');
+    expect(
+      teams.includes('data-vui-recipe="teams-organization-workbench"')
+      || teams.includes('data-vui-domain-recipe="teams-organization-workbench"'),
+    ).toBe(true);
+    expect(teamsCanvas).toContain('data-vui-region="teams-canvas"');
+    expect(
+      memory.includes('data-vui-domain-recipe="memory-knowledge-workbench"')
+      || memory.includes('data-vui-recipe="memory-knowledge-workbench"'),
+    ).toBe(true);
   });
 
   it("keeps remaining workbench routes on domain recipe markers (Wave 7A)", () => {

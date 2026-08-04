@@ -49,7 +49,7 @@ import { PaneResizeHandle } from "../components/layout/PaneResizeHandle";
 import { type PaneSpec } from "../components/layout/paneLayoutPersistence";
 import { usePersistedPaneResize } from "../components/layout/usePersistedPaneResize";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
-import { VButton, VRouteHeader, VTooltip } from "../components/vui";
+import { VButton, VDenseOpsPage, VTooltip } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { launcherRouteStyles as styles } from "./LauncherRoute.styles";
 
@@ -2085,79 +2085,83 @@ export function LauncherRoute() {
   }, [launcherCloseGuardArmed, launcherCloseGuardMessage, status]);
 
   return (
-    <section className={styles.route} aria-label={copy.title} data-vui-recipe="launcher-workbench">
-      <VRouteHeader
-        className={styles.header}
-        aria-label={lifecycleDisplay.detail || copy.subtitle}
-        eyebrow={copy.eyebrow}
-        title={copy.title}
-        meta={lifecycleDetailShort || copy.subtitle}
-        actions={(
-          <div className={styles.statusBar}>
-            <VTooltip content={statusBarBlockerReason} tone={userGuideTone === "warning" ? "warning" : "neutral"} width="wide">
-              <div className={styles.statusBarReason} data-tone={userGuideTone} tabIndex={0}>
-                <span>{copy.lifecycleStatus}</span>
-                <strong>{projectSummary}</strong>
-                {activeWorkCount > 0 || restartQueueActive || launcherControlLimited || launcherStatusDisconnected ? <small>{statusBarReasonText}</small> : null}
-              </div>
-            </VTooltip>
-            <div className={styles.statusBarActions} aria-label={copy.lifecycleControls}>
-              <VButton type="button" variant="secondary" className={styles.statusBarButton} onPress={() => void statusQuery.refetch()} isDisabled={statusQuery.isFetching} disabledReason={copy.loading} tooltip={copy.refresh} icon={statusQuery.isFetching ? <LoaderCircle size={15} className={styles.spin} /> : <RefreshCw size={15} />}>
-                <span>{copy.refresh}</span>
+    <VDenseOpsPage
+      className={styles.route}
+      headerClassName={styles.header}
+      fill={false}
+      data-vui-domain-recipe="launcher-workbench"
+      ariaLabel={copy.title}
+      eyebrow={copy.eyebrow}
+      title={copy.title}
+      meta={lifecycleDetailShort || copy.subtitle}
+      actions={(
+        <div className={styles.statusBar}>
+          <VTooltip content={statusBarBlockerReason} tone={userGuideTone === "warning" ? "warning" : "neutral"} width="wide">
+            <div className={styles.statusBarReason} data-tone={userGuideTone} tabIndex={0}>
+              <span>{copy.lifecycleStatus}</span>
+              <strong>{projectSummary}</strong>
+              {activeWorkCount > 0 || restartQueueActive || launcherControlLimited || launcherStatusDisconnected ? <small>{statusBarReasonText}</small> : null}
+            </div>
+          </VTooltip>
+          <div className={styles.statusBarActions} aria-label={copy.lifecycleControls}>
+            <VButton type="button" variant="secondary" className={styles.statusBarButton} onPress={() => void statusQuery.refetch()} isDisabled={statusQuery.isFetching} disabledReason={copy.loading} tooltip={copy.refresh} icon={statusQuery.isFetching ? <LoaderCircle size={15} className={styles.spin} /> : <RefreshCw size={15} />}>
+              <span>{copy.refresh}</span>
+            </VButton>
+            <VButton type="button" variant="primary" className={`${styles.statusBarButton} ${styles.primaryButton}`} onPress={() => controlMutation.mutate("start")} isDisabled={startDisabled} disabledReason={startDisabledReason} tooltip={copy.start} icon={<Play size={15} />}>
+              <span>{copy.start}</span>
+            </VButton>
+            <VButton type="button" variant="secondary" className={styles.statusBarButton} onPress={() => controlMutation.mutate("restart")} isDisabled={destructiveActionDisabled} disabledReason={destructiveActionDisabledReason} tooltip={copy.restart} icon={<RefreshCw size={15} />}>
+              <span>{copy.restart}</span>
+            </VButton>
+            <VButton type="button" variant="secondary" className={styles.statusBarButton} onPress={() => controlMutation.mutate("stop")} isDisabled={stopDisabled} disabledReason={stopDisabledReason} tooltip={copy.stop} icon={<Square size={15} />}>
+              <span>{copy.stop}</span>
+            </VButton>
+            {bundle?.url ? (
+              <VTooltip content={copy.open} width="compact">
+                <a className={styles.statusBarButton} href={bundle.url} target="_blank" rel="noreferrer">
+                  <ExternalLink size={15} />
+                  <span>{copy.open}</span>
+                </a>
+              </VTooltip>
+            ) : null}
+          </div>
+        </div>
+      )}
+      toolbarSlot={(
+        <div className={styles.opsToolbarStack}>
+          <div className={styles.summaryStrip} data-tone={launcherStatusDisconnected ? "neutral" : headerTone}>
+            <Metric label={copy.lifecycleStatus} value={projectSummary} helper={lifecycleDetailShort} helperTitle={lifecycleDisplay.detail} tone={lifecycleDisplay.tone} />
+            <Metric label={copy.activeWork} value={activeWorkSummary} helper={activeWorkDetailShort} helperTitle={activeWorkDetail} tone={restartQueuePending || activeWorkCount > 0 ? "warning" : "success"} />
+            <Metric label={copy.launcherStatus} value={controlSummary} helper={controlDetail} tone={launcherControlLimited ? "warning" : status ? "success" : "neutral"} />
+            <Metric
+              label={copy.userAction}
+              value={recovery?.active ? copy.recovery : nextAction}
+              helper={recovery?.active ? summarizeLauncherMessage(recovery.statusLine || humanCommandType(recovery.commandType, uiLang), copy, uiLang) : nextActionDetailShort}
+              helperTitle={recovery?.active ? recovery.statusLine || humanCommandType(recovery.commandType, uiLang) : nextActionDetail}
+              tone={recovery?.active ? (recovery.resultOk === false ? "warning" : "success") : projectIsOpen ? "success" : projectIsChanging ? "warning" : "neutral"}
+            />
+          </div>
+
+          <VTooltip content={userGuideDetail} tone={userGuideTone === "warning" ? "warning" : "neutral"} width="wide">
+            <div className={styles.userGuide} data-tone={userGuideTone} tabIndex={0}>
+              <span>{copy.userGuide}</span>
+              <strong>{userGuideTitle}</strong>
+              <em>{actionLockLabel}</em>
+            </div>
+          </VTooltip>
+
+          <div className={styles.dangerZone}>
+            <span>{copy.forceStop}</span>
+            <small>{forceStopDisabled ? forceStopDisabledReason : copy.forceStopHint}</small>
+            <div className={styles.dangerActions}>
+              <VButton type="button" variant="danger" className={`${styles.iconButton} ${styles.dangerButton}`} onPress={() => controlMutation.mutate("force-stop")} isDisabled={forceStopDisabled} disabledReason={forceStopDisabledReason} tooltip={copy.forceStopHint} icon={<Power size={15} />}>
+                <span>{copy.forceStop}</span>
               </VButton>
-              <VButton type="button" variant="primary" className={`${styles.statusBarButton} ${styles.primaryButton}`} onPress={() => controlMutation.mutate("start")} isDisabled={startDisabled} disabledReason={startDisabledReason} tooltip={copy.start} icon={<Play size={15} />}>
-                <span>{copy.start}</span>
-              </VButton>
-              <VButton type="button" variant="secondary" className={styles.statusBarButton} onPress={() => controlMutation.mutate("restart")} isDisabled={destructiveActionDisabled} disabledReason={destructiveActionDisabledReason} tooltip={copy.restart} icon={<RefreshCw size={15} />}>
-                <span>{copy.restart}</span>
-              </VButton>
-              <VButton type="button" variant="secondary" className={styles.statusBarButton} onPress={() => controlMutation.mutate("stop")} isDisabled={stopDisabled} disabledReason={stopDisabledReason} tooltip={copy.stop} icon={<Square size={15} />}>
-                <span>{copy.stop}</span>
-              </VButton>
-              {bundle?.url ? (
-                <VTooltip content={copy.open} width="compact">
-                  <a className={styles.statusBarButton} href={bundle.url} target="_blank" rel="noreferrer">
-                    <ExternalLink size={15} />
-                    <span>{copy.open}</span>
-                  </a>
-                </VTooltip>
-              ) : null}
             </div>
           </div>
-        )}
-      />
-
-      <div className={styles.summaryStrip} data-tone={launcherStatusDisconnected ? "neutral" : headerTone}>
-        <Metric label={copy.lifecycleStatus} value={projectSummary} helper={lifecycleDetailShort} helperTitle={lifecycleDisplay.detail} tone={lifecycleDisplay.tone} />
-        <Metric label={copy.activeWork} value={activeWorkSummary} helper={activeWorkDetailShort} helperTitle={activeWorkDetail} tone={restartQueuePending || activeWorkCount > 0 ? "warning" : "success"} />
-        <Metric label={copy.launcherStatus} value={controlSummary} helper={controlDetail} tone={launcherControlLimited ? "warning" : status ? "success" : "neutral"} />
-        <Metric
-          label={copy.userAction}
-          value={recovery?.active ? copy.recovery : nextAction}
-          helper={recovery?.active ? summarizeLauncherMessage(recovery.statusLine || humanCommandType(recovery.commandType, uiLang), copy, uiLang) : nextActionDetailShort}
-          helperTitle={recovery?.active ? recovery.statusLine || humanCommandType(recovery.commandType, uiLang) : nextActionDetail}
-          tone={recovery?.active ? (recovery.resultOk === false ? "warning" : "success") : projectIsOpen ? "success" : projectIsChanging ? "warning" : "neutral"}
-        />
-      </div>
-
-      <VTooltip content={userGuideDetail} tone={userGuideTone === "warning" ? "warning" : "neutral"} width="wide">
-        <div className={styles.userGuide} data-tone={userGuideTone} tabIndex={0}>
-          <span>{copy.userGuide}</span>
-          <strong>{userGuideTitle}</strong>
-          <em>{actionLockLabel}</em>
         </div>
-      </VTooltip>
-
-      <div className={styles.dangerZone}>
-        <span>{copy.forceStop}</span>
-        <small>{forceStopDisabled ? forceStopDisabledReason : copy.forceStopHint}</small>
-        <div className={styles.dangerActions}>
-          <VButton type="button" variant="danger" className={`${styles.iconButton} ${styles.dangerButton}`} onPress={() => controlMutation.mutate("force-stop")} isDisabled={forceStopDisabled} disabledReason={forceStopDisabledReason} tooltip={copy.forceStopHint} icon={<Power size={15} />}>
-            <span>{copy.forceStop}</span>
-          </VButton>
-        </div>
-      </div>
-
+      )}
+    >
       <Suspense fallback={<p className={styles.notice} data-tone="neutral">{copy.loading}</p>}>
         <LauncherStartupSettingsPanel
           copy={copy}
@@ -2231,8 +2235,8 @@ export function LauncherRoute() {
         ref={launcherLayoutRef}
         className={styles.workspace}
         style={launcherLayoutStyle}
-        data-vui-recipe="launcher-workbench"
         data-vui-layout-id={LAUNCHER_LAYOUT_ID}
+        data-vui-region="launcher-workspace"
       >
         <section className={`${styles.panel} ${styles.matrixPanel}`}>
           <div className={styles.panelHeader}>
@@ -2302,7 +2306,7 @@ export function LauncherRoute() {
           />
         </Suspense>
       </div>
-    </section>
+    </VDenseOpsPage>
   );
 }
 

@@ -46,16 +46,19 @@ describe("SupervisedReviewRoute layout contract", () => {
     expect(routeSource).toContain('className={styles.errorText}');
   });
 
-  it("keeps the review workspace in split-pane layout at common desktop widths", () => {
+  it("hosts review on VListDetailPage with persistent list/detail resize", () => {
     const workspaceClass = routeStyle("workspace");
     const queuePanelClass = routeStyle("queuePanel");
     const detailPanelClass = routeStyle("detailPanel");
 
-    expect(routeSource).toContain("className={styles.workspace}");
-    expect(workspaceClass).toContain("grid-cols-[var(--review-queue-width,380px)_12px_minmax(0,1fr)]");
+    expect(routeSource).toContain("VListDetailPage");
+    expect(routeSource).toContain("workspaceClassName={styles.workspace}");
+    expect(routeSource).toContain("layoutId={REVIEW_LAYOUT_ID}");
+    expect(routeSource).toContain("resize={{ sidebar: REVIEW_QUEUE_SIDEBAR }}");
+    expect(routeSource).toContain('data-vui-domain-recipe="supervised-review-workbench"');
+    expect(routeSource).toContain("list={");
+    expect(routeSource).toContain("detail={");
     expect(workspaceClass).toContain("min-h-0");
-    expect(workspaceClass).toContain("minmax(0,1fr)");
-    expect(workspaceClass).toContain("max-[980px]:grid-cols-1");
     expect(workspaceClass).toContain("max-[980px]:overflow-y-visible");
     expect(workspaceClass).toContain("max-[980px]:overflow-x-hidden");
     expect(workspaceClass).not.toContain("max-[1280px]:grid-cols-1");

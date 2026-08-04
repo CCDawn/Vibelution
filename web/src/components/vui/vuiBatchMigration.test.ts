@@ -135,7 +135,12 @@ const cssModuleFreeTargets = [
 const routeShellTargets = [
   {
     path: "routes/LauncherRoute.tsx",
-    expected: ["VRouteHeader"],
+    expected: ["VDenseOpsPage"],
+    forbidden: ["<header className={styles.header}"],
+  },
+  {
+    path: "routes/SupervisedReviewRoute.tsx",
+    expected: ["VListDetailPage"],
     forbidden: ["<header className={styles.header}"],
   },
   {
