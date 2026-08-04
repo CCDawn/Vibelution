@@ -251,15 +251,17 @@ describe("MemoryRoute layout contract", () => {
     const sourcePanelIndex = sourceAndItemPanelsSource.indexOf("styles.sourcePanel");
     const itemPanelIndex = sourceAndItemPanelsSource.indexOf("styles.itemPanel", sourcePanelIndex);
     const sourcesViewIndex = routeSource.indexOf("const renderSourcesView");
-    const sourcesWorkspaceIndex = routeSource.indexOf("styles.workspace", sourcesViewIndex);
-    const sourcesPanelsIndex = routeSource.indexOf("createSourceAndItemPanels(copy.sourceAudit)", sourcesWorkspaceIndex);
-    const detailPanelIndex = routeSource.indexOf("createDetailPanel()", sourcesPanelsIndex);
+    const sourcesWorkspaceIndex = routeSource.indexOf("VSplitWorkspace", sourcesViewIndex);
+    const sourcesRailIndex = routeSource.indexOf("createSourceRail()", sourcesWorkspaceIndex);
+    const sourcesItemIndex = routeSource.indexOf("createItemColumn(copy.sourceAudit)", sourcesRailIndex);
+    const detailPanelIndex = routeSource.indexOf("createDetailPanel()", sourcesItemIndex);
 
     expect(sourcePanelIndex).toBeGreaterThan(0);
     expect(itemPanelIndex).toBeGreaterThan(sourcePanelIndex);
     expect(sourcesViewIndex).toBeGreaterThan(0);
-    expect(sourcesPanelsIndex).toBeGreaterThan(sourcesWorkspaceIndex);
-    expect(detailPanelIndex).toBeGreaterThan(sourcesPanelsIndex);
+    expect(sourcesRailIndex).toBeGreaterThan(sourcesWorkspaceIndex);
+    expect(sourcesItemIndex).toBeGreaterThan(sourcesRailIndex);
+    expect(detailPanelIndex).toBeGreaterThan(sourcesItemIndex);
   });
 
   it("keeps the source audit filter stable instead of deriving focus from the first item", () => {
@@ -275,9 +277,15 @@ describe("MemoryRoute layout contract", () => {
 
   it("delegates source and item audit panels to a dedicated view component", () => {
     expect(routeSource).toContain('from "./MemorySourceAndItemPanels"');
-    expect(routeSource).toContain("<MemorySourceAndItemPanels");
+    expect(routeSource).toContain("<MemorySourcePanel");
+    expect(routeSource).toContain("<MemoryItemPanel");
+    expect(routeSource).toContain("VSplitWorkspace");
     expect(routeSource).not.toContain("const renderSourceAndItemPanels = (title: string) => (");
+    expect(routeSource).not.toContain("usePersistedPaneResize");
+    expect(routeSource).not.toContain("PaneResizeHandle");
 
+    expect(sourceAndItemPanelsSource).toContain("export function MemorySourcePanel");
+    expect(sourceAndItemPanelsSource).toContain("export function MemoryItemPanel");
     expect(sourceAndItemPanelsSource).toContain("export function MemorySourceAndItemPanels");
     expect(sourceAndItemPanelsSource).toContain("styles.sourcePanel");
     expect(sourceAndItemPanelsSource).toContain("styles.itemPanel");
@@ -326,17 +334,16 @@ describe("MemoryRoute layout contract", () => {
     expect(styles.viewStack).toContain("[&>.summaryGrid]:shrink-0");
     expect(styles.workspace).toContain("h-full");
     expect(styles.workspace).toContain("min-h-0");
-    expect(styles.workspace).toContain("grid-rows-[minmax(0,1fr)]");
-    expect(styles.workspace).toContain("var(--memory-left-width,clamp(200px,18vw,260px))");
-    expect(styles.workspace).toContain("var(--memory-right-width,clamp(280px,24vw,380px))");
     expect(styles.workspace).toContain("overflow-hidden");
-    expect(styles.workspace).toContain("max-[1120px]:grid-cols-[var(--memory-left-width,clamp(190px,18vw,240px))_minmax(0,1fr)]");
-    expect(styles.paneResizeHandleLeft).toContain("left-[var(--memory-left-width,230px)]");
-    expect(styles.paneResizeHandleRight).toContain("right-[var(--memory-right-width,320px)]");
-    expect(routeSource).toContain("PaneResizeHandle");
-    expect(styles.workspace).toContain("max-[1120px]:[&_.detailPanel]:col-span-2");
-    expect(styles.workspace).toContain("max-[780px]:grid-cols-1");
-    expect(styles.workspace).toContain("max-[780px]:overflow-auto");
+    expect(styles.workspace).not.toContain("--memory-left-width");
+    expect(styles.workspace).not.toContain("--memory-right-width");
+    expect(routeSource).toContain("VSplitWorkspace");
+    expect(routeSource).toContain("MEMORY_SPLIT_RESIZE");
+    expect(routeSource).toContain("WORKBENCH_LAYOUT_IDS.memory");
+    expect(routeSource).not.toContain("usePersistedPaneResize");
+    expect(routeSource).not.toContain("PaneResizeHandle");
+    expect(styles).not.toHaveProperty("paneResizeHandleLeft");
+    expect(styles).not.toHaveProperty("paneResizeHandleRight");
     expect(agentMemoryPanelStyles.detailPanel).toContain("min-h-0");
     expect(agentMemoryPanelStyles.detailPanel).toContain("overflow-auto");
     expect(agentMemoryPanelStyles.emptyDetail).toContain("min-h-[96px]");
@@ -436,10 +443,11 @@ describe("MemoryRoute layout contract", () => {
     expect(graphViewPanelStyles.itemButton).not.toContain("w-fit");
     expect(graphViewPanelStyles.itemButton).toContain("w-full");
 
-    expect(graphViewPanelStyles.graphWorkspace).toContain("grid-cols-[minmax(190px,240px)_minmax(0,1fr)_minmax(230px,0.34fr)]");
-    expect(graphViewPanelStyles.graphWorkspace).toContain("max-[1180px]:grid-cols-[minmax(180px,220px)_minmax(0,1fr)]");
-    expect(graphViewPanelStyles.graphWorkspace).toContain("max-[1180px]:[&_.detailPanel]:col-span-2");
-    expect(graphViewPanelStyles.graphWorkspace).toContain("max-[860px]:grid-cols-[minmax(0,1fr)]");
+    // Graph shell fills; columns owned by VCanvasWorkbenchPage / panel hosts (not route CSS vars).
+    expect(graphViewPanelStyles.graphWorkspace).toContain("h-full");
+    expect(graphViewPanelStyles.graphWorkspace).toContain("min-h-0");
+    expect(graphViewPanelStyles.graphWorkspace).toContain("overflow-hidden");
+    expect(graphViewPanelStyles.graphWorkspace).not.toContain("grid-cols-[minmax(190px,240px)");
 
     expect(detailPanelStyles.detailHeader).toContain("[&_h2]:break-words");
     expect(detailPanelStyles.detailHeader).toContain("[&_p]:line-clamp-2");
@@ -683,7 +691,8 @@ describe("MemoryRoute layout contract", () => {
     expect(graphCanvasStyles.graphCanvasShell).toContain("bg-[var(--vui-gradient-route-soft)]");
     expect(graphCanvasStyles.graphCanvasShell).toContain("after:content-['']");
     expect(graphCanvasStyles.graphCanvasShell).toContain("after:[background-size:91px_91px]");
-    expect(graphViewPanelStyles.graphWorkspace).toContain("grid-cols-[minmax(190px,240px)_minmax(0,1fr)_minmax(230px,0.34fr)]");
+    expect(graphViewPanelStyles.graphWorkspace).toContain("h-full");
+    expect(graphViewPanelStyles.graphWorkspace).toContain("overflow-hidden");
     expect(graphCanvasStyles.graphNodeBadge).toBeTypeOf("string");
     expect(memoryCssSource).not.toContain("backdrop-filter");
     expect(graphCanvasStyles.graphNodeBadge).toContain("data-[detail=true]:z-10");
@@ -1162,10 +1171,14 @@ describe("MemoryRoute layout contract", () => {
     expect(managementEditorSource).not.toContain('title={copy.managementHint}');
     expect(knowledgePipelinePanelSource).toContain('<VTooltip content={copy.knowledgeSubtitle} width="wide">');
     expect(knowledgePipelinePanelSource).not.toContain('title={copy.knowledgeSubtitle}');
-    expect(knowledgeBaseSidebarSource).toContain('import { VButton, VTooltip } from "../components/vui"');
+    expect(knowledgeBaseSidebarSource).toContain("VButton");
+    expect(knowledgeBaseSidebarSource).toContain("VTooltip");
+    expect(knowledgeBaseSidebarSource).toContain("VStateSurface");
     expect(knowledgeBaseSidebarSource).toContain("const toolVisibilityTooltip");
     expect(knowledgeBaseSidebarSource).toContain("content={toolVisibilityTooltip}");
-    expect(knowledgeBaseSidebarSource).not.toContain("title=");
+    // VStateSurface may use title= for loading/empty; native HTML title tooltips stay forbidden.
+    expect(knowledgeBaseSidebarSource).not.toContain("title={copy.knowledgeHint}");
+    expect(knowledgeBaseSidebarSource).not.toContain(" title=\"");
     expect(knowledgeModeTabsSource).toContain('import { VButton, VTooltip } from "../components/vui"');
     expect(knowledgeModeTabsSource).toContain("content={mode.hint}");
     expect(knowledgeModeTabsSource).not.toContain("title={mode.hint}");
@@ -1460,8 +1473,12 @@ describe("MemoryRoute layout contract", () => {
     expect(knowledgeModeTabsStyles.knowledgeModeTabActive).toBeTypeOf("string");
     expect(knowledgeModeTabsStyles.knowledgeModeTabActive).not.toContain("inline-flex");
     expect(knowledgeModeTabsStyles.knowledgeModeTabActive).not.toContain("w-fit");
-    expect(styles.knowledgeWorkspace).toContain("var(--memory-left-width,minmax(170px,205px))");
-    expect(styles.knowledgeWorkspace).toContain("var(--memory-right-width,minmax(260px,0.62fr))");
+    expect(styles.knowledgeWorkspace).toContain("h-full");
+    expect(styles.knowledgeWorkspace).toContain("min-h-0");
+    expect(styles.knowledgeWorkspace).toContain("overflow-hidden");
+    expect(styles.knowledgeWorkspace).not.toContain("--memory-left-width");
+    expect(styles.knowledgeWorkspace).not.toContain("--memory-right-width");
+    expect(routeSource).toContain('data-vui-region="memory-knowledge-workspace"');
     expect(knowledgeSourceGovernancePanelStyles.sourceGovernanceColumn).toContain("[&_.sourceGovernanceControls]:grid-cols-[minmax(240px,0.92fr)_minmax(250px,1.08fr)]");
     expect(knowledgeSourceGovernancePanelStyles.collapsedFormButton).toContain("max-h-[92px]");
     expect(knowledgeUsageContractPanelStyles.contractStateGrid).toContain("hidden");

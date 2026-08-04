@@ -17,7 +17,7 @@ const styles = {
   detailActions: `detailActions min-w-0 flex w-fit max-w-full flex-wrap items-center gap-1.5 ${vuiOpaqueRowClass} p-1.5`,
   detailHeader:
     "detailHeader min-w-0 flex flex-wrap items-start justify-between gap-2 px-1 py-0.5 [&>div]:min-w-0 [&_h2]:min-w-0 [&_h2]:break-words [&_p]:min-w-0 [&_p]:line-clamp-2 [&_p]:break-words",
-  detailPanel: `detailPanel min-w-0 min-h-0 overflow-auto ${vuiFlatPanelClass} p-2`,
+  detailPanel: `detailPanel min-w-0 h-full min-h-0 overflow-auto ${vuiFlatPanelClass} p-2`,
   emptyDetail:
     "emptyDetail min-w-0 grid min-h-[96px] content-center gap-1.5 rounded-[var(--radius-control)] border border-dashed border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] p-2 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   factGrid:

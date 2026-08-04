@@ -31,10 +31,9 @@ export type MemorySourceAndItemPanelsCopy = {
   refreshFailed: string;
 };
 
-type MemorySourceAndItemPanelsProps = {
+type MemorySourcePanelProps = {
   copy: MemorySourceAndItemPanelsCopy;
   sourceTitle: string;
-  itemTitle: string;
   selectedSectionVisibleCount: number;
   searchText: string;
   onSearchTextChange: (value: string) => void;
@@ -47,15 +46,23 @@ type MemorySourceAndItemPanelsProps = {
   onSelectAllSections: () => void;
   sections: MemorySourceSectionView[];
   onSelectSection: (sectionId: string) => void;
+};
+
+type MemoryItemPanelProps = {
+  copy: MemorySourceAndItemPanelsCopy;
+  itemTitle: string;
+  flatVisibleItemCount: number;
   showRefreshNotice: boolean;
   refreshErrorText: string;
   memoryList: ReactNode;
 };
 
-export function MemorySourceAndItemPanels({
+type MemorySourceAndItemPanelsProps = MemorySourcePanelProps & MemoryItemPanelProps;
+
+/** Left source rail for VSplitWorkspace sidebar slot. */
+export function MemorySourcePanel({
   copy,
   sourceTitle,
-  itemTitle,
   selectedSectionVisibleCount,
   searchText,
   onSearchTextChange,
@@ -68,104 +75,121 @@ export function MemorySourceAndItemPanels({
   onSelectAllSections,
   sections,
   onSelectSection,
+}: MemorySourcePanelProps) {
+  return (
+    <div className={styles.sourcePanel} data-vui-region="memory-source-rail">
+      <div className={styles.panelHeader}>
+        <div>
+          <p className={styles.panelEyebrow}>{copy.sections}</p>
+          <h2>{sourceTitle}</h2>
+        </div>
+        <span className={styles.countPill}>{selectedSectionVisibleCount}</span>
+      </div>
+
+      <label className={styles.searchBox}>
+        <Search size={15} />
+        <VNativeInput value={searchText} placeholder={copy.searchPlaceholder} onChange={(event) => onSearchTextChange(event.target.value)} />
+      </label>
+
+      <div className={styles.filterGroup} aria-label={copy.filters}>
+        {filterOptions.map((option) => (
+          <VButton
+            key={option.id}
+            type="button"
+            className={option.id === activeFilterId ? `${styles.filterButton} ${styles.filterButtonActive}` : styles.filterButton}
+            onClick={() => onFilterChange(option.id)}
+            aria-pressed={option.id === activeFilterId}
+          >
+            <span>{option.label}</span>
+            <strong>{option.count}</strong>
+          </VButton>
+        ))}
+      </div>
+
+      <VButton
+        type="button"
+        contentLayout="plain"
+        className={allSectionsActive ? `${styles.sourceButton} ${styles.sourceButtonActive}` : styles.sourceButton}
+        onClick={onSelectAllSections}
+      >
+        <span className={styles.sourceIcon}>
+          <Database size={15} />
+        </span>
+        <span className={styles.sourceCopy}>
+          <strong>{copy.allSections}</strong>
+          <span>
+            {copy.items}: {flatVisibleItemCount}
+            {selectedSectionPromptCount ? ` / ${selectedSectionPromptCount}` : ""}
+          </span>
+        </span>
+      </VButton>
+
+      <nav className={styles.sourceList} aria-label={copy.sections}>
+        {sections.map((section) => (
+          <VButton
+            key={section.id}
+            type="button"
+            contentLayout="plain"
+            className={section.active ? `${styles.sourceButton} ${styles.sourceButtonActive}` : styles.sourceButton}
+            onClick={() => onSelectSection(section.id)}
+            aria-pressed={section.active}
+          >
+            <span className={styles.sourceIcon}>
+              <Brain size={15} />
+            </span>
+            <span className={styles.sourceCopy}>
+              <strong>{section.title}</strong>
+              <span>{[section.sourcePath, section.sourceApi].filter(Boolean).join(" · ") || section.sourceKind}</span>
+            </span>
+            <span className={styles.sourceStats}>
+              {section.itemCount}
+              {section.promptCount ? ` / ${section.promptCount}` : ""}
+            </span>
+          </VButton>
+        ))}
+      </nav>
+    </div>
+  );
+}
+
+/** Center item list for VSplitWorkspace main slot. */
+export function MemoryItemPanel({
+  copy,
+  itemTitle,
+  flatVisibleItemCount,
   showRefreshNotice,
   refreshErrorText,
   memoryList,
-}: MemorySourceAndItemPanelsProps) {
+}: MemoryItemPanelProps) {
+  return (
+    <div className={styles.itemPanel} data-vui-region="memory-item-list">
+      <div className={styles.panelHeader}>
+        <div>
+          <p className={styles.panelEyebrow}>{copy.items}</p>
+          <h2>{itemTitle}</h2>
+        </div>
+        <span className={styles.countPill}>{flatVisibleItemCount}</span>
+      </div>
+
+      {showRefreshNotice ? (
+        <section className={styles.panelNotice} aria-label={copy.refreshFailed}>
+          <TriangleAlert size={16} />
+          <strong>{copy.refreshFailed}</strong>
+          <span>{refreshErrorText}</span>
+        </section>
+      ) : null}
+
+      {memoryList}
+    </div>
+  );
+}
+
+/** Combined source + item columns (legacy fragment composition). Prefer split slots with VSplitWorkspace. */
+export function MemorySourceAndItemPanels(props: MemorySourceAndItemPanelsProps) {
   return (
     <>
-      <aside className={styles.sourcePanel}>
-        <div className={styles.panelHeader}>
-          <div>
-            <p className={styles.panelEyebrow}>{copy.sections}</p>
-            <h2>{sourceTitle}</h2>
-          </div>
-          <span className={styles.countPill}>{selectedSectionVisibleCount}</span>
-        </div>
-
-        <label className={styles.searchBox}>
-          <Search size={15} />
-          <VNativeInput value={searchText} placeholder={copy.searchPlaceholder} onChange={(event) => onSearchTextChange(event.target.value)} />
-        </label>
-
-        <div className={styles.filterGroup} aria-label={copy.filters}>
-          {filterOptions.map((option) => (
-            <VButton
-              key={option.id}
-              type="button"
-              className={option.id === activeFilterId ? `${styles.filterButton} ${styles.filterButtonActive}` : styles.filterButton}
-              onClick={() => onFilterChange(option.id)}
-              aria-pressed={option.id === activeFilterId}
-            >
-              <span>{option.label}</span>
-              <strong>{option.count}</strong>
-            </VButton>
-          ))}
-        </div>
-
-        <VButton
-          type="button"
-                contentLayout="plain"
-          className={allSectionsActive ? `${styles.sourceButton} ${styles.sourceButtonActive}` : styles.sourceButton}
-          onClick={onSelectAllSections}
-        >
-          <span className={styles.sourceIcon}>
-            <Database size={15} />
-          </span>
-          <span className={styles.sourceCopy}>
-            <strong>{copy.allSections}</strong>
-            <span>
-              {copy.items}: {flatVisibleItemCount}
-              {selectedSectionPromptCount ? ` / ${selectedSectionPromptCount}` : ""}
-            </span>
-          </span>
-        </VButton>
-
-        <nav className={styles.sourceList} aria-label={copy.sections}>
-          {sections.map((section) => (
-            <VButton
-              key={section.id}
-              type="button"
-                contentLayout="plain"
-              className={section.active ? `${styles.sourceButton} ${styles.sourceButtonActive}` : styles.sourceButton}
-              onClick={() => onSelectSection(section.id)}
-              aria-pressed={section.active}
-            >
-              <span className={styles.sourceIcon}>
-                <Brain size={15} />
-              </span>
-              <span className={styles.sourceCopy}>
-                <strong>{section.title}</strong>
-                <span>{[section.sourcePath, section.sourceApi].filter(Boolean).join(" · ") || section.sourceKind}</span>
-              </span>
-              <span className={styles.sourceStats}>
-                {section.itemCount}
-                {section.promptCount ? ` / ${section.promptCount}` : ""}
-              </span>
-            </VButton>
-          ))}
-        </nav>
-      </aside>
-
-      <main className={styles.itemPanel}>
-        <div className={styles.panelHeader}>
-          <div>
-            <p className={styles.panelEyebrow}>{copy.items}</p>
-            <h2>{itemTitle}</h2>
-          </div>
-          <span className={styles.countPill}>{flatVisibleItemCount}</span>
-        </div>
-
-        {showRefreshNotice ? (
-          <section className={styles.panelNotice} aria-label={copy.refreshFailed}>
-            <TriangleAlert size={16} />
-            <strong>{copy.refreshFailed}</strong>
-            <span>{refreshErrorText}</span>
-          </section>
-        ) : null}
-
-        {memoryList}
-      </main>
+      <MemorySourcePanel {...props} />
+      <MemoryItemPanel {...props} />
     </>
   );
 }

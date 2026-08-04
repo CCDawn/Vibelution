@@ -29,7 +29,7 @@ const styles = {
     "sourceIcon min-w-0 shrink-0 text-[var(--fg-tertiary)]",
   sourceList:
     "sourceList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
-  sourcePanel: `sourcePanel min-w-0 min-h-0 overflow-auto ${vuiFlatPanelClass} p-2`,
+  sourcePanel: `sourcePanel min-w-0 h-full min-h-0 overflow-auto ${vuiFlatPanelClass} p-2`,
   sourceStats:
     "sourceStats min-w-0 grid gap-2 grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]",
   statusPill:

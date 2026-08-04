@@ -68,6 +68,9 @@ describe("workbench layout gate (Wave 5)", () => {
   it("keeps Chat workbench on shared axis resize session + registry layout id", () => {
     const chatLayout = readFileSync(resolve(webSrc, "routes/chat/useChatWorkbenchLayout.ts"), "utf-8");
     const chatRoute = readFileSync(resolve(webSrc, "routes/ChatCodingRoute.tsx"), "utf-8");
+    const statusRail = readFileSync(resolve(webSrc, "routes/chat/ChatStatusRail.tsx"), "utf-8");
+    const indexRail = readFileSync(resolve(webSrc, "routes/chat/ChatConversationIndexRail.tsx"), "utf-8");
+    const sessionTabs = readFileSync(resolve(webSrc, "routes/AgentSessionTabStrip.styles.ts"), "utf-8");
     expect(chatLayout).toContain("attachAxisResizeSession");
     expect(chatLayout).toContain("CHAT_WORKBENCH_LAYOUT_ID");
     expect(chatLayout).toContain("WORKBENCH_LAYOUT_IDS.chat");
@@ -78,7 +81,16 @@ describe("workbench layout gate (Wave 5)", () => {
     expect(chatRoute).toContain("WORKBENCH_LAYOUT_IDS.chat");
     expect(chatRoute).toContain("data-vui-layout-id");
     expect(chatRoute).toContain('data-vui-recipe="chat-session-workbench"');
+    expect(chatRoute).toContain('data-vui-domain-recipe="chat-dual-pane"');
+    expect(chatRoute).toContain('data-vui-region="chat-conversation-center"');
     expect(chatRoute).toContain("PaneCollapseHandle");
+    expect(statusRail).toContain('data-vui-region="chat-status-rail"');
+    expect(indexRail).toContain('data-vui-region="chat-session-index"');
+    // Soft cool active tab — not full ink slab fill.
+    expect(sessionTabs).toContain("agentSessionTabActive");
+    expect(sessionTabs).toContain("accent-cool");
+    expect(sessionTabs).not.toContain("bg-[var(--accent)]");
+    expect(sessionTabs).not.toContain("bg-[var(--accent-primary)]");
   });
 
   it("keeps Memory project-memory-queue on shared height resize handle (Wave 6D)", () => {
@@ -87,6 +99,32 @@ describe("workbench layout gate (Wave 5)", () => {
     expect(panel).toContain("PaneHeightResizeHandle");
     expect(panel).toContain("project-memory-queue");
     expect(panel).toContain("WORKBENCH_LAYOUT_IDS.memory");
+  });
+
+  it("keeps Memory sources/knowledge three-pane on VSplitWorkspace + registry layout id", () => {
+    const memory = readFileSync(resolve(webSrc, "routes/MemoryRoute.tsx"), "utf-8");
+    expect(memory).toContain("VSplitWorkspace");
+    expect(memory).toContain("WORKBENCH_LAYOUT_IDS.memory");
+    expect(memory).toContain("MEMORY_SPLIT_RESIZE");
+    expect(memory).toContain('id: "left"');
+    expect(memory).toContain('id: "right"');
+    expect(memory).toContain('data-vui-region="memory-sources-workspace"');
+    expect(memory).toContain('data-vui-region="memory-knowledge-workspace"');
+    expect(memory).not.toMatch(/import\s*\{[^}]*usePersistedPaneResize/);
+    expect(memory).not.toContain("PaneResizeHandle");
+    expect(memory).not.toContain("--memory-left-width");
+  });
+
+  it("keeps Evolution multi-rail on registry layoutId (domain resize exception)", () => {
+    const evolution = readFileSync(resolve(webSrc, "routes/EvolutionRoute.tsx"), "utf-8");
+    expect(evolution).toContain("WORKBENCH_LAYOUT_IDS.evolution");
+    expect(evolution).toContain("usePersistedPaneResize");
+    expect(evolution).toContain('data-vui-domain-recipe="evolution-multi-rail"');
+    expect(evolution).toContain('data-vui-recipe="evolution-workbench"');
+    expect(evolution).toContain("runs-queue");
+    expect(evolution).toContain("library-list");
+    expect(evolution).toContain("live-launch");
+    expect(evolution).toContain("live-run");
   });
 
   it("keeps Teams source-collection list shells on shared height API (Wave 6E)", () => {
@@ -244,7 +282,6 @@ describe("workbench layout gate (Wave 5)", () => {
       { file: "routes/LogsRoute.styles.ts", key: "resizeHandle" },
       { file: "routes/ToolsRoute.styles.ts", key: "resizeHandle" },
       { file: "routes/LauncherRoute.styles.ts", key: "railResizeHandle" },
-      { file: "routes/ConfigRoute.styles.ts", key: "settingsNavResizeHandle" },
       { file: "routes/MemoryGraphViewPanel.styles.ts", key: "graphNodeListResizeHandle" },
       { file: "routes/LogsRoute.styles.ts", key: "packageFilesResizeHandle" },
       { file: "routes/LauncherDiagnosticsPanel.styles.ts", key: "diagnosticsBodyResizeHandle" },
