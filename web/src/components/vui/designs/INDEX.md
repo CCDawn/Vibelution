@@ -18,6 +18,7 @@
 | `VDialog` | [primitives/feedback.md](./primitives/feedback.md#vdialog) |
 | `VConfirmDialog` | [primitives/feedback.md](./primitives/feedback.md#vconfirmdialog) |
 | `VDropdownMenu` | [primitives/feedback.md](./primitives/feedback.md#vdropdownmenu) |
+| `VPopover` | [primitives/feedback.md](./primitives/feedback.md#vpopover) |
 
 ## Forms
 

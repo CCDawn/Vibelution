@@ -120,7 +120,7 @@ const styles = {
   mobileRouteLinkActive:
     `vui-app-appshell mobileRouteLinkActive ${vuiStateSelectedRowClass}`,
   mobileRouteMenu:
-    "vui-app-appshell mobileRouteMenu hidden max-[639px]:grid absolute right-0 top-[calc(100%+4px)] z-[90] w-[min(88vw,320px)] gap-1 rounded-[var(--vui-radius-panel-soft)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2 shadow-[var(--vui-elevation-panel)]",
+    "vui-app-appshell mobileRouteMenu hidden max-[639px]:grid min-w-0 w-full gap-1 rounded-[var(--vui-radius-panel-soft)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2",
   nav: `vui-app-appshell nav min-w-0 max-[639px]:hidden rounded-[var(--vui-radius-panel-soft)] border border-[var(--vui-border-subtle)] ${vuiToolbarFillClass} p-[3px] shadow-[var(--vui-elevation-panel)]`,
   navLink:
     "vui-app-appshell navLink relative z-[2] inline-flex min-h-[30px] min-w-0 cursor-pointer items-center justify-center rounded-[var(--radius-control)] px-2.5 [font-size:var(--vui-font-sm)] font-semibold text-[var(--fg-primary)] no-underline select-none",
@@ -242,6 +242,10 @@ const styles = {
     "vui-app-appshell utilityCluster relative min-w-0 shrink-0",
   utilityClusterOpen:
     `vui-app-appshell utilityClusterOpen min-w-0 ${vuiStateCoolSoftClass}`,
+  utilityPopoverContent:
+    "vui-app-appshell utilityPopoverContent z-[95] w-[min(520px,calc(100vw-40px))] max-h-[min(78vh,760px)] overflow-auto border-[var(--border-strong)] bg-[var(--shell-panel)] p-0 shadow-[var(--vui-shadow-soft)]",
+  utilityPopoverBody:
+    "vui-app-appshell utilityPopoverBody grid min-w-0 gap-2 p-2",
   utilityFileButton:
     `vui-app-appshell utilityFileButton min-w-0 ${vuiControlQuietClass} grid [&_[data-slot=vui-button-content]]:w-full [&_[data-slot=vui-button-label]]:grid [&_[data-slot=vui-button-label]]:w-full [&_[data-slot=vui-button-label]]:grid-cols-[minmax(0,1fr)_auto] [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-2`,
   utilityFileButtonActive:
