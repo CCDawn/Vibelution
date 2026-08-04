@@ -1019,9 +1019,11 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourceCollectionConversationWorkspacePanelSource).toContain("本地文件");
     expect(evidenceModelSource).toContain("缺少来源");
     expect(routeSource).toContain("SourceCollectionSourceFilter");
-    expect(routeSource).toContain("SOURCE_COLLECTION_SOURCE_FILTERS");
-    expect(routeSource).toContain("sourceCollectionSourceFilterLabel");
+    // Filter constants/labels live on filter-bar inject + evidence model.
+    expect(evidenceModelSource).toContain("SOURCE_COLLECTION_SOURCE_FILTERS");
+    expect(evidenceModelSource).toContain("sourceCollectionSourceFilterLabel");
     expect(routeSource).toContain("sourceCollectionSourceFilter");
+    expect(routeSource).toContain("TeamSourceCollectionFilterBarInject");
     expect(routeSource).toContain("sourceCollectionFilteredRecords");
     expect(routeSource).toContain("sourceCollectionFilteredRunCandidates");
     expect(routeSource).toContain("sourceCollectionFilterMatches");
@@ -1386,8 +1388,10 @@ describe("TeamsRoute layout contract", () => {
     expect(teamStageCardSource).toContain('target.closest("button, a")');
     // Wave 8M: stage-agents strip mount lives on controls workspace.
     expect(teamSourceCollectionControlsWorkspacePanelSource).toContain("renderSourceCollectionStageAgents(activeModule.id)");
-    expect(routeSource).toContain("TeamSourceCollectionStageAgentsPanel");
-    expect(routeSource).toContain("agentCards: TeamSourceCollectionStageAgentCard[]");
+    expect(routeSource).toContain("TeamSourceCollectionStageAgentsInject");
+    expect(teamSourceCollectionStageAgentsPanelSource).toContain("TeamSourceCollectionStageAgentsPanel");
+    // Agent card mapping lives on stageAgentsPresentation pure helper.
+    expect(routeSource).toContain("bindings={sourceCollectionStageAgentBindings(stageId)}");
     expect(teamSourceCollectionStageAgentsPanelSource).toContain("当前步骤 Agent 配置");
     expect(teamSourceCollectionStageAgentsPanelSource).toContain("sourceCollectionStageAgentCardBody");
     expect(teamSourceCollectionStageAgentsPanelSource).toContain("sourceCollectionStageAgentCardActions");
@@ -1395,7 +1399,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).not.toContain("sourceCollectionStageAgentStrip");
     expect(routeSource).not.toContain("sourceCollectionStageAgentChips");
     expect(routeSource).not.toContain("sourceCollectionStageAgentChip");
-    expect(routeSource).toContain("researchStageAgentManagementRoute(binding.agentId)");
+    // Config route composition moved into stageAgentsPresentation pure helper.
+    expect(routeSource).toContain("TeamSourceCollectionStageAgentsInject");
     expect(routeSource).not.toContain("const chatRoute = researchStageAgentDirectChatRoute");
     // Wave 8G: Agent management CTA copy lives on TeamResearchStageAgentPanel.
     expect(teamResearchStageAgentPanelSource).toContain("Agent 管理");
@@ -3094,13 +3099,14 @@ describe("TeamsRoute layout contract", () => {
     );
     expect(standaloneSource).toContain("sourceCollectionBoardNextStepLabel");
     expect(standaloneSource).not.toContain("{renderSourceCollectionControlsPanel()}");
-    expect(routeSource).toContain("buildSourceCollectionFilterBarOptions");
+    expect(routeSource).toContain("TeamSourceCollectionFilterBarInject");
+    expect(routeSource).toContain("TeamSourceCollectionPaginationInject");
     expect(teamSourceCollectionInjectModelSource).toContain("buildSourceCollectionFilterBarOptions");
-    expect(routeSource).toContain("resolveSourceCollectionPaginationView");
+    expect(teamSourceCollectionInjectModelSource).toContain("resolveSourceCollectionPaginationView");
     expect(routeSource).toContain("TeamSourceCollectionControlsInject");
     expect(routeSource).toContain("TeamSourceCollectionActiveStageInject");
     expect(teamSourceCollectionInjectModelSource).toContain('filter === ("all" as Key)');
-    expect(routeSource).toContain("loadingAllText: sourceCollectionLoadingText");
+    expect(routeSource).toContain("loadingAllText={sourceCollectionLoadingText}");
     expect(routeSource).not.toContain("count: loading ? loadingValue");
 
     const commandStatsSource = standaloneSource.slice(

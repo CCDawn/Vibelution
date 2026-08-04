@@ -14,7 +14,7 @@
 
 | Surface | Symptom | Target recipe |
 | --- | --- | --- |
-| `TeamsRoute.tsx` | ~6.2k lines; shell recipes + hosts + stage modules + SC injects + **extractionRecovery bag builder**. Next: stage-launcher internal adapters; SC filter/pagination ownership; optional controls prop bag typing. | keep recipes; continue module extract |
+| `TeamsRoute.tsx` | ~6.1k lines; shell recipes + hosts + stage modules + SC injects + list chrome injects + recovery/controls bags. Next: stage-launcher internal adapters; further collapse remaining render* glue; optional Evolution multi-rail recipe work. | keep recipes; continue module extract |
 | Agents workspace | **Migrated** outer shell to `VListDetailPage` + layoutId (`AgentWorkspaceLayoutPanel`) | keep product/agent-management panels; optional inspector UX polish |
 | Chat coding | Dual-pane domain math (OK) but chrome drift risk | Keep domain layout; enforce layoutId + regions only |
 | Memory graph | **Migrated** `MemoryGraphViewPanel` → `VCanvasWorkbenchPage` | height list still uses PaneHeightResizeHandle |

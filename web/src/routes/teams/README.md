@@ -29,6 +29,8 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 | SC screening inject | `TeamSourceCollectionScreeningInject.tsx` + injectModel recommended-next | screening next-step copy in route |
 | SC graph / memory / selected / conversation injects | `TeamSourceCollection*Inject.tsx` | route mounting workspace panels directly |
 | SC active-stage extraction recovery bag | `source-collection/extractionRecoveryBag.ts` + ActiveStageInject normalize | inline extractionRecovery object in TeamsRoute |
+| SC filter / pagination / stage agents | `TeamSourceCollectionFilterBarInject` / `PaginationInject` / `StageAgentsInject` + stageAgentsPresentation | list chrome + agent cards inlined in route |
+| SC controls metrics/feedback bags | `source-collection/controlsFeedbackBag.ts` | untyped controls prop groups |
 | Workflow API error product copy | `researchWorkflowErrorModel.ts` + `ResearchWorkflowErrorSurface.tsx` | raw Error.message in UI |
 | Team kind guards / system-team roles | `teamKindModel.ts` | UI panels |
 | Canvas geometry / auto-layout / edge paths | `canvasGeometry.ts` | styles maps, mutations |

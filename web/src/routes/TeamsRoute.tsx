@@ -24,18 +24,15 @@ import {
   TeamSourceCollectionControlsPanel,
   TeamSourceCollectionControlsWorkspacePanel,
   TeamSourceCollectionConversationPanel,
-  TeamSourceCollectionFilterBar,
   TeamSourceCollectionFindingDetailsPanel,
   TeamSourceCollectionGraphPanel,
   TeamSourceCollectionManualWritebackPanel,
   TeamSourceCollectionMemoryPanel,
-  TeamSourceCollectionPagination,
   TeamSourceCollectionPhaseCloseGatePanel,
   TeamSourceCollectionRunSettingsPanel,
   TeamSourceCollectionScreeningPanel,
   TeamSourceCollectionSearchBriefPanel,
   TeamSourceCollectionSourceDetailPanel,
-  TeamSourceCollectionStageAgentsPanel,
   TeamSourceCollectionStandaloneStagePanel,
   TeamWorkflowGraphView,
   TeamWorkflowModelEvidenceStatusPanel,
@@ -175,10 +172,14 @@ import { TeamSourceCollectionGraphInject } from "./teams/TeamSourceCollectionGra
 import { TeamSourceCollectionMemoryInject } from "./teams/TeamSourceCollectionMemoryInject";
 import { TeamSourceCollectionSelectedSourceInject } from "./teams/TeamSourceCollectionSelectedSourceInject";
 import { TeamSourceCollectionConversationInject } from "./teams/TeamSourceCollectionConversationInject";
+import { TeamSourceCollectionFilterBarInject } from "./teams/TeamSourceCollectionFilterBarInject";
+import { TeamSourceCollectionPaginationInject } from "./teams/TeamSourceCollectionPaginationInject";
+import { TeamSourceCollectionStageAgentsInject } from "./teams/TeamSourceCollectionStageAgentsInject";
 import {
-  buildSourceCollectionFilterBarOptions,
-  resolveSourceCollectionPaginationView,
-} from "./teams/source-collection/injectModel";
+  buildSourceCollectionControlsFeedbackBag,
+  buildSourceCollectionControlsMetricsBag,
+} from "./teams/source-collection/controlsFeedbackBag";
+
 import {
   CANVAS_VIEWPORT_HEIGHT,
   CANVAS_VIEWPORT_WIDTH,
@@ -319,7 +320,6 @@ import { agentCenterMemoryRoute, teamMemoryRoute } from "./agentCenterRoutes";
 import { agentDisplayInfo } from "./agentDisplay";
 import { createChatWorkspaceCache } from "./chatWorkspaceCache";
 import type { TeamMemoryIndexMember } from "./TeamMemoryIndexPanel";
-import type { TeamSourceCollectionStageAgentCard, TeamSourceCollectionStageAgentTone } from "./TeamSourceCollectionStageAgentsPanel";
 import type {
   TeamSourceCollectionOverviewPlan,
   TeamSourceCollectionOverviewResult,
@@ -332,11 +332,9 @@ import type {
   TeamSourceCollectionSourceDetailLink,
 } from "./TeamSourceCollectionSourceDetailPanel";
 import type { TeamSourceCollectionStandaloneStageModule } from "./TeamSourceCollectionStandaloneStagePanel";
-import type { TeamSourceCollectionFilterOption } from "./TeamSourceCollectionResultControls";
 import type { TeamWorkflowCandidatePreviewItem } from "./TeamWorkflowCandidatePreviewPanel";
 import type { ResearchMemoryContextSummary } from "./teams/ResearchMemoryEvidencePanel";
 import {
-  SOURCE_COLLECTION_SOURCE_FILTERS,
   deriveSourceCollectionExcludedRecoveryState,
   evidenceLedgerText,
   sourceCollectionCandidateEmptyStateText,
@@ -352,7 +350,6 @@ import {
   sourceCollectionFilterMatches,
   sourceCollectionRecordProvenance,
   sourceCollectionRecordSourceCategory,
-  sourceCollectionSourceFilterLabel,
   sourceCollectionSourceTypeLabel,
   type SourceCollectionCandidateProvenance,
   type SourceCollectionEvidenceLedgerSummary,
@@ -1888,63 +1885,16 @@ export function TeamsRoute({
   }
 
   function renderSourceCollectionStageAgents(stageId: SourceCollectionStageModuleId) {
-    const bindings = sourceCollectionStageAgentBindings(stageId);
-    if (!bindings.length) {
-      return null;
-    }
-    const agentCards: TeamSourceCollectionStageAgentCard[] = bindings.map((binding) => {
-      const agentHydrationPending = Boolean(
-        binding.agentId
-        && !binding.agent
-        && (agentSummaryQuery.isPending || agentSummaryQuery.isFetching),
-      );
-      const tone: TeamSourceCollectionStageAgentTone = binding.agent
-        ? researchStageAgentConfigTone(binding.agent)
-        : binding.agentId
-          ? "blocked"
-          : "missing";
-      const info = agentDisplayInfo(binding.agent, lang, {
-        name: binding.bindingLabel || (lang === "zh" ? binding.zh : binding.en),
-      });
-      const agentName = binding.agent
-        ? info.name
-        : binding.agentId
-          ? binding.agentId
-          : (lang === "zh" ? "未绑定" : "Not bound");
-      const statusLabel = binding.agent
-        ? researchStageAgentConfigStatusLabel(binding.agent, lang)
-        : binding.agentId
-          ? agentHydrationPending
-            ? (lang === "zh" ? "加载中" : "loading")
-            : agentSummaryQuery.isError
-              ? (lang === "zh" ? "Agent 加载失败" : "Agent load failed")
-              : (lang === "zh" ? "引用失效" : "missing reference")
-          : (lang === "zh" ? "待绑定" : "missing");
-      const agentMemoryRoute = binding.agentId
-        ? agentCenterMemoryRoute({
-            agentId: binding.agentId,
-            teamId: selectedTeam?.teamId,
-            view: "agents",
-            returnLabel: "teams",
-            returnTo: selectedTeamReturnRoute,
-          })
-        : "";
-      return {
-        id: `source-step-${stageId}-${binding.key}`,
-        tone,
-        roleLabel: lang === "zh" ? binding.zh : binding.en,
-        agentName,
-        modelLabel: researchStageAgentModelLabel(binding.agent, lang),
-        statusLabel,
-        memoryRoute: agentMemoryRoute,
-        configRoute: binding.agentId ? researchStageAgentManagementRoute(binding.agentId) : "/agents",
-        configLabel: binding.agent ? (lang === "zh" ? "配置" : "Configure") : (lang === "zh" ? "绑定" : "Bind"),
-      };
-    });
     return (
-      <TeamSourceCollectionStageAgentsPanel
+      <TeamSourceCollectionStageAgentsInject
         lang={lang}
-        agents={agentCards}
+        stageId={stageId}
+        bindings={sourceCollectionStageAgentBindings(stageId)}
+        agentSummaryPending={agentSummaryQuery.isPending}
+        agentSummaryFetching={agentSummaryQuery.isFetching}
+        agentSummaryError={agentSummaryQuery.isError}
+        teamId={selectedTeam?.teamId}
+        returnTo={selectedTeamReturnRoute}
       />
     );
   }
@@ -1954,19 +1904,14 @@ export function TeamsRoute({
     label: string,
     loading = false,
   ) {
-    const options = buildSourceCollectionFilterBarOptions({
-      filters: SOURCE_COLLECTION_SOURCE_FILTERS,
-      counts,
-      selected: sourceCollectionSourceFilter,
-      loading,
-      loadingAllText: sourceCollectionLoadingText,
-      labelFor: (filter) => sourceCollectionSourceFilterLabel(filter, lang),
-    }) as Array<TeamSourceCollectionFilterOption<SourceCollectionSourceFilter>>;
-
     return (
-      <TeamSourceCollectionFilterBar
-        ariaLabel={label}
-        options={options}
+      <TeamSourceCollectionFilterBarInject
+        lang={lang}
+        counts={counts}
+        label={label}
+        selected={sourceCollectionSourceFilter}
+        loading={loading}
+        loadingAllText={sourceCollectionLoadingText}
         onSelect={setSourceCollectionSourceFilter}
       />
     );
@@ -1988,21 +1933,13 @@ export function TeamsRoute({
   }
 
   function renderSourceCollectionPagination(stageId: SourceCollectionStageModuleId, total: number) {
-    const view = resolveSourceCollectionPaginationView({
-      total,
-      page: sourceCollectionResultPageByStage[stageId] ?? 1,
-      pageSize: SOURCE_COLLECTION_RESULT_PAGE_SIZE,
-    });
-    if (!view) {
-      return null;
-    }
     return (
-      <TeamSourceCollectionPagination
+      <TeamSourceCollectionPaginationInject
         lang={lang}
-        total={view.total}
-        page={view.page}
-        pageSize={view.pageSize}
-        onPageChange={(nextPage) => setSourceCollectionResultPage(stageId, nextPage)}
+        stageId={stageId}
+        total={total}
+        page={sourceCollectionResultPageByStage[stageId] ?? 1}
+        onPageChange={setSourceCollectionResultPage}
         onContain={stopSourceCollectionPaginationEvent}
       />
     );
@@ -2611,7 +2548,7 @@ export function TeamsRoute({
   }
 
   function buildSourceCollectionControlsFeedbackProps() {
-    return {
+    return buildSourceCollectionControlsFeedbackBag({
       selectedTeamKnowledgeCollectionIngestResult,
       selectedTeamKnowledgeCollectionIngestError,
       selectedTeamStartSourceCollectionError,
@@ -2620,11 +2557,11 @@ export function TeamsRoute({
       selectedTeamStartSourceCollectionStageTaskError,
       selectedTeamExecuteSourceCollectionSearchResult,
       selectedTeamRecordSourceCollectionOutputResult,
-    };
+    });
   }
 
   function buildSourceCollectionControlsMetricsProps() {
-    return {
+    return buildSourceCollectionControlsMetricsBag({
       sourceCollectionDisplayedCandidateCountText,
       sourceCollectionProjectedAssessedCountText,
       sourceCollectionProjectedApprovedCountText,
@@ -2634,7 +2571,7 @@ export function TeamsRoute({
       sourceCollectionPrecheckCandidateCount,
       knowledgePendingReviewCount,
       formalKnowledgeItemCount,
-    };
+    });
   }
 
   function renderSourceCollectionControlsPanel() {
