@@ -229,6 +229,7 @@ import { TeamShellRail } from "./teams/TeamShellRail";
 import { TeamShellToolbar } from "./teams/TeamShellToolbar";
 import { TeamCommunicationPanel } from "./teams/TeamCommunicationPanel";
 import { TeamResearchWorkflowPanelHost } from "./teams/TeamResearchWorkflowPanelHost";
+import { TeamResearchBoardPrimarySurface } from "./teams/TeamResearchBoardPrimarySurface";
 import {
   parseTeamShellMode,
   teamShellModeFromResearchView,
@@ -6216,6 +6217,20 @@ export function TeamsRoute({
     );
   }
 
+
+  function renderTeamsInspectorSharedPanels() {
+    return (
+      <>
+        {researchCanvasReadOnly ? renderResearchCanvasReadOnlyPanel() : null}
+        {renderTeamNodeBindingPanel()}
+        {showAiSearchScopePanel ? renderAiSearchSourceScopePanel() : null}
+        {renderResearchWorkflowPanel()}
+        {renderTeamCommunicationPanel()}
+      </>
+    );
+  }
+
+
   if (researchCanvasVisible) {
     return (
       <VCanvasWorkbenchPage
@@ -6309,11 +6324,7 @@ export function TeamsRoute({
             {validation && !validation.valid ? <AlertTriangle size={16} /> : researchCanvasReadOnly ? <Eye size={16} /> : <Link2 size={16} />}
           </div>
           <div className={styles.inspectorBody}>
-            {researchCanvasReadOnly ? renderResearchCanvasReadOnlyPanel() : null}
-            {renderTeamNodeBindingPanel()}
-            {showAiSearchScopePanel ? renderAiSearchSourceScopePanel() : null}
-            {renderResearchWorkflowPanel()}
-            {renderTeamCommunicationPanel()}
+            {renderTeamsInspectorSharedPanels()}
             </div>
         </aside>
         )}
@@ -6345,41 +6356,18 @@ export function TeamsRoute({
             styles.teamShellBoardBody,
           ].filter(Boolean).join(" ")}>
             {/* Board mode: preview-aligned research board (CTA + 3-column kanban). */}
-            {!researchCanvasVisible && researchWorkflowTeamSelected ? (
-              showResearchOverview ? (
-                teamWorkflowQuery.isPending ? (
-                  <VStateSurface
-                    fill
-                    tone="loading"
-                    title={lang === "zh" ? "正在读取科研总览" : "Loading research overview"}
-                  >
-                    {lang === "zh"
-                      ? "看板、阶段与 CTA 会在工作流返回后原位铺满本区，而不是只显示一行提示。"
-                      : "Board, stages, and CTA will fill this region once the workflow returns — not a one-line hint."}
-                  </VStateSurface>
-                ) : teamWorkflow ? (
-                  renderResearchOverviewSurface()
-                ) : (
-                  <VStateSurface
-                    fill
-                    tone="empty"
-                    title={lang === "zh" ? "科研工作流尚未初始化" : "Research workflow is not initialized"}
-                  >
-                    {lang === "zh"
-                      ? "初始化后总览会占满此主区。"
-                      : "After initialization, the overview will occupy this main region."}
-                  </VStateSurface>
-                )
-              ) : (
-                renderResearchStageLauncher("interactive")
-              )
-            ) : null}
+            <TeamResearchBoardPrimarySurface
+              lang={lang}
+              researchCanvasVisible={researchCanvasVisible}
+              researchWorkflowTeamSelected={researchWorkflowTeamSelected}
+              showResearchOverview={showResearchOverview}
+              workflowPending={teamWorkflowQuery.isPending}
+              workflowReady={Boolean(teamWorkflow)}
+              overviewSlot={renderResearchOverviewSurface()}
+              launcherSlot={renderResearchStageLauncher("interactive")}
+            />
             {selectedTeam && !challengeCupResearchTeamSelected ? renderTeamMemoryIndex() : null}
-            {researchCanvasReadOnly ? renderResearchCanvasReadOnlyPanel() : null}
-            {renderTeamNodeBindingPanel()}
-            {showAiSearchScopePanel ? renderAiSearchSourceScopePanel() : null}
-            {renderResearchWorkflowPanel()}
-            {renderTeamCommunicationPanel()}
+            {renderTeamsInspectorSharedPanels()}
             </div>
         </aside>
       )}
