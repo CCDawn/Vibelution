@@ -136,6 +136,31 @@ describe("workbench layout gate (Wave 5)", () => {
     expect(evolution).toContain("library-list");
     expect(evolution).toContain("live-launch");
     expect(evolution).toContain("live-run");
+    expect(evolution).toContain("EvolutionSupervisedConversationEvidencePanel");
+  });
+
+  it("documents collapse-capable workbenches keep usePersistedPaneResize (not forced VSplit)", () => {
+    // VSplitWorkspace does not own collapse-to-zero rails; these stay on the shared hook intentionally.
+    for (const sample of [
+      { file: "routes/GitRoute.tsx", layoutId: "WORKBENCH_LAYOUT_IDS.git", collapse: "PaneCollapseHandle" },
+      { file: "routes/ToolsRoute.tsx", layoutId: "WORKBENCH_LAYOUT_IDS.tools", collapse: "PaneCollapseHandle" },
+      { file: "routes/LogsRoute.tsx", layoutId: "WORKBENCH_LAYOUT_IDS.logs", collapse: "PaneCollapseHandle" },
+      { file: "routes/LauncherRoute.tsx", layoutId: "WORKBENCH_LAYOUT_IDS.launcher", collapse: "railResizeHandle" },
+    ] as const) {
+      const text = readFileSync(resolve(webSrc, sample.file), "utf-8");
+      expect(text, sample.file).toContain(sample.layoutId);
+      expect(text, sample.file).toContain("usePersistedPaneResize");
+      expect(text, sample.file).toContain(sample.collapse);
+    }
+  });
+
+  it("keeps Research flow canvas inspector on registry layoutId via VCanvasWorkbenchPage", () => {
+    const research = readFileSync(resolve(webSrc, "routes/ResearchFlowCanvasRoute.tsx"), "utf-8");
+    const ids = readFileSync(resolve(webSrc, "components/layout/workbenchLayoutIds.ts"), "utf-8");
+    expect(ids).toContain("researchFlow");
+    expect(research).toContain("WORKBENCH_LAYOUT_IDS.researchFlow");
+    expect(research).toContain("layoutId={WORKBENCH_LAYOUT_IDS.researchFlow}");
+    expect(research).toContain('id: "inspector"');
   });
 
   it("keeps Teams source-collection list shells on shared height API (Wave 6E)", () => {
@@ -213,8 +238,9 @@ describe("workbench layout gate (Wave 5)", () => {
 
   it("keeps Evolution CASE IO on shared height resize handle", () => {
     const evolution = readFileSync(resolve(webSrc, "routes/EvolutionRoute.tsx"), "utf-8");
+    const liveIo = readFileSync(resolve(webSrc, "routes/EvolutionSupervisedLiveIoPanel.tsx"), "utf-8");
     expect(evolution).toContain("usePersistedPaneHeight");
-    expect(evolution).toContain("PaneHeightResizeHandle");
+    expect(liveIo).toContain("PaneHeightResizeHandle");
     expect(evolution).not.toContain("beginPaneHeightResize");
   });
 
