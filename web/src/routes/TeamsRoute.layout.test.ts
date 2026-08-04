@@ -14,6 +14,7 @@ import teamCanvasReadOnlyInspectorSource from "./teams/TeamCanvasReadOnlyInspect
 import teamsWorkspacePanelRenderersSource from "./teams/teamsWorkspacePanelRenderers.tsx?raw";
 import useSourceCollectionWorkspaceSource from "./teams/useSourceCollectionWorkspace.ts?raw";
 import useResearchExperimentWorkspaceSource from "./teams/useResearchExperimentWorkspace.ts?raw";
+import useTeamsShellCanvasWorkspaceSource from "./teams/useTeamsShellCanvasWorkspace.ts?raw";
 
 /** Route + extracted shell modules (layout contracts may live in either). */
 const routeSource = [
@@ -25,6 +26,7 @@ const routeSource = [
   teamsWorkspacePanelRenderersSource,
   useSourceCollectionWorkspaceSource,
   useResearchExperimentWorkspaceSource,
+  useTeamsShellCanvasWorkspaceSource,
 ].join("\n");
 import researchWorkspaceModelSource from "./teams/researchWorkspaceModel.ts?raw";
 import researchProjectSwitcherSource from "./teams/research-projects/ResearchProjectSwitcher.tsx?raw";
@@ -1854,13 +1856,18 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).not.toContain("enabled: Boolean(effectiveTeamId && researchWorkflowTeamSelected && teamWorkflowQuery.data)");
     expect(routeSource.match(/&& teamWorkflowQuery\.data\)/g) ?? []).toEqual([]);
 
-    const queryLayerSource = routeSource.slice(
-      routeSource.indexOf("const teamsQuery = useQuery"),
-      routeSource.indexOf("const autoCanvasViewportStyle = useMemo"),
+    // Route-owned bootstrap queries (teams list + team detail). Canvas/SC lists live in workspace hooks.
+    const routeBootstrapQuerySource = routeSourceRaw.slice(
+      routeSourceRaw.indexOf("const teamsQuery = useQuery"),
+      routeSourceRaw.indexOf("const sourceCollectionNeedsCandidateList"),
     );
-    expect(queryLayerSource).toContain("queryFn: ({ signal }) => fetchJson<TeamListPayload>(\"/api/teams\", { signal })");
-    expect(queryLayerSource).toContain("queryFn: ({ signal }) => fetchJson<Team>(`/api/teams/${encodeURIComponent(effectiveTeamId)}?detail=${teamDetailLoadMode}`, { signal })");
-    expect(queryLayerSource).toContain("queryFn: ({ signal }) => fetchJson<TeamOrganizationCanvas>(`/api/teams/${encodeURIComponent(effectiveTeamId)}/canvas`, { signal })");
+    expect(routeBootstrapQuerySource).toContain("queryFn: ({ signal }) => fetchJson<TeamListPayload>(\"/api/teams\", { signal })");
+    expect(routeBootstrapQuerySource).toContain("queryFn: ({ signal }) => fetchJson<Team>(`/api/teams/${encodeURIComponent(effectiveTeamId)}?detail=${teamDetailLoadMode}`, { signal })");
+    expect(routeBootstrapQuerySource).not.toContain("fetchJson<TeamOrganizationCanvas>");
+    expect(routeBootstrapQuerySource).not.toContain("queryKey: researchProjectQueryKey");
+    // Phase 3: organization canvas query lives in useTeamsCanvasProjection.
+    expect(useTeamsShellCanvasWorkspaceSource).toContain("fetchJson<TeamOrganizationCanvas>(");
+    expect(useTeamsShellCanvasWorkspaceSource).toContain("`/api/teams/${encodeURIComponent(effectiveTeamId)}/canvas`");
     // Phase 1 state-machine: project/run list queries live in useSourceCollectionWorkspace.
     expect(useSourceCollectionWorkspaceSource).toContain("queryKey: researchProjectQueryKey(effectiveTeamId || \"none\")");
     expect(useSourceCollectionWorkspaceSource).toContain("activeSourceCollectionResearchProjectId");
@@ -1871,10 +1878,15 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSourceRaw).not.toContain("} = useTeamResearchSecondaryQueries({");
     expect(useResearchExperimentWorkspaceSource).toContain("useTeamResearchSecondaryQueries");
     expect(useResearchExperimentWorkspaceSource).toContain("experimentBaselineArtifactDraft");
-    expect(queryLayerSource).toContain("queryFn: ({ signal }) =>");
-    // Route query layer no longer owns SC project/run list (moved to workspace hook).
-    expect(queryLayerSource.match(/queryFn: \(\{ signal \}\) =>/g)?.length ?? 0).toBeLessThanOrEqual(10);
-    expect(queryLayerSource.match(/queryFn: \(\) =>/g) ?? []).toEqual([]);
+    // Phase 3: shell/canvas state + canvas projection live in useTeamsShellCanvasWorkspace module.
+    expect(routeSourceRaw).toContain("useTeamsShellCanvasWorkspace");
+    expect(routeSourceRaw).toContain("useTeamsCanvasProjection");
+    expect(routeSourceRaw).not.toContain('const [selectedTeamId, setSelectedTeamId] = useState("")');
+    expect(routeSourceRaw).not.toContain("const durableCanvas = canvasFromTeamOrFallback");
+    expect(useTeamsShellCanvasWorkspaceSource).toContain("resolveTeamCanvasQueryEnabled");
+    expect(useTeamsShellCanvasWorkspaceSource).toContain("autoLayoutResearchCanvasNodes");
+    expect(routeBootstrapQuerySource).toContain("queryFn: ({ signal }) =>");
+    expect(routeBootstrapQuerySource.match(/queryFn: \(\) =>/g) ?? []).toEqual([]);
     const sourceCollectionStageReturnRefreshSource = routeSource.slice(
       routeSource.indexOf("if (!researchWorkflowTeamSelected || !pageVisible"),
       routeSource.indexOf("if (!selectedTeam?.teamId || !selectedSourceCollectionRunEffectiveId || !selectedSourceCollectionSearchAccepted"),

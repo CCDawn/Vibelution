@@ -50,6 +50,11 @@ import { useTeamWorkflowStartMutations } from "./teams/useTeamWorkflowStartMutat
 import { useSourceCollectionWorkspace } from "./teams/useSourceCollectionWorkspace";
 import { useResearchExperimentWorkspace } from "./teams/useResearchExperimentWorkspace";
 import {
+  useTeamsCanvasProjection,
+  useTeamsShellCanvasWorkspace,
+  type NodeDragState,
+} from "./teams/useTeamsShellCanvasWorkspace";
+import {
   type DataProcessingRecordListPayload,
   type SourceCollectionSummaryPayload,
 } from "./teams/sourceCollectionRunQueryModel";
@@ -181,18 +186,9 @@ import {
 } from "./teams/source-collection/controlsFeedbackBag";
 
 import {
-  CANVAS_VIEWPORT_HEIGHT,
-  CANVAS_VIEWPORT_WIDTH,
-  autoLayoutResearchCanvasNodes,
-  canvasStyleScale,
-  canvasViewStyle,
   edgeLine,
-  isCommunicationEdge,
   nextNodeId,
   teamCanvasNodeStyle,
-  type CanvasFrameSize,
-  type CanvasViewportStyle,
-  type ResearchCanvasLayoutMode,
 } from "./teams/canvasGeometry";
 import {
   RESEARCH_WORKSPACE_NAV_ITEMS,
@@ -226,7 +222,6 @@ import { TeamResearchBoardPrimarySurface } from "./teams/TeamResearchBoardPrimar
 import { TeamResearchWorkflowStageModules } from "./teams/TeamResearchWorkflowStageModules";
 import {
   parseTeamShellMode,
-  teamShellModeFromResearchView,
   type TeamShellMode,
 } from "./teams/teamShellModel";
 import { ResearchProjectSwitcher, researchProjectQueryKey } from "./teams/research-projects/ResearchProjectSwitcher";
@@ -409,7 +404,6 @@ import {
   isForeignTeamDetailQueryKey,
   resolveLinkedChatRoomQueryEnabled,
   resolveResearchSecondaryStatusQueryEnabled,
-  resolveTeamCanvasQueryEnabled,
   resolveTeamDetailLoadMode,
 } from "./teams/teamDetailLoadPolicy";
 import {
@@ -486,10 +480,7 @@ import {
   RESEARCH_TEAM_ID,
   TEAM_PICKER_TEAM_IDS,
   TEAM_ORGANIZATION_CANVAS_KIND,
-  canvasFromKnownTeamId,
   canvasFromTeam,
-  canvasFromTeamOrFallback,
-  memberCanvasFromTeam,
   resolveKnownRouteTeamId,
   resolveTeamsRouteEffectiveTeamId,
 } from "./TeamsRoute.canvasData";
@@ -526,13 +517,6 @@ type TeamsRouteProps = {
   sourceCollectionStandalone?: boolean;
 };
 
-type NodeDraft = {
-  label: string;
-  role: string;
-  purpose: string;
-  agentId: string;
-};
-
 type SourceCollectionStageModule = {
   id: SourceCollectionStageModuleId;
   label: string;
@@ -557,17 +541,7 @@ type SourceCollectionCompletionFlowNode = NonNullable<TeamWorkflowKnowledgeInges
 
 
 
-type NodeDragState = {
-  nodeId: string;
-  startClientX: number;
-  startClientY: number;
-  startX: number;
-  startY: number;
-  currentX: number;
-  currentY: number;
-  scale: number;
-  moved: boolean;
-};
+
 
 const CANVAS_NODE_ROLE_BADGE_STYLES = {
   stale: styles.nodeRoleBadgeStale,
@@ -622,35 +596,13 @@ export function TeamsRoute({
   const stageStandaloneView: ResearchStageWorkspaceView | null =
     requestedResearchWorkspaceView === "experiment" || requestedResearchWorkspaceView === "iteration" ? requestedResearchWorkspaceView : null;
   const pageVisible = usePageVisibility();
-  const [selectedTeamId, setSelectedTeamId] = useState("");
-  const [selectedNodeId, setSelectedNodeId] = useState("");
-  const [nodeDraft, setNodeDraft] = useState<NodeDraft>({ label: "", role: "", purpose: "", agentId: "" });
-  const [teamMessage, setTeamMessage] = useState("");
-  const [teamInterrupt, setTeamInterrupt] = useState(false);
-  const [teamTaskTopic, setTeamTaskTopic] = useState("");
-  const [showCommunicationEdges, setShowCommunicationEdges] = useState(false);
-  const [researchCanvasLayoutMode, setResearchCanvasLayoutMode] = useState<ResearchCanvasLayoutMode>("auto");
-  const [researchWorkspaceView, setResearchWorkspaceView] = useState<ResearchWorkspaceView>(
-    forcedResearchWorkspaceView ?? requestedResearchWorkspaceView ?? "overview",
-  );
   const requestedTeamShellMode = parseTeamShellMode(searchParams.get("teamMode"));
-  const [teamShellMode, setTeamShellMode] = useState<TeamShellMode>(
-    () => requestedTeamShellMode
-      ?? teamShellModeFromResearchView(forcedResearchWorkspaceView ?? requestedResearchWorkspaceView)
-      ?? "board",
-  );
-  const [challengeTeamSurface, setChallengeTeamSurface] = useState<"workspace" | "progress">("workspace");
   const [aiSearchRunTopic, setAiSearchRunTopic] = useState("AI 最新动态");
-  // Experiment/research-loop drafts + secondary queries: useResearchExperimentWorkspace (Phase 2).
-  const [nodePositionDrafts, setNodePositionDrafts] = useState<Record<string, { x: number; y: number }>>({});
-  const [canvasFrameSize, setCanvasFrameSize] = useState<CanvasFrameSize>({ width: CANVAS_VIEWPORT_WIDTH, height: CANVAS_VIEWPORT_HEIGHT });
-  const [lockedCanvasViewportStyle, setLockedCanvasViewportStyle] = useState<CanvasViewportStyle | null>(null);
+  // Shell/canvas state: useTeamsShellCanvasWorkspace (Phase 3).
+  // Experiment/research-loop drafts: useResearchExperimentWorkspace (Phase 2).
   const sourceCollectionControlPanelRef = useRef<HTMLElement | null>(null);
   // Late-bound: mutations hook is declared above scroll helper; keep stable identity via ref.
   const scrollSourceCollectionPanelIntoViewRef = useRef<(panelId: string) => void>(() => {});
-  const canvasFrameRef = useRef<HTMLDivElement | null>(null);
-  const dragStateRef = useRef<NodeDragState | null>(null);
-  const dragFrameRef = useRef(0);
 
   const teamsQuery = useQuery({
     queryKey: queryKeys.teams(),
@@ -713,12 +665,53 @@ export function TeamsRoute({
   const requestedAgentTeamId = requestedAgentId ? agentTeamMembership.get(requestedAgentId)?.teamId ?? "" : "";
   const requestedVisibleTeamId = resolveKnownRouteTeamId(requestedTeamId, visibleTeamIds);
   const requestedVisibleAgentTeamId = requestedAgentTeamId && visibleTeamIds.has(requestedAgentTeamId) ? requestedAgentTeamId : "";
-  const selectedVisibleTeamId = selectedTeamId && visibleTeamIds.has(selectedTeamId) ? selectedTeamId : "";
   // Preview-aligned default: land on challenge-cup research board, not AI-search ops.
   const fallbackVisibleTeamId =
     (visibleTeamIds.has(RESEARCH_TEAM_ID) ? RESEARCH_TEAM_ID : "")
     || visibleTeams[0]?.teamId
     || "";
+  const {
+    selectedTeamId,
+    setSelectedTeamId,
+    selectedNodeId,
+    setSelectedNodeId,
+    nodeDraft,
+    setNodeDraft,
+    teamMessage,
+    setTeamMessage,
+    teamInterrupt,
+    setTeamInterrupt,
+    teamTaskTopic,
+    setTeamTaskTopic,
+    showCommunicationEdges,
+    setShowCommunicationEdges,
+    researchCanvasLayoutMode,
+    setResearchCanvasLayoutMode,
+    researchWorkspaceView,
+    setResearchWorkspaceView,
+    teamShellMode,
+    setTeamShellMode,
+    challengeTeamSurface,
+    setChallengeTeamSurface,
+    nodePositionDrafts,
+    setNodePositionDrafts,
+    canvasFrameSize,
+    setCanvasFrameSize,
+    lockedCanvasViewportStyle,
+    setLockedCanvasViewportStyle,
+    canvasFrameRef,
+    dragStateRef,
+    dragFrameRef,
+  } = useTeamsShellCanvasWorkspace({
+    forcedResearchWorkspaceView,
+    requestedResearchWorkspaceView,
+    requestedTeamShellMode,
+    requestedVisibleTeamId,
+    requestedVisibleAgentTeamId,
+    visibleTeamIds,
+    fallbackVisibleTeamId,
+  });
+  const selectedVisibleTeamId = selectedTeamId && visibleTeamIds.has(selectedTeamId) ? selectedTeamId : "";
   const effectiveTeamId = resolveTeamsRouteEffectiveTeamId({
     forcedTeamId,
     selectedTeamId: selectedVisibleTeamId,
@@ -727,9 +720,6 @@ export function TeamsRoute({
     visibleTeamIds,
     fallbackTeamId: fallbackVisibleTeamId,
   });
-  useEffect(() => {
-    setPreferredExperimentMethod("");
-  }, [effectiveTeamId]);
   const teamDetailLoadMode = resolveTeamDetailLoadMode({
     sourceCollectionStandalone,
     researchWorkspaceView,
@@ -768,8 +758,6 @@ export function TeamsRoute({
       && researchWorkspaceView !== "knowledge_collection",
   });
   const aiSearchScopeTeamSelected = isAiSearchScopeTeam(selectedTeam);
-  const researchCanvasReadOnly = researchWorkflowTeamSelected
-    && (researchWorkspaceView === "canvas" || teamShellMode === "canvas");
   const sourceCollectionWorkspaceSelected =
     researchWorkflowTeamSelected && (sourceCollectionStandalone || researchWorkspaceView === "source_collection" || researchWorkspaceView === "knowledge_collection");
 
@@ -846,17 +834,43 @@ export function TeamsRoute({
     sourceCollectionWorkspaceSelected,
     researchWorkspaceView,
   ]);
-  const teamCanvasQueryEnabled = resolveTeamCanvasQueryEnabled({
+  const {
+    researchCanvasReadOnly,
+    teamCanvasQueryEnabled,
+    teamCanvasQuery,
+    durableCanvas,
+    canvas,
+    hasWritableCanvas,
+    canvasNodes,
+    organizationEdges,
+    communicationEdges,
+    autoLayoutCanvasNodes,
+    researchCanvasAutoLayoutActive,
+    displayCanvasNodes,
+    selectedNode,
+    visibleCommunicationEdges,
+    visibleEdges,
+    autoCanvasViewportStyle,
+    canvasViewportStyle,
+    canvasScale,
+  } = useTeamsCanvasProjection({
     effectiveTeamId,
+    selectedTeam,
     researchWorkflowTeamSelected,
     researchWorkspaceView,
+    teamShellMode,
     sourceCollectionStandalone,
-  });
-  const teamCanvasQuery = useQuery({
-    queryKey: queryKeys.teamCanvas(effectiveTeamId || "none"),
-    queryFn: ({ signal }) => fetchJson<TeamOrganizationCanvas>(`/api/teams/${encodeURIComponent(effectiveTeamId)}/canvas`, { signal }),
-    enabled: teamCanvasQueryEnabled,
-    staleTime: 10_000,
+    selectedNodeId,
+    nodePositionDrafts,
+    showCommunicationEdges,
+    researchCanvasLayoutMode,
+    canvasFrameSize,
+    lockedCanvasViewportStyle,
+    setNodeDraft,
+    setNodePositionDrafts,
+    setLockedCanvasViewportStyle,
+    dragStateRef,
+    dragFrameRef,
   });
   const sourceCollectionNeedsCandidateList = sourceCollectionWorkspaceSelected;
   const teamWorkflowCandidateListEnabled = Boolean(
@@ -907,15 +921,7 @@ export function TeamsRoute({
     enabled: Boolean(effectiveTeamId && aiSearchScopeTeamSelected),
   });
 
-  useEffect(() => {
-    if (forcedResearchWorkspaceView) {
-      setResearchWorkspaceView(forcedResearchWorkspaceView);
-      return;
-    }
-    if (requestedResearchWorkspaceView) {
-      setResearchWorkspaceView(requestedResearchWorkspaceView);
-    }
-  }, [forcedResearchWorkspaceView, requestedResearchWorkspaceView]);
+  // Research workspace view URL sync lives in useTeamsShellCanvasWorkspace.
   const {
     workflow: teamWorkflowQuery,
     stageRound: researchStageRoundStatusQuery,
@@ -983,6 +989,9 @@ export function TeamsRoute({
     sourceCollectionStandalone,
     researchSecondaryStatusQueryEnabled,
   });
+  useEffect(() => {
+    setPreferredExperimentMethod("");
+  }, [effectiveTeamId, setPreferredExperimentMethod]);
   const linkedChatRoomId = selectedTeam?.linkedChatRoomId ?? "";
   const linkedRoomStatusForPolling = String(selectedTeam?.linkedChatRoom?.status || "").toLowerCase();
   const linkedChatRoomQueryEnabled = resolveLinkedChatRoomQueryEnabled({
@@ -1001,44 +1010,6 @@ export function TeamsRoute({
       return linkedRoomRefetchInterval(pageVisible, detail?.status || linkedRoomStatusForPolling);
     },
   });
-  const durableCanvas = canvasFromTeamOrFallback(selectedTeam, teamCanvasQuery.data);
-  const memberCanvas = useMemo(() => memberCanvasFromTeam(selectedTeam), [selectedTeam]);
-  const knownTeamCanvas = useMemo(() => canvasFromKnownTeamId(effectiveTeamId), [effectiveTeamId]);
-  const canvas = durableCanvas ?? memberCanvas ?? knownTeamCanvas;
-  const hasWritableCanvas = Boolean(durableCanvas);
-  const canvasNodes = useMemo(
-    () =>
-      (canvas?.nodes ?? []).map((node) => ({
-        ...node,
-        ...(nodePositionDrafts[node.id] ?? {}),
-      })),
-    [canvas, nodePositionDrafts],
-  );
-  const organizationEdges = useMemo(() => (canvas?.edges ?? []).filter((edge) => !isCommunicationEdge(edge)), [canvas]);
-  const communicationEdges = useMemo(
-    () => (canvas?.edges ?? []).filter((edge) => isCommunicationEdge(edge)),
-    [canvas],
-  );
-  const autoLayoutCanvasNodes = useMemo(
-    () => autoLayoutResearchCanvasNodes(canvasNodes, organizationEdges),
-    [canvasNodes, organizationEdges],
-  );
-  const researchCanvasAutoLayoutActive = researchCanvasReadOnly && researchCanvasLayoutMode === "auto";
-  const displayCanvasNodes = researchCanvasAutoLayoutActive ? autoLayoutCanvasNodes : canvasNodes;
-  const selectedNode = displayCanvasNodes.find((node) => node.id === selectedNodeId) ?? displayCanvasNodes[0] ?? null;
-  const visibleCommunicationEdges = useMemo(() => {
-    if (!showCommunicationEdges) {
-      return [];
-    }
-    if (!selectedNodeId) {
-      return communicationEdges;
-    }
-    return communicationEdges.filter((edge) => edge.source === selectedNodeId || edge.target === selectedNodeId);
-  }, [communicationEdges, selectedNodeId, showCommunicationEdges]);
-  const visibleEdges = useMemo(
-    () => [...organizationEdges, ...visibleCommunicationEdges],
-    [organizationEdges, visibleCommunicationEdges],
-  );
   const sourceCollectionAgentIds = useMemo(() => sourceCollectionAgentIdsFromTeam(selectedTeam, canvas), [canvas, selectedTeam]);
   const sourceCollectionOwnerAgentId = useMemo(() => sourceCollectionOwnerAgentIdFromTeam(selectedTeam, canvas), [canvas, selectedTeam]);
   const sourceCollectionFinderAgentId = sourceCollectionAgentIds.source_finder || "Source Finder Agent";
@@ -1090,78 +1061,13 @@ export function TeamsRoute({
       bindingSource: string;
     }>>;
   }, [activeAgentsById, canvas, knowledgeExpansionWorkflowTeamSelected, selectedTeam?.members]);
-  const autoCanvasViewportStyle = useMemo(() => canvasViewStyle(displayCanvasNodes, canvasFrameSize), [canvasFrameSize, displayCanvasNodes]);
-  const canvasViewportStyle = lockedCanvasViewportStyle ?? autoCanvasViewportStyle;
-  const canvasScale = canvasStyleScale(canvasViewportStyle);
   const teamBusEvents = useMemo(
     () => projectAgentBusEventsForTeam(projectBusQuery.data, selectedTeam?.teamId),
     [projectBusQuery.data, selectedTeam?.teamId],
   );
 
-  useEffect(() => {
-    if (requestedVisibleTeamId) {
-      setSelectedTeamId(requestedVisibleTeamId);
-      return;
-    }
-    if (requestedVisibleAgentTeamId) {
-      setSelectedTeamId(requestedVisibleAgentTeamId);
-      return;
-    }
-    if (selectedTeamId && !visibleTeamIds.has(selectedTeamId)) {
-      setSelectedTeamId(fallbackVisibleTeamId);
-      return;
-    }
-    if (!selectedTeamId && fallbackVisibleTeamId) {
-      setSelectedTeamId(fallbackVisibleTeamId);
-    }
-  }, [fallbackVisibleTeamId, requestedVisibleAgentTeamId, requestedVisibleTeamId, selectedTeamId, visibleTeamIds]);
-
+  // Shell team pick / canvas frame / node-draft sync live in useTeamsShellCanvasWorkspace + useTeamsCanvasProjection.
   // SC stage URL sync + pagination reset live in useSourceCollectionWorkspace.
-
-  useEffect(() => {
-    if (selectedNode) {
-      setNodeDraft({
-        label: selectedNode.label,
-        role: selectedNode.role,
-        purpose: selectedNode.purpose,
-        agentId: selectedNode.agentId,
-      });
-    }
-  }, [selectedNode?.id]);
-
-  useEffect(() => {
-    setNodePositionDrafts({});
-    dragStateRef.current = null;
-    if (dragFrameRef.current) {
-      window.cancelAnimationFrame(dragFrameRef.current);
-      dragFrameRef.current = 0;
-    }
-  }, [selectedTeam?.teamId, canvas?.updatedAt]);
-
-  useEffect(() => {
-    setLockedCanvasViewportStyle(null);
-  }, [selectedTeam?.teamId]);
-
-  useEffect(() => {
-    const element = canvasFrameRef.current;
-    if (!element) {
-      return;
-    }
-    const updateFrameSize = () => {
-      setCanvasFrameSize({
-        width: Math.max(420, Math.round(element.clientWidth)),
-        height: Math.max(360, Math.round(element.clientHeight)),
-      });
-    };
-    updateFrameSize();
-    if (typeof ResizeObserver === "undefined") {
-      window.addEventListener("resize", updateFrameSize);
-      return () => window.removeEventListener("resize", updateFrameSize);
-    }
-    const observer = new ResizeObserver(updateFrameSize);
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, []);
 
   const {
     archiveTeamMutation,
