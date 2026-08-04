@@ -663,17 +663,20 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain('view: "graph"');
     expect(routeSource).toContain("teamId: selectedTeam.teamId");
     expect(routeSource).toContain("teamId: selectedTeam?.teamId");
-    expect(routeStyles.teamMemoryIndex).toContain("!flex-none");
+    // Full-height board shell: memory index stretches with the pane (not content-sized).
+    expect(routeStyles.teamMemoryIndex).toContain("flex-1");
     expect(routeStyles.teamMemoryIndex).toMatch(/bg-vui-surface-panel|var\(--vui-surface-panel\)/);
     expect(routeStyles.teamMemoryMemberTable).toContain("grid-cols-[minmax(0,1fr)]");
+    expect(routeStyles.teamMemoryMemberTable).toContain("overflow-auto");
     expect(routeStyles.teamMemoryMemberTable).not.toContain("repeat(auto-fit");
     expect(routeStyles.teamMemoryMemberTable).not.toContain("repeat(auto-fill");
     expect(routeStyles.teamMemoryMemberCard).toMatch(/bg-vui-surface-row|bg-\[var\(--vui-surface-row\)\]/);
     expect(routeStyles.teamMemoryMemberCard).not.toContain("bg-[var(--vui-surface-glass)]");
     expect(routeStyles.teamMemoryMemberCard).not.toContain("shadow-[var(--vui-shadow-hairline)]");
-    expect(teamMemoryIndexPanelStyles.teamMemoryIndex).toContain("!flex-none");
+    expect(teamMemoryIndexPanelStyles.teamMemoryIndex).toContain("flex-1");
     expect(teamMemoryIndexPanelStyles.teamMemoryIndex).toMatch(/bg-vui-surface-panel|var\(--vui-surface-panel\)/);
     expect(teamMemoryIndexPanelStyles.teamMemoryMemberTable).toContain("grid-cols-[minmax(0,1fr)]");
+    expect(teamMemoryIndexPanelStyles.teamMemoryMemberTable).toContain("overflow-auto");
     expect(teamMemoryIndexPanelStyles.teamMemoryMemberTable).not.toContain("repeat(auto-fit");
     expect(teamMemoryIndexPanelStyles.teamMemoryMemberTable).not.toContain("repeat(auto-fill");
     expect(teamMemoryIndexPanelStyles.teamMemoryMemberCard).toMatch(/bg-vui-surface-row|bg-\[var\(--vui-surface-row\)\]/);
@@ -898,8 +901,14 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("TeamResearchStageLauncherPanel");
     expect(routeSource).toContain("researchWorkspaceViewLabel");
     expect(routeSource).toContain("styles.teamShellWorkspace");
+    expect(routeSource).toContain("styles.teamShellPageBody");
     expect(routeSource).toContain("styles.teamShellWorkspaceBoard");
     expect(routeSource).toContain("styles.teamShellWorkspaceCanvas");
+    // Full-height shell (shadcn/Kernel fill): page grid + body + workspace never content-shrink.
+    expect(routeStylesSource).toContain("grid-rows-[auto_minmax(0,1fr)]");
+    expect(routeStylesSource).toContain("teamShellPageBody");
+    expect(routeStyles.teamShellBoardBody).toContain("flex-1");
+    expect(routeStyles.teamShellContentBoard).toContain("overflow-hidden");
     expect(routeSource).toContain("styles.researchInspector");
     expect(routeSource).toContain("styles.researchCanvasPanelHidden");
     // Wave 8G: AI Search surface classes live on panel + aiSearch style cluster.
