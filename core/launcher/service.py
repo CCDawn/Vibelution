@@ -175,6 +175,12 @@ def get_launcher_status() -> dict[str, Any]:
         workbench=workbench,
         active_work_runs=active_work_runs,
     )
+    last_error = runtime_state.get("lastError") if isinstance(runtime_state.get("lastError"), dict) else {}
+    last_error_message = str(last_error.get("message") or "").strip()
+    last_error_scope = str(last_error.get("scope") or "").strip()
+    last_error_at = str(last_error.get("at") or "").strip()
+    failure_message = str(workbench.get("failureMessage") or "").strip() or last_error_message
+    # Flat string fields for native tray JSON extractors (regex string matcher only).
     return {
         "launcher": {
             "mode": "standalone_control_plane",
@@ -199,6 +205,16 @@ def get_launcher_status() -> dict[str, Any]:
             "workbenchWindow": get_workbench_window_mode_setting(),
             "developerMode": get_launcher_developer_mode_setting(),
         },
+        # Tray / lightweight clients: prefer these top-level string fields.
+        "overallState": str(lifecycle_proof.get("overallState") or ""),
+        "observedState": str(workbench.get("observedState") or "closed"),
+        "phase": str(workbench.get("phase") or "steady"),
+        "lifecycleConsistency": str(workbench.get("lifecycleConsistency") or "consistent"),
+        "failureMessage": failure_message,
+        "lastErrorMessage": last_error_message,
+        "lastErrorScope": last_error_scope,
+        "lastErrorAt": last_error_at,
+        "stateVersion": str(int(runtime_manager.get("stateVersion") or 0)),
     }
 
 
