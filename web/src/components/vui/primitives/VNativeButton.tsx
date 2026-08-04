@@ -38,6 +38,13 @@ function nativeButtonGeometryClass(className: VNativeButtonProps["className"]): 
     .join(" ");
 }
 
+/** Minimal shadcn-safe defaults so dense hit targets still have focus/disabled chrome. */
+const nativeButtonChromeClass =
+  "rounded-[var(--radius-control)] transition-colors duration-150 motion-reduce:transition-none " +
+  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_45%,transparent)] " +
+  "focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--vui-surface-panel)] " +
+  "disabled:cursor-default disabled:opacity-55 disabled:pointer-events-none";
+
 export const VNativeButton = forwardRef<HTMLButtonElement, VNativeButtonProps>(
   function VNativeButton({ className, type = "button", "data-vui": dataVui, ...props }, ref) {
     return (
@@ -46,7 +53,9 @@ export const VNativeButton = forwardRef<HTMLButtonElement, VNativeButtonProps>(
         ref={ref}
         type={type}
         data-vui={dataVui ?? "native-button"}
-        className={[nativeButtonGeometryClass(className), className].filter(Boolean).join(" ")}
+        className={[nativeButtonGeometryClass(className), nativeButtonChromeClass, className]
+          .filter(Boolean)
+          .join(" ")}
       />
     );
   },

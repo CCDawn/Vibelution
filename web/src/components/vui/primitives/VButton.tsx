@@ -6,6 +6,7 @@ import {
   type MouseEvent,
   type ReactNode,
 } from "react";
+import { LoaderCircle } from "lucide-react";
 
 import { ShadcnButton } from "../renderers/shadcn/ShadcnButton";
 import {
@@ -37,6 +38,11 @@ export type VButtonProps = Omit<
   title?: string;
   /** HeroUI-era disabled flag — mapped to native disabled. */
   isDisabled?: boolean;
+  /**
+   * Async / mutation pending. Disables the control, sets aria-busy,
+   * and shows a spinner (shadcn Button loading pattern).
+   */
+  isPending?: boolean;
   /** Square icon layout flag (VIconButton). */
   isIconOnly?: boolean;
   /** HeroUI-era press handler — still supported, fires after onClick. */
@@ -69,16 +75,27 @@ export const VButton = forwardRef<HTMLButtonElement, VButtonProps>(function VBut
     "data-vui": dataVui,
     title,
     isDisabled,
+    isPending = false,
     isIconOnly,
     onPress,
     ...props
   },
   ref,
 ) {
+  const blocked = Boolean(isDisabled || isPending);
   const tooltipContent = isDisabled && disabledReason ? disabledReason : tooltip ?? title;
   const hasTooltip = tooltipContent !== undefined && tooltipContent !== null && tooltipContent !== "";
   const titleProps = title && !hasTooltip ? ({ title } as Record<string, string>) : undefined;
   const iconOnly = Boolean(isIconOnly);
+  const pendingIcon = (
+    <LoaderCircle
+      size={14}
+      strokeWidth={2.25}
+      className="animate-spin motion-reduce:animate-none"
+      aria-hidden="true"
+      data-slot="vui-button-pending"
+    />
+  );
 
   const button = (
     <ShadcnButton
@@ -89,6 +106,7 @@ export const VButton = forwardRef<HTMLButtonElement, VButtonProps>(function VBut
       variant={variant}
       density={density}
       isDisabled={isDisabled}
+      isPending={isPending}
       isIconOnly={iconOnly}
       onPress={onPress}
       className={[
@@ -103,7 +121,7 @@ export const VButton = forwardRef<HTMLButtonElement, VButtonProps>(function VBut
     >
       {contentLayout === "plain" ? (
         <>
-          {icon}
+          {isPending ? pendingIcon : icon}
           {children}
           {trailingIcon}
         </>
@@ -113,12 +131,16 @@ export const VButton = forwardRef<HTMLButtonElement, VButtonProps>(function VBut
           title={hasTooltip ? undefined : title}
           className="inline-flex min-w-0 max-w-full items-center justify-center gap-1.5"
         >
-          {icon ? (
+          {isPending ? (
+            <span data-slot="vui-button-icon" className="inline-grid shrink-0 place-items-center">
+              {pendingIcon}
+            </span>
+          ) : icon ? (
             <span data-slot="vui-button-icon" className="inline-grid shrink-0 place-items-center">
               {icon}
             </span>
           ) : null}
-          {iconOnly && children ? (
+          {iconOnly && children && !isPending ? (
             <span data-slot="vui-button-icon" className="inline-grid shrink-0 place-items-center">
               {children}
             </span>
@@ -127,7 +149,7 @@ export const VButton = forwardRef<HTMLButtonElement, VButtonProps>(function VBut
               {children}
             </span>
           ) : null}
-          {trailingIcon ? (
+          {!isPending && trailingIcon ? (
             <span data-slot="vui-button-trailing-icon" className="inline-grid shrink-0 place-items-center">
               {trailingIcon}
             </span>
@@ -141,7 +163,7 @@ export const VButton = forwardRef<HTMLButtonElement, VButtonProps>(function VBut
     return button;
   }
 
-  if (isDisabled) {
+  if (blocked && isDisabled) {
     const actionLabel = typeof props["aria-label"] === "string"
       ? props["aria-label"]
       : typeof children === "string"

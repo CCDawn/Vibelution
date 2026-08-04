@@ -31,15 +31,17 @@ export const ShadcnInput = forwardRef<HTMLInputElement, ShadcnInputProps>(functi
   const isRange = inputType === "range";
   const controlClass = isBox
     ? [
-        "h-4 w-4 min-w-4 rounded border border-vui-border-subtle",
-        "bg-vui-control-muted text-vui-accent-cool shadow-none",
-        "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-vui-accent-cool",
+        "h-4 w-4 min-w-4 rounded-[4px] border border-vui-border-subtle",
+        "bg-[var(--vui-surface-panel)] text-[var(--fg-primary)] shadow-none",
+        "accent-[var(--fg-primary)]",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_45%,transparent)]",
+        "focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--vui-surface-panel)]",
         "disabled:cursor-not-allowed disabled:opacity-55",
       ].join(" ")
     : isRange
       ? [
-          "w-full min-w-0 accent-[var(--accent-cool)]",
-          "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-vui-accent-cool",
+          "w-full min-w-0 accent-[var(--fg-primary)]",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_45%,transparent)]",
           "disabled:cursor-not-allowed disabled:opacity-55",
         ].join(" ")
       : vuiFormControlClass(density);

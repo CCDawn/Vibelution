@@ -64,8 +64,9 @@ export function ShadcnDialog({
           data-renderer="radix"
           className={cn(
             "fixed inset-0 z-[90]",
-            "bg-[color-mix(in_srgb,var(--bg-canvas)_52%,transparent)]",
-            "backdrop-blur-[5px]",
+            // shadcn-like dim: ink wash, light blur (no animate plugin dependency)
+            "bg-[color-mix(in_srgb,var(--fg-primary)_28%,transparent)]",
+            "backdrop-blur-[2px]",
           )}
         />
         <DialogPrimitive.Content
@@ -76,8 +77,9 @@ export function ShadcnDialog({
             "fixed left-1/2 top-1/2 z-[91] max-h-[min(88dvh,52rem)] -translate-x-1/2 -translate-y-1/2",
             "grid min-w-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden",
             "rounded-[var(--radius-panel)] border border-[var(--vui-border-subtle)]",
-            "bg-[color-mix(in_srgb,var(--vui-surface-panel)_98%,transparent)]",
+            "bg-[var(--vui-surface-panel)]",
             "shadow-[var(--vui-elevation-overlay)] outline-none",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_40%,transparent)]",
             sizeClassName[size],
             contentClassName,
             className,

@@ -26,6 +26,38 @@
 
 ---
 
+## VTabs
+
+### 职责
+工作台分段切换（Radix Tabs / shadcn 风格 list + 可选 content）。
+
+### 非职责
+- 不做路由级导航（用 `VRouteLinkButton` / router）
+- 不做完整 wizard 步骤器
+
+### 何时使用
+- Agent/Config/面板内多 section 切换
+- 替代手写 `button` 行冒充 tab
+
+### 何时不要用
+| 场景 | 改用 |
+| --- | --- |
+| 页面主从列表 | `VListDetailPage` |
+| 仅两个开关 | 考虑 `VButton` ghost 组或后续 `VSwitch` |
+
+### API 要点
+- `items: { id, label, disabled?, content? }[]`
+- `value` / `defaultValue` / `onValueChange`
+- `density`: compact | normal
+
+### 实现落点
+- `layout/VTabs.tsx` → `@radix-ui/react-tabs`
+
+### 反冗余
+- 禁止再写 `styles.tabActive` 平行 tab 系统；扩展本组件
+
+---
+
 ## VToolbar
 
 ### 职责

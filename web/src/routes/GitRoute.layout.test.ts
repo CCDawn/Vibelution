@@ -193,8 +193,10 @@ describe("GitRoute layout contract", () => {
     expect(routeSource).toContain('fetchJson<GitFileDiff>(`/api/git/diff?path=${encodeURIComponent(activePath ?? "")}`, { signal })');
     expect(routeSource).toContain('fetchJson<GitObjectDetail>(`/api/git/object-detail?${params.toString()}`, { signal })');
     expect(routeSource).toContain("invalidateQueries({ queryKey: queryKeys.gitStatusSummary() })");
-    expect(routeSource).toContain('tone="loading"');
+    expect(routeSource).toContain("ProgressiveRegionSkeleton");
     expect(routeSource).toContain("gitStatusLoading");
+    // Refreshing banner may still use compact VStateSurface loading; initial panes use progressive shell.
+    expect(routeSource).toContain('tone="loading"');
     expect(gitRouteStyles.summaryGrid).toContain("min-h-[48px]");
   });
 
@@ -211,6 +213,7 @@ describe("GitRoute layout contract", () => {
 
     expect(markup).toContain('aria-busy="true"');
     expect(markup).toContain("Loading recent commits");
+    expect(markup).toContain('data-testid="progressive-region-skeleton"');
     expect(markup).not.toContain("old commit");
   });
 

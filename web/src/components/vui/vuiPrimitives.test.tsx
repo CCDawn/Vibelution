@@ -14,6 +14,7 @@ import {
   VNativeButton,
   VPanel,
   VRouteLinkButton,
+  VSkeleton,
   VSurface,
   VToolbar,
   VTooltip,
@@ -35,10 +36,44 @@ describe("VUI foundation primitives", () => {
     expect(sharedSlotsSource).toContain("hover:border-[var(--vui-control-hover-border)]");
     expect(sharedSlotsSource).toContain("hover:bg-[var(--vui-control-hover-bg)]");
     expect(sharedSlotsSource).toContain("hover:text-[var(--vui-control-hover-fg)]");
+    // shadcn-aligned solid primary (ink fill), not washed border-only primary.
+    expect(sharedSlotsSource).toContain("vuiButtonPrimaryClass");
+    expect(sharedSlotsSource).toContain("bg-[var(--fg-primary)]");
+    expect(sharedSlotsSource).toContain("text-[var(--vui-surface-base)]");
+    expect(sharedSlotsSource).toContain("focus-visible:ring-2");
     expect(sharedSlotsSource).not.toContain("hover:border-[var(--border-strong)]");
     expect(sharedSlotsSource).not.toContain("hover:bg-[var(--vui-control-muted-hover)]");
     expect(buttonSource).toContain('from "../renderers/shadcn/ShadcnButton"');
     expect(buttonSource).toContain("ShadcnButton");
+  });
+
+  it("renders solid primary CTA and skeleton pulse tokens", () => {
+    const markup = renderToStaticMarkup(
+      <VuiProvider>
+        <VButton variant="primary">Save</VButton>
+      </VuiProvider>,
+    );
+    expect(markup).toContain('data-variant="primary"');
+    expect(markup).toContain("bg-[var(--fg-primary)]");
+
+    const skeleton = renderToStaticMarkup(<VSkeleton shape="line" className="w-24" />);
+    expect(skeleton).toContain('data-vui="skeleton"');
+    expect(skeleton).toContain("animate-pulse");
+  });
+
+  it("shows pending spinner and aria-busy on VButton", () => {
+    const markup = renderToStaticMarkup(
+      <VuiProvider>
+        <VButton variant="primary" isPending>
+          Saving
+        </VButton>
+      </VuiProvider>,
+    );
+    expect(markup).toContain('data-pending="true"');
+    expect(markup).toContain('aria-busy="true"');
+    expect(markup).toContain('data-slot="vui-button-pending"');
+    expect(markup).toContain("animate-spin");
+    expect(markup).toContain("disabled");
   });
 
   it("scans Tailwind classes from the TSX surfaces replacing CSS modules", () => {
@@ -214,7 +249,9 @@ describe("VUI foundation primitives", () => {
   it("keeps button geometry content-sized unless a caller opts into full width", () => {
     const compactMarkup = renderToStaticMarkup(
       <VToolbar ariaLabel="Button fit">
-        <VButton icon={<Search size={14} />}>Search</VButton>
+        <VButton icon={<Search size={14} />}>
+          Search
+        </VButton>
         <VIconButton label="Refresh" icon={<Search size={14} />} />
       </VToolbar>,
     );

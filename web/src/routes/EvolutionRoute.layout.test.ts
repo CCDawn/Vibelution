@@ -417,6 +417,8 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(selfTrackBoundarySource).toContain('import("./SelfEvolutionTrack")');
     expect(selfTrackBoundarySource).toContain("<Suspense");
     expect(selfTrackBoundarySource).toContain("正在加载自进化工作台");
+    expect(selfTrackBoundarySource).toContain("ProgressiveRegionSkeleton");
+    expect(selfTrackBoundarySource).not.toContain('tone="loading"');
     expect(selfTrackBoundarySource).not.toContain("useQuery");
     expect(selfTrackBoundarySource).not.toContain("useMutation");
     expect(selfTrackBoundarySource).not.toContain("queryClient");
@@ -719,8 +721,9 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(supervisedAgentConversationPanelSource).toContain("VStatusStrip");
     expect(supervisedAgentConversationPanelSource).toContain("VToolbar");
     expect(supervisedAgentConversationPanelSource).toContain("VEmptyState");
-    expect(supervisedAgentConversationPanelSource).toContain("VStateSurface");
-    expect(supervisedAgentConversationPanelSource).toContain('tone="loading"');
+    expect(supervisedAgentConversationPanelSource).toContain("ProgressiveRegionSkeleton");
+    expect(supervisedAgentConversationPanelSource).toContain('variant="conversation"');
+    expect(supervisedAgentConversationPanelSource).not.toContain('tone="loading"');
     expect(supervisedAgentConversationPanelSource).toContain('variant={selected ? "primary" : "secondary"}');
     expect(supervisedAgentConversationPanelSource).toContain("tabIndex={selected ? 0 : -1}");
     expect(supervisedAgentConversationPanelSource).toContain('event.key === "ArrowRight"');

@@ -10,6 +10,7 @@ import {
   VNativeSelect,
   VNativeTextarea,
   VSelect,
+  VTabs,
   VTextarea,
 } from "./index";
 import { VuiProvider } from "./VuiProvider";
@@ -48,6 +49,7 @@ describe("VUI form primitives", () => {
     expect(markup).toContain('data-vui="native-select"');
     expect(markup).toContain('data-vui="native-textarea"');
     expect(markup).toContain('data-vui="select"');
+    expect(markup).toContain('data-renderer="radix"');
     expect(markup).toContain('data-vui="textarea"');
     expect(markup).toContain('data-vui="checkbox"');
     expect(markup).toContain('data-density="compact"');
@@ -60,5 +62,24 @@ describe("VUI form primitives", () => {
     expect(markup).toContain('type="checkbox"');
     expect(markup).toContain("MiMo V2.5");
     expect(markup).toContain("Running only");
+  });
+
+  it("exports Radix tabs list chrome", () => {
+    const markup = renderToStaticMarkup(
+      <VuiProvider>
+        <VTabs
+          aria-label="Sections"
+          defaultValue="a"
+          items={[
+            { id: "a", label: "Basics", content: <p>A</p> },
+            { id: "b", label: "Ops", content: <p>B</p> },
+          ]}
+        />
+      </VuiProvider>,
+    );
+    expect(markup).toContain('data-vui="tabs"');
+    expect(markup).toContain('data-slot="tabs-list"');
+    expect(markup).toContain("Basics");
+    expect(markup).toContain("Ops");
   });
 });

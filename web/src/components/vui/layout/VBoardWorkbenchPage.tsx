@@ -27,6 +27,11 @@ export type VBoardWorkbenchPageProps = Omit<ComponentPropsWithoutRef<"section">,
   rail: ReactNode;
   /** Main board content (CTA, kanban, tables…). */
   board: ReactNode;
+  /**
+   * Optional right inspector (workflow modules, stage tools).
+   * When set with resize.aside, becomes a persisted drag column.
+   */
+  aside?: ReactNode;
   /** Stable layoutId for rail resize persistence. */
   layoutId?: string;
   resize?: Omit<VSplitWorkspaceResizeConfig, "layoutId">;
@@ -38,6 +43,7 @@ export type VBoardWorkbenchPageProps = Omit<ComponentPropsWithoutRef<"section">,
   shellMode?: string;
   railClassName?: string;
   boardClassName?: string;
+  asideClassName?: string;
   workspaceClassName?: string;
   className?: string;
 };
@@ -58,6 +64,7 @@ export function VBoardWorkbenchPage({
   toolbarClassName,
   rail,
   board,
+  aside,
   layoutId,
   resize,
   domainRecipe,
@@ -65,6 +72,7 @@ export function VBoardWorkbenchPage({
   shellMode,
   railClassName,
   boardClassName,
+  asideClassName,
   workspaceClassName,
   className,
   ...props
@@ -101,7 +109,7 @@ export function VBoardWorkbenchPage({
           sidebar={(
             <div
               data-vui="board-workbench-rail"
-              className={cn(VUI_RAIL_SURFACE_CLASS, "flex flex-col", railClassName)}
+              className={cn(VUI_RAIL_SURFACE_CLASS, "flex h-full min-h-0 flex-col", railClassName)}
             >
               {rail}
             </div>
@@ -121,12 +129,30 @@ export function VBoardWorkbenchPage({
               ) : null}
               <div
                 data-vui="board-workbench-board"
-                className={cn(VUI_BOARD_CONTENT_PAD_CLASS, boardClassName)}
+                className={cn(
+                  VUI_BOARD_CONTENT_PAD_CLASS,
+                  "min-h-0 flex-1",
+                  boardClassName,
+                )}
               >
                 {board}
               </div>
             </div>
           )}
+          aside={
+            aside ? (
+              <div
+                data-vui="board-workbench-aside"
+                className={cn(
+                  VUI_RAIL_SURFACE_CLASS,
+                  "flex h-full min-h-0 flex-col overflow-hidden",
+                  asideClassName,
+                )}
+              >
+                {aside}
+              </div>
+            ) : undefined
+          }
         />
       </div>
     </VWorkbenchPage>

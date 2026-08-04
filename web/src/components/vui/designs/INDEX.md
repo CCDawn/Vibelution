@@ -52,6 +52,7 @@
 | `VRouteHeader` | [layout/chrome.md](./layout/chrome.md#vrouteheader) |
 | `VPanelHeader` | [layout/chrome.md](./layout/chrome.md#vpanelheader) |
 | `VToolbar` | [layout/chrome.md](./layout/chrome.md#vtoolbar) |
+| `VTabs` | [layout/chrome.md](./layout/chrome.md#vtabs) |
 | `VActionGroup` | [layout/chrome.md](./layout/chrome.md#vactiongroup) |
 | `VStatusStrip` | [layout/chrome.md](./layout/chrome.md#vstatusstrip) |
 | `VSection` | [layout/structure.md](./layout/structure.md#vsection) |
@@ -69,6 +70,7 @@
 | `VDenseTable` | [display/data.md](./display/data.md#vdensetable) |
 | `VMetricStrip` | [display/data.md](./display/data.md#vmetricstrip) |
 | `VLoadingValue` | [display/data.md](./display/data.md#vloadingvalue) |
+| `VSkeleton` | [display/data.md](./display/data.md#vskeleton) |
 
 ## Aesthetic
 
