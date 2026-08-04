@@ -2,11 +2,12 @@ import { type VuiTone } from "./buttonVariants";
 
 /** Shared visual slots for VChip — renderer-agnostic Tailwind contracts. */
 
+/** shadcn Badge-like pill: tighter border, panel-aware fill. */
 export const vuiChipBaseClass =
-  "inline-flex max-w-full items-center justify-center gap-1 rounded-full border border-vui-border-subtle bg-vui-control-muted text-vui-fg-secondary shadow-none";
+  "inline-flex max-w-full items-center justify-center gap-1 rounded-full border border-vui-border-subtle bg-[color-mix(in_srgb,var(--vui-control-muted)_88%,var(--vui-surface-panel))] text-vui-fg-secondary shadow-none";
 
 export const vuiChipSizeClass =
-  "h-6 min-h-6 max-h-6 px-1.5 [font-size:var(--vui-font-xs)] font-semibold leading-none";
+  "h-6 min-h-6 max-h-6 px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none";
 
 /** Tone classes (paired with vui-provider-theme.css .vui-tone-* under the app provider). */
 export function vuiChipToneClass(tone: VuiTone | undefined): string {

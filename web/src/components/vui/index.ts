@@ -39,6 +39,7 @@ export {
 export { VDenseTable, type VDenseTableColumn, type VDenseTableProps } from "./display/VDenseTable";
 export { VLoadingValue, type VLoadingValueProps } from "./display/VLoadingValue";
 export { VMetricStrip, type VMetricStripMetric, type VMetricStripProps, type VMetricStripStatus } from "./display/VMetricStrip";
+export { VSkeleton, type VSkeletonProps } from "./display/VSkeleton";
 export { VCheckbox, type VCheckboxProps } from "./forms/VCheckbox";
 export { VFieldRow, type VFieldRowProps } from "./forms/VFieldRow";
 export { VInput, type VInputProps } from "./forms/VInput";
@@ -108,5 +109,6 @@ export {
 } from "./layout/VSplitWorkspace";
 export { VStatusStrip, type VStatusStripItem, type VStatusStripProps, type VStatusStripTone } from "./layout/VStatusStrip";
 export { VStack, type VStackProps } from "./layout/VStack";
+export { VTabs, type VTabsItem, type VTabsProps } from "./layout/VTabs";
 export { VToolbar, type VToolbarProps } from "./layout/VToolbar";
 export { VWorkbenchPage, type VWorkbenchPageProps } from "./layout/VWorkbenchPage";

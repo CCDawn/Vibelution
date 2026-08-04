@@ -149,8 +149,12 @@ describe("VUI dual-theme foundation", () => {
       "utf8",
     );
 
-    expect(selectSource).toContain("bg-[image:var(--vui-select-chevron)]");
+    // Radix Select uses lucide ChevronDown (theme-aware stroke), not a fixed CSS data-URI chevron.
+    expect(selectSource).toContain('@radix-ui/react-select');
+    expect(selectSource).toContain("ChevronDown");
+    expect(selectSource).toContain('data-renderer="radix"');
     expect(selectSource).not.toContain("%237d8796");
+    expect(selectSource).not.toContain("bg-[image:var(--vui-select-chevron)]");
     expect(formClassesSource).toContain("[color-scheme:inherit]");
     expect(nativeControlsSource).toContain('select[data-renderer="shadcn"] option');
     expect(nativeControlsSource).toContain("color-scheme: inherit");
@@ -307,7 +311,9 @@ describe("VUI dual-theme foundation", () => {
             meta={<span>32</span>}
             actions={
               <VActionGroup ariaLabel="Agent actions">
-                <VButton icon={<Search size={14} />}>搜索</VButton>
+                <VButton icon={<Search size={14} />}>
+                  搜索
+                </VButton>
               </VActionGroup>
             }
           >

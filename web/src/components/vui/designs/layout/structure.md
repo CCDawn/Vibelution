@@ -49,11 +49,20 @@
 加载/错误/不可用/空 的状态面（可 skeleton、facts）。
 
 ### 何时使用
-- 冷加载、失败恢复、占位
-- **工作台主区（board/canvas/list-detail main）加载**：必须 `fill`，避免「一行字 + 大片空白」
+- 冷加载（**尚无稳定 IA/骨架可铺**）、失败恢复、空态、不可用
+- 行内/紧凑通知：`density="compact"`
+
+### 何时不要用
+| 场景 | 改用 |
+| --- | --- |
+| 主区已有稳定结构，仅数据未到 | `VSkeleton` / progressive region shell（原位填数） |
+| 仅一行错误文案 | `VErrorSummary` |
+| 列表永久空 | `VEmptyState` |
+| 主区加载仍用 `styles.empty` 一行字 | **禁止** — 用本组件 `fill` **或** 结构骨架 |
 
 ### `fill`
 - `fill`：占满父级 flex/grid 区域（`flex-1` + 最小高度 + 居中内容）
+- 仅当**没有**可铺的业务几何时使用 fill loading（避免「一行字 + 大片空白」）
 - loading 且未指定 `skeletonLines` 时：`fill` 默认 3 条骨架，非 fill 默认 2 条
 - 父级请用 `VUI_REGION_STATE_HOST_CLASS` 或已有 `flex-1 min-h-0` 链
 
@@ -61,13 +70,6 @@
 - `default`：facts 用 `1fr` 网格（适合总览型状态）
 - `compact`：更紧 padding；facts 为 **内容宽度 chip**（`flex-wrap`），避免宽屏两格被拉成整行空卡
 - **行内失败/中断横幅**（如自进化闭环中断）应用 `compact`
-
-### 何时不要用
-| 场景 | 改用 |
-| --- | --- |
-| 仅一行错误文案 | `VErrorSummary` |
-| 列表永久空 | `VEmptyState` |
-| 主区加载仍用 `styles.empty` 一行字 | **禁止** — 改本组件 `fill` |
 
 ---
 

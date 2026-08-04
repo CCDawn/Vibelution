@@ -66,15 +66,21 @@
 ## VSelect
 
 ### 职责
-可访问选择器（Radix/shadcn），支持 `selectedKey` / `onSelectionChange`。
+可访问选择器（**Radix Select** / shadcn 风格），支持 `selectedKey` / `onSelectionChange`、选项 description、portal 下拉。
+
+### 视觉与状态
+- Trigger 与 `VInput` 同 control chrome（border / ring focus）
+- 下拉：panel 表面 + 高亮行 + check indicator
+- 表单 `name` 时输出 hidden input 便于原生提交
 
 ### 何时不要用
 | 场景 | 改用 |
 | --- | --- |
-| 简单 string + 原生 option 列表 | `VNativeSelect` 或 `VStringSelect` |
+| 简单 string + 原生 option 列表、极低成本 | `VNativeSelect` 或 `VStringSelect` |
+| 需要搜索过滤大量选项 | 暂用调用方 Combobox 方案（未建 `VCombobox` 前） |
 
 ### 实现落点
-- `forms/VSelect.tsx` → `ShadcnSelect`
+- `forms/VSelect.tsx` → `renderers/shadcn/ShadcnSelect.tsx`（`@radix-ui/react-select`）
 
 ---
 

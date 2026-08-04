@@ -32,15 +32,17 @@
 
 | Product API | Implementation | Notes |
 | --- | --- | --- |
-| `VButton` | `ShadcnButton` | density + variant; HeroUI-era `onPress` / `isDisabled` kept |
+| `VButton` | `ShadcnButton` | density + variant; `isPending` spinner; HeroUI-era `onPress` / `isDisabled` kept |
 | `VRouteLinkButton` | React Router `Link` + shared button slots | Internal SPA navigation with link semantics and the same variant/density/focus contract as `VButton`; route classes may preserve domain geometry during migration |
 | `VIconButton` | via `VButton` | square geometry |
 | `VChip` | `ShadcnChip` | tone map |
 | `VTooltip` | `ShadcnTooltip` (Radix) | `isOpen` alias retained |
 | `VDialog` / `VConfirmDialog` | `ShadcnDialog` (Radix) | Prefer over hand-rolled `fixed inset-0` overlays |
+| `VTabs` | `@radix-ui/react-tabs` | section switcher; items API |
+| `VSkeleton` | Tailwind pulse | progressive in-place loading slots |
 | `VInput` | `ShadcnInput` | |
 | `VTextarea` | `ShadcnTextarea` | |
-| `VSelect` | `ShadcnSelect` | `selectedKey` / `onSelectionChange` retained |
+| `VSelect` | `ShadcnSelect` (`@radix-ui/react-select`) | `selectedKey` / `onSelectionChange` retained; portal list |
 | `VCheckbox` | `ShadcnCheckbox` | |
 | `VNativeButton` / `VNativeInput` / `VNativeSelect` / `VNativeTextarea` | native | Prefer for dense ops / zero-float paths |
 | Layout / display (`VPage`, `VSurface`, strips, …) | Tailwind composition | Not shadcn primitives; keep project-owned |

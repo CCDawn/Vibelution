@@ -25,6 +25,8 @@ export type ShadcnButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, "d
   variant?: VuiButtonVariant;
   density?: VuiDensity;
   isDisabled?: boolean;
+  /** Mutation / async in flight — disables and exposes aria-busy. */
+  isPending?: boolean;
   isIconOnly?: boolean;
   /** HeroUI-era compatibility: mapped to onClick. */
   onPress?: (event: MouseEvent<HTMLButtonElement>) => void;
@@ -38,6 +40,7 @@ export const ShadcnButton = forwardRef<HTMLButtonElement, ShadcnButtonProps>(
       variant = "secondary",
       density = "compact",
       isDisabled = false,
+      isPending = false,
       isIconOnly = false,
       onPress,
       onClick,
@@ -49,30 +52,35 @@ export const ShadcnButton = forwardRef<HTMLButtonElement, ShadcnButtonProps>(
     },
     ref,
   ) {
+    const blocked = Boolean(isDisabled || isPending);
     return (
       <button
         {...props}
         ref={ref}
         type={type}
-        disabled={isDisabled}
+        disabled={blocked}
         data-vui={dataVui ?? "button"}
         data-variant={variant}
         data-density={density}
         data-icon-only={isIconOnly ? "true" : undefined}
+        data-pending={isPending ? "true" : undefined}
         data-renderer="shadcn"
-        aria-disabled={isDisabled || undefined}
+        aria-disabled={blocked || undefined}
+        aria-busy={isPending || undefined}
         className={cn(
           "inline-flex max-w-full shrink-0 items-center justify-center justify-self-start",
-          "rounded-[var(--radius-control)] px-2 [font-size:var(--vui-font-sm)] font-semibold leading-tight",
+          "rounded-[var(--radius-control)] px-2.5 [font-size:var(--vui-font-sm)] font-semibold leading-tight",
+          "select-none",
           vuiButtonDensityClass(density),
           vuiButtonVariantClass(variant),
+          // Focus is included for primary in variant slots; always apply ring base for secondary/ghost/danger.
           vuiButtonFocusClass,
           vuiButtonDisabledClass,
           isIconOnly ? "aspect-square px-0" : null,
           className,
         )}
         onClick={(event) => {
-          if (isDisabled) {
+          if (blocked) {
             event.preventDefault();
             return;
           }

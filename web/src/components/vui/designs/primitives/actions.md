@@ -21,12 +21,18 @@
 | 画布节点/多行卡片点击命中区 | `VNativeButton` |
 
 ### API 要点
-- `variant`: primary / secondary / danger 等
+- `variant`: primary / secondary / ghost / danger
 - `density`、`isDisabled`、`onPress`（兼容层）
+- **`isPending`**：异步中禁用 + `aria-busy` + 前置 spinner（勿只改文案 “Working…”）
 - 可带 `icon`、`tooltip`、`disabledReason`
 
 ### 视觉与状态
-- primary 实心；secondary 边框；disabled 降对比
+- **primary**：shadcn 风格高对比实心（`fg-primary` 填充 / `surface-base` 字），一眼可辨主 CTA
+- **secondary**：描边 + control muted；hover 用语义 control hover token
+- **ghost**：透明底 + 轻 hover 填充
+- **danger**：错误色描边/底
+- focus：`ring-2` + ring-offset + 项目 focus shadow
+- disabled：opacity + pointer-events-none
 - 长中文标签不截断布局（允许换行策略由调用方 class 控制）
 
 ### 实现落点

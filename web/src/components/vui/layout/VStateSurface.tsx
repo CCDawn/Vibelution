@@ -93,8 +93,9 @@ const FACT_VALUE = "truncate text-[0.72rem] font-[820] text-[var(--fg-primary)]"
 const FACT_VALUE_COMPACT = "min-w-0 truncate font-mono text-[0.72rem] font-[820] text-[var(--fg-primary)]";
 const ACTIONS = "flex min-w-0 flex-wrap items-center gap-1.5";
 const SKELETON_STACK = "grid min-w-0 gap-1.5";
+/** Align with VSkeleton / shadcn pulse (border mix, reduced motion via global pulse). */
 const SKELETON_LINE =
-  "block h-2 animate-pulse rounded-full bg-[color-mix(in_srgb,var(--accent-cool)_22%,var(--vui-border-subtle))]";
+  "block h-2 animate-pulse rounded-full bg-[color-mix(in_srgb,var(--vui-border-subtle)_72%,transparent)] motion-reduce:animate-none";
 const SKELETON_WIDTHS = ["w-[min(100%,520px)]", "w-[min(72%,380px)]", "w-[min(46%,260px)]"];
 
 function skeletonLineCount(value: boolean | number | undefined): number {
