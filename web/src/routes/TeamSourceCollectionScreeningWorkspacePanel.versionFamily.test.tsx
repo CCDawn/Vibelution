@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import panelSource from "./TeamSourceCollectionScreeningWorkspacePanel.tsx?raw";
 import teamsRouteSource from "./TeamsRoute.tsx?raw";
+import presentationSource from "./teams/useSourceCollectionPresentation.ts?raw";
 
 describe("TeamSourceCollectionScreeningWorkspacePanel version family contract", () => {
   it("shows the version chain and prevents independent approval of superseded records", () => {
@@ -20,11 +21,13 @@ describe("TeamSourceCollectionScreeningWorkspacePanel version family contract", 
   });
 
   it("counts pending review from reviewable candidate state instead of extraction artifacts", () => {
-    expect(teamsRouteSource).toContain("sourceCollectionReviewableRunCandidates");
-    expect(teamsRouteSource).toContain('candidate.sourceVersionFamily?.state !== "superseded"');
-    expect(teamsRouteSource).toContain("sourceCollectionRunReviewableCandidateCount - sourceCollectionRunAssessedCount");
-    expect(teamsRouteSource).not.toContain(
+    // Owned by useSourceCollectionPresentation after presentation extract.
+    expect(presentationSource).toContain("sourceCollectionReviewableRunCandidates");
+    expect(presentationSource).toContain('candidate.sourceVersionFamily?.state !== "superseded"');
+    expect(presentationSource).toContain("sourceCollectionRunReviewableCandidateCount - sourceCollectionRunAssessedCount");
+    expect(presentationSource).not.toContain(
       "Math.max(0, sourceCollectionProjectedCandidateCount - sourceCollectionProjectedAssessedCount)",
     );
+    expect(teamsRouteSource).toContain("useSourceCollectionPresentation({");
   });
 });

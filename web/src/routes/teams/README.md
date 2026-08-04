@@ -33,6 +33,7 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 | SC controls metrics/feedback bags | `source-collection/controlsFeedbackBag.ts` | untyped controls prop groups |
 | Workspace panel render factory | `teamsWorkspacePanelRenderers.tsx` | memory/AI-search/completion/loop/ledger/canvas inspector render* in TeamsRoute |
 | SC workspace state machine | `useSourceCollectionWorkspace.ts` | SC useState + project/run list + selection + detail queries in TeamsRoute |
+| SC presentation + action adapters | `useSourceCollectionPresentation.ts` | SC summary/counts/readiness/display + mutation surfaces + run actions in TeamsRoute |
 | Experiment + research-loop workspace state | `useResearchExperimentWorkspace.ts` | experiment/loop drafts + secondary status queries in TeamsRoute |
 | Shell + canvas state machine | `useTeamsShellCanvasWorkspace.ts` (`useTeamsShellCanvasWorkspace` + `useTeamsCanvasProjection`) | shell/canvas useState, team pick sync, canvas query + display projection in TeamsRoute |
 | Team-scoped mutation surface (pending/error/result) | `teamMutationSurface.ts` | repeating `variables?.teamId === selectedTeam` ternaries in TeamsRoute |
@@ -162,8 +163,9 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 | 2 | `useResearchExperimentWorkspace` — experiment/loop drafts + secondary queries | **Done** |
 | 3 | `useTeamsShellCanvasWorkspace` + `useTeamsCanvasProjection` — shell/canvas state + canvas query/projection | **Done** |
 | 4 | `teamMutationSurface` — collapse team-scoped mutation pending/error/result ctx; docs/ownership map | **Done** |
+| 4+ / presentation | `useSourceCollectionPresentation` — SC summary/records/candidates/counts/readiness/display + write/mutation surfaces + stage action adapters | **Done** |
 
-**Still route-owned (intentional):** SC stage modules / readiness / large presentation chain, render* inject adapters, drag/save handlers, createExperimentWorkspaceActions wiring.
+**Still route-owned (intentional):** `sourceCollectionStageModules` JSX descriptors + board next-step, render* inject adapters, drag/save handlers, createExperimentWorkspaceActions wiring.
 
 **Explicitly deferred to Phase 9+:** SC chrome+workspace double-layer merge; force `TeamsRoute` under 2k LOC; large Context replacement of inject props; cross-route Chat/Agents/Config depth parity.
 

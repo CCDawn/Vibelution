@@ -17,6 +17,7 @@ import useResearchExperimentWorkspaceSource from "./teams/useResearchExperimentW
 import useTeamsShellCanvasWorkspaceSource from "./teams/useTeamsShellCanvasWorkspace.ts?raw";
 import teamMutationSurfaceSource from "./teams/teamMutationSurface.ts?raw";
 import sourceCollectionActionChromeSource from "./teams/source-collection/actionChrome.ts?raw";
+import useSourceCollectionPresentationSource from "./teams/useSourceCollectionPresentation.ts?raw";
 
 /** Route + extracted shell modules (layout contracts may live in either). */
 const routeSource = [
@@ -31,6 +32,7 @@ const routeSource = [
   useTeamsShellCanvasWorkspaceSource,
   teamMutationSurfaceSource,
   sourceCollectionActionChromeSource,
+  useSourceCollectionPresentationSource,
 ].join("\n");
 import researchWorkspaceModelSource from "./teams/researchWorkspaceModel.ts?raw";
 import researchProjectSwitcherSource from "./teams/research-projects/ResearchProjectSwitcher.tsx?raw";
@@ -2790,10 +2792,11 @@ describe("TeamsRoute layout contract", () => {
   });
 
   it("prioritizes active stage task launch and interruption status over stale summaries", () => {
-    const launchStateIndex = routeSource.indexOf("function sourceCollectionStageDisplayState");
+    // Display-state helpers live in useSourceCollectionPresentation; stage modules stay in route.
+    const launchStateIndex = useSourceCollectionPresentationSource.indexOf("function sourceCollectionStageDisplayState");
     const extractionModuleStateIndex = routeSource.indexOf('state: sourceCollectionStageDisplayState("extraction"');
     expect(launchStateIndex).toBeGreaterThan(0);
-    expect(extractionModuleStateIndex).toBeGreaterThan(launchStateIndex);
+    expect(extractionModuleStateIndex).toBeGreaterThan(0);
 
     const interruptedSummaryIndex = stageProjectionSource.indexOf("function sourceCollectionStageInterruptedSummary");
     const staleUserSummaryIndex = stageProjectionSource.indexOf('if (lang === "zh" && projection.userSummary)');
@@ -2979,7 +2982,7 @@ describe("TeamsRoute layout contract", () => {
     expect(teamMutationSurfaceSource).toContain('knowledgeCollectionWorkRunStatus === "completed"');
     expect(teamMutationSurfaceSource).toContain('knowledgeCollectionFlowStatus === "completed"');
     expect(teamMutationSurfaceSource).toContain("!knowledgeCollectionCompleted");
-    expect(routeSourceRaw).toContain("buildSourceCollectionWriteMutationSurface({");
+    expect(useSourceCollectionPresentationSource).toContain("buildSourceCollectionWriteMutationSurface({");
   });
 
   it("does not treat a completed knowledge work run from another source run as the selected loop completion", () => {
@@ -3080,9 +3083,9 @@ describe("TeamsRoute layout contract", () => {
     // Wave 8L: candidate panel loading prop lives on candidate workspace panel.
     expect(teamSourceCollectionCandidateWorkspacePanelSource).toContain("loading={sourceCollectionPrimaryDataLoading}");
 
-    const displayLoadingSource = routeSource.slice(
-      routeSource.indexOf("const sourceCollectionFindingDisplayLoading"),
-      routeSource.indexOf("const sourceCollectionStageModules"),
+    const displayLoadingSource = useSourceCollectionPresentationSource.slice(
+      useSourceCollectionPresentationSource.indexOf("const sourceCollectionFindingDisplayLoading"),
+      useSourceCollectionPresentationSource.indexOf("const sourceCollectionExperimentPlanningRoute"),
     );
     expect(displayLoadingSource).toContain("const sourceCollectionRelationsDisplayLoading = sourceCollectionGraphDataLoading");
     expect(displayLoadingSource).toContain("const sourceCollectionIngestionDisplayLoading = sourceCollectionSourceQualityLoading || sourceCollectionKnowledgeIngestionDataLoading");
