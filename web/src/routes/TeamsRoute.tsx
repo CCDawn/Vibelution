@@ -175,6 +175,7 @@ import { TeamSourceCollectionConversationInject } from "./teams/TeamSourceCollec
 import { TeamSourceCollectionFilterBarInject } from "./teams/TeamSourceCollectionFilterBarInject";
 import { TeamSourceCollectionPaginationInject } from "./teams/TeamSourceCollectionPaginationInject";
 import { TeamSourceCollectionStageAgentsInject } from "./teams/TeamSourceCollectionStageAgentsInject";
+import { createTeamsWorkspacePanelRenderers } from "./teams/teamsWorkspacePanelRenderers";
 import {
   buildSourceCollectionControlsFeedbackBag,
   buildSourceCollectionControlsMetricsBag,
@@ -1661,30 +1662,7 @@ export function TeamsRoute({
     recordResearchLoopDecisionMutation,
   });
 
-  function renderResearchStageAgentSummary(stageType: ResearchStageType) {
-    const bindings = researchStageAgentBindingsByStage[stageType] ?? [];
-    const agentDirectoryHydrating = bindings.some((binding) => binding.agentId && !binding.agent)
-      && (agentSummaryQuery.isPending || agentSummaryQuery.isFetching);
-    return (
-      <TeamResearchStageAgentSummary
-        lang={lang}
-        bindings={bindings}
-        agentDirectoryHydrating={agentDirectoryHydrating}
-      />
-    );
-  }
 
-  function renderResearchStageAgentPanel(stageType: ResearchStageType, variant: "compact" | "page" = "page") {
-    const bindings = researchStageAgentBindingsByStage[stageType] ?? [];
-    return (
-      <TeamResearchStageAgentPanel
-        lang={lang}
-        stageType={stageType}
-        bindings={bindings}
-        variant={variant}
-      />
-    );
-  }
 
   function sourceCollectionStageAgentBindings(stageId: SourceCollectionStageModuleId) {
     return sourceCollectionStageAgentBindingsForStage(
@@ -1788,19 +1766,6 @@ export function TeamsRoute({
     }
   }
 
-  function renderTeamMemoryIndex() {
-    if (!selectedTeam) {
-      return null;
-    }
-    return (
-      <TeamMemoryIndexPanel
-        lang={lang}
-        members={selectedTeamMemoryMembers}
-        knowledgeRoute={selectedTeamKnowledgeRoute}
-        graphRoute={selectedTeamGraphRoute}
-      />
-    );
-  }
 
   async function startSourceCollectionStageSessionTask(
     stageId: SourceCollectionStageModuleId,
@@ -2146,114 +2111,9 @@ export function TeamsRoute({
     );
   }
 
-  function renderResearchCanvasReadOnlyPanel() {
-    const node = selectedNode;
-    const agent = node?.agentId ? activeAgents.find((item) => item.agentId === node.agentId) : null;
-    const display = agent ? agentDisplayInfo(agent, lang) : null;
-    return (
-      <TeamCanvasReadOnlyInspector
-        lang={lang}
-        node={node}
-        agentName={display?.name}
-        functionLabel={node ? teamNodeFunctionLabel(node, display?.functionLabel, lang) : ""}
-        validationIssues={validation?.issues ?? []}
-        className={styles.canvasReadOnlyPanel}
-        noticeClassName={styles.canvasReadOnlyNotice}
-        nodeClassName={styles.canvasReadOnlyNode}
-        nodeWideClassName={styles.canvasReadOnlyNodeWide}
-        emptyClassName={styles.empty}
-        issueListClassName={styles.issueList}
-        issueClassName={styles.issue}
-      />
-    );
-  }
 
-  function renderTeamNodeBindingPanel() {
-    if (!showNodeBindingPanel) {
-      return null;
-    }
-    return (
-      <TeamNodeBindingPanel
-        lang={lang}
-        selectedTeam={selectedTeam}
-        selectedNode={selectedNode}
-        nodeDraft={nodeDraft}
-        onNodeDraftChange={(patch) => setNodeDraft((current) => ({ ...current, ...patch }))}
-        activeAgents={activeAgents}
-        agentTeamMembership={agentTeamMembership}
-        agentDisplayName={(agent) => agentDisplayInfo(agent, lang).name}
-        agentSourceRoute={teamCanvasNodeAgentSourceRoute}
-        durableCanvas={durableCanvas}
-        hasWritableCanvas={hasWritableCanvas}
-        savePending={selectedTeamSaveCanvasPending}
-        detailPending={teamDetailQuery.isPending}
-        agentsPending={agentSummaryQuery.isPending}
-        validationIssues={validation?.issues ?? []}
-        onSave={applyNodeDraft}
-        onConnectFromLead={connectFromLead}
-        onUnbind={unbindSelectedNode}
-        onDelete={deleteSelectedNode}
-        styles={{
-          section: styles.nodeBindingSection,
-          placeholder: styles.nodeBindingPlaceholder,
-          empty: styles.empty,
-          sourceAuthority: styles.nodeSourceAuthority,
-          actionRow: styles.actionRow,
-          dangerButton: styles.dangerButton,
-          issueList: styles.issueList,
-          issue: styles.issue,
-        }}
-      />
-    );
-  }
 
-  function renderKnowledgeCollectionCompletionFlowPanel() {
-    return (
-      <TeamKnowledgeCollectionCompletionFlowPanel
-        lang={lang}
-        researchWorkflowTeamSelected={researchWorkflowTeamSelected}
-        researchCanvasReadOnly={researchCanvasReadOnly}
-        selectedTeamKnowledgeCollectionWorkRun={selectedTeamKnowledgeCollectionWorkRun}
-        sourceCollectionCompletionFlow={sourceCollectionCompletionFlow}
-        sourceCollectionCompletionFlowNodes={sourceCollectionCompletionFlowNodes}
-        sourceCollectionStageModules={sourceCollectionStageModules}
-        workflowIngestionTone={workflowIngestionToneBound}
-        parseSourceCollectionStageModuleId={parseSourceCollectionStageModuleId}
-        sourceCollectionStagePrimaryAgentBinding={sourceCollectionStagePrimaryAgentBinding}
-        sourceCollectionStageReturnRoute={sourceCollectionStageReturnRoute}
-        openSourceCollectionStageAgentChat={openSourceCollectionStageAgentChat}
-        sourceCollectionStepClassName={sourceCollectionStepClassName}
-        runKnowledgeCollectionCompletionAction={runKnowledgeCollectionCompletionAction}
-        sourceCollectionCompletionActionDisabled={sourceCollectionCompletionActionDisabled}
-        selectedTeamKnowledgeCollectionIngestPending={selectedTeamKnowledgeCollectionIngestPending}
-        sourceCollectionActionDisabledTitle={sourceCollectionActionDisabledTitle}
-        sourceCollectionCompletionActionReadiness={sourceCollectionCompletionActionReadiness}
-      />
-    );
-  }
 
-  function renderAiSearchSourceScopePanel() {
-    return (
-      <TeamAiSearchWorkspacePanel
-        lang={lang}
-        scope={selectedTeam?.sourceScope ?? null}
-        teamDetailPending={teamDetailQuery.isPending}
-        runs={aiSearchRuns}
-        runsPending={aiSearchRunsQuery.isPending}
-        runsFetching={aiSearchRunsQuery.isFetching}
-        visibleRunCount={aiSearchRunsQuery.data?.summary.visibleRunCount ?? aiSearchRuns.length}
-        totalRunCount={aiSearchRunsQuery.data?.summary.runCount ?? aiSearchRuns.length}
-        latestRun={latestAiSearchRun}
-        topic={aiSearchRunTopic}
-        onTopicChange={setAiSearchRunTopic}
-        canStart={aiSearchRunCanStart}
-        startPending={selectedTeamStartAiSearchPending}
-        startErrorMessage={selectedTeamStartAiSearchError?.message ?? null}
-        onStart={(payload) => startAiSearchRunMutation.mutate(payload)}
-        teamId={selectedTeam?.teamId}
-      />
-    );
-  }
 
   function renderSourceCollectionRunSwitcher() {
     return (
@@ -2664,110 +2524,7 @@ export function TeamsRoute({
     );
   }
 
-  function renderResearchLoopPanel(activePlan: ExperimentPlanRecord | null, variant: "experiment" | "iteration" = "experiment") {
-    return (
-      <TeamResearchLoopPanel
-        activePlan={activePlan}
-        variant={variant}
-        lang={lang}
-        selectedTeam={selectedTeam}
-        researchLoopStatus={researchLoopStatus}
-        researchLoopTemplatesPayload={researchLoopTemplatesPayload}
-        selectedResearchLoopTemplateId={selectedResearchLoopTemplateId}
-        setSelectedResearchLoopTemplateId={setSelectedResearchLoopTemplateId}
-        researchLoopCreateDraft={researchLoopCreateDraft}
-        setResearchLoopCreateDraft={setResearchLoopCreateDraft}
-        researchLoopEvidenceDraft={researchLoopEvidenceDraft}
-        setResearchLoopEvidenceDraft={setResearchLoopEvidenceDraft}
-        researchLoopDecisionDraft={researchLoopDecisionDraft}
-        setResearchLoopDecisionDraft={setResearchLoopDecisionDraft}
-        sourceCollectionDraft={sourceCollectionDraft}
-        researchLoopStatusQuery={researchLoopStatusQuery}
-        selectedTeamCreateResearchLoopPending={selectedTeamCreateResearchLoopPending}
-        selectedTeamCreateResearchLoopError={selectedTeamCreateResearchLoopError}
-        selectedTeamCreateResearchLoopResult={selectedTeamCreateResearchLoopResult}
-        selectedTeamRecordResearchLoopEvidencePending={selectedTeamRecordResearchLoopEvidencePending}
-        selectedTeamRecordResearchLoopEvidenceError={selectedTeamRecordResearchLoopEvidenceError}
-        selectedTeamRecordResearchLoopEvidenceResult={selectedTeamRecordResearchLoopEvidenceResult}
-        selectedTeamRecordResearchLoopDecisionPending={selectedTeamRecordResearchLoopDecisionPending}
-        selectedTeamRecordResearchLoopDecisionError={selectedTeamRecordResearchLoopDecisionError}
-        selectedTeamRecordResearchLoopDecisionResult={selectedTeamRecordResearchLoopDecisionResult}
-        materializeResearchLoopIterationDesignMutation={materializeResearchLoopIterationDesignMutation}
-        createResearchLoopFromWorkspace={createResearchLoopFromWorkspace}
-        recordResearchLoopEvidenceFromWorkspace={recordResearchLoopEvidenceFromWorkspace}
-        recordResearchLoopDecisionFromWorkspace={recordResearchLoopDecisionFromWorkspace}
-      />
-    );
-  }
 
-  function renderExperimentPlanningLedgerPanel() {
-    return (
-      <TeamExperimentPlanningLedgerPanel
-        lang={lang}
-        selectedTeam={selectedTeam}
-        experimentPlanningStatus={experimentPlanningStatus}
-        experimentPlanningStatusQuery={experimentPlanningStatusQuery}
-        experimentMethodCatalogQuery={experimentMethodCatalogQuery}
-        preferredExperimentMethod={preferredExperimentMethod}
-        searchParams={searchParams}
-        experimentBaselineArtifactDraft={experimentBaselineArtifactDraft}
-        setExperimentBaselineArtifactDraft={setExperimentBaselineArtifactDraft}
-        experimentSmokeResultDraft={experimentSmokeResultDraft}
-        setExperimentSmokeResultDraft={setExperimentSmokeResultDraft}
-        experimentFullRunResultDraft={experimentFullRunResultDraft}
-        setExperimentFullRunResultDraft={setExperimentFullRunResultDraft}
-        experimentKnowledgeIngestionDraft={experimentKnowledgeIngestionDraft}
-        setExperimentKnowledgeIngestionDraft={setExperimentKnowledgeIngestionDraft}
-        selectedTeamCreateExperimentPlanPending={selectedTeamCreateExperimentPlanPending}
-        selectedTeamCreateExperimentPlanError={selectedTeamCreateExperimentPlanError}
-        selectedTeamCreateExperimentPlanResult={selectedTeamCreateExperimentPlanResult}
-        selectedTeamMaterializeEngineeringProxyPending={selectedTeamMaterializeEngineeringProxyPending}
-        selectedTeamMaterializeEngineeringProxyError={selectedTeamMaterializeEngineeringProxyError}
-        selectedTeamCompleteScientificHypothesisCandidateId={selectedTeamCompleteScientificHypothesisCandidateId}
-        selectedTeamCompleteScientificHypothesisError={selectedTeamCompleteScientificHypothesisError}
-        selectedTeamReviewExperimentHypothesisCandidateId={selectedTeamReviewExperimentHypothesisCandidateId}
-        selectedTeamReviewExperimentHypothesisError={selectedTeamReviewExperimentHypothesisError}
-        selectedTeamCreateExperimentHypothesisRevisionCandidateId={selectedTeamCreateExperimentHypothesisRevisionCandidateId}
-        selectedTeamCreateExperimentHypothesisRevisionError={selectedTeamCreateExperimentHypothesisRevisionError}
-        selectedTeamFreezeExperimentDesignPending={selectedTeamFreezeExperimentDesignPending}
-        selectedTeamFreezeExperimentDesignError={selectedTeamFreezeExperimentDesignError}
-        selectedTeamFreezeExperimentDesignResult={selectedTeamFreezeExperimentDesignResult}
-        selectedTeamRegisterExperimentBaselineArtifactPending={selectedTeamRegisterExperimentBaselineArtifactPending}
-        selectedTeamRegisterExperimentBaselineArtifactError={selectedTeamRegisterExperimentBaselineArtifactError}
-        selectedTeamRegisterExperimentBaselineArtifactResult={selectedTeamRegisterExperimentBaselineArtifactResult}
-        selectedTeamRunExperimentSmokePending={selectedTeamRunExperimentSmokePending}
-        selectedTeamRunExperimentSmokeError={selectedTeamRunExperimentSmokeError}
-        selectedTeamRunExperimentSmokeResult={selectedTeamRunExperimentSmokeResult}
-        selectedTeamRegisterExperimentSmokeResultPending={selectedTeamRegisterExperimentSmokeResultPending}
-        selectedTeamRegisterExperimentSmokeResultError={selectedTeamRegisterExperimentSmokeResultError}
-        selectedTeamRegisterExperimentSmokeResultResult={selectedTeamRegisterExperimentSmokeResultResult}
-        selectedTeamRegisterExperimentFullRunResultPending={selectedTeamRegisterExperimentFullRunResultPending}
-        selectedTeamRegisterExperimentFullRunResultError={selectedTeamRegisterExperimentFullRunResultError}
-        selectedTeamRegisterExperimentFullRunResultResult={selectedTeamRegisterExperimentFullRunResultResult}
-        selectedTeamRequestExperimentKnowledgeIngestionPending={selectedTeamRequestExperimentKnowledgeIngestionPending}
-        selectedTeamRequestExperimentKnowledgeIngestionError={selectedTeamRequestExperimentKnowledgeIngestionError}
-        selectedTeamRequestExperimentKnowledgeIngestionResult={selectedTeamRequestExperimentKnowledgeIngestionResult}
-        createExperimentPlanFromWorkspace={createExperimentPlanFromWorkspace}
-        materializeEngineeringProxyHypothesisFromWorkspace={materializeEngineeringProxyHypothesisFromWorkspace}
-        completeScientificHypothesisFromWorkspace={completeScientificHypothesisFromWorkspace}
-        reviewExperimentHypothesisFromWorkspace={reviewExperimentHypothesisFromWorkspace}
-        createExperimentHypothesisRevisionFromWorkspace={createExperimentHypothesisRevisionFromWorkspace}
-        freezeExperimentDesignFromWorkspace={freezeExperimentDesignFromWorkspace}
-        registerExperimentBaselineArtifactFromWorkspace={registerExperimentBaselineArtifactFromWorkspace}
-        runExperimentSmokeFromWorkspace={runExperimentSmokeFromWorkspace}
-        registerExperimentSmokeResultFromWorkspace={registerExperimentSmokeResultFromWorkspace}
-        registerExperimentFullRunResultFromWorkspace={registerExperimentFullRunResultFromWorkspace}
-        requestExperimentKnowledgeIngestionFromWorkspace={requestExperimentKnowledgeIngestionFromWorkspace}
-        openIterationWorkspace={() => {
-          if (!selectedTeam?.teamId) {
-            return;
-          }
-          navigate(researchWorkspaceStageRoute(selectedTeam.teamId, "iteration"));
-        }}
-        renderResearchLoopPanel={renderResearchLoopPanel}
-      />
-    );
-  }
 
   function renderResearchStageStandalonePage(stageView: Exclude<ResearchStageWorkspaceView, "knowledge_collection">) {
     const refreshStageWorkspace = () => {
@@ -5779,6 +5536,147 @@ export function TeamsRoute({
     </VDenseOpsPage>
     );
   }
+
+
+  const {
+    renderResearchStageAgentSummary,
+    renderResearchStageAgentPanel,
+    renderTeamMemoryIndex,
+    renderResearchCanvasReadOnlyPanel,
+    renderTeamNodeBindingPanel,
+    renderKnowledgeCollectionCompletionFlowPanel,
+    renderAiSearchSourceScopePanel,
+    renderResearchLoopPanel,
+    renderExperimentPlanningLedgerPanel,
+  } = createTeamsWorkspacePanelRenderers({
+    lang,
+    selectedTeam,
+    selectedTeamMemoryMembers,
+    selectedTeamKnowledgeRoute,
+    selectedTeamGraphRoute,
+    researchStageAgentBindingsByStage,
+    agentSummaryQuery,
+    selectedNode,
+    activeAgents,
+    validation,
+    styles,
+    showNodeBindingPanel,
+    nodeDraft,
+    setNodeDraft,
+    agentTeamMembership,
+    durableCanvas,
+    hasWritableCanvas,
+    selectedTeamSaveCanvasPending,
+    teamDetailQuery,
+    applyNodeDraft,
+    connectFromLead,
+    unbindSelectedNode,
+    deleteSelectedNode,
+    researchWorkflowTeamSelected,
+    researchCanvasReadOnly,
+    selectedTeamKnowledgeCollectionWorkRun,
+    sourceCollectionCompletionFlow,
+    sourceCollectionCompletionFlowNodes,
+    sourceCollectionStageModules,
+    workflowIngestionToneBound,
+    sourceCollectionStagePrimaryAgentBinding,
+    sourceCollectionStageReturnRoute,
+    openSourceCollectionStageAgentChat,
+    sourceCollectionStepClassName,
+    runKnowledgeCollectionCompletionAction,
+    sourceCollectionCompletionActionDisabled,
+    selectedTeamKnowledgeCollectionIngestPending,
+    sourceCollectionActionDisabledTitle,
+    sourceCollectionCompletionActionReadiness,
+    aiSearchRuns,
+    aiSearchRunsQuery,
+    latestAiSearchRun,
+    aiSearchRunTopic,
+    setAiSearchRunTopic,
+    aiSearchRunCanStart,
+    selectedTeamStartAiSearchPending,
+    selectedTeamStartAiSearchError,
+    startAiSearchRunMutation,
+    researchLoopStatus,
+    researchLoopTemplatesPayload,
+    selectedResearchLoopTemplateId,
+    setSelectedResearchLoopTemplateId,
+    researchLoopCreateDraft,
+    setResearchLoopCreateDraft,
+    researchLoopEvidenceDraft,
+    setResearchLoopEvidenceDraft,
+    researchLoopDecisionDraft,
+    setResearchLoopDecisionDraft,
+    sourceCollectionDraft,
+    researchLoopStatusQuery,
+    selectedTeamCreateResearchLoopPending,
+    selectedTeamCreateResearchLoopError,
+    selectedTeamCreateResearchLoopResult,
+    selectedTeamRecordResearchLoopEvidencePending,
+    selectedTeamRecordResearchLoopEvidenceError,
+    selectedTeamRecordResearchLoopEvidenceResult,
+    selectedTeamRecordResearchLoopDecisionPending,
+    selectedTeamRecordResearchLoopDecisionError,
+    selectedTeamRecordResearchLoopDecisionResult,
+    materializeResearchLoopIterationDesignMutation,
+    createResearchLoopFromWorkspace,
+    recordResearchLoopEvidenceFromWorkspace,
+    recordResearchLoopDecisionFromWorkspace,
+    experimentPlanningStatus,
+    experimentPlanningStatusQuery,
+    experimentMethodCatalogQuery,
+    preferredExperimentMethod,
+    searchParams,
+    experimentBaselineArtifactDraft,
+    setExperimentBaselineArtifactDraft,
+    experimentSmokeResultDraft,
+    setExperimentSmokeResultDraft,
+    experimentFullRunResultDraft,
+    setExperimentFullRunResultDraft,
+    experimentKnowledgeIngestionDraft,
+    setExperimentKnowledgeIngestionDraft,
+    selectedTeamCreateExperimentPlanPending,
+    selectedTeamCreateExperimentPlanError,
+    selectedTeamCreateExperimentPlanResult,
+    selectedTeamMaterializeEngineeringProxyPending,
+    selectedTeamMaterializeEngineeringProxyError,
+    selectedTeamCompleteScientificHypothesisCandidateId,
+    selectedTeamCompleteScientificHypothesisError,
+    selectedTeamReviewExperimentHypothesisCandidateId,
+    selectedTeamReviewExperimentHypothesisError,
+    selectedTeamCreateExperimentHypothesisRevisionCandidateId,
+    selectedTeamCreateExperimentHypothesisRevisionError,
+    selectedTeamFreezeExperimentDesignPending,
+    selectedTeamFreezeExperimentDesignError,
+    selectedTeamFreezeExperimentDesignResult,
+    selectedTeamRegisterExperimentBaselineArtifactPending,
+    selectedTeamRegisterExperimentBaselineArtifactError,
+    selectedTeamRegisterExperimentBaselineArtifactResult,
+    selectedTeamRunExperimentSmokePending,
+    selectedTeamRunExperimentSmokeError,
+    selectedTeamRunExperimentSmokeResult,
+    selectedTeamRegisterExperimentSmokeResultPending,
+    selectedTeamRegisterExperimentSmokeResultError,
+    selectedTeamRegisterExperimentSmokeResultResult,
+    selectedTeamRegisterExperimentFullRunResultPending,
+    selectedTeamRegisterExperimentFullRunResultError,
+    selectedTeamRegisterExperimentFullRunResultResult,
+    selectedTeamRequestExperimentKnowledgeIngestionPending,
+    selectedTeamRequestExperimentKnowledgeIngestionError,
+    selectedTeamRequestExperimentKnowledgeIngestionResult,
+    createExperimentPlanFromWorkspace,
+    materializeEngineeringProxyHypothesisFromWorkspace,
+    completeScientificHypothesisFromWorkspace,
+    reviewExperimentHypothesisFromWorkspace,
+    createExperimentHypothesisRevisionFromWorkspace,
+    freezeExperimentDesignFromWorkspace,
+    registerExperimentBaselineArtifactFromWorkspace,
+    runExperimentSmokeFromWorkspace,
+    registerExperimentSmokeResultFromWorkspace,
+    registerExperimentFullRunResultFromWorkspace,
+    requestExperimentKnowledgeIngestionFromWorkspace,
+    navigate,
+  });
 
   function researchWorkflowStatusText() {
     if (!researchWorkflowTeamSelected) {

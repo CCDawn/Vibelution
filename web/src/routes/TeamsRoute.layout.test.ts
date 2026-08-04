@@ -11,6 +11,7 @@ import teamOrganizationCanvasSurfaceSource from "./teams/TeamOrganizationCanvasS
 import teamNodeBindingPanelSource from "./teams/TeamNodeBindingPanel.tsx?raw";
 import teamShellToolbarSource from "./teams/TeamShellToolbar.tsx?raw";
 import teamCanvasReadOnlyInspectorSource from "./teams/TeamCanvasReadOnlyInspector.tsx?raw";
+import teamsWorkspacePanelRenderersSource from "./teams/teamsWorkspacePanelRenderers.tsx?raw";
 
 /** Route + extracted shell modules (layout contracts may live in either). */
 const routeSource = [
@@ -19,6 +20,7 @@ const routeSource = [
   teamNodeBindingPanelSource,
   teamShellToolbarSource,
   teamCanvasReadOnlyInspectorSource,
+  teamsWorkspacePanelRenderersSource,
 ].join("\n");
 import researchWorkspaceModelSource from "./teams/researchWorkspaceModel.ts?raw";
 import researchProjectSwitcherSource from "./teams/research-projects/ResearchProjectSwitcher.tsx?raw";
