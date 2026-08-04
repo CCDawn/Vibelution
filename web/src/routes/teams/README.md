@@ -13,7 +13,10 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 | Overview primary CTA UI | `ResearchPrimaryActionBar.tsx` | mutations ownership |
 | Overview advanced disclosure shell | `ResearchOverviewSecondary.tsx` | evidence/path dumps in hero |
 | Design acceptance preview (static) | `web/research-overview-preview-standalone.html` + `design/research-overview-preview.*` | production routes |
-| Teams shell (left team list + board/canvas mode) | `teamShellModel.ts` + `TeamShellRail.tsx` + `TeamShellModeSwitch.tsx` | burying team pick in dense header only |
+| Teams shell (left team list + board/canvas mode) | `teamShellModel.ts` + `TeamShellRail.tsx` + `TeamShellModeSwitch.tsx` + `TeamShellToolbar.tsx` + VUI `VBoardWorkbenchPage` / `VCanvasWorkbenchPage` | burying team pick in dense header only |
+| Organization canvas surface | `TeamOrganizationCanvasSurface.tsx` | inlining graph/drag chrome in TeamsRoute |
+| Canvas node binding inspector | `TeamNodeBindingPanel.tsx` | duplicating bind form in board/canvas |
+| Read-only canvas inspector | `TeamCanvasReadOnlyInspector.tsx` | ad-hoc read-only blocks in route |
 | Workflow API error product copy | `researchWorkflowErrorModel.ts` + `ResearchWorkflowErrorSurface.tsx` | raw Error.message in UI |
 | Team kind guards / system-team roles | `teamKindModel.ts` | UI panels |
 | Canvas geometry / auto-layout / edge paths | `canvasGeometry.ts` | styles maps, mutations |

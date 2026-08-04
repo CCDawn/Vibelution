@@ -222,8 +222,11 @@ import { ResearchBoardKanban } from "./teams/ResearchBoardKanban";
 import { ResearchOverviewSurface } from "./teams/ResearchOverviewSurface";
 import { ResearchWorkflowErrorSurface } from "./teams/ResearchWorkflowErrorSurface";
 import { buildResearchBoardColumns } from "./teams/researchBoardModel";
-import { TeamShellModeSwitch } from "./teams/TeamShellModeSwitch";
+import { TeamCanvasReadOnlyInspector } from "./teams/TeamCanvasReadOnlyInspector";
+import { TeamNodeBindingPanel } from "./teams/TeamNodeBindingPanel";
+import { TeamOrganizationCanvasSurface } from "./teams/TeamOrganizationCanvasSurface";
 import { TeamShellRail } from "./teams/TeamShellRail";
+import { TeamShellToolbar } from "./teams/TeamShellToolbar";
 import {
   parseTeamShellMode,
   teamShellModeFromResearchView,
@@ -2235,55 +2238,60 @@ export function TeamsRoute({
     const node = selectedNode;
     const agent = node?.agentId ? activeAgents.find((item) => item.agentId === node.agentId) : null;
     const display = agent ? agentDisplayInfo(agent, lang) : null;
-    const functionLabel = node ? teamNodeFunctionLabel(node, display?.functionLabel, lang) : "";
     return (
-      <section className={styles.canvasReadOnlyPanel} aria-label={lang === "zh" ? "只读组织画布详情" : "Read-only organization canvas details"}>
-        <div className={styles.canvasReadOnlyNotice}>
-          <Eye size={15} />
-          <div>
-            <strong>{lang === "zh" ? "只读组织画布" : "Read-only canvas"}</strong>
-            <span>{lang === "zh" ? "这里仅展示科研团队节点关系，不写回画布配置。" : "This view shows research-team relationships without writing canvas config."}</span>
-          </div>
-        </div>
-        {node ? (
-          <div className={styles.canvasReadOnlyNode}>
-            <div>
-              <span>{lang === "zh" ? "节点" : "Node"}</span>
-              <strong>{node.label}</strong>
-            </div>
-            <div>
-              <span>{lang === "zh" ? "职责" : "Role"}</span>
-              <strong>{functionLabel || node.role || node.type}</strong>
-            </div>
-            <div>
-              <span>Agent</span>
-              <strong>{display?.name || node.agentName || node.agentCode || (lang === "zh" ? "未绑定" : "unbound")}</strong>
-            </div>
-            <div>
-              <span>{lang === "zh" ? "状态" : "Status"}</span>
-              <strong>{canvasNodeStatusLabel(node, lang)}</strong>
-            </div>
-            <div className={styles.canvasReadOnlyNodeWide}>
-              <span>{lang === "zh" ? "目的" : "Purpose"}</span>
-              <strong>{node.purpose || (lang === "zh" ? "暂无说明" : "No purpose yet")}</strong>
-            </div>
-          </div>
-        ) : (
-          <div className={styles.empty}>{lang === "zh" ? "选择一个节点查看详情。" : "Select a node to inspect details."}</div>
-        )}
-        <div className={styles.issueList}>
-          {(validation?.issues ?? []).length ? (
-            validation?.issues.map((issue) => (
-              <div key={`${issue.code}-${issue.nodeId}-${issue.edgeId}`} className={styles.issue}>
-                <strong>{issue.code}</strong>
-                <span>{issue.message}</span>
-              </div>
-            ))
-          ) : (
-            <span>{lang === "zh" ? "画布校验通过" : "Canvas validation passed"}</span>
-          )}
-        </div>
-      </section>
+      <TeamCanvasReadOnlyInspector
+        lang={lang}
+        node={node}
+        agentName={display?.name}
+        functionLabel={node ? teamNodeFunctionLabel(node, display?.functionLabel, lang) : ""}
+        validationIssues={validation?.issues ?? []}
+        className={styles.canvasReadOnlyPanel}
+        noticeClassName={styles.canvasReadOnlyNotice}
+        nodeClassName={styles.canvasReadOnlyNode}
+        nodeWideClassName={styles.canvasReadOnlyNodeWide}
+        emptyClassName={styles.empty}
+        issueListClassName={styles.issueList}
+        issueClassName={styles.issue}
+      />
+    );
+  }
+
+  function renderTeamNodeBindingPanel() {
+    if (!showNodeBindingPanel) {
+      return null;
+    }
+    return (
+      <TeamNodeBindingPanel
+        lang={lang}
+        selectedTeam={selectedTeam}
+        selectedNode={selectedNode}
+        nodeDraft={nodeDraft}
+        onNodeDraftChange={(patch) => setNodeDraft((current) => ({ ...current, ...patch }))}
+        activeAgents={activeAgents}
+        agentTeamMembership={agentTeamMembership}
+        agentDisplayName={(agent) => agentDisplayInfo(agent, lang).name}
+        agentSourceRoute={teamCanvasNodeAgentSourceRoute}
+        durableCanvas={durableCanvas}
+        hasWritableCanvas={hasWritableCanvas}
+        savePending={selectedTeamSaveCanvasPending}
+        detailPending={teamDetailQuery.isPending}
+        agentsPending={agentSummaryQuery.isPending}
+        validationIssues={validation?.issues ?? []}
+        onSave={applyNodeDraft}
+        onConnectFromLead={connectFromLead}
+        onUnbind={unbindSelectedNode}
+        onDelete={deleteSelectedNode}
+        styles={{
+          section: styles.nodeBindingSection,
+          placeholder: styles.nodeBindingPlaceholder,
+          empty: styles.empty,
+          sourceAuthority: styles.nodeSourceAuthority,
+          actionRow: styles.actionRow,
+          dangerButton: styles.dangerButton,
+          issueList: styles.issueList,
+          issue: styles.issue,
+        }}
+      />
     );
   }
 
@@ -5887,30 +5895,17 @@ export function TeamsRoute({
   );
 
   const teamShellToolbar = (
-    <>
-      <div className={styles.teamShellToolbarIdentity}>
-        <strong>{selectedTeam?.name ?? (lang === "zh" ? "暂无团队" : "No team")}</strong>
-        <span>
-          {selectedTeam?.purpose
-            || (researchCanvasVisible
-              ? (lang === "zh" ? "组织画布" : "Organization canvas")
-              : (lang === "zh" ? "看板工作台" : "Board workbench"))}
-        </span>
-      </div>
-      <div className={styles.teamShellToolbarActions}>
-        <TeamShellModeSwitch
-          lang={lang}
-          mode={teamShellMode}
-          onChange={selectTeamShellMode}
-        />
-        <VIconButton
-          className={styles.teamRefreshButton}
-          label={lang === "zh" ? "刷新团队" : "Refresh teams"}
-          icon={<RefreshCw size={15} />}
-          onPress={() => void teamsQuery.refetch()}
-        />
-      </div>
-    </>
+    <TeamShellToolbar
+      lang={lang}
+      teamName={selectedTeam?.name ?? ""}
+      purpose={selectedTeam?.purpose ?? ""}
+      mode={teamShellMode}
+      onModeChange={selectTeamShellMode}
+      onRefresh={() => void teamsQuery.refetch()}
+      identityClassName={styles.teamShellToolbarIdentity}
+      actionsClassName={styles.teamShellToolbarActions}
+      refreshButtonClassName={styles.teamRefreshButton}
+    />
   );
 
   if (showTeamInitialLoadingSurface || showTeamUnavailableSurface || showTeamDetailUnavailableSurface) {
@@ -6024,232 +6019,63 @@ export function TeamsRoute({
         canvasClassName="!border-0 !rounded-none"
         inspectorClassName="!border-0 !rounded-none !bg-transparent"
         canvas={(
-        <VSurface
-          as="main"
-          className={[styles.canvasPanel, "min-h-0 flex-1 !border-0 !rounded-none"].filter(Boolean).join(" ")}
-          elevation="panel"
-          padding="none"
-          tone="rail"
-          id="research-organization-canvas"
-          data-vui-region="teams-canvas"
-        >
-          <div className={styles.canvasToolbar}>
-            <div>
-              <strong>{selectedTeam?.name ?? (lang === "zh" ? "暂无团队" : "No team")}</strong>
-              <span>{canvas ? `${canvas.path} · ${TEAM_ORGANIZATION_CANVAS_KIND}` : "workspace/teams"}</span>
-              {canvas ? (
-                <small className={styles.edgeLayerLine}>
-                  {lang === "zh" ? "组织线" : "Org lines"} {organizationEdges.length}
-                  {" · "}
-                  {lang === "zh" ? "信息线" : "Info lines"} {communicationEdges.length}
-                </small>
-              ) : null}
-              {selectedTeam?.linkedChatRoom ? (
-                <small className={styles.linkedRoomLine}>
-                  {lang === "zh" ? "已衔接群聊" : "Linked room"}
-                  {" · "}
-                  {selectedTeam.linkedChatRoom.title}
-                  {" · "}
-                  {selectedTeam.linkedChatRoom.participantCount} agents
-                  {" · "}
-                  {teamConversationStatusLabel(conversationProjection?.status || "linked", lang)}
-                </small>
-              ) : selectedTeam ? (
-                <small className={styles.linkedRoomLine}>
-                  {researchCanvasReadOnly
-                    ? (lang === "zh" ? "只读关系图：不会同步群聊或修改节点。" : "Read-only graph: room sync and node edits are disabled.")
-                    : conversationProjection?.status === "agent_missing"
-                    ? (lang === "zh" ? `成员缺失 ${conversationProjection.missingAgentCount} 个，请先修复 Agent 引用。` : `${conversationProjection.missingAgentCount} missing agents. Repair Agent references first.`)
-                    : activeTeamMemberCount > 0
-                    ? (lang === "zh" ? "尚未衔接群聊，可同步创建。" : "No linked room yet. Sync to create one.")
-                    : (lang === "zh" ? "绑定 active Agent 后可衔接群聊。" : "Bind active agents before linking a room.")}
-                </small>
-              ) : null}
-            </div>
-            <VActionGroup
-              className={styles.toolbarActions}
-              ariaLabel={lang === "zh" ? "团队画布操作" : "Team canvas actions"}
-            >
-              {researchCanvasReadOnly ? (
-                <span className={styles.canvasReadOnlyBadge}>{lang === "zh" ? "只读" : "Read only"}</span>
-              ) : saveLabel ? (
-                <span className={styles.saveState}>{saveLabel}</span>
-              ) : null}
-              {researchCanvasReadOnly ? (
-                <div className={styles.canvasLayoutModeSwitch} role="group" aria-label={lang === "zh" ? "画布排版模式" : "Canvas layout mode"}>
-                  <VTooltip content={lang === "zh" ? "自动排版只改变当前显示，不保存坐标" : "Auto layout only changes the current view and does not save coordinates"}>
-                    <VNativeButton
-                      type="button"
-                      className={researchCanvasAutoLayoutActive ? styles.layerButtonActive : ""}
-                      onClick={() => setResearchCanvasLayoutMode("auto")}
-                    >
-                      <RefreshCw size={14} />
-                      {lang === "zh" ? "自动排版" : "Auto layout"}
-                    </VNativeButton>
-                  </VTooltip>
-                  <VTooltip content={lang === "zh" ? "显示画布文件中的原始坐标" : "Show the original coordinates from the canvas file"}>
-                    <VNativeButton
-                      type="button"
-                      className={!researchCanvasAutoLayoutActive ? styles.layerButtonActive : ""}
-                      onClick={() => setResearchCanvasLayoutMode("source")}
-                    >
-                      {lang === "zh" ? "原始坐标" : "Original"}
-                    </VNativeButton>
-                  </VTooltip>
-                </div>
-              ) : null}
-              <VTooltip content={communicationEdgeHint}>
-                <VNativeButton
-                  type="button"
-                  className={showCommunicationEdges ? styles.layerButtonActive : ""}
-                  onClick={() => setShowCommunicationEdges((current) => !current)}
-                  disabled={!canvas || communicationEdges.length === 0}
-                >
-                  <Link2 size={14} />
-                  {communicationEdgeButtonLabel}
-                </VNativeButton>
-              </VTooltip>
-              {researchCanvasReadOnly ? (
-                <Link className={styles.toolbarLink} to={teamWorkspaceRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID)}>
-                  <ArrowLeft size={14} />
-                  {lang === "zh" ? "返回三阶段" : "Back to stages"}
-                </Link>
-              ) : (
-                <>
-                  {linkedChatRoomId ? (
-                    <Link className={styles.toolbarLink} to={teamChatRoomRoute(linkedChatRoomId, teamWorkspaceRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID), lang === "zh" ? "返回团队页面" : "Back to team")}>
-                      {lang === "zh" ? "打开群聊" : "Open room"}
-                    </Link>
-                  ) : (
-                    <VNativeButton
-                      type="button"
-                      onClick={() => selectedTeam?.teamId && syncTeamChatRoomMutation.mutate(selectedTeam.teamId)}
-                      disabled={!selectedTeam || activeTeamMemberCount === 0 || selectedTeamSyncPending}
-                    >
-                      <Link2 size={14} />
-                      {selectedTeamSyncPending
-                        ? (lang === "zh" ? "同步中" : "Syncing")
-                        : (lang === "zh" ? "同步群聊" : "Sync room")}
-                    </VNativeButton>
-                  )}
-                  <VNativeButton type="button" onClick={addNode} disabled={!hasWritableCanvas}>
-                    <Plus size={14} />
-                    {lang === "zh" ? "节点" : "Node"}
-                  </VNativeButton>
-                  <VNativeButton
-                    type="button"
-                    className={styles.dangerButton}
-                    onClick={() => selectedTeam?.teamId && archiveTeamMutation.mutate(selectedTeam.teamId)}
-                    disabled={!selectedTeam || selectedTeamArchivePending || Boolean(selectedTeamArchiveDisabledReason)}
-                    title={selectedTeamArchiveDisabledReason || (lang === "zh" ? "归档当前团队" : "Archive this team")}
-                  >
-                    <Archive size={14} />
-                    {lang === "zh" ? "归档" : "Archive"}
-                  </VNativeButton>
-                </>
-              )}
-            </VActionGroup>
-          </div>
-          {showTeamLoadingSurface ? (
-            <VStateSurface
-              className={styles.teamLoadingInlineSurface}
-              icon={<RefreshCw size={15} />}
-              role="status"
-              skeletonLines
-              title={teamWorkspaceLoadingTitle}
-              tone="loading"
-              facts={[
-                { key: "team", label: lang === "zh" ? "团队" : "Team", value: selectedTeamReference?.name ?? effectiveTeamId },
-                { key: "detail", label: lang === "zh" ? "详情" : "Details", value: teamDetailLoadMode },
-                { key: "source", label: lang === "zh" ? "来源" : "Source", value: "Team detail API" },
-              ]}
-            >
-              {teamWorkspaceLoadingMessage}
-            </VStateSurface>
-          ) : null}
-          {renderKnowledgeCollectionCompletionFlowPanel()}
-          {canvas ? (
-            <div className={styles.canvas} ref={canvasFrameRef}>
-              <div className={styles.canvasViewport} style={canvasViewportStyle}>
-                <svg className={styles.edges} width="100%" height="100%" aria-hidden="true">
-                  <defs>
-                    <marker
-                      id="team-edge-arrow"
-                      viewBox="0 0 10 10"
-                      refX="10"
-                      refY="5"
-                      markerWidth="6"
-                      markerHeight="6"
-                      orient="auto-start-reverse"
-                    >
-                      <path d="M 0 0 L 10 5 L 0 10 z" />
-                    </marker>
-                  </defs>
-                  {visibleEdges.map((edge) => {
-                    const line = edgeLine(edge, displayCanvasNodes, visibleEdges);
-                    return line ? (
-                      <path
-                        key={edge.id}
-                        className={isCommunicationEdge(edge) ? styles.edgeCommunication : styles.edgeOrganization}
-                        d={`M ${line.x1} ${line.y1} Q ${line.cx} ${line.cy} ${line.x2} ${line.y2}`}
-                      />
-                    ) : null;
-                  })}
-                </svg>
-                {displayCanvasNodes.map((node) => {
-                  const agent = activeAgents.find((item) => item.agentId === node.agentId);
-                  const display = agent ? agentDisplayInfo(agent, lang) : null;
-                  const functionLabel = teamNodeFunctionLabel(node, display?.functionLabel, lang);
-                  return (
-                    <VNativeButton
-                      key={node.id}
-                      type="button"
-                      className={[
-                        styles.node,
-                        nodeTone(node),
-                        selectedNode?.id === node.id ? styles.nodeActive : "",
-                        researchCanvasReadOnly ? styles.nodeReadOnly : "",
-                      ].filter(Boolean).join(" ")}
-                      style={teamCanvasNodeStyle(node)}
-                      title={researchCanvasReadOnly ? (lang === "zh" ? "点击查看节点详情" : "Click to inspect node") : (lang === "zh" ? "拖动调整节点位置" : "Drag to reposition")}
-                      onPointerDown={researchCanvasReadOnly ? undefined : (event) => startNodeDrag(event, node)}
-                      onPointerMove={researchCanvasReadOnly ? undefined : moveNodeDrag}
-                      onPointerUp={researchCanvasReadOnly ? undefined : finishNodeDrag}
-                      onPointerCancel={researchCanvasReadOnly ? undefined : finishNodeDrag}
-                      onClick={() => setSelectedNodeId(node.id)}
-                    >
-                      <span className={styles.nodeIcon}>{node.agentId ? <Bot size={15} /> : <Users size={15} />}</span>
-                      <strong>{node.label}</strong>
-                      <span className={`${styles.nodeRoleBadge} ${roleBadgeTone(node, display?.tone)}`}>{functionLabel}</span>
-                      <small>{node.agentCode || node.status}</small>
-                    </VNativeButton>
-                  );
-                })}
-              </div>
-            </div>
-          ) : (
-            <div className={styles.emptyCanvasPanel} ref={canvasFrameRef}>
-              <div className={styles.emptyCanvasContent}>
-                <span className={styles.emptyCanvasKicker}>{lang === "zh" ? "组织画布" : "Organization canvas"}</span>
-                <strong>
-                  {teamDetailQuery.isPending || teamCanvasQuery.isPending
-                    ? (lang === "zh" ? "正在读取画布" : "Loading canvas")
-                    : (lang === "zh" ? "暂无画布数据" : "No canvas data")}
-                </strong>
-                <p>
-                  {lang === "zh"
-                    ? "刷新团队数据后会自动恢复。"
-                    : "Refresh team data to restore the canvas."}
-                </p>
-                <div className={styles.emptyCanvasSteps}>
-                  <span>{lang === "zh" ? "团队" : "Team"}</span>
-                  <span>{selectedTeam?.name ?? (lang === "zh" ? "未选择" : "Not selected")}</span>
-                  <span>{teamDetailQuery.isError || teamCanvasQuery.isError ? (lang === "zh" ? "读取失败" : "Failed") : (lang === "zh" ? "等待数据" : "Waiting")}</span>
-                </div>
-              </div>
-            </div>
-          )}
-        </VSurface>
+          <TeamOrganizationCanvasSurface
+            lang={lang}
+            selectedTeam={selectedTeam}
+            selectedTeamReferenceName={selectedTeamReference?.name}
+            effectiveTeamId={effectiveTeamId}
+            teamDetailLoadMode={teamDetailLoadMode}
+            researchTeamId={RESEARCH_TEAM_ID}
+            canvas={canvas}
+            displayCanvasNodes={displayCanvasNodes}
+            visibleEdges={visibleEdges}
+            selectedNodeId={selectedNodeId}
+            activeAgents={activeAgents}
+            agentDisplay={agentDisplayInfo}
+            researchCanvasReadOnly={researchCanvasReadOnly}
+            researchCanvasAutoLayoutActive={researchCanvasAutoLayoutActive}
+            showCommunicationEdges={showCommunicationEdges}
+            organizationEdgeCount={organizationEdges.length}
+            communicationEdgeCount={communicationEdges.length}
+            communicationEdgeHint={communicationEdgeHint}
+            communicationEdgeButtonLabel={communicationEdgeButtonLabel}
+            saveLabel={saveLabel}
+            hasWritableCanvas={hasWritableCanvas}
+            linkedChatRoomId={linkedChatRoomId || ""}
+            activeTeamMemberCount={activeTeamMemberCount}
+            teamSyncPending={selectedTeamSyncPending}
+            teamArchivePending={selectedTeamArchivePending}
+            teamArchiveDisabledReason={selectedTeamArchiveDisabledReason || ""}
+            conversationStatus={conversationProjection?.status}
+            conversationMissingAgentCount={conversationProjection?.missingAgentCount}
+            showTeamLoadingSurface={showTeamLoadingSurface}
+            teamWorkspaceLoadingTitle={teamWorkspaceLoadingTitle}
+            teamWorkspaceLoadingMessage={teamWorkspaceLoadingMessage}
+            teamDetailPending={teamDetailQuery.isPending}
+            teamCanvasPending={teamCanvasQuery.isPending}
+            teamDetailError={teamDetailQuery.isError}
+            teamCanvasError={teamCanvasQuery.isError}
+            canvasViewportStyle={canvasViewportStyle}
+            canvasFrameRef={canvasFrameRef}
+            nodeToneClass={nodeTone}
+            roleBadgeToneClass={roleBadgeTone}
+            nodeActiveClassName={styles.nodeActive}
+            nodeReadOnlyClassName={styles.nodeReadOnly}
+            styles={styles}
+            completionFlowSlot={renderKnowledgeCollectionCompletionFlowPanel()}
+            teamWorkspaceRoute={teamWorkspaceRoute}
+            teamChatRoomRoute={teamChatRoomRoute}
+            onSelectNode={setSelectedNodeId}
+            onLayoutModeChange={setResearchCanvasLayoutMode}
+            onToggleCommunicationEdges={() => setShowCommunicationEdges((current) => !current)}
+            onAddNode={addNode}
+            onArchiveTeam={() => selectedTeam?.teamId && archiveTeamMutation.mutate(selectedTeam.teamId)}
+            onSyncRoom={() => selectedTeam?.teamId && syncTeamChatRoomMutation.mutate(selectedTeam.teamId)}
+            onNodePointerDown={startNodeDrag}
+            onNodePointerMove={moveNodeDrag}
+            onNodePointerUp={finishNodeDrag}
+            onNodePointerCancel={finishNodeDrag}
+          />
         )}
         inspector={(
         <aside
@@ -6270,106 +6096,7 @@ export function TeamsRoute({
           </div>
           <div className={styles.inspectorBody}>
             {researchCanvasReadOnly ? renderResearchCanvasReadOnlyPanel() : null}
-            {showNodeBindingPanel && !selectedTeam ? (
-              <section className={`${styles.nodeBindingSection} ${styles.nodeBindingPlaceholder}`}>
-                <div className={styles.empty}>
-                  {lang === "zh"
-                    ? "暂无可用团队。请确认 AI 搜索范围团队和 挑战杯ai科研团队 已初始化。"
-                    : "No available team. Confirm the AI search scope team and Challenge Cup AI research team are initialized."}
-                </div>
-              </section>
-            ) : showNodeBindingPanel && selectedNode ? (
-              <section className={styles.nodeBindingSection}>
-              {selectedNode.agentId ? (
-                <div className={styles.nodeSourceAuthority}>
-                  <div>
-                    <strong>{lang === "zh" ? "Agent 身份只读投影" : "Read-only Agent identity"}</strong>
-                    <span>{selectedNode.agentSourceRef?.owner || "AgentDirectory"} · {selectedNode.agentCode || selectedNode.agentName || selectedNode.agentId}</span>
-                  </div>
-                  <VTooltip content={lang === "zh" ? "到 AgentDirectory 源配置修改" : "Edit in the AgentDirectory source"}>
-                    <Link to={teamCanvasNodeAgentSourceRoute(selectedNode)}>
-                      <Link2 size={14} />
-                      {lang === "zh" ? "源配置" : "Source"}
-                    </Link>
-                  </VTooltip>
-                </div>
-              ) : null}
-              <label>
-                <span>{lang === "zh" ? "节点名称" : "Node label"}</span>
-                <VNativeInput value={nodeDraft.label} onChange={(event) => setNodeDraft((current) => ({ ...current, label: event.target.value }))} />
-              </label>
-              <label>
-                <span>{lang === "zh" ? "组织角色" : "Role"}</span>
-                <VNativeInput value={nodeDraft.role} onChange={(event) => setNodeDraft((current) => ({ ...current, role: event.target.value }))} />
-              </label>
-              <label>
-                <span>{lang === "zh" ? "绑定 Agent" : "Bound Agent"}</span>
-                <VNativeSelect value={nodeDraft.agentId} onChange={(event) => setNodeDraft((current) => ({ ...current, agentId: event.target.value }))}>
-                  <option value="">{lang === "zh" ? "不绑定" : "Unbound"}</option>
-                  {activeAgents.map((agent) => {
-                    const display = agentDisplayInfo(agent, lang);
-                    const membership = agentTeamMembership.get(agent.agentId);
-                    const ownedByOtherTeam = Boolean(membership && membership.teamId !== selectedTeam?.teamId);
-                    return (
-                      <option key={agent.agentId} value={agent.agentId} disabled={ownedByOtherTeam}>
-                        {display.name} · {agent.agentCode}
-                        {ownedByOtherTeam
-                          ? ` · ${lang === "zh" ? "已属于" : "belongs to"} ${membership?.teamName}`
-                          : ""}
-                      </option>
-                    );
-                  })}
-                </VNativeSelect>
-              </label>
-              <label>
-                <span>{lang === "zh" ? "目的" : "Purpose"}</span>
-                <VNativeTextarea value={nodeDraft.purpose} onChange={(event) => setNodeDraft((current) => ({ ...current, purpose: event.target.value }))} />
-              </label>
-              <div className={styles.actionRow}>
-                <VNativeButton type="button" onClick={applyNodeDraft} disabled={!hasWritableCanvas || selectedTeamSaveCanvasPending}>
-                  <Save size={14} />
-                  {lang === "zh" ? "保存节点" : "Save node"}
-                </VNativeButton>
-                <VNativeButton type="button" onClick={connectFromLead} disabled={!hasWritableCanvas || !selectedNode || durableCanvas?.nodes[0]?.id === selectedNode.id}>
-                  <Link2 size={14} />
-                  {lang === "zh" ? "接入主干" : "Connect"}
-                </VNativeButton>
-                <VNativeButton type="button" onClick={unbindSelectedNode} disabled={!hasWritableCanvas || !selectedNode?.agentId || selectedTeamSaveCanvasPending}>
-                  <Unlink size={14} />
-                  {lang === "zh" ? "解绑节点" : "Unbind"}
-                </VNativeButton>
-                <VNativeButton
-                  type="button"
-                  className={styles.dangerButton}
-                  onClick={deleteSelectedNode}
-                  disabled={!hasWritableCanvas || !selectedNode || (durableCanvas?.nodes.length ?? 0) <= 1 || selectedTeamSaveCanvasPending}
-                >
-                  <Trash2 size={14} />
-                  {lang === "zh" ? "删除节点" : "Delete"}
-                </VNativeButton>
-              </div>
-              <div className={styles.issueList}>
-                {(validation?.issues ?? []).length ? (
-                  validation?.issues.map((issue) => (
-                    <div key={`${issue.code}-${issue.nodeId}-${issue.edgeId}`} className={styles.issue}>
-                      <strong>{issue.code}</strong>
-                      <span>{issue.message}</span>
-                    </div>
-                  ))
-                ) : (
-                  <span>{lang === "zh" ? "画布校验通过" : "Canvas validation passed"}</span>
-                )}
-              </div>
-              </section>
-            ) : showNodeBindingPanel ? (
-              <section className={`${styles.nodeBindingSection} ${styles.nodeBindingPlaceholder}`} aria-busy={teamDetailQuery.isPending || agentSummaryQuery.isPending}>
-                <div className={styles.empty}>
-                  {teamDetailQuery.isPending || agentSummaryQuery.isPending
-                    ? (lang === "zh" ? "正在读取团队节点..." : "Loading team nodes...")
-                    : (lang === "zh" ? "创建或选择一个团队节点。" : "Create or select a team node.")}
-                </div>
-              </section>
-            ) : null}
+            {renderTeamNodeBindingPanel()}
             {showAiSearchScopePanel ? renderAiSearchSourceScopePanel() : null}
             {showWorkflowPanel ? (
               <section className={styles.workflowPanel} id="research-workflow-overview">
@@ -6775,106 +6502,7 @@ export function TeamsRoute({
             ) : null}
             {selectedTeam && !challengeCupResearchTeamSelected ? renderTeamMemoryIndex() : null}
             {researchCanvasReadOnly ? renderResearchCanvasReadOnlyPanel() : null}
-            {showNodeBindingPanel && !selectedTeam ? (
-              <section className={`${styles.nodeBindingSection} ${styles.nodeBindingPlaceholder}`}>
-                <div className={styles.empty}>
-                  {lang === "zh"
-                    ? "暂无可用团队。请确认 AI 搜索范围团队和 挑战杯ai科研团队 已初始化。"
-                    : "No available team. Confirm the AI search scope team and Challenge Cup AI research team are initialized."}
-                </div>
-              </section>
-            ) : showNodeBindingPanel && selectedNode ? (
-              <section className={styles.nodeBindingSection}>
-              {selectedNode.agentId ? (
-                <div className={styles.nodeSourceAuthority}>
-                  <div>
-                    <strong>{lang === "zh" ? "Agent 身份只读投影" : "Read-only Agent identity"}</strong>
-                    <span>{selectedNode.agentSourceRef?.owner || "AgentDirectory"} · {selectedNode.agentCode || selectedNode.agentName || selectedNode.agentId}</span>
-                  </div>
-                  <VTooltip content={lang === "zh" ? "到 AgentDirectory 源配置修改" : "Edit in the AgentDirectory source"}>
-                    <Link to={teamCanvasNodeAgentSourceRoute(selectedNode)}>
-                      <Link2 size={14} />
-                      {lang === "zh" ? "源配置" : "Source"}
-                    </Link>
-                  </VTooltip>
-                </div>
-              ) : null}
-              <label>
-                <span>{lang === "zh" ? "节点名称" : "Node label"}</span>
-                <VNativeInput value={nodeDraft.label} onChange={(event) => setNodeDraft((current) => ({ ...current, label: event.target.value }))} />
-              </label>
-              <label>
-                <span>{lang === "zh" ? "组织角色" : "Role"}</span>
-                <VNativeInput value={nodeDraft.role} onChange={(event) => setNodeDraft((current) => ({ ...current, role: event.target.value }))} />
-              </label>
-              <label>
-                <span>{lang === "zh" ? "绑定 Agent" : "Bound Agent"}</span>
-                <VNativeSelect value={nodeDraft.agentId} onChange={(event) => setNodeDraft((current) => ({ ...current, agentId: event.target.value }))}>
-                  <option value="">{lang === "zh" ? "不绑定" : "Unbound"}</option>
-                  {activeAgents.map((agent) => {
-                    const display = agentDisplayInfo(agent, lang);
-                    const membership = agentTeamMembership.get(agent.agentId);
-                    const ownedByOtherTeam = Boolean(membership && membership.teamId !== selectedTeam?.teamId);
-                    return (
-                      <option key={agent.agentId} value={agent.agentId} disabled={ownedByOtherTeam}>
-                        {display.name} · {agent.agentCode}
-                        {ownedByOtherTeam
-                          ? ` · ${lang === "zh" ? "已属于" : "belongs to"} ${membership?.teamName}`
-                          : ""}
-                      </option>
-                    );
-                  })}
-                </VNativeSelect>
-              </label>
-              <label>
-                <span>{lang === "zh" ? "目的" : "Purpose"}</span>
-                <VNativeTextarea value={nodeDraft.purpose} onChange={(event) => setNodeDraft((current) => ({ ...current, purpose: event.target.value }))} />
-              </label>
-              <div className={styles.actionRow}>
-                <VNativeButton type="button" onClick={applyNodeDraft} disabled={!hasWritableCanvas || selectedTeamSaveCanvasPending}>
-                  <Save size={14} />
-                  {lang === "zh" ? "保存节点" : "Save node"}
-                </VNativeButton>
-                <VNativeButton type="button" onClick={connectFromLead} disabled={!hasWritableCanvas || !selectedNode || durableCanvas?.nodes[0]?.id === selectedNode.id}>
-                  <Link2 size={14} />
-                  {lang === "zh" ? "接入主干" : "Connect"}
-                </VNativeButton>
-                <VNativeButton type="button" onClick={unbindSelectedNode} disabled={!hasWritableCanvas || !selectedNode?.agentId || selectedTeamSaveCanvasPending}>
-                  <Unlink size={14} />
-                  {lang === "zh" ? "解绑节点" : "Unbind"}
-                </VNativeButton>
-                <VNativeButton
-                  type="button"
-                  className={styles.dangerButton}
-                  onClick={deleteSelectedNode}
-                  disabled={!hasWritableCanvas || !selectedNode || (durableCanvas?.nodes.length ?? 0) <= 1 || selectedTeamSaveCanvasPending}
-                >
-                  <Trash2 size={14} />
-                  {lang === "zh" ? "删除节点" : "Delete"}
-                </VNativeButton>
-              </div>
-              <div className={styles.issueList}>
-                {(validation?.issues ?? []).length ? (
-                  validation?.issues.map((issue) => (
-                    <div key={`${issue.code}-${issue.nodeId}-${issue.edgeId}`} className={styles.issue}>
-                      <strong>{issue.code}</strong>
-                      <span>{issue.message}</span>
-                    </div>
-                  ))
-                ) : (
-                  <span>{lang === "zh" ? "画布校验通过" : "Canvas validation passed"}</span>
-                )}
-              </div>
-              </section>
-            ) : showNodeBindingPanel ? (
-              <section className={`${styles.nodeBindingSection} ${styles.nodeBindingPlaceholder}`} aria-busy={teamDetailQuery.isPending || agentSummaryQuery.isPending}>
-                <div className={styles.empty}>
-                  {teamDetailQuery.isPending || agentSummaryQuery.isPending
-                    ? (lang === "zh" ? "正在读取团队节点..." : "Loading team nodes...")
-                    : (lang === "zh" ? "创建或选择一个团队节点。" : "Create or select a team node.")}
-                </div>
-              </section>
-            ) : null}
+            {renderTeamNodeBindingPanel()}
             {showAiSearchScopePanel ? renderAiSearchSourceScopePanel() : null}
             {showWorkflowPanel ? (
               <section className={styles.workflowPanel} id="research-workflow-overview">
