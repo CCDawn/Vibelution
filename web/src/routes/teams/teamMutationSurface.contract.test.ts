@@ -2,11 +2,13 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const routeSource = readFileSync(new URL("../TeamsRoute.tsx", import.meta.url), "utf8");
+const presentationSource = readFileSync(new URL("./useSourceCollectionPresentation.ts", import.meta.url), "utf8");
 const surfaceSource = readFileSync(new URL("./teamMutationSurface.ts", import.meta.url), "utf8");
 
 describe("teamMutationSurface Phase 4 contract", () => {
-  it("TeamsRoute consumes buildTeamsRouteMutationSurface instead of repeating team-scoped ternaries", () => {
-    expect(routeSource).toContain("buildTeamsRouteMutationSurface({");
+  it("SC presentation consumes buildTeamsRouteMutationSurface instead of repeating team-scoped ternaries", () => {
+    expect(presentationSource).toContain("buildTeamsRouteMutationSurface({");
+    expect(routeSource).toContain("useSourceCollectionPresentation({");
     expect(routeSource).not.toContain(
       "startSourceCollectionRunMutation.isPending && startSourceCollectionRunMutation.variables?.teamId === selectedTeam?.teamId",
     );
@@ -15,8 +17,8 @@ describe("teamMutationSurface Phase 4 contract", () => {
     );
   });
 
-  it("TeamsRoute consumes SC write mutation surface for quality/graph/knowledge flags", () => {
-    expect(routeSource).toContain("buildSourceCollectionWriteMutationSurface({");
+  it("SC presentation consumes SC write mutation surface for quality/graph/knowledge flags", () => {
+    expect(presentationSource).toContain("buildSourceCollectionWriteMutationSurface({");
     expect(routeSource).not.toContain(
       "buildCandidateGraphMutation.isPending && buildCandidateGraphMutation.variables?.teamId === selectedTeam?.teamId",
     );

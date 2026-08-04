@@ -10,11 +10,10 @@ TeamsRoute (orchestration)
 |-- useTeamsShellCanvasWorkspace     # Phase 3 -- team pick, shell mode, research view, canvas UI state/refs
 |   +-- useTeamsCanvasProjection     # Phase 3 -- canvas query + display projection + node-draft sync
 |-- useSourceCollectionWorkspace     # Phase 1 / 1+ -- SC drafts, run list, selection, hydration, detail queries
+|-- useSourceCollectionPresentation  # Phase 4+ -- SC presentation + mutation surfaces + stage action adapters
+|   +-- buildTeamsRouteMutationSurface / buildSourceCollectionWriteMutationSurface / actionChrome
 |-- useResearchExperimentWorkspace   # Phase 2 -- experiment/loop drafts + secondary status queries
 |   +-- useTeamResearchSecondaryQueries
-|-- buildTeamsRouteMutationSurface   # Phase 4 -- team-scoped pending/error/result bag
-|-- buildSourceCollectionWriteMutationSurface  # Phase 4+ -- SC write/quality/knowledge flags
-|-- source-collection/actionChrome   # Phase 4+ -- loading copy + readiness helpers
 |-- mutation hooks (unchanged ownership)
 |   |-- useTeamShellMutations
 |   |-- useTeamWorkflowStartMutations
