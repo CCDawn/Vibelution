@@ -180,6 +180,16 @@ export function useSourceCollectionWorkspace(input: UseSourceCollectionWorkspace
       ?? selectedSourceCollectionRun?.scope?.dataSearchPlanRef?.queryCount,
     ) || 0;
 
+  // Reset stage result pagination when the effective run or list filter changes.
+  useEffect(() => {
+    setSourceCollectionResultPageByStage({
+      finding: 1,
+      extraction: 1,
+      relations: 1,
+      ingestion: 1,
+    });
+  }, [selectedSourceCollectionRunEffectiveId, sourceCollectionSourceFilter]);
+
   useEffect(() => {
     if (
       !selectedSourceCollectionRunEffectiveId
@@ -217,6 +227,8 @@ export function useSourceCollectionWorkspace(input: UseSourceCollectionWorkspace
         .filter((taskId): taskId is string => Boolean(taskId)),
     [sourceCollectionPendingStageTaskIds],
   );
+  const sourceCollectionStageWritebackAwaitingTask =
+    sourceCollectionStageWritebackSyncActive && sourceCollectionPendingStageTaskIdList.length > 0;
 
   const {
     sourceCollectionSummaryQuery,
@@ -320,6 +332,7 @@ export function useSourceCollectionWorkspace(input: UseSourceCollectionWorkspace
     // writeback
     sourceCollectionStageWritebackSyncActive,
     sourceCollectionPendingStageTaskIdList,
+    sourceCollectionStageWritebackAwaitingTask,
     // detail queries
     sourceCollectionFindingDetailsVisible,
     sourceCollectionSummaryQuery,

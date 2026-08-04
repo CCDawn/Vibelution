@@ -47,11 +47,9 @@ import { useTeamExperimentLoopMutations } from "./teams/useTeamExperimentLoopMut
 import { useTeamSourceCollectionMutations } from "./teams/useTeamSourceCollectionMutations";
 import { useTeamShellMutations } from "./teams/useTeamShellMutations";
 import { useTeamWorkflowStartMutations } from "./teams/useTeamWorkflowStartMutations";
-import { useTeamResearchSecondaryQueries } from "./teams/useTeamResearchSecondaryQueries";
-import { useSourceCollectionRunQueries } from "./teams/useSourceCollectionRunQueries";
 import { useSourceCollectionWorkspace } from "./teams/useSourceCollectionWorkspace";
+import { useResearchExperimentWorkspace } from "./teams/useResearchExperimentWorkspace";
 import {
-  sourceCollectionSummaryQuerySeedText,
   type DataProcessingRecordListPayload,
   type SourceCollectionSummaryPayload,
 } from "./teams/sourceCollectionRunQueryModel";
@@ -266,7 +264,6 @@ import {
   ExperimentContractV2,
   ExperimentContractValidation,
   ExperimentMethodCatalogPayload,
-  ExperimentMethodId,
   RuntimeSummary,
   Team,
   TeamCanvasNode,
@@ -360,7 +357,6 @@ import {
 import {
   deriveSourceCollectionDisplayState,
   sourceCollectionActiveWorkRunFromRuntime,
-  sourceCollectionRunHasUsableRecords,
   sourceCollectionRunLabel,
   sourceCollectionRunTitleLabel,
   sourceCollectionStableCountText,
@@ -644,74 +640,8 @@ export function TeamsRoute({
       ?? "board",
   );
   const [challengeTeamSurface, setChallengeTeamSurface] = useState<"workspace" | "progress">("workspace");
-  const [preferredExperimentMethod, setPreferredExperimentMethod] = useState<ExperimentMethodId | "">("");
   const [aiSearchRunTopic, setAiSearchRunTopic] = useState("AI 最新动态");
-  const [experimentBaselineArtifactDraft, setExperimentBaselineArtifactDraft] = useState<ExperimentBaselineArtifactDraft>({
-    artifactPath: "",
-    reproductionCommand: "",
-    evaluationCommand: "",
-    metricValue: "",
-  });
-  const [experimentSmokeResultDraft, setExperimentSmokeResultDraft] = useState<ExperimentSmokeResultDraft>({
-    status: "needs_review",
-    metricValue: "",
-    baselineMetricValue: "",
-    delta: "",
-    resultPath: "",
-    logRef: "",
-    evaluationCommand: "",
-    notes: "",
-  });
-  const [experimentFullRunResultDraft, setExperimentFullRunResultDraft] = useState<ExperimentFullRunResultDraft>({
-    status: "needs_review",
-    metricValue: "",
-    baselineMetricValue: "",
-    smokeMetricValue: "",
-    delta: "",
-    resultPath: "",
-    logRef: "",
-    configPath: "",
-    reproductionCommand: "",
-    evaluationCommand: "",
-    notes: "",
-  });
-  const [experimentKnowledgeIngestionDraft, setExperimentKnowledgeIngestionDraft] = useState<ExperimentKnowledgeIngestionDraft>({
-    knowledgeBaseId: "research-team-experiment-kb",
-    targetDomain: "挑战杯实验结果",
-    title: "",
-    summary: "",
-    notes: "",
-    wakeStewardAgent: true,
-  });
-  const [selectedResearchLoopTemplateId, setSelectedResearchLoopTemplateId] = useState("algorithm_model_experiment");
-  const [researchLoopCreateDraft, setResearchLoopCreateDraft] = useState<ResearchLoopCreateDraft>({
-    researchQuestion: "",
-    constraints: "",
-    datasetRefs: "",
-    environmentRefs: "",
-  });
-  const [researchLoopEvidenceDraft, setResearchLoopEvidenceDraft] = useState<ResearchLoopEvidenceDraft>({
-    evidenceType: "",
-    status: "needs_review",
-    summary: "",
-    metricName: "",
-    metricValue: "",
-    baselineMetricValue: "",
-    delta: "",
-    artifactRef: "",
-    datasetRefs: "",
-    environmentRefs: "",
-    logRefs: "",
-    commandPreview: "",
-  });
-  const [researchLoopDecisionDraft, setResearchLoopDecisionDraft] = useState<ResearchLoopDecisionDraft>({
-    decision: "needs_more_evidence",
-    rationale: "",
-    nextTemplateId: "",
-    nextActions: "",
-    allowedVariableChanges: "",
-    frozenControls: "",
-  });
+  // Experiment/research-loop drafts + secondary queries: useResearchExperimentWorkspace (Phase 2).
   const [nodePositionDrafts, setNodePositionDrafts] = useState<Record<string, { x: number; y: number }>>({});
   const [canvasFrameSize, setCanvasFrameSize] = useState<CanvasFrameSize>({ width: CANVAS_VIEWPORT_WIDTH, height: CANVAS_VIEWPORT_HEIGHT });
   const [lockedCanvasViewportStyle, setLockedCanvasViewportStyle] = useState<CanvasViewportStyle | null>(null);
@@ -885,6 +815,7 @@ export function TeamsRoute({
     sourceCollectionSelectedRunQueryCount,
     sourceCollectionStageWritebackSyncActive,
     sourceCollectionPendingStageTaskIdList,
+    sourceCollectionStageWritebackAwaitingTask,
     sourceCollectionFindingDetailsVisible,
     sourceCollectionSummaryQuery,
     sourceCollectionRunStatusQuery,
@@ -966,7 +897,6 @@ export function TeamsRoute({
     && researchWorkflowTeamSelected
     && !sourceCollectionWorkspaceSelected,
   );
-  const sourceCollectionStageWritebackAwaitingTask = sourceCollectionStageWritebackSyncActive && sourceCollectionPendingStageTaskIdList.length > 0;
   const aiSearchRunsQuery = useQuery({
     queryKey: queryKeys.teamAiSearchRuns(effectiveTeamId || "none", AI_SEARCH_RUN_PREVIEW_LIMIT),
     queryFn: ({ signal }) =>
@@ -1024,11 +954,29 @@ export function TeamsRoute({
     challengeProgramProgressVisible: challengeCupResearchTeamSelected && (challengeTeamSurface === "progress" || researchWorkspaceView === "overview"),
   });
   const {
+    preferredExperimentMethod,
+    setPreferredExperimentMethod,
+    experimentBaselineArtifactDraft,
+    setExperimentBaselineArtifactDraft,
+    experimentSmokeResultDraft,
+    setExperimentSmokeResultDraft,
+    experimentFullRunResultDraft,
+    setExperimentFullRunResultDraft,
+    experimentKnowledgeIngestionDraft,
+    setExperimentKnowledgeIngestionDraft,
+    selectedResearchLoopTemplateId,
+    setSelectedResearchLoopTemplateId,
+    researchLoopCreateDraft,
+    setResearchLoopCreateDraft,
+    researchLoopEvidenceDraft,
+    setResearchLoopEvidenceDraft,
+    researchLoopDecisionDraft,
+    setResearchLoopDecisionDraft,
     experimentPlanningStatusQuery,
     experimentMethodCatalogQuery,
     researchLoopTemplatesQuery,
     researchLoopStatusQuery,
-  } = useTeamResearchSecondaryQueries({
+  } = useResearchExperimentWorkspace({
     effectiveTeamId,
     researchWorkflowTeamSelected,
     researchWorkspaceView,
@@ -1168,20 +1116,7 @@ export function TeamsRoute({
     }
   }, [fallbackVisibleTeamId, requestedVisibleAgentTeamId, requestedVisibleTeamId, selectedTeamId, visibleTeamIds]);
 
-  useEffect(() => {
-    if (requestedSourceCollectionStage) {
-      setSelectedSourceCollectionStageId(requestedSourceCollectionStage);
-    }
-  }, [requestedSourceCollectionStage]);
-
-  useEffect(() => {
-    setSourceCollectionResultPageByStage({
-      finding: 1,
-      extraction: 1,
-      relations: 1,
-      ingestion: 1,
-    });
-  }, [selectedSourceCollectionRunEffectiveId, sourceCollectionSourceFilter]);
+  // SC stage URL sync + pagination reset live in useSourceCollectionWorkspace.
 
   useEffect(() => {
     if (selectedNode) {

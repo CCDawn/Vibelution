@@ -33,6 +33,7 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 | SC controls metrics/feedback bags | `source-collection/controlsFeedbackBag.ts` | untyped controls prop groups |
 | Workspace panel render factory | `teamsWorkspacePanelRenderers.tsx` | memory/AI-search/completion/loop/ledger/canvas inspector render* in TeamsRoute |
 | SC workspace state machine | `useSourceCollectionWorkspace.ts` | SC useState + project/run list + selection + detail queries in TeamsRoute |
+| Experiment + research-loop workspace state | `useResearchExperimentWorkspace.ts` | experiment/loop drafts + secondary status queries in TeamsRoute |
 | Workflow API error product copy | `researchWorkflowErrorModel.ts` + `ResearchWorkflowErrorSurface.tsx` | raw Error.message in UI |
 | Team kind guards / system-team roles | `teamKindModel.ts` | UI panels |
 | Canvas geometry / auto-layout / edge paths | `canvasGeometry.ts` | styles maps, mutations |

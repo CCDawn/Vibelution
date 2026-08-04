@@ -13,6 +13,7 @@ import teamShellToolbarSource from "./teams/TeamShellToolbar.tsx?raw";
 import teamCanvasReadOnlyInspectorSource from "./teams/TeamCanvasReadOnlyInspector.tsx?raw";
 import teamsWorkspacePanelRenderersSource from "./teams/teamsWorkspacePanelRenderers.tsx?raw";
 import useSourceCollectionWorkspaceSource from "./teams/useSourceCollectionWorkspace.ts?raw";
+import useResearchExperimentWorkspaceSource from "./teams/useResearchExperimentWorkspace.ts?raw";
 
 /** Route + extracted shell modules (layout contracts may live in either). */
 const routeSource = [
@@ -23,6 +24,7 @@ const routeSource = [
   teamCanvasReadOnlyInspectorSource,
   teamsWorkspacePanelRenderersSource,
   useSourceCollectionWorkspaceSource,
+  useResearchExperimentWorkspaceSource,
 ].join("\n");
 import researchWorkspaceModelSource from "./teams/researchWorkspaceModel.ts?raw";
 import researchProjectSwitcherSource from "./teams/research-projects/ResearchProjectSwitcher.tsx?raw";
@@ -1863,6 +1865,12 @@ describe("TeamsRoute layout contract", () => {
     expect(useSourceCollectionWorkspaceSource).toContain("queryKey: researchProjectQueryKey(effectiveTeamId || \"none\")");
     expect(useSourceCollectionWorkspaceSource).toContain("activeSourceCollectionResearchProjectId");
     expect(routeSource).toContain("useSourceCollectionWorkspace");
+    // Phase 2: experiment/loop drafts + secondary queries live in useResearchExperimentWorkspace.
+    expect(routeSourceRaw).toContain("useResearchExperimentWorkspace");
+    expect(routeSourceRaw).not.toContain("const [experimentBaselineArtifactDraft, setExperimentBaselineArtifactDraft]");
+    expect(routeSourceRaw).not.toContain("} = useTeamResearchSecondaryQueries({");
+    expect(useResearchExperimentWorkspaceSource).toContain("useTeamResearchSecondaryQueries");
+    expect(useResearchExperimentWorkspaceSource).toContain("experimentBaselineArtifactDraft");
     expect(queryLayerSource).toContain("queryFn: ({ signal }) =>");
     // Route query layer no longer owns SC project/run list (moved to workspace hook).
     expect(queryLayerSource.match(/queryFn: \(\{ signal \}\) =>/g)?.length ?? 0).toBeLessThanOrEqual(10);
@@ -1948,10 +1956,12 @@ describe("TeamsRoute layout contract", () => {
     expect(teamResearchStageLauncherPanelSource).toContain("当前模式尚未自动就绪");
     expect(teamResearchStageLauncherPanelSource).toContain('aria-label={lang === "zh" ? "选择实验方式" : "Select experiment method"}');
     expect(routeSource).toContain("preferredExperimentMethod=");
-    // Wave 8S: experiment methods endpoint lives on useTeamResearchSecondaryQueries.
+    // Wave 8S / Phase 2: methods endpoint on secondary queries; route consumes via experiment workspace.
     expect(teamResearchSecondaryQueriesSource).toContain("/workflow-orchestration/experiments/methods");
-    expect(routeSource).toContain("useTeamResearchSecondaryQueries");
-    expect(routeSource).toContain("useSourceCollectionRunQueries");
+    expect(routeSourceRaw).toContain("useResearchExperimentWorkspace");
+    expect(routeSourceRaw).not.toContain("useTeamResearchSecondaryQueries({");
+    // SC run detail queries composed inside useSourceCollectionWorkspace (Phase 1).
+    expect(useSourceCollectionWorkspaceSource).toContain("useSourceCollectionRunQueries");
     expect(workflowToneSource).toContain("export function workflowQualityTone");
     expect(teamExperimentPlanningLedgerPanelSource).toContain("activeContract={activeExperimentContract}");
     expect(teamExperimentPlanningLedgerPanelSource).toContain("onSubmit={createExperimentPlanFromWorkspace}");
