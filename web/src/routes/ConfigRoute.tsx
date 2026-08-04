@@ -1,6 +1,6 @@
 import "../design/route-css/config.tailwind.css";
 
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   ChevronRight,
   Image as ImageIcon,
@@ -95,6 +95,7 @@ import {
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
 import { publishConfigDraftPresence } from "./configDraftPresence";
+import { useConfigWorkspaceQueries } from "./config/useConfigWorkspaceQueries";
 import { ConfigOverviewPanel } from "./ConfigOverviewPanel";
 import {
   type ConfigProviderRegistryTab,
@@ -2247,14 +2248,7 @@ export function ConfigRoute() {
     baseHash: string;
     modelCatalog: ConfigWorkspace["modelCatalog"];
   } | null>(null);
-  const workspaceQuery = useQuery({
-    queryKey: queryKeys.configWorkspace(),
-    queryFn: () => fetchJson<ConfigWorkspace>("/api/config/workspace"),
-  });
-  const healthDiagnosticsQuery = useQuery({
-    queryKey: queryKeys.diagnosticsHealth(),
-    queryFn: () => fetchJson<HealthDiagnostics>("/api/diagnostics/health"),
-  });
+  const { workspaceQuery, healthDiagnosticsQuery } = useConfigWorkspaceQueries();
 
   const [draftConfig, setDraftConfig] = useState<PublicConfigShape | null>(null);
   const [baseConfig, setBaseConfig] = useState<PublicConfigShape | null>(null);
