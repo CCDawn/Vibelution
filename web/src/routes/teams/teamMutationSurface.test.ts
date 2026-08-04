@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildSourceCollectionQualityBatchFeedback,
+  buildSourceCollectionWriteMutationSurface,
   buildTeamsRouteMutationSurface,
   teamScopedMutationCandidateId,
   teamScopedMutationSurface,
@@ -89,5 +91,46 @@ describe("teamMutationSurface", () => {
     expect(surface.selectedTeamStartResearchStageResult).toEqual({ stage: 1 });
     expect(surface.sourceCollectionStageSessionTaskPendingStageId).toBe("finding");
     expect(surface.selectedTeamExtractSourceCollectionCandidatesResult).toEqual({ runId: "run-1" });
+  });
+
+  it("builds SC write mutation surface with knowledge work-run and quality feedback", () => {
+    const idle = { isPending: false, error: null, data: undefined, variables: undefined };
+    const write = buildSourceCollectionWriteMutationSurface({
+      teamId: "team-a",
+      selectedSourceCollectionRunEffectiveId: "run-1",
+      buildCandidateGraph: {
+        isPending: true,
+        error: null,
+        data: undefined,
+        variables: { teamId: "team-a" },
+      },
+      runKnowledgeIngestionPrecheck: idle,
+      runKnowledgeCollectionCompletion: idle,
+      planPaperNoteChunks: idle,
+      assessSourceQuality: idle,
+      assessSourceQualityBatch: {
+        isPending: false,
+        isSuccess: true,
+        error: null,
+        data: {
+          summary: {
+            approvedCandidateCount: 2,
+            needsRevisionCandidateCount: 1,
+            rejectedCandidateCount: 0,
+            assessedCandidateCount: 3,
+            skippedCandidateCount: 0,
+          },
+        },
+        variables: { teamId: "team-a" },
+      },
+      knowledgeIngestionActiveWorkRun: { sourceRunId: "run-1", status: "running" },
+      knowledgeIngestionLatestWorkRun: null,
+      lang: "zh",
+    });
+    expect(write.selectedTeamBuildCandidateGraphPending).toBe(true);
+    expect(write.selectedTeamKnowledgeCollectionIngestPending).toBe(true);
+    expect(write.selectedTeamSourceQualityBatchResult).toBeTruthy();
+    expect(write.sourceCollectionQualityBatchFeedback).toContain("质量审查完成");
+    expect(buildSourceCollectionQualityBatchFeedback(null, "en")).toBeNull();
   });
 });

@@ -15,9 +15,21 @@ describe("teamMutationSurface Phase 4 contract", () => {
     );
   });
 
-  it("helper owns scoping and candidate-id extraction", () => {
+  it("TeamsRoute consumes SC write mutation surface for quality/graph/knowledge flags", () => {
+    expect(routeSource).toContain("buildSourceCollectionWriteMutationSurface({");
+    expect(routeSource).not.toContain(
+      "buildCandidateGraphMutation.isPending && buildCandidateGraphMutation.variables?.teamId === selectedTeam?.teamId",
+    );
+    expect(routeSource).not.toContain(
+      "assessSourceQualityMutation.isPending && assessSourceQualityMutation.variables?.teamId === selectedTeam?.teamId",
+    );
+  });
+
+  it("helper owns scoping, candidate-id extraction, and SC write surface", () => {
     expect(surfaceSource).toContain("export function teamScopedMutationSurface");
     expect(surfaceSource).toContain("export function teamScopedMutationCandidateId");
     expect(surfaceSource).toContain("export function buildTeamsRouteMutationSurface");
+    expect(surfaceSource).toContain("export function buildSourceCollectionWriteMutationSurface");
+    expect(surfaceSource).toContain("export function buildSourceCollectionQualityBatchFeedback");
   });
 });
