@@ -164,7 +164,7 @@ export function createResearchWorkflowSurfaceRenderers(ctx: ResearchWorkflowSurf
           boundaryItems: sourceCollectionOverviewBoundaryItems,
           errorMessages: sourceCollectionOverviewErrors,
           result: sourceCollectionOverviewResult,
-          onDraftChange: (patch) => setSourceCollectionDraft((current) => ({ ...current, ...patch })),
+          onDraftChange: (patch) => setSourceCollectionDraft((current: Record<string, unknown>) => ({ ...current, ...patch })),
           onStart: () => {
             if (!selectedTeam?.teamId || !sourceCollectionCanStart || selectedTeamStartSourceCollectionPending) {
               return;
@@ -175,7 +175,7 @@ export function createResearchWorkflowSurfaceRenderers(ctx: ResearchWorkflowSurf
             });
           },
           onRunChange: setSelectedSourceCollectionRunId,
-          onAssignmentSelect: (assignmentId) => setSourceCollectionOutputDraft((current) => ({ ...current, assignmentId })),
+          onAssignmentSelect: (assignmentId: string) => setSourceCollectionOutputDraft((current: Record<string, unknown>) => ({ ...current, assignmentId })),
         }}
         coordination={{
           status: teamWorkflowCoordinationStatus,

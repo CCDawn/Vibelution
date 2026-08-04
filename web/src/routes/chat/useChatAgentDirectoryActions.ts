@@ -7,6 +7,7 @@ import type { NavigateFunction } from "react-router-dom";
 import type { AgentInstance, SessionSummary } from "../../api/types";
 import type { AgentContextMenuState } from "../AgentContextMenu";
 import { agentCenterConfigRoute } from "../agentCenterRoutes";
+import type { SessionContextMenuState } from "./useChatSessionRenameMenu";
 
 export type UseChatAgentDirectoryActionsOptions = {
   lang: "zh" | "en";
@@ -20,7 +21,7 @@ export type UseChatAgentDirectoryActionsOptions = {
   openDirectSession: (sessionId: string) => void;
   openAgent: (agent: AgentInstance) => void;
   setAgentContextMenu: Dispatch<SetStateAction<AgentContextMenuState | null>>;
-  setSessionContextMenu: Dispatch<SetStateAction<unknown>>;
+  setSessionContextMenu: Dispatch<SetStateAction<SessionContextMenuState | null>>;
   setSessionComposerErrors: Dispatch<SetStateAction<Record<string, string>>>;
   setAgentCreateWizardOpen: (open: boolean) => void;
   renameAgentEmptyMessage: string;
