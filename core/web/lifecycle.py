@@ -50,7 +50,7 @@ def is_windows_proactor_disconnect_noise(context: dict[str, Any]) -> bool:
 
 
 @asynccontextmanager
-async def web_workbench_lifespan(_: FastAPI):
+async def web_workbench_lifespan(app: FastAPI | None):
     loop = asyncio.get_running_loop()
     previous_handler = loop.get_exception_handler()
     lifespan_started = time.perf_counter()
@@ -64,9 +64,17 @@ async def web_workbench_lifespan(_: FastAPI):
         current_loop.default_exception_handler(context)
 
     loop.set_exception_handler(handle_loop_exception)
+    from .route_bootstrap import warm_web_routes_in_background
     from .services.cli_agent_terminal_service import reconcile_cli_agent_terminal_states_on_startup
     from .services.session_service import recover_wakeable_agent_inbox_messages_on_startup
 
+    startup_routes_task: asyncio.Task[Any] | None = None
+    if app is not None:
+        # Enable async waiters for non-health requests while routes mount in background.
+        app.state.web_routes_ready_event = asyncio.Event()
+        # Route import/mount is the cold-start bulk cost — do not await before yield so
+        # /api/health can pass and Launcher can open the window early.
+        startup_routes_task = asyncio.create_task(warm_web_routes_in_background(app))
     # Do not await terminal reconcile before yield — it blocked /api/health readiness
     # and stretched launcher open_launcher_action by the full reconcile cost.
     startup_cli_reconcile_task = asyncio.create_task(
@@ -93,6 +101,10 @@ async def web_workbench_lifespan(_: FastAPI):
                 }
             )
 
+    if startup_routes_task is not None:
+        startup_routes_task.add_done_callback(
+            lambda task: consume_startup_task_result(task, message="Web route bootstrap failed during startup.")
+        )
     startup_cli_reconcile_task.add_done_callback(
         lambda task: consume_startup_task_result(
             task, message="CLI agent terminal reconcile failed during startup."
@@ -116,11 +128,15 @@ async def web_workbench_lifespan(_: FastAPI):
                 "backend",
                 "startup",
                 "backend.lifespan.ready_to_serve",
-                message="Workbench lifespan yielded; background startup tasks are running.",
+                message="Workbench lifespan yielded; health is up while routes mount in background.",
                 outcome="started",
                 fields={
                     "preYieldMs": max(0, int((time.perf_counter() - lifespan_started) * 1000)),
+                    "routesReady": bool(
+                        app is not None and getattr(app.state, "web_routes_registered", False)
+                    ),
                     "backgroundTasks": [
+                        *(["web_routes_bootstrap"] if startup_routes_task is not None else []),
                         "cli_terminal_reconcile",
                         "ui_cache_prewarm",
                         "session_catalog",
@@ -135,11 +151,14 @@ async def web_workbench_lifespan(_: FastAPI):
     finally:
         shutdown_session_catalog_on_shutdown()
         for startup_task in (
+            startup_routes_task,
             startup_cli_reconcile_task,
             startup_cache_prewarm_task,
             startup_catalog_task,
             startup_agent_inbox_recovery_task,
         ):
+            if startup_task is None:
+                continue
             if not startup_task.done():
                 startup_task.cancel()
                 with suppress(asyncio.CancelledError):

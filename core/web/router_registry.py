@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import importlib
-from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from fastapi import FastAPI
 
-# Import order is preserved for include_router; modules load concurrently.
+# Stable include order. Imports stay single-threaded: concurrent importlib of
+# interdependent route/service packages deadlocks on module locks (CPython).
 _ROUTE_MODULE_NAMES: tuple[str, ...] = (
     "core.web.routes.runtime",
     "core.web.routes.launcher",
@@ -49,21 +49,17 @@ def _import_route_module(module_name: str) -> Any:
     return importlib.import_module(module_name)
 
 
-def import_web_route_modules(*, max_workers: int = 8) -> list[Any]:
-    """Import route modules, preferring concurrent loads to cut cold-start wall time."""
+def import_web_route_modules(*, max_workers: int = 1) -> list[Any]:
+    """Import route modules in stable order (serial; max_workers kept for API compatibility)."""
 
-    workers = max(1, min(int(max_workers or 1), len(_ROUTE_MODULE_NAMES)))
-    if workers == 1 or len(_ROUTE_MODULE_NAMES) <= 1:
-        return [_import_route_module(name) for name in _ROUTE_MODULE_NAMES]
+    del max_workers  # concurrent import is unsafe with circular service packages
+    return [_import_route_module(name) for name in _ROUTE_MODULE_NAMES]
 
-    modules_by_name: dict[str, Any] = {}
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = {pool.submit(_import_route_module, name): name for name in _ROUTE_MODULE_NAMES}
-        for future, name in futures.items():
-            modules_by_name[name] = future.result()
-    return [modules_by_name[name] for name in _ROUTE_MODULE_NAMES]
+
+def register_web_routers_from_modules(app: FastAPI, modules: list[Any]) -> None:
+    for module in modules:
+        app.include_router(module.router, prefix="/api")
 
 
 def register_web_routers(app: FastAPI) -> None:
-    for module in import_web_route_modules():
-        app.include_router(module.router, prefix="/api")
+    register_web_routers_from_modules(app, import_web_route_modules())
