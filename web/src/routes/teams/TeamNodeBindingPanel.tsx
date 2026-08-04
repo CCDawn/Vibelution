@@ -2,7 +2,7 @@ import { Link2, Save, Trash2, Unlink } from "lucide-react";
 import { Link } from "react-router-dom";
 
 import type { AgentConfigWorkspaceAgent, Team, TeamCanvasNode, TeamOrganizationCanvas } from "../../api/types";
-import { VNativeButton, VNativeInput, VNativeSelect, VNativeTextarea, VTooltip } from "../../components/vui";
+import { VNativeButton, VNativeInput, VNativeTextarea, VStringSelect, VTooltip } from "../../components/vui";
 
 export type TeamNodeBindingDraft = {
   label: string;
@@ -130,24 +130,27 @@ export function TeamNodeBindingPanel({
       </label>
       <label>
         <span>{lang === "zh" ? "绑定 Agent" : "Bound Agent"}</span>
-        <VNativeSelect
+        <VStringSelect
+          ariaLabel={lang === "zh" ? "绑定 Agent" : "Bind agent"}
           value={nodeDraft.agentId}
-          onChange={(event) => onNodeDraftChange({ agentId: event.target.value })}
-        >
-          <option value="">{lang === "zh" ? "不绑定" : "Unbound"}</option>
-          {activeAgents.map((agent) => {
-            const membership = agentTeamMembership.get(agent.agentId);
-            const ownedByOtherTeam = Boolean(membership && membership.teamId !== selectedTeam.teamId);
-            return (
-              <option key={agent.agentId} value={agent.agentId} disabled={ownedByOtherTeam}>
-                {agentDisplayName(agent)} · {agent.agentCode}
-                {ownedByOtherTeam
-                  ? ` · ${lang === "zh" ? "已属于" : "belongs to"} ${membership?.teamName}`
-                  : ""}
-              </option>
-            );
-          })}
-        </VNativeSelect>
+          onValueChange={(agentId) => onNodeDraftChange({ agentId })}
+          options={[
+            { value: "", label: lang === "zh" ? "不绑定" : "Unbound" },
+            ...activeAgents.map((agent) => {
+              const membership = agentTeamMembership.get(agent.agentId);
+              const ownedByOtherTeam = Boolean(membership && membership.teamId !== selectedTeam.teamId);
+              return {
+                value: agent.agentId,
+                disabled: ownedByOtherTeam,
+                label:
+                  `${agentDisplayName(agent)} · ${agent.agentCode}`
+                  + (ownedByOtherTeam
+                    ? ` · ${lang === "zh" ? "已属于" : "belongs to"} ${membership?.teamName}`
+                    : ""),
+              };
+            }),
+          ]}
+        />
       </label>
       <label>
         <span>{lang === "zh" ? "目的" : "Purpose"}</span>

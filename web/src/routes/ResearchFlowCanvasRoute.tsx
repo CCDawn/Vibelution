@@ -37,10 +37,10 @@ import {
   VButton,
   VCanvasWorkbenchPage,
   VNativeInput,
-  VNativeSelect,
   VNativeTextarea,
   VRouteLinkButton,
   VStateSurface,
+  VStringSelect,
 } from "../components/vui";
 import { agentDisplayInfo } from "./agentDisplay";
 import styles from "./ResearchFlowCanvasRoute.styles";
@@ -2744,48 +2744,60 @@ export function ResearchFlowCanvasRoute() {
                     <div className={styles.twoColumns}>
                       <label>
                         通信方式
-                        <VNativeSelect value={orgDeliveryMode} onChange={(event) => setOrgDeliveryMode(event.target.value)}>
-                          {RESEARCH_ORG_DELIVERY_MODE_OPTIONS.map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </VNativeSelect>
+                        <VStringSelect
+                          ariaLabel="通信方式"
+                          value={orgDeliveryMode}
+                          onValueChange={setOrgDeliveryMode}
+                          options={RESEARCH_ORG_DELIVERY_MODE_OPTIONS.map((option) => ({
+                            value: option.value,
+                            label: option.label,
+                          }))}
+                        />
                       </label>
                       <label>
                         消息类型
-                        <VNativeSelect value={orgMessageType} onChange={(event) => setOrgMessageType(event.target.value)}>
-                          {RESEARCH_ORG_MESSAGE_TYPE_OPTIONS.map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </VNativeSelect>
+                        <VStringSelect
+                          ariaLabel="消息类型"
+                          value={orgMessageType}
+                          onValueChange={setOrgMessageType}
+                          options={RESEARCH_ORG_MESSAGE_TYPE_OPTIONS.map((option) => ({
+                            value: option.value,
+                            label: option.label,
+                          }))}
+                        />
                       </label>
                     </div>
                     {orgDeliveryMode === "private" ? (
                       <label>
                         目标 Agent
-                        <VNativeSelect value={defaultOrganizationTargetId} onChange={(event) => setOrgTargetAgentId(event.target.value)}>
-                          {activeOrganizationAgents.map((agent) => (
-                            <option key={agent.agentId} value={agent.agentId}>
-                              {agent.agentCode ? `${agent.agentCode} · ${agent.displayName}` : agent.displayName}
-                            </option>
-                          ))}
-                        </VNativeSelect>
+                        <VStringSelect
+                          ariaLabel="目标 Agent"
+                          value={defaultOrganizationTargetId}
+                          onValueChange={setOrgTargetAgentId}
+                          options={activeOrganizationAgents.map((agent) => ({
+                            value: agent.agentId,
+                            label: agent.agentCode
+                              ? `${agent.agentCode} · ${agent.displayName}`
+                              : agent.displayName,
+                          }))}
+                        />
                       </label>
                     ) : null}
                     {orgDeliveryMode === "zone" ? (
                       <label>
                         目标区域
-                        <VNativeSelect value={orgZoneId} onChange={(event) => setOrgZoneId(event.target.value)}>
-                          <option value="">选择区域</option>
-                          {organizationZones.map((zone) => (
-                            <option key={zone.zoneId} value={zone.zoneId}>
-                              {zone.label || zone.zoneId}
-                            </option>
-                          ))}
-                        </VNativeSelect>
+                        <VStringSelect
+                          ariaLabel="目标区域"
+                          value={orgZoneId}
+                          onValueChange={setOrgZoneId}
+                          options={[
+                            { value: "", label: "选择区域" },
+                            ...organizationZones.map((zone) => ({
+                              value: zone.zoneId,
+                              label: zone.label || zone.zoneId,
+                            })),
+                          ]}
+                        />
                       </label>
                     ) : null}
                     <label>

@@ -2,7 +2,7 @@
  * SC inject surface: collection mode + local roots fields (workspace claim).
  * Stays free of TeamsRoute query/mutation ownership.
  */
-import { VNativeInput, VNativeSelect } from "../../components/vui";
+import { VNativeInput, VStringSelect } from "../../components/vui";
 import {
   shouldShowLocalScanRootsField,
   sourceCollectionModeFieldOptions,
@@ -43,20 +43,19 @@ export function TeamSourceCollectionModeFields({
     <>
       <label>
         <span>{lang === "zh" ? "来源模式" : "Source mode"}</span>
-        <VNativeSelect
+        <VStringSelect
+          ariaLabel={lang === "zh" ? "搜集模式" : "Collection mode"}
           value={mode}
-          onChange={(event) =>
+          onValueChange={(collectionMode) =>
             onDraftChange({
-              collectionMode: event.target.value as SourceCollectionMode,
+              collectionMode: collectionMode as SourceCollectionMode,
             })
           }
-        >
-          {modeOptions.map((item) => (
-            <option key={item.value} value={item.value}>
-              {item.label}
-            </option>
-          ))}
-        </VNativeSelect>
+          options={modeOptions.map((item) => ({
+            value: item.value,
+            label: item.label,
+          }))}
+        />
       </label>
       {shouldShowLocalScanRootsField(mode) ? (
         <label>

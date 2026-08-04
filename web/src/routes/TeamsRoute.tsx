@@ -277,18 +277,13 @@ import {
 import { useShellI18n } from "../i18n/useShellI18n";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import {
-  VActionGroup,
   VButton,
   VIconButton,
   VLoadingValue,
   VNativeButton,
-  VNativeInput,
-  VNativeSelect,
-  VNativeTextarea,
   VBoardWorkbenchPage,
   VCanvasWorkbenchPage,
   VDenseOpsPage,
-  VSelect,
   VStateSurface,
   VStatusStrip,
   VSurface,
