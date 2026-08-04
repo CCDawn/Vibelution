@@ -74,7 +74,8 @@ export function TeamShellRail({
       elevation="flat"
       padding="compact"
       className={[
-        "teamShellRail flex h-full min-h-0 min-w-0 flex-col gap-3 overflow-hidden",
+        // Fill split-sidebar height (shadcn sidebar pattern: h-full + min-h-0 chain).
+        "teamShellRail flex h-full min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-hidden",
         className,
       ].filter(Boolean).join(" ")}
       data-testid="team-shell-rail"

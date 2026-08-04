@@ -13,9 +13,10 @@ const styles = {
     "empty min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   teamMemoryActionRail:
     `teamMemoryActionRail min-w-0 flex flex-wrap items-center justify-end gap-1.5 ${compactActionLink}`,
-  teamMemoryIndex: `teamMemoryIndex min-w-0 !flex-none grid gap-2.5 ${vuiFlatPanelClass} p-2.5`,
+  // Stretch with board shell; member list scrolls inside (shadcn sidebar/content fill).
+  teamMemoryIndex: `teamMemoryIndex flex min-h-0 min-w-0 flex-1 flex-col gap-2.5 ${vuiFlatPanelClass} p-2.5`,
   teamMemoryIndexHeader:
-    "teamMemoryIndexHeader min-w-0 flex flex-wrap items-start justify-between gap-2 [&>div]:grid [&>div]:min-w-0 [&>div]:gap-0.5 [&>div_strong]:truncate [&>div_strong]:text-[var(--fg-primary)] [&>div_span]:truncate [&>div_span]:text-[var(--fg-muted)] [&>div_span]:[font-size:var(--vui-font-xs)] [&>div_span]:font-[760]",
+    "teamMemoryIndexHeader min-w-0 shrink-0 flex flex-wrap items-start justify-between gap-2 [&>div]:grid [&>div]:min-w-0 [&>div]:gap-0.5 [&>div_strong]:truncate [&>div_strong]:text-[var(--fg-primary)] [&>div_span]:truncate [&>div_span]:text-[var(--fg-muted)] [&>div_span]:[font-size:var(--vui-font-xs)] [&>div_span]:font-[760]",
   teamMemoryMemberActions:
     `teamMemoryMemberActions min-w-0 flex flex-none flex-wrap items-center justify-end gap-1 self-start ${compactActionLink}`,
   teamMemoryMemberCard: `teamMemoryMemberCard min-w-0 grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-2 gap-y-1.5 ${vuiOpaqueRowClass} px-2.5 py-2`,
@@ -28,7 +29,7 @@ const styles = {
   teamMemoryMemberMeta:
     "teamMemoryMemberMeta min-w-0 flex flex-wrap items-center gap-1.5",
   teamMemoryMemberTable:
-    "teamMemoryMemberTable min-w-0 !grid grid-cols-[minmax(0,1fr)] content-start auto-rows-max gap-1.5",
+    "teamMemoryMemberTable min-h-0 min-w-0 flex-1 !grid grid-cols-[minmax(0,1fr)] content-start auto-rows-max gap-1.5 overflow-auto [scrollbar-gutter:stable]",
   teamMemoryRole:
     "teamMemoryRole min-w-0 block max-w-full truncate font-mono [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)]",
   teamMemoryStatusBadge:

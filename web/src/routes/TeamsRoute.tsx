@@ -5555,7 +5555,7 @@ export function TeamsRoute({
     researchWorkflowTeamSelected ? styles.researchInspector : "",
     challengeCupResearchTeamSelected && !researchCanvasVisible ? styles.challengeWorkspaceInspector : "",
     !researchCanvasVisible
-      ? "min-h-0 w-full max-w-none flex-1 !overflow-auto border-0 !bg-transparent"
+      ? "flex h-full min-h-0 w-full max-w-none flex-1 flex-col overflow-hidden border-0 !bg-transparent"
       : "min-h-0 shrink-0",
   ].filter(Boolean).join(" ");
   const showNodeBindingPanel = researchCanvasVisible && !researchCanvasReadOnly;
@@ -5893,7 +5893,7 @@ export function TeamsRoute({
     <VDenseOpsPage
       className={styles.route}
       headerClassName={styles.challengeWorkspaceContextHidden}
-      bodyClassName="!flex min-h-0 flex-1 flex-col overflow-hidden"
+      bodyClassName={styles.teamShellPageBody}
       data-vui-domain-recipe="teams-organization-workbench"
       ariaLabel={selectedTeamContextTitle}
       eyebrow={lang === "zh" ? "团队" : "Teams"}

@@ -143,8 +143,11 @@ const styles: Record<string, string> = {
     "!border-[color:color-mix(in_srgb,var(--accent-cool)_34%,var(--vui-border-subtle))] !bg-[color:color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-panel))] !text-[var(--fg-primary)]",
   revokeButton:
     `revokeButton min-w-0 ${vuiControlQuietClass}`,
+  // shadcn / Kernel list-detail fill: page owns viewport height; body row is minmax(0,1fr).
   route:
-    `route min-w-0 flex flex-col h-full min-h-0 overflow-hidden text-[var(--fg-primary)] [--team-workbench-gap:4px] ${vuiWorkspaceFillClass}`,
+    `route grid h-full min-h-0 min-w-0 max-w-full grid-rows-[auto_minmax(0,1fr)] content-stretch gap-0 overflow-hidden text-[var(--fg-primary)] [--team-workbench-gap:4px] ${vuiWorkspaceFillClass}`,
+  teamShellPageBody:
+    "teamShellPageBody !flex h-full min-h-0 min-w-0 flex-col overflow-hidden",
   saveState:
     "saveState min-w-0",
   sectionTitle:
@@ -210,33 +213,34 @@ const styles: Record<string, string> = {
   workspaceResearchCanvas:
     "workspaceResearchCanvas min-w-0",
   teamShellWorkspace:
-    "teamShellWorkspace !flex min-h-0 w-full flex-1 flex-row overflow-hidden",
+    "teamShellWorkspace !flex h-full min-h-0 w-full flex-1 flex-row overflow-hidden",
   teamShellWorkspaceBoard:
     "teamShellWorkspaceBoard",
   teamShellWorkspaceCanvas:
     "teamShellWorkspaceCanvas",
   teamShellRailPane:
-    "teamShellRailPane min-h-0 w-[var(--teams-rail-width,248px)] min-w-[200px] max-w-[360px] shrink-0 overflow-hidden border-r border-[var(--vui-border-subtle)] [flex-basis:var(--teams-rail-width,248px)]",
+    "teamShellRailPane flex h-full min-h-0 w-[var(--teams-rail-width,248px)] min-w-[200px] max-w-[360px] shrink-0 flex-col overflow-hidden border-r border-[var(--vui-border-subtle)] [flex-basis:var(--teams-rail-width,248px)]",
   teamShellRailResizeHandle:
-    "teamShellRailResizeHandle max-[900px]:hidden",
+    "teamShellRailResizeHandle self-stretch max-[900px]:hidden",
   teamShellInspectorPane:
-    "teamShellInspectorPane w-[var(--teams-inspector-width,360px)] min-w-[300px] max-w-[480px] shrink-0 [flex-basis:var(--teams-inspector-width,360px)]",
+    "teamShellInspectorPane flex h-full min-h-0 w-[var(--teams-inspector-width,360px)] min-w-[300px] max-w-[480px] shrink-0 flex-col [flex-basis:var(--teams-inspector-width,360px)]",
   teamShellMain:
-    "teamShellMain min-w-0 flex h-full min-h-0 flex-1 flex-col overflow-hidden",
+    "teamShellMain flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-[var(--vui-surface-panel)]",
   teamShellToolbar:
-    "teamShellToolbar min-w-0 flex flex-wrap items-center justify-between gap-2 border-b border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] px-3 py-2",
+    "teamShellToolbar min-w-0 shrink-0 flex flex-wrap items-center justify-between gap-2 border-b border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] px-3 py-2",
   teamShellToolbarIdentity:
     "teamShellToolbarIdentity min-w-0 grid gap-0.5 [&>strong]:text-[14px] [&>strong]:font-[760] [&>strong]:text-[var(--fg-primary)] [&>span]:text-[12px] [&>span]:text-[var(--fg-secondary)]",
   teamShellToolbarActions:
     "teamShellToolbarActions min-w-0 flex flex-wrap items-center justify-end gap-2",
   teamShellContent:
-    "teamShellContent min-h-0 min-w-0 flex-1 overflow-hidden",
+    "teamShellContent flex min-h-0 min-w-0 flex-1 overflow-hidden",
   teamShellContentBoard:
-    "teamShellContentBoard !flex min-h-0 flex-col overflow-auto bg-[var(--vui-surface-panel)] [scrollbar-gutter:stable]",
+    "teamShellContentBoard !flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--vui-surface-panel)]",
   teamShellContentCanvas:
-    "teamShellContentCanvas !flex min-h-0 flex-row overflow-hidden",
+    "teamShellContentCanvas !flex min-h-0 flex-1 flex-row overflow-hidden",
+  // Board body fills remaining viewport; scroll inside, never shrink shell with content.
   teamShellBoardBody:
-    "teamShellBoardBody !flex min-h-0 flex-1 flex-col content-start gap-4 overflow-auto p-4 [scrollbar-gutter:stable] [&>*]:flex-none",
+    "teamShellBoardBody !flex min-h-0 flex-1 flex-col content-start gap-4 overflow-auto p-4 [scrollbar-gutter:stable] [&>*]:shrink-0",
   // Wave 4B: shared PaneResizeHandle visual.,
   inspectorResizeHandle:
     "inspectorResizeHandle max-[900px]:hidden",
