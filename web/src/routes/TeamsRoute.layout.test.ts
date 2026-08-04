@@ -126,6 +126,9 @@ import teamMemoryIndexPanelStyles from "./TeamMemoryIndexPanel.styles";
 import teamAiSearchWorkspacePanelSource from "./TeamAiSearchWorkspacePanel.tsx?raw";
 import teamResearchStageAgentPanelSource from "./TeamResearchStageAgentPanel.tsx?raw";
 import teamResearchStageLauncherPanelSource from "./TeamResearchStageLauncherPanel.tsx?raw";
+import teamCommunicationPanelSource from "./teams/TeamCommunicationPanel.tsx?raw";
+import teamResearchBoardPrimarySurfaceSource from "./teams/TeamResearchBoardPrimarySurface.tsx?raw";
+import teamResearchWorkflowPanelHostSource from "./teams/TeamResearchWorkflowPanelHost.tsx?raw";
 import teamResearchStageStandalonePagePanelSource from "./TeamResearchStageStandalonePagePanel.tsx?raw";
 import teamResearchLoopPanelSource from "./TeamResearchLoopPanel.tsx?raw";
 import teamExperimentPlanningLedgerPanelSource from "./TeamExperimentPlanningLedgerPanel.tsx?raw";
@@ -370,7 +373,8 @@ describe("TeamsRoute layout contract", () => {
     expect(teamShellMutationsSource).toContain("fetchJson<Team>(`/api/teams/${encodeURIComponent(teamId)}`");
     expect(teamShellMutationsSource).toContain('method: "DELETE"');
     expect(teamShellMutationsSource).toContain("sendTeamProjectBusMessage(payload)");
-    expect(routeSource).toContain("kernelTaskCenterHref");
+    // Kernel deep-links live on TeamCommunicationPanel after discussion/broadcast extraction.
+    expect(teamCommunicationPanelSource).toContain("kernelTaskCenterHref");
     expect(routeSource).toContain("queryFn: ({ signal }) => listProjectAgentBusTimeline(PROJECT_AGENT_BUS_TEAM_TIMELINE_LIMIT, { signal })");
     expect(teamShellMutationsSource).toContain("revokeProjectAgentBusMessage({");
     expect(teamShellMutationsSource).toContain("/api/teams/${encodeURIComponent(teamId)}/chat-room/sync");
@@ -828,9 +832,12 @@ describe("TeamsRoute layout contract", () => {
     expect(initialLoadingSurfaceSource).not.toContain("visibleTeamSummary.activeTeamCount");
     expect(initialLoadingSurfaceSource).not.toContain("visibleTeamSummary.memberCount");
     // Board main: research overview cold load must fill the region (not styles.empty one-liner).
-    expect(routeSource).toContain('title={lang === "zh" ? "正在读取科研总览" : "Loading research overview"}');
+    // Fill loading/empty chrome lives on TeamResearchBoardPrimarySurface after extraction.
+    expect(teamResearchBoardPrimarySurfaceSource).toContain('title={lang === "zh" ? "正在读取科研总览" : "Loading research overview"}');
+    expect(teamResearchBoardPrimarySurfaceSource).toContain("fill");
+    expect(teamResearchBoardPrimarySurfaceSource).not.toContain('styles.empty}>{lang === "zh" ? "正在读取科研总览');
+    expect(routeSource).toContain("TeamResearchBoardPrimarySurface");
     expect(routeSource).toContain("fill");
-    expect(routeSource).not.toContain('styles.empty}>{lang === "zh" ? "正在读取科研总览');
     expect(routeSource).toContain("styles.emptyCanvasPanel");
     expect(routeSource).not.toContain("选择团队后进入对应工作区");
     expect(routeSource).not.toContain("顶部只保留 AI 搜索范围团队和 挑战杯ai科研团队 两个入口");
@@ -874,17 +881,20 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).not.toContain("系统团队不可归档");
     expect(routeSource).toContain("解绑节点");
     expect(routeSource).toContain("删除节点");
-    expect(routeSource).toContain("团队任务");
-    expect(routeSource).toContain("启动团队讨论");
+    // Discussion/broadcast chrome extracted to TeamCommunicationPanel.
+    expect(teamCommunicationPanelSource).toContain("团队任务");
+    expect(teamCommunicationPanelSource).toContain("启动团队讨论");
     expect(routeSource).toContain("teamTaskTopic");
     expect(routeSource).toContain("linkedRoomBusy");
-    expect(routeSource).toContain("最近团队任务");
-    expect(routeSource).toContain("styles.teamRoundPanel");
-    expect(routeSource).toContain("styles.teamRoundCard");
-    expect(routeSource).toContain("查看完整群聊");
-    expect(routeSource).toContain("styles.teamTaskForm");
-    expect(routeSource).toContain("科研流程");
-    expect(routeSource).toContain("TeamWorkflowOrchestration");
+    expect(teamCommunicationPanelSource).toContain("最近团队任务");
+    expect(teamCommunicationPanelSource).toContain("styles.teamRoundPanel");
+    expect(teamCommunicationPanelSource).toContain("styles.teamRoundCard");
+    expect(teamCommunicationPanelSource).toContain("查看完整群聊");
+    expect(teamCommunicationPanelSource).toContain("styles.teamTaskForm");
+    expect(routeSource).toContain("TeamCommunicationPanel");
+    // Workflow section chrome extracted to TeamResearchWorkflowPanelHost.
+    expect(teamResearchWorkflowPanelHostSource).toContain("科研流程");
+    expect(teamResearchWorkflowPanelHostSource).toContain("TeamWorkflowOrchestration");
     expect(routeSource).toContain("teamWorkflowQuery");
     expect(routeSource).toContain("teamWorkflowCandidatesQuery");
     expect(routeSource).toContain("teamWorkflowValidationSummary");
@@ -894,7 +904,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("workflowQualityTone");
     expect(routeSource).toContain("workflowIngestionStatusLabel");
     expect(routeSource).toContain("workflowIngestionTone");
-    expect(routeSource).toContain("styles.workflowPanel");
+    expect(teamResearchWorkflowPanelHostSource).toContain("styles.workflowPanel");
     expect(routeSource).toContain("styles.workflowStats");
     expect(routeSource).toContain("TeamWorkflowModelEvidenceStatusPanel");
     expect(routeSource).toContain("TeamWorkflowCoordinationStatusPanel");
@@ -1548,7 +1558,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).not.toContain("{renderResearchWorkspaceNav()}");
     expect(routeSource).toContain("renderResearchStageLauncher");
     expect(routeSource).toContain("renderResearchOverviewSurface");
-    expect(routeSource).toContain("!researchCanvasVisible && researchWorkflowTeamSelected");
+    // Board primary surface gates overview/launcher when canvas is hidden for research teams.
+    expect(routeSource).toContain("TeamResearchBoardPrimarySurface");
+    expect(teamResearchBoardPrimarySurfaceSource).toContain("researchCanvasVisible");
+    expect(teamResearchBoardPrimarySurfaceSource).toContain("researchWorkflowTeamSelected");
     // Wave 8H: research graph / MVP console copy and ChallengeCup workspace live on launcher panel.
     expect(teamResearchStageLauncherPanelSource).toContain("研究关系图");
     expect(teamResearchStageLauncherPanelSource).toContain("researchStageHeaderActions");
@@ -1628,7 +1641,8 @@ describe("TeamsRoute layout contract", () => {
     expect(teamResearchStageStandalonePagePanelSource).toContain('stage="iteration"');
     expect(researchWorkspaceModelSource).toContain('value === "source_collection"');
     expect(researchWorkspaceModelSource).toContain('return "knowledge_collection"');
-    expect(routeSource).toContain('id="research-workflow-overview"');
+    expect(teamResearchWorkflowPanelHostSource).toContain('id="research-workflow-overview"');
+    expect(routeSource).toContain("TeamResearchWorkflowPanelHost");
     expect(researchWorkspaceModelSource).toContain('knowledge_collection: "research-workflow-knowledge-collection"');
     expect(teamSourceCollectionOverviewPanelSource).toContain('id="research-workflow-source-collection"');
     expect(routeAndPureSource).toContain('id="research-organization-canvas"');
@@ -1969,7 +1983,9 @@ describe("TeamsRoute layout contract", () => {
     expect(teamWorkflowStatusPanelsSource).toContain("入库审核状态");
     expect(teamWorkflowStatusPanelsSource).toContain("模型调用证据链");
     expect(teamWorkflowStatusPanelsSource).toContain("证据登记，不是正式知识");
-    expect(teamWorkflowStatusPanelsSource).toContain("CandidateStore、Team Knowledge 和正式同步边界");
+    // CandidateStore boundary copy (keeps formal Knowledge/RAG/Graph writes off).
+    expect(teamWorkflowStatusPanelsSource).toContain("CandidateStore 快照 · 正式知识/RAG/图谱写入关闭");
+    expect(teamWorkflowStatusPanelsSource).toContain("只写 CandidateStore");
     expect(routeSource).toContain("TeamSourceCollectionOverviewPanel");
     expect(teamSourceCollectionOverviewPanelSource).toContain("workflowSourceCollectionPanel");
     expect(routeSource).toContain("资料搜索执行");
@@ -2011,25 +2027,25 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("生成分块计划");
     expect(routeSource).toContain("重建分块计划");
     expect(teamWorkflowStatusPanelsSource).toContain("后续 paper_note draft 需带 chunkId");
-    expect(routeSource).toContain("选择 research-team / 挑战杯ai科研团队 后显示挑战杯科研流程。");
-    expect(routeSource).toContain("团队广播");
-    expect(routeSource).toContain("发送给团队");
-    expect(routeSource).toContain("最近团队广播");
+    expect(teamResearchWorkflowPanelHostSource).toContain("选择 research-team / 挑战杯ai科研团队 后显示挑战杯科研流程。");
+    expect(teamCommunicationPanelSource).toContain("团队广播");
+    expect(teamCommunicationPanelSource).toContain("发送给团队");
+    expect(teamCommunicationPanelSource).toContain("最近团队广播");
     expect(routeSource).toContain("已衔接群聊");
-    expect(routeSource).toContain("teamChatRoomRoute(selectedTeamStartRoundResult.roomId");
-    expect(routeSource).toContain("teamChatRoomRoute(latestTeamRound.roomId");
-    expect(routeSource).toContain("teamWorkspaceRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID)");
+    expect(teamCommunicationPanelSource).toContain("teamChatRoomRoute(startRoundResult.roomId");
+    expect(teamCommunicationPanelSource).toContain("teamChatRoomRoute(latestTeamRound.roomId");
+    expect(teamCommunicationPanelSource).toContain("teamWorkspaceRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID)");
     expect(routeSource).toContain("styles.linkedRoomLine");
     expect(routeSource).toContain("styles.toolbarLink");
     expect(routeSource).toContain("teamBusEvents");
-    expect(routeSource).toContain("isProjectAgentBusEventRevoked");
+    expect(teamCommunicationPanelSource).toContain("isProjectAgentBusEventRevoked");
     expect(routeSource).toContain("projectAgentBusEventsForTeam");
     expect(routeSource).toContain("revokeTeamMessageMutation");
-    expect(routeSource).toContain("selectedTeamMessageResult.kernel?.taskId");
-    expect(routeSource).toContain("event.kernel?.taskId");
-    expect(routeSource).toContain("styles.teamHistoryPanel");
+    expect(teamCommunicationPanelSource).toContain("messageResult.kernel?.taskId");
+    expect(teamCommunicationPanelSource).toContain("event.kernel?.taskId");
+    expect(teamCommunicationPanelSource).toContain("styles.teamHistoryPanel");
     expect(routeStyles.kernelTraceLink).toBeTypeOf("string");
-    expect(routeSource).toContain("interrupt_targets");
+    expect(teamCommunicationPanelSource).toContain("interrupt_targets");
     expect(routeSource).toContain("edges: durableCanvas.edges.filter((edge) => edge.source !== deletedNodeId && edge.target !== deletedNodeId)");
     expect(routeSource).toContain("disabled={!hasWritableCanvas");
     expect(routeStyles.teamContextBar).toBeTypeOf("string");
@@ -3168,8 +3184,11 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("startTeamRoundMutation.variables?.teamId === selectedTeam?.teamId");
     expect(routeSource).toContain("selectedTeamMessagePending");
     expect(routeSource).toContain("sendTeamMessageMutation.variables?.teamId === selectedTeam?.teamId");
-    expect(routeSource).toContain("revokeTeamMessageMutation.variables?.eventId === event.eventId");
-    expect(routeSource).toContain("revokeTeamMessageMutation.mutate({ teamId: selectedTeam.teamId, eventId: event.eventId })");
+    // Revoke pending/event matching is projected into TeamCommunicationPanel via revokePendingEventId.
+    expect(routeSource).toContain("revokeTeamMessageMutation.variables?.eventId");
+    expect(routeSource).toContain("revokePendingEventId=");
+    expect(teamCommunicationPanelSource).toContain("revokePendingEventId === event.eventId");
+    expect(teamCommunicationPanelSource).toContain("onRevokeTeamMessage({ teamId: selectedTeam.teamId, eventId: event.eventId })");
     expect(routeSource).not.toContain("chatWorkspaceCache.afterTeamChanged(selectedTeamId || undefined)");
     expect(routeSource).not.toContain("revokeTeamMessageMutation.mutate(event.eventId)");
   });

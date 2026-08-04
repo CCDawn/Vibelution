@@ -6,6 +6,11 @@ const source = readFileSync(
   new URL("./TeamResearchStageLauncherPanel.tsx", import.meta.url),
   "utf8",
 );
+const propsSource = readFileSync(
+  new URL("./teams/researchStageLauncherProps.ts", import.meta.url),
+  "utf8",
+);
+const panelAndProps = `${source}\n${propsSource}`;
 
 describe("TeamResearchStageLauncherPanel lifecycle truth", () => {
   it("uses lifecycle truth for completed knowledge collection", () => {
@@ -22,12 +27,13 @@ describe("TeamResearchStageLauncherPanel lifecycle truth", () => {
   });
 
   it("keeps overview stage cards read-only without competing start CTAs", () => {
-    expect(source).toContain('presentationMode?: "overview" | "interactive"');
+    expect(propsSource).toContain('presentationMode?: "overview" | "interactive"');
     expect(source).toContain('presentationMode === "overview"');
     expect(source).toContain('data-presentation={stageCardsReadOnly ? "overview" : "interactive"}');
     expect(source).toContain("ResearchWorkflowErrorSurface");
     expect(source).toContain('data-presentation={stageCardsReadOnly ? "overview-readonly" : "interactive"}');
     expect(source).toContain('lang === "zh" ? "查看阶段" : "View stage"');
     expect(source).toContain("researchExperimentMethodReadonly");
+    expect(panelAndProps).toContain("flattenResearchStageLauncherProps");
   });
 });
