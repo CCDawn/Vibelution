@@ -2405,8 +2405,9 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     traceTargetId,
     sourceOwnerType,
     sourceOwnerId,
-    sourceInboxStatus,
+    sourceInboxStatus: sourceInboxStatus as any,
   });
+  const knowledgeItems = ((knowledgeItemsQuery.data as any)?.items ?? []) as any[];
   const cleanupTargetOptions = useMemo<CleanupTargetOption[]>(() => {
     const options: CleanupTargetOption[] = [
       {
@@ -3641,58 +3642,58 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
           privateByteText: formatByteCount(summary?.privateByteCount ?? 0),
           formalKnowledgeItemCount: summary?.formalKnowledgeItemCount ?? 0,
           formalKnowledgeBaseCount: summary?.formalKnowledgeBaseCount ?? 0,
-          warningCount: summary?.warnings.length ?? 0,
+          warningCount: (summary as any)?.warnings?.length ?? summary?.warningCount ?? 0,
         }}
         searchText={searchText}
         onSearchTextChange={setSearchText}
-        agents={visibleAgents.map((agent) => ({
+        agents={visibleAgents.map((agent: any) => ({
           id: agent.agentId,
           name: agent.displayName || agent.agentId,
           status: agent.status,
           origin: agent.agentCode || agent.agentId,
           path: agent.privateMemoryRoot || agent.workspacePath,
-          privateFileCount: agent.fileCount,
-          formalKnowledgeBaseCount: agent.knowledgeSummary.knowledgeBaseCount,
+          privateFileCount: agent.fileCount ?? agent.privateFileCount ?? 0,
+          formalKnowledgeBaseCount: agent.knowledgeSummary?.knowledgeBaseCount ?? agent.formalKnowledgeBaseCount ?? 0,
           hasPrivateMemory: agent.hasPrivateMemory,
           active: agent.agentId === selectedAgentMemoryAgentId,
         }))}
         selectedAgent={
-          selectedAgentMemoryAgent
+          (selectedAgentMemoryAgent
             ? {
               name: selectedAgentMemoryAgent.displayName || selectedAgentMemoryAgent.agentId,
               privateRoot: selectedAgentMemoryAgent.privateMemoryRoot,
               workspacePath: selectedAgentMemoryAgent.workspacePath,
-              fileCount: selectedAgentMemoryAgent.fileCount,
-              formalKnowledgeItemCount: selectedAgentMemoryAgent.knowledgeSummary.itemCount,
-              formalKnowledgeBaseCount: selectedAgentMemoryAgent.knowledgeSummary.knowledgeBaseCount,
-              knowledgeError: selectedAgentMemoryAgent.knowledgeSummary.error,
-              knowledgeBases: selectedAgentMemoryAgent.knowledgeSummary.knowledgeBases.map((base) => ({
+              fileCount: (selectedAgentMemoryAgent as any).fileCount ?? 0,
+              formalKnowledgeItemCount: (selectedAgentMemoryAgent as any).knowledgeSummary?.itemCount ?? 0,
+              formalKnowledgeBaseCount: (selectedAgentMemoryAgent as any).knowledgeSummary?.knowledgeBaseCount ?? 0,
+              knowledgeError: (selectedAgentMemoryAgent as any).knowledgeSummary?.error,
+              knowledgeBases: ((selectedAgentMemoryAgent as any).knowledgeSummary?.knowledgeBases ?? []).map((base: any) => ({
                 id: base.scopedKnowledgeBaseId || base.knowledgeBaseId,
                 label: base.name || base.knowledgeBaseId,
                 title: base.scopedKnowledgeBaseId || base.knowledgeBaseId,
               })),
             }
-            : null
+            : null) as any
         }
         selectedItem={
-          selectedAgentMemoryItem
+          (selectedAgentMemoryItem
             ? {
-              title: selectedAgentMemoryItem.relativePath || selectedAgentMemoryItem.title,
+              title: selectedAgentMemoryItem.relativePath || selectedAgentMemoryItem.title || "",
               path: selectedAgentMemoryItem.path,
-              sizeText: formatByteCount(selectedAgentMemoryItem.sizeBytes),
+              sizeText: formatByteCount(selectedAgentMemoryItem.sizeBytes ?? 0),
               contentType: selectedAgentMemoryItem.contentType,
-              contentLanguage: contentLanguage(selectedAgentMemoryItem.contentType),
+              contentLanguage: contentLanguage(selectedAgentMemoryItem.contentType || ""),
               content: selectedAgentMemoryItem.content,
             }
-            : null
+            : null) as any
         }
-        items={selectedAgentMemoryItems.map((item) => ({
+        items={selectedAgentMemoryItems.map((item: any) => ({
           id: item.id,
-          title: item.relativePath || item.title,
+          title: item.relativePath || item.title || "",
           updatedAtText: formatTimestamp(item.updatedAt, lang),
           path: item.path,
           summary: item.summary,
-          sizeText: formatByteCount(item.sizeBytes),
+          sizeText: formatByteCount(item.sizeBytes ?? 0),
           contentType: item.contentType,
           truncated: item.contentTruncated,
           active: item.id === selectedAgentMemoryItem?.id,

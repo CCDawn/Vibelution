@@ -87,9 +87,9 @@ export type BuildSourceCollectionStageModulesInput = {
   sourceCollectionDisplayedCandidateCount: number;
   sourceCollectionRunPendingScreeningCount: number;
   sourceCollectionRunPendingScreeningCountText: string;
-  sourceCollectionProjectedGraphNodeCount: number | string;
-  sourceCollectionProjectedGraphEdgeCount: number | string;
-  sourceCollectionProjectedFormalKnowledgeCount: number | string;
+  sourceCollectionProjectedGraphNodeCount: number | string | any;
+  sourceCollectionProjectedGraphEdgeCount: number | string | any;
+  sourceCollectionProjectedFormalKnowledgeCount: number | string | any;
   sourceCollectionProjectedStewardPackCount: number;
   sourceCollectionPrecheckCandidateCount: number;
   knowledgePendingReviewCount: number;
@@ -102,7 +102,7 @@ export type BuildSourceCollectionStageModulesInput = {
   selectedTeamSourceQualityPending: boolean;
   sourceCollectionExperimentPlanningRoute: string;
   sourceCollectionStageFocusLabel: string;
-  selectedTeamKnowledgeCollectionWorkRun: TeamWorkflowKnowledgeIngestionWorkRun | null | undefined;
+  selectedTeamKnowledgeCollectionWorkRun: any;
   sourceCollectionStageLaunchActive: (stageId: SourceCollectionStageModuleId) => boolean;
   sourceCollectionStageLaunchSummary: (stageId: SourceCollectionStageModuleId) => string;
   sourceCollectionStageUserSummary: (
@@ -310,7 +310,7 @@ const sourceCollectionStageModules: SourceCollectionStageModule[] = [
       ? sourceCollectionStageLaunchSummary("relations")
       : sourceCollectionRelationsDisplayLoading
       ? (lang === "zh" ? "正在读取候选和关系数据" : "Loading candidates and relations")
-      : sourceCollectionStageUserSummary(sourceCollectionGraphProjection, lang) || (sourceCollectionProjectedGraphNodeCount > 0
+      : sourceCollectionStageUserSummary(sourceCollectionGraphProjection, lang) || (Number(sourceCollectionProjectedGraphNodeCount) > 0
       ? (lang === "zh" ? "资料关系已整理" : "Source relations are ready")
       : sourceCollectionDisplayedCandidateCount > 0
         ? (lang === "zh" ? "可由 Agent 整理资料关系" : "Agent can map source relationships")
@@ -319,7 +319,7 @@ const sourceCollectionStageModules: SourceCollectionStageModule[] = [
       ? sourceCollectionProjectedCandidateCountLabel
       : (lang === "zh" ? `${sourceCollectionProjectedCandidateCountText} 条候选资料` : `${sourceCollectionProjectedCandidateCountText} candidate sources`),
     outputLabel: lang === "zh" ? `${sourceCollectionProjectedGraphNodeCount} 个节点 / ${sourceCollectionProjectedGraphEdgeCount} 条关系` : `${sourceCollectionProjectedGraphNodeCount} nodes / ${sourceCollectionProjectedGraphEdgeCount} edges`,
-    nextLabel: sourceCollectionProjectedGraphNodeCount > 0
+    nextLabel: Number(sourceCollectionProjectedGraphNodeCount) > 0
       ? (lang === "zh" ? "进入资料入库" : "Move to ingestion")
       : (lang === "zh" ? "生成资料关系" : "Build source relations"),
     state: sourceCollectionStageDisplayState("relations", sourceCollectionRelationsDisplayState),
@@ -341,7 +341,7 @@ const sourceCollectionStageModules: SourceCollectionStageModule[] = [
       ? sourceCollectionStageLaunchSummary("ingestion")
       : sourceCollectionIngestionDisplayLoading
       ? (lang === "zh" ? "正在读取候选和入库数据" : "Loading candidates and ingestion data")
-      : sourceCollectionStageUserSummary(sourceCollectionMemoryProjection, lang) || (sourceCollectionProjectedFormalKnowledgeCount > 0
+      : sourceCollectionStageUserSummary(sourceCollectionMemoryProjection, lang) || (Number(sourceCollectionProjectedFormalKnowledgeCount) > 0
       ? (lang === "zh" ? "已进入团队知识库" : "Synced into Team Knowledge")
       : sourceCollectionProjectedStewardPackCount > 0
         ? (lang === "zh" ? "已生成入库待审包" : "Ingestion review pack ready")
@@ -404,7 +404,7 @@ export function buildSourceCollectionBoardChrome(input: {
 }
 
 export function buildSourceCollectionCompletionFlowNodes(input: {
-  selectedTeamKnowledgeCollectionWorkRun: TeamWorkflowKnowledgeIngestionWorkRun | null | undefined;
+  selectedTeamKnowledgeCollectionWorkRun: TeamWorkflowKnowledgeIngestionWorkRun | null | undefined | any;
   sourceCollectionStageModules: SourceCollectionStageModule[];
 }): SourceCollectionCompletionFlowNode[] {
   const flow = input.selectedTeamKnowledgeCollectionWorkRun?.flowVisualization ?? null;

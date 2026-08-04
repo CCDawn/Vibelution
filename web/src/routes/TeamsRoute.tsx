@@ -1864,8 +1864,8 @@ export function TeamsRoute({
         artifacts={selectedSourceCollectionStorageArtifacts}
         runId={selectedSourceCollectionRunEffectiveId}
         pending={selectedSourceCollectionStorageOpenPending}
-        openedPath={selectedSourceCollectionStorageOpenResult?.openedPath ?? ""}
-        errorMessage={selectedSourceCollectionStorageOpenError?.message ?? ""}
+        openedPath={(selectedSourceCollectionStorageOpenResult as any)?.openedPath ?? ""}
+        errorMessage={(selectedSourceCollectionStorageOpenError as any)?.message ?? ""}
         onOpenTarget={(target) => openSourceCollectionStorageTarget(target)}
       />
     );
@@ -2972,14 +2972,14 @@ export function TeamsRoute({
     selectedTeamStartAiSearchPending,
     selectedTeamStartAiSearchError,
     selectedTeamStartAiSearchResult,
-    loadingText,
-    dataSyncText,
-    loadingSummary,
-    actionLoadingReason,
-    actionErrorReason,
-    actionNoRunReason,
-    actionNoInputReason,
-    actionBusyReason,
+    sourceCollectionLoadingText,
+    sourceCollectionDataSyncText,
+    sourceCollectionLoadingSummary,
+    sourceCollectionActionLoadingReason,
+    sourceCollectionActionErrorReason,
+    sourceCollectionActionNoRunReason,
+    sourceCollectionActionNoInputReason,
+    sourceCollectionActionBusyReason,
     selectedTeamBuildCandidateGraphPending,
     selectedTeamBuildCandidateGraphError,
     selectedTeamKnowledgePrecheckPending,
@@ -3031,6 +3031,11 @@ export function TeamsRoute({
     sourceCollectionRunStatusQuery,
     sourceCollectionFindingDetailsVisible,
     sourceCollectionRuns,
+    sourceCollectionRunsQuery,
+    sourceCollectionWorkspaceSelected,
+    teamWorkflowSourceQualityEnabled,
+    teamWorkflowGraphEnabled,
+    teamWorkflowKnowledgeIngestionEnabled,
     selectedSourceCollectionRun,
     selectedSourceCollectionRunEffectiveId,
     sourceCollectionDraft,
@@ -3096,6 +3101,13 @@ export function TeamsRoute({
     sourceCollectionRelationMapperAgentId,
     sourceCollectionExtractorAgentId,
     sourceCollectionOwnerAgentId,
+    sourceCollectionIngestorAgentId,
+    sourceCollectionStandalone,
+    sourceCollectionStageWritebackSyncActive,
+    sourceCollectionPendingStageTaskIds,
+    selectResearchWorkspaceView,
+    launchResearchStage,
+    styles,
   });
 
   const sourceCollectionStageModules = buildSourceCollectionStageModules({
@@ -3160,7 +3172,7 @@ export function TeamsRoute({
     selectedTeamSourceQualityPending,
     sourceCollectionExperimentPlanningRoute,
     sourceCollectionStageFocusLabel,
-    selectedTeamKnowledgeCollectionWorkRun,
+    selectedTeamKnowledgeCollectionWorkRun: selectedTeamKnowledgeCollectionWorkRun as any,
     sourceCollectionStageLaunchActive,
     sourceCollectionStageLaunchSummary,
     sourceCollectionStageUserSummary,
@@ -3182,7 +3194,7 @@ export function TeamsRoute({
   });
   const sourceCollectionCompletionFlow = selectedTeamKnowledgeCollectionWorkRun?.flowVisualization ?? null;
   const sourceCollectionCompletionFlowNodes = buildSourceCollectionCompletionFlowNodes({
-    selectedTeamKnowledgeCollectionWorkRun,
+    selectedTeamKnowledgeCollectionWorkRun: selectedTeamKnowledgeCollectionWorkRun as any,
     sourceCollectionStageModules,
   });
   const sourceCollectionStandaloneStageModules = buildSourceCollectionStandaloneStageModules({
@@ -3463,10 +3475,11 @@ export function TeamsRoute({
       value: `${sourceCollectionPromptCacheStatusLabel(sourceCollectionPromptCacheStatus, lang)}${sourceCollectionPromptCacheMode ? ` · ${sourceCollectionPromptCacheMode}` : ""}`,
     },
   ];
-  const sourceCollectionOverviewPlan: TeamSourceCollectionOverviewPlan | null = selectedTeamStartSourceCollectionResult ? {
-    planId: selectedTeamStartSourceCollectionResult.searchPlan.planId,
-    seeds: selectedTeamStartSourceCollectionResult.searchPlan.querySeeds.join(" / "),
-    promptCache: `${sourceCollectionPromptCacheStatusLabel(selectedTeamStartSourceCollectionResult.promptCachePolicy.gate.status, lang)} · ${selectedTeamStartSourceCollectionResult.promptCachePolicy.promptCacheMode}`,
+  const sourceCollectionStartResult = selectedTeamStartSourceCollectionResult as any;
+  const sourceCollectionOverviewPlan: TeamSourceCollectionOverviewPlan | null = sourceCollectionStartResult ? {
+    planId: sourceCollectionStartResult.searchPlan.planId,
+    seeds: sourceCollectionStartResult.searchPlan.querySeeds.join(" / "),
+    promptCache: `${sourceCollectionPromptCacheStatusLabel(sourceCollectionStartResult.promptCachePolicy.gate.status, lang)} · ${sourceCollectionStartResult.promptCachePolicy.promptCacheMode}`,
     boundary: lang === "zh" ? "不触发外部搜索，不写正式知识/RAG/图谱" : "No external search, formal Knowledge/RAG/Graph writes off",
   } : null;
   const sourceCollectionOverviewAssignmentEmptyMessage = sourceCollectionAssignmentsQuery.isPending
@@ -3481,9 +3494,10 @@ export function TeamsRoute({
     selectedTeamStartSourceCollectionError?.message,
     selectedTeamRecordSourceCollectionOutputError?.message,
   ].filter((message): message is string => Boolean(message));
-  const sourceCollectionOverviewResult: TeamSourceCollectionOverviewResult | null = selectedTeamRecordSourceCollectionOutputResult ? {
+  const sourceCollectionOutputResult = selectedTeamRecordSourceCollectionOutputResult as any;
+  const sourceCollectionOverviewResult: TeamSourceCollectionOverviewResult | null = sourceCollectionOutputResult ? {
     title: lang === "zh" ? "已回写" : "Written",
-    detail: `${selectedTeamRecordSourceCollectionOutputResult.output.createdRecords.length} DataRecord / ${selectedTeamRecordSourceCollectionOutputResult.imported.length} candidate`,
+    detail: `${sourceCollectionOutputResult.output.createdRecords.length} DataRecord / ${sourceCollectionOutputResult.imported.length} candidate`,
   } : null;
   const selectedTeamContextTitle = selectedTeam
     ? [
