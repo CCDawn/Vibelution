@@ -3,7 +3,7 @@
  */
 import type { MouseEvent as ReactMouseEvent } from "react";
 
-import { TeamSourceCollectionPagination } from "../TeamSourceCollectionPagination";
+import { TeamSourceCollectionPagination } from "../TeamSourceCollectionResultControls";
 import { SOURCE_COLLECTION_RESULT_PAGE_SIZE } from "./source-collection/presentationModel";
 import { resolveSourceCollectionPaginationView } from "./source-collection/injectModel";
 import type { SourceCollectionStageModuleId } from "./source-collection/stageProjection";
@@ -41,7 +41,7 @@ export function TeamSourceCollectionPaginationInject({
       total={view.total}
       page={view.page}
       pageSize={view.pageSize}
-      onPageChange={(nextPage) => onPageChange(stageId, nextPage)}
+      onPageChange={(nextPage: number) => onPageChange(stageId, nextPage)}
       onContain={onContain}
     />
   );

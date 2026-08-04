@@ -188,7 +188,7 @@ export function TeamResearchWorkflowStageModules({
           errorMessages={graph.errorMessages}
           actionLabel={graph.actionLabel}
           actionDisabled={graph.actionDisabled}
-          actionTitle={graph.actionTitle}
+          actionTitle={graph.actionTitle ?? ""}
           stateLabel={(value) => workflowStateLabel(value, lang)}
           onAction={graph.onAction}
         />

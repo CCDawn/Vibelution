@@ -36,6 +36,7 @@ import {
   type ResearchStageWorkspaceView,
 } from "./teams/researchWorkspaceModel";
 import type {
+  ResearchStagePhaseStatus,
   ResearchStageType,
 } from "./teams/source-collection/stageProjection";
 import {

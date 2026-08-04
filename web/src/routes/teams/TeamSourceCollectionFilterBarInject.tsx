@@ -1,8 +1,10 @@
 /**
  * SC inject: filter bar options + selection wiring.
  */
-import { TeamSourceCollectionFilterBar } from "../TeamSourceCollectionFilterBar";
-import type { TeamSourceCollectionFilterOption } from "../TeamSourceCollectionResultControls";
+import {
+  TeamSourceCollectionFilterBar,
+  type TeamSourceCollectionFilterOption,
+} from "../TeamSourceCollectionResultControls";
 import { buildSourceCollectionFilterBarOptions } from "./source-collection/injectModel";
 import {
   SOURCE_COLLECTION_SOURCE_FILTERS,
