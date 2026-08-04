@@ -1878,11 +1878,14 @@ export function ToolsRoute() {
               </div>
             </div>
             {toolPolicyPreview ? (
-              <p className={styles.emptyState}>
+              <VStateSurface
+                tone="info"
+                title={lang === "zh" ? "服务端生效预览" : "Server effective preview"}
+              >
                 {lang === "zh"
-                  ? `服务端生效预览：可见 ${toolPolicyPreview.preview.visibleTools.length}，可执行 ${toolPolicyPreview.preview.executableTools.length}，不可用 ${toolPolicyPreview.preview.unavailableTools.length}，需审批 ${toolPolicyPreview.preview.approvalRequiredTools.length}；影响 ${toolPolicyPreview.impact.affectedAgentCount} 个 Agent。`
-                  : `Server preview: ${toolPolicyPreview.preview.visibleTools.length} visible, ${toolPolicyPreview.preview.executableTools.length} executable, ${toolPolicyPreview.preview.unavailableTools.length} unavailable, ${toolPolicyPreview.preview.approvalRequiredTools.length} approval-required; affects ${toolPolicyPreview.impact.affectedAgentCount} Agents.`}
-              </p>
+                  ? `可见 ${toolPolicyPreview.preview.visibleTools.length}，可执行 ${toolPolicyPreview.preview.executableTools.length}，不可用 ${toolPolicyPreview.preview.unavailableTools.length}，需审批 ${toolPolicyPreview.preview.approvalRequiredTools.length}；影响 ${toolPolicyPreview.impact.affectedAgentCount} 个 Agent。`
+                  : `${toolPolicyPreview.preview.visibleTools.length} visible, ${toolPolicyPreview.preview.executableTools.length} executable, ${toolPolicyPreview.preview.unavailableTools.length} unavailable, ${toolPolicyPreview.preview.approvalRequiredTools.length} approval-required; affects ${toolPolicyPreview.impact.affectedAgentCount} Agents.`}
+              </VStateSurface>
             ) : null}
             <section className={styles.policyDraftPanel}>
               <div className={styles.policyDraftSummary}>
@@ -2023,7 +2026,10 @@ export function ToolsRoute() {
                   ))}
                 </div>
               ) : (
-                <p className={styles.emptyState}>{lang === "zh" ? "当前没有可分配工具。" : "No assignable tools."}</p>
+                <VStateSurface
+                  tone="empty"
+                  title={lang === "zh" ? "当前没有可分配工具" : "No assignable tools"}
+                />
               )}
               <div className={styles.detailActions}>
                 <VButton

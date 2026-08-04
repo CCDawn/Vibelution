@@ -510,7 +510,10 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
                       );
                     })
                   ) : (
-                    <p className={styles.groupComposerEmpty}>{lang === "zh" ? "暂无可加入群聊的持久助手。" : "No persistent agents are available."}</p>
+                    <VStateSurface
+                      tone="empty"
+                      title={lang === "zh" ? "暂无可加入群聊的持久助手" : "No persistent agents are available"}
+                    />
                   )}
                 </div>
                 <VButton

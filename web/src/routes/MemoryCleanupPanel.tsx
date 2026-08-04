@@ -207,7 +207,7 @@ export function MemoryCleanupPanel({
               </div>
             </>
           ) : (
-            <div className={styles.emptyState}>{copy.cleanupSelectTargets}</div>
+            <VStateSurface tone="empty" title={copy.cleanupSelectTargets} />
           )}
         </section>
 

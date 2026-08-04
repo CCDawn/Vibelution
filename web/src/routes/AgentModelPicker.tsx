@@ -3,7 +3,7 @@ import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom";
 
 import type { AgentLlmSlotDefinition, AgentModelChoice } from "../api/types";
-import { VButton, VConfirmDialog, VContextualHint, VNativeInput } from "../components/vui";
+import { VButton, VConfirmDialog, VContextualHint, VNativeInput, VStateSurface } from "../components/vui";
 import styles from "./AgentModelPicker.styles";
 
 export type AgentModelCandidateGroup = {
@@ -311,7 +311,7 @@ export function AgentModelPicker({
               })}
             </section>
           ))}
-          {!groups.length ? <p className={styles.empty}>没有匹配的模型。</p> : null}
+          {!groups.length ? <VStateSurface tone="empty" title="没有匹配的模型" /> : null}
         </div>
       </div>
     </div>
