@@ -15,6 +15,7 @@ import {
 } from "../components/vui";
 import type { Language, TranslationKey } from "../i18n/dictionary";
 import {
+  compactCaseObject,
   compactTimestamp,
   displaySupervisedTechnicalText,
   proposalDisplaySourceRun,
