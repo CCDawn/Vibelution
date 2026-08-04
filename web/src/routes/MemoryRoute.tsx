@@ -59,6 +59,7 @@ import { VButton, VDenseOpsPage, VRouteLinkButton, VSplitWorkspace, VStateSurfac
 import { useShellI18n } from "../i18n/useShellI18n";
 import { useMemoryItemMutations } from "./memory/useMemoryItemMutations";
 import { useMemoryKnowledgeMutations } from "./memory/useMemoryKnowledgeMutations";
+import { useMemoryCoreQueries, useMemoryKnowledgeQueries } from "./memory/useMemoryWorkbenchQueries";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
 import { MemoryDetailPanel } from "./MemoryDetailPanel";
 import { MemoryEffectivePanel } from "./MemoryEffectivePanel";
@@ -2258,103 +2259,29 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   const [memoryProposalStatusFilter, setMemoryProposalStatusFilter] = useState<MemoryProposalStatusFilter>("pending");
   const [memoryProposalResolutionNotes, setMemoryProposalResolutionNotes] = useState<Record<string, string>>({});
 
-  const overviewQuery = useQuery({
-    queryKey: queryKeys.memoryOverview(),
-    queryFn: ({ signal }) => fetchJson<MemoryOverview>("/api/memory/overview?includeContent=false", { signal }),
-    refetchInterval: resolvePollingInterval(pageVisible, 30_000),
-    refetchIntervalInBackground: false,
-  });
-  const projectMemoryUpdatesQuery = useQuery({
-    queryKey: queryKeys.agentProjectMemoryUpdates(memoryProposalStatusFilter, "", 100),
-    queryFn: ({ signal }) => fetchJson<AgentProjectMemoryUpdateProposal[]>(agentProjectMemoryUpdatesEndpoint(memoryProposalStatusFilter, 100), { signal }),
-    refetchInterval: resolvePollingInterval(pageVisible, 45_000),
-    refetchIntervalInBackground: false,
-    enabled: forcedView === "overview",
-  });
-  const memoryUsageContractQuery = useQuery({
-    queryKey: queryKeys.memoryUsageContract(),
-    queryFn: ({ signal }) => fetchJson<MemoryUsageContractPayload>("/api/memory/usage-contract", { signal }),
-    refetchInterval: resolvePollingInterval(pageVisible, 60_000),
-    refetchIntervalInBackground: false,
-    enabled: forcedView === "knowledge",
-  });
-
-  const agentsQuery = useQuery({
-    queryKey: queryKeys.agents(),
-    queryFn: ({ signal }) => fetchJson<AgentInstance[]>("/api/agents?detail=summary", { signal }),
-    enabled: forcedView === "agents" || forcedView === "knowledge" || forcedView === "graph" || forcedView === "cleanup",
-    refetchInterval: resolvePollingInterval(pageVisible, 60_000),
-    refetchIntervalInBackground: false,
+  const {
+    overviewQuery,
+    projectMemoryUpdatesQuery,
+    memoryUsageContractQuery,
+    agentsQuery,
+    agentMemoryInventoryQuery,
+    agentMemoryDetailQuery,
+    knowledgeDashboardSnapshotQuery,
+    memoryKnowledgeGraphQuery,
+    memoryKnowledgeGraphNodeDetailQuery,
+    knowledgeActorAgents,
+    agentMemoryInventoryAgents,
+    selectedAgentMemoryAgentId,
+    fallbackKnowledgeActorAgentId,
+  } = useMemoryCoreQueries({
+    pageVisible,
+    forcedView,
+    memoryProposalStatusFilter,
+    requestedKnowledgeActorAgentId,
+    requestedTeamId,
+    selectedGraphNodeId,
   });
 
-  const agentMemoryInventoryQuery = useQuery({
-    queryKey: ["memory", "agents", "inventory"],
-    queryFn: ({ signal }) => fetchJson<AgentMemoryInventoryPayload>("/api/memory/agents", { signal }),
-    enabled: forcedView === "agents",
-    refetchInterval: resolvePollingInterval(pageVisible, 45_000),
-    refetchIntervalInBackground: false,
-  });
-
-  const knowledgeActorAgents = agentsQuery.data ?? [];
-  const fallbackKnowledgeActorAgentId = requestedKnowledgeActorAgentId || knowledgeActorAgents.find((agent) => agent.status !== "archived")?.agentId || "";
-
-  const agentMemoryInventoryAgents = agentMemoryInventoryQuery.data?.agents ?? [];
-  const requestedAgentMemoryAgent = requestedKnowledgeActorAgentId
-    ? agentMemoryInventoryAgents.find((agent) => agent.agentId === requestedKnowledgeActorAgentId) ?? null
-    : null;
-  const selectedAgentMemoryAgentId =
-    requestedAgentMemoryAgent?.agentId
-    || agentMemoryInventoryAgents.find((agent) => agent.hasPrivateMemory)?.agentId
-    || agentMemoryInventoryAgents.find((agent) => agent.status !== "archived")?.agentId
-    || agentMemoryInventoryAgents[0]?.agentId
-    || "";
-  const agentMemoryDetailQuery = useQuery({
-    queryKey: ["memory", "agents", selectedAgentMemoryAgentId, "detail"],
-    queryFn: ({ signal }) => fetchJson<AgentMemoryInventoryPayload>(
-      `/api/memory/agents/${encodeURIComponent(selectedAgentMemoryAgentId)}?actorAgentId=${encodeURIComponent(selectedAgentMemoryAgentId)}`,
-      { signal },
-    ),
-    enabled: forcedView === "agents" && Boolean(selectedAgentMemoryAgentId),
-    refetchInterval: false,
-  });
-
-  const knowledgeDashboardSnapshotQuery = useQuery({
-    queryKey: queryKeys.knowledgeDashboardSnapshot(fallbackKnowledgeActorAgentId),
-    queryFn: ({ signal }) => {
-      const params = appendAgentParam(new URLSearchParams({
-        recommendationLimit: "6",
-        workbenchLimit: "8",
-        planLimit: "8",
-      }), fallbackKnowledgeActorAgentId);
-      return fetchJson<KnowledgeDashboardSnapshotPayload>(`/api/knowledge/dashboard-snapshot?${params.toString()}`, { signal });
-    },
-    refetchInterval: resolvePollingInterval(pageVisible, 45_000),
-    refetchIntervalInBackground: false,
-    enabled: (forcedView === "knowledge" || forcedView === "cleanup") && Boolean(fallbackKnowledgeActorAgentId),
-  });
-
-  const memoryKnowledgeGraphQuery = useQuery({
-    queryKey: queryKeys.memoryKnowledgeGraph(fallbackKnowledgeActorAgentId, "officialResearchGraph", requestedTeamId),
-    queryFn: ({ signal }) => {
-      const params = appendAgentParam(new URLSearchParams({ include: "officialResearchGraph" }), fallbackKnowledgeActorAgentId);
-      if (requestedTeamId) {
-        params.set("teamId", requestedTeamId);
-      }
-      return fetchJson<MemoryKnowledgeGraphPayload>(`/api/memory/knowledge-graph?${params.toString()}`, { signal });
-    },
-    refetchInterval: resolvePollingInterval(pageVisible, 60_000),
-    refetchIntervalInBackground: false,
-    enabled: forcedView === "graph" && Boolean(fallbackKnowledgeActorAgentId),
-  });
-  const memoryKnowledgeGraphNodeDetailQuery = useQuery({
-    queryKey: queryKeys.memoryKnowledgeGraphNodeDetail(selectedGraphNodeId, fallbackKnowledgeActorAgentId),
-    queryFn: ({ signal }) => {
-      const params = appendAgentParam(new URLSearchParams({ nodeId: selectedGraphNodeId }), fallbackKnowledgeActorAgentId);
-      return fetchJson<MemoryKnowledgeGraphNodeDetailPayload>(`/api/memory/knowledge-graph/node-detail?${params.toString()}`, { signal });
-    },
-    refetchInterval: false,
-    enabled: forcedView === "graph" && Boolean(selectedGraphNodeId) && Boolean(fallbackKnowledgeActorAgentId),
-  });
   const {
     memoryMutation,
     deleteMemoryMutation,
@@ -2455,6 +2382,31 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     knowledgeBases.find((base) => knowledgeBaseRequestId(base) === activeKnowledgeBaseId) ?? knowledgeBases[0] ?? null;
   const activeKnowledgeBaseForItems = knowledgeBaseRequestId(activeKnowledgeBase);
   const activeKnowledgeActorAgentId = actorAgentIdForKnowledgeContext(activeKnowledgeBase, knowledgeActorAgents, fallbackKnowledgeActorAgentId);
+  const {
+    knowledgeItemsQuery,
+    knowledgeSearchQuery,
+    knowledgeRagHealthQuery,
+    knowledgeRagRetrieveQuery,
+    ratingSuggestionsQuery,
+    permissionAuditQuery,
+    governanceTasksQuery,
+    ingestionAdaptersQuery,
+    knowledgeTraceQuery,
+    sourceInboxQuery,
+    centralSourcesQuery,
+  } = useMemoryKnowledgeQueries({
+    pageVisible,
+    forcedView,
+    activeKnowledgeBaseForItems,
+    activeKnowledgeActorAgentId,
+    knowledgeSearchDraft,
+    ratingSuggestionStatus,
+    ratingSuggestionPriority,
+    traceTargetId,
+    sourceOwnerType,
+    sourceOwnerId,
+    sourceInboxStatus,
+  });
   const cleanupTargetOptions = useMemo<CleanupTargetOption[]>(() => {
     const options: CleanupTargetOption[] = [
       {
@@ -2576,165 +2528,6 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   const activeSourceOwnerType = sourceOwnerType;
   const activeSourceOwnerId = sourceOwnerId.trim();
   const activeSourceInboxStatus = sourceInboxStatus === "all" ? "" : sourceInboxStatus;
-  const knowledgeItemsQuery = useQuery({
-    queryKey: queryKeys.knowledgeItems(activeKnowledgeBaseForItems, activeKnowledgeActorAgentId),
-    queryFn: ({ signal }) => {
-      const params = appendAgentParam(new URLSearchParams(), activeKnowledgeActorAgentId);
-      return fetchJson<KnowledgeItemsPayload>(`/api/knowledge-bases/${encodeURIComponent(activeKnowledgeBaseForItems)}/items?${params.toString()}`, { signal });
-    },
-    enabled: forcedView === "knowledge" && Boolean(activeKnowledgeBaseForItems) && Boolean(activeKnowledgeActorAgentId),
-    refetchInterval: resolvePollingInterval(pageVisible, 45_000),
-    refetchIntervalInBackground: false,
-  });
-  const knowledgeItems = knowledgeItemsQuery.data?.items ?? [];
-  const knowledgeSearchQuery = useQuery({
-    queryKey: queryKeys.knowledgeSearch(
-      activeKnowledgeBaseForItems,
-      activeKnowledgeActorAgentId,
-      knowledgeSearchDraft.query,
-      knowledgeSearchDraft.tags,
-      knowledgeSearchDraft.searchMode,
-    ),
-    queryFn: ({ signal }) => {
-      const params = new URLSearchParams();
-      params.set("agentId", activeKnowledgeActorAgentId);
-      if (activeKnowledgeBaseForItems) {
-        params.set("knowledgeBaseId", activeKnowledgeBaseForItems);
-      }
-      if (knowledgeSearchDraft.query.trim()) {
-        params.set("query", knowledgeSearchDraft.query.trim());
-      }
-      commaList(knowledgeSearchDraft.tags).forEach((tag) => params.append("tags", tag));
-      params.set("searchMode", knowledgeSearchDraft.searchMode);
-      params.set("limit", "12");
-      return fetchJson<KnowledgeSearchPayload>(`/api/knowledge/search?${params.toString()}`, { signal });
-    },
-    enabled: forcedView === "knowledge" && Boolean(activeKnowledgeBaseForItems) && Boolean(activeKnowledgeActorAgentId),
-    refetchInterval: false,
-  });
-  const knowledgeRagHealthQuery = useQuery({
-    queryKey: queryKeys.knowledgeRagHealth(activeKnowledgeActorAgentId),
-    queryFn: ({ signal }) => {
-      const params = appendAgentParam(new URLSearchParams(), activeKnowledgeActorAgentId);
-      return fetchJson<KnowledgeRagHealthPayload>(`/api/knowledge/rag/health?${params.toString()}`, { signal });
-    },
-    enabled: forcedView === "knowledge" && Boolean(activeKnowledgeActorAgentId),
-    refetchInterval: resolvePollingInterval(pageVisible, 60_000),
-    refetchIntervalInBackground: false,
-  });
-  const knowledgeRagRetrieveQuery = useQuery({
-    queryKey: queryKeys.knowledgeRagRetrieve(
-      activeKnowledgeBaseForItems,
-      activeKnowledgeActorAgentId,
-      knowledgeSearchDraft.query,
-      knowledgeSearchDraft.tags,
-      knowledgeSearchDraft.searchMode,
-      knowledgeSearchDraft.ragTopK,
-      knowledgeSearchDraft.ragMaxContextChars,
-    ),
-    queryFn: ({ signal }) => {
-      const params = new URLSearchParams();
-      params.set("agentId", activeKnowledgeActorAgentId);
-      if (activeKnowledgeBaseForItems) {
-        params.set("knowledgeBaseId", activeKnowledgeBaseForItems);
-      }
-      if (knowledgeSearchDraft.query.trim()) {
-        params.set("query", knowledgeSearchDraft.query.trim());
-      }
-      commaList(knowledgeSearchDraft.tags).forEach((tag) => params.append("tags", tag));
-      params.set("retrievalMode", knowledgeSearchDraft.searchMode);
-      params.set("provider", "local");
-      params.set("topK", String(knowledgeSearchDraft.ragTopK));
-      params.set("maxContextChars", String(knowledgeSearchDraft.ragMaxContextChars));
-      return fetchJson<KnowledgeRagRetrievalPayload>(`/api/knowledge/rag/retrieve?${params.toString()}`, { signal });
-    },
-    enabled: forcedView === "knowledge" && Boolean(activeKnowledgeBaseForItems) && Boolean(activeKnowledgeActorAgentId),
-    refetchInterval: false,
-  });
-  const ratingSuggestionsQuery = useQuery({
-    queryKey: queryKeys.knowledgeRatingSuggestions(
-      activeKnowledgeBaseForItems,
-      activeKnowledgeActorAgentId,
-      ratingSuggestionStatus,
-      ratingSuggestionPriority,
-    ),
-    queryFn: ({ signal }) => {
-      const params = appendAgentParam(new URLSearchParams(), activeKnowledgeActorAgentId);
-      if (ratingSuggestionStatus !== "all") {
-        params.set("status", ratingSuggestionStatus);
-      }
-      return fetchJson<KnowledgeRatingSuggestionsPayload>(
-        `/api/knowledge-bases/${encodeURIComponent(activeKnowledgeBaseForItems)}/rating-suggestions?${params.toString()}`,
-        { signal },
-      );
-    },
-    enabled: forcedView === "knowledge" && Boolean(activeKnowledgeBaseForItems) && Boolean(activeKnowledgeActorAgentId),
-    refetchInterval: resolvePollingInterval(pageVisible, 45_000),
-    refetchIntervalInBackground: false,
-  });
-  const permissionAuditQuery = useQuery({
-    queryKey: queryKeys.knowledgePermissionAudit(activeKnowledgeActorAgentId),
-    queryFn: ({ signal }) => fetchJson<KnowledgePermissionAuditPayload>(`/api/knowledge/permissions/audit?agentId=${encodeURIComponent(activeKnowledgeActorAgentId)}`, { signal }),
-    enabled: forcedView === "knowledge" && Boolean(activeKnowledgeActorAgentId),
-    refetchInterval: resolvePollingInterval(pageVisible, 60_000),
-    refetchIntervalInBackground: false,
-  });
-  const governanceTasksQuery = useQuery({
-    queryKey: queryKeys.knowledgeGovernanceTasks(activeKnowledgeActorAgentId, "open"),
-    queryFn: ({ signal }) => fetchJson<KnowledgeGovernanceTasksPayload>(`/api/knowledge/governance/tasks?agentId=${encodeURIComponent(activeKnowledgeActorAgentId)}&status=open`, { signal }),
-    enabled: forcedView === "knowledge" && Boolean(activeKnowledgeActorAgentId),
-    refetchInterval: resolvePollingInterval(pageVisible, 45_000),
-    refetchIntervalInBackground: false,
-  });
-  const ingestionAdaptersQuery = useQuery({
-    queryKey: queryKeys.knowledgeIngestionAdapters(),
-    queryFn: ({ signal }) => fetchJson<KnowledgeIngestionAdaptersPayload>("/api/knowledge/ingestion-adapters", { signal }),
-    enabled: forcedView === "knowledge",
-    refetchInterval: false,
-  });
-  const knowledgeTraceQuery = useQuery({
-    queryKey: queryKeys.knowledgeTrace(activeKnowledgeBaseForItems, activeKnowledgeActorAgentId, traceTargetId),
-    queryFn: ({ signal }) => {
-      const params = appendAgentParam(new URLSearchParams(), activeKnowledgeActorAgentId);
-      return fetchJson<KnowledgeTracePayload>(
-        `/api/knowledge-bases/${encodeURIComponent(activeKnowledgeBaseForItems)}/trace/${encodeURIComponent(traceTargetId)}?${params.toString()}`,
-        { signal },
-      );
-    },
-    enabled: forcedView === "knowledge" && Boolean(activeKnowledgeBaseForItems) && Boolean(activeKnowledgeActorAgentId) && Boolean(traceTargetId),
-    refetchInterval: false,
-  });
-  const sourceInboxQuery = useQuery({
-    queryKey: queryKeys.knowledgeSourceInbox(activeSourceOwnerType, activeSourceOwnerId, activeKnowledgeActorAgentId, activeSourceInboxStatus),
-    queryFn: ({ signal }) => {
-      const params = new URLSearchParams({
-        ownerType: activeSourceOwnerType,
-        ownerId: activeSourceOwnerId,
-        agentId: activeKnowledgeActorAgentId,
-      });
-      if (activeSourceInboxStatus) {
-        params.set("status", activeSourceInboxStatus);
-      }
-      return fetchJson<KnowledgeSourceInboxPayload>(`/api/knowledge/sources/inbox?${params.toString()}`, { signal });
-    },
-    enabled: forcedView === "knowledge" && Boolean(activeSourceOwnerId) && Boolean(activeKnowledgeActorAgentId),
-    refetchInterval: resolvePollingInterval(pageVisible, 45_000),
-    refetchIntervalInBackground: false,
-  });
-  const centralSourcesQuery = useQuery({
-    queryKey: queryKeys.knowledgeCentralSources(activeKnowledgeActorAgentId, activeSourceOwnerType, activeSourceOwnerId),
-    queryFn: ({ signal }) => {
-      const params = new URLSearchParams({
-        agentId: activeKnowledgeActorAgentId,
-        ownerType: activeSourceOwnerType,
-        ownerId: activeSourceOwnerId,
-      });
-      return fetchJson<KnowledgeCentralSourceRegistryPayload>(`/api/knowledge/sources/registry?${params.toString()}`, { signal });
-    },
-    enabled: forcedView === "knowledge" && Boolean(activeSourceOwnerId) && Boolean(activeKnowledgeActorAgentId),
-    refetchInterval: resolvePollingInterval(pageVisible, 60_000),
-    refetchIntervalInBackground: false,
-  });
   const knowledgeSearchResults = knowledgeSearchQuery.data?.results ?? [];
   const knowledgeRagContexts = knowledgeRagRetrieveQuery.data?.contexts ?? [];
   const ownerInboxSources = sourceInboxQuery.data?.sources ?? [];
