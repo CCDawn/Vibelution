@@ -4,8 +4,10 @@ import routeSourceRaw from "./ConfigRoute.tsx?raw";
 import providerDraftActionsSource from "./config/useConfigProviderDraftActions.ts?raw";
 import configApplyModelSource from "./config/configApplyModel.ts?raw";
 import configProviderActionModelSource from "./config/configProviderActionModel.ts?raw";
+import configMigrationActionsSource from "./config/useConfigMigrationActions.ts?raw";
+import configQuickSetupActionsSource from "./config/useConfigProviderQuickSetupActions.ts?raw";
 /** Route + extracted config write helpers (layout contracts may live in either). */
-const routeSource = `${routeSourceRaw}\n${providerDraftActionsSource}\n${configApplyModelSource}\n${configProviderActionModelSource}`;
+const routeSource = `${routeSourceRaw}\n${providerDraftActionsSource}\n${configApplyModelSource}\n${configProviderActionModelSource}\n${configMigrationActionsSource}\n${configQuickSetupActionsSource}`;
 import draftPanelSource from "./ConfigDraftPanel.tsx?raw";
 import draftPanelStylesSource from "./ConfigDraftPanel.styles.ts?raw";
 import draftPanelStyles from "./ConfigDraftPanel.styles";
@@ -107,7 +109,7 @@ describe("ConfigRoute layout contract", () => {
   it("submits artifact decisions only through a new preview request", () => {
     expect(migrationPanelSource).toContain("onPreview(resolutions)");
     expect(migrationPanelSource).toContain("onPreview([])");
-    expect(routeSource).toContain("artifactResolutions,");
+    expect(routeSource).toContain("artifactResolutions");
     expect(routeSource).toContain("ConfigMigrationPreviewRequest");
     expect(routeSource).toContain("setMigrationPreview(response)");
     expect(routeSource).not.toContain("handleApplyMigration(resolutions");
@@ -156,12 +158,12 @@ describe("ConfigRoute layout contract", () => {
 
   it("keeps formal config apply outside Provider detection orchestration", () => {
     const detectionBody = routeSource.slice(
-      routeSource.indexOf("async function handlePrepareProviderQuickSetup"),
-      routeSource.indexOf("async function handleConfirmProviderQuickSetup"),
+      routeSource.indexOf("const handlePrepareProviderQuickSetup = useCallback"),
+      routeSource.indexOf("const handleConfirmProviderQuickSetup = useCallback"),
     );
     const confirmationBody = routeSource.slice(
-      routeSource.indexOf("async function handleConfirmProviderQuickSetup"),
-      routeSource.indexOf("async function handleUnpinProviderModel"),
+      routeSource.indexOf("const handleConfirmProviderQuickSetup = useCallback"),
+      routeSource.indexOf("return {\n    handlePrepareProviderQuickSetup"),
     );
 
     expect(detectionBody).toContain("handleCreateProvider");
@@ -176,7 +178,7 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("draftOverride?: ConfigApplyDraftOverride");
     expect(routeSource).toContain("buildConfigApplyRequestPayload");
     expect(routeSource).toContain("isConfigBaselineStaleErrorMessage");
-    expect(routeSource).toContain('handleApply("正在应用快速配置…", providerDraftRequestRef.current ?? undefined)');
+    expect(routeSource).toContain('handleApply("正在应用快速配置…", draftOverride)');
     expect(routeSource).toContain("publicConfig: draftOverride.publicConfig");
     expect(routeSource).toContain("draftMeta: draftOverride.draftMeta");
     // Apply must freeze baseConfig+baseHash as an edit baseline pair across draft pin ops.

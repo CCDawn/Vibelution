@@ -38,7 +38,6 @@ import {
   ConfigModelOption,
   ConfigMigrationArtifactResolution,
   ConfigMigrationPreview,
-  ConfigMigrationPreviewRequest,
   ConfigWorkspace,
   HealthDiagnostics,
 } from "../api/types";
@@ -63,7 +62,6 @@ import {
   resolveConfigSectionUiStateOnSelect,
   resolveImageInputCapabilityStatus,
   shouldBlockConfigLeave,
-  shouldResetMigrationPreview,
   selectModelScenarioProviderPresetId,
   type ModelScenarioId,
   uniqueModelLibraryId,
@@ -101,8 +99,9 @@ import {
   isConfigBaselineStaleErrorMessage,
   type ConfigApplyDraftOverride,
 } from "./config/configApplyModel";
-import { classifyProviderQuickSetupErrorKind } from "./config/configProviderActionModel";
 import { useConfigProviderDraftActions } from "./config/useConfigProviderDraftActions";
+import { useConfigProviderQuickSetupActions } from "./config/useConfigProviderQuickSetupActions";
+import { useConfigMigrationActions } from "./config/useConfigMigrationActions";
 import { ConfigOverviewPanel } from "./ConfigOverviewPanel";
 import {
   type ConfigProviderRegistryTab,
@@ -151,8 +150,6 @@ import {
   initialProviderWizardState,
   providerQuickSetupReducer,
   providerWizardReducer,
-  recommendProviderModel,
-  type ProviderQuickSetupErrorKind,
   type ProviderWizardState,
 } from "./configProviderLogic";
 import styles from "./ConfigRoute.styles";
@@ -2647,77 +2644,23 @@ export function ConfigRoute() {
     requestJson,
   });
 
-  function quickSetupErrorKind(error: unknown): ProviderQuickSetupErrorKind {
-    return classifyProviderQuickSetupErrorKind(readableErrorMessage(error));
-  }
-
-  async function handlePrepareProviderQuickSetup(input: { provider: ProviderWizardState; credentialValue: string }) {
-    dispatchProviderQuickSetup({ type: "start_check" });
-    try {
-      let provider = input.provider;
-      if (!provider.providerId) {
-        const template = providerPresetOptions.find((item) => item.provider_preset_id === provider.templateId);
-        const suggestedProviderId = await handleSuggestProviderId(buildProviderWizardDraft(provider, template?.provider));
-        provider = { ...provider, providerId: suggestedProviderId };
-        dispatchProviderQuickSetup({ type: "set_provider", provider });
-        dispatchProviderQuickSetup({ type: "start_check" });
-      }
-      await handleCreateProvider(provider, input.credentialValue);
-      const models = await handleDiscoverProvider(provider.providerId, input.credentialValue);
-      const template = providerPresetOptions.find((item) => item.provider_preset_id === provider.templateId);
-      const defaultModel = asRecord(template?.default_model);
-      const templateDefaultModelRef = getString(defaultModel.model_ref)
-        || getString(defaultModel.modelRef)
-        || (getString(defaultModel.model) ? `${provider.providerId}/${getString(defaultModel.model)}` : "");
-      const recommendation = recommendProviderModel(models, {
-        templateDefaultModelRef,
-        allowedProtocols: provider.allowedProtocols,
-      });
-      dispatchProviderQuickSetup({
-        type: "check_succeeded",
-        models,
-        selectedModelRef: recommendation.modelRef,
-        recommendationReason: recommendation.reason,
-      });
-      setProviderQuickCredential("");
-    } catch (error) {
-      dispatchProviderQuickSetup({
-        type: "check_failed",
-        errorKind: quickSetupErrorKind(error),
-        errorMessage: readableErrorMessage(error).slice(0, 320),
-      });
-    }
-  }
-
-  async function handleConfirmProviderQuickSetup() {
-    const { provider, selectedModelRef, discoveredModels: quickModels } = providerQuickSetupState;
-    const selectedModel = quickModels.find((model) => model.modelRef === selectedModelRef);
-    if (providerQuickSetupState.phase !== "review" || !selectedModel || !selectedModelRef.startsWith(`${provider.providerId}/`)) {
-      return;
-    }
-    dispatchProviderQuickSetup({ type: "start_save" });
-    try {
-      await handlePinProviderModels(provider.providerId, [selectedModel]);
-      const applied = await handleApply("正在应用快速配置…", providerDraftRequestRef.current ?? undefined);
-      if (!applied) {
-        dispatchProviderQuickSetup({
-          type: "save_failed",
-          errorKind: "partial_save",
-          errorMessage: "Provider 草稿已保留，但正式配置尚未应用。请重试确认保存。",
-        });
-        return;
-      }
-      await queryClient.invalidateQueries({ queryKey: queryKeys.configWorkspace() });
-      setProviderQuickCredential("");
-      dispatchProviderQuickSetup({ type: "save_succeeded" });
-    } catch (error) {
-      dispatchProviderQuickSetup({
-        type: "save_failed",
-        errorKind: "partial_save",
-        errorMessage: readableErrorMessage(error).slice(0, 320),
-      });
-    }
-  }
+  const {
+    handlePrepareProviderQuickSetup,
+    handleConfirmProviderQuickSetup,
+  } = useConfigProviderQuickSetupActions({
+    providerQuickSetupState,
+    providerPresetOptions,
+    providerDraftRequestRef,
+    queryClient,
+    dispatchProviderQuickSetup,
+    setProviderQuickCredential,
+    handleSuggestProviderId,
+    handleCreateProvider,
+    handleDiscoverProvider,
+    handlePinProviderModels,
+    handleApply,
+    readableErrorMessage,
+  });
 
   async function handleUnpinProviderModel(modelRef: string) {
     await unpinProviderModel(modelRef, (ref) => {
@@ -2795,58 +2738,22 @@ export function ConfigRoute() {
     await applyProviderRoutePreview(routePreview);
   }
 
-  async function handlePreviewMigration(
-    artifactResolutions: ConfigMigrationArtifactResolution[] = [],
-  ) {
-    setBusyAction("正在生成迁移预览…");
-    try {
-      const payload: ConfigMigrationPreviewRequest = {
-        artifactResolutions,
-      };
-      const response = await requestJson<ConfigMigrationPreview>(
-        "/api/config/migration/llm-v2/preview",
-        payload,
-      );
-      setMigrationPreview(response);
-    } catch (error) {
-      setProviderActionError(readableErrorMessage(error).slice(0, 480));
-      markError(error);
-    } finally {
-      setBusyAction("");
-    }
-  }
-
-  async function handleApplyMigration(previewId: string, previewBaseHash: string) {
-    if (!migrationPreview || migrationPreview.previewId !== previewId || migrationPreview.baseHash !== previewBaseHash) return;
-    const impactedRefs = Object.values(migrationPreview.modelRefMap).slice(0, 8).join("\n");
-    const confirmed = typeof window === "undefined" || window.confirm(
-      `将修改外部 operator config。\nLive references: ${migrationPreview.referenceImpact.liveReferenceCount}\nCanonical model refs:\n${impactedRefs}\n\n确认应用已预览的迁移？`,
-    );
-    if (!confirmed) return;
-    setBusyAction("正在应用迁移…");
-    try {
-      await requestJson<{ migrationId: string; updatedReferenceCount?: number }>(
-        "/api/config/migration/llm-v2/apply",
-        { previewId, baseHash: previewBaseHash },
-      );
-      const refreshed = await workspaceQuery.refetch();
-      if (refreshed.data) {
-        syncWorkspace(refreshed.data, "success");
-      }
-      setMigrationPreview(null);
-      await queryClient.invalidateQueries({ queryKey: queryKeys.configWorkspace() });
-    } catch (error) {
-      if (shouldResetMigrationPreview(error)) {
-        setMigrationPreview(null);
-        setProviderActionError(copy.migrationPreviewExpired);
-      } else {
-        setProviderActionError(readableErrorMessage(error).slice(0, 480));
-      }
-      markError(error);
-    } finally {
-      setBusyAction("");
-    }
-  }
+  const {
+    handlePreviewMigration,
+    handleApplyMigration,
+  } = useConfigMigrationActions({
+    migrationPreview,
+    migrationPreviewExpiredMessage: copy.migrationPreviewExpired,
+    workspaceQuery,
+    queryClient,
+    setBusyAction,
+    setMigrationPreview,
+    setProviderActionError,
+    syncWorkspace,
+    markError,
+    readableErrorMessage,
+    requestJson,
+  });
 
   function resolveDraftForSubmission(): PublicConfigShape {
     return buildConfigApplyPayload({
