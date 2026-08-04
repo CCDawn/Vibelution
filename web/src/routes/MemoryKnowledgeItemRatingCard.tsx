@@ -1,7 +1,7 @@
 import { CheckCircle2 } from "lucide-react";
 
 import type { KnowledgeItem } from "../api/types";
-import { VButton, VNativeInput, VNativeSelect } from "../components/vui";
+import { VButton, VNativeInput, VStringSelect } from "../components/vui";
 import styles from "./MemoryKnowledgeItemRatingCard.styles";
 
 export type MemoryKnowledgeRatingDraft = {
@@ -64,23 +64,23 @@ export function MemoryKnowledgeItemRatingCard({
         />
       </label>
       <div className={styles.ratingControls}>
-        <VNativeSelect
+        <VStringSelect
+          ariaLabel="importance"
           value={ratingDraft.importanceLevel}
-          onChange={(event) => onRatingDraftChange({ ...ratingDraft, importanceLevel: event.target.value })}
-        >
-          {["low", "medium", "high", "critical"].map((value) => <option key={value} value={value}>{value}</option>)}
-        </VNativeSelect>
+          onValueChange={(importanceLevel) => onRatingDraftChange({ ...ratingDraft, importanceLevel })}
+          options={["low", "medium", "high", "critical"].map((value) => ({ value, label: value }))}
+        />
         <VNativeInput
           value={ratingDraft.confidence}
           onChange={(event) => onRatingDraftChange({ ...ratingDraft, confidence: event.target.value })}
           aria-label={copy.confidence}
         />
-        <VNativeSelect
+        <VStringSelect
+          ariaLabel={copy.stability}
           value={ratingDraft.stability}
-          onChange={(event) => onRatingDraftChange({ ...ratingDraft, stability: event.target.value })}
-        >
-          {["temporary", "evolving", "stable", "deprecated"].map((value) => <option key={value} value={value}>{value}</option>)}
-        </VNativeSelect>
+          onValueChange={(stability) => onRatingDraftChange({ ...ratingDraft, stability })}
+          options={["temporary", "evolving", "stable", "deprecated"].map((value) => ({ value, label: value }))}
+        />
         <VButton
           type="button"
           className={styles.detailActionButton}

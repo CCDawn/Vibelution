@@ -1,7 +1,7 @@
 import { CheckCircle2, Copy as CopyIcon, Database, Eye, FileText, Link2, Pencil, XCircle } from "lucide-react";
 
 import type { KnowledgeCentralSource, KnowledgeOwnerSource } from "../api/types";
-import { VButton, VNativeInput, VNativeSelect, VNativeTextarea } from "../components/vui";
+import { VButton, VNativeInput, VNativeTextarea, VStringSelect } from "../components/vui";
 import styles from "./MemoryKnowledgeSourceGovernancePanel.styles";
 
 export type MemoryKnowledgeSourceOwnerType = "team" | "agent";
@@ -185,10 +185,15 @@ export function MemoryKnowledgeSourceGovernancePanel({
       <div className={styles.sourceGovernanceControls}>
         <label>
           <span>{copy.ownerScope}</span>
-          <VNativeSelect value={sourceOwnerType} onChange={(event) => onSourceOwnerTypeChange(event.target.value as MemoryKnowledgeSourceOwnerType)}>
-            <option value="team">{copy.ownerTeam}</option>
-            <option value="agent">{copy.ownerAgent}</option>
-          </VNativeSelect>
+          <VStringSelect
+            ariaLabel={copy.ownerTeam}
+            value={sourceOwnerType}
+            onValueChange={(value) => onSourceOwnerTypeChange(value as MemoryKnowledgeSourceOwnerType)}
+            options={[
+              { value: "team", label: copy.ownerTeam },
+              { value: "agent", label: copy.ownerAgent },
+            ]}
+          />
         </label>
         <label>
           <span>{copy.ownerId}</span>
@@ -196,11 +201,15 @@ export function MemoryKnowledgeSourceGovernancePanel({
         </label>
         <label>
           <span>{copy.status}</span>
-          <VNativeSelect value={sourceInboxStatus} onChange={(event) => onSourceInboxStatusChange(event.target.value as MemoryKnowledgeSourceInboxStatusFilter)}>
-            {SOURCE_INBOX_STATUSES.map((status) => (
-              <option key={status} value={status}>{sourceInboxStatusLabel(copy, status)}</option>
-            ))}
-          </VNativeSelect>
+          <VStringSelect
+            ariaLabel={copy.status}
+            value={sourceInboxStatus}
+            onValueChange={(value) => onSourceInboxStatusChange(value as MemoryKnowledgeSourceInboxStatusFilter)}
+            options={SOURCE_INBOX_STATUSES.map((status) => ({
+              value: status,
+              label: sourceInboxStatusLabel(copy, status),
+            }))}
+          />
         </label>
         <VButton type="button" className={styles.detailActionButton} onClick={onApplyActiveKnowledgeOwner}
           icon={<Database size={14}/>}
@@ -226,11 +235,12 @@ export function MemoryKnowledgeSourceGovernancePanel({
               <div className={styles.knowledgeFormGrid}>
                 <label>
                   <span>{copy.sourceType}</span>
-                  <VNativeSelect value={ownerSourceDraft.sourceType} onChange={(event) => onOwnerSourceDraftChange({ ...ownerSourceDraft, sourceType: event.target.value })}>
-                    {SOURCE_TYPES.map((type) => (
-                      <option key={type} value={type}>{type}</option>
-                    ))}
-                  </VNativeSelect>
+                  <VStringSelect
+                    ariaLabel={copy.sourceType}
+                    value={ownerSourceDraft.sourceType}
+                    onValueChange={(sourceType) => onOwnerSourceDraftChange({ ...ownerSourceDraft, sourceType })}
+                    options={SOURCE_TYPES.map((type) => ({ value: type, label: type }))}
+                  />
                 </label>
                 <label>
                   <span>{copy.titleField}</span>

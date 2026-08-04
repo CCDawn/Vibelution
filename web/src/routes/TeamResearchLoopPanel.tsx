@@ -6,7 +6,7 @@ import { useEffect, useRef } from "react";
 import { AlertTriangle, Plus, RefreshCw, Save, Send } from "lucide-react";
 
 import type { Team } from "../api/types";
-import { VNativeButton, VNativeInput, VNativeSelect } from "../components/vui";
+import { VNativeButton, VNativeInput, VStringSelect } from "../components/vui";
 import {
   RESEARCH_LOOP_DECISION_VALUES,
   RESEARCH_LOOP_EVIDENCE_STATUSES,
@@ -314,13 +314,15 @@ export function TeamResearchLoopPanel(props: TeamResearchLoopPanelProps) {
         <div className={styles.researchLoopTemplateBar}>
           <label>
             <span>{lang === "zh" ? "验证模板" : "Template"}</span>
-            <VNativeSelect value={selectedTemplate?.templateId || selectedResearchLoopTemplateId} onChange={(event) => setSelectedResearchLoopTemplateId(event.target.value)}>
-              {templates.map((template: any) => (
-                <option key={template.templateId} value={template.templateId}>
-                  {lang === "zh" ? template.labelZh : template.label}
-                </option>
-              ))}
-            </VNativeSelect>
+            <VStringSelect
+              ariaLabel={lang === "zh" ? "研究环模板" : "Research loop template"}
+              value={selectedTemplate?.templateId || selectedResearchLoopTemplateId}
+              onValueChange={setSelectedResearchLoopTemplateId}
+              options={templates.map((template: any) => ({
+                value: template.templateId,
+                label: lang === "zh" ? template.labelZh : template.label,
+              }))}
+            />
           </label>
           <label>
             <span>{lang === "zh" ? "研究问题" : "Research question"}</span>
@@ -481,16 +483,15 @@ export function TeamResearchLoopPanel(props: TeamResearchLoopPanelProps) {
               </div>
               <label>
                 <span>{lang === "zh" ? "下一模板" : "Next template"}</span>
-                <VNativeSelect
+                <VStringSelect
+                  ariaLabel={lang === "zh" ? "下一模板" : "Next template"}
                   value={researchLoopDecisionDraft.nextTemplateId || selectedTemplate?.templateId || activeLoop.templateId}
-                  onChange={(event) => setResearchLoopDecisionDraft((draft) => ({ ...draft, nextTemplateId: event.target.value }))}
-                >
-                  {templates.map((template: any) => (
-                    <option key={template.templateId} value={template.templateId}>
-                      {lang === "zh" ? template.labelZh : template.label}
-                    </option>
-                  ))}
-                </VNativeSelect>
+                  onValueChange={(nextTemplateId) => setResearchLoopDecisionDraft((draft) => ({ ...draft, nextTemplateId }))}
+                  options={templates.map((template: any) => ({
+                    value: template.templateId,
+                    label: lang === "zh" ? template.labelZh : template.label,
+                  }))}
+                />
               </label>
               <label className={styles.researchLoopWide}>
                 <span>{lang === "zh" ? "理由" : "Rationale"}</span>

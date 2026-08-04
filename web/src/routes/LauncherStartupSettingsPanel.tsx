@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 
 import type { LauncherStartupSettings } from "../api/launcher";
 import type { WorkbenchWindowMode, WorkbenchWindowModeUpdateRequest } from "../api/types";
-import { VButton, VNativeInput, VNativeSelect, VTooltip } from "../components/vui";
+import { VButton, VNativeInput, VStringSelect, VTooltip } from "../components/vui";
 import styles from "./LauncherStartupSettingsPanel.styles";
 
 type LauncherStartupSettingsCopy = {
@@ -208,17 +208,16 @@ export function LauncherStartupSettingsPanel({
       </VTooltip>
       <label className={styles.settingField}>
         <span>{copy.runtimeProfile}</span>
-        <VNativeSelect
+        <VStringSelect
+          ariaLabel={copy.runtimeProfile}
           value={draft.runtime.profile}
-          disabled={controlsDisabled}
-          onChange={(event) => patchDraft({ runtime: { ...draft.runtime, profile: event.target.value } })}
-        >
-          {draft.runtime.profileOptions.map((profile) => (
-            <option key={profile} value={profile}>
-              {runtimeProfileLabel(profile, uiLang)}
-            </option>
-          ))}
-        </VNativeSelect>
+          isDisabled={controlsDisabled}
+          onValueChange={(profile) => patchDraft({ runtime: { ...draft.runtime, profile } })}
+          options={draft.runtime.profileOptions.map((profile) => ({
+            value: profile,
+            label: runtimeProfileLabel(profile, uiLang),
+          }))}
+        />
       </label>
       <label className={styles.settingField}>
         <span>{copy.launcherControlPort}</span>
@@ -282,32 +281,33 @@ export function LauncherStartupSettingsPanel({
       </div>
       <label className={styles.settingField}>
         <span>{copy.windowSize}</span>
-        <VNativeSelect
+        <VStringSelect
+          ariaLabel={copy.windowSize}
           value={draft.workbench.windowSize}
-          disabled={controlsDisabled}
-          onChange={(event) => patchDraft({ workbench: { ...draft.workbench, windowSize: event.target.value } })}
-        >
-          {(draft.workbench.windowSizeOptions.length
+          isDisabled={controlsDisabled}
+          onValueChange={(windowSize) => patchDraft({ workbench: { ...draft.workbench, windowSize } })}
+          options={(draft.workbench.windowSizeOptions.length
             ? draft.workbench.windowSizeOptions
             : [{ size: "auto", label: { zh: copy.windowSizeAuto, en: copy.windowSizeAuto } }]
-          ).map((option) => (
-            <option key={option.size} value={option.size}>
-              {option.label[uiLang] ?? option.size}
-            </option>
-          ))}
-        </VNativeSelect>
+          ).map((option) => ({
+            value: option.size,
+            label: option.label[uiLang] ?? option.size,
+          }))}
+        />
         {draft.workbench.windowSizeEnvOverride ? <small>{copy.windowSizeEnvOverride}: {draft.workbench.effectiveWindowSize}</small> : null}
       </label>
       <label className={styles.settingField}>
         <span>{copy.interfaceLanguage}</span>
-        <VNativeSelect
+        <VStringSelect
+          ariaLabel={copy.interfaceLanguage}
           value={draft.interface.language}
-          disabled={controlsDisabled}
-          onChange={(event) => patchDraft({ interface: { ...draft.interface, language: event.target.value } })}
-        >
-          <option value="zh">{copy.languageZh}</option>
-          <option value="en">{copy.languageEn}</option>
-        </VNativeSelect>
+          isDisabled={controlsDisabled}
+          onValueChange={(language) => patchDraft({ interface: { ...draft.interface, language } })}
+          options={[
+            { value: "zh", label: copy.languageZh },
+            { value: "en", label: copy.languageEn },
+          ]}
+        />
       </label>
       <label className={styles.settingToggle}>
         <VNativeInput

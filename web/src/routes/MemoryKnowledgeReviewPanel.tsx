@@ -1,7 +1,7 @@
 import { CheckCircle2, Eye, Pencil, Square, SquareCheckBig, XCircle } from "lucide-react";
 
 import type { KnowledgeRatingSuggestion, TeamKnowledgeBase } from "../api/types";
-import { VButton, VNativeInput, VNativeSelect, VNativeTextarea } from "../components/vui";
+import { VButton, VNativeInput, VNativeTextarea, VStringSelect } from "../components/vui";
 import styles from "./MemoryKnowledgeReviewPanel.styles";
 
 export type MemoryKnowledgeProposalDraft = {
@@ -185,21 +185,31 @@ export function MemoryKnowledgeReviewPanel({
         <div className={styles.queueToolbar}>
           <label>
             <span>{copy.status}</span>
-            <VNativeSelect value={ratingSuggestionStatus} onChange={(event) => onRatingSuggestionStatusChange(event.target.value as MemoryKnowledgeRatingSuggestionStatusFilter)}>
-              <option value="pending">{copy.pendingProposals}</option>
-              <option value="applied">{copy.applySuggestion}</option>
-              <option value="rejected">{copy.rejectSuggestion}</option>
-              <option value="all">{copy.allStatuses}</option>
-            </VNativeSelect>
+            <VStringSelect
+              ariaLabel={copy.allStatuses}
+              value={ratingSuggestionStatus}
+              onValueChange={(value) => onRatingSuggestionStatusChange(value as MemoryKnowledgeRatingSuggestionStatusFilter)}
+              options={[
+                { value: "pending", label: copy.pendingProposals },
+                { value: "applied", label: copy.applySuggestion },
+                { value: "rejected", label: copy.rejectSuggestion },
+                { value: "all", label: copy.allStatuses },
+              ]}
+            />
           </label>
           <label>
             <span>{copy.priority}</span>
-            <VNativeSelect value={ratingSuggestionPriority} onChange={(event) => onRatingSuggestionPriorityChange(event.target.value as MemoryKnowledgeRatingSuggestionPriorityFilter)}>
-              <option value="all">{copy.allPriorities}</option>
-              <option value="urgent">urgent</option>
-              <option value="elevated">elevated</option>
-              <option value="normal">normal</option>
-            </VNativeSelect>
+            <VStringSelect
+              ariaLabel={copy.allPriorities}
+              value={ratingSuggestionPriority}
+              onValueChange={(value) => onRatingSuggestionPriorityChange(value as MemoryKnowledgeRatingSuggestionPriorityFilter)}
+              options={[
+                { value: "all", label: copy.allPriorities },
+                { value: "urgent", label: "urgent" },
+                { value: "elevated", label: "elevated" },
+                { value: "normal", label: "normal" },
+              ]}
+            />
           </label>
         </div>
         <div className={styles.bulkActionBar}>

@@ -109,7 +109,7 @@ describe("PromptTemplatesRoute layout contract", () => {
   it("supports bulk prompt selection with safe existing mutations", () => {
     expect(routeSource).toContain("selectedTemplateIds");
     expect(routeSource).toContain("<VNativeInput");
-    expect(routeSource).toContain("<VNativeSelect");
+    expect(routeSource).toContain("<VStringSelect");
     expect(routeSource).toContain("<VNativeTextarea");
     expect(routeSource).not.toMatch(/<input\b/);
     expect(routeSource).not.toMatch(/<select\b/);

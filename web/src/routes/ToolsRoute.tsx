@@ -23,7 +23,7 @@ import {
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
-import { VButton, VConfirmDialog, VContextualHint, VDenseOpsPage, VIconButton, VNativeInput, VNativeSelect, VRouteLinkButton, VStateSurface, VTooltip } from "../components/vui";
+import { VButton, VConfirmDialog, VContextualHint, VDenseOpsPage, VIconButton, VNativeInput, VRouteLinkButton, VStateSurface, VStringSelect, VTooltip } from "../components/vui";
 import type { TranslationKey } from "../i18n/dictionary";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
@@ -1916,16 +1916,15 @@ export function ToolsRoute() {
                 >
                   <label className={styles.toolBundleSelect}>
                     <span>{lang === "zh" ? "工具包" : "Package"}</span>
-                    <VNativeSelect
+                    <VStringSelect
+                      ariaLabel={lang === "zh" ? "工具包" : "Tool bundle"}
                       value={selectedBundle?.bundleId ?? ""}
-                      onChange={(event) => setSelectedBundleId(event.target.value)}
-                    >
-                      {toolBundles.map((bundle) => (
-                        <option key={bundle.bundleId} value={bundle.bundleId}>
-                          {bundle.label}
-                        </option>
-                      ))}
-                    </VNativeSelect>
+                      onValueChange={setSelectedBundleId}
+                      options={toolBundles.map((bundle) => ({
+                        value: bundle.bundleId,
+                        label: bundle.label,
+                      }))}
+                    />
                   </label>
                   <VTooltip content={selectedBundle?.description || (lang === "zh" ? "先选择工具包。" : "Choose a package first.")} width="wide">
                     <span className={styles.toolBundleSummary} tabIndex={0}>
@@ -2159,20 +2158,22 @@ export function ToolsRoute() {
                   <div className={styles.image2ModelControls}>
                     <label className={styles.image2ModelSelect}>
                       <span>{lang === "zh" ? "使用模型" : "Model"}</span>
-                      <VNativeSelect
+                      <VStringSelect
+                        ariaLabel={lang === "zh" ? "默认模型" : "Default model"}
                         value={image2ModelConfig?.defaultModelRef ?? ""}
-                        disabled={image2ModelsQuery.isPending || image2ModelMutation.isPending}
-                        onChange={(event) => image2ModelMutation.mutate(event.target.value)}
-                      >
-                        <option value="">
-                          {lang === "zh" ? "未设置（环境变量/内置回退）" : "Not set (env/built-in fallback)"}
-                        </option>
-                        {(image2ModelConfig?.models ?? []).map((model) => (
-                          <option key={model.modelRef} value={model.modelRef}>
-                            {model.label || model.modelRef}
-                          </option>
-                        ))}
-                      </VNativeSelect>
+                        isDisabled={image2ModelsQuery.isPending || image2ModelMutation.isPending}
+                        onValueChange={(value) => image2ModelMutation.mutate(value)}
+                        options={[
+                          {
+                            value: "",
+                            label: lang === "zh" ? "未设置（环境变量/内置回退）" : "Not set (env/built-in fallback)",
+                          },
+                          ...(image2ModelConfig?.models ?? []).map((model) => ({
+                            value: model.modelRef,
+                            label: model.label || model.modelRef,
+                          })),
+                        ]}
+                      />
                     </label>
                     <div className={styles.image2ModelSummary}>
                       <strong>{image2ModelLabel(image2ModelConfig, lang)}</strong>

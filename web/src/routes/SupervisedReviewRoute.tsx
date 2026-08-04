@@ -17,7 +17,7 @@ import {
   SupervisedWorktreeRun,
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
-import { VButton, VListDetailPage, VNativeInput, VNativeSelect, VNativeTextarea, VTooltip } from "../components/vui";
+import { VButton, VListDetailPage, VNativeInput, VNativeTextarea, VStringSelect, VTooltip } from "../components/vui";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { createEvolutionWorkspaceCache } from "./evolutionWorkspaceCache";
 import { SupervisedWorkspaceControls } from "./SupervisedWorkspaceControls";
@@ -750,16 +750,19 @@ export function SupervisedReviewRoute() {
                 <div className={styles.formGrid}>
                   <label className={styles.formField}>
                     <span>{lang === "zh" ? "原因分类" : "Reason code"}</span>
-                    <VNativeSelect
+                    <VStringSelect
+                      ariaLabel={lang === "zh" ? "原因码" : "Reason code"}
                       value={reasonCode}
-                      disabled={detailCandidate.status !== "pending"}
-                      onChange={(event) => setReasonCode(event.target.value)}
-                    >
-                      <option value="">{lang === "zh" ? "未填写" : "Not set"}</option>
-                      {reasonOptions.map((option) => (
-                        <option key={option.value} value={option.value}>{option.label}</option>
-                      ))}
-                    </VNativeSelect>
+                      isDisabled={detailCandidate.status !== "pending"}
+                      onValueChange={setReasonCode}
+                      options={[
+                        { value: "", label: lang === "zh" ? "未填写" : "Not set" },
+                        ...reasonOptions.map((option) => ({
+                          value: option.value,
+                          label: option.label,
+                        })),
+                      ]}
+                    />
                   </label>
 
                   {draftDecision === "negative" ? (

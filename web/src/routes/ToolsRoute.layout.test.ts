@@ -123,7 +123,7 @@ describe("ToolsRoute layout contract", () => {
     expect(routeSource).toContain("<VIconButton");
     expect(routeSource).toContain("<VRouteLinkButton");
     expect(routeSource).toContain("<VNativeInput");
-    expect(routeSource).toContain("<VNativeSelect");
+    expect(routeSource).toContain("<VStringSelect");
     expect(routeSource).not.toMatch(/<button\b/);
     expect(routeSource).not.toMatch(/<input\b/);
     expect(routeSource).not.toMatch(/<select\b/);
@@ -417,7 +417,7 @@ describe("ToolsRoute layout contract", () => {
   it("keeps route layout CSS from restyling raw native form elements", () => {
     expect(stylesSource).not.toMatch(/\.(scopeSelect|searchBox|rowSelect|toolBundleSelect|image2ModelSelect|agentPolicySelect)\s+(input|select)\b/);
     expect(routeSource).toContain("<VNativeInput");
-    expect(routeSource).toContain("<VNativeSelect");
+    expect(routeSource).toContain("<VStringSelect");
     expect(styles.scopeSelect).toBeTypeOf("string");
     expect(styles.searchBox).toBeTypeOf("string");
     expect(styles.rowSelect).toBeTypeOf("string");
