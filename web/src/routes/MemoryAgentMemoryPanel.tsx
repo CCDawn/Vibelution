@@ -1,6 +1,7 @@
 import { Brain, Database, FileText, Search } from "lucide-react";
 
-import { VButton, VNativeInput, VStateSurface } from "../components/vui";
+import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
+import { VButton, VNativeInput, VSplitWorkspace, VStateSurface } from "../components/vui";
 import styles from "./MemoryAgentMemoryPanel.styles";
 
 export type MemoryAgentMemorySummaryView = {
@@ -104,6 +105,23 @@ type MemoryAgentMemoryPanelProps = {
   onSelectItem: (itemId: string) => void;
 };
 
+/** Pane ids under WORKBENCH_LAYOUT_IDS.memory — separate from sources left/right. */
+const AGENT_MEMORY_SPLIT_RESIZE = {
+  layoutId: WORKBENCH_LAYOUT_IDS.memory,
+  sidebar: {
+    id: "agent-list",
+    defaultWidth: 235,
+    minWidth: 210,
+    maxWidth: 300,
+  },
+  aside: {
+    id: "agent-detail",
+    defaultWidth: 320,
+    minWidth: 260,
+    maxWidth: 420,
+  },
+} as const;
+
 export function MemoryAgentMemoryPanel({
   copy,
   summary,
@@ -145,160 +163,168 @@ export function MemoryAgentMemoryPanel({
         </section>
       </div>
 
-      <div className={`${styles.workspace} ${styles.agentMemoryWorkspace}`}>
-        <aside className={styles.sourcePanel}>
-          <div className={styles.panelHeader}>
-            <div>
-              <p className={styles.panelEyebrow}>{copy.agentMemoryAgents}</p>
-              <h2>{copy.agentMemorySelectedAgent}</h2>
-            </div>
-            <span className={styles.countPill}>{agents.length}</span>
-          </div>
-          <label className={styles.searchBox}>
-            <Search size={15} />
-            <VNativeInput value={searchText} placeholder={copy.searchPlaceholder} onChange={(event) => onSearchTextChange(event.target.value)} />
-          </label>
-          <div className={styles.itemList}>
-            {inventoryPending ? <VStateSurface tone="loading" title={copy.loading} skeletonLines={2} /> : null}
-            {inventoryErrorText ? (
-              <VStateSurface tone="error" title={copy.loadFailed}>
-                {inventoryErrorText}
-              </VStateSurface>
-            ) : null}
-            {!inventoryPending && !agents.length ? <VStateSurface tone="empty" title={copy.agentMemoryNoAgents} /> : null}
-            {agents.map((agent) => (
-              <VButton
-                key={agent.id}
-                type="button"
-                contentLayout="plain"
-                className={agent.active ? `${styles.itemButton} ${styles.itemButtonActive}` : styles.itemButton}
-                onClick={() => onSelectAgent(agent.id)}
-              >
-                <span className={styles.itemHeader}>
-                  <strong>{agent.name}</strong>
-                  <span>{agent.status}</span>
-                </span>
-                <span className={styles.itemOrigin}>{agent.origin}</span>
-                <span className={styles.itemPath}>{agent.path}</span>
-                <span className={styles.itemBadges}>
-                  <span className={agent.hasPrivateMemory ? styles.statusPillVisible : styles.statusPill}>
-                    {copy.agentMemoryPrivateFiles}: {agent.privateFileCount}
-                  </span>
-                  <span className={styles.statusPill}>
-                    {copy.agentMemoryFormalBases}: {agent.formalKnowledgeBaseCount}
-                  </span>
-                </span>
-              </VButton>
-            ))}
-          </div>
-        </aside>
-
-        <main className={styles.itemPanel}>
-          <div className={styles.panelHeader}>
-            <div>
-              <p className={styles.panelEyebrow}>{copy.agentMemoryPrivateRoot}</p>
-              <h2 title={selectedAgent?.privateRoot || selectedAgent?.workspacePath || ""}>
-                {selectedAgent?.name ?? copy.agentMemorySelectedAgent}
-              </h2>
-            </div>
-            <span className={styles.countPill}>{selectedAgent?.fileCount ?? 0}</span>
-          </div>
-          <section className={styles.detailMeta}>
-            <span>{copy.agentMemoryPrivateRoot}: {selectedAgent?.privateRoot || "-"}</span>
-            <span>{copy.sourcePath}: {selectedAgent?.workspacePath || "-"}</span>
-            <span>{copy.agentMemoryFormalKnowledge}: {selectedAgent?.formalKnowledgeItemCount ?? 0}</span>
-          </section>
-          <div className={styles.itemList}>
-            {detailPending && selectedAgent ? <VStateSurface tone="loading" title={copy.loading} skeletonLines={2} /> : null}
-            {detailErrorText ? (
-              <VStateSurface tone="error" title={copy.loadFailed}>
-                {detailErrorText}
-              </VStateSurface>
-            ) : null}
-            {!items.length && !detailPending ? (
-              <VStateSurface tone="empty" title={copy.agentMemoryNoPrivateMemory} />
-            ) : null}
-            {items.map((item) => (
-              <VButton
-                key={item.id}
-                type="button"
-                contentLayout="plain"
-                className={item.active ? `${styles.itemButton} ${styles.itemButtonActive}` : styles.itemButton}
-                onClick={() => onSelectItem(item.id)}
-              >
-                <span className={styles.itemHeader}>
-                  <strong>{item.title}</strong>
-                  <span>{item.updatedAtText}</span>
-                </span>
-                <span className={styles.itemPath}>{item.path}</span>
-                <span className={styles.itemSummary}>{item.summary}</span>
-                <span className={styles.itemBadges}>
-                  <span className={styles.statusPill}>{item.sizeText}</span>
-                  <span className={styles.statusPill}>{item.contentType}</span>
-                  {item.truncated ? <span className={styles.statusPill}>{copy.truncated}</span> : null}
-                </span>
-              </VButton>
-            ))}
-          </div>
-        </main>
-
-        <aside className={styles.detailPanel}>
-          {selectedAgent ? (
-            <>
-              <div className={styles.detailHeader}>
-                <div>
-                  <p className={styles.panelEyebrow}>{copy.agentMemorySelectedFile}</p>
-                  <h2>{selectedItem?.title ?? copy.agentMemoryNoFileSelected}</h2>
-                  <p>{selectedItem?.path || selectedAgent.privateRoot || "-"}</p>
-                </div>
-                {selectedItem ? <span className={styles.countPill}>{selectedItem.sizeText}</span> : null}
+      <VSplitWorkspace
+        className={`${styles.workspace} ${styles.agentMemoryWorkspace}`}
+        data-vui-region="memory-agent-workspace"
+        data-vui-layout-id={WORKBENCH_LAYOUT_IDS.memory}
+        resize={AGENT_MEMORY_SPLIT_RESIZE}
+        sidebar={(
+          <div className={styles.sourcePanel} data-vui-region="memory-agent-list">
+            <div className={styles.panelHeader}>
+              <div>
+                <p className={styles.panelEyebrow}>{copy.agentMemoryAgents}</p>
+                <h2>{copy.agentMemorySelectedAgent}</h2>
               </div>
-              <section className={styles.sectionPanel}>
-                <div className={styles.panelHeader}>
-                  <div>
-                    <p className={styles.panelEyebrow}>{copy.agentMemoryFormalKnowledge}</p>
-                    <h3>{copy.agentMemoryFormalBases}</h3>
-                  </div>
-                  <span className={styles.countPill}>{selectedAgent.formalKnowledgeBaseCount}</span>
-                </div>
-                {selectedAgent.knowledgeError ? <p>{selectedAgent.knowledgeError}</p> : null}
-                {selectedAgent.knowledgeBases.length ? (
-                  <div className={styles.usageList}>
-                    {selectedAgent.knowledgeBases.map((base) => (
-                      <span key={base.id} title={base.title}>
-                        <Database size={13} />
-                        {base.label}
-                      </span>
-                    ))}
-                  </div>
-                ) : (
-                  <p>{copy.noMatches}</p>
-                )}
-              </section>
-              <details className={styles.rawPanel} open>
-                <summary>
-                  <FileText size={15} />
-                  <span>{copy.rawContent}</span>
-                  <code>{selectedItem?.contentType ?? "-"}</code>
-                </summary>
-                {detailFetching ? <p>{copy.loading}</p> : null}
-                {selectedItem?.content ? (
-                  <pre data-language={selectedItem.contentLanguage}>{selectedItem.content}</pre>
-                ) : !detailFetching ? (
-                  <p>{selectedItem ? copy.noContent : copy.agentMemoryNoFileSelected}</p>
-                ) : null}
-              </details>
-              <p className={styles.generatedAt}>{copy.generatedAt}: {generatedAtText}</p>
-            </>
-          ) : (
-            <section className={styles.emptyDetail}>
-              <Brain size={24} />
-              <strong>{copy.agentMemorySelectedAgent}</strong>
-              <p>{inventoryPending ? copy.loading : copy.agentMemoryNoAgents}</p>
+              <span className={styles.countPill}>{agents.length}</span>
+            </div>
+            <label className={styles.searchBox}>
+              <Search size={15} />
+              <VNativeInput value={searchText} placeholder={copy.searchPlaceholder} onChange={(event) => onSearchTextChange(event.target.value)} />
+            </label>
+            <div className={styles.itemList}>
+              {inventoryPending ? <VStateSurface tone="loading" title={copy.loading} skeletonLines={2} /> : null}
+              {inventoryErrorText ? (
+                <VStateSurface tone="error" title={copy.loadFailed}>
+                  {inventoryErrorText}
+                </VStateSurface>
+              ) : null}
+              {!inventoryPending && !agents.length ? <VStateSurface tone="empty" title={copy.agentMemoryNoAgents} /> : null}
+              {agents.map((agent) => (
+                <VButton
+                  key={agent.id}
+                  type="button"
+                  contentLayout="plain"
+                  className={agent.active ? `${styles.itemButton} ${styles.itemButtonActive}` : styles.itemButton}
+                  onClick={() => onSelectAgent(agent.id)}
+                >
+                  <span className={styles.itemHeader}>
+                    <strong>{agent.name}</strong>
+                    <span>{agent.status}</span>
+                  </span>
+                  <span className={styles.itemOrigin}>{agent.origin}</span>
+                  <span className={styles.itemPath}>{agent.path}</span>
+                  <span className={styles.itemBadges}>
+                    <span className={agent.hasPrivateMemory ? styles.statusPillVisible : styles.statusPill}>
+                      {copy.agentMemoryPrivateFiles}: {agent.privateFileCount}
+                    </span>
+                    <span className={styles.statusPill}>
+                      {copy.agentMemoryFormalBases}: {agent.formalKnowledgeBaseCount}
+                    </span>
+                  </span>
+                </VButton>
+              ))}
+            </div>
+          </div>
+        )}
+        main={(
+          <div className={styles.itemPanel} data-vui-region="memory-agent-files">
+            <div className={styles.panelHeader}>
+              <div>
+                <p className={styles.panelEyebrow}>{copy.agentMemoryPrivateRoot}</p>
+                <h2 title={selectedAgent?.privateRoot || selectedAgent?.workspacePath || ""}>
+                  {selectedAgent?.name ?? copy.agentMemorySelectedAgent}
+                </h2>
+              </div>
+              <span className={styles.countPill}>{selectedAgent?.fileCount ?? 0}</span>
+            </div>
+            <section className={styles.detailMeta}>
+              <span>{copy.agentMemoryPrivateRoot}: {selectedAgent?.privateRoot || "-"}</span>
+              <span>{copy.sourcePath}: {selectedAgent?.workspacePath || "-"}</span>
+              <span>{copy.agentMemoryFormalKnowledge}: {selectedAgent?.formalKnowledgeItemCount ?? 0}</span>
             </section>
-          )}
-        </aside>
-      </div>
+            <div className={styles.itemList}>
+              {detailPending && selectedAgent ? <VStateSurface tone="loading" title={copy.loading} skeletonLines={2} /> : null}
+              {detailErrorText ? (
+                <VStateSurface tone="error" title={copy.loadFailed}>
+                  {detailErrorText}
+                </VStateSurface>
+              ) : null}
+              {!items.length && !detailPending ? (
+                <VStateSurface tone="empty" title={copy.agentMemoryNoPrivateMemory} />
+              ) : null}
+              {items.map((item) => (
+                <VButton
+                  key={item.id}
+                  type="button"
+                  contentLayout="plain"
+                  className={item.active ? `${styles.itemButton} ${styles.itemButtonActive}` : styles.itemButton}
+                  onClick={() => onSelectItem(item.id)}
+                >
+                  <span className={styles.itemHeader}>
+                    <strong>{item.title}</strong>
+                    <span>{item.updatedAtText}</span>
+                  </span>
+                  <span className={styles.itemPath}>{item.path}</span>
+                  <span className={styles.itemSummary}>{item.summary}</span>
+                  <span className={styles.itemBadges}>
+                    <span className={styles.statusPill}>{item.sizeText}</span>
+                    <span className={styles.statusPill}>{item.contentType}</span>
+                    {item.truncated ? <span className={styles.statusPill}>{copy.truncated}</span> : null}
+                  </span>
+                </VButton>
+              ))}
+            </div>
+          </div>
+        )}
+        aside={(
+          <div className={styles.detailPanel} data-vui-region="memory-agent-detail">
+            {selectedAgent ? (
+              <>
+                <div className={styles.detailHeader}>
+                  <div>
+                    <p className={styles.panelEyebrow}>{copy.agentMemorySelectedFile}</p>
+                    <h2>{selectedItem?.title ?? copy.agentMemoryNoFileSelected}</h2>
+                    <p>{selectedItem?.path || selectedAgent.privateRoot || "-"}</p>
+                  </div>
+                  {selectedItem ? <span className={styles.countPill}>{selectedItem.sizeText}</span> : null}
+                </div>
+                <section className={styles.sectionPanel}>
+                  <div className={styles.panelHeader}>
+                    <div>
+                      <p className={styles.panelEyebrow}>{copy.agentMemoryFormalKnowledge}</p>
+                      <h3>{copy.agentMemoryFormalBases}</h3>
+                    </div>
+                    <span className={styles.countPill}>{selectedAgent.formalKnowledgeBaseCount}</span>
+                  </div>
+                  {selectedAgent.knowledgeError ? <p>{selectedAgent.knowledgeError}</p> : null}
+                  {selectedAgent.knowledgeBases.length ? (
+                    <div className={styles.usageList}>
+                      {selectedAgent.knowledgeBases.map((base) => (
+                        <span key={base.id} title={base.title}>
+                          <Database size={13} />
+                          {base.label}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <p>{copy.noMatches}</p>
+                  )}
+                </section>
+                <details className={styles.rawPanel} open>
+                  <summary>
+                    <FileText size={15} />
+                    <span>{copy.rawContent}</span>
+                    <code>{selectedItem?.contentType ?? "-"}</code>
+                  </summary>
+                  {detailFetching ? <p>{copy.loading}</p> : null}
+                  {selectedItem?.content ? (
+                    <pre data-language={selectedItem.contentLanguage}>{selectedItem.content}</pre>
+                  ) : !detailFetching ? (
+                    <p>{selectedItem ? copy.noContent : copy.agentMemoryNoFileSelected}</p>
+                  ) : null}
+                </details>
+                <p className={styles.generatedAt}>{copy.generatedAt}: {generatedAtText}</p>
+              </>
+            ) : (
+              <section className={styles.emptyDetail}>
+                <Brain size={24} />
+                <strong>{copy.agentMemorySelectedAgent}</strong>
+                <p>{inventoryPending ? copy.loading : copy.agentMemoryNoAgents}</p>
+              </section>
+            )}
+          </div>
+        )}
+      />
     </>
   );
 }

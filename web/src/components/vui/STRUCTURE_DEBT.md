@@ -17,10 +17,10 @@
 | `TeamsRoute.tsx` | ~6.0k lines; shell recipes + SC injects + **`teamsWorkspacePanelRenderers` factory** for memory/AI-search/loop/ledger/canvas inspectors. Next: collapse remaining SC/orchestrator render glue. | keep recipes; continue module extract |
 | Agents workspace | **Migrated** outer shell to `VListDetailPage` + layoutId (`AgentWorkspaceLayoutPanel`) | keep product/agent-management panels; optional inspector UX polish |
 | Chat coding | Dual-pane domain math (OK); `data-vui-domain-recipe=chat-dual-pane` + `WORKBENCH_LAYOUT_IDS.chat` + height panes in `chatListHeights.ts`; session tabs soft cool select | Keep domain layout; region tags on center/status rails |
-| Memory | Outer `VDenseOpsPage` + layoutId; **sources/knowledge three-pane → `VSplitWorkspace`** (pane ids `left`/`right`); lists/queues on height registry | Optional: Agent memory workspace same split pattern |
+| Memory | Outer `VDenseOpsPage` + layoutId; sources/knowledge/agent-memory three-pane → `VSplitWorkspace` (`left`/`right`, `agent-list`/`agent-detail`); lists/queues on height registry | Done for main three-pane shells |
 | Config settings | **Migrated** nav/main to `VSplitWorkspace` + `configSettings`; model-assets → `configModelAssets` | Done for shell width ownership |
 | Research flow canvas | **Migrated** page shell → `VCanvasWorkbenchPage` | optional layoutId for inspector width |
-| Evolution queues | Multi-rail widths/heights on `WORKBENCH_LAYOUT_IDS.evolution`; `data-vui-domain-recipe=evolution-multi-rail`; soft segment track switch | Domain multi-rail intentional exception (not ListDetail/VSplit); continue extract panels |
+| Evolution queues | Multi-rail widths/heights on `WORKBENCH_LAYOUT_IDS.evolution`; soft segment track; **dataset catalog → `EvolutionDatasetCatalogPanel`** | Domain multi-rail intentional; next: live launch setup / members rail extract |
 
 ## Cleanup playbook (per surface)
 

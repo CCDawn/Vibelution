@@ -11,15 +11,16 @@ import {
 } from "../design/vuiSurfaceRecipes";
 
 const styles = {
+  // Width ownership: VSplitWorkspace + WORKBENCH_LAYOUT_IDS.memory (agent-list / agent-detail).
   agentMemoryWorkspace:
-    `agentMemoryWorkspace min-w-0 grid h-full min-h-0 gap-2 p-2 grid-cols-[minmax(210px,260px)_minmax(0,1fr)_minmax(280px,0.42fr)] overflow-hidden ${vuiStateCoolInfoClass} max-[1100px]:grid-cols-[minmax(220px,280px)_minmax(0,1fr)] max-[1100px]:[&_.detailPanel]:col-span-2 max-[780px]:grid-cols-1 max-[780px]:overflow-auto`,
+    `agentMemoryWorkspace min-w-0 h-full min-h-0 flex-1 overflow-hidden p-2 ${vuiStateCoolInfoClass}`,
   countPill:
     `countPill min-w-0 ${vuiControlPillClass}`,
   detailHeader:
     "detailHeader min-w-0 flex flex-wrap items-center gap-1.5 px-1 py-0.5",
   detailMeta:
     "detailMeta min-w-0 flex flex-wrap items-center gap-1.5 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
-  detailPanel: `detailPanel min-w-0 min-h-0 overflow-auto ${vuiFlatPanelClass} p-2`,
+  detailPanel: `detailPanel min-w-0 h-full min-h-0 overflow-auto ${vuiFlatPanelClass} p-2`,
   emptyDetail: `emptyDetail min-w-0 grid min-h-[96px] content-center gap-1.5 ${vuiFlatPanelClass} p-2 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]`,
   emptyState:
     "emptyState min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
@@ -31,7 +32,7 @@ const styles = {
   itemHeader: `itemHeader min-w-0 flex flex-wrap items-center gap-1.5 ${vuiOpaqueRowClass} p-2`,
   itemList: `itemList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto ${vuiOpaqueRowClass} p-2`,
   itemOrigin: `itemOrigin min-w-0 ${vuiOpaqueRowClass} p-2`,
-  itemPanel: `itemPanel min-w-0 min-h-0 overflow-auto ${vuiOpaqueRowClass} p-2`,
+  itemPanel: `itemPanel min-w-0 h-full min-h-0 overflow-auto ${vuiOpaqueRowClass} p-2`,
   itemPath: `itemPath min-w-0 ${vuiOpaqueRowClass} p-2 font-mono [font-size:var(--vui-font-xs)]`,
   itemSummary: `itemSummary min-w-0 ${vuiOpaqueRowClass} p-2`,
   panelEyebrow:
@@ -41,7 +42,7 @@ const styles = {
   rawPanel: `rawPanel min-w-0 ${vuiFlatPanelClass} p-2`,
   searchBox: `searchBox min-w-0 ${vuiFlatPanelClass} p-2`,
   sectionPanel: `sectionPanel min-w-0 ${vuiFlatPanelClass} p-2`,
-  sourcePanel: `sourcePanel min-w-0 min-h-0 overflow-auto ${vuiFlatPanelClass} p-2`,
+  sourcePanel: `sourcePanel min-w-0 h-full min-h-0 overflow-auto ${vuiFlatPanelClass} p-2`,
   statusPill:
     `statusPill min-w-0 ${vuiControlPillClass}`,
   statusPillVisible:
@@ -51,7 +52,7 @@ const styles = {
   usageList:
     "usageList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   workspace:
-    `workspace min-w-0 grid h-full min-h-0 flex-1 gap-2 p-2 grid-rows-[minmax(0,1fr)] overflow-auto ${vuiWorkspaceFillClass}`,
+    `workspace min-w-0 h-full min-h-0 flex-1 overflow-hidden ${vuiWorkspaceFillClass}`,
 } as const;
 
 export default styles;
