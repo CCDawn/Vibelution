@@ -3,12 +3,10 @@ import "../design/route-css/teams.tailwind.css";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Archive, ArrowLeft, Bot, CheckCircle2, Eye, Link2, MessageSquare, Play, Plus, RefreshCw, Save, Search, Send, Settings2, Trash2, Unlink, Users } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
-import { PaneResizeHandle } from "../components/layout/PaneResizeHandle";
 import { type PaneSpec } from "../components/layout/paneLayoutPersistence";
-import { usePersistedPaneResize } from "../components/layout/usePersistedPaneResize";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import {
   ResearchMemoryEvidencePanel,
@@ -305,6 +303,7 @@ import {
   VNativeTextarea,
   VDenseOpsPage,
   VSelect,
+  VSplitWorkspace,
   VStateSurface,
   VStatusStrip,
   VSurface,
@@ -538,15 +537,6 @@ const TEAMS_RAIL_PANE: PaneSpec = {
   minWidth: 200,
   maxWidth: 360,
 };
-/** Right inspector in canvas mode. */
-const TEAMS_INSPECTOR_PANE: PaneSpec = {
-  id: "inspector",
-  defaultWidth: 360,
-  minWidth: 300,
-  maxWidth: 480,
-};
-const TEAMS_PANES: PaneSpec[] = [TEAMS_RAIL_PANE, TEAMS_INSPECTOR_PANE];
-
 type TeamsRouteProps = {
   forcedTeamId?: string;
   forcedResearchWorkspaceView?: ResearchWorkspaceView;
@@ -641,23 +631,6 @@ export function TeamsRoute({
   const chatWorkspaceCache = useMemo(() => createChatWorkspaceCache(queryClient), [queryClient]);
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const {
-    layoutRef: teamsLayoutRef,
-    widths: teamsPaneWidths,
-    draggingPaneId: teamsDraggingPaneId,
-    startResize: startTeamsInspectorResize,
-    onResizeKeyDown: onTeamsInspectorResizeKeyDown,
-  } = usePersistedPaneResize({
-    layoutId: TEAMS_LAYOUT_ID,
-    panes: TEAMS_PANES,
-    preserveMainMinWidth: 480,
-  });
-  const teamsRailWidth = teamsPaneWidths.rail ?? TEAMS_RAIL_PANE.defaultWidth;
-  const teamsInspectorWidth = teamsPaneWidths.inspector ?? TEAMS_INSPECTOR_PANE.defaultWidth;
-  const teamsLayoutStyle = {
-    ["--teams-rail-width" as string]: `${teamsRailWidth}px`,
-    ["--teams-inspector-width" as string]: `${teamsInspectorWidth}px`,
-  } as CSSProperties;
   const requestedResearchViewParam = searchParams.get("researchView");
   const requestedResearchWorkspaceView = parseResearchWorkspaceView(searchParams.get("researchView"));
   const requestedSourceCollectionStage = parseSourceCollectionStageModuleId(searchParams.get("collectionStage"));
@@ -5471,6 +5444,20 @@ export function TeamsRoute({
   const activeWorkflowItemCount = teamWorkflow?.activeWorkflowItems.length ?? 0;
   /** Shell mode owns left/right IA: board = full team workbench, canvas = org graph. */
   const researchCanvasVisible = teamShellMode === "canvas";
+  // shadcn list-detail: VSplitWorkspace owns team-rail width + persistence.
+  // Canvas inspector stays in main (domain shell); rail is the shared sidebar contract.
+  const teamsSplitResize = useMemo(
+    () => ({
+      layoutId: TEAMS_LAYOUT_ID,
+      sidebar: {
+        id: TEAMS_RAIL_PANE.id,
+        defaultWidth: TEAMS_RAIL_PANE.defaultWidth,
+        minWidth: TEAMS_RAIL_PANE.minWidth,
+        maxWidth: TEAMS_RAIL_PANE.maxWidth,
+      },
+    }),
+    [],
+  );
   const teamListInitialLoading = teamsQuery.isPending && !teamsQuery.data;
   const teamListUnavailable = teamsQuery.isError && !teamsQuery.data;
   const showTeamInitialLoadingSurface = teamListInitialLoading;
@@ -5977,36 +5964,25 @@ export function TeamsRoute({
           </VStateSurface>
         </main>
       ) : (
-      <div
-        ref={teamsLayoutRef}
+      <VSplitWorkspace
         className={workspaceClassName}
-        style={teamsLayoutStyle}
         data-vui-recipe="teams-organization-workbench"
+        data-vui-domain-recipe="teams-organization-workbench"
         data-vui-layout-id={TEAMS_LAYOUT_ID}
         data-team-shell-mode={teamShellMode}
         data-testid="team-shell-workspace"
-      >
-        <div
-          className={styles.teamShellRailPane}
-          data-vui-region="teams-sidebar"
-        >
-          <TeamShellRail
-            lang={lang}
-            teams={visibleTeams}
-            selectedTeamId={effectiveTeamId}
-            onSelectTeam={selectTeamRecord}
-          />
-        </div>
-        <PaneResizeHandle
-          label={lang === "zh" ? "调整团队列表宽度" : "Resize team list"}
-          valueNow={teamsRailWidth}
-          valueMin={TEAMS_RAIL_PANE.minWidth}
-          valueMax={TEAMS_RAIL_PANE.maxWidth}
-          active={teamsDraggingPaneId === "rail"}
-          className={styles.teamShellRailResizeHandle}
-          onPointerDown={(event) => startTeamsInspectorResize("rail", event, { direction: 1 })}
-          onKeyDown={(event) => onTeamsInspectorResizeKeyDown("rail", event, { direction: 1 })}
-        />
+        resize={teamsSplitResize}
+        sidebar={(
+          <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden" data-vui-region="teams-sidebar">
+            <TeamShellRail
+              lang={lang}
+              teams={visibleTeams}
+              selectedTeamId={effectiveTeamId}
+              onSelectTeam={selectTeamRecord}
+            />
+          </div>
+        )}
+        main={(
         <div className={styles.teamShellMain} data-testid="team-shell-main">
           <div className={styles.teamShellToolbar}>
             <div className={styles.teamShellToolbarIdentity}>
@@ -6265,19 +6241,6 @@ export function TeamsRoute({
             </div>
           )}
         </VSurface>
-
-        {researchCanvasVisible ? (
-          <PaneResizeHandle
-            label={lang === "zh" ? "调整节点侧栏宽度" : "Resize inspector"}
-            valueNow={teamsInspectorWidth}
-            valueMin={TEAMS_INSPECTOR_PANE.minWidth}
-            valueMax={TEAMS_INSPECTOR_PANE.maxWidth}
-            active={teamsDraggingPaneId === "inspector"}
-            className={styles.inspectorResizeHandle}
-            onPointerDown={(event) => startTeamsInspectorResize("inspector", event, { direction: -1 })}
-            onKeyDown={(event) => onTeamsInspectorResizeKeyDown("inspector", event, { direction: -1 })}
-          />
-        ) : null}
 
         <aside
           className={[
@@ -6779,7 +6742,8 @@ export function TeamsRoute({
         </aside>
           </div>
         </div>
-      </div>
+        )}
+      />
       )}
     </VDenseOpsPage>
   );

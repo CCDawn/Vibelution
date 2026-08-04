@@ -223,7 +223,7 @@ const styles: Record<string, string> = {
   teamShellRailResizeHandle:
     "teamShellRailResizeHandle self-stretch max-[900px]:hidden",
   teamShellInspectorPane:
-    "teamShellInspectorPane flex h-full min-h-0 w-[var(--teams-inspector-width,360px)] min-w-[300px] max-w-[480px] shrink-0 flex-col [flex-basis:var(--teams-inspector-width,360px)]",
+    "teamShellInspectorPane flex h-full min-h-0 w-[min(360px,38%)] min-w-[280px] max-w-[480px] shrink-0 flex-col border-l border-[var(--vui-border-subtle)]",
   teamShellMain:
     "teamShellMain flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-[var(--vui-surface-panel)]",
   teamShellToolbar:

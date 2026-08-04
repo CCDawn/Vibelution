@@ -1,8 +1,10 @@
 # VUI — product design system
 
 > **VUI is the stable product API.**
-> **shadcn-style + Radix is the preferred implementation backend.**
-> Routes and product pages must not import `@heroui/react` or `renderers/shadcn/*` directly.
+> **shadcn-style + Radix is the required implementation backend for all product frontend.**
+> Routes and product pages **must not** import `@heroui/react` or `renderers/shadcn/*` directly.
+> Prefer page recipes (`VListDetailPage` / `VSplitWorkspace` / `VDenseOpsPage`) over hand-rolled shells.
+> Gate: `components/vui/vuiShadcnRouteContract.test.ts`.
 > `@heroui/react` is **removed** from dependencies.
 
 ## Ownership
