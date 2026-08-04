@@ -2253,6 +2253,7 @@ export function ChatCodingRoute() {
       lastCacheComposition,
       lastContextComposition,
       compression,
+      runtimeMatchesSelectedSession,
       cache: {
         cacheDetailAvailable,
         cacheCompositionPercent,
@@ -2293,6 +2294,7 @@ export function ChatCodingRoute() {
       numberFormatter,
       providerCacheInputTokens,
       providerCachedInputTokens,
+      runtimeMatchesSelectedSession,
       sessionStateLabel,
       sessionStateLine,
       sessionStateValue,
@@ -2312,7 +2314,8 @@ export function ChatCodingRoute() {
     mentalRelativeTime,
     mentalCompactLine,
   } = buildChatMentalStateViewModel({
-    mental: runtime?.mentalState,
+    // Prefer the selected session's last assistant snapshot over global runtime mood.
+    mental: latestMentalSnapshot(detail?.messages) ?? runtime?.mentalState,
     lang,
     t,
     locale,
@@ -3355,7 +3358,8 @@ export function ChatCodingRoute() {
                 defaultFileContext: detail.defaultFileContext,
                 showHeader: false,
                 showSessionOverview: false,
-                showMentalSnapshots: mentalModelEnabledForNextTurn,
+                // Historical mental snapshots are conversation evidence; next-turn toggle only affects submit.
+                showMentalSnapshots: true,
                 composer: conversationComposer,
                 permissionControl: activeSessionAgent ? {
                   value: activeSessionAgent.permissionPreset || "request_approval",
@@ -3525,7 +3529,6 @@ export function ChatCodingRoute() {
         expandedGroupAgentDetailsBySessionId={expandedGroupAgentDetailsBySessionId}
         sessionsById={sessionsById}
         agentsById={agentsById}
-        mentalModelEnabledForNextTurn={mentalModelEnabledForNextTurn}
         numberFormatter={numberFormatter}
         conversationIndexPanel={conversationIndexPanel}
         groupComposerOpen={groupComposerOpen}

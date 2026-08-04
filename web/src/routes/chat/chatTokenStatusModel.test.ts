@@ -213,4 +213,41 @@ describe("chatTokenStatusModel", () => {
     expect(compressionMetric?.title).toContain("Agent 策略未物化");
     expect(compressionMetric?.title).not.toContain("继承全局策略");
   });
+
+  it("labels compression as active-session-only when runtime does not match selection", () => {
+    const model = buildChatTokenStatusViewModel({
+      detail: null,
+      lastCacheComposition: null,
+      lastContextComposition: null,
+      compression: null,
+      runtimeMatchesSelectedSession: false,
+      cache: {
+        cacheDetailAvailable: false,
+        cacheCompositionPercent: 0,
+        providerCachedInputTokens: 0,
+        providerCacheInputTokens: 0,
+        cacheCompositionSummary: "",
+        cacheDetailOpenLabel: "",
+        cacheCompositionTitle: "",
+      },
+      tokenSpeedTracker: null,
+      activeSessionId: "session-other",
+      groupPanelActive: false,
+      sessionStateValue: "idle",
+      sessionStateLabel: "空闲",
+      sessionStateLine: "ready",
+      lang: "zh",
+      t: ((key: string) => key) as never,
+      numberFormatter: new Intl.NumberFormat("zh-CN"),
+      compactNumberFormatter: new Intl.NumberFormat("zh-CN", { notation: "compact" }),
+      locale: "zh-CN",
+      formatTime: (value) => value,
+    });
+
+    const compressionMetric = model.tokenStatusMetrics.find((item) => item.key === "compression");
+    expect(compressionMetric?.value).toBe("--");
+    expect(compressionMetric?.meta).toBe("compressionScopeInactiveSession");
+    expect(compressionMetric?.title).toContain("compressionScopeInactiveSessionHint");
+    expect(compressionMetric?.title).not.toContain("loadingContext");
+  });
 });

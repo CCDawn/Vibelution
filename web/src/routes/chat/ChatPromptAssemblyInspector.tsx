@@ -70,6 +70,7 @@ export function ChatPromptAssemblyInspector({
   const usedTokens = safeCount(manifest.totalEstimatedTokens);
   const budgetTokens = safeCount(manifest.budgetTokens);
   const tokenSummary = `${usedTokens} / ${budgetTokens || "—"} tokens`;
+  const scopeLabel = lang === "zh" ? "上轮装配" : "Last-turn assembly";
 
   return (
     <details className={`group ${styles.root}`}>
@@ -77,6 +78,12 @@ export function ChatPromptAssemblyInspector({
         <span className={styles.titleGroup}>
           <ChevronRight aria-hidden="true" className={styles.chevron} />
           <span className={styles.title}>{title}</span>
+          <span className={styles.summaryMeta} title={lang === "zh"
+            ? "反映上一轮实际装配清单，不是当前消息列表条数。"
+            : "Reflects the last turn's assembly manifest, not the visible message count."}
+          >
+            {scopeLabel}
+          </span>
           <span className={styles.summaryMeta}>{safeText(manifest.assemblyMode) || "v2"}</span>
         </span>
         <span className={styles.summaryMeta}>{tokenSummary} · {segments.length} {lang === "zh" ? "段" : "segments"}</span>
