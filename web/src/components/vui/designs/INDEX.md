@@ -1,0 +1,122 @@
+# VUI Component Index
+
+选型与反冗余入口。路径均为 `designs/` 相对路径。
+
+## Primitives
+
+| 组件 | 设计说明 |
+| --- | --- |
+| `VButton` | [primitives/actions.md](./primitives/actions.md#vbutton) |
+| `VIconButton` | [primitives/actions.md](./primitives/actions.md#viconbutton) |
+| `VNativeButton` | [primitives/actions.md](./primitives/actions.md#vnativebutton) |
+| `VRouteLinkButton` | [primitives/actions.md](./primitives/actions.md#vroutelinkbutton) |
+| `VSurface` | [primitives/surfaces.md](./primitives/surfaces.md#vsurface) |
+| `VPanel` | [primitives/surfaces.md](./primitives/surfaces.md#vpanel) |
+| `VChip` | [primitives/feedback.md](./primitives/feedback.md#vchip) |
+| `VTooltip` | [primitives/feedback.md](./primitives/feedback.md#vtooltip) |
+| `VContextualHint` | [primitives/feedback.md](./primitives/feedback.md#vcontextualhint) |
+| `VDialog` | [primitives/feedback.md](./primitives/feedback.md#vdialog) |
+| `VConfirmDialog` | [primitives/feedback.md](./primitives/feedback.md#vconfirmdialog) |
+
+## Forms
+
+| 组件 | 设计说明 |
+| --- | --- |
+| `VInput` | [forms/controls.md](./forms/controls.md#vinput) |
+| `VNativeInput` | [forms/controls.md](./forms/controls.md#vnativeinput) |
+| `VTextarea` | [forms/controls.md](./forms/controls.md#vtextarea) |
+| `VNativeTextarea` | [forms/controls.md](./forms/controls.md#vnativetextarea) |
+| `VSelect` | [forms/controls.md](./forms/controls.md#vselect) |
+| `VNativeSelect` | [forms/controls.md](./forms/controls.md#vnativeselect) |
+| `VStringSelect` | [forms/controls.md](./forms/controls.md#vstringselect) |
+| `VCheckbox` | [forms/controls.md](./forms/controls.md#vcheckbox) |
+| `VFieldRow` | [forms/controls.md](./forms/controls.md#vfieldrow) |
+
+## Layout — page recipes
+
+| 组件 | 设计说明 |
+| --- | --- |
+| `VPage` | [layout/pages.md](./layout/pages.md#vpage) |
+| `VWorkbenchPage` | [layout/pages.md](./layout/pages.md#vworkbenchpage) |
+| `VDenseOpsPage` | [layout/pages.md](./layout/pages.md#vdenseopspage) |
+| `VListDetailPage` | [layout/pages.md](./layout/pages.md#vlistdetailpage) |
+| `VSettingsFormPage` | [layout/pages.md](./layout/pages.md#vsettingsformpage) |
+| `VBoardWorkbenchPage` | [layout/pages.md](./layout/pages.md#vboardworkbenchpage) |
+| `VCanvasWorkbenchPage` | [layout/pages.md](./layout/pages.md#vcanvasworkbenchpage) |
+| `VSplitWorkspace` | [layout/pages.md](./layout/pages.md#vsplitworkspace) |
+
+## Layout — chrome & structure
+
+| 组件 | 设计说明 |
+| --- | --- |
+| `VRouteHeader` | [layout/chrome.md](./layout/chrome.md#vrouteheader) |
+| `VPanelHeader` | [layout/chrome.md](./layout/chrome.md#vpanelheader) |
+| `VToolbar` | [layout/chrome.md](./layout/chrome.md#vtoolbar) |
+| `VActionGroup` | [layout/chrome.md](./layout/chrome.md#vactiongroup) |
+| `VStatusStrip` | [layout/chrome.md](./layout/chrome.md#vstatusstrip) |
+| `VSection` | [layout/structure.md](./layout/structure.md#vsection) |
+| `VStack` | [layout/structure.md](./layout/structure.md#vstack) |
+| `VHStack` | [layout/structure.md](./layout/structure.md#vhstack) |
+| `VEmptyState` | [layout/structure.md](./layout/structure.md#vemptystate) |
+| `VStateSurface` | [layout/structure.md](./layout/structure.md#vstatesurface) |
+| `VErrorSummary` | [layout/structure.md](./layout/structure.md#verrorsummary) |
+| `VEntityList` | [layout/structure.md](./layout/structure.md#ventitylist) |
+
+## Display
+
+| 组件 | 设计说明 |
+| --- | --- |
+| `VDenseTable` | [display/data.md](./display/data.md#vdensetable) |
+| `VMetricStrip` | [display/data.md](./display/data.md#vmetricstrip) |
+| `VLoadingValue` | [display/data.md](./display/data.md#vloadingvalue) |
+
+## Aesthetic
+
+| 组件 | 设计说明 |
+| --- | --- |
+| `VDenseToolbar` | [aesthetic/dense.md](./aesthetic/dense.md#vdensetoolbar) |
+| `VDenseRow` | [aesthetic/dense.md](./aesthetic/dense.md#vdenserow) |
+| `VEmbeddedPanel` | [aesthetic/dense.md](./aesthetic/dense.md#vembeddedpanel) |
+| `VMetricChip` | [aesthetic/dense.md](./aesthetic/dense.md#vmetricchip) |
+| `VStateRow` | [aesthetic/dense.md](./aesthetic/dense.md#vstaterow) |
+| `VStatusChip` | [aesthetic/dense.md](./aesthetic/dense.md#vstatuschip) |
+
+## Product — agent-management
+
+| 组件 | 设计说明 |
+| --- | --- |
+| `AgentPageHeader` | [product/agent-management.md](./product/agent-management.md#agentpageheader) |
+| `AgentFilterRail` | [product/agent-management.md](./product/agent-management.md#agentfilterrail) |
+| `AgentDenseList` | [product/agent-management.md](./product/agent-management.md#agentdenselist) |
+| `AgentBulkActionBar` | [product/agent-management.md](./product/agent-management.md#agentbulkactionbar) |
+| `AgentSummaryStrip` | [product/agent-management.md](./product/agent-management.md#agentsummarystrip) |
+| `AgentWorkspacePanel` | [product/agent-management.md](./product/agent-management.md#agentworkspacepanel) |
+| `AgentPermissionPresetControl` | [product/agent-management.md](./product/agent-management.md#agentpermissionpresetcontrol) |
+
+## Product — team-management
+
+| 组件 | 设计说明 |
+| --- | --- |
+| `TeamStageCard` | [product/team-management.md](./product/team-management.md#teamstagecard) |
+| `TeamStageCommandBar` | [product/team-management.md](./product/team-management.md#teamstagecommandbar) |
+| `TeamStagePipeline` | [product/team-management.md](./product/team-management.md#teamstagepipeline) |
+| `TeamSourceFilterBar` | [product/team-management.md](./product/team-management.md#teamsourcefilterbar) |
+| `TeamSourcePagination` | [product/team-management.md](./product/team-management.md#teamsourcepagination) |
+| `TeamSourceResultList` / `TeamSourceResultItem` | [product/team-management.md](./product/team-management.md#teamsourceresultlist) |
+| `TeamSourceResultStats` | [product/team-management.md](./product/team-management.md#teamsourceresultstats) |
+| `TeamSourceEmptyState` | [product/team-management.md](./product/team-management.md#teamsourceemptystate) |
+| `TeamCandidateCard` | [product/team-management.md](./product/team-management.md#teamcandidatecard) |
+
+## Provider
+
+| 组件 | 设计说明 |
+| --- | --- |
+| `VuiProvider` | [provider.md](./provider.md#vuiprovider) |
+
+## 拟新增（未实现，仅登记意图 — 实现前补全专节）
+
+| 候选 | 聚类 | 为何不立刻建 | 设计占位 |
+| --- | --- | --- | --- |
+| `VSessionWorkbenchPage` | Chat 双轨 | 先验证能否用 list-detail + domain 槽 | [layout/planned.md](./layout/planned.md#vsessionworkbenchpage) |
+| `VTrackWorkbenchPage` | Evolution 双轨 | 先 DenseOps + 内嵌 split | [layout/planned.md](./layout/planned.md#vtrackworkbenchpage) |
+| `VFilterListDetailPage` | Agents 筛选+列表+详情 | 先塞进 ListDetail 的 list 槽 | [layout/planned.md](./layout/planned.md#vfilterlistdetailpage) |
