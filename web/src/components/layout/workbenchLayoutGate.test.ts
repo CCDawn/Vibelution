@@ -222,12 +222,14 @@ describe("workbench layout gate (Wave 5)", () => {
       { file: "routes/SkillsRoute.tsx", recipe: "skills-workbench" },
       { file: "routes/KernelTaskCenterRoute.tsx", recipe: "kernel-task-center-workbench" },
       { file: "routes/PromptTemplatesRoute.tsx", recipe: "prompt-templates-workbench" },
+      { file: "routes/ResearchFlowCanvasRoute.tsx", recipe: "research-flow-canvas-workbench" },
     ];
     for (const sample of samples) {
       const text = readFileSync(resolve(webSrc, sample.file), "utf-8");
       expect(
         text.includes(`data-vui-recipe="${sample.recipe}"`)
-        || text.includes(`data-vui-domain-recipe="${sample.recipe}"`),
+        || text.includes(`data-vui-domain-recipe="${sample.recipe}"`)
+        || text.includes(`domainRecipe="${sample.recipe}"`),
         sample.file,
       ).toBe(true);
     }

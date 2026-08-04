@@ -34,10 +34,10 @@ import {
 } from "../api/types";
 import {
   VButton,
+  VCanvasWorkbenchPage,
   VNativeInput,
   VNativeSelect,
   VNativeTextarea,
-  VRouteHeader,
   VRouteLinkButton,
 } from "../components/vui";
 import { agentDisplayInfo } from "./agentDisplay";
@@ -2303,68 +2303,74 @@ export function ResearchFlowCanvasRoute() {
   const scaledCanvasHeight = canvasHeight * canvasZoom + Math.abs(canvasOffset.y) + 260;
 
   return (
-    <section className={styles.route}>
-      <VRouteHeader
-        className={styles.header}
-        eyebrow="Project Organization Canvas"
-        title="科研组织画布"
-        meta="持续锁定到项目组织架构；Agent 节点和通信线实时来自科研团队事实源。"
-        actions={(
-          <div className={styles.headerActions}>
-            <VRouteLinkButton className={styles.secondaryButton} to="/research" icon={<ArrowLeft size={16} />}>
-              返回科研页
-            </VRouteLinkButton>
-            <VButton className={styles.secondaryButton} type="button" onClick={fitView} isDisabled={!draft}>
-              <MousePointer2 size={16} />
-              复位视图
-            </VButton>
-            <VButton
-              className={styles.secondaryButton}
-              type="button"
-              onClick={() => {
-                canvasQuery.refetch();
-                organizationQuery.refetch();
-                setObservationMessage("已请求刷新科研组织图。");
-              }}
-              isDisabled={canvasQuery.isFetching || organizationQuery.isFetching}
-            >
-              <RefreshCw size={16} />
-              刷新组织图
-            </VButton>
-            <VButton
-              className={`${styles.primaryButton} ${styles.lockButtonActive}`}
-              type="button"
-              onClick={toggleCanvasLock}
-              title="画布持续锁定，拓扑来自项目组织架构。"
-              aria-pressed="true"
-            >
-              <Lock size={16} />
-              持续锁定
-            </VButton>
+    <VCanvasWorkbenchPage
+      className={styles.route}
+      headerClassName={styles.header}
+      domainRecipe="research-flow-canvas-workbench"
+      data-vui-recipe="research-flow-canvas-workbench"
+      ariaLabel="科研组织画布"
+      eyebrow="Project Organization Canvas"
+      title="科研组织画布"
+      meta="持续锁定到项目组织架构；Agent 节点和通信线实时来自科研团队事实源。"
+      actions={(
+        <div className={styles.headerActions}>
+          <VRouteLinkButton className={styles.secondaryButton} to="/research" icon={<ArrowLeft size={16} />}>
+            返回科研页
+          </VRouteLinkButton>
+          <VButton className={styles.secondaryButton} type="button" onClick={fitView} isDisabled={!draft}>
+            <MousePointer2 size={16} />
+            复位视图
+          </VButton>
+          <VButton
+            className={styles.secondaryButton}
+            type="button"
+            onClick={() => {
+              canvasQuery.refetch();
+              organizationQuery.refetch();
+              setObservationMessage("已请求刷新科研组织图。");
+            }}
+            isDisabled={canvasQuery.isFetching || organizationQuery.isFetching}
+          >
+            <RefreshCw size={16} />
+            刷新组织图
+          </VButton>
+          <VButton
+            className={`${styles.primaryButton} ${styles.lockButtonActive}`}
+            type="button"
+            onClick={toggleCanvasLock}
+            title="画布持续锁定，拓扑来自项目组织架构。"
+            aria-pressed="true"
+          >
+            <Lock size={16} />
+            持续锁定
+          </VButton>
+        </div>
+      )}
+      toolbar={(
+        <section className={styles.executionBar} aria-label="科研组织画布观察状态">
+          <div className={styles.executionGroup}>
+            <span>绑定团队</span>
+            <strong>{canvasProjectLabel}</strong>
           </div>
-        )}
-      />
-
-      <section className={styles.executionBar} aria-label="科研组织画布观察状态">
-        <div className={styles.executionGroup}>
-          <span>绑定团队</span>
-          <strong>{canvasProjectLabel}</strong>
-        </div>
-        <div className={canvasObservationActive ? `${styles.observerStatus} ${styles.observerStatusActive}` : styles.observerStatus}>
-          <span>事实来源</span>
-          <strong>{organizationSourcePath}</strong>
-        </div>
-        <div className={styles.observerStatus}>
-          <span>组织结构</span>
-          <strong>{`${draft?.nodes.length ?? 0} Agent / ${draft?.edges.length ?? 0} 通信线`}</strong>
-        </div>
-        <p className={styles.executionHint}>
-          {observationMessage || "画布持续只读同步；流程线与组织通信线使用同一份项目组织数据。"}
-        </p>
-      </section>
-
-      <div className={styles.body}>
-        <main className={styles.canvasShell} aria-label="科研组织画布">
+          <div className={canvasObservationActive ? `${styles.observerStatus} ${styles.observerStatusActive}` : styles.observerStatus}>
+            <span>事实来源</span>
+            <strong>{organizationSourcePath}</strong>
+          </div>
+          <div className={styles.observerStatus}>
+            <span>组织结构</span>
+            <strong>{`${draft?.nodes.length ?? 0} Agent / ${draft?.edges.length ?? 0} 通信线`}</strong>
+          </div>
+          <p className={styles.executionHint}>
+            {observationMessage || "画布持续只读同步；流程线与组织通信线使用同一份项目组织数据。"}
+          </p>
+        </section>
+      )}
+      toolbarClassName={styles.canvasToolbarStrip}
+      canvasClassName={styles.canvasShell}
+      inspectorClassName={styles.inspector}
+      workspaceClassName={styles.body}
+      canvas={(
+        <div className={styles.canvasShellInner} aria-label="科研组织画布">
           <div className={styles.zoomControl} aria-label="画布缩放控制">
             <VButton
               className={styles.iconButton}
@@ -2591,9 +2597,10 @@ export function ResearchFlowCanvasRoute() {
               </div>
             </div>
           )}
-        </main>
-
-        <aside className={styles.inspector} aria-label="科研组织配置">
+        </div>
+      )}
+      inspector={(
+        <div className={styles.inspectorInner} aria-label="科研组织配置">
           <div className={styles.inspectorHeader}>
             <p>
               {inspectorView === "organization"
@@ -3036,8 +3043,8 @@ export function ResearchFlowCanvasRoute() {
             )}
             </div>
           </div>
-        </aside>
-      </div>
-    </section>
+        </div>
+      )}
+    />
   );
 }

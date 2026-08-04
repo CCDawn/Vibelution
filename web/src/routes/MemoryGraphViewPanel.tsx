@@ -6,7 +6,7 @@ import { PaneHeightResizeHandle } from "../components/layout/PaneHeightResizeHan
 import type { PaneHeightSpec } from "../components/layout/paneHeightPersistence";
 import { usePersistedPaneHeight } from "../components/layout/usePersistedPaneHeight";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
-import { VButton, VMetricStrip, VNativeInput, VSection, VSurface } from "../components/vui";
+import { VButton, VCanvasWorkbenchPage, VMetricStrip, VNativeInput, VSection, VSurface } from "../components/vui";
 import {
   GRAPH_NODE_TYPE_LABELS,
   MemoryGraphNodeInspectorPanel,
@@ -110,28 +110,40 @@ export function MemoryGraphViewPanel({
   } as CSSProperties;
 
   return (
-    <>
-      <VMetricStrip
-        ariaLabel={copy.knowledgeGraph}
-        metrics={[
-          { id: "visible-nodes", label: copy.graphVisibleNodes, value: filteredGraphNodes.length, detail: `${copy.graphNodes}: ${graphPayload?.summary.nodeCount ?? 0}` },
-          { id: "visible-edges", label: copy.graphVisibleEdges, value: filteredGraphEdges.length, detail: `${copy.graphEdges}: ${graphPayload?.summary.edgeCount ?? 0}` },
-          { id: "gpu", label: copy.graphGpu, value: graphPayload?.operatingBoundary.gpuPreferred ? copy.yes : copy.no },
-          { id: "worker", label: copy.graphWorker, value: graphPayload?.operatingBoundary.layoutWorker ? copy.yes : copy.no },
-          { id: "readonly", label: copy.graphReadOnly, value: graphPayload?.operatingBoundary.readOnly ? copy.yes : copy.no },
-          { id: "acl", label: copy.graphAcl, value: graphPayload?.operatingBoundary.honorsKnowledgeAcl ? copy.yes : copy.no },
-        ]}
-      />
-
-      <div
-        className={`${styles.workspace} ${styles.graphWorkspace}`}
-        data-vui-recipe="memory-knowledge-workbench"
-        data-vui-layout-id={MEMORY_GRAPH_LAYOUT_ID}
-        data-vui-region="memory-graph-workspace"
-      >
+    <VCanvasWorkbenchPage
+      className={`${styles.workspace} ${styles.graphWorkspace}`}
+      hideHeader
+      title={copy.knowledgeGraph}
+      ariaLabel={copy.knowledgeGraph}
+      domainRecipe="memory-knowledge-workbench"
+      data-vui-recipe="memory-knowledge-workbench"
+      data-vui-region="memory-graph-workspace"
+      layoutId={MEMORY_GRAPH_LAYOUT_ID}
+      resize={{
+        sidebar: { id: "filters", defaultWidth: 280, minWidth: 220, maxWidth: 360 },
+        aside: { id: "inspector", defaultWidth: 320, minWidth: 260, maxWidth: 440 },
+      }}
+      toolbar={(
+        <VMetricStrip
+          ariaLabel={copy.knowledgeGraph}
+          metrics={[
+            { id: "visible-nodes", label: copy.graphVisibleNodes, value: filteredGraphNodes.length, detail: `${copy.graphNodes}: ${graphPayload?.summary.nodeCount ?? 0}` },
+            { id: "visible-edges", label: copy.graphVisibleEdges, value: filteredGraphEdges.length, detail: `${copy.graphEdges}: ${graphPayload?.summary.edgeCount ?? 0}` },
+            { id: "gpu", label: copy.graphGpu, value: graphPayload?.operatingBoundary.gpuPreferred ? copy.yes : copy.no },
+            { id: "worker", label: copy.graphWorker, value: graphPayload?.operatingBoundary.layoutWorker ? copy.yes : copy.no },
+            { id: "readonly", label: copy.graphReadOnly, value: graphPayload?.operatingBoundary.readOnly ? copy.yes : copy.no },
+            { id: "acl", label: copy.graphAcl, value: graphPayload?.operatingBoundary.honorsKnowledgeAcl ? copy.yes : copy.no },
+          ]}
+        />
+      )}
+      toolbarClassName={styles.graphMetricToolbar}
+      railClassName={styles.sourcePanel}
+      canvasClassName={styles.graphCanvasPanel}
+      inspectorClassName={styles.graphInspectorHost}
+      rail={(
         <VSurface
-          as="aside"
-          className={styles.sourcePanel}
+          as="div"
+          className={styles.sourcePanelInner}
           elevation="panel"
           tone="rail"
           data-vui-region="memory-graph-filters"
@@ -178,12 +190,10 @@ export function MemoryGraphViewPanel({
             ) : null}
           </VSection>
         </VSurface>
-
-        <VSurface
-          as="main"
-          className={styles.graphCanvasPanel}
-          elevation="panel"
-          tone="rail"
+      )}
+      canvas={(
+        <div
+          className={styles.graphCanvasInner}
           style={graphCanvasStyle}
           data-vui-region="memory-graph-canvas"
         >
@@ -232,9 +242,10 @@ export function MemoryGraphViewPanel({
               </VButton>
             ))}
           </div>
-        </VSurface>
-
-        <div data-vui-region="memory-graph-inspector">
+        </div>
+      )}
+      inspector={(
+        <div data-vui-region="memory-graph-inspector" className={styles.graphInspectorInner}>
           <MemoryGraphNodeInspectorPanel
             copy={copy}
             selectedGraphNode={selectedGraphNode}
@@ -246,7 +257,7 @@ export function MemoryGraphViewPanel({
             onFocusGraphNode={onFocusGraphNode}
           />
         </div>
-      </div>
-    </>
+      )}
+    />
   );
 }
