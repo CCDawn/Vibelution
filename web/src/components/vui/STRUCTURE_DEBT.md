@@ -12,7 +12,7 @@
 
 | Surface | Symptom | Target recipe |
 | --- | --- | --- |
-| `TeamsRoute.tsx` | Still 6k+ lines of domain logic, but **success shell now mounts** `VBoardWorkbenchPage` / `VCanvasWorkbenchPage` (loading stays on `VDenseOpsPage`). Next: extract board/canvas bodies into `routes/teams/*` modules. | keep recipes; split domain modules |
+| `TeamsRoute.tsx` | Still ~6.7k lines; shell recipes + **extracted** `TeamOrganizationCanvasSurface` / `TeamNodeBindingPanel` / `TeamShellToolbar` / `TeamCanvasReadOnlyInspector`. Next: extract board workflow panel host + discussion/broadcast blocks. | keep recipes; continue module extract |
 | Agents workspace | Custom three-pane remnants | `VListDetailPage` + product/agent-management |
 | Chat coding | Dual-pane domain math (OK) but chrome drift risk | Keep domain layout; enforce layoutId + regions only |
 | Memory graph | Graph + inspector hand shells | `VCanvasWorkbenchPage` |
