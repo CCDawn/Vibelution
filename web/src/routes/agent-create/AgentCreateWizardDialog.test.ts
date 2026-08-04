@@ -4,19 +4,18 @@ import dialogSource from "./AgentCreateWizardDialog.tsx?raw";
 import dialogStyles from "./AgentCreateWizardDialog.styles";
 
 describe("AgentCreateWizardDialog contract", () => {
-  it("keeps creation in an accessible, scroll-contained floating layer", () => {
-    expect(dialogSource).toContain("createPortal(");
-    expect(dialogSource).toContain('role="dialog"');
-    expect(dialogSource).toContain('aria-modal="true"');
-    expect(dialogSource).toContain('event.key === "Escape"');
-    expect(dialogSource).toContain('event.key !== "Tab"');
-    expect(dialogSource).toContain('querySelector<HTMLElement>("[autofocus]")');
+  it("hosts creation in VDialog with viewport-clamped content", () => {
+    expect(dialogSource).toContain("<VDialog");
+    expect(dialogSource).toContain("from \"../../components/vui\"");
+    expect(dialogSource).toContain("onOpenChange={handleOpenChange}");
+    expect(dialogSource).toContain("contentClassName={styles.dialogContent}");
     expect(dialogSource).toContain("triggerRef?.current");
     expect(dialogSource).toContain("document.getElementById(triggerId)");
     expect(dialogSource).toContain("requestAnimationFrame(() => {");
-    expect(dialogSource).toContain('document.body.style.overflow = "hidden"');
-    expect(dialogStyles.overlay).toContain("fixed inset-0");
-    expect(dialogStyles.body).toContain("overflow-y-auto");
+    expect(dialogSource).not.toContain("createPortal(");
+    expect(dialogSource).not.toContain('document.body.style.overflow = "hidden"');
+    expect(dialogStyles.dialogContent).toContain("min(880px");
+    expect(dialogStyles.dialogContent).toContain("100dvh");
   });
 
   it("loads avatar options while open for create-time library picks", () => {
@@ -48,5 +47,14 @@ describe("AgentCreateWizardDialog contract", () => {
     expect(dialogSource).toContain("createDraftReady(draft, toolBundles, probeUsableModelIds)");
     expect(dialogSource).toContain('markProbe(modelId, "ok"');
     expect(dialogSource).toContain('markProbe(modelId, "fail"');
+  });
+
+  it("keeps discard confirmation and success actions inside the dialog body", () => {
+    expect(dialogSource).toContain("discardConfirmOpen");
+    expect(dialogSource).toContain("setDiscardConfirmOpen(true)");
+    expect(dialogSource).toContain("createdAgent");
+    expect(dialogSource).toContain("onStartConversation");
+    expect(dialogStyles.confirmation).toContain("grid");
+    expect(dialogStyles.success).toContain("min-h-[280px]");
   });
 });

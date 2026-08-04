@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, MessageSquare, Settings2, X } from "lucide-react";
+import { CheckCircle2, MessageSquare, Settings2 } from "lucide-react";
 import { type RefObject, useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 
 import { fetchJson } from "../../api/client";
 import { queryKeys } from "../../api/queryKeys";
@@ -13,7 +12,7 @@ import {
   type ConfigLlmTestResult,
   type ToolRegistryPayload,
 } from "../../api/types";
-import { VButton } from "../../components/vui";
+import { VButton, VDialog } from "../../components/vui";
 import { useShellI18n } from "../../i18n/useShellI18n";
 import { AgentCreatePanel, type AgentCreatePanelCopy } from "../AgentCreatePanel";
 import { createChatWorkspaceCache } from "../chatWorkspaceCache";
@@ -35,6 +34,7 @@ import {
   withDialogueModel,
 } from "./agentCreateContract";
 import styles from "./AgentCreateWizardDialog.styles";
+
 type AgentCreateWizardDialogProps = {
   open: boolean;
   /** The invoking control receives focus again when this modal closes. */
@@ -106,13 +106,6 @@ function dialogCopy(lang: "zh" | "en"): AgentCreatePanelCopy {
   };
 }
 
-function focusableElements(container: HTMLElement | null) {
-  if (!container) return [];
-  return Array.from(container.querySelectorAll<HTMLElement>(
-    'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-  )).filter((element) => !element.hidden && element.offsetParent !== null);
-}
-
 export function AgentCreateWizardDialog({
   open,
   triggerRef,
@@ -126,7 +119,6 @@ export function AgentCreateWizardDialog({
   const queryClient = useQueryClient();
   const chatWorkspaceCache = useMemo(() => createChatWorkspaceCache(queryClient), [queryClient]);
   const copy = useMemo(() => dialogCopy(lang), [lang]);
-  const dialogRef = useRef<HTMLDivElement>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
   const [draft, setDraft] = useState<AgentCreateDraft>(() => createDraftFromWorkspace(undefined, [], lang));
   const [draftDirty, setDraftDirty] = useState(false);
@@ -201,19 +193,10 @@ export function AgentCreateWizardDialog({
     setProbeBusy(false);
     setProbeSummary("");
     setInstanceKey((current) => current + 1);
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    requestAnimationFrame(() => {
-      const initialFocus = dialogRef.current?.querySelector<HTMLElement>("[autofocus]")
-        ?? focusableElements(dialogRef.current)[0];
-      initialFocus?.focus();
-    });
     return () => {
-      document.body.style.overflow = previousOverflow;
       const fallbackFocusTarget = returnFocusRef.current;
-      // The portal is removed in the same commit as this cleanup. Defer so the
-      // browser does not subsequently move focus from the removed close button
-      // back to <body>.
+      // Radix unmounts the portal in the same commit; defer so focus is not
+      // stolen by body after the dialog close control is removed.
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
           const focusTarget = triggerId ? document.getElementById(triggerId) : fallbackFocusTarget;
@@ -271,33 +254,10 @@ export function AgentCreateWizardDialog({
     }
     closeNow();
   };
-
-  useEffect(() => {
-    if (!open) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        requestClose();
-        return;
-      }
-      if (event.key !== "Tab") return;
-      const elements = focusableElements(dialogRef.current);
-      if (!elements.length) return;
-      const first = elements[0];
-      const last = elements[elements.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  });
-
-  if (!open || typeof document === "undefined") return null;
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (nextOpen) return;
+    requestClose();
+  };
 
   const updateDraft = (patch: Partial<AgentCreateDraft>) => {
     setDraft((current) => ({ ...current, ...patch }));
@@ -404,95 +364,110 @@ export function AgentCreateWizardDialog({
       setStartingConversation(false);
     }
   };
-  const headingId = "agent-create-wizard-title";
-  const descriptionId = "agent-create-wizard-description";
+  const title = createdAgent
+    ? (lang === "zh" ? "Agent 已创建" : "Agent created")
+    : copy.createAgentTitle;
+  const description = createdAgent
+    ? (lang === "zh"
+      ? "现在即可进入与新 Agent 的对话，或继续完善高级配置。"
+      : "Start a conversation now or continue with advanced configuration.")
+    : (lang === "zh"
+      ? "3 步完成；当前对话会保留在背景中。"
+      : "Finish in three steps; your current conversation stays in place.");
 
-  return createPortal(
-    <div className={styles.overlay} role="presentation" onMouseDown={requestClose}>
-      <div
-        ref={dialogRef}
-        className={styles.dialog}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={headingId}
-        aria-describedby={descriptionId}
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <header className={styles.header}>
-          <div className={styles.heading}>
-            <span className={styles.eyebrow}>{lang === "zh" ? "会话工作台" : "Chat workspace"}</span>
-            <h2 id={headingId}>{createdAgent ? (lang === "zh" ? "Agent 已创建" : "Agent created") : copy.createAgentTitle}</h2>
-            <p id={descriptionId}>{createdAgent
-              ? (lang === "zh" ? "现在即可进入与新 Agent 的对话，或继续完善高级配置。" : "Start a conversation now or continue with advanced configuration.")
-              : (lang === "zh" ? "3 步完成；当前对话会保留在背景中。" : "Finish in three steps; your current conversation stays in place.")}</p>
+  return (
+    <VDialog
+      open={open}
+      onOpenChange={handleOpenChange}
+      title={title}
+      description={description}
+      size="xl"
+      contentClassName={styles.dialogContent}
+      aria-label={title}
+      hideClose={createMutation.isPending || startingConversation}
+    >
+      {discardConfirmOpen ? (
+        <section className={styles.confirmation} aria-live="polite">
+          <strong>{lang === "zh" ? "放弃本次填写？" : "Discard this draft?"}</strong>
+          <p>{lang === "zh" ? "尚未创建 Agent，关闭后本次填写不会保留。" : "No Agent has been created. Closing discards this draft."}</p>
+          <div className={styles.confirmationActions}>
+            <VButton type="button" variant="secondary" onPress={() => setDiscardConfirmOpen(false)}>{lang === "zh" ? "继续填写" : "Keep editing"}</VButton>
+            <VButton type="button" variant="danger" onPress={closeNow}>{lang === "zh" ? "放弃并关闭" : "Discard"}</VButton>
           </div>
-          <VButton type="button" variant="ghost" isIconOnly aria-label={lang === "zh" ? "关闭创建向导" : "Close create wizard"} onPress={requestClose}>
-            <X size={17} aria-hidden="true" />
-          </VButton>
-        </header>
-
-        <div className={styles.body}>
-          {discardConfirmOpen ? (
-            <section className={styles.confirmation} aria-live="polite">
-              <strong>{lang === "zh" ? "放弃本次填写？" : "Discard this draft?"}</strong>
-              <p>{lang === "zh" ? "尚未创建 Agent，关闭后本次填写不会保留。" : "No Agent has been created. Closing discards this draft."}</p>
-              <div className={styles.confirmationActions}>
-                <VButton type="button" variant="secondary" onPress={() => setDiscardConfirmOpen(false)}>{lang === "zh" ? "继续填写" : "Keep editing"}</VButton>
-                <VButton type="button" variant="danger" onPress={closeNow}>{lang === "zh" ? "放弃并关闭" : "Discard"}</VButton>
-              </div>
-            </section>
-          ) : createdAgent ? (
-            <section className={styles.success} aria-live="polite">
-              <CheckCircle2 size={28} aria-hidden="true" />
-              <div>
-                <strong>{lang === "zh" ? `已创建 ${createdAgent.displayName}` : `Created ${createdAgent.displayName}`}</strong>
-                <p>{lang === "zh" ? "Agent 已加入当前工作台。" : "The Agent is now available in this workspace."}</p>
-              </div>
-              {startConversationError ? <p className={styles.error}>{startConversationError}</p> : null}
-              <div className={styles.successActions}>
-                {onStartConversation ? <VButton type="button" variant="primary" icon={<MessageSquare size={15} />} isDisabled={startingConversation} onPress={() => { void startConversation(); }}>{startingConversation ? (lang === "zh" ? "正在打开会话…" : "Opening session…") : (lang === "zh" ? "开始对话" : "Start conversation")}</VButton> : null}
-                {onOpenAdvancedConfig ? <VButton type="button" variant="secondary" icon={<Settings2 size={15} />} isDisabled={startingConversation} onPress={() => onOpenAdvancedConfig(createdAgent)}>{lang === "zh" ? "继续高级配置" : "Advanced configuration"}</VButton> : null}
-                <VButton type="button" variant="secondary" isDisabled={startingConversation} onPress={closeNow}>{lang === "zh" ? "完成" : "Done"}</VButton>
-              </div>
-            </section>
-          ) : (
-            <AgentCreatePanel
-              key={instanceKey}
-              copy={copy}
-              draft={draft}
-              selectedModelId={selectedModelId}
-              isWorkSession={isWorkSessionCreateDraft(draft)}
-              canCreate={canCreate}
-              pending={createMutation.isPending}
-              loadingOptions={loadingOptions}
-              optionsError={optionsError}
-              notice={createMutation.isError ? { tone: "error", text: createMutation.error instanceof Error ? createMutation.error.message : String(createMutation.error) } : null}
-              modelChoices={modelChoices}
-              primaryModeOptions={primaryModeOptions}
-              promptTemplateOptions={promptTemplateOptions}
-              toolBundles={toolBundles}
-              toolBundleSummary={toolBundleSummary}
-              toolBundleMeta={(bundle) => toolBundleMeta(bundle, lang)}
-              presets={presets}
-              lang={lang}
-              probeBusy={probeBusy}
-              probeSummary={probeSummary}
-              onProbeSelected={probeSelectedModel}
-              onProbeCredentialReady={probeAllCredentialReady}
-              avatarOptions={avatarOptionsQuery.data ?? null}
-              avatarOptionsPending={avatarOptionsQuery.isPending}
-              onDraftChange={updateDraft}
-              onApplyPreset={applyPreset}
-              onModelChange={(modelId) => updateDraft({ llmBindings: withDialogueModel(draft.llmBindings, modelId) })}
-              onPrimaryModeChange={(primaryMode) => updateDraft({ primaryMode, selectedToolBundleIds: toolBundleIdsForModeChange(draft, primaryMode, toolBundles) })}
-              onToolBundleToggle={toggleToolBundle}
-              onCancel={requestClose}
-              onCreate={() => createMutation.mutate(draft)}
-            />
-          )}
-        </div>
-      </div>
-    </div>,
-    document.body,
+        </section>
+      ) : createdAgent ? (
+        <section className={styles.success} aria-live="polite">
+          <CheckCircle2 size={28} aria-hidden="true" />
+          <div>
+            <strong>{lang === "zh" ? `已创建 ${createdAgent.displayName}` : `Created ${createdAgent.displayName}`}</strong>
+            <p>{lang === "zh" ? "Agent 已加入当前工作台。" : "The Agent is now available in this workspace."}</p>
+          </div>
+          {startConversationError ? <p className={styles.error}>{startConversationError}</p> : null}
+          <div className={styles.successActions}>
+            {onStartConversation ? (
+              <VButton
+                type="button"
+                variant="primary"
+                icon={<MessageSquare size={15} />}
+                isDisabled={startingConversation}
+                onPress={() => { void startConversation(); }}
+              >
+                {startingConversation
+                  ? (lang === "zh" ? "正在打开会话…" : "Opening session…")
+                  : (lang === "zh" ? "开始对话" : "Start conversation")}
+              </VButton>
+            ) : null}
+            {onOpenAdvancedConfig ? (
+              <VButton
+                type="button"
+                variant="secondary"
+                icon={<Settings2 size={15} />}
+                isDisabled={startingConversation}
+                onPress={() => onOpenAdvancedConfig(createdAgent)}
+              >
+                {lang === "zh" ? "继续高级配置" : "Advanced configuration"}
+              </VButton>
+            ) : null}
+            <VButton type="button" variant="secondary" isDisabled={startingConversation} onPress={closeNow}>
+              {lang === "zh" ? "完成" : "Done"}
+            </VButton>
+          </div>
+        </section>
+      ) : (
+        <AgentCreatePanel
+          key={instanceKey}
+          copy={copy}
+          draft={draft}
+          selectedModelId={selectedModelId}
+          isWorkSession={isWorkSessionCreateDraft(draft)}
+          canCreate={canCreate}
+          pending={createMutation.isPending}
+          loadingOptions={loadingOptions}
+          optionsError={optionsError}
+          notice={createMutation.isError ? { tone: "error", text: createMutation.error instanceof Error ? createMutation.error.message : String(createMutation.error) } : null}
+          modelChoices={modelChoices}
+          primaryModeOptions={primaryModeOptions}
+          promptTemplateOptions={promptTemplateOptions}
+          toolBundles={toolBundles}
+          toolBundleSummary={toolBundleSummary}
+          toolBundleMeta={(bundle) => toolBundleMeta(bundle, lang)}
+          presets={presets}
+          lang={lang}
+          probeBusy={probeBusy}
+          probeSummary={probeSummary}
+          onProbeSelected={probeSelectedModel}
+          onProbeCredentialReady={probeAllCredentialReady}
+          avatarOptions={avatarOptionsQuery.data ?? null}
+          avatarOptionsPending={avatarOptionsQuery.isPending}
+          onDraftChange={updateDraft}
+          onApplyPreset={applyPreset}
+          onModelChange={(modelId) => updateDraft({ llmBindings: withDialogueModel(draft.llmBindings, modelId) })}
+          onPrimaryModeChange={(primaryMode) => updateDraft({ primaryMode, selectedToolBundleIds: toolBundleIdsForModeChange(draft, primaryMode, toolBundles) })}
+          onToolBundleToggle={toggleToolBundle}
+          onCancel={requestClose}
+          onCreate={() => createMutation.mutate(draft)}
+        />
+      )}
+    </VDialog>
   );
 }
