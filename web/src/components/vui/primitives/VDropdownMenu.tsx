@@ -16,8 +16,11 @@ export type VDropdownMenuProps = {
   onOpenChange?: (open: boolean) => void;
   /** Fixed coordinates for context-menu surfaces (virtual anchor). */
   position?: VDropdownMenuPosition;
-  /** Classic dropdown trigger (button/icon). */
+  /** Classic dropdown trigger (button/icon). Must accept ref (forwardRef). */
   trigger?: ReactNode;
+  side?: "top" | "right" | "bottom" | "left";
+  align?: "start" | "center" | "end";
+  sideOffset?: number;
   "aria-label"?: string;
   className?: string;
   contentClassName?: string;

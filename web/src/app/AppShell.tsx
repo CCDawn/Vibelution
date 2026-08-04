@@ -78,6 +78,7 @@ import {
   shouldBlockWorkbenchWindowClose,
 } from "./projectCloseGuard";
 import { VButton } from "../components/vui/primitives/VButton";
+import { VDropdownMenu } from "../components/vui/primitives/VDropdownMenu";
 import { VIconButton } from "../components/vui/primitives/VIconButton";
 import { getPageInstanceId } from "./pageInstance";
 import { useShellStore } from "../store/shellStore";
@@ -700,7 +701,7 @@ export function AppShell() {
   const lifecycleRequestSeqRef = useRef(0);
   const lifecycleOverlayDismissedRef = useRef(false);
   const utilityMenuRef = useRef<HTMLDivElement | null>(null);
-  const lifecycleMenuRef = useRef<HTMLDivElement | null>(null);
+
   const shutdownLocalCompletionLoggedRef = useRef(false);
   const telemetrySeqRef = useRef(0);
   const pageInstanceIdRef = useRef(getPageInstanceId());
@@ -1624,33 +1625,6 @@ export function AppShell() {
   }, [utilityOpen]);
 
   useEffect(() => {
-    if (!lifecycleMenuOpen) {
-      return;
-    }
-
-    function handlePointerDown(event: PointerEvent) {
-      const target = event.target;
-      if (target instanceof Node && lifecycleMenuRef.current?.contains(target)) {
-        return;
-      }
-      setLifecycleMenuOpen(false);
-    }
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        setLifecycleMenuOpen(false);
-      }
-    }
-
-    document.addEventListener("pointerdown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [lifecycleMenuOpen]);
-
-  useEffect(() => {
     setFetchJsonFailureReporter((failure) => {
       if (shouldSuppressApiFailureTelemetry(failure, {
         shutdownRequested,
@@ -2531,113 +2505,103 @@ export function AppShell() {
             onPress={() => setTopBarMode("hidden")}
           />
           <div
-            ref={lifecycleMenuRef}
             className={
               lifecycleMenuOpen
                 ? `${styles.lifecycleMenuCluster} ${styles.lifecycleMenuClusterOpen}`
                 : styles.lifecycleMenuCluster
             }
           >
-            <VIconButton
-              type="button"
-              className={styles.actionIconButton}
-              label={lifecycleMenuLabel}
-              tooltip={lifecycleMenuLabel}
-              title={lifecycleMenuLabel}
-              aria-haspopup="menu"
-              aria-expanded={lifecycleMenuOpen}
-              icon={<Power size={16} />}
-              onPress={() => setLifecycleMenuOpen((current) => !current)}
-              isDisabled={restartRequested || (shutdownInFlight && !shutdownSettled)}
-            />
-            <div
-              className={styles.lifecycleMenuPanel}
-              role="menu"
+            <VDropdownMenu
+              open={lifecycleMenuOpen}
+              onOpenChange={setLifecycleMenuOpen}
+              align="end"
+              side="bottom"
               aria-label={lifecycleMenuLabel}
-              hidden={!lifecycleMenuOpen}
-            >
-              <VButton
-                type="button"
-                variant="ghost"
-                className={styles.lifecycleMenuItem}
-                role="menuitem"
-                onPress={() => {
-                  setLifecycleMenuOpen(false);
-                  const proceed = () => {
-                    void beginShutdown();
-                  };
-                  if (requestWorkbenchExitGuard("shutdown", proceed)) {
-                    proceed();
-                  }
-                }}
-                isDisabled={restartRequested || (shutdownInFlight && !shutdownSettled)}
-                icon={<Power size={15} />}
-              >
-                <span>{closeWorkbenchLabel}</span>
-              </VButton>
-              {forceCloseVisible ? (
+              contentClassName={styles.lifecycleMenuPanel}
+              itemClassName={styles.lifecycleMenuItem}
+              dangerItemClassName={styles.lifecycleMenuDangerItem}
+              trigger={(
                 <VButton
                   type="button"
-                  variant="danger"
-                  className={`${styles.lifecycleMenuItem} ${styles.lifecycleMenuDangerItem}`}
-                  role="menuitem"
-                  onPress={() => {
-                    setLifecycleMenuOpen(false);
-                    void beginForceShutdown();
-                  }}
-                  isDisabled={restartRequested}
-                  icon={<Power size={15} />}
-                >
-                  <span>{forceCloseWorkbenchLabel}</span>
-                </VButton>
-              ) : null}
-              <VButton
-                type="button"
-                variant="ghost"
-                className={styles.lifecycleMenuItem}
-                role="menuitem"
-                onPress={() => {
-                  setLifecycleMenuOpen(false);
-                  const proceed = () => {
-                    if (activeWorkIndicator) {
-                      setShutdownOpen(true);
-                      setShutdownSettled(false);
-                      setShutdownRequested(false);
-                      setRestartRequested(false);
-                      setLifecycleAction("restart");
-                      setLifecycleCommandId("");
-                      setLifecycleCancelPending(false);
-                      setShutdownTitle(restartHeading);
-                      setShutdownDetail(restartActiveWorkBlockedMessage(lang, activeWorkDetailsTitle));
-                      emitBrowserTelemetry(
-                        {
-                          phase: "restart",
-                          eventCode: "browser.user_action.restart_blocked_active_work",
-                          message: "Restart was blocked because active work is running.",
-                          level: "warning",
-                          fields: {
-                            action: "restart",
-                            source: "app_shell",
-                            activeWorkCount: activeWorkIndicator.count,
-                            activeWorkKinds: activeWorkIndicator.items.map((item) => item.kind),
-                          },
-                        },
-                        { preferBeacon: true },
-                      );
-                      return;
+                  isIconOnly
+                  className={styles.actionIconButton}
+                  aria-label={lifecycleMenuLabel}
+                  tooltip={lifecycleMenuLabel}
+                  title={lifecycleMenuLabel}
+                  isDisabled={restartRequested || (shutdownInFlight && !shutdownSettled)}
+                  icon={<Power size={16} />}
+                />
+              )}
+              items={[
+                {
+                  id: "shutdown",
+                  icon: <Power size={15} />,
+                  disabled: restartRequested || (shutdownInFlight && !shutdownSettled),
+                  label: closeWorkbenchLabel,
+                  onSelect: () => {
+                    const proceed = () => {
+                      void beginShutdown();
+                    };
+                    if (requestWorkbenchExitGuard("shutdown", proceed)) {
+                      proceed();
                     }
-                    void beginRestart();
-                  };
-                  if (requestWorkbenchExitGuard("restart", proceed)) {
-                    proceed();
-                  }
-                }}
-                isDisabled={restartRequested || shutdownRequested || (shutdownInFlight && !shutdownSettled)}
-                icon={<RefreshCw size={15} />}
-              >
-                <span>{restartWorkbenchLabel}</span>
-              </VButton>
-            </div>
+                  },
+                },
+                ...(forceCloseVisible
+                  ? [{
+                      id: "force-shutdown",
+                      icon: <Power size={15} />,
+                      danger: true,
+                      disabled: restartRequested,
+                      label: forceCloseWorkbenchLabel,
+                      onSelect: () => {
+                        void beginForceShutdown();
+                      },
+                    }]
+                  : []),
+                {
+                  id: "restart",
+                  icon: <RefreshCw size={15} />,
+                  disabled: restartRequested || shutdownRequested || (shutdownInFlight && !shutdownSettled),
+                  label: restartWorkbenchLabel,
+                  onSelect: () => {
+                    const proceed = () => {
+                      if (activeWorkIndicator) {
+                        setShutdownOpen(true);
+                        setShutdownSettled(false);
+                        setShutdownRequested(false);
+                        setRestartRequested(false);
+                        setLifecycleAction("restart");
+                        setLifecycleCommandId("");
+                        setLifecycleCancelPending(false);
+                        setShutdownTitle(restartHeading);
+                        setShutdownDetail(restartActiveWorkBlockedMessage(lang, activeWorkDetailsTitle));
+                        emitBrowserTelemetry(
+                          {
+                            phase: "restart",
+                            eventCode: "browser.user_action.restart_blocked_active_work",
+                            message: "Restart was blocked because active work is running.",
+                            level: "warning",
+                            fields: {
+                              action: "restart",
+                              source: "app_shell",
+                              activeWorkCount: activeWorkIndicator.count,
+                              activeWorkKinds: activeWorkIndicator.items.map((item) => item.kind),
+                            },
+                          },
+                          { preferBeacon: true },
+                        );
+                        return;
+                      }
+                      void beginRestart();
+                    };
+                    if (requestWorkbenchExitGuard("restart", proceed)) {
+                      proceed();
+                    }
+                  },
+                },
+              ]}
+            />
           </div>
           <NavLink
             to="/config"

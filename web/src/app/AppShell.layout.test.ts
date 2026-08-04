@@ -543,6 +543,10 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain("lifecycleMenuCluster");
     expect(shellSource).toContain("lifecycleMenuPanel");
     expect(shellSource).toContain("lifecycleMenuOpen");
+    expect(shellSource).toContain("<VDropdownMenu");
+    expect(shellSource).toContain("contentClassName={styles.lifecycleMenuPanel}");
+    expect(shellSource).toContain('id: "shutdown"');
+    expect(shellSource).toContain('id: "restart"');
     expect(shellSource).toContain("restartLauncherBundle");
     expect(shellSource).toContain("stopLauncherBundle");
     expect(shellSource).toContain("forceStopLauncherBundle");
@@ -563,18 +567,12 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain("requestWorkbenchExitGuard");
     expect(shellSource).toContain('requestWorkbenchExitGuard("restart"');
     expect(shellSource).toContain('requestWorkbenchExitGuard("shutdown"');
+    // Outside-click/Escape are owned by Radix DropdownMenu (no hand-rolled listeners).
+    expect(shellSource).not.toContain("lifecycleMenuRef");
     expect(styles.lifecycleMenuCluster).toBeTypeOf("string");
     expect(styles.lifecycleMenuPanel).toBeTypeOf("string");
     expect(styles.lifecycleMenuItem).toBeTypeOf("string");
     expect(styles.lifecycleMenuDangerItem).toBeTypeOf("string");
-    const lifecycleMenuBlock = shellStyles.slice(
-      shellStyles.indexOf(":where(.vui-app-appshell).lifecycleMenuItem,"),
-      shellStyles.indexOf("@media (max-width: 1420px)"),
-    );
-    expect(lifecycleMenuBlock).toContain('[data-slot="vui-button-content"]');
-    expect(lifecycleMenuBlock).toContain("display: contents");
-    expect(lifecycleMenuBlock).toContain('[data-slot="vui-button-label"]');
-    expect(lifecycleMenuBlock).toContain("text-overflow: ellipsis");
   });
 
   it("lets lifecycle wait overlays be cancelled without stopping active work", () => {

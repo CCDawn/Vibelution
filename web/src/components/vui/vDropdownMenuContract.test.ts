@@ -32,4 +32,15 @@ describe("VDropdownMenu contract", () => {
     expect(agent).not.toContain('role="menuitem"');
     expect(session).not.toContain('role="menuitem"');
   });
+
+  it("AppShell lifecycle power menu uses trigger-mode VDropdownMenu", () => {
+    const shell = readFileSync(resolve(vuiRoot, "../../app/AppShell.tsx"), "utf8");
+    expect(shell).toContain("VDropdownMenu");
+    expect(shell).toContain("contentClassName={styles.lifecycleMenuPanel}");
+    expect(shell).toContain('align="end"');
+    expect(shell).toContain('id: "shutdown"');
+    expect(shell).toContain('id: "restart"');
+    expect(shell).not.toContain("lifecycleMenuRef");
+    expect(shell).not.toContain('role="menuitem"');
+  });
 });

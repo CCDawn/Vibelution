@@ -30,6 +30,9 @@ export type ShadcnDropdownMenuProps = {
   position?: ShadcnDropdownMenuPosition;
   /** Button/trigger for classic dropdown menus. Ignored when `position` is set. */
   trigger?: ReactNode;
+  side?: "top" | "right" | "bottom" | "left";
+  align?: "start" | "center" | "end";
+  sideOffset?: number;
   "aria-label"?: string;
   className?: string;
   contentClassName?: string;
@@ -73,6 +76,9 @@ export function ShadcnDropdownMenu({
   onOpenChange,
   position,
   trigger,
+  side,
+  align,
+  sideOffset,
   "aria-label": ariaLabel,
   className,
   contentClassName,
@@ -83,6 +89,9 @@ export function ShadcnDropdownMenu({
 }: ShadcnDropdownMenuProps) {
   const anchored = Boolean(position);
   const controlledOpen = open ?? (anchored ? true : undefined);
+  const resolvedSide = side ?? "bottom";
+  const resolvedAlign = align ?? (anchored ? "start" : "start");
+  const resolvedSideOffset = sideOffset ?? (anchored ? 2 : 4);
 
   return (
     <DropdownMenuPrimitive.Root open={controlledOpen} onOpenChange={onOpenChange} modal={!anchored}>
@@ -102,9 +111,9 @@ export function ShadcnDropdownMenu({
       <DropdownMenuPrimitive.Portal>
         <DropdownMenuPrimitive.Content
           aria-label={ariaLabel}
-          side={anchored ? "bottom" : "bottom"}
-          align={anchored ? "start" : "start"}
-          sideOffset={anchored ? 2 : 4}
+          side={resolvedSide}
+          align={resolvedAlign}
+          sideOffset={resolvedSideOffset}
           collisionPadding={12}
           data-vui={dataVui}
           data-renderer="radix"
