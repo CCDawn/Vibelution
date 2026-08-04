@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useState, type ComponentProps, type ReactNode } from "react";
 
-import { VNativeButton } from "../components/vui";
+import { VNativeButton, VStateSurface } from "../components/vui";
 import {
   AgentDetailHeaderPanel,
   type AgentDetailHeaderPaneView,
@@ -93,7 +93,13 @@ function PaneSuspense({ children, lang }: { children: ReactNode; lang: "zh" | "e
     <Suspense
       fallback={
         <div className={styles.paneContent} role="status">
-          {lang === "zh" ? "正在加载面板…" : "Loading panel…"}
+          <VStateSurface
+            fill
+            tone="loading"
+            title={lang === "zh" ? "正在加载面板" : "Loading panel"}
+          >
+            {lang === "zh" ? "面板内容返回后会原位铺满此区。" : "Panel content will fill this region when ready."}
+          </VStateSurface>
         </div>
       }
     >

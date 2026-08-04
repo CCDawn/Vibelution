@@ -5,13 +5,31 @@ import type {
   TeamWorkflowCoordinationStatus,
   TeamWorkflowKnowledgeIngestionStatus,
 } from "../api/types";
-import { VNativeButton } from "../components/vui";
+import { VNativeButton, VStateSurface } from "../components/vui";
 import { TeamWorkflowGraphView, type TeamWorkflowGraphLayout } from "./TeamWorkflowGraphView";
 import styles from "./TeamWorkflowStatusPanels.styles";
 
 type TeamWorkflowStatusLang = "zh" | "en";
 
 type TeamWorkflowStatusLabel = (value: string) => string;
+
+function WorkflowPanelState({
+  loading,
+  loadingTitle,
+  emptyTitle,
+}: {
+  loading: boolean;
+  loadingTitle: string;
+  emptyTitle: string;
+}) {
+  return (
+    <VStateSurface
+      tone={loading ? "loading" : "empty"}
+      title={loading ? loadingTitle : emptyTitle}
+      skeletonLines={loading ? 2 : false}
+    />
+  );
+}
 
 type TeamWorkflowStatusActionItem = {
   code: string;
@@ -217,11 +235,11 @@ export function TeamWorkflowModelEvidenceStatusPanel({
           </div>
         </>
       ) : (
-        <div className={styles.empty}>
-          {loading
-            ? (lang === "zh" ? "正在读取 Qwen/百炼/本地模型调用证据覆盖..." : "Loading Qwen/Bailian/local model evidence coverage...")
-            : (lang === "zh" ? "暂无模型调用证据。" : "No model evidence yet.")}
-        </div>
+        <WorkflowPanelState
+          loading={loading}
+          loadingTitle={lang === "zh" ? "正在读取模型调用证据覆盖" : "Loading model evidence coverage"}
+          emptyTitle={lang === "zh" ? "暂无模型调用证据" : "No model evidence yet"}
+        />
       )}
       <WorkflowStatusErrors messages={errorMessages} />
     </div>
@@ -334,11 +352,11 @@ export function TeamWorkflowCoordinationStatusPanel({
           </div>
         </>
       ) : (
-        <div className={styles.empty}>
-          {loading
-            ? (lang === "zh" ? "正在汇总候选队列、返工项和转移请求..." : "Aggregating candidates, rework items, and transfers...")
-            : (lang === "zh" ? "暂无协调队列状态。" : "No coordination status yet.")}
-        </div>
+        <WorkflowPanelState
+          loading={loading}
+          loadingTitle={lang === "zh" ? "正在汇总协调队列" : "Aggregating coordination queues"}
+          emptyTitle={lang === "zh" ? "暂无协调队列状态" : "No coordination status yet"}
+        />
       )}
       <WorkflowStatusErrors messages={errorMessages} />
     </div>
@@ -416,11 +434,11 @@ export function TeamWorkflowKnowledgeIngestionStatusPanel({
           </div>
         </>
       ) : (
-        <div className={styles.empty}>
-          {loading
-            ? (lang === "zh" ? "正在汇总 CandidateStore、Team Knowledge 和正式同步边界..." : "Aggregating CandidateStore, Team Knowledge, and sync boundary...")
-            : (lang === "zh" ? "暂无入库审核状态。" : "No knowledge ingestion review status yet.")}
-        </div>
+        <WorkflowPanelState
+          loading={loading}
+          loadingTitle={lang === "zh" ? "正在汇总入库审核状态" : "Aggregating knowledge ingestion review"}
+          emptyTitle={lang === "zh" ? "暂无入库审核状态" : "No knowledge ingestion review status yet"}
+        />
       )}
       <WorkflowStatusErrors messages={errorMessages} />
     </div>
@@ -512,11 +530,11 @@ export function TeamWorkflowCandidateGraphStatusPanel({
           </div>
         </>
       ) : (
-        <div className={styles.empty}>
-          {loading
-            ? (lang === "zh" ? "正在读取入库关系图..." : "Loading ingestion map...")
-            : (lang === "zh" ? "还没有入库关系图，可先点击生成关系。" : "No ingestion map yet. Build the map first.")}
-        </div>
+        <WorkflowPanelState
+          loading={loading}
+          loadingTitle={lang === "zh" ? "正在读取入库关系图" : "Loading ingestion map"}
+          emptyTitle={lang === "zh" ? "还没有入库关系图，可先点击生成关系" : "No ingestion map yet. Build the map first"}
+        />
       )}
       <WorkflowStatusErrors messages={errorMessages} />
     </div>
@@ -587,11 +605,11 @@ export function TeamWorkflowSourceQualityStatusPanel({
           </div>
         </>
       ) : (
-        <div className={styles.empty}>
-          {loading
-            ? (lang === "zh" ? "正在汇总资料提炼复核状态..." : "Aggregating source extraction review status...")
-            : (lang === "zh" ? "暂无资料提炼复核状态。" : "No source extraction review status yet.")}
-        </div>
+        <WorkflowPanelState
+          loading={loading}
+          loadingTitle={lang === "zh" ? "正在汇总资料提炼复核状态" : "Aggregating source extraction review"}
+          emptyTitle={lang === "zh" ? "暂无资料提炼复核状态" : "No source extraction review status yet"}
+        />
       )}
       <WorkflowStatusErrors messages={errorMessages} />
     </div>
@@ -646,11 +664,14 @@ export function TeamWorkflowPaperNoteChunkStatusPanel({
               ))}
             </div>
           ) : (
-            <div className={styles.empty}>
+            <VStateSurface
+              tone="empty"
+              title={lang === "zh" ? "还没有分块计划" : "No chunk plan yet"}
+            >
               {lang === "zh"
-                ? "还没有分块计划。对已完成内容提取的 source 生成计划后，才能按 chunk 产出 paper_note。"
-                : "No chunk plan yet. Generate plans for extracted sources before drafting paper_notes by chunk."}
-            </div>
+                ? "对已完成内容提取的 source 生成计划后，才能按 chunk 产出 paper_note。"
+                : "Generate plans for extracted sources before drafting paper_notes by chunk."}
+            </VStateSurface>
           )}
           <WorkflowStatusActions
             items={status.actionItems}
@@ -665,11 +686,11 @@ export function TeamWorkflowPaperNoteChunkStatusPanel({
           </div>
         </>
       ) : (
-        <div className={styles.empty}>
-          {loading
-            ? (lang === "zh" ? "正在汇总 source extraction 与 paper_note chunk 计划..." : "Aggregating source extraction and paper_note chunk plans...")
-            : (lang === "zh" ? "暂无 paper_note 分块状态。" : "No paper_note chunk status yet.")}
-        </div>
+        <WorkflowPanelState
+          loading={loading}
+          loadingTitle={lang === "zh" ? "正在汇总 paper_note 分块计划" : "Aggregating paper_note chunk plans"}
+          emptyTitle={lang === "zh" ? "暂无 paper_note 分块状态" : "No paper_note chunk status yet"}
+        />
       )}
       <WorkflowStatusErrors messages={errorMessages} />
     </div>

@@ -20,6 +20,7 @@ import {
   VNativeTextarea,
   VPanelHeader,
   VRouteLinkButton,
+  VStateSurface,
   VStatusChip,
   VSurface,
   VTooltip,
@@ -618,11 +619,11 @@ export function PromptTemplatesRoute() {
 
           <div className={styles.templateListClass}>
             {templatesQuery.isError ? (
-              <p className={styles.emptyStateClass}>{copy.loadFailed}</p>
+              <VStateSurface className={styles.emptyStateClass} tone="error" title={copy.loadFailed} />
             ) : templatesQuery.isPending ? (
-              <p className={styles.emptyStateClass}>{copy.loading}</p>
+              <VStateSurface className={styles.emptyStateClass} tone="loading" title={copy.loading} skeletonLines={3} />
             ) : filteredTemplates.length === 0 ? (
-              <p className={styles.emptyStateClass}>{copy.emptyList}</p>
+              <VStateSurface className={styles.emptyStateClass} tone="empty" title={copy.emptyList} />
             ) : (
               filteredTemplates.map((template) => {
                 const linkedCount = agentsByTemplate.get(template.promptTemplateId)?.length ?? 0;

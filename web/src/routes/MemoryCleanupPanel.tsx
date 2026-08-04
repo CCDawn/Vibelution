@@ -1,7 +1,7 @@
 import { CheckCircle2, Eye, Trash2, TriangleAlert } from "lucide-react";
 
 import type { MemoryCleanupExecuteResponse, MemoryCleanupPreviewResponse } from "../api/types";
-import { VButton, VNativeInput, VTooltip } from "../components/vui";
+import { VButton, VNativeInput, VStateSurface, VTooltip } from "../components/vui";
 import styles from "./MemoryCleanupPanel.styles";
 
 export type MemoryCleanupTargetOptionView = {
@@ -128,8 +128,8 @@ export function MemoryCleanupPanel({
             </div>
             <span className={styles.countPill}>{selectedTargetCount}</span>
           </div>
-          {targetsLoading ? <div className={styles.emptyState}>{copy.loading}</div> : null}
-          {!targetsLoading && !targetOptions.length ? <div className={styles.emptyState}>{copy.cleanupNoTargets}</div> : null}
+          {targetsLoading ? <VStateSurface tone="loading" title={copy.loading} skeletonLines={2} /> : null}
+          {!targetsLoading && !targetOptions.length ? <VStateSurface tone="empty" title={copy.cleanupNoTargets} /> : null}
           <div className={styles.cleanupTargetList}>
             {targetOptions.map((option) => {
               const selected = selectedTargetKeys.includes(option.key);

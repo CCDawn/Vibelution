@@ -176,15 +176,15 @@ export function KernelTaskCenterRoute() {
     [copy.allStatus],
   );
   const taskPaneContent = taskQuery.isError ? (
-    <VStateSurface className={styles.emptyStateClass} title={copy.loadFailed} tone="error">
+    <VStateSurface fill className={styles.emptyStateClass} title={copy.loadFailed} tone="error">
       {describeError(taskQuery.error, copy.loadFailed)}
     </VStateSurface>
   ) : taskQuery.isLoading ? (
-    <VStateSurface className={styles.emptyStateClass} title={copy.loading} tone="loading">
+    <VStateSurface fill className={styles.emptyStateClass} title={copy.loading} tone="loading">
       {copy.taskList}
     </VStateSurface>
   ) : tasks.length === 0 ? (
-    <VStateSurface className={styles.emptyStateClass} title={status ? copy.noMatchingTasks : copy.noTasks} tone="empty">
+    <VStateSurface fill className={styles.emptyStateClass} title={status ? copy.noMatchingTasks : copy.noTasks} tone="empty">
       {copy.taskList}
     </VStateSurface>
   ) : (
@@ -199,15 +199,15 @@ export function KernelTaskCenterRoute() {
     ))
   );
   const timelinePaneContent = !selectedTaskId ? (
-    <VStateSurface className={styles.emptyStateClass} title={copy.noTimeline} tone="empty">
+    <VStateSurface fill className={styles.emptyStateClass} title={copy.noTimeline} tone="empty">
       {copy.detail}
     </VStateSurface>
   ) : timelineQuery.isError ? (
-    <VStateSurface className={styles.emptyStateClass} title={copy.loadFailed} tone="error">
+    <VStateSurface fill className={styles.emptyStateClass} title={copy.loadFailed} tone="error">
       {describeError(timelineQuery.error, copy.loadFailed)}
     </VStateSurface>
   ) : timelineQuery.isLoading || !timeline ? (
-    <VStateSurface className={styles.emptyStateClass} title={copy.loading} tone="loading">
+    <VStateSurface fill className={styles.emptyStateClass} title={copy.loading} tone="loading">
       {selectedTaskId}
     </VStateSurface>
   ) : (

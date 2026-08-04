@@ -58,6 +58,7 @@ import {
   VNativeInput,
   VNativeTextarea,
   VRouteLinkButton,
+  VStateSurface,
 } from "../components/vui";
 import { TranslationKey } from "../i18n/dictionary";
 import { petAvatarPresetLabel } from "../i18n/petLabels";
@@ -1405,13 +1406,22 @@ export function SelfEvolutionTrack({
               );
             })
           ) : (
-            <div className={styles.emptyState}>
-              {agentConfigWorkspaceQuery.isLoading
-                ? (lang === "zh" ? "正在加载 Agent 绑定。" : "Loading Agent bindings.")
-                : observationRunModeActive
-                  ? (lang === "zh" ? "还没有可展示的观察 Agent 绑定。" : "No observation Agent binding is available.")
-                  : (lang === "zh" ? "还没有可展示的自进化 Agent 绑定。" : "No self-evolution Agent binding is available.")}
-            </div>
+            {agentConfigWorkspaceQuery.isLoading ? (
+              <VStateSurface
+                tone="loading"
+                title={lang === "zh" ? "正在加载 Agent 绑定" : "Loading Agent bindings"}
+                skeletonLines={2}
+              />
+            ) : (
+              <VStateSurface
+                tone="empty"
+                title={
+                  observationRunModeActive
+                    ? (lang === "zh" ? "还没有可展示的观察 Agent 绑定" : "No observation Agent binding is available")
+                    : (lang === "zh" ? "还没有可展示的自进化 Agent 绑定" : "No self-evolution Agent binding is available")
+                }
+              />
+            )}
           )}
         </div>
       </section>

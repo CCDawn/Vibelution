@@ -6,7 +6,7 @@ import { PaneHeightResizeHandle } from "../components/layout/PaneHeightResizeHan
 import type { PaneHeightSpec } from "../components/layout/paneHeightPersistence";
 import { usePersistedPaneHeight } from "../components/layout/usePersistedPaneHeight";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
-import { VButton, VNativeInput, VTooltip } from "../components/vui";
+import { VButton, VNativeInput, VStateSurface, VTooltip } from "../components/vui";
 import styles from "./MemoryProjectMemoryQueuePanel.styles";
 
 const MEMORY_PROJECT_QUEUE_LAYOUT_ID = WORKBENCH_LAYOUT_IDS.memory;
@@ -253,13 +253,10 @@ export function MemoryProjectMemoryQueuePanel({
           );
         })}
         {isLoading && !proposals.length ? (
-          <section className={styles.emptyState}>{copy.loading}</section>
+          <VStateSurface tone="loading" title={copy.loading} skeletonLines={2} />
         ) : null}
         {!isLoading && !proposals.length ? (
-          <section className={styles.emptyState}>
-            <CheckCircle2 size={20} />
-            <span>{emptyText}</span>
-          </section>
+          <VStateSurface tone="empty" title={emptyText} icon={<CheckCircle2 size={18} />} />
         ) : null}
       </div>
     </section>

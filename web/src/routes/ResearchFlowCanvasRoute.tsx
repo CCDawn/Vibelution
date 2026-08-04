@@ -2692,10 +2692,13 @@ export function ResearchFlowCanvasRoute() {
                   </div>
 
                   {organizationQuery.isLoading ? (
-                    <div className={styles.issueEmpty}>
-                      <strong>正在读取组织图</strong>
-                      <span>事实源来自 workspace/research/organization_graph.json。</span>
-                    </div>
+                    <VStateSurface
+                      tone="loading"
+                      title="正在读取组织图"
+                      skeletonLines={2}
+                    >
+                      事实源来自 workspace/research/organization_graph.json。
+                    </VStateSurface>
                   ) : null}
 
                   <div className={styles.organizationSectionHeader}>
