@@ -161,7 +161,14 @@ export function deriveStartupProgressState(
   const lifecycleState = String(lifecycleProof?.overallState ?? "").trim().toLowerCase();
   const lifecycleConsistency = String(workbench?.lifecycleConsistency ?? "").trim().toLowerCase();
   const rawFailureMessage = String(workbench?.failureMessage ?? "").trim();
-  const failureMessage = textValue(rawFailureMessage);
+  // Runtime may keep lifecycle failure only on lastError after older reconciles;
+  // prefer failureMessage, fall back to lastError.message when phase is failed.
+  const rawLastErrorMessage = String(
+    (runtime as { lastError?: { message?: string } } | null | undefined)?.lastError?.message
+      ?? (workbench as { lastErrorMessage?: string } | null | undefined)?.lastErrorMessage
+      ?? "",
+  ).trim();
+  const failureMessage = textValue(rawFailureMessage) || (phase === "failed" ? textValue(rawLastErrorMessage) : "");
   const statusLine = textValue(workbench?.statusLine);
   const summary = textValue(lifecycleProof?.summary);
   const backendReady = Boolean(workbench?.backendHealthy || workbench?.backendAlive || workbench?.backendObserved);
@@ -171,7 +178,10 @@ export function deriveStartupProgressState(
     && backendReady;
 
   if (failureMessage || phase === "failed" || (lifecycleState === "failed" && !workbenchReady)) {
-    const failureSummary = summarizeStartupFailure(rawFailureMessage || failureMessage || statusLine || summary, lang);
+    const failureSummary = summarizeStartupFailure(
+      rawFailureMessage || rawLastErrorMessage || failureMessage || statusLine || summary,
+      lang,
+    );
     return {
       active: true,
       title: failureSummary.title,

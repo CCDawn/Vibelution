@@ -46,6 +46,11 @@ def test_native_launcher_tray_menu_exposes_lifecycle_controls():
     assert "重建并启动已受理，正在后台构建/拉起…" in source
     assert "正在排队：强制重建前端并启动/重启工作台…" not in source
     assert "重建并启动请求已发送。正在后台构建并拉起工作台…" not in source
+    # Outcome poll must not treat a pre-existing open workbench as rebuild success.
+    assert "sawVersionAdvance" in source
+    assert "lastErrorMessage" in source
+    assert "stateVersion" in source
+    assert "Never treat a pre-existing open session as rebuild success" in source
     assert "RunPythonBridge(projectDir, \"stop-launcher\", true, false)" in source
 
 

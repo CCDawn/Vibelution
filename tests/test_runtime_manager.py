@@ -1270,6 +1270,81 @@ def test_load_runtime_snapshot_clears_stale_failed_close_after_successful_reopen
     assert "Workbench is open" in snapshot["workbench"]["statusLine"]
 
 
+def test_load_runtime_snapshot_keeps_lifecycle_restart_failure_while_still_open(monkeypatch):
+    """Preflight can fail before close; desired==observed==open must not erase the failure."""
+    monkeypatch.setattr(
+        daemon,
+        "load_state",
+        lambda: {
+            "stateVersion": 12,
+            "workbench": {
+                "desiredState": "open",
+                "observedState": "open",
+                "phase": "failed",
+                "failureMessage": "Restart preflight failed before closing the workbench.\nerror TS2304",
+            },
+            "command": {"activeCommandId": ""},
+            "lastError": {
+                "scope": "restart_workbench",
+                "message": "Restart preflight failed before closing the workbench.\nerror TS2304",
+                "at": "2026-08-04T05:02:11+00:00",
+            },
+        },
+    )
+    monkeypatch.setattr(
+        daemon,
+        "observe_workbench",
+        lambda: {
+            "observedState": "open",
+            "backendPid": 4200,
+            "browserLaunchPid": 0,
+            "browserWindowPid": 5100,
+            "browserManaged": True,
+            "backendAlive": True,
+            "backendHealthy": True,
+            "backendObserved": True,
+            "backendPort": 8002,
+            "backendPortListening": True,
+            "backendPortOwnerPid": 4200,
+            "backendPortOwnerTrusted": True,
+            "backendPortConflict": False,
+            "browserWindowAlive": True,
+            "sessionId": "managed-session",
+            "url": "http://127.0.0.1:8002",
+        },
+    )
+    monkeypatch.setattr(daemon, "is_daemon_running", lambda: True)
+    monkeypatch.setattr(daemon, "load_pid", lambda: 9912)
+    monkeypatch.setattr(daemon, "_process_source_signature", lambda: "sig-current")
+
+    snapshot = daemon.load_runtime_snapshot()
+
+    assert snapshot["workbench"]["phase"] == "failed"
+    assert "Restart preflight failed" in snapshot["workbench"]["failureMessage"]
+    assert "TS2304" in snapshot["workbench"]["failureMessage"]
+
+
+def test_workbench_failure_should_stick_lifecycle_even_when_observed_matches_desired():
+    state = {
+        "lastError": {
+            "scope": "restart_workbench",
+            "message": "preflight failed",
+            "at": "2026-08-04T05:02:11+00:00",
+        }
+    }
+    assert (
+        daemon._workbench_failure_should_stick(state, desired_state="open", observed_state="open") is True
+    )
+    assert (
+        daemon._workbench_failure_should_stick(
+            {"lastError": {"scope": "stop_supervised_run", "message": "x", "at": "t"}},
+            desired_state="open",
+            observed_state="open",
+        )
+        is False
+    )
+
+
 def test_load_runtime_snapshot_recovers_failed_non_lifecycle_error_when_observation_matches(monkeypatch):
     monkeypatch.setattr(
         daemon,

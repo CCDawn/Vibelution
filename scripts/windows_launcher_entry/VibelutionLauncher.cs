@@ -194,8 +194,21 @@ internal static class VibelutionLauncher
 
         private string WaitForRebuildOutcome(int timeoutMs)
         {
+            // Capture baseline before the rebuild request so a still-open old workbench
+            // is not treated as success (preflight can fail without closing).
+            string baselineStatus = "";
+            try
+            {
+                baselineStatus = GetLauncher("/api/launcher/status");
+            }
+            catch
+            {
+            }
+            string baselineErrorAt = ExtractJsonString(baselineStatus, "lastErrorAt");
+            string baselineVersion = ExtractJsonString(baselineStatus, "stateVersion");
             int waited = 0;
             string lastFailure = "";
+            bool sawVersionAdvance = false;
             while (waited < timeoutMs)
             {
                 try
@@ -203,18 +216,45 @@ internal static class VibelutionLauncher
                     string body = GetLauncher("/api/launcher/status");
                     string overall = ExtractJsonString(body, "overallState").ToLowerInvariant();
                     string observed = ExtractJsonString(body, "observedState").ToLowerInvariant();
+                    string phase = ExtractJsonString(body, "phase").ToLowerInvariant();
                     string failure = ExtractJsonString(body, "failureMessage");
-                    if (!string.IsNullOrEmpty(failure))
+                    string lastErrorMessage = ExtractJsonString(body, "lastErrorMessage");
+                    string lastErrorAt = ExtractJsonString(body, "lastErrorAt");
+                    string stateVersion = ExtractJsonString(body, "stateVersion");
+                    if (!string.IsNullOrEmpty(stateVersion)
+                        && !string.IsNullOrEmpty(baselineVersion)
+                        && !string.Equals(stateVersion, baselineVersion, StringComparison.Ordinal))
                     {
-                        lastFailure = failure;
+                        sawVersionAdvance = true;
                     }
-                    if (overall == "running" || observed == "open" || observed == "running")
+                    string terminalFailure = !string.IsNullOrEmpty(failure) ? failure : lastErrorMessage;
+                    bool newLifecycleError = !string.IsNullOrEmpty(lastErrorMessage)
+                        && !string.Equals(lastErrorAt ?? "", baselineErrorAt ?? "", StringComparison.Ordinal);
+                    if (newLifecycleError || (sawVersionAdvance && !string.IsNullOrEmpty(terminalFailure)))
+                    {
+                        return ShortMessage(terminalFailure);
+                    }
+                    if (!string.IsNullOrEmpty(terminalFailure))
+                    {
+                        lastFailure = terminalFailure;
+                    }
+                    if (overall == "failed" || phase == "failed")
+                    {
+                        if (!string.IsNullOrEmpty(terminalFailure))
+                        {
+                            return ShortMessage(terminalFailure);
+                        }
+                    }
+                    // Success only after this rebuild advanced state and the workbench is fully open.
+                    // Never treat a pre-existing open session as rebuild success.
+                    if (sawVersionAdvance
+                        && (overall == "ready" || observed == "open")
+                        && phase != "failed"
+                        && phase != "opening"
+                        && string.IsNullOrEmpty(lastErrorMessage)
+                        && string.IsNullOrEmpty(failure))
                     {
                         return "";
-                    }
-                    if (overall == "failed" && !string.IsNullOrEmpty(failure))
-                    {
-                        return failure;
                     }
                 }
                 catch
@@ -224,7 +264,11 @@ internal static class VibelutionLauncher
                 Thread.Sleep(2000);
                 waited += 2000;
             }
-            return lastFailure;
+            if (!string.IsNullOrEmpty(lastFailure))
+            {
+                return ShortMessage(lastFailure);
+            }
+            return "重建/启动超时：未看到成功完成的状态变更。";
         }
 
         private void QueueStatus()

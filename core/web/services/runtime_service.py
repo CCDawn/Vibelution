@@ -1165,6 +1165,25 @@ def _workbench_payload(lang: str, runtime_manager: dict) -> dict[str, object]:
     session_role = str(workbench.get("sessionRole") or "workbench").strip() or "workbench"
     phase = str(workbench.get("phase") or "steady").strip() or "steady"
     failure_message = str(workbench.get("failureMessage") or "").strip()
+    if not failure_message:
+        # Preserve lifecycle failures stored only on lastError (older reconcile paths).
+        last_error = runtime_manager.get("lastError") if isinstance(runtime_manager, dict) else {}
+        if isinstance(last_error, dict):
+            err_scope = str(last_error.get("scope") or "").strip()
+            err_message = str(last_error.get("message") or "").strip()
+            if err_message and (
+                phase == "failed"
+                or err_scope
+                in {
+                    "open_workbench",
+                    "close_workbench",
+                    "force_close_workbench",
+                    "restart_workbench",
+                    "hot_restart_workbench",
+                    "toggle_workbench",
+                }
+            ):
+                failure_message = err_message
     lifecycle_consistency = str(workbench.get("lifecycleConsistency") or "consistent").strip() or "consistent"
     if (
         desktop_window

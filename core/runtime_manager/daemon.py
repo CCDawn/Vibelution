@@ -737,17 +737,30 @@ def _exit_current_process(exit_code: int = 0) -> None:
 
 
 def _workbench_failure_should_stick(state: dict[str, Any], *, desired_state: str, observed_state: str) -> bool:
-    if observed_state == desired_state:
-        return False
+    """Whether a failed workbench phase must survive reconcile.
+
+    Lifecycle failures (open/close/restart) must stick until a *successful* lifecycle
+    command clears lastError. Preflight can fail while the old workbench is still
+    observed open (desired==observed); clearing failure there hid errors and left the
+    UI stuck in a false "starting" state.
+    """
+
     raw_last_error = state.get("lastError")
     if isinstance(raw_last_error, dict):
         last_error = raw_last_error
-        if not any(str(last_error.get(key) or "").strip() for key in ("scope", "message", "at")):
-            return False
     else:
         last_error = {}
+    if not any(str(last_error.get(key) or "").strip() for key in ("scope", "message", "at")):
+        return False
     scope = str(last_error.get("scope") or "").strip()
-    return not scope or _command_affects_workbench_lifecycle(scope)
+    if not scope:
+        # Empty scope with residual message: stick only while observation mismatches.
+        return observed_state != desired_state
+    if not _command_affects_workbench_lifecycle(scope):
+        # Non-lifecycle errors auto-heal when observation matches desired.
+        return observed_state != desired_state
+    # Lifecycle scope: keep failed until successful command clears lastError.
+    return True
 
 
 def _workbench_has_orphaned_browser(observation: dict[str, Any]) -> bool:
@@ -1666,10 +1679,20 @@ def load_runtime_snapshot() -> dict[str, Any]:
 
     if observed_state == desired_state and phase != "failed":
         phase = "steady"
-        workbench["failureMessage"] = ""
+        # Do not clear failureMessage here when lastError still names a lifecycle
+        # failure — _workbench_failure_should_stick owns that transition.
+        if not _workbench_failure_should_stick(
+            state, desired_state=desired_state, observed_state=observed_state
+        ):
+            workbench["failureMessage"] = ""
     elif desired_state == "open" and observed_state == "partial" and browser_missing and phase != "failed":
         phase = "steady"
-        workbench["failureMessage"] = ""
+        # Keep lifecycle failure text so UI can show rebuild/restart errors instead of
+        # an endless "starting" overlay while the window is missing.
+        if not _workbench_failure_should_stick(
+            state, desired_state=desired_state, observed_state=observed_state
+        ):
+            workbench["failureMessage"] = ""
     elif desired_state == "closed" and observed_state != "closed" and phase != "failed":
         phase = "closing"
     elif desired_state == "open" and observed_state != "open" and phase != "failed":
