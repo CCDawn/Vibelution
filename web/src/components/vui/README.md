@@ -52,10 +52,26 @@ global variants.
 
 | Recipe | Use when |
 | --- | --- |
-| `VListDetailPage` | Left list / filter + main detail (+ optional aside); pass `layoutId` so sidebars are **draggable with permanent width memory** (`localStorage` key `vibelution.pane-layouts.v1`) |
+| `VListDetailPage` | Left list / filter + main detail (+ optional aside); pass `layoutId` so sidebars are **draggable with permanent width memory** (`localStorage` key `vibelution.pane-layouts.v1`). Default `fill` keeps full viewport height. |
+| `VBoardWorkbenchPage` | Left rail + board main (Teams-style kanban/ops board); optional mode toolbar strip |
+| `VCanvasWorkbenchPage` | Canvas / graph center + optional rail + inspector (org graph, memory graph, flow) |
 | `VSettingsFormPage` | Settings/config form with sticky save footer |
-| `VDenseOpsPage` | Dense toolbar + body; use `toolbar` (VToolbar) or `toolbarSlot` (bare strip like metrics) |
-| `VSplitWorkspace` | Low-level split; `resize={{ layoutId }}` enables left/right drag + persistence (used by list-detail recipe) |
+| `VDenseOpsPage` | Dense toolbar + body; use `toolbar` (VToolbar) or `toolbarSlot` (bare strip like metrics). Default `fill`. |
+| `VSplitWorkspace` | Low-level split; `resize={{ layoutId }}` enables left/right drag + persistence (used by list-detail / board / canvas recipes) |
+
+Shared geometry/visual tokens: `layout/pageRecipeClasses.ts` (`VUI_PAGE_FILL_CLASS`, rail/canvas surfaces, toolbar strip). Prefer these over reinventing per-route shell CSS.
+
+### Structure debt backlog (cleanup prep)
+
+Priority order for migrating fat routes onto recipes (do not invent parallel shells):
+
+1. **Teams** — absorb board/canvas shell into `VBoardWorkbenchPage` / `VCanvasWorkbenchPage`; keep domain logic in `routes/teams/*` modules only.
+2. **Agents** — list/detail already close to `VListDetailPage`; remove remaining private width keys / dual chrome.
+3. **Chat** — keep domain dual-pane math, but mark regions with `data-vui-domain-recipe` + registry layout ids only.
+4. **Memory / Evolution** — prefer canvas/list recipes for graph + queue surfaces.
+5. **Route style maps** — stop growing mega `*.styles.ts`; new UI uses recipe defaults + local component maps.
+
+Exit criteria per migration: route line-count drops, no new ad-hoc width keys, recipe `data-vui-recipe` present, layout tests still green.
 
 ## Rail resize / collapse (Wave 4B)
 

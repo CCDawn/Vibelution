@@ -78,9 +78,23 @@ export {
 } from "./layout/VErrorSummary";
 export { VEntityList, type VEntityListItem, type VEntityListProps } from "./layout/VEntityList";
 export { VHStack, type VHStackProps } from "./layout/VHStack";
+export { VBoardWorkbenchPage, type VBoardWorkbenchPageProps } from "./layout/VBoardWorkbenchPage";
+export { VCanvasWorkbenchPage, type VCanvasWorkbenchPageProps } from "./layout/VCanvasWorkbenchPage";
 export { VDenseOpsPage, type VDenseOpsPageProps } from "./layout/VDenseOpsPage";
 export { VListDetailPage, type VListDetailPageProps } from "./layout/VListDetailPage";
 export { VPage, type VPageProps } from "./layout/VPage";
+export {
+  VUI_BOARD_CONTENT_PAD_CLASS,
+  VUI_CANVAS_SURFACE_CLASS,
+  VUI_PAGE_BAND_GAP_CLASS,
+  VUI_PAGE_BODY_FILL_CLASS,
+  VUI_PAGE_BODY_SCROLL_CLASS,
+  VUI_PAGE_FILL_CLASS,
+  VUI_PAGE_STACK_FILL_CLASS,
+  VUI_PAGE_TOOLBAR_STRIP_CLASS,
+  VUI_RAIL_SURFACE_CLASS,
+  VUI_WORKBENCH_SURFACE_CLASS,
+} from "./layout/pageRecipeClasses";
 export { VPanelHeader, type VPanelHeaderProps } from "./layout/VPanelHeader";
 export { VRouteHeader, type VRouteHeaderProps } from "./layout/VRouteHeader";
 export { VSection, type VSectionProps } from "./layout/VSection";

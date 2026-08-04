@@ -3,7 +3,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import {
+  VBoardWorkbenchPage,
   VButton,
+  VCanvasWorkbenchPage,
   VDenseOpsPage,
   VDenseTable,
   VEmptyState,
@@ -20,6 +22,7 @@ import {
   VSplitWorkspace,
   VStateSurface,
   VStatusStrip,
+  VUI_PAGE_FILL_CLASS,
   VWorkbenchPage,
 } from "./index";
 
@@ -205,6 +208,44 @@ describe("VUI workbench layout templates", () => {
     expect(markup).toContain("Save");
   });
 
+  it("renders board and canvas workbench recipes with coordinated fill slots", () => {
+    const boardMarkup = renderToStaticMarkup(
+      <VBoardWorkbenchPage
+        ariaLabel="Teams board"
+        title="Team workbench"
+        hideHeader
+        domainRecipe="teams-organization-workbench"
+        layoutId="teams"
+        rail={<nav>Teams</nav>}
+        toolbar={<span>Board mode</span>}
+        board={<div>Kanban</div>}
+      />,
+    );
+    expect(boardMarkup).toContain('data-vui-recipe="board-workbench-page"');
+    expect(boardMarkup).toContain('data-vui-domain-recipe="teams-organization-workbench"');
+    expect(boardMarkup).toContain('data-fill="true"');
+    expect(boardMarkup).toContain('data-vui="board-workbench-rail"');
+    expect(boardMarkup).toContain('data-vui="board-workbench-board"');
+    expect(boardMarkup).toContain("Kanban");
+    expect(boardMarkup).toContain(VUI_PAGE_FILL_CLASS.split(" ")[0]);
+
+    const canvasMarkup = renderToStaticMarkup(
+      <VCanvasWorkbenchPage
+        ariaLabel="Org canvas"
+        title="Canvas"
+        hideHeader
+        rail={<nav>Layers</nav>}
+        canvas={<div>Graph</div>}
+        inspector={<div>Node</div>}
+      />,
+    );
+    expect(canvasMarkup).toContain('data-vui-recipe="canvas-workbench-page"');
+    expect(canvasMarkup).toContain('data-vui="canvas-workbench-canvas"');
+    expect(canvasMarkup).toContain('data-vui="canvas-workbench-inspector"');
+    expect(canvasMarkup).toContain("Graph");
+    expect(canvasMarkup).toContain("Node");
+  });
+
   it("renders the dense-ops page recipe with toolbar and empty state", () => {
     const emptyMarkup = renderToStaticMarkup(
       <VDenseOpsPage
@@ -217,6 +258,7 @@ describe("VUI workbench layout templates", () => {
     );
 
     expect(emptyMarkup).toContain('data-vui-recipe="dense-ops-page"');
+    expect(emptyMarkup).toContain('data-fill="true"');
     expect(emptyMarkup).toContain('data-vui-recipe="dense-ops-toolbar"');
     expect(emptyMarkup).toContain('data-vui="toolbar"');
     expect(emptyMarkup).toContain('data-vui="empty-state"');

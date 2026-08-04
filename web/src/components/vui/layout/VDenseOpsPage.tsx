@@ -1,9 +1,11 @@
 import { type ComponentPropsWithoutRef, type ReactNode } from "react";
 
+import { cn } from "../lib/cn";
 import { VEmptyState } from "./VEmptyState";
 import { VRouteHeader } from "./VRouteHeader";
 import { VToolbar } from "./VToolbar";
 import { VWorkbenchPage } from "./VWorkbenchPage";
+import { VUI_PAGE_BODY_FILL_CLASS } from "./pageRecipeClasses";
 
 export type VDenseOpsPageProps = Omit<ComponentPropsWithoutRef<"section">, "children"> & {
   ariaLabel?: string;
@@ -23,6 +25,8 @@ export type VDenseOpsPageProps = Omit<ComponentPropsWithoutRef<"section">, "chil
   /** Primary dense table / list content. */
   children?: ReactNode;
   bodyClassName?: string;
+  /** Fill viewport height (default true for workbench ops pages). */
+  fill?: boolean;
   /** Shown when the table has no rows (optional). */
   empty?: {
     title: ReactNode;
@@ -50,13 +54,20 @@ export function VDenseOpsPage({
   toolbarSlot,
   children,
   bodyClassName,
+  fill = true,
   empty,
   isEmpty = false,
   className,
   ...props
 }: VDenseOpsPageProps) {
   return (
-    <VWorkbenchPage ariaLabel={ariaLabel} className={className} data-vui-recipe="dense-ops-page" {...props}>
+    <VWorkbenchPage
+      ariaLabel={ariaLabel}
+      className={className}
+      data-vui-recipe="dense-ops-page"
+      fill={fill}
+      {...props}
+    >
       <VRouteHeader
         className={headerClassName}
         eyebrow={eyebrow}
@@ -64,13 +75,20 @@ export function VDenseOpsPage({
         meta={meta}
         actions={actions}
       />
-      {toolbarSlot ? <div data-vui-recipe="dense-ops-toolbar">{toolbarSlot}</div> : null}
+      {toolbarSlot ? (
+        <div data-vui-recipe="dense-ops-toolbar" className="min-w-0 shrink-0">
+          {toolbarSlot}
+        </div>
+      ) : null}
       {toolbar ? (
-        <VToolbar ariaLabel={toolbarAriaLabel} data-vui-recipe="dense-ops-toolbar">
+        <VToolbar ariaLabel={toolbarAriaLabel} data-vui-recipe="dense-ops-toolbar" className="shrink-0">
           {toolbar}
         </VToolbar>
       ) : null}
-      <div data-vui="dense-ops-body" className={["min-h-0 min-w-0", bodyClassName].filter(Boolean).join(" ")}>
+      <div
+        data-vui="dense-ops-body"
+        className={cn(fill ? VUI_PAGE_BODY_FILL_CLASS : "min-h-0 min-w-0", bodyClassName)}
+      >
         {isEmpty && empty ? (
           empty.description ? (
             <VEmptyState title={empty.title} actions={empty.actions}>
