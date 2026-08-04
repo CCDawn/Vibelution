@@ -9,7 +9,7 @@ import {
   TriangleAlert,
   Undo2,
 } from "lucide-react";
-import { lazy, Suspense, useEffect, useMemo, useState, type CSSProperties } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { NavLink, useSearchParams } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
@@ -53,11 +53,9 @@ import {
   TeamKnowledgeBase,
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
-import { PaneResizeHandle } from "../components/layout/PaneResizeHandle";
 import { type PaneSpec } from "../components/layout/paneLayoutPersistence";
-import { usePersistedPaneResize } from "../components/layout/usePersistedPaneResize";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
-import { VButton, VDenseOpsPage, VRouteLinkButton, VStateSurface } from "../components/vui";
+import { VButton, VDenseOpsPage, VRouteLinkButton, VSplitWorkspace, VStateSurface } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { useMemoryItemMutations } from "./memory/useMemoryItemMutations";
 import { useMemoryKnowledgeMutations } from "./memory/useMemoryKnowledgeMutations";
@@ -79,7 +77,7 @@ import { MemoryOverviewPanel } from "./MemoryOverviewPanel";
 import { MemoryProjectMemoryQueuePanel } from "./MemoryProjectMemoryQueuePanel";
 import { MemoryReviewQueuePanel } from "./MemoryReviewQueuePanel";
 import { MemorySelectedConfigPanel } from "./MemorySelectedConfigPanel";
-import { MemorySourceAndItemPanels } from "./MemorySourceAndItemPanels";
+import { MemoryItemPanel, MemorySourcePanel } from "./MemorySourceAndItemPanels";
 import { MemoryUserContentPanel } from "./MemoryUserContentPanel";
 import { MemoryWarningStrip } from "./MemoryWarningStrip";
 import styles from "./MemoryRoute.styles";
@@ -1884,6 +1882,7 @@ function commaList(value: string) {
 }
 
 const MEMORY_LAYOUT_ID = WORKBENCH_LAYOUT_IDS.memory;
+/** Pane ids stay "left"/"right" so existing pane-layouts.v1[memory] widths keep applying. */
 const MEMORY_LEFT_PANE: PaneSpec = {
   id: "left",
   defaultWidth: 230,
@@ -1896,7 +1895,11 @@ const MEMORY_RIGHT_PANE: PaneSpec = {
   minWidth: 260,
   maxWidth: 420,
 };
-const MEMORY_PANES: PaneSpec[] = [MEMORY_LEFT_PANE, MEMORY_RIGHT_PANE];
+const MEMORY_SPLIT_RESIZE = {
+  layoutId: MEMORY_LAYOUT_ID,
+  sidebar: MEMORY_LEFT_PANE,
+  aside: MEMORY_RIGHT_PANE,
+} as const;
 
 type MemoryRouteProps = {
   forcedView?: MemoryRouteView;
@@ -2199,47 +2202,6 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   const searchParamText = searchParams.toString();
   const returnToPath = useMemo(() => safeAgentCenterReturnToPath(searchParams.get("returnTo")), [searchParamText]);
   const returnToLabel = searchParams.get("returnLabel") === "agents" ? copy.returnToAgents : copy.returnToSource;
-  const {
-    layoutRef: memoryLayoutRef,
-    widths: memoryPaneWidths,
-    draggingPaneId: memoryDraggingPaneId,
-    startResize: startMemoryPaneResize,
-    onResizeKeyDown: onMemoryPaneResizeKeyDown,
-  } = usePersistedPaneResize({
-    layoutId: MEMORY_LAYOUT_ID,
-    panes: MEMORY_PANES,
-    preserveMainMinWidth: 420,
-  });
-  const memoryLeftWidth = memoryPaneWidths.left ?? MEMORY_LEFT_PANE.defaultWidth;
-  const memoryRightWidth = memoryPaneWidths.right ?? MEMORY_RIGHT_PANE.defaultWidth;
-  const memoryLayoutStyle = {
-    ["--memory-left-width" as string]: `${memoryLeftWidth}px`,
-    ["--memory-right-width" as string]: `${memoryRightWidth}px`,
-  } as CSSProperties;
-  const memoryResizeHandles = (
-    <>
-      <PaneResizeHandle
-        label={lang === "zh" ? "调整记忆左侧栏宽度" : "Resize memory left rail"}
-        valueNow={memoryLeftWidth}
-        valueMin={MEMORY_LEFT_PANE.minWidth}
-        valueMax={MEMORY_LEFT_PANE.maxWidth}
-        active={memoryDraggingPaneId === "left"}
-        className={styles.paneResizeHandleLeft}
-        onPointerDown={(event) => startMemoryPaneResize("left", event, { direction: 1 })}
-        onKeyDown={(event) => onMemoryPaneResizeKeyDown("left", event, { direction: 1 })}
-      />
-      <PaneResizeHandle
-        label={lang === "zh" ? "调整记忆右侧栏宽度" : "Resize memory right rail"}
-        valueNow={memoryRightWidth}
-        valueMin={MEMORY_RIGHT_PANE.minWidth}
-        valueMax={MEMORY_RIGHT_PANE.maxWidth}
-        active={memoryDraggingPaneId === "right"}
-        className={styles.paneResizeHandleRight}
-        onPointerDown={(event) => startMemoryPaneResize("right", event, { direction: -1 })}
-        onKeyDown={(event) => onMemoryPaneResizeKeyDown("right", event, { direction: -1 })}
-      />
-    </>
-  );
   const [activeSectionId, setActiveSectionId] = useState(() => searchParams.get("section") ?? "");
   const [activeItemId, setActiveItemId] = useState(() => searchParams.get("item") ?? "");
   const [activeFilter, setActiveFilter] = useState<FilterMode>(() => normalizeFilterMode(searchParams.get("filter")));
@@ -3759,11 +3721,10 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     />
   );
 
-  const createSourceAndItemPanels = (title: string) => (
-    <MemorySourceAndItemPanels
+  const createSourceRail = () => (
+    <MemorySourcePanel
       copy={copy}
       sourceTitle={selectedSection?.title ?? copy.allSections}
-      itemTitle={selectedSection?.title ?? title}
       selectedSectionVisibleCount={selectedSectionVisibleCount}
       searchText={searchText}
       onSearchTextChange={setSearchText}
@@ -3794,6 +3755,14 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
         setActiveItemId("");
         setActiveSectionId(sectionId);
       }}
+    />
+  );
+
+  const createItemColumn = (title: string) => (
+    <MemoryItemPanel
+      copy={copy}
+      itemTitle={selectedSection?.title ?? title}
+      flatVisibleItemCount={flatVisibleItems.length}
       showRefreshNotice={showRefreshNotice}
       refreshErrorText={overviewQuery.error instanceof Error ? overviewQuery.error.message : String(overviewQuery.error)}
       memoryList={renderMemoryList(flatVisibleItems, copy.noMatches, true)}
@@ -3951,18 +3920,16 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     <>
       {createMatrixPanel(copy.sourceAudit)}
       {createWarningStrip()}
-      <div
-        ref={memoryLayoutRef}
+      <VSplitWorkspace
         className={styles.workspace}
-        style={memoryLayoutStyle}
         data-vui-recipe="memory-knowledge-workbench"
         data-vui-layout-id={MEMORY_LAYOUT_ID}
         data-vui-region="memory-sources-workspace"
-      >
-        {createSourceAndItemPanels(copy.sourceAudit)}
-        {createDetailPanel()}
-        {memoryResizeHandles}
-      </div>
+        resize={MEMORY_SPLIT_RESIZE}
+        sidebar={createSourceRail()}
+        main={createItemColumn(copy.sourceAudit)}
+        aside={createDetailPanel()}
+      />
     </>
   );
 
@@ -4005,14 +3972,13 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
           <span>{knowledgeFeedback.text}</span>
         </section>
       ) : null}
-      <div
-        ref={memoryLayoutRef}
+      <VSplitWorkspace
         className={`${styles.workspace} ${styles.knowledgeWorkspace}`}
-        style={memoryLayoutStyle}
         data-vui-recipe="memory-knowledge-workbench"
         data-vui-layout-id={MEMORY_LAYOUT_ID}
         data-vui-region="memory-knowledge-workspace"
-      >
+        resize={MEMORY_SPLIT_RESIZE}
+        sidebar={(
         <MemoryKnowledgeBaseSidebar
           copy={copy}
           bases={knowledgeBases.map((base) => ({
@@ -4031,8 +3997,9 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
           isLoading={knowledgeDashboardSnapshotQuery.isPending}
           onSelectBase={setActiveKnowledgeBaseId}
         />
-
-        <main className={styles.knowledgeMain}>
+        )}
+        main={(
+        <div className={styles.knowledgeMain}>
           <MemoryKnowledgeModeTabs
             copy={copy}
             lang={lang}
@@ -4148,8 +4115,9 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
           />
           ) : null}
 
-        </main>
-
+        </div>
+        )}
+        aside={(
         <MemoryKnowledgeDetailPanel
           copy={copy}
           activeKnowledgeBase={activeKnowledgeBase}
@@ -4163,8 +4131,8 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
           onRatingDraftChange={setRatingDraft}
           onUpdateKnowledgeRating={updateKnowledgeRating}
         />
-        {memoryResizeHandles}
-      </div>
+        )}
+      />
     </>
   );
 

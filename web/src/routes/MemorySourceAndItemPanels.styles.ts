@@ -18,7 +18,7 @@ const styles = {
     `filterButtonActive min-w-0 ${vuiStateSelectedRowClass}`,
   filterGroup:
     "filterGroup min-w-0",
-  itemPanel: `itemPanel min-w-0 min-h-0 overflow-auto ${vuiFlatPanelClass} p-2`,
+  itemPanel: `itemPanel min-w-0 h-full min-h-0 overflow-auto ${vuiFlatPanelClass} p-2`,
   panelEyebrow:
     "panelEyebrow min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   panelHeader:
@@ -34,7 +34,7 @@ const styles = {
     "sourceIcon min-w-0 shrink-0 text-[var(--fg-tertiary)]",
   sourceList:
     "sourceList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
-  sourcePanel: `sourcePanel min-w-0 min-h-0 overflow-auto ${vuiFlatPanelClass} p-2`,
+  sourcePanel: `sourcePanel min-w-0 h-full min-h-0 overflow-auto ${vuiFlatPanelClass} p-2`,
   sourceStats:
     "sourceStats min-w-0 text-right tabular-nums",
 } as const;
