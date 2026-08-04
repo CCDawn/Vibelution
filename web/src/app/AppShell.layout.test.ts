@@ -108,7 +108,10 @@ describe("AppShell layout contract", () => {
     expect(shellSource).not.toContain("<span className={styles.statusBadgeLabel}>Gate</span>");
     expect(shellSource).not.toContain("className={`${styles.statusCluster} ${styles.brandGate}`}");
     expect(shellSource).toContain("LazyAppShellStatusGuidePanel");
-    expect(shellSource).toContain("statusGuideOpen ? (");
+    expect(shellSource).toContain('data-vui="status-guide-popover"');
+    expect(shellSource).toContain("contentClassName={styles.statusGuidePopoverContent}");
+    expect(shellSource).toContain("open={statusGuideOpen}");
+    expect(shellSource).not.toContain("onMouseEnter={() => setStatusGuideOpen(true)}");
     expect(shellSource).not.toContain("statusGuidePanel");
     expect(statusGuideSource).toContain('from "./AppShellStatusGuidePanel.styles"');
     expect(statusGuideSource).not.toContain("AppShell.styles");
@@ -165,9 +168,10 @@ describe("AppShell layout contract", () => {
     expect(shellStyles).toContain("width: 32px");
     expect(shellStyles).toContain("grid-template-columns: minmax(0, max-content) minmax(0, 1fr) max-content;");
     expect(shellStyles).toContain("max-width: 100%");
-    // Utility panel size now lives on VPopover content class (portaled).
+    // Utility / status-guide panel size lives on VPopover content class (portaled).
     expect(styles.utilityPopoverContent).toContain("w-[min(520px,calc(100vw-40px))]");
     expect(styles.utilityPopoverContent).toContain("max-h-[min(78vh,760px)]");
+    expect(styles.statusGuidePopoverContent).toContain("w-[min(640px,calc(100vw-40px))]");
     expect(shellStyles).toContain("grid-template-columns: repeat(4, minmax(0, 1fr))");
     expect(shellStyles).toContain("grid-template-columns: 36px minmax(0, 1fr)");
     expect(shellStyles).toContain("@media (max-width: 640px)");

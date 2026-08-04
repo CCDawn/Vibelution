@@ -175,10 +175,12 @@ const styles = {
     "vui-app-appshell statusGuideList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   statusGuideListItem: `vui-app-appshell statusGuideListItem min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto ${vuiOpaqueRowClass} p-2`,
   statusGuidePanel: `vui-app-appshell statusGuidePanel min-w-0 ${vuiGlassPanelClass} p-2`,
+  statusGuidePopoverContent:
+    "vui-app-appshell statusGuidePopoverContent z-[95] w-[min(640px,calc(100vw-40px))] max-w-[min(640px,calc(100vw-40px))] border-[var(--border-strong)] bg-[var(--shell-panel)] p-0 shadow-[var(--vui-shadow-soft)]",
   statusGuideStateLabel:
     "vui-app-appshell statusGuideStateLabel min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
-  statusSummaryChip: `vui-app-appshell statusSummaryChip min-w-0 ${vuiGlassPanelClass} p-2 inline-flex min-h-6 w-fit max-w-full items-center justify-center gap-1.5 rounded-full bg-[var(--vui-control-muted)] px-2 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)] h-8 min-h-8 flex-nowrap gap-1.5 whitespace-nowrap`,
-  statusSummaryCount: `vui-app-appshell statusSummaryCount min-w-0 ${vuiGlassPanelClass} p-2`,
+  statusSummaryChip: `vui-app-appshell statusSummaryChip min-w-0 ${vuiControlPillClass} ${vuiStateSelectedRowClass} h-8 min-h-8 flex-nowrap gap-1.5 whitespace-nowrap`,
+  statusSummaryCount: `vui-app-appshell statusSummaryCount min-w-0`,
   status_active:
     `vui-app-appshell status_active min-w-0 ${vuiStateSelectedRowClass}`,
   status_blocked:

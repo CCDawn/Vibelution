@@ -66,7 +66,7 @@ import type { ConversationStreamingFramePaintMetrics } from "../components/conve
 import { shouldShowNextStateSignalInConversation } from "../components/conversation/conversationNextStateSignal";
 import type { TurnAvatarResolution } from "../components/conversation/conversationTurnAvatar";
 import { isAgentInboxMessage } from "../components/conversation/conversationMessagePredicates";
-import { VButton, VContextualHint, VInput, VNativeInput, VNativeSelect, VStateSurface, VTooltip, type VButtonProps } from "../components/vui";
+import { VButton, VContextualHint, VInput, VNativeInput, VStateSurface, VTooltip, type VButtonProps } from "../components/vui";
 import { collectBrowserPageSnapshot, postBrowserTelemetry } from "../app/browserTelemetry";
 import { getPageInstanceId } from "../app/pageInstance";
 import { resolvePollingInterval, usePageVisibility, useStartupWarmup } from "../app/pollingPolicy";

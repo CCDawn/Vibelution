@@ -27,7 +27,7 @@ import {
   VButton,
   VContextualHint,
   VNativeInput,
-  VNativeSelect,
+  VStringSelect,
   VTooltip,
   type VButtonProps,
 } from "../../components/vui";
@@ -404,37 +404,35 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
                 </label>
                 <label className={styles.groupModeSelect}>
                   <span>{lang === "zh" ? "调度模式" : "Mode"}</span>
-                  <VNativeSelect
+                  <VStringSelect
+                    ariaLabel={lang === "zh" ? "调度模式" : "Mode"}
                     value={groupManageModeDraft}
-                    disabled={activeGroupTeamOwned || groupRoundActive || updateGroupRoomPending}
-                    onChange={(event) => {
+                    isDisabled={activeGroupTeamOwned || groupRoundActive || updateGroupRoomPending}
+                    onValueChange={(value) => {
                       setGroupRoomActionError("");
-                      setGroupManageModeDraft(event.target.value);
+                      setGroupManageModeDraft(value);
                     }}
-                  >
-                    {readyChatRoomModes.map((mode) => (
-                      <option key={mode.id} value={mode.id}>
-                        {chatRoomModeLabel(mode, lang)}
-                      </option>
-                    ))}
-                  </VNativeSelect>
+                    options={readyChatRoomModes.map((mode) => ({
+                      value: mode.id,
+                      label: chatRoomModeLabel(mode, lang),
+                    }))}
+                  />
                 </label>
                 <label className={styles.groupModeSelect}>
                   <span>{lang === "zh" ? "对话目的" : "Purpose"}</span>
-                  <VNativeSelect
+                  <VStringSelect
+                    ariaLabel={lang === "zh" ? "对话目的" : "Purpose"}
                     value={groupManagePurposeDraft}
-                    disabled={activeGroupTeamOwned || groupRoundRunning || updateGroupRoomPending}
-                    onChange={(event) => {
+                    isDisabled={activeGroupTeamOwned || groupRoundRunning || updateGroupRoomPending}
+                    onValueChange={(value) => {
                       setGroupRoomActionError("");
-                      setGroupManagePurposeDraft(event.target.value);
+                      setGroupManagePurposeDraft(value);
                     }}
-                  >
-                    {availableChatRoomPurposes.map((purpose) => (
-                      <option key={purpose.id} value={purpose.id}>
-                        {chatRoomPurposeLabel(purpose, lang)}
-                      </option>
-                    ))}
-                  </VNativeSelect>
+                    options={availableChatRoomPurposes.map((purpose) => ({
+                      value: purpose.id,
+                      label: chatRoomPurposeLabel(purpose, lang),
+                    }))}
+                  />
                 </label>
                 <div className={styles.groupManagementCount}>
                   <span>{lang === "zh" ? "已选" : "Selected"}</span>

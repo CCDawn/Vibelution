@@ -2416,32 +2416,33 @@ export function AppShell() {
               </div>
             </VPopover>
           </div>
-          <div
-            className={styles.statusCluster}
-            tabIndex={0}
-            aria-label={t("systemStatusGuide")}
-            title={statusSummaryTitle}
-            onMouseEnter={() => setStatusGuideOpen(true)}
-            onMouseLeave={(event) => {
-              if (!event.currentTarget.contains(document.activeElement)) {
-                setStatusGuideOpen(false);
-              }
-            }}
-            onFocus={() => setStatusGuideOpen(true)}
-            onBlur={(event) => {
-              const nextTarget = event.relatedTarget;
-              if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
-                setStatusGuideOpen(false);
-              }
-            }}
-          >
-            <div className={styles.statusSummaryChip}>
-              <span className={`${styles.statusDot} ${styles[`status_${primaryStatusCard.tone}`]}`} />
-              <span className={styles.statusBadgeLabel}>{primaryStatusCard.label}</span>
-              <strong className={styles.statusBadgeValue}>{primaryStatusCard.value}</strong>
-              <span className={styles.statusSummaryCount}>{rightStatusCards.length}</span>
-            </div>
-            {statusGuideOpen ? (
+          <div className={styles.statusCluster} data-shell-group="status-guide">
+            <VPopover
+              open={statusGuideOpen}
+              onOpenChange={setStatusGuideOpen}
+              align="end"
+              side="bottom"
+              sideOffset={10}
+              aria-label={t("systemStatusGuide")}
+              contentClassName={styles.statusGuidePopoverContent}
+              data-vui="status-guide-popover"
+              trigger={(
+                <VButton
+                  type="button"
+                  variant="secondary"
+                  className={styles.statusSummaryChip}
+                  title={statusSummaryTitle}
+                  aria-haspopup="dialog"
+                  aria-expanded={statusGuideOpen}
+                  aria-label={`${t("systemStatusGuide")}: ${primaryStatusCard.label} ${primaryStatusCard.value}`}
+                >
+                  <span className={`${styles.statusDot} ${styles[`status_${primaryStatusCard.tone}`]}`} />
+                  <span className={styles.statusBadgeLabel}>{primaryStatusCard.label}</span>
+                  <strong className={styles.statusBadgeValue}>{primaryStatusCard.value}</strong>
+                  <span className={styles.statusSummaryCount}>{rightStatusCards.length}</span>
+                </VButton>
+              )}
+            >
               <Suspense fallback={null}>
                 <LazyAppShellStatusGuidePanel
                   lang={lang}
@@ -2455,7 +2456,7 @@ export function AppShell() {
                   buildId={buildId}
                 />
               </Suspense>
-            ) : null}
+            </VPopover>
           </div>
           <VIconButton
             type="button"

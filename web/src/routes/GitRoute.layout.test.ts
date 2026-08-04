@@ -20,7 +20,8 @@ describe("GitRoute layout contract", () => {
     expect(routeSource).toContain("from \"../components/vui\"");
     expect(routeSource).toContain("<VButton");
     expect(routeSource).toContain("<VIconButton");
-    expect(routeSource).toContain("<VNativeSelect");
+    expect(routeSource).toContain("<VStringSelect");
+    expect(routeSource).not.toContain("<VNativeSelect");
     expect(routeSource).toContain("<VNativeTextarea");
     expect(routeSource).not.toMatch(/<button\b/);
     expect(routeSource).not.toMatch(/<input\b/);

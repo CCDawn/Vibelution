@@ -26,7 +26,7 @@ import {
   VLoadingValue,
   VMetricStrip,
   VNativeButton,
-  VNativeSelect,
+  VStringSelect,
   VNativeTextarea,
   VDenseOpsPage,
   VStateSurface,
@@ -991,21 +991,17 @@ export function GitRoute() {
             </section>
             <label className={styles.messageField}>
               <span>{t("gitAiAgentLabel")}</span>
-              <VNativeSelect
+              <VStringSelect
+                ariaLabel={t("gitAiAgentLabel")}
                 value={activeAiModelId}
-                disabled={!aiModelSelectOptions.length || configQuery.isPending}
-                onChange={(event) => setSelectedAiModelId(event.target.value)}
-              >
-                {aiModelSelectOptions.length ? (
-                  aiModelSelectOptions.map((option) => (
-                    <option key={option.model_id} value={option.model_id}>
-                      {option.label || option.model || option.model_id}
-                    </option>
-                  ))
-                ) : (
-                  <option value="">{t("gitAiAgentDefault")}</option>
-                )}
-              </VNativeSelect>
+                isDisabled={!aiModelSelectOptions.length || configQuery.isPending}
+                onValueChange={setSelectedAiModelId}
+                placeholder={t("gitAiAgentDefault")}
+                options={aiModelSelectOptions.map((option) => ({
+                  value: option.model_id,
+                  label: option.label || option.model || option.model_id,
+                }))}
+              />
             </label>
             <div className={styles.modelDefaultRow}>
               <span>{configuredModelId ? `${t("gitAiCurrentDefault")} ${configuredModelId}` : t("gitAiNoDefaultModel")}</span>

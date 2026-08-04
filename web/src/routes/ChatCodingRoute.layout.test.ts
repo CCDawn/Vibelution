@@ -1892,8 +1892,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndIndexRailSource).toContain("Team room reference");
     expect(routeAndIndexRailSource).toContain("onClick={() => onOpenTeam(activeGroupTeam.teamId)}");
     expect(routeAndIndexRailSource).toContain("打开团队");
-    expect(routeAndIndexRailSource).toContain("disabled={activeGroupTeamOwned || groupRoundActive || updateGroupRoomPending}");
-    expect(routeAndIndexRailSource).toContain("disabled={activeGroupTeamOwned || groupRoundRunning || updateGroupRoomPending}");
+    expect(routeAndIndexRailSource).toContain("isDisabled={activeGroupTeamOwned || groupRoundActive || updateGroupRoomPending}");
+    expect(routeAndIndexRailSource).toContain("isDisabled={activeGroupTeamOwned || groupRoundRunning || updateGroupRoomPending}");
     expect(routeAndIndexRailSource).toContain("团队关联群聊的成员来自团队组织画布");
     expect(routeSource).toContain("groupManageTitleDraft");
     expect(routeAndActionsSource).toContain("title: groupManageTitleDraft.trim()");
@@ -3330,7 +3330,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain('from "../components/vui"');
     expect(routeAndIndexRailSource).toContain("<VButton");
     expect(routeAndIndexRailSource).toContain("<VNativeInput");
-    expect(routeAndIndexRailSource).toContain("<VNativeSelect");
+    expect(routeAndIndexRailSource).toContain("<VStringSelect");
+    expect(routeAndIndexRailSource).not.toContain("<VNativeSelect");
     expect(routeSource).not.toMatch(/<button\b/);
     expect(routeSource).not.toMatch(/<input\b/);
     expect(routeSource).not.toMatch(/<select\b/);
