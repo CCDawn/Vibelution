@@ -40,7 +40,7 @@ import {
   ResearchSource,
   ResearchThemeCard,
 } from "../api/types";
-import { VButton, VNativeTextarea, VRouteHeader } from "../components/vui";
+import { VButton, VNativeTextarea, VRouteHeader, VStateSurface } from "../components/vui";
 import { useAppI18n } from "../i18n/useAppI18n";
 import styles from "./ResearchRoute.styles";
 
@@ -771,7 +771,7 @@ export function ResearchRoute() {
               <Database size={18} />
             </div>
             <div className={styles.sessionList}>
-              {sessions.length === 0 ? <p className={styles.emptyText}>{copy.noSession}</p> : null}
+              {sessions.length === 0 ? <VStateSurface tone="empty" title={copy.noSession} /> : null}
               {sessions.map((session) => (
                 <div
                   key={session.sessionId}
@@ -1077,7 +1077,7 @@ function ResearchStageOutput({
   const StageIcon = (STAGES.find((item) => item.id === stage) ?? STAGES[0]).icon;
 
   if (!active) {
-    return <p className={styles.emptyText}>{copy.noSession}</p>;
+    return <VStateSurface tone="empty" title={copy.noSession} />;
   }
 
   return (
@@ -1163,7 +1163,12 @@ function StageSources({
   const hiddenSourceCount = Math.max(0, sources.length - visibleSources.length);
   return (
     <div className={styles.evidenceList}>
-      {!visibleSources.length ? <p className={styles.emptyText}>{phase === "broad" ? "还没有广撒网来源。" : "还没有定向深搜来源。"}</p> : null}
+      {!visibleSources.length ? (
+        <VStateSurface
+          tone="empty"
+          title={phase === "broad" ? "还没有广撒网来源" : "还没有定向深搜来源"}
+        />
+      ) : null}
       {visibleSources.map((source) => (
         <article key={source.sourceId} className={styles.evidenceCard}>
           <a href={source.url} target="_blank" rel="noreferrer">
@@ -1532,7 +1537,7 @@ function StageEvidence({
           </VButton>
         </section>
       ) : null}
-      {!visibleEvidence.length ? <p className={styles.emptyText}>还没有证据记录。</p> : null}
+      {!visibleEvidence.length ? <VStateSurface tone="empty" title="还没有证据记录" /> : null}
       {visibleEvidence.map((item) => (
         <article key={item.evidenceId} className={styles.evidenceCard}>
           <strong>{item.claim}</strong>
@@ -1561,7 +1566,7 @@ function StageThemes({
 }) {
   return (
     <div className={styles.themeGrid}>
-      {currentThemes.length === 0 ? <p className={styles.emptyText}>{copy.emptyCandidates}</p> : null}
+      {currentThemes.length === 0 ? <VStateSurface tone="empty" title={copy.emptyCandidates} /> : null}
       {currentThemes.map((theme, index) => (
         <ThemeCompareRow
           key={theme.themeId}
@@ -1681,7 +1686,7 @@ function StageCard({
           </div>
           <p>{copy.previewBeforeCard}</p>
         </section>
-        {visibleThemes.length === 0 ? <p className={styles.emptyText}>{copy.emptyCandidates}</p> : null}
+        {visibleThemes.length === 0 ? <VStateSurface tone="empty" title={copy.emptyCandidates} /> : null}
         {visibleThemes.map((theme, index) => {
           const isSelected = selectedTheme?.themeId === theme.themeId;
           return (

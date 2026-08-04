@@ -23,7 +23,7 @@ import {
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
-import { VButton, VConfirmDialog, VContextualHint, VDenseOpsPage, VIconButton, VNativeInput, VNativeSelect, VRouteLinkButton, VTooltip } from "../components/vui";
+import { VButton, VConfirmDialog, VContextualHint, VDenseOpsPage, VIconButton, VNativeInput, VNativeSelect, VRouteLinkButton, VStateSurface, VTooltip } from "../components/vui";
 import type { TranslationKey } from "../i18n/dictionary";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
@@ -1834,7 +1834,7 @@ export function ToolsRoute() {
                 </div>
               </section>
             ))}
-            {!visibleTools.length ? <p className={styles.emptyState}>{t("toolsNoMatches")}</p> : null}
+            {!visibleTools.length ? <VStateSurface tone="empty" title={t("toolsNoMatches")} /> : null}
           </div>
         </aside>
 

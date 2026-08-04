@@ -1,7 +1,7 @@
 import { ShieldCheck, Wrench } from "lucide-react";
 
 import { AgentToolGovernanceRequest } from "../api/types";
-import { VButton, VContextualHint } from "../components/vui";
+import { VButton, VContextualHint, VStateSurface } from "../components/vui";
 import { governanceStatusLabel } from "./agents/agentStatusPresentation";
 import styles from "./AgentToolGovernancePanel.styles";
 
@@ -117,7 +117,7 @@ export function AgentToolGovernancePanel({
             );
           })
         ) : (
-          <p className={styles.emptyText}>{copy.toolGovernanceEmpty}</p>
+          <VStateSurface tone="empty" title={copy.toolGovernanceEmpty} />
         )}
       </div>
       <div className={styles.editorActions}>

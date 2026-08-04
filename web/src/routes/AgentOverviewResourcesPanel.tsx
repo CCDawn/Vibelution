@@ -1,6 +1,6 @@
 import { Boxes } from "lucide-react";
 
-import { VButton, VTooltip } from "../components/vui";
+import { VButton, VStateSurface, VTooltip } from "../components/vui";
 import styles from "./AgentOverviewResourcesPanel.styles";
 
 export type AgentOverviewResourceView = {
@@ -40,7 +40,7 @@ export function AgentOverviewResourcesPanel({ title, emptyLabel, openLabel, reso
           ))}
         </div>
       ) : (
-        <p className={styles.empty}>{emptyLabel}</p>
+        <VStateSurface tone="empty" title={emptyLabel} />
       )}
     </section>
   );

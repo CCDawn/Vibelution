@@ -1,6 +1,6 @@
 import { AlertTriangle, CheckCircle2, MessageSquare } from "lucide-react";
 
-import { VButton, VContextualHint } from "../components/vui";
+import { VButton, VContextualHint, VStateSurface } from "../components/vui";
 import styles from "./AgentHealthMaintenancePanel.styles";
 
 export type AgentHealthMaintenanceIssueView = {
@@ -73,7 +73,7 @@ export function AgentHealthMaintenancePanel({
             ))}
           </div>
         ) : (
-          <p className={styles.emptyText}>{copy.noIssues}</p>
+          <VStateSurface tone="empty" title={copy.noIssues} />
         )}
       </section>
 

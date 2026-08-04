@@ -781,7 +781,13 @@ export function PromptTemplatesRoute() {
               </div>
             </>
           ) : (
-            <p className={styles.emptyStateClass}>{templatesQuery.isPending ? copy.loading : copy.emptyEditor}</p>
+            <VStateSurface
+              fill
+              className={styles.emptyStateClass}
+              tone={templatesQuery.isPending ? "loading" : "empty"}
+              title={templatesQuery.isPending ? copy.loading : copy.emptyEditor}
+              skeletonLines={templatesQuery.isPending ? 3 : false}
+            />
           )}
         </VSurface>
         )}

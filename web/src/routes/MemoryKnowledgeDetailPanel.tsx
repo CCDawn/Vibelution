@@ -1,7 +1,7 @@
 import { FileText } from "lucide-react";
 
 import type { KnowledgeItem, KnowledgeTracePayload, TeamKnowledgeBase } from "../api/types";
-import { VNativeInput } from "../components/vui";
+import { VNativeInput, VStateSurface } from "../components/vui";
 import styles from "./MemoryKnowledgeDetailPanel.styles";
 import { MemoryKnowledgeItemRatingCard, type MemoryKnowledgeRatingDraft } from "./MemoryKnowledgeItemRatingCard";
 
@@ -75,7 +75,7 @@ export function MemoryKnowledgeDetailPanel({
           </div>
         ) : null}
       </section>
-      {knowledgeItemsPending ? <div className={styles.emptyState}>{copy.loading}</div> : null}
+      {knowledgeItemsPending ? <VStateSurface tone="loading" title={copy.loading} skeletonLines={2} /> : null}
       <div className={styles.knowledgeItems}>
         {knowledgeItems.map((item) => (
           <MemoryKnowledgeItemRatingCard

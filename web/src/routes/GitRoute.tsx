@@ -126,7 +126,7 @@ export function GitRecentCommitsState({
         <p className={styles.notice} role="status">{syncingLabel}</p>
       ) : null}
       <div className={styles.commitList}>
-        {commitsContent || <p className={styles.emptyState}>{emptyMessage}</p>}
+        {commitsContent || <VStateSurface tone="empty" title={emptyMessage} />}
       </div>
     </>
   );
@@ -750,7 +750,10 @@ export function GitRoute() {
                   <div className={styles.situationList}>
                     {localCommitPreview.map((commit) => renderCommitItem(commit, gitCommitSourceLabel))}
                     {!localCommitPreview.length ? (
-                      <p className={styles.emptyState}>{lang === "zh" ? "没有本地提交待同步。" : "No local commits ahead of upstream."}</p>
+                      <VStateSurface
+                        tone="empty"
+                        title={lang === "zh" ? "没有本地提交待同步" : "No local commits ahead of upstream"}
+                      />
                     ) : null}
                   </div>
                 </section>
@@ -782,7 +785,10 @@ export function GitRoute() {
                       </VNativeButton>
                     ))}
                     {!pendingWorktreePreview.length ? (
-                      <p className={styles.emptyState}>{lang === "zh" ? "没有待合入 worktree 分支。" : "No worktree branches with pending commits."}</p>
+                      <VStateSurface
+                        tone="empty"
+                        title={lang === "zh" ? "没有待合入 worktree 分支" : "No worktree branches with pending commits"}
+                      />
                     ) : null}
                   </div>
                 </section>
@@ -886,7 +892,7 @@ export function GitRoute() {
                     </article>
                   );
                 })}
-                {!filteredFiles.length ? <p className={styles.emptyState}>{t("gitNoMatchingChanges")}</p> : null}
+                {!filteredFiles.length ? <VStateSurface tone="empty" title={t("gitNoMatchingChanges")} /> : null}
               </div>
             </VSurface>
 
