@@ -16,7 +16,7 @@ import type {
   UserMarkdownSpaceSearchPayload,
   UserMarkdownSpaceSummary,
 } from "../api/types";
-import { VButton, VNativeInput, VNativeSelect, VStateSurface } from "../components/vui";
+import { VButton, VNativeInput, VStateSurface, VStringSelect } from "../components/vui";
 import styles from "./MemoryUserContentPanel.styles";
 import { ProgressiveRegionSkeleton } from "./shared/ProgressiveRegionSkeleton";
 
@@ -317,12 +317,15 @@ export function MemoryUserContentPanel({ defaultUserId = "default" }: MemoryUser
             </label>
             <label>
               <span>标签</span>
-              <VNativeSelect value={tagFilter} onChange={(event) => setTagFilter(event.target.value)}>
-                <option value="">全部</option>
-                {visibleTags.map((tag) => (
-                  <option key={tag} value={tag}>{tag}</option>
-                ))}
-              </VNativeSelect>
+              <VStringSelect
+                ariaLabel="标签筛选"
+                value={tagFilter}
+                onValueChange={setTagFilter}
+                options={[
+                  { value: "", label: "全部" },
+                  ...visibleTags.map((tag) => ({ value: tag, label: tag })),
+                ]}
+              />
             </label>
             <div className={styles.actionRow}>
               <span className={styles.badge}>{searchResultsQuery.data?.summary.resultCount ?? 0} hits</span>

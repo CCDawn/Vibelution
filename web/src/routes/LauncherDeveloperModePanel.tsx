@@ -7,7 +7,7 @@ import type {
   LauncherDeveloperNoiseOverview,
 } from "../api/types";
 import { PersistedHeightListShell } from "../components/layout/PersistedHeightListShell";
-import { VButton, VNativeSelect, VTooltip } from "../components/vui";
+import { VButton, VStringSelect, VTooltip } from "../components/vui";
 import styles from "./LauncherDeveloperModePanel.styles";
 import {
   LAUNCHER_CLEANUP_CONSOLE_HEIGHT_PANE,
@@ -216,11 +216,16 @@ export function LauncherDeveloperModePanel({
           <VTooltip content={selectedOption.detail} width="wide">
             <label className={styles.settingField}>
               <span>{copy.developerModeAction}</span>
-              <VNativeSelect value={selectedAction} disabled={previewPending || applyPending} onChange={(event) => onSelectAction(event.target.value as LauncherDeveloperCleanupAction)}>
-                {actionOptions.map((option) => (
-                  <option key={option.action} value={option.action}>{option.label}</option>
-                ))}
-              </VNativeSelect>
+              <VStringSelect
+                ariaLabel={copy.developerModeAction}
+                value={selectedAction}
+                isDisabled={previewPending || applyPending}
+                onValueChange={(value) => onSelectAction(value as LauncherDeveloperCleanupAction)}
+                options={actionOptions.map((option) => ({
+                  value: option.action,
+                  label: option.label,
+                }))}
+              />
             </label>
           </VTooltip>
           <div className={styles.cleanupMetrics}>

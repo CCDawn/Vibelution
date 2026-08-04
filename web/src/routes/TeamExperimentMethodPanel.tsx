@@ -9,7 +9,7 @@ import type {
   ExperimentPurposeId,
   ExperimentResearchModeId,
 } from "../api/types";
-import { VNativeButton, VNativeInput, VNativeSelect, VNativeTextarea } from "../components/vui";
+import { VNativeButton, VNativeInput, VNativeTextarea, VStringSelect } from "../components/vui";
 import type { ExperimentHypothesisCandidateSummary } from "./teams/experimentLoopModel";
 import styles from "./TeamExperimentMethodPanel.styles";
 
@@ -284,12 +284,18 @@ function MethodField({
     return (
       <label className={className}>
         <span>{label}</span>
-        <VNativeSelect value={value} onChange={(event) => onChange(event.target.value)} disabled={disabled}>
-          <option value="not_required">{lang === "zh" ? "无需审批" : "Not required"}</option>
-          <option value="pending">{lang === "zh" ? "审批中" : "Pending"}</option>
-          <option value="approved">{lang === "zh" ? "已批准" : "Approved"}</option>
-          <option value="rejected">{lang === "zh" ? "已拒绝" : "Rejected"}</option>
-        </VNativeSelect>
+        <VStringSelect
+          ariaLabel={lang === "zh" ? "审批状态" : "Approval status"}
+          value={value}
+          isDisabled={disabled}
+          onValueChange={onChange}
+          options={[
+            { value: "not_required", label: lang === "zh" ? "无需审批" : "Not required" },
+            { value: "pending", label: lang === "zh" ? "审批中" : "Pending" },
+            { value: "approved", label: lang === "zh" ? "已批准" : "Approved" },
+            { value: "rejected", label: lang === "zh" ? "已拒绝" : "Rejected" },
+          ]}
+        />
       </label>
     );
   }
@@ -418,9 +424,16 @@ export function TeamExperimentMethodPanel({
       <div className={styles.selectionRow}>
         <label className={styles.field}>
           <span>{isZh ? "实验目的" : "Experiment purpose"}</span>
-          <VNativeSelect value={draft.primaryPurpose} onChange={(event) => setDraft((current) => ({ ...current, primaryPurpose: event.target.value as ExperimentPurposeId }))} disabled={locked}>
-            {catalog.experimentPurposes.map((purpose) => <option key={purpose.purposeId} value={purpose.purposeId}>{isZh ? purpose.labelZh : purpose.labelEn}</option>)}
-          </VNativeSelect>
+          <VStringSelect
+            ariaLabel={isZh ? "主实验目的" : "Primary purpose"}
+            value={draft.primaryPurpose}
+            isDisabled={locked}
+            onValueChange={(primaryPurpose) => setDraft((current) => ({ ...current, primaryPurpose: primaryPurpose as ExperimentPurposeId }))}
+            options={catalog.experimentPurposes.map((purpose) => ({
+              value: purpose.purposeId,
+              label: isZh ? purpose.labelZh : purpose.labelEn,
+            }))}
+          />
         </label>
         <div className={styles.section}>
           <span>{isZh ? "验证方法" : "Validation method"}</span>
@@ -496,12 +509,21 @@ export function TeamExperimentMethodPanel({
         </label>
         <label className={styles.field}>
           <span>{isZh ? "指标方向" : "Metric direction"}</span>
-          <VNativeSelect value={draft.metricDirection} onChange={(event) => setDraft((current) => ({ ...current, metricDirection: event.target.value as ExperimentMethodFormDraft["metricDirection"] }))} disabled={locked}>
-            <option value="maximize">{isZh ? "越高越好" : "Maximize"}</option>
-            <option value="minimize">{isZh ? "越低越好" : "Minimize"}</option>
-            <option value="target">{isZh ? "接近目标" : "Target"}</option>
-            <option value="descriptive">{isZh ? "描述性指标" : "Descriptive"}</option>
-          </VNativeSelect>
+          <VStringSelect
+            ariaLabel={isZh ? "指标方向" : "Metric direction"}
+            value={draft.metricDirection}
+            isDisabled={locked}
+            onValueChange={(metricDirection) => setDraft((current) => ({
+              ...current,
+              metricDirection: metricDirection as ExperimentMethodFormDraft["metricDirection"],
+            }))}
+            options={[
+              { value: "maximize", label: isZh ? "越高越好" : "Maximize" },
+              { value: "minimize", label: isZh ? "越低越好" : "Minimize" },
+              { value: "target", label: isZh ? "接近目标" : "Target" },
+              { value: "descriptive", label: isZh ? "描述性指标" : "Descriptive" },
+            ]}
+          />
         </label>
         {selectedMethod?.requiredConfigFields.map((field) => (
           <MethodField key={field} field={field} value={draft.methodConfigs[draft.experimentMethod][field] ?? ""} lang={lang} disabled={locked} onChange={(value) => updateConfig(field, value)} />
@@ -527,17 +549,16 @@ export function TeamExperimentMethodPanel({
         <div className={styles.selectionRow} data-scientific-hypothesis-completion="true">
           <label className={styles.field}>
             <span>{isZh ? "待补全的科学假设" : "Scientific hypothesis to complete"}</span>
-            <VNativeSelect
+            <VStringSelect
+              ariaLabel={isZh ? "科学候选" : "Scientific candidate"}
               value={selectedScientificCandidateId}
-              onChange={(event) => setSelectedScientificCandidateId(event.target.value)}
-              disabled={locked || Boolean(completingCandidateId)}
-            >
-              {scientificCandidatesNeedingDesign.map((candidate) => (
-                <option key={candidate.candidateId} value={candidate.candidateId}>
-                  {candidate.title || candidate.hypothesis || candidate.candidateId}
-                </option>
-              ))}
-            </VNativeSelect>
+              isDisabled={locked || Boolean(completingCandidateId)}
+              onValueChange={setSelectedScientificCandidateId}
+              options={scientificCandidatesNeedingDesign.map((candidate) => ({
+                value: candidate.candidateId,
+                label: candidate.title || candidate.hypothesis || candidate.candidateId,
+              }))}
+            />
           </label>
           <div className={styles.section}>
             <span>

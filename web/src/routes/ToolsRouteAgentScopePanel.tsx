@@ -1,5 +1,5 @@
 import type { AgentInstance } from "../api/types";
-import { VNativeSelect } from "../components/vui";
+import { VStringSelect } from "../components/vui";
 import styles from "./ToolsRouteAgentScopePanel.styles";
 
 export type ToolsRouteScopeOption = {
@@ -66,35 +66,32 @@ export function ToolsRouteAgentScopePanel({
         </div>
         <label className={styles.scopeSelect}>
           <span>{copy.configure}</span>
-          <VNativeSelect
+          <VStringSelect
+            ariaLabel={copy.configureAgent}
             value={activeAgent?.agentId ?? ""}
-            disabled={!activeAgents.length}
-            aria-label={copy.configureAgent}
-            onChange={(event) => onAgentChange(event.target.value)}
-          >
-            {!activeAgents.length ? (
-              <option value="">{agentsLoading ? copy.loading : "-"}</option>
-            ) : null}
-            {activeAgents.map((agent) => (
-              <option key={agent.agentId} value={agent.agentId}>
-                {agent.agentCode ? `${agent.agentCode} · ` : ""}{agent.displayName || agent.agentId}
-              </option>
-            ))}
-          </VNativeSelect>
+            isDisabled={!activeAgents.length}
+            onValueChange={onAgentChange}
+            options={
+              !activeAgents.length
+                ? [{ value: "", label: agentsLoading ? copy.loading : "-" }]
+                : activeAgents.map((agent) => ({
+                    value: agent.agentId,
+                    label: `${agent.agentCode ? `${agent.agentCode} · ` : ""}${agent.displayName || agent.agentId}`,
+                  }))
+            }
+          />
         </label>
         <label className={styles.scopeSelect}>
           <span>{copy.scope}</span>
-          <VNativeSelect
+          <VStringSelect
+            ariaLabel={copy.scope}
             value={activeAgentScopeId}
-            aria-label={copy.scope}
-            onChange={(event) => onScopeChange(event.target.value)}
-          >
-            {scopeOptions.map((scope) => (
-              <option key={scope.id} value={scope.id}>
-                {scope.label}
-              </option>
-            ))}
-          </VNativeSelect>
+            onValueChange={onScopeChange}
+            options={scopeOptions.map((scope) => ({
+              value: scope.id,
+              label: scope.label,
+            }))}
+          />
         </label>
         <div className={styles.scopeStats}>
           <span>

@@ -55,8 +55,8 @@ describe("LauncherRoute layout contract", () => {
     expect(developerModePanelSource).toContain("<VButton");
     expect(startupSettingsPanelSource).toContain("<VButton");
     expect(startupSettingsPanelSource).toContain("<VNativeInput");
-    expect(developerModePanelSource).toContain("<VNativeSelect");
-    expect(startupSettingsPanelSource).toContain("<VNativeSelect");
+    expect(developerModePanelSource).toContain("<VStringSelect");
+    expect(startupSettingsPanelSource).toContain("<VStringSelect");
     expect(routeSource).not.toMatch(/<button\b/);
     expect(routeSource).not.toMatch(/<select\b/);
     expect(routeSource).not.toMatch(/<textarea\b/);

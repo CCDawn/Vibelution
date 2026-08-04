@@ -25,7 +25,7 @@ describe("SupervisedReviewRoute layout contract", () => {
     expect(routeSource).toContain('from "../components/vui"');
     expect(routeSource).toContain("<VButton");
     expect(routeSource).toContain("<VNativeInput");
-    expect(routeSource).toContain("<VNativeSelect");
+    expect(routeSource).toContain("<VStringSelect");
     expect(routeSource).toContain("<VNativeTextarea");
     expect(routeSource).toContain("VTooltip");
     expect(routeSource).not.toMatch(/<button\b/);

@@ -16,8 +16,8 @@ import {
   VIconButton,
   VListDetailPage,
   VNativeInput,
-  VNativeSelect,
   VNativeTextarea,
+  VStringSelect,
   VPanelHeader,
   VRouteLinkButton,
   VStateSurface,
@@ -578,13 +578,17 @@ export function PromptTemplatesRoute() {
             <label className={styles.bulkSelectFieldClass}>
               <Tags size={14} />
               <span>{copy.bulkCategory}</span>
-              <VNativeSelect className={styles.bulkSelectClass} value={bulkCategory} disabled={bulkPromptPending} onChange={(event) => setBulkCategory(event.target.value)}>
-                {CATEGORY_FILTERS.filter((filter) => filter !== "all").map((filter) => (
-                  <option key={filter} value={filter}>
-                    {categoryLabel(filter, lang)}
-                  </option>
-                ))}
-              </VNativeSelect>
+              <VStringSelect
+                className={styles.bulkSelectClass}
+                ariaLabel={copy.bulkCategory}
+                value={bulkCategory}
+                isDisabled={bulkPromptPending}
+                onValueChange={setBulkCategory}
+                options={CATEGORY_FILTERS.filter((filter) => filter !== "all").map((filter) => ({
+                  value: filter,
+                  label: categoryLabel(filter, lang),
+                }))}
+              />
             </label>
             <VButton
               type="button"

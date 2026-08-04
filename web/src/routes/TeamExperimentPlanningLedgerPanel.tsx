@@ -10,9 +10,9 @@ import {
   VMetricChip,
   VNativeButton,
   VNativeInput,
-  VNativeSelect,
   VNativeTextarea,
   VStatusChip,
+  VStringSelect,
   type VStatusTone,
 } from "../components/vui";
 import {
@@ -744,24 +744,24 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
                 <div className={styles.experimentSmokeForm}>
                   <label>
                     <span>{lang === "zh" ? "Smoke 状态" : "Smoke status"}</span>
-                    <VNativeSelect
+                    <VStringSelect
+                      ariaLabel={lang === "zh" ? "Smoke 状态" : "Smoke status"}
                       value={experimentSmokeResultDraft.status}
-                      onChange={(event) =>
+                      onValueChange={(status) =>
                         setExperimentSmokeResultDraft((draft) => ({
                           ...draft,
-                          status: event.target.value as ExperimentSmokeResultStatus,
+                          status: status as ExperimentSmokeResultStatus,
                         }))}
-                    >
-                      {EXPERIMENT_SMOKE_RESULT_STATUSES.map((status: any) => (
-                        <option key={status} value={status}>
-                          {status === "needs_review"
+                      options={EXPERIMENT_SMOKE_RESULT_STATUSES.map((status: any) => ({
+                        value: status,
+                        label:
+                          status === "needs_review"
                             ? (lang === "zh" ? "需复核" : "needs review")
                             : status === "passed"
                               ? (lang === "zh" ? "通过" : "passed")
-                              : (lang === "zh" ? "失败" : "failed")}
-                        </option>
-                      ))}
-                    </VNativeSelect>
+                              : (lang === "zh" ? "失败" : "failed"),
+                      }))}
+                    />
                   </label>
                   <label>
                     <span>{lang === "zh" ? "Smoke 指标" : "Smoke metric"}</span>
@@ -863,24 +863,24 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
                     <div className={styles.experimentSmokeForm}>
                       <label>
                         <span>{lang === "zh" ? "Full-run 状态" : "Full-run status"}</span>
-                        <VNativeSelect
+                        <VStringSelect
+                          ariaLabel={lang === "zh" ? "Full-run 状态" : "Full-run status"}
                           value={experimentFullRunResultDraft.status}
-                          onChange={(event) =>
+                          onValueChange={(status) =>
                             setExperimentFullRunResultDraft((draft) => ({
                               ...draft,
-                              status: event.target.value as ExperimentFullRunResultStatus,
+                              status: status as ExperimentFullRunResultStatus,
                             }))}
-                        >
-                          {EXPERIMENT_FULL_RUN_RESULT_STATUSES.map((status: any) => (
-                            <option key={status} value={status}>
-                              {status === "needs_review"
+                          options={EXPERIMENT_FULL_RUN_RESULT_STATUSES.map((status: any) => ({
+                            value: status,
+                            label:
+                              status === "needs_review"
                                 ? (lang === "zh" ? "需复核" : "needs review")
                                 : status === "passed"
                                   ? (lang === "zh" ? "通过" : "passed")
-                                  : (lang === "zh" ? "失败" : "failed")}
-                            </option>
-                          ))}
-                        </VNativeSelect>
+                                  : (lang === "zh" ? "失败" : "failed"),
+                          }))}
+                        />
                       </label>
                       <label>
                         <span>{lang === "zh" ? "Full-run 指标" : "Full-run metric"}</span>

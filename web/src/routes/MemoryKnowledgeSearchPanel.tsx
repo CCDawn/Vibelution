@@ -7,7 +7,7 @@ import type {
   KnowledgeRagRetrievalPayload,
   KnowledgeSearchPayload,
 } from "../api/types";
-import { VNativeInput, VNativeSelect } from "../components/vui";
+import { VNativeInput, VStringSelect } from "../components/vui";
 import { MemoryKnowledgeRagPanel, type MemoryKnowledgeRagPanelCopy } from "./MemoryKnowledgeRagPanel";
 import styles from "./MemoryKnowledgeSearchPanel.styles";
 
@@ -86,19 +86,21 @@ export function MemoryKnowledgeSearchPanel({
         </label>
         <label>
           <span>{copy.searchMode}</span>
-          <VNativeSelect
+          <VStringSelect
+            ariaLabel={copy.searchMode}
             value={draft.searchMode}
-            onChange={(event) =>
+            onValueChange={(searchMode) =>
               onDraftChange({
                 ...draft,
-                searchMode: event.target.value as MemoryKnowledgeSearchDraft["searchMode"],
+                searchMode: searchMode as MemoryKnowledgeSearchDraft["searchMode"],
               })
             }
-          >
-            <option value="exact">{copy.exactSearch}</option>
-            <option value="semantic">{copy.semanticSearch}</option>
-            <option value="hybrid">{copy.hybridSearch}</option>
-          </VNativeSelect>
+            options={[
+              { value: "exact", label: copy.exactSearch },
+              { value: "semantic", label: copy.semanticSearch },
+              { value: "hybrid", label: copy.hybridSearch },
+            ]}
+          />
         </label>
         <label>
           <span>{copy.ragTopK}</span>
