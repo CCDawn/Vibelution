@@ -78,12 +78,13 @@
 | --- | --- |
 | 表单/配置面、string value | **优先 `VStringSelect`**（封装本组件） |
 | 需要 description / 非 string key | `VSelect` |
-| 密集筛选条、零 portal（Chat 侧栏、Git 过滤） | `VNativeSelect` |
+| 选项少且必须零 portal 的超密控件 | `VNativeSelect`（保留双轨；**当前 product routes 无消费者**） |
 | 需要搜索过滤大量选项 | 暂用调用方 Combobox 方案（未建 `VCombobox` 前） |
 
-### 迁移
-- Agent 配置/批量/创建表单已迁到 `VStringSelect`（Radix）
-- Config / Evolution 表单面继续用 `VStringSelect`；勿回退为原生 `<select>`
+### 迁移（收口收口）
+- Agent 配置/批量/创建、Config、Evolution → `VStringSelect`
+- Chat 群组 Mode/Purpose、Git AI 模型 → `VStringSelect`
+- 禁止 product route 回退原生 `<select>` / 新增 `VNativeSelect` 消费者（见 `vuiOverlayAlignmentGate`）
 
 ### 实现落点
 - `forms/VSelect.tsx` → `renderers/shadcn/ShadcnSelect.tsx`（`@radix-ui/react-select`）
@@ -93,10 +94,14 @@
 ## VNativeSelect
 
 ### 职责
-原生 `<select>`。
+原生 `<select>` 门面（dense 双轨保留）。
 
 ### 何时使用
-- 选项少、需极低成本、密集面板
+- 仅当选项极少、必须零 portal、且 Radix Select 会破坏布局时
+- **默认不要用**：新场景优先 `VStringSelect`
+
+### 反冗余
+- 不删除组件（双轨 API 保留）；不在 product routes 扩大使用面
 
 ---
 
@@ -106,7 +111,7 @@
 以 string 为 value 的选择封装，减少 key 样板代码。
 
 ### 何时使用
-- 配置项枚举、过滤器
+- 配置项枚举、过滤器、轻量表单 select
 
 ### 反冗余
 - 不要再做 `VEnumSelect`；扩展本组件

@@ -22,6 +22,9 @@
    `product/` 只做领域组合；按钮/输入/表面必须组合 `VButton` / `VInput` / `VSurface` 等。
 5. **renderer 不对外**
    `renderers/shadcn/*` 无独立产品设计页；行为写在对应 `V*` 设计说明的「实现」节。
+6. **浮层对齐门禁**
+   产品面禁止手写 `createPortal` / `fixed inset-0` 对话框壳；模态用 `VDialog`/`VConfirmDialog`，锚定浮层用 `VPopover`/`VDropdownMenu`。
+   总闸：`../vuiOverlayAlignmentGate.test.ts`（含 intentional keep 清单）。
 
 ## 设计说明最低字段
 
