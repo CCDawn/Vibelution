@@ -1,7 +1,7 @@
 import { CheckCircle2 } from "lucide-react";
 import { type FormEvent } from "react";
 
-import { VNativeButton, VNativeInput, VNativeSelect, VNativeTextarea } from "../components/vui";
+import { VNativeButton, VNativeInput, VNativeTextarea, VStringSelect } from "../components/vui";
 import styles from "./TeamSourceCollectionManualWritebackPanel.styles";
 
 export type TeamSourceCollectionManualWritebackAssignment = {
@@ -63,27 +63,28 @@ export function TeamSourceCollectionManualWritebackPanel({
       </div>
       <label>
         <span>{isZh ? "分工任务" : "Assignment"}</span>
-        <VNativeSelect
+        <VStringSelect
+          ariaLabel={isZh ? "任务分配" : "Assignment"}
           value={assignmentValue}
-          onChange={(event) => onDraftChange({ assignmentId: event.target.value })}
-          disabled={!assignments.length}
-        >
-          {assignments.map((assignment) => (
-            <option key={assignment.id} value={assignment.id}>
-              {assignment.label}
-            </option>
-          ))}
-        </VNativeSelect>
+          isDisabled={!assignments.length}
+          onValueChange={(assignmentId) => onDraftChange({ assignmentId })}
+          options={assignments.map((assignment) => ({
+            value: assignment.id,
+            label: assignment.label,
+          }))}
+        />
       </label>
       <label>
         <span>{isZh ? "类型" : "Type"}</span>
-        <VNativeSelect value={draft.sourceType} onChange={(event) => onDraftChange({ sourceType: event.target.value })}>
-          {sourceTypes.map((sourceType) => (
-            <option key={sourceType} value={sourceType}>
-              {sourceTypeLabel(sourceType)}
-            </option>
-          ))}
-        </VNativeSelect>
+        <VStringSelect
+          ariaLabel={isZh ? "来源类型" : "Source type"}
+          value={draft.sourceType}
+          onValueChange={(sourceType) => onDraftChange({ sourceType })}
+          options={sourceTypes.map((sourceType) => ({
+            value: sourceType,
+            label: sourceTypeLabel(sourceType),
+          }))}
+        />
       </label>
       <label>
         <span>{isZh ? "标题" : "Title"}</span>

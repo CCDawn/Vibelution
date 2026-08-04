@@ -1,6 +1,6 @@
 import { type ReactNode } from "react";
 
-import { VNativeButton, VNativeSelect } from "../components/vui";
+import { VNativeButton, VStringSelect } from "../components/vui";
 import styles from "./TeamSourceCollectionFindingDetailsPanel.styles";
 
 type TeamSourceCollectionFindingDetailsLang = "zh" | "en";
@@ -93,21 +93,17 @@ export function TeamSourceCollectionFindingDetailsPanel({
       <div className={styles.workflowSourceCollectionRuns}>
         <label>
           <span>{isZh ? "最近批次" : "Recent runs"}</span>
-          <VNativeSelect
+          <VStringSelect
+            ariaLabel={isZh ? "批次" : "Run"}
             value={selectedRunId}
-            onChange={(event) => onRunChange(event.target.value)}
-            disabled={!runs.length}
-          >
-            {runs.length ? (
-              runs.map((run) => (
-                <option key={run.id} value={run.id}>
-                  {run.label}
-                </option>
-              ))
-            ) : (
-              <option value="">{isZh ? "暂无批次" : "No runs"}</option>
-            )}
-          </VNativeSelect>
+            isDisabled={!runs.length}
+            onValueChange={onRunChange}
+            options={
+              runs.length
+                ? runs.map((run) => ({ value: run.id, label: run.label }))
+                : [{ value: "", label: isZh ? "暂无批次" : "No runs" }]
+            }
+          />
         </label>
         {runStats}
       </div>

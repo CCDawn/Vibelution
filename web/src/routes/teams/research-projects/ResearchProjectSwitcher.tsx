@@ -12,9 +12,9 @@ import {
   VButton,
   VDialog,
   VNativeInput,
-  VNativeSelect,
   VRouteLinkButton,
   VStatusChip,
+  VStringSelect,
   type VStatusTone,
 } from "../../../components/vui";
 
@@ -196,16 +196,16 @@ export function ResearchProjectSwitcher({
       </div>
       <label className={styles.projectSelect}>
         {variant === "hero" ? <span>{lang === "zh" ? "切换项目" : "Switch project"}</span> : null}
-        <VNativeSelect
+        <VStringSelect
+          ariaLabel={lang === "zh" ? "切换研究项目" : "Switch research project"}
           value={projectsQuery.data?.activeProjectId || ""}
-          onChange={(event) => activateMutation.mutate(event.target.value)}
-          disabled={pending || projectsQuery.isPending}
-          aria-label={lang === "zh" ? "切换研究项目" : "Switch research project"}
-        >
-          {(projectsQuery.data?.projects ?? []).map((project) => (
-            <option key={project.projectId} value={project.projectId}>{project.name}</option>
-          ))}
-        </VNativeSelect>
+          isDisabled={pending || projectsQuery.isPending}
+          onValueChange={(projectId) => activateMutation.mutate(projectId)}
+          options={(projectsQuery.data?.projects ?? []).map((project) => ({
+            value: project.projectId,
+            label: project.name,
+          }))}
+        />
       </label>
       <div className={styles.actions}>
         <VButton

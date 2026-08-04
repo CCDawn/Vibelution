@@ -13,7 +13,7 @@ import type {
   ExperimentMethodId,
   ResearchProjectAgentTaskKind,
 } from "../api/types";
-import { VNativeButton, VNativeInput, VNativeSelect } from "../components/vui";
+import { VNativeButton, VNativeInput, VStringSelect } from "../components/vui";
 import {
   ChallengeCupOperationsWorkspace,
   type ChallengeCupWorkspaceAgent,
@@ -913,18 +913,16 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
                   <div className={styles.researchExperimentMethodQuickSelect}>
                     <label>
                       <span>{lang === "zh" ? "实验方式" : "Experiment method"}</span>
-                      <VNativeSelect
+                      <VStringSelect
+                        ariaLabel={lang === "zh" ? "选择实验方式" : "Select experiment method"}
                         value={selectedExperimentMethod}
-                        onChange={(event) => setPreferredExperimentMethod(event.target.value as ExperimentMethodId | "")}
-                        disabled={experimentMethodCatalogQuery.isFetching || !experimentMethodCatalogQuery.data}
-                        aria-label={lang === "zh" ? "选择实验方式" : "Select experiment method"}
-                      >
-                        {experimentMethodCatalogQuery.data?.methods.map((method: any) => (
-                          <option key={method.methodId} value={method.methodId}>
-                            {lang === "zh" ? method.labelZh : method.labelEn}
-                          </option>
-                        ))}
-                      </VNativeSelect>
+                        isDisabled={experimentMethodCatalogQuery.isFetching || !experimentMethodCatalogQuery.data}
+                        onValueChange={(value) => setPreferredExperimentMethod(value as ExperimentMethodId | "")}
+                        options={(experimentMethodCatalogQuery.data?.methods ?? []).map((method: any) => ({
+                          value: method.methodId,
+                          label: lang === "zh" ? method.labelZh : method.labelEn,
+                        }))}
+                      />
                     </label>
                     <div>
                       <span>
