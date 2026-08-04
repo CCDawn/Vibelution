@@ -5,10 +5,12 @@ const routeSource = readFileSync(new URL("../TeamsRoute.tsx", import.meta.url), 
 const panelSource = readFileSync(new URL("./TeamCommunicationPanel.tsx", import.meta.url), "utf8");
 
 describe("TeamCommunicationPanel extraction contract", () => {
-  it("TeamsRoute mounts the shared communication panel in both shells", () => {
+  it("TeamsRoute mounts the shared communication panel via one render helper used by both shells", () => {
     expect(routeSource).toContain('import { TeamCommunicationPanel } from "./teams/TeamCommunicationPanel"');
+    expect(routeSource).toContain("function renderTeamCommunicationPanel()");
+    expect(routeSource.match(/\{renderTeamCommunicationPanel\(\)\}/g)?.length).toBe(2);
     const mounts = routeSource.match(/<TeamCommunicationPanel[\s\S]*?\/>/g) || [];
-    expect(mounts.length).toBe(2);
+    expect(mounts.length).toBe(1);
     // Board/canvas must not re-inline discussion/broadcast forms.
     expect(routeSource).not.toContain("research-workflow-discussion");
     expect(routeSource).not.toContain("teamTaskForm");

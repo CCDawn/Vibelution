@@ -228,6 +228,7 @@ import { TeamOrganizationCanvasSurface } from "./teams/TeamOrganizationCanvasSur
 import { TeamShellRail } from "./teams/TeamShellRail";
 import { TeamShellToolbar } from "./teams/TeamShellToolbar";
 import { TeamCommunicationPanel } from "./teams/TeamCommunicationPanel";
+import { TeamResearchWorkflowPanelHost } from "./teams/TeamResearchWorkflowPanelHost";
 import {
   parseTeamShellMode,
   teamShellModeFromResearchView,
@@ -6001,6 +6002,219 @@ export function TeamsRoute({
     );
   }
 
+  function researchWorkflowStatusText() {
+    if (!researchWorkflowTeamSelected) {
+      return lang === "zh" ? "非科研团队" : "not research";
+    }
+    if (teamWorkflow?.status) {
+      return teamWorkflow.status;
+    }
+    if (teamWorkflowQuery.isPending) {
+      return lang === "zh" ? "读取中" : "loading";
+    }
+    return lang === "zh" ? "待初始化" : "not initialized";
+  }
+
+  function renderResearchWorkflowModules() {
+    return (
+      <>
+        {showResearchSourceCollection ? (
+                      <TeamsSourceCollectionPanel
+                        lang={lang}
+                        title={lang === "zh" ? "资料搜索执行" : "Source collection"}
+                        summary={sourceCollectionOverviewSummary}
+                        statusLabel={sourceCollectionOverviewStatus || (lang === "zh" ? "未启动" : "not started")}
+                        statusClassName={workflowIngestionToneBound(sourceCollectionOverviewStatus)}
+                        draft={sourceCollectionDraft}
+                        modeFields={renderSourceCollectionModeFields()}
+                        canStart={sourceCollectionCanStart}
+                        startPending={selectedTeamStartSourceCollectionPending}
+                        selectedRunId={selectedSourceCollectionRunEffectiveId}
+                        runs={sourceCollectionFindingRunOptions}
+                        stats={sourceCollectionOverviewStats}
+                        assignments={sourceCollectionFindingAssignments}
+                        assignmentEmptyMessage={sourceCollectionOverviewAssignmentEmptyMessage}
+                        queries={sourceCollectionFindingQueries}
+                        phaseCloseGate={(
+                          <TeamSourceCollectionPhaseCloseGatePanel
+                            lang={lang}
+                            selectedRunId={selectedSourceCollectionRunEffectiveId}
+                            gate={sourceCollectionPhaseCloseGate}
+                            loading={Boolean(
+                              selectedSourceCollectionRunEffectiveId
+                              && sourceCollectionSummaryQuery.isPending
+                              && !sourceCollectionSummaryQuery.data,
+                            )}
+                            onOpenStage={selectSourceCollectionStage}
+                          />
+                        )}
+                        storageActions={renderSourceCollectionStorageActions()}
+                        plan={sourceCollectionOverviewPlan}
+                        manualWriteback={renderSourceCollectionManualWritebackPanel({
+                          title: lang === "zh" ? "手工回写一条搜集结果" : "Manual result writeback",
+                          description: lang === "zh" ? "写 DataRecord 后自动导入 source_manifest 候选" : "Writes DataRecord, then imports source_manifest candidate",
+                          wrapInDetails: false,
+                        })}
+                        boundaryItems={sourceCollectionOverviewBoundaryItems}
+                        errorMessages={sourceCollectionOverviewErrors}
+                        result={sourceCollectionOverviewResult}
+                        onDraftChange={(patch) => setSourceCollectionDraft((current) => ({ ...current, ...patch }))}
+                        onStart={() => {
+                          if (!selectedTeam?.teamId || !sourceCollectionCanStart || selectedTeamStartSourceCollectionPending) {
+                            return;
+                          }
+                          startSourceCollectionRunMutation.mutate({
+                            teamId: selectedTeam.teamId,
+                            draft: sourceCollectionDraft,
+                          });
+                        }}
+                        onRunChange={setSelectedSourceCollectionRunId}
+                        onAssignmentSelect={(assignmentId) => setSourceCollectionOutputDraft((current) => ({ ...current, assignmentId }))}
+                      />
+                      ) : null}
+                      {showResearchCoordination ? (
+                      <TeamWorkflowCoordinationStatusPanel
+                        lang={lang}
+                        status={teamWorkflowCoordinationStatus}
+                        loading={teamWorkflowCoordinationStatusQuery.isPending}
+                        errorMessages={teamWorkflowCoordinationStatusQuery.error instanceof Error ? [teamWorkflowCoordinationStatusQuery.error.message] : []}
+                        statusLabel={(value) => workflowCoordinationStatusLabel(value, lang)}
+                        channelLabel={(value) => workflowCoordinationChannelLabel(value, lang)}
+                        stateLabel={(value) => workflowStateLabel(value, lang)}
+                      />
+                      ) : null}
+                      {showResearchIngestion ? (
+                      <TeamWorkflowKnowledgeIngestionStatusPanel
+                        lang={lang}
+                        status={teamWorkflowKnowledgeIngestionStatus}
+                        loading={teamWorkflowKnowledgeIngestionStatusQuery.isPending}
+                        errorMessages={teamWorkflowKnowledgeIngestionStatusQuery.error instanceof Error ? [teamWorkflowKnowledgeIngestionStatusQuery.error.message] : []}
+                        statusLabel={(value) => workflowIngestionStatusLabel(value, lang)}
+                      />
+                      ) : null}
+                      {showResearchGraph ? (
+                      <TeamWorkflowCandidateGraphStatusPanel
+                        lang={lang}
+                        graph={teamWorkflowCandidateGraph}
+                        layout={teamWorkflowCandidateGraphLayout}
+                        loading={teamWorkflowCandidateGraphQuery.isPending}
+                        errorMessages={[
+                          ...(teamWorkflowCandidateGraphQuery.error instanceof Error ? [teamWorkflowCandidateGraphQuery.error.message] : []),
+                          ...(selectedTeamBuildCandidateGraphError ? [selectedTeamBuildCandidateGraphError.message] : []),
+                        ]}
+                        actionLabel={sourceCollectionGraphActionLabel}
+                        actionDisabled={sourceCollectionGraphActionDisabled}
+                        actionTitle={sourceCollectionActionDisabledTitle(sourceCollectionGraphActionReadiness, sourceCollectionGraphActionLabel)}
+                        stateLabel={(value) => workflowStateLabel(value, lang)}
+                        onAction={runSourceCollectionGraphAction}
+                      />
+                      ) : null}
+                      {showResearchCandidates ? (
+                        <>
+                      <TeamWorkflowSourceQualityStatusPanel
+                        lang={lang}
+                        status={teamWorkflowSourceQualityStatus}
+                        loading={teamWorkflowSourceQualityStatusQuery.isPending}
+                        errorMessages={[
+                          ...(teamWorkflowSourceQualityStatusQuery.error instanceof Error ? [teamWorkflowSourceQualityStatusQuery.error.message] : []),
+                          ...(selectedTeamSourceQualityError ? [selectedTeamSourceQualityError.message] : []),
+                        ]}
+                        statusLabel={(value) => workflowIngestionStatusLabel(value, lang)}
+                      />
+                      <TeamWorkflowPaperNoteChunkStatusPanel
+                        lang={lang}
+                        status={teamWorkflowPaperNoteChunkStatus}
+                        loading={teamWorkflowPaperNoteChunkStatusQuery.isPending}
+                        errorMessages={[
+                          ...(teamWorkflowPaperNoteChunkStatusQuery.error instanceof Error ? [teamWorkflowPaperNoteChunkStatusQuery.error.message] : []),
+                          ...(selectedTeamPlanPaperNoteChunksError ? [selectedTeamPlanPaperNoteChunksError.message] : []),
+                        ]}
+                        statusLabel={(value) => workflowIngestionStatusLabel(value, lang)}
+                      />
+                      <TeamWorkflowCandidatePreviewPanel
+                        lang={lang}
+                        items={teamWorkflowCandidatePreviewItems}
+                        canOpenLibrary={Boolean(selectedTeam?.teamId)}
+                        reviewDisabled={sourceCollectionScreeningDisabled}
+                        reviewTitle={sourceCollectionActionDisabledTitle(sourceCollectionScreeningActionReadiness, lang === "zh" ? "进入资料提炼复核" : "Open review")}
+                        listNeedsScrollHint={teamWorkflowCandidates.length > SOURCE_COLLECTION_RESULT_PAGE_SIZE}
+                        emptyMessage={lang === "zh" ? "候选仓库还没有资料、笔记或机制候选。" : "No sources, notes, or mechanism candidates yet."}
+                        onOpenLibrary={openSourceCollectionCandidatePanel}
+                        onOpenReview={openSourceCollectionScreeningPanel}
+                      />
+                        </>
+                      ) : null}
+      </>
+    );
+  }
+
+  function renderResearchWorkflowPanel() {
+    if (!showWorkflowPanel) {
+      return null;
+    }
+    return (
+      <TeamResearchWorkflowPanelHost
+        lang={lang}
+        researchWorkflowTeamSelected={researchWorkflowTeamSelected}
+        statusText={researchWorkflowStatusText()}
+        workflowPending={teamWorkflowQuery.isPending}
+        workflowReady={Boolean(teamWorkflow)}
+        workflowErrorMessage={
+          teamWorkflowQuery.error instanceof Error ? teamWorkflowQuery.error.message : null
+        }
+        candidatesErrorMessage={
+          teamWorkflowCandidatesQuery.error instanceof Error
+            ? teamWorkflowCandidatesQuery.error.message
+            : null
+        }
+      >
+        {renderResearchWorkflowModules()}
+      </TeamResearchWorkflowPanelHost>
+    );
+  }
+
+  function renderTeamCommunicationPanel() {
+    if (!showTeamCommunicationPanel) {
+      return null;
+    }
+    return (
+      <TeamCommunicationPanel
+        lang={lang}
+        selectedTeam={selectedTeam}
+        linkedChatRoomId={linkedChatRoomId}
+        linkedRoomDetail={linkedRoomDetail}
+        linkedRoomBusy={linkedRoomBusy}
+        linkedChatRoomPending={linkedChatRoomQuery.isPending}
+        linkedChatRoomError={linkedChatRoomQuery.error instanceof Error ? linkedChatRoomQuery.error : null}
+        latestTeamRound={latestTeamRound}
+        teamTaskTopic={teamTaskTopic}
+        onTeamTaskTopicChange={setTeamTaskTopic}
+        canStartTeamRound={canStartTeamRound}
+        startRoundPending={selectedTeamStartRoundPending}
+        startRoundResult={selectedTeamStartRoundResult}
+        startRoundError={selectedTeamStartRoundError}
+        onStartTeamRound={(payload) => startTeamRoundMutation.mutate(payload)}
+        teamMessage={teamMessage}
+        onTeamMessageChange={setTeamMessage}
+        teamInterrupt={teamInterrupt}
+        onTeamInterruptChange={setTeamInterrupt}
+        activeTeamMemberCount={activeTeamMemberCount}
+        messagePending={selectedTeamMessagePending}
+        messageResult={selectedTeamMessageResult}
+        messageError={selectedTeamMessageError}
+        onSendTeamMessage={(payload) => sendTeamMessageMutation.mutate(payload)}
+        teamBusEvents={teamBusEvents}
+        projectBusPending={projectBusQuery.isPending}
+        revokePendingEventId={
+          revokeTeamMessageMutation.isPending
+            ? (revokeTeamMessageMutation.variables?.eventId || null)
+            : null
+        }
+        revokeError={revokeTeamMessageMutation.error instanceof Error ? revokeTeamMessageMutation.error : null}
+        onRevokeTeamMessage={(payload) => revokeTeamMessageMutation.mutate(payload)}
+      />
+    );
+  }
 
   if (researchCanvasVisible) {
     return (
@@ -6098,208 +6312,8 @@ export function TeamsRoute({
             {researchCanvasReadOnly ? renderResearchCanvasReadOnlyPanel() : null}
             {renderTeamNodeBindingPanel()}
             {showAiSearchScopePanel ? renderAiSearchSourceScopePanel() : null}
-            {showWorkflowPanel ? (
-              <section className={styles.workflowPanel} id="research-workflow-overview">
-                <div className={styles.sectionTitle}>
-                  <strong>{lang === "zh" ? "科研流程" : "Research workflow"}</strong>
-                  <span>
-                    {researchWorkflowTeamSelected
-                      ? teamWorkflow?.status || (teamWorkflowQuery.isPending ? (lang === "zh" ? "读取中" : "loading") : (lang === "zh" ? "待初始化" : "not initialized"))
-                      : (lang === "zh" ? "非科研团队" : "not research")}
-                  </span>
-                </div>
-                {researchWorkflowTeamSelected ? (
-                  teamWorkflowQuery.isPending ? (
-                    <VStateSurface
-                      tone="loading"
-                      title={lang === "zh" ? "正在读取科研工作流" : "Loading research workflow"}
-                      skeletonLines={3}
-                    >
-                      {lang === "zh" ? "TeamWorkflowOrchestration 返回后会显示流程模块。" : "Workflow modules appear after TeamWorkflowOrchestration returns."}
-                    </VStateSurface>
-                  ) : teamWorkflow ? (
-                    <>
-                      {/* Overview hero/stages/secondary render via ResearchOverviewSurface above the workflow panel. */}
-                      {showResearchSourceCollection ? (
-                      <TeamsSourceCollectionPanel
-                        lang={lang}
-                        title={lang === "zh" ? "资料搜索执行" : "Source collection"}
-                        summary={sourceCollectionOverviewSummary}
-                        statusLabel={sourceCollectionOverviewStatus || (lang === "zh" ? "未启动" : "not started")}
-                        statusClassName={workflowIngestionToneBound(sourceCollectionOverviewStatus)}
-                        draft={sourceCollectionDraft}
-                        modeFields={renderSourceCollectionModeFields()}
-                        canStart={sourceCollectionCanStart}
-                        startPending={selectedTeamStartSourceCollectionPending}
-                        selectedRunId={selectedSourceCollectionRunEffectiveId}
-                        runs={sourceCollectionFindingRunOptions}
-                        stats={sourceCollectionOverviewStats}
-                        assignments={sourceCollectionFindingAssignments}
-                        assignmentEmptyMessage={sourceCollectionOverviewAssignmentEmptyMessage}
-                        queries={sourceCollectionFindingQueries}
-                        phaseCloseGate={(
-                          <TeamSourceCollectionPhaseCloseGatePanel
-                            lang={lang}
-                            selectedRunId={selectedSourceCollectionRunEffectiveId}
-                            gate={sourceCollectionPhaseCloseGate}
-                            loading={Boolean(
-                              selectedSourceCollectionRunEffectiveId
-                              && sourceCollectionSummaryQuery.isPending
-                              && !sourceCollectionSummaryQuery.data,
-                            )}
-                            onOpenStage={selectSourceCollectionStage}
-                          />
-                        )}
-                        storageActions={renderSourceCollectionStorageActions()}
-                        plan={sourceCollectionOverviewPlan}
-                        manualWriteback={renderSourceCollectionManualWritebackPanel({
-                          title: lang === "zh" ? "手工回写一条搜集结果" : "Manual result writeback",
-                          description: lang === "zh" ? "写 DataRecord 后自动导入 source_manifest 候选" : "Writes DataRecord, then imports source_manifest candidate",
-                          wrapInDetails: false,
-                        })}
-                        boundaryItems={sourceCollectionOverviewBoundaryItems}
-                        errorMessages={sourceCollectionOverviewErrors}
-                        result={sourceCollectionOverviewResult}
-                        onDraftChange={(patch) => setSourceCollectionDraft((current) => ({ ...current, ...patch }))}
-                        onStart={() => {
-                          if (!selectedTeam?.teamId || !sourceCollectionCanStart || selectedTeamStartSourceCollectionPending) {
-                            return;
-                          }
-                          startSourceCollectionRunMutation.mutate({
-                            teamId: selectedTeam.teamId,
-                            draft: sourceCollectionDraft,
-                          });
-                        }}
-                        onRunChange={setSelectedSourceCollectionRunId}
-                        onAssignmentSelect={(assignmentId) => setSourceCollectionOutputDraft((current) => ({ ...current, assignmentId }))}
-                      />
-                      ) : null}
-                      {showResearchCoordination ? (
-                      <TeamWorkflowCoordinationStatusPanel
-                        lang={lang}
-                        status={teamWorkflowCoordinationStatus}
-                        loading={teamWorkflowCoordinationStatusQuery.isPending}
-                        errorMessages={teamWorkflowCoordinationStatusQuery.error instanceof Error ? [teamWorkflowCoordinationStatusQuery.error.message] : []}
-                        statusLabel={(value) => workflowCoordinationStatusLabel(value, lang)}
-                        channelLabel={(value) => workflowCoordinationChannelLabel(value, lang)}
-                        stateLabel={(value) => workflowStateLabel(value, lang)}
-                      />
-                      ) : null}
-                      {showResearchIngestion ? (
-                      <TeamWorkflowKnowledgeIngestionStatusPanel
-                        lang={lang}
-                        status={teamWorkflowKnowledgeIngestionStatus}
-                        loading={teamWorkflowKnowledgeIngestionStatusQuery.isPending}
-                        errorMessages={teamWorkflowKnowledgeIngestionStatusQuery.error instanceof Error ? [teamWorkflowKnowledgeIngestionStatusQuery.error.message] : []}
-                        statusLabel={(value) => workflowIngestionStatusLabel(value, lang)}
-                      />
-                      ) : null}
-                      {showResearchGraph ? (
-                      <TeamWorkflowCandidateGraphStatusPanel
-                        lang={lang}
-                        graph={teamWorkflowCandidateGraph}
-                        layout={teamWorkflowCandidateGraphLayout}
-                        loading={teamWorkflowCandidateGraphQuery.isPending}
-                        errorMessages={[
-                          ...(teamWorkflowCandidateGraphQuery.error instanceof Error ? [teamWorkflowCandidateGraphQuery.error.message] : []),
-                          ...(selectedTeamBuildCandidateGraphError ? [selectedTeamBuildCandidateGraphError.message] : []),
-                        ]}
-                        actionLabel={sourceCollectionGraphActionLabel}
-                        actionDisabled={sourceCollectionGraphActionDisabled}
-                        actionTitle={sourceCollectionActionDisabledTitle(sourceCollectionGraphActionReadiness, sourceCollectionGraphActionLabel)}
-                        stateLabel={(value) => workflowStateLabel(value, lang)}
-                        onAction={runSourceCollectionGraphAction}
-                      />
-                      ) : null}
-                      {showResearchCandidates ? (
-                        <>
-                      <TeamWorkflowSourceQualityStatusPanel
-                        lang={lang}
-                        status={teamWorkflowSourceQualityStatus}
-                        loading={teamWorkflowSourceQualityStatusQuery.isPending}
-                        errorMessages={[
-                          ...(teamWorkflowSourceQualityStatusQuery.error instanceof Error ? [teamWorkflowSourceQualityStatusQuery.error.message] : []),
-                          ...(selectedTeamSourceQualityError ? [selectedTeamSourceQualityError.message] : []),
-                        ]}
-                        statusLabel={(value) => workflowIngestionStatusLabel(value, lang)}
-                      />
-                      <TeamWorkflowPaperNoteChunkStatusPanel
-                        lang={lang}
-                        status={teamWorkflowPaperNoteChunkStatus}
-                        loading={teamWorkflowPaperNoteChunkStatusQuery.isPending}
-                        errorMessages={[
-                          ...(teamWorkflowPaperNoteChunkStatusQuery.error instanceof Error ? [teamWorkflowPaperNoteChunkStatusQuery.error.message] : []),
-                          ...(selectedTeamPlanPaperNoteChunksError ? [selectedTeamPlanPaperNoteChunksError.message] : []),
-                        ]}
-                        statusLabel={(value) => workflowIngestionStatusLabel(value, lang)}
-                      />
-                      <TeamWorkflowCandidatePreviewPanel
-                        lang={lang}
-                        items={teamWorkflowCandidatePreviewItems}
-                        canOpenLibrary={Boolean(selectedTeam?.teamId)}
-                        reviewDisabled={sourceCollectionScreeningDisabled}
-                        reviewTitle={sourceCollectionActionDisabledTitle(sourceCollectionScreeningActionReadiness, lang === "zh" ? "进入资料提炼复核" : "Open review")}
-                        listNeedsScrollHint={teamWorkflowCandidates.length > SOURCE_COLLECTION_RESULT_PAGE_SIZE}
-                        emptyMessage={lang === "zh" ? "候选仓库还没有资料、笔记或机制候选。" : "No sources, notes, or mechanism candidates yet."}
-                        onOpenLibrary={openSourceCollectionCandidatePanel}
-                        onOpenReview={openSourceCollectionScreeningPanel}
-                      />
-                        </>
-                      ) : null}
-                    </>
-                  ) : (
-                    <div className={styles.empty}>{lang === "zh" ? "科研流程尚未初始化。" : "Research workflow is not initialized yet."}</div>
-                  )
-                ) : (
-                  <div className={styles.empty}>
-                    {lang === "zh" ? "选择 research-team / 挑战杯ai科研团队 后显示挑战杯科研流程。" : "Select research-team to view the Challenge Cup workflow."}
-                  </div>
-                )}
-                {teamWorkflowQuery.error instanceof Error ? (
-                  <div className={styles.messageError}>{teamWorkflowQuery.error.message}</div>
-                ) : null}
-                {teamWorkflowCandidatesQuery.error instanceof Error ? (
-                  <div className={styles.messageError}>{teamWorkflowCandidatesQuery.error.message}</div>
-                ) : null}
-              </section>
-            ) : null}
-            {showTeamCommunicationPanel ? (
-              <TeamCommunicationPanel
-                lang={lang}
-                selectedTeam={selectedTeam}
-                linkedChatRoomId={linkedChatRoomId}
-                linkedRoomDetail={linkedRoomDetail}
-                linkedRoomBusy={linkedRoomBusy}
-                linkedChatRoomPending={linkedChatRoomQuery.isPending}
-                linkedChatRoomError={linkedChatRoomQuery.error instanceof Error ? linkedChatRoomQuery.error : null}
-                latestTeamRound={latestTeamRound}
-                teamTaskTopic={teamTaskTopic}
-                onTeamTaskTopicChange={setTeamTaskTopic}
-                canStartTeamRound={canStartTeamRound}
-                startRoundPending={selectedTeamStartRoundPending}
-                startRoundResult={selectedTeamStartRoundResult}
-                startRoundError={selectedTeamStartRoundError}
-                onStartTeamRound={(payload) => startTeamRoundMutation.mutate(payload)}
-                teamMessage={teamMessage}
-                onTeamMessageChange={setTeamMessage}
-                teamInterrupt={teamInterrupt}
-                onTeamInterruptChange={setTeamInterrupt}
-                activeTeamMemberCount={activeTeamMemberCount}
-                messagePending={selectedTeamMessagePending}
-                messageResult={selectedTeamMessageResult}
-                messageError={selectedTeamMessageError}
-                onSendTeamMessage={(payload) => sendTeamMessageMutation.mutate(payload)}
-                teamBusEvents={teamBusEvents}
-                projectBusPending={projectBusQuery.isPending}
-                revokePendingEventId={
-                  revokeTeamMessageMutation.isPending
-                    ? (revokeTeamMessageMutation.variables?.eventId || null)
-                    : null
-                }
-                revokeError={revokeTeamMessageMutation.error instanceof Error ? revokeTeamMessageMutation.error : null}
-                onRevokeTeamMessage={(payload) => revokeTeamMessageMutation.mutate(payload)}
-              />
-            ) : null}
+            {renderResearchWorkflowPanel()}
+            {renderTeamCommunicationPanel()}
             </div>
         </aside>
         )}
@@ -6364,208 +6378,8 @@ export function TeamsRoute({
             {researchCanvasReadOnly ? renderResearchCanvasReadOnlyPanel() : null}
             {renderTeamNodeBindingPanel()}
             {showAiSearchScopePanel ? renderAiSearchSourceScopePanel() : null}
-            {showWorkflowPanel ? (
-              <section className={styles.workflowPanel} id="research-workflow-overview">
-                <div className={styles.sectionTitle}>
-                  <strong>{lang === "zh" ? "科研流程" : "Research workflow"}</strong>
-                  <span>
-                    {researchWorkflowTeamSelected
-                      ? teamWorkflow?.status || (teamWorkflowQuery.isPending ? (lang === "zh" ? "读取中" : "loading") : (lang === "zh" ? "待初始化" : "not initialized"))
-                      : (lang === "zh" ? "非科研团队" : "not research")}
-                  </span>
-                </div>
-                {researchWorkflowTeamSelected ? (
-                  teamWorkflowQuery.isPending ? (
-                    <VStateSurface
-                      tone="loading"
-                      title={lang === "zh" ? "正在读取科研工作流" : "Loading research workflow"}
-                      skeletonLines={3}
-                    >
-                      {lang === "zh" ? "TeamWorkflowOrchestration 返回后会显示流程模块。" : "Workflow modules appear after TeamWorkflowOrchestration returns."}
-                    </VStateSurface>
-                  ) : teamWorkflow ? (
-                    <>
-                      {/* Overview hero/stages/secondary render via ResearchOverviewSurface above the workflow panel. */}
-                      {showResearchSourceCollection ? (
-                      <TeamsSourceCollectionPanel
-                        lang={lang}
-                        title={lang === "zh" ? "资料搜索执行" : "Source collection"}
-                        summary={sourceCollectionOverviewSummary}
-                        statusLabel={sourceCollectionOverviewStatus || (lang === "zh" ? "未启动" : "not started")}
-                        statusClassName={workflowIngestionToneBound(sourceCollectionOverviewStatus)}
-                        draft={sourceCollectionDraft}
-                        modeFields={renderSourceCollectionModeFields()}
-                        canStart={sourceCollectionCanStart}
-                        startPending={selectedTeamStartSourceCollectionPending}
-                        selectedRunId={selectedSourceCollectionRunEffectiveId}
-                        runs={sourceCollectionFindingRunOptions}
-                        stats={sourceCollectionOverviewStats}
-                        assignments={sourceCollectionFindingAssignments}
-                        assignmentEmptyMessage={sourceCollectionOverviewAssignmentEmptyMessage}
-                        queries={sourceCollectionFindingQueries}
-                        phaseCloseGate={(
-                          <TeamSourceCollectionPhaseCloseGatePanel
-                            lang={lang}
-                            selectedRunId={selectedSourceCollectionRunEffectiveId}
-                            gate={sourceCollectionPhaseCloseGate}
-                            loading={Boolean(
-                              selectedSourceCollectionRunEffectiveId
-                              && sourceCollectionSummaryQuery.isPending
-                              && !sourceCollectionSummaryQuery.data,
-                            )}
-                            onOpenStage={selectSourceCollectionStage}
-                          />
-                        )}
-                        storageActions={renderSourceCollectionStorageActions()}
-                        plan={sourceCollectionOverviewPlan}
-                        manualWriteback={renderSourceCollectionManualWritebackPanel({
-                          title: lang === "zh" ? "手工回写一条搜集结果" : "Manual result writeback",
-                          description: lang === "zh" ? "写 DataRecord 后自动导入 source_manifest 候选" : "Writes DataRecord, then imports source_manifest candidate",
-                          wrapInDetails: false,
-                        })}
-                        boundaryItems={sourceCollectionOverviewBoundaryItems}
-                        errorMessages={sourceCollectionOverviewErrors}
-                        result={sourceCollectionOverviewResult}
-                        onDraftChange={(patch) => setSourceCollectionDraft((current) => ({ ...current, ...patch }))}
-                        onStart={() => {
-                          if (!selectedTeam?.teamId || !sourceCollectionCanStart || selectedTeamStartSourceCollectionPending) {
-                            return;
-                          }
-                          startSourceCollectionRunMutation.mutate({
-                            teamId: selectedTeam.teamId,
-                            draft: sourceCollectionDraft,
-                          });
-                        }}
-                        onRunChange={setSelectedSourceCollectionRunId}
-                        onAssignmentSelect={(assignmentId) => setSourceCollectionOutputDraft((current) => ({ ...current, assignmentId }))}
-                      />
-                      ) : null}
-                      {showResearchCoordination ? (
-                      <TeamWorkflowCoordinationStatusPanel
-                        lang={lang}
-                        status={teamWorkflowCoordinationStatus}
-                        loading={teamWorkflowCoordinationStatusQuery.isPending}
-                        errorMessages={teamWorkflowCoordinationStatusQuery.error instanceof Error ? [teamWorkflowCoordinationStatusQuery.error.message] : []}
-                        statusLabel={(value) => workflowCoordinationStatusLabel(value, lang)}
-                        channelLabel={(value) => workflowCoordinationChannelLabel(value, lang)}
-                        stateLabel={(value) => workflowStateLabel(value, lang)}
-                      />
-                      ) : null}
-                      {showResearchIngestion ? (
-                      <TeamWorkflowKnowledgeIngestionStatusPanel
-                        lang={lang}
-                        status={teamWorkflowKnowledgeIngestionStatus}
-                        loading={teamWorkflowKnowledgeIngestionStatusQuery.isPending}
-                        errorMessages={teamWorkflowKnowledgeIngestionStatusQuery.error instanceof Error ? [teamWorkflowKnowledgeIngestionStatusQuery.error.message] : []}
-                        statusLabel={(value) => workflowIngestionStatusLabel(value, lang)}
-                      />
-                      ) : null}
-                      {showResearchGraph ? (
-                      <TeamWorkflowCandidateGraphStatusPanel
-                        lang={lang}
-                        graph={teamWorkflowCandidateGraph}
-                        layout={teamWorkflowCandidateGraphLayout}
-                        loading={teamWorkflowCandidateGraphQuery.isPending}
-                        errorMessages={[
-                          ...(teamWorkflowCandidateGraphQuery.error instanceof Error ? [teamWorkflowCandidateGraphQuery.error.message] : []),
-                          ...(selectedTeamBuildCandidateGraphError ? [selectedTeamBuildCandidateGraphError.message] : []),
-                        ]}
-                        actionLabel={sourceCollectionGraphActionLabel}
-                        actionDisabled={sourceCollectionGraphActionDisabled}
-                        actionTitle={sourceCollectionActionDisabledTitle(sourceCollectionGraphActionReadiness, sourceCollectionGraphActionLabel)}
-                        stateLabel={(value) => workflowStateLabel(value, lang)}
-                        onAction={runSourceCollectionGraphAction}
-                      />
-                      ) : null}
-                      {showResearchCandidates ? (
-                        <>
-                      <TeamWorkflowSourceQualityStatusPanel
-                        lang={lang}
-                        status={teamWorkflowSourceQualityStatus}
-                        loading={teamWorkflowSourceQualityStatusQuery.isPending}
-                        errorMessages={[
-                          ...(teamWorkflowSourceQualityStatusQuery.error instanceof Error ? [teamWorkflowSourceQualityStatusQuery.error.message] : []),
-                          ...(selectedTeamSourceQualityError ? [selectedTeamSourceQualityError.message] : []),
-                        ]}
-                        statusLabel={(value) => workflowIngestionStatusLabel(value, lang)}
-                      />
-                      <TeamWorkflowPaperNoteChunkStatusPanel
-                        lang={lang}
-                        status={teamWorkflowPaperNoteChunkStatus}
-                        loading={teamWorkflowPaperNoteChunkStatusQuery.isPending}
-                        errorMessages={[
-                          ...(teamWorkflowPaperNoteChunkStatusQuery.error instanceof Error ? [teamWorkflowPaperNoteChunkStatusQuery.error.message] : []),
-                          ...(selectedTeamPlanPaperNoteChunksError ? [selectedTeamPlanPaperNoteChunksError.message] : []),
-                        ]}
-                        statusLabel={(value) => workflowIngestionStatusLabel(value, lang)}
-                      />
-                      <TeamWorkflowCandidatePreviewPanel
-                        lang={lang}
-                        items={teamWorkflowCandidatePreviewItems}
-                        canOpenLibrary={Boolean(selectedTeam?.teamId)}
-                        reviewDisabled={sourceCollectionScreeningDisabled}
-                        reviewTitle={sourceCollectionActionDisabledTitle(sourceCollectionScreeningActionReadiness, lang === "zh" ? "进入资料提炼复核" : "Open review")}
-                        listNeedsScrollHint={teamWorkflowCandidates.length > SOURCE_COLLECTION_RESULT_PAGE_SIZE}
-                        emptyMessage={lang === "zh" ? "候选仓库还没有资料、笔记或机制候选。" : "No sources, notes, or mechanism candidates yet."}
-                        onOpenLibrary={openSourceCollectionCandidatePanel}
-                        onOpenReview={openSourceCollectionScreeningPanel}
-                      />
-                        </>
-                      ) : null}
-                    </>
-                  ) : (
-                    <div className={styles.empty}>{lang === "zh" ? "科研流程尚未初始化。" : "Research workflow is not initialized yet."}</div>
-                  )
-                ) : (
-                  <div className={styles.empty}>
-                    {lang === "zh" ? "选择 research-team / 挑战杯ai科研团队 后显示挑战杯科研流程。" : "Select research-team to view the Challenge Cup workflow."}
-                  </div>
-                )}
-                {teamWorkflowQuery.error instanceof Error ? (
-                  <div className={styles.messageError}>{teamWorkflowQuery.error.message}</div>
-                ) : null}
-                {teamWorkflowCandidatesQuery.error instanceof Error ? (
-                  <div className={styles.messageError}>{teamWorkflowCandidatesQuery.error.message}</div>
-                ) : null}
-              </section>
-            ) : null}
-            {showTeamCommunicationPanel ? (
-              <TeamCommunicationPanel
-                lang={lang}
-                selectedTeam={selectedTeam}
-                linkedChatRoomId={linkedChatRoomId}
-                linkedRoomDetail={linkedRoomDetail}
-                linkedRoomBusy={linkedRoomBusy}
-                linkedChatRoomPending={linkedChatRoomQuery.isPending}
-                linkedChatRoomError={linkedChatRoomQuery.error instanceof Error ? linkedChatRoomQuery.error : null}
-                latestTeamRound={latestTeamRound}
-                teamTaskTopic={teamTaskTopic}
-                onTeamTaskTopicChange={setTeamTaskTopic}
-                canStartTeamRound={canStartTeamRound}
-                startRoundPending={selectedTeamStartRoundPending}
-                startRoundResult={selectedTeamStartRoundResult}
-                startRoundError={selectedTeamStartRoundError}
-                onStartTeamRound={(payload) => startTeamRoundMutation.mutate(payload)}
-                teamMessage={teamMessage}
-                onTeamMessageChange={setTeamMessage}
-                teamInterrupt={teamInterrupt}
-                onTeamInterruptChange={setTeamInterrupt}
-                activeTeamMemberCount={activeTeamMemberCount}
-                messagePending={selectedTeamMessagePending}
-                messageResult={selectedTeamMessageResult}
-                messageError={selectedTeamMessageError}
-                onSendTeamMessage={(payload) => sendTeamMessageMutation.mutate(payload)}
-                teamBusEvents={teamBusEvents}
-                projectBusPending={projectBusQuery.isPending}
-                revokePendingEventId={
-                  revokeTeamMessageMutation.isPending
-                    ? (revokeTeamMessageMutation.variables?.eventId || null)
-                    : null
-                }
-                revokeError={revokeTeamMessageMutation.error instanceof Error ? revokeTeamMessageMutation.error : null}
-                onRevokeTeamMessage={(payload) => revokeTeamMessageMutation.mutate(payload)}
-              />
-            ) : null}
+            {renderResearchWorkflowPanel()}
+            {renderTeamCommunicationPanel()}
             </div>
         </aside>
       )}
