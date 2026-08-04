@@ -113,31 +113,24 @@ export function TeamShellRail({
               data-active={active ? "true" : "false"}
               data-testid={`team-shell-item-${item.teamId}`}
               className={[
-                // Multi-line team card: never collapse into an empty ink slab.
+                // Multi-line team card; selected = muted surface + accent edge (not full ink fill).
                 "!grid h-auto min-h-[4.5rem] w-full min-w-0 gap-1 rounded-lg border px-2.5 py-2 text-left !whitespace-normal",
                 active
-                  // Selected = ink fill + forced light text (token surface-base can fail as dark-on-dark).
-                  ? "!border-[var(--fg-primary)] !bg-[var(--fg-primary)] !text-white [&_*]:!text-white"
+                  ? "!border-[color-mix(in_srgb,var(--accent-cool)_42%,var(--vui-border-subtle))] !bg-[var(--vui-surface-row)] !text-[var(--fg-primary)] shadow-[inset_3px_0_0_0_var(--fg-primary)]"
                   : "!border-transparent !bg-transparent !text-[var(--fg-primary)] hover:!bg-[var(--vui-surface-row)]",
               ].join(" ")}
               onClick={() => onSelectTeam(team)}
             >
               <span className="flex min-w-0 items-center justify-between gap-2">
                 <span className="min-w-0 truncate text-[13px] font-[720]">{item.name}</span>
-                <VChip
-                  className={
-                    active
-                      ? "!border-white/35 !bg-transparent !text-white"
-                      : undefined
-                  }
-                >
+                <VChip>
                   {item.status}
                 </VChip>
               </span>
               <span
                 className={[
                   "flex min-w-0 flex-wrap gap-x-2 gap-y-0.5 text-[11px]",
-                  active ? "!text-white/80" : "text-[var(--fg-tertiary)]",
+                  active ? "text-[var(--fg-secondary)]" : "text-[var(--fg-tertiary)]",
                 ].join(" ")}
               >
                 <span>{item.kindLabel}</span>
@@ -145,12 +138,7 @@ export function TeamShellRail({
                   {item.memberCount} {lang === "zh" ? "成员" : "members"}
                 </span>
               </span>
-              <span
-                className={[
-                  "line-clamp-2 text-[11px] leading-snug",
-                  active ? "!text-white/75" : "text-[var(--fg-secondary)]",
-                ].join(" ")}
-              >
+              <span className="line-clamp-2 text-[11px] leading-snug text-[var(--fg-secondary)]">
                 {item.purpose}
               </span>
             </VNativeButton>

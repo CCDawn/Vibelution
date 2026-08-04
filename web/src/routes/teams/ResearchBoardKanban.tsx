@@ -39,14 +39,18 @@ export function ResearchBoardKanban({
           </span>
         </div>
       ) : null}
-      <div className="grid min-w-0 grid-cols-1 items-start gap-3 md:grid-cols-3">
+      {/* Always three columns; narrow viewports scroll horizontally instead of stacking into a list. */}
+      <div
+        className="grid min-w-0 grid-cols-[repeat(3,minmax(240px,1fr))] items-start gap-3 overflow-x-auto pb-1 [scrollbar-gutter:stable]"
+        data-testid="research-board-columns"
+      >
         {columns.map((column) => (
           <VSurface
             key={column.id}
             tone="inset"
             elevation="flat"
             padding="compact"
-            className="grid min-h-[320px] min-w-0 content-start gap-2.5"
+            className="grid min-h-[320px] min-w-[240px] content-start gap-2.5"
             data-testid={`research-board-column-${column.id}`}
           >
             <div className="flex min-w-0 items-center justify-between gap-2">

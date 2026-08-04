@@ -40,10 +40,11 @@ export function TeamShellModeSwitch({
             data-active={active ? "true" : "false"}
             data-testid={`team-shell-mode-${item}`}
             className={[
+              // shadcn-like segment: active is raised surface, not ink slab.
               "!min-h-8 !rounded-full !px-3.5 !text-[12.5px] !font-[700]",
               active
-                ? "!border-transparent !bg-[var(--fg-primary)] !text-[var(--vui-surface-base)]"
-                : "!border-transparent !bg-transparent !text-[var(--fg-secondary)] hover:!text-[var(--fg-primary)]",
+                ? "!border-[var(--vui-border-subtle)] !bg-[var(--vui-surface-base)] !text-[var(--fg-primary)] !shadow-[var(--vui-shadow-hairline,0_1px_2px_rgba(0,0,0,0.06))]"
+                : "!border-transparent !bg-transparent !text-[var(--fg-secondary)] hover:!bg-[var(--vui-control-muted)] hover:!text-[var(--fg-primary)]",
             ].join(" ")}
             onClick={() => onChange(item)}
           >
