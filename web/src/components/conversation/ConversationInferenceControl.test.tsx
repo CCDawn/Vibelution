@@ -5,9 +5,9 @@ import { describe, expect, it } from "vitest";
 import type { SessionLlmModelOption } from "../../api/types";
 import {
   ConversationInferenceControl,
-  placeInferenceMenu,
   resolveConversationInferenceEffort,
 } from "./ConversationInferenceControl";
+import controlSource from "./ConversationInferenceControl.tsx?raw";
 import styles from "./ConversationInferenceControl.styles";
 
 const luna: SessionLlmModelOption = {
@@ -50,7 +50,12 @@ describe("ConversationInferenceControl", () => {
     expect(html).not.toContain("Sol");
   });
 
-  it("keeps the reasoning menu compact and reserves a right-side selection column", () => {
+  it("hosts the reasoning menu on VPopover instead of a hand-placed portal", () => {
+    expect(controlSource).toContain("<VPopover");
+    expect(controlSource).toContain('data-vui="conversation-inference-menu"');
+    expect(controlSource).toContain("contentClassName={styles.menu}");
+    expect(controlSource).not.toContain("createPortal(");
+    expect(controlSource).not.toContain("placeInferenceMenu");
     expect(styles.menu).toContain("w-[min(200px,calc(100vw-16px))]");
     expect(styles.menu).toContain("overflow-y-auto");
     expect(styles.menu).not.toContain("absolute");
@@ -62,38 +67,6 @@ describe("ConversationInferenceControl", () => {
     expect(styles.triggerChevron).toContain("data-[open=true]:rotate-180");
     expect(styles.trigger).toContain("!px-1.5");
     expect(styles.triggerSeparator).toContain("opacity-55");
-  });
-
-  it("places the menu fixed above the trigger when there is room", () => {
-    const style = placeInferenceMenu(
-      { top: 400, bottom: 428, right: 900 },
-      { width: 1200, height: 800 },
-    );
-    expect(style.position).toBe("fixed");
-    expect(style.bottom).toBe(800 - 400 + 6);
-    expect(style.width).toBe(200);
-    expect(Number(style.maxHeight)).toBeGreaterThanOrEqual(88);
-    expect(style.right).toBe(1200 - 900);
-  });
-
-  it("flips the menu below when space above is tight", () => {
-    const style = placeInferenceMenu(
-      { top: 40, bottom: 68, right: 900 },
-      { width: 1200, height: 800 },
-    );
-    expect(style.top).toBe(68 + 6);
-    expect(style.bottom).toBeUndefined();
-    expect(Number(style.maxHeight)).toBeGreaterThan(0);
-  });
-
-  it("clamps menu right edge so a wide panel stays on-screen", () => {
-    const style = placeInferenceMenu(
-      { top: 400, bottom: 428, right: 40 },
-      { width: 400, height: 800 },
-    );
-    // width 200 → right must leave room: max right = 400 - 200 - 8 = 192, min 8
-    expect(Number(style.right)).toBeGreaterThanOrEqual(8);
-    expect(Number(style.right) + 200).toBeLessThanOrEqual(400 - 8 + 0.01);
   });
 
   it("keeps models without reasoning as a non-interactive label", () => {

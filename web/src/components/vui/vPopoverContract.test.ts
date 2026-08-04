@@ -39,4 +39,19 @@ describe("VPopover contract", () => {
     expect(styles).toContain("activeWorkPopoverContent");
     expect(styles).not.toContain("[&:hover_.activeWorkDetailPanel]:visible");
   });
+
+  it("composer permission and inference menus use VPopover instead of createPortal", () => {
+    const permission = readFileSync(
+      resolve(vuiRoot, "product/agent-management/AgentPermissionPresetControl.tsx"),
+      "utf8",
+    );
+    const inference = readFileSync(
+      resolve(vuiRoot, "../conversation/ConversationInferenceControl.tsx"),
+      "utf8",
+    );
+    expect(permission).toContain("<VPopover");
+    expect(permission).not.toContain("createPortal(");
+    expect(inference).toContain("<VPopover");
+    expect(inference).not.toContain("createPortal(");
+  });
 });

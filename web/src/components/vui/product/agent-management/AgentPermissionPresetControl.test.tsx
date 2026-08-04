@@ -6,6 +6,7 @@ import {
   AgentPermissionPresetControl,
   agentPermissionPresetOptions,
 } from "./AgentPermissionPresetControl";
+import controlSource from "./AgentPermissionPresetControl.tsx?raw";
 
 describe("AgentPermissionPresetControl", () => {
   it("exposes exactly the three Agent-owned permission presets", () => {
@@ -39,5 +40,13 @@ describe("AgentPermissionPresetControl", () => {
     expect(html).toContain('data-surface="composer"');
     expect(html).not.toContain("自定义");
     expect(html).not.toContain("config.toml");
+  });
+
+  it("hosts the permission menu on VPopover instead of a hand-placed portal", () => {
+    expect(controlSource).toContain("<VPopover");
+    expect(controlSource).toContain('data-vui="agent-permission-preset-menu"');
+    expect(controlSource).toContain("contentClassName={styles.menu}");
+    expect(controlSource).not.toContain("createPortal(");
+    expect(controlSource).not.toContain("placePermissionMenu");
   });
 });

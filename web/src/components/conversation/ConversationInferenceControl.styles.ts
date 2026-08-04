@@ -11,7 +11,7 @@ const styles = {
   triggerSeparator: "shrink-0 opacity-55",
   triggerEffort: "shrink-0 font-semibold text-[var(--fg-secondary)]",
   triggerChevron: "shrink-0 opacity-70 transition-transform duration-150 data-[open=true]:rotate-180",
-  // Fixed portal menu — escapes composer overflow-hidden; width matches short zh labels.
+  // Portaled via VPopover — escapes composer overflow-hidden; width matches short zh labels.
   menu: `grid w-[min(200px,calc(100vw-16px))] gap-0.5 overflow-y-auto overscroll-contain rounded-[12px] border border-[var(--vui-border-subtle)] ${vuiFlatPanelClass} p-1 shadow-[0_12px_32px_color-mix(in_srgb,var(--fg-primary)_12%,transparent),var(--vui-shadow-soft)]`,
   option: "!grid !h-auto !min-h-9 !w-full !grid-cols-[minmax(0,1fr)_0.875rem] !items-start !gap-x-2 !gap-y-0 !rounded-[8px] !border-0 !bg-transparent !px-2 !py-1.5 !text-left !shadow-none hover:!bg-[var(--vui-control-muted)] data-[selected=true]:!bg-[color-mix(in_srgb,var(--accent-cool)_12%,transparent)]",
   optionCopy: "grid min-w-0 content-start gap-0.5",

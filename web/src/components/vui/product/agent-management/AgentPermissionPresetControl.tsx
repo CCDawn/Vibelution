@@ -7,17 +7,13 @@ import {
 } from "lucide-react";
 import {
   useEffect,
-  useLayoutEffect,
   useMemo,
-  useRef,
   useState,
-  type CSSProperties,
   type ComponentType,
 } from "react";
-import { createPortal } from "react-dom";
 
 import type { AgentPermissionPreset } from "../../../../api/types";
-import { VButton } from "../../index";
+import { VButton, VPopover } from "../../index";
 import styles from "./AgentPermissionPresetControl.styles";
 
 export type AgentPermissionPresetControlSurface = "composer" | "settings";
@@ -38,10 +34,6 @@ export type AgentPermissionPresetControlProps = {
   agentName?: string;
   onChange: (value: AgentPermissionPreset) => void;
 };
-
-const MENU_GAP = 6;
-const VIEWPORT_PAD = 8;
-const MENU_WIDTH = 360;
 
 export function agentPermissionPresetOptions(
   lang: "zh" | "en",
@@ -90,39 +82,6 @@ export function agentPermissionPresetOptions(
   ];
 }
 
-function placePermissionMenu(
-  trigger: DOMRect,
-  viewport = {
-    width: typeof window === "undefined" ? 1280 : window.innerWidth,
-    height: typeof window === "undefined" ? 720 : window.innerHeight,
-  },
-): CSSProperties {
-  const width = Math.min(MENU_WIDTH, viewport.width - VIEWPORT_PAD * 2);
-  const left = Math.min(
-    Math.max(VIEWPORT_PAD, trigger.left),
-    Math.max(VIEWPORT_PAD, viewport.width - width - VIEWPORT_PAD),
-  );
-  const estimatedHeight = 210;
-  const placeAbove = trigger.top >= estimatedHeight + MENU_GAP + VIEWPORT_PAD;
-  return placeAbove
-    ? {
-        position: "fixed",
-        left,
-        bottom: viewport.height - trigger.top + MENU_GAP,
-        width,
-        maxHeight: Math.max(120, trigger.top - MENU_GAP - VIEWPORT_PAD),
-        zIndex: 90,
-      }
-    : {
-        position: "fixed",
-        left,
-        top: trigger.bottom + MENU_GAP,
-        width,
-        maxHeight: Math.max(120, viewport.height - trigger.bottom - MENU_GAP - VIEWPORT_PAD),
-        zIndex: 90,
-      };
-}
-
 export function AgentPermissionPresetControl({
   value,
   lang,
@@ -132,11 +91,7 @@ export function AgentPermissionPresetControl({
   agentName = "",
   onChange,
 }: AgentPermissionPresetControlProps) {
-  const rootRef = useRef<HTMLDivElement | null>(null);
-  const triggerRef = useRef<HTMLButtonElement | null>(null);
-  const menuRef = useRef<HTMLDivElement | null>(null);
   const [open, setOpen] = useState(false);
-  const [menuStyle, setMenuStyle] = useState<CSSProperties>({});
   const options = useMemo(() => agentPermissionPresetOptions(lang), [lang]);
   const current = options.find((option) => option.value === value) ?? options[0];
   const CurrentIcon = current.icon;
@@ -147,50 +102,50 @@ export function AgentPermissionPresetControl({
     }
   }, [disabled, pending]);
 
-  useLayoutEffect(() => {
-    if (!open || !triggerRef.current) return;
-    const place = () => {
-      const rect = triggerRef.current?.getBoundingClientRect();
-      if (rect) setMenuStyle(placePermissionMenu(rect));
-    };
-    place();
-    window.addEventListener("resize", place);
-    window.addEventListener("scroll", place, true);
-    return () => {
-      window.removeEventListener("resize", place);
-      window.removeEventListener("scroll", place, true);
-    };
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-    const closeOnPointer = (event: PointerEvent) => {
-      const target = event.target;
-      if (!(target instanceof Node)) return;
-      if (rootRef.current?.contains(target) || menuRef.current?.contains(target)) return;
-      setOpen(false);
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      setOpen(false);
-      requestAnimationFrame(() => triggerRef.current?.focus());
-    };
-    window.addEventListener("pointerdown", closeOnPointer);
-    window.addEventListener("keydown", closeOnEscape);
-    return () => {
-      window.removeEventListener("pointerdown", closeOnPointer);
-      window.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [open]);
-
-  const menu = open
-    ? createPortal(
+  return (
+    <div
+      className={styles.root}
+      data-testid="agent-permission-preset-control"
+      data-surface={surface}
+    >
+      <VPopover
+        open={open}
+        onOpenChange={(nextOpen) => {
+          if (disabled || pending) {
+            setOpen(false);
+            return;
+          }
+          setOpen(nextOpen);
+        }}
+        side="bottom"
+        align={surface === "settings" ? "start" : "end"}
+        sideOffset={6}
+        aria-label={lang === "zh" ? "选择 Agent 工具权限" : "Select Agent tool permissions"}
+        contentClassName={styles.menu}
+        data-vui="agent-permission-preset-menu"
+        trigger={(
+          <VButton
+            type="button"
+            contentLayout="plain"
+            className={`${styles.trigger} ${surface === "settings" ? styles.triggerSettings : ""}`}
+            isDisabled={disabled || pending}
+            aria-haspopup="listbox"
+            aria-expanded={open}
+            data-open={open ? "true" : "false"}
+            data-preset={current.value}
+            title={`${current.label} · ${current.description}`}
+          >
+            <CurrentIcon className={styles.triggerIcon} aria-hidden />
+            <span className={styles.triggerLabel}>
+              {pending ? (lang === "zh" ? "保存中…" : "Saving…") : current.label}
+            </span>
+            <ChevronDown className={styles.triggerChevron} data-open={open ? "true" : "false"} aria-hidden />
+          </VButton>
+        )}
+      >
         <div
-          ref={menuRef}
           role="listbox"
           aria-label={lang === "zh" ? "选择 Agent 工具权限" : "Select Agent tool permissions"}
-          className={styles.menu}
-          style={menuStyle}
           data-testid="agent-permission-preset-menu"
         >
           <div className={styles.menuHeader}>
@@ -213,7 +168,6 @@ export function AgentPermissionPresetControl({
                 onPress={() => {
                   setOpen(false);
                   if (!selected) onChange(option.value);
-                  requestAnimationFrame(() => triggerRef.current?.focus());
                 }}
               >
                 <OptionIcon className={styles.optionIcon} aria-hidden />
@@ -227,36 +181,8 @@ export function AgentPermissionPresetControl({
               </VButton>
             );
           })}
-        </div>,
-        document.body,
-      )
-    : null;
-
-  return (
-    <div
-      ref={rootRef}
-      className={styles.root}
-      data-testid="agent-permission-preset-control"
-      data-surface={surface}
-    >
-      <VButton
-        ref={triggerRef}
-        type="button"
-        contentLayout="plain"
-        className={`${styles.trigger} ${surface === "settings" ? styles.triggerSettings : ""}`}
-        isDisabled={disabled || pending}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        data-open={open ? "true" : "false"}
-        data-preset={current.value}
-        title={`${current.label} · ${current.description}`}
-        onPress={() => setOpen((currentOpen) => !currentOpen)}
-      >
-        <CurrentIcon className={styles.triggerIcon} aria-hidden />
-        <span className={styles.triggerLabel}>{pending ? (lang === "zh" ? "保存中…" : "Saving…") : current.label}</span>
-        <ChevronDown className={styles.triggerChevron} data-open={open ? "true" : "false"} aria-hidden />
-      </VButton>
-      {menu}
+        </div>
+      </VPopover>
     </div>
   );
 }

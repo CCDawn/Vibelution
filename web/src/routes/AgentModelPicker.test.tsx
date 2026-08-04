@@ -3,7 +3,13 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import type { AgentModelChoice } from "../api/types";
-import { AgentModelPicker, groupAgentModelCandidates } from "./AgentModelPicker";
+import {
+  AgentModelPicker,
+  agentModelChoiceDisabledReason,
+  groupAgentModelCandidates,
+} from "./AgentModelPicker";
+import pickerSource from "./AgentModelPicker.tsx?raw";
+import pickerStyles from "./AgentModelPicker.styles";
 
 function candidate(
   modelRef: string,
@@ -59,7 +65,7 @@ const candidates = [
 ];
 
 describe("AgentModelPicker", () => {
-  it("groups one relay's models and keeps observed and incompatible rows visible", () => {
+  it("renders a closed trigger with the selected model via VDialog host", () => {
     const html = renderToStaticMarkup(
       <AgentModelPicker
         candidates={candidates}
@@ -74,15 +80,27 @@ describe("AgentModelPicker", () => {
       />,
     );
 
-    expect(html).toContain("Ai-Pixel");
-    expect(html).toContain("Luna");
     expect(html).toContain("Sol");
-    expect(html).toContain("Terra");
-    expect(html).toContain("固定后使用");
-    expect(html).toContain('role="dialog"');
-    expect(html).toContain('aria-modal="true"');
-    expect(html).toContain('data-reason-code="non_dialogue_model"');
-    expect(html).toContain("low / high");
+    expect(html).toContain('aria-haspopup="dialog"');
+    expect(pickerSource).toContain("<VDialog");
+    expect(pickerSource).toContain("onOpenChange={handleOpenChange}");
+    expect(pickerSource).not.toContain("createPortal(");
+    expect(pickerStyles.dialogContent).toContain("min(760px");
+    expect(pickerStyles.dialogContent).toContain("100dvh");
+  });
+
+  it("groups one relay's models and keeps observed and incompatible rows visible in grouping", () => {
+    const groups = groupAgentModelCandidates(candidates, "dialogue", "");
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.providerLabel).toBe("Ai-Pixel");
+    expect(groups[0]?.items.map((item) => item.label)).toEqual([
+      "Image 2",
+      "Luna",
+      "Sol",
+      "Terra",
+    ]);
+    expect(agentModelChoiceDisabledReason(candidates[0]!, "dialogue", false)).toBe("");
+    expect(agentModelChoiceDisabledReason(candidates[3]!, "dialogue", false)).toContain("对话模型");
   });
 
   it("searches canonical identity and preserves provider grouping", () => {
@@ -95,19 +113,10 @@ describe("AgentModelPicker", () => {
   });
 
   it("blocks promotion while either owning draft is dirty", () => {
-    const html = renderToStaticMarkup(
-      <AgentModelPicker
-        candidates={candidates}
-        slot={{ slot: "dialogue", label: "对话", description: "", required: true }}
-        selectedModelRef="ai-pixel/gpt-5.6-sol"
-        disabled={false}
-        pendingModelRef=""
-        configDraftDirty
-        agentDraftDirty={false}
-        onSelectPinned={() => undefined}
-        onPromote={() => undefined}
-      />,
+    const discovered = candidates[0]!;
+    expect(agentModelChoiceDisabledReason(discovered, "dialogue", true)).toBe(
+      "请先保存或放弃未保存修改",
     );
-    expect(html).toContain("请先保存或放弃未保存修改");
+    expect(agentModelChoiceDisabledReason(candidates[1]!, "dialogue", true)).toBe("");
   });
 });
