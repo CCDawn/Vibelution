@@ -123,7 +123,7 @@ export function GitRecentCommitsState({
           actions={<VButton type="button" variant="secondary" onPress={onRetry}>{retryLabel}</VButton>}
         />
       ) : presentation === "refreshing" ? (
-        <p className={styles.notice} role="status">{syncingLabel}</p>
+        <VStateSurface className={styles.notice} tone="loading" title={syncingLabel} role="status" skeletonLines={1} />
       ) : null}
       <div className={styles.commitList}>
         {commitsContent || <VStateSurface tone="empty" title={emptyMessage} />}
@@ -197,7 +197,7 @@ export function GitStatusSummaryState({
           actions={<VButton type="button" variant="secondary" onPress={onRetry}>{retryLabel}</VButton>}
         />
       ) : presentation === "refreshing" ? (
-        <p className={styles.notice} role="status">{syncingLabel}</p>
+        <VStateSurface className={styles.notice} tone="loading" title={syncingLabel} role="status" skeletonLines={1} />
       ) : null}
     </>
   );

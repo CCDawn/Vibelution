@@ -27,6 +27,7 @@ import type {
   AgentMentalPart,
 } from "../../agent-thread/types";
 import { fetchJson } from "../../api/client";
+import { VStateSurface } from "../../components/vui";
 import { useAppI18n } from "../../i18n/useAppI18n";
 import { ConversationImageArtifactView } from "./ConversationImageArtifactView";
 import type { ConversationImagePreviewRequest } from "./ConversationImagePreviewDialog";
@@ -3683,7 +3684,7 @@ export function ConversationView({
 
       <div ref={timelineRef} className={styles.timeline}>
         {displayMessages.length === 0 && !activeTurnMessage ? (
-          <div className={styles.emptyState}>{t("sessionNoMessages")}</div>
+          <VStateSurface fill className={styles.emptyState} tone="empty" title={t("sessionNoMessages")} />
         ) : (
           <div ref={timelineContentRef} className={styles.timelineContent}>
             {timelineVirtualRange.topSpacerPx > 0 ? (

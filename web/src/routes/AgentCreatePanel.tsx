@@ -2,7 +2,7 @@ import { Check, ChevronLeft, ChevronRight, Plus, Sparkles } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { type AgentAvatarOptionsPayload, type ToolBundle } from "../api/types";
-import { VButton, VContextualHint, VFieldRow, VNativeButton, VNativeInput, VNativeSelect, VNativeTextarea, VTooltip } from "../components/vui";
+import { VButton, VContextualHint, VFieldRow, VNativeButton, VNativeInput, VNativeSelect, VNativeTextarea, VStateSurface, VTooltip } from "../components/vui";
 import {
   buildAgentProviderChoices,
   firstAvailableModelId,
@@ -282,7 +282,11 @@ export function AgentCreatePanel({
                 <small>{avatarOptions?.count ?? 0}</small>
               </div>
               {avatarOptionsPending ? (
-                <p className={styles.availabilitySummary}>{copy.createAgentAvatarLoading || (lang === "zh" ? "正在加载头像库…" : "Loading avatar library…")}</p>
+                <VStateSurface
+                  tone="loading"
+                  title={copy.createAgentAvatarLoading || (lang === "zh" ? "正在加载头像库" : "Loading avatar library")}
+                  skeletonLines={2}
+                />
               ) : avatarOptions?.options?.length ? (
                 <div className={styles.avatarOptionGrid} role="listbox" aria-label={copy.createAgentAvatarLibrary || (lang === "zh" ? "头像图库" : "Avatar library")}>
                   {avatarOptions.options.map((option) => {
@@ -331,7 +335,13 @@ export function AgentCreatePanel({
 
         {activeStep === 1 ? (
           <div className={styles.createAgentGrid}>
-            {loadingOptions ? <div className={styles.loadingRows} aria-label={lang === "zh" ? "正在加载模型选项" : "Loading model options"} /> : null}
+            {loadingOptions ? (
+              <VStateSurface
+                tone="loading"
+                title={lang === "zh" ? "正在加载模型选项" : "Loading model options"}
+                skeletonLines={2}
+              />
+            ) : null}
             {!loadingOptions && modelChoices.length ? (
               <p className={styles.availabilitySummary} aria-live="polite">{availabilitySummary}</p>
             ) : null}
@@ -425,7 +435,13 @@ export function AgentCreatePanel({
         {activeStep === 2 ? (
           <div className={styles.finalStepLayout}>
             <div className={styles.finalStepMain}>
-              {loadingOptions ? <div className={styles.loadingRows} aria-label={lang === "zh" ? "正在加载提示词和工具" : "Loading prompts and tools"} /> : null}
+              {loadingOptions ? (
+                <VStateSurface
+                  tone="loading"
+                  title={lang === "zh" ? "正在加载提示词和工具" : "Loading prompts and tools"}
+                  skeletonLines={2}
+                />
+              ) : null}
               <VFieldRow label={copy.prompt}>
                 <VNativeSelect value={draft.promptTemplateId} onChange={(event) => onDraftChange({ promptTemplateId: event.target.value })}>
                   <option value="">-</option>

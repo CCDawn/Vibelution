@@ -652,7 +652,8 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("lastControlOperation");
     expect(routeSource).toContain('setLastControlOperation((operation === "stop" || operation === "force-stop") && response.accepted ? operation : null)');
     expect(routeSource).toContain('statusQuery.isError && (lastControlOperation === "stop" || lastControlOperation === "force-stop" || launcherStatusDisconnected)');
-    expect(routeSource).toContain('data-tone={expectedStopDisconnect ? "success" : launcherControlLimited ? "warning" : "error"}');
+    expect(routeSource).toContain("expectedStopDisconnect ? copy.stoppedStatusUnavailable");
+    expect(routeSource).toContain('tone={expectedStopDisconnect ? "info" : launcherControlLimited ? "unavailable" : "error"}');
     expect(routeSource).toContain("工作台已关闭，Launcher 后端连接已断开。重新启动后会恢复状态。");
     expect(routeSource).toContain("当前看到的是旧前端页面，不代表项目仍在运行。");
     expect(routeSource).toContain("当前缺少有效控制 token；请刷新后再执行启动、停止或重启。");

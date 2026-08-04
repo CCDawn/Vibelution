@@ -2,7 +2,7 @@ import { X } from "lucide-react";
 import { type ComponentProps, type ReactNode } from "react";
 
 import { AgentWorkspacePanel } from "../components/vui/product/agent-management";
-import { VIconButton } from "../components/vui";
+import { VIconButton, VStateSurface } from "../components/vui";
 import { AgentManagementBriefPanel } from "./AgentManagementBriefPanel";
 import { AgentOverviewResourcesPanel } from "./AgentOverviewResourcesPanel";
 import styles from "./AgentInspectorRailPanel.styles";
@@ -64,10 +64,15 @@ export function AgentInspectorRailPanel({
             {extra}
           </>
         ) : (
-          <section className={styles.emptyRail} aria-label={emptyTitle}>
-            <strong>{emptyTitle}</strong>
-            <span>{emptyHint}</span>
-          </section>
+          <VStateSurface
+            fill
+            className={styles.emptyRail}
+            tone="empty"
+            title={emptyTitle}
+            aria-label={emptyTitle}
+          >
+            {emptyHint}
+          </VStateSurface>
         )}
       </div>
     </AgentWorkspacePanel>

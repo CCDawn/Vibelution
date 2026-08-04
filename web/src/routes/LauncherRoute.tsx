@@ -49,7 +49,7 @@ import { PaneResizeHandle } from "../components/layout/PaneResizeHandle";
 import { type PaneSpec } from "../components/layout/paneLayoutPersistence";
 import { usePersistedPaneResize } from "../components/layout/usePersistedPaneResize";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
-import { VButton, VDenseOpsPage, VTooltip } from "../components/vui";
+import { VButton, VDenseOpsPage, VStateSurface, VTooltip } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { launcherRouteStyles as styles } from "./LauncherRoute.styles";
 
@@ -2162,7 +2162,7 @@ export function LauncherRoute() {
         </div>
       )}
     >
-      <Suspense fallback={<p className={styles.notice} data-tone="neutral">{copy.loading}</p>}>
+      <Suspense fallback={<VStateSurface className={styles.notice} tone="loading" title={copy.loading} skeletonLines={2} />}>
         <LauncherStartupSettingsPanel
           copy={copy}
           uiLang={uiLang}
@@ -2218,18 +2218,25 @@ export function LauncherRoute() {
       </Suspense>
 
       {statusQuery.isError ? (
-        <p className={styles.notice} data-tone={expectedStopDisconnect ? "success" : launcherControlLimited ? "warning" : "error"}>
-          {expectedStopDisconnect ? copy.stoppedStatusUnavailable : launcherControlLimited ? copy.controlLimitedDetail : copy.loadFailed}
-        </p>
+        <VStateSurface
+          className={styles.notice}
+          tone={expectedStopDisconnect ? "info" : launcherControlLimited ? "unavailable" : "error"}
+          title={expectedStopDisconnect ? copy.stoppedStatusUnavailable : launcherControlLimited ? copy.controlLimitedDetail : copy.loadFailed}
+        />
       ) : null}
       {notice.text ? (
         <VTooltip content={notice.text} tone={notice.tone === "error" ? "danger" : notice.tone === "warning" ? "warning" : "neutral"} width="wide">
-          <p className={styles.notice} data-tone={notice.tone} tabIndex={0}>
-            {noticeTextShort}
-          </p>
+          <VStateSurface
+            className={styles.notice}
+            tone={notice.tone === "error" ? "error" : notice.tone === "warning" ? "unavailable" : "info"}
+            title={noticeTextShort}
+            tabIndex={0}
+          />
         </VTooltip>
       ) : null}
-      {statusQuery.isPending && !status ? <p className={styles.notice} data-tone="neutral">{copy.loading}</p> : null}
+      {statusQuery.isPending && !status ? (
+        <VStateSurface className={styles.notice} tone="loading" title={copy.loading} skeletonLines={2} />
+      ) : null}
 
       <div
         ref={launcherLayoutRef}
@@ -2283,7 +2290,7 @@ export function LauncherRoute() {
           onKeyDown={(event) => onLauncherRailResizeKeyDown("rail", event, { direction: -1 })}
         />
 
-        <Suspense fallback={<p className={styles.notice} data-tone="neutral">{copy.loading}</p>}>
+        <Suspense fallback={<VStateSurface className={styles.notice} tone="loading" title={copy.loading} skeletonLines={2} />}>
           <LauncherDiagnosticsPanel
             copy={copy}
             controlPlaneStatus={humanState(status?.runtimeManager.runtimeState, uiLang)}
