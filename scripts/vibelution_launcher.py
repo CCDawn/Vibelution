@@ -1380,15 +1380,15 @@ def _ensure_frontend_build(source_identity: dict[str, object] | None = None) -> 
     dist_index = web_dir / "dist" / "index.html"
     provenance_path = web_dir / "dist" / FRONTEND_BUILD_PROVENANCE_NAME
     previous_provenance = _read_frontend_build_provenance(provenance_path)
-    tree_matches = (
-        bool(previous_provenance)
-        and str(previous_provenance.get("frontendTree") or "") == str(identity.get("frontendTree") or "")
-    )
-    needs_build = (
-        not dist_index.exists()
-        or not tree_matches
-        or _frontend_sources_are_newer_than_dist(web_dir, dist_index)
-    )
+    sources_newer = _frontend_sources_are_newer_than_dist(web_dir, dist_index)
+    previous_tree = str(previous_provenance.get("frontendTree") or "")
+    identity_tree = str(identity.get("frontendTree") or "")
+    tree_matches = bool(previous_provenance) and previous_tree == identity_tree
+    # Missing provenance alone must not force a second production build when dist is
+    # already fresher than sources (runtime-manager preflight often builds first and
+    # historically left provenance empty → open_workbench rebuilt again).
+    tree_mismatch = bool(previous_provenance) and previous_tree != identity_tree
+    needs_build = (not dist_index.exists()) or sources_newer or tree_mismatch
     _append_frontend_build_log(
         {
             "event": "frontend_build.ensure",

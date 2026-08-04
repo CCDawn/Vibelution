@@ -781,6 +781,45 @@ def test_python_launcher_rebuilds_when_sources_are_newer_than_dist(monkeypatch, 
     assert commands == [(["npm", "run", "build"], "npm build")]
 
 
+def test_python_launcher_reuses_fresh_dist_when_provenance_is_missing(monkeypatch, tmp_path):
+    """Restart open path must not rebuild solely because preflight left no provenance stamp."""
+    launcher = _load_python_launcher()
+    web_dir = tmp_path / "web"
+    source = web_dir / "src" / "App.tsx"
+    dist_index = web_dir / "dist" / "index.html"
+    provenance_path = web_dir / "dist" / launcher.FRONTEND_BUILD_PROVENANCE_NAME
+    node_modules = web_dir / "node_modules"
+    source.parent.mkdir(parents=True)
+    dist_index.parent.mkdir(parents=True)
+    node_modules.mkdir(parents=True)
+    source.write_text("export {};", encoding="utf-8")
+    dist_index.write_text("current build", encoding="utf-8")
+    now = time.time()
+    os.utime(source, (now - 20, now - 20))
+    os.utime(dist_index, (now - 10, now - 10))
+    commands: list[tuple[list[str], str]] = []
+    source_identity = {
+        "projectRoot": str(tmp_path.resolve()),
+        "branch": "main",
+        "commit": "2" * 40,
+        "frontendTree": "tree-current",
+        "trackedClean": True,
+    }
+    monkeypatch.setattr(launcher, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(launcher, "_runtime_source_identity", lambda: source_identity)
+    monkeypatch.setattr(launcher, "_frontend_package_manager", lambda: "npm")
+    monkeypatch.setattr(launcher, "_run_checked", lambda args, cwd, label: commands.append((args, label)))
+    monkeypatch.setattr(launcher, "_append_frontend_build_log", lambda payload: None)
+
+    result = launcher._ensure_frontend_build()
+
+    assert commands == []
+    assert provenance_path.is_file()
+    assert result["rebuilt"] is False
+    assert result["frontendTree"] == "tree-current"
+    assert result["sourceCommit"] == "2" * 40
+
+
 def test_python_launcher_reattests_reused_build_for_current_matching_tree(monkeypatch, tmp_path):
     launcher = _load_python_launcher()
     web_dir = tmp_path / "web"

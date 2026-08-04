@@ -157,11 +157,10 @@ internal static class VibelutionLauncher
                     try
                     {
                         EnsureLauncherBackend();
-                        ShowInfo("正在排队：强制重建前端并启动/重启工作台…");
+                        // Single accept toast (avoid double balloon spam). Outcome toast after poll.
                         // Rebuild runs inside runtime-manager after accept; keep API timeout short.
                         PostLauncher("/api/launcher/rebuild-and-start");
-                        ShowInfo("重建并启动请求已发送。正在后台构建并拉起工作台…");
-                        // Poll briefly so tray shows real failure instead of only the accept toast.
+                        ShowInfo("重建并启动已受理，正在后台构建/拉起…");
                         string lastFailure = WaitForRebuildOutcome(90000);
                         if (!string.IsNullOrEmpty(lastFailure))
                         {
@@ -169,7 +168,7 @@ internal static class VibelutionLauncher
                         }
                         else
                         {
-                            ShowInfo("重建并启动已完成（或仍在收尾中）。可打开控制台查看状态。");
+                            ShowInfo("重建并启动已完成（或仍在收尾中）。");
                         }
                     }
                     catch (WebException ex)

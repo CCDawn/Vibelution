@@ -42,6 +42,10 @@ def test_native_launcher_tray_menu_exposes_lifecycle_controls():
     assert "\"/api/launcher/rebuild-and-start\"" in source
     assert "\"/api/launcher/force-stop\"" in source
     assert "QueueRebuildAndStart" in source
+    # Rebuild flow: one accept toast + one outcome toast (no double accept balloons).
+    assert "重建并启动已受理，正在后台构建/拉起…" in source
+    assert "正在排队：强制重建前端并启动/重启工作台…" not in source
+    assert "重建并启动请求已发送。正在后台构建并拉起工作台…" not in source
     assert "RunPythonBridge(projectDir, \"stop-launcher\", true, false)" in source
 
 
