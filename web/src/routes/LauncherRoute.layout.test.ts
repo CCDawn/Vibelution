@@ -282,7 +282,9 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("lifecycleDetailShort");
     expect(routeSource).toContain("noticeTextShort");
     expect(routeSource).toContain("helperTitle={lifecycleDisplay.detail}");
-    expect(routeSource).toContain("aria-label={lifecycleDisplay.detail || copy.subtitle}");
+    expect(routeSource).toContain("meta={lifecycleDetailShort || copy.subtitle}");
+    expect(routeSource).toContain("VDenseOpsPage");
+    expect(routeSource).toContain('data-vui-domain-recipe="launcher-workbench"');
     expect(routeSource).toContain("<VTooltip content={notice.text}");
     expect(routeSource).toContain("<VTooltip key={row.id} content={row.technical} width=\"wide\">");
     expect(routeSource).not.toContain("<p className={styles.subtitle}>{lifecycleDisplay.detail || copy.subtitle}</p>");

@@ -2,7 +2,7 @@ import "../design/route-css/workbench-secondary.tailwind.css";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowUpRight, CheckCircle2, LibraryBig, LoaderCircle, Search, Square, SquareCheckBig, Trash2, TriangleAlert } from "lucide-react";
-import { type CSSProperties, type KeyboardEvent, type PointerEvent, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { NavLink } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
@@ -17,17 +17,12 @@ import {
   SupervisedWorktreeRun,
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
-import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
-import { VButton, VNativeInput, VNativeSelect, VNativeTextarea, VTooltip } from "../components/vui";
+import { VButton, VListDetailPage, VNativeInput, VNativeSelect, VNativeTextarea, VTooltip } from "../components/vui";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { createEvolutionWorkspaceCache } from "./evolutionWorkspaceCache";
 import { SupervisedWorkspaceControls } from "./SupervisedWorkspaceControls";
 import { SupervisedWorktreeReviewPanel } from "./SupervisedWorktreeReviewPanel";
-import {
-  migrateLegacyNumericPane,
-  type PaneSpec,
-} from "../components/layout/paneLayoutPersistence";
-import { usePersistedPaneResize } from "../components/layout/usePersistedPaneResize";
+import { migrateLegacyNumericPane } from "../components/layout/paneLayoutPersistence";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import styles from "./SupervisedReviewRoute.styles";
 
@@ -38,13 +33,12 @@ const REVIEW_FILTERS: ReviewFilter[] = ["all", "pending", "positive", "negative"
 const EMPTY_REVIEW_ITEMS: EvolutionChatReviewCandidate[] = [];
 const REVIEW_LAYOUT_ID = WORKBENCH_LAYOUT_IDS.supervisedReview;
 const REVIEW_QUEUE_WIDTH_KEY = "vibelution.supervised-review.queue-width";
-const REVIEW_QUEUE_PANE: PaneSpec = {
+const REVIEW_QUEUE_SIDEBAR = {
   id: "queue",
   defaultWidth: 380,
   minWidth: 320,
   maxWidth: 560,
-};
-const REVIEW_QUEUE_PANES: PaneSpec[] = [REVIEW_QUEUE_PANE];
+} as const;
 
 
 export function SupervisedReviewRoute() {
@@ -63,22 +57,9 @@ export function SupervisedReviewRoute() {
   const [actionFeedback, setActionFeedback] = useState("");
   const [selectedCandidateIds, setSelectedCandidateIds] = useState<string[]>([]);
   const [bulkFeedback, setBulkFeedback] = useState("");
-  const [queuePanelCollapsed, setQueuePanelCollapsed] = useState(false);
   useEffect(() => {
     migrateLegacyNumericPane(REVIEW_LAYOUT_ID, "queue", REVIEW_QUEUE_WIDTH_KEY);
   }, []);
-  const {
-    layoutRef: reviewLayoutRef,
-    widths: reviewPaneWidths,
-    draggingPaneId: reviewDraggingPaneId,
-    startResize: startReviewPaneResize,
-    onResizeKeyDown: onReviewPaneResizeKeyDown,
-  } = usePersistedPaneResize({
-    layoutId: REVIEW_LAYOUT_ID,
-    panes: REVIEW_QUEUE_PANES,
-    preserveMainMinWidth: 480,
-  });
-  const queuePanelWidth = reviewPaneWidths.queue ?? REVIEW_QUEUE_PANE.defaultWidth;
   const pageVisible = usePageVisibility();
 
   const reviewQuery = useQuery({
@@ -289,14 +270,6 @@ export function SupervisedReviewRoute() {
   const selectedCount = selectedCandidateIds.length;
   const visiblePendingCount = visiblePendingItems.length;
   const lifecycle = reviewData?.lifecycle;
-  const workspaceStyle = useMemo(
-    () =>
-      ({
-        "--review-queue-width": queuePanelCollapsed ? "0px" : `${queuePanelWidth}px`,
-      }) as CSSProperties,
-    [queuePanelCollapsed, queuePanelWidth],
-  );
-  const resizeQueueLabel = lang === "zh" ? "调整样本列表宽度" : "Resize sample list";
 
   function levelLabel(level: string) {
     if (level === "high") {
@@ -367,20 +340,6 @@ export function SupervisedReviewRoute() {
     setSelectedCandidateIds(visiblePendingIds);
   }
 
-  function handleQueueResizeStart(event: PointerEvent<any>) {
-    if (queuePanelCollapsed) {
-      return;
-    }
-    startReviewPaneResize("queue", event as PointerEvent<HTMLDivElement>, { direction: 1 });
-  }
-
-  function handleQueueResizeKeyDown(event: KeyboardEvent<any>) {
-    if (queuePanelCollapsed) {
-      return;
-    }
-    onReviewPaneResizeKeyDown("queue", event as KeyboardEvent<HTMLDivElement>, { direction: 1 });
-  }
-
   function triggerWorktreeReviewApproval(run: SupervisedWorktreeRun) {
     if (!run.runId) {
       return;
@@ -427,86 +386,85 @@ export function SupervisedReviewRoute() {
       ];
 
   return (
-    <div className={styles.page} data-vui-recipe="supervised-review-workbench">
-      <section className={styles.toolbar}>
-        <div className={styles.toolbarIntro}>
-          <p className={styles.eyebrow}>{t("navSupervisedEvolution")}</p>
-          <h1 className={styles.title}>{t("reviewWorkspace")}</h1>
-          <p className={styles.subtitle}>{t("reviewWorkspaceSubtitle")}</p>
+    <VListDetailPage
+      className={styles.page}
+      headerClassName={styles.header}
+      workspaceClassName={styles.workspace}
+      columnsClassName=""
+      layoutId={REVIEW_LAYOUT_ID}
+      resize={{ sidebar: REVIEW_QUEUE_SIDEBAR }}
+      data-vui-domain-recipe="supervised-review-workbench"
+      data-vui-region="supervised-review-workspace"
+      ariaLabel={t("reviewWorkspace")}
+      eyebrow={t("navSupervisedEvolution")}
+      title={t("reviewWorkspace")}
+      meta={t("reviewWorkspaceSubtitle")}
+      actions={(
+        <SupervisedWorkspaceControls activeView="review" activeWorkflowStepId="approval" tabSummaries={reviewTabSummaries} />
+      )}
+      toolbar={(
+        <div className={styles.toolbarStack}>
+          <section className={styles.summaryStrip}>
+            <article className={styles.summaryCard}>
+              <span>{lang === "zh" ? "待审样本" : "Pending cases"}</span>
+              <strong>{reviewData?.pendingCount ?? 0}</strong>
+            </article>
+            <article className={styles.summaryCard}>
+              <span>{lang === "zh" ? "正例" : "Positive"}</span>
+              <strong>{reviewData?.positiveCount ?? 0}</strong>
+            </article>
+            <article className={styles.summaryCard}>
+              <span>{lang === "zh" ? "负例" : "Negative"}</span>
+              <strong>{reviewData?.negativeCount ?? 0}</strong>
+            </article>
+            <article className={styles.summaryCard}>
+              <span>{lang === "zh" ? "已丢弃" : "Discarded"}</span>
+              <strong>{reviewData?.discardCount ?? 0}</strong>
+            </article>
+            <article className={styles.summaryCard}>
+              <span>{lang === "zh" ? "正例数据集" : "Positive dataset"}</span>
+              <strong>{reviewData?.positiveDatasetName ?? "--"}</strong>
+            </article>
+          </section>
+
+          <section className={styles.lifecyclePanel}>
+            <div>
+              <p className={styles.eyebrow}>{lang === "zh" ? "生命周期边界" : "Lifecycle boundary"}</p>
+              <h2 className={styles.sectionTitle}>
+                {lifecycle?.candidateStage || "pending_review"}{" -> "}{lifecycle?.reviewedCaseStage || "reviewed_chat_case"}
+              </h2>
+            </div>
+            <div className={styles.lifecyclePills}>
+              <span className={styles.secondaryPill}>
+                {lifecycle?.rawChatDirectTrainingAllowed
+                  ? (lang === "zh" ? "raw chat 可直训" : "raw chat training allowed")
+                  : (lang === "zh" ? "raw chat 不直训" : "no raw-chat training")}
+              </span>
+              <span className={styles.secondaryPill}>
+                {lang === "zh" ? "正例" : "positive"}: {lifecycle?.datasetTarget || reviewData?.positiveDatasetName || "--"}
+              </span>
+              <span className={styles.secondaryPill}>
+                {lang === "zh" ? "负例" : "negative"}: {lifecycle?.negativeTarget || reviewData?.negativeDatasetName || "--"}
+              </span>
+              {(lifecycle?.allowedDownstreamUses ?? []).map((use) => (
+                <span key={use} className={styles.signalPill}>{use}</span>
+              ))}
+            </div>
+          </section>
+
+          <SupervisedWorktreeReviewPanel
+            activeRun={activeWorktreeRun}
+            runs={worktreeRuns}
+            pending={worktreeActionMutation.isPending}
+            feedback={worktreeActionMutation.data?.latestMessage || ""}
+            error={worktreeActionMutation.error?.message ?? ""}
+            onApproveReview={triggerWorktreeReviewApproval}
+            onRunAction={triggerWorktreeAction}
+          />
         </div>
-
-        <div className={styles.toolbarControls}>
-          <SupervisedWorkspaceControls activeView="review" activeWorkflowStepId="approval" tabSummaries={reviewTabSummaries} />
-        </div>
-      </section>
-
-      <section className={styles.summaryStrip}>
-        <article className={styles.summaryCard}>
-          <span>{lang === "zh" ? "待审样本" : "Pending cases"}</span>
-          <strong>{reviewData?.pendingCount ?? 0}</strong>
-        </article>
-        <article className={styles.summaryCard}>
-          <span>{lang === "zh" ? "正例" : "Positive"}</span>
-          <strong>{reviewData?.positiveCount ?? 0}</strong>
-        </article>
-        <article className={styles.summaryCard}>
-          <span>{lang === "zh" ? "负例" : "Negative"}</span>
-          <strong>{reviewData?.negativeCount ?? 0}</strong>
-        </article>
-        <article className={styles.summaryCard}>
-          <span>{lang === "zh" ? "已丢弃" : "Discarded"}</span>
-          <strong>{reviewData?.discardCount ?? 0}</strong>
-        </article>
-        <article className={styles.summaryCard}>
-          <span>{lang === "zh" ? "正例数据集" : "Positive dataset"}</span>
-          <strong>{reviewData?.positiveDatasetName ?? "--"}</strong>
-        </article>
-      </section>
-
-      <section className={styles.lifecyclePanel}>
-        <div>
-          <p className={styles.eyebrow}>{lang === "zh" ? "生命周期边界" : "Lifecycle boundary"}</p>
-          <h2 className={styles.sectionTitle}>
-            {lifecycle?.candidateStage || "pending_review"}{" -> "}{lifecycle?.reviewedCaseStage || "reviewed_chat_case"}
-          </h2>
-        </div>
-        <div className={styles.lifecyclePills}>
-          <span className={styles.secondaryPill}>
-            {lifecycle?.rawChatDirectTrainingAllowed
-              ? (lang === "zh" ? "raw chat 可直训" : "raw chat training allowed")
-              : (lang === "zh" ? "raw chat 不直训" : "no raw-chat training")}
-          </span>
-          <span className={styles.secondaryPill}>
-            {lang === "zh" ? "正例" : "positive"}: {lifecycle?.datasetTarget || reviewData?.positiveDatasetName || "--"}
-          </span>
-          <span className={styles.secondaryPill}>
-            {lang === "zh" ? "负例" : "negative"}: {lifecycle?.negativeTarget || reviewData?.negativeDatasetName || "--"}
-          </span>
-          {(lifecycle?.allowedDownstreamUses ?? []).map((use) => (
-            <span key={use} className={styles.signalPill}>{use}</span>
-          ))}
-        </div>
-      </section>
-
-      <SupervisedWorktreeReviewPanel
-        activeRun={activeWorktreeRun}
-        runs={worktreeRuns}
-        pending={worktreeActionMutation.isPending}
-        feedback={worktreeActionMutation.data?.latestMessage || ""}
-        error={worktreeActionMutation.error?.message ?? ""}
-        onApproveReview={triggerWorktreeReviewApproval}
-        onRunAction={triggerWorktreeAction}
-      />
-
-      <div
-        ref={reviewLayoutRef}
-        className={styles.workspace}
-        style={workspaceStyle}
-        data-vui-recipe="supervised-review-workbench"
-        data-vui-layout-id={REVIEW_LAYOUT_ID}
-        data-vui-region="supervised-review-workspace"
-      >
-        <aside className={queuePanelCollapsed ? `${styles.queuePanel} ${styles.paneCollapsed}` : styles.queuePanel} aria-hidden={queuePanelCollapsed}>
+      )}
+      list={(
+        <div className={styles.queuePanel} data-vui-region="supervised-review-queue">
           <div className={styles.panelHeader}>
             <div>
               <p className={styles.eyebrow}>{lang === "zh" ? "待审队列" : "Review queue"}</p>
@@ -662,25 +620,10 @@ export function SupervisedReviewRoute() {
               })}
             </div>
           )}
-        </aside>
-
-        <PaneCollapseHandle
-          side="left"
-          collapsed={queuePanelCollapsed}
-          separatorLabel={resizeQueueLabel}
-          collapseLabel={lang === "zh" ? "收起样本列表" : "Collapse sample list"}
-          expandLabel={lang === "zh" ? "展开样本列表" : "Expand sample list"}
-          className={styles.resizeHandle}
-          active={reviewDraggingPaneId === "queue"}
-          valueNow={queuePanelWidth}
-          valueMin={REVIEW_QUEUE_PANE.minWidth}
-          valueMax={REVIEW_QUEUE_PANE.maxWidth}
-          onToggle={() => setQueuePanelCollapsed((current) => !current)}
-          onPointerDown={handleQueueResizeStart}
-          onKeyDown={handleQueueResizeKeyDown}
-        />
-
-        <section className={styles.detailPanel}>
+        </div>
+      )}
+      detail={(
+        <section className={styles.detailPanel} data-vui-region="supervised-review-detail">
           {detailCandidate ? (
             <>
               <div className={styles.detailHeader}>
@@ -935,7 +878,7 @@ export function SupervisedReviewRoute() {
             </div>
           )}
         </section>
-      </div>
-    </div>
+      )}
+    />
   );
 }

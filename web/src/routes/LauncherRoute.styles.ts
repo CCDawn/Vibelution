@@ -23,6 +23,7 @@ export const launcherRouteStyles = {
     `grid h-full min-h-full max-w-full content-start overflow-y-auto overflow-x-hidden overscroll-contain pb-[max(12px,env(safe-area-inset-bottom))] text-vui-fg-primary [scrollbar-gutter:stable] [--accent-primary:var(--accent-warm)] [--danger:var(--state-error)] [&_[data-vui=button]]:w-fit [&_[data-vui=button]]:[max-width:100%] [&_[data-vui=button]]:[white-space:nowrap] ${vuiWorkspaceFillClass}`,
   header:
     "mx-2 mt-2 min-w-0 border-[var(--vui-border-subtle)] !bg-transparent !shadow-none !backdrop-blur-none",
+  opsToolbarStack: "grid min-w-0 shrink-0 gap-0",
   panelEyebrow: "m-0 [font-size:var(--vui-font-xs)] uppercase tracking-[0.08em] text-vui-fg-tertiary",
   statusBar:
     "grid w-full max-w-none min-w-0 grid-cols-[minmax(0,1fr)_max-content] items-center gap-2 max-[1200px]:grid-cols-[minmax(0,1fr)] max-[1200px]:justify-items-stretch",
