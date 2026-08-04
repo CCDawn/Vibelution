@@ -67,6 +67,7 @@ export { VEmptyState, type VEmptyStateProps } from "./layout/VEmptyState";
 export {
   VStateSurface,
   type VStateSurfaceFact,
+  type VStateSurfaceDensity,
   type VStateSurfaceProps,
   type VStateSurfaceTone,
 } from "./layout/VStateSurface";
