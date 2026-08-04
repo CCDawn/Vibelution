@@ -224,6 +224,57 @@ class TestGitMemoryService:
         assert git_calls == [["status", "--porcelain=1"], ["rev-parse", "HEAD"]]
         assert stored_snapshots == []
 
+    def test_refresh_recovers_from_missing_indexed_base_without_remote_revision_range(self, tmp_path, monkeypatch):
+        """A stale GitCommit entry must not make a live status refresh wait on Git remotes."""
+        repo = _init_git_repo(tmp_path)
+        db_path = tmp_path / "brain.db"
+        fake_workspace = FakeWorkspace(repo, db_path)
+
+        class FakeBus:
+            def publish(self, name, data=None, source=None):
+                return None
+
+            def subscribe(self, name, handler, priority=0):
+                return True
+
+        monkeypatch.setattr("core.infrastructure.git_memory.get_workspace", lambda: fake_workspace)
+        monkeypatch.setattr("core.infrastructure.git_memory.get_event_bus", lambda: FakeBus())
+
+        service = GitMemoryService()
+        stale_base = "missing-indexed-base"
+        with fake_workspace.get_db_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO GitCommit(commit_sha, parent_sha, author_time, subject, indexed_at)
+                VALUES (?, NULL, '2099-01-01T00:00:00+00:00', 'stale index', '2099-01-01T00:00:00+00:00')
+                """,
+                (stale_base,),
+            )
+
+        git_calls = []
+        original_run_git = git_process.run_git
+
+        def tracked_run_git(args, **kwargs):
+            git_calls.append((list(args), dict(kwargs)))
+            return original_run_git(args, **kwargs)
+
+        monkeypatch.setattr(git_process, "run_git", tracked_run_git)
+
+        state = service.refresh_git_memory(force=True)
+
+        assert state.available is True
+        assert state.head_rev is not None
+        assert service._is_commit_indexed(state.head_rev) is True
+        verification = [
+            kwargs
+            for args, kwargs in git_calls
+            if args == ["rev-parse", "--verify", "--quiet", f"{stale_base}^{{commit}}"]
+        ]
+        assert verification
+        assert verification[0]["env"]["GIT_NO_LAZY_FETCH"] == "1"
+        assert any(args == ["rev-list", "--reverse", "--max-count", "20", "HEAD"] for args, _ in git_calls)
+        assert not any(args == ["rev-list", "--reverse", f"{stale_base}..HEAD"] for args, _ in git_calls)
+
     def test_worktree_snapshot_retention_prunes_old_worktree_rows(self, tmp_path, monkeypatch):
         repo = _init_git_repo(tmp_path)
         db_path = tmp_path / "brain.db"
