@@ -550,14 +550,16 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("sourceCollectionHistoricalRunWithRecords");
     expect(routeSource).toContain("sourceCollectionLatestRunIsEmpty");
     expect(routeSource).toContain("renderSourceCollectionRunSwitcher");
-    expect(routeSource).toContain("TeamSourceCollectionRunSwitcherPanel");
-    expect(routeSource).toContain("runOptions: TeamSourceCollectionRunSwitcherRun[]");
+    expect(routeSource).toContain("TeamSourceCollectionRunSwitcherInject");
     expect(routeSource).toContain("onRunChange={setSelectedSourceCollectionRunId}");
     expect(teamSourceCollectionRunSwitcherPanelSource).toContain("sourceCollectionRunSwitcher");
     expect(teamSourceCollectionRunSwitcherPanelSource).toContain("sourceCollectionRunSwitcherMain");
     expect(teamSourceCollectionRunSwitcherPanelSource).toContain("sourceCollectionRunSwitcherStats");
     expect(teamSourceCollectionRunSwitcherPanelSource).toContain("VTooltip");
     expect(teamSourceCollectionRunSwitcherPanelSource).not.toContain("<small>{hint}</small>");
+    // Option mapping + empty-run hints live on runModel / inject.
+    expect(runModelSource).toContain("buildSourceCollectionRunSwitcherOptions");
+    expect(runModelSource).toContain("resolveSourceCollectionRunSwitcherHint");
     // Wave 8K: raw-record empty-state copy lives on conversation workspace panel.
     expect(teamSourceCollectionConversationWorkspacePanelSource).toContain("TeamSourceEmptyState");
     expect(teamSourceCollectionConversationWorkspacePanelSource).toContain("rawRecordEmptyFacts");
@@ -1483,7 +1485,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).not.toContain("Agent 执行过程");
     expect(routeSource).not.toContain("过程</button>");
     expect(routeSource).toContain("TeamSourceCollectionConversationPanel");
-    expect(routeSource).toContain("TeamSourceCollectionConversationWorkspacePanel");
+    expect(routeSource).toContain("TeamSourceCollectionConversationInject");
+    expect(teamSourceCollectionConversationWorkspacePanelSource).toContain("TeamSourceCollectionConversationWorkspacePanel");
     expect(teamSourceCollectionConversationPanelSource).toContain("sourceCollectionResultsPanel");
     expect(teamSourceCollectionConversationPanelSource).toContain("source-collection-results");
     expect(teamSourceCollectionConversationPanelSource).toContain("TeamSourceResultStats");

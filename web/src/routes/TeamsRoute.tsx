@@ -24,22 +24,16 @@ import {
   TeamSourceCollectionControlsPanel,
   TeamSourceCollectionControlsWorkspacePanel,
   TeamSourceCollectionConversationPanel,
-  TeamSourceCollectionConversationWorkspacePanel,
   TeamSourceCollectionFilterBar,
   TeamSourceCollectionFindingDetailsPanel,
   TeamSourceCollectionGraphPanel,
-  TeamSourceCollectionGraphWorkspacePanel,
   TeamSourceCollectionManualWritebackPanel,
   TeamSourceCollectionMemoryPanel,
-  TeamSourceCollectionMemoryWorkspacePanel,
   TeamSourceCollectionPagination,
   TeamSourceCollectionPhaseCloseGatePanel,
   TeamSourceCollectionRunSettingsPanel,
-  TeamSourceCollectionRunSwitcherPanel,
   TeamSourceCollectionScreeningPanel,
-  TeamSourceCollectionScreeningWorkspacePanel,
   TeamSourceCollectionSearchBriefPanel,
-  TeamSourceCollectionSelectedSourceWorkspacePanel,
   TeamSourceCollectionSourceDetailPanel,
   TeamSourceCollectionStageAgentsPanel,
   TeamSourceCollectionStandaloneStagePanel,
@@ -175,6 +169,12 @@ import { TeamSourceCollectionControlsInject } from "./teams/TeamSourceCollection
 import { TeamSourceCollectionActiveStageInject } from "./teams/TeamSourceCollectionActiveStageInject";
 import { TeamSourceCollectionStorageActionsInject } from "./teams/TeamSourceCollectionStorageActionsInject";
 import { TeamSourceCollectionSearchBriefShell } from "./teams/TeamSourceCollectionSearchBriefShell";
+import { TeamSourceCollectionRunSwitcherInject } from "./teams/TeamSourceCollectionRunSwitcherInject";
+import { TeamSourceCollectionScreeningInject } from "./teams/TeamSourceCollectionScreeningInject";
+import { TeamSourceCollectionGraphInject } from "./teams/TeamSourceCollectionGraphInject";
+import { TeamSourceCollectionMemoryInject } from "./teams/TeamSourceCollectionMemoryInject";
+import { TeamSourceCollectionSelectedSourceInject } from "./teams/TeamSourceCollectionSelectedSourceInject";
+import { TeamSourceCollectionConversationInject } from "./teams/TeamSourceCollectionConversationInject";
 import {
   buildSourceCollectionFilterBarOptions,
   resolveSourceCollectionPaginationView,
@@ -320,7 +320,6 @@ import { agentDisplayInfo } from "./agentDisplay";
 import { createChatWorkspaceCache } from "./chatWorkspaceCache";
 import type { TeamMemoryIndexMember } from "./TeamMemoryIndexPanel";
 import type { TeamSourceCollectionStageAgentCard, TeamSourceCollectionStageAgentTone } from "./TeamSourceCollectionStageAgentsPanel";
-import type { TeamSourceCollectionRunSwitcherRun } from "./TeamSourceCollectionRunSwitcherPanel";
 import type {
   TeamSourceCollectionOverviewPlan,
   TeamSourceCollectionOverviewResult,
@@ -363,11 +362,8 @@ import {
   deriveSourceCollectionDisplayState,
   selectDefaultSourceCollectionRun,
   sourceCollectionActiveWorkRunFromRuntime,
-  sourceCollectionRunCandidateMetric,
   sourceCollectionRunHasUsableRecords,
   sourceCollectionRunLabel,
-  sourceCollectionRunOptionLabel,
-  sourceCollectionRunRecordCount,
   sourceCollectionRunsForTeam,
   sourceCollectionRunTitleLabel,
   sourceCollectionStableCountText,
@@ -2323,53 +2319,25 @@ export function TeamsRoute({
   }
 
   function renderSourceCollectionRunSwitcher() {
-    if (!sourceCollectionRuns.length) {
-      return null;
-    }
-    const selectedRecordCount = sourceCollectionRunRecordCount(selectedSourceCollectionRun);
-    const selectedCandidateCount = sourceCollectionRunCandidateMetric(selectedSourceCollectionRun);
-    const selectedRunIsEmpty = Boolean(
-      selectedSourceCollectionRun
-      && !sourceCollectionRunHasUsableRecords(selectedSourceCollectionRun),
-    );
-    const canSwitchToHistoricalRun = Boolean(
-      sourceCollectionHistoricalRunWithRecords
-      && sourceCollectionHistoricalRunWithRecords.runId !== selectedSourceCollectionRun?.runId,
-    );
-    const runOptions: TeamSourceCollectionRunSwitcherRun[] = sourceCollectionRuns.map((run) => ({
-      runId: run.runId,
-      label: sourceCollectionRunOptionLabel(run, lang),
-    }));
-    const hint = sourceCollectionRecordsDataLoading
-      ? (lang === "zh" ? "正在读取当前批次资料。" : "Loading the selected run.")
-      : sourceCollectionShowingHistoricalRunByDefault
-        ? (lang === "zh" ? "最新批次暂无资料，已显示上一轮有资料的批次。" : "The latest run is empty, so the latest run with records is shown.")
-      : selectedRunIsEmpty && canSwitchToHistoricalRun
-        ? (lang === "zh" ? "当前批次暂无资料，上一轮有资料；可切换查看。" : "This run is empty; another run has records.")
-      : (lang === "zh" ? "可切换批次查看历史搜索结果。" : "Switch runs to inspect previous search results.");
     return (
-      <TeamSourceCollectionRunSwitcherPanel
+      <TeamSourceCollectionRunSwitcherInject
         lang={lang}
-        runs={runOptions}
+        runs={sourceCollectionRuns}
+        selectedRun={selectedSourceCollectionRun}
         selectedRunId={selectedSourceCollectionRunEffectiveId}
-        hint={hint}
-        recordMetric={sourceCollectionRecordsDataLoading ? sourceCollectionLoadingText : selectedRecordCount}
-        candidateMetric={sourceCollectionRecordsDataLoading ? sourceCollectionLoadingText : selectedCandidateCount}
-        statusLabel={sourceCollectionStatusLabel(sourceCollectionRunStatus?.runStatus || selectedSourceCollectionRun?.status, lang)}
-        canSwitchToHistoricalRun={selectedRunIsEmpty && canSwitchToHistoricalRun && Boolean(sourceCollectionHistoricalRunWithRecords)}
+        historicalRunWithRecords={sourceCollectionHistoricalRunWithRecords}
+        showingHistoricalRunByDefault={sourceCollectionShowingHistoricalRunByDefault}
+        recordsLoading={sourceCollectionRecordsDataLoading}
+        loadingText={sourceCollectionLoadingText}
+        runStatusLabelSource={sourceCollectionRunStatus?.runStatus || selectedSourceCollectionRun?.status}
         onRunChange={setSelectedSourceCollectionRunId}
-        onSwitchToHistoricalRun={() => {
-          if (sourceCollectionHistoricalRunWithRecords) {
-            setSelectedSourceCollectionRunId(sourceCollectionHistoricalRunWithRecords.runId);
-          }
-        }}
       />
     );
   }
 
   function renderSourceCollectionConversation() {
     return (
-      <TeamSourceCollectionConversationWorkspacePanel
+      <TeamSourceCollectionConversationInject
         lang={lang}
         sourceCollectionPageItems={sourceCollectionPageItems}
         sourceCollectionFilteredRecords={sourceCollectionFilteredRecords}
@@ -2421,7 +2389,7 @@ export function TeamsRoute({
 
   function renderSourceCollectionSelectedSourcePanel() {
     return (
-      <TeamSourceCollectionSelectedSourceWorkspacePanel
+      <TeamSourceCollectionSelectedSourceInject
         lang={lang}
         selectedSourceCollectionCandidate={selectedSourceCollectionCandidate}
         selectedSourceCollectionCandidateTrace={selectedSourceCollectionCandidateTrace}
@@ -2436,7 +2404,7 @@ export function TeamsRoute({
 
   function renderSourceCollectionScreeningPanel() {
     return (
-      <TeamSourceCollectionScreeningWorkspacePanel
+      <TeamSourceCollectionScreeningInject
         lang={lang}
         sourceCollectionFilteredRunCandidates={sourceCollectionFilteredRunCandidates}
         sourceCollectionPageItems={sourceCollectionPageItems}
@@ -2468,22 +2436,9 @@ export function TeamsRoute({
         sourceCollectionScreeningButtonTitle={sourceCollectionScreeningButtonTitle}
         sourceCollectionScreeningStatusText={sourceCollectionScreeningStatusText}
         sourceCollectionQualityBatchFeedback={sourceCollectionQualityBatchFeedback}
-        sourceCollectionQualityReviewIsSecondary={sourceCollectionExtractionNeedsAgentMaterial}
-        sourceCollectionRecommendedNextHint={
-          sourceCollectionExtractionNeedsAgentMaterial
-            ? (lang === "zh"
-              ? "推荐下一步：右侧主按钮「补材料」→ 完成后再质量审查。不要只点审查。"
-              : "Recommended: right-stage primary “repair materials”, then quality review. Do not review alone.")
-            : sourceCollectionRunPendingScreeningCount > 0
-              ? (lang === "zh"
-                ? `推荐下一步：点「${sourceCollectionScreeningButtonText}」推进审查。`
-                : `Recommended: run “${sourceCollectionScreeningButtonText}”.`)
-              : sourceCollectionProjectedApprovedCount > 0 && sourceCollectionRunPendingScreeningCount <= 0
-                ? (lang === "zh"
-                  ? "推荐下一步：右侧主按钮「进入关系整理」。"
-                  : "Recommended: right-stage primary “Go to relations”.")
-                : null
-        }
+        needsAgentMaterial={sourceCollectionExtractionNeedsAgentMaterial}
+        pendingScreeningCount={sourceCollectionRunPendingScreeningCount}
+        projectedApprovedCount={sourceCollectionProjectedApprovedCount}
         openSourceCollectionScreeningPanel={openSourceCollectionScreeningPanel}
         renderSourceCollectionPagination={renderSourceCollectionPagination}
         teamWorkflowSourceQualityStatus={teamWorkflowSourceQualityStatus}
@@ -2505,7 +2460,7 @@ export function TeamsRoute({
 
   function renderSourceCollectionGraphPanel() {
     return (
-      <TeamSourceCollectionGraphWorkspacePanel
+      <TeamSourceCollectionGraphInject
         lang={lang}
         selectedSourceCollectionRunEffectiveId={selectedSourceCollectionRunEffectiveId}
         sourceCollectionGraphProjection={sourceCollectionGraphProjection}
@@ -2532,7 +2487,7 @@ export function TeamsRoute({
 
   function renderSourceCollectionMemoryPanel() {
     return (
-      <TeamSourceCollectionMemoryWorkspacePanel
+      <TeamSourceCollectionMemoryInject
         lang={lang}
         teamWorkflowKnowledgeIngestionStatus={teamWorkflowKnowledgeIngestionStatus}
         sourceCollectionFilteredRunCandidates={sourceCollectionFilteredRunCandidates}
