@@ -1,5 +1,5 @@
 import type { EvolutionWorkbench } from "../api/types";
-import { VButton, VTooltip } from "../components/vui";
+import { VTabs, VTooltip } from "../components/vui";
 import { datasetCatalogStatusLabel } from "./evolution/evolutionRouteModel";
 import styles from "./EvolutionRoute.styles";
 
@@ -61,23 +61,27 @@ export function EvolutionDatasetCatalogPanel({
         <span>{lang === "zh" ? "展开管理" : "Manage"}</span>
       </summary>
       <div className={styles.datasetCatalogBody}>
-        <div className={styles.datasetCatalogFilterRow} role="tablist" aria-label={copy.datasetCatalog}>
-          {filters.map(([filter, label, count]) => (
-            <VButton
-              key={filter}
-              type="button"
-              className={
-                selectedFilter === filter
-                  ? `${styles.datasetCatalogFilterButton} ${styles.datasetCatalogFilterButtonActive}`
-                  : styles.datasetCatalogFilterButton
-              }
-              onClick={() => onFilterChange(filter)}
-              aria-pressed={selectedFilter === filter}
-            >
-              {label} {count}
-            </VButton>
-          ))}
-        </div>
+        <VTabs
+          aria-label={copy.datasetCatalog}
+          value={selectedFilter}
+          onValueChange={(value) => {
+            if (
+              value === "all"
+              || value === "runnable"
+              || value === "blocked"
+              || value === "roadmap"
+            ) {
+              onFilterChange(value);
+            }
+          }}
+          className="min-w-0"
+          listClassName={styles.datasetCatalogFilterRow}
+          triggerClassName={styles.datasetCatalogFilterButton}
+          items={filters.map(([filter, label, count]) => ({
+            id: filter,
+            label: `${label} ${count}`,
+          }))}
+        />
         <div className={styles.datasetCatalogList}>
           {visible.length > 0 ? (
             visible.map((item) => {

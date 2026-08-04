@@ -6,7 +6,7 @@ import type {
   LauncherMaintenanceSummary,
 } from "../api/types";
 import { PersistedHeightListShell } from "../components/layout/PersistedHeightListShell";
-import { VButton, VTooltip } from "../components/vui";
+import { VButton, VTabs, VTooltip } from "../components/vui";
 import styles from "./LauncherProjectMaintenancePanel.styles";
 import {
   LAUNCHER_CLEANUP_CONSOLE_HEIGHT_PANE,
@@ -130,25 +130,30 @@ export function LauncherProjectMaintenancePanel({
             <span>{copy.maintenanceProfile}</span>
             <small>{loading ? copy.maintenanceLoading : summary?.executionOwner || "launcher"}</small>
           </div>
-          <div className={styles.segmentedControl} role="group" aria-label={copy.maintenanceProfile}>
-            {[
-              ["clean_start", copy.maintenanceCleanStart],
-              ["factory_runtime", copy.maintenanceFactoryRuntime],
-            ].map(([profile, label]) => (
-              <VButton
-                key={profile}
-                type="button"
-                variant="secondary"
-                data-active={maintenanceProfile === profile}
-                isDisabled={previewPending || applyPending}
-                onPress={() => {
-                  onProfileChange(profile as LauncherMaintenanceProfileId);
-                }}
-              >
-                {label}
-              </VButton>
-            ))}
-          </div>
+          <VTabs
+            aria-label={copy.maintenanceProfile}
+            value={maintenanceProfile}
+            onValueChange={(value) => {
+              if (value === "clean_start" || value === "factory_runtime") {
+                onProfileChange(value as LauncherMaintenanceProfileId);
+              }
+            }}
+            className="min-w-0"
+            listClassName={styles.segmentedControl}
+            triggerClassName={styles.segmentedTrigger}
+            items={[
+              {
+                id: "clean_start",
+                label: copy.maintenanceCleanStart,
+                disabled: previewPending || applyPending,
+              },
+              {
+                id: "factory_runtime",
+                label: copy.maintenanceFactoryRuntime,
+                disabled: previewPending || applyPending,
+              },
+            ]}
+          />
           <PersistedHeightListShell
             layoutId={LAUNCHER_LIST_HEIGHT_LAYOUT_ID}
             pane={LAUNCHER_NOISE_ITEM_GRID_HEIGHT_PANE}

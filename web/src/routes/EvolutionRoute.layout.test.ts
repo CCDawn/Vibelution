@@ -231,8 +231,11 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain('useState<EvolutionDatasetCatalogFilter>("runnable")');
     expect(datasetCatalogPanelSource).toContain("styles.datasetCatalogPanel");
     expect(datasetCatalogPanelSource).toContain("styles.datasetCatalogSummary");
+    expect(datasetCatalogPanelSource).toContain("<VTabs");
+    expect(datasetCatalogPanelSource).toContain("listClassName={styles.datasetCatalogFilterRow}");
     expect(routeStyles.datasetCatalogPanel).toContain("[overflow:hidden]");
     expect(routeStyles.datasetCatalogSummary).toContain("[cursor:pointer]");
+    expect(routeStyles.datasetCatalogFilterButton).toContain("data-[state=active]");
   });
 
   it("separates inconclusive terminal status and harness-only datasets from success wording", () => {

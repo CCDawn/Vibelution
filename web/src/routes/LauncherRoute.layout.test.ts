@@ -46,6 +46,9 @@ describe("LauncherRoute layout contract", () => {
     expect(developerModePanelSource).toContain('from "./LauncherDeveloperModePanel.styles"');
     expect(diagnosticsPanelSource).toContain('from "./LauncherDiagnosticsPanel.styles"');
     expect(projectMaintenancePanelSource).toContain('from "./LauncherProjectMaintenancePanel.styles"');
+    expect(projectMaintenancePanelSource).toContain("<VTabs");
+    expect(projectMaintenancePanelSource).toContain("listClassName={styles.segmentedControl}");
+    expect(projectMaintenancePanelStyles.segmentedTrigger).toContain("data-[state=active]");
     expect(startupSettingsPanelSource).toContain('from "./LauncherStartupSettingsPanel.styles"');
     expect(developerModePanelSource).not.toContain("LauncherRoute.styles");
     expect(diagnosticsPanelSource).not.toContain("LauncherRoute.styles");

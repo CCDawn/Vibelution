@@ -1,4 +1,4 @@
-import { VButton, VTooltip } from "../components/vui";
+import { VTabs } from "../components/vui";
 import styles from "./MemoryKnowledgeModeTabs.styles";
 
 export type MemoryKnowledgeWorkspaceMode = "sources" | "search" | "review" | "governance" | "permissions";
@@ -52,53 +52,65 @@ export function MemoryKnowledgeModeTabs({
 }: MemoryKnowledgeModeTabsProps) {
   const modes = [
     {
-      key: "sources",
+      key: "sources" as const,
       label: lang === "zh" ? "来源" : "Sources",
       hint: `${copy.ownerSourceInbox} / ${copy.centralSources}`,
       count: sourceCount + centralSourceCount,
     },
     {
-      key: "search",
+      key: "search" as const,
       label: lang === "zh" ? "检索" : "Search",
       hint: `${copy.knowledgeSearch} / ${copy.ragRetrieval}`,
       count: searchResultCount + ragContextCount,
     },
     {
-      key: "review",
+      key: "review" as const,
       label: lang === "zh" ? "审核" : "Review",
       hint: `${copy.pendingProposals} / ${copy.ratingSuggestions}`,
       count: pendingProposalCount + ratingSuggestionCount,
     },
     {
-      key: "governance",
+      key: "governance" as const,
       label: lang === "zh" ? "治理" : "Governance",
       hint: `${copy.operationsHealth} / ${copy.governanceTasks}`,
       count: operationsFindingCount + openGovernanceTaskCount,
     },
     {
-      key: "permissions",
+      key: "permissions" as const,
       label: lang === "zh" ? "权限" : "Permissions",
       hint: `${copy.permissionAudit} / ${copy.ingestionAdapters}`,
       count: permissionKnowledgeBaseCount + ingestionAdapterCount,
     },
-  ] satisfies Array<{ key: MemoryKnowledgeWorkspaceMode; label: string; hint: string; count: number }>;
+  ];
 
   return (
-    <div className={styles.knowledgeModeTabs} role="tablist" aria-label={copy.governance}>
-      {modes.map((mode) => (
-        <VTooltip key={mode.key} content={mode.hint} width="wide">
-          <VButton
-            type="button"
-            role="tab"
-            aria-selected={activeMode === mode.key}
-            className={activeMode === mode.key ? styles.knowledgeModeTabActive : styles.knowledgeModeTab}
-            onClick={() => onModeChange(mode.key)}
-          >
+    <VTabs
+      aria-label={copy.governance}
+      value={activeMode}
+      onValueChange={(value) => {
+        if (
+          value === "sources"
+          || value === "search"
+          || value === "review"
+          || value === "governance"
+          || value === "permissions"
+        ) {
+          onModeChange(value);
+        }
+      }}
+      className="min-w-0 max-w-full"
+      listClassName={styles.knowledgeModeTabs}
+      triggerClassName={styles.knowledgeModeTab}
+      items={modes.map((mode) => ({
+        id: mode.key,
+        title: mode.hint,
+        label: (
+          <>
             <span>{mode.label}</span>
             <strong>{mode.count}</strong>
-          </VButton>
-        </VTooltip>
-      ))}
-    </div>
+          </>
+        ),
+      }))}
+    />
   );
 }
