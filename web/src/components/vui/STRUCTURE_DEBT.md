@@ -7,6 +7,7 @@
 - New pages start from a **page recipe**, not a custom flex shell.
 - Visual coordination comes from **tokens + `pageRecipeClasses`**, not one-off CSS.
 - Fat routes become **orchestrators**; domain logic lives in sibling modules.
+- Workbench main **loading/empty** uses `VStateSurface` with `fill` (or panel-local skeleton) — never a one-line `styles.empty` above a empty floor.
 
 ## Inventory (current hotspots)
 

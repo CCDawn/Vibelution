@@ -195,9 +195,9 @@ const styles: Record<string, string> = {
   teamTaskForm:
     "teamTaskForm min-w-0 grid gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_input]:min-h-[var(--vui-control-height-sm)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_textarea]:min-h-20 [&_input]:w-full [&_select]:w-full [&_textarea]:w-full",
   teamUnavailableCard:
-    "teamUnavailableCard w-full max-w-[720px]",
+    "teamUnavailableCard w-full max-w-[720px] !min-h-[min(100%,28rem)]",
   teamUnavailableSurface:
-    "teamUnavailableSurface grid min-h-0 flex-1 grid-cols-[minmax(0,720px)] content-start justify-center overflow-auto px-3 py-4",
+    "teamUnavailableSurface grid min-h-0 flex-1 grid-cols-[minmax(0,720px)] content-center justify-center overflow-auto px-3 py-4",
   teamLoadingInlineSurface:
     "teamLoadingInlineSurface min-h-[96px]",
   // VNativeButton carries data-vui so global native-control chrome does not apply.
@@ -239,8 +239,9 @@ const styles: Record<string, string> = {
   teamShellContentCanvas:
     "teamShellContentCanvas !flex min-h-0 flex-1 flex-row overflow-hidden",
   // Board body fills remaining viewport; scroll inside, never shrink shell with content.
+  // Allow fill state surfaces to grow; other board blocks stay content-sized.
   teamShellBoardBody:
-    "teamShellBoardBody !flex min-h-0 flex-1 flex-col content-start gap-4 overflow-auto p-4 [scrollbar-gutter:stable] [&>*]:shrink-0",
+    "teamShellBoardBody !flex min-h-0 flex-1 flex-col content-start gap-4 overflow-auto p-4 [scrollbar-gutter:stable] [&>*:not([data-fill=true])]:shrink-0 [&>[data-fill=true]]:min-h-0 [&>[data-fill=true]]:flex-1",
   // Wave 4B: shared PaneResizeHandle visual.,
   inspectorResizeHandle:
     "inspectorResizeHandle max-[900px]:hidden",

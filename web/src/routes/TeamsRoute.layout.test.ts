@@ -824,8 +824,13 @@ describe("TeamsRoute layout contract", () => {
     expect(initialLoadingSurfaceSource).toContain('tone="loading"');
     expect(initialLoadingSurfaceSource).toContain("skeletonLines={3}");
     expect(initialLoadingSurfaceSource).toContain("<VLoadingValue");
+    expect(initialLoadingSurfaceSource).toContain("fill");
     expect(initialLoadingSurfaceSource).not.toContain("visibleTeamSummary.activeTeamCount");
     expect(initialLoadingSurfaceSource).not.toContain("visibleTeamSummary.memberCount");
+    // Board main: research overview cold load must fill the region (not styles.empty one-liner).
+    expect(routeSource).toContain('title={lang === "zh" ? "正在读取科研总览" : "Loading research overview"}');
+    expect(routeSource).toContain("fill");
+    expect(routeSource).not.toContain('styles.empty}>{lang === "zh" ? "正在读取科研总览');
     expect(routeSource).toContain("styles.emptyCanvasPanel");
     expect(routeSource).not.toContain("选择团队后进入对应工作区");
     expect(routeSource).not.toContain("顶部只保留 AI 搜索范围团队和 挑战杯ai科研团队 两个入口");
@@ -2499,7 +2504,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.aiSearchRunRefs).toBeTypeOf("string");
     expect(routeStyles.teamUnavailableSurface).not.toContain("place-items-center");
     expect(routeStyles.teamUnavailableSurface).toContain("justify-center");
-    expect(routeStyles.teamUnavailableSurface).toContain("content-start");
+    expect(routeStyles.teamUnavailableSurface).toContain("content-center");
     expect(routeStyles.teamUnavailableSurface).toContain("grid-cols-[minmax(0,720px)]");
     expect(routeStyles.teamUnavailableCard).toContain("max-w-[720px]");
     expect(routeStyles.workspace).toContain("overflow-hidden");

@@ -39,6 +39,7 @@ import {
   VNativeSelect,
   VNativeTextarea,
   VRouteLinkButton,
+  VStateSurface,
 } from "../components/vui";
 import { agentDisplayInfo } from "./agentDisplay";
 import styles from "./ResearchFlowCanvasRoute.styles";
@@ -2398,11 +2399,17 @@ export function ResearchFlowCanvasRoute() {
             </div>
           ) : null}
           {!draft && canvasQuery.isLoading ? (
-            <div className={styles.emptyState}>正在读取科研团队组织架构...</div>
+            <VStateSurface fill tone="loading" title="正在读取科研团队组织架构">
+              组织图节点与通信线会在数据返回后铺满画布区。
+            </VStateSurface>
           ) : !draft && canvasQuery.isError ? (
-            <div className={styles.emptyState}>组织画布读取失败，请检查后端科研组织接口。</div>
+            <VStateSurface fill tone="error" title="组织画布读取失败">
+              请检查后端科研组织接口。
+            </VStateSurface>
           ) : !draft ? (
-            <div className={styles.emptyState}>暂无可展示的科研团队组织架构。</div>
+            <VStateSurface fill tone="empty" title="暂无可展示的科研团队组织架构">
+              绑定团队并同步组织图后，画布区将显示 Agent 与通信关系。
+            </VStateSurface>
           ) : (
             <div
               ref={canvasScrollerRef}
