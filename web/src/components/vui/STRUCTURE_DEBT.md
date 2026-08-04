@@ -14,7 +14,7 @@
 
 | Surface | Symptom | Target recipe |
 | --- | --- | --- |
-| `TeamsRoute.tsx` | ~6.6k lines; shell recipes + **extracted** canvas/shell modules + **`TeamCommunicationPanel`** (discussion/broadcast, board+canvas shared). Next: extract board workflow panel host (stage-specific modules still inlined twice). | keep recipes; continue module extract |
+| `TeamsRoute.tsx` | ~6.4k lines; shell recipes + **extracted** canvas/shell modules + **`TeamCommunicationPanel`** + **`TeamResearchWorkflowPanelHost`** (stage modules composed once via `renderResearchWorkflowModules`). Next: shrink remaining board-only overview/launcher chrome; optional extract of SC module composition. | keep recipes; continue module extract |
 | Agents workspace | **Migrated** outer shell to `VListDetailPage` + layoutId (`AgentWorkspaceLayoutPanel`) | keep product/agent-management panels; optional inspector UX polish |
 | Chat coding | Dual-pane domain math (OK) but chrome drift risk | Keep domain layout; enforce layoutId + regions only |
 | Memory graph | **Migrated** `MemoryGraphViewPanel` → `VCanvasWorkbenchPage` | height list still uses PaneHeightResizeHandle |

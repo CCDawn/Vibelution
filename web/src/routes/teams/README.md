@@ -18,6 +18,7 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 | Canvas node binding inspector | `TeamNodeBindingPanel.tsx` | duplicating bind form in board/canvas |
 | Read-only canvas inspector | `TeamCanvasReadOnlyInspector.tsx` | ad-hoc read-only blocks in route |
 | Team discussion + broadcast | `TeamCommunicationPanel.tsx` | duplicating task/broadcast JSX in board/canvas shells |
+| Research workflow stage host | `TeamResearchWorkflowPanelHost.tsx` + `renderResearchWorkflowModules` in `TeamsRoute` | inlining workflow section chrome / stage modules twice in board+canvas |
 | Workflow API error product copy | `researchWorkflowErrorModel.ts` + `ResearchWorkflowErrorSurface.tsx` | raw Error.message in UI |
 | Team kind guards / system-team roles | `teamKindModel.ts` | UI panels |
 | Canvas geometry / auto-layout / edge paths | `canvasGeometry.ts` | styles maps, mutations |
