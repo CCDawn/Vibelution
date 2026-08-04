@@ -12,6 +12,8 @@ import {
 const styles: Record<string, string> = {
   tokenCompressionCard:
     "vui-routes-chatcodingroute tokenCompressionCard min-w-0",
+  tokenStatusScope:
+    "vui-routes-chatcodingroute tokenStatusScope min-w-0 shrink-0 [font-size:10px] font-semibold leading-none text-[var(--fg-tertiary)]",
   tokenStatusBar:
     "vui-routes-chatcodingroute tokenStatusBar relative mt-1.5 block h-1.5 overflow-hidden rounded-full bg-[color-mix(in_srgb,var(--vui-border-subtle)_78%,transparent)] [&>span]:block [&>span]:h-full [&>span]:rounded-full [&>span]:bg-[var(--accent-cool)] [&>span]:w-[calc(var(--token-status-value)*1%)]",
   tokenStatusCopy:

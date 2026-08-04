@@ -22,6 +22,9 @@ type TokenCoreStatusPanelProps = {
   lang: "zh" | "en";
   metrics: TokenCoreStatusMetric[];
   onOpenCacheDetail: () => void;
+  /** Short scope chip, e.g. last-turn telemetry. */
+  scopeLabel?: string;
+  scopeTitle?: string;
 };
 
 function tokenMetricShortLabel(metric: TokenCoreStatusMetric, lang: "zh" | "en") {
@@ -60,14 +63,25 @@ export function TokenCoreStatusPanel({
   lang,
   metrics,
   onOpenCacheDetail,
+  scopeLabel,
+  scopeTitle,
 }: TokenCoreStatusPanelProps) {
   const panelId = useId();
   const titleId = `${panelId}-title`;
+  const resolvedScopeLabel = scopeLabel
+    ?? (lang === "zh" ? "上轮遥测" : "Last-turn telemetry");
+  const resolvedScopeTitle = scopeTitle
+    ?? (lang === "zh"
+      ? "缓存命中与模型输入来自上一轮会话落库；压缩仅在当前 active 会话可读 runtime；速度仅在流式输出中估算。"
+      : "Cache hit and model input come from the last persisted turn; compression is available only for the active runtime session; speed is estimated only while streaming.");
 
   return (
     <section className={`${routeStyles.leftBlock} ${styles.tokenCompressionCard}`} aria-labelledby={titleId}>
       <div className={routeStyles.sectionHeader}>
         <h3 id={titleId} className={routeStyles.railSectionHeading}>Token</h3>
+        <span className={styles.tokenStatusScope} title={resolvedScopeTitle}>
+          {resolvedScopeLabel}
+        </span>
       </div>
       <div className={styles.tokenStatusVisualGrid} role="list" aria-label={lang === "zh" ? "Token 核心状态" : "Token core status"}>
         {metrics.map((metric) => {

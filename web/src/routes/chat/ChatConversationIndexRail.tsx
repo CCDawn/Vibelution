@@ -63,7 +63,6 @@ export type ChatConversationIndexRailProps = {
   groupTitleDraft: string;
   lang: "zh" | "en";
   locale: string;
-  mentalModelEnabledForNextTurn: boolean;
   numberFormatter: Intl.NumberFormat;
   onCreateAgent: () => void;
   onCreateGroupRoom: () => void;
@@ -145,7 +144,6 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
     groupTitleDraft,
     lang,
     locale,
-    mentalModelEnabledForNextTurn,
     numberFormatter,
     onCreateAgent,
     onCreateGroupRoom,
@@ -275,7 +273,7 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
                   const memberContextUsed = memberContext?.used ?? 0;
                   const memberContextLimit = memberContext?.limit ?? 0;
                   const memberContextPercent = contextUsagePercent(memberContextUsed, memberContextLimit);
-                  const memberMental = mentalModelEnabledForNextTurn ? latestMentalSnapshot(memberDetail?.messages) : undefined;
+                  const memberMental = latestMentalSnapshot(memberDetail?.messages);
                   const memberMentalState = memberMental?.mood?.trim()
                     || memberMental?.cognitiveState?.trim()
                     || (lang === "zh" ? "未记录" : "No snapshot");

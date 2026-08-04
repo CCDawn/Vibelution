@@ -1024,8 +1024,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(llmPayloadTracePanelSource).not.toContain('<p className={styles.blockEyebrow}>LLM</p>');
     expect(routeSource).not.toContain('<p className={styles.blockEyebrow}>{lang === "zh" ? "模式控制" : "Mode controls"}</p>');
     expect(routeSource).not.toContain('<p className={styles.sectionMetaLine}>{mentalCompactLine || mentalSourceLabel}</p>');
-    expect(routeAndIndexRailSource).toContain("content={mentalCompactLine || mentalSourceLabel}");
-    expect(routeAndIndexRailSource).toContain('aria-label={`${mentalStateLabel}. ${mentalCompactLine || mentalSourceLabel}`}');
+    expect(chatStatusRailSource).toContain("content={mentalCompactLine || mentalSourceLabel || mentalSummary}");
+    expect(chatStatusRailSource).toContain('aria-label={`${mentalStateLabel}. ${mentalCompactLine || mentalSourceLabel || mentalSummary}`}');
     expect(routeAndIndexRailSource).toContain("VContextualHint");
     expect(routeAndIndexRailSource).toMatch(/styles\.sectionEyebrowRow|routeStyles\.sectionEyebrowRow/);
     expect(routeAndIndexRailSource).toContain("styles.groupManagementTitleRow");
@@ -1087,8 +1087,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.railSectionHeading).toContain("[font-size:var(--vui-font-xs)]");
     expect(routeStyles.sectionTitle).toContain("[font-size:var(--vui-font-sm)]");
     expect(chatStatusRailSource).toContain('lang === "zh" ? "陪伴" : "Companion"');
-    expect(chatStatusRailSource).toContain('lang === "zh" ? "心智关" : "Mental off"');
-    expect(chatStatusRailSource).toContain("mentalModelEnabledForNextTurn ? (");
+    expect(chatStatusRailSource).toContain('lang === "zh" ? "下轮关" : "Next off"');
+    expect(chatStatusRailSource).toContain("!mentalModelEnabledForNextTurn ? (");
     expect(chatStatusRailSource).toContain('lang === "zh" ? "明细" : "Details"');
   });
 
@@ -1779,12 +1779,15 @@ describe("ChatCodingRoute layout contract", () => {
     expect(submitErrorBlock).toContain("restoreSubmittedDraftIfComposerStillEmpty(current, variables.sessionId, variables.content)");
   });
 
-  it("keeps mental model opt-in explicit and uses it to gate timeline snapshots", () => {
+  it("keeps mental model next-turn opt-in explicit without gating historical snapshots", () => {
     expect(routeSource).toContain("readStoredMentalModelToggle() ?? false");
     expect(routeSource).not.toContain("const defaultEnabled = String(runtime.mentalState?.source");
-    expect(routeSource).toContain("showMentalSnapshots: mentalModelEnabledForNextTurn");
+    expect(routeSource).toContain("showMentalSnapshots: true");
+    expect(routeSource).not.toContain("showMentalSnapshots: mentalModelEnabledForNextTurn");
     expect(routeAndComposerSource).toContain("mentalModelEnabled: mentalModelEnabledForNextTurn");
-    expect(routeAndIndexRailSource).toContain("const memberMental = mentalModelEnabledForNextTurn ? latestMentalSnapshot(memberDetail?.messages) : undefined");
+    expect(routeAndIndexRailSource).toContain("const memberMental = latestMentalSnapshot(memberDetail?.messages)");
+    expect(routeAndIndexRailSource).not.toContain("mentalModelEnabledForNextTurn ? latestMentalSnapshot");
+    expect(routeSource).toContain("latestMentalSnapshot(detail?.messages) ?? runtime?.mentalState");
   });
 
   it("exposes dynamic group creation from the unified conversation list", () => {

@@ -41,6 +41,8 @@ export function buildChatTokenStatusViewModel(options: {
   lastCacheComposition: SessionDetail["lastCacheComposition"] | null | undefined;
   lastContextComposition: SessionDetail["lastContextComposition"] | null | undefined;
   compression: ChatTokenStatusCompression;
+  /** When false, compression is intentionally unavailable (not still loading). */
+  runtimeMatchesSelectedSession?: boolean;
   cache: ChatTokenStatusCacheInputs;
   tokenSpeedTracker: TokenSpeedTrackerState | null | undefined;
   activeSessionId: string | null | undefined;
@@ -61,6 +63,7 @@ export function buildChatTokenStatusViewModel(options: {
     lastCacheComposition,
     lastContextComposition,
     compression,
+    runtimeMatchesSelectedSession = true,
     cache,
     tokenSpeedTracker,
     activeSessionId,
@@ -76,6 +79,13 @@ export function buildChatTokenStatusViewModel(options: {
     formatTime,
     nowMs = Date.now(),
   } = options;
+  const compressionUnavailableForSession = !compression && !runtimeMatchesSelectedSession;
+  const compressionUnavailableLine = compressionUnavailableForSession
+    ? t("compressionScopeInactiveSession")
+    : t("loadingContext");
+  const compressionUnavailableTitle = compressionUnavailableForSession
+    ? t("compressionScopeInactiveSessionHint")
+    : t("loadingContext");
 
   const sessionCacheUsage = detail?.cacheUsage;
   const sessionContextUsage = detail?.contextUsage;
@@ -123,7 +133,7 @@ export function buildChatTokenStatusViewModel(options: {
       : "--";
   const compressionMainLine = compression
     ? `${numberFormatter.format(compression.currentTokens)} / ${numberFormatter.format(compression.effectiveTokenLimit)} · ${compressionCurrentPercent}%`
-    : t("loadingContext");
+    : compressionUnavailableLine;
   const compressionPolicyUnmaterialized = compression?.policyMode === "unmaterialized"
     || compression?.policySource === "migration_required";
   const compressionPolicySourceLine = compression
@@ -132,16 +142,16 @@ export function buildChatTokenStatusViewModel(options: {
       : compression.policySource === "agent_custom"
         ? (lang === "zh" ? "Agent 自定义策略" : "Agent custom policy")
         : (lang === "zh" ? "继承全局策略" : "Inherited global policy")
-    : t("loadingContext");
+    : compressionUnavailableLine;
   const compressionScopeLine = compression
     ? `${t("compressionScopeRuntime")} · ${compressionPolicySourceLine}`
-    : t("loadingContext");
+    : compressionUnavailableLine;
   const compressionModelWindowLine = compression
     ? numberFormatter.format(compression.contextWindowLimit)
     : "--";
   const compressionTitleLine = compression
     ? `${compressionMainLine} · ${compressionScopeLine} · ${t("compressionLimitBasisEffective")} · window ${numberFormatter.format(compression.contextWindowLimit)} · source ${compression.source || "runtime_state"}`
-    : t("loadingContext");
+    : compressionUnavailableTitle;
 
   const modelInputAvailable =
     lastCacheComposition?.calibratedInputTokens != null
@@ -210,6 +220,7 @@ export function buildChatTokenStatusViewModel(options: {
       ? `${numberFormatter.format(modelInputTokens)} / ${numberFormatter.format(modelInputLimitTokens)} · ${modelInputPercent}%`
       : modelInputSourceLine;
   const modelInputTitle = [
+    t("tokenStatusScopeLastTurn"),
     modelInputLimitMissing ? modelInputLimitError : "",
     lang === "zh"
       ? `模型输入 ${numberFormatter.format(modelInputTokens)}`
@@ -261,13 +272,14 @@ export function buildChatTokenStatusViewModel(options: {
     : tokenCompressionStrategyKeywords;
   const compressionThresholdValue = compression
     ? `${numberFormatter.format(compression.currentTokens)} / ${numberFormatter.format(compression.effectiveTokenLimit)}`
-    : t("loadingContext");
+    : compressionUnavailableLine;
   const compressionThresholdMeta = compression
     ? (lang === "zh"
       ? `压缩阈值 ${compressionCurrentPercent}% · ${compressionLevelLabel}`
       : `threshold ${compressionCurrentPercent}% · ${compressionLevelLabel}`)
     : "";
   const tokenStatusCacheTitle = [
+    t("tokenStatusScopeLastTurn"),
     cache.cacheDetailOpenLabel,
     cache.cacheCompositionTitle,
     cacheHitLine,
@@ -345,7 +357,7 @@ export function buildChatTokenStatusViewModel(options: {
       key: "compression",
       label: lang === "zh" ? "压缩状态" : "Compression",
       value: compression ? `${compressionCurrentPercent}%` : "--",
-      meta: compression ? tokenCompressionLevelLabel : t("loadingContext"),
+      meta: compression ? tokenCompressionLevelLabel : compressionUnavailableLine,
       title: tokenStatusCompressionTitle,
       percent: clampPercent(compression ? compressionCurrentPercent : 0),
       tone: "compression",

@@ -41,6 +41,8 @@ const styles: Record<string, string> = {
     "vui-routes-chatcodingroute compactDetailsResizeHandle",
   companionBlock:
     "vui-routes-chatcodingroute companionBlock min-w-0 content-start overflow-visible",
+  companionHeaderMeta:
+    "vui-routes-chatcodingroute companionHeaderMeta flex min-w-0 max-w-full shrink-0 items-center gap-1.5",
   companionCompact:
     "vui-routes-chatcodingroute companionCompact !grid min-w-0 grid-cols-[32px_minmax(0,1fr)] items-start gap-2 rounded-[var(--radius-control)] border border-[color-mix(in_srgb,var(--vui-border-strong)_64%,transparent)] bg-[var(--vui-surface-raised)] px-1.5 py-1.5 shadow-none",
   companionCopy:

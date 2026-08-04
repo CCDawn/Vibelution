@@ -65,6 +65,7 @@ describe("ChatPromptAssemblyInspector", () => {
     expect(html).toContain("<details");
     expect(html).not.toContain("<details open");
     expect(html).toContain("Prompt 装配");
+    expect(html).toContain("上轮装配");
     expect(html).toContain("session_snapshot_v2");
     expect(html).toContain("128 / 512 tokens");
     expect(html).toContain("core_common");

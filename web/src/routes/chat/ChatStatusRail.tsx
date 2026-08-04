@@ -643,6 +643,8 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
           lang={lang}
           metrics={tokenStatusMetrics}
           onOpenCacheDetail={onOpenCacheDetail}
+          scopeLabel={t("tokenStatusScopeLastTurn")}
+          scopeTitle={t("tokenStatusScopeLastTurnHint")}
         />
 
         {promptSnapshot ? (
@@ -667,9 +669,9 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
         <section className={`${routeStyles.leftBlock} ${styles.companionBlock}`}>
           <div className={routeStyles.sectionHeader}>
             <h3 className={routeStyles.railSectionHeading}>{lang === "zh" ? "陪伴" : "Companion"}</h3>
-            {mentalModelEnabledForNextTurn ? (
+            <div className={styles.companionHeaderMeta}>
               <VTooltip
-                content={mentalCompactLine || mentalSourceLabel}
+                content={mentalCompactLine || mentalSourceLabel || mentalSummary}
                 renderTrigger={(tooltipTriggerProps) => {
                   const {
                     children: _triggerChildren,
@@ -688,7 +690,7 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
                         routeStyles.mentalStateBadge,
                         styles[`mentalStateBadge_${mentalCognitiveStateValue}`],
                       ].filter(Boolean).join(" ")}
-                      aria-label={`${mentalStateLabel}. ${mentalCompactLine || mentalSourceLabel}`}
+                      aria-label={`${mentalStateLabel}. ${mentalCompactLine || mentalSourceLabel || mentalSummary}`}
                     >
                       {mentalStateLabel}
                     </VButton>
@@ -697,11 +699,15 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
               >
                 {mentalStateLabel}
               </VTooltip>
-            ) : (
-              <span className={routeStyles.mentalStateBadge} title={mentalSummary}>
-                {lang === "zh" ? "心智关" : "Mental off"}
-              </span>
-            )}
+              {!mentalModelEnabledForNextTurn ? (
+                <span
+                  className={styles.featurePresetScope}
+                  title={t("chatMentalHistoryVisibleHint")}
+                >
+                  {lang === "zh" ? "下轮关" : "Next off"}
+                </span>
+              ) : null}
+            </div>
           </div>
           <div className={styles.companionCompact}>
             <div className={styles.petMiniAvatar} aria-hidden="true">
@@ -740,34 +746,33 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
               className={styles.compactDetailsBody}
               resizeHandleClassName={styles.compactDetailsResizeHandle}
             >
-              {mentalModelEnabledForNextTurn ? (
-                <>
-                  <p className={routeStyles.oneLineValue} title={mentalWhisper}>
-                    <span>{t("mentalWhisper")}</span>
-                    {mentalWhisper}
-                  </p>
-                  <div className={styles.inlineStatGrid}>
-                    <div className={styles.inlineStat}>
-                      <span>{t("state")}</span>
-                      <strong>{mentalCognitiveStateLabel}</strong>
-                    </div>
-                    <div className={styles.inlineStat}>
-                      <span>{t("mentalConfidence")}</span>
-                      <strong>{mentalConfidence}</strong>
-                    </div>
-                    <div className={styles.inlineStat}>
-                      <span>{t("mentalSource")}</span>
-                      <strong>{mentalSourceLabel}</strong>
-                    </div>
-                    <div className={styles.inlineStat}>
-                      <span>{t("mentalLastUpdated")}</span>
-                      <strong title={formatTime(mental?.updatedAt ?? "")}>{mentalRelativeTime}</strong>
-                    </div>
-                  </div>
-                </>
-              ) : (
-                <p className={routeStyles.contextLineCompact}>{mentalSummary}</p>
-              )}
+              <p className={routeStyles.oneLineValue} title={mentalWhisper}>
+                <span>{t("mentalWhisper")}</span>
+                {mentalWhisper}
+              </p>
+              <div className={styles.inlineStatGrid}>
+                <div className={styles.inlineStat}>
+                  <span>{t("state")}</span>
+                  <strong>{mentalCognitiveStateLabel}</strong>
+                </div>
+                <div className={styles.inlineStat}>
+                  <span>{t("mentalConfidence")}</span>
+                  <strong>{mentalConfidence}</strong>
+                </div>
+                <div className={styles.inlineStat}>
+                  <span>{t("mentalSource")}</span>
+                  <strong>{mentalSourceLabel}</strong>
+                </div>
+                <div className={styles.inlineStat}>
+                  <span>{t("mentalLastUpdated")}</span>
+                  <strong title={formatTime(mental?.updatedAt ?? "")}>{mentalRelativeTime}</strong>
+                </div>
+              </div>
+              {!mentalModelEnabledForNextTurn ? (
+                <p className={routeStyles.contextLineCompact} title={t("chatMentalHistoryVisibleHint")}>
+                  {lang === "zh" ? "下轮心智关闭；历史快照仍展示。" : "Next-turn mental is off; historical snapshots still show."}
+                </p>
+              ) : null}
               <div className={styles.inlineMetaList}>
                 <span className={styles.inlineMetaPill}>
                   <span>{t("dailyTokens")}</span>
