@@ -53,6 +53,7 @@ def is_windows_proactor_disconnect_noise(context: dict[str, Any]) -> bool:
 async def web_workbench_lifespan(_: FastAPI):
     loop = asyncio.get_running_loop()
     previous_handler = loop.get_exception_handler()
+    lifespan_started = time.perf_counter()
 
     def handle_loop_exception(current_loop: asyncio.AbstractEventLoop, context: dict[str, Any]) -> None:
         if is_windows_proactor_disconnect_noise(context):
@@ -64,14 +65,17 @@ async def web_workbench_lifespan(_: FastAPI):
 
     loop.set_exception_handler(handle_loop_exception)
     from .services.cli_agent_terminal_service import reconcile_cli_agent_terminal_states_on_startup
+    from .services.session_service import recover_wakeable_agent_inbox_messages_on_startup
 
-    await asyncio.to_thread(reconcile_cli_agent_terminal_states_on_startup, reason="backend_startup")
+    # Do not await terminal reconcile before yield — it blocked /api/health readiness
+    # and stretched launcher open_launcher_action by the full reconcile cost.
+    startup_cli_reconcile_task = asyncio.create_task(
+        asyncio.to_thread(reconcile_cli_agent_terminal_states_on_startup, reason="backend_startup")
+    )
     startup_cache_prewarm_task = asyncio.create_task(prewarm_ui_caches_on_startup())
     startup_catalog_task = asyncio.create_task(
         asyncio.to_thread(initialize_session_catalog_on_startup)
     )
-    from .services.session_service import recover_wakeable_agent_inbox_messages_on_startup
-
     startup_agent_inbox_recovery_task = asyncio.create_task(
         asyncio.to_thread(recover_wakeable_agent_inbox_messages_on_startup)
     )
@@ -89,6 +93,11 @@ async def web_workbench_lifespan(_: FastAPI):
                 }
             )
 
+    startup_cli_reconcile_task.add_done_callback(
+        lambda task: consume_startup_task_result(
+            task, message="CLI agent terminal reconcile failed during startup."
+        )
+    )
     startup_cache_prewarm_task.add_done_callback(
         lambda task: consume_startup_task_result(task, message="UI cache prewarm failed during startup.")
     )
@@ -99,10 +108,34 @@ async def web_workbench_lifespan(_: FastAPI):
         lambda task: consume_startup_task_result(task, message="Agent inbox recovery failed during startup.")
     )
     try:
+        # Emit after tasks are scheduled so open-path diagnosis can see pre-yield cost.
+        try:
+            from .services.runtime_scene_service import record_runtime_scene_event
+
+            record_runtime_scene_event(
+                "backend",
+                "startup",
+                "backend.lifespan.ready_to_serve",
+                message="Workbench lifespan yielded; background startup tasks are running.",
+                outcome="started",
+                fields={
+                    "preYieldMs": max(0, int((time.perf_counter() - lifespan_started) * 1000)),
+                    "backgroundTasks": [
+                        "cli_terminal_reconcile",
+                        "ui_cache_prewarm",
+                        "session_catalog",
+                        "agent_inbox_recovery",
+                    ],
+                },
+                lifecycle=True,
+            )
+        except Exception:
+            pass
         yield
     finally:
         shutdown_session_catalog_on_shutdown()
         for startup_task in (
+            startup_cli_reconcile_task,
             startup_cache_prewarm_task,
             startup_catalog_task,
             startup_agent_inbox_recovery_task,
