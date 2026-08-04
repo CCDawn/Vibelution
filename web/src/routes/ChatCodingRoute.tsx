@@ -207,6 +207,7 @@ import {
   useChatSessionRenameMenu,
   type SessionContextMenuState,
 } from "./chat/useChatSessionRenameMenu";
+import { useChatAgentDirectoryActions } from "./chat/useChatAgentDirectoryActions";
 import { useChatCliAgentTerminal } from "./chat/useChatCliAgentTerminal";
 import { buildChatCacheDetailViewModel } from "./chat/chatCacheDetailModel";
 import { useChatCacheDetailDialog } from "./chat/useChatCacheDetailDialog";
@@ -2672,10 +2673,6 @@ export function ChatCodingRoute() {
     petActionMutation,
   });
 
-  function handleCreateAgent() {
-    setAgentCreateWizardOpen(true);
-  }
-
   const {
     beginRenameSession,
     openSessionAgentConfig,
@@ -2694,114 +2691,31 @@ export function ChatCodingRoute() {
     suppressRenameBlurUntilRef,
   });
 
-  const openAgentContextMenu = useCallback((
-    event: ReactMouseEvent<HTMLElement>,
-    agent: AgentInstance,
-    latestSession: SessionSummary | null,
-  ) => {
-    event.preventDefault();
-    event.stopPropagation();
-    setSessionContextMenu(null);
-    setAgentContextMenu({
-      agent,
-      latestSession,
-      x: event.clientX,
-      y: event.clientY,
-    });
-  }, []);
-
-  const handleOpenAgentLatestSession = useCallback((
-    agent: AgentInstance,
-    latestSession: SessionSummary | null,
-  ) => {
-    setAgentContextMenu(null);
-    if (latestSession?.id) {
-      handleOpenDirectSession(latestSession.id);
-      return;
-    }
-    handleOpenAgent(agent);
-  }, [handleOpenAgent, handleOpenDirectSession]);
-
-  const handleCreateAgentSession = useCallback((agent: AgentInstance) => {
-    const agentId = String(agent.agentId || "").trim();
-    setAgentContextMenu(null);
-    if (!agentId || createSessionMutation.isPending) {
-      return;
-    }
-    setSessionComposerErrors((current) => ({
-      ...current,
-      __sessions__: "",
-    }));
-    createSessionMutation.mutate({ agentId });
-  }, [createSessionMutation, setSessionComposerErrors]);
-
-  const handleOpenAgentConfig = useCallback((
-    agent: AgentInstance,
-    latestSession: SessionSummary | null,
-  ) => {
-    const agentId = String(agent.agentId || "").trim();
-    setAgentContextMenu(null);
-    if (!agentId) {
-      return;
-    }
-    navigate(agentCenterConfigRoute({
-      agentId,
-      pane: "config",
-      returnLabel: "chat",
-      returnTo: latestSession?.id
-        ? `/chat?session=${encodeURIComponent(latestSession.id)}`
-        : "/chat",
-    }));
-  }, [navigate]);
-
-  const handleRenameAgent = useCallback((agent: AgentInstance) => {
-    const agentId = String(agent.agentId || "").trim();
-    setAgentContextMenu(null);
-    if (!agentId || renameAgentMutation.isPending) {
-      return;
-    }
-    const currentName = String(agent.displayName || agent.agentCode || agentId).trim();
-    const requestedName = window.prompt(
-      lang === "zh" ? "输入新的 Agent 名称" : "Enter a new Agent name",
-      currentName,
-    );
-    if (requestedName === null) {
-      return;
-    }
-    const title = requestedName.trim();
-    if (!title) {
-      setSessionComposerErrors((current) => ({
-        ...current,
-        __sessions__: t("renameAgentEmpty"),
-      }));
-      return;
-    }
-    if (title === currentName) {
-      return;
-    }
-    renameAgentMutation.mutate({ agentId, displayName: title });
-  }, [lang, renameAgentMutation, setSessionComposerErrors, t]);
-
-  const handleArchiveAgent = useCallback((agent: AgentInstance) => {
-    const agentId = String(agent.agentId || "").trim();
-    if (!agentId || archiveAgentMutation.isPending) {
-      return;
-    }
-    const agentName = String(agent.displayName || agent.agentCode || agentId).trim();
-    const confirmed = window.confirm(
-      lang === "zh"
-        ? `确认安全归档 ${agentName}？这会将 Agent 移出可用列表及相关绑定，但保留会话、记忆、日志和工作区。`
-        : `Archive ${agentName}? This removes the Agent from active lists and bindings while keeping sessions, memory, logs, and workspace data.`,
-    );
-    if (!confirmed) {
-      return;
-    }
-    setSessionComposerErrors((current) => ({
-      ...current,
-      __sessions__: "",
-    }));
-    archiveAgentMutation.mutate({ agentId });
-  }, [archiveAgentMutation, lang]);
+  const {
+    handleCreateAgent,
+    openAgentContextMenu,
+    handleOpenAgentLatestSession,
+    handleCreateAgentSession,
+    handleOpenAgentConfig,
+    handleRenameAgent,
+    handleArchiveAgent,
+  } = useChatAgentDirectoryActions({
+    lang,
+    navigate,
+    createSessionPending: createSessionMutation.isPending,
+    renameAgentPending: renameAgentMutation.isPending,
+    archiveAgentPending: archiveAgentMutation.isPending,
+    createSession: (variables) => createSessionMutation.mutate(variables),
+    renameAgent: (variables) => renameAgentMutation.mutate(variables),
+    archiveAgent: (variables) => archiveAgentMutation.mutate(variables),
+    openDirectSession: handleOpenDirectSession,
+    openAgent: handleOpenAgent,
+    setAgentContextMenu,
+    setSessionContextMenu,
+    setSessionComposerErrors,
+    setAgentCreateWizardOpen,
+    renameAgentEmptyMessage: t("renameAgentEmpty"),
+  });
 
   const toggleFeaturePreset = useCallback((key: FeaturePresetKey) => {
     setFeaturePresetState((current) => ({
