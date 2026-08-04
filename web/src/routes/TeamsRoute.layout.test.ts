@@ -129,6 +129,7 @@ import teamResearchStageLauncherPanelSource from "./TeamResearchStageLauncherPan
 import teamCommunicationPanelSource from "./teams/TeamCommunicationPanel.tsx?raw";
 import teamResearchBoardPrimarySurfaceSource from "./teams/TeamResearchBoardPrimarySurface.tsx?raw";
 import teamResearchWorkflowPanelHostSource from "./teams/TeamResearchWorkflowPanelHost.tsx?raw";
+import teamResearchWorkflowStageModulesSource from "./teams/TeamResearchWorkflowStageModules.tsx?raw";
 import teamResearchStageStandalonePagePanelSource from "./TeamResearchStageStandalonePagePanel.tsx?raw";
 import teamResearchLoopPanelSource from "./TeamResearchLoopPanel.tsx?raw";
 import teamExperimentPlanningLedgerPanelSource from "./TeamExperimentPlanningLedgerPanel.tsx?raw";
@@ -620,7 +621,9 @@ describe("TeamsRoute layout contract", () => {
   });
 
   it("extracts the research source-collection workspace through a route-local wrapper", () => {
-    expect(routeSource).toContain("TeamsSourceCollectionPanel");
+    // Stage SC panel is composed via TeamResearchWorkflowStageModules (eager import of wrapper).
+    expect(teamResearchWorkflowStageModulesSource).toContain("TeamsSourceCollectionPanel");
+    expect(routeSource).toContain("TeamResearchWorkflowStageModules");
     // Wave 8N: path-scoped secondary packs (shared / research / source-collection).
     expect(routeSource).toContain('from "./teams/teamLazyPanels"');
     expect(teamLazyPanelsSource).toContain('import("./teamSharedPanels")');
@@ -907,11 +910,12 @@ describe("TeamsRoute layout contract", () => {
     expect(teamResearchWorkflowPanelHostSource).toContain("styles.workflowPanel");
     expect(routeSource).toContain("styles.workflowStats");
     expect(routeSource).toContain("TeamWorkflowModelEvidenceStatusPanel");
-    expect(routeSource).toContain("TeamWorkflowCoordinationStatusPanel");
-    expect(routeSource).toContain("TeamWorkflowKnowledgeIngestionStatusPanel");
-    expect(routeSource).toContain("TeamWorkflowCandidateGraphStatusPanel");
-    expect(routeSource).toContain("TeamWorkflowSourceQualityStatusPanel");
-    expect(routeSource).toContain("TeamWorkflowPaperNoteChunkStatusPanel");
+    expect(teamResearchWorkflowStageModulesSource).toContain("TeamWorkflowCoordinationStatusPanel");
+    expect(teamResearchWorkflowStageModulesSource).toContain("TeamWorkflowKnowledgeIngestionStatusPanel");
+    expect(teamResearchWorkflowStageModulesSource).toContain("TeamWorkflowCandidateGraphStatusPanel");
+    expect(teamResearchWorkflowStageModulesSource).toContain("TeamWorkflowSourceQualityStatusPanel");
+    expect(teamResearchWorkflowStageModulesSource).toContain("TeamWorkflowPaperNoteChunkStatusPanel");
+    expect(routeSource).toContain("TeamResearchWorkflowStageModules");
     expect(teamWorkflowStatusPanelsSource).toContain("styles.workflowIngestionPanel");
     expect(teamWorkflowStatusPanelsSource).toContain("styles.workflowIngestionStages");
     expect(teamWorkflowStatusPanelsSource).toContain("styles.workflowIngestionBoundary");
@@ -1988,19 +1992,20 @@ describe("TeamsRoute layout contract", () => {
     expect(teamWorkflowStatusPanelsSource).toContain("只写 CandidateStore");
     expect(routeSource).toContain("TeamSourceCollectionOverviewPanel");
     expect(teamSourceCollectionOverviewPanelSource).toContain("workflowSourceCollectionPanel");
-    expect(routeSource).toContain("资料搜索执行");
+    expect(teamResearchWorkflowStageModulesSource).toContain("资料搜索执行");
     expect(routeSource).toContain("sourceCollectionOverviewSummary");
     expect(routeSource).toContain("sourceCollectionOverviewStats");
     expect(routeSource).toContain("sourceCollectionOverviewPlan");
     expect(routeSource).toContain("TeamSourceCollectionRunSettingsPanel");
-    expect(routeSource).toContain("onDraftChange={(patch) => setSourceCollectionDraft");
+    expect(routeSource).toContain("onDraftChange:");
+    expect(routeSource).toContain("setSourceCollectionDraft");
     expect(teamSourceCollectionRunSettingsPanelSource).toContain("启动搜集批次");
     expect(teamSourceCollectionRunSettingsPanelSource).toContain("workflowSourceCollectionForm");
     expect(teamSourceCollectionRunSettingsPanelSource).toContain("wrapInDetails");
     expect(routeSource).toContain("TeamSourceCollectionFindingDetailsPanel");
     expect(routeSource).toContain("sourceCollectionFindingRunOptions");
     expect(routeSource).toContain("sourceCollectionFindingAssignments");
-    expect(routeSource).toContain("storageActions={renderSourceCollectionStorageActions()}");
+    expect(routeSource).toContain("storageActions: renderSourceCollectionStorageActions()");
     expect(teamSourceCollectionFindingDetailsPanelSource).toContain("最近批次");
     expect(teamSourceCollectionFindingDetailsPanelSource).toContain("查询与分工详情");
     expect(teamSourceCollectionFindingDetailsPanelSource).toContain("assignmentEmptyMessage");
@@ -2017,7 +2022,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("通过复核");
     expect(routeSource).toContain("退回补资料");
     expect(teamWorkflowStatusPanelsSource).toContain("Source extraction Agent");
-    expect(routeSource).toContain("TeamWorkflowCandidatePreviewPanel");
+    expect(teamResearchWorkflowStageModulesSource).toContain("TeamWorkflowCandidatePreviewPanel");
     expect(routeSource).toContain("teamWorkflowCandidatePreviewItems");
     expect(teamWorkflowCandidatePreviewPanelSource).toContain("候选仓库预览");
     expect(teamWorkflowCandidatePreviewPanelSource).toContain("查看完整候选库");

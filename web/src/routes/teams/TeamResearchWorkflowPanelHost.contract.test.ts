@@ -16,10 +16,9 @@ describe("TeamResearchWorkflowPanelHost extraction contract", () => {
     expect(routeSource.match(/\{renderTeamsInspectorSharedPanels\(\)\}/g)?.length).toBe(2);
     // Host JSX appears once inside the helper, not duplicated per shell.
     expect(routeSource.match(/<TeamResearchWorkflowPanelHost[\s\S]*?>/g)?.length).toBe(1);
-    // Stage modules are composed once.
-    expect(routeSource.match(/<TeamsSourceCollectionPanel[\s\S]*?\/>/g)?.length).toBe(1);
-    expect(routeSource.match(/<TeamWorkflowCoordinationStatusPanel[\s\S]*?\/>/g)?.length).toBe(1);
-    expect(routeSource.match(/<TeamWorkflowCandidatePreviewPanel[\s\S]*?\/>/g)?.length).toBe(1);
+    // Stage modules are composed once through TeamResearchWorkflowStageModules.
+    expect(routeSource).toContain("TeamResearchWorkflowStageModules");
+    expect(routeSource.match(/<TeamResearchWorkflowStageModules[\s\S]*?\/>/g)?.length).toBe(1);
   });
 
   it("host owns workflow section chrome, loading, and empty states", () => {
