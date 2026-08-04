@@ -14,8 +14,15 @@ from pathlib import Path, PureWindowsPath
 from typing import Any, Callable
 
 WINDOWS_COMMAND_ENV = "VIBELUTION_CODEX_SANDBOX_COMMAND"
+READ_ONLY_SANDBOX_MODE = "read_only"
 WORKSPACE_WRITE_SANDBOX_MODE = "workspace_write"
 DANGER_FULL_ACCESS_SANDBOX_MODE = "danger_full_access"
+
+_CODEX_SANDBOX_MODE_CONFIG = {
+    READ_ONLY_SANDBOX_MODE: 'sandbox_mode="read-only"',
+    WORKSPACE_WRITE_SANDBOX_MODE: 'sandbox_mode="workspace-write"',
+}
+_WORKSPACE_WRITE_NETWORK_DISABLED_CONFIG = "sandbox_workspace_write.network_access=false"
 
 _WINDOWS_CHAIN_BUILTINS = {
     "cd",
@@ -343,13 +350,25 @@ class ShellAdapter:
         return True, WINDOWS_COMMAND_ENV, label
 
     def _sandbox_prefix(self, executable: str, sandbox_mode: str) -> list[str]:
-        if sandbox_mode == WORKSPACE_WRITE_SANDBOX_MODE:
+        if sandbox_mode in _CODEX_SANDBOX_MODE_CONFIG:
             if not str(executable or "").strip():
                 raise RuntimeError("Codex CLI sandbox executable is required")
             return [executable, "sandbox"]
         if sandbox_mode == DANGER_FULL_ACCESS_SANDBOX_MODE:
             return []
         raise RuntimeError(f"Unsupported Agent sandbox mode: {sandbox_mode}")
+
+    @staticmethod
+    def _sandbox_config_argv(sandbox_mode: str) -> list[str]:
+        config = _CODEX_SANDBOX_MODE_CONFIG.get(sandbox_mode)
+        if not config:
+            return []
+        argv = ["-c", config]
+        if sandbox_mode == WORKSPACE_WRITE_SANDBOX_MODE:
+            # Agent-network permissions are governed outside arbitrary shell
+            # commands. Never inherit a user's global Codex network opt-in.
+            argv.extend(["-c", _WORKSPACE_WRITE_NETWORK_DISABLED_CONFIG])
+        return argv
 
     def _windows_sandbox_argv(
         self,
@@ -360,14 +379,11 @@ class ShellAdapter:
         sandbox_mode: str,
     ) -> list[str]:
         prefix = self._sandbox_prefix(executable, sandbox_mode)
-        if sandbox_mode == WORKSPACE_WRITE_SANDBOX_MODE:
-            prefix += [
-                "-c",
-                'windows.sandbox="unelevated"',
-                "-c",
-                'sandbox_mode="workspace-write"',
-                "--",
-            ]
+        if sandbox_mode != DANGER_FULL_ACCESS_SANDBOX_MODE:
+            # Let the native Codex CLI select its configured Windows sandbox
+            # backend (elevated preferred, unelevated fallback). Vibelution
+            # must not silently weaken that selection.
+            prefix += [*self._sandbox_config_argv(sandbox_mode), "--"]
         command = str(getattr(route, "command", "") or "")
         route_name = str(getattr(route, "route", "") or "")
         direct_argv = _direct_executable_argv(command)
@@ -419,12 +435,8 @@ class ShellAdapter:
         sandbox_mode: str,
     ) -> list[str]:
         prefix = self._sandbox_prefix(executable, sandbox_mode)
-        if sandbox_mode == WORKSPACE_WRITE_SANDBOX_MODE:
-            prefix += [
-                "-c",
-                'sandbox_mode="workspace-write"',
-                "--",
-            ]
+        if sandbox_mode != DANGER_FULL_ACCESS_SANDBOX_MODE:
+            prefix += [*self._sandbox_config_argv(sandbox_mode), "--"]
         command = str(getattr(route, "command", "") or "")
         shell = self._unix_shell_executable_fn()
         return prefix + [shell, "-c", command]

@@ -108,7 +108,7 @@ class _CompletedProcess:
         return "sandbox ok\n", ""
 
 
-def test_execute_uses_native_codex_sandbox_without_shell(monkeypatch, tmp_path):
+def test_unix_execute_uses_native_codex_sandbox_without_host_shell(monkeypatch, tmp_path):
     recorded = {}
 
     monkeypatch.setenv(
@@ -123,28 +123,25 @@ def test_execute_uses_native_codex_sandbox_without_shell(monkeypatch, tmp_path):
         "VIBELUTION_CONFIG_PATH",
         str(tmp_path.parent / "formal-vibelution-config" / "config.toml"),
     )
-    monkeypatch.setattr(shell_tools, "CURRENT_SYSTEM", "windows")
-    monkeypatch.setattr(shell_tools, "IS_WINDOWS", True)
-    monkeypatch.setattr(shell_tools, "IS_UNIX", False)
-    monkeypatch.setattr(codex_cli_sandbox, "_host_platform", lambda: "windows")
+    monkeypatch.setattr(shell_tools, "CURRENT_SYSTEM", "linux")
+    monkeypatch.setattr(shell_tools, "IS_WINDOWS", False)
+    monkeypatch.setattr(shell_tools, "IS_UNIX", True)
+    monkeypatch.setattr(codex_cli_sandbox, "_host_platform", lambda: "linux")
+    monkeypatch.setattr(
+        codex_cli_sandbox,
+        "_current_agent_sandbox_mode",
+        lambda: "workspace_write",
+    )
     monkeypatch.setattr(
         codex_cli_sandbox,
         "_resolve_codex_executable",
         lambda: r"C:\Codex\codex.exe",
     )
-    monkeypatch.setattr(
-        codex_cli_sandbox,
-        "_windows_command_interpreter",
-        lambda: r"C:\Windows\System32\cmd.exe",
-    )
+    monkeypatch.setattr(codex_cli_sandbox, "_unix_shell_executable", lambda: "/bin/bash")
 
     def fake_popen(argv, **kwargs):
         recorded["argv"] = argv
         recorded["kwargs"] = kwargs
-        recorded["sitecustomize_exists"] = (
-            Path(kwargs["env"]["VIBELUTION_CODEX_SANDBOX_TEMP"])
-            / "sitecustomize.py"
-        ).is_file()
         recorded["vibelution_data_home_exists"] = Path(
             kwargs["env"]["VIBELUTION_DATA_HOME"]
         ).is_dir()
@@ -156,7 +153,7 @@ def test_execute_uses_native_codex_sandbox_without_shell(monkeypatch, tmp_path):
     monkeypatch.setattr(codex_cli_sandbox.subprocess, "Popen", fake_popen)
 
     result = codex_cli_sandbox.execute_codex_sandbox_command(
-        command="dir",
+        command="ls",
         timeout=5,
         cwd=str(tmp_path),
     )
@@ -166,15 +163,13 @@ def test_execute_uses_native_codex_sandbox_without_shell(monkeypatch, tmp_path):
         r"C:\Codex\codex.exe",
         "sandbox",
         "-c",
-        'windows.sandbox="unelevated"',
-        "-c",
         'sandbox_mode="workspace-write"',
+        "-c",
+        "sandbox_workspace_write.network_access=false",
         "--",
-        r"C:\Windows\System32\cmd.exe",
-        "/d",
-        "/s",
-        "/c",
-        "dir",
+        "/bin/bash",
+        "-c",
+        "ls",
     ]
     assert recorded["kwargs"]["shell"] is False
     assert recorded["kwargs"]["cwd"] == str(tmp_path)
@@ -182,7 +177,6 @@ def test_execute_uses_native_codex_sandbox_without_shell(monkeypatch, tmp_path):
         str(tmp_path / ".runtime" / "codex-cli")
     )
     assert "--basetemp=.runtime/codex-cli/" in recorded["kwargs"]["env"]["PYTEST_ADDOPTS"]
-    assert recorded["sitecustomize_exists"] is True
     sandbox_temp = Path(recorded["kwargs"]["env"]["VIBELUTION_CODEX_SANDBOX_TEMP"])
     assert Path(recorded["kwargs"]["env"]["VIBELUTION_DATA_HOME"]) == (
         sandbox_temp / "vibelution-data"
@@ -210,6 +204,122 @@ def test_sandbox_runs_rewritten_python_command_without_cmd_quote_roundtrip(monke
 
     assert argv[-3:] == [python_executable, "-c", "print(123)"]
     assert "cmd.exe" not in argv
+
+
+def test_unknown_runtime_sandbox_mode_falls_back_to_read_only(monkeypatch):
+    from core.web.services import agent_directory_service
+
+    monkeypatch.setattr(
+        agent_directory_service,
+        "current_agent_runtime",
+        lambda: {"runtimePermissions": {"sandboxMode": "unrecognized_mode"}},
+    )
+
+    assert codex_cli_sandbox._current_agent_sandbox_mode() == "read_only"
+
+
+def test_unix_read_only_execution_requires_native_codex_binary(monkeypatch, tmp_path):
+    monkeypatch.setattr(codex_cli_sandbox, "_host_platform", lambda: "linux")
+    monkeypatch.setattr(codex_cli_sandbox, "_current_agent_sandbox_mode", lambda: "read_only")
+    monkeypatch.setattr(codex_cli_sandbox, "_resolve_codex_executable", lambda: "")
+
+    result = codex_cli_sandbox.start_codex_sandbox_terminal_session(
+        "dir",
+        cwd=str(tmp_path),
+    )
+
+    assert result["status"] == "failed"
+    assert result["code"] == "CODEX_SANDBOX_UNAVAILABLE"
+
+
+def test_windows_offline_terminal_fails_closed_before_resolving_or_spawning(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setattr(codex_cli_sandbox, "_host_platform", lambda: "windows")
+    monkeypatch.setattr(
+        codex_cli_sandbox,
+        "_current_agent_sandbox_mode",
+        lambda: "workspace_write",
+    )
+    monkeypatch.setattr(
+        codex_cli_sandbox,
+        "_resolve_codex_executable",
+        lambda: (_ for _ in ()).throw(AssertionError("must not resolve Codex")),
+    )
+    monkeypatch.setattr(
+        codex_cli_sandbox.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("must not spawn")),
+    )
+
+    result = codex_cli_sandbox.start_codex_sandbox_terminal_session(
+        "echo must-not-run",
+        cwd=str(tmp_path),
+    )
+
+    assert result["status"] == "failed"
+    assert result["code"] == "SANDBOX_UNVERIFIED"
+    assert "Windows 原生 Codex 离线 shell 隔离未通过运行时验证" in result["message"]
+
+
+def test_windows_offline_execute_fails_closed_before_resolving_or_spawning(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setattr(codex_cli_sandbox, "_host_platform", lambda: "windows")
+    monkeypatch.setattr(
+        codex_cli_sandbox,
+        "_current_agent_sandbox_mode",
+        lambda: "read_only",
+    )
+    monkeypatch.setattr(
+        codex_cli_sandbox,
+        "_resolve_codex_executable",
+        lambda: (_ for _ in ()).throw(AssertionError("must not resolve Codex")),
+    )
+    monkeypatch.setattr(
+        codex_cli_sandbox.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("must not spawn")),
+    )
+
+    result = codex_cli_sandbox.execute_codex_sandbox_command(
+        "echo must-not-run",
+        cwd=str(tmp_path),
+    )
+
+    assert "SANDBOX_UNVERIFIED" in result
+    assert "命令未执行" in result
+
+
+def test_windows_explicit_full_access_is_not_treated_as_offline(monkeypatch, tmp_path):
+    recorded = {}
+    monkeypatch.setattr(codex_cli_sandbox, "_host_platform", lambda: "windows")
+    monkeypatch.setattr(
+        codex_cli_sandbox,
+        "_current_agent_sandbox_mode",
+        lambda: "danger_full_access",
+    )
+    monkeypatch.setattr(
+        codex_cli_sandbox,
+        "_windows_command_interpreter",
+        lambda: r"C:\Windows\System32\cmd.exe",
+    )
+
+    def fake_popen(argv, **kwargs):
+        recorded["argv"] = argv
+        return _CompletedProcess()
+
+    monkeypatch.setattr(codex_cli_sandbox.subprocess, "Popen", fake_popen)
+
+    result = codex_cli_sandbox.execute_codex_sandbox_command(
+        "echo explicit-full-access",
+        cwd=str(tmp_path),
+    )
+
+    assert result == "sandbox ok"
+    assert recorded["argv"][0] == r"C:\Windows\System32\cmd.exe"
 
 
 def test_sandbox_runs_relative_python_command_with_escaped_code_quotes_without_cmd_roundtrip(monkeypatch):
@@ -386,8 +496,7 @@ def test_sandbox_uses_cmd_for_single_native_windows_command(monkeypatch):
     ]
 
 
-def test_execute_passes_native_windows_chain_through_environment(monkeypatch, tmp_path):
-    recorded = {}
+def test_windows_offline_execute_blocks_native_chain_before_environment(monkeypatch, tmp_path):
     command = 'git status --short && rg -n "candidate" .'
     native_commands = {
         "git": r"C:\Program Files\Git\cmd\git.exe",
@@ -397,16 +506,6 @@ def test_execute_passes_native_windows_chain_through_environment(monkeypatch, tm
     monkeypatch.setattr(shell_tools, "IS_WINDOWS", True)
     monkeypatch.setattr(shell_tools, "IS_UNIX", False)
     monkeypatch.setattr(codex_cli_sandbox, "_host_platform", lambda: "windows")
-    monkeypatch.setattr(
-        codex_cli_sandbox,
-        "_resolve_codex_executable",
-        lambda: r"C:\Codex\codex.exe",
-    )
-    monkeypatch.setattr(
-        codex_cli_sandbox,
-        "_windows_command_interpreter",
-        lambda: r"C:\Windows\System32\cmd.exe",
-    )
     monkeypatch.setattr(
         codex_cli_sandbox.shutil,
         "which",
@@ -418,12 +517,11 @@ def test_execute_passes_native_windows_chain_through_environment(monkeypatch, tm
         lambda: r"C:\Program Files\Git\bin\bash.exe",
     )
 
-    def fake_popen(argv, **kwargs):
-        recorded["argv"] = argv
-        recorded["env"] = kwargs["env"]
-        return _CompletedProcess()
-
-    monkeypatch.setattr(codex_cli_sandbox.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(
+        codex_cli_sandbox.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("must not spawn")),
+    )
 
     result = codex_cli_sandbox.execute_codex_sandbox_command(
         command=command,
@@ -431,12 +529,8 @@ def test_execute_passes_native_windows_chain_through_environment(monkeypatch, tm
         cwd=str(tmp_path),
     )
 
-    assert result == "sandbox ok"
-    assert recorded["argv"][-2:] == [
-        "call",
-        "%VIBELUTION_CODEX_SANDBOX_COMMAND%",
-    ]
-    assert recorded["env"]["VIBELUTION_CODEX_SANDBOX_COMMAND"] == command
+    assert "SANDBOX_UNVERIFIED" in result
+    assert "命令未执行" in result
 
 
 def test_sandbox_keeps_unix_and_chain_on_git_bash(monkeypatch):
@@ -514,6 +608,7 @@ def test_sandbox_routes_native_command_with_quoted_and_through_cmd(monkeypatch):
 
 
 def test_execute_fails_closed_when_native_codex_is_missing(monkeypatch, tmp_path):
+    monkeypatch.setattr(codex_cli_sandbox, "_host_platform", lambda: "linux")
     monkeypatch.setattr(codex_cli_sandbox, "_resolve_codex_executable", lambda: "")
 
     def unexpected_popen(*args, **kwargs):
@@ -600,6 +695,7 @@ class _TerminalSessionProcess:
 def test_terminal_session_exec_and_stdin_keep_one_explicit_session_id(monkeypatch, tmp_path):
     process = _TerminalSessionProcess()
     codex_cli_sandbox._SANDBOX_TERMINAL_SESSIONS.clear()
+    monkeypatch.setattr(codex_cli_sandbox, "_host_platform", lambda: "linux")
     monkeypatch.setattr(codex_cli_sandbox, "_resolve_codex_executable", lambda: r"C:\\Codex\\codex.exe")
     monkeypatch.setattr(codex_cli_sandbox.subprocess, "Popen", lambda *args, **kwargs: process)
     monkeypatch.setattr(codex_cli_sandbox.uuid, "uuid4", lambda: SimpleNamespace(hex="session0000000000"))
@@ -764,7 +860,7 @@ def test_execute_terminates_sandbox_when_cancelled(monkeypatch, tmp_path):
     process = _RunningProcess()
     terminated = {"value": False}
 
-    monkeypatch.setattr(codex_cli_sandbox, "_host_platform", lambda: "windows")
+    monkeypatch.setattr(codex_cli_sandbox, "_host_platform", lambda: "linux")
     monkeypatch.setattr(
         codex_cli_sandbox,
         "_resolve_codex_executable",

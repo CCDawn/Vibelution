@@ -698,6 +698,13 @@ def _build_command_args(
         args = [
             executable,
             "exec",
+        ]
+        if sandbox == "workspace-write":
+            # Codex's global config may opt into networking. Vibelution's
+            # agent-network policy is handled separately, so shell execution
+            # must remain explicitly offline.
+            args.extend(["-c", "sandbox_workspace_write.network_access=false"])
+        args.extend([
             "--cd",
             str(cwd),
             "--sandbox",
@@ -705,7 +712,7 @@ def _build_command_args(
             "--ask-for-approval",
             "never",
             "--json",
-        ]
+        ])
         preview = list(args)
         if model_value:
             args.extend(["--model", model_value])

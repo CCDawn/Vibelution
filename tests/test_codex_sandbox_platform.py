@@ -96,7 +96,7 @@ def test_resolver_missing_fails_closed():
 
 
 # ---------------------------------------------------------------------------
-# Sandbox argv: workspace_write and danger_full_access
+# Sandbox argv: read_only, workspace_write and danger_full_access
 # ---------------------------------------------------------------------------
 
 def test_linux_workspace_write_argv_uses_unified_codex_sandbox_surface(monkeypatch):
@@ -112,12 +112,38 @@ def test_linux_workspace_write_argv_uses_unified_codex_sandbox_surface(monkeypat
         "sandbox",
         "-c",
         'sandbox_mode="workspace-write"',
+        "-c",
+        "sandbox_workspace_write.network_access=false",
         "--",
         "/bin/bash",
         "-c",
         "git status",
     ]
     assert "windows.sandbox" not in argv
+
+
+def test_linux_read_only_argv_uses_native_codex_sandbox_without_network_override(monkeypatch):
+    monkeypatch.setattr(codex_cli_sandbox, "_host_platform", lambda: "linux")
+    monkeypatch.setattr(codex_cli_sandbox, "_unix_shell_executable", lambda: "/bin/bash")
+    route = SimpleNamespace(route="bash", command="git status")
+
+    argv = codex_cli_sandbox._sandbox_argv(
+        "/opt/codex-cli/codex",
+        route,
+        sandbox_mode="read_only",
+    )
+
+    assert argv == [
+        "/opt/codex-cli/codex",
+        "sandbox",
+        "-c",
+        'sandbox_mode="read-only"',
+        "--",
+        "/bin/bash",
+        "-c",
+        "git status",
+    ]
+    assert "sandbox_workspace_write.network_access=false" not in argv
 
 
 def test_linux_workspace_write_argv_requires_executable(monkeypatch):
@@ -144,7 +170,7 @@ def test_linux_full_access_argv_uses_unix_shell_without_codex_binary(monkeypatch
     assert "codex" not in " ".join(argv).lower()
 
 
-def test_windows_workspace_write_argv_keeps_windows_sandbox_config(monkeypatch):
+def test_windows_workspace_write_argv_inherits_native_windows_backend_and_disables_network(monkeypatch):
     monkeypatch.setattr(codex_cli_sandbox, "_host_platform", lambda: "windows")
     monkeypatch.setattr(
         codex_cli_sandbox,
@@ -155,8 +181,10 @@ def test_windows_workspace_write_argv_keeps_windows_sandbox_config(monkeypatch):
 
     argv = codex_cli_sandbox._sandbox_argv(r"C:\Codex\codex.exe", route)
 
-    assert 'windows.sandbox="unelevated"' in argv
+    assert 'windows.sandbox="unelevated"' not in argv
+    assert 'windows.sandbox="elevated"' not in argv
     assert 'sandbox_mode="workspace-write"' in argv
+    assert "sandbox_workspace_write.network_access=false" in argv
     assert argv[-5:] == [
         r"C:\Windows\System32\cmd.exe",
         "/d",
@@ -302,7 +330,7 @@ def test_linux_sandbox_temp_dir_is_0700(monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Process start/termination: no console on Windows, no taskkill on POSIX
+# Process start/termination: no console and no taskkill
 # ---------------------------------------------------------------------------
 
 def test_sandbox_popen_kwargs_windows_keeps_no_window_flags(monkeypatch):
@@ -326,6 +354,49 @@ def test_sandbox_popen_kwargs_posix_uses_own_process_group(monkeypatch):
     kwargs = process_module.sandbox_popen_kwargs()
 
     assert kwargs == {"start_new_session": True}
+
+
+def test_windows_terminate_process_tree_uses_project_descendant_terminator(monkeypatch):
+    calls = []
+
+    class _Process:
+        pid = 4242
+
+        def __init__(self):
+            self._returncode = None
+            self.terminated = False
+
+        def poll(self):
+            return self._returncode
+
+        def terminate(self):
+            self.terminated = True
+            self._returncode = -15
+
+        def kill(self):
+            self._returncode = -9
+
+        def wait(self, timeout=None):
+            return self._returncode
+
+    process = _Process()
+    monkeypatch.setattr(
+        process_module,
+        "terminate_process_descendants",
+        lambda pid, timeout_seconds: calls.append((pid, timeout_seconds)),
+    )
+    monkeypatch.setattr(
+        process_module.subprocess,
+        "run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("taskkill subprocess fallback must not be used")
+        ),
+    )
+
+    process_module.terminate_process_tree(process, platform="windows")
+
+    assert calls == [(4242, 1.0)]
+    assert process.terminated is True
 
 
 def test_posix_terminate_process_tree_never_invokes_taskkill(monkeypatch):

@@ -1,10 +1,4 @@
-"""Cross-platform sandbox process start and termination.
-
-Windows keeps the console-free background behavior (``taskkill`` via
-``CREATE_NO_WINDOW``); POSIX never calls ``taskkill`` and instead uses the
-existing descendant-termination mechanism plus the sandbox's own process group
-(``start_new_session``) for timeout, cancel and terminal-session cleanup.
-"""
+"""Cross-platform sandbox process start and termination without console shells."""
 
 from __future__ import annotations
 
@@ -14,6 +8,7 @@ import subprocess
 from typing import Any
 
 from core.infrastructure.codex_sandbox.platform import host_platform
+from core.runtime_manager.process_inventory import terminate_process_descendants
 from scripts.windowless_subprocess import no_window_subprocess_kwargs
 
 
@@ -38,26 +33,19 @@ def terminate_process_tree(process: Any, *, platform: str | None = None) -> None
 
 
 def _terminate_windows_tree(process: Any) -> None:
+    pid = int(getattr(process, "pid", 0) or 0)
+    if pid > 0:
+        terminate_process_descendants(pid, timeout_seconds=1.0)
     try:
-        subprocess.run(
-            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=5,
-            check=False,
-            **no_window_subprocess_kwargs(),
-        )
-    except Exception:
-        try:
-            process.terminate()
-        except Exception:
-            pass
+        process.terminate()
+    except (AttributeError, OSError):
+        pass
     try:
         process.wait(timeout=2)
-    except Exception:
+    except (OSError, subprocess.TimeoutExpired):
         try:
             process.kill()
-        except Exception:
+        except (AttributeError, OSError):
             pass
 
 

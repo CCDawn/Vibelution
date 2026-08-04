@@ -45,8 +45,19 @@ _POLL_INTERVAL_SECONDS = 0.2
 _TERMINAL_SESSION_MAX_OUTPUT_CHARS = 120_000
 _TERMINAL_SESSION_TTL_SECONDS = 15 * 60
 _TERMINAL_SESSION_MAX_LIFETIME_SECONDS = 15 * 60
+_READ_ONLY_SANDBOX_MODE = "read_only"
 _WORKSPACE_WRITE_SANDBOX_MODE = "workspace_write"
 _DANGER_FULL_ACCESS_SANDBOX_MODE = "danger_full_access"
+_CODEX_SANDBOX_MODES = {
+    _READ_ONLY_SANDBOX_MODE,
+    _WORKSPACE_WRITE_SANDBOX_MODE,
+}
+_WINDOWS_OFFLINE_SHELL_BLOCK_CODE = "SANDBOX_UNVERIFIED"
+_WINDOWS_OFFLINE_SHELL_BLOCK_MESSAGE = (
+    "Windows 原生 Codex 离线 shell 隔离未通过运行时验证；"
+    "为避免命令在可访问外网的错误边界中执行，已拒绝本次直接 shell 命令。"
+    "请改用受控工具，或由显式 danger_full_access 权限执行。"
+)
 
 
 def _current_agent_sandbox_mode() -> str:
@@ -63,10 +74,25 @@ def _current_agent_sandbox_mode() -> str:
         and isinstance(runtime.get("runtimePermissions"), dict)
         else {}
     )
-    sandbox_mode = str(permissions.get("sandboxMode") or "").strip()
-    if sandbox_mode == _DANGER_FULL_ACCESS_SANDBOX_MODE:
+    sandbox_mode = str(permissions.get("sandboxMode") or "").strip().lower()
+    if sandbox_mode in _CODEX_SANDBOX_MODES | {_DANGER_FULL_ACCESS_SANDBOX_MODE}:
         return sandbox_mode
-    return _WORKSPACE_WRITE_SANDBOX_MODE
+    return _READ_ONLY_SANDBOX_MODE
+
+
+def _sandbox_requires_codex(sandbox_mode: str) -> bool:
+    return sandbox_mode != _DANGER_FULL_ACCESS_SANDBOX_MODE
+
+
+def _windows_offline_shell_is_unverified(sandbox_mode: str) -> bool:
+    """Fail closed until native Windows offline containment is runtime-proven.
+
+    A configured policy or an ``CodexSandboxOffline`` identity alone is not
+    sufficient evidence: the direct shell boundary must also block outbound
+    traffic. Networked work therefore stays on governed tools instead of an
+    arbitrary local shell while the native boundary is unverifiable.
+    """
+    return _host_platform() == "windows" and _sandbox_requires_codex(sandbox_mode)
 
 
 def _log_outcome(
@@ -528,12 +554,14 @@ def start_codex_sandbox_terminal_session(
     if route.blocked:
         _log_outcome(command_hash, "blocked", reason=route.reason or "shell_route")
         return _terminal_error_payload("SHELL_ROUTE_BLOCKED", str(route.error or "命令路由被拦截。"))
-    executable = (
-        _resolve_codex_executable()
-        if sandbox_mode == _WORKSPACE_WRITE_SANDBOX_MODE
-        else ""
-    )
-    if sandbox_mode == _WORKSPACE_WRITE_SANDBOX_MODE and not executable:
+    if _windows_offline_shell_is_unverified(sandbox_mode):
+        _log_outcome(command_hash, "blocked", reason="windows_offline_shell_unverified")
+        return _terminal_error_payload(
+            _WINDOWS_OFFLINE_SHELL_BLOCK_CODE,
+            _WINDOWS_OFFLINE_SHELL_BLOCK_MESSAGE,
+        )
+    executable = _resolve_codex_executable() if _sandbox_requires_codex(sandbox_mode) else ""
+    if _sandbox_requires_codex(sandbox_mode) and not executable:
         _log_outcome(command_hash, "unavailable", reason="codex_executable_missing")
         return _terminal_error_payload("CODEX_SANDBOX_UNAVAILABLE", "未找到原生 Codex CLI 可执行文件（codex.exe / codex）；命令未执行。")
     timeout_seconds = _clamp_terminal_timeout(timeout, default=60, minimum=1, maximum=_TERMINAL_SESSION_MAX_LIFETIME_SECONDS)
@@ -685,13 +713,15 @@ def execute_codex_sandbox_command(
     if route.blocked:
         _log_outcome(command_hash, "blocked", reason=route.reason or "shell_route")
         return route.error
+    if _windows_offline_shell_is_unverified(sandbox_mode):
+        _log_outcome(command_hash, "blocked", reason="windows_offline_shell_unverified")
+        return (
+            f"[安全拦截 | {_WINDOWS_OFFLINE_SHELL_BLOCK_CODE}] "
+            f"{_WINDOWS_OFFLINE_SHELL_BLOCK_MESSAGE}\n命令未执行，也未回退到非沙盒模式。"
+        )
 
-    executable = (
-        _resolve_codex_executable()
-        if sandbox_mode == _WORKSPACE_WRITE_SANDBOX_MODE
-        else ""
-    )
-    if sandbox_mode == _WORKSPACE_WRITE_SANDBOX_MODE and not executable:
+    executable = _resolve_codex_executable() if _sandbox_requires_codex(sandbox_mode) else ""
+    if _sandbox_requires_codex(sandbox_mode) and not executable:
         _log_outcome(command_hash, "unavailable", reason="codex_executable_missing")
         return (
             "[错误] Codex CLI 沙盒不可用：未找到原生 Codex CLI（codex.exe / codex）。"
@@ -715,6 +745,7 @@ def execute_codex_sandbox_command(
     _debug_logger.info(
         f"[Codex CLI 沙盒] 启动 commandHash={command_hash} "
         f"route={route_label} sandboxMode={sandbox_mode} "
+        f"networkPolicy={'host' if sandbox_mode == _DANGER_FULL_ACCESS_SANDBOX_MODE else 'disabled'} "
         f"cwd={workdir} timeout={timeout_seconds}s"
     )
     started_at = time.monotonic()
