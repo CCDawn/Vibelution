@@ -67,10 +67,10 @@ export function buildConfigApplyRequestPayload(options: {
 
   if (applyBaseConfig) {
     return buildConfigApplyPayload({
-      draftConfig,
+      draftConfig: draftConfig ?? null,
       draftMeta,
       baseHash: applyBaseHash,
-      baseConfig: applyBaseConfig,
+      baseConfig: applyBaseConfig ?? null,
       editorText,
       hasEditorChanges,
       editorSections,
@@ -81,10 +81,10 @@ export function buildConfigApplyRequestPayload(options: {
   // Snapshot apply: server checks baseHash against disk and replaces with full draft.
   return {
     publicConfig: buildConfigApplyPayload({
-      draftConfig,
+      draftConfig: draftConfig ?? null,
       draftMeta,
       baseHash: applyBaseHash,
-      baseConfig: draftConfig,
+      baseConfig: draftConfig ?? null,
       editorText,
       hasEditorChanges,
       editorSections,
