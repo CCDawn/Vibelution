@@ -29,4 +29,14 @@ describe("VPopover contract", () => {
     expect(shell).not.toContain("utilityMenuRef");
     expect(shell).not.toContain("onMouseEnter={() => setUtilityOpen(true)}");
   });
+
+  it("AppShell active-work details use VPopover instead of CSS hover panel", () => {
+    const shell = readFileSync(resolve(vuiRoot, "../../app/AppShell.tsx"), "utf8");
+    const styles = readFileSync(resolve(vuiRoot, "../../app/AppShell.styles.ts"), "utf8");
+    expect(shell).toContain('data-vui="active-work-popover"');
+    expect(shell).toContain("contentClassName={styles.activeWorkPopoverContent}");
+    expect(shell).toContain("activeWorkDetailPanel");
+    expect(styles).toContain("activeWorkPopoverContent");
+    expect(styles).not.toContain("[&:hover_.activeWorkDetailPanel]:visible");
+  });
 });

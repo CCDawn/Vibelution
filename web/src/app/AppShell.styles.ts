@@ -30,7 +30,7 @@ const styles = {
   actionIconButton:
     `vui-app-appshell actionIconButton ${vuiControlIconSmClass}`,
   activeWorkChip:
-    `vui-app-appshell activeWorkChip min-w-0 ${vuiControlPillClass} ${vuiStateSelectedRowClass} relative h-8 min-h-8 flex-nowrap overflow-visible gap-1.5 whitespace-nowrap [&:focus-within_.activeWorkDetailPanel]:visible [&:focus-within_.activeWorkDetailPanel]:pointer-events-auto [&:focus-within_.activeWorkDetailPanel]:translate-y-0 [&:focus-within_.activeWorkDetailPanel]:opacity-100 [&:hover_.activeWorkDetailPanel]:visible [&:hover_.activeWorkDetailPanel]:pointer-events-auto [&:hover_.activeWorkDetailPanel]:translate-y-0 [&:hover_.activeWorkDetailPanel]:opacity-100`,
+    `vui-app-appshell activeWorkChip min-w-0 ${vuiControlPillClass} ${vuiStateSelectedRowClass} h-8 min-h-8 flex-nowrap gap-1.5 whitespace-nowrap`,
   activeWorkDetailCopy: `vui-app-appshell activeWorkDetailCopy min-w-0 ${vuiGlassPanelClass} p-2 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] ${vuiStateSelectedRowClass}`,
   activeWorkDetailHeader:
     "vui-app-appshell activeWorkDetailHeader min-w-0 flex flex-wrap items-center gap-1.5 border-b border-[color-mix(in_srgb,var(--accent-cool)_28%,transparent)] px-0.5 pb-1 text-[var(--accent-cool)]",
@@ -38,7 +38,7 @@ const styles = {
   activeWorkDetailList: `vui-app-appshell activeWorkDetailList min-w-0 ${vuiGlassPanelClass} p-2 grid min-h-0 content-start gap-1.5 overflow-auto ${vuiStateSelectedRowClass} max-h-[260px] overflow-y-auto`,
   activeWorkDetailLink:
     "vui-app-appshell activeWorkDetailLink block min-w-0 rounded-[var(--radius-control)] text-inherit no-underline outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-cool)_45%,transparent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--vui-surface-panel)]",
-  activeWorkDetailPanel: `vui-app-appshell activeWorkDetailPanel min-w-0 ${vuiGlassPanelClass} p-2 ${vuiStateSelectedRowClass} invisible pointer-events-none absolute left-0 top-[calc(100%+8px)] z-[80] w-[min(480px,calc(100vw-2rem))] translate-y-1 opacity-0 transition-[opacity,transform,visibility] duration-150`,
+  activeWorkDetailPanel: `vui-app-appshell activeWorkDetailPanel min-w-0 ${vuiGlassPanelClass} p-2 ${vuiStateSelectedRowClass} grid gap-2`,
   activeWorkDetailTitle: `vui-app-appshell activeWorkDetailTitle min-w-0 ${vuiGlassPanelClass} p-2 [font-size:var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)] ${vuiStateSelectedRowClass} grid grid-cols-[minmax(0,1fr)_max-content] items-center gap-2`,
   activeWorkInlineDetails:
     "vui-app-appshell activeWorkInlineDetails min-w-0",
@@ -48,6 +48,8 @@ const styles = {
     `vui-app-appshell activeWorkKicker min-w-0 ${vuiStateSelectedRowClass}`,
   activeWorkMore:
     `vui-app-appshell activeWorkMore min-w-0 ${vuiStateSelectedRowClass}`,
+  activeWorkPopoverContent:
+    "vui-app-appshell activeWorkPopoverContent z-[95] w-[min(480px,calc(100vw-2rem))] max-w-[min(480px,calc(100vw-2rem))] border-[var(--border-strong)] bg-[var(--shell-panel)] p-0 shadow-[var(--vui-shadow-soft)]",
   activeWorkStatus:
     `vui-app-appshell activeWorkStatus min-w-0 ${vuiStateSelectedRowClass}`,
   activeWorkSummary: `vui-app-appshell activeWorkSummary min-w-0 ${vuiGlassPanelClass} p-2 ${vuiStateSelectedRowClass}`,

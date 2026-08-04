@@ -983,10 +983,13 @@ describe("AgentsRoute layout contract", () => {
     expect(createPanelStyles).toHaveProperty("wizardSteps");
     expect(createPanelStyles).toHaveProperty("createSummary");
     expect(agentCreateDialogSource).toContain("<AgentCreatePanel");
-    expect(agentCreateDialogSource).toContain('role="dialog"');
-    expect(agentCreateDialogSource).toContain("createPortal(");
-    expect(agentCreateDialogStyles.overlay).toContain("fixed inset-0");
-    expect(agentCreateDialogStyles.dialog).toContain("min(880px");
+    expect(agentCreateDialogSource).toContain("<VDialog");
+    expect(agentCreateDialogSource).toContain("onOpenChange={handleOpenChange}");
+    expect(agentCreateDialogSource).toContain("contentClassName={styles.dialogContent}");
+    expect(agentCreateDialogSource).not.toContain("createPortal(");
+    expect(agentCreateDialogSource).not.toContain('role="dialog"');
+    expect(agentCreateDialogStyles.dialogContent).toContain("min(880px");
+    expect(agentCreateDialogStyles.dialogContent).toContain("100dvh");
     expect(listWorkspacePanelSource).not.toContain("AgentCreatePanel");
     expect(listWorkspacePanelSource).not.toContain("createOpen");
     expect(workspaceLayoutPanelSource).not.toContain("AgentCreatePanel");

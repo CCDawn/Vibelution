@@ -232,6 +232,8 @@ describe("workbench layout gate (Wave 5)", () => {
     expect(wizardDialog).not.toContain("usePersistedPaneHeight");
     expect(wizardDialog).not.toContain("PersistedHeightListShell");
     expect(wizardStyles).toContain("100dvh");
+    expect(wizardDialog).toContain("VDialog");
+    expect(wizardDialog).not.toContain("createPortal(");
     expect(policy).toContain("viewport");
     expect(policy).toContain("usePersistedPaneHeight");
   });

@@ -444,19 +444,21 @@ describe("AppShell layout contract", () => {
     expect(utilityMenuStylesSource).toContain("gitSignalGrid");
   });
 
-  it("keeps active work details out of the primary top bar chip", () => {
+  it("keeps active work details in a click VPopover off the primary chip", () => {
     expect(shellSource).toContain("activeWorkDetailPanel");
     expect(shellSource).toContain("activeWorkIndicator.items.map");
     expect(shellSource).toContain("<Link className={styles.activeWorkDetailLink} to={item.href}");
+    expect(shellSource).toContain("contentClassName={styles.activeWorkPopoverContent}");
+    expect(shellSource).toContain('data-vui="active-work-popover"');
     expect(shellSource).not.toContain("className={styles.activeWorkSummary}");
+    expect(shellSource).not.toContain("[&:hover_.activeWorkDetailPanel]:visible");
 
     expect(styles.activeWorkDetailPanel).toBeTypeOf("string");
-    expect(styles.activeWorkChip).toContain("relative");
-    expect(styles.activeWorkChip).toContain("overflow-visible");
-    expect(styles.activeWorkChip).toContain("[&:hover_.activeWorkDetailPanel]:visible");
-    expect(styles.activeWorkDetailPanel).toContain("absolute");
-    expect(styles.activeWorkDetailPanel).toContain("invisible");
-    expect(styles.activeWorkDetailPanel).toContain("z-[80]");
+    expect(styles.activeWorkPopoverContent).toContain("w-[min(480px");
+    expect(styles.activeWorkChip).toContain("h-8");
+    expect(styles.activeWorkChip).not.toContain("[&:hover_.activeWorkDetailPanel]:visible");
+    expect(styles.activeWorkDetailPanel).not.toContain("absolute");
+    expect(styles.activeWorkDetailPanel).not.toContain("invisible");
     expect(styles.activeWorkDetailItem).toBeTypeOf("string");
     expect(styles.activeWorkDetailLink).toContain("block");
     expect(styles.activeWorkDetailLink).toContain("focus-visible:ring-2");

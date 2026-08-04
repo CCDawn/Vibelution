@@ -2198,31 +2198,44 @@ export function AppShell() {
           </div>
           <AppShellTopClock lang={lang} systemTimeLabel={t("systemTime")} />
           {activeWorkIndicator ? (
-            <div
-              className={styles.activeWorkChip}
-              tabIndex={0}
-              title={activeWorkDetailsTitle}
-              aria-label={`${t("activeWorkNow")}: ${activeWorkIndicator.label} ${statusLabel(activeWorkIndicator.status)}${
-                activeWorkIndicator.count > 1 ? `, ${activeWorkIndicator.count} ${t("activeWorkCountSuffix")}` : ""
-              }. ${activeWorkDetailsTitle}`}
-            >
-              <span className={`${styles.statusDot} ${styles[`status_${activeWorkIndicator.tone}`]}`} />
-              <span className={styles.activeWorkKicker}>{t("activeWorkNow")}</span>
-              <strong>{activeWorkIndicator.label}</strong>
-              <span className={styles.activeWorkStatus}>{statusLabel(activeWorkIndicator.status)}</span>
-              <span className={styles.activeWorkInlineDetails} aria-hidden="true">
-                {activeWorkIndicator.items.slice(0, 2).map((item) => (
-                  <span key={`${item.kind}-${item.runId || item.status}-inline`} className={styles.activeWorkInlineItem}>
-                    <span>{item.summary}</span>
+            <VPopover
+              align="start"
+              side="bottom"
+              sideOffset={8}
+              aria-label={t("activeWorkDetails")}
+              contentClassName={styles.activeWorkPopoverContent}
+              data-vui="active-work-popover"
+              trigger={(
+                <VButton
+                  type="button"
+                  variant="secondary"
+                  className={styles.activeWorkChip}
+                  title={activeWorkDetailsTitle}
+                  aria-haspopup="dialog"
+                  aria-label={`${t("activeWorkNow")}: ${activeWorkIndicator.label} ${statusLabel(activeWorkIndicator.status)}${
+                    activeWorkIndicator.count > 1 ? `, ${activeWorkIndicator.count} ${t("activeWorkCountSuffix")}` : ""
+                  }. ${activeWorkDetailsTitle}`}
+                >
+                  <span className={`${styles.statusDot} ${styles[`status_${activeWorkIndicator.tone}`]}`} />
+                  <span className={styles.activeWorkKicker}>{t("activeWorkNow")}</span>
+                  <strong>{activeWorkIndicator.label}</strong>
+                  <span className={styles.activeWorkStatus}>{statusLabel(activeWorkIndicator.status)}</span>
+                  <span className={styles.activeWorkInlineDetails} aria-hidden="true">
+                    {activeWorkIndicator.items.slice(0, 2).map((item) => (
+                      <span key={`${item.kind}-${item.runId || item.status}-inline`} className={styles.activeWorkInlineItem}>
+                        <span>{item.summary}</span>
+                      </span>
+                    ))}
                   </span>
-                ))}
-              </span>
-              {activeWorkIndicator.overflowCount > 0 ? (
-                <span className={styles.activeWorkMore}>
-                  {t("activeWorkMorePrefix")}
-                  {activeWorkIndicator.overflowCount}
-                </span>
-              ) : null}
+                  {activeWorkIndicator.overflowCount > 0 ? (
+                    <span className={styles.activeWorkMore}>
+                      {t("activeWorkMorePrefix")}
+                      {activeWorkIndicator.overflowCount}
+                    </span>
+                  ) : null}
+                </VButton>
+              )}
+            >
               <div className={styles.activeWorkDetailPanel} role="note">
                 <div className={styles.activeWorkDetailHeader}>
                   <strong>{t("activeWorkDetails")}</strong>
@@ -2255,7 +2268,7 @@ export function AppShell() {
                   })}
                 </ul>
               </div>
-            </div>
+            </VPopover>
           ) : null}
         </div>
 
