@@ -14,7 +14,7 @@
 
 | Surface | Symptom | Target recipe |
 | --- | --- | --- |
-| `TeamsRoute.tsx` | ~6.4k lines; shell recipes + extracted communication/workflow/board-primary hosts + **grouped stage-launcher props** (`researchStageLauncherProps.ts`). Next: optional SC module composition extract; shrink stage-launcher *internal* prop consumption via domain adapters. | keep recipes; continue module extract |
+| `TeamsRoute.tsx` | ~6.3k lines; shell recipes + extracted hosts + **grouped launcher props** + **`TeamResearchWorkflowStageModules`**. Next: extract SC inject render helpers / stage-launcher internal adapters; optional split of remaining fat render* bodies. | keep recipes; continue module extract |
 | Agents workspace | **Migrated** outer shell to `VListDetailPage` + layoutId (`AgentWorkspaceLayoutPanel`) | keep product/agent-management panels; optional inspector UX polish |
 | Chat coding | Dual-pane domain math (OK) but chrome drift risk | Keep domain layout; enforce layoutId + regions only |
 | Memory graph | **Migrated** `MemoryGraphViewPanel` → `VCanvasWorkbenchPage` | height list still uses PaneHeightResizeHandle |
