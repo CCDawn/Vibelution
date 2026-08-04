@@ -1,0 +1,33 @@
+# VUI Structure Debt Backlog
+
+> Prep document for cleanup. Not a second design system. Authority: root `AGENTS.md` + `docs/standards/development-standard.md` §9.1 + this folder’s `README.md`.
+
+## Goals
+
+- New pages start from a **page recipe**, not a custom flex shell.
+- Visual coordination comes from **tokens + `pageRecipeClasses`**, not one-off CSS.
+- Fat routes become **orchestrators**; domain logic lives in sibling modules.
+
+## Inventory (current hotspots)
+
+| Surface | Symptom | Target recipe |
+| --- | --- | --- |
+| `TeamsRoute.tsx` | 6k+ lines; shell + research + canvas + memory mixed | `VBoardWorkbenchPage` / `VCanvasWorkbenchPage` + `routes/teams/*` |
+| Agents workspace | Custom three-pane remnants | `VListDetailPage` + product/agent-management |
+| Chat coding | Dual-pane domain math (OK) but chrome drift risk | Keep domain layout; enforce layoutId + regions only |
+| Memory graph | Graph + inspector hand shells | `VCanvasWorkbenchPage` |
+| Evolution queues | Multiple width rails | `VListDetailPage` / `VDenseOpsPage` + height registry |
+
+## Cleanup playbook (per surface)
+
+1. Identify shell vs domain logic vs styles.
+2. Replace shell with a recipe (`fill` + `layoutId`).
+3. Move domain blocks into `routes/<domain>/` or `vui/product/`.
+4. Delete dead style keys and private resize handlers.
+5. Run: `vuiShadcnRouteContract`, route layout tests, `npm --prefix web run build`.
+
+## Non-goals
+
+- Do not reintroduce HeroUI.
+- Do not put business logic in `renderers/shadcn`.
+- Do not add a second page-template folder outside VUI.

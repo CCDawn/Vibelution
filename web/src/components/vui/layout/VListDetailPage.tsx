@@ -1,8 +1,10 @@
 import { type ComponentPropsWithoutRef, type ReactNode } from "react";
 
+import { cn } from "../lib/cn";
 import { VRouteHeader } from "./VRouteHeader";
 import { VSplitWorkspace, type VSplitWorkspaceResizeConfig } from "./VSplitWorkspace";
 import { VWorkbenchPage } from "./VWorkbenchPage";
+import { VUI_PAGE_BODY_FILL_CLASS } from "./pageRecipeClasses";
 
 export type VListDetailPageProps = Omit<ComponentPropsWithoutRef<"section">, "children"> & {
   /** Page landmark label. */
@@ -36,6 +38,8 @@ export type VListDetailPageProps = Omit<ComponentPropsWithoutRef<"section">, "ch
   layoutId?: string;
   /** Optional min/max/default overrides for resizable panes. */
   resize?: Omit<VSplitWorkspaceResizeConfig, "layoutId">;
+  /** Fill viewport height (default true). */
+  fill?: boolean;
   className?: string;
 };
 
@@ -58,6 +62,7 @@ export function VListDetailPage({
   columnsClassName,
   layoutId,
   resize,
+  fill = true,
   className,
   ...props
 }: VListDetailPageProps) {
@@ -66,7 +71,13 @@ export function VListDetailPage({
     : false;
 
   return (
-    <VWorkbenchPage ariaLabel={ariaLabel} className={className} data-vui-recipe="list-detail-page" {...props}>
+    <VWorkbenchPage
+      ariaLabel={ariaLabel}
+      className={className}
+      data-vui-recipe="list-detail-page"
+      fill={fill}
+      {...props}
+    >
       <VRouteHeader
         className={headerClassName}
         eyebrow={eyebrow}
@@ -74,15 +85,21 @@ export function VListDetailPage({
         meta={meta}
         actions={actions}
       />
-      {toolbar ? <div data-vui="list-detail-toolbar">{toolbar}</div> : null}
-      <VSplitWorkspace
-        className={workspaceClassName}
-        columnsClassName={columnsClassName}
-        sidebar={list}
-        main={detail}
-        aside={aside}
-        resize={resizeConfig}
-      />
+      {toolbar ? (
+        <div data-vui="list-detail-toolbar" className="min-w-0 shrink-0">
+          {toolbar}
+        </div>
+      ) : null}
+      <div className={fill ? VUI_PAGE_BODY_FILL_CLASS : "min-h-0 min-w-0"}>
+        <VSplitWorkspace
+          className={cn(fill ? "h-full min-h-0" : undefined, workspaceClassName)}
+          columnsClassName={columnsClassName}
+          sidebar={list}
+          main={detail}
+          aside={aside}
+          resize={resizeConfig}
+        />
+      </div>
     </VWorkbenchPage>
   );
 }

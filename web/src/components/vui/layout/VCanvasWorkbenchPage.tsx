@@ -1,0 +1,142 @@
+import { type ComponentPropsWithoutRef, type ReactNode } from "react";
+
+import { cn } from "../lib/cn";
+import { VRouteHeader } from "./VRouteHeader";
+import { VSplitWorkspace, type VSplitWorkspaceResizeConfig } from "./VSplitWorkspace";
+import { VWorkbenchPage } from "./VWorkbenchPage";
+import {
+  VUI_CANVAS_SURFACE_CLASS,
+  VUI_PAGE_BODY_FILL_CLASS,
+  VUI_PAGE_TOOLBAR_STRIP_CLASS,
+  VUI_RAIL_SURFACE_CLASS,
+  VUI_WORKBENCH_SURFACE_CLASS,
+} from "./pageRecipeClasses";
+
+export type VCanvasWorkbenchPageProps = Omit<ComponentPropsWithoutRef<"section">, "children"> & {
+  ariaLabel?: string;
+  eyebrow?: ReactNode;
+  title: ReactNode;
+  meta?: ReactNode;
+  actions?: ReactNode;
+  hideHeader?: boolean;
+  headerClassName?: string;
+  toolbar?: ReactNode;
+  toolbarClassName?: string;
+  /** Optional left rail (team list, layer list). */
+  rail?: ReactNode;
+  /** Center canvas / graph host. */
+  canvas: ReactNode;
+  /** Right inspector / binding panel. */
+  inspector?: ReactNode;
+  layoutId?: string;
+  resize?: Omit<VSplitWorkspaceResizeConfig, "layoutId">;
+  domainRecipe?: string;
+  railClassName?: string;
+  canvasClassName?: string;
+  inspectorClassName?: string;
+  workspaceClassName?: string;
+  className?: string;
+};
+
+/**
+ * Page recipe: full-height canvas workbench with optional rail + inspector.
+ * Prefer for org graphs, flow canvases, and memory graphs.
+ */
+export function VCanvasWorkbenchPage({
+  ariaLabel,
+  eyebrow,
+  title,
+  meta,
+  actions,
+  hideHeader = false,
+  headerClassName,
+  toolbar,
+  toolbarClassName,
+  rail,
+  canvas,
+  inspector,
+  layoutId,
+  resize,
+  domainRecipe,
+  railClassName,
+  canvasClassName,
+  inspectorClassName,
+  workspaceClassName,
+  className,
+  ...props
+}: VCanvasWorkbenchPageProps) {
+  const resizeConfig = layoutId
+    ? { layoutId, enabled: true as const, ...resize }
+    : false;
+
+  return (
+    <VWorkbenchPage
+      ariaLabel={ariaLabel}
+      data-vui-recipe="canvas-workbench-page"
+      data-vui-domain-recipe={domainRecipe}
+      fill
+      className={className}
+      {...props}
+    >
+      {hideHeader ? null : (
+        <VRouteHeader
+          className={headerClassName}
+          eyebrow={eyebrow}
+          title={title}
+          meta={meta}
+          actions={actions}
+        />
+      )}
+      <div data-vui="canvas-workbench-body" className={VUI_PAGE_BODY_FILL_CLASS}>
+        {toolbar ? (
+          <div
+            data-vui="canvas-workbench-toolbar"
+            className={cn(VUI_PAGE_TOOLBAR_STRIP_CLASS, toolbarClassName)}
+          >
+            {toolbar}
+          </div>
+        ) : null}
+        <VSplitWorkspace
+          className={cn("min-h-0 flex-1", workspaceClassName)}
+          resize={resizeConfig}
+          sidebar={
+            rail
+              ? (
+                <div
+                  data-vui="canvas-workbench-rail"
+                  className={cn(VUI_RAIL_SURFACE_CLASS, "flex flex-col", railClassName)}
+                >
+                  {rail}
+                </div>
+              )
+              : undefined
+          }
+          main={(
+            <div
+              data-vui="canvas-workbench-canvas"
+              className={cn(VUI_CANVAS_SURFACE_CLASS, "flex flex-col", canvasClassName)}
+            >
+              {canvas}
+            </div>
+          )}
+          aside={
+            inspector
+              ? (
+                <div
+                  data-vui="canvas-workbench-inspector"
+                  className={cn(
+                    VUI_WORKBENCH_SURFACE_CLASS,
+                    "flex h-full min-h-0 flex-col overflow-hidden",
+                    inspectorClassName,
+                  )}
+                >
+                  {inspector}
+                </div>
+              )
+              : undefined
+          }
+        />
+      </div>
+    </VWorkbenchPage>
+  );
+}
