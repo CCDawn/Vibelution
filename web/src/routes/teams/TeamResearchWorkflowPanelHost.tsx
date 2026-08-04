@@ -1,8 +1,8 @@
 import type { ReactNode } from "react";
 
-import { VStateSurface } from "../../components/vui";
 import shellStyles from "../TeamsRoute.styles";
 import workflowRouteStyles from "../TeamsRoute.workflow.styles";
+import { ProgressiveRegionSkeleton } from "../shared/ProgressiveRegionSkeleton";
 
 const styles = {
   ...shellStyles,
@@ -27,6 +27,9 @@ export type TeamResearchWorkflowPanelHostProps = {
  * Shared host for research workflow stage modules on board + canvas shells.
  * Overview CTA/kanban stay outside (ResearchOverviewSurface); this only wraps
  * non-overview stage panels that still live under `showWorkflowPanel`.
+ *
+ * Progressive-fill: section chrome stays mounted; pending shows in-place panel
+ * skeleton instead of replacing the host with a loading title surface.
  */
 export function TeamResearchWorkflowPanelHost({
   lang,
@@ -46,15 +49,10 @@ export function TeamResearchWorkflowPanelHost({
       </div>
       {researchWorkflowTeamSelected ? (
         workflowPending ? (
-          <VStateSurface
-            tone="loading"
-            title={lang === "zh" ? "正在读取科研工作流" : "Loading research workflow"}
-            skeletonLines={3}
-          >
-            {lang === "zh"
-              ? "TeamWorkflowOrchestration 返回后会显示流程模块。"
-              : "Workflow modules appear after TeamWorkflowOrchestration returns."}
-          </VStateSurface>
+          <ProgressiveRegionSkeleton
+            variant="panel"
+            label={lang === "zh" ? "正在读取科研工作流" : "Loading research workflow"}
+          />
         ) : workflowReady ? (
           <>
             {/* Overview hero/stages/secondary render via ResearchOverviewSurface above this host. */}

@@ -16,11 +16,17 @@ describe("teamResearchPrimarySurfaceRenderers extraction", () => {
     expect(routeSource).not.toContain("function renderResearchStageLauncher(");
     expect(routeSource).not.toContain("function renderResearchOverviewSurface(");
     expect(routeSource).not.toContain("function renderResearchStageStandalonePage(");
-    // stageStandalone must run after the factory initializes renderers
+    // Stage destinations mount inside board primary surface (not whole-route early return).
+    expect(routeSource).toContain("boardPrimaryMode={boardPrimaryMode}");
+    expect(routeSource).toContain("stageSlot=");
+    expect(routeSource).toContain("showResearchStageWorkspace");
+    expect(routeSource).not.toMatch(
+      /if\s*\(\s*stageStandaloneView\s*\)\s*\{\s*return\s+renderResearchStageStandalonePage/,
+    );
     const factoryAt = routeSource.indexOf("createResearchPrimarySurfaceRenderers({");
-    const stageAt = routeSource.indexOf("if (stageStandaloneView)");
+    const boardAt = routeSource.indexOf("boardPrimaryMode={boardPrimaryMode}");
     expect(factoryAt).toBeGreaterThan(-1);
-    expect(stageAt).toBeGreaterThan(factoryAt);
+    expect(boardAt).toBeGreaterThan(factoryAt);
   });
 
   it("factory owns ResearchOverviewSurface, launcher, and standalone mounts", () => {
@@ -31,5 +37,6 @@ describe("teamResearchPrimarySurfaceRenderers extraction", () => {
     expect(renderersSource).toContain("ResearchBoardKanban");
     expect(renderersSource).toContain("TeamResearchStageLauncherPanel");
     expect(renderersSource).toContain("TeamResearchStageStandalonePagePanel");
+    expect(renderersSource).toContain("embeddedInBoard");
   });
 });

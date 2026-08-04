@@ -2,57 +2,64 @@ import type { ReactNode } from "react";
 
 import { VStateSurface } from "../../components/vui";
 
+export type TeamResearchBoardPrimaryMode = "overview" | "stage" | "launcher" | "hidden";
+
 export type TeamResearchBoardPrimarySurfaceProps = {
   lang: "zh" | "en";
-  /** Board primary region is hidden while the canvas shell is active. */
-  researchCanvasVisible: boolean;
-  researchWorkflowTeamSelected: boolean;
-  showResearchOverview: boolean;
+  /**
+   * Which primary body to mount inside the board shell:
+   * - overview: CTA + three-column kanban summary
+   * - stage: experiment / iteration standalone workspace (full main column)
+   * - launcher: three-stage control console (hub / knowledge path)
+   * - hidden: canvas shell or non-research team
+   */
+  boardPrimaryMode: TeamResearchBoardPrimaryMode;
+  /** True while the workflow query is still in flight (overview progressive shell). */
   workflowPending: boolean;
   workflowReady: boolean;
-  /** Ready overview (CTA + kanban) when workflow exists. */
+  /**
+   * Overview composition (stable IA + progressive skeleton/data).
+   * Mounted while boardPrimaryMode is overview and (pending or ready).
+   */
   overviewSlot: ReactNode;
-  /** Non-overview board view: stage launcher console. */
+  /** Experiment / iteration dedicated workspace (fills board main). */
+  stageSlot: ReactNode;
+  /** Interactive three-stage launcher console (not a stage destination). */
   launcherSlot: ReactNode;
 };
 
 /**
- * Board-mode primary research surface: overview fill loading/empty/ready,
- * or interactive stage launcher when researchView is not overview.
+ * Board-mode primary research surface.
+ *
+ * Product contract:
+ * - overview → overview IA
+ * - experiment / iteration → stage standalone workspace (not the three-card hub)
+ * - other non-overview → launcher hub only when no dedicated stage page
+ * - Loading: progressive overview shell; never swap mid-load to fill "正在读取"
  */
 export function TeamResearchBoardPrimarySurface({
   lang,
-  researchCanvasVisible,
-  researchWorkflowTeamSelected,
-  showResearchOverview,
+  boardPrimaryMode,
   workflowPending,
   workflowReady,
   overviewSlot,
+  stageSlot,
   launcherSlot,
 }: TeamResearchBoardPrimarySurfaceProps) {
-  if (researchCanvasVisible || !researchWorkflowTeamSelected) {
+  if (boardPrimaryMode === "hidden") {
     return null;
   }
 
-  if (!showResearchOverview) {
+  if (boardPrimaryMode === "stage") {
+    return <>{stageSlot}</>;
+  }
+
+  if (boardPrimaryMode === "launcher") {
     return <>{launcherSlot}</>;
   }
 
-  if (workflowPending) {
-    return (
-      <VStateSurface
-        fill
-        tone="loading"
-        title={lang === "zh" ? "正在读取科研总览" : "Loading research overview"}
-      >
-        {lang === "zh"
-          ? "看板、阶段与 CTA 会在工作流返回后原位铺满本区，而不是只显示一行提示。"
-          : "Board, stages, and CTA will fill this region once the workflow returns — not a one-line hint."}
-      </VStateSurface>
-    );
-  }
-
-  if (workflowReady) {
+  // overview
+  if (workflowPending || workflowReady) {
     return <>{overviewSlot}</>;
   }
 

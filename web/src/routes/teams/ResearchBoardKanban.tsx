@@ -9,24 +9,68 @@ export type ResearchBoardKanbanProps = {
   onOpenCard?: (columnId: string, cardId: string) => void;
   /** When embedded under ResearchOverviewSurface, the parent already owns the section label. */
   showSectionLabel?: boolean;
+  /**
+   * Progressive cold-load: keep the fixed three-column geometry and fill card
+   * slots with skeleton blocks until data settles. Column titles stay stable.
+   */
+  loading?: boolean;
   className?: string;
 };
 
+const pulseClass =
+  "block animate-pulse rounded-md bg-[color-mix(in_srgb,var(--vui-border-subtle)_70%,transparent)] motion-reduce:animate-none";
+
+const SKELETON_COLUMNS: Array<{ id: ResearchBoardColumn["id"]; titleZh: string; titleEn: string }> = [
+  { id: "knowledge_collection", titleZh: "知识搜集", titleEn: "Knowledge" },
+  { id: "experiment", titleZh: "实验设计", titleEn: "Experiment" },
+  { id: "iteration", titleZh: "执行与迭代", titleEn: "Iteration" },
+];
+
+function SkeletonCard() {
+  return (
+    <div
+      className="grid min-w-0 gap-2 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] p-2.5"
+      aria-hidden="true"
+    >
+      <span className={`${pulseClass} h-3.5 w-[72%]`} />
+      <span className={`${pulseClass} h-2.5 w-full`} />
+      <span className={`${pulseClass} h-2.5 w-[88%] opacity-80`} />
+      <div className="flex items-center justify-between gap-2 pt-1">
+        <span className={`${pulseClass} h-2.5 w-14`} />
+        <span className={`${pulseClass} h-2.5 w-10`} />
+      </div>
+    </div>
+  );
+}
+
 /**
  * Preview-aligned three-column research board (read-only cards + 查看).
+ * Column count/geometry is fixed; only card interiors progressive-fill.
  */
 export function ResearchBoardKanban({
   lang,
   columns,
   onOpenCard,
   showSectionLabel = false,
+  loading = false,
   className = "",
 }: ResearchBoardKanbanProps) {
+  const renderedColumns = loading
+    ? SKELETON_COLUMNS.map((column) => ({
+        id: column.id,
+        titleZh: column.titleZh,
+        titleEn: column.titleEn,
+        cards: [] as ResearchBoardColumn["cards"],
+      }))
+    : columns;
+
   return (
     <section
       className={["researchBoardKanban grid min-w-0 gap-3", className].filter(Boolean).join(" ")}
       data-testid="research-board-kanban"
       data-vui="research-board-kanban"
+      data-loading={loading ? "true" : "false"}
+      aria-busy={loading || undefined}
       aria-label={lang === "zh" ? "阶段看板" : "Stage board"}
     >
       {showSectionLabel ? (
@@ -44,7 +88,7 @@ export function ResearchBoardKanban({
         className="grid min-w-0 grid-cols-[repeat(3,minmax(240px,1fr))] items-start gap-3 overflow-x-auto pb-1 [scrollbar-gutter:stable]"
         data-testid="research-board-columns"
       >
-        {columns.map((column) => (
+        {renderedColumns.map((column) => (
           <VSurface
             key={column.id}
             tone="inset"
@@ -57,11 +101,20 @@ export function ResearchBoardKanban({
               <h4 className="m-0 text-[13px] font-[760] text-[var(--fg-primary)]">
                 {lang === "zh" ? column.titleZh : column.titleEn}
               </h4>
-              <span className="inline-grid h-[22px] min-w-[22px] place-items-center rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-1.5 text-[11px] font-[740] text-[var(--fg-secondary)]">
-                {column.cards.length}
-              </span>
+              {loading ? (
+                <span className={`${pulseClass} size-[22px] shrink-0 rounded-full`} aria-hidden="true" />
+              ) : (
+                <span className="inline-grid h-[22px] min-w-[22px] place-items-center rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-1.5 text-[11px] font-[740] text-[var(--fg-secondary)]">
+                  {column.cards.length}
+                </span>
+              )}
             </div>
-            {column.cards.length ? column.cards.map((card) => (
+            {loading ? (
+              <div className="grid gap-2.5" data-testid={`research-board-column-skeleton-${column.id}`}>
+                <SkeletonCard />
+                <SkeletonCard />
+              </div>
+            ) : column.cards.length ? column.cards.map((card) => (
               <VSurface
                 key={card.id}
                 tone="panel"

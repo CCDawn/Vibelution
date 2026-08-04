@@ -352,7 +352,10 @@ export function createResearchPrimarySurfaceRenderers(ctx: ResearchPrimarySurfac
 
 
 
-  function renderResearchStageStandalonePage(stageView: Exclude<ResearchStageWorkspaceView, "knowledge_collection">) {
+  function renderResearchStageStandalonePage(
+    stageView: Exclude<ResearchStageWorkspaceView, "knowledge_collection">,
+    options?: { embeddedInBoard?: boolean },
+  ) {
     const refreshStageWorkspace = () => {
       createExperimentPlanMutation.reset();
       materializeEngineeringProxyHypothesisMutation.reset();
@@ -400,6 +403,7 @@ export function createResearchPrimarySurfaceRenderers(ctx: ResearchPrimarySurfac
         researchStageStartFeedbackText={researchStageStartFeedbackText}
         renderExperimentPlanningLedgerPanel={renderExperimentPlanningLedgerPanel}
         renderResearchLoopPanel={renderResearchLoopPanel}
+        embeddedInBoard={options?.embeddedInBoard ?? true}
       />
     );
   }
