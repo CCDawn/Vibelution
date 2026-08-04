@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import routeSource from "./ConfigRoute.tsx?raw";
+import routeSourceRaw from "./ConfigRoute.tsx?raw";
+import providerDraftActionsSource from "./config/useConfigProviderDraftActions.ts?raw";
+import configApplyModelSource from "./config/configApplyModel.ts?raw";
+import configProviderActionModelSource from "./config/configProviderActionModel.ts?raw";
+/** Route + extracted config write helpers (layout contracts may live in either). */
+const routeSource = `${routeSourceRaw}\n${providerDraftActionsSource}\n${configApplyModelSource}\n${configProviderActionModelSource}`;
 import draftPanelSource from "./ConfigDraftPanel.tsx?raw";
 import draftPanelStylesSource from "./ConfigDraftPanel.styles.ts?raw";
 import draftPanelStyles from "./ConfigDraftPanel.styles";
