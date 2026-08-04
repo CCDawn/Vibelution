@@ -90,7 +90,21 @@
 - `primitives/VDialog.tsx` → `ShadcnDialog`
 
 ### 反冗余
-- 禁止 route 内 `fixed inset-0` 手写遮罩
+- 禁止 route 内 `fixed inset-0` 手写遮罩（实现落在 `ShadcnDialog` 即可）
+
+### 已迁业务面（对齐收口）
+- `AgentCreateWizardDialog`、`AgentModelPicker`
+- `CacheDetailDialog`、`ConversationImagePreviewDialog`
+- Config 未保存离开守卫（`ConfigRoute` leave guard）
+
+### Intentional keep（不要硬套 VDialog）
+| 面 | 原因 |
+| --- | --- |
+| `ChatToolApprovalDialog` | banner/inline 会话内确认，非模态栈 |
+| Chat `overlayBackdrop` | 响应式侧栏遮罩（`VButton` 关侧栏） |
+| design preview tooltips | 非产品 chrome |
+
+门禁：`components/vui/vuiOverlayAlignmentGate.test.ts`
 
 ---
 
@@ -176,7 +190,10 @@
 - `primitives/VPopover.tsx` → `renderers/shadcn/ShadcnPopover.tsx` → `@radix-ui/react-popover`
 
 ### 已迁业务面
-- AppShell 顶栏工具菜单（click 打开，替代 hover 手写面板）
+- AppShell 顶栏工具菜单（click，替代 hover 手写面板）
+- AppShell 进行中详情（active-work）
+- AppShell 系统状态指南（status guide）
+- Composer：`AgentPermissionPresetControl`、`ConversationInferenceControl`
 
 ### 反冗余
-- 禁止再写 cluster + absolute + pointerdown 关闭平行系统
+- 禁止再写 cluster + absolute + pointerdown / CSS hover 显隐平行系统

@@ -788,7 +788,9 @@ describe("ChatCodingRoute layout contract", () => {
   it("renders Agent sessions as a compact browser-like navigation rail", () => {
     expect(routeStyles.tabStrip).toContain("overflow-hidden");
     expect(routeStyles.tabStrip).toContain("border-b");
-    expect(routeStyles.tabStrip).toContain("items-end");
+    // Shell row is vertically centered; session scroller keeps items-end for tab feet.
+    expect(routeStyles.tabStrip).toContain("items-center");
+    expect(routeStyles.tabStripSessions).toContain("items-end");
     expect(agentSessionTabStripStyles.agentSessionTabRail).toContain("w-fit");
     expect(agentSessionTabStripStyles.agentSessionTabRail).toContain("max-w-full");
     expect(agentSessionTabStripStyles.agentSessionTabGroup).toContain("flex-nowrap");
