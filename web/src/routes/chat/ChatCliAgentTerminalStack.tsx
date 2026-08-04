@@ -1,5 +1,6 @@
 import { Suspense, type ComponentType, type LazyExoticComponent } from "react";
 
+import { VStateSurface } from "../../components/vui";
 import styles from "./ChatCliAgentTerminalStack.styles";
 import type { CliAgentRunView, CliAgentTerminalSession } from "./cliAgentRunModel";
 
@@ -53,12 +54,13 @@ export function ChatCliAgentTerminalStack({
                 data-cli-agent-run-id={run.id}
               >
                 <div className={styles.cliAgentTerminalFrame}>
-                  <div className={styles.cliAgentTerminalCommand} title={run.commandLine}>
-                    <span className={styles.cliAgentTerminalStatus}>
-                      {lang === "zh" ? "加载终端" : "Loading terminal"}
-                    </span>
-                    <code>{run.commandLine}</code>
-                  </div>
+                  <VStateSurface
+                    tone="loading"
+                    title={lang === "zh" ? "加载终端" : "Loading terminal"}
+                    skeletonLines={2}
+                  >
+                    <code className={styles.cliAgentTerminalCommand}>{run.commandLine}</code>
+                  </VStateSurface>
                 </div>
               </section>
             )}

@@ -8,7 +8,7 @@
 - Visual coordination comes from **tokens + `pageRecipeClasses`**, not one-off CSS.
 - Fat routes become **orchestrators**; domain logic lives in sibling modules.
 - Workbench main **loading/empty** uses `VStateSurface` with `fill` (or panel-local skeleton) — never a one-line `styles.empty` above a empty floor.
-- Sweep status: Teams board, Research canvas, Memory graph/user content/cleanup/KB/queue, Agent activity/overview/empty/config history, Skills/Prompt list, Kernel panes, Evolution detail + self-track boundary, TeamWorkflow status panels. Remaining: some Chat rails and dense Git list empties (lower priority, not full-height workbench shells).
+- Sweep status: Teams, Research canvas/route empties, Memory (graph/user/cleanup/KB/queue/agent/items), Agent panels, Skills/Prompt, Kernel, Evolution, TeamWorkflow status, Git empties, Chat rail/file preview/CLI terminal, Supervised conversation loading. Residual: Tools table empty rows, some form helper microcopy.
 
 ## Inventory (current hotspots)
 

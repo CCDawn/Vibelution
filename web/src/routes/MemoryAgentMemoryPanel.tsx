@@ -1,6 +1,6 @@
 import { Brain, Database, FileText, Search } from "lucide-react";
 
-import { VButton, VNativeInput } from "../components/vui";
+import { VButton, VNativeInput, VStateSurface } from "../components/vui";
 import styles from "./MemoryAgentMemoryPanel.styles";
 
 export type MemoryAgentMemorySummaryView = {
@@ -159,9 +159,13 @@ export function MemoryAgentMemoryPanel({
             <VNativeInput value={searchText} placeholder={copy.searchPlaceholder} onChange={(event) => onSearchTextChange(event.target.value)} />
           </label>
           <div className={styles.itemList}>
-            {inventoryPending ? <div className={styles.emptyState}>{copy.loading}</div> : null}
-            {inventoryErrorText ? <div className={styles.emptyState}>{copy.loadFailed}: {inventoryErrorText}</div> : null}
-            {!inventoryPending && !agents.length ? <div className={styles.emptyState}>{copy.agentMemoryNoAgents}</div> : null}
+            {inventoryPending ? <VStateSurface tone="loading" title={copy.loading} skeletonLines={2} /> : null}
+            {inventoryErrorText ? (
+              <VStateSurface tone="error" title={copy.loadFailed}>
+                {inventoryErrorText}
+              </VStateSurface>
+            ) : null}
+            {!inventoryPending && !agents.length ? <VStateSurface tone="empty" title={copy.agentMemoryNoAgents} /> : null}
             {agents.map((agent) => (
               <VButton
                 key={agent.id}
@@ -205,9 +209,15 @@ export function MemoryAgentMemoryPanel({
             <span>{copy.agentMemoryFormalKnowledge}: {selectedAgent?.formalKnowledgeItemCount ?? 0}</span>
           </section>
           <div className={styles.itemList}>
-            {detailPending && selectedAgent ? <div className={styles.emptyState}>{copy.loading}</div> : null}
-            {detailErrorText ? <div className={styles.emptyState}>{copy.loadFailed}: {detailErrorText}</div> : null}
-            {!items.length && !detailPending ? <div className={styles.emptyState}>{copy.agentMemoryNoPrivateMemory}</div> : null}
+            {detailPending && selectedAgent ? <VStateSurface tone="loading" title={copy.loading} skeletonLines={2} /> : null}
+            {detailErrorText ? (
+              <VStateSurface tone="error" title={copy.loadFailed}>
+                {detailErrorText}
+              </VStateSurface>
+            ) : null}
+            {!items.length && !detailPending ? (
+              <VStateSurface tone="empty" title={copy.agentMemoryNoPrivateMemory} />
+            ) : null}
             {items.map((item) => (
               <VButton
                 key={item.id}

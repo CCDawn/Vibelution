@@ -1,5 +1,5 @@
 import { PersistedHeightListShell } from "../components/layout/PersistedHeightListShell";
-import { VButton, VNativeInput } from "../components/vui";
+import { VButton, VNativeInput, VStateSurface } from "../components/vui";
 import type { MemoryItem, MemorySection } from "../api/types";
 import styles from "./MemoryItemListPanel.styles";
 import {
@@ -71,13 +71,13 @@ export function MemoryItemListPanel({
   onToggleSelection,
 }: MemoryItemListPanelProps) {
   if (loading) {
-    return <div className={styles.emptyState}>{copy.loading}</div>;
+    return <VStateSurface tone="loading" title={copy.loading} skeletonLines={2} />;
   }
   if (errorText) {
-    return <div className={styles.emptyState}>{errorText}</div>;
+    return <VStateSurface tone="error" title={errorText} />;
   }
   if (!pairs.length) {
-    return <div className={styles.emptyState}>{emptyText}</div>;
+    return <VStateSurface tone="empty" title={emptyText} />;
   }
 
   const listItems = pairs.map(({ section, item }) => {

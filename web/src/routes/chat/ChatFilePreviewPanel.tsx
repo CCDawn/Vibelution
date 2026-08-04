@@ -1,5 +1,6 @@
 import type { FileContent } from "../../api/types";
 import { LazyFilePreview } from "../../components/preview/LazyFilePreview";
+import { VStateSurface } from "../../components/vui";
 import styles from "./ChatFilePreviewPanel.styles";
 
 type ChatFilePreviewPanelProps = {
@@ -19,9 +20,7 @@ export function ChatFilePreviewPanel({
 }: ChatFilePreviewPanelProps) {
   if (errorMessage) {
     return (
-      <div className={styles.emptySurface} role="alert">
-        {errorMessage}
-      </div>
+      <VStateSurface className={styles.emptySurface} tone="error" title={errorMessage} role="alert" />
     );
   }
 
@@ -32,17 +31,26 @@ export function ChatFilePreviewPanel({
         changed={changed}
         sourceLabel={sourceLabel}
         fallback={
-          <div className={styles.emptySurface} role="status" aria-live="polite">
-            {loadingLabel}
-          </div>
+          <VStateSurface
+            className={styles.emptySurface}
+            tone="loading"
+            title={loadingLabel}
+            skeletonLines={2}
+            role="status"
+            aria-live="polite"
+          />
         }
       />
     );
   }
 
   return (
-    <div className={styles.emptySurface} role="status" aria-live="polite">
-      {loadingLabel}
-    </div>
+    <VStateSurface
+      className={styles.emptySurface}
+      tone="empty"
+      title={loadingLabel}
+      role="status"
+      aria-live="polite"
+    />
   );
 }

@@ -10,7 +10,7 @@ import {
   VButton,
   VChip,
   VEmptyState,
-  VLoadingValue,
+  VStateSurface,
   VStatusChip,
   VStatusStrip,
   VSurface,
@@ -409,17 +409,25 @@ export function SupervisedAgentConversationPanel({
               onComposerChange={() => undefined}
               onSubmit={() => undefined}
               fallback={(
-                <div className={styles.loading}>
-                  <VLoadingValue label={lang === "zh" ? "正在加载统一对话前端" : "Loading conversation"} />
-                  <span>{lang === "zh" ? "正在加载统一对话前端…" : "Loading conversation…"}</span>
-                </div>
+                <VStateSurface
+                  fill
+                  className={styles.loading}
+                  tone="loading"
+                  title={lang === "zh" ? "正在加载统一对话前端" : "Loading conversation"}
+                >
+                  {lang === "zh" ? "对话界面就绪后会原位铺满此区。" : "The conversation surface will fill this region when ready."}
+                </VStateSurface>
               )}
             />
           ) : sessionDetailQuery.isLoading ? (
-            <div className={styles.loading}>
-              <VLoadingValue label={lang === "zh" ? "正在加载 Agent 会话" : "Loading Agent session"} />
-              <span>{lang === "zh" ? "正在加载 Agent 会话…" : "Loading Agent session…"}</span>
-            </div>
+            <VStateSurface
+              fill
+              className={styles.loading}
+              tone="loading"
+              title={lang === "zh" ? "正在加载 Agent 会话" : "Loading Agent session"}
+            >
+              {lang === "zh" ? "会话内容返回后会显示在此区。" : "Session content will appear in this region."}
+            </VStateSurface>
           ) : (
             <VEmptyState
               className={styles.empty}

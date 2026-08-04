@@ -697,7 +697,8 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(supervisedAgentConversationPanelSource).toContain("VStatusStrip");
     expect(supervisedAgentConversationPanelSource).toContain("VToolbar");
     expect(supervisedAgentConversationPanelSource).toContain("VEmptyState");
-    expect(supervisedAgentConversationPanelSource).toContain("VLoadingValue");
+    expect(supervisedAgentConversationPanelSource).toContain("VStateSurface");
+    expect(supervisedAgentConversationPanelSource).toContain('tone="loading"');
     expect(supervisedAgentConversationPanelSource).toContain('variant={selected ? "primary" : "secondary"}');
     expect(supervisedAgentConversationPanelSource).toContain("tabIndex={selected ? 0 : -1}");
     expect(supervisedAgentConversationPanelSource).toContain('event.key === "ArrowRight"');

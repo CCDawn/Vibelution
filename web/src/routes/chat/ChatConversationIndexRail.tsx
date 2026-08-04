@@ -23,6 +23,7 @@ import {
   VInput,
   VNativeInput,
   VNativeSelect,
+  VStateSurface,
 } from "../../components/vui";
 import type { TranslationKey } from "../../i18n/dictionary";
 import { agentDisplayInfo } from "../agentDisplay";
@@ -346,9 +347,12 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
                       {expanded ? (
                         <div className={styles.agentIndexDetails}>
                           {expandedDetailQuery?.isPending ? (
-                            <p className={routeStyles.contextLineCompact}>{t("loadingSession")}</p>
+                            <VStateSurface tone="loading" title={t("loadingSession")} skeletonLines={2} />
                           ) : expandedDetailQuery?.isError ? (
-                            <p className={routeStyles.panelNotice}>{describeError(expandedDetailQuery.error, t("loadFailed"))}</p>
+                            <VStateSurface
+                              tone="error"
+                              title={describeError(expandedDetailQuery.error, t("loadFailed"))}
+                            />
                           ) : (
                             <>
                               <div className={routeStyles.resourceSplit}>
@@ -467,7 +471,11 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
                 </label>
                 <div className={styles.groupAgentPicker} aria-label={lang === "zh" ? "选择参与助手" : "Choose agents"}>
                   {agentsPending ? (
-                    <p className={styles.groupComposerEmpty}>{lang === "zh" ? "正在读取助手..." : "Loading agents..."}</p>
+                    <VStateSurface
+                      tone="loading"
+                      title={lang === "zh" ? "正在读取助手" : "Loading agents"}
+                      skeletonLines={2}
+                    />
                   ) : groupCandidateAgents.length ? (
                     groupCandidateAgents.map((agent) => {
                       const selected = groupSelectedAgentIds.includes(agent.agentId);

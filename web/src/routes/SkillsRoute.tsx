@@ -452,10 +452,13 @@ export function SkillsRoute() {
               </section>
             </>
           ) : (
-            <div className={styles.emptyDetailClass}>
-              <Sparkles size={20} />
-              <p className={styles.emptyDetailTextClass}>{copy.emptyDetail}</p>
-            </div>
+            <VStateSurface
+              fill
+              className={styles.emptyDetailClass}
+              tone="empty"
+              title={copy.emptyDetail}
+              icon={<Sparkles size={18} />}
+            />
           )}
         </VSurface>
       )}

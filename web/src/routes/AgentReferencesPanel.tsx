@@ -1,6 +1,6 @@
 import { ExternalLink, Users } from "lucide-react";
 
-import { VButton } from "../components/vui";
+import { VButton, VStateSurface } from "../components/vui";
 import styles from "./AgentReferencesPanel.styles";
 
 export type AgentReferenceStatusTone = "active" | "stale";
@@ -90,7 +90,7 @@ export function AgentReferencesPanel({
               ))}
             </div>
           ) : (
-            <p className={styles.emptyText}>{copy.noChatRooms}</p>
+            <VStateSurface tone="empty" title={copy.noChatRooms} />
           )}
           <p className={styles.emptyText}>{copy.membershipHelp}</p>
         </section>
@@ -130,7 +130,7 @@ export function AgentReferencesPanel({
             ))}
           </div>
         ) : (
-          <p className={styles.emptyText}>{copy.selectAgent}</p>
+          <VStateSurface tone="empty" title={copy.selectAgent} />
         )}
       </section>
     </>
