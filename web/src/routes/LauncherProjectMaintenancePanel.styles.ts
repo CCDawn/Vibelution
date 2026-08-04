@@ -29,7 +29,14 @@ const styles = {
     "noiseItemGridResizeHandle",
   panelEyebrow: "m-0 [font-size:var(--vui-font-xs)] uppercase tracking-[0.08em] text-[var(--fg-tertiary)]",
   primaryButton: primaryControl,
-  segmentedControl: `inline-flex min-w-0 max-w-full flex-wrap items-center gap-0.5 ${vuiOpaqueRowClass} p-0.5 max-[860px]:justify-self-start [&_button]:min-h-[25px] [&_button]:rounded-[calc(var(--radius-control)-2px)] [&_button]:border-0 [&_button]:bg-transparent [&_button]:px-[7px] [&_button]:py-[3px] [&_button]:[font-size:var(--vui-font-xs)] [&_button]:leading-none [&_button]:text-[var(--fg-secondary)] [&_button[data-active=true]]:bg-[color-mix(in_srgb,var(--accent-primary)_11%,var(--vui-surface-panel))] [&_button[data-active=true]]:text-[var(--fg-primary)] [&_button:disabled]:cursor-default [&_button:disabled]:opacity-60 [&_button[data-vui]]:min-w-0 [&_button[data-vui]_[data-slot=vui-button-content]]:inline-flex [&_button[data-vui]_[data-slot=vui-button-content]]:items-center [&_button[data-vui]_[data-slot=vui-button-content]]:gap-[5px] [&_button[data-vui]_[data-slot=vui-button-label]]:inline-flex [&_button[data-vui]_[data-slot=vui-button-label]]:items-center [&_button[data-vui]_[data-slot=vui-button-label]]:gap-[5px]`,
+  segmentedControl: `inline-flex min-w-0 max-w-full flex-wrap items-center gap-0.5 ${vuiOpaqueRowClass} p-0.5 max-[860px]:justify-self-start`,
+  segmentedTrigger: [
+    "min-h-[25px] !rounded-[calc(var(--radius-control)-2px)] !border-0 !bg-transparent !px-[7px] !py-[3px]",
+    "[font-size:var(--vui-font-xs)] leading-none text-[var(--fg-secondary)]",
+    "data-[state=active]:!bg-[color-mix(in_srgb,var(--accent-primary)_11%,var(--vui-surface-panel))]",
+    "data-[state=active]:!text-[var(--fg-primary)] data-[state=active]:shadow-none",
+    "disabled:cursor-default disabled:opacity-60",
+  ].join(" "),
   spin: "animate-spin",
 } as const;
 

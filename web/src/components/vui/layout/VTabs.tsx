@@ -8,6 +8,8 @@ export type VTabsItem = {
   id: string;
   label: ReactNode;
   disabled?: boolean;
+  /** Optional native title / hint on the trigger. */
+  title?: string;
   /** Optional panel body for this tab. */
   content?: ReactNode;
 };
@@ -75,6 +77,7 @@ export function VTabs({
             key={item.id}
             value={item.id}
             disabled={item.disabled}
+            title={item.title}
             className={cn(
               "inline-flex min-w-0 max-w-full items-center justify-center gap-1.5 rounded-[calc(var(--radius-control)-2px)]",
               "px-2.5 font-semibold text-[var(--fg-secondary)] outline-none transition-colors duration-150",
@@ -90,7 +93,12 @@ export function VTabs({
             )}
             data-slot="tabs-trigger"
           >
-            <span className="min-w-0 truncate">{item.label}</span>
+            {/* Allow multi-slot labels (icon+text, text+count) without extra truncate wrapper. */}
+            {typeof item.label === "string" || typeof item.label === "number" ? (
+              <span className="min-w-0 truncate">{item.label}</span>
+            ) : (
+              item.label
+            )}
           </TabsPrimitive.Trigger>
         ))}
       </TabsPrimitive.List>

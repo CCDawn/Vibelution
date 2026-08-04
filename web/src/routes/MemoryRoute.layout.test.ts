@@ -1205,9 +1205,11 @@ describe("MemoryRoute layout contract", () => {
     // VStateSurface may use title= for loading/empty; native HTML title tooltips stay forbidden.
     expect(knowledgeBaseSidebarSource).not.toContain("title={copy.knowledgeHint}");
     expect(knowledgeBaseSidebarSource).not.toContain(" title=\"");
-    expect(knowledgeModeTabsSource).toContain('import { VButton, VTooltip } from "../components/vui"');
-    expect(knowledgeModeTabsSource).toContain("content={mode.hint}");
-    expect(knowledgeModeTabsSource).not.toContain("title={mode.hint}");
+    expect(knowledgeModeTabsSource).toContain('import { VTabs } from "../components/vui"');
+    expect(knowledgeModeTabsSource).toContain("<VTabs");
+    // Hints ride on Radix trigger title (tablist a11y: no VTooltip wrapping tabs).
+    expect(knowledgeModeTabsSource).toContain("title: mode.hint");
+    expect(knowledgeModeTabsSource).not.toContain("content={mode.hint}");
     expect(knowledgeRagPanelSource).toContain('<VTooltip content={copy.ragRetrievalHint} width="wide">');
     expect(knowledgeRagPanelSource).not.toContain('title={copy.ragRetrievalHint}');
     expect(cleanupPanelSource).toContain('<VTooltip content={copy.cleanupNoBackup} tone="warning" width="wide">');
@@ -1467,8 +1469,9 @@ describe("MemoryRoute layout contract", () => {
     expect(knowledgeModeTabsSource).toContain('from "./MemoryKnowledgeModeTabs.styles"');
     expect(knowledgeModeTabsSource).not.toContain("MemoryRoute.styles");
     expect(knowledgeModeTabsSource).toContain("styles.knowledgeModeTabs");
-    expect(knowledgeModeTabsSource).toContain("styles.knowledgeModeTabActive");
-    expect(knowledgeModeTabsSource).toContain("onModeChange(mode.key)");
+    expect(knowledgeModeTabsSource).toContain("styles.knowledgeModeTab");
+    expect(knowledgeModeTabsSource).toContain("onModeChange(value)");
+    expect(knowledgeModeTabsStyles.knowledgeModeTab).toContain("data-[state=active]");
     expect(knowledgeModeTabsSource).not.toContain("useQuery");
     expect(knowledgeModeTabsSource).not.toContain("useMutation");
     expect(knowledgeModeTabsSource).not.toContain("fetchJson");

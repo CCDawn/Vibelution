@@ -46,15 +46,20 @@
 | 仅两个开关 | 考虑 `VButton` ghost 组或后续 `VSwitch` |
 
 ### API 要点
-- `items: { id, label, disabled?, content? }[]`
+- `items: { id, label, disabled?, title?, content? }[]` — `title` 挂到 trigger（hint / a11y）
 - `value` / `defaultValue` / `onValueChange`
 - `density`: compact | normal
+- `listClassName` / `triggerClassName` — 域几何；选中态用 `data-[state=active]:…`，勿再维护 twin Active class
 
 ### 实现落点
 - `layout/VTabs.tsx` → `@radix-ui/react-tabs`
 
+### 已迁业务面
+- Chat 群索引、Memory 知识模式、Evolution 评测集筛选、Launcher 维护 profile
+
 ### 反冗余
 - 禁止再写 `styles.tabActive` 平行 tab 系统；扩展本组件
+- 复杂键盘轨（Agent 会话条、监督对话 Agent 条）可暂留 domain 实现
 
 ---
 

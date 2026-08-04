@@ -125,12 +125,18 @@ const styles = {
     "min-w-0 [max-width:100%] [grid-column:5] [grid-row:1] max-[1200px]:[grid-column:2] max-[1200px]:[grid-row:2] max-[900px]:[grid-column:1] max-[900px]:[grid-row:3]",
   datasetCatalogEmpty:
     "[grid-column:1_/_-1] [margin:0] [color:var(--fg-tertiary)] [font-size:var(--vui-font-xs)] [line-height:1.35] [overflow-wrap:anywhere]",
-  datasetCatalogFilterButton:
-    "[min-height:25px] [padding:0_7px] [border:1px_solid_var(--border-soft)] [border-radius:999px] [background:var(--vui-surface-row)] [color:var(--fg-secondary)] [font-size:var(--vui-font-xs)] [white-space:nowrap]",
+  datasetCatalogFilterButton: [
+    "[min-height:25px] !px-[7px] !py-0 [border:1px_solid_var(--border-soft)] [border-radius:999px]",
+    "[background:var(--vui-surface-row)] [color:var(--fg-secondary)] [font-size:var(--vui-font-xs)] [white-space:nowrap]",
+    "data-[state=active]:border-[color-mix(in_srgb,var(--accent-warm)_35%,var(--border-soft))]",
+    "data-[state=active]:bg-[color-mix(in_srgb,var(--accent-warm)_12%,var(--vui-surface-row))]",
+    "data-[state=active]:text-[var(--accent-warm-2)]",
+    "data-[state=active]:shadow-none",
+  ].join(" "),
   datasetCatalogFilterButtonActive:
     "[border-color:color-mix(in_srgb,_var(--accent-warm)_35%,_var(--border-soft))] [background:color-mix(in_srgb,_var(--accent-warm)_12%,_var(--vui-surface-row))] [color:var(--accent-warm-2)]",
   datasetCatalogFilterRow:
-    "flex [flex-wrap:wrap] [gap:4px] min-w-0",
+    "flex [flex-wrap:wrap] [gap:4px] min-w-0 !border-0 !bg-transparent !p-0 !rounded-none",
   datasetCatalogBody:
     "grid [gap:7px] min-h-0 [padding:0_8px_8px]",
   datasetCatalogItem:
