@@ -44,6 +44,7 @@ from core.web.services.self_evolution_service import (
     get_self_evolution_overview,
     list_self_evolution_audit_events,
     list_self_evolution_transactions,
+    record_self_evolution_workspace_snapshot_perf,
 )
 from core.web.services.self_evolution_control_service import (
     SelfEvolutionRunBusyError,
@@ -330,6 +331,47 @@ def evolution_workspace_snapshot(includeSelf: bool = False) -> dict:
         timings_ms=timings,
         payload=payload,
         include_self=includeSelf,
+    )
+    return payload
+
+
+@router.get("/evolution/self/workspace-snapshot")
+def self_evolution_workspace_snapshot() -> dict:
+    """Return only the self-evolution data needed for the self workbench first paint."""
+
+    started_at = time.perf_counter()
+    timings: dict[str, float] = {}
+
+    def timed(name: str, loader):
+        stage_started = time.perf_counter()
+        value = loader()
+        timings[name] = (time.perf_counter() - stage_started) * 1000
+        return value
+
+    overview = timed("overview", get_self_evolution_overview)
+    transactions = timed("transactions", list_self_evolution_transactions)
+    active_worktree_run = timed("worktree_active_run", get_active_supervised_worktree_run)
+    self_worktree_active_run = (
+        active_worktree_run
+        if _is_self_evolution_worktree_run(active_worktree_run)
+        else None
+    )
+    observation_active_run = timed("observation_active_run", get_active_self_observation_run)
+    autonomous_active_run = timed("autonomous_active_run", get_active_autonomous_self_evolution_run)
+    autonomous_latest_run = timed("autonomous_latest_run", get_latest_autonomous_self_evolution_run)
+    payload = {
+        "overview": overview,
+        "transactions": transactions,
+        "worktreeActiveRun": self_worktree_active_run,
+        "observationActiveRun": observation_active_run,
+        "autonomousActiveRun": autonomous_active_run,
+        "autonomousLatestRun": autonomous_latest_run,
+    }
+    timings["total"] = (time.perf_counter() - started_at) * 1000
+    record_self_evolution_workspace_snapshot_perf(
+        duration_ms=timings["total"],
+        timings_ms=timings,
+        self_transaction_count=len(transactions),
     )
     return payload
 

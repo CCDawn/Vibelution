@@ -50,6 +50,7 @@ export function createEvolutionWorkspaceCache(queryClient: QueryClientLike) {
     afterWorktreeRunChanged() {
       return invalidateAll(queryClient, [
         queryKeys.evolutionWorkspaceSnapshot(),
+        queryKeys.evolutionSelfWorkspaceSnapshot(),
         queryKeys.evolutionWorktreeActiveRun(),
         queryKeys.evolutionWorktreeRuns(),
         queryKeys.runtimeSummary(),
@@ -57,11 +58,9 @@ export function createEvolutionWorkspaceCache(queryClient: QueryClientLike) {
     },
     afterSelfEvolutionChanged() {
       return invalidateAll(queryClient, [
-        queryKeys.evolutionWorkspaceSnapshot(),
-        queryKeys.evolutionSelfOverview(),
+        queryKeys.evolutionSelfWorkspaceSnapshot(),
         queryKeys.evolutionWorktreeActiveRun(),
         queryKeys.evolutionWorktreeRuns(),
-        queryKeys.evolutionSelfTransactions(),
         queryKeys.evolutionSelfAudit(),
         queryKeys.runtimeSummary(),
       ]);

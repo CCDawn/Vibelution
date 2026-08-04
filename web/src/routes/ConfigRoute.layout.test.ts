@@ -59,6 +59,12 @@ const configSources = [
 ].join("\n");
 
 describe("ConfigRoute layout contract", () => {
+  it("invalidates the compact self-evolution snapshot after evolution configuration changes", () => {
+    expect(routeSource).toContain("async function invalidateWorkbenchQueries");
+    expect(routeSource).toContain("queryKeys.evolutionSelfWorkspaceSnapshot()");
+    expect(routeSource).not.toContain("queryKeys.evolutionSelfOverview()");
+  });
+
   it("shows trusted feature provenance without creating a second editable state", () => {
     expect(routeSource).toContain("ConfigFeatureDecisionPanel");
     expect(routeSource).toContain("workspace.featureDecisions");

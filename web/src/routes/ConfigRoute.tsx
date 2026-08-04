@@ -2598,7 +2598,7 @@ export function ConfigRoute() {
       invalidations.push(
         queryClient.invalidateQueries({ queryKey: queryKeys.evolutionOverview() }),
         queryClient.invalidateQueries({ queryKey: queryKeys.evolutionLibrary() }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionSelfOverview() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionSelfWorkspaceSnapshot() }),
         queryClient.invalidateQueries({ queryKey: queryKeys.evolutionWorkspaceSnapshot() }),
         queryClient.invalidateQueries({ queryKey: queryKeys.evolutionWorktreeActiveRun() }),
         queryClient.invalidateQueries({ queryKey: queryKeys.evolutionWorktreeRuns() }),

@@ -52,9 +52,9 @@ def build_self_evolution_snapshot(
     )
     status_summary = worktree_bundle["git_status_summary"]
     worktree_snapshot_json = worktree_bundle["worktree_snapshot"]
-    recent_changes_json = _safe_tool_call(
-        lambda: get_recent_changes_tool(limit=change_limit),
-        fallback="[]",
+    recent_changes = _recent_changes_from_status_summary(
+        status_summary,
+        limit=change_limit,
     )
     fitness_json = _safe_tool_call(
         lambda: get_evolution_fitness_tool(recent_limit=recent_limit),
@@ -67,7 +67,7 @@ def build_self_evolution_snapshot(
             "summary": status_summary,
             "lines": _trim_lines(status_summary, fallback="git 状态暂不可用"),
         },
-        "recent_changes": _normalize_recent_changes_payload(recent_changes_json),
+        "recent_changes": recent_changes,
         "fitness": _normalize_fitness_payload(fitness_json),
         "worktree": _normalize_worktree_snapshot(worktree_snapshot_json),
         "recent_transactions": list_recent_self_evolution_transaction_payloads(
@@ -407,6 +407,19 @@ def _load_worktree_status_bundle(*, status_limit: int) -> dict[str, str]:
         "git_status_summary": status_summary or "git 状态暂不可用",
         "worktree_snapshot": worktree_snapshot or "{}",
     }
+
+
+def _recent_changes_from_status_summary(status_summary: str, *, limit: int) -> list[dict[str, str]]:
+    """Reuse the worktree bundle's indexed change summary without a second Git refresh."""
+
+    payload = _load_json_value(status_summary, fallback={})
+    raw_changes = payload.get("recent_changes") if isinstance(payload, dict) else []
+    if not isinstance(raw_changes, list):
+        return []
+    normalized_limit = max(1, int(limit or 1))
+    return _normalize_recent_changes_payload(
+        json.dumps(raw_changes[:normalized_limit], ensure_ascii=False),
+    )
 
 
 def _resolve_project_root(project_root: Path | None) -> Path:

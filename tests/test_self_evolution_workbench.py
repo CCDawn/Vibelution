@@ -5,6 +5,8 @@ import json
 import sqlite3
 from pathlib import Path
 
+import pytest
+
 from core.infrastructure import developer_sandbox
 from core.evaluation.self_evolution_workbench import (
     SelfEvolutionTransactionRecord,
@@ -274,7 +276,19 @@ def test_build_self_evolution_snapshot_returns_structured_payload(monkeypatch):
         "core.evaluation.self_evolution_workbench.get_worktree_status_bundle_tool",
         lambda limit=5: json.dumps(
             {
-                "git_status_summary": f"status-limit={limit}",
+                "git_status_summary": json.dumps(
+                    {
+                        "dirty_summary": f"status-limit={limit}",
+                        "recent_changes": [
+                            {
+                                "path": "agent.py",
+                                "change_type": "M",
+                                "subject": "touch agent loop",
+                            }
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
                 "worktree_snapshot": json.dumps(
                     {
                         "snapshot_id": "snap-7",
@@ -303,7 +317,7 @@ def test_build_self_evolution_snapshot_returns_structured_payload(monkeypatch):
     )
     monkeypatch.setattr(
         "core.evaluation.self_evolution_workbench.get_recent_changes_tool",
-        lambda limit=3: '[{"path":"agent.py","change_type":"M","summary":"touch agent loop"}]',
+        lambda limit=3: pytest.fail("snapshot should reuse recent changes from the worktree status bundle"),
     )
     monkeypatch.setattr(
         "core.evaluation.self_evolution_workbench.get_evolution_fitness_tool",
@@ -340,7 +354,7 @@ def test_build_self_evolution_snapshot_returns_structured_payload(monkeypatch):
 
     assert snapshot["goal"] == "自定义进化目标"
     assert snapshot["advisory"]["active_count"] == 1
-    assert snapshot["git_status"]["lines"][0] == "status-limit=5"
+    assert json.loads(snapshot["git_status"]["summary"])["dirty_summary"] == "status-limit=5"
     assert snapshot["recent_changes"][0]["path"] == "agent.py"
     assert snapshot["fitness"]["transactions"]["success_rate"] == 1.0
     assert snapshot["worktree"]["snapshot_id"] == "snap-7"

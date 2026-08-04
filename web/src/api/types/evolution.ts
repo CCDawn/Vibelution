@@ -942,6 +942,15 @@ export type EvolutionWorkspaceSnapshot = {
   selfTransactions: SelfEvolutionTransaction[];
 };
 
+export type SelfEvolutionWorkspaceSnapshot = {
+  overview: SelfEvolutionOverview;
+  transactions: SelfEvolutionTransaction[];
+  worktreeActiveRun: SupervisedWorktreeRun | null;
+  observationActiveRun: SelfObservationRun | null;
+  autonomousActiveRun: SelfEvolutionAutonomousLoopRun | null;
+  autonomousLatestRun: SelfEvolutionAutonomousLoopRun | null;
+};
+
 export type EvolutionRunActionResponse = {
   action: string;
   summary: string;

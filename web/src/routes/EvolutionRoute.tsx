@@ -38,10 +38,9 @@ import {
   EvolutionWorkspaceSnapshot,
   SupervisedWorktreeRun,
   SelfEvolutionAutonomousLoopRun,
-  SelfEvolutionOverview,
+  SelfEvolutionWorkspaceSnapshot,
   SelfObservationRun,
   SelfObservationRunStartRequest,
-  SelfEvolutionTransaction,
   SelfEvolutionHistoryDeleteResponse,
   EvolutionRun,
   EvolutionRoleConversationSession,
@@ -201,8 +200,6 @@ const CASE_TRACE_TURN_CLASS: Record<SupervisedCaseTraceTone, string> = {
   assistant: styles.caseTraceTurn_assistant,
   error: styles.caseTraceTurn_error,
 };
-const SELF_OVERVIEW_REFETCH_INTERVAL_MS = 12_000;
-const SELF_OVERVIEW_STALE_TIME_MS = 10_000;
 
 type SupervisedSourceOption =
   | {
@@ -421,24 +418,19 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const supervisedTrackQueriesEnabled = activeTrack === "supervised";
 
   const workspaceSnapshotQuery = useQuery({
-    queryKey: [...queryKeys.evolutionWorkspaceSnapshot(), selfTrackQueriesEnabled ? "include-self" : "default"] as const,
-    queryFn: () => fetchJson<EvolutionWorkspaceSnapshot>(
-      selfTrackQueriesEnabled
-        ? "/api/evolution/workspace-snapshot?includeSelf=true"
-        : "/api/evolution/workspace-snapshot",
-    ),
+    queryKey: queryKeys.evolutionWorkspaceSnapshot(),
+    queryFn: () => fetchJson<EvolutionWorkspaceSnapshot>("/api/evolution/workspace-snapshot"),
     // R3: idle workspace — slower poll; fast only when an active run is present (see below after data).
     refetchInterval: (query) => {
       const snapshot = query.state.data as EvolutionWorkspaceSnapshot | undefined;
       const hasActiveRun = Boolean(
         snapshot?.activeRun?.runId
-        || snapshot?.worktreeActiveRun?.runId
-        || snapshot?.selfAutonomousActiveRun?.runId,
+        || snapshot?.worktreeActiveRun?.runId,
       );
       return resolvePollingInterval(pageVisible, hasActiveRun ? 4_000 : 12_000);
     },
     refetchIntervalInBackground: false,
-    enabled: supervisedTrackQueriesEnabled || selfTrackQueriesEnabled,
+    enabled: supervisedTrackQueriesEnabled,
   });
   const workbenchCatalogQuery = useQuery({
     queryKey: queryKeys.evolutionWorkbench(),
@@ -447,18 +439,18 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     refetchIntervalInBackground: false,
     enabled: supervisedTrackQueriesEnabled,
   });
-  const selfOverviewQuery = useQuery({
-    queryKey: queryKeys.evolutionSelfOverview(),
-    queryFn: () => fetchJson<SelfEvolutionOverview>("/api/evolution/self/overview"),
-    staleTime: SELF_OVERVIEW_STALE_TIME_MS,
-    refetchInterval: resolvePollingInterval(pageVisible, SELF_OVERVIEW_REFETCH_INTERVAL_MS),
-    refetchIntervalInBackground: false,
-    enabled: selfTrackQueriesEnabled,
-  });
-  const selfTransactionsQuery = useQuery({
-    queryKey: queryKeys.evolutionSelfTransactions(),
-    queryFn: () => fetchJson<SelfEvolutionTransaction[]>("/api/evolution/self/transactions"),
-    refetchInterval: resolvePollingInterval(pageVisible, 12_000),
+  const selfWorkspaceSnapshotQuery = useQuery({
+    queryKey: queryKeys.evolutionSelfWorkspaceSnapshot(),
+    queryFn: () => fetchJson<SelfEvolutionWorkspaceSnapshot>("/api/evolution/self/workspace-snapshot"),
+    refetchInterval: (query) => {
+      const snapshot = query.state.data as SelfEvolutionWorkspaceSnapshot | undefined;
+      const hasActiveRun = Boolean(
+        snapshot?.worktreeActiveRun?.runId
+        || snapshot?.observationActiveRun?.runId
+        || snapshot?.autonomousActiveRun?.runId,
+      );
+      return resolvePollingInterval(pageVisible, hasActiveRun ? 4_000 : 30_000);
+    },
     refetchIntervalInBackground: false,
     enabled: selfTrackQueriesEnabled,
   });
@@ -539,7 +531,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   };
 
   const workspaceSnapshot = workspaceSnapshotQuery.data;
-  const activeSelfObservationRunId = workspaceSnapshot?.selfObservationActiveRun?.runId ?? "";
+  const selfWorkspaceSnapshot = selfWorkspaceSnapshotQuery.data;
+  const activeSelfObservationRunId = selfWorkspaceSnapshot?.observationActiveRun?.runId ?? "";
   useEffect(() => {
     if (activeSelfObservationRunId) {
       setSelectedSelfObservationRunId(activeSelfObservationRunId);
@@ -573,28 +566,24 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     worktreeRuns,
     recentSupervisedWorktreeRunId,
   );
-  const selfWorktreeRuns = workspaceSnapshot?.selfWorktreeRuns ?? worktreeRuns.filter((run) => isSelfEvolutionWorktreeRun(run));
-  const selfWorktreeRun =
-    workspaceSnapshot?.selfWorktreeActiveRun
-    ?? (isSelfEvolutionWorktreeRun(activeWorktreeRun) ? activeWorktreeRun : null)
-    ?? null;
+  const selfWorktreeRun = selfWorkspaceSnapshot?.worktreeActiveRun ?? null;
   const reviewCandidateWorktree = activeWorktreeRun ?? worktreeRuns[0] ?? null;
   const reviewCandidateGate = reviewCandidateWorktree?.reviewGate ?? reviewCandidateWorktree?.mergeAnalysis?.reviewGate;
   const highlightedReviewPending = isSelfEvolutionWorktreeRun(reviewCandidateWorktree)
     && Boolean(reviewCandidateGate?.required)
     && String(reviewCandidateGate?.status || "").trim().toLowerCase() !== "approved";
-  const selfOverview = selfOverviewQuery.data ?? workspaceSnapshot?.selfOverview;
-  const selfTransactions = selfTransactionsQuery.data ?? workspaceSnapshot?.selfTransactions ?? [];
-  const selfObservationRun = workspaceSnapshot?.selfObservationActiveRun
+  const selfOverview = selfWorkspaceSnapshot?.overview;
+  const selfTransactions = selfWorkspaceSnapshot?.transactions ?? [];
+  const selfObservationRun = selfWorkspaceSnapshot?.observationActiveRun
     ?? selectedSelfObservationRunQuery.data
     ?? null;
   const selfAutonomousRun: SelfEvolutionAutonomousLoopRun | null =
-    workspaceSnapshot?.selfAutonomousActiveRun
-    ?? workspaceSnapshot?.selfAutonomousLatestRun
+    selfWorkspaceSnapshot?.autonomousActiveRun
+    ?? selfWorkspaceSnapshot?.autonomousLatestRun
     ?? null;
   const selfTrackLoading = selfTrackQueriesEnabled
     && !selfOverview
-    && (selfOverviewQuery.isLoading || workspaceSnapshotQuery.isLoading);
+    && selfWorkspaceSnapshotQuery.isLoading;
   const latestRun = runs[0] ?? null;
   const supervisedClosedLoopRecord: SupervisedClosedLoopRecord | null =
     workspaceSnapshot?.latestClosedLoopRecord
@@ -645,8 +634,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     : null);
   const runLocked = Boolean(runningRun && isLiveSupervisedRunStatus(runningRun.status));
   const worktreeRunLocked = Boolean(
-    activeWorktreeRun
-    && ["queued", "running", "paused", "stopping"].includes(String(activeWorktreeRun.status || "").toLowerCase()),
+    (activeWorktreeRun ?? selfWorktreeRun)
+    && ["queued", "running", "paused", "stopping"].includes(String((activeWorktreeRun ?? selfWorktreeRun)?.status || "").toLowerCase()),
   );
   const supervisedStartSubmitting = startWorktreeRunMutation.isPending || isLocalSupervisedStartPlaceholder(liveActiveRun);
   const supervisedPrimaryRunning = runLocked || worktreeRunLocked;
@@ -1613,12 +1602,12 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   }, [forcedView, rawEvolutionView, setEvolutionView]);
 
   useEffect(() => {
-    if (selfGoalInitialized || !workspaceSnapshot?.selfOverview?.goal) {
+    if (selfGoalInitialized || !selfWorkspaceSnapshot?.overview?.goal) {
       return;
     }
-    setSelfGoalInput(workspaceSnapshot.selfOverview.goal);
+    setSelfGoalInput(selfWorkspaceSnapshot.overview.goal);
     setSelfGoalInitialized(true);
-  }, [selfGoalInitialized, workspaceSnapshot?.selfOverview?.goal]);
+  }, [selfGoalInitialized, selfWorkspaceSnapshot?.overview?.goal]);
 
   useEffect(() => {
     if (!pageVisible) {

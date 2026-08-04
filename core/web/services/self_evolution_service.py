@@ -26,8 +26,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SELF_EVOLUTION_OVERVIEW_CACHE_TTL_SECONDS = 15.0
 SELF_EVOLUTION_OVERVIEW_SLOW_MS = 1000.0
 _OVERVIEW_CACHE_LOCK = threading.Lock()
+_OVERVIEW_BUILD_LOCK = threading.Lock()
 _OVERVIEW_CACHE: dict[str, Any] = {}
 _SELF_OVERVIEW_WAS_SLOW = False
+_SELF_WORKSPACE_SNAPSHOT_WAS_SLOW = False
 
 
 class SelfEvolutionHistoryDeleteError(ValueError):
@@ -42,69 +44,110 @@ def get_self_evolution_overview() -> dict[str, Any]:
     enabled = _self_evolution_enabled(contract)
     lang = get_web_language()
     cache_key = _self_overview_cache_key(lang=lang, enabled=enabled)
-    cached = _get_self_overview_cache(cache_key)
-    if cached is not None:
+    with _OVERVIEW_BUILD_LOCK:
+        cached = _get_self_overview_cache(cache_key)
+        if cached is not None:
+            _record_self_overview_perf(
+                duration_ms=(time.perf_counter() - started_at) * 1000,
+                cache_hit=True,
+                enabled=enabled,
+            )
+            return cached
+        phase_timings: list[dict[str, Any]] = []
+        phase_started_at = time.perf_counter()
+        snapshot = (
+            build_self_evolution_snapshot(project_root=PROJECT_ROOT, transaction_limit=6, recent_limit=4)
+            if enabled
+            else _empty_snapshot()
+        )
+        _append_self_overview_phase_timing(phase_timings, "snapshot.build", phase_started_at)
+        phase_started_at = time.perf_counter()
+        advisory = snapshot.get("advisory", {})
+        worktree = snapshot.get("worktree", {})
+        fitness = snapshot.get("fitness", {})
+        recent_transactions = snapshot.get("recent_transactions", [])
+        readiness = _build_readiness(lang, enabled=enabled, worktree=worktree, recent_transactions=recent_transactions)
+        _append_self_overview_phase_timing(phase_timings, "readiness.build", phase_started_at)
+        phase_started_at = time.perf_counter()
+        audit_tail = _audit_payloads(load_self_evolution_audit_records(PROJECT_ROOT, limit=6))
+        _append_self_overview_phase_timing(phase_timings, "audit_tail.load", phase_started_at, count=len(audit_tail))
+        phase_started_at = time.perf_counter()
+
+        payload = {
+            "enabled": enabled,
+            "goal": str(snapshot.get("goal") or DEFAULT_SELF_EVOLUTION_GOAL),
+            "readiness": readiness,
+            "sceneSemantics": _scene_semantics(readiness),
+            "runSemantics": _overview_run_semantics(recent_transactions, lang=lang),
+            "actionStates": {
+                "start": _start_action_state(enabled=enabled, lang=lang),
+            },
+            "guardrails": _guardrails(lang),
+            "metrics": _build_metrics(advisory, worktree, fitness, recent_transactions),
+            "advisory": _advisory_payload(advisory),
+            "gitStatus": _git_status_payload(snapshot.get("git_status", {}), lang),
+            "recentChanges": _recent_changes_payload(snapshot.get("recent_changes", [])),
+            "fitness": _fitness_payload(fitness),
+            "worktree": _worktree_payload(worktree),
+            "recentTransactions": _transaction_payloads(recent_transactions[:4]),
+            "auditTail": audit_tail,
+        }
+        _append_self_overview_phase_timing(phase_timings, "payload.build", phase_started_at)
+        _set_self_overview_cache(cache_key, payload)
         _record_self_overview_perf(
             duration_ms=(time.perf_counter() - started_at) * 1000,
-            cache_hit=True,
+            cache_hit=False,
             enabled=enabled,
+            recent_transaction_count=len(recent_transactions),
+            dirty_file_count=int((worktree or {}).get("dirty_file_count") or 0),
+            phase_timings=phase_timings,
         )
-        return cached
-    phase_timings: list[dict[str, Any]] = []
-    phase_started_at = time.perf_counter()
-    snapshot = (
-        build_self_evolution_snapshot(project_root=PROJECT_ROOT, transaction_limit=6, recent_limit=4)
-        if enabled
-        else _empty_snapshot()
-    )
-    _append_self_overview_phase_timing(phase_timings, "snapshot.build", phase_started_at)
-    phase_started_at = time.perf_counter()
-    advisory = snapshot.get("advisory", {})
-    worktree = snapshot.get("worktree", {})
-    fitness = snapshot.get("fitness", {})
-    recent_transactions = snapshot.get("recent_transactions", [])
-    readiness = _build_readiness(lang, enabled=enabled, worktree=worktree, recent_transactions=recent_transactions)
-    _append_self_overview_phase_timing(phase_timings, "readiness.build", phase_started_at)
-    phase_started_at = time.perf_counter()
-    audit_tail = _audit_payloads(load_self_evolution_audit_records(PROJECT_ROOT, limit=6))
-    _append_self_overview_phase_timing(phase_timings, "audit_tail.load", phase_started_at, count=len(audit_tail))
-    phase_started_at = time.perf_counter()
-
-    payload = {
-        "enabled": enabled,
-        "goal": str(snapshot.get("goal") or DEFAULT_SELF_EVOLUTION_GOAL),
-        "readiness": readiness,
-        "sceneSemantics": _scene_semantics(readiness),
-        "runSemantics": _overview_run_semantics(recent_transactions, lang=lang),
-        "actionStates": {
-            "start": _start_action_state(enabled=enabled, lang=lang),
-        },
-        "guardrails": _guardrails(lang),
-        "metrics": _build_metrics(advisory, worktree, fitness, recent_transactions),
-        "advisory": _advisory_payload(advisory),
-        "gitStatus": _git_status_payload(snapshot.get("git_status", {}), lang),
-        "recentChanges": _recent_changes_payload(snapshot.get("recent_changes", [])),
-        "fitness": _fitness_payload(fitness),
-        "worktree": _worktree_payload(worktree),
-        "recentTransactions": _transaction_payloads(recent_transactions[:4]),
-        "auditTail": audit_tail,
-    }
-    _append_self_overview_phase_timing(phase_timings, "payload.build", phase_started_at)
-    _set_self_overview_cache(cache_key, payload)
-    _record_self_overview_perf(
-        duration_ms=(time.perf_counter() - started_at) * 1000,
-        cache_hit=False,
-        enabled=enabled,
-        recent_transaction_count=len(recent_transactions),
-        dirty_file_count=int((worktree or {}).get("dirty_file_count") or 0),
-        phase_timings=phase_timings,
-    )
-    return json.loads(json.dumps(payload))
+        return json.loads(json.dumps(payload))
 
 
 def invalidate_self_evolution_overview_cache() -> None:
-    with _OVERVIEW_CACHE_LOCK:
+    with _OVERVIEW_BUILD_LOCK, _OVERVIEW_CACHE_LOCK:
         _OVERVIEW_CACHE.clear()
+
+
+def record_self_evolution_workspace_snapshot_perf(
+    *,
+    duration_ms: float,
+    timings_ms: dict[str, float],
+    self_transaction_count: int,
+) -> None:
+    """Record the compact self-evolution first-paint projection without payload content."""
+
+    global _SELF_WORKSPACE_SNAPSHOT_WAS_SLOW
+    slow = duration_ms >= SELF_EVOLUTION_OVERVIEW_SLOW_MS
+    recovered = _SELF_WORKSPACE_SNAPSHOT_WAS_SLOW and duration_ms <= SELF_EVOLUTION_OVERVIEW_SLOW_MS * 0.75
+    _SELF_WORKSPACE_SNAPSHOT_WAS_SLOW = slow
+    if not slow and not recovered:
+        return
+    try:
+        from core.web.services.runtime_scene_service import record_runtime_scene_event
+
+        record_runtime_scene_event(
+            "self_evolution",
+            "workspace_snapshot",
+            "self_evolution.workspace_snapshot.slow" if slow else "self_evolution.workspace_snapshot.recovered",
+            message=(
+                "Self-evolution first-paint snapshot exceeded slow threshold."
+                if slow
+                else "Self-evolution first-paint snapshot recovered below slow threshold."
+            ),
+            level="warning" if slow else "info",
+            outcome="observed" if slow else "recovered",
+            fields={
+                "durationMs": round(float(duration_ms), 1),
+                "thresholdMs": SELF_EVOLUTION_OVERVIEW_SLOW_MS,
+                "timingsMs": {key: round(float(value), 1) for key, value in timings_ms.items()},
+                "selfTransactionCount": int(self_transaction_count),
+            },
+            lifecycle=True,
+        )
+    except Exception:  # noqa: BLE001 - observability must never block the read-only workbench snapshot.
+        return
 
 
 def _self_overview_cache_key(*, lang: str, enabled: bool) -> str:
