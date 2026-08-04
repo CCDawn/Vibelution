@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import subprocess
 import threading
@@ -254,15 +255,30 @@ class GitMemoryService:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_git_entity_change_ref ON GitEntityChange(entity_ref)")
 
     def _run_git(self, args: List[str]) -> subprocess.CompletedProcess[str]:
+        return self._run_git_with_options(args)
+
+    def _run_git_with_options(
+        self,
+        args: List[str],
+        *,
+        no_lazy_fetch: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
         # Git scans are tool-driven (or startup prewarm). Timeouts must degrade to an
         # unavailable CompletedProcess, never raise TimeoutExpired into callers.
         try:
+            run_kwargs: Dict[str, Any] = {
+                "cwd": str(self._project_root),
+                "capture_output": True,
+                "text": True,
+                "timeout": 20,
+            }
+            if no_lazy_fetch:
+                environment = os.environ.copy()
+                environment["GIT_NO_LAZY_FETCH"] = "1"
+                run_kwargs["env"] = environment
             return git_process.run_git(
                 args,
-                cwd=str(self._project_root),
-                capture_output=True,
-                text=True,
-                timeout=20,
+                **run_kwargs,
             )
         except subprocess.TimeoutExpired as exc:
             timeout_seconds = getattr(exc, "timeout", 20)
@@ -324,8 +340,30 @@ class GitMemoryService:
             ).fetchone()
             return row is not None
 
+    def _is_usable_index_base(self, base_rev: Optional[str]) -> bool:
+        """Return whether an indexed commit is still a local ancestor of HEAD.
+
+        The Git-memory database survives rebases and worktree replacement.  A stale
+        commit id passed directly to ``git rev-list <base>..HEAD`` can make Git try
+        an expensive promisor/remote lookup before failing.  Validate it locally
+        first, then keep indexing bounded when history no longer contains that base.
+        """
+        if not base_rev:
+            return False
+        object_result = self._run_git_with_options(
+            ["rev-parse", "--verify", "--quiet", f"{base_rev}^{{commit}}"],
+            no_lazy_fetch=True,
+        )
+        if object_result.returncode != 0:
+            return False
+        ancestry_result = self._run_git_with_options(
+            ["merge-base", "--is-ancestor", base_rev, "HEAD"],
+            no_lazy_fetch=True,
+        )
+        return ancestry_result.returncode == 0
+
     def _list_commits_to_index(self, base_rev: Optional[str]) -> List[str]:
-        if base_rev:
+        if self._is_usable_index_base(base_rev):
             result = self._run_git(["rev-list", "--reverse", f"{base_rev}..HEAD"])
         else:
             result = self._run_git(["rev-list", "--reverse", "--max-count", "20", "HEAD"])
