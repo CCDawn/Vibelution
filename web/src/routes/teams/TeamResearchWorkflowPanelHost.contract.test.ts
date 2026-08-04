@@ -11,7 +11,9 @@ describe("TeamResearchWorkflowPanelHost extraction contract", () => {
     );
     expect(routeSource).toContain("function renderResearchWorkflowPanel()");
     expect(routeSource).toContain("function renderResearchWorkflowModules()");
-    expect(routeSource.match(/\{renderResearchWorkflowPanel\(\)\}/g)?.length).toBe(2);
+    // Called from renderTeamsInspectorSharedPanels (used by board + canvas), not inlined twice.
+    expect(routeSource.match(/\{renderResearchWorkflowPanel\(\)\}/g)?.length).toBe(1);
+    expect(routeSource.match(/\{renderTeamsInspectorSharedPanels\(\)\}/g)?.length).toBe(2);
     // Host JSX appears once inside the helper, not duplicated per shell.
     expect(routeSource.match(/<TeamResearchWorkflowPanelHost[\s\S]*?>/g)?.length).toBe(1);
     // Stage modules are composed once.
