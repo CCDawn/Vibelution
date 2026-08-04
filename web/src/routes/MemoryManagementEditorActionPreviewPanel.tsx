@@ -42,14 +42,8 @@ export function MemoryManagementEditorActionPreviewPanel({
   return (
     <>
       <div className={styles.managementActions}>
-        <VButton type="button" className={styles.primaryActionButton} onClick={onSave} isDisabled={mutationBusy}>
-          <CheckCircle2 size={15} />
-          <span>{copy.saveMemory}</span>
-        </VButton>
-        <VButton type="button" className={styles.detailActionButton} onClick={onCancel} isDisabled={mutationBusy}>
-          <XCircle size={15} />
-          <span>{copy.cancelEdit}</span>
-        </VButton>
+        <VButton type="button" className={styles.primaryActionButton} onClick={onSave} isDisabled={mutationBusy} icon={<CheckCircle2 size={15}/>}><span>{copy.saveMemory}</span></VButton>
+        <VButton type="button" className={styles.detailActionButton} onClick={onCancel} isDisabled={mutationBusy} icon={<XCircle size={15}/>}><span>{copy.cancelEdit}</span></VButton>
       </div>
       <section className={styles.editPreviewPanel} aria-label={copy.editPreview}>
         <div className={styles.panelHeader}>

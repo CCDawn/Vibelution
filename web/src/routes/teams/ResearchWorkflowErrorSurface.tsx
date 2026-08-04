@@ -41,11 +41,13 @@ export function ResearchWorkflowErrorSurface({
             variant="danger"
             isDisabled={pending}
             onPress={() => onRecommendedAction?.(presented.recommendedAction)}
+            icon={
+              presented.recommendedAction === "reset_progress_cascade"
+                || presented.recommendedAction === "reset_source_only" ? (
+                <Trash2 size={14} />
+              ) : null
+            }
           >
-            {presented.recommendedAction === "reset_progress_cascade"
-              || presented.recommendedAction === "reset_source_only" ? (
-              <Trash2 size={14} />
-            ) : null}
             {pending ? (lang === "zh" ? "处理中…" : "Working…") : actionLabel}
           </VButton>
         ) : undefined

@@ -231,9 +231,7 @@ export function ConfigProviderWizard({
       />
       <div className={styles.wizardSteps} aria-label="Provider 向导进度">
         {STEPS.map((step, index) => (
-          <VButton key={step.id} variant={step.id === state.step ? "primary" : "ghost"} isDisabled>
-            {index < selectedStepIndex ? <Check size={13} /> : null}{step.label}
-          </VButton>
+          <VButton key={step.id} variant={step.id === state.step ? "primary" : "ghost"} isDisabled icon={index < selectedStepIndex ? <Check size={13} /> : null}>{step.label}</VButton>
         ))}
       </div>
 

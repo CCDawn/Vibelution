@@ -128,10 +128,7 @@ export function MemoryKnowledgeGovernancePanel({
               <strong>{task.title}</strong>
               <span>{task.summary || task.targetId}</span>
               <small>{task.taskType} · {task.targetStatus} · {task.knowledgeBaseName}</small>
-              <VButton type="button" className={styles.detailActionButton} onClick={() => onTraceTarget(task.targetId)}>
-                <Eye size={14} />
-                <span>{copy.traceability}</span>
-              </VButton>
+              <VButton type="button" className={styles.detailActionButton} onClick={() => onTraceTarget(task.targetId)} icon={<Eye size={14}/>}><span>{copy.traceability}</span></VButton>
             </section>
           ))}
           {!governanceTasksPending && !governanceTasks.length ? (

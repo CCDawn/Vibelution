@@ -29,6 +29,7 @@ import { useShellI18n } from "../i18n/useShellI18n";
 import { AgentManagementModuleBar } from "./AgentManagementModuleBar";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
 import styles from "./PromptTemplatesRoute.styles";
+import { ProgressiveRegionSkeleton } from "./shared/ProgressiveRegionSkeleton";
 
 type PromptCategoryFilter = "all" | "chat" | "research" | "supervised_evolution" | "self_evolution" | "general";
 
@@ -621,7 +622,7 @@ export function PromptTemplatesRoute() {
             {templatesQuery.isError ? (
               <VStateSurface className={styles.emptyStateClass} tone="error" title={copy.loadFailed} />
             ) : templatesQuery.isPending ? (
-              <VStateSurface className={styles.emptyStateClass} tone="loading" title={copy.loading} skeletonLines={3} />
+              <ProgressiveRegionSkeleton variant="list" className={styles.emptyStateClass} label={copy.loading} />
             ) : filteredTemplates.length === 0 ? (
               <VStateSurface className={styles.emptyStateClass} tone="empty" title={copy.emptyList} />
             ) : (
@@ -780,13 +781,18 @@ export function PromptTemplatesRoute() {
                 </VButton>
               </div>
             </>
+          ) : templatesQuery.isPending ? (
+            <ProgressiveRegionSkeleton
+              variant="detail"
+              className={styles.emptyStateClass}
+              label={copy.loading}
+            />
           ) : (
             <VStateSurface
               fill
               className={styles.emptyStateClass}
-              tone={templatesQuery.isPending ? "loading" : "empty"}
-              title={templatesQuery.isPending ? copy.loading : copy.emptyEditor}
-              skeletonLines={templatesQuery.isPending ? 3 : false}
+              tone="empty"
+              title={copy.emptyEditor}
             />
           )}
         </VSurface>

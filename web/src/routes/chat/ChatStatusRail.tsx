@@ -348,50 +348,38 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
                       type="button"
                       className={styles.groupSecondaryButton}
                       onClick={() => onOpenTeam(activeGroupTeam.teamId)}
-                    >
-                      <ArrowUpRight size={14} />
-                      <span>{lang === "zh" ? "打开团队" : "Open team"}</span>
-                    </VButton>
+                      icon={<ArrowUpRight size={14} />}><span>{lang === "zh" ? "打开团队" : "Open team"}</span></VButton>
                   ) : null}
                   <VButton
                     type="button"
                     className={groupManageChanged ? styles.groupApplyButton : styles.groupSecondaryButton}
                     isDisabled={groupManageDisabled || !groupManageChanged}
                     onClick={onApplyGroupRoomManagement}
-                  >
-                    <Check size={14} />
-                    <span>
+                icon={<Check size={14} />}><span>
                       {updateGroupRoomPending
                         ? (lang === "zh" ? "应用中" : "Applying")
                         : (lang === "zh" ? "应用变更" : "Apply")}
-                    </span>
-                  </VButton>
+                    </span></VButton>
                   <VButton
                     type="button"
                     className={styles.groupDeleteButton}
                     isDisabled={groupDeleteDisabled}
                     onClick={onDeleteActiveGroupRoom}
-                  >
-                    <Trash2 size={14} />
-                    <span>
+                icon={<Trash2 size={14} />}><span>
                       {deleteGroupRoomPending
                         ? (lang === "zh" ? "删除中" : "Deleting")
                         : (lang === "zh" ? "删除" : "Delete")}
-                    </span>
-                  </VButton>
+                    </span></VButton>
                   <VButton
                     type="button"
                     className={styles.groupSecondaryButton}
                     isDisabled={groupResetDisabled}
                     onClick={onResetActiveGroupRoom}
-                  >
-                    <RotateCcw size={14} />
-                    <span>
+                icon={<RotateCcw size={14} />}><span>
                       {resetGroupRoomPending
                         ? (lang === "zh" ? "重置中" : "Resetting")
                         : (lang === "zh" ? "重置消息" : "Reset messages")}
-                    </span>
-                  </VButton>
+                    </span></VButton>
                 </div>
               </div>
               {groupRoomActionError ? (
@@ -538,10 +526,7 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
                 onFocus={() => onPrefetchDirectSession?.(agentPrimaryDirectSessionId)}
                 onClick={() => onOpenDirectSession(agentPrimaryDirectSessionId)}
                 title={`${t("openCurrentDirectSession")} · ${agentPrimaryDirectSessionId}`}
-              >
-                <ArrowUpRight size={13} />
-                <span>{t("openCurrentDirectSession")}</span>
-              </VButton>
+                icon={<ArrowUpRight size={13} />}><span>{t("openCurrentDirectSession")}</span></VButton>
             </div>
           ) : null}
           {sessionCompactRows.length > 0 ? (

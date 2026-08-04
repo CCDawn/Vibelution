@@ -2,6 +2,7 @@ import { Activity, ExternalLink, FileSearch, PlayCircle } from "lucide-react";
 
 import { VButton, VStateSurface, VTooltip } from "../components/vui";
 import styles from "./AgentOverviewOperationsPanel.styles";
+import { ProgressiveRegionSkeleton } from "./shared/ProgressiveRegionSkeleton";
 
 export type AgentOverviewOperationsCopy = {
   currentFocus: string;
@@ -112,12 +113,7 @@ export function AgentOverviewOperationsPanel({
         </div>
         <div className={styles.activityBody} aria-busy={state === "loading"}>
           {state === "loading" ? (
-            <VStateSurface
-              tone="loading"
-              title={copy.loading}
-              icon={<PlayCircle size={16} aria-hidden="true" />}
-              skeletonLines={2}
-            />
+            <ProgressiveRegionSkeleton variant="list" label={copy.loading} />
           ) : null}
           {state === "error" ? (
             <VStateSurface

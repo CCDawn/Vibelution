@@ -10,7 +10,6 @@ import {
   VButton,
   VChip,
   VEmptyState,
-  VStateSurface,
   VStatusChip,
   VStatusStrip,
   VSurface,
@@ -22,6 +21,7 @@ import { fetchSessionDetailWindow } from "./chat/chatSessionDetailHelpers";
 import { mergeSessionDetailMessageWindow } from "./chatSessionState";
 import type { SupervisedMemberRole, SupervisedRunMember } from "./evolution/evolutionRouteModel";
 import styles from "./SupervisedAgentConversationPanel.styles";
+import { ProgressiveRegionSkeleton } from "./shared/ProgressiveRegionSkeleton";
 
 export type SupervisedAgentConversationPanelProps = {
   members: SupervisedRunMember[];
@@ -409,25 +409,19 @@ export function SupervisedAgentConversationPanel({
               onComposerChange={() => undefined}
               onSubmit={() => undefined}
               fallback={(
-                <VStateSurface
-                  fill
+                <ProgressiveRegionSkeleton
+                  variant="conversation"
                   className={styles.loading}
-                  tone="loading"
-                  title={lang === "zh" ? "正在加载统一对话前端" : "Loading conversation"}
-                >
-                  {lang === "zh" ? "对话界面就绪后会原位铺满此区。" : "The conversation surface will fill this region when ready."}
-                </VStateSurface>
+                  label={lang === "zh" ? "正在加载统一对话前端" : "Loading conversation"}
+                />
               )}
             />
           ) : sessionDetailQuery.isLoading ? (
-            <VStateSurface
-              fill
+            <ProgressiveRegionSkeleton
+              variant="conversation"
               className={styles.loading}
-              tone="loading"
-              title={lang === "zh" ? "正在加载 Agent 会话" : "Loading Agent session"}
-            >
-              {lang === "zh" ? "会话内容返回后会显示在此区。" : "Session content will appear in this region."}
-            </VStateSurface>
+              label={lang === "zh" ? "正在加载 Agent 会话" : "Loading Agent session"}
+            />
           ) : (
             <VEmptyState
               className={styles.empty}

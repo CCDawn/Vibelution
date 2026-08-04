@@ -1824,9 +1824,8 @@ export function ConversationView({
                     aria-controls={detailsId}
                     onClick={() => toggleSection(operation.id, "details", false)}
                     title={detailToggleTitle}
-                  >
-                    {detailsExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                  </VButton>
+                    isIconOnly
+                    icon={detailsExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />} />
                 ) : (
                   <span className={styles.operationChevron} aria-hidden="true">
                     {hasOperationDetails(operation) ? <ChevronRight size={16} /> : null}
@@ -3086,9 +3085,8 @@ export function ConversationView({
                       aria-controls={detailsId}
                       onClick={() => toggleSection(operation.id, "details", false)}
                       title={detailsExpanded ? t("toolCallDetailsVisible") : t("toolCallDetailsHidden")}
-                    >
-                      {detailsExpanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
-                    </VButton>
+                      isIconOnly
+                      icon={detailsExpanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />} />
                   ) : null}
                 </div>
                 {canExpandDetails ? (
@@ -3151,9 +3149,9 @@ export function ConversationView({
           title={expanded
             ? lang === "zh" ? "折叠工具结果" : "Collapse tool results"
             : lang === "zh" ? "展开工具结果" : "Expand tool results"}
+          trailingIcon={expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
         >
           <span className={styles.reActOperationSectionLabel}>{label}</span>
-          {expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
         </VButton>
         {expanded ? (
           <div id={bodyId} className={styles.reActResultList}>
@@ -3237,14 +3235,13 @@ export function ConversationView({
           aria-expanded={expanded}
           onClick={() => toggleSection(messageId, section, defaultExpanded)}
           title={toggleTitle}
-        >
-          {operationIcon(kind, title)}
+          isIconOnly
+          icon={operationIcon(kind, title)}
           <span>{title}</span>
           {!expanded && operations[0]?.summary ? (
             <span className={styles.operationSummaryPreview}>{operations[0].summary}</span>
           ) : null}
-          {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-        </VButton>
+          {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />} />
         {expanded ? renderOperationTimeline(operations) : null}
       </section>
     );
@@ -3285,12 +3282,11 @@ export function ConversationView({
           aria-expanded={expanded}
           onClick={() => toggleSection(messageId, "feedback", defaultTimelineExpanded)}
           title={expanded ? t("executionDetailsVisible") : t("executionDetailsHidden")}
-        >
-          {operationIcon(operations[0]?.kind ?? "tool", title)}
+          isIconOnly
+          icon={operationIcon(operations[0]?.kind ?? "tool", title)}
           <span>{title}</span>
           <span className={styles.operationSummaryCount}>{stateLabel}</span>
-          {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-        </VButton>
+          {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />} />
         {expanded ? renderFeedbackTimelineDetails(messageId, operations) : null}
       </section>
     );
@@ -4020,9 +4016,8 @@ export function ConversationView({
                         aria-pressed={isEditingMessage}
                         title={editDisabled ? composerPlaceholder : editUserMessageLabel ?? t("editMessage")}
                         aria-label={editUserMessageLabel ?? t("editMessage")}
-                      >
-                        <Pencil size={14} />
-                      </VButton>
+                        isIconOnly
+                        icon={<Pencil size={14}/>} />
                     ) : null}
                   </>
                 }
@@ -4056,11 +4051,8 @@ export function ConversationView({
                         aria-expanded={agentInboxExpanded}
                         onClick={() => toggleSection(message.id, "agentInbox", false)}
                         title={agentInboxExpanded ? (lang === "zh" ? "折叠私信内容" : "Collapse private message") : (lang === "zh" ? "展开私信内容" : "Expand private message")}
-                      >
-                        {agentInboxExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                        <span>{lang === "zh" ? "私信内容" : "Private message"}</span>
-                        {agentInboxPreview ? <span className={styles.agentInboxPreview}>{agentInboxPreview}</span> : null}
-                      </VButton>
+                        icon={agentInboxExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}><span>{lang === "zh" ? "私信内容" : "Private message"}</span>
+                        {agentInboxPreview ? <span className={styles.agentInboxPreview}>{agentInboxPreview}</span> : null}</VButton>
                       {agentInboxExpanded ? (
                         <div className={styles.agentInboxMessageBody}>
                           {renderResponseText(message.content)}
@@ -4279,9 +4271,8 @@ export function ConversationView({
                         onClick={() => onRemoveComposerReference(referenceId)}
                         title={lang === "zh" ? "移除会话引用" : "Remove session reference"}
                         aria-label={lang === "zh" ? "移除会话引用" : "Remove session reference"}
-                      >
-                        <X size={13} aria-hidden="true" />
-                      </VButton>
+                        isIconOnly
+                        icon={<X size={13} aria-hidden="true"/>} />
                     ) : null}
                   </div>
                 );

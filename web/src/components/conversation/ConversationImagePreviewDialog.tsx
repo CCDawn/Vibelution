@@ -73,9 +73,7 @@ export function ConversationImagePreviewDialog({
               title={closeLabel}
               aria-label={closeLabel}
               autoFocus
-            >
-              <X size={16} aria-hidden="true" />
-            </VButton>
+                icon={<X size={16} aria-hidden="true" />}></VButton>
           </div>
         </div>
         <img className={styles.imagePreviewLarge} src={image.src} alt={image.alt} aria-describedby={descriptionId} />

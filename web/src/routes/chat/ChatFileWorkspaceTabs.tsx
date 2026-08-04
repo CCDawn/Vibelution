@@ -55,9 +55,8 @@ export function ChatFileWorkspaceTabs({
               onClick={() => onCloseTab(tabPath)}
               title={closePreviewTabLabel}
               aria-label={`${closePreviewTabLabel} ${tabName}`}
-            >
-              <X size={14} aria-hidden="true" />
-            </VButton>
+              isIconOnly
+              icon={<X size={14} aria-hidden="true"/>} />
           </div>
         );
       })}

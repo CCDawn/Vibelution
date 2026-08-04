@@ -44,10 +44,7 @@ export function ConfigDraftPanel({
         <p className={styles.sectionText}>{copy.draftBody}</p>
         <div className={styles.draftWorkbench}>
         <div className={styles.draftActionRail}>
-          <VButton type="button" className={styles.actionButton} isDisabled={!canCheckCurrentChanges} onClick={onValidateEditorDraft}>
-            <RefreshCw size={14} />
-            {copy.validateDraft}
-          </VButton>
+          <VButton type="button" className={styles.actionButton} isDisabled={!canCheckCurrentChanges} onClick={onValidateEditorDraft} icon={<RefreshCw size={14} />}>{copy.validateDraft}</VButton>
           <VButton
             type="button"
             className={styles.actionButton}
@@ -55,10 +52,7 @@ export function ConfigDraftPanel({
             tooltip={copy.editorRestoreHint}
             disabledReason={copy.editorRestoreHint}
             onClick={onRestoreEditorText}
-          >
-            <RotateCcw size={14} />
-            {copy.resetDraft}
-          </VButton>
+                icon={<RotateCcw size={14} />}>{copy.resetDraft}</VButton>
           <span className={styles.helperText}>{hasEditorChanges ? copy.editorDirtyHint : copy.editorCleanHint}</span>
         </div>
         <div className={styles.editorWrap}>

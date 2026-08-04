@@ -188,10 +188,7 @@ export function EvolutionRunRecordsPanel({
           type="button"
           className={styles.inlineAction}
           onClick={() => onOpenProposal(item, view)}
-        >
-          <ArrowUpRight size={15} />
-          {t("openProposal")}
-        </VButton>
+          icon={<ArrowUpRight size={15} />}>{t("openProposal")}</VButton>
         <VButton
           type="button"
           variant="danger"
@@ -200,10 +197,7 @@ export function EvolutionRunRecordsPanel({
           tooltip={lang === "zh" ? "删除这条提案记录。" : "Delete this proposal record."}
           disabledReason={!item.canDelete ? item.deleteBlockReason || (lang === "zh" ? "当前提案不可删除。" : "This proposal cannot be deleted.") : deleteProposalPending ? (lang === "zh" ? "提案正在删除。" : "Proposal deletion is in progress.") : undefined}
           onClick={() => onDeleteProposal(item.sourceRun)}
-        >
-          <Trash2 size={15} />
-          {t("deleteProposal")}
-        </VButton>
+          icon={<Trash2 size={15} />}>{t("deleteProposal")}</VButton>
       </div>
       {!item.canDelete && item.deleteBlockReason ? (
         <p>{item.deleteBlockReason}</p>
@@ -234,10 +228,7 @@ export function EvolutionRunRecordsPanel({
                 isDisabled={visibleDeletableRunCount === 0 || allVisibleDeletableRunsSelected}
                 disabledReason={visibleDeletableRunCount === 0 ? (lang === "zh" ? "当前列表没有可删除的运行记录。" : "There are no deletable run records in this list.") : (lang === "zh" ? "当前可删除记录已全部选中。" : "All deletable records are already selected.")}
                 onClick={onSelectVisibleRunRecords}
-              >
-                <CheckCircle2 size={15} />
-                {t("selectVisibleRuns")}
-              </VButton>
+                icon={<CheckCircle2 size={15}/>}>{t("selectVisibleRuns")}</VButton>
               <VButton
                 type="button"
                 className={styles.inlineAction}
@@ -255,10 +246,7 @@ export function EvolutionRunRecordsPanel({
                 tooltip={t("runBatchDeleteHint")}
                 disabledReason={selectedRunIds.length === 0 ? (lang === "zh" ? "先选择运行记录。" : "Select run records first.") : bulkDeleteRunRecordsPending ? (lang === "zh" ? "批量删除正在进行。" : "Bulk deletion is in progress.") : undefined}
                 onClick={onBulkDeleteRunRecords}
-              >
-                {bulkDeleteRunRecordsPending ? <LoaderCircle size={15} /> : <Trash2 size={15} />}
-                {t("deleteSelectedRuns")}
-              </VButton>
+                icon={bulkDeleteRunRecordsPending ? <LoaderCircle size={15} /> : <Trash2 size={15} />}>{t("deleteSelectedRuns")}</VButton>
             </div>
             <p className={styles.bulkToolbarHint}>{t("runBatchDeleteHint")}</p>
           </div>
@@ -277,10 +265,7 @@ export function EvolutionRunRecordsPanel({
                 type="button"
                 className={styles.inlineAction}
                 onClick={onReturnToOverview}
-              >
-                <ArrowUpRight size={15} />
-                {t("returnToOverview")}
-              </VButton>
+                icon={<ArrowUpRight size={15} />}>{t("returnToOverview")}</VButton>
             </div>
           </div>
         ) : filteredRunsEmpty ? (
@@ -481,10 +466,7 @@ export function EvolutionRunRecordsPanel({
                       isDisabled={runLocked || actionPending}
                       disabledReason={runLocked ? (lang === "zh" ? "运行仍被锁定，暂不能执行提案动作。" : "The run is locked, so proposal actions are unavailable.") : actionPending ? (lang === "zh" ? "提案动作正在执行。" : "A proposal action is in progress.") : undefined}
                       onClick={() => onRunAction(selectedRun.id, action)}
-                    >
-                      <Sparkles size={15} />
-                      {proposalActionLabel(action)}
-                    </VButton>
+                      icon={<Sparkles size={15}/>}>{proposalActionLabel(action)}</VButton>
                   ))}
                 </div>
               ) : null}
@@ -553,10 +535,7 @@ export function EvolutionRunRecordsPanel({
                   tooltip={t("runDeleteImpact")}
                   disabledReason={!selectedRun.canDelete ? selectedRun.deleteBlockReason || (lang === "zh" ? "当前运行记录不可删除。" : "This run record cannot be deleted.") : deleteRunRecordPending ? (lang === "zh" ? "运行记录正在删除。" : "Run record deletion is in progress.") : undefined}
                   onClick={() => onDeleteRunRecord(selectedRun.id)}
-                >
-                  {deleteRunRecordPending ? <LoaderCircle size={15} /> : <Trash2 size={15} />}
-                  {t("deleteRunRecord")}
-                </VButton>
+                  icon={deleteRunRecordPending ? <LoaderCircle size={15} /> : <Trash2 size={15} />}>{t("deleteRunRecord")}</VButton>
               </div>
             </div>
           </>
@@ -581,10 +560,7 @@ export function EvolutionRunRecordsPanel({
                   type="button"
                   className={styles.inlineAction}
                   onClick={onReturnToOverview}
-                >
-                  <ArrowUpRight size={15} />
-                  {t("returnToOverview")}
-                </VButton>
+                icon={<ArrowUpRight size={15} />}>{t("returnToOverview")}</VButton>
               ) : (
                 <VButton
                   type="button"

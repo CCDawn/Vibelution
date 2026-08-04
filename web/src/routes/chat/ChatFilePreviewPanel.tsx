@@ -1,6 +1,7 @@
 import type { FileContent } from "../../api/types";
 import { LazyFilePreview } from "../../components/preview/LazyFilePreview";
 import { VStateSurface } from "../../components/vui";
+import { ProgressiveRegionSkeleton } from "../shared/ProgressiveRegionSkeleton";
 import styles from "./ChatFilePreviewPanel.styles";
 
 type ChatFilePreviewPanelProps = {
@@ -31,13 +32,10 @@ export function ChatFilePreviewPanel({
         changed={changed}
         sourceLabel={sourceLabel}
         fallback={
-          <VStateSurface
+          <ProgressiveRegionSkeleton
+            variant="detail"
             className={styles.emptySurface}
-            tone="loading"
-            title={loadingLabel}
-            skeletonLines={2}
-            role="status"
-            aria-live="polite"
+            label={loadingLabel}
           />
         }
       />

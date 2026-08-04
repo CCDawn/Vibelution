@@ -44,6 +44,7 @@ import {
 } from "../components/vui";
 import { agentDisplayInfo } from "./agentDisplay";
 import styles from "./ResearchFlowCanvasRoute.styles";
+import { ProgressiveRegionSkeleton } from "./shared/ProgressiveRegionSkeleton";
 
 export type CanvasSelection =
   | { kind: "node"; id: string }
@@ -2328,10 +2329,7 @@ export function ResearchFlowCanvasRoute() {
           <VRouteLinkButton className={styles.secondaryButton} to="/research" icon={<ArrowLeft size={16} />}>
             返回科研页
           </VRouteLinkButton>
-          <VButton className={styles.secondaryButton} type="button" onClick={fitView} isDisabled={!draft}>
-            <MousePointer2 size={16} />
-            复位视图
-          </VButton>
+          <VButton className={styles.secondaryButton} type="button" onClick={fitView} isDisabled={!draft} icon={<MousePointer2 size={16}/>}>复位视图</VButton>
           <VButton
             className={styles.secondaryButton}
             type="button"
@@ -2341,20 +2339,14 @@ export function ResearchFlowCanvasRoute() {
               setObservationMessage("已请求刷新科研组织图。");
             }}
             isDisabled={canvasQuery.isFetching || organizationQuery.isFetching}
-          >
-            <RefreshCw size={16} />
-            刷新组织图
-          </VButton>
+            icon={<RefreshCw size={16} />}>刷新组织图</VButton>
           <VButton
             className={`${styles.primaryButton} ${styles.lockButtonActive}`}
             type="button"
             onClick={toggleCanvasLock}
             title="画布持续锁定，拓扑来自项目组织架构。"
             aria-pressed="true"
-          >
-            <Lock size={16} />
-            持续锁定
-          </VButton>
+            icon={<Lock size={16}/>}>持续锁定</VButton>
         </div>
       )}
       toolbar={(
@@ -2389,9 +2381,8 @@ export function ResearchFlowCanvasRoute() {
               onClick={() => zoomCanvasBy(-CANVAS_ZOOM_STEP)}
               isDisabled={!draft || canvasZoom <= CANVAS_ZOOM_MIN}
               title="缩小画布"
-            >
-              <ZoomOut size={16} />
-            </VButton>
+              isIconOnly
+              icon={<ZoomOut size={16}/>} />
             <span>{Math.round(canvasZoom * 100)}%</span>
             <VButton
               className={styles.iconButton}
@@ -2399,9 +2390,8 @@ export function ResearchFlowCanvasRoute() {
               onClick={() => zoomCanvasBy(CANVAS_ZOOM_STEP)}
               isDisabled={!draft || canvasZoom >= CANVAS_ZOOM_MAX}
               title="放大画布"
-            >
-              <ZoomIn size={16} />
-            </VButton>
+              isIconOnly
+              icon={<ZoomIn size={16}/>} />
           </div>
           {reconnect && reconnectEdge ? (
             <div className={styles.reconnectHint}>
@@ -2409,9 +2399,11 @@ export function ResearchFlowCanvasRoute() {
             </div>
           ) : null}
           {!draft && canvasQuery.isLoading ? (
-            <VStateSurface fill tone="loading" title="正在读取科研团队组织架构">
-              组织图节点与通信线会在数据返回后铺满画布区。
-            </VStateSurface>
+            <ProgressiveRegionSkeleton
+              variant="canvas"
+              label="正在读取科研团队组织架构"
+              className={styles.canvasScroller}
+            />
           ) : !draft && canvasQuery.isError ? (
             <VStateSurface fill tone="error" title="组织画布读取失败">
               请检查后端科研组织接口。
@@ -2701,20 +2693,16 @@ export function ResearchFlowCanvasRoute() {
                     </div>
                   </div>
 
-                  {organizationQuery.isLoading ? (
-                    <VStateSurface
-                      tone="loading"
-                      title="正在读取组织图"
-                      skeletonLines={2}
-                    >
-                      事实源来自 workspace/research/organization_graph.json。
-                    </VStateSurface>
-                  ) : null}
-
                   <div className={styles.organizationSectionHeader}>
                     <strong>组织图成员</strong>
                     <span>节点只表示 Agent；成员、角色和工具权限不在这里编辑，分别回到团队/Agent 管理处理。</span>
                   </div>
+                  {organizationQuery.isLoading ? (
+                    <ProgressiveRegionSkeleton
+                      variant="list"
+                      label="正在读取组织图"
+                    />
+                  ) : null}
                   <div className={styles.organizationAgentList}>
                     {organizationAgents.map((agent) => (
                       <article key={agent.agentId} className={styles.organizationAgentCard}>
@@ -2813,18 +2801,12 @@ export function ResearchFlowCanvasRoute() {
                         className={styles.primaryButton}
                         type="submit"
                         isDisabled={!canSendOrganizationMessage || sendOrgMessageMutation.isPending}
-                      >
-                        <Send size={16} />
-                        {sendOrgMessageMutation.isPending ? "发送中" : "发送消息"}
-                      </VButton>
+                icon={<Send size={16} />}>{sendOrgMessageMutation.isPending ? "发送中" : "发送消息"}</VButton>
                       <VButton
                         className={styles.secondaryButton}
                         type="button"
                         onClick={() => queryClient.invalidateQueries({ queryKey: queryKeys.researchOrganization() })}
-                      >
-                        <RefreshCw size={16} />
-                        刷新
-                      </VButton>
+                        icon={<RefreshCw size={16} />}>刷新</VButton>
                     </div>
                     {orgMessageFeedback ? <p className={styles.fieldHint}>{orgMessageFeedback}</p> : null}
                   </form>
@@ -2887,10 +2869,7 @@ export function ResearchFlowCanvasRoute() {
                               type="button"
                               isDisabled={retryOrgWakeMutation.isPending}
                               onClick={() => retryOrgWakeMutation.mutate(message.messageId)}
-                            >
-                              <RefreshCw size={16} />
-                              重试唤醒
-                            </VButton>
+                              icon={<RefreshCw size={16} />}>重试唤醒</VButton>
                           ) : null}
                         </article>
                       );

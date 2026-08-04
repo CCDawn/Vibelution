@@ -151,10 +151,7 @@ export function MemoryKnowledgeStewardPanel({
                 <section className={styles.stewardRecommendationRow} tabIndex={0} aria-label={`${recommendation.title}说明`}>
                   <span className={styles.statusPill}>{recommendation.priority}</span>
                   <strong>{recommendation.title}</strong>
-                  <VButton type="button" className={styles.detailActionButton} onClick={() => onTraceTarget(recommendation.targetId)}>
-                    <Eye size={14} />
-                    <span>{copy.traceability}</span>
-                  </VButton>
+                  <VButton type="button" className={styles.detailActionButton} onClick={() => onTraceTarget(recommendation.targetId)} icon={<Eye size={14}/>}><span>{copy.traceability}</span></VButton>
                 </section>
               </VTooltip>
             );

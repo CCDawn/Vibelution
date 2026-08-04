@@ -71,6 +71,7 @@ import { resolveChatUserDisplayName } from "./chatCompactPanel";
 import { mergeSessionDetailMessageWindow } from "./chatSessionState";
 import { selfEvolutionTrackStyles as styles } from "./SelfEvolutionTrack.styles";
 import { SelfEvolutionAutonomousLoopPanel } from "./SelfEvolutionAutonomousLoopPanel";
+import { ProgressiveRegionSkeleton } from "./shared/ProgressiveRegionSkeleton";
 
 type SelfEvolutionDynamicVariable =
   | "--self-sidebar-width"
@@ -1406,10 +1407,9 @@ export function SelfEvolutionTrack({
               );
             })
           ) : agentConfigWorkspaceQuery.isLoading ? (
-            <VStateSurface
-              tone="loading"
-              title={lang === "zh" ? "正在加载 Agent 绑定" : "Loading Agent bindings"}
-              skeletonLines={2}
+            <ProgressiveRegionSkeleton
+              variant="list"
+              label={lang === "zh" ? "正在加载 Agent 绑定" : "Loading Agent bindings"}
             />
           ) : (
             <VStateSurface
@@ -1616,10 +1616,7 @@ export function SelfEvolutionTrack({
                       onWorktreeAction(worktreeRun.runId, "terminate");
                     }
                   }}
-                >
-                  {(observationActionPending || worktreeActionPending) ? <LoaderCircle size={15} className={styles.spinning} /> : <X size={15} />}
-                  {terminateRequested ? t("selfStopRequested") : t("stopSelfRun")}
-                </VButton>
+                  icon={(observationActionPending || worktreeActionPending) ? <LoaderCircle size={15} className={styles.spinning} /> : <X size={15} />}>{terminateRequested ? t("selfStopRequested") : t("stopSelfRun")}</VButton>
               ) : !observationRunModeActive ? (
                 <VButton
                   type="button"
@@ -1636,10 +1633,7 @@ export function SelfEvolutionTrack({
                           : undefined
                   }
                   onClick={onStartRun}
-                >
-                  {startPending ? <LoaderCircle size={15} className={styles.spinning} /> : <ArrowUpRight size={15} />}
-                  {lang === "zh" ? "启动自动闭环" : "Start autonomous loop"}
-                </VButton>
+                  icon={startPending ? <LoaderCircle size={15} className={styles.spinning} /> : <ArrowUpRight size={15} />}>{lang === "zh" ? "启动自动闭环" : "Start autonomous loop"}</VButton>
               ) : null}
             </div>
           </section>
@@ -1806,14 +1800,11 @@ export function SelfEvolutionTrack({
                             inputMode: observationInputModeValue,
                           });
                         }}
-                      >
-                        {(observationStartPending || observationActionPending) ? <LoaderCircle size={15} className={styles.spinning} /> : observationRunActive ? <X size={15} /> : <ArrowUpRight size={15} />}
-                        {observationRunActive
+                        icon={(observationStartPending || observationActionPending) ? <LoaderCircle size={15} className={styles.spinning} /> : observationRunActive ? <X size={15} /> : <ArrowUpRight size={15} />}>{observationRunActive
                           ? (observationActionPending ? t("selfStopRequested") : (lang === "zh" ? "终止这一轮" : "Stop this run"))
                           : observationStartPending
                           ? (lang === "zh" ? "启动中" : "Starting")
-                          : (lang === "zh" ? "开始自主观察" : "Start observation")}
-                      </VButton>
+                          : (lang === "zh" ? "开始自主观察" : "Start observation")}</VButton>
                     </div>
                   </div>
                   <div className={styles.noticeStack}>
@@ -1963,10 +1954,7 @@ export function SelfEvolutionTrack({
                           tooltip={lang === "zh" ? "通过人工审批并允许进入后续步骤。" : "Approve the review and allow the next step."}
                           disabledReason={disabledReason(approveReviewAction) || (worktreeActionPending ? (lang === "zh" ? "工作树动作正在执行。" : "A worktree action is in progress.") : !worktreeRun ? (lang === "zh" ? "当前没有可审批的工作树运行。" : "There is no worktree run to approve.") : undefined)}
                           onClick={() => worktreeRun && onWorktreeAction(worktreeRun.runId, "approve_review")}
-                        >
-                          {worktreeActionPending ? <LoaderCircle size={15} className={styles.spinning} /> : <CheckSquare size={15} />}
-                          {lang === "zh" ? "通过审批" : "Approve"}
-                        </VButton>
+                          icon={worktreeActionPending ? <LoaderCircle size={15} className={styles.spinning} /> : <CheckSquare size={15} />}>{lang === "zh" ? "通过审批" : "Approve"}</VButton>
                         <VButton
                           type="button"
                           className={styles.secondaryAction}
@@ -1974,10 +1962,7 @@ export function SelfEvolutionTrack({
                           tooltip={lang === "zh" ? "把已审批候选合并入本地 main。" : "Merge the approved candidate into local main."}
                           disabledReason={disabledReason(mergeAction) || (worktreeActionPending ? (lang === "zh" ? "工作树动作正在执行。" : "A worktree action is in progress.") : !worktreeRun ? (lang === "zh" ? "当前没有可合并的工作树运行。" : "There is no worktree run to merge.") : undefined)}
                           onClick={() => worktreeRun && onWorktreeAction(worktreeRun.runId, "merge")}
-                        >
-                          {worktreeActionPending ? <LoaderCircle size={15} className={styles.spinning} /> : <ShieldCheck size={15} />}
-                          {lang === "zh" ? "合并入库" : "Merge"}
-                        </VButton>
+                          icon={worktreeActionPending ? <LoaderCircle size={15} className={styles.spinning} /> : <ShieldCheck size={15} />}>{lang === "zh" ? "合并入库" : "Merge"}</VButton>
                         <VButton
                           type="button"
                           className={styles.secondaryAction}
@@ -1985,10 +1970,7 @@ export function SelfEvolutionTrack({
                           tooltip={lang === "zh" ? "丢弃当前候选，不合并其更改。" : "Discard the current candidate without merging its changes."}
                           disabledReason={disabledReason(discardAction) || (worktreeActionPending ? (lang === "zh" ? "工作树动作正在执行。" : "A worktree action is in progress.") : !worktreeRun ? (lang === "zh" ? "当前没有可丢弃的工作树运行。" : "There is no worktree run to discard.") : undefined)}
                           onClick={() => worktreeRun && onWorktreeAction(worktreeRun.runId, "discard")}
-                        >
-                          {worktreeActionPending ? <LoaderCircle size={15} className={styles.spinning} /> : <X size={15} />}
-                          {lang === "zh" ? "丢弃候选" : "Discard"}
-                        </VButton>
+                          icon={worktreeActionPending ? <LoaderCircle size={15} className={styles.spinning} /> : <X size={15} />}>{lang === "zh" ? "丢弃候选" : "Discard"}</VButton>
                       </div>
                     </section>
                   ) : observationRunModeActive ? (
@@ -2143,9 +2125,8 @@ export function SelfEvolutionTrack({
                         onClick={() => setWorktreePage((current) => Math.max(1, current - 1))}
                         tooltip={t("pagePrevious")}
                         disabledReason={t("pagePrevious")}
-                      >
-                        <ChevronLeft size={15} />
-                      </VButton>
+                        isIconOnly
+                        icon={<ChevronLeft size={15}/>} />
                       {pageNumbers.map((page) => (
                         <VButton
                           key={page}
@@ -2163,9 +2144,8 @@ export function SelfEvolutionTrack({
                         onClick={() => setWorktreePage((current) => Math.min(totalWorktreePages, current + 1))}
                         tooltip={t("pageNext")}
                         disabledReason={t("pageNext")}
-                      >
-                        <ChevronRight size={15} />
-                      </VButton>
+                        isIconOnly
+                        icon={<ChevronRight size={15}/>} />
                     </div>
                   </div>
 
@@ -2293,10 +2273,7 @@ export function SelfEvolutionTrack({
                       className={styles.selectionToggle}
                       isDisabled={visibleTransactionIds.length === 0}
                       onClick={toggleAllVisibleHistoryGroups}
-                    >
-                      <CheckSquare size={14} />
-                      {allVisibleHistorySelected ? t("clearSelection") : t("selectForBatchDelete")}
-                    </VButton>
+                      icon={<CheckSquare size={14}/>}>{allVisibleHistorySelected ? t("clearSelection") : t("selectForBatchDelete")}</VButton>
                   </div>
                 </div>
 
@@ -2365,20 +2342,14 @@ export function SelfEvolutionTrack({
                         type="button"
                         className={styles.secondaryAction}
                         onClick={() => setTransactionHistoryExpanded((current) => !current)}
-                      >
-                        {transactionHistoryExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                        {transactionHistoryExpanded ? t("selfTransactionCollapseRecent") : t("selfTransactionShowAll")}
-                      </VButton>
+                        icon={transactionHistoryExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}>{transactionHistoryExpanded ? t("selfTransactionCollapseRecent") : t("selfTransactionShowAll")}</VButton>
                     ) : null}
                     <VButton
                       type="button"
                       className={styles.secondaryAction}
                       isDisabled={selectedHistoryTxnIds.length === 0 || deleteHistoryPending}
                       onClick={() => setSelectedHistoryTxnIds([])}
-                    >
-                      <X size={14} />
-                      {t("clearSelection")}
-                    </VButton>
+                      icon={<X size={14} />}>{t("clearSelection")}</VButton>
                     <VButton
                       type="button"
                       className={styles.secondaryAction}
@@ -2386,10 +2357,7 @@ export function SelfEvolutionTrack({
                       tooltip={t("batchDeleteHint")}
                       disabledReason={selectedHistoryTxnIds.length === 0 ? t("deleteSelectedDisabledHistory") : deleteHistoryPending ? t("deletingSelectedHistory") : undefined}
                       onClick={() => onDeleteHistoryGroups(selectedHistoryTxnIds)}
-                    >
-                      {deleteHistoryPending ? <LoaderCircle size={15} className={styles.spinning} /> : <ScrollText size={15} />}
-                      {deleteHistoryPending ? t("deletingSelectedHistory") : t("deleteSelected")}
-                    </VButton>
+                      icon={deleteHistoryPending ? <LoaderCircle size={15} className={styles.spinning} /> : <ScrollText size={15} />}>{deleteHistoryPending ? t("deletingSelectedHistory") : t("deleteSelected")}</VButton>
                   </div>
                 </div>
                 <p className={styles.noticeText}>{t("batchDeleteHint")}</p>
@@ -2461,10 +2429,7 @@ export function SelfEvolutionTrack({
                                       className={styles.transactionDetailsToggle}
                                       aria-expanded={detailsExpanded}
                                       onClick={() => toggleTransactionDetails(item.txnId)}
-                                    >
-                                      {detailsExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                                      {detailsExpanded ? t("hideDetails") : t("showDetails")}
-                                    </VButton>
+                                      icon={detailsExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}>{detailsExpanded ? t("hideDetails") : t("showDetails")}</VButton>
                                   </div>
                                 </div>
                                 <div className={styles.transactionMetaGrid}>

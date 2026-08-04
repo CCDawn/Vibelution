@@ -8,6 +8,7 @@ import type {
 } from "../api/types";
 import { VButton, VStateSurface } from "../components/vui";
 import styles from "./AgentActivityHistoryPanel.styles";
+import { ProgressiveRegionSkeleton } from "./shared/ProgressiveRegionSkeleton";
 
 export type AgentActivityTimelineItem = {
   id: string;
@@ -139,7 +140,7 @@ export function AgentActivityHistoryPanel({
           <Layers3 size={16} />
         </div>
         {isActivityLoading ? (
-          <VStateSurface tone="loading" title={copy.loading} skeletonLines={2} />
+          <ProgressiveRegionSkeleton variant="list" label={copy.loading} />
         ) : activityTimeline.length ? (
           <div className={styles.activityTimelineList}>
             {activityTimeline.map((item) => (
@@ -181,7 +182,7 @@ export function AgentActivityHistoryPanel({
           <ShieldCheck size={16} />
         </div>
         {isRunHistoryLoading ? (
-          <VStateSurface tone="loading" title={copy.runHistoryLoading} skeletonLines={2} />
+          <ProgressiveRegionSkeleton variant="list" label={copy.runHistoryLoading} />
         ) : runCount + subRunCount > 0 ? (
           <div className={styles.runHistoryList}>
             {runHistory?.runs.map((run) => (
@@ -223,7 +224,7 @@ export function AgentActivityHistoryPanel({
           </div>
         </div>
         {isInboxLoading ? (
-          <VStateSurface tone="loading" title={copy.inboxLoading} skeletonLines={2} />
+          <ProgressiveRegionSkeleton variant="list" label={copy.inboxLoading} />
         ) : inboxMessages?.length ? (
           <div className={styles.inboxMessageList}>
             {inboxMessages.map((message) => {

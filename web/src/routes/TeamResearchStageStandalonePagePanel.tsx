@@ -58,6 +58,11 @@ export type TeamResearchStageStandalonePagePanelProps = {
   researchStageStartFeedbackText: (payload: any, lang: Lang, stageLabel?: string) => string;
   renderExperimentPlanningLedgerPanel: () => ReactNode;
   renderResearchLoopPanel: (activePlan: ExperimentPlanRecord | null, variant?: "experiment" | "iteration") => ReactNode;
+  /**
+   * When true (default), page is embedded in Teams board shell:
+   * fill remaining height, hide redundant "back to team" chrome.
+   */
+  embeddedInBoard?: boolean;
 };
 
 export function TeamResearchStageStandalonePagePanel(props: TeamResearchStageStandalonePagePanelProps) {
@@ -82,6 +87,7 @@ export function TeamResearchStageStandalonePagePanel(props: TeamResearchStageSta
     researchStageStartFeedbackText,
     renderExperimentPlanningLedgerPanel,
     renderResearchLoopPanel,
+    embeddedInBoard = true,
   } = props;
 
 
@@ -156,7 +162,15 @@ export function TeamResearchStageStandalonePagePanel(props: TeamResearchStageSta
       || experimentStatusLoading;
 
     return (
-      <section className={`${styles.route} ${styles.researchStagePage}`}>
+      <section
+        className={[
+          styles.researchStagePage,
+          embeddedInBoard ? styles.researchStagePageEmbedded : styles.route,
+        ].filter(Boolean).join(" ")}
+        data-fill={embeddedInBoard ? "true" : undefined}
+        data-research-stage-view={stageView}
+        data-testid="research-stage-standalone-page"
+      >
         <header className={`${styles.header} ${styles.researchStagePageHeader}`}>
           <div>
             <p>{config.eyebrow}</p>
@@ -182,10 +196,19 @@ export function TeamResearchStageStandalonePagePanel(props: TeamResearchStageSta
                   : (lang === "zh" ? "同步团队讨论" : "Sync team discussion")}
               </VButton>
             )}
-            <Link to={teamWorkspaceRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID)}>
-              <ArrowLeft size={14} />
-              {lang === "zh" ? "返回团队页面" : "Back to team"}
-            </Link>
+            {!embeddedInBoard ? (
+              <Link to={teamWorkspaceRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID)}>
+                <ArrowLeft size={14} />
+                {lang === "zh" ? "返回团队页面" : "Back to team"}
+              </Link>
+            ) : (
+              <Link
+                to={`/teams?team=${encodeURIComponent(selectedTeam?.teamId || RESEARCH_TEAM_ID)}&researchView=overview&teamMode=board`}
+              >
+                <ArrowLeft size={14} />
+                {lang === "zh" ? "返回科研总览" : "Back to overview"}
+              </Link>
+            )}
             <VNativeButton
               type="button"
               onClick={refreshStageWorkspace}

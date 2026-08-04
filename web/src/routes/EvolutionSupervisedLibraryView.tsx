@@ -22,6 +22,7 @@ import {
   type ProposalEditDraft,
 } from "./evolution/evolutionRouteModel";
 import styles from "./EvolutionRoute.styles";
+import { ProgressiveRegionSkeleton } from "./shared/ProgressiveRegionSkeleton";
 
 const EvolutionProposalActionBandsPanel = lazy(() =>
   import("./EvolutionProposalActionBandsPanel").then((module) => ({
@@ -444,10 +445,7 @@ export function EvolutionSupervisedLibraryView(props: EvolutionSupervisedLibrary
                     type="button"
                     className={styles.inlineAction}
                     onClick={() => onOpenRun(selectedProposalSummary.sourceRun)}
-                  >
-                    <ArrowUpRight size={15} />
-                    {t("openSourceRun")}
-                  </VButton>
+                    icon={<ArrowUpRight size={15} />}>{t("openSourceRun")}</VButton>
                 </div>
               ) : null}
             </section>
@@ -487,10 +485,7 @@ export function EvolutionSupervisedLibraryView(props: EvolutionSupervisedLibrary
                       className={styles.inlineAction}
                       isDisabled={selectedProposalRunIds.length === 0 || bulkDeletePending}
                       onClick={onBulkDelete}
-                    >
-                      <Trash2 size={15} />
-                      {t("deleteSelected")}
-                    </VButton>
+                icon={<Trash2 size={15} />}>{t("deleteSelected")}</VButton>
                   </div>
                 </div>
                 <div className={styles.libraryFilters}>
@@ -709,20 +704,14 @@ export function EvolutionSupervisedLibraryView(props: EvolutionSupervisedLibrary
                               className={styles.inlineAction}
                               isDisabled={updateProposalPending}
                               onClick={() => onCancelProposalEdit(proposalDetail)}
-                            >
-                              <X size={15} />
-                              {t("cancelEdit")}
-                            </VButton>
+                              icon={<X size={15} />}>{t("cancelEdit")}</VButton>
                             <VButton
                               type="button"
                               variant="primary"
                               className={styles.inlineAction}
                               isDisabled={!proposalDetail.canEdit || updateProposalPending}
                               onClick={() => onTriggerProposalUpdate(proposalDetail.sourceRun)}
-                            >
-                              <Save size={15} />
-                              {updateProposalPending ? t("saving") : t("saveProposalEdit")}
-                            </VButton>
+                              icon={<Save size={15} />}>{updateProposalPending ? t("saving") : t("saveProposalEdit")}</VButton>
                           </div>
                         ) : (
                           <VButton
@@ -730,10 +719,7 @@ export function EvolutionSupervisedLibraryView(props: EvolutionSupervisedLibrary
                             className={styles.inlineAction}
                             isDisabled={!proposalDetail.canEdit}
                             onClick={() => onBeginProposalEdit(proposalDetail)}
-                          >
-                            <Pencil size={15} />
-                            {t("editProposal")}
-                          </VButton>
+                            icon={<Pencil size={15} />}>{t("editProposal")}</VButton>
                         )}
                       </div>
                       {!proposalDetail.canEdit ? (
@@ -979,10 +965,7 @@ export function EvolutionSupervisedLibraryView(props: EvolutionSupervisedLibrary
                         type="button"
                         className={styles.inlineAction}
                         onClick={() => onOpenRun(proposalDetail.sourceRun)}
-                      >
-                        <ArrowUpRight size={15} />
-                        {t("openSourceRun")}
-                      </VButton>
+                        icon={<ArrowUpRight size={15} />}>{t("openSourceRun")}</VButton>
                     </div>
 
                     <div className={styles.detailSection}>
@@ -996,7 +979,11 @@ export function EvolutionSupervisedLibraryView(props: EvolutionSupervisedLibrary
                 ) : proposalDetailError ? (
                   <VStateSurface fill className={styles.emptyState} title={proposalDetailError} tone="error" />
                 ) : (
-                  <VStateSurface fill className={styles.emptyState} title={t("loadingRunDetails")} tone="loading" />
+                  <ProgressiveRegionSkeleton
+                    variant="detail"
+                    className={styles.emptyState}
+                    label={t("loadingRunDetails")}
+                  />
                 )
               ) : (
                 <VStateSurface fill className={styles.emptyState} title={t("chooseProposalDetail")} tone="empty" />

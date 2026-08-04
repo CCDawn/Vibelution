@@ -365,9 +365,7 @@ export function CacheDetailDialog({
             className={styles.cacheDetailCloseButton}
             onClick={onClose}
             aria-label={closeLabel}
-          >
-            <X size={16} aria-hidden="true" />
-          </VButton>
+                icon={<X size={16} aria-hidden="true" />}></VButton>
         </header>
 
         <div className={styles.cacheDetailSummaryGrid}>
