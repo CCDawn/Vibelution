@@ -272,9 +272,11 @@ def test_build_self_evolution_run_prompt_uses_advisory_and_fitness(monkeypatch):
 
 
 def test_build_self_evolution_snapshot_returns_structured_payload(monkeypatch):
-    monkeypatch.setattr(
-        "core.evaluation.self_evolution_workbench.get_worktree_status_bundle_tool",
-        lambda limit=5: json.dumps(
+    bundle_calls = []
+
+    def get_worktree_status_bundle_tool(limit=5, **kwargs):
+        bundle_calls.append((limit, kwargs))
+        return json.dumps(
             {
                 "git_status_summary": json.dumps(
                     {
@@ -313,7 +315,11 @@ def test_build_self_evolution_snapshot_returns_structured_payload(monkeypatch):
                 ),
             },
             ensure_ascii=False,
-        ),
+        )
+
+    monkeypatch.setattr(
+        "core.evaluation.self_evolution_workbench.get_worktree_status_bundle_tool",
+        get_worktree_status_bundle_tool,
     )
     monkeypatch.setattr(
         "core.evaluation.self_evolution_workbench.get_recent_changes_tool",
@@ -360,6 +366,7 @@ def test_build_self_evolution_snapshot_returns_structured_payload(monkeypatch):
     assert snapshot["worktree"]["snapshot_id"] == "snap-7"
     assert snapshot["worktree"]["is_dirty"] is True
     assert snapshot["recent_transactions"][0]["txn_id"] == "txn-7"
+    assert bundle_calls == [(5, {"refresh_index": False, "live_recent_changes": True})]
 
 
 def test_format_self_evolution_worktree_snapshot_renders_files():

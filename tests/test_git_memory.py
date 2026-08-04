@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+import json
 import sqlite3
 import subprocess
 from contextlib import contextmanager
@@ -274,6 +275,33 @@ class TestGitMemoryService:
         assert verification[0]["env"]["GIT_NO_LAZY_FETCH"] == "1"
         assert any(args == ["rev-list", "--reverse", "--max-count", "20", "HEAD"] for args, _ in git_calls)
         assert not any(args == ["rev-list", "--reverse", f"{stale_base}..HEAD"] for args, _ in git_calls)
+
+    def test_read_only_refresh_skips_indexing_but_keeps_live_recent_changes(self, tmp_path, monkeypatch):
+        repo = _init_git_repo(tmp_path)
+        db_path = tmp_path / "brain.db"
+        fake_workspace = FakeWorkspace(repo, db_path)
+
+        class FakeBus:
+            def publish(self, name, data=None, source=None):
+                return None
+
+            def subscribe(self, name, handler, priority=0):
+                return True
+
+        monkeypatch.setattr("core.infrastructure.git_memory.get_workspace", lambda: fake_workspace)
+        monkeypatch.setattr("core.infrastructure.git_memory.get_event_bus", lambda: FakeBus())
+
+        service = GitMemoryService()
+        monkeypatch.setattr(service, "index_recent_changes", lambda *args, **kwargs: pytest.fail("must not index"))
+
+        state = service.refresh_git_memory(force=True, index_recent_changes=False)
+        bundle = service.build_worktree_status_bundle(limit=3, live_recent_changes=True)
+        summary = json.loads(bundle["git_status_summary"])
+
+        assert state.available is True
+        assert state.indexed_head_rev is None
+        assert summary["dirty_summary"] == "工作区干净"
+        assert summary["recent_changes"][0]["path"] == "sample.py"
 
     def test_worktree_snapshot_retention_prunes_old_worktree_rows(self, tmp_path, monkeypatch):
         repo = _init_git_repo(tmp_path)
