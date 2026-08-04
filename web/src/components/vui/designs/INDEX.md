@@ -17,6 +17,7 @@
 | `VContextualHint` | [primitives/feedback.md](./primitives/feedback.md#vcontextualhint) |
 | `VDialog` | [primitives/feedback.md](./primitives/feedback.md#vdialog) |
 | `VConfirmDialog` | [primitives/feedback.md](./primitives/feedback.md#vconfirmdialog) |
+| `VDropdownMenu` | [primitives/feedback.md](./primitives/feedback.md#vdropdownmenu) |
 
 ## Forms
 

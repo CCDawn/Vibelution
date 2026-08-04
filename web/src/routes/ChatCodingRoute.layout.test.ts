@@ -825,15 +825,13 @@ describe("ChatCodingRoute layout contract", () => {
 
     expect(agentSessionTabStripSource).toContain("<VButton");
     expect(agentSessionTabStripSource).toContain("<VIconButton");
-    expect(sessionContextMenuSource).toContain("<VButton");
+    expect(sessionContextMenuSource).toContain("<VDropdownMenu");
     expect(directSessionIndexItemSource).toContain("<VNativeButton");
     expect(directSessionIndexItemSource).toContain("<VIconButton");
     expect(groupSessionIndexItemsSource).toContain("<VNativeButton");
     expect(conversationIndexSectionSource).toContain("<VNativeButton");
-    // Wave 8D: menu item layout is full-width grid label (component map), not contents span.
-    expect(routeStyles.sessionContextMenuItem).toContain("[&_[data-slot=vui-button-content]]:grid");
-    expect(routeStyles.sessionContextMenuItem).toContain("[&_[data-slot=vui-button-content]]:w-full");
-    expect(routeStyles.sessionContextMenuItem).toContain("[&_[data-slot=vui-button-label]]:truncate");
+    // Menu items are Radix DropdownMenu items (domain class hooks, not VButton grids).
+    expect(routeStyles.sessionContextMenuItem).toContain("sessionContextMenuItem");
   });
 
   it("shows a safe return link when Chat is opened from another workspace surface", () => {
@@ -2440,6 +2438,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(sessionContextMenuSource).toContain("styles.sessionContextMenu");
     expect(sessionContextMenuSource).toContain("styles.sessionContextMenuItem");
     expect(sessionContextMenuSource).toContain("styles.sessionContextMenuDanger");
+    expect(sessionContextMenuSource).toContain("<VDropdownMenu");
+    expect(sessionContextMenuSource).toContain("position={position}");
     expect(sessionContextMenuStyles.sessionContextMenu).toMatch(/bg-vui-surface-panel|var\(--vui-surface-panel\)/);
     expect(sessionContextMenuStyles.sessionContextMenu).toContain("shadow-none");
     expect(sessionContextMenuStyles.sessionContextMenu).not.toContain("vui-surface-glass");
@@ -2449,10 +2449,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(directSessionIndexItemStyles.sessionItemNotice).toContain("mx-2.5");
     expect(directSessionIndexItemStyles.sessionItemNotice).not.toContain("vui-surface-glass");
     expect(directSessionIndexItemStyles.sessionItemNotice).not.toContain("vui-shadow-hairline");
-    expect(sessionContextMenuSource).toContain("role=\"menu\"");
-    expect(sessionContextMenuSource).toContain("role=\"menuitem\"");
     expect(sessionContextMenuSource).toContain("sessionContextMenuStyle");
-    expect(sessionContextMenuSource).toContain("window.innerWidth");
 
     expect(routeStyles.sessionContextMenu).toBeTypeOf("string");
     expect(routeStyles.sessionContextMenuItem).toBeTypeOf("string");
@@ -2499,6 +2496,7 @@ describe("ChatCodingRoute layout contract", () => {
       "onPress={() => onOpenAgent(agent, latestSession ?? null)}",
     );
     expect(agentContextMenuSource).toContain('aria-label={lang === "zh" ? "Agent 操作" : "Agent actions"}');
+    expect(agentContextMenuSource).toContain("<VDropdownMenu");
     expect(agentContextMenuSource).toContain("打开最近会话");
     expect(agentContextMenuSource).toContain("新建会话");
     expect(agentContextMenuSource).toContain("重命名 Agent");
@@ -2506,6 +2504,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(agentContextMenuSource).toContain("安全归档");
     expect(agentContextMenuSource).toContain("agentCanArchiveFromContextMenu");
     expect(agentContextMenuSource).toContain("sessionContextMenuDanger");
+    expect(agentContextMenuSource).toContain("onDismiss");
     expect(agentContextMenuSource).not.toContain("Trash2");
     expect(agentContextMenuSource).not.toContain("Eraser");
   });

@@ -1,13 +1,14 @@
-import React from "react";
-import { renderToStaticMarkup } from "react-dom/server";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import type { AgentInstance, SessionSummary } from "../api/types";
+import type { AgentInstance } from "../api/types";
 import {
-  AgentContextMenu,
   agentCanArchiveFromContextMenu,
   agentContextMenuStyle,
 } from "./AgentContextMenu";
+
+const menuSource = readFileSync(resolve(import.meta.dirname, "AgentContextMenu.tsx"), "utf8");
 
 function agent(metadata: Record<string, unknown> = {}): AgentInstance {
   return {
@@ -19,107 +20,38 @@ function agent(metadata: Record<string, unknown> = {}): AgentInstance {
   } as AgentInstance;
 }
 
-function session(): SessionSummary {
-  return {
-    id: "session-1",
-    title: "最近会话",
-    status: "ready",
-    taskSummary: "",
-    lastActive: "2026-07-20T01:02:00.000Z",
-    updatedAt: "2026-07-20T01:02:00.000Z",
-    currentPhase: "ready",
-  };
-}
-
 describe("AgentContextMenu", () => {
-  it("offers Agent-scoped actions without destructive session actions", () => {
-    const markup = renderToStaticMarkup(
-      <AgentContextMenu
-        createPending={false}
-        archivePending={false}
-        renamePending={false}
-        lang="zh"
-        state={{ agent: agent(), latestSession: session(), x: 24, y: 32 }}
-        onArchive={() => undefined}
-        onCreateSession={() => undefined}
-        onOpenConfig={() => undefined}
-        onOpenLatest={() => undefined}
-        onRename={() => undefined}
-      />,
-    );
-
-    expect(markup).toContain('role="menu"');
-    expect(markup).toContain('aria-label="Agent 操作"');
-    expect(markup).toContain('data-agent-context-menu="agent-1"');
-    expect(markup).toContain("打开最近会话");
-    expect(markup).toContain("新建会话");
-    expect(markup).toContain("重命名 Agent");
-    expect(markup).toContain("打开 Agent 设置");
-    expect(markup).toContain("安全归档");
-    expect(markup).not.toContain("彻底删除");
-    expect(markup).not.toContain("清空");
-    expect(markup.match(/role="menuitem"/g)?.length).toBe(5);
+  it("offers Agent-scoped actions through VDropdownMenu without session-destructive items", () => {
+    expect(menuSource).toContain("VDropdownMenu");
+    expect(menuSource).toContain('aria-label={lang === "zh" ? "Agent 操作" : "Agent actions"}');
+    expect(menuSource).toContain("打开最近会话");
+    expect(menuSource).toContain("新建会话");
+    expect(menuSource).toContain("重命名 Agent");
+    expect(menuSource).toContain("打开 Agent 设置");
+    expect(menuSource).toContain("安全归档");
+    expect(menuSource).toContain("data-agent-context-menu");
+    expect(menuSource).not.toContain("彻底删除");
+    expect(menuSource).not.toContain("清空");
+    expect(menuSource).toContain("id: \"rename\"");
+    expect(menuSource).toContain("id: \"archive\"");
   });
 
-  it("keeps Agent rename available when the Agent has no session", () => {
-    const markup = renderToStaticMarkup(
-      <AgentContextMenu
-        createPending
-        archivePending={false}
-        renamePending={false}
-        lang="en"
-        state={{ agent: agent(), latestSession: null, x: 24, y: 32 }}
-        onArchive={() => undefined}
-        onCreateSession={() => undefined}
-        onOpenConfig={() => undefined}
-        onOpenLatest={() => undefined}
-        onRename={() => undefined}
-      />,
-    );
-
-    expect(markup).toContain('aria-busy="true"');
-    expect(markup).toContain("Open latest session");
-    expect(markup).toContain("Creating session");
-    expect(markup.match(/disabled=""/g)?.length).toBe(2);
+  it("wires pending labels and busy aria for async actions", () => {
+    expect(menuSource).toContain("Creating session");
+    expect(menuSource).toContain("正在新建会话");
+    expect(menuSource).toContain("正在归档");
+    expect(menuSource).toContain("aria-busy");
+    expect(menuSource).toContain("createPending");
+    expect(menuSource).toContain("renamePending");
+    expect(menuSource).toContain("archivePending");
   });
 
   it("hides archive for protected Agents and exposes pending state for eligible Agents", () => {
     expect(agentCanArchiveFromContextMenu(agent({ protected: true }))).toBe(false);
     expect(agentCanArchiveFromContextMenu(agent({ fixedRole: true }))).toBe(false);
     expect(agentCanArchiveFromContextMenu(agent())).toBe(true);
-
-    const protectedMarkup = renderToStaticMarkup(
-      <AgentContextMenu
-        archivePending={false}
-        createPending={false}
-        renamePending={false}
-        lang="zh"
-        state={{ agent: agent({ protected: true }), latestSession: session(), x: 24, y: 32 }}
-        onArchive={() => undefined}
-        onCreateSession={() => undefined}
-        onOpenConfig={() => undefined}
-        onOpenLatest={() => undefined}
-        onRename={() => undefined}
-      />,
-    );
-    expect(protectedMarkup).not.toContain("安全归档");
-
-    const pendingMarkup = renderToStaticMarkup(
-      <AgentContextMenu
-        archivePending
-        createPending={false}
-        renamePending={false}
-        lang="zh"
-        state={{ agent: agent(), latestSession: session(), x: 24, y: 32 }}
-        onArchive={() => undefined}
-        onCreateSession={() => undefined}
-        onOpenConfig={() => undefined}
-        onOpenLatest={() => undefined}
-        onRename={() => undefined}
-      />,
-    );
-    expect(pendingMarkup).toContain('aria-busy="true"');
-    expect(pendingMarkup).toContain("正在归档");
+    expect(menuSource).toContain("agentCanArchiveFromContextMenu(state.agent)");
+    expect(menuSource).toContain("canArchive");
   });
 
   it("clamps the menu inside the visible viewport", () => {

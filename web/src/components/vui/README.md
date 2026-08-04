@@ -38,6 +38,7 @@
 | `VChip` | `ShadcnChip` | tone map |
 | `VTooltip` | `ShadcnTooltip` (Radix) | `isOpen` alias retained |
 | `VDialog` / `VConfirmDialog` | `ShadcnDialog` (Radix) | Prefer over hand-rolled `fixed inset-0` overlays |
+| `VDropdownMenu` | `ShadcnDropdownMenu` (`@radix-ui/react-dropdown-menu`) | trigger or fixed `position` anchor; items API |
 | `VTabs` | `@radix-ui/react-tabs` | section switcher; items API |
 | `VSkeleton` | Tailwind pulse | progressive in-place loading slots |
 | `VInput` | `ShadcnInput` | |

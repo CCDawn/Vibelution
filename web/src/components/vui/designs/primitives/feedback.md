@@ -110,3 +110,38 @@
 
 ### 反冗余
 - 禁止每个域一个 `XxxConfirmModal`
+
+---
+
+## VDropdownMenu
+
+### 职责
+下拉菜单 / 右键锚定菜单（Radix DropdownMenu / shadcn 风格）。
+
+### 非职责
+- 不做路由级导航（菜单项里的跳转由调用方 `onSelect` 处理）
+- 不做多级树（未暴露 Sub）
+
+### 何时使用
+| 模式 | 用法 |
+| --- | --- |
+| 按钮触发 | `trigger={...}` + `items` |
+| 右键/坐标锚定 | `position={{ x, y }}` + 受控 `open` / `onOpenChange` |
+
+### 何时不要用
+| 场景 | 改用 |
+| --- | --- |
+| 分段浏览 | `VTabs` |
+| 表单单选 | `VSelect` / `VStringSelect` |
+| 复杂命令面板 | 域内实现或后续 `VCommand` |
+
+### API 要点
+- `items: { id, label, icon?, disabled?, danger?, title?, onSelect? }[]`
+- `position` 时使用 1px 虚拟 Anchor + Portal Content
+- `contentClassName` / `itemClassName` / `dangerItemClassName` 允许域几何
+
+### 实现落点
+- `primitives/VDropdownMenu.tsx` → `renderers/shadcn/ShadcnDropdownMenu.tsx` → `@radix-ui/react-dropdown-menu`
+
+### 反冗余
+- 禁止再写 `role="menu"` + `fixed` 坐标面板平行系统；Agent/Session 上下文菜单应消费本组件

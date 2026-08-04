@@ -1,8 +1,8 @@
 import { Archive, MessageSquareText, Pencil, Plus, Settings2 } from "lucide-react";
-import type { CSSProperties, PointerEvent } from "react";
+import type { CSSProperties } from "react";
 
 import type { AgentInstance, SessionSummary } from "../api/types";
-import { VButton } from "../components/vui";
+import { VDropdownMenu } from "../components/vui";
 import styles from "./AgentContextMenu.styles";
 
 const MENU_WIDTH = 188;
@@ -46,6 +46,8 @@ type AgentContextMenuProps = {
   onOpenConfig: (agent: AgentInstance, latestSession: SessionSummary | null) => void;
   onOpenLatest: (agent: AgentInstance, latestSession: SessionSummary | null) => void;
   onRename: (agent: AgentInstance) => void;
+  /** Called when the Radix menu requests close (select / Escape / dismiss). */
+  onDismiss?: () => void;
 };
 
 function metadataFlag(agent: AgentInstance, key: string) {
@@ -91,87 +93,76 @@ export function AgentContextMenu({
   onOpenConfig,
   onOpenLatest,
   onRename,
+  onDismiss,
 }: AgentContextMenuProps) {
-  const viewport = typeof window === "undefined"
-    ? undefined
-    : { width: window.innerWidth, height: window.innerHeight };
-  const style = agentContextMenuStyle(state, viewport);
-
-  function stopPointerPropagation(event: PointerEvent<HTMLDivElement>) {
-    event.stopPropagation();
-  }
+  const canArchive = agentCanArchiveFromContextMenu(state.agent);
+  const busy = createPending || renamePending || archivePending;
 
   return (
-    <div
-      className={styles.sessionContextMenu}
-      style={style}
-      role="menu"
+    <VDropdownMenu
+      open
+      onOpenChange={(open) => {
+        if (!open) {
+          onDismiss?.();
+        }
+      }}
+      position={{ x: state.x, y: state.y }}
       aria-label={lang === "zh" ? "Agent 操作" : "Agent actions"}
-      aria-busy={createPending || renamePending || archivePending ? true : undefined}
-      aria-orientation="vertical"
-      data-agent-context-menu={state.agent.agentId}
-      onPointerDown={stopPointerPropagation}
-    >
-      <VButton
-        type="button"
-        role="menuitem"
-        className={styles.sessionContextMenuItem}
-        onPress={() => onRename(state.agent)}
-        isDisabled={renamePending}
-        icon={<Pencil size={14} />}
-      >
-        {renamePending
-          ? (lang === "zh" ? "正在重命名" : "Renaming")
-          : (lang === "zh" ? "重命名 Agent" : "Rename Agent")}
-      </VButton>
-      <VButton
-        type="button"
-        role="menuitem"
-        className={styles.sessionContextMenuItem}
-        onPress={() => onOpenLatest(state.agent, state.latestSession)}
-        isDisabled={!state.latestSession}
-        icon={<MessageSquareText size={14} />}
-      >
-        {lang === "zh" ? "打开最近会话" : "Open latest session"}
-      </VButton>
-      <VButton
-        type="button"
-        role="menuitem"
-        className={styles.sessionContextMenuItem}
-        onPress={() => onCreateSession(state.agent)}
-        isDisabled={createPending}
-        icon={<Plus size={14} />}
-      >
-        {createPending
-          ? (lang === "zh" ? "正在新建会话" : "Creating session")
-          : (lang === "zh" ? "新建会话" : "New session")}
-      </VButton>
-      <VButton
-        type="button"
-        role="menuitem"
-        className={styles.sessionContextMenuItem}
-        onPress={() => onOpenConfig(state.agent, state.latestSession)}
-        icon={<Settings2 size={14} />}
-      >
-        {lang === "zh" ? "打开 Agent 设置" : "Open Agent settings"}
-      </VButton>
-      {agentCanArchiveFromContextMenu(state.agent) ? (
-        <VButton
-          type="button"
-          role="menuitem"
-          className={`${styles.sessionContextMenuItem} ${styles.sessionContextMenuDanger}`}
-          variant="danger"
-          onPress={() => onArchive(state.agent)}
-          isDisabled={archivePending}
-          aria-disabled={archivePending ? true : undefined}
-          icon={<Archive size={14} />}
-          title={lang === "zh" ? "安全归档并保留会话、记忆和日志" : "Archive safely and keep sessions, memory, and logs"}
-        >
-          {archivePending
-            ? (lang === "zh" ? "正在归档" : "Archiving")
-            : (lang === "zh" ? "安全归档" : "Safe archive")}
-        </VButton>
-      ) : null}
-    </div>
+      contentClassName={styles.sessionContextMenu}
+      itemClassName={styles.sessionContextMenuItem}
+      dangerItemClassName={styles.sessionContextMenuDanger}
+      contentProps={{
+        "data-agent-context-menu": state.agent.agentId,
+        "aria-busy": busy ? "true" : undefined,
+      }}
+      items={[
+        {
+          id: "rename",
+          icon: <Pencil size={14} />,
+          disabled: renamePending,
+          label: renamePending
+            ? (lang === "zh" ? "正在重命名" : "Renaming")
+            : (lang === "zh" ? "重命名 Agent" : "Rename Agent"),
+          onSelect: () => onRename(state.agent),
+        },
+        {
+          id: "open-latest",
+          icon: <MessageSquareText size={14} />,
+          disabled: !state.latestSession,
+          label: lang === "zh" ? "打开最近会话" : "Open latest session",
+          onSelect: () => onOpenLatest(state.agent, state.latestSession),
+        },
+        {
+          id: "create-session",
+          icon: <Plus size={14} />,
+          disabled: createPending,
+          label: createPending
+            ? (lang === "zh" ? "正在新建会话" : "Creating session")
+            : (lang === "zh" ? "新建会话" : "New session"),
+          onSelect: () => onCreateSession(state.agent),
+        },
+        {
+          id: "open-config",
+          icon: <Settings2 size={14} />,
+          label: lang === "zh" ? "打开 Agent 设置" : "Open Agent settings",
+          onSelect: () => onOpenConfig(state.agent, state.latestSession),
+        },
+        ...(canArchive
+          ? [{
+              id: "archive",
+              icon: <Archive size={14} />,
+              danger: true,
+              disabled: archivePending,
+              title: lang === "zh"
+                ? "安全归档并保留会话、记忆和日志"
+                : "Archive safely and keep sessions, memory, and logs",
+              label: archivePending
+                ? (lang === "zh" ? "正在归档" : "Archiving")
+                : (lang === "zh" ? "安全归档" : "Safe archive"),
+              onSelect: () => onArchive(state.agent),
+            }]
+          : []),
+      ]}
+    />
   );
 }
