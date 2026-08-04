@@ -4,7 +4,8 @@
 > **shadcn-style + Radix is the required implementation backend for all product frontend.**
 > Routes and product pages **must not** import `@heroui/react` or `renderers/shadcn/*` directly.
 > Prefer page recipes (`VListDetailPage` / `VSplitWorkspace` / `VDenseOpsPage`) over hand-rolled shells.
-> Gate: `components/vui/vuiShadcnRouteContract.test.ts`.
+> **All elements** (not only recipes) need design specs under [`designs/`](./designs/README.md); catalog: [`designs/INDEX.md`](./designs/INDEX.md).
+> Gates: `vuiShadcnRouteContract.test.ts`, `vuiComponentDesignContract.test.ts`.
 > `@heroui/react` is **removed** from dependencies.
 
 ## Ownership
@@ -20,11 +21,12 @@
 
 ## Rules (efficiency)
 
-1. **No new `V*` primitive** unless at least two call sites already need it. Prefer composing existing primitives **or a page recipe**.
+1. **No new `V*` / product element** without: (a) INDEX 检索确认无职责重叠，(b) `designs/` 专节，(c) 至少两处真实调用或明确第二消费者计划。Prefer composing existing primitives **or a page recipe**.
 2. **Routes import only** from `components/vui` (or `…/vui/product/…`). Never from `renderers/`.
 3. **New interactive controls** go through a `V*` facade; put Radix/shadcn code under `renderers/shadcn/`.
 4. **HeroUI is gone.** Do not re-add `@heroui/react`. Prefer extending the shadcn renderer.
 5. **Domain shells** (Agent three-pane, Chat rails) stay in routes/product — shadcn does not replace them.
+6. **No parallel twins**: 同一职责只保留一个对外组件；`V*` vs `VNative*` 双轨必须在设计说明中写清边界。
 
 ## Renderer map (interactive primitives)
 
