@@ -130,6 +130,11 @@ import {
   EvolutionDatasetCatalogPanel,
   type EvolutionDatasetCatalogFilter,
 } from "./EvolutionDatasetCatalogPanel";
+import { EvolutionSupervisedLiveSetupPanel } from "./EvolutionSupervisedLiveSetupPanel";
+import {
+  EvolutionSupervisedWorkflowMembersPanel,
+  type EvolutionSupervisedWorkflowStepView,
+} from "./EvolutionSupervisedWorkflowMembersPanel";
 import {
   buildSupervisedWorktreeLedgerSummary,
   isSelfEvolutionWorktreeRun,
@@ -1828,6 +1833,36 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     return normalized || "--";
   }
 
+  const supervisedWorkflowStepViews: EvolutionSupervisedWorkflowStepView[] = supervisedWorkflowCards.map((step) => {
+    const selected = step.id === supervisedSelectedWorkflowStep.id;
+    const current = step.id === supervisedRuntimeWorkflowStepId;
+    const member = step.member;
+    const sessionRoute = step.chatRoute || member?.chatRoute || "";
+    const approvalIsAgent = String(supervisedMembersRun?.approvalMode ?? approvalMode).toLowerCase() === "agent";
+    const meta = step.role
+      ? runRoleLabel(step.role)
+      : approvalIsAgent
+        ? (lang === "zh" ? "Agent 审批" : "Agent approval")
+        : (lang === "zh" ? "人工审批" : "Human approval");
+    const metric = typeof step.metrics?.scoreDelta === "number"
+      ? `Δ ${step.metrics.scoreDelta}`
+      : typeof step.metrics?.score === "number"
+        ? String(step.metrics.score)
+        : statusLabel(step.status);
+    return {
+      id: step.id,
+      label: supervisedWorkflowStepLabel(step, lang),
+      selected,
+      current,
+      meta,
+      metric,
+      preview: step.livePreview || step.summary || (lang === "zh" ? "等待实时输出" : "Waiting for live output"),
+      sessionRoute: sessionRoute || undefined,
+      configRoute: member?.configRoute || undefined,
+      memberName: member?.name,
+    };
+  });
+
   function supervisedAgentRoleDescription(role: SupervisedMemberRole) {
     if (role === "baseline") {
       return lang === "zh" ? "基线运行后在原会话中完成自改" : "Run the baseline and self-improve in the same session";
@@ -2570,259 +2605,78 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
               ) : null}
 
               <div className={styles.supervisedRunConsoleGrid}>
-                <div className={styles.supervisedRunSetup}>
-                  <div className={styles.formGrid}>
-                    <div className={sourceKind === "dataset" ? styles.compactFieldGrid : styles.formGrid}>
-                      <div className={styles.formField}>
-                        <div className={styles.formLabelWithHint}>
-                          <label>{lang === "zh" ? "评测来源" : "Evaluation source"}</label>
-                          <VContextualHint
-                            content={lang === "zh" ? "数据集会先物化，评测包可直接运行。" : "A dataset is materialized first; a bundle runs directly."}
-                            label={lang === "zh" ? "评测来源说明" : "Evaluation source help"}
-                          />
-                        </div>
-                        <VStringSelect
-                          ariaLabel={lang === "zh" ? "评测来源" : "Evaluation source"}
-                          className={styles.selectInput}
-                          value={selectedSourceValue}
-                          options={supervisedSourceOptions.map((source) => ({
-                            value: source.value,
-                            label: source.kind === "dataset"
-                              ? `${source.name} [${datasetUsabilityLabel(source.dataset, lang)}]`
-                              : `${source.name} [${source.caseCount} cases]`,
-                          }))}
-                          onValueChange={(value) => {
-                            const [nextKind, ...nameParts] = value.split(":");
-                            const nextName = nameParts.join(":");
-                            if (nextKind === "bundle") {
-                              setSourceKind("bundle");
-                              setBundleNameInput(nextName);
-                              return;
-                            }
-                            setSourceKind("dataset");
-                            setDatasetName(nextName);
-                          }}
-                        />
-                      </div>
-                      {sourceKind === "dataset" ? (
-                        <div className={styles.formField}>
-                          <div className={styles.formLabelWithHint}>
-                            <label htmlFor="supervised-limit">{t("caseLimit")}</label>
-                            <VContextualHint content={t("caseLimitHint")} label={`${t("caseLimit")}说明`} />
-                          </div>
-                          <VInput
-                            ref={datasetLimitInputRef}
-                            id="supervised-limit"
-                            className={styles.textInput}
-                            type="number"
-                            min={1}
-                            placeholder="all"
-                            value={datasetLimitInput}
-                            onChange={(event) => setDatasetLimitInput(event.target.value)}
-                          />
-                        </div>
-                      ) : null}
-                    </div>
-                    {selectedSourceOption ? (
-                      <div className={styles.sourceMetaCompact}>
-                        <div className={styles.sourceMetaMain}>
-                          <strong>{selectedSourceOption.label}</strong>
-                          <span>{selectedSourceStatusText}</span>
-                          {selectedSourceEvaluationText ? <span>{selectedSourceEvaluationText}</span> : null}
-                        </div>
-                        <span className={styles.sourceMetaSide}>
-                          {selectedSourceKindLabel} · {selectedSourceCaseText}
-                        </span>
-                      </div>
-                    ) : null}
-                    {selectedSourceOfficialWarning ? (
-                      <p className={styles.sourceWarningStrip}>{selectedSourceOfficialWarning}</p>
-                    ) : null}
-                    {workbenchControl && sourceKind === "bundle" && !selectedBundleExists ? (
-                      <p className={styles.errorTextCompact}>
-                        {lang === "zh" ? "请选择一个存在的监督评测包。" : "Choose an existing supervised bundle."}
-                      </p>
-                    ) : null}
-                  </div>
-
-                  <div className={styles.supervisedRunOptions}>
-                    <VCheckbox
-                      className={styles.checkboxRow}
-                      isSelected={keepWorktree}
-                      onChange={setKeepWorktree}
-                    >
-                      <span className={styles.checkboxLabel}>{lang === "zh" ? "保留 worktree" : "Keep worktree"}</span>
-                    </VCheckbox>
-                    <div className={styles.formField}>
-                      <div className={styles.formLabelWithHint}>
-                        <label>{lang === "zh" ? "最终审批方式" : "Final approval mode"}</label>
-                        <VContextualHint
-                          content={lang === "zh"
-                            ? "人工审批由用户作最终决定；Agent 审批会在复评完成后自动作出最终决定，批准时自动创建 Git 提交并请求 Launcher 激活。两者都审阅评分、评估状态、风险与证据。"
-                            : "Human approval is decided by the user. Agent approval automatically makes the final decision after rerun evaluation and, when approved, creates a Git commit and requests Launcher activation. Both review scores, states, risk, and evidence."}
-                          label={lang === "zh" ? "最终审批方式说明" : "Final approval mode help"}
-                        />
-                      </div>
-                      <VStringSelect
-                        ariaLabel={lang === "zh" ? "最终审批方式" : "Final approval mode"}
-                        className={styles.selectInput}
-                        value={approvalMode}
-                        options={[
-                          { value: "human", label: lang === "zh" ? "人工审批" : "Human approval" },
-                          { value: "agent", label: lang === "zh" ? "Agent 审批" : "Agent approval" },
-                        ]}
-                        onValueChange={(value) => setApprovalMode(value === "agent" ? "agent" : "human")}
-                      />
-                    </div>
-                    <div className={styles.formField}>
-                      <div className={styles.formLabelWithHint}>
-                        <label>{t("supervisedMentalMode")}</label>
-                        <VContextualHint content={t("supervisedMentalModeHint")} label={`${t("supervisedMentalMode")}说明`} />
-                      </div>
-                      <VStringSelect
-                        ariaLabel={t("supervisedMentalMode")}
-                        className={styles.selectInput}
-                        value={supervisedMentalModelMode}
-                        options={[
-                          { value: "follow", label: t("supervisedMentalModeFollow") },
-                          { value: "enabled", label: t("supervisedMentalModeEnabled") },
-                          { value: "disabled", label: t("supervisedMentalModeDisabled") },
-                        ]}
-                        onValueChange={(value) => setSupervisedMentalModelMode(value as SupervisedMentalModelMode)}
-                      />
-                    </div>
-                  </div>
-
-                  <div className={styles.controlFooter}>
-                    <div className={styles.controlActions}>
-                      <VButton
-                        type="button"
-                        variant="primary"
-                        className={`${styles.inlineAction} ${styles.supervisedPrimaryAction}`}
-                        isDisabled={
-                          runLocked
-                          || worktreeRunLocked
-                          || !workbenchControl
-                          || startWorktreeRunMutation.isPending
-                          || (sourceKind === "dataset" && !datasetName)
-                          || (sourceKind === "bundle" && !selectedBundleExists)
-                        }
-                        onClick={() => startWorktreeRunMutation.mutate()}
-                        tooltip={t("launchSupervisedRunHint")}
-                        disabledReason={supervisedStartDisabledReason}
-                        icon={
-                          supervisedStartSubmitting || supervisedPrimaryRunning
-                            ? <LoaderCircle size={15} />
-                            : <Play size={15} />
-                        }
-                      >
-                        {supervisedStartButtonLabel}
-                      </VButton>
-                    </div>
-                    {runLocked || worktreeRunLocked ? <p className={styles.noticeText}>{t("runningLockHint")}</p> : null}
-                    {supervisedControlError ? (
-                      <p className={styles.errorText}>{supervisedControlError}</p>
-                    ) : null}
-                  </div>
-                </div>
-
-                <aside className={styles.supervisedWorkflowPanel}>
-                  <div className={styles.supervisedMembersHeader}>
-                    <div>
-                      <p className={styles.eyebrow}>
-                        {supervisedMembersSource === "run" ? lang === "zh" ? "运行步骤" : "Run steps" : lang === "zh" ? "当前步骤" : "Current steps"}
-                      </p>
-                      <h3 className={`${styles.sectionTitle} ${styles.formLabelWithHint}`}>
-                        {supervisedWorkflowStepLabel(supervisedSelectedWorkflowStep, lang)}
-                        {supervisedMembersHint ? (
-                          <VContextualHint content={supervisedMembersHint} label={lang === "zh" ? "监督成员绑定说明" : "Supervised member binding help"} width="wide" />
-                        ) : null}
-                      </h3>
-                    </div>
-                    <div className={styles.supervisedMembersHeaderActions}>
-                      {supervisedWorkflowManualSelection ? (
-                        <VButton
-                          type="button"
-                          className={styles.supervisedWorkflowFollowButton}
-                          onClick={() => setSelectedSupervisedWorkflowStepId(null)}
-                          tooltip={lang === "zh" ? "回到当前执行阶段" : "Follow the current run stage"}
-                        >
-                          {lang === "zh" ? "跟随现场" : "Follow live"}
-                        </VButton>
-                      ) : null}
-                      <span className={styles.secondaryPill}>{supervisedWorkflowCards.length}</span>
-                    </div>
-                  </div>
-                  <div className={styles.workflowStepRail} aria-label={lang === "zh" ? "监督进化步骤导航" : "Supervised evolution step navigation"}>
-                    {supervisedWorkflowCards.map((step) => {
-                      const selected = step.id === supervisedSelectedWorkflowStep.id;
-                      const current = step.id === supervisedRuntimeWorkflowStepId;
-                      const member = step.member;
-                      const stepRoute = step.chatRoute || (member && member.chatRoute) || "";
-                      const stepMeta = step.role
-                        ? runRoleLabel(step.role)
-                        : String(supervisedMembersRun?.approvalMode ?? approvalMode).toLowerCase() === "agent"
-                          ? lang === "zh" ? "Agent 审批" : "Agent approval"
-                          : lang === "zh" ? "人工审批" : "Human approval";
-                      const stepMetric = typeof step.metrics?.scoreDelta === "number"
-                        ? `Δ ${step.metrics.scoreDelta}`
-                          : typeof step.metrics?.score === "number"
-                            ? String(step.metrics.score)
-                            : statusLabel(step.status);
-                      return (
-                        <div
-                          key={step.id}
-                          className={current && !selected ? `${styles.workflowStepItem} ${styles.workflowStepItemCurrent}` : styles.workflowStepItem}
-                        >
-                          <VButton
-                            type="button"
-                            contentLayout="plain"
-                            className={selected ? `${styles.workflowStepButton} ${styles.workflowStepButtonActive}` : styles.workflowStepButton}
-                            aria-pressed={selected}
-                            onClick={() => handleSupervisedWorkflowStepSelect(step.id)}
-                            tooltip={lang === "zh" ? `查看${supervisedWorkflowStepLabel(step, lang)}` : `View ${supervisedWorkflowStepLabel(step, lang)}`}
-                          >
-                            <span className={styles.workflowStepMeta}>
-                              <span>{current ? (lang === "zh" ? "当前" : "Live") : stepMetric}</span>
-                              <span>{stepMeta}</span>
-                            </span>
-                            <strong>{supervisedWorkflowStepLabel(step, lang)}</strong>
-                            <span className={styles.workflowStepPreview}>
-                              {step.livePreview || step.summary || (lang === "zh" ? "等待实时输出" : "Waiting for live output")}
-                            </span>
-                          </VButton>
-                          {stepRoute ? (
-                            <VTooltip content={
-                              member?.chatRoute
-                                ? lang === "zh" ? `打开监督成员 ${member.name} 的会话` : `Open supervised member session for ${member.name}`
-                                : lang === "zh" ? "打开监督会话" : "Open supervised session"
-                            }>
-                              <Link
-                                className={styles.supervisedWorkflowSessionLink}
-                                to={stepRoute}
-                                aria-label={
-                                member?.chatRoute
-                                  ? lang === "zh" ? `打开监督成员 ${member.name} 的会话` : `Open supervised member session for ${member.name}`
-                                  : lang === "zh" ? "打开监督会话" : "Open supervised session"
-                                }
-                              >
-                                <span>{lang === "zh" ? "会话" : "Session"}</span>
-                                <ArrowUpRight size={13} aria-hidden="true" />
-                              </Link>
-                            </VTooltip>
-                          ) : member?.configRoute ? (
-                            <VTooltip content={lang === "zh" ? `配置 ${member.name}` : `Configure ${member.name}`}>
-                              <Link className={styles.supervisedWorkflowSessionLink} to={member.configRoute}>
-                                <span>{lang === "zh" ? "配置" : "Config"}</span>
-                                <ArrowUpRight size={13} aria-hidden="true" />
-                              </Link>
-                            </VTooltip>
-                          ) : null}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </aside>
+                <EvolutionSupervisedLiveSetupPanel
+                  lang={lang}
+                  sourceKind={sourceKind}
+                  selectedSourceValue={selectedSourceValue}
+                  sourceOptions={supervisedSourceOptions.map((source) => ({
+                    value: source.value,
+                    label: source.kind === "dataset"
+                      ? `${source.name} [${datasetUsabilityLabel(source.dataset, lang)}]`
+                      : `${source.name} [${source.caseCount} cases]`,
+                  }))}
+                  onSourceValueChange={(value) => {
+                    const [nextKind, ...nameParts] = value.split(":");
+                    const nextName = nameParts.join(":");
+                    if (nextKind === "bundle") {
+                      setSourceKind("bundle");
+                      setBundleNameInput(nextName);
+                      return;
+                    }
+                    setSourceKind("dataset");
+                    setDatasetName(nextName);
+                  }}
+                  datasetLimitInput={datasetLimitInput}
+                  datasetLimitInputRef={datasetLimitInputRef}
+                  onDatasetLimitChange={setDatasetLimitInput}
+                  selectedSourceLabel={selectedSourceOption?.label}
+                  selectedSourceStatusText={selectedSourceStatusText}
+                  selectedSourceEvaluationText={selectedSourceEvaluationText}
+                  selectedSourceKindLabel={selectedSourceKindLabel}
+                  selectedSourceCaseText={selectedSourceCaseText}
+                  selectedSourceOfficialWarning={selectedSourceOfficialWarning}
+                  showMissingBundleError={Boolean(workbenchControl && sourceKind === "bundle" && !selectedBundleExists)}
+                  keepWorktree={keepWorktree}
+                  onKeepWorktreeChange={setKeepWorktree}
+                  approvalMode={approvalMode}
+                  onApprovalModeChange={setApprovalMode}
+                  supervisedMentalModelMode={supervisedMentalModelMode}
+                  onMentalModelModeChange={setSupervisedMentalModelMode}
+                  startDisabled={
+                    runLocked
+                    || worktreeRunLocked
+                    || !workbenchControl
+                    || startWorktreeRunMutation.isPending
+                    || (sourceKind === "dataset" && !datasetName)
+                    || (sourceKind === "bundle" && !selectedBundleExists)
+                  }
+                  startDisabledReason={supervisedStartDisabledReason}
+                  startPendingVisual={supervisedStartSubmitting || supervisedPrimaryRunning}
+                  startLabel={supervisedStartButtonLabel}
+                  startTooltip={t("launchSupervisedRunHint")}
+                  caseLimitLabel={t("caseLimit")}
+                  caseLimitHint={t("caseLimitHint")}
+                  mentalModeLabel={t("supervisedMentalMode")}
+                  mentalModeHint={t("supervisedMentalModeHint")}
+                  mentalModeFollowLabel={t("supervisedMentalModeFollow")}
+                  mentalModeEnabledLabel={t("supervisedMentalModeEnabled")}
+                  mentalModeDisabledLabel={t("supervisedMentalModeDisabled")}
+                  runningLockHint={t("runningLockHint")}
+                  showRunningLock={runLocked || worktreeRunLocked}
+                  controlError={supervisedControlError}
+                  onStart={() => startWorktreeRunMutation.mutate()}
+                />
+                <EvolutionSupervisedWorkflowMembersPanel
+                  lang={lang}
+                  membersSource={supervisedMembersSource}
+                  selectedStepLabel={supervisedWorkflowStepLabel(supervisedSelectedWorkflowStep, lang)}
+                  membersHint={supervisedMembersHint}
+                  showFollowLive={supervisedWorkflowManualSelection}
+                  onFollowLive={() => setSelectedSupervisedWorkflowStepId(null)}
+                  stepCount={supervisedWorkflowCards.length}
+                  steps={supervisedWorkflowStepViews}
+                  onSelectStep={handleSupervisedWorkflowStepSelect}
+                />
               </div>
             </VSurface>
 
