@@ -3062,95 +3062,103 @@ export function ChatCodingRoute() {
 
       <section className={centerPaneClassName} data-vui-region="chat-conversation-center">
         <div className={styles.tabStrip}>
-          {/* Session tabs first so they stay left-aligned; never put ml-auto before them. */}
+          {/* Pinned back chip — short label only; full destination stays in title/aria. */}
           {chatReturnTarget ? (
-            <Link className={styles.chatReturnLink} to={chatReturnTarget} title={chatReturnLabel}>
-              <ArrowLeft size={14} aria-hidden="true" />
-              <span>{chatReturnLabel}</span>
+            <Link
+              className={styles.chatReturnLink}
+              to={chatReturnTarget}
+              title={chatReturnLabel}
+              aria-label={chatReturnLabel}
+            >
+              <ArrowLeft size={14} className={styles.chatReturnLinkIcon} aria-hidden="true" />
+              <span>{lang === "zh" ? "返回" : "Back"}</span>
             </Link>
           ) : null}
-          {groupPanelActive ? (
-            <VButton
-              type="button"
-              className={`${styles.tab} ${styles.tabActive}`}
-              onClick={() => undefined}
-            >
-              {projectBusActive ? (lang === "zh" ? "通知流" : "Notice stream") : (lang === "zh" ? "群聊" : "Group")}
-            </VButton>
-          ) : selectedChatAgentId || agentSessionTabs.length > 0 || cliAgentRunTabs.length > 0 ? (
-            <AgentSessionTabStrip
-              activeSessionId={activeSessionId}
-              activeCliAgentRunId={activeCliAgentRunId}
-              agentsById={agentsById}
-              buildSessionReferencePayload={buildSessionReferencePayload}
-              contextMenuSessionId={contextMenuSessionId}
-              cliAgentRuns={cliAgentRunTabs}
-              createPending={createSessionMutation.isPending}
-              createDisabled={!selectedChatAgentId}
-              deletePendingSessionId={
-                deleteSessionMutation.isPending
-                  ? String(deleteSessionMutation.variables?.sessionId || "").trim()
-                  : ""
-              }
-              editingSessionId={editingSessionId}
-              editingSessionTitle={editingSessionTitle}
-              lang={lang}
-              renamePending={renameSessionMutation.isPending}
-              renameSessionId={renameSessionMutation.variables?.sessionId ?? ""}
-              resolveModelLabel={resolveModelLabel}
-              sessions={agentSessionTabs}
-              runtimeRunningSessionIds={runtimeRunningSessionIds}
-              sessionIdsNeedingApproval={sessionIdsNeedingApproval}
-              statusLabel={statusLabel}
-              t={t}
-              workspaceActiveTab={workspace.activeTab}
-              onCancelRename={cancelRenameSession}
-              onContextMenu={openSessionContextMenu}
-              onDragReference={startSessionReferenceDrag}
-              onOpenCliAgentRun={(runId) => {
-                if (activeSessionId) {
-                  setActiveTab(activeSessionId, cliAgentRunTabId(runId));
+          {/* Session + file tabs scroll together; never put ml-auto before this region. */}
+          <div className={styles.tabStripSessions}>
+            {groupPanelActive ? (
+              <VButton
+                type="button"
+                className={`${styles.tab} ${styles.tabActive}`}
+                onClick={() => undefined}
+              >
+                {projectBusActive ? (lang === "zh" ? "通知流" : "Notice stream") : (lang === "zh" ? "群聊" : "Group")}
+              </VButton>
+            ) : selectedChatAgentId || agentSessionTabs.length > 0 || cliAgentRunTabs.length > 0 ? (
+              <AgentSessionTabStrip
+                activeSessionId={activeSessionId}
+                activeCliAgentRunId={activeCliAgentRunId}
+                agentsById={agentsById}
+                buildSessionReferencePayload={buildSessionReferencePayload}
+                contextMenuSessionId={contextMenuSessionId}
+                cliAgentRuns={cliAgentRunTabs}
+                createPending={createSessionMutation.isPending}
+                createDisabled={!selectedChatAgentId}
+                deletePendingSessionId={
+                  deleteSessionMutation.isPending
+                    ? String(deleteSessionMutation.variables?.sessionId || "").trim()
+                    : ""
                 }
-              }}
-              onCloseCliAgentRun={(runId) => {
-                const run = cliAgentRunTabs.find((item) => item.id === runId);
-                if (run) {
-                  void closeCliAgentRun(run);
-                }
-              }}
-              onCreateSession={handleCreateSession}
-              onDeleteSession={handleDeleteSession}
-              onOpenDirectSession={handleOpenDirectSession}
-              onPrefetchDirectSession={handlePrefetchDirectSession}
-              onRenameTitleChange={setEditingSessionTitle}
-              onSetActiveTab={setActiveTab}
-              onSubmitRename={submitRenameSession}
-            />
-          ) : (
-            <VButton
-              type="button"
-              className={workspace.activeTab === "agent" ? `${styles.tab} ${styles.tabActive}` : styles.tab}
-              onClick={() => {
-                activeSessionId && setActiveTab(activeSessionId, "agent");
-              }}
-            >
-              {t("agentSession")}
-            </VButton>
-          )}
-          <Suspense fallback={null}>
-            <ChatFileWorkspaceTabs
-              activeTab={workspace.activeTab}
-              closePreviewTabLabel={t("closePreviewTab")}
-              hidden={groupPanelActive}
-              openTabs={workspace.openTabs}
-              onCloseTab={(tabPath) => {
-                activeSessionId && closePreviewTab(activeSessionId, tabPath);
-              }}
-              onOpenTab={(tabPath) => {
-                activeSessionId && setActiveTab(activeSessionId, tabPath);
-              }}
-            />
-          </Suspense>
+                editingSessionId={editingSessionId}
+                editingSessionTitle={editingSessionTitle}
+                lang={lang}
+                renamePending={renameSessionMutation.isPending}
+                renameSessionId={renameSessionMutation.variables?.sessionId ?? ""}
+                resolveModelLabel={resolveModelLabel}
+                sessions={agentSessionTabs}
+                runtimeRunningSessionIds={runtimeRunningSessionIds}
+                sessionIdsNeedingApproval={sessionIdsNeedingApproval}
+                statusLabel={statusLabel}
+                t={t}
+                workspaceActiveTab={workspace.activeTab}
+                onCancelRename={cancelRenameSession}
+                onContextMenu={openSessionContextMenu}
+                onDragReference={startSessionReferenceDrag}
+                onOpenCliAgentRun={(runId) => {
+                  if (activeSessionId) {
+                    setActiveTab(activeSessionId, cliAgentRunTabId(runId));
+                  }
+                }}
+                onCloseCliAgentRun={(runId) => {
+                  const run = cliAgentRunTabs.find((item) => item.id === runId);
+                  if (run) {
+                    void closeCliAgentRun(run);
+                  }
+                }}
+                onCreateSession={handleCreateSession}
+                onDeleteSession={handleDeleteSession}
+                onOpenDirectSession={handleOpenDirectSession}
+                onPrefetchDirectSession={handlePrefetchDirectSession}
+                onRenameTitleChange={setEditingSessionTitle}
+                onSetActiveTab={setActiveTab}
+                onSubmitRename={submitRenameSession}
+              />
+            ) : (
+              <VButton
+                type="button"
+                className={workspace.activeTab === "agent" ? `${styles.tab} ${styles.tabActive}` : styles.tab}
+                onClick={() => {
+                  activeSessionId && setActiveTab(activeSessionId, "agent");
+                }}
+              >
+                {t("agentSession")}
+              </VButton>
+            )}
+            <Suspense fallback={null}>
+              <ChatFileWorkspaceTabs
+                activeTab={workspace.activeTab}
+                closePreviewTabLabel={t("closePreviewTab")}
+                hidden={groupPanelActive}
+                openTabs={workspace.openTabs}
+                onCloseTab={(tabPath) => {
+                  activeSessionId && closePreviewTab(activeSessionId, tabPath);
+                }}
+                onOpenTab={(tabPath) => {
+                  activeSessionId && setActiveTab(activeSessionId, tabPath);
+                }}
+              />
+            </Suspense>
+          </div>
           {/* Overlay rail toggles last + ml-auto so they sit on the right when present. */}
           {!responsiveLayout.leftVisible || !responsiveLayout.rightVisible ? (
             <div className={styles.overlayPaneControls}>

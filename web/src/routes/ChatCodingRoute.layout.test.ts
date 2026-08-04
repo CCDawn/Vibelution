@@ -841,10 +841,19 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("const chatReturnLabel = useMemo");
     expect(routeSource).toContain("返回来源");
     expect(routeSource).toContain("styles.chatReturnLink");
+    expect(routeSource).toContain("styles.tabStripSessions");
     expect(routeSource).toContain("to={chatReturnTarget}");
-    expect(routeSource).toContain("<ArrowLeft size={14} aria-hidden=\"true\" />");
+    expect(routeSource).toContain("title={chatReturnLabel}");
+    expect(routeSource).toContain("aria-label={chatReturnLabel}");
+    // Visible text stays short; full destination is only in title/aria.
+    expect(routeSource).toContain('{lang === "zh" ? "返回" : "Back"}');
+    expect(routeSource).toContain("styles.chatReturnLinkIcon");
     expect(routeStyles.chatReturnLink).toBeTypeOf("string");
+    expect(routeStyles.chatReturnLink).toContain("shrink-0");
+    expect(routeStyles.chatReturnLink).toContain("max-w-[7.5rem]");
     expect(routeStyles.chatReturnLink).toContain("[&_span]:truncate");
+    expect(routeStyles.tabStripSessions).toContain("flex-1");
+    expect(routeStyles.tabStripSessions).toContain("overflow-x-auto");
   });
 
   it("keeps the conversation index compact enough for 1024px workbench use", () => {

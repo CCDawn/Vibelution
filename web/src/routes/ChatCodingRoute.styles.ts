@@ -56,8 +56,14 @@ const styles: Record<string, string> = {
     "vui-routes-chatcodingroute centerPaneOverlay [grid-column:1] [grid-row:1]",
   centerSurface:
     `vui-routes-chatcodingroute centerSurface grid h-full min-h-0 w-full overflow-hidden ${vuiChatFillClass}`,
+  // Compact back chip: never compete with session tabs for width.
   chatReturnLink:
-    "vui-routes-chatcodingroute chatReturnLink min-w-0 [&_span]:truncate",
+    "vui-routes-chatcodingroute chatReturnLink inline-flex h-7 max-w-[7.5rem] shrink-0 items-center gap-1 self-center rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 no-underline [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-cool)] [&_span]:min-w-0 [&_span]:truncate",
+  chatReturnLinkIcon:
+    "vui-routes-chatcodingroute chatReturnLinkIcon shrink-0 text-[var(--fg-tertiary)]",
+  // Session + file tabs share one scroll region so the back chip stays pinned left.
+  tabStripSessions:
+    "vui-routes-chatcodingroute tabStripSessions min-w-0 flex flex-1 items-end gap-1 overflow-x-auto overflow-y-hidden [scrollbar-width:thin]",
   contextCompositionSegmentAgent:
     `vui-routes-chatcodingroute contextCompositionSegmentAgent min-w-0 ${vuiStateCoolInfoClass}`,
   contextCompositionSegmentAttachments:
@@ -266,7 +272,7 @@ const styles: Record<string, string> = {
   tabActive:
     `vui-routes-chatcodingroute tabActive min-w-0 ${vuiStateSelectedRowClass}`,
   tabStrip:
-    "vui-routes-chatcodingroute tabStrip min-w-0 flex h-9 items-end gap-1 overflow-hidden border-b border-[var(--vui-border-subtle)] !bg-[var(--vui-surface-panel)] px-1 pt-1",
+    "vui-routes-chatcodingroute tabStrip min-w-0 flex h-9 items-center gap-1.5 overflow-hidden border-b border-[var(--vui-border-subtle)] !bg-[var(--vui-surface-panel)] px-1.5 pt-1",
 
 };
 
