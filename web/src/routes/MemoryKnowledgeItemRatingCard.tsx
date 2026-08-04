@@ -86,7 +86,11 @@ export function MemoryKnowledgeItemRatingCard({
           className={styles.detailActionButton}
           onClick={() => onUpdateKnowledgeRating(item)}
           isDisabled={!canRate || knowledgeBusy}
-          icon={<CheckCircle2 size={14}/>}><span>{copy.submitRatingSuggestion}</span></VButton>
+
+            icon={<CheckCircle2 size={14}/>}
+          >
+            <span>{copy.submitRatingSuggestion}</span>
+          </VButton>
       </div>
     </section>
   );

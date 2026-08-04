@@ -4007,7 +4007,11 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
       meta={memoryViewSubtitle(copy, forcedView)}
       actions={(
         <div className={styles.headerActions}>
-          <VButton type="button" className={styles.refreshButton} onClick={refresh} icon={<RefreshCw size={16} />}>{copy.refresh}</VButton>
+          <VButton type="button" className={styles.refreshButton} onClick={refresh}
+            icon={<RefreshCw size={16} />}
+          >
+            {copy.refresh}
+          </VButton>
           {returnToPath ? (
             <VRouteLinkButton
               to={returnToPath}

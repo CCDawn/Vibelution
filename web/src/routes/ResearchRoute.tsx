@@ -684,9 +684,17 @@ export function ResearchRoute() {
             </div>
           ) : null}
           {autoDraftMutation.isPending ? (
-            <VButton className={styles.secondaryButton} isDisabled={autoDraftPauseRequested} onClick={pauseAutoDraft} icon={<Pause size={16}/>}>{autoDraftPauseRequested ? copy.pausing : copy.pause}</VButton>
+            <VButton className={styles.secondaryButton} isDisabled={autoDraftPauseRequested} onClick={pauseAutoDraft}
+              icon={<Pause size={16}/>}
+            >
+              {autoDraftPauseRequested ? copy.pausing : copy.pause}
+            </VButton>
           ) : (
-            <VButton className={styles.primaryButton} isDisabled={workflowControlsDisabled} onClick={runWorkflow} icon={<Sparkles size={16}/>}>{copy.continueWorkflow}</VButton>
+            <VButton className={styles.primaryButton} isDisabled={workflowControlsDisabled} onClick={runWorkflow}
+              icon={<Sparkles size={16}/>}
+            >
+              {copy.continueWorkflow}
+            </VButton>
           )}
           </div>
         )}
@@ -749,7 +757,11 @@ export function ResearchRoute() {
                 />
               </label>
             </div>
-            <VButton className={styles.primaryButton} isDisabled={busy} onClick={() => createMutation.mutate()} icon={<Layers3 size={16}/>}>{copy.create}</VButton>
+            <VButton className={styles.primaryButton} isDisabled={busy} onClick={() => createMutation.mutate()}
+              icon={<Layers3 size={16}/>}
+            >
+              {copy.create}
+            </VButton>
             {actionError ? <p className={styles.errorText}>{errorMessage(actionError)}</p> : null}
           </section>
 
@@ -860,7 +872,11 @@ export function ResearchRoute() {
                         className={styles.secondaryButton}
                         isDisabled={busy || !canRun}
                         onClick={() => runFlowNode(item.node)}
-                        icon={<ActionIcon size={14}/>}><span>{actionLabel}</span></VButton>
+
+                          icon={<ActionIcon size={14}/>}
+                        >
+                          <span>{actionLabel}</span>
+                        </VButton>
                     </div> : null}
                   </article>
                 );
@@ -1276,7 +1292,11 @@ function AgentTracePanel({
               className={styles.traceGhostButton}
               onClick={() => setIsCollapsed((current) => !current)}
               aria-expanded={!isCollapsed}
-              icon={isCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}><span>{isCollapsed ? copy.expandTrace : copy.collapseTrace}</span></VButton>
+
+                icon={isCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+              >
+                <span>{isCollapsed ? copy.expandTrace : copy.collapseTrace}</span>
+              </VButton>
             {isRunning ? <LoaderCircle className={styles.statusSpinner} size={15} /> : null}
           </div>
         </div>
@@ -1312,14 +1332,22 @@ function AgentTracePanel({
             className={styles.traceGhostButton}
             onClick={() => setIsCollapsed((current) => !current)}
             aria-expanded={!isCollapsed}
-            icon={isCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}><span>{isCollapsed ? copy.expandTrace : copy.collapseTrace}</span></VButton>
+
+              icon={isCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+            >
+              <span>{isCollapsed ? copy.expandTrace : copy.collapseTrace}</span>
+            </VButton>
           <VButton
             type="button"
             className={styles.traceGhostButton}
             isDisabled={!detailEntries.length}
             onClick={() => setDetailsExpanded((current) => !current)}
             aria-expanded={detailsExpanded}
-            icon={detailsExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}><span>{detailsExpanded ? "收起细节" : `展开细节 ${detailEntries.length}`}</span></VButton>
+
+              icon={detailsExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+            >
+              <span>{detailsExpanded ? "收起细节" : `展开细节 ${detailEntries.length}`}</span>
+            </VButton>
           {isRunning ? (
             <span className={styles.agentTraceLivePill}>
               <LoaderCircle className={styles.statusSpinner} size={13} />
@@ -1388,7 +1416,11 @@ function AgentTracePanel({
       </div> : null}
 
       {!isCollapsed && !isAtBottom ? (
-        <VButton type="button" className={styles.traceBackToBottomButton} onClick={scrollToLatest} icon={<ArrowDown size={14} />}><span>回到最新</span></VButton>
+        <VButton type="button" className={styles.traceBackToBottomButton} onClick={scrollToLatest}
+          icon={<ArrowDown size={14} />}
+        >
+          <span>回到最新</span>
+        </VButton>
       ) : null}
     </section>
   );
@@ -1507,7 +1539,11 @@ function StageEvidence({
               <li key={item}>{item}</li>
             ))}
           </ul>
-          <VButton className={styles.secondaryButton} isDisabled={busy} onClick={onSupplementEvidence} icon={<SearchCheck size={14}/>}>{copy.confirmEvidenceSearch}</VButton>
+          <VButton className={styles.secondaryButton} isDisabled={busy} onClick={onSupplementEvidence}
+            icon={<SearchCheck size={14}/>}
+          >
+            {copy.confirmEvidenceSearch}
+          </VButton>
         </section>
       ) : null}
       {!visibleEvidence.length ? <VStateSurface tone="empty" title="还没有证据记录" /> : null}
@@ -1613,12 +1649,20 @@ function ThemeCompareRow({
           className={cardPrimary ? styles.secondaryButton : styles.primaryButton}
           isDisabled={disabled || isSelected}
           onClick={() => onSelectTheme(theme)}
-          icon={<GitBranch size={14}/>}><span>{isSelected ? copy.selected : copy.select}</span></VButton>
+
+            icon={<GitBranch size={14}/>}
+          >
+            <span>{isSelected ? copy.selected : copy.select}</span>
+          </VButton>
         <VButton
           className={cardPrimary ? styles.primaryButton : styles.secondaryButton}
           isDisabled={disabled}
           onClick={() => onGenerateCard(theme)}
-          icon={<FlaskConical size={14}/>}><span>{cardPrimary ? copy.formalCard : copy.themeCard}</span></VButton>
+
+            icon={<FlaskConical size={14}/>}
+          >
+            <span>{cardPrimary ? copy.formalCard : copy.themeCard}</span>
+          </VButton>
       </div>
     </article>
   );

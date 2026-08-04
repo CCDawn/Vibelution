@@ -165,7 +165,9 @@ export function MemoryCleanupPanel({
               className={styles.inlineActionButton}
               onClick={onPreview}
               isDisabled={!selectedTargetCount || previewPending}
-              icon={<Eye size={15}/>}>{copy.cleanupPreview}</VButton>
+ icon={<Eye size={15}/>}>
+                {copy.cleanupPreview}
+              </VButton>
           </div>
           {report ? (
             <>
@@ -229,7 +231,9 @@ export function MemoryCleanupPanel({
             className={styles.cleanupExecuteButton}
             onClick={onExecute}
             isDisabled={!canExecute || executePending}
-                icon={<Trash2 size={15} />}>{copy.cleanupExecute}</VButton>
+ icon={<Trash2 size={15} />}>
+                  {copy.cleanupExecute}
+                </VButton>
           {feedback.tone !== "idle" ? (
             <p className={styles.cleanupFeedback} data-tone={feedback.tone}>{feedback.text}</p>
           ) : null}

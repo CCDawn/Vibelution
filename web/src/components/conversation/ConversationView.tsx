@@ -3235,13 +3235,14 @@ export function ConversationView({
           aria-expanded={expanded}
           onClick={() => toggleSection(messageId, section, defaultExpanded)}
           title={toggleTitle}
-          isIconOnly
           icon={operationIcon(kind, title)}
+          trailingIcon={expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+        >
           <span>{title}</span>
           {!expanded && operations[0]?.summary ? (
             <span className={styles.operationSummaryPreview}>{operations[0].summary}</span>
           ) : null}
-          {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />} />
+        </VButton>
         {expanded ? renderOperationTimeline(operations) : null}
       </section>
     );
@@ -3282,11 +3283,12 @@ export function ConversationView({
           aria-expanded={expanded}
           onClick={() => toggleSection(messageId, "feedback", defaultTimelineExpanded)}
           title={expanded ? t("executionDetailsVisible") : t("executionDetailsHidden")}
-          isIconOnly
           icon={operationIcon(operations[0]?.kind ?? "tool", title)}
+          trailingIcon={expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+        >
           <span>{title}</span>
           <span className={styles.operationSummaryCount}>{stateLabel}</span>
-          {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />} />
+        </VButton>
         {expanded ? renderFeedbackTimelineDetails(messageId, operations) : null}
       </section>
     );
@@ -3400,14 +3402,18 @@ export function ConversationView({
           aria-expanded={expanded}
           onClick={() => toggleSection(messageId, "mental", defaultExpandedOverride ?? true)}
           title={toggleTitle}
+          icon={<BrainCircuit size={17} />}
+          trailingIcon={
+            <>
+              {isRunning ? <LoaderCircle className={styles.statusSpinner} size={14} /> : null}
+              {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+            </>
+          }
         >
-          <BrainCircuit size={17} />
           <span>{t("mentalProcess")}</span>
           {!expanded && preview ? (
             <span className={styles.operationSummaryPreview}>{preview}</span>
           ) : null}
-          {isRunning ? <LoaderCircle className={styles.statusSpinner} size={14} /> : null}
-          {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
         </VButton>
         {expanded ? (
           <div className={`${styles.auxiliaryPanel} ${styles.auxiliaryPanel_mental}`}>

@@ -1410,7 +1410,9 @@ function ConfigSectionEditor({
                   className={`${styles.actionButton} ${styles.compactButton}`}
                   isDisabled={disabled || imageUploading}
                   onClick={() => updateSectionDraft(absolutePath, "")}
-                  icon={<X size={14} />}>{copy.clearThemeBackgroundImage}</VButton>
+ icon={<X size={14} />}>
+                    {copy.clearThemeBackgroundImage}
+                  </VButton>
               ) : null}
             </div>
           </div>
@@ -1648,13 +1650,19 @@ function ConfigSectionEditor({
                   onClick={() => {
                     void confirmAvatarCrop();
                   }}
-                  icon={<Save size={14} />}>{imageUploading ? copy.avatarImageUploading : copy.avatarCropConfirm}</VButton>
+
+                    icon={<Save size={14} />}
+                  >
+                    {imageUploading ? copy.avatarImageUploading : copy.avatarCropConfirm}
+                  </VButton>
                 <VButton
                   type="button"
                   className={`${styles.actionButton} ${styles.compactButton}`}
                   isDisabled={disabled || imageUploading}
                   onClick={cancelAvatarCrop}
-                icon={<X size={14} />}>{copy.avatarCropCancel}</VButton>
+ icon={<X size={14} />}>
+                  {copy.avatarCropCancel}
+                </VButton>
               </div>
             </div>
           ) : null}
@@ -1688,7 +1696,9 @@ function ConfigSectionEditor({
                 className={`${styles.actionButton} ${styles.compactButton}`}
                 isDisabled={disabled || imageUploading}
                 onClick={() => updateSectionDraft(absolutePath, "")}
-                icon={<X size={14} />}>{copy.clearAvatarImage}</VButton>
+ icon={<X size={14} />}>
+                  {copy.clearAvatarImage}
+                </VButton>
             ) : null}
           </div>
           {avatarCropError ? <p className={styles.inlineError}>{avatarCropError}</p> : null}
@@ -2083,7 +2093,11 @@ function ConfigSectionEditor({
               className={`${styles.actionButton} ${styles.compactButton} ${styles.toolbarButton}`}
               aria-expanded={sectionExpanded}
               onClick={() => onUiStateChange(section.id, { ...uiState, expanded: !sectionExpanded })}
-              icon={<ChevronRight size={14} className={sectionExpanded ? styles.treeToggleIconExpanded : styles.treeToggleIcon}/>}>{sectionExpanded ? copy.collapseSection : copy.expandSection}</VButton>
+
+                icon={<ChevronRight size={14} className={sectionExpanded ? styles.treeToggleIconExpanded : styles.treeToggleIcon}/>}
+              >
+                {sectionExpanded ? copy.collapseSection : copy.expandSection}
+              </VButton>
           {editing ? (
             <>
               <VButton
@@ -2091,7 +2105,9 @@ function ConfigSectionEditor({
                 className={`${styles.primaryButton} ${styles.compactButton} ${styles.toolbarButton}`}
                 isDisabled={disabled}
                 onClick={handleSave}
-                icon={<Save size={14} />}>{copy.saveSection}</VButton>
+ icon={<Save size={14} />}>
+                  {copy.saveSection}
+                </VButton>
               <VButton
                 type="button"
                 className={`${styles.actionButton} ${styles.compactButton} ${styles.toolbarButton}`}
@@ -2104,7 +2120,9 @@ function ConfigSectionEditor({
                     draftValue: undefined,
                   });
                 }}
-                icon={<RotateCcw size={14} />}>{copy.cancelSection}</VButton>
+ icon={<RotateCcw size={14} />}>
+                  {copy.cancelSection}
+                </VButton>
             </>
           ) : (
             <VButton
@@ -2119,7 +2137,9 @@ function ConfigSectionEditor({
                   draftValue: clonePublicConfig(value),
                 });
               }}
-              icon={<Pencil size={14} />}>{copy.editSection}</VButton>
+ icon={<Pencil size={14} />}>
+                {copy.editSection}
+              </VButton>
           )}
           </div>
         </div>
@@ -3326,7 +3346,9 @@ export function ConfigRoute() {
                 onClick={() => {
                   void handleSaveAndLeave();
                 }}
-                icon={<Save size={14} />}>{leaveGuardSaveLabel}</VButton>
+ icon={<Save size={14} />}>
+                  {leaveGuardSaveLabel}
+                </VButton>
               <VButton type="button" className={styles.dangerButton} isDisabled={Boolean(busyAction)} onClick={handleDiscardAndLeave}>
                 {copy.leaveGuardDiscard}
               </VButton>
@@ -3383,7 +3405,9 @@ export function ConfigRoute() {
               onClick={() => {
                 void reloadWorkspace();
               }}
-              icon={<RotateCcw size={14} />}>{copy.refresh}</VButton>
+ icon={<RotateCcw size={14} />}>
+                {copy.refresh}
+              </VButton>
             <VButton
               type="button"
               variant="primary"
@@ -3392,7 +3416,9 @@ export function ConfigRoute() {
               onClick={() => {
                 void handleApply();
               }}
-              icon={<Save size={14} />}>{saveButtonLabel}</VButton>
+ icon={<Save size={14} />}>
+                {saveButtonLabel}
+              </VButton>
           </div>
         }
         toolbar={

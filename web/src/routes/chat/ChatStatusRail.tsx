@@ -348,7 +348,11 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
                       type="button"
                       className={styles.groupSecondaryButton}
                       onClick={() => onOpenTeam(activeGroupTeam.teamId)}
-                      icon={<ArrowUpRight size={14} />}><span>{lang === "zh" ? "打开团队" : "Open team"}</span></VButton>
+
+                        icon={<ArrowUpRight size={14} />}
+                      >
+                        <span>{lang === "zh" ? "打开团队" : "Open team"}</span>
+                      </VButton>
                   ) : null}
                   <VButton
                     type="button"
@@ -526,7 +530,11 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
                 onFocus={() => onPrefetchDirectSession?.(agentPrimaryDirectSessionId)}
                 onClick={() => onOpenDirectSession(agentPrimaryDirectSessionId)}
                 title={`${t("openCurrentDirectSession")} · ${agentPrimaryDirectSessionId}`}
-                icon={<ArrowUpRight size={13} />}><span>{t("openCurrentDirectSession")}</span></VButton>
+
+                  icon={<ArrowUpRight size={13} />}
+                >
+                  <span>{t("openCurrentDirectSession")}</span>
+                </VButton>
             </div>
           ) : null}
           {sessionCompactRows.length > 0 ? (

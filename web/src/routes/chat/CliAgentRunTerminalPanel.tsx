@@ -551,7 +551,11 @@ export function CliAgentRunTerminalPanel({
               title={terminalCanResume
                 ? (lang === "zh" ? "恢复这个 CLI 会话" : "Resume this CLI session")
                 : (lang === "zh" ? "新开一个 CLI 会话" : "Start a new CLI session")}
-                icon={<RotateCcw size={13} aria-hidden="true" />}><span>{terminalCanResume ? (lang === "zh" ? "恢复" : "Resume") : (lang === "zh" ? "新开" : "Start")}</span></VButton>
+
+                  icon={<RotateCcw size={13} aria-hidden="true" />}
+                >
+                  <span>{terminalCanResume ? (lang === "zh" ? "恢复" : "Resume") : (lang === "zh" ? "新开" : "Start")}</span>
+                </VButton>
           ) : null}
         </div>
         <div
