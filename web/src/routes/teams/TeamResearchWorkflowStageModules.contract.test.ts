@@ -2,15 +2,16 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const routeSource = readFileSync(new URL("../TeamsRoute.tsx", import.meta.url), "utf8");
+const surfaceSource = readFileSync(new URL("./teamResearchWorkflowSurfaceRenderers.tsx", import.meta.url), "utf8");
 const modulesSource = readFileSync(new URL("./TeamResearchWorkflowStageModules.tsx", import.meta.url), "utf8");
+const routeAndSurfaceSource = `${routeSource}\n${surfaceSource}`;
 
 describe("TeamResearchWorkflowStageModules extraction contract", () => {
   it("TeamsRoute composes stage modules once via the extracted component", () => {
-    expect(routeSource).toContain(
-      'import { TeamResearchWorkflowStageModules } from "./teams/TeamResearchWorkflowStageModules"',
-    );
-    expect(routeSource).toContain("function renderResearchWorkflowModules()");
-    expect(routeSource.match(/<TeamResearchWorkflowStageModules[\s\S]*?\/>/g)?.length).toBe(1);
+    expect(routeSource).toContain("createResearchWorkflowSurfaceRenderers");
+    expect(surfaceSource).toContain('from "./TeamResearchWorkflowStageModules"');
+    expect(routeAndSurfaceSource).toContain("function renderResearchWorkflowModules(");
+    expect(surfaceSource.match(/<TeamResearchWorkflowStageModules[\s\S]*?\/>/g)?.length).toBe(1);
     // Stage panel JSX no longer lives on the route.
     expect(routeSource).not.toContain("<TeamsSourceCollectionPanel");
     expect(routeSource).not.toContain("<TeamWorkflowCoordinationStatusPanel");

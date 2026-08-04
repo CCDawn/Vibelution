@@ -190,8 +190,9 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 1. **Done (structure wave):** lazy pack facades → `teamLazyPanels.tsx`; experiment/research-loop workspace action adapters → `experimentWorkspaceActions.ts`.
 2. **Done (state machine 1–4):** SC / experiment / shell-canvas workspace hooks + mutation surface ctx shrink.
 3. **Done (structure):** SC inject render adapters → `teamSourceCollectionInjectRenderers.tsx` (`createSourceCollectionInjectRenderers`).
-4. Optional: collapse SC chrome+workspace double layer; large React Context only with explicit charter.
-5. Optional: cross-route query/mutation patterns (Chat/Agents) only with a new phase charter.
+4. **Done (structure):** research workflow / communication surface → `teamResearchWorkflowSurfaceRenderers.tsx`.
+5. Optional: collapse SC chrome+workspace double layer; large React Context only with explicit charter.
+6. Optional: extract research launcher/overview/standalone adapters (careful of peer ResearchBoard diffs).
 
 ## Rules
 

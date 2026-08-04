@@ -13,6 +13,7 @@ import teamShellToolbarSource from "./teams/TeamShellToolbar.tsx?raw";
 import teamCanvasReadOnlyInspectorSource from "./teams/TeamCanvasReadOnlyInspector.tsx?raw";
 import teamsWorkspacePanelRenderersSource from "./teams/teamsWorkspacePanelRenderers.tsx?raw";
 import teamSourceCollectionInjectRenderersSource from "./teams/teamSourceCollectionInjectRenderers.tsx?raw";
+import teamResearchWorkflowSurfaceRenderersSource from "./teams/teamResearchWorkflowSurfaceRenderers.tsx?raw";
 import useSourceCollectionWorkspaceSource from "./teams/useSourceCollectionWorkspace.ts?raw";
 import useResearchExperimentWorkspaceSource from "./teams/useResearchExperimentWorkspace.ts?raw";
 import useTeamsShellCanvasWorkspaceSource from "./teams/useTeamsShellCanvasWorkspace.ts?raw";
@@ -30,6 +31,7 @@ const routeSource = [
   teamCanvasReadOnlyInspectorSource,
   teamsWorkspacePanelRenderersSource,
   teamSourceCollectionInjectRenderersSource,
+  teamResearchWorkflowSurfaceRenderersSource,
   useSourceCollectionWorkspaceSource,
   useResearchExperimentWorkspaceSource,
   useTeamsShellCanvasWorkspaceSource,
@@ -925,7 +927,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("TeamCommunicationPanel");
     // Workflow section chrome extracted to TeamResearchWorkflowPanelHost.
     expect(teamResearchWorkflowPanelHostSource).toContain("科研流程");
-    expect(teamResearchWorkflowPanelHostSource).toContain("TeamWorkflowOrchestration");
+    expect(teamResearchWorkflowPanelHostSource).toContain("Research workflow");
+    expect(routeSource).toContain("createResearchWorkflowSurfaceRenderers");
     expect(routeSource).toContain("teamWorkflowQuery");
     expect(routeSource).toContain("teamWorkflowCandidatesQuery");
     expect(routeSource).toContain("teamWorkflowValidationSummary");
