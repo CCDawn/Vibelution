@@ -175,6 +175,45 @@ export function sourceCollectionRunOptionLabel(run: DataProcessingRunListPayload
     : `${sourceCollectionRunLabel(run.runId)} · ${title} · ${recordCount} records / ${candidateCount} candidates`;
 }
 
+export type SourceCollectionRunSwitcherOption = {
+  runId: string;
+  label: string;
+};
+
+export function buildSourceCollectionRunSwitcherOptions(
+  runs: DataProcessingRunListPayload["runs"],
+  lang: "zh" | "en",
+): SourceCollectionRunSwitcherOption[] {
+  return runs.map((run) => ({
+    runId: run.runId,
+    label: sourceCollectionRunOptionLabel(run, lang),
+  }));
+}
+
+export function resolveSourceCollectionRunSwitcherHint(input: {
+  lang: "zh" | "en";
+  recordsLoading: boolean;
+  showingHistoricalRunByDefault: boolean;
+  selectedRunIsEmpty: boolean;
+  canSwitchToHistoricalRun: boolean;
+}): string {
+  const zh = input.lang === "zh";
+  if (input.recordsLoading) {
+    return zh ? "正在读取当前批次资料。" : "Loading the selected run.";
+  }
+  if (input.showingHistoricalRunByDefault) {
+    return zh
+      ? "最新批次暂无资料，已显示上一轮有资料的批次。"
+      : "The latest run is empty, so the latest run with records is shown.";
+  }
+  if (input.selectedRunIsEmpty && input.canSwitchToHistoricalRun) {
+    return zh
+      ? "当前批次暂无资料，上一轮有资料；可切换查看。"
+      : "This run is empty; another run has records.";
+  }
+  return zh ? "可切换批次查看历史搜索结果。" : "Switch runs to inspect previous search results.";
+}
+
 export function deriveSourceCollectionDisplayState(input: SourceCollectionDisplayInput): SourceCollectionDisplayState {
   const materialCount = Math.max(0, input.rawRecordCount || 0, input.candidateCount || 0);
   const zh = input.lang === "zh";

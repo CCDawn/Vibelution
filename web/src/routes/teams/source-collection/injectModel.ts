@@ -80,6 +80,33 @@ export function canStartSourceCollectionRun(input: {
   return Boolean(String(input.teamId || "").trim() && input.canStart && !input.startPending);
 }
 
+/** Recommended next-step copy for the screening workspace (pure presentation). */
+export function resolveSourceCollectionScreeningRecommendedNextHint(input: {
+  lang: "zh" | "en";
+  needsAgentMaterial: boolean;
+  pendingScreeningCount: number;
+  projectedApprovedCount: number;
+  screeningButtonText: string;
+}): string | null {
+  const zh = input.lang === "zh";
+  if (input.needsAgentMaterial) {
+    return zh
+      ? "推荐下一步：右侧主按钮「补材料」→ 完成后再质量审查。不要只点审查。"
+      : "Recommended: right-stage primary “repair materials”, then quality review. Do not review alone.";
+  }
+  if (input.pendingScreeningCount > 0) {
+    return zh
+      ? `推荐下一步：点「${input.screeningButtonText}」推进审查。`
+      : `Recommended: run “${input.screeningButtonText}”.`;
+  }
+  if (input.projectedApprovedCount > 0 && input.pendingScreeningCount <= 0) {
+    return zh
+      ? "推荐下一步：右侧主按钮「进入关系整理」。"
+      : "Recommended: right-stage primary “Go to relations”.";
+  }
+  return null;
+}
+
 export type SourceCollectionFilterBarOption<Key extends string = string> = {
   key: Key;
   label: string;

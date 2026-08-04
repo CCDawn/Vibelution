@@ -25,6 +25,9 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 | Research workflow stage modules | `TeamResearchWorkflowStageModules.tsx` | SC/coordination/ingestion/graph/candidates JSX inlined in TeamsRoute |
 | SC storage open inject | `TeamSourceCollectionStorageActionsInject.tsx` | storage action target list + labels in route |
 | SC search brief + project reset shell | `TeamSourceCollectionSearchBriefShell.tsx` | reset surface + search brief start form in route |
+| SC run switcher inject | `TeamSourceCollectionRunSwitcherInject.tsx` + runModel hint/options | empty-run hint + option mapping in route |
+| SC screening inject | `TeamSourceCollectionScreeningInject.tsx` + injectModel recommended-next | screening next-step copy in route |
+| SC graph / memory / selected / conversation injects | `TeamSourceCollection*Inject.tsx` | route mounting workspace panels directly |
 | Workflow API error product copy | `researchWorkflowErrorModel.ts` + `ResearchWorkflowErrorSurface.tsx` | raw Error.message in UI |
 | Team kind guards / system-team roles | `teamKindModel.ts` | UI panels |
 | Canvas geometry / auto-layout / edge paths | `canvasGeometry.ts` | styles maps, mutations |

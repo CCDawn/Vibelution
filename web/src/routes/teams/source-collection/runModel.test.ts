@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import type { DataProcessingRunListPayload } from "../../../api/types";
 import {
+  buildSourceCollectionRunSwitcherOptions,
   deriveSourceCollectionDisplayState,
+  resolveSourceCollectionRunSwitcherHint,
   selectDefaultSourceCollectionRun,
   sourceCollectionActiveWorkRunFromRuntime,
   sourceCollectionRunCandidateMetric,
@@ -71,6 +73,30 @@ describe("source collection run selection", () => {
 
     expect(sourceCollectionRunRecordCount(run)).toBe(5);
     expect(sourceCollectionRunCandidateMetric(run)).toBe(3);
+  });
+
+  it("builds run switcher options and empty-run hints", () => {
+    const run = runFixture("r1", { recordCount: 2 });
+    const options = buildSourceCollectionRunSwitcherOptions([run], "zh");
+    expect(options).toHaveLength(1);
+    expect(options[0]?.runId).toBe("r1");
+    expect(options[0]?.label).toContain("2 条资料");
+
+    expect(resolveSourceCollectionRunSwitcherHint({
+      lang: "en",
+      recordsLoading: true,
+      showingHistoricalRunByDefault: false,
+      selectedRunIsEmpty: false,
+      canSwitchToHistoricalRun: false,
+    })).toContain("Loading");
+
+    expect(resolveSourceCollectionRunSwitcherHint({
+      lang: "zh",
+      recordsLoading: false,
+      showingHistoricalRunByDefault: false,
+      selectedRunIsEmpty: true,
+      canSwitchToHistoricalRun: true,
+    })).toContain("上一轮有资料");
   });
 
   it("does not surface a usable round from another research project", () => {
