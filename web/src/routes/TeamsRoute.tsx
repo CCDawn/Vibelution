@@ -2610,6 +2610,33 @@ export function TeamsRoute({
     );
   }
 
+  function buildSourceCollectionControlsFeedbackProps() {
+    return {
+      selectedTeamKnowledgeCollectionIngestResult,
+      selectedTeamKnowledgeCollectionIngestError,
+      selectedTeamStartSourceCollectionError,
+      selectedTeamRecordSourceCollectionOutputError,
+      selectedTeamExecuteSourceCollectionSearchError,
+      selectedTeamStartSourceCollectionStageTaskError,
+      selectedTeamExecuteSourceCollectionSearchResult,
+      selectedTeamRecordSourceCollectionOutputResult,
+    };
+  }
+
+  function buildSourceCollectionControlsMetricsProps() {
+    return {
+      sourceCollectionDisplayedCandidateCountText,
+      sourceCollectionProjectedAssessedCountText,
+      sourceCollectionProjectedApprovedCountText,
+      sourceCollectionRunPendingScreeningCountText,
+      candidateGraphNodeCount,
+      candidateGraphEdgeCount,
+      sourceCollectionPrecheckCandidateCount,
+      knowledgePendingReviewCount,
+      formalKnowledgeItemCount,
+    };
+  }
+
   function renderSourceCollectionControlsPanel() {
     return (
       <TeamSourceCollectionControlsInject
@@ -2637,26 +2664,41 @@ export function TeamsRoute({
         setSelectedSourceCollectionRunId={setSelectedSourceCollectionRunId}
         setSourceCollectionOutputDraft={setSourceCollectionOutputDraft}
         renderSourceCollectionManualWritebackPanel={renderSourceCollectionManualWritebackPanel}
-        sourceCollectionDisplayedCandidateCountText={sourceCollectionDisplayedCandidateCountText}
-        sourceCollectionProjectedAssessedCountText={sourceCollectionProjectedAssessedCountText}
-        sourceCollectionProjectedApprovedCountText={sourceCollectionProjectedApprovedCountText}
-        sourceCollectionRunPendingScreeningCountText={sourceCollectionRunPendingScreeningCountText}
-        candidateGraphNodeCount={candidateGraphNodeCount}
-        candidateGraphEdgeCount={candidateGraphEdgeCount}
-        sourceCollectionPrecheckCandidateCount={sourceCollectionPrecheckCandidateCount}
-        knowledgePendingReviewCount={knowledgePendingReviewCount}
-        formalKnowledgeItemCount={formalKnowledgeItemCount}
-        selectedTeamKnowledgeCollectionIngestResult={selectedTeamKnowledgeCollectionIngestResult}
-        selectedTeamKnowledgeCollectionIngestError={selectedTeamKnowledgeCollectionIngestError}
-        selectedTeamStartSourceCollectionError={selectedTeamStartSourceCollectionError}
-        selectedTeamRecordSourceCollectionOutputError={selectedTeamRecordSourceCollectionOutputError}
-        selectedTeamExecuteSourceCollectionSearchError={selectedTeamExecuteSourceCollectionSearchError}
-        selectedTeamStartSourceCollectionStageTaskError={selectedTeamStartSourceCollectionStageTaskError}
-        selectedTeamExecuteSourceCollectionSearchResult={selectedTeamExecuteSourceCollectionSearchResult}
-        selectedTeamRecordSourceCollectionOutputResult={selectedTeamRecordSourceCollectionOutputResult}
+        {...buildSourceCollectionControlsMetricsProps()}
+        {...buildSourceCollectionControlsFeedbackProps()}
         renderSourceCollectionStageAgents={renderSourceCollectionStageAgents}
       />
     );
+  }
+
+  function buildActiveStageExtractionRecoveryBag() {
+    return {
+      candidateProjection: sourceCollectionCandidateProjection,
+      sourceCollectionRawRecordCount,
+      sourceCollectionRunApprovedCount,
+      sourceCollectionDisplayedCandidateCount,
+      sourceCollectionPrimaryDataLoading,
+      sourceCollectionLoadingText,
+      sourceCollectionCandidateStepState,
+      sourceCollectionExtractionExcludedRecoveryState,
+      runSourceCollectionCandidateExtractionAction,
+      sourceCollectionCandidateExtractionActionReadiness,
+      runSourceCollectionScreeningAction,
+      sourceCollectionScreeningActionReadiness,
+      sourceCollectionScreeningButtonText,
+      sourceCollectionScreeningButtonTitle,
+      sourceCollectionRunPendingScreeningCountText,
+      sourceCollectionQualityBatchFeedback,
+      needsAgentMaterial: sourceCollectionExtractionNeedsAgentMaterial,
+      pendingScreeningCount: sourceCollectionRunPendingScreeningCount,
+      pendingImportCount: sourceCollectionPendingCandidateImportCount,
+      canProceedAfterExclusions: sourceCollectionExtractionCanProceedAfterExclusions,
+      qualityReviewPending: selectedTeamSourceQualityPending,
+      advanceToRelations: () => selectSourceCollectionStage("relations"),
+      unverifiableCandidateCount: sourceCollectionUnverifiableCandidateIds.length,
+      excludeUnverifiableCandidates: excludeUnverifiableSourceCollectionCandidates,
+      excludeUnverifiableCandidatesPending: selectedTeamSourceQualityPending,
+    };
   }
 
   function renderSourceCollectionActiveStagePanel() {
@@ -2680,33 +2722,7 @@ export function TeamsRoute({
         renderSourceCollectionScreeningPanel={renderSourceCollectionScreeningPanel}
         renderSourceCollectionGraphPanel={renderSourceCollectionGraphPanel}
         renderSourceCollectionMemoryPanel={renderSourceCollectionMemoryPanel}
-        extractionRecovery={{
-          candidateProjection: sourceCollectionCandidateProjection,
-          sourceCollectionRawRecordCount,
-          sourceCollectionRunApprovedCount,
-          sourceCollectionDisplayedCandidateCount,
-          sourceCollectionPrimaryDataLoading,
-          sourceCollectionLoadingText,
-          sourceCollectionCandidateStepState,
-          sourceCollectionExtractionExcludedRecoveryState,
-          runSourceCollectionCandidateExtractionAction,
-          sourceCollectionCandidateExtractionActionReadiness,
-          runSourceCollectionScreeningAction,
-          sourceCollectionScreeningActionReadiness,
-          sourceCollectionScreeningButtonText,
-          sourceCollectionScreeningButtonTitle,
-          sourceCollectionRunPendingScreeningCountText,
-          sourceCollectionQualityBatchFeedback,
-          needsAgentMaterial: sourceCollectionExtractionNeedsAgentMaterial,
-          pendingScreeningCount: sourceCollectionRunPendingScreeningCount,
-          pendingImportCount: sourceCollectionPendingCandidateImportCount,
-          canProceedAfterExclusions: sourceCollectionExtractionCanProceedAfterExclusions,
-          qualityReviewPending: selectedTeamSourceQualityPending,
-          advanceToRelations: () => selectSourceCollectionStage("relations"),
-          unverifiableCandidateCount: sourceCollectionUnverifiableCandidateIds.length,
-          excludeUnverifiableCandidates: excludeUnverifiableSourceCollectionCandidates,
-          excludeUnverifiableCandidatesPending: selectedTeamSourceQualityPending,
-        }}
+        extractionRecovery={buildActiveStageExtractionRecoveryBag()}
       />
     );
   }

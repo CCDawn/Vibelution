@@ -11,7 +11,8 @@ import { VConfirmDialog, VNativeButton, VTooltip } from "../components/vui";
 import { researchStageAgentManagementRoute } from "./teams/researchStageAgentPresentation";
 import { buildExtractionRecoveryViewModel } from "./teams/source-collection/extractionRecoveryViewModel";
 import { buildExtractionStageFlowGuide } from "./teams/source-collection/extractionStageFlowGuide";
-import type { SourceCollectionStageCardProjection, SourceCollectionStageModuleId } from "./teams/source-collection/stageProjection";
+import type { SourceCollectionExtractionRecoveryBag } from "./teams/source-collection/extractionRecoveryBag";
+import type { SourceCollectionStageModuleId } from "./teams/source-collection/stageProjection";
 import { TeamSourceCollectionActiveStagePanel } from "./TeamSourceCollectionActiveStagePanel";
 import { TeamSourceCollectionExtractionRecoveryWorkspacePanel } from "./TeamSourceCollectionExtractionRecoveryWorkspacePanel";
 import shellStyles from "./TeamsRoute.styles";
@@ -20,6 +21,8 @@ import workflowStyles from "./TeamsRoute.workflow.styles";
 const styles = { ...shellStyles, ...workflowStyles } as Record<string, string>;
 
 type Lang = "zh" | "en";
+
+export type { SourceCollectionExtractionRecoveryBag };
 
 export type TeamSourceCollectionActiveStageWorkspacePanelProps = {
   lang: Lang;
@@ -52,39 +55,7 @@ export type TeamSourceCollectionActiveStageWorkspacePanelProps = {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   renderSourceCollectionMemoryPanel: () => ReactNode;
   /** Extraction recovery inputs — when set, merge into extraction stage card. */
-  extractionRecovery?: {
-    candidateProjection: SourceCollectionStageCardProjection | null | undefined;
-    sourceCollectionRawRecordCount: number;
-    sourceCollectionRunApprovedCount: number;
-    sourceCollectionDisplayedCandidateCount: number;
-    sourceCollectionPrimaryDataLoading: boolean;
-    sourceCollectionLoadingText: string;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    sourceCollectionCandidateStepState: any;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    sourceCollectionExtractionExcludedRecoveryState: any;
-    runSourceCollectionCandidateExtractionAction: () => void;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    sourceCollectionCandidateExtractionActionReadiness: any;
-    runSourceCollectionScreeningAction: () => void;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    sourceCollectionScreeningActionReadiness: any;
-    sourceCollectionScreeningButtonText: string;
-    sourceCollectionScreeningButtonTitle?: string;
-    sourceCollectionRunPendingScreeningCountText: string;
-    sourceCollectionQualityBatchFeedback?: string | null;
-    /** Flow progression inputs for a single recommended CTA. */
-    needsAgentMaterial?: boolean;
-    pendingScreeningCount?: number;
-    pendingImportCount?: number;
-    canProceedAfterExclusions?: boolean;
-    qualityReviewPending?: boolean;
-    advanceToRelations?: () => void;
-    /** Sources currently blocked solely by public version/reliability verification. */
-    unverifiableCandidateCount?: number;
-    excludeUnverifiableCandidates?: () => Promise<void>;
-    excludeUnverifiableCandidatesPending?: boolean;
-  };
+  extractionRecovery?: SourceCollectionExtractionRecoveryBag;
 };
 
 export function TeamSourceCollectionActiveStageWorkspacePanel(props: TeamSourceCollectionActiveStageWorkspacePanelProps) {
