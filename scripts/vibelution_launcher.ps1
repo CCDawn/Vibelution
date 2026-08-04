@@ -3787,6 +3787,44 @@ function Get-ProjectPythonCandidates {
     return $venvCandidates.ToArray()
 }
 
+function Get-RequirementsContentFingerprint {
+    # Content-only SHA256 of requirements.txt — must match Python
+    # scripts/vibelution_launcher.py::_requirements_fingerprint so PS/Python
+    # share python-deps.stamp and do not reinstall on every handoff.
+    param([string]$Path = $requirementsPath)
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return $null
+    }
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $Path).Path)
+        return ([System.BitConverter]::ToString($sha.ComputeHash($bytes))).Replace("-", "").ToLowerInvariant()
+    } finally {
+        $sha.Dispose()
+    }
+}
+
+function Test-PythonDepsStampCurrent {
+    param(
+        [string]$StoredFingerprint,
+        [string]$ContentFingerprint,
+        [string]$LegacyFileFingerprint
+    )
+
+    if (-not $StoredFingerprint) {
+        return $false
+    }
+    if ($ContentFingerprint -and ($StoredFingerprint -eq $ContentFingerprint)) {
+        return $true
+    }
+    # Accept legacy PS path|length|hash fingerprints until the stamp is rewritten.
+    if ($LegacyFileFingerprint -and ($StoredFingerprint -eq $LegacyFileFingerprint)) {
+        return $true
+    }
+    return $false
+}
+
 function Ensure-ProjectPythonDependencies {
     Ensure-ProjectVirtualEnvironment
     $venvCandidates = @(Get-ProjectPythonCandidates)
@@ -3794,12 +3832,48 @@ function Ensure-ProjectPythonDependencies {
         return
     }
 
-    $requirementsFingerprint = $null
+    $requirementsContentFingerprint = $null
+    $requirementsLegacyFingerprint = $null
     if (Test-Path $requirementsPath) {
-        $requirementsFingerprint = Get-FileFingerprint -Paths @($requirementsPath)
+        $requirementsContentFingerprint = Get-RequirementsContentFingerprint -Path $requirementsPath
+        # Legacy stamp format used Get-FileFingerprint (path|length|hash). Keep reading
+        # it so existing stamps still skip pip until rewritten as content hash.
+        $requirementsLegacyFingerprint = Get-FileFingerprint -Paths @($requirementsPath)
     }
+    $requirementsFingerprint = $requirementsContentFingerprint
     $storedFingerprint = Get-StoredStampValue -Path $pythonDepsStampPath
+    $stampCurrent = Test-PythonDepsStampCurrent `
+        -StoredFingerprint $storedFingerprint `
+        -ContentFingerprint $requirementsContentFingerprint `
+        -LegacyFileFingerprint $requirementsLegacyFingerprint
     $runtimeReady = $false
+
+    # When stamp already matches, only need one cheap runtime probe (fastapi/uvicorn).
+    # Full pip resolution on every restart was a major open-path cost.
+    if ($stampCurrent) {
+        foreach ($candidate in $venvCandidates) {
+            if (Test-PythonRuntime -CommandPath $candidate.FilePath -PrefixArgs $candidate.PrefixArgs) {
+                $runtimeReady = $true
+                break
+            }
+        }
+        if ($runtimeReady) {
+            # Migrate legacy file-fingerprint stamps to content-hash stamps.
+            if ($requirementsContentFingerprint -and $storedFingerprint -ne $requirementsContentFingerprint) {
+                Set-StoredStampValue -Path $pythonDepsStampPath -Value $requirementsContentFingerprint
+            }
+            if ($script:currentRuntimeSceneId) {
+                Write-RuntimeSceneEvent `
+                    -Component "launcher" `
+                    -Phase "python_dependencies" `
+                    -EventCode "backend.dependencies.current" `
+                    -Message "Backend runtime dependencies are current." `
+                    -Outcome "succeeded" `
+                    -Fields @{ stamp = "matched"; probe = "core" }
+            }
+            return
+        }
+    }
 
     foreach ($candidate in $venvCandidates) {
         if (Test-PythonRuntime -CommandPath $candidate.FilePath -PrefixArgs $candidate.PrefixArgs) {
@@ -3820,7 +3894,7 @@ function Ensure-ProjectPythonDependencies {
         return
     }
 
-    if ($runtimeReady -and $requirementsFingerprint -and $storedFingerprint -eq $requirementsFingerprint) {
+    if ($runtimeReady -and $requirementsFingerprint -and $stampCurrent) {
         if ($script:currentRuntimeSceneId) {
             Write-RuntimeSceneEvent `
                 -Component "launcher" `

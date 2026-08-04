@@ -556,8 +556,53 @@ def _runtime_source_identity(*, allow_dirty: bool | None = None) -> dict[str, ob
     }
 
 
-def _assert_runtime_source_identity(expected: dict[str, object]) -> dict[str, object]:
-    if bool(expected.get("allowDirty")):
+def _runtime_source_identity_light(*, allow_dirty: bool | None = None) -> dict[str, object]:
+    """Cheap mid-start recheck: branch/commit/frontend tree only (no porcelain scan)."""
+
+    allow_dirty_worktree = _allow_dirty_launch() if allow_dirty is None else bool(allow_dirty)
+    git_command = shutil.which("git.exe" if os.name == "nt" else "git") or shutil.which("git") or "git"
+    root_text = _run_capture(
+        [git_command, "rev-parse", "--show-toplevel"],
+        cwd=PROJECT_ROOT,
+        label="git root identity",
+    )
+    resolved_root = Path(root_text).resolve()
+    branch = _run_capture(
+        [git_command, "branch", "--show-current"],
+        cwd=PROJECT_ROOT,
+        label="git branch identity",
+    )
+    commit = _run_capture(
+        [git_command, "rev-parse", "HEAD"],
+        cwd=PROJECT_ROOT,
+        label="git commit identity",
+    )
+    frontend_tree = _run_capture(
+        [git_command, "rev-parse", "HEAD:web"],
+        cwd=PROJECT_ROOT,
+        label="frontend tree identity",
+    )
+    return {
+        "projectRoot": str(resolved_root),
+        "branch": branch,
+        "commit": commit,
+        "frontendTree": frontend_tree,
+        "trackedClean": True,
+        "allowDirty": allow_dirty_worktree,
+        "ignoredUserSceneEntries": [],
+        "light": True,
+    }
+
+
+def _assert_runtime_source_identity(
+    expected: dict[str, object],
+    *,
+    light: bool = False,
+) -> dict[str, object]:
+    allow_dirty = bool(expected.get("allowDirty"))
+    if light:
+        current = _runtime_source_identity_light(allow_dirty=allow_dirty)
+    elif allow_dirty:
         current = _runtime_source_identity(allow_dirty=True)
     else:
         current = _runtime_source_identity()
@@ -1176,12 +1221,12 @@ def _write_dependency_stamp(fingerprint: str) -> None:
     _dependency_stamp_path().write_text(fingerprint, encoding="utf-8")
 
 
-def _runtime_imports_available(python_executable: str) -> bool:
-    """True when the interpreter can import the runtime dependencies in one probe."""
+_CORE_RUNTIME_IMPORT_MODULES = ("fastapi", "uvicorn")
 
-    if not str(python_executable or "").strip():
+
+def _probe_python_imports(python_executable: str, modules: list[str], *, timeout: float = 30.0) -> bool:
+    if not str(python_executable or "").strip() or not modules:
         return False
-    modules = _requirements_runtime_modules() or ["fastapi", "uvicorn"]
     try:
         result = subprocess.run(
             [str(python_executable), "-c", "import " + ", ".join(modules)],
@@ -1189,7 +1234,7 @@ def _runtime_imports_available(python_executable: str) -> bool:
             stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=timeout,
             creationflags=_windows_creation_flags(),
             startupinfo=_hidden_startup_info(),
             check=False,
@@ -1199,25 +1244,28 @@ def _runtime_imports_available(python_executable: str) -> bool:
     return int(result.returncode) == 0
 
 
+def _runtime_core_imports_available(python_executable: str) -> bool:
+    """Cheap readiness probe used when requirements fingerprint already matches."""
+
+    return _probe_python_imports(python_executable, list(_CORE_RUNTIME_IMPORT_MODULES), timeout=15.0)
+
+
+def _runtime_imports_available(python_executable: str) -> bool:
+    """True when the interpreter can import the runtime dependencies in one probe."""
+
+    modules = _requirements_runtime_modules() or list(_CORE_RUNTIME_IMPORT_MODULES)
+    return _probe_python_imports(python_executable, modules, timeout=45.0)
+
+
 def _missing_runtime_modules(python_executable: str, modules: list[str]) -> list[str]:
+    if not modules:
+        return []
+    # One subprocess for all modules first; only fan out when the batch fails.
+    if _probe_python_imports(python_executable, list(modules), timeout=45.0):
+        return []
     missing: list[str] = []
     for module in modules:
-        try:
-            result = subprocess.run(
-                [str(python_executable), "-c", f"import {module}"],
-                cwd=str(PROJECT_ROOT),
-                stdin=subprocess.DEVNULL,
-                capture_output=True,
-                text=True,
-                timeout=30,
-                creationflags=_windows_creation_flags(),
-                startupinfo=_hidden_startup_info(),
-                check=False,
-            )
-        except (OSError, subprocess.SubprocessError):
-            missing.append(module)
-            continue
-        if int(result.returncode) != 0:
+        if not _probe_python_imports(python_executable, [module], timeout=15.0):
             missing.append(module)
     return missing
 
@@ -1292,14 +1340,19 @@ def _ensure_project_python_runtime() -> str:
     - Creates it from the current interpreter when missing.
     - Installs requirements.txt only when the runtime imports are incomplete or the
       requirements fingerprint changed; a ready venv is never reinstalled.
+    - When the stamp matches, only a cheap fastapi/uvicorn probe runs (not a full
+      langchain/litellm import of every requirements module).
     """
 
     venv_python = str(_venv_python_executable())
     if not _venv_python_executable().exists():
         _create_project_virtualenv()
-    runtime_ready = _runtime_imports_available(venv_python)
     fingerprint = _requirements_fingerprint()
     stored_fingerprint = _read_dependency_stamp()
+    # Fast path: stamp already matches requirements.txt → skip heavy full-import probe.
+    if fingerprint and stored_fingerprint == fingerprint and _runtime_core_imports_available(venv_python):
+        return venv_python
+    runtime_ready = _runtime_imports_available(venv_python)
     if runtime_ready and (not fingerprint or stored_fingerprint == fingerprint):
         if fingerprint and not stored_fingerprint:
             _write_dependency_stamp(fingerprint)
@@ -1490,13 +1543,22 @@ def _start_backend(port: int, host: str, *, no_browser: bool) -> dict:
         _write_state(state)
         return state
     # Foreign occupancy is resolved by auto-binding another free port (multi-checkout safe).
+    open_started = time.monotonic()
+    open_timings_ms: dict[str, float] = {}
+    identity_started = time.monotonic()
     source_identity = _runtime_source_identity()
+    open_timings_ms["sourceIdentityMs"] = round((time.monotonic() - identity_started) * 1000.0, 1)
+    frontend_started = time.monotonic()
     frontend_provenance = _ensure_frontend_build(source_identity)
-    _assert_runtime_source_identity(source_identity)
+    open_timings_ms["frontendEnsureMs"] = round((time.monotonic() - frontend_started) * 1000.0, 1)
+    # Mid-flight checks only need commit/tree drift detection (full porcelain already done).
+    _assert_runtime_source_identity(source_identity, light=True)
     runtime_scene = _start_runtime_scene("python_launcher_start")
     stdout = BACKEND_STDOUT_PATH.open("ab")
     stderr = BACKEND_STDERR_PATH.open("ab")
+    python_started = time.monotonic()
     python_runtime = _select_background_python(_ensure_project_python_runtime())
+    open_timings_ms["pythonRuntimeEnsureMs"] = round((time.monotonic() - python_started) * 1000.0, 1)
     python_command = str(python_runtime["pythonExecutable"])
     args = [
         python_command,
@@ -1508,6 +1570,7 @@ def _start_backend(port: int, host: str, *, no_browser: bool) -> dict:
         "--no-browser",
         "--managed-by-launcher",
     ]
+    backend_spawn_started = time.monotonic()
     process = subprocess.Popen(
         args,
         cwd=str(PROJECT_ROOT),
@@ -1522,11 +1585,12 @@ def _start_backend(port: int, host: str, *, no_browser: bool) -> dict:
     stdout.close()
     stderr.close()
     backend_pid = _wait_for_started_backend(process, port, host)
+    open_timings_ms["backendSpawnAndHealthMs"] = round((time.monotonic() - backend_spawn_started) * 1000.0, 1)
     if backend_pid <= 0:
         _terminate_pid(process.pid)
         raise RuntimeError(f"New backend did not own a healthy listener at {_health_url(port, host)}.")
     try:
-        _assert_runtime_source_identity(source_identity)
+        _assert_runtime_source_identity(source_identity, light=True)
     except Exception:
         _terminate_pid(process.pid)
         raise
@@ -1540,16 +1604,28 @@ def _start_backend(port: int, host: str, *, no_browser: bool) -> dict:
     }
     if not no_browser:
         try:
+            browser_started = time.monotonic()
             browser_info = _start_managed_browser(url)
+            open_timings_ms["browserStartMs"] = round((time.monotonic() - browser_started) * 1000.0, 1)
         except Exception:
             _terminate_pid(process.pid)
             raise
     try:
-        _assert_runtime_source_identity(source_identity)
+        _assert_runtime_source_identity(source_identity, light=True)
     except Exception:
         _terminate_pid(int(browser_info.get("browserLaunchPid") or 0))
         _terminate_pid(process.pid)
         raise
+    open_timings_ms["totalOpenMs"] = round((time.monotonic() - open_started) * 1000.0, 1)
+    _append_frontend_build_log(
+        {
+            "event": "workbench.open.timings",
+            "timingsMs": open_timings_ms,
+            "rebuiltFrontend": bool(frontend_provenance.get("rebuilt")),
+            "port": int(port),
+            "noBrowser": bool(no_browser),
+        }
+    )
     state = {
         **_preserved_launcher_control_state(previous_state),
         "schemaVersion": 1,
