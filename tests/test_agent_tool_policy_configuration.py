@@ -3,17 +3,71 @@ from __future__ import annotations
 import pytest
 
 from core.web.services import agent_directory_service, tool_policy_configuration_service
-from tests.test_agent_config_workspace_service import _mark_config_agent_instances_present, _use_tmp_project_root, client
+from tests.test_agent_config_workspace_service import (
+    _mark_config_agent_instances_present,
+    _use_tmp_project_root,
+    client,
+)
 
 
-def _registry_payload():
+def _registry_payload(tool_names: list[str] | None = None):
+    defaults = {
+        "cli_tool": {
+            "enabled": True,
+            "runtimeActive": True,
+            "llmVisible": True,
+            "status": "validated",
+            "permissionPolicy": {"requiresExplicitAllow": False},
+            "descriptor": {"capabilities": ["command"], "risk": "read", "approval": "never"},
+        },
+        "dangerous_tool": {
+            "enabled": True,
+            "runtimeActive": True,
+            "llmVisible": True,
+            "status": "validated",
+            "permissionPolicy": {"requiresExplicitAllow": True},
+            "descriptor": {"capabilities": ["write"], "risk": "write", "approval": "on_request"},
+        },
+        "exec_command": {
+            "enabled": True,
+            "runtimeActive": True,
+            "llmVisible": True,
+            "status": "validated",
+            "permissionPolicy": {"requiresExplicitAllow": False},
+            "descriptor": {"capabilities": ["command"], "risk": "execute", "approval": "on_request"},
+        },
+        "offline_tool": {
+            "enabled": True,
+            "runtimeActive": False,
+            "llmVisible": False,
+            "status": "validated",
+            "permissionPolicy": {"requiresExplicitAllow": False},
+            "descriptor": {"capabilities": ["read"], "risk": "read", "approval": "never"},
+        },
+    }
+    selected_names = list(defaults) if tool_names is None else tool_names
+    tools = []
+    descriptors = []
+    for name in selected_names:
+        definition = defaults.get(
+            name,
+            {
+                "enabled": True,
+                "runtimeActive": True,
+                "llmVisible": True,
+                "status": "validated",
+                "permissionPolicy": {"requiresExplicitAllow": False},
+                "descriptor": {"capabilities": ["read"], "risk": "read", "approval": "never"},
+            },
+        )
+        tools.append({"name": name, **definition})
+        descriptor = definition["descriptor"]
+        descriptors.append({"name": name, "enabled": definition["enabled"], **descriptor})
     return {
-        "registryVersion": "test-registry-v1",
-        "tools": [
-            {"name": "cli_tool", "enabled": True, "runtimeActive": True, "status": "validated", "permissionPolicy": {"requiresExplicitAllow": False}},
-            {"name": "dangerous_tool", "enabled": True, "runtimeActive": True, "status": "validated", "permissionPolicy": {"requiresExplicitAllow": True}},
-            {"name": "offline_tool", "enabled": True, "runtimeActive": False, "status": "validated"},
-        ],
+        "registryVersion": 1,
+        "registryFingerprint": "test-registry-v1",
+        "tools": tools,
+        "descriptors": descriptors,
     }
 
 
@@ -40,6 +94,25 @@ def test_validate_projects_exact_effective_visibility_and_invalid_names(configur
     assert payload["preview"]["visibleTools"] == ["cli_tool"]
     assert payload["preview"]["unavailableTools"] == ["offline_tool"]
     assert payload["preview"]["unknownTools"] == ["missing_tool"]
+
+
+def test_validate_preview_uses_canonical_descriptor_approval(configured_agent):
+    response = client.post(
+        f"/api/agents/{configured_agent['agentId']}/tool-policy/validate",
+        json={
+            "toolPolicy": {
+                **configured_agent["toolPolicy"],
+                "allowedTools": ["exec_command"],
+                "preferredTools": ["exec_command"],
+            }
+        },
+    )
+    assert response.status_code == 200, response.json()
+    payload = response.json()
+    assert payload["validation"]["valid"] is True
+    assert payload["preview"]["visibleTools"] == ["exec_command"]
+    assert payload["preview"]["executableTools"] == ["exec_command"]
+    assert payload["preview"]["approvalRequiredTools"] == ["exec_command"]
 
 
 def test_versioned_update_rejects_stale_policy_fingerprint(configured_agent):
@@ -90,13 +163,7 @@ def test_fixed_research_role_preserves_versioned_call_budget_update(tmp_path, mo
     monkeypatch.setattr(
         tool_policy_configuration_service.tool_registry_service,
         "get_tool_registry",
-        lambda: {
-            "registryVersion": "test-registry-v1",
-            "tools": [
-                {"name": name, "enabled": True, "runtimeActive": True, "status": "validated"}
-                for name in policy["allowedTools"]
-            ],
-        },
+        lambda: _registry_payload(policy["allowedTools"]),
     )
     detail = client.get(f"/api/agents/{agent['agentId']}/tool-policy").json()
 
