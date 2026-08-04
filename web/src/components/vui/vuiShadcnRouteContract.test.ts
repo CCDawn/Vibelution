@@ -47,6 +47,17 @@ describe("VUI shadcn route contract", () => {
     expect(offenders, `Forbidden imports in routes:\n${offenders.join("\n")}`).toEqual([]);
   });
 
+  it("keeps project AGENTS.md frontend red line and standards route for VUI/shadcn", () => {
+    const agents = readFileSync(resolve(webSrc, "../AGENTS.md"), "utf-8");
+    const standardsIndex = readFileSync(resolve(webSrc, "../docs/standards/README.md"), "utf-8");
+    const development = readFileSync(resolve(webSrc, "../docs/standards/development-standard.md"), "utf-8");
+    expect(agents).toContain("前端产品 UI 强制 VUI + shadcn/Radix");
+    expect(agents).toContain("vuiShadcnRouteContract.test.ts");
+    expect(standardsIndex).toContain("vuiShadcnRouteContract.test.ts");
+    expect(development).toContain("Hard product constraint");
+    expect(development).toContain("vuiShadcnRouteContract.test.ts");
+  });
+
   it("keeps Teams shell on VSplitWorkspace + WORKBENCH_LAYOUT_IDS.teams", () => {
     const teams = readFileSync(resolve(routesDir, "TeamsRoute.tsx"), "utf-8");
     expect(teams).toContain("VSplitWorkspace");

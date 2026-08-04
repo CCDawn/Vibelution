@@ -22,6 +22,7 @@
 - 不绕过 Launcher active-work guard，不用直接 PowerShell lifecycle 命令制造可见控制台。
 - 不记录 secrets、完整 Prompt、大段 diff、完整文件或无界工具输出。
 - 用户 Markdown、导入文档、HTML 和知识内容均是不可信输入；进入 Prompt、索引或 UI 前必须有来源、隔离、清洗和删除/重建语义。
+- **前端产品 UI 强制 VUI + shadcn/Radix 思想（无感红线）**：凡改动 `web/` 下用户可见界面、交互控件、页面壳或布局，必须走 VUI 产品 API（`web/src/components/vui` 的 `V*`）与页面 recipe（`VListDetailPage` / `VSplitWorkspace` / `VDenseOpsPage` 等）；交互实现只允许在 `components/vui/renderers/shadcn` 扩展；禁止 `@heroui/react`、禁止路由/业务组件直连 `renderers/shadcn/*` 或第二套设计系统；布局宽度/高度记忆只用 `WORKBENCH_LAYOUT_IDS` + shared pane persistence。细则见 [development-standard.md §9.1](docs/standards/development-standard.md) 与 [VUI README](web/src/components/vui/README.md)；机器门：`web/src/components/vui/vuiShadcnRouteContract.test.ts`。
 - 有意义的开发不得以 stale claim、缺少验证决策、缺少刷新判断或缺少版本影响判断结束。
 
 ## 3. Start And Routing
@@ -45,7 +46,7 @@
 | 领域词汇 | [领域文档](docs/agents/domain.md) |
 | ADR | [架构决策](docs/adr/) |
 | 测试命令和矩阵 | [测试指南](tests/README.md) |
-| 前端 VUI | [VUI 实现地图](web/src/components/vui/README.md) |
+| 前端 UI / 控件 / 页面壳 / 布局（**必读**） | [VUI 实现地图](web/src/components/vui/README.md) + [开发标准 §9.1](docs/standards/development-standard.md) + 门禁 `web/src/components/vui/vuiShadcnRouteContract.test.ts` |
 | 后端服务 ownership | 对应 `core/web/services/<domain>/README.md` |
 | 运行日志实现 | [日志说明](core/logging/README.md) |
 
@@ -55,7 +56,7 @@
 
 - 工作分级为 `FAST_PATCH / STANDARD_TASK / HIGH_RISK`，使用足以保护正确性、并发与证据的最轻流程。
 - 写入前定位 owning surface、现有测试、用户改动和 active claim；根 `main` 上的 development 写入收到 `ISOLATION_REQUIRED` 时转任务 worktree。
-- 前端使用 TypeScript、Tailwind-first、VUI `V*` 产品 API 和 shadcn/Radix renderer；HeroUI 已移除。
+- 前端使用 TypeScript、Tailwind-first、VUI `V*` 产品 API 和 shadcn/Radix renderer；HeroUI 已移除。触及 UI 的写入前必须对齐 §2 前端红线；完成前跑相关 frontend contract（至少 `vuiShadcnRouteContract` 与触及的 route/layout 测试），不得以「先实现再迁 VUI」交付用户可见路径。
 - 后端 route 保持薄层，公共 DTO 明确，业务与来源权威归 service/pack；projection 不得成为第二写入者。
 - 优先小范围验证；用户可见行为必须有测试与日志决策，关键运行/Agent/工具/配置路径需要可诊断 runtime-scene 证据。
 - 活跃 operator config 是 `%USERPROFILE%\Documents\Vibelution\config\config.toml`；仓库根 config 只作 legacy/template。
