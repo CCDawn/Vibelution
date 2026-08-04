@@ -1,7 +1,7 @@
 import "../design/route-css/teams.tailwind.css";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Archive, ArrowLeft, Bot, CheckCircle2, Eye, Link2, MessageSquare, Play, Plus, RefreshCw, Save, Search, Send, Settings2, Trash2, Unlink, Users } from "lucide-react";
+import { AlertTriangle, Archive, ArrowLeft, Bot, CheckCircle2, Eye, Link2, MessageSquare, Plus, RefreshCw, Save, Search, Settings2, Trash2, Unlink, Users } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
@@ -227,6 +227,7 @@ import { TeamNodeBindingPanel } from "./teams/TeamNodeBindingPanel";
 import { TeamOrganizationCanvasSurface } from "./teams/TeamOrganizationCanvasSurface";
 import { TeamShellRail } from "./teams/TeamShellRail";
 import { TeamShellToolbar } from "./teams/TeamShellToolbar";
+import { TeamCommunicationPanel } from "./teams/TeamCommunicationPanel";
 import {
   parseTeamShellMode,
   teamShellModeFromResearchView,
@@ -246,11 +247,9 @@ import {
   systemManagedTeamArchiveReason,
 } from "./teams/teamKindModel";
 import { fetchJson } from "../api/client";
-import { kernelTaskCenterHref } from "../api/kernel";
 import { getRuntimeSummary } from "../api/launcher";
 import {
   PROJECT_AGENT_BUS_TEAM_TIMELINE_LIMIT,
-  isProjectAgentBusEventRevoked,
   listProjectAgentBusTimeline,
   projectAgentBusEventsForTeam,
 } from "../api/projectAgentBus";
@@ -6265,211 +6264,41 @@ export function TeamsRoute({
               </section>
             ) : null}
             {showTeamCommunicationPanel ? (
-              <div className={styles.researchDiscussionPanel} id="research-workflow-discussion">
-              <form
-                className={styles.teamTaskForm}
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  if (!selectedTeam?.teamId || !linkedChatRoomId || !teamTaskTopic.trim() || linkedRoomBusy) {
-                    return;
-                  }
-                  startTeamRoundMutation.mutate({
-                    roomId: linkedChatRoomId,
-                    teamId: selectedTeam.teamId,
-                    topic: teamTaskTopic.trim(),
-                    mode: linkedRoomDetail?.mode || selectedTeam.linkedChatRoom?.mode || "round_robin",
-                    purpose: linkedRoomDetail?.purpose || selectedTeam.linkedChatRoom?.purpose || "discussion",
-                  });
-                }}
-              >
-                <div className={styles.sectionTitle}>
-                  <strong>{lang === "zh" ? "团队任务" : "Team task"}</strong>
-                  <span>
-                    {selectedTeam?.linkedChatRoomId
-                      ? linkedRoomBusy
-                        ? (lang === "zh" ? "群聊运行中" : "room running")
-                        : (lang === "zh" ? "发送到群聊 round" : "starts a room round")
-                      : (lang === "zh" ? "需要先同步群聊" : "sync room first")}
-                  </span>
-                </div>
-                <VNativeTextarea
-                  value={teamTaskTopic}
-                  onChange={(event) => setTeamTaskTopic(event.target.value)}
-                  placeholder={lang === "zh" ? "输入团队要协作处理的议题或任务" : "Enter a topic or task for this team"}
-                />
-                <VNativeButton
-                  type="submit"
-                  disabled={!canStartTeamRound || selectedTeamStartRoundPending}
-                >
-                  <Play size={14} />
-                  {selectedTeamStartRoundPending
-                    ? (lang === "zh" ? "启动中" : "Starting")
-                    : (lang === "zh" ? "启动团队讨论" : "Start team round")}
-                </VNativeButton>
-                {selectedTeamStartRoundResult ? (
-                  <div className={styles.messageResult}>
-                    <strong>{selectedTeamStartRoundResult.rounds.length}</strong>
-                    <span>{lang === "zh" ? "轮讨论已写入关联群聊" : "rounds now recorded in the linked room"}</span>
-                    <Link to={teamChatRoomRoute(selectedTeamStartRoundResult.roomId, teamWorkspaceRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID), lang === "zh" ? "返回团队页面" : "Back to team")}>
-                      {lang === "zh" ? "打开群聊" : "Open room"}
-                    </Link>
-                  </div>
-                ) : null}
-                {selectedTeamStartRoundError ? (
-                  <div className={styles.messageError}>{selectedTeamStartRoundError.message}</div>
-                ) : null}
-                <section className={styles.teamRoundPanel}>
-                  <div className={styles.sectionTitle}>
-                    <strong>{lang === "zh" ? "最近团队任务" : "Latest team task"}</strong>
-                    <span>{linkedRoomDetail ? chatRoomStatusLabel(linkedRoomDetail.status, lang) : (lang === "zh" ? "未读取" : "not loaded")}</span>
-                  </div>
-                  {linkedChatRoomQuery.isPending && linkedChatRoomId ? (
-                    <VStateSurface
-                      tone="loading"
-                      title={lang === "zh" ? "正在读取关联群聊" : "Loading linked room"}
-                      skeletonLines={2}
-                    />
-                  ) : latestTeamRound ? (
-                    <article className={styles.teamRoundCard}>
-                      <div className={styles.teamRoundHeader}>
-                        <strong>{latestTeamRound.topic || (lang === "zh" ? "未命名任务" : "Untitled task")}</strong>
-                        <span>{latestTeamRound.status}</span>
-                      </div>
-                      <p>{latestTeamRound.summary || (lang === "zh" ? "任务仍在等待成员输出。" : "Waiting for participant output.")}</p>
-                      <div className={styles.teamRoundMeta}>
-                        <span>{latestTeamRound.messages.length} messages</span>
-                        <span>{latestTeamRound.mode}</span>
-                        <span>{formatTime(latestTeamRound.updatedAt || latestTeamRound.startedAt, lang)}</span>
-                      </div>
-                      <Link to={teamChatRoomRoute(latestTeamRound.roomId, teamWorkspaceRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID), lang === "zh" ? "返回团队页面" : "Back to team")}>
-                        {lang === "zh" ? "查看完整群聊" : "View full room"}
-                      </Link>
-                    </article>
-                  ) : (
-                    <div className={styles.empty}>
-                      {linkedChatRoomId
-                        ? (lang === "zh" ? "关联群聊还没有团队任务记录。" : "No team task rounds in the linked room yet.")
-                        : (lang === "zh" ? "同步群聊后可查看团队任务状态。" : "Sync a room to view team task status.")}
-                    </div>
-                  )}
-                  {linkedChatRoomQuery.error instanceof Error ? (
-                    <div className={styles.messageError}>{linkedChatRoomQuery.error.message}</div>
-                  ) : null}
-                </section>
-              </form>
-              <form
-                className={styles.teamMessageForm}
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  if (!selectedTeam?.teamId || !teamMessage.trim()) {
-                    return;
-                  }
-                  sendTeamMessageMutation.mutate({
-                    teamId: selectedTeam.teamId,
-                    content: teamMessage.trim(),
-                    interruptMode: teamInterrupt ? "interrupt_targets" : "none",
-                  });
-                }}
-              >
-                <div className={styles.sectionTitle}>
-                  <strong>{lang === "zh" ? "团队广播" : "Team broadcast"}</strong>
-                  <span>{activeTeamMemberCount} active agents</span>
-                </div>
-                <VNativeTextarea
-                  value={teamMessage}
-                  onChange={(event) => setTeamMessage(event.target.value)}
-                  placeholder={lang === "zh" ? "发送给当前团队 active 成员" : "Send to active members of this team"}
-                />
-                <label className={styles.inlineToggle}>
-                  <VNativeInput type="checkbox" checked={teamInterrupt} onChange={(event) => setTeamInterrupt(event.target.checked)} />
-                  <span>{lang === "zh" ? "打断正在直聊中的目标 Agent" : "Interrupt targeted running direct sessions"}</span>
-                </label>
-                <VNativeButton
-                  type="submit"
-                  disabled={!selectedTeam || !teamMessage.trim() || activeTeamMemberCount === 0 || selectedTeamMessagePending}
-                >
-                  <Send size={14} />
-                  {lang === "zh" ? "发送给团队" : "Send to team"}
-                </VNativeButton>
-                {selectedTeamMessageResult ? (
-                  <div className={styles.messageResult}>
-                    <strong>{selectedTeamMessageResult.deliveries.length}</strong>
-                    <span>{lang === "zh" ? "条投递已进入项目总群" : "deliveries recorded in project bus"}</span>
-                    {selectedTeamMessageResult.kernel?.taskId ? (
-                      <Link className={styles.kernelTraceLink} to={kernelTaskCenterHref(selectedTeamMessageResult.kernel.taskId)}>
-                        {lang === "zh" ? "Kernel 任务" : "Kernel Task"}
-                      </Link>
-                    ) : null}
-                  </div>
-                ) : null}
-                {selectedTeamMessageError ? (
-                  <div className={styles.messageError}>{selectedTeamMessageError.message}</div>
-                ) : null}
-              </form>
-              <section className={styles.teamHistoryPanel}>
-                <div className={styles.sectionTitle}>
-                  <strong>{lang === "zh" ? "最近团队广播" : "Recent team broadcasts"}</strong>
-                  <span>{teamBusEvents.length} events</span>
-                </div>
-                {projectBusQuery.isPending ? (
-                  <VStateSurface
-                    tone="loading"
-                    title={lang === "zh" ? "正在读取项目总群" : "Loading project bus"}
-                    skeletonLines={2}
-                  />
-                ) : teamBusEvents.length ? (
-                  <div className={styles.teamHistoryList}>
-                    {teamBusEvents.map((event) => {
-                      const revoked = isProjectAgentBusEventRevoked(event);
-                      const revokePending =
-                        revokeTeamMessageMutation.isPending
-                        && revokeTeamMessageMutation.variables?.eventId === event.eventId;
-                      return (
-                        <article key={event.eventId} className={revoked ? `${styles.teamHistoryItem} ${styles.teamHistoryItemRevoked}` : styles.teamHistoryItem}>
-                          <div className={styles.teamHistoryHeader}>
-                            <strong>{event.summary || event.content}</strong>
-                            <span>{revoked ? (lang === "zh" ? "已撤回" : "revoked") : event.messageType}</span>
-                          </div>
-                          <p>{revoked ? (lang === "zh" ? "这条团队广播已撤回，目标 Agent 已请求停止。" : "This team broadcast was revoked and target agents were asked to stop.") : event.content}</p>
-                          <div className={styles.teamHistoryMeta}>
-                            <span>{formatTime(event.createdAt, lang)}</span>
-                            <span>{event.deliveries.length} deliveries</span>
-                            <span>{event.interruptions.length} interrupts</span>
-                            {event.kernel?.taskId ? (
-                              <Link className={styles.kernelTraceLink} to={kernelTaskCenterHref(event.kernel.taskId)}>
-                                {lang === "zh" ? "Kernel 任务" : "Kernel Task"}
-                              </Link>
-                            ) : null}
-                          </div>
-                          <div className={styles.deliveryList}>
-                            {event.deliveries.map((delivery) => (
-                              <span key={`${event.eventId}-${delivery.targetAgentId}-${delivery.inboxMessageId}`}>
-                                {delivery.targetAgentCode || delivery.targetAgentName || delivery.targetAgentId}: {delivery.revoked ? "revoked" : delivery.wake?.wakeStatus || delivery.status}
-                              </span>
-                            ))}
-                          </div>
-                          {event.createdBy === "user" && !revoked ? (
-                            <VNativeButton
-                              type="button"
-                              className={styles.revokeButton}
-                              disabled={revokePending}
-                              onClick={() => selectedTeam?.teamId && revokeTeamMessageMutation.mutate({ teamId: selectedTeam.teamId, eventId: event.eventId })}
-                            >
-                              {revokePending ? (lang === "zh" ? "撤回中" : "Revoking") : (lang === "zh" ? "撤回" : "Revoke")}
-                            </VNativeButton>
-                          ) : null}
-                        </article>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div className={styles.empty}>{lang === "zh" ? "当前团队还没有广播记录。" : "No team broadcasts yet."}</div>
-                )}
-                {revokeTeamMessageMutation.error instanceof Error ? (
-                  <div className={styles.messageError}>{revokeTeamMessageMutation.error.message}</div>
-                ) : null}
-              </section>
-              </div>
+              <TeamCommunicationPanel
+                lang={lang}
+                selectedTeam={selectedTeam}
+                linkedChatRoomId={linkedChatRoomId}
+                linkedRoomDetail={linkedRoomDetail}
+                linkedRoomBusy={linkedRoomBusy}
+                linkedChatRoomPending={linkedChatRoomQuery.isPending}
+                linkedChatRoomError={linkedChatRoomQuery.error instanceof Error ? linkedChatRoomQuery.error : null}
+                latestTeamRound={latestTeamRound}
+                teamTaskTopic={teamTaskTopic}
+                onTeamTaskTopicChange={setTeamTaskTopic}
+                canStartTeamRound={canStartTeamRound}
+                startRoundPending={selectedTeamStartRoundPending}
+                startRoundResult={selectedTeamStartRoundResult}
+                startRoundError={selectedTeamStartRoundError}
+                onStartTeamRound={(payload) => startTeamRoundMutation.mutate(payload)}
+                teamMessage={teamMessage}
+                onTeamMessageChange={setTeamMessage}
+                teamInterrupt={teamInterrupt}
+                onTeamInterruptChange={setTeamInterrupt}
+                activeTeamMemberCount={activeTeamMemberCount}
+                messagePending={selectedTeamMessagePending}
+                messageResult={selectedTeamMessageResult}
+                messageError={selectedTeamMessageError}
+                onSendTeamMessage={(payload) => sendTeamMessageMutation.mutate(payload)}
+                teamBusEvents={teamBusEvents}
+                projectBusPending={projectBusQuery.isPending}
+                revokePendingEventId={
+                  revokeTeamMessageMutation.isPending
+                    ? (revokeTeamMessageMutation.variables?.eventId || null)
+                    : null
+                }
+                revokeError={revokeTeamMessageMutation.error instanceof Error ? revokeTeamMessageMutation.error : null}
+                onRevokeTeamMessage={(payload) => revokeTeamMessageMutation.mutate(payload)}
+              />
             ) : null}
             </div>
         </aside>
@@ -6701,211 +6530,41 @@ export function TeamsRoute({
               </section>
             ) : null}
             {showTeamCommunicationPanel ? (
-              <div className={styles.researchDiscussionPanel} id="research-workflow-discussion">
-              <form
-                className={styles.teamTaskForm}
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  if (!selectedTeam?.teamId || !linkedChatRoomId || !teamTaskTopic.trim() || linkedRoomBusy) {
-                    return;
-                  }
-                  startTeamRoundMutation.mutate({
-                    roomId: linkedChatRoomId,
-                    teamId: selectedTeam.teamId,
-                    topic: teamTaskTopic.trim(),
-                    mode: linkedRoomDetail?.mode || selectedTeam.linkedChatRoom?.mode || "round_robin",
-                    purpose: linkedRoomDetail?.purpose || selectedTeam.linkedChatRoom?.purpose || "discussion",
-                  });
-                }}
-              >
-                <div className={styles.sectionTitle}>
-                  <strong>{lang === "zh" ? "团队任务" : "Team task"}</strong>
-                  <span>
-                    {selectedTeam?.linkedChatRoomId
-                      ? linkedRoomBusy
-                        ? (lang === "zh" ? "群聊运行中" : "room running")
-                        : (lang === "zh" ? "发送到群聊 round" : "starts a room round")
-                      : (lang === "zh" ? "需要先同步群聊" : "sync room first")}
-                  </span>
-                </div>
-                <VNativeTextarea
-                  value={teamTaskTopic}
-                  onChange={(event) => setTeamTaskTopic(event.target.value)}
-                  placeholder={lang === "zh" ? "输入团队要协作处理的议题或任务" : "Enter a topic or task for this team"}
-                />
-                <VNativeButton
-                  type="submit"
-                  disabled={!canStartTeamRound || selectedTeamStartRoundPending}
-                >
-                  <Play size={14} />
-                  {selectedTeamStartRoundPending
-                    ? (lang === "zh" ? "启动中" : "Starting")
-                    : (lang === "zh" ? "启动团队讨论" : "Start team round")}
-                </VNativeButton>
-                {selectedTeamStartRoundResult ? (
-                  <div className={styles.messageResult}>
-                    <strong>{selectedTeamStartRoundResult.rounds.length}</strong>
-                    <span>{lang === "zh" ? "轮讨论已写入关联群聊" : "rounds now recorded in the linked room"}</span>
-                    <Link to={teamChatRoomRoute(selectedTeamStartRoundResult.roomId, teamWorkspaceRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID), lang === "zh" ? "返回团队页面" : "Back to team")}>
-                      {lang === "zh" ? "打开群聊" : "Open room"}
-                    </Link>
-                  </div>
-                ) : null}
-                {selectedTeamStartRoundError ? (
-                  <div className={styles.messageError}>{selectedTeamStartRoundError.message}</div>
-                ) : null}
-                <section className={styles.teamRoundPanel}>
-                  <div className={styles.sectionTitle}>
-                    <strong>{lang === "zh" ? "最近团队任务" : "Latest team task"}</strong>
-                    <span>{linkedRoomDetail ? chatRoomStatusLabel(linkedRoomDetail.status, lang) : (lang === "zh" ? "未读取" : "not loaded")}</span>
-                  </div>
-                  {linkedChatRoomQuery.isPending && linkedChatRoomId ? (
-                    <VStateSurface
-                      tone="loading"
-                      title={lang === "zh" ? "正在读取关联群聊" : "Loading linked room"}
-                      skeletonLines={2}
-                    />
-                  ) : latestTeamRound ? (
-                    <article className={styles.teamRoundCard}>
-                      <div className={styles.teamRoundHeader}>
-                        <strong>{latestTeamRound.topic || (lang === "zh" ? "未命名任务" : "Untitled task")}</strong>
-                        <span>{latestTeamRound.status}</span>
-                      </div>
-                      <p>{latestTeamRound.summary || (lang === "zh" ? "任务仍在等待成员输出。" : "Waiting for participant output.")}</p>
-                      <div className={styles.teamRoundMeta}>
-                        <span>{latestTeamRound.messages.length} messages</span>
-                        <span>{latestTeamRound.mode}</span>
-                        <span>{formatTime(latestTeamRound.updatedAt || latestTeamRound.startedAt, lang)}</span>
-                      </div>
-                      <Link to={teamChatRoomRoute(latestTeamRound.roomId, teamWorkspaceRoute(selectedTeam?.teamId || RESEARCH_TEAM_ID), lang === "zh" ? "返回团队页面" : "Back to team")}>
-                        {lang === "zh" ? "查看完整群聊" : "View full room"}
-                      </Link>
-                    </article>
-                  ) : (
-                    <div className={styles.empty}>
-                      {linkedChatRoomId
-                        ? (lang === "zh" ? "关联群聊还没有团队任务记录。" : "No team task rounds in the linked room yet.")
-                        : (lang === "zh" ? "同步群聊后可查看团队任务状态。" : "Sync a room to view team task status.")}
-                    </div>
-                  )}
-                  {linkedChatRoomQuery.error instanceof Error ? (
-                    <div className={styles.messageError}>{linkedChatRoomQuery.error.message}</div>
-                  ) : null}
-                </section>
-              </form>
-              <form
-                className={styles.teamMessageForm}
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  if (!selectedTeam?.teamId || !teamMessage.trim()) {
-                    return;
-                  }
-                  sendTeamMessageMutation.mutate({
-                    teamId: selectedTeam.teamId,
-                    content: teamMessage.trim(),
-                    interruptMode: teamInterrupt ? "interrupt_targets" : "none",
-                  });
-                }}
-              >
-                <div className={styles.sectionTitle}>
-                  <strong>{lang === "zh" ? "团队广播" : "Team broadcast"}</strong>
-                  <span>{activeTeamMemberCount} active agents</span>
-                </div>
-                <VNativeTextarea
-                  value={teamMessage}
-                  onChange={(event) => setTeamMessage(event.target.value)}
-                  placeholder={lang === "zh" ? "发送给当前团队 active 成员" : "Send to active members of this team"}
-                />
-                <label className={styles.inlineToggle}>
-                  <VNativeInput type="checkbox" checked={teamInterrupt} onChange={(event) => setTeamInterrupt(event.target.checked)} />
-                  <span>{lang === "zh" ? "打断正在直聊中的目标 Agent" : "Interrupt targeted running direct sessions"}</span>
-                </label>
-                <VNativeButton
-                  type="submit"
-                  disabled={!selectedTeam || !teamMessage.trim() || activeTeamMemberCount === 0 || selectedTeamMessagePending}
-                >
-                  <Send size={14} />
-                  {lang === "zh" ? "发送给团队" : "Send to team"}
-                </VNativeButton>
-                {selectedTeamMessageResult ? (
-                  <div className={styles.messageResult}>
-                    <strong>{selectedTeamMessageResult.deliveries.length}</strong>
-                    <span>{lang === "zh" ? "条投递已进入项目总群" : "deliveries recorded in project bus"}</span>
-                    {selectedTeamMessageResult.kernel?.taskId ? (
-                      <Link className={styles.kernelTraceLink} to={kernelTaskCenterHref(selectedTeamMessageResult.kernel.taskId)}>
-                        {lang === "zh" ? "Kernel 任务" : "Kernel Task"}
-                      </Link>
-                    ) : null}
-                  </div>
-                ) : null}
-                {selectedTeamMessageError ? (
-                  <div className={styles.messageError}>{selectedTeamMessageError.message}</div>
-                ) : null}
-              </form>
-              <section className={styles.teamHistoryPanel}>
-                <div className={styles.sectionTitle}>
-                  <strong>{lang === "zh" ? "最近团队广播" : "Recent team broadcasts"}</strong>
-                  <span>{teamBusEvents.length} events</span>
-                </div>
-                {projectBusQuery.isPending ? (
-                  <VStateSurface
-                    tone="loading"
-                    title={lang === "zh" ? "正在读取项目总群" : "Loading project bus"}
-                    skeletonLines={2}
-                  />
-                ) : teamBusEvents.length ? (
-                  <div className={styles.teamHistoryList}>
-                    {teamBusEvents.map((event) => {
-                      const revoked = isProjectAgentBusEventRevoked(event);
-                      const revokePending =
-                        revokeTeamMessageMutation.isPending
-                        && revokeTeamMessageMutation.variables?.eventId === event.eventId;
-                      return (
-                        <article key={event.eventId} className={revoked ? `${styles.teamHistoryItem} ${styles.teamHistoryItemRevoked}` : styles.teamHistoryItem}>
-                          <div className={styles.teamHistoryHeader}>
-                            <strong>{event.summary || event.content}</strong>
-                            <span>{revoked ? (lang === "zh" ? "已撤回" : "revoked") : event.messageType}</span>
-                          </div>
-                          <p>{revoked ? (lang === "zh" ? "这条团队广播已撤回，目标 Agent 已请求停止。" : "This team broadcast was revoked and target agents were asked to stop.") : event.content}</p>
-                          <div className={styles.teamHistoryMeta}>
-                            <span>{formatTime(event.createdAt, lang)}</span>
-                            <span>{event.deliveries.length} deliveries</span>
-                            <span>{event.interruptions.length} interrupts</span>
-                            {event.kernel?.taskId ? (
-                              <Link className={styles.kernelTraceLink} to={kernelTaskCenterHref(event.kernel.taskId)}>
-                                {lang === "zh" ? "Kernel 任务" : "Kernel Task"}
-                              </Link>
-                            ) : null}
-                          </div>
-                          <div className={styles.deliveryList}>
-                            {event.deliveries.map((delivery) => (
-                              <span key={`${event.eventId}-${delivery.targetAgentId}-${delivery.inboxMessageId}`}>
-                                {delivery.targetAgentCode || delivery.targetAgentName || delivery.targetAgentId}: {delivery.revoked ? "revoked" : delivery.wake?.wakeStatus || delivery.status}
-                              </span>
-                            ))}
-                          </div>
-                          {event.createdBy === "user" && !revoked ? (
-                            <VNativeButton
-                              type="button"
-                              className={styles.revokeButton}
-                              disabled={revokePending}
-                              onClick={() => selectedTeam?.teamId && revokeTeamMessageMutation.mutate({ teamId: selectedTeam.teamId, eventId: event.eventId })}
-                            >
-                              {revokePending ? (lang === "zh" ? "撤回中" : "Revoking") : (lang === "zh" ? "撤回" : "Revoke")}
-                            </VNativeButton>
-                          ) : null}
-                        </article>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div className={styles.empty}>{lang === "zh" ? "当前团队还没有广播记录。" : "No team broadcasts yet."}</div>
-                )}
-                {revokeTeamMessageMutation.error instanceof Error ? (
-                  <div className={styles.messageError}>{revokeTeamMessageMutation.error.message}</div>
-                ) : null}
-              </section>
-              </div>
+              <TeamCommunicationPanel
+                lang={lang}
+                selectedTeam={selectedTeam}
+                linkedChatRoomId={linkedChatRoomId}
+                linkedRoomDetail={linkedRoomDetail}
+                linkedRoomBusy={linkedRoomBusy}
+                linkedChatRoomPending={linkedChatRoomQuery.isPending}
+                linkedChatRoomError={linkedChatRoomQuery.error instanceof Error ? linkedChatRoomQuery.error : null}
+                latestTeamRound={latestTeamRound}
+                teamTaskTopic={teamTaskTopic}
+                onTeamTaskTopicChange={setTeamTaskTopic}
+                canStartTeamRound={canStartTeamRound}
+                startRoundPending={selectedTeamStartRoundPending}
+                startRoundResult={selectedTeamStartRoundResult}
+                startRoundError={selectedTeamStartRoundError}
+                onStartTeamRound={(payload) => startTeamRoundMutation.mutate(payload)}
+                teamMessage={teamMessage}
+                onTeamMessageChange={setTeamMessage}
+                teamInterrupt={teamInterrupt}
+                onTeamInterruptChange={setTeamInterrupt}
+                activeTeamMemberCount={activeTeamMemberCount}
+                messagePending={selectedTeamMessagePending}
+                messageResult={selectedTeamMessageResult}
+                messageError={selectedTeamMessageError}
+                onSendTeamMessage={(payload) => sendTeamMessageMutation.mutate(payload)}
+                teamBusEvents={teamBusEvents}
+                projectBusPending={projectBusQuery.isPending}
+                revokePendingEventId={
+                  revokeTeamMessageMutation.isPending
+                    ? (revokeTeamMessageMutation.variables?.eventId || null)
+                    : null
+                }
+                revokeError={revokeTeamMessageMutation.error instanceof Error ? revokeTeamMessageMutation.error : null}
+                onRevokeTeamMessage={(payload) => revokeTeamMessageMutation.mutate(payload)}
+              />
             ) : null}
             </div>
         </aside>
