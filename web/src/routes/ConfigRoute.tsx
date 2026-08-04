@@ -101,6 +101,13 @@ import {
   isConfigBaselineStaleErrorMessage,
   type ConfigApplyDraftOverride,
 } from "./config/configApplyModel";
+import {
+  classifyProviderQuickSetupErrorKind,
+  formatProviderPinBusyMessage,
+  formatProviderPinErrorMessage,
+  formatProviderPinSuccessMessage,
+  isProviderModelAlreadyPinnedErrorMessage,
+} from "./config/configProviderActionModel";
 import { ConfigOverviewPanel } from "./ConfigOverviewPanel";
 import {
   type ConfigProviderRegistryTab,
@@ -2702,10 +2709,12 @@ export function ConfigRoute() {
       return;
     }
 
-    setBusyAction(models.length === 1 ? `正在固定 ${models[0].modelRef}…` : `正在固定 ${models.length} 个模型…`);
-    report("busy", models.length === 1
-      ? `正在固定 ${models[0].modelRef}…`
-      : `正在固定 ${models.length} 个模型…`);
+    const pinBusy = formatProviderPinBusyMessage({
+      modelCount: models.length,
+      firstModelRef: models[0]?.modelRef,
+    });
+    setBusyAction(pinBusy);
+    report("busy", pinBusy);
 
     const latestDraft = providerDraftRequestRef.current;
     let currentConfig = latestDraft?.publicConfig ?? requireDraft();
@@ -2778,11 +2787,15 @@ export function ConfigRoute() {
           pinnedCount += 1;
           pinnedModelRefs.add(model.modelRef || `${providerId}/${modelKey}`);
           if (pendingModels.length > 1) {
-            report("busy", `正在固定模型…（${pinnedCount}/${pendingModels.length}）`);
+            report("busy", formatProviderPinBusyMessage({
+              modelCount: pendingModels.length,
+              completed: pinnedCount,
+              total: pendingModels.length,
+            }));
           }
         } catch (error) {
           const message = readableErrorMessage(error);
-          if (/already exists|already pinned|已存在|已固定/i.test(message)) {
+          if (isProviderModelAlreadyPinnedErrorMessage(message)) {
             skippedRuntime += 1;
             pinnedModelRefs.add(model.modelRef || `${providerId}/${modelKey}`);
             continue;
@@ -2793,20 +2806,16 @@ export function ConfigRoute() {
       setSelectedProviderId(providerId);
       setSelectedProviderTab("models");
       const skippedTotal = skippedExisting + skippedRuntime;
-      const parts = [
-        pinnedCount > 0 ? `新固定 ${pinnedCount} 个` : null,
-        skippedTotal > 0 ? `跳过已存在 ${skippedTotal} 个` : null,
-      ].filter(Boolean);
       report(
         "success",
-        `${parts.join("，") || "固定完成"}。已切换到「已固定」列表；请点右上角「保存到外部配置」。`,
+        formatProviderPinSuccessMessage({ pinnedCount, skippedTotal }),
       );
     } catch (error) {
       const message = readableErrorMessage(error).slice(0, 480);
       markError(error);
       report(
         "error",
-        pinnedCount > 0 ? `已固定 ${pinnedCount} 个后失败：${message}` : `固定失败：${message}`,
+        formatProviderPinErrorMessage({ pinnedCount, errorMessage: message }),
       );
     } finally {
       setBusyAction("");
@@ -2814,14 +2823,7 @@ export function ConfigRoute() {
   }
 
   function quickSetupErrorKind(error: unknown): ProviderQuickSetupErrorKind {
-    const message = readableErrorMessage(error).toLowerCase();
-    if (message.includes("auth") || message.includes("credential") || message.includes("api key") || message.includes("401") || message.includes("403")) {
-      return "auth";
-    }
-    if (message.includes("endpoint") || message.includes("base_url") || message.includes("target") || message.includes("connect")) {
-      return "endpoint";
-    }
-    return "discovery";
+    return classifyProviderQuickSetupErrorKind(readableErrorMessage(error));
   }
 
   async function handlePrepareProviderQuickSetup(input: { provider: ProviderWizardState; credentialValue: string }) {
