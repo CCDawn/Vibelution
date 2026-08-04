@@ -35,6 +35,7 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 | SC workspace state machine | `useSourceCollectionWorkspace.ts` | SC useState + project/run list + selection + detail queries in TeamsRoute |
 | Experiment + research-loop workspace state | `useResearchExperimentWorkspace.ts` | experiment/loop drafts + secondary status queries in TeamsRoute |
 | Shell + canvas state machine | `useTeamsShellCanvasWorkspace.ts` (`useTeamsShellCanvasWorkspace` + `useTeamsCanvasProjection`) | shell/canvas useState, team pick sync, canvas query + display projection in TeamsRoute |
+| Team-scoped mutation surface (pending/error/result) | `teamMutationSurface.ts` | repeating `variables?.teamId === selectedTeam` ternaries in TeamsRoute |
 | Workflow API error product copy | `researchWorkflowErrorModel.ts` + `ResearchWorkflowErrorSurface.tsx` | raw Error.message in UI |
 | Team kind guards / system-team roles | `teamKindModel.ts` | UI panels |
 | Canvas geometry / auto-layout / edge paths | `canvasGeometry.ts` | styles maps, mutations |
@@ -150,6 +151,18 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 | Behavior-conserving refactors only | Done |
 | Route is orchestration shell | Done |
 
+### State-machine extract (Phases 1–4)
+
+| Phase | Module | Status |
+|---|---|---|
+| 1 | `useSourceCollectionWorkspace` — SC drafts, run list, selection, hydration, detail queries | **Done** |
+| 1+ | SC pagination reset + writeback-awaiting derived in SC hook | **Done** |
+| 2 | `useResearchExperimentWorkspace` — experiment/loop drafts + secondary queries | **Done** |
+| 3 | `useTeamsShellCanvasWorkspace` + `useTeamsCanvasProjection` — shell/canvas state + canvas query/projection | **Done** |
+| 4 | `teamMutationSurface` — collapse team-scoped mutation pending/error/result ctx; docs/ownership map | **Done** |
+
+**Still route-owned (intentional):** SC stage modules / readiness / large presentation chain, render* inject adapters, drag/save handlers, createExperimentWorkspaceActions wiring.
+
 **Explicitly deferred to Phase 9+:** SC chrome+workspace double-layer merge; force `TeamsRoute` under 2k LOC; large Context replacement of inject props; cross-route Chat/Agents/Config depth parity.
 
 **History (8G–8P):** 8G AI Search + stage agents · 8H launcher · 8I standalone stage · 8J loop/ledger · 8K–8M SC workspaces · 8N packs · prefetch · 8O experiment mutations · 8P SC mutations.
@@ -169,9 +182,10 @@ Agent-oriented map for Teams workbench development. Prefer editing a **module** 
 ## Next (planned) — Phase 9+
 
 1. **Done (structure wave):** lazy pack facades → `teamLazyPanels.tsx`; experiment/research-loop workspace action adapters → `experimentWorkspaceActions.ts`.
-2. Optional: collapse SC chrome+workspace double layer when inject surface stabilizes.
-3. Optional: extract remaining style-bound shell helpers only if they block a concrete claim.
-4. Optional: cross-route query/mutation patterns (Chat/Agents) only with a new phase charter.
+2. **Done (state machine 1–4):** SC / experiment / shell-canvas workspace hooks + mutation surface ctx shrink.
+3. Optional: extract SC presentation/readiness/stageModules chain when inject surface stabilizes (largest remaining B-section).
+4. Optional: collapse SC chrome+workspace double layer; large React Context only with explicit charter.
+5. Optional: cross-route query/mutation patterns (Chat/Agents) only with a new phase charter.
 
 ## Rules
 
