@@ -1,9 +1,8 @@
-import { Check, ChevronDown, X } from "lucide-react";
+import { Check, ChevronDown } from "lucide-react";
 import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 
 import type { AgentLlmSlotDefinition, AgentModelChoice } from "../api/types";
-import { VButton, VConfirmDialog, VContextualHint, VNativeInput, VStateSurface } from "../components/vui";
+import { VButton, VConfirmDialog, VContextualHint, VDialog, VNativeInput, VStateSurface } from "../components/vui";
 import styles from "./AgentModelPicker.styles";
 
 export type AgentModelCandidateGroup = {
@@ -105,20 +104,26 @@ function hardDisabledReason(candidate: AgentModelChoice, slot: string) {
   return "";
 }
 
+/** Pure disable reason for list rows — exported for unit contracts. */
+export function agentModelChoiceDisabledReason(
+  candidate: AgentModelChoice,
+  slot: string,
+  draftsDirty: boolean,
+): string {
+  const hardReason = hardDisabledReason(candidate, slot);
+  if (hardReason) return hardReason;
+  if (!candidate.runtimeSelectable && draftsDirty) {
+    return "请先保存或放弃未保存修改";
+  }
+  return "";
+}
+
 function candidateStatus(candidate: AgentModelChoice) {
   if (candidate.catalogStale || candidate.verificationStatus === "stale") return "已过期";
   if (candidate.source === "both") return "已固定 · 已发现";
   if (candidate.source === "pinned") return "已固定";
   if (candidate.verificationStatus === "verified") return "已发现 · 已验证";
   return "已发现 · 未验证";
-}
-
-function closeAndRestoreFocus(
-  setOpen: (open: boolean) => void,
-  trigger: HTMLButtonElement | null,
-) {
-  setOpen(false);
-  requestAnimationFrame(() => trigger?.focus());
 }
 
 export function AgentModelPicker({
@@ -151,12 +156,7 @@ export function AgentModelPicker({
   const draftsDirty = configDraftDirty || agentDraftDirty;
 
   function disabledReason(candidate: AgentModelChoice) {
-    const hardReason = hardDisabledReason(candidate, slot.slot);
-    if (hardReason) return hardReason;
-    if (!candidate.runtimeSelectable && draftsDirty) {
-      return "请先保存或放弃未保存修改";
-    }
-    return "";
+    return agentModelChoiceDisabledReason(candidate, slot.slot, draftsDirty);
   }
 
   const enabledCandidates = visibleCandidates.filter((candidate) => !disabledReason(candidate));
@@ -168,13 +168,29 @@ export function AgentModelPicker({
     requestAnimationFrame(() => searchRef.current?.focus());
   }, [enabledCandidates, open]);
 
+  function restoreTriggerFocus() {
+    requestAnimationFrame(() => triggerRef.current?.focus());
+  }
+
+  function closePicker() {
+    setOpen(false);
+    setQuery("");
+    restoreTriggerFocus();
+  }
+
+  function handleOpenChange(nextOpen: boolean) {
+    if (nextOpen) {
+      setOpen(true);
+      return;
+    }
+    closePicker();
+  }
+
   function choose(candidate: AgentModelChoice) {
     if (disabled || disabledReason(candidate)) return;
     if (candidate.runtimeSelectable) {
       onSelectPinned(candidate.modelRef);
-      setOpen(false);
-      setQuery("");
-      requestAnimationFrame(() => triggerRef.current?.focus());
+      closePicker();
       return;
     }
     setPendingPromote(candidate);
@@ -184,7 +200,7 @@ export function AgentModelPicker({
 
   function closePromoteConfirm() {
     setPendingPromote(null);
-    requestAnimationFrame(() => triggerRef.current?.focus());
+    restoreTriggerFocus();
   }
 
   function moveActive(delta: number) {
@@ -199,11 +215,6 @@ export function AgentModelPicker({
   }
 
   function handlePanelKeyDown(event: KeyboardEvent) {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      closeAndRestoreFocus(setOpen, triggerRef.current);
-      return;
-    }
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
       moveActive(event.key === "ArrowDown" ? 1 : -1);
@@ -219,103 +230,7 @@ export function AgentModelPicker({
     }
   }
 
-  const dialog = (
-    <div className={styles.dialogLayer} role="presentation" hidden={!open} onMouseDown={() => closeAndRestoreFocus(setOpen, triggerRef.current)}>
-      <div
-        className={styles.panel}
-        role="dialog"
-        aria-modal="true"
-        aria-label={`选择 ${slot.label} 模型`}
-        onMouseDown={(event) => event.stopPropagation()}
-        onKeyDown={handlePanelKeyDown}
-      >
-        <div className={styles.panelHeader}>
-          <div className={styles.panelTitle}>
-            <div className={styles.contextualHintRow}>
-              <strong className={styles.panelTitleText}>选择 {slot.label}</strong>
-              <VContextualHint
-                label="模型选择说明"
-                content="按 Provider 分组。可直接搜索模型名 / gpt / luna。已固定的点「使用」；未固定的点「固定后使用」会先加入模型库再绑定。"
-                width="wide"
-              />
-            </div>
-          </div>
-          <VButton
-            type="button"
-            variant="ghost"
-            isIconOnly
-            aria-label="关闭模型选择"
-            tooltip="关闭模型选择"
-            onPress={() => closeAndRestoreFocus(setOpen, triggerRef.current)}
-          >
-            <X size={15} aria-hidden="true" />
-          </VButton>
-        </div>
-        <VNativeInput
-          ref={searchRef}
-          className={styles.search}
-          value={query}
-          aria-label="搜索模型"
-          placeholder="快速过滤：模型名 / gpt-5 / luna / Provider"
-          onChange={(event) => setQuery(event.target.value)}
-        />
-        <div className={styles.list} role="listbox" aria-label={`${slot.label}模型候选`}>
-          {groups.map((group) => (
-            <section key={group.providerId} className={styles.group} aria-label={group.providerLabel}>
-              <header className={styles.groupHeader}>
-                <span>{group.providerLabel}</span>
-                <span className={styles.groupCount}>{group.items.length} 个模型</span>
-              </header>
-              {group.items.map((candidate) => {
-                const reason = disabledReason(candidate);
-                const compatibility = slotCompatibility(candidate, slot.slot);
-                const selectedRow = candidate.modelRef === selectedModelRef;
-                const pending = candidate.modelRef === pendingModelRef;
-                return (
-                  <VButton
-                    key={candidate.modelRef}
-                    ref={(node) => {
-                      if (node) optionRefs.current.set(candidate.modelRef, node);
-                      else optionRefs.current.delete(candidate.modelRef);
-                    }}
-                    type="button"
-                    contentLayout="plain"
-                    role="option"
-                    className={`${styles.option} ${selectedRow ? styles.optionSelected : ""} ${reason ? styles.optionDisabled : ""}`}
-                    isDisabled={disabled || Boolean(reason)}
-                    aria-selected={selectedRow}
-                    data-reason-code={compatibility.reasonCode || undefined}
-                    title={candidate.modelRef}
-                    onFocus={() => setActiveModelRef(candidate.modelRef)}
-                    onPress={() => choose(candidate)}
-                  >
-                    <span className={styles.optionCopy}>
-                      <span className={styles.optionTitle}>
-                        <span>{candidate.label || candidate.upstreamId}</span>
-                        <span className={styles.badge}>{candidateStatus(candidate)}</span>
-                        {selectedRow ? <Check className={styles.check} size={14} aria-hidden="true" /> : null}
-                      </span>
-                      <span className={styles.optionMeta}>
-                        {candidate.reasoningEffortValues?.length
-                          ? <span>{candidate.reasoningEffortValues.join(" / ")}</span>
-                          : <span>标准推理</span>}
-                        <span>{candidate.transport || candidate.providerKind}</span>
-                      </span>
-                    </span>
-                    <span className={styles.action}>
-                      {pending ? "处理中…" : candidate.runtimeSelectable ? "使用" : "固定后使用"}
-                    </span>
-                    {reason ? <span className={styles.reason}>{reason}</span> : null}
-                  </VButton>
-                );
-              })}
-            </section>
-          ))}
-          {!groups.length ? <VStateSurface tone="empty" title="没有匹配的模型" /> : null}
-        </div>
-      </div>
-    </div>
-  );
+  const dialogTitle = `选择 ${slot.label}`;
 
   return (
     <>
@@ -328,7 +243,7 @@ export function AgentModelPicker({
           isDisabled={disabled}
           aria-haspopup="dialog"
           aria-expanded={open}
-          onPress={() => setOpen((value) => !value)}
+          onPress={() => setOpen(true)}
         >
           <span className={styles.triggerCopy}>
             <span className={styles.triggerLabel}>
@@ -338,7 +253,89 @@ export function AgentModelPicker({
           </span>
           <ChevronDown size={14} aria-hidden="true" />
         </VButton>
-        {typeof document === "undefined" ? dialog : createPortal(dialog, document.body)}
+        <VDialog
+          open={open}
+          onOpenChange={handleOpenChange}
+          title={(
+            <span className={styles.contextualHintRow}>
+              <span>{dialogTitle}</span>
+              <VContextualHint
+                label="模型选择说明"
+                content="按 Provider 分组。可直接搜索模型名 / gpt / luna。已固定的点「使用」；未固定的点「固定后使用」会先加入模型库再绑定。"
+                width="wide"
+              />
+            </span>
+          )}
+          description="按 Provider 分组浏览；搜索支持模型名、Provider 与 modelRef。"
+          size="xl"
+          contentClassName={styles.dialogContent}
+          aria-label={dialogTitle}
+        >
+          <div className={styles.dialogBody} onKeyDown={handlePanelKeyDown}>
+            <VNativeInput
+              ref={searchRef}
+              className={styles.search}
+              value={query}
+              aria-label="搜索模型"
+              placeholder="快速过滤：模型名 / gpt-5 / luna / Provider"
+              onChange={(event) => setQuery(event.target.value)}
+            />
+            <div className={styles.list} role="listbox" aria-label={`${slot.label}模型候选`}>
+              {groups.map((group) => (
+                <section key={group.providerId} className={styles.group} aria-label={group.providerLabel}>
+                  <header className={styles.groupHeader}>
+                    <span>{group.providerLabel}</span>
+                    <span className={styles.groupCount}>{group.items.length} 个模型</span>
+                  </header>
+                  {group.items.map((candidate) => {
+                    const reason = disabledReason(candidate);
+                    const compatibility = slotCompatibility(candidate, slot.slot);
+                    const selectedRow = candidate.modelRef === selectedModelRef;
+                    const pending = candidate.modelRef === pendingModelRef;
+                    return (
+                      <VButton
+                        key={candidate.modelRef}
+                        ref={(node) => {
+                          if (node) optionRefs.current.set(candidate.modelRef, node);
+                          else optionRefs.current.delete(candidate.modelRef);
+                        }}
+                        type="button"
+                        contentLayout="plain"
+                        role="option"
+                        className={`${styles.option} ${selectedRow ? styles.optionSelected : ""} ${reason ? styles.optionDisabled : ""}`}
+                        isDisabled={disabled || Boolean(reason)}
+                        aria-selected={selectedRow}
+                        data-reason-code={compatibility.reasonCode || undefined}
+                        title={candidate.modelRef}
+                        onFocus={() => setActiveModelRef(candidate.modelRef)}
+                        onPress={() => choose(candidate)}
+                      >
+                        <span className={styles.optionCopy}>
+                          <span className={styles.optionTitle}>
+                            <span>{candidate.label || candidate.upstreamId}</span>
+                            <span className={styles.badge}>{candidateStatus(candidate)}</span>
+                            {selectedRow ? <Check className={styles.check} size={14} aria-hidden="true" /> : null}
+                          </span>
+                          <span className={styles.optionMeta}>
+                            {candidate.reasoningEffortValues?.length
+                              ? <span>{candidate.reasoningEffortValues.join(" / ")}</span>
+                              : <span>标准推理</span>}
+                            <span>{candidate.transport || candidate.providerKind}</span>
+                          </span>
+                        </span>
+                        <span className={styles.action}>
+                          {pending ? "处理中…" : candidate.runtimeSelectable ? "使用" : "固定后使用"}
+                        </span>
+                        {reason ? <span className={styles.reason}>{reason}</span> : null}
+                      </VButton>
+                    );
+                  })}
+                </section>
+              ))}
+              {!groups.length ? <VStateSurface tone="empty" title="没有匹配的模型" /> : null}
+            </div>
+          </div>
+        </VDialog>
       </div>
       <VConfirmDialog
         open={Boolean(pendingPromote)}
