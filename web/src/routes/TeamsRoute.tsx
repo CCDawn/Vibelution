@@ -1,7 +1,7 @@
 import "../design/route-css/teams.tailwind.css";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Archive, ArrowLeft, Bot, CheckCircle2, Eye, Link2, MessageSquare, Plus, RefreshCw, Save, Search, Settings2, Trash2, Unlink, Users } from "lucide-react";
+import { AlertTriangle, Archive, ArrowLeft, Bot, CheckCircle2, Eye, Link2, MessageSquare, Plus, RefreshCw, Save, Search, Settings2, Unlink, Users } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
@@ -43,7 +43,6 @@ import {
   TeamSourceCollectionSourceDetailPanel,
   TeamSourceCollectionStageAgentsPanel,
   TeamSourceCollectionStandaloneStagePanel,
-  TeamSourceCollectionStorageActionsPanel,
   TeamWorkflowGraphView,
   TeamWorkflowModelEvidenceStatusPanel,
   teamsPanelPackLoaders,
@@ -162,7 +161,6 @@ import {
   sourceCollectionStatusLabel,
   sourceCollectionStorageArtifactsForRun,
   sourceCollectionStorageTargetForRef,
-  sourceCollectionStorageTargetLabel,
   sourceCollectionFreshProjectDraft,
   splitDraftList,
   workflowIngestionStatusLabel,
@@ -172,10 +170,11 @@ import {
   type SourceCollectionStorageOpenTarget,
 } from "./teams/source-collection/presentationModel";
 import { TeamSourceCollectionModeFields } from "./teams/TeamSourceCollectionModeFields";
-import { TeamSourceCollectionSearchBriefInject } from "./teams/TeamSourceCollectionSearchBriefInject";
 import { TeamSourceCollectionManualWritebackInject } from "./teams/TeamSourceCollectionManualWritebackInject";
 import { TeamSourceCollectionControlsInject } from "./teams/TeamSourceCollectionControlsInject";
 import { TeamSourceCollectionActiveStageInject } from "./teams/TeamSourceCollectionActiveStageInject";
+import { TeamSourceCollectionStorageActionsInject } from "./teams/TeamSourceCollectionStorageActionsInject";
+import { TeamSourceCollectionSearchBriefShell } from "./teams/TeamSourceCollectionSearchBriefShell";
 import {
   buildSourceCollectionFilterBarOptions,
   resolveSourceCollectionPaginationView,
@@ -335,7 +334,6 @@ import type {
 } from "./TeamSourceCollectionSourceDetailPanel";
 import type { TeamSourceCollectionStandaloneStageModule } from "./TeamSourceCollectionStandaloneStagePanel";
 import type { TeamSourceCollectionFilterOption } from "./TeamSourceCollectionResultControls";
-import type { TeamSourceCollectionStorageAction } from "./TeamSourceCollectionStorageActionsPanel";
 import type { TeamWorkflowCandidatePreviewItem } from "./TeamWorkflowCandidatePreviewPanel";
 import type { ResearchMemoryContextSummary } from "./teams/ResearchMemoryEvidencePanel";
 import {
@@ -2145,32 +2143,10 @@ export function TeamsRoute({
               message={selectedResearchProjectSourceCollectionResetError.message}
               pending={selectedResearchProjectSourceCollectionResetPending}
               onRecommendedAction={(action) => {
-                if (!selectedTeam?.teamId || !sourceCollectionResetResearchProjectId) {
-                  return;
-                }
                 if (action !== "reset_progress_cascade" && action !== "reset_source_only") {
                   return;
                 }
-                resetResearchProjectSourceCollectionMutation.mutate(
-                  {
-                    teamId: selectedTeam.teamId,
-                    researchProjectId: sourceCollectionResetResearchProjectId,
-                    includeDownstream: action === "reset_progress_cascade",
-                  },
-                  {
-                    onSuccess: () => {
-                      sourceCollectionDraftHydratedRunIdRef.current = "";
-                      sourceCollectionDraftHydratedSearchPlanRef.current = "";
-                      setSelectedSourceCollectionRunId("");
-                      if (activeSourceCollectionResearchProject) {
-                        sourceCollectionFreshProjectDraftIdRef.current = activeSourceCollectionResearchProject.projectId;
-                        setSourceCollectionDraft(sourceCollectionFreshProjectDraft(activeSourceCollectionResearchProject));
-                      } else {
-                        sourceCollectionFreshProjectDraftIdRef.current = "";
-                      }
-                    },
-                  },
-                );
+                runSourceCollectionProjectReset(action === "reset_progress_cascade");
               }}
             />
           ) : undefined
@@ -2430,34 +2406,15 @@ export function TeamsRoute({
   }
 
   function renderSourceCollectionStorageActions() {
-    if (!selectedSourceCollectionStorageArtifacts || !selectedSourceCollectionRunEffectiveId) {
-      return null;
-    }
-    const detailActions: SourceCollectionStorageOpenTarget[] = [
-      "search_plan",
-      "search_events",
-      "records",
-      "candidates",
-      "candidate_store",
-    ];
-    const primaryAction: TeamSourceCollectionStorageAction = {
-      target: "run_directory",
-      label: sourceCollectionStorageTargetLabel("run_directory", lang),
-    };
-    const storageActions: TeamSourceCollectionStorageAction[] = detailActions.map((target) => ({
-      target,
-      label: sourceCollectionStorageTargetLabel(target, lang),
-    }));
     return (
-      <TeamSourceCollectionStorageActionsPanel
+      <TeamSourceCollectionStorageActionsInject
         lang={lang}
-        runDirectory={selectedSourceCollectionStorageArtifacts.runDirectory}
-        primaryAction={primaryAction}
-        detailActions={storageActions}
+        artifacts={selectedSourceCollectionStorageArtifacts}
+        runId={selectedSourceCollectionRunEffectiveId}
         pending={selectedSourceCollectionStorageOpenPending}
         openedPath={selectedSourceCollectionStorageOpenResult?.openedPath ?? ""}
         errorMessage={selectedSourceCollectionStorageOpenError?.message ?? ""}
-        onOpenTarget={(target) => openSourceCollectionStorageTarget(target as SourceCollectionStorageOpenTarget)}
+        onOpenTarget={(target) => openSourceCollectionStorageTarget(target)}
       />
     );
   }
@@ -2612,151 +2569,61 @@ export function TeamsRoute({
     );
   }
 
+  function handleSourceCollectionProjectResetSuccess() {
+    sourceCollectionDraftHydratedRunIdRef.current = "";
+    sourceCollectionDraftHydratedSearchPlanRef.current = "";
+    setSelectedSourceCollectionRunId("");
+    if (activeSourceCollectionResearchProject) {
+      sourceCollectionFreshProjectDraftIdRef.current = activeSourceCollectionResearchProject.projectId;
+      setSourceCollectionDraft(sourceCollectionFreshProjectDraft(activeSourceCollectionResearchProject));
+    } else {
+      sourceCollectionFreshProjectDraftIdRef.current = "";
+    }
+  }
+
+  function runSourceCollectionProjectReset(includeDownstream: boolean) {
+    if (!selectedTeam?.teamId || !sourceCollectionResetResearchProjectId) {
+      return;
+    }
+    resetResearchProjectSourceCollectionMutation.mutate(
+      {
+        teamId: selectedTeam.teamId,
+        researchProjectId: sourceCollectionResetResearchProjectId,
+        includeDownstream,
+      },
+      {
+        onSuccess: handleSourceCollectionProjectResetSuccess,
+      },
+    );
+  }
+
   function renderSourceCollectionSearchBrief() {
     return (
-      <>
-        {sourceCollectionResetAvailable ? (
-          <VStateSurface
-            title={lang === "zh" ? "重新开始本项目的资料搜集" : "Restart this project's source collection"}
-            tone="unavailable"
-            facts={[
-              {
-                key: "scope",
-                label: lang === "zh" ? "清理范围" : "Reset scope",
-                value: lang === "zh" ? `${sourceCollectionRuns.length} 个资料批次` : `${sourceCollectionRuns.length} source runs`,
-              },
-            ]}
-            actions={(
-              <>
-                <VButton
-                  type="button"
-                  variant="danger"
-                  onPress={() => {
-                    if (!selectedTeam?.teamId) {
-                      return;
-                    }
-                    resetResearchProjectSourceCollectionMutation.mutate(
-                      {
-                        teamId: selectedTeam.teamId,
-                        researchProjectId: sourceCollectionResetResearchProjectId,
-                        includeDownstream: false,
-                      },
-                      {
-                        onSuccess: () => {
-                          sourceCollectionDraftHydratedRunIdRef.current = "";
-                          sourceCollectionDraftHydratedSearchPlanRef.current = "";
-                          setSelectedSourceCollectionRunId("");
-                          if (activeSourceCollectionResearchProject) {
-                            sourceCollectionFreshProjectDraftIdRef.current = activeSourceCollectionResearchProject.projectId;
-                            setSourceCollectionDraft(sourceCollectionFreshProjectDraft(activeSourceCollectionResearchProject));
-                          } else {
-                            sourceCollectionFreshProjectDraftIdRef.current = "";
-                          }
-                        },
-                      },
-                    );
-                  }}
-                  isDisabled={selectedResearchProjectSourceCollectionResetPending}
-                >
-                  <Trash2 size={14} />
-                  {selectedResearchProjectSourceCollectionResetPending
-                    && !resetResearchProjectSourceCollectionMutation.variables?.includeDownstream
-                    ? (lang === "zh" ? "正在清空…" : "Clearing…")
-                    : (lang === "zh" ? "清空本项目资料并重新开始" : "Clear this project's sources and restart")}
-                </VButton>
-                <VButton
-                  type="button"
-                  variant="danger"
-                  onPress={() => {
-                    if (!selectedTeam?.teamId) {
-                      return;
-                    }
-                    resetResearchProjectSourceCollectionMutation.mutate(
-                      {
-                        teamId: selectedTeam.teamId,
-                        researchProjectId: sourceCollectionResetResearchProjectId,
-                        includeDownstream: true,
-                      },
-                      {
-                        onSuccess: () => {
-                          sourceCollectionDraftHydratedRunIdRef.current = "";
-                          sourceCollectionDraftHydratedSearchPlanRef.current = "";
-                          setSelectedSourceCollectionRunId("");
-                          if (activeSourceCollectionResearchProject) {
-                            sourceCollectionFreshProjectDraftIdRef.current = activeSourceCollectionResearchProject.projectId;
-                            setSourceCollectionDraft(sourceCollectionFreshProjectDraft(activeSourceCollectionResearchProject));
-                          } else {
-                            sourceCollectionFreshProjectDraftIdRef.current = "";
-                          }
-                        },
-                      },
-                    );
-                  }}
-                  isDisabled={selectedResearchProjectSourceCollectionResetPending}
-                >
-                  <Trash2 size={14} />
-                  {selectedResearchProjectSourceCollectionResetPending
-                    && resetResearchProjectSourceCollectionMutation.variables?.includeDownstream
-                    ? (lang === "zh" ? "正在清空…" : "Clearing…")
-                    : (lang === "zh" ? "连同实验与迭代一起清空" : "Clear sources + experiment/iteration")}
-                </VButton>
-              </>
-            )}
-          >
-            {lang === "zh"
-              ? "「清空资料」只清尚未进入实验的资料批次；若本项目已有实验/迭代，请用「连同实验与迭代一起清空」。不会删除其他项目、正式题目、知识库或 Agent 会话。"
-              : "Source-only reset keeps experiment/iteration. Use the cascade button to also clear this project's experiment and iteration. Other projects, official records, knowledge, and Agent conversations stay."}
-          </VStateSurface>
-        ) : null}
-        {selectedResearchProjectSourceCollectionResetError ? (
-          <ResearchWorkflowErrorSurface
-            lang={lang}
-            message={selectedResearchProjectSourceCollectionResetError.message}
-            pending={selectedResearchProjectSourceCollectionResetPending}
-            onRecommendedAction={(action) => {
-              if (!selectedTeam?.teamId || !sourceCollectionResetResearchProjectId) {
-                return;
-              }
-              if (action !== "reset_progress_cascade" && action !== "reset_source_only") {
-                return;
-              }
-              resetResearchProjectSourceCollectionMutation.mutate(
-                {
-                  teamId: selectedTeam.teamId,
-                  researchProjectId: sourceCollectionResetResearchProjectId,
-                  includeDownstream: action === "reset_progress_cascade",
-                },
-                {
-                  onSuccess: () => {
-                    sourceCollectionDraftHydratedRunIdRef.current = "";
-                    sourceCollectionDraftHydratedSearchPlanRef.current = "";
-                    setSelectedSourceCollectionRunId("");
-                    if (activeSourceCollectionResearchProject) {
-                      sourceCollectionFreshProjectDraftIdRef.current = activeSourceCollectionResearchProject.projectId;
-                      setSourceCollectionDraft(sourceCollectionFreshProjectDraft(activeSourceCollectionResearchProject));
-                    } else {
-                      sourceCollectionFreshProjectDraftIdRef.current = "";
-                    }
-                  },
-                },
-              );
-            }}
-          />
-        ) : null}
-        <TeamSourceCollectionSearchBriefInject
-          lang={lang}
-          draft={sourceCollectionDraft}
-          modeFields={renderSourceCollectionModeFields()}
-          hasExistingRun={Boolean(selectedSourceCollectionRun)}
-          canStart={sourceCollectionCanStart}
-          startPending={selectedTeamStartSourceCollectionPending}
-          teamId={selectedTeam?.teamId}
-          onDraftChange={(patch) => setSourceCollectionDraft((current) => ({ ...current, ...patch }))}
-          onStart={({ teamId, draft }) => {
-            startSourceCollectionRunMutation.mutate({ teamId, draft });
-          }}
-        />
-      </>
+      <TeamSourceCollectionSearchBriefShell
+        lang={lang}
+        resetAvailable={sourceCollectionResetAvailable}
+        runCount={sourceCollectionRuns.length}
+        resetPending={selectedResearchProjectSourceCollectionResetPending}
+        resetIncludeDownstream={Boolean(
+          resetResearchProjectSourceCollectionMutation.variables?.includeDownstream,
+        )}
+        resetError={
+          selectedResearchProjectSourceCollectionResetError instanceof Error
+            ? selectedResearchProjectSourceCollectionResetError
+            : null
+        }
+        onReset={({ includeDownstream }) => runSourceCollectionProjectReset(includeDownstream)}
+        draft={sourceCollectionDraft}
+        modeFields={renderSourceCollectionModeFields()}
+        hasExistingRun={Boolean(selectedSourceCollectionRun)}
+        canStart={sourceCollectionCanStart}
+        startPending={selectedTeamStartSourceCollectionPending}
+        teamId={selectedTeam?.teamId}
+        onDraftChange={(patch) => setSourceCollectionDraft((current) => ({ ...current, ...patch }))}
+        onStart={({ teamId, draft }) => {
+          startSourceCollectionRunMutation.mutate({ teamId, draft });
+        }}
+      />
     );
   }
 
