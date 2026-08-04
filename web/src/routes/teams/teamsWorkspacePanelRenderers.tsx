@@ -36,7 +36,9 @@ export function createTeamsWorkspacePanelRenderers(ctx: TeamsWorkspacePanelRende
       } = ctx;
 
       const bindings = researchStageAgentBindingsByStage[stageType] ?? [];
-      const agentDirectoryHydrating = bindings.some((binding) => binding.agentId && !binding.agent)
+      const agentDirectoryHydrating = bindings.some(
+        (binding: { agentId?: string; agent?: unknown }) => binding.agentId && !binding.agent,
+      )
         && (agentSummaryQuery.isPending || agentSummaryQuery.isFetching);
       return (
         <TeamResearchStageAgentSummary
@@ -93,7 +95,9 @@ export function createTeamsWorkspacePanelRenderers(ctx: TeamsWorkspacePanelRende
       } = ctx;
 
       const node = selectedNode;
-      const agent = node?.agentId ? activeAgents.find((item) => item.agentId === node.agentId) : null;
+      const agent = node?.agentId
+        ? activeAgents.find((item: { agentId?: string }) => item.agentId === node.agentId)
+        : null;
       const display = agent ? agentDisplayInfo(agent, lang) : null;
       return (
         <TeamCanvasReadOnlyInspector
@@ -144,10 +148,10 @@ export function createTeamsWorkspacePanelRenderers(ctx: TeamsWorkspacePanelRende
           selectedTeam={selectedTeam}
           selectedNode={selectedNode}
           nodeDraft={nodeDraft}
-          onNodeDraftChange={(patch) => setNodeDraft((current) => ({ ...current, ...patch }))}
+          onNodeDraftChange={(patch: Record<string, unknown>) => setNodeDraft((current: Record<string, unknown>) => ({ ...current, ...patch }))}
           activeAgents={activeAgents}
           agentTeamMembership={agentTeamMembership}
-          agentDisplayName={(agent) => agentDisplayInfo(agent, lang).name}
+          agentDisplayName={(agent: Parameters<typeof agentDisplayInfo>[0]) => agentDisplayInfo(agent, lang).name}
           agentSourceRoute={teamCanvasNodeAgentSourceRoute}
           durableCanvas={durableCanvas}
           hasWritableCanvas={hasWritableCanvas}
