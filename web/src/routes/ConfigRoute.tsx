@@ -85,15 +85,13 @@ import {
   VRouteLinkButton,
   VSection,
   VSettingsFormPage,
+  VSplitWorkspace,
   VStatusStrip,
   VStringSelect,
   VStateSurface,
   VSurface,
   VTextarea,
 } from "../components/vui";
-import { PaneResizeHandle } from "../components/layout/PaneResizeHandle";
-import { type PaneSpec } from "../components/layout/paneLayoutPersistence";
-import { usePersistedPaneResize } from "../components/layout/usePersistedPaneResize";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
 import { publishConfigDraftPresence } from "./configDraftPresence";
@@ -153,13 +151,13 @@ import {
 import styles from "./ConfigRoute.styles";
 
 const CONFIG_SETTINGS_LAYOUT_ID = WORKBENCH_LAYOUT_IDS.configSettings;
-const CONFIG_SETTINGS_NAV_PANE: PaneSpec = {
+/** Sidebar width contract — owned by VSplitWorkspace resize (not route-local CSS vars). */
+const CONFIG_SETTINGS_SIDEBAR_RESIZE = {
   id: "sidebar",
   defaultWidth: 280,
   minWidth: 220,
   maxWidth: 360,
-};
-const CONFIG_SETTINGS_PANES: PaneSpec[] = [CONFIG_SETTINGS_NAV_PANE];
+} as const;
 
 export type ConfigLanguage = "zh" | "en";
 type NoticeTone = "neutral" | "success" | "error";
@@ -2242,21 +2240,6 @@ export function ConfigRoute() {
   const [searchParams] = useSearchParams();
   const contentViewportRef = useRef<HTMLDivElement | null>(null);
   const modelEditorRef = useRef<HTMLDivElement | null>(null);
-  const {
-    layoutRef: settingsLayoutRef,
-    widths: settingsPaneWidths,
-    draggingPaneId: settingsDraggingPaneId,
-    startResize: startSettingsNavResize,
-    onResizeKeyDown: onSettingsNavResizeKeyDown,
-  } = usePersistedPaneResize({
-    layoutId: CONFIG_SETTINGS_LAYOUT_ID,
-    panes: CONFIG_SETTINGS_PANES,
-    preserveMainMinWidth: 480,
-  });
-  const settingsNavWidth = settingsPaneWidths.sidebar ?? CONFIG_SETTINGS_NAV_PANE.defaultWidth;
-  const settingsLayoutStyle = {
-    ["--config-settings-nav-width" as string]: `${settingsNavWidth}px`,
-  } as CSSProperties;
   const lastRequestedSectionRef = useRef("");
   const providerDraftRequestRef = useRef<{
     publicConfig: PublicConfigShape;
@@ -3780,11 +3763,10 @@ export function ConfigRoute() {
 
   return (
     <div
-      ref={settingsLayoutRef}
       className={styles.page}
-      style={settingsLayoutStyle}
       data-vui-recipe="config-settings-workbench"
       data-vui-layout-id={CONFIG_SETTINGS_LAYOUT_ID}
+      data-vui-domain-recipe="config-settings"
     >
       {leaveGuardOpen ? (
         <div className={styles.leaveGuardOverlay}>
@@ -3824,37 +3806,35 @@ export function ConfigRoute() {
           </VSurface>
         </div>
       ) : null}
-      <ConfigSettingsSidebar
-        language={currentLanguage}
-        title={copy.pageTitle}
-        subtitle={copy.subtitle}
-        subtitleHint={copy.subtitleHint}
-        statusLabel={hasPendingApply ? copy.unsavedDraft : copy.syncedDraft}
-        groups={settingsGroups}
-        activeGroupId={activeGroup?.id ?? ""}
-        onSelectGroup={handleSelectGroup}
-        headerAction={returnToPath ? (
-          <VRouteLinkButton
-            to={returnToPath}
-            className={styles.returnButton}
-            icon={<ChevronRight size={14} />}
-          >
-            {returnToLabel}
-          </VRouteLinkButton>
-        ) : undefined}
-      />
-
-      <PaneResizeHandle
-        label={currentLanguage === "zh" ? "调整设置导航宽度" : "Resize settings navigation"}
-        valueNow={settingsNavWidth}
-        valueMin={CONFIG_SETTINGS_NAV_PANE.minWidth}
-        valueMax={CONFIG_SETTINGS_NAV_PANE.maxWidth}
-        active={settingsDraggingPaneId === "sidebar"}
-        className={styles.settingsNavResizeHandle}
-        onPointerDown={(event) => startSettingsNavResize("sidebar", event, { direction: 1 })}
-        onKeyDown={(event) => onSettingsNavResizeKeyDown("sidebar", event, { direction: 1 })}
-      />
-
+      <VSplitWorkspace
+        className={styles.settingsSplit}
+        data-vui-region="config-settings-split"
+        resize={{
+          layoutId: CONFIG_SETTINGS_LAYOUT_ID,
+          sidebar: CONFIG_SETTINGS_SIDEBAR_RESIZE,
+        }}
+        sidebar={(
+          <ConfigSettingsSidebar
+            language={currentLanguage}
+            title={copy.pageTitle}
+            subtitle={copy.subtitle}
+            subtitleHint={copy.subtitleHint}
+            statusLabel={hasPendingApply ? copy.unsavedDraft : copy.syncedDraft}
+            groups={settingsGroups}
+            activeGroupId={activeGroup?.id ?? ""}
+            onSelectGroup={handleSelectGroup}
+            headerAction={returnToPath ? (
+              <VRouteLinkButton
+                to={returnToPath}
+                className={styles.returnButton}
+                icon={<ChevronRight size={14} />}
+              >
+                {returnToLabel}
+              </VRouteLinkButton>
+            ) : undefined}
+          />
+        )}
+        main={(
       <VSettingsFormPage
         ariaLabel={activeGroup?.title ?? copy.pageTitle}
         className={styles.content}
@@ -4324,6 +4304,8 @@ export function ConfigRoute() {
         </Suspense>
         </div>
       </VSettingsFormPage>
+        )}
+      />
     </div>
   );
 }

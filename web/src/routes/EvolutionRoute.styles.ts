@@ -274,12 +274,13 @@ const styles = {
     "flex [align-items:center] [justify-content:space-between] [gap:12px] min-w-0",
   sectionTitle:
     "[margin:3px_0_0] [line-height:1.18] [margin-top:2px] [font-size:0.98rem]",
+  // Soft segment select (raised surface) — matches TeamShellModeSwitch, not ink slab.
   segmentButton:
-    "[min-height:26px] [padding:0_8px] [border:0] [border-radius:var(--radius-control)] [background:transparent] [color:var(--fg-secondary)] [transition:background-color_140ms_ease,_color_140ms_ease]",
+    "[min-height:26px] [padding:0_8px] [border:1px_solid_transparent] [border-radius:999px] [background:transparent] [color:var(--fg-secondary)] [font-weight:700] [transition:background-color_140ms_ease,_color_140ms_ease,_box-shadow_140ms_ease]",
   segmentButtonActive:
-    "[background:color-mix(in_srgb,_var(--accent-warm)_16%,_transparent)] [color:var(--accent-warm-2)]",
+    "[border-color:var(--vui-border-subtle)] [background:var(--vui-surface-base)] [color:var(--fg-primary)] [box-shadow:0_1px_2px_rgba(0,0,0,0.06)]",
   segmented:
-    "inline-flex [align-items:center] [gap:6px] [padding:3px] [border-radius:var(--radius-panel)] [border:1px_solid_var(--border-soft)] [background:var(--vui-surface-panel)]",
+    "inline-flex [align-items:center] [gap:4px] [padding:3px] [border-radius:999px] [border:1px_solid_var(--vui-border-subtle)] [background:var(--vui-surface-row)]",
   selectInput:
     "[width:100%] min-w-0 [min-height:31px] [padding:0_9px] [border:1px_solid_var(--border-hairline)] [border-radius:7px] [background:var(--vui-surface-workspace)] [color:var(--fg-primary)] focus:[outline:1px_solid_color-mix(in_srgb,_var(--accent-warm)_26%,_transparent)] focus:[border-color:color-mix(in_srgb,_var(--accent-warm)_26%,_transparent)]",
   selectionBar:
