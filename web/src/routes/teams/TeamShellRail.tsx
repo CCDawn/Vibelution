@@ -112,9 +112,11 @@ export function TeamShellRail({
               data-active={active ? "true" : "false"}
               data-testid={`team-shell-item-${item.teamId}`}
               className={[
-                "!grid h-auto min-h-0 w-full min-w-0 gap-1 rounded-lg border px-2.5 py-2 text-left !whitespace-normal",
+                // Multi-line team card: never collapse into an empty ink slab.
+                "!grid h-auto min-h-[4.5rem] w-full min-w-0 gap-1 rounded-lg border px-2.5 py-2 text-left !whitespace-normal",
                 active
-                  ? "!border-[var(--fg-primary)] !bg-[var(--fg-primary)] !text-[var(--vui-surface-base)]"
+                  // Selected = ink fill + forced light text (token surface-base can fail as dark-on-dark).
+                  ? "!border-[var(--fg-primary)] !bg-[var(--fg-primary)] !text-white [&_*]:!text-white"
                   : "!border-transparent !bg-transparent !text-[var(--fg-primary)] hover:!bg-[var(--vui-surface-row)]",
               ].join(" ")}
               onClick={() => onSelectTeam(team)}
@@ -122,7 +124,11 @@ export function TeamShellRail({
               <span className="flex min-w-0 items-center justify-between gap-2">
                 <span className="min-w-0 truncate text-[13px] font-[720]">{item.name}</span>
                 <VChip
-                  className={active ? "!border-[color-mix(in_srgb,var(--vui-surface-base)_35%,transparent)] !bg-transparent !text-inherit" : undefined}
+                  className={
+                    active
+                      ? "!border-white/35 !bg-transparent !text-white"
+                      : undefined
+                  }
                 >
                   {item.status}
                 </VChip>
@@ -130,7 +136,7 @@ export function TeamShellRail({
               <span
                 className={[
                   "flex min-w-0 flex-wrap gap-x-2 gap-y-0.5 text-[11px]",
-                  active ? "text-[color-mix(in_srgb,var(--vui-surface-base)_78%,transparent)]" : "text-[var(--fg-tertiary)]",
+                  active ? "!text-white/80" : "text-[var(--fg-tertiary)]",
                 ].join(" ")}
               >
                 <span>{item.kindLabel}</span>
@@ -141,7 +147,7 @@ export function TeamShellRail({
               <span
                 className={[
                   "line-clamp-2 text-[11px] leading-snug",
-                  active ? "text-[color-mix(in_srgb,var(--vui-surface-base)_72%,transparent)]" : "text-[var(--fg-secondary)]",
+                  active ? "!text-white/75" : "text-[var(--fg-secondary)]",
                 ].join(" ")}
               >
                 {item.purpose}
