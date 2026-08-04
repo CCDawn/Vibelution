@@ -227,9 +227,10 @@ export function SelfEvolutionAutonomousLoopPanel({
 
       {failed ? (
         <VStateSurface
+          density="compact"
           title={lang === "zh" ? "自动闭环未完成" : "Autonomous loop did not complete"}
           tone="error"
-          icon={<X size={15} />}
+          icon={<X size={14} />}
           actions={integrationFailed ? (
             <VButton
               type="button"
@@ -371,9 +372,10 @@ export function SelfEvolutionAutonomousLoopPanel({
 
       {awaitingReview ? (
         <VStateSurface
+          density="compact"
           title={lang === "zh" ? "等待用户审查" : "Waiting for user review"}
           tone="unavailable"
-          icon={<ShieldCheck size={15} />}
+          icon={<ShieldCheck size={14} />}
           facts={[
             {
               key: "candidate",
@@ -417,9 +419,10 @@ export function SelfEvolutionAutonomousLoopPanel({
 
       {cleanupFailed ? (
         <VStateSurface
+          density="compact"
           title={lang === "zh" ? "Git 已提交，候选清理未完成" : "Git committed; candidate cleanup incomplete"}
           tone="error"
-          icon={<RotateCcw size={15} />}
+          icon={<RotateCcw size={14} />}
           actions={(
             <VButton
               type="button"
@@ -437,9 +440,10 @@ export function SelfEvolutionAutonomousLoopPanel({
 
       {completed ? (
         <VStateSurface
+          density="compact"
           title={lang === "zh" ? "闭环完成" : "Loop complete"}
           tone="info"
-          icon={<CheckCircle2 size={15} />}
+          icon={<CheckCircle2 size={14} />}
           facts={[
             {
               key: "commit",

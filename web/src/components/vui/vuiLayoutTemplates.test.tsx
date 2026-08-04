@@ -112,6 +112,17 @@ describe("VUI workbench layout templates", () => {
         <VStateSurface fill tone="loading" title="Loading research overview">
           Occupies the board region instead of a one-line label.
         </VStateSurface>
+        <VStateSurface
+          density="compact"
+          tone="error"
+          title="Autonomous loop did not complete"
+          facts={[
+            { key: "phase", label: "Phase", value: "observing_interrupted" },
+            { key: "candidate", label: "Candidate", value: "Not created" },
+          ]}
+        >
+          Interrupted before the process restarted.
+        </VStateSurface>
         <VSplitWorkspace
           sidebar={<nav>Team list</nav>}
           main={
@@ -145,6 +156,9 @@ describe("VUI workbench layout templates", () => {
     expect(markup).toContain('data-tone="loading"');
     expect(markup).toContain('data-fill="true"');
     expect(markup).toContain("Loading research overview");
+    expect(markup).toContain('data-density="compact"');
+    expect(markup).toContain("observing_interrupted");
+    expect(markup).toContain("max-w-[min(100%,18rem)]");
     expect(markup).toContain("Team detail API");
     expect(markup).toContain("animate-pulse");
     expect(markup).toContain('data-vui="split-workspace"');
