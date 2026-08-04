@@ -3372,7 +3372,7 @@ def test_self_evolution_routes_expose_read_only_evidence(monkeypatch):
     assert audit_response.json()[0]["summary"].startswith("2026-05-18T12:00:00Z")
 
 def test_self_evolution_snapshot_uses_worktree_status_bundle(monkeypatch, tmp_path):
-    bundle_calls = {"count": 0}
+    bundle_calls = {"count": 0, "arguments": []}
     status_summary = json.dumps(
         {
             "dirty_summary": "工作区干净",
@@ -3406,8 +3406,9 @@ def test_self_evolution_snapshot_uses_worktree_status_bundle(monkeypatch, tmp_pa
         indent=2,
     )
 
-    def build_bundle(limit=5):
+    def build_bundle(limit=5, **kwargs):
         bundle_calls["count"] += 1
+        bundle_calls["arguments"].append((limit, kwargs))
         assert limit == 5
         return json.dumps(
             {
@@ -3449,6 +3450,7 @@ def test_self_evolution_snapshot_uses_worktree_status_bundle(monkeypatch, tmp_pa
     payload = self_evolution_workbench.build_self_evolution_snapshot(project_root=tmp_path)
 
     assert bundle_calls["count"] == 1
+    assert bundle_calls["arguments"] == [(5, {"refresh_index": False, "live_recent_changes": True})]
     assert payload["git_status"]["summary"] == status_summary
     assert payload["worktree"]["snapshot_id"] == "bundle-snap"
     assert payload["recent_changes"] == [

@@ -22,9 +22,12 @@ def _short_subject(subject: str | None) -> str | None:
     return first_line or subject.strip()
 
 
-def _refresh_git_memory_for_tool() -> None:
+def _refresh_git_memory_for_tool(*, index_recent_changes: bool = True) -> None:
     """Git observation is tool-driven: refresh only when an agent calls a git tool."""
-    get_git_memory_service().refresh_git_memory(force=True)
+    get_git_memory_service().refresh_git_memory(
+        force=True,
+        index_recent_changes=index_recent_changes,
+    )
 
 
 def get_git_status_summary_tool(limit: int = 5) -> str:
@@ -38,15 +41,24 @@ def get_git_status_summary_tool(limit: int = 5) -> str:
     return get_git_memory_service().get_git_status_summary(limit=normalized_limit)
 
 
-def get_worktree_status_bundle_tool(limit: int = 5) -> str:
+def get_worktree_status_bundle_tool(
+    limit: int = 5,
+    *,
+    refresh_index: bool = True,
+    live_recent_changes: bool = False,
+) -> str:
     """一次性获取 Git 状态摘要与详细 working tree 快照。"""
     try:
         normalized_limit = int(limit)
     except (TypeError, ValueError):
         normalized_limit = 5
     normalized_limit = max(1, min(normalized_limit, 10))
-    _refresh_git_memory_for_tool()
-    payload = get_git_memory_service().build_worktree_status_bundle(limit=normalized_limit)
+    service = get_git_memory_service()
+    service.refresh_git_memory(force=True, index_recent_changes=bool(refresh_index))
+    payload = service.build_worktree_status_bundle(
+        limit=normalized_limit,
+        live_recent_changes=bool(live_recent_changes),
+    )
     return json.dumps(payload, ensure_ascii=False, indent=2)
 
 

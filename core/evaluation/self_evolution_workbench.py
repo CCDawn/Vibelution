@@ -394,7 +394,11 @@ def _safe_tool_call(fn, *, fallback: str) -> str:
 
 def _load_worktree_status_bundle(*, status_limit: int) -> dict[str, str]:
     raw_bundle = _safe_tool_call(
-        lambda: get_worktree_status_bundle_tool(limit=status_limit),
+        lambda: get_worktree_status_bundle_tool(
+            limit=status_limit,
+            refresh_index=False,
+            live_recent_changes=True,
+        ),
         fallback="{}",
     )
     payload = _load_json_value(raw_bundle, fallback={})

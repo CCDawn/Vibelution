@@ -735,7 +735,12 @@ class GitMemoryService:
         parts.append(f"共 {len(snapshot.files)} 个变化文件")
         return "，".join(parts)
 
-    def refresh_git_memory(self, force: bool = False) -> GitMemoryState:
+    def refresh_git_memory(
+        self,
+        force: bool = False,
+        *,
+        index_recent_changes: bool = True,
+    ) -> GitMemoryState:
         with self._lock:
             now = _utcnow_iso()
             snapshot = self.scan_working_tree(store=False)
@@ -753,7 +758,7 @@ class GitMemoryService:
 
             head_rev = snapshot.base_rev
             last_indexed_head_rev = self._get_last_indexed_commit()
-            if head_rev and not self._is_commit_indexed(head_rev):
+            if index_recent_changes and head_rev and not self._is_commit_indexed(head_rev):
                 index_result = self.index_recent_changes(base_rev=last_indexed_head_rev)
             else:
                 index_result = {"available": True, "indexed_commits": [], "error": None}
@@ -766,7 +771,11 @@ class GitMemoryService:
             self._last_state = GitMemoryState(
                 available=True,
                 head_rev=head_rev,
-                indexed_head_rev=head_rev if head_rev else self._get_last_indexed_commit(),
+                indexed_head_rev=(
+                    head_rev
+                    if head_rev and self._is_commit_indexed(head_rev)
+                    else last_indexed_head_rev
+                ),
                 dirty=bool(snapshot.files),
                 snapshot_id=snapshot.snapshot_id,
                 refreshed_at=now,
@@ -851,6 +860,54 @@ class GitMemoryService:
             )
             for row in rows
         ]
+
+    def get_live_recent_project_changes(self, limit: int = 10) -> List[ChangeRecord]:
+        """Return a bounded current-HEAD summary without indexing Git history into SQLite."""
+        normalized_limit = max(1, min(int(limit or 1), 10))
+        result = self._run_git_with_options(
+            [
+                "log",
+                f"--max-count={normalized_limit}",
+                "--format=%H%x1f%s%x1e",
+                "--name-status",
+            ],
+            no_lazy_fetch=True,
+        )
+        if result.returncode != 0:
+            return self.get_recent_project_changes(limit=normalized_limit)
+
+        changes: List[ChangeRecord] = []
+        commit_sha: Optional[str] = None
+        subject: Optional[str] = None
+        for raw_line in result.stdout.splitlines():
+            line = raw_line.strip()
+            if "\x1f" in line:
+                header = line.rstrip("\x1e")
+                commit_sha, subject = header.split("\x1f", 1)
+                commit_sha = commit_sha.strip() or None
+                subject = subject.strip() or None
+                continue
+            if not line or not commit_sha:
+                continue
+            for change in self._parse_name_status(line):
+                path = str(change.get("path") or "").strip()
+                if not path:
+                    continue
+                change_type = str(change.get("change_type") or "modified")
+                changes.append(
+                    ChangeRecord(
+                        kind="commit",
+                        path=path,
+                        summary=f"{change_type}: {path}",
+                        commit_sha=commit_sha,
+                        change_type=change_type,
+                        old_path=change.get("old_path"),
+                        subject=subject,
+                    )
+                )
+                if len(changes) >= normalized_limit:
+                    return changes
+        return changes
 
     def get_entity_history(self, entity_ref: str, limit: int = 10) -> List[Dict[str, Any]]:
         with self._workspace.get_db_connection() as conn:
@@ -942,7 +999,12 @@ class GitMemoryService:
         }
         return json.dumps(payload, ensure_ascii=False, indent=2)
 
-    def build_worktree_status_bundle(self, limit: int = 5) -> Dict[str, str]:
+    def build_worktree_status_bundle(
+        self,
+        limit: int = 5,
+        *,
+        live_recent_changes: bool = False,
+    ) -> Dict[str, str]:
         """Build status summary and worktree snapshot from cached (or just-refreshed) state.
 
         Callers that need a live scan must call ``refresh_git_memory`` first (tools do).
@@ -955,7 +1017,11 @@ class GitMemoryService:
             snapshot = self.scan_working_tree(store=False)
             self._last_snapshot = snapshot
         attention = session.get_attention_snapshot()
-        recent_changes = self.get_recent_project_changes(limit=normalized_limit)
+        recent_changes = (
+            self.get_live_recent_project_changes(limit=normalized_limit)
+            if live_recent_changes
+            else self.get_recent_project_changes(limit=normalized_limit)
+        )
         status_payload = {
             "dirty_summary": self._dirty_summary(snapshot),
             "modified_paths": attention["modified_paths"],
