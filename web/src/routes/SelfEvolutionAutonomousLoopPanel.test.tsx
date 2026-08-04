@@ -175,5 +175,46 @@ describe("SelfEvolutionAutonomousLoopPanel", () => {
     expect(markup).toContain("已保留");
     expect(markup).toContain("重试 Git 集成");
     expect(markup).not.toContain("工作树已删除");
+    expect(markup).toContain('data-testid="self-loop-phase-stepper"');
+    expect(markup).toContain('data-state="interrupted"');
+  });
+
+  it("maps observing_interrupted to the observe step and keeps chips compact", () => {
+    const interrupted = {
+      ...reviewRun(),
+      status: "failed",
+      phase: "observing_interrupted",
+      observation: undefined,
+      plan: undefined,
+      candidate: undefined,
+      resultReport: undefined,
+      error: {
+        type: "Interrupted",
+        message: "The autonomous loop was interrupted before the process restarted.",
+      },
+      finishedAt: "2026-08-04T03:16:49Z",
+    } as SelfEvolutionAutonomousLoopRun;
+
+    const markup = renderToStaticMarkup(
+      <MemoryRouter>
+        <SelfEvolutionAutonomousLoopPanel
+          lang="zh"
+          run={interrupted}
+          pending={false}
+          error=""
+          onAction={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(markup).toContain("自动闭环未完成");
+    expect(markup).toContain("闭环中断");
+    expect(markup).toContain('data-phase="observing"');
+    expect(markup).toContain('data-state="interrupted"');
+    expect(markup).toContain("中断");
+    expect(markup).toContain("max-w-[9.5rem]");
+    expect(markup).toContain("shrink-0");
+    // Empty stage cards are collapsed when failed and no summaries exist.
+    expect(markup).not.toContain("尚未产生观察摘要");
   });
 });
