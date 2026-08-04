@@ -12,6 +12,7 @@ TeamsRoute (orchestration)
 |-- useSourceCollectionWorkspace     # Phase 1 / 1+ -- SC drafts, run list, selection, hydration, detail queries
 |-- useSourceCollectionPresentation  # Phase 4+ -- SC presentation + mutation surfaces + stage action adapters
 |   +-- buildTeamsRouteMutationSurface / buildSourceCollectionWriteMutationSurface / actionChrome
+|-- source-collection/stageModulesModel  # stageModules / board / standalone / completion flow factory
 |-- useResearchExperimentWorkspace   # Phase 2 -- experiment/loop drafts + secondary status queries
 |   +-- useTeamResearchSecondaryQueries
 |-- mutation hooks (unchanged ownership)
@@ -19,8 +20,9 @@ TeamsRoute (orchestration)
 |   |-- useTeamWorkflowStartMutations
 |   |-- useTeamSourceCollectionMutations
 |   +-- useTeamExperimentLoopMutations
-+-- remaining presentation / render* / drag-save (route-local)
++-- remaining render* inject adapters / drag-save (route-local)
 ```
+
 
 ## Inputs / boundaries
 

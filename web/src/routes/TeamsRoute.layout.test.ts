@@ -18,6 +18,7 @@ import useTeamsShellCanvasWorkspaceSource from "./teams/useTeamsShellCanvasWorks
 import teamMutationSurfaceSource from "./teams/teamMutationSurface.ts?raw";
 import sourceCollectionActionChromeSource from "./teams/source-collection/actionChrome.ts?raw";
 import useSourceCollectionPresentationSource from "./teams/useSourceCollectionPresentation.ts?raw";
+import stageModulesModelSource from "./teams/source-collection/stageModulesModel.ts?raw";
 
 /** Route + extracted shell modules (layout contracts may live in either). */
 const routeSource = [
@@ -33,6 +34,7 @@ const routeSource = [
   teamMutationSurfaceSource,
   sourceCollectionActionChromeSource,
   useSourceCollectionPresentationSource,
+  stageModulesModelSource,
 ].join("\n");
 import researchWorkspaceModelSource from "./teams/researchWorkspaceModel.ts?raw";
 import researchProjectSwitcherSource from "./teams/research-projects/ResearchProjectSwitcher.tsx?raw";
@@ -2948,9 +2950,10 @@ describe("TeamsRoute layout contract", () => {
     expect(launcherSource).not.toContain("一键完成知识搜集");
     expect(launcherSource).not.toContain("新一轮搜集");
 
-    const stageModuleSource = routeSource.slice(
-      routeSource.indexOf("const sourceCollectionStageModules"),
-      routeSource.indexOf("const sourceCollectionBoardCurrentModule"),
+    // Stage module descriptors live in stageModulesModel after extract.
+    const stageModuleSource = stageModulesModelSource.slice(
+      stageModulesModelSource.indexOf("const sourceCollectionStageModules: SourceCollectionStageModule[] = ["),
+      stageModulesModelSource.indexOf("return sourceCollectionStageModules;"),
     );
     const ingestionModuleSource = stageModuleSource.slice(
       stageModuleSource.indexOf('id: "ingestion"'),
@@ -2962,6 +2965,7 @@ describe("TeamsRoute layout contract", () => {
     expect(ingestionModuleSource).not.toContain("runKnowledgeCollectionCompletionAction");
     expect(ingestionModuleSource).not.toContain("runKnowledgeCollectionCompletionMutation");
     expect(ingestionModuleSource).not.toContain("runKnowledgeCollectionIngestMutation.mutate");
+    expect(routeSourceRaw).toContain("buildSourceCollectionStageModules({");
   });
 
   it("starts a new source collection run before completion when the loop CTA represents the next loop", () => {
@@ -3035,9 +3039,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("const sourceCollectionCompletionActionDisabled = sourceCollectionCompletionActionReadiness.disabled");
     expect(launcherSource).toContain("title={sourceCollectionActionDisabledTitle(sourceCollectionLoopActionReadiness, sourceCollectionLoopActionLabel)}");
 
-    const stageModuleSource = routeSource.slice(
-      routeSource.indexOf("const sourceCollectionStageModules"),
-      routeSource.indexOf("const sourceCollectionBoardCurrentModule"),
+    const stageModuleSource = stageModulesModelSource.slice(
+      stageModulesModelSource.indexOf("const sourceCollectionStageModules: SourceCollectionStageModule[] = ["),
+      stageModulesModelSource.indexOf("return sourceCollectionStageModules;"),
     );
     expect(stageModuleSource).toContain('sourceCollectionStageActionReadinessFor("finding").disabled');
     expect(stageModuleSource).toContain('sourceCollectionStageActionReadinessFor("extraction").disabled');
@@ -3145,9 +3149,9 @@ describe("TeamsRoute layout contract", () => {
     expect(commandStatsSource).not.toContain("sourceCollectionQueryCountLabel");
     expect(commandStatsSource).not.toContain("sourceCollectionPromptCacheStatusLabel");
 
-    const stageModuleViewModelSource = routeSource.slice(
-      routeSource.indexOf("const sourceCollectionStandaloneStageModules"),
-      routeSource.indexOf("const activeWorkflowItemCount"),
+    const stageModuleViewModelSource = stageModulesModelSource.slice(
+      stageModulesModelSource.indexOf("export function buildSourceCollectionStandaloneStageModules"),
+      stageModulesModelSource.length,
     );
     expect(stageModuleViewModelSource).toContain("tone: module.state");
     expect(stageModuleViewModelSource).toContain("status: module.status");
@@ -3157,6 +3161,7 @@ describe("TeamsRoute layout contract", () => {
     expect(stageModuleViewModelSource).not.toContain("summary: module.summary");
     expect(stageModuleViewModelSource).not.toContain("sourceCollectionStageProjectionTaskMetric");
     expect(stageModuleViewModelSource).not.toContain("sourceCollectionStageTechnicalDetails");
+    expect(routeSourceRaw).toContain("buildSourceCollectionStandaloneStageModules({");
 
     const stageCardSource = teamSourceCollectionStandaloneStagePanelSource.slice(
       teamSourceCollectionStandaloneStagePanelSource.indexOf("<TeamStagePipeline"),
