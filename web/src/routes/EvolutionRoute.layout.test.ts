@@ -347,16 +347,17 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(activeRunMonitorPanelSource).toContain("styles.closedLoopLedger");
   });
 
-  it("loads self-evolution history separately but current flow from worktree snapshot", () => {
-    expect(routeSource).toContain("queryKeys.evolutionSelfOverview()");
-    expect(routeSource).toContain('"/api/evolution/self/overview"');
-    expect(routeSource).toContain("queryKeys.evolutionSelfTransactions()");
-    expect(routeSource).toContain('"/api/evolution/self/transactions"');
-    expect(routeSource).toContain("const selfOverview = selfOverviewQuery.data ?? workspaceSnapshot?.selfOverview");
-    expect(routeSource).toContain("workspaceSnapshot?.selfWorktreeActiveRun");
-    expect(routeSource).toContain("workspaceSnapshot?.selfWorktreeRuns");
+  it("loads self-evolution first paint from its compact self-only snapshot", () => {
+    expect(routeSource).toContain("queryKeys.evolutionSelfWorkspaceSnapshot()");
+    expect(routeSource).toContain('"/api/evolution/self/workspace-snapshot"');
+    expect(routeSource).not.toContain("queryKeys.evolutionSelfOverview()");
+    expect(routeSource).not.toContain('"/api/evolution/self/overview"');
+    expect(routeSource).not.toContain("queryKeys.evolutionSelfTransactions()");
+    expect(routeSource).not.toContain('"/api/evolution/self/transactions"');
+    expect(routeSource).toContain("const selfOverview = selfWorkspaceSnapshot?.overview");
+    expect(routeSource).toContain("selfWorkspaceSnapshot?.worktreeActiveRun");
     expect(routeSource).not.toContain("?? selfWorktreeRuns[0]");
-    expect(routeSource).toContain("const selfTransactions = selfTransactionsQuery.data ?? workspaceSnapshot?.selfTransactions ?? []");
+    expect(routeSource).toContain("const selfTransactions = selfWorkspaceSnapshot?.transactions ?? []");
     expect(routeSource).toContain("const selfTrackLoading = selfTrackQueriesEnabled");
     expect(routeSource).toContain("overview={selfOverview}");
     expect(routeSource).toContain("worktreeRun={selfWorktreeRun}");
@@ -374,7 +375,7 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(runMutationsSource).toContain("options.setSelectedSelfObservationRunId(snapshot.runId)");
     expect(routeSource).toContain("queryKeys.evolutionSelfObservationRun(selectedSelfObservationRunId || \"__none__\")");
     expect(routeSource).toContain("`/api/evolution/self/observation-runs/${encodeURIComponent(selectedSelfObservationRunId)}`");
-    expect(routeSource).toContain("const selfObservationRun = workspaceSnapshot?.selfObservationActiveRun");
+    expect(routeSource).toContain("const selfObservationRun = selfWorkspaceSnapshot?.observationActiveRun");
     expect(routeSource).toContain("?? selectedSelfObservationRunQuery.data");
     expect(routeSource).toContain("observationRun={selfObservationRun ?? null}");
   });
@@ -744,7 +745,7 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("const supervisedStartSubmitting = startWorktreeRunMutation.isPending || isLocalSupervisedStartPlaceholder(liveActiveRun)");
     expect(routeSource).toContain("snapshot?.activeRun?.runId");
     expect(routeSource).toContain("snapshot?.worktreeActiveRun?.runId");
-    expect(routeSource).toContain("snapshot?.selfAutonomousActiveRun?.runId");
+    expect(routeSource).not.toContain("snapshot?.selfAutonomousActiveRun?.runId");
     expect(routeSource).toContain("onClick={() => startWorktreeRunMutation.mutate()}");
     expect(runMutationsSource).toContain('executionMode: "real"');
     expect(runMutationsSource).toContain("confirmRealLlmCost: true");

@@ -32,6 +32,7 @@ describe("createEvolutionWorkspaceCache", () => {
 
     expect(queryKeysFromCalls()).toEqual([
       queryKeys.evolutionWorkspaceSnapshot(),
+      queryKeys.evolutionSelfWorkspaceSnapshot(),
       queryKeys.evolutionWorktreeActiveRun(),
       queryKeys.evolutionWorktreeRuns(),
       queryKeys.runtimeSummary(),
@@ -61,17 +62,15 @@ describe("createEvolutionWorkspaceCache", () => {
     ]);
   });
 
-  it("refreshes the self-evolution worktree workspace after a self run change", async () => {
+  it("refreshes only the compact self-evolution workspace after a self run change", async () => {
     const { cache, queryKeysFromCalls } = makeCache();
 
     await cache.afterSelfEvolutionChanged();
 
     expect(queryKeysFromCalls()).toEqual([
-      queryKeys.evolutionWorkspaceSnapshot(),
-      queryKeys.evolutionSelfOverview(),
+      queryKeys.evolutionSelfWorkspaceSnapshot(),
       queryKeys.evolutionWorktreeActiveRun(),
       queryKeys.evolutionWorktreeRuns(),
-      queryKeys.evolutionSelfTransactions(),
       queryKeys.evolutionSelfAudit(),
       queryKeys.runtimeSummary(),
     ]);

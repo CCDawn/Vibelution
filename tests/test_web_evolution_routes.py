@@ -1,6 +1,8 @@
 import json
 import sqlite3
 import subprocess
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -801,6 +803,56 @@ def test_evolution_workspace_snapshot_can_include_full_self_payload(monkeypatch)
     assert payload["selfAutonomousLatestRun"] == autonomous_run
     assert "selfLatestRun" not in payload
     assert payload["selfTransactions"] == [{"txnId": "txn-1"}]
+
+
+def test_self_evolution_workspace_snapshot_avoids_supervised_payload(monkeypatch):
+    self_worktree = {
+        "runId": "swte-self-active",
+        "status": "running",
+        "phase": "candidate_modify",
+        "selfEvolutionOrigin": {"sourceTrack": "self_evolution"},
+    }
+    autonomous_run = {
+        "runId": "self-loop-active",
+        "runKind": "self_evolution_autonomous_loop",
+        "status": "running",
+        "phase": "planning",
+    }
+    observation_run = {
+        "runId": "self-observation-active",
+        "runKind": "self_observation",
+        "status": "running",
+        "phase": "observing",
+    }
+    monkeypatch.setattr(
+        evolution_routes,
+        "get_evolution_workspace_dashboard",
+        lambda: pytest.fail("self first paint must not hydrate the supervised dashboard"),
+    )
+    monkeypatch.setattr(
+        evolution_routes,
+        "list_supervised_worktree_runs",
+        lambda: pytest.fail("self first paint must not serialize supervised worktree history"),
+    )
+    monkeypatch.setattr(evolution_routes, "get_active_supervised_worktree_run", lambda: self_worktree)
+    monkeypatch.setattr(evolution_routes, "get_self_evolution_overview", lambda: {"enabled": True, "goal": "self only"})
+    monkeypatch.setattr(evolution_routes, "list_self_evolution_transactions", lambda: [{"txnId": "txn-1"}])
+    monkeypatch.setattr(evolution_routes, "get_active_self_observation_run", lambda: observation_run)
+    monkeypatch.setattr(evolution_routes, "get_active_autonomous_self_evolution_run", lambda: autonomous_run)
+    monkeypatch.setattr(evolution_routes, "get_latest_autonomous_self_evolution_run", lambda: autonomous_run)
+    monkeypatch.setattr(evolution_routes, "record_self_evolution_workspace_snapshot_perf", lambda **kwargs: None)
+
+    response = client.get("/api/evolution/self/workspace-snapshot")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "overview": {"enabled": True, "goal": "self only"},
+        "transactions": [{"txnId": "txn-1"}],
+        "worktreeActiveRun": self_worktree,
+        "observationActiveRun": observation_run,
+        "autonomousActiveRun": autonomous_run,
+        "autonomousLatestRun": autonomous_run,
+    }
 
 def test_workspace_snapshot_include_self_projects_observation_active_run(monkeypatch):
     from core.web.services import self_evolution_control_service as service
@@ -3327,7 +3379,13 @@ def test_self_evolution_snapshot_uses_worktree_status_bundle(monkeypatch, tmp_pa
             "modified_paths": [],
             "modified_entities": [],
             "last_validation_summary": None,
-            "recent_changes": [],
+            "recent_changes": [
+                {
+                    "path": "core/web/routes/evolution.py",
+                    "change_type": "M",
+                    "subject": "self snapshot",
+                }
+            ],
         },
         ensure_ascii=False,
         indent=2,
@@ -3371,7 +3429,11 @@ def test_self_evolution_snapshot_uses_worktree_status_bundle(monkeypatch, tmp_pa
         "explain_current_worktree_tool",
         lambda: pytest.fail("snapshot should not load a second worktree snapshot"),
     )
-    monkeypatch.setattr(self_evolution_workbench, "get_recent_changes_tool", lambda limit=3: "[]")
+    monkeypatch.setattr(
+        self_evolution_workbench,
+        "get_recent_changes_tool",
+        lambda limit=3: pytest.fail("snapshot must reuse recent changes from the shared worktree bundle"),
+    )
     monkeypatch.setattr(self_evolution_workbench, "get_evolution_fitness_tool", lambda recent_limit=3: "{}")
     monkeypatch.setattr(
         self_evolution_workbench,
@@ -3389,6 +3451,13 @@ def test_self_evolution_snapshot_uses_worktree_status_bundle(monkeypatch, tmp_pa
     assert bundle_calls["count"] == 1
     assert payload["git_status"]["summary"] == status_summary
     assert payload["worktree"]["snapshot_id"] == "bundle-snap"
+    assert payload["recent_changes"] == [
+        {
+            "path": "core/web/routes/evolution.py",
+            "change_type": "M",
+            "summary": "self snapshot",
+        }
+    ]
 
 def test_self_evolution_overview_uses_short_ttl_cache(monkeypatch):
     calls = {"snapshot": 0, "audit": 0}
@@ -3441,6 +3510,54 @@ def test_self_evolution_overview_uses_short_ttl_cache(monkeypatch):
     assert calls["audit"] == 2
     assert first == second
     assert third["metrics"]["dirtyFiles"] == 2
+
+
+def test_self_evolution_overview_coalesces_concurrent_cache_misses(monkeypatch):
+    calls = {"snapshot": 0}
+    snapshot_started = threading.Event()
+    release_snapshot = threading.Event()
+
+    monkeypatch.setattr(self_evolution_service, "get_web_language", lambda: "zh")
+    monkeypatch.setattr(
+        self_evolution_service,
+        "get_workbench_contract",
+        lambda: {
+            "modeAvailability": {
+                "chat": True,
+                "self_evolution": True,
+                "supervised_evolution": True,
+            }
+        },
+    )
+
+    def build_snapshot(project_root=None, transaction_limit=6, recent_limit=4):
+        calls["snapshot"] += 1
+        snapshot_started.set()
+        assert release_snapshot.wait(timeout=2)
+        return {
+            "goal": "coalesced cache miss",
+            "advisory": {"active_count": 0, "entries": []},
+            "git_status": {"summary": "clean", "lines": ["clean"]},
+            "recent_changes": [],
+            "fitness": {},
+            "worktree": {"available": True, "dirty_file_count": 0, "files": []},
+            "recent_transactions": [],
+        }
+
+    monkeypatch.setattr(self_evolution_service, "build_self_evolution_snapshot", build_snapshot)
+    monkeypatch.setattr(self_evolution_service, "load_self_evolution_audit_records", lambda project_root, limit=6: [])
+    monkeypatch.setattr(self_evolution_service, "_record_self_overview_perf", lambda **kwargs: None)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(self_evolution_service.get_self_evolution_overview)
+        assert snapshot_started.wait(timeout=2)
+        second = pool.submit(self_evolution_service.get_self_evolution_overview)
+        release_snapshot.set()
+        assert first.result(timeout=2)["goal"] == "coalesced cache miss"
+        assert second.result(timeout=2)["goal"] == "coalesced cache miss"
+
+    assert calls["snapshot"] == 1
+
 
 def test_self_evolution_history_delete_invalidates_overview_cache(tmp_path, monkeypatch):
     _seed_self_evolution_history(tmp_path)
