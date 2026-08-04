@@ -6,7 +6,7 @@ import type {
   AgentRunHistory,
   AgentRuntimeEvidenceMatch,
 } from "../api/types";
-import { VButton } from "../components/vui";
+import { VButton, VStateSurface } from "../components/vui";
 import styles from "./AgentActivityHistoryPanel.styles";
 
 export type AgentActivityTimelineItem = {
@@ -139,7 +139,7 @@ export function AgentActivityHistoryPanel({
           <Layers3 size={16} />
         </div>
         {isActivityLoading ? (
-          <p className={styles.emptyText}>{copy.loading}</p>
+          <VStateSurface tone="loading" title={copy.loading} skeletonLines={2} />
         ) : activityTimeline.length ? (
           <div className={styles.activityTimelineList}>
             {activityTimeline.map((item) => (
@@ -168,7 +168,7 @@ export function AgentActivityHistoryPanel({
             ))}
           </div>
         ) : (
-          <p className={styles.emptyText}>{copy.activityTimelineEmpty}</p>
+          <VStateSurface tone="empty" title={copy.activityTimelineEmpty} />
         )}
       </section>
 
@@ -181,7 +181,7 @@ export function AgentActivityHistoryPanel({
           <ShieldCheck size={16} />
         </div>
         {isRunHistoryLoading ? (
-          <p className={styles.emptyText}>{copy.runHistoryLoading}</p>
+          <VStateSurface tone="loading" title={copy.runHistoryLoading} skeletonLines={2} />
         ) : runCount + subRunCount > 0 ? (
           <div className={styles.runHistoryList}>
             {runHistory?.runs.map((run) => (
@@ -200,7 +200,7 @@ export function AgentActivityHistoryPanel({
             ))}
           </div>
         ) : (
-          <p className={styles.emptyText}>{copy.noRunHistory}</p>
+          <VStateSurface tone="empty" title={copy.noRunHistory} />
         )}
       </section>
 
@@ -223,7 +223,7 @@ export function AgentActivityHistoryPanel({
           </div>
         </div>
         {isInboxLoading ? (
-          <p className={styles.emptyText}>{copy.inboxLoading}</p>
+          <VStateSurface tone="loading" title={copy.inboxLoading} skeletonLines={2} />
         ) : inboxMessages?.length ? (
           <div className={styles.inboxMessageList}>
             {inboxMessages.map((message) => {
@@ -257,7 +257,7 @@ export function AgentActivityHistoryPanel({
             })}
           </div>
         ) : (
-          <p className={styles.emptyText}>{copy.inboxEmpty}</p>
+          <VStateSurface tone="empty" title={copy.inboxEmpty} />
         )}
       </section>
     </>

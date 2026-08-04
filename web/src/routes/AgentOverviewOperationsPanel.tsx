@@ -1,6 +1,6 @@
 import { Activity, ExternalLink, FileSearch, PlayCircle } from "lucide-react";
 
-import { VButton, VTooltip } from "../components/vui";
+import { VButton, VStateSurface, VTooltip } from "../components/vui";
 import styles from "./AgentOverviewOperationsPanel.styles";
 
 export type AgentOverviewOperationsCopy = {
@@ -112,21 +112,23 @@ export function AgentOverviewOperationsPanel({
         </div>
         <div className={styles.activityBody} aria-busy={state === "loading"}>
           {state === "loading" ? (
-            <div className={styles.state}>
-              <div className={styles.stateInner}>
-                <PlayCircle size={20} aria-hidden="true" />
-                <strong>{copy.loading}</strong>
-              </div>
-            </div>
+            <VStateSurface
+              tone="loading"
+              title={copy.loading}
+              icon={<PlayCircle size={16} aria-hidden="true" />}
+              skeletonLines={2}
+            />
           ) : null}
           {state === "error" ? (
-            <div className={styles.state}>
-              <div className={styles.stateInner}>
-                <strong>{copy.activityUnavailable}</strong>
-                <p className={styles.error} role="alert">{errorMessage || copy.activityUnavailable}</p>
+            <VStateSurface
+              tone="error"
+              title={copy.activityUnavailable}
+              actions={(
                 <VButton type="button" variant="ghost" onPress={onOpenActivity}>{copy.viewActivity}</VButton>
-              </div>
-            </div>
+              )}
+            >
+              <span className={styles.error} role="alert">{errorMessage || copy.activityUnavailable}</span>
+            </VStateSurface>
           ) : null}
           {state === "ready" && activities.length ? (
             <div className={styles.activityList}>

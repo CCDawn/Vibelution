@@ -15,6 +15,7 @@ import {
   VListDetailPage,
   VNativeInput,
   VPanelHeader,
+  VStateSurface,
   VStatusChip,
   VSurface,
   VTooltip,
@@ -339,11 +340,11 @@ export function SkillsRoute() {
 
           <div className={styles.skillListClass}>
             {libraryQuery.isError ? (
-              <p className={styles.emptyStateClass}>{copy.loadFailed}</p>
+              <VStateSurface className={styles.emptyStateClass} tone="error" title={copy.loadFailed} />
             ) : libraryQuery.isPending ? (
-              <p className={styles.emptyStateClass}>{copy.loading}</p>
+              <VStateSurface className={styles.emptyStateClass} tone="loading" title={copy.loading} skeletonLines={3} />
             ) : filteredSkills.length === 0 ? (
-              <p className={styles.emptyStateClass}>{copy.emptyList}</p>
+              <VStateSurface className={styles.emptyStateClass} tone="empty" title={copy.emptyList} />
             ) : (
               filteredSkills.map((skill) => {
                 const selected = selectedSkillCommands.has(skill.command);

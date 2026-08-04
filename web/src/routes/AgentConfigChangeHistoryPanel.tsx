@@ -1,7 +1,7 @@
 import { History, Save, Trash2 } from "lucide-react";
 
 import type { AgentConfigChanges } from "../api/types";
-import { VButton, VEmptyState, VPanel } from "../components/vui";
+import { VButton, VEmptyState, VPanel, VStateSurface } from "../components/vui";
 import styles from "./AgentConfigChangeHistoryPanel.styles";
 
 type AgentConfigChangeHistoryPanelProps = {
@@ -70,7 +70,9 @@ export function AgentConfigChangeHistoryPanel({
         </div>
       </header>
 
-      {loading ? <p className={styles.emptyText}>正在读取草稿与版本记录…</p> : null}
+      {loading ? (
+        <VStateSurface tone="loading" title="正在读取草稿与版本记录" skeletonLines={2} />
+      ) : null}
 
       {draft ? (
         <section className={styles.draftCard} aria-label="当前草稿">

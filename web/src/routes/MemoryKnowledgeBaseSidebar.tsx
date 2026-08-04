@@ -1,6 +1,6 @@
 import { Database } from "lucide-react";
 
-import { VButton, VTooltip } from "../components/vui";
+import { VButton, VStateSurface, VTooltip } from "../components/vui";
 import styles from "./MemoryKnowledgeBaseSidebar.styles";
 
 export type MemoryKnowledgeBaseSidebarCopy = {
@@ -73,12 +73,9 @@ export function MemoryKnowledgeBaseSidebar({
           </span>
         </section>
       </VTooltip>
-      {isLoading ? <div className={styles.emptyState}>{copy.loading}</div> : null}
+      {isLoading ? <VStateSurface tone="loading" title={copy.loading} skeletonLines={2} /> : null}
       {!isLoading && !bases.length ? (
-        <section className={styles.emptyDetail}>
-          <Database size={22} />
-          <strong>{copy.noKnowledgeBases}</strong>
-        </section>
+        <VStateSurface tone="empty" title={copy.noKnowledgeBases} icon={<Database size={18} />} />
       ) : null}
       <nav className={styles.sourceList} aria-label={copy.knowledgeBases}>
         {bases.map((base) => (

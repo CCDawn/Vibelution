@@ -10,6 +10,7 @@ import type {
   SupervisedWorktreeRun,
 } from "../api/types";
 import type { Language } from "../i18n/dictionary";
+import { VStateSurface } from "../components/vui";
 import styles from "./EvolutionSelfTrackBoundary.styles";
 
 const LazySelfEvolutionTrack = lazy(() =>
@@ -56,15 +57,16 @@ export type EvolutionSelfTrackBoundaryProps = {
 function selfTrackFallback(lang: Language) {
   return (
     <section className={`${styles.surface} ${styles.structuredEmptyState}`}>
-      <LoaderCircle size={18} className={styles.spinIcon} aria-hidden="true" />
-      <div>
-        <h3>{lang === "zh" ? "正在加载自进化工作台" : "Loading self-evolution workspace"}</h3>
-        <p>
-          {lang === "zh"
-            ? "监督进化工作台已先保持可用，自进化面板正在按需载入。"
-            : "The supervised workspace stays available while the self-evolution panel loads on demand."}
-        </p>
-      </div>
+      <VStateSurface
+        fill
+        tone="loading"
+        title={lang === "zh" ? "正在加载自进化工作台" : "Loading self-evolution workspace"}
+        icon={<LoaderCircle size={18} className={styles.spinIcon} aria-hidden="true" />}
+      >
+        {lang === "zh"
+          ? "监督进化工作台已先保持可用，自进化面板正在按需载入。"
+          : "The supervised workspace stays available while the self-evolution panel loads on demand."}
+      </VStateSurface>
     </section>
   );
 }

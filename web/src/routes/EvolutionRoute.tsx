@@ -3849,12 +3849,12 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                     </div>
                   </>
                 ) : proposalDetailQuery.error ? (
-                  <VStateSurface className={styles.emptyState} title={proposalDetailQuery.error.message} tone="error" />
+                  <VStateSurface fill className={styles.emptyState} title={proposalDetailQuery.error.message} tone="error" />
                 ) : (
-                  <VStateSurface className={styles.emptyState} title={t("loadingRunDetails")} tone="loading" />
+                  <VStateSurface fill className={styles.emptyState} title={t("loadingRunDetails")} tone="loading" />
                 )
               ) : (
-                <VStateSurface className={styles.emptyState} title={t("chooseProposalDetail")} tone="empty" />
+                <VStateSurface fill className={styles.emptyState} title={t("chooseProposalDetail")} tone="empty" />
               )}
             </VSurface>
           </div>
