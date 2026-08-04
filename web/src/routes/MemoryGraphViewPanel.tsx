@@ -183,10 +183,7 @@ export function MemoryGraphViewPanel({
                 type="button"
                 className={styles.graphClearFocusButton}
                 onClick={onClearGraphFilters}
-              >
-                <XCircle size={14} />
-                {copy.graphClearFocus}
-              </VButton>
+                icon={<XCircle size={14}/>}>{copy.graphClearFocus}</VButton>
             ) : null}
           </VSection>
         </VSurface>

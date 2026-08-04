@@ -107,25 +107,16 @@ export function MemorySelectedConfigPanel({
             className={styles.detailActionButton}
             onClick={onEdit}
             isDisabled={!item.managedState?.editable || mutationBusy}
-          >
-            <Pencil size={15} />
-            <span>{copy.editMemory}</span>
-          </VButton>
+                icon={<Pencil size={15} />}><span>{copy.editMemory}</span></VButton>
           {item.managedState?.restorable ? (
-            <VButton type="button" className={styles.detailActionButton} onClick={onRestore} isDisabled={mutationBusy}>
-              <Undo2 size={15} />
-              <span>{copy.restoreMemory}</span>
-            </VButton>
+            <VButton type="button" className={styles.detailActionButton} onClick={onRestore} isDisabled={mutationBusy} icon={<Undo2 size={15}/>}><span>{copy.restoreMemory}</span></VButton>
           ) : null}
           <VButton
             type="button"
             className={styles.detailActionButton}
             onClick={onDisableOrDelete}
             isDisabled={!item.managedState?.deletable || mutationBusy}
-          >
-            <Trash2 size={15} />
-            <span>{item.managedState?.userManaged ? copy.deleteMemory : copy.disableMemory}</span>
-          </VButton>
+                icon={<Trash2 size={15} />}><span>{item.managedState?.userManaged ? copy.deleteMemory : copy.disableMemory}</span></VButton>
         </div>
         {mutationFeedback.tone !== "idle" ? (
           <p className={styles.copyNotice} data-tone={mutationFeedback.tone}>

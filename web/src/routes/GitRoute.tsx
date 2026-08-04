@@ -33,6 +33,7 @@ import {
   VSurface,
 } from "../components/vui";
 import { GitDiffView } from "./GitDiffView";
+import { ProgressiveRegionSkeleton } from "./shared/ProgressiveRegionSkeleton";
 import {
   getGitAiDraftBlockReason,
   getGitCommitBlockReason,
@@ -100,7 +101,12 @@ export function GitRecentCommitsState({
   syncingLabel,
 }: GitRecentCommitsStateProps) {
   if (presentation === "initial-loading") {
-    return <VStateSurface tone="loading" title={loadingLabel} skeletonLines />;
+    return (
+      <ProgressiveRegionSkeleton
+        variant="list"
+        label={typeof loadingLabel === "string" ? loadingLabel : "Loading"}
+      />
+    );
   }
   if (presentation === "error-empty") {
     return (
@@ -674,12 +680,9 @@ export function GitRoute() {
         {statusInitialLoading || statusEmptyError ? (
           <>
             {statusInitialLoading ? (
-              <VStateSurface
-                className={changePanelCollapsed ? `${styles.changePanel} ${styles.paneCollapsed}` : styles.changePanel}
-                tone="loading"
-                title={gitStatusLoading}
-                skeletonLines
-              />
+              <div className={changePanelCollapsed ? `${styles.changePanel} ${styles.paneCollapsed}` : styles.changePanel}>
+                <ProgressiveRegionSkeleton variant="list" label={gitStatusLoading} />
+              </div>
             ) : (
               <VStateSurface
                 className={changePanelCollapsed ? `${styles.changePanel} ${styles.paneCollapsed}` : styles.changePanel}

@@ -211,9 +211,8 @@ export function EvolutionActiveRunMonitorPanel({
                 title={run.termination.title}
                 onClick={run.termination.onClick}
                 aria-label={run.termination.ariaLabel}
-              >
-                {run.termination.pending ? <LoaderCircle size={15} /> : <Square size={15} />}
-              </VButton>
+                isIconOnly
+                icon={run.termination.pending ? <LoaderCircle size={15} /> : <Square size={15} />} />
             </div>
             <div className={styles.compactActionGroup}>
               {run.openSessionAction ? (

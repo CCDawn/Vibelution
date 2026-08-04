@@ -1,4 +1,3 @@
-import { LoaderCircle } from "lucide-react";
 import { Suspense, lazy } from "react";
 
 import type {
@@ -10,8 +9,8 @@ import type {
   SupervisedWorktreeRun,
 } from "../api/types";
 import type { Language } from "../i18n/dictionary";
-import { VStateSurface } from "../components/vui";
 import styles from "./EvolutionSelfTrackBoundary.styles";
+import { ProgressiveRegionSkeleton } from "./shared/ProgressiveRegionSkeleton";
 
 const LazySelfEvolutionTrack = lazy(() =>
   import("./SelfEvolutionTrack").then((module) => ({ default: module.SelfEvolutionTrack })),
@@ -57,16 +56,10 @@ export type EvolutionSelfTrackBoundaryProps = {
 function selfTrackFallback(lang: Language) {
   return (
     <section className={`${styles.surface} ${styles.structuredEmptyState}`}>
-      <VStateSurface
-        fill
-        tone="loading"
-        title={lang === "zh" ? "正在加载自进化工作台" : "Loading self-evolution workspace"}
-        icon={<LoaderCircle size={18} className={styles.spinIcon} aria-hidden="true" />}
-      >
-        {lang === "zh"
-          ? "监督进化工作台已先保持可用，自进化面板正在按需载入。"
-          : "The supervised workspace stays available while the self-evolution panel loads on demand."}
-      </VStateSurface>
+      <ProgressiveRegionSkeleton
+        variant="panel"
+        label={lang === "zh" ? "正在加载自进化工作台" : "Loading self-evolution workspace"}
+      />
     </section>
   );
 }

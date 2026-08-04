@@ -3,6 +3,7 @@ import { History, Save, Trash2 } from "lucide-react";
 import type { AgentConfigChanges } from "../api/types";
 import { VButton, VEmptyState, VPanel, VStateSurface } from "../components/vui";
 import styles from "./AgentConfigChangeHistoryPanel.styles";
+import { ProgressiveRegionSkeleton } from "./shared/ProgressiveRegionSkeleton";
 
 type AgentConfigChangeHistoryPanelProps = {
   changes: AgentConfigChanges | undefined;
@@ -71,7 +72,7 @@ export function AgentConfigChangeHistoryPanel({
       </header>
 
       {loading ? (
-        <VStateSurface tone="loading" title="正在读取草稿与版本记录" skeletonLines={2} />
+        <ProgressiveRegionSkeleton variant="list" label="正在读取草稿与版本记录" />
       ) : null}
 
       {draft ? (

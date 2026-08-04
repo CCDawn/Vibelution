@@ -141,10 +141,7 @@ export function ConfigHealthDiagnosticsPanel({
                 {healthStatusLabel(diagnostics.status, copy)}
               </span>
             ) : null}
-            <VButton type="button" className={styles.actionButton} onClick={onRefresh} isDisabled={loading}>
-              <RefreshCw size={14} />
-              {copy.healthRefresh}
-            </VButton>
+            <VButton type="button" className={styles.actionButton} onClick={onRefresh} isDisabled={loading} icon={<RefreshCw size={14} />}>{copy.healthRefresh}</VButton>
           </div>
         }
     >

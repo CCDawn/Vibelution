@@ -65,23 +65,17 @@ export function TeamSourceCollectionSearchBriefShell({
                 variant="danger"
                 onPress={() => onReset({ includeDownstream: false })}
                 isDisabled={resetPending}
-              >
-                <Trash2 size={14} />
-                {resetPending && !resetIncludeDownstream
+                icon={<Trash2 size={14} />}>{resetPending && !resetIncludeDownstream
                   ? (lang === "zh" ? "正在清空…" : "Clearing…")
-                  : (lang === "zh" ? "清空本项目资料并重新开始" : "Clear this project's sources and restart")}
-              </VButton>
+                  : (lang === "zh" ? "清空本项目资料并重新开始" : "Clear this project's sources and restart")}</VButton>
               <VButton
                 type="button"
                 variant="danger"
                 onPress={() => onReset({ includeDownstream: true })}
                 isDisabled={resetPending}
-              >
-                <Trash2 size={14} />
-                {resetPending && resetIncludeDownstream
+                icon={<Trash2 size={14} />}>{resetPending && resetIncludeDownstream
                   ? (lang === "zh" ? "正在清空…" : "Clearing…")
-                  : (lang === "zh" ? "连同实验与迭代一起清空" : "Clear sources + experiment/iteration")}
-              </VButton>
+                  : (lang === "zh" ? "连同实验与迭代一起清空" : "Clear sources + experiment/iteration")}</VButton>
             </>
           )}
         >

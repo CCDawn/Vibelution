@@ -13,6 +13,7 @@ import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import { VActionGroup, VButton, VIconButton, VListDetailPage, VMetricStrip, VSelect, VStateSurface, VSurface } from "../components/vui";
 import { useShellI18n } from "../i18n/useShellI18n";
 import styles from "./KernelTaskCenterRoute.styles";
+import { ProgressiveRegionSkeleton } from "./shared/ProgressiveRegionSkeleton";
 
 const ALL_STATUS_KEY = "all";
 const STATUS_OPTIONS = ["queued", "running", "succeeded", "blocked", "failed", "cancelled"];
@@ -180,9 +181,7 @@ export function KernelTaskCenterRoute() {
       {describeError(taskQuery.error, copy.loadFailed)}
     </VStateSurface>
   ) : taskQuery.isLoading ? (
-    <VStateSurface fill className={styles.emptyStateClass} title={copy.loading} tone="loading">
-      {copy.taskList}
-    </VStateSurface>
+    <ProgressiveRegionSkeleton variant="list" label={copy.loading} className={styles.taskListClass} />
   ) : tasks.length === 0 ? (
     <VStateSurface fill className={styles.emptyStateClass} title={status ? copy.noMatchingTasks : copy.noTasks} tone="empty">
       {copy.taskList}
@@ -207,9 +206,7 @@ export function KernelTaskCenterRoute() {
       {describeError(timelineQuery.error, copy.loadFailed)}
     </VStateSurface>
   ) : timelineQuery.isLoading || !timeline ? (
-    <VStateSurface fill className={styles.emptyStateClass} title={copy.loading} tone="loading">
-      {selectedTaskId}
-    </VStateSurface>
+    <ProgressiveRegionSkeleton variant="detail" label={copy.loading} className={styles.detailContentClass} />
   ) : (
     <>
       <div className={styles.detailContentClass}>

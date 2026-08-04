@@ -18,6 +18,7 @@ import type {
 } from "../api/types";
 import { VButton, VNativeInput, VNativeSelect, VStateSurface } from "../components/vui";
 import styles from "./MemoryUserContentPanel.styles";
+import { ProgressiveRegionSkeleton } from "./shared/ProgressiveRegionSkeleton";
 
 export interface MemoryUserContentPanelProps {
   defaultUserId?: string;
@@ -419,9 +420,7 @@ export function MemoryUserContentPanel({ defaultUserId = "default" }: MemoryUser
                 <div className={styles.pre}>{selectedPageContent || "No content."}</div>
               </>
             ) : pageQuery.isPending ? (
-              <VStateSurface fill tone="loading" title="正在读取页面">
-                页面正文会在加载完成后显示在此区域。
-              </VStateSurface>
+              <ProgressiveRegionSkeleton variant="detail" label="正在读取页面" />
             ) : (
               <VStateSurface fill tone="empty" title="未选择页面">
                 选择页面后会在这里显示托管副本正文。

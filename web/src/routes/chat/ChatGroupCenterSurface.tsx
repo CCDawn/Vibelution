@@ -423,14 +423,11 @@ export function ChatGroupCenterSurface({
             type="button"
             onClick={onSendProjectBusMessage}
             isDisabled={!projectBusDraft.trim() || projectBusSendPending}
-          >
-            <UsersRound size={15} />
-            <span>
+                icon={<UsersRound size={15} />}><span>
               {projectBusSendPending
                 ? (lang === "zh" ? "发送中" : "Sending")
                 : (lang === "zh" ? "发送广播" : "Send")}
-            </span>
-          </VButton>
+            </span></VButton>
         </div>
       </div>
     );
@@ -516,14 +513,11 @@ export function ChatGroupCenterSurface({
             || groupRoundActive
             || !activeGroupRoom
           }
-        >
-          <UsersRound size={15} />
-          <span>
+                icon={<UsersRound size={15} />}><span>
             {startGroupRoundPending || groupRoundActive
               ? (groupRoundStopping ? (lang === "zh" ? "停止中" : "Stopping") : (lang === "zh" ? "讨论中" : "Running"))
               : (lang === "zh" ? "启动一轮" : "Run round")}
-          </span>
-        </VButton>
+          </span></VButton>
         {groupRoundActive ? (
           <VButton
             type="button"
@@ -531,14 +525,11 @@ export function ChatGroupCenterSurface({
             onClick={onStopGroupRound}
             isDisabled={groupStopDisabled}
             title={lang === "zh" ? "停止当前群聊轮次" : "Stop current group round"}
-          >
-            <Square size={15} />
-            <span>
+                icon={<Square size={15} />}><span>
               {stopGroupRoundPending
                 ? (lang === "zh" ? "停止中" : "Stopping")
                 : (lang === "zh" ? "停止" : "Stop")}
-            </span>
-          </VButton>
+            </span></VButton>
         ) : null}
       </div>
     </div>

@@ -71,10 +71,7 @@ export function EvolutionProposalActionBandsPanel({
                 className={styles.inlineAction}
                 isDisabled={runLocked || actionPending}
                 onClick={() => onRunAction(proposal.sourceRun, action)}
-              >
-                <Sparkles size={15} />
-                {proposalActionLabel(action)}
-              </VButton>
+                icon={<Sparkles size={15}/>}>{proposalActionLabel(action)}</VButton>
             ))}
           </div>
         ) : null}
@@ -99,10 +96,7 @@ export function EvolutionProposalActionBandsPanel({
             className={styles.inlineAction}
             isDisabled={!proposal.canDelete || deleteProposalPending}
             onClick={() => onDeleteProposal(proposal.sourceRun)}
-          >
-            <Trash2 size={15} />
-            {t("deleteProposal")}
-          </VButton>
+            icon={<Trash2 size={15} />}>{t("deleteProposal")}</VButton>
         </div>
         {deleteProposalError ? <p className={styles.errorText}>{deleteProposalError}</p> : null}
       </div>

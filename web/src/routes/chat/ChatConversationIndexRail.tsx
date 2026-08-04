@@ -33,6 +33,7 @@ import {
   formatRelativeTime,
 } from "../chatShellFormat";
 import routeStyles from "../ChatCodingRoute.styles";
+import { ProgressiveRegionSkeleton } from "../shared/ProgressiveRegionSkeleton";
 import styles from "./ChatConversationIndexRail.styles";
 
 export type ConversationIndexPanelKey = "conversations" | "members";
@@ -199,20 +200,14 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
               aria-selected={rightIndexPanel === "conversations"}
               className={rightIndexPanel === "conversations" ? `${styles.rightIndexTab} ${styles.rightIndexTabActive}` : styles.rightIndexTab}
               onClick={() => setRightIndexPanel("conversations")}
-            >
-              <MessageCircleHeart size={14} />
-              <span>{lang === "zh" ? "会话" : "Chats"}</span>
-            </VButton>
+              icon={<MessageCircleHeart size={14}/>}><span>{lang === "zh" ? "会话" : "Chats"}</span></VButton>
             <VButton
               type="button"
               role="tab"
               aria-selected={rightIndexPanel === "members"}
               className={rightIndexPanel === "members" ? `${styles.rightIndexTab} ${styles.rightIndexTabActive}` : styles.rightIndexTab}
               onClick={() => setRightIndexPanel("members")}
-            >
-              <UsersRound size={14} />
-              <span>{lang === "zh" ? "成员" : "Members"}</span>
-            </VButton>
+              icon={<UsersRound size={14} />}><span>{lang === "zh" ? "成员" : "Members"}</span></VButton>
           </div>
         ) : null}
 
@@ -304,9 +299,8 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
                                 ? current.filter((sessionId) => sessionId !== participant.sessionId)
                                 : [...current, participant.sessionId],
                             )}
-                        >
-                          <ChevronRight size={14} aria-hidden="true" />
-                        </VButton>
+                            isIconOnly
+                            icon={<ChevronRight size={14} aria-hidden="true"/>} />
                         <VButton
                           type="button"
                           contentLayout="plain"
@@ -345,7 +339,7 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
                       {expanded ? (
                         <div className={styles.agentIndexDetails}>
                           {expandedDetailQuery?.isPending ? (
-                            <VStateSurface tone="loading" title={t("loadingSession")} skeletonLines={2} />
+                            <ProgressiveRegionSkeleton variant="list" label={t("loadingSession")} />
                           ) : expandedDetailQuery?.isError ? (
                             <VStateSurface
                               tone="error"
@@ -469,10 +463,9 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
                 </label>
                 <div className={styles.groupAgentPicker} aria-label={lang === "zh" ? "选择参与助手" : "Choose agents"}>
                   {agentsPending ? (
-                    <VStateSurface
-                      tone="loading"
-                      title={lang === "zh" ? "正在读取助手" : "Loading agents"}
-                      skeletonLines={2}
+                    <ProgressiveRegionSkeleton
+                      variant="list"
+                      label={lang === "zh" ? "正在读取助手" : "Loading agents"}
                     />
                   ) : groupCandidateAgents.length ? (
                     groupCandidateAgents.map((agent) => {
@@ -519,10 +512,7 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
                   className={styles.createGroupButton}
                   onClick={onCreateGroupRoom}
                   isDisabled={createGroupRoomPending || groupSelectedAgentIds.length < 2 || !groupTitleDraft.trim()}
-                >
-                  <UsersRound size={15} />
-                  <span>{createGroupRoomPending ? (lang === "zh" ? "创建中" : "Creating") : (lang === "zh" ? "创建群聊" : "Create group")}</span>
-                </VButton>
+                icon={<UsersRound size={15} />}><span>{createGroupRoomPending ? (lang === "zh" ? "创建中" : "Creating") : (lang === "zh" ? "创建群聊" : "Create group")}</span></VButton>
               </section>
             ) : null}
             </div>

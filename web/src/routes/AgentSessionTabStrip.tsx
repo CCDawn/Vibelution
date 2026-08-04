@@ -371,6 +371,7 @@ export function AgentSessionTabStrip({
           >
             <VButton
               type="button"
+              contentLayout="plain"
               className={tabMainActionClassName}
               id={agentSessionTabElementId("session", session.id)}
               role="tab"
@@ -468,6 +469,7 @@ export function AgentSessionTabStrip({
           >
             <VButton
               type="button"
+              contentLayout="plain"
               className={tabMainActionClassName}
               id={agentSessionTabElementId("cli", run.id)}
               role="tab"

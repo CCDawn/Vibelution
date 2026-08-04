@@ -78,10 +78,7 @@ export function MemoryManagementEditor({
             <p className={styles.panelEyebrow}>{copy.management}</p>
             <h2>{draft.mode === "create" ? copy.addMemory : copy.editMemory}</h2>
           </div>
-          <VButton type="button" className={styles.iconButton} onClick={onCancel} isDisabled={mutationBusy}>
-            <XCircle size={16} />
-            <span>{copy.cancelEdit}</span>
-          </VButton>
+          <VButton type="button" className={styles.iconButton} onClick={onCancel} isDisabled={mutationBusy} icon={<XCircle size={16}/>}><span>{copy.cancelEdit}</span></VButton>
         </div>
         <label className={styles.fieldStack}>
           <span>{copy.titleField}</span>
