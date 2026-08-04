@@ -16,7 +16,7 @@ import type {
   UserMarkdownSpaceSearchPayload,
   UserMarkdownSpaceSummary,
 } from "../api/types";
-import { VButton, VNativeInput, VNativeSelect } from "../components/vui";
+import { VButton, VNativeInput, VNativeSelect, VStateSurface } from "../components/vui";
 import styles from "./MemoryUserContentPanel.styles";
 
 export interface MemoryUserContentPanelProps {
@@ -419,9 +419,13 @@ export function MemoryUserContentPanel({ defaultUserId = "default" }: MemoryUser
                 <div className={styles.pre}>{selectedPageContent || "No content."}</div>
               </>
             ) : pageQuery.isPending ? (
-              <div className={styles.emptyState}>正在读取页面...</div>
+              <VStateSurface fill tone="loading" title="正在读取页面">
+                页面正文会在加载完成后显示在此区域。
+              </VStateSurface>
             ) : (
-              <div className={styles.emptyState}>选择页面后会在这里显示托管副本正文。</div>
+              <VStateSurface fill tone="empty" title="未选择页面">
+                选择页面后会在这里显示托管副本正文。
+              </VStateSurface>
             )}
             {pageQuery.error ? <div className={styles.error}>{errorText(pageQuery.error)}</div> : null}
           </section>

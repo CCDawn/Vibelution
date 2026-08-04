@@ -50,12 +50,19 @@
 
 ### 何时使用
 - 冷加载、失败恢复、占位
+- **工作台主区（board/canvas/list-detail main）加载**：必须 `fill`，避免「一行字 + 大片空白」
+
+### `fill`
+- `fill`：占满父级 flex/grid 区域（`flex-1` + 最小高度 + 居中内容）
+- loading 且未指定 `skeletonLines` 时：`fill` 默认 3 条骨架，非 fill 默认 2 条
+- 父级请用 `VUI_REGION_STATE_HOST_CLASS` 或已有 `flex-1 min-h-0` 链
 
 ### 何时不要用
 | 场景 | 改用 |
 | --- | --- |
 | 仅一行错误文案 | `VErrorSummary` |
 | 列表永久空 | `VEmptyState` |
+| 主区加载仍用 `styles.empty` 一行字 | **禁止** — 改本组件 `fill` |
 
 ---
 

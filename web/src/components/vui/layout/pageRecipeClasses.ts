@@ -41,3 +41,10 @@ export const VUI_PAGE_TOOLBAR_STRIP_CLASS =
 /** Primary scroll/content padding inside board main. */
 export const VUI_BOARD_CONTENT_PAD_CLASS =
   "flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-auto p-4 [scrollbar-gutter:stable]";
+
+/**
+ * Host for loading/empty/error state that must occupy the workbench main region
+ * (avoids one-line loading with a huge empty floor — shadcn-style content occupancy).
+ */
+export const VUI_REGION_STATE_HOST_CLASS =
+  "grid min-h-0 min-w-0 flex-1 content-stretch items-stretch";

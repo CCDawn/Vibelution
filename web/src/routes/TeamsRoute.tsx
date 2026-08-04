@@ -5926,6 +5926,7 @@ export function TeamsRoute({
         <main className={styles.teamUnavailableSurface} aria-label={teamInitialLoadingTitle}>
           <VStateSurface
             className={styles.teamUnavailableCard}
+            fill
             title={teamInitialLoadingTitle}
             tone="loading"
             skeletonLines={3}
@@ -6110,7 +6111,13 @@ export function TeamsRoute({
                 </div>
                 {researchWorkflowTeamSelected ? (
                   teamWorkflowQuery.isPending ? (
-                    <div className={styles.empty}>{lang === "zh" ? "正在读取 TeamWorkflowOrchestration..." : "Loading TeamWorkflowOrchestration..."}</div>
+                    <VStateSurface
+                      tone="loading"
+                      title={lang === "zh" ? "正在读取科研工作流" : "Loading research workflow"}
+                      skeletonLines={3}
+                    >
+                      {lang === "zh" ? "TeamWorkflowOrchestration 返回后会显示流程模块。" : "Workflow modules appear after TeamWorkflowOrchestration returns."}
+                    </VStateSurface>
                   ) : teamWorkflow ? (
                     <>
                       {/* Overview hero/stages/secondary render via ResearchOverviewSurface above the workflow panel. */}
@@ -6317,7 +6324,11 @@ export function TeamsRoute({
                     <span>{linkedRoomDetail ? chatRoomStatusLabel(linkedRoomDetail.status, lang) : (lang === "zh" ? "未读取" : "not loaded")}</span>
                   </div>
                   {linkedChatRoomQuery.isPending && linkedChatRoomId ? (
-                    <div className={styles.empty}>{lang === "zh" ? "正在读取关联群聊..." : "Loading linked room..."}</div>
+                    <VStateSurface
+                      tone="loading"
+                      title={lang === "zh" ? "正在读取关联群聊" : "Loading linked room"}
+                      skeletonLines={2}
+                    />
                   ) : latestTeamRound ? (
                     <article className={styles.teamRoundCard}>
                       <div className={styles.teamRoundHeader}>
@@ -6401,7 +6412,11 @@ export function TeamsRoute({
                   <span>{teamBusEvents.length} events</span>
                 </div>
                 {projectBusQuery.isPending ? (
-                  <div className={styles.empty}>{lang === "zh" ? "正在读取项目总群..." : "Loading project bus..."}</div>
+                  <VStateSurface
+                    tone="loading"
+                    title={lang === "zh" ? "正在读取项目总群" : "Loading project bus"}
+                    skeletonLines={2}
+                  />
                 ) : teamBusEvents.length ? (
                   <div className={styles.teamHistoryList}>
                     {teamBusEvents.map((event) => {
@@ -6490,11 +6505,27 @@ export function TeamsRoute({
             {!researchCanvasVisible && researchWorkflowTeamSelected ? (
               showResearchOverview ? (
                 teamWorkflowQuery.isPending ? (
-                  <div className={styles.empty}>{lang === "zh" ? "正在读取科研总览…" : "Loading research overview…"}</div>
+                  <VStateSurface
+                    fill
+                    tone="loading"
+                    title={lang === "zh" ? "正在读取科研总览" : "Loading research overview"}
+                  >
+                    {lang === "zh"
+                      ? "看板、阶段与 CTA 会在工作流返回后原位铺满本区，而不是只显示一行提示。"
+                      : "Board, stages, and CTA will fill this region once the workflow returns — not a one-line hint."}
+                  </VStateSurface>
                 ) : teamWorkflow ? (
                   renderResearchOverviewSurface()
                 ) : (
-                  <div className={styles.empty}>{lang === "zh" ? "科研工作流尚未初始化。" : "Research workflow is not initialized."}</div>
+                  <VStateSurface
+                    fill
+                    tone="empty"
+                    title={lang === "zh" ? "科研工作流尚未初始化" : "Research workflow is not initialized"}
+                  >
+                    {lang === "zh"
+                      ? "初始化后总览会占满此主区。"
+                      : "After initialization, the overview will occupy this main region."}
+                  </VStateSurface>
                 )
               ) : (
                 renderResearchStageLauncher("interactive")
@@ -6516,7 +6547,13 @@ export function TeamsRoute({
                 </div>
                 {researchWorkflowTeamSelected ? (
                   teamWorkflowQuery.isPending ? (
-                    <div className={styles.empty}>{lang === "zh" ? "正在读取 TeamWorkflowOrchestration..." : "Loading TeamWorkflowOrchestration..."}</div>
+                    <VStateSurface
+                      tone="loading"
+                      title={lang === "zh" ? "正在读取科研工作流" : "Loading research workflow"}
+                      skeletonLines={3}
+                    >
+                      {lang === "zh" ? "TeamWorkflowOrchestration 返回后会显示流程模块。" : "Workflow modules appear after TeamWorkflowOrchestration returns."}
+                    </VStateSurface>
                   ) : teamWorkflow ? (
                     <>
                       {/* Overview hero/stages/secondary render via ResearchOverviewSurface above the workflow panel. */}
@@ -6723,7 +6760,11 @@ export function TeamsRoute({
                     <span>{linkedRoomDetail ? chatRoomStatusLabel(linkedRoomDetail.status, lang) : (lang === "zh" ? "未读取" : "not loaded")}</span>
                   </div>
                   {linkedChatRoomQuery.isPending && linkedChatRoomId ? (
-                    <div className={styles.empty}>{lang === "zh" ? "正在读取关联群聊..." : "Loading linked room..."}</div>
+                    <VStateSurface
+                      tone="loading"
+                      title={lang === "zh" ? "正在读取关联群聊" : "Loading linked room"}
+                      skeletonLines={2}
+                    />
                   ) : latestTeamRound ? (
                     <article className={styles.teamRoundCard}>
                       <div className={styles.teamRoundHeader}>
@@ -6807,7 +6848,11 @@ export function TeamsRoute({
                   <span>{teamBusEvents.length} events</span>
                 </div>
                 {projectBusQuery.isPending ? (
-                  <div className={styles.empty}>{lang === "zh" ? "正在读取项目总群..." : "Loading project bus..."}</div>
+                  <VStateSurface
+                    tone="loading"
+                    title={lang === "zh" ? "正在读取项目总群" : "Loading project bus"}
+                    skeletonLines={2}
+                  />
                 ) : teamBusEvents.length ? (
                   <div className={styles.teamHistoryList}>
                     {teamBusEvents.map((event) => {

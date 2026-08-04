@@ -1,5 +1,7 @@
 import { type ComponentPropsWithoutRef, type ReactNode } from "react";
 
+import { cn } from "../lib/cn";
+
 export type VStateSurfaceTone = "info" | "loading" | "empty" | "unavailable" | "error";
 
 export type VStateSurfaceFact = {
@@ -16,11 +18,21 @@ export type VStateSurfaceProps = Omit<ComponentPropsWithoutRef<"section">, "titl
   skeletonLines?: boolean | number;
   title: ReactNode;
   tone?: VStateSurfaceTone;
+  /**
+   * Occupy the parent workbench region (flex-1 + min height) so loading/empty
+   * is not a one-line label above a large empty floor.
+   */
+  fill?: boolean;
 };
 
 const BASE =
   "grid min-w-0 w-full content-start gap-2 rounded-[var(--radius-control)] border p-3 text-left " +
   "[font-size:var(--vui-font-xs)] leading-[var(--vui-line-readable)]";
+
+/** Full-region occupancy for board/canvas/list-detail main slots. */
+const FILL =
+  "h-full min-h-[min(100%,22rem)] flex-1 content-center place-content-center self-stretch p-4 " +
+  "sm:min-h-[min(100%,28rem)]";
 
 const TONE: Record<VStateSurfaceTone, string> = {
   info:
@@ -73,13 +85,22 @@ export function VStateSurface({
   children,
   className,
   facts = [],
+  fill = false,
   icon,
   skeletonLines,
   title,
   tone = "info",
   ...props
 }: VStateSurfaceProps) {
-  const lineCount = skeletonLineCount(skeletonLines);
+  const resolvedSkeleton =
+    skeletonLines === undefined && (fill || tone === "loading")
+      ? fill
+        ? 3
+        : tone === "loading"
+          ? 2
+          : false
+      : skeletonLines;
+  const lineCount = skeletonLineCount(resolvedSkeleton);
   const isBusy = busy ?? tone === "loading";
 
   return (
@@ -87,8 +108,9 @@ export function VStateSurface({
       {...props}
       aria-busy={isBusy || undefined}
       data-tone={tone}
+      data-fill={fill ? "true" : "false"}
       data-vui="state-surface"
-      className={[BASE, TONE[tone], className].filter(Boolean).join(" ")}
+      className={cn(BASE, TONE[tone], fill ? FILL : undefined, className)}
     >
       <div className={icon ? HEADER : COPY}>
         {icon ? <span className={ICON}>{icon}</span> : null}

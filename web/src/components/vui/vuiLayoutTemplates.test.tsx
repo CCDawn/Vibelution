@@ -109,6 +109,9 @@ describe("VUI workbench layout templates", () => {
         >
           Keeping the workspace frame visible while details load.
         </VStateSurface>
+        <VStateSurface fill tone="loading" title="Loading research overview">
+          Occupies the board region instead of a one-line label.
+        </VStateSurface>
         <VSplitWorkspace
           sidebar={<nav>Team list</nav>}
           main={
@@ -140,6 +143,8 @@ describe("VUI workbench layout templates", () => {
     expect(markup).toContain("motion-reduce:animate-none");
     expect(markup).toContain('data-vui="state-surface"');
     expect(markup).toContain('data-tone="loading"');
+    expect(markup).toContain('data-fill="true"');
+    expect(markup).toContain("Loading research overview");
     expect(markup).toContain("Team detail API");
     expect(markup).toContain("animate-pulse");
     expect(markup).toContain('data-vui="split-workspace"');

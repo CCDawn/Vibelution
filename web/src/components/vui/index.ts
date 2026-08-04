@@ -93,6 +93,7 @@ export {
   VUI_PAGE_STACK_FILL_CLASS,
   VUI_PAGE_TOOLBAR_STRIP_CLASS,
   VUI_RAIL_SURFACE_CLASS,
+  VUI_REGION_STATE_HOST_CLASS,
   VUI_WORKBENCH_SURFACE_CLASS,
 } from "./layout/pageRecipeClasses";
 export { VPanelHeader, type VPanelHeaderProps } from "./layout/VPanelHeader";
