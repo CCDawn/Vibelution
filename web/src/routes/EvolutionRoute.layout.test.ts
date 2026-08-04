@@ -9,6 +9,8 @@ import activeRunMonitorPanelSource from "./EvolutionActiveRunMonitorPanel.tsx?ra
 import activeRunMonitorStyles from "./EvolutionActiveRunMonitorPanel.styles";
 import activeRunMonitorStylesSource from "./EvolutionActiveRunMonitorPanel.styles.ts?raw";
 import datasetCatalogPanelSource from "./EvolutionDatasetCatalogPanel.tsx?raw";
+import supervisedLiveSetupPanelSource from "./EvolutionSupervisedLiveSetupPanel.tsx?raw";
+import supervisedWorkflowMembersPanelSource from "./EvolutionSupervisedWorkflowMembersPanel.tsx?raw";
 import proposalActionBandsPanelSource from "./EvolutionProposalActionBandsPanel.tsx?raw";
 import proposalActionBandsStyles from "./EvolutionProposalActionBandsPanel.styles";
 import proposalActionBandsStylesSource from "./EvolutionProposalActionBandsPanel.styles.ts?raw";
@@ -48,6 +50,9 @@ const evolutionSources = [
   runRecordsPanelSource,
   runMutationsSource,
   supervisedApprovalDecisionPanelSource,
+  supervisedLiveSetupPanelSource,
+  supervisedWorkflowMembersPanelSource,
+  datasetCatalogPanelSource,
 ].join("\n");
 
 describe("EvolutionRoute library user flow contract", () => {
@@ -56,7 +61,8 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("VMetricStrip");
     expect(routeSource).toContain("VStateSurface");
     expect(routeSource).toContain("VStringSelect");
-    expect(routeSource).toContain("onChange={setKeepWorktree}");
+    expect(routeSource).toContain("onKeepWorktreeChange={setKeepWorktree}");
+    expect(supervisedLiveSetupPanelSource).toContain("onChange={onKeepWorktreeChange}");
     expect(routeSource).toContain("hideIntro={hideSupervisedToolbarIntro}");
     expect(routeSource).not.toContain('"\\u200B"');
     expect(activeRunMonitorPanelSource).toContain("<VButton");
@@ -69,9 +75,9 @@ describe("EvolutionRoute library user flow contract", () => {
   });
 
   it("keeps complex Evolution card buttons in the VButton plain-content layout", () => {
-    expect(routeSource.match(/contentLayout="plain"/g)).toHaveLength(4);
+    expect(routeSource.match(/contentLayout="plain"/g)).toHaveLength(3);
     expect(routeSource).toMatch(/contentLayout="plain"[\s\S]{0,160}styles\.caseTraceSummary/);
-    expect(routeSource).toMatch(/contentLayout="plain"[\s\S]{0,160}styles\.workflowStepButton/);
+    expect(supervisedWorkflowMembersPanelSource).toMatch(/contentLayout="plain"[\s\S]{0,160}styles\.workflowStepButton/);
     expect(routeSource.match(/contentLayout="plain"[\s\S]{0,160}styles\.proposalCardButton/g)).toHaveLength(2);
     expect(runRecordsPanelSource).toMatch(/contentLayout="plain"[\s\S]{0,160}styles\.runCardButton/);
   });
@@ -185,7 +191,7 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(evolutionRouteModelSource).toContain("item.taskType");
     expect(evolutionRouteModelSource).toContain("item.runBudgetClass");
     expect(routeSource).toContain("datasetBenchmarkDetail(item, lang)");
-    expect(routeSource).toContain("数据集会先物化，评测包可直接运行。");
+    expect(supervisedLiveSetupPanelSource).toContain("数据集会先物化，评测包可直接运行。");
     expect(routeSource).toContain("sourceInventoryBar");
     expect(routeSource).toContain("primaryDatasets.map((item)");
   });
@@ -235,7 +241,7 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("非官方 Terminal-Bench 成绩");
     expect(routeSource).toContain("selectedSourceOfficialWarning");
     expect(routeSource).toContain('t("sourceOfficialVerifierWarning")');
-    expect(routeSource).toContain("styles.sourceWarningStrip");
+    expect(supervisedLiveSetupPanelSource).toContain("styles.sourceWarningStrip");
     expect(evolutionDictionarySource).toContain("Terminal-Bench 官方 Harbor 判分尚未接入");
     expect(routeStyles.sourceWarningStrip).toContain("var(--state-warning)");
   });
@@ -466,21 +472,23 @@ describe("EvolutionRoute library user flow contract", () => {
   it("keeps the supervised launch panel compact", () => {
     expect(routeSource).toContain("styles.supervisedRunConsole");
     expect(routeSource).toContain("styles.supervisedRunConsoleGrid");
-    expect(routeSource).toContain("styles.supervisedRunSetup");
-    expect(routeSource).toContain("styles.supervisedRunOptions");
-    expect(routeSource).toContain("sourceMetaSide");
-    expect(routeSource).toContain("数据集会先物化，评测包可直接运行。");
+    expect(routeSource).toContain("EvolutionSupervisedLiveSetupPanel");
+    expect(routeSource).toContain("EvolutionSupervisedWorkflowMembersPanel");
+    expect(supervisedLiveSetupPanelSource).toContain("styles.supervisedRunSetup");
+    expect(supervisedLiveSetupPanelSource).toContain("styles.supervisedRunOptions");
+    expect(supervisedLiveSetupPanelSource).toContain("sourceMetaSide");
+    expect(supervisedLiveSetupPanelSource).toContain("数据集会先物化，评测包可直接运行。");
     expect(routeSource).toContain("startWorktreeRunMutation");
     expect(routeSource).toContain("SupervisedMentalModelMode");
     expect(routeSource).toContain("supervisedMentalModelMode");
     expect(routeSource).toContain("mentalModelMode: supervisedMentalModelMode");
-    expect(routeSource).toContain('ariaLabel={t("supervisedMentalMode")}');
+    expect(supervisedLiveSetupPanelSource).toContain("ariaLabel={mentalModeLabel}");
     expect(evolutionDictionarySource).toContain('supervisedMentalMode: "心智模式"');
   });
 
   it("submits the visible case limit even after browser form restoration", () => {
     expect(routeSource).toContain("const datasetLimitInputRef = useRef<HTMLInputElement | null>(null);");
-    expect(routeSource).toContain("ref={datasetLimitInputRef}");
+    expect(supervisedLiveSetupPanelSource).toContain("ref={datasetLimitInputRef}");
     expect(routeSource).toContain("datasetLimitInputRef.current?.value ?? datasetLimitInput");
     expect(routeSource).toContain("supervisedDatasetLimitFromInput(");
   });
@@ -543,8 +551,8 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(supervisedApprovalDecisionPanelSource).toContain("是否授权后端受控合入");
     expect(supervisedApprovalDecisionPanelSource).toContain("评估状态");
     expect(supervisedApprovalDecisionPanelSource).toContain("runAgentApproval");
-    expect(routeSource).toContain("最终审批方式");
-    expect(routeSource).toContain("自动作出最终决定");
+    expect(supervisedLiveSetupPanelSource).toContain("最终审批方式");
+    expect(supervisedLiveSetupPanelSource).toContain("自动作出最终决定");
     expect(routeSource).toContain('supervisedMembersRun?.approvalMode ?? approvalMode');
     expect(supervisedApprovalDecisionPanelSource).toContain('data-vui-recipe="supervised-approval-decision"');
     expect(supervisedApprovalDecisionPanelSource).toContain("Judge 建议（仅供参考）");
@@ -588,8 +596,8 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("conversationSessionId");
     expect(routeSource).toContain("chatRoute: supervisedMemberChatRoute");
     expect(routeSource).toContain("configRoute: agentId ? supervisedMemberAgentManagementRoute");
-    expect(routeSource).toContain("member.chatRoute");
-    expect(routeSource).toContain("打开监督成员");
+    expect(routeSource).toContain("member?.chatRoute");
+    expect(supervisedWorkflowMembersPanelSource).toContain("打开监督成员");
     expect(routeSource).toContain("返回监督进化");
     expect(routeSource).toContain("<SupervisedAgentConversationPanel");
     expect(routeSource).toContain("supervisedSelectedAgentRole");
@@ -603,16 +611,16 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(evolutionRouteModelSource).toContain('params.set("agent", normalizedAgentId)');
     expect(evolutionRouteModelSource).toContain('params.set("returnTo", normalizedReturnTo)');
     expect(routeSource).toContain("const supervisedMemberReturnTo = `${location.pathname}${location.search}`");
-    expect(routeSource).toContain("<ArrowUpRight size={13} aria-hidden=\"true\" />");
-    expect(routeSource).toContain("onClick={() => handleSupervisedWorkflowStepSelect(step.id)}");
-    expect(routeSource).toContain("aria-pressed={selected}");
+    expect(supervisedWorkflowMembersPanelSource).toContain("<ArrowUpRight size={13} aria-hidden=\"true\" />");
+    expect(routeSource).toContain("onSelectStep={handleSupervisedWorkflowStepSelect}");
+    expect(supervisedWorkflowMembersPanelSource).toContain("aria-pressed={step.selected}");
     expect(routeSource).toContain("setSelectedSupervisedWorkflowStepId(null)");
-    expect(routeSource).toContain("跟随现场");
-    expect(routeSource).toContain("styles.supervisedWorkflowPanel");
-    expect(routeSource).toContain("styles.workflowStepRail");
-    expect(routeSource).toContain("styles.workflowStepButton");
-    expect(routeSource).toContain("styles.workflowStepButtonActive");
-    expect(routeSource).toContain("styles.workflowStepPreview");
+    expect(supervisedWorkflowMembersPanelSource).toContain("跟随现场");
+    expect(supervisedWorkflowMembersPanelSource).toContain("styles.supervisedWorkflowPanel");
+    expect(supervisedWorkflowMembersPanelSource).toContain("styles.workflowStepRail");
+    expect(supervisedWorkflowMembersPanelSource).toContain("styles.workflowStepButton");
+    expect(supervisedWorkflowMembersPanelSource).toContain("styles.workflowStepButtonActive");
+    expect(supervisedWorkflowMembersPanelSource).toContain("styles.workflowStepPreview");
     expect(routeSource).toContain("<SupervisedAgentConversationPanel");
     expect(routeSource).toContain("selectedRole={supervisedSelectedAgentRole}");
     expect(routeSource).toContain("activeRole={supervisedActiveAgentRole}");
@@ -620,7 +628,7 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).not.toContain("styles.supervisedWorkflowCardGrid");
     expect(routeSource).not.toContain("styles.supervisedWorkflowCardButton");
     expect(routeSource).not.toContain("styles.supervisedWorkflowCardFooter");
-    expect(routeSource).toContain("监督进化步骤导航");
+    expect(supervisedWorkflowMembersPanelSource).toContain("监督进化步骤导航");
     expect(routeStyles.supervisedWorkflowPanel).toContain("[overflow:hidden]");
     expect(routeStyles.workflowStepRail).toContain("[max-height:min(196px,_30vh)]");
     expect(routeStyles.workflowStepButton).toContain("hover:[border-color:");
