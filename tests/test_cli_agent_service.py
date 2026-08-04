@@ -244,6 +244,31 @@ def test_codex_readonly_uses_exec_with_readonly_sandbox(monkeypatch, tmp_path):
     assert result["taskId"].startswith("cli-task-")
 
 
+def test_codex_worktree_exec_explicitly_disables_workspace_network(tmp_path):
+    command = service._build_command_args(
+        {"id": "codex_code"},
+        executable=r"C:\tools\codex.exe",
+        cwd=tmp_path,
+        task="run the requested worktree task",
+        task_hash="taskhash",
+        mode="worktree",
+        model="",
+        agent="",
+        allow_unsafe_permissions=False,
+    )
+
+    assert command["args"][:6] == [
+        r"C:\tools\codex.exe",
+        "exec",
+        "-c",
+        "sandbox_workspace_write.network_access=false",
+        "--cd",
+        str(tmp_path),
+    ]
+    assert "workspace-write" in command["args"]
+    assert "<task:taskhash>" in command["preview"]
+
+
 def test_mimo_worktree_mode_requires_sibling_worktree(monkeypatch, tmp_path):
     project_root = _configure_roots(monkeypatch, tmp_path)
     monkeypatch.setattr(service.shutil, "which", lambda candidate: r"C:\tools\mimo.cmd" if candidate == "mimo.cmd" else "")
