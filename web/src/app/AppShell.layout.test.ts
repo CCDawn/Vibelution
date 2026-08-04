@@ -165,8 +165,9 @@ describe("AppShell layout contract", () => {
     expect(shellStyles).toContain("width: 32px");
     expect(shellStyles).toContain("grid-template-columns: minmax(0, max-content) minmax(0, 1fr) max-content;");
     expect(shellStyles).toContain("max-width: 100%");
-    expect(shellStyles).toContain("width: min(520px, calc(100vw - 40px))");
-    expect(shellStyles).toContain("max-height: min(78vh, 760px)");
+    // Utility panel size now lives on VPopover content class (portaled).
+    expect(styles.utilityPopoverContent).toContain("w-[min(520px,calc(100vw-40px))]");
+    expect(styles.utilityPopoverContent).toContain("max-h-[min(78vh,760px)]");
     expect(shellStyles).toContain("grid-template-columns: repeat(4, minmax(0, 1fr))");
     expect(shellStyles).toContain("grid-template-columns: 36px minmax(0, 1fr)");
     expect(shellStyles).toContain("@media (max-width: 640px)");
@@ -369,7 +370,7 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain('t("navMemory")');
   });
 
-  it("collapses logs git and files behind one hover utility menu", () => {
+  it("collapses logs git and files behind one click utility popover", () => {
     const primaryNav = shellSource.slice(
       shellSource.indexOf("<nav className={styles.nav}>"),
       shellSource.indexOf("</nav>"),
@@ -383,8 +384,10 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain("utilityCluster");
     expect(shellSource).toContain("utilityClusterOpen");
     expect(shellSource).toContain("aria-expanded={utilityOpen}");
+    expect(shellSource).toContain("<VPopover");
+    expect(shellSource).toContain("contentClassName={styles.utilityPopoverContent}");
     expect(shellSource).toContain("LazyAppShellUtilityMenu");
-    expect(shellSource).toContain("utilityOpen ? (");
+    expect(shellSource).not.toContain("utilityMenuRef");
     expect(shellSource).not.toContain("queryKeys.gitStatus()");
     expect(shellSource).toContain('queryFn: ({ signal }) => fetchJson<ConfigSummary>("/api/config/public", { signal })');
     expect(shellSource).toContain('queryFn: ({ signal }) => fetchJson<RuntimeSummary>("/api/runtime/summary", { signal })');
@@ -396,11 +399,13 @@ describe("AppShell layout contract", () => {
     expect(utilityMenuSource).toContain('from "./AppShellUtilityMenu.styles"');
     expect(utilityMenuSource).not.toContain("AppShell.styles");
     expect(utilityMenuSource).toContain("utilityPanel");
+    expect(utilityMenuSource).toContain('role="region"');
+    expect(utilityMenuSource).not.toContain('role="menu"');
+    expect(utilityMenuSource).not.toContain('role="menuitem"');
     expect(utilityMenuSource).toContain('import { VButton, VNativeInput, VTooltip } from "../components/vui"');
     expect(utilityMenuSource).toContain("<VNativeInput");
     expect(utilityMenuSource).not.toMatch(/<input\b/);
     expect(utilityMenuSource).not.toContain("hidden={!utilityOpen}");
-    expect(shellSource).toContain('event.key === "Escape"');
     expect(utilityMenuSource).toContain('to="/usage"');
     expect(utilityMenuSource).toContain('t("navUsage")');
     expect(utilityMenuSource).toContain('<VTooltip content={t("usageUtilityTitle")}>');
@@ -428,6 +433,7 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain('data-browser-role="workbench"');
     expect(styles.utilityTrigger).toBeTypeOf("string");
     expect(styles.utilityClusterOpen).toBeTypeOf("string");
+    expect(styles.utilityPopoverContent).toBeTypeOf("string");
     expect(utilityMenuStyles.utilityPanel).toBeTypeOf("string");
     expect(utilityMenuStyles.utilityButtonGrid).toBeTypeOf("string");
     expect(utilityMenuStyles.gitSignalGrid).toBeTypeOf("string");
@@ -635,7 +641,7 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain("activePrimaryRouteLabel");
     expect(shellSource).toContain('data-shell-group="mobile-navigation"');
     expect(shellSource).toContain('id="shell-mobile-route-menu"');
-    expect(shellSource).toContain('aria-controls="shell-mobile-route-menu"');
+    expect(shellSource).toContain('aria-haspopup="dialog"');
     expect(shellSource).toContain("mobileLinkClassName");
     expect(shellSource).toContain("closeUtilityMenu");
   });

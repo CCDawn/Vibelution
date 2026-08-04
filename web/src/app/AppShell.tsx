@@ -80,6 +80,7 @@ import {
 import { VButton } from "../components/vui/primitives/VButton";
 import { VDropdownMenu } from "../components/vui/primitives/VDropdownMenu";
 import { VIconButton } from "../components/vui/primitives/VIconButton";
+import { VPopover } from "../components/vui/primitives/VPopover";
 import { getPageInstanceId } from "./pageInstance";
 import { useShellStore } from "../store/shellStore";
 import styles from "./AppShell.styles";
@@ -700,7 +701,7 @@ export function AppShell() {
   const restartCompletionDismissTimerRef = useRef<number | null>(null);
   const lifecycleRequestSeqRef = useRef(0);
   const lifecycleOverlayDismissedRef = useRef(false);
-  const utilityMenuRef = useRef<HTMLDivElement | null>(null);
+
 
   const shutdownLocalCompletionLoggedRef = useRef(false);
   const telemetrySeqRef = useRef(0);
@@ -1598,33 +1599,6 @@ export function AppShell() {
   }, [lang, t]);
 
   useEffect(() => {
-    if (!utilityOpen) {
-      return;
-    }
-
-    function handlePointerDown(event: PointerEvent) {
-      const target = event.target;
-      if (target instanceof Node && utilityMenuRef.current?.contains(target)) {
-        return;
-      }
-      setUtilityOpen(false);
-    }
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        setUtilityOpen(false);
-      }
-    }
-
-    document.addEventListener("pointerdown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [utilityOpen]);
-
-  useEffect(() => {
     setFetchJsonFailureReporter((failure) => {
       if (shouldSuppressApiFailureTelemetry(failure, {
         shutdownRequested,
@@ -2356,7 +2330,6 @@ export function AppShell() {
 
         <div className={styles.topActions} data-shell-group="system-actions">
           <div
-            ref={utilityMenuRef}
             className={
               utilityOpen
                 ? `${styles.utilityCluster} ${styles.utilityClusterOpen}`
@@ -2364,38 +2337,33 @@ export function AppShell() {
             }
             aria-label={t("topUtilityMenu")}
             title={t("topUtilityMenu")}
-            onMouseEnter={() => setUtilityOpen(true)}
-            onMouseLeave={(event) => {
-              if (!event.currentTarget.contains(document.activeElement)) {
-                setUtilityOpen(false);
-              }
-            }}
-            onBlur={(event) => {
-              const nextTarget = event.relatedTarget;
-              if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
-                setUtilityOpen(false);
-              }
-            }}
           >
-            <VButton
-              type="button"
-              variant="secondary"
-              className={styles.utilityTrigger}
-              aria-haspopup="menu"
-              aria-expanded={utilityOpen}
-              aria-controls="shell-mobile-route-menu"
+            <VPopover
+              open={utilityOpen}
+              onOpenChange={setUtilityOpen}
+              align="end"
+              side="bottom"
+              sideOffset={8}
               aria-label={t("topUtilityMenu")}
-              title={t("topUtilityMenu")}
-              onPress={() => setUtilityOpen(true)}
-              onFocus={() => setUtilityOpen(true)}
-              icon={<Wrench size={15} />}
-              trailingIcon={<ChevronDown size={13} className={styles.utilityChevron} />}
+              contentClassName={styles.utilityPopoverContent}
+              trigger={(
+                <VButton
+                  type="button"
+                  variant="secondary"
+                  className={styles.utilityTrigger}
+                  aria-haspopup="dialog"
+                  aria-expanded={utilityOpen}
+                  aria-label={t("topUtilityMenu")}
+                  title={t("topUtilityMenu")}
+                  icon={<Wrench size={15} />}
+                  trailingIcon={<ChevronDown size={13} className={styles.utilityChevron} />}
+                >
+                  <span className={styles.utilityTriggerLabel}>{t("topUtilityMenuShort")}</span>
+                  <span className={`${styles.statusDot} ${styles.status_idle}`} />
+                </VButton>
+              )}
             >
-              <span className={styles.utilityTriggerLabel}>{t("topUtilityMenuShort")}</span>
-              <span className={`${styles.statusDot} ${styles.status_idle}`} />
-            </VButton>
-            {utilityOpen ? (
-              <>
+              <div className={styles.utilityPopoverBody}>
                 <nav id="shell-mobile-route-menu" className={styles.mobileRouteMenu} aria-label={lang === "en" ? "Primary navigation" : "主导航"}>
                   {chatEnabled ? (
                     <NavLink
@@ -2432,8 +2400,8 @@ export function AppShell() {
                     onClose={closeUtilityMenu}
                   />
                 </Suspense>
-              </>
-            ) : null}
+              </div>
+            </VPopover>
           </div>
           <div
             className={styles.statusCluster}

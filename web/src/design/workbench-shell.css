@@ -646,35 +646,23 @@
   transform: rotate(180deg);
 }
 
+/* Utility panel lives inside Radix VPopover content (not absolute under the cluster). */
 :where(.vui-app-appshell).utilityPanel {
-  position: absolute;
-  top: calc(100% + 10px);
-  right: 0;
-  width: min(520px, calc(100vw - 40px));
-  max-height: min(78vh, 760px);
+  position: relative;
+  width: 100%;
+  max-height: none;
   display: grid;
   gap: 12px;
-  overflow: auto;
+  overflow: visible;
   padding: 14px;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-panel);
   background:
     var(--vui-gradient-route-soft),
     var(--shell-panel);
-  box-shadow: var(--vui-shadow-soft);
-  opacity: 0;
-  transform: translateY(-4px);
-  pointer-events: none;
-  transition: opacity 150ms ease, transform 150ms ease;
-}
-
-:where(.vui-app-appshell).utilityPanel[hidden] {
-  display: none;
-}
-
-:where(.vui-app-appshell).utilityClusterOpen .utilityPanel {
+  box-shadow: none;
   opacity: 1;
-  transform: translateY(0);
+  transform: none;
   pointer-events: auto;
 }
 

@@ -145,3 +145,38 @@
 
 ### 反冗余
 - 禁止再写 `role="menu"` + `fixed` 坐标面板平行系统；Agent/Session 上下文菜单应消费本组件
+
+---
+
+## VPopover
+
+### 职责
+非模态浮层面板（Radix Popover / shadcn 风格）：trigger + 任意内容。
+
+### 非职责
+- 不做动作列表（用 `VDropdownMenu`）
+- 不做打断主流程的确认（用 `VDialog` / `VConfirmDialog`）
+- 不做纯文案 tip（用 `VTooltip`）
+
+### 何时使用
+- 工具菜单、状态说明、短表单浮层、可滚动内容面板
+
+### 何时不要用
+| 场景 | 改用 |
+| --- | --- |
+| 纯操作列表 | `VDropdownMenu` |
+| 模态编辑 | `VDialog` |
+| 悬停短文案 | `VTooltip` |
+
+### API 要点
+- `trigger`（forwardRef 子节点）+ `children`
+- `open` / `onOpenChange` / `side` / `align` / `sideOffset` / `modal?`
+
+### 实现落点
+- `primitives/VPopover.tsx` → `renderers/shadcn/ShadcnPopover.tsx` → `@radix-ui/react-popover`
+
+### 已迁业务面
+- AppShell 顶栏工具菜单（click 打开，替代 hover 手写面板）
+
+### 反冗余
+- 禁止再写 cluster + absolute + pointerdown 关闭平行系统

@@ -174,7 +174,7 @@ export function AppShellUtilityMenu({ lang, t, frontendVisible, onClose }: AppSh
   return (
     <div
       className={styles.utilityPanel}
-      role="menu"
+      role="region"
       aria-label={t("topUtilityMenu")}
     >
       <VTooltip content={t("topUtilityMenuHint")} width="wide">
@@ -187,28 +187,27 @@ export function AppShellUtilityMenu({ lang, t, frontendVisible, onClose }: AppSh
         </div>
       </VTooltip>
       <div className={styles.utilityButtonGrid}>
-        <a href="/launcher" target="_blank" rel="noreferrer" className={styles.utilityButton} role="menuitem" onClick={onClose}>
+        <a href="/launcher" target="_blank" rel="noreferrer" className={styles.utilityButton} onClick={onClose}>
           <ExternalLink size={16} />
           <span>{lang === "zh" ? "启动器" : "Launcher"}</span>
         </a>
         <VTooltip content={t("usageUtilityTitle")}>
-          <NavLink to="/usage" className={({ isActive }) => isActive ? `${styles.utilityButton} ${styles.utilityButtonActive}` : styles.utilityButton} role="menuitem" onClick={onClose}>
+          <NavLink to="/usage" className={({ isActive }) => isActive ? `${styles.utilityButton} ${styles.utilityButtonActive}` : styles.utilityButton} onClick={onClose}>
             <Activity size={16} />
             <span>{t("navUsage")}</span>
           </NavLink>
         </VTooltip>
-        <NavLink to="/logs" className={({ isActive }) => isActive ? `${styles.utilityButton} ${styles.utilityButtonActive}` : styles.utilityButton} role="menuitem" onClick={onClose}>
+        <NavLink to="/logs" className={({ isActive }) => isActive ? `${styles.utilityButton} ${styles.utilityButtonActive}` : styles.utilityButton} onClick={onClose}>
           <ScrollText size={16} />
           <span>{t("navLogs")}</span>
         </NavLink>
-        <NavLink to="/git" className={({ isActive }) => isActive ? `${styles.utilityButton} ${styles.utilityButtonActive}` : styles.utilityButton} role="menuitem" onClick={onClose}>
+        <NavLink to="/git" className={({ isActive }) => isActive ? `${styles.utilityButton} ${styles.utilityButtonActive}` : styles.utilityButton} onClick={onClose}>
           <GitBranch size={16} />
           <span>{t("navGit")}</span>
         </NavLink>
         <VButton
           type="button"
           className={styles.utilityButton}
-          role="menuitem"
           icon={<FolderTree size={16} />}
           onPress={() => {
             requestUtilityFileTree();

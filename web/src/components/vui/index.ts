@@ -27,6 +27,7 @@ export {
   type VDropdownMenuProps,
 } from "./primitives/VDropdownMenu";
 export { VIconButton, type VIconButtonProps } from "./primitives/VIconButton";
+export { VPopover, type VPopoverProps } from "./primitives/VPopover";
 export { VNativeButton, type VNativeButtonProps } from "./primitives/VNativeButton";
 export { VPanel, type VPanelProps } from "./primitives/VPanel";
 export {
