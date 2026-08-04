@@ -54,6 +54,7 @@ import {
   useTeamsShellCanvasWorkspace,
   type NodeDragState,
 } from "./teams/useTeamsShellCanvasWorkspace";
+import { buildTeamsRouteMutationSurface } from "./teams/teamMutationSurface";
 import {
   type DataProcessingRecordListPayload,
   type SourceCollectionSummaryPayload,
@@ -2713,14 +2714,103 @@ export function TeamsRoute({
   const sourceCollectionRunStatus = sourceCollectionRunStatusQuery.data ?? sourceCollectionSummary?.runStatus ?? null;
   const sourceCollectionSearchPlanRef = selectedSourceCollectionRun?.scope?.dataSearchPlanRef ?? null;
   const aiSearchRuns = aiSearchRunsQuery.data?.runs ?? [];
-  const selectedTeamStartAiSearchPending =
-    startAiSearchRunMutation.isPending && startAiSearchRunMutation.variables?.teamId === selectedTeam?.teamId;
-  const selectedTeamStartAiSearchError =
-    startAiSearchRunMutation.variables?.teamId === selectedTeam?.teamId && startAiSearchRunMutation.error instanceof Error
-      ? startAiSearchRunMutation.error
-      : null;
-  const selectedTeamStartAiSearchResult =
-    startAiSearchRunMutation.variables?.teamId === selectedTeam?.teamId ? startAiSearchRunMutation.data : undefined;
+  const researchLoopTemplatesPayload = researchLoopTemplatesQuery.data ?? null;
+  const researchLoopStatus = researchLoopStatusQuery.data ?? null;
+  // Phase 4: team-scoped pending/error/result flags collapsed into one surface bag.
+  const {
+    selectedResearchProjectSourceCollectionResetPending,
+    selectedResearchProjectSourceCollectionResetError,
+    selectedTeamStartResearchStagePending,
+    selectedTeamStartResearchStageError,
+    selectedTeamStartResearchStageResult,
+    selectedTeamCreateExperimentPlanPending,
+    selectedTeamCreateExperimentPlanError,
+    selectedTeamCreateExperimentPlanResult,
+    selectedTeamMaterializeEngineeringProxyPending,
+    selectedTeamMaterializeEngineeringProxyError,
+    selectedTeamCompleteScientificHypothesisCandidateId,
+    selectedTeamCompleteScientificHypothesisError,
+    selectedTeamReviewExperimentHypothesisCandidateId,
+    selectedTeamReviewExperimentHypothesisError,
+    selectedTeamCreateExperimentHypothesisRevisionCandidateId,
+    selectedTeamCreateExperimentHypothesisRevisionError,
+    selectedTeamFreezeExperimentDesignPending,
+    selectedTeamFreezeExperimentDesignError,
+    selectedTeamFreezeExperimentDesignResult,
+    selectedTeamRegisterExperimentBaselineArtifactPending,
+    selectedTeamRegisterExperimentBaselineArtifactError,
+    selectedTeamRegisterExperimentBaselineArtifactResult,
+    selectedTeamRunExperimentSmokePending,
+    selectedTeamRunExperimentSmokeError,
+    selectedTeamRunExperimentSmokeResult,
+    selectedTeamRegisterExperimentSmokeResultPending,
+    selectedTeamRegisterExperimentSmokeResultError,
+    selectedTeamRegisterExperimentSmokeResultResult,
+    selectedTeamRegisterExperimentFullRunResultPending,
+    selectedTeamRegisterExperimentFullRunResultError,
+    selectedTeamRegisterExperimentFullRunResultResult,
+    selectedTeamRequestExperimentKnowledgeIngestionPending,
+    selectedTeamRequestExperimentKnowledgeIngestionError,
+    selectedTeamRequestExperimentKnowledgeIngestionResult,
+    selectedTeamCreateResearchLoopPending,
+    selectedTeamCreateResearchLoopError,
+    selectedTeamCreateResearchLoopResult,
+    selectedTeamRecordResearchLoopEvidencePending,
+    selectedTeamRecordResearchLoopEvidenceError,
+    selectedTeamRecordResearchLoopEvidenceResult,
+    selectedTeamRecordResearchLoopDecisionPending,
+    selectedTeamRecordResearchLoopDecisionError,
+    selectedTeamRecordResearchLoopDecisionResult,
+    selectedTeamStartSourceCollectionPending,
+    selectedTeamStartSourceCollectionError,
+    selectedTeamStartSourceCollectionResult,
+    selectedTeamStartSourceCollectionStageTaskPending,
+    selectedTeamStartSourceCollectionStageTaskError,
+    sourceCollectionStageSessionTaskPendingStageId,
+    selectedTeamRecordSourceCollectionOutputPending,
+    selectedTeamRecordSourceCollectionOutputError,
+    selectedTeamRecordSourceCollectionOutputResult,
+    selectedTeamExecuteSourceCollectionSearchPending,
+    selectedTeamExecuteSourceCollectionSearchError,
+    selectedTeamExecuteSourceCollectionSearchResult,
+    selectedTeamExtractSourceCollectionCandidatesPending,
+    selectedTeamExtractSourceCollectionCandidatesError,
+    selectedTeamExtractSourceCollectionCandidatesResult,
+    selectedSourceCollectionStorageOpenPending,
+    selectedSourceCollectionStorageOpenResult,
+    selectedSourceCollectionStorageOpenError,
+    selectedTeamStartAiSearchPending,
+    selectedTeamStartAiSearchError,
+    selectedTeamStartAiSearchResult,
+  } = buildTeamsRouteMutationSurface({
+    teamId: selectedTeam?.teamId,
+    resetResearchProjectSourceCollection: resetResearchProjectSourceCollectionMutation,
+    startResearchStageRound: startResearchStageRoundMutation,
+    createExperimentPlan: createExperimentPlanMutation,
+    materializeEngineeringProxyHypothesis: materializeEngineeringProxyHypothesisMutation,
+    completeScientificHypothesisFromDesign: completeScientificHypothesisFromDesignMutation,
+    reviewExperimentHypothesis: reviewExperimentHypothesisMutation,
+    createExperimentHypothesisRevision: createExperimentHypothesisRevisionMutation,
+    freezeExperimentDesign: freezeExperimentDesignMutation,
+    registerExperimentBaselineArtifact: registerExperimentBaselineArtifactMutation,
+    runExperimentSmoke: runExperimentSmokeMutation,
+    registerExperimentSmokeResult: registerExperimentSmokeResultMutation,
+    registerExperimentFullRunResult: registerExperimentFullRunResultMutation,
+    requestExperimentKnowledgeIngestion: requestExperimentKnowledgeIngestionMutation,
+    createResearchLoop: createResearchLoopMutation,
+    recordResearchLoopEvidence: recordResearchLoopEvidenceMutation,
+    recordResearchLoopDecision: recordResearchLoopDecisionMutation,
+    startSourceCollectionRun: startSourceCollectionRunMutation,
+    startSourceCollectionStageSessionTask: startSourceCollectionStageSessionTaskMutation,
+    recordSourceCollectionOutput: recordSourceCollectionOutputMutation,
+    executeSourceCollectionSearch: executeSourceCollectionSearchMutation,
+    extractSourceCollectionCandidates: extractSourceCollectionCandidatesMutation,
+    openSourceCollectionStorage: openSourceCollectionStorageMutation,
+    startAiSearchRun: startAiSearchRunMutation,
+    researchStageProjectAgentStarting: researchStageProjectAgentTasks.isStarting,
+    researchStageProjectAgentError: researchStageProjectAgentTasks.error,
+    selectedSourceCollectionRunEffectiveId,
+  });
   const latestAiSearchRun = selectedTeamStartAiSearchResult ?? aiSearchRuns[0] ?? null;
   const aiSearchRunCanStart = Boolean(selectedTeam?.teamId && aiSearchRunTopic.trim() && !selectedTeamStartAiSearchPending);
   const selectedSourceCollectionAssignment =
@@ -2751,174 +2841,6 @@ export function TeamsRoute({
     sourceCollectionResetResearchProjectId
     && sourceCollectionRuns.length > 0,
   );
-  const selectedResearchProjectSourceCollectionResetPending =
-    resetResearchProjectSourceCollectionMutation.isPending
-    && resetResearchProjectSourceCollectionMutation.variables?.teamId === selectedTeam?.teamId;
-  const selectedResearchProjectSourceCollectionResetError =
-    resetResearchProjectSourceCollectionMutation.variables?.teamId === selectedTeam?.teamId
-    && resetResearchProjectSourceCollectionMutation.error instanceof Error
-      ? resetResearchProjectSourceCollectionMutation.error
-      : null;
-  const selectedTeamStartResearchStagePending =
-    (startResearchStageRoundMutation.isPending && startResearchStageRoundMutation.variables?.teamId === selectedTeam?.teamId)
-    || researchStageProjectAgentTasks.isStarting;
-  const selectedTeamStartResearchStageError =
-    startResearchStageRoundMutation.variables?.teamId === selectedTeam?.teamId && startResearchStageRoundMutation.error instanceof Error
-      ? startResearchStageRoundMutation.error
-      : researchStageProjectAgentTasks.error instanceof Error
-        ? researchStageProjectAgentTasks.error
-        : null;
-  const selectedTeamStartResearchStageResult =
-    startResearchStageRoundMutation.variables?.teamId === selectedTeam?.teamId ? startResearchStageRoundMutation.data : undefined;
-  const selectedTeamCreateExperimentPlanPending =
-    createExperimentPlanMutation.isPending && createExperimentPlanMutation.variables?.teamId === selectedTeam?.teamId;
-  const selectedTeamCreateExperimentPlanError =
-    createExperimentPlanMutation.variables?.teamId === selectedTeam?.teamId && createExperimentPlanMutation.error instanceof Error
-      ? createExperimentPlanMutation.error
-      : null;
-  const selectedTeamCreateExperimentPlanResult =
-    createExperimentPlanMutation.variables?.teamId === selectedTeam?.teamId ? createExperimentPlanMutation.data : undefined;
-  const selectedTeamMaterializeEngineeringProxyPending =
-    materializeEngineeringProxyHypothesisMutation.isPending
-    && materializeEngineeringProxyHypothesisMutation.variables?.teamId === selectedTeam?.teamId;
-  const selectedTeamMaterializeEngineeringProxyError =
-    materializeEngineeringProxyHypothesisMutation.variables?.teamId === selectedTeam?.teamId
-    && materializeEngineeringProxyHypothesisMutation.error instanceof Error
-      ? materializeEngineeringProxyHypothesisMutation.error
-      : null;
-  const selectedTeamCompleteScientificHypothesisCandidateId =
-    completeScientificHypothesisFromDesignMutation.isPending
-    && completeScientificHypothesisFromDesignMutation.variables?.teamId === selectedTeam?.teamId
-      ? completeScientificHypothesisFromDesignMutation.variables.candidateId
-      : "";
-  const selectedTeamCompleteScientificHypothesisError =
-    completeScientificHypothesisFromDesignMutation.variables?.teamId === selectedTeam?.teamId
-    && completeScientificHypothesisFromDesignMutation.error instanceof Error
-      ? completeScientificHypothesisFromDesignMutation.error
-      : null;
-  const selectedTeamReviewExperimentHypothesisCandidateId =
-    reviewExperimentHypothesisMutation.isPending
-    && reviewExperimentHypothesisMutation.variables?.teamId === selectedTeam?.teamId
-      ? reviewExperimentHypothesisMutation.variables.candidateId
-      : "";
-  const selectedTeamReviewExperimentHypothesisError =
-    reviewExperimentHypothesisMutation.variables?.teamId === selectedTeam?.teamId
-    && reviewExperimentHypothesisMutation.error instanceof Error
-      ? reviewExperimentHypothesisMutation.error
-      : null;
-  const selectedTeamCreateExperimentHypothesisRevisionCandidateId =
-    createExperimentHypothesisRevisionMutation.isPending
-    && createExperimentHypothesisRevisionMutation.variables?.teamId === selectedTeam?.teamId
-      ? createExperimentHypothesisRevisionMutation.variables.candidateId
-      : "";
-  const selectedTeamCreateExperimentHypothesisRevisionError =
-    createExperimentHypothesisRevisionMutation.variables?.teamId === selectedTeam?.teamId
-    && createExperimentHypothesisRevisionMutation.error instanceof Error
-      ? createExperimentHypothesisRevisionMutation.error
-      : null;
-  const selectedTeamFreezeExperimentDesignPending =
-    freezeExperimentDesignMutation.isPending && freezeExperimentDesignMutation.variables?.teamId === selectedTeam?.teamId;
-  const selectedTeamFreezeExperimentDesignError =
-    freezeExperimentDesignMutation.variables?.teamId === selectedTeam?.teamId && freezeExperimentDesignMutation.error instanceof Error
-      ? freezeExperimentDesignMutation.error
-      : null;
-  const selectedTeamFreezeExperimentDesignResult =
-    freezeExperimentDesignMutation.variables?.teamId === selectedTeam?.teamId
-      ? freezeExperimentDesignMutation.data
-      : undefined;
-  const selectedTeamRegisterExperimentBaselineArtifactPending =
-    registerExperimentBaselineArtifactMutation.isPending && registerExperimentBaselineArtifactMutation.variables?.teamId === selectedTeam?.teamId;
-  const selectedTeamRegisterExperimentBaselineArtifactError =
-    registerExperimentBaselineArtifactMutation.variables?.teamId === selectedTeam?.teamId && registerExperimentBaselineArtifactMutation.error instanceof Error
-      ? registerExperimentBaselineArtifactMutation.error
-      : null;
-  const selectedTeamRegisterExperimentBaselineArtifactResult =
-    registerExperimentBaselineArtifactMutation.variables?.teamId === selectedTeam?.teamId
-      ? registerExperimentBaselineArtifactMutation.data
-      : undefined;
-  const selectedTeamRunExperimentSmokePending =
-    runExperimentSmokeMutation.isPending && runExperimentSmokeMutation.variables?.teamId === selectedTeam?.teamId;
-  const selectedTeamRunExperimentSmokeError =
-    runExperimentSmokeMutation.variables?.teamId === selectedTeam?.teamId && runExperimentSmokeMutation.error instanceof Error
-      ? runExperimentSmokeMutation.error
-      : null;
-  const selectedTeamRunExperimentSmokeResult =
-    runExperimentSmokeMutation.variables?.teamId === selectedTeam?.teamId
-      ? runExperimentSmokeMutation.data
-      : undefined;
-  const selectedTeamRegisterExperimentSmokeResultPending =
-    registerExperimentSmokeResultMutation.isPending && registerExperimentSmokeResultMutation.variables?.teamId === selectedTeam?.teamId;
-  const selectedTeamRegisterExperimentSmokeResultError =
-    registerExperimentSmokeResultMutation.variables?.teamId === selectedTeam?.teamId && registerExperimentSmokeResultMutation.error instanceof Error
-      ? registerExperimentSmokeResultMutation.error
-      : null;
-  const selectedTeamRegisterExperimentSmokeResultResult =
-    registerExperimentSmokeResultMutation.variables?.teamId === selectedTeam?.teamId
-      ? registerExperimentSmokeResultMutation.data
-      : undefined;
-  const selectedTeamRegisterExperimentFullRunResultPending =
-    registerExperimentFullRunResultMutation.isPending && registerExperimentFullRunResultMutation.variables?.teamId === selectedTeam?.teamId;
-  const selectedTeamRegisterExperimentFullRunResultError =
-    registerExperimentFullRunResultMutation.variables?.teamId === selectedTeam?.teamId && registerExperimentFullRunResultMutation.error instanceof Error
-      ? registerExperimentFullRunResultMutation.error
-      : null;
-  const selectedTeamRegisterExperimentFullRunResultResult =
-    registerExperimentFullRunResultMutation.variables?.teamId === selectedTeam?.teamId
-      ? registerExperimentFullRunResultMutation.data
-      : undefined;
-  const selectedTeamRequestExperimentKnowledgeIngestionPending =
-    requestExperimentKnowledgeIngestionMutation.isPending && requestExperimentKnowledgeIngestionMutation.variables?.teamId === selectedTeam?.teamId;
-  const selectedTeamRequestExperimentKnowledgeIngestionError =
-    requestExperimentKnowledgeIngestionMutation.variables?.teamId === selectedTeam?.teamId
-    && requestExperimentKnowledgeIngestionMutation.error instanceof Error
-      ? requestExperimentKnowledgeIngestionMutation.error
-      : null;
-  const selectedTeamRequestExperimentKnowledgeIngestionResult =
-    requestExperimentKnowledgeIngestionMutation.variables?.teamId === selectedTeam?.teamId
-      ? requestExperimentKnowledgeIngestionMutation.data
-      : undefined;
-  const researchLoopTemplatesPayload = researchLoopTemplatesQuery.data ?? null;
-  const researchLoopStatus = researchLoopStatusQuery.data ?? null;
-  const selectedTeamCreateResearchLoopPending =
-    createResearchLoopMutation.isPending && createResearchLoopMutation.variables?.teamId === selectedTeam?.teamId;
-  const selectedTeamCreateResearchLoopError =
-    createResearchLoopMutation.variables?.teamId === selectedTeam?.teamId && createResearchLoopMutation.error instanceof Error
-      ? createResearchLoopMutation.error
-      : null;
-  const selectedTeamCreateResearchLoopResult =
-    createResearchLoopMutation.variables?.teamId === selectedTeam?.teamId ? createResearchLoopMutation.data : undefined;
-  const selectedTeamRecordResearchLoopEvidencePending =
-    recordResearchLoopEvidenceMutation.isPending && recordResearchLoopEvidenceMutation.variables?.teamId === selectedTeam?.teamId;
-  const selectedTeamRecordResearchLoopEvidenceError =
-    recordResearchLoopEvidenceMutation.variables?.teamId === selectedTeam?.teamId && recordResearchLoopEvidenceMutation.error instanceof Error
-      ? recordResearchLoopEvidenceMutation.error
-      : null;
-  const selectedTeamRecordResearchLoopEvidenceResult =
-    recordResearchLoopEvidenceMutation.variables?.teamId === selectedTeam?.teamId ? recordResearchLoopEvidenceMutation.data : undefined;
-  const selectedTeamRecordResearchLoopDecisionPending =
-    recordResearchLoopDecisionMutation.isPending && recordResearchLoopDecisionMutation.variables?.teamId === selectedTeam?.teamId;
-  const selectedTeamRecordResearchLoopDecisionError =
-    recordResearchLoopDecisionMutation.variables?.teamId === selectedTeam?.teamId && recordResearchLoopDecisionMutation.error instanceof Error
-      ? recordResearchLoopDecisionMutation.error
-      : null;
-  const selectedTeamRecordResearchLoopDecisionResult =
-    recordResearchLoopDecisionMutation.variables?.teamId === selectedTeam?.teamId ? recordResearchLoopDecisionMutation.data : undefined;
-  const selectedTeamStartSourceCollectionPending =
-    startSourceCollectionRunMutation.isPending && startSourceCollectionRunMutation.variables?.teamId === selectedTeam?.teamId;
-  const selectedTeamStartSourceCollectionError =
-    startSourceCollectionRunMutation.variables?.teamId === selectedTeam?.teamId && startSourceCollectionRunMutation.error instanceof Error
-      ? startSourceCollectionRunMutation.error
-      : null;
-  const selectedTeamStartSourceCollectionResult =
-    startSourceCollectionRunMutation.variables?.teamId === selectedTeam?.teamId ? startSourceCollectionRunMutation.data : undefined;
-  const selectedTeamStartSourceCollectionStageTaskPending =
-    startSourceCollectionStageSessionTaskMutation.isPending && startSourceCollectionStageSessionTaskMutation.variables?.teamId === selectedTeam?.teamId;
-  const selectedTeamStartSourceCollectionStageTaskError =
-    startSourceCollectionStageSessionTaskMutation.variables?.teamId === selectedTeam?.teamId && startSourceCollectionStageSessionTaskMutation.error instanceof Error
-      ? startSourceCollectionStageSessionTaskMutation.error
-      : null;
-  const sourceCollectionStageSessionTaskPendingStageId =
-    selectedTeamStartSourceCollectionStageTaskPending ? startSourceCollectionStageSessionTaskMutation.variables?.stageId : "";
   const sourceCollectionPromptCachePolicy =
     [
       selectedTeamStartSourceCollectionResult?.promptCachePolicy,
@@ -2946,33 +2868,6 @@ export function TeamsRoute({
     sourceCollectionPromptCachePolicy?.requirement || sourceCollectionPromptCachePolicyRef?.requirement || SOURCE_COLLECTION_PROMPT_CACHE_POLICY.requirement;
   const sourceCollectionOutputHasRecord =
     Boolean(sourceCollectionOutputDraft.title.trim() || sourceCollectionOutputDraft.sourceRef.trim() || sourceCollectionOutputDraft.rawLocation.trim());
-  const selectedTeamRecordSourceCollectionOutputPending =
-    recordSourceCollectionOutputMutation.isPending && recordSourceCollectionOutputMutation.variables?.teamId === selectedTeam?.teamId;
-  const selectedTeamRecordSourceCollectionOutputError =
-    recordSourceCollectionOutputMutation.variables?.teamId === selectedTeam?.teamId && recordSourceCollectionOutputMutation.error instanceof Error
-      ? recordSourceCollectionOutputMutation.error
-      : null;
-  const selectedTeamRecordSourceCollectionOutputResult =
-    recordSourceCollectionOutputMutation.variables?.teamId === selectedTeam?.teamId ? recordSourceCollectionOutputMutation.data : undefined;
-  const selectedTeamExecuteSourceCollectionSearchPending =
-    executeSourceCollectionSearchMutation.isPending && executeSourceCollectionSearchMutation.variables?.teamId === selectedTeam?.teamId;
-  const selectedTeamExecuteSourceCollectionSearchError =
-    executeSourceCollectionSearchMutation.variables?.teamId === selectedTeam?.teamId && executeSourceCollectionSearchMutation.error instanceof Error
-      ? executeSourceCollectionSearchMutation.error
-      : null;
-  const selectedTeamExecuteSourceCollectionSearchResult =
-    executeSourceCollectionSearchMutation.variables?.teamId === selectedTeam?.teamId ? executeSourceCollectionSearchMutation.data : undefined;
-  const selectedTeamExtractSourceCollectionCandidatesPending =
-    extractSourceCollectionCandidatesMutation.isPending && extractSourceCollectionCandidatesMutation.variables?.teamId === selectedTeam?.teamId;
-  const selectedTeamExtractSourceCollectionCandidatesError =
-    extractSourceCollectionCandidatesMutation.variables?.teamId === selectedTeam?.teamId && extractSourceCollectionCandidatesMutation.error instanceof Error
-      ? extractSourceCollectionCandidatesMutation.error
-      : null;
-  const selectedTeamExtractSourceCollectionCandidatesResult =
-    extractSourceCollectionCandidatesMutation.variables?.teamId === selectedTeam?.teamId
-    && extractSourceCollectionCandidatesMutation.data?.runId === selectedSourceCollectionRunEffectiveId
-      ? extractSourceCollectionCandidatesMutation.data
-      : null;
   const selectedTeamInitialSourceCollectionSearchResult = selectedTeamStartResearchStageResult?.sourceCollectionSearchExecution;
   const selectedSourceCollectionSearchExecutionResult =
     selectedTeamExecuteSourceCollectionSearchResult ?? selectedTeamInitialSourceCollectionSearchResult;
@@ -2993,14 +2888,6 @@ export function TeamsRoute({
     selectedSourceCollectionSearchExecutionResult?.storageArtifacts
     ?? sourceCollectionSummaryStorageArtifacts
     ?? sourceCollectionStorageArtifactsForRun(selectedTeam?.teamId ?? effectiveTeamId, selectedSourceCollectionRunEffectiveId);
-  const selectedSourceCollectionStorageOpenPending =
-    openSourceCollectionStorageMutation.isPending && openSourceCollectionStorageMutation.variables?.teamId === selectedTeam?.teamId;
-  const selectedSourceCollectionStorageOpenResult =
-    openSourceCollectionStorageMutation.variables?.teamId === selectedTeam?.teamId ? openSourceCollectionStorageMutation.data : undefined;
-  const selectedSourceCollectionStorageOpenError =
-    openSourceCollectionStorageMutation.variables?.teamId === selectedTeam?.teamId && openSourceCollectionStorageMutation.error instanceof Error
-      ? openSourceCollectionStorageMutation.error
-      : null;
   useEffect(() => {
     if (!researchWorkflowTeamSelected || !pageVisible || !selectedTeam?.teamId || !selectedSourceCollectionRunEffectiveId) {
       return;
