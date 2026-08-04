@@ -12,6 +12,7 @@ import teamNodeBindingPanelSource from "./teams/TeamNodeBindingPanel.tsx?raw";
 import teamShellToolbarSource from "./teams/TeamShellToolbar.tsx?raw";
 import teamCanvasReadOnlyInspectorSource from "./teams/TeamCanvasReadOnlyInspector.tsx?raw";
 import teamsWorkspacePanelRenderersSource from "./teams/teamsWorkspacePanelRenderers.tsx?raw";
+import teamSourceCollectionInjectRenderersSource from "./teams/teamSourceCollectionInjectRenderers.tsx?raw";
 import useSourceCollectionWorkspaceSource from "./teams/useSourceCollectionWorkspace.ts?raw";
 import useResearchExperimentWorkspaceSource from "./teams/useResearchExperimentWorkspace.ts?raw";
 import useTeamsShellCanvasWorkspaceSource from "./teams/useTeamsShellCanvasWorkspace.ts?raw";
@@ -28,6 +29,7 @@ const routeSource = [
   teamShellToolbarSource,
   teamCanvasReadOnlyInspectorSource,
   teamsWorkspacePanelRenderersSource,
+  teamSourceCollectionInjectRenderersSource,
   useSourceCollectionWorkspaceSource,
   useResearchExperimentWorkspaceSource,
   useTeamsShellCanvasWorkspaceSource,
@@ -857,12 +859,15 @@ describe("TeamsRoute layout contract", () => {
     expect(initialLoadingSurfaceSource).toContain("fill");
     expect(initialLoadingSurfaceSource).not.toContain("visibleTeamSummary.activeTeamCount");
     expect(initialLoadingSurfaceSource).not.toContain("visibleTeamSummary.memberCount");
-    // Board main: research overview cold load must fill the region (not styles.empty one-liner).
-    // Fill loading/empty chrome lives on TeamResearchBoardPrimarySurface after extraction.
-    expect(teamResearchBoardPrimarySurfaceSource).toContain('title={lang === "zh" ? "正在读取科研总览" : "Loading research overview"}');
+    // Board main: research overview progressive shell (stable IA + in-place skeleton),
+    // not a full-region fill "正在读取" surface and not styles.empty one-liner.
+    expect(teamResearchBoardPrimarySurfaceSource).not.toContain("正在读取科研总览");
+    expect(teamResearchBoardPrimarySurfaceSource).not.toContain("Loading research overview");
+    expect(teamResearchBoardPrimarySurfaceSource).toContain("workflowPending || workflowReady");
     expect(teamResearchBoardPrimarySurfaceSource).toContain("fill");
-    expect(teamResearchBoardPrimarySurfaceSource).not.toContain('styles.empty}>{lang === "zh" ? "正在读取科研总览');
     expect(routeSource).toContain("TeamResearchBoardPrimarySurface");
+    expect(routeSource).toContain("loading: overviewWorkflowPending");
+    expect(routeSource).toContain("loading={overviewWorkflowPending}");
     expect(routeSource).toContain("fill");
     expect(routeSource).toContain("styles.emptyCanvasPanel");
     expect(routeSource).not.toContain("选择团队后进入对应工作区");
@@ -3438,7 +3443,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("<TeamSourceCollectionPhaseCloseGatePanel");
     expect(routeSource).toContain("onOpenStage={selectSourceCollectionStage}");
     expect(teamLazyPanelsSource).toContain('createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamSourceCollectionSearchBriefPanel")');
-    expect(routeSource).toContain("function renderSourceCollectionSearchBrief()");
+    expect(routeSource).toContain("function renderSourceCollectionSearchBrief(");
+    expect(routeSource).toContain("createSourceCollectionInjectRenderers");
     expect(standaloneSource).toContain("searchBrief={renderSourceCollectionSearchBrief()}");
     expect(standaloneSource).toContain("runHistoryLabel=");
     expect(standaloneSource).toContain("compact");

@@ -147,7 +147,6 @@ import {
   type ResearchLoopTemplatesPayload,
 } from "./teams/experimentLoopModel";
 import {
-  SOURCE_COLLECTION_LOCAL_SCAN_DEFAULT_ROOTS,
   SOURCE_COLLECTION_PROMPT_CACHE_MODEL_LABEL,
   SOURCE_COLLECTION_PROMPT_CACHE_POLICY,
   SOURCE_COLLECTION_RESULT_PAGE_SIZE,
@@ -174,7 +173,6 @@ import {
   sourceCollectionStatusLabel,
   sourceCollectionStorageArtifactsForRun,
   sourceCollectionStorageTargetForRef,
-  sourceCollectionFreshProjectDraft,
   splitDraftList,
   workflowIngestionStatusLabel,
   type SourceCollectionDraft,
@@ -182,26 +180,8 @@ import {
   type SourceCollectionStorageArtifacts,
   type SourceCollectionStorageOpenTarget,
 } from "./teams/source-collection/presentationModel";
-import { TeamSourceCollectionModeFields } from "./teams/TeamSourceCollectionModeFields";
-import { TeamSourceCollectionManualWritebackInject } from "./teams/TeamSourceCollectionManualWritebackInject";
-import { TeamSourceCollectionControlsInject } from "./teams/TeamSourceCollectionControlsInject";
-import { TeamSourceCollectionActiveStageInject } from "./teams/TeamSourceCollectionActiveStageInject";
-import { TeamSourceCollectionStorageActionsInject } from "./teams/TeamSourceCollectionStorageActionsInject";
-import { TeamSourceCollectionSearchBriefShell } from "./teams/TeamSourceCollectionSearchBriefShell";
-import { TeamSourceCollectionRunSwitcherInject } from "./teams/TeamSourceCollectionRunSwitcherInject";
-import { TeamSourceCollectionScreeningInject } from "./teams/TeamSourceCollectionScreeningInject";
-import { TeamSourceCollectionGraphInject } from "./teams/TeamSourceCollectionGraphInject";
-import { TeamSourceCollectionMemoryInject } from "./teams/TeamSourceCollectionMemoryInject";
-import { TeamSourceCollectionSelectedSourceInject } from "./teams/TeamSourceCollectionSelectedSourceInject";
-import { TeamSourceCollectionConversationInject } from "./teams/TeamSourceCollectionConversationInject";
-import { TeamSourceCollectionFilterBarInject } from "./teams/TeamSourceCollectionFilterBarInject";
-import { TeamSourceCollectionPaginationInject } from "./teams/TeamSourceCollectionPaginationInject";
-import { TeamSourceCollectionStageAgentsInject } from "./teams/TeamSourceCollectionStageAgentsInject";
 import { createTeamsWorkspacePanelRenderers } from "./teams/teamsWorkspacePanelRenderers";
-import {
-  buildSourceCollectionControlsFeedbackBag,
-  buildSourceCollectionControlsMetricsBag,
-} from "./teams/source-collection/controlsFeedbackBag";
+import { createSourceCollectionInjectRenderers } from "./teams/teamSourceCollectionInjectRenderers";
 
 import {
   edgeLine,
@@ -479,7 +459,6 @@ import {
   SOURCE_COLLECTION_STAGE_AGENT_KEYS,
   resolveSourceCollectionStageAgentChatState,
   selectSourceCollectionStagePrimaryBinding,
-  sourceCollectionPageSlice,
   sourceCollectionStageAgentBindingsForStage,
   sourceCollectionStageChatReturnLabel as sourceCollectionStageChatReturnLabelPure,
   sourceCollectionStageDisplayState as sourceCollectionStageDisplayStatePure,
@@ -1536,66 +1515,179 @@ export function TeamsRoute({
     }
   }
 
-  function renderSourceCollectionStageAgents(stageId: SourceCollectionStageModuleId) {
-    return (
-      <TeamSourceCollectionStageAgentsInject
-        lang={lang}
-        stageId={stageId}
-        bindings={sourceCollectionStageAgentBindings(stageId)}
-        agentSummaryPending={agentSummaryQuery.isPending}
-        agentSummaryFetching={agentSummaryQuery.isFetching}
-        agentSummaryError={agentSummaryQuery.isError}
-        teamId={selectedTeam?.teamId}
-        returnTo={selectedTeamReturnRoute}
-      />
-    );
-  }
-
-  function renderSourceCollectionFilterBar(
-    counts: Record<SourceCollectionSourceFilter, number>,
-    label: string,
-    loading = false,
-  ) {
-    return (
-      <TeamSourceCollectionFilterBarInject
-        lang={lang}
-        counts={counts}
-        label={label}
-        selected={sourceCollectionSourceFilter}
-        loading={loading}
-        loadingAllText={sourceCollectionLoadingText}
-        onSelect={setSourceCollectionSourceFilter}
-      />
-    );
-  }
-
-  function sourceCollectionPageItems<T>(stageId: SourceCollectionStageModuleId, items: T[]) {
-    return sourceCollectionPageSlice(items, sourceCollectionResultPageByStage[stageId] ?? 1);
-  }
-
-  function setSourceCollectionResultPage(stageId: SourceCollectionStageModuleId, page: number) {
-    setSourceCollectionResultPageByStage((current) => ({
-      ...current,
-      [stageId]: Math.max(1, page),
-    }));
-  }
-
-  function stopSourceCollectionPaginationEvent(event: ReactMouseEvent<HTMLDivElement>) {
-    event.stopPropagation();
-  }
-
-  function renderSourceCollectionPagination(stageId: SourceCollectionStageModuleId, total: number) {
-    return (
-      <TeamSourceCollectionPaginationInject
-        lang={lang}
-        stageId={stageId}
-        total={total}
-        page={sourceCollectionResultPageByStage[stageId] ?? 1}
-        onPageChange={setSourceCollectionResultPage}
-        onContain={stopSourceCollectionPaginationEvent}
-      />
-    );
-  }
+  const {
+    renderSourceCollectionStageAgents,
+    renderSourceCollectionFilterBar,
+    sourceCollectionPageItems,
+    setSourceCollectionResultPage,
+    stopSourceCollectionPaginationEvent,
+    renderSourceCollectionPagination,
+    renderSourceCollectionRunSwitcher,
+    renderSourceCollectionConversation,
+    renderSourceCollectionStorageActions,
+    renderSourceCollectionSelectedSourcePanel,
+    renderSourceCollectionScreeningPanel,
+    renderSourceCollectionGraphPanel,
+    renderSourceCollectionMemoryPanel,
+    renderSourceCollectionModeFields,
+    renderSourceCollectionSearchBrief,
+    renderSourceCollectionManualWritebackPanel,
+    renderSourceCollectionControlsPanel,
+    renderSourceCollectionActiveStagePanel,
+  } = createSourceCollectionInjectRenderers({
+    lang,
+    sourceCollectionStageAgentBindings,
+    agentSummaryQuery,
+    selectedTeam,
+    selectedTeamReturnRoute,
+    sourceCollectionSourceFilter,
+    setSourceCollectionSourceFilter,
+    sourceCollectionLoadingText,
+    sourceCollectionResultPageByStage,
+    setSourceCollectionResultPageByStage,
+    sourceCollectionRuns,
+    selectedSourceCollectionRun,
+    selectedSourceCollectionRunEffectiveId,
+    sourceCollectionHistoricalRunWithRecords,
+    sourceCollectionShowingHistoricalRunByDefault,
+    sourceCollectionRecordsDataLoading,
+    sourceCollectionRunStatus,
+    setSelectedSourceCollectionRunId,
+    sourceCollectionFilteredRecords,
+    sourceCollectionRecords,
+    sourceCollectionRawRecordCount,
+    sourceCollectionRecordClickableSourceCount,
+    sourceCollectionRecordLocalFileCount,
+    sourceCollectionStageModules,
+    sourceCollectionStageActionReadinessFor,
+    sourceCollectionDraft,
+    setSourceCollectionDraft,
+    sourceCollectionCollectedCountLabel,
+    selectedSourceCollectionStorageArtifacts,
+    sourceCollectionBoardNextStepLabel,
+    sourceCollectionActionDisabledTitle,
+    sourceCollectionRecordFilterCounts,
+    sourceCollectionCollectedCountText,
+    sourceCollectionDisplayedCandidateCountText,
+    sourceCollectionPendingCandidateImportCount,
+    sourceCollectionRecordMissingSourceCount,
+    sourceCollectionCandidatesByRecordId,
+    selectedSourceCollectionCandidateId,
+    selectSourceCollectionCandidate,
+    selectedSourceCollectionStorageOpenPending,
+    selectedSourceCollectionStorageOpenResult,
+    selectedSourceCollectionStorageOpenError,
+    openSourceCollectionStorageTarget,
+    selectedSourceCollectionCandidate,
+    selectedSourceCollectionCandidateTrace,
+    selectedSourceCollectionCandidateStorageArtifacts,
+    workflowQualityToneBound,
+    sourceCollectionFilteredRunCandidates,
+    sourceCollectionDisplayedCandidateCount,
+    sourceCollectionCountText,
+    sourceCollectionPrimaryDataLoading,
+    sourceCollectionDataSyncText,
+    sourceCollectionFocusedPanelId,
+    selectedSourceCollectionStageId,
+    sourceCollectionExpandedPanelId,
+    setSourceCollectionExpandedPanelId,
+    sourceCollectionExtractionDefaultPanelId,
+    sourceCollectionScreeningStepState,
+    sourceCollectionDisplayedCandidateFilterCounts,
+    sourceCollectionProjectedAssessedCountText,
+    sourceCollectionProjectedApprovedCountText,
+    sourceCollectionRunPendingScreeningCountText,
+    sourceCollectionEvidenceReadyCandidateCount,
+    sourceCollectionMissingEvidenceAnchorCount,
+    runSourceCollectionScreeningAction,
+    sourceCollectionScreeningDisabled,
+    selectedTeamSourceQualityPending,
+    sourceCollectionScreeningActionReadiness,
+    sourceCollectionScreeningButtonText,
+    sourceCollectionScreeningButtonTitle,
+    sourceCollectionScreeningStatusText,
+    sourceCollectionQualityBatchFeedback,
+    sourceCollectionExtractionNeedsAgentMaterial,
+    sourceCollectionRunPendingScreeningCount,
+    sourceCollectionProjectedApprovedCount,
+    openSourceCollectionScreeningPanel,
+    teamWorkflowSourceQualityStatus,
+    teamWorkflowSourceQualityStatusQuery,
+    workflowIngestionToneBound,
+    selectedTeamSourceQualityError,
+    selectedTeamAssessSourceQualityPending,
+    assessSourceQualityMutation,
+    selectedTeamPlanPaperNoteChunksPending,
+    planPaperNoteChunksMutation,
+    sourceCollectionGraphProjection,
+    sourceCollectionProjectedGraphNodeCount,
+    sourceCollectionProjectedGraphEdgeCount,
+    teamWorkflowCandidateGraph,
+    teamWorkflowCandidatesById,
+    sourceCollectionGraphStepState,
+    teamWorkflowCandidateGraphQuery,
+    selectedTeamBuildCandidateGraphError,
+    teamWorkflowKnowledgeIngestionStatus,
+    sourceCollectionMemoryStepState,
+    sourceCollectionCandidateFilterCounts,
+    knowledgePendingReviewCount,
+    formalKnowledgeItemCount,
+    sourceCollectionApprovedCount,
+    teamWorkflowKnowledgeIngestionStatusQuery,
+    knowledgeExpansionWorkflowTeamSelected,
+    sourceCollectionDraftHydratedRunIdRef,
+    sourceCollectionDraftHydratedSearchPlanRef,
+    activeSourceCollectionResearchProject,
+    sourceCollectionFreshProjectDraftIdRef,
+    sourceCollectionResetResearchProjectId,
+    resetResearchProjectSourceCollectionMutation,
+    sourceCollectionResetAvailable,
+    selectedResearchProjectSourceCollectionResetPending,
+    selectedResearchProjectSourceCollectionResetError,
+    sourceCollectionCanStart,
+    selectedTeamStartSourceCollectionPending,
+    startSourceCollectionRunMutation,
+    sourceCollectionOutputDraft,
+    setSourceCollectionOutputDraft,
+    sourceCollectionAssignments,
+    selectedSourceCollectionAssignment,
+    canRecordSourceCollectionOutput,
+    selectedTeamRecordSourceCollectionOutputPending,
+    sourceCollectionOutputHasRecord,
+    recordSourceCollectionOutputMutation,
+    sourceCollectionControlPanelRef,
+    sourceCollectionStageFocusLabel,
+    sourceCollectionFindingRunOptions,
+    sourceCollectionFindingAssignments,
+    sourceCollectionFindingQueries,
+    selectedTeamKnowledgeCollectionIngestResult,
+    selectedTeamKnowledgeCollectionIngestError,
+    selectedTeamStartSourceCollectionError,
+    selectedTeamRecordSourceCollectionOutputError,
+    selectedTeamExecuteSourceCollectionSearchError,
+    selectedTeamStartSourceCollectionStageTaskError,
+    selectedTeamExecuteSourceCollectionSearchResult,
+    selectedTeamRecordSourceCollectionOutputResult,
+    candidateGraphNodeCount,
+    candidateGraphEdgeCount,
+    sourceCollectionPrecheckCandidateCount,
+    sourceCollectionStageAgentChatState,
+    repairChallengeCupTeamAgentsMutation,
+    sourceCollectionStagePrimaryAgentBinding,
+    openSourceCollectionStageAgentChat,
+    startSourceCollectionStageSessionTask,
+    sourceCollectionFindingStageCompact,
+    sourceCollectionCandidateProjection,
+    sourceCollectionRunApprovedCount,
+    sourceCollectionCandidateStepState,
+    sourceCollectionExtractionExcludedRecoveryState,
+    runSourceCollectionCandidateExtractionAction,
+    sourceCollectionCandidateExtractionActionReadiness,
+    sourceCollectionExtractionCanProceedAfterExclusions,
+    sourceCollectionUnverifiableCandidateIds,
+    excludeUnverifiableSourceCollectionCandidates,
+    selectSourceCollectionStage,
+  });
 
   function openSourceCollectionStage(stageId: SourceCollectionStageModuleId) {
     selectSourceCollectionStage(stageId);
@@ -1682,39 +1774,60 @@ export function TeamsRoute({
   }
 
   function renderResearchOverviewSurface() {
-    if (!teamWorkflow) {
-      return null;
-    }
+    // Progressive fill: mount the stable overview IA immediately.
+    // Primary CTA + three-column board keep geometry; only inner slots skeleton
+    // until each query settles. Never return null just because workflow is pending.
+    const overviewWorkflowPending = teamWorkflowQuery.isPending;
+    const overviewProgressPending = researchProjectProgressQuery.isPending
+      && Boolean(activeSourceCollectionResearchProjectId);
+    const stageLabelSource =
+      researchProjectProgress?.currentStage
+      || teamWorkflow?.stateMachine.currentStage
+      || "";
+    const stageMetricReady = Boolean(stageLabelSource) || (!overviewWorkflowPending && !overviewProgressPending);
+    const sourcesMetricReady =
+      researchProjectProgress != null
+      || !overviewProgressPending
+      || sourceCollectionRuns.length > 0
+      || !overviewWorkflowPending;
+    const candidatesMetricReady =
+      researchProjectProgress != null
+      || teamWorkflow != null
+      || (!overviewWorkflowPending && !overviewProgressPending);
+    const sourcesValue = researchProjectProgress?.sourceRunCount ?? sourceCollectionRuns.length;
+    const candidatesValue =
+      researchProjectProgress?.sourceCandidateCount
+      ?? teamWorkflow?.candidateStore.candidateCount
+      ?? 0;
+
     return (
       <ResearchOverviewSurface
         lang={lang}
         className={styles.researchOverviewSurface}
         primary={{
           action: researchPrimaryAction,
-          handoff: researchStageHandoff,
+          handoff: overviewWorkflowPending ? null : researchStageHandoff,
           pending: selectedTeamStartResearchStagePending,
+          loading: overviewWorkflowPending,
           projectName: activeSourceCollectionResearchProject?.name || researchProjectProgress?.experimentName || "",
           metrics: [
             {
               key: "stage",
               label: lang === "zh" ? "阶段" : "Stage",
-              value: workflowStateLabel(
-                researchProjectProgress?.currentStage || teamWorkflow.stateMachine.currentStage,
-                lang,
-              ),
+              value: stageMetricReady ? workflowStateLabel(stageLabelSource, lang) : null,
+              loading: !stageMetricReady,
             },
             {
               key: "sources",
               label: lang === "zh" ? "资料批次" : "Runs",
-              value: String(researchProjectProgress?.sourceRunCount ?? sourceCollectionRuns.length),
+              value: sourcesMetricReady ? String(sourcesValue) : null,
+              loading: !sourcesMetricReady,
             },
             {
               key: "candidates",
               label: lang === "zh" ? "候选" : "Candidates",
-              value: String(
-                researchProjectProgress?.sourceCandidateCount
-                ?? teamWorkflow.candidateStore.candidateCount,
-              ),
+              value: candidatesMetricReady ? String(candidatesValue) : null,
+              loading: !candidatesMetricReady,
             },
           ],
           onPrimaryAction: (action) => {
@@ -1739,6 +1852,7 @@ export function TeamsRoute({
         stages={(
           <ResearchBoardKanban
             lang={lang}
+            loading={overviewWorkflowPending}
             columns={researchBoardColumns}
             onOpenCard={(columnId) => {
               if (columnId === "knowledge_collection") {
@@ -1753,7 +1867,7 @@ export function TeamsRoute({
             }}
           />
         )}
-        advanced={(
+        advanced={teamWorkflow ? (
           <>
             <div className={styles.workflowStats}>
               <div>
@@ -1793,423 +1907,12 @@ export function TeamsRoute({
               <div className={styles.empty}>{lang === "zh" ? "候选校验已延后。" : "Validation deferred."}</div>
             ) : null}
           </>
-        )}
+        ) : undefined}
       />
     );
   }
 
 
-
-
-
-  function renderSourceCollectionRunSwitcher() {
-    return (
-      <TeamSourceCollectionRunSwitcherInject
-        lang={lang}
-        runs={sourceCollectionRuns}
-        selectedRun={selectedSourceCollectionRun}
-        selectedRunId={selectedSourceCollectionRunEffectiveId}
-        historicalRunWithRecords={sourceCollectionHistoricalRunWithRecords}
-        showingHistoricalRunByDefault={sourceCollectionShowingHistoricalRunByDefault}
-        recordsLoading={sourceCollectionRecordsDataLoading}
-        loadingText={sourceCollectionLoadingText}
-        runStatusLabelSource={sourceCollectionRunStatus?.runStatus || selectedSourceCollectionRun?.status}
-        onRunChange={setSelectedSourceCollectionRunId}
-      />
-    );
-  }
-
-  function renderSourceCollectionConversation() {
-    return (
-      <TeamSourceCollectionConversationInject
-        lang={lang}
-        sourceCollectionPageItems={sourceCollectionPageItems}
-        sourceCollectionFilteredRecords={sourceCollectionFilteredRecords}
-        sourceCollectionRecordsDataLoading={sourceCollectionRecordsDataLoading}
-        sourceCollectionRecords={sourceCollectionRecords}
-        selectedSourceCollectionRun={selectedSourceCollectionRun}
-        sourceCollectionHistoricalRunWithRecords={sourceCollectionHistoricalRunWithRecords}
-        sourceCollectionLoadingText={sourceCollectionLoadingText}
-        sourceCollectionRawRecordCount={sourceCollectionRawRecordCount}
-        sourceCollectionRecordClickableSourceCount={sourceCollectionRecordClickableSourceCount}
-        sourceCollectionRecordLocalFileCount={sourceCollectionRecordLocalFileCount}
-        sourceCollectionStageModules={sourceCollectionStageModules}
-        sourceCollectionStageActionReadinessFor={sourceCollectionStageActionReadinessFor}
-        sourceCollectionDraft={sourceCollectionDraft}
-        sourceCollectionCollectedCountLabel={sourceCollectionCollectedCountLabel}
-        selectedSourceCollectionStorageArtifacts={selectedSourceCollectionStorageArtifacts}
-        sourceCollectionBoardNextStepLabel={sourceCollectionBoardNextStepLabel}
-        sourceCollectionSourceFilter={sourceCollectionSourceFilter}
-        setSourceCollectionSourceFilter={setSourceCollectionSourceFilter}
-        sourceCollectionActionDisabledTitle={sourceCollectionActionDisabledTitle}
-        sourceCollectionRecordFilterCounts={sourceCollectionRecordFilterCounts}
-        renderSourceCollectionFilterBar={renderSourceCollectionFilterBar}
-        sourceCollectionCollectedCountText={sourceCollectionCollectedCountText}
-        sourceCollectionDisplayedCandidateCountText={sourceCollectionDisplayedCandidateCountText}
-        sourceCollectionPendingCandidateImportCount={sourceCollectionPendingCandidateImportCount}
-        sourceCollectionRecordMissingSourceCount={sourceCollectionRecordMissingSourceCount}
-        renderSourceCollectionPagination={renderSourceCollectionPagination}
-        sourceCollectionCandidatesByRecordId={sourceCollectionCandidatesByRecordId}
-        selectedSourceCollectionCandidateId={selectedSourceCollectionCandidateId}
-        selectSourceCollectionCandidate={selectSourceCollectionCandidate}
-        setSelectedSourceCollectionRunId={setSelectedSourceCollectionRunId}
-      />
-    );
-  }
-
-  function renderSourceCollectionStorageActions() {
-    return (
-      <TeamSourceCollectionStorageActionsInject
-        lang={lang}
-        artifacts={selectedSourceCollectionStorageArtifacts}
-        runId={selectedSourceCollectionRunEffectiveId}
-        pending={selectedSourceCollectionStorageOpenPending}
-        openedPath={(selectedSourceCollectionStorageOpenResult as any)?.openedPath ?? ""}
-        errorMessage={(selectedSourceCollectionStorageOpenError as any)?.message ?? ""}
-        onOpenTarget={(target) => openSourceCollectionStorageTarget(target)}
-      />
-    );
-  }
-
-  function renderSourceCollectionSelectedSourcePanel() {
-    return (
-      <TeamSourceCollectionSelectedSourceInject
-        lang={lang}
-        selectedSourceCollectionCandidate={selectedSourceCollectionCandidate}
-        selectedSourceCollectionCandidateTrace={selectedSourceCollectionCandidateTrace}
-        selectedSourceCollectionRunEffectiveId={selectedSourceCollectionRunEffectiveId}
-        selectedSourceCollectionCandidateStorageArtifacts={selectedSourceCollectionCandidateStorageArtifacts}
-        workflowQualityTone={workflowQualityToneBound}
-        selectedSourceCollectionStorageOpenPending={selectedSourceCollectionStorageOpenPending}
-        openSourceCollectionStorageTarget={openSourceCollectionStorageTarget}
-      />
-    );
-  }
-
-  function renderSourceCollectionScreeningPanel() {
-    return (
-      <TeamSourceCollectionScreeningInject
-        lang={lang}
-        sourceCollectionFilteredRunCandidates={sourceCollectionFilteredRunCandidates}
-        sourceCollectionPageItems={sourceCollectionPageItems}
-        sourceCollectionSourceFilter={sourceCollectionSourceFilter}
-        sourceCollectionDisplayedCandidateCount={sourceCollectionDisplayedCandidateCount}
-        sourceCollectionCountText={sourceCollectionCountText}
-        sourceCollectionPrimaryDataLoading={sourceCollectionPrimaryDataLoading}
-        sourceCollectionDataSyncText={sourceCollectionDataSyncText}
-        sourceCollectionFocusedPanelId={sourceCollectionFocusedPanelId}
-        selectedSourceCollectionStageId={selectedSourceCollectionStageId}
-        sourceCollectionExpandedPanelId={sourceCollectionExpandedPanelId}
-        setSourceCollectionExpandedPanelId={setSourceCollectionExpandedPanelId}
-        sourceCollectionExtractionDefaultPanelId={sourceCollectionExtractionDefaultPanelId}
-        sourceCollectionScreeningStepState={sourceCollectionScreeningStepState}
-        sourceCollectionDisplayedCandidateFilterCounts={sourceCollectionDisplayedCandidateFilterCounts}
-        renderSourceCollectionFilterBar={renderSourceCollectionFilterBar}
-        sourceCollectionDisplayedCandidateCountText={sourceCollectionDisplayedCandidateCountText}
-        sourceCollectionProjectedAssessedCountText={sourceCollectionProjectedAssessedCountText}
-        sourceCollectionProjectedApprovedCountText={sourceCollectionProjectedApprovedCountText}
-        sourceCollectionRunPendingScreeningCountText={sourceCollectionRunPendingScreeningCountText}
-        sourceCollectionEvidenceReadyCandidateCount={sourceCollectionEvidenceReadyCandidateCount}
-        sourceCollectionMissingEvidenceAnchorCount={sourceCollectionMissingEvidenceAnchorCount}
-        runSourceCollectionScreeningAction={runSourceCollectionScreeningAction}
-        sourceCollectionScreeningDisabled={sourceCollectionScreeningDisabled}
-        selectedTeamSourceQualityPending={selectedTeamSourceQualityPending}
-        sourceCollectionActionDisabledTitle={sourceCollectionActionDisabledTitle}
-        sourceCollectionScreeningActionReadiness={sourceCollectionScreeningActionReadiness}
-        sourceCollectionScreeningButtonText={sourceCollectionScreeningButtonText}
-        sourceCollectionScreeningButtonTitle={sourceCollectionScreeningButtonTitle}
-        sourceCollectionScreeningStatusText={sourceCollectionScreeningStatusText}
-        sourceCollectionQualityBatchFeedback={sourceCollectionQualityBatchFeedback}
-        needsAgentMaterial={sourceCollectionExtractionNeedsAgentMaterial}
-        pendingScreeningCount={sourceCollectionRunPendingScreeningCount}
-        projectedApprovedCount={sourceCollectionProjectedApprovedCount}
-        openSourceCollectionScreeningPanel={openSourceCollectionScreeningPanel}
-        renderSourceCollectionPagination={renderSourceCollectionPagination}
-        teamWorkflowSourceQualityStatus={teamWorkflowSourceQualityStatus}
-        teamWorkflowSourceQualityStatusQuery={teamWorkflowSourceQualityStatusQuery}
-        workflowIngestionTone={workflowIngestionToneBound}
-        selectedTeamSourceQualityError={selectedTeamSourceQualityError}
-        selectedSourceCollectionCandidateId={selectedSourceCollectionCandidateId}
-        selectSourceCollectionCandidate={selectSourceCollectionCandidate}
-        selectedTeam={selectedTeam}
-        selectedTeamAssessSourceQualityPending={selectedTeamAssessSourceQualityPending}
-        assessSourceQualityMutation={assessSourceQualityMutation}
-        selectedTeamPlanPaperNoteChunksPending={selectedTeamPlanPaperNoteChunksPending}
-        planPaperNoteChunksMutation={planPaperNoteChunksMutation}
-        sourceCandidateHasCompletedExtraction={sourceCandidateHasCompletedExtraction}
-        candidatePaperNoteChunkPlanSummary={candidatePaperNoteChunkPlanSummary}
-      />
-    );
-  }
-
-  function renderSourceCollectionGraphPanel() {
-    return (
-      <TeamSourceCollectionGraphInject
-        lang={lang}
-        selectedSourceCollectionRunEffectiveId={selectedSourceCollectionRunEffectiveId}
-        sourceCollectionGraphProjection={sourceCollectionGraphProjection}
-        sourceCollectionProjectedGraphNodeCount={sourceCollectionProjectedGraphNodeCount}
-        sourceCollectionProjectedGraphEdgeCount={sourceCollectionProjectedGraphEdgeCount}
-        teamWorkflowCandidateGraph={teamWorkflowCandidateGraph}
-        teamWorkflowCandidatesById={teamWorkflowCandidatesById}
-        sourceCollectionSourceFilter={sourceCollectionSourceFilter}
-        sourceCollectionFocusedPanelId={sourceCollectionFocusedPanelId}
-        selectedSourceCollectionStageId={selectedSourceCollectionStageId}
-        sourceCollectionExpandedPanelId={sourceCollectionExpandedPanelId}
-        setSourceCollectionExpandedPanelId={setSourceCollectionExpandedPanelId}
-        sourceCollectionGraphStepState={sourceCollectionGraphStepState}
-        renderSourceCollectionFilterBar={renderSourceCollectionFilterBar}
-        sourceCollectionPageItems={sourceCollectionPageItems}
-        renderSourceCollectionPagination={renderSourceCollectionPagination}
-        teamWorkflowCandidateGraphQuery={teamWorkflowCandidateGraphQuery}
-        selectedTeamBuildCandidateGraphError={selectedTeamBuildCandidateGraphError}
-        selectedSourceCollectionCandidateId={selectedSourceCollectionCandidateId}
-        selectSourceCollectionCandidate={selectSourceCollectionCandidate}
-      />
-    );
-  }
-
-  function renderSourceCollectionMemoryPanel() {
-    return (
-      <TeamSourceCollectionMemoryInject
-        lang={lang}
-        teamWorkflowKnowledgeIngestionStatus={teamWorkflowKnowledgeIngestionStatus}
-        sourceCollectionFilteredRunCandidates={sourceCollectionFilteredRunCandidates}
-        sourceCollectionPageItems={sourceCollectionPageItems}
-        teamWorkflowCandidatesById={teamWorkflowCandidatesById}
-        sourceCollectionFocusedPanelId={sourceCollectionFocusedPanelId}
-        selectedSourceCollectionStageId={selectedSourceCollectionStageId}
-        sourceCollectionExpandedPanelId={sourceCollectionExpandedPanelId}
-        setSourceCollectionExpandedPanelId={setSourceCollectionExpandedPanelId}
-        sourceCollectionMemoryStepState={sourceCollectionMemoryStepState}
-        sourceCollectionCandidateFilterCounts={sourceCollectionCandidateFilterCounts}
-        renderSourceCollectionFilterBar={renderSourceCollectionFilterBar}
-        knowledgePendingReviewCount={knowledgePendingReviewCount}
-        formalKnowledgeItemCount={formalKnowledgeItemCount}
-        sourceCollectionApprovedCount={sourceCollectionApprovedCount}
-        renderSourceCollectionPagination={renderSourceCollectionPagination}
-        workflowIngestionTone={workflowIngestionToneBound}
-        teamWorkflowKnowledgeIngestionStatusQuery={teamWorkflowKnowledgeIngestionStatusQuery}
-        selectedSourceCollectionCandidateId={selectedSourceCollectionCandidateId}
-        selectSourceCollectionCandidate={selectSourceCollectionCandidate}
-      />
-    );
-  }
-
-  function renderSourceCollectionModeFields() {
-    return (
-      <TeamSourceCollectionModeFields
-        lang={lang}
-        knowledgeExpansionWorkflowTeamSelected={knowledgeExpansionWorkflowTeamSelected}
-        draft={sourceCollectionDraft}
-        localScanDefaultRoots={SOURCE_COLLECTION_LOCAL_SCAN_DEFAULT_ROOTS}
-        onDraftChange={(patch) => setSourceCollectionDraft((current) => ({ ...current, ...patch }))}
-      />
-    );
-  }
-
-  function handleSourceCollectionProjectResetSuccess() {
-    sourceCollectionDraftHydratedRunIdRef.current = "";
-    sourceCollectionDraftHydratedSearchPlanRef.current = "";
-    setSelectedSourceCollectionRunId("");
-    if (activeSourceCollectionResearchProject) {
-      sourceCollectionFreshProjectDraftIdRef.current = activeSourceCollectionResearchProject.projectId;
-      setSourceCollectionDraft(sourceCollectionFreshProjectDraft(activeSourceCollectionResearchProject));
-    } else {
-      sourceCollectionFreshProjectDraftIdRef.current = "";
-    }
-  }
-
-  function runSourceCollectionProjectReset(includeDownstream: boolean) {
-    if (!selectedTeam?.teamId || !sourceCollectionResetResearchProjectId) {
-      return;
-    }
-    resetResearchProjectSourceCollectionMutation.mutate(
-      {
-        teamId: selectedTeam.teamId,
-        researchProjectId: sourceCollectionResetResearchProjectId,
-        includeDownstream,
-      },
-      {
-        onSuccess: handleSourceCollectionProjectResetSuccess,
-      },
-    );
-  }
-
-  function renderSourceCollectionSearchBrief() {
-    return (
-      <TeamSourceCollectionSearchBriefShell
-        lang={lang}
-        resetAvailable={sourceCollectionResetAvailable}
-        runCount={sourceCollectionRuns.length}
-        resetPending={selectedResearchProjectSourceCollectionResetPending}
-        resetIncludeDownstream={Boolean(
-          resetResearchProjectSourceCollectionMutation.variables?.includeDownstream,
-        )}
-        resetError={
-          selectedResearchProjectSourceCollectionResetError instanceof Error
-            ? selectedResearchProjectSourceCollectionResetError
-            : null
-        }
-        onReset={({ includeDownstream }) => runSourceCollectionProjectReset(includeDownstream)}
-        draft={sourceCollectionDraft}
-        modeFields={renderSourceCollectionModeFields()}
-        hasExistingRun={Boolean(selectedSourceCollectionRun)}
-        canStart={sourceCollectionCanStart}
-        startPending={selectedTeamStartSourceCollectionPending}
-        teamId={selectedTeam?.teamId}
-        onDraftChange={(patch) => setSourceCollectionDraft((current) => ({ ...current, ...patch }))}
-        onStart={({ teamId, draft }) => {
-          startSourceCollectionRunMutation.mutate({ teamId, draft });
-        }}
-      />
-    );
-  }
-
-  function renderSourceCollectionManualWritebackPanel(options?: {
-    title?: string;
-    description?: string;
-    wrapInDetails?: boolean;
-  }) {
-    return (
-      <TeamSourceCollectionManualWritebackInject
-        lang={lang}
-        draft={sourceCollectionOutputDraft}
-        assignments={sourceCollectionAssignments}
-        selectedAssignmentId={selectedSourceCollectionAssignment?.assignmentId}
-        canSubmit={canRecordSourceCollectionOutput}
-        pending={selectedTeamRecordSourceCollectionOutputPending}
-        teamId={selectedTeam?.teamId}
-        runId={selectedSourceCollectionRunEffectiveId}
-        hasRecord={sourceCollectionOutputHasRecord}
-        onDraftChange={(patch) => setSourceCollectionOutputDraft((current) => ({ ...current, ...patch }))}
-        onSubmitRecord={({ teamId, runId, draft }) => {
-          recordSourceCollectionOutputMutation.mutate({ teamId, runId, draft });
-        }}
-        sourceTypeLabel={(sourceType) => sourceCollectionSourceTypeLabel(sourceType, lang)}
-        title={options?.title}
-        description={options?.description}
-        wrapInDetails={options?.wrapInDetails}
-      />
-    );
-  }
-
-  function buildSourceCollectionControlsFeedbackProps() {
-    return buildSourceCollectionControlsFeedbackBag({
-      selectedTeamKnowledgeCollectionIngestResult,
-      selectedTeamKnowledgeCollectionIngestError,
-      selectedTeamStartSourceCollectionError,
-      selectedTeamRecordSourceCollectionOutputError,
-      selectedTeamExecuteSourceCollectionSearchError,
-      selectedTeamStartSourceCollectionStageTaskError,
-      selectedTeamExecuteSourceCollectionSearchResult,
-      selectedTeamRecordSourceCollectionOutputResult,
-    });
-  }
-
-  function buildSourceCollectionControlsMetricsProps() {
-    return buildSourceCollectionControlsMetricsBag({
-      sourceCollectionDisplayedCandidateCountText,
-      sourceCollectionProjectedAssessedCountText,
-      sourceCollectionProjectedApprovedCountText,
-      sourceCollectionRunPendingScreeningCountText,
-      candidateGraphNodeCount,
-      candidateGraphEdgeCount,
-      sourceCollectionPrecheckCandidateCount,
-      knowledgePendingReviewCount,
-      formalKnowledgeItemCount,
-    });
-  }
-
-  function renderSourceCollectionControlsPanel() {
-    return (
-      <TeamSourceCollectionControlsInject
-        lang={lang}
-        sourceCollectionControlPanelRef={sourceCollectionControlPanelRef}
-        sourceCollectionStageModules={sourceCollectionStageModules}
-        selectedSourceCollectionStageId={selectedSourceCollectionStageId}
-        selectedSourceCollectionRun={selectedSourceCollectionRun}
-        sourceCollectionStageFocusLabel={sourceCollectionStageFocusLabel}
-        workflowIngestionTone={workflowIngestionToneBound}
-        sourceCollectionRunStatus={sourceCollectionRunStatus}
-        renderSourceCollectionSelectedSourcePanel={renderSourceCollectionSelectedSourcePanel}
-        sourceCollectionDraft={sourceCollectionDraft}
-        renderSourceCollectionModeFields={renderSourceCollectionModeFields}
-        sourceCollectionCanStart={sourceCollectionCanStart}
-        selectedTeamStartSourceCollectionPending={selectedTeamStartSourceCollectionPending}
-        setSourceCollectionDraft={setSourceCollectionDraft}
-        selectedTeam={selectedTeam}
-        startSourceCollectionRunMutation={startSourceCollectionRunMutation}
-        selectedSourceCollectionRunEffectiveId={selectedSourceCollectionRunEffectiveId}
-        sourceCollectionFindingRunOptions={sourceCollectionFindingRunOptions}
-        sourceCollectionFindingAssignments={sourceCollectionFindingAssignments}
-        sourceCollectionFindingQueries={sourceCollectionFindingQueries}
-        renderSourceCollectionStorageActions={renderSourceCollectionStorageActions}
-        setSelectedSourceCollectionRunId={setSelectedSourceCollectionRunId}
-        setSourceCollectionOutputDraft={setSourceCollectionOutputDraft}
-        renderSourceCollectionManualWritebackPanel={renderSourceCollectionManualWritebackPanel}
-        {...buildSourceCollectionControlsMetricsProps()}
-        {...buildSourceCollectionControlsFeedbackProps()}
-        renderSourceCollectionStageAgents={renderSourceCollectionStageAgents}
-      />
-    );
-  }
-
-  function buildActiveStageExtractionRecoveryBag() {
-    return {
-      candidateProjection: sourceCollectionCandidateProjection,
-      sourceCollectionRawRecordCount,
-      sourceCollectionRunApprovedCount,
-      sourceCollectionDisplayedCandidateCount,
-      sourceCollectionPrimaryDataLoading,
-      sourceCollectionLoadingText,
-      sourceCollectionCandidateStepState,
-      sourceCollectionExtractionExcludedRecoveryState,
-      runSourceCollectionCandidateExtractionAction,
-      sourceCollectionCandidateExtractionActionReadiness,
-      runSourceCollectionScreeningAction,
-      sourceCollectionScreeningActionReadiness,
-      sourceCollectionScreeningButtonText,
-      sourceCollectionScreeningButtonTitle,
-      sourceCollectionRunPendingScreeningCountText,
-      sourceCollectionQualityBatchFeedback,
-      needsAgentMaterial: sourceCollectionExtractionNeedsAgentMaterial,
-      pendingScreeningCount: sourceCollectionRunPendingScreeningCount,
-      pendingImportCount: sourceCollectionPendingCandidateImportCount,
-      canProceedAfterExclusions: sourceCollectionExtractionCanProceedAfterExclusions,
-      qualityReviewPending: selectedTeamSourceQualityPending,
-      advanceToRelations: () => selectSourceCollectionStage("relations"),
-      unverifiableCandidateCount: sourceCollectionUnverifiableCandidateIds.length,
-      excludeUnverifiableCandidates: excludeUnverifiableSourceCollectionCandidates,
-      excludeUnverifiableCandidatesPending: selectedTeamSourceQualityPending,
-    };
-  }
-
-  function renderSourceCollectionActiveStagePanel() {
-    return (
-      <TeamSourceCollectionActiveStageInject
-        lang={lang}
-        sourceCollectionStageModules={sourceCollectionStageModules}
-        selectedSourceCollectionStageId={selectedSourceCollectionStageId}
-        sourceCollectionStageAgentChatState={sourceCollectionStageAgentChatState}
-        repairChallengeCupTeamAgentsMutation={repairChallengeCupTeamAgentsMutation}
-        sourceCollectionActionDisabledTitle={sourceCollectionActionDisabledTitle}
-        sourceCollectionStageActionReadinessFor={sourceCollectionStageActionReadinessFor}
-        sourceCollectionStagePrimaryAgentBinding={sourceCollectionStagePrimaryAgentBinding}
-        stageChatLabels={SOURCE_COLLECTION_STAGE_CHAT_LABELS}
-        openSourceCollectionStageAgentChat={openSourceCollectionStageAgentChat}
-        startSourceCollectionStageSessionTask={startSourceCollectionStageSessionTask}
-        sourceCollectionRunAvailable={Boolean(selectedSourceCollectionRunEffectiveId)}
-        sourceCollectionFindingStageCompact={sourceCollectionFindingStageCompact}
-        selectedTeamStartSourceCollectionStageTaskError={selectedTeamStartSourceCollectionStageTaskError}
-        renderSourceCollectionConversation={renderSourceCollectionConversation}
-        renderSourceCollectionScreeningPanel={renderSourceCollectionScreeningPanel}
-        renderSourceCollectionGraphPanel={renderSourceCollectionGraphPanel}
-        renderSourceCollectionMemoryPanel={renderSourceCollectionMemoryPanel}
-        extractionRecovery={buildActiveStageExtractionRecoveryBag()}
-      />
-    );
-  }
 
 
 
