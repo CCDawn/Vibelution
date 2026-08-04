@@ -22,7 +22,8 @@ TeamsRoute (orchestration)
 |   +-- useTeamExperimentLoopMutations
 |-- teamSourceCollectionInjectRenderers  # SC inject panel mounts (filter/page/controls/active-stage/…)
 |-- teamResearchWorkflowSurfaceRenderers # workflow modules/panel host + communication + inspector shared
-+-- remaining research launcher/overview/standalone adapters / drag-save (route-local)
+|-- teamResearchPrimarySurfaceRenderers  # launcher / overview / stage standalone
++-- remaining drag-save / shell queries (route-local)
 ```
 
 

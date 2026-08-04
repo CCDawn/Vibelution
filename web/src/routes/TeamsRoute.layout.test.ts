@@ -14,6 +14,7 @@ import teamCanvasReadOnlyInspectorSource from "./teams/TeamCanvasReadOnlyInspect
 import teamsWorkspacePanelRenderersSource from "./teams/teamsWorkspacePanelRenderers.tsx?raw";
 import teamSourceCollectionInjectRenderersSource from "./teams/teamSourceCollectionInjectRenderers.tsx?raw";
 import teamResearchWorkflowSurfaceRenderersSource from "./teams/teamResearchWorkflowSurfaceRenderers.tsx?raw";
+import teamResearchPrimarySurfaceRenderersSource from "./teams/teamResearchPrimarySurfaceRenderers.tsx?raw";
 import useSourceCollectionWorkspaceSource from "./teams/useSourceCollectionWorkspace.ts?raw";
 import useResearchExperimentWorkspaceSource from "./teams/useResearchExperimentWorkspace.ts?raw";
 import useTeamsShellCanvasWorkspaceSource from "./teams/useTeamsShellCanvasWorkspace.ts?raw";
@@ -32,6 +33,7 @@ const routeSource = [
   teamsWorkspacePanelRenderersSource,
   teamSourceCollectionInjectRenderersSource,
   teamResearchWorkflowSurfaceRenderersSource,
+  teamResearchPrimarySurfaceRenderersSource,
   useSourceCollectionWorkspaceSource,
   useResearchExperimentWorkspaceSource,
   useTeamsShellCanvasWorkspaceSource,
