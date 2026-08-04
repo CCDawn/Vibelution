@@ -6851,6 +6851,7 @@ def test_restart_force_frontend_rebuild_propagates_dirty_launch_opt_in(monkeypat
 
 def test_restart_build_preflight_skips_when_frontend_build_is_current(monkeypatch):
     events: list[tuple[str, dict]] = []
+    provenance_calls: list[dict[str, object]] = []
 
     def fail_run(*args, **kwargs):
         raise AssertionError("frontend preflight should not run node commands when dist is current")
@@ -6862,12 +6863,20 @@ def test_restart_build_preflight_skips_when_frontend_build_is_current(monkeypatc
     )
     monkeypatch.setattr(daemon.subprocess, "run", fail_run)
     monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+    monkeypatch.setattr(
+        daemon,
+        "_write_frontend_build_provenance_after_preflight",
+        lambda **kwargs: provenance_calls.append(dict(kwargs))
+        or {"written": True, "frontendTree": "tree-a", "sourceCommit": "a" * 40},
+    )
 
     result = daemon._preflight_frontend_build_for_restart("cmd-restart")
 
     assert result["ok"] is True
     assert result["skipped"] is True
     assert result["completedSteps"] == []
+    assert result["forceRequested"] is False
+    assert provenance_calls == [{"rebuilt": False, "force_requested": False, "skipped": True}]
     assert events == [
         (
             "workbench.restart.build_preflight_skipped_current",
@@ -6876,12 +6885,50 @@ def test_restart_build_preflight_skips_when_frontend_build_is_current(monkeypatc
                 "ok": True,
                 "skipped": True,
                 "reason": "frontend build is current",
+                "forceRequested": False,
                 "startedAt": result["startedAt"],
                 "completedSteps": [],
                 "freshness": {"distIndex": "web/dist/index.html", "distMtime": 20.0, "inputMtime": 10.0},
+                "provenance": {
+                    "written": True,
+                    "frontendTree": "tree-a",
+                    "sourceCommit": "a" * 40,
+                },
             },
         )
     ]
+
+
+def test_restart_build_preflight_force_skips_when_frontend_build_is_already_current(monkeypatch):
+    events: list[tuple[str, dict]] = []
+    provenance_calls: list[dict[str, object]] = []
+
+    def fail_run(*args, **kwargs):
+        raise AssertionError("force rebuild must not re-run tsc/vite when dist is already current")
+
+    monkeypatch.setattr(
+        daemon,
+        "_frontend_build_current",
+        lambda: (True, "frontend build is current", {"distIndex": "web/dist/index.html", "distMtime": 20.0, "inputMtime": 10.0}),
+    )
+    monkeypatch.setattr(daemon.subprocess, "run", fail_run)
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+    monkeypatch.setattr(
+        daemon,
+        "_write_frontend_build_provenance_after_preflight",
+        lambda **kwargs: provenance_calls.append(dict(kwargs))
+        or {"written": True, "frontendTree": "tree-a", "sourceCommit": "a" * 40},
+    )
+
+    result = daemon._preflight_frontend_build_for_restart("cmd-restart", force=True)
+
+    assert result["ok"] is True
+    assert result["skipped"] is True
+    assert result["forceRequested"] is True
+    assert result["completedSteps"] == []
+    assert provenance_calls == [{"rebuilt": False, "force_requested": True, "skipped": True}]
+    assert events[0][0] == "workbench.restart.build_preflight_skipped_current"
+    assert events[0][1]["forceRequested"] is True
 
 
 @pytest.mark.parametrize(
@@ -6924,6 +6971,11 @@ def test_restart_build_preflight_restores_missing_frontend_dependencies(monkeypa
     monkeypatch.setattr(daemon, "_frontend_build_preflight_missing_dependency_entries", lambda commands: missing_checks.pop(0))
     monkeypatch.setattr(daemon.subprocess, "run", fake_run)
     monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+    monkeypatch.setattr(
+        daemon,
+        "_write_frontend_build_provenance_after_preflight",
+        lambda **kwargs: {"written": True, "frontendTree": "tree-a", "sourceCommit": "a" * 40},
+    )
 
     result = daemon._preflight_frontend_build_for_restart("cmd-restart")
 
@@ -6964,6 +7016,11 @@ def test_restart_build_preflight_uses_hidden_node_entrypoints_on_windows(monkeyp
         "_frontend_build_current",
         lambda: (False, "frontend sources changed", {"distIndex": "web/dist/index.html", "distMtime": 10.0, "inputMtime": 20.0}),
     )
+    monkeypatch.setattr(
+        daemon,
+        "_write_frontend_build_provenance_after_preflight",
+        lambda **kwargs: {"written": True, "frontendTree": "tree-a", "sourceCommit": "a" * 40},
+    )
 
     result = daemon._preflight_frontend_build_for_restart("cmd-restart")
 
@@ -6988,6 +7045,7 @@ def test_restart_build_preflight_uses_hidden_node_entrypoints_on_windows(monkeyp
         assert startupinfo.wShowWindow == 0
     assert result["ok"] is True
     assert result["completedSteps"] == ["tsc -b", "vite build"]
+    assert result["provenance"]["written"] is True
     assert events[-1][0] == "workbench.restart.build_preflight_succeeded"
 
 

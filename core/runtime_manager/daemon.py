@@ -1992,18 +1992,95 @@ def _frontend_build_current() -> tuple[bool, str, dict[str, Any]]:
     return True, "frontend build is current", {"distIndex": str(dist_index), "distMtime": dist_mtime, "inputMtime": input_mtime}
 
 
+def _frontend_build_provenance_path() -> Path:
+    return PROJECT_ROOT / "web" / "dist" / ".vibelution-build.json"
+
+
+def _capture_git_text(args: list[str], *, label: str) -> str:
+    git_command = shutil.which("git.exe" if os.name == "nt" else "git") or shutil.which("git") or "git"
+    try:
+        result = subprocess.run(
+            [git_command, *args],
+            cwd=str(PROJECT_ROOT),
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+            creationflags=_creation_flags(detach=False),
+            startupinfo=_hidden_startup_info(),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    if int(result.returncode or 0) != 0:
+        return ""
+    return str(result.stdout or "").strip()
+
+
+def _write_frontend_build_provenance_after_preflight(
+    *,
+    rebuilt: bool,
+    force_requested: bool,
+    skipped: bool,
+) -> dict[str, Any]:
+    """Stamp dist provenance so open_workbench/_ensure_frontend_build will not rebuild again."""
+
+    provenance_path = _frontend_build_provenance_path()
+    commit = _capture_git_text(["rev-parse", "HEAD"], label="preflight commit identity")
+    branch = _capture_git_text(["branch", "--show-current"], label="preflight branch identity")
+    frontend_tree = _capture_git_text(["rev-parse", "HEAD:web"], label="preflight frontend tree identity")
+    payload: dict[str, Any] = {
+        "schemaVersion": 1,
+        "projectRoot": str(PROJECT_ROOT),
+        "sourceBranch": branch,
+        "sourceCommit": commit,
+        "frontendTree": frontend_tree,
+        "builtFromCommit": commit,
+        "reusedArtifactFromCommit": "" if rebuilt else commit,
+        "rebuilt": bool(rebuilt),
+        "validatedAt": now_iso(),
+        "source": "runtime_manager_build_preflight",
+        "forceRequested": bool(force_requested),
+        "skipped": bool(skipped),
+    }
+    try:
+        provenance_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = provenance_path.with_suffix(provenance_path.suffix + ".tmp")
+        tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp_path.replace(provenance_path)
+        payload["written"] = True
+        payload["path"] = str(provenance_path)
+    except OSError as exc:
+        payload["written"] = False
+        payload["errorType"] = type(exc).__name__
+        payload["errorMessage"] = str(exc)
+    return payload
+
+
 def _preflight_frontend_build_for_restart(command_id: str, *, force: bool = False) -> dict[str, Any]:
     started_at = now_iso()
     current, reason, freshness = _frontend_build_current()
-    if current and not force:
+    # force means "ensure latest assets", not "always re-run tsc/vite when already fresh".
+    if current:
+        provenance = _write_frontend_build_provenance_after_preflight(
+            rebuilt=False,
+            force_requested=bool(force),
+            skipped=True,
+        )
         payload = {
             "commandId": command_id,
             "ok": True,
             "skipped": True,
             "reason": reason,
+            "forceRequested": bool(force),
             "startedAt": started_at,
             "completedSteps": [],
             "freshness": freshness,
+            "provenance": {
+                "written": bool(provenance.get("written")),
+                "frontendTree": provenance.get("frontendTree") or "",
+                "sourceCommit": provenance.get("sourceCommit") or "",
+            },
         }
         _append_event("workbench.restart.build_preflight_skipped_current", payload)
         return payload
@@ -2104,6 +2181,11 @@ def _preflight_frontend_build_for_restart(command_id: str, *, force: bool = Fals
                 "Restart preflight failed before closing the workbench.\n"
                 + _launcher_error_detail(result, f"Frontend build preflight failed during {label}.")
             )
+    provenance = _write_frontend_build_provenance_after_preflight(
+        rebuilt=True,
+        force_requested=bool(force),
+        skipped=False,
+    )
     payload = {
         "commandId": command_id,
         "ok": True,
@@ -2112,6 +2194,11 @@ def _preflight_frontend_build_for_restart(command_id: str, *, force: bool = Fals
         "completedSteps": completed_steps,
         "stdoutTail": "\n".join(stdout_parts)[-1000:],
         "stderrTail": "\n".join(stderr_parts)[-1000:],
+        "provenance": {
+            "written": bool(provenance.get("written")),
+            "frontendTree": provenance.get("frontendTree") or "",
+            "sourceCommit": provenance.get("sourceCommit") or "",
+        },
     }
     _append_event("workbench.restart.build_preflight_succeeded", payload)
     return payload
