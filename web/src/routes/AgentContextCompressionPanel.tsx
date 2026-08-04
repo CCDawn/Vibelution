@@ -1,6 +1,6 @@
 import { ExternalLink } from "lucide-react";
 
-import { VButton, VCheckbox, VFieldRow, VNativeInput, VNativeSelect, VTooltip } from "../components/vui";
+import { VButton, VCheckbox, VFieldRow, VNativeInput, VStringSelect, VTooltip } from "../components/vui";
 import styles from "./AgentContextCompressionPanel.styles";
 
 export type AgentContextCompressionPolicyDraft = {
@@ -64,15 +64,17 @@ export function AgentContextCompressionPanel({
         <span>{copy.contextCompressionPolicy}</span>
         <div className={styles.compressionPolicyGrid}>
         <VFieldRow label={copy.contextCompressionPolicy}>
-          <VNativeSelect
+          <VStringSelect
+            ariaLabel={copy.contextCompressionPolicy}
             value={policy.mode}
-            onChange={(event) => onPolicyChange({
-              mode: event.target.value === "custom" ? "custom" : "inherit",
+            onValueChange={(value) => onPolicyChange({
+              mode: value === "custom" ? "custom" : "inherit",
             })}
-          >
-            <option value="inherit">{copy.contextCompressionInherit}</option>
-            <option value="custom">{copy.contextCompressionCustom}</option>
-          </VNativeSelect>
+            options={[
+              { value: "inherit", label: copy.contextCompressionInherit },
+              { value: "custom", label: copy.contextCompressionCustom },
+            ]}
+          />
         </VFieldRow>
         <VCheckbox
           isSelected={policy.enabled}

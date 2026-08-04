@@ -1,4 +1,4 @@
-import { VButton, VCheckbox, VFieldRow, VNativeSelect } from "../components/vui";
+import { VButton, VCheckbox, VFieldRow, VStringSelect } from "../components/vui";
 import styles from "./AgentModeMembershipPanel.styles";
 
 export type AgentModeMembershipDraft = {
@@ -84,20 +84,26 @@ export function AgentModeMembershipPanel({
       </div>
       <div className={styles.editorGrid}>
         <VFieldRow label={copy.supervisedSlot}>
-          <VNativeSelect value={draft.supervisedSlot} onChange={(event) => onDraftChange({ supervisedSlot: event.target.value })}>
-            <option value="">{copy.noSlot}</option>
-            {supervisedSlots.map((slot) => (
-              <option key={slot} value={slot}>{slot}</option>
-            ))}
-          </VNativeSelect>
+          <VStringSelect
+            ariaLabel={copy.supervisedSlot}
+            value={draft.supervisedSlot}
+            onValueChange={(supervisedSlot) => onDraftChange({ supervisedSlot })}
+            options={[
+              { value: "", label: copy.noSlot },
+              ...supervisedSlots.map((slot) => ({ value: slot, label: slot })),
+            ]}
+          />
         </VFieldRow>
         <VFieldRow label={copy.selfEvolutionSlot}>
-          <VNativeSelect value={draft.selfEvolutionSlot} onChange={(event) => onDraftChange({ selfEvolutionSlot: event.target.value })}>
-            <option value="">{copy.noSlot}</option>
-            {selfEvolutionSlots.map((slot) => (
-              <option key={slot} value={slot}>{slot}</option>
-            ))}
-          </VNativeSelect>
+          <VStringSelect
+            ariaLabel={copy.selfEvolutionSlot}
+            value={draft.selfEvolutionSlot}
+            onValueChange={(selfEvolutionSlot) => onDraftChange({ selfEvolutionSlot })}
+            options={[
+              { value: "", label: copy.noSlot },
+              ...selfEvolutionSlots.map((slot) => ({ value: slot, label: slot })),
+            ]}
+          />
         </VFieldRow>
       </div>
       <div className={styles.editorActions}>

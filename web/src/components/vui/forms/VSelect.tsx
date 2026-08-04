@@ -34,7 +34,8 @@ export type VSelectProps = {
 /**
  * Product select API. Implementation is Radix/shadcn Select (portal list).
  * Keeps selectedKey/onSelectionChange for existing call sites.
- * Dense native <select> remains available as VNativeSelect / VStringSelect.
+ * Dense native select remains available as VNativeSelect.
+ * Prefer VStringSelect (this API) for form/config surfaces.
  */
 export function VSelect({
   density = "compact",

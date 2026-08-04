@@ -10,6 +10,7 @@ import {
   VNativeSelect,
   VNativeTextarea,
   VSelect,
+  VStringSelect,
   VTabs,
   VTextarea,
 } from "./index";
@@ -81,5 +82,24 @@ describe("VUI form primitives", () => {
     expect(markup).toContain('data-slot="tabs-list"');
     expect(markup).toContain("Basics");
     expect(markup).toContain("Ops");
+  });
+
+  it("string select routes through Radix VSelect portal", () => {
+    const markup = renderToStaticMarkup(
+      <VuiProvider>
+        <VStringSelect
+          ariaLabel="Mode"
+          value="a"
+          onValueChange={() => undefined}
+          options={[
+            { value: "a", label: "Alpha" },
+            { value: "b", label: "Beta" },
+          ]}
+        />
+      </VuiProvider>,
+    );
+    expect(markup).toContain('data-vui="select"');
+    expect(markup).toContain('data-renderer="radix"');
+    expect(markup).toContain("Alpha");
   });
 });

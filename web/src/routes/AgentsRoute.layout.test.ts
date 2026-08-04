@@ -2307,7 +2307,8 @@ describe("AgentsRoute layout contract", () => {
     expect(bulkConfigPanelSource).toContain("styles.bulkFieldHeader");
     expect(bulkConfigStyles.bulkSelectionList).toBeTruthy();
     expect(bulkConfigStyles.bulkFieldHeader).toBeTruthy();
-    expect(bulkConfigPanelSource).toContain("<VNativeSelect");
+    expect(bulkConfigPanelSource).toContain("<VStringSelect");
+    expect(bulkConfigPanelSource).not.toContain("<VNativeSelect");
     expect(bulkConfigPanelSource).toContain("<VNativeInput");
     expect(routeSource).toContain("bulkSelected: selectedBulkAgentIds.has(agent.agentId)");
     expect(denseListSource).toContain("onToggleBulk");
@@ -2352,7 +2353,8 @@ describe("AgentsRoute layout contract", () => {
       bulkOperationsPanelSource.indexOf("const mutationActions"),
     );
 
-    expect(bulkPromptSource).toContain("<VNativeSelect");
+    expect(bulkPromptSource).toContain("<VStringSelect");
+    expect(bulkPromptSource).not.toContain("<VNativeSelect");
     expect(bulkPromptSource).not.toContain("styles.bulkPromptSelect");
     expect(bulkPromptSource).not.toContain("styles.bulkPromptField");
     expect(bulkSelectionSource).toContain("<VButton");

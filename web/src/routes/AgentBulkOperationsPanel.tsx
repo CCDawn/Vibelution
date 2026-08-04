@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Archive, CheckCircle2, CheckSquare, Square, Trash2 } from "lucide-react";
 
 import { AgentBulkActionBar } from "../components/vui/product/agent-management";
-import { VButton, VConfirmDialog, VHStack, VNativeSelect } from "../components/vui";
+import { VButton, VConfirmDialog, VHStack, VStringSelect } from "../components/vui";
 import styles from "./AgentBulkOperationsPanel.styles";
 
 export type AgentBulkPromptTemplateOption = {
@@ -98,19 +98,20 @@ export function AgentBulkOperationsPanel({
       <label className={styles.bulkPromptLabel} htmlFor="agents-bulk-prompt">
         {copy.bulkPromptLabel}
       </label>
-      <VNativeSelect
+      <VStringSelect
         id="agents-bulk-prompt"
+        ariaLabel={copy.bulkPromptLabel}
         value={selectedPromptTemplateId}
-        disabled={pending}
-        onChange={(event) => onPromptTemplateChange(event.target.value)}
-      >
-        <option value="">{copy.bulkPromptPlaceholder}</option>
-        {promptTemplateOptions.map((template) => (
-          <option key={template.value} value={template.value}>
-            {template.label}
-          </option>
-        ))}
-      </VNativeSelect>
+        isDisabled={pending}
+        onValueChange={onPromptTemplateChange}
+        options={[
+          { value: "", label: copy.bulkPromptPlaceholder },
+          ...promptTemplateOptions.map((template) => ({
+            value: template.value,
+            label: template.label,
+          })),
+        ]}
+      />
     </VHStack>
   );
   const mutationActions = (

@@ -1,6 +1,6 @@
 import { CheckSquare } from "lucide-react";
 
-import { VButton, VNativeInput, VNativeSelect } from "../components/vui";
+import { VButton, VNativeInput, VStringSelect } from "../components/vui";
 import styles from "./AgentBulkConfigPanel.styles";
 
 export type AgentBulkConfigField = "dialogueModelId" | "promptTemplateId" | "primaryMode" | "roleKey";
@@ -97,18 +97,16 @@ export function AgentBulkConfigPanel({
             {copy.bulkApplyField}
           </span>
           <span>{copy.bulkDialogueModel}</span>
-          <VNativeSelect
+          <VStringSelect
+            ariaLabel={copy.bulkDialogueModel}
             value={draft.dialogueModelId}
-            disabled={!apply.dialogueModelId || pending}
-            onChange={(event) => onDraftChange({ dialogueModelId: event.target.value })}
-          >
-            <option value="">{mixed.dialogueModelId ? copy.bulkEditMixed : "-"}</option>
-            {modelOptions.map((model) => (
-              <option key={`bulk-dialogue:${model.value}`} value={model.value}>
-                {model.label}
-              </option>
-            ))}
-          </VNativeSelect>
+            isDisabled={!apply.dialogueModelId || pending}
+            onValueChange={(dialogueModelId) => onDraftChange({ dialogueModelId })}
+            options={[
+              { value: "", label: mixed.dialogueModelId ? copy.bulkEditMixed : "-" },
+              ...modelOptions.map((model) => ({ value: model.value, label: model.label })),
+            ]}
+          />
         </label>
         <label className={styles.field}>
           <span className={styles.bulkFieldHeader}>
@@ -120,18 +118,16 @@ export function AgentBulkConfigPanel({
             {copy.bulkApplyField}
           </span>
           <span>{copy.prompt}</span>
-          <VNativeSelect
+          <VStringSelect
+            ariaLabel={copy.prompt}
             value={draft.promptTemplateId}
-            disabled={!apply.promptTemplateId || pending}
-            onChange={(event) => onDraftChange({ promptTemplateId: event.target.value })}
-          >
-            <option value="">{mixed.promptTemplateId ? copy.bulkEditMixed : "-"}</option>
-            {promptTemplateOptions.map((template) => (
-              <option key={`bulk-prompt:${template.value}`} value={template.value}>
-                {template.label}
-              </option>
-            ))}
-          </VNativeSelect>
+            isDisabled={!apply.promptTemplateId || pending}
+            onValueChange={(promptTemplateId) => onDraftChange({ promptTemplateId })}
+            options={[
+              { value: "", label: mixed.promptTemplateId ? copy.bulkEditMixed : "-" },
+              ...promptTemplateOptions.map((template) => ({ value: template.value, label: template.label })),
+            ]}
+          />
         </label>
         <label className={styles.field}>
           <span className={styles.bulkFieldHeader}>
@@ -143,18 +139,16 @@ export function AgentBulkConfigPanel({
             {copy.bulkApplyField}
           </span>
           <span>{copy.bulkPrimaryMode}</span>
-          <VNativeSelect
+          <VStringSelect
+            ariaLabel={copy.bulkPrimaryMode}
             value={draft.primaryMode}
-            disabled={!apply.primaryMode || pending}
-            onChange={(event) => onDraftChange({ primaryMode: event.target.value })}
-          >
-            <option value="">{mixed.primaryMode ? copy.bulkEditMixed : "-"}</option>
-            {primaryModeOptions.map((mode) => (
-              <option key={`bulk-mode:${mode.value}`} value={mode.value}>
-                {mode.label}
-              </option>
-            ))}
-          </VNativeSelect>
+            isDisabled={!apply.primaryMode || pending}
+            onValueChange={(primaryMode) => onDraftChange({ primaryMode })}
+            options={[
+              { value: "", label: mixed.primaryMode ? copy.bulkEditMixed : "-" },
+              ...primaryModeOptions.map((mode) => ({ value: mode.value, label: mode.label })),
+            ]}
+          />
         </label>
         <label className={styles.field}>
           <span className={styles.bulkFieldHeader}>

@@ -24,6 +24,7 @@ import {
   VNativeInput,
   VNativeSelect,
   VStateSurface,
+  VTabs,
 } from "../../components/vui";
 import type { TranslationKey } from "../../i18n/dictionary";
 import { agentDisplayInfo } from "../agentDisplay";
@@ -189,34 +190,38 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
         aria-label={conversationIndexOverlayOpen ? (lang === "zh" ? "会话列表" : "Conversation list") : undefined}
       >
         {standardGroupRoomActive ? (
-          <div
-            className={styles.rightIndexTabs}
-            role="tablist"
+          <VTabs
             aria-label={lang === "zh" ? "左侧索引" : "Left index"}
-          >
-            <VButton
-              type="button"
-              role="tab"
-              aria-selected={rightIndexPanel === "conversations"}
-              className={rightIndexPanel === "conversations" ? `${styles.rightIndexTab} ${styles.rightIndexTabActive}` : styles.rightIndexTab}
-              onClick={() => setRightIndexPanel("conversations")}
-
-                icon={<MessageCircleHeart size={14}/>}
-              >
-                <span>{lang === "zh" ? "会话" : "Chats"}</span>
-              </VButton>
-            <VButton
-              type="button"
-              role="tab"
-              aria-selected={rightIndexPanel === "members"}
-              className={rightIndexPanel === "members" ? `${styles.rightIndexTab} ${styles.rightIndexTabActive}` : styles.rightIndexTab}
-              onClick={() => setRightIndexPanel("members")}
-
-                icon={<UsersRound size={14} />}
-              >
-                <span>{lang === "zh" ? "成员" : "Members"}</span>
-              </VButton>
-          </div>
+            value={rightIndexPanel}
+            onValueChange={(value) => {
+              if (value === "conversations" || value === "members") {
+                setRightIndexPanel(value);
+              }
+            }}
+            className="min-w-0"
+            listClassName={styles.rightIndexTabs}
+            triggerClassName={styles.rightIndexTab}
+            items={[
+              {
+                id: "conversations",
+                label: (
+                  <>
+                    <MessageCircleHeart size={14} aria-hidden="true" />
+                    <span>{lang === "zh" ? "会话" : "Chats"}</span>
+                  </>
+                ),
+              },
+              {
+                id: "members",
+                label: (
+                  <>
+                    <UsersRound size={14} aria-hidden="true" />
+                    <span>{lang === "zh" ? "成员" : "Members"}</span>
+                  </>
+                ),
+              },
+            ]}
+          />
         ) : null}
 
         {rightIndexPanel === "members" && standardGroupRoomActive ? (

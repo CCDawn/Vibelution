@@ -22,6 +22,8 @@ export type VTabsProps = {
   density?: VuiDensity;
   className?: string;
   listClassName?: string;
+  /** Extra classes on each tab trigger (merged after density chrome). */
+  triggerClassName?: string;
   contentClassName?: string;
   "aria-label"?: string;
   "data-vui"?: string;
@@ -39,6 +41,7 @@ export function VTabs({
   density = "compact",
   className,
   listClassName,
+  triggerClassName,
   contentClassName,
   "aria-label": ariaLabel,
   "data-vui": dataVui = "tabs",
@@ -83,6 +86,7 @@ export function VTabs({
               dense
                 ? "min-h-[calc(var(--vui-control-height-sm)-2px)] text-[var(--vui-font-xs)]"
                 : "min-h-[calc(var(--vui-control-height-md)-2px)] text-[var(--vui-font-sm)]",
+              triggerClassName,
             )}
             data-slot="tabs-trigger"
           >
