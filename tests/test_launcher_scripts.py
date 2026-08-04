@@ -131,6 +131,21 @@ def test_managed_edge_windows_apply_vibelution_app_identity():
     assert "window_icon_applied" in source
 
 
+def test_ps_launcher_python_deps_stamp_aligns_with_content_hash():
+    """PS and Python must share python-deps.stamp format to avoid pip on every restart."""
+    ps_source = (PROJECT_ROOT / "scripts" / "vibelution_launcher.ps1").read_text(encoding="utf-8")
+    py_source = (PROJECT_ROOT / "scripts" / "vibelution_launcher.py").read_text(encoding="utf-8")
+
+    assert "function Get-RequirementsContentFingerprint" in ps_source
+    assert "function Test-PythonDepsStampCurrent" in ps_source
+    assert "Content-only SHA256 of requirements.txt" in ps_source
+    assert "must match Python" in ps_source
+    assert "_requirements_fingerprint" in py_source
+    assert "_runtime_core_imports_available" in py_source
+    assert "stamp already matches" in py_source
+    assert "workbench.open.timings" in py_source
+
+
 def test_python_launcher_workbench_window_applies_vibelution_app_identity():
     source = (PROJECT_ROOT / "scripts" / "vibelution_launcher.py").read_text(encoding="utf-8")
 
@@ -321,7 +336,13 @@ def test_python_launcher_skips_reinstall_when_venv_ready_and_requirements_unchan
     monkeypatch.setattr(launcher, "VENV_DIR", project_dir / ".venv")
     monkeypatch.setattr(launcher, "REQUIREMENTS_PATH", requirements)
     monkeypatch.setattr(launcher, "RUNTIME_DIR", tmp_path / ".runtime" / "launcher")
-    monkeypatch.setattr(launcher, "_runtime_imports_available", lambda exe: True)
+    full_probes: list[str] = []
+    monkeypatch.setattr(launcher, "_runtime_core_imports_available", lambda exe: True)
+    monkeypatch.setattr(
+        launcher,
+        "_runtime_imports_available",
+        lambda exe: full_probes.append(exe) or True,
+    )
     installed: list[str] = []
     monkeypatch.setattr(launcher, "_install_project_dependencies", lambda exe: installed.append(exe))
     monkeypatch.setattr(launcher, "_missing_runtime_modules", lambda exe, modules: [])
@@ -333,7 +354,43 @@ def test_python_launcher_skips_reinstall_when_venv_ready_and_requirements_unchan
 
     assert resolved == str(venv_python)
     assert installed == []
+    assert full_probes == []  # stamp match uses cheap core probe only
     assert stamp_path.read_text(encoding="utf-8") == launcher._requirements_fingerprint()
+
+
+def test_python_launcher_stamp_match_uses_core_probe_not_full_import(monkeypatch, tmp_path):
+    launcher = _load_python_launcher()
+    monkeypatch.setattr(launcher.os, "name", "posix")
+    project_dir = tmp_path / "project"
+    venv_python = project_dir / ".venv" / "bin" / "python"
+    venv_python.parent.mkdir(parents=True)
+    venv_python.write_text("#!/usr/bin/env python3", encoding="utf-8")
+    requirements = project_dir / "requirements.txt"
+    requirements.write_text("fastapi>=0.111.0\nlangchain>=0.1.0\n", encoding="utf-8")
+    monkeypatch.setattr(launcher, "PROJECT_ROOT", project_dir)
+    monkeypatch.setattr(launcher, "VENV_DIR", project_dir / ".venv")
+    monkeypatch.setattr(launcher, "REQUIREMENTS_PATH", requirements)
+    monkeypatch.setattr(launcher, "RUNTIME_DIR", tmp_path / ".runtime" / "launcher")
+    core_probes: list[str] = []
+    full_probes: list[str] = []
+    monkeypatch.setattr(
+        launcher,
+        "_runtime_core_imports_available",
+        lambda exe: core_probes.append(exe) or True,
+    )
+    monkeypatch.setattr(
+        launcher,
+        "_runtime_imports_available",
+        lambda exe: full_probes.append(exe) or True,
+    )
+    monkeypatch.setattr(launcher, "_install_project_dependencies", lambda exe: (_ for _ in ()).throw(AssertionError("should not install")))
+    stamp_path = launcher._dependency_stamp_path()
+    stamp_path.parent.mkdir(parents=True)
+    stamp_path.write_text(launcher._requirements_fingerprint(), encoding="utf-8")
+
+    assert launcher._ensure_project_python_runtime() == str(venv_python)
+    assert core_probes == [str(venv_python)]
+    assert full_probes == []
 
 
 def test_python_launcher_reinstalls_when_requirements_changed(monkeypatch, tmp_path):
@@ -989,6 +1046,33 @@ def test_python_launcher_rejects_main_change_during_refresh(monkeypatch):
 
     with pytest.raises(RuntimeError, match="changed while Launcher was refreshing"):
         launcher._assert_runtime_source_identity(expected)
+
+
+def test_python_launcher_light_identity_assert_skips_full_worktree_scan(monkeypatch):
+    launcher = _load_python_launcher()
+    expected = {
+        "projectRoot": "C:/repo",
+        "branch": "main",
+        "commit": "a" * 40,
+        "frontendTree": "tree-a",
+        "allowDirty": True,
+    }
+    full_calls: list[object] = []
+    light_calls: list[object] = []
+    monkeypatch.setattr(
+        launcher,
+        "_runtime_source_identity",
+        lambda **kwargs: full_calls.append(kwargs) or dict(expected),
+    )
+    monkeypatch.setattr(
+        launcher,
+        "_runtime_source_identity_light",
+        lambda **kwargs: light_calls.append(kwargs) or dict(expected),
+    )
+
+    assert launcher._assert_runtime_source_identity(expected, light=True)["commit"] == "a" * 40
+    assert light_calls == [{"allow_dirty": True}]
+    assert full_calls == []
 
 
 def test_web_workbench_access_log_filter_suppresses_polling_noise_only():
