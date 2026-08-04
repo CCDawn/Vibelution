@@ -705,11 +705,11 @@ describe("TeamsRoute layout contract", () => {
   });
 
   it("keeps the research overview on a readable workbench surface instead of a transparent card wall", () => {
-    // Shell: left team rail + right main; board content carries panel fill.
+    // Shell: VSplitWorkspace rail + right main; board content carries panel fill.
     expect(routeStyles.teamShellWorkspace).toContain("!flex");
-    expect(routeStyles.teamShellRailPane).toContain("--teams-rail-width");
     expect(routeStyles.teamShellContentBoard).toMatch(/bg-vui-surface-panel|var\(--vui-surface-panel\)/);
     expect(routeStyles.teamShellMain).toContain("flex-col");
+    expect(routeSource).toContain("VSplitWorkspace");
 
     expect(routeStyles.researchStageLauncher).toMatch(/bg-vui-surface-panel|var\(--vui-surface-panel\)/);
     expect(routeStyles.researchStageLauncher).toContain("rounded-[var(--radius-panel)]");
@@ -922,14 +922,17 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("buildResearchBoardColumns");
     expect(routeSource).toContain('renderResearchStageLauncher("interactive")');
     expect(routeSource).toContain("styles.researchOverviewSurface");
-    // Shell: left team rail + board/canvas modes + persisted rail resize.
+    // Shell: VSplitWorkspace (shadcn list-detail) + team rail + board/canvas modes.
+    expect(routeSource).toContain("VSplitWorkspace");
+    expect(routeSource).toContain("teamsSplitResize");
     expect(routeSource).toContain("TeamShellRail");
     expect(routeSource).toContain("TeamShellModeSwitch");
     expect(routeSource).toContain("selectTeamShellMode");
     expect(routeSource).toContain('data-testid="team-shell-workspace"');
     expect(routeSource).toContain("teamShellMode");
-    expect(routeSource).toContain('id: "rail"');
-    expect(routeSource).toContain('startTeamsInspectorResize("rail"');
+    expect(routeSource).toContain('id: TEAMS_RAIL_PANE.id');
+    expect(routeSource).not.toContain("startTeamsInspectorResize");
+    expect(routeSource).not.toContain("usePersistedPaneResize");
     expect(routeSource).not.toContain("科研三阶段索引");
     expect(routeSource).not.toContain("团队专属阶段页");
     expect(routeSource).toContain("ResearchBoardKanban");
@@ -2483,10 +2486,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.teamUnavailableCard).toContain("max-w-[720px]");
     expect(routeStyles.workspace).toContain("overflow-hidden");
     expect(routeStyles.teamShellWorkspace).toContain("!flex");
-    expect(routeStyles.teamShellRailPane).toContain("--teams-rail-width");
-    expect(routeStyles.teamShellInspectorPane).toContain("--teams-inspector-width");
-    expect(routeStyles.inspectorResizeHandle).toContain("max-[900px]:hidden");
-    expect(routeSource).toContain("PaneResizeHandle");
+    expect(routeStyles.teamShellInspectorPane).toContain("min-w-[280px]");
+    expect(routeSource).toContain("VSplitWorkspace");
+    expect(routeSource).toContain("WORKBENCH_LAYOUT_IDS.teams");
     expect(routeSource).toContain('data-vui-recipe="teams-organization-workbench"');
     expect(routeSource).toContain('data-vui-domain-recipe="teams-organization-workbench"');
     expect(routeSource).toContain('data-vui-region="teams-canvas"');
