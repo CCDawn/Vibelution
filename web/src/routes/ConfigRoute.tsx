@@ -96,6 +96,11 @@ import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
 import { publishConfigDraftPresence } from "./configDraftPresence";
 import { useConfigWorkspaceQueries } from "./config/useConfigWorkspaceQueries";
+import {
+  buildConfigApplyRequestPayload,
+  isConfigBaselineStaleErrorMessage,
+  type ConfigApplyDraftOverride,
+} from "./config/configApplyModel";
 import { ConfigOverviewPanel } from "./ConfigOverviewPanel";
 import {
   type ConfigProviderRegistryTab,
@@ -163,8 +168,6 @@ const CONFIG_SETTINGS_SIDEBAR_RESIZE = {
 export type ConfigLanguage = "zh" | "en";
 type NoticeTone = "neutral" | "success" | "error";
 type ProviderWorkspaceMode = "quick" | "manage" | "advanced";
-type ConfigApplyDraftOverride = Pick<ConfigWorkspace, "publicConfig" | "draftMeta" | "baseHash">;
-
 type ProviderDiscoveryFailureDetail = {
   providerId: string;
   reasonCode: string;
@@ -3236,44 +3239,17 @@ export function ConfigRoute() {
         throw new Error(copy.loadFailed);
       }
 
-      const payload = draftOverride
-        ? {
-            publicConfig: draftOverride.publicConfig,
-            draftMeta: draftOverride.draftMeta,
-            // Prefer frozen baseline hash; draftOverride.baseHash must not be the draft content hash.
-            baseHash: applyBaseHash || draftOverride.baseHash,
-            baseConfig: applyBaseConfig ?? null,
-          }
-        : applyBaseConfig
-          ? buildConfigApplyPayload({
-              draftConfig,
-              draftMeta,
-              baseHash: applyBaseHash,
-              baseConfig: applyBaseConfig,
-              editorText: jsonText,
-              hasEditorChanges,
-              editorSections: workspace?.editorSections ?? [],
-              loadFailedMessage: copy.loadFailed,
-            })
-          : {
-              // Snapshot apply: server checks baseHash against disk and replaces with full draft.
-              publicConfig: buildConfigApplyPayload({
-                draftConfig,
-                draftMeta,
-                baseHash: applyBaseHash,
-                baseConfig: draftConfig,
-                editorText: jsonText,
-                hasEditorChanges,
-                editorSections: workspace?.editorSections ?? [],
-                loadFailedMessage: copy.loadFailed,
-              }).publicConfig,
-              draftMeta,
-              baseHash: applyBaseHash,
-              baseConfig: null as PublicConfigShape | null,
-            };
-
-      const isBaselineStaleError = (error: unknown) =>
-        /配置基线已过期|edit baseline is stale/i.test(readableErrorMessage(error));
+      const payload = buildConfigApplyRequestPayload({
+        draftOverride,
+        draftConfig,
+        draftMeta,
+        applyBaseHash,
+        applyBaseConfig,
+        editorText: jsonText,
+        hasEditorChanges,
+        editorSections: workspace?.editorSections ?? [],
+        loadFailedMessage: copy.loadFailed,
+      });
 
       let response: ConfigWorkspace;
       try {
@@ -3281,7 +3257,7 @@ export function ConfigRoute() {
       } catch (error) {
         // Multi-pin draft loops can desync client baseConfig/baseHash. Retry once without
         // baseConfig so the server uses on-disk baseline + this draft body.
-        if (!isBaselineStaleError(error) || payload.baseConfig == null) {
+        if (!isConfigBaselineStaleErrorMessage(readableErrorMessage(error)) || payload.baseConfig == null) {
           throw error;
         }
         response = await requestJson<ConfigWorkspace>(

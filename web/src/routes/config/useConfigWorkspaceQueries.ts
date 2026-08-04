@@ -1,6 +1,6 @@
 /**
  * Config route workspace + diagnostics read queries.
- * Apply/provider write handlers remain on ConfigRoute until further extract.
+ * Apply request body builders live in configApplyModel; wire handlers stay on ConfigRoute.
  */
 import { useQuery } from "@tanstack/react-query";
 

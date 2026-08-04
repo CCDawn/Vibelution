@@ -167,8 +167,10 @@ describe("ConfigRoute layout contract", () => {
   });
 
   it("applies quick setup from the latest synchronized Provider workspace instead of stale React state", () => {
-    expect(routeSource).toContain("type ConfigApplyDraftOverride");
+    expect(routeSource).toContain("ConfigApplyDraftOverride");
     expect(routeSource).toContain("draftOverride?: ConfigApplyDraftOverride");
+    expect(routeSource).toContain("buildConfigApplyRequestPayload");
+    expect(routeSource).toContain("isConfigBaselineStaleErrorMessage");
     expect(routeSource).toContain('handleApply("正在应用快速配置…", providerDraftRequestRef.current ?? undefined)');
     expect(routeSource).toContain("publicConfig: draftOverride.publicConfig");
     expect(routeSource).toContain("draftMeta: draftOverride.draftMeta");
@@ -188,8 +190,8 @@ describe("ConfigRoute layout contract", () => {
   });
 
   it("retries config apply in snapshot mode when baseline pairing is stale", () => {
-    expect(routeSource).toContain("isBaselineStaleError");
-    expect(routeSource).toContain("配置基线已过期");
+    expect(routeSource).toContain("isConfigBaselineStaleErrorMessage");
+    expect(routeSource).toContain("buildConfigApplyRequestPayload");
     expect(routeSource).toContain("baseConfig: null");
     expect(routeSource).toContain('requestJson<ConfigWorkspace>("/api/config/apply"');
   });
