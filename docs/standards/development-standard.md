@@ -444,16 +444,31 @@ Detailed interaction geometry requirements, including button sizing, control cho
 
 ### 9.1 Tailwind, VUI, And shadcn/Radix Style Ownership
 
+> **Hard product constraint (Agent red line):** root `AGENTS.md` §2 requires every product UI change under `web/` to follow VUI + shadcn/Radix ownership. This is not optional guidance.
+
 Frontend styling is Tailwind-first. New UI, touched UI, extracted components, and visual polish under `web/` should express layout, spacing, density, color, borders, and state styling through Tailwind utility classes or Tailwind class maps. Do not introduce new CSS Modules, page-scale CSS files, ad hoc inline `style={{ ... }}`, or CSS-in-JS for ordinary product UI.
 
 Use this ownership order:
 
-- **VUI** (`web/src/components/vui/`) owns the stable product API (`VButton`, `VInput`, …), density/tone mapping, page recipes (`VListDetailPage` / `VSettingsFormPage` / `VDenseOpsPage`), and domain composition under `product/`;
+- **VUI** (`web/src/components/vui/`) owns the stable product API (`VButton`, `VInput`, …), density/tone mapping, page recipes (`VListDetailPage` / `VSplitWorkspace` / `VSettingsFormPage` / `VDenseOpsPage`), and domain composition under `product/`;
 - **shadcn-style + Radix renderers** under `web/src/components/vui/renderers/shadcn/` own interactive control implementation (focus, floating UI, accessible patterns);
 - **Tailwind** owns final visual styling via `className` and typed local `*.styles.ts` class maps;
 - **HeroUI is removed** (`@heroui/react` is not a dependency). Do not reintroduce it. Prefer extending the shadcn renderer behind a `V*` facade, or use a page recipe for new surfaces.
+- **Workbench shells** use `WORKBENCH_LAYOUT_IDS` + `usePersistedPaneResize` / page-recipe `layoutId`; do not invent new ad-hoc width/height localStorage keys (see `workbenchLayoutGate.test.ts`).
 
 Canonical notes: `web/src/components/vui/README.md`.
+
+**Required agent workflow for any UI-facing `web/` change:**
+
+1. Read root `AGENTS.md` §2 frontend red line and this section before writing UI code.
+2. Prefer an existing page recipe or VUI composition; do not hand-roll a competing shell or second design system.
+3. Routes and product pages must import from `components/vui` (or `components/vui/product/…`) only. They must not import `components/vui/renderers/*`, `@heroui/react`, or a parallel `components/ui` shadcn tree.
+4. Before claiming done, run at least:
+   - `node web/node_modules/vitest/vitest.mjs run src/components/vui/vuiShadcnRouteContract.test.ts`
+   - the narrowest related route/layout/VUI contract tests for the touched surface
+   - `npm --prefix web run build` when layout/import surface risk is non-trivial
+
+Machine gate (must stay green): `web/src/components/vui/vuiShadcnRouteContract.test.ts`.
 
 Before adding a new visible control or interaction primitive, check `web/src/components/vui/` and existing route/component patterns. Prefer **page recipes** and compose existing VUI wrappers. **Do not invent a new `V*` primitive** unless at least two call sites already need it.
 

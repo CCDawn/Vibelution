@@ -21,7 +21,7 @@
 | 多 Agent、worktree、claim、merge 协作 | [../agents/worktree-collaboration.md](../agents/worktree-collaboration.md) |
 | 领域词汇 | [../agents/domain.md](../agents/domain.md) |
 | 工具授权入口 | [../agents/tool-authorization-entrypoints.md](../agents/tool-authorization-entrypoints.md) |
-| 前端 VUI 实现地图 | [../../web/src/components/vui/README.md](../../web/src/components/vui/README.md) |
+| 前端 UI / VUI / shadcn（**强制**，根 `AGENTS.md` §2 红线） | [development-standard.md §9.1](development-standard.md) + [../../web/src/components/vui/README.md](../../web/src/components/vui/README.md) + 门禁 `web/src/components/vui/vuiShadcnRouteContract.test.ts` |
 | 测试入口 | [../../tests/README.md](../../tests/README.md) |
 | 运行日志实现地图 | [../../core/logging/README.md](../../core/logging/README.md) |
 | 架构决策 | [../adr/](../adr/) |

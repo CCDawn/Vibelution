@@ -271,10 +271,12 @@ rules:
       - "web/src/app/**"
       - "web/src/i18n/**"
     commands:
+      - "node web/node_modules/vitest/vitest.mjs run src/components/vui/vuiShadcnRouteContract.test.ts"
       - "node web/node_modules/vitest/vitest.mjs run"
       - "npm --prefix web run build"
     notes:
-      - "Prefer narrowing the Vitest file list manually when the changed route has a dedicated layout test."
+      - "VUI/shadcn route contract is mandatory for any web UI path (root AGENTS.md §2)."
+      - "Prefer narrowing the Vitest file list manually when the changed route has a dedicated layout test, but keep vuiShadcnRouteContract.test.ts."
 
   - id: docs-only
     description: "Documentation-only changes."
