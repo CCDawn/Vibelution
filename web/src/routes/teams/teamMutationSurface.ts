@@ -198,3 +198,124 @@ export function buildTeamsRouteMutationSurface(input: TeamMutationSurfaceMapInpu
 }
 
 export type TeamsRouteMutationSurface = ReturnType<typeof buildTeamsRouteMutationSurface>;
+
+export type KnowledgeIngestionWorkRunLike = {
+  sourceRunId?: string | null;
+  status?: string | null;
+  flowVisualization?: { status?: string | null } | null;
+} | null | undefined;
+
+export type SourceCollectionWriteMutationSurfaceInput = {
+  teamId: string | undefined | null;
+  selectedSourceCollectionRunEffectiveId: string;
+  buildCandidateGraph: TeamScopedMutationLike;
+  runKnowledgeIngestionPrecheck: TeamScopedMutationLike;
+  runKnowledgeCollectionCompletion: TeamScopedMutationLike;
+  planPaperNoteChunks: TeamScopedMutationLike;
+  assessSourceQuality: TeamScopedMutationLike;
+  assessSourceQualityBatch: TeamScopedMutationLike & { isSuccess?: boolean };
+  knowledgeIngestionActiveWorkRun: KnowledgeIngestionWorkRunLike;
+  knowledgeIngestionLatestWorkRun: KnowledgeIngestionWorkRunLike;
+  lang: "zh" | "en";
+};
+
+export function buildSourceCollectionQualityBatchFeedback(
+  batchResult: { summary?: Record<string, unknown> | null } | null | undefined,
+  lang: "zh" | "en",
+): string | null {
+  if (!batchResult) {
+    return null;
+  }
+  const summary = batchResult.summary ?? {};
+  const approved = Number(summary.approvedCandidateCount || 0);
+  const needsRevision = Number(summary.needsRevisionCandidateCount || 0);
+  const rejected = Number(summary.rejectedCandidateCount || 0);
+  const assessed = Number(summary.assessedCandidateCount || 0);
+  const skipped = Number(summary.skippedCandidateCount || 0);
+  if (lang === "zh") {
+    const stillBlocked = needsRevision > 0
+      ? " 仍为「待补」的条目需要先补充全文/DOI/证据锚点，再审查；只点审查不会自动通过。"
+      : "";
+    return `质量审查完成：通过 ${approved} · 待补 ${needsRevision} · 排除 ${rejected}（本批评估 ${assessed}${skipped ? `，跳过 ${skipped}` : ""}）。${stillBlocked}`;
+  }
+  const stillBlocked = needsRevision > 0
+    ? " Needs-revision items stay blocked until materials are fixed; review alone does not auto-approve."
+    : "";
+  return `Quality review finished: approved ${approved} · needs revision ${needsRevision} · rejected ${rejected} (assessed ${assessed}${skipped ? `, skipped ${skipped}` : ""}).${stillBlocked}`;
+}
+
+/**
+ * SC write-path mutation surface + knowledge-collection work-run derived flags.
+ * Phase 4 continuation: shrink remaining SC write ternaries in TeamsRoute.
+ */
+export function buildSourceCollectionWriteMutationSurface(input: SourceCollectionWriteMutationSurfaceInput) {
+  const teamId = input.teamId;
+  const buildGraph = teamScopedMutationSurface(input.buildCandidateGraph, teamId);
+  const precheck = teamScopedMutationSurface(input.runKnowledgeIngestionPrecheck, teamId);
+  const completion = teamScopedMutationSurface(input.runKnowledgeCollectionCompletion, teamId);
+  const planChunks = teamScopedMutationSurface(input.planPaperNoteChunks, teamId);
+  const assessQuality = teamScopedMutationSurface(input.assessSourceQuality, teamId);
+  const assessBatch = teamScopedMutationSurface(input.assessSourceQualityBatch, teamId);
+
+  const activeWorkRun = input.knowledgeIngestionActiveWorkRun ?? null;
+  const latestWorkRun = input.knowledgeIngestionLatestWorkRun ?? null;
+  const knowledgeCollectionWorkRun = activeWorkRun ?? latestWorkRun ?? null;
+  const knowledgeCollectionSourceRunId = String(knowledgeCollectionWorkRun?.sourceRunId || "");
+  const knowledgeCollectionMatchesSelectedRun =
+    !knowledgeCollectionSourceRunId
+    || !input.selectedSourceCollectionRunEffectiveId
+    || knowledgeCollectionSourceRunId === input.selectedSourceCollectionRunEffectiveId;
+  const knowledgeCollectionWorkRunStatus = String(knowledgeCollectionWorkRun?.status || "").toLowerCase();
+  const knowledgeCollectionFlowStatus = String(
+    knowledgeCollectionWorkRun?.flowVisualization?.status || "",
+  ).toLowerCase();
+  const knowledgeCollectionCompleted =
+    knowledgeCollectionWorkRunStatus === "completed"
+    || knowledgeCollectionFlowStatus === "completed";
+  const knowledgeCollectionCompletedForSelectedRun =
+    knowledgeCollectionCompleted && knowledgeCollectionMatchesSelectedRun;
+
+  const batchResult =
+    Boolean(input.assessSourceQualityBatch.isSuccess)
+    && assessBatch.forTeam
+    && input.assessSourceQualityBatch.data
+      ? input.assessSourceQualityBatch.data as { summary?: Record<string, unknown> | null }
+      : null;
+
+  return {
+    selectedTeamBuildCandidateGraphPending: buildGraph.pending,
+    selectedTeamBuildCandidateGraphError: buildGraph.error,
+    selectedTeamKnowledgePrecheckPending: precheck.pending,
+    selectedTeamKnowledgePrecheckError: precheck.error,
+    selectedTeamKnowledgeIngestionActiveWorkRun: activeWorkRun,
+    selectedTeamKnowledgeIngestionLatestWorkRun: latestWorkRun,
+    selectedTeamKnowledgeCollectionWorkRun: knowledgeCollectionWorkRun,
+    selectedTeamKnowledgeCollectionSourceRunId: knowledgeCollectionSourceRunId,
+    selectedTeamKnowledgeCollectionMatchesSelectedRun: knowledgeCollectionMatchesSelectedRun,
+    selectedTeamKnowledgeCollectionWorkRunStatus: knowledgeCollectionWorkRunStatus,
+    selectedTeamKnowledgeCollectionFlowStatus: knowledgeCollectionFlowStatus,
+    selectedTeamKnowledgeCollectionCompleted: knowledgeCollectionCompleted,
+    selectedTeamKnowledgeCollectionCompletedForSelectedRun: knowledgeCollectionCompletedForSelectedRun,
+    selectedTeamKnowledgeCollectionIngestPending:
+      completion.pending || Boolean(activeWorkRun),
+    selectedTeamKnowledgeCollectionIngestError:
+      completion.forTeam
+      && !knowledgeCollectionCompleted
+      && completion.error
+        ? completion.error
+        : null,
+    selectedTeamKnowledgeCollectionIngestResult: completion.forTeam ? completion.result : null,
+    selectedTeamPlanPaperNoteChunksPending: planChunks.pending,
+    selectedTeamPlanPaperNoteChunksError: planChunks.error,
+    selectedTeamAssessSourceQualityPending: assessQuality.pending,
+    selectedTeamAssessSourceQualityError: assessQuality.error,
+    selectedTeamAssessSourceQualityBatchPending: assessBatch.pending,
+    selectedTeamAssessSourceQualityBatchError: assessBatch.error,
+    selectedTeamSourceQualityPending: assessQuality.pending || assessBatch.pending,
+    selectedTeamSourceQualityError: assessQuality.error || assessBatch.error,
+    selectedTeamSourceQualityBatchResult: batchResult,
+    sourceCollectionQualityBatchFeedback: buildSourceCollectionQualityBatchFeedback(batchResult, input.lang),
+  };
+}
+
+export type SourceCollectionWriteMutationSurface = ReturnType<typeof buildSourceCollectionWriteMutationSurface>;

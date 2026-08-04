@@ -13,6 +13,8 @@ TeamsRoute (orchestration)
 |-- useResearchExperimentWorkspace   # Phase 2 -- experiment/loop drafts + secondary status queries
 |   +-- useTeamResearchSecondaryQueries
 |-- buildTeamsRouteMutationSurface   # Phase 4 -- team-scoped pending/error/result bag
+|-- buildSourceCollectionWriteMutationSurface  # Phase 4+ -- SC write/quality/knowledge flags
+|-- source-collection/actionChrome   # Phase 4+ -- loading copy + readiness helpers
 |-- mutation hooks (unchanged ownership)
 |   |-- useTeamShellMutations
 |   |-- useTeamWorkflowStartMutations
@@ -28,7 +30,8 @@ TeamsRoute (orchestration)
 | SC UI + run queries | `useSourceCollectionWorkspace` | experiment drafts, canvas drag |
 | Experiment/loop drafts | `useResearchExperimentWorkspace` | SC workspace state |
 | Shell + canvas | `useTeamsShellCanvasWorkspace` (+ projection) | SC presentation chain |
-| Mutation flags | `teamMutationSurface` | React components |
+| Mutation flags | `teamMutationSurface` (+ SC write surface) | React components |
+| SC action chrome | `source-collection/actionChrome` | mutations / JSX |
 
 ## Verification
 

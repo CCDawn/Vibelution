@@ -15,6 +15,8 @@ import teamsWorkspacePanelRenderersSource from "./teams/teamsWorkspacePanelRende
 import useSourceCollectionWorkspaceSource from "./teams/useSourceCollectionWorkspace.ts?raw";
 import useResearchExperimentWorkspaceSource from "./teams/useResearchExperimentWorkspace.ts?raw";
 import useTeamsShellCanvasWorkspaceSource from "./teams/useTeamsShellCanvasWorkspace.ts?raw";
+import teamMutationSurfaceSource from "./teams/teamMutationSurface.ts?raw";
+import sourceCollectionActionChromeSource from "./teams/source-collection/actionChrome.ts?raw";
 
 /** Route + extracted shell modules (layout contracts may live in either). */
 const routeSource = [
@@ -27,6 +29,8 @@ const routeSource = [
   useSourceCollectionWorkspaceSource,
   useResearchExperimentWorkspaceSource,
   useTeamsShellCanvasWorkspaceSource,
+  teamMutationSurfaceSource,
+  sourceCollectionActionChromeSource,
 ].join("\n");
 import researchWorkspaceModelSource from "./teams/researchWorkspaceModel.ts?raw";
 import researchProjectSwitcherSource from "./teams/research-projects/ResearchProjectSwitcher.tsx?raw";
@@ -2970,31 +2974,21 @@ describe("TeamsRoute layout contract", () => {
   });
 
   it("lets a completed knowledge collection work run clear stale one-click mutation errors", () => {
-    const completionStateSource = routeSource.slice(
-      routeSource.indexOf("const selectedTeamKnowledgeCollectionWorkRun ="),
-      routeSource.indexOf("const selectedTeamKnowledgeCollectionIngestResult ="),
-    );
-    expect(completionStateSource).toContain("selectedTeamKnowledgeCollectionCompleted");
-    expect(completionStateSource).toContain('selectedTeamKnowledgeCollectionWorkRunStatus === "completed"');
-    expect(completionStateSource).toContain('selectedTeamKnowledgeCollectionFlowStatus === "completed"');
-
-    const ingestErrorSource = routeSource.slice(
-      routeSource.indexOf("const selectedTeamKnowledgeCollectionIngestError ="),
-      routeSource.indexOf("const selectedTeamKnowledgeCollectionIngestResult ="),
-    );
-    expect(ingestErrorSource).toContain("!selectedTeamKnowledgeCollectionCompleted");
+    // Phase 4+: completion/error gating lives on buildSourceCollectionWriteMutationSurface.
+    expect(teamMutationSurfaceSource).toContain("selectedTeamKnowledgeCollectionCompleted");
+    expect(teamMutationSurfaceSource).toContain('knowledgeCollectionWorkRunStatus === "completed"');
+    expect(teamMutationSurfaceSource).toContain('knowledgeCollectionFlowStatus === "completed"');
+    expect(teamMutationSurfaceSource).toContain("!knowledgeCollectionCompleted");
+    expect(routeSourceRaw).toContain("buildSourceCollectionWriteMutationSurface({");
   });
 
   it("does not treat a completed knowledge work run from another source run as the selected loop completion", () => {
-    const completionStateSource = routeSource.slice(
-      routeSource.indexOf("const selectedTeamKnowledgeCollectionWorkRun ="),
-      routeSource.indexOf("const selectedTeamKnowledgeCollectionIngestResult ="),
+    expect(teamMutationSurfaceSource).toContain("knowledgeCollectionSourceRunId");
+    expect(teamMutationSurfaceSource).toContain("knowledgeCollectionMatchesSelectedRun");
+    expect(teamMutationSurfaceSource).toContain(
+      "knowledgeCollectionSourceRunId === input.selectedSourceCollectionRunEffectiveId",
     );
-    expect(completionStateSource).toContain("selectedTeamKnowledgeCollectionSourceRunId");
-    expect(completionStateSource).toContain("selectedTeamKnowledgeCollectionMatchesSelectedRun");
-    expect(completionStateSource).toContain(
-      "selectedTeamKnowledgeCollectionSourceRunId === selectedSourceCollectionRunEffectiveId",
-    );
+    expect(teamMutationSurfaceSource).toContain("knowledgeCollectionCompletedForSelectedRun");
 
     const loopStateSource = routeSource.slice(
       routeSource.indexOf("const sourceCollectionLoopStartsNewRun ="),

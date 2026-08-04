@@ -54,7 +54,15 @@ import {
   useTeamsShellCanvasWorkspace,
   type NodeDragState,
 } from "./teams/useTeamsShellCanvasWorkspace";
-import { buildTeamsRouteMutationSurface } from "./teams/teamMutationSurface";
+import {
+  buildSourceCollectionWriteMutationSurface,
+  buildTeamsRouteMutationSurface,
+} from "./teams/teamMutationSurface";
+import {
+  sourceCollectionActionDisabledTitle as sourceCollectionActionDisabledTitlePure,
+  sourceCollectionActionReadinessOf,
+  sourceCollectionLoadingChrome,
+} from "./teams/source-collection/actionChrome";
 import {
   type DataProcessingRecordListPayload,
   type SourceCollectionSummaryPayload,
@@ -3233,24 +3241,18 @@ export function TeamsRoute({
     && !teamWorkflowKnowledgeIngestionStatusQuery.data
   );
   const sourceCollectionScreeningDataLoading = sourceCollectionPrimaryDataLoading || sourceCollectionSourceQualityLoading;
-  const sourceCollectionLoadingText = lang === "zh" ? "加载中" : "loading";
-  const sourceCollectionDataSyncText = lang === "zh" ? "同步中" : "syncing";
-  const sourceCollectionLoadingSummary = lang === "zh" ? "正在读取资料提炼结果" : "Loading extraction results";
-  const sourceCollectionActionLoadingReason = lang === "zh" ? "正在读取当前批次数据" : "Loading current batch data";
-  const sourceCollectionActionErrorReason = lang === "zh" ? "当前批次数据读取失败，请刷新后重试" : "Current batch data failed to load. Refresh and retry.";
-  const sourceCollectionActionNoRunReason = lang === "zh" ? "还没有可执行的搜集批次" : "No collection run is available yet.";
-  const sourceCollectionActionNoInputReason = lang === "zh" ? "当前阶段还没有可执行输入" : "This stage has no runnable input yet.";
-  const sourceCollectionActionBusyReason = lang === "zh" ? "已有任务正在执行" : "A task is already running.";
-  const sourceCollectionActionReady: SourceCollectionActionReadiness = { disabled: false, loading: false, reason: "" };
-  const sourceCollectionActionReadiness = (
-    disabled: boolean,
-    reason: string,
-    loading = false,
-  ): SourceCollectionActionReadiness => disabled
-    ? { disabled: true, loading, reason }
-    : sourceCollectionActionReady;
-  const sourceCollectionActionDisabledTitle = (readiness: SourceCollectionActionReadiness, fallback: string) =>
-    readiness.disabled && readiness.reason ? readiness.reason : fallback;
+  const {
+    loadingText: sourceCollectionLoadingText,
+    dataSyncText: sourceCollectionDataSyncText,
+    loadingSummary: sourceCollectionLoadingSummary,
+    actionLoadingReason: sourceCollectionActionLoadingReason,
+    actionErrorReason: sourceCollectionActionErrorReason,
+    actionNoRunReason: sourceCollectionActionNoRunReason,
+    actionNoInputReason: sourceCollectionActionNoInputReason,
+    actionBusyReason: sourceCollectionActionBusyReason,
+  } = sourceCollectionLoadingChrome(lang);
+  const sourceCollectionActionReadiness = sourceCollectionActionReadinessOf;
+  const sourceCollectionActionDisabledTitle = sourceCollectionActionDisabledTitlePure;
   const sourceCollectionCountText = (loading: boolean, value: number) => sourceCollectionStableCountText({
     loading,
     value,
@@ -3440,98 +3442,46 @@ export function TeamsRoute({
     && !selectedTeamExecuteSourceCollectionSearchPending
     && !sourceCollectionAcceptedBackgroundActive,
   );
-  const selectedTeamBuildCandidateGraphPending =
-    buildCandidateGraphMutation.isPending && buildCandidateGraphMutation.variables?.teamId === selectedTeam?.teamId;
-  const selectedTeamBuildCandidateGraphError =
-    buildCandidateGraphMutation.variables?.teamId === selectedTeam?.teamId && buildCandidateGraphMutation.error instanceof Error
-      ? buildCandidateGraphMutation.error
-      : null;
-  const selectedTeamKnowledgePrecheckPending =
-    runKnowledgeIngestionPrecheckMutation.isPending && runKnowledgeIngestionPrecheckMutation.variables?.teamId === selectedTeam?.teamId;
-  const selectedTeamKnowledgePrecheckError =
-    runKnowledgeIngestionPrecheckMutation.variables?.teamId === selectedTeam?.teamId
-    && runKnowledgeIngestionPrecheckMutation.error instanceof Error
-      ? runKnowledgeIngestionPrecheckMutation.error
-      : null;
-  const selectedTeamKnowledgeIngestionActiveWorkRun =
-    teamWorkflowKnowledgeIngestionStatusQuery.data?.activeWorkRun ?? null;
-  const selectedTeamKnowledgeIngestionLatestWorkRun =
-    teamWorkflowKnowledgeIngestionStatusQuery.data?.latestWorkRun ?? null;
-  const selectedTeamKnowledgeCollectionWorkRun =
-    selectedTeamKnowledgeIngestionActiveWorkRun ?? selectedTeamKnowledgeIngestionLatestWorkRun ?? null;
-  const selectedTeamKnowledgeCollectionSourceRunId = String(selectedTeamKnowledgeCollectionWorkRun?.sourceRunId || "");
-  const selectedTeamKnowledgeCollectionMatchesSelectedRun =
-    !selectedTeamKnowledgeCollectionSourceRunId
-    || !selectedSourceCollectionRunEffectiveId
-    || selectedTeamKnowledgeCollectionSourceRunId === selectedSourceCollectionRunEffectiveId;
-  const selectedTeamKnowledgeCollectionWorkRunStatus = String(selectedTeamKnowledgeCollectionWorkRun?.status || "").toLowerCase();
-  const selectedTeamKnowledgeCollectionFlowStatus = String(
-    selectedTeamKnowledgeCollectionWorkRun?.flowVisualization?.status || "",
-  ).toLowerCase();
-  const selectedTeamKnowledgeCollectionCompleted =
-    selectedTeamKnowledgeCollectionWorkRunStatus === "completed"
-    || selectedTeamKnowledgeCollectionFlowStatus === "completed";
-  const selectedTeamKnowledgeCollectionCompletedForSelectedRun =
-    selectedTeamKnowledgeCollectionCompleted && selectedTeamKnowledgeCollectionMatchesSelectedRun;
-  const selectedTeamKnowledgeCollectionIngestPending =
-    (runKnowledgeCollectionCompletionMutation.isPending && runKnowledgeCollectionCompletionMutation.variables?.teamId === selectedTeam?.teamId)
-    || Boolean(selectedTeamKnowledgeIngestionActiveWorkRun);
-  const selectedTeamKnowledgeCollectionIngestError =
-    runKnowledgeCollectionCompletionMutation.variables?.teamId === selectedTeam?.teamId
-    && !selectedTeamKnowledgeCollectionCompleted
-    && runKnowledgeCollectionCompletionMutation.error instanceof Error
-      ? runKnowledgeCollectionCompletionMutation.error
-      : null;
-  const selectedTeamKnowledgeCollectionIngestResult =
-    runKnowledgeCollectionCompletionMutation.variables?.teamId === selectedTeam?.teamId
-      ? runKnowledgeCollectionCompletionMutation.data
-      : null;
-  const selectedTeamPlanPaperNoteChunksPending =
-    planPaperNoteChunksMutation.isPending && planPaperNoteChunksMutation.variables?.teamId === selectedTeam?.teamId;
-  const selectedTeamPlanPaperNoteChunksError =
-    planPaperNoteChunksMutation.variables?.teamId === selectedTeam?.teamId && planPaperNoteChunksMutation.error instanceof Error
-      ? planPaperNoteChunksMutation.error
-      : null;
-  const selectedTeamAssessSourceQualityPending =
-    assessSourceQualityMutation.isPending && assessSourceQualityMutation.variables?.teamId === selectedTeam?.teamId;
-  const selectedTeamAssessSourceQualityError =
-    assessSourceQualityMutation.variables?.teamId === selectedTeam?.teamId && assessSourceQualityMutation.error instanceof Error
-      ? assessSourceQualityMutation.error
-      : null;
-  const selectedTeamAssessSourceQualityBatchPending =
-    assessSourceQualityBatchMutation.isPending && assessSourceQualityBatchMutation.variables?.teamId === selectedTeam?.teamId;
-  const selectedTeamAssessSourceQualityBatchError =
-    assessSourceQualityBatchMutation.variables?.teamId === selectedTeam?.teamId && assessSourceQualityBatchMutation.error instanceof Error
-      ? assessSourceQualityBatchMutation.error
-      : null;
-  const selectedTeamSourceQualityPending = selectedTeamAssessSourceQualityPending || selectedTeamAssessSourceQualityBatchPending;
-  const selectedTeamSourceQualityError = selectedTeamAssessSourceQualityError || selectedTeamAssessSourceQualityBatchError;
-  const selectedTeamSourceQualityBatchResult =
-    assessSourceQualityBatchMutation.isSuccess
-    && assessSourceQualityBatchMutation.variables?.teamId === selectedTeam?.teamId
-    && assessSourceQualityBatchMutation.data
-      ? assessSourceQualityBatchMutation.data
-      : null;
-  const sourceCollectionQualityBatchFeedback = selectedTeamSourceQualityBatchResult
-    ? (() => {
-      const summary = selectedTeamSourceQualityBatchResult.summary;
-      const approved = Number(summary?.approvedCandidateCount || 0);
-      const needsRevision = Number(summary?.needsRevisionCandidateCount || 0);
-      const rejected = Number(summary?.rejectedCandidateCount || 0);
-      const assessed = Number(summary?.assessedCandidateCount || 0);
-      const skipped = Number(summary?.skippedCandidateCount || 0);
-      if (lang === "zh") {
-        const stillBlocked = needsRevision > 0
-          ? " 仍为「待补」的条目需要先补充全文/DOI/证据锚点，再审查；只点审查不会自动通过。"
-          : "";
-        return `质量审查完成：通过 ${approved} · 待补 ${needsRevision} · 排除 ${rejected}（本批评估 ${assessed}${skipped ? `，跳过 ${skipped}` : ""}）。${stillBlocked}`;
-      }
-      const stillBlocked = needsRevision > 0
-        ? " Needs-revision items stay blocked until materials are fixed; review alone does not auto-approve."
-        : "";
-      return `Quality review finished: approved ${approved} · needs revision ${needsRevision} · rejected ${rejected} (assessed ${assessed}${skipped ? `, skipped ${skipped}` : ""}).${stillBlocked}`;
-    })()
-    : null;
+  const {
+    selectedTeamBuildCandidateGraphPending,
+    selectedTeamBuildCandidateGraphError,
+    selectedTeamKnowledgePrecheckPending,
+    selectedTeamKnowledgePrecheckError,
+    selectedTeamKnowledgeIngestionActiveWorkRun,
+    selectedTeamKnowledgeIngestionLatestWorkRun,
+    selectedTeamKnowledgeCollectionWorkRun,
+    selectedTeamKnowledgeCollectionSourceRunId,
+    selectedTeamKnowledgeCollectionMatchesSelectedRun,
+    selectedTeamKnowledgeCollectionWorkRunStatus,
+    selectedTeamKnowledgeCollectionFlowStatus,
+    selectedTeamKnowledgeCollectionCompleted,
+    selectedTeamKnowledgeCollectionCompletedForSelectedRun,
+    selectedTeamKnowledgeCollectionIngestPending,
+    selectedTeamKnowledgeCollectionIngestError,
+    selectedTeamKnowledgeCollectionIngestResult,
+    selectedTeamPlanPaperNoteChunksPending,
+    selectedTeamPlanPaperNoteChunksError,
+    selectedTeamAssessSourceQualityPending,
+    selectedTeamAssessSourceQualityError,
+    selectedTeamAssessSourceQualityBatchPending,
+    selectedTeamAssessSourceQualityBatchError,
+    selectedTeamSourceQualityPending,
+    selectedTeamSourceQualityError,
+    selectedTeamSourceQualityBatchResult,
+    sourceCollectionQualityBatchFeedback,
+  } = buildSourceCollectionWriteMutationSurface({
+    teamId: selectedTeam?.teamId,
+    selectedSourceCollectionRunEffectiveId,
+    buildCandidateGraph: buildCandidateGraphMutation,
+    runKnowledgeIngestionPrecheck: runKnowledgeIngestionPrecheckMutation,
+    runKnowledgeCollectionCompletion: runKnowledgeCollectionCompletionMutation,
+    planPaperNoteChunks: planPaperNoteChunksMutation,
+    assessSourceQuality: assessSourceQualityMutation,
+    assessSourceQualityBatch: assessSourceQualityBatchMutation,
+    knowledgeIngestionActiveWorkRun: teamWorkflowKnowledgeIngestionStatusQuery.data?.activeWorkRun ?? null,
+    knowledgeIngestionLatestWorkRun: teamWorkflowKnowledgeIngestionStatusQuery.data?.latestWorkRun ?? null,
+    lang,
+  });
   const sourceCollectionAcceptedBackgroundFailed = Boolean(
     selectedSourceCollectionActiveWorkRun
     && ["failed", "blocked"].includes(String(selectedSourceCollectionActiveWorkRun.status || "").toLowerCase()),
